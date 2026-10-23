@@ -953,6 +953,91 @@ class TestTheSessionOverOpenSsh:
             session.open()
         assert e.value.kind == "needs_paramiko" and system_board.fake.calls == []
 
+    def test_the_board_meant_cannot_be_compared_either(self, system_board, tmp_path):
+        """remote-callers' expect_device_id (a key of another board is refused at every login) needs the key the
+        board presents, which OpenSSH does not hand out: such a session is refused before any call, as a shown
+        fingerprint is, instead of skipping the check."""
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.remote.session import RemoteSession, SessionFailure
+        from orchestrator.remote.transport import SystemSshTransport
+        for device_id in ("0123456789abcdef", ""):
+            session = RemoteSession(Endpoint(HOST), USER, tmp_path, expect_device_id=device_id,
+                                    openssh=SystemSshTransport)
+            with pytest.raises(SessionFailure) as e:
+                session.open()
+            assert e.value.kind == "needs_paramiko" and system_board.fake.calls == []
+
+    def test_a_session_its_owner_opens_again_is_no_longer_ended(self, system_board, tmp_path):
+        """close() ends a session (remote-callers); the owner's open() starts it again over OpenSSH too, so a later
+        drop is waited through instead of ending as a cancel."""
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.remote.session import RemoteSession
+        from orchestrator.remote.transport import SystemSshTransport
+        session = RemoteSession(Endpoint(HOST), USER, tmp_path, openssh=SystemSshTransport)
+        session.open()
+        session.close()
+        assert session.ended and session.transport is None
+        session.open()
+        assert not session.ended and session.alive()
+        assert session.run_resumable("true").status == 0
+
+    @POSIX_ONLY
+    def test_a_private_upload_is_the_users_only_over_openssh_too(self, tmp_path, monkeypatch):
+        """remote-callers' upload(..., private=True) over SystemSshTransport, with the board's commands run by a real
+        shell here: every new copy is made under umask 077 before `cat >` writes into it (writing keeps the mode), also
+        the copy sent again after a damaged arrival, so the file is the user's only under a umask of 022."""
+        import shutil
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.remote.session import RemoteSession
+        from orchestrator.remote.transport import SystemSshTransport
+        if shutil.which("sha256sum") is None:
+            pytest.skip("the board side needs sha256sum")
+        real_popen = subprocess.Popen
+        scripts = []
+
+        def popen(args, *a, **kwargs):
+            argv = list(args) if not isinstance(args, (str, bytes)) else [args]
+            if Path(str(argv[0])).name.lower().removesuffix(".exe") != "ssh":
+                return real_popen(args, *a, **kwargs)
+            call = Call(argv, kwargs)
+            assert call.wrapped, call.argv
+            scripts.append(call.script)
+            return real_popen(["sh", "-c", call.script], *a, **kwargs)   # the board: this computer's shell
+
+        monkeypatch.setattr(subprocess, "Popen", popen)
+        data = bytes(range(256)) * 600
+        digest = hashlib.sha256(data).hexdigest()
+
+        class DamagedOnce(io.BytesIO):
+            """The first chunk read leaves this computer with one byte flipped (a damaged arrival)."""
+            flipped = False
+
+            def read(self, n=-1):
+                chunk = super().read(n)
+                if chunk and not DamagedOnce.flipped:
+                    DamagedOnce.flipped = True
+                    chunk = bytes([chunk[0] ^ 0xFF]) + chunk[1:]
+                return chunk
+
+        board = tmp_path / "board"
+        board.mkdir()
+        target = board / "runtime.tar.gz"
+        session = RemoteSession(Endpoint(HOST), USER, tmp_path / "state", openssh=SystemSshTransport)
+        old = os.umask(0o022)   # what a board's login shell usually runs with
+        try:
+            session.open()
+            session.upload(DamagedOnce(data), str(target), len(data), digest, private=True)
+        finally:
+            os.umask(old)
+            session.close()
+        assert DamagedOnce.flipped and target.read_bytes() == data
+        assert target.stat().st_mode & 0o777 == 0o600
+        part = shlex.quote(f"{target}.part")
+        made = [i for i, s in enumerate(scripts) if s == f"umask 077 && : > {part}"]
+        written = [i for i, s in enumerate(scripts) if s == f"cat > {part}"]
+        assert len(made) == 2 and len(written) == 2, scripts
+        assert all(m < w for m, w in zip(made, written)), "each copy is made under umask 077 before it is written"
+
     def test_no_openssh_on_this_computer_is_a_local_problem(self, tmp_path):
         from orchestrator.remote.address import Endpoint
         from orchestrator.remote.session import RemoteSession, SessionFailure

@@ -231,7 +231,7 @@ class SSHProbeWorker(QThread):
             if e.kind == "user":
                 text = ui_text("deploy.bad_user")
             elif e.kind == "login":
-                text = (reasons.person_text(e.reason, address=self.ip, port=int(self.port))
+                text = (reasons.person_text(e.reason, address=self.ip, port=int(self.port), error=e.error)
                         if e.reason in reasons.CODES else ui_text("deploy.remote.login_failed", reason=str(e.error)))
             elif e.kind == "probe":
                 text = ui_text("deploy.remote.probe_failed", address=self.ip, reason=str(e.error))

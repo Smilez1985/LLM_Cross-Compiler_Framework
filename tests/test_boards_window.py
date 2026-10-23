@@ -531,7 +531,8 @@ def test_older_builds_on_the_board_are_listed_off_the_gui_thread_and_removed_onl
         def close(self):
             connected.append("closed")
 
-    def connect(state, device_id, host, port, user, password=None, *, step="", on_client=None):
+    def connect(state, device_id, host, port, user, password=None, *, step="", on_client=None,
+                cancel=None, on_event=None):
         threads(ran)()
         connected.append((device_id, host, port, user, password, step))
         on_client(Client())
@@ -585,7 +586,8 @@ def runtime_fakes(monkeypatch, record):
         def close(self):
             record.append("closed")
 
-    def connect(state, device_id, host, port, user, password=None, *, step="", on_client=None):
+    def connect(state, device_id, host, port, user, password=None, *, step="", on_client=None,
+                cancel=None, on_event=None):
         record.append(("connect", user, password, step, threading.current_thread() is threading.main_thread()))
         return Client(), FakeHostKey()
 

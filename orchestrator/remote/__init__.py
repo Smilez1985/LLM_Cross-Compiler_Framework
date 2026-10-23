@@ -31,6 +31,8 @@ Everything that talks to a board (consolidation plan, layer 2): one Qt-free pack
 
 What a contact found is recorded for Mojo by orchestrator/runtime/device/trusted.py record_reach (the store of the
 trusted boards lives there; this layer imports no runtime code). The deploy's OpenSSH fallback is a RemoteSession
-over SystemSshTransport (chain c2-remote-system, decision A5); the runtime deploy, the probe and the on-board benchmark
-move onto RemoteSession in chain c2-remote-callers.
+over SystemSshTransport (chain c2-remote-system, decision A5). The runtime deploy, the checks on the board, the
+on-board benchmark (run_detached) and the probe run on RemoteSession (runtime/device/remote.py RemoteShell is their
+facade), and so do the AI path's and the person's board steps (runtime/device/service.py with KeyOnly,
+person_steps.connect_stored with the person's one-time password): chain c2-remote-callers.
 """

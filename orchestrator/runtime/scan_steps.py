@@ -157,7 +157,8 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
     `audit_factory` (instead of `audit`) opens the audit log only when that record is written, so a scan that fails
     never touches it (the CLI's audit log may create the OS keyring's audit key on first use). `on_client` gets the
     SSH session so a Cancel can close it."""
-    from orchestrator.remote.address import valid_user
+    from orchestrator.remote.address import Endpoint, valid_user
+    from orchestrator.remote.session import KeyOnly, OneTimePassword, RemoteSession, SessionFailure, Stopped
     from orchestrator.runtime.device.settings import remember_ssh_user
     from orchestrator.runtime.device.trusted import record_trusted_device
     from orchestrator.runtime.profile import ProfileStore, device_id_for_host_key
@@ -168,6 +169,7 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
     state_dir = Path(state_dir)
     store = store if store is not None else ProfileStore(state_dir)
     try:
+        # the login checks the host key against the framework's known_hosts (TofuPolicy refuses an unknown one)
         client = ssh_trust.connect(host, user, state_dir, port=port, password=password)
     except Exception as e:  # authentication, network, a host key that changed meanwhile
         code = reach_code(e)
@@ -178,17 +180,31 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
     _note_reach(state_dir, host, port, "")
     if on_client is not None:
         on_client(client)
+    # the one board session takes the login over for the probe (orchestrator/remote/session.py): when the board's
+    # network drops, it waits for the board and logs in again with the host key checked as at the first login, the
+    # one-time password for this session's logins only (N5)
+    session = RemoteSession(Endpoint(host, port), user, state_dir,
+                            credentials=OneTimePassword(password) if password else KeyOnly())
     try:
+        if key is None:
+            key = client.get_transport().get_remote_server_key()   # the key of the session itself
+        session.adopt(client, key)
         if password:
             from orchestrator.remote import pairing
             pairing.pair(client, state_dir)   # the framework's key, over the one-time password session
-        if key is None:
-            key = client.get_transport().get_remote_server_key()
-        result = probe_over_ssh(client)
+        result = probe_over_ssh(session)
     except (RemoteProbeError, ssh_trust.HostKeyError) as e:
         raise DeviceScanError(f"The probe on {host} failed: {e}", "probe", error=e) from None
+    except (SessionFailure, Stopped) as e:   # the board did not answer again after a drop, or a cancel
+        if getattr(e, "reason", ""):
+            _note_reach(state_dir, host, port, e.reason)
+        raise DeviceScanError(f"The probe on {host} failed: {e}", "probe", reason=getattr(e, "reason", ""),
+                              error=e) from None
     finally:
-        client.close()
+        if session.client is not None:
+            session.close()   # the client of its current login
+        else:
+            client.close()
     device_id = device_id_for_host_key(ssh_trust.fingerprint(key))
     try:
         if output_file is not None:

@@ -1360,12 +1360,39 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   split the framework's known_hosts into two files that do not exist, so every board's key counted as unknown. A
   password is no longer dropped silently: OpenSSH never asks for one, so the deploy logs in with the framework key and
   its result says the password was not used. A deploy bound to a fingerprint you were shown is still refused without
-  paramiko. The framework's SSH key is made private to your account when it is created and before OpenSSH uses it
+  paramiko, and so is a board session that must also check which board answers (its device ID). The framework's SSH key is made private to your account when it is created and before OpenSSH uses it
   (`orchestrator/utils/atomic.py` `owner_only`: group and other bits off on Linux and macOS, on Windows a protected ACL
   for your account alone, which OpenSSH for Windows requires of a private key). A key file OpenSSH still refuses
   (others may read it, or it is damaged) is reported as a problem on this computer (`local_problem`, never kept with
   the board), not as the board refusing the login, although OpenSSH then goes on without the key and ends with the
   board's "Permission denied". Tested against a real `sshd` as well (`tests/test_remote_system_ssh.py`).
+- **The runtime deploy, the checks on the board, the on-board benchmark and the probe go through the one board
+  session** (consolidation chain c2-remote-callers). A Wi-Fi drop no longer ends them with "the SSH connection
+  failed": `runtime/device/remote.py` `RemoteShell` is a facade over `RemoteSession`, so the session waits for the
+  board (N5), logs in again with the host key checked again and goes on. The runtime tarball goes over SFTP into its
+  private staging folder and continues at what arrived (a board without SFTP gets it on a command's stdin as before);
+  the checks only read and run again; a step that must not run twice ends with a clear sentence once the board answers
+  again, and the staging folder is still removed; a board that does not answer again ends every later step at once
+  with its reason code. The short llama-bench run starts on the board on its own (`run_detached`) and is followed again
+  after a drop, never started twice (round 16 G4: work keeps running while nobody watches; a board without nohup runs
+  it attached as before); `RemoteSession.follow` follows a job started before. The probe sends its read-only commands
+  again after a drop. The AI path (`runtime/device/service.py`) opens a `KeyOnly` session (decision 2), with the same
+  refusals and texts as before; the person's board steps (`person_steps.connect_stored`, the CLI's
+  `device runtime deploy|verify|prune --on-device`, the Boards window) open one with the person's one-time password
+  when one is typed, and `scan --device` hands its login to a session. The CLI and the Boards window say when the
+  board's network dropped and when it answers again (EN/DE), each wait anew (also after an upload that started
+  again from the beginning), an AI's job shows it by the board's label. One
+  `CancelToken` replaces the four "hold the client so Cancel can close it" copies, and closing a session ends its
+  waits. The person's board steps, `scan --device` and Mojo ask `remote.transport.available()` whether SSH works, and
+  the GUI's messages for a problem on this computer (local_problem) now also name what failed there (the system's
+  words and the file's name, never its folder or an account). Kept as before (review of the chain): a command that
+  stays silent while its connection still answers (`exit 0` on it) is busy on the board, not cut off, so its time
+  limit ends it at once with "no answer from the device within N s", without a second login, a second run on the
+  board or a line that the network dropped; the tarball is made under umask 077 before the SFTP upload writes into it,
+  also the copy sent again after a damaged arrival, so it is the user's only as with `umask 077 && cat >`; a drop
+  just as the deploy asks whether the board has SFTP waits for the board and uploads over SFTP instead of ending the
+  deploy; and the board session's sentences an AI gets as external text name the board by its label, never its
+  address (D0).
 - **One file hash and one disk watchdog** (architecture consolidation c1-hashing and c1-disk, maintainer rule R0: the
   existing implementation first). The 24 copies of the file sha256 (15 named helpers, 9 loops; the loop of
   `utils/network.py` left with that module, see below) run through the oldest one's module,

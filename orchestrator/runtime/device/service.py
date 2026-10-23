@@ -7,6 +7,10 @@ returning results and raising DeviceRuntimeError with a reason code and the next
 Every step reaches only a trusted device (orchestrator/runtime/device/trusted.py): the host key the device presents now
 must be exactly the one the person confirmed, and the login uses the framework's own SSH key, never a password. Nothing
 here trusts a key, pairs a device or changes the deploy settings (decision D7: the person decides those beforehand).
+
+Each step opens the one board session (orchestrator/remote/session.py RemoteSession with KeyOnly credentials, decision
+2: an AI path can never pair): when a Wi-Fi board's network drops, the session waits for the board (N5), logs in again
+with the same host key check and goes on; a board that does not answer again ends the step with its SSH reason code.
 """
 
 from dataclasses import dataclass, field
@@ -22,11 +26,13 @@ class DeviceRuntimeError(WithSteps, RemoteFailure):
     """A device step that cannot be done; `code` is a tool reason code, `next` the step that helps, `reason` one of the
     SSH reason codes of orchestrator/runtime/device/reasons.py when the board could not be reached or logged in to.
     `external_text` holds what the device answered (its stderr, a check's output): never part of the message,
-    returned to AI callers marked as external text."""
+    returned to AI callers marked as external text. `error` is the exception behind a failed contact (the person's
+    windows name what failed on this computer from it; an AI never gets it)."""
 
     def __init__(self, message: str, code: str = "failed", next: str = "",
-                 external_text: Optional[List[str]] = None, reason: str = ""):
-        super().__init__(message, reason=reason)
+                 external_text: Optional[List[str]] = None, reason: str = "",
+                 error: Optional[BaseException] = None):
+        super().__init__(message, reason=reason, error=error)
         self.code, self.next = code, next
         self.external_text = list(external_text or [])
 
@@ -40,21 +46,37 @@ def note_reach(state_dir: Path, device: TrustedDevice, step: str, reason: str) -
 
 
 def unreachable(device: TrustedDevice, reason: str, state_dir: Optional[Path] = None,
-                step: str = "") -> DeviceRuntimeError:
+                step: str = "", error: Optional[BaseException] = None) -> DeviceRuntimeError:
     """The refusal for a board that could not be reached or logged in to, with its SSH reason code (N6); recorded for
     Mojo when the step is named."""
     from orchestrator.runtime.device import reasons
     if state_dir is not None:
         note_reach(state_dir, device, step, reason)
     return DeviceRuntimeError(f"The device {device.label} cannot be used now ({reason}).",
-                              code=reasons.TOOL_CODES[reason], next=reasons.AI_NEXT[reason], reason=reason)
+                              code=reasons.TOOL_CODES[reason], next=reasons.AI_NEXT[reason], reason=reason,
+                              error=error)
+
+
+def by_label(text: str, device: TrustedDevice) -> str:
+    """`text` with the board's address (its host, also with its port) named by the board's label: the address, like
+    the login, is the person's to see, never an AI's (D0). The board session's own sentences name the host (the
+    person's windows show them as they are); this is their copy for an AI."""
+    import re
+    out, host = str(text), str(device.host or "")
+    if not host:
+        return out
+    port = int(device.port)
+    forms = {host, device.address, f"{host}:{port}", f"[{host}]:{port}"}
+    for form in sorted(forms, key=len, reverse=True):   # the longest form first, so a port never stays behind
+        out = re.sub(r"(?<![\w.-])" + re.escape(form) + r"(?![\w-])", lambda _m: device.label, out)
+    return out
 
 
 def _device_said(what: str, device: TrustedDevice, error: Exception) -> DeviceRuntimeError:
     """A failed remote step: the framework's sentence as the message, the device's words (inside the remote error's
-    text) as external text."""
+    text) as external text, the board named there by its label only (by_label)."""
     return DeviceRuntimeError(f"{what} on {device.label} failed; the details from the device are kept apart as "
-                              "external text.", code="failed", external_text=[str(error)[:2000]])
+                              "external text.", code="failed", external_text=[by_label(str(error), device)[:2000]])
 
 
 class Stopped(DeviceRuntimeError):
@@ -85,7 +107,7 @@ def read_key(device: TrustedDevice, state_dir: Path, step: str = "") -> str:
     except Exception as e:  # noqa: BLE001 - unreachable, no SSH server, no paramiko
         reason = reasons.reach_code(e)
         if reason:
-            raise unreachable(device, reason, state_dir, step) from None
+            raise unreachable(device, reason, state_dir, step, e) from None
         raise DeviceRuntimeError(f"The host key of {device.label} could not be read ({e.__class__.__name__}).",
                                  code="failed", next="Tell the person; the framework's log has the details.") from None
     fp = check.fingerprint
@@ -99,50 +121,99 @@ def read_key(device: TrustedDevice, state_dir: Path, step: str = "") -> str:
     return fp
 
 
+def _not_trusted(device: TrustedDevice, fp: str) -> DeviceRuntimeError:
+    return DeviceRuntimeError(f"The host key of {device.label} is not the one the person trusted ({fp}); nothing "
+                              "was done.", code="needs_person",
+                              next="Tell the person: they must check the device and trust it again in the GUI or "
+                                   "the CLI. No tool can accept a changed key.")
+
+
 def connect(device: TrustedDevice, state_dir: Path, user: str, expect_fingerprint: str,
-            on_client: Optional[Callable[[Any], None]] = None, step: str = ""):
-    """An SSH client for the trusted device, as `user`, with the framework's key only (never a password), after the
-    key it presents was compared with `expect_fingerprint` (the one the person was shown). `step` names the contact
-    (probe, runtime_deploy, benchmark) for Mojo's record of the board."""
-    from orchestrator.utils import ssh_trust
-    fp = read_key(device, state_dir, step)
-    if fp != expect_fingerprint:
+            on_client: Optional[Callable[[Any], None]] = None, step: str = "", *, cancel: Any = None,
+            on_event: Optional[Callable[[Any], None]] = None, wait_seconds: Optional[float] = None):
+    """The board session (orchestrator/remote/session.py RemoteSession, logged in) with the trusted device, as `user`,
+    with the framework's key only (KeyOnly: never a password, so this path can never pair; decision 2), after the key
+    it presents was compared with the trusted one and with `expect_fingerprint` (the one the person was shown). Every
+    login after a network drop checks it again, and while the board's network is gone the session waits for it (N5;
+    `on_event` gets its events, `wait_seconds` is how long it waits, the session's default 300 s when None). `step`
+    names the contact (probe, runtime_deploy, benchmark) for Mojo's record of the board. `on_client` gets the session
+    once (closing it closes its connection); `cancel` (a session.CancelToken) ends any wait at once."""
+    from orchestrator.remote import reasons
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.remote.session import KeyOnly, RemoteSession, SessionFailure, Stopped as SessionStopped
+    if expect_fingerprint != device.fingerprint:
+        # the person was shown another key than the one the record holds now: refused after one key read, no login
+        read_key(device, state_dir, step)   # refuses a key that is not the trusted one
         raise DeviceRuntimeError(f"The device {device.label} presents another host key than the one shown; nothing "
                                  "was done.", code="needs_person", next="Call the tool again.")
-    from orchestrator.runtime.device import reasons
+    options: Dict[str, Any] = {} if wait_seconds is None else {"wait_seconds": wait_seconds}
+    session = RemoteSession(Endpoint(device.host, device.port), user, Path(state_dir), credentials=KeyOnly(),
+                            expect_fingerprint=expect_fingerprint, cancel=cancel, on_event=on_event, **options)
     try:
-        client = ssh_trust.connect(device.host, user, state_dir, port=device.port, password=None)
-    except Exception as e:  # noqa: BLE001 - authentication or network
-        reason = reasons.classify(e)
+        session.open()
+    except SessionStopped:
+        raise Stopped("The contact with the device") from None
+    except SessionFailure as failed:
+        check, e = session.last_check, failed.error
+        if failed.kind == "key_read":   # unreachable, no SSH server, no paramiko
+            if failed.reason:
+                raise unreachable(device, failed.reason, state_dir, step, e) from None
+            raise DeviceRuntimeError(f"The host key of {device.label} could not be read ({e.__class__.__name__}).",
+                                     code="failed", next="Tell the person; the framework's log has the details.") \
+                from None
+        if failed.kind == "key_changed":
+            raise unreachable(device, reasons.HOST_KEY_CHANGED, state_dir, step) from None
+        if failed.kind in ("not_trusted", "other_key"):
+            raise _not_trusted(device, check.fingerprint if check is not None else "") from None
+        reason = reasons.classify(e) if e is not None else None   # the login: authentication or network
         if reason is not None and reason != reasons.AUTH_FAILED:
-            raise unreachable(device, reason, state_dir, step) from None
+            raise unreachable(device, reason, state_dir, step, e) from None
         note_reach(state_dir, device, step, reasons.AUTH_FAILED)
         raise DeviceRuntimeError(f"The framework's SSH key does not log in to {device.label} as {user} "
-                                 f"({e.__class__.__name__}).", code="needs_person", reason=reasons.AUTH_FAILED,
+                                 f"({(e or failed).__class__.__name__}).", code="needs_person",
+                                 reason=reasons.AUTH_FAILED,
                                  next="Ask the person to pair the device once with 'llm-cli deploy run' or "
                                       "'llm-cli scan --device' (they enter the password there).") from None
     note_reach(state_dir, device, step, "")   # reached and logged in: a recorded problem ends
     if on_client is not None:
-        on_client(client)
-    return client
+        on_client(session)
+    return session
+
+
+def _session_failed(device: TrustedDevice, error: Exception, state_dir: Path, step: str, what: str,
+                    cancel: Any = None) -> DeviceRuntimeError:
+    """A step on the board that the board session ended: the board did not answer again after a network drop (its
+    SSH reason code, recorded for Mojo), a cancel, or the device's own words (kept apart as external text)."""
+    if cancel is not None and cancel.cancelled or getattr(error, "kind", "") == "stopped":
+        return Stopped(what)
+    reason = getattr(error, "reason", "")
+    if reason:
+        return unreachable(device, reason, state_dir, step, getattr(error, "error", None))
+    return _device_said(what, device, error)
 
 
 # --- probe ----------------------------------------------------------------------------------------------------------
 
 def probe(device: TrustedDevice, state_dir: Path, expect_fingerprint: str, *,
-          on_client: Optional[Callable[[Any], None]] = None) -> Dict[str, Any]:
+          on_client: Optional[Callable[[Any], None]] = None, cancel: Any = None,
+          on_event: Optional[Callable[[Any], None]] = None) -> Dict[str, Any]:
     """Runs the read-only hardware probe on the device (as `llm-cli scan --device`) and stores its profile under the
-    device id (the label and address the person gave are kept). Returns what was stored, without device text."""
+    device id (the label and address the person gave are kept). Returns what was stored, without device text. A
+    network drop makes the session wait for the board and run the probe's command again (N5)."""
+    from orchestrator.remote.session import SessionFailure, Stopped as SessionStopped
     from orchestrator.runtime.profile import ProfileStore
     from orchestrator.runtime.remote_probe import RemoteProbeError, probe_over_ssh
-    client = connect(device, state_dir, device.user, expect_fingerprint, on_client, step="probe")
+    session = connect(device, state_dir, device.user, expect_fingerprint, on_client, step="probe", cancel=cancel,
+                      on_event=on_event)
     try:
         try:
-            result = probe_over_ssh(client)
+            result = probe_over_ssh(session)
         except RemoteProbeError as e:
             raise _device_said("The probe", device, e) from None
+        except (SessionFailure, SessionStopped) as e:
+            raise _session_failed(device, e, state_dir, "probe", "The probe", cancel) from None
     finally:
-        client.close()
+        session.close()
     store = ProfileStore(state_dir)
     store.save_device(device.device_id, result.profile, label=device.label, address=device.address)
     return {"probe_id": device.device_id, "tool": result.tool, "warnings": len(result.profile.warnings)}
@@ -249,15 +320,20 @@ def ensure_build(state_dir: Path, device: TrustedDevice, profile: Any, expect_bu
 
 def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, expect_fingerprint: str,
            expect_build_id: str, *, on_client: Optional[Callable[[Any], None]] = None,
-           cancelled: Callable[[], bool] = lambda: False, say: Say = lambda _m: None) -> Dict[str, Any]:
+           cancelled: Callable[[], bool] = lambda: False, say: Say = lambda _m: None, cancel: Any = None,
+           on_event: Optional[Callable[[Any], None]] = None) -> Dict[str, Any]:
     """Builds (when needed) and installs the device runtime as the deploy settings say, checks the new build on the
     device and activates it only when it passes: the same steps as `llm-cli device runtime deploy`
-    (steps.install_runtime saves the deployment's record)."""
+    (steps.install_runtime saves the deployment's record). Over the board session: the upload resumes after a network
+    drop, the checks run again, and a step that must not run twice ends with the board's state named."""
+    from orchestrator.remote.session import CancelToken
     from orchestrator.runtime.device import steps
     from orchestrator.runtime.device.remote import RemoteError, RemoteShell
+    cancel = cancel if cancel is not None else CancelToken(check=cancelled)
     builds, build, packaged = ensure_build(state_dir, device, profile, expect_build_id, cancelled=cancelled, say=say)
     source = pinned_source()
-    client = connect(device, state_dir, settings.ssh_user, expect_fingerprint, on_client, step="runtime_deploy")
+    client = connect(device, state_dir, settings.ssh_user, expect_fingerprint, on_client, step="runtime_deploy",
+                     cancel=cancel, on_event=on_event)
     try:
         shell = RemoteShell(client)
         if cancelled():
@@ -268,7 +344,7 @@ def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, 
                                             arch=str(build.plan.get("target", {}).get("arch") or profile.arch),
                                             kv_cache=settings.kv_choice(profile).kind, say=say)
         except RemoteError as e:
-            raise _device_said("The deploy", device, e) from None
+            raise _session_failed(device, e, state_dir, "runtime_deploy", "The deploy", cancel) from None
     finally:
         client.close()
     result, report, ok = outcome.result, outcome.report, outcome.ok
@@ -282,12 +358,14 @@ def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, 
 def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, expect_fingerprint: str, *,
               allow_untrusted: bool, on_client: Optional[Callable[[Any], None]] = None,
               consent: Optional[Callable[[str], None]] = None,
-              output_dirs: Sequence[Path] = ()) -> Dict[str, Any]:
+              output_dirs: Sequence[Path] = (), cancel: Any = None,
+              on_event: Optional[Callable[[Any], None]] = None) -> Dict[str, Any]:
     """The checks of the deployed runtime on the device with a short llama-bench run on the model the deploy settings
     name (as `llm-cli device runtime verify --bench-model`). A model that is not a catalog model runs only when
     `allow_untrusted` (the person approved exactly that); `consent(sha256)` writes that consent to the audit log before
     the model is loaded. The measurement runs on the board, never on this computer (seventh round 2'); its result is
-    recorded with every build of that model below `output_dirs` as "tested on" the board (tested.py, N3)."""
+    recorded with every build of that model below `output_dirs` as "tested on" the board (tested.py, N3). The
+    short llama-bench run runs on the board on its own and is followed again after a network drop (round 16 G4)."""
     from orchestrator.runtime.build.store import BuildStore
     from orchestrator.runtime.device import steps
     from orchestrator.runtime.device.package import DeviceRuntimeStore
@@ -305,7 +383,8 @@ def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: An
     stored = BuildStore(state_dir).get(record["build_id"])
     plan_verify = (stored.plan.get("verify") if stored else None) or {}
     source = pinned_source()
-    client = connect(device, state_dir, settings.ssh_user, expect_fingerprint, on_client, step="benchmark")
+    client = connect(device, state_dir, settings.ssh_user, expect_fingerprint, on_client, step="benchmark",
+                     cancel=cancel, on_event=on_event)
     try:
         shell = RemoteShell(client)
         try:
@@ -336,7 +415,7 @@ def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: An
                                       pin_build=source.build_number, pin_commit=source.commit, port=settings.port,
                                       bench_model=path, bench_allowed=True)
         except RemoteError as e:
-            raise _device_said("The checks", device, e) from None
+            raise _session_failed(device, e, state_dir, "benchmark", "The checks", cancel) from None
     finally:
         client.close()
     record.update({"verification": report.as_dict(), "verified_at": report_time()})

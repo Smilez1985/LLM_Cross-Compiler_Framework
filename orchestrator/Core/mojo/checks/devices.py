@@ -132,9 +132,9 @@ def check_devices(framework, contact: Sequence[str] = ()) -> List[Finding]:
     """The trusted boards as the framework recorded them (host keys, failed contacts, the last deploy's look at the
     board): no network contact. `contact`: the device IDs of the boards the person or an AI asked to check now (one
     TCP connection to each one's SSH port). Changes nothing, logs in nowhere."""
+    from orchestrator.remote import transport
     from orchestrator.runtime.device import reasons
     from orchestrator.runtime.device.trusted import TrustedDevices, board_name
-    from orchestrator.utils import ssh_trust
     state_dir = getattr(getattr(framework, "config", None), "user_state_dir", None)
     if state_dir is None:
         return []
@@ -143,7 +143,7 @@ def check_devices(framework, contact: Sequence[str] = ()) -> List[Finding]:
     if not boards:
         return []
     findings: List[Finding] = []
-    keys_known = ssh_trust.paramiko is not None
+    keys_known = transport.available()[0]   # a real import: a broken installation counts as missing
     if not keys_known:
         findings.append(Finding("devices", "devices.unchecked", Severity.INFO,
                                 f"The host keys of {len(boards)} trusted boards were not read: reading them needs the "

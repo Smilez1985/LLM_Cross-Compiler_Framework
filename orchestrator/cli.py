@@ -4794,9 +4794,9 @@ def _trust_device(state_dir: Path, host: str, port: int, trust_fingerprint: Opti
 def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host: str, user: Optional[str], port: int,
                  password: Optional[str], trust_fingerprint: Optional[str], label: Optional[str],
                  ctx: Optional[FrameworkContext] = None) -> None:
+    from orchestrator.remote import transport
     from orchestrator.remote.address import valid_host, valid_user
     from orchestrator.runtime.scan_steps import USER_HINT, DeviceScanError, label_problem, scan_device
-    from orchestrator.utils import ssh_trust
     if not user:
         raise click.UsageError("--device needs --user")
     if not valid_user(user, allow_root=True):
@@ -4808,7 +4808,7 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
         raise click.UsageError("--port must be between 1 and 65535")
     if label_problem(label):
         raise click.UsageError("--label takes 1 to 64 printable characters")
-    if ssh_trust.paramiko is None:
+    if not transport.available()[0]:   # a real import: a broken installation counts as missing
         console.print("[red]Probing a device needs the 'paramiko' package.[/red]")
         sys.exit(1)
     key = _trust_device(state_dir, host, port, trust_fingerprint, ctx)
@@ -5017,13 +5017,17 @@ def _device_plan(profile):
 
 def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user: str, password: Optional[str],
                     ctx: Optional[FrameworkContext] = None, step: str = ""):
-    """An SSH client for the stored device: its host key must be the trusted one the device was probed with (the
-    device ID is derived from it), so a deployment never reaches another machine at the same address. `step` names
-    the contact for Mojo's record of the board (W1), kept in `state_dir`. A verify only checks: it never rewrites the
-    board's trust record (its --ssh-user may name another account than the one AI tools deploy as)."""
+    """The board session with the stored device (remote/session.py RemoteSession): its host key must be the trusted
+    one the device was probed with (the device ID is derived from it), so a deployment never reaches another machine
+    at the same address; when the board's network drops, the session waits for it and says so on the console (N5).
+    `step` names the contact for Mojo's record of the board (W1), kept in `state_dir`. A verify only checks: it never
+    rewrites the board's trust record (its --ssh-user may name another account than the one AI tools deploy as)."""
+    from orchestrator.remote.text import wait_lines
     from orchestrator.runtime.device import person_steps, reasons
+    lines = wait_lines(lambda text: console.print(escape(text)), host, _config_language(ctx))
     try:   # the shared step records the board's contacts for Mojo in `state_dir`
-        client, key = person_steps.connect_stored(state_dir, device_id, host, port, user, password, step=step)
+        client, key = person_steps.connect_stored(state_dir, device_id, host, port, user, password, step=step,
+                                                  on_event=lines)
     except person_steps.BoardStepError as e:
         if e.kind in ("unreachable", "host_key_changed") and e.reason:
             _print_reason(ctx, e.reason, host, port)
