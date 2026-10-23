@@ -104,6 +104,7 @@ class DeploymentWorker(QThread):
         self.kv_setting = KV_KEEP       # what the board's deploy settings get: None (automatic), a type, or KV_KEEP
         self.device_id = None           # the board's record after a successful deploy
         self.model_name = None          # the GGUF model the package installed (for the benchmark on the board)
+        self.package_error = None       # why _make_package made no package (a DeployError with its next step)
         # the one cancel of a board step (remote/session.py CancelToken): it holds the deploy's SSH session
         from orchestrator.remote.session import CancelToken
         self._stop = CancelToken()
@@ -123,30 +124,29 @@ class DeploymentWorker(QThread):
             self.finished.emit(False, "DeploymentManager not loaded.")
             return
 
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.remote.session import KeyOnly, OneTimePassword
+        from orchestrator.runtime.device.person_steps import deploy_build
         try:
-            if self.package is not None:   # an existing package: nothing is packaged (deploy run PACKAGE_PATH)
-                pkg_path = self.package
-            else:
-                pkg_path = self._make_package(dep_mgr)
-                if not pkg_path:
-                    error = getattr(dep_mgr, "last_package_error", None)
-                    self.finished.emit(False, "Package generation failed." if error is None else "\n\n".join(
-                        p for p in (ui_text("deploy.package_failed", reason=str(error)), error.next) if p))
-                    return
-
-            # 2. Deployment: waits for the board when its network drops, and says why when it cannot reach it
-            self.progress.emit(f"🚀 Deploying to {self.target_ip}...")
-            options = {"port": self.port, "password": password, "cancelled": self._stop.is_set,
-                       "on_client": self._on_client, "on_event": self.event.emit}
-            if self.wait_seconds is not None:
-                options["wait_seconds"] = self.wait_seconds
-            if self.key is not None:
-                from orchestrator.utils import ssh_trust
-                options["expect_fingerprint"] = ssh_trust.fingerprint(self.key)
-            result = dep_mgr.deploy_package(Path(pkg_path), self.target_ip, self.user, **options)
+            # the one deploy of a build (person_steps.deploy_build, also `llmcf deploy run`): the package of the
+            # selected build in the output folder (make_package: Cancel stops it too), or the existing package; the
+            # deploy, which waits for the board when its network drops and says why when it cannot reach it, bound to
+            # the key of this window's question; then the board's trusted record
+            done = deploy_build(self.framework, dep_mgr, Endpoint(self.target_ip, self.port), self.user,
+                                source=None if self.package is not None else self.artifact_path, package=self.package,
+                                profile=self.profile_name, docker=bool((self.docker_config or {}).get("use_docker")),
+                                credentials=OneTimePassword(password) if password else KeyOnly(), label=self.label,
+                                kv_cache=self.kv_cache, wait=self.wait_seconds, on_event=self.event.emit,
+                                cancel=self._stop, key=self.key, via="gui", actor="gui",
+                                remember=lambda key: self._remember_device(key=key), on_step=self._on_step)
+            if done.package_error is not None:
+                error = done.package_error
+                self.finished.emit(False, "\n\n".join(
+                    p for p in (ui_text("deploy.package_failed", reason=str(error)), getattr(error, "next", "")) if p))
+                return
+            pkg_path, result = done.package, done.result
 
             if result.success:
-                self._remember_device()
                 self.model_name = self._model_name()
                 # an old container of an earlier package still on the board: told, never removed (only the person)
                 state = f"device.deploy.state.{result.old_sidecar}"
@@ -165,25 +165,28 @@ class DeploymentWorker(QThread):
         except Exception as e:
             self.finished.emit(False, str(e))
 
-    def _make_package(self, dep_mgr):
-        """Step 1 of a deploy: the package of the selected build in the output folder (None when it cannot be made;
-        the manager keeps the reason in last_package_error)."""
-        self.progress.emit("📦 Generating Deployment Package...")
-        # Safe config access
-        get_cfg = getattr(self.framework.config, 'get', lambda k, d=None: getattr(self.framework.config, k, d))
-        # The configured folder (relative to the installation), the one the artifact list shows; never the cwd.
-        output_dir = Path(get_cfg("output_dir", "output"))
-        if hasattr(self.framework, "resolve_path"):
-            output_dir = self.framework.resolve_path(output_dir)
+    def _on_step(self, kind: str) -> None:
+        """The deploy's step for the button text: packaging the build, then the deploy."""
+        if kind == "package":
+            self.progress.emit("📦 Generating Deployment Package...")
+        elif kind == "deploy":
+            self.progress.emit(f"🚀 Deploying to {self.target_ip}...")
 
-        extra = {"kv_cache": self.kv_cache} if self.kv_cache else {}
-        return dep_mgr.create_deployment_package(
-            artifact_path=self.artifact_path,
-            profile_name=self.profile_name,
-            docker_config=self.docker_config,
-            output_dir=output_dir,
-            **extra
-        )
+    def _make_package(self, dep_mgr):
+        """Step 1 of a deploy on its own, kept for older callers (run() packages through person_steps.deploy_build):
+        the package of the selected build in the configured output folder, made as run() makes it (make_package: the
+        image name of a Docker package; Cancel stops it). None when it cannot be made; the reason is then in
+        `package_error`, never in the manager's shared state."""
+        from orchestrator.Core.deployment_manager import DeployError, make_package, package_folder
+        self.package_error = None
+        self._on_step("package")
+        try:
+            return make_package(dep_mgr, self.framework, self.artifact_path, self.profile_name,
+                                bool((self.docker_config or {}).get("use_docker")), package_folder(self.framework),
+                                kv_cache=self.kv_cache, cancelled=self._stop.is_set)
+        except DeployError as e:
+            self.package_error = e
+            return None
 
     def _model_name(self):
         """The GGUF model deploy.sh copied to models/ in the home folder (for the benchmark on the board); with Docker
@@ -208,35 +211,26 @@ class DeploymentWorker(QThread):
                                                                             "transfer/execution."))
         return "\n\n".join(parts)
 
-    def _remember_device(self, port=None) -> None:
+    def _remember_device(self, port=None, key=None):
         """After a deployment to a device whose host key the person confirmed in this window (confirm_host_key) and
         that the framework logged in to: its record, so AI tools may name it for deploy_to_device (each deploy is
-        still confirmed). Written only here and in the CLI, never by a tool; it never fails the deployment. The KV-cache
-        choice of this window goes into the board's deploy settings. The key is the one of this window's question (the
-        deploy reached exactly that one: expect_fingerprint); only a worker started without it reads the key again."""
-        from orchestrator.remote.address import Endpoint
-        from orchestrator.remote.trust import TrustStore
-        from orchestrator.runtime.device.person_steps import remember_board
+        still confirmed). Written only here and in the CLI, never by a tool; it never fails the deployment. The record
+        and its audit row are the CLI's (person_steps.remember_deployed: the registry's audit log, else the per-user
+        one). The KV-cache choice of this window goes into the board's deploy settings. The key is the one of this
+        window's question (the deploy reached exactly that one: expect_fingerprint); only a worker started without it
+        reads the key again. Returns the record (None: not written)."""
+        from orchestrator.runtime.device.person_steps import remember_deployed
         port = self.port if port is None else int(port)
         state = getattr(getattr(self.framework, "config", None), "user_state_dir", None)
         if not state:
-            return
-        key = self.key
-        if key is None:
-            try:
-                check = TrustStore(Path(state)).check(Endpoint(self.target_ip, port))
-                if not check.known:
-                    return
-            except Exception:  # noqa: BLE001 - unreachable now: the next deployment records it
-                return
-            key = check.key
-        audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
-        device = remember_board(Path(state), self.target_ip, port, self.user, key, via="gui", audit=audit,
-                                actor="gui", label=self.label)
+            return None
+        device = remember_deployed(Path(state), self.target_ip, port, self.user, self.key if key is None else key,
+                                   via="gui", actor="gui", label=self.label, framework=self.framework)
         if device is not None:
             self.device_id, self.trusted = device.device_id, device
             if self.kv_setting != KV_KEEP:
                 _save_kv_setting(Path(state), device.device_id, self.kv_setting)
+        return device
 
 
 def _save_kv_setting(state_dir: Path, device_id: str, kind) -> None:

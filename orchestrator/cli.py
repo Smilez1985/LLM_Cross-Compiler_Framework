@@ -4595,11 +4595,19 @@ def run_deploy(ctx: FrameworkContext, package_path, host, user, port, password, 
         password = _device_password(None, False, ask_when_omitted=True)
 
     import threading
+    from orchestrator.remote.session import CancelToken, KeyOnly, OneTimePassword
+    from orchestrator.runtime.device.person_steps import deploy_build
     stop = threading.Event()
+    # The one deploy of a build (person_steps.deploy_build, also the Deployment tab's): the package as it is, the
+    # deploy (Ctrl+C is its cancel, _ctrl_c_cancels), then, trusted by you and logged in to with the framework's key,
+    # the board's record, so AI tools may name it (deploy_to_device).
     with _ctrl_c_cancels(stop), console.status(f"Deploying to {user}@{host}...", spinner="earth") as shown:
-        result = dep_mgr.deploy_package(Path(package_path), host, user, port=port, password=password,
-                                        wait_seconds=wait_seconds, cancelled=stop.is_set,
-                                        on_event=lambda event: shown.update(_deploy_event_text(ctx, event, host)))
+        done = deploy_build(ctx.framework_manager, dep_mgr, Endpoint(host, port), user, package=Path(package_path),
+                            credentials=OneTimePassword(password) if password else KeyOnly(), label=label,
+                            wait=wait_seconds, on_event=lambda event: shown.update(_deploy_event_text(ctx, event, host)),
+                            cancel=CancelToken(check=stop.is_set), key=key, bind_key=False, via="cli", actor="cli",
+                            state_dir=lambda: _state_dir(ctx), audit=lambda: _device_audit(ctx, _state_dir(ctx)))
+    result = done.result
 
     if result.success:
         console.print("[bold green]✅ Deployment Execution Successful![/bold green]")
@@ -4608,8 +4616,7 @@ def run_deploy(ctx: FrameworkContext, package_path, host, user, port, password, 
                           "for the board and continued where it stopped.")
         for note in result.notes:  # e.g. an old container on the board that only you remove
             console.print(f"[yellow]{escape(note)}[/yellow]")
-        # Trusted by you and logged in to with the framework's key: AI tools may now name it (deploy_to_device).
-        _remember_device(ctx, host, port, user, key, paired=True, label=label)
+        _say_trusted(done.device)
     else:
         console.print("[bold red]❌ Deployment Failed.[/bold red]")
         if result.code:
@@ -4755,17 +4762,11 @@ def _deploy_event_text(ctx: FrameworkContext, event, host: str) -> str:
 
 
 def _device_audit(ctx: FrameworkContext, state_dir: Path):
-    """The tool audit log for a person's device decisions, also when the framework is not booted (scan --device)."""
+    """The tool audit log for a person's device decisions, also when the framework is not booted (scan --device): the
+    one opener the GUI uses too (person_steps.device_audit)."""
+    from orchestrator.runtime.device.person_steps import device_audit
     fm = ctx.framework_manager if getattr(ctx, "_initialized", False) else None
-    audit = getattr(getattr(fm, "tool_registry", None), "audit", None)
-    if audit is not None:
-        return audit
-    try:
-        from orchestrator.tools.audit import AuditLog
-        from orchestrator.Core.vault_key import audit_key
-        return AuditLog(state_dir / "audit.db", key=audit_key(None, state_dir))
-    except Exception:  # noqa: BLE001 - the record is still written; the trust itself was the person's
-        return None
+    return device_audit(fm, state_dir)
 
 
 def _remember_device(ctx: FrameworkContext, host: str, port: int, user: str, key, *, paired: bool,
@@ -5235,8 +5236,12 @@ def _device_plan(profile):
     try:
         return plan_runtime(profile)
     except PlanError as e:
-        console.print(f"[red]No device runtime can be planned for this device: {escape(str(e))}[/red]")
-        sys.exit(1)
+        _no_plan(e)
+
+
+def _no_plan(error) -> None:
+    console.print(f"[red]No device runtime can be planned for this device: {escape(str(error))}[/red]")
+    sys.exit(1)
 
 
 def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user: str, password: Optional[str],
@@ -5246,6 +5251,16 @@ def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user:
     at the same address; when the board's network drops, the session waits for it and says so on the console (N5).
     `step` names the contact for Mojo's record of the board (W1), kept in `state_dir`. A verify only checks: it never
     rewrites the board's trust record (its --ssh-user may name another account than the one AI tools deploy as)."""
+    client, key = _open_device(state_dir, device_id, host, port, user, password, ctx, step)
+    if ctx is not None and step != "verify":  # trusted by the person when it was probed, logged in to with the
+        _remember_device(ctx, host, port, user, key, paired=True)  # framework's key now (a verify only checks)
+    return client
+
+
+def _open_device(state_dir: Path, device_id: str, host: str, port: int, user: str, password: Optional[str],
+                 ctx: Optional[FrameworkContext] = None, step: str = ""):
+    """(board session, host key) of the stored device, as _connect_device logs in (it exits with the reason when the
+    board cannot be reached or logged in to); the board's trust record is the caller's to write."""
     from orchestrator.remote.text import wait_lines
     from orchestrator.runtime.device import person_steps, reasons
     # the key that ends a wait, as `deploy run` names it (Ctrl+C ends the command; a wait never runs on to 300 s)
@@ -5268,9 +5283,7 @@ def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user:
         else:
             console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
-    if ctx is not None and step != "verify":  # trusted by the person when it was probed, logged in to with the
-        _remember_device(ctx, host, port, user, key, paired=True)  # framework's key now (a verify only checks)
-    return client
+    return client, key
 
 
 def _board_step_failed(ctx: Optional[FrameworkContext], error, host: str, port: int) -> None:
@@ -5291,6 +5304,14 @@ def _bench_choice(ctx: FrameworkContext, shell, home: str, bench_model: Optional
                   device_id: str, user: str):
     """(model path on the device or None, allowed, its sha256): a catalog model (by sha256) runs; any other model only
     after the user's consent, written to the audit log first (decision D23)."""
+    choice = _bench_model_choice(ctx, shell, home, bench_model, allow_untrusted, device_id, user)
+    return choice.path, choice.allowed, choice.digest
+
+
+def _bench_model_choice(ctx: FrameworkContext, shell, home: str, bench_model: Optional[str], allow_untrusted: bool,
+                        device_id: str, user: str):
+    """The short benchmark's model (steps.BenchChoice) as _bench_choice chooses it, with the question at a terminal and
+    the line for a model that is not on the device."""
     from orchestrator.runtime.device import steps
     from orchestrator.runtime.device.person_steps import UNTRUSTED_CONSENT, UNTRUSTED_QUESTION
     from orchestrator.runtime.device.settings import SettingsError
@@ -5310,24 +5331,39 @@ def _bench_choice(ctx: FrameworkContext, shell, home: str, bench_model: Optional
     if choice.missing:
         console.print(f"[yellow]No readable model at {escape(choice.missing)} on the device; the short benchmark is "
                       "skipped.[/yellow]")
-    return choice.path, choice.allowed, choice.digest
+    return choice
 
 
 def _record_board_test(ctx: FrameworkContext, store, device_id: str, profile, report, digest: Optional[str],
                        runtime_build_id: str, source, kv_cache: Optional[str]) -> None:
     """Records a benchmark on the board with the builds of its model as "tested on" the board (N3) and says so."""
+    builds = _board_test_builds(ctx, store, device_id, profile, report, digest, runtime_build_id, source, kv_cache)
+    _say_board_test(ctx, store, device_id, profile, builds)
+
+
+def _board_test_builds(ctx: FrameworkContext, store, device_id: str, profile, report, digest: Optional[str],
+                       runtime_build_id: str, source, kv_cache: Optional[str]):
+    """The builds a benchmark on the board was recorded with as "tested on" it (N3); None when no short benchmark ran
+    (nothing to say then)."""
     from types import SimpleNamespace
     from orchestrator.runtime.device.service import record_board_test
-    from orchestrator.utils.localization import ui_text
     smoke = report.check("smoke")
     if smoke is None or smoke.ok is None or not digest:
-        return
+        return None
     label = store.device_info(device_id).get("label") or device_id
     from orchestrator.Core.artifact_output import artifact_folders
     config, resolve = _settings(ctx)  # the folders of golden artifacts without booting the framework
-    builds = record_board_test(artifact_folders(SimpleNamespace(config=config, resolve_path=resolve)),
-                               SimpleNamespace(device_id=device_id, label=label), profile, report, digest,
-                               runtime_build_id, source, kv_cache)
+    return record_board_test(artifact_folders(SimpleNamespace(config=config, resolve_path=resolve)),
+                             SimpleNamespace(device_id=device_id, label=label), profile, report, digest,
+                             runtime_build_id, source, kv_cache)
+
+
+def _say_board_test(ctx: FrameworkContext, store, device_id: str, profile, builds) -> None:
+    """The line about the "tested on" record (_board_test_builds); nothing when no short benchmark ran."""
+    from orchestrator.utils.localization import ui_text
+    if builds is None:
+        return
+    label = store.device_info(device_id).get("label") or device_id
     lang = _config_language(ctx)
     board = profile.get("BOARD_MODEL") or label
     console.print(escape(ui_text("device.bench.recorded", lang, board=board, count=len(builds)) if builds else
@@ -5549,18 +5585,46 @@ def _say_older_packages(devices, build) -> None:
                       "[/dim]")
 
 
-def _ensure_package(state_dir: Path, device_id: str, builds, build):
+def _stored_runtime(state_dir: Path, device_id: str, profile):
+    """The stored build of the device's plan and its checked tarball (steps.stored_runtime, as the Boards window finds
+    them); exits with the reason and the next step when there is none."""
+    from orchestrator.runtime.build.recipe import PlanError
     from orchestrator.runtime.device.package import PackageError
-    from orchestrator.runtime.device.steps import PackageNeedsSource, ensure_package
+    from orchestrator.runtime.device import steps
     try:
-        return ensure_package(state_dir, device_id, builds, build, _pinned_llama_source)
-    except PackageNeedsSource:
+        return steps.stored_runtime(state_dir, device_id, profile, _pinned_llama_source)
+    except PlanError as e:
+        _no_plan(e)
+    except steps.NotBuilt:
+        console.print(f"[red]The runtime for this device is not built yet (or the device's profile changed): "
+                      f"llm-cli device runtime build {device_id}[/red]")
+        sys.exit(1)
+    except (steps.PackageNeedsSource, PackageError) as e:
+        _package_refused(e, device_id)
+
+
+def _ensure_package(state_dir: Path, device_id: str, builds, build):
+    """(the device's runtime store, its checked tarball) of a stored build (steps.ensure_package); exits with the
+    reason and the next step when it cannot be packaged. Kept for older callers: `device runtime deploy` finds its
+    build and tarball through _stored_runtime (steps.stored_runtime), with the same words."""
+    from orchestrator.runtime.device.package import PackageError
+    from orchestrator.runtime.device import steps
+    try:
+        return steps.ensure_package(state_dir, device_id, builds, build, _pinned_llama_source)
+    except (steps.PackageNeedsSource, PackageError) as e:
+        _package_refused(e, device_id)
+
+
+def _package_refused(error, device_id: str) -> None:
+    """The words for a stored build whose tarball cannot be used: it needs the pinned source to be packaged again,
+    or the package's own reason; exits with 1."""
+    from orchestrator.runtime.device import steps
+    if isinstance(error, steps.PackageNeedsSource):
         console.print("[red]The tarball must be packaged again, which needs the pinned source (its licence text): "
                       f"run llm-cli device runtime build {device_id}.[/red]")
-        sys.exit(1)
-    except PackageError as e:
-        console.print(f"[red]{escape(str(e))}[/red]")
-        sys.exit(1)
+    else:
+        console.print(f"[red]{escape(str(error))}[/red]")
+    sys.exit(1)
 
 
 @device_runtime.command('prune')
@@ -5656,10 +5720,9 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
                           password_stdin: bool, bench_model: Optional[str], allow_untrusted_model: bool):
     """Install the built runtime on the device over SSH as the deploy settings say, then check it there"""
     password = _device_password(password, password_stdin)
-    from orchestrator.runtime.build.store import BuildStore
     from orchestrator.runtime.device import steps
     from orchestrator.runtime.device.person_steps import board_address
-    from orchestrator.runtime.device.remote import RemoteError, RemoteShell, read_facts
+    from orchestrator.runtime.device.remote import RemoteError
     from orchestrator.runtime.device.settings import SettingsError
     state_dir, store, device_id, profile = _device_context(ctx, device_name)
     settings = _deploy_settings(store, device_id)
@@ -5679,43 +5742,39 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
         console.print("[red]Nothing was deployed; change the deploy settings first (llm-cli device settings).[/red]")
         sys.exit(1)
     kv = settings.kv_choice(profile)
-    plan = _device_plan(profile)
-    builds = BuildStore(state_dir)
-    build = builds.find(plan)
-    if build is None:
-        console.print(f"[red]The runtime for this device is not built yet (or the device's profile changed): "
-                      f"llm-cli device runtime build {device_id}[/red]")
-        sys.exit(1)
-    devices, packaged = _ensure_package(state_dir, device_id, builds, build)
+    stored = _stored_runtime(state_dir, device_id, profile)
+    build, devices = stored.build, stored.devices
     try:
         host, port = board_address(store, device_id)
     except ValueError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
     source = _pinned_llama_source()
-    client = _connect_device(state_dir, device_id, host, port, settings.ssh_user, password, ctx=ctx,
-                             step="runtime_deploy")
+    user = settings.ssh_user
+    # The one flow of the device runtime's deploy (steps.deploy_runtime_flow, also the Boards window's and the AI's):
+    # this command's login, the board's trust record (trusted by you when it was probed, logged in to with the
+    # framework's key now), the question about an untrusted benchmark model, asked before anything changes on the
+    # device (decision D23: only after consent), and the "tested on" record. Design 3.8 and P6: the new build is
+    # checked in its own folder and becomes current only if it passes; only then is its record saved.
+    hooks = steps.DeployHooks(
+        open_board=lambda: _open_device(state_dir, device_id, host, port, user, password, ctx=ctx,
+                                        step="runtime_deploy"),
+        remember=lambda key: _remember_device(ctx, host, port, user, key, paired=True),
+        choose_bench=lambda shell, home: _bench_model_choice(ctx, shell, home, bench_model, allow_untrusted_model,
+                                                             device_id, user),
+        tested_on=lambda report, digest, build_id, kind: _board_test_builds(ctx, store, device_id, profile, report,
+                                                                            digest, build_id, source, kind),
+        progress=lambda msg: console.print(escape(msg)))
     try:
-        shell = RemoteShell(client)
-        facts = read_facts(shell)
-        if facts.uid == 0:
-            console.print("[red]The SSH user on the device is root: the runtime never runs as root. Deploy as an "
-                          "unprivileged user (llm-cli device settings DEVICE --user NAME).[/red]")
-            sys.exit(1)
-        # Asked before anything changes on the device (decision D23: an untrusted model only after consent).
-        model_path, allowed, digest = _bench_choice(ctx, shell, facts.home, bench_model, allow_untrusted_model,
-                                                    device_id, settings.ssh_user)
-        # Design 3.8 and P6: the new build is checked in its own folder and becomes current only if it passes; only
-        # then is its record saved.
-        outcome = steps.install_runtime(shell, state_dir=state_dir, device_id=device_id, profile=profile,
-                                        settings=settings, build=build, packaged=packaged, source=source,
-                                        arch=str(plan.target["arch"]), kv_cache=kv.kind,
-                                        bench=steps.BenchChoice(model_path, allowed, digest),
-                                        say=lambda msg: console.print(escape(msg)))
+        flow = steps.deploy_runtime_flow(state_dir, device_id, profile, settings, hooks=hooks, build=build,
+                                         packaged=stored.packaged, source=source, arch=str(stored.plan.target["arch"]))
+    except steps.RootUser:
+        console.print("[red]The SSH user on the device is root: the runtime never runs as root. Deploy as an "
+                      "unprivileged user (llm-cli device settings DEVICE --user NAME).[/red]")
+        sys.exit(1)
     except RemoteError as e:
         _board_step_failed(ctx, e, host, port)
-    finally:
-        client.close()
+    outcome = flow.outcome
     result, report = outcome.result, outcome.report
     if not outcome.ok:
         console.print(f"[red]Build {build.build_id[:16]} did not pass its checks on the device; it was not "
@@ -5728,8 +5787,7 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
     console.print(f"[bold green]Deployed[/bold green] build {build.build_id[:16]} to {escape(result.root)}"
                   + (f" (previous {result.previous} kept)" if result.previous else ""))
     _print_report(report)
-    _record_board_test(ctx, store, device_id, profile, report, digest if allowed else None, build.build_id, source,
-                       kv.kind)
+    _say_board_test(ctx, store, device_id, profile, flow.tested)
     for note in result.notes:
         console.print(f"[yellow]{escape(note)}[/yellow]")
     _say_older_packages(devices, build)

@@ -572,7 +572,7 @@ class TestDeploymentWindow:
         (build / "smol-q4_0.gguf").write_bytes(b"GGUF")
         package = tmp_path / "deploy_smol.zip"
         package.write_bytes(b"PK")
-        manager = SimpleNamespace(create_deployment_package=lambda **kw: package,
+        manager = SimpleNamespace(create_package=lambda *a, **kw: package,   # make_package's call
                                   deploy_package=lambda *a, **kw: DeployResult(True, exit_status=0, device_state="ok"))
         monkeypatch.setattr(window_framework, "get_component",
                             lambda name: manager if name == "deployment_manager" else None)

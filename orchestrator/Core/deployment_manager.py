@@ -223,6 +223,13 @@ def package_docker_config(docker: bool) -> Dict[str, Any]:
     return config
 
 
+def package_folder(framework: Any) -> Path:
+    """The folder a package is written to when the caller names none: the configured output folder (setting output_dir,
+    relative paths below the installation), as `llmcf deploy package` and the Deployment tab use it."""
+    from orchestrator.Core.build_plan import folder
+    return folder(framework, "output_dir", "output")
+
+
 def resolve_package_source(framework: Any, artifact: Any, output_dir: Path) -> Path:
     """The build or model file a package is made from: an absolute path or one relative to the working folder as it
     is, else a folder as `llmcf deploy list-artifacts` names it (relative to the output folder, then to the
@@ -271,14 +278,18 @@ class DeploymentManager:
         self.logger = get_logger("DeploymentManager")
         self.framework = framework_manager
         self._clock, self._sleep = time.monotonic, time.sleep  # the waiting for a board (tests replace them)
-        self.last_package_error: Optional[DeployError] = None   # why create_deployment_package returned None
+        # why create_deployment_package returned None; kept for its older callers only (it is shared by every caller
+        # of this manager): the framework's own callers take the reason with the call (make_package raises it, and
+        # person_steps.deploy_build returns it as package_error)
+        self.last_package_error: Optional[DeployError] = None
 
     # --- PACKAGE GENERATION ---
 
     def create_deployment_package(self, artifact_path: Path, profile_name: str, docker_config: Dict, output_dir: Path,
                                   kv_cache: Optional[str] = None) -> Optional[Path]:
         """The package (see create_package), or None when it cannot be made (the reason is logged and kept in
-        `last_package_error`, so a caller can show it with its next step)."""
+        `last_package_error`, so a caller can show it with its next step). Kept for older callers: the framework's
+        own callers use make_package (it raises the reason) or person_steps.deploy_build (it returns it)."""
         self.last_package_error = None
         try:
             return self.create_package(artifact_path, profile_name, docker_config, output_dir, kv_cache=kv_cache)
