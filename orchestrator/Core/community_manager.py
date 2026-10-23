@@ -192,8 +192,9 @@ class Provenance(Strict):
     # made before topics and confirmed by the person). Absent for other kinds and for packs installed before it.
     topic: Optional[str] = None
     target: Optional[str] = None
-    # The installed files' digest as this computer's file system reports it, only where that differs from
-    # content_sha256: Windows keeps no execute bit, so a pack's 0o755 scripts read as 0o644 there (installed_unchanged)
+    # The pack's digest with the modes as this computer's file system keeps them (community_pack.local_sha256), only
+    # where that differs from content_sha256: Windows keeps no execute bit, so a pack's 0o755 scripts read as 0o644
+    # there (installed_unchanged)
     local_sha256: Optional[str] = Field(default=None, pattern=SHA256_PATTERN)
 
     @field_validator("topic", "target")
@@ -209,7 +210,7 @@ class Provenance(Strict):
 
     def installed_unchanged(self, digest: str) -> bool:
         """Whether `digest` (tree_sha256 of the installed folder) is the installed content: the pack's own digest, or
-        the one this computer's file system gave right after the install."""
+        that digest with the modes this computer's file system kept at the install."""
         return digest in {self.content_sha256, self.local_sha256}
 
 
