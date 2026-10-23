@@ -489,6 +489,18 @@ class ConfigManager:
             ConfigSchema("chat_context_limit", int, False, 4096, "Max tokens for chat context history"),
             ConfigSchema("enable_telemetry", bool, False, False, "Allow anonymous error reporting (GitHub Issues)"),
             ConfigSchema("offline_mode", bool, False, False, "Force offline mode (no external APIs)"),
+            # What offline mode counts as local besides this computer and the own network (DECISIONS round 24,
+            # "L-NET final"): the person's opt-outs, written only by Core/local_network.py (GUI and CLI), never by an
+            # AI (AISettingsChange and MCP update_settings refuse them).
+            ConfigSchema("offline_local_vpns", list, False, [],
+                         "VPNs counted as local in offline mode (tailscale: also Tailscale or a Headscale with outside "
+                         "relays); set only by you, never by an AI"),
+            ConfigSchema("offline_local_hosts", list, False, [],
+                         "Host names counted as local in offline mode, whatever they resolve to (e.g. your reverse "
+                         "proxy); set only by you, never by an AI"),
+            ConfigSchema("offline_local_ranges", list, False, [],
+                         "Address ranges counted as local in offline mode (e.g. 203.0.113.0/24); set only by you, never "
+                         "by an AI"),
 
             # Community zoo (3.1): the signed index (verified with configs/community_keys.yml) and the repository
             # that receives contributions as pull requests. The repository is decided (maintainer, 2026-10-22);
@@ -723,6 +735,7 @@ class ConfigManager:
                 "ai_anthropic_workspace_id",
                 # v2.0
                 "chat_context_limit", "enable_telemetry", "offline_mode",
+                "offline_local_vpns", "offline_local_hosts", "offline_local_ranges",
                 # v2.3
                 "image_trivy", "image_base_debian", "image_inference_runtime",
                 "enable_security_scan", "llama_cpp_version", "build_jobs", "healing_approval_timeout",

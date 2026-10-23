@@ -20,13 +20,21 @@ set`, Q6).
 
 Moved here from where they were first written, their old import paths kept: check_base_url and plain_http_to_remote
 (llm/auth/signin.py), direction_problem with TIGHTEN_ONLY and memory_bytes (tools/tools_status.py), and the dialog's
-SettingsOverlay and fallback parsing (gui/dialogs.py). Only the standard library is imported here at load time.
+SettingsOverlay and fallback parsing (gui/dialogs.py). Only the standard library and utils/locality (standard library
+only itself) are imported here at load time.
+
+The person's opt-outs of offline mode's locality rule (PERSON_ONLY_SETTINGS: offline_local_vpns, offline_local_hosts,
+offline_local_ranges; DECISIONS round 24, "L-NET final") are refused here for every channel that changes settings
+through this module (MCP update_settings, the coming `llmcf config set`): only the person sets them, in
+File > Settings... or with `llmcf config local-network` (Core/local_network.py).
 """
 
 import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional, Sequence
 from urllib.parse import urlparse, urlsplit
+
+from orchestrator.utils.locality import OPT_OUT_SETTINGS
 
 # --- the settings an AI may only tighten (MCP update_settings, the dialog's GUI-tool fields) --------------------------
 
@@ -36,6 +44,10 @@ TIGHTEN_ONLY: Dict[str, Any] = {
     "crawler_rate_limit": "higher", "build_memory_limit": "lower", "build_pids_limit": "lower",
     "crawler_download_pdfs": False}
 MIN_MEMORY_LIMIT = 6 * 1024 ** 2  # Docker refuses a smaller container memory limit
+# Settings only the person sets, in the window or the command line, never through a change of this module or an AI.
+PERSON_ONLY_SETTINGS = tuple(OPT_OUT_SETTINGS)
+PERSON_ONLY_TEXT = ("{key} says what offline mode counts as local besides this computer and the own network. Only the "
+                    "person sets it, in the framework's settings; no AI and no settings change of an AI can.")
 
 
 def memory_bytes(value: Any) -> Optional[int]:
@@ -399,7 +411,11 @@ class AISettingsChange:
         names that are not AI settings are ignored. A problem the saved settings already have is not counted, so a
         change that does not touch it is not refused for it (the person fixes it in the AI settings dialog). For the
         channels that change single settings: MCP update_settings and the coming `llmcf config set`. ValueError for a
-        value an AI setting cannot take."""
+        value an AI setting cannot take. The person's opt-outs of the locality rule (PERSON_ONLY_SETTINGS) are refused
+        as "person_only"."""
+        person = [key for key in values if key in PERSON_ONLY_SETTINGS]
+        if person:
+            return [SettingsProblem("person_only", "Offline Mode", PERSON_ONLY_TEXT.format(key=key)) for key in person]
         names = [key for key in values if key in AI_SETTINGS]
         if not names:
             return []
@@ -417,6 +433,8 @@ class AISettingsChange:
         """This change with one AI setting replaced (a name of AI_SETTINGS). A new provider brings its own address,
         workspace and model from `config` (never the old provider's); KeyError for a setting that is not an AI
         setting, ValueError for a value it cannot take."""
+        if key in PERSON_ONLY_SETTINGS:
+            raise PermissionError(PERSON_ONLY_TEXT.format(key=key))
         name = AI_SETTINGS.get(key)
         if name is None:
             raise KeyError(f"{key} is not an AI setting (AI settings: {', '.join(AI_SETTINGS)}).")

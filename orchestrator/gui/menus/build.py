@@ -5,7 +5,7 @@ startable with the mouse):
 
   Build > Targets...        llm-cli targets list / targets validate   (orchestrator/gui/targets_window.py)
   Build > Build History...  llm-cli build status [--all] [REQUEST_ID] (orchestrator/gui/build_history_window.py)
-  File > Settings...        llm-cli config show / config repos         (orchestrator/gui/settings_window.py)
+  File > Settings...        llm-cli config show / config repos / config local-network (orchestrator/gui/settings_window.py)
 
 The Build menu sits right after File; Settings... sits above File > Exit. Every window calls the same core function
 as the CLI. CLI_PATHS names, for every command of this area, the QAction or button that starts it by mouse (its
@@ -55,11 +55,17 @@ CLI_PATHS: Dict[str, str] = {
     "config repos": "act_file_settings",
     "config repos --add": "act_file_settings",
     "config repos --remove": "act_file_settings",
+    # File > Settings... > Local network: what offline mode counts as local, and the person's opt-outs
+    "config local-network": "act_file_settings",
+    "config local-network --add": "act_file_settings",
+    "config local-network --remove": "act_file_settings",
+    "config local-network --check": "act_file_settings",
 }
 # The switches of this area that are for scripts only, with the reason (as the other menu modules list theirs; the
 # hidden, deprecated build start --parallel is not offered at all).
 MACHINE_ONLY: Dict[str, str] = {
     "targets list --format": "json or yaml output for scripts; Build > Targets... shows the same rows as a table",
+    "config local-network --yes": "skips the question with the explanation, for scripts; the window always asks",
 }
 
 

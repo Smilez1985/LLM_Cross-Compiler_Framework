@@ -558,6 +558,7 @@ TEXT_MODULES += ("orchestrator.utils.l10n_main", "orchestrator.utils.l10n_shell"
                  "orchestrator.utils.l10n_hf", "orchestrator.utils.l10n_ditto_setup",
                  "orchestrator.utils.l10n_glossary")
 TEXT_MODULES += ("orchestrator.utils.l10n_maintainer",)   # Community Hub > Maintainer, llmcf zoo maintainer
+TEXT_MODULES += ("orchestrator.utils.l10n_network",)   # offline mode's locality rule, File > Settings... > Local network
 
 
 def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,

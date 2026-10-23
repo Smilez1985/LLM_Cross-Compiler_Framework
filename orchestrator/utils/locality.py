@@ -34,7 +34,8 @@ mirror (runtime/build/source.py); the provider presets' local/cloud labels follo
 
 offline_mode(config) is the one offline check: every caller that asks whether offline mode is on reads it here.
 
-Only the standard library and the framework's text table are imported.
+Only the standard library is imported at load time; the texts (orchestrator/utils/l10n_network.py) and the next
+steps come from the framework's text table and step catalogue when they are needed.
 """
 
 import ipaddress
@@ -314,40 +315,32 @@ class Locality:
     reason: str
     addresses: Tuple[str, ...] = ()
     outside: Tuple[str, ...] = ()
-    detail: str = ""      # the VPN check's words, or why a lookup failed
+    detail: str = ""      # why a lookup failed
+    vpn_check: Optional["VpnCheck"] = None   # the VPN check behind a "vpn" verdict
 
     @property
     def address(self) -> Optional[str]:
         """The checked address a connection goes to (the first one); None when the host is not local."""
         return self.addresses[0] if self.local and self.addresses else None
 
-    def why(self) -> str:
-        """Why the host counts as local or not, in plain words (English, as the framework's refusals are)."""
-        host = self.host or "the address"
+    def why(self, lang: str = "en") -> str:
+        """Why the host counts as local or not, in plain words (English by default, as the framework's refusals are;
+        the window and the command line pass the person's language)."""
+        from orchestrator.utils.localization import ui_text
         shown = ", ".join(self.outside[:3]) + (" ..." if len(self.outside) > 3 else "")
-        return {
-            "this_computer": f"{host} is this computer",
-            "own_network": f"{host} is in your own network",
-            "own_vpn": f"{host} is in your own Headscale VPN (its control server and every relay are in your network)",
-            "opt_out_host": f"you count {host} as local",
-            "opt_out_range": f"you count the address range of {host} as local",
-            "opt_out_vpn": f"you count the VPN of {host} as local",
-            "public": f"{host} resolves to {shown or 'an address'} on the internet",
-            "mixed": f"{host} resolves to addresses in your network and on the internet ({shown})",
-            "vpn": f"{host} is a Tailscale address ({shown}), and the VPN is not a Headscale in your own network "
-                   f"with only own relays" + (f": {self.detail}" if self.detail else ""),
-            "unresolved": f"{host} could not be resolved" + (f" ({self.detail})" if self.detail else ""),
-            "no_host": "there is no server address",
-            "not_checked": f"{host} was not checked yet",
-        }.get(self.reason, self.reason)
+        detail = self.vpn_check.why(lang) if self.vpn_check is not None else self.detail
+        return ui_text(f"net.why.{self.reason}", lang, host=self.host or ui_text("net.subject", lang),
+                       addresses=shown or ui_text("net.why.an_address", lang),
+                       detail=(f" ({detail})" if detail else "") if self.reason == "unresolved" else detail)
 
-    def refusal(self, what: str = "") -> str:
-        """The plain refusal of a reach-out in offline mode: the host, why it is not local, and the opt-out."""
-        subject = f"{what} ({self.host})" if what and self.host else (what or self.host or "The address")
-        text = f"Offline mode is on, and {subject} is not on this computer or in your own network: {self.why()}."
+    def refusal(self, what: str = "", lang: str = "en") -> str:
+        """The plain refusal of a reach-out in offline mode: the host, why it is not local, and (when it would help)
+        that the person can count it as local; the next step itself is `steps`."""
+        from orchestrator.utils.localization import ui_text
+        subject = f"{what} ({self.host})" if what and self.host else (what or self.host or ui_text("net.subject", lang))
+        text = ui_text("net.refusal", lang, subject=subject, why=self.why(lang))
         if self.reason in OPT_OUT_HELPS:
-            text += (" If it is part of your own network (a reverse proxy, a VPN), the person can count it as local "
-                     "in the framework's settings (only the person can; an AI cannot).")
+            text += ui_text("net.refusal.opt_out", lang)
         return text
 
     @property
@@ -377,7 +370,7 @@ def _judge(host: str, addresses: Sequence[str], optouts: OptOuts, vpn: Callable[
         return Locality(host, False, "unresolved")
     if host and normal_host(host) in optouts.hosts:
         return Locality(host, True, "opt_out_host", addresses)
-    found, public, vpn_outside, vpn_detail = set(), [], [], ""
+    found, public, vpn_outside, vpn_check = set(), [], [], None
     for text in addresses:
         ip = parse_address(text)
         kind = address_kind(ip) if ip is not None else "invalid"
@@ -396,7 +389,7 @@ def _judge(host: str, addresses: Sequence[str], optouts: OptOuts, vpn: Callable[
                     found.add("own_vpn")
                 else:
                     vpn_outside.append(text)
-                    vpn_detail = check.why()
+                    vpn_check = check
         else:
             public.append(text)
     if not public and not vpn_outside:   # every address is local: the reason that needed the most
@@ -405,7 +398,7 @@ def _judge(host: str, addresses: Sequence[str], optouts: OptOuts, vpn: Callable[
         return Locality(host, True, reason, addresses)
     outside = tuple(public + vpn_outside)
     if not public:                       # only VPN addresses are outside: the VPN is not the person's own
-        return Locality(host, False, "vpn", addresses, outside, vpn_detail)
+        return Locality(host, False, "vpn", addresses, outside, vpn_check=vpn_check)
     return Locality(host, False, "mixed" if len(outside) < len(addresses) else "public", addresses, outside)
 
 
@@ -480,16 +473,10 @@ class VpnCheck:
     relays: Tuple[str, ...] = ()
     detail: str = ""
 
-    def why(self) -> str:
-        return {
-            "own_headscale": f"its control server {self.control} and every relay are in your own network",
-            "no_cli": "the tailscale command is not installed here, so the VPN cannot be checked",
-            "unreadable": "the VPN's settings could not be read" + (f" ({self.detail})" if self.detail else ""),
-            "tailscale_control": "it is coordinated by Tailscale's own servers",
-            "control_outside": f"its control server {self.control} is not in your own network",
-            "relay_outside": "it uses relays outside your own network: " + ", ".join(self.relays[:3]),
-            "not_checked": "the VPN was not checked yet",
-        }.get(self.reason, self.reason)
+    def why(self, lang: str = "en") -> str:
+        from orchestrator.utils.localization import ui_text
+        return ui_text(f"net.vpn.{self.reason}", lang, control=self.control, relays=", ".join(self.relays[:3]),
+                       detail=f" ({self.detail})" if self.detail else "")
 
 
 _vpn_cache: Dict[str, VpnCheck] = {}
