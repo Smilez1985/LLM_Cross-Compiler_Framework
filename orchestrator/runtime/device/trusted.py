@@ -298,6 +298,36 @@ class TrustedDevices:
         except (OSError, TimeoutError, DeviceStoreError):
             pass  # bookkeeping never fails a deploy, a verify or a benchmark
 
+    def copy_deploys(self, old_id: str, new_id: str) -> str:
+        """P6, the person's change of a board's host key (runtime/device/board_move.py): copies the board's deploy
+        record (its last deploy, what a deploy saw there, the last contact's problem) from `old_id` to `new_id` and
+        reads it back. "none": `old_id` has none; "present": `new_id` holds the same record already; "kept": `new_id`
+        holds a record of its own (nothing is written); "copied". OSError or DeviceStoreError when it cannot be
+        written, ValueError when the copy does not read back."""
+        with file_lock(self.state_dir / ".devices.lock"):
+            rows = self._read(self.deploys_path)
+            row = rows.get(old_id)
+            if not isinstance(row, dict):
+                return "none"
+            if new_id in rows:
+                return "present" if rows[new_id] == row else "kept"
+            rows[new_id] = dict(row)
+            self._write(self.deploys_path, rows)
+            if self._read(self.deploys_path).get(new_id) != row:
+                raise ValueError("the copied deploy record does not read back")
+        return "copied"
+
+    def drop_deploys(self, device_id: str, *, only: Optional[Dict[str, Any]] = None) -> bool:
+        """Removes the deploy record of `device_id` (with `only`: just when it is exactly that record, so the undo of
+        copy_deploys never removes another). False when there is none to remove."""
+        with file_lock(self.state_dir / ".devices.lock"):
+            rows = self._read(self.deploys_path)
+            if device_id not in rows or (only is not None and rows[device_id] != only):
+                return False
+            del rows[device_id]
+            self._write(self.deploys_path, rows)
+        return True
+
     def note_reach_at(self, host: str, port: int, step: str, code: str) -> None:
         """note_reach for every trusted board at this address and port (a caller that knows only the address)."""
         try:

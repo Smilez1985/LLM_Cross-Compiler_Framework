@@ -747,7 +747,10 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   importiert (`tests/test_remote_trust.py` folgt den Importen der Tool-Module, des MCP-Servers, der LLM-Schicht, von
   Ditto, des Gerätedienstes und des Benchmarks). Das veraltete `DeploymentManager.trust_host` ist nur ein schlanker
   Delegate an `trust_presented_key`, der den `pairing.PersonChannel` des Kanals braucht; neuer Code ruft
-  `remote.pairing` auf. Arbeite auf einem Board über `remote.session.RemoteSession`
+  `remote.pairing` auf. Ein neuer Host-Schlüssel zieht die Daten des Boards zu seiner neuen Geräte-ID um
+  (`runtime/device/board_move.py` `BoardDataMove`, nur für die Person: `stage()` kopiert und prüft jeden Teil, dann
+  kommt die Änderung, dann entfernt `finish()` die alten Kopien, `undo()`, wenn die Änderung scheitert); eine neue Art
+  von Daten pro Board bekommt dort ihren Eintrag. Arbeite auf einem Board über `remote.session.RemoteSession`
   (Anmeldung mit dem über `TrustStore` geprüften Host-Schlüssel bei jeder Anmeldung, `run`, `private_dir`, `upload`
   mit Fortsetzen, `wait_for_host`, `run_detached` und `follow`, `run_resumable`, ein `CancelToken`): Ein KI-Weg
   übergibt `KeyOnly()`, nur das `OneTimePassword` der Person kann koppeln, und jeder Befehl geht als ein `sh -c` mit

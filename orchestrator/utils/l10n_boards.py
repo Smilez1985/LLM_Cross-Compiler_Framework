@@ -140,16 +140,25 @@ TEXTS = {
         "boards.edit.row.device": "Device ID:",
         "boards.edit.displaced": "The framework's known_hosts holds another {key_type} key for {address} "
                                  "({fingerprint}); it is replaced too.",
-        "boards.edit.new_id": "The board's device ID becomes {new_id}: it derives from the host key. Its probe and "
-                              "deploy settings stay under {old_id}; probe the board again "
-                              "({path:act_deploy_scan_remote}) to store its system under the new key.",
+        "boards.edit.new_id": "The board's device ID becomes {new_id}: it derives from the host key. Its data moves "
+                              "there from {old_id} (its stored probe, deploy settings, deployed runtime, deploy record "
+                              "and benchmark results, 'tested on'): each part is copied and checked first, and the "
+                              "old copies go only after the change.",
         "boards.edit.compare": "Compare the new fingerprint with the board itself (ssh-keygen -lf "
                                "/etc/ssh/ssh_host_ed25519_key.pub there). Your answer is written to the audit log.",
         "boards.edit.nothing": "Nothing was changed.",
         "boards.edit.changing": "Changing the board's address and key",
         "boards.edit.done": "Board {label} ({device_id}): {address}, host key {key_type} {fingerprint}.",
-        "boards.edit.probe_again": "Its probe and deploy settings stay under {old_id}; probe the board again "
-                                   "({path:act_deploy_scan_remote}) to store its system under the new key.",
+        "boards.edit.probe_again": "If the board was set up anew, probe it again ({path:act_deploy_scan_remote}) so "
+                                   "its stored system is current.",
+        "boards.edit.moved": "Moved to the new device ID {new_id}: {what}.",
+        "boards.edit.kept": "Kept under {old_id}, because {new_id} has its own: {what}.",
+        "boards.edit.left": "Could not be removed under {old_id} (the copies under {new_id} are complete): {what}.",
+        "boards.edit.data.probe": "stored probe",
+        "boards.edit.data.deploy_settings": "deploy settings",
+        "boards.edit.data.runtime": "deployed runtime",
+        "boards.edit.data.deploy_record": "deploy record",
+        "boards.edit.data.tested_on": "benchmark results ('tested on')",
         "boards.edit.record_failed": "The framework's known_hosts holds the change, but the board's record could not "
                                      "be written: add the board again (Add a trusted board...).",
         "boards.edit.err.no_board": "This board is not trusted any more; the list is read again.",
@@ -161,6 +170,9 @@ TEXTS = {
         "boards.edit.err.stale": "The framework's known_hosts changed meanwhile; nothing was changed. Open Edit address "
                                  "or key... again.",
         "boards.edit.err.audit": "The change could not be written to the audit log; nothing was changed.",
+        "boards.edit.err.not_moved": "The board's data could not be copied to its new device ID; nothing was "
+                                     "changed. Check the free space and the rights of the framework's folder and try "
+                                     "again.",
         "boards.edit.err.other_board": "The new host key is the key of the trusted board {label} ({device_id}); nothing "
                                        "was changed. Change or remove that board instead.",
         "boards.edit.err.key_empty": "No host key was pasted.",
@@ -454,16 +466,25 @@ TEXTS = {
         "boards.edit.displaced": "Die known_hosts-Datei des Frameworks hält für {address} einen anderen "
                                  "{key_type}-Schlüssel ({fingerprint}); er wird ebenfalls ersetzt.",
         "boards.edit.new_id": "Die Geräte-ID des Boards wird {new_id}: sie leitet sich vom Host-Schlüssel ab. Seine "
-                              "Prüfung und seine Deploy-Einstellungen bleiben unter {old_id}; prüfe das Board erneut "
-                              "({path:act_deploy_scan_remote}), um sein System unter dem neuen Schlüssel zu speichern.",
+                              "Daten ziehen von {old_id} dorthin (seine gespeicherte Prüfung, die "
+                              "Deploy-Einstellungen, die deployte Laufzeit, der Deploy-Eintrag und die "
+                              "Benchmark-Ergebnisse, \"getestet auf\"): Jeder Teil wird zuerst kopiert und geprüft, und "
+                              "die alten Kopien gehen erst nach der Änderung.",
         "boards.edit.compare": "Vergleiche den neuen Fingerabdruck mit dem Board selbst (dort ssh-keygen -lf "
                                "/etc/ssh/ssh_host_ed25519_key.pub). Deine Antwort wird ins Audit-Log geschrieben.",
         "boards.edit.nothing": "Es wurde nichts geändert.",
         "boards.edit.changing": "Adresse und Schlüssel des Boards werden geändert",
         "boards.edit.done": "Board {label} ({device_id}): {address}, Host-Schlüssel {key_type} {fingerprint}.",
-        "boards.edit.probe_again": "Seine Prüfung und seine Deploy-Einstellungen bleiben unter {old_id}; prüfe das "
-                                   "Board erneut ({path:act_deploy_scan_remote}), um sein System unter dem neuen "
-                                   "Schlüssel zu speichern.",
+        "boards.edit.probe_again": "Wurde das Board neu eingerichtet, prüfe es erneut ({path:act_deploy_scan_remote}), "
+                                   "damit sein gespeichertes System aktuell ist.",
+        "boards.edit.moved": "Zur neuen Geräte-ID {new_id} verschoben: {what}.",
+        "boards.edit.kept": "Unter {old_id} behalten, weil {new_id} eigene hat: {what}.",
+        "boards.edit.left": "Unter {old_id} nicht entfernbar (die Kopien unter {new_id} sind vollständig): {what}.",
+        "boards.edit.data.probe": "gespeicherte Prüfung",
+        "boards.edit.data.deploy_settings": "Deploy-Einstellungen",
+        "boards.edit.data.runtime": "deployte Laufzeit",
+        "boards.edit.data.deploy_record": "Deploy-Eintrag",
+        "boards.edit.data.tested_on": "Benchmark-Ergebnisse (\"getestet auf\")",
         "boards.edit.record_failed": "Die known_hosts-Datei des Frameworks enthält die Änderung, aber der Eintrag des "
                                      "Boards konnte nicht geschrieben werden: füge das Board erneut hinzu (Vertrautes "
                                      "Board hinzufügen...).",
@@ -479,6 +500,9 @@ TEXTS = {
                                  "geändert. Öffne Adresse oder Schlüssel ändern... erneut.",
         "boards.edit.err.audit": "Die Änderung konnte nicht ins Audit-Log geschrieben werden; es wurde nichts "
                                  "geändert.",
+        "boards.edit.err.not_moved": "Die Daten des Boards konnten nicht zu seiner neuen Geräte-ID kopiert werden; es "
+                                     "wurde nichts geändert. Prüfe den freien Platz und die Rechte im Ordner des "
+                                     "Frameworks und versuche es erneut.",
         "boards.edit.err.other_board": "Der neue Host-Schlüssel ist der Schlüssel des vertrauten Boards {label} "
                                        "({device_id}); es wurde nichts geändert. Ändere oder entferne stattdessen "
                                        "dieses Board.",

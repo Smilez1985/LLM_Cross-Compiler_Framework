@@ -407,7 +407,9 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   rufen dieselben Funktionen wie die CLI auf, mit denselben Fragen ("Nein" ist die Vorgabe) und Audit-Einträgen:
   **Vertrautes Board hinzufügen...** (`deploy devices add`), **Adresse oder Schlüssel ändern...** (`deploy devices
   edit`: Hostname oder IP-Adresse, Port und der Schlüssel eingefügt oder vom Board gelesen, alt und neu
-  nebeneinander), **Vertrauen entfernen...** (`deploy devices remove`:
+  nebeneinander; mit einem neuen Schlüssel ziehen Probe, Deploy-Einstellungen, deployte Laufzeit, Deploy-Eintrag und
+  "getestet auf"-Einträge des Boards zu seiner neuen Geräte-ID, jeweils vor der Änderung kopiert und geprüft),
+  **Vertrauen entfernen...** (`deploy devices remove`:
   ohne es bleibt ein einmal gekoppeltes Board für KI-Deployments erlaubt), **Einstellungen...**,
   **Laufzeit-Plan**, **Status**, **Laufzeit bauen...**, **Laufzeit installieren...**, **Prüfen...**, **Ältere
   Laufzeit-Pakete entfernen...** und **Ältere Builds auf dem Board entfernen...** (die `device`-Befehle unten;

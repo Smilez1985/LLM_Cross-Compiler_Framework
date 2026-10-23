@@ -97,6 +97,27 @@ def builds_with_model(output_dirs: Iterable[Path], model_sha256: str) -> List[Pa
     return found
 
 
+def builds_with_board(output_dirs: Iterable[Path], device_id: str) -> List[Path]:
+    """The build folders below `output_dirs` (each once) whose device_tests.json holds a record of the board
+    `device_id` (the person's change of the board's host key moves them, runtime/device/board_move.py)."""
+    from orchestrator.Core.deployment_manager import list_builds
+    found: List[Path] = []
+    seen = set()
+    for folder in output_dirs:
+        try:
+            builds = list_builds(Path(folder)) if Path(folder).is_dir() else []
+        except OSError:
+            continue
+        for info in builds:
+            path = Path(info["path"])
+            key = os.path.realpath(path)
+            if key not in seen:
+                seen.add(key)
+                if any(row.get("device_id") == device_id for row in device_tests(path)):
+                    found.append(path)
+    return found
+
+
 def device_tests(build_dir: Path) -> List[Dict[str, Any]]:
     """The recorded benchmarks of a build (oldest first); a damaged file reads as none."""
     try:
@@ -136,6 +157,51 @@ def record_device_test(output_dirs: Iterable[Path], entry: Mapping[str, Any]) ->
     return written
 
 
+def copy_board_rows(build_dir: Path, old_id: str, new_id: str) -> int:
+    """P6, the person's change of a board's host key (runtime/device/board_move.py): next to each record of the board
+    `old_id` in this build's device_tests.json the same record for `new_id` (unless it is there already), in one
+    atomic write, then read back. Returns how many records of `old_id` the build holds (0: nothing to copy).
+    OSError, TimeoutError or ValueError when the file cannot be written or the copies do not read back."""
+    from orchestrator.utils.file_lock import file_lock
+    build = Path(build_dir)
+    with file_lock(build / f".{DEVICE_TESTS}.lock"):
+        rows = device_tests(build)
+        olds = [r for r in rows if r.get("device_id") == old_id]
+        if not olds:
+            return 0
+        out: List[Dict[str, Any]] = []
+        for row in rows:
+            out.append(row)
+            copy = dict(row, device_id=new_id)
+            if row.get("device_id") == old_id and copy not in rows:
+                out.append(copy)
+        if out != rows:
+            _write(build / DEVICE_TESTS, {"schema": SCHEMA, "tests": out})
+        back = device_tests(build)
+        if any(dict(row, device_id=new_id) not in back for row in olds):
+            raise ValueError("the copied device test records do not read back")
+    return len(olds)
+
+
+def drop_board_rows(build_dir: Path, device_id: str, *, copies_of: Optional[str] = None) -> int:
+    """Removes the records of the board `device_id` from this build's device_tests.json; with `copies_of`, only those
+    that are copies of a record of the board `copies_of` (the undo of copy_board_rows). Returns how many went."""
+    from orchestrator.utils.file_lock import file_lock
+    build = Path(build_dir)
+    with file_lock(build / f".{DEVICE_TESTS}.lock"):
+        rows = device_tests(build)
+        originals = [r for r in rows if r.get("device_id") == copies_of] if copies_of else []
+
+        def goes(row: Dict[str, Any]) -> bool:
+            if row.get("device_id") != device_id:
+                return False
+            return copies_of is None or dict(row, device_id=copies_of) in originals
+        kept = [r for r in rows if not goes(r)]
+        if len(kept) != len(rows):
+            _write(build / DEVICE_TESTS, {"schema": SCHEMA, "tests": kept})
+    return len(rows) - len(kept)
+
+
 def _write(path: Path, data: Dict[str, Any]) -> None:
     text = json.dumps(data, indent=2, sort_keys=True) + "\n"
     if len(text) > MAX_BYTES:
@@ -153,5 +219,5 @@ def _write(path: Path, data: Dict[str, Any]) -> None:
         raise
 
 
-__all__ = ["DEVICE_TESTS", "SCHEMA", "builds_with_model", "device_tests", "make_entry", "record_device_test",
-           "tested_on"]
+__all__ = ["DEVICE_TESTS", "SCHEMA", "builds_with_board", "builds_with_model", "copy_board_rows", "device_tests",
+           "drop_board_rows", "make_entry", "record_device_test", "tested_on"]
