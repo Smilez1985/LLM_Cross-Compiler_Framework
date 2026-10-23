@@ -10,6 +10,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **`llm-cli models take-over`: die Übernahme alter Hugging-Face-Downloads im Terminal** (Konsolidierungskette
+  hf-online): Installationen ohne GUI konnten nicht übernehmen, was frühere Versionen des Hugging-Face-Browsers der
+  GUI im Cache von huggingface_hub im Modellordner gespeichert haben. Der Befehl ruft im Kern dasselbe auf wie **Alte
+  Downloads übernehmen…** in **Tools > Hugging Face Model Browser...** (`ModelManager.old_downloads`, `take_over`,
+  `old_copies_plan`, `delete_old_copies`): die vollständige Liste der Dateien, die noch zu übernehmen sind, die
+  Ja-Frage mit „Nein“ als Vorgabe, die Kopie (jede Datei geprüft, unter der einen Speicherplatz-Regel; Strg+C hält
+  zwischen zwei Blöcken an), jede Datei, die bleibt, mit ihrem Grund, danach die vollständige Liste der alten Kopien,
+  die gehen können, Papierkorb oder endgültig, und die Löschung erst nach deinem Ja („Nein“ ist die Vorgabe), vorher
+  protokolliert. Ohne Terminal wird nichts kopiert und nichts gelöscht. Der GUI-Paritätstest nennt seinen Weg mit der
+  Maus (`orchestrator/gui/menus/existing.py`: `btn_hf_take_over` im Browser). Tests: `tests/test_hf_takeover.py`
+  `TestTheCommandLinesTakeOver`.
 - **Adresse und Host-Schlüssel eines vertrauten Boards kannst du ändern** (DECISIONS Runde 10 Q5): `llm-cli deploy
   devices edit GERÄT [--host] [--port] [--key "SCHLÜSSELZEILE" | --read-key]` und **Adresse oder Schlüssel ändern...**
   in **Boards > Boards und Geräte...** ändern Hostname oder IP-Adresse, SSH-Port oder Host-Schlüssel des Boards in der
@@ -2360,7 +2371,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (`hf_hub.offline_refusal`, dieselbe Ablehnung, die `HubClient` einer KI gibt; `hf_hub.person_text` gibt einem
   Fenster oder der Kommandozeile die Worte für die Person). **Alte Downloads übernehmen…** funktioniert offline: Eine
   Datei, deren Prüfsumme nur Hugging Face liefern könnte (ein Cache ohne Links), bleibt mit dem Grund „der
-  Offline-Modus ist an“ im alten Cache, und Hugging Face wird nicht gefragt. Regressionstests: `tests/test_hf_online.py` `TestOfflineMode`, `TestTheBrowserWindowOffline`.
+  Offline-Modus ist an“ im alten Cache, und Hugging Face wird nicht gefragt; `llm-cli models take-over` verhält sich
+  genauso. Regressionstests: `tests/test_hf_online.py` `TestOfflineMode`, `TestTheBrowserWindowOffline`.
 - **Ein Modell aus dem alten Download-Cache von Hugging Face funktioniert wieder im Build** (A6, „bleiben nutzbar“):
   Der Hugging-Face-Browser der GUI speicherte bisher in den eigenen Cache von huggingface_hub im Modellordner, wo eine
   Datei ein Link auf einen Blob ist, der nach seiner Prüfsumme heißt. Ein Build einer solchen GGUF-Datei band sie
