@@ -2374,7 +2374,8 @@ wurde.
   Dateiliste oder ein Download wird sofort abgelehnt, in klaren Worten, mit dem Ort, an dem du den Offline-Modus
   ausschaltest; die Übernahme funktioniert offline (eine Datei, die nur Hugging Face prüfen könnte, bleibt mit diesem
   Grund im alten Cache). Jeder Hub-Aufruf (Suche, Abfrage, Dateiliste) geht nur an huggingface.co, nie an den Host in
-  `HF_ENDPOINT`, mit deinem eingegebenen oder gespeicherten Token, nie mit einem impliziten.
+  `HF_ENDPOINT`, nie mit einem impliziten Token; dein eingegebenes oder gespeichertes Token geht nur an ein gated
+  oder privates Repository (Dateien, Abfragen und Suchen eines öffentlichen gehen ohne).
 - **Geräte und Deployment (`list_devices`, `create_deploy_package`, `deploy_to_device`):** `list_devices` zeigt die
   [vertrauten Geräte](#übertragen-auf-das-board-deployment) mit deinem Namen dafür, Adresse, Fingerabdruck des
   Host-Schlüssels, ob das Gerät nutzbar ist (gekoppelt und sein Schlüssel noch der vertraute) und dem letzten

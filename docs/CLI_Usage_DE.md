@@ -525,7 +525,16 @@ Verhalten:
   diesem Namen wird nie ersetzt: der neue kommt daneben (`Q4_K_M-2`). Ein Ordner, den du außerhalb des
   Ausgabeordners gewählt hast, bleibt in `deploy list-artifacts` aufgelistet.
 - Zugangsbeschränkte Hugging-Face-Modelle brauchen ein Token: `llm-cli secrets set hf_token`. Gesendet wird nur das
-  im Framework gespeicherte Token; ein Token in `HF_TOKEN` oder aus `hf auth login` wird nie verwendet.
+  im Framework gespeicherte Token, und nur dort, wo Hugging Face es braucht (ein gated oder privates Repository;
+  Dateien und Abfragen eines öffentlichen gehen ohne Token); ein Token in `HF_TOKEN` oder aus `hf auth login` wird
+  nie verwendet.
+- Im Offline-Modus wird nichts geladen: Ein Hugging-Face-Modell kommt aus seiner Kopie auf diesem Computer (die
+  eines früheren Builds, des Hugging-Face-Browsers oder des alten Download-Caches). Ohne Kopie startet nichts, und
+  die Modelle, die schon hier sind, werden mit ihren Labels aufgeführt (`models:...` für den Modellordner, die
+  Repository-ID für die Kopie eines früheren Builds, der Pfad der Eingabe eines früheren Builds); am Terminal wirst
+  du nach einem der Labels oder einem lokalen Pfad gefragt, ohne Terminal endet der Befehl mit Exit-Code 2 und du
+  startest ihn mit `--model` noch einmal. Das Image des Targets wird offline weder gezogen noch gebaut: Es kommt
+  das Image, das früher mit denselben Einstellungen gebaut wurde.
 - Ein Hugging-Face-Modell wird nach `<cache_dir>/models/hf/<owner>--<name>/<commit>/` heruntergeladen, ein Ordner pro
   Commit, Datei für Datei; nur dieser Ordner wird in die Build-Container eingebunden. Ein zweiter Build desselben
   Commits verwendet ihn wieder, und ein Build eines anderen Commits vermischt nie Dateien damit. Strg+C stoppt den
@@ -1437,7 +1446,9 @@ llm-cli ditto models download [STUFE] [-y]
 Lädt ein Modell in seiner festgelegten Hugging-Face-Revision herunter und prüft Größe und sha256. Ohne `STUFE` das
 Modell, das ein einfaches `ditto runtime start` lädt: die früher mit `runtime start --model` gewählte Stufe („Chosen
 earlier with 'runtime start --model': ...“), sonst die empfohlene Stufe für diesen Rechner („Recommended: ...“).
-Unterbrochene Downloads werden fortgesetzt.
+Unterbrochene Downloads werden fortgesetzt. Im Offline-Modus lehnt er in klaren Worten ab und nennt die
+Ditto-Modelle, die schon auf diesem Computer sind, außer die Download-Adresse liegt in deinem eigenen Netz (ein
+lokaler Modell-Spiegel).
 
 | Argument / Option | Bedeutung |
 |---|---|
