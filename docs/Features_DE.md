@@ -398,7 +398,9 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   `<Repository>:lcf-<erste 12 Hex-Zeichen des Digests>` eingepackt (`docker load` stellt Registry-Digests nicht
   wieder her), und `deploy.sh` startet jedes eingepackte Image mit `--pull never`: Das Board führt genau das
   eingepackte Image aus, und ein Board, auf dem es fehlt, bricht ab, statt eines aus einer Registry zu ziehen.
-  Pakete früherer Versionen starteten außerdem einen Qdrant-Sidecar (`qdrant-sidecar`), den nichts mehr nutzt: Nach
+  `deploy.sh` installiert das Modell wie ohne Docker (nach `$MODEL_DIR`, standardmäßig `~/models`) und gibt diesen
+  Ordner dem Inferenz-Container nur lesbar unter `/models`, wobei `MODEL_FILE` das Modell dort nennt (vorher startete
+  der Container ohne das Modell). Pakete früherer Versionen starteten außerdem einen Qdrant-Sidecar (`qdrant-sidecar`), den nichts mehr nutzt: Nach
   einem Deployment schaut das Framework, ob er noch auf dem Board ist, und sagt es dir (im Ergebnis des Deployments
   und in einer Zeile von Mojo Oracle für dieses Board), mit dem Befehl, um ihn dort zu entfernen. Das Framework
   stoppt oder entfernt ihn nie.
@@ -459,17 +461,39 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   Board braucht den Modellserver des Frameworks, `llm-cli device runtime deploy`). Vorher wirst du gefragt, mit „Nein“
   vorgewählt und mit Board und Modell genannt, ob ein Modell, das kein Katalogmodell ist, dort geladen werden darf;
   dein Ja wird ins Audit-Log geschrieben. Ein bestandener Lauf wird beim Build dieses Modells vermerkt, und die Build-Liste zeigt „getestet auf
-  <Board>“.
+  <Board>“. Das Ergebnis nennt auch die Temperatur des Boards während des Laufs
+  ([unten](#laufzeit-auf-dem-board-selbst-gebautes-llamacpp)).
 - **Fehler mit Grund:** Paketieren und Übertragen melden, warum sie gescheitert sind (kein Docker, ein nicht
   festgelegtes Image, ein geänderter Host-Schlüssel, der Exit-Status von `deploy.sh`), statt es nur zu protokollieren.
   Ein Paket wird unter einem vorläufigen Namen geschrieben und erst umbenannt, wenn es vollständig ist. Ohne paramiko
   läuft das Deployment über den OpenSSH-Client dieses Computers und kann all das auch (auf das Board warten, den
   Upload fortsetzen, `deploy.sh` selbständig), nur mit dem Schlüssel und der known_hosts des Frameworks, einem
-  Zeitlimit für die Anmeldung und Keepalive; `ssh` bekommt nie die Standardeingabe des Frameworks (über MCP-stdio ist
+  Zeitlimit für die Anmeldung und Keepalive und der eigenen SSH-Einstellungsdatei des Frameworks (unten) statt
+  `~/.ssh/config` und `/etc/ssh/ssh_config`; `ssh` bekommt nie die Standardeingabe des Frameworks (über MCP-stdio ist
   das der Protokollstrom). Ein Passwort braucht dort paramiko (OpenSSH fragt nie danach): Das Ergebnis sagt, dass es
   nicht genutzt wurde. Ein Deployment, das an einen dir gezeigten Fingerabdruck gebunden ist, wird abgelehnt.
   `deploy run` und der Deployment-Tab lesen den Host-Schlüssel des Boards vor dem Deployment mit paramiko, brauchen
   es also weiterhin.
+- **Die eigenen SSH-Einstellungen des Frameworks** (`llm-cli deploy ssh-config show|edit|import`; GUI: **Boards >
+  Boards und Geräte... > SSH-Einstellungen...**; [CLI](CLI_Usage_DE.md#deploy-ssh-config)): Jeder OpenSSH-Aufruf
+  bekommt die Datei `ssh_config` im Zustandsordner des Frameworks mit `-F`, darum werden weder `~/.ssh/config` noch
+  `/etc/ssh/ssh_config` gelesen. Sie wird bei der ersten Nutzung angelegt, ist nur für dich lesbar und enthält nur,
+  was du hinzufügst: einen `Host`-Block je Board (seine Adresse oder sein Hostname, wie das Framework es nennt), zum
+  Beispiel einen `User` oder einen `ProxyJump` über einen Sprung-Host. Du kannst sie zeigen, den Block eines Boards
+  ändern oder einen Block aus deiner eigenen `~/.ssh/config` übernehmen, nachdem er dir gezeigt wurde (diese Datei
+  wird nur gelesen). Die Vertrauenseinstellungen bleiben auf der Befehlszeile von OpenSSH, wo der erste Wert gilt
+  (strenge Prüfung des Host-Schlüssels, die `known_hosts` des Frameworks, das Null-Gerät als globale, nur sein
+  Schlüssel), und Zeilen, die sie ändern oder einen Befehl ausführen würden, werden mit Grund abgelehnt:
+  `StrictHostKeyChecking`, `UserKnownHostsFile`, `GlobalKnownHostsFile`, `KnownHostsCommand`, `HostKeyAlias`,
+  `HostName`, `LocalCommand`, `RemoteCommand`, `Include`, `Match` (auch `Match exec`), Weiterleitungen und geteilte
+  Verbindungen, unter anderem. Ein `ProxyJump` oder ein `ProxyCommand` kommt erst hinzu, nachdem du gelesen hast, was
+  er tut (er entscheidet, über welchen Computer oder mit welchem Programm die Verbindung läuft), und Ja gesagt hast;
+  „Nein“ ist bei jeder Frage die Vorgabe, und die Änderung wird ins Audit-Log geschrieben. Eine von Hand bearbeitete
+  Datei mit einer abgelehnten Zeile stoppt jeden OpenSSH-Aufruf mit Grund (`local_problem`). Kein KI-Tool schreibt
+  diese Datei; paramiko liest überhaupt keine SSH-Einstellungsdatei. Ein `%` in den eigenen Pfaden des Frameworks
+  (sein Schlüssel, seine `known_hosts`) wird dort, wo OpenSSH Tokens ersetzt, als `%%` geschrieben, so dass ein
+  Zustandsordner mit `%` im Namen funktioniert; unter Windows wird der Pfad mit Schrägstrichen übergeben (ein
+  Leerzeichen darin wird gequotet). Geteilte Verbindungen (`ControlMaster`) bleiben aus.
 
 ### Laufzeit auf dem Board (selbst gebautes llama.cpp)
 
@@ -546,7 +570,27 @@ entfernen...**, **Ältere Builds auf dem Board entfernen...**).
   deployte Build noch der ist, den Profil und Pin verlangen. Ein bestandener kurzer Benchmark ist der Beweis
   „getestet auf <Board>“: Er wird bei jedem Build dieses Modells im Ausgabeordner, im Build-Ordner des Frameworks
   und in den Ordnern, in die Builds gespeichert wurden, vermerkt (`device_tests.json`, gefunden über die sha256 des
-  Modells) und im Deployment-Fenster gezeigt.
+  Modells) und im Deployment-Fenster gezeigt. Der kurze Benchmark läuft auf dem Board selbständig; ein Abbrechen im
+  Fenster Boards und Geräte oder des Jobs einer KI und Strg+C an einem Terminal stoppen ihn auch dort: genau den
+  Prozess (seine Prozessgruppe, wo das Board `setsid` hat), den das Framework gestartet hat, über die Nummer, die es
+  sich gemerkt hat, nie ein Programm, das über seinen Namen gefunden wird; hat das Abbrechen die Verbindung
+  geschlossen, stoppt es eine neue Anmeldung mit derselben Prüfung des Host-Schlüssels. Wo das Board `timeout` hat,
+  beendet auch das Zeitlimit des Boards selbst (900 s) einen Lauf, den niemand mehr verfolgt.
+- **Die Temperatur des Boards** während dieser Prüfungen (bei einem Laufzeit-Deployment, `device runtime verify` und
+  dem Benchmark): Das Framework liest die Thermalzonen des Boards (`/sys/class/thermal/thermal_zone*/temp`, ihren Typ
+  und ihre Trip-Points) und auf einem Raspberry Pi `vcgencmd measure_temp` und `get_throttled`, mit einem nur
+  lesenden Befehl über die Sitzung, die es schon hat, vor dem kurzen `llama-bench`-Lauf und danach; nichts wird
+  installiert. Die Grenze ist der eigene `passive`-Trip-Point der Zone (sonst ihr `hot`-Trip-Point), ab dem der Kernel
+  den Chip zu bremsen beginnt; eine Zone ohne ihn wird nach einem vorsichtigen Standardwert für ihre SoC-Familie
+  beurteilt (aus `/proc/device-tree/compatible`): 80 °C für einen Raspberry Pi und jedes andere Board, 85 °C für
+  Rockchip, nie über dem kritischen Trip-Point der Zone minus 10 °C. Die weiche Temperaturgrenze der Firmware (Bit 0x8
+  von `get_throttled`) zählt ebenfalls als heiß. Die Prüfzeilen nennen die Temperatur; ein heißes Board bekommt eine
+  Warnung mit dem, was hilft (ein Kühlkörper oder ein Lüfter, weniger Threads, eine kleinere Quantisierung, eine Pause
+  zwischen den Läufen), und den Hinweis, dass Mojo Oracle sich die Messung merkt: Mojo warnt vor einem Board, das bei
+  seinen letzten Prüfungen heiß war, bis eine kühlere Messung sie ersetzt. Ein heißes Board lässt keine Prüfung
+  scheitern. Eine KI bekommt dieselben Fakten auf Englisch (`temperature`, `temperature_note`), ohne Pfad und ohne
+  Konto. Die Temperatur ist kein Schlüssel der Hardware-Untersuchung: Sie ist ein Moment, keine Eigenschaft des
+  Boards.
 - **Gemessen** mit echten Programmen statt eines Boards: `llama-server` und `llama-bench`, nativ mit den Optionen des
   Geräte-Bauplans für einen x86-64-Rechner gebaut (GCC 13.3, `-j4`, etwa 8 Minuten auf 4 geteilten Kernen), ergaben
   30 MB Programme und einen Tarball von 11,6 MB; die Formatprüfung (glibc 2.38 nötig, keine geteilte C++-Laufzeit),

@@ -23,7 +23,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [knowledge](#knowledge): `snapshots` (`list`, `prune`, `delete`, `export`)
 - [targets](#targets): `list`, `validate`
 - [build](#build): `start`, `save`, `status`
-- [deploy](#deploy): `list-artifacts`, `package`, `run`
+- [deploy](#deploy): `list-artifacts`, `package`, `run`, `devices`, `ssh-config`
 - [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
 - [mcp](#mcp): `serve`, `config`, `token add|list|rotate|revoke`
@@ -132,6 +132,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `build start` / `build status` | Ein Modell konvertieren und quantisieren / Builds zeigen, auch solche, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat |
 | `build save` | Einen Build, der im Build-Ordner des Frameworks wartet, im Ausgabeordner oder einem anderen Ordner speichern (unveröffentlicht) |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | Fertige Builds auflisten / einen Build in eine ZIP-Datei packen / sie auf ein Board laden und installieren |
+| `deploy ssh-config show/edit/import` | Die eigene OpenSSH-Einstellungsdatei des Frameworks (gelesen statt `~/.ssh/config`): zeigen, den Block eines Boards setzen, einen Block aus `~/.ssh/config` übernehmen |
 | `ditto login` / `ditto logout` | Ditto bei einem Anbieter anmelden (der Schlüssel verdeckt abgefragt, von stdin oder aus einer Umgebungsvariable, vor dem Speichern geprüft) / abmelden |
 | `ditto auth status/methods/storage/rotate-key` | Anmeldestand aller Anbieter / die Anmeldeverfahren / wie der Tresor geschützt ist / ein neuer Schlüssel für den Tresor |
 | `ditto setup` | Die Tool-Berechtigungen festlegen (dieselbe Auswahl wie im Dialog beim ersten Start der GUI) |
@@ -783,6 +784,35 @@ Schlüssel ändern...** macht `edit` (Hostname oder IP-Adresse, Port und ein Fel
 einfügst, oder stattdessen **Schlüssel vom Board lesen**; Adresse, Host-Schlüssel und Geräte-ID jetzt und nach der
 Änderung nebeneinander, "Nein" ist die Vorgabe), und **Vertrauen entfernen...** macht `remove` (es nennt genau, was
 wegfällt, "Nein" ist die Vorgabe, und es schreibt denselben Audit-Eintrag).
+
+### deploy ssh-config
+
+```
+llm-cli deploy ssh-config [show]
+llm-cli deploy ssh-config edit HOST [--line "OPTION WERT" ...]
+llm-cli deploy ssh-config import HOST
+```
+
+Die eigenen OpenSSH-Einstellungen des Frameworks: die Datei `ssh_config` im Zustandsordner des Frameworks, die jeder
+Aufruf des OpenSSH-Clients dieses Computers (der Rückfallweg ohne paramiko) mit `-F` bekommt, darum werden weder
+`~/.ssh/config` noch `/etc/ssh/ssh_config` gelesen. Sie wird bei der ersten Nutzung angelegt, ist nur für dich lesbar
+und enthält nur, was du hier hinzufügst. paramiko liest keine Einstellungsdatei.
+
+| Befehl | Bedeutung |
+|---|---|
+| `show` (auch ohne Unterbefehl) | Gibt den Pfad der Datei und ihren Inhalt aus. |
+| `edit HOST --line ...` | Setzt den Block `Host HOST` (die Adresse oder der Hostname des Boards, wie das Framework es nennt) auf die angegebenen Zeilen, ein `--line` je Optionszeile, zum Beispiel `--line "ProxyJump jump.example"` oder `--line "User radxa"`; ohne `--line` fällt der Block weg. Es zeigt den Block jetzt und nach der Änderung. Eine Zeile, die ändern würde, wie einem Host-Schlüssel vertraut wird, einen Befehl ausführen, eine andere Datei einbinden oder Verbindungen teilen würde, wird mit Grund abgelehnt, und nichts wird geschrieben (`StrictHostKeyChecking`, `UserKnownHostsFile`, `GlobalKnownHostsFile`, `KnownHostsCommand`, `HostKeyAlias`, `HostName`, `LocalCommand`, `RemoteCommand`, `Include`, `Match`, `ControlMaster`, Weiterleitungen, ...; Exit-Code 1). Ein `ProxyJump` oder `ProxyCommand` wird vor der Frage zum Schreiben erklärt und eigens erfragt; "Nein" ist bei beiden die Vorgabe. Braucht ein Terminal; die Änderung wird ins Audit-Log geschrieben. |
+| `import HOST` | Liest den eigenen Block von `HOST` aus deiner `~/.ssh/config` (nur gelesen, nie geändert: der erste `Host`-Block, der `HOST` selbst nennt; Muster wie `Host *` passen nicht, `Include` und `Match` werden nicht verfolgt), zeigt ihn und macht dann mit seinen Zeilen wie `edit` weiter: dieselben Prüfungen und Fragen. |
+
+Die Vertrauenseinstellungen bleiben auf der Befehlszeile von OpenSSH, wo der erste Wert gilt:
+`StrictHostKeyChecking=yes`, die `known_hosts` des Frameworks, das Null-Gerät als `GlobalKnownHostsFile`, nur sein
+eigener Schlüssel (`IdentitiesOnly`). Ein `%` in diesen Pfaden wird als `%%` geschrieben. Eine von Hand bearbeitete
+Datei mit einer abgelehnten Zeile stoppt jeden OpenSSH-Aufruf mit Grund (`local_problem`, Exit-Code 1), bis du sie
+änderst. Kein KI-Tool kann diese Datei schreiben.
+
+In der GUI: **Boards > Boards und Geräte... > SSH-Einstellungen...** zeigt die Datei und den Block eines Boards (die
+Adresse des ausgewählten Boards ist eingetragen), mit **Aus ~/.ssh/config übernehmen** und denselben Ablehnungen und
+Fragen.
 
 ---
 
@@ -2153,6 +2183,12 @@ heißt). Sie enthält das Board (deinen Namen dafür, Board- und SoC-Modell aus 
 gemessenen Geschwindigkeiten, den KV-Cache der Messung (wie `llama-bench` ihn meldet) neben dem, auf den der Server
 des Boards eingestellt ist, und ob die Prüfungen bestanden. Das Deployment-Fenster zeigt den Build als
 „getestet auf <Board>“. Ein Modell, das kein Build dieses Frameworks gemacht hat, wird nirgends vermerkt.
+
+Die Prüfzeilen enden mit der Temperatur des Boards während der Prüfungen (vor und nach dem kurzen Benchmark gelesen;
+siehe [Funktionen](Features_DE.md#laufzeit-auf-dem-board-selbst-gebautes-llamacpp)). Ein heißes Board bekommt eine
+Warnung mit dem, was hilft, und eine Zeile zu Mojo Oracle; es lässt keine Prüfung scheitern, der Exit-Code bleibt also
+der der Prüfungen. Strg+C während des kurzen Benchmarks stoppt `llama-bench` auch auf dem Board (die Prozessgruppe,
+die das Framework dort gestartet hat).
 
 ### device runtime status
 

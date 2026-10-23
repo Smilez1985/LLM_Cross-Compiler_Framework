@@ -830,7 +830,10 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   dieselbe Sitzung über den OpenSSH-Client dieses Computers (`RemoteSession(..., openssh=SystemSshTransport)`: nur
   `KeyOnly`, kein gezeigter Fingerabdruck, kein `expect_device_id`); eine Befehlszeile für ssh, scp oder sftp kommt nur
   aus `remote.transport.openssh_argv` mit `openssh_options`, und ein Pfad in einer `-o`-Option wird mit
-  `config_value` gequotet. Das Laufzeit-Deployment, die Prüfungen auf dem Board und die Board-Prüfung nutzen sie über
+  `config_value` gequotet (ein eigener Pfad des Frameworks geht über `openssh_file`, das `%` als `%%` schreibt).
+  `openssh_options` übergibt die eigene Einstellungsdatei des Frameworks mit `-F` (`remote/ssh_config.py`), so dass
+  OpenSSH keine `~/.ssh/config` liest; diese Datei schreibt nur `person_steps.save_ssh_block` (CLI und GUI), und eine
+  Vertrauensoption wird nie in sie verschoben: Sie bleibt vorn auf der Befehlszeile. Das Laufzeit-Deployment, die Prüfungen auf dem Board und die Board-Prüfung nutzen sie über
   `runtime/device/remote.py` `RemoteShell` (markiere einen Befehl nur dann mit `again=True`, wenn er zweimal laufen
   darf: Er liest nur oder tut dasselbe noch einmal; jeder andere endet nach einem Netzabbruch mit „dropped“; ein
   Befehl, der stumm bleibt, während seine Verbindung noch antwortet, ist kein Abbruch und endet mit seinem Zeitlimit),
