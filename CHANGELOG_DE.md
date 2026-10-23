@@ -1483,9 +1483,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   einfachen Erklärung, was dann dein Netz verlassen kann (Einstellungen `offline_local_vpns`, `offline_local_hosts`,
   `offline_local_ranges`); nur du kannst das: die Änderung der KI-Einstellungen und MCP `update_settings` lehnen sie
   ab, und eine KI kann sie weder lesen noch setzen. Die Auflösung nutzt nur den Resolver des Systems, mit 2 s
-  Zeitlimit, einmal je Lauf und nie im GUI-Thread, und die Verbindung danach geht an die geprüfte Adresse (der
-  Anbieter-Client des Offline-Modus nutzt keinen Proxy aus der Umgebung; Downloads der Laufzeit über einen Adapter
-  nur für das eigene Netz; git mit `http.curloptResolve`). Ollama unter einer Adresse außerhalb deines Netzes wird im
+  Zeitlimit, einmal je Lauf und nie im GUI-Thread (der Dialog der KI-Einstellungen prüft einen Servernamen oder eine
+  Tailscale-Adresse vor dem Speichern in einem Worker, und ein inzwischen geschlossener Dialog speichert nichts), und
+  die Verbindung danach geht nur an die geprüften Adressen, der Reihe nach versucht wie bei der Verbindung des
+  Systems selbst (eine Link-Local-Adresse mit ihrer Zone; ein `localhost`-Name an die Loopback-Adressen, nie dorthin,
+  wohin ein DNS-Server ihn zeigt), und über keinen Proxy (der Anbieter-Client des Offline-Modus nutzt keinen aus der
+  Umgebung; Downloads der Laufzeit über einen Adapter nur für das eigene Netz; git mit `http.curloptResolve`, leerem
+  `http.proxy` und ohne Weiterleitungen). Ollama unter einer Adresse außerhalb deines Netzes wird im
   Offline-Modus jetzt abgelehnt (seine Vorlage zählte unter jeder Adresse als lokal), und die Downloads der Laufzeit
   und die festgelegte Quelle kommen im Offline-Modus nur aus deinem eigenen Netz (ein lokaler Spiegel): `device
   runtime build`, `ditto runtime install` und `export-source`, das Boards-Fenster und Ditto > Lokale Laufzeit holten

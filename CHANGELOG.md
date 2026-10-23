@@ -1301,9 +1301,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Local network** or with `llm-cli config local-network` (new), each with a plain explanation of what can then leave
   your network (settings `offline_local_vpns`, `offline_local_hosts`, `offline_local_ranges`); only you can: the AI
   settings change and MCP `update_settings` refuse them, and an AI can neither read nor set them. The lookup uses
-  the system resolver only, with a 2 s timeout, once per run and never on the GUI thread, and the connection that
-  follows goes to the checked address (the provider client of offline mode uses no proxy from the environment;
-  runtime downloads through a local-only adapter; git with `http.curloptResolve`). Ollama at an address outside your
+  the system resolver only, with a 2 s timeout, once per run and never on the GUI thread (the AI settings dialog
+  checks a server name or a Tailscale address in a worker before it saves, and a dialog closed meanwhile saves
+  nothing), and the connection that follows goes only to the checked addresses, tried in turn as the system's own
+  connection would (a link-local one with its zone; a `localhost` name to the loopback addresses, never where a DNS
+  server points it), and through no proxy (the provider client of offline mode uses none from the environment;
+  runtime downloads through a local-only adapter; git with `http.curloptResolve`, an empty `http.proxy` and no
+  redirects). Ollama at an address outside your
   network is now refused in offline mode (its preset counted as local whatever its address), and the runtime's
   downloads and the pinned source come in offline mode only from your own network (a local mirror): `device runtime
   build`, `ditto runtime install` and `export-source`, the Boards window and Ditto > Local Runtime fetched from

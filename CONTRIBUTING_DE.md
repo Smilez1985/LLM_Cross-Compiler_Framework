@@ -739,7 +739,7 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   (`tests/test_offline_check.py` schlägt dann fehl). Ob eine Adresse im Offline-Modus erreicht werden darf,
   entscheidet nur die Regel in `orchestrator/utils/locality.py` (`check_url`, `check_host`: jede Adresse, zu der ein
   Name auflöst, Tailscale nur mit dem eigenen Headscale der Person, die Ausnahmen der Person), nie eine Namensendung
-  oder eine eigene Adressprüfung; eine Verbindung danach geht an die geprüfte Adresse (`connect_address`;
+  oder eine eigene Adressprüfung; eine Verbindung danach geht nur an die geprüften Adressen (`connect_addresses`, der Reihe nach;
   `security/http.local_only_session` für requests, `llm/client.offline_http_client` für die SDKs,
   `runtime/build/source.offline_reach` für git). Eine Auflösung läuft nie im GUI-Thread: Ein Fenster prüft vorher in
   einem Hintergrund-Thread (`locality.needs_lookup`). Die Ausnahmen der Person schreibt nur
