@@ -309,9 +309,10 @@ class BoardBenchWorker(QThread):
     def _consent(self, digest: str) -> None:
         """The person's yes to an untrusted model, written to the audit log before the board loads it."""
         from orchestrator.remote.pairing import record_consent
-        from orchestrator.runtime.device.person_steps import UNTRUSTED_CONSENT
+        from orchestrator.runtime.device.person_steps import UNTRUSTED_CONSENT, device_audit
         from orchestrator.runtime.device.service import DeviceRuntimeError
-        audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
+        state = Path(getattr(getattr(self.framework, "config", None), "user_state_dir", "") or ".")
+        audit = device_audit(self.framework, state)   # the one sink (round 25 Q3): the registry's, else audit.db
         tool, detail = UNTRUSTED_CONSENT
         try:
             record_consent(audit, tool, {"device": self.device_id, "model_sha256": digest}, detail,

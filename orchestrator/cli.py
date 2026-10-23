@@ -5425,11 +5425,12 @@ def _deploy_settings(store, device_id: str):
 
 
 def _record_consent(ctx: FrameworkContext, tool: str, arguments: Dict[str, Any], detail: str) -> None:
-    """Writes a consent to the audit log; without its record there is no consent (exit 1, nothing changed)."""
+    """Writes a consent to the audit log; without its record there is no consent (exit 1, nothing changed). The log is
+    the one sink of the person's device rows (round 25 Q3, _device_audit): the registry's, else the per-user
+    audit.db, so a consent needs no booted framework, as in the GUI."""
     from orchestrator.runtime.device.person_steps import record_consent
-    registry = _tool_registry(ctx)
     try:
-        record_consent(getattr(registry, "audit", None), tool, arguments, detail, channel="framework-cli")
+        record_consent(_device_audit(ctx, _state_dir(ctx)), tool, arguments, detail, channel="framework-cli")
     except Exception as e:
         console.print(f"[red]The consent could not be written to the audit log ({escape(str(e))}); nothing was "
                       "changed.[/red]")
