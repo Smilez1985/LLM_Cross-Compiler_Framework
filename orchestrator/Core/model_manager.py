@@ -174,12 +174,13 @@ class ModelManager:
 
     def _hub_api(self, token: Optional[str]):
         """The Hub's API with `token` or no token at all (False: never HF_TOKEN or the Hugging Face home folder's
-        token file). A stand-in framework's `hf_api_factory` replaces it (tests)."""
+        token file), pinned to huggingface.co (hf_hub.hub_api: never the host in HF_ENDPOINT). A stand-in
+        framework's `hf_api_factory` replaces it (tests)."""
         factory = getattr(self.framework, "hf_api_factory", None)
         if callable(factory):
             return factory(token or False)
-        from huggingface_hub import HfApi
-        return HfApi(token=token or False)
+        from orchestrator.Core.hf_hub import hub_api
+        return hub_api(token)
 
     def _hub_lookup(self):
         """For the Take over: the files the Hub lists for one commit of a repository ({name: HubFile}), with the

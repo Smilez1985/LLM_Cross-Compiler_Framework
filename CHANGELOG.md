@@ -2333,6 +2333,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **The Hugging Face token goes only to huggingface.co, also when `HF_ENDPOINT` names another host** (review of
+  chain hf): huggingface_hub sends its API calls to the host in the `HF_ENDPOINT` environment variable (a mirror).
+  The commit lookup of the GUI browser's download and the Hub list of **Take over old downloads...** sent the token
+  the person typed or stored there, and so did every search and lookup of an AI caller, while the fetcher sends it
+  only to huggingface.co. Every Hub API call of `orchestrator/Core/hf_hub.py` (`HubClient`) and of the browser's
+  download and Take over (`ModelManager`) now goes through `hf_hub.hub_api`, pinned to huggingface.co. Regression
+  tests: `tests/test_hf_gui_download.py` `TestTheTokenGoesOnlyToHuggingFace`.
 - **No other account's home folder or name reaches an AI through a file URL or a space** (D0; default of
   2026-10-17). The path labels for AIs (`security.paths.label_paths`, also inside `device_text`) left the path of a
   `file:///` URL as it was when it named another account's home folder (`file:///home/<name>/...`,
