@@ -520,3 +520,27 @@ def test_the_threads_of_a_test_never_outlive_it():
     while time.monotonic() < deadline and [t for t in threading.enumerate() if t.name == "boards-step"]:
         time.sleep(0.05)
     assert not [t for t in threading.enumerate() if t.name == "boards-step"]
+
+
+def test_the_ai_s_deploy_hands_the_flow_no_person_only_hook():
+    """The board's trusted record (`remember`), the person's benchmark question (`choose_bench`) and the 'tested on'
+    record are the person's hooks of steps.deploy_runtime_flow: the AI-reachable service.py builds its DeployHooks
+    without them (and without **kwargs that could carry them), and the shared steps.py reaches no person step."""
+    import ast
+    from conftest import REPO_ROOT
+    tree = ast.parse((REPO_ROOT / "orchestrator/runtime/device/service.py").read_text(encoding="utf-8"))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and (getattr(n.func, "attr", None) or getattr(n.func, "id", None)) == "DeployHooks"]
+    assert calls, "service.deploy runs the one flow"
+    for call in calls:
+        names = {k.arg for k in call.keywords}
+        assert None not in names and not call.args, "every hook is named"
+        assert not names & {"remember", "choose_bench", "tested_on"}, names
+        assert any(k.arg == "refuse_root" and isinstance(k.value, ast.Constant) and k.value.value is False
+                   for k in call.keywords), "the AI's root refusal stays the install's own (its words, as before)"
+    steps_tree = ast.parse((REPO_ROOT / "orchestrator/runtime/device/steps.py").read_text(encoding="utf-8"))
+    imported = {n.module for n in ast.walk(steps_tree) if isinstance(n, ast.ImportFrom)} | {
+        a.name for n in ast.walk(steps_tree) if isinstance(n, ast.Import) for a in n.names}
+    imported_names = {a.name for n in ast.walk(steps_tree) if isinstance(n, ast.ImportFrom) for a in n.names}
+    assert not [m for m in imported if m and ("person_steps" in m or "pairing" in m)], imported
+    assert not imported_names & {"person_steps", "pairing"}, imported_names
