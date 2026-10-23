@@ -904,8 +904,10 @@ llm-cli ditto ask QUESTION [--no-tools] [--provider TEXT] [--model TEXT]
 
 Asks Ditto one question. Ditto may use the framework tools within your permissions; tools set to "ask" show the
 tool and every argument and need your confirmation in the terminal (without a terminal they are denied). The
-tools are the framework's own on this computer. The answer goes to stdout, tool notes and errors to stderr. Nothing is
-saved to the chat history.
+tools are the framework's own on this computer. The answer goes to stdout, tool notes and errors to stderr, without
+control characters (escape sequences, carriage returns, bidi and zero-width characters). Ctrl+C or the end of input
+at a confirmation is a no. Nothing is saved to the chat history, and `--provider`/`--model` hold for this command
+only: they are never saved, also not when a tool saves the settings during the question.
 
 | Option | Meaning |
 |---|---|
@@ -1759,8 +1761,8 @@ llm-cli module generate-ai PROBE_FILE [--provider TEXT] [--model TEXT]
 ```
 
 Ditto proposes a target module from a hardware probe file (`target_hardware_config.txt`, see [scan](#scan)). The
-whole proposal is printed as JSON; only after you confirm is the module created (checked again by the module
-generator) in the configured targets folder. Ditto uses the provider's stored sign-in
+whole proposal is printed as JSON, hidden and control characters shown as `\u` escapes; only after you confirm is the
+module created (checked again by the module generator) in the configured targets folder. Ditto uses the provider's stored sign-in
 ([`llm-cli ditto login`](#ditto-login)); the command never asks for a key itself. Neither `module create` nor
 `module generate-ai` attaches pages from the knowledge base; that is an option on the last page of the GUI wizard.
 When the probe file is a probe profile, the module's `runtime:` block is planned from it; the proposal's CPU and

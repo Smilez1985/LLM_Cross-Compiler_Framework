@@ -724,7 +724,12 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   und ihre Darstellung. Die `recipe.yml` liest nur `community_manager.read_recipe`. Eine Änderung der
   KI-Einstellungen geht über `AISettingsChange` (`orchestrator/llm/settings_change.py`): `problems()`, die eigene
   Rückfrage des Kanals zu `plain_http_url()`, dann `apply()`. `tests/test_build_parity_core.py` und
-  `tests/test_ai_settings_change.py` prüfen, dass kein Fenster und kein Befehl an ihnen vorbeigeht.
+  `tests/test_ai_settings_change.py` prüfen, dass kein Fenster und kein Befehl an ihnen vorbeigeht. Anbieter, Modell
+  oder Aufwand für eine Frage oder einen Lauf kommen aus `Core/ai_override.override_values(..., ditto=...)` (ein
+  anderer Anbieter als der gespeicherte lässt Modell, Adresse und Anmeldeart des gespeicherten weg); die CLI setzt
+  diese Werte mit der Einstellungsquelle `cli`, die `save_user_config` nie schreibt. Tool-Aufrufe und ihre Ergebnisse
+  in einem Gespräch passt nur `orchestrator/llm/tool_loop.py` zusammen (`close_open_calls`,
+  `conversation_is_consistent`).
 - Das Framework fragt nie nach einem Repository-Token, liest keines und speichert keines. Übergib Arbeit an GitHub
   über eine installierte GitHub CLI (sie behält ihre eigene Anmeldung) oder den Browser, so wie
   `llm-cli zoo export --pr` es tut.
