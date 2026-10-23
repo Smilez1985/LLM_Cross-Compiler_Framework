@@ -269,20 +269,31 @@ Commit legt den Inhalt fest; ein Tag lässt sich verschieben. Eine Anhebung läu
    `targets/Rockchip/dockerfile`, `targets/_template/Dockerfile` und `targets/_template/Dockerfile.gpu` (die Vorgaben
    für Image-Builds außerhalb des Frameworks; das Framework übergibt den Pin selbst), `docker.build_args.LLAMA_CPP_TAG`
    und `LLAMA_CPP_COMMIT` in `targets/*/target.yml` und `inference_backends.llama_cpp.commit` in
-   `configs/project_sources.yml` (danach `python ../scripts/sync_ssot.py --write` in `configs/`). Die Einstellung
+   `configs/project_sources.yml` (danach `python ../scripts/sync_ssot.py --write` in `configs/`) sowie
+   `LLAMA_CPP_PIN_TAG` und `LLAMA_CPP_PIN_COMMIT` in `targets/Rockchip/modules/source_module.sh` und
+   `targets/_template/modules/source_module.sh` (die Vorgabe von `--clone-llama-cpp`). Die Einstellung
    `llama_cpp_version` folgt dem Katalog von selbst.
 4. Prüfen, dass der Commit von Upstream stammt: `python scripts/llama_cpp_pin.py check`. Es ruft
    `git ls-remote https://github.com/ggml-org/llama.cpp.git refs/tags/b<N>` auf, das genau den neuen Commit ausgeben
    muss (GitHub liefert Commits, die in irgendeinen Fork gepusht wurden, auch über die Upstream-URL aus, der Commit
    allein beweist also nicht seine Herkunft), und listet jede Stelle auf, die die Version nennt: abgeleitete und
    Referenz-Stellen müssen übereinstimmen, und die `LLAMA_CPP_COMMIT`-Vorgabe eines `modules/source_module.sh` aus
-   Version 1.x in einem älteren Target wird nur gemeldet (die mitgelieferten Stufenmodule haben keine).
+   Version 1.x in einem älteren Target wird nur gemeldet (die mitgelieferten Stufenmodule nennen den Pin als
+   `LLAMA_CPP_PIN_TAG` und `LLAMA_CPP_PIN_COMMIT`, und das sind abgeleitete Stellen).
 5. Die Optionen, die etwas herunterladen können, gegen den neuen Baum prüfen. `DOWNLOAD_OPTIONS_OFF` und `NEVER_SET`
    in `orchestrator/runtime/build/recipe.py` nennen jede Option mit Datei und Zeilen; den neuen Baum nach
    `FetchContent_Declare`, `ExternalProject_Add` und `file(DOWNLOAD` durchsuchen und jede neue ergänzen. Ebenso die
    Regeln für CUDA-Architekturen (`ggml/src/ggml-cuda/CMakeLists.txt`) und welche Ziele `tools/CMakeLists.txt` baut.
    Die Target-Dockerfiles wiederholen beide Listen in ihrem llama.cpp-Bauschritt (die zuletzt gesetzten Optionen und
-   die, die sie ablehnen); `tests/test_target_dockerfiles.py` schlägt fehl, bis sie wieder zum Rezept passen.
+   die, die sie ablehnen); `tests/test_target_dockerfiles.py` schlägt fehl, bis sie wieder zum Rezept passen. Prüfe
+   auch die Quantisierungstypen: `QUANT_OPTIONS` aus dem neuen `tools/quantize/quantize.cpp` nach
+   `PINNED_QUANT_OPTIONS` in `tests/test_target_stage.py` übernehmen und nach `PINNED_NEEDS_IMATRIX` jede Methode,
+   die `llama-quantize` ohne Importance-Matrix ablehnt: eine, bei der `tensor_requires_imatrix` in
+   `src/llama-quant.cpp` für einen Typ wahr ist, den `llama_tensor_get_type_impl` irgendeinem Tensor der Datei gibt
+   (eine `IQ3_XS`-Datei hat `IQ3_XXS`-Tensoren); der Test schlägt fehl, bis
+   `GGUF_QUANT_TYPES` und `GGUF_NEEDS_IMATRIX` beider `config_module.sh`, die GGUF-Fähigkeiten in
+   `targets/Rockchip/target.yml` und `LLAMA_CPP_NEEDS_IMATRIX` in `orchestrator/Core/orchestrator.py` übereinstimmen
+   (auch die Liste im README).
 6. Die Golden-Pläne neu erzeugen und den Unterschied durchsehen:
    `LLM_FRAMEWORK_UPDATE_GOLDEN=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_build_recipe.py`. Ohne
    Änderung am Rezept ändern sich nur der Commit, die Build-Nummer und die Build-IDs.

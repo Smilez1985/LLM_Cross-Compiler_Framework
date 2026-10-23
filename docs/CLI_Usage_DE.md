@@ -455,7 +455,7 @@ Target ohne Capabilities-Block wird ungeprüft gebaut.
 | `--parallel` | Veraltet und in `--help` ausgeblendet: Hat keine Wirkung (ein Aufruf startet einen Build) und gibt eine Warnung aus. |
 | `-F, --follow` | Jede Stufe ausgeben, während der Build läuft. |
 | `--gpu / --no-gpu` | Die GPU des Hosts in den Container durchreichen (Standard aus): eine NVIDIA-GPU, wenn `nvidia-smi` gefunden wird, sonst `/dev/dri`, falls vorhanden. Rockchip-Konvertierungen brauchen das nicht. |
-| `--imatrix / --no-imatrix` | Importance Matrix für GGUF (Standard aus). Pflicht für `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ2_M`, `IQ3_XXS`, `Q2_K_S`. |
+| `--imatrix / --no-imatrix` | Importance Matrix für GGUF (Standard aus). Pflicht für `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ2_M`, `IQ3_XXS`, `IQ3_XS`, `Q2_K_S`. |
 | `--dataset PATH` | Deine eigene Kalibrierungsdatei (muss existieren): eine Textdatei für die GGUF-Importance-Matrix oder für RKLLM, eine Liste mit Beispieleingaben für RKNN `i8`. Ohne sie nutzt die Importance Matrix den mitgelieferten Kalibrierungstext. |
 
 Verhalten:
@@ -2199,9 +2199,13 @@ Zugangsdaten.
 | `--add TEXT...` | Eine Überschreibung hinzufügen: `NAME URL`. |
 | `--remove TEXT` | Die Überschreibung `NAME` entfernen. |
 
-Die Überschreibungen wirken sich auf Rockchip-Builds nicht aus: Ein Build nutzt das llama.cpp seines Images, und
-seine Stufe source (`source_module.sh`) warnt nur, wenn `LLAMA_CPP_REPO_OVERRIDE` gesetzt ist. Nur
-`source_module.sh --clone-llama-cpp`, von Hand in einem Container mit Netzwerk gestartet, klont daraus.
+Die Überschreibung für llama.cpp (`LLAMA_CPP_REPO_OVERRIDE`, zum Beispiel ein Spiegel in einem Firmennetz) ist der
+Ort, von dem ein Target-Image den gepinnten llama.cpp-Commit holt: Die Engine übergibt sie als Build-Argument
+`LLAMA_CPP_REPO`, wenn sie eine https-Adresse ohne Benutzernamen, Passwort, Token oder Query ist (sonst warnt das
+Build-Log, und das Image holt von Upstream), und das Image bricht weiterhin ab, wenn es nicht genau den gepinnten
+Commit bekommt. Das Build-Log sagt, wann die Überschreibung genutzt wurde oder warum nicht.
+`source_module.sh --clone-llama-cpp`, von Hand in einem Container mit Netzwerk gestartet, klont nach derselben Regel
+daraus. Die übrigen Überschreibungen ändern in einem Build nichts: Seine Stufen-Container haben kein Netzwerk.
 
 In der GUI: **Datei > Einstellungen…**, Tab **Quell-Repositorys**: die Liste, **Hinzufügen** (Name und URL) und
 **Ausgewählte entfernen…** (fragt zuerst; „Nein“ ist die Vorgabe).
@@ -2565,8 +2569,8 @@ llm-cli trash empty --due
 
 - `build start --optimization` wirkt sich auf Rockchip-Builds nicht aus (die Skripte haben keine passende
   Einstellung); `--parallel` ist veraltet und hat keine Wirkung.
-- Überschreibungen aus `config repos` erreichen die Builds als `<NAME>_REPO_OVERRIDE`, aber die Rockchip-Skripte
-  lesen sie nicht.
+- Von den Überschreibungen aus `config repos` wirkt nur die für llama.cpp (woher das Image den gepinnten Commit
+  holt); die übrigen erreichen die Builds als `<NAME>_REPO_OVERRIDE`, aber die Rockchip-Skripte lesen sie nicht.
 - `deploy package --docker` ist experimentell.
 - Einen CLI-Befehl, um Dittos Anbieter dauerhaft zu wählen, gibt es noch nicht; nutze die GUI, die `config.yml` oder
   `LLM_FRAMEWORK_AI_PROVIDER` (`ditto login` meldet an, wechselt den Anbieter aber nicht). Anmeldungen im Browser
