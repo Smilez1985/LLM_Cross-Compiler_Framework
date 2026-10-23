@@ -1250,6 +1250,9 @@ class BuildEngine:
 
         if not HF_REPO_ID.match(source) or ".." in source:
             raise ValueError(f"Model '{source}' is neither an existing local path nor a HuggingFace repo id (owner/name).")
+        from orchestrator.utils.locality import offline_mode
+        if offline_mode(self.config):   # never a download in offline mode: the copy on this computer, or no build
+            return self._stage_local_copy(config, progress, source)
 
         from orchestrator.Core.hf_hub import DownloadStopped, hub_api
         from orchestrator.Core.hf_lookup import staged_files
@@ -1314,8 +1317,33 @@ class BuildEngine:
         finally:
             stop.set()
         self._check_cancelled(progress)
+        from orchestrator.Core.local_models import write_complete
+        try:  # every file is there: an offline build may use this copy (local_models.local_copy)
+            write_complete(dest, source, commit, {name: files[name].size for name in keep})
+        except OSError as e:
+            self.logger.debug(f"The record of the complete copy of {source} was not written: {e}")
         inner = "/build-cache/input-model"
         return inner, {str(dest): {"bind": inner, "mode": "ro"}}
+
+    def _stage_local_copy(self, config: BuildConfiguration, progress: BuildProgress,
+                          source: str) -> Tuple[str, Dict[str, Dict[str, str]]]:
+        """Offline mode (DECISIONS round 25 Q1): a model named by its Hugging Face id is never downloaded. Its complete
+        copy on this computer (local_models.local_copy: an earlier build's, the Hugging Face browser's, the old cache's)
+        is mounted read-only, at the commit asked for when the branch is a commit; without one the build stops naming
+        what to do (the build service refuses such a build before it is queued and lists the models already here)."""
+        from orchestrator.Core.local_models import local_copy
+        copy = local_copy(self.cache_dir, self.models_dir, source, config.model_branch)
+        if copy is None:
+            raise ValueError(f"Offline mode is on, so {source} is not downloaded from Hugging Face, and no copy of it "
+                             "is on this computer. Choose a model already here or a model file or folder of your own, "
+                             "or switch offline mode off.")
+        config.model_revision = copy.commit
+        progress.add_log(f"Offline mode: using the copy of {source} on this computer (commit {copy.commit[:12]}); "
+                         "nothing is downloaded.")
+        inner = "/build-cache/input-model"
+        # a cache snapshot's links lead out of the folder: bound file by file
+        binds = local_files.linked_folder_binds(copy.path, inner)
+        return inner, binds or {str(copy.path): {"bind": inner, "mode": "ro"}}
 
     @staticmethod
     def _hub_files(api_for, source: str, commit: str, token: Optional[str]) -> Tuple[Dict[str, Any], bool]:
