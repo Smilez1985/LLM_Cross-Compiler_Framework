@@ -1306,7 +1306,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the earlier build left where it is. The identical build there already (the same manifest, and each of its model
   files there with its size) is not copied again; anything else under that name, also a folder whose model file was
   deleted or changed, is replaced only after you accepted the full list of what is replaced ("No" is the default; to
-  the trash or for good; written to the audit log first).
+  the trash or for good; written to the audit log first) and only by a complete copy (one that left a link out keeps
+  a name of its own).
 - **The Deployment tab's Docker table decides what the package carries** (DECISIONS round 23 item 6): the table in
   **Use Docker Containerization?** no longer shows mock-up choices that did nothing (Llama.cpp (CPU), RKLLM (NPU),
   TensorRT (GPU)); it lists the containers a package with Docker images carries for the chosen profile, from the one

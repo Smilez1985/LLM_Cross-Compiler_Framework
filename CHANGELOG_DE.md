@@ -1488,7 +1488,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   liegt (dasselbe Manifest, und jede seiner Modelldateien dort mit ihrer Größe), wird nicht noch einmal kopiert;
   alles andere unter diesem Namen, auch ein Ordner, dessen Modelldatei gelöscht oder geändert wurde, wird erst
   ersetzt, wenn du die vollständige Liste dessen angenommen hast, was ersetzt wird („Nein“ ist die Vorgabe; in den
-  Papierkorb oder endgültig; vorher ins Audit-Log geschrieben).
+  Papierkorb oder endgültig; vorher ins Audit-Log geschrieben), und nur durch eine vollständige Kopie (eine, die einen
+  Link ausgelassen hat, behält einen eigenen Namen).
 - **Die Docker-Tabelle im Deployment-Tab entscheidet, was das Paket enthält** (DECISIONS Runde 23 Punkt 6): Die
   Tabelle in **Use Docker Containerization?** zeigt keine Attrappen-Auswahl mehr, die nichts bewirkte (Llama.cpp
   (CPU), RKLLM (NPU), TensorRT (GPU)); sie listet die Container, die ein Paket mit Docker-Images für das gewählte Profil
