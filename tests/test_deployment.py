@@ -352,7 +352,9 @@ class TestSSHDeployment:
         # Since decision A5 the fallback is the board session over OpenSSH (consolidation chain c2-remote-system):
         # the calls are the session's steps, the upload streams into cat over ssh (no scp), deploy.sh runs detached.
         # The fake OpenSSH in front of a fake board is tests/test_remote_system_ssh.py's (it pins the rest).
-        fake = pytest.importorskip("test_remote_system_ssh")
+        # A plain import: a broken helper module fails here instead of skipping (the module itself skips where
+        # paramiko is missing, as the fake board it builds on does).
+        import test_remote_system_ssh as fake
         board = fake.openssh_board(monkeypatch)
         dm = fake.on_fake_clock(DeploymentManager(FakeFramework(config)), board)
         monkeypatch.setattr(dm, "_check_conn", lambda *a, **k: True)
