@@ -325,6 +325,44 @@ class TestModuleGenerator:
         assert "not allowed, -DLLAMA_USE_PREBUILT_UI=ON would let llama.cpp download" in problems[0]
         assert "LLAMA_BUILD_WEBUI must never be set" in problems[1]
 
+    @pytest.mark.parametrize("line, rule", [
+        # cmake reads "-D NAME=VALUE" (two words) as one option
+        ("CMAKE_OPTIONS='-DGGML_NATIVE=OFF -D LLAMA_BUILD_BORINGSSL=ON'", "LLAMA_BUILD_BORINGSSL must never be set"),
+        ('cmake -S . -B b -D "LLAMA_USE_PREBUILT_UI=ON"', "LLAMA_USE_PREBUILT_UI must be OFF on every build"),
+        ("cmake -S . -B b -D'GGML_CUDA_CCCL_VERSION'=v3.4.3", "GGML_CUDA_CCCL_VERSION must never be set"),
+        ("cmake -S . -B b -DLLAMA_CURL='ON'", "LLAMA_CURL must be OFF on every build"),
+    ], ids=["space", "quoted-word", "quoted-name", "quoted-value"])
+    def test_a_download_option_in_another_spelling_of_the_shell_is_refused(self, generator, line, rule):
+        """The shell gives cmake the same option however the line quotes it, and cmake reads -D and the next word as one
+        option: the folder check refuses each spelling."""
+        from orchestrator.Core.module_generator import validate_target_folder
+        target = generator.generate_module(self.data())
+        (target / "modules" / "extra.sh").write_text(line + "\n", encoding="utf-8")
+
+        problems = validate_target_folder(target, generator.template_dir)
+
+        assert len(problems) == 1 and problems[0].startswith("modules/extra.sh:1: not allowed, "), problems
+        assert f"would let llama.cpp download while it is built ({rule}" in problems[0]
+
+    def test_a_quoted_value_that_keeps_a_download_off_is_kept(self, generator):
+        from orchestrator.Core.module_generator import validate_target_folder
+        target = generator.generate_module(self.data())
+        (target / "modules" / "extra.sh").write_text(
+            'cmake -S . -B b -DLLAMA_BUILD_TESTS="OFF" -DFETCHCONTENT_FULLY_DISCONNECTED=\'ON\' -D LLAMA_CURL=OFF\n',
+            encoding="utf-8")
+
+        assert validate_target_folder(target, generator.template_dir) == []
+
+    @pytest.mark.parametrize("flag", ["-C/app/scripts/initial-cache.cmake", "-C", "-P/app/scripts/settings.cmake"])
+    def test_cmake_flags_that_run_a_cmake_script_are_refused(self, generator, flag):
+        """An initial cache (-C) or a script (-P) can set any option, also one that downloads whenever it is set; the
+        module's packaging commands run before the package's cross build and could write such a file."""
+        with pytest.raises(ValueError) as refused:
+            generator.generate_module(self.data(cmake_flags=f"-DGGML_NATIVE=OFF {flag}"))
+        assert (f"- cmake_flags: {flag} makes CMake run a CMake script (-C, -P), which can switch on any llama.cpp "
+                "option; leave it out") in str(refused.value)
+        assert not (generator.targets_dir / "my_board").exists()
+
     def test_failed_generation_leaves_nothing_behind(self, generator):
         with pytest.raises(ValueError, match="syntax"):
             generator.generate_module(self.data(quantization_logic="    Q4) echo 'unterminated ;;"))
