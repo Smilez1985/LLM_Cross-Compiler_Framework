@@ -2080,6 +2080,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **A machine whose GPU has no Vulkan driver gets the CPU build** (chain port-runtime, from the review of the managed
+  llama-server): when `vulkaninfo` ran but listed only a software renderer (llvmpipe, lavapipe), the hardware probe
+  still set `VULKAN=ON` because a Vulkan loader, a display adapter (Windows) or `vulkan-1.dll` was there, so the
+  official prebuilt choice and the self-built plan picked the Vulkan build, which would only have found llvmpipe.
+  Such a `vulkaninfo` now means `VULKAN=OFF`; the loader, the adapters and the DLL count only when `vulkaninfo` is
+  missing or fails. The same in the three probes: `orchestrator/runtime/hardware_probe.py` (with its byte-identical
+  copy `scripts/hardware_probe.py`), `scripts/hardware_probe.sh` and `scripts/hardware_probe.ps1`. Regression tests:
+  `tests/test_runtime.py` `test_vulkaninfo_with_only_a_software_renderer_means_no_gpu_driver`,
+  `test_windows_vulkaninfo_with_only_a_software_renderer`, `tests/test_hardware_probe.py`
+  `test_a_software_renderer_only_means_no_vulkan` (the .sh and the .py on the same machine).
 - **`runtime start --model` and `--sleep-idle` count also while a server runs** (chain port-runtime, from the review
   of the managed llama-server): a start that found the running server already serving the chosen model returned
   before the choice was recorded, so `runtime start --model X` (or `--model auto`, and the GUI's model choice) on a

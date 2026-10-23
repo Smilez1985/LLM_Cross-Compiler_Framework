@@ -1510,6 +1510,9 @@ class Probe:
     # --- GPU ---
 
     def _gpu(self):
+        """GPUs and the Vulkan flag. A vulkaninfo that ran and lists only software renderers (llvmpipe, lavapipe)
+        means that no GPU has a Vulkan driver: VULKAN stays OFF then, whatever the display adapters, the Vulkan
+        loader or vulkan-1.dll suggest (those only stand in when vulkaninfo is missing or fails)."""
         run, os_name = self.run, self.os
         nvidia, vk, vk_ran, vulkan = [], [], False, False
         hip = None
@@ -1525,7 +1528,7 @@ class Probe:
                 adapters = [g for g in probe_windows_adapters(run) if g["VENDOR"] != "nvidia" or not nvidia]
                 if not vk:
                     others = adapters
-                    vulkan = bool(adapters)
+                    vulkan = not vk_ran and bool(adapters)
                 else:
                     # vulkaninfo knows the device type, the registry the memory size.
                     by_name = {norm_name(a.get("NAME")): a for a in adapters}
@@ -1535,7 +1538,7 @@ class Probe:
                             g["VRAM_MB"] = match["VRAM_MB"]
                         if match and match.get("PCI_ID") and "PCI_ID" not in g:
                             g["PCI_ID"] = match["PCI_ID"]
-                if not vulkan:
+                if not vulkan and not vk_ran:
                     root = self.env.get("SystemRoot") or self.env.get("SYSTEMROOT")
                     vulkan = bool(root) and os.path.isfile(os.path.join(root, "System32", "vulkan-1.dll"))
             elif os_name in ("linux", "android"):
@@ -1544,7 +1547,7 @@ class Probe:
                 if not vk:
                     others = sysfs + tree
                     # Without vulkaninfo: a Vulkan loader plus a GPU whose driver ships a Vulkan ICD.
-                    vulkan = bool((others or nvidia) and self._vulkan_loader())
+                    vulkan = not vk_ran and bool((others or nvidia) and self._vulkan_loader())
                 else:
                     others = merge_sysfs(others, sysfs + tree)
                 hip = self._hip()

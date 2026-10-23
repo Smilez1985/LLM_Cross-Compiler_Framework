@@ -1028,8 +1028,9 @@ VK_OTHERS=$VK_GPUS
 VULKAN=OFF
 if [ -z "$VK_GPUS" ]; then
     OTHERS=$FS_GPUS
-    # Without vulkaninfo: a Vulkan loader plus a GPU whose driver ships a Vulkan ICD.
-    if [ -n "$OTHERS$NV_GPUS" ]; then
+    # Without vulkaninfo: a Vulkan loader plus a GPU whose driver ships a Vulkan ICD. A vulkaninfo that ran and lists
+    # only software renderers (llvmpipe) means no GPU has a Vulkan driver: VULKAN stays OFF.
+    if [ -n "$OTHERS$NV_GPUS" ] && [ "$VK_RAN" != 1 ]; then
         LOADER=0
         if [ "$SYSROOT" = 0 ]; then
             for ldc in /sbin/ldconfig ldconfig; do
