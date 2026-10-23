@@ -1465,6 +1465,31 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `llm-cli module create` (dessen nächste Schritte die Module nicht mehr Altlasten nennen) und die Leitfäden nennen
   die Stufe, zu der jeder Teil gehört; der Roadmap-Punkt, die Vier-Module-Skripte zu entfernen, ist anders erledigt
   (sie sind der Build).
+- **Die Stufe config prüft ihren Plan, und die Stufe target macht wieder das einsatzfertige Paket der Version 1.x**
+  (Nachtrag zu U9, DECISIONS Runde 16; Rockchip und die Vorlage). Mit dem Hardware-Profil eines Boards sucht die Stufe
+  config die geplanten Compiler im Image (fehlt einer, wird nichts geplant), baut und linkt ein kleines C- und
+  C++-Programm mit den geplanten Flags (und führt sie aus, wenn sie für diesen Rechner sind), prüft am ELF-Kopf, dass
+  sie für das System des Boards sind, lässt `cmake -P` die erzeugte Toolchain-Datei lesen und prüft den Plan
+  `build_config.sh` in einer sauberen Shell, bevor sie ihn behält. Die Build-Jobs werden auf die Kerne des Boards
+  begrenzt (`CPU_CORES` oder `CPU_CORES_LOGICAL` der Probe-Datei), und ein 32-Bit-ARM-System wird mit dem schlichten
+  Grund abgelehnt (die Boards haben 64-Bit-CPUs, das Image nur die aarch64-Cross-Compiler; installiere das
+  64-Bit-System und lass die Probe erneut laufen). Mit Profil macht die Stufe target eines GGUF-Builds das Paket in
+  `output/packages/`: das Modell, `llama-cli` und `llama-server` für das Board, die Toolchain-Datei und das Profil,
+  eine Model Card, `test_model.sh` (prüft die Dateien, dann eine kurze Antwort des Modells), `deploy.sh`
+  (`USER@HOST [ZIEL]` über `ssh` und `scp` mit `StrictHostKeyChecking=yes`, oder auf dem Board selbst nach
+  `/opt/llm`), `MANIFEST.json` mit jedem Detail des Builds und `SHA256SUMS`; das Modell läuft einmal auf diesem
+  Rechner, die Programme müssen für das Board sein, und jede Datei muss zu ihrer Prüfsumme passen, bevor das Paket
+  bleibt. `build.sh --package` (auch ein von Hand gestartetes `target_module.sh` und die Entrypoint-Modi `target` und
+  `pipeline`) macht es auch ohne Profil, mit den schlichten Vorgaben des Targets, die das Manifest nennt; das eigene
+  Deployment des Frameworks bleibt `llm-cli deploy` über seine SSH-Sitzung. Jede Quantisierungsmethode des gepinnten
+  `llama-quantize` ist aufgeführt und wird angenommen (neu: `Q1_0`, `Q2_0` und die Kurznamen `Q3_K`, `Q4_K`,
+  `Q5_K`), und `IQ2_M`, `IQ3_XXS`, `IQ3_XS` und `Q2_K_S`, die `llama-quantize` ohne Importance-Matrix ablehnt,
+  werden vor dem Konvertieren abgelehnt, wenn IMatrix aus ist. `source_module.sh --clone-llama-cpp` klont den Pin des Frameworks,
+  wenn kein `LLAMA_CPP_COMMIT` angegeben ist, und prüft den Checkout; seine `LLAMA_CPP_PIN_TAG` und
+  `LLAMA_CPP_PIN_COMMIT` sind Pin-Stellen, die `tests/test_build_recipe.py` prüft. Die Überschreibung aus
+  `config repos` für llama.cpp (`LLAMA_CPP_REPO_OVERRIDE`) wirkt jetzt: Das Image holt den gepinnten Commit daraus
+  (Build-Argument `LLAMA_CPP_REPO`), wenn sie eine https-Adresse ohne Zugangsdaten ist, und bricht weiterhin ab, wenn
+  es nicht genau diesen Commit bekommt; die Doku sagte, sie habe keine Wirkung.
 - **Der Code ist in Schichten geordnet, und ein Test hält sie ein** (Konsolidierung; Entscheidung des Maintainers vom
   2026-10-17: ein Repository, Schichten per Test durchgesetzt). `tests/test_layering.py` ordnet jedes Modul von
   `orchestrator/` einer Schicht zu (unten, remote, Kern, Fachlogik, Tool-Definitionen, Adapter), liest jeden Import
@@ -1563,7 +1588,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Weise abgelehnt und nennen den Download oder das Paket (der Text sagte „this build“). Die Self-Healing-Diagnose nach einer vollen Festplatte nennt weiter die Festplatten unter der Reserve,
   ohne Reservierungen zu zählen, weil sie die Festplatte sucht, die vollgelaufen ist. Der Downloader in
   `orchestrator/utils/download.py` nimmt die Speicherplatz-Regel seines Aufrufers (`space`), so importiert die unterste
-  Schicht nichts über ihr.
+  Schicht nichts über ihr. Ein laufender KI-Build trägt ein, was von seiner Reservierung schon auf der Festplatte
+  liegt (`ReservationLedger.landed`, über `LandedMeter`: das Wachstum seines bereitgestellten Downloads, seines
+  Build-Ordners und seines Zwischenordners, nach jeder Stufe und in jeder Runde seiner Festplatten-Watchdogs), so
+  zählen andere Prüfungen diese Bytes nicht mehr doppelt, einmal im freien Platz und einmal in der Reservierung.
 - **Die GUI ist ein optionales Extra; Kommandozeile, MCP-Server und Kern laufen ohne Qt.** PySide6 ist das Extra
   `gui` in `pyproject.toml` (die per Hash festgelegte `requirements-gui.txt`, ein Export von `uv.lock` wie
   `requirements.txt`). Die Installer für Linux und Windows installieren es wie bisher; `sudo ./install.sh --headless`

@@ -255,20 +255,28 @@ content; a tag can be moved. A bump goes like this:
    `targets/Rockchip/dockerfile`, `targets/_template/Dockerfile` and `targets/_template/Dockerfile.gpu` (the defaults
    for image builds outside the framework; the framework passes the pin itself), `docker.build_args.LLAMA_CPP_TAG`
    and `LLAMA_CPP_COMMIT` in `targets/*/target.yml`, and `inference_backends.llama_cpp.commit` in
-   `configs/project_sources.yml` (then `python ../scripts/sync_ssot.py --write` inside `configs/`). The setting
+   `configs/project_sources.yml` (then `python ../scripts/sync_ssot.py --write` inside `configs/`), and
+   `LLAMA_CPP_PIN_TAG` and `LLAMA_CPP_PIN_COMMIT` in `targets/Rockchip/modules/source_module.sh` and
+   `targets/_template/modules/source_module.sh` (the default of `--clone-llama-cpp`). The setting
    `llama_cpp_version` follows the catalog by itself.
 4. Check that the commit is upstream's: `python scripts/llama_cpp_pin.py check`. It runs
    `git ls-remote https://github.com/ggml-org/llama.cpp.git refs/tags/b<N>`, which must print exactly the new commit
    (GitHub serves commits pushed to any fork through the upstream URL, so the commit alone does not prove its
    origin), and lists every place that names the version: derived and reference places must agree, and the
    `LLAMA_CPP_COMMIT` default of a version 1.x `modules/source_module.sh` in an older target is only reported (the
-   shipped stage modules have none).
+   shipped stage modules name the pin as `LLAMA_CPP_PIN_TAG` and `LLAMA_CPP_PIN_COMMIT`, which are derived places).
 5. Re-check the download-capable options against the new tree. `DOWNLOAD_OPTIONS_OFF` and `NEVER_SET` in
    `orchestrator/runtime/build/recipe.py` name each option with its file and lines; search the new tree for
    `FetchContent_Declare`, `ExternalProject_Add` and `file(DOWNLOAD` and add any new one. Check the CUDA architecture
    rules (`ggml/src/ggml-cuda/CMakeLists.txt`) and which targets `tools/CMakeLists.txt` builds as well. The target
    Dockerfiles repeat both lists in their llama.cpp build step (the options set last, and the ones they refuse);
-   `tests/test_target_dockerfiles.py` fails until they match the recipe again.
+   `tests/test_target_dockerfiles.py` fails until they match the recipe again. Re-check the quantization types too:
+   copy `QUANT_OPTIONS` of the new `tools/quantize/quantize.cpp` into `PINNED_QUANT_OPTIONS` of
+   `tests/test_target_stage.py`, and into `PINNED_NEEDS_IMATRIX` every method `llama-quantize` refuses without an
+   importance matrix: one where `tensor_requires_imatrix` of `src/llama-quant.cpp` is true for a type that
+   `llama_tensor_get_type_impl` gives any tensor of the file (an `IQ3_XS` file has `IQ3_XXS` tensors); it fails until `GGUF_QUANT_TYPES` and `GGUF_NEEDS_IMATRIX` of both
+   `config_module.sh`, the GGUF capabilities in `targets/Rockchip/target.yml` and `LLAMA_CPP_NEEDS_IMATRIX` in
+   `orchestrator/Core/orchestrator.py` agree (the list in the README too).
 6. Regenerate the golden plans and review the diff:
    `LLM_FRAMEWORK_UPDATE_GOLDEN=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_build_recipe.py`. Without a
    recipe change only the commit, the build number and the build IDs change.

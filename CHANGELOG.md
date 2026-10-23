@@ -1289,6 +1289,30 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `create_target_module` tool, Ditto's module prompt, `llm-cli module create` (whose next steps no longer call the
   modules legacy files) and the guides name the stage each part belongs to; the roadmap item to remove the
   four-module scripts is done differently (they are the build).
+- **The config stage checks its plan, and the target stage makes the deploy-ready package of version 1.x again**
+  (U9 addendum, DECISIONS round 16; Rockchip and the template). With a board's hardware profile the config stage
+  finds the planned compilers in the image (nothing is planned when one is missing), builds and links a small C and
+  C++ program with the planned flags (and runs them when they are for this machine), checks with the ELF header that
+  they are for the board's system, lets `cmake -P` read the generated toolchain file and checks the plan
+  `build_config.sh` in a clean shell before it keeps it. The build jobs are capped at the board's cores (`CPU_CORES`,
+  or `CPU_CORES_LOGICAL` of the probe file), and a 32-bit ARM system is refused with the plain reason (the boards
+  have 64-bit CPUs, the image only the aarch64 cross compilers; install the 64-bit system and probe again). With a
+  profile, the target stage of a GGUF build makes the package in `output/packages/`: the model, `llama-cli` and `llama-server`
+  for the board, the toolchain file and the profile, a model card, `test_model.sh` (checks the files, then a short
+  answer from the model), `deploy.sh` (`USER@HOST [DEST]` over `ssh` and `scp` with `StrictHostKeyChecking=yes`, or
+  on the board itself to `/opt/llm`), `MANIFEST.json` with every build detail and `SHA256SUMS`; the model is run once
+  on this machine, the programs must be for the board, and every file must match its checksum before the package is
+  kept. `build.sh --package` (also `target_module.sh` started by hand and the entrypoint modes `target` and
+  `pipeline`) makes it without a profile too, with the target's plain defaults, which the manifest names; the
+  framework's own deployment stays `llm-cli deploy` over its SSH session. Every quantization method of the pinned
+  `llama-quantize` is listed and accepted (new: `Q1_0`, `Q2_0` and the short names `Q3_K`, `Q4_K`, `Q5_K`), and
+  `IQ2_M`, `IQ3_XXS`, `IQ3_XS` and `Q2_K_S`, which `llama-quantize` refuses without an importance matrix, are refused
+  before converting unless IMatrix is on. `source_module.sh --clone-llama-cpp` clones the framework's pin when no
+  `LLAMA_CPP_COMMIT` is given and checks the checkout; its `LLAMA_CPP_PIN_TAG` and `LLAMA_CPP_PIN_COMMIT` are pin
+  places that `tests/test_build_recipe.py` checks. The `config repos` override of llama.cpp
+  (`LLAMA_CPP_REPO_OVERRIDE`) now takes effect: the image fetches the pinned commit from it (build argument
+  `LLAMA_CPP_REPO`) when it is an https address without a credential, and still stops unless it got exactly that
+  commit; the docs said it had no effect.
 - **The code is arranged in layers, and a test keeps them** (consolidation; maintainer decision of 2026-10-17: one
   repository, layers enforced by a test). `tests/test_layering.py` maps every module of `orchestrator/` to a layer
   (bottom, remote, kernel, domain, tool definitions, adapters), reads every import (also inside functions, under
@@ -1373,7 +1397,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   download does; when another call took the space while the person was asked, both are refused the same way, naming
   the download or the package (the text said "this build"). The self-healing diagnosis after a full disk still names the disks below the reserve without
   counting reservations, because it looks for the disk that ran full. The downloader in `orchestrator/utils/
-  download.py` takes its caller's disk rule (`space`), so the bottom layer imports nothing above it.
+  download.py` takes its caller's disk rule (`space`), so the bottom layer imports nothing above it. A running AI
+  build records what of its reservation has landed on disk (`ReservationLedger.landed`, through `LandedMeter`: the
+  growth of its staged download, its build folder and its staging folder, after each stage and in every round of its
+  disk watchdogs), so other checks no longer count those bytes twice, once in the free space and once in the
+  reservation.
 - **The GUI is an optional extra; the command line, the MCP server and the core run without Qt.** PySide6 is the
   extra `gui` in `pyproject.toml` (the hash-pinned `requirements-gui.txt`, an export of `uv.lock` like
   `requirements.txt`). The Linux and Windows installers install it as before; `sudo ./install.sh --headless`

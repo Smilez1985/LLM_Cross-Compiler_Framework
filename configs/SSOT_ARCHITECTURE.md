@@ -160,7 +160,7 @@ both `b<build_number>` and `build`. Everything else follows from this entry:
 | The setting `llama_cpp_version` | its default is derived from `tag`; it no longer moves what target images build (a different value only gives a warning in the build log) |
 | `ARG LLAMA_CPP_TAG` and `ARG LLAMA_CPP_COMMIT` in `targets/Rockchip/dockerfile`, `targets/_template/Dockerfile` and `Dockerfile.gpu` (every `Dockerfile*` of a target that sets them or clones llama.cpp is checked), `docker.build_args.LLAMA_CPP_TAG` and `LLAMA_CPP_COMMIT` in `targets/*/target.yml` | fallbacks for image builds outside the framework; must equal `tag` and `commit` |
 | `inference_backends.llama_cpp.commit` in `project_sources.yml` and `detailed_project_sources.yml` | reference catalogue; must equal `tag` |
-| `LLAMA_CPP_COMMIT` defaults in `targets/*/modules/source_module.sh` | the shipped stage modules have none: their source stage reports the pin of the image, and `--clone-llama-cpp` (started by hand) needs a full commit id. A version 1.x `source_module.sh` of an older target that still has a default (decision D20) is reported, not checked |
+| `LLAMA_CPP_PIN_TAG` and `LLAMA_CPP_PIN_COMMIT` in `targets/Rockchip/modules/source_module.sh` and `targets/_template/modules/source_module.sh` | the default of `--clone-llama-cpp` (started by hand) when `LLAMA_CPP_COMMIT` is not set; must equal `tag` and `commit`. In a build the source stage reports the pin of the image. A `LLAMA_CPP_COMMIT` default in a version 1.x `source_module.sh` of an older target (decision D20) is reported, not checked |
 
 `tests/test_build_recipe.py` fails when a place disagrees. `python scripts/llama_cpp_pin.py check` prints the same
 table and checks with `git ls-remote` that upstream's tag points at the pinned commit. How to bump the pin:
@@ -300,10 +300,13 @@ eleven entries that only `project_sources.yml` has.
 `project_sources.yml`. It edits the setting `source_repositories` in `config.yml`: `--add <name> <url>` stores an
 entry, `--remove <name>` removes it, and without options it lists the entries. The build engine turns entries of
 the form `{name: {url: ...}}`, which `--add` stores, and plain URLs stored by earlier versions into variables
-`<NAME>_REPO_OVERRIDE` for the stage containers. The source stage (`source_module.sh`) only warns when
-`LLAMA_CPP_REPO_OVERRIDE` is set, because a build uses the llama.cpp of its image; only
-`source_module.sh --clone-llama-cpp`, started by hand in a container with network, clones from it. In practice the
-setting has no effect on builds at the moment.
+`<NAME>_REPO_OVERRIDE` for the stage containers. The override of llama.cpp (`LLAMA_CPP_REPO_OVERRIDE`) is where
+the image fetches the pinned commit from: the engine passes it as the build argument `LLAMA_CPP_REPO` when the
+target's Dockerfile takes it and the address is https without a user name, password, token or query (else a warning
+and upstream), and the image still stops unless it got exactly the pinned commit, so a mirror changes where the
+source comes from, never which source it is. The source stage says so in the build log, and
+`source_module.sh --clone-llama-cpp`, started by hand in a container with network, clones from it under the same
+rule. The other overrides reach the stage containers, which have no network, and change nothing there.
 
 ## Other single sources of the project
 
