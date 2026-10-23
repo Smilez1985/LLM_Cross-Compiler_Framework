@@ -17,8 +17,8 @@ Take over:
 - take_over(models_dir, files): copies each new file into the new folder, read once and checked while it is copied:
   against the sha256 its blob is named by (a file stored with LFS), its git blob id (a small file), or, where the
   cache kept no checksum (a cache without links), against what the Hub lists for that commit (`lookup`: the LFS
-  sha256, a small file by its size, as the downloader pins it); without `lookup`, or when the Hub cannot be asked, such
-  a file is skipped with the reason and stays where it is. A copy is a hidden temporary file under the downloader's
+  sha256, a small file by its size, as the downloader pins it); without `lookup`, when the Hub cannot be asked or in
+  offline mode (the lookup refuses before any request), such a file is skipped with the reason and stays where it is. A copy is a hidden temporary file under the downloader's
   per-file lock until its check passed, then it gets its name. The one disk rule comes first (room for the copies
   beside the reserve and what other calls reserved), and the copy holds its own reservation in the ledger while it
   runs. Nothing is removed from the old cache here, and a link that leads out of the models folder is never
@@ -54,6 +54,7 @@ REASONS = {
     "conflict": "another file of that name is in the models folder; it is not replaced",
     "no_checksum": "the old cache kept no checksum for it",
     "hub": "Hugging Face could not be asked for its checksum",
+    "offline": "offline mode is on, so Hugging Face was not asked for its checksum",
     "not_listed": "Hugging Face does not list it for that commit",
     "size": "its size does not match",
     "mismatch": "it does not match its checksum",
@@ -177,6 +178,8 @@ def _expected(file: OldFile, lookup: Optional[Callable[[str, str], Dict[str, Any
         except Exception as e:  # noqa: BLE001 - offline, a gated repository without a stored token, ...
             listed[key] = hub_error(e, f"Hugging Face could not list {file.repo}", False)
     hub = listed[key]
+    if isinstance(hub, HubError) and hub.blocker == "offline_mode":
+        return None, None, "offline"   # the lookup asked nobody (hf_hub.offline_refusal)
     if isinstance(hub, HubError) or not isinstance(hub, dict):
         return None, None, "hub"
     listed_file = hub.get(file.name)

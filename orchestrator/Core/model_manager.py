@@ -68,12 +68,26 @@ class ModelManager:
 
     # --- HUGGING FACE INTEGRATION ---
 
+    def offline(self) -> bool:
+        """Offline mode is on (the setting offline_mode): the browser's search, licence check, file list and download
+        and the Take over's Hub list do not contact Hugging Face (hf_hub.offline, the check of every caller)."""
+        from orchestrator.Core.hf_hub import offline
+        return offline(self.config)
+
+    def _check_online(self) -> None:
+        """hf_hub.offline_refusal in offline mode, before any network request (the person reads hf_hub.person_text)."""
+        if self.offline():
+            from orchestrator.Core.hf_hub import offline_refusal
+            raise offline_refusal()
+
     def search_huggingface_models(self, query: str, limit: int = 20,
                                   gated: Optional[bool] = None) -> List[Dict[str, Any]]:
         """Models matching `query`, most downloaded first. gated: False only models that download without accepting
         conditions, True only gated ones, None all. Each result keeps the gating mode (`gating`: false, auto,
         manual) next to the plain `gated` flag. Raises on any failure: an error is never an empty list. Asks
-        huggingface.co only (hf_hub.hub_api) with the token stored in the framework, or none: never an implicit one."""
+        huggingface.co only (hf_hub.hub_api) with the token stored in the framework, or none: never an implicit one.
+        Refused in offline mode (hf_hub.offline_refusal)."""
+        self._check_online()
         from orchestrator.Core.hf_hub import gating
         token = self._stored_token()
         models = self._hub_api(token).list_models(search=query, limit=limit, sort="downloads", gated=gated,
@@ -96,7 +110,8 @@ class ModelManager:
         for a known restrictive one and "unknown" otherwise (`other`, custom, a list, none); `is_restrictive` is
         True unless it is "false", so the GUI asks before such a download. Raises when the check fails: a failed
         check never counts as "not restrictive". Asks huggingface.co only, with `token` or the stored one, else
-        none."""
+        none. Refused in offline mode."""
+        self._check_online()
         from orchestrator.Core.hf_hub import classify_license
         self.logger.info(f"Checking license for {model_id}...")
         token = token or self._stored_token()
@@ -119,7 +134,8 @@ class ModelManager:
 
     def list_repo_files(self, repo_id: str, token: Optional[str] = None) -> List[str]:
         """The file list of a repository. Raises on any failure. Asks huggingface.co only, with the token the person
-        typed, else the stored one, else none (never an implicit one)."""
+        typed, else the stored one, else none (never an implicit one). Refused in offline mode."""
+        self._check_online()
         token = token or self._stored_token()
         return self._hub_api(token).list_repo_files(repo_id=repo_id, token=token or False)
 
@@ -133,7 +149,8 @@ class ModelManager:
         reservation in the per-user ledger while it runs. `token`: the one the person typed, else the one stored in
         the framework; never an implicit one. `progress(name, done, total)` is called between chunks; `stop` ends it
         between two chunks and keeps the part already downloaded. Raises on any failure (HubError, a DownloadError,
-        disk_plan.InsufficientSpace)."""
+        disk_plan.InsufficientSpace); in offline mode it is refused before any request (hf_hub.offline_refusal)."""
+        self._check_online()
         from orchestrator.Core.hf_hub import download_for_person
         token = token or self._stored_token()
         self.logger.info(f"Downloading {filename} from {repo_id}...")
@@ -187,8 +204,10 @@ class ModelManager:
 
     def _hub_lookup(self):
         """For the Take over: the files the Hub lists for one commit of a repository ({name: HubFile}), with the
-        stored token; used only for a cached file whose checksum the old cache did not keep."""
+        stored token; used only for a cached file whose checksum the old cache did not keep. In offline mode it asks
+        nobody (hf_hub.offline_refusal): such a file stays in the old cache with the reason `offline`."""
         def lookup(repo: str, commit: str):
+            self._check_online()
             from orchestrator.Core.hf_hub import hub_file
             token = self._stored_token()
             info = self._hub_api(token).model_info(repo, revision=commit, files_metadata=True, token=token or False)

@@ -1287,7 +1287,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   every file was taken over, and the files of the cache's shared store only they use, with full path and size; a
   folder that holds a file the Take over cannot list is never offered; trash or for good; "No" is the default),
   audited first; nothing is deleted without that yes. Every step runs in a worker thread. The texts are in
-  `orchestrator/utils/l10n_hf.py` (English and German). The browser does not read offline mode, as before.
+  `orchestrator/utils/l10n_hf.py` (English and German). In offline mode the browser refuses before any request
+  (see Fixed).
 - **A build is the four stage modules again, and `build.sh` only runs them** (maintainer decision U9; consolidation
   chain build4). `targets/Rockchip/modules/build.sh` is a stage runner over `source_module.sh` (the toolchain
   sources the image was built from), `config_module.sh` (normalizes the request, refuses what the target cannot
@@ -2080,6 +2081,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **In offline mode the Hugging Face browser no longer contacts Hugging Face** (consolidation chain hf-online): its
+  search, licence check, file list and download went online with offline mode on, while an AI caller's calls were
+  refused. **Tools > Hugging Face Model Browser...** now refuses before any request, before a worker starts or a token
+  is asked for, in plain words in your language: offline mode is on, nothing is searched, checked or downloaded,
+  where to switch it off (Ditto > AI Settings...), and that models already on this computer stay usable.
+  `ModelManager` refuses the same way for every caller (`hf_hub.offline_refusal`, the refusal `HubClient` gives an
+  AI; `hf_hub.person_text` gives a window or the command line the person's words). **Take over old downloads...**
+  works offline: a file whose checksum only Hugging Face could give (a cache without links) stays in the old cache
+  with the reason "offline mode is on", and Hugging Face is not asked. Regression tests: `tests/test_hf_online.py` `TestOfflineMode`, `TestTheBrowserWindowOffline`.
 - **A model from the old Hugging Face download cache works in a build again** (A6, "stay usable"): the GUI's Hugging
   Face browser used to save into huggingface_hub's own cache inside the models folder, where a file is a link to a
   blob named by its checksum. A build of such a GGUF file mounted it under that checksum name, so the build no longer

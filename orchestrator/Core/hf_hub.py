@@ -13,11 +13,14 @@ Rules that hold for every call here:
   token never appears in a result, a note, an error or the audit log, and it is sent only to huggingface.co: every
   API call goes there (hub_api; never to the host in HF_ENDPOINT), and a redirect to the Hub's file storage carries
   no token (requests drops the header on a cross-host redirect, and the fetcher refuses any other host).
-- Offline mode refuses before any network request; a network error is an error, never an empty list.
+- Offline mode refuses before any network request (offline_refusal, the one refusal: AI callers, the GUI's browser
+  and the Take over's Hub list; a person reads it in plain words with person_text); a network error is an error,
+  never an empty list.
 - A licence is "permissive" only on a fixed allowlist; `other`, custom, list-valued and unknown licences are
   "unknown", and the base model's licence and gating are reported too (a GGUF re-upload of a gated model shows as such).
 - The person's own download (download_for_person) sends the token the person typed in the browser's token question
-  or stored in the framework, never an implicit one either; like the rest of the browser it does not read offline mode.
+  or stored in the framework, never an implicit one either; in offline mode the browser refuses it before any request
+  (ModelManager), like its search, licence check and file list.
 - A download lands in `<models_dir>/hf/<owner>--<name>/<commit[:12]>/<filename>`: one folder per commit (Hugging Face
   forbids `--` in repository ids, so the encoding cannot collide). The file is written to a `.part` file that a
   later run resumes, under a lock per file, and gets its name only after its size and sha256 matched what the Hub
@@ -167,6 +170,34 @@ def hub_api(token: Any = False):
     return HfApi(endpoint=HUB_URL, token=token or False)
 
 
+def offline(config: Any) -> bool:
+    """Offline mode (the setting offline_mode) of `config` (a ConfigManager, a dict or a stand-in with get); False
+    when it cannot be read. The one check of every Hugging Face caller (HubClient, ModelManager)."""
+    try:
+        get = getattr(config, "get", None)
+        return bool(get("offline_mode", False)) if callable(get) else False
+    except Exception:  # noqa: BLE001 - an unreadable setting is "not offline", as before
+        return False
+
+
+def offline_refusal() -> "HubError":
+    """The refusal of a Hugging Face call in offline mode, raised before any network request: reason code
+    not_supported, the facts catalogue's blocker offline_mode and the AI's next step; a person reads person_text."""
+    return HubError("Hugging Face is not used in offline mode.", code="not_supported", next=OFFLINE_NEXT,
+                    blocker="offline_mode")
+
+
+def person_text(error: BaseException, lang: Optional[str] = None) -> str:
+    """What a window or the command line shows a person for a failed Hugging Face call, in the person's language:
+    offline mode in plain words (what is refused and where to switch it off, hf.offline), a disk that cannot hold it
+    (disk_plan.person_reason), any other error as its own text."""
+    if getattr(error, "blocker", "") == "offline_mode":
+        from orchestrator.utils.localization import ui_text
+        return ui_text("hf.offline", lang)
+    from orchestrator.Core.disk_plan import person_reason
+    return person_reason(error, lang)
+
+
 def hub_error(e: BaseException, what: str, with_token: Any) -> "HubError":
     """A failed Hub call as the HubError a person and an AI read: a gated repository the token cannot read, a missing
     revision or repository, or the Hub not reachable. `with_token`: whether a token was sent (permission_denied rather
@@ -219,16 +250,11 @@ class HubClient:
         return hub_api(self.token_arg())
 
     def offline(self) -> bool:
-        config = getattr(self.framework, "config", None)
-        try:
-            return bool(config.get("offline_mode", False)) if config is not None else False
-        except Exception:  # noqa: BLE001
-            return False
+        return offline(getattr(self.framework, "config", None))
 
     def check_online(self) -> None:
         if self.offline():
-            raise HubError("Hugging Face is not used in offline mode.", code="not_supported", next=OFFLINE_NEXT,
-                           blocker="offline_mode")
+            raise offline_refusal()
 
     def _failed(self, e: BaseException, what: str) -> HubError:
         return hub_error(e, what, lambda: bool(self.token()))
