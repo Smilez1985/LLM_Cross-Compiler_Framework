@@ -23,6 +23,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from board_toolchain import install_toolchain
 from conftest import NO_POSIX_BASH, REPO_ROOT, posix_shell
 
 ROCKCHIP = REPO_ROOT / "targets" / "Rockchip"
@@ -131,11 +132,15 @@ class Image:
         for name, text in (("config.json", "{}"), ("tokenizer.json", "{}"), ("model.safetensors", "weights")):
             (self.model / name).write_text(text)
         self.log = root / "calls.log"
+        # The image's compilers (the aarch64 cross toolchain, gcc and g++), cmake and make: stubs that never write to
+        # the calls log (tests/board_toolchain.py)
+        self.toolchain, self.buildtools = install_toolchain(root)
 
     def env(self, **values) -> dict:
         """The environment the BuildEngine gives the build container (builder.py _container_env and _sandbox)."""
         env = {
-            "PATH": f"{Path(sys.executable).parent}{os.pathsep}/usr/bin{os.pathsep}/bin",
+            "PATH": os.pathsep.join([str(self.toolchain), str(self.buildtools), str(Path(sys.executable).parent),
+                                     "/usr/bin", "/bin"]),
             "HOME": str(self.work / "home"), "XDG_CACHE_HOME": str(self.work / "cache"),
             "BUILD_CACHE_DIR": str(self.cache), "BUILD_SCRATCH_DIR": str(self.work), "TMPDIR": str(self.work / "tmp"),
             "LLAMA_CPP_PATH": str(self.llama), "RKLLM_PYTHON": str(self.rkllm_python),
@@ -845,7 +850,9 @@ def test_config_module_by_hand_with_only_a_hardware_profile_writes_toolchain_and
 
     assert result.returncode == 0, result.stdout + result.stderr
     stages = image.work / "stages" / "build"
-    assert "SET(CMAKE_C_COMPILER   /usr/bin/aarch64-linux-gnu-gcc)" in (stages / "cross_compile_toolchain.cmake").read_text()
+    # the cross compiler the config stage found in the image (here the stub of tests/board_toolchain.py)
+    assert f"SET(CMAKE_C_COMPILER   {image.toolchain}/aarch64-linux-gnu-gcc)" in \
+        (stages / "cross_compile_toolchain.cmake").read_text()
     assert "BOARD_PACKAGE=1" in (stages / "build_config.sh").read_text()
     assert f"HARDWARE_PROFILE={profile}" in (stages / "build_config.sh").read_text(), "the path is made absolute"
 
@@ -890,7 +897,7 @@ def test_config_module_plans_the_board_from_the_file_the_probe_writes(image, fix
     assert (plan["BOARD_PACKAGE"], plan["PROFILE_ARCH"], plan["TARGET_CPU"]) == ("1", arch, cpu)
     assert flag in plan["CFLAGS"] and "-DGGML_NEON=ON" in plan["CMAKE_FLAGS"]
     toolchain = (image.work / "stages" / "build" / "cross_compile_toolchain.cmake").read_text()
-    assert "SET(CMAKE_C_COMPILER   /usr/bin/aarch64-linux-gnu-gcc)" in toolchain and flag in toolchain
+    assert f"SET(CMAKE_C_COMPILER   {image.toolchain}/aarch64-linux-gnu-gcc)" in toolchain and flag in toolchain
 
 
 @needs_bash
@@ -906,7 +913,7 @@ def test_config_module_plans_an_x86_64_profile_with_its_simd_flags(image):
     assert plan["PROFILE_ARCH"] == "x86_64" and "-march=native" in plan["CFLAGS"]
     assert "-DGGML_AVX2=ON" in plan["CMAKE_FLAGS"] and "-DGGML_AVX512=ON" in plan["CMAKE_FLAGS"]
     toolchain = (image.work / "stages" / "build" / "cross_compile_toolchain.cmake").read_text()
-    assert "aarch64-linux-gnu" not in toolchain and "SET(CMAKE_C_COMPILER   /usr/bin/gcc)" in toolchain
+    assert "aarch64-linux-gnu" not in toolchain and f"SET(CMAKE_C_COMPILER   {image.toolchain}/gcc)" in toolchain
 
 
 @needs_bash
@@ -1160,9 +1167,11 @@ def test_a_hardware_profile_also_packages_the_model_for_the_board(image):
 
     assert result.returncode == 0, result.stdout + result.stderr
     toolchain = (image.work / "stages" / "build" / "cross_compile_toolchain.cmake").read_text()
-    assert "SET(CMAKE_C_COMPILER   /usr/bin/aarch64-linux-gnu-gcc)" in toolchain and "-mcpu=cortex-a55" in toolchain
-    cmake = next(c for c in image.calls() if c.startswith("cmake "))
-    assert cmake.startswith("cmake <root>/llama.cpp ") and "-DCMAKE_TOOLCHAIN_FILE=" in cmake
+    assert f"SET(CMAKE_C_COMPILER   {image.toolchain}/aarch64-linux-gnu-gcc)" in toolchain and "-mcpu=cortex-a55" in toolchain
+    # The config stage had CMake read the toolchain file first (its syntax check), then the target stage configured
+    assert image.calls()[0] == "cmake -P <root>/build-cache/work/stages/build/cross_compile_toolchain.cmake"
+    cmake = next(c for c in image.calls() if c.startswith("cmake ") and "-DCMAKE_TOOLCHAIN_FILE=" in c)
+    assert cmake.startswith("cmake <root>/llama.cpp ")
     assert "-DGGML_NEON=ON" in cmake and "-DFETCHCONTENT_FULLY_DISCONNECTED=ON" in cmake
     assert "make -j4 llama-cli llama-server" in image.calls()
     packages = image.output / "packages"
