@@ -71,12 +71,16 @@ log_warn() { echo "WARNING: $1" >&2; }
 {
 # Output types convert_hf_to_gguf.py writes directly.
 GGUF_CONVERT_TYPES=" f32 f16 bf16 q8_0 auto "
-# Types accepted by llama-quantize (llama.cpp v0.6.0).
+# Every quantization method of llama-quantize at the pin (QUANT_OPTIONS of tools/quantize/quantize.cpp, llama.cpp
+# b11429 = v0.6.0), except F16, BF16 and F32, which the converter writes itself, and COPY, which quantizes nothing;
+# its aliases Q3_K, Q4_K and Q5_K are accepted by normalize_gguf_type.
 GGUF_QUANT_TYPES=" Q4_0 Q4_1 Q5_0 Q5_1 Q8_0 Q2_K Q2_K_S Q3_K_S Q3_K_M Q3_K_L Q4_K_S Q4_K_M Q5_K_S Q5_K_M Q6_K \
-IQ1_S IQ1_M IQ2_XXS IQ2_XS IQ2_S IQ2_M IQ3_XXS IQ3_XS IQ3_S IQ3_M IQ4_NL IQ4_XS TQ1_0 TQ2_0 MXFP4_MOE "
-# Very low-bit i-quants are unusable without an importance matrix; other i-quants lose quality without one.
-GGUF_NEEDS_IMATRIX=" IQ1_S IQ1_M IQ2_XXS IQ2_XS IQ2_S "
-GGUF_WANTS_IMATRIX=" IQ2_M IQ3_XXS IQ3_XS IQ3_S IQ3_M IQ4_NL IQ4_XS "
+IQ1_S IQ1_M IQ2_XXS IQ2_XS IQ2_S IQ2_M IQ3_XXS IQ3_XS IQ3_S IQ3_M IQ4_NL IQ4_XS TQ1_0 TQ2_0 MXFP4_MOE Q1_0 Q2_0 "
+# llama-quantize refuses these without an importance matrix: their main tensors are of a type that requires one
+# (tensor_requires_imatrix of src/llama-quant.cpp at the pin: IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S, IQ3_XXS, and Q2_K in
+# a Q2_K_S file; IQ2_M is mostly IQ2_S). The other i-quants lose quality without one.
+GGUF_NEEDS_IMATRIX=" IQ1_S IQ1_M IQ2_XXS IQ2_XS IQ2_S IQ2_M IQ3_XXS Q2_K_S "
+GGUF_WANTS_IMATRIX=" IQ3_XS IQ3_S IQ3_M IQ4_NL IQ4_XS "
 }
 
 normalize_gguf_type() {
@@ -87,8 +91,9 @@ normalize_gguf_type() {
         BF16) echo "BF16" ;;
         F32|FP32) echo "F32" ;;
         INT8|Q8) echo "Q8_0" ;;
-        INT4|Q4) echo "Q4_K_M" ;;
-        Q5) echo "Q5_K_M" ;;
+        INT4|Q4|Q4_K) echo "Q4_K_M" ;;
+        Q5|Q5_K) echo "Q5_K_M" ;;
+        Q3_K) echo "Q3_K_M" ;;
         *) echo "$q" ;;
     esac
 }
