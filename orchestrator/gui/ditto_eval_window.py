@@ -411,7 +411,7 @@ class EvaluationWindow(QDialog):
             return []
         try:
             values = override_values("local" if choice["tiers"] else choice["provider"], choice["model"],
-                                     choice["effort"])
+                                     choice["effort"], ditto=self.ditto)
             chain = ditto_with(self.ditto, values).client.fallback_targets("chat")
         except Exception:  # noqa: BLE001 - no chain to name; the run reports a broken setting itself
             return []
@@ -478,7 +478,8 @@ class EvaluationWindow(QDialog):
 
         from orchestrator.Core.ai_override import ditto_with
         base, framework, factory = self.ditto, self.framework, self._factory
-        values = override_values("local" if choice["tiers"] else choice["provider"], choice["model"], choice["effort"])
+        values = override_values("local" if choice["tiers"] else choice["provider"], choice["model"], choice["effort"],
+                                 ditto=base)
 
         def make_ditto():
             return ditto_with(base, values)   # this run only; the saved settings stay unchanged

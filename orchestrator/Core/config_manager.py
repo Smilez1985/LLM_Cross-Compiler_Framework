@@ -179,8 +179,9 @@ class ConfigValue:
 class SettingsReload:
     """What ConfigManager.reload_user_config did: the keys whose value this process took from the file, the keys it
     kept its own value for, each with the reason (changed_here: set in this process and not saved since; environment:
-    an LLM_FRAMEWORK_* variable; explicit_file: the file given at start, e.g. `llm-cli -c`), and why the file could not
-    be read ("" when it could)."""
+    an LLM_FRAMEWORK_* variable; explicit_file: the file given at start, e.g. `llm-cli -c`; command_line: chosen for
+    one command, e.g. `ditto ask --provider`, set with the source "cli"), and why the file could not be read ("" when
+    it could)."""
     changed: Tuple[str, ...] = ()
     conflicts: Dict[str, str] = field(default_factory=dict)
     problem: str = ""
@@ -730,8 +731,9 @@ class ConfigManager:
                 "source_repositories", "default_enable_imatrix", "default_calibration_dataset",
             ]
             
-            # Only values changed at runtime via set(); defaults and env overrides must not
-            # become permanent, and values already in config.yml are kept from `data` above.
+            # Only values changed at runtime via set(); defaults, env overrides and a command's own choice (source
+            # "cli", `ditto ask --provider`) must not become permanent, and values already in config.yml are kept
+            # from `data` above.
             for key, val in self.config_values.items():
                 if val.source.source_type != "override":
                     continue
@@ -823,6 +825,8 @@ class ConfigManager:
         kind = current.source.source_type
         if kind == "environment":
             return "environment"
+        if kind == "cli":   # a one-command choice (`ditto ask --provider`): never saved, never replaced while it runs
+            return "command_line"
         if kind == "override" and (key not in self._disk_seen or self._disk_seen[key] != current.value):
             return "changed_here"
         if kind == "file" and self._explicit_file and current.source.source_path == self._explicit_file:

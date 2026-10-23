@@ -682,7 +682,7 @@ class ChatPanel(QWidget):
         ditto = self.ditto
         if choice.provider or choice.model:
             from orchestrator.Core.ai_override import ditto_with, override_values
-            ditto = ditto_with(self.ditto, override_values(choice.provider, choice.model))
+            ditto = ditto_with(self.ditto, override_values(choice.provider, choice.model, ditto=self.ditto))
         worker = chat_window.ChatWorker(ditto, question, self.history, self.confirmation.confirm)
         worker.use_tools = choice.use_tools
         return worker
