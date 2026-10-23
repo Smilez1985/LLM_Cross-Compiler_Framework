@@ -1487,11 +1487,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine Signatur zu überspringen oder einen Schlüssel von selbst zu übernehmen, und `pacman -Sy` (ein Teil-Upgrade) läuft
   nie. Unter Alpine kann das Framework selbst nicht laufen (onnxruntime, Teil seiner festgelegten Pakete, gibt es nicht
   für musl): Der Installer hält nach Docker an und verweist auf das Framework-Image. Jede andere Familie (Gentoo, Void,
-  NixOS, ...) hält, wenn etwas installiert werden muss, mit der Familie und den Anleitungen an. Neu:
-  `./install.sh --dry-run` zeigt den Plan (Familie, Paketverwaltung, Pakete, Repositorys, Fingerabdrücke der Schlüssel),
-  ohne etwas zu verändern, zu laden oder aufzurufen und ohne Root-Rechte, mit Exit-Code 0 oder 1, wie die Installation
-  enden würde. Tests führen den Installer gegen die `/etc/os-release`-Dateien echter Distributionen mit nachgebauten
-  Paketverwaltungen aus (`tests/test_install_distros.py`).
+  NixOS, ...) hält, wenn etwas installiert werden muss, mit der Familie und den Anleitungen an. Eine eigene
+  `docker-ce.repo` der Person, in der Dockers Repository ausgeschaltet ist, wird nie ersetzt oder entfernt (der
+  Installer hält an, bevor er etwas verändert, und sagt, wie man es einschaltet), und wo der Befehl `docker` Podman ist
+  (ein zweiter Lauf, oder früher installiertes `podman-docker`), geht der Installer Podmans Weg statt über die Gruppe
+  `docker`. Neu: `./install.sh --dry-run` zeigt den Plan (Familie, Paketverwaltung, Pakete, Repositorys,
+  Fingerabdrücke der Schlüssel), ohne etwas zu verändern, zu laden oder aufzurufen und ohne Root-Rechte, mit Exit-Code
+  0 oder 1, wie die Installation enden würde. Tests führen den Installer gegen die `/etc/os-release`-Dateien echter
+  Distributionen mit nachgebauten Paketverwaltungen aus (`tests/test_install_distros.py`).
 - **Wissen gehört immer zu einem Thema oder einem Target** (DECISIONS Runde 23 Punkte 1 und 8): Ein installiertes
   Wissenspaket liegt in `community/knowledge/<Thema oder Target>/<Paket>/` (früher installierte Pakete bleiben, wo sie
   sind), und jeder Auszug, den es bringt, trägt sein Thema oder Target. Ein Wissenspaket nennt sein Thema oder Target

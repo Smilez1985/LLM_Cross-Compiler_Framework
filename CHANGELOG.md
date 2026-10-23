@@ -1306,10 +1306,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   manager is told to skip a signature or to take a key on its own, and `pacman -Sy` (a partial upgrade) never runs. On
   Alpine the framework itself cannot run (onnxruntime, part of its pinned packages, has no musl build): the installer
   stops after Docker and points to the framework image. Any other family (Gentoo, Void, NixOS, ...) stops naming the
-  family and the manual pages when something must be installed. New: `./install.sh --dry-run` shows the plan (family,
-  package manager, packages, repositories, key fingerprints) without changing, downloading or calling anything and
-  without root, exit code 0 or 1 as the installation would end. Tests run the installer against the `/etc/os-release`
-  files of real distributions with fake package managers (`tests/test_install_distros.py`).
+  family and the manual pages when something must be installed. A `docker-ce.repo` of the person's own in which
+  Docker's repository is switched off is never replaced or removed (the installer stops before it changes anything and
+  says how to switch it on), and where the `docker` command is Podman (a second run, or `podman-docker` installed
+  earlier) the installer takes Podman's way instead of the `docker` group. New: `./install.sh --dry-run` shows the plan
+  (family, package manager, packages, repositories, key fingerprints) without changing, downloading or calling
+  anything and without root, exit code 0 or 1 as the installation would end. Tests run the installer against the
+  `/etc/os-release` files of real distributions with fake package managers (`tests/test_install_distros.py`).
 - **Knowledge always belongs to a topic or a target** (DECISIONS round 23 items 1 and 8): an installed knowledge pack
   lives in `community/knowledge/<topic or target>/<pack>/` (packs installed earlier stay where they are), and every
   excerpt it brings carries its topic or target. A knowledge pack names its topic or target in its manifest:

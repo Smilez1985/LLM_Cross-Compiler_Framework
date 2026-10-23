@@ -619,12 +619,23 @@ docker_rpm_repo_exists() {
     return 1
 }
 
+# Hält an, wenn es DOCKER_RPM_REPO schon gibt, aber ohne eingeschaltetes Repository für download.docker.com (etwa mit
+# enabled=0 oder auskommentiert) und auch sonst keins eingeschaltet ist: Die Datei gehört der Person (Dockers Anleitung
+# legt sie unter diesem Namen an). Der Installer ersetzt sie nicht und entfernt sie nie, auch nicht nach einer
+# gescheiterten Installation; er hält an, bevor er etwas verändert.
+docker_rpm_repo_check() {
+    if ! docker_rpm_repo_exists && { [ -e "$DOCKER_RPM_REPO" ] || [ -L "$DOCKER_RPM_REPO" ]; }; then
+        docker_stop "$DOCKER_RPM_REPO gibt es schon, aber Dockers Repository ist darin nicht eingeschaltet (enabled=0 oder auskommentiert); der Installer ändert und entfernt diese Datei nicht. Schalte es dort ein (enabled=1) oder benenne die Datei um."
+    fi
+}
+
 # Docker Engine aus Dockers rpm-Repository (Fedora, RHEL, CentOS Stream), wie Dockers Anleitung, aber ohne fremden
 # Schlüssel: Der Signaturschlüssel wird gegen DOCKER_RPM_KEY_FINGERPRINT geprüft und erst dann mit rpm übernommen; das
 # Repository nennt nur diese geprüfte Datei (gpgkey=file://), und dnf prüft die Signatur jedes Pakets (gpgcheck=1).
 install_docker_rpm() {
     local created=0 undone="" tools=()
     if ! command -v dnf &> /dev/null; then docker_stop "dnf fehlt auf diesem System."; fi
+    docker_rpm_repo_check
     log_info "Quelle: $DOCKER_DOWNLOAD_URL/$DOCKER_REPO. Ihr Schlüssel muss den Fingerabdruck $DOCKER_RPM_KEY_FINGERPRINT haben (Dockers Installationsanleitung)."
     # Nur, was fehlt: Fedora und RHEL bringen oft curl-minimal mit, das mit dem Paket curl streitet.
     command -v curl &> /dev/null || tools+=(curl)
@@ -804,10 +815,21 @@ setup_system() {
     docker_group
 }
 
+# Ist der Befehl docker Podman (podman-docker: 'docker --version' meldet "podman version ...")?
+docker_is_podman() {
+    local version
+    command -v docker &> /dev/null || return 1
+    version="$(docker --version 2> /dev/null)" || return 1
+    [[ "${version,,}" == podman* ]]
+}
+
 # Docker Permissions
 # Wir nehmen den User, der sudo aufgerufen hat (SUDO_USER), nicht root!
 docker_group() {
     REAL_USER="${SUDO_USER:-$USER}"
+    # Gab es docker schon (ein zweiter Lauf nach podman-docker, oder podman-docker, das die Person selbst installiert
+    # hat) und ist es Podman: derselbe Weg wie nach der Installation von podman-docker, ohne Gruppe docker.
+    if [ -z "$DOCKER_ROUTE" ] && docker_is_podman; then DOCKER_ROUTE=podman; fi
     if [ "$DOCKER_ROUTE" = "podman" ]; then podman_for_user; return 0; fi
     # Ohne Nachfrage (siebte Runde, Punkt 6), aber mit klaren Worten, was die Gruppe bedeutet.
     if ! groups "$REAL_USER" | grep &>/dev/null "\bdocker\b"; then
@@ -1161,6 +1183,7 @@ plan_docker() {
         apt-repo)
             echo "   Docker: fehlt -> Dockers apt-Repository $DOCKER_DOWNLOAD_URL/$DOCKER_REPO ($DOCKER_SUITE), sein Schlüssel nur mit dem Fingerabdruck $DOCKER_KEY_FINGERPRINT; apt-get install -y ${DOCKER_PACKAGES[*]}" ;;
         rpm-repo)
+            docker_rpm_repo_check
             echo "   Docker: fehlt -> Dockers dnf-Repository $DOCKER_DOWNLOAD_URL/$DOCKER_REPO, sein Schlüssel nur mit dem Fingerabdruck $DOCKER_RPM_KEY_FINGERPRINT; dnf install -y ${DOCKER_PACKAGES[*]}$service" ;;
         podman)
             echo "   Docker: fehlt -> Docker veröffentlicht für ${OS_ID:-dieses System} kein Repository; das Paket der Distribution: ${PKG_ARGV[*]} ${DOCKER_PACKAGES[*]} (Podman mit dem Befehl docker); Podmans Docker-kompatible Schnittstelle für deinen Benutzer (systemctl --user enable --now podman.socket)" ;;
