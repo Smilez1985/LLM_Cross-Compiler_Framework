@@ -490,7 +490,9 @@ builds, it asks the framework's tools, with the same permissions as an AI client
 cloud provider, personal details are replaced by placeholders.
 
 1. **Question.** In the GUI chat, or with `llm-cli ditto ask "<question>"` (`--no-tools` answers without tools;
-   `--provider` and `--model` override the AI settings for this question).
+   `--provider` and `--model` override the AI settings for this question; such a choice is never saved, also not
+   by a settings change during the question, and another provider does not inherit the saved provider's model,
+   address or sign-in method).
 2. **Provider and model.** The `LLMClient` takes provider, model and effort for the task from the AI settings
    and the preset in `configs/llm_providers.yml`. For the `local` provider it reads address, key and model of the
    running managed `llama-server`. In offline mode only local providers are used.
@@ -499,13 +501,17 @@ cloud provider, personal details are replaced by placeholders.
    placeholders, which are mapped back locally in the answer.
 4. **Tool loop.** The model may call tools, at most 8 model turns per question. Each call goes through the tool
    registry as actor `ditto`. A call that needs confirmation shows its title and every argument: a dialog in the
-   GUI, a prompt in the CLI; without a terminal the answer is no. Tool results go back to the model as untrusted
-   data blocks.
+   GUI, a prompt in the CLI; without a terminal, and with Ctrl+C at the prompt, the answer is no. Tool results go
+   back to the model as untrusted data blocks. Every tool call is answered before the conversation goes on: a call
+   in an answer cut off at the length limit never runs and gets an error result.
 5. **Errors.** Provider errors are typed and explained (missing credit, rejected key, rate limit, refusal, cut-off
    answer). Refusals and outages move on along the fallback chain. An error is never shown or stored as an
-   answer.
+   answer; when tools already ran in the failed turn, the message names them and says that Ditto will not
+   remember the turn. In the terminal, the answer, error texts and tool lines lose their control characters.
 6. **History.** The finished turn is appended to `chat_history.json`. A long conversation is summarized and
-   continued as a new conversation; earlier turns are never edited.
+   continued as a new conversation, and so is a conversation with tool turns asked without tools (tool turns need
+   the tool definitions); earlier turns are never edited. A saved conversation whose tool calls and results do not
+   pair up starts anew.
 7. **Only this computer's tools.** Ditto's hands are the framework's own tools on this computer: the same registry,
    permissions, questions and audit log every MCP client gets. Ditto never connects to a framework on another
    computer. An earlier development version had such a remote mode; it was removed before a release (decision of

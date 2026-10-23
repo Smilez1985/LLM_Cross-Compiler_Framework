@@ -938,7 +938,10 @@ llm-cli ditto ask FRAGE [--no-tools] [--provider TEXT] [--model TEXT]
 Stellt Ditto eine Frage. Ditto darf die Tools des Frameworks im Rahmen deiner Berechtigungen nutzen; Tools, die auf
 „ask“ stehen, zeigen das Tool und jedes Argument und brauchen deine Bestätigung im Terminal (ohne Terminal werden sie
 abgelehnt). Die Tools sind die eigenen des Frameworks auf diesem Computer. Die Antwort geht nach stdout,
-Tool-Hinweise und Fehler nach stderr. Nichts wird im Chatverlauf gespeichert.
+Tool-Hinweise und Fehler nach stderr, ohne Steuerzeichen (Escape-Sequenzen, Wagenrückläufe, Bidi- und
+Nullbreitenzeichen). Strg+C oder das Ende der Eingabe an einer Bestätigung ist ein Nein. Nichts wird im Chatverlauf
+gespeichert, und `--provider`/`--model` gelten nur für diesen Befehl: Sie werden nie gespeichert, auch nicht, wenn ein
+Tool während der Frage die Einstellungen speichert.
 
 | Option | Bedeutung |
 |---|---|
@@ -1832,7 +1835,8 @@ llm-cli module generate-ai PROBE_FILE [--provider TEXT] [--model TEXT]
 ```
 
 Ditto schlägt ein Target-Modul aus einer Hardware-Probe-Datei vor (`target_hardware_config.txt`, siehe
-[scan](#scan)). Der ganze Vorschlag wird als JSON ausgegeben; erst nach deiner Bestätigung wird das Modul im
+[scan](#scan)). Der ganze Vorschlag wird als JSON ausgegeben, versteckte Zeichen und Steuerzeichen als
+`\u`-Escapes; erst nach deiner Bestätigung wird das Modul im
 eingestellten Targets-Ordner angelegt (und vom Modulgenerator erneut geprüft). Ditto nutzt die gespeicherte
 Anmeldung des Anbieters ([`llm-cli ditto login`](#ditto-login)); der Befehl fragt selbst nie nach einem Schlüssel.
 Weder `module create` noch `module generate-ai` hängt Seiten aus der Wissensbasis an; das ist eine Option auf der

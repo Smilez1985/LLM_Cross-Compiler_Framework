@@ -2350,6 +2350,40 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Dittos Tool-Aufrufe und ihre Ergebnisse passen immer zusammen** (Übernahme aus dem behaltenen Worktree
+  ditto-rewire-verified): Jeder Anbieter lehnt ein Gespräch ab, das nach einem unbeantworteten Tool-Aufruf
+  weitergeht, also scheiterte jede spätere Frage auf so einem Verlauf. Eine an der Längengrenze abgeschnittene
+  Antwort ließ einen Tool-Aufruf unbeantwortet; die Tool-Schleife beantwortet ihn jetzt mit einem Fehlerergebnis
+  (der Aufruf läuft nie), und ein Verlauf, den eine frühere Version mit einem offenen Aufruf am Ende gespeichert hat,
+  wird vor der nächsten Frage durch angehängte Ergebnisse geschlossen (frühere Runden bleiben unverändert). Ein
+  gespeichertes Gespräch, dessen Aufrufe und Ergebnisse nicht zusammenpassen (ein OpenAI-kompatibler Server kann so
+  eines angenommen haben), beginnt neu mit dem Hinweis, dass es nicht gelesen werden konnte, und ein Wert
+  `transcript` oder `messages`, der keine Liste ist, bricht das Laden des Chats nicht mehr ab. Eine Umsetzung in
+  `orchestrator/llm/tool_loop.py` (`CALL_NOT_RUN`, `open_tool_calls`, `close_open_calls`,
+  `conversation_is_consistent`). Regressionstests: `tests/test_ditto.py` `TestToolCallsAndResultsPairUp`.
+- **Eine gescheiterte Ditto-Runde, in der schon Tools liefen, sagt das**: Scheitert der Anbieter oder lehnt das
+  Modell ab, nachdem in der Runde schon Tools liefen, nennt die Meldung sie und sagt, dass Ditto sich die Runde
+  nicht merkt, damit du prüfst, was sie getan haben (vielleicht wurde ein Build gestartet), bevor du noch einmal
+  fragst. Eine Ablehnung in der Tool-Schleife nimmt denselben Weg. Regressionstest: `tests/test_ditto.py`
+  `test_a_failed_turn_after_tools_ran_names_them_and_says_it_is_not_remembered`.
+- **Ein Gespräch mit Tool-Runden, das ohne Tools gefragt wird, geht als neues weiter**: **Ohne Werkzeuge
+  antworten** im Chat-Bereich schickte die früheren Tool-Aufrufe und Ergebnisse ohne Tool-Definitionen, was Claude
+  ablehnt. So ein Gespräch wird jetzt wie ein langes zu einem neuen zusammengefasst, und der Hinweis sagt, warum
+  (`ChatReply.new_conversation_reason`, `chat.notice.new_conversation_no_tools`). Regressionstests:
+  `tests/test_ditto.py` `test_a_conversation_with_tool_turns_asked_without_tools_continues_as_a_new_one`,
+  `tests/test_chat_panel.py` `test_the_new_conversation_notice_says_why`.
+- **Strg+C an Dittos Bestätigung im Terminal ist ein Nein**: `llm-cli ditto ask` stürzte ohne stdin ab, und Strg+C
+  oder das Ende der Eingabe an der Bestätigung oder an der y/a/n-Rückfrage einer dauerhaften Freigabe kam beim Modell
+  als gescheiterter Tool-Aufruf an („Abort“), ohne Zeile `not_confirmed` im Audit-Log. Beides ist jetzt ein
+  protokolliertes Nein; `module generate-ai` meldet eine Probe, die sich nicht lesen lässt (ein Ordner, keine
+  Berechtigung), oder ein Modul, das sich nicht speichern lässt, statt eines Tracebacks. Regressionstests:
+  `tests/test_ditto.py` `TestConfirmations`.
+- **Der Offline-Modus lehnt beim Speichern einen eigenen Server außerhalb dieses Computers und des lokalen Netzes
+  ab**: Die KI-Einstellungen (Dialog, Anmeldung, MCP `update_settings`) lehnten im Offline-Modus nur Cloud-Vorlagen
+  ab, also wurde ein eigener Server mit öffentlicher Adresse gespeichert und erst abgelehnt, wenn Ditto gefragt
+  wurde. `AISettingsChange.problems()` nutzt jetzt die Regel der LLM-Schicht selbst (`preset.is_local(address)`).
+  Regressionstests: `tests/test_ai_settings_change.py` und `tests/test_dialogs.py`
+  `test_offline_mode_accepts_a_custom_server_only_on_the_local_network`.
 - **Ein Modell aus dem alten Download-Cache von Hugging Face funktioniert wieder im Build** (A6, „bleiben nutzbar“):
   Der Hugging-Face-Browser der GUI speicherte bisher in den eigenen Cache von huggingface_hub im Modellordner, wo eine
   Datei ein Link auf einen Blob ist, der nach seiner Prüfsumme heißt. Ein Build einer solchen GGUF-Datei band sie
@@ -2810,6 +2844,31 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
+- **Ein für einen Befehl gewählter Anbieter oder ein Modell wird nie zur gespeicherten Einstellung** (Übernahme aus
+  dem behaltenen Worktree ditto-rewire-verified): `llm-cli ditto ask --provider/--model` und der Aufwand von `ditto
+  eval` wurden als gewöhnliche Laufzeitwerte gesetzt, die `save_user_config` schreibt, also speicherte ein Speichern
+  der Einstellungen während des Befehls (das Tool `update_settings`, das du bestätigst) die Wahl des einen Befehls als
+  KI-Einstellung. Sie werden jetzt mit der Einstellungsquelle `cli` gesetzt, die nie gespeichert wird und die ein
+  Neuladen aus `config.yml` nicht ersetzt (Grund `command_line`). Ein anderer Anbieter als der gespeicherte lässt für
+  die Frage oder den Lauf auch Modell, Modelle je Aufgabe, Serveradresse und Anmeldeart des gespeicherten weg
+  (`Core/ai_override.override_values(..., ditto=...)`, gemeinsam für CLI, Modul-Assistent, **Für diese Frage** im
+  Chat-Bereich und **Ditto > Evaluation...**), sodass eine gespeicherte Ollama- oder eigene Adresse nie die Anfragen
+  eines anderen Anbieters bekommt; ein Modell gilt für jede Aufgabe. Regressionstests: `tests/test_ditto.py`
+  `test_one_command_provider_and_model_are_never_saved`, `test_the_eval_effort_is_never_saved`,
+  `tests/test_ditto_models_core.py` `TestOneRunProviderSwitch`.
+- **Ausgaben des Modells können das Terminal nicht steuern**: `llm-cli ditto ask` gab die Antwort, Fehlertexte, die
+  einen Anbieter oder ein Tool zitieren, und Tool-Zeilen (ein erfundener Tool-Name, der Fehler eines Handlers) so aus,
+  wie sie kamen, also konnten von einem Build-Log oder einer Webseite gesteuerte Escape-Sequenzen den Bildschirm, den
+  Fenstertitel oder die Zwischenablage überschreiben. Steuerzeichen (C0 mit Wagenrücklauf, DEL, C1) und
+  Formatzeichen (Bidi-Steuerzeichen, Nullbreitenzeichen) werden dort entfernt; der Vorschlag von `module generate-ai`
+  und seine Fakten zeigen versteckte Zeichen als Escapes (`tools.confirmation.visible`). Regressionstests:
+  `tests/test_ditto.py` `test_ditto_ask_keeps_control_characters_of_the_model_out_of_the_terminal` und die Tests
+  daneben.
+- **Die Modellliste des KI-Einstellungsdialogs schickt nie einen Schlüssel an die Adresse des gespeicherten
+  Anbieters**: Wer einen anderen Anbieter wählte, bevor er dessen Adresse eintippte (ein gespeichertes Ollama im
+  lokalen Netz, dann **custom**), ließ die Modelle beim Server des gespeicherten Anbieters mit dem Schlüssel des
+  anderen auflisten. Das Adressfeld zählt für die Liste jetzt immer, ein leeres bedeutet den eigenen Endpunkt des
+  Anbieters. Regressionstest: `tests/test_dialogs.py` `test_model_list_never_sends_a_key_to_the_saved_providers_url`.
 - **Das Hugging-Face-Token geht nur an huggingface.co, auch wenn `HF_ENDPOINT` einen anderen Host nennt** (Review
   der Kette hf): huggingface_hub schickt seine API-Aufrufe an den Host in der Umgebungsvariable `HF_ENDPOINT` (einen
   Mirror). Die Commit-Abfrage des Downloads im GUI-Browser und die Hub-Liste von **Alte Downloads übernehmen…**

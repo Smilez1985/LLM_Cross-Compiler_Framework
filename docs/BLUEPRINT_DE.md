@@ -512,7 +512,9 @@ Builds, fragt es die Tools des Frameworks, mit denselben Berechtigungen wie ein 
 Cloud-Anbieter geht, werden persönliche Angaben durch Platzhalter ersetzt.
 
 1. **Frage.** Im Chat der GUI oder mit `llm-cli ditto ask "<Frage>"` (`--no-tools` antwortet ohne Tools;
-   `--provider` und `--model` überschreiben die KI-Einstellungen für diese eine Frage).
+   `--provider` und `--model` überschreiben die KI-Einstellungen für diese eine Frage; so eine Wahl wird nie
+   gespeichert, auch nicht durch eine Änderung der Einstellungen während der Frage, und ein anderer Anbieter erbt
+   weder Modell noch Adresse noch Anmeldeart des gespeicherten).
 2. **Anbieter und Modell.** Der `LLMClient` nimmt Anbieter, Modell und Aufwand für die Aufgabe aus den
    KI-Einstellungen und der Vorlage in `configs/llm_providers.yml`. Für den Anbieter `local` liest er Adresse,
    Schlüssel und Modell des laufenden verwalteten `llama-server`. Im Offline-Modus werden nur lokale Anbieter
@@ -522,13 +524,19 @@ Cloud-Anbieter geht, werden persönliche Angaben durch Platzhalter ersetzt.
    Platzhalter ersetzt, die in der Antwort lokal zurückübersetzt werden.
 4. **Tool-Schleife.** Das Modell darf Tools aufrufen, höchstens 8 Modellrunden je Frage. Jeder Aufruf läuft als
    Akteur `ditto` über die Tool-Registry. Ein Aufruf, der eine Bestätigung braucht, zeigt seinen Titel und jedes
-   Argument: als Dialog in der GUI, als Rückfrage in der CLI; ohne Terminal lautet die Antwort Nein.
-   Tool-Ergebnisse gehen als nicht vertrauenswürdige Datenblöcke an das Modell zurück.
+   Argument: als Dialog in der GUI, als Rückfrage in der CLI; ohne Terminal, und mit Strg+C an der Rückfrage,
+   lautet die Antwort Nein. Tool-Ergebnisse gehen als nicht vertrauenswürdige Datenblöcke an das Modell zurück.
+   Jeder Tool-Aufruf wird beantwortet, bevor das Gespräch weitergeht: Ein Aufruf in einer an der Längengrenze
+   abgeschnittenen Antwort läuft nie und bekommt ein Fehlerergebnis.
 5. **Fehler.** Anbieterfehler sind typisiert und werden erklärt (kein Guthaben, abgelehnter Schlüssel,
    Ratenlimit, Ablehnung, abgeschnittene Antwort). Bei Ablehnungen und Ausfällen geht es entlang der Fallback-Kette
-   weiter. Ein Fehler wird nie als Antwort angezeigt oder gespeichert.
+   weiter. Ein Fehler wird nie als Antwort angezeigt oder gespeichert; liefen in der gescheiterten Runde schon
+   Tools, nennt die Meldung sie und sagt, dass Ditto sich die Runde nicht merkt. Im Terminal verlieren die Antwort,
+   Fehlertexte und Tool-Zeilen ihre Steuerzeichen.
 6. **Verlauf.** Die fertige Runde wird an `chat_history.json` angehängt. Ein langes Gespräch wird zusammengefasst
-   und als neues Gespräch fortgesetzt; frühere Runden werden nie verändert.
+   und als neues Gespräch fortgesetzt, ebenso ein Gespräch mit Tool-Runden, das ohne Tools gefragt wird
+   (Tool-Runden brauchen die Tool-Definitionen); frühere Runden werden nie verändert. Ein gespeichertes Gespräch,
+   dessen Tool-Aufrufe und Ergebnisse nicht zusammenpassen, beginnt neu.
 7. **Nur die Tools dieses Computers.** Dittos Hände sind die eigenen Tools des Frameworks auf diesem Computer:
    dieselbe Registry, dieselben Berechtigungen, Fragen und dasselbe Audit-Log, die jeder MCP-Client bekommt. Ditto
    verbindet sich nie mit einem Framework auf einem anderen Computer. Eine frühere Entwicklungsversion hatte so einen
