@@ -543,32 +543,41 @@ def _validate_memory_usage(max_memory_percent: float) -> ValidationResult:
 @dataclass
 class DockerEnvironment:
     """What the Docker check found: the daemon behind the framework's Docker client answered a ping (`error` says why
-    not), the docker command is on PATH, and `docker buildx version` succeeded (None: not asked or no answer)."""
+    not), the docker command is on PATH, and `docker buildx version` succeeded (None: not asked or no answer).
+    `engine`: 'docker', or 'podman' for Podman's Docker-compatible interface ('' unknown; utils/docker_engine.py);
+    under Podman buildx is not asked: Podman has no BuildKit."""
     reachable: bool
     error: str = ""
     docker_cli: bool = False
     buildx: Optional[bool] = None
+    engine: str = ""
 
 
 def check_docker_environment(client: Any) -> DockerEnvironment:
     """The one Docker check of the build engine (its start, since 2025) and of Mojo: ping the framework's Docker
-    client, the one builds use (the docker command can be set to another daemon by a docker context), then, when the
-    docker command is on PATH, ask for BuildKit's buildx (at most 15 seconds). Never raises: the engine runs it while
-    the framework starts. The question goes through helpers.execute_command, the one runner of a short command
-    (stdin closed, so an MCP server's stdio stream never reaches docker; no console window on Windows)."""
+    client, the one builds use (the docker command can be set to another daemon by a docker context), name its engine
+    (Docker or Podman), then, for Docker and when the docker command is on PATH, ask for BuildKit's buildx (at most 15
+    seconds). Never raises: the engine runs it while the framework starts. The question goes through
+    helpers.execute_command, the one runner of a short command (stdin closed, so an MCP server's stdio stream never
+    reaches docker; no console window on Windows)."""
     if client is None:
         return DockerEnvironment(False, "no client")
     try:
         client.ping()
     except Exception as e:  # noqa: BLE001 - any failure means: builds cannot reach the daemon
         return DockerEnvironment(False, str(e))
+    from orchestrator.utils.docker_engine import engine_name, ensure_docker_host
+    ensure_docker_host()   # the docker command below talks to the same engine as the client
+    engine = engine_name(client)
+    if engine == "podman":
+        return DockerEnvironment(True, docker_cli=bool(shutil.which("docker")), engine=engine)
     if not shutil.which("docker"):
-        return DockerEnvironment(True)
+        return DockerEnvironment(True, engine=engine)
     from orchestrator.utils.helpers import execute_command
     code, _out, _err = execute_command(["docker", "buildx", "version"], timeout=15)
     if code == -1:  # docker could not be started or gave no answer in time: buildx unknown
-        return DockerEnvironment(True, docker_cli=True)
-    return DockerEnvironment(True, docker_cli=True, buildx=code == 0)
+        return DockerEnvironment(True, docker_cli=True, engine=engine)
+    return DockerEnvironment(True, docker_cli=True, buildx=code == 0, engine=engine)
 
 
 def _validate_docker_version() -> ValidationResult:
