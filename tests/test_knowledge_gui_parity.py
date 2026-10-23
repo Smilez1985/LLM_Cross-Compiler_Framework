@@ -238,9 +238,9 @@ def recording_sources(monkeypatch):
     from orchestrator.Core import knowledge_sources
     calls, real = [], knowledge_sources.sources
 
-    def spy(rag, kind="any"):
+    def spy(rag, kind="any", topic=None):
         calls.append((kind, threading.current_thread().name))
-        return real(rag, kind)
+        return real(rag, kind, topic)
     monkeypatch.setattr(knowledge_sources, "sources", spy)
     return calls
 
@@ -744,6 +744,7 @@ def test_export_the_knowledge_base_with_its_id_to_the_keys_in_a_key_file(qapp, w
         assert dialog.license_combo.currentText() == "NOASSERTION", "the default of zoo export knowledge"
         dialog.author_edit.setText("pat")
         dialog.id_edit.setText("board-notes")
+        dialog.scope.name.setCurrentText("rk3588")   # a knowledge pack names its topic (round 23 item 1)
         dialog.encrypt_combo.setCurrentIndex(dialog.encrypt_combo.findData("keys"))
         dialog.recipient_files = [str(tmp_path / "friend.keys")]
     ended = export_through(monkeypatch, qapp, "knowledge", None, fill)
@@ -753,9 +754,10 @@ def test_export_the_knowledge_base_with_its_id_to_the_keys_in_a_key_file(qapp, w
         hub.export_btn.click()
         args, kwargs, _ = calls[0]
         assert args == ("knowledge", None) and kwargs["pack_id"] == "board-notes"
+        assert (kwargs["topic"], kwargs["target"]) == ("rk3588", None)
         assert kwargs["license"] == "NOASSERTION" and len(kwargs["recipients"]) == 1
         result = ended[0].result
-        assert result.encrypted and result.manifest.id == "board-notes"
+        assert result.encrypted and result.manifest.id == "board-notes" and result.manifest.topic == "rk3588"
         data, _ = cp.decrypt_pack(result.path.read_bytes(), identity=friend)
         (tmp_path / "plain.zip").write_bytes(data)
         with zipfile.ZipFile(tmp_path / "plain.zip") as zf:

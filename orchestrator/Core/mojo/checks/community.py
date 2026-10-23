@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Mojo check: installed community packs against the cached signed index
+LLM Cross-Compiler Framework - Mojo check: installed community packs against the cached signed index, and the loose
+knowledge files that wait to be sorted into a topic or target folder
 """
 
 from typing import List
@@ -37,4 +38,24 @@ def check_community(framework) -> List[Finding]:
                                     f"Community {name} was imported from a file without a signed index entry."))
         else:
             findings.append(_ok("community", f"community.{prov.id}", f"Community {name} ({trust.value if trust else '?'})"))
-    return findings
+    return findings + check_loose_knowledge(cm)
+
+
+LOOSE_WHY = ("Knowledge always belongs to a topic or a target (DECISIONS round 23 item 1). A loose file was never checked "
+             "like a knowledge pack (its pages, their sources, the licence files), so it is not imported into the "
+             "knowledge base until it is sorted into a topic or target folder.")
+
+
+def check_loose_knowledge(cm) -> List[Finding]:
+    """The loose knowledge files (CommunityManager.loose_knowledge): a warning with each file's name, never imported
+    until the person sorts it (`llmcf knowledge loose`, the Community Hub's Sort loose knowledge...). Reads the folder
+    only."""
+    lister = getattr(cm, "loose_knowledge", None)
+    loose = lister() if callable(lister) else []
+    if not loose:
+        return []
+    names = ", ".join(item.label for item in loose[:10]) + (f" and {len(loose) - 10} more" if len(loose) > 10 else "")
+    return [Finding("community", "community.knowledge.loose", Severity.WARN,
+                    f"{len(loose)} loose knowledge file(s) are not imported into the knowledge base: {names}",
+                    "Sort each into a topic or target folder: it is checked like a knowledge pack, then imported.",
+                    where=str(cm.knowledge_dir), why=LOOSE_WHY, cannot="person", steps=("knowledge.loose",))]

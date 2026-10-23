@@ -1265,6 +1265,20 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **Knowledge always belongs to a topic or a target** (DECISIONS round 23 items 1 and 8): an installed knowledge pack
+  lives in `community/knowledge/<topic or target>/<pack>/` (packs installed earlier stay where they are), and every
+  excerpt it brings carries its topic or target. A knowledge pack names its topic or target in its manifest:
+  `llm-cli zoo export knowledge` needs `--topic` or `--target` (a target of this computer), as do the export window
+  (**Belongs to:**) and the tool `export_pack`; a pack made before that still verifies and installs, with its id as its
+  topic, which the summary says and only your confirmation accepts (no standing approval covers it).
+  `search_knowledge` and `list_knowledge_sources` take `topic`, `llm-cli knowledge sources --topic` and the new field
+  and column **Topic or target** in **Tools > Knowledge Sources...** narrow the list. A loose knowledge file is listed
+  (`llm-cli knowledge loose`, Mojo, **Sort loose knowledge...** in the Community Hub) and sorted into a topic or
+  target folder (`llm-cli knowledge sort NAME --topic|--target`) through the checks of an installed pack, then
+  imported. The knowledge snapshot of a target pack (`knowledge/initial_knowledge.json`) is checked like a knowledge
+  pack and imported into the recipient's knowledge base under that target, with a snapshot first; the README the
+  module wizard writes next to it says so. The module wizard's temporary knowledge export goes to a private scratch
+  folder instead of `community/knowledge/`.
 - **The GUI's Hugging Face browser downloads into the models folder's `hf/` folder, checked, like an AI's download**
   (maintainer decision A6; consolidation chain hf). New location: `<models folder>/hf/<owner>--<name>/<first 12
   characters of the commit>/<file>`, the same folder as an AI's `download_hf_file` (the Builder keeps staging whole
@@ -2117,6 +2131,23 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   and a run without a result (a crash, a time-out: one warning with what hadolint wrote). The check stays advisory:
   the build always goes on. CONTRIBUTING's local hadolint command pins the image by digest
   (`hadolint/hadolint:v2.15.1@sha256:32dac941...`, FRESHNESS_PLAN F-5) and lists all five Dockerfiles CI lints.
+- **A newer version of a knowledge pack left the old version's excerpts behind** (DECISIONS round 23 item 2): pack
+  pages are stored piece by piece without replacing, so a changed or dropped page kept its old excerpts. Every excerpt
+  now carries the installed pack's content digest; once every page of the new version is in, the excerpts of the
+  older one are removed (`RAGManager.remove_pack_leftovers`), per pack and page source, never those of other packs or
+  your own pages; a sorted loose file also replaces the excerpts an earlier version imported from it unsorted. The
+  snapshot before the import stays. A pack page that failed to import used to be written only to
+  the log; why a pack waits is now said after the install (`last_sync_problem`): only why the installed pack waits
+  (another pack that waits is named when the knowledge base starts), and the Community Hub offers the list of
+  snapshots to delete only when the snapshot taken first did not fit. A sorted loose file gets a name that is free in
+  its folder before you are asked (also when the file lay in a folder of that topic), never a Windows device name,
+  and its sort never removes the excerpts of an installed pack of the same name or of a target pack. A knowledge pack
+  whose folder exists already is refused before the question, as other packs are. Windows keeps no execute bit, so
+  an installed pack with scripts made on Linux or macOS (every target the module wizard makes) never matched its
+  digest there: its knowledge snapshot would never be imported and **Check installed packs** called it changed. The
+  provenance now also holds the pack's digest with the modes as the file system keeps them (only where it differs;
+  the contents stay the manifest's, so a file changed later is still caught), and both checks accept it. Crawled
+  pages already replaced their earlier excerpts and are stored right after their download (unchanged).
 - **A model from the old Hugging Face download cache works in a build again** (A6, "stay usable"): the GUI's Hugging
   Face browser used to save into huggingface_hub's own cache inside the models folder, where a file is a link to a
   blob named by its checksum. A build of such a GGUF file mounted it under that checksum name, so the build no longer
@@ -2550,6 +2581,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   unchecked (on Windows as Administrator). The virtual environment now keeps the pip that comes with Python, which
   is enough for `--require-hashes --no-deps`; the installer test holds every pip call to the hash-pinned export.
   `install.bat` downloads nothing else unchecked (winget checks the Python installer against its manifest's SHA256).
+- **Loose knowledge files are no longer imported without the pack checks** (DECISIONS round 23 item 1): every `.json`
+  file in `community/knowledge/` and every `knowledge.json` in a folder without the pack's provenance was imported
+  into the knowledge base at each start, with no manifest, signature, quarantine or validator. Only installed packs
+  are imported now, and only while their files match what was installed; a loose file waits until the person sorts it
+  through the checks of an installed pack. A pack's page can no longer set the fields the import sets itself
+  (`origin_pack`, `origin_sha256`, `topic`, `target`), and a topic or target reaches an AI client only as a plain name.
 - **The Hugging Face token goes only to huggingface.co, also when `HF_ENDPOINT` names another host** (review of
   chain hf): huggingface_hub sends its API calls to the host in the `HF_ENDPOINT` environment variable (a mirror).
   The commit lookup of the GUI browser's download and the Hub list of **Take over old downloads...** sent the token

@@ -2952,8 +2952,9 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   die Schaltfläche *Finish* des Assistenten gesperrt (die Seite sagt, warum), damit der Schnappschuss jede gecrawlte
   Seite enthält; stammt keine gespeicherte Seite von diesen URLs, sagt der Assistent, dass kein Schnappschuss
   angehängt wurde. Der Rest deiner Wissensbasis kommt nie in ein Modul, und `llm-cli module create` und
-  `module generate-ai` hängen nichts an. Das Framework nimmt einen solchen Schnappschuss nicht in eine Wissensbasis
-  auf; zum Teilen von Wissen exportierst du ein Wissens-Pack.
+  `module generate-ai` hängen nichts an. Auf deinem Computer nimmt das Framework einen solchen Schnappschuss nicht auf
+  (seine Seiten sind schon in deiner Wissensbasis); exportierst du das Target als Pack, nimmt das Framework des
+  Empfängers ihn unter diesem Target auf (siehe [Wissen gehört zu einem Thema oder einem Target](#wissen-gehört-zu-einem-thema-oder-einem-target)).
 - **Export für die Community:** Die letzte Seite des Assistenten bietet außerdem **Export for community after
   creating** an (siehe [Export für die Community](#export-für-die-community)).
 - **Board-Empfehlung:** Nach einer Probe empfiehlt der Builder das Board des passenden Targets, mit der Angabe, woher
@@ -3182,14 +3183,52 @@ und **Import file...** im Hub:
    sich nur die Groß- und Kleinschreibung unterscheidet), mit einer Herkunftsdatei `.lcf-provenance.json` (Quelle,
    Vertrauensstufe, Hashes, Signierer, Zeit). Alles, was scheitert, wird entfernt.
 
-Targets kommen nach `targets/`, Rezepte nach `community/recipes/`, Wissen nach `community/knowledge/`. Ein
-Wissens-Pack wird direkt nach seiner Installation in die Wissensbasis aufgenommen oder, wenn die Wissensbasis
+Targets kommen nach `targets/`, Rezepte nach `community/recipes/`, Wissen in den Ordner seines Themas oder Targets
+in `community/knowledge/` (siehe [Wissen gehört zu einem Thema oder einem Target](#wissen-gehört-zu-einem-thema-oder-einem-target)).
+Ein Wissens-Pack wird direkt nach seiner Installation in die Wissensbasis aufgenommen oder, wenn die Wissensbasis
 ausgeschaltet ist, sobald sie eingeschaltet wird. Bevor seine erste Seite aufgenommen wird, wird die Wissensbasis als
 Schnappschuss gesichert (`pre_pack_<Zeit>`), damit sich der Import rückgängig machen lässt (unveröffentlicht). Passt
 dieser Schnappschuss nicht mehr auf die Platte, wird nichts aufgenommen: das Pack bleibt installiert und wird
 aufgenommen, sobald Platz da ist. Ein Pack, das sich noch nicht aufnehmen lässt (zum Beispiel offline ohne das
 Embedding-Modell), wird beim nächsten Start ohne weiteren Schnappschuss noch einmal versucht; ein erneut installiertes
 Pack bekommt einen neuen.
+
+### Wissen gehört zu einem Thema oder einem Target
+
+Unveröffentlicht (DECISIONS Runde 23 Punkte 1, 2 und 8). Jedes geteilte Wissen gehört zu einem Thema (zum Beispiel
+`llama.cpp`) oder zu einem Target (zum Beispiel `Rockchip`), und so wird es auch auf der Platte und in der Wissensbasis
+gehalten:
+
+- **Ordner:** Ein installiertes Wissens-Pack liegt in `community/knowledge/<Thema oder Target>/<Pack>/` mit seiner
+  `.lcf-provenance.json` (ein Pack, das eine frühere Version installiert hat, bleibt in `community/knowledge/<Pack>/`
+  und funktioniert weiter). Ein Pack nennt sein Thema oder Target im Manifest; ein Pack, das erstellt wurde, bevor
+  Packs das taten, bekommt seine ID als Thema, was die Zusammenfassung der Installation sagt und deine Bestätigung
+  annimmt (keine dauerhafte Freigabe einer KI deckt das ab).
+- **Keine losen Dateien:** Eine `.json`-Datei direkt in `community/knowledge/` oder in einem Themenordner, oder eine
+  `knowledge.json` ohne die Herkunftsdatei des Packs, wird nie importiert. `llm-cli knowledge loose`, Mojo und **Lose
+  Wissensdateien einsortieren...** im Community Hub listen sie; eine davon in ein Thema oder Target einzusortieren
+  prüft sie wie ein installiertes Wissens-Pack (in der Quarantäne: eine Liste von Seiten, jede mit ihrer Quelle; die
+  Lizenztexte und die `NOTICE`, die ihre Volltext-Seiten brauchen), zeigt die Zusammenfassung mit „Nein“ als Vorgabe
+  und verschiebt sie erst dann in den Ordner (Vertrauensstufe `local`) und importiert sie. Der vorläufige
+  Wissens-Export des Modul-Assistenten landet in einem privaten Arbeitsordner, nie in `community/knowledge/`. Ein Pack,
+  dessen Dateien sich nach der Installation geändert haben, wird ebenfalls nicht importiert; warum ein Pack wartet,
+  wird nach der Installation gesagt, nicht nur ins Log geschrieben.
+- **Auszüge:** Jeder Auszug eines Packs trägt sein Thema oder Target; eine Seite des Packs kann es nicht setzen, auch
+  nicht das Pack, aus dem sie angeblich stammt. `search_knowledge` und `list_knowledge_sources` nehmen `topic` (ein
+  Thema oder ein Target), `llm-cli knowledge sources --topic` und das Feld **Thema oder Target** in **Tools >
+  Wissensquellen...** grenzen die Liste genauso ein.
+- **Ersetzen:** Eine neuere Version eines Packs ersetzt die Auszüge der älteren, je Pack und Seitenquelle: Sobald jede
+  Seite der neuen Version drin ist, werden die Auszüge entfernt, die die alte Version hatte und die neue nicht, sodass
+  kein veralteter Auszug bleibt. Der Snapshot der Wissensbasis vor dem Import bleibt. Eine Seite, die du mit Deep
+  Ingest erneut crawlst, ersetzt ebenfalls ihre früheren Auszüge (jede gecrawlte Seite wird direkt nach dem Download
+  gespeichert).
+- **Target-Wissen:** Der Wissens-Schnappschuss, den ein Target-Pack mitbringt (`knowledge/initial_knowledge.json`, vom
+  Modul-Assistenten erstellt), wird bei der Installation wie ein Wissens-Pack geprüft und unter diesem Target in die
+  Wissensbasis des Empfängers importiert, mit einem Snapshot vorher und derselben Ersetzung durch eine neuere Version.
+  Auf dem Computer, der das Target erstellt hat, wird nichts importiert: seine Seiten sind schon in dieser
+  Wissensbasis.
+- **Exporte:** `llm-cli zoo export knowledge` braucht `--topic` oder `--target` (ein Target dieses Computers), das
+  Feld **Gehört zu:** im Export-Fenster und das Werkzeug `export_pack` nehmen dasselbe.
 
 ### Vertrauensstufen
 
@@ -3237,8 +3276,9 @@ tun, was `zoo verify`, `zoo verify DATEI`, `zoo export` und `zoo keys` tun; jede
   fertigen Builds wird zum Rezept) und mit `llm-cli zoo export target <ID>`, `zoo export recipe <Build-Ordner>` oder
   `zoo export knowledge`, jeweils mit `--author <Name>` (ein Pseudonym genügt). GUI: **Tools > Community Hub
   öffnen > Exportieren...** exportiert jeden Target-Ordner (auch einen vorhandenen oder installierten; ein
-  Community-Pack wird abgelehnt, siehe unten), einen fertigen Build oder die Wissensbasis, mit der Paket-ID eines
-  Wissens-Packs, privatem Teilen an die Schlüssel in Schlüsseldateien oder mit einer Passphrase, und dem Ordner.
+  Community-Pack wird abgelehnt, siehe unten), einen fertigen Build oder die Wissensbasis, mit der Paket-ID und dem
+  Thema oder Target eines Wissens-Packs (**Gehört zu:**, `--topic` oder `--target`, Pflicht), privatem Teilen an die
+  Schlüssel in Schlüsseldateien oder mit einer Passphrase, und dem Ordner.
 - **Datenschutz-Bereinigung:** Jede Datei wird auf diesem Rechner bereinigt. Home-Ordner werden zu `~`, IP- und
   MAC-Adressen zu `<ip>` und `<mac>`, E-Mail-Adressen zu `<email>`, JWTs zu `<jwt>`, der Hostname zu `<host>`, der
   Benutzername zu `<user>`, und API-Schlüssel werden geschwärzt. Loopback-Adressen, Image-Digests, `git@`-Remotes und
@@ -3293,7 +3333,8 @@ signierten Index und verlassen diesen Rechner nur als lokale Datei, die du selbs
   wirst, lädt das Framework den aktuellen Index, prüft den Speicherplatz (die doppelte Pack-Größe plus Reserve), lädt
   das festgelegte Pack in die Quarantäne und prüft es; eine Ablehnung nennt ihren Grund. Die Frage zeigt das Pack mit
   Autor und Lizenz (als Text aus dem Index markiert), die Vertrauensstufe, die sha256, die Dateien, wohin es kommt
-  (`targets/<id>`, `community/recipes/<id>`, `community/knowledge/<id>`), die Hinweise des Packs und bei einem
+  (`targets/<id>`, `community/recipes/<id>`, `community/knowledge/<Thema oder Target>/<id>`), sein Thema oder
+  Target, die Hinweise des Packs und bei einem
   Target-Pack, dass es Build-Skripte und ein Dockerfile hinzufügt, dessen Image-Build mit Netzzugang läuft, mit jedem
   Image, das ein Dockerfile bezieht (`FROM`, `COPY --from=`, `RUN --mount=...,from=`), klar benannt: Registry, Image, Tag, Digest oder „not pinned by digest“ und „Docker
   Official Image“ oder „other registry: ...; prebuilt image made by its publisher, not checked by the framework“.
@@ -3420,8 +3461,9 @@ mit eigenen Änderungen (sie werden nie verworfen).
 ### Was entfernt wurde
 
 - Das „Swarm“-Hochladen: die XOR-„SwarmCipher“ (eine Verschleierung, die jeder rückgängig machen konnte),
-  `llm-cli swarm upload`, der Knopf „Contribute to Swarm“ im Hub und seine Abfrage eines GitHub-Tokens. Alte
-  Swarm-Pakete in `community/knowledge/` werden mit einer Warnung übersprungen.
+  `llm-cli swarm upload`, der Knopf „Contribute to Swarm“ im Hub und seine Abfrage eines GitHub-Tokens. Ein altes
+  Swarm-Paket in `community/knowledge/` ist eine lose Datei, die nie importiert wird; das Einsortieren wird mit dem
+  Grund abgelehnt.
 - Das Installieren von Hand kopierter Modulordner aus `community/`. Community-Packs werden mit `llm-cli zoo install`
   oder dem Hub installiert.
 

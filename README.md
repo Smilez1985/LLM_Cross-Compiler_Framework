@@ -702,6 +702,10 @@ the result says success, partial or failure; the outcome is also spoken by the s
 if there is one, unless you turn that off. Search results are treated as external text, never as instructions. Each
 page also records its licence and copyright notice: a knowledge pack carries a page's full text only where its licence
 allows passing it on, every other page as its address and short facts (`llm-cli knowledge sources` shows each page).
+Knowledge always belongs to a topic or a target: installed knowledge packs live in their topic's or target's folder,
+a loose knowledge file is never imported until you sort it into one (it is checked like a pack first), a newer pack
+version replaces the old one's excerpts, and a target pack's knowledge snapshot reaches the recipient's knowledge base
+under that target.
 More: [knowledge base](docs/Features.md#knowledge-base-rag), [Deep Ingest](docs/Features.md#deep-ingest) and
 [licences and copyright](docs/Features.md#licences-and-copyright).
 

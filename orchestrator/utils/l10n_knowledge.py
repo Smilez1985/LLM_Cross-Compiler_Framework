@@ -238,6 +238,31 @@ TEXTS = {
         "zoo.install.installing": "Installing {kind} {id}...",
         "zoo.install.snapshot": "The knowledge base was saved first as the snapshot {name} "
                                 "({path:act_knowledge_snapshots} lists it).",
+        "zoo.install.waiting": "Not imported into the knowledge base yet: {why}",
+        "zoo.sort": "Sort loose knowledge...",
+        "zoo.sort.tip": "Knowledge always belongs to a topic or a target: a loose knowledge file is never imported. "
+                        "Sort it into a topic or target folder; it is checked like a knowledge pack first.",
+        "zoo.sort.title": "Sort loose knowledge",
+        "zoo.sort.intro": "These files lie loose in the knowledge folder and are not in the knowledge base. Choose one "
+                          "and the topic or target it belongs to: it is checked like a knowledge pack (quarantine, its "
+                          "pages, the licence files), you see the summary, and after your Yes it is moved into that "
+                          "folder and imported (a snapshot of the knowledge base first).",
+        "zoo.sort.none": "No loose knowledge file: every knowledge file belongs to a topic or a target.",
+        "zoo.sort.check": "Check and sort...",
+        "zoo.sort.choose_file": "Choose a file first.",
+        "zoo.sort.checking": "Checking {name}...",
+        "zoo.sort.done": "Sorted {name} into {folder}.",
+        "knowledge.scope": "Belongs to:",
+        "knowledge.scope.topic": "A topic",
+        "knowledge.scope.target": "A target",
+        "knowledge.scope.name": "Topic or target:",
+        "knowledge.scope.topic.hint": "e.g. llama.cpp (a new name makes a new topic folder)",
+        "knowledge.scope.missing": "Knowledge always belongs to a topic or a target: choose a target or name a topic.",
+        "sources.col.topic": "Topic or target",
+        "sources.topic": "Topic or target:",
+        "sources.topic.hint": "all",
+        "sources.topic.topic": "topic {name}",
+        "sources.topic.target": "target {name}",
         "storage.reason.server": "The knowledge base uses the Qdrant server (setting qdrant_url), so the local storage "
                                  "is not converted while it is set.",
     },
@@ -482,6 +507,34 @@ TEXTS = {
         "zoo.install.installing": "{kind} {id} wird installiert...",
         "zoo.install.snapshot": "Die Wissensdatenbank wurde zuerst als Snapshot {name} gesichert "
                                 "({path:act_knowledge_snapshots} listet ihn).",
+        "zoo.install.waiting": "Noch nicht in die Wissensdatenbank importiert: {why}",
+        "zoo.sort": "Lose Wissensdateien einsortieren...",
+        "zoo.sort.tip": "Wissen gehört immer zu einem Thema oder einem Target: eine lose Wissensdatei wird nie "
+                        "importiert. Sortiere sie in einen Themen- oder Target-Ordner; vorher wird sie wie ein "
+                        "Wissenspaket geprüft.",
+        "zoo.sort.title": "Lose Wissensdateien einsortieren",
+        "zoo.sort.intro": "Diese Dateien liegen lose im Wissensordner und sind nicht in der Wissensdatenbank. Wähle "
+                          "eine und das Thema oder Target, zu dem sie gehört: sie wird wie ein Wissenspaket geprüft "
+                          "(Quarantäne, ihre Seiten, die Lizenzdateien), du siehst die Zusammenfassung, und nach "
+                          "deinem Ja wird sie in diesen Ordner verschoben und importiert (vorher ein Snapshot der "
+                          "Wissensdatenbank).",
+        "zoo.sort.none": "Keine lose Wissensdatei: jede Wissensdatei gehört zu einem Thema oder einem Target.",
+        "zoo.sort.check": "Prüfen und einsortieren...",
+        "zoo.sort.choose_file": "Wähle zuerst eine Datei.",
+        "zoo.sort.checking": "{name} wird geprüft...",
+        "zoo.sort.done": "{name} wurde in {folder} einsortiert.",
+        "knowledge.scope": "Gehört zu:",
+        "knowledge.scope.topic": "Einem Thema",
+        "knowledge.scope.target": "Einem Target",
+        "knowledge.scope.name": "Thema oder Target:",
+        "knowledge.scope.topic.hint": "z. B. llama.cpp (ein neuer Name legt einen neuen Themenordner an)",
+        "knowledge.scope.missing": "Wissen gehört immer zu einem Thema oder einem Target: wähle ein Target oder "
+                                   "nenne ein Thema.",
+        "sources.col.topic": "Thema oder Target",
+        "sources.topic": "Thema oder Target:",
+        "sources.topic.hint": "alle",
+        "sources.topic.topic": "Thema {name}",
+        "sources.topic.target": "Target {name}",
         "storage.reason.server": "Die Wissensdatenbank nutzt den Qdrant-Server (Einstellung qdrant_url), daher wird "
                                  "der lokale Speicher nicht umgewandelt, solange sie gesetzt ist.",
     },

@@ -271,7 +271,7 @@ einer Probe); wofür jede Datei in `configs/` da ist, steht in
 | `models/embeddings/` | Embedding- und Reranking-Modelle der Wissensbasis (unveröffentlicht). |
 | `models/hf/<owner>--<name>/<commit>/` | Einzelne Hugging-Face-Dateien, die der Browser der GUI oder eine KI-App geladen hat, gegen den Hub geprüft (unveröffentlicht, Entscheidung A6). |
 | `models/models--<owner>--<name>/` | Die Downloads des Browsers früherer Versionen, im eigenen Cache-Schema von huggingface_hub: weiter aufgeführt und nutzbar; **Alte Downloads übernehmen…** kopiert sie nach `models/hf/` und bietet an, sie zu entfernen (unveröffentlicht). |
-| `community/` | Installierte Community-Rezepte (`recipes/`) und Wissenspakete (`knowledge/`), jeweils mit einer `.lcf-provenance.json`, und die Pakete, die du exportierst (`contributions/`). Community-Targets werden nach `targets/` installiert. Ein Ordner `.quarantine/` in einem Installationsordner enthält ein Paket nur, solange es geprüft wird (unveröffentlicht). |
+| `community/` | Installierte Community-Rezepte (`recipes/`) und Wissenspakete (`knowledge/<Thema oder Target>/<Paket>/`: Wissen gehört immer zu einem Thema oder einem Target; eine lose Wissensdatei dort wird nie importiert, bis sie in eins einsortiert ist), jeweils mit einer `.lcf-provenance.json`, und die Pakete, die du exportierst (`contributions/`). Community-Targets werden nach `targets/` installiert. Ein Ordner `.quarantine/` in einem Installationsordner enthält ein Paket nur, solange es geprüft wird (unveröffentlicht). |
 | `~/.llm-framework/` (oder `LLM_FRAMEWORK_HOME`) | `secrets.store` (auch deine Community-Schlüssel), `tool_policy.json`, `audit.db` mit `audit.db.anchor`, `known_hosts`, der SSH-Schlüssel des Frameworks `id_ed25519_llm_framework` (+ `.pub`), `mcp_tokens.json` (die benannten MCP-Tokens als SHA-256-Hashes, mit ihren Berechtigungen), `chat_history.json`, `llm_privacy_key` und `llm_install_id`; `crawl_notice.json` und `input_history.json` (unveröffentlicht); der zwischengespeicherte Community-Index `community/index.json` mit `index.json.sig` und die bei der ersten Installation gemerkten öffentlichen Schlüssel der Autoren, `community/authors.json` (unveröffentlicht); die Wissensbasis `qdrant_edge/` mit ihrer Sperrdatei `qdrant_edge.lock` und dem Eintrag ihrer Umwandlung `knowledge_conversion.json` (unveröffentlicht; der Ordner `qdrant/` früherer Versionen bleibt, bis du ihn löschst) und `knowledge_snapshots/`; der lokale Modellserver unter `runtime/llama.cpp/` (Builds, `active.json`, `server.json`, die Schlüsseldatei, solange der Server läuft) und sein Log in `logs/llama-server.log`; solange das Framework-Fenster offen ist, `gui_bridge/` mit `bridge.json` (Adresse und Schlüssel der Brücke, Modus 0600) und dem Socket `gui.sock` (unveröffentlicht). |
 | Einstellungsordner (meist `configs/`) | `config.yml` (Benutzereinstellungen); auf Wunsch eine eigene `llm_providers.yml`, die Anbietervorlagen ergänzt oder ersetzt. |
 | `chat_feed.sqlite` im Benutzerordner (unveröffentlicht) | Der Chat-Verlauf: was der Chat-Bereich rechts zeigt (deine Nachrichten, Dittos Antworten, wartende Fragen, Entscheidungen einer KI mit ihrer Begründung, Ergebnisse von Arbeit, die eine KI gestartet hat). Jede Zeile ist signiert; nichts darin wird von selbst gelöscht. |
@@ -984,8 +984,13 @@ nicht aktualisiert wurde.
    (Vertrauen `verified` oder `community`), auch bei einer Paketdatei.
 6. Ein atomares Umbenennen bringt das Paket an seinen Platz, nie über einen bestehenden Ordner (auch nicht, wenn
    sich nur die Groß- und Kleinschreibung unterscheidet), zusammen mit `.lcf-provenance.json` (Vertrauen, Quelle,
-   Hashes, Signierer, Absender). Ein Wissenspaket wird danach in die Wissensbasis eingelesen oder, wenn sie
-   ausgeschaltet ist, sobald sie startet. Was unterwegs scheitert, wird entfernt.
+   Hashes, Signierer, Absender; bei Wissen sein Thema oder Target). Ein Wissenspaket, und der Wissens-Snapshot eines
+   Target-Pakets, wird danach in die Wissensbasis eingelesen oder, wenn sie ausgeschaltet ist, sobald sie startet:
+   Jeder Auszug trägt das Paket, seinen Inhalts-Digest und sein Thema oder Target (eine Seite kann sie nicht setzen),
+   und sobald jede Seite drin ist, werden die Auszüge einer älteren Version des Pakets entfernt. Eingelesen werden nur
+   installierte Pakete, deren Dateien unverändert sind, nie eine lose Datei (`community_manager.prepare_sort` prüft
+   eine genauso, bevor sie in einen Themen- oder Target-Ordner einsortiert wird). Was unterwegs scheitert, wird
+   entfernt.
 
 Eine Paketdatei (`llm-cli zoo install --file` oder Import file... im Community-Hub) läuft durch dieselbe
 Quarantäne; eine verschlüsselte wird zuerst entschlüsselt (`--from`, `--passphrase`). Ihr Vertrauen kommt aus dem

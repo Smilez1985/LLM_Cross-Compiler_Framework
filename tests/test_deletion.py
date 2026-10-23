@@ -32,6 +32,9 @@ OWN_BRIDGE = ("bookkeeping: the endpoint and key file of the framework's own GUI
 NAME_ONLY = "never deletes an image: drops the per-build name once the image carries its last-build name"
 MOVED = ("a move the person chose (save dialog, Save..., llm-cli build save): the build folder's copy goes only after "
          "every file arrived and matched its original by sha256; the artifact itself is kept (eighth round, answer 3)")
+SORTED = ("a move the person chose (Sort loose knowledge..., llm-cli knowledge sort): the summary names the loose file "
+          "and its new folder, No is the default; the file goes only after its checked copy is installed in the pack "
+          "folder, and only while both still match the checked file's sha256 (round 23, 1)")
 UNUSED = "OPEN (reported): no caller; must get a plan before it is wired"
 KNOWLEDGE_REPLACED = ("the knowledge base's own storage: a collection replaced by a restore, which saves the current "
                       "content as a snapshot first (round 5 b); clear_knowledge_base, its other caller, has no caller "
@@ -63,6 +66,7 @@ DELETION_SITES = {
     # (the chat: FeedStore.clear_conversation and ChatHistory.clear delete rows and messages, not files; see below)
     ("orchestrator/Core/builder.py", "BuildEngine._keep_as_last_build"): NAME_ONLY,
     ("orchestrator/Core/artifact_output.py", "_remove_moved_source"): MOVED,
+    ("orchestrator/Core/community_manager.py", "CommunityManager._remove_sorted"): SORTED,
     # temporary and partial files
     ("orchestrator/Core/build_records.py", "write_record"): TEMP,
     ("orchestrator/Core/client_proposals.py", "ClientProposalStore._write"): TEMP,
@@ -134,6 +138,7 @@ DELETION_SITES = {
     ("orchestrator/Core/community_manager.py", "CommunityManager.finish_install"): STAGING,
     ("orchestrator/Core/community_manager.py", "CommunityManager.prepare_install"): STAGING,
     ("orchestrator/Core/community_manager.py", "CommunityManager.prepare_install_file"): STAGING,
+    ("orchestrator/Core/community_manager.py", "CommunityManager.prepare_sort"): STAGING,   # its quarantine copy
     ("orchestrator/Core/community_manager.py", "CommunityManager.verify_file"): STAGING,
     ("orchestrator/Core/community_manager.py", "_submit_with_gh"): STAGING,
     # the maintainer's review folder of the framework's own (never a folder the person named)

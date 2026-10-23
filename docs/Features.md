@@ -2662,8 +2662,9 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   [Licences and copyright](#licences-and-copyright)). While a Deep Ingest is still running, the wizard's **Finish**
   stays disabled (the page says why), so the snapshot holds every crawled page; if no stored page comes from those
   URLs, the wizard says that no snapshot was attached. The rest of your knowledge base never goes into a module, and
-  `llm-cli module create` and `module generate-ai` attach nothing. The framework does not import such a snapshot into
-  a knowledge base; to share knowledge, export a knowledge pack.
+  `llm-cli module create` and `module generate-ai` attach nothing. On your computer the framework does not import such
+  a snapshot (its pages are in your knowledge base already); when you export the target as a pack, the recipient's
+  framework imports it under this target (see [Knowledge belongs to a topic or a target](#knowledge-belongs-to-a-topic-or-a-target)).
 - **Export for community:** the wizard's last page also offers **Export for community after creating** (see
   [Export for community](#export-for-community)).
 - **Board recommendation:** after a probe, the Builder recommends the board of the matched target, with where the
@@ -2874,12 +2875,45 @@ rebuilt, never downloaded as a model.
    a provenance file `.lcf-provenance.json` (source, trust level, hashes, signer, time). Anything that fails is
    removed.
 
-Targets go to `targets/`, recipes to `community/recipes/`, knowledge to `community/knowledge/`. A knowledge pack is
-imported into the knowledge base right after its installation or, if the knowledge base is off, as soon as it is
-turned on. Before its first page is imported, the knowledge base is saved as a snapshot (`pre_pack_<time>`), so the
+Targets go to `targets/`, recipes to `community/recipes/`, knowledge to the folder of its topic or target in
+`community/knowledge/` (see [Knowledge belongs to a topic or a target](#knowledge-belongs-to-a-topic-or-a-target)). A
+knowledge pack is imported into the knowledge base right after its installation or, if the knowledge base is off, as
+soon as it is turned on. Before its first page is imported, the knowledge base is saved as a snapshot (`pre_pack_<time>`), so the
 import can be undone (unreleased). When that snapshot does not fit on the disk, nothing is imported: the pack stays
 installed and is imported once there is room. A pack that cannot be imported yet (for example offline without the
 embedding model) is tried again at the next start without another snapshot; a pack installed again gets a new one.
+
+### Knowledge belongs to a topic or a target
+
+Unreleased (DECISIONS round 23 items 1, 2 and 8). Every piece of shared knowledge belongs to a topic (for example
+`llama.cpp`) or to a target (for example `Rockchip`), and it is kept that way on disk and in the knowledge base:
+
+- **Folders:** an installed knowledge pack lives in `community/knowledge/<topic or target>/<pack>/` with its
+  `.lcf-provenance.json` (a pack installed by an earlier version stays in `community/knowledge/<pack>/` and keeps
+  working). A pack names its topic or target in its manifest; a pack made before packs did that gets its id as its
+  topic, which the install summary says and your confirmation accepts (no standing approval of an AI covers it).
+- **No loose files:** a `.json` file directly in `community/knowledge/` or in a topic folder, or a `knowledge.json`
+  without the pack's provenance, is never imported. `llm-cli knowledge loose`, Mojo and **Sort loose knowledge...** in
+  the Community Hub list them; sorting one into a topic or target checks it like an installed knowledge pack (in the
+  quarantine: a list of pages, each with its source; the licence texts and the `NOTICE` its full-text pages need),
+  shows the summary with "No" as the default, and only then moves it into the folder (trust `local`) and imports it.
+  The module wizard's temporary knowledge export goes to a private scratch folder, never into `community/knowledge/`.
+  A pack whose files changed after its installation is not imported either; why a pack waits is said after the
+  install, not only logged.
+- **Excerpts:** every excerpt of a pack carries its topic or target; a pack's page cannot set it, nor the pack it
+  claims to come from. `search_knowledge` and `list_knowledge_sources` take `topic` (a topic or a target),
+  `llm-cli knowledge sources --topic` and the field **Topic or target** in **Tools > Knowledge Sources...** narrow the
+  list the same way.
+- **Upsert:** a newer version of a pack replaces the excerpts of the older one, per pack and page source: once every
+  page of the new version is in, the excerpts the old version had and the new one does not are removed, so no stale
+  excerpt stays. The snapshot of the knowledge base taken before the import stays. A page you crawl again with Deep
+  Ingest replaces its earlier excerpts too (each crawled page is stored right after it was downloaded).
+- **Target knowledge:** the knowledge snapshot a target pack carries (`knowledge/initial_knowledge.json`, made by the
+  module wizard) is checked like a knowledge pack at the install and imported into the recipient's knowledge base
+  under that target, with a snapshot first and the same replacement by a newer version. On the computer that made the
+  target nothing is imported: its pages are in that knowledge base already.
+- **Exports:** `llm-cli zoo export knowledge` needs `--topic` or `--target` (a target of this computer), the export
+  window's **Belongs to:** and the tool `export_pack` take the same.
 
 ### Trust levels
 
@@ -2924,8 +2958,8 @@ installed version and folder, the download address with size and sha256, the des
   a recipe), and `llm-cli zoo export target <id>`, `zoo export recipe <build folder>` or `zoo export knowledge`,
   each with `--author <name>` (a pseudonym is fine). GUI: **Tools > Open Community Hub > Export...** exports any
   target folder (also an existing or installed one; a community pack is refused, see below), a finished build or the
-  knowledge base, with the pack id of a knowledge pack, private sharing to the keys in key files or with a passphrase,
-  and the folder.
+  knowledge base, with the pack id and the topic or target of a knowledge pack (**Belongs to:**, `--topic` or
+  `--target`, required), private sharing to the keys in key files or with a passphrase, and the folder.
 - **Privacy scrub:** every file is scrubbed on this computer. Home folders become `~`, IP and MAC addresses `<ip>`
   and `<mac>`, e-mail addresses `<email>`, JWTs `<jwt>`, the host name `<host>`, the user name `<user>`, and API
   keys are redacted. Loopback addresses, image digests, `git@` remotes and default accounts such as `root` or
@@ -2976,7 +3010,7 @@ and leave this computer only as a local file you publish yourself.
   the current index, checks the disk (twice the pack size plus the reserve), downloads the pinned pack into
   quarantine and validates it; a refusal names its reason. The question shows the pack with author and licence
   (marked as index text), the trust level, the sha256, the files, where it goes (`targets/<id>`,
-  `community/recipes/<id>`, `community/knowledge/<id>`), the pack's notes, and for a target pack that it adds build
+  `community/recipes/<id>`, `community/knowledge/<topic or target>/<id>`), its topic or target, the pack's notes, and for a target pack that it adds build
   scripts and a Dockerfile whose image build runs with network access, with every image every Dockerfile pulls
   (`FROM`, `COPY --from=`, `RUN --mount=...,from=`) shown plainly: registry, image, tag, digest or "not pinned by digest", and "Docker Official Image" or "other
   registry: ...; prebuilt image made by its publisher, not checked by the framework". The job installs exactly the
@@ -3089,8 +3123,8 @@ name, a clone with changes of its own (they are never thrown away).
 ### What was removed
 
 - The "swarm" upload: the XOR "SwarmCipher" (an obfuscation anyone could undo), `llm-cli swarm upload`, the hub's
-  "Contribute to Swarm" button and its GitHub token prompt. Old swarm packets in `community/knowledge/` are skipped
-  with a warning.
+  "Contribute to Swarm" button and its GitHub token prompt. An old swarm packet in `community/knowledge/` is a loose
+  file that is never imported; sorting it is refused with the reason.
 - Installing hand-copied module folders from `community/`. Community packs are installed with `llm-cli zoo install`
   or the hub.
 
