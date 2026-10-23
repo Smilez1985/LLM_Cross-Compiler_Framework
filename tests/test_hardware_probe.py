@@ -256,7 +256,8 @@ def available_shells():
 
 
 def py_probe(root: Path, run=no_tools):
-    return probe.collect(root=str(root), run=run, sections=("cpu", "memory", "soc", "npu", "gpu"))
+    """Every section but the toolchain (since 3.1.0 that includes "runtimes", the vendor runtime keys)."""
+    return probe.collect(root=str(root), run=run, sections=tuple(s for s in probe.SECTIONS if s != "toolchain"))
 
 
 # --- the Python probe on fixture machines ---------------------------------------------------------------------

@@ -22,8 +22,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   und Firmware, Geräte-IDs werden nie geschrieben) mit dem neuen Warnungscode `version_mismatch`; und für die Targets,
   die für andere vorbereitet werden (O-PREP), `JETSON_L4T_VERSION`, `JETSON_JETPACK_VERSION`, `CUDA_TOOLKIT_VERSION`,
   `TENSORRT_VERSION`, `OPENVINO_VERSION`, `INTEL_GPU_DEVICE`, `INTEL_GPU_DRIVER`, `INTEL_NPU_DEVICE` und
-  `ROCM_GFX_TARGETS`, jeder nur gelesen, wenn er da ist; nichts wird installiert oder mit sudo ausgeführt.
-  `HardwareProfile.hailo()` liefert die Hailo-Fakten als einen typisierten Wert (`HailoFacts`); `llm-cli scan` (auch
+  `ROCM_GFX_TARGETS`, jeder nur gelesen, wenn er da ist; nichts wird installiert oder mit sudo ausgeführt. Die
+  schnelle Probe von freiem RAM und GPUs bei jedem Start der lokalen Laufzeit und für die Schätzung eines Builds
+  startet kein neues Werkzeug (clinfo und die Dateien der Hersteller-Laufzeiten liest nur die volle Probe), und
+  NUL-Bytes und CRLF-Zeilenenden ergeben in allen drei Probes dieselben Werte. `HardwareProfile.hailo()` liefert die Hailo-Fakten als einen typisierten Wert (`HailoFacts`); `llm-cli scan` (auch
   `--device` und `--import`) zeigt sie in einer Zeile „Hailo:“, auch neben einer Rockchip-NPU; Target-Matching,
   Board-Empfehlung, Doku-Links und Deploy lesen denselben Wert, sobald die Hailo-Targets aus HAILO_PLAN Abschnitt 3
   da sind. Die `.py` und die `.sh` laufen auf den Testrechnern aus

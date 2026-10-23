@@ -183,6 +183,39 @@ class TestCacheVulkanOpenCL:
             assert profile.get("VULKAN_INSTANCE_VERSION") == "1.4.305" and "OPENCL_PLATFORMS" not in profile
             assert not any("L2" in w or "OPENCL" in w or "VULKAN" in w for w in profile.warnings)
 
+    @POSIX_ONLY
+    @NEEDS_SHELL
+    @pytest.mark.parametrize("shell", SHELLS)
+    def test_a_loader_link_counts_in_both(self, tmp_path, shell):
+        """Both look through the loader folders the same way: a link named libvulkan.so.1.Y.Z counts whether or not
+        its target is inside the sysroot, as the TensorRT and OpenVINO file names do in both."""
+        root = make_sysroot(tmp_path, "intel")
+        os.symlink("/opt/vulkan-sdk/libvulkan.so.1.3.250", root / "usr/lib/x86_64-linux-gnu/libvulkan.so.1.3.250")
+        write(root, "/usr/lib64/libvulkan.so.1.3.275", b"")
+        sh_text, py_text = both(tmp_path, root, tool_dir(tmp_path), shell)
+        assert comparable(sh_text) == comparable(py_text)
+        assert parse_profile(sh_text).get("VULKAN_INSTANCE_VERSION") == "1.3.250"   # the first loader folder
+
+    def test_the_quick_gpu_probe_runs_no_new_tool(self, tmp_path):
+        """detect_hardware() reads free RAM and the GPUs at every start of the local runtime and for a build's
+        estimate: it runs the tools it ran before probe 3.1.0, never clinfo. The full probe reads the vendor
+        runtimes (OpenCL platforms, the loader version, CUDA, TensorRT, OpenVINO, ROCm, the Intel GPU)."""
+        from orchestrator.runtime import hardware
+        for system, machine, tools in (("Linux", "x86_64", {"nvidia-smi", "vulkaninfo"}),
+                                       ("Windows", "AMD64", {"nvidia-smi", "vulkaninfo", "powershell"})):
+            calls = []
+
+            def run(cmd, timeout, calls=calls):
+                calls.append(cmd[0])
+                return -1, "", "not found"
+            hardware.detect_hardware(run, system=system, machine=machine, memory=(8 << 30, 4 << 30),
+                                     sysfs_root=tmp_path / "sys", find_library=lambda name: None, rocm_globs=())
+            assert set(calls) == tools, system
+        calls = []
+        probe.collect(root=str(tmp_path), system="Linux", machine="x86_64",
+                      run=lambda cmd, timeout: calls.append(cmd[0]) or (-1, "", "not found"))
+        assert "clinfo" in calls
+
     def test_windows_l2_cache_and_vulkan_loader(self):
         class Api(FakeWindows):
             def l2_cache_kb(self):
@@ -386,6 +419,13 @@ class TestHailoParsers:
         assert probe.parse_hailo_version("", 255) == (None, "version_mismatch")
         assert probe.parse_hailo_version("HailoRT-CLI\n", 0) == (None, "not_determined")
 
+    def test_nul_bytes_of_scan_and_version_are_dropped(self):
+        """A shell drops the NUL bytes of a tool's output (dash and bash do): the .py does the same, so a scan line
+        with a NUL behind the id gives the same device in both."""
+        assert probe.parse_hailo_scan("Hailo Devices:\n[-] Device: 0000:01:00.0\0\n") == ["0000:01:00.0"]
+        assert probe.parse_hailo_scan("Hailo devices not \0found\n") == []
+        assert probe.parse_hailo_version("HailoRT-CLI version 4.24\0.0\n", 0) == ("4.24.0", None)
+
 
 @POSIX_ONLY
 @NEEDS_SHELL
@@ -564,6 +604,17 @@ class TestHailoMachines:
         assert profile.get("HAILO_ARCH") == "hailo8l" and "HAILO_DRIVER_VERSION" not in profile
         assert hailo_warnings(profile) == ["not_determined:HAILO_DRIVER_VERSION"]
 
+    def test_scan_output_with_nul_bytes(self, tmp_path):
+        root = board(tmp_path)
+        hailo8_files(root)
+        bindir = tool_dir(tmp_path)
+        fake_hailortcli(bindir, identify={"0000:01:00.0": "identify_current_hailo8_4.24.0.txt"})
+        (bindir.parent / "hailo-data" / "scan.out").write_bytes(b"Hailo Devices:\n[-] Device: 0000:01:00.0\0\n")
+        profile = run_both(tmp_path, root, bindir)
+        assert (profile.get("HAILO_ARCH"), profile.get("HAILO_DEVICES"), profile.get("HAILO_FW_VERSION")) == \
+            ("hailo8", "1", "4.24.0")
+        assert hailo_warnings(profile) == []
+
     def test_a_rockchip_board_with_a_hailo_keeps_both(self, tmp_path):
         root = make_sysroot(tmp_path, "rk3566")
         hailo8_files(root)
@@ -617,7 +668,12 @@ class TestHailoWindows:
             assert dict(re.findall(r"'([^']+)' = '([^']+)'", line)) == table, name
         for needle in ("'-v'", "'scan'", "'fw-control', 'identify', '-s'", "version_mismatch:HAILORT_VERSION",
                        "not_determined:HAILO_FAMILY", "'(?m)^\\s*Device Architecture\\s*:\\s*([A-Za-z0-9_]+)\\s*$'",
-                       "Replace([string][char]0, '')", "if ($hailoClock.Elapsed.TotalSeconds -ge 60) { break }"):
+                       "Replace([string][char]0, '')", "if ($hailoClock.Elapsed.TotalSeconds -ge 60) { break }",
+                       # NUL bytes leave the -v and scan outputs too, as a shell drops them (the .sh, the .py)
+                       "$scanOut = ([string]$result.Out).Replace([string][char]0, '')",
+                       "[regex]::Matches($scanOut, ",
+                       ("$text = ([string]$result.Out + \"`n\" + [string]$result.Err)"
+                        ".Replace([string][char]0, '')")):
             assert needle in text, needle
         assert "HAILO_DRIVER" not in text   # Linux-only keys
 
@@ -782,6 +838,16 @@ class TestVendorRuntimes:
         (root / "usr/local/cuda/version.json").unlink()
         write(root, "/usr/local/cuda/version.txt", "CUDA Version 10.2.300\n")
         assert run_both(tmp_path, root, tool_dir(tmp_path)).get("CUDA_TOOLKIT_VERSION") == "10.2.300"
+
+    @POSIX_ONLY
+    @NEEDS_SHELL
+    def test_files_with_crlf_line_ends(self, tmp_path):
+        """Python reads a file's lines without the CR of a CRLF line end; the .sh drops it too (as for os-release)."""
+        root = jetson(tmp_path)
+        write(root, "/etc/nv_tegra_release", "# R36 (release), REVISION: 4.3, GCID: 1\r\n")
+        write(root, "/var/lib/dpkg/status", DPKG_STATUS.replace("\n", "\r\n"))
+        profile = run_both(tmp_path, root, tool_dir(tmp_path))
+        assert (profile.get("JETSON_L4T_VERSION"), profile.get("JETSON_JETPACK_VERSION")) == ("36.4.3", "6.1")
 
     @POSIX_ONLY
     @NEEDS_SHELL

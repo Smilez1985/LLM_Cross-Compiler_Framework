@@ -762,6 +762,7 @@ if [ "$OS" = linux ] && [ "$ARCH" = arm64 ]; then
                 if (pkg == "nvidia-jetpack" && st == "install ok installed" && !done) { print ver; done = 1 }
                 pkg = ""; st = ""; ver = ""; hp = 0; hs = 0; hv = 0
             }
+            { sub(/\r$/, "") }   # the CR of a CRLF line end, as the Python probe reads lines
             /^$/ { check(); next }
             /^Package: / && !hp { pkg = substr($0, 10); hp = 1 }
             /^Status: / && !hs { st = substr($0, 9); hs = 1 }
@@ -1247,7 +1248,7 @@ fi
 if [ -z "$VK_INSTANCE" ]; then
     for m in "$(f /usr/lib)"/*/libvulkan.so.1.* "$(f /usr/lib)"/libvulkan.so.1.* "$(f /usr/lib64)"/libvulkan.so.1.* \
              "$(f /lib)"/*/libvulkan.so.1.* "$(f /lib)"/libvulkan.so.1.* "$(f /lib64)"/libvulkan.so.1.*; do
-        [ -e "$m" ] || continue
+        [ -e "$m" ] || [ -L "$m" ] || continue   # a link counts by its name, as in hardware_probe.py
         v=${m##*/libvulkan.so.}
         if valid '^1\.[0-9]+\.[0-9]+$' "$v"; then VK_INSTANCE=$v; break; fi
     done
