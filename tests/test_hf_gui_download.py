@@ -301,6 +301,55 @@ class TestTheBrowsersDownload:
         assert person.ledger.entries() == [], "a stopped download holds no space"
 
 
+class TestTheTokenGoesOnlyToHuggingFace:
+    """Regression (review of chain hf): huggingface_hub sends its API calls to the host in HF_ENDPOINT (a mirror the
+    environment names). The person's typed or stored token went there with the browser's commit lookup, the Take
+    over's Hub list and every look-up of an AI caller, while the fetcher sends it only to huggingface.co. The
+    framework's own API calls are pinned to huggingface.co too."""
+
+    @pytest.fixture
+    def mirror(self, monkeypatch):
+        import huggingface_hub
+        from huggingface_hub import constants
+        monkeypatch.setattr(constants, "ENDPOINT", "https://mirror.example")
+        monkeypatch.setenv("HF_ENDPOINT", "https://mirror.example")
+        seen = []
+
+        def model_info(self, repo_id, **kwargs):
+            seen.append((self.endpoint, kwargs.get("token")))
+            raise ConnectionError("no network in tests")
+
+        monkeypatch.setattr(huggingface_hub.HfApi, "model_info", model_info)
+        return seen
+
+    @staticmethod
+    def framework(tmp_path, token):
+        settings = {"models_dir": str(tmp_path / "models")}
+        config = SimpleNamespace(get=lambda key, default=None: settings.get(key, default),
+                                 user_state_dir=str(tmp_path / "state"))
+        return SimpleNamespace(config=config, resolve_path=lambda p: Path(p),
+                               secrets_manager=SimpleNamespace(get_secret=lambda key: token))
+
+    def test_the_browsers_lookup_sends_the_token_only_to_huggingface(self, mirror, tmp_path):
+        from orchestrator.Core.hf_hub import HUB_URL, HubError
+        from orchestrator.Core.model_manager import ModelManager
+        from test_hf_tools import TOKEN
+        manager = ModelManager(self.framework(tmp_path, TOKEN))
+        typed = "hf_" + "Typed" * 8
+        for token in (None, typed):
+            with pytest.raises(HubError):
+                manager.download_file("acme/tiny-GGUF", "tiny-q4_k_m.gguf", token)
+        with pytest.raises(ConnectionError):
+            manager._hub_lookup()("acme/tiny-GGUF", "c" * 40)
+        assert mirror == [(HUB_URL, TOKEN), (HUB_URL, typed), (HUB_URL, TOKEN)]
+
+    def test_an_ai_callers_lookup_too(self, mirror, tmp_path):
+        from orchestrator.Core.hf_hub import HUB_URL, HubClient
+        from test_hf_tools import TOKEN
+        assert HubClient(self.framework(tmp_path, TOKEN)).api().endpoint == HUB_URL
+        assert HubClient(self.framework(tmp_path, None)).api().endpoint == HUB_URL
+
+
 class TestTheBrowsersDiskRule:
     """The one disk rule (Core/disk_plan, A4) for the browser's download: the reserve stays free beside what running
     builds and downloads reserved, and the download holds its own reservation while it runs (csC1 open item)."""

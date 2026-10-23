@@ -10,9 +10,9 @@ Rules that hold for every call here:
 - Only the token the person stored in the framework (`hf_token` in the vault) is used, and it is read here, inside the
   framework. Without one every call passes `token=False`, so huggingface_hub never falls back to an implicit token
   (`HF_TOKEN`, the Hugging Face home folder's token file, an OIDC exchange) the person never gave the framework. The
-  token never appears in a result, a note, an error or the audit log, and it is sent only to huggingface.co: a
-  redirect to the Hub's file storage carries no token (requests drops the header on a cross-host redirect, and the
-  fetcher refuses any other host).
+  token never appears in a result, a note, an error or the audit log, and it is sent only to huggingface.co: every
+  API call goes there (hub_api; never to the host in HF_ENDPOINT), and a redirect to the Hub's file storage carries
+  no token (requests drops the header on a cross-host redirect, and the fetcher refuses any other host).
 - Offline mode refuses before any network request; a network error is an error, never an empty list.
 - A licence is "permissive" only on a fixed allowlist; `other`, custom, list-valued and unknown licences are
   "unknown", and the base model's licence and gating are reported too (a GGUF re-upload of a gated model shows as such).
@@ -155,6 +155,14 @@ def _error_name(e: BaseException) -> str:
     return e.__class__.__name__
 
 
+def hub_api(token: Any = False):
+    """huggingface_hub's HfApi with `token` (False: none at all) and pinned to huggingface.co: without the pin
+    huggingface_hub sends every call, with the token, to the host in HF_ENDPOINT. Every Hub API call of the
+    framework's own (HubClient, the GUI's browser download and the Take over) comes through here."""
+    from huggingface_hub import HfApi
+    return HfApi(endpoint=HUB_URL, token=token or False)
+
+
 def hub_error(e: BaseException, what: str, with_token: Any) -> "HubError":
     """A failed Hub call as the HubError a person and an AI read: a gated repository the token cannot read, a missing
     revision or repository, or the Hub not reachable. `with_token`: whether a token was sent (permission_denied rather
@@ -204,8 +212,7 @@ class HubClient:
     def api(self):
         if self._api_factory is not None:
             return self._api_factory(self.token_arg())
-        from huggingface_hub import HfApi
-        return HfApi(token=self.token_arg())
+        return hub_api(self.token_arg())
 
     def offline(self) -> bool:
         config = getattr(self.framework, "config", None)
