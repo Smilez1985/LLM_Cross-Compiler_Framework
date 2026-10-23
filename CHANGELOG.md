@@ -2080,6 +2080,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **hadolint findings at build time are shown, not thrown away** (DECISIONS round 23, item 4): the build reported
+  every outcome of its Dockerfile check as "Hadolint check skipped (tool not found or failed)" and dropped what
+  hadolint found. `BuildEngine._validate_dockerfile_hadolint` now runs hadolint through the new
+  `orchestrator/utils/hadolint.py` (in the Dockerfile's folder on its file name, without colours, at most 60 s) and
+  tells the cases apart: not installed (a note in the build log with where to get it, no warning any more),
+  findings (a summary line, then each finding in plain words, for example "hadolint, Dockerfile: line 30, DL3008
+  (warning): ...", in the build log and as a progress warning, at most 10 warnings), no findings (said in the log),
+  and a run without a result (a crash, a time-out: one warning with what hadolint wrote). The check stays advisory:
+  the build always goes on. CONTRIBUTING's local hadolint command pins the image by digest
+  (`hadolint/hadolint:v2.15.1@sha256:32dac941...`, FRESHNESS_PLAN F-5) and lists all five Dockerfiles CI lints.
 - **A model from the old Hugging Face download cache works in a build again** (A6, "stay usable"): the GUI's Hugging
   Face browser used to save into huggingface_hub's own cache inside the models folder, where a file is a link to a
   blob named by its checksum. A build of such a GGUF file mounted it under that checksum name, so the build no longer
@@ -2492,6 +2502,22 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **`install.sh` installs Docker only with a checksum** (DECISIONS round 23, item 3): when Docker was missing, the
+  installer downloaded `get.docker.com` and ran it as root without any check. Now Docker comes only from Docker's
+  official apt repository on Debian, Ubuntu and Raspberry Pi OS (32-bit gets Debian's armhf packages, as Docker's
+  guide says from Engine 29 on). The signing key is read into a throwaway keyring and trusted only when the download
+  holds exactly one key whose primary fingerprint is the one Docker's install guide publishes
+  (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`, pinned in the script with its source); apt then checks every
+  package against the signed package lists. Nothing is written before the check. Any other system, ARMv6
+  (Raspberry Pi 1, Zero), a key that does not match or cannot be downloaded, and a failing apt stop in plain words
+  with Docker's manual install link; a new apt source that breaks `apt-get update` is taken back. No downloaded
+  script runs any more. Tests run the installer in a sandbox with fake curl, apt-get, dpkg and uname and a real gpg
+  key made for the test; `install.sh` is ShellCheck-clean (the two findings of the base are fixed too).
+- **The installers no longer download pip without a checksum**: `install.sh` and `install.bat` ran
+  `pip install --upgrade pip` before the hash-checked install, which fetched the newest pip from the package index
+  unchecked (on Windows as Administrator). The virtual environment now keeps the pip that comes with Python, which
+  is enough for `--require-hashes --no-deps`; the installer test holds every pip call to the hash-pinned export.
+  `install.bat` downloads nothing else unchecked (winget checks the Python installer against its manifest's SHA256).
 - **The Hugging Face token goes only to huggingface.co, also when `HF_ENDPOINT` names another host** (review of
   chain hf): huggingface_hub sends its API calls to the host in the `HF_ENDPOINT` environment variable (a mirror).
   The commit lookup of the GUI browser's download and the Hub list of **Take over old downloads...** sent the token
