@@ -1322,12 +1322,27 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the repository file naming only that checked key and dnf checking every package; where Docker publishes no repository,
   the distribution's own package (`moby-engine` on other Fedora-based systems, `docker` on Amazon Linux, openSUSE and
   SLES, where the Containers Module is switched on with `SUSEConnect`, and on Arch, Manjaro and EndeavourOS with
-  `docker-buildx`; `podman-docker` on Rocky Linux, AlmaLinux and Oracle Linux, with Podman's Docker-compatible socket
-  switched on for the person and the `DOCKER_HOST` named; `docker` from Alpine's community repository). No package
+  `docker-buildx`; `docker` from Alpine's community repository). Rocky Linux, AlmaLinux, Oracle Linux and the other
+  RHEL rebuilds get Docker CE from Docker's RHEL repository (DECISIONS round 26 Q1: the framework needs BuildKit, for
+  example for Hailo), with the same key check and the RHEL version from `PLATFORM_ID` or `VERSION_ID`; Podman
+  (`podman-docker` from the distribution, the person's `podman.socket` switched on) is only the fallback, when Docker
+  publishes nothing for the architecture, the repository cannot be reached, the key does not match, dnf finds no
+  package or the install fails. Before the key is trusted, `dnf install --assumeno --allowerasing` works out what dnf
+  would remove or replace for Docker CE (`podman-docker`; on RHEL 8 rebuilds also `runc`, `podman`, `buildah`, ...),
+  without changing anything: the installer names exactly these packages and asks the person on the terminal, and
+  only a yes uses `--allowerasing`; a no (or no terminal) removes nothing, takes back the repository file and key it
+  wrote, and gives the Podman fallback (on Fedora, RHEL and CentOS Stream, which get the same question, it stops). The
+  dry run names both ways and why; a second run where `docker` is Podman says how to switch. Checked for real in
+  Rocky Linux 9.8 containers (Docker CE fresh; with `podman-docker` and a no; with `podman-docker` and a yes). SLES:
+  when no Python 3.11 to 3.14 is there, the installer offers to switch on SUSE's Python 3 Module
+  (`SUSEConnect -p sle-module-python3/<version>/<arch>`, the identifier checked in SUSE Customer Center's package
+  search) and asks first; an unregistered system stops naming the registration step, and the Python hint names the
+  module (dry-run line too). No package
   manager is told to skip a signature or to take a key on its own, and `pacman -Sy` (a partial upgrade) never runs. On
   Alpine the framework itself cannot run (onnxruntime, part of its pinned packages, has no musl build): the installer
   stops after Docker and points to the framework image, whose build script also needs `git` and GNU `tar` there
-  (busybox's `tar` has no `--null`: `apk add git tar`). Any other family (Gentoo, Void, NixOS, ...) stops naming the
+  (busybox's `tar` has no `--null`): the installer adds them with `apk add git tar` (only what is missing; the dry run
+  names it). Any other family (Gentoo, Void, NixOS, ...) stops naming the
   family and the manual pages when something must be installed. A `docker-ce.repo` of the person's own in which
   Docker's repository is switched off is never replaced or removed (the installer stops before it changes anything and
   says how to switch it on), and where the `docker` command is Podman (a second run, or `podman-docker` installed
@@ -1335,6 +1350,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (family, package manager, packages, repositories, key fingerprints) without changing, downloading or calling
   anything and without root, exit code 0 or 1 as the installation would end. Tests run the installer against the
   `/etc/os-release` files of real distributions with fake package managers (`tests/test_install_distros.py`).
+- **Podman instead of Docker: the framework finds it and refuses what it cannot do** (DECISIONS round 26 Q1): when
+  `DOCKER_HOST` is not set and no Docker daemon answers, the framework sets `DOCKER_HOST` to the person's Podman socket
+  for itself and the programs it starts (`orchestrator/utils/docker_engine.py`, one helper for the build engine, the
+  builder image, Ditto's container, the one Docker check and `scripts/build_container_image.sh`; a `DOCKER_HOST` the
+  person set always wins). Under Podman (checked with Podman 5.8.2 and buildah 1.43.1): images are built through
+  Podman's API rather than `docker buildx`; a GPU build with an NVIDIA GPU is refused before it is queued, because
+  Podman's Docker-compatible interface drops Docker's GPU request without a word, and Ditto's container then says why
+  it runs on the CPU; features that need BuildKit are refused with the reason and the way to Docker CE;
+  `scripts/build_container_image.sh` builds with `DOCKER_BUILDKIT=0`. `llm-cli mojo` names the engine
+  (`docker.daemon`) and lists Podman's limits (`docker.engine`).
 - **Hardware probe: version 3.1.0, wider Hailo detection** (consolidation chain probe-keys): `PROBE_TOOL_VERSION` is
   3.1.0 in all three probes (new keys are a schema change; HAILO_PLAN question 5, default recorded in round 23). The
   new keys are never required or `ON`/`OFF` keys, so a profile of probe 3.0.0 is read and stored as before (tested on
@@ -1342,7 +1367,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `NPU_MODEL` is filled for a Hailo (`hailo-8l`, `hailo-10h`), and `SUPPORTS_HAILO` is also `ON` for the USB
   Hailo-10H, an entry of a Hailo sysfs class and a device `hailortcli scan` lists; `HAILO_FAMILY` and `HAILO_ARCH`
   enter the performance key. A board whose probe sees a Hailo without `hailortcli` now gets `HAILO_FAMILY`,
-  `HAILO_INTERFACE`, `HAILO_DEVICES` and the warning `not_determined:HAILO_ARCH`. `hardware_probe.sh` no longer uses
+  `HAILO_INTERFACE`, `HAILO_DEVICES` and the warning `not_determined:HAILO_ARCH`. The 60-second cap of the Hailo part
+  in `hardware_probe.sh` no longer depends on `date +%s` (not POSIX; some busybox builds lack it): without it the
+  whole seconds since boot from `/proc/uptime` are the clock. `hardware_probe.ps1` no longer names its Hailo loop
+  variable `$arch`: PowerShell names ignore case, so it overwrote the script's `ARCH` value. `hardware_probe.sh` no longer uses
   `ls | grep` for the DRM nodes (ShellCheck clean at warning level).
 - **Offline mode reaches only this computer and your own network, and you decide what that includes** (DECISIONS
   round 24, L-NET and "L-NET final"): one network-locality rule (`orchestrator/utils/locality.py`) decides every
