@@ -17,7 +17,8 @@ menu bar, so this module adds no menu entry of its own (GUI_PARITY.md's menu lay
 CLI_PATHS names, for each `llmcf` command path of this area, the object that does it by mouse (the main window finds
 every one of them with findChild: the tabs are its children). TAB_OBJECTS names the tab each object lives in.
 MACHINE_ONLY lists the switches of this area that are for scripts only, with the reason (the integrator lists them
-once). The Deployment tab's "Benchmark on the board" group belongs to the boards and Mojo areas.
+once). CLI_ONLY_LINES lists the lines a command of this area prints that the GUI does not show yet ("command
+Label:"), with the reason. The Deployment tab's "Benchmark on the board" group belongs to the boards and Mojo areas.
 """
 
 from typing import Dict
@@ -71,6 +72,11 @@ MACHINE_ONLY: Dict[str, str] = {
     "scan --password-stdin": "script switch: the GUI asks for the password with hidden input",
     "scan --trust-fingerprint": "script switch: the GUI shows the fingerprint and asks (No is the default)",
 }
+# `llm-cli scan` (local, --device, --import) prints probe 3.1.0's Hailo facts (HardwareProfile.hailo()) on a line of
+# its own; the Builder tab's scan has no such line yet.
+CLI_ONLY_LINES: Dict[str, str] = {
+    "scan Hailo:": "GUI line comes with the Hailo wave",
+}
 
 
 def install(window, menubar) -> None:
@@ -79,4 +85,4 @@ def install(window, menubar) -> None:
     return None
 
 
-__all__ = ["BUILDER_TAB", "CLI_PATHS", "DEPLOYMENT_TAB", "MACHINE_ONLY", "TAB_OBJECTS", "install"]
+__all__ = ["BUILDER_TAB", "CLI_ONLY_LINES", "CLI_PATHS", "DEPLOYMENT_TAB", "MACHINE_ONLY", "TAB_OBJECTS", "install"]
