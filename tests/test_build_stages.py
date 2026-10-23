@@ -24,13 +24,17 @@ from types import SimpleNamespace
 import pytest
 
 from conftest import NO_POSIX_BASH, REPO_ROOT, posix_shell
+from model_files import GGUF_HEAD, gguf_text, write_gguf, write_safetensors
 
 ROCKCHIP = REPO_ROOT / "targets" / "Rockchip"
 # The stubs are Python scripts started through their #! line; Git for Windows' bash cannot run those reliably.
 needs_bash = pytest.mark.skipif(os.name == "nt" or posix_shell("bash") is None, reason=NO_POSIX_BASH)
 
-CONVERT_STUB = """\
+# The GGUF files of the stubs start with a valid GGUF header (GGUF_HEAD, tests/model_files.py), which the convert stage
+# checks; the text after it is what the tests compare.
+CONVERT_STUB = f"""\
 import os, sys
+HEAD = {GGUF_HEAD!r}
 a = sys.argv
 log = os.environ["STUB_LOG"]
 out = a[a.index('--outfile') + 1]
@@ -40,11 +44,12 @@ with open(log, 'a') as f:
 if os.environ.get('STUB_FAIL') == 'convert':
     sys.exit(3)
 with open(out, 'w') as f:
-    f.write('gguf ' + outtype)
+    f.write(HEAD + 'gguf ' + outtype)
 """
 
-QUANTIZE_STUB = """\
+QUANTIZE_STUB = f"""\
 import os, sys
+HEAD = {GGUF_HEAD!r}
 a = sys.argv
 with open(os.environ["STUB_LOG"], 'a') as f:
     f.write('quantize ' + ' '.join(a[1:]) + '\\n')
@@ -53,20 +58,23 @@ if os.environ.get('STUB_FAIL') == 'quantize':
 src, dst, kind = a[-3], a[-2], a[-1]
 with open(src) as f:
     data = f.read()
+data = data[len(HEAD):] if data.startswith(HEAD) else data
 with open(dst, 'w') as f:
-    f.write('quantized ' + kind + ' of ' + data + (' with imatrix' if '--imatrix' in a else ''))
+    f.write(HEAD + 'quantized ' + kind + ' of ' + data + (' with imatrix' if '--imatrix' in a else ''))
     f.write('.' * int(os.environ.get('STUB_PAD', '0')))
 """
 
-IMATRIX_STUB = """\
+IMATRIX_STUB = f"""\
 import os, sys
+HEAD = {GGUF_HEAD!r}
 a = sys.argv
 with open(os.environ["STUB_LOG"], 'a') as f:
     f.write('imatrix ' + ' '.join(a[1:]) + '\\n')
 if os.environ.get('STUB_FAIL') == 'imatrix':
     sys.exit(5)
+data = open(a[a.index('-m') + 1]).read()
 with open(a[a.index('-o') + 1], 'w') as f:
-    f.write('imatrix of ' + open(a[a.index('-m') + 1]).read())
+    f.write('imatrix of ' + (data[len(HEAD):] if data.startswith(HEAD) else data))
 """
 
 # The toolkit venvs' python: `-c` asks for the RKLLM package folder; anything else is a converter call.
@@ -128,8 +136,9 @@ class Image:
             folder.mkdir(parents=True)
         self.model = root / "input-model"
         self.model.mkdir()
-        for name, text in (("config.json", "{}"), ("tokenizer.json", "{}"), ("model.safetensors", "weights")):
+        for name, text in (("config.json", "{}"), ("tokenizer.json", "{}")):
             (self.model / name).write_text(text)
+        write_safetensors(self.model / "model.safetensors")  # the convert stage checks its header
         self.log = root / "calls.log"
 
     def env(self, **values) -> dict:
@@ -163,17 +172,21 @@ class Image:
         return [line.replace(str(self.root), "<root>") for line in self.log.read_text().splitlines()]
 
     def sha256sums(self) -> str:
-        """The output folder as a SHA256SUMS file (sorted relative paths)."""
+        """The output folder as a SHA256SUMS file (sorted relative paths), build_info.json without "conversion"."""
         files = sorted(p for p in self.output.rglob("*") if p.is_file())
-        return "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(self.output).as_posix()}\n"
-                       for p in files)
+        return "".join(f"{hashlib.sha256(_without_conversion(p)).hexdigest()}  "
+                       f"{p.relative_to(self.output).as_posix()}\n" for p in files)
 
     def outputs(self) -> dict:
-        return {p.relative_to(self.output).as_posix(): p.read_text() for p in sorted(self.output.rglob("*"))
-                if p.is_file()}
+        """The output folder's files: a GGUF as the text after its header, build_info.json without "conversion"."""
+        return {p.relative_to(self.output).as_posix(): gguf_text(p) if p.suffix == ".gguf"
+                else _without_conversion(p).decode() for p in sorted(self.output.rglob("*")) if p.is_file()}
 
     def build_info(self) -> dict:
-        return json.loads((self.output / "build_info.json").read_text())
+        """build_info.json without "conversion" (the convert stage's statistics, tests/test_convert_stage.py)."""
+        info = json.loads((self.output / "build_info.json").read_text())
+        info.pop("conversion", None)
+        return info
 
     def leftovers(self) -> list:
         """Intermediates left in the work folder (the F16 GGUF and the RKLLM package copy)."""
@@ -185,8 +198,21 @@ def image(tmp_path):
     return Image(tmp_path)
 
 
+# What the target stage adds to build_info.json from the convert stage (its statistics: input, output, ratio, duration,
+# functional test). The characterization tests here compare build_info.json as it was before; the statistics are
+# pinned in tests/test_convert_stage.py.
+_CONVERSION = re.compile(rb', "conversion": \{[^{}]*\}(?=\}\s*$)')
+
+
+def _without_conversion(path: Path) -> bytes:
+    data = path.read_bytes()
+    return _CONVERSION.sub(b"", data) if path.name == "build_info.json" else data
+
+
 def sums(files: dict) -> str:
-    return "".join(f"{hashlib.sha256(text.encode()).hexdigest()}  {name}\n" for name, text in sorted(files.items()))
+    """SHA256SUMS of the expected files (a GGUF's text after the stubs' GGUF header)."""
+    return "".join(f"{hashlib.sha256(((GGUF_HEAD if name.endswith('.gguf') else '') + text).encode()).hexdigest()}  "
+                   f"{name}\n" for name, text in sorted(files.items()))
 
 
 def info(fmt="gguf", board="rk3588", quant="Q4_K_M") -> str:
@@ -643,7 +669,7 @@ def test_other_inputs_run_every_stage_again(image, change):
     if change == "quantization":
         values["QUANTIZATION"] = "Q5_K_M"
     elif change == "model file":
-        (image.model / "model.safetensors").write_text("other weights")
+        write_safetensors(image.model / "model.safetensors", "other weights")
     elif change == "module script":
         script = image.app / "modules" / "target_module.sh"
         script.write_text(script.read_text() + "\n# changed\n")
@@ -759,7 +785,7 @@ def test_convert_module_by_hand_writes_the_f16_gguf_where_output_says(image):
     assert result.returncode == 0, result.stdout + result.stderr
     assert stage_lines(result) == ran("source", "config", "convert")
     assert image.calls() == ["convert <root>/input-model --outfile <root>/granite.fp16.gguf --outtype f16"]
-    assert (image.root / "granite.fp16.gguf").read_text() == "gguf f16"
+    assert gguf_text(image.root / "granite.fp16.gguf") == "gguf f16"
     assert not any(image.output.iterdir()), "nothing else in the output folder"
 
 
@@ -771,7 +797,7 @@ def test_a_build_with_output_quantizes_that_f16_file_and_keeps_it(image):
     assert result.returncode == 0, result.stdout + result.stderr
     assert image.calls() == [f"convert <root>/input-model --outfile <root>/granite.fp16.gguf --outtype f16",
                              f"quantize <root>/granite.fp16.gguf {OUT}/granite-Q4_K_M.gguf Q4_K_M"]
-    assert f16.read_text() == "gguf f16", "a file the person named is no intermediate"
+    assert gguf_text(f16) == "gguf f16", "a file the person named is no intermediate"
     assert sorted(image.outputs()) == ["build_info.json", "granite-Q4_K_M.gguf"]
 
 
@@ -780,7 +806,7 @@ def test_target_module_by_hand_quantizes_a_gguf_input_and_keeps_it(image):
     """The 1.x target module takes the F16 GGUF of the convert module: the convert stage sees a GGUF input and
     converts nothing, the target stage quantizes it and leaves the person's file where it is."""
     f16 = image.root / "granite.fp16.gguf"
-    f16.write_text("gguf f16")
+    write_gguf(f16, "gguf f16")
 
     result = by_hand(image, "target", "--input", f16, "--quantization", "Q5_K_M", "--model-name", "granite",
                      **FROM_OPTIONS)
@@ -788,7 +814,7 @@ def test_target_module_by_hand_quantizes_a_gguf_input_and_keeps_it(image):
     assert result.returncode == 0, result.stdout + result.stderr
     assert stage_lines(result) == ran("source", "config", "convert", "target")
     assert image.calls() == [f"quantize <root>/granite.fp16.gguf {OUT}/granite-Q5_K_M.gguf Q5_K_M"]
-    assert f16.read_text() == "gguf f16"
+    assert gguf_text(f16) == "gguf f16"
     assert image.outputs()["granite-Q5_K_M.gguf"] == "quantized Q5_K_M of gguf f16"
     assert image.build_info()["model"] == "granite" and image.build_info()["quantization"] == "Q5_K_M"
 
@@ -797,7 +823,7 @@ def test_target_module_by_hand_quantizes_a_gguf_input_and_keeps_it(image):
 def test_a_gguf_input_without_type_or_name_follows_the_1x_target_module(image):
     """1.x defaults of target_module.sh: Q4_K_M, and the name of the input file without .gguf and .fp16."""
     f16 = image.root / "granite.fp16.gguf"
-    f16.write_text("gguf f16")
+    write_gguf(f16, "gguf f16")
 
     result = by_hand(image, "target", "--input", f16, **FROM_OPTIONS)
 
@@ -810,12 +836,12 @@ def test_a_gguf_input_without_type_or_name_follows_the_1x_target_module(image):
 @pytest.mark.parametrize("quant", ["F16", "bf16"])
 def test_a_gguf_input_needs_a_type_llama_quantize_makes(image, quant):
     f16 = image.root / "granite.fp16.gguf"
-    f16.write_text("gguf f16")
+    write_gguf(f16, "gguf f16")
     result = image.run(MODEL_SOURCE=f16, QUANTIZATION=quant)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "ERROR: The model is a GGUF file already; the target stage quantizes it to a type of llama-quantize" \
         in result.stderr
-    assert image.calls() == [] and f16.read_text() == "gguf f16"
+    assert image.calls() == [] and gguf_text(f16) == "gguf f16"
 
 
 @needs_bash
@@ -823,7 +849,7 @@ def test_the_imatrix_job_measures_a_gguf_input_as_it_is(image):
     dataset = image.root / "dataset.txt"
     dataset.write_text("calibration text")
     f16 = image.root / "granite.fp16.gguf"
-    f16.write_text("gguf f16")
+    write_gguf(f16, "gguf f16")
     image.output.rmdir()
 
     result = image.run(JOB_TYPE="imatrix", DATASET_PATH=dataset, MODEL_SOURCE=f16)
@@ -831,7 +857,7 @@ def test_the_imatrix_job_measures_a_gguf_input_as_it_is(image):
     assert result.returncode == 0, result.stdout + result.stderr
     assert image.calls() == [f"imatrix -m <root>/granite.fp16.gguf -f <root>/dataset.txt "
                              f"-o <root>/build-cache/imatrix/imatrix.dat --chunks 100"]
-    assert f16.read_text() == "gguf f16"
+    assert gguf_text(f16) == "gguf f16"
 
 
 @needs_bash
@@ -1076,7 +1102,7 @@ def test_the_stage_modes_take_the_options_of_the_1x_modules(image):
     convert = entrypoint(image, "convert", "--input", image.model, "--output", f16, "--model-name", "granite",
                          **FROM_OPTIONS)
     assert convert.returncode == 0, convert.stdout + convert.stderr
-    assert f16.read_text() == "gguf f16"
+    assert gguf_text(f16) == "gguf f16"
 
     target = entrypoint(image, "target", "--input", f16, "--quantization", "Q4_K_M", "--model-name", "granite",
                         **FROM_OPTIONS)

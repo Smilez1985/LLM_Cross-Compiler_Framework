@@ -14,6 +14,7 @@ import pytest
 import yaml
 
 from conftest import REPO_ROOT
+from model_files import GGUF_HEAD, gguf_text
 from orchestrator.Core.module_generator import ModuleGenerator, check_shell_syntax, validate_target_folder
 
 TEMPLATE = REPO_ROOT / "targets" / "_template"
@@ -33,13 +34,14 @@ def generate(tmp_path, profile=None, **overrides):
 
 
 def stub_llama(root: Path) -> Path:
-    """convert_hf_to_gguf.py and build/bin/llama-quantize that write small files and log their arguments."""
+    """convert_hf_to_gguf.py and build/bin/llama-quantize that write small files and log their arguments (the
+    converter a GGUF with a valid header, which the convert stage checks)."""
     llama = root / "llama.cpp"
     (llama / "build" / "bin").mkdir(parents=True)
     (llama / "convert_hf_to_gguf.py").write_text(
         "import sys\n"
         "a = sys.argv\n"
-        "open(a[a.index('--outfile') + 1], 'w').write('gguf')\n"
+        f"open(a[a.index('--outfile') + 1], 'w').write({GGUF_HEAD!r} + 'gguf')\n"
         f"open({str(root / 'calls.log')!r}, 'a').write('convert ' + ' '.join(a[1:]) + '\\n')\n")
     quantize = llama / "build" / "bin" / "llama-quantize"
     quantize.write_text(f"#!{sys.executable}\n"
@@ -188,7 +190,7 @@ def test_a_generated_module_takes_the_options_of_the_1x_convert_and_target_modul
     convert = subprocess.run(["bash", str(modules / "convert_module.sh"), "--input", str(model), "--output", str(f16),
                               "--model-name", "granite"], env=env, capture_output=True, text=True, timeout=60)
     assert convert.returncode == 0, convert.stdout + convert.stderr
-    assert f16.read_text() == "gguf"
+    assert gguf_text(f16) == "gguf"
 
     quantize = subprocess.run(["bash", str(modules / "target_module.sh"), "--input", str(f16), "--quantization",
                                "Q4_K_M", "--model-name", "granite"], env=env, capture_output=True, text=True,

@@ -23,6 +23,8 @@ MODULES_DIR="${MODULES_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 # shellcheck source=config_module.sh
 source "$MODULES_DIR/config_module.sh"
 QUANTIZE_JOBS="$PLAN_DIR/quantize_jobs.sh"
+# The convert stage's statistics (input, output, ratio, duration, functional test): "conversion" in build_info.json
+CONVERT_STATS="$PLAN_DIR/convert_stats.json"
 
 # Target configuration storage
 declare -A TARGET_CONFIG
@@ -69,8 +71,12 @@ quantize_model() {
 }
 
 write_build_info() {
+    local conversion=""
+    if [ -s "$CONVERT_STATS" ]; then
+        conversion=", \"conversion\": $(cat "$CONVERT_STATS")"
+    fi
     cat > "$OUTPUT_DIR/build_info.json" <<EOF
-{"model": "$MODEL_NAME", "format": "$FORMAT", "board": "$BOARD", "quantization": "${QUANT:-default}", "llama_cpp": "$(cat "$LLAMA_BASE/.llama_cpp_tag" 2>/dev/null || echo unknown)"}
+{"model": "$MODEL_NAME", "format": "$FORMAT", "board": "$BOARD", "quantization": "${QUANT:-default}", "llama_cpp": "$(cat "$LLAMA_BASE/.llama_cpp_tag" 2>/dev/null || echo unknown)"$conversion}
 EOF
 }
 
