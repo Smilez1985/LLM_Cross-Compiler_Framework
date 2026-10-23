@@ -204,8 +204,11 @@ PINNED_QUANT_OPTIONS = (
     "IQ3_S IQ3_M Q3_K IQ3_XS Q3_K_S Q3_K_M Q3_K_L IQ4_NL IQ4_XS Q4_K Q4_K_S Q4_K_M Q5_K Q5_K_S Q5_K_M Q6_K Q8_0 F16 "
     "BF16 F32 COPY").split()
 ALIASES = {"Q3_K": "Q3_K_M", "Q4_K": "Q4_K_M", "Q5_K": "Q5_K_M"}   # "alias for ..." in QUANT_OPTIONS
-# tensor_requires_imatrix of src/llama-quant.cpp at the pin: the types whose main tensors need an importance matrix
-PINNED_NEEDS_IMATRIX = {"IQ1_S", "IQ1_M", "IQ2_XXS", "IQ2_XS", "IQ2_S", "IQ2_M", "IQ3_XXS", "Q2_K_S"}
+# The methods llama-quantize refuses without an importance matrix at the pin: tensor_requires_imatrix of
+# src/llama-quant.cpp is true for a type some tensors of the file get (llama_tensor_get_type_impl): IQ1_S, IQ1_M,
+# IQ2_XXS, IQ2_XS, IQ2_S and IQ3_XXS as types, IQ2_M is mostly IQ2_S, Q2_K_S has Q2_K, and IQ3_XS makes attn_q, attn_k
+# and the middle ffn_gate and ffn_up IQ3_XXS.
+PINNED_NEEDS_IMATRIX = {"IQ1_S", "IQ1_M", "IQ2_XXS", "IQ2_XS", "IQ2_S", "IQ2_M", "IQ3_XXS", "IQ3_XS", "Q2_K_S"}
 
 
 def script_list(name: str) -> set:
@@ -240,7 +243,7 @@ def test_the_new_methods_and_the_short_names_are_accepted(image, quant, kind):
 
 
 @needs_bash
-@pytest.mark.parametrize("quant", ["IQ2_M", "IQ3_XXS", "Q2_K_S"])
+@pytest.mark.parametrize("quant", ["IQ2_M", "IQ3_XXS", "IQ3_XS", "Q2_K_S"])
 def test_a_method_llama_quantize_refuses_without_an_importance_matrix_is_refused_before_converting(image, quant):
     """Before, these built until llama-quantize stopped with "this quantization requires an imatrix!"."""
     result = image.run(QUANTIZATION=quant)
@@ -255,7 +258,7 @@ def test_the_capabilities_ask_for_the_importance_matrix_of_these_methods():
     from test_foundation import ROCKCHIP_YML
     import yaml
     caps = TargetCapabilities.model_validate(yaml.safe_load(ROCKCHIP_YML.read_text())["capabilities"])
-    for quant in ("IQ2_M", "IQ3_XXS", "Q2_K_S"):
+    for quant in ("IQ2_M", "IQ3_XXS", "IQ3_XS", "Q2_K_S"):
         assert any("needs an importance matrix" in p for p in caps.check_request("gguf", "rk3588", quant)), quant
     assert caps.check_request("gguf", "rk3588", "Q4_K") == [], "the short name of Q4_K_M"
 

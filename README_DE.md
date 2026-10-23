@@ -76,8 +76,8 @@ quantisiert); die Kurznamen `Q3_K`, `Q4_K` und `Q5_K` werden für `Q3_K_M`, `Q4_
 - **RK3566 und RK3568** werden von RKLLM nicht unterstützt; dort nimmst du GGUF. `Q4_0` und `IQ4_NL` werden für
   schnelle ARM-Kernel umgepackt.
 - **Importance Matrix (IMatrix):** nur für GGUF. Sie verbessert Quantisierungen mit wenigen Bits. `IQ1_S`,
-  `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ2_M`, `IQ3_XXS` und `Q2_K_S` setzen sie voraus (`llama-quantize` lehnt sie
-  ohne ab). Ohne eigene Textdatei nimmt das Framework seinen
+  `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ2_M`, `IQ3_XXS`, `IQ3_XS` und `Q2_K_S` setzen sie voraus
+  (`llama-quantize` lehnt sie ohne ab). Ohne eigene Textdatei nimmt das Framework seinen
   mitgelieferten Kalibrierungstext ([data/calibration](data/calibration/README_DE.md)).
 - **Kalibrierungsdaten:** für RKLLM und RKNN optional. RKNN `i8` braucht eine Liste mit Beispieleingaben (Pfade
   relativ zur Listendatei).
