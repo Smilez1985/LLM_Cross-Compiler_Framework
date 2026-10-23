@@ -773,6 +773,47 @@ def test_a_module_s_cmake_flags_cannot_switch_a_download_back_on_in_the_package_
 
 
 @needs_bash
+@pytest.mark.parametrize("flags, refused", [
+    ("-D LLAMA_BUILD_BORINGSSL=ON", "-DLLAMA_BUILD_BORINGSSL=ON (LLAMA_BUILD_BORINGSSL downloads at configure time "
+                                    "and is never set)"),
+    ("-DGGML_CUDA_CCCL_VERSION:STRING=v3.4.3", "-DGGML_CUDA_CCCL_VERSION:STRING=v3.4.3 (GGML_CUDA_CCCL_VERSION "
+                                               "downloads at configure time and is never set)"),
+    ("-C /tmp/initial-cache.cmake", "-C (CMake runs a script with -C or -P, and a script can set any option)"),
+    ("-P/tmp/settings.cmake", "-P/tmp/settings.cmake (CMake runs a script with -C or -P, and a script can set any "
+                              "option)"),
+], ids=["space", "typed", "initial-cache", "script"])
+def test_a_module_s_cmake_flags_that_no_later_option_turns_off_stop_the_package(image, flags, refused):
+    """An option that downloads whenever it is set (NEVER_SET of the build recipe) is not turned off by the every-build
+    options after it, and a CMake script (-C, -P) can set any option: the package refuses such module flags before
+    anything slow, in every spelling cmake reads, as the image's Dockerfile refuses such LLAMA_CMAKE_ARGS (a module
+    edited by hand, or generated before the module generator refused them)."""
+    config = image.app / "modules" / "config_module.sh"
+    text = config.read_text(encoding="utf-8")
+    config.write_text(text.replace('local cmake_flags="-DGGML_NATIVE=OFF"',
+                                   f'local cmake_flags="-DGGML_NATIVE=OFF {flags}"'), encoding="utf-8")
+
+    result = target_by_hand(image, "--model-name", "granite", STUB_TOOLS_LOG=image.root / "tools.log")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert (f"ERROR: The CMake flags of the build plan would let llama.cpp download while it is built: {refused}; "
+            "builds have no network: leave it out. No package was made.") in result.stderr
+    assert not any(c.startswith("cmake ") and "-DCMAKE_TOOLCHAIN_FILE=" in c for c in tools_log(image))
+    assert "Functional test" not in result.stdout
+    assert not (image.output / "packages").exists()
+
+
+def test_the_package_refuses_the_options_the_build_recipe_never_sets():
+    """The image has no framework: target_module.sh carries the recipe's NEVER_SET (as the Dockerfiles do)."""
+    import re
+    from conftest import REPO_ROOT
+
+    from orchestrator.runtime.build.recipe import NEVER_SET
+    text = (REPO_ROOT / "targets" / "Rockchip" / "modules" / "target_module.sh").read_text(encoding="utf-8")
+    names = re.search(r"^NEVER_SET_OPTIONS=\(([^)]*)\)", text, re.M).group(1).split()
+    assert names == list(NEVER_SET)
+
+
+@needs_bash
 def test_package_is_an_input_of_the_target_stage_only(image):
     """The convert stage first, then the target stage with --package: the stages before target resume (the request
     is the same), and only the target stage's marker names the package."""

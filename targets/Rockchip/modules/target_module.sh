@@ -103,6 +103,11 @@ EOF
 
 PACKAGE_SCRIPTS="$(dirname "$MODULES_DIR")/scripts"
 FUNCTIONAL_TEST_SECONDS=120
+# The options of llama.cpp that download at configure time whenever they are set (NEVER_SET of
+# orchestrator/runtime/build/recipe.py, which the image's Dockerfile refuses in LLAMA_CMAKE_ARGS as well;
+# tests/test_target_stage.py compares): no option after them turns them off again.
+NEVER_SET_OPTIONS=(LLAMA_BUILD_BORINGSSL LLAMA_BUILD_LIBRESSL GGML_CUDA_CCCL_VERSION GGML_ZENDNN GGML_VIRTGPU
+                   LLAMA_BUILD_WEBUI LLAMA_USE_PREBUILT_WEBUI)
 
 # Without a hardware profile in the build plan (a package on request: build.sh --package, target_module.sh started
 # by hand): the board's part of the plan from the plain defaults of this target, planned and checked by the config
@@ -158,6 +163,44 @@ package_room() {  # FILE...: stops the stage with the rule's plain reason when t
     problem="$(python3 "$PACKAGE_SCRIPTS/board_package.py" room "$OUTPUT_DIR/packages" \
         --what "the package for the board" "$@")" \
         || die "${problem:-The free space for the package could not be checked.} No package was made."
+}
+
+# The first of the module's CMake flags (FLAG...: the plan's CMAKE_FLAGS, word by word as the cross build passes them)
+# that the cross build refuses, with the reason; nothing when there is none. The options of every build come after
+# the module's flags and win (cross_compile_target), except an option of NEVER_SET_OPTIONS, which downloads whenever it
+# is set, and a CMake script (-C, an initial cache, or -P), which can set any option. cmake reads "-D NAME=VALUE" as
+# one option, and -DNAME:TYPE=VALUE names NAME.
+module_flag_problem() {  # FLAG...
+    local word name
+    while [ $# -gt 0 ]; do
+        word="$1"
+        shift
+        if [ "$word" = -D ] && [ $# -gt 0 ]; then
+            word="-D$1"
+            shift
+        fi
+        case "$word" in
+            -C*|-P*)
+                echo "$word (CMake runs a script with -C or -P, and a script can set any option)"
+                return ;;
+            -D*)
+                name="${word#-D}"
+                name="${name%%=*}"
+                name="${name%%:*}"
+                if [[ " ${NEVER_SET_OPTIONS[*]} " == *" $name "* ]]; then
+                    echo "$word ($name downloads at configure time and is never set)"
+                    return
+                fi ;;
+        esac
+    done
+}
+
+check_module_flags() {  # before anything slow: the module's CMake flags in the plan, as the cross build passes them
+    local problem flags=()
+    read -r -a flags <<< "${CMAKE_FLAGS:-}"
+    [ ${#flags[@]} -gt 0 ] || return 0
+    problem="$(module_flag_problem "${flags[@]}")"
+    [ -z "$problem" ] || die "The CMake flags of the build plan would let llama.cpp download while it is built: $problem; builds have no network: leave it out. No package was made."
 }
 
 # A short run of the quantized model on this build machine: the convert stage's functional test (scripts/model_check.py
@@ -496,6 +539,7 @@ package_for_board() {
     fi
     validate_inputs "${TARGET_CONFIG[QUANTIZED_GGUF]:-}" "${TARGET_CONFIG[QUANT_METHOD]:-}" "$MODEL_NAME"
     package_room "${TARGET_CONFIG[INPUT_GGUF]}"
+    check_module_flags
     functional_test "${TARGET_CONFIG[QUANTIZED_GGUF]}"
     cross_compile_target
     check_board_binaries

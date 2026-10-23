@@ -42,8 +42,12 @@ MODULE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$")
 SDK_RE = re.compile(r"^[\w .+/-]{0,64}$")
 DEB_PACKAGE_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]+(?::[a-z0-9-]+)?(?:=[A-Za-z0-9.+~:-]+)?$")
 FLAG_RE = re.compile(r"^-[A-Za-z][\w.=+,:/-]*$")
-# A CMake option on a command line or in a module's CMake flags: -DNAME=VALUE or -DNAME:TYPE=VALUE
-CMAKE_OPTION_RE = re.compile(r"(?<![\w-])-D([A-Za-z_][A-Za-z0-9_]*)(?::[A-Za-z]+)?=([^\s'\";|&)]*)")
+# A CMake option on a command line or in a module's CMake flags: -DNAME=VALUE or -DNAME:TYPE=VALUE, also as cmake gets
+# it from the shell: "-D NAME=VALUE" (cmake reads -D and the next word as one option) and with quotes around the word,
+# the name or the value (-D "NAME=ON", -D'NAME'=ON, -DNAME="OFF").
+CMAKE_OPTION_RE = re.compile(r"(?<![\w-])-D\s*[\"']?([A-Za-z_][A-Za-z0-9_]*)[\"']?(?::[A-Za-z]+)?=[\"']?([^\s'\";|&)]*)")
+# Switches that make cmake run a CMake script (an initial cache -C, script mode -P): a script can set any option.
+CMAKE_SCRIPT_FLAGS = ("-C", "-P")
 # An image reference: an optional registry with a port (registry.example:5000/...; any registry is allowed, DECISIONS
 # round 3), the repository, an optional tag and an optional digest.
 IMAGE_RE = re.compile(r"^(?:[a-z0-9][a-z0-9.-]*(?::\d{1,5})?/)?[a-z0-9][a-z0-9._/-]*(?::[\w][\w.-]{0,127})?"
@@ -125,7 +129,8 @@ def download_flag_problems(text: str) -> List[str]:
     for match in CMAKE_OPTION_RE.finditer(text or ""):
         problem = refused_option(match.group(1), match.group(2))
         if problem:
-            problems.append(f"{match.group(0)} would let llama.cpp download while it is built ({problem}); builds have "
+            option = re.sub(r"[\s\"']", "", match.group(0))  # as cmake reads it: -DNAME=VALUE
+            problems.append(f"{option} would let llama.cpp download while it is built ({problem}); builds have "
                             "no network: leave it out")
     return problems
 
@@ -423,6 +428,8 @@ def validate_module_data(data: Dict[str, Any]) -> Dict[str, Any]:
             problems.append(f"{key}: only plain compiler/CMake options like -mcpu=cortex-a76 or -DGGML_CUDA=ON: {', '.join(bad[:5])}")
         elif key == "cmake_flags":
             problems += [f"cmake_flags: {problem}" for problem in download_flag_problems(" ".join(tokens))]
+            problems += [f"cmake_flags: {t} makes CMake run a CMake script (-C, -P), which can switch on any llama.cpp "
+                         "option; leave it out" for t in tokens if t.startswith(CMAKE_SCRIPT_FLAGS)]
         out[key] = " ".join(tokens)
 
     boards = data.get("supported_boards") or []
