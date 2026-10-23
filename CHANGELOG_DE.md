@@ -2898,9 +2898,18 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   sofort (es fand den Port belegt), der Start beendet es und versucht einen anderen Port, und an das andere Programm
   geht nichts. Wo sich die Verbindungstabelle nicht lesen lässt, hat ein Server, der 10 s weiterläuft, seinen Port
   gebunden und wird wie bisher genutzt. Nur Bare Metal: Im Docker-Modus bindet Docker den veröffentlichten Port
-  selbst, und ein belegter Port lässt den Start scheitern. Regressionstests: `tests/test_runtime.py`
+  selbst, und ein belegter Port lässt den Start scheitern. Review von port-runtime: `server.json` wird gleich nach
+  dem Start geschrieben, und LLMClient in jedem anderen Prozess (die GUI, der MCP-Server) liest es, sodass ein Chat
+  dort, solange die Prüfung noch lief, den Port des anderen Programms mit dem neuen Schlüssel bekam. Der Eintrag ist
+  jetzt markiert (`"port_unconfirmed": true`), bis llama-server als Lauscher des Ports aufgeführt ist (es bindet,
+  bevor es das Modell lädt, daher wird der Endpunkt weiter ausgegeben, während das Modell lädt), und `read_endpoint`
+  gibt einen markierten Eintrag an niemanden; ein Start, der vor der Prüfung endete, hinterlässt einen Server, den
+  der nächste Start beendet. Regressionstests: `tests/test_runtime.py`
   `test_a_program_answering_on_the_chosen_port_never_gets_the_key`,
-  `test_an_unreliable_connection_table_does_not_block_the_start`.
+  `test_an_unreliable_connection_table_does_not_block_the_start`,
+  `test_other_processes_get_no_endpoint_before_the_port_is_confirmed`,
+  `test_a_server_that_holds_its_port_is_handed_out_while_it_loads`,
+  `test_a_start_that_died_before_the_port_was_confirmed_leaves_no_server_behind`.
 - **Das Hugging-Face-Token geht nur an huggingface.co, auch wenn `HF_ENDPOINT` einen anderen Host nennt** (Review
   der Kette hf): huggingface_hub schickt seine API-Aufrufe an den Host in der Umgebungsvariable `HF_ENDPOINT` (einen
   Mirror). Die Commit-Abfrage des Downloads im GUI-Browser und die Hub-Liste von **Alte Downloads übernehmen…**
