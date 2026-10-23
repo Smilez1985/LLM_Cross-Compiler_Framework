@@ -440,6 +440,9 @@ def test_the_gui_commit_look_up_asks_nobody_offline_or_for_a_local_model(fw, mon
     asked = []
 
     class Api:
+        def __init__(self, endpoint=None, token=None):   # made by hf_hub.hub_api: pinned to huggingface.co
+            assert endpoint == "https://huggingface.co"
+
         def model_info(self, repo, token=None, timeout=None):
             asked.append((repo, timeout))
             return SimpleNamespace(sha="c" * 40)

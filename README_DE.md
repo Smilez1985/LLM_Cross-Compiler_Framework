@@ -325,8 +325,8 @@ Module...** (Assistent für ein neues Target, mit „Deep Ingest“, um Dokument
 **Tools > Hugging Face Model Browser...** (Modelle suchen, sehen, ob sie zugangsbeschränkt sind und welche Lizenz sie
 haben, einzelne Dateien wie ein GGUF in den Ordner `hf/` des Modellordners laden, geprüft wie ein Download einer KI,
 mit einem Anhalten-Knopf; ein zugangsbeschränktes Modell fragt nach deinem Hugging-Face-Token; **Alte Downloads
-übernehmen…** kopiert, was frühere Versionen im Hugging-Face-Cache gespeichert haben, siehe
-[Funktionen](docs/Features_DE.md#mcp-server)), **Tools > Community Hub öffnen** (siehe [Community-Zoo](#community-zoo)), **Tools > Tool Permissions (Ditto /
+übernehmen…** kopiert, was frühere Versionen im Hugging-Face-Cache gespeichert haben, auch im Terminal mit `llm-cli
+models take-over`; im Offline-Modus lehnt der Browser sofort ab, siehe [Funktionen](docs/Features_DE.md#mcp-server)), **Tools > Community Hub öffnen** (siehe [Community-Zoo](#community-zoo)), **Tools > Tool Permissions (Ditto /
 MCP)...**, **Tools > Gesprochene Ansagen** (ein oder aus) und **Tools > Eingabeverlauf löschen...** (in der
 englischen Oberfläche *Open Community Hub*, *Spoken Announcements* und *Clear Input History...*)
 

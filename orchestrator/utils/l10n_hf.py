@@ -45,6 +45,10 @@ TEXTS = {
         "hf.takeover.why.mismatch": "it does not match its checksum",
         "hf.takeover.why.link": "its link leads out of the models folder",
         "hf.takeover.why.copy_failed": "it could not be copied",
+        "hf.takeover.why.offline": "offline mode is on, so Hugging Face was not asked for its checksum",
+        "hf.offline.title": "Offline mode",
+        "hf.offline": "Offline mode is on, so the Hugging Face browser does not contact Hugging Face: no search, "
+                      "licence check, file list or download.",
     },
     "de": {
         "hf.stop": "Anhalten",
@@ -82,6 +86,11 @@ TEXTS = {
         "hf.takeover.why.mismatch": "sie passt nicht zu ihrer Prüfsumme",
         "hf.takeover.why.link": "ihr Link führt aus dem Modellordner hinaus",
         "hf.takeover.why.copy_failed": "sie konnte nicht kopiert werden",
+        "hf.takeover.why.offline": "der Offline-Modus ist an, deshalb wurde Hugging Face nicht nach ihrer Prüfsumme "
+                                   "gefragt",
+        "hf.offline.title": "Offline-Modus",
+        "hf.offline": "Der Offline-Modus ist an, deshalb nimmt der Hugging-Face-Browser keinen Kontakt zu Hugging Face "
+                      "auf: keine Suche, keine Lizenzprüfung, keine Dateiliste und kein Download.",
     },
 }
 

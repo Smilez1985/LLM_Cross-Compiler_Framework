@@ -10,6 +10,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **`llm-cli models take-over`: the Take over of old Hugging Face downloads at a terminal** (consolidation chain
+  hf-online): headless installations had no way to take over what earlier versions of the GUI's Hugging Face browser
+  saved in huggingface_hub's cache inside the models folder. The command runs the same core calls as **Take over old
+  downloads...** in **Tools > Hugging Face Model Browser...** (`ModelManager.old_downloads`, `take_over`,
+  `old_copies_plan`, `delete_old_copies`): the full list of the files still to take over, the yes question with "No"
+  as the default, the copy (each file checked, under the one disk rule; Ctrl+C stops between two chunks), each file
+  that stays with its reason, then the full list of old copies that can go, trash or for good, and the deletion only
+  after your yes ("No" is the default), audited first. Without a terminal nothing is copied or deleted. A copy that
+  fails (a disk that cannot hold the copies, a file in use by another `llm-cli` or the GUI) ends with one plain line,
+  "Nothing was taken over: ..." with the reason, as the window shows it, never with a traceback. The GUI parity test
+  names its mouse path (`orchestrator/gui/menus/existing.py`: `btn_hf_take_over` in the browser). Tests:
+  `tests/test_hf_takeover.py` `TestTheCommandLinesTakeOver`.
 - **A trusted board's address and host key are editable by you** (DECISIONS round 10 Q5): `llm-cli deploy devices
   edit DEVICE [--host] [--port] [--key "KEY LINE" | --read-key]` and **Edit address or key...** in **Boards > Boards
   and Devices...** change the board's host name or IP address, its SSH port or its host key in the framework's
@@ -1301,7 +1313,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   every file was taken over, and the files of the cache's shared store only they use, with full path and size; a
   folder that holds a file the Take over cannot list is never offered; trash or for good; "No" is the default),
   audited first; nothing is deleted without that yes. Every step runs in a worker thread. The texts are in
-  `orchestrator/utils/l10n_hf.py` (English and German). The browser does not read offline mode, as before.
+  `orchestrator/utils/l10n_hf.py` (English and German). In offline mode the browser refuses before any request
+  (see Fixed).
 - **A build is the four stage modules again, and `build.sh` only runs them** (maintainer decision U9; consolidation
   chain build4). `targets/Rockchip/modules/build.sh` is a stage runner over `source_module.sh` (the toolchain
   sources the image was built from), `config_module.sh` (normalizes the request, refuses what the target cannot
@@ -2243,6 +2256,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   public address was saved and refused only when Ditto was asked. `AISettingsChange.problems()` now uses the LLM
   layer's own rule (`preset.is_local(address)`). Regression tests: `tests/test_ai_settings_change.py` and
   `tests/test_dialogs.py` `test_offline_mode_accepts_a_custom_server_only_on_the_local_network`.
+- **In offline mode the Hugging Face browser no longer contacts Hugging Face** (consolidation chain hf-online): its
+  search, licence check, file list and download went online with offline mode on, while an AI caller's calls were
+  refused. **Tools > Hugging Face Model Browser...** now refuses before any request, before a worker starts or a token
+  is asked for, in plain words in your language: offline mode is on, nothing is searched, checked or downloaded,
+  then the words every other offline refusal shows you: switch offline mode off (Ditto > AI Settings...), or use a
+  model already on this computer.
+  `ModelManager` refuses the same way for every caller (`hf_hub.offline_refusal`, the refusal `HubClient` gives an
+  AI; `hf_hub.person_text` gives a window or the command line the person's words). **Take over old downloads...**
+  works offline: a file whose checksum only Hugging Face could give (a cache without links) stays in the old cache
+  with the reason "offline mode is on", and Hugging Face is not asked; `llm-cli models take-over` behaves the same.
+  Regression tests: `tests/test_hf_online.py` `TestOfflineMode`, `TestTheBrowserWindowOffline`.
 - **A model from the old Hugging Face download cache works in a build again** (A6, "stay usable"): the GUI's Hugging
   Face browser used to save into huggingface_hub's own cache inside the models folder, where a file is a link to a
   blob named by its checksum. A build of such a GGUF file mounted it under that checksum name, so the build no longer
@@ -2747,6 +2771,22 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   only to huggingface.co. Every Hub API call of `orchestrator/Core/hf_hub.py` (`HubClient`) and of the browser's
   download and Take over (`ModelManager`) now goes through `hf_hub.hub_api`, pinned to huggingface.co. Regression
   tests: `tests/test_hf_gui_download.py` `TestTheTokenGoesOnlyToHuggingFace`.
+- **No Hugging Face call of the framework's own code sends a token to the host in `HF_ENDPOINT` or an implicit
+  `HF_TOKEN` any more** (consolidation chain hf-online). Outside `hf_hub` four callers still made their own
+  `HfApi()`: the Builder's staging of a Hugging Face model, the build plan's look-up (`hf_lookup.look_up`) and the
+  GUI's commit check of an identical build (`BuildService.model_commit`) sent the token stored in the framework to
+  the host in `HF_ENDPOINT`, and the Hugging Face browser's search, licence check and file list
+  (`ModelManager.search_huggingface_models`, `check_license`, `list_repo_files`) sent the implicit token (`HF_TOKEN`
+  or the Hugging Face home folder's token file) there. Every one of them now goes through `hf_hub.hub_api`
+  (huggingface.co only; the token the person typed in the browser, else the one stored in the framework, else none),
+  and every file list is read by `hf_hub.hub_file` (the Builder's `_hub_files` delegates to it). The browser's search
+  and licence check use the stored token where they used the implicit one. A mirror named in `HF_ENDPOINT` is no
+  longer used by any of these calls either, as for the browser's downloads since A6; only fastembed, the knowledge
+  base's embedding library, still fetches its models with huggingface_hub's own defaults (`HF_ENDPOINT`, an implicit
+  token). A redirect of an API answer to another host is followed without the token. Regression tests:
+  `tests/test_hf_online.py` drives every caller through huggingface_hub's own HTTP client with `HF_ENDPOINT` naming
+  another host and `HF_TOKEN` set, and fails on a token sent to that host, on the implicit token, on a token that
+  follows a redirect to another host and on an `HfApi` made outside `hf_hub`.
 - **No other account's home folder or name reaches an AI through a file URL or a space** (D0; default of
   2026-10-17). The path labels for AIs (`security.paths.label_paths`, also inside `device_text`) left the path of a
   `file:///` URL as it was when it named another account's home folder (`file:///home/<name>/...`,

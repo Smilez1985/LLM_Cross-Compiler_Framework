@@ -1251,13 +1251,13 @@ class BuildEngine:
         if not HF_REPO_ID.match(source) or ".." in source:
             raise ValueError(f"Model '{source}' is neither an existing local path nor a HuggingFace repo id (owner/name).")
 
-        from huggingface_hub import HfApi
-        from orchestrator.Core.hf_hub import DownloadStopped
+        from orchestrator.Core.hf_hub import DownloadStopped, hub_api
         from orchestrator.Core.hf_lookup import staged_files
         # The token stored in the framework, or none at all: never an implicit token (HF_TOKEN, the Hugging Face home
-        # folder's token file) the person did not give the framework (G37).
+        # folder's token file) the person did not give the framework (G37), and only to huggingface.co, never to the
+        # host in HF_ENDPOINT (hf_hub.hub_api, the one Hub API of the framework).
         auth = self._hf_token() or False
-        api = HfApi()
+        api = hub_api(auth)
         revision = config.model_branch or None
         commit = self._model_commit(api, source, revision, auth)
         if not commit:
@@ -1312,18 +1312,11 @@ class BuildEngine:
 
     @staticmethod
     def _hub_files(api, source: str, commit: str, auth: Any) -> Dict[str, Any]:
-        """The commit's files with the sizes and LFS sha256 the Hub lists (what the fetcher checks each file against)."""
-        from orchestrator.Core.hf_hub import HubFile
+        """The commit's files with the sizes and LFS sha256 the Hub lists (what the fetcher checks each file against),
+        read by hf_hub.hub_file, the one parser of the Hub's file list."""
+        from orchestrator.Core.hf_hub import hub_file
         info = api.model_info(source, revision=commit, files_metadata=True, token=auth)
-        files = {}
-        for s in getattr(info, "siblings", None) or []:
-            lfs = getattr(s, "lfs", None)
-            sha = getattr(lfs, "sha256", None) if lfs is not None and not isinstance(lfs, dict) else \
-                (lfs.get("sha256") if isinstance(lfs, dict) else None)
-            size = getattr(s, "size", None)
-            files[str(s.rfilename)] = HubFile(str(s.rfilename), int(size) if isinstance(size, int) else None,
-                                              str(sha).lower() if sha else None)
-        return files
+        return {f.name: f for f in (hub_file(s) for s in getattr(info, "siblings", None) or [])}
 
     @staticmethod
     def _hub_fetcher(token: Optional[str], stop: threading.Event):

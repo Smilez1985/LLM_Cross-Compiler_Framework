@@ -56,7 +56,7 @@ class TestModelStaging:
         calls = {}
 
         class FakeApi:
-            def __init__(self, token=None):
+            def __init__(self, endpoint=None, token=None):   # made by hf_hub.hub_api
                 pass
 
             def model_info(self, repo, revision=None, token=None, files_metadata=False):
