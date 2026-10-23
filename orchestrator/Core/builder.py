@@ -860,11 +860,42 @@ class BuildEngine:
             
         return df_path
 
+    # At most this many hadolint findings become progress warnings; every finding is in the build log.
+    HADOLINT_WARNINGS = 10
+
     def _validate_dockerfile_hadolint(self, path: Path, prog: BuildProgress):
-        try: 
-            subprocess.run(["hadolint", str(path)], check=True, capture_output=True) 
-        except Exception: 
-            prog.add_warning("Hadolint check skipped (tool not found or failed)")
+        """hadolint on the build's Dockerfile, advisory: the build goes on whatever it says (no setting makes the
+        check stop a build). Tells apart hadolint not installed (a note on how to get it), findings (each one in the
+        build log and as a progress warning) and no findings; a run without a result is said plainly too (round 23,
+        item 4: before, every outcome was "skipped" and the findings were thrown away)."""
+        from orchestrator.utils.hadolint import INSTALL_HINT, RULES_URL, run_hadolint
+        name = path.name
+        try:
+            result = run_hadolint(path)
+        except Exception as e:  # noqa: BLE001 - the check never stops a build
+            prog.add_warning(f"Dockerfile check (hadolint) did not run: {e}. The check is advisory; the build goes on.")
+            return
+        if result.outcome == "missing":
+            prog.add_log(f"Dockerfile check skipped: hadolint is not installed on this computer. The check is "
+                         f"advisory; the build goes on. {INSTALL_HINT}")
+        elif result.outcome == "passed":
+            prog.add_log(f"Dockerfile check (hadolint): no findings in {name}.")
+        elif result.outcome == "findings":
+            prog.add_log(f"Dockerfile check (hadolint): {len(result.findings)} finding(s) in {name} "
+                         f"({result.counts()}). The check is advisory; the build goes on. The rules are explained "
+                         f"at {RULES_URL}.", "WARNING")
+            for n, finding in enumerate(result.findings):
+                text = f"hadolint, {name}: {finding.plain()}"
+                if n < self.HADOLINT_WARNINGS:
+                    prog.add_warning(text)
+                else:
+                    prog.add_log(text, "WARNING")
+            if len(result.findings) > self.HADOLINT_WARNINGS:
+                prog.add_warning(f"hadolint: {len(result.findings) - self.HADOLINT_WARNINGS} more finding(s) in "
+                                 f"{name}, all in the build log.")
+        else:
+            prog.add_warning(f"Dockerfile check (hadolint) gave no result for {name}: {result.detail}. The check is "
+                             "advisory; the build goes on.")
 
     def _build_docker_image(self, config: BuildConfiguration, progress: BuildProgress, path: Path) -> Image:
         progress.current_stage = "Building Image"

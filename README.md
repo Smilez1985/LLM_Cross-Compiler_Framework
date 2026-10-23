@@ -125,17 +125,26 @@ The installer:
 1. checks the internet connection (HTTPS to the package index `pypi.org`, or `PIP_INDEX_URL` if you set a
    mirror; behind a proxy start it with `sudo -E` so `https_proxy` is kept) and Python (installs it with `apt` if
    it is missing, then requires 3.11 to 3.14),
-2. installs Docker via `get.docker.com` if it is missing and adds your user to the `docker` group. It says what
-   that means: members of the group control the Docker service, which runs as root, so every program that runs
-   as your user can get root rights on this computer (`sudo gpasswd -d USER docker` undoes it; the framework
-   then cannot build without sudo),
+2. installs Docker if it is missing, only from Docker's official apt repository and only with a checked key: on Debian,
+   Ubuntu and Raspberry Pi OS (32-bit gets Debian's armhf packages, as Docker's guide says), and on systems built on
+   Ubuntu or Debian such as Linux Mint, Pop!_OS or LMDE (the packages of the Ubuntu or Debian release they are built on,
+   as before), it downloads Docker's signing key and trusts it only when the file holds exactly that one key with the
+   fingerprint Docker's install guide publishes (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`, pinned in
+   `install.sh`); apt then checks every package against the signed package lists. No downloaded script runs. On any
+   other system, on ARMv6 (Raspberry Pi 1, Zero), or when the key does not match, it stops, says why and points you to
+   [Docker's install guide](https://docs.docker.com/engine/install/); install Docker yourself and start `install.sh`
+   again. It then adds your user to the `docker` group and says what that means: members of the group control the Docker
+   service, which runs as root, so every program that runs as your user can get root rights on this computer
+   (`sudo gpasswd -d USER docker` undoes it; the framework then cannot build without sudo),
 3. copies the files the repository ships to `/opt/llm-cross-compiler-framework` (owned by your user) and lists them
    in `.lcf-installed-files`. Running it again updates those files and removes only files that an earlier run
    copied and the repository no longer ships; everything else there stays: your own targets (module wizard,
    `llm-cli module create`), installed community packs, `configs/config.yml`, builds, cache and models. Start
    updates in the repository folder: the copy of `install.sh` in `/opt` copies and removes nothing,
 4. creates a virtual environment (`.venv`) there and installs the pinned packages from `requirements-gui.txt`
-   (everything in `requirements.txt` plus the GUI's PySide6; with `--headless` only `requirements.txt`),
+   (everything in `requirements.txt` plus the GUI's PySide6; with `--headless` only `requirements.txt`), each file
+   checked against its hash, with the pip that comes with Python (pip itself is not upgraded: that would download
+   it without a checksum),
 5. creates the launcher `/usr/local/bin/llm-framework`, which starts the GUI,
 6. sets up Ditto's local model server (`llm-cli ditto runtime ensure`, run as you, never as root): bare metal by
    default, in Docker when you choose it or when bare metal is not possible here. If Ditto is there already, it does
