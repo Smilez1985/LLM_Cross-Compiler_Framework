@@ -157,7 +157,8 @@ class TestLooseFiles:
             assert (meta["origin_pack"], meta["topic"], meta["origin_sha256"]) == ("board-notes", "rk-npu",
                                                                                   prov.content_sha256)
             assert "target" not in meta
-        assert world.rag.removed == [("board-notes", prov.content_sha256)]
+        # its own older excerpts, and those an earlier version imported from the loose file unsorted (named after it)
+        assert world.rag.removed == [("board-notes", prov.content_sha256), ("board notes.json", prov.content_sha256)]
         assert [folder for folder, _ in world.cm.installed()] == [dest]
 
     def test_a_target_must_exist_and_names_the_folder(self, world):
