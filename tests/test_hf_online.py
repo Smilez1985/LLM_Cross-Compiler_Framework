@@ -224,6 +224,24 @@ class TestTheTokenGoesOnlyToHuggingFace:
         assert "config.json" in ModelManager(framework(tmp_path, STORED)).list_repo_files(REPO, typed)
         only_to_huggingface(foreign, typed)
 
+    def test_the_browsers_licence_check_uses_the_typed_token_too(self, qapp, foreign, tmp_path):
+        # Regression (review of chain hf-online): ModelManager.check_license took the typed token, but the browser's
+        # FileListWorker did not pass it, so the licence check went without the token the person had just typed
+        # (the stored one or none) while the file list used it. Both requests now carry the typed token.
+        pytest.importorskip("PySide6")
+        from orchestrator.Core.model_manager import ModelManager
+        from orchestrator.gui import huggingface_window as hf
+        typed = "hf_" + "Typed" * 8
+        done = []
+        worker = hf.FileListWorker(ModelManager(framework(tmp_path)), REPO, typed, lang="en")
+        worker.finished.connect(lambda licence, files: done.append((licence["license"], files)))
+        worker.error.connect(lambda text: pytest.fail(text))
+        worker.run()
+        assert done == [("apache-2.0", [s["rfilename"] for s in SIBLINGS])]
+        calls = [(path, token) for host, path, token in foreign.seen if path != "/api/agent-harnesses"]
+        assert len(calls) == 2 and all(token == typed for _, token in calls), calls
+        only_to_huggingface(foreign, typed)
+
     def test_the_take_overs_hub_list(self, foreign, tmp_path):
         from orchestrator.Core.model_manager import ModelManager
         listed = ModelManager(framework(tmp_path, STORED))._hub_lookup()(REPO, COMMIT)
