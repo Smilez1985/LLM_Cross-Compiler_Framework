@@ -1546,7 +1546,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   wie bisher; die Board-Schritte der Person (`person_steps.connect_stored`, `device runtime deploy|verify|prune
   --on-device` der CLI, das Fenster Boards) öffnen eine mit dem Einmal-Passwort der Person, wenn eines eingegeben ist,
   und `scan --device` übergibt seine Anmeldung an eine Sitzung. CLI und Fenster Boards sagen, wenn das Netz des Boards
-  abbricht und wenn es wieder antwortet (EN/DE), der Job einer KI zeigt es mit dem Label des Boards. Ein
+  abbricht und wenn es wieder antwortet (EN/DE), jedes Warten neu (auch nach einem Upload, der von vorn begann),
+  der Job einer KI zeigt es mit dem Label des Boards. Ein
   `CancelToken` ersetzt die vier Kopien von „den Client halten, damit Abbrechen ihn schließt“, und das Schließen einer
   Sitzung beendet ihr Warten. Die Board-Schritte der Person, `scan --device` und Mojo fragen
   `remote.transport.available()`, ob SSH geht, und die Meldungen der GUI für ein Problem auf diesem Computer

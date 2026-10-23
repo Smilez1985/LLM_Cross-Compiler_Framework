@@ -1358,7 +1358,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   refusals and texts as before; the person's board steps (`person_steps.connect_stored`, the CLI's
   `device runtime deploy|verify|prune --on-device`, the Boards window) open one with the person's one-time password
   when one is typed, and `scan --device` hands its login to a session. The CLI and the Boards window say when the
-  board's network dropped and when it answers again (EN/DE), an AI's job shows it by the board's label. One
+  board's network dropped and when it answers again (EN/DE), each wait anew (also after an upload that started
+  again from the beginning), an AI's job shows it by the board's label. One
   `CancelToken` replaces the four "hold the client so Cancel can close it" copies, and closing a session ends its
   waits. The person's board steps, `scan --device` and Mojo ask `remote.transport.available()` whether SSH works, and
   the GUI's messages for a problem on this computer (local_problem) now also name what failed there (the system's
