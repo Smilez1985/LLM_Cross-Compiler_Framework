@@ -2350,6 +2350,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Die lokale Laufzeit scheitert unter Windows nicht mehr, während ein anderes Fenster ihre Dateien liest** (Kette
+  port-runtime, aus der Prüfung des verwalteten llama-server): Windows verweigert das Ersetzen oder Löschen einer
+  Datei, die ein anderer Prozess gerade offen hat. Der LLMClient der GUI liest `server.json` und die Schlüsseldatei
+  des Servers, und ein Prozess, der auf die Laufzeit-Sperre wartet, liest die Sperrdatei; ein Start, Stopp oder eine
+  Installation in einem anderen Fenster konnte daher mit „The process cannot access the file“ enden. Die
+  Zustandsdateien der Laufzeit (auch die des Build-Speichers und des Laufzeitmodus) werden jetzt mit
+  `utils/atomic.replace_file` ersetzt, und `server.json`, die Schlüsseldateien und die Sperrdateien von
+  `utils/download.FileLock` (die Laufzeit-Sperre, die des Build-Speichers und die einzelner Downloads) mit dem neuen
+  `utils/atomic.remove_file` gelöscht; beide versuchen es unter Windows kurz erneut, sonst nie. Regressionstests:
+  `tests/test_atomic.py`, `tests/test_runtime.py` `test_windows_sharing_violations_are_retried`.
 - **Ein Modell aus dem alten Download-Cache von Hugging Face funktioniert wieder im Build** (A6, „bleiben nutzbar“):
   Der Hugging-Face-Browser der GUI speicherte bisher in den eigenen Cache von huggingface_hub im Modellordner, wo eine
   Datei ein Link auf einen Blob ist, der nach seiner Prüfsumme heißt. Ein Build einer solchen GGUF-Datei band sie

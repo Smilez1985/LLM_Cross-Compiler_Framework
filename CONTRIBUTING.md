@@ -614,9 +614,11 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
 - **Shared helpers have one home below the tools.** Paths in text an AI reads: `orchestrator/security/paths.py`
   (`label_paths`, `shorten_home`, `device_text`, `scrub_for_ai`, and the home-folder patterns `HOME_ROOT` and
   `ACCOUNT_NAME` that other scrubbers build on). Private atomic files: `orchestrator/utils/atomic.py`
-  (`replace_file` with the Windows retry, `write_private`, `write_private_exclusive`, and `owner_only`, which makes
-  an existing file private to this account: group and other bits off on POSIX, a protected ACL for this account
-  alone on Windows; every "only you" file uses it, never a second chmod or ACL helper). One-time notices:
+  (`replace_file` with the Windows retry, `remove_file`, which deletes with the same retry (a file another process
+  has open, such as the local runtime's `server.json`, key files and lock files), `write_private`,
+  `write_private_exclusive`, and `owner_only`, which makes an existing file private to this account: group and other
+  bits off on POSIX, a protected ACL for this account alone on Windows; every "only you" file uses it, never a second
+  chmod or ACL helper). One-time notices:
   `orchestrator/utils/notice_store.py` (`OneTimeNotice`). Docker image references:
   `orchestrator/utils/image_ref.py`. HTTP that reaches only public addresses: `orchestrator/security/http.py`
   (`PublicOnlyAdapter`). The audit key: `Core/vault_key.audit_key`; a pack's base images:

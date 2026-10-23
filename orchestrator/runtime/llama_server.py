@@ -61,7 +61,7 @@ from orchestrator.runtime.server_policy import (LOOPBACK, PolicyError, check_ser
                                                 write_key_file)
 from orchestrator.utils.download import DownloadError, FileLock, PinnedDownloader
 from orchestrator.utils.download import IntegrityError as DownloadIntegrityError
-from orchestrator.utils.atomic import write_private_exclusive
+from orchestrator.utils.atomic import remove_file, write_private_exclusive
 from orchestrator.utils.helpers import redact_secrets, safe_extract_archive, safe_json_load
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.next_steps import WithSteps
@@ -190,7 +190,9 @@ def runtime_root(data_dir: Path) -> Path:
     return Path(data_dir) / "runtime" / "llama.cpp"
 
 
-# The runtime's private state files are written by orchestrator/utils/atomic.py (consolidation chain c1-imports).
+# The runtime's private state files are written by orchestrator/utils/atomic.py (consolidation chain c1-imports), and
+# server.json and the key files are deleted with atomic.remove_file: LLMClient reads them in every process (the GUI's
+# too), and Windows refuses to replace or delete a file that is open at that moment, so both try again for a moment.
 _write_private = write_private_exclusive
 
 
@@ -1502,9 +1504,9 @@ class LocalLLMRuntime:
         state = self._load_state()
         if state and state.get("mode") == "docker":
             stopped = self._stop_container_locked(state, timeout)
-            self.state_file.unlink(missing_ok=True)
+            remove_file(self.state_file)
             for key_file in self.root.glob("server-*.key"):
-                key_file.unlink(missing_ok=True)
+                remove_file(key_file)
             return stopped
         proc = owned_process(state)
         if proc:
@@ -1515,9 +1517,9 @@ class LocalLLMRuntime:
             except subprocess.TimeoutExpired:
                 pass
             self._proc = None
-        self.state_file.unlink(missing_ok=True)
+        remove_file(self.state_file)
         for key_file in self.root.glob("server-*.key"):
-            key_file.unlink(missing_ok=True)
+            remove_file(key_file)
         return proc is not None
 
     @staticmethod
@@ -1586,11 +1588,11 @@ class LocalLLMRuntime:
         docker_state = bool(state and state.get("mode") == "docker")
         alive = _server_alive(state, self._docker) if state else False
         if state and not alive:
-            self.state_file.unlink(missing_ok=True)
+            remove_file(self.state_file)
         live_key = Path(state["key_file"]).name if alive and state and state.get("key_file") else None
         for key_file in self.root.glob("server-*.key"):
             if key_file.name != live_key:
-                key_file.unlink(missing_ok=True)
+                remove_file(key_file)
         proc = owned_process(state) if alive and not docker_state else None
         orphans = self.find_orphans(keep_pid=proc.pid if proc else None)
         for orphan in orphans:
