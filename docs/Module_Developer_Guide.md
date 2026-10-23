@@ -259,6 +259,12 @@ ISC, Apache-2.0, MPL-2.0, CC BY, CC BY-SA) get the canonical licence text in `kn
 `knowledge/NOTICE` that lists every page with its source address, copyright line and licence; the placeholder check
 leaves these out too, and an export makes them anew from the snapshot.
 
+On your computer the snapshot is not imported: its pages are in your knowledge base already. When you export the
+target as a pack, the snapshot travels with it, and the recipient's framework checks it at the install like a
+knowledge pack (a list of pages, each with its source, and its licence files) and imports it into their knowledge base
+under this target, with a snapshot of their knowledge base first; a newer version of your target pack replaces the
+excerpts of the older one there (unreleased, DECISIONS round 23 item 8).
+
 The result is a **skeleton**, not a working target yet:
 
 - **The capabilities block is a starting point.** Add your real boards, other formats, per-board quantizations and

@@ -260,7 +260,7 @@ SDK); see [SSOT_ARCHITECTURE.md](../configs/SSOT_ARCHITECTURE.md) for what each 
 | `models/embeddings/` | Embedding and reranking models of the knowledge base (unreleased). |
 | `models/hf/<owner>--<name>/<commit>/` | Single Hugging Face files the GUI's browser or an AI app downloaded, checked against the Hub (unreleased, decision A6). |
 | `models/models--<owner>--<name>/` | The browser's downloads of earlier versions, in huggingface_hub's own cache layout: still listed and usable; **Take over old downloads...** copies them into `models/hf/` and offers to remove them (unreleased). |
-| `community/` | Installed community recipes (`recipes/`) and knowledge packs (`knowledge/`), each with a `.lcf-provenance.json`, and the packs you export (`contributions/`). Community targets are installed into `targets/`. A `.quarantine/` folder inside an install folder holds a pack only while it is checked (unreleased). |
+| `community/` | Installed community recipes (`recipes/`) and knowledge packs (`knowledge/<topic or target>/<pack>/`: knowledge always belongs to a topic or a target; a loose knowledge file there is never imported until it is sorted into one), each with a `.lcf-provenance.json`, and the packs you export (`contributions/`). Community targets are installed into `targets/`. A `.quarantine/` folder inside an install folder holds a pack only while it is checked (unreleased). |
 | `~/.llm-framework/` (or `LLM_FRAMEWORK_HOME`) | `secrets.store` (also your community keys), `tool_policy.json`, `audit.db` with `audit.db.anchor`, `known_hosts`, the framework SSH key `id_ed25519_llm_framework` (+ `.pub`), `mcp_tokens.json` (the named MCP tokens, as SHA-256 hashes, with their permissions), `chat_history.json`, `llm_privacy_key` and `llm_install_id`; `crawl_notice.json` and `input_history.json` (unreleased); the cached community index `community/index.json` with `index.json.sig` and the authors' public keys remembered at the first install, `community/authors.json` (unreleased); the knowledge base `qdrant_edge/` with its lock file `qdrant_edge.lock` and the record of its conversion `knowledge_conversion.json` (unreleased; the folder `qdrant/` of earlier versions stays until you delete it) and `knowledge_snapshots/`; the local model server under `runtime/llama.cpp/` (builds, `active.json`, `server.json`, the key file while the server runs) and its log in `logs/llama-server.log`; while the framework window is open, `gui_bridge/` with `bridge.json` (the bridge's address and key, mode 0600) and the socket `gui.sock` (unreleased). |
 | Config folder (usually `configs/`) | `config.yml` (user settings); optionally an own `llm_providers.yml` that adds or replaces provider presets. |
 | `chat_feed.sqlite` in the per-user folder (unreleased) | The chat feed: what the chat panel on the right shows (your messages, Ditto's answers, questions that wait, decisions an AI made with its reason, results of work an AI started). Every row is signed; nothing in it is deleted by itself. |
@@ -916,8 +916,12 @@ expired, so a revocation never stops applying because the framework was not upda
    and you confirm. `--yes` skips the question only when the signed index lists the pack (trust `verified` or
    `community`), also for a pack file.
 6. An atomic rename puts the pack in place, never over an existing folder (also when only the case differs),
-   together with `.lcf-provenance.json` (trust, source, hashes, signer, sender). A knowledge pack is then imported
-   into the knowledge base, or when the knowledge base starts if it is off. Anything that fails on the way is
+   together with `.lcf-provenance.json` (trust, source, hashes, signer, sender; for knowledge its topic or target).
+   A knowledge pack, and the knowledge snapshot of a target pack, is then imported into the knowledge base, or when
+   the knowledge base starts if it is off: every excerpt carries the pack, its content digest and its topic or target
+   (a page cannot set them), and once every page is in, the excerpts of an older version of the pack are removed.
+   Only installed packs whose files are unchanged are imported, never a loose file (`community_manager.prepare_sort`
+   checks one the same way before it is sorted into a topic or target folder). Anything that fails on the way is
    removed.
 
 A pack file (`llm-cli zoo install --file`, or Import file... in the Community Hub) goes through the same
