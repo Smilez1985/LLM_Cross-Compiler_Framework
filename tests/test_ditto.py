@@ -46,7 +46,7 @@ class FakeConfig:
     def get(self, key, default=None):
         return self.values.get(key, default)
 
-    def set(self, key, value):
+    def set(self, key, value, source_type="override"):
         self.values[key] = value
         return True
 
@@ -829,6 +829,77 @@ class TestConfirmations:
         # CliRunner has no terminal: the terminal prompt, which denies without one.
         assert calls == [("Which targets?", cli._ditto_confirm, True)]
         assert config.values["ai_provider"] == "ollama"
+
+    def test_one_command_provider_and_model_are_never_saved(self, monkeypatch, tmp_path):
+        """`ditto ask --provider/--model` holds for this command only: a save of the settings during it (the
+        update_settings tool the person confirms) writes the saved provider and model, never the command's."""
+        import yaml
+        from click.testing import CliRunner
+        from orchestrator import cli
+        from orchestrator.Core.config_manager import ConfigManager
+        from orchestrator.llm import load_catalog
+        config = ConfigManager(tmp_path / "configs")
+        config.set("ai_provider", "custom")
+        config.set("ai_base_url", "http://192.168.1.30:8000/v1")
+        config.set("ai_model", "served-model")
+        assert config.save_user_config()
+        seen = {}
+
+        class FakeDitto:
+            client = SimpleNamespace(catalog=load_catalog(), primary_provider=lambda: load_catalog().get("custom"))
+
+            def chat(self, question, confirm=None, use_tools=True, on_tool=None):
+                seen.update({key: config.get(key) for key in ("ai_provider", "ai_model", "ai_model_chat",
+                                                              "ai_base_url")})
+                config.set("language", "de")   # a setting the person changed through a tool
+                assert config.save_user_config()
+                return ChatReply(question=question, text="ok", new_messages=[])
+
+        framework = SimpleNamespace(config=config, get_component=lambda name: FakeDitto())
+
+        def require(self):
+            self.framework_manager = framework
+            return self
+
+        monkeypatch.setattr(cli.FrameworkContext, "require_framework", require)
+        result = CliRunner().invoke(cli.cli, ["-q", "ditto", "ask", "--provider", "ollama", "--model", "small",
+                                              "Hi"])
+        assert result.exit_code == 0, result.output
+        assert seen == {"ai_provider": "ollama", "ai_model": "small", "ai_model_chat": "small", "ai_base_url": ""}
+        saved = yaml.safe_load((tmp_path / "configs" / "config.yml").read_text())
+        assert saved["ai_provider"] == "custom" and saved["ai_model"] == "served-model"
+        assert saved["ai_base_url"] == "http://192.168.1.30:8000/v1" and saved["language"] == "de"
+        assert "ai_model_chat" not in saved
+        # Another process's save does not replace the command's choice while it runs either.
+        assert config.reload_user_config(["ai_provider"]).conflicts == {"ai_provider": "command_line"}
+        assert config.get("ai_provider") == "ollama"
+
+    def test_the_eval_effort_is_never_saved(self, monkeypatch, tmp_path):
+        import yaml
+        from click.testing import CliRunner
+        from orchestrator import cli
+        from orchestrator.Core.config_manager import ConfigManager
+        from orchestrator.evals import eval_run
+        config = ConfigManager(tmp_path / "configs")
+        framework = SimpleNamespace(config=config, get_component=lambda name: SimpleNamespace(), resolve_path=str)
+
+        def require(self):
+            self.framework_manager = framework
+            return self
+
+        def run(fm, cases, make_ditto, **kw):
+            make_ditto()
+            assert fm.config.get("ai_effort_json") == "low" and fm.config.save_user_config()
+            raise eval_run.EvalRunError("stopped by the test", exit_code=3)
+
+        monkeypatch.setattr(cli.FrameworkContext, "require_framework", require)
+        monkeypatch.setattr(cli, "_ai_override", lambda ctx, provider, model: SimpleNamespace())
+        monkeypatch.setattr(eval_run, "run_evaluation", run)
+        result = CliRunner().invoke(cli.cli, ["-q", "ditto", "eval", "--case", "healing-disk-full", "--effort",
+                                              "low"])
+        assert result.exit_code == 3, result.output
+        saved = yaml.safe_load((tmp_path / "configs" / "config.yml").read_text()) or {}
+        assert not any(key.startswith("ai_effort") for key in saved), saved
 
     def test_removed_provider_on_the_command_line_names_the_alternatives(self, monkeypatch):
         from click.testing import CliRunner

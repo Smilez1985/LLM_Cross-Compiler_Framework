@@ -439,10 +439,11 @@ def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str, probe_f
 
 
 def _ai_override(ctx: FrameworkContext, provider: Optional[str], model: Optional[str]):
-    """Ditto with provider/model chosen for this command only (the saved AI settings stay unchanged: they are set in
-    this short-lived process; the GUI uses Core/ai_override.ditto_with instead, and DittoManager.for_run goes through
-    it too)."""
-    from orchestrator.Core.ai_override import override_values, provider_problem
+    """Ditto with provider/model chosen for this command only. The values are set in this short-lived process with
+    the source "cli", which save_user_config never writes, so the saved AI settings stay unchanged also when a tool
+    saves the settings during the command (the GUI uses Core/ai_override.ditto_with instead, and DittoManager.for_run
+    goes through it too)."""
+    from orchestrator.Core.ai_override import CLI_SOURCE, override_values, provider_problem
     fm = ctx.framework_manager
     ditto = fm.get_component("ditto_manager")
     if ditto is None:
@@ -452,8 +453,8 @@ def _ai_override(ctx: FrameworkContext, provider: Optional[str], model: Optional
     if problem:
         console.print(f"[red]{escape(problem)}[/red]")
         sys.exit(2)
-    for key, value in override_values(provider, model).items():
-        fm.config.set(key, value)
+    for key, value in override_values(provider, model, ditto=ditto).items():
+        fm.config.set(key, value, source_type=CLI_SOURCE)
     return ditto
 
 
@@ -2396,7 +2397,7 @@ def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Opti
     """Grade Ditto on fixed cases with the chosen provider/model, e.g. to check whether a 2-bit local model is
     good enough, or the knowledge-base search (--kind retrieval, works offline once the embedding model is
     downloaded). Nothing is built or changed. Cloud providers bill every request (about 20 per run and repeat)."""
-    from orchestrator.Core.ai_override import override_values
+    from orchestrator.Core.ai_override import CLI_SOURCE, override_values
     from orchestrator.Core.ditto_manager import DittoError
     from orchestrator.evals.eval_run import (EvalEvents, EvalRunError, check_choice, retrieval_table, run_evaluation,
                                              select_cases, summary_table, write_report)
@@ -2439,7 +2440,7 @@ def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Opti
     def make_ditto():
         ditto = _ai_override(ctx, "local" if tiers else provider, model)
         for key, value in override_values(effort=effort).items():
-            fm.config.set(key, value)  # this run only; the saved settings stay unchanged
+            fm.config.set(key, value, source_type=CLI_SOURCE)  # this run only: never saved
         return ditto
 
     try:

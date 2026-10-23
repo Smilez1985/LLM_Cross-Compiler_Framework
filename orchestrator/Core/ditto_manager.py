@@ -754,7 +754,7 @@ class DittoCoder:
         if problem:
             raise DittoError(problem)
         from orchestrator.Core.ai_override import ditto_with, override_values
-        return ditto_with(self, override_values(provider, model))
+        return ditto_with(self, override_values(provider, model, ditto=self))
 
     def pin_base_image(self, definition: "ModuleDefinition") -> "ModuleDefinition":
         """pin_base_image() in this Ditto's offline mode (the settings' offline_mode)."""

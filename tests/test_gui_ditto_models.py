@@ -732,8 +732,12 @@ class TestEvaluation:
         wait_until(eval_ui.qapp, lambda: not win.busy)
         (call,) = eval_ui.run.calls
         assert call.kw["rag_variants"] == ("fused", "rerank") and call.kw["provider"] == "ollama"
-        assert call.kw["model"] == "model-y" and call.ditto.config.values == {"ai_provider": "ollama",
-                                                                            "ai_model": "model-y"}
+        # Changed on purpose (port of ditto-rewire-verified): the core's values for this run, with a switch away from
+        # the saved provider clearing its own settings and the model applied to every task.
+        from orchestrator.Core.ai_override import override_values
+        assert call.kw["model"] == "model-y" and call.ditto.config.values == override_values(
+            "ollama", "model-y", ditto=win.ditto)
+        assert call.ditto.config.values["ai_model_chat"] == "model-y"
 
     def test_retrieval_only_needs_no_ai_model(self, eval_ui):
         win = eval_ui.win
