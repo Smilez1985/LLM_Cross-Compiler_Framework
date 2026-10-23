@@ -1451,7 +1451,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   kommt mit dem Ergebnis zurück statt über das geteilte `DeploymentManager.last_package_error`, das kein Code des
   Frameworks mehr liest (`create_deployment_package` behält es für ältere Aufrufer). Der vertraute Eintrag des Tabs
   wird so protokolliert wie in der CLI: Ohne das Audit-Log der Registry schreibt er seine Zeile jetzt ins Audit-Log
-  im Benutzerordner, vorher schrieb er keine. `llmcf device runtime deploy`, Laufzeit installieren... im Boards-Fenster
+  im Benutzerordner, vorher schrieb er keine. Die Frage der GUI zu einem neuen Host-Schlüssel (vor dem Deployment des
+  Tabs und im Hardware-Scan) schreibt die Zeile des Vertrauens genauso, wie es `llmcf deploy run` und
+  `llmcf scan --device` tun. `llmcf device runtime deploy`, Laufzeit installieren... im Boards-Fenster
   und `deploy_device_runtime` der KI laufen über einen Ablauf, `steps.deploy_runtime_flow`. Er meldet sich an,
   schreibt den vertrauten Eintrag des Boards (nur für die Person), liest das Board und lehnt root vor jeder Frage ab,
   fragt zum Benchmark-Modell mit der Zustimmung (nur für die Person), installiert, schließt die Sitzung und

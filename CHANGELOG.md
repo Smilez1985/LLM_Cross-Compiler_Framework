@@ -1273,7 +1273,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   stays). The reason a package cannot be made comes back with the result instead of the shared
   `DeploymentManager.last_package_error`, which no framework code reads any more (`create_deployment_package` keeps
   it for older callers). The tab's trusted record is audited as the CLI audits it: without the registry's audit log
-  it now writes its row to the per-user audit log, where it wrote none before. `llmcf device runtime deploy`, the
+  it now writes its row to the per-user audit log, where it wrote none before. The GUI's question about a new host
+  key (before the tab's deploy and in the Hardware scan) writes the trust's row the same way, as `llmcf deploy run` and
+  `llmcf scan --device` do. `llmcf device runtime deploy`, the
   Boards window's Deploy runtime... and the AI's `deploy_device_runtime` run one flow, `steps.deploy_runtime_flow`.
   It logs in, writes the board's trusted record (person only), reads the board and refuses root before any question,
   asks about the benchmark model with its consent (person only), installs, closes the session and records "tested
