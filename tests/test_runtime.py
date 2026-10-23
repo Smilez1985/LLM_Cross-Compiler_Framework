@@ -777,7 +777,7 @@ class TestInstall:
         assert [i.full_path for i in rt.cleanup_plan().items] == [str(rt.root / "b0-cpu")]
 
     def test_refuses_to_replace_the_installation_the_server_runs_from(self, tmp_path, monkeypatch):
-        rt, _ = self.setup_runtime(tmp_path)
+        rt, session = self.setup_runtime(tmp_path)
         inst = rt.install_prebuilt()
 
         class Running:
@@ -787,8 +787,45 @@ class TestInstall:
             def exe(self):
                 return str(inst.server)
         monkeypatch.setattr(ls, "owned_process", lambda state: Running())
+        calls = len(session.calls)
         with pytest.raises(LocalRuntimeError, match="stop it first"):
             rt.install_prebuilt(force=True)
+        assert len(session.calls) == calls  # refused before downloading, not after
+
+    def test_downloads_do_not_hold_the_runtime_lock(self, tmp_path):
+        # A CUDA archive is hundreds of MB; holding the lock meanwhile made `runtime stop`, `runtime start` and the exit
+        # handler of a GUI with a tied server wait for the whole download (up to the lock's 15 minutes).
+        rt, session = self.setup_runtime(tmp_path)
+        free = []
+        get = session.get
+
+        def checking_get(url, **kw):
+            with ls._FileLock(rt.lock_file, timeout=0.3, sleep=lambda s: time.sleep(0.05)):
+                free.append(url)
+            return get(url, **kw)
+        session.get = checking_get
+        rt.install_prebuilt()
+        assert len(free) == 2 and rt.installed()
+
+    @pytest.mark.parametrize("force", [False, True])
+    def test_an_install_finished_meanwhile_by_another_process(self, tmp_path, force):
+        rt, session = self.setup_runtime(tmp_path)
+        other = LocalLLMRuntime(data_dir=rt.data_dir, models_dir=rt.models_dir, catalog=rt.catalog,
+                                hardware=rt.hardware(), session=session, sleep=lambda s: None)
+        lock = rt._lock
+
+        def other_installs_first():
+            other.install_prebuilt(force=force)  # it reuses our verified archives and deletes them when done
+            return lock()
+        rt._lock = other_installs_first
+        calls_before = len(session.calls)
+        inst = rt.install_prebuilt(force=force)
+        assert inst == rt.installed() and inst.server.is_file()
+        downloads = len(session.calls) - calls_before
+        # Without force the other installation is taken as it is; with force the removed archives are fetched again
+        # instead of failing as a "broken archive".
+        assert downloads == (4 if force else 2)
+        assert not list((rt.root / "downloads").glob("*.tar.gz"))
 
     def test_no_build_for_this_machine(self, tmp_path):
         rt = LocalLLMRuntime(data_dir=tmp_path / "s", models_dir=tmp_path / "m", catalog=runtime_catalog(),
@@ -1119,6 +1156,27 @@ class TestServerProcess:
         third = rt.start(tie_to_process=True)
         handlers[-1]()
         assert gone(third.pid) and rt.endpoint() is None and gone(first.pid)
+
+    def test_exit_handler_does_not_wait_for_a_busy_lock(self, fake_runtime, monkeypatch):
+        # Another process holding the runtime lock (its start waits up to minutes for health) must not keep this
+        # process from exiting for the lock's 15 minutes; the tied server, verified by pid and start time, is ended
+        # anyway.
+        handlers = []
+        monkeypatch.setattr(ls.atexit, "register", handlers.append)
+        rt = fake_runtime()
+        ep = rt.start(tie_to_process=True)
+        holder = psutil.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        try:
+            rt.lock_file.write_text(f"{holder.pid} {holder.create_time()}")
+            rt.EXIT_LOCK_TIMEOUT = 0.3
+            began = time.monotonic()
+            handlers[0]()
+            assert time.monotonic() - began < 5 and gone(ep.pid)
+        finally:
+            holder.kill()
+            holder.wait(5)
+            rt.lock_file.unlink(missing_ok=True)
+        assert rt.endpoint() is None
 
     def test_crashed_server_leaves_nothing_that_is_trusted(self, fake_runtime):
         rt = fake_runtime()

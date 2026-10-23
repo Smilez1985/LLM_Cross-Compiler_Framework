@@ -368,6 +368,8 @@ def _job_kill_on_close(pid: int):
 class LocalLLMRuntime:
     """Install, start and stop the managed llama-server; choose Ditto's model for this machine."""
 
+    EXIT_LOCK_TIMEOUT = 5.0  # seconds the exit handler of a tied server waits for the runtime lock
+
     def __init__(self, data_dir: Optional[Path] = None, models_dir: Optional[Path] = None,
                  catalog: Optional[RuntimeCatalog] = None, hardware: Optional[HardwareInfo] = None,
                  session: Optional[requests.Session] = None, runner: Optional[Runner] = None,
@@ -943,7 +945,11 @@ class LocalLLMRuntime:
         backend): only on explicit request (`ditto runtime install --prebuilt`, or the GUI's "Install the official
         prebuilt archive..."), and always shown as "prebuilt, not self-built". The previous installation of the same
         variant stays in place until the new one is complete. A set `stop` event (threading.Event, the GUI's Cancel)
-        ends the download with DownloadStopped, keeps the `.part` file for a resume and installs nothing."""
+        ends the download with DownloadStopped, keeps the `.part` file for a resume and installs nothing. The archives
+        are downloaded outside the runtime lock (each file has its own), so a start, a stop or the exit handler of a
+        tied server elsewhere is not held up for the minutes a CUDA archive takes; under the lock everything is checked
+        again (installed by another process meanwhile, a server started from it, archives a concurrent install of the
+        same build removed are fetched again)."""
         choice = self.select_backend(prefer)
         asset = choice.asset
         if asset is None:
@@ -952,24 +958,42 @@ class LocalLLMRuntime:
         if unpinned:
             raise IntegrityError(f"No sha256 and size pinned for {', '.join(unpinned)} in the runtime catalog; "
                                  "refusing to download unverifiable binaries.")
-        with self._lock():
-            target = self.install_dir(asset)
+        target = self.install_dir(asset)
+        pins = {f.name: f.sha256 for f in asset.files}
+        downloads = self.root / "downloads"
+
+        def up_to_date() -> Optional[InstalledRuntime]:
             current = self._read_manifest(target)
-            if current and not force and current.files == {f.name: f.sha256 for f in asset.files}:
-                self._update_active(variant=asset.variant, asset_id=asset.id, use="prebuilt")
-                return current
+            return current if current and not force and current.files == pins else None
+
+        def refuse_if_running() -> None:
             running = owned_process(_read_json(self.state_file))
             if running and target.exists() and self._uses(running, target):
                 raise LocalRuntimeError("The local model server runs from this installation; stop it first "
                                         "(llm-cli ditto runtime stop).")
+
+        def fetch_all() -> List[Path]:
+            downloads.mkdir(parents=True, exist_ok=True)
+            return [self._fetch(self.catalog.llama_cpp.base_url + f.name, downloads / f.name, f.size, f.sha256,
+                                progress, stop=stop) for f in asset.files]
+
+        archives: List[Path] = []
+        if up_to_date() is None:
+            refuse_if_running()  # before minutes of downloading, not after
+            self._ensure_space(self.root, 2 * asset.download_size, what="unpacking")
+            archives = fetch_all()
+        with self._lock():
+            current = up_to_date()  # possibly installed by another process in the meantime
+            if current:
+                for archive in archives:
+                    archive.unlink(missing_ok=True)  # not needed any more
+                self._update_active(variant=asset.variant, asset_id=asset.id, use="prebuilt")
+                return current
+            refuse_if_running()
             for leftover in list(self.root.glob(".staging-*")) + list(self.root.glob(".old-*")):
                 shutil.rmtree(leftover, ignore_errors=True)  # from an interrupted install; the lock is ours
-
-            downloads = self.root / "downloads"
-            downloads.mkdir(parents=True, exist_ok=True)
-            self._ensure_space(self.root, 2 * asset.download_size, what="unpacking")
-            archives = [self._fetch(self.catalog.llama_cpp.base_url + f.name, downloads / f.name, f.size, f.sha256,
-                                    progress, stop=stop) for f in asset.files]
+            if not archives or not all(a.is_file() for a in archives):
+                archives = fetch_all()  # removed by a concurrent install of the same build
             staging = self.root / f".staging-{asset.variant}-{secrets.token_hex(4)}"
             old = None
             try:
@@ -1466,7 +1490,9 @@ class LocalLLMRuntime:
 
     def _tie_to_this_process(self, pid: int, created: float) -> None:
         """Ends the server together with this process: a kill-on-close job on Windows, an exit handler elsewhere
-        (which a hard kill of this process skips; the next start reuses or cleans up the server)."""
+        (which a hard kill of this process skips; the next start reuses or cleans up the server). The handler waits
+        at most EXIT_LOCK_TIMEOUT for the runtime lock (another process's start waits minutes for health); when the
+        lock stays busy it still ends the exact process it started (pid, start time and program checked)."""
         if os.name == "nt":
             try:
                 self._job = _job_kill_on_close(pid)
@@ -1474,13 +1500,22 @@ class LocalLLMRuntime:
                 self.logger.warning(f"Could not tie llama-server to this process ({e.__class__.__name__})")
             return
 
+        def ours(state: dict) -> bool:
+            return state.get("pid") == pid and state.get("create_time") == created
+
         def stop_if_unchanged():
             state = self._load_state() or {}
-            if state.get("pid") == pid and state.get("create_time") == created:
-                try:
-                    self.stop()
-                except LocalRuntimeError:
-                    pass
+            if not ours(state):
+                return  # replaced or stopped in the meantime
+            try:
+                with _FileLock(self.lock_file, timeout=self.EXIT_LOCK_TIMEOUT):
+                    if ours(self._load_state() or {}):
+                        self._stop_locked()
+                        self._cleanup_stale_locked()
+            except LocalRuntimeError:
+                proc = owned_process(state)  # the lock stays busy: still the exact process this one started
+                if proc:
+                    self._terminate(proc, 5)
         atexit.register(stop_if_unchanged)
 
     def _wait_healthy(self, proc, port: int, timeout: float) -> str:
