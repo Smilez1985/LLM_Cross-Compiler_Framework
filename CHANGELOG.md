@@ -1361,7 +1361,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Podman's Docker-compatible interface drops Docker's GPU request without a word, and Ditto's container then says why
   it runs on the CPU; features that need BuildKit are refused with the reason and the way to Docker CE;
   `scripts/build_container_image.sh` builds with `DOCKER_BUILDKIT=0`. `llm-cli mojo` names the engine
-  (`docker.daemon`) and lists Podman's limits (`docker.engine`).
+  (`docker.daemon`) and lists Podman's limits (`docker.engine`). Every container of the framework is created through
+  `create_container` (the build stages, the llama.cpp builder, Ditto's containers): under rootless Podman, which the
+  fallback always is, one that runs as the person gets Podman's `keep-id`; without it such a container sees the
+  person's folders as root's and every build stopped with "Permission denied" (found and checked against Podman
+  5.8.9 rootless in the consolidation review install-followups-v).
 - **Hardware probe: version 3.1.0, wider Hailo detection** (consolidation chain probe-keys): `PROBE_TOOL_VERSION` is
   3.1.0 in all three probes (new keys are a schema change; HAILO_PLAN question 5, default recorded in round 23). The
   new keys are never required or `ON`/`OFF` keys, so a profile of probe 3.0.0 is read and stored as before (tested on

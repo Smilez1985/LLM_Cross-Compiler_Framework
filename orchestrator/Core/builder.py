@@ -40,7 +40,7 @@ from orchestrator.Core import build_identity, build_records
 from orchestrator.tools import local_files
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.build_context import stage_build_context
-from orchestrator.utils.docker_engine import engine_name, ensure_docker_host, podman_refusal
+from orchestrator.utils.docker_engine import create_container, engine_name, ensure_docker_host, podman_refusal
 from orchestrator.utils.download import FileLock as DownloadLock
 from orchestrator.utils.helpers import copy_hashed, digest_matches, sha256_file
 from orchestrator.utils.llama_pin import pinned_source
@@ -1659,7 +1659,7 @@ class BuildEngine:
              self._refuse_gpu_under_podman()
              device_requests = [DeviceRequest(count=-1, capabilities=[['gpu']])]
              
-        container = self.docker_client.containers.create(
+        container = create_container(self.docker_client,
             image=image.id,
             command=["/app/modules/build.sh"],
             volumes=vols,
@@ -1733,7 +1733,7 @@ class BuildEngine:
                     sandbox["group_add"] = [str(gid) for gid in self._render_group_ids()]
 
         # 5. Run Container
-        container = self.docker_client.containers.create(
+        container = create_container(self.docker_client,
             image=image.id, 
             command=["/app/modules/build.sh"], 
             volumes=vols, 

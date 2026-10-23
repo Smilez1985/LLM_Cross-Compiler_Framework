@@ -211,9 +211,10 @@ class DockerEngine(ContainerEngine):
 
     def run(self, image: str, command: Sequence[str], *, mounts: Sequence[Mount], env: Mapping[str, str],
             options: Mapping[str, Any], log: Path, timeout: float, stop: Optional[threading.Event] = None) -> int:
+        from orchestrator.utils.docker_engine import create_container   # rootless Podman: keep-id
         volumes = {str(m.source): {"bind": m.target, "mode": "ro" if m.read_only else "rw"} for m in mounts}
-        container = self.client().containers.create(image=image, command=list(command), volumes=volumes,
-                                                    environment=dict(env), **dict(options))
+        container = create_container(self.client(), image=image, command=list(command), volumes=volumes,
+                                     environment=dict(env), **dict(options))
         timer = threading.Timer(timeout, lambda: _quiet(container.kill))
         ended = threading.Event()
 

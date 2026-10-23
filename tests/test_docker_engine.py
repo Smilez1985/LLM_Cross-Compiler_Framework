@@ -359,6 +359,113 @@ class TestTheDockerCheck:
         assert "container engine: Docker" in findings[0].message
 
 
+# --- rootless Podman: a container that runs as the person writes the person's folders --------------------------------
+# Checked with Podman 5.8.9 rootless through its Docker-compatible API (2026-10-23): a container created with
+# "User": "1000:1000" and a bind mount of a folder of that person sees the folder as owned by root and cannot write it
+# ("Permission denied"); with HostConfig.UsernsMode "keep-id" it writes, and the file belongs to the person on the host.
+# A label or annotation does not do it. docker-py's create() refuses any userns_mode but "host".
+
+PODMAN_ROOTLESS_INFO = {"SecurityOptions": ["name=seccomp,profile=default", "name=rootless"]}
+
+
+class RealApiClient:
+    """A real docker-py client whose low-level create request is recorded instead of sent."""
+
+    def __init__(self, monkeypatch, version=PODMAN_VERSION, info=PODMAN_ROOTLESS_INFO):
+        import docker
+        from docker.models.containers import ContainerCollection
+        self.client = docker.DockerClient(base_url="unix:///nonexistent/docker.sock", version="1.41")
+        self.created = []
+        self.client.api.create_container = lambda **kw: self.created.append(kw) or {"Id": "c0ffee"}
+        self.client.version = lambda: version
+        self.client.info = lambda: info
+        self.container = types.SimpleNamespace(
+            id="c0ffee", start=lambda: None, kill=lambda: None, remove=lambda force=False: None,
+            logs=lambda **kw: iter([b"done\n"]) if kw.get("stream") else b"done\n",
+            wait=lambda timeout=None: {"StatusCode": 0})
+        monkeypatch.setattr(ContainerCollection, "get", lambda collection, cid: self.container)
+
+    @property
+    def host_config(self):
+        assert len(self.created) == 1, self.created
+        return self.created[0]["host_config"]
+
+
+class TestRootlessPodmanKeepsThePersonsUid:
+
+    def _sandboxed_run(self, client, tmp_path):
+        from orchestrator.runtime.build.executor import DockerEngine, Mount
+        from orchestrator.utils.sandbox import container_sandbox
+        engine = DockerEngine()
+        engine._client = client
+        (tmp_path / "out").mkdir()
+        status = engine.run("sha256:" + "0" * 64, ["true"], mounts=[Mount(tmp_path / "out", "/work/build", False)],
+                            env={"LANG": "C"}, options=container_sandbox((1000, 1000), working_dir="/work"),
+                            log=tmp_path / "build.log", timeout=30)
+        assert status == 0
+
+    def test_the_builder_container_under_rootless_podman_keeps_the_persons_uid(self, monkeypatch, tmp_path):
+        """The llama.cpp builder container (runtime/build/executor.DockerEngine.run), like every sandboxed container
+        of the framework, runs as the person's uid with the person's folders mounted: under rootless Podman it gets
+        keep-id, or it could not write them."""
+        api = RealApiClient(monkeypatch)
+        self._sandboxed_run(api.client, tmp_path)
+        assert api.host_config.get("UsernsMode") == "keep-id", api.host_config
+        assert api.created[0]["user"] == "1000:1000" and api.host_config["ReadonlyRootfs"] is True
+        assert api.host_config["Binds"] == [f"{tmp_path / 'out'}:/work/build:rw"]
+        assert api.host_config["CapDrop"] == ["ALL"] and api.host_config["NetworkMode"] == "none"
+
+    @pytest.mark.parametrize("version, info", [(DOCKER_VERSION, {"SecurityOptions": ["name=rootless"]}),
+                                               (PODMAN_VERSION, {"SecurityOptions": ["name=seccomp"]})],
+                             ids=["docker-rootless", "podman-rootful"])
+    def test_docker_and_rootful_podman_get_no_user_namespace_mode(self, monkeypatch, tmp_path, version, info):
+        """Docker (rootless or not) has no keep-id and refuses it; rootful Podman needs none."""
+        api = RealApiClient(monkeypatch, version=version, info=info)
+        self._sandboxed_run(api.client, tmp_path)
+        assert "UsernsMode" not in api.host_config, api.host_config
+
+    def test_a_container_that_runs_as_root_gets_no_keep_id(self, monkeypatch):
+        """Root in a rootless Podman container is the person already (the legacy build mode, Trivy)."""
+        api = RealApiClient(monkeypatch)
+        docker_engine.create_container(api.client, image="example", command=["true"], user="0:0")
+        assert "UsernsMode" not in api.host_config
+
+    def test_dockers_own_create_is_used_unchanged_elsewhere(self):
+        calls = []
+        client = types.SimpleNamespace(version=lambda: DOCKER_VERSION,
+                                       containers=types.SimpleNamespace(create=lambda **kw: calls.append(kw) or "c"))
+        assert docker_engine.create_container(client, image="example", command=["x"], user="1000:1000",
+                                              volumes={"/a": {"bind": "/b", "mode": "rw"}}) == "c"
+        assert calls == [{"image": "example", "command": ["x"], "user": "1000:1000",
+                          "volumes": {"/a": {"bind": "/b", "mode": "rw"}}}]
+
+    def test_rootless_is_asked_once_per_client(self, monkeypatch):
+        api = RealApiClient(monkeypatch)
+        asked = []
+        api.client.info = lambda: asked.append(1) or PODMAN_ROOTLESS_INFO
+        assert docker_engine.rootless_podman(api.client) and docker_engine.rootless_podman(api.client)
+        assert asked == [1]
+
+    def test_a_podman_that_does_not_answer_info_is_not_taken_for_rootless(self):
+        client = FakeClient(PODMAN_VERSION)
+        client.info = lambda: (_ for _ in ()).throw(ConnectionError("gone"))
+        assert docker_engine.rootless_podman(client) is False
+
+
+def test_every_framework_container_is_created_through_the_one_helper():
+    """docker_engine.create_container is the one place that creates a container of the framework through docker-py's
+    containers.create (the build stages, the llama.cpp builder, Ditto's check and server containers), so rootless
+    Podman's keep-id cannot be missed by a new site."""
+    sites = []
+    for path in sorted((REPO_ROOT / "orchestrator").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "create"
+                    and isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "containers"):
+                sites.append(path.relative_to(REPO_ROOT).as_posix())
+    assert sites == ["orchestrator/utils/docker_engine.py"], sites
+
+
 # --- every place that connects to Docker ---------------------------------------------------------------------------
 
 def test_every_docker_client_is_made_after_the_one_helper():

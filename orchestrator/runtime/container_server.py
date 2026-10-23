@@ -221,9 +221,10 @@ class DittoDocker(DockerEngine):
                   options: Mapping[str, Any], timeout: float) -> Tuple[int, str]:
         """Runs a short check in a new container of `image` (created by its ID: nothing is pulled) and returns its exit
         status and its output; the container is removed right after (-1: it did not end in time)."""
+        from orchestrator.utils.docker_engine import create_container   # rootless Podman: keep-id
         volumes = {str(m.source): {"bind": m.target, "mode": "ro" if m.read_only else "rw"} for m in mounts}
-        container = self.client().containers.create(image=image, command=list(command), volumes=volumes,
-                                                    environment=dict(env), **dict(options))
+        container = create_container(self.client(), image=image, command=list(command), volumes=volumes,
+                                     environment=dict(env), **dict(options))
         try:
             container.start()
             try:
@@ -239,8 +240,9 @@ class DittoDocker(DockerEngine):
 
     def start_container(self, image: str, command: Sequence[str], *, volumes: Mapping[str, Mapping[str, str]],
                         env: Mapping[str, str], options: Mapping[str, Any]) -> str:
-        container = self.client().containers.create(image=image, command=list(command), volumes=dict(volumes),
-                                                    environment=dict(env), **dict(options))
+        from orchestrator.utils.docker_engine import create_container   # rootless Podman: keep-id
+        container = create_container(self.client(), image=image, command=list(command), volumes=dict(volumes),
+                                     environment=dict(env), **dict(options))
         container.start()
         return str(container.id)
 

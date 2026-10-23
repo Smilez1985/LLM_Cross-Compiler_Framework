@@ -182,7 +182,9 @@ python -m pytest
   oder Podman) und `podman_refusal(feature, engine)` für das, was Podman nicht kann (`gpu`, `buildkit`). Ein neues
   `docker.from_env()` ohne den Helfer davor lässt `tests/test_docker_engine.py` scheitern; eine neue Funktion, die
   BuildKit oder API-Aufrufe nur von Docker braucht, lehnt unter Podman über `podman_refusal` ab, bevor sie startet.
-  Der Helfer nutzt nur die Standardbibliothek (auch Python 3.9): `scripts/build_container_image.sh` startet ihn mit
+  Jeder Container des Frameworks entsteht mit `create_container(client, ...)`, nie mit `client.containers.create`
+  (sonst scheitert ein Test): Unter rootless Podman ergänzt es Podmans `keep-id` für einen Container, der als die
+  Person läuft. Der Helfer nutzt nur die Standardbibliothek (auch Python 3.9): `scripts/build_container_image.sh` startet ihn mit
   dem `python3 -I` des Systems. In Tests hält die autouse-Fixture `hermetic_docker_engine` die Sockets dieses
   Rechners heraus.
 
