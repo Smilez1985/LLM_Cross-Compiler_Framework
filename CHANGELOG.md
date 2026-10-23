@@ -1493,8 +1493,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   again, and the staging folder is still removed; a board that does not answer again ends every later step at once
   with its reason code. The short llama-bench run starts on the board on its own (`run_detached`) and is followed again
   after a drop, never started twice (round 16 G4: work keeps running while nobody watches; a board without nohup runs
-  it attached as before); `RemoteSession.follow` follows a job started before. The probe sends its read-only commands
-  again after a drop. The AI path (`runtime/device/service.py`) opens a `KeyOnly` session (decision 2), with the same
+  it attached as before); `RemoteSession.follow` follows a job started before. Its private folder
+  (`<install folder>/.bench.XXXXXXXX`) goes afterwards, also after a failure or a Ctrl+C at the terminal; one that a
+  Cancel in the Boards window or an AI's `cancel_job` left (the Cancel closes the connection, so the board cannot be
+  reached then) goes with the board's next benchmark once no run can follow its job any more: nothing in it changed
+  for longer than the benchmark's time limit (`sweep_bench_folders`, as the local benchmark removes the sandbox folders
+  a crash left). The probe sends its read-only commands again after a drop. The AI path (`runtime/device/service.py`) opens a `KeyOnly` session (decision 2), with the same
   refusals and texts as before; the person's board steps (`person_steps.connect_stored`, the CLI's
   `device runtime deploy|verify|prune --on-device`, the Boards window) open one with the person's one-time password
   when one is typed, and `scan --device` hands its login to a session. The CLI and the Boards window say when the

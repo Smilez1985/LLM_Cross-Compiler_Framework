@@ -1698,6 +1698,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   sofort mit seinem Grundcode. Der kurze llama-bench-Lauf startet auf dem Board für sich (`run_detached`) und wird nach
   einem Abbruch wieder verfolgt, nie zweimal gestartet (Runde 16 G4: Arbeit läuft weiter, während niemand zusieht; ein
   Board ohne nohup führt ihn wie bisher angehängt aus); `RemoteSession.follow` verfolgt einen schon gestarteten Job.
+  Sein privater Ordner (`<Installationsordner>/.bench.XXXXXXXX`) wird danach entfernt, auch nach einem Fehler oder
+  einem Strg+C im Terminal; einer, den ein Abbrechen im Fenster Boards oder ein `cancel_job` einer KI hinterließ (das
+  Abbrechen schließt die Verbindung, das Board ist dann nicht mehr erreichbar), geht mit dem nächsten Benchmark auf
+  dem Board, sobald kein Lauf seinen Job mehr verfolgen kann: In ihm hat sich länger als das Zeitlimit des Benchmarks
+  nichts geändert (`sweep_bench_folders`, so wie der lokale Benchmark die Sandbox-Ordner eines Absturzes entfernt).
   Die Board-Prüfung sendet ihre nur lesenden Befehle nach einem Abbruch erneut. Der KI-Weg
   (`runtime/device/service.py`) öffnet eine `KeyOnly`-Sitzung (Entscheidung 2), mit denselben Ablehnungen und Texten
   wie bisher; die Board-Schritte der Person (`person_steps.connect_stored`, `device runtime deploy|verify|prune

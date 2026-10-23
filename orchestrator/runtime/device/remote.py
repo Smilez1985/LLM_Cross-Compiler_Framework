@@ -64,6 +64,9 @@ DEVICES_TIMEOUT = 180
 BENCH_TIMEOUT = 900
 BENCH_POLL = 2.0           # seconds between two looks whether the benchmark on the board has finished
 BENCH_PREFIX = ".bench"    # its private folder in the install folder: <root>/.bench.XXXXXXXX (no build folder name)
+# A benchmark folder unchanged this long belongs to no run that can still follow its job (each gives up after
+# BENCH_TIMEOUT from its start): the next run on the board removes it (sweep_bench_folders).
+BENCH_STALE_MINUTES = BENCH_TIMEOUT // 60 + 1
 REQUIRED_TOOLS = ("tar", "gzip", "sha256sum", "od", "dd", "tr", "readlink", "awk", "mktemp")
 MACHINES = {"aarch64": "arm64", "arm64": "arm64", "x86_64": "x86_64", "amd64": "x86_64"}
 
@@ -657,17 +660,37 @@ def _run_on_its_own(shell: RemoteShell, home: str, root: str, argv: Sequence[str
     env = " ".join(f"{k}={_q(v)}" for k, v in posix_cleared_env(home).items())
     job = (f"(PATH={POSIX_CLEARED_PATH}; export PATH; cd {_q(home)} && exec env -i {env} "
            + " ".join(_q(a) for a in argv) + " </dev/null) >out 2>err")
+    sweep_bench_folders(shell, root)
     folder = shell.private_dir(root, BENCH_PREFIX)
     try:
         status = shell.run_detached(folder, job, timeout=timeout, poll=BENCH_POLL, step="bench")
         out = shell.run(f"cat {_q(folder + '/out')}", again=True).out
         err = shell.run(f"cat {_q(folder + '/err')}", again=True).out
     finally:
+        # also on a failure and on a cancel that leaves the connection standing (a Ctrl+C at the terminal); a cancel
+        # that closed the connection (the Boards window, an AI's cancel_job) cannot reach the board any more: the
+        # next run's sweep_bench_folders removes the folder then
         try:
             shell.run(f"rm -rf {_q(folder)}", again=True)
         except RemoteError:
             pass   # a folder that stays is no build folder: older_builds and the prune never list it
     return Result(status, out, err)
+
+
+def sweep_bench_folders(shell: RemoteShell, root: str) -> None:
+    """Removes what earlier on-board benchmarks left in the install folder `root`: a run whose connection a Cancel
+    closed (or whose framework ended) could not remove its private folder itself. A folder goes only when its name is
+    exactly <root>/.bench.XXXXXXXX (mktemp's), it is a folder and no link, and nothing in it changed for longer than
+    any run can take (BENCH_STALE_MINUTES: no session follows its job any more), as the local benchmark removes the
+    sandbox folders a crash left behind (runtime/bench.py BenchRunner._sweep). Never fails the benchmark."""
+    script = (f"for d in {_q(root)}/{BENCH_PREFIX}.????????; do "
+              '[ -d "$d" ] && [ ! -L "$d" ] || continue; '
+              f'[ -n "$(find "$d" -maxdepth 0 -mmin +{BENCH_STALE_MINUTES} 2>/dev/null)" ] && rm -rf -- "$d"; '
+              "done; true")
+    try:
+        shell.run(script, again=True)
+    except RemoteError:
+        pass   # the benchmark itself says what is wrong with the board
 
 
 def model_sha256(shell: RemoteShell, path: str) -> Optional[str]:
@@ -799,4 +822,4 @@ def start_command(home: str, model: Optional[str] = None, port: int = DEVICE_DEF
 
 __all__ = ["BoardBuild", "DeployResult", "DeviceFacts", "RemoteError", "RemoteShell", "board_cleanup_plan",
            "deploy_runtime", "model_sha256", "older_builds", "read_facts", "remove_older_builds", "start_command",
-           "start_script_path", "verify_on_device"]
+           "start_script_path", "sweep_bench_folders", "verify_on_device"]
