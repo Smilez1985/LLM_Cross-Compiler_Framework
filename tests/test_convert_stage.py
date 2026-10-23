@@ -209,6 +209,34 @@ def test_the_shards_an_index_lists_must_all_be_there(tmp_path):
     assert "3 SafeTensors files" in mc.check_input(folder, mc.detect(folder))
 
 
+def test_only_the_weights_the_converter_reads_are_checked(tmp_path):
+    """A repository with SafeTensors and PyTorch shards is staged without its PyTorch shards (hf_lookup.staged_files
+    leaves pickle weights out when SafeTensors exist), but its pytorch_model.bin.index.json stays. The converter reads
+    the SafeTensors and their index only, so the other index and other weights are no reason to refuse the model."""
+    folder = hf_folder(tmp_path)
+    (folder / "model.safetensors").rename(folder / "model-00001-of-00001.safetensors")
+    (folder / "model.safetensors.index.json").write_text(json.dumps(
+        {"weight_map": {"a": "model-00001-of-00001.safetensors"}}))
+    (folder / "pytorch_model.bin.index.json").write_text(json.dumps(
+        {"weight_map": {"a": "pytorch_model-00001-of-00002.bin", "b": "pytorch_model-00002-of-00002.bin"}}))
+    assert mc.check_input(folder, mc.detect(folder)) == \
+        "config.json, tokenizer.json, model.safetensors.index.json, 1 SafeTensors file"
+    (folder / "pytorch_model-00001-of-00002.bin").write_bytes(b"<html>Not Found</html>")  # not read either
+    assert "1 SafeTensors file" in mc.check_input(folder, mc.detect(folder))
+    # PyTorch weights only: a SafeTensors index without its shards is not what the converter reads then
+    for shard in folder.glob("*.safetensors"):
+        shard.unlink()
+    (folder / "pytorch_model-00001-of-00002.bin").write_bytes(b"\x80\x02}q\x00.")
+    (folder / "pytorch_model-00002-of-00002.bin").write_bytes(b"\x80\x02}q\x00.")
+    assert mc.check_input(folder, mc.detect(folder)) == \
+        "config.json, tokenizer.json, pytorch_model.bin.index.json, 2 PyTorch files"
+    # without any weights both indexes say what is missing
+    for shard in folder.glob("*.bin"):
+        shard.unlink()
+    with pytest.raises(mc.Problem, match="lists weights files that are not in the model folder"):
+        mc.check_input(folder, mc.detect(folder))
+
+
 # ---------------------------------------------------------------------------------------------------------------
 # Format detection and what each format refuses
 # ---------------------------------------------------------------------------------------------------------------
@@ -368,6 +396,42 @@ def test_after_a_stopped_run_only_its_named_files_are_undone(tmp_path):
     (folder / "later.txt").write_text("put there by the person")
     assert check("restore", "--state", state, "--stopped") == 0
     assert not out.exists() and (folder / "later.txt").exists()
+
+
+def test_an_earlier_file_the_person_put_back_after_a_killed_run_stays(tmp_path, capsys):
+    """A killed run leaves FILE.convert-backup beside its half-written FILE. A person who moves the backup back by
+    hand has their earlier file again: the next start of the stage must not remove it as the run's unfinished file."""
+    state, out = tmp_path / "state.json", tmp_path / "granite.fp16.gguf"
+    out.write_text("the person's earlier file")
+    check("begin", out, "--state", state)
+    out.write_text("half")  # the run was killed here
+    os.replace(tmp_path / "granite.fp16.gguf.convert-backup", out)  # the person put the earlier file back
+
+    assert check("restore", "--state", state, "--stopped") == 0
+
+    assert out.read_text() == "the person's earlier file" and not state.exists()
+    printed = capsys.readouterr().out
+    assert "Removed the unfinished granite.fp16.gguf." not in printed
+    assert "Left granite.fp16.gguf as it is: granite.fp16.gguf.convert-backup is no longer there" in printed
+
+
+def test_a_helper_output_written_over_a_file_of_the_same_name_is_found(tmp_path):
+    """A second build into the same output folder: the format helper writes the file name of the first build again.
+    That file is what it wrote (not "no file"), and a failed run removes it like a new one."""
+    state, stats, folder = tmp_path / "state.json", tmp_path / "stats.json", tmp_path / "output"
+    folder.mkdir()
+    (folder / "model-rk3588-w8a8.rkllm").write_text("the first build")
+    (folder / "other.rkllm").write_text("untouched")
+    old = os.stat(folder / "model-rk3588-w8a8.rkllm")
+    check("watch", folder, "--state", state)
+    (folder / "model-rk3588-w8a8.rkllm").write_text("the second build, longer")
+    os.utime(folder / "model-rk3588-w8a8.rkllm", ns=(old.st_atime_ns, old.st_mtime_ns + 1_000_000_000))
+
+    assert check("output", "--watched", "--state", state, "--format", "rkllm", "--stats", stats,
+                 "--test-skip", "board only") == 0
+    assert json.loads(stats.read_text())["output_bytes"] == len("the second build, longer")
+    assert check("restore", "--state", state, "--failed") == 0
+    assert sorted(p.name for p in folder.iterdir()) == ["other.rkllm"]
 
 
 def test_an_intermediate_of_the_work_folder_is_replaced_without_a_backup(tmp_path):
@@ -823,6 +887,35 @@ def test_rkllm_is_counted_and_a_failing_toolkit_leaves_no_half_model(image):
     failed = image.run("--fresh", TARGET_FORMAT="rkllm")
     assert failed.returncode == 6
     assert not any(image.output.iterdir()) and "Removed the unfinished model-rk3588-w4a16.rkllm." in failed.stdout
+
+
+@needs_bash
+@pytest.mark.parametrize("fmt", ["rkllm", "rknn"])
+def test_a_second_build_into_the_same_output_folder_converts_again(image, tmp_path, fmt):
+    """The pipeline mode of 1.x and `build.sh --fresh` by hand build into the output folder of the first build: the
+    format helper writes the same file name again, and that is its model, not "no file"."""
+    values = {"TARGET_FORMAT": fmt}
+    if fmt == "rknn":
+        (tmp_path / "in").mkdir()
+        values.update(TARGET_BOARD="rk3566", QUANTIZATION="", MODEL_SOURCE=make_input(tmp_path / "in", "onnx folder"),
+                      tool="rknn")
+    first = image.run(**values)
+    assert first.returncode == 0, first.stdout + first.stderr
+    again = image.run("--fresh", **values)
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert conversion(image)["output_format"] == fmt
+    assert "wrote no file" not in again.stderr
+
+
+@needs_bash
+def test_a_staged_repository_with_safetensors_and_a_pytorch_index_converts(image):
+    """The build engine stages a repository with SafeTensors and PyTorch shards without the PyTorch shards
+    (hf_lookup.staged_files); their index stays in the folder and is no reason to refuse the model."""
+    (image.model / "pytorch_model.bin.index.json").write_text(json.dumps(
+        {"weight_map": {"a": "pytorch_model-00001-of-00002.bin", "b": "pytorch_model-00002-of-00002.bin"}}))
+    result = image.run()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert [c.split()[0] for c in image.calls()] == ["convert", "quantize"]
 
 
 @needs_bash

@@ -51,6 +51,10 @@ MODEL_SUFFIXES = {".gguf": "gguf", ".onnx": "onnx", ".tflite": "tflite", ".pt": 
 JSON_FILES = ("config.json", "tokenizer.json", "tokenizer_config.json", "generation_config.json",
               "special_tokens_map.json", "model.safetensors.index.json", "pytorch_model.bin.index.json")
 INDEX_FILES = ("model.safetensors.index.json", "pytorch_model.bin.index.json")
+# The index of the weights the converter does not read: convert_hf_to_gguf.py reads the SafeTensors when there are
+# any, else the PyTorch weights, each with its own index. The build engine stages a repository that has both without
+# its PyTorch weights (orchestrator/Core/hf_lookup.py staged_files), and their index stays in the folder.
+UNREAD_INDEX = {"safetensors": "pytorch_model.bin.index.json", "pytorch": "model.safetensors.index.json"}
 
 # GGUF (gguf-py/gguf/constants.py at the llama.cpp pin): value types and their sizes, and the ggml tensor types as
 # (block size, bytes per block). A type not listed (a newer one) has no size check; its offset is still checked.
@@ -408,22 +412,25 @@ def check_input(path: Path, info: Dict[str, Any]) -> str:
         return "not empty"
     if path.is_file() or kind == "gguf-folder":
         return "nothing"
+    # What the converter reads: the SafeTensors weights when there are any (not the PyTorch ones beside them)
+    unread = UNREAD_INDEX.get(info["weights"])
+    pytorch = [] if info["weights"] == "safetensors" else info["pytorch"]
     checked = []
     for name in JSON_FILES:
-        if (path / name).is_file():
+        if name != unread and (path / name).is_file():
             check_json(path / name)
             checked.append(name)
     for name in INDEX_FILES:
-        if (path / name).is_file():
+        if name != unread and (path / name).is_file():
             check_index(path, name)
     for weights in info["safetensors"]:
         check_safetensors(weights)
-    for weights in info["pytorch"]:
+    for weights in pytorch:
         check_pytorch(weights)
     if info["safetensors"]:
         checked.append(plural(len(info["safetensors"]), "SafeTensors file"))
-    if info["pytorch"]:
-        checked.append(plural(len(info["pytorch"]), "PyTorch file"))
+    if pytorch:
+        checked.append(plural(len(pytorch), "PyTorch file"))
     return ", ".join(checked) if checked else "nothing to check"
 
 
@@ -557,27 +564,47 @@ def cmd_begin(args) -> None:
             if os.path.lexists(backup):
                 raise Problem(f"{backup.name} is in the way: move it away and start again (this stage keeps the "
                               f"file it replaces there until the new {path.name} passed its checks).")
-            os.rename(path, backup)
+            # Noted before the move: a run killed in between leaves the earlier file where it was, and restore
+            # leaves it there (its backup does not exist)
             entry["backup"] = str(backup)
+            state.setdefault("files", []).append(entry)
+            save(state_file, state)
+            os.rename(path, backup)
             log(f"Kept the earlier {path.name} as {backup.name} until the new one passed its checks.")
+            return
     state.setdefault("files", []).append(entry)
     save(state_file, state)
+
+
+def _stamp(path: Path) -> List[int]:
+    info = path.stat()
+    return [info.st_size, info.st_mtime_ns]
 
 
 def cmd_watch(args) -> None:
     folder, state_file = Path(args.dir), Path(args.state)
     state = load(state_file)
+    files = sorted(p for p in folder.iterdir() if p.is_file()) if folder.is_dir() else []
     state["watch"] = {"dir": str(folder), "before": sorted(p.name for p in folder.iterdir()) if folder.is_dir()
-                      else []}
+                      else [], "stamps": {p.name: _stamp(p) for p in files}}
     save(state_file, state)
+
+
+def written_since_watch(watch: Dict[str, Any]) -> List[Path]:
+    """The files of the watched folder a format helper wrote: new ones, and earlier ones it wrote over (a second
+    build into the same output folder writes the same file name again)."""
+    folder = Path(watch.get("dir", ""))
+    if not watch or not folder.is_dir():
+        return []
+    before, stamps = set(watch.get("before", [])), watch.get("stamps") or {}
+    return sorted(p for p in folder.iterdir() if p.is_file()
+                  and (p.name not in before or (p.name in stamps and _stamp(p) != stamps[p.name])))
 
 
 def cmd_output(args) -> None:
     stats_file = Path(args.stats)
     if args.watched:
-        watch = load(Path(args.state)).get("watch") or {}
-        folder, before = Path(watch.get("dir", ".")), set(watch.get("before", []))
-        new = [p for p in folder.iterdir() if p.is_file() and p.name not in before] if folder.is_dir() else []
+        new = written_since_watch(load(Path(args.state)).get("watch") or {})
         if not new:
             raise Problem(f"The {args.format} converter finished but wrote no file.")
         path = max(new, key=lambda p: p.stat().st_size)
@@ -627,20 +654,23 @@ def cmd_restore(args) -> None:
         log("An earlier run of this stage did not finish: removing what it wrote.")
     for entry in reversed(state.get("files", [])):
         path = Path(entry["path"])
+        backup = entry.get("backup")
+        if backup and not os.path.lexists(backup):
+            # The earlier file is no longer kept beside it: put back by hand after a killed run (or the run had
+            # already kept its result). What is at FILE now is no unfinished file of this stage, so it stays.
+            if os.path.lexists(path):
+                log(f"Left {path.name} as it is: {Path(backup).name} is no longer there (put back by hand?).")
+            continue
         if os.path.lexists(path):
             path.unlink()
             log(f"Removed the unfinished {path.name}.")
-        backup = entry.get("backup")
-        if backup and os.path.lexists(backup):
+        if backup:
             os.replace(backup, path)
             log(f"Put back the earlier {path.name}.")
-    watch = state.get("watch") or {}
-    folder = Path(watch.get("dir", ""))
-    # New files of a folder a format helper wrote into: only in the run that failed (after a stopped run the person
-    # may have put files there since)
-    if args.failed and watch and folder.is_dir():
-        before = set(watch.get("before", []))
-        for path in sorted(p for p in folder.iterdir() if p.is_file() and p.name not in before):
+    # What a format helper wrote into its folder: only in the run that failed (after a stopped run the person may
+    # have put files there since)
+    if args.failed:
+        for path in written_since_watch(state.get("watch") or {}):
             path.unlink()
             log(f"Removed the unfinished {path.name}.")
     state_file.unlink()

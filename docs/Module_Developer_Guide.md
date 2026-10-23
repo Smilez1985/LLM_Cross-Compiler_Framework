@@ -696,10 +696,10 @@ it there). What it does is what the convert module of version 1.x promised in th
 |---|---|---|
 | `input PATH --format FORMAT --stats FILE` | before converting | Detects the input: a Hugging Face folder with SafeTensors or PyTorch weights, a GGUF file (nothing to convert), an ONNX model, a single weights file, a folder of GGUF files. Refuses what the format cannot use with the reason (`--onnx-next TEXT` adds where an ONNX model goes on this target), checks the input's integrity (its JSON files, SafeTensors headers against the file sizes, the shards an index lists, PyTorch archives, a GGUF header) and starts the statistics. |
 | `begin FILE --state FILE [--scratch DIR]` | before a converter writes FILE | Keeps an existing FILE as `FILE.convert-backup` until the new one passed its checks (an intermediate `tmp-*` of the work folder is simply replaced). |
-| `watch DIR --state FILE` | before a format helper runs | Notes the files of DIR, so that `output --watched` finds the new model and a failure removes it. |
+| `watch DIR --state FILE` | before a format helper runs | Notes the files of DIR with their sizes and times, so that `output --watched` finds the model the helper wrote (a new file, or one it wrote over) and a failure removes it. |
 | `output FILE --format gguf --type TYPE --seconds N --stats FILE --tools DIR` | after the converter | Checks the GGUF (every tensor's data inside the file), runs the functional test with `llama-completion` (or `llama-cli`) from DIR: 8 tokens, at most `--test-seconds` (120), offline. `--test-skip REASON` skips the test with a note. Completes the statistics. |
 | `keep --state FILE` | when the stage succeeded | Removes the backups. |
-| `restore --state FILE --failed` or `--stopped` | when the stage fails; at its next start | Removes what the run wrote and puts the backups back (`--stopped`: what a killed run left). |
+| `restore --state FILE --failed` or `--stopped` | when the stage fails; at its next start | Removes what the run wrote and puts the backups back (`--stopped`: what a killed run left). A file whose backup is no longer there stays as it is: the earlier file was put back by hand. |
 
 The statistics (`convert_stats.json` in the stage folder) go into `build_info.json` as `conversion`: `input_format`,
 `weights`, `input_bytes`, `converted`, `output_format`, `output_type`, `output_bytes`, `ratio` (input / output),
