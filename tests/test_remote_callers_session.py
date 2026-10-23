@@ -574,6 +574,8 @@ def _silent_on(board, marker):
     board.exec_command = exec_command
 
 
+# the fake board answers `exit 0` and the commands with a real POSIX shell, as every test over it here
+@POSIX
 class TestASilentCommandIsNoNetworkDrop:
     """N5 waits for a network loss. A command that stays silent while its connection still answers is busy on the
     board, not cut off: its time limit ends it at once with the sentence RemoteShell always gave, without logging in
