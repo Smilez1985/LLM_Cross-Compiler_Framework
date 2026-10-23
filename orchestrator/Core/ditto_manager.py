@@ -47,6 +47,9 @@ from orchestrator.llm.task_prompts import (CANNOT_REASONS, CANNOT_RETRY, CANNOT_
                                            SDK_HINTS, base_image_block, format_listing, healing_parts,
                                            healing_query, is_official_image, knowledge_excerpts, module_parts,
                                            module_query, optimizer_parts)
+# Tool calls and results pair up (one implementation, in the tool loop); the names are Ditto's too.
+from orchestrator.llm.tool_loop import (CALL_NOT_RUN, close_open_calls, conversation_is_consistent,  # noqa: F401
+                                        open_tool_calls)
 from orchestrator.tools.registry import ToolContext, ToolDenied, ToolError, ToolInputError
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
@@ -452,7 +455,9 @@ def tool_note(use: ToolUse) -> str:
 class ChatReply:
     question: str
     text: str
-    new_messages: List[Message]       # the user turn and everything the model and the tools added, in order
+    # the results that close an earlier turn's open tool calls (CALL_NOT_RUN), the user turn and everything the model
+    # and the tools added, in order
+    new_messages: List[Message]
     new_conversation: bool = False    # earlier turns were summarized into a new conversation
     tools: List[ToolUse] = field(default_factory=list)
     stop: str = "end"                 # end | max_tokens | max_steps
@@ -532,14 +537,22 @@ class ChatHistory:
     def _read(self, raw: dict) -> None:
         source = raw.get("tool_source")
         self.tool_source = source if isinstance(source, str) and source else "local"
-        for entry in raw.get("transcript") or []:
+        transcript = raw.get("transcript")
+        for entry in transcript if isinstance(transcript, list) else []:
             try:
                 self.transcript.append(TranscriptEntry.model_validate(entry))
             except ValidationError:
                 continue
+        messages = raw.get("messages")
         try:
-            self.messages = [Message.model_validate(m) for m in raw.get("messages") or []]
-        except ValidationError:
+            if messages is not None and not isinstance(messages, list):
+                raise ValueError("messages is not a list")
+            self.messages = [Message.model_validate(m) for m in messages or []]
+            if not conversation_is_consistent(self.messages):
+                # Every provider rejects a conversation that goes on after an unanswered call (an OpenAI-compatible
+                # server may have accepted it): every later question on it would fail.
+                raise ValueError("tool calls and tool results do not pair up")
+        except (ValidationError, ValueError):
             # A conversation with a missing turn could pair a tool call with the wrong result: start anew.
             self.messages = []
             self.transcript.append(TranscriptEntry(role="notice", text="The saved conversation could not be read; "
@@ -1004,6 +1017,8 @@ class DittoCoder:
             # Tool calls in the conversation need tool definitions (Claude rejects the request otherwise); the
             # registry still denies every call the permissions forbid.
             tools = tool_specs_from_registry(registry)
+        # A turn cut off during a tool call (saved by an earlier version) is closed first, by appending results.
+        repairs = close_open_calls(earlier)
         if not tools:
             # Without tools Ditto cannot search the knowledge base itself, so matching excerpts come along.
             excerpts = self._knowledge(question)
@@ -1012,7 +1027,7 @@ class DittoCoder:
         blocks.append(_text_block(question))
         user_turn = Message(role="user", content=blocks if len(blocks) > 1 else question)
         system = CHAT_INTRO + "\n\n" + (CHAT_TOOLS if tools else CANNOT_RULE) + "\n\n" + UNTRUSTED_RULE
-        request = ChatRequest(system=system, messages=[*earlier, user_turn], tools=tools, task="chat")
+        request = ChatRequest(system=system, messages=[*earlier, *repairs, user_turn], tools=tools, task="chat")
         uses: List[ToolUse] = []
         try:
             if tools:
@@ -1024,6 +1039,7 @@ class DittoCoder:
             else:
                 result = client.chat(request)
                 results, new, text, stop, usage = [result], result.new_messages, result.text, result.stop, result.usage
+                new = [*new, *close_open_calls(new)]  # the tool loop answers a call cut off in it itself
         except LLMError as e:
             raise self._error(e) from None
         text = text.strip()
@@ -1036,7 +1052,7 @@ class DittoCoder:
         elif not text:
             text = "(Ditto gave no answer.)"
         last = results[-1] if results else None
-        return ChatReply(question=question, text=text, new_messages=[user_turn, *new],
+        return ChatReply(question=question, text=text, new_messages=[*repairs, user_turn, *new],
                          new_conversation=new_conversation, tools=uses, stop=stop,
                          provider=getattr(last, "provider", ""), model=getattr(last, "model", ""), usage=usage,
                          source_changed=source_changed)

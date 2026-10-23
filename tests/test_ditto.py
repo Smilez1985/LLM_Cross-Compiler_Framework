@@ -19,9 +19,10 @@ from pydantic import BaseModel, ConfigDict
 pytest.importorskip("anthropic")
 pytest.importorskip("openai")
 
-from orchestrator.Core.ditto_manager import (CONSOLE_WORKSPACE_HINT, ChatHistory, ChatReply,  # noqa: E402
-                                             DittoCoder, DittoError, HealingAnalysis, ModuleDefinition,
-                                             OptimizerRecommendation, ToolUse, describe_llm_error)
+from orchestrator.Core.ditto_manager import (CALL_NOT_RUN, CONSOLE_WORKSPACE_HINT, ChatHistory,  # noqa: E402
+                                             ChatReply, DittoCoder, DittoError, HealingAnalysis,
+                                             ModuleDefinition, OptimizerRecommendation, ToolUse,
+                                             conversation_is_consistent, describe_llm_error)
 from orchestrator.llm import (AuthFailed, BadRequest, BillingError, ChatResult, InvalidOutput, LLMClient,  # noqa: E402
                               Message, NativeMessage, NotConfigured, PermissionDenied, ProviderTimeout,
                               ProviderUnavailable, RateLimited, Refused, ToolCall, Truncated)
@@ -494,6 +495,105 @@ class TestHistory:
         with pytest.raises(DittoError):
             make_ditto(tmp_path).chat("hi", history)
         assert history.messages == [] and history.transcript == []
+
+
+def cut_off(calls, text=""):
+    """An answer cut off at the length limit while the model was calling a tool."""
+    msg = Message(role="assistant", content=text, tool_calls=calls,
+                  native=NativeMessage(family="scripted", payload={"role": "assistant", "content": text}))
+    return ChatResult(text=text, tool_calls=calls, stop="max_tokens", message=msg, provider="ollama",
+                      model="test-model")
+
+
+def saved(path, messages, transcript=None):
+    path.write_text(json.dumps({"version": 3, "transcript": transcript or [{"role": "user", "text": "hi"}],
+                                "messages": messages}), encoding="utf-8")
+    return ChatHistory.load(path)
+
+
+USER = {"role": "user", "content": "hi"}
+CALLING = {"role": "assistant", "content": "", "tool_calls": [{"id": "t1", "name": "list_targets"}]}
+ANSWERED = {"role": "tool", "tool_call_id": "t1", "content": "Rockchip"}
+
+
+class TestToolCallsAndResultsPairUp:
+    """Every provider rejects a conversation that goes on after an unanswered tool call (Claude also a result whose
+    call is not in the turn before it), so every later question built on such a history would fail."""
+
+    def test_a_saved_conversation_whose_calls_and_results_do_not_pair_up_starts_anew(self, tmp_path):
+        path = tmp_path / "chat_history.json"
+        for messages in ([USER, CALLING, {"role": "user", "content": "next"}],         # a call never answered
+                         [USER, {**ANSWERED, "tool_call_id": "t9"}],                   # a result without its call
+                         [USER, CALLING, ANSWERED, {**ANSWERED, "content": "again"}]):  # one call, two results
+            history = saved(path, messages)
+            assert history.messages == [], messages
+            assert history.transcript[-1].role == "notice" and "could not be read" in history.transcript[-1].text
+
+    def test_a_consistent_conversation_loads_and_an_open_call_at_its_end_is_allowed(self, tmp_path):
+        path = tmp_path / "chat_history.json"
+        assert len(saved(path, [USER, CALLING, ANSWERED, {"role": "assistant", "content": "ok"}]).messages) == 4
+        history = saved(path, [USER, CALLING])   # the next question closes it
+        assert len(history.messages) == 2 and history.transcript[-1].role == "user"
+        assert conversation_is_consistent(history.messages)
+
+    @pytest.mark.parametrize("raw", [{"transcript": 5, "messages": []}, {"transcript": True, "messages": 7},
+                                     {"transcript": [{"role": "user", "text": "hi"}], "messages": "text"},
+                                     {"transcript": None, "messages": {"role": "user"}}])
+    def test_a_transcript_or_messages_that_is_no_list_does_not_break_the_load(self, tmp_path, raw):
+        path = tmp_path / "chat_history.json"
+        path.write_text(json.dumps({"version": 3, **raw}), encoding="utf-8")
+        history = ChatHistory.load(path)
+        assert history.messages == []
+        if raw["messages"] not in ([], None):
+            assert history.transcript[-1].role == "notice"
+
+    def test_an_answer_cut_off_during_a_tool_call_gets_a_result_for_it(self, tmp_path, llm, registry):
+        ditto = make_ditto(tmp_path, registry)
+        history = ChatHistory()
+        llm.script.append(cut_off([call("start_build", {"model": "m", "target": "Rockchip"})], "Let me start"))
+        reply = ditto.chat("Build it", history, confirm=lambda spec, inp: True)
+
+        assert reply.stop == "max_tokens" and "cut off at the length limit" in reply.text
+        assert registry.started == [], "a call cut off in the middle never runs"
+        closing = reply.new_messages[-1]
+        assert (closing.role, closing.tool_call_id, closing.is_error, closing.text()) == ("tool", "t1", True,
+                                                                                         CALL_NOT_RUN)
+        history.apply(reply)
+        assert conversation_is_consistent(history.messages)
+
+        llm.script.append(answer("Shall I try again?"))
+        ditto.chat("And now?", history)
+        sent = llm.requests[-1].messages
+        assert sent[:len(history.messages)] == history.messages and sent[-1].text() == "And now?"
+        assert conversation_is_consistent(sent)
+
+    def test_the_tool_loop_answers_a_call_cut_off_at_the_length_limit(self):
+        from orchestrator.llm import ChatRequest, run_tool_loop
+        ran = []
+        client = SimpleNamespace(chat=lambda request: cut_off([call("list_targets", call_id="a"),
+                                                               call("start_build", call_id="b")]))
+        loop = run_tool_loop(client, ChatRequest(messages=[Message.user("q")]), lambda n, a: ran.append(n))
+        assert loop.stop == "max_tokens" and ran == []
+        assert [(m.role, m.tool_call_id) for m in loop.new_messages] == [("assistant", None), ("tool", "a"),
+                                                                         ("tool", "b")]
+        assert all(m.is_error and m.text() == CALL_NOT_RUN for m in loop.new_messages[1:])
+
+    def test_a_history_with_an_open_call_from_an_earlier_version_is_closed_before_the_question(self, tmp_path,
+                                                                                               llm, registry):
+        history = saved(tmp_path / "chat_history.json", [USER, CALLING])
+        before = list(history.messages)
+        llm.script.append(answer("Hello again."))
+        reply = make_ditto(tmp_path, registry).chat("Still there?", history)
+
+        sent = llm.requests[0].messages
+        assert sent[:2] == before, "the earlier turns go out unchanged: the repair is appended"
+        repair = sent[2]
+        assert (repair.role, repair.tool_call_id, repair.is_error, repair.text()) == ("tool", "t1", True,
+                                                                                     CALL_NOT_RUN)
+        assert sent[3].text() == "Still there?" and conversation_is_consistent(sent)
+        assert reply.new_messages[0] == repair and reply.new_messages[1].text() == "Still there?"
+        history.apply(reply)
+        assert history.messages[:2] == before and conversation_is_consistent(history.messages)
 
 
 # --- errors -----------------------------------------------------------------------------------------------------
