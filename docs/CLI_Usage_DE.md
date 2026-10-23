@@ -1378,8 +1378,10 @@ In der GUI: **Ditto > Lokale Modelle...** (dieselbe Liste, mit der Empfehlung f�
 llm-cli ditto models download [STUFE] [-y]
 ```
 
-Lädt ein Modell in seiner festgelegten Hugging-Face-Revision herunter und prüft Größe und sha256. Ohne `STUFE` die
-empfohlene Stufe für diesen Rechner. Unterbrochene Downloads werden fortgesetzt.
+Lädt ein Modell in seiner festgelegten Hugging-Face-Revision herunter und prüft Größe und sha256. Ohne `STUFE` das
+Modell, das ein einfaches `ditto runtime start` lädt: die früher mit `runtime start --model` gewählte Stufe („Chosen
+earlier with 'runtime start --model': ...“), sonst die empfohlene Stufe für diesen Rechner („Recommended: ...“).
+Unterbrochene Downloads werden fortgesetzt.
 
 | Argument / Option | Bedeutung |
 |---|---|
@@ -1392,7 +1394,8 @@ llm-cli ditto models download small-q2
 ```
 
 In der GUI: **Ditto > Lokale Modelle...** > **Empfohlenes Modell herunterladen...** (die Empfehlung, die das Fenster
-zeigt; der Knopf ist an, sobald die Liste gelesen ist), oder eine Stufe auswählen und **Ausgewähltes
+zeigt; der Knopf ist an, sobald die Liste gelesen ist; **Gewähltes Modell herunterladen...**, wenn früher eine Stufe für
+den lokalen Server gewählt wurde), oder eine Stufe auswählen und **Ausgewähltes
 herunterladen...**; die Frage zeigt Repository, Datei, Lizenz, Größe und Ordner („Nein“ ist die
 Vorgabe), der Download läuft im Hintergrund mit Fortschritt und **Abbrechen** (was schon heruntergeladen ist, bleibt
 für die Fortsetzung).

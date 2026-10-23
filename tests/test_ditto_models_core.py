@@ -72,6 +72,15 @@ def test_model_to_download_is_the_named_tier_or_the_recommendation(tmp_path):
         model_to_download(rt, "nope")
 
 
+def test_without_a_tier_the_download_is_the_model_runtime_start_loads(tmp_path):
+    """`runtime start` loads the tier chosen earlier with --model; `models download` without a tier fetched the
+    recommendation instead, so the next start still failed with "not downloaded" (why None: no recommendation)."""
+    rt = fake_runtime(tmp_path, [entry("small"), entry("default")], recommended="small", preferred="default")
+    model, why = model_to_download(rt, None)
+    assert model.tier == "default" and why is None
+    assert model_to_download(rt, "small") == (rt.catalog.model("small"), None)
+
+
 def test_gib_is_written_like_the_cli():
     from orchestrator import cli
     for size in (None, 0, 1, 2 * 1024 ** 3, 4_700_000_000):

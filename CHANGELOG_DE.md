@@ -2350,6 +2350,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **`ditto models download` ohne Stufe lädt das Modell, das ein einfaches `runtime start` lädt** (Kette
+  port-runtime, aus der Prüfung des verwalteten llama-server): `runtime start` lädt die früher mit `--model` gewählte
+  Stufe, der Download ohne Stufe holte aber die Empfehlung für diesen Computer; nach der Wahl einer anderen Stufe
+  scheiterte der nächste Start daher weiter mit „not downloaded“. Der Download nimmt jetzt die früher gewählte Stufe
+  („Chosen earlier with 'runtime start --model': ...“), sonst wie bisher die Empfehlung
+  (`runtime/ditto_models.model_to_download`). **Ditto > Lokale Modelle...** in der GUI macht es genauso: Mit einer
+  früher gewählten Stufe heißt sein Knopf **Gewähltes Modell herunterladen...** und fragt nach dieser Stufe. Doku:
+  README, `docs/CLI_Usage_DE.md`, `docs/Features_DE.md` (EN/DE). Regressionstests: `tests/test_runtime.py`
+  `test_model_download_defaults_to_the_model_runtime_start_loads`, `tests/test_ditto_models_core.py`
+  `test_without_a_tier_the_download_is_the_model_runtime_start_loads`, `tests/test_gui_ditto_models.py`
+  `test_without_a_selection_the_download_is_the_model_the_server_loads`.
 - **Ein Rechner, dessen GPU keinen Vulkan-Treiber hat, bekommt den CPU-Build** (Kette port-runtime, aus der Prüfung des
   verwalteten llama-server): Lief `vulkaninfo`, listete aber nur einen Software-Renderer (llvmpipe, lavapipe), setzte
   die Hardware-Erkennung trotzdem `VULKAN=ON`, weil ein Vulkan-Loader, ein Grafikadapter (Windows) oder

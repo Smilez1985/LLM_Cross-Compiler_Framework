@@ -612,7 +612,7 @@ Rechner aus dem festgelegten llama.cpp-Commit, lädt ein festgelegtes Qwen3.5-Mo
 llm-cli ditto runtime status       # Hardware, der genutzte Build, das empfohlene Modell, Serverzustand
 llm-cli ditto runtime install      # baut llama-server für diesen Rechner (zuerst den CPU-Build, dann den GPU-Build)
 llm-cli ditto models list          # die Modellstufen, ihre Größe und ob sie heruntergeladen sind
-llm-cli ditto models download      # das empfohlene Modell (oder eine Stufe, z. B. small-q2)
+llm-cli ditto models download      # das Modell, das `runtime start` lädt (oder eine Stufe, z. B. small-q2)
 llm-cli ditto runtime start        # startet llama-server; er läuft weiter bis „runtime stop“
 llm-cli ditto runtime stop
 ```

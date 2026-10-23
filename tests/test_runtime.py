@@ -1503,6 +1503,25 @@ class TestCli:
         declined = self.invoke(monkeypatch, rt, "models", "download", "small", input="n\n")
         assert declined.exit_code == 0 and not list(rt.models_dir.glob("*.gguf"))
 
+    def test_model_download_defaults_to_the_model_runtime_start_loads(self, tmp_path, monkeypatch):
+        # `runtime start` loads the tier chosen earlier with --model; `models download` without a tier fetched the
+        # recommendation instead, so the next start still failed with "not downloaded".
+        small, other = b"GGUF" + os.urandom(800), b"GGUF" + os.urandom(900)
+        models = [{"tier": "tiny", "repo": "example/Tiny-GGUF", "revision": "c" * 40, "file": "tiny.gguf",
+                   "size": len(small), "sha256": sha(small)},
+                  {"tier": "other", "repo": "example/Other-GGUF", "revision": "d" * 40, "file": "other.gguf",
+                   "size": len(other), "sha256": sha(other)}]
+        session = FakeSession({f"https://models.invalid/example/Other-GGUF/resolve/{'d' * 40}/other.gguf": other})
+        rt = LocalLLMRuntime(data_dir=tmp_path / "s", models_dir=tmp_path / "m", hardware=CPU_HW, session=session,
+                             catalog=runtime_catalog(models=models), sleep=lambda s: None)
+        rt._update_active(tier="other")
+        assert rt.resolve_model()[0].tier == "other", "what a plain start loads"
+        result = self.invoke(monkeypatch, rt, "models", "download", "--yes")
+        assert result.exit_code == 0 and "Chosen earlier with 'runtime start --model': other" in result.output, \
+            result.output
+        assert "Recommended:" not in result.output
+        assert rt.model_ready(rt.catalog.model("other")) and not rt.model_path(rt.catalog.model("tiny")).exists()
+
     def test_install_failure_exits_with_1(self, tmp_path, monkeypatch):
         rt, session = TestInstall().setup_runtime(tmp_path)
         for url in session.files:
