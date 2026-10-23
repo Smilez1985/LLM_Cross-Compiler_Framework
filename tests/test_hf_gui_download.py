@@ -422,3 +422,22 @@ class TestTheBrowserWindowsDownload:
         qapp.processEvents()
         assert not win.stop_btn.isVisibleTo(win)
         assert "x.gguf" in win.status_label.text() and "kept" in win.status_label.text()
+
+
+def test_there_is_one_hugging_face_downloader():
+    """One code path (A6): no module downloads a model with huggingface_hub's own functions, which write its cache and
+    check nothing the framework pinned; every file comes through hf_hub.HubFetcher."""
+    import ast
+    from conftest import REPO_ROOT
+    found = []
+    for path in sorted((REPO_ROOT / "orchestrator").rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Call):
+                name = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
+                if name in ("hf_hub_download", "snapshot_download"):
+                    found.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{node.lineno}")
+            elif isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("huggingface_hub"):
+                names = {a.name for a in node.names} & {"hf_hub_download", "snapshot_download"}
+                if names:
+                    found.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{node.lineno}")
+    assert found == []

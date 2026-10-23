@@ -1412,8 +1412,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ### Geändert
 - **Der Hugging-Face-Browser der GUI lädt in den Ordner `hf/` des Modellordners, geprüft, wie ein Download einer KI**
   (Entscheidung A6 des Maintainers; Konsolidierungskette hf). Neuer Ort: `<Modellordner>/hf/<Owner>--<Name>/<die
-  ersten 12 Zeichen des Commits>/<Datei>`, derselbe Ordner, den `download_hf_file` und die eigenen Downloads des
-  Builders nutzen; bisher speicherte der Browser über huggingface_hub in dessen Cache (`<Modellordner>/models--<Owner>--
+  ersten 12 Zeichen des Commits>/<Datei>`, derselbe Ordner wie bei `download_hf_file` einer KI (der Builder legt
+  ganze Modelle weiter in `cache/models/hf/` ab); bisher speicherte der Browser über huggingface_hub in dessen Cache (`<Modellordner>/models--<Owner>--
   <Name>/`, Links auf Blobs, die nach ihrer Prüfsumme heißen). Ein Codepfad: `ModelManager.download_file` ruft jetzt
   `orchestrator/Core/hf_hub.py` `download_for_person` auf, das zuerst den Commit nachschlägt, genau die Datei dieses
   Commits mit dem Fetcher des Frameworks lädt (`HubFetcher`: fortsetzbare `.part`-Datei, Größe und sha256 des Hubs

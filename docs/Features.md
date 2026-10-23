@@ -2095,6 +2095,21 @@ with the token's standing approvals, Back to read only). A token is shown once, 
   folders the AI may use (a Hugging Face model folder as one entry, PyTorch pickle weights flagged, links out of the
   folder, hard-linked and hidden files and unfinished downloads left out; 50 per page), each with its file id and
   `<label>:<relative path>`, which `start_build` takes; a downloaded file shows up there too.
+- **Hugging Face downloads in the GUI (unreleased, decision A6):** **Tools > Hugging Face Model Browser...**
+  downloads through the same fetcher as `download_hf_file`, into the same folder `models/hf/<owner>--<name>/<first
+  12 characters of the commit>/`: the commit is looked up first, the file is checked against the Hub's size and
+  sha256 before it gets its name, and a download that stopped resumes from its `.part` file. The disk rule comes
+  first (the reserve stays free beside what running builds and downloads reserved; otherwise you read how much is
+  missing and what to do, in your language), and the download holds its own reservation while it runs. The window
+  shows the progress and has a **Stop** button (the part downloaded so far is kept). It sends the token you type in
+  its token question, else the one stored in the framework, never `HF_TOKEN`. Earlier versions saved the browser's
+  downloads in huggingface_hub's cache inside the models folder (`models/models--<owner>--<name>/`); those models stay
+  listed and usable for builds. **Take over old downloads...** (optional, once) copies them into the new folder, each
+  file checked against the checksum it was downloaded with (for a cache without links, against what the Hub lists for
+  that commit); a file that does not match, or another file of the same name in the new folder, stays where it is,
+  with its reason. Then it offers to remove the old copies in the deletion dialog with the exact list (each model's
+  cache folder and the files of the cache's shared store only they use, with full path and size; trash or for good;
+  "No" is the default); nothing is removed without your yes, and an AI never removes them.
 - **Devices and deploy (`list_devices`, `create_deploy_package`, `deploy_to_device`):** `list_devices` shows the
   [trusted devices](#deployment) with the label you gave, address, host key fingerprint, whether the device is
   usable (paired, and its key still the trusted one) and the last deploy; the account the framework logs in with is
