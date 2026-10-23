@@ -727,8 +727,7 @@ Die Statistik (`convert_stats.json` im Stufenordner) kommt als `conversion` in `
 `weights`, `input_bytes`, `converted`, `output_format`, `output_type`, `output_bytes`, `ratio` (Eingabe / Ausgabe),
 `seconds`, `functional_test` (`passed`, `skipped`, `timed out` oder `stopped`) und `functional_test_tool`; nur Zahlen
 und Wörter, keine Pfade. Ein Funktionstest, der mit einem Fehler endet, lässt die Stufe mit den letzten Zeilen des
-Werkzeugs scheitern: Das GGUF funktioniert nicht. Übersprungen wird er mit einem Hinweis, wenn das Image keines der
-beiden Werkzeuge hat, bei einem Embedding-Modell, bei den NPU-Formaten (das Modell läuft auf dem Board) und im
+Werkzeugs scheitern: Das GGUF funktioniert nicht. Übersprungen wird er mit einem Hinweis, wenn das Image keines der beiden Werkzeuge hat oder es dort nicht startet, bei einem Embedding-Modell, bei den NPU-Formaten (das Modell läuft auf dem Board) und im
 Auftrag `imatrix` (dort führt `llama-imatrix` das Modell aus).
 
 ## 7. Regeln der Sandbox
