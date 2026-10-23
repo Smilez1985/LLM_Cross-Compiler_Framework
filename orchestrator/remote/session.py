@@ -421,6 +421,26 @@ class RemoteSession:
         ssh_trust.install_public_key(self.client, ssh_trust.client_key(self.state_dir)[1])
         return True
 
+    def for_cleanup(self) -> Optional["RemoteSession"]:
+        """A new, logged-in session to this session's board for one clean-up command after a Cancel closed this one
+        (the stop of the benchmark the framework started there: runtime/device/remote.py): the same board, account
+        and host-key checks (the fingerprint of the last login), the framework key only (a one-time password is never
+        kept), no wait for the board and a cancel of its own. None when this session cannot log in again (attached())
+        or the login fails; the caller then leaves the board as it is."""
+        if not self.can_relogin:
+            return None
+        expect = (self.fingerprint or self.expect_fingerprint) if self.openssh is None else None
+        fresh = RemoteSession(self.endpoint, self.user, self.state_dir, credentials=KeyOnly(), expect_fingerprint=expect,
+                              expect_device_id=self.expect_device_id, cancel=CancelToken(), clock=self._clock,
+                              sleep=self._sleep, reachable=self._reachable, wait_seconds=0.0,
+                              transport_factory=self._factory, logger=self.logger, openssh=self.openssh)
+        try:
+            fresh.open()
+        except Exception:  # noqa: BLE001 - unreachable now: the board's own time limit ends the job
+            fresh.close()
+            return None
+        return fresh
+
     def close(self) -> None:
         """Ends the session: its connection closes, and a step that runs or waits for the board ends (Stopped)
         instead of logging in again. A Cancel that holds the session (CancelToken.hold) ends it this way."""
