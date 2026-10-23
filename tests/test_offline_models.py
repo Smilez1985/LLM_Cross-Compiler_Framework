@@ -274,6 +274,16 @@ class TestTheCommandLine:
         assert result.code == 0, result.out
         assert [r.models[0] for r in offline_cli.submitted] == [str(path.resolve())]
 
+    def test_a_listed_label_works_as_model_directly(self, offline_cli, monkeypatch):
+        """The refusal says to start again with --model <label or path>: the label names its file."""
+        from orchestrator import cli as cli_module
+        models = Path(offline_cli.framework.resolve_path(offline_cli.framework.config.get("models_dir", "models")))
+        path = a_gguf(models)
+        monkeypatch.setattr(cli_module, "_build_destination", lambda ctx, out: (str(offline_cli.work / "out"), False))
+        result = offline_cli.invoke("build", "start", "-m", GGUF, "-t", "Rockchip", "-f", "gguf")
+        assert result.code == 0, result.out
+        assert [r.models[0] for r in offline_cli.submitted] == [str(path.resolve())]
+
     def test_an_empty_answer_cancels(self, offline_cli, monkeypatch):
         from orchestrator import cli as cli_module
         monkeypatch.setattr(cli_module, "_interactive", lambda: True)
