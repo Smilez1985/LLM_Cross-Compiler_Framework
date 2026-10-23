@@ -765,7 +765,9 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   `"mojo --board"`, auf den objectName der QAction oder des Widgets; `WINDOW_OBJECTS` oder `TAB_OBJECTS` nennt das
   Fenster oder den Reiter, in dem es liegt). Ein Schalter nur für Skripte (Maschinenausgabe wie `--json`, ein
   `--yes`, das eine Frage überspringt, die die GUI immer stellt, ein Kompatibilitäts-Alias) kommt stattdessen mit
-  seinem Grund nach `MACHINE_ONLY`. Sonst schlägt `tests/test_cli_gui_parity.py` fehl: Er geht den ganzen
+  seinem Grund nach `MACHINE_ONLY`. Eine neue Zeile in der Ausgabe eines Befehls, die die GUI noch nicht zeigt (wie
+  die Zeile `Hailo:` von `llm-cli scan`), kommt mit ihrem Grund nach `CLI_ONLY_LINES` (`"scan Hailo:"`), bis sie
+  ihre Zeile in der GUI bekommt. Sonst schlägt `tests/test_cli_gui_parity.py` fehl: Er geht den ganzen
   Befehlsbaum durch, öffnet jedes Fenster offscreen über seinen Menüeintrag und prüft, dass jedes genannte Objekt
   existiert und jede Aktion von der Menüleiste aus erreichbar ist. Menüs werden über
   `orchestrator/gui/menus/place.py` gefunden und platziert.

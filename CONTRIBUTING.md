@@ -722,7 +722,9 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   `"deploy devices remove"` or `"mojo --board"`, to the objectName of the QAction or widget; `WINDOW_OBJECTS` or
   `TAB_OBJECTS` names the window or tab it lives in). A switch that is for scripts only (machine output such as
   `--json`, a `--yes` that skips a question the GUI always asks, a compatibility alias) goes into `MACHINE_ONLY`
-  with its reason instead. Otherwise `tests/test_cli_gui_parity.py` fails: it walks the whole command tree, opens
+  with its reason instead. A new line of a command's output that the GUI does not show yet (such as the `Hailo:`
+  line of `llm-cli scan`) goes into `CLI_ONLY_LINES` (`"scan Hailo:"`) with its reason until it gets its GUI line.
+  Otherwise `tests/test_cli_gui_parity.py` fails: it walks the whole command tree, opens
   every window from its menu entry offscreen and checks that every named object exists and every action can be
   reached from the menu bar. Menus are found and placed through `orchestrator/gui/menus/place.py`.
 - New actions for AI clients and Ditto are tools in `orchestrator/tools/framework_tools.py` with the correct tier
