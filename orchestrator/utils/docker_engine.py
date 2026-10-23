@@ -19,6 +19,10 @@ on Rocky Linux 9.8 with Podman 5.8.2 and buildah 1.43.1 (2026-10-23) and against
   the API with a target stage, build arguments and labels; Podman's `docker buildx build --load --progress=plain`
   (an alias of `podman build`); RUN --mount=type=bind (read-only by default, as in BuildKit), multi-stage builds and
   heredocs in a Dockerfile (buildah 1.35 and later; Debian and Ubuntu builds of buildah remove heredocs again);
+  the framework's sandboxed containers, which run as the person's uid, through `create_container`: under rootless
+  Podman they get the user namespace mode keep-id (checked with Podman 5.8.9 rootless: without it a container with
+  the person's uid cannot write the person's bind-mounted folders, "Permission denied"; with it the files it writes
+  belong to the person);
 - does not work: Docker's GPU request (`docker run --gpus`, DeviceRequests): Podman's Docker-compatible interface
   passes on only CDI device requests and drops this one without a word (the container was created with no GPU);
 - not there: BuildKit itself. Podman's `docker buildx` is buildah, without BuildKit's frontends (`# syntax=`), its
@@ -225,6 +229,60 @@ def engine_at(docker_host: str = "", timeout: float = 5.0) -> str:
         return engine_of_version(json.loads(body.decode("utf-8", "replace")))
     except ValueError:
         return ""
+
+
+# Podman's user namespace mode that maps the person's uid and gid to the same ids inside the container.
+USERNS_KEEP_ID = "keep-id"
+# Whether the Podman behind each docker-py client already asked runs rootless (a client talks to one daemon).
+_ROOTLESS: "weakref.WeakKeyDictionary[Any, bool]" = weakref.WeakKeyDictionary()
+
+
+def rootless_podman(client: Any) -> bool:
+    """Whether the API behind the docker-py `client` is Podman running rootless (its /info lists the security option
+    'name=rootless'; the person's podman.socket always is). There the person is root inside a container's user
+    namespace, and a container that runs as the person's uid sees the person's folders as root's. False for Docker,
+    rootful Podman and when Podman does not answer (asked again next time)."""
+    if engine_name(client) != "podman":
+        return False
+    try:
+        known = _ROOTLESS.get(client)
+    except TypeError:   # a client that cannot be weakly referenced: asked every time
+        known = None
+    if known is not None:
+        return known
+    try:
+        options = (client.info() or {}).get("SecurityOptions") or []
+    except Exception:  # noqa: BLE001 - no answer: not rootless as far as we know
+        return False
+    rootless = any(str(option).strip() == "name=rootless" for option in options)
+    try:
+        _ROOTLESS[client] = rootless
+    except TypeError:
+        pass
+    return rootless
+
+
+def create_container(client: Any, **kwargs: Any) -> Any:
+    """client.containers.create(**kwargs) for every container of the framework (the build stages, the llama.cpp builder,
+    Ditto's check and server containers). Under rootless Podman a container that runs as a user other than root (the
+    sandbox runs as the person, utils/sandbox.py) also gets Podman's user namespace mode keep-id: the person's uid is
+    then the same inside the container as outside, so the container writes the person's bind-mounted folders and
+    what it writes belongs to the person, as with Docker. Without it the folders look like root's inside and the build
+    stops with "Permission denied". docker-py's create() refuses any userns_mode but "host", so there the request goes
+    through docker-py's own conversion of create()'s arguments (docker 7.2.0) and the low-level API, and the container
+    comes back exactly as create() returns it."""
+    user = str(kwargs.get("user") or "").split(":")[0]
+    if user in ("", "0", "root") or not rootless_podman(client):
+        return client.containers.create(**kwargs)
+    from docker.models.containers import _create_container_args   # docker-py's create(): its arguments -> the API's
+    args = dict(kwargs)
+    image = args.pop("image")
+    args["image"] = getattr(image, "id", image)
+    args.setdefault("command", None)
+    args["version"] = client.api._version
+    request = _create_container_args(args)
+    request["host_config"]["UsernsMode"] = USERNS_KEEP_ID
+    return client.containers.get(client.api.create_container(**request)["Id"])
 
 
 def podman_refusal(feature: str, engine: str) -> Optional[str]:

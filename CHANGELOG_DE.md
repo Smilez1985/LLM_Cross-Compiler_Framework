@@ -1546,6 +1546,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Dockers GPU-Anfrage ohne ein Wort übergeht, und Dittos Container sagt dann, warum er auf der CPU rechnet; was
   BuildKit braucht, wird mit dem Grund und dem Weg zu Docker CE abgelehnt; `scripts/build_container_image.sh` baut mit
   `DOCKER_BUILDKIT=0`. `llm-cli mojo` nennt die Engine (`docker.daemon`) und Podmans Grenzen (`docker.engine`).
+  Jeder Container des Frameworks entsteht über `create_container` (die Build-Stufen, der llama.cpp-Builder, Dittos
+  Container): Unter rootless Podman, und das ist der Ersatzweg immer, bekommt einer, der als die Person läuft, Podmans
+  `keep-id`; ohne ihn sieht ein solcher Container die Ordner der Person als die von root, und jeder Build hielt mit
+  "Permission denied" an (gefunden und gegen Podman 5.8.9 rootless geprüft in der Konsolidierungsprüfung
+  install-followups-v).
 - **Hardware-Probe: Version 3.1.0, breitere Hailo-Erkennung** (Konsolidierungskette probe-keys):
   `PROBE_TOOL_VERSION` ist in allen drei Probes 3.1.0 (neue Schlüssel sind eine Änderung des Schemas; HAILO_PLAN
   Frage 5, Vorgabe in Runde 23 festgehalten). Die neuen Schlüssel sind nie Pflicht und nie `ON`/`OFF`-Schlüssel, darum

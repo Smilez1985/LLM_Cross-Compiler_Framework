@@ -173,7 +173,10 @@ python -m pytest
   person's Podman socket as `DOCKER_HOST` when no Docker daemon is there), `engine_name(client)` (Docker or Podman)
   and `podman_refusal(feature, engine)` for what Podman cannot do (`gpu`, `buildkit`). A new `docker.from_env()`
   without the helper before it fails `tests/test_docker_engine.py`; a new feature that needs BuildKit or Docker-only
-  API calls refuses under Podman through `podman_refusal`, before it starts. The helper uses the standard library
+  API calls refuses under Podman through `podman_refusal`, before it starts. Every container of the framework is
+  created with `create_container(client, ...)`, never with `client.containers.create` (a test fails otherwise):
+  under rootless Podman it adds Podman's `keep-id` for a container that runs as the person. The helper uses the
+  standard library
   only (Python 3.9 too): `scripts/build_container_image.sh` runs it with the system's `python3 -I`. In tests the
   autouse fixture `hermetic_docker_engine` keeps this computer's sockets out.
 

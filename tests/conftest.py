@@ -277,8 +277,10 @@ def hermetic_docker_engine(monkeypatch):
     from orchestrator.utils import docker_engine
     monkeypatch.setattr(docker_engine, "_CHOICE", docker_engine.EngineChoice("", False, "tests"))
     docker_engine._ENGINES.clear()
+    docker_engine._ROOTLESS.clear()
     yield
     docker_engine._ENGINES.clear()
+    docker_engine._ROOTLESS.clear()
 
 
 @pytest.fixture(autouse=True)
