@@ -17,6 +17,7 @@ MOUSE_LABELS = {
     "btn_knowledge_storage_convert": (_SNAP, ("storage.convert", "storage.convert.now")),
     "btn_zoo_import": (_HUB, "main.hub.import"),
     "btn_zoo_export": (_HUB, "zoo.export"),
+    "btn_zoo_sort": (_HUB, "zoo.sort"),
     "btn_zoo_keys": (_HUB, "zoo.keys"),
     "tbl_zoo_packs": (_HUB, "main.hub.install"),   # the Install button in the pack's row
     "btn_zoo_refresh": (_HUB, "zoo.refresh"),
@@ -42,6 +43,9 @@ STEPS = (
     Step("knowledge.sources", cli="knowledge sources", tool="list_knowledge_sources", window="knowledge_sources",
          target="act_knowledge_sources", runnable=True),
     Step("hub.open", cli="zoo", tool="list_packs", window="community_hub", target=_HUB),
+    # loose knowledge files are never imported until the person sorts them (DECISIONS round 23 item 1)
+    Step("knowledge.loose", cli="knowledge loose", person_only="permission", window="community_hub",
+         target="btn_zoo_sort", runnable=True),
     Step("hub.refresh", cli="zoo list --refresh", cli_args=("--refresh",), tool="list_packs", window="community_hub",
          target="btn_zoo_refresh"),
     # the community repository's maintainer only (orchestrator/Core/community_maintainer.py: no AI path reaches it)
@@ -84,6 +88,9 @@ TEXTS = {
         "step.knowledge.sources.what": "Lists every source of the knowledge base with its kind, licence and "
                                        "copyright notice.",
         "step.hub.open": "Open the Community Hub",
+        "step.knowledge.loose": "Sort the loose knowledge files into a topic or target",
+        "step.knowledge.loose.what": "Lists the loose knowledge files; each is imported only after you sort it into a "
+                                     "topic or target folder, where it is checked like a knowledge pack.",
         "step.hub.refresh": "Download the signed index of the Community Hub again",
         "step.maint.review": "List the contributions that wait for the maintainer",
         "step.pack.passphrase": "Install the pack with its passphrase",
@@ -112,6 +119,10 @@ TEXTS = {
         "step.knowledge.sources.what": "Listet jede Quelle der Wissensdatenbank mit Art, Lizenz und "
                                        "Urheberrechtshinweis.",
         "step.hub.open": "Den Community Hub öffnen",
+        "step.knowledge.loose": "Die losen Wissensdateien in ein Thema oder Target einsortieren",
+        "step.knowledge.loose.what": "Listet die losen Wissensdateien; jede wird erst importiert, wenn du sie in einen "
+                                     "Themen- oder Target-Ordner einsortierst, wo sie wie ein Wissenspaket geprüft "
+                                     "wird.",
         "step.hub.refresh": "Den signierten Index des Community Hubs erneut laden",
         "step.maint.review": "Die Beiträge auflisten, die auf den Maintainer warten",
         "step.pack.passphrase": "Das Paket mit seiner Passphrase installieren",
@@ -129,6 +140,9 @@ TEXTS = {
 FORMAL = {
     "de": {
         "step.keys.show": "Ihre öffentlichen Schlüssel anzeigen",
+        "step.knowledge.loose.what": "Listet die losen Wissensdateien; jede wird erst importiert, wenn Sie sie in "
+                                     "einen Themen- oder Target-Ordner einsortieren, wo sie wie ein Wissenspaket "
+                                     "geprüft wird.",
         "step.snapshots.free": "Platz schaffen: Wissens-Snapshots löschen, die Sie nicht mehr brauchen (Sie haken an, "
                                "was gelöscht wird)",
         "step.storage.convert.what": "Wandelt den Speicher der Wissensdatenbank einer früheren Version in den jetzigen "

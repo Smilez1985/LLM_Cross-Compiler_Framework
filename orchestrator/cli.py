@@ -3894,7 +3894,8 @@ def knowledge_sort(ctx: FrameworkContext, name: str, topic: Optional[str], targe
     try:
         prepared = cm.prepare_sort(name, topic=topic, target=target)
     except (PackError, OSError) as e:
-        _zoo_fail(e)
+        _say_error(e)   # the message, then the next step it carries
+        sys.exit(1)
     click.echo(prepared.summary(), err=True)
     if not sys.stdin.isatty():   # a loose file nobody reviewed: always confirmed, like a pack of trust local
         cm.discard(prepared)

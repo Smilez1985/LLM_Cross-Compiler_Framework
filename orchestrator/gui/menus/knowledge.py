@@ -47,6 +47,12 @@ CLI_PATHS: Dict[str, str] = {
     "knowledge index-docs --with-code": ACT_INDEX_DOCS,   # the question's check box
     "knowledge sources": ACT_SOURCES,
     "knowledge sources --kind": "cmb_knowledge_sources_kind",
+    "knowledge sources --topic": "edt_knowledge_sources_topic",
+    # loose knowledge files: listed and sorted into a topic or target folder in the Community Hub (round 23 item 1)
+    "knowledge loose": "btn_zoo_sort",               # the list of the window it opens
+    "knowledge sort": "btn_zoo_sort",                # the chosen file, then the summary ("No" default)
+    "knowledge sort --topic": "btn_zoo_sort",        # Belongs to: a topic
+    "knowledge sort --target": "btn_zoo_sort",       # Belongs to: a target
     # the community zoo
     "zoo": ACT_HUB,
     "zoo list": ACT_HUB,
@@ -65,6 +71,8 @@ CLI_PATHS: Dict[str, str] = {
     "zoo export --license": "btn_zoo_export",
     "zoo export --model-license": "btn_zoo_export",
     "zoo export --id": "btn_zoo_export",
+    "zoo export --topic": "btn_zoo_export",          # a knowledge pack: Belongs to: a topic
+    "zoo export --target": "btn_zoo_export",         # a knowledge pack: Belongs to: a target
     "zoo export --to": "btn_zoo_export",             # Encrypt: to the keys in key files
     "zoo export --passphrase": "btn_zoo_export",     # Encrypt: with a passphrase
     "zoo export --out": "btn_zoo_export",            # Folder: Choose folder...
@@ -100,6 +108,8 @@ WINDOW_OBJECTS: Dict[str, str] = {
     "lbl_knowledge_snapshots_disk": ACT_SNAPSHOTS,
     "lbl_knowledge_storage": ACT_SNAPSHOTS,
     "cmb_knowledge_sources_kind": ACT_SOURCES,
+    "edt_knowledge_sources_topic": ACT_SOURCES,
+    "btn_zoo_sort": ACT_HUB,
     "btn_knowledge_sources_refresh": ACT_SOURCES,
     "tbl_knowledge_sources": ACT_SOURCES,
     "cmb_zoo_kind": ACT_HUB,

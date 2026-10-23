@@ -12,8 +12,11 @@ what one CLI command shows or takes; the Community Hub calls the same core funct
   (CommunityManager.verify_installed).
 - PublicKeysDialog (`llm-cli zoo keys`): the person's public keys with Copy and Save... (UserKeys.export_public).
 - ExportSourceDialog (`llm-cli zoo export KIND SOURCE`): what to export: a target folder, a finished build's
-  build_info.json, or the knowledge base; CommunityExportDialog then takes the author, licence, pack id, encryption
-  and folder.
+  build_info.json, or the knowledge base; CommunityExportDialog then takes the author, licence, pack id, the topic or
+  target of a knowledge pack, encryption and folder.
+- SortKnowledgeDialog (`llm-cli knowledge loose`, `llm-cli knowledge sort NAME --topic|--target`): every loose
+  knowledge file and the topic or target to sort the chosen one into (DECISIONS round 23 item 1); the Community Hub
+  then checks it like a knowledge pack (CommunityManager.prepare_sort) and shows the summary with "No" as default.
 
 Every text is plain text in the person's language (l10n_knowledge); names, addresses and notes from packs and the index
 are data and never rendered as markup.
@@ -24,8 +27,9 @@ from typing import Any, List, Optional, Sequence, Tuple
 
 from PySide6.QtGui import QFontDatabase, QGuiApplication
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-                               QGroupBox, QHBoxLayout, QHeaderView, QLineEdit, QPlainTextEdit, QPushButton,
-                               QScrollArea, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+                               QGroupBox, QHBoxLayout, QHeaderView, QLineEdit, QListWidget, QListWidgetItem,
+                               QPlainTextEdit, QPushButton, QScrollArea, QStackedWidget, QTableWidget,
+                               QTableWidgetItem, QVBoxLayout, QWidget)
 
 from orchestrator.gui.plain import button_text, display_text, one_line, plain_label
 from orchestrator.utils.localization import current_language, ui_text
@@ -369,5 +373,97 @@ class ExportSourceDialog(_Dialog):
         return kind, source or None
 
 
+# --- knowledge loose / knowledge sort -----------------------------------------------------------------------------
+
+SCOPES = ("topic", "target")   # what knowledge belongs to: a topic, or a target of this computer
+
+
+class ScopeChooser:
+    """The topic or target of knowledge (a sorted file, a knowledge pack's export): a choice between a topic (one in use
+    or a new name) and a target of this computer, as two widgets for a form row."""
+
+    def __init__(self, parent: QWidget, lang: str, topics: Sequence[str], targets: Sequence[str], prefix: str):
+        self.lang, self.topics, self.targets = lang, list(topics), list(targets)
+        self.scope = QComboBox(parent)
+        self.scope.setObjectName(f"cmb_{prefix}_scope")
+        for scope in SCOPES:
+            self.scope.addItem(ui_text(f"knowledge.scope.{scope}", lang), scope)
+        self.name = QComboBox(parent)
+        self.name.setObjectName(f"cmb_{prefix}_topic")
+        self.name.setAccessibleName(ui_text("knowledge.scope.name", lang))
+        self.scope.currentIndexChanged.connect(lambda _index: self._fill())
+        self._fill()
+
+    def _fill(self) -> None:
+        target = self.scope.currentData() == "target"
+        self.name.clear()
+        self.name.setEditable(not target)   # a topic may be new; a target is one of this computer
+        self.name.addItems(self.targets if target else self.topics)
+        if not target:
+            self.name.setCurrentText("")
+            self.name.lineEdit().setPlaceholderText(ui_text("knowledge.scope.topic.hint", self.lang))
+
+    def values(self) -> Tuple[Optional[str], Optional[str]]:
+        """(topic, target): one of them set, or both None when nothing was chosen."""
+        name = self.name.currentText().strip() or None
+        return (None, name) if self.scope.currentData() == "target" else (name, None)
+
+
+class SortKnowledgeDialog(_Dialog):
+    """Sort loose knowledge...: the loose knowledge files (CommunityManager.loose_knowledge: never imported until they
+    are sorted) and the topic or target the chosen one belongs to. values() gives (file label, topic, target) for
+    CommunityManager.prepare_sort, the function `llm-cli knowledge sort` calls."""
+
+    def __init__(self, loose: Sequence[Any], topics: Sequence[str], targets: Sequence[str],
+                 parent: Optional[QWidget] = None, lang: Optional[str] = None):
+        super().__init__(parent, lang, "zoo.sort.title")
+        self.setObjectName("dlg_zoo_sort")
+        self.resize(720, 420)
+        layout = QVBoxLayout(self)
+        layout.addWidget(plain_label(self._t("zoo.sort.intro")))
+        self.files = QListWidget(self)
+        self.files.setObjectName("lst_zoo_loose")
+        for item in loose:
+            entry = QListWidgetItem(one_line(f"{item.label} ({self._t('zoo.value.bytes', size=item.size)})"))
+            entry.setData(256, item.label)   # Qt.UserRole
+            self.files.addItem(entry)
+        if self.files.count():
+            self.files.setCurrentRow(0)
+        layout.addWidget(self.files, 1)
+        if not loose:
+            layout.addWidget(plain_label(self._t("zoo.sort.none")))
+        form = QFormLayout()
+        self.chooser = ScopeChooser(self, self.lang, topics, targets, "zoo_sort")
+        form.addRow(plain_label(self._t("knowledge.scope"), wrap=False), self.chooser.scope)
+        form.addRow(plain_label(self._t("knowledge.scope.name"), wrap=False), self.chooser.name)
+        layout.addLayout(form)
+        self.problem = plain_label("")
+        layout.addWidget(self.problem)
+        buttons = QDialogButtonBox(QDialogButtonBox.Cancel, self)
+        self.btn_check = buttons.addButton(button_text(self._t("zoo.sort.check")), QDialogButtonBox.AcceptRole)
+        self.btn_check.setObjectName("btn_zoo_sort_check")
+        self.btn_check.setEnabled(bool(loose))
+        buttons.accepted.connect(self._check)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _check(self) -> None:
+        topic, target = self.chooser.values()
+        if self.files.currentItem() is None:
+            self.problem.setText(self._t("zoo.sort.choose_file"))
+            return
+        if not (topic or target):
+            self.problem.setText(self._t("knowledge.scope.missing"))
+            return
+        self.problem.setText("")
+        self.accept()
+
+    def values(self) -> Tuple[str, Optional[str], Optional[str]]:
+        item = self.files.currentItem()
+        topic, target = self.chooser.values()
+        return (str(item.data(256)) if item is not None else ""), topic, target
+
+
 __all__ = ["EXPORT_KINDS", "ExportSourceDialog", "ImportPackDialog", "PackDetailsDialog", "PublicKeysDialog",
-           "VERIFY_COLUMNS", "VerifyResultsDialog", "detail_fields", "key_file_problem"]
+           "SCOPES", "ScopeChooser", "SortKnowledgeDialog", "VERIFY_COLUMNS", "VerifyResultsDialog", "detail_fields",
+           "key_file_problem"]
