@@ -644,6 +644,50 @@ def test_the_ai_s_deploy_reaches_no_person_hook_from_any_ai_reachable_module():
     assert built, "service.deploy builds the AI's hooks"
 
 
+# --- stage C wave 3: the person-only names of deploy-flow and trust-followups -------------------------------------
+
+# The person's board steps of both chains: deploy-flow's deploy of a build with its trusted record and audit, and
+# trust-followups' key change with the move of the board's data (P6) and the deprecated trust_host delegate (P5).
+PERSON_ONLY_NAMES = {"deploy_build", "remember_deployed", "device_audit", "change_board", "plan_board_change",
+                     "moved_lines", "BoardChange", "BoardDataMove", "copy_deploys", "drop_deploys", "copy_board_rows",
+                     "drop_board_rows", "trust_host", "trust_presented_key", "PersonChannel", "replace_key"}
+
+
+def person_only_references(source: str):
+    """Every reference (a call, a hook handed over, a partial, an attribute read) to a person-only board step."""
+    import ast
+    found = []
+    for node in ast.walk(ast.parse(source)):
+        name = node.attr if isinstance(node, ast.Attribute) else getattr(node, "id", None)
+        if isinstance(node, (ast.Attribute, ast.Name)) and name in PERSON_ONLY_NAMES:
+            found.append((node.lineno, name))
+    return found
+
+
+def test_no_ai_reachable_module_names_a_person_only_board_step():
+    """The DeployHooks guard above names deploy-flow's person steps as calls only, and test_deploy_tools' WRITERS
+    guard trust-followups' P6 move and trust_host as calls only: a hook handed over as a reference
+    (DeployHooks(open_board=partial(manager.trust_host, ...)), `hook = BoardDataMove`) passed both. No module an AI
+    can reach (test_deploy_tools AI_REACHABLE) names any of them at all."""
+    from conftest import REPO_ROOT
+    from test_deploy_tools import AI_REACHABLE
+    found = []
+    for entry in AI_REACHABLE:
+        path = REPO_ROOT / entry
+        for file in ([path] if path.is_file() else sorted(path.rglob("*.py"))):
+            found += [(file.relative_to(REPO_ROOT).as_posix(), line, name)
+                      for line, name in person_only_references(file.read_text(encoding="utf-8"))]
+    assert found == []
+
+
+def test_the_person_only_name_guard_bites():
+    source = ("import functools\nfrom orchestrator.runtime.device.steps import DeployHooks\n"
+              "def hooks(manager, move):\n"
+              "    later = move.BoardDataMove\n"
+              "    return DeployHooks(open_board=functools.partial(manager.trust_host, 'h'))\n")
+    assert person_only_references(source) == [(4, "BoardDataMove"), (5, "trust_host")]
+
+
 def test_the_tabs_deploy_says_its_steps_as_before(qapp, tmp_path, monkeypatch):
     """The button text of the Deployment tab's deploy: packaging the build, then the deploy; an existing package is
     only deployed (characterization, the same before and after deploy_build)."""
