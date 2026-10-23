@@ -790,29 +790,37 @@ class TestInstallShInAContainer:
 
     def _setup_system(self, tmp_path, container: bool):
         stubs = tmp_path / "bin"
-        for name in ("curl", "usermod", "sh", "groups"):
+        for name in ("curl", "usermod", "sh", "groups", "apt-get", "dpkg"):
             _stub(stubs, name)
         python = shutil.which("python3")
         (stubs / "python3").symlink_to(python)
         env = {"PATH": f"{stubs}:/usr/bin:/bin", "HOME": str(tmp_path), "USER": "lcf"}
         if container:
             env["LCF_CONTAINER_BUILD"] = "1"
-        # No docker anywhere on this PATH: outside a container build the installer would fetch get.docker.com.
+        # No docker anywhere on this PATH: outside a container build the installer would install Docker from Docker's
+        # apt repository (tests/test_install_docker.py). The system paths it would write point into tmp_path.
+        (tmp_path / "os-release").write_text("ID=debian\nVERSION_CODENAME=bookworm\n")
         script = ('source "$1"; command() { if [ "$2" = docker ]; then return 1; fi; builtin command "$@"; }; '
-                  'wait_for_internet() { :; }; setup_system')
-        run = subprocess.run(["/bin/bash", "-c", script, "test", str(INSTALL_SH)], env=env, capture_output=True,
-                             text=True, timeout=60, cwd=tmp_path)
+                  'OS_RELEASE_FILE="$2/os-release"; DOCKER_KEYRING="$2/keyrings/docker.asc"; '
+                  'DOCKER_SOURCES="$2/sources.list.d/docker.sources"; wait_for_internet() { :; }; setup_system')
+        run = subprocess.run(["/bin/bash", "-c", script, "test", str(INSTALL_SH), str(tmp_path)], env=env,
+                             capture_output=True, text=True, timeout=60, cwd=tmp_path)
         calls = (stubs / "calls.log").read_text() if (stubs / "calls.log").exists() else ""
         return run, calls
 
     def test_no_docker_engine_and_no_docker_group_in_a_container_build(self, tmp_path):
         run, calls = self._setup_system(tmp_path, container=True)
         assert run.returncode == 0, run.stdout + run.stderr
-        assert "get.docker.com" not in calls and "usermod" not in calls
+        assert "download.docker.com" not in calls and "apt-get" not in calls and "usermod" not in calls
 
     def test_outside_a_container_build_the_engine_is_still_installed(self, tmp_path):
+        """Round 23, item 3: from Docker's apt repository with the checked key, no longer with get.docker.com. The
+        fake curl here delivers no key, so the installer stops before it trusts or installs anything."""
         run, calls = self._setup_system(tmp_path, container=False)
-        assert "get.docker.com" in calls, run.stdout + run.stderr
+        assert "https://download.docker.com/linux/debian/gpg" in calls, run.stdout + run.stderr
+        assert "get.docker.com" not in calls and "docker-ce" not in calls
+        assert run.returncode == 1 and "Docker wurde nicht installiert" in run.stdout + run.stderr
+        assert not (tmp_path / "keyrings").exists() and not (tmp_path / "sources.list.d").exists()
 
     @pytest.mark.parametrize("with_sudo", [False, True])
     def test_the_venv_is_made_as_the_user_with_runuser_when_sudo_is_missing(self, tmp_path, with_sudo):

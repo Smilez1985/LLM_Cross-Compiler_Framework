@@ -41,6 +41,23 @@ HEADLESS="${LCF_HEADLESS:-0}"
 # unbeaufsichtigte Läufe auch LCF_DITTO=... (ohne Rückfragen; Größe und Lizenz des Modells werden trotzdem gezeigt).
 DITTO_CHOICE="${LCF_DITTO:-auto}"
 
+# Docker, falls es fehlt: nur aus Dockers offiziellem apt-Repository (Debian, Ubuntu, Raspberry Pi OS), nie mit einem
+# heruntergeladenen Skript. Dem Signaturschlüssel des Repositorys wird erst vertraut, wenn sein Fingerabdruck dieser
+# ist; danach prüft apt jedes Paket gegen die signierte Paketliste (SHA256).
+# Quelle des Fingerabdrucks: Dockers Installationsanleitung für Debian und Ubuntu ("Verify that you now have the key
+# with the fingerprint 9DC8 5822 9FC7 DD38 854A  E2D8 8D81 803C 0EBF CD88", docs.docker.com/engine/install/; im
+# Repository docker/docs, Tag archive/v18.09, install/linux/docker-ce/debian.md und ubuntu.md). Am 2026-10-23
+# nachgeprüft: download.docker.com/linux/{debian,ubuntu,raspbian}/gpg ist genau dieser eine Schlüssel
+# (Docker Release (CE deb), rsa4096, 2017-02-22).
+DOCKER_KEY_FINGERPRINT="9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
+DOCKER_DOWNLOAD_URL="https://download.docker.com/linux"
+DOCKER_MANUAL_URL="https://docs.docker.com/engine/install/"
+# Dieselben Dateien wie in Dockers Anleitung, damit eine dort angelegte Quelle nicht mit dieser streitet (Signed-By).
+DOCKER_KEYRING="/etc/apt/keyrings/docker.asc"
+DOCKER_SOURCES="/etc/apt/sources.list.d/docker.sources"
+OS_RELEASE_FILE="/etc/os-release"
+DEBIAN_VERSION_FILE="/etc/debian_version"
+
 # Farben
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -86,6 +103,178 @@ wait_for_internet() {
     log_error "$shown ist per HTTPS nicht erreichbar. Proxy? Dann mit 'sudo -E ./install.sh' starten, damit https_proxy erhalten bleibt (oder PIP_INDEX_URL auf einen erreichbaren Spiegel setzen)."
 }
 
+# --- DOCKER: NUR MIT GEPRÜFTEM SCHLÜSSEL ---
+# Hält an, ohne Docker zu installieren: der Grund in klaren Worten und Dockers Anleitung für eine Installation von Hand.
+docker_stop() {
+    log_error "Docker wurde nicht installiert: $1 Installiere Docker selbst nach Dockers Anleitung für dein System ($DOCKER_MANUAL_URL) und starte danach 'sudo ./install.sh' erneut."
+}
+
+# Der Codename der Debian-Version in $DEBIAN_VERSION_FILE ("12.7" -> bookworm, "trixie/sid" -> trixie), so wie Dockers
+# Installationsskript sie las, das der Installer früher ausführte; nichts, wenn dort keine steht (etwa "kali-rolling").
+debian_version_codename() {
+    local version=""
+    if [ -r "$DEBIAN_VERSION_FILE" ]; then IFS= read -r version < "$DEBIAN_VERSION_FILE" || true; fi
+    version="${version%%/*}"
+    case "$version" in
+        10|10.*) echo buster ;;
+        11|11.*) echo bullseye ;;
+        12|12.*) echo bookworm ;;
+        13|13.*) echo trixie ;;
+        *) if [[ "$version" =~ ^[a-z]+$ ]]; then echo "$version"; fi ;;
+    esac
+}
+
+# Setzt DOCKER_REPO und DOCKER_SUITE (etwa "debian" und "bookworm") für dieses System oder hält an. Raspberry Pi OS mit
+# 32 Bit (ID raspbian) bekommt die armhf-Pakete von Debian: Dockers Anleitung nennt sie dafür, und ab Docker Engine 29
+# gibt es keine eigenen Pakete für raspbian mehr. ARMv6 (Raspberry Pi 1, Zero) hat keine offiziellen Pakete.
+# Raspberry Pi OS mit 64 Bit meldet sich als debian. Debian testing ohne VERSION_CODENAME: der Codename aus
+# $DEBIAN_VERSION_FILE. Ein System, das auf Ubuntu oder Debian aufbaut (ID_LIKE; etwa Linux Mint, Pop!_OS, LMDE),
+# bekommt wie mit Dockers früher ausgeführtem Installationsskript die Pakete der Version, auf der es aufbaut:
+# UBUNTU_CODENAME (so nennt es Dockers Anleitung für Linux Mint), bei Debian DEBIAN_CODENAME oder
+# $DEBIAN_VERSION_FILE, nie den eigenen Codenamen. Jedes andere System hält an.
+docker_apt_repo() {
+    local id="" like="" codename="" ubuntu_codename="" debian_codename=""
+    if [ -r "$OS_RELEASE_FILE" ]; then
+        { IFS= read -r id; IFS= read -r like; IFS= read -r codename; IFS= read -r ubuntu_codename
+          IFS= read -r debian_codename; } < <(
+            # shellcheck disable=SC1090
+            . "$OS_RELEASE_FILE" > /dev/null 2>&1
+            printf '%s\n%s\n%s\n%s\n%s\n' "${ID:-}" "${ID_LIKE:-}" "${VERSION_CODENAME:-}" "${UBUNTU_CODENAME:-}" \
+                "${DEBIAN_CODENAME:-}")
+    fi
+    id="${id//[^A-Za-z0-9._-]/}"
+    case "$id" in
+        debian) DOCKER_REPO=debian; DOCKER_SUITE="${codename:-$(debian_version_codename)}" ;;
+        raspbian)
+            if [ "$(uname -m)" = "armv6l" ]; then
+                docker_stop "Für Raspberry Pi OS auf ARMv6 (Raspberry Pi 1, Zero) gibt es keine offiziellen Docker-Pakete."
+            fi
+            DOCKER_REPO=debian; DOCKER_SUITE="${codename:-$(debian_version_codename)}" ;;
+        ubuntu) DOCKER_REPO=ubuntu; DOCKER_SUITE="${ubuntu_codename:-$codename}" ;;
+        *)
+            if [[ " $like " == *" ubuntu "* ]]; then
+                DOCKER_REPO=ubuntu; DOCKER_SUITE="$ubuntu_codename"
+            elif [[ " $like " == *" debian "* ]]; then
+                DOCKER_REPO=debian; DOCKER_SUITE="${debian_codename:-$(debian_version_codename)}"
+            else
+                docker_stop "Der Installer richtet Docker nur unter Debian, Ubuntu, Raspberry Pi OS und darauf aufbauenden Systemen ein (dieses System laut $OS_RELEASE_FILE: ${id:-unbekannt})."
+            fi ;;
+    esac
+    if ! [[ "$DOCKER_SUITE" =~ ^[a-z][a-z0-9-]*$ ]]; then
+        docker_stop "$OS_RELEASE_FILE nennt keine Version dieses Systems (VERSION_CODENAME; bei einem System, das auf Ubuntu oder Debian aufbaut, UBUNTU_CODENAME oder DEBIAN_CODENAME, sonst die Debian-Version in $DEBIAN_VERSION_FILE), also kein passendes Docker-Repository."
+    fi
+    case "$id" in
+        debian|raspbian|ubuntu) ;;
+        *) log_info "${id:-Dieses System} baut auf $DOCKER_REPO $DOCKER_SUITE auf: Docker kommt aus Dockers Repository für $DOCKER_REPO $DOCKER_SUITE (wie bisher mit Dockers Installationsskript; offiziell unterstützt Docker nur $DOCKER_REPO selbst)." ;;
+    esac
+}
+
+# Lädt Dockers Signaturschlüssel für das Repository $1 und legt nach $2 nur einen Schlüssel, dessen Fingerabdruck
+# DOCKER_KEY_FINGERPRINT ist. Wie die Paketquellen eines Moduls (module_generator.vendor_blocks): eingelesen in ein
+# eigenes, leeres GNUPGHOME, verglichen, dann exportiert. Strenger als dort: Die Datei muss genau einen Schlüssel
+# enthalten, und der festgelegte Fingerabdruck muss der seines Hauptschlüssels sein (nicht der eines Unterschlüssels).
+# Vor der Prüfung wird nichts außerhalb eines eigenen temporären Ordners geschrieben. gpg läuft mit --no-autostart: Es
+# startet keinen gpg-agent, der als root nach dem Installer weiterliefe. Rückgabe 0 geschrieben, 1 nicht Dockers
+# Schlüssel, 2 nicht geladen, 3 nicht geschrieben; außer bei 0 bleibt $2, wie es war.
+fetch_docker_key() {
+    local repo="$1" dest="$2" home primary rc=0
+    home="$(mktemp -d)" || return 3
+    if ! curl -fsSL --proto '=https' --tlsv1.2 "$DOCKER_DOWNLOAD_URL/$repo/gpg" -o "$home/download.key"; then
+        rc=2
+    else
+        # Was danach im Schlüsselbund steht, entscheidet, nicht der Rückgabewert des Einlesens: Ohne gpg-agent meldet
+        # gpg auch für einen eingelesenen Schlüssel einen Fehler. Ein nicht eingelesener fehlt in der Liste.
+        GNUPGHOME="$home" gpg --batch --no-autostart --quiet --import "$home/download.key" > /dev/null 2>&1 || true
+        primary="$(GNUPGHOME="$home" gpg --batch --no-autostart --with-colons --list-keys 2> /dev/null | awk -F: '
+            $1 == "pub" { keys++; want = 1; next }
+            want && $1 == "fpr" { fpr = $10; want = 0 }
+            END { if (keys == 1) print fpr }')"
+        if [ "$primary" != "$DOCKER_KEY_FINGERPRINT" ]; then
+            rc=1
+        elif ! GNUPGHOME="$home" gpg --batch --no-autostart --armor --export "$DOCKER_KEY_FINGERPRINT" > "$home/docker.asc" \
+            || [ ! -s "$home/docker.asc" ]; then
+            rc=3
+        elif ! install -d -m 0755 "$(dirname "$dest")" || ! install -m 0644 "$home/docker.asc" "$dest"; then
+            rc=3
+        fi
+    fi
+    rm -rf "$home"
+    return "$rc"
+}
+
+# Gibt es schon eine eingeschaltete apt-Quelle für download.docker.com (Dockers Anleitung, ein früherer Lauf, Dockers
+# Installationsskript)? Eine auskommentierte Zeile und ein Eintrag mit "Enabled: no" zählen nicht: apt liest sie nicht,
+# und so schaltet ein Versions-Upgrade von Ubuntu fremde Quellen ab.
+docker_source_exists() {
+    local dir file
+    dir="$(dirname "$DOCKER_SOURCES")"
+    [ -e "$DOCKER_SOURCES" ] && return 0
+    for file in "$(dirname "$dir")/sources.list" "$dir"/*.list; do
+        if [ -f "$file" ] && grep -q -E '^[[:space:]]*deb(-src)?[[:space:]][^#]*download\.docker\.com' "$file"; then
+            return 0
+        fi
+    done
+    for file in "$dir"/*.sources; do
+        # deb822: ein Absatz je Eintrag; Zeilen mit # sind Kommentare.
+        if [ -f "$file" ] && awk 'BEGIN { RS = "" }
+            { docker = 0; off = 0; n = split($0, lines, "\n")
+              for (i = 1; i <= n; i++) {
+                  line = tolower(lines[i])
+                  if (line ~ /^[ \t]*#/) continue
+                  if (line ~ /download\.docker\.com/) docker = 1
+                  if (line ~ /^enabled:[ \t]*(no|false|off|disable)[ \t]*$/) off = 1
+              }
+              if (docker && !off) found = 1 }
+            END { exit !found }' "$file"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Docker Engine aus Dockers offiziellem apt-Repository. Kein heruntergeladenes Skript läuft als root: Der
+# Signaturschlüssel wird gegen den festgelegten Fingerabdruck geprüft, bevor apt ihm vertraut, und apt prüft dann
+# jedes Paket gegen die signierte Paketliste. Passt etwas nicht, hält der Installer mit dem Grund an.
+install_docker() {
+    local arch created=0 rc=0 undone=""
+    DOCKER_REPO="" DOCKER_SUITE=""
+    docker_apt_repo
+    if ! command -v apt-get &> /dev/null; then docker_stop "apt-get fehlt auf diesem System."; fi
+    log_info "Quelle: $DOCKER_DOWNLOAD_URL/$DOCKER_REPO ($DOCKER_SUITE). Ihr Schlüssel muss den Fingerabdruck $DOCKER_KEY_FINGERPRINT haben (Dockers Installationsanleitung)."
+    if ! apt-get update || ! apt-get install -y --no-install-recommends ca-certificates curl gnupg; then
+        docker_stop "Die Werkzeuge für die Schlüsselprüfung (ca-certificates, curl, gnupg) ließen sich nicht installieren (Meldungen oben)."
+    fi
+    fetch_docker_key "$DOCKER_REPO" "$DOCKER_KEYRING" || rc=$?
+    case "$rc" in
+        0) log_success "Dockers Signaturschlüssel geprüft (Fingerabdruck $DOCKER_KEY_FINGERPRINT): $DOCKER_KEYRING" ;;
+        1) docker_stop "Der Schlüssel von $DOCKER_DOWNLOAD_URL/$DOCKER_REPO/gpg hat nicht den Fingerabdruck aus Dockers Anleitung ($DOCKER_KEY_FINGERPRINT) oder enthält mehr als diesen einen Schlüssel; ihm wird nicht vertraut, und nichts wurde eingetragen." ;;
+        2) docker_stop "Dockers Signaturschlüssel ließ sich nicht von $DOCKER_DOWNLOAD_URL/$DOCKER_REPO/gpg laden (Proxy? Dann mit 'sudo -E ./install.sh')." ;;
+        *) docker_stop "Der geprüfte Schlüssel ließ sich nicht nach $DOCKER_KEYRING schreiben." ;;
+    esac
+    arch="$(dpkg --print-architecture 2> /dev/null)"
+    if ! [[ "$arch" =~ ^[a-z0-9]+$ ]]; then docker_stop "dpkg nennt keine Architektur dieses Systems."; fi
+    if docker_source_exists; then
+        log_info "Eine apt-Quelle für download.docker.com gibt es schon in $(dirname "$DOCKER_SOURCES"); sie bleibt, wie sie ist."
+    else
+        if ! install -d -m 0755 "$(dirname "$DOCKER_SOURCES")" || ! printf '%s\n' "Types: deb" \
+            "URIs: $DOCKER_DOWNLOAD_URL/$DOCKER_REPO" "Suites: $DOCKER_SUITE" "Components: stable" \
+            "Architectures: $arch" "Signed-By: $DOCKER_KEYRING" > "$DOCKER_SOURCES"; then
+            docker_stop "$DOCKER_SOURCES ließ sich nicht schreiben."
+        fi
+        created=1
+    fi
+    if ! apt-get update; then
+        # Die eben angelegte Quelle wieder entfernen: Streitet sie mit einer anderen, bliebe apt sonst kaputt.
+        if [ "$created" = "1" ]; then rm -f -- "$DOCKER_SOURCES"; undone="; $DOCKER_SOURCES ist wieder entfernt"; fi
+        docker_stop "apt-get update mit Dockers Repository ist gescheitert (Meldungen oben)$undone."
+    fi
+    if ! apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; then
+        docker_stop "Die Docker-Pakete ließen sich nicht installieren (Meldungen oben)."
+    fi
+    if ! command -v docker &> /dev/null; then docker_stop "Nach der Installation gibt es den Befehl docker nicht."; fi
+    log_success "Docker ist installiert (aus $DOCKER_DOWNLOAD_URL/$DOCKER_REPO, Schlüssel und Pakete geprüft)."
+}
+
 # --- SCHRITT 1: PREREQUISITES (Docker & Python) ---
 setup_system() {
     log_info "[1/5] Systemprüfung & Vorbereitung..."
@@ -95,7 +284,9 @@ setup_system() {
     # Python Check
     if ! command -v python3 &> /dev/null; then
         log_warn "Python3 fehlt. Installiere..."
-        apt-get update && apt-get install -y python3 python3-venv python3-pip || log_error "Konnte Python nicht installieren."
+        if ! apt-get update || ! apt-get install -y python3 python3-venv python3-pip; then
+            log_error "Konnte Python nicht installieren."
+        fi
     fi
     # requirements.txt only matches Python 3.11-3.14; outside that range pip would silently install nothing.
     if ! python3 -c 'import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] < (3, 15) else 1)'; then
@@ -110,10 +301,8 @@ setup_system() {
 
     # Docker Check (Übernommen aus setup_linux.sh)
     if ! command -v docker &> /dev/null; then
-        log_warn "Docker fehlt. Starte Auto-Installer..."
-        curl -fsSL https://get.docker.com -o get-docker.sh
-        sh get-docker.sh || log_error "Docker Installation fehlgeschlagen."
-        rm get-docker.sh
+        log_warn "Docker fehlt. Installiere es aus Dockers offiziellem apt-Repository (Signaturschlüssel geprüft)..."
+        install_docker
     fi
 
     # Docker Permissions
@@ -301,7 +490,8 @@ setup_venv() {
     set -e
     cd "$INSTALL_DIR"
     python3 -m venv .venv
-    ./.venv/bin/pip install --upgrade pip > /dev/null || echo "⚠️ pip ließ sich nicht aktualisieren; weiter mit der vorhandenen Version."
+    # Das pip der Umgebung ist das, was mit Python kommt (ensurepip). Es wird nicht aktualisiert: Das lüde die neueste
+    # Version von pip ohne Prüfsumme, und das mitgelieferte genügt für die Installation mit --require-hashes unten.
 
     # Genau die Versionen aus $REQUIREMENTS dieses Stands (uv export aus uv.lock); pip prüft jede Datei gegen
     # ihren Hash. Ohne die Datei wird nichts ungeprüft nachinstalliert.
@@ -371,6 +561,8 @@ setup_ditto() {
         return 0
     fi
     # sudo übernimmt nur die Proxy-Variablen (für den Quellcode und das Modell), nie die übrige Umgebung von root.
+    # Ein Argument mit Kommas (die Liste für --preserve-env), keine Feldelemente.
+    # shellcheck disable=SC2054
     local as_user=(sudo -H --preserve-env=https_proxy,HTTPS_PROXY,http_proxy,HTTP_PROXY,no_proxy,NO_PROXY -u "$real_user")
     if ! command -v sudo &> /dev/null; then as_user=(runuser -u "$real_user" --); fi
     local args=(ditto runtime ensure --mode "$DITTO_CHOICE")

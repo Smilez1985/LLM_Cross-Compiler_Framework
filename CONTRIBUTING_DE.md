@@ -359,13 +359,21 @@ die schlichte Meldung von `llm-gui`) und die ganze Testsuite, deren GUI-Tests si
 
 **Secret-Scan** (`security.yml`): jeder Commit der ganzen Historie, siehe [Abschnitt 6](#6-secret-scan-und-git-hooks).
 
-**hadolint** (`docker.yml`): prüft `targets/Rockchip/dockerfile`, `targets/_template/Dockerfile` und
-`targets/_template/Dockerfile.gpu` und scheitert an Fehlern. Lokal mit installiertem hadolint oder mit Docker:
+**hadolint** (`docker.yml`): prüft `targets/Rockchip/dockerfile`, `targets/_template/Dockerfile`,
+`targets/_template/Dockerfile.gpu`, `orchestrator/runtime/build/builder.Dockerfile` und
+`orchestrator/runtime/build/ditto-runtime.Dockerfile` und scheitert an Fehlern. Lokal mit installiertem hadolint
+oder mit Docker (das Image per Digest festgelegt; beim Wechsel der Version den Digest des neuen Tags neu auflösen):
 
 ```bash
 hadolint --failure-threshold error targets/Rockchip/dockerfile
-docker run --rm -i hadolint/hadolint hadolint --failure-threshold error - < targets/Rockchip/dockerfile
+docker run --rm -i hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d hadolint --failure-threshold error - < targets/Rockchip/dockerfile
 ```
+
+Jeder Build prüft sein Dockerfile ebenfalls mit hadolint, wenn es installiert ist (`orchestrator/utils/hadolint.py`,
+aufgerufen von `BuildEngine._validate_dockerfile_hadolint`). Diese Prüfung ist ein Hinweis, der Build läuft weiter:
+Jeder Fund steht im Build-Log und wird eine Fortschrittswarnung (höchstens 10; die übrigen bleiben im Log), keine
+Funde sagt das Log, und ohne hadolint sagt das Log, wie du es bekommst. Die Prüfung ist standardmäßig an;
+`enable_hadolint=False` in einer `BuildConfiguration` schaltet sie ab.
 
 **Image-Build** (`docker.yml`): Wenn sich `targets/**`, `entrypoint.sh`, `orchestrator/utils/build_context.py` oder
 `orchestrator/Core/builder.py` ändern, baut die CI das Rockchip-Image und führt Rauchtests aus (Werkzeugketten,

@@ -340,13 +340,21 @@ message of `llm-gui`) and the whole suite, whose GUI tests skip themselves (`pyt
 
 **Secret scan** (`security.yml`): every commit of the whole history, see [section 6](#6-secret-scan-and-git-hooks).
 
-**hadolint** (`docker.yml`): lints `targets/Rockchip/dockerfile`, `targets/_template/Dockerfile` and
-`targets/_template/Dockerfile.gpu` and fails on errors. Locally with an installed hadolint, or with Docker:
+**hadolint** (`docker.yml`): lints `targets/Rockchip/dockerfile`, `targets/_template/Dockerfile`,
+`targets/_template/Dockerfile.gpu`, `orchestrator/runtime/build/builder.Dockerfile` and
+`orchestrator/runtime/build/ditto-runtime.Dockerfile` and fails on errors. Locally with an installed hadolint, or
+with Docker (the image pinned by digest; when you bump the version, resolve the digest of the new tag again):
 
 ```bash
 hadolint --failure-threshold error targets/Rockchip/dockerfile
-docker run --rm -i hadolint/hadolint hadolint --failure-threshold error - < targets/Rockchip/dockerfile
+docker run --rm -i hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d hadolint --failure-threshold error - < targets/Rockchip/dockerfile
 ```
+
+Every build runs hadolint on its Dockerfile too, when it is installed (`orchestrator/utils/hadolint.py`, called by
+`BuildEngine._validate_dockerfile_hadolint`). That check is advisory and the build goes on: each finding goes to the
+build log and becomes a progress warning (at most 10; the rest stay in the log), no findings is said in the log, and
+without hadolint the log says how to get it. The check is on by default; `enable_hadolint=False` in a
+`BuildConfiguration` switches it off.
 
 **Image build** (`docker.yml`): when `targets/**`, `entrypoint.sh`, `orchestrator/utils/build_context.py` or
 `orchestrator/Core/builder.py` change, the CI builds the Rockchip image and runs smoke tests (toolchains,
