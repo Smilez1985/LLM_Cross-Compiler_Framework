@@ -485,7 +485,7 @@ Target ohne Capabilities-Block wird ungeprüft gebaut.
 |---|---|
 | `-m, --model TEXT` | **Pflicht.** Hugging-Face-ID (z. B. `HuggingFaceTB/SmolLM2-135M-Instruct`) oder ein lokaler Ordner bzw. eine Datei. |
 | `-t, --target TEXT` | **Pflicht.** Target-ID, wie `targets list` sie zeigt, z. B. `Rockchip`, oder der Ordnername des Targets. Groß- und Kleinschreibung spielt keine Rolle. Ein unbekanntes Target stoppt mit Exit-Code 2 und der Liste der bekannten Targets. |
-| `-f, --format [gguf\|rkllm\|onnx\|tflite\|pytorch_mobile\|rknn\|tensorrt\|openvino\|coreml\|ncnn\|mnn]` | Ausgabeformat (Standard `gguf`). Die Liste ist länger als das, was ein Target unterstützt; Rockchip nimmt `gguf`, `rkllm` und `rknn`. |
+| `-f, --format FORMAT` | Ausgabeformat (Standard `gguf`): eines, das das Target baut, wie seine Capabilities in `target.yml` es angeben (die Formate, die der Builder-Tab dafür anbietet). `--help` und die Shell-Vervollständigung nennen, was jedes installierte Target baut (Rockchip: `gguf`, `rkllm`, `rknn`). Ein Target ohne Capabilities nimmt jedes Format außer `hf`, ungeprüft. Ein Format, das das Target nicht baut, stoppt mit Exit-Code 2 und nennt, was jedes installierte Target baut. Groß- und Kleinschreibung spielt keine Rolle. |
 | `-b, --board TEXT` | Board der Target-Familie, z. B. `rk3588`, `rk3576`, `rk3566`. Standard: das Standard-Board des Targets (Rockchip: `rk3588`). Groß- und Kleinschreibung spielt keine Rolle. |
 | `-q, --quantization TEXT` | Quantisierung, z. B. `Q4_K_M`, `IQ4_XS`, `F16` (GGUF), `w8a8`, `w4a16` (RKLLM), `fp16`, `i8` (RKNN). Standard: der Standard des Formats für das Board. Gängige Schreibweisen wie `INT8` werden übersetzt. |
 | `-o, --output TEXT` | Ordner, in dem das fertige Modell (Golden-Artefakt) gespeichert wird, relativ zum aktuellen Ordner; er wird angelegt, wenn es ihn noch nicht gibt. Standard: der Ausgabeordner ([`config output-folder`](#config-output-folder), `~/llmcf/output`). An einem Terminal ohne diese Angabe wirst du gefragt, mit dem Ausgabeordner als Vorgabe; `-` lässt den Build im Build-Ordner des Frameworks ([`build save`](#build-save) speichert ihn später). Ein Systemordner oder der Programmordner des Frameworks wird abgelehnt (Exit-Code 2). `--output-dir` ist der alte Name und geht weiter. |
@@ -499,6 +499,18 @@ Target ohne Capabilities-Block wird ungeprüft gebaut.
 
 Verhalten:
 
+- Bevor etwas läuft, werden die fertigen Builds mit der Anfrage verglichen (die Prüfung des Builder-Tabs): Hat einer
+  zu 100 % dieselben Optionen (Modell und sein Commit, Target, Board, Format, Quantisierung, Kalibrierung,
+  Optimierung, ...), wirst du mit seinem vollen Pfad gefragt: **u** ihn nehmen, **a** noch einmal bauen, **c**
+  abbrechen (`u` ist die Vorgabe). „Nehmen“ startet nichts und kopiert den früheren Build samt Golden-ZIP in den
+  Ordner, in den dieser Build gegangen wäre (`--output`, die Antwort auf die Frage oder der Ausgabeordner; `-` kopiert
+  nichts und nennt ihn): Zuerst wird der freie Platz dort geprüft (mit den Reservierungen jedes laufenden Builds und
+  Downloads), jede Kopie wird per sha256 mit ihrem Original verglichen, und der frühere Build bleibt, wo er ist. Liegt
+  der gleiche Build dort schon, wird nichts kopiert; liegt unter diesem Namen ein anderer Build, wird er erst ersetzt,
+  wenn du die vollständige Liste dessen angenommen hast, was ersetzt wird („Nein“ ist die Vorgabe; in den Papierkorb
+  oder endgültig). Für ein Hugging-Face-Modell wird der aktuelle Commit einmal nachgeschlagen (nie im Offline-Modus),
+  wenn ein früherer Build gleich sein könnte. Ohne Terminal wird nichts gefragt: Der frühere Build wird genannt und der
+  Build startet wie angegeben (nichts wird von selbst übersprungen).
 - Der Befehl bleibt im Vordergrund, bis der Build fertig ist. Strg+C bricht den Build über den Build-Service ab:
   Sein laufender Container (Image-Build, Sicherheits-Scan oder Konvertierung) wird gestoppt, die CLI wartet, bis der
   Build angehalten hat (höchstens 120 s), sagt das und endet mit Exit-Code 130. In den Ausgabeordner wird nichts
@@ -529,11 +541,14 @@ Verhalten:
   [Ordnern, die die KI nutzen darf](#tools-folders).
 - Der erste Build eines Targets baut zuerst sein Docker-Image und dauert deutlich länger.
 
-In der GUI: der Tab **Builder**: Modell, Target (**Targets…** zeigt jedes Target), Format (ein Target ohne Fähigkeiten
-bietet jedes Format von `--format`, mit dem Hinweis, dass nichts geprüft wird), Board, Quantisierung, **Optimization**
+In der GUI: der Tab **Builder**: Modell, Target (**Targets…** zeigt jedes Target), Format (genau die Formate, die das
+Target angibt, die Liste, die `--format` dafür nimmt; ein Target ohne Fähigkeiten bietet jedes Format, mit dem Hinweis,
+dass nichts geprüft wird), Board, Quantisierung, **Optimization**
 (alle Stufen, auch `FAST`), **Priorität**, Kalibrierung und GPU, dann **Start Build Pipeline**. Die
 Fortschrittsanzeige folgt dem Build (`--follow`), **Cancel Build** stoppt ihn (Strg+C), und das fertige Modell wird in
-einem Speichern-Dialog am Ausgabeordner angeboten (`--output`; **Datei > Output Folder...** setzt die Vorgabe).
+einem Speichern-Dialog am Ausgabeordner angeboten (`--output`; **Datei > Output Folder...** setzt die Vorgabe). Die
+Frage nach einem gleichen früheren Build ist dieselbe; **Den vorhandenen Build nehmen** öffnet den Ordnerdialog am
+Ausgabeordner und kopiert ihn dorthin, wie oben.
 
 ```bash
 # GGUF für die CPU des RK3566 (Standard-Quantisierung Q4_0 auf diesem Board)
@@ -752,7 +767,7 @@ dieselbe ID, die `llm-cli device list` zeigt. Einträge schreibst nur du: `deplo
 |---|---|
 | `list` | Jeder Eintrag mit seinem Host-Schlüssel und ob dieser noch der vertraute in der `known_hosts` des Frameworks ist (`trusted`, `CHANGED in known_hosts`, `not in known_hosts`), gekoppelt und dem letzten Deployment. |
 | `add HOST --user BENUTZER` | Nimmt ein Board auf, dem du vor dieser Version vertraut hast (sein Host-Schlüssel steht schon in der `known_hosts` des Frameworks). Braucht ein Terminal: Es zeigt den Fingerabdruck und fragt; es vertraut nie einem neuen Schlüssel, fragt nie nach einem Passwort und markiert das Board nur dann als gekoppelt, wenn der Schlüssel des Frameworks sich anmeldet. |
-| `edit GERÄT` | Ändert die Adresse eines vertrauten Boards (`--host`: Hostname oder IP-Adresse, `--port`) oder seinen SSH-Host-Schlüssel in der `known_hosts` des Frameworks, z. B. nachdem sich seine Adresse geändert hat oder es neu installiert wurde. `GERÄT` ist seine Geräte-ID, sein Name oder seine Adresse. Den neuen Schlüssel fügst du mit `--key` ein (die Zeile aus `/etc/ssh/ssh_host_ed25519_key.pub` auf dem Board, eine `known_hosts`-Zeile oder eine Zeile von `ssh-keyscan`, in Anführungszeichen; niemand tippt einen Schlüssel ab), oder `--read-key` liest ihn vom Board unter seiner (neuen) Adresse; eine Zeile mit Optionen aus `authorized_keys`, Befehlen oder einem zweiten Schlüssel und der Schlüssel eines anderen vertrauten Boards werden abgelehnt. Braucht ein Terminal: Es zeigt die Adresse und den Fingerabdruck jetzt und nach der Änderung und fragt ("Nein" ist die Vorgabe); die Änderung kommt zuerst ins Audit-Log. Ein neuer Schlüssel gibt dem Board eine neue Geräte-ID (sie leitet sich vom Schlüssel ab): Der Eintrag zieht mit Name und Benutzer dorthin, und ob sich der Schlüssel des Frameworks anmeldet, wird einmal getestet. Die Daten des Boards ziehen mit: seine gespeicherte Probe, die Deploy-Einstellungen, die deployte Laufzeit (der Eintrag des letzten Deployments mit seinen Prüfungen und seinem Benchmark und seine Laufzeit-Pakete), der Deploy-Eintrag und seine Benchmark-Ergebnisse bei den Builds ("getestet auf"). Jeder Teil wird zur neuen ID kopiert und geprüft, bevor sich die `known_hosts` ändert, und die Kopien der alten ID gehen erst nach der Änderung; scheitert eine Kopie, wird nichts geändert. Ein Teil, den die neue ID schon mit anderem Inhalt hat, bleibt unter der alten ID, ebenso eine alte Kopie, die sich nicht entfernen lässt; der Befehl nennt beides. Prüfe das Board erneut, wenn es neu eingerichtet wurde. |
+| `edit GERÄT` | Ändert die Adresse eines vertrauten Boards (`--host`: Hostname oder IP-Adresse, `--port`) oder seinen SSH-Host-Schlüssel in der `known_hosts` des Frameworks, z. B. nachdem sich seine Adresse geändert hat oder es neu installiert wurde. `GERÄT` ist seine Geräte-ID, sein Name oder seine Adresse. Den neuen Schlüssel fügst du mit `--key` ein (die Zeile aus `/etc/ssh/ssh_host_ed25519_key.pub` auf dem Board, eine `known_hosts`-Zeile oder eine Zeile von `ssh-keyscan`, in Anführungszeichen; niemand tippt einen Schlüssel ab), oder `--read-key` liest ihn vom Board unter seiner (neuen) Adresse; eine Zeile mit Optionen aus `authorized_keys`, Befehlen oder einem zweiten Schlüssel und der Schlüssel eines anderen vertrauten Boards werden abgelehnt. Braucht ein Terminal: Es zeigt die Adresse und den Fingerabdruck jetzt und nach der Änderung und fragt ("Nein" ist die Vorgabe); die Änderung kommt zuerst ins Audit-Log. Ein neuer Schlüssel gibt dem Board eine neue Geräte-ID (sie leitet sich vom Schlüssel ab): Der Eintrag zieht mit Name und Benutzer dorthin, und ob sich der Schlüssel des Frameworks anmeldet, wird einmal getestet. Die Daten des Boards ziehen mit: seine gespeicherte Probe, die Deploy-Einstellungen, die deployte Laufzeit (der Eintrag des letzten Deployments mit seinen Prüfungen und seinem Benchmark und seine Laufzeit-Pakete), der Deploy-Eintrag und seine Benchmark-Ergebnisse bei den Builds ("getestet auf"). Jeder Teil wird zur neuen ID kopiert und geprüft, bevor sich die `known_hosts` ändert, und die Kopien der alten ID gehen erst nach der Änderung; scheitert eine Kopie, wird nichts geändert. Ein Teil, den die neue ID schon mit anderem Inhalt hat, bleibt unter der alten ID, ebenso eine alte Kopie, die sich nicht entfernen lässt; der Befehl nennt beides. Prüfe das Board erneut, wenn es neu eingerichtet wurde. Hält etwas auf diesem Computer die Änderung auf (die `known_hosts` des Frameworks ist von einem anderen Teil des Frameworks belegt, etwa der GUI oder einem MCP-Server, Einstellungen oder eine Datei lassen sich nicht lesen), sagt der Befehl das mit dem Grund (`local_problem`) und Exit-Code 1, nie mit einem Traceback; es wird nichts geändert. |
 | `remove GERÄTE_ID` | Entfernt den Eintrag (im Audit-Log vermerkt); KI-Tools können das Gerät dann nicht mehr nennen. Sein Eintrag in `known_hosts` bleibt. |
 
 Ein Eintrag ist nur nutzbar, solange die `known_hosts` des Frameworks genau den Schlüssel enthält, den er nennt:

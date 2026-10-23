@@ -44,21 +44,19 @@ except ImportError:
 # --- DIALOGS ---
 
 
-# Formats with a working pipeline, and quantization suggestions per format (free text is allowed).
-BUILD_FORMATS = [
-    ("GGUF (llama.cpp, CPU/GPU)", "gguf"),
-    ("RKLLM (Rockchip NPU, LLM)", "rkllm"),
-    ("RKNN (Rockchip NPU, ONNX models)", "rknn"),
-]
+# Formats with a working pipeline, and quantization suggestions per format (free text is allowed). The lists of what a
+# target offers live in Core/build_formats.py (the CLI's `build start --format` offers the same); kept here under
+# their old names.
+from orchestrator.Core.build_formats import PIPELINE_FORMATS, offered_formats, unchecked_formats  # noqa: E402
+
+BUILD_FORMATS = list(PIPELINE_FORMATS)
 
 
 def _unchecked_formats():
-    """What `llm-cli build start --format` offers (every ModelFormat but hf), the three with a working pipeline
-    first: a target without capabilities is not checked against any of them, by the CLI or here."""
-    from orchestrator.Core.build_formats import ModelFormat as Formats
-    known = {value for _, value in BUILD_FORMATS}
-    return BUILD_FORMATS + [(f.value.upper(), f.value) for f in Formats
-                            if f is not Formats.HUGGINGFACE and f.value not in known]
+    """What a target without capabilities is offered (every ModelFormat but hf, the three with a working pipeline
+    first; build_formats.unchecked_formats, as the CLI's --format offers it): it is not checked against any of them,
+    by the CLI or here."""
+    return unchecked_formats()
 
 
 UNCHECKED_FORMATS = _unchecked_formats()
@@ -875,12 +873,10 @@ class BuilderTab(QWidget):
         current = self.format_combo.currentData()
         self.format_combo.blockSignals(True)
         self.format_combo.clear()
-        if caps:
-            for fid, cap in caps.formats.items():
-                self.format_combo.addItem(cap.label, fid)
-        else:
-            for label, value in UNCHECKED_FORMATS:
-                self.format_combo.addItem(label, value)
+        # build_formats.offered_formats: exactly the declared formats, else every format (UNCHECKED_FORMATS), the
+        # list the CLI's `build start --format` takes for this target too
+        for label, value in offered_formats(caps):
+            self.format_combo.addItem(label, value)
         if hasattr(self, "lbl_no_caps"):
             target = self.target_combo.currentData()
             if caps is None and target is not None:
@@ -1310,7 +1306,9 @@ class BuilderTab(QWidget):
 
     def _decide_about_earlier(self, found) -> bool:
         """True when the build is to start: no earlier build with the same options, or the person chose to build
-        again. "Use the existing build" starts nothing and names it; nothing is skipped without the person."""
+        again. "Use the existing build" starts nothing: the earlier build is named and copied into the folder the
+        person picks in the dialog that opens at the output folder (artifact_save.ask_and_use, as `llm-cli build start`
+        copies it to --output); nothing is skipped without the person."""
         if not found:
             return True
         from orchestrator.gui import artifact_save
@@ -1318,8 +1316,18 @@ class BuilderTab(QWidget):
         choice = artifact_save.ask_earlier(self, found)
         if choice == "use":
             self._log(ui_text("earlier.used", path=str(found[0].info.get("path") or found[0].label)))
+            worker = artifact_save.ask_and_use(self, self.framework, found[0], self._on_earlier_copied)
+            if worker is not None:
+                self._copy_workers = [w for w in getattr(self, "_copy_workers", []) if w.isRunning()] + [worker]
             return False
         return choice == "again"
+
+    def _on_earlier_copied(self, ok: bool, text: str) -> None:
+        """What "Use" did with the earlier build (copied, already there, refused): in the log and a plain box."""
+        from orchestrator.gui.plain import plain_box
+        from orchestrator.utils.localization import ui_text
+        self._log(text)
+        plain_box(self, "information" if ok else "warning", ui_text("earlier.title"), text)
 
     # --- SAVING A FINISHED BUILD (eighth round, answer 3) ---
 

@@ -27,6 +27,10 @@ GUI parity (W1' of 2026-10-16, wave 5a): "Create package only..." makes the pack
 package..." uploads a ZIP made earlier (`deploy run PACKAGE_PATH`), and the Port, Name and "Wait for the board" fields
 are `--port`, `--label` and `--wait`. The host key is read off the GUI thread (gui/host_key.HostKeyCheck) and the
 question has "No" as its default; packaging and the deploy run in worker threads.
+Docker containers (DECISIONS round 23, item 6): the "Use Docker Containerization?" group lists the containers a package
+with Docker images carries for the chosen profile, from the list the CLI's `deploy package --docker` packs
+(deployment_manager.package_containers: the image of the settings, the hardware access of the target profile). The
+person's ticks decide which go into the package (package_docker_config); the CLI packs every one.
 Every text that can hold a value from outside the framework is plain text (gui/plain.py).
 """
 
@@ -84,6 +88,8 @@ class DeploymentWorker(QThread):
 
     def __init__(self, framework, artifact_path, profile_name, docker_config, target_ip, user, password, *,
                  port: int = 22, label=None, wait_seconds=None, package=None, key=None):
+        # docker_config: {"use_docker": the group's tick, "containers": the containers ticked in its table (None or
+        # left out: every one, as `deploy package --docker`)}
         super().__init__()
         self.framework = framework
         self.artifact_path = artifact_path
@@ -135,6 +141,7 @@ class DeploymentWorker(QThread):
             done = deploy_build(self.framework, dep_mgr, Endpoint(self.target_ip, self.port), self.user,
                                 source=None if self.package is not None else self.artifact_path, package=self.package,
                                 profile=self.profile_name, docker=bool((self.docker_config or {}).get("use_docker")),
+                                containers=(self.docker_config or {}).get("containers"),
                                 credentials=OneTimePassword(password) if password else KeyOnly(), label=self.label,
                                 kv_cache=self.kv_cache, wait=self.wait_seconds, on_event=self.event.emit,
                                 cancel=self._stop, key=self.key, via="gui", actor="gui",
@@ -181,9 +188,11 @@ class DeploymentWorker(QThread):
         self.package_error = None
         self._on_step("package")
         try:
+            extra = {"containers": self.docker_config["containers"]} \
+                if (self.docker_config or {}).get("containers") is not None else {}
             return make_package(dep_mgr, self.framework, self.artifact_path, self.profile_name,
                                 bool((self.docker_config or {}).get("use_docker")), package_folder(self.framework),
-                                kv_cache=self.kv_cache, cancelled=self._stop.is_set)
+                                kv_cache=self.kv_cache, cancelled=self._stop.is_set, **extra)
         except DeployError as e:
             self.package_error = e
             return None
@@ -251,10 +260,12 @@ class PackageWorker(QThread):
     make_package), off the GUI thread; Cancel stops it between the steps and no partial package stays."""
     finished = Signal(bool, str)
 
-    def __init__(self, framework, source: Path, profile_name: str, docker: bool, folder: Path, kv_cache=None):
+    def __init__(self, framework, source: Path, profile_name: str, docker: bool, folder: Path, kv_cache=None,
+                 containers=None):
         super().__init__()
         self.framework, self.source, self.profile_name = framework, Path(source), profile_name
         self.docker, self.folder, self.kv_cache = bool(docker), Path(folder), kv_cache
+        self.containers = list(containers) if containers is not None else None   # None: every container
         self.package = None
         self._stop = threading.Event()
 
@@ -269,8 +280,9 @@ class PackageWorker(QThread):
             self.finished.emit(False, ui_text("deploy.package.failed", reason="DeploymentManager not loaded."))
             return
         try:
+            extra = {"containers": self.containers} if self.containers is not None else {}
             self.package = make_package(manager, self.framework, str(self.source), self.profile_name, self.docker,
-                                        self.folder, kv_cache=self.kv_cache, cancelled=self._stop.is_set)
+                                        self.folder, kv_cache=self.kv_cache, cancelled=self._stop.is_set, **extra)
         except DeployError as e:
             self.finished.emit(False, "\n\n".join(p for p in (ui_text("deploy.package.failed", reason=str(e)),
                                                                e.next) if p))
@@ -390,6 +402,8 @@ class DeploymentWindow(QWidget):
         layout_group = QVBoxLayout()
         layout_target = QHBoxLayout()
         self.cb_profiles = QComboBox()
+        # the containers of a Docker package depend on the profile (its hardware access): the table follows it
+        self.cb_profiles.currentTextChanged.connect(lambda *_: self._fill_containers())
         layout_target.addWidget(QLabel("Profile:"))
         layout_target.addWidget(self.cb_profiles, 1)
         
@@ -439,19 +453,24 @@ class DeploymentWindow(QWidget):
         
         # --- 3. Docker Configuration ---
         self.grp_docker = QGroupBox("3. Docker Configuration")
+        self.grp_docker.setObjectName("grp_deploy_docker")   # `llmcf deploy package --docker / --no-docker`
         self.grp_docker.setCheckable(True)
         self.grp_docker.setChecked(False)
         self.grp_docker.setTitle("Use Docker Containerization?")
-        
+
         layout_docker = QVBoxLayout()
+        # The containers the package carries (deployment_manager.package_containers, the CLI's --docker): each row
+        # with its image and the hardware access of the profile; the ticked ones go into the package.
         self.table_docker = QTableWidget()
-        self.table_docker.setColumnCount(2)
-        self.table_docker.setHorizontalHeaderLabels(["Component", "Container Type"])
+        self.table_docker.setObjectName("table_deploy_containers")
+        self.table_docker.setColumnCount(3)
+        self.table_docker.setHorizontalHeaderLabels([ui_text("deploy.containers.component"),
+                                                     ui_text("deploy.containers.image"),
+                                                     ui_text("deploy.containers.access")])
         self.table_docker.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        
-        # Mockup Rows
-        self._add_docker_row("Inference Engine", ["Llama.cpp (CPU)", "RKLLM (NPU)", "TensorRT (GPU)"])
-        
+        self.table_docker.setToolTip(plain_tooltip(ui_text("deploy.containers.tip")))
+        self.table_docker.setAccessibleName(ui_text("deploy.containers.component"))
+
         layout_docker.addWidget(self.table_docker)
         self.grp_docker.setLayout(layout_docker)
         layout.addWidget(self.grp_docker)
@@ -641,6 +660,7 @@ class DeploymentWindow(QWidget):
 
     def _start_deploy(self, conn, password, *, artifact_path=None, profile_name="", docker_config=None,
                       package=None) -> None:
+        """Starts the deploy worker: `docker_config` as the worker takes it ({"use_docker", "containers"})."""
         self._set_busy(True)
         self.btn_cancel.setVisible(True)
         self.btn_cancel.setEnabled(True)
@@ -727,14 +747,17 @@ class DeploymentWindow(QWidget):
         if not profile_name:
             plain_box(self, "warning", ui_text("deploy.package.title"), ui_text("deploy.package.no_profile"))
             return
+        docker = self.docker_choice()
+        if docker is None:
+            return
         folder = self._package_folder(source.name)
         if folder is None:
             return
         self._set_busy(True, ui_text("deploy.package.running", name=source.name, folder=str(folder)))
         self.btn_cancel.setVisible(True)
         self.btn_cancel.setEnabled(True)
-        self.package_worker = PackageWorker(self.framework, source, profile_name, self.grp_docker.isChecked(),
-                                            folder, kv_cache=self.kv_choice()[0])
+        self.package_worker = PackageWorker(self.framework, source, profile_name, docker["use_docker"],
+                                            folder, kv_cache=self.kv_choice()[0], containers=docker.get("containers"))
         self.package_worker.finished.connect(self._on_packaged)
         self.package_worker.start()
 
@@ -743,13 +766,64 @@ class DeploymentWindow(QWidget):
         self.btn_cancel.setVisible(False)
         plain_box(self, "information" if ok else "warning", ui_text("deploy.package.title"), text)
 
-    def _add_docker_row(self, name, options):
+    # --- the containers of a package with Docker images (DECISIONS round 23, item 6) ---
+
+    def _fill_containers(self) -> None:
+        """The table lists the containers a package for the chosen profile carries (package_containers, as `llmcf
+        deploy package --docker` packs them): the component, ticked unless the person unticked it before, its image
+        and the hardware access the profile's target gives it on the board. Values from the settings and target.yml
+        are shown as plain text."""
+        from orchestrator.Core.deployment_manager import package_containers
+        if not hasattr(self, "table_docker"):
+            return
+        unticked = {self.table_docker.item(row, 0).data(Qt.UserRole) for row in range(self.table_docker.rowCount())
+                    if self.table_docker.item(row, 0) is not None
+                    and self.table_docker.item(row, 0).checkState() != Qt.Checked}
+        containers = package_containers(self.framework, self.cb_profiles.currentText().strip())
+        self.table_docker.setRowCount(0)
+        for container in containers:
+            self._add_docker_row(container, ticked=container.key not in unticked)
+
+    def _add_docker_row(self, container, ticked: bool = True):
+        """One container of the package: its component (ticked: it goes into the package), image and hardware
+        access."""
         row = self.table_docker.rowCount()
         self.table_docker.insertRow(row)
-        self.table_docker.setItem(row, 0, QTableWidgetItem(name))
-        cb = QComboBox()
-        cb.addItems(options)
-        self.table_docker.setCellWidget(row, 1, cb)
+        component = QTableWidgetItem(ui_text(f"deploy.containers.{container.key}"))
+        component.setData(Qt.UserRole, container.key)
+        component.setFlags((component.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
+        component.setCheckState(Qt.Checked if ticked else Qt.Unchecked)
+        self.table_docker.setItem(row, 0, component)
+        access = " ".join(container.flags) or ui_text("deploy.containers.access_none")
+        for column, text in ((1, container.image), (2, access)):
+            item = QTableWidgetItem(text)   # QTableWidgetItem shows plain text, never rich text
+            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            item.setToolTip(plain_tooltip(text))
+            self.table_docker.setItem(row, column, item)
+
+    def container_choice(self):
+        """The component keys of the ticked containers, or None when every one is ticked (what `llmcf deploy package
+        --docker` packs)."""
+        keys, ticked = [], []
+        for row in range(self.table_docker.rowCount()):
+            item = self.table_docker.item(row, 0)
+            if item is None:
+                continue
+            keys.append(item.data(Qt.UserRole))
+            if item.checkState() == Qt.Checked:
+                ticked.append(item.data(Qt.UserRole))
+        return None if ticked == keys else ticked
+
+    def docker_choice(self):
+        """The Docker part of this window's package: {"use_docker": the group's tick, "containers": the ticked
+        containers (None: every one)}; None after a plain warning when Docker is on but no container is ticked."""
+        if not self.grp_docker.isChecked():
+            return {"use_docker": False}
+        chosen = self.container_choice()
+        if chosen is not None and not chosen:
+            plain_box(self, "warning", ui_text("deploy.package.title"), ui_text("deploy.containers.none"))
+            return None
+        return {"use_docker": True, "containers": chosen}
 
     # --- the KV cache (N7) ---
 
@@ -856,6 +930,7 @@ class DeploymentWindow(QWidget):
         else:
             self.cb_profiles.addItem("Error: TargetManager not loaded")
         select_recent(self.cb_profiles, ([previous] if previous else []) + self._recent("target"))
+        self._fill_containers()
 
     def _recent(self, field):
         return self.history.get(field) if self.history else []
@@ -898,6 +973,9 @@ class DeploymentWindow(QWidget):
             return
 
         artifact_path = Path(artifact_item.data(Qt.UserRole))
+        docker_config = self.docker_choice()   # read before any question: a choice of no container stops here
+        if docker_config is None:
+            return
         conn = self._connection()   # address, user, port, name and wait (deploy run --port/--label/--wait)
         if conn is None:
             return
@@ -915,9 +993,8 @@ class DeploymentWindow(QWidget):
             password, asked = self._ask_password(conn.user, conn.host)
             if not asked:
                 return
-            # 3. Docker Config gathering
-            docker_config = {"use_docker": self.grp_docker.isChecked()}
-            # TODO: Hier detaillierte Container-Auswahl aus der Tabelle auslesen
+            # 3. Docker: the group's tick and the containers ticked in its table (docker_choice), packed by the
+            #    one deploy step as `llmcf deploy package --docker` packs them (package_docker_config)
             # 4. Start Worker
             self._start_deploy(conn, password, artifact_path=artifact_path, profile_name=profile_name,
                                docker_config=docker_config)

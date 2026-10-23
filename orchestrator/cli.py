@@ -639,11 +639,56 @@ def build():
     pass
 
 
+def _installed_formats(click_ctx: Optional[click.Context]):
+    """What each installed target builds (Core/build_formats.py TargetFormats): from the booted framework's targets,
+    else read from the targets folder of the settings without booting (the help text and the completion of `build
+    start --format`). [] when they cannot be read."""
+    from orchestrator.Core.build_formats import formats_in, formats_of
+    fctx = click_ctx.find_object(FrameworkContext) if click_ctx is not None else None
+    fctx = fctx or FrameworkContext()
+    try:
+        tm = getattr(fctx.framework_manager, "target_manager", None)
+        if tm is not None:
+            return formats_of(tm)
+        config, resolve = _settings(fctx)
+        return formats_in(Path(resolve(config.get("targets_dir", "targets") or "targets")))
+    except Exception:  # noqa: BLE001 - help and completion never fail on a target that cannot be read
+        return []
+
+
+class _TargetFormat(click.ParamType):
+    """`build start --format`: a format the installed targets build (their target.yml capabilities, as the Builder
+    tab's format list offers them). Any word is taken here; the command refuses a format the chosen target does not
+    build and names what each target builds (build_formats.format_problem). Completion offers the targets' formats."""
+    name = "format"
+
+    def convert(self, value, param, ctx):
+        return str(value).strip()
+
+    def shell_complete(self, ctx, param, incomplete):
+        from click.shell_completion import CompletionItem
+        from orchestrator.Core.build_formats import offered_values
+        return [CompletionItem(v) for v in offered_values(_installed_formats(ctx)) if v.startswith(incomplete)]
+
+
+class _FormatOption(click.Option):
+    """--format's help text lists what each installed target builds, read when the help is shown (never at import:
+    the CLI starts without the targets)."""
+
+    def get_help_record(self, ctx):
+        from orchestrator.Core.build_formats import formats_text
+        found = formats_text(_installed_formats(ctx))
+        self.help = ("Target format, one the target builds. The installed targets build: " + found
+                     + " ('llm-cli targets list' shows them)") if found else \
+            "Target format, one the target builds ('llm-cli targets list' shows what each target builds)"
+        return super().get_help_record(ctx)
+
+
 @build.command('start')
 @click.option('--model', '-m', required=True, help='Model name (HuggingFace) or local path')
 @click.option('--target', '-t', required=True, help='Target id or folder name in targets/ (llm-cli targets list)')
-@click.option('--format', '-f', default='gguf', type=click.Choice([f.value for f in ModelFormat if f is not ModelFormat.HUGGINGFACE]),
-              help='Target format (gguf: llama.cpp/CPU, rkllm: Rockchip NPU LLM, rknn: Rockchip NPU ONNX)')
+@click.option('--format', '-f', default='gguf', type=_TargetFormat(), cls=_FormatOption, show_default=True,
+              help='Target format, one the target builds')
 @click.option('--board', '-b', help='Board within the target family, e.g. rk3588, rk3576, rk3566')
 @click.option('--quantization', '-q', help='Quantization, e.g. Q4_K_M, IQ4_XS, F16 (gguf) or w4a16, w8a8 (rkllm)')
 @click.option('--output', '--output-dir', '-o', 'output_dir',
@@ -669,7 +714,11 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
                 quantization: Optional[str], output_dir: Optional[str], 
                 optimization: str, priority: str, parallel: bool, follow: bool, gpu: bool,
                 imatrix: bool, dataset: Optional[str]):
-    """Start a new build job. Ctrl+C cancels it (its container is stopped) and exits with code 130."""
+    """Start a new build job. Ctrl+C cancels it (its container is stopped) and exits with code 130.
+
+    When a finished build with exactly the same options exists, you are asked first, as in the Builder tab: use it
+    (it is copied into the folder this build would go to), build it again, or cancel. Without a terminal the build
+    starts as given (nothing is skipped by itself)."""
     from orchestrator.Core.build_service import BuildServiceError
     from orchestrator.Core.orchestrator import OrchestrationStatus
     ctx.require_framework()
@@ -690,6 +739,13 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
                 console.print(f"[red]Unknown target '{escape(target)}' (targets: {escape(', '.join(known) or 'none')}).[/red]")
                 sys.exit(2)
             target = match
+            # Only a format the target builds (its target.yml capabilities, as the Builder tab offers them); a
+            # format no target builds is refused naming what each installed target builds (round 23, item 7).
+            from orchestrator.Core.build_formats import format_problem, formats_of
+            problem = format_problem(format, formats_of(tm), target)
+            if problem:
+                console.print(f"[red]{escape(problem)}[/red]")
+                sys.exit(2)
         # Checked by the service against the target's declared capabilities (a target without them is built
         # unchecked), with its defaults filled: the values the build really runs with (canonical spellings, the
         # scripts' default board).
@@ -704,10 +760,21 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
             sys.exit(2)
         board, quantization = request.board, request.quantization
 
+        # A finished build with 100 % the same options (eighth round N11; round 23 item 9): the Builder tab's check
+        # and question. Use it (copied into the folder below), build it again, or cancel; nothing is skipped by itself.
+        found = _earlier_builds(service, request, optimization)
+        choice = _ask_earlier(ctx, found) if found else "again"
+        if choice == "cancel":
+            console.print("Nothing was started.")
+            return
+
         # Where the golden artifact goes (eighth round, answer 3): --output, else at a terminal the person's answer to
         # a prompt with the output folder as its default, else the output folder; '-' keeps it in the framework's
         # build folder ('llm-cli build save' saves it later). A relative path means the current directory.
         output_dir, chosen = _build_destination(ctx, output_dir)
+        if choice == "use":
+            _use_earlier(ctx, found[0], output_dir)
+            return
 
         # The orchestrator runs on the framework's background loop (as for the GUI and the build service), so the
         # build service can cancel the build from here on Ctrl+C.
@@ -803,6 +870,98 @@ def _build_destination(ctx: FrameworkContext, given: Optional[str]) -> Tuple[str
     except DestinationRefused as e:
         console.print(f"[red]{escape(str(e))}[/red] {escape(e.next)}")
         sys.exit(2)
+
+
+def _earlier_builds(service, request, optimization: str) -> list:
+    """Finished builds with 100 % the options of `request` (BuildService.earlier_builds, identical ones first), as the
+    Builder tab finds them: the commit of a Hugging Face model's default branch is looked up (once, never in offline
+    mode) only when an earlier build could be identical. [] when they cannot be looked up: the build starts."""
+    try:
+        found = service.earlier_builds(request, optimization=optimization, local_paths=True)
+        if found and not request.revision and all(b.match == "commit_unchecked" for b in found):
+            with console.status("Looking up the model's current commit on Hugging Face, to compare it with an "
+                                "earlier build ...", spinner="dots"):
+                commit = service.model_commit(request.model)
+            if commit:
+                found = service.earlier_builds(request, revision=commit, optimization=optimization, local_paths=True)
+        return found
+    except Exception as e:  # noqa: BLE001 - the look-up never stops a build; the person builds as asked
+        console.print(f"[yellow]Earlier builds not checked: {escape(str(e))}[/yellow]")
+        return []
+
+
+def _ask_earlier(ctx: FrameworkContext, found) -> str:
+    """The Builder tab's question about an earlier build with the same options, at the terminal: "use", "again" or
+    "cancel" (use is the default; the full path is shown). Without a terminal nothing is asked: "again", the build
+    starts as given."""
+    from orchestrator.utils.localization import ui_text
+    lang = _config_language(ctx)
+    first = found[0]
+    key = "earlier.identical" if first.match == "identical" else "earlier.unchecked"
+    console.print(f"[bold yellow]{escape(ui_text('earlier.title', lang))}[/bold yellow]")
+    console.print(escape(ui_text(key, lang, path=str(first.info.get("path") or first.label),
+                                 created=first.created or "?", commit=(first.revision or "?")[:12])))
+    if not _interactive():
+        console.print("Without a terminal nothing is asked: the build starts as given.")
+        return "again"
+    use, again = ui_text("earlier.use", lang).replace("&", ""), ui_text("earlier.again", lang).replace("&", "")
+    answer = click.prompt(f"u = {use}, a = {again}, c = Cancel", type=click.Choice(["u", "a", "c"]), default="u")
+    return {"u": "use", "a": "again", "c": "cancel"}[answer]
+
+
+def _use_earlier(ctx: FrameworkContext, earlier, output_dir: str) -> None:
+    """"Use" of an earlier identical build: copied (with its golden ZIP) into `output_dir`, the folder this build
+    would have gone to (artifact_output.plan_copy, copy_artifact: the one disk rule first, every copy checked by
+    sha256, the earlier build stays where it is). The identical build there already is not copied again; anything
+    else under its name is replaced only after you accepted the full list ("No" is the default). '-' (the
+    framework's build folder) copies nothing: the earlier build is named."""
+    from orchestrator.Core.artifact_output import DestinationRefused, build_folder, copy_artifact, plan_copy
+    from orchestrator.Core.deletion import PlanChanged
+    from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.utils.localization import ui_text
+    fm = ctx.framework_manager
+    source = str(earlier.info.get("path") or "")
+    try:
+        same = Path(output_dir).resolve() == build_folder(fm).resolve()
+    except OSError:
+        same = False
+    if same or not source:
+        console.print(escape(ui_text("earlier.used", _config_language(ctx), path=source or earlier.label)))
+        return
+    relative = earlier.label.split(":", 1)[1] if ":" in earlier.label else None
+    try:
+        plan = plan_copy(fm, source, output_dir, relative=relative, create=True)
+    except DestinationRefused as e:
+        console.print(f"[red]{escape(str(e))}[/red] {escape(e.next or '')}")
+        sys.exit(1)
+    if plan.there:
+        console.print(f"[green]The identical build is in {escape(str(plan.target))} already; nothing was copied."
+                      "[/green]")
+        return
+    accepted = None
+    if plan.replaces is not None:
+        console.print(f"{escape(str(plan.target))} exists already: the copy of the earlier build replaces what lies "
+                      "there now, only with your yes.")
+        accepted = confirm_deletion(plan.replaces, title="Replaced by the copy of the earlier build", verb="Replace",
+                                    again="llm-cli build start ... --output <another folder>")
+        if accepted is None:
+            console.print(f"Nothing was copied or replaced; the earlier build stays in {escape(source)}.")
+            return
+    try:
+        with console.status(f"Copying the earlier build to {plan.target} ...", spinner="dots"):
+            result = copy_artifact(fm, plan, replace=accepted, audit=_cli_audit(ctx),
+                                   trash=_cli_trash(ctx) if accepted is not None and accepted.mode == "trash"
+                                   else None)
+    except (DestinationRefused, PlanChanged, PermissionError) as e:
+        console.print(f"[red]{escape(str(e))}[/red] {escape(getattr(e, 'next', '') or '')}")
+        sys.exit(1)
+    console.print(f"[green]The earlier build is copied to {escape(str(result.folder))} ({result.files} files, "
+                  f"{size_text(result.bytes)}; every copy was checked against its original). It stays in "
+                  f"{escape(source)} too.[/green]")
+    if result.zip is not None:
+        console.print(f"Golden ZIP: {escape(str(result.zip))}")
+    for note in result.notes:
+        console.print(f"[yellow]{escape(note)}[/yellow]")
 
 
 def _remember_saved(ctx: FrameworkContext, artifact: Any, root: str) -> None:
@@ -4934,6 +5093,8 @@ def deploy_devices_edit(ctx: FrameworkContext, device: str, host: Optional[str],
                                    "or myboard.local")
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
+    except Exception as e:  # noqa: BLE001 - a file of this computer that cannot be read: its reason, no traceback
+        _board_change_failed(ctx, host or found[0].host, port or found[0].port, e)
     for line in person_steps.change_lines(change):
         console.print(escape(line))
     if not click.confirm(person_steps.CHANGE_QUESTION, default=False):
@@ -4943,7 +5104,10 @@ def deploy_devices_edit(ctx: FrameworkContext, device: str, host: Optional[str],
     if change.plan.key_changed:   # where the board's "tested on" records are (P6: they move with its data)
         from types import SimpleNamespace
         from orchestrator.Core.artifact_output import artifact_folders
-        config, resolve = _settings(ctx)
+        try:
+            config, resolve = _settings(ctx)
+        except Exception as e:  # noqa: BLE001 - settings that cannot be read: nothing changed yet, the reason
+            _board_change_failed(ctx, change.plan.new.host, change.plan.new.port, e, settings=True)
         try:
             output_dirs = artifact_folders(SimpleNamespace(config=config, resolve_path=resolve))
         except Exception:  # noqa: BLE001 - no output folder: there are no build records to move
@@ -4955,6 +5119,8 @@ def deploy_devices_edit(ctx: FrameworkContext, device: str, host: Optional[str],
     except person_steps.BoardStepError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
+    except Exception as e:  # noqa: BLE001 - known_hosts held by another process (LockTimeout), a file of this computer
+        _board_change_failed(ctx, change.plan.new.host, change.plan.new.port, e)
     for line in person_steps.moved_lines(change):
         console.print(escape(line))
     plan = change.plan
@@ -4970,6 +5136,31 @@ def deploy_devices_edit(ctx: FrameworkContext, device: str, host: Optional[str],
     if plan.key_changed and not paired:
         console.print("[yellow]The framework's SSH key does not log in there yet: pair the board once with "
                       "'llm-cli deploy run' (it asks for the password one time).[/yellow]")
+
+
+def _board_change_failed(ctx: FrameworkContext, host: str, port: int, error: BaseException, *,
+                         settings: bool = False) -> None:
+    """`deploy devices edit` stopped by something on this computer, not the board: the plain reason (_print_reason,
+    local_problem) and what failed, never a traceback; exit code 1. `settings`: the framework's settings could not be
+    read after the person said yes (nothing was changed yet). A LockTimeout is known_hosts held by another process
+    of the framework (change_board undid its data move: nothing was changed)."""
+    from orchestrator.runtime.device import reasons
+    from orchestrator.utils.file_lock import LockTimeout
+    _print_reason(ctx, reasons.LOCAL_PROBLEM, host, port)
+    if settings:
+        console.print(f"The framework's settings could not be read ({escape(str(error))}); nothing was changed. "
+                      "'llm-cli config show' shows them; fix them, then try again.")
+    elif isinstance(error, LockTimeout):
+        console.print("The framework's known_hosts is being changed by another part of the framework (the GUI, "
+                      "another llm-cli command or an MCP server); nothing was changed. Try again when it has "
+                      "finished.")
+    elif isinstance(error, OSError):
+        console.print(f"What failed on this computer: {escape(reasons.local_detail(error))}. "
+                      "'llm-cli deploy devices list' shows the board's record now.")
+    else:
+        console.print(f"The change stopped: {escape(str(error) or error.__class__.__name__)}. 'llm-cli deploy "
+                      "devices list' shows the board's record now.")
+    sys.exit(1)
 
 
 # ============================================================================

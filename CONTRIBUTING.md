@@ -739,7 +739,11 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   `person_steps.device_audit`), and a board's self-built runtime only through `steps.deploy_runtime_flow` (`llmcf device
   runtime deploy`, the Boards window, the AI's `service.deploy`): each caller hands over its login as a `DeployHooks`,
   and only the person's channels add the hooks that write the board's trusted record or ask the benchmark question.
-  `tests/test_build_parity_core.py`, `tests/test_ai_settings_change.py` and `tests/test_deploy_flow.py` check that no
+  The containers a package with Docker images carries come only from `deployment_manager.package_containers` (`llmcf
+  deploy package --docker` and the Deployment tab's container table, whose ticks reach `make_package` through
+  `package_docker_config`); the formats a target offers only from `build_formats.offered_formats` (the Builder tab's
+  format list and `llmcf build start --format`); an identical earlier build is put into a chosen folder ("Use") only by
+  `artifact_output.plan_copy` and `copy_artifact` (the CLI and the GUI). `tests/test_build_parity_core.py`, `tests/test_ai_settings_change.py` and `tests/test_deploy_flow.py` check that no
   window or command goes around them. A provider, model or effort for one question or run comes from
   `Core/ai_override.override_values(..., ditto=...)` (another provider than the saved one drops the saved provider's
   model, address and sign-in method); the CLI sets these values with the settings source `cli`, which `save_user_config`
