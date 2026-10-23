@@ -699,7 +699,7 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   (`tests/test_offline_check.py` fails on one). Whether an address may be reached in offline mode is decided only by
   the network-locality rule of `orchestrator/utils/locality.py` (`check_url`, `check_host`: every address a name
   resolves to, Tailscale only with the person's own Headscale, the person's opt-outs), never by a name suffix or an
-  address check of your own; a connection that follows goes to the checked address (`connect_address`;
+  address check of your own; a connection that follows goes only to the checked addresses (`connect_addresses`, tried in turn;
   `security/http.local_only_session` for requests, `llm/client.offline_http_client` for the SDKs,
   `runtime/build/source.offline_reach` for git). A lookup never runs on the GUI thread: a window checks in a worker
   first (`locality.needs_lookup`). The person's opt-outs are written only by `orchestrator/Core/local_network.py`;
