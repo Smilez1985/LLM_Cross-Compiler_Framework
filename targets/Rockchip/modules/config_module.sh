@@ -262,7 +262,8 @@ cpu_flag_list() {  # stdin: CPU flags (separated by spaces or commas) -> the sor
 }
 
 profile_cpu_flags() {  # CPU_FLAGS_ALL of the profile file as written (the loader drops the spaces of version 1.x)
-    sed -n 's/^[[:space:]]*CPU_FLAGS_ALL[[:space:]]*=//p' "$HARDWARE_CONFIG_FILE" | head -n 1 | tr -d '"\r'
+    awk '/^[[:space:]]*CPU_FLAGS_ALL[[:space:]]*=/ { sub(/^[^=]*=/, ""); print; exit }' "$HARDWARE_CONFIG_FILE" \
+        | tr -d '"\r'
 }
 
 # The hardware profile describes this build machine itself when it names this machine's CPU: the same system

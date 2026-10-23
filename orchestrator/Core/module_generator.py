@@ -545,8 +545,8 @@ def validate_target_folder(root: Path, template_dir: Path = SHIPPED_TEMPLATE) ->
     valid runtime: block if it has one), every Dockerfile FROM pinned by digest unless it is an official base image
     or an earlier stage, no prebuilt llama.cpp (images, copied or downloaded binaries, packages: the framework shares
     recipes, decision D21), the shell deny-list and no llama.cpp option that downloads (download_flag_problems) on
-    every script line that is not in the shipped template, bash -n, no template placeholders and no binary files. Used for generated modules, community exports and packs in
-    quarantine."""
+    every script line that is not in the shipped template, bash -n, no template placeholders and no binary files.
+    Used for generated modules, community exports and packs in quarantine."""
     from orchestrator.schemas.targets import TargetCapabilities, TargetRuntime
     root = Path(root)
     problems: List[str] = []
