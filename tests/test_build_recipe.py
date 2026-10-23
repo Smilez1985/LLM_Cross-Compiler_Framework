@@ -499,6 +499,33 @@ class TestRefusals:
         with pytest.raises(PlanError, match=name):
             check_download_options(options)
 
+    def test_one_rule_for_a_plan_and_for_a_single_option(self):
+        """refused_option is the rule check_download_options applies to a plan; the module generator applies it to
+        the CMake flags of a target module, which may name any option or none of them."""
+        from orchestrator.runtime.build.recipe import DEPRECATED_DOWNLOAD_OPTIONS, refused_option
+        for name in NEVER_SET:
+            for value in ("ON", "OFF", ""):
+                assert refused_option(name, value) == f"{name} must never be set: {NEVER_SET[name]}"
+        for name, why in {**DOWNLOAD_OPTIONS_OFF, **DEPRECATED_DOWNLOAD_OPTIONS}.items():
+            assert refused_option(name, "OFF") is None
+            for value in ("ON", "1", "off", None):
+                assert refused_option(name, value) == f"{name} must be OFF on every build: {why}"
+        assert refused_option("FETCHCONTENT_FULLY_DISCONNECTED", "ON") is None
+        assert refused_option("FETCHCONTENT_FULLY_DISCONNECTED", "OFF") == \
+            "FETCHCONTENT_FULLY_DISCONNECTED must be ON on every build"
+        assert refused_option("LLAMA_SUBPROCESS", "OFF") is None
+        assert refused_option("LLAMA_SUBPROCESS", "ON") == "LLAMA_SUBPROCESS must be OFF on every build (decision D22)"
+        for name in ("GGML_CUDA", "GGML_NATIVE", "GGML_NEON", "LLAMA_BUILD_SERVER", "CMAKE_BUILD_TYPE"):
+            assert refused_option(name, "ON") is None
+        # check_download_options with the messages it always gave
+        options = dict(plan("rk3566_dietpi_cross").options())
+        del options["LLAMA_BUILD_UI"]
+        with pytest.raises(PlanError, match="^LLAMA_BUILD_UI must be OFF on every build: scripts/ui-assets.cmake"):
+            check_download_options(options)
+        options = dict(plan("rk3566_dietpi_cross").options())
+        options["LLAMA_CURL"] = "ON"  # not one of the recipe's options: a plan never names it
+        check_download_options(options)
+
     @pytest.mark.parametrize("key, value", [
         ("GPU0_COMPUTE_CAP", "8.6;rm -rf /"),
         ("GPU0_COMPUTE_CAP", "86"),

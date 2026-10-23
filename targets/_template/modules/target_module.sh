@@ -190,14 +190,7 @@ cross_compile_target() {
     local cmake_args=()
     cmake_args+=("-DCMAKE_BUILD_TYPE=Release")
     cmake_args+=("-DBUILD_SHARED_LIBS=OFF")
-    cmake_args+=("-DLLAMA_CURL=OFF")
-    # Nothing is downloaded at configure or build time (the build container has no network, a container started by
-    # hand may have); only what the package needs. Every option of llama.cpp that can download something is off, as
-    # in every llama.cpp build of the framework (DOWNLOAD_OPTIONS_OFF of orchestrator/runtime/build/recipe.py, the
-    # image's Dockerfile): LLAMA_USE_PREBUILT_UI, on by default, would fetch llama-server's web UI while it is built.
-    cmake_args+=("-DFETCHCONTENT_FULLY_DISCONNECTED=ON" "-DLLAMA_OPENSSL=OFF" "-DLLAMA_BUILD_TESTS=OFF")
-    cmake_args+=("-DLLAMA_BUILD_EXAMPLES=OFF" "-DLLAMA_BUILD_APP=OFF" "-DLLAMA_USE_PREBUILT_UI=OFF" "-DLLAMA_BUILD_UI=OFF"
-                 "-DLLAMA_LLGUIDANCE=OFF" "-DGGML_CPU_KLEIDIAI=OFF" "-DGGML_OPENMP_FETCH=OFF")
+    cmake_args+=("-DLLAMA_OPENSSL=OFF")
     cmake_args+=("-DLLAMA_BUILD_SERVER=ON")
 
     # WICHTIG: Setze die Toolchain (mit den Optimierungs-Flags) aus config_module.sh
@@ -207,6 +200,16 @@ cross_compile_target() {
     if [ ${#flags[@]} -gt 0 ]; then
         cmake_args+=("${flags[@]}")
     fi
+    # Nothing is downloaded at configure or build time (the build container has no network, a container started by
+    # hand may have); only what the package needs. Every option of llama.cpp that can download something is off, as
+    # in every llama.cpp build of the framework (DOWNLOAD_OPTIONS_OFF and DEPRECATED_DOWNLOAD_OPTIONS of
+    # orchestrator/runtime/build/recipe.py, the image's Dockerfile): LLAMA_USE_PREBUILT_UI, on by default, would fetch
+    # llama-server's web UI while it is built. llama-server has no subprocesses (LLAMA_SUBPROCESS=OFF, decision D22).
+    # These come after the module's CMake flags, so they always win (CMake keeps the last value); the module generator
+    # refuses such flags in a module (module_generator.download_flag_problems).
+    cmake_args+=("-DLLAMA_CURL=OFF" "-DFETCHCONTENT_FULLY_DISCONNECTED=ON" "-DLLAMA_SUBPROCESS=OFF" "-DLLAMA_BUILD_TESTS=OFF")
+    cmake_args+=("-DLLAMA_BUILD_EXAMPLES=OFF" "-DLLAMA_BUILD_APP=OFF" "-DLLAMA_USE_PREBUILT_UI=OFF" "-DLLAMA_BUILD_UI=OFF"
+                 "-DLLAMA_LLGUIDANCE=OFF" "-DGGML_CPU_KLEIDIAI=OFF" "-DGGML_OPENMP_FETCH=OFF")
 
     log_info "Configuring target build..."
     if ! cmake "$LLAMA_BASE" "${cmake_args[@]}"; then
