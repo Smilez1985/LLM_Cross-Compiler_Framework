@@ -235,7 +235,10 @@ class TestTheOldCopiesGoOnlyWithTheYes:
         assert plan.items[0].speaking_name == f"{REPO} (old download cache)" and other.is_dir()
         assert plan.mode_offered == ("trash", "permanent")
 
-    @pytest.mark.parametrize("stray", ["not-a-commit/kept.gguf", f"{OLD_COMMIT}/{'x' * 200}/{'y' * 120}.gguf"])
+    @pytest.mark.parametrize("stray", [
+        "not-a-commit/kept.gguf",
+        pytest.param(f"{OLD_COMMIT}/kept\\x.gguf", marks=pytest.mark.skipif(
+            os.name == "nt", reason="a backslash cannot be part of a file name on Windows"))])
     def test_a_folder_with_a_file_the_take_over_skips_is_not_offered(self, area, stray):
         # Regression (review of chain hf): old_cache leaves out what it cannot place in the new folder (a revision
         # folder that is no commit, a name the downloader would refuse); the folder that holds it was offered for
