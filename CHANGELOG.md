@@ -17,8 +17,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `old_copies_plan`, `delete_old_copies`): the full list of the files still to take over, the yes question with "No"
   as the default, the copy (each file checked, under the one disk rule; Ctrl+C stops between two chunks), each file
   that stays with its reason, then the full list of old copies that can go, trash or for good, and the deletion only
-  after your yes ("No" is the default), audited first. Without a terminal nothing is copied or deleted. The GUI parity
-  test names its mouse path (`orchestrator/gui/menus/existing.py`: `btn_hf_take_over` in the browser). Tests:
+  after your yes ("No" is the default), audited first. Without a terminal nothing is copied or deleted. A copy that
+  fails (a disk that cannot hold the copies, a file in use by another `llm-cli` or the GUI) ends with one plain line,
+  "Nothing was taken over: ..." with the reason, as the window shows it, never with a traceback. The GUI parity test
+  names its mouse path (`orchestrator/gui/menus/existing.py`: `btn_hf_take_over` in the browser). Tests:
   `tests/test_hf_takeover.py` `TestTheCommandLinesTakeOver`.
 - **A trusted board's address and host key are editable by you** (DECISIONS round 10 Q5): `llm-cli deploy devices
   edit DEVICE [--host] [--port] [--key "KEY LINE" | --read-key]` and **Edit address or key...** in **Boards > Boards

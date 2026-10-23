@@ -3996,7 +3996,6 @@ def models_take_over(ctx: FrameworkContext):
         console.print("Nothing was copied.")
         return
     import threading
-    from orchestrator.Core.disk_plan import InsufficientSpace
     from orchestrator.Core.hf_hub import person_text
     stop = threading.Event()
 
@@ -4007,7 +4006,8 @@ def models_take_over(ctx: FrameworkContext):
     try:
         with _ctrl_c_cancels(stop):   # Ctrl+C stops between two chunks; the file being copied is not kept
             result = manager.take_over(new, stop=stop, progress=progress)
-    except InsufficientSpace as e:
+    except Exception as e:  # noqa: BLE001 - as the window: a disk that cannot hold the copies (in your language), a
+        # file in use by another llm-cli or the GUI, ...: one plain line, never a traceback (a second Ctrl+C ends it)
         console.print(f"[red]{escape(ui_text('hf.takeover.failed', lang, reason=person_text(e, lang)))}[/red]")
         sys.exit(1)
     console.print(escape(ui_text("hf.takeover.result", lang, copied=len(result.copied), total=len(new),

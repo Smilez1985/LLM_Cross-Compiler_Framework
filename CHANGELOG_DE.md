@@ -18,9 +18,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Ja-Frage mit „Nein“ als Vorgabe, die Kopie (jede Datei geprüft, unter der einen Speicherplatz-Regel; Strg+C hält
   zwischen zwei Blöcken an), jede Datei, die bleibt, mit ihrem Grund, danach die vollständige Liste der alten Kopien,
   die gehen können, Papierkorb oder endgültig, und die Löschung erst nach deinem Ja („Nein“ ist die Vorgabe), vorher
-  protokolliert. Ohne Terminal wird nichts kopiert und nichts gelöscht. Der GUI-Paritätstest nennt seinen Weg mit der
-  Maus (`orchestrator/gui/menus/existing.py`: `btn_hf_take_over` im Browser). Tests: `tests/test_hf_takeover.py`
-  `TestTheCommandLinesTakeOver`.
+  protokolliert. Ohne Terminal wird nichts kopiert und nichts gelöscht. Scheitert die Kopie (eine Platte, die die
+  Kopien nicht fasst, eine Datei, die ein anderes `llm-cli` oder die GUI gerade nutzt), endet der Befehl mit einer
+  klaren Zeile „Es wurde nichts übernommen: ...“ mit dem Grund, wie das Fenster sie zeigt, nie mit einem Traceback.
+  Der GUI-Paritätstest nennt seinen Weg mit der Maus (`orchestrator/gui/menus/existing.py`: `btn_hf_take_over` im
+  Browser). Tests: `tests/test_hf_takeover.py` `TestTheCommandLinesTakeOver`.
 - **Adresse und Host-Schlüssel eines vertrauten Boards kannst du ändern** (DECISIONS Runde 10 Q5): `llm-cli deploy
   devices edit GERÄT [--host] [--port] [--key "SCHLÜSSELZEILE" | --read-key]` und **Adresse oder Schlüssel ändern...**
   in **Boards > Boards und Geräte...** ändern Hostname oder IP-Adresse, SSH-Port oder Host-Schlüssel des Boards in der
