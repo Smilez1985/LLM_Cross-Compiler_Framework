@@ -148,6 +148,18 @@ validate_inputs() {
     log_success "Input validation completed"
 }
 
+# The framework's disk rule before the package is made (scripts/board_package.py room, the numbers and words of
+# orchestrator/Core/disk_plan.py): the disk of the package folder must hold FILE... and still keep 2 GiB or 2 % of it
+# free. The package copies the model next to the build's own; so the model is checked before anything slow (the
+# functional test, the cross build) and every file again just before the copy. The framework's reservation ledger is
+# in the per-user folder of the computer, which a build container does not see: the check counts the disk's free space.
+package_room() {  # FILE...: stops the stage with the rule's plain reason when the package does not fit
+    local problem
+    problem="$(python3 "$PACKAGE_SCRIPTS/board_package.py" room "$OUTPUT_DIR/packages" \
+        --what "the package for the board" "$@")" \
+        || die "${problem:-The free space for the package could not be checked.} No package was made."
+}
+
 # A short run of the quantized model on this build machine: the convert stage's functional test (scripts/model_check.py
 # test, the one implementation), with the image's own llama-completion (llama-cli when the image has only that): 8
 # tokens, at most FUNCTIONAL_TEST_SECONDS, offline, the options this tool has. A run that ends with an error or
@@ -410,6 +422,13 @@ create_deployment_package() {
 
     log_info "Schritt 4: Erstelle Deployment-Paket: $package_name"
 
+    local copies=("${TARGET_CONFIG[INPUT_GGUF]}" "${TARGET_CONFIG[LLAMA_CLI_BINARY]}"
+                  "${TARGET_CONFIG[LLAMA_SERVER_BINARY]}" "${CMAKE_TOOLCHAIN_FILE}")
+    if [[ -f "${HARDWARE_PROFILE:-}" ]]; then
+        copies+=("$HARDWARE_PROFILE")
+    fi
+    package_room "${copies[@]}"
+
     rm -rf "$package_dir"
     mkdir -p "$package_dir"
 
@@ -473,6 +492,7 @@ package_for_board() {
         done
     fi
     validate_inputs "${TARGET_CONFIG[QUANTIZED_GGUF]:-}" "${TARGET_CONFIG[QUANT_METHOD]:-}" "$MODEL_NAME"
+    package_room "${TARGET_CONFIG[INPUT_GGUF]}"
     functional_test "${TARGET_CONFIG[QUANTIZED_GGUF]}"
     cross_compile_target
     check_board_binaries
