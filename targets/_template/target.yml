@@ -60,7 +60,8 @@ modules:
       description: "Toolchain sources of the image and the SDK setup commands (their exports reach the later stages)"
       outputs: ["sdk_environment.sh"]
     config:
-      description: "Request checks and the build plan; with a hardware profile also the CMake toolchain"
+      description: "Request checks and the build plan; with a hardware profile also the CMake toolchain, checked
+        (compiler test with CC and CXX of the image, CMake reads the toolchain file, the plan is a valid shell script)"
       inputs: ["the request (environment)", "target_hardware_config.txt (optional)"]
       outputs: ["build_config.sh", "cross_compile_toolchain.cmake (hardware profile only)"]
     convert:
@@ -69,9 +70,11 @@ modules:
       outputs: ["<model>-<type>.gguf", "tmp-<model>-F16.gguf (or the --output file) and quantize_jobs.sh",
                 "imatrix.dat"]
     target:
-      description: "Quantization, the packaging commands of the module and build_info.json"
+      description: "Quantization, the packaging commands of the module and build_info.json; with a hardware profile
+        or on request (--package, target_module.sh by hand) the package for the board: llama-cli, llama-server, model
+        card, test_model.sh, deploy.sh, MANIFEST.json and SHA256SUMS, checked before it is kept"
       inputs: ["quantize_jobs.sh", "build_config.sh"]
-      outputs: ["<model>-<type>.gguf", "build_info.json", "packages/ (hardware profile only)"]
+      outputs: ["<model>-<type>.gguf", "build_info.json", "packages/ (hardware profile or --package)"]
 
 # Hardware optimization profiles: descriptive, nothing reads them. The board's runtime takes llama.cpp's options from
 # the build recipe (orchestrator/runtime/build/recipe.py).

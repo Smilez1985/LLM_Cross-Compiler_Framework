@@ -378,7 +378,7 @@ EOF
         elif [ -n "$want" ]; then
             got="$(elf_machine "$program")"
             [ -n "$got" ] && [ "$got" = "$want" ] \
-                || die "The compiler test failed: the plan's compilers do not build programs for the $arch system of the plan (ELF machine ${got:-none}, expected $want)."
+                || die "The compiler test failed: the plan's compilers do not build programs for the $arch system of the plan (ELF machine ${got:-none}, expected $want). The image needs a cross compiler for it (a module names it with CC and CXX in its Dockerfile)."
         else
             log_warn "The compiler test built and linked the programs; for a $arch system it cannot tell their processor."
         fi

@@ -260,6 +260,349 @@ def test_the_capabilities_ask_for_the_importance_matrix_of_these_methods():
     assert caps.check_request("gguf", "rk3588", "Q4_K") == [], "the short name of Q4_K_M"
 
 
+# --- the package for the board (target_module.sh of version 1.x: "Professional Packaging", "Helper Scripts",
+# "Complete Manifest", "Automated Testing") ----------------------------------------------------------------------
+
+import hashlib  # noqa: E402
+import json  # noqa: E402
+import sys  # noqa: E402
+
+from test_build_stages import _script, ran, resumed  # noqa: E402
+
+PAD = {"STUB_PAD": 1 << 20}  # the package's input check of 1.x wants a model of at least 1 MiB
+OUT_DIR = "<root>/build-cache/output"
+COMPLETION_STUB = """\
+import os, sys
+with open(os.environ["STUB_LOG"], 'a') as f:
+    f.write('completion ' + ' '.join(sys.argv[1:]) + '\\n')
+sys.exit(int(os.environ.get('STUB_COMPLETION_EXIT', '0')))
+"""
+
+
+def f16_input(image):
+    f16 = image.root / "granite.fp16.gguf"
+    f16.write_text("gguf f16")
+    return f16
+
+
+def package_of(image, name="granite_q4_k_m_latest"):
+    link = image.output / "packages" / name
+    assert link.is_symlink(), sorted(p.name for p in (image.output / "packages").iterdir())
+    return link.resolve()
+
+
+def manifest_of(package):
+    return json.loads((package / "MANIFEST.json").read_text())
+
+
+def target_by_hand(image, *args, **values):
+    """target_module.sh --input FILE.gguf ... of version 1.x, with the stub toolchain's padded model."""
+    return by_hand(image, "target", "--input", f16_input(image), *args, MODEL_SOURCE=None, MODEL_NAME=None,
+                   QUANTIZATION=None, **PAD, **values)
+
+
+@needs_bash
+def test_target_module_by_hand_packages_without_a_hardware_profile_with_the_plain_defaults(image):
+    result = target_by_hand(image, "--model-name", "granite")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    package = package_of(image)
+    assert sorted(p.name for p in package.iterdir()) == [
+        "MANIFEST.json", "README.md", "SHA256SUMS", "cmake_toolchain.cmake", "deploy.sh", "granite-Q4_K_M.gguf",
+        "llama-cli", "llama-server", "test_model.sh"], "no hardware profile: none in the package"
+    manifest = manifest_of(package)
+    hardware = manifest["hardware"]
+    assert hardware["source"] == "defaults" and hardware["arch"] == "aarch64"
+    assert hardware["profile"] == "none: the plain defaults of the Rockchip target (no hardware profile was given)"
+    assert "-march=armv8-a" in hardware["cflags"] and "-mcpu" not in hardware["cflags"]
+    assert "-DGGML_NEON=ON" in hardware["cmake_flags"]
+    assert "Hardware profile:** none: the plain defaults of the Rockchip target" in (package / "README.md").read_text()
+    # The plain defaults were planned by the config stage's functions in the stage folder, with the compiler test
+    toolchain = (image.root / STAGES / "package_toolchain.cmake").read_text()
+    assert f"SET(CMAKE_C_COMPILER   {image.toolchain}/aarch64-linux-gnu-gcc)" in toolchain
+    assert (package / "cmake_toolchain.cmake").read_text() == toolchain
+    assert "Compiler test passed: C and C++ programs for aarch64" in result.stdout
+
+
+@needs_bash
+def test_the_manifest_holds_every_build_detail_and_the_checksums_cover_every_file(image):
+    profile = image.root / "target_hardware_config.txt"
+    profile.write_text(RK3566)
+    result = target_by_hand(image, "--model-name", "granite", "--hardware-config", profile.name)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    package = package_of(image)
+    manifest = manifest_of(package)
+    assert {k: manifest[k] for k in ("name", "model", "quantization", "format", "target", "board")} == {
+        "name": package.name, "model": "granite", "quantization": "Q4_K_M", "format": "gguf", "target": "Rockchip",
+        "board": "rk3588"}
+    assert manifest["build"]["llama_cpp"]["tag"] == "b11429" and manifest["build"]["source_model"] == "granite.fp16.gguf"
+    assert manifest["build"]["input_format"] == "gguf" and isinstance(manifest["build"]["jobs"], int)
+    assert manifest["hardware"]["source"] == "profile" and manifest["hardware"]["cpu"] == "Cortex-A55"
+    assert "-mcpu=cortex-a55" in manifest["hardware"]["cflags"]
+    assert manifest["tests"]["functional"] == "skipped: the image has no llama-completion or llama-cli for this machine"
+    assert manifest["binaries"]["llama-cli"]["elf_machine"] == 183
+    model = package / "granite-Q4_K_M.gguf"
+    assert manifest["model_file"] == {"name": model.name, "size_bytes": model.stat().st_size,
+                                      "sha256": hashlib.sha256(model.read_bytes()).hexdigest()}
+    files = {f["path"] for f in manifest["files"]}
+    assert files == {p.name for p in package.iterdir()} - {"MANIFEST.json", "SHA256SUMS"}
+    assert "target_hardware_config.txt" in files
+    assert str(image.root) not in (package / "MANIFEST.json").read_text(), "no path of the build machine"
+    sums = subprocess.run(["sha256sum", "-c", "SHA256SUMS"], cwd=package, capture_output=True, text=True)
+    assert sums.returncode == 0, sums.stdout + sums.stderr
+    assert "MANIFEST.json: OK" in sums.stdout
+
+
+@needs_bash
+@pytest.mark.parametrize("exit_code, outcome", [(0, "passed (llama-completion, 8 tokens on the build machine)"),
+                                                (124, "timed out after 120 s (llama-completion on the build "
+                                                      "machine); not a failure")])
+def test_the_functional_test_runs_the_model_on_the_build_machine(image, exit_code, outcome):
+    _script(image.llama / "build" / "bin" / "llama-completion", COMPLETION_STUB)
+
+    result = target_by_hand(image, "--model-name", "granite", STUB_COMPLETION_EXIT=exit_code)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    run = [c for c in image.calls() if c.startswith("completion ")]
+    assert run == [f"completion -m {OUT_DIR}/granite-Q4_K_M.gguf -p Hello -n 8 -no-cnv --no-warmup"]
+    assert manifest_of(package_of(image))["tests"]["functional"] == outcome
+
+
+@needs_bash
+def test_a_model_the_functional_test_cannot_run_gets_no_package(image):
+    _script(image.llama / "build" / "bin" / "llama-completion", COMPLETION_STUB)
+
+    result = target_by_hand(image, "--model-name", "granite", STUB_COMPLETION_EXIT=3)
+
+    assert result.returncode == 1
+    assert "ERROR: The functional test failed: llama-completion could not run the quantized model (exit 3)" \
+        in result.stderr
+    assert not (image.output / "packages").exists()
+
+
+@needs_bash
+def test_programs_for_another_processor_get_no_package(image):
+    result = target_by_hand(image, "--model-name", "granite", STUB_MAKE_MACHINE="62")
+
+    assert result.returncode == 1
+    assert ("ERROR: llama-cli is no program for the aarch64 board (ELF machine 62, expected 183); no package was made."
+            in result.stderr)
+    assert not any((image.output / "packages").glob("granite_*_aarch64_*"))
+
+
+@needs_bash
+def test_package_is_an_input_of_the_target_stage_only(image):
+    """The convert stage first, then the target stage with --package: the stages before target resume (the request
+    is the same), and only the target stage's marker names the package."""
+    assert image.run("--to", "convert").returncode == 0
+
+    packaged = image.run("--to", "target", "--package", **PAD)
+    assert packaged.returncode == 0, packaged.stdout + packaged.stderr
+    assert stage_lines(packaged) == resumed("source", "config", "convert") + ran("target", start=4)
+    assert (image.output / "packages" / "model_q4_k_m_latest").is_symlink()
+    markers = image.root / "build-cache" / "work" / "stages" / "build"
+    inputs = {stage: next(line for line in (markers / f"{stage}.done").read_text().splitlines()
+                          if line.startswith("inputs ")) for stage in ("convert", "target")}
+    assert inputs["target"] == inputs["convert"] + "+package", "a target stage without --package does not resume it"
+
+
+@needs_bash
+def test_package_is_said_and_skipped_for_an_npu_format(image):
+    result = image.run("--package", TARGET_FORMAT="rkllm", QUANTIZATION="w8a8")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "No package for the board: a package holds a GGUF model with llama.cpp's programs" in result.stdout
+    assert not (image.output / "packages").exists()
+
+
+def _board_package():
+    """scripts/board_package.py as a module, without writing its bytecode into the target folder (a __pycache__
+    folder there would go into every image and break the tests' copy of the image)."""
+    import importlib.util
+    from conftest import REPO_ROOT
+    spec = importlib.util.spec_from_file_location(
+        "board_package", REPO_ROOT / "targets" / "Rockchip" / "scripts" / "board_package.py")
+    module = importlib.util.module_from_spec(spec)
+    before, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = before
+    return module
+
+
+def test_the_package_check_finds_a_changed_a_missing_and_an_unlisted_file(tmp_path):
+    board_package = _board_package()
+    (tmp_path / "model.gguf").write_bytes(b"GGUF model")
+    (tmp_path / "llama-cli").write_bytes(b"\x7fELF")
+    board_package.write(tmp_path, ["model=m", "hardware.arch=aarch64"], ["build.jobs=4"], "model.gguf",
+                        ["llama-cli=183"])
+    assert board_package.check(tmp_path) == []
+    manifest = json.loads((tmp_path / "MANIFEST.json").read_text())
+    assert manifest["hardware"] == {"arch": "aarch64"} and manifest["build"] == {"jobs": 4}
+
+    (tmp_path / "model.gguf").write_bytes(b"GGUF other")
+    (tmp_path / "extra.txt").write_text("x")
+    (tmp_path / "llama-cli").unlink()
+    problems = board_package.check(tmp_path)
+    assert "model.gguf does not have the checksum SHA256SUMS lists" in problems
+    assert "extra.txt is not in SHA256SUMS" in problems
+    assert "llama-cli is listed in SHA256SUMS but not in the package" in problems
+    assert "the files of MANIFEST.json are not the files of the package" in problems
+
+
+# --- the package's helper scripts -----------------------------------------------------------------------------
+
+def fake_package(tmp_path, arch):
+    """A package as target_module.sh makes it, with a llama-cli that logs its arguments."""
+    from conftest import REPO_ROOT
+    scripts = REPO_ROOT / "targets" / "Rockchip" / "scripts"
+    package = tmp_path / "granite_q4_k_m_aarch64_20261023_010203"
+    package.mkdir()
+    (package / "granite-Q4_K_M.gguf").write_text("GGUF")
+    _script(package / "llama-cli", f"import sys\nopen({str(tmp_path / 'cli.log')!r}, 'w').write(' '.join(sys.argv[1:]))\n")
+    _script(package / "llama-server", "pass\n")
+    for name in ("test_model.sh", "deploy.sh"):
+        shutil.copy2(scripts / f"package_{name}", package / name)
+    _board_package().write(package, [f"hardware.arch={arch}"], [], "granite-Q4_K_M.gguf", [])
+    return package
+
+
+def bash_run(*args, env=None, cwd=None):
+    return subprocess.run([posix_shell("bash"), *map(str, args)], capture_output=True, text=True, timeout=60,
+                          stdin=subprocess.DEVNULL, env=env, cwd=cwd)
+
+
+@needs_bash
+def test_test_model_sh_checks_the_package_and_asks_llama_cli_for_one_answer(tmp_path):
+    package = fake_package(tmp_path, platform.machine())
+
+    result = bash_run(package / "test_model.sh")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = (tmp_path / "cli.log").read_text()
+    assert args.startswith("-m granite-Q4_K_M.gguf -p Hello, world! -n 10 -st --no-warmup -t ")
+    assert bash_run(package / "test_model.sh", "Hi", "x").returncode == 2
+
+    (package / "granite-Q4_K_M.gguf").write_text("GGUF changed")
+    damaged = bash_run(package / "test_model.sh")
+    assert damaged.returncode == 1 and "The package is damaged" in damaged.stderr
+
+
+@needs_bash
+def test_test_model_sh_on_another_machine_says_where_to_run_it(tmp_path):
+    other = "riscv64" if platform.machine() != "riscv64" else "aarch64"
+    result = bash_run(fake_package(tmp_path, other) / "test_model.sh")
+    assert result.returncode == 1
+    assert f"This package is for a {other} system; this machine is" in result.stderr
+    assert not (tmp_path / "cli.log").exists()
+
+
+SSH_STUB = """\
+import os, sys
+with open(os.environ["SSH_LOG"], 'a') as f:
+    f.write(os.path.basename(sys.argv[0]) + ' ' + ' '.join(sys.argv[1:]) + '\\n')
+"""
+
+
+def deploy(tmp_path, package, *args):
+    bin_dir = tmp_path / "ssh-bin"
+    for name in ("ssh", "scp"):
+        _script(bin_dir / name, SSH_STUB)
+    env = {"PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin", "HOME": str(tmp_path),
+           "SSH_LOG": str(tmp_path / "ssh.log")}
+    result = bash_run(package / "deploy.sh", *args, env=env)
+    log = tmp_path / "ssh.log"
+    calls = [c.replace(str(package), "<pkg>") for c in log.read_text().splitlines()] if log.exists() else []
+    return result, calls
+
+
+@needs_bash
+def test_deploy_sh_copies_over_ssh_and_scp_with_strict_host_key_checking(tmp_path):
+    package = fake_package(tmp_path, "aarch64")
+    dest = f"llm/{package.name}"
+    options = "-o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4"
+
+    result, calls = deploy(tmp_path, package, "radxa@zero3w.local")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    files = " ".join(f"<pkg>/{p.name}" for p in sorted(package.iterdir()))
+    assert calls[0] == f"ssh {options} -p 22 -- radxa@zero3w.local mkdir -p -- '{dest}'"
+    assert calls[1] == f"scp {options} -P 22 -p -- {files} radxa@zero3w.local:{dest}/"
+    assert calls[2].startswith(f"ssh {options} -p 22 -- radxa@zero3w.local cd -- '{dest}' && ")
+    assert "sha256sum -c --quiet SHA256SUMS" in calls[2]
+    assert all("StrictHostKeyChecking=yes" in c for c in calls) and len(calls) == 3
+
+
+@needs_bash
+def test_deploy_sh_takes_a_port_a_key_an_ipv6_address_and_a_destination(tmp_path):
+    package = fake_package(tmp_path, "aarch64")
+    key = tmp_path / "board_key"
+    key.write_text("key")
+
+    result, calls = deploy(tmp_path, package, "pi@[fd00::5]", "/opt/models/granite", "--port", "2222",
+                           "--identity", key)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"-i {key} -o IdentitiesOnly=yes -p 2222 -- pi@fd00::5 mkdir -p -- '/opt/models/granite'" in calls[0]
+    assert calls[1].endswith(" pi@[fd00::5]:/opt/models/granite/") and " -P 2222 " in calls[1]
+
+
+@needs_bash
+@pytest.mark.parametrize("args, message", [
+    (("ro ot@board",), "'ro ot' is no user name of a board"),
+    (("-oProxyCommand=evil@board",), "Unknown option '-oProxyCommand=evil@board'"),
+    (("pi@board", "../etc"), "The destination '../etc' may hold only"),
+    (("pi@board", "a b"), "The destination 'a b' may hold only"),
+    (("pi@board;reboot",), "'board;reboot' is no host name or address"),
+    (("pi@board", "--port", "99999"), "'99999' is no port."),
+])
+def test_deploy_sh_refuses_what_could_reach_a_shell_or_an_option(tmp_path, args, message):
+    package = fake_package(tmp_path, "aarch64")
+    result, calls = deploy(tmp_path, package, *args)
+    assert result.returncode == 1 and f"deploy.sh: {message}" in result.stderr
+    assert calls == [], "nothing was started"
+
+
+@needs_bash
+def test_deploy_sh_on_the_board_itself_copies_and_checks_as_in_version_1x(tmp_path):
+    package = fake_package(tmp_path, "aarch64")
+    dest = tmp_path / "opt-llm"
+
+    result, calls = deploy(tmp_path, package, dest)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls == [] and sorted(p.name for p in dest.iterdir()) == sorted(p.name for p in package.iterdir())
+
+
+# --- the same packaging in the template, and the generator copies the helpers -------------------------------------
+
+def _block(path, start, end):
+    text = path.read_text(encoding="utf-8")
+    first = text.index(start)
+    return text[first:text.index(end, first)]
+
+
+def test_the_template_packages_with_the_same_functions_and_helpers_as_the_rockchip_target():
+    from conftest import REPO_ROOT
+    targets = REPO_ROOT / "targets"
+    blocks = [_block(targets / t / "modules" / "target_module.sh", "# PACKAGE FOR THE BOARD (version 1.x",
+                     "# END OF PACKAGE") for t in ("Rockchip", "_template")]
+    assert blocks[0] == blocks[1]
+    for name in ("board_package.py", "package_test_model.sh", "package_deploy.sh"):
+        assert (targets / "_template" / "scripts" / name).read_bytes() == \
+            (targets / "Rockchip" / "scripts" / name).read_bytes(), name
+
+
+def test_a_generated_module_gets_the_package_helpers_executable(tmp_path):
+    from test_target_template import generate
+    target = generate(tmp_path)
+    for name in ("package_test_model.sh", "package_deploy.sh"):
+        script = target / "scripts" / name
+        assert script.is_file() and (os.name == "nt" or os.access(script, os.X_OK)), name
+    assert (target / "scripts" / "board_package.py").is_file()
+
+
 # --- the same validation in the template (targets/_template, the module generator's source) ----------------------
 
 def _validation(path):
