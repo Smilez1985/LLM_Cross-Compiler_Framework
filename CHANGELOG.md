@@ -1499,9 +1499,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `device runtime deploy|verify|prune --on-device`, the Boards window) open one with the person's one-time password
   when one is typed, and `scan --device` hands its login to a session. The CLI and the Boards window say when the
   board's network dropped and when it answers again (EN/DE), each wait anew (also after an upload that started
-  again from the beginning), an AI's job shows it by the board's label. So does the Builder tab's **Remote Scan via
-  SSH...** in its log, with a **Cancel scan** button while the scan runs, as the Boards window has one: it ends a wait
-  for the board at once (not after 300 s) and nothing is stored (`scan_steps.scan_device` takes the caller's
+  again from the beginning), an AI's job shows it by the board's label (`probe_remote_device`'s job too, which showed
+  no wait at all: the tool now passes the session's events as the deploy and benchmark tools do). So does the Builder
+  tab's **Remote Scan via SSH...** in its log, with a **Cancel scan** button while the scan runs, as the Boards window
+  has one: it ends a wait for the board at once (not after 300 s) and nothing is stored (`scan_steps.scan_device` takes the caller's
   `CancelToken` and `on_event`). The CLI's wait line of `device runtime deploy|verify|prune --on-device` and of
   `scan --device` (which waited silently under its spinner) names the key that ends it, " (Ctrl+C)", as
   `deploy run`'s does; a Ctrl+C during the runtime deploy's wait now ends the
