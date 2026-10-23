@@ -3244,7 +3244,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   auch in den Schreibweisen als IPv4-mapped, NAT64 und 6to4, und auch einen Namen mit einer solchen Adresse unter
   anderen). Online wird ein eigener Server, der nach seiner Adresse als lokal gilt (seine Prompts gehen ohne
   Datenschutzfilter), nur unter seinen geprüften lokalen Adressen erreicht, damit eine geänderte DNS-Antwort sie nicht
-  an einen öffentlichen Host schicken kann.
+  an einen öffentlichen Host schicken kann; ein Durchgang ohne Datenschutzfilter bekommt immer diesen festgelegten
+  Client, auch wenn sich die Antwort für den Namen zwischen der Prüfung des Durchgangs und seiner Verbindung geändert
+  hat. Die festgelegten Clients lassen nur den Proxy weg: Eine eigene CA in `SSL_CERT_FILE` oder `SSL_CERT_DIR` bleibt
+  vertrauenswürdig, wie beim eigenen Client des SDK. Ein online geöffneter Qdrant-Server wird nach der Regel neu
+  geöffnet, sobald der Offline-Modus eingeschaltet wird (ein Qdrant in der Cloud wird dann abgelehnt).
 - **`install.sh` installiert Docker nur mit Prüfsumme** (DECISIONS Runde 23, Punkt 3): Fehlte Docker, lud der Installer
   `get.docker.com` herunter und führte es ungeprüft als root aus. Jetzt kommt Docker nur aus Dockers offiziellem
   apt-Repository unter Debian, Ubuntu und Raspberry Pi OS (32 Bit bekommt die armhf-Pakete von Debian, wie Dockers

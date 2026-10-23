@@ -326,10 +326,15 @@ class LLMClient:
             credential = self.resolver.resolve(target.preset, target.auth, target.base_url, runtime_key=endpoint[1])
         else:
             credential = self.credential(target)  # raises before any request: no key, admin key, bad workspace ID
-        return self.adapter_for(target.preset, target.base_url, credential)
+        # the location resolve() judged: the privacy filter of this call (_call) and its client come from one check
+        return self.adapter_for(target.preset, target.base_url, credential, local=target.local)
 
-    def adapter_for(self, preset: ProviderPreset, base_url: Optional[str], credential: ResolvedCredential):
-        """The adapter for an explicit credential (also one that is not stored yet: the sign-in check)."""
+    def adapter_for(self, preset: ProviderPreset, base_url: Optional[str], credential: ResolvedCredential, *,
+                    local: Optional[bool] = None):
+        """The adapter for an explicit credential (also one that is not stored yet: the sign-in check). `local`: where
+        the server stands as the caller judged it for the privacy filter (adapter() passes the target's), so a call
+        without the filter always gets the pinned client of a server labelled local by its address, also when the
+        name's answer changed since (the pinned client judges it again when it connects); None judges it here."""
         options = dict(self.adapter_options.get(preset.adapter, {}))
         if preset.adapter == "anthropic":
             options.update(auth="ant_profile" if credential.kind == "anthropic_profile" else "api_key",
@@ -338,7 +343,7 @@ class LLMClient:
             options.update(prompt_cache_key=self.install_id())
         offline = offline_mode(self.config)   # an adapter made online is never reused offline (its client differs)
         target = Target(preset=preset, model="", base_url=base_url, auth=credential.method,
-                        local=preset.is_local(base_url))
+                        local=preset.is_local(base_url) if local is None else bool(local))
         # nor one made while the address counted as local, once it does not (its client differs too)
         key = (preset.id, base_url, credential.method, credential.fingerprint, repr(sorted(options.items(), key=str)),
                offline, target.local)
@@ -366,8 +371,10 @@ class LLMClient:
             if self._offline_http is None:
                 self._offline_http = offline_http_client(self.config)
             return self._offline_http
+        # labelled local by its address (location "auto": ProviderPreset.located_by_address), as `target` says; not
+        # judged a second time here, so the client always fits the privacy filter the caller decided with target.local
         if target.local and target.base_url and not is_loopback_url(target.base_url) \
-                and target.preset.located_by_address(target.base_url):
+                and getattr(target.preset, "location", "") == "auto":
             if self._located_http is None:
                 self._located_http = offline_http_client(None, offline=False)
             return self._located_http

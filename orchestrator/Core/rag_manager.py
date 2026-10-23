@@ -347,6 +347,7 @@ class RAGManager:
         self.client = None
         self._connected = False
         self._server_mode = False
+        self._server_offline: Optional[bool] = None  # offline mode when the Qdrant server client was opened
         self._file_lock = None  # the local storage's cross-process lock while it is open (edge_store.storage_lock)
         self._convert_now = False  # the person asked to try the conversion of the old storage again
         self._conversion_checked = False  # the conversion was looked at (and tried when due) in this process
@@ -462,6 +463,11 @@ class RAGManager:
                 raise KnowledgeBaseError(f"Use https for the Qdrant server at {host}, so the API key is not "
                                          "sent in clear text.")
         return key or None
+
+    def _offline_now(self) -> bool:
+        """Offline mode (the setting offline_mode) as a Qdrant server client is opened under it."""
+        from orchestrator.utils.locality import offline_mode
+        return offline_mode(self.config)
 
     def _offline_server_options(self, url: str) -> Dict[str, Any]:
         """In offline mode (round 24 L-NET: every reach-out on the rule) the Qdrant server must be on this computer or in
@@ -588,7 +594,12 @@ class RAGManager:
     def _ensure_store(self) -> "KnowledgeStore":
         with self._lock:
             if self._store is not None:
-                return self._store
+                if not getattr(self, "_server_mode", False) \
+                        or getattr(self, "_server_offline", None) == self._offline_now():
+                    return self._store
+                # offline mode was switched since the Qdrant server was opened: the client is not used again, the
+                # server is judged by the locality rule anew (round 24 L-NET: every reach-out on the rule)
+                self._close_client()
             try:
                 client, server, store_cls = self._open_client()
             except KnowledgeBaseError:
@@ -619,6 +630,7 @@ class RAGManager:
                     raise
                 raise KnowledgeBaseError(f"Could not prepare the knowledge base: {redact_secrets(str(e))}") from e
             self.client, self._store, self._connected, self._server_mode = client, store, True, server
+            self._server_offline = self._offline_now() if server else None   # how the Qdrant server was opened
             self.storage_format = store.store_format
             self.last_error = ""
             kind = "Qdrant Edge" if store.store_format == "qdrant-edge" else "old format: " + self.storage_reason

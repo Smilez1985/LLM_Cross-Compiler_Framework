@@ -2884,7 +2884,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Alibaba, Scaleway, Tencent, from their documentation; also IPv4-mapped, NAT64 and 6to4 spellings, and a name with
   one such address among others). Online, a custom server labelled local by its address (its prompts go without the
   privacy filter) is reached only at its checked local addresses, so a DNS answer that changes cannot send them to a
-  public host.
+  public host; a turn without the privacy filter always gets that pinned client, also when the name's answer changed
+  between the turn's check and its connection. The pinned clients leave out only the proxy: an own CA named in
+  `SSL_CERT_FILE` or `SSL_CERT_DIR` stays trusted, as with the SDK's own client. A Qdrant server opened online is
+  opened again under the rule once offline mode is switched on (a cloud Qdrant is refused then).
 - **`install.sh` installs Docker only with a checksum** (DECISIONS round 23, item 3): when Docker was missing, the
   installer downloaded `get.docker.com` and ran it as root without any check. Now Docker comes only from Docker's
   official apt repository on Debian, Ubuntu and Raspberry Pi OS (32-bit gets Debian's armhf packages, as Docker's guide
