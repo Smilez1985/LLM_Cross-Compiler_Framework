@@ -78,7 +78,7 @@ def test_address_kinds(address, kind):
     ("box.lan", ["10.0.0.5", "fd00::5"], True, "own_network"),
     ("server.home.arpa", ["fe80::2"], True, "own_network"),
     ("gpu.internal", ["172.20.0.4"], True, "own_network"),
-    ("box.local", ["203.0.113.9"], False, "public"),                    # a home suffix never makes a public address local
+    ("box.local", ["203.0.113.9"], False, "public"),                    # a suffix never makes a public address local
     ("nas", ["192.168.1.20", "203.0.113.9"], False, "mixed"),           # local and public: not local
     ("myhome.duckdns.org", ["198.51.100.7"], False, "public"),          # (c) a reverse proxy's public name
     ("ollama.example.com", ["10.0.0.9"], True, "own_network"),          # any name counts by its addresses

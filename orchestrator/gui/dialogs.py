@@ -512,9 +512,29 @@ class AIConfigurationDialog(QDialog):
         threading.Thread(target=work, name="ai-model-list", daemon=True).start()
 
     def _on_relay(self, token: object, result) -> None:
-        """Every worker result passes the relay: only this dialog's latest model list is taken."""
+        """Every worker result passes the relay: only this dialog's latest model list is taken, and the address check
+        of offline mode before a save."""
+        if token is getattr(self, "_address_check", None):
+            self._address_check = None
+            self._save_config(checked=True)
+            return
         if token is self._model_request and isinstance(result, tuple) and len(result) == 2:
             self._on_models_listed(token, *result)
+
+    def _check_address_first(self, address: str) -> None:
+        """Offline mode judges the server address by every address its name resolves to (utils/locality.py): the
+        lookup runs in a worker thread, never on the GUI thread; the save goes on when it is in the run's cache."""
+        from orchestrator.utils.locality import check_url
+        token = self._address_check = object()
+        config, relay = self._config(), worker_relay()
+
+        def work():
+            try:
+                check_url(address, config)
+            finally:
+                relay.done.emit(token, ("address", address))
+
+        threading.Thread(target=work, name="ai-address-check", daemon=True).start()
 
     def _on_models_listed(self, request: object, ids, message: str):
         if request is not self._model_request:
@@ -571,11 +591,18 @@ class AIConfigurationDialog(QDialog):
         """The migration text for the first removed provider among `entries` (provider or provider:model)."""
         return removed_message(self.catalog, entries)
 
-    def _save_config(self):
+    def _save_config(self, checked: bool = False):
         """Save: the change the fields describe, checked and applied by AISettingsChange (llm/settings_change.py,
-        the rules every channel shares); the dialog keeps only its message boxes and the plain-http question."""
+        the rules every channel shares); the dialog keeps only its message boxes and the plain-http question. In
+        offline mode a server name is looked up in a worker thread first (_check_address_first)."""
         change = self._change()
         if change is None:
+            return
+        from orchestrator.utils.locality import needs_lookup
+        address = change.address or getattr(change.preset, "base_url", None) or ""
+        if change.offline_mode and not checked and getattr(change.preset, "location", "") != "cloud" and address \
+                and needs_lookup(address):
+            self._check_address_first(address)
             return
         problems = change.problems(self._config(), self._secrets())
         if problems:  # the first refusal, as the dialog always showed one at a time

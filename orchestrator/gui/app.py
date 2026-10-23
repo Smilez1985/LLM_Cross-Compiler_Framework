@@ -70,6 +70,10 @@ def main():
 
     app = QApplication([arg for arg in sys.argv if arg != "--debug-http"])
     app.setApplicationName("LLM Cross-Compiler")
+    # Offline mode's locality rule never looks a name up or runs the tailscale command on the GUI thread
+    # (utils/locality.py: the windows check addresses in a worker thread first).
+    from orchestrator.utils.locality import mark_ui_thread
+    mark_ui_thread()
     # A vault protected by a passphrase asks for it in a dialog (also when it opens in a worker thread).
     set_passphrase_prompt(PassphrasePrompt(app))
 
