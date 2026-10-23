@@ -541,10 +541,19 @@ class DeploymentManager:
         ]
 
         if use_docker:
+            # The model goes where the native branch puts it ($MODEL_DIR, default ~/models), and the container reads it
+            # there through a read-only mount of that folder at /models (as Ditto's container server mounts its
+            # models: runtime/container_server.py MODELS_MOUNT), named by MODEL_FILE; the package folder is temporary.
+            from orchestrator.runtime.container_server import MODELS_MOUNT as CONTAINER_MODELS
+            q = shlex.quote(str(artifact))
             script.extend([
                 "echo '[2/3] Loading Images (Air-Gap Support)...'",
                 "for img in images/*.tar; do if [ -e \"$img\" ]; then docker load -i \"$img\"; fi; done",
                 *[f"# {pinned} is packed as {name}" for pinned, name in sorted(names.items()) if pinned != name],
+                'MODEL_DIR="${MODEL_DIR:-$HOME/models}"',
+                'mkdir -p "$MODEL_DIR"',
+                f'cp {q} "$MODEL_DIR/"',
+                f'echo "Model installed: $MODEL_DIR/"{q}',
                 "",
                 "echo '[3/3] Starting Stack...'",
                 "docker network create llm-net || true",
@@ -558,6 +567,8 @@ class DeploymentManager:
             if flags:
                 node.append(f"  {flags} \\")  # Hardware Flags (NPU/GPU) from the target profile
             node.extend([
+                f"  -v \"$MODEL_DIR:{CONTAINER_MODELS}:ro\" \\",
+                f"  -e MODEL_FILE={CONTAINER_MODELS}/{q} \\",
                 "  -v \"$(pwd)/data:/app/data\" \\",
                 "  --restart unless-stopped \\",
                 "  --pull never \\",
