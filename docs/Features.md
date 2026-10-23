@@ -379,7 +379,9 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   holds it, since when and how it was trusted, the last deploy, the system of its probe, its deploy settings and the
   deployed runtime). Its buttons call the same functions as the CLI, with the same questions ("No" is the default)
   and audit records: **Add a trusted board...** (`deploy devices add`), **Edit address or key...** (`deploy devices
-  edit`: host name or IP address, port and the key pasted or read from the board, old and new side by side),
+  edit`: host name or IP address, port and the key pasted or read from the board, old and new side by side; with a
+  new key the board's probe, deploy settings, deployed runtime, deploy record and "tested on" records move to its new
+  device ID, each copied and checked before the change),
   **Remove trust...** (`deploy devices remove`: without it, a board paired once stays allowed for AI deploys), **Settings...**, **Runtime plan**,
   **Status**, **Build runtime...**, **Deploy runtime...**, **Verify...**, **Remove older runtime packages...** and
   **Remove older builds on the board...** (the `device` commands below; deletions in the deletion dialog with the

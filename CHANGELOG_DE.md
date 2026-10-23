@@ -22,7 +22,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   wenn sich die `known_hosts` inzwischen geändert hat. Ein neuer Schlüssel gibt dem Board eine neue Geräte-ID: Sein
   Eintrag zieht mit Name und Benutzer dorthin, und ob sich der Schlüssel des Frameworks anmeldet, wird einmal
   getestet; der Schlüssel eines anderen vertrauten Boards wird abgelehnt und dieses Board genannt, sodass sein Eintrag
-  nie überschrieben wird. Die Arbeit läuft im Hintergrund; die Texte gibt es auf Englisch und Deutsch. Kein Tool, der MCP-Server,
+  nie überschrieben wird. Die Daten des Boards ziehen mit seinem neuen Schlüssel um (DECISIONS Runde 22, P6;
+  `orchestrator/runtime/device/board_move.py`): seine gespeicherte Prüfung, die Deploy-Einstellungen, die deployte
+  Laufzeit (der Eintrag des letzten Deployments mit seinen Prüfungen und seinem Benchmark und seine Laufzeit-Pakete),
+  der Deploy-Eintrag und seine Benchmark-Ergebnisse bei den Builds ("getestet auf"). Jeder Teil wird zur neuen
+  Geräte-ID kopiert und geprüft (zurückgelesen, die Laufzeit-Pakete als harte Links oder als Kopien mit derselben
+  sha256), bevor sich die `known_hosts` ändert, und die Kopien der alten ID gehen erst nach der Änderung; scheitert
+  eine Kopie oder wird die Änderung abgelehnt (kein Audit-Eintrag, `known_hosts` inzwischen geändert), gehen die
+  Kopien wieder und nichts hat sich geändert. Was die neue ID schon mit anderem Inhalt hat, wird nie überschrieben (es
+  bleibt unter der alten ID), eine alte Kopie, die sich nicht entfernen lässt, bleibt ebenfalls, und CLI und Fenster
+  nennen beides. Die Arbeit läuft im Hintergrund; die Texte gibt es auf Englisch und Deutsch. Kein Tool, der MCP-Server,
   Ditto oder die Laufzeit-Schritte für Geräte erreichen sie (`orchestrator/remote/pairing.py` `replace_key`, ein
   Test über den Importgraphen).
 - **Nächste Schritte statt Befehlen, Befehle zum Zulassen und übersetzte, neu geordnete Menüs** (Welle 6, Kette

@@ -16,7 +16,7 @@ with the words kept here (SUDO_QUESTION).
 
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from orchestrator.remote.errors import RemoteFailure
 from orchestrator.utils.next_steps import WithSteps
@@ -44,7 +44,8 @@ class BoardStepError(WithSteps, RemoteFailure):
     not_trusted, other_device, login_failed, key_install, host_user, label, not_known, no_systemd, sudo_declined,
     not_saved, damaged, no_user, no_address; for a change of a board's address or key: no_board, address, key_text
     with facts["detail"] empty, several, not_a_key or no_paramiko, unchanged, no_key, stale, audit, other_board with
-    facts["label"] and facts["device_id"] of the trusted board the new key belongs to); `reason` is the
+    facts["label"] and facts["device_id"] of the trusted board the new key belongs to, not_moved with facts["what"]
+    the kind of the board's data that could not be copied to its new device ID); `reason` is the
     SSH reason code when the board could not be reached or logged in to; `error` the exception behind it."""
 
     def __init__(self, message: str, kind: str, reason: str = "", error: Optional[BaseException] = None,
@@ -180,9 +181,11 @@ def framework_key_logs_in(state_dir: Path, host: str, port: int, user: str) -> b
 class BoardChange:
     """A change of a trusted board's address or host key, shown to the person before it is made: `device` the board's
     record now, `plan` the change (remote/pairing.py KeyReplacement: the address, key type and fingerprint now and
-    after it, and a key of another board the new address held)."""
+    after it, and a key of another board the new address held). After change_board, `data` says where the board's
+    data went for a new key (board_move.MovedData; None when the device ID stays)."""
     device: Any
     plan: Any
+    data: Any = None
 
 
 def plan_board_change(state_dir: Path, device_id: str, *, host: Optional[str] = None, port: Optional[int] = None,
@@ -246,9 +249,27 @@ def change_lines(change: BoardChange) -> List[str]:
         lines.append(f"The framework's known_hosts holds another {plan.new_key_type} key for {plan.new.display} "
                      f"({plan.displaced}); it is replaced too.")
     if plan.key_changed:
-        lines.append(f"The board's device ID becomes {plan.new_device_id} (it derives from the host key). Its stored "
-                     f"probe and deploy settings stay under {plan.old_device_id}; probe the board again to store its "
-                     "system under the new key.")
+        lines.append(f"The board's device ID becomes {plan.new_device_id} (it derives from the host key). Its data "
+                     f"moves there from {plan.old_device_id}: its stored probe, deploy settings, deployed runtime, "
+                     "deploy record and benchmark results ('tested on'), each copied and checked first; the old "
+                     "copies go only after the change.")
+    return lines
+
+
+def moved_lines(change: BoardChange) -> List[str]:
+    """Where the board's data went after change_board (English; the GUI shows the same facts in its own texts)."""
+    from orchestrator.runtime.device.board_move import kind_words
+    data = change.data
+    if data is None:
+        return []
+    lines = []
+    if data.moved:
+        lines.append(f"Moved to the new device ID {data.new_id}: {kind_words(data.moved)}.")
+    if data.kept:
+        lines.append(f"Kept under {data.old_id}, because {data.new_id} has its own: {kind_words(data.kept)}.")
+    if data.left:
+        lines.append(f"Could not be removed under {data.old_id} (the copies under {data.new_id} are complete): "
+                     f"{kind_words(data.left)}.")
     return lines
 
 
@@ -257,21 +278,35 @@ CHANGE_QUESTION = ("Change the board's address and host key in the framework's k
                    "written to the audit log.")
 
 
-def change_board(state_dir: Path, change: BoardChange, *, via: str, audit: Any, actor: str):
+def change_board(state_dir: Path, change: BoardChange, *, via: str, audit: Any, actor: str,
+                 output_dirs: Sequence[Path] = ()):
     """Makes the change the person confirmed (Q5): known_hosts first (remote/pairing.py replace_key, written to the
     audit log before anything changes), then the board's trusted record follows: at its new address, and for a new key
     under the board's new device ID with its label and user (whether the framework's key logs in there is tested once,
-    as `deploy devices add` does). For a new address the stored probe's address follows (its device ID stays).
-    Returns (TrustedDevice or None when the record could not be written, paired); BoardStepError when known_hosts
-    could not be changed (nothing was changed then)."""
+    as `deploy devices add` does). For a new address the stored probe's address follows. For a new key the board's
+    data moves to its new device ID (P6, board_move.py: its stored probe, deploy settings, deployed runtime, deploy
+    record and its "tested on" records in the builds below `output_dirs`): copied and checked before known_hosts
+    changes, the old copies removed only after the change; `change.data` says what moved. Returns (TrustedDevice or
+    None when the record could not be written, paired); BoardStepError when known_hosts could not be changed or the
+    data could not be copied (kind not_moved; nothing was changed then)."""
     from orchestrator.remote import pairing
     from orchestrator.remote.trust import TrustStore
     from orchestrator.runtime.device.trusted import TrustedDevices
     state_dir = Path(state_dir)
     plan, device = change.plan, change.device
+    move = None
+    if plan.key_changed and plan.new_device_id != device.device_id:
+        from orchestrator.runtime.device.board_move import BoardDataMove, BoardMoveError
+        move = BoardDataMove(state_dir, device.device_id, plan.new_device_id, output_dirs=output_dirs)
+        try:
+            move.stage()
+        except BoardMoveError as e:
+            raise BoardStepError(str(e), "not_moved", what=e.what) from None
     try:
         pairing.replace_key(TrustStore(state_dir), plan, via=via, audit=audit, actor=actor)
     except pairing.KeyReplaceError as e:
+        if move is not None:
+            move.undo()   # nothing changed: the board's data stays where it was
         raise BoardStepError(str(e), e.kind) from None
     paired = device.paired
     if plan.key_changed:
@@ -281,10 +316,13 @@ def change_board(state_dir: Path, change: BoardChange, *, via: str, audit: Any, 
                                                   plan.new_key, via=via, paired=paired, label=device.label)
     except Exception:  # noqa: BLE001 - known_hosts holds the change; the record is added again by the person
         moved = None
-    if plan.address_changed and not plan.key_changed:
+    if move is not None:
+        change.data = move.finish()   # the change is made: only now the old ID's copies go
+    if plan.address_changed:
         from orchestrator.runtime.profile import ProfileStore
         try:
-            ProfileStore(state_dir).set_address(device.device_id, plan.new.store_form)
+            ProfileStore(state_dir).set_address(plan.new_device_id if move is not None else device.device_id,
+                                                plan.new.store_form)
         except (OSError, ValueError):
             pass  # the probe's address is set again by the next probe
     return moved, paired
@@ -524,4 +562,4 @@ __all__ = ["BoardPrune", "BoardStepError", "DAMAGED_QUESTION", "SUDO_QUESTION", 
            "load_settings", "not_known_error", "previous_build", "read_host_key", "record_consent", "remember_board",
            "remove_board_builds", "remove_trust", "settings_to_change", "trusted_rows", "unreachable_error",
            "BoardChange", "CHANGE_QUESTION", "change_board", "change_lines", "framework_key_logs_in",
-           "plan_board_change"]
+           "moved_lines", "plan_board_change"]

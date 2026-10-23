@@ -4700,7 +4700,8 @@ def deploy_devices_edit(ctx: FrameworkContext, device: str, host: Optional[str],
                         key_text: Optional[str], read_key: bool):
     """Change a trusted board's address (host name or IP address, port) or its SSH host key in the framework's
     known_hosts, e.g. after its address changed or it was reinstalled. Needs a terminal: you compare the old and the
-    new fingerprint ("No" is the default); the change is written to the audit log."""
+    new fingerprint ("No" is the default); the change is written to the audit log. With a new key the board's data
+    (probe, deploy settings, deployed runtime, deploy record, "tested on") moves to its new device ID."""
     from orchestrator.runtime.device import person_steps
     from orchestrator.runtime.device.trusted import TrustedDevices, find_boards
     if key_text is not None and read_key:
@@ -4734,12 +4735,24 @@ def deploy_devices_edit(ctx: FrameworkContext, device: str, host: Optional[str],
     if not click.confirm(person_steps.CHANGE_QUESTION, default=False):
         console.print("Nothing was changed.")
         return
+    output_dirs = []
+    if change.plan.key_changed:   # where the board's "tested on" records are (P6: they move with its data)
+        from types import SimpleNamespace
+        from orchestrator.Core.artifact_output import artifact_folders
+        config, resolve = _settings(ctx)
+        try:
+            output_dirs = artifact_folders(SimpleNamespace(config=config, resolve_path=resolve))
+        except Exception:  # noqa: BLE001 - no output folder: there are no build records to move
+            output_dirs = []
     try:
         moved, paired = person_steps.change_board(state_dir, change, via="cli",
-                                                  audit=lambda: _device_audit(ctx, state_dir), actor="cli")
+                                                  audit=lambda: _device_audit(ctx, state_dir), actor="cli",
+                                                  output_dirs=output_dirs)
     except person_steps.BoardStepError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
+    for line in person_steps.moved_lines(change):
+        console.print(escape(line))
     plan = change.plan
     if moved is None:
         console.print("[red]The framework's known_hosts holds the change, but the board's record could not be "

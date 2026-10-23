@@ -20,7 +20,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   side by side (in the window) and answer with "No" as the default; the change is written to the audit log before
   anything changes and refused when `known_hosts` changed meanwhile. A new key gives the board a new device ID: its
   record moves there with its name and user, and whether the framework's key logs in is tested once; the key of
-  another trusted board is refused, naming that board, so its record is never overwritten. The work runs
+  another trusted board is refused, naming that board, so its record is never overwritten. The board's data moves
+  with its new key (DECISIONS round 22, P6; `orchestrator/runtime/device/board_move.py`): its stored probe, deploy
+  settings, deployed runtime (the record of the last deployment with its checks and benchmark, and its runtime
+  packages), deploy record and its benchmark results with the builds ("tested on"). Every part is copied to the new
+  device ID and checked (read back, the runtime packages as hard links or as copies with the same sha256) before
+  `known_hosts` changes, and the old ID's copies go only after the change; when a copy fails or the change is refused
+  (no audit row, `known_hosts` changed meanwhile), the copies go again and nothing has changed. What the new ID
+  already holds with other content is never overwritten (it stays under the old ID), an old copy that cannot be
+  removed stays too, and the CLI and the window name both. The work runs
   in the background; the texts are English and German. No tool, the MCP server, Ditto or the device runtime steps can
   reach it (`orchestrator/remote/pairing.py` `replace_key`, an import-graph test).
 - **Next steps instead of commands, allow-to-run proposals and translated, regrouped menus** (wave 6, chain a0;
