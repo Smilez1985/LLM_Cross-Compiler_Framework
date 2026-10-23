@@ -271,6 +271,24 @@ pkg_ready() {
     if ! command -v "$tool" &> /dev/null; then
         log_error "$1 fehlt, und $tool, die Paketverwaltung von $(system_label), fehlt auch. Installiere es selbst (was das Framework braucht: $MANUAL_URL) und starte danach 'sudo ./install.sh' erneut."
     fi
+    if ! pacman_database_ready; then log_error "$1 fehlt. $(pacman_database_text)"; fi
+}
+
+# pacman ohne Paketdatenbank (ein frisch eingerichtetes System, ein Container) findet kein Paket. Der Installer liest
+# sie nicht selbst (pacman -Sy allein wäre ein Teil-Upgrade, das Arch nicht unterstützt, und -Syu aktualisierte das
+# ganze System ungefragt); er sagt, was zu tun ist.
+PACMAN_SYNC_DIR="/var/lib/pacman/sync"
+pacman_database_ready() {
+    local db
+    [ "$PKG" = "pacman" ] || return 0
+    for db in "$PACMAN_SYNC_DIR"/*.db; do
+        if [ -f "$db" ]; then return 0; fi
+    done
+    return 1
+}
+
+pacman_database_text() {
+    echo "pacman hat noch keine Paketdatenbank ($PACMAN_SYNC_DIR). Aktualisiere das System zuerst (sudo pacman -Syu) und starte danach 'sudo ./install.sh' erneut; der Installer aktualisiert das System nicht selbst."
 }
 
 # Installiert Pakete mit PKG. Vor der ersten Installation lesen apt und apk ihre Paketlisten neu; pacman nie
@@ -358,7 +376,7 @@ ensure_python() {
         log_warn "Python3 fehlt. Installiere..."
         pkg_ready "Python 3.11 bis 3.14"
         read -r -a pkgs <<< "$(python_packages)"
-        if ! pkg_install "${pkgs[@]}"; then log_error "Konnte Python nicht installieren."; fi
+        if ! pkg_install "${pkgs[@]}"; then log_error "Konnte Python nicht installieren.$(pkg_failure_hint)"; fi
         find_python && return 0
     fi
     mapfile -t sets < <(python_versioned_packages)
@@ -700,6 +718,7 @@ install_docker_distro() {
     local tool package
     tool="$(pkg_tool)"
     if ! command -v "$tool" &> /dev/null; then docker_stop "$tool fehlt auf diesem System."; fi
+    if ! pacman_database_ready; then docker_stop "$(pacman_database_text)"; fi
     log_info "Quelle: die Paketquellen von $(system_label): ${DOCKER_PACKAGES[*]} (mit $tool; die Signaturen prüft $tool mit den Schlüsseln der Distribution)."
     if [ "$PKG" = "apk" ] && ! apk_enable_community; then
         docker_stop "Alpines Repository community ließ sich in $APK_REPOSITORIES nicht einschalten (keine eingeschaltete main-Zeile gefunden oder die Datei nicht schreibbar)."
@@ -1132,6 +1151,7 @@ plan_docker() {
     fi
     docker_plan
     pkg_argv
+    if ! pacman_database_ready; then docker_stop "$(pacman_database_text)"; fi
     if [ -n "$DOCKER_SERVICE" ]; then
         if [ "$PKG" = "apk" ]; then service="; rc-update add docker default; rc-service docker start"
         else service="; systemctl enable --now $DOCKER_SERVICE"; fi
