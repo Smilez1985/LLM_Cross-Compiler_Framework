@@ -8,8 +8,9 @@ Every place in the repository that names the llama.cpp version, checked against 
   outside the framework and are compared here.
 - reference: the catalogue of upstream projects (not read while the framework runs); compared as well.
 - legacy: a target whose modules/source_module.sh still has the LLAMA_CPP_COMMIT default of version 1.x (an older
-  community target; decision D20): reported, never a failure. The shipped stage modules name no version of their own:
-  the source stage reports the pin of the image (DECISIONS U9).
+  community target; decision D20): reported, never a failure. In a build the shipped stage modules use the pin of the
+  image (DECISIONS U9); their LLAMA_CPP_PIN_TAG and LLAMA_CPP_PIN_COMMIT, the default of
+  `source_module.sh --clone-llama-cpp`, are derived places.
 
 tests/test_build_recipe.py fails on any derived or reference mismatch; scripts/llama_cpp_pin.py prints the table.
 """
@@ -29,6 +30,9 @@ _DOCKER_ARG = re.compile(r"^\s*ARG\s+LLAMA_CPP_TAG=(\S+)\s*$", re.MULTILINE)
 _DOCKER_COMMIT = re.compile(r"^\s*ARG\s+LLAMA_CPP_COMMIT=(\S+)\s*$", re.MULTILINE)
 _LLAMA_REPO = re.compile(r"github\.com/(ggml-org|ggerganov)/llama\.cpp", re.IGNORECASE)
 _LEGACY_DEFAULT =re.compile(r'LLAMA_CPP_COMMIT="\$\{LLAMA_CPP_COMMIT:-([^}"]*)\}"')
+# The default of source_module.sh --clone-llama-cpp in the shipped stage modules (the pin, written out)
+_SOURCE_PIN_TAG = re.compile(r'^LLAMA_CPP_PIN_TAG="([^"]*)"$', re.MULTILINE)
+_SOURCE_PIN_COMMIT = re.compile(r'^LLAMA_CPP_PIN_COMMIT="([^"]*)"$', re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -92,10 +96,18 @@ def pin_places(source: LlamaCppSource, root: Path = REPO_ROOT) -> List[PinPlace]
                                        str(args["LLAMA_CPP_COMMIT"]), source.commit))
         legacy = target_dir / "modules" / "source_module.sh"
         if legacy.is_file():
-            found = _LEGACY_DEFAULT.findall(legacy.read_text(encoding="utf-8"))
+            text = legacy.read_text(encoding="utf-8")
+            found = _LEGACY_DEFAULT.findall(text)
             if found:
                 places.append(PinPlace(rel(legacy), "LLAMA_CPP_COMMIT default (source_module.sh of version 1.x, D20)",
                                        "legacy", found[0], tag))
+            pin_tag, pin_commit = _SOURCE_PIN_TAG.findall(text), _SOURCE_PIN_COMMIT.findall(text)
+            if pin_tag or pin_commit:  # the default of --clone-llama-cpp: both or neither
+                places.append(PinPlace(rel(legacy), "LLAMA_CPP_PIN_TAG (default of source_module.sh --clone-llama-cpp)",
+                                       "derived", pin_tag[0] if pin_tag else None, tag))
+                places.append(PinPlace(rel(legacy),
+                                       "LLAMA_CPP_PIN_COMMIT (default of source_module.sh --clone-llama-cpp)",
+                                       "derived", pin_commit[0] if pin_commit else None, source.commit))
 
     for name in ("project_sources.yml", "detailed_project_sources.yml"):
         path = root / "configs" / name

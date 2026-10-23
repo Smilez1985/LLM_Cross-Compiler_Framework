@@ -56,7 +56,7 @@ The GUI, the CLI, Ditto and the MCP server offer exactly these options and rejec
 
 | Format (`--format`) | Runs on | Input | Boards | Quantizations | Default |
 |---|---|---|---|---|---|
-| `gguf` | CPU (llama.cpp v0.6.0) | Hugging Face model | all four | 33 llama.cpp types, e.g. `Q4_K_M`, `Q4_0`, `IQ4_NL`, `IQ4_XS`, `Q5_K_M`, `Q6_K`, `Q8_0`, `F16` | `Q4_K_M`; `Q4_0` on rk3566/rk3568 |
+| `gguf` | CPU (llama.cpp v0.6.0) | Hugging Face model | all four | 35 llama.cpp types, e.g. `Q4_K_M`, `Q4_0`, `IQ4_NL`, `IQ4_XS`, `Q5_K_M`, `Q6_K`, `Q8_0`, `F16` | `Q4_K_M`; `Q4_0` on rk3566/rk3568 |
 | `rkllm` | NPU, language models (RKLLM-Toolkit 1.3.1) | Hugging Face model | rk3588, rk3576 | rk3588: `w8a8`, `w8a8_g128`, `w8a8_g256`, `w8a8_g512` · rk3576: `w4a16`, `w4a16_g32`, `w4a16_g64`, `w4a16_g128`, `w8a8` | `w8a8` (rk3588), `w4a16` (rk3576) |
 | `rknn` | NPU, ONNX vision/audio models (RKNN-Toolkit2 2.3.2) | local `.onnx` file | all four | `fp16`, `i8` | `fp16` |
 
@@ -65,13 +65,17 @@ The GUI, the CLI, Ditto and the MCP server offer exactly these options and rejec
 
 `Q4_K_M`, `Q4_0`, `IQ4_NL`, `IQ4_XS`, `Q5_K_M`, `Q6_K`, `Q8_0`, `Q4_1`, `Q5_0`, `Q5_1`, `Q2_K`, `Q2_K_S`,
 `Q3_K_S`, `Q3_K_M`, `Q3_K_L`, `Q4_K_S`, `Q5_K_S`, `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ2_M`,
-`IQ3_XXS`, `IQ3_XS`, `IQ3_S`, `IQ3_M`, `TQ1_0`, `TQ2_0`, `MXFP4_MOE`, `F16`, `BF16`, `F32`
+`IQ3_XXS`, `IQ3_XS`, `IQ3_S`, `IQ3_M`, `TQ1_0`, `TQ2_0`, `MXFP4_MOE`, `Q1_0`, `Q2_0`, `F16`, `BF16`, `F32`
+
+Every quantization method of `llama-quantize` at the pinned llama.cpp (`COPY` aside, which quantizes
+nothing); its short names `Q3_K`, `Q4_K` and `Q5_K` are accepted for `Q3_K_M`, `Q4_K_M` and `Q5_K_M`.
 </details>
 
 - **RK3566 and RK3568** are not supported by RKLLM; use GGUF there. `Q4_0` and `IQ4_NL` are repacked for fast
   ARM kernels.
 - **Importance matrix (IMatrix):** GGUF only. It improves low-bit quantization. `IQ1_S`, `IQ1_M`, `IQ2_XXS`,
-  `IQ2_XS` and `IQ2_S` require it. Without your own text file the framework uses its shipped calibration text
+  `IQ2_XS`, `IQ2_S`, `IQ2_M`, `IQ3_XXS`, `IQ3_XS` and `Q2_K_S` require it (`llama-quantize` refuses them without
+  one). Without your own text file the framework uses its shipped calibration text
   ([data/calibration](data/calibration/README.md)).
 - **Calibration data:** optional for RKLLM and RKNN. RKNN `i8` needs a list of sample inputs (paths relative to
   the list file).

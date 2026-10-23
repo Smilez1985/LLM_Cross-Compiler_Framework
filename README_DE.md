@@ -58,7 +58,7 @@ GUI, CLI, Ditto und der MCP-Server bieten genau diese Optionen an und lehnen all
 
 | Format (`--format`) | Läuft auf | Eingabe | Boards | Quantisierungen | Standard |
 |---|---|---|---|---|---|
-| `gguf` | CPU (llama.cpp v0.6.0) | Hugging-Face-Modell | alle vier | 33 llama.cpp-Typen, z. B. `Q4_K_M`, `Q4_0`, `IQ4_NL`, `IQ4_XS`, `Q5_K_M`, `Q6_K`, `Q8_0`, `F16` | `Q4_K_M`; `Q4_0` auf rk3566/rk3568 |
+| `gguf` | CPU (llama.cpp v0.6.0) | Hugging-Face-Modell | alle vier | 35 llama.cpp-Typen, z. B. `Q4_K_M`, `Q4_0`, `IQ4_NL`, `IQ4_XS`, `Q5_K_M`, `Q6_K`, `Q8_0`, `F16` | `Q4_K_M`; `Q4_0` auf rk3566/rk3568 |
 | `rkllm` | NPU, Sprachmodelle (RKLLM-Toolkit 1.3.1) | Hugging-Face-Modell | rk3588, rk3576 | rk3588: `w8a8`, `w8a8_g128`, `w8a8_g256`, `w8a8_g512` · rk3576: `w4a16`, `w4a16_g32`, `w4a16_g64`, `w4a16_g128`, `w8a8` | `w8a8` (rk3588), `w4a16` (rk3576) |
 | `rknn` | NPU, ONNX-Bild-/Audiomodelle (RKNN-Toolkit2 2.3.2) | lokale `.onnx`-Datei | alle vier | `fp16`, `i8` | `fp16` |
 
@@ -67,13 +67,17 @@ GUI, CLI, Ditto und der MCP-Server bieten genau diese Optionen an und lehnen all
 
 `Q4_K_M`, `Q4_0`, `IQ4_NL`, `IQ4_XS`, `Q5_K_M`, `Q6_K`, `Q8_0`, `Q4_1`, `Q5_0`, `Q5_1`, `Q2_K`, `Q2_K_S`,
 `Q3_K_S`, `Q3_K_M`, `Q3_K_L`, `Q4_K_S`, `Q5_K_S`, `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ2_M`,
-`IQ3_XXS`, `IQ3_XS`, `IQ3_S`, `IQ3_M`, `TQ1_0`, `TQ2_0`, `MXFP4_MOE`, `F16`, `BF16`, `F32`
+`IQ3_XXS`, `IQ3_XS`, `IQ3_S`, `IQ3_M`, `TQ1_0`, `TQ2_0`, `MXFP4_MOE`, `Q1_0`, `Q2_0`, `F16`, `BF16`, `F32`
+
+Jede Quantisierungsmethode von `llama-quantize` im gepinnten llama.cpp (außer `COPY`, das nichts
+quantisiert); die Kurznamen `Q3_K`, `Q4_K` und `Q5_K` werden für `Q3_K_M`, `Q4_K_M` und `Q5_K_M` angenommen.
 </details>
 
 - **RK3566 und RK3568** werden von RKLLM nicht unterstützt; dort nimmst du GGUF. `Q4_0` und `IQ4_NL` werden für
   schnelle ARM-Kernel umgepackt.
 - **Importance Matrix (IMatrix):** nur für GGUF. Sie verbessert Quantisierungen mit wenigen Bits. `IQ1_S`,
-  `IQ1_M`, `IQ2_XXS`, `IQ2_XS` und `IQ2_S` setzen sie voraus. Ohne eigene Textdatei nimmt das Framework seinen
+  `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ2_M`, `IQ3_XXS`, `IQ3_XS` und `Q2_K_S` setzen sie voraus
+  (`llama-quantize` lehnt sie ohne ab). Ohne eigene Textdatei nimmt das Framework seinen
   mitgelieferten Kalibrierungstext ([data/calibration](data/calibration/README_DE.md)).
 - **Kalibrierungsdaten:** für RKLLM und RKNN optional. RKNN `i8` braucht eine Liste mit Beispieleingaben (Pfade
   relativ zur Listendatei).

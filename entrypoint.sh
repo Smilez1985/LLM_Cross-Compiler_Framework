@@ -184,7 +184,8 @@ run_pipeline() {
     log_info ">>> Starting PIPELINE for model: $model_name"
     log_info ">>> Quantization: $quant_method"
 
-    local args=(--input "$input_path" --model-name "$model_name" --quantization "$quant_method")
+    # Stage 4/4 of version 1.x: "Quantization & Packaging" (the package for the board, also without a profile)
+    local args=(--input "$input_path" --model-name "$model_name" --quantization "$quant_method" --package)
     if [[ -n "$hardware_config" ]] && [[ -f "$hardware_config" ]]; then
         args+=(--hardware-config "$hardware_config")
     fi
@@ -218,6 +219,10 @@ run_module() {
         exec bash "$module_path" "$@"
     fi
     log_info "Executing Module: $module_name (the build up to this stage)"
+    if [[ "$module_name" == "target" ]]; then
+        # target_module.sh of version 1.x quantized and packaged: the package for the board
+        exec bash "$STAGE_RUNNER_SCRIPT" --to target --package "$@"
+    fi
     exec bash "$STAGE_RUNNER_SCRIPT" --to "$module_name" "$@"
 }
 

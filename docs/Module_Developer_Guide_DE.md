@@ -549,14 +549,15 @@ Köpfe wahr, wenn du eine Stufe änderst.
 | Stufe | Modul | Was sie tut (Rockchip) |
 |---|---|---|
 | 1. source | `source_module.sh` | Nennt die Quellen der Werkzeuge, aus denen das Image gebaut wurde (Tag und Commit von llama.cpp, die das Dockerfile geprüft hat, die SDK-venvs); in der Vorlage führt sie außerdem einmal die Einrichtungsbefehle der Moduldefinition aus. Nichts wird heruntergeladen. |
-| 2. config | `config_module.sh` | Liest den Auftrag aus der Umgebung, vereinheitlicht die Namen von Format, Board und Typ, lehnt ab, was das Target nicht bauen kann, und schreibt den Build-Plan `build_config.sh` in den Stufenordner. |
+| 2. config | `config_module.sh` | Liest den Auftrag aus der Umgebung, vereinheitlicht die Namen von Format, Board und Typ, lehnt ab, was das Target nicht bauen kann, und schreibt den Build-Plan `build_config.sh` in den Stufenordner. Mit einem Hardware-Profil plant sie außerdem das Board (Toolchain und Flags) und prüft diesen Plan, bevor sie ihn behält ([Abschnitt 10](#10-was-die-stufenmodule-aus-version-1x-behalten-haben)). |
 | 3. convert | `convert_module.sh` | Wandelt das Modell um: GGUF-Typen, die der Konverter selbst schreibt, landen direkt im Ausgabeordner; jeder andere Typ wird zu einer F16-Zwischendatei im Arbeitsordner für die Stufe target. RKLLM und RKNN führen ihre Format-Helfer `rkllm_module.sh` und `rknn_module.sh` aus. Im Auftrag `imatrix` berechnet sie die Importance-Matrix. Um jede Umwandlung herum erkennt sie das Format der Eingabe, prüft die Eingabe und was der Konverter geschrieben hat, führt einen kurzen Funktionstest aus und hält eine Statistik fest ([Abschnitt 6.5](#65-die-prüfungen-der-stufe-convert)). |
 | (rotate) | `rotate_module.sh` | Optionaler Haken zwischen convert und target für eine Rotation wie SpinQuant oder QuaRot (Roadmap): läuft nur, wenn das Target diese Datei hat; mitgeliefert wird keine. Sie darf die Zwischendatei in voller Genauigkeit ändern, bevor sie quantisiert wird. |
-| 4. target | `target_module.sh` | Quantisiert, was die Stufe convert für sie hinterlassen hat (`quantize_jobs.sh`), entfernt die Zwischendatei, schreibt `build_info.json` und listet die Ergebnisse auf. |
+| 4. target | `target_module.sh` | Quantisiert, was die Stufe convert für sie hinterlassen hat (`quantize_jobs.sh`), entfernt die Zwischendatei, schreibt `build_info.json` und listet die Ergebnisse auf. Für einen GGUF-Build mit Hardware-Profil und mit `build.sh --package` macht sie außerdem das Paket für das Board ([Abschnitt 10](#10-was-die-stufenmodule-aus-version-1x-behalten-haben)). |
 
 Der Auftrag `imatrix` führt source, config und convert aus; der Auftrag `build` alle Stufen. Ein von Hand
 gestartetes Stufenmodul (`bash modules/convert_module.sh`) führt über den Runner den Build bis zu seiner Stufe aus;
-`build.sh --to STUFE` tut dasselbe. Eine spätere Stufe darf die Funktionen einer früheren nutzen, indem sie deren
+`build.sh --to STUFE` tut dasselbe (ein von Hand gestartetes `target_module.sh` fragt außerdem nach dem Paket:
+`build.sh --to target --package`). Eine spätere Stufe darf die Funktionen einer früheren nutzen, indem sie deren
 Modul einliest (`config_module.sh` und `source_module.sh` führen ihr `main` nur in ihrer eigenen Stufe aus).
 `benchmark_module.sh` ist keine Stufe: Es würde die CPU des Build-Rechners messen, und ein Modell für ein Board wird
 auf dem Board gemessen (`llm-cli device runtime verify --bench-model` oder **Boards > Boards and Devices... >
@@ -607,6 +608,7 @@ Was der Stage-Runner jeder Stufe mitgibt:
 | `STAGE_DIR` | der Stufenordner `$BUILD_SCRATCH_DIR/stages/<Auftrag>/`: die Marken, der Build-Plan `build_config.sh` und was eine Stufe der nächsten übergibt (`quantize_jobs.sh`, `sdk_environment.sh`) |
 | `MODULES_DIR` | der Ordner der Stufenmodule (`/app/modules` im Image) |
 | `STAGE_RUNNER`, `STAGE_NAME` | gesetzt, solange der Runner eine Stufe ausführt; ein Modul, das ohne `STAGE_RUNNER` startet, übergibt an den Runner |
+| `PACKAGE_REQUESTED` | `1`, wenn `build.sh --package` die Stufe target um das Paket für das Board gebeten hat (auch ohne Hardware-Profil), sonst `0`; eine Eingabe nur der Stufe target |
 | `stage_output DATEI` | eine Shell-Funktion: nennt eine Datei, die die Stufe geschrieben hat und die das Fortsetzen prüft |
 
 Einbindungen:
@@ -890,14 +892,41 @@ Funktionen aus 1.x sind geblieben:
   auf dem Board schreibt ([Abschnitt 11](#11-die-datei-der-hardware-probe)): Die Stufe config von Rockchip nimmt das
   System aus `ARCH` und die Kerne aus `CPU_MODEL` (Cortex-A55, A72 und A76 bekommen ihre CPU-Flags,
   `SUPPORTS_NEON`, `SUPPORTS_AVX2` und `SUPPORTS_AVX512` ihre GGML-Flags) und lehnt ein System ab, für das ihr Image
-  keinen Compiler hat (nur aarch64 und x86_64), zum Beispiel `ARCH=armv7` eines 32-Bit-Systems auf einem Board. Ein
-  Build des Frameworks hat kein Profil: Die
-  Runtime des Boards wird aus der eigenen Probe des Boards gebaut (`llm-cli device runtime build`), und das
-  Board-Paket kommt von `llm-cli deploy package` oder `llm-cli device runtime deploy`.
+  keinen Compiler hat (nur aarch64 und x86_64). Ein 32-Bit-ARM-System (`ARCH=armv7` und ähnliche) wird mit dem
+  schlichten Grund abgelehnt: Die Rockchip-Boards haben 64-Bit-CPUs, und das Image hat nur die aarch64-Cross-Compiler;
+  installiere also das 64-Bit-System des Boards und lass die Probe erneut laufen. Die Build-Jobs werden auf die Kerne
+  des Boards begrenzt (`CPU_CORES` oder `CPU_CORES_LOGICAL` der Probe-Datei). Ein Build des Frameworks hat kein
+  Profil: Die Runtime des Boards wird aus der eigenen Probe des Boards gebaut (`llm-cli device runtime build`), und
+  das Board-Paket kommt von `llm-cli deploy package` oder `llm-cli device runtime deploy`.
+- **Der Plan wird geprüft, bevor er bleibt.** Die Stufe config sucht die geplanten Compiler im Image (fehlt einer,
+  plant sie nichts), baut und linkt ein kleines C- und C++-Programm mit den geplanten Flags (und führt sie aus, wenn
+  sie für diesen Rechner sind), prüft am ELF-Kopf, dass sie für das System des Boards sind, lässt `cmake -P` die
+  erzeugte Toolchain-Datei lesen und prüft den Plan `build_config.sh` in einer sauberen Shell: Er muss ein gültiges
+  Skript sein, das jeden Namen setzt, den die späteren Stufen lesen. Ein Plan, der eine Prüfung nicht besteht, wird
+  nicht geschrieben.
+- **Das Paket für das Board.** `output/packages/<Modell>_<Typ>_<Architektur>_<Zeit>/` enthält das GGUF, `llama-cli`
+  und `llama-server`, die Toolchain-Datei (`cmake_toolchain.cmake`) und das Hardware-Profil, eine Model Card
+  (`README.md`), `test_model.sh` (prüft die Dateien gegen `SHA256SUMS` und bittet das Modell dann mit `llama-cli` um
+  eine kurze Antwort), `deploy.sh` (`./deploy.sh USER@HOST [ZIEL]` kopiert das Paket über `ssh` und `scp` mit
+  `StrictHostKeyChecking=yes`, der Host-Key des Boards muss also schon bekannt sein, nach ZIEL, Vorgabe
+  `llm/<Paket>` im Home-Ordner des Benutzers auf dem Board, und prüft die Kopie dort; `./deploy.sh [ZIEL]` auf dem
+  Board selbst kopiert es nach ZIEL, Vorgabe `/opt/llm`), `MANIFEST.json` mit
+  jedem Detail des Builds (Modell, Quantisierung, llama.cpp, Board, Profil, Flags, Tests, jede Datei mit Größe und
+  SHA-256) und `SHA256SUMS`. Die Helfer kommen aus `scripts/package_test_model.sh`, `scripts/package_deploy.sh` und
+  `scripts/board_package.py` des Targets. Bevor das Paket bleibt, läuft das Modell einmal auf diesem Rechner
+  (`llama-completion` des Images, wenn es eins hat), die Programme müssen ELF-Programme für das Board sein, und jede
+  Datei muss zu `SHA256SUMS` passen. `build.sh --package` (auch ein von Hand gestartetes `target_module.sh` und die
+  Entrypoint-Modi `target` und `pipeline`) macht das Paket auch ohne Profil, mit den schlichten Vorgaben des Targets
+  (aarch64 bei Rockchip), und das Manifest sagt es (`hardware.source: defaults`). Das eigene Deployment des
+  Frameworks bleibt `llm-cli deploy` und der Tab **Deployment**, über seine SSH-Sitzung mit dem Schlüssel und den Known
+  Hosts des Frameworks.
 - **llama.cpp klonen.** `source_module.sh --clone-llama-cpp` (oder der Entrypoint-Modus `source
   --clone-llama-cpp`), von Hand in einem Container mit Netzwerk gestartet, klont llama.cpp bei `LLAMA_CPP_COMMIT`
-  (eine vollständige Commit-ID) und verlinkt es als `LLAMA_CPP_PATH`, für ein Image ohne llama.cpp. Ein Build tut das
-  nie: Sein Image bringt das gepinnte llama.cpp mit.
+  (eine vollständige Commit-ID; ohne sie der Pin des Frameworks, `LLAMA_CPP_PIN_COMMIT` im Modul) aus
+  `LLAMA_CPP_REPO_OVERRIDE` (eine https-Adresse ohne Benutzernamen, Passwort, Token oder Query; ohne sie Upstream),
+  prüft, dass der Checkout dieser Commit ist, und verlinkt es als `LLAMA_CPP_PATH`, für ein Image ohne llama.cpp. Ein
+  Build tut das nie: Sein Image bringt das gepinnte llama.cpp mit, beim Bau des Images durch das Framework aus der
+  Repository-Überschreibung geholt.
 - **Die Moduloptionen.** `--input`, `--output`, `--model-name`, `--quantization` und `--hardware-config`
   funktionieren bei `build.sh`, bei jedem von Hand gestarteten Stufenmodul und bei jedem Stufenmodus des
   Entrypoints, wie im Entwurf des Maintainers für 1.x: `convert_module.sh --input ORDNER --output DATEI --model-name

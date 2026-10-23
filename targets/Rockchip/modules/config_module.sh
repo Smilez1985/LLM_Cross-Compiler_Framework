@@ -12,6 +12,15 @@
 #         for that board into the plan, as the hardware agent of version 1.x did; the target stage then packages
 #         llama-cli and llama-server for the board as well. A build of the BuildEngine has no profile: the board's
 #         runtime is planned from the board's own probe by the runtime builder (orchestrator/runtime/build/recipe.py).
+#         The toolchain is the one this image has: the compilers are looked up where the shell finds them (the
+#         aarch64 cross compilers for a Rockchip board, the image's own for an x86_64 profile), and a profile of a
+#         system this image has no compiler for (a 32-bit armv7 system) is refused with the reason.
+# Validation (version 1.x: "Professional Validation - compiler tests, syntax checks"): before the plan is used, the
+#         planned compilers build and link a small C and C++ program with the planned flags (a program for the build
+#         host itself is run, one for the board must be an ELF program for the board's processor), CMake reads the
+#         generated toolchain file, and build_config.sh must be a valid shell script that sets every name the later
+#         stages read. A plan that fails a check is never written. The target stage checks the same way when it plans
+#         a package without a profile (the plain defaults of this target, plan_board defaults).
 #
 # Inputs (environment, set by BuildEngine):
 #   MODEL_SOURCE   local HF model directory inside the container (staged by the host); an ONNX file or folder (rknn);
@@ -48,6 +57,9 @@ declare -A HW_CONFIG
 # Compiler-Konfiguration
 declare -A COMPILER_CONFIG
 
+# Where the board's part of the plan comes from: profile (a hardware profile) or defaults (plain_defaults)
+PROFILE_SOURCE=""
+
 die() { echo "ERROR: $*" >&2; exit 1; }
 
 # ============================================================================
@@ -67,12 +79,17 @@ log_warn() { echo "⚠️  [$(date '+%H:%M:%S')] [CONFIG] $1"; }
 {
 # Output types convert_hf_to_gguf.py writes directly.
 GGUF_CONVERT_TYPES=" f32 f16 bf16 q8_0 auto "
-# Types accepted by llama-quantize (llama.cpp v0.6.0).
+# Every quantization method of llama-quantize at the pin (QUANT_OPTIONS of tools/quantize/quantize.cpp, llama.cpp
+# b11429 = v0.6.0), except F16, BF16 and F32, which the converter writes itself, and COPY, which quantizes nothing;
+# its aliases Q3_K, Q4_K and Q5_K are accepted by normalize_gguf_type.
 GGUF_QUANT_TYPES=" Q4_0 Q4_1 Q5_0 Q5_1 Q8_0 Q2_K Q2_K_S Q3_K_S Q3_K_M Q3_K_L Q4_K_S Q4_K_M Q5_K_S Q5_K_M Q6_K \
-IQ1_S IQ1_M IQ2_XXS IQ2_XS IQ2_S IQ2_M IQ3_XXS IQ3_XS IQ3_S IQ3_M IQ4_NL IQ4_XS TQ1_0 TQ2_0 MXFP4_MOE "
-# Very low-bit i-quants are unusable without an importance matrix; other i-quants lose quality without one.
-GGUF_NEEDS_IMATRIX=" IQ1_S IQ1_M IQ2_XXS IQ2_XS IQ2_S "
-GGUF_WANTS_IMATRIX=" IQ2_M IQ3_XXS IQ3_XS IQ3_S IQ3_M IQ4_NL IQ4_XS "
+IQ1_S IQ1_M IQ2_XXS IQ2_XS IQ2_S IQ2_M IQ3_XXS IQ3_XS IQ3_S IQ3_M IQ4_NL IQ4_XS TQ1_0 TQ2_0 MXFP4_MOE Q1_0 Q2_0 "
+# llama-quantize refuses these without an importance matrix: tensors of the file get a type that requires one
+# (tensor_requires_imatrix of src/llama-quant.cpp at the pin: IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S, IQ3_XXS, and Q2_K in
+# a Q2_K_S file; IQ2_M is mostly IQ2_S, and IQ3_XS makes attn_q, attn_k and the middle ffn_gate and ffn_up IQ3_XXS).
+# The other i-quants lose quality without one.
+GGUF_NEEDS_IMATRIX=" IQ1_S IQ1_M IQ2_XXS IQ2_XS IQ2_S IQ2_M IQ3_XXS IQ3_XS Q2_K_S "
+GGUF_WANTS_IMATRIX=" IQ3_S IQ3_M IQ4_NL IQ4_XS "
 }
 
 normalize_gguf_type() {
@@ -83,8 +100,9 @@ normalize_gguf_type() {
         BF16) echo "BF16" ;;
         F32|FP32) echo "F32" ;;
         INT8|Q8) echo "Q8_0" ;;
-        INT4|Q4) echo "Q4_K_M" ;;
-        Q5) echo "Q5_K_M" ;;
+        INT4|Q4|Q4_K) echo "Q4_K_M" ;;
+        Q5|Q5_K) echo "Q5_K_M" ;;
+        Q3_K) echo "Q3_K_M" ;;
         *) echo "$q" ;;
     esac
 }
@@ -175,13 +193,34 @@ load_hardware_config() {
     fi
     HW_CONFIG[CPU_MODEL_NAME]="${HW_CONFIG[CPU_MODEL_NAME]:-${HW_CONFIG[CPU_MODEL]:-}}"
     HW_CONFIG[ARCHITECTURE_FULL]="${HW_CONFIG[ARCHITECTURE_FULL]:-aarch64}"
-    # This image has the aarch64 cross compilers (the Rockchip boards) and the host's own: programs for any other
-    # system (a 32-bit OS on a board writes ARCH=armv7) could not run there.
-    case "${HW_CONFIG[ARCHITECTURE_FULL]}" in
-        aarch64|x86_64) ;;
-        *) die "The hardware profile is of a ${HW_CONFIG[ARCHITECTURE_FULL]} system; this image compiles for aarch64 (the Rockchip boards) and x86_64 only, so nothing was planned for it." ;;
-    esac
+    # The build jobs are capped at the board's cores, as in version 1.x (CPU_CORES of its own files); the probe names
+    # them CPU_CORES_LOGICAL.
+    HW_CONFIG[CPU_CORES]="${HW_CONFIG[CPU_CORES]:-${HW_CONFIG[CPU_CORES_LOGICAL]:-}}"
+    check_profile_system
+    PROFILE_SOURCE="profile"
     log_info "Hardware-Konfiguration geladen (${HW_CONFIG[CPU_MODEL_NAME]:-Unknown})"
+}
+
+# This image has the aarch64 cross compilers (the Rockchip boards) and the host's own: programs for any other system
+# (a 32-bit OS on a board writes ARCH=armv7) could not run there.
+check_profile_system() {
+    local arch="${HW_CONFIG[ARCHITECTURE_FULL]}"
+    local refused="The hardware profile is of a $arch system; this image compiles for aarch64 (the Rockchip boards) and x86_64 only, so nothing was planned for it."
+    case "$arch" in
+        aarch64|x86_64) ;;
+        armv7*|armv6*|armv8l|armhf|armel|arm)  # armv8l: `uname -m` of a 32-bit system on a 64-bit CPU (1.x probe)
+            die "$refused The board runs a 32-bit system: the Rockchip boards have 64-bit CPUs (Cortex-A55, A72, A76), and this image has only the aarch64 cross compilers. Install the board's 64-bit (arm64) system, probe the board again (scripts/hardware_probe.sh) and use the new file." ;;
+        *) die "$refused" ;;
+    esac
+}
+
+# Without a hardware profile, a package for the board (build.sh --package; target_module.sh started by hand) is planned
+# with the plain defaults of this target: the baseline every Rockchip board of it runs, aarch64 with generic ARMv8-A
+# flags and NEON (every ARMv8-A core has it). The package's manifest and model card say so.
+load_plain_defaults() {
+    HW_CONFIG=([ARCHITECTURE_FULL]=aarch64 [CPU_MODEL_NAME]="" [SUPPORTS_NEON]=ON)
+    PROFILE_SOURCE="defaults"
+    log_info "No hardware profile: the plain defaults of this target (aarch64, generic ARMv8-A, NEON)"
 }
 
 # ============================================================================
@@ -233,8 +272,8 @@ generate_compiler_flags() {
         fi
     fi
 
-    # Build-Jobs basierend auf Kernen
-    if [[ -n "${HW_CONFIG[CPU_CORES]:-}" ]] && [[ "${HW_CONFIG[CPU_CORES]}" -lt "$build_jobs" ]]; then
+    # Build-Jobs basierend auf Kernen (a number of cores, never a text the shell would read as a name)
+    if [[ "${HW_CONFIG[CPU_CORES]:-}" =~ ^[1-9][0-9]*$ ]] && [[ "${HW_CONFIG[CPU_CORES]}" -lt "$build_jobs" ]]; then
         build_jobs=${HW_CONFIG[CPU_CORES]}
     fi
 
@@ -244,6 +283,147 @@ generate_compiler_flags() {
     COMPILER_CONFIG[CMAKE_FLAGS]="$cmake_flags"
     COMPILER_CONFIG[BUILD_JOBS]="$build_jobs"
 }
+
+# ============================================================================
+# THE TOOLCHAIN OF THIS IMAGE (version 1.x: "Cross-Compilation - automatic toolchain detection")
+# ============================================================================
+
+# The tools of the planned system, where the shell finds them: <prefix>-gcc, -g++, -ar and -strip of the cross
+# toolchain for a board, the image's own gcc and g++ for a native (x86_64) plan, as the toolchain file of version 1.x
+# named them.
+find_compilers() {
+    local prefix="${COMPILER_CONFIG[CROSS_PREFIX]:-}" key name path
+    for key in CC CXX AR STRIP; do
+        case "$key" in
+            CC) name="gcc" ;;
+            CXX) name="g++" ;;
+            AR) name="ar" ;;
+            *) name="strip" ;;
+        esac
+        if [ -n "$prefix" ]; then
+            name="$prefix-$name"
+        elif [ "$key" = AR ] || [ "$key" = STRIP ]; then
+            continue
+        fi
+        path="$(command -v "$name" || true)"
+        [[ "$path" == /* ]] || die "This image has no $name, which the plan for the ${HW_CONFIG[ARCHITECTURE_FULL]} system of the hardware profile needs; nothing was planned."
+        [[ "$path" =~ ^[A-Za-z0-9._/+-]+$ ]] || die "The path of $name has characters a CMake toolchain file cannot hold unquoted; nothing was planned."
+        COMPILER_CONFIG[$key]="$path"
+    done
+}
+
+# ============================================================================
+# VALIDATION (version 1.x: "Professional Validation - compiler tests, syntax checks")
+# The same functions in targets/Rockchip and targets/_template (tests/test_target_stage.py compares them). They read
+# the plan's compilers and flags from COMPILER_CONFIG (CC, CXX, CFLAGS, CXXFLAGS) and its system from
+# HW_CONFIG[ARCHITECTURE_FULL].
+# ============================================================================
+
+# The ELF machine number of a program file (62 x86_64, 183 aarch64, 40 32-bit Arm, 3 32-bit x86, 243 RISC-V), empty for a
+# file that is no ELF program.
+elf_machine() {
+    local -a head
+    read -r -a head <<< "$(od -An -tu1 -N20 "$1" 2>/dev/null | tr '\n' ' ')"
+    [ "${#head[@]}" -eq 20 ] && [ "${head[0]}" = 127 ] && [ "${head[1]}" = 69 ] && [ "${head[2]}" = 76 ] \
+        && [ "${head[3]}" = 70 ] || return 0
+    if [ "${head[5]}" = 2 ]; then
+        echo $(( 256 * head[18] + head[19] ))  # big-endian
+    else
+        echo $(( head[18] + 256 * head[19] ))
+    fi
+}
+
+elf_machine_of() {  # SYSTEM: the ELF machine number of its programs, empty when this script does not know it
+    case "$1" in
+        aarch64|arm64) echo 183 ;;
+        x86_64|amd64) echo 62 ;;
+        armv7*|armv6*|armv8l|armhf|armel|arm) echo 40 ;;
+        x86|i386|i486|i586|i686) echo 3 ;;
+        riscv64) echo 243 ;;
+        *) echo "" ;;
+    esac
+}
+
+run_compiler() {  # COMPILER OUTPUT ARGUMENTS...: builds OUTPUT, or stops the stage with the compiler's own words
+    local compiler="$1" output="$2"
+    shift 2
+    if ! "$compiler" "$@" -o "$output" > "$output.log" 2>&1; then
+        die "The compiler test failed: $(basename "$compiler") cannot build and link a small program with the flags of the plan (${COMPILER_CONFIG[CFLAGS]}): $(tail -n 8 "$output.log" | tr '\n' ' ')"
+    fi
+}
+
+# The planned compilers build and link a small C and a small C++ program (with a thread) with the planned flags. A
+# program built for this machine itself (-march=native on a machine of the plan's system) is run; any other must be an
+# ELF program for the processor of the plan's system.
+compiler_test() {
+    local dir="$PLAN_DIR/compiler-test" arch="${HW_CONFIG[ARCHITECTURE_FULL]}" want got program
+    local -a cflags cxxflags
+    read -r -a cflags <<< "${COMPILER_CONFIG[CFLAGS]}"
+    read -r -a cxxflags <<< "${COMPILER_CONFIG[CXXFLAGS]}"
+    rm -rf "$dir" && mkdir -p "$dir"
+    cat > "$dir/test.c" << 'EOF'
+#include <stdio.h>
+int main(void) { volatile float x = 1.5f; printf("compiler test %d\n", (int)(x * 2.0f)); return 0; }
+EOF
+    cat > "$dir/test.cpp" << 'EOF'
+#include <thread>
+#include <vector>
+int main() { std::vector<int> v(4, 1); std::thread t([&v] { v[0] = 2; }); t.join(); return v[0] == 2 ? 0 : 1; }
+EOF
+    run_compiler "${COMPILER_CONFIG[CC]}" "$dir/test-c" "${cflags[@]}" "$dir/test.c"
+    run_compiler "${COMPILER_CONFIG[CXX]}" "$dir/test-cxx" "${cxxflags[@]}" "$dir/test.cpp"
+    want="$(elf_machine_of "$arch")"
+    for program in "$dir/test-c" "$dir/test-cxx"; do
+        if [[ " ${cflags[*]} " == *" -march=native "* ]] && [ "$(uname -m)" = "$arch" ]; then
+            "$program" > "$program.run" 2>&1 \
+                || die "The compiler test failed: a program the plan's compilers built for this machine does not run: $(tail -n 5 "$program.run" | tr '\n' ' ')"
+        elif [ -n "$want" ]; then
+            got="$(elf_machine "$program")"
+            [ -n "$got" ] && [ "$got" = "$want" ] \
+                || die "The compiler test failed: the plan's compilers do not build programs for the $arch system of the plan (ELF machine ${got:-none}, expected $want). The image needs a cross compiler for it (a module names it with CC and CXX in its Dockerfile)."
+        else
+            log_warn "The compiler test built and linked the programs; for a $arch system it cannot tell their processor."
+        fi
+    done
+    rm -rf "$dir"
+    log_success "Compiler test passed: C and C++ programs for $arch, built and linked with the flags of the plan"
+}
+
+# CMake reads the toolchain file as the target stage's cmake will (script mode stops at a syntax error), and the file
+# names the system and the compilers.
+check_toolchain_file() {
+    local file="$1" key
+    if command -v cmake > /dev/null 2>&1; then
+        cmake -P "$file" > "$file.log" 2>&1 \
+            || die "The CMake toolchain file is not valid: $(tail -n 5 "$file.log" | tr '\n' ' ')"
+        rm -f "$file.log"
+    fi
+    for key in CMAKE_SYSTEM_NAME CMAKE_SYSTEM_PROCESSOR CMAKE_C_COMPILER CMAKE_CXX_COMPILER; do
+        grep -Eq "^SET\\(${key}[[:space:]]" "$file" || die "The CMake toolchain file sets no $key."
+    done
+}
+
+# A plan file is a valid shell script, and a clean shell that reads it has every name given after it.
+check_plan_file() {  # FILE NAME...
+    local file="$1" missing
+    shift
+    bash -n "$file" 2> "$file.log" || die "The build plan is not a valid shell script: $(tail -n 3 "$file.log" | tr '\n' ' ')"
+    rm -f "$file.log"
+    # shellcheck disable=SC2016  # expanded by the clean shell
+    missing="$(env -i bash --noprofile --norc -c 'set -u; source "$1"; shift; for n in "$@"; do [ -n "${!n+set}" ] || printf "%s " "$n"; done' _ "$file" "$@" 2>&1)" \
+        || die "The build plan cannot be read: $missing"
+    [ -z "$missing" ] || die "The build plan does not set: ${missing% }."
+}
+
+# ============================================================================
+# END OF VALIDATION
+# ============================================================================
+
+# The names the later stages read from the build plan (and, for a package, from its board part).
+PLAN_NAMES=(FORMAT BOARD QUANT JOB MODEL_SOURCE INPUT_FORMAT MODEL_NAME OUTPUT_DIR IMATRIX_DIR SCRATCH_DIR LLAMA_BASE
+            CONVERT_SCRIPT QUANTIZE_BIN IMATRIX_BIN BOARD_PACKAGE)
+BOARD_PLAN_NAMES=(BOARD_PACKAGE PROFILE_SOURCE HARDWARE_PROFILE TARGET_CPU PROFILE_ARCH CFLAGS CXXFLAGS CMAKE_FLAGS
+                  CMAKE_TOOLCHAIN_FILE BUILD_JOBS)
 
 # ============================================================================
 # CMAKE TOOLCHAIN GENERATION
@@ -267,18 +447,18 @@ SET(CMAKE_SYSTEM_PROCESSOR ${HW_CONFIG[ARCHITECTURE_FULL]})
 # Compiler Configuration
 EOF
 
-    # Cross-Compile Pfade (falls definiert)
+    # Cross-Compile Pfade (falls definiert): the tools find_compilers found in this image
     if [[ -n "${COMPILER_CONFIG[CROSS_PREFIX]:-}" ]]; then
         cat >> "$OUTPUT_TOOLCHAIN_FILE" << EOF
-SET(CMAKE_C_COMPILER   /usr/bin/${COMPILER_CONFIG[CROSS_PREFIX]}-gcc)
-SET(CMAKE_CXX_COMPILER /usr/bin/${COMPILER_CONFIG[CROSS_PREFIX]}-g++)
-SET(CMAKE_AR           /usr/bin/${COMPILER_CONFIG[CROSS_PREFIX]}-ar)
-SET(CMAKE_STRIP        /usr/bin/${COMPILER_CONFIG[CROSS_PREFIX]}-strip)
+SET(CMAKE_C_COMPILER   ${COMPILER_CONFIG[CC]})
+SET(CMAKE_CXX_COMPILER ${COMPILER_CONFIG[CXX]})
+SET(CMAKE_AR           ${COMPILER_CONFIG[AR]})
+SET(CMAKE_STRIP        ${COMPILER_CONFIG[STRIP]})
 EOF
     else
         cat >> "$OUTPUT_TOOLCHAIN_FILE" << EOF
-SET(CMAKE_C_COMPILER   /usr/bin/gcc)
-SET(CMAKE_CXX_COMPILER /usr/bin/g++)
+SET(CMAKE_C_COMPILER   ${COMPILER_CONFIG[CC]})
+SET(CMAKE_CXX_COMPILER ${COMPILER_CONFIG[CXX]})
 EOF
     fi
 
@@ -337,28 +517,58 @@ generate_build_config() {
         if [ -z "${HW_CONFIG[ARCHITECTURE_FULL]:-}" ]; then
             plan_line BOARD_PACKAGE 0
         else
-            echo "# Hardware profile of the board (for the package of llama-cli and llama-server, target stage)"
-            plan_line BOARD_PACKAGE 1
-            plan_line HARDWARE_PROFILE "$HARDWARE_CONFIG_FILE"
-            plan_line TARGET_CPU "${HW_CONFIG[CPU_MODEL_NAME]:-}"
-            plan_line PROFILE_ARCH "${HW_CONFIG[ARCHITECTURE_FULL]}"
-            plan_line CFLAGS "${COMPILER_CONFIG[CFLAGS]}"
-            plan_line CXXFLAGS "${COMPILER_CONFIG[CXXFLAGS]}"
-            plan_line CMAKE_FLAGS "${COMPILER_CONFIG[CMAKE_FLAGS]}"
-            plan_line CMAKE_TOOLCHAIN_FILE "$OUTPUT_TOOLCHAIN_FILE"
-            plan_line BUILD_JOBS "${COMPILER_CONFIG[BUILD_JOBS]}"
-            plan_line HW_SUPPORTS_NEON "${HW_CONFIG[SUPPORTS_NEON]:-OFF}"
-            plan_line HW_SUPPORTS_AVX2 "${HW_CONFIG[SUPPORTS_AVX2]:-OFF}"
-            plan_line HW_SUPPORTS_AVX512 "${HW_CONFIG[SUPPORTS_AVX512]:-OFF}"
-            plan_line HW_GPU_MODEL "${HW_CONFIG[GPU_MODEL]:-None}"
+            board_plan_lines
         fi
     } > "$BUILD_PLAN.tmp"
+    check_plan_file "$BUILD_PLAN.tmp" "${PLAN_NAMES[@]}"
+    if [ -n "${HW_CONFIG[ARCHITECTURE_FULL]:-}" ]; then
+        check_plan_file "$BUILD_PLAN.tmp" "${BOARD_PLAN_NAMES[@]}"
+    fi
     mv -f "$BUILD_PLAN.tmp" "$BUILD_PLAN"
     stage_output "$BUILD_PLAN"
     if [ -f "$OUTPUT_TOOLCHAIN_FILE" ]; then
         stage_output "$OUTPUT_TOOLCHAIN_FILE"
     fi
-    log_success "Build Config Script generiert"
+    log_success "Build Config Script generiert (checked: a valid shell script with every name the later stages read)"
+}
+
+# The board's part of the plan (in build_config.sh, or in the package plan of the target stage), from plan_board.
+board_plan_lines() {
+    echo "# Hardware profile of the board (for the package of llama-cli and llama-server, target stage)"
+    plan_line BOARD_PACKAGE 1
+    # profile: the board's hardware profile; defaults: none was given, the plain defaults of this target
+    plan_line PROFILE_SOURCE "$PROFILE_SOURCE"
+    if [ "$PROFILE_SOURCE" = profile ]; then
+        plan_line HARDWARE_PROFILE "$HARDWARE_CONFIG_FILE"
+    else
+        plan_line HARDWARE_PROFILE ""
+    fi
+    plan_line TARGET_CPU "${HW_CONFIG[CPU_MODEL_NAME]:-}"
+    plan_line PROFILE_ARCH "${HW_CONFIG[ARCHITECTURE_FULL]}"
+    plan_line CFLAGS "${COMPILER_CONFIG[CFLAGS]}"
+    plan_line CXXFLAGS "${COMPILER_CONFIG[CXXFLAGS]}"
+    plan_line CMAKE_FLAGS "${COMPILER_CONFIG[CMAKE_FLAGS]}"
+    plan_line CMAKE_TOOLCHAIN_FILE "$OUTPUT_TOOLCHAIN_FILE"
+    plan_line BUILD_JOBS "${COMPILER_CONFIG[BUILD_JOBS]}"
+    plan_line HW_SUPPORTS_NEON "${HW_CONFIG[SUPPORTS_NEON]:-OFF}"
+    plan_line HW_SUPPORTS_AVX2 "${HW_CONFIG[SUPPORTS_AVX2]:-OFF}"
+    plan_line HW_SUPPORTS_AVX512 "${HW_CONFIG[SUPPORTS_AVX512]:-OFF}"
+    plan_line HW_GPU_MODEL "${HW_CONFIG[GPU_MODEL]:-None}"
+}
+
+# The board: the toolchain and the flags from the hardware profile (profile) or from the plain defaults of this
+# target (defaults: a package without a profile), checked before anything uses them.
+plan_board() {  # profile | defaults
+    if [ "$1" = profile ]; then
+        load_hardware_config
+    else
+        load_plain_defaults
+    fi
+    generate_compiler_flags
+    find_compilers
+    generate_cmake_toolchain
+    check_toolchain_file "$OUTPUT_TOOLCHAIN_FILE"
+    compiler_test
 }
 
 # ============================================================================
@@ -370,9 +580,7 @@ main() {
     HARDWARE_CONFIG_FILE="${HARDWARE_CONFIG_FILE:-$BUILD_CACHE_DIR/target_hardware_config.txt}"
     rm -f "$OUTPUT_TOOLCHAIN_FILE"
     if [ -f "$HARDWARE_CONFIG_FILE" ]; then
-        load_hardware_config
-        generate_compiler_flags
-        generate_cmake_toolchain
+        plan_board profile
     fi
     generate_build_config
 }

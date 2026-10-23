@@ -164,7 +164,7 @@ sowohl `b<build_number>` als auch `build` entspricht. Alles andere folgt aus die
 | Die Einstellung `llama_cpp_version` | ihre Vorgabe wird aus `tag` abgeleitet; sie verschiebt nicht mehr, was Target-Images bauen (ein anderer Wert ergibt nur eine Warnung im Build-Log) |
 | `ARG LLAMA_CPP_TAG` und `ARG LLAMA_CPP_COMMIT` in `targets/Rockchip/dockerfile`, `targets/_template/Dockerfile` und `Dockerfile.gpu` (geprüft wird jedes `Dockerfile*` eines Targets, das sie setzt oder llama.cpp klont), `docker.build_args.LLAMA_CPP_TAG` und `LLAMA_CPP_COMMIT` in `targets/*/target.yml` | Rückfallwerte für Image-Builds außerhalb des Frameworks; müssen `tag` und `commit` entsprechen |
 | `inference_backends.llama_cpp.commit` in `project_sources.yml` und `detailed_project_sources.yml` | Nachschlagekatalog; muss `tag` entsprechen |
-| Vorgaben für `LLAMA_CPP_COMMIT` in `targets/*/modules/source_module.sh` | die mitgelieferten Stufenmodule haben keine: Ihre Stufe source meldet den Pin des Images, und `--clone-llama-cpp` (von Hand gestartet) braucht eine vollständige Commit-ID. Ein `source_module.sh` aus Version 1.x eines älteren Targets, das noch eine Vorgabe hat (Entscheidung D20), wird gemeldet, nicht geprüft |
+| `LLAMA_CPP_PIN_TAG` und `LLAMA_CPP_PIN_COMMIT` in `targets/Rockchip/modules/source_module.sh` und `targets/_template/modules/source_module.sh` | die Vorgabe von `--clone-llama-cpp` (von Hand gestartet), wenn `LLAMA_CPP_COMMIT` nicht gesetzt ist; müssen `tag` und `commit` entsprechen. In einem Build meldet die Stufe source den Pin des Images. Eine Vorgabe für `LLAMA_CPP_COMMIT` in einem `source_module.sh` aus Version 1.x eines älteren Targets (Entscheidung D20) wird gemeldet, nicht geprüft |
 
 `tests/test_build_recipe.py` schlägt fehl, wenn eine Stelle abweicht. `python scripts/llama_cpp_pin.py check` gibt
 dieselbe Tabelle aus und prüft mit `git ls-remote`, dass der Tag bei Upstream auf den festgelegten Commit zeigt. Wie
@@ -308,10 +308,14 @@ stimmen die gemeinsamen Werte überein, und es nennt elf Einträge, die nur `pro
 Der Befehl bearbeitet die Einstellung `source_repositories` in `config.yml`: `--add <Name> <URL>` speichert einen
 Eintrag, `--remove <Name>` entfernt ihn, und ohne Optionen listet er die Einträge auf. Die Build-Engine macht aus
 Einträgen der Form `{name: {url: ...}}`, wie `--add` sie speichert, und aus reinen URLs früherer Versionen
-Variablen `<NAME>_REPO_OVERRIDE` für die Stufen-Container. Die Stufe source (`source_module.sh`) warnt nur, wenn
-`LLAMA_CPP_REPO_OVERRIDE` gesetzt ist, weil ein Build das llama.cpp seines Images nutzt; nur
-`source_module.sh --clone-llama-cpp`, von Hand in einem Container mit Netzwerk gestartet, klont daraus. Praktisch
-hat die Einstellung derzeit keine Wirkung auf Builds.
+Variablen `<NAME>_REPO_OVERRIDE` für die Stufen-Container. Die Überschreibung für llama.cpp
+(`LLAMA_CPP_REPO_OVERRIDE`) ist der Ort, von dem das Image den gepinnten Commit holt: Die Engine übergibt sie als
+Build-Argument `LLAMA_CPP_REPO`, wenn das Dockerfile des Targets es annimmt und die Adresse https ohne Benutzernamen,
+Passwort, Token oder Query ist (sonst eine Warnung und Upstream), und das Image bricht weiterhin ab, wenn es nicht
+genau den gepinnten Commit bekommt; ein Spiegel ändert also, woher die Quellen kommen, nie, welche es sind. Die Stufe
+source sagt es im Build-Log, und `source_module.sh --clone-llama-cpp`, von Hand in einem Container mit Netzwerk
+gestartet, klont nach derselben Regel daraus. Die übrigen Überschreibungen erreichen die Stufen-Container, die kein
+Netzwerk haben, und ändern dort nichts.
 
 ## Weitere einzige Quellen des Projekts
 

@@ -443,7 +443,7 @@ target's defaults. A target without a capabilities block is built unchecked.
 | `--parallel` | Deprecated and hidden from `--help`: it has no effect (one call runs one build) and prints a warning. |
 | `-F, --follow` | Print each stage while the build runs. |
 | `--gpu / --no-gpu` | Pass the host's GPU into the container (default off): an NVIDIA GPU when `nvidia-smi` is found, otherwise `/dev/dri` if it exists. Rockchip conversions do not need it. |
-| `--imatrix / --no-imatrix` | Importance matrix for GGUF (default off). Required for `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`. |
+| `--imatrix / --no-imatrix` | Importance matrix for GGUF (default off). Required for `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ2_M`, `IQ3_XXS`, `IQ3_XS`, `Q2_K_S`. |
 | `--dataset PATH` | Your own calibration file (must exist): a text file for the GGUF importance matrix or for RKLLM, a list of sample inputs for RKNN `i8`. Without it, the importance matrix uses the shipped calibration text. |
 
 Behaviour:
@@ -2108,9 +2108,13 @@ such as `?private_token=`, exit code 2): `config.yml` is plain text, so keep pas
 | `--add TEXT...` | Add an override: `NAME URL`. |
 | `--remove TEXT` | Remove the override `NAME`. |
 
-The overrides have no effect on Rockchip builds: a build uses the llama.cpp of its image, and its source stage
-(`source_module.sh`) only warns when `LLAMA_CPP_REPO_OVERRIDE` is set. Only `source_module.sh --clone-llama-cpp`,
-started by hand in a container with network, clones from it.
+The override of llama.cpp (`LLAMA_CPP_REPO_OVERRIDE`, for example a mirror inside a company network) is where a
+target image fetches the pinned llama.cpp commit from: the engine passes it as the build argument `LLAMA_CPP_REPO`
+when it is an https address without a user name, password, token or query (otherwise the build log warns and the
+image fetches from upstream), and the image still stops unless it got exactly the pinned commit. The build log says
+when the override was used or why not. `source_module.sh --clone-llama-cpp`, started by hand in a container with
+network, clones from it under the same rule. The other overrides change nothing in a build: its stage containers have
+no network.
 
 In the GUI: **File > Settings...**, tab **Source repositories**: the list, **Add** (name and URL) and **Remove
 selected...** (asks first; "No" is the default).
@@ -2457,7 +2461,8 @@ llm-cli trash empty --due
 
 - `build start --optimization` has no effect on Rockchip builds (the scripts have no matching setting);
   `--parallel` is deprecated and has no effect.
-- `config repos` overrides reach builds as `<NAME>_REPO_OVERRIDE`, but the Rockchip scripts do not read them.
+- Of the `config repos` overrides only the one of llama.cpp has an effect (where the image fetches the pinned
+  commit from); the others reach builds as `<NAME>_REPO_OVERRIDE`, but the Rockchip scripts do not read them.
 - `deploy package --docker` is experimental.
 - There is no CLI command yet to choose Ditto's provider permanently; use the GUI, `config.yml` or
   `LLM_FRAMEWORK_AI_PROVIDER` (`ditto login` signs in but does not switch the provider). Browser and cloud
