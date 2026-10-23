@@ -2350,6 +2350,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **hadolint-Funde beim Build werden gezeigt statt weggeworfen** (DECISIONS Runde 23, Punkt 4): Der Build meldete
+  jedes Ergebnis seiner Dockerfile-Prüfung als „Hadolint check skipped (tool not found or failed)“ und verwarf, was
+  hadolint fand. `BuildEngine._validate_dockerfile_hadolint` führt hadolint jetzt über das neue
+  `orchestrator/utils/hadolint.py` aus (im Ordner des Dockerfiles mit seinem Dateinamen, ohne Farben, höchstens 60 s)
+  und unterscheidet: nicht installiert (ein Hinweis im Build-Log, woher du es bekommst, keine Warnung mehr), Funde
+  (eine Zusammenfassung, dann jeder Fund in klaren Worten, etwa „hadolint, Dockerfile: line 30, DL3008 (warning):
+  ...“, im Build-Log und als Fortschrittswarnung, höchstens 10 Warnungen), keine Funde (steht im Log) und ein Lauf
+  ohne Ergebnis (Absturz, Zeitüberschreitung: eine Warnung mit dem, was hadolint schrieb). Die Prüfung bleibt ein
+  Hinweis: Der Build läuft immer weiter. Der lokale hadolint-Befehl in CONTRIBUTING legt das Image per Digest fest
+  (`hadolint/hadolint:v2.15.1@sha256:32dac941...`, FRESHNESS_PLAN F-5) und nennt alle fünf Dockerfiles, die die CI
+  prüft.
 - **Ein Modell aus dem alten Download-Cache von Hugging Face funktioniert wieder im Build** (A6, „bleiben nutzbar“):
   Der Hugging-Face-Browser der GUI speicherte bisher in den eigenen Cache von huggingface_hub im Modellordner, wo eine
   Datei ein Link auf einen Blob ist, der nach seiner Prüfsumme heißt. Ein Build einer solchen GGUF-Datei band sie
@@ -2810,6 +2821,23 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
+- **`install.sh` installiert Docker nur mit Prüfsumme** (DECISIONS Runde 23, Punkt 3): Fehlte Docker, lud der
+  Installer `get.docker.com` herunter und führte es ungeprüft als root aus. Jetzt kommt Docker nur aus Dockers
+  offiziellem apt-Repository unter Debian, Ubuntu und Raspberry Pi OS (32 Bit bekommt die armhf-Pakete von Debian,
+  wie Dockers Anleitung es ab Engine 29 sagt). Der Signaturschlüssel wird in einen Wegwerf-Schlüsselbund gelesen und
+  nur vertraut, wenn der Download genau einen Schlüssel enthält, dessen Hauptfingerabdruck der aus Dockers
+  Installationsanleitung ist (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`, mit Quelle fest im Skript); apt
+  prüft danach jedes Paket gegen die signierten Paketlisten. Vor der Prüfung wird nichts geschrieben. Jedes andere
+  System, ARMv6 (Raspberry Pi 1, Zero), ein Schlüssel, der nicht passt oder sich nicht laden lässt, und ein
+  scheiterndes apt halten mit klaren Worten und dem Link zu Dockers Anleitung an; eine neue apt-Quelle, an der
+  `apt-get update` scheitert, wird wieder entfernt. Kein heruntergeladenes Skript läuft mehr. Tests führen den
+  Installer in einer Sandbox mit falschem curl, apt-get, dpkg und uname und einem echten, für den Test erzeugten
+  gpg-Schlüssel aus; `install.sh` ist ohne ShellCheck-Befund (die beiden Befunde der Basis sind mit behoben).
+- **Die Installer laden pip nicht mehr ohne Prüfsumme**: `install.sh` und `install.bat` führten vor der Installation
+  mit Hash-Prüfung `pip install --upgrade pip` aus und luden damit das neueste pip ungeprüft vom Paketindex (unter
+  Windows als Administrator). Die virtuelle Umgebung behält jetzt das pip, das mit Python kommt; es genügt für
+  `--require-hashes --no-deps`, und der Installer-Test hält jeden pip-Aufruf am Export mit Hashes fest.
+  `install.bat` lädt sonst nichts ungeprüft (winget prüft den Python-Installer gegen den SHA256 seines Manifests).
 - **Das Hugging-Face-Token geht nur an huggingface.co, auch wenn `HF_ENDPOINT` einen anderen Host nennt** (Review
   der Kette hf): huggingface_hub schickt seine API-Aufrufe an den Host in der Umgebungsvariable `HF_ENDPOINT` (einen
   Mirror). Die Commit-Abfrage des Downloads im GUI-Browser und die Hub-Liste von **Alte Downloads übernehmen…**

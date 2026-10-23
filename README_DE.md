@@ -128,9 +128,16 @@ Der Installer:
 1. prüft die Internetverbindung (HTTPS zum Paketindex `pypi.org` oder zu `PIP_INDEX_URL`, wenn du einen Spiegel
    setzt; hinter einem Proxy startest du ihn mit `sudo -E`, damit `https_proxy` erhalten bleibt) und Python
    (installiert es mit `apt`, falls es fehlt, und verlangt dann 3.11 bis 3.14),
-2. installiert Docker über `get.docker.com`, falls es fehlt, und nimmt deinen Benutzer in die Gruppe `docker` auf.
-   Er sagt, was das heißt: Wer in der Gruppe ist, steuert den Docker-Dienst, und der läuft als root; jedes
-   Programm, das als dein Benutzer läuft, kann damit Root-Rechte auf diesem Rechner bekommen
+2. installiert Docker, falls es fehlt, nur aus Dockers offiziellem apt-Repository und nur mit geprüftem Schlüssel:
+   Unter Debian, Ubuntu und Raspberry Pi OS (32 Bit bekommt die armhf-Pakete von Debian, wie Dockers Anleitung es
+   sagt) lädt er Dockers Signaturschlüssel und vertraut ihm nur, wenn die Datei genau diesen einen Schlüssel mit dem
+   Fingerabdruck aus Dockers Installationsanleitung enthält (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`,
+   fest in `install.sh`); apt prüft danach jedes Paket gegen die signierten Paketlisten. Kein heruntergeladenes
+   Skript läuft. Auf jedem anderen System, auf ARMv6 (Raspberry Pi 1, Zero) oder wenn der Schlüssel nicht passt,
+   hält er an, sagt warum und verweist auf [Dockers Installationsanleitung](https://docs.docker.com/engine/install/);
+   installiere Docker dann selbst und starte `install.sh` erneut. Danach nimmt er deinen Benutzer in die Gruppe
+   `docker` auf und sagt, was das heißt: Wer in der Gruppe ist, steuert den Docker-Dienst, und der läuft als root;
+   jedes Programm, das als dein Benutzer läuft, kann damit Root-Rechte auf diesem Rechner bekommen
    (`sudo gpasswd -d BENUTZER docker` macht es rückgängig; danach kann das Framework ohne sudo nicht bauen),
 3. kopiert die Dateien, die das Repository ausliefert, nach `/opt/llm-cross-compiler-framework` (Eigentümer ist dein
    Benutzer) und führt sie in `.lcf-installed-files` auf. Ein erneuter Aufruf aktualisiert diese Dateien und
@@ -140,7 +147,8 @@ Der Installer:
    Kopie von `install.sh` in `/opt` kopiert und entfernt nichts,
 4. legt dort eine virtuelle Umgebung (`.venv`) an und installiert die festgelegten Pakete aus
    `requirements-gui.txt` (alles aus `requirements.txt` plus PySide6 für die GUI; mit `--headless` nur
-   `requirements.txt`),
+   `requirements.txt`), jede Datei gegen ihren Hash geprüft, mit dem pip, das mit Python kommt (pip selbst wird
+   nicht aktualisiert: Das lüde es ohne Prüfsumme),
 5. legt den Starter `/usr/local/bin/llm-framework` an, der die GUI startet,
 6. richtet Dittos lokalen Modellserver ein (`llm-cli ditto runtime ensure`, als du, nie als root): standardmäßig
    direkt, in Docker, wenn du das wählst oder wenn es direkt hier nicht geht. Ist Ditto schon da, tut der Schritt
