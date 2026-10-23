@@ -712,12 +712,18 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   tools pass their own options (`local_paths`, `priority`, `output_dir`, ...) and keep only their questions and their
   rendering. `recipe.yml` is read only by `community_manager.read_recipe`. A change of the AI settings goes through
   `AISettingsChange` (`orchestrator/llm/settings_change.py`): `problems()`, the channel's own question for
-  `plain_http_url()`, then `apply()`. `tests/test_build_parity_core.py` and `tests/test_ai_settings_change.py` check
-  that no window or command goes around them. A provider, model or effort for one question or run comes from
+  `plain_http_url()`, then `apply()`. A build goes to a board only through `person_steps.deploy_build` (`llmcf deploy
+  run` and the Deployment tab: the package by `make_package`, whose reason comes back with the call, never through the
+  manager's shared `last_package_error`; the deploy; the board's trusted record with the audit row of
+  `person_steps.device_audit`), and a board's self-built runtime only through `steps.deploy_runtime_flow` (`llmcf device
+  runtime deploy`, the Boards window, the AI's `service.deploy`): each caller hands over its login as a `DeployHooks`,
+  and only the person's channels add the hooks that write the board's trusted record or ask the benchmark question.
+  `tests/test_build_parity_core.py`, `tests/test_ai_settings_change.py` and `tests/test_deploy_flow.py` check that no
+  window or command goes around them. A provider, model or effort for one question or run comes from
   `Core/ai_override.override_values(..., ditto=...)` (another provider than the saved one drops the saved provider's
-  model, address and sign-in method); the CLI sets these values with the settings source `cli`, which
-  `save_user_config` never writes. Tool calls and their results in a conversation are paired only by
-  `orchestrator/llm/tool_loop.py` (`close_open_calls`, `conversation_is_consistent`).
+  model, address and sign-in method); the CLI sets these values with the settings source `cli`, which `save_user_config`
+  never writes. Tool calls and their results in a conversation are paired only by `orchestrator/llm/tool_loop.py`
+  (`close_open_calls`, `conversation_is_consistent`).
 - The framework never asks for, reads or stores a repository token. Hand work over to GitHub through an installed
   GitHub CLI (it keeps its own sign-in) or the browser, as `llm-cli zoo export --pr` does.
 - Code adapted from another project keeps a comment that names its source ("Adapted from ...") and gets an entry

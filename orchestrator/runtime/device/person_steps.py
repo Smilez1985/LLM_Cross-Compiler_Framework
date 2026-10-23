@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 The person's own board steps (MCP design 2.7, W1' of 2026-10-16): the one code path behind `llmcf deploy devices
-list|add|remove`, `llmcf deploy devices edit` (Q5), `llmcf device list|settings` and the board contacts of
-`llmcf device runtime prune|deploy|verify`,
-and behind the GUI's Boards > Boards and Devices... window. Both are the person's channels. No tool and no AI reaches
+list|add|remove`, `llmcf deploy devices edit` (Q5), `llmcf device list|settings`, the board contacts of
+`llmcf device runtime prune|deploy|verify` and the deploy of a build (`llmcf deploy run`, deploy_build),
+and behind the GUI's Boards > Boards and Devices... window and the Deployment tab's Deploy. Both are the person's channels. No tool and no AI reaches
 this module (tests/test_board_steps.py keeps it out of the AI-reachable code): it trusts and removes boards, logs in
 with a password once, records the sudo consent and removes builds from a board.
 
@@ -527,6 +527,127 @@ def remember_board(state_dir: Path, host: str, port: int, user: str, key: Any, *
                                  actor=actor, label=label)
 
 
+def device_audit(framework: Any, state_dir: Path):
+    """The tool audit log for the person's decisions about a board: the framework's registry's log, else the per-user
+    audit.db opened with its key, as `llmcf` opens it when the framework is not booted; None when it cannot be opened
+    (the person's decision itself still holds)."""
+    audit = getattr(getattr(framework, "tool_registry", None), "audit", None)
+    if audit is not None:
+        return audit
+    try:
+        from orchestrator.Core.vault_key import audit_key
+        from orchestrator.tools.audit import AuditLog
+        return AuditLog(Path(state_dir) / "audit.db", key=audit_key(None, Path(state_dir)))
+    except Exception:  # noqa: BLE001 - the record is still written; the trust itself was the person's
+        return None
+
+
+def remember_deployed(state_dir: Path, host: str, port: int, user: str, key: Any, *, via: str, actor: str,
+                      label: Optional[str] = None, audit: Any = None, framework: Any = None):
+    """After a successful deploy of a build to a board whose host key the person trusted in this channel's question
+    (`llmcf deploy run`, the Deployment tab): its trusted record (remember_board), audited as the CLI audits it. `audit`
+    is the audit log or a function that opens it (called only now); None takes device_audit (the registry's log, else
+    the per-user one). `key` None (a deploy started without the key of its question) reads the key the board presents
+    now and records it only when the framework's known_hosts knows it. Never fails the deploy: None when nothing was
+    written."""
+    from orchestrator.remote.address import Endpoint
+    from orchestrator.remote.trust import TrustStore
+    state_dir = Path(state_dir)
+    if key is None:
+        try:
+            check = TrustStore(state_dir).check(Endpoint(host, int(port)))
+        except Exception:  # noqa: BLE001 - unreachable now: the next deployment records it
+            return None
+        if not check.known:
+            return None
+        key = check.key
+    if audit is None:
+        audit = device_audit(framework, state_dir)
+    elif callable(audit) and not hasattr(audit, "record"):
+        try:
+            audit = audit()
+        except Exception:  # noqa: BLE001 - the record itself is the person's
+            audit = None
+    return remember_board(state_dir, host, int(port), user, key, via=via, audit=audit, actor=actor, label=label)
+
+
+# --- the deploy of a build (deploy run, the Deployment tab's Deploy) -----------------------------------------------
+
+@dataclass
+class BuildDeploy:
+    """What deploy_build did: `package` the ZIP that went to the board (made now from the build, or the one given;
+    None when it could not be made), `package_error` why it could not be made (a DeployError with its reason and next
+    step; nothing was deployed then), `result` the deploy's DeployResult (None without a package) and `device` the
+    board's trusted record written after a successful deploy (None: not written)."""
+    package: Optional[Path] = None
+    package_error: Optional[Exception] = None
+    result: Any = None
+    device: Any = None
+
+
+def deploy_build(framework: Any, manager: Any, endpoint: Any, user: str, *, source: Any = None,
+                 package: Optional[Path] = None, profile: str = "", docker: bool = False, credentials: Any = None,
+                 label: Optional[str] = None, kv_cache: Optional[str] = None, wait: Optional[float] = None,
+                 on_event: Optional[Callable[[Any], None]] = None, cancel: Any = None, key: Any = None,
+                 bind_key: bool = True, via: str, actor: str, state_dir: Any = None,
+                 output_dir: Optional[Path] = None, audit: Any = None,
+                 remember: Optional[Callable[[Any], Any]] = None,
+                 on_step: Callable[[str], None] = lambda _kind: None) -> BuildDeploy:
+    """The deploy of a build to a board, one core step for `llmcf deploy run` and the Deployment tab's Deploy and
+    Deploy existing package... (the questions, the trust of a new host key, the password and the rendering stay with
+    each). The person's step only: no AI-reachable module imports this one (the AI deploys with deploy_to_device).
+
+    1. The package (`on_step("package")`): `package` as it is, else made from `source` (a build folder or a model file)
+       for the target `profile` by make_package: `docker` packs the inference image (air-gap) under the image name of
+       package_docker_config, `kv_cache` names the KV cache in the start command, and `cancel` stops it between its
+       steps; written to `output_dir` (None: the configured output folder, package_folder). A package that cannot be
+       made comes back as `package_error`; nothing is deployed then.
+    2. The deploy (`on_step("deploy")`): DeploymentManager.deploy_package to `endpoint` as `user` with `credentials`
+       (OneTimePassword: the person's one-time password, used for this deploy's logins only and never kept; KeyOnly or
+       None: the framework's key), waiting `wait` seconds for a board whose network dropped (None: the deploy's
+       default), with `on_event` its events and `cancel` (remote/session.py CancelToken) its cancel, which also holds
+       the deploy's SSH session. With `bind_key` and a `key` the board must present exactly that key (the one the
+       person was shown); without, the framework's known_hosts decides.
+    3. After a successful deploy, the board's trusted record: `remember(key)` when the caller writes it, else
+       remember_deployed (`state_dir` the per-user folder or a function that names it, asked only then; None: the
+       framework's; `label` None keeps the board's name; `audit` an audit log or a function that opens it, None: the
+       CLI's audit log)."""
+    from orchestrator.Core.deployment_manager import DeployError, make_package, package_folder
+    done = BuildDeploy(package=Path(package) if package is not None else None)
+    stop = getattr(cancel, "is_set", None)
+    if done.package is None:
+        on_step("package")
+        try:
+            done.package = make_package(manager, framework, source, profile, docker,
+                                        Path(output_dir) if output_dir is not None else package_folder(framework),
+                                        kv_cache=kv_cache, cancelled=stop)
+        except DeployError as e:
+            done.package_error = e
+            return done
+    on_step("deploy")
+    options: Dict[str, Any] = {"port": int(endpoint.port), "password": getattr(credentials, "password", None),
+                               "cancelled": stop, "on_event": on_event}
+    if callable(getattr(cancel, "hold", None)):
+        options["on_client"] = cancel.hold
+    if wait is not None:
+        options["wait_seconds"] = wait
+    if bind_key and key is not None:
+        from orchestrator.utils import ssh_trust
+        options["expect_fingerprint"] = ssh_trust.fingerprint(key)
+    done.result = manager.deploy_package(done.package, endpoint.host, user, **options)
+    if done.result.success:
+        if remember is not None:
+            done.device = remember(key)
+        else:
+            folder = state_dir() if callable(state_dir) else state_dir
+            if folder is None:
+                folder = getattr(getattr(framework, "config", None), "user_state_dir", None)
+            if folder:
+                done.device = remember_deployed(Path(folder), endpoint.host, endpoint.port, user, key, via=via,
+                                                actor=actor, label=label, audit=audit, framework=framework)
+    return done
+
+
 # --- older builds on the board (device runtime prune --on-device) ------------------------------------------------
 
 @dataclass
@@ -570,4 +691,4 @@ __all__ = ["BoardPrune", "BoardStepError", "DAMAGED_QUESTION", "SUDO_QUESTION", 
            "load_settings", "not_known_error", "previous_build", "read_host_key", "record_consent", "remember_board",
            "remove_board_builds", "remove_trust", "settings_to_change", "trusted_rows", "unreachable_error",
            "BoardChange", "CHANGE_QUESTION", "change_board", "change_lines", "framework_key_logs_in",
-           "moved_lines", "plan_board_change"]
+           "moved_lines", "plan_board_change", "BuildDeploy", "deploy_build", "device_audit", "remember_deployed"]

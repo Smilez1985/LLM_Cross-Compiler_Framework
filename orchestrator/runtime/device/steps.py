@@ -9,6 +9,10 @@ short benchmark and whether an untrusted one may run) and returns facts. Nothing
 logs in or pairs a board: the caller connects (with its own trust rules) and hands over the shell. The library errors
 (PlanError, SourceError, BuildFailed, StoreError, PackageError, RemoteError, SettingsError) reach the caller as they
 are, so every caller keeps its own words for them.
+
+The deploy of the runtime is one flow for all three callers (deploy_runtime_flow, consolidation c3-deploy-flow): the
+caller hands over its login, and, in the person's channels only, the board's trusted record and the benchmark's
+question, as hooks (DeployHooks); the flow runs the steps in the one order.
 """
 
 from dataclasses import dataclass
@@ -243,6 +247,118 @@ def install_runtime(shell: Any, *, state_dir: Path, device_id: str, profile: Any
     return InstallOutcome(result, report, True, record)
 
 
+# --- the deploy of the runtime: one flow for every caller ------------------------------------------------------------
+
+class NotBuilt(RuntimeError):
+    """The runtime of the board's plan is not built yet (`llmcf device runtime build` builds it)."""
+
+
+class RootUser(RuntimeError):
+    """The SSH user on the board is root: the runtime never runs as root (refused before anything is asked or changed;
+    deploy_runtime refuses it again on its own)."""
+
+
+@dataclass
+class StoredRuntime:
+    plan: Any        # the BuildPlan of the board's profile
+    builds: Any      # BuildStore
+    build: Any       # the stored build of that plan
+    devices: Any     # the board's DeviceRuntimeStore
+    packaged: Any    # its checked tarball
+
+
+def stored_runtime(state_dir: Path, device_id: str, profile: Any, source: Callable[[], Any]) -> StoredRuntime:
+    """The stored build of the board's plan and its checked tarball, found before any contact with the board (`llmcf
+    device runtime deploy` and the Boards window; the AI's deploy builds instead, service.ensure_build): PlanError when
+    the board gets no plan, NotBuilt when the plan's build is not stored, PackageNeedsSource or PackageError when its
+    tarball must be packaged again and cannot be (`source()` names the pin, asked only then)."""
+    from orchestrator.runtime.build.store import BuildStore
+    plan = plan_runtime(profile)
+    builds = BuildStore(state_dir)
+    build = builds.find(plan)
+    if build is None:
+        raise NotBuilt("the runtime for this device is not built yet")
+    devices, packaged = ensure_package(state_dir, device_id, builds, build, source)
+    return StoredRuntime(plan=plan, builds=builds, build=build, devices=devices, packaged=packaged)
+
+
+@dataclass
+class DeployHooks:
+    """What the caller of deploy_runtime_flow decides; the flow itself trusts, pairs, asks and prints nothing.
+
+    - `open_board()` logs in with the caller's own trust rules and returns (board session, the host key it presented):
+      the person's channels through person_steps.connect_stored (a one-time password may pair the board once), the
+      AI's service.deploy through service.connect (the trusted key only, KeyOnly credentials).
+    - `remember(key)` writes the board's trusted record right after that login: the person's channels only (D7,
+      decision 2; no AI-reachable code passes it, tests/test_deploy_flow.py checks service.py).
+    - `choose_bench(shell, home)` the short benchmark's model (choose_bench_model with the person's consent in the
+      audit log before an untrusted model runs); None: no benchmark (the AI's deploy).
+    - `tested_on(report, digest, build_id, kv_cache)` records a passed deploy whose benchmark ran as "tested on" the
+      board (N3) with the builds of its model and returns what it recorded; `digest` is None when the model did not
+      run. None: nothing is recorded.
+    - `progress(text)` gets the install's sentences; `check_cancel()` raises the caller's own cancel right before the
+      install starts.
+    - `refuse_root`: the board's facts are read first and an SSH user that is root ends the flow with RootUser before
+      any question (the person's channels; the AI's deploy leaves that refusal to deploy_runtime, whose words reach the
+      AI as the device's text, as before)."""
+    open_board: Callable[[], Any]
+    remember: Optional[Callable[[Any], Any]] = None
+    choose_bench: Optional[Callable[[Any, str], "BenchChoice"]] = None
+    tested_on: Optional[Callable[[Any, Optional[str], str, Optional[str]], Any]] = None
+    progress: Say = lambda _m: None
+    check_cancel: Callable[[], None] = lambda: None
+    refuse_root: bool = True
+
+
+@dataclass
+class RuntimeDeploy:
+    """What deploy_runtime_flow did: the install's outcome (the record is saved when it passed), the short benchmark's
+    model, the KV-cache choice of the deploy settings, and what `tested_on` returned (None: nothing recorded)."""
+    outcome: InstallOutcome
+    bench: BenchChoice
+    kv: Any
+    tested: Any = None
+
+
+def deploy_runtime_flow(state_dir: Path, device_id: str, profile: Any, settings: Any, *, hooks: DeployHooks,
+                        build: Any, packaged: Any, source: Any, arch: Optional[str] = None) -> RuntimeDeploy:
+    """The deploy of the board's self-built runtime, one flow for `llmcf device runtime deploy`, the Boards window's
+    Deploy runtime... and the AI's deploy_device_runtime (service.deploy): the login (`hooks.open_board`), the board's
+    trusted record (`hooks.remember`, the person's channels only), the board's facts with the refusal of root and the
+    short benchmark's model (`hooks.choose_bench`), the caller's cancel, then install_runtime (the new build is checked
+    in its own folder and activated only when it passes; its record is saved), the session closed in every case, and
+    the "tested on" record of a passed deploy (`hooks.tested_on`). `build` and `packaged` are the stored build and its
+    tarball (stored_runtime, or the AI's service.ensure_build); `arch` the plan's architecture (None: the build's).
+    RootUser, the board session's errors (RemoteError, the session's SessionFailure and Stopped) and whatever a hook
+    raises reach the caller as they are, so every caller keeps its own words."""
+    from orchestrator.runtime.device.remote import RemoteShell, read_facts
+    kv = settings.kv_choice(profile)
+    if arch is None:
+        arch = str((build.plan.get("target") or {}).get("arch") or profile.arch)
+    session, key = hooks.open_board()
+    try:
+        if hooks.remember is not None:
+            hooks.remember(key)
+        shell = RemoteShell(session)
+        bench = BenchChoice()
+        if hooks.refuse_root or hooks.choose_bench is not None:
+            facts = read_facts(shell)
+            if hooks.refuse_root and facts.uid == 0:
+                raise RootUser("the SSH user on the device is root: the runtime never runs as root")
+            if hooks.choose_bench is not None:   # asked before anything changes on the board (decision D23)
+                bench = hooks.choose_bench(shell, facts.home)
+        hooks.check_cancel()
+        outcome = install_runtime(shell, state_dir=state_dir, device_id=device_id, profile=profile, settings=settings,
+                                  build=build, packaged=packaged, source=source, arch=arch, kv_cache=kv.kind,
+                                  bench=bench, say=hooks.progress)
+    finally:
+        session.close()
+    tested = None
+    if outcome.ok and hooks.tested_on is not None:
+        tested = hooks.tested_on(outcome.report, bench.digest if bench.allowed else None, build.build_id, kv.kind)
+    return RuntimeDeploy(outcome=outcome, bench=bench, kv=kv, tested=tested)
+
+
 def deployed_verify_plan(state_dir: Path, record: Dict[str, Any], plan_of_profile: Callable[[], Any]) -> Dict:
     """The checks a deployed build is verified with: the ones of its stored build, else those of the plan the board's
     profile gives now (`plan_of_profile()`, called only then)."""
@@ -274,7 +390,8 @@ def check_lines(report: Any) -> List[Dict[str, Any]]:
     return [{"name": c.name, "ok": c.ok, "detail": c.detail} for c in (report.checks if report is not None else [])]
 
 
-__all__ = ["BenchChoice", "BuildCancelled", "InstallOutcome", "PackageNeedsSource", "RuntimeBuild", "SourceDeclined",
-           "build_runtime", "catalog_model_digests", "check_lines", "check_runtime", "choose_bench_model",
+__all__ = ["BenchChoice", "BuildCancelled", "DeployHooks", "InstallOutcome", "NotBuilt", "PackageNeedsSource",
+           "RootUser", "RuntimeBuild", "RuntimeDeploy", "SourceDeclined", "StoredRuntime", "build_runtime",
+           "catalog_model_digests", "check_lines", "check_runtime", "choose_bench_model", "deploy_runtime_flow",
            "deployed_verify_plan", "ensure_package", "install_runtime", "older_package_count", "plan_runtime",
-           "plan_view", "runtime_status", "utc_stamp"]
+           "plan_view", "runtime_status", "stored_runtime", "utc_stamp"]
