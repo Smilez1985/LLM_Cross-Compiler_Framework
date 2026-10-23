@@ -257,7 +257,7 @@ cuda:
 # digests: the manifest lists on Docker Hub, checked 2026-10-11.
 build_bases:
   - {id: debian-11, libc: glibc, libc_version: "2.31", gcc: "10.2", image: "debian:11-slim@sha256:e5b6442dd2e9684cf5e87d8338b5968f3b348636fc0be6d7850a381e3731a2bd"}
-  - {id: ubuntu-22.04, libc: glibc, libc_version: "2.35", gcc: "11.4", image: "ubuntu:22.04@sha256:5ec03bb3441e8b0bf3b4f9cd4629a1ae763010dc3035bb8da3ae6cf026486401"}
+  - {id: ubuntu-22.04, libc: glibc, libc_version: "2.35", gcc: "11.4", image: "ubuntu:22.04@sha256:0a9887931b0e38af2e3487ed39e29436b0535c4f3f52e57745baaf79d1898956"}
   - {id: debian-12, libc: glibc, libc_version: "2.36", gcc: "12.2", image: "debian:12-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587"}
   - {id: ubuntu-24.04, libc: glibc, libc_version: "2.39", gcc: "13.3", image: "ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55"}
   - {id: debian-13, libc: glibc, libc_version: "2.41", gcc: "14.2", image: "debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f"}

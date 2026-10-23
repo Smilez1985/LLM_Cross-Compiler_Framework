@@ -32,7 +32,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [scan](#scan): Hardware-Probe
 - [device](#device): `list`, `settings`, `runtime`
 - [config](#config): `show`, `output-folder`, `repos`
-- [zoo](#zoo): `list`, `show`, `install`, `verify`, `export`, `keys`
+- [zoo](#zoo): `list`, `show`, `install`, `verify`, `export`, `keys`, `maintainer`
 - [trash](#trash): `list`, `restore`, `empty`
 - [Bekannte Einschränkungen](#bekannte-einschränkungen)
 
@@ -150,6 +150,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `zoo list` / `zoo show` | Den Community-Zoo und die installierten Pakete auflisten / einen Eintrag zeigen |
 | `zoo install` / `zoo verify` | Ein Community-Paket nach Prüfungen und deiner Bestätigung installieren / installierte Pakete oder eine Paketdatei prüfen |
 | `zoo export` / `zoo keys` | Ein signiertes Paket aus deinem Target, Build oder deiner Wissensbasis machen (und einen Pull-Request öffnen) / deine öffentlichen Schlüssel zeigen |
+| `zoo maintainer key` / `review` / `revoke` | Für den Maintainer des Community-Repositorys: den Signaturschlüssel des Index anlegen / Beiträge prüfen und veröffentlichen / ein veröffentlichtes Paket zurückziehen |
 
 ---
 
@@ -2531,6 +2532,59 @@ llm-cli zoo keys > my.keys
 # encrypted packs (llm-cli zoo export --to) or check your signed packs.
 age1<58 Zeichen>
 ed25519:<base64>
+```
+
+### zoo maintainer
+
+```
+llm-cli zoo maintainer key NAME [--save DATEI]
+llm-cli zoo maintainer review [ITEM] [--review-dir ORDNER] [--key NAME] [--trust community|verified] [--title T]
+llm-cli zoo maintainer revoke KIND ID --reason TEXT [--version V | --sha256 S] [--key NAME]
+```
+
+Unveröffentlicht. Für den Maintainer des Community-Repositorys (`community_repo`), nicht für Benutzer. GitHub wird mit
+deinem eigenen Login der GitHub CLI (`gh`) und git erreicht, beide installiert und angemeldet (`gh auth login`); das
+Framework liest, speichert und zeigt nie einen Token. Kein KI-Client und kein Weg von Ditto erreicht diese Befehle. Jeder
+Schritt wird ausgegeben und ins Audit-Log geschrieben; Strg+C bricht vor dem nächsten Schritt ab, bis zum letzten
+Merge (nach dem Push schließt es auch den eigenen Pull Request der Veröffentlichung und löscht seinen Branch). Eine
+Ablehnung sagt, was auf GitHub bis dahin geschehen ist, und nennt den nächsten Schritt.
+
+- **`key NAME`** (einmalig): ein neuer Ed25519-Signaturschlüssel für den Index im Schlüsselbund des Betriebssystems
+  (Dienst `lcf-community-index`). Ein Name, den es schon gibt, wird abgelehnt; ein Schlüssel wird nie ersetzt. Der
+  Befehl gibt den Eintrag für `configs/community_keys.yml` aus (zwei Jahre gültig); `--save DATEI` schreibt ihn
+  zusätzlich in eine Textdatei (eine vorhandene Datei wird abgelehnt, bevor ein Schlüssel entsteht). Wähle einen
+  Namen, der nicht dein persönlicher Name ist, zum Beispiel `lcf-community-2026`: er steht im öffentlichen Eintrag.
+- **`review`** ohne ITEM listet die offenen Pull Requests, die Pakete unter `contributions/<kind>/` hinzufügen, mit dem
+  Stand der Pflichtprüfung `validate`, und die dort gemergten, noch nicht veröffentlichten Pakete
+  (`main:contributions/...`).
+- **`review ITEM`** (eine Pull-Request-Nummer wie `7` oder `#7`, oder `main:contributions/KIND/DATEI.zip`): holt die
+  Pakete dieses Commits in den lokalen Klon im benutzereigenen Ordner, prüft jedes mit `zoo verify` und gibt jede Datei
+  des Pakets aus (`pack.json`, `pack.sig`, jede Datei und jedes andere Element der Paket-Datei; versteckte Zeichen
+  erscheinen als Escape). Ein Pull Request, der außer neuen Paketen unter `contributions/<kind>/` noch etwas ändert
+  oder in einen anderen Branch als `main` geht, wird nicht veröffentlicht; die Prüfung nennt diese Änderung. Mit
+  `--review-dir ORDNER` werden die Dateien stattdessen in diesen neuen oder leeren Ordner geschrieben, damit du sie
+  dort liest. Dann fragt er „Publish?“ („Nein“ ist die Vorgabe; ohne Terminal wird nichts veröffentlicht). Ja mergt
+  den Beitrag (nur wenn seine Prüfung bestanden ist und sein Stand der geprüfte Commit ist), verschiebt das Paket nach
+  `packs/<kind>/`, trägt es mit der Raw-Adresse, dem Vertrauen (`--trust`, Vorgabe `community`; `verified` nur, wenn
+  jemand anderes als der Autor das Paket nachgebaut hat) und dem Titel (`--title`, bei einem Beitrag mit einem Paket;
+  Vorgabe die Paket-ID) in den Index ein, erhöht Version und Zeit des Index, signiert `index.json` mit dem Schlüssel
+  (`--key`, Vorgabe der zuletzt benutzte), committet auf einem neuen Branch, pusht ihn, öffnet einen Pull Request,
+  wartet auf die Pflichtprüfung und mergt ihn. Nichts wird nach `main` gepusht.
+- **`revoke KIND ID --reason TEXT`**: zieht jede Version der ID, eine Version (`--version`) oder genau eine Datei
+  (`--sha256`, aus dem Index) zurück, mit dem Grund, den alle sehen, nach der Frage „Revoke ...?“ („Nein“ ist die
+  Vorgabe); der Rückzug kommt auf demselben Weg in den signierten Index. Der Eintrag bleibt, damit der Hub ihn als
+  zurückgezogen zeigt.
+
+In der GUI: **Tools > Community Hub öffnen > Maintainer**: **1. Signaturschlüssel anlegen...** (mit **Kopieren** und
+**Speichern...**), **2. Prüfen und veröffentlichen: Beiträge laden**, **Auswahl prüfen** (Dateiliste und
+schreibgeschützte Textansicht), **Vertrauen**, **Titel** und **Veröffentlichen...**, **3. Veröffentlichtes Pack
+zurückziehen...**, der **Name des Signaturschlüssels** und **Abbrechen**.
+
+```bash
+llm-cli zoo maintainer key lcf-community-2026 --save lcf-community-2026.public-key.txt
+llm-cli zoo maintainer review
+llm-cli zoo maintainer review 7 --review-dir ../review-7
+llm-cli zoo maintainer revoke target Rockchip --version 1.0.0 --reason "breaks the RK3588 build"
 ```
 
 ---

@@ -247,15 +247,18 @@ class VerifyResultsDialog(_Dialog):
 # --- zoo keys ---------------------------------------------------------------------------------------------------------
 
 class PublicKeysDialog(_Dialog):
-    """The person's public keys (not secret) with Copy and Save...; the private keys are never shown."""
+    """The person's public keys (not secret) with Copy and Save...; the private keys are never shown. The Maintainer
+    tab shows the public entry of a new index signing key with it too (intro, title_key, file_name, name)."""
 
-    def __init__(self, text: str, parent: Optional[QWidget] = None, lang: Optional[str] = None):
-        super().__init__(parent, lang, "zoo.keys.title")
-        self.setObjectName("dlg_zoo_keys")
+    def __init__(self, text: str, parent: Optional[QWidget] = None, lang: Optional[str] = None, *,
+                 intro: Optional[str] = None, title_key: str = "zoo.keys.title",
+                 file_name: str = "lcf-public-keys.keys", name: str = "dlg_zoo_keys"):
+        super().__init__(parent, lang, title_key)
+        self.setObjectName(name)
         self.resize(760, 300)
-        self.text = text
+        self.text, self.title_key, self.file_name = text, title_key, file_name
         layout = QVBoxLayout(self)
-        layout.addWidget(plain_label(self._t("zoo.keys.intro")))
+        layout.addWidget(plain_label(intro if intro is not None else self._t("zoo.keys.intro")))
         self.view = _mono(QPlainTextEdit(self))
         self.view.setObjectName("txt_zoo_keys")
         self.view.setPlainText(text)
@@ -275,7 +278,7 @@ class PublicKeysDialog(_Dialog):
         self.status.setText(self._t("zoo.keys.copied"))
 
     def save(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, self._t("zoo.keys.title"), "lcf-public-keys.keys", KEY_FILE_FILTER)
+        path, _ = QFileDialog.getSaveFileName(self, self._t(self.title_key), self.file_name, KEY_FILE_FILTER)
         if not path:
             return
         try:

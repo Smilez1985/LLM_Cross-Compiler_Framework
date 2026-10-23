@@ -320,4 +320,5 @@ def test_text_modules_are_merged_and_never_replace_a_key(monkeypatch):
                                              "orchestrator.utils.l10n_main", "orchestrator.utils.l10n_shell",
                                              "orchestrator.utils.l10n_activity", "orchestrator.utils.l10n_hf",
                                              "orchestrator.utils.l10n_ditto_setup",
-                                             "orchestrator.utils.l10n_glossary"}
+                                             "orchestrator.utils.l10n_glossary",
+                                             "orchestrator.utils.l10n_maintainer"}

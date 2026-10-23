@@ -3334,21 +3334,86 @@ signierten Index und verlassen diesen Rechner nur als lokale Datei, die du selbs
 
 ### Werkzeuge für Maintainer
 
-Für das Community-Repository, nicht für Benutzer:
+Für den Maintainer des Community-Repositorys (`community_repo`), nicht für Benutzer. **Tools > Community Hub öffnen >
+Maintainer** und `llm-cli zoo maintainer` ([CLI_Usage](CLI_Usage_DE.md#zoo-maintainer)) erledigen die Arbeit
+in drei Aktionen, mit einer Implementierung für beide (`orchestrator/Core/community_maintainer.py`). GitHub wird mit
+deinem eigenen Login der GitHub CLI (`gh`) und git erreicht; das Framework liest, speichert und zeigt nie einen Token.
+Nichts davon ist für eine KI erreichbar: kein MCP-Tool, kein Weg von Ditto und kein anderes Tool ruft es auf (ein Test
+sichert das ab).
 
-- `scripts/zoo_sign_index.py keygen <Name>` erzeugt einen Ed25519-Signaturschlüssel im Schlüsselbund des
-  Betriebssystems und gibt seinen Eintrag für `configs/community_keys.yml` aus (zwei Jahre gültig).
-  `entry <pack.zip> --url <https-Adresse>` prüft ein Pack und gibt seinen Eintrag für den Index aus.
-  `sign index.json --key <Name> [--previous <alte index.json>]` prüft den Index (seine Version muss höher sein als
-  die vorige) und schreibt `index.json.sig`. Um ein Pack zu sperren, nimmst du es in `revoked` auf, erhöhst die
-  Version und signierst erneut.
-- `scripts/community_repo/validate-contribution.yml` ist eine Vorlage für einen CI-Workflow des
-  Community-Repositorys. Bei jedem Pull Request unter `contributions/` nimmt sie nur `.zip`-Pack-Dateien bis 5 MB an
-  und führt `llm-cli zoo verify` für jede aus, dessen Datenschutz-Bereinigung auch ein Pack mit einem Schlüssel in
-  einer seiner Dateien abweist (der Secret-Scan des Repositorys überspringt Binärdateien und läuft deshalb nicht über
-  die ZIP-Dateien). Ein Maintainer prüft und übernimmt das Pack, trägt es in `index.json` ein und signiert den Index
-  offline; der Signaturschlüssel kommt nie in die CI. Der Maintainer trägt das Framework-Release ein, mit dem die
-  Packs geprüft werden (`LCF_REF`); bis dahin steht in der Vorlage ein Platzhalter, und der Job schlägt fehl.
+1. **Signaturschlüssel anlegen...** (einmalig; `zoo maintainer key NAME`): ein neuer Ed25519-Signaturschlüssel für
+   den Index im Schlüsselbund des Betriebssystems (Dienst `lcf-community-index`). Ein Name, den es schon gibt, wird
+   abgelehnt: ein Schlüssel wird nie ersetzt. Sein öffentlicher Eintrag für `configs/community_keys.yml` (zwei Jahre
+   gültig) wird mit **Kopieren** und **Speichern...** (`--save DATEI`) gezeigt; er erreicht alle mit dem nächsten
+   Framework-Release.
+2. **Prüfen und veröffentlichen** (`zoo maintainer review [ITEM]`): **Beiträge laden** listet die offenen Pull
+   Requests, die Packs unter `contributions/<kind>/` hinzufügen, mit dem Stand der Pflichtprüfung `validate`, und
+   Packs, die dort gemergt, aber noch nicht veröffentlicht sind. **Auswahl prüfen** holt die Packs vom Stand des Pull
+   Requests in einen lokalen Klon des Repositorys im benutzereigenen Ordner, prüft jedes mit `zoo verify` und zeigt
+   jede Datei (`pack.json`, `pack.sig`, jede Datei des Packs und jedes andere Element der Pack-Datei) in einer Liste
+   mit einer schreibgeschützten Textansicht (die CLI gibt sie aus oder schreibt sie mit `--review-dir` in einen neuen
+   oder leeren Ordner, den du nennst). Von hier werden nur neue Pack-Dateien unter `contributions/<kind>/` gemergt:
+   Ein Pull Request, der auch etwas anderes ändert (den Prüf-Workflow, den Index, eine README, eine Löschung) oder in
+   einen anderen Branch als `main` geht, wird nicht veröffentlicht, und die Prüfung nennt diese Änderung.
+   **Veröffentlichen...** fragt „Veröffentlichen?“ („Nein“ ist die Vorgabe). Bei Ja wird der Beitrag
+   gemergt (nur wenn die Prüfung bestanden ist und sein Stand noch der geprüfte Commit ist), der Klon aktualisiert,
+   das Pack nach `packs/<kind>/` verschoben, sein Index-Eintrag bekommt die Raw-Adresse
+   (`https://raw.githubusercontent.com/<repo>/main/packs/<kind>/<datei>`), das Vertrauen (`community`, oder
+   `verified`, wenn jemand anderes als der Autor es nachgebaut hat) und den Titel, die Version des Index wird erhöht
+   und seine Zeit gesetzt, `index.json` mit dem Schlüssel aus dem Schlüsselbund signiert, und diese Änderung auf einem
+   neuen Branch (`lcf-publish-...`) committet, gepusht, als Pull Request geöffnet und gemergt, sobald die
+   Pflichtprüfung bestanden ist. Nichts wird je nach `main` gepusht (der Branch ist geschützt), und jeder Merge legt
+   den geprüften Commit fest.
+3. **Veröffentlichtes Pack zurückziehen...** (`zoo maintainer revoke KIND ID --reason ... [--version V | --sha256
+   S]`): der Rückzug (genau eine Datei, eine Version oder jede Version der ID, mit dem Grund, den alle sehen) kommt auf
+   demselben Weg in den signierten Index. Der Eintrag bleibt, damit der Hub das Pack als zurückgezogen zeigt.
+
+Jeder Schritt wird gezeigt, sobald er geschieht, und ins Audit-Log geschrieben (Tool `zoo_maintainer`; ohne Audit-Log
+beginnt nichts). **Abbrechen** (Strg+C im Terminal) hält vor dem nächsten Schritt an, bis zum letzten Merge; nach
+dem Push schließt es auch den eigenen Pull Request der Veröffentlichung und löscht seinen Branch, damit nichts halb
+Veröffentlichtes zurückbleibt (ein gemergter Beitrag wartet unter `contributions/` und steht wieder in der Liste).
+Bevor etwas signiert wird, muss sich der Index auf `main` mit deinem Schlüssel oder einem vertrauenswürdigen Schlüssel dieses
+Frameworks prüfen lassen. Eine Ablehnung nennt den Grund, was auf GitHub bis dahin geschehen ist (zum Beispiel ein Pull
+Request, der offen bleibt) und den nächsten Schritt: kein `gh` oder `git`, nicht angemeldet (`gh auth login`), offline,
+eine nicht bestandene Prüfung, ein Pack, das `zoo verify` ablehnt, eine veröffentlichte Datei gleichen Namens, ein Klon
+mit eigenen Änderungen (sie werden nie verworfen).
+
+- Von Hand: `scripts/zoo_sign_index.py`, eine dünne Hülle über denselben Code, legt den Schlüssel an
+  (`keygen <Name>`), gibt den Index-Eintrag eines geprüften Packs aus (`entry <pack.zip> --url <https-Adresse>`) und
+  signiert einen Index (`sign index.json --key <Name> [--previous <alte index.json>]`; die Version muss höher sein als
+  die vorige).
+- `scripts/community_repo/validate-contribution.yml` ist die Vorlage für den CI-Workflow des Community-Repositorys.
+  Sie läuft bei jedem Pull Request in `main` (sie ist die Pflichtprüfung `validate` des geschützten `main`) und kommt
+  immer aus `main` selbst (`pull_request_target`): Ein Pull Request aus einem Fork kann die Prüfung, die ihn prüft,
+  nicht umschreiben. Der Job liest nur (`contents: read`, kein Secret, kein Cache, sein einziger Checkout, der des
+  Frameworks, behält keine Zugangsdaten). Die Dateien des Pull Requests sind nur Daten und werden nie ausgecheckt:
+  Nachdem das Framework installiert ist, werden `main` und der Head-Commit (über seine ID) still und ohne Zugangsdaten
+  in ein Repository ohne Arbeitsverzeichnis geholt, also wird keine Datei des Pull Requests je ausgeschrieben, nichts
+  davon wird ausgeführt, eingelesen (`source`), installiert oder importiert, und die Schritte lesen es nur mit git
+  (ein Checkout würde auch den Betreff des Commits ausgeben, in dem ein Wagenrücklauf einen Workflow-Befehl beginnt);
+  nichts, was der Pull Request festlegt (Titel, Branch, Commit-Nachrichten, Dateinamen), wird in ein Skript
+  geschrieben. Die Änderungen berechnet git zwischen `main` und dem Head-Commit (ab ihrer einen Merge-Basis, so wie
+  GitHub sie zusammenführt: Ein Pull Request ohne oder mit mehr als einer Merge-Basis mit `main` fällt durch, weil der
+  Merge von GitHub dann Basen verbindet, die die Prüfung nicht sieht; ein Verschieben zählt als Löschen und
+  Hinzufügen). Ein Dateiname mit einem Steuerzeichen, ein symbolischer Link, eine ausführbare Datei oder ein Submodul
+  fällt für jeden durch. Ein Pull Request von jemand anderem als dem Besitzer des Repositorys, einem Mitglied oder
+  einem Collaborator darf nur Pack-Dateien `contributions/<kind>/<name>.zip` hinzufügen; alles andere, was er
+  hinzufügt, ändert oder löscht (den Workflow, `index.json`, `packs/`, eine README, auch die README eines
+  Kind-Ordners, eine Löschung), fällt durch, und der Fehler nennt die Datei. Die übrigen Änderungen des Besitzers,
+  eines Mitglieds oder eines Collaborators, etwa die Veröffentlichung des Maintainers (das Pack nach `packs/`
+  verschoben, der signierte Index geändert), erscheinen als Hinweise und bestehen. Jedes hinzugefügte Pack, egal von
+  wem, wird aus den Objekten von git kopiert und muss höchstens 5 MB groß sein und `llm-cli zoo verify` bestehen,
+  dessen Datenschutz-Bereinigung auch ein Pack mit einem Schlüssel in einer seiner Dateien abweist (der Secret-Scan des
+  Repositorys überspringt Binärdateien und läuft deshalb nicht über die ZIP-Dateien); was es ausgibt, wird nie als
+  Workflow-Befehl gelesen. Der Signaturschlüssel kommt nie in die CI. Der Maintainer trägt das Framework-Release ein,
+  mit dem die Packs geprüft werden (`LCF_REF`); bis dahin steht in der Vorlage ein Platzhalter, und der Job schlägt
+  fehl. Das Repository braucht außerdem eine Einstellung: Ein Pull Request kann immer noch einen eigenen Workflow
+  mitbringen, der bei `pull_request` läuft und einen Job namens `validate` hat; unter Settings > Actions > General muss
+  "Approval for running fork pull request workflows from contributors" deshalb auf "Require approval for all external
+  contributors" stehen (diese Prüfung braucht keine Freigabe, und der Workflow-Lauf eines Forks wird nie
+  freigegeben). Diese Fassung in eine Kopie bringen, die noch bei `pull_request` läuft: Der Pull Request, der sie
+  ändert, bekommt von keiner der beiden Kopien ein `validate`; ergänze deshalb in genau diesem Pull Request
+  `pull_request:` neben `pull_request_target:` und entferne es im direkt folgenden wieder.
 
 ### Was entfernt wurde
 

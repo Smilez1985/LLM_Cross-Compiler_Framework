@@ -19,6 +19,10 @@ MOUSE_LABELS = {
     "btn_zoo_export": (_HUB, "zoo.export"),
     "btn_zoo_keys": (_HUB, "zoo.keys"),
     "tbl_zoo_packs": (_HUB, "main.hub.install"),   # the Install button in the pack's row
+    "btn_zoo_refresh": (_HUB, "zoo.refresh"),
+    # the Maintainer tab of the Community Hub (orchestrator/gui/community_maintainer.py, the maintainer's own actions)
+    "pnl_zoo_maintainer": (_HUB, "zoo.maint.tab"),
+    "btn_zoo_maint_load": ("pnl_zoo_maintainer", "zoo.maint.load"),
 }
 
 STEPS = (
@@ -38,6 +42,11 @@ STEPS = (
     Step("knowledge.sources", cli="knowledge sources", tool="list_knowledge_sources", window="knowledge_sources",
          target="act_knowledge_sources", runnable=True),
     Step("hub.open", cli="zoo", tool="list_packs", window="community_hub", target=_HUB),
+    Step("hub.refresh", cli="zoo list --refresh", cli_args=("--refresh",), tool="list_packs", window="community_hub",
+         target="btn_zoo_refresh"),
+    # the community repository's maintainer only (orchestrator/Core/community_maintainer.py: no AI path reaches it)
+    Step("maint.review", cli="zoo maintainer review", person_only="permission", window="community_hub",
+         target="btn_zoo_maint_load"),
     Step("pack.passphrase", cli="zoo install --passphrase", cli_args=("--file", "{file}", "--passphrase"),
          params={"file": Param("path")}, person_only="secret", window="community_hub",
          target="btn_zoo_import"),
@@ -75,6 +84,8 @@ TEXTS = {
         "step.knowledge.sources.what": "Lists every source of the knowledge base with its kind, licence and "
                                        "copyright notice.",
         "step.hub.open": "Open the Community Hub",
+        "step.hub.refresh": "Download the signed index of the Community Hub again",
+        "step.maint.review": "List the contributions that wait for the maintainer",
         "step.pack.passphrase": "Install the pack with its passphrase",
         "step.pack.reinstall": "Install the pack again from the Community Hub",
         "step.pack.install_file": "Install a pack file",
@@ -101,6 +112,8 @@ TEXTS = {
         "step.knowledge.sources.what": "Listet jede Quelle der Wissensdatenbank mit Art, Lizenz und "
                                        "Urheberrechtshinweis.",
         "step.hub.open": "Den Community Hub öffnen",
+        "step.hub.refresh": "Den signierten Index des Community Hubs erneut laden",
+        "step.maint.review": "Die Beiträge auflisten, die auf den Maintainer warten",
         "step.pack.passphrase": "Das Paket mit seiner Passphrase installieren",
         "step.pack.reinstall": "Das Paket erneut aus dem Community Hub installieren",
         "step.pack.install_file": "Eine Paketdatei installieren",

@@ -81,6 +81,38 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   **Allgemein**, in dem du stattdessen „Sie“ wählst (Einstellung `form_of_address`), sofort wirksam, auch für die
   nächsten Schritte. Größen im Löschdialog folgen deiner
   Sprache („1,5 GB“ auf Deutsch).
+- **Aktionen für den Maintainer des Community-Repositorys** (Entscheidung vom 2026-10-22: die Arbeit des Maintainers
+  als wenige Klicks statt einer Anleitung): **Tools > Community Hub öffnen > Maintainer** und
+  `llm-cli zoo maintainer key|review|revoke`, eine Implementierung in `orchestrator/Core/community_maintainer.py`
+  (`scripts/zoo_sign_index.py` ist jetzt eine dünne Hülle darüber). **Signaturschlüssel anlegen** (einmalig) legt den
+  Signaturschlüssel des Index im Schlüsselbund des Betriebssystems an (ein Name, den es schon gibt, wird abgelehnt)
+  und zeigt seinen öffentlichen Eintrag für `configs/community_keys.yml`, gespeichert als Textdatei, die du wählst.
+  **Prüfen und veröffentlichen** listet die offenen Pull Requests von `community_repo`, die Pakete hinzufügen (und
+  unter `contributions/` gemergte, noch nicht veröffentlichte Pakete), holt ein Paket vom Stand des Pull Requests,
+  prüft es mit `zoo verify` und zeigt jede Datei (GUI: eine Dateiliste mit schreibgeschützter Textansicht; CLI:
+  ausgegeben oder mit `--review-dir` in einen Ordner geschrieben, den du nennst; jedes Element der Paket-Datei), dann
+  fragt es „Veröffentlichen?“ („Nein“ ist die Vorgabe); ein Pull Request, der außer neuen Paketen unter
+  `contributions/<kind>/` noch etwas ändert oder in einen anderen Branch als `main` geht, wird nicht veröffentlicht,
+  und die Prüfung nennt diese Änderung. Ja mergt den Beitrag (nur wenn seine Pflichtprüfung `validate` bestanden
+  ist und sein
+  Stand der geprüfte Commit ist), aktualisiert einen lokalen Klon im benutzereigenen Ordner, verschiebt das Paket nach
+  `packs/<kind>/`, trägt es mit der Raw-Adresse in den Index ein, erhöht Version und Zeit des Index, signiert ihn mit
+  dem Schlüssel aus dem Schlüsselbund, committet auf einem neuen Branch, pusht ihn, öffnet einen Pull Request, wartet
+  auf die Pflichtprüfung und mergt ihn; nach `main` wird nie gepusht. **Veröffentlichtes Paket zurückziehen** trägt
+  einen Rückzug (eine Datei, eine Version oder jede Version, mit dem Grund) auf demselben Weg ein. Jeder Schritt wird
+  gemeldet und ins Audit-Log geschrieben, Abbrechen (Strg+C im Terminal) hält bis zum letzten Merge vor dem nächsten
+  Schritt an (nach dem Push schließt es den eigenen Pull Request der Veröffentlichung und löscht seinen Branch, damit
+  nichts halb Veröffentlichtes bleibt), und eine Ablehnung sagt, was bis dahin geschehen ist, und nennt den nächsten
+  Schritt (kein `gh`, nicht angemeldet, offline, eine nicht bestandene Prüfung, ein abgelehntes Paket, ein Klon mit eigenen Änderungen). Der
+  Index auf `main` muss sich mit deinem Schlüssel oder einem vertrauenswürdigen Schlüssel prüfen lassen, bevor etwas
+  darauf signiert wird. gh und git nutzen dein eigenes Login; das Framework liest, speichert und zeigt nie einen
+  Token. Nur die Person: kein MCP-Tool, Ditto oder anderer Weg einer KI erreicht es (Test als Absicherung). Die
+  Vorlage des Prüf-Workflows `scripts/community_repo/validate-contribution.yml` läuft jetzt bei jedem Pull Request
+  (kein Pfadfilter; ein Pull Request ohne Paket besteht), wie die Kopie im Community-Repository, weil dessen
+  geschützter `main` sie verlangt. Seine Meldungen nennen einen Schritt des Frameworks im Terminal als Befehl und im
+  Fenster als Ort (`hub.refresh`, `maint.review` und `audit.verify` des Katalogs der nächsten Schritte, die
+  Einstellungen mit ihrem Menüpfad), im Fenster nie einen Befehl; der Knopf **Aktualisieren** des Community Hubs ist
+  jetzt übersetzt.
 - **`tests/test_cli_gui_parity.py`: Jeder Befehl und jede Option der CLI für Personen hat einen Weg mit der Maus**
   (W1', Runde 9 U2): Der Test geht den ganzen Befehlsbaum von `llm-cli` durch (294 Pfade: Befehle, Unterbefehle und
   Optionen) und liest `CLI_PATHS`, `MACHINE_ONLY` und die Fenster- und Reitertabellen jedes Moduls in
@@ -2846,6 +2878,39 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   die scheitert, wenn eine Nutzlast in die gespeicherten Auszüge gelangt; die Evaluation liest ihr Korpus jetzt
   ebenfalls als Text von außen ein. Früher gespeicherte Seiten behalten ihre Auszüge, bis sie erneut eingelesen
   werden.
+- **Ein Pull Request kann die Pflichtprüfung des Community-Repositorys nicht mehr umschreiben**: Die Vorlage des
+  Prüf-Workflows `scripts/community_repo/validate-contribution.yml` lief bei `pull_request`, also führte ein Pull
+  Request aus einem Fork seine eigene, geänderte Kopie aus: Er konnte die Prüfung bestehen lassen und ein schlechtes
+  Pack hinzufügen, oder `.github/`, `index.json`, `packs/` oder eine README ändern, die die Prüfung nie ansah (sie
+  listete nur `contributions/`). Die Maintainer-Aktionen lehnten einen solchen Pull Request ab, ein Merge auf der
+  GitHub-Webseite wurde aber nicht verhindert. Die Prüfung läuft jetzt bei `pull_request_target` (opened,
+  synchronize, reopened; Pull Requests in `main`), also prüft immer die Kopie in `main`, nur mit `contents: read`,
+  ohne Secret, ohne Cache und mit `persist-credentials: false` in seinem einzigen Checkout, dem des Frameworks. Der
+  Head-Commit des Pull Requests ist nur Daten und wird nie ausgecheckt (ein Checkout davon unter
+  `pull_request_target` ist das bekannte gefährliche Muster, und actions/checkout gibt seinen Betreff aus, in dem ein
+  Wagenrücklauf einen Workflow-Befehl beginnen würde): Nachdem das Framework installiert ist, werden `main` und der
+  Head-Commit über seine ID still und ohne Zugangsdaten in ein Repository ohne Arbeitsverzeichnis geholt, nichts davon
+  wird ausgeführt, eingelesen (`source`), installiert oder importiert, nur git liest es, und kein Wert des Pull
+  Requests (Titel, Branch, Text, Commit-Nachrichten, Dateinamen) wird in ein `run:`-Skript geschrieben; er kommt über
+  `env`. git berechnet die Änderungen zwischen `main` und dem Head (`--raw -z --no-renames`, ab ihrer einen
+  Merge-Basis, so wie GitHub sie zusammenführt; ein Pull Request ohne oder mit mehr als einer Merge-Basis fällt
+  durch, weil der Merge von GitHub dann Basen verbindet, die die Prüfung nicht sieht, und so eine Historie, die zwei
+  Linien von `main` noch einmal zusammenführt, eine Veröffentlichung unbemerkt rückgängig machen könnte). Ein
+  Dateiname mit einem Steuerzeichen, ein symbolischer Link (ein Link namens `x.zip` kann die
+  Prüfung keine andere Datei mehr lesen lassen), eine ausführbare Datei oder ein Submodul fällt für jeden durch. Wer
+  nicht Besitzer, Mitglied oder Collaborator ist (`author_association`), darf nur `contributions/<kind>/<name>.zip`
+  hinzufügen, die Pfade, die die Maintainer-Aktionen prüfen; jede andere hinzugefügte, geänderte oder gelöschte Datei
+  fällt mit ihrem Namen durch, die README eines Kind-Ordners eingeschlossen (sie bestand vorher als Hinweis). Die
+  übrigen Änderungen des Besitzers, eines Mitglieds oder eines Collaborators sind Hinweise, deshalb bestehen die
+  eigenen Pull Requests der Maintainer-Aktionen für Veröffentlichen und Zurückziehen weiter. Jedes hinzugefügte Pack
+  wird geprüft wie bisher (höchstens 5 MB, `llm-cli zoo verify`), jetzt aus dem Blob des Head-Commits, und was zoo
+  verify ausgibt, wird nie als Workflow-Befehl gelesen. Der Lint-Job der CI prüft die Vorlage auch mit actionlint.
+  Tests führen die echten Schritte in bash gegen lokale git-Repositorys mit einem Stub für `llm-cli` aus (auch die
+  Veröffentlichung der Maintainer-Aktionen über das nachgebildete GitHub, eine Commit-Nachricht mit Wagenrücklauf und
+  eine Historie mit zwei Merge-Basen) und sichern den Aufbau des Workflows ab. Die Kopie im Community-Repository
+  ändert dessen Maintainer (die Vorlage sagt, wie eine Kopie umgestellt wird, die noch bei `pull_request` läuft, und
+  nennt die Einstellung, die das Repository außerdem braucht: Fork-Pull-Request-Workflows nur mit Freigabe, weil ein
+  Pull Request immer noch einen eigenen Workflow mit einem Job namens `validate` mitbringen kann).
 - **Abhängigkeiten auf den neuesten passenden Versionen, die Advisories vom Oktober 2026 behoben**: `uv lock
   --upgrade` hob jede Abhängigkeit auf die neueste Version, die ihr Bereich erlaubt (darunter pypdf 6.21.2, certifi
   2026.10.19, paramiko 5.1.0, qdrant-client 1.20.0, filelock 4.2.4), und Pillow geht auf 13.0.0, das 35 Advisories
@@ -2857,6 +2922,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   nächtlichen Retrieval-Evaluation und der Workflow-Vorlage des Community-Repositorys. Ein Test meldet, sobald fastembed Pillow 13 selbst erlaubt und die Ausnahme entfallen
   kann. `astral-sh/setup-uv` in der CI geht auf v10.3.0 (Dependabot-PR #8). Geprüft mit der vollen Testsuite und einer
   echten Retrieval-Evaluation (88 % der Fälle bestanden).
+  Am selben Tag danach: anthropic 1.15.0, openai 3.35.1, fastembed 0.9.0 (es begrenzt Pillow weiterhin, die Ausnahme
+  bleibt), das Build-Backend uv_build bis 0.13 und die Ubuntu-22.04-Basis der GPU-Vorlage und des
+  Build-Basis-Katalogs (`configs/llama_runtime.yml`) auf ihren aktuellen Digest, beide zusammen (Dependabot-PRs #10
+  bis #12, von Hand übernommen: Dependabot hatte nur die Vorlage geändert und überlässt uns die Exporte mit Hashes).
+  Dependabot öffnet seine Pull Requests jetzt gegen `development`, wo die Arbeit landet, statt gegen `main`.
 - **Ein Basis-Image, das eine KI in den Modul-Assistenten einträgt, wird ebenfalls auf seinen Digest festgelegt**:
   `llm-cli module generate-ai` und das Tool `create_target_module` schreiben das Basis-Image einer KI mit dem Digest,
   auf den sein Tag zeigt, und der Assistent tat das für Dittos eigenen Vorschlag auch; ein Basis-Image, das eine KI

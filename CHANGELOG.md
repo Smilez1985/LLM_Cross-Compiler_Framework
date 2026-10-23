@@ -71,6 +71,33 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   **File > Settings...** now has a **General** tab where you choose "Sie" instead (setting `form_of_address`), used
   at once, also for the next steps. Sizes in the deletion
   dialog follow your language ("1,5 GB" in German).
+- **Maintainer actions for the community repository** (decision 2026-10-22: the maintainer's work as a few clicks
+  instead of a manual): **Tools > Open Community Hub > Maintainer** and `llm-cli zoo maintainer key|review|revoke`,
+  one implementation in `orchestrator/Core/community_maintainer.py` (`scripts/zoo_sign_index.py` is now a thin wrapper
+  over it). **Create signing key** (once) puts the index signing key into the OS keyring (a name that exists is
+  refused) and shows its public entry for `configs/community_keys.yml`, saved as a text file you choose. **Review and
+  publish** lists the open pull requests of `community_repo` that add packs (and packs merged under `contributions/`
+  but not published yet), fetches a pack from the pull request's head, checks it with `zoo verify` and shows every
+  file (GUI: a file list with a read-only text view; CLI: printed, or written to a folder you name with
+  `--review-dir`; every member of the pack file), then asks "Publish?" ("No" is the default); a pull request that
+  changes anything besides new packs under `contributions/<kind>/`, or goes into another branch than `main`, is not
+  published, and the review names that change. Yes merges the contribution (only when its required
+  check `validate` passed and its head is the reviewed commit), updates a local clone in the per-user folder, moves
+  the pack to `packs/<kind>/`, adds its index entry with the raw address, raises the index version and time, signs
+  the index with the keyring key, commits on a new branch, pushes it, opens a pull request, waits for the required
+  check and merges it; nothing is ever pushed to `main`. **Revoke a published pack** adds a revocation (one file, one
+  version or every version, with the reason) the same way. Every step is reported and written to the audit log,
+  Cancel (Ctrl+C at a terminal) stops before the next step up to the last merge (after the push it closes the
+  publication's own pull request and deletes its branch, so nothing half-published stays), and a refusal says what
+  happened so far and the next step (no `gh`, not logged in, offline, a check that has not passed, a rejected pack, a
+  clone with changes of its own). The index on `main` must verify with your key or a trusted key before anything is signed on
+  top of it. gh and git use your own login; the framework never reads, stores or shows a token. The person only: no
+  MCP tool, Ditto or other AI path reaches it (guard test). The check workflow template
+  `scripts/community_repo/validate-contribution.yml` now runs on every pull request (no paths filter; a pull request
+  without a pack passes), as the community repository's copy does, because its protected `main` requires it. Its
+  messages name a framework step as its command at a terminal and as its place in the window (the next-step
+  catalogue's `hub.refresh`, `maint.review` and `audit.verify`, and the settings by their menu path), never a command
+  in the window; the Community Hub's **Refresh** button is now translated.
 - **`tests/test_cli_gui_parity.py`: every person-facing CLI command and option has a mouse path** (W1', round 9
   U2): the test walks the whole command tree of `llm-cli` (294 paths: commands, subcommands and options) and reads
   `CLI_PATHS`, `MACHINE_ONLY` and the window and tab tables of every module in `orchestrator/gui/menus/`. It fails
@@ -2524,6 +2551,35 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the nightly retrieval evaluation (`llm-cli ditto eval --kind retrieval --cases evals/retrieval/carriers.yml`), which
   fails when a payload reaches the stored excerpts; the evaluation now indexes its corpus as outside text too.
   Pages stored before keep their excerpts until they are ingested again.
+- **A pull request can no longer rewrite the community repository's required check**: the check workflow template
+  `scripts/community_repo/validate-contribution.yml` ran on `pull_request`, so a pull request from a fork ran its own
+  edited copy: it could make the check pass and add a bad pack, or change `.github/`, `index.json`, `packs/` or a
+  README, which the check never looked at (it listed only `contributions/`). The maintainer actions refused such a
+  pull request, but a merge on the GitHub web page was not stopped. The check now runs on `pull_request_target`
+  (opened, synchronize, reopened; pull requests into `main`), so the copy on `main` always checks, with
+  `contents: read` only, no secret, no cache and `persist-credentials: false` on its one checkout, the framework's.
+  The pull request's head commit is data only and never checked out (a checkout of it under `pull_request_target` is
+  the known dangerous pattern, and actions/checkout prints its subject, where a carriage return would start a
+  workflow command): after the framework is installed, `main` and the head commit are fetched by its id, quietly and
+  without credentials, into a repository without a working tree, nothing of it is run, sourced, installed or
+  imported, git alone reads it, and no value of the pull request (title, branch, body, commit messages, file names) is
+  written into a `run:` script; it comes through `env`. git computes the changes between `main` and the head
+  (`--raw -z --no-renames`, from their one merge base, as GitHub merges them; a pull request with no or more than one
+  merge base fails, since GitHub's merge would then combine bases the check does not see, so a history that merges
+  two lines of `main` again could undo a publication unseen). A file name with a control character, a symbolic link
+  (a link named `x.zip` can no longer make the check read another file), an executable file or a submodule fails for
+  everyone. Anyone but the owner, a member or a collaborator (`author_association`) may only add
+  `contributions/<kind>/<name>.zip`, the paths the maintainer actions review; any other added, changed or deleted
+  file fails with its name, the README of a kind folder included (it passed as a notice before). The owner's, a
+  member's or a collaborator's other changes are notices, so the maintainer actions' own publication and revocation
+  pull requests keep passing. Every added pack is still checked as before (at most 5 MB, `llm-cli zoo verify`), now
+  from the blob of the head commit, and what zoo verify prints is never read as a workflow command. The CI's lint job
+  also runs actionlint over the template. Tests run the real steps in bash against local git repositories with a stub
+  `llm-cli` (including the maintainer actions' publication through the fake GitHub, a commit message with a carriage
+  return and a history with two merge bases) and guard the workflow's structure. The community repository's copy is
+  changed by its maintainer (the template says how to switch a copy that still runs on `pull_request`, and names the
+  setting the repository needs as well: fork pull request workflows only with approval, because a pull request can
+  still bring a workflow of its own with a job named `validate`).
 - **Dependencies on the newest versions that fit, with the advisories of 2026-10 fixed**: `uv lock --upgrade` moved
   every dependency to the newest version its range allows (among them pypdf 6.21.2, certifi 2026.10.19, paramiko
   5.1.0, qdrant-client 1.20.0, filelock 4.2.4), and Pillow goes to 13.0.0, which fixes 35 advisories of 12.3.0.
@@ -2535,6 +2591,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   template. A test removes the
   override's reason as soon as fastembed allows Pillow 13 itself. The CI's `astral-sh/setup-uv` goes to v10.3.0
   (Dependabot PR #8). Checked with the full test suite and a real retrieval evaluation (88 % of the cases pass).
+  Later the same day: anthropic 1.15.0, openai 3.35.1, fastembed 0.9.0 (it still caps Pillow, so the override
+  stays), the build backend uv_build up to 0.13, and the Ubuntu 22.04 base of the GPU template and of the build-base
+  catalogue (`configs/llama_runtime.yml`) to its current digest, both together (Dependabot PRs #10 to #12, applied by
+  hand: Dependabot moved the template only and leaves the hash-pinned exports to us). Dependabot now opens its pull
+  requests against `development`, where the work lands, instead of `main`.
 - **A base image an AI fills into the module wizard is pinned to its digest too**: `llm-cli module generate-ai` and
   the `create_target_module` tool write an AI's base image with the digest its tag points at, and so did the
   wizard for Ditto's own proposal; a base image an AI filled in through the GUI tools (Ditto in the chat or an AI
