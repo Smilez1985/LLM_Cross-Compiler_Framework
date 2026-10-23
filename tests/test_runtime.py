@@ -21,6 +21,7 @@ import time
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 import psutil
 import pytest
@@ -859,6 +860,22 @@ class TestInstall:
         session.get = checking_get
         rt.install_prebuilt()
         assert len(free) == 2 and rt.installed()
+
+    def test_the_leftovers_of_an_interrupted_install_are_removed_before_the_space_check(self, tmp_path, monkeypatch):
+        # Review of port-runtime: the unpack space check moved before the downloads, out of the lock, and so before
+        # the leftovers of an interrupted install (.staging-*, .old-*) were removed; on a disk they filled, the install
+        # was refused although removing them (as it did before) made room.
+        rt, session = self.setup_runtime(tmp_path)
+        leftover = rt.root / ".staging-cuda-13.4-dead"
+        leftover.mkdir(parents=True)
+        (leftover / "llama-server").write_bytes(b"partial")
+
+        def usage(path):
+            full = any(rt.root.glob(".staging-*"))
+            return SimpleNamespace(total=2 * 1024 * GIB, used=GIB, free=0 if full else 1024 * GIB)
+        monkeypatch.setattr(ls.shutil, "disk_usage", usage)
+        inst = rt.install_prebuilt()
+        assert inst == rt.installed() and not leftover.exists()
 
     @pytest.mark.parametrize("force", [False, True])
     def test_an_install_finished_meanwhile_by_another_process(self, tmp_path, force):

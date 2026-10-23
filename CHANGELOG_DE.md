@@ -2392,12 +2392,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   bis zu den 15 Minuten der Sperre. Die Archive werden jetzt außerhalb der Sperre geladen (jede Datei hat ihre eigene);
   unter der Sperre prüft die Installation erneut, ob ein anderer Prozess denselben Build inzwischen installiert hat
   (dann wird er so genommen), ob ein Server daraus läuft, und lädt die Archive erneut, wenn eine gleichzeitige
-  Installation sie entfernt hat; ein laufender Server wird weiterhin abgelehnt, bevor etwas heruntergeladen wird. Der
+  Installation sie entfernt hat; ein laufender Server wird weiterhin abgelehnt, bevor etwas heruntergeladen wird, und
+  die Ordner, die eine abgebrochene Installation hinterließ, werden weiterhin (unter der Sperre) entfernt, bevor der
+  Platz zum Entpacken geprüft wird (Review von port-runtime: die Prüfung war vor dieses Entfernen gerutscht). Der
   Exit-Handler eines an seinen Prozess gebundenen Servers (`start(tie_to_process=True)`) wartet höchstens 5 s auf die
   Sperre und beendet danach trotzdem genau den Prozess, den er gestartet hat (PID, Startzeit und Programm geprüft),
   statt den endenden Prozess hinter einem anderen Start am Leben zu halten. Regressionstests:
   `tests/test_runtime.py` `test_downloads_do_not_hold_the_runtime_lock`,
-  `test_an_install_finished_meanwhile_by_another_process`, `test_exit_handler_does_not_wait_for_a_busy_lock`.
+  `test_an_install_finished_meanwhile_by_another_process`,
+  `test_the_leftovers_of_an_interrupted_install_are_removed_before_the_space_check`,
+  `test_exit_handler_does_not_wait_for_a_busy_lock`.
 - **Ein gepinnter Download, der nicht gelingen kann, sagt sofort, warum** (Kette port-runtime, aus der Prüfung des
   verwalteten llama-server; `orchestrator/utils/download.py` `PinnedDownloader`, den die Builds und Modelle der
   lokalen Laufzeit und der Community-Zoo teilen): Ein TLS-Zertifikat, das sich nicht prüfen ließ, wurde wie eine

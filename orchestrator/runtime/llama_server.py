@@ -964,7 +964,8 @@ class LocalLLMRuntime:
         variant stays in place until the new one is complete. A set `stop` event (threading.Event, the GUI's Cancel)
         ends the download with DownloadStopped, keeps the `.part` file for a resume and installs nothing. The archives
         are downloaded outside the runtime lock (each file has its own), so a start, a stop or the exit handler of a
-        tied server elsewhere is not held up for the minutes a CUDA archive takes; under the lock everything is checked
+        tied server elsewhere is not held up for the minutes a CUDA archive takes; the folders of an interrupted install
+        are removed (under the lock) before the space for unpacking is checked; under the lock everything is checked
         again (installed by another process meanwhile, a server started from it, archives a concurrent install of the
         same build removed are fetched again)."""
         choice = self.select_backend(prefer)
@@ -994,9 +995,16 @@ class LocalLLMRuntime:
             return [self._fetch(self.catalog.llama_cpp.base_url + f.name, downloads / f.name, f.size, f.sha256,
                                 progress, stop=stop) for f in asset.files]
 
+        def leftovers() -> List[Path]:
+            return list(self.root.glob(".staging-*")) + list(self.root.glob(".old-*"))
+
         archives: List[Path] = []
         if up_to_date() is None:
             refuse_if_running()  # before minutes of downloading, not after
+            if leftovers():  # an interrupted install's folders: removed (under the lock) before space is counted
+                with self._lock():
+                    for leftover in leftovers():
+                        shutil.rmtree(leftover, ignore_errors=True)
             self._ensure_space(self.root, 2 * asset.download_size, what="unpacking")
             archives = fetch_all()
         with self._lock():
@@ -1007,7 +1015,7 @@ class LocalLLMRuntime:
                 self._update_active(variant=asset.variant, asset_id=asset.id, use="prebuilt")
                 return current
             refuse_if_running()
-            for leftover in list(self.root.glob(".staging-*")) + list(self.root.glob(".old-*")):
+            for leftover in leftovers():
                 shutil.rmtree(leftover, ignore_errors=True)  # from an interrupted install; the lock is ours
             if not archives or not all(a.is_file() for a in archives):
                 archives = fetch_all()  # removed by a concurrent install of the same build
