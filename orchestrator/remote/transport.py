@@ -363,14 +363,21 @@ def config_value(path: Any) -> str:
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+# The null device as OpenSSH names a file: GlobalKnownHostsFile points here, so this computer's system-wide known_hosts
+# (/etc/ssh/ssh_known_hosts, on Windows %ProgramData%\ssh\ssh_known_hosts) never decides about a board's host key.
+NULL_DEVICE = "NUL" if os.name == "nt" else "/dev/null"
+
+
 def openssh_options(state_dir: Path) -> List[str]:
     """The options of every OpenSSH call of the framework: the framework key only (IdentitiesOnly, -i), the
-    framework's known_hosts only, and never a question or an accepted new key (BatchMode, StrictHostKeyChecking); a
-    connection that gives up after LOGIN_TIMEOUT seconds (ConnectTimeout) and a keepalive every KEEPALIVE_SECONDS that
-    ends a session after KEEPALIVE_COUNT unanswered ones (ServerAliveInterval, ServerAliveCountMax), so a dropped
-    network ends the call instead of holding it. The key file is made private to this account first (OpenSSH refuses
-    a key others can read: utils/atomic.py owner_only, an ACL on Windows). The framework key and known_hosts are read
-    through orchestrator/utils/ssh_trust at call time (ssh_trust.system_ssh_options is this function's old name)."""
+    framework's known_hosts only (UserKnownHostsFile; GlobalKnownHostsFile is the null device, so a key in this
+    computer's system-wide known_hosts is never taken either), and never a question or an accepted new key
+    (BatchMode, StrictHostKeyChecking); a connection that gives up after LOGIN_TIMEOUT seconds (ConnectTimeout) and a
+    keepalive every KEEPALIVE_SECONDS that ends a session after KEEPALIVE_COUNT unanswered ones (ServerAliveInterval,
+    ServerAliveCountMax), so a dropped network ends the call instead of holding it. The key file is made private to
+    this account first (OpenSSH refuses a key others can read: utils/atomic.py owner_only, an ACL on Windows). The
+    framework key and known_hosts are read through orchestrator/utils/ssh_trust at call time
+    (ssh_trust.system_ssh_options is this function's old name)."""
     from orchestrator.utils import ssh_trust
     from orchestrator.utils.atomic import owner_only
     private, _ = ssh_trust.client_key(state_dir)
@@ -380,6 +387,7 @@ def openssh_options(state_dir: Path) -> List[str]:
         _log.warning(f"The framework's SSH key could not be made private to this account ({e.strerror or e}).")
     return ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
             "-o", f"UserKnownHostsFile={config_value(ssh_trust.known_hosts_path(state_dir))}",
+            "-o", f"GlobalKnownHostsFile={NULL_DEVICE}",
             "-o", "IdentitiesOnly=yes", "-o", f"ConnectTimeout={int(LOGIN_TIMEOUT)}",
             "-o", f"ServerAliveInterval={KEEPALIVE_SECONDS}", "-o", f"ServerAliveCountMax={KEEPALIVE_COUNT}",
             "-i", str(private)]
@@ -728,7 +736,7 @@ class SystemSshTransport(Transport):
 
 
 __all__ = ["COMMAND_TIMEOUT", "HASH_TIMEOUT", "KEEPALIVE_COUNT", "KEEPALIVE_SECONDS", "LOGIN_TIMEOUT", "MAX_OUTPUT",
-           "OPENSSH_FAILED", "PARAMIKO_AVAILABLE", "ParamikoTransport", "Result", "SshFailed", "SystemSshTransport",
-           "TooMuchOutput", "Transport", "available", "config_value", "imported_paramiko", "open_client",
-           "openssh_argv", "openssh_options", "paramiko_module", "paramiko_quiet", "read_limited", "remote_location",
+           "NULL_DEVICE", "OPENSSH_FAILED", "PARAMIKO_AVAILABLE", "ParamikoTransport", "Result", "SshFailed",
+           "SystemSshTransport", "TooMuchOutput", "Transport", "available", "config_value", "imported_paramiko",
+           "open_client", "openssh_argv", "openssh_options", "paramiko_module", "paramiko_quiet", "read_limited", "remote_location",
            "sh_command", "timed_out"]
