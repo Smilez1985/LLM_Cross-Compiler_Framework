@@ -206,7 +206,10 @@ class RevisionAnchor:
             st = os.stat(path)
         except OSError:
             return None
-        return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns
+        # With the change time on POSIX: a hard link kept to the file puts back the very file read before (same inode,
+        # size and modification time) after another process saved a newer one; a link or rename moves the change time.
+        # Windows gives the creation time as st_ctime, which a hard link keeps, so there it adds nothing.
+        return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, (st.st_ctime_ns if os.name == "posix" else None)
 
     def current(self, path: Any) -> int:
         """The highest revision the framework saved of the file at `path` (0 when it never saved one)."""
