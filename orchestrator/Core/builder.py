@@ -136,6 +136,10 @@ LAST_BUILD_TAG = "last-build"
 HF_REPO_ID = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
 TARGET_ID = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
 COMMIT_ID = re.compile(r"^[0-9a-f]{40}$")
+# A llama.cpp repository override the target image may fetch the pinned commit from (the rule of the source stage's
+# repo_url_ok): https, a host, an optional port and a path of plain characters; no user, password, token or query.
+LLAMA_REPO_URL = re.compile(r"https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~%+/-]*)?", re.ASCII)
+LLAMA_REPO_ARG = re.compile(r"^\s*ARG\s+LLAMA_CPP_REPO\b", re.MULTILINE)
 IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
 # Where the Trivy container sees the saved image (read-only); it never sees the Docker socket.
 SCAN_ARCHIVE = "/scan/image.tar"
@@ -926,6 +930,9 @@ class BuildEngine:
             text = dockerfile.read_text(encoding="utf-8", errors="replace")
         except OSError:
             text = ""
+        repo = self._llama_cpp_repo(progress) if LLAMA_REPO_ARG.search(text) else None
+        if repo:
+            args["LLAMA_CPP_REPO"] = repo
         if not dockerfile_takes_cmake_args(text):
             progress.add_log("The target's Dockerfile takes no LLAMA_CMAKE_ARGS: its llama.cpp build, if it has one, "
                              "does not follow the build recipe.")
@@ -946,6 +953,26 @@ class BuildEngine:
         config.llama_cpp_tools = tools.record()
         args.update(tools.build_args())
         return args
+
+    def _llama_cpp_repo(self, progress: BuildProgress) -> Optional[str]:
+        """Where the target image fetches the pinned llama.cpp commit from: the source_repositories override of
+        llama.cpp (LLAMA_CPP_REPO_OVERRIDE, e.g. a mirror inside a company network) when it is an https address
+        without a user name, password, token or query (a build argument is visible in the image's history), else
+        None (upstream). The image still fetches the pinned commit and stops unless `git rev-parse HEAD` gives it
+        back, so a mirror changes where the source comes from, never which source it is."""
+        url = self._repo_overrides().get("LLAMA_CPP_REPO_OVERRIDE", "")
+        if not url:
+            return None
+        from orchestrator.Core.settings_view import shown_repo_url, url_credential
+        shown = shown_repo_url(url)
+        if url_credential(url) or not LLAMA_REPO_URL.fullmatch(url):
+            progress.add_warning(f"The llama.cpp repository override {shown} is not used for the image: only an https "
+                                 "address without a user name, password, token or query is; the image fetches the "
+                                 "pinned commit from upstream.")
+            return None
+        progress.add_log(f"llama.cpp source: the pinned commit from the repository override {shown} (the image "
+                         "checks that it is the pinned commit).")
+        return url
 
     def _build_host_profile(self, progress: BuildProgress) -> Tuple[Any, str]:
         """(profile, reason when there is none) of the machine whose CPU runs the image: a probe now (a fraction of a

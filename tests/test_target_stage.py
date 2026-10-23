@@ -603,6 +603,164 @@ def test_a_generated_module_gets_the_package_helpers_executable(tmp_path):
     assert (target / "scripts" / "board_package.py").is_file()
 
 
+# --- source_module.sh --clone-llama-cpp: the pinned commit by default, LLAMA_CPP_REPO_OVERRIDE -------------------
+
+from test_build_stages import GIT_STUB  # noqa: E402
+
+PIN_COMMIT = "d81235049384534c167caea52b85a694f6103d14"
+
+
+def clone(image, **values):
+    bin_dir = image.root / "bin"
+    _script(bin_dir / "git", GIT_STUB)
+    env = image.env(PATH=f"{bin_dir}{os.pathsep}{image.env()['PATH']}", LLAMA_CPP_PATH=image.root / "src" / "llama.cpp",
+                    **values)
+    return subprocess.run([posix_shell("bash"), str(image.app / "modules" / "source_module.sh"), "--clone-llama-cpp"],
+                          env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+
+
+@needs_bash
+def test_the_clone_takes_the_framework_s_pin_when_no_commit_is_named(image):
+    result = clone(image, LLAMA_CPP_COMMIT=None)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"git checkout -f {PIN_COMMIT}" in image.calls()
+    assert f"LLAMA_CPP_COMMIT is not set: the framework's pin, llama.cpp b11429 (commit {PIN_COMMIT})." in result.stdout
+
+
+@needs_bash
+def test_the_clone_takes_the_repository_override(image):
+    result = clone(image, LLAMA_CPP_COMMIT=None, LLAMA_CPP_REPO_OVERRIDE="https://git.example.com/mirror/llama.cpp.git")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert image.calls()[0] == "git clone -- https://git.example.com/mirror/llama.cpp.git " \
+                               "<root>/build-cache/repos/llama.cpp"
+
+
+@needs_bash
+@pytest.mark.parametrize("url", ["https://builder:secret@git.example.com/l.git", "ssh://git@git.example.com/l.git",
+                                 "--upload-pack=touch /tmp/x", "ext::sh -c id", "https://git.example.com/l.git?t=1",
+                                 "https://git.example.com/a b.git"])
+def test_a_repository_override_that_is_no_plain_https_address_clones_nothing(image, url):
+    result = clone(image, LLAMA_CPP_REPO_OVERRIDE=url)
+
+    assert result.returncode == 1
+    assert ("LLAMA_CPP_REPO_OVERRIDE must be an https address of a git repository without a user name, password, "
+            "token or query; nothing was cloned.") in result.stderr
+    assert image.calls() == []
+
+
+@needs_bash
+def test_a_checkout_that_is_not_the_commit_asked_for_is_not_used(image):
+    result = clone(image, STUB_HEAD="0" * 40)
+
+    assert result.returncode == 1
+    assert f"llama.cpp: got commit {'0' * 40}, asked for {PIN_COMMIT}; the source is not used." in result.stderr
+    assert not (image.root / "src" / "llama.cpp").is_symlink()
+
+
+@needs_bash
+def test_the_source_stage_says_where_the_image_s_source_came_from(image):
+    result = image.run("--to", "source", LLAMA_CPP_REPO_OVERRIDE="https://git.example.com/mirror/llama.cpp.git")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "LLAMA_CPP_REPO_OVERRIDE is set: the framework fetches the pinned llama.cpp commit (above) from that " \
+           "repository when it builds this target's image" in result.stdout
+
+
+def test_the_clone_default_is_a_pin_place_of_both_shipped_targets():
+    from orchestrator.runtime.build import pins
+    from orchestrator.runtime.catalog import load_catalog
+    source = load_catalog().llama_cpp.source
+    places = [p for p in pins.pin_places(source) if "--clone-llama-cpp" in p.what]
+    assert {(p.path, p.kind) for p in places} == {
+        (f"targets/{t}/modules/source_module.sh", "derived") for t in ("Rockchip", "_template")}
+    assert len(places) == 4 and all(p.ok for p in places)
+
+
+def test_a_clone_default_off_the_pin_is_a_mismatch(tmp_path):
+    from conftest import REPO_ROOT
+    from orchestrator.runtime.build import pins
+    from orchestrator.runtime.catalog import load_catalog
+    root = tmp_path / "repo"
+    (root / "configs").mkdir(parents=True)
+    (root / "configs" / "llama_runtime.yml").write_text(
+        (REPO_ROOT / "configs" / "llama_runtime.yml").read_text(encoding="utf-8"), encoding="utf-8")
+    (root / "targets" / "Board" / "modules").mkdir(parents=True)
+    (root / "targets" / "Board" / "modules" / "source_module.sh").write_text(
+        '#!/bin/bash\nLLAMA_CPP_PIN_TAG="b4009"\nLLAMA_CPP_PIN_COMMIT="' + "1" * 40 + '"\n')
+    bad = {(p.what.split()[0], p.found) for p in pins.mismatches(pins.pin_places(load_catalog().llama_cpp.source, root))}
+    assert bad == {("LLAMA_CPP_PIN_TAG", "b4009"), ("LLAMA_CPP_PIN_COMMIT", "1" * 40)}
+
+
+def test_the_template_clones_with_the_same_functions_as_the_rockchip_target():
+    from conftest import REPO_ROOT
+    blocks = [_block(REPO_ROOT / "targets" / t / "modules" / "source_module.sh", "# THE LLAMA.CPP SOURCE BY HAND",
+                     "# END OF LLAMA.CPP SOURCE") for t in ("Rockchip", "_template")]
+    assert blocks[0] == blocks[1] and "repo_url_ok" in blocks[0]
+
+
+# --- the image builds take LLAMA_CPP_REPO_OVERRIDE as where the pinned commit comes from ---------------------------
+
+def image_build_args(tmp_path, monkeypatch, repos, dockerfile_text="FROM scratch\nARG LLAMA_CPP_REPO=x\n"):
+    """The build arguments BuildEngine._build_docker_image gives the target image, and the build's progress."""
+    from orchestrator.Core import builder as builder_module
+    from orchestrator.Core.builder import BuildEngine, BuildProgress, BuildStatus
+    from orchestrator.Core.config_manager import ConfigManager
+    monkeypatch.setattr(builder_module.docker, "from_env", lambda: (_ for _ in ()).throw(RuntimeError("no docker")))
+    engine = BuildEngine(ConfigManager(tmp_path / "configs"))
+    monkeypatch.setattr(engine, "_get_conf", lambda key, default=None: repos if key == "source_repositories" else default)
+    seen = {}
+    monkeypatch.setattr(engine, "_build_with_buildkit", lambda tag, path, args, *a, **k: seen.update(args))
+    monkeypatch.setattr(engine, "_buildkit_available", lambda: True)
+    monkeypatch.setattr(engine, "docker_client", type("D", (), {"images": type("I", (), {
+        "get": staticmethod(lambda tag: tag)})})())
+    dockerfile = tmp_path / "ctx" / "Dockerfile"
+    dockerfile.parent.mkdir()
+    dockerfile.write_text(dockerfile_text)
+    progress = BuildProgress("b1", BuildStatus.QUEUED, "")
+    config = type("C", (), {"target_arch": "rockchip", "build_id": "b1", "build_args": {}})()
+    engine._build_docker_image(config, progress, dockerfile)
+    return seen, progress
+
+
+MIRROR = "https://git.example.com/mirror/llama.cpp.git"
+
+
+def test_the_image_fetches_the_pinned_commit_from_the_repository_override(tmp_path, monkeypatch):
+    seen, progress = image_build_args(tmp_path, monkeypatch, {"llama.cpp": {"url": MIRROR}})
+
+    assert seen["LLAMA_CPP_REPO"] == MIRROR and seen["LLAMA_CPP_COMMIT"] == PIN_COMMIT
+    assert any(f"llama.cpp source: the pinned commit from the repository override {MIRROR}" in line
+               for line in progress.logs)
+
+
+@pytest.mark.parametrize("url", ["https://builder:FAKEsecret1@git.example.com/l.git",
+                                 "https://git.example.com/l.git?private_token=FAKEsecret1",
+                                 "ssh://git@git.example.com/l.git", "file:///srv/mirror/llama.cpp"])
+def test_an_override_the_image_cannot_use_safely_leaves_the_upstream_source(tmp_path, monkeypatch, url):
+    seen, progress = image_build_args(tmp_path, monkeypatch, {"llama_cpp": {"url": url}})
+
+    assert "LLAMA_CPP_REPO" not in seen and seen["LLAMA_CPP_COMMIT"] == PIN_COMMIT
+    warning = next(w for w in progress.warnings if "is not used for the image" in w)
+    assert "FAKEsecret1" not in warning and "fetches the pinned commit from upstream" in warning
+
+
+def test_a_dockerfile_without_the_repository_argument_gets_none(tmp_path, monkeypatch):
+    seen, progress = image_build_args(tmp_path, monkeypatch, {"llama.cpp": {"url": MIRROR}},
+                                      dockerfile_text="FROM scratch\n")
+    assert "LLAMA_CPP_REPO" not in seen and not progress.warnings
+
+
+def test_the_shipped_images_fetch_the_pinned_commit_from_llama_cpp_repo_and_check_it():
+    from conftest import REPO_ROOT
+    for dockerfile in (REPO_ROOT / "targets" / "Rockchip" / "dockerfile", REPO_ROOT / "targets" / "_template" / "Dockerfile",
+                       REPO_ROOT / "targets" / "_template" / "Dockerfile.gpu"):
+        text = dockerfile.read_text(encoding="utf-8")
+        assert 'remote add origin "${LLAMA_CPP_REPO}"' in text, dockerfile
+        assert '[ "${head}" = "${LLAMA_CPP_COMMIT}" ]' in text, dockerfile
+
+
 # --- the same validation in the template (targets/_template, the module generator's source) ----------------------
 
 def _validation(path):

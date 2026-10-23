@@ -15,8 +15,11 @@
 #         every variable the later stages need. Build containers have no network, so nothing is downloaded here.
 #
 # By hand, in a container with network (never in a build): `source_module.sh --clone-llama-cpp` clones llama.cpp at
-# LLAMA_CPP_COMMIT (a full commit id) from LLAMA_CPP_REPO_OVERRIDE (or upstream) into $BUILD_CACHE_DIR/repos and
-# points LLAMA_CPP_PATH at it: the source setup of version 1.x, for an image without llama.cpp.
+# LLAMA_CPP_COMMIT (a full commit id; default: the framework's pin, LLAMA_CPP_PIN_COMMIT below) from
+# LLAMA_CPP_REPO_OVERRIDE (an https address without a credential; default: upstream) into $BUILD_CACHE_DIR/repos,
+# checks that the checkout is that commit and points LLAMA_CPP_PATH at it: the source setup of version 1.x, for an
+# image without llama.cpp. In a build, LLAMA_CPP_REPO_OVERRIDE is where the framework fetched the image's pinned
+# commit from when it built the image (the build log says whether it did); nothing is fetched in a build container.
 
 set -euo pipefail
 
@@ -40,7 +43,7 @@ report_sources() {
     commit="$(cat "$LLAMA_BASE/.llama_cpp_commit" 2>/dev/null || echo unknown)"
     log_info "llama.cpp: $LLAMA_BASE (build $tag, commit $commit)"
     if [ -n "${LLAMA_CPP_REPO_OVERRIDE:-}" ]; then
-        log_warn "LLAMA_CPP_REPO_OVERRIDE is set, but a build uses the llama.cpp of its image (above): build containers have no network."
+        log_info "LLAMA_CPP_REPO_OVERRIDE is set: the framework fetches the pinned llama.cpp commit (above) from that repository when it builds this target's image, if it is an https address without a credential (the build log says whether it did); a build container has no network, so nothing is fetched here."
     fi
 }
 
@@ -81,24 +84,41 @@ load_sdk_environment() {
     fi
 }
 
+# ============================================================================
+# THE LLAMA.CPP SOURCE BY HAND (source_module.sh --clone-llama-cpp: the source setup of version 1.x)
+# The same functions in targets/Rockchip and targets/_template (tests/test_target_stage.py compares them).
+# ============================================================================
+
+# The framework's llama.cpp pin (configs/llama_runtime.yml, llama_cpp.source): what --clone-llama-cpp checks out when
+# LLAMA_CPP_COMMIT is not set. A derived pin place: tests/test_build_recipe.py and scripts/llama_cpp_pin.py compare it
+# with the pin, so a pin bump changes it as well.
+LLAMA_CPP_PIN_TAG="b11429"
+LLAMA_CPP_PIN_COMMIT="d81235049384534c167caea52b85a694f6103d14"
+
+# An https address of a git repository without a user name, password, token or query (the rule the framework's image
+# builds apply to LLAMA_CPP_REPO_OVERRIDE): nothing of it reaches git as an option or a credential.
+repo_url_ok() {
+    [[ "$1" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~%+/-]*)?$ ]]
+}
+
 ensure_repo() {
     local url="$1"
     local path="$2"
-    local commit="${3:-HEAD}"
+    local commit="$3"
+    local current head
 
     log_info "Prüfe Repo: $(basename "$path") @ $commit"
 
     if [ ! -d "$path/.git" ]; then
         log_info "Klone Repo..."
-        git clone "$url" "$path"
+        git clone -- "$url" "$path"
     else
         cd "$path"
         # Prüfen ob Remote URL stimmt, sonst fixen
-        local current_url
-        current_url=$(git remote get-url origin)
-        if [ "$current_url" != "$url" ]; then
-             log_warn "URL Mismatch. Setze neu..."
-             git remote set-url origin "$url"
+        current="$(git remote get-url origin 2>/dev/null || true)"
+        if [ "$current" != "$url" ]; then
+            log_warn "URL Mismatch. Setze neu..."
+            git remote set-url origin "$url"
         fi
         git fetch origin
     fi
@@ -107,21 +127,38 @@ ensure_repo() {
     # Hard Reset auf den spezifischen Commit für Reproduzierbarkeit
     git checkout -f "$commit"
     git submodule update --init --recursive
+    # The source is the commit asked for (as the target images check it)
+    head="$(git rev-parse HEAD)"
+    if [ "$head" != "$commit" ]; then
+        log_error "llama.cpp: got commit $head, asked for $commit; the source is not used."
+        exit 1
+    fi
 }
 
 clone_llama_cpp() {
-    local commit="${LLAMA_CPP_COMMIT:-}"
+    local commit="${LLAMA_CPP_COMMIT:-$LLAMA_CPP_PIN_COMMIT}" url="${LLAMA_CPP_REPO_OVERRIDE:-$UPSTREAM_LLAMA_CPP}"
     if ! printf '%s\n' "$commit" | grep -Eqx '[0-9a-f]{40}'; then
         log_error "LLAMA_CPP_COMMIT must be a full commit id (40 hex characters), such as the pin in configs/llama_runtime.yml."
         exit 1
     fi
+    if ! repo_url_ok "$url"; then
+        log_error "LLAMA_CPP_REPO_OVERRIDE must be an https address of a git repository without a user name, password, token or query; nothing was cloned."
+        exit 1
+    fi
+    if [ -z "${LLAMA_CPP_COMMIT:-}" ]; then
+        log_info "LLAMA_CPP_COMMIT is not set: the framework's pin, llama.cpp $LLAMA_CPP_PIN_TAG (commit $LLAMA_CPP_PIN_COMMIT)."
+    fi
     mkdir -p "$REPO_DIR"
-    ensure_repo "${LLAMA_CPP_REPO_OVERRIDE:-$UPSTREAM_LLAMA_CPP}" "$REPO_DIR/llama.cpp" "$commit"
-    # Symlink erstellen für Kompatibilität mit anderen Modulen
+    ensure_repo "$url" "$REPO_DIR/llama.cpp" "$commit"
+    # Softlink für Pfad-Kompatibilität
     mkdir -p "$(dirname "$LLAMA_BASE")"
     ln -sfn "$REPO_DIR/llama.cpp" "$LLAMA_BASE"
     log_success "llama.cpp $commit in $REPO_DIR/llama.cpp, linked as $LLAMA_BASE."
 }
+
+# ============================================================================
+# END OF LLAMA.CPP SOURCE
+# ============================================================================
 
 # --- MAIN EXECUTION ---
 main() {

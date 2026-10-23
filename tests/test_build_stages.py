@@ -1105,13 +1105,19 @@ def test_the_stage_modes_take_the_options_of_the_1x_modules(image):
 # What the modules of version 1.x did, on request: the llama.cpp clone and the package for the board
 # ---------------------------------------------------------------------------------------------------------------
 
+# git of the image: clone makes the folder, checkout records the commit, rev-parse HEAD gives it back (STUB_HEAD: another
+# one, a checkout that is not the commit asked for)
 GIT_STUB = """\
 import os, sys
 a = sys.argv[1:]
 with open(os.environ["STUB_LOG"], 'a') as f:
     f.write('git ' + ' '.join(a) + '\\n')
 if a[0] == 'clone':
-    os.makedirs(os.path.join(a[2], '.git'))
+    os.makedirs(os.path.join(a[-1], '.git'))
+if a[0] == 'checkout':
+    open(os.path.join('.git', 'stub_head'), 'w').write(a[-1])
+if a[0] == 'rev-parse':
+    print(os.environ.get('STUB_HEAD') or open(os.path.join('.git', 'stub_head')).read())
 """
 
 
@@ -1126,8 +1132,10 @@ def test_source_module_clones_llama_cpp_by_hand(image):
     result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
     assert result.returncode == 0, result.stdout + result.stderr
     repo = "<root>/build-cache/repos/llama.cpp"
-    assert image.calls() == [f"git clone https://github.com/ggml-org/llama.cpp.git {repo}",
-                             f"git checkout -f {commit}", "git submodule update --init --recursive"]
+    # `--` before the address (it never becomes an option of git) and the checkout checked against the commit asked for
+    assert image.calls() == [f"git clone -- https://github.com/ggml-org/llama.cpp.git {repo}",
+                             f"git checkout -f {commit}", "git submodule update --init --recursive",
+                             "git rev-parse HEAD"]
     assert link.is_symlink() and link.resolve() == (image.cache / "repos" / "llama.cpp").resolve()
 
     # The entrypoint mode `source` cloned llama.cpp in 1.x: `source --clone-llama-cpp` still does
