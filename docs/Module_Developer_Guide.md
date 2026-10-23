@@ -532,7 +532,7 @@ system its result is for and what its stage does; keep these headers true when y
 |---|---|---|
 | 1. source | `source_module.sh` | Names the toolchain sources the image was built from (the llama.cpp tag and commit its Dockerfile checked, the SDK venvs); in the template it also runs the setup commands of the module definition once. Nothing is downloaded. |
 | 2. config | `config_module.sh` | Reads the request from the environment, normalizes format, board and type names, refuses what the target cannot build, and writes the build plan `build_config.sh` into the stage folder. |
-| 3. convert | `convert_module.sh` | Converts the model: GGUF types the converter writes itself go straight into the output folder; every other type becomes an F16 intermediate in the work folder for the target stage. RKLLM and RKNN run their format helpers `rkllm_module.sh` and `rknn_module.sh`. In the `imatrix` job it computes the importance matrix. |
+| 3. convert | `convert_module.sh` | Converts the model: GGUF types the converter writes itself go straight into the output folder; every other type becomes an F16 intermediate in the work folder for the target stage. RKLLM and RKNN run their format helpers `rkllm_module.sh` and `rknn_module.sh`. In the `imatrix` job it computes the importance matrix. Around every conversion it detects the input's format, checks the input and what the converter wrote, runs a short functional test and records statistics ([section 6.5](#65-the-checks-of-the-convert-stage)). |
 | (rotate) | `rotate_module.sh` | Optional hook between convert and target for a rotation such as SpinQuant or QuaRot (roadmap): it runs only when the target has this file; none is shipped. It may change the full-precision intermediate before it is quantized. |
 | 4. target | `target_module.sh` | Quantizes what the convert stage left for it (`quantize_jobs.sh`) and removes the intermediate, writes `build_info.json` and lists the results. |
 
@@ -607,7 +607,8 @@ Mounts:
   `.rknn`, `.onnx`, `.safetensors` or `.bin` count as model files; the largest file with the format's extension
   becomes the primary file that deployment installs.
 - You may write `build_info.json` there with your own fields (Rockchip writes model, format, board, quantization
-  and the llama.cpp tag, in its target stage); the engine adds the file list, hashes and build data.
+  and the llama.cpp tag, in its target stage, and the convert stage's statistics as `conversion`); the engine adds
+  the file list, hashes and build data.
 - In the imatrix job, the convert stage writes `$BUILD_CACHE_DIR/imatrix/imatrix.dat`.
 - Name every file a later stage needs, and every result, with `stage_output FILE`: a resume runs a stage again when
   one of them is gone.
@@ -684,6 +685,31 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
 fi
 ```
+
+### 6.5 The checks of the convert stage
+
+The convert modules of Rockchip and of the template run `scripts/model_check.py` around every conversion (with the
+image's `python3` and the standard library only; the module generator copies it into a new target's `scripts/`, keep
+it there). What it does is what the convert module of version 1.x promised in the maintainer's design:
+
+| Command | When | What it does |
+|---|---|---|
+| `input PATH --format FORMAT --stats FILE` | before converting | Detects the input: a Hugging Face folder with SafeTensors or PyTorch weights, a GGUF file (nothing to convert), an ONNX model, a single weights file, a folder of GGUF files. Refuses what the format cannot use with the reason (`--onnx-next TEXT` adds where an ONNX model goes on this target), checks the input's integrity (its JSON files, SafeTensors headers against the file sizes, the shards an index lists, PyTorch archives, a GGUF header) and starts the statistics. |
+| `begin FILE --state FILE [--scratch DIR]` | before a converter writes FILE | Keeps an existing FILE as `FILE.convert-backup` until the new one passed its checks (an intermediate `tmp-*` of the work folder is simply replaced). |
+| `watch DIR --state FILE` | before a format helper runs | Notes the files of DIR with their sizes and times, so that `output --watched` finds the model the helper wrote (a new file, or one it wrote over) and a failure removes it. |
+| `output FILE --format gguf --type TYPE --seconds N --stats FILE --tools DIR` | after the converter | Checks the GGUF (every tensor's data inside the file), runs the functional test with `llama-completion` (or `llama-cli`) from DIR: 8 tokens, at most `--test-seconds` (120), offline. `--test-skip REASON` skips the test with a note. Completes the statistics. |
+| `keep --state FILE` | when the stage succeeded | Removes the backups. |
+| `restore --state FILE --failed` or `--stopped` | when the stage fails; at its next start | Removes what the run wrote and puts the backups back (`--stopped`: what a killed run left). A file whose backup is no longer there stays as it is: the earlier file was put back by hand. |
+
+The statistics (`convert_stats.json` in the stage folder) go into `build_info.json` as `conversion`: `input_format`,
+`weights`, `input_bytes` (what the converter reads: a weights file it leaves aside, such as Mistral's
+`consolidated.safetensors` beside the `model*.safetensors` shards, is not counted), `converted`, `output_format`,
+`output_type`, `output_bytes`, `ratio` (input / output),
+`seconds`, `functional_test` (`passed`, `skipped`, `timed out` or `stopped`) and `functional_test_tool`; numbers and
+words only, no paths. A functional test that ends with an error or crashes (a signal such as llama.cpp's abort on a
+tensor it cannot use) fails the stage with the tool's last lines: the GGUF does not work. A timeout or a run stopped
+from outside (SIGKILL of the out-of-memory killer, SIGTERM) is a note. It is skipped with a note when the image has neither tool or the tool does not start there, for an embedding model, for the NPU formats
+(the model runs on the board) and in the `imatrix` job (`llama-imatrix` runs the model there).
 
 ## 7. Sandbox rules
 

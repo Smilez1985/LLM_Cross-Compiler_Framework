@@ -16,6 +16,25 @@
 #         --input FILE.gguf) is not converted: build_gguf leaves it to the target stage to quantize.
 # Job imatrix: the importance matrix of a GGUF build (F16 intermediate, then llama-imatrix over 100 chunks), which the
 # BuildEngine hands to the build job (USE_IMATRIX, IMATRIX_PATH).
+#
+# Around every conversion, what the convert module of version 1.x promised in the maintainer's design (HOW2_ORIGINAL;
+# DECISIONS round 16, U9 addendum), done by scripts/model_check.py (the image's python3, standard library only; the
+# same file as in the Rockchip target):
+#   detection   the input is a Hugging Face folder (SafeTensors or PyTorch weights), a GGUF file (nothing to convert),
+#               an ONNX model, a single weights file or a folder of GGUF files; what this target cannot use is refused
+#               with the reason before anything slow runs (ONNX: llama.cpp has no converter from it to GGUF)
+#   validation  the warnings of 1.x about missing files (validate_huggingface_model), the integrity of the input (its
+#               JSON files, SafeTensors headers against the file sizes, the shards an index lists, PyTorch archives, a
+#               GGUF header) and of every GGUF convert_to_gguf wrote (every tensor's data inside the file)
+#   statistics  input and output size, ratio and duration: in the log and in convert_stats.json in the stage folder,
+#               which the target stage puts into build_info.json ("conversion")
+#   test        a short run of the written GGUF with llama-completion (the llama-cli of 1.x; llama-cli itself when the
+#               image has only that): 8 tokens, at most FUNCTIONAL_TEST_SECONDS, no network. A run that ends with an
+#               error fails the stage; a timeout is a note. Skipped with a note when the image has neither tool, for
+#               an embedding model and in the imatrix job (llama-imatrix runs the model there).
+#   cleanup     a file the converter replaces is kept as FILE.convert-backup until the new one passed its checks; a
+#               failed or stopped stage removes what it wrote and puts the backups back (after a killed run: at the
+#               next start of the stage).
 
 set -euo pipefail
 
@@ -27,8 +46,27 @@ source "$MODULES_DIR/source_module.sh"
 # shellcheck source=config_module.sh
 source "$MODULES_DIR/config_module.sh"
 QUANTIZE_JOBS="$PLAN_DIR/quantize_jobs.sh"
+# The stage's own files: its statistics (read by the target stage) and the files it wrote but has not kept yet.
+CONVERT_STATS="$PLAN_DIR/convert_stats.json"
+CONVERT_STATE="$PLAN_DIR/convert_state.json"
+MODEL_CHECK="$(dirname "$MODULES_DIR")/scripts/model_check.py"
+FUNCTIONAL_TEST=1
+FUNCTIONAL_TEST_SECONDS=120
+# Where an ONNX model goes instead: named when an ONNX model is refused.
+ONNX_NEXT="An ONNX model (a voice or vision model) needs a target with an ONNX toolchain, such as the format rknn of \
+the Rockchip target (RKNN-Toolkit2, for the NPU of its boards)."
+
+model_check() {
+    [ -f "$MODEL_CHECK" ] || die "The checks of the convert stage are missing: scripts/model_check.py is not in the image."
+    python3 "$MODEL_CHECK" "$@"
+}
 
 # --- VALIDATION LOGIC ----------------------------------------------------------
+
+# What the input is, and whether it is complete (model_check.py input): refuses what this target cannot use.
+check_input() {
+    model_check input "$MODEL_SOURCE" --format "$FORMAT" --stats "$CONVERT_STATS" --onnx-next "$ONNX_NEXT"
+}
 
 # The model folder holds what the converter needs (Security Fix from v1.7.1: tokenizer files, so a build does not
 # fail late). Only warnings: the converter has the last word, and its own message follows when it fails.
@@ -49,14 +87,41 @@ validate_huggingface_model() {
     fi
 }
 
+# --- Cleanup on failure ------------------------------------------------------
+
+# A failed or stopped stage leaves nothing half-written: what this run wrote goes, the files it replaced come back.
+# The stage keeps its exit code.
+on_exit() {
+    local rc=$?
+    trap - EXIT
+    if [ "$rc" -ne 0 ] && [ -f "$MODEL_CHECK" ]; then
+        python3 "$MODEL_CHECK" restore --state "$CONVERT_STATE" --failed || true
+    fi
+    exit "$rc"
+}
+
 # --- GGUF helpers ------------------------------------------------------------
 
 convert_to_gguf() {
-    local outtype="$1" outfile="$2"
+    local outtype="$1" outfile="$2" started
     [ -f "$CONVERT_SCRIPT" ] || die "llama.cpp converter not found at $CONVERT_SCRIPT (the image must build llama.cpp)."
+    model_check begin "$outfile" --state "$CONVERT_STATE" --scratch "$SCRATCH_DIR"
     echo ">> Converting HF -> GGUF ($outtype)..."
+    started=$SECONDS
     python3 "$CONVERT_SCRIPT" "$MODEL_SOURCE" --outfile "$outfile" --outtype "$outtype"
+    check_gguf_output "$outfile" "$outtype" "$((SECONDS - started))"
     stage_output "$outfile"
+}
+
+# OUTFILE OUTTYPE SECONDS: the GGUF the converter wrote, checked (its tensors inside the file), tested (a short run,
+# except in the imatrix job) and counted (the statistics).
+check_gguf_output() {
+    local test_args=(--tools "$LLAMA_BASE/build/bin" --test-seconds "$FUNCTIONAL_TEST_SECONDS")
+    if [ "$FUNCTIONAL_TEST" = "0" ]; then
+        test_args=(--test-skip "llama-imatrix runs the model over the calibration text next")
+    fi
+    model_check output "$1" --format gguf --type "$(normalize_gguf_type "$2")" --seconds "$3" \
+        --stats "$CONVERT_STATS" "${test_args[@]}"
 }
 
 # The model for one GGUF type: written directly by the converter, or an F16 intermediate that the target stage
@@ -110,6 +175,8 @@ build_imatrix() {
     [ -f "$dataset" ] || die "Calibration dataset not found at '$dataset'."
     [ -x "$IMATRIX_BIN" ] || die "llama-imatrix not found at $IMATRIX_BIN (the image must build llama.cpp)."
     mkdir -p "$IMATRIX_DIR"
+    check_input
+    FUNCTIONAL_TEST=0
     if [ "${INPUT_FORMAT:-model}" = "gguf" ]; then
         f16_file="$MODEL_SOURCE"  # measured as it is, and kept
     else
@@ -117,6 +184,7 @@ build_imatrix() {
         convert_to_gguf f16 "$f16_file"
     fi
     echo ">> Computing importance matrix..."
+    model_check begin "$IMATRIX_DIR/imatrix.dat" --state "$CONVERT_STATE"
     # -o *.dat keeps the legacy format, which llama-quantize --imatrix accepts.
     "$IMATRIX_BIN" -m "$f16_file" -f "$dataset" -o "$IMATRIX_DIR/imatrix.dat" --chunks 100
     if [ "${INPUT_FORMAT:-model}" != "gguf" ]; then
@@ -128,13 +196,21 @@ build_imatrix() {
 main() {
     # shellcheck source=/dev/null
     source "$BUILD_PLAN"
+    trap on_exit EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    # A run of this stage that was stopped before it finished: what it wrote goes before anything else.
+    model_check restore --state "$CONVERT_STATE" --stopped
 
     if [[ "$JOB" == "imatrix" ]]; then
         build_imatrix
+        model_check keep --state "$CONVERT_STATE"
+        stage_output "$CONVERT_STATS"
         return
     fi
 
     load_sdk_environment
+    check_input
     validate_huggingface_model "$MODEL_SOURCE"
     : > "$QUANTIZE_JOBS"
 
@@ -147,6 +223,8 @@ main() {
             ;;
     esac
 
+    model_check keep --state "$CONVERT_STATE"
+    stage_output "$CONVERT_STATS"
     stage_output "$QUANTIZE_JOBS"
     local f
     for f in "$OUTPUT_DIR"/*; do

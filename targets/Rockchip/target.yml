@@ -129,12 +129,15 @@ modules:
       outputs: ["build_config.sh", "cross_compile_toolchain.cmake (hardware profile only)"]
 
     convert:
-      description: "Model conversion: HF -> GGUF (F16 intermediate or a direct type), RKLLM, RKNN; the imatrix job"
-      dependencies: ["convert_hf_to_gguf.py", "llama-imatrix", "RKLLM-Toolkit", "RKNN-Toolkit2"]
+      description: "Model conversion: HF -> GGUF (F16 intermediate or a direct type), RKLLM, RKNN; the imatrix job.
+        Around it (scripts/model_check.py): format detection, integrity checks of the input and the output, the
+        statistics, a functional test of the GGUF, cleanup on failure"
+      dependencies: ["convert_hf_to_gguf.py", "llama-imatrix", "RKLLM-Toolkit", "RKNN-Toolkit2",
+                     "llama-completion (the functional test, when the image has it)"]
       runtime: "container"
       inputs: ["model_directory (or a GGUF file: nothing converted)", "build_config.sh"]
       outputs: ["<model>-<type>.gguf, .rkllm or .rknn", "tmp-<model>-F16.gguf (or the --output file) and quantize_jobs.sh",
-                "imatrix.dat"]
+                "imatrix.dat", "convert_stats.json (\"conversion\" in build_info.json)"]
 
     target:
       description: "Quantization and the results (build_info.json); with a hardware profile the board package"

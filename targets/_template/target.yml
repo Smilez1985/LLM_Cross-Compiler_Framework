@@ -64,10 +64,12 @@ modules:
       inputs: ["the request (environment)", "target_hardware_config.txt (optional)"]
       outputs: ["build_config.sh", "cross_compile_toolchain.cmake (hardware profile only)"]
     convert:
-      description: "Model conversion: the quantization logic of the module, by default HF -> GGUF; the imatrix job"
+      description: "Model conversion: the quantization logic of the module, by default HF -> GGUF; the imatrix job.
+        Around it (scripts/model_check.py): format detection, integrity checks of the input and the output, the
+        statistics, a functional test of the GGUF, cleanup on failure"
       inputs: ["model_directory (or a GGUF file: nothing converted)", "build_config.sh"]
       outputs: ["<model>-<type>.gguf", "tmp-<model>-F16.gguf (or the --output file) and quantize_jobs.sh",
-                "imatrix.dat"]
+                "imatrix.dat", "convert_stats.json (\"conversion\" in build_info.json)"]
     target:
       description: "Quantization, the packaging commands of the module and build_info.json"
       inputs: ["quantize_jobs.sh", "build_config.sh"]

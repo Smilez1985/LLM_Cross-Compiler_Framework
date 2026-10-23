@@ -550,7 +550,7 @@ Köpfe wahr, wenn du eine Stufe änderst.
 |---|---|---|
 | 1. source | `source_module.sh` | Nennt die Quellen der Werkzeuge, aus denen das Image gebaut wurde (Tag und Commit von llama.cpp, die das Dockerfile geprüft hat, die SDK-venvs); in der Vorlage führt sie außerdem einmal die Einrichtungsbefehle der Moduldefinition aus. Nichts wird heruntergeladen. |
 | 2. config | `config_module.sh` | Liest den Auftrag aus der Umgebung, vereinheitlicht die Namen von Format, Board und Typ, lehnt ab, was das Target nicht bauen kann, und schreibt den Build-Plan `build_config.sh` in den Stufenordner. |
-| 3. convert | `convert_module.sh` | Wandelt das Modell um: GGUF-Typen, die der Konverter selbst schreibt, landen direkt im Ausgabeordner; jeder andere Typ wird zu einer F16-Zwischendatei im Arbeitsordner für die Stufe target. RKLLM und RKNN führen ihre Format-Helfer `rkllm_module.sh` und `rknn_module.sh` aus. Im Auftrag `imatrix` berechnet sie die Importance-Matrix. |
+| 3. convert | `convert_module.sh` | Wandelt das Modell um: GGUF-Typen, die der Konverter selbst schreibt, landen direkt im Ausgabeordner; jeder andere Typ wird zu einer F16-Zwischendatei im Arbeitsordner für die Stufe target. RKLLM und RKNN führen ihre Format-Helfer `rkllm_module.sh` und `rknn_module.sh` aus. Im Auftrag `imatrix` berechnet sie die Importance-Matrix. Um jede Umwandlung herum erkennt sie das Format der Eingabe, prüft die Eingabe und was der Konverter geschrieben hat, führt einen kurzen Funktionstest aus und hält eine Statistik fest ([Abschnitt 6.5](#65-die-prüfungen-der-stufe-convert)). |
 | (rotate) | `rotate_module.sh` | Optionaler Haken zwischen convert und target für eine Rotation wie SpinQuant oder QuaRot (Roadmap): läuft nur, wenn das Target diese Datei hat; mitgeliefert wird keine. Sie darf die Zwischendatei in voller Genauigkeit ändern, bevor sie quantisiert wird. |
 | 4. target | `target_module.sh` | Quantisiert, was die Stufe convert für sie hinterlassen hat (`quantize_jobs.sh`), entfernt die Zwischendatei, schreibt `build_info.json` und listet die Ergebnisse auf. |
 
@@ -626,8 +626,8 @@ Einbindungen:
   `.rkllm`, `.rknn`, `.onnx`, `.safetensors` oder `.bin` zählen als Modelldateien; die größte Datei mit der Endung
   des Formats wird zur Hauptdatei, die das Deployment installiert.
 - Du darfst dort eine `build_info.json` mit eigenen Feldern schreiben (Rockchip schreibt Modell, Format, Board,
-  Quantisierung und den llama.cpp-Tag, in seiner Stufe target); die Engine ergänzt Dateiliste, Hashes und
-  Build-Daten.
+  Quantisierung und den llama.cpp-Tag, in seiner Stufe target, und die Statistik der Stufe convert als
+  `conversion`); die Engine ergänzt Dateiliste, Hashes und Build-Daten.
 - Im Auftrag `imatrix` schreibt die Stufe convert `$BUILD_CACHE_DIR/imatrix/imatrix.dat`.
 - Nenne jede Datei, die eine spätere Stufe braucht, und jedes Ergebnis mit `stage_output DATEI`: Ein Fortsetzen führt
   eine Stufe erneut aus, wenn eine davon fehlt.
@@ -706,6 +706,33 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
 fi
 ```
+
+### 6.5 Die Prüfungen der Stufe convert
+
+Die convert-Module von Rockchip und der Vorlage führen um jede Umwandlung herum `scripts/model_check.py` aus (mit dem
+`python3` des Images und nur der Standardbibliothek; der Modulgenerator kopiert die Datei in das `scripts/` eines
+neuen Targets, lass sie dort). Sie leistet, was das convert-Modul der Version 1.x im Entwurf des Maintainers
+versprochen hat:
+
+| Befehl | Wann | Was er tut |
+|---|---|---|
+| `input PFAD --format FORMAT --stats DATEI` | vor dem Umwandeln | Erkennt die Eingabe: einen Hugging-Face-Ordner mit SafeTensors- oder PyTorch-Gewichten, eine GGUF-Datei (nichts umzuwandeln), ein ONNX-Modell, eine einzelne Gewichtsdatei, einen Ordner mit GGUF-Dateien. Lehnt mit dem Grund ab, was das Format nicht verwenden kann (`--onnx-next TEXT` ergänzt, wohin ein ONNX-Modell auf diesem Target gehört), prüft die Integrität der Eingabe (ihre JSON-Dateien, die SafeTensors-Header gegen die Dateigrößen, die Teildateien, die ein Index nennt, PyTorch-Archive, einen GGUF-Header) und beginnt die Statistik. |
+| `begin DATEI --state DATEI [--scratch ORDNER]` | bevor ein Konverter DATEI schreibt | Behält eine vorhandene DATEI als `DATEI.convert-backup`, bis die neue ihre Prüfungen bestanden hat (eine Zwischendatei `tmp-*` des Arbeitsordners wird einfach ersetzt). |
+| `watch ORDNER --state DATEI` | bevor ein Format-Helfer läuft | Merkt sich die Dateien von ORDNER mit Größe und Zeit, damit `output --watched` das Modell findet, das der Helfer geschrieben hat (eine neue Datei oder eine, die er überschrieben hat), und ein Fehler es entfernt. |
+| `output DATEI --format gguf --type TYP --seconds N --stats DATEI --tools ORDNER` | nach dem Konverter | Prüft das GGUF (die Daten jedes Tensors liegen in der Datei), führt den Funktionstest mit `llama-completion` (oder `llama-cli`) aus ORDNER aus: 8 Tokens, höchstens `--test-seconds` (120), offline. `--test-skip GRUND` überspringt den Test mit einem Hinweis. Vervollständigt die Statistik. |
+| `keep --state DATEI` | wenn die Stufe gelungen ist | Entfernt die Sicherungen. |
+| `restore --state DATEI --failed` oder `--stopped` | wenn die Stufe scheitert; bei ihrem nächsten Start | Entfernt, was der Lauf geschrieben hat, und legt die Sicherungen zurück (`--stopped`: was ein abgebrochener Lauf hinterlassen hat). Eine Datei, deren Sicherung nicht mehr da ist, bleibt, wie sie ist: Die frühere Datei wurde von Hand zurückgelegt. |
+
+Die Statistik (`convert_stats.json` im Stufenordner) kommt als `conversion` in `build_info.json`: `input_format`,
+`weights`, `input_bytes` (was der Konverter liest: Eine Gewichtsdatei, die er beiseitelässt, etwa Mistrals
+`consolidated.safetensors` neben den Teildateien `model*.safetensors`, zählt nicht), `converted`, `output_format`,
+`output_type`, `output_bytes`, `ratio` (Eingabe / Ausgabe),
+`seconds`, `functional_test` (`passed`, `skipped`, `timed out` oder `stopped`) und `functional_test_tool`; nur Zahlen
+und Wörter, keine Pfade. Ein Funktionstest, der mit einem Fehler endet oder abstürzt (ein Signal wie der Abbruch von
+llama.cpp bei einem Tensor, den es nicht verwenden kann), lässt die Stufe mit den letzten Zeilen des Werkzeugs
+scheitern: Das GGUF funktioniert nicht. Eine Zeitüberschreitung oder ein von außen angehaltener Lauf (SIGKILL des
+Out-of-Memory-Killers, SIGTERM) ist ein Hinweis. Übersprungen wird er mit einem Hinweis, wenn das Image keines der beiden Werkzeuge hat oder es dort nicht startet, bei einem Embedding-Modell, bei den NPU-Formaten (das Modell läuft auf dem Board) und im
+Auftrag `imatrix` (dort führt `llama-imatrix` das Modell aus).
 
 ## 7. Regeln der Sandbox
 

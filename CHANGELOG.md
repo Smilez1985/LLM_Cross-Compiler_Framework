@@ -1300,6 +1300,35 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   planned, instead of getting programs that cannot run there. The resume digest also covers the output folder and
   the hardware profile that the config stage reads when none is named, and a late stage line of a finished container no longer takes back the
   build's next step.
+- **The convert stage detects, checks, counts and tests what it converts, and leaves nothing half-written**
+  (the maintainer's design of the 1.x convert module, decision U9 addendum; consolidation chain how2-convert).
+  `scripts/model_check.py` (the Rockchip target and the template ship the same file; it needs only the image's
+  Python and its standard library) detects the input: a Hugging Face folder with SafeTensors or PyTorch weights, a
+  GGUF file (nothing is converted, the target stage quantizes it), an ONNX model, a single weights file or a folder
+  of GGUF files. What the build's format cannot use is refused with the reason before anything slow runs: an ONNX
+  model for GGUF ("llama.cpp has no converter from ONNX to GGUF") or RKLLM names the format rknn for the NPU (on the
+  RK3566 the NPU runs voice and vision models, the LLM runs on the CPU as a GGUF), and a single weights file asks
+  for the model's folder. Before, such an input reached the converter and failed there with a traceback. The input's
+  integrity is checked (its JSON files, every SafeTensors header against the file size as the safetensors library
+  checks it, the shards an index lists, PyTorch archives, a GGUF header; only the weights the converter reads, so
+  a staged repository's leftover `pytorch_model.bin.index.json` beside its SafeTensors is no reason to refuse it),
+  and so is every GGUF the converter wrote
+  (every tensor's data inside the file, as llama.cpp's loader checks it); the 1.x warnings about a missing config,
+  tokenizer or weights stay. A short functional test runs the written GGUF with `llama-completion`, the one-shot
+  generator that was `llama-cli` in 1.x (`llama-cli` itself when an image has only that): 8 tokens, at most 120 s,
+  offline. A run that ends with an error or crashes (llama.cpp aborts on a tensor it cannot use) fails the stage
+  with the tool's last lines; a timeout or a run stopped from outside (the out-of-memory killer) is a note; it is
+  skipped with a note when the image has neither tool, for an embedding model, for the NPU formats and
+  in the `imatrix` job. The statistics (input and output size, ratio, duration of the conversion, the test's result;
+  the input counts the weights the converter reads, not a second copy such as Mistral's `consolidated.safetensors`)
+  go into the log and into `build_info.json` as `conversion` (numbers and words, no paths), which the build engine
+  keeps when it completes the manifest. A file a converter replaces (the `--output` file of 1.x, an earlier result)
+  is kept as `FILE.convert-backup` until the new one passed its checks; a failed or stopped stage removes what it
+  wrote and puts the backups back, and after a killed run the next start of the stage does (an earlier file the
+  person put back by hand stays). A second build into the same output folder finds the RKLLM or RKNN model the
+  format helper wrote over the first one's file of the same name. The modules stay
+  callable on their own with their 1.x options. The characterization tests compare `build_info.json` without the new
+  key, and their stub toolchains write GGUF and SafeTensors files with valid headers (`tests/model_files.py`).
 - **New targets get working stage modules, and the entrypoint modes run the stage runner.** The template's
   `build.sh` is the same runner as Rockchip's (a test keeps them equal), and its four stage modules take the
   wizard's values: the setup commands run once in the source stage (what they export reaches the later stages, also
