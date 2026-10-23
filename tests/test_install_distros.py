@@ -370,6 +370,20 @@ class TestTheDryRun:
         assert run.returncode == 1, text
         assert "Docker wurde nicht installiert" in text and "dieses System laut" in text and DOCKER_MANUAL in text
 
+    @pytest.mark.parametrize("system, tool", [("centos", "dnf"), ("amzn", "dnf"), ("arch", "pacman"),
+                                              ("debian", "apt-get")])
+    def test_without_the_package_manager_the_dry_run_stops_like_the_installation(self, tmp_path, system, tool):
+        """CentOS 7 and Amazon Linux 2 have yum, not dnf: with Python and rsync there, the installation still stops
+        at Docker ('dnf fehlt auf diesem System'), so the dry run must not say it would go through."""
+        box = Box(tmp_path, system, present=("curl", "python3=3.12", "rsync"), tools=("zypper",))
+        run, calls = box.run("main --dry-run")
+        assert calls == []
+        assert run.returncode == 1, said(run)
+        assert f"Docker wurde nicht installiert: {tool} fehlt auf diesem System." in said(run)
+        real = Box(tmp_path / "real", system, present=("curl", "python3=3.12", "rsync"), tools=("zypper",))
+        run, _ = real.run("install_docker")
+        assert run.returncode == 1 and f"{tool} fehlt auf diesem System." in said(run), said(run)
+
     def test_the_dry_run_changes_nothing_and_needs_no_root(self):
         text = INSTALL_SH.read_text(encoding="utf-8")
         main = text[text.index("main() {"):]

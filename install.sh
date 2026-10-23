@@ -1174,6 +1174,8 @@ plan_docker() {
     fi
     docker_plan
     pkg_argv
+    # Wie install_docker_apt, install_docker_rpm und install_docker_distro: ohne die Paketverwaltung hält es hier an.
+    if ! command -v "$(pkg_tool)" &> /dev/null; then docker_stop "$(pkg_tool) fehlt auf diesem System."; fi
     if ! pacman_database_ready; then docker_stop "$(pacman_database_text)"; fi
     if [ -n "$DOCKER_SERVICE" ]; then
         if [ "$PKG" = "apk" ]; then service="; rc-update add docker default; rc-service docker start"
