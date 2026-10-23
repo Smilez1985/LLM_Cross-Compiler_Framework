@@ -63,6 +63,18 @@ def test_format_problem(mixed, fmt, target, refused, words):
         assert "Rockchip: gguf, rkllm, rknn" in listing and "MyJetson: any format" in listing
 
 
+def test_a_target_without_capabilities_names_the_target_that_builds_it():
+    """Review cs-cli-gui-v: a format a target without capabilities does not take (no engine format) but another
+    installed target declares is not called "no format a target builds": the refusal names that target."""
+    from orchestrator.Core.build_formats import TargetFormats, format_problem, unchecked_formats
+    found = [TargetFormats("Hailo8", ("hef",), True),
+             TargetFormats("MyJetson", tuple(v for _, v in unchecked_formats()), False)]
+    problem = format_problem("hef", found, "MyJetson")
+    assert problem is not None and "no format a target builds" not in problem
+    assert "The target MyJetson does not build the format hef; Hailo8 builds it." in problem
+    assert format_problem("hf", found, "MyJetson").startswith("hf is no format a target builds."), "as before"
+
+
 def test_another_target_that_builds_it_is_named():
     from orchestrator.Core.build_formats import TargetFormats, format_problem
     found = [TargetFormats("Rockchip", ("gguf", "rkllm", "rknn"), True), TargetFormats("Hailo8", ("hef",), True)]
