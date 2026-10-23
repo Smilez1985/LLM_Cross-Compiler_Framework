@@ -22,6 +22,7 @@ LFS_SHA = "a" * 64
 STORED = "hf_" + "Stored" * 6        # built at runtime: never a credential-shaped literal in the repository
 IMPLICIT = "hf_" + "Implicit" * 5    # HF_TOKEN: never to be sent
 FOREIGN = "https://mirror.example"   # an HF_ENDPOINT that is not huggingface.co
+PRIVATE = "acme/private-GGUF"        # a private repository: the Hub answers 401 to a request without a token
 
 SIBLINGS = [{"rfilename": "config.json", "size": 12},
             {"rfilename": "model.safetensors", "size": 99, "lfs": {"sha256": LFS_SHA, "size": 99, "pointerSize": 134}},
@@ -34,6 +35,11 @@ class Wire:
     def __init__(self, licence="apache-2.0", gated=False):
         self.seen, self.licence, self.gated = [], licence, gated
         self.redirect = ""   # a host the Hub's API answers with a redirect to (a renamed repository, a mirror)
+        self.private = {PRIVATE}   # answered with 401 without a token, as the Hub answers for a private repository
+
+    def tokens_in_order(self, host: str = "huggingface.co"):
+        """The token (or None) of each API request to `host`, in order."""
+        return [token for seen_host, path, token in self.seen if seen_host == host and path != "/api/agent-harnesses"]
 
     def tokens_to(self, host: str):
         return [token for seen_host, _, token in self.seen if seen_host == host and token]
@@ -46,6 +52,9 @@ class Wire:
         auth = request.headers.get("authorization", "")
         self.seen.append((request.url.host, request.url.path, auth[len("Bearer "):] if auth else None))
         path = request.url.path
+        repo = re.match(r"/api/models/([^/]+/[^/]+)", path)
+        if repo and repo.group(1) in self.private and not auth and request.url.host == "huggingface.co":
+            return httpx.Response(401, json={"error": "Repository not found"}, headers={"X-Error-Code": "RepoNotFound"})
         if self.redirect and request.url.host == "huggingface.co" and path.startswith("/api/"):
             return httpx.Response(307, headers={"Location": f"{self.redirect}{path}"})
         if path == "/api/models":
@@ -64,6 +73,7 @@ class Wire:
             return httpx.Response(200, json={
                 "id": found.group(1), "modelId": found.group(1), "sha": COMMIT, "siblings": SIBLINGS,
                 "cardData": {"license": self.licence}, "tags": [f"license:{self.licence}"], "gated": self.gated,
+                "private": found.group(1) in self.private,
                 "safetensors": {"total": 1234, "parameters": {"F32": 1234}}})
         return httpx.Response(404, json={"error": "not found"})
 
@@ -103,8 +113,8 @@ def engine(tmp_path, token=None):
     return e
 
 
-def stage(tmp_path, monkeypatch, token=None):
-    """The Builder's staging of REPO with a stand-in for the fetcher: (what it fetched, the tokens it got)."""
+def stage(tmp_path, monkeypatch, token=None, repo=REPO):
+    """The Builder's staging of `repo` with a stand-in for the fetcher: (what it fetched, the tokens it got)."""
     from orchestrator.Core.builder import BuildConfiguration, BuildEngine, BuildProgress, BuildStatus, ModelFormat
     fetched, tokens = [], []
 
@@ -119,7 +129,7 @@ def stage(tmp_path, monkeypatch, token=None):
             return Path(dest), "0" * 64
 
     monkeypatch.setattr(BuildEngine, "_hub_fetcher", staticmethod(lambda token, stop: Fetcher(token, stop)))
-    config = BuildConfiguration(build_id="b1", timestamp="t", model_source=REPO, target_arch="Rockchip",
+    config = BuildConfiguration(build_id="b1", timestamp="t", model_source=repo, target_arch="Rockchip",
                                 target_format=ModelFormat.GGUF, output_dir="out")
     engine(tmp_path, token)._stage_model(config, BuildProgress("b1", BuildStatus.QUEUED, ""))
     return fetched, tokens
@@ -179,34 +189,74 @@ def foreign(wire, monkeypatch):
 
 def only_to_huggingface(wire, token):
     """No request carries a token to the host in HF_ENDPOINT, none carries the implicit HF_TOKEN, every API call goes
-    to huggingface.co, and the token sent there is exactly the framework's own (`token`), or none at all."""
+    to huggingface.co, and the token sent there is exactly the framework's own (`token`), or, with `token` None, none
+    at all."""
     assert wire.tokens_to("mirror.example") == [], "a token went to the host in HF_ENDPOINT"
     assert IMPLICIT not in [token for _, _, token in wire.seen], "the implicit HF_TOKEN was sent"
     assert wire.api_hosts() == {"huggingface.co"}, wire.seen
     assert set(wire.tokens_to("huggingface.co")) == ({token} if token else set())
 
 
+def refused_then_once_with(wire, token):
+    """Each request with the token came right after the Hub refused the same request without one (401): the token went
+    only where Hugging Face needed it, one request each time."""
+    order = wire.tokens_in_order()
+    assert order and all(t == token for t in order[1::2]) and all(t is None for t in order[0::2]), order
+
+
 class TestTheTokenGoesOnlyToHuggingFace:
     """Regression (maintainer, stage C wave 3): the wave-2 fix pinned hf_hub's own calls, while the Builder's staging,
     the build plan's look-up and the GUI's commit check created their own HfApi() and sent the stored token to the
     host in HF_ENDPOINT, and the browser's search, licence check and file list sent the implicit HF_TOKEN there. Every
-    caller now goes through hf_hub.hub_api."""
+    caller now goes through hf_hub.hub_api.
+
+    Changed on purpose (DECISIONS round 25 Q2): the token goes only where Hugging Face needs one. Before, every call
+    of these callers carried the stored (or typed) token to huggingface.co; now a public repository's look-ups,
+    listings and files carry none, also with a token stored. A gated repository's access check and files get it, and
+    a private one's calls get it after the Hub refused them without one (401), one request each time; still only at
+    huggingface.co."""
 
     @pytest.mark.parametrize("token", [STORED, None])
     def test_the_builders_staging(self, foreign, tmp_path, monkeypatch, token):
         fetched, tokens = stage(tmp_path, monkeypatch, token)
-        assert [f[0] for f in fetched] == ["config.json", "model.safetensors"] and tokens == [token]
-        only_to_huggingface(foreign, token)
+        assert [f[0] for f in fetched] == ["config.json", "model.safetensors"] and tokens == [None]
+        only_to_huggingface(foreign, None)
+
+    def test_the_builders_staging_of_a_gated_and_of_a_private_repository(self, foreign, tmp_path, monkeypatch):
+        foreign.gated = "manual"
+        _, tokens = stage(tmp_path, monkeypatch, STORED)
+        assert tokens == [STORED], "the files of a gated repository need the token"
+        only_to_huggingface(foreign, None)   # a gated repository's facts are public
+        foreign.gated, foreign.seen = False, []
+        _, tokens = stage(tmp_path / "private", monkeypatch, STORED, repo=PRIVATE)
+        assert tokens == [STORED]
+        only_to_huggingface(foreign, STORED)
+        refused_then_once_with(foreign, STORED)
 
     @pytest.mark.parametrize("token", [STORED, None])
     def test_the_build_plans_look_up(self, foreign, token):
         assert real_look_up(REPO, None, token).commit == COMMIT
-        only_to_huggingface(foreign, token)
+        only_to_huggingface(foreign, None)
+
+    def test_the_build_plans_look_up_of_a_gated_and_of_a_private_repository(self, foreign):
+        foreign.gated = "auto"
+        facts = real_look_up(REPO, None, STORED)
+        assert facts.token_access == "yes"
+        assert [(p.rsplit("/", 1)[-1], t) for _, p, t in foreign.seen if t] == [("auth-check", STORED)], \
+            "only the access check of the gated repository carries the token"
+        only_to_huggingface(foreign, STORED)
+        foreign.gated, foreign.seen = False, []
+        assert real_look_up(PRIVATE, None, STORED).token_access == "yes"
+        refused_then_once_with(foreign, STORED)
+        only_to_huggingface(foreign, STORED)
 
     @pytest.mark.parametrize("token", [STORED, None])
     def test_the_gui_commit_check_of_an_identical_build(self, foreign, tmp_path, token):
         from orchestrator.Core.build_service import BuildService
         assert BuildService(framework(tmp_path, token)).model_commit(REPO) == COMMIT
+        only_to_huggingface(foreign, None)
+        foreign.seen = []
+        assert BuildService(framework(tmp_path, token)).model_commit(PRIVATE) == (COMMIT if token else None)
         only_to_huggingface(foreign, token)
 
     @pytest.mark.parametrize("token", [STORED, None])
@@ -216,36 +266,52 @@ class TestTheTokenGoesOnlyToHuggingFace:
         assert [m["id"] for m in manager.search_huggingface_models("tiny")] == ["acme/free", "acme/locked"]
         assert manager.check_license(REPO)["license"] == "apache-2.0"
         assert "config.json" in manager.list_repo_files(REPO)
-        only_to_huggingface(foreign, token)
+        only_to_huggingface(foreign, None)
+
+    def test_a_private_repositorys_licence_check_and_file_list(self, foreign, tmp_path):
+        from orchestrator.Core.model_manager import ModelManager
+        manager = ModelManager(framework(tmp_path, STORED))
+        assert manager.check_license(PRIVATE)["license"] == "apache-2.0"
+        assert "config.json" in manager.list_repo_files(PRIVATE)
+        refused_then_once_with(foreign, STORED)
+        only_to_huggingface(foreign, STORED)
 
     def test_the_token_typed_in_the_browser_too(self, foreign, tmp_path):
         from orchestrator.Core.model_manager import ModelManager
         typed = "hf_" + "Typed" * 8
         assert "config.json" in ModelManager(framework(tmp_path, STORED)).list_repo_files(REPO, typed)
+        only_to_huggingface(foreign, None)
+        foreign.seen = []
+        assert "config.json" in ModelManager(framework(tmp_path, STORED)).list_repo_files(PRIVATE, typed)
         only_to_huggingface(foreign, typed)
 
     def test_the_browsers_licence_check_uses_the_typed_token_too(self, qapp, foreign, tmp_path):
         # Regression (review of chain hf-online): ModelManager.check_license took the typed token, but the browser's
         # FileListWorker did not pass it, so the licence check went without the token the person had just typed
-        # (the stored one or none) while the file list used it. Both requests now carry the typed token.
+        # (the stored one or none) while the file list used it. Both requests now carry the typed token where the
+        # Hub needs one (a private repository here; round 25 Q2: a public one's carry none).
         pytest.importorskip("PySide6")
         from orchestrator.Core.model_manager import ModelManager
         from orchestrator.gui import huggingface_window as hf
         typed = "hf_" + "Typed" * 8
         done = []
-        worker = hf.FileListWorker(ModelManager(framework(tmp_path)), REPO, typed, lang="en")
+        worker = hf.FileListWorker(ModelManager(framework(tmp_path)), PRIVATE, typed, lang="en")
         worker.finished.connect(lambda licence, files: done.append((licence["license"], files)))
         worker.error.connect(lambda text: pytest.fail(text))
         worker.run()
         assert done == [("apache-2.0", [s["rfilename"] for s in SIBLINGS])]
-        calls = [(path, token) for host, path, token in foreign.seen if path != "/api/agent-harnesses"]
+        calls = [(path, token) for host, path, token in foreign.seen if path != "/api/agent-harnesses" and token]
         assert len(calls) == 2 and all(token == typed for _, token in calls), calls
+        refused_then_once_with(foreign, typed)
         only_to_huggingface(foreign, typed)
 
     def test_the_take_overs_hub_list(self, foreign, tmp_path):
         from orchestrator.Core.model_manager import ModelManager
         listed = ModelManager(framework(tmp_path, STORED))._hub_lookup()(REPO, COMMIT)
         assert listed["model.safetensors"].sha256 == LFS_SHA
+        only_to_huggingface(foreign, None)
+        foreign.seen = []
+        assert ModelManager(framework(tmp_path, STORED))._hub_lookup()(PRIVATE, COMMIT)["model.safetensors"]
         only_to_huggingface(foreign, STORED)
 
     def test_an_ai_callers_search_and_look_up(self, foreign, tmp_path):
@@ -253,23 +319,28 @@ class TestTheTokenGoesOnlyToHuggingFace:
         client = HubClient(framework(tmp_path, STORED))
         assert [m["id"] for m in client.search("tiny", gated_mode="any")] == ["acme/free", "acme/locked"]
         assert client.info(REPO).commit == COMMIT
+        only_to_huggingface(foreign, None)
+        foreign.seen = []
+        facts = client.info(PRIVATE)
+        assert facts.commit == COMMIT and facts.private and facts.needs_token and facts.token_access == "yes"
+        refused_then_once_with(foreign, STORED)
         only_to_huggingface(foreign, STORED)
 
     def test_a_redirect_to_another_host_carries_no_token(self, wire, tmp_path):
         """An API answer that redirects to another host (a renamed repository, a mirror, a CDN): huggingface_hub's
         client follows it, and the token stays with huggingface.co (httpx drops Authorization when the origin changes;
-        the fetcher's redirects are tests/test_hf_tools.py's)."""
+        the fetcher's redirects are tests/test_hf_tools.py's). A private repository, so the token is sent at all."""
         from orchestrator.Core.build_service import BuildService
         from orchestrator.Core.hf_hub import HubClient
         from orchestrator.Core.model_manager import ModelManager
         wire.redirect = FOREIGN
         manager = ModelManager(framework(tmp_path, STORED))
-        assert "config.json" in manager.list_repo_files(REPO)
-        assert manager.check_license(REPO)["license"] == "apache-2.0"
+        assert "config.json" in manager.list_repo_files(PRIVATE)
+        assert manager.check_license(PRIVATE)["license"] == "apache-2.0"
         assert [m["id"] for m in manager.search_huggingface_models("tiny")] == ["acme/free", "acme/locked"]
-        assert real_look_up(REPO, None, STORED).commit == COMMIT
-        assert BuildService(framework(tmp_path, STORED)).model_commit(REPO) == COMMIT
-        assert HubClient(framework(tmp_path, STORED)).info(REPO).commit == COMMIT
+        assert real_look_up(PRIVATE, None, STORED).commit == COMMIT
+        assert BuildService(framework(tmp_path, STORED)).model_commit(PRIVATE) == COMMIT
+        assert HubClient(framework(tmp_path, STORED)).info(PRIVATE).commit == COMMIT
         assert {host for host, _, _ in wire.seen} >= {"huggingface.co", "mirror.example"}, "the redirects were followed"
         assert wire.tokens_to("mirror.example") == [], "a token went through a redirect to another host"
         assert set(wire.tokens_to("huggingface.co")) == {STORED}

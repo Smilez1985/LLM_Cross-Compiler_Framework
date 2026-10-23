@@ -311,16 +311,28 @@ class TestTheBrowsersDownload:
         assert all("Authorization" not in headers for _, headers in person.sessions[-1].seen)
 
     def test_the_stored_token_or_the_typed_one_goes_only_to_huggingface(self, person):
-        from test_hf_tools import REPO, TOKEN
+        # Changed on purpose (DECISIONS round 25 Q2): the token goes only where Hugging Face needs one. A gated
+        # repository's file gets it, at huggingface.co only; its look-up is public and carries none (before, the
+        # look-up carried the token too). A public repository's file carries none, also with a token stored.
+        from test_hf_tools import REPO, TOKEN, info
         person.vault["hf_token"] = TOKEN
+        person.hub.models[REPO] = info(gated="auto")
         person.mm.download_file(REPO, "tiny-q4_k_m.gguf")
-        assert person.hub.tokens == [TOKEN]
+        assert person.hub.tokens == [False]
         url, headers = person.sessions[-1].seen[0]
         assert url.startswith("https://huggingface.co/") and headers["Authorization"] == f"Bearer {TOKEN}"
         typed = "hf_" + "Typed" * 8
         new_place(person).unlink()
         person.mm.download_file(REPO, "tiny-q4_k_m.gguf", typed)
-        assert person.hub.tokens[-1] == typed
+        assert person.hub.tokens[-1] is False and person.sessions[-1].seen[-1][1]["Authorization"] == f"Bearer {typed}"
+
+    def test_a_public_file_carries_no_token_even_with_one_stored(self, person):
+        # Regression (DECISIONS round 25 Q2): the stored token went with every file of the browser's download.
+        from test_hf_tools import REPO, TOKEN
+        person.vault["hf_token"] = TOKEN
+        person.mm.download_file(REPO, "tiny-q4_k_m.gguf")
+        assert person.hub.tokens == [False]
+        assert person.sessions[-1].seen and all("Authorization" not in h for _, h in person.sessions[-1].seen)
 
     @pytest.mark.parametrize("status", [401, 403])
     def test_a_refusal_of_the_file_is_a_hub_error_with_the_token_step(self, person, status):
@@ -374,6 +386,11 @@ class TestTheTokenGoesOnlyToHuggingFace:
 
         def model_info(self, repo_id, **kwargs):
             seen.append((self.endpoint, kwargs.get("token")))
+            if kwargs.get("token") is False:   # the Hub refuses the request without a token (a private repository)
+                import httpx
+                from huggingface_hub.errors import RepositoryNotFoundError
+                raise RepositoryNotFoundError("401 Client Error", response=httpx.Response(
+                    401, request=httpx.Request("GET", f"{self.endpoint}/api/models/{repo_id}")))
             raise ConnectionError("no network in tests")
 
         monkeypatch.setattr(huggingface_hub.HfApi, "model_info", model_info)
@@ -398,7 +415,10 @@ class TestTheTokenGoesOnlyToHuggingFace:
                 manager.download_file("acme/tiny-GGUF", "tiny-q4_k_m.gguf", token)
         with pytest.raises(ConnectionError):
             manager._hub_lookup()("acme/tiny-GGUF", "c" * 40)
-        assert mirror == [(HUB_URL, TOKEN), (HUB_URL, typed), (HUB_URL, TOKEN)]
+        # Changed on purpose (DECISIONS round 25 Q2): each look-up asks without a token first; the token (typed or
+        # stored) follows only after the Hub refused that, in one request, and only to huggingface.co.
+        assert mirror == [(HUB_URL, False), (HUB_URL, TOKEN), (HUB_URL, False), (HUB_URL, typed),
+                          (HUB_URL, False), (HUB_URL, TOKEN)]
 
     def test_an_ai_callers_lookup_too(self, mirror, tmp_path):
         from orchestrator.Core.hf_hub import HUB_URL, HubClient
