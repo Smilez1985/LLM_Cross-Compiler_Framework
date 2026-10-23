@@ -10,9 +10,12 @@ are checked before anything is unpacked, and it is always shown as "prebuilt, no
 downloaded the same way. `start()` starts only a build that passed its verification on this machine and still matches
 its manifest (or the opted-in prebuilt archive), on 127.0.0.1 with a free port and a random per-start API key that
 reaches the server only through a 0600 key file, with a cleared environment and without any option of the shared
-forbidden list (orchestrator/runtime/server_policy.py, decision D22). It hands base_url, key and model to the provider
-layer (read_endpoint; LLMClient uses it for the "local" provider). The server never gets its own tools, agent mode,
-MCP servers or web UI: Ditto's tools run inside the framework, where approval is enforced.
+forbidden list (orchestrator/runtime/server_policy.py, decision D22). An answer on the chosen port counts only while
+llama-server itself listens there (listens_on): a program that took the free port between the choice and the bind
+never receives the key, the auth check or a prompt, and another port is tried; until then server.json is marked
+("port_unconfirmed") and read_endpoint hands it to no other process. It hands base_url, key and model to
+the provider layer (read_endpoint; LLMClient uses it for the "local" provider). The server never gets its own tools,
+agent mode, MCP servers or web UI: Ditto's tools run inside the framework, where approval is enforced.
 
 Ditto's server runs bare metal (above) or in Docker (runtime mode "docker", DECISIONS round 7 D): then start() starts
 Ditto's image, built and verified on this computer (container_server.py, runtime_mode.py), with the same launch policy,
@@ -28,8 +31,9 @@ Files under <user state dir>/runtime/llama.cpp/:
                         the build Ditto's Docker image was made from (docker_build_id)
   mode.json             the runtime mode (bare-metal or docker) and Ditto's verified image (runtime_mode.py)
   server.json           pid, start time, port and model of the running server; trusted only while that
-                        exact process (pid + start time + executable) is alive; in Docker mode the container's ID,
-                        trusted only while that container runs with Ditto's label and the recorded port
+                        exact process (pid + start time + executable) is alive and, during a start, once it is
+                        known to listen on its port (until then "port_unconfirmed": true); in Docker mode the
+                        container's ID, trusted only while that container runs with Ditto's label and the recorded port
   server-<random>.key   API key of the running server (0600, deleted on stop)
   downloads/            archives while they are fetched (.part files resume)
 Models: <models_dir>/ditto/<file>.gguf plus a .<file>.verified.json marker. Log: <state dir>/logs/llama-server.log.
@@ -61,7 +65,7 @@ from orchestrator.runtime.server_policy import (LOOPBACK, PolicyError, check_ser
                                                 write_key_file)
 from orchestrator.utils.download import DownloadError, FileLock, PinnedDownloader
 from orchestrator.utils.download import IntegrityError as DownloadIntegrityError
-from orchestrator.utils.atomic import write_private_exclusive
+from orchestrator.utils.atomic import remove_file, write_private_exclusive
 from orchestrator.utils.helpers import redact_secrets, safe_extract_archive, safe_json_load
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.next_steps import WithSteps
@@ -190,7 +194,9 @@ def runtime_root(data_dir: Path) -> Path:
     return Path(data_dir) / "runtime" / "llama.cpp"
 
 
-# The runtime's private state files are written by orchestrator/utils/atomic.py (consolidation chain c1-imports).
+# The runtime's private state files are written by orchestrator/utils/atomic.py (consolidation chain c1-imports), and
+# server.json and the key files are deleted with atomic.remove_file: LLMClient reads them in every process (the GUI's
+# too), and Windows refuses to replace or delete a file that is open at that moment, so both try again for a moment.
 _write_private = write_private_exclusive
 
 
@@ -274,6 +280,16 @@ def owned_process(state: Optional[dict]) -> Optional[psutil.Process]:
         return None
 
 
+def listens_on(pid: int, port: int) -> Optional[bool]:
+    """Whether process `pid` has a listening TCP socket on `port` (the connection table of psutil); None when that
+    cannot be checked (no permission, a system psutil cannot read)."""
+    try:
+        connections = psutil.Process(pid).net_connections(kind="tcp")
+    except (psutil.Error, OSError):
+        return None
+    return any(c.status == psutil.CONN_LISTEN and c.laddr and c.laddr.port == port for c in connections)
+
+
 def _server_alive(state: Optional[dict], docker: Any = None) -> bool:
     """The recorded server still runs: that exact process, or in Docker mode that container of Ditto's."""
     if state and state.get("mode") == "docker":
@@ -289,6 +305,8 @@ def read_endpoint(root: Path, docker: Any = None) -> Optional[LocalEndpoint]:
     state = _read_json(root / "server.json")
     if not _server_alive(state, docker):
         return None
+    if state.get("port_unconfirmed"):
+        return None  # llama-server is not yet known to be its port's listener: another program may answer there
     try:
         key_file = Path(state["key_file"])
         if key_file.parent.resolve() != root.resolve() or not key_file.name.startswith("server-"):
@@ -365,6 +383,9 @@ def _job_kill_on_close(pid: int):
 
 class LocalLLMRuntime:
     """Install, start and stop the managed llama-server; choose Ditto's model for this machine."""
+
+    EXIT_LOCK_TIMEOUT = 5.0  # seconds the exit handler of a tied server waits for the runtime lock
+    PORT_CHECK_GRACE = 10.0  # seconds a server not listed as its port's listener has to exit or to show up
 
     def __init__(self, data_dir: Optional[Path] = None, models_dir: Optional[Path] = None,
                  catalog: Optional[RuntimeCatalog] = None, hardware: Optional[HardwareInfo] = None,
@@ -941,7 +962,12 @@ class LocalLLMRuntime:
         backend): only on explicit request (`ditto runtime install --prebuilt`, or the GUI's "Install the official
         prebuilt archive..."), and always shown as "prebuilt, not self-built". The previous installation of the same
         variant stays in place until the new one is complete. A set `stop` event (threading.Event, the GUI's Cancel)
-        ends the download with DownloadStopped, keeps the `.part` file for a resume and installs nothing."""
+        ends the download with DownloadStopped, keeps the `.part` file for a resume and installs nothing. The archives
+        are downloaded outside the runtime lock (each file has its own), so a start, a stop or the exit handler of a
+        tied server elsewhere is not held up for the minutes a CUDA archive takes; the folders of an interrupted install
+        are removed (under the lock) before the space for unpacking is checked; under the lock everything is checked
+        again (installed by another process meanwhile, a server started from it, archives a concurrent install of the
+        same build removed are fetched again)."""
         choice = self.select_backend(prefer)
         asset = choice.asset
         if asset is None:
@@ -950,24 +976,49 @@ class LocalLLMRuntime:
         if unpinned:
             raise IntegrityError(f"No sha256 and size pinned for {', '.join(unpinned)} in the runtime catalog; "
                                  "refusing to download unverifiable binaries.")
-        with self._lock():
-            target = self.install_dir(asset)
+        target = self.install_dir(asset)
+        pins = {f.name: f.sha256 for f in asset.files}
+        downloads = self.root / "downloads"
+
+        def up_to_date() -> Optional[InstalledRuntime]:
             current = self._read_manifest(target)
-            if current and not force and current.files == {f.name: f.sha256 for f in asset.files}:
-                self._update_active(variant=asset.variant, asset_id=asset.id, use="prebuilt")
-                return current
+            return current if current and not force and current.files == pins else None
+
+        def refuse_if_running() -> None:
             running = owned_process(_read_json(self.state_file))
             if running and target.exists() and self._uses(running, target):
                 raise LocalRuntimeError("The local model server runs from this installation; stop it first "
                                         "(llm-cli ditto runtime stop).")
-            for leftover in list(self.root.glob(".staging-*")) + list(self.root.glob(".old-*")):
-                shutil.rmtree(leftover, ignore_errors=True)  # from an interrupted install; the lock is ours
 
-            downloads = self.root / "downloads"
+        def fetch_all() -> List[Path]:
             downloads.mkdir(parents=True, exist_ok=True)
+            return [self._fetch(self.catalog.llama_cpp.base_url + f.name, downloads / f.name, f.size, f.sha256,
+                                progress, stop=stop) for f in asset.files]
+
+        def leftovers() -> List[Path]:
+            return list(self.root.glob(".staging-*")) + list(self.root.glob(".old-*"))
+
+        archives: List[Path] = []
+        if up_to_date() is None:
+            refuse_if_running()  # before minutes of downloading, not after
+            if leftovers():  # an interrupted install's folders: removed (under the lock) before space is counted
+                with self._lock():
+                    for leftover in leftovers():
+                        shutil.rmtree(leftover, ignore_errors=True)
             self._ensure_space(self.root, 2 * asset.download_size, what="unpacking")
-            archives = [self._fetch(self.catalog.llama_cpp.base_url + f.name, downloads / f.name, f.size, f.sha256,
-                                    progress, stop=stop) for f in asset.files]
+            archives = fetch_all()
+        with self._lock():
+            current = up_to_date()  # possibly installed by another process in the meantime
+            if current:
+                for archive in archives:
+                    archive.unlink(missing_ok=True)  # not needed any more
+                self._update_active(variant=asset.variant, asset_id=asset.id, use="prebuilt")
+                return current
+            refuse_if_running()
+            for leftover in leftovers():
+                shutil.rmtree(leftover, ignore_errors=True)  # from an interrupted install; the lock is ours
+            if not archives or not all(a.is_file() for a in archives):
+                archives = fetch_all()  # removed by a concurrent install of the same build
             staging = self.root / f".staging-{asset.variant}-{secrets.token_hex(4)}"
             old = None
             try:
@@ -1216,9 +1267,10 @@ class LocalLLMRuntime:
     def start(self, tier: Optional[str] = None, ctx: Optional[int] = None,
               sleep_idle_seconds: Optional[int] = None, timeout: Optional[float] = None,
               tie_to_process: bool = False, remember: bool = True) -> LocalEndpoint:
-        """Starts llama-server (or returns the running one if it already serves this model and context).
-        tier "auto" forgets a tier chosen earlier; tie_to_process ends the server together with this process;
-        remember=False keeps the tier chosen earlier (e.g. for an evaluation run). Only a build that passed its
+        """Starts llama-server (or returns the running one if it already serves this model and context, and the idle
+        time when one is given). tier "auto" forgets a tier chosen earlier; the choice is recorded also when the running
+        server is reused; tie_to_process ends the server together with this process; remember=False keeps the tier
+        chosen earlier (e.g. for an evaluation run). Only a build that passed its
         verification on this machine and still matches its manifest is started (or the opted-in prebuilt archive).
         In Docker mode, Ditto's verified image is started instead (_start_container)."""
         if self.mode() == "docker":
@@ -1234,21 +1286,38 @@ class LocalLLMRuntime:
         for note in installed.notes:
             self.logger.warning(f"Local runtime: {note}")
         model, _ = self.resolve_model(tier)
+        idle = self._idle_seconds(sleep_idle_seconds)
         with self._lock():
             state = self._load_state() or {}
             running = self.endpoint()
             if running:
                 same = (state.get("alias") == model.alias and state.get("server") == str(installed.server)
-                        and (ctx is None or state.get("ctx") == ctx))
+                        and (ctx is None or state.get("ctx") == ctx)
+                        and (sleep_idle_seconds is None or state.get("sleep_idle_seconds") == idle))
                 if same and self._health(running.port) == 200:
+                    self._remember_tier(tier, model, remember)
                     return running
                 self._stop_locked()
+            elif state.get("port_unconfirmed"):
+                self._stop_locked()  # a start that ended before its port check: its server is never handed out
             self._cleanup_stale_locked()
             model_path = self._ensure_model_verified(model)
-            endpoint = self._launch(installed, model, model_path, ctx, sleep_idle_seconds, timeout, tie_to_process)
+            endpoint = self._launch(installed, model, model_path, ctx, idle, timeout, tie_to_process)
+            self._remember_tier(tier, model, remember)
+        return endpoint
+
+    def _idle_seconds(self, requested: Optional[int]) -> int:
+        """The idle time a server gets (--sleep-idle-seconds, 0 = never): the request, else the catalog's; 0 when the
+        pinned build has no such option. Recorded in server.json and compared the same way, so a build without the
+        option is not restarted on every start that asks for one."""
+        idle = self.catalog.server.sleep_idle_seconds if requested is None else int(requested)
+        return idle if self.catalog.llama_cpp.supports("sleep_idle_seconds") else 0
+
+    def _remember_tier(self, tier: Optional[str], model: ModelEntry, remember: bool) -> None:
+        """Records the tier chosen with `start --model` (under the runtime lock, which install() also takes to write
+        active.json): "auto" forgets it; remember=False (an evaluation run) keeps the earlier choice."""
         if tier and remember:
             self._update_active(tier=None if tier == "auto" else model.tier)
-        return endpoint
 
     def _launch(self, installed: InstalledRuntime, model: ModelEntry, model_path: Path, ctx: Optional[int],
                 sleep_idle_seconds: Optional[int], timeout: Optional[float], tie_to_process: bool) -> LocalEndpoint:
@@ -1262,10 +1331,7 @@ class LocalLLMRuntime:
             ctx, why = compute_context(model, hw, choice, self.catalog.server, model_bytes=model_path.stat().st_size)
         else:
             ctx, why = max(256, min(int(ctx), model.native_context)), "set explicitly"
-        if sleep_idle_seconds is None:
-            sleep_idle_seconds = self.catalog.server.sleep_idle_seconds
-        if not self.catalog.llama_cpp.supports("sleep_idle_seconds"):
-            sleep_idle_seconds = 0
+        sleep_idle_seconds = self._idle_seconds(sleep_idle_seconds)
         cache_ram = max(256, min(8192, hw.ram_total // (8 * MIB)))
         timeout = timeout or self.catalog.server.health_timeout_seconds
 
@@ -1299,26 +1365,37 @@ class LocalLLMRuntime:
                 created = psutil.Process(proc.pid).create_time()
             except psutil.Error:
                 created = 0.0  # already gone; the health wait reports it
-            _write_private(self.state_file, json.dumps({
+            state = {
                 "pid": proc.pid, "create_time": created, "port": port, "server": str(installed.server),
                 "variant": installed.variant, "origin": installed.origin, "build_id": installed.build_id,
-                "tier": model.tier, "alias": model.alias, "ctx": ctx,
-                "key_file": str(key_file), "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}))
+                "tier": model.tier, "alias": model.alias, "ctx": ctx, "sleep_idle_seconds": sleep_idle_seconds,
+                "key_file": str(key_file), "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+            # Written at once (a crash still leaves the server recorded), but marked: LLMClient in every other process
+            # reads server.json, and until llama-server is known to listen on the port, another program may answer
+            # there; read_endpoint hands out nothing for a marked record.
+            _write_private(self.state_file, json.dumps({**state, "port_unconfirmed": True}))
+            confirmed = []
+
+            def confirm() -> None:
+                if not confirmed:
+                    confirmed.append(True)
+                    _write_private(self.state_file, json.dumps(state))
             if tie_to_process:
                 self._tie_to_this_process(proc.pid, created)
-            outcome = self._wait_healthy(proc, port, timeout)
+            outcome = self._wait_healthy(proc, port, timeout, on_listening=confirm)
             if outcome == "ok":
                 try:
                     self._check_auth(port, key)
                 except (LocalRuntimeError, requests.RequestException) as e:
                     self._stop_locked()
                     raise LocalRuntimeError(str(e)) from e
+                confirm()  # where the connection table cannot be read: the checks above stand in for it
                 return LocalEndpoint(base_url=f"http://{LOOPBACK}:{port}/v1", api_key=key, model=model.alias,
                                      port=port, pid=proc.pid)
             tail = self._log_tail()
             self._stop_locked()
-            if outcome == "exited" and "couldn't bind" in tail:
-                continue
+            if outcome == "foreign" or (outcome == "exited" and "couldn't bind" in tail):
+                continue  # another program took the port between our choice and the bind: try another one
             what = "did not become ready in time" if outcome == "timeout" else "exited during startup"
             raise LocalRuntimeError(f"llama-server {what} (log: {self.log_file}).", log_tail=tail)
         raise LocalRuntimeError("Could not find a free local port for llama-server.")
@@ -1348,20 +1425,22 @@ class LocalLLMRuntime:
         read-only, verified here first), on 127.0.0.1 only."""
         image = self.docker_image()
         model, _ = self.resolve_model(tier)
+        idle = self._idle_seconds(sleep_idle_seconds)
         with self._lock():
             state = self._load_state() or {}
             running = self.endpoint()
             if running:
                 same = (state.get("mode") == "docker" and state.get("alias") == model.alias
-                        and state.get("image_id") == image.image_id and (ctx is None or state.get("ctx") == ctx))
+                        and state.get("image_id") == image.image_id and (ctx is None or state.get("ctx") == ctx)
+                        and (sleep_idle_seconds is None or state.get("sleep_idle_seconds") == idle))
                 if same and self._health(running.port) == 200:
+                    self._remember_tier(tier, model, remember)
                     return running
                 self._stop_locked()
             self._cleanup_stale_locked()
             model_path = self._ensure_model_verified(model)
-            endpoint = self._launch_container(image, model, model_path, ctx, sleep_idle_seconds, timeout)
-        if tier and remember:
-            self._update_active(tier=None if tier == "auto" else model.tier)
+            endpoint = self._launch_container(image, model, model_path, ctx, idle, timeout)
+            self._remember_tier(tier, model, remember)
         return endpoint
 
     def _launch_container(self, image, model: ModelEntry, model_path: Path, ctx: Optional[int],
@@ -1378,10 +1457,7 @@ class LocalLLMRuntime:
             ctx, why = compute_context(model, hw, choice, self.catalog.server, model_bytes=model_path.stat().st_size)
         else:
             ctx, why = max(256, min(int(ctx), model.native_context)), "set explicitly"
-        if sleep_idle_seconds is None:
-            sleep_idle_seconds = self.catalog.server.sleep_idle_seconds
-        if not self.catalog.llama_cpp.supports("sleep_idle_seconds"):
-            sleep_idle_seconds = 0
+        sleep_idle_seconds = self._idle_seconds(sleep_idle_seconds)
         extra = ["-c", str(ctx), "--cache-ram", str(max(256, min(8192, hw.ram_total // (8 * MIB))))]
         if gpu.used:
             extra += ["-ngl", "auto"]
@@ -1423,8 +1499,8 @@ class LocalLLMRuntime:
         _write_private(self.state_file, json.dumps({
             "mode": "docker", "container_id": container_id, "container_name": name, "image_id": image.image_id,
             "build_id": image.labels.get(cs.LABEL_BUILD), "port": port, "variant": backend, "origin": "docker",
-            "tier": model.tier, "alias": model.alias, "ctx": ctx, "key_file": str(key_file),
-            "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}))
+            "tier": model.tier, "alias": model.alias, "ctx": ctx, "sleep_idle_seconds": sleep_idle_seconds,
+            "key_file": str(key_file), "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}))
         outcome = self._wait_container_healthy(container_id, port, timeout)
         if outcome == "ok":
             try:
@@ -1464,7 +1540,9 @@ class LocalLLMRuntime:
 
     def _tie_to_this_process(self, pid: int, created: float) -> None:
         """Ends the server together with this process: a kill-on-close job on Windows, an exit handler elsewhere
-        (which a hard kill of this process skips; the next start reuses or cleans up the server)."""
+        (which a hard kill of this process skips; the next start reuses or cleans up the server). The handler waits
+        at most EXIT_LOCK_TIMEOUT for the runtime lock (another process's start waits minutes for health); when the
+        lock stays busy it still ends the exact process it started (pid, start time and program checked)."""
         if os.name == "nt":
             try:
                 self._job = _job_kill_on_close(pid)
@@ -1472,24 +1550,57 @@ class LocalLLMRuntime:
                 self.logger.warning(f"Could not tie llama-server to this process ({e.__class__.__name__})")
             return
 
+        def ours(state: dict) -> bool:
+            return state.get("pid") == pid and state.get("create_time") == created
+
         def stop_if_unchanged():
             state = self._load_state() or {}
-            if state.get("pid") == pid and state.get("create_time") == created:
-                try:
-                    self.stop()
-                except LocalRuntimeError:
-                    pass
+            if not ours(state):
+                return  # replaced or stopped in the meantime
+            try:
+                with _FileLock(self.lock_file, timeout=self.EXIT_LOCK_TIMEOUT):
+                    if ours(self._load_state() or {}):
+                        self._stop_locked()
+                        self._cleanup_stale_locked()
+            except LocalRuntimeError:
+                proc = owned_process(state)  # the lock stays busy: still the exact process this one started
+                if proc:
+                    self._terminate(proc, 5)
         atexit.register(stop_if_unchanged)
 
-    def _wait_healthy(self, proc, port: int, timeout: float) -> str:
+    def _wait_healthy(self, proc, port: int, timeout: float,
+                      on_listening: Optional[Callable[[], None]] = None) -> str:
+        """ok | exited | timeout | foreign: another program answers /health on the port (it took the port between our
+        choice and llama-server's bind) and must never receive the key, the auth check or the prompts. on_listening
+        runs once as soon as llama-server is listed as the port's listener (it binds before it loads the model), so
+        other processes get the endpoint while the model loads, as before, but never one another program answers."""
         deadline = time.monotonic() + timeout
+        listening = False
         while time.monotonic() < deadline:
             if proc.poll() is not None:
                 return "exited"
+            if not listening and on_listening is not None and listens_on(proc.pid, port):
+                listening = True
+                on_listening()
             if self._health(port) == 200:
-                return "ok"
+                return "ok" if listening else self._answered_by(proc, port)
             self._sleep(0.25)
         return "timeout"
+
+    def _answered_by(self, proc, port: int) -> str:
+        """Who answered /health: llama-server binds its port right after it starts (before it loads the model) and
+        exits when the port is taken. So when it is not listed as the port's listener, it either exits shortly
+        (another program holds the port: "foreign") or shows up; when neither happens within PORT_CHECK_GRACE, the
+        connection table is what is unreliable, and a server that keeps running has bound its port."""
+        grace = time.monotonic() + self.PORT_CHECK_GRACE
+        while listens_on(proc.pid, port) is False:
+            if proc.poll() is not None:
+                return "foreign"
+            if time.monotonic() > grace:
+                self.logger.warning(f"Could not confirm that llama-server (pid {proc.pid}) listens on port {port}")
+                break
+            self._sleep(0.25)
+        return "ok"
 
     def stop(self, timeout: float = 15) -> int:
         """Stops the server this runtime started and leftover servers from its folder (after a crash). Returns
@@ -1502,9 +1613,9 @@ class LocalLLMRuntime:
         state = self._load_state()
         if state and state.get("mode") == "docker":
             stopped = self._stop_container_locked(state, timeout)
-            self.state_file.unlink(missing_ok=True)
+            remove_file(self.state_file)
             for key_file in self.root.glob("server-*.key"):
-                key_file.unlink(missing_ok=True)
+                remove_file(key_file)
             return stopped
         proc = owned_process(state)
         if proc:
@@ -1515,9 +1626,9 @@ class LocalLLMRuntime:
             except subprocess.TimeoutExpired:
                 pass
             self._proc = None
-        self.state_file.unlink(missing_ok=True)
+        remove_file(self.state_file)
         for key_file in self.root.glob("server-*.key"):
-            key_file.unlink(missing_ok=True)
+            remove_file(key_file)
         return proc is not None
 
     @staticmethod
@@ -1586,11 +1697,11 @@ class LocalLLMRuntime:
         docker_state = bool(state and state.get("mode") == "docker")
         alive = _server_alive(state, self._docker) if state else False
         if state and not alive:
-            self.state_file.unlink(missing_ok=True)
+            remove_file(self.state_file)
         live_key = Path(state["key_file"]).name if alive and state and state.get("key_file") else None
         for key_file in self.root.glob("server-*.key"):
             if key_file.name != live_key:
-                key_file.unlink(missing_ok=True)
+                remove_file(key_file)
         proc = owned_process(state) if alive and not docker_state else None
         orphans = self.find_orphans(keep_pid=proc.pid if proc else None)
         for orphan in orphans:

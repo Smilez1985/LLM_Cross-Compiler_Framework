@@ -12,7 +12,8 @@ check_container_server_command, check_publish).
 
 - FORBIDDEN_FLAGS: llama-server options that give the model its own tools, file or shell access, MCP clients, a web
   UI, remote compute (RPC), state endpoints, downloads (Hugging Face, URLs, Docker Hub), a prompt log on disk,
-  programs run from a folder, or a key or token on the command line. None of them may reach a command line, in any
+  programs run from a folder, a port another process may bind as well (--reuse-port, SO_REUSEPORT), or a key or token
+  on the command line. None of them may reach a command line, in any
   spelling llama.cpp accepts: every alias, and `--a_b` for `--a-b` (common/arg.cpp at the pin replaces the
   underscores of long options), so the check reads them the same way (option_name).
   Self-built servers are also compiled without subprocess support (LLAMA_SUBPROCESS=OFF), so even a forbidden
@@ -65,6 +66,9 @@ FORBIDDEN_FLAGS = frozenset({
     # --offline.
     "-hfr", "-hff", "--hf-file", "-hft", "--hf-token", "-dr", "--docker-repo", "-mmu", "--mmproj-url",
     "--spec-draft-hf", "-hfd", "-hfrd", "--hf-repo-draft", "--log-prompts-dir", "--video-ffmpeg-dir",
+    # SO_REUSEPORT: another process of this user could bind the server's port beside it and take its connections
+    # (the key and the prompts).
+    "--reuse-port",
 })
 # What Ditto's server may still take from the caller's environment (decision D22: a cleared environment for every
 # launcher): GPU selection of the CUDA, ROCm and Vulkan backends and where the GPU drivers and the Vulkan loader's

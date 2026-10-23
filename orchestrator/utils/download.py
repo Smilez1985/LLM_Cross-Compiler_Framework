@@ -5,7 +5,10 @@ the community zoo).
 
 PinnedDownloader.fetch resumes into <dest>.part; the file gets its final name only after its size and sha256
 matched the pin. get_bytes reads a small file that is verified another way (the signed community index) with a
-size cap. Redirects away from HTTPS are refused.
+size cap. Redirects away from HTTPS are refused. A dropped connection, a timeout or a server error is retried (the
+download resumes); a TLS certificate that cannot be verified is not (it does not go away on its own) and is named by
+its host only, never by the (possibly signed) URL; any other request error and a `.part` file that cannot be written
+end the download with a clear error (the part is kept for a resume).
 """
 
 import os
@@ -14,10 +17,12 @@ import shutil
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
+from urllib.parse import urlparse
 
 import psutil
 import requests
 
+from orchestrator.utils.atomic import remove_file
 from orchestrator.utils.helpers import digest_matches
 from orchestrator.utils.helpers import sha256_file  # download.sha256_file: community zoo, Hugging Face
 
@@ -47,7 +52,8 @@ def _gib(size: float) -> str:
 
 class FileLock:
     """Cross-process lock: an O_EXCL lock file holding the owner's pid and start time. A lock left behind by a
-    process that no longer exists is taken over."""
+    process that no longer exists is taken over. The lock file is deleted with atomic.remove_file: on Windows a waiting
+    process reading it at that moment makes the delete fail for a moment."""
 
     error = DownloadError
     busy = "{path} is in use by another llm-cli or GUI; try again when it has finished."
@@ -84,7 +90,7 @@ class FileLock:
                 fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
             except FileExistsError:
                 if not self._owner_alive():
-                    self.path.unlink(missing_ok=True)
+                    remove_file(self.path)
                     continue
                 if time.monotonic() > deadline:
                     raise self.error(self.busy.format(path=self.path)) from None
@@ -95,7 +101,7 @@ class FileLock:
             return self
 
     def __exit__(self, *exc) -> None:
-        self.path.unlink(missing_ok=True)
+        remove_file(self.path)
 
 
 SPACE_MARGIN = 256 * MIB   # what a download leaves free when its caller gives no disk rule (`space`)
@@ -235,8 +241,19 @@ class PinnedDownloader:
                             break  # more than pinned: the hash check refuses it
                         if progress:
                             progress(name, have, size)
+        except requests.exceptions.SSLError as e:  # a ConnectionError, but trying again only wastes time
+            # The host whose certificate failed: after a redirect (a release CDN) that is the request requests sent.
+            failed = getattr(getattr(e, "request", None), "url", None) or url
+            raise self.error(f"Download of {name} failed: the TLS certificate of {urlparse(failed).hostname} could "
+                             "not be verified (behind a proxy that inspects TLS, its CA certificate belongs in "
+                             "REQUESTS_CA_BUNDLE).") from e
         except (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError) as e:
             raise _Retry(e.__class__.__name__) from e
+        except requests.RequestException as e:  # too many redirects, an invalid URL, ... (also an OSError)
+            raise self.error(f"Download of {name} failed ({e.__class__.__name__}).") from e
+        except OSError as e:  # writing the .part file: a full disk, no permission
+            raise self.error(f"Could not write {part}: {e.strerror or e.__class__.__name__}. The partial download is "
+                             "kept and resumes on the next run.") from e
 
     def verify(self, path: Path, size: int, sha256: str, name: str) -> None:
         actual_size = path.stat().st_size

@@ -209,6 +209,20 @@ EOF
 """
 
 
+# vulkaninfo of a machine whose GPU has no Vulkan driver: only Mesa's software renderer.
+FAKE_VULKANINFO_SOFTWARE = """#!/bin/sh
+cat <<'EOF'
+Devices:
+========
+GPU0:
+	vendorID           = 0x10005
+	deviceID           = 0x0000
+	deviceType         = PHYSICAL_DEVICE_TYPE_CPU
+	deviceName         = llvmpipe (LLVM 17.0.6, 256 bits)
+EOF
+"""
+
+
 def tool_dir(base: Path, fake_gpu_tools=False) -> Path:
     """A PATH folder with the shell tools the .sh needs and, optionally, fake nvidia-smi and vulkaninfo."""
     bindir = base / "bin"
@@ -432,6 +446,21 @@ class TestShellEquivalence:
         assert sh_warnings == py_warnings
         assert sh_key == py_key
         assert parse_profile(sh_text).get("PROBE_TOOL") == "sh"
+
+    @pytest.mark.parametrize("shell", available_shells())
+    def test_a_software_renderer_only_means_no_vulkan(self, tmp_path, shell):
+        # The intel machine has a Vulkan loader and an Intel GPU in sysfs: without vulkaninfo that counts as Vulkan.
+        # A vulkaninfo that runs and lists only llvmpipe says that no GPU has a Vulkan driver: VULKAN=OFF in both.
+        root = make_sysroot(tmp_path, "intel")
+        bindir = tool_dir(tmp_path)
+        (bindir / "vulkaninfo").write_text(FAKE_VULKANINFO_SOFTWARE)
+        (bindir / "vulkaninfo").chmod(0o755)
+        sh_text = run_emitter(shell.split() + [str(PROBE_SH)], root, bindir, tmp_path)
+        py_text = run_emitter([sys.executable, "-I", str(PROBE_PY)], root, bindir, tmp_path)
+        assert comparable(sh_text) == comparable(py_text)
+        for text in (sh_text, py_text):
+            profile = parse_profile(text)
+            assert not profile.is_on("VULKAN") and profile.get("VULKAN_DEVICES") == "0" and profile.gpus()
 
     @pytest.mark.parametrize("shell", available_shells())
     def test_untrusted_values_are_handled_the_same(self, tmp_path, shell):

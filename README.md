@@ -591,7 +591,7 @@ the pinned llama.cpp commit, downloads a pinned Qwen3.5 model and runs the serve
 llm-cli ditto runtime status       # hardware, the build in use, the recommended model, server state
 llm-cli ditto runtime install      # builds llama-server for this machine (CPU build first, then the GPU build)
 llm-cli ditto models list          # the model tiers, their size and whether they are downloaded
-llm-cli ditto models download      # the recommended model (or a tier, e.g. small-q2)
+llm-cli ditto models download      # the model `runtime start` loads (or a tier, e.g. small-q2)
 llm-cli ditto runtime start        # starts llama-server; it keeps running until "runtime stop"
 llm-cli ditto runtime stop
 ```

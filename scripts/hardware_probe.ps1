@@ -532,9 +532,11 @@ try {
 $others = @($vk | Where-Object { $_.VENDOR -ne 'nvidia' -or $nvidia.Count -eq 0 })
 $adapters = @($adapters | Where-Object { $_.VENDOR -ne 'nvidia' -or $nvidia.Count -eq 0 })
 $vulkan = $false
+# A vulkaninfo that ran and lists only software renderers (llvmpipe) means no GPU has a Vulkan driver: neither the
+# adapters nor vulkan-1.dll make it Vulkan then.
 if ($vk.Count -eq 0) {
     $others = $adapters
-    $vulkan = $adapters.Count -gt 0
+    $vulkan = (-not $vkRan) -and $adapters.Count -gt 0
 } else {
     # vulkaninfo knows the device type, the registry the memory size.
     $byName = @{}
@@ -545,7 +547,7 @@ if ($vk.Count -eq 0) {
         if ($match -and $match.PCI_ID -and -not $g.PCI_ID) { $g.PCI_ID = $match.PCI_ID }
     }
 }
-if (-not $vulkan -and $env:SystemRoot) { $vulkan = Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32\vulkan-1.dll') -PathType Leaf }
+if (-not $vulkan -and -not $vkRan -and $env:SystemRoot) { $vulkan = Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32\vulkan-1.dll') -PathType Leaf }
 if ($vkRan) { Put 'VULKAN_DEVICES' $vk.Count '^[0-9]{1,2}$' -Quiet }
 
 $gpus = @(@($nvidia) + @($others) | Select-Object -First 16)

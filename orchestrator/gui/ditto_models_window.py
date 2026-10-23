@@ -10,7 +10,9 @@ after the CLI's question with repo, file, licence, size and folder ("No" is the 
 
 Reading the catalogue probes the hardware, and a download takes minutes: both run in a plain worker thread whose
 progress and result come back on the application's worker relay. "Download the recommended model..." takes the
-recommendation the window shows (read with the list, so no probe runs on the GUI thread) and is off until it is read. Cancel stops a download between two pieces and keeps
+recommendation the window shows (read with the list, so no probe runs on the GUI thread) and is off until it is read;
+when a tier was chosen earlier for the local server it reads "Download the chosen model..." and takes that tier, the
+model a plain start loads (as `ditto models download` without a tier does). Cancel stops a download between two pieces and keeps
 the `.part` file for a later resume. Closing the window hides it; a running download goes on and the window shows it
 again when it is opened. A download is a task of Ditto's local runtime: it waits while another one runs (a build,
 a server start or a download in Ditto > Local Runtime... or the AI settings), and they wait for it
@@ -144,6 +146,9 @@ class LocalModelsWindow(QDialog):
         if view.preferred and view.preferred != view.recommended.tier:
             text += "\n" + self._t("ditto_models.chosen", tier=one_line(view.preferred))
         self.lbl_recommended.setText(text)
+        # Without a selection the download is the model a plain start loads: the tier chosen earlier, if any.
+        self.btn_recommended.setText(button_text(self._t(
+            "ditto_models.download_chosen" if view.preferred else "ditto_models.download_recommended")))
         selected = self.selected_tier() or view.recommended.tier
         self.table.setRowCount(len(view.rows))
         for index, row in enumerate(view.rows):
@@ -176,8 +181,9 @@ class LocalModelsWindow(QDialog):
 
     def _download(self, tier: Optional[str]) -> bool:
         """Asks the CLI's question (repo, file, licence, size, folder; No by default), then downloads in a worker
-        thread. True when the download was started. Without a tier it is the recommendation the window shows: the
-        recommendation probes the hardware (seconds), so it is read with the list in a worker thread, never here."""
+        thread. True when the download was started. Without a tier it is the tier chosen earlier for the local server,
+        else the recommendation the window shows: the recommendation probes the hardware (seconds), so it is read with
+        the list in a worker thread, never here."""
         if self._job is not None:
             self._tell("information", self._t("ditto_models.busy"))
             return False
@@ -188,9 +194,12 @@ class LocalModelsWindow(QDialog):
         if tier is None and view is None:
             self._tell("information", self._t("ditto_models.loading"))
             return False
+        chosen = None
         try:
             rt = self._factory()
-            if tier is None:
+            if tier is None and view.preferred:   # the model a plain start loads (`ditto models download`)
+                model, why, chosen = model_to_download(rt, view.preferred)[0], None, view.preferred
+            elif tier is None:
                 model, why = model_to_download(rt, view.recommended.tier)[0], view.why
             else:
                 model, why = model_to_download(rt, tier)
@@ -207,8 +216,12 @@ class LocalModelsWindow(QDialog):
         if model.pinned:   # an unpinned model is refused by the download itself, before anything is fetched
             values = dict(repo=one_line(model.repo), file=one_line(model.file), license=one_line(model.license),
                           size=gib(model.size), folder=str(rt.models_dir))
-            question = (self._t("ditto_models.question_recommended", why=one_line(why), **values) if why is not None
-                        else self._t("ditto_models.question", **values))
+            if chosen is not None:
+                question = self._t("ditto_models.question_chosen", tier=one_line(chosen), **values)
+            elif why is not None:
+                question = self._t("ditto_models.question_recommended", why=one_line(why), **values)
+            else:
+                question = self._t("ditto_models.question", **values)
             if not ask(self, self._t("ditto_models.title"), question):
                 return False
         return self._run_download(rt, model)

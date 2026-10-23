@@ -2148,6 +2148,71 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   provenance now also holds the pack's digest with the modes as the file system keeps them (only where it differs;
   the contents stay the manifest's, so a file changed later is still caught), and both checks accept it. Crawled
   pages already replaced their earlier excerpts and are stored right after their download (unchanged).
+- **`ditto models download` without a tier fetches the model a plain `runtime start` loads** (chain port-runtime,
+  from the review of the managed llama-server): `runtime start` loads the tier chosen earlier with `--model`, but
+  the download without a tier fetched the recommendation for this computer, so after choosing another tier the next
+  start still failed with "not downloaded". The download now takes the tier chosen earlier ("Chosen earlier with
+  'runtime start --model': ..."), else the recommendation as before (`runtime/ditto_models.model_to_download`). The
+  GUI's **Ditto > Local Models...** does the same: with a tier chosen earlier its button reads **Download the chosen
+  model...** and asks about that tier. Docs: README, `docs/CLI_Usage.md`, `docs/Features.md` (EN/DE). Regression
+  tests: `tests/test_runtime.py` `test_model_download_defaults_to_the_model_runtime_start_loads`,
+  `tests/test_ditto_models_core.py` `test_without_a_tier_the_download_is_the_model_runtime_start_loads`,
+  `tests/test_gui_ditto_models.py` `test_without_a_selection_the_download_is_the_model_the_server_loads`.
+- **A machine whose GPU has no Vulkan driver gets the CPU build** (chain port-runtime, from the review of the managed
+  llama-server): when `vulkaninfo` ran but listed only a software renderer (llvmpipe, lavapipe), the hardware probe
+  still set `VULKAN=ON` because a Vulkan loader, a display adapter (Windows) or `vulkan-1.dll` was there, so the
+  official prebuilt choice and the self-built plan picked the Vulkan build, which would only have found llvmpipe.
+  Such a `vulkaninfo` now means `VULKAN=OFF`; the loader, the adapters and the DLL count only when `vulkaninfo` is
+  missing or fails. The same in the three probes: `orchestrator/runtime/hardware_probe.py` (with its byte-identical
+  copy `scripts/hardware_probe.py`), `scripts/hardware_probe.sh` and `scripts/hardware_probe.ps1`. Regression tests:
+  `tests/test_runtime.py` `test_vulkaninfo_with_only_a_software_renderer_means_no_gpu_driver`,
+  `test_windows_vulkaninfo_with_only_a_software_renderer`, `tests/test_hardware_probe.py`
+  `test_a_software_renderer_only_means_no_vulkan` (the .sh and the .py on the same machine).
+- **`runtime start --model` and `--sleep-idle` count also while a server runs** (chain port-runtime, from the review
+  of the managed llama-server): a start that found the running server already serving the chosen model returned
+  before the choice was recorded, so `runtime start --model X` (or `--model auto`, and the GUI's model choice) on a
+  running server was forgotten and the next plain start loaded the recommendation again. The choice is now recorded
+  under the runtime lock in both cases (an evaluation run, `remember=False`, still keeps the earlier one). An
+  explicit idle time (`--sleep-idle`, the GUI's field) that differs from the running server's was ignored; the
+  server now records its effective idle time and is started again when another one is asked for (a build without
+  the option always runs with 0 and is not restarted for it). Both on bare metal and in Docker mode. Regression
+  tests: `tests/test_runtime.py` `test_choosing_a_tier_is_remembered_when_the_running_server_is_reused`,
+  `test_an_explicit_idle_time_restarts_a_server_started_with_another`,
+  `test_an_idle_time_the_build_cannot_use_restarts_nothing`, `tests/test_runtime_mode.py`
+  `test_a_reused_container_remembers_the_tier_and_another_idle_time_restarts_it`.
+- **The local runtime's lock is not held for minutes any more** (chain port-runtime, from the review of the managed
+  llama-server): `ditto runtime install --prebuilt` (and the GUI's **Install the official prebuilt archive…**)
+  downloaded the archives while it held the runtime lock, so a `runtime start` or `runtime stop` elsewhere waited for
+  the whole download (a CUDA build is hundreds of MB), up to the lock's 15 minutes. The archives are now downloaded
+  outside the lock (each file has its own); under the lock the install checks again whether another process
+  installed the same build meanwhile (then it is used as it is), whether a server runs from it, and fetches the
+  archives again if a concurrent install removed them; a running server is still refused before anything is
+  downloaded, and the folders an interrupted install left behind are still removed (under the lock) before the space
+  for unpacking is checked (review of port-runtime: the check had moved in front of that removal). The exit handler of a server tied to its process (`start(tie_to_process=True)`) waits at most 5 s for
+  the lock and then still ends the exact process it started (pid, start time and program checked), instead of
+  keeping the exiting process alive behind another start. Regression tests: `tests/test_runtime.py`
+  `test_downloads_do_not_hold_the_runtime_lock`, `test_an_install_finished_meanwhile_by_another_process`,
+  `test_the_leftovers_of_an_interrupted_install_are_removed_before_the_space_check`,
+  `test_exit_handler_does_not_wait_for_a_busy_lock`.
+- **A pinned download that cannot work says why at once** (chain port-runtime, from the review of the managed
+  llama-server; `orchestrator/utils/download.py` `PinnedDownloader`, shared by the local runtime's builds and models
+  and the community zoo): a TLS certificate that could not be verified was retried five times with backoff like a
+  dropped connection and ended in "did not complete after 5 attempts"; it now ends at once with "the TLS certificate
+  of <host> could not be verified" (only the host, never the possibly signed download URL; after a redirect the host
+  that failed, such as a release CDN, not the first one, review of port-runtime; behind a proxy that inspects TLS its
+  CA certificate belongs in `REQUESTS_CA_BUNDLE`). Any other request error (too many redirects, an
+  invalid URL) and a `.part` file that cannot be written (a full disk, no permission) used to escape as a raw
+  exception; they now end with a clear message, and the part is kept for a resume. Regression tests:
+  `tests/test_runtime.py` `TestDownloads`.
+- **The local runtime no longer fails on Windows while another window reads its files** (chain port-runtime, from
+  the review of the managed llama-server): Windows refuses to replace or delete a file that another process has open
+  at that moment. The GUI's LLMClient reads `server.json` and the server's key file, and a process waiting for the
+  runtime lock reads the lock file, so a start, stop or install in another window could end with "The process cannot
+  access the file". The runtime's state files (also those of the build store and the runtime mode) are now replaced
+  with `utils/atomic.replace_file`, and `server.json`, the key files and the lock files of `utils/download.FileLock`
+  (the runtime lock, the build store's lock and the per-download locks) are deleted with the new
+  `utils/atomic.remove_file`; both try again for a moment on Windows, never elsewhere. Regression tests:
+  `tests/test_atomic.py`, `tests/test_runtime.py` `test_windows_sharing_violations_are_retried`.
 - **A model from the old Hugging Face download cache works in a build again** (A6, "stay usable"): the GUI's Hugging
   Face browser used to save into huggingface_hub's own cache inside the models folder, where a file is a link to a
   blob named by its checksum. A build of such a GGUF file mounted it under that checksum name, so the build no longer
@@ -2587,6 +2652,35 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   are imported now, and only while their files match what was installed; a loose file waits until the person sorts it
   through the checks of an installed pack. A pack's page can no longer set the fields the import sets itself
   (`origin_pack`, `origin_sha256`, `topic`, `target`), and a topic or target reaches an AI client only as a plain name.
+- **A restarted local model server's new key never goes to its old port** (chain port-runtime, from the review of the
+  managed llama-server): every start gives the server a new port and a new key. `LLMClient` resolved the target
+  (with the URL) and then built the adapter with a credential that read the server's state again, so a restart in
+  between paired the old URL with the new key and sent it to whatever listened on the old port by then. The adapter
+  now reads URL and key of the local server once, together, and refuses when the URL changed since the target was
+  resolved ("the local model server was stopped or restarted; try again", an outage for the fallback chain), so
+  nothing is built or sent for the old port (`orchestrator/llm/client.py` `adapter`; the credential resolver takes
+  that key, `CredentialResolver.resolve(..., runtime_key=...)`). Regression test: `tests/test_runtime.py`
+  `test_a_new_key_never_goes_to_the_port_of_the_previous_server`.
+- **Another program on the local model server's port never receives its key or a prompt** (chain port-runtime,
+  from the review of the managed llama-server): `runtime start` chose a free port, started llama-server on it and
+  took any answer of `/health` on that port for the server. A program that took the port between the choice and
+  llama-server's bind (another process of any user on this computer) was then sent the new key by the key check,
+  and the endpoint handed to Ditto pointed at it, so it would also have received the prompts. An answer now counts
+  only while llama-server itself listens on the port (its connection table through psutil); otherwise llama-server
+  exits at once (it found the port taken), the start stops it and tries another port, and nothing is sent to the
+  other program. Where the connection table cannot be read, a server that keeps running for 10 s has bound its
+  port and is used as before. Bare metal only: in Docker mode Docker binds the published port itself, and a taken
+  port fails the start. Review of port-runtime: `server.json` is written right after the launch and LLMClient in
+  every other process (the GUI, the MCP server) reads it, so while the check still ran a chat sent there got the
+  other program's port with the new key. The record is now marked (`"port_unconfirmed": true`) until llama-server is
+  listed as the port's listener (it binds before it loads the model, so the endpoint is still handed out while the
+  model loads), and `read_endpoint` hands a marked record to no one; a start that ended before the check leaves a
+  server the next start stops. Regression tests: `tests/test_runtime.py`
+  `test_a_program_answering_on_the_chosen_port_never_gets_the_key`,
+  `test_an_unreliable_connection_table_does_not_block_the_start`,
+  `test_other_processes_get_no_endpoint_before_the_port_is_confirmed`,
+  `test_a_server_that_holds_its_port_is_handed_out_while_it_loads`,
+  `test_a_start_that_died_before_the_port_was_confirmed_leaves_no_server_behind`.
 - **The Hugging Face token goes only to huggingface.co, also when `HF_ENDPOINT` names another host** (review of
   chain hf): huggingface_hub sends its API calls to the host in the `HF_ENDPOINT` environment variable (a mirror).
   The commit lookup of the GUI browser's download and the Hub list of **Take over old downloads...** sent the token
@@ -2843,8 +2937,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - One launch policy for every llama.cpp program the framework starts (`orchestrator/runtime/server_policy.py`):
   Ditto's server, the build checks, the perplexity check, the start script and systemd unit on a board and the
   checks there share one list of forbidden options (tools, agent mode, MCP, web UI, remote compute, downloads, a
-  prompt log on disk, a key or token on the command line, in every spelling llama.cpp accepts, also `--a_b` for
-  `--a-b`) and a cleared environment, and every server listens on 127.0.0.1 only and reads its key from a private
+  prompt log on disk, a port another process may bind as well (`--reuse-port`), a key or token on the command line,
+  in every spelling llama.cpp accepts, also `--a_b` for `--a-b`) and a cleared environment, and every server listens on 127.0.0.1 only and reads its key from a private
   file, held to the same server options (Ditto's command line is checked again right before the start, the start
   script's when it is generated). `runtime start` starts only a build that
   passed its verification on this machine, still matches its manifest and is of the pinned commit (else its CPU
