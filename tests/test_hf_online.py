@@ -296,6 +296,35 @@ def test_every_hub_api_object_comes_from_hub_api():
     assert found == []
 
 
+# What code outside orchestrator/Core/hf_hub.py may take from huggingface_hub: readers of the local cache (no request)
+# and the exception classes. Everything else (HfApi, the module-level API functions, hf_hub_download,
+# snapshot_download, HfFileSystem, get_token, ...) sends an implicit token to the host in HF_ENDPOINT.
+LOCAL_ONLY = {"try_to_load_from_cache", "scan_cache_dir", "GatedRepoError", "HfHubHTTPError",
+              "RepositoryNotFoundError", "RevisionNotFoundError", "EntryNotFoundError", "LocalEntryNotFoundError"}
+
+
+def test_nothing_but_local_cache_readers_and_errors_come_from_huggingface_hub_elsewhere():
+    """Review of chain hf-online: the guard above names a list of API functions, so hf_hub_download,
+    snapshot_download, HfFileSystem or `import huggingface_hub` with an attribute call would have passed it. This one
+    is an allowlist over orchestrator/ and scripts/: outside hf_hub.py only local cache readers and exception classes
+    are imported from huggingface_hub, and the package itself is never imported as a module."""
+    import ast
+    from conftest import REPO_ROOT
+    found = []
+    for folder in ("orchestrator", "scripts"):
+        for path in sorted((REPO_ROOT / folder).rglob("*.py")):
+            name = path.relative_to(REPO_ROOT).as_posix()
+            if name == "orchestrator/Core/hf_hub.py":
+                continue
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "huggingface_hub":
+                    found += [f"{name}:{node.lineno} imports {a.name}" for a in node.names if a.name not in LOCAL_ONLY]
+                elif isinstance(node, ast.Import):
+                    found += [f"{name}:{node.lineno} imports {a.name}" for a in node.names
+                              if a.name.split(".")[0] == "huggingface_hub"]
+    assert found == []
+
+
 # --- offline mode: the browser refuses like every other Hugging Face caller -----------------------------------------
 
 def offline_manager(tmp_path, token=None):

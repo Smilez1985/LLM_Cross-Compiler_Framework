@@ -665,7 +665,9 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   Every Hub API call (search, model info, file list, access check) uses the `HfApi` that `hf_hub.hub_api(token)`
   makes (huggingface.co only, never the host in `HF_ENDPOINT`; the framework's token or `False`, never an implicit
   one), and a file list is read by `hf_hub.hub_file`; never create an `HfApi` or call huggingface_hub's module-level
-  API functions elsewhere (`tests/test_hf_online.py` fails on one). In offline mode a Hugging Face call refuses
+  API functions elsewhere: outside `hf_hub.py` the code in `orchestrator/` and `scripts/` takes only the local cache
+  readers (`try_to_load_from_cache`, `scan_cache_dir`) and exception classes from huggingface_hub
+  (`tests/test_hf_online.py` fails on anything else). In offline mode a Hugging Face call refuses
   before any request with `hf_hub.offline_refusal()` (checked with `hf_hub.offline(config)`), and a window or the
   command line shows the person `hf_hub.person_text(error, lang)`.
 - **Every CLI action has a mouse path.** Many people never use a terminal, so a person can start every command and
