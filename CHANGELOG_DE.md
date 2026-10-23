@@ -3289,8 +3289,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   zwischenzeitliche Änderung nicht mehr rückgängig machen kann. Die neueste gespeicherte Revision jeder Datei steht
   zusätzlich im Schlüsselbund, daher verbieten auch eine ältere signierte Kopie, die darüber zurückgelegt wird (eine
   widerrufene dauerhafte Freigabe oder ein widerrufenes Token käme zurück), und eine entfernte Berechtigungsdatei
-  alles. Ohne Schlüsselbund hat die Signatur keinen Schlüssel, wie die Audit-Kette; eine solche Datei wird abgelehnt,
-  solange das Audit-Log mit Schlüssel geführt wird.
+  alles. Eine ältere Kopie des Token-Speichers wird auch dann abgelehnt, wenn ihre Bytes genau die sind, die ein
+  laufender MCP-Server oder die GUI vorher gelesen hat: Die gelesenen Tokens werden nach dem SHA-256 der Bytes der
+  Datei zwischengespeichert, und bisher brachte eine solche Kopie das widerrufene Token in diesem Prozess zurück. Die
+  Revision wird vor der Datei gelesen, daher sieht eine Token-Änderung, die zwischendurch in einem anderen Fenster
+  gespeichert wird, nie wie eine ältere Kopie aus. Unter Linux und macOS wird eine ältere Kopie einer der beiden
+  Dateien auch dann abgelehnt, wenn sie genau die Datei ist, die ein laufender Prozess vorher gelesen hat, über einen
+  aufbewahrten Hardlink zurückgelegt (gleicher Inode, gleiche Größe und gleiche mtime): Die Revision im
+  Schlüsselbund wird auch dann neu gelesen, wenn sich die ctime der Datei geändert hat. Ohne Schlüsselbund hat die
+  Signatur keinen Schlüssel, wie die Audit-Kette; eine solche Datei wird abgelehnt, solange das Audit-Log mit
+  Schlüssel geführt wird.
 - **Ausstehende Freigaben und Bitten, nicht mehr zu fragen, sind Rückfragen wie alle anderen.** Sie zählen zu den
   30 Rückfragen pro Stunde; ein Nein im Freigabefenster verhindert für 10 Minuten, dass dir derselbe Aufruf erneut
   vorgelegt wird, und zählt zur Pause des Tools, wie ein Nein im Dialog des Clients; ein kürzliches Nein, ein
