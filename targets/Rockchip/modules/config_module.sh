@@ -208,7 +208,7 @@ check_profile_system() {
     local refused="The hardware profile is of a $arch system; this image compiles for aarch64 (the Rockchip boards) and x86_64 only, so nothing was planned for it."
     case "$arch" in
         aarch64|x86_64) ;;
-        armv7*|armv6*|armhf|armel|arm)
+        armv7*|armv6*|armv8l|armhf|armel|arm)  # armv8l: `uname -m` of a 32-bit system on a 64-bit CPU (1.x probe)
             die "$refused The board runs a 32-bit system: the Rockchip boards have 64-bit CPUs (Cortex-A55, A72, A76), and this image has only the aarch64 cross compilers. Install the board's 64-bit (arm64) system, probe the board again (scripts/hardware_probe.sh) and use the new file." ;;
         *) die "$refused" ;;
     esac
@@ -319,8 +319,8 @@ find_compilers() {
 # HW_CONFIG[ARCHITECTURE_FULL].
 # ============================================================================
 
-# The ELF machine number of a program file (62 x86_64, 183 aarch64, 40 32-bit Arm, 243 RISC-V), empty for a file that
-# is no ELF program.
+# The ELF machine number of a program file (62 x86_64, 183 aarch64, 40 32-bit Arm, 3 32-bit x86, 243 RISC-V), empty for a
+# file that is no ELF program.
 elf_machine() {
     local -a head
     read -r -a head <<< "$(od -An -tu1 -N20 "$1" 2>/dev/null | tr '\n' ' ')"
@@ -337,7 +337,8 @@ elf_machine_of() {  # SYSTEM: the ELF machine number of its programs, empty when
     case "$1" in
         aarch64|arm64) echo 183 ;;
         x86_64|amd64) echo 62 ;;
-        armv7*|armv6*|armhf|armel|arm) echo 40 ;;
+        armv7*|armv6*|armv8l|armhf|armel|arm) echo 40 ;;
+        x86|i386|i486|i586|i686) echo 3 ;;
         riscv64) echo 243 ;;
         *) echo "" ;;
     esac
