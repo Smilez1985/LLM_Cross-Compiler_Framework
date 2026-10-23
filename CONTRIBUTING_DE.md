@@ -706,7 +706,10 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   (Suche, Modellinfo, Dateiliste, Zugriffsprüfung) nutzt das `HfApi`, das `hf_hub.hub_api(token)` anlegt (nur
   huggingface.co, nie der Host in `HF_ENDPOINT`; das Token des Frameworks oder `False`, nie ein implizites), und eine
   Dateiliste liest `hf_hub.hub_file`; lege nirgends sonst ein `HfApi` an und rufe nirgends sonst die API-Funktionen
-  von huggingface_hub auf Modulebene auf (`tests/test_hf_online.py` schlägt bei einem solchen Aufruf fehl).
+  von huggingface_hub auf Modulebene auf (`tests/test_hf_online.py` schlägt bei einem solchen Aufruf fehl). Im
+  Offline-Modus lehnt ein Hugging-Face-Aufruf vor jeder Anfrage mit `hf_hub.offline_refusal()` ab (geprüft mit
+  `hf_hub.offline(config)`), und ein Fenster oder die Kommandozeile zeigt der Person `hf_hub.person_text(error,
+  lang)`.
 - **Jede CLI-Aktion hat einen Weg mit der Maus.** Viele Menschen nutzen nie ein Terminal, deshalb kann eine Person
   jeden Befehl und jede Option von `llm-cli` auch in der GUI starten, ohne einen Befehl zu tippen (einen Wert in ein
   Feld zu tippen ist in Ordnung). Ein neuer Befehl oder eine neue Option braucht ihren Weg mit der Maus, einen

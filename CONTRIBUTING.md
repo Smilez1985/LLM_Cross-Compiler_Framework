@@ -665,7 +665,9 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   Every Hub API call (search, model info, file list, access check) uses the `HfApi` that `hf_hub.hub_api(token)`
   makes (huggingface.co only, never the host in `HF_ENDPOINT`; the framework's token or `False`, never an implicit
   one), and a file list is read by `hf_hub.hub_file`; never create an `HfApi` or call huggingface_hub's module-level
-  API functions elsewhere (`tests/test_hf_online.py` fails on one).
+  API functions elsewhere (`tests/test_hf_online.py` fails on one). In offline mode a Hugging Face call refuses
+  before any request with `hf_hub.offline_refusal()` (checked with `hf_hub.offline(config)`), and a window or the
+  command line shows the person `hf_hub.person_text(error, lang)`.
 - **Every CLI action has a mouse path.** Many people never use a terminal, so a person can start every command and
   option of `llm-cli` in the GUI as well, without typing a command (typing a value into a field is fine). A new
   command or option needs its mouse path, a menu entry, a button or a field that calls the same core function as the
