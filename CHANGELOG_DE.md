@@ -2827,9 +2827,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   wie Dockers Anleitung es ab Engine 29 sagt). Der Signaturschlüssel wird in einen Wegwerf-Schlüsselbund gelesen und
   nur vertraut, wenn der Download genau einen Schlüssel enthält, dessen Hauptfingerabdruck der aus Dockers
   Installationsanleitung ist (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`, mit Quelle fest im Skript); apt
-  prüft danach jedes Paket gegen die signierten Paketlisten. Vor der Prüfung wird nichts geschrieben. Jedes andere
-  System, ARMv6 (Raspberry Pi 1, Zero), ein Schlüssel, der nicht passt oder sich nicht laden lässt, und ein
-  scheiterndes apt halten mit klaren Worten und dem Link zu Dockers Anleitung an; eine neue apt-Quelle, an der
+  prüft danach jedes Paket gegen die signierten Paketlisten. Vor der Prüfung wird nichts geschrieben, und die Prüfung
+  startet keinen gpg-agent, der den Installer überdauert. Jedes andere System, ARMv6 (Raspberry Pi 1, Zero), ein
+  Schlüssel, der nicht passt oder sich nicht laden lässt, und ein scheiterndes apt halten mit klaren Worten und dem
+  Link zu Dockers Anleitung an; eine neue apt-Quelle, an der
   `apt-get update` scheitert, wird wieder entfernt. Kein heruntergeladenes Skript läuft mehr. Tests führen den
   Installer in einer Sandbox mit falschem curl, apt-get, dpkg und uname und einem echten, für den Test erzeugten
   gpg-Schlüssel aus; `install.sh` ist ohne ShellCheck-Befund (die beiden Befunde der Basis sind mit behoben).
