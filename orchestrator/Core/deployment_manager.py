@@ -15,7 +15,6 @@ import os
 import re
 import shlex
 import time
-import subprocess
 import shutil
 import tempfile
 import json
@@ -78,6 +77,10 @@ def old_sidecar_check(seconds: int = OLD_SIDECAR_SECONDS) -> str:
 
 
 OLD_SIDECAR_CHECK = old_sidecar_check()
+# What the OpenSSH fallback (no paramiko) says when it was given a password: it logs in with the framework key only.
+NO_PASSWORD_NOTE = ("The password was not used: OpenSSH runs in BatchMode and never asks for one, and logging in "
+                    "with a password or pairing (installing the framework's key on the board) needs the 'paramiko' "
+                    "package. The deploy logged in with the framework's key only.")
 OLD_SIDECAR_NOTE = ("The board still has the container {name} ({state}) from an earlier package with Docker images. "
                     "Nothing uses it any more: the knowledge base stays on this computer. The framework does not "
                     "remove it. To remove it, run on the board: docker rm -f {name} (the data folder data/qdrant of "
@@ -634,7 +637,8 @@ class DeploymentManager:
             # paramiko, so a deploy bound to one is refused rather than sent unchecked.
             return DeployResult(False, reason="Checking the device's host key against the fingerprint shown needs the "
                                               "'paramiko' package; nothing was deployed.")
-        return self._deploy_system(Path(package), host, user, port, expect_sha256, stop)
+        return self._deploy_system(Path(package), host, user, port, expect_sha256, stop, password=password,
+                                   on_client=on_client, wait_seconds=wait_seconds, on_event=on_event)
 
     def _check_conn(self, ip, port=22) -> bool:
         """Whether the board's SSH port opens (reasons.check_port says why not)."""
@@ -717,85 +721,57 @@ class DeploymentManager:
             return session.deploy(fh, artifact.name, size, digest, pair)
 
     def _deploy_system(self, artifact: Path, ip: str, user: str, port: int = 22,
-                       expect_sha256: Optional[str] = None, stop: Callable[[], bool] = lambda: False) -> DeployResult:
-        """Fallback to OpenSSH: framework key and known_hosts only, never prompts, never auto-accepts keys, and never
-        hands this process's stdin to ssh or scp (over MCP stdio it is the protocol stream). A failure says its SSH
-        reason code where OpenSSH's message shows it; waiting for the board and resuming the upload need paramiko
-        (a dependency of the framework, so this fallback is only used where it is missing)."""
-        from orchestrator.runtime.device import reasons
-        lines: List[str] = []
-        started = False
-        try:
-            with tempfile.TemporaryDirectory(prefix="llm-deploy-") as tmp:
-                upload = artifact
-                if expect_sha256:
-                    # The copy that is hashed is the copy that is uploaded.
-                    upload = Path(tmp) / artifact.name
-                    shutil.copyfile(artifact, upload)
-                    if sha256_file(upload) != expect_sha256:
-                        return DeployResult(False, reason=f"The package {artifact.name} changed after it was shown "
-                                                          "(its sha256 differs); nothing was deployed.")
-                opts = ssh_trust.system_ssh_options(self._state_dir())
-                target = f"{user}@{ip}"
-                made = subprocess.run(["ssh", *opts, "-p", str(port), target, self.REMOTE_MKTEMP],
-                                      capture_output=True, text=True, check=True, stdin=subprocess.DEVNULL)
-                target_dir = made.stdout.strip()
-                # Checks mktemp's answer on the device; no local temp file is involved.
-                if not target_dir.startswith("/tmp/llm_deploy."):  # nosec B108
-                    raise RuntimeError("could not create a folder on the device")
-                subprocess.run(["scp", *opts, "-P", str(port), str(upload), f"{target}:{target_dir}/"], check=True,
-                               stdin=subprocess.DEVNULL, capture_output=True)
-                if stop():
-                    return DeployResult(False, reason="The deploy was cancelled after the upload; deploy.sh did not "
-                                                      "run.", device_state="ok")
-                cmd = (self._remote_install_cmd(target_dir, artifact.name)
-                       + f"; status=$?; rm -rf {shlex.quote(target_dir)}; exit $status")
-                started = True
-                res = subprocess.run(["ssh", *opts, "-p", str(port), target, cmd], capture_output=True, text=True,
-                                     stdin=subprocess.DEVNULL)
-            self.logger.info(res.stdout)
-            if res.stderr:
-                self.logger.warning(res.stderr)
-            for line in (res.stdout or "").splitlines() + (res.stderr or "").splitlines():
-                self._keep(lines, line)
-            if res.returncode == 0:
-                try:
-                    answer = subprocess.run(["ssh", *opts, "-p", str(port), target, OLD_SIDECAR_CHECK],
-                                            capture_output=True, text=True, stdin=subprocess.DEVNULL,
-                                            timeout=60).stdout
-                except (OSError, subprocess.SubprocessError):  # only a look; the deploy itself succeeded
-                    answer = ""
-                return DeployResult(True, exit_status=0, output=lines, device_state="ok",
-                                    **self._old_sidecar(answer))
-            code = reasons.classify_ssh_output(res.stderr or "") if res.returncode == 255 else None
-            return DeployResult(False, exit_status=res.returncode, output=lines, code=code or "",
-                                device_state="unknown" if code else "failed",
-                                reason=(f"The connection to the device failed ({code})." if code else
-                                        f"deploy.sh failed on the device (exit {res.returncode})."))
-        except subprocess.CalledProcessError as e:
-            output = e.stderr if isinstance(e.stderr, str) else (e.stderr or b"").decode(errors="replace")
-            code = reasons.classify_ssh_output(output) or ""
-            for line in output.splitlines():
-                self._keep(lines, line)
-            return DeployResult(False, output=lines, device_state="unknown" if started else "ok", code=code,
-                                reason=f"System Deployment Error: {e.cmd[0]} failed (exit {e.returncode})"
-                                       + (f" ({code})." if code else "."))
-        except Exception as e:
-            return DeployResult(False, output=lines, device_state="unknown" if started else "ok",
-                                reason=f"System Deployment Error: {e}")
+                       expect_sha256: Optional[str] = None, stop: Callable[[], bool] = lambda: False, *,
+                       password: Optional[str] = None, on_client: Optional[Callable[[Any], None]] = None,
+                       wait_seconds: float = DEPLOY_WAIT_SECONDS,
+                       on_event: Optional[Callable[[DeployEvent], None]] = None) -> DeployResult:
+        """Fallback to OpenSSH where paramiko cannot be imported: the same board session as the paramiko deploy
+        (_BoardSession over remote/session.py RemoteSession), over the second transport, this computer's OpenSSH
+        client (remote/transport.py SystemSshTransport, decision A5). So it waits for a board whose network dropped
+        (`wait_seconds`, `on_event`), resumes the upload, starts deploy.sh once on the board on its own and follows it
+        again after a drop, and hands each session to `on_client` (its close() ends the running OpenSSH call). Every
+        OpenSSH call takes the framework key and known_hosts only, never asks and never takes a new key, and never
+        gets this process's stdin (over MCP stdio it is the protocol stream). The package is opened once: the bytes
+        hashed are the bytes uploaded, and the board checks their sha256 before they are installed. OpenSSH in
+        BatchMode never asks for a password, so a one-time password (and pairing with it) needs paramiko: the deploy
+        logs in with the framework key only and its result says so (NO_PASSWORD_NOTE) instead of dropping it."""
+        with open(artifact, "rb") as fh:
+            digest = sha256_fileobj(fh)
+            if expect_sha256 and digest != expect_sha256:
+                return DeployResult(False, reason=f"The package {artifact.name} changed after it was shown (its "
+                                                  "sha256 differs); nothing was deployed.")
+            size = fh.tell()
+            fh.seek(0)
+            session = _BoardSession(self, ip, user, None, port, None, on_client, stop, wait_seconds, on_event,
+                                    openssh=self._openssh_transport)
+            result = session.deploy(fh, artifact.name, size, digest, pair=False)
+        if password:
+            result.notes.append(NO_PASSWORD_NOTE)
+            if not result.success:
+                result.reason = f"{result.reason} {NO_PASSWORD_NOTE}".strip()
+        return result
+
+    @staticmethod
+    def _openssh_transport(endpoint, user: str, state_dir: Path):
+        """The OpenSSH transport of one login (a seam: tests replace it)."""
+        from orchestrator.remote.transport import SystemSshTransport
+        return SystemSshTransport(endpoint, user, state_dir)
 
 
 class _BoardSession:
-    """One deploy over paramiko (DeploymentManager.deploy_package): the package and deploy.sh's job on a board session
+    """One deploy (DeploymentManager.deploy_package): the package and deploy.sh's job on a board session
     (orchestrator/remote/session.py RemoteSession), which logs in (every login checks the host key as the first one
     did), makes the private folder, uploads with resume, waits for the board (N5) and follows the installation that
-    runs on the board on its own. This adapter keeps the deploy's results as they were: the reasons, the device state
+    runs on the board on its own; over paramiko, or with `openssh` (the fallback without paramiko) over this
+    computer's OpenSSH client. This adapter keeps the deploy's results as they were: the reasons, the device state
     and the device's output lines (its words, never in a reason)."""
 
     def __init__(self, manager: DeploymentManager, host: str, user: str, password: Optional[str], port: int,
                  expect_fingerprint: Optional[str], on_client: Optional[Callable[[Any], None]],
-                 stop: Callable[[], bool], wait_seconds: float, on_event: Optional[Callable[[DeployEvent], None]]):
+                 stop: Callable[[], bool], wait_seconds: float, on_event: Optional[Callable[[DeployEvent], None]],
+                 openssh: Optional[Callable[..., Any]] = None):
         self.manager, self.logger = manager, manager.logger
+        self.openssh = openssh   # the OpenSSH transport's factory (the fallback without paramiko), else paramiko
         self.host, self.user, self.password, self.port = host, user, password, port
         self.expect_fingerprint, self.on_client, self.wait_seconds = expect_fingerprint, on_client, wait_seconds
         self.lines: List[str] = []
@@ -815,7 +791,8 @@ class _BoardSession:
             Endpoint(self.host, self.port), self.user, manager._state_dir(), credentials=credentials,
             expect_fingerprint=self.expect_fingerprint, cancel=self.cancel, clock=lambda: manager._clock(),
             sleep=lambda seconds: manager._sleep(seconds), reachable=lambda h, p: manager._check_conn(h, p),
-            on_event=self.on_event, on_client=self.on_client, wait_seconds=self.wait_seconds, logger=manager.logger)
+            on_event=self.on_event, on_client=self.on_client, wait_seconds=self.wait_seconds, logger=manager.logger,
+            openssh=self.openssh)
 
     @property
     def state_after_stop(self) -> str:
@@ -840,7 +817,7 @@ class _BoardSession:
             if kind == "private_dir":
                 self.logger.error(f"[REMOTE] {line.strip()}")
             DeploymentManager._keep(self.lines, line)
-        if kind in ("key_read", "not_trusted", "key_changed", "login"):
+        if kind in ("key_read", "not_trusted", "key_changed", "login", "needs_paramiko"):
             return self.result(False, code=failure.reason, reason=str(failure))
         if kind == "other_key":
             return self.result(False, code=failure.reason, reason=f"{failure}; nothing was deployed.")

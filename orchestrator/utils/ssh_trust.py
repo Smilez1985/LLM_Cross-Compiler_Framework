@@ -24,6 +24,7 @@ the names here delegate, so every caller and every test that patches ssh_trust.c
 module behave as without paramiko, as before.
 """
 
+import logging
 import os
 import re
 import shlex
@@ -36,6 +37,8 @@ from orchestrator.remote import transport
 from orchestrator.remote.trust import (HostKeyChanged, HostKeyError, UnknownHostKey, check_host_key,  # noqa: F401
                                        fingerprint, host_entry, known_hosts_path)
 from orchestrator.remote.trust import load_host_keys as _host_keys
+
+_log = logging.getLogger(__name__)
 
 KEY_NAME = "id_ed25519_llm_framework"
 # A public key line as client_key writes it: key type, base64 key, an optional plain comment.
@@ -132,15 +135,21 @@ def fetch_host_key(host: str, port: int = 22, timeout: float = 10.0):
 
 
 def client_key(state_dir: Path) -> Tuple[Path, str]:
-    """The framework's own SSH key (created on first use, private part mode 0600) and its public line."""
+    """The framework's own SSH key (created on first use, private part mode 0600; on Windows, where a mode is only a
+    read-only flag, an ACL for this account alone: utils/atomic.py owner_only) and its public line."""
     private = Path(state_dir) / KEY_NAME
     public = private.with_suffix(".pub")
     if not private.exists():
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from orchestrator.utils.atomic import owner_only
         key = Ed25519PrivateKey.generate()
         private.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(private, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            owner_only(private)   # before the key is in it (the mode above is all POSIX needs)
+        except OSError as e:      # the key still works over paramiko; OpenSSH says what it refuses
+            _log.warning(f"The framework's SSH key could not be made private to this account ({e.strerror or e}).")
         with os.fdopen(fd, "wb") as f:
             f.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.OpenSSH,
                                       serialization.NoEncryption()))
@@ -179,8 +188,6 @@ def install_public_key(client, public_line: str) -> None:
 
 
 def system_ssh_options(state_dir: Path) -> List[str]:
-    """Options that make OpenSSH use the framework key and known_hosts and never ask or auto-accept."""
-    private, _ = client_key(state_dir)
-    return ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
-            "-o", f"UserKnownHostsFile={known_hosts_path(state_dir)}", "-o", "IdentitiesOnly=yes",
-            "-i", str(private)]
+    """Options that make OpenSSH use the framework key and known_hosts and never ask or auto-accept, with a login
+    time limit and keepalive: the one list of orchestrator/remote/transport.py openssh_options (its old name)."""
+    return transport.openssh_options(state_dir)
