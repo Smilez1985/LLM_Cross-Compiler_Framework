@@ -21,10 +21,21 @@ if [ -f SHA256SUMS ] && command -v sha256sum > /dev/null 2>&1; then
     fi
 fi
 
+# This machine runs programs of the package's system: the same system, or a 32-bit Arm package (armv6, armv7) on an
+# Arm machine that runs 32-bit programs (armv7l; armv8l, a 32-bit system on a 64-bit CPU; aarch64, a 64-bit kernel
+# with a 32-bit system such as Raspberry Pi OS 32-bit on a Pi 4 or 5).
+runs_here() {  # PACKAGE_SYSTEM MACHINE
+    [ "$1" = "$2" ] && return 0
+    case "$1:$2" in
+        armv6*:armv6*|armv6*:armv7*|armv6*:armv8l|armv6*:aarch64|armv7*:armv7*|armv7*:armv8l|armv7*:aarch64) return 0 ;;
+    esac
+    return 1
+}
+
 expected="$(sed -n 's/^ *"arch": "\([A-Za-z0-9_]*\)".*/\1/p' MANIFEST.json 2>/dev/null | head -n 1)"
 machine="$(uname -m)"
 [ "$machine" = arm64 ] && machine=aarch64
-if [ -n "$expected" ] && [ "$machine" != "$expected" ]; then
+if [ -n "$expected" ] && ! runs_here "$expected" "$machine"; then
     echo "This package is for a $expected system; this machine is $machine. Copy it to the board (./deploy.sh USER@HOST) and run ./test_model.sh there." >&2
     exit 1
 fi

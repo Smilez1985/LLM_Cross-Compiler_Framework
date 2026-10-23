@@ -531,6 +531,35 @@ def test_test_model_sh_on_another_machine_says_where_to_run_it(tmp_path):
     assert not (tmp_path / "cli.log").exists()
 
 
+def run_on_machine(tmp_path, package, machine):
+    """test_model.sh of `package` on a machine whose `uname -m` says `machine`."""
+    bin_dir = tmp_path / "uname-bin"
+    _script(bin_dir / "uname", f"print({machine!r})\n")
+    env = {"PATH": os.pathsep.join([str(bin_dir), "/usr/bin", "/bin"]), "HOME": str(tmp_path)}
+    return bash_run(package / "test_model.sh", env=env)
+
+
+@needs_bash
+@pytest.mark.parametrize("machine", ["armv7l", "armv8l", "aarch64"])
+def test_test_model_sh_runs_a_32_bit_arm_package_on_every_arm_machine_that_runs_it(tmp_path, machine):
+    """A package of a module for 32-bit Arm (armv7l) runs on a 32-bit system (armv7l), on a 32-bit system of a 64-bit
+    CPU (armv8l) and on a 64-bit kernel with the 32-bit system (aarch64: Raspberry Pi OS 32-bit on a Pi 4 or 5)."""
+    result = run_on_machine(tmp_path, fake_package(tmp_path, "armv7l"), machine)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "cli.log").read_text().startswith("-m granite-Q4_K_M.gguf -p Hello, world! -n 10 -st")
+
+
+@needs_bash
+@pytest.mark.parametrize("arch, machine", [("aarch64", "armv7l"), ("armv7l", "x86_64"), ("x86_64", "aarch64")])
+def test_test_model_sh_still_refuses_a_machine_that_cannot_run_the_package(tmp_path, arch, machine):
+    result = run_on_machine(tmp_path, fake_package(tmp_path, arch), machine)
+
+    assert result.returncode == 1
+    assert f"This package is for a {arch} system; this machine is {machine}." in result.stderr
+    assert not (tmp_path / "cli.log").exists()
+
+
 SSH_STUB = """\
 import os, sys
 with open(os.environ["SSH_LOG"], 'a') as f:

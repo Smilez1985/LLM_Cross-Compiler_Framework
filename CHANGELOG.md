@@ -1300,8 +1300,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `ARCH=armv8l` of a 1.x probe file (a 32-bit system on a 64-bit CPU); the template refuses every profile that is not
   of the module's system, also one of a system it does not know. With a
   profile, the target stage of a GGUF build makes the package in `output/packages/`: the model, `llama-cli` and `llama-server`
-  for the board, the toolchain file and the profile, a model card, `test_model.sh` (checks the files, then a short
-  answer from the model), `deploy.sh` (`USER@HOST [DEST]` over `ssh` and `scp` with `StrictHostKeyChecking=yes`, or
+  for the board, the toolchain file and the profile, a model card, `test_model.sh` (checks the files and that the
+  machine runs the package's programs, a 32-bit Arm package also on a 64-bit Arm kernel, then a short answer from the
+  model), `deploy.sh` (`USER@HOST [DEST]` over `ssh` and `scp` with `StrictHostKeyChecking=yes`, or
   on the board itself to `/opt/llm`), `MANIFEST.json` with every build detail and `SHA256SUMS`; the model is run once
   on this machine, the programs must be for the board, and every file must match its checksum before the package is
   kept. Their cross build turns off every llama.cpp option that can download something, as every llama.cpp build of
