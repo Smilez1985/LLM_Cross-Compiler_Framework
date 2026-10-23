@@ -120,6 +120,26 @@ def test_a_replacement_into_the_trash_can_be_restored(fw, tmp_path, earlier):
     assert len(entries) == 2 and all(e.kind == "artifact" and e.confirmed_by == "gui" for e in entries)
 
 
+def test_an_incomplete_copy_replaces_nothing(fw, tmp_path, earlier):
+    """Review cs-cli-gui-v: what lies under the name is replaced only once the copy is complete; a copy that left
+    something out (a link in the earlier build: links are never followed) keeps its free name, and what lay there
+    stays."""
+    from orchestrator.Core.deletion import accept
+    try:
+        (earlier / "tokenizer.json").symlink_to(earlier / "Model_Card.md")
+    except (OSError, NotImplementedError):
+        pytest.skip("this system cannot make a link")
+    other = finished_build(tmp_path / "disk2", payload=b"other weights", zip_payload=b"old zip")
+    plan = ao.plan_copy(fw, earlier, tmp_path / "disk2", relative="Rockchip/m/Q4_K_M")
+    audit = Audit()
+    result = ao.copy_artifact(fw, plan, replace=accept(plan.replaces, "cli", "permanent"), audit=audit)
+    assert (other / "m.gguf").read_bytes() == b"other weights", "what lay there stays"
+    assert (other.parent / "Q4_K_M.zip").read_bytes() == b"old zip"
+    assert Path(result.folder).name == "Q4_K_M-2" and sha(Path(result.folder) / "m.gguf") == sha(earlier / "m.gguf")
+    assert audit.rows == [], "nothing was replaced, so nothing is recorded as replaced"
+    assert any("tokenizer.json" in n for n in result.notes) and any("nothing was replaced" in n for n in result.notes)
+
+
 def test_a_list_that_changed_after_the_question_replaces_nothing(fw, tmp_path, earlier):
     from orchestrator.Core.deletion import accept
     other = finished_build(tmp_path / "disk2", payload=b"other weights", zip_payload=b"old zip")

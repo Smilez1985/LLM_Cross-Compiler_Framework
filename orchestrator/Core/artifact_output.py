@@ -827,7 +827,10 @@ def copy_artifact(framework, plan: CopyPlan, *, replace: Any = None, trash: Any 
     if skipped:
         result.kept = True
         result.notes.append(f"Not copied: {', '.join(skipped)}.")
-    if accepted is not None:
+        if accepted is not None:   # only a complete copy replaces what lies under the name
+            result.notes.append(f"The copy is not complete, so nothing was replaced: {target} stays as it is, and the "
+                                f"copy is in {result.folder}.")
+    elif accepted is not None:
         result.notes += _replace_with_copy(framework, plan, accepted, trash, audit, result)
     out = output_folder(framework)
     if state is not None and not _inside(_real(result.folder), _real(out)):
