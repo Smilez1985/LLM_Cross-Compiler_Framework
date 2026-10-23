@@ -402,6 +402,31 @@ class TestTheBrowsersTakeOver:
         assert [e["outcome"] for e in window.audit.entries] == ["old_downloads_deleted"]
         assert any(f"{REPO} (old download cache)" in text for _, text, _ in window.boxes)
 
+    def test_the_stop_button_says_what_a_stopped_take_over_keeps(self, qapp):
+        # Regression (review of chain hf): Stop during a take-over said "the part downloaded so far is kept"; a
+        # take-over keeps the files copied so far and drops the one it was copying.
+        from orchestrator.gui import huggingface_window as hf
+        from orchestrator.utils.localization import ui_text
+        started = threading.Event()
+
+        class Manager:
+            def take_over(self, files, stop=None, progress=None):
+                started.set()
+                assert stop.wait(10)
+                return hf_takeover.TakeOverResult(stopped=True)
+
+            def old_copies_plan(self):
+                return None
+
+        win = hf.HuggingFaceWindow(SimpleNamespace(model_manager=Manager(), secrets_manager=None))
+        win.takeover_worker = hf.TakeOverWorker(win.model_manager, [], lang="en")
+        win.takeover_worker.start()
+        assert started.wait(10)
+        win.stop_running()
+        assert win.takeover_worker.wait(10000)
+        assert win.status_label.text() == ui_text("hf.takeover.stopping", win.lang)
+        assert "downloaded" not in win.status_label.text()
+
     def test_nothing_to_take_over_says_so(self, qapp, area, window):
         window.win.take_over()
         self.settle(qapp, window.win)

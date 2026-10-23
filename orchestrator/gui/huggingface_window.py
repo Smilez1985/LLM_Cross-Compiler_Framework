@@ -472,11 +472,11 @@ class HuggingFaceWindow(QMainWindow):
 
     def stop_running(self):
         """The Stop button: ends the running download or take-over between two chunks."""
-        for worker in (self.dl_worker, self.takeover_worker):
+        for worker, key in ((self.dl_worker, "hf.download.stopping"), (self.takeover_worker, "hf.takeover.stopping")):
             if worker is not None and worker.isRunning():
                 worker.stop.set()
                 self.stop_btn.setEnabled(False)
-                self.status_label.setText(self._t("hf.download.stopping"))
+                self.status_label.setText(self._t(key))
 
     # --- Take over old downloads (A6) ---------------------------------------------------------------------------
 
