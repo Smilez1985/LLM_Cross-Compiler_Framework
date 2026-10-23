@@ -687,8 +687,10 @@ class DittoCoder:
 
     @property
     def offline_mode(self) -> bool:
-        """Only local providers are used (read live from the settings)."""
-        return bool(self._cfg("offline_mode", False))
+        """Only local providers are used (read live from the settings: utils/locality.offline_mode, the one offline
+        check)."""
+        from orchestrator.utils.locality import offline_mode
+        return offline_mode(self.config)
 
     @property
     def client(self) -> LLMClient:

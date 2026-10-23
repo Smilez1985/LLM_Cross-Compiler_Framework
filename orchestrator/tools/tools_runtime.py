@@ -176,10 +176,8 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
         return Path(framework.config.user_state_dir)
 
     def offline() -> bool:
-        try:
-            return bool(framework.config.get("offline_mode", False))
-        except Exception:  # noqa: BLE001
-            return False
+        from orchestrator.utils.locality import offline_mode   # the one offline check
+        return offline_mode(getattr(framework, "config", None))
 
     def sandbox_allowed() -> bool:
         """Whether the person allowed the Docker sandbox for an AI's benchmark of an untrusted model (an oversight

@@ -114,6 +114,11 @@ class CrawlJobService:
         except Exception:  # noqa: BLE001 - a setting that cannot be read is its default
             return default
 
+    def _offline(self) -> bool:
+        """Offline mode: the framework's one offline check (utils/locality.offline_mode)."""
+        from orchestrator.utils.locality import offline_mode
+        return offline_mode(getattr(self.framework, "config", None))
+
     def _state_dir(self) -> Optional[Path]:
         path = getattr(getattr(self.framework, "config", None), "user_state_dir", None)
         return Path(path) if isinstance(path, (str, Path)) else None
@@ -182,7 +187,7 @@ class CrawlJobService:
         if self.notice_needed():
             raise CrawlRefused("The person has not read the one-time Deep Ingest notice yet, so no crawl can start.",
                                code="needs_person", next=NOTICE_NEXT, blocker="ingest_notice_unread")
-        if bool(self._cfg("offline_mode", False)):
+        if self._offline():
             raise CrawlRefused("Offline mode is on: the framework does not read web sites.", code="not_supported",
                                next="Only the person can switch offline mode off (in the GUI or with llm-cli).",
                                blocker="offline_mode")
@@ -265,7 +270,7 @@ class CrawlJobService:
         if self.notice_needed():  # its text may have changed since the question
             raise CrawlRefused("The person has not read the current Deep Ingest notice, so no crawl can start.",
                                code="needs_person", next=NOTICE_NEXT, blocker="ingest_notice_unread")
-        if bool(self._cfg("offline_mode", False)):  # switched on while the person was asked
+        if self._offline():  # switched on while the person was asked
             raise CrawlRefused("Offline mode is on: the framework does not read web sites.", code="not_supported",
                                next="Only the person can switch offline mode off (in the GUI or with llm-cli).",
                                blocker="offline_mode")

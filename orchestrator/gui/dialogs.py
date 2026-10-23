@@ -32,6 +32,7 @@ from orchestrator.llm.settings_change import (AISettingsChange, SettingsChangeEr
                                               user_value)
 from orchestrator.utils.crawl_notice import CrawlNotice, acknowledge_and_audit, notice_text
 from orchestrator.utils.helpers import redact_secrets
+from orchestrator.utils.locality import offline_mode
 from orchestrator.utils.localization import current_language, get_instance as get_i18n, ui_text
 
 class LanguageSelectionDialog(QDialog):
@@ -551,7 +552,7 @@ class AIConfigurationDialog(QDialog):
     def _load_current_config(self):
         saved_provider = self._config_get("ai_provider", "OpenAI")
         pid = self.catalog.resolve_id(saved_provider) or "openai"
-        self.chk_offline.setChecked(bool(self._config_get("offline_mode", False)))
+        self.chk_offline.setChecked(offline_mode(self._config()))
         self.cb_provider.blockSignals(True)
         self.cb_provider.setCurrentIndex(max(self.cb_provider.findData(pid), 0))
         self.cb_provider.blockSignals(False)

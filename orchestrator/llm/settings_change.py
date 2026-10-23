@@ -368,6 +368,7 @@ class AISettingsChange:
     def current(cls, config: Any, catalog: Any, provider: Optional[str] = None) -> "AISettingsChange":
         """The saved AI settings as a change (what the dialog shows when it opens), for `provider` (a preset id) when
         given: its own address and workspace, the saved model only when it is the saved provider's."""
+        from orchestrator.utils.locality import offline_mode   # the one offline check
         get = getattr(config, "get", None)
         saved_id = catalog.resolve_id(user_value(config, "ai_provider"))
         pid = provider or catalog.resolve_id((get("ai_provider", "OpenAI") if callable(get) else None) or "OpenAI") \
@@ -387,7 +388,7 @@ class AISettingsChange:
                    if takes_workspace(preset) else "",
                    effort=user_value(config, "ai_effort") or "", security_level=security,
                    fallback_chain=list(chain) if isinstance(chain, (list, tuple)) else parse_fallback(chain),
-                   offline_mode=bool(get("offline_mode", False)) if callable(get) else False,
+                   offline_mode=offline_mode(config),
                    enable_rag=bool(get("enable_rag_knowledge", False)) if callable(get) else False)
 
     @classmethod

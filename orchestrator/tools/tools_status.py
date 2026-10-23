@@ -28,6 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from orchestrator.llm.settings_change import (MIN_MEMORY_LIMIT, TIGHTEN_ONLY, direction_problem,  # noqa: F401
                                               memory_bytes)
 from orchestrator.tools.output import ToolOutput, untrusted_text
+from orchestrator.utils.locality import offline_mode
 from orchestrator.utils.any_path import last_part
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.untrusted import sanitize_untrusted
@@ -417,7 +418,7 @@ def framework_section(framework, registry) -> FrameworkSection:
     policy = registry.policy_store.load()
     return FrameworkSection(version=str(getattr(getattr(framework, "info", None), "version", "") or "unknown"),
                             docker_reachable=docker, targets=targets,
-                            offline_mode=bool(_cfg(framework, "offline_mode", False)),
+                            offline_mode=offline_mode(getattr(framework, "config", None)),
                             knowledge_base=bool(_cfg(framework, "enable_rag_knowledge", False)), active_builds=active,
                             policy_configured=bool(policy.configured),
                             policy_problem=bool(getattr(registry.policy_store, "problem", None)))
@@ -828,7 +829,7 @@ def status_tool_specs(registry, framework, no_tool_actions: List[Tuple[str, str]
                        model=str(_cfg(framework, "ai_model", "") or "") or None,
                        effort=str(_cfg(framework, "ai_effort", "") or "") or None,
                        privacy_level=str(_cfg(framework, "ai_security_level", "") or "") or None,
-                       offline_mode=bool(_cfg(framework, "offline_mode", False)))
+                       offline_mode=offline_mode(getattr(framework, "config", None)))
         return SettingsOut(settings=rows, ai=ai)
 
     def update_settings(inp: UpdateSettingsIn, ctx) -> UpdateSettingsOut:
