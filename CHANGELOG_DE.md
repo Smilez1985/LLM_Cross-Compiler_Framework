@@ -1549,8 +1549,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   einen dir gezeigten Fingerabdruck gebunden ist, wird ohne paramiko weiter abgelehnt. Der SSH-Schlüssel des
   Frameworks wird beim Anlegen und bevor OpenSSH ihn nutzt nur für dein Konto lesbar gemacht
   (`orchestrator/utils/atomic.py` `owner_only`: Gruppen- und andere Bits weg unter Linux und macOS, unter Windows eine
-  geschützte ACL nur für dein Konto, die OpenSSH für Windows bei einem privaten Schlüssel verlangt). Auch gegen einen
-  echten `sshd` getestet (`tests/test_remote_system_ssh.py`).
+  geschützte ACL nur für dein Konto, die OpenSSH für Windows bei einem privaten Schlüssel verlangt). Eine
+  Schlüsseldatei, die OpenSSH trotzdem ablehnt (andere können sie lesen, oder sie ist beschädigt), wird als Problem auf
+  diesem Computer gemeldet (`local_problem`, nie beim Board vermerkt), nicht als Ablehnung der Anmeldung durch das
+  Board, obwohl OpenSSH dann ohne den Schlüssel weitermacht und mit dem „Permission denied“ des Boards endet. Auch
+  gegen einen echten `sshd` getestet (`tests/test_remote_system_ssh.py`).
 - **Ein Datei-Hash und ein Disk-Watchdog** (Architektur-Konsolidierung c1-hashing und c1-disk, Regel R0 des Maintainers:
   zuerst die vorhandene Implementierung). Die 24 Kopien des sha256 einer Datei (15 benannte Helfer, 9 Schleifen; die
   Schleife von `utils/network.py` ist mit diesem Modul gegangen, siehe unten) laufen über das Modul der ältesten,
