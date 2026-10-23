@@ -550,6 +550,39 @@ class TestTheCommandLinesTakeOver:
         assert ui_text("hf.takeover.why.offline", "en") in out and "Copied 0 of 1 files" in out
         assert not new_place(area, "plain.gguf").exists()
 
+    def test_offline_it_opens_no_socket(self, area, cli, monkeypatch):
+        from test_hf_online import guard_sockets
+        tried = guard_sockets(monkeypatch)
+        cli.settings["offline_mode"] = True
+        old_cache(area.models, REPO, files={"plain.gguf": (WEIGHTS, True)}, links=False)
+        result, out = cli.invoke(answer="y\n")
+        assert result.exit_code == 0 and "Copied 0 of 1 files" in out
+        assert tried == [], "a connection was tried in offline mode"
+
+    def test_a_failed_take_over_is_one_plain_line(self, area, cli, monkeypatch):
+        # Regression (review of chain hf-online): only a disk that cannot hold the copies was caught, so a file in use
+        # by another llm-cli or the GUI (its per-file lock) ended the command with a Python traceback; the window
+        # shows "Nothing was taken over: <reason>" for every failure, and so does the command line now.
+        from orchestrator.utils import download
+        from orchestrator.utils.localization import ui_text
+        two_files(area)
+        busy = "The file is in use by another llm-cli or GUI; try again when it has finished."
+
+        class Busy:
+            def __init__(self, path, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                raise download.DownloadError(busy)
+
+            def __exit__(self, *exc):
+                return False
+        monkeypatch.setattr(download, "FileLock", Busy)
+        result, out = cli.invoke(answer="y\n")
+        assert result.exit_code == 1 and isinstance(result.exception, SystemExit), result.exception
+        assert ui_text("hf.takeover.failed", "en", reason=busy) in out
+        assert not (area.models / "hf" / "acme--tiny-GGUF" / OLD_COMMIT[:12] / "config.json").exists()
+
     def test_the_command_is_in_the_parity_table(self):
         from orchestrator.gui.menus import existing
         assert existing.CLI_PATHS["models take-over"] == "btn_hf_take_over"
