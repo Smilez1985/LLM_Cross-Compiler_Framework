@@ -275,8 +275,10 @@ content; a tag can be moved. A bump goes like this:
    rules (`ggml/src/ggml-cuda/CMakeLists.txt`) and which targets `tools/CMakeLists.txt` builds as well. The target
    Dockerfiles repeat both lists in their llama.cpp build step (the options set last, and the ones they refuse);
    `tests/test_target_dockerfiles.py` fails until they match the recipe again. The board package's cross build in both
-   `target_module.sh` sets them after a module's CMake flags (`tests/test_target_stage.py` reads the recipe), and the
-   module generator refuses a module's flags with `recipe.refused_option`, which reads the same lists. If the new tree
+   `target_module.sh` sets them after a module's CMake flags (`tests/test_target_stage.py` reads the recipe) and
+   refuses a module flag of `NEVER_SET` (its `NEVER_SET_OPTIONS`, which
+   `test_the_package_refuses_the_options_the_build_recipe_never_sets` compares), and the module generator refuses a
+   module's flags with `recipe.refused_option`, which reads the same lists. If the new tree
    changes ggml's x86 options or the flags it adds for them (`ggml/src/ggml-cpu/CMakeLists.txt`), `X86_FEATURES` and
    `_X86_FLAGS` of the recipe change, and with them the tables of Rockchip's `config_module.sh`
    (`test_the_explicit_x86_features_are_the_build_recipe_s` fails until they agree). Re-check the quantization types too:

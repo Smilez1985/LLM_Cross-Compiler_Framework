@@ -1418,8 +1418,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `-DGGML_CUDA_CCCL_VERSION=...`, `-DFETCHCONTENT_FULLY_DISCONNECTED=OFF`, `-DLLAMA_SUBPROCESS=ON` and the like) with
   the build recipe's reason (`recipe.refused_option`, the rule `check_download_options` applies to every plan), the
   folder check of generated modules, exports and community packs refuses them in every script line that is not the
-  template's, and the package's cross build passes the framework's options after the module's flags, so they always
-  win. Its `llama-server` is built without subprocesses now (`LLAMA_SUBPROCESS=OFF`, decision D22), as every server
+  template's (in every spelling the shell hands cmake: `-D NAME=VALUE`, `-DNAME:TYPE=VALUE`, quoted), and the
+  package's cross build passes the framework's options after the module's flags, so they always win. What no later
+  option turns off stops the package before anything slow, with the reason and no package: a module flag that sets
+  an option of the recipe's `NEVER_SET` (it downloads whenever it is set) or makes CMake run a script (`-C`, an
+  initial cache, or `-P`, which can set any option; the generator refuses these in `cmake_flags` as well). A quoted
+  value that keeps a download off (`-DLLAMA_BUILD_TESTS="OFF"`) is no longer refused. Its `llama-server` is built
+  without subprocesses now (`LLAMA_SUBPROCESS=OFF`, decision D22), as every server
   of the framework; before, the package's server had them. An x86_64 hardware profile is planned with
   `-march=native` only when it is of this build machine itself (the same CPU model and CPU flags as `/proc/cpuinfo`
   here); a profile of another PC gets the CPU features of its probe, as the build recipe plans a build for another
