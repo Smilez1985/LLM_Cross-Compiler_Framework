@@ -492,8 +492,28 @@ class TestHistory:
     def test_failed_turns_are_not_stored(self, tmp_path, llm):
         history = ChatHistory()
         llm.script.append(ProviderTimeout("late", provider="ollama"))
-        with pytest.raises(DittoError):
+        with pytest.raises(DittoError) as info:
             make_ditto(tmp_path).chat("hi", history)
+        assert history.messages == [] and history.transcript == []
+        assert "Already done" not in str(info.value), "no tool ran"
+
+    @pytest.mark.parametrize("error, phrase", [
+        (ProviderTimeout("late", provider="ollama"), "did not answer in time"),
+        (Refused("declined", category="cyber", provider="ollama"), "declined this request (cyber)")],
+        ids=["error", "refusal"])
+    def test_a_failed_turn_after_tools_ran_names_them_and_says_it_is_not_remembered(self, tmp_path, llm,
+                                                                                    registry, error, phrase):
+        history = ChatHistory()
+        llm.script += [answer(calls=[call("list_targets", call_id="a")]),
+                       answer(calls=[call("read_build_log", call_id="b"), call("list_targets", call_id="c")]),
+                       error]
+        with pytest.raises(DittoError) as info:
+            make_ditto(tmp_path, registry).chat("Targets and the log?", history)
+        text = str(info.value)
+        assert phrase in text
+        # The read_build_log call failed (its handler raised): only what ran is named, each tool once.
+        assert "Already done in this turn before the error: List targets." in text
+        assert "Ditto will not remember this turn" in text and "Read build log" not in text
         assert history.messages == [] and history.transcript == []
 
 

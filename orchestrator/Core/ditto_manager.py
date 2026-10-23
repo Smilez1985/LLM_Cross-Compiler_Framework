@@ -762,9 +762,16 @@ class DittoCoder:
         except LLMError:
             return False
 
-    def _error(self, err: LLMError) -> DittoError:
+    def _error(self, err: LLMError, done: Sequence[str] = ()) -> DittoError:
+        """The person's message for a failed request. `done`: titles of the tools that already ran in the failed chat
+        turn; the turn is not stored, so the message says so (a build may have started)."""
         self.logger.warning(f"AI request failed: {type(err).__name__}: {err}")
-        return DittoError(describe_llm_error(err), cause=err)
+        message = describe_llm_error(err)
+        done = list(dict.fromkeys(done))
+        if done:
+            message += (f"\nAlready done in this turn before the error: {', '.join(done)}. Ditto will not remember "
+                        "this turn, so check what these tools did before you ask again.")
+        return DittoError(message, cause=err)
 
     # --- knowledge base -----------------------------------------------------------------------------------
     def _knowledge(self, query: str, limit: int = 5, rerank: Optional[bool] = None) -> str:
@@ -1034,14 +1041,14 @@ class DittoCoder:
                 loop = run_tool_loop(client, request, self._executor(registry, confirm, uses, on_tool),
                                      max_steps=MAX_TOOL_STEPS, extra_steps=FIX_EXTRA_STEPS)
                 if loop.stop == "refusal":
-                    raise self._error(loop.refusal)
+                    raise loop.refusal   # the same message as any other failed turn, with the tools that ran
                 results, new, text, stop, usage = loop.results, loop.new_messages, loop.text, loop.stop, loop.usage
             else:
                 result = client.chat(request)
                 results, new, text, stop, usage = [result], result.new_messages, result.text, result.stop, result.usage
                 new = [*new, *close_open_calls(new)]  # the tool loop answers a call cut off in it itself
         except LLMError as e:
-            raise self._error(e) from None
+            raise self._error(e, done=[use.title for use in uses if use.ok]) from None
         text = text.strip()
         if stop == "max_steps":
             steps = getattr(loop, "steps", MAX_TOOL_STEPS) if tools else MAX_TOOL_STEPS
