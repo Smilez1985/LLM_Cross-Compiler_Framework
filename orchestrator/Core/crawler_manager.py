@@ -404,9 +404,11 @@ class CrawlerManager:
         """Why the crawl may not read `url` (None when it may): the public-only SSRF guard, or in offline mode for the
         person's crawl the one network-locality rule (validate_own_network_url); an AI's crawl in offline mode reads
         nothing."""
+        from orchestrator.utils.locality import offline_mode
         if self.own_network:
             check = validate_own_network_url(url, self.config)
-        elif self.offline:
+        elif self.offline or offline_mode(self.config):
+            # offline mode, also when it was switched on during a crawl that started online: nothing more is read
             return OFFLINE_REFUSAL
         else:
             check = validate_public_url(url)
@@ -517,7 +519,8 @@ class CrawlerManager:
             # 1. SSRF / format check (offline mode: the own network only, for the person's crawl)
             refused = self._address_refusal(url)
             if refused:
-                reason = refused if self.offline else "unsafe or invalid address (security check)"
+                reason = refused if self.offline or refused == OFFLINE_REFUSAL \
+                    else "unsafe or invalid address (security check)"
                 self._skip(url, reason, level=logging.WARNING)
                 continue
 

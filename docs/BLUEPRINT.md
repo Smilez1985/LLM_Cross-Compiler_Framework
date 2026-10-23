@@ -650,6 +650,7 @@ its ending, and you can count a VPN, a host such as your reverse proxy or an add
   (`METADATA_ADDRESSES`, `METADATA_NAMES`, from the providers' documentation, also in their IPv4-mapped, NAT64 and
   6to4 spellings, and also when only one address of a name is one) are never read. A crawl an AI starts
   (`crawl_docs_site`) keeps the public-only guard, so it reads nothing in offline mode; online every crawl keeps it.
+  A crawl that started online reads nothing more once offline mode is switched on (every address is judged again).
 - **After the question.** `download_hf_file`, `build_local_runtime`, `deploy_device_runtime` and
   `add_pack_from_index` look at offline mode again after your answer: switched on while the question was open, the
   same refusal follows and nothing runs.

@@ -690,7 +690,8 @@ Adressbereich als lokal zählen.
   `METADATA_NAMES`, aus der Dokumentation der Anbieter, auch in ihren Schreibweisen als IPv4-mapped, NAT64 und 6to4,
   und auch wenn nur eine Adresse eines Namens eine solche ist) werden nie gelesen. Ein Crawl, den eine KI startet
   (`crawl_docs_site`), behält den Schutz „nur öffentlich“ und liest im Offline-Modus daher nichts; online behält
-  jeder Crawl ihn.
+  jeder Crawl ihn. Ein online begonnener Crawl liest nichts mehr, sobald der Offline-Modus eingeschaltet wird (jede
+  Adresse wird neu beurteilt).
 - **Nach der Rückfrage.** `download_hf_file`, `build_local_runtime`, `deploy_device_runtime` und
   `add_pack_from_index` sehen nach deiner Antwort noch einmal auf den Offline-Modus: wurde er eingeschaltet, während
   die Rückfrage offen war, folgt dieselbe Ablehnung, und nichts läuft.
