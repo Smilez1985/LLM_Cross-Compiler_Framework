@@ -2288,12 +2288,15 @@ llm-cli config local-network [--add ART WERT | --remove ART WERT | --check ADRES
 ```
 
 Was der Offline-Modus als lokal zählt (unveröffentlicht): diesen Computer, dein eigenes Netz und was du selbst als
-lokal zählst. Ein Name zählt nach jeder Adresse, zu der er auflöst (Loopback, private und Link-Local-Adressen sind
-lokal; ein `.local`- oder `.lan`-Name nur, wenn er zu einer solchen Adresse auflöst; ein Name mit einer öffentlichen
-Adresse ist nie lokal), und eine Adresse eines Tailscale- oder Headscale-VPN nur, wenn sein Steuerserver und jedes
-Relay in deinem eigenen Netz sind (gelesen mit dem Befehl `tailscale`, wenn er installiert ist). Ohne Optionen
-listet der Befehl, was du als lokal zählst, mit dem, was dann dein Netz verlassen kann, und die Prüfung des VPN
-dieses Computers.
+lokal zählst. Ein Name zählt nach den Adressen, zu denen er auflöst (Loopback, private und Link-Local-Adressen sind
+lokal; ein `.local`- oder `.lan`-Name nur, wenn er zu einer solchen Adresse auflöst; ein Name mit nur öffentlichen
+Adressen ist nie lokal; ein Name mit lokalen und öffentlichen Adressen zählt als lokal, und das Framework verbindet
+sich nur mit seinen lokalen, was `--check` sagt), und eine Adresse eines Tailscale- oder Headscale-VPN nur, wenn sein
+Steuerserver und jedes Relay in deinem eigenen Netz sind und sie zu einem Gerät deines Tailnets gehört (gelesen mit
+dem Befehl `tailscale`, wenn er installiert ist; eine private Adresse hinter der Subnet-Route eines Geräts zählt wie
+eine VPN-Adresse). Ohne Optionen listet der Befehl, was du als lokal zählst, mit dem, was dann dein Netz verlassen
+kann, und die Prüfung des VPN dieses Computers. Was du hier als lokal zählst, zählt nur dafür, was der
+Offline-Modus erreichen darf: Der Datenschutzfilter bleibt dafür an.
 
 `--add` zählt einen weiteren Eintrag als lokal: `vpn tailscale` (jede Tailscale- oder Headscale-Adresse, auch mit
 Tailscales Servern oder Relays außerhalb), `host NAME` (zum Beispiel den öffentlichen Namen deines Reverse Proxys,

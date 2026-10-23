@@ -1310,6 +1310,21 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **Offline mode: your opt-outs count only for what it may reach, a name with local and public addresses counts by
+  its local ones, and your own crawl reads your own network** (DECISIONS round 26 Q3, Q4, Q5): the locality rule now
+  answers two questions with one API, `check_reach` (may offline mode reach this: your opt-outs count) and
+  `check_location` (where does this server stand: they never count). The privacy filter and a provider's local/cloud
+  label ask the second, so a public host you count as local keeps the privacy filter on, online and offline, and
+  keeps its label (`ProviderPreset.is_local` and `is_local_url` no longer take the settings); the explanations of
+  **File > Settings... > Local network** and `llm-cli config local-network` say so. A name that resolves to
+  addresses in your network and on the internet (a home router that also registers a global IPv6 address) now
+  counts as local, and every connection goes only to its checked local addresses (the provider client, the
+  local-only download adapter, git's `http.curloptResolve` pin, the crawler); it was refused before. A Deep Ingest
+  you start in offline mode reads sites on this computer and in your own network (it refused before); an AI's
+  `crawl_docs_site` stays refused in offline mode. With your own Headscale, an address of the VPN counts as local only
+  for this computer or a device of the tailnet (`tailscale status --json`), and a private address behind a device's
+  subnet route counts like a VPN address. A lookup and the VPN check are kept 5 minutes and dropped after a failed
+  connection, instead of for the whole run.
 - **`install.sh` on every Linux family, through the family's own package manager** (DECISIONS round 24 PKG): the
   installer finds the family from `ID` and `ID_LIKE` in `/etc/os-release` with the hardware probe's table and installs
   what it needs (Python 3.11 to 3.14, `rsync`, Docker) with `apt`, `dnf`, `zypper`, `pacman` or `apk`, under the
@@ -1349,7 +1364,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   reach-out of offline mode. A server name counts by every address it resolves to: loopback, private (RFC 1918,
   `fc00::/7`) and link-local addresses are local, a `.local`, `.lan`, `.fritz.box` or single-label name only when it
   resolves to such an address (it counted by its ending before, also with a public address; the privacy filter's
-  local label follows the same rule), and a name with local and public addresses is not local. A Tailscale address
+  local label follows the same rule), and a name with local and public addresses counts by its local ones (round 26,
+  entry below). A Tailscale address
   (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) counts as local only when the VPN is Headscale in your own network with
   only own DERP relays, read with the `tailscale` command (`debug prefs`, `debug derp-map`); a public name such as a
   reverse proxy's is not local. You can count a VPN, a host or an address range as local in **File > Settings... >
@@ -1366,7 +1382,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   network is now refused in offline mode (its preset counted as local whatever its address), and the runtime's
   downloads and the pinned source come in offline mode only from your own network (a local mirror): `device runtime
   build`, `ditto runtime install` and `export-source`, the Boards window and Ditto > Local Runtime fetched from
-  GitHub or Hugging Face before. The person's Deep Ingest refuses in offline mode as an AI's crawl does.
+  GitHub or Hugging Face before. The person's Deep Ingest reads only the own network in offline mode (round 26,
+  entry below), and an AI's crawl reads nothing then.
   `build_local_runtime`, `deploy_device_runtime` and `add_pack_from_index` look at offline mode again after the
   person's answer, as `download_hf_file` does. Refusals name the host, why it is not local and the opt-out. The
   local/cloud labels of the bundled providers do not change. Every reader of the setting now asks the one offline
@@ -2855,6 +2872,19 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   100 %.
 
 ### Security
+- **Every reach-out of offline mode now goes through the locality rule** (DECISIONS round 24 L-NET, round 26 d-g):
+  a Qdrant server (`qdrant_url`) is judged by it, a cloud Qdrant is refused in plain words, and qdrant-client
+  connects only to the checked addresses without a proxy and without its own version request; the sign-in
+  **Check**, `ditto login --check` and the AI settings' sign-in panel refuse a provider offline mode may not reach
+  before any socket opens; the llama.cpp repository override of an image build (`LLAMA_CPP_REPO_OVERRIDE`) and the
+  pin-bump check (`scripts/llama_cpp_pin.py`) reach only a mirror in your own network, pinned like the source fetch
+  (the image build gets `--add-host` for the checked addresses and no proxy); an international mirror host is refused
+  until it is written in its `xn--` form (Python and git's curl convert a few characters differently). A crawl never
+  reads an IPv4 link-local address or a cloud metadata service (AWS, Google, Azure, Oracle, OpenStack, Akamai/Linode,
+  Alibaba, Scaleway, Tencent, from their documentation; also IPv4-mapped, NAT64 and 6to4 spellings, and a name with
+  one such address among others). Online, a custom server labelled local by its address (its prompts go without the
+  privacy filter) is reached only at its checked local addresses, so a DNS answer that changes cannot send them to a
+  public host.
 - **`install.sh` installs Docker only with a checksum** (DECISIONS round 23, item 3): when Docker was missing, the
   installer downloaded `get.docker.com` and ran it as root without any check. Now Docker comes only from Docker's
   official apt repository on Debian, Ubuntu and Raspberry Pi OS (32-bit gets Debian's armhf packages, as Docker's guide
