@@ -97,6 +97,11 @@ TEXTS = {
         "net.error.host_is_address": "{value} is an address: count it as an address range.",
         "net.error.range": "{value!r} is not an address or address range (e.g. 203.0.113.0/24).",
         "net.error.not_saved": "Not saved: {path} could not be updated (see the log); nothing changed.",
+        # the person's Deep Ingest in offline mode
+        "net.crawl.title": "Deep Ingest",
+        "net.crawl.offline": "Offline mode is on, so the framework reads no web sites: the crawler reads only public "
+                             "sites, and those are outside your own network. To read documentation sites, switch "
+                             "offline mode off in {path:act_ditto_settings}.",
     },
     "de": {
         "net.why.this_computer": "{host} ist dieser Computer",
@@ -185,6 +190,11 @@ TEXTS = {
         "net.error.range": "{value!r} ist keine Adresse und kein Adressbereich (z. B. 203.0.113.0/24).",
         "net.error.not_saved": "Nicht gespeichert: {path} ließ sich nicht aktualisieren (siehe Log); nichts wurde "
                                "geändert.",
+        "net.crawl.title": "Deep Ingest",
+        "net.crawl.offline": "Der Offline-Modus ist an, daher liest das Framework keine Webseiten: Der Crawler liest "
+                             "nur öffentliche Seiten, und die liegen außerhalb deines eigenen Netzes. Um "
+                             "Dokumentationsseiten zu lesen, schalte den Offline-Modus in {path:act_ditto_settings} "
+                             "aus.",
     },
 }
 
@@ -230,5 +240,9 @@ FORMAL = {
         "net.pick": "Wählen Sie zuerst eine Zeile.",
         "net.error.kind": "Wählen Sie VPN, Host oder Adressbereich.",
         "net.error.host_is_address": "{value} ist eine Adresse: zählen Sie sie als Adressbereich.",
+        "net.crawl.offline": "Der Offline-Modus ist an, daher liest das Framework keine Webseiten: Der Crawler liest "
+                             "nur öffentliche Seiten, und die liegen außerhalb Ihres eigenen Netzes. Um "
+                             "Dokumentationsseiten zu lesen, schalten Sie den Offline-Modus in "
+                             "{path:act_ditto_settings} aus.",
     },
 }

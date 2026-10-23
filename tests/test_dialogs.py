@@ -1132,6 +1132,22 @@ class TestDeepIngestControls:
         assert wizard.status_label.text() == "Deep Ingest finished: 1 pages (2 chunks) are now searchable."
         assert offered == [[], ["https://docs.example/"]]   # crawled URLs are offered the next time
 
+    def test_offline_mode_reads_no_web_site_for_the_person_either(self, qapp, wizard, tmp_path, monkeypatch,
+                                                                 wizard_boxes):
+        """Chain offline-lan: in offline mode the framework reaches only the person's own network, and the crawler
+        reads only public sites, so the person's Deep Ingest refuses as an AI's crawl_docs_site does (it used to
+        crawl the web in offline mode)."""
+        from orchestrator.gui import wizards
+        cfg = ConfigManager(tmp_path / "configs")
+        cfg.set("offline_mode", True)
+        crawled = []
+        wizard.framework_manager = SimpleNamespace(config=cfg, get_component=lambda name: crawled.append(name))
+        monkeypatch.setattr(dialogs.CrawlNoticeDialog, "exec", lambda self: 0)
+        monkeypatch.setattr(wizards, "URLInputDialog", lambda *a, **k: pytest.fail("no address is asked for"))
+        wizard.run_deep_ingest()
+        assert [kind for kind, _title, _text in wizard_boxes] == ["information"]
+        assert "Offline mode is on" in wizard_boxes[0][2] and crawled == [] and wizard.crawl_worker is None
+
     def test_finish_waits_for_a_running_crawl(self, qapp, wizard, tmp_path, monkeypatch, wizard_boxes):
         """Finish used to create the module, and its knowledge snapshot of the crawled pages, while Deep Ingest
         was still storing them."""

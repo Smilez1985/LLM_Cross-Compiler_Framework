@@ -501,3 +501,79 @@ def test_the_runtime_catalog_resource(fw):
     allow(fw)
     text = fw.tool_registry.read_resource("lcf://runtime/catalog", {}, ToolContext("mcp"))
     assert "commit" in str(text) and "tier" in str(text)
+
+
+# --- offline mode switched on while the person's question was open (chain offline-lan, as download_hf_file) ------
+
+class TestOfflineAfterTheQuestion:
+    """build_local_runtime and deploy_device_runtime refuse in offline mode before the question when they need a
+    download from outside the person's own network; the person may switch offline mode on while the question is
+    open. The handler looks again (the 56b962c pattern of download_hf_file): the same refusal, no job, nothing
+    fetched. A download from the own network (a local mirror, by the network-locality rule) may run."""
+
+    @staticmethod
+    def going_offline(fw):
+        def confirm(spec, inp, *rest):
+            fw.config.set("offline_mode", True)
+            return True
+        return confirm
+
+    @staticmethod
+    def asked_each_time(fw, name):
+        fw.tool_registry.policy_store.replace(ToolPolicy(configured=True,
+                                                         reviewed=[s.name for s in fw.tool_registry.list()],
+                                                         overrides={name: Decision.ASK}))
+
+    def test_build_local_runtime_with_a_model_download(self, fw, fake_rt):
+        self.asked_each_time(fw, "build_local_runtime")
+        before = fw.job_service.list()
+        with pytest.raises(ToolError) as e:
+            call(fw, "build_local_runtime", {"backend": "cpu", "model_tier": "small"},
+                 confirm=self.going_offline(fw))
+        assert e.value.code == "needs_person" and e.value.blocker == "offline_mode"
+        assert "Offline mode is on, and this needs a download" in str(e.value)
+        assert "huggingface.co" in str(e.value), "the host it would have reached"
+        assert fw.job_service.list() == before, "no job started"
+
+    def test_build_local_runtime_from_a_model_mirror_in_the_own_network(self, fw, fake_rt, monkeypatch):
+        """A local model mirror (the catalog's model_base_url in the own network) may be used in offline mode."""
+        from orchestrator.utils import locality
+        rt = fake_rt["rt"]
+        monkeypatch.setattr(rt, "catalog", rt.catalog.model_copy(update={"model_base_url": "https://hf.lan/"}))
+        monkeypatch.setattr(locality, "_system_lookup", lambda host: {"hf.lan": ["192.168.1.9"]}[host])
+        fw.config.set("offline_mode", True)
+        self.asked_each_time(fw, "build_local_runtime")
+        confirm = asking(True)
+        started = call(fw, "build_local_runtime", {"backend": "cpu", "model_tier": "small"}, confirm=confirm)
+        assert started.job_id and len(confirm.asked) == 1, "asked, then started: the mirror is in the own network"
+        wait_job(fw, started.job_id)
+
+    def test_deploy_device_runtime_when_the_build_needs_the_source(self, fw, monkeypatch):
+        paramiko = pytest.importorskip("paramiko")
+        from types import SimpleNamespace as NS
+        from orchestrator.runtime.device import service
+        from orchestrator.runtime.device.trusted import TrustedDevices
+        from orchestrator.utils import ssh_trust
+        state = Path(fw.config.user_state_dir)
+        key = paramiko.ECDSAKey.generate()
+        ssh_trust.trust_host_key(state, "192.168.1.50", 22, key)
+        device = TrustedDevices(state).record("192.168.1.50", 22, "dietpi", key, via="cli", paired=True,
+                                              label="Living room board")
+        kv = NS(kind="f16", describe=lambda: "f16 (the default)")
+        monkeypatch.setattr(service, "device_profile", lambda s, d: NS())
+        monkeypatch.setattr(service, "deploy_settings", lambda s, d, p=None: NS(
+            ssh_user="dietpi", install="script", sudo_confirmed_at=None, kv_choice=lambda profile: kv))
+        monkeypatch.setattr(service, "plan_facts", lambda s, p: service.DevicePlanFacts(
+            build_id="b" * 16, built=False, source_cached=False,
+            target={"os": "linux", "arch": "arm64", "libc": "glibc", "libc_version": "2.36"},
+            builder={"base": "debian:bookworm"}))
+        monkeypatch.setattr(service, "read_key", lambda d, s, step="": device.fingerprint)
+        deployed = []
+        monkeypatch.setattr(service, "deploy", lambda *a, **k: deployed.append(a) or {})
+        allow(fw, "deploy_device_runtime")
+        before = fw.job_service.list()
+        with pytest.raises(ToolError) as e:
+            call(fw, "deploy_device_runtime", {"device_id": device.device_id}, confirm=self.going_offline(fw))
+        assert e.value.blocker == "offline_mode" and "the build needs the pinned source" in str(e.value)
+        assert "github" in str(e.value), "the host it would have reached"
+        assert fw.job_service.list() == before and deployed == [], "no job, no deploy"
