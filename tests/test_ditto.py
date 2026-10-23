@@ -486,8 +486,45 @@ class TestHistory:
         opening = turn_request.messages[0]
         assert "<untrusted_data" in opening.content[0]["text"] and "RK3588" in opening.content[0]["text"]
         assert opening.content[-1]["text"] == "Next step?"
+        assert reply.new_conversation_reason == "long"
         history.apply(reply)
         assert history.messages == reply.new_messages and history.transcript[0].role == "notice"
+        assert "got long" in history.transcript[0].text
+
+    def test_a_conversation_with_tool_turns_asked_without_tools_continues_as_a_new_one(self, tmp_path, llm,
+                                                                                       registry):
+        """Claude rejects tool turns without tool definitions ("Answer without tools" in the chat panel): the
+        conversation is summarized into a new one, like a long one, instead of being sent without them."""
+        ditto = make_ditto(tmp_path, registry)
+        history = ChatHistory()
+        llm.script += [answer(calls=[call("list_targets")]), answer("Rockchip.")]
+        history.apply(ditto.chat("Targets?", history))
+        earlier = list(history.messages)
+        llm.script += [answer("The user listed the targets: Rockchip."), answer("Rockchip it is.")]
+
+        reply = ditto.chat("Which one again?", history, use_tools=False)
+
+        summary_request, turn_request = llm.requests[2:]
+        assert summary_request.tools == [] and "<untrusted_data" in summary_request.messages[0].text()
+        assert turn_request.tools == [] and len(turn_request.messages) == 1
+        assert not any(m.role == "tool" or m.tool_calls for m in turn_request.messages)
+        opening = turn_request.messages[0]
+        assert "listed the targets" in opening.content[0]["text"] and opening.content[-1]["text"] == "Which one again?"
+        assert reply.new_conversation and reply.new_conversation_reason == "no_tools"
+        assert history.messages == earlier, "the old conversation is never edited"
+        history.apply(reply)
+        assert history.messages == reply.new_messages
+        notice = history.transcript[-3]
+        assert notice.role == "notice" and "without tools" in notice.text and "got long" not in notice.text
+
+    def test_a_conversation_without_tool_turns_asked_without_tools_goes_on(self, tmp_path, llm, registry):
+        ditto = make_ditto(tmp_path, registry)
+        history = ChatHistory()
+        llm.script += [answer("Hello."), answer("Still here.")]
+        history.apply(ditto.chat("Hi", history))
+        reply = ditto.chat("Still there?", history, use_tools=False)
+        assert len(llm.requests) == 2 and llm.requests[1].messages[:2] == history.messages
+        assert not reply.new_conversation and reply.new_conversation_reason == ""
 
     def test_failed_turns_are_not_stored(self, tmp_path, llm):
         history = ChatHistory()
