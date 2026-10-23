@@ -270,11 +270,19 @@ class AISettingsChange:
                 "fallback_unknown", "Invalid Fallback Chain",
                 f"Unknown provider in the fallback chain: {', '.join(unknown)}.\n"
                 f"Known providers: {', '.join(self.catalog.ids())}." + (f"\n\n{removed}" if removed else "")))
+        # The LLM layer's own rule (client.resolve): a provider whose location depends on its address (a custom
+        # server) counts as local only on this computer or the local network (no address at all: base_url_missing).
         if self.offline_mode and preset.location == "cloud":
             found.append(SettingsProblem(
                 "offline_cloud", "Offline Mode",
                 f"{preset.label} is a cloud provider. In offline mode choose a local provider (Ollama, the managed "
                 "local model, or a custom server on your network)."))
+        elif self.offline_mode and (self.address or preset.base_url) and not preset.is_local(self.address or None):
+            found.append(SettingsProblem(
+                "offline_cloud", "Offline Mode",
+                f"The server address of {preset.label} is not on this computer or your local network. In offline "
+                "mode choose a local provider (Ollama, the managed local model, or a custom server on your "
+                "network)."))
         if self.key_required(config) and not self.key and not self.stored_key(secrets):
             found.append(SettingsProblem("key_missing", "Missing API Key",
                                          "Please provide an API key for this provider."))

@@ -235,6 +235,22 @@ class TestAIConfigurationDialog:
         assert message_boxes == [("warning", "Missing Base URL")]
         assert dlg.result() == 0
 
+    def test_offline_mode_accepts_a_custom_server_only_on_the_local_network(self, qapp, framework,
+                                                                              message_boxes):
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "custom")
+        dlg.cb_model.setCurrentText("my-model")
+        dlg.chk_offline.setChecked(True)
+        dlg.txt_base_url.setText("https://api.example.com/v1")
+        dlg._save_config()
+        assert message_boxes == [("warning", "Offline Mode")] and dlg.result() == 0
+        assert framework.config.get("offline_mode") is not True, "nothing is saved"
+
+        dlg.txt_base_url.setText("http://192.168.1.30:8000/v1")
+        dlg._save_config()
+        assert dlg.result() == dialogs.QDialog.Accepted
+        assert framework.config.get("ai_provider") == "custom" and framework.config.get("offline_mode") is True
+
     def test_offline_mode_accepts_only_local_providers(self, qapp, framework, message_boxes):
         dlg = AIConfigurationDialog(framework)
         select_provider(dlg, "openai")
