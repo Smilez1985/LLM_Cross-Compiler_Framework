@@ -402,3 +402,181 @@ def test_the_pin_bump_check_reaches_only_a_mirror_in_the_own_network(names):
     with pytest.raises(SourceError):
         check_pin_upstream(source, git=git, settings=offline)
     assert check_pin_upstream(source, repo="https://mirror.lan/llama.cpp.git", git=git, settings=offline) == "c" * 40
+
+
+# --- Q5: a crawl the person starts reads the own network in offline mode -------------------------------------------
+
+EN = " This guide explains how to install the software development kit on your single board computer. "
+
+
+def page(status=200, html="", location=None, content_type="text/html"):
+    from requests.structures import CaseInsensitiveDict
+    headers = CaseInsensitiveDict({"Content-Type": content_type})
+    if location:
+        headers["Location"] = location
+    return SimpleNamespace(status_code=status, headers=headers, text=html, content=html.encode(),
+                           is_redirect=status in (301, 302, 303, 307, 308) and location is not None)
+
+
+class FakeWeb:
+    def __init__(self, pages):
+        self.pages, self.urls, self.kwargs = pages, [], {}
+
+    def __call__(self, prepared, **kwargs):
+        self.urls.append(prepared.url)
+        self.kwargs = kwargs
+        return self.pages.get(prepared.url) or page(404)
+
+
+def crawler_for(settings, actor="", pages=None, monkeypatch=None, **options):
+    from orchestrator.Core.crawler_manager import CrawlerManager
+    options.setdefault("request_delay", 0)
+    options.setdefault("languages", [])
+    crawler = CrawlerManager(SimpleNamespace(config=settings), options, actor=actor, _skip_robots_txt_for_tests=True)
+    web = FakeWeb(pages or {})
+    if monkeypatch is not None:
+        monkeypatch.setattr(crawler.session, "send", web)
+    return crawler, web
+
+
+def test_the_persons_offline_crawl_reads_the_own_network_and_judges_every_hop(names, monkeypatch):
+    names.update({"docs.lan": ["192.168.1.20"], "public.example": ["203.0.113.9"]})
+    pages = {"http://docs.lan/": page(html='<a href="/guide">Guide</a><a href="/away">Away</a>'
+                                           '<a href="/meta">Meta</a>' + EN),
+             "http://docs.lan/guide": page(html="Guide." + EN),
+             "http://docs.lan/away": page(302, location="http://public.example/"),
+             "http://docs.lan/meta": page(302, location="http://169.254.169.254/latest/meta-data/")}
+    crawler, web = crawler_for(Settings(offline_mode=True), "gui", pages, monkeypatch, max_depth=1)
+    assert crawler.own_network
+    docs = crawler.crawl("http://docs.lan/")
+    assert [d.metadata["source"] for d in docs] == ["http://docs.lan/", "http://docs.lan/guide"]
+    assert "http://public.example/" not in web.urls and not any("169.254" in u for u in web.urls)
+    assert web.kwargs.get("proxies") == {}, "no proxy: it would resolve the name itself"
+    assert type(crawler.session.get_adapter("http://docs.lan/")).__name__ == "LocalOnlyAdapter"
+
+
+def test_a_redirect_at_the_start_to_a_public_host_is_judged_again(names, monkeypatch):
+    names.update({"docs.lan": ["192.168.1.20"], "public.example": ["203.0.113.9"]})
+    pages = {"http://docs.lan/": page(301, location="http://public.example/docs")}
+    crawler, web = crawler_for(Settings(offline_mode=True), "cli", pages, monkeypatch)
+    assert crawler.crawl("http://docs.lan/") == []
+    assert web.urls == ["http://docs.lan/.well-known/tdmrep.json", "http://docs.lan/"]
+    skipped = {s.url: s.reason for s in crawler.skipped}
+    assert "on the internet" in skipped["http://public.example/docs"]
+
+
+def test_an_ai_crawl_stays_public_only_and_reads_nothing_in_offline_mode(names, monkeypatch):
+    names["docs.lan"] = ["192.168.1.20"]
+    for actor in ("", "mcp", "mcp:token", "ditto", "framework"):
+        crawler, web = crawler_for(Settings(offline_mode=True), actor, {"http://docs.lan/": page(html=EN)},
+                                   monkeypatch)
+        assert not crawler.own_network and crawler.crawl("http://docs.lan/") == [] and web.urls == []
+        assert "Offline mode is on" in crawler.skipped[0].reason
+        assert type(crawler.session.get_adapter("http://docs.lan/")).__name__ == "PublicOnlyAdapter"
+
+
+def test_online_every_crawl_keeps_the_public_only_guard(names, monkeypatch):
+    names["docs.lan"] = ["192.168.1.20"]
+    for actor in ("gui", "cli", ""):
+        crawler, web = crawler_for(Settings(), actor, {"http://docs.lan/": page(html=EN)}, monkeypatch)
+        assert not crawler.own_network and crawler.crawl("http://docs.lan/") == [] and web.urls == []
+        assert crawler.skipped[0].reason == "unsafe or invalid address (security check)"
+
+
+@pytest.mark.parametrize("address", [
+    "169.254.169.254", "169.254.1.1", "169.254.42.42", "::ffff:169.254.169.254", "::169.254.169.254",
+    "64:ff9b::a9fe:a9fe", "64:ff9b:1::a9fe:a9fe", "2002:a9fe:a9fe::1", "fd00:ec2::254", "fd20:ce::254",
+    "fe80::a9fe:a9fe", "fe80::a9fe:a9fe%eth0", "[fd00:ec2::254]", "fd00:a9fe:a9fe::1", "fd00:42::42",
+    "100.100.100.200", "::ffff:100.100.100.200", "64:ff9b::6464:64c8"])
+def test_a_crawl_never_reads_link_local_ipv4_or_a_metadata_service_in_any_spelling(address):
+    assert locality.crawl_excluded(address)
+    with pytest.raises(LocalityRefused) as info:
+        locality.crawl_addresses(address.strip("[]").split("%")[0], {"offline_local_ranges": ["0.0.0.0/0", "::/0"]})
+    assert info.value.locality.reason == "metadata" and not info.value.steps, "no opt-out lifts it"
+
+
+def test_every_listed_metadata_address_is_excluded_in_its_mapped_spelling_too():
+    """The list itself (one of them is a public address of a cloud platform, named here only through the list)."""
+    for ip in locality.METADATA_ADDRESSES:
+        assert locality.crawl_excluded(str(ip))
+        if ip.version == 4:
+            assert locality.crawl_excluded(f"::ffff:{ip}") and locality.crawl_excluded(f"64:ff9b::{ip}")
+
+
+@pytest.mark.parametrize("address", ["192.168.1.20", "10.0.0.1", "fe80::1", "fd00::5", "127.0.0.1"])
+def test_other_local_addresses_stay_readable_for_a_crawl(address):
+    assert not locality.crawl_excluded(address)
+    assert locality.crawl_addresses(address) == check_host(address).local_addresses
+
+
+def test_a_metadata_name_or_a_name_with_one_metadata_address_is_refused(names):
+    names.update({"metadata.google.internal": ["192.168.1.5"], "evil.lan": ["192.168.1.5", "169.254.169.254"],
+                  "mixed.lan": ["192.168.1.5", "203.0.113.5"]})
+    for host in ("metadata.google.internal", "METADATA.GOOG.", "metadata.tencentyun.com", "evil.lan"):
+        with pytest.raises(LocalityRefused) as info:
+            locality.crawl_addresses(host)
+        assert info.value.locality.reason == "metadata" and "never reads" in str(info.value)
+    assert locality.crawl_addresses("mixed.lan") == ("192.168.1.5",), "a public address is never used"
+
+
+def test_the_persons_crawl_connects_only_to_the_checked_local_address(names, monkeypatch):
+    """End to end: a real HTTP server on this computer, a name with a public and a local address, a proxy in the
+    environment: the page arrives over the pinned connection to the local address, through no proxy."""
+    from urllib3.connection import HTTPConnection
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = f"<html><body><p>{EN * 3}</p></body></html>".encode() if self.path == "/" else b""
+            self.send_response(200 if self.path == "/" else 404)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    port = httpd.server_address[1]
+    try:
+        names["docs.lan"] = ["203.0.113.66", "127.0.0.1"]
+        for var in ("HTTP_PROXY", "http_proxy", "ALL_PROXY"):
+            monkeypatch.setenv(var, "http://203.0.113.1:9")
+        asked = []
+        real = HTTPConnection._new_conn
+
+        def spy(conn):
+            asked.append(conn._dns_host)
+            return real(conn)
+        monkeypatch.setattr(HTTPConnection, "_new_conn", spy)
+        crawler, _web = crawler_for(Settings(offline_mode=True), "gui")
+        docs = crawler.crawl(f"http://docs.lan:{port}/")
+        assert [d.metadata["source"] for d in docs] == [f"http://docs.lan:{port}/"], crawler.failed
+        assert asked and set(asked) == {"127.0.0.1"}
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_the_rag_manager_hands_the_persons_actor_to_the_crawler(monkeypatch):
+    from orchestrator.Core import rag_manager as rag_module
+    made = []
+
+    class Crawler:
+        def __init__(self, framework, options, **kwargs):
+            made.append(kwargs)
+            self.skipped, self.failed, self.stopped = [], [], False
+
+        def iter_crawl(self, url, stop=None, progress=None):
+            return iter(())
+
+    rag = rag_module.RAGManager.__new__(rag_module.RAGManager)
+    rag.framework = SimpleNamespace(config=Settings())
+    rag.logger = SimpleNamespace(info=lambda *a: None, error=lambda *a: None)
+    rag._connect = lambda: True
+    rag.create_snapshot = lambda *a, **k: None
+    monkeypatch.setattr(rag_module, "CrawlerManager", Crawler)
+    rag.ingest_url("http://docs.lan/", actor="gui")
+    rag.ingest_url("http://docs.lan/")
+    assert made == [{"actor": "gui"}, {}], "an AI's crawl (crawl_jobs) passes no actor"

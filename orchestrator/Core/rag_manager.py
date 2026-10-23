@@ -876,11 +876,13 @@ class RAGManager:
     # --- DEEP INGEST (WEB/PDF) ---
     def ingest_url(self, url: str, crawler_options: Optional[Dict[str, Any]] = None,
                    stop: Optional[threading.Event] = None,
-                   progress: Optional[Callable[[int, int, str], None]] = None) -> Dict[str, Any]:
+                   progress: Optional[Callable[[int, int, str], None]] = None, *, actor: str = "") -> Dict[str, Any]:
         """
         Crawls a URL and stores each page as soon as it is read. A snapshot is taken first, so a bad crawl can
         be rolled back. crawler_options apply to this crawl only (see CrawlerManager). Setting stop ends the
-        crawl after the current page and keeps what is stored; progress gets (page, max pages, url).
+        crawl after the current page and keeps what is stored; progress gets (page, max pages, url). `actor`: who
+        starts it ("gui" or "cli" for the person: in offline mode the crawl may then read the own network;
+        CrawlerManager); an AI's crawl (crawl_jobs) passes none.
 
         "outcome" is "success" (pages stored, nothing failed or reserved), "partial" (pages stored, but others
         failed, were reserved by the site, or the crawl was stopped) or "failure" (nothing stored). "skipped"
@@ -899,7 +901,8 @@ class RAGManager:
 
         crawler, pages, chunks, error = None, 0, 0, None
         try:
-            crawler = crawler_class(self.framework, crawler_options)
+            # the person's actor only when there is one: a stand-in crawler class of earlier tests takes none
+            crawler = crawler_class(self.framework, crawler_options, **({"actor": actor} if actor else {}))
             self.logger.info(f"Invoking Crawler for {url}...")
             for doc in crawler.iter_crawl(url, stop=stop, progress=progress):
                 added = self.ingest_page(doc, url)

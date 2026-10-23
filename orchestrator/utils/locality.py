@@ -443,6 +443,9 @@ class Locality:
         """The plain refusal of a reach-out in offline mode: the host, why it is not local, and (when it would help)
         that the person can count it as local; the next step itself is `steps`."""
         from orchestrator.utils.localization import ui_text
+        if self.reason == "metadata":   # rule f: it may well be in the own network, and still a crawl never reads it
+            return ui_text("net.refusal.metadata", lang, subject=self._subject(what, lang, start=True),
+                           why=self.why(lang))
         text = ui_text("net.refusal", lang, subject=self._subject(what, lang), why=self.why(lang))
         if self.reason in OPT_OUT_HELPS:
             text += ui_text("net.refusal.opt_out", lang)
@@ -453,11 +456,14 @@ class Locality:
         longer counts as local: nothing is sent to it unfiltered. The person's opt-outs do not change the location,
         so none is named."""
         from orchestrator.utils.localization import ui_text
-        return ui_text("net.refusal.location", lang, subject=self._subject(what, lang), why=self.why(lang))
+        return ui_text("net.refusal.location", lang, subject=self._subject(what, lang, start=True),
+                       why=self.why(lang))
 
-    def _subject(self, what: str, lang: str) -> str:
+    def _subject(self, what: str, lang: str, start: bool = False) -> str:
+        """`what` and the host; `start`: it opens the sentence (its first letter in upper case)."""
         from orchestrator.utils.localization import ui_text
-        return f"{what} ({self.host})" if what and self.host else (what or self.host or ui_text("net.subject", lang))
+        text = f"{what} ({self.host})" if what and self.host else (what or self.host or ui_text("net.subject", lang))
+        return text[:1].upper() + text[1:] if start else text
 
     @property
     def steps(self) -> Tuple[str, ...]:
@@ -670,13 +676,13 @@ def crawl_addresses(host: str, config: Any = None) -> Tuple[str, ...]:
     with ANY address a crawl never reads (crawl_excluded), whatever its other addresses are."""
     name = normal_host(host)
     if is_metadata_name(name):
-        raise LocalityRefused(Locality(name, False, "metadata"), "the crawl")
+        raise LocalityRefused(Locality(name, False, "metadata"), "the site to crawl")
     verdict = check_host(name, config)
     bad = tuple(a for a in verdict.addresses if crawl_excluded(a))
     if bad:
-        raise LocalityRefused(Locality(name, False, "metadata", verdict.addresses, bad), "the crawl")
+        raise LocalityRefused(Locality(name, False, "metadata", verdict.addresses, bad), "the site to crawl")
     if not verdict.local_addresses:
-        raise LocalityRefused(verdict, "the crawl")
+        raise LocalityRefused(verdict, "the site to crawl")
     return verdict.local_addresses
 
 
