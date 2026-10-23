@@ -276,21 +276,26 @@ class TargetManager:
         p_npu_vid = probe_data.get("NPU_VENDOR_ID", "").lower()
         p_cpu_arch = probe_data.get("ARCH", "").lower()
 
+        def value(hw: Dict[str, Any], part: str, key: str) -> str:
+            return str(_block(hw.get(part)).get(key) or '').lower()
+
         for tid, tdata in self._targets.items():
-            hw = tdata.get('hardware', {})
-            
+            # An empty block (`hardware:`, `cpu:`, `npu:` or `gpu:` with nothing under it: YAML reads null) or one that
+            # is no mapping is no block, as get_docker_flags_for_profile reads it (the Builder tab's probe import).
+            hw = _block(tdata.get('hardware'))
+
             # Check Arch
-            t_arch = hw.get('cpu', {}).get('architecture', '').lower()
+            t_arch = value(hw, 'cpu', 'architecture')
             if t_arch and t_arch != p_cpu_arch:
                 continue # Architektur passt nicht
 
             # Check NPU Match (Strong Signal)
-            t_npu_vid = hw.get('npu', {}).get('vendor_id', '').lower()
+            t_npu_vid = value(hw, 'npu', 'vendor_id')
             if t_npu_vid and p_npu_vid and t_npu_vid in p_npu_vid:
                 return tid
-            
+
             # Check GPU Match
-            t_gpu_vid = hw.get('gpu', {}).get('vendor_id', '').lower()
+            t_gpu_vid = value(hw, 'gpu', 'vendor_id')
             if t_gpu_vid and p_gpu_vid and t_gpu_vid in p_gpu_vid:
                 return tid
 

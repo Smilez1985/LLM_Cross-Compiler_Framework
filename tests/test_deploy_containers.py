@@ -334,3 +334,51 @@ def test_the_deployment_tab_opens_with_an_empty_hardware_block(qapp, empty_hardw
     win = TestDeploymentTab().window(empty_hardware, monkeypatch)
     win.cb_profiles.setCurrentIndex(win.cb_profiles.findText("Mine"))
     assert rows(win)[0][1:] == (True, rows(win)[0][2], "none (it runs on the CPU)")
+
+
+# --- the probe import's target suggestion reads the block the same way (stage C wave 3c, fix b) -------------------
+
+def matching(targets: dict, probe: dict):
+    from types import SimpleNamespace
+
+    from orchestrator.Core.target_manager import TargetManager
+    tm = TargetManager(SimpleNamespace(config=SimpleNamespace(targets_dir="targets"), resolve_path=Path))
+    tm._targets, tm._initialized = targets, True
+    return tm.find_matching_target(probe)
+
+
+FILLED = {"Rk": {"hardware": {"cpu": {"architecture": "AArch64"}, "npu": {"vendor_id": "0x1E60"}}},
+          "Nv": {"hardware": {"cpu": {"architecture": "x86_64"}, "gpu": {"vendor_id": "0x10de"}}},
+          "Any": {"hardware": {"gpu": {"vendor_id": "0x8086"}}}}
+
+
+@pytest.mark.parametrize("probe, found", [
+    ({"ARCH": "aarch64", "NPU_VENDOR_ID": "0x1e60"}, "Rk"),
+    ({"ARCH": "x86_64", "GPU_VENDOR_ID": "0x10DE"}, "Nv"),
+    ({"ARCH": "aarch64", "GPU_VENDOR_ID": "0x10de"}, None),        # the architecture does not fit
+    ({"ARCH": "riscv64", "GPU_VENDOR_ID": "0x8086"}, "Any"),       # a target without an architecture fits any
+    ({"ARCH": "x86_64"}, None),
+    ({}, None),
+])
+def test_the_target_suggestion_of_a_filled_hardware_block_stays(probe, found):
+    """Characterization (the probe import's suggestion, as before the empty-block fix): the architecture first, then
+    the NPU's and the GPU's vendor id."""
+    assert matching(FILLED, probe) == found
+
+
+@pytest.mark.parametrize("hardware", [None, "", [], {"cpu": None, "npu": None, "gpu": None},
+                                      {"cpu": {"architecture": None}, "npu": {"vendor_id": None}},
+                                      {"npu": "hailo"}])
+def test_an_empty_hardware_block_suggests_nothing_and_stops_nothing(hardware):
+    """The Builder tab's probe import asks find_matching_target for a target: an empty `hardware:`, `cpu:`, `npu:` or
+    `gpu:` block (YAML null, e.g. its lines commented out) or one that is no mapping is no block, as the container
+    flags read it (target_manager._block), and the other targets are still looked at."""
+    targets = {"Mine": {"hardware": hardware}, **FILLED}
+    assert matching(targets, {"ARCH": "aarch64", "NPU_VENDOR_ID": "0x1e60"}) == "Rk"
+    assert matching({"Mine": {"hardware": hardware}}, {"ARCH": "aarch64", "GPU_VENDOR_ID": "0x10de"}) is None
+
+
+def test_the_probe_import_suggests_a_target_next_to_an_empty_hardware_block(empty_hardware):
+    """The real targets of a target folder (one with its hardware lines commented out, one with empty npu and gpu
+    blocks): the suggestion runs through and finds nothing to match."""
+    assert empty_hardware.target_manager.find_matching_target({"ARCH": "aarch64", "NPU_VENDOR_ID": "0x1e60"}) is None
