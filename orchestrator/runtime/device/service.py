@@ -323,30 +323,36 @@ def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, 
            cancelled: Callable[[], bool] = lambda: False, say: Say = lambda _m: None, cancel: Any = None,
            on_event: Optional[Callable[[Any], None]] = None) -> Dict[str, Any]:
     """Builds (when needed) and installs the device runtime as the deploy settings say, checks the new build on the
-    device and activates it only when it passes: the same steps as `llm-cli device runtime deploy`
-    (steps.install_runtime saves the deployment's record). Over the board session: the upload resumes after a network
-    drop, the checks run again, and a step that must not run twice ends with the board's state named."""
+    device and activates it only when it passes: the one flow of `llm-cli device runtime deploy` and the Boards window
+    (steps.deploy_runtime_flow; steps.install_runtime saves the deployment's record), with this path's login only: the
+    trusted key, never a password, and no trusted record, question or benchmark (decision 2). Over the board session:
+    the upload resumes after a network drop, the checks run again, and a step that must not run twice ends with the
+    board's state named."""
     from orchestrator.remote.session import CancelToken
     from orchestrator.runtime.device import steps
-    from orchestrator.runtime.device.remote import RemoteError, RemoteShell
+    from orchestrator.runtime.device.remote import RemoteError
     cancel = cancel if cancel is not None else CancelToken(check=cancelled)
     builds, build, packaged = ensure_build(state_dir, device, profile, expect_build_id, cancelled=cancelled, say=say)
     source = pinned_source()
-    client = connect(device, state_dir, settings.ssh_user, expect_fingerprint, on_client, step="runtime_deploy",
-                     cancel=cancel, on_event=on_event)
-    try:
-        shell = RemoteShell(client)
+
+    def open_board():
+        session = connect(device, state_dir, settings.ssh_user, expect_fingerprint, on_client, step="runtime_deploy",
+                          cancel=cancel, on_event=on_event)
+        return session, getattr(session, "key", None)
+
+    def check_cancel() -> None:
         if cancelled():
             raise Stopped("The deploy")
-        try:
-            outcome = steps.install_runtime(shell, state_dir=state_dir, device_id=device.device_id, profile=profile,
-                                            settings=settings, build=build, packaged=packaged, source=source,
-                                            arch=str(build.plan.get("target", {}).get("arch") or profile.arch),
-                                            kv_cache=settings.kv_choice(profile).kind, say=say)
-        except RemoteError as e:
-            raise _session_failed(device, e, state_dir, "runtime_deploy", "The deploy", cancel) from None
-    finally:
-        client.close()
+
+    # the AI's hooks: its own login only; the root refusal stays deploy_runtime's (the device's words, as before)
+    hooks = steps.DeployHooks(open_board=open_board, progress=say, check_cancel=check_cancel, refuse_root=False)
+    try:
+        flow = steps.deploy_runtime_flow(state_dir, device.device_id, profile, settings, hooks=hooks, build=build,
+                                         packaged=packaged, source=source,
+                                         arch=str(build.plan.get("target", {}).get("arch") or profile.arch))
+    except RemoteError as e:
+        raise _session_failed(device, e, state_dir, "runtime_deploy", "The deploy", cancel) from None
+    outcome = flow.outcome
     result, report, ok = outcome.result, outcome.report, outcome.ok
     # every older build stays on the board (round 5 f): only their number reaches the caller, never their folders
     return {"activated": ok, "build_id": build.build_id, "install": settings.install, "previous": result.previous,

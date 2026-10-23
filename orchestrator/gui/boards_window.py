@@ -1203,7 +1203,6 @@ class BoardsWindow(QDialog):
 
     def deploy(self, entry: Dict[str, Any], profile: Any, user: Optional[str], password: Optional[str],
                bench_model: Optional[str]) -> None:
-        from orchestrator.runtime.build.store import BuildStore
         from orchestrator.runtime.device import person_steps, steps
         from orchestrator.runtime.device.settings import SettingsError
         settings = self._settings(entry)
@@ -1233,52 +1232,45 @@ class BoardsWindow(QDialog):
         def prepare():
             # the stored build is checked file by file and its package hashed: off the GUI thread, and before the
             # question about the benchmark model, so a board without a build is refused first
-            plan = steps.plan_runtime(profile)
-            builds = BuildStore(state)
-            build = builds.find(plan)
-            if build is None:
-                raise _Refusal(self._t("boards.deploy.not_built"))
             try:
-                devices, packaged = steps.ensure_package(state, device_id, builds, build, lambda: source)
+                return steps.stored_runtime(state, device_id, profile, lambda: source)
+            except steps.NotBuilt:
+                raise _Refusal(self._t("boards.deploy.not_built")) from None
             except steps.PackageNeedsSource:
                 raise _Refusal(self._t("boards.deploy.needs_source")) from None
-            return plan, build, devices, packaged
 
         def prepared(found: Any) -> None:
-            plan, build, devices, packaged = found
             self._start(self._t("boards.deploy.running"),
-                        lambda: work(plan, build, devices, packaged),
+                        lambda: work(found),
                         lambda out: self._deployed(entry, profile, settings, kv, out),
                         failed=lambda e: self._runtime_failed(e, host, port, settings.ssh_user, device_id))
 
-        def work(plan: Any, build: Any, devices: Any, packaged: Any):
-            client, key = person_steps.connect_stored(state, device_id, host, port, settings.ssh_user, password,
-                                                      step="runtime_deploy", on_client=self._keep_client,
-                                                      cancel=self._cancel, on_event=self._board_lines(host))
-            try:
-                person_steps.remember_board(state, host, port, settings.ssh_user, key, via="gui", audit=audit,
-                                            actor="gui")
-                from orchestrator.runtime.device.remote import RemoteShell, read_facts
-                shell = RemoteShell(client)
-                facts = read_facts(shell)
-                if facts.uid == 0:
-                    raise _Refusal(self._t("boards.deploy.root"))
-                # asked before anything changes on the board (decision D23), as the CLI asks it
-                bench = steps.choose_bench_model(
-                    shell, facts.home, bench_model, may_run_untrusted=self._may_run_untrusted(settings.ssh_user),
+        def work(found: Any):
+            # the one flow of the device runtime's deploy (steps.deploy_runtime_flow, also the CLI's and the AI's),
+            # with this window's login, the board's trust record, the CLI's question about an untrusted benchmark
+            # model (asked before anything changes on the board, decision D23) and its Cancel
+            hooks = steps.DeployHooks(
+                open_board=lambda: person_steps.connect_stored(state, device_id, host, port, settings.ssh_user,
+                                                               password, step="runtime_deploy",
+                                                               on_client=self._keep_client, cancel=self._cancel,
+                                                               on_event=self._board_lines(host)),
+                remember=lambda key: person_steps.remember_board(state, host, port, settings.ssh_user, key, via="gui",
+                                                                 audit=audit, actor="gui"),
+                choose_bench=lambda shell, home: steps.choose_bench_model(
+                    shell, home, bench_model, may_run_untrusted=self._may_run_untrusted(settings.ssh_user),
                     record_consent=lambda digest: person_steps.record_consent(
-                        audit, tool, {"device": device_id, "model_sha256": digest}, detail, channel="framework-gui"))
-                self._check_cancel()
-                outcome = steps.install_runtime(shell, state_dir=state, device_id=device_id, profile=profile,
-                                                settings=settings, build=build, packaged=packaged, source=source,
-                                                arch=str(plan.target["arch"]), kv_cache=kv.kind, bench=bench,
-                                                say=self._progress)
-            finally:
-                client.close()
-            older = steps.older_package_count(devices, build)
-            tested = self._record_tested_on(entry, profile, outcome.report, bench.digest if bench.allowed else None,
-                                            build.build_id, source, kv.kind) if outcome.ok else None
-            return build, bench, outcome, older, tested
+                        audit, tool, {"device": device_id, "model_sha256": digest}, detail, channel="framework-gui")),
+                tested_on=lambda report, digest, build_id, kind: self._record_tested_on(entry, profile, report, digest,
+                                                                                        build_id, source, kind),
+                progress=self._progress, check_cancel=self._check_cancel)
+            try:
+                flow = steps.deploy_runtime_flow(state, device_id, profile, settings, hooks=hooks, build=found.build,
+                                                 packaged=found.packaged, source=source,
+                                                 arch=str(found.plan.target["arch"]))
+            except steps.RootUser:
+                raise _Refusal(self._t("boards.deploy.root")) from None
+            older = steps.older_package_count(found.devices, found.build)
+            return found.build, flow.bench, flow.outcome, older, flow.tested
 
         self._start(self._t("boards.deploy.preparing"), prepare, prepared,
                     failed=lambda e: self._runtime_failed(e, host, port, settings.ssh_user, device_id))
