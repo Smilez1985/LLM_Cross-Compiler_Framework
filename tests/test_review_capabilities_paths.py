@@ -561,10 +561,11 @@ def make_cli(framework, tmp_path, monkeypatch):
             self.deployment_manager = deployment
             return self
 
-    def invoke(*args):
+    def invoke(*args, quiet=True):
+        """The command with -q (the default), or without it (quiet=False: what a person sees, e.g. a start panel)."""
         printed.seek(0)
         printed.truncate()
-        result = CliRunner().invoke(cli_module.cli, ["-q", *args], obj=Ctx())
+        result = CliRunner().invoke(cli_module.cli, ["-q", *args] if quiet else list(args), obj=Ctx())
         return SimpleNamespace(code=result.exit_code, out=printed.getvalue() + result.output,
                                exception=result.exception)
 

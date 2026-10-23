@@ -1377,7 +1377,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (`build_formats.offered_formats`, one list for both; a target without capabilities takes every format but `hf`,
   unchecked, as before). `--help` and the shell completion list what each installed target builds, read from the
   targets when they are shown; a format the target does not build stops with exit code 2 in plain words naming what
-  each installed target builds (`build_formats.format_problem`). The format is no longer case-sensitive.
+  each installed target builds (`build_formats.format_problem`). The format is no longer case-sensitive, and the
+  start panel names it as the target spells it, the format the build runs with (`-f RKLLM` shows `rkllm`), never
+  read as markup.
 - **"Use the existing build" copies it into the chosen folder, and `llm-cli build start` asks too** (DECISIONS round
   23 item 9): `build start` checks for a finished build with 100 % the same options before anything runs, as the
   Builder tab does (`BuildService.earlier_builds`, the commit looked up once when it could be identical), and asks the

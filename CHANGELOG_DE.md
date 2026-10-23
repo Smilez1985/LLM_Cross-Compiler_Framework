@@ -1565,7 +1565,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Format außer `hf`, ungeprüft). `--help` und die Shell-Vervollständigung nennen, was jedes installierte Target baut,
   gelesen aus den Targets, wenn sie gezeigt werden; ein Format, das das Target nicht baut, stoppt mit Exit-Code 2 in
   klaren Worten, die nennen, was jedes installierte Target baut (`build_formats.format_problem`). Groß- und
-  Kleinschreibung des Formats spielt keine Rolle mehr.
+  Kleinschreibung des Formats spielt keine Rolle mehr, und die Startübersicht nennt es so, wie das Target es
+  schreibt, das Format, mit dem der Build läuft (`-f RKLLM` zeigt `rkllm`), nie als Markup gelesen.
 - **„Den vorhandenen Build nehmen“ kopiert ihn in den gewählten Ordner, und `llm-cli build start` fragt auch**
   (DECISIONS Runde 23 Punkt 9): `build start` prüft vor allem anderen auf einen fertigen Build mit zu 100 % denselben
   Optionen, wie der Builder-Tab (`BuildService.earlier_builds`, der Commit einmal nachgeschlagen, wenn er gleich sein
