@@ -124,6 +124,11 @@ class BuildStatus(Enum):
     CANCELLED = "cancelled"
     CLEANING = "cleaning"
 
+# Offline mode with a llama.cpp repository override: the image build's proxy variables (Docker passes them on as
+# build arguments) are emptied, and nothing goes through a proxy (it would resolve the mirror's name itself).
+OFFLINE_NO_PROXY_ARGS = {"HTTP_PROXY": "", "HTTPS_PROXY": "", "ALL_PROXY": "", "http_proxy": "", "https_proxy": "",
+                         "all_proxy": "", "NO_PROXY": "*", "no_proxy": "*"}
+
 # ModelFormat and OptimizationLevel live in build_formats (the CLI imports them without this module).
 from orchestrator.Core.build_formats import ModelFormat, OptimizationLevel  # noqa: E402,F401 - re-exported
 
@@ -311,6 +316,8 @@ class BuildEngine:
         self._running: set = set()  # builds whose worker thread has not returned yet
         self._settled: set = set()  # builds whose outcome is fixed; a cancel comes too late for them
         self._build_images: Dict[str, str] = {}
+        # offline mode: the checked local addresses of the llama.cpp repository override per build (--add-host)
+        self._repo_hosts: Dict[str, List[str]] = {}
         self._records: Dict[str, Dict[str, Any]] = {}  # what each build's record says besides its progress
         self._executor = ThreadPoolExecutor(max_workers=self.max_concurrent_builds)
         
@@ -927,8 +934,11 @@ class BuildEngine:
 
             labels = {IMAGE_LABEL: config.target_arch}
             self._build_images[config.build_id] = tag
+            hosts = self._repo_hosts.pop(config.build_id, None)
+            if hosts is not None:   # offline mode with the override: no proxy, which would resolve the name itself
+                buildargs.update(OFFLINE_NO_PROXY_ARGS)
             if self._buildkit_available():
-                self._build_with_buildkit(tag, path, buildargs, progress, labels)
+                self._build_with_buildkit(tag, path, buildargs, progress, labels, **({"hosts": hosts} if hosts else {}))
             else:
                 resp = self.docker_client.api.build(
                     path=str(context),
@@ -936,7 +946,9 @@ class BuildEngine:
                     tag=tag,
                     buildargs=buildargs,
                     labels=labels,
-                    decode=True
+                    decode=True,
+                    **({"extra_hosts": [h.replace("=[", ":", 1)[:-1] if "=[" in h else h for h in hosts]}
+                       if hosts else {})
                 )
                 for chunk in resp:
                     if 'stream' in chunk:
@@ -1005,14 +1017,58 @@ class BuildEngine:
             return None
         from orchestrator.Core.settings_view import shown_repo_url, url_credential
         shown = shown_repo_url(url)
+        self._offline_idn_refusal(url)   # offline mode: an international name only in its xn-- form (round 26 g)
         if url_credential(url) or not LLAMA_REPO_URL.fullmatch(url):
             progress.add_warning(f"The llama.cpp repository override {shown} is not used for the image: only an https "
                                  "address without a user name, password, token or query is; the image fetches the "
                                  "pinned commit from upstream.")
             return None
+        self._offline_repo_hosts(url, progress)   # offline mode: only from the own network, pinned
         progress.add_log(f"llama.cpp source: the pinned commit from the repository override {shown} (the image "
                          "checks that it is the pinned commit).")
         return url
+
+    def _offline_idn_refusal(self, url: str) -> None:
+        """Offline mode: an override whose host is an international name stops the build with the plain text that asks
+        for its xn-- form (runtime/build/source.idn_refusal), before the address check would fall back to upstream."""
+        from orchestrator.utils.locality import offline_mode
+        if not offline_mode(self.config):
+            return
+        from urllib.parse import urlsplit
+
+        from orchestrator.runtime.build.source import idn_refusal
+        try:
+            host = urlsplit(url).hostname or ""
+        except ValueError:
+            return
+        refused = idn_refusal(host, "the llama.cpp repository override (LLAMA_CPP_REPO_OVERRIDE)")
+        if refused:
+            raise RuntimeError(refused)
+
+    def _offline_repo_hosts(self, url: str, progress: BuildProgress) -> None:
+        """Offline mode (round 24 L-NET, round 26 f): the llama.cpp repository override must be a mirror in the person's
+        own network, judged and pinned as the pinned source from a mirror is (runtime/build/source.offline_reach: the
+        locality rule with the opt-outs, an international name only in its xn-- form); a refusal stops the build with
+        the plain text. The image build then resolves the mirror's name only to its checked local addresses (--add-host,
+        extra_hosts) and gets no proxy (OFFLINE_NO_PROXY_ARGS). Online nothing changes."""
+        from orchestrator.utils.locality import offline_mode
+        if not offline_mode(self.config):
+            return
+        from orchestrator.runtime.build.source import SourceError, offline_reach
+        try:
+            pin = offline_reach(url, self.config, "the llama.cpp repository override (LLAMA_CPP_REPO_OVERRIDE)")
+        except SourceError as e:
+            raise RuntimeError(str(e)) from None
+        hosts: List[str] = []
+        if pin:   # "HOST:PORT:ADDRESS[,ADDRESS...]", a name (an address needs no pin)
+            host, _port, addresses = pin.split(":", 2)
+            for name in dict.fromkeys((host, host.rstrip("."))):
+                for address in addresses.split(","):
+                    address = address.strip("[]")
+                    hosts.append(f"{name}=[{address}]" if ":" in address else f"{name}:{address}")
+        self._repo_hosts[progress.build_id] = hosts
+        progress.add_log("Offline mode: the image fetches the pinned llama.cpp commit only from the checked local "
+                         "addresses of the repository override, through no proxy.")
 
     def _build_host_profile(self, progress: BuildProgress) -> Tuple[Any, str]:
         """(profile, reason when there is none) of the machine whose CPU runs the image: a probe now (a fraction of a
@@ -1057,8 +1113,11 @@ class BuildEngine:
             return False
 
     def _build_with_buildkit(self, tag: str, dockerfile: Path, buildargs: Dict[str, str], progress: BuildProgress,
-                             labels: Optional[Dict[str, str]] = None):
+                             labels: Optional[Dict[str, str]] = None, hosts: Optional[List[str]] = None):
+        """`hosts`: --add-host entries (offline mode: the checked local addresses of the llama.cpp mirror)."""
         cmd = ["docker", "buildx", "build", "--load", "--progress=plain", "-t", tag, "-f", str(dockerfile)]
+        for entry in hosts or ():
+            cmd += ["--add-host", entry]
         for key, value in buildargs.items():
             cmd += ["--build-arg", f"{key}={value}"]
         for key, value in (labels or {}).items():
