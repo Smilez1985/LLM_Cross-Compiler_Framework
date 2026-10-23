@@ -183,6 +183,7 @@ $Features = [ordered]@{
 }
 
 $P_Version = '^[0-9]{1,5}(\.[0-9]{1,6}){0,3}$'
+$P_Dotted = '^[0-9]{1,3}(\.[0-9]{1,4}){1,3}$'
 
 # --- native calls ------------------------------------------------------------------------------------------------
 $NativeCode = @"
@@ -392,14 +393,139 @@ if ($diskPath) {
     } catch { }
 }
 
+# --- Hailo (HAILO_PLAN.md 2.4: the PnP ids and hailortcli on PATH, with the rules of hardware_probe.py) ----------
+# Tables: copies of configs/hardware_probe_schema.yml (tests compare them). hailortcli runs with fixed arguments and an
+# empty stdin: -v, scan, fw-control identify -s <id> for up to 16 devices (never --extended); of identify only the
+# architecture and firmware lines are read. The Linux-only driver keys and the pip version are not written here.
+$HailoArchNames = @{ 'HAILO8' = 'hailo8'; 'HAILO8_B0' = 'hailo8'; 'HAILO8L' = 'hailo8l'; 'HAILO10H' = 'hailo10h'; 'HAILO15H' = 'hailo15h'; 'HAILO15M' = 'hailo15m'; 'HAILO15L' = 'hailo15l'; 'HAILO12L' = 'hailo12l'; 'MARS' = 'hailo12l' }
+$HailoArchFamily = @{ 'hailo8' = 'hailo8'; 'hailo8l' = 'hailo8'; 'hailo10h' = 'hailo1x'; 'hailo15h' = 'hailo1x'; 'hailo15m' = 'hailo1x'; 'hailo15l' = 'hailo1x'; 'hailo12l' = 'hailo1x' }
+$HailoPciDevices = @{ '0x1e60:0x2864' = 'hailo8'; '0x1e60:0x45c4' = 'hailo1x'; '0x1e60:0x43a2' = 'hailo1x'; '0x1e60:0x26a2' = 'hailo1x' }
+$HailoUsbDevices = @{ '0x0b05:0x1d6f' = 'hailo10h' }
+$HailoIdPattern = '^(\[integrated\]|usb/[0-9]{3}:[0-9]{3}|(pci/)?([0-9a-fA-F]{4}:)?[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7])$'
+
+function Hailo-Interface([string]$Id) {
+    if ($Id -ceq '[integrated]') { return 'integrated' }
+    if ($Id.StartsWith('usb/')) { return 'usb' }
+    return 'pcie'
+}
+
+function Distinct-List($Items) {
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($item in $Items) { if ($null -ne $item -and -not $out.Contains([string]$item)) { $out.Add([string]$item) } }
+    return ,$out
+}
+
+$hailoFamilies = New-Object System.Collections.Generic.List[string]
+$hailoPci = 0; $hailoUsb = 0; $hailoUsbArch = $null
+foreach ($id in @($ids | Sort-Object)) {
+    $parts = ([string]$id).Split(':')
+    if ($parts.Count -ne 3) { continue }
+    $pair = '0x' + $parts[1] + ':0x' + $parts[2]
+    if ($parts[0] -eq 'pci' -and $parts[1] -eq '1e60') {
+        $hailoPci++
+        if ($HailoPciDevices.ContainsKey($pair)) { $hailoFamilies.Add($HailoPciDevices[$pair]) }
+    }
+    if ($parts[0] -eq 'usb' -and $HailoUsbDevices.ContainsKey($pair)) {
+        $hailoUsb++
+        $hailoUsbArch = $HailoUsbDevices[$pair]
+        $hailoFamilies.Add($HailoArchFamily[$hailoUsbArch])
+    }
+}
+$hailoInstalled = $false; $hailoWarn = $null; $hailoVersion = $null; $hailoIds = $null
+$hailoRecords = New-Object System.Collections.ArrayList
+$hailoClock = [Diagnostics.Stopwatch]::StartNew()
+$result = Invoke-Tool 'hailortcli' @('-v')
+if ($null -ne $result) {
+    $hailoInstalled = $true
+    $text = [string]$result.Out + "`n" + [string]$result.Err
+    $versionText = $null
+    if ($text -cmatch 'HailoRT-CLI version ([0-9]+\.[0-9]+\.[0-9]+)') { $versionText = $Matches[1] }
+    if ($text -cmatch 'libhailort version \(([0-9.]+)\) does not match HailoRT-CLI version \(([0-9.]+)\)') { $hailoWarn = 'version_mismatch' }
+    elseif ($result.Code -ne 0) { if ($versionText) { $hailoWarn = 'not_determined' } else { $hailoWarn = 'version_mismatch' } }
+    elseif ($versionText -and $versionText -cmatch $P_Dotted) { $hailoVersion = $versionText }
+    else { $hailoWarn = 'not_determined' }
+    if ($hailoWarn -ne 'version_mismatch') {
+        $result = Invoke-Tool 'hailortcli' @('scan')
+        if ($null -ne $result -and $result.Code -eq 0) {
+            $found = @([regex]::Matches([string]$result.Out, '(?m)^\s*\[-\]\s*Device:\s*(\S+)\s*$') | ForEach-Object { $_.Groups[1].Value })
+            if ($found.Count -gt 0 -or ([string]$result.Out).Contains('Hailo devices not found')) {
+                $hailoIds = New-Object System.Collections.Generic.List[string]
+                foreach ($d in $found) { if ($d -cmatch $HailoIdPattern -and -not $hailoIds.Contains($d)) { $hailoIds.Add($d) } }
+            }
+        }
+        if ($null -ne $hailoIds) {
+            foreach ($d in @($hailoIds | Select-Object -First 16)) {
+                if ($hailoClock.Elapsed.TotalSeconds -ge 60) { break }
+                $result = Invoke-Tool 'hailortcli' @('fw-control', 'identify', '-s', $d)
+                if ($null -eq $result) { break }   # it did not answer: no further device is asked
+                if ($result.Code -ne 0) { continue }
+                $clean = ([string]$result.Out).Replace([string][char]0, '')
+                $word = $null; $fw = $null
+                if ($clean -cmatch '(?m)^\s*Device Architecture\s*:\s*([A-Za-z0-9_]+)\s*$') { $word = $Matches[1].ToUpperInvariant() }
+                if ($clean -cmatch '(?m)^\s*Firmware Version\s*:\s*([0-9][0-9.]*)') { $fw = $Matches[1]; if ($fw -cnotmatch $P_Dotted) { $fw = $null } }
+                if ($word) { [void]$hailoRecords.Add(@($d, $word, $fw)) }
+            }
+        }
+    }
+}
+$hailoPresent = ($hailoPci -gt 0) -or ($hailoUsb -gt 0) -or ($null -ne $hailoIds -and $hailoIds.Count -gt 0)
+if ($hailoVersion) { Put 'HAILORT_VERSION' $hailoVersion $P_Dotted }
+elseif ($hailoWarn -eq 'version_mismatch') { Add-Warning 'version_mismatch:HAILORT_VERSION' }
+elseif ($hailoWarn) { Add-Warning 'not_determined:HAILORT_VERSION' }
+$hailoArchs = New-Object System.Collections.Generic.List[string]
+$hailoFws = New-Object System.Collections.Generic.List[string]
+$hailoUnknown = $false
+foreach ($record in $hailoRecords) {
+    if (-not $HailoArchNames.ContainsKey($record[1])) { $hailoUnknown = $true; continue }
+    $arch = $HailoArchNames[$record[1]]
+    if ($arch -eq 'hailo15h' -and (Hailo-Interface $record[0]) -ne 'integrated') { $arch = 'hailo10h' }
+    $hailoArchs.Add($arch)
+    if ($record[2]) { $hailoFws.Add($record[2]) }
+}
+$hailoArchs = Distinct-List $hailoArchs
+$hailoFws = Distinct-List $hailoFws
+$hailoArch = $null
+if ($hailoArchs.Count -gt 1 -or $hailoUnknown) { Add-Warning 'not_determined:HAILO_ARCH' }
+elseif ($hailoArchs.Count -eq 1) { $hailoArch = $hailoArchs[0] }
+elseif ($hailoUsbArch -and $hailoPci -eq 0 -and $hailoRecords.Count -eq 0) { $hailoArch = $hailoUsbArch }
+$families = @()
+if ($hailoArch) { $families += $HailoArchFamily[$hailoArch] }
+$families = Distinct-List ($families + @($hailoFamilies))
+$hailoFamily = $null
+if ($families.Count -eq 1) { $hailoFamily = $families[0] }
+$hailoConflict = $families.Count -gt 1
+if ($hailoConflict) { $hailoArch = $null; Add-Warning 'not_determined:HAILO_FAMILY' }
+if ($hailoPresent -and -not $hailoArch -and -not $hailoConflict -and $hailoWarn -ne 'version_mismatch') { Add-Warning 'not_determined:HAILO_ARCH' }
+if ($hailoFws.Count -eq 1) { Put 'HAILO_FW_VERSION' $hailoFws[0] $P_Dotted }
+elseif ($hailoFws.Count -gt 1) { Add-Warning 'not_determined:HAILO_FW_VERSION' }
+if ($null -ne $hailoIds -and $hailoIds.Count -gt 0) { $interfaces = Distinct-List @($hailoIds | ForEach-Object { Hailo-Interface $_ }) }
+else {
+    $interfaces = @()
+    if ($hailoPci -gt 0) { $interfaces += 'pcie' }
+    if ($hailoUsb -gt 0) { $interfaces += 'usb' }
+}
+if (@($interfaces).Count -eq 1) { Put 'HAILO_INTERFACE' @($interfaces)[0] }
+elseif (@($interfaces).Count -gt 1) { Add-Warning 'not_determined:HAILO_INTERFACE' }
+$hailoCount = $null
+if ($null -ne $hailoIds -and $hailoIds.Count -gt 0) { $hailoCount = $hailoIds.Count }
+elseif ($hailoPresent) { $hailoCount = $hailoPci + $hailoUsb }
+elseif ($null -ne $hailoIds) { $hailoCount = 0 }
+if ($null -ne $hailoCount) {
+    if ($hailoCount -le 64) { Put 'HAILO_DEVICES' ([string]$hailoCount) } else { Add-Warning 'not_determined:HAILO_DEVICES' }
+} elseif ($hailoInstalled -and $hailoWarn -ne 'version_mismatch') { Add-Warning 'not_determined:HAILO_DEVICES' }
+if ($hailoFamily) { Put 'HAILO_FAMILY' $hailoFamily }
+if ($hailoArch) { Put 'HAILO_ARCH' $hailoArch }
+$hailoModel = $null
+if ($hailoArch) { $hailoModel = 'hailo-' + $hailoArch.Substring(5) }
+
 # --- NPU and USB-attached boards (a board attached over USB is not this machine's NPU) -------------------------
 $pciVendors = @($ids | Where-Object { $_ -like 'pci:*' } | ForEach-Object { $_.Split(':')[1] })
-$hailo = $pciVendors -contains '1e60'
+$hailo = $hailoPresent
 $metis = $pciVendors -contains '1f4b'
 $mx3 = $pciVendors -contains '1d6b'
 $coral = ($ids -contains 'pci:1ac1:089a') -or ($ids -contains 'usb:1a6e:089a') -or ($ids -contains 'usb:18d1:9302')
 $npuVendor = $null; $npuModel = $null
-if ($hailo) { $npuVendor = 'hailo' }
+if ($hailo) { $npuVendor = 'hailo'; $npuModel = $hailoModel }
 elseif ($metis) { $npuVendor = 'axelera' }
 elseif ($mx3) { $npuVendor = 'memryx' }
 elseif ($coral) { $npuVendor = 'google' }

@@ -1,0 +1,9 @@
+Executing on device: 0000:01:00.0
+Identifying board
+Control Protocol Version: 2
+Firmware Version: 4.24.0 (release,app,extended context switch buffer)
+Logger Version: 0
+Device Architecture: Unknown
+Serial Number: c0ffee00deadbeef
+Part Number: MADE-UP-PART-2
+Product Name: MADE-UP PRODUCT NAME

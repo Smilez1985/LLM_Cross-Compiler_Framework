@@ -1,0 +1,10 @@
+(hailo) Running command 'fw-control' with 'hailortcli'
+Identifying board
+Control Protocol Version: 2
+Firmware Version: 4.6.0 (release,app)
+Logger Version: 0
+Board Name: Hailo-10H
+Device Architecture: HAILO10H
+Serial Number: c0ffee00deadbeef
+Part Number: MADE-UP-PART-1
+Product Name: Hailo-10H AI ACCELERATOR M.2 MODULE

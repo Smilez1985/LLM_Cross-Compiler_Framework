@@ -1,0 +1,3 @@
+Hailo Devices:
+[-] Device: 0000:01:00.0
+[-] Device: 0000:03:00.0
