@@ -1551,7 +1551,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Sitzung beendet ihr Warten. Die Board-Schritte der Person, `scan --device` und Mojo fragen
   `remote.transport.available()`, ob SSH geht, und die Meldungen der GUI für ein Problem auf diesem Computer
   (local_problem) nennen jetzt auch, was dort fehlschlug (die Worte des Systems und den Namen der Datei, nie ihren
-  Ordner oder ein Konto).
+  Ordner oder ein Konto). Wie bisher bleibt (Review der Kette): Ein Befehl, der stumm bleibt, während seine
+  Verbindung noch antwortet (`exit 0` darauf), ist auf dem Board beschäftigt, nicht abgeschnitten; seine Zeitgrenze
+  beendet ihn also sofort mit „no answer from the device within N s“, ohne zweite Anmeldung, ohne zweiten Lauf auf dem
+  Board und ohne Zeile, dass das Netz abbrach. Das Archiv wird unter umask 077 angelegt, bevor der SFTP-Upload
+  hineinschreibt, gehört also wie bei `umask 077 && cat >` nur dem Benutzer. Ein Abbruch genau dann, wenn das
+  Deployment fragt, ob das Board SFTP hat, wartet auf das Board und lädt über SFTP hoch, statt das Deployment zu
+  beenden. Und die Sätze der Board-Sitzung, die eine KI als externen Text bekommt, nennen das Board mit seinem Label,
+  nie mit seiner Adresse (D0).
 - **Ein Datei-Hash und ein Disk-Watchdog** (Architektur-Konsolidierung c1-hashing und c1-disk, Regel R0 des Maintainers:
   zuerst die vorhandene Implementierung). Die 24 Kopien des sha256 einer Datei (15 benannte Helfer, 9 Schleifen; die
   Schleife von `utils/network.py` ist mit diesem Modul gegangen, siehe unten) laufen über das Modul der ältesten,
