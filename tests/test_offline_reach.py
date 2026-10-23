@@ -251,3 +251,182 @@ def test_runtime_downloads_in_offline_mode_reach_only_the_own_network(names, tmp
     framework = SimpleNamespace(config=SimpleNamespace(user_state_dir=tmp_path / "s", get=lambda k, d=None: d),
                                 resolve_path=lambda p: tmp_path / p)
     assert LocalLLMRuntime.from_framework(framework).settings is framework.config
+
+
+# --- review offline-lan-v: the connection goes to a checked address, and to every one of them ---------------------
+
+def spy_backend(http):
+    """The hosts the pinned client's own network backend is asked to connect to (after the locality check)."""
+    backend = http._transport._pool._network_backend
+    inner, asked = backend._inner, []
+
+    class Spy:
+        def connect_tcp(self, host, port, **kwargs):
+            asked.append(host)
+            return inner.connect_tcp(host, port, **kwargs)
+
+        def sleep(self, seconds):
+            inner.sleep(seconds)
+    backend._inner = Spy()
+    return asked
+
+
+def test_the_offline_client_tries_every_checked_address(names, server):
+    """A name with an IPv6 and an IPv4 address in the own network (a home router hands out both) and a server that
+    listens on IPv4 only (Ollama with OLLAMA_HOST=0.0.0.0): the system's own connection tries the next address, the
+    pinned client gave up after the first one."""
+    from orchestrator.llm.client import offline_http_client
+    port, seen = server
+    names["box.lan"] = ["::1", "127.0.0.1"]
+    http = offline_http_client(Settings(offline_mode=True))
+    asked = spy_backend(http)
+    assert http.get(f"http://box.lan:{port}/v1/models", timeout=10).status_code == 200
+    assert asked == ["::1", "127.0.0.1"] and seen == [f"box.lan:{port}"]
+
+
+def test_the_offline_client_pins_localhost_names_too(names, server):
+    """*.localhost and localhost. are this computer by the rule (no lookup), but a system with `hosts: files dns`
+    asks the DNS server for them: the pinned client handed such a name to the system resolver, so the answer of a DNS
+    server decided where the prompts went in offline mode. It connects to the loopback addresses instead."""
+    from orchestrator.llm.client import offline_http_client
+    port, seen = server
+    http = offline_http_client(Settings(offline_mode=True))
+    asked = spy_backend(http)
+    assert http.get(f"http://box.localhost:{port}/v1/models", timeout=10).status_code == 200
+    assert asked == ["127.0.0.1"] and seen == [f"box.localhost:{port}"]
+
+
+def test_the_local_only_session_tries_every_checked_address(names, server):
+    from orchestrator.security.http import local_only_session
+    port, seen = server
+    names["models.lan"] = ["::1", "127.0.0.1"]
+    session = local_only_session(Settings(offline_mode=True))
+    assert session.get(f"http://models.lan:{port}/model.gguf", timeout=10).status_code == 200
+    assert seen == [f"models.lan:{port}"]
+
+
+def test_the_mirror_pin_names_every_checked_address_and_the_host_as_git_spells_it(names):
+    """curl matches http.curloptResolve by the host as the URL spells it: a trailing dot made curl look the name up
+    itself (the pin did not apply). Every checked address is pinned (curl tries them in turn), and a literal address
+    needs no pin (curl cannot parse an IPv6 one there: the fetch failed)."""
+    from orchestrator.runtime.build.source import offline_reach
+    offline = Settings(offline_mode=True)
+    names.update({"mirror.lan": ["fd00::5", "192.168.1.5"]})
+    assert offline_reach("https://mirror.lan/llama.cpp.git", offline) == "mirror.lan:443:[fd00::5],192.168.1.5"
+    assert offline_reach("https://mirror.lan.:8443/llama.cpp.git", offline) == \
+        "mirror.lan.:8443:[fd00::5],192.168.1.5"
+    assert offline_reach("https://[fd00::5]:8443/llama.cpp.git", offline) is None
+    assert offline_reach("https://192.168.1.5/llama.cpp.git", offline) is None
+
+
+def test_git_in_offline_mode_uses_no_proxy_and_follows_no_redirect(monkeypatch):
+    """In offline mode git reaches the mirror directly: no proxy from the environment (it would receive the request
+    and resolve the name itself) and no redirect to a host nobody checked."""
+    import subprocess
+    from orchestrator.runtime.build import source as src
+    for var in ("HTTPS_PROXY", "https_proxy", "ALL_PROXY", "http_proxy"):
+        monkeypatch.setenv(var, "http://proxy.example:3128")
+    runs = []
+
+    def runner(argv, **kwargs):
+        runs.append((argv, kwargs["env"]))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+    git = src.Git(runner=runner, git="git")
+    git(["fetch", "https://mirror.lan/x"], resolve="mirror.lan:443:192.168.1.5")
+    git(["fetch", "https://192.168.1.5/x"], offline=True)
+    for argv, env in runs:
+        assert "http.proxy=" in argv and "http.followRedirects=false" in argv, argv
+        assert not [k for k in env if k.lower().endswith("_proxy")], env
+    git(["fetch", "https://github.com/x"])
+    argv, env = runs[-1]
+    assert "http.proxy=" not in argv and "http.followRedirects=false" not in argv, "online: as before"
+    assert env.get("HTTPS_PROXY") == "http://proxy.example:3128"
+
+
+def real_fetch_source():
+    """fetch_source behind the conftest guard (no test fetches from the network; these reach only 127.0.0.1)."""
+    from orchestrator.runtime.build import source as src
+    return next(c.cell_contents for c in src.fetch_source.__closure__ or ()
+                if getattr(c.cell_contents, "__name__", "") == "fetch_source")
+
+
+def test_fetch_source_in_offline_mode_gives_git_the_offline_options_also_for_an_address(tmp_path, monkeypatch):
+    from orchestrator.runtime.build import source as src
+    calls = []
+
+    def git(args, **kwargs):
+        calls.append(kwargs)
+        raise src.SourceError("stop after the fetch call")
+    pin = SimpleNamespace(repo="https://github.com/ggml-org/llama.cpp", commit="a" * 40, tag="b1")
+    monkeypatch.setattr(src, "cached_source", lambda *a, **k: None)
+    monkeypatch.setattr(src, "_init", lambda staging, g: None)
+    with pytest.raises(src.SourceError):
+        real_fetch_source()(pin, tmp_path, url="https://[fd00::5]:8443/llama.cpp.git", git=git,
+                            settings=Settings(offline_mode=True))
+    assert calls and calls[0].get("offline") is True and not calls[0].get("resolve")
+
+
+@pytest.fixture
+def listeners():
+    """TCP listeners on 127.0.0.1 that record every connection (the first bytes each one sent)."""
+    import socket
+    made = []
+
+    def listener():
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(4)
+        sock.settimeout(0.2)
+        got, stop = [], threading.Event()
+
+        def serve():
+            while not stop.is_set():
+                try:
+                    conn, _ = sock.accept()
+                except OSError:
+                    continue
+                conn.settimeout(2)
+                try:
+                    got.append(conn.recv(200))
+                except OSError:
+                    got.append(b"")
+                conn.close()
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        made.append((sock, stop, thread))
+        return sock.getsockname()[1], got
+    yield listener
+    for sock, stop, thread in made:
+        stop.set()
+        thread.join(2)
+        sock.close()
+
+
+def test_a_real_fetch_in_offline_mode_goes_to_the_checked_address_not_to_the_proxy(names, tmp_path, monkeypatch,
+                                                                                  listeners):
+    """The real git: with HTTPS_PROXY set it sent `CONNECT mirror.lan:PORT` to the proxy (the pin applies only to a
+    connection git makes itself), and a trailing dot in the URL made curl resolve the name on its own. Now git
+    connects to the checked address of the mirror and nowhere else."""
+    import shutil
+    import subprocess
+    from orchestrator.runtime.build import source as src
+    if not shutil.which("git"):
+        pytest.skip("git is not installed")
+    version = subprocess.run(["git", "--version"], capture_output=True, text=True).stdout.split()[-1]
+    if tuple(int(p) for p in version.split(".")[:2] if p.isdigit()) < (2, 37):
+        pytest.skip("git older than 2.37 has no http.curloptResolve")
+    proxy_port, via_proxy = listeners()
+    mirror_port, direct = listeners()
+    for var in ("HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.setenv(var, f"http://127.0.0.1:{proxy_port}")
+    for var in ("NO_PROXY", "no_proxy"):
+        monkeypatch.setenv(var, "")
+    names["mirror.lan"] = ["127.0.0.1"]
+    pin = SimpleNamespace(repo="https://github.com/ggml-org/llama.cpp", commit="a" * 40, tag="b1")
+    for url in (f"https://mirror.lan:{mirror_port}/llama.cpp.git",
+                f"https://mirror.lan.:{mirror_port}/llama.cpp.git"):
+        before = len(direct)
+        with pytest.raises(src.SourceError):   # the listener speaks no TLS
+            real_fetch_source()(pin, tmp_path / "state", url=url, settings=Settings(offline_mode=True))
+        assert via_proxy == [], f"nothing went to the proxy ({url})"
+        assert len(direct) > before, f"git connected to the checked address of the mirror ({url})"

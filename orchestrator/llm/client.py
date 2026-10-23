@@ -70,24 +70,31 @@ def is_loopback_url(url: Optional[str]) -> bool:
 
 def offline_http_client(config: Any):
     """The SDK client of offline mode (openai_compat servers: Ollama, the managed local model, a custom server): no
-    proxy from the environment, and every connection goes to the address the network-locality rule checked for its
-    host (utils/locality.connect_address, from the run's cache, so a DNS answer that changes after the check cannot
-    reach a public host, also not through a redirect). A host that is not local is refused when the connection is
-    opened (LocalityRefused, which map_openai_error turns into the plain refusal). localhost names stay as they are
-    (the system answers them itself, never a DNS server)."""
+    proxy from the environment, and every connection goes only to the addresses the network-locality rule checked
+    for its host (utils/locality.connect_addresses, from the run's cache, so a DNS answer that changes after the check
+    cannot reach a public host, also not through a redirect), tried in turn as the system's own connection would (a
+    name with an IPv6 and an IPv4 address in the own network, a server that listens on one of them only). A
+    localhost name goes to the loopback addresses: a system that asks a DNS server for *.localhost never decides
+    where it goes. A host that is not local is refused when the connection is opened (LocalityRefused, which
+    map_openai_error turns into the plain refusal)."""
     import httpcore2
     import httpx2
     import openai
-    from orchestrator.utils.locality import connect_address, is_localhost_name
+    from orchestrator.utils.locality import connect_addresses
 
     class PinnedBackend(httpcore2.NetworkBackend):
         def __init__(self, inner):
             self._inner = inner
 
         def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
-            address = host if is_localhost_name(host) else connect_address(host, config, "the AI provider's server")
-            return self._inner.connect_tcp(address, port, timeout=timeout, local_address=local_address,
-                                           socket_options=socket_options)
+            failed = None
+            for address in connect_addresses(host, config, "the AI provider's server"):
+                try:
+                    return self._inner.connect_tcp(address, port, timeout=timeout, local_address=local_address,
+                                                   socket_options=socket_options)
+                except (httpcore2.ConnectError, httpcore2.ConnectTimeout) as e:   # the next checked address
+                    failed = e
+            raise failed
 
         def connect_unix_socket(self, path, timeout=None, socket_options=None):  # pragma: no cover - never used
             raise PermissionError("offline mode connects to checked network addresses only")

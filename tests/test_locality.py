@@ -29,6 +29,9 @@ from orchestrator.utils.locality import (
     offline_mode,
     tailscale_vpn,
 )
+# the real resolver and CLI runners, taken before the fixtures replace them (their own tests stub what they call)
+from orchestrator.utils.locality import _run_cli as REAL_RUN_CLI  # noqa: E402
+from orchestrator.utils.locality import _system_lookup as REAL_LOOKUP  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -317,3 +320,68 @@ def test_the_refusal_names_the_host_why_and_the_opt_out():
 
 def test_offline_mode_is_the_helper_here_too():
     assert offline_mode({"offline_mode": True}) and not offline_mode({})
+
+
+# --- review offline-lan-v ------------------------------------------------------------------------------------------
+
+def test_a_link_local_address_keeps_its_zone(monkeypatch):
+    """getaddrinfo gives the zone of a link-local IPv6 address (an mDNS .local name on macOS or Windows) as the scope
+    id, not in the text: without it a connection to fe80::... fails, so the checked address keeps it."""
+    import socket
+    infos = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("fe80::1", 0, 0, 3)),
+             (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.5", 0)),
+             (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("fd00::5", 0, 0, 0))]
+    monkeypatch.setattr(locality.socket, "getaddrinfo", lambda *a, **k: infos)
+    assert REAL_LOOKUP("box.local") == ["fe80::1%3", "192.168.1.5", "fd00::5"]
+    from orchestrator.utils.locality import connect_addresses
+    monkeypatch.setattr(locality, "_system_lookup", REAL_LOOKUP)
+    verdict = check_host("box.local")
+    assert verdict.local and verdict.reason == "own_network" and verdict.address == "fe80::1%3"
+    assert connect_addresses("box.local") == ("fe80::1%3", "192.168.1.5", "fd00::5"), "every checked address"
+    assert check_host("fe80::1%3").address == "fe80::1%3" and check_url("http://[fe80::1%253]:80/").local
+    with pytest.raises(LocalityRefused):
+        connect_addresses("8.8.8.8")
+
+
+def test_a_bare_ipv6_address_is_a_host_too():
+    """`llmcf config local-network --check fd00::1` and the window's check field: a bare IPv6 address was read as a
+    URL without a host ("there is no server address")."""
+    assert locality.url_host("fd00::1") == ("fd00::1", None)
+    assert check_url("fd00::1").local and check_url("::ffff:192.168.1.5").local
+    assert check_url("2001:db8::1").reason == "public"
+
+
+def test_a_vpn_address_is_checked_in_a_worker_first(monkeypatch):
+    """A literal Tailscale address needs the VPN check, which never runs on the GUI thread: the window has to check
+    it in a worker first, as it does for a name (needs_lookup), or its save is refused as "not checked yet"."""
+    monkeypatch.setattr(locality.shutil, "which", which)
+    monkeypatch.setattr(locality, "_run_cli", cli(HEADSCALE, derp_map({"HostName": "192.168.1.3"})))
+    monkeypatch.setattr(locality, "_system_lookup", lambda host: {"headscale.lan": ["192.168.1.2"]}[host])
+    locality.mark_ui_thread()
+    url = "http://100.64.0.5:8000/v1"
+    assert needs_lookup(url) and label(url) is None
+    assert not needs_lookup("http://192.168.1.5:8000/v1")
+    worker = threading.Thread(target=check_url, args=(url,))
+    worker.start()
+    worker.join()
+    assert not needs_lookup(url) and label(url) is True and check_url(url).reason == "own_vpn"
+
+
+def test_the_tailscale_command_runs_as_every_helper_command(monkeypatch):
+    """Through utils/helpers.execute_command (R0): no console window on Windows when the GUI starts it, stdin closed,
+    output decoded with replacement characters; a failure raises, which the check reads as "unreadable"."""
+    from orchestrator.utils import helpers
+    seen = []
+
+    def execute(command, cwd=None, timeout=None, env=None):
+        seen.append((list(command), timeout))
+        return 0, '{"ControlURL": ""}', ""
+    monkeypatch.setattr(helpers, "execute_command", execute)
+    assert REAL_RUN_CLI(["/no/such/tailscale", "debug", "prefs"]) == '{"ControlURL": ""}'
+    assert seen == [(["/no/such/tailscale", "debug", "prefs"], locality.CLI_TIMEOUT)]
+    monkeypatch.setattr(helpers, "execute_command", lambda *a, **k: (1, "", "access denied"))
+    with pytest.raises(subprocess.CalledProcessError):
+        REAL_RUN_CLI(["/no/such/tailscale", "debug", "prefs"])
+    monkeypatch.setattr(helpers, "execute_command", lambda *a, **k: (-1, "", "timed out"))
+    with pytest.raises(subprocess.SubprocessError):
+        REAL_RUN_CLI(["/no/such/tailscale", "debug", "prefs"])

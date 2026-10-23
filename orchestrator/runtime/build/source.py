@@ -20,9 +20,10 @@ no credential helpers or prompts, and only the https transport (plus local files
 
 Offline mode (fetch_source and export_source with `settings`; DECISIONS round 24 L-NET): a network repository is
 fetched only from the person's own network (a local mirror), judged by the one network-locality rule
-(utils/locality.py, with the person's opt-outs), and git connects to exactly the address that was checked
-(http.curloptResolve, git 2.37 or newer), so a DNS answer that changes in between cannot reach a public host. A local
-file or path needs no network.
+(utils/locality.py, with the person's opt-outs), and git connects only to the addresses that were checked
+(http.curloptResolve, git 2.37 or newer), so a DNS answer that changes in between cannot reach a public host; it uses
+no proxy (an empty http.proxy and no proxy variables: a proxy would resolve the name itself) and follows no redirect
+(http.followRedirects=false: a redirect could lead to a host nobody checked). A local file or path needs no network.
 Bundle files and remote output are untrusted: sizes are capped and every value is checked before it is used.
 """
 
@@ -94,8 +95,10 @@ def _is_local(url: str) -> bool:
     return url.startswith("file://") or "://" not in url
 
 
-def _git_env() -> Dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if k in _PASS_ENV}
+def _git_env(offline: bool = False) -> Dict[str, str]:
+    """The cleared environment git runs with; in offline mode without the proxy variables (git connects to the
+    checked address of the mirror itself, never through a proxy that would resolve the name on its own)."""
+    env = {k: v for k, v in os.environ.items() if k in _PASS_ENV and not (offline and k.lower().endswith("_proxy"))}
     env.update({
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": os.devnull,
@@ -111,22 +114,35 @@ def _git_env() -> Dict[str, str]:
 
 def offline_reach(url: str, settings: Any) -> Optional[str]:
     """In offline mode (the settings `settings`), the git option value that pins the repository at `url` to the
-    address the network-locality rule checked ("HOST:PORT:ADDRESS" for http.curloptResolve); SourceError when the
-    repository is not on this computer or in the person's own network. None for a local file or path, or when offline
-    mode is off."""
-    from orchestrator.utils.locality import check_url, offline_mode, url_host
+    addresses the network-locality rule checked ("HOST:PORT:ADDRESS[,ADDRESS...]" for http.curloptResolve, every
+    checked address in the resolver's order, which curl tries in turn; HOST spelled as git and curl look it up, a
+    trailing dot kept, an international name in its IDNA form); SourceError when the repository is not on this
+    computer or in the person's own network. None for a local file or path, when offline mode is off, or for an
+    address (nothing to resolve: git connects to the address that was checked). fetch_source passes git the other
+    options of offline mode in every case (no proxy, no redirect)."""
+    from urllib.parse import urlsplit
+
+    from orchestrator.utils.locality import check_url, offline_mode, parse_address
     if _is_local(url) or not offline_mode(settings):
         return None
     verdict = check_url(url, settings)
-    if not verdict.local or verdict.address is None:
+    if not verdict.local or not verdict.addresses:
         raise SourceError(verdict.refusal("the llama.cpp source repository"))
-    host, port = url_host(url)
-    address = verdict.address
-    return f"{host}:{port or (443 if url.lower().startswith('https:') else 80)}:" + \
-        (f"[{address}]" if ":" in address else address)
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    if parse_address(host) is not None:
+        return None
+    try:
+        host = host.encode("idna").decode("ascii")
+    except UnicodeError:
+        pass   # git refuses such a URL itself
+    # curl takes no zone in the address list: a link-local address with one is left out (unless it is the only one)
+    addresses = [a for a in verdict.addresses if "%" not in a] or [verdict.addresses[0].split("%", 1)[0]]
+    port = parts.port or (443 if parts.scheme.lower() == "https" else 80)
+    return f"{host}:{port}:" + ",".join(f"[{a}]" if ":" in a else a for a in addresses)
 
 
-def _git_config(allow_file: bool, resolve: Optional[str] = None) -> List[str]:
+def _git_config(allow_file: bool, resolve: Optional[str] = None, offline: bool = False) -> List[str]:
     config = {
         "core.hooksPath": os.devnull,
         "core.fsmonitor": "false",
@@ -141,7 +157,12 @@ def _git_config(allow_file: bool, resolve: Optional[str] = None) -> List[str]:
         "init.defaultBranch": "main",
         "transfer.fsckObjects": "true",
     }
-    if resolve:   # offline mode: the checked address of the repository's host (offline_reach)
+    if offline or resolve:
+        # offline mode: no proxy (an empty http.proxy switches off the one from the environment as well) and no
+        # redirect, so git reaches only the checked mirror itself
+        config["http.proxy"] = ""
+        config["http.followRedirects"] = "false"
+    if resolve:   # offline mode: the checked addresses of the repository's host (offline_reach)
         config["http.curloptResolve"] = resolve
     args: List[str] = []
     for key, value in config.items():
@@ -157,13 +178,16 @@ class Git:
         self.git = git or shutil.which("git")
 
     def __call__(self, args: Sequence[str], *, cwd: Optional[Path] = None, allow_file: bool = False,
-                 timeout: int = LOCAL_TIMEOUT, check: bool = True,
-                 resolve: Optional[str] = None) -> "subprocess.CompletedProcess[str]":
+                 timeout: int = LOCAL_TIMEOUT, check: bool = True, resolve: Optional[str] = None,
+                 offline: bool = False) -> "subprocess.CompletedProcess[str]":
+        """`resolve` (offline_reach) pins the mirror's host to its checked addresses; with it, or with `offline`,
+        git also uses no proxy and follows no redirect (offline mode)."""
         if not self.git:
             raise SourceError("git was not found; install git (the pinned source is fetched and verified with it)")
-        argv = [self.git, *_git_config(allow_file, resolve), *args]
+        offline = offline or bool(resolve)
+        argv = [self.git, *_git_config(allow_file, resolve, offline), *args]
         try:
-            result = self.runner(argv, cwd=str(cwd) if cwd else None, env=_git_env(), capture_output=True,
+            result = self.runner(argv, cwd=str(cwd) if cwd else None, env=_git_env(offline), capture_output=True,
                                  text=True, timeout=timeout, stdin=subprocess.DEVNULL)
         except subprocess.TimeoutExpired:
             raise SourceError(f"git {args[0]} did not finish within {timeout} s") from None
@@ -308,8 +332,10 @@ def fetch_source(source: LlamaCppSource, state_dir: Union[str, Path], *, url: Op
         say(f"The cached source in {target} is damaged; it is fetched again.")
         remove_tree(target)
     local = _is_local(url)
-    pin = offline_reach(url, settings)        # offline mode: only the own network, at the checked address
-    pinned = {"resolve": pin} if pin else {}
+    pin = offline_reach(url, settings)        # offline mode: only the own network, at the checked addresses
+    from orchestrator.utils.locality import offline_mode
+    # offline mode: git also uses no proxy and follows no redirect (also for a mirror given by its address)
+    pinned = ({"resolve": pin} if pin else {"offline": True}) if not local and offline_mode(settings) else {}
     staging = _staging(state_dir)
     try:
         _init(staging, git)
