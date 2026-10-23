@@ -309,8 +309,8 @@ class TestRuntimeEnds:
     def test_a_board_probe_writes_its_end(self, board, monkeypatch):
         fm, rtt, device = board
         from orchestrator.runtime.device import service
-        monkeypatch.setattr(service, "probe", lambda d, s, fp, on_client=None: {"probe_id": d.device_id,
-                                                                                "tool": "python", "warnings": 2})
+        monkeypatch.setattr(service, "probe", lambda d, s, fp, on_client=None, on_event=None: {
+            "probe_id": d.device_id, "tool": "python", "warnings": 2})
         rtt.allow(fm, "probe_remote_device")
         started = rtt.call(fm, "probe_remote_device", {"device_id": device.device_id}, confirm=rtt.asking(True))
         assert rtt.wait_job(fm, started.job_id).state == "done"

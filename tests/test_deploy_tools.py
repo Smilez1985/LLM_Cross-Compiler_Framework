@@ -422,7 +422,9 @@ AI_REACHABLE = ["orchestrator/mcp_server.py", "orchestrator/tools", "orchestrato
 # The writers of a board's trust: the primitives (ssh_trust) and the person's writers of orchestrator/remote/pairing.py
 # (c2-remote-trust, Q5), whose module no AI-reachable code imports (tests/test_remote_trust.py follows the imports).
 WRITERS = {"record_trusted_device", "trust_host_key", "trust_host", "install_public_key", "save_host_keys",
-           "trust_presented_key", "first_use", "pair", "replace_key", "plan_replacement"}
+           "trust_presented_key", "first_use", "pair", "replace_key", "plan_replacement",
+           # P6: the move of a board's data to its new device ID after the person's key change (board_move.py)
+           "BoardDataMove", "copy_deploys", "drop_deploys", "copy_board_rows", "drop_board_rows"}
 
 
 def _python_files():

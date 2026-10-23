@@ -537,7 +537,7 @@ def path_to(via, module):
 
 
 PERSON_ONLY = ("orchestrator.remote.pairing", "orchestrator.runtime.device.person_steps",
-               "orchestrator.runtime.scan_steps")
+               "orchestrator.runtime.scan_steps", "orchestrator.runtime.device.board_move")
 
 
 def test_no_module_an_ai_can_reach_imports_the_person_s_trust_writers():
@@ -563,11 +563,11 @@ def test_the_import_guard_bites():
 
 # The primitives that write the framework's known_hosts or a board's authorized_keys (orchestrator/utils/ssh_trust.py).
 TRUST_WRITERS = ("trust_host_key", "save_host_keys", "install_public_key")
-# The only places a module an AI can reach names one of them: ssh_trust itself (their definitions), the session's pair(),
-# which only the person's OneTimePassword credentials reach (every AI path logs in with KeyOnly), and the old
-# DeploymentManager.trust_host, which nothing calls.
-WRITER_PLACES = {("orchestrator.remote.session", "RemoteSession.pair"),
-                 ("orchestrator.Core.deployment_manager", "DeploymentManager.trust_host")}
+# The only places a module an AI can reach names one of them: ssh_trust itself (their definitions) and the session's
+# pair(), which only the person's OneTimePassword credentials reach (every AI path logs in with KeyOnly). The deprecated
+# DeploymentManager.trust_host names none since P5 (DECISIONS round 22): it delegates to pairing.trust_presented_key
+# through the person's PersonChannel, and nothing calls it.
+WRITER_PLACES = {("orchestrator.remote.session", "RemoteSession.pair")}
 
 
 def writer_uses(module: str, source: str):
@@ -591,8 +591,8 @@ def writer_uses(module: str, source: str):
 
 def test_no_module_an_ai_can_reach_writes_trust_except_the_person_s_one_time_password_session():
     """ssh_trust's promise (stage C seam): of the modules an AI can reach, only RemoteSession.pair names a trust writer
-    (install_public_key, gated by OneTimePassword), and DeploymentManager.trust_host, the old primitive without an audit
-    row, has no caller anywhere in the framework."""
+    (install_public_key, gated by OneTimePassword), and DeploymentManager.trust_host, the deprecated delegate that
+    trusts only with the person's PersonChannel (P5), names none and has no caller anywhere in the framework."""
     import test_layering
     via = ai_reachable_closure(test_layering.build_graph().edges())
     uses = set()
@@ -607,6 +607,72 @@ def test_no_module_an_ai_can_reach_writes_trust_except_the_person_s_one_time_pas
     assert ("orchestrator.remote.session", "RemoteSession.pair") in uses, "the guard reads the session"
     callers = [p for p in test_layering.PACKAGE.rglob("*.py") if ".trust_host(" in p.read_text(encoding="utf-8")]
     assert callers == [], callers
+
+
+class TestTrustHostDelegate:
+    """P5 (DECISIONS round 22): DeploymentManager.trust_host is deprecated and a thin delegate to
+    pairing.trust_presented_key, for the person only: with the channel's PersonChannel it stores the key in the deploy's
+    known_hosts and writes the same audit row; without one nothing is trusted."""
+
+    def manager(self, state):
+        from orchestrator.Core.deployment_manager import DeploymentManager
+        return DeploymentManager(SimpleNamespace(config=SimpleNamespace(user_state_dir=str(state))))
+
+    def test_with_the_person_s_channel_it_is_trust_presented_key(self, tmp_path):
+        from orchestrator.remote import pairing
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.remote.trust import TrustStore, device_id_for
+        state, key, audit = tmp_path / "state", paramiko.ECDSAKey.generate(), Audit()
+        with pytest.warns(DeprecationWarning, match="trust_presented_key"):
+            self.manager(state).trust_host(HOST, key, 2222,
+                                           person=pairing.PersonChannel("gui", audit=lambda: audit, actor="gui"))
+        assert TrustStore(state).status(Endpoint(HOST, 2222), key) == "known"
+        if sys.platform != "win32":
+            assert TrustStore(state).path.stat().st_mode & 0o077 == 0
+        (row,) = audit.rows
+        fp = ssh_trust.fingerprint(key)
+        assert (row["actor"], row["tool"], row["outcome"], row["approved"]) == ("gui", "host_key_trusted", "ok", True)
+        assert row["arguments"] == {"device_id": device_id_for(fp), "fingerprint": fp,
+                                    "key_type": "ecdsa-sha2-nistp256"}
+        assert row["extra"] == {"confirm_channel": "framework-gui", "answer": "accepted"}
+
+    def test_it_goes_through_the_one_writer(self, tmp_path, monkeypatch):
+        from orchestrator.remote import pairing
+        seen = []
+        monkeypatch.setattr(pairing, "trust_presented_key", lambda store, endpoint, key, **kw: seen.append(
+            (store.state_dir, endpoint, key, kw)))
+        key = paramiko.ECDSAKey.generate()
+        with pytest.warns(DeprecationWarning):
+            self.manager(tmp_path / "state").trust_host(HOST, key, person=pairing.PersonChannel("cli", actor="cli"))
+        ((state_dir, endpoint, used, kw),) = seen
+        assert (state_dir, endpoint.host, endpoint.port, used) == (tmp_path / "state", HOST, 22, key)
+        assert kw == {"via": "cli", "audit": None, "actor": "cli"}
+
+    @pytest.mark.parametrize("person", [None, "cli", SimpleNamespace(via="cli")], ids=["none", "a word", "no writer"])
+    def test_without_the_person_s_channel_nothing_is_trusted(self, tmp_path, person):
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.remote.trust import TrustStore
+        state, key = tmp_path / "state", paramiko.ECDSAKey.generate()
+        with pytest.warns(DeprecationWarning), pytest.raises(PermissionError, match="PersonChannel"):
+            self.manager(state).trust_host(HOST, key, person=person)
+        with pytest.warns(DeprecationWarning), pytest.raises(PermissionError):
+            self.manager(state).trust_host(HOST, key)   # the old call: the primitive without an audit row is gone
+        assert TrustStore(state).status(Endpoint(HOST), key) == "unknown" and not (state / "known_hosts").exists()
+
+    @pytest.mark.parametrize("host, port", [("-oProxyCommand=x", 22), ("host;reboot", 22), (HOST, 0), (HOST, True)])
+    def test_an_address_that_is_none_is_refused(self, tmp_path, host, port):
+        from orchestrator.remote import pairing
+        with pytest.warns(DeprecationWarning), pytest.raises(ValueError):
+            self.manager(tmp_path / "state").trust_host(host, paramiko.ECDSAKey.generate(), port,
+                                                        person=pairing.PersonChannel("cli"))
+        assert not (tmp_path / "state" / "known_hosts").exists()
+
+    def test_only_the_person_s_channels_make_a_person_channel(self):
+        from orchestrator.remote import pairing
+        for via in ("mcp", "ditto", "", "framework-gui"):
+            with pytest.raises(ValueError):
+                pairing.PersonChannel(via)
+        assert {pairing.PersonChannel(v).via for v in pairing.PERSON_CHANNELS} == {"cli", "gui"}
 
 
 def test_the_trust_writer_guard_bites():
@@ -865,7 +931,9 @@ class TestBoardChange:
         assert paired is logs_in and moved.paired is logs_in
         assert b.store.get(b.device.device_id) is None and b.store.list() == [moved]
         assert b.store.key_status(moved) == "known"
-        assert b.profiles.list_devices() == [b.device.device_id], "the stored probe stays under its old ID"
+        # P6 (DECISIONS round 22): the board's data moves with its new key (before, the probe stayed under the old ID)
+        assert b.profiles.list_devices() == [new_id], "the stored probe moved to the new device ID"
+        assert b.profiles.device_info(new_id)["label"] == "Desk board"
         assert b.logins in ([(HOST, 22, "radxa", None)], [])
 
     def test_the_key_read_from_the_board_is_read_at_the_new_address(self, b, monkeypatch):
@@ -906,6 +974,261 @@ class TestBoardChange:
             person_steps.change_board(b.state, change, via="cli", audit=None, actor="cli")
         assert e.value.kind == "audit"
         assert ((b.state / "known_hosts").read_bytes(), (b.state / "devices.json").read_bytes()) == before
+
+
+OTHER_BOARD = "0123456789abcdef"
+
+
+class TestTheBoardsDataMoves:
+    """P6 (DECISIONS round 22): after the person confirms a new host key for a board, the board's data moves to its new
+    device ID: its stored probe, deploy settings, deployed runtime, deploy record and "tested on" records. Each part
+    is copied and checked before known_hosts changes, the old copies go only after the change, and nothing is lost
+    when a step fails."""
+
+    @pytest.fixture
+    def b(self, tmp_path, monkeypatch):
+        import hashlib
+        from orchestrator.runtime.device import tested
+        from orchestrator.runtime.device.package import DeviceRuntimeStore
+        from orchestrator.runtime.device.trusted import TrustedDevices
+        from orchestrator.runtime.profile import ProfileStore, parse_profile
+        from test_hardware_probe import FIXTURES
+        state = tmp_path / "state"
+        device = record(state, paramiko.ECDSAKey.generate(), label="Desk board", user="radxa")
+        old = device.device_id
+        profiles = ProfileStore(state)
+        profiles.save_device(old, parse_profile((FIXTURES / "schema2_rk3566_dietpi.txt").read_text()),
+                             label="Desk board", address=HOST)
+        profiles.save_deploy_settings(old, {"install": "user", "ssh_user": "radxa", "port": 8081})
+        runtime = DeviceRuntimeStore(state, old)
+        runtime.save_record({"build_id": "ab" * 32, "deployed_at": "2026-10-20T10:00:00Z", "ssh_user": "radxa",
+                             "verification": {"checks": [{"name": "smoke", "ok": True}]}})
+        tarball = runtime.root / f"llama-runtime-arm64-{'ab' * 8}.tar.gz"
+        tarball.write_bytes(b"tarball bytes " * 4096)
+        (runtime.root / (tarball.name + ".sha256")).write_text(
+            f"{hashlib.sha256(tarball.read_bytes()).hexdigest()}  {tarball.name}\n")
+        store = TrustedDevices(state)
+        store.note_deploy(old, True, "deploy_model_1.zip")
+        store.note_deploy(OTHER_BOARD, False, "deploy_model_2.zip")
+        output = tmp_path / "output"
+        build = output / "build-1"
+        build.mkdir(parents=True)
+        (build / "build_info.json").write_text(json.dumps({"created": "2026-10-20T09:00:00Z", "artifacts": []}))
+        rows = [{"schema": tested.SCHEMA, "at": "2026-10-20T10:05:00Z", "device_id": old, "label": "Desk board",
+                 "smoke_passed": True, "checks_passed": True},
+                {"schema": tested.SCHEMA, "at": "2026-10-20T11:00:00Z", "device_id": OTHER_BOARD, "label": "Shelf",
+                 "smoke_passed": True, "checks_passed": True}]
+        tested._write(build / tested.DEVICE_TESTS, {"schema": tested.SCHEMA, "tests": rows})
+        monkeypatch.setattr(ssh_trust, "connect", lambda *a, **k: SimpleNamespace(close=lambda: None))
+        return SimpleNamespace(state=state, device=device, old=old, profiles=profiles, store=store, output=output,
+                               build=build, rows=rows, runtime=runtime, audit=Audit())
+
+    def data(self, b, device_id):
+        """The board's data under `device_id`: its profile files, its runtime folder, its deploy record and its
+        'tested on' records (without the device ID itself)."""
+        from orchestrator.runtime.device import tested
+        from orchestrator.runtime.device.package import DeviceRuntimeStore
+        files = {kind: path.read_text() for kind, path in b.profiles.device_files(device_id).items() if path.exists()}
+        folder = DeviceRuntimeStore(b.state, device_id).root
+        runtime = {p.name: p.read_bytes() for p in sorted(folder.iterdir())} if folder.exists() else {}
+        rows = [{k: v for k, v in r.items() if k != "device_id"} for r in tested.device_tests(b.build)
+                if r.get("device_id") == device_id]
+        return files, runtime, b.store.last_deploys().get(device_id), rows
+
+    def plan(self, b, key=None):
+        from orchestrator.runtime.device import person_steps
+        key = key or paramiko.ECDSAKey.generate()
+        return person_steps.plan_board_change(b.state, b.old, key_text=f"{key.get_name()} {key.get_base64()}")
+
+    def unchanged(self, b):
+        return (b.state / "known_hosts").read_bytes(), (b.state / "devices.json").read_bytes()
+
+    @pytest.mark.parametrize("links", [True, False], ids=["hard links", "copies"])
+    def test_every_part_moves_to_the_new_device_id(self, b, monkeypatch, links):
+        import os
+        from orchestrator.runtime.device import board_move, person_steps
+        if not links:   # a file system without hard links: the files are copied and compared
+            monkeypatch.setattr(os, "link", lambda *a, **k: (_ for _ in ()).throw(OSError(1, "no links here")))
+        before = self.data(b, b.old)
+        assert all(before), "every kind is there before"
+        change = self.plan(b)
+        moved, _paired = person_steps.change_board(b.state, change, via="cli", audit=b.audit, actor="cli",
+                                                   output_dirs=[b.output])
+        new_id = moved.device_id
+        assert new_id == change.plan.new_device_id != b.old
+        assert self.data(b, new_id) == before, "the same data under the new ID"
+        assert self.data(b, b.old) == ({}, {}, None, []), "nothing is left under the old ID"
+        assert change.data.moved == list(board_move.KINDS) and change.data.kept == [] == change.data.left
+        assert b.store.last_deploys()[OTHER_BOARD]["package"] == "deploy_model_2.zip", "another board stays"
+        from orchestrator.runtime.device import tested
+        assert [r for r in tested.device_tests(b.build) if r["device_id"] == OTHER_BOARD] == [b.rows[1]]
+        assert not list(b.runtime.root.parent.glob(".*moving*")), "no temporary folder stays"
+        assert person_steps.moved_lines(change) == [
+            f"Moved to the new device ID {new_id}: stored probe, deploy settings, deployed runtime, deploy record, "
+            "benchmark results ('tested on')."]
+        assert any(f"Its data moves there from {b.old}" in line for line in person_steps.change_lines(change))
+
+    def test_a_copy_that_fails_changes_nothing(self, b, monkeypatch):
+        from orchestrator.runtime.device import person_steps, tested
+        before, outside = self.data(b, b.old), self.unchanged(b)
+        change = self.plan(b)
+
+        def full(*a, **k):
+            raise OSError(28, "No space left on device")
+        monkeypatch.setattr(tested, "_write", full)   # the last part, the 'tested on' copy, cannot be written
+        with pytest.raises(person_steps.BoardStepError) as e:
+            person_steps.change_board(b.state, change, via="cli", audit=b.audit, actor="cli", output_dirs=[b.output])
+        assert e.value.kind == "not_moved" and e.value.facts["what"] == "tested_on"
+        assert "nothing was changed" in str(e.value) and "OSError" in str(e.value)
+        assert self.data(b, b.old) == before and self.unchanged(b) == outside and b.audit.rows == []
+        assert self.data(b, change.plan.new_device_id) == ({}, {}, None, []), "the copies made went again"
+        assert not list(b.runtime.root.parent.glob(".*moving*"))
+
+    @pytest.mark.parametrize("audit", [None, Audit(fail=True)], ids=["no audit log", "audit log fails"])
+    def test_without_its_audit_row_the_data_stays_where_it_was(self, b, audit):
+        from orchestrator.runtime.device import person_steps
+        before, outside = self.data(b, b.old), self.unchanged(b)
+        change = self.plan(b)
+        with pytest.raises(person_steps.BoardStepError) as e:
+            person_steps.change_board(b.state, change, via="gui", audit=audit, actor="gui", output_dirs=[b.output])
+        assert e.value.kind == "audit"
+        assert self.data(b, b.old) == before and self.unchanged(b) == outside
+        assert self.data(b, change.plan.new_device_id) == ({}, {}, None, [])
+
+    def test_an_old_copy_that_cannot_be_removed_is_named_and_its_new_copy_is_complete(self, b, monkeypatch):
+        import shutil
+        from orchestrator.runtime.device import person_steps
+        before = self.data(b, b.old)
+        real = shutil.rmtree
+
+        def busy(path, *a, **k):
+            if Path(path) == b.runtime.root:
+                raise PermissionError(13, "in use by another program")
+            return real(path, *a, **k)
+        monkeypatch.setattr(shutil, "rmtree", busy)
+        change = self.plan(b)
+        moved, _ = person_steps.change_board(b.state, change, via="cli", audit=b.audit, actor="cli",
+                                             output_dirs=[b.output])
+        assert change.data.left == ["runtime"] and "runtime" not in change.data.moved
+        assert self.data(b, moved.device_id) == before
+        assert self.data(b, b.old)[1] == before[1], "the old runtime folder stays as it was"
+        assert (f"Could not be removed under {b.old} (the copies under {moved.device_id} are complete): deployed "
+                "runtime.") in person_steps.moved_lines(change)
+
+    def test_what_the_new_device_id_has_of_its_own_is_never_overwritten(self, b):
+        from orchestrator.runtime.device import person_steps
+        from orchestrator.runtime.profile import device_id_for_host_key
+        key = paramiko.ECDSAKey.generate()
+        new_id = device_id_for_host_key(ssh_trust.fingerprint(key))
+        b.profiles.save_deploy_settings(new_id, {"install": "user", "ssh_user": "other", "port": 9000})
+        old_settings = b.profiles.load_deploy_settings(b.old)
+        change = self.plan(b, key)
+        person_steps.change_board(b.state, change, via="cli", audit=b.audit, actor="cli", output_dirs=[b.output])
+        assert change.data.kept == ["deploy_settings"] and "deploy_settings" not in change.data.moved
+        assert b.profiles.load_deploy_settings(new_id)["ssh_user"] == "other"
+        assert b.profiles.load_deploy_settings(b.old) == old_settings, "kept under the old ID"
+        assert f"Kept under {b.old}, because {new_id} has its own: deploy settings." in person_steps.moved_lines(change)
+
+    def test_a_copy_an_interrupted_move_left_counts_as_moved(self, b):
+        """A move that was interrupted after its copies (the framework ended) left identical copies under the new ID:
+        the next change takes them as moved and removes the old ones."""
+        from orchestrator.runtime.device import board_move, person_steps
+        key = paramiko.ECDSAKey.generate()
+        change = self.plan(b, key)
+        board_move.BoardDataMove(b.state, b.old, change.plan.new_device_id, output_dirs=[b.output]).stage()
+        before = self.data(b, b.old)
+        moved, _ = person_steps.change_board(b.state, change, via="cli", audit=b.audit, actor="cli",
+                                             output_dirs=[b.output])
+        assert change.data.moved == list(board_move.KINDS) and change.data.kept == []
+        assert self.data(b, moved.device_id) == before and self.data(b, b.old) == ({}, {}, None, [])
+
+    def test_a_new_address_alone_moves_nothing(self, b):
+        from orchestrator.runtime.device import person_steps
+        before = self.data(b, b.old)
+        change = person_steps.plan_board_change(b.state, b.old, host="myboard.local")
+        person_steps.change_board(b.state, change, via="cli", audit=b.audit, actor="cli", output_dirs=[b.output])
+        assert change.data is None and person_steps.moved_lines(change) == []
+        files, runtime, deploys, rows = self.data(b, b.old)
+        assert (runtime, deploys, rows) == before[1:] and files["deploy_settings"] == before[0]["deploy_settings"]
+        assert b.profiles.device_info(b.old)["address"] == "myboard.local"
+
+    def test_a_new_key_and_address_move_the_probe_with_its_new_address(self, b):
+        from orchestrator.runtime.device import person_steps
+        key = paramiko.ECDSAKey.generate()
+        change = person_steps.plan_board_change(b.state, b.old, host="192.0.2.41", port=2222,
+                                                key_text=f"{key.get_name()} {key.get_base64()}")
+        moved, _ = person_steps.change_board(b.state, change, via="cli", audit=b.audit, actor="cli",
+                                             output_dirs=[b.output])
+        info = b.profiles.device_info(moved.device_id)
+        assert (info["address"], info["label"]) == ("192.0.2.41:2222", "Desk board")
+        assert b.profiles.list_devices() == [moved.device_id]
+
+    def test_a_change_that_fails_otherwise_takes_its_copies_back(self, b, monkeypatch):
+        """known_hosts' lock held by another process (or any other failure of the change than a refusal): the change
+        is not made, so the copies go again. Copies left under the new ID would be stale when the person tries again
+        later, and the board's newer data would then stay under the old ID as 'kept'."""
+        from orchestrator.remote import pairing
+        from orchestrator.runtime.device import person_steps
+        from orchestrator.utils.file_lock import LockTimeout
+        before, outside = self.data(b, b.old), self.unchanged(b)
+        change = self.plan(b)
+
+        def held(*a, **k):
+            raise LockTimeout("known_hosts.lock is held by another process")
+        monkeypatch.setattr(pairing, "replace_key", held)
+        with pytest.raises(LockTimeout):
+            person_steps.change_board(b.state, change, via="cli", audit=b.audit, actor="cli", output_dirs=[b.output])
+        assert self.data(b, b.old) == before and self.unchanged(b) == outside
+        assert self.data(b, change.plan.new_device_id) == ({}, {}, None, []), "the copies made went again"
+
+    def test_a_ctrl_c_while_the_data_is_copied_takes_the_copies_back(self, b, monkeypatch):
+        from orchestrator.runtime.device import person_steps, tested
+        before, outside = self.data(b, b.old), self.unchanged(b)
+        change = self.plan(b)
+
+        def interrupted(*a, **k):
+            raise KeyboardInterrupt()
+        monkeypatch.setattr(tested, "copy_board_rows", interrupted)   # the last part: every other one is copied
+        with pytest.raises(KeyboardInterrupt):
+            person_steps.change_board(b.state, change, via="cli", audit=b.audit, actor="cli", output_dirs=[b.output])
+        assert self.data(b, b.old) == before and self.unchanged(b) == outside and b.audit.rows == []
+        assert self.data(b, change.plan.new_device_id) == ({}, {}, None, []), "the copies made went again"
+        assert not list(b.runtime.root.parent.glob(".*moving*"))
+
+    def test_a_ctrl_c_after_the_change_still_moves_the_data(self, b, monkeypatch):
+        """known_hosts holds the new key (and its audit row) once replace_key returns: a Ctrl+C during the login test
+        that follows leaves no second copy of the board's data, it is under the new device ID only, as when the
+        board's record could not be written."""
+        from orchestrator.runtime.device import person_steps
+        before = self.data(b, b.old)
+        change = self.plan(b)
+
+        def interrupted(*a, **k):
+            raise KeyboardInterrupt()
+        monkeypatch.setattr(person_steps, "framework_key_logs_in", interrupted)
+        with pytest.raises(KeyboardInterrupt):
+            person_steps.change_board(b.state, change, via="cli", audit=b.audit, actor="cli", output_dirs=[b.output])
+        assert [row["tool"] for row in b.audit.rows] == ["host_key_replaced"]
+        assert self.data(b, change.plan.new_device_id) == before
+        assert self.data(b, b.old) == ({}, {}, None, []), "no second copy stays under the old ID"
+
+    def test_the_probe_and_its_label_and_address_move_together(self, b):
+        """The stored probe is two files (the profile and its label and address): when the new ID holds one of them
+        with other content, neither moves, so the probe is kept as a whole and never named as moved and kept at once."""
+        from orchestrator.runtime.device import board_move, person_steps
+        key = paramiko.ECDSAKey.generate()
+        change = self.plan(b, key)
+        new_files = b.profiles.device_files(change.plan.new_device_id)
+        old_files = b.profiles.device_files(b.old)
+        new_files["probe"].write_text(old_files["probe"].read_text())   # the same profile ...
+        new_files["probe_info"].write_text(json.dumps({"label": "Its own", "address": "192.0.2.99"}))   # ... not so
+        own = {kind: path.read_text() for kind, path in new_files.items() if path.exists()}
+        old = {kind: path.read_text() for kind, path in old_files.items() if kind != "deploy_settings"}
+        person_steps.change_board(b.state, change, via="cli", audit=b.audit, actor="cli", output_dirs=[b.output])
+        assert change.data.kept == ["probe"] and "probe" not in change.data.moved
+        assert {kind: old_files[kind].read_text() for kind in old} == old, "the probe stays whole under the old ID"
+        assert {kind: path.read_text() for kind, path in new_files.items() if kind in own} == own
+        assert change.data.moved == [k for k in board_move.KINDS if k != "probe"]
 
 
 @pytest.mark.usefixtures("keep_logger_levels")
@@ -957,6 +1280,30 @@ class TestCliDevicesEdit:
                                                                 "Desk board")
         assert f"Board {moved.device_id} (Desk board): myboard.local:22, host key" in result.out
         assert [row["tool"] for row in b.audit.rows] == ["host_key_replaced"]
+
+    def test_a_new_key_moves_the_board_s_data_and_says_so(self, b, terminal):
+        from orchestrator.runtime.profile import ProfileStore, device_id_for_host_key
+        terminal()
+        ProfileStore(b.state).save_deploy_settings(b.device.device_id, {"install": "user", "ssh_user": "radxa"})
+        new = paramiko.ECDSAKey.generate()
+        new_id = device_id_for_host_key(ssh_trust.fingerprint(new))
+        result = self.edit(b.device.device_id, "--key", f"{new.get_name()} {new.get_base64()}", answer="y\n")
+        assert result.code == 0, result.out
+        assert f"Its data moves there from {b.device.device_id}" in " ".join(result.out.split())
+        assert f"Moved to the new device ID {new_id}: deploy settings." in " ".join(result.out.split())
+        assert ProfileStore(b.state).load_deploy_settings(new_id) == {"install": "user", "ssh_user": "radxa"}
+        assert ProfileStore(b.state).load_deploy_settings(b.device.device_id) == {}
+
+    def test_a_new_key_still_says_to_probe_a_board_that_was_set_up_anew(self, b, terminal):
+        """A new key mostly means the board was reinstalled: its moved probe may be old. The CLI said to probe it again
+        before P6 and the Boards window still does (boards.edit.probe_again), so the CLI keeps saying it."""
+        from orchestrator.utils.l10n_boards import TEXTS
+        terminal()
+        new = paramiko.ECDSAKey.generate()
+        result = self.edit(b.device.device_id, "--key", f"{new.get_name()} {new.get_base64()}", answer="y\n")
+        assert result.code == 0, result.out
+        assert "If the board was set up anew, probe it again" in " ".join(result.out.split())
+        assert TEXTS["en"]["boards.edit.probe_again"].startswith("If the board was set up anew, probe it again")
 
     def test_an_unknown_board_is_named(self, b, terminal):
         terminal()

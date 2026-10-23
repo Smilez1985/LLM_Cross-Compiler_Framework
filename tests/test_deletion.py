@@ -35,6 +35,9 @@ MOVED = ("a move the person chose (save dialog, Save..., llm-cli build save): th
 SORTED = ("a move the person chose (Sort loose knowledge..., llm-cli knowledge sort): the summary names the loose file "
           "and its new folder, No is the default; the file goes only after its checked copy is installed in the pack "
           "folder, and only while both still match the checked file's sha256 (round 23, 1)")
+BOARD_MOVED = ("a move the person confirmed (Q5/P6, a board's new host key): the old device ID's data goes only after "
+               "its copy under the new ID was checked and the change was made; the undo takes back only the copies "
+               "the move itself made")
 UNUSED = "OPEN (reported): no caller; must get a plan before it is wired"
 KNOWLEDGE_REPLACED = ("the knowledge base's own storage: a collection replaced by a restore, which saves the current "
                       "content as a snapshot first (round 5 b); clear_knowledge_base, its other caller, has no caller "
@@ -105,6 +108,12 @@ DELETION_SITES = {
     ("orchestrator/runtime/bench.py", "BenchRunner._pinned_link"): TEMP,
     ("orchestrator/runtime/bench.py", "BenchRunner._pinned_model"): TEMP,
     ("orchestrator/runtime/bench.py", "BenchRunner._sweep"): TEMP,
+    ("orchestrator/runtime/device/board_move.py", "_File.finish"): BOARD_MOVED,
+    ("orchestrator/runtime/device/board_move.py", "_File.undo"): BOARD_MOVED,
+    ("orchestrator/runtime/device/board_move.py", "_Folder.finish"): BOARD_MOVED,
+    ("orchestrator/runtime/device/board_move.py", "_Folder.undo"): BOARD_MOVED,
+    ("orchestrator/runtime/device/board_move.py", "_Folder.stage"): STAGING,   # its temporary folder (a failed copy,
+                                                                               # what an interrupted move left)
     ("orchestrator/tools/approvals.py", "ApprovalStore._write"): TEMP,
     ("orchestrator/tools/audit.py", "AuditLog._write_anchor"): TEMP,
     ("orchestrator/tools/audit.py", "AuditLog.record"): TEMP,             # an anchor of an entry never committed

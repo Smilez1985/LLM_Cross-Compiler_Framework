@@ -262,6 +262,84 @@ class TestTheBenchmarkOnTheBoard:
         assert not list(board.root.glob(".bench.*")), "its folder goes afterwards"
         assert not any("/tmp" in c.replace(str(board.home), "") for c in board.commands)
 
+    def bench(self, board, session, build):
+        model = board.home / "models" / "qwen.gguf"
+        model.parent.mkdir(exist_ok=True)
+        model.write_bytes(b"GGUF")
+        return verify_on_device(RemoteShell(session), home=str(board.home), plan_verify=build.plan["verify"],
+                                pin_build=tdr.PIN.build_number, pin_commit=tdr.PIN.commit, port=8080,
+                                bench_model=str(model), bench_allowed=True)
+
+    @staticmethod
+    def age(folder, minutes):
+        import os
+        import time
+        then = time.time() - minutes * 60
+        os.utime(folder, (then, then))
+
+    def test_the_next_run_removes_what_an_earlier_run_left(self, tmp_path, source, board_session):
+        """A folder of an earlier run that nothing changed for longer than any run can take goes with the next run;
+        one a run may still follow, other names, and a link (and what it points to) stay."""
+        from orchestrator.runtime.device.remote import BENCH_STALE_MINUTES
+        board, session, _events, _clock = board_session
+        build, packaged = tdr.packaged_build(tmp_path, source)
+        assert deploy_over(session, build, packaged).activated
+        left = board.root / ".bench.Ab12Cd34"
+        left.mkdir()
+        (left / "out").write_text("[]")
+        (left / ".lcf-install.status").write_text("0\n")
+        self.age(left, BENCH_STALE_MINUTES + 1)
+        followed = board.root / ".bench.Zz98Yy76"   # a run that may still follow its job
+        followed.mkdir()
+        self.age(followed, BENCH_STALE_MINUTES - 2)
+        other = board.root / ".bench.short"
+        other.mkdir()
+        self.age(other, 600)
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "keep.txt").write_text("mine")
+        link = board.root / ".bench.Li11Nk22"
+        link.symlink_to(elsewhere, target_is_directory=True)
+        self.age(elsewhere, 600)
+        assert self.bench(board, session, build).check("smoke").ok
+        assert not left.exists(), "the leftover went"
+        assert followed.is_dir() and other.is_dir() and link.is_symlink()
+        assert (elsewhere / "keep.txt").read_text() == "mine"
+        assert sorted(p.name for p in board.root.glob(".bench.*")) == sorted(
+            [".bench.Zz98Yy76", ".bench.short", ".bench.Li11Nk22"]), "the run's own folder went too"
+
+    def test_a_cancel_that_closes_the_connection_leaves_the_folder_to_the_next_run(self, tmp_path, source,
+                                                                                  board_session):
+        """A Cancel closes the board session while the benchmark runs on the board: its folder cannot be removed
+        then (the board is not reached again after a Cancel), and the next run removes it once no run can follow
+        it any more."""
+        from orchestrator.remote.session import CancelToken
+        from orchestrator.runtime.device.remote import BENCH_STALE_MINUTES, RemoteError
+        board, session, _events, _clock = board_session
+        build, packaged = tdr.packaged_build(tmp_path, source)
+        assert deploy_over(session, build, packaged).activated
+        token = CancelToken()
+        token.hold(session)
+        real_answer = board.answer
+
+        def answer(command, stdin):
+            if "echo running" in command and "nohup" not in command:
+                token.cancel()   # the person presses Cancel while the session follows the benchmark
+            return real_answer(command, stdin)
+
+        board.answer = answer
+        with pytest.raises(RemoteError) as e:
+            self.bench(board, session, build)
+        assert e.value.kind == "stopped"
+        (left,) = list(board.root.glob(".bench.*"))
+        board.answer = real_answer
+        session.open()
+        assert self.bench(board, session, build).check("smoke").ok
+        assert left.is_dir(), "a run may still follow it: it stays"
+        self.age(left, BENCH_STALE_MINUTES + 1)   # nothing in it changed for longer than any run can take
+        assert self.bench(board, session, build).check("smoke").ok
+        assert not list(board.root.glob(".bench.*")), "the next run removed it"
+
     def test_a_board_without_nohup_runs_it_attached_as_before(self, tmp_path, source, board_session):
         board, session, _events, _clock = board_session
         build, packaged = tdr.packaged_build(tmp_path, source)
