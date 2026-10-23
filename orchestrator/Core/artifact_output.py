@@ -30,6 +30,14 @@ artifact where it was and removes only the unfinished copy. Nothing is ever over
 A destination is refused when it is (or lies in) a system folder, the framework's program folder, its build folder or
 its per-user folder. Artifacts saved outside the output folder are remembered (`saved_artifacts.json` in the per-user
 folder) so the listings keep showing them.
+
+Using an earlier identical build (DECISIONS round 23, item 9): "Use" before a build (the GUI's Builder tab and `llm-cli
+build start`) copies the earlier build, with its golden ZIP, into the chosen folder (`plan_copy`, `copy_artifact`):
+the earlier build stays where it is. The one disk rule is checked before the copy (with every process's
+reservations); every copy is checked against its original by sha256. When the folder there holds the identical build
+already, nothing is copied. When something else holds that name, it is replaced only after the person accepted the
+full list of what is replaced ("No" is the default; moved to the trash or deleted for good, as the person chose), and
+only once the copy is complete and checked.
 """
 
 import errno
@@ -443,6 +451,7 @@ class SaveResult:
     files: int = 0
     bytes: int = 0
     notes: List[str] = field(default_factory=list)
+    already: bool = False   # "Use" of an earlier build: the identical build lies there already, nothing was copied
 
 
 def _disk_usage(path: str):
@@ -649,6 +658,218 @@ def save_artifact(framework, folder: Any, destination: Any, *, create: bool = Fa
     return result
 
 
+# --- using an earlier identical build: a copy into the chosen folder ------------------------------------------------
+
+@dataclass
+class CopyPlan:
+    """What "Use" of an earlier build does (plan_copy): copy `source` (and its golden ZIP `zip`) to `target` below the
+    checked folder `root`, `needed` bytes. `there`: the identical build lies there already (nothing to copy).
+    `replaces`: what the copy would replace at `target` (the folder and the ZIP there, with their full paths) as the
+    person's deletion list, None when the name is free."""
+    source: Path
+    zip: Optional[Path]
+    root: Path
+    target: Path
+    needed: int
+    there: bool = False
+    replaces: Any = None
+
+
+def _same_build(a: Path, b: Path) -> bool:
+    """Whether two build folders hold the same build: the same recorded options and the same model files (sha256)."""
+    from orchestrator.Core.build_identity import MANIFEST_KEY
+    try:
+        first = json.loads((a / MANIFEST).read_text(encoding="utf-8"))
+        second = json.loads((b / MANIFEST).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(first, dict) or not isinstance(second, dict):
+        return False
+
+    def files(info):
+        return sorted((str(x.get("file")), str(x.get("sha256"))) for x in info.get("artifacts") or []
+                      if isinstance(x, dict))
+    return bool(files(first)) and files(first) == files(second) and \
+        first.get(MANIFEST_KEY) == second.get(MANIFEST_KEY) and first.get("primary") == second.get("primary")
+
+
+def _replace_plan(framework, target: Path, modes=("trash", "permanent")):
+    """The person's deletion list of what a copy to `target` replaces: the folder and the golden ZIP there (None when
+    neither exists)."""
+    from orchestrator.Core.deletion import plan_of
+    from orchestrator.tools.spec import DeletionItem
+    label = label_for(framework, target) or target.name
+    items = []
+    if os.path.lexists(target):
+        items.append(DeletionItem(kind="artifact", speaking_name=label, full_path=str(target), file_name=target.name,
+                                  size_bytes=_tree_size(target) if target.is_dir() and not target.is_symlink()
+                                  else os.lstat(target).st_size,
+                                  what="what lies there now under the earlier build's name (the copy replaces it)"))
+    zip_file = target.parent / f"{target.name}.zip"
+    if os.path.lexists(zip_file):
+        items.append(DeletionItem(kind="artifact", speaking_name=f"{label} (golden ZIP)", full_path=str(zip_file),
+                                  file_name=zip_file.name, size_bytes=os.lstat(zip_file).st_size,
+                                  what="the golden ZIP there now (the copy's ZIP replaces it)"))
+    return plan_of(items, modes) if items else None
+
+
+def plan_copy(framework, folder: Any, destination: Any, *, relative: Optional[str] = None,
+              create: bool = False) -> CopyPlan:
+    """What "Use" of the earlier build `folder` (a finished build anywhere the listings show it) copies into the
+    folder `destination` (checked as every destination: check_destination; `create` makes it): the build's folder
+    with its golden ZIP at `relative` below it (its path below the folder it lies in, as its label names it:
+    <target>/<model>/<quantization>; default its folder name). DestinationRefused when the build is gone, is no
+    finished build, or the destination is refused or lies inside the build."""
+    source = Path(str(folder))
+    try:
+        real = source.resolve(strict=True)
+    except OSError:
+        raise DestinationRefused(f"{source} is no longer there.", "Look at the list of builds again.",
+                                 code="unknown_id") from None
+    if source.is_symlink() or not (real / MANIFEST).is_file():
+        raise DestinationRefused(f"{source} is not a finished build (no {MANIFEST}).", "Choose a finished build.",
+                                 code="not_supported")
+    root = check_destination(framework, destination, create=create)
+    parts = Path(str(relative or real.name).replace("\\", "/")).parts
+    if not parts or Path(*parts).is_absolute() or any(p in ("", ".", "..") for p in parts):
+        parts = (real.name,)
+    target = root.joinpath(*parts)
+    zip_file = real.parent / f"{real.name}.zip"
+    zip_file = zip_file if zip_file.is_file() and not zip_file.is_symlink() else None
+    needed = _tree_size(real) + (zip_file.stat().st_size if zip_file else 0)
+    plan = CopyPlan(source=real, zip=zip_file, root=root, target=target, needed=needed)
+    real_target = _real(target)
+    if real_target == real:
+        plan.there = True
+        return plan
+    if _inside(real_target, real) or _inside(real, real_target):
+        raise DestinationRefused(f"Not copied: {target} and the earlier build {real} lie inside each other.",
+                                 "Choose another folder.", code="not_supported")
+    if target.is_dir() and not target.is_symlink() and _same_build(real, target):
+        plan.there = True
+        return plan
+    plan.replaces = _replace_plan(framework, target)
+    return plan
+
+
+def copy_artifact(framework, plan: CopyPlan, *, replace: Any = None, trash: Any = None,
+                  audit: Any = None) -> SaveResult:
+    """Copies the earlier build of `plan` (plan_copy) into its folder: the one disk rule first (check_disk with every
+    process's reservations; nothing is copied when it does not fit), then every file is copied and checked against
+    its original by sha256 (the earlier build stays where it is). When the name is taken (`plan.replaces`), `replace`
+    must be the person's accepted deletion of exactly that list (orchestrator.Core.deletion; PermissionError without
+    it, PlanChanged when what lies there changed since): the copy is made under a free name first, then what lay
+    there goes to the trash (`trash`, a Trash) or is deleted for good, as the person chose (written to the `audit`
+    log first; without it nothing is copied or replaced), and the copy takes its name. DestinationRefused with the
+    reason when the copy cannot be made."""
+    from orchestrator.Core.deletion import require_person
+    from orchestrator.Core.disk_plan import DiskNeed, ReservationLedger, check_disk
+    target = plan.target
+    target_zip = target.parent / f"{target.name}.zip"
+    if plan.there:
+        return SaveResult(folder=target, zip=target_zip if target_zip.is_file() else None, already=True)
+    accepted = None
+    if plan.replaces is not None:
+        if replace is None:
+            raise DestinationRefused(f"{target} exists already; nothing was copied.",
+                                     "Accept replacing it, or choose another folder.", code="needs_person")
+        accepted = require_person(replace)
+        if accepted.mode == "trash" and trash is None:
+            raise DestinationRefused("The trash is not available; nothing was copied or replaced.",
+                                     "Delete for good instead, or choose another folder.", code="failed")
+        if audit is None or not callable(getattr(audit, "record", None)):
+            raise DestinationRefused("The audit log is not available, so nothing was copied or replaced.",
+                                     "Choose another folder, or try again once the framework has started.",
+                                     code="failed")
+    state = _state_dir(framework)
+    ledger = ReservationLedger(state) if state is not None else None
+    checks = check_disk([DiskNeed("destination", plan.root, plan.needed, "the copy of the earlier build")], ledger,
+                        disk_usage=_disk_usage)
+    short = [c for c in checks if not c.fits]
+    if short:
+        raise DestinationRefused("Not copied: not enough disk space there; the copy "
+                                 + "; ".join(c.sentence() for c in short) + ".",
+                                 "Free space there or choose a folder on another disk; the earlier build stays where "
+                                 "it is.", code="insufficient_resources")
+    try:
+        manifest = json.loads((plan.source / MANIFEST).read_text(encoding="utf-8"))
+        listed = {a["file"]: a["sha256"] for a in manifest.get("artifacts") or []
+                  if isinstance(a, dict) and isinstance(a.get("file"), str) and isinstance(a.get("sha256"), str)}
+    except (OSError, ValueError, AttributeError):
+        listed = {}
+    parent = target.parent
+    copy = parent / _free_name(parent, target.name)
+    try:
+        files, size, skipped = _copy_verified(plan.source, plan.zip, copy, listed)
+    except OSError as e:  # a disk that ran full or a file that cannot be read: only the unfinished copy went
+        raise DestinationRefused(f"Not copied: the copy failed ({e.strerror or e}); the earlier build stays where it "
+                                 "is.", "Check the disk there, then try again.", code="failed") from None
+    result = SaveResult(folder=copy, zip=(copy.parent / f"{copy.name}.zip") if plan.zip else None, files=files,
+                        bytes=size)
+    if skipped:
+        result.kept = True
+        result.notes.append(f"Not copied: {', '.join(skipped)}.")
+    if accepted is not None:
+        result.notes += _replace_with_copy(framework, plan, accepted, trash, audit, result)
+    out = output_folder(framework)
+    if state is not None and not _inside(_real(result.folder), _real(out)):
+        try:
+            SavedIndex(state).add(result.folder, plan.root)
+        except (OSError, TimeoutError) as e:
+            result.notes.append(f"It is not listed by the framework ({e}); it is in {result.folder}.")
+    return result
+
+
+def _replace_with_copy(framework, plan: CopyPlan, accepted: Any, trash: Any, audit: Any,
+                       result: SaveResult) -> List[str]:
+    """What lay at the plan's target goes as the person accepted it (the list must still be exactly that one; the
+    audit log records it first), then the finished copy takes its name. Returns notes; the copy keeps its free name
+    when anything stops this."""
+    from orchestrator.Core.deletion import PlanChanged, require_same
+    target = plan.target
+    current = _replace_plan(framework, target, accepted.plan.mode_offered)
+    try:
+        require_same(accepted, current, f"what lies at {target}")
+    except PlanChanged as e:
+        return [f"{e} The copy is in {result.folder}."]
+    paths = [Path(item.full_path) for item in current.items]
+    try:
+        audit.record(accepted.actor, "artifacts", "framework", "person", "earlier_build_replaced", approved=True,
+                     arguments={"items": len(paths), "bytes": accepted.plan.total_bytes, "mode": accepted.mode},
+                     detail="the copy of an earlier identical build replaces what lay under its name ("
+                            + ("moved to the trash" if accepted.mode == "trash" else "deleted for good") + ")",
+                     extra=accepted.audit_extra())
+    except Exception:  # noqa: BLE001 - the reason could name a host path
+        return [f"The audit log cannot record the replacement; nothing was replaced. The copy is in {result.folder}."]
+    if accepted.mode == "trash":
+        from orchestrator.Core.trash import TrashError
+        where = OUTPUT if _inside(_real(plan.root), _real(output_folder(framework))) else SAVED
+        for item, path in zip(current.items, paths):
+            try:
+                trash.move("artifact", path, plan.root, where, item.speaking_name, accepted, accepted.actor)
+            except TrashError as e:
+                return [f"{e} Nothing more was replaced; the copy is in {result.folder}."]
+    else:
+        for path in paths:
+            try:
+                if path.is_dir() and not path.is_symlink():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
+            except OSError as e:
+                return [f"{path} could not be deleted ({e.strerror or e}); the copy is in {result.folder}."]
+    try:
+        os.rename(result.folder, target)
+        if result.zip is not None:
+            os.rename(result.zip, target.parent / f"{target.name}.zip")
+    except OSError as e:
+        return [f"The copy could not take the name {target.name} ({e.strerror or e}); it is in {result.folder}."]
+    result.folder = target
+    if result.zip is not None:
+        result.zip = target.parent / f"{target.name}.zip"
+    return []
+
+
 def set_output_folder(framework, folder: Any) -> Path:
     """The person sets the output folder (File > Output Folder... in the GUI, `llm-cli config output-folder`; never an
     AI): checked like a destination and made when it does not exist, then saved in config.yml. The earlier output
@@ -714,7 +935,7 @@ def remember(framework, folder: Any, root: Any) -> None:
     SavedIndex(state).add(target, _real(Path(str(root))))
 
 
-__all__ = ["BUILDS", "DEFAULT_OUTPUT", "DestinationRefused", "INDEX_FILE", "ListedArtifact", "OUTPUT", "SAVED",
-           "SaveResult", "SavedIndex", "WHERE_TEXT", "artifact_folders", "build_folder", "check_destination", "keep_listing",
-           "label_for", "list_artifacts", "output_folder", "refusal", "remember", "roots", "save_artifact",
-           "set_output_folder", "windows_plain_path", "windows_system_folder"]
+__all__ = ["BUILDS", "CopyPlan", "DEFAULT_OUTPUT", "DestinationRefused", "INDEX_FILE", "ListedArtifact", "OUTPUT",
+           "SAVED", "SaveResult", "SavedIndex", "WHERE_TEXT", "artifact_folders", "build_folder", "check_destination",
+           "copy_artifact", "keep_listing", "label_for", "list_artifacts", "output_folder", "plan_copy", "refusal",
+           "remember", "roots", "save_artifact", "set_output_folder", "windows_plain_path", "windows_system_folder"]
