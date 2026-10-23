@@ -741,3 +741,35 @@ class TestReplacedHelpersDelegate:
             with pytest.raises(SystemExit) as e:
                 cli_module._ensure_package(tmp_path, "0123456789abcdef", "builds", "build")
             assert e.value.code == 1 and text in " ".join(printed.getvalue().split())
+
+
+def test_the_tabs_trust_of_a_new_host_key_is_audited_as_the_cli_audits_it(qapp, tmp_path, monkeypatch,
+                                                                          memory_keyring):
+    """The rest of the wave-5 minor (ARCH_PLAN c3-deploy-flow: the GUI deploy writes the same audit as the CLI,
+    through pairing.trust_presented_key): the GUI's question about a new host key, which comes before the Deployment
+    tab's deploy, wrote its trust to the registry's audit log only, so without the registry the trust had no audit
+    row, while `llmcf deploy run` writes it to the per-user audit log (person_steps.device_audit). With the registry
+    its log takes the row, as before; exactly one row either way."""
+    pytest.importorskip("PySide6")
+    paramiko = pytest.importorskip("paramiko")
+    from orchestrator.Core.vault_key import audit_key
+    from orchestrator.gui import host_key, plain
+    from orchestrator.tools.audit import AuditLog
+    monkeypatch.setattr(plain, "_exec", lambda box: plain.QMessageBox.Yes)
+    state = tmp_path / "state"
+    state.mkdir()
+    bare = SimpleNamespace(config=SimpleNamespace(user_state_dir=str(state)))
+    key = paramiko.ECDSAKey.generate()
+    assert host_key.ask_trust(None, bare, HOST, 2222, key, "unknown", step="deploy") is True
+    rows = [r for r in AuditLog(state / "audit.db", key=audit_key(None, state)).entries(10)
+            if r["tool"] == "host_key_trusted"]
+    assert len(rows) == 1 and rows[0]["actor"] == "gui"
+    extra = rows[0]["extra"] if isinstance(rows[0]["extra"], dict) else json.loads(rows[0]["extra"])
+    assert extra["confirm_channel"] == "framework-gui"
+    other = tmp_path / "other"
+    other.mkdir()
+    registry = SimpleNamespace(audit=Audit())
+    booted = SimpleNamespace(config=SimpleNamespace(user_state_dir=str(other)), tool_registry=registry)
+    assert host_key.ask_trust(None, booted, HOST, 2223, key, "unknown", step="deploy") is True
+    assert [r["tool"] for r in registry.audit.rows] == ["host_key_trusted"]
+    assert not (other / "audit.db").exists(), "the registry's log takes the row; no second log"

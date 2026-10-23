@@ -66,8 +66,8 @@ def question_text(host: str, port: int, key: Any, lang: Optional[str] = None) ->
 def ask_trust(parent: Any, framework: Any, host: str, port: int, key: Any, status: str, *, step: str = "",
               lang: Optional[str] = None) -> bool:
     """The question part on the GUI thread: True for a known key, the person's "Yes" for an unknown one (then the key
-    is stored and the trust written to the audit log: remote/pairing.py first_use), False for a changed key (refused,
-    recorded for Mojo) or "No"."""
+    is stored and the trust written to the audit log the CLI writes it to: remote/pairing.py first_use), False for a
+    changed key (refused, recorded for Mojo) or "No"."""
     from orchestrator.gui.plain import ask, plain_box
     from orchestrator.remote import pairing
     from orchestrator.remote.address import Endpoint
@@ -78,7 +78,13 @@ def ask_trust(parent: Any, framework: Any, host: str, port: int, key: Any, statu
         return True
     folder = state_dir(framework)
     check = KeyCheck.of(Endpoint(host, int(port)), key, status)
-    audit = getattr(getattr(framework, "tool_registry", None), "audit", None)
+
+    def audit():
+        """The audit log the CLI writes the trust to (person_steps.device_audit: the registry's, else the per-user
+        one); opened only when the person trusted the key."""
+        from orchestrator.runtime.device.person_steps import device_audit
+        return device_audit(framework, folder)
+
     outcome = pairing.first_use(TrustStore(folder), check, via="gui", audit=audit, actor="gui",
                                 ask=lambda c: ask(parent, ui_text("deploy.hostkey.title", lang),
                                                   question_text(host, port, key, lang)))
