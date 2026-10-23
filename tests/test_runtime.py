@@ -1157,6 +1157,37 @@ class TestServerProcess:
         handlers[-1]()
         assert gone(third.pid) and rt.endpoint() is None and gone(first.pid)
 
+    def test_choosing_a_tier_is_remembered_when_the_running_server_is_reused(self, fake_runtime):
+        # `runtime start --model X` (or `--model auto`) on a server that already serves X returned before the choice
+        # was recorded, so the next plain start loaded the recommendation instead.
+        rt = fake_runtime()
+        first = rt.start()
+        assert rt.preferred_tier() is None
+        assert rt.start(tier="tiny", remember=False).pid == first.pid and rt.preferred_tier() is None
+        assert rt.start(tier="tiny").pid == first.pid and rt.preferred_tier() == "tiny"
+        assert rt.start(tier="auto").pid == first.pid and rt.preferred_tier() is None
+
+    def test_an_explicit_idle_time_restarts_a_server_started_with_another(self, fake_runtime):
+        # `runtime start --sleep-idle 0` was ignored while a server with the catalog's 600 s ran.
+        rt = fake_runtime()
+        first = rt.start()
+        argv = json.loads((rt.root / "b1-cpu" / "argv-1.json").read_text())
+        assert argv[argv.index("--sleep-idle-seconds") + 1] == "600"
+        second = rt.start(sleep_idle_seconds=0)
+        assert second.pid != first.pid and "--sleep-idle-seconds" not in json.loads(
+            (rt.root / "b1-cpu" / "argv-2.json").read_text())
+        assert rt.start(sleep_idle_seconds=0).pid == second.pid and rt.start().pid == second.pid
+        assert rt.start(sleep_idle_seconds=600).pid != second.pid
+
+    def test_an_idle_time_the_build_cannot_use_restarts_nothing(self, fake_runtime):
+        # A build without --sleep-idle-seconds always runs with 0: asking for another value compares as 0, so it
+        # neither restarts the server on every start nor passes the option.
+        rt = fake_runtime()
+        rt.catalog.llama_cpp.features["sleep_idle_seconds"] = False
+        first = rt.start()
+        assert rt.start(sleep_idle_seconds=300).pid == first.pid
+        assert "--sleep-idle-seconds" not in json.loads((rt.root / "b1-cpu" / "argv-1.json").read_text())
+
     def test_exit_handler_does_not_wait_for_a_busy_lock(self, fake_runtime, monkeypatch):
         # Another process holding the runtime lock (its start waits up to minutes for health) must not keep this
         # process from exiting for the lock's 15 minutes; the tied server, verified by pid and start time, is ended

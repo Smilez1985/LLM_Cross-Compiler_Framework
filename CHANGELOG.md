@@ -2080,6 +2080,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **`runtime start --model` and `--sleep-idle` count also while a server runs** (chain port-runtime, from the review
+  of the managed llama-server): a start that found the running server already serving the chosen model returned
+  before the choice was recorded, so `runtime start --model X` (or `--model auto`, and the GUI's model choice) on a
+  running server was forgotten and the next plain start loaded the recommendation again. The choice is now recorded
+  under the runtime lock in both cases (an evaluation run, `remember=False`, still keeps the earlier one). An
+  explicit idle time (`--sleep-idle`, the GUI's field) that differs from the running server's was ignored; the
+  server now records its effective idle time and is started again when another one is asked for (a build without
+  the option always runs with 0 and is not restarted for it). Both on bare metal and in Docker mode. Regression
+  tests: `tests/test_runtime.py` `test_choosing_a_tier_is_remembered_when_the_running_server_is_reused`,
+  `test_an_explicit_idle_time_restarts_a_server_started_with_another`,
+  `test_an_idle_time_the_build_cannot_use_restarts_nothing`, `tests/test_runtime_mode.py`
+  `test_a_reused_container_remembers_the_tier_and_another_idle_time_restarts_it`.
 - **The local runtime's lock is not held for minutes any more** (chain port-runtime, from the review of the managed
   llama-server): `ditto runtime install --prebuilt` (and the GUI's **Install the official prebuilt archive…**)
   downloaded the archives while it held the runtime lock, so a `runtime start` or `runtime stop` elsewhere waited for

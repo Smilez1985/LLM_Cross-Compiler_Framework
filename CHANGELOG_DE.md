@@ -2350,6 +2350,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **`runtime start --model` und `--sleep-idle` zählen auch, während ein Server läuft** (Kette port-runtime, aus der
+  Prüfung des verwalteten llama-server): Ein Start, der den laufenden Server schon mit dem gewählten Modell vorfand,
+  kehrte zurück, bevor die Wahl gespeichert war; `runtime start --model X` (oder `--model auto`, und die Modellwahl
+  der GUI) bei laufendem Server ging daher verloren, und der nächste einfache Start lud wieder die Empfehlung. Die
+  Wahl wird jetzt in beiden Fällen unter der Laufzeit-Sperre gespeichert (ein Evaluationslauf, `remember=False`,
+  behält weiterhin die frühere). Eine ausdrückliche Leerlaufzeit (`--sleep-idle`, das Feld der GUI), die von der des
+  laufenden Servers abwich, wurde übergangen; der Server speichert jetzt seine wirksame Leerlaufzeit und wird neu
+  gestartet, wenn eine andere verlangt wird (ein Build ohne die Option läuft immer mit 0 und wird dafür nicht neu
+  gestartet). Auf Bare Metal und im Docker-Modus. Regressionstests: `tests/test_runtime.py`
+  `test_choosing_a_tier_is_remembered_when_the_running_server_is_reused`,
+  `test_an_explicit_idle_time_restarts_a_server_started_with_another`,
+  `test_an_idle_time_the_build_cannot_use_restarts_nothing`, `tests/test_runtime_mode.py`
+  `test_a_reused_container_remembers_the_tier_and_another_idle_time_restarts_it`.
 - **Die Sperre der lokalen Laufzeit wird nicht mehr minutenlang gehalten** (Kette port-runtime, aus der Prüfung des
   verwalteten llama-server): `ditto runtime install --prebuilt` (und **Offizielles fertiges Archiv
   installieren…** in der GUI) lud die Archive herunter, während es die Laufzeit-Sperre hielt; ein
