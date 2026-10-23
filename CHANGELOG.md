@@ -2508,9 +2508,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   guide says from Engine 29 on). The signing key is read into a throwaway keyring and trusted only when the download
   holds exactly one key whose primary fingerprint is the one Docker's install guide publishes
   (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`, pinned in the script with its source); apt then checks every
-  package against the signed package lists. Nothing is written before the check. Any other system, ARMv6
-  (Raspberry Pi 1, Zero), a key that does not match or cannot be downloaded, and a failing apt stop in plain words
-  with Docker's manual install link; a new apt source that breaks `apt-get update` is taken back. No downloaded
+  package against the signed package lists. Nothing is written before the check, and the check starts no gpg-agent
+  that would outlive the installer. Any other system, ARMv6 (Raspberry Pi 1, Zero), a key that does not match or
+  cannot be downloaded, and a failing apt stop in plain words with Docker's manual install link; a new apt source that breaks `apt-get update` is taken back. No downloaded
   script runs any more. Tests run the installer in a sandbox with fake curl, apt-get, dpkg and uname and a real gpg
   key made for the test; `install.sh` is ShellCheck-clean (the two findings of the base are fixed too).
 - **The installers no longer download pip without a checksum**: `install.sh` and `install.bat` ran
