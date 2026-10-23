@@ -1163,6 +1163,73 @@ class TestTheBoardsDataMoves:
         assert (info["address"], info["label"]) == ("192.0.2.41:2222", "Desk board")
         assert b.profiles.list_devices() == [moved.device_id]
 
+    def test_a_change_that_fails_otherwise_takes_its_copies_back(self, b, monkeypatch):
+        """known_hosts' lock held by another process (or any other failure of the change than a refusal): the change
+        is not made, so the copies go again. Copies left under the new ID would be stale when the person tries again
+        later, and the board's newer data would then stay under the old ID as 'kept'."""
+        from orchestrator.remote import pairing
+        from orchestrator.runtime.device import person_steps
+        from orchestrator.utils.file_lock import LockTimeout
+        before, outside = self.data(b, b.old), self.unchanged(b)
+        change = self.plan(b)
+
+        def held(*a, **k):
+            raise LockTimeout("known_hosts.lock is held by another process")
+        monkeypatch.setattr(pairing, "replace_key", held)
+        with pytest.raises(LockTimeout):
+            person_steps.change_board(b.state, change, via="cli", audit=b.audit, actor="cli", output_dirs=[b.output])
+        assert self.data(b, b.old) == before and self.unchanged(b) == outside
+        assert self.data(b, change.plan.new_device_id) == ({}, {}, None, []), "the copies made went again"
+
+    def test_a_ctrl_c_while_the_data_is_copied_takes_the_copies_back(self, b, monkeypatch):
+        from orchestrator.runtime.device import person_steps, tested
+        before, outside = self.data(b, b.old), self.unchanged(b)
+        change = self.plan(b)
+
+        def interrupted(*a, **k):
+            raise KeyboardInterrupt()
+        monkeypatch.setattr(tested, "copy_board_rows", interrupted)   # the last part: every other one is copied
+        with pytest.raises(KeyboardInterrupt):
+            person_steps.change_board(b.state, change, via="cli", audit=b.audit, actor="cli", output_dirs=[b.output])
+        assert self.data(b, b.old) == before and self.unchanged(b) == outside and b.audit.rows == []
+        assert self.data(b, change.plan.new_device_id) == ({}, {}, None, []), "the copies made went again"
+        assert not list(b.runtime.root.parent.glob(".*moving*"))
+
+    def test_a_ctrl_c_after_the_change_still_moves_the_data(self, b, monkeypatch):
+        """known_hosts holds the new key (and its audit row) once replace_key returns: a Ctrl+C during the login test
+        that follows leaves no second copy of the board's data, it is under the new device ID only, as when the
+        board's record could not be written."""
+        from orchestrator.runtime.device import person_steps
+        before = self.data(b, b.old)
+        change = self.plan(b)
+
+        def interrupted(*a, **k):
+            raise KeyboardInterrupt()
+        monkeypatch.setattr(person_steps, "framework_key_logs_in", interrupted)
+        with pytest.raises(KeyboardInterrupt):
+            person_steps.change_board(b.state, change, via="cli", audit=b.audit, actor="cli", output_dirs=[b.output])
+        assert [row["tool"] for row in b.audit.rows] == ["host_key_replaced"]
+        assert self.data(b, change.plan.new_device_id) == before
+        assert self.data(b, b.old) == ({}, {}, None, []), "no second copy stays under the old ID"
+
+    def test_the_probe_and_its_label_and_address_move_together(self, b):
+        """The stored probe is two files (the profile and its label and address): when the new ID holds one of them
+        with other content, neither moves, so the probe is kept as a whole and never named as moved and kept at once."""
+        from orchestrator.runtime.device import board_move, person_steps
+        key = paramiko.ECDSAKey.generate()
+        change = self.plan(b, key)
+        new_files = b.profiles.device_files(change.plan.new_device_id)
+        old_files = b.profiles.device_files(b.old)
+        new_files["probe"].write_text(old_files["probe"].read_text())   # the same profile ...
+        new_files["probe_info"].write_text(json.dumps({"label": "Its own", "address": "192.0.2.99"}))   # ... not so
+        own = {kind: path.read_text() for kind, path in new_files.items() if path.exists()}
+        old = {kind: path.read_text() for kind, path in old_files.items() if kind != "deploy_settings"}
+        person_steps.change_board(b.state, change, via="cli", audit=b.audit, actor="cli", output_dirs=[b.output])
+        assert change.data.kept == ["probe"] and "probe" not in change.data.moved
+        assert {kind: old_files[kind].read_text() for kind in old} == old, "the probe stays whole under the old ID"
+        assert {kind: path.read_text() for kind, path in new_files.items() if kind in own} == own
+        assert change.data.moved == [k for k in board_move.KINDS if k != "probe"]
+
 
 @pytest.mark.usefixtures("keep_logger_levels")
 class TestCliDevicesEdit:

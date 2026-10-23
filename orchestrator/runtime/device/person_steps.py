@@ -308,16 +308,24 @@ def change_board(state_dir: Path, change: BoardChange, *, via: str, audit: Any, 
         if move is not None:
             move.undo()   # nothing changed: the board's data stays where it was
         raise BoardStepError(str(e), e.kind) from None
-    paired = device.paired
-    if plan.key_changed:
-        paired = framework_key_logs_in(state_dir, plan.new.host, plan.new.port, device.user)
+    except BaseException:
+        if move is not None:
+            move.undo()   # known_hosts' lock held elsewhere, a Ctrl+C: no change, so no copies stay either
+        raise
     try:
-        moved = TrustedDevices(state_dir).replace(device.device_id, plan.new.host, plan.new.port, device.user,
-                                                  plan.new_key, via=via, paired=paired, label=device.label)
-    except Exception:  # noqa: BLE001 - known_hosts holds the change; the record is added again by the person
-        moved = None
-    if move is not None:
-        change.data = move.finish()   # the change is made: only now the old ID's copies go
+        paired = device.paired
+        if plan.key_changed:
+            paired = framework_key_logs_in(state_dir, plan.new.host, plan.new.port, device.user)
+        try:
+            moved = TrustedDevices(state_dir).replace(device.device_id, plan.new.host, plan.new.port, device.user,
+                                                      plan.new_key, via=via, paired=paired, label=device.label)
+        except Exception:  # noqa: BLE001 - known_hosts holds the change; the record is added again by the person
+            moved = None
+    finally:
+        if move is not None:
+            # the change is made (known_hosts holds the new key): only now the old ID's copies go, also when a Ctrl+C
+            # ends the login test, so no second copy of the board's data stays
+            change.data = move.finish()
     if plan.address_changed:
         from orchestrator.runtime.profile import ProfileStore
         try:
