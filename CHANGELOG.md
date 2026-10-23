@@ -1472,8 +1472,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   a login time limit (`ConnectTimeout`) and keepalive (`ServerAliveInterval`, `ServerAliveCountMax`), each command as
   one `sh -c` with a time limit (which also holds while the command's input is written) and an output cap, and
   `UserKnownHostsFile` in quotes: a state folder with a space in its path (a Windows account name such as "Jane Doe")
-  split the framework's known_hosts into two files that do not exist, so every board's key counted as unknown. A
-  password is no longer dropped silently: OpenSSH never asks for one, so the deploy logs in with the framework key and
+  split the framework's known_hosts into two files that do not exist, so every board's key counted as unknown.
+  `GlobalKnownHostsFile` is the null device (`/dev/null`, `NUL` on Windows): OpenSSH no longer also reads this
+  computer's system-wide known_hosts, so a key another program or an administrator put there never lets a board in
+  that you did not confirm in the framework (`StrictHostKeyChecking=yes` stays). A password is no longer dropped
+  silently: OpenSSH never asks for one, so the deploy logs in with the framework key and
   its result says the password was not used. A deploy bound to a fingerprint you were shown is still refused without
   paramiko, and so is a board session that must also check which board answers (its device ID). The framework's SSH key is made private to your account when it is created and before OpenSSH uses it
   (`orchestrator/utils/atomic.py` `owner_only`: group and other bits off on Linux and macOS, on Windows a protected ACL

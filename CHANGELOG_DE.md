@@ -1672,9 +1672,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `ServerAliveCountMax`), jeder Befehl als ein `sh -c` mit Zeitlimit (das auch gilt, während die Eingabe des Befehls
   geschrieben wird) und Ausgabegrenze, und `UserKnownHostsFile` in Anführungszeichen: Ein Zustandsordner mit einem
   Leerzeichen im Pfad (ein Windows-Kontoname wie „Jane Doe“) teilte die known_hosts des Frameworks in zwei Dateien,
-  die es nicht gibt, sodass der Schlüssel jedes Boards als unbekannt galt. Ein Passwort geht nicht mehr
-  stillschweigend verloren: OpenSSH fragt nie danach, also meldet sich das Deployment mit dem Schlüssel des Frameworks
-  an, und sein Ergebnis sagt, dass das Passwort nicht genutzt wurde. Ein Deployment, das an einen dir gezeigten
+  die es nicht gibt, sodass der Schlüssel jedes Boards als unbekannt galt. `GlobalKnownHostsFile` ist das Null-Gerät
+  (`/dev/null`, unter Windows `NUL`): OpenSSH liest nicht mehr zusätzlich die systemweite known_hosts dieses
+  Rechners, ein Schlüssel, den ein anderes Programm oder ein Administrator dort eingetragen hat, lässt also nie ein
+  Board herein, das du im Framework nicht bestätigt hast (`StrictHostKeyChecking=yes` bleibt). Ein Passwort geht nicht
+  mehr stillschweigend verloren: OpenSSH fragt nie danach, also meldet sich das Deployment mit dem Schlüssel des
+  Frameworks an, und sein Ergebnis sagt, dass das Passwort nicht genutzt wurde. Ein Deployment, das an einen dir gezeigten
   Fingerabdruck gebunden ist, wird ohne paramiko weiter abgelehnt, ebenso eine Board-Sitzung, die auch prüfen muss,
   welches Board antwortet (seine Geräte-ID). Der SSH-Schlüssel des Frameworks wird beim Anlegen
   und bevor OpenSSH ihn nutzt nur für dein Konto lesbar gemacht
