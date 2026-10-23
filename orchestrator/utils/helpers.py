@@ -176,6 +176,15 @@ def try_sha256_file(path: Union[str, Path]) -> Optional[str]:
         return None
 
 
+def git_blob_id(path: Union[str, Path], *, follow_links: bool = True) -> str:
+    """The id git gives a file's bytes: sha1 of "blob <size>\\0" and the bytes. It is the Hugging Face Hub's ETag of a
+    file stored without LFS, and huggingface_hub's cache names that file's blob by it. A check against a damaged or
+    other file, not a security digest. OSError when the file cannot be read."""
+    with _open_read(path, follow_links) as f:
+        size = os.fstat(f.fileno()).st_size
+        return _digest(lambda: f.read(HASH_CHUNK), hashlib.sha1(b"blob %d\0" % size, usedforsecurity=False))
+
+
 def sha256_fileobj(fh, *, limit: Optional[int] = None, cancel: Optional[Callable[[], Any]] = None,
                    chunk: int = HASH_CHUNK) -> str:
     """sha256 of what an open binary file gives from its current position: to its end, or only its next `limit` bytes

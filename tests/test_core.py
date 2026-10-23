@@ -322,24 +322,45 @@ class TestDependencyApiRegressions:
     # in tests/test_rag.py, the FastEmbed API in TestFastEmbedApi there.
 
     def test_hub_file_download_uses_current_hub_api(self, tmp_path, monkeypatch):
-        # The Hugging Face browser's download (the tiny-model snapshot download it replaced was removed).
+        # The Hugging Face browser's download (the tiny-model snapshot download it replaced was removed). Since A6
+        # (DECISIONS round 11) it goes through the framework's verified fetcher into models/hf/<owner>--<name>/
+        # <commit[:12]>/ instead of huggingface_hub's cache: this test pinned hf_hub_download(cache_dir=models) before.
         import inspect
         import huggingface_hub
+        from orchestrator.Core import hf_hub
         from orchestrator.Core.model_manager import ModelManager
 
-        seen = {}
+        body = b'{"model_type": "qwen3"}'
+        seen, urls = {}, []
 
-        def fake_hf_hub_download(**kwargs):
-            inspect.signature(huggingface_hub.hf_hub_download).bind(**kwargs)
-            seen.update(kwargs)
-            return str(Path(kwargs["cache_dir"]) / kwargs["filename"])
+        def model_info(self, repo_id, **kwargs):
+            inspect.signature(huggingface_hub.HfApi.model_info).bind(self, repo_id, **kwargs)
+            seen.update(kwargs, repo_id=repo_id)
+            return SimpleNamespace(sha="c" * 40, siblings=[SimpleNamespace(rfilename="config.json", size=len(body),
+                                                                           lfs=None)])
 
-        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_hf_hub_download)
-        monkeypatch.setattr(huggingface_hub.HfApi, "model_info", lambda self, repo_id, **kw: SimpleNamespace(sha="c" * 40))
+        class Response:
+            status_code, url, headers = 200, "https://huggingface.co/x", {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def iter_content(self, chunk_size=1):
+                yield body
+
+        session = SimpleNamespace(get=lambda url, **kw: urls.append(url) or Response())
+        monkeypatch.setattr(huggingface_hub.HfApi, "model_info", model_info)
+        monkeypatch.setattr(hf_hub.HubFetcher, "session", property(lambda self: session))
         mm = ModelManager(ConfigManager(tmp_path / "configs"), base_dir=tmp_path)
 
         path = mm.download_file("Qwen/Qwen3.5-0.8B", "config.json", token=None)
 
         assert path is not None, "download_file swallowed an exception"
-        assert seen["repo_id"] == "Qwen/Qwen3.5-0.8B" and seen["cache_dir"] == str(tmp_path / "models")
-        assert seen["revision"] == "c" * 40, "the file comes from the commit that was resolved, not a moving branch"
+        assert Path(path) == tmp_path / "models" / "hf" / "Qwen--Qwen3.5-0.8B" / ("c" * 12) / "config.json"
+        assert Path(path).read_bytes() == body and seen["repo_id"] == "Qwen/Qwen3.5-0.8B"
+        assert seen["files_metadata"] is True and seen["token"] is False, "never an implicit token"
+        assert urls == ["https://huggingface.co/Qwen/Qwen3.5-0.8B/resolve/" + "c" * 40 + "/config.json"], \
+            "the file comes from the commit that was resolved, not a moving branch"

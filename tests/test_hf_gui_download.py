@@ -178,3 +178,247 @@ class TestTheOldCacheIsUsableForABuild:
         assert self.stage(engine, model) == ("/build-cache/input-model",
                                              {str(model.resolve()): {"bind": "/build-cache/input-model",
                                                                      "mode": "ro"}})
+
+
+# --- A6: the browser's download through the verified fetcher ----------------------------------------------------------
+
+@pytest.fixture
+def person(tmp_path, monkeypatch):
+    """The browser's ModelManager over a framework stand-in with a per-user folder (the reservation ledger), the vault
+    and a stand-in for the Hub (tests/test_hf_tools.py's)."""
+    from orchestrator.Core import hf_hub
+    from orchestrator.Core.disk_plan import ReservationLedger
+    from orchestrator.Core.model_manager import ModelManager
+    from test_hf_tools import DATA, FakeSession, Hub
+    monkeypatch.setenv("HF_TOKEN", "hf_" + "Implicit" * 5)   # never to be used
+    hub = Hub()
+    models, state = tmp_path / "models", tmp_path / "state"
+    models.mkdir()
+    state.mkdir()
+    settings = {"models_dir": str(models)}
+    vault = {"hf_token": None}
+    config = SimpleNamespace(get=lambda key, default=None: settings.get(key, default), user_state_dir=str(state))
+    framework = SimpleNamespace(config=config, resolve_path=lambda p: Path(p), hf_api_factory=hub.factory,
+                                secrets_manager=SimpleNamespace(get_secret=lambda key: vault.get(key)))
+    sessions = []
+
+    def use(body=DATA, gate=None):
+        session = FakeSession(body, gate)
+        sessions.append(session)
+        monkeypatch.setattr(hf_hub.HubFetcher, "session", property(lambda self: session))
+        return session
+
+    use()
+    return SimpleNamespace(mm=ModelManager(framework), hub=hub, models=models, state=state, vault=vault,
+                           framework=framework, use=use, sessions=sessions, ledger=ReservationLedger(state))
+
+
+def new_place(person, name="tiny-q4_k_m.gguf"):
+    from test_hf_tools import COMMIT
+    return person.models / "hf" / "acme--tiny-GGUF" / COMMIT[:12] / name
+
+
+class TestTheBrowsersDownload:
+
+    def test_it_lands_pinned_in_the_new_folder_and_is_listed(self, person):
+        from test_hf_tools import COMMIT, DATA, REPO
+        path = person.mm.download_file(REPO, "tiny-q4_k_m.gguf")
+        assert Path(path) == new_place(person) and Path(path).read_bytes() == DATA
+        assert person.sessions[-1].seen[0][0] == f"https://huggingface.co/{REPO}/resolve/{COMMIT}/tiny-q4_k_m.gguf"
+        assert ("model_info", REPO, {"revision": None, "files_metadata": True, "token": False}) in person.hub.calls
+        assert not list(person.models.glob("models--*")), "nothing lands in huggingface_hub's cache any more"
+        files = LocalFiles(person.state, {"models": person.models})
+        refs = [e["ref"] for e in files.list("model")[0]]
+        assert refs == [f"models:hf/acme--tiny-GGUF/{COMMIT[:12]}/tiny-q4_k_m.gguf"]
+
+    def test_a_corrupted_byte_never_gets_its_name(self, person):
+        from orchestrator.utils.download import IntegrityError
+        from test_hf_tools import DATA, REPO
+        bad = bytearray(DATA)
+        bad[100] ^= 0xFF
+        person.use(body=bytes(bad))
+        with pytest.raises(IntegrityError, match="does not match"):
+            person.mm.download_file(REPO, "tiny-q4_k_m.gguf")
+        assert not new_place(person).exists() and not new_place(person).with_name("tiny-q4_k_m.gguf.part").exists()
+
+    def test_a_small_file_without_lfs_is_pinned_by_size(self, person):
+        from test_hf_tools import REPO
+        person.use(body=b'{"a": 1234}\n')
+        path = person.mm.download_file(REPO, "config.json")
+        assert Path(path).read_bytes() == b'{"a": 1234}\n'
+
+    def test_a_file_the_repository_does_not_list_is_refused_before_any_transfer(self, person):
+        from orchestrator.Core.hf_hub import HubError
+        from test_hf_tools import REPO
+        with pytest.raises(HubError) as refused:
+            person.mm.download_file(REPO, "other.gguf")
+        assert refused.value.code == "unknown_id" and person.sessions[-1].seen == []
+
+    def test_a_network_error_is_a_plain_error(self, person):
+        from orchestrator.Core.hf_hub import HubError
+        from test_hf_tools import REPO
+        person.hub.fail = True
+        with pytest.raises(HubError, match="could not be reached"):
+            person.mm.download_file(REPO, "tiny-q4_k_m.gguf")
+
+    def test_without_a_token_none_is_sent_never_an_implicit_one(self, person):
+        from test_hf_tools import REPO
+        person.mm.download_file(REPO, "tiny-q4_k_m.gguf")
+        assert person.hub.tokens == [False]
+        assert all("Authorization" not in headers for _, headers in person.sessions[-1].seen)
+
+    def test_the_stored_token_or_the_typed_one_goes_only_to_huggingface(self, person):
+        from test_hf_tools import REPO, TOKEN
+        person.vault["hf_token"] = TOKEN
+        person.mm.download_file(REPO, "tiny-q4_k_m.gguf")
+        assert person.hub.tokens == [TOKEN]
+        url, headers = person.sessions[-1].seen[0]
+        assert url.startswith("https://huggingface.co/") and headers["Authorization"] == f"Bearer {TOKEN}"
+        typed = "hf_" + "Typed" * 8
+        new_place(person).unlink()
+        person.mm.download_file(REPO, "tiny-q4_k_m.gguf", typed)
+        assert person.hub.tokens[-1] == typed
+
+    def test_progress_is_reported_and_a_stop_keeps_the_part(self, person):
+        import threading
+        from orchestrator.Core.hf_hub import DownloadStopped
+        from test_hf_tools import DATA, REPO, Response
+        stop = threading.Event()
+
+        class Stopping(Response):
+            def iter_content(self, chunk_size=1):
+                yield self.data[:4096]
+                stop.set()
+                yield self.data[4096:]
+
+        person.use(gate=lambda body, start: Stopping(body[start:], start, total=len(body)))
+        seen = []
+        with pytest.raises(DownloadStopped):
+            person.mm.download_file(REPO, "tiny-q4_k_m.gguf", progress=lambda *a: seen.append(a), stop=stop)
+        part = new_place(person).with_name("tiny-q4_k_m.gguf.part")
+        assert seen == [("tiny-q4_k_m.gguf", 4096, len(DATA))]
+        assert part.stat().st_size == 4096 and not new_place(person).exists()
+        assert person.ledger.entries() == [], "a stopped download holds no space"
+
+
+class TestTheBrowsersDiskRule:
+    """The one disk rule (Core/disk_plan, A4) for the browser's download: the reserve stays free beside what running
+    builds and downloads reserved, and the download holds its own reservation while it runs (csC1 open item)."""
+
+    def test_a_file_that_does_not_fit_is_refused_in_the_persons_language(self, person, monkeypatch):
+        import shutil
+        from orchestrator.Core.disk_plan import InsufficientSpace, person_reason
+        from test_hf_tools import REPO
+        monkeypatch.setattr(shutil, "disk_usage", lambda p: SimpleNamespace(total=100 * 10 ** 9, used=0,
+                                                                            free=2 * 1024 ** 3 + 100))
+        with pytest.raises(InsufficientSpace) as refused:
+            person.mm.download_file(REPO, "tiny-q4_k_m.gguf")
+        assert "Not enough disk space for the download" in str(refused.value) and refused.value.checks
+        assert person_reason(refused.value, "de").startswith("Nicht genug Speicherplatz")
+        assert person.sessions[-1].seen == [] and not new_place(person).parent.exists()
+
+    def test_space_a_running_build_holds_counts(self, person):
+        from types import SimpleNamespace as NS
+        from orchestrator.Core.disk_plan import DiskNeed, InsufficientSpace, person_reason
+        from test_hf_tools import REPO, SHA, Sibling, info
+        # conftest: the disk has 1000 GB with 600 GB free; reserve 20 GB. A build holds 575 GB of it.
+        person.ledger.reserve([DiskNeed("cache", person.models, 575 * 10 ** 9, "build")], "build", "b1")
+        person.hub.models[REPO] = info(files=[Sibling(rfilename="big.gguf", size=10 * 10 ** 9, lfs=NS(sha256=SHA))])
+        with pytest.raises(InsufficientSpace) as refused:
+            person.mm.download_file(REPO, "big.gguf")
+        assert "reserved" in person_reason(refused.value, "en") and person.sessions[-1].seen == []
+
+    def test_the_download_holds_its_own_reservation_while_it_runs(self, person):
+        from orchestrator.Core.disk_plan import device_of
+        from test_hf_tools import DATA, REPO, Response
+        held = []
+        person.use(gate=lambda body, start: held.append(person.ledger.entries()) or
+                   Response(body[start:], start, total=len(body)))
+        person.mm.download_file(REPO, "tiny-q4_k_m.gguf")
+        assert [(e["owner"], e["label"], e["bytes"]) for e in held[0]] == [
+            ("gui", f"{REPO}/tiny-q4_k_m.gguf", {device_of(person.models): len(DATA)})]
+        assert person.ledger.entries() == [], "released when it ends"
+
+    def test_a_failed_download_releases_its_reservation(self, person):
+        from orchestrator.utils.download import IntegrityError
+        from test_hf_tools import DATA, REPO
+        person.use(body=DATA[:-1] + b"x")
+        with pytest.raises(IntegrityError):
+            person.mm.download_file(REPO, "tiny-q4_k_m.gguf")
+        assert person.ledger.entries() == []
+
+    def test_a_resumed_download_reserves_only_what_is_missing(self, person):
+        from test_hf_tools import DATA, REPO, Response
+        part = new_place(person).with_name("tiny-q4_k_m.gguf.part")
+        part.parent.mkdir(parents=True)
+        part.write_bytes(DATA[:5000])
+        held = []
+        person.use(gate=lambda body, start: held.append(person.ledger.entries()) or
+                   Response(body[start:], start, total=len(body)))
+        path = person.mm.download_file(REPO, "tiny-q4_k_m.gguf")
+        assert Path(path).read_bytes() == DATA and person.sessions[-1].seen[0][1]["Range"] == "bytes=5000-"
+        assert list(held[0][0]["bytes"].values()) == [len(DATA) - 5000]
+
+
+@pytest.mark.usefixtures("qapp")
+class TestTheBrowserWindowsDownload:
+    """The window hands its progress callback and a stop event to the download, which runs in a worker thread."""
+
+    def test_progress_arrives_from_the_worker(self):
+        import threading
+        from orchestrator.gui import huggingface_window as hf
+        threads = []
+
+        class Manager:
+            def download_file(self, repo_id, filename, token=None, progress=None, stop=None):
+                threads.append(threading.current_thread() is threading.main_thread())
+                progress(filename, 50, 100)
+                progress(filename, 50, 100)   # the same percent again: no second signal
+                progress(filename, 100, 100)
+                return "/models/hf/x"
+
+        worker = hf.DownloadWorker(Manager(), "acme/tiny-GGUF", "x.gguf")
+        seen = []
+        worker.progress.connect(lambda done, total: seen.append((done, total)))
+        worker.start()
+        assert worker.wait(10000)
+        from PySide6.QtWidgets import QApplication
+        QApplication.processEvents()
+        assert seen == [(50, 100), (100, 100)] and threads == [False]
+
+    def test_a_disk_refusal_is_shown_in_the_persons_language(self):
+        from orchestrator.Core.disk_plan import person_reason, refusal, room
+        from orchestrator.gui import huggingface_window as hf
+        full = refusal([room(Path("."), 10 ** 9, label="models", disk_usage=lambda p: SimpleNamespace(
+            total=100 * 10 ** 9, used=0, free=10 ** 9))], "the download")
+
+        class Manager:
+            def download_file(self, *args, **kwargs):
+                raise full
+
+        worker = hf.DownloadWorker(Manager(), "acme/tiny-GGUF", "x.gguf", lang="de")
+        errors = []
+        worker.error.connect(errors.append)
+        worker.run()
+        assert errors == [person_reason(full, "de")] and errors[0].startswith("Nicht genug Speicherplatz")
+
+    def test_the_stop_button_stops_the_download_and_keeps_the_part(self, qapp):
+        import threading
+        from orchestrator.Core.hf_hub import DownloadStopped
+        from orchestrator.gui import huggingface_window as hf
+        started = threading.Event()
+
+        class Manager:
+            def download_file(self, repo_id, filename, token=None, progress=None, stop=None):
+                started.set()
+                assert stop.wait(10)
+                raise DownloadStopped("stopped")
+
+        win = hf.HuggingFaceWindow(SimpleNamespace(model_manager=Manager(), secrets_manager=None))
+        win.download_file("acme/tiny-GGUF", "x.gguf", None)
+        assert started.wait(10) and win.stop_btn.isVisibleTo(win)
+        win.stop_btn.click()
+        assert win.dl_worker.wait(10000)
+        qapp.processEvents()
+        assert not win.stop_btn.isVisibleTo(win)
+        assert "x.gguf" in win.status_label.text() and "kept" in win.status_label.text()
