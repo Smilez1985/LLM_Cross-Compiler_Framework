@@ -128,6 +128,8 @@ KEYS = {
     "SOC_VENDOR": ("pattern", "^[a-z0-9][a-z0-9-]{0,31}$", 0, (), ()),
     "SOC_MODEL": ("pattern", _IDENT, 0, (), ()),
     "BOARD_MODEL": ("text", 128, 0, (), ()),
+    "JETSON_L4T_VERSION": ("pattern", r"^\d{2}\.\d{1,2}\.\d{1,2}$", 0, ("arm64",), ("linux",)),
+    "JETSON_JETPACK_VERSION": ("pattern", r"^\d{1,2}\.\d{1,2}(\.\d{1,2})?$", 0, ("arm64",), ("linux",)),
     "NPU_VENDOR": ("enum", ("rockchip", "hailo", "axelera", "memryx", "google", "intel", "qualcomm", "apple", "amd",
                             "other"), 0, (), ()),
     "NPU_MODEL": ("pattern", _IDENT, 0, (), ()),
@@ -144,6 +146,7 @@ KEYS = {
     "SUPPORTS_MX3": ("bool", None, 1, (), ()),
     "SUPPORTS_CORAL": ("bool", None, 1, (), ()),
     "SUPPORTS_INTEL_NPU": ("bool", None, 1, (), ()),
+    "INTEL_NPU_DEVICE": ("pattern", "^/dev/accel/accel[0-9]{1,3}$", 0, (), ("linux",)),
     "HAILO_FAMILY": ("enum", ("hailo8", "hailo1x"), 0, (), ()),
     "HAILO_ARCH": ("enum", ("hailo8", "hailo8l", "hailo10h", "hailo15h", "hailo15m", "hailo15l", "hailo12l"), 0, (),
                    ()),
@@ -164,6 +167,12 @@ KEYS = {
     "OPENCL_PLATFORMS": ("list", (r"^[a-z0-9]([a-z0-9-]{0,46}[a-z0-9])?:\d{1,2}\.\d{1,2}$", 16), 0, (), ()),
     "HIP_RUNTIME": ("bool", None, 1, (), ("linux",)),
     "ROCM_VERSION": ("version", _VERSION, 0, (), ("linux",)),
+    "ROCM_GFX_TARGETS": ("list", ("^gfx[0-9a-f]{3,5}$", 16), 0, (), ("linux",)),
+    "CUDA_TOOLKIT_VERSION": ("pattern", _DOTTED, 0, (), ()),
+    "TENSORRT_VERSION": ("pattern", r"^\d{1,2}\.\d{1,2}\.\d{1,2}$", 0, (), ()),
+    "OPENVINO_VERSION": ("pattern", r"^\d{4}\.\d{1,2}\.\d{1,2}$", 0, (), ()),
+    "INTEL_GPU_DEVICE": ("pattern", "^/dev/dri/renderD[0-9]{1,3}$", 0, (), ("linux",)),
+    "INTEL_GPU_DRIVER": ("enum", ("i915", "xe"), 0, (), ("linux",)),
     "METAL": ("bool", None, 1, (), ("macos",)),
     "TOOL_CC": ("pattern", _TOOLCHAIN, 0, (), ()),
     "TOOL_CXX": ("pattern", _TOOLCHAIN, 0, (), ()),
@@ -854,6 +863,40 @@ def distinct(items):
         if item not in out:
             out.append(item)
     return out
+
+
+# --- vendor runtimes of targets the maintainer cannot test (decision O-PREP): read only when present ----------------
+
+def parse_nv_tegra_release(text):
+    """JETSON_L4T_VERSION of /etc/nv_tegra_release's first line: "# R35 (release), REVISION: 4.1, ..." -> 35.4.1."""
+    first = next((line for line in (text or "").splitlines() if line.strip()), "")
+    match = re.match(r"^#\s*R([0-9]+)\s*\(release\),\s*REVISION:\s*([0-9]+\.[0-9]+)", first)
+    return f"{match.group(1)}.{match.group(2)}" if match else None
+
+
+def dpkg_installed_version(lines, package):
+    """The Version of an installed package ("Status: install ok installed") in /var/lib/dpkg/status, or None."""
+    fields = {}
+    for raw in list(lines) + [""]:
+        line = raw.rstrip("\n")
+        if not line:
+            if fields.get("Package") == package and fields.get("Status") == "install ok installed":
+                return fields.get("Version")
+            fields = {}
+        elif ": " in line and not line.startswith((" ", "\t")):
+            key, _, value = line.partition(": ")
+            fields.setdefault(key, value)
+    return None
+
+
+def parse_cuda_version_file(text, json_file):
+    """The toolkit release of /usr/local/cuda/version.json ("cuda": {"version": "12.6.3"}) or version.txt
+    ("CUDA Version 10.2.300")."""
+    if json_file:
+        match = re.search(r'"cuda"\s*:\s*\{[^}]*"version"\s*:\s*"([0-9][0-9.]*)"', text or "")
+    else:
+        match = re.search(r"^CUDA Version ([0-9][0-9.]*)", text or "", re.MULTILINE)
+    return match.group(1) if match else None
 
 
 # --- Windows -----------------------------------------------------------------------------------------------------
@@ -1599,6 +1642,23 @@ class Probe:
         model = self._device_tree("model")
         if model:
             self.put("BOARD_MODEL", model.replace("\0", " "), warn_invalid=False)
+        if self.os == "linux" and self.arch == "arm64":
+            self._jetson()
+
+    def _jetson(self):
+        """JETSON_L4T_VERSION and JETSON_JETPACK_VERSION, read only when NVIDIA's files are there."""
+        release = self.read("/etc/nv_tegra_release", 65536)
+        if release is not None:
+            self.put("JETSON_L4T_VERSION", parse_nv_tegra_release(release))
+            if "JETSON_L4T_VERSION" not in self.values:
+                self.warn("not_determined", "JETSON_L4T_VERSION")
+        try:
+            with open(self.path("/var/lib/dpkg/status"), encoding="utf-8", errors="replace") as status:
+                version = dpkg_installed_version(status, "nvidia-jetpack")
+        except (OSError, ValueError):
+            version = None
+        match = re.match(r"^([0-9][0-9.]*)", version or "")
+        self.put("JETSON_JETPACK_VERSION", match.group(1) if match else None, warn_invalid=False)
 
     # --- NPU and USB-attached boards ---
 
@@ -1836,6 +1896,7 @@ class Probe:
             for node_path in sorted(glob.glob(os.path.join(glob.escape(accel), "accel[0-9]*"))):
                 if _link_name(os.path.join(node_path, "device", "driver")) == "intel_vpu":
                     intel_nodes.append("/dev/accel/" + os.path.basename(node_path))
+            self.put("INTEL_NPU_DEVICE", intel_nodes[0] if intel_nodes else None, warn_invalid=False)
             vendors = {v for v, _d in pci}
             checks = (
                 ("SUPPORTS_HAILO", "hailo", hailo_present, hailo_model, hailo_node),
@@ -1948,7 +2009,57 @@ class Probe:
             self.values["HIP_RUNTIME"] = "ON" if hip else "OFF"
             rocm = first_number(self.read("/opt/rocm/.info/version", 4096) or "", 4)
             self.put("ROCM_VERSION", rocm, warn_invalid=False)
+            self._vendor_runtimes()
         self.values["METAL"] = "ON" if os_name == "macos" and self._metal else "OFF"
+
+    def _vendor_runtimes(self):
+        """Decision O-PREP: the ROCm gfx targets, CUDA toolkit, TensorRT, OpenVINO and the Intel GPU render node,
+        each read only when it is there (nothing is installed, nothing is run)."""
+        targets = distinct(self._kfd_targets())
+        self.put("ROCM_GFX_TARGETS", ",".join(targets) or None, warn_invalid=False)
+        for name, json_file in (("version.json", True), ("version.txt", False)):
+            text = self.read("/usr/local/cuda/" + name, 1048576)
+            if text is not None:
+                version = parse_cuda_version_file(text, json_file)
+                if version:
+                    self.put("CUDA_TOOLKIT_VERSION", version)
+                else:
+                    self.warn("not_determined", "CUDA_TOOLKIT_VERSION")
+                break
+        for key, patterns, regex in (
+                ("TENSORRT_VERSION", ("/usr/lib/*/libnvinfer.so.*", "/usr/lib64/libnvinfer.so.*",
+                                      "/usr/lib/libnvinfer.so.*"), r"^libnvinfer\.so\.([0-9]+\.[0-9]+\.[0-9]+)$"),
+                ("OPENVINO_VERSION", ("/usr/lib/libopenvino.so.*", "/usr/lib/*/libopenvino.so.*",
+                                      "/usr/lib64/libopenvino.so.*"), r"^libopenvino\.so\.([0-9]+\.[0-9]+\.[0-9]+)$")):
+            found = None
+            for pattern in patterns:
+                for path in sorted(glob.glob(self._glob(pattern))):
+                    match = re.match(regex, os.path.basename(path))
+                    if match:
+                        found = match.group(1)
+                        break
+                if found:
+                    break
+            self.put(key, found, warn_invalid=False)
+        drm = self.path("/sys/class/drm")
+        for node in sorted(glob.glob(os.path.join(glob.escape(drm), "renderD[0-9]*"))):
+            vendor = hex_id((_read(os.path.join(node, "device", "vendor")) or "").strip(), 4)
+            driver = _link_name(os.path.join(node, "device", "driver"))
+            if vendor == "0x8086" and driver in ("i915", "xe"):
+                self.put("INTEL_GPU_DEVICE", "/dev/dri/" + os.path.basename(node), warn_invalid=False)
+                self.put("INTEL_GPU_DRIVER", driver)
+                break
+
+    def _kfd_targets(self):
+        """The gfx targets of every KFD topology node, in the order of the nodes."""
+        targets = []
+        nodes = os.path.join(self.sys_dir, "class", "kfd", "kfd", "topology", "nodes")
+        for props in sorted(glob.glob(os.path.join(glob.escape(nodes), "*", "properties"))):
+            fields = [line.split() for line in (_read(props) or "").splitlines()]
+            value = next((f[1] if len(f) > 1 else "" for f in fields if f and f[0] == "gfx_target_version"), "")
+            if re.match(r"^[0-9]{1,9}$", value) and int(value) > 0:
+                targets.append(gfx_name(int(value)))
+        return targets
 
     def _vulkan_loader_version(self):
         """Y.Z of the Vulkan loader's file name (libvulkan.so.1.Y.Z on Linux; the file version of vulkan-1.dll on
