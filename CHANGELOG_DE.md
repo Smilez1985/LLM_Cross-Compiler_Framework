@@ -1470,8 +1470,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   llama.cpp es prüft); die Warnungen von 1.x zu fehlender Konfiguration, fehlendem Tokenizer oder fehlenden Gewichten
   bleiben. Ein kurzer Funktionstest führt das geschriebene GGUF mit `llama-completion` aus, dem Einmal-Generator, der
   in 1.x `llama-cli` war (`llama-cli` selbst, wenn ein Image nur das hat): 8 Tokens, höchstens 120 s, offline. Ein
-  Lauf, der mit einem Fehler endet, lässt die Stufe mit den letzten Zeilen des Werkzeugs scheitern; eine
-  Zeitüberschreitung oder ein angehaltener Lauf ist ein Hinweis; übersprungen wird er mit einem Hinweis, wenn das
+  Lauf, der mit einem Fehler endet oder abstürzt (llama.cpp bricht bei einem Tensor ab, den es nicht verwenden kann),
+  lässt die Stufe mit den letzten Zeilen des Werkzeugs scheitern; eine Zeitüberschreitung oder ein von außen
+  angehaltener Lauf (der Out-of-Memory-Killer) ist ein Hinweis; übersprungen wird er mit einem Hinweis, wenn das
   Image keines der beiden Werkzeuge hat, bei einem Embedding-Modell, bei den NPU-Formaten und im Auftrag `imatrix`.
   Die Statistik (Größe der Eingabe und der Ausgabe, Verhältnis, Dauer der Umwandlung, das Ergebnis des Tests; die
   Eingabe zählt die Gewichte, die der Konverter liest, keine zweite Kopie wie Mistrals `consolidated.safetensors`) steht

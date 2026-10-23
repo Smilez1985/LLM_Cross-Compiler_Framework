@@ -84,6 +84,11 @@ SAFETENSORS_MAX_HEADER = 100_000_000  # the safetensors library's own limit
 # off when llama-cli became the chat program); llama-cli is used when the image has only that.
 TEST_TOOLS = ("llama-completion", "llama-cli")
 TEST_TOKENS = 8
+# Signals that stop a run from outside (SIGHUP, SIGINT, SIGKILL: the out-of-memory killer, SIGTERM): a note, no
+# failure. SIGILL: the tool uses instructions this CPU lacks, which says nothing about the GGUF. Numbers, not the
+# signal module's names, so the file runs the same everywhere (the container is Linux).
+STOP_SIGNALS = (1, 2, 9, 15)
+SIGILL = 4
 BACKUP_SUFFIX = ".convert-backup"
 
 
@@ -528,18 +533,25 @@ def functional_test(gguf: Path, tools: Path, seconds: int) -> Tuple[str, Optiona
     if run.returncode == 0:
         log(f"Functional test passed: {tool.name} loaded {gguf.name} and generated {TEST_TOKENS} tokens ({took} s).")
         return "passed", tool.name
-    if run.returncode < 0:
+    if -run.returncode in STOP_SIGNALS:
+        # Stopped from outside: the kernel's out-of-memory killer sends SIGKILL, a stop SIGTERM
         log(f"Functional test: {tool.name} was stopped by signal {-run.returncode} (not enough memory?); not counted "
             "as a failure.")
         return "stopped", tool.name
+    if -run.returncode == SIGILL:
+        log(f"Functional test skipped: {tool.name} uses instructions this build host's CPU does not have "
+            f"(signal {SIGILL}).")
+        return "skipped", tool.name
     if run.returncode in (126, 127):
         # The tool itself did not start (a library of the image missing, no permission): nothing said about the GGUF
         log(f"Functional test skipped: {tool.name} does not start in this image (exit {run.returncode}).")
         return "skipped", tool.name
     tail = [line for line in (run.stderr or "").splitlines() if line.strip()][-6:]
-    raise Problem(f"The functional test failed: {tool.name} could not run {gguf.name} (exit {run.returncode}), so "
-                  "the GGUF the converter wrote does not work." + ("" if not tail else " Its last lines:\n  "
-                                                                   + "\n  ".join(tail)))
+    # Any other signal is a crash on this GGUF (GGML_ASSERT aborts, a segmentation fault): it does not work either
+    how = (f"crashed running {gguf.name} (signal {-run.returncode})" if run.returncode < 0
+           else f"could not run {gguf.name} (exit {run.returncode})")
+    raise Problem(f"The functional test failed: {tool.name} {how}, so the GGUF the converter wrote does not work."
+                  + ("" if not tail else " Its last lines:\n  " + "\n  ".join(tail)))
 
 
 # --- Commands ----------------------------------------------------------------------------------------------------
