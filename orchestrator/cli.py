@@ -4760,6 +4760,9 @@ def deploy_devices_edit(ctx: FrameworkContext, device: str, host: Optional[str],
         sys.exit(1)
     console.print(f"Board {moved.device_id} ({escape(moved.label)}): {escape(plan.new.display)}, host key "
                   f"{escape(plan.new_key_type)} {plan.new_fingerprint}.")
+    if plan.key_changed:   # as the Boards window says it (boards.edit.probe_again): the moved probe may be old
+        console.print("If the board was set up anew, probe it again ('llm-cli scan --device') so its stored system is "
+                      "current.")
     if plan.key_changed and not paired:
         console.print("[yellow]The framework's SSH key does not log in there yet: pair the board once with "
                       "'llm-cli deploy run' (it asks for the password one time).[/yellow]")
