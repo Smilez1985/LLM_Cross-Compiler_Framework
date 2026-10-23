@@ -1504,6 +1504,26 @@ class TestClientIntegration:
         client.set_runtime_endpoint("local", "http://127.0.0.1:9999/v1", "explicit", "other")  # explicit wins
         assert client.resolve().base_url == "http://127.0.0.1:9999/v1" and client.resolve().model == "other"
 
+    def test_a_new_key_never_goes_to_the_port_of_the_previous_server(self, tmp_path):
+        # A restart between resolve() and adapter() gives a new port and a new key. The adapter used to pair the old
+        # URL with the new key (the credential read the endpoint again); another program may hold the old port now.
+        from orchestrator.llm import ProviderUnavailable
+        answers = [("http://127.0.0.1:9123/v1", "old-key", "m"), ("http://127.0.0.1:9124/v1", "new-key", "m")]
+        client = self.make(tmp_path, lambda pid: answers[0])
+        target = client.resolve()
+        answers.pop(0)
+        with pytest.raises(ProviderUnavailable, match="stopped or restarted"):
+            client.adapter(target)
+        assert not client._adapters, "nothing was built for the old port"
+        answers[0] = None   # stopped meanwhile
+        with pytest.raises(ProviderUnavailable, match="stopped or restarted"):
+            client.adapter(target)
+        answers[0] = ("http://127.0.0.1:9124/v1", "new-key", "m")
+        fresh = client.resolve()
+        adapter = client.adapter(fresh)
+        assert adapter.base_url == "http://127.0.0.1:9124/v1"
+        assert client.credential(fresh).api_key.get_secret_value() == "new-key"
+
     def test_broken_resolver_means_not_running(self, tmp_path):
         from orchestrator.llm import NotConfigured
 

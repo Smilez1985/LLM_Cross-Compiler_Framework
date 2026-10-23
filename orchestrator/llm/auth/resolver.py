@@ -98,6 +98,7 @@ def register_refresher(provider: str, method: str, refresher: Refresher) -> None
 
 
 RuntimeKey = Callable[[Any], Union[str, SecretStr, None]]
+_READ = object()   # resolve(): read the running local server's key through the runtime_key callback
 
 
 class CredentialResolver:
@@ -163,13 +164,16 @@ class CredentialResolver:
         return auth_error("auth.not_signed_in", message=message, provider=preset.id, key_page=key_page)
 
     # --- credentials ----------------------------------------------------------------------------------------
-    def resolve(self, preset: Any, method: Union[str, AuthMethodSpec], base_url: Optional[str] = None
-                ) -> ResolvedCredential:
+    def resolve(self, preset: Any, method: Union[str, AuthMethodSpec], base_url: Optional[str] = None, *,
+                runtime_key: Any = _READ) -> ResolvedCredential:
+        """The credential for `method`. For a running local server (runtime_endpoint presets) `runtime_key` is the
+        key read together with its URL (LLMClient.adapter: a restarted server has a new port and a new key, and the
+        two must come from one read); without it the key is read through the runtime_key callback."""
         spec = method if isinstance(method, AuthMethodSpec) else preset.method(method)
         if spec is None:
             raise NotConfigured(f"{preset.label} does not support sign-in method '{method}'.", provider=preset.id)
         if preset.runtime_endpoint and spec.type in ("none", *KEY_TYPES):
-            key = reveal(self.runtime_key(preset))
+            key = reveal(self.runtime_key(preset) if runtime_key is _READ else runtime_key)
             return ResolvedCredential(kind="api_key" if key else "none", method=spec.id, type=spec.type,
                                       source="runtime" if key else "none", api_key=key,
                                       origin=display_origin(base_url) or None)
