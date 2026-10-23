@@ -688,3 +688,24 @@ def test_a_drop_at_the_sftp_check_still_uploads_over_sftp_after_the_wait(tmp_pat
     assert deploy_over(session, build, packaged).activated
     assert not any("cat >" in c for c in board.commands), "over SFTP after the wait"
     assert any(e.kind == "waiting" for e in events), "it waited for the board"
+
+
+@POSIX
+def test_the_person_is_told_of_every_wait_also_after_an_upload_that_started_again(tmp_path, source, board_session):
+    """The network drops before a byte of the tarball arrived: after the wait the upload starts again from the
+    beginning (no "back" event, nothing on the board to continue at). When the network drops again later, the person's
+    output pane and console still get the first line of that second wait (wait_lines), as of the first one."""
+    from orchestrator.remote.text import wait_lines
+    board, session, events, _clock = board_session
+    build, packaged = tdr.packaged_build(tmp_path, source)
+    board.drop_after_bytes = 0          # the first chunk never arrives
+    board.drop_on = "--list-devices"    # a check that only reads loses its answer later
+    assert deploy_over(session, build, packaged).activated
+    lines = []
+    on_event = wait_lines(lines.append, "192.0.2.30", "en")
+    for event in events:
+        on_event(event)
+    waits = [line for line in lines if line.startswith("Waiting for the board at 192.0.2.30")]
+    assert len(waits) == 2, lines
+    assert "upload" in waits[0] and "step on the board" in waits[1]
+    assert lines[-1] == "The board answers again: the step continues."

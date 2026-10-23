@@ -104,7 +104,8 @@ def wait_lines(say: Callable[[str], Any], place: str, lang: Optional[str] = None
     """A board session's on_event for the person's output pane or console: `say(line)` gets the first line of each
     wait for the board (in the person's language, `place` the board's address) and the line when it answers again;
     the upload's progress and the wait's later seconds are left out (the CLI's spinner and the Deployment tab show
-    those themselves)."""
+    those themselves). Any other event than a wait ends the wait it follows, also one without a "back" (an upload
+    that starts again from the beginning), so the first line of the next wait is said again."""
     seen = {"waiting": False}
 
     def on_event(event: Any) -> None:
@@ -112,8 +113,9 @@ def wait_lines(say: Callable[[str], Any], place: str, lang: Optional[str] = None
             if not seen["waiting"]:
                 seen["waiting"] = True
                 say(event_text(event, place, lang))
-        elif event.kind == "back":
-            seen["waiting"] = False
+            return
+        seen["waiting"] = False
+        if event.kind == "back":
             say(event_text(event, place, lang))
     return on_event
 
