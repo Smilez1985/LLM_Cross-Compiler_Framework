@@ -90,7 +90,10 @@ nothing); its short names `Q3_K`, `Q4_K` and `Q5_K` are accepted for `Q3_K_M`, `
 
 - An **x86-64 computer** (Intel or AMD). The Rockchip build image installs Rockchip's toolkits as x86-64 Linux
   packages.
-- **Linux** (the installer uses `apt`, so Debian, Ubuntu and similar) or **Windows** with Docker Desktop.
+- **Linux** with one of the package managers the installer uses: `apt` (Debian, Ubuntu, Raspberry Pi OS and the
+  systems built on them), `dnf` (Fedora, RHEL, CentOS Stream, Rocky Linux, AlmaLinux, Oracle Linux, Amazon Linux),
+  `zypper` (openSUSE, SLES) or `pacman` (Arch, Manjaro, EndeavourOS); on Alpine it sets up Docker only (see
+  [Installation](#installation)). Or **Windows** with Docker Desktop.
 - **Python 3.11 to 3.14.**
 - **Docker:** on Linux, Docker Engine (the installer sets it up if it is missing); on Windows, **Docker Desktop**
   with the **WSL 2 backend**, installed and running before you install the framework.
@@ -123,24 +126,47 @@ sudo ./install.sh
 The installer:
 
 1. checks the internet connection (HTTPS to the package index `pypi.org`, or `PIP_INDEX_URL` if you set a
-   mirror; behind a proxy start it with `sudo -E` so `https_proxy` is kept) and Python (installs it with `apt` if
-   it is missing, then requires 3.11 to 3.14),
-2. installs Docker if it is missing, only from Docker's official apt repository and only with a checked key: on Debian,
-   Ubuntu and Raspberry Pi OS (32-bit gets Debian's armhf packages, as Docker's guide says), and on systems built on
-   Ubuntu or Debian such as Linux Mint, Pop!_OS or LMDE (the packages of the Ubuntu or Debian release they are built on,
-   as before), it downloads Docker's signing key and trusts it only when the file holds exactly that one key with the
-   fingerprint Docker's install guide publishes (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`, pinned in
-   `install.sh`); apt then checks every package against the signed package lists. No downloaded script runs. On any
-   other system, on ARMv6 (Raspberry Pi 1, Zero), or when the key does not match, it stops, says why and points you to
-   [Docker's install guide](https://docs.docker.com/engine/install/); install Docker yourself and start `install.sh`
-   again. It then adds your user to the `docker` group and says what that means: members of the group control the Docker
+   mirror; behind a proxy start it with `sudo -E` so `https_proxy` is kept), finds the Linux family from
+   `/etc/os-release` (`ID`, then `ID_LIKE`, with the same table as the hardware probe) and its package manager, and
+   checks Python: if no Python 3.11 to 3.14 is there, it installs the distribution's own package (`python3`; on
+   RHEL 8/9 and their rebuilds and on openSUSE Leap 15, whose `python3` is older, a numbered one such as
+   `python3.12` or `python312`),
+2. installs Docker if it is missing, through the package manager of the system and never with a downloaded script.
+   Every package manager checks signatures its own way, and a third-party repository is trusted only after its key
+   matches a fingerprint pinned in `install.sh`:
+   - **Debian, Ubuntu, Raspberry Pi OS** and systems built on Ubuntu or Debian such as Linux Mint, Pop!_OS or LMDE:
+     Docker's official apt repository (32-bit Raspberry Pi OS gets Debian's armhf packages, as Docker's guide says;
+     a system built on Ubuntu or Debian gets the packages of the release it is built on). The downloaded key file
+     must hold exactly that one key with the fingerprint Docker's install guide publishes
+     (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`); apt then checks every package against the signed package
+     lists.
+   - **Fedora, RHEL and CentOS Stream:** Docker's rpm repository, its key trusted only with the fingerprint Docker's
+     guide publishes (`060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35`); dnf checks the signature of every package.
+   - Where Docker publishes no repository, the distribution's own package: `moby-engine` on other systems built on
+     Fedora; `docker` on Amazon Linux, on openSUSE and SLES (on SLES from the Containers Module, which the installer
+     switches on with `SUSEConnect`) and on Arch, Manjaro and EndeavourOS (with `docker-buildx`; the installer never
+     runs `pacman -Sy`, a partial upgrade: if pacman cannot find a package, update the system with `sudo pacman -Syu`
+     first). Rocky Linux, AlmaLinux and Oracle Linux get `podman-docker` (Podman with the `docker` command): there is
+     no `docker` group then; the installer switches on Podman's Docker-compatible socket for your user and tells you
+     the `DOCKER_HOST` the framework needs.
+   - **Alpine:** `docker` from Alpine's community repository (switched on in `/etc/apk/repositories` if needed). The
+     framework itself cannot run on Alpine (musl): its pinned Python packages include onnxruntime, which has no musl
+     build. The installer stops after Docker and points you to the framework image you build on this computer
+     ([The framework in a container](docs/Container_Setup.md)).
+   - On ARMv6 (Raspberry Pi 1, Zero), when a key does not match, or on any other system (such as Gentoo, Void or
+     NixOS) it stops, says why and points you to [Docker's install guide](https://docs.docker.com/engine/install/);
+     install Docker yourself and start `install.sh` again. On such a system it installs nothing else either: what it
+     needs (see [Requirements](#requirements)) is up to you.
+
+   It then adds your user to the `docker` group and says what that means: members of the group control the Docker
    service, which runs as root, so every program that runs as your user can get root rights on this computer
    (`sudo gpasswd -d USER docker` undoes it; the framework then cannot build without sudo),
-3. copies the files the repository ships to `/opt/llm-cross-compiler-framework` (owned by your user) and lists them
-   in `.lcf-installed-files`. Running it again updates those files and removes only files that an earlier run
-   copied and the repository no longer ships; everything else there stays: your own targets (module wizard,
-   `llm-cli module create`), installed community packs, `configs/config.yml`, builds, cache and models. Start
-   updates in the repository folder: the copy of `install.sh` in `/opt` copies and removes nothing,
+3. copies the files the repository ships to `/opt/llm-cross-compiler-framework` (owned by your user; `rsync` comes from
+   the package manager if it is missing) and lists them in `.lcf-installed-files`. Running it again updates those files
+   and removes only files that an earlier run copied and the repository no longer ships; everything else there stays:
+   your own targets (module wizard, `llm-cli module create`), installed community packs, `configs/config.yml`, builds,
+   cache and models. Start updates in the repository folder: the copy of `install.sh` in `/opt` copies and removes
+   nothing,
 4. creates a virtual environment (`.venv`) there and installs the pinned packages from `requirements-gui.txt`
    (everything in `requirements.txt` plus the GUI's PySide6; with `--headless` only `requirements.txt`), each file
    checked against its hash, with the pip that comes with Python (pip itself is not upgraded: that would download
@@ -154,6 +180,11 @@ The installer:
 Choose the Ditto step with `sudo ./install.sh --ditto=auto|bare-metal|docker|skip` (default `auto`). For an unattended
 run set `LCF_DITTO` instead (for example `sudo LCF_DITTO=auto ./install.sh`): then nothing is asked, and a model under
 a permissive licence (such as Apache 2.0) is downloaded after its size and licence are shown.
+
+To see what the installer would do on this computer without changing anything, run `./install.sh --dry-run` (no
+`sudo` needed): it names the family, the package manager, the packages, the repositories and the key
+fingerprints, calls no package manager and downloads nothing. It ends with exit code 0 when the installation
+would go through and 1, with the reason, when it would stop.
 
 On a server without a display, `sudo ./install.sh --headless` (unattended: `LCF_HEADLESS=1`) leaves the GUI out:
 the command line and the MCP server need no Qt. `llm-framework` then says how to add the GUI later.
