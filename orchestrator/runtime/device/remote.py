@@ -151,23 +151,20 @@ class RemoteShell:
     def upload(self, path: Path, remote_path: str, sha256: str) -> None:
         """Puts the file at `path` (its sha256 `sha256`) on the device as `remote_path`, in a folder that exists
         there: over SFTP as <remote_path>.part, checked with sha256sum on the device and only then renamed; after a
-        network drop it waits for the board and continues at what arrived (RemoteSession.upload). The file is made
-        empty under umask 077 first, so it is the user's only from the start, as the old `umask 077 && cat >` made it
-        (an SFTP server creates a file with its own umask; writing into the empty file keeps its mode). A board without
-        SFTP (or a stand-in without it) gets the file on a command's stdin under umask 077 as before (no resume)."""
+        network drop it waits for the board and continues at what arrived (RemoteSession.upload). Every copy it starts
+        on the board is made empty under umask 077 first (`private`), so it is the user's only from the start, as the
+        old `umask 077 && cat >` made it (an SFTP server creates a file with its own umask; writing into the empty file
+        keeps its mode), also the copy sent again after a damaged arrival. A board without SFTP (or a stand-in without
+        it) gets the file on a command's stdin under umask 077 as before (no resume)."""
         if not self._has_sftp(posixpath.dirname(remote_path)):
             res = self.run(f"umask 077 && cat > {_q(remote_path)}", stdin=_chunks(Path(path)),
                            timeout=UPLOAD_TIMEOUT)
             if res.status != 0:
                 raise RemoteError(f"the upload failed (exit {res.status}): {_tail(res.err or res.out)}")
             return
-        part = remote_path + ".part"   # RemoteSession.upload's file until its sha256 on the board matches
-        res = self.run(f"umask 077 && : > {_q(part)}", again=True)   # empties a file that is not written yet
-        if res.status != 0:
-            raise RemoteError(f"the upload failed (exit {res.status}): {_tail(res.err or res.out)}")
         with open(path, "rb") as fh:
             size = os.fstat(fh.fileno()).st_size
-            self._call(lambda: self.session.upload(fh, remote_path, size, sha256), UPLOAD_TIMEOUT)
+            self._call(lambda: self.session.upload(fh, remote_path, size, sha256, private=True), UPLOAD_TIMEOUT)
 
     def _has_sftp(self, folder: str) -> bool:
         """Whether the device answers over SFTP: one stat of `folder`, tried once. A board without an SFTP server
