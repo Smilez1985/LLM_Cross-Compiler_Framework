@@ -34,6 +34,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [config](#config): `show`, `output-folder`, `repos`
 - [zoo](#zoo): `list`, `show`, `install`, `verify`, `export`, `keys`, `maintainer`
 - [trash](#trash): `list`, `restore`, `empty`
+- [models](#models): `take-over`
 - [Known limitations](#known-limitations)
 
 ---
@@ -124,6 +125,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `knowledge index-docs` | Add the framework's own documentation (and with `--with-code` its code) to the knowledge base (unreleased) |
 | `knowledge storage` | Where the knowledge base is stored (Qdrant Edge), the conversion of an older one, and its old folder: `convert`, `delete-old` (unreleased) |
 | `trash list` / `restore` / `empty` | What deletions moved to the trash; put entries back; delete the ones you pick for good (unreleased) |
+| `models take-over` | Copy what earlier versions of the Hugging Face browser saved in the Hugging Face cache into the models folder, each file checked, then offer to remove the old copies (unreleased) |
 | `targets list` / `targets validate` | List hardware targets with their boards and formats / check that a target loads and its capabilities are valid |
 | `build start` / `build status` | Convert and quantize a model / show builds, also those the GUI, the MCP server or another CLI call started |
 | `build save` | Save a build that waits in the framework's build folder to the output folder or another folder (unreleased) |
@@ -2512,6 +2514,32 @@ No tool and no AI app empties the trash. The GUI shows the same under **File > T
 llm-cli trash
 llm-cli trash restore tr_0123456789abcdef
 llm-cli trash empty --due
+```
+
+---
+
+## models
+
+```
+llm-cli models take-over
+```
+
+Unreleased. Earlier versions of the GUI's Hugging Face browser saved their downloads in huggingface_hub's cache inside
+the models folder (`models/models--<owner>--<name>/`); those models stay listed and usable. `take-over` does what
+**Take over old downloads...** in **Tools > Hugging Face Model Browser...** does, through the same core calls: it
+lists every file still to take over (model, file, size), asks "Copy exactly N files (size)? [y/N]" ("No" is the
+default), and copies each file into `models/hf/<owner>--<name>/<first 12 characters of the commit>/`, checked against
+the checksum it was downloaded with (for a cache without links, against what Hugging Face lists for that commit; in
+offline mode such a file stays, with that reason). The one disk rule comes first, and the copy holds its own
+reservation while it runs. Ctrl+C stops between two chunks (the files copied so far stay; the one being copied is not
+kept). Each file that stays in the old cache is printed with its reason. Then it shows the full list of old copies
+that can go (each model's cache folder whose every file was taken over, and the files of the cache's shared store only
+they use, with full path and size), asks trash or for good, and deletes only after "Move/Delete exactly N items
+(size) ...? [y/N]" ("No" is the default), audited first. Without a terminal nothing is copied or deleted. No AI tool
+does this.
+
+```bash
+llm-cli models take-over
 ```
 
 ---

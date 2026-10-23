@@ -34,6 +34,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [config](#config): `show`, `output-folder`, `repos`
 - [zoo](#zoo): `list`, `show`, `install`, `verify`, `export`, `keys`, `maintainer`
 - [trash](#trash): `list`, `restore`, `empty`
+- [models](#models): `take-over`
 - [Bekannte Einschränkungen](#bekannte-einschränkungen)
 
 ---
@@ -125,6 +126,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `knowledge index-docs` | Die eigene Dokumentation des Frameworks (und mit `--with-code` seinen Code) in die Wissensbasis aufnehmen (unveröffentlicht) |
 | `knowledge storage` | Wo die Wissensbasis liegt (Qdrant Edge), die Umwandlung einer älteren und ihr alter Ordner: `convert`, `delete-old` (unveröffentlicht) |
 | `trash list` / `restore` / `empty` | Was Löschungen in den Papierkorb verschoben haben; Einträge zurücklegen; die ausgewählten endgültig löschen (unveröffentlicht) |
+| `models take-over` | Was frühere Versionen des Hugging-Face-Browsers im Hugging-Face-Cache gespeichert haben, in den Modellordner kopieren, jede Datei geprüft, und danach das Entfernen der alten Kopien anbieten (unveröffentlicht) |
 | `targets list` / `targets validate` | Hardware-Targets mit ihren Boards und Formaten auflisten / prüfen, ob ein Target lädt und seine Capabilities gültig sind |
 | `build start` / `build status` | Ein Modell konvertieren und quantisieren / Builds zeigen, auch solche, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat |
 | `build save` | Einen Build, der im Build-Ordner des Frameworks wartet, im Ausgabeordner oder einem anderen Ordner speichern (unveröffentlicht) |
@@ -2625,6 +2627,33 @@ Kein Tool und keine KI-App leert den Papierkorb. Die GUI zeigt dasselbe unter **
 llm-cli trash
 llm-cli trash restore tr_0123456789abcdef
 llm-cli trash empty --due
+```
+
+---
+
+## models
+
+```
+llm-cli models take-over
+```
+
+Unveröffentlicht. Frühere Versionen des Hugging-Face-Browsers der GUI speicherten ihre Downloads im Cache von
+huggingface_hub im Modellordner (`models/models--<owner>--<name>/`); diese Modelle bleiben aufgeführt und nutzbar.
+`take-over` macht, was **Alte Downloads übernehmen…** in **Tools > Hugging Face Model Browser...** macht, über dieselben
+Aufrufe im Kern: Es listet jede Datei, die noch zu übernehmen ist (Modell, Datei, Größe), fragt „Copy exactly N files
+(size)? [y/N]“ („Nein“ ist die Vorgabe) und kopiert jede Datei nach `models/hf/<owner>--<name>/<die ersten 12 Zeichen
+des Commits>/`, geprüft gegen die Prüfsumme, mit der sie geladen wurde (bei einem Cache ohne Links gegen das, was
+Hugging Face für diesen Commit führt; im Offline-Modus bleibt eine solche Datei, mit diesem Grund). Die eine
+Speicherplatz-Regel kommt zuerst, und die Kopie hält während sie läuft eine eigene Reservierung. Strg+C hält zwischen
+zwei Blöcken an (die bis dahin kopierten Dateien bleiben; die gerade kopierte wird nicht behalten). Jede Datei, die im
+alten Cache bleibt, wird mit ihrem Grund ausgegeben. Danach zeigt es die vollständige Liste der alten Kopien, die
+gehen können (der Cache-Ordner jedes Modells, dessen Dateien alle übernommen sind, und die Dateien des gemeinsamen
+Speichers des Caches, die nur sie nutzen, mit vollem Pfad und Größe), fragt nach Papierkorb oder endgültig und löscht
+erst nach „Move/Delete exactly N items (size) ...? [y/N]“ („Nein“ ist die Vorgabe), vorher protokolliert. Ohne Terminal
+wird nichts kopiert und nichts gelöscht. Kein KI-Tool macht das.
+
+```bash
+llm-cli models take-over
 ```
 
 ---

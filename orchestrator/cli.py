@@ -3955,6 +3955,104 @@ def trash_empty(ctx: FrameworkContext, ids: Tuple[str, ...], everything: bool, d
 
 
 # ============================================================================
+# MODELS (the models folder: Hugging Face downloads of earlier versions)
+# ============================================================================
+
+@cli.group()
+def models():
+    """The models folder: take over what earlier versions downloaded from Hugging Face"""
+    pass
+
+
+@models.command('take-over')
+@pass_context
+def models_take_over(ctx: FrameworkContext):
+    """Copy what earlier versions saved in the Hugging Face cache inside the models folder into the models folder,
+    each file checked, after your yes at a terminal; then offer to remove the old copies (the full list, "No" by
+    default). The same as Take over old downloads... in the GUI's Hugging Face browser."""
+    ctx.require_framework()
+    manager = ctx.framework_manager.model_manager
+    lang = _config_language(ctx)
+    from orchestrator.utils.localization import ui_text
+    from orchestrator.utils.sizes import format_size
+    files = manager.old_downloads()
+    new = [f for f in files if f.state == "new"]
+    if not new:
+        plan = manager.old_copies_plan()
+        if plan is None:
+            console.print(escape(ui_text("hf.takeover.none", lang)))
+            return
+        _remove_old_hf_copies(ctx, manager, plan, lang)
+        return
+    # the full list (the GUI's question shows the first ones; a terminal shows every file) and the yes question
+    lines = [f"{f.repo} / {f.name} ({format_size(f.size, lang)})" for f in new]
+    total = format_size(sum(f.size for f in new), lang)
+    click.echo(ui_text("hf.takeover.ask", lang, n=len(new), size=total, files="\n".join(lines)))
+    if not _interactive():
+        console.print("[yellow]Nothing was copied: the take-over needs your answer at a terminal "
+                      "('llm-cli models take-over').[/yellow]")
+        return
+    if not click.confirm(f"Copy exactly {len(new)} files ({total})?", default=False):
+        console.print("Nothing was copied.")
+        return
+    import threading
+    from orchestrator.Core.disk_plan import InsufficientSpace
+    from orchestrator.Core.hf_hub import person_text
+    stop = threading.Event()
+
+    def progress(done: int, count: int, name: str) -> None:
+        if name:
+            console.print(escape(ui_text("hf.takeover.running", lang, name=name, done=done, total=count)) +
+                          (" (Ctrl+C)" if done == 0 else ""))
+    try:
+        with _ctrl_c_cancels(stop):   # Ctrl+C stops between two chunks; the file being copied is not kept
+            result = manager.take_over(new, stop=stop, progress=progress)
+    except InsufficientSpace as e:
+        console.print(f"[red]{escape(ui_text('hf.takeover.failed', lang, reason=person_text(e, lang)))}[/red]")
+        sys.exit(1)
+    console.print(escape(ui_text("hf.takeover.result", lang, copied=len(result.copied), total=len(new),
+                                 size=format_size(result.bytes_copied, lang))))
+    if result.stopped:
+        console.print(f"[yellow]{escape(ui_text('hf.takeover.stopped', lang))}[/yellow]")
+    for file, code in result.skipped:   # every file that stays, with its reason
+        console.print(escape(ui_text("hf.takeover.kept", lang, name=f"{file.repo} / {file.name}",
+                                     reason=ui_text(f"hf.takeover.why.{code}", lang))))
+    plan = manager.old_copies_plan()
+    if plan is not None:
+        _remove_old_hf_copies(ctx, manager, plan, lang)
+
+
+def _remove_old_hf_copies(ctx: FrameworkContext, manager, plan, lang: Optional[str]) -> None:
+    """The old copies of the taken-over downloads: the full list, the mode and the yes question ("No" by default,
+    confirm_deletion), then exactly the accepted ones go (hf_takeover.delete_old_copies, audited first)."""
+    from orchestrator.Core.deletion import PlanChanged
+    from orchestrator.utils.localization import ui_text
+    accepted = confirm_deletion(plan, title=ui_text("hf.takeover.remove_title", lang),
+                                again="llm-cli models take-over")
+    if accepted is None:
+        return
+    trash = None
+    if accepted.mode == "trash":
+        try:
+            trash = _cli_trash(ctx)
+        except Exception:  # noqa: BLE001 - no per-user folder: delete_old_copies refuses the trash mode then
+            trash = None
+    try:
+        result = manager.delete_old_copies(accepted, trash=trash, audit=_cli_audit(ctx))
+    except PlanChanged:
+        console.print(f"[yellow]{escape(ui_text('deletion.changed', lang))}[/yellow]")
+        return
+    except (PermissionError, RuntimeError) as e:
+        console.print(f"[yellow]{escape(ui_text('deletion.failed', lang, reason=str(e)))}[/yellow]")
+        return
+    key = "deletion.done.trash" if accepted.mode == "trash" else "deletion.done.permanent"
+    for name in result.done:
+        console.print(f"[green]{escape(ui_text(key, lang, name=name))}[/green]")
+    for name, reason in result.failed:
+        console.print(f"[yellow]{escape(ui_text('deletion.kept', lang, name=name, reason=reason))}[/yellow]")
+
+
+# ============================================================================
 # MCP SERVER (AI clients such as Claude Code / Claude Desktop / VS Code)
 # ============================================================================
 

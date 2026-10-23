@@ -10,6 +10,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **`llm-cli models take-over`: the Take over of old Hugging Face downloads at a terminal** (consolidation chain
+  hf-online): headless installations had no way to take over what earlier versions of the GUI's Hugging Face browser
+  saved in huggingface_hub's cache inside the models folder. The command runs the same core calls as **Take over old
+  downloads...** in **Tools > Hugging Face Model Browser...** (`ModelManager.old_downloads`, `take_over`,
+  `old_copies_plan`, `delete_old_copies`): the full list of the files still to take over, the yes question with "No"
+  as the default, the copy (each file checked, under the one disk rule; Ctrl+C stops between two chunks), each file
+  that stays with its reason, then the full list of old copies that can go, trash or for good, and the deletion only
+  after your yes ("No" is the default), audited first. Without a terminal nothing is copied or deleted. The GUI parity
+  test names its mouse path (`orchestrator/gui/menus/existing.py`: `btn_hf_take_over` in the browser). Tests:
+  `tests/test_hf_takeover.py` `TestTheCommandLinesTakeOver`.
 - **A trusted board's address and host key are editable by you** (DECISIONS round 10 Q5): `llm-cli deploy devices
   edit DEVICE [--host] [--port] [--key "KEY LINE" | --read-key]` and **Edit address or key...** in **Boards > Boards
   and Devices...** change the board's host name or IP address, its SSH port or its host key in the framework's
@@ -2089,7 +2099,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `ModelManager` refuses the same way for every caller (`hf_hub.offline_refusal`, the refusal `HubClient` gives an
   AI; `hf_hub.person_text` gives a window or the command line the person's words). **Take over old downloads...**
   works offline: a file whose checksum only Hugging Face could give (a cache without links) stays in the old cache
-  with the reason "offline mode is on", and Hugging Face is not asked. Regression tests: `tests/test_hf_online.py` `TestOfflineMode`, `TestTheBrowserWindowOffline`.
+  with the reason "offline mode is on", and Hugging Face is not asked; `llm-cli models take-over` behaves the same.
+  Regression tests: `tests/test_hf_online.py` `TestOfflineMode`, `TestTheBrowserWindowOffline`.
 - **A model from the old Hugging Face download cache works in a build again** (A6, "stay usable"): the GUI's Hugging
   Face browser used to save into huggingface_hub's own cache inside the models folder, where a file is a link to a
   blob named by its checksum. A build of such a GGUF file mounted it under that checksum name, so the build no longer
