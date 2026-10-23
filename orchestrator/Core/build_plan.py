@@ -685,7 +685,9 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
             # DECISIONS round 25 Q1: never a download; the copy on this computer, or the models already here by label
             copy = service.local_copy(req.model, req.revision)
             if copy is not None:
-                plan.commit, plan.download, plan.download_known = copy.commit, 0, True
+                # a full commit pins the build to this copy; a browser download's folder names only its first 12
+                plan.commit = copy.commit if re.fullmatch(r"[0-9a-f]{40}", copy.commit or "") else req.revision
+                plan.download, plan.download_known = 0, True
                 plan.local_bytes = plan.cached = _size_of(Path(copy.path))
                 plan.mounts[-1] = (f"model cache: {req.model}@{copy.commit[:12]} (its copy on this computer; offline "
                                    "mode: nothing is downloaded)")

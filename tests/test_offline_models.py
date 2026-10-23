@@ -243,6 +243,22 @@ class TestAnAICaller:
         assert env.service.lookups == []
 
 
+    def test_start_build_with_a_copy_here_queues_the_build_at_its_commit(self, env):  # noqa: F811
+        from test_build_tools import ask
+        env.framework.config.values["offline_mode"] = True
+        staged(env.tmp / "cache")
+        out, shown = ask(env, BUILD)
+        assert out.request_id and shown, "the person was asked as for any AI build"
+        assert env.orch.requests[0].model_revision == COMMIT and env.service.lookups == []
+
+    def test_a_copy_the_browser_downloaded_is_used_without_pinning_a_short_commit(self, env):  # noqa: F811
+        from test_build_tools import ask
+        env.framework.config.values["offline_mode"] = True
+        model_folder(env.tmp / "models" / "hf" / REPO.replace("/", "--") / COMMIT[:12])
+        out, _ = ask(env, BUILD)
+        assert out.request_id and env.orch.requests[0].model_revision is None
+
+
 # --- the command line ------------------------------------------------------------------------------------------------
 
 @pytest.fixture
