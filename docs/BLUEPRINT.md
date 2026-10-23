@@ -630,10 +630,12 @@ its ending, and you can count a VPN, a host such as your reverse proxy or an add
 - **Where it decides.** The AI provider's address (Ollama and a custom server by their address, the managed local
   model on 127.0.0.1; `LLMClient.resolve`, the AI settings dialog and every settings change): in offline mode the
   requests go through a client without the proxy from the environment that connects only to the checked local
-  addresses (`security/http.pinned_transport`). The sign-in check (**Check**, `ditto login --check`, the AI settings'
+  addresses (`security/http.pinned_transport`; the certificate trust the environment names, `SSL_CERT_FILE` or
+  `SSL_CERT_DIR`, stays). The sign-in check (**Check**, `ditto login --check`, the AI settings'
   sign-in panel): a provider offline mode may not reach is refused before any socket opens, a local server is
   checked through the same pinned client. A Qdrant server (setting `qdrant_url`): judged by the rule, a cloud Qdrant
-  is refused in plain words, and qdrant-client connects only to the checked addresses. The pinned llama.cpp source
+  is refused in plain words, and qdrant-client connects only to the checked addresses (a server opened online is
+  opened again under the rule once offline mode is switched on). The pinned llama.cpp source
   from a mirror (`device runtime build --mirror`, `ditto runtime export-source --mirror`, `ditto runtime install`)
   and the pin-bump check (`scripts/llama_cpp_pin.py`, `upstream_tag_commit`): only from your own network, and git
   connects to the checked local addresses (`http.curloptResolve`), through no proxy (an empty `http.proxy`, no proxy
@@ -658,7 +660,8 @@ its ending, and you can count a VPN, a host such as your reverse proxy or an add
   Ollama keeps its "local" label whatever its address; offline mode judges the address itself. A custom server
   labelled local by its address is reached online too only at its checked local addresses, so its prompts, which go
   without the privacy filter, never reach a public address; when its name no longer counts as local, the
-  connection is refused in plain words.
+  connection is refused in plain words. A turn decides the privacy filter and its client from the same check, so a
+  turn without the filter always gets that pinned client.
 
 ### Deep Ingest: from a web page to the knowledge base (unreleased)
 

@@ -667,11 +667,13 @@ Adressbereich als lokal zählen.
 - **Wo sie entscheidet.** Die Adresse des KI-Anbieters (Ollama und ein eigener Server nach ihrer Adresse, das
   verwaltete lokale Modell auf 127.0.0.1; `LLMClient.resolve`, der Dialog der KI-Einstellungen und jede Änderung der
   Einstellungen): Im Offline-Modus laufen die Anfragen über einen Client ohne Proxy aus der Umgebung, der sich nur
-  mit den geprüften lokalen Adressen verbindet (`security/http.pinned_transport`). Die Anmelde-Prüfung (**Prüfen**,
+  mit den geprüften lokalen Adressen verbindet (`security/http.pinned_transport`; das Vertrauen in Zertifikate, das
+  die Umgebung nennt, `SSL_CERT_FILE` oder `SSL_CERT_DIR`, bleibt). Die Anmelde-Prüfung (**Prüfen**,
   `ditto login --check`, der Anmeldebereich der KI-Einstellungen): Ein Anbieter, den der Offline-Modus nicht
   erreichen darf, wird abgelehnt, bevor ein Socket aufgeht; ein lokaler Server wird über denselben festgelegten
   Client geprüft. Ein Qdrant-Server (Einstellung `qdrant_url`): nach der Regel beurteilt, ein Qdrant in der Cloud
-  wird in einfachen Worten abgelehnt, und qdrant-client verbindet sich nur mit den geprüften Adressen. Die
+  wird in einfachen Worten abgelehnt, und qdrant-client verbindet sich nur mit den geprüften Adressen (ein online
+  geöffneter Server wird nach der Regel neu geöffnet, sobald der Offline-Modus eingeschaltet wird). Die
   festgelegte llama.cpp-Quelle von einem Spiegel (`device runtime build --mirror`, `ditto runtime export-source
   --mirror`, `ditto runtime install`) und die Prüfung beim Anheben der Festlegung (`scripts/llama_cpp_pin.py`,
   `upstream_tag_commit`): nur aus deinem eigenen Netz, und git verbindet sich mit den geprüften lokalen Adressen
@@ -700,7 +702,8 @@ Adressbereich als lokal zählen.
   Offline-Modus beurteilt die Adresse selbst. Ein eigener Server, der nach seiner Adresse als lokal gilt, wird auch
   online nur unter seinen geprüften lokalen Adressen erreicht, damit seine Prompts, die ohne Datenschutzfilter
   gehen, nie eine öffentliche Adresse erreichen; zählt sein Name nicht mehr als lokal, wird die Verbindung in
-  einfachen Worten abgelehnt.
+  einfachen Worten abgelehnt. Ein Durchgang entscheidet den Datenschutzfilter und seinen Client aus derselben
+  Prüfung, daher bekommt ein Durchgang ohne Filter immer diesen festgelegten Client.
 
 ### Deep Ingest: von der Webseite in die Wissensbasis (unveröffentlicht)
 

@@ -135,7 +135,8 @@ class LocalOnlyAdapter(HTTPAdapter):
 
 
 def pinned_transport(settings: Any, what: str, *, httpx: Any, httpcore: Any, offline: bool = True):
-    """An httpx transport without the proxy from the environment whose every connection goes only to the checked
+    """An httpx transport without the proxy from the environment (with its certificate trust: SSL_CERT_FILE,
+    SSL_CERT_DIR) whose every connection goes only to the checked
     local addresses of its host (locality.connect_addresses with the person's opt-outs in `settings`, tried in turn;
     locality.forget when every one failed), for the httpx/httpcore pair a client library uses: httpx2/httpcore2 of
     the AI SDKs (llm/client.offline_http_client) or httpx/httpcore of qdrant-client (a Qdrant server in offline
@@ -164,7 +165,10 @@ def pinned_transport(settings: Any, what: str, *, httpx: Any, httpcore: Any, off
         def sleep(self, seconds):
             self._inner.sleep(seconds)
 
-    transport = httpx.HTTPTransport(trust_env=False)
+    # A transport reads no proxy (only the client does; its trust_env stays off). The certificate trust of the
+    # environment (SSL_CERT_FILE, SSL_CERT_DIR: an own CA for servers in the own network) is kept, as the library's
+    # own client has it.
+    transport = httpx.HTTPTransport(verify=httpx.create_ssl_context(trust_env=True), trust_env=False)
     transport._pool._network_backend = PinnedBackend(transport._pool._network_backend)
     return transport
 

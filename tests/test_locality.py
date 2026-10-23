@@ -411,7 +411,7 @@ def test_the_tailscale_command_runs_as_every_helper_command(monkeypatch):
 PUBLIC_KEPT = {"8.8.8.8", "93.184.215.14", "172.32.0.1", "198.51.101.1", "224.0.0.1"}
 DOCUMENTATION = ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32")
 OFFLINE_TESTS = ("test_locality.py", "test_offline_reach.py", "test_local_network.py", "test_offline_check.py",
-                 "test_offline_followups.py")
+                 "test_offline_followups.py", "test_offline_followups_review.py")
 
 
 def test_a_public_stand_in_is_a_documentation_address():
