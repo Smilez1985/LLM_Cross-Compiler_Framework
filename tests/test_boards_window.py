@@ -1212,6 +1212,31 @@ def test_a_new_key_moves_the_board_s_data_as_the_cli_does(qapp, window, monkeypa
     assert window._t("boards.edit.moved", new_id=moved.device_id, old_id=device.device_id, what=what) in told.text
 
 
+def test_a_record_that_cannot_be_written_still_names_where_the_board_s_data_went(qapp, window, monkeypatch):
+    """known_hosts holds the new key and the board's data moved, but its trusted record could not be written: the
+    window says both, as the CLI prints moved_lines before it says the record is missing."""
+    paramiko = pytest.importorskip("paramiko")
+    from orchestrator.runtime.device.trusted import DeviceStoreError, TrustedDevices
+    from orchestrator.runtime.profile import device_id_for_host_key
+    from orchestrator.utils import ssh_trust
+    state, device = _board_with_data(window, monkeypatch)
+
+    def refuse(self, *a, **k):
+        raise DeviceStoreError("the device records are too large")
+    monkeypatch.setattr(TrustedDevices, "replace", refuse)
+    new = paramiko.ECDSAKey.generate()
+    new_id = device_id_for_host_key(ssh_trust.fingerprint(new))
+    _edit_dialogs(monkeypatch, key_text=f"{new.get_name()} {new.get_base64()}", answer=True)
+    boxes = Boxes(monkeypatch)
+    window.buttons["btn_boards_edit"].click()
+    wait(qapp, window)
+    wait(qapp, window)
+    (told,) = boxes.asked
+    what = ", ".join(window._t(f"boards.edit.data.{k}") for k in ("probe", "deploy_settings", "deploy_record"))
+    assert window._t("boards.edit.record_failed") in told.text
+    assert window._t("boards.edit.moved", new_id=new_id, old_id=device.device_id, what=what) in told.text
+
+
 def test_a_failed_copy_of_the_board_s_data_changes_nothing_and_says_why(qapp, window, monkeypatch):
     paramiko = pytest.importorskip("paramiko")
     from orchestrator.runtime.device import board_move

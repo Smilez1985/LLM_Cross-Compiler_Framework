@@ -28,10 +28,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   der Deploy-Eintrag und seine Benchmark-Ergebnisse bei den Builds ("getestet auf"). Jeder Teil wird zur neuen
   Geräte-ID kopiert und geprüft (zurückgelesen, die Laufzeit-Pakete als harte Links oder als Kopien mit derselben
   sha256), bevor sich die `known_hosts` ändert, und die Kopien der alten ID gehen erst nach der Änderung; scheitert
-  eine Kopie oder wird die Änderung abgelehnt (kein Audit-Eintrag, `known_hosts` inzwischen geändert), gehen die
-  Kopien wieder und nichts hat sich geändert. Was die neue ID schon mit anderem Inhalt hat, wird nie überschrieben (es
-  bleibt unter der alten ID), eine alte Kopie, die sich nicht entfernen lässt, bleibt ebenfalls, und CLI und Fenster
-  nennen beides. Die Arbeit läuft im Hintergrund; die Texte gibt es auf Englisch und Deutsch. Kein Tool, der MCP-Server,
+  eine Kopie, wird die Änderung abgelehnt (kein Audit-Eintrag, `known_hosts` inzwischen geändert) oder endet sie auf
+  andere Weise, bevor sich die `known_hosts` ändert (ihre Sperre hält ein anderer Prozess, ein Strg+C), gehen die
+  Kopien wieder und nichts hat sich geändert. Sobald die `known_hosts` den neuen Schlüssel hält, gehen die alten Kopien
+  auch dann, wenn ein Strg+C den Anmeldetest danach beendet, sodass die Daten des Boards nie doppelt bleiben. Was die
+  neue ID schon mit anderem Inhalt hat, wird nie überschrieben (es bleibt unter der alten ID; die Prüfung und ihr Name
+  und ihre Adresse ziehen gemeinsam um oder bleiben gemeinsam), eine alte Kopie, die sich nicht entfernen lässt,
+  bleibt ebenfalls, und CLI und Fenster nennen beides, auch wenn der Eintrag des Boards nicht geschrieben werden
+  konnte. Die Arbeit läuft im Hintergrund; die Texte gibt es auf Englisch und Deutsch. Kein Tool, der MCP-Server,
   Ditto oder die Laufzeit-Schritte für Geräte erreichen sie (`orchestrator/remote/pairing.py` `replace_key`, ein
   Test über den Importgraphen).
 - **Nächste Schritte statt Befehlen, Befehle zum Zulassen und übersetzte, neu geordnete Menüs** (Welle 6, Kette
