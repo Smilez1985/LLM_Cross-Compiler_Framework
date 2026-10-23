@@ -104,7 +104,8 @@ class TokenStore:
     The parsed tokens are cached by the SHA-256 of the file's bytes, so the HTTP server can check every request
     cheaply and sees a revoke or rotate at once. The file is signed like the tool permissions
     (orchestrator/tools/signing.py): a file edited by hand, damaged, unsigned or signed with another key accepts no
-    token at all."""
+    token at all, and with the keyring an older signed copy put back is refused too, also when its bytes are those
+    of a revision this process has cached."""
 
     FILE_NAME = "mcp_tokens.json"
     LOCK_NAME = ".mcp_tokens.lock"
@@ -119,7 +120,7 @@ class TokenStore:
         self.key = key
         self.refuse_unkeyed = refuse_unkeyed
         self.anchor = anchor
-        # (sha256 of the bytes, tokens, revision)
+        # (sha256 of the bytes, tokens, the file's revision)
         self._cache: Optional[Tuple[str, Dict[str, TokenRecord], int]] = None
         self._cache_lock = threading.Lock()
 
@@ -130,6 +131,11 @@ class TokenStore:
         The file is read on every call and the parsed tokens are cached by the SHA-256 of its bytes: a cache by
         file identity, size and modification time would keep a token that was replaced within the time stamp's
         resolution (or by a same-size write that kept the time)."""
+        # The newest revision the framework saved (a stat while the file is unchanged), checked on a cache hit too:
+        # the bytes of an older revision this process cached can be put back over a newer file. Read before the file
+        # is opened, as the framework saves the file before it moves the anchor: a file saved meanwhile is then
+        # newer than the anchor read, never older (which would refuse every token and close every session).
+        anchored = self.anchor.current(self.path) if self.anchor is not None else 0
         try:
             fd = os.open(self.path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
         except FileNotFoundError:
@@ -162,9 +168,11 @@ class TokenStore:
                                   "MCP token is accepted. Remove the file and create the tokens again.")
         key = hashlib.sha256(raw).hexdigest()
         with self._cache_lock:
-            if self._cache is not None and self._cache[0] == key:
-                return self._cache[1]
-        anchored = self.anchor.current(self.path) if self.anchor is not None else 0
+            cached = self._cache if self._cache is not None and self._cache[0] == key else None
+        if cached is not None:
+            if cached[2] < anchored:
+                raise self._older_copy(cached[2], anchored)
+            return cached[1]
         try:
             parsed = json.loads(raw.decode("utf-8"))
             if not isinstance(parsed, dict):
@@ -179,13 +187,18 @@ class TokenStore:
             raise TokenStoreError(f"{self.path} cannot be trusted: {e}. No MCP token is accepted. Remove the file and "
                                   "create the tokens again ('llm-cli mcp token add NAME').") from None
         if data.revision < anchored:  # genuinely signed, but put back over a newer one (a revoked token returns)
-            raise TokenStoreError(f"{self.path} cannot be trusted: it is an older copy (revision {data.revision}; the "
-                                  f"framework saved revision {anchored} last). No MCP token is accepted. Remove the "
-                                  "file and create the tokens again ('llm-cli mcp token add NAME').")
+            raise self._older_copy(data.revision, anchored)
         records = {t.name: t for t in data.tokens}
         with self._cache_lock:
             self._cache = (key, records, data.revision)
         return records
+
+    def _older_copy(self, revision: int, anchored: int) -> TokenStoreError:
+        """The refusal of a genuinely signed file older than the revision the framework saved last (parsed now or
+        cached by its bytes)."""
+        return TokenStoreError(f"{self.path} cannot be trusted: it is an older copy (revision {revision}; the "
+                               f"framework saved revision {anchored} last). No MCP token is accepted. Remove the file "
+                               "and create the tokens again ('llm-cli mcp token add NAME').")
 
     def _revision(self) -> int:
         """The revision of the file _read() just read (0 when there is none)."""

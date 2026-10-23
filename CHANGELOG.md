@@ -2909,8 +2909,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   be written. Saves take a revision number under a lock shared by the GUI, the CLI and MCP servers; a save based on
   an older revision is refused, so a window opened earlier can no longer undo a change made meanwhile. The newest
   saved revision of each file is kept in the keyring as well, so an older signed copy put back over it (a revoked
-  standing approval or token would return) and a removed permission file deny everything too. Without a keyring the
-  signature has no key, as for the audit chain; such a file is refused while the audit log is kept with a key.
+  standing approval or token would return) and a removed permission file deny everything too. An older copy of the
+  token store is refused also when its bytes are the very ones a running MCP server or the GUI read before: the
+  parsed tokens are cached by the SHA-256 of the file's bytes, and before, such a copy brought the revoked token
+  back in that process. The revision is read before the file, so a token change saved meanwhile in another window
+  never looks like an older copy. Without a keyring the signature has no key, as for the audit chain; such a file
+  is refused while the audit log is kept with a key.
 - **Pending approvals and requests to stop asking are questions like any other.** They count toward the 30
   questions per hour; a "no" in the approval window stops the same call from being put to you again for 10 minutes
   and counts toward pausing the tool, as a "no" in the client's dialog does; a recent "no", a paused tool or a used-up
