@@ -476,8 +476,10 @@ class DeploymentManager:
     def _export_docker_images(self, images: List[str], dest_dir: Path, client: Any = None) -> Dict[str, str]:
         """Saves each image into the package under the name deploy.sh starts it by (_load_name) and returns
         {image: that name}. A digest-pinned image that is not here is pulled by its digest; an image is never pulled
-        by a tag. Any failure stops the package (DeployError): a package without its images would fail on the
-        air-gapped device."""
+        by a tag. In offline mode only images already on this computer are used, or one pulled from a registry the
+        one locality rule counts as local (image_ref.offline_pull_refusal); otherwise the package stops naming the
+        image and what to do while online. Any failure stops the package (DeployError): a package without its images
+        would fail on the air-gapped device."""
         dest_dir.mkdir(parents=True, exist_ok=True)
         client = client or self.framework.get_component("docker_client")
         if not client:
@@ -496,6 +498,12 @@ class DeploymentManager:
                 except Exception:  # noqa: BLE001 - not here: only a digest-pinned image is fetched
                     if not DIGEST_REFERENCE.fullmatch(img_name):
                         raise
+                    from orchestrator.utils.image_ref import offline_pull_refusal
+                    refused = offline_pull_refusal(img_name, getattr(self.framework, "config", None))
+                    if refused:   # offline mode: no pull from outside the own network (DECISIONS round 24 L-NET)
+                        raise DeployError(refused, code="needs_person",
+                                          next="Ask the person to package while offline mode is off, or without "
+                                               "Docker images.")
                     client.images.pull(img_name)
                     img = client.images.get(img_name)
                 name = self._load_name(img_name)
@@ -507,6 +515,8 @@ class DeploymentManager:
                     for chunk in img.save(named=name):
                         f.write(chunk)
                 names[img_name] = name
+            except DeployError:
+                raise
             except Exception as e:
                 raise DeployError(f"The image {img_name} could not be packaged: {e}", code="failed",
                                   next="Check Docker and the image reference, then package again.") from None

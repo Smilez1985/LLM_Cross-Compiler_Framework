@@ -37,4 +37,26 @@ def is_official_image(reference: str) -> bool:
     return bool(split_image(reference)["official"])
 
 
-__all__ = ["is_official_image", "split_image"]
+def registry_host(reference: str) -> str:
+    """The host a pull of `reference` goes to (Docker Hub's registry for an image without a registry)."""
+    registry = split_image(reference)["registry"]
+    return "registry-1.docker.io" if registry == "docker.io" else registry
+
+
+def offline_pull_refusal(reference: str, config) -> str:
+    """In offline mode (the framework's one offline check) a pull of an image that is not on this computer goes only
+    to a registry the one locality rule counts as local (utils/locality.py: this computer, the own network, the
+    person's opt-outs); otherwise the plain refusal naming the image and what to do while online. "" when the pull may
+    go (offline mode off, or a local registry)."""
+    from orchestrator.utils.locality import check_host, offline_mode, url_host
+    if not offline_mode(config):
+        return ""
+    verdict = check_host(url_host(registry_host(reference))[0], config)   # host[:port], [v6]:port
+    if verdict.local:
+        return ""
+    return (f"Offline mode is on, and the image {reference} is not on this computer; it would be pulled from "
+            f"{verdict.host}, which is not in your own network ({verdict.why()}). Pull it once while offline mode is "
+            "off (or package without Docker images), then package again offline.")
+
+
+__all__ = ["is_official_image", "offline_pull_refusal", "registry_host", "split_image"]
