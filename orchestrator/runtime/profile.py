@@ -363,6 +363,38 @@ def load_schema(path: Union[str, Path, None] = None) -> ProbeSchema:
 
 # --- the profile ---------------------------------------------------------------------------------------------------
 
+@dataclass(frozen=True)
+class HailoFacts:
+    """HardwareProfile.hailo(): what the probe found of a Hailo accelerator (None: not determined or no device).
+
+    family: hailo8 (HailoRT 4.x, branch hailo8) or hailo1x (HailoRT 5.x, branch master); arch: the Dataflow Compiler's
+    --hw-arch spelling (hailo8, hailo8l, hailo10h, ...); devices, interface (pcie, usb, integrated); driver and its
+    version (Linux), firmware_version, hailort_version (hailortcli = libhailort), pyhailort_version. version_mismatch:
+    hailortcli refused to run because libhailort has another version. Driver, firmware and HailoRT of one machine must
+    be the same release; comparing them is the preflight's and deploy's job (HAILO_PLAN 4.2), not the probe's."""
+    present: bool
+    family: Optional[str] = None
+    arch: Optional[str] = None
+    devices: Optional[int] = None
+    interface: Optional[str] = None
+    driver: Optional[str] = None
+    driver_version: Optional[str] = None
+    firmware_version: Optional[str] = None
+    hailort_version: Optional[str] = None
+    pyhailort_version: Optional[str] = None
+    version_mismatch: bool = False
+
+    @property
+    def hailort_line(self) -> Optional[str]:
+        """The HailoRT version line the board needs: "4" for family hailo8, "5" for hailo1x (None when unknown)."""
+        return {"hailo8": "4", "hailo1x": "5"}.get(self.family or "")
+
+    @property
+    def model(self) -> Optional[str]:
+        """NPU_MODEL's spelling of the architecture: hailo-8l, hailo-10h."""
+        return "hailo-" + self.arch[len("hailo"):] if self.arch else None
+
+
 class HardwareProfile:
     """A validated hardware profile. Only keys of the schema with validated, normalised values are kept; every bool
     key is present (ON, OFF or UNKNOWN), also for each GPU."""
@@ -447,6 +479,18 @@ class HardwareProfile:
     def soc_model_known(self) -> bool:
         """SOC_MODEL is one the framework takes decisions on (other values are display only)."""
         return self._values.get("SOC_MODEL") in self.schema.soc_models_known
+
+    def hailo(self) -> "HailoFacts":
+        """The Hailo accelerator facts of the probe (HAILO_PLAN.md section 2) in one typed value for its consumers
+        (target matching, the board recommendation, the documentation links, the wizard, deploy). A profile without
+        Hailo keys (no Hailo device, or a probe older than 3.1.0) gives present False and None everywhere else."""
+        return HailoFacts(
+            present=self.is_on("SUPPORTS_HAILO"), family=self.get("HAILO_FAMILY"), arch=self.get("HAILO_ARCH"),
+            devices=self.int_value("HAILO_DEVICES"), interface=self.get("HAILO_INTERFACE"),
+            driver=self.get("HAILO_DRIVER"), driver_version=self.get("HAILO_DRIVER_VERSION"),
+            firmware_version=self.get("HAILO_FW_VERSION"), hailort_version=self.get("HAILORT_VERSION"),
+            pyhailort_version=self.get("HAILO_PYHAILORT_VERSION"),
+            version_mismatch="version_mismatch:HAILORT_VERSION" in self.warnings)
 
     def gpus(self) -> List[Dict[str, str]]:
         """Per GPU (GPU0, GPU1, ...) its keys without the GPU<n>_ prefix."""

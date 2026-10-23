@@ -21,7 +21,7 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-PROBE_VERSION=3.0.0
+PROBE_VERSION=3.1.0
 OUTPUT_FILE=target_hardware_config.txt
 INSTALL_TOOLS=0
 TOOLCHAIN=1
@@ -135,7 +135,7 @@ P_SOC_VENDOR='^[a-z0-9][a-z0-9-]{0,31}$'
 P_CUDA='^[0-9]{1,2}\.[0-9]{1,3}$'
 P_TOOLCHAIN='^(gcc|clang|appleclang|msvc|icx)-[0-9]{1,4}(\.[0-9]{1,6}){0,3}$'
 P_INT='^(0|[1-9][0-9]{0,11})$'
-P_NPU_DEVICE='^/dev/(rknpu|dri/(renderD|card)[0-9]{1,3}|accel/accel[0-9]{1,3}|hailo[0-9]{1,3}|apex_[0-9]{1,3})$'
+P_NPU_DEVICE='^/dev/(rknpu|dri/(renderD|card)[0-9]{1,3}|accel/accel[0-9]{1,3}|hailo[0-9]{1,3}|h1x(-[0-9]{1,3})?|apex_[0-9]{1,3})$'
 # PCI device ids of AMD APU graphics (amdgpu_drv.c): their "VRAM" is a carve-out of the system RAM.
 AMD_APU_IDS="0x15dd 0x15d8 0x1636 0x1638 0x164c 0x15e7 0x163f 0x1435 0x1681 0x1506 0x164e 0x13c0 0x15bf 0x15c8"
 AMD_APU_IDS="$AMD_APU_IDS 0x150e 0x1114 0x1586"
@@ -685,6 +685,26 @@ else
     warn "not_determined:CPU_FLAGS_ALL"
 fi
 
+# The largest level-2 unified or data cache of /sys/devices/system/cpu/cpu<N>/cache/index<M> (the kernel writes KiB,
+# "2048K"); a level-2 cache whose size cannot be read is a warning, a CPU without one is not.
+L2_KB=0 L2_LISTED=0
+for idx in "$(f /sys/devices/system/cpu)"/cpu[0-9]*/cache/index[0-9]*; do
+    [ -d "$idx" ] || continue
+    [ "$(trim "$(rdp "$idx/level")")" = 2 ] || continue
+    case "$(trim "$(rdp "$idx/type")")" in Unified|Data) ;; *) continue ;; esac
+    L2_LISTED=1
+    size=$(trim "$(rdp "$idx/size")")
+    case "$size" in *K) n=${size%K} mult=1 ;; *M) n=${size%M} mult=1024 ;; *) continue ;; esac
+    case "$n" in ''|*[!0-9]*) continue ;; esac
+    [ ${#n} -le 9 ] || continue
+    n=$(printf '%s' "$n" | sed 's/^0*//')
+    n=$(( ${n:-0} * mult ))
+    [ "$n" -gt "$L2_KB" ] && L2_KB=$n
+done
+if [ "$L2_KB" -gt 0 ]; then put_int CPU_L2_CACHE_KB "$L2_KB" 1 1048576
+elif [ "$L2_LISTED" = 1 ]; then warn "not_determined:CPU_L2_CACHE_KB"
+fi
+
 # --- memory ----------------------------------------------------------------------------------------------------
 
 meminfo_mb() {
@@ -726,6 +746,32 @@ esac
 BOARD=$(dt_prop model ' ')
 [ -n "$BOARD" ] && put_text BOARD_MODEL "$BOARD" quiet
 
+# NVIDIA Jetson (decision O-PREP; read only when NVIDIA's files are there): the L4T release of /etc/nv_tegra_release
+# ("# R35 (release), REVISION: 4.1, ..." -> 35.4.1) and the JetPack version of the installed package nvidia-jetpack.
+if [ "$OS" = linux ] && [ "$ARCH" = arm64 ]; then
+    if [ -f "$(f /etc/nv_tegra_release)" ]; then
+        v=$(sed '/^[[:space:]]*$/d' "$(f /etc/nv_tegra_release)" 2>/dev/null | head -n1 |
+            sed -n 's/^#[[:space:]]*R\([0-9][0-9]*\)[[:space:]]*(release),[[:space:]]*REVISION:[[:space:]]*\([0-9][0-9]*\.[0-9][0-9]*\).*/\1.\2/p')
+        if [ -n "$v" ]; then put JETSON_L4T_VERSION "$v" '^[0-9]{2}\.[0-9]{1,2}\.[0-9]{1,2}$'
+        else warn "not_determined:JETSON_L4T_VERSION"
+        fi
+    fi
+    if [ -f "$(f /var/lib/dpkg/status)" ]; then
+        v=$(awk '
+            function check() {
+                if (pkg == "nvidia-jetpack" && st == "install ok installed" && !done) { print ver; done = 1 }
+                pkg = ""; st = ""; ver = ""; hp = 0; hs = 0; hv = 0
+            }
+            { sub(/\r$/, "") }   # the CR of a CRLF line end, as the Python probe reads lines
+            /^$/ { check(); next }
+            /^Package: / && !hp { pkg = substr($0, 10); hp = 1 }
+            /^Status: / && !hs { st = substr($0, 9); hs = 1 }
+            /^Version: / && !hv { ver = substr($0, 10); hv = 1 }
+            END { check() }' "$(f /var/lib/dpkg/status)" 2>/dev/null | sed -n 's/^\([0-9][0-9.]*\).*/\1/p' | head -n1)
+        put JETSON_JETPACK_VERSION "$v" '^[0-9]{1,2}\.[0-9]{1,2}(\.[0-9]{1,2})?$' quiet
+    fi
+fi
+
 # --- NPU and USB-attached boards -------------------------------------------------------------------------------
 
 PCI_IDS=""
@@ -751,17 +797,18 @@ RKNODE=""
 if exists /dev/rknpu; then RKNODE=/dev/rknpu
 else
     # A DRM node of the vendor rknpu driver or an accel node of the mainline rocket driver (unverified on a board).
-    set -f
     for pattern in renderD card; do
-        for name in $(ls "$(f /sys/class/drm)" 2>/dev/null | grep "^$pattern" | grep -v -- -); do
+        for node in "$(f /sys/class/drm)/$pattern"*; do
+            [ -e "$node" ] || [ -L "$node" ] || continue
+            name=${node##*/}
+            case "$name" in *-*) continue ;; esac   # a connector (card0-eDP-1), not a node
             # The vendor driver registers as "RKNPU" (upper case): compared without case.
-            if [ "$(lower "$(link_name "$(f /sys/class/drm)/$name/device/driver")")" = rknpu ]; then
+            if [ "$(lower "$(link_name "$node/device/driver")")" = rknpu ]; then
                 RKNODE=/dev/dri/$name
                 break 2
             fi
         done
     done
-    set +f
     if [ -z "$RKNODE" ]; then
         for n in "$(f /sys/class/accel)"/accel[0-9]*; do
             if [ "$(link_name "$n/device/driver")" = rocket ]; then RKNODE=/dev/accel/${n##*/}; break; fi
@@ -781,17 +828,280 @@ if [ -n "$RKNODE" ]; then
     done
     if [ -n "$DRV" ]; then put RKNPU_DRIVER_VERSION "$DRV"; else warn "needs_root:RKNPU_DRIVER_VERSION"; fi
 fi
-HAILO_NODE="" APEX_NODE="" INTEL_NODE=""
-for n in "$(f /dev)"/hailo[0-9]*; do [ -e "$n" ] && { HAILO_NODE=/dev/${n##*/}; break; }; done
+APEX_NODE="" INTEL_NODE=""
 for n in "$(f /dev)"/apex_[0-9]*; do [ -e "$n" ] && { APEX_NODE=/dev/${n##*/}; break; }; done
 for n in "$(f /sys/class/accel)"/accel[0-9]*; do
     if [ "$(link_name "$n/device/driver")" = intel_vpu ]; then INTEL_NODE=/dev/accel/${n##*/}; break; fi
 done
+[ "$OS" = linux ] && put INTEL_NPU_DEVICE "$INTEL_NODE" '^/dev/accel/accel[0-9]{1,3}$' quiet
+# --- Hailo (HAILO_PLAN.md section 2; the same read order and rules as hardware_probe.py) -------------------------
+# Files first (no tool): /sys/module/<driver> (never lsmod), the sysfs classes, /dev nodes, PCI and USB ids. Then
+# hailortcli with fixed arguments and an empty stdin: -v, scan, fw-control identify -s <id> for up to 16 devices (never
+# --extended); of identify only the architecture and firmware lines are read. Device ids stay in this script.
+
+hailo_arch_name() {  # identify's "Device Architecture" word -> HAILO_ARCH (tables.hailo_arch_names)
+    case "$1" in
+        HAILO8) echo hailo8 ;;
+        HAILO8_B0) echo hailo8 ;;
+        HAILO8L) echo hailo8l ;;
+        HAILO10H) echo hailo10h ;;
+        HAILO15H) echo hailo15h ;;
+        HAILO15M) echo hailo15m ;;
+        HAILO15L) echo hailo15l ;;
+        HAILO12L) echo hailo12l ;;
+        MARS) echo hailo12l ;;
+        *) return 1 ;;
+    esac
+}
+hailo_arch_family() {  # HAILO_ARCH -> HAILO_FAMILY (tables.hailo_arch_family)
+    case "$1" in
+        hailo8) echo hailo8 ;;
+        hailo8l) echo hailo8 ;;
+        hailo10h) echo hailo1x ;;
+        hailo15h) echo hailo1x ;;
+        hailo15m) echo hailo1x ;;
+        hailo15l) echo hailo1x ;;
+        hailo12l) echo hailo1x ;;
+        *) return 1 ;;
+    esac
+}
+hailo_driver_family() {  # kernel module -> HAILO_FAMILY (tables.hailo_drivers)
+    case "$1" in
+        hailo_pci) echo hailo8 ;;
+        hailo1x_pci) echo hailo1x ;;
+        hailo_integrated_nnc) echo hailo1x ;;
+        *) return 1 ;;
+    esac
+}
+hailo_class_family() {  # sysfs class -> HAILO_FAMILY (tables.hailo_sysfs_classes)
+    case "$1" in
+        hailo_chardev) echo hailo8 ;;
+        hailo1x) echo hailo1x ;;
+        hailo1x_integrated) echo hailo1x ;;
+        *) return 1 ;;
+    esac
+}
+hailo_pci_family() {  # PCI vendor:device -> HAILO_FAMILY (tables.hailo_pci_devices)
+    case "$1" in
+        0x1e60:0x2864) echo hailo8 ;;
+        0x1e60:0x45c4) echo hailo1x ;;
+        0x1e60:0x43a2) echo hailo1x ;;
+        0x1e60:0x26a2) echo hailo1x ;;
+        *) return 1 ;;
+    esac
+}
+hailo_usb_arch() {  # USB vendor:product -> HAILO_ARCH (tables.hailo_usb_devices)
+    case "$1" in
+        0x0b05:0x1d6f) echo hailo10h ;;
+        *) return 1 ;;
+    esac
+}
+hailo_interface() {  # the form of a hailortcli device id -> pcie, usb or integrated
+    case "$1" in
+        '[integrated]') echo integrated ;;
+        usb/*) echo usb ;;
+        *) echo pcie ;;
+    esac
+}
+count_distinct() { printf '%s\n' "$@" | sed '/^$/d' | sort -u | grep -c . ; }
+first_word() { printf '%s\n' "$@" | sed '/^$/d' | head -n1; }
+
+H_MODULE="" H_DRV_VER="" H_FAMS="" H_ENTRIES=0 H_NODE="" H_NODES=0 H_PCI=0 H_USB=0 H_USB_ARCH="" H_INTEGRATED=0
+for m in hailo_pci hailo1x_pci hailo_integrated_nnc; do
+    if [ "$OS" = linux ] && exists "/sys/module/$m"; then
+        H_MODULE=$m
+        H_FAMS="$H_FAMS $(hailo_driver_family "$m")"
+        v=$(first_number "$(rd "/sys/module/$m/version")")
+        if [ -n "$v" ] && valid "$P_DOTTED" "$v"; then H_DRV_VER=$v; fi
+        break
+    fi
+done
+for cls in hailo_chardev hailo1x hailo1x_integrated; do
+    for e in "$(f /sys/class)/$cls"/*; do
+        [ -e "$e" ] || [ -L "$e" ] || continue
+        H_ENTRIES=$((H_ENTRIES + 1))
+        [ -n "$H_NODE" ] || H_NODE=/dev/${e##*/}
+        H_FAMS="$H_FAMS $(hailo_class_family "$cls")"
+        [ "$cls" = hailo1x_integrated ] && H_INTEGRATED=1
+        if [ "$cls" = hailo_chardev ]; then   # the hailo8 driver's device_id reads 1e60:2864
+            did=$(trim "$(rdp "$e/device_id")")
+            case "$did" in
+                *:*) if v=$(hexid "${did%%:*}" 4) && d=$(hexid "${did#*:}" 4) && fam=$(hailo_pci_family "$v:$d"); then
+                         H_FAMS="$H_FAMS $fam"
+                     fi ;;
+            esac
+        fi
+    done
+done
+for n in "$(f /dev)"/hailo[0-9]*; do
+    [ -e "$n" ] || [ -L "$n" ] || continue
+    H_NODES=$((H_NODES + 1))
+    [ -n "$H_NODE" ] || [ "$H_ENTRIES" -gt 0 ] || H_NODE=/dev/${n##*/}
+done
+for id in $PCI_IDS; do
+    case "$id" in 0x1e60:*)
+        H_PCI=$((H_PCI + 1))
+        if fam=$(hailo_pci_family "$id"); then H_FAMS="$H_FAMS $fam"; fi ;;
+    esac
+done
+for id in $USB_IDS; do
+    if arch=$(hailo_usb_arch "$id"); then
+        H_USB=$((H_USB + 1)) H_USB_ARCH=$arch
+        H_FAMS="$H_FAMS $(hailo_arch_family "$arch")"
+    fi
+done
+
+# Step B: hailortcli. A call that does not answer (exit 124 of timeout, 126/127: cannot run) ends the Hailo tools,
+# as a missing tool does in hardware_probe.py; the Hailo part stops after 60 s where date +%s works.
+H_INSTALLED=0 H_WARN="" H_VERSION="" H_SCAN=0 H_IDS="" H_RECORDS=""
+hailo_seconds() { s=$(date +%s 2>/dev/null); case "$s" in ''|*[!0-9]*) echo "" ;; *) echo "$s" ;; esac; }
+H_START=$(hailo_seconds)
+if have hailortcli; then
+    out=$($TIMEOUT hailortcli -v </dev/null 2>&1)
+    rc=$?
+    case "$rc" in 124|125|126|127) ;; *) H_INSTALLED=1 ;; esac
+fi
+if [ "$H_INSTALLED" = 1 ]; then
+    ver=$(printf '%s\n' "$out" | sed -n 's/.*HailoRT-CLI version \([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' |
+          head -n1)
+    if printf '%s\n' "$out" | grep -q 'libhailort version ([0-9.][0-9.]*) does not match HailoRT-CLI version ([0-9.][0-9.]*)'; then
+        H_WARN=version_mismatch
+    elif [ "$rc" -ne 0 ]; then
+        if [ -n "$ver" ]; then H_WARN=not_determined; else H_WARN=version_mismatch; fi
+    elif [ -n "$ver" ] && valid "$P_DOTTED" "$ver"; then
+        H_VERSION=$ver
+    else
+        H_WARN=not_determined
+    fi
+    if [ "$H_WARN" != version_mismatch ] && out=$(tool hailortcli scan); then
+        raw=$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*\[-\][[:space:]]*Device:[[:space:]]*\([^[:space:]][^[:space:]]*\)[[:space:]]*$/\1/p')
+        case "$out" in *"Hailo devices not found"*) H_SCAN=1 ;; esac
+        [ -n "$raw" ] && H_SCAN=1
+        H_IDS=$(printf '%s\n' "$raw" |
+                grep -E '^(\[integrated\]|usb/[0-9]{3}:[0-9]{3}|(pci/)?([0-9a-fA-F]{4}:)?[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7])$' |
+                awk '!seen[$0]++')
+    fi
+    OLDIFS=$IFS; IFS=$NL
+    set -f
+    asked=0
+    for id in $H_IDS; do
+        IFS=$OLDIFS   # the ids are split on line breaks; the commands below need the usual IFS ($TIMEOUT)
+        [ "$asked" -lt 16 ] || break
+        now=$(hailo_seconds)
+        if [ -n "$H_START" ] && [ -n "$now" ] && [ $((now - H_START)) -ge 60 ]; then break; fi
+        asked=$((asked + 1))
+        # NUL bytes removed (as hailo-apps does); the exit code travels behind the output.
+        out=$( { $TIMEOUT hailortcli fw-control identify -s "$id" </dev/null 2>/dev/null; echo "rc=$?"; } | tr -d '\000')
+        rc=${out##*rc=}
+        out=${out%rc=*}
+        case "$rc" in 124|125|126|127) break ;; 0) ;; *) continue ;; esac
+        word=$(printf '%s\n' "$out" |
+               sed -n 's/^[[:space:]]*Device Architecture[[:space:]]*:[[:space:]]*\([A-Za-z0-9_][A-Za-z0-9_]*\)[[:space:]]*$/\1/p' |
+               head -n1 | tr 'a-z' 'A-Z')
+        [ -n "$word" ] || continue
+        fw=$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*Firmware Version[[:space:]]*:[[:space:]]*\([0-9][0-9.]*\).*/\1/p' |
+             head -n1)
+        valid "$P_DOTTED" "$fw" || fw=""
+        H_RECORDS="$H_RECORDS$id$SEP$word$SEP$fw$NL"
+    done
+    set +f
+    IFS=$OLDIFS
+fi
+
+H_PRESENT=0
+if [ "$H_PCI" -gt 0 ] || [ "$H_USB" -gt 0 ] || [ "$H_ENTRIES" -gt 0 ] || [ "$H_NODES" -gt 0 ] || [ -n "$H_IDS" ]; then
+    H_PRESENT=1
+fi
+[ -n "$H_VERSION" ] && put HAILORT_VERSION "$H_VERSION" "$P_DOTTED"
+[ -n "$H_WARN" ] && warn "$H_WARN:HAILORT_VERSION"
+H_ARCHS="" H_UNKNOWN=0 H_FWS="" H_ARCH=""
+OLDIFS=$IFS; IFS=$NL
+set -f
+for rec in $H_RECORDS; do
+    id=${rec%%"$SEP"*} rest=${rec#*"$SEP"}
+    word=${rest%%"$SEP"*} fw=${rest#*"$SEP"}
+    if ! arch=$(hailo_arch_name "$word"); then H_UNKNOWN=1; continue; fi
+    if [ "$arch" = hailo15h ] && [ "$(hailo_interface "$id")" != integrated ]; then arch=hailo10h; fi
+    H_ARCHS="$H_ARCHS$arch$NL"
+    [ -n "$fw" ] && H_FWS="$H_FWS$fw$NL"
+done
+set +f
+IFS=$OLDIFS
+if [ "$(count_distinct "$H_ARCHS")" -gt 1 ] || [ "$H_UNKNOWN" = 1 ]; then warn "not_determined:HAILO_ARCH"
+elif [ -n "$H_ARCHS" ]; then H_ARCH=$(first_word "$H_ARCHS")
+elif [ -n "$H_USB_ARCH" ] && [ "$H_PCI" = 0 ] && [ -z "$H_RECORDS" ]; then H_ARCH=$H_USB_ARCH
+fi
+[ -n "$H_ARCH" ] && H_FAMS="$(hailo_arch_family "$H_ARCH") $H_FAMS"
+set -f
+# shellcheck disable=SC2086 # the families are single words
+H_NFAM=$(count_distinct $H_FAMS)
+# shellcheck disable=SC2086
+H_FAMILY=$(first_word $H_FAMS)
+set +f
+H_CONFLICT=0
+if [ "$H_NFAM" -gt 1 ]; then H_CONFLICT=1 H_FAMILY="" H_ARCH=""; warn "not_determined:HAILO_FAMILY"; fi
+if [ "$H_PRESENT" = 1 ] && [ -z "$H_ARCH" ] && [ "$H_CONFLICT" = 0 ] && [ "$H_WARN" != version_mismatch ]; then
+    if [ "$H_INSTALLED" = 1 ] && [ -n "$H_NODE" ] && { [ -e "$(f "$H_NODE")" ] || [ -L "$(f "$H_NODE")" ]; } &&
+       ! { [ -r "$(f "$H_NODE")" ] && [ -w "$(f "$H_NODE")" ]; }; then
+        warn "needs_root:HAILO_ARCH"
+    else
+        warn "not_determined:HAILO_ARCH"
+    fi
+fi
+if [ "$(count_distinct "$H_FWS")" = 1 ]; then put HAILO_FW_VERSION "$(first_word "$H_FWS")" "$P_DOTTED"
+elif [ "$(count_distinct "$H_FWS")" -gt 1 ]; then warn "not_determined:HAILO_FW_VERSION"
+elif [ "$H_PRESENT" = 1 ] && { [ -n "$H_MODULE" ] || [ "$H_ENTRIES" -gt 0 ]; } && [ "$H_INSTALLED" = 0 ]; then
+    warn "not_determined:HAILO_FW_VERSION"
+fi
+H_IFACES=""
+if [ -n "$H_IDS" ]; then
+    OLDIFS=$IFS; IFS=$NL
+    set -f
+    for id in $H_IDS; do H_IFACES="$H_IFACES$(hailo_interface "$id")$NL"; done
+    set +f
+    IFS=$OLDIFS
+else
+    [ "$H_PCI" -gt 0 ] && H_IFACES="${H_IFACES}pcie$NL"
+    [ "$H_USB" -gt 0 ] && H_IFACES="${H_IFACES}usb$NL"
+    [ "$H_INTEGRATED" = 1 ] && H_IFACES="${H_IFACES}integrated$NL"
+fi
+if [ "$(count_distinct "$H_IFACES")" = 1 ]; then put HAILO_INTERFACE "$(first_word "$H_IFACES")"
+elif [ "$(count_distinct "$H_IFACES")" -gt 1 ]; then warn "not_determined:HAILO_INTERFACE"
+fi
+H_COUNT=""
+if [ -n "$H_IDS" ]; then H_COUNT=$(printf '%s\n' "$H_IDS" | grep -c .)
+elif [ "$H_PRESENT" = 1 ]; then
+    if [ "$H_ENTRIES" -gt 0 ]; then H_COUNT=$H_ENTRIES
+    elif [ "$H_NODES" -gt 0 ]; then H_COUNT=$H_NODES
+    else H_COUNT=$((H_PCI + H_USB))
+    fi
+elif [ "$H_SCAN" = 1 ]; then H_COUNT=0
+fi
+if [ -n "$H_COUNT" ]; then put_int HAILO_DEVICES "$H_COUNT" 0 64
+elif [ "$H_INSTALLED" = 1 ] && [ "$H_WARN" != version_mismatch ]; then warn "not_determined:HAILO_DEVICES"
+fi
+put HAILO_FAMILY "$H_FAMILY"
+put HAILO_ARCH "$H_ARCH"
+if [ -n "$H_MODULE" ]; then
+    put HAILO_DRIVER "$H_MODULE"
+    if [ -n "$H_DRV_VER" ]; then put HAILO_DRIVER_VERSION "$H_DRV_VER"; else warn "not_determined:HAILO_DRIVER_VERSION"; fi
+fi
+if [ "$OS" = linux ]; then
+    for m in "$(f /usr/lib/python3/dist-packages)"/hailort-*.dist-info/METADATA \
+             "$(f /usr/local/lib)"/python3*/dist-packages/hailort-*.dist-info/METADATA; do
+        [ -f "$m" ] || continue
+        v=$(trim "$(sed -n 's/^Version:[ 	]*//p' "$m" | head -n1 | tr -d '\r')")
+        if valid "$P_DOTTED" "$v"; then put HAILO_PYHAILORT_VERSION "$v"; break; fi
+    done
+fi
+H_MODEL=""
+[ -n "$H_ARCH" ] && H_MODEL="hailo-${H_ARCH#hailo}"
+
 describe() {  # VENDOR MODEL DEVICE: the first NPU found is described
     [ -n "$NPU_VENDOR" ] && return 0
     NPU_VENDOR=$1 NPU_MODEL=$2 NPU_DEVICE=$3
 }
-if pci_vendor_seen 0x1e60 || [ -n "$HAILO_NODE" ]; then HAILO=ON; describe hailo "" "$HAILO_NODE"; fi
+if [ "$H_PRESENT" = 1 ]; then HAILO=ON; describe hailo "$H_MODEL" "$H_NODE"; fi
 if pci_vendor_seen 0x1f4b; then METIS=ON; describe axelera "" ""; fi
 if pci_vendor_seen 0x1d6b; then MX3=ON; describe memryx "" ""; fi
 if id_seen 0x1ac1:0x089a "$PCI_IDS" || id_seen 0x1a6e:0x089a "$USB_IDS" || id_seen 0x18d1:0x9302 "$USB_IDS" \
@@ -884,11 +1194,12 @@ if have nvidia-smi; then
     fi
 fi
 
-VK_RAN=0 VK_GPUS=""
+VK_RAN=0 VK_GPUS="" VK_INSTANCE=""
 if have vulkaninfo; then
-    out=$(tool vulkaninfo --summary)
-    if [ $? -eq 0 ]; then
+    if out=$(tool vulkaninfo --summary); then
         case "$out" in *Devices*) VK_RAN=1 ;; esac
+        VK_INSTANCE=$(printf '%s\n' "$out" |
+                      sed -n 's/^[[:space:]]*Vulkan Instance Version:[[:space:]]*\([0-9][0-9.]*\).*/\1/p' | head -n1)
     fi
     if [ "$VK_RAN" = 1 ]; then
         RAW=$(printf '%s\n' "$out" | awk '
@@ -932,6 +1243,50 @@ if have vulkaninfo; then
     fi
 fi
 
+# The instance version: vulkaninfo's line, else the version in the loader's file name (libvulkan.so.1.Y.Z), the first
+# file in the order of the loader folders.
+if [ -z "$VK_INSTANCE" ]; then
+    for m in "$(f /usr/lib)"/*/libvulkan.so.1.* "$(f /usr/lib)"/libvulkan.so.1.* "$(f /usr/lib64)"/libvulkan.so.1.* \
+             "$(f /lib)"/*/libvulkan.so.1.* "$(f /lib)"/libvulkan.so.1.* "$(f /lib64)"/libvulkan.so.1.*; do
+        [ -e "$m" ] || [ -L "$m" ] || continue   # a link counts by its name, as in hardware_probe.py
+        v=${m##*/libvulkan.so.}
+        if valid '^1\.[0-9]+\.[0-9]+$' "$v"; then VK_INSTANCE=$v; break; fi
+    done
+fi
+put VULKAN_INSTANCE_VERSION "$VK_INSTANCE" '^[0-9]{1,2}\.[0-9]{1,3}\.[0-9]{1,5}$' quiet
+
+# OpenCL platforms of clinfo: each "Platform Version" line (OpenCL <major>.<minor> ...) with the "Platform Name" line
+# before it, as <name>:<version> (the name lower case, (r)/(tm) removed, other characters one "-", at most 48).
+opencl_name() {
+    printf '%s' "$1" | tr -c ' -~' ' ' | tr 'A-Z' 'a-z' | sed 's/(r)//g; s/(tm)//g' | tr -c 'a-z0-9' '-' |
+        tr -s '-' | sed 's/^-//; s/-$//' | cut -c1-48 | sed 's/-$//'
+}
+OPENCL=""
+if have clinfo && out=$(tool clinfo); then
+    RAW=$(printf '%s\n' "$out" | awk '
+        { line = $0; gsub(/^[ \t\r]+|[ \t\r]+$/, "", line) }
+        line == "Platform Name" || line ~ /^Platform Name[ \t]/ {
+            name = substr(line, 14); gsub(/^[ \t\r]+|[ \t\r]+$/, "", name); next
+        }
+        line ~ /^Platform Version[ \t]+OpenCL [0-9]+\.[0-9]+/ && name != "" {
+            v = line; sub(/^Platform Version[ \t]+OpenCL /, "", v); match(v, /^[0-9]+\.[0-9]+/)
+            printf "%s\037%s\n", name, substr(v, 1, RLENGTH)
+        }')
+    OLDIFS=$IFS; IFS=$NL
+    set -f
+    for row in $RAW; do
+        name=${row%%"$SEP"*} version=${row#*"$SEP"}
+        item="$(opencl_name "$name"):$version"
+        valid '^[a-z0-9]([a-z0-9-]{0,46}[a-z0-9])?:[0-9]{1,2}\.[0-9]{1,2}$' "$item" || continue
+        case ",$OPENCL," in *",$item,"*) continue ;; esac
+        [ "$(printf '%s' "$OPENCL" | tr ',' '\n' | grep -c .)" -lt 16 ] || break
+        OPENCL="${OPENCL:+$OPENCL,}$item"
+    done
+    set +f
+    IFS=$OLDIFS
+fi
+put OPENCL_PLATFORMS "$OPENCL" "" quiet
+
 # Display-class PCI GPUs of /sys/class/drm, with the amdgpu VRAM and the KFD gfx target.
 FS_GPUS=""
 KFD=""
@@ -946,8 +1301,9 @@ for props in "$(f /sys/class/kfd/kfd/topology/nodes)"/*/properties; do
     KFD="$KFD$minor $(printf 'gfx%d%x%x' $((ver / 10000)) $((ver / 100 % 100)) $((ver % 100)))$NL"
 done
 DRM=$(f /sys/class/drm)
-for num in $(ls "$DRM" 2>/dev/null | grep -E '^card[0-9]+$' | sed 's/^card//' | sort -n); do
-    card=$DRM/card$num dev=$DRM/card$num/device
+for num in $(for c in "$DRM"/card[0-9]*; do n=${c##*/card}; case "$n" in ''|*[!0-9]*) continue ;; esac
+                                          echo "$n"; done | sort -n); do
+    dev=$DRM/card$num/device
     vendor_id=$(hexid "$(rdp "$dev/vendor")" 4) || continue
     [ ${#vendor_id} -eq 6 ] || continue
     device_id=$(hexid "$(rdp "$dev/device")" 4) || device_id=""
@@ -1123,6 +1479,52 @@ if [ "$OS" = linux ]; then
     fi
     emit HIP_RUNTIME "$HIP"
     put ROCM_VERSION "$(first_number "$(rd /opt/rocm/.info/version)")" "$P_VERSION" quiet
+    # Decision O-PREP, each read only when it is there: the gfx targets of every KFD node (also compute devices that
+    # are no display controller), the CUDA toolkit release, the TensorRT and OpenVINO runtime libraries, the Intel GPU
+    # render node and its driver.
+    ROCM_GFX=""
+    for props in "$(f /sys/class/kfd/kfd/topology/nodes)"/*/properties; do
+        [ -f "$props" ] || continue
+        ver=$(awk '$1 == "gfx_target_version" { print $2; exit }' "$props")
+        case "$ver" in ''|*[!0-9]*) continue ;; esac
+        [ ${#ver} -le 9 ] || continue
+        [ "$ver" -gt 0 ] || continue
+        t=$(printf 'gfx%d%x%x' $((ver / 10000)) $((ver / 100 % 100)) $((ver % 100)))
+        valid '^gfx[0-9a-f]{3,5}$' "$t" || continue
+        case ",$ROCM_GFX," in *",$t,"*) ;; *) ROCM_GFX="${ROCM_GFX:+$ROCM_GFX,}$t" ;; esac
+    done
+    put ROCM_GFX_TARGETS "$(printf '%s' "$ROCM_GFX" | tr ',' '\n' | head -n16 | tr '\n' ',' | sed 's/,$//')" \
+        '^gfx[0-9a-f]{3,5}(,gfx[0-9a-f]{3,5})*$' quiet
+    if [ -f "$(f /usr/local/cuda/version.json)" ]; then
+        v=$(tr -d '\r\n' < "$(f /usr/local/cuda/version.json)" |
+            sed -n 's/.*"cuda"[[:space:]]*:[[:space:]]*{[^}]*"version"[[:space:]]*:[[:space:]]*"\([0-9][0-9.]*\)".*/\1/p')
+        if [ -n "$v" ]; then put CUDA_TOOLKIT_VERSION "$v" "$P_DOTTED"; else warn "not_determined:CUDA_TOOLKIT_VERSION"; fi
+    elif [ -f "$(f /usr/local/cuda/version.txt)" ]; then
+        v=$(sed -n 's/^CUDA Version \([0-9][0-9.]*\).*/\1/p' "$(f /usr/local/cuda/version.txt)" | head -n1)
+        if [ -n "$v" ]; then put CUDA_TOOLKIT_VERSION "$v" "$P_DOTTED"; else warn "not_determined:CUDA_TOOLKIT_VERSION"; fi
+    fi
+    v=""
+    for m in "$(f /usr/lib)"/*/libnvinfer.so.* "$(f /usr/lib64)"/libnvinfer.so.* "$(f /usr/lib)"/libnvinfer.so.*; do
+        [ -e "$m" ] || [ -L "$m" ] || continue
+        if valid '^[0-9]+\.[0-9]+\.[0-9]+$' "${m##*/libnvinfer.so.}"; then v=${m##*/libnvinfer.so.}; break; fi
+    done
+    put TENSORRT_VERSION "$v" '^[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,2}$' quiet
+    v=""
+    for m in "$(f /usr/lib)"/libopenvino.so.* "$(f /usr/lib)"/*/libopenvino.so.* "$(f /usr/lib64)"/libopenvino.so.*; do
+        [ -e "$m" ] || [ -L "$m" ] || continue
+        if valid '^[0-9]+\.[0-9]+\.[0-9]+$' "${m##*/libopenvino.so.}"; then v=${m##*/libopenvino.so.}; break; fi
+    done
+    put OPENVINO_VERSION "$v" '^[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}$' quiet
+    for n in "$(f /sys/class/drm)"/renderD[0-9]*; do
+        [ -e "$n" ] || [ -L "$n" ] || continue
+        vendor=$(hexid "$(rdp "$n/device/vendor")" 4) || continue
+        drv=$(link_name "$n/device/driver") || drv=""
+        if [ "$vendor" = 0x8086 ] && { [ "$drv" = i915 ] || [ "$drv" = xe ]; }; then
+            put INTEL_GPU_DEVICE "/dev/dri/${n##*/}" '^/dev/dri/renderD[0-9]{1,3}$' quiet
+            put INTEL_GPU_DRIVER "$drv"
+            break
+        fi
+    done
 else
     emit HIP_RUNTIME OFF
 fi
