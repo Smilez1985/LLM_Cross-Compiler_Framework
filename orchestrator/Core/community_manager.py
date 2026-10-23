@@ -813,8 +813,8 @@ class CommunityManager:
         if target:
             folder = self._target_folder(target) if re.fullmatch(ID_PATTERN, target) else None
             if folder is None:
-                raise PackError(f"There is no target '{target}' on this computer ('llm-cli targets list' lists them); "
-                                "give a topic instead, or install the target first.")
+                raise PackError(f"There is no target '{target}' on this computer; give a topic instead, or install "
+                                "the target first.").with_steps("hub.open")
             target = folder.name
         return topic, target
 
@@ -828,7 +828,7 @@ class CommunityManager:
         loose = next((item for item in self.loose_knowledge() if item.label == str(name or "").replace("\\", "/")),
                      None)
         if loose is None:
-            raise PackError(f"There is no loose knowledge file '{name}' ('llm-cli knowledge loose' lists them).")
+            raise PackError(f"There is no loose knowledge file '{name}'.").with_steps("knowledge.loose")
         topic, target = self._knowledge_choice(topic, target)
         if loose.size > MAX_PACK_BYTES:
             raise PackError(f"{loose.label} is larger than a knowledge pack may be.")
@@ -1544,7 +1544,7 @@ class CommunityManager:
                 unchanged = False
             if not unchanged:
                 problems.append(f"{item.label}: its files changed since it was installed, so it is not imported "
-                                "('llm-cli zoo verify' shows it; install it again)")
+                                "(the check of the installed packs shows it; install it again)")
                 continue
             pending.append(item)
         # A pack that cannot be imported yet stays pending and is tried again at every start: its snapshot is taken

@@ -16,13 +16,13 @@ from typing import Any, List, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView,
-                               QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+                               QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from orchestrator.gui.plain import button_text, one_line, plain_label, plain_tooltip
 from orchestrator.utils.localization import current_language, ui_text
 
 COLUMNS = ("sources.col.source", "sources.col.kind", "sources.col.removed", "sources.col.licence",
-           "sources.col.copyright", "sources.col.carried", "sources.col.why")
+           "sources.col.copyright", "sources.col.carried", "sources.col.why", "sources.col.topic")
 KIND_FILTER = ("any", "web", "pack", "docs", "other")   # knowledge_sources.KIND_CHOICES, "any" first
 
 
@@ -47,6 +47,15 @@ class KnowledgeSourcesDialog(QDialog):
             self.kind.addItem(self._t(f"sources.filter.{value}"), value)
         self.kind.currentIndexChanged.connect(lambda _index: self.reload())
         row.addWidget(self.kind)
+        # the topic or target a source belongs to (`llm-cli knowledge sources --topic`; DECISIONS round 23 item 1)
+        row.addWidget(plain_label(self._t("sources.topic"), wrap=False, selectable=False))
+        self.topic = QLineEdit(self)
+        self.topic.setObjectName("edt_knowledge_sources_topic")
+        self.topic.setAccessibleName(self._t("sources.topic"))
+        self.topic.setPlaceholderText(self._t("sources.topic.hint"))
+        self.topic.setClearButtonEnabled(True)
+        self.topic.editingFinished.connect(self.reload)
+        row.addWidget(self.topic)
         row.addStretch()
         self.btn_refresh = QPushButton(button_text(self._t("sources.refresh")), self)
         self.btn_refresh.setObjectName("btn_knowledge_sources_refresh")
@@ -84,6 +93,7 @@ class KnowledgeSourcesDialog(QDialog):
         `llm-cli knowledge sources --kind KIND`)."""
         from orchestrator.gui.worker_relay import worker_relay
         kind = str(self.kind.currentData() or "any")
+        topic = self.topic.text().strip() or None
         token, relay, framework = object(), worker_relay(), self.framework
         self._token = token
         self.status.setText(self._t("sources.loading"))
@@ -93,7 +103,8 @@ class KnowledgeSourcesDialog(QDialog):
             from orchestrator.Core import knowledge_sources
             from orchestrator.rag.errors import KnowledgeBaseError
             try:
-                result = ("ok", knowledge_sources.sources(knowledge_sources.knowledge_base(framework), kind))
+                result = ("ok", knowledge_sources.sources(knowledge_sources.knowledge_base(framework), kind,
+                                                          topic=topic))
             except knowledge_sources.KnowledgeOff:
                 result = ("off", "")
             except KnowledgeBaseError as e:
@@ -130,7 +141,7 @@ class KnowledgeSourcesDialog(QDialog):
             values = (str(entry.get("source") or ""), self._kind_text(str(entry.get("kind") or "")), removed,
                       str(entry.get("licence") or "-"), str(entry.get("copyright") or "-"),
                       self._t(f"sources.carried.{share}") if share in knowledge_sources.CARRIED else "-",
-                      str(entry.get("share_reason") or ""))
+                      str(entry.get("share_reason") or ""), self._topic_text(entry))
             for column, value in enumerate(values):
                 cell = QTableWidgetItem(one_line(value))   # plain text, never rich text
                 if column == 0 and entry.get("title"):
@@ -144,6 +155,14 @@ class KnowledgeSourcesDialog(QDialog):
         else:
             full, facts = knowledge_sources.totals(self.entries)
             self.summary.setText(self._t("sources.totals", n=len(self.entries), full=full, facts=facts))
+
+    def _topic_text(self, entry: dict) -> str:
+        """The topic or target a source belongs to, in the window's language ("-" for your own pages)."""
+        if entry.get("target"):
+            return self._t("sources.topic.target", name=str(entry["target"]))
+        if entry.get("topic"):
+            return self._t("sources.topic.topic", name=str(entry["topic"]))
+        return "-"
 
     def _kind_text(self, kind: str) -> str:
         return self._t(f"sources.filter.{kind}") if kind in KIND_FILTER else kind
