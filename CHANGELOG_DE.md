@@ -1466,7 +1466,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   aufführen kann, wird nie angeboten; Papierkorb oder endgültig; „Nein“ ist die Vorgabe), zuerst im Audit-Log
   vermerkt; ohne dieses
   Ja wird nichts gelöscht. Jeder Schritt läuft in einem Worker-Thread. Die Texte stehen in
-  `orchestrator/utils/l10n_hf.py` (Englisch und Deutsch). Der Browser liest den Offline-Modus wie bisher nicht.
+  `orchestrator/utils/l10n_hf.py` (Englisch und Deutsch). Im Offline-Modus lehnt der Browser vor jeder Anfrage ab
+  (siehe Behoben).
 - **Ein Build sind wieder die vier Stufenmodule, und `build.sh` führt sie nur aus** (Entscheidung U9 des
   Maintainers; Konsolidierungskette build4). `targets/Rockchip/modules/build.sh` ist ein Stage-Runner über
   `source_module.sh` (die Quellen der Werkzeuge, aus denen das Image gebaut wurde), `config_module.sh`
@@ -2350,6 +2351,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Im Offline-Modus nimmt der Hugging-Face-Browser keinen Kontakt mehr zu Hugging Face auf** (Konsolidierungskette
+  hf-online): Suche, Lizenzprüfung, Dateiliste und Download gingen bei eingeschaltetem Offline-Modus online, während
+  die Aufrufe einer KI abgelehnt wurden. **Tools > Hugging Face Model Browser...** lehnt jetzt vor jeder Anfrage ab,
+  bevor ein Worker startet oder nach einem Token gefragt wird, in klaren Worten in deiner Sprache: Der Offline-Modus
+  ist an, es wird nichts gesucht, geprüft oder geladen, wo du ihn ausschaltest (Ditto > KI-Einstellungen...), und dass
+  Modelle, die schon auf diesem Computer sind, nutzbar bleiben. `ModelManager` lehnt für jeden Aufrufer gleich ab
+  (`hf_hub.offline_refusal`, dieselbe Ablehnung, die `HubClient` einer KI gibt; `hf_hub.person_text` gibt einem
+  Fenster oder der Kommandozeile die Worte für die Person). **Alte Downloads übernehmen…** funktioniert offline: Eine
+  Datei, deren Prüfsumme nur Hugging Face liefern könnte (ein Cache ohne Links), bleibt mit dem Grund „der
+  Offline-Modus ist an“ im alten Cache, und Hugging Face wird nicht gefragt. Regressionstests: `tests/test_hf_online.py` `TestOfflineMode`, `TestTheBrowserWindowOffline`.
 - **Ein Modell aus dem alten Download-Cache von Hugging Face funktioniert wieder im Build** (A6, „bleiben nutzbar“):
   Der Hugging-Face-Browser der GUI speicherte bisher in den eigenen Cache von huggingface_hub im Modellordner, wo eine
   Datei ein Link auf einen Blob ist, der nach seiner Prüfsumme heißt. Ein Build einer solchen GGUF-Datei band sie

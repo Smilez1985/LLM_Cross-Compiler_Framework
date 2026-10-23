@@ -254,3 +254,115 @@ def test_every_hub_api_object_comes_from_hub_api():
             elif isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "HfApi":
                 found.append(f"{name}:{node.lineno} calls HfApi")
     assert found == []
+
+
+# --- offline mode: the browser refuses like every other Hugging Face caller -----------------------------------------
+
+def offline_manager(tmp_path, token=None):
+    from orchestrator.Core.model_manager import ModelManager
+    return ModelManager(framework(tmp_path, token, offline_mode=True))
+
+
+class TestOfflineMode:
+    """Regression (maintainer, stage C wave 3): in offline mode the Hugging Face browser's search, licence check, file
+    list and download still went online, while an AI caller's were refused (HubClient.check_online). They now refuse
+    with the same refusal (hf_hub.offline_refusal) before any request, and the person reads it in plain words in their
+    language (hf_hub.person_text); the Take over's Hub list asks nobody either."""
+
+    def test_the_browsers_calls_refuse_before_any_request(self, wire, tmp_path):
+        from orchestrator.Core.hf_hub import HubError
+        manager = offline_manager(tmp_path, STORED)
+        assert manager.offline() is True
+        calls = [lambda: manager.search_huggingface_models("tiny"), lambda: manager.check_license(REPO),
+                 lambda: manager.list_repo_files(REPO), lambda: manager.download_file(REPO, "tiny-q4_k_m.gguf"),
+                 lambda: manager._hub_lookup()(REPO, COMMIT)]
+        for call in calls:
+            with pytest.raises(HubError) as refused:
+                call()
+            assert (refused.value.code, refused.value.blocker) == ("not_supported", "offline_mode")
+        assert wire.seen == [], "nothing reached the network"
+        assert not (tmp_path / "models").exists(), "nothing was written"
+
+    def test_it_is_the_refusal_an_ai_caller_gets(self, wire, tmp_path):
+        from orchestrator.Core.hf_hub import HubClient, HubError
+        with pytest.raises(HubError) as person:
+            offline_manager(tmp_path).search_huggingface_models("tiny")
+        with pytest.raises(HubError) as ai:
+            HubClient(framework(tmp_path, offline_mode=True)).search("tiny")
+        assert (str(person.value), person.value.code, person.value.next, person.value.blocker) == \
+            (str(ai.value), ai.value.code, ai.value.next, ai.value.blocker)
+        assert wire.seen == []
+
+    def test_the_person_reads_it_in_plain_words_in_their_language(self, tmp_path):
+        from orchestrator.Core.hf_hub import HubError, person_text
+        from orchestrator.utils.next_steps import mouse_path
+        with pytest.raises(HubError) as refused:
+            offline_manager(tmp_path).list_repo_files(REPO)
+        english, german = person_text(refused.value, "en"), person_text(refused.value, "de")
+        assert english.startswith("Offline mode is on, so the framework does not contact Hugging Face")
+        assert mouse_path("act_ditto_settings", "en") in english, "where to switch it off"
+        assert german.startswith("Der Offline-Modus ist an") and mouse_path("act_ditto_settings", "de") in german
+        assert "offline_mode" not in english + german, "no setting name, no reason code"
+
+    def test_other_errors_keep_their_text(self):
+        from orchestrator.Core.hf_hub import HubError, person_text
+        assert person_text(HubError("Hugging Face could not be reached."), "de") == \
+            "Hugging Face could not be reached."
+
+    def test_the_take_over_works_offline_and_says_why_a_file_stays(self, wire, tmp_path):
+        from test_hf_gui_download import WEIGHTS, old_cache
+        models = tmp_path / "models"
+        old_cache(models, "acme/linked", files={"a.gguf": (WEIGHTS, True)})
+        old_cache(models, "acme/plain", files={"b.gguf": (WEIGHTS, True)}, links=False)
+        manager = offline_manager(tmp_path, STORED)
+        result = manager.take_over(manager.old_downloads())
+        assert [f.repo for f in result.copied] == ["acme/linked"], "checked by its blob's name: no question needed"
+        assert [(f.repo, code) for f, code in result.skipped] == [("acme/plain", "offline")]
+        assert wire.seen == []
+
+    def test_the_offline_reason_has_its_words(self):
+        from orchestrator.Core.hf_takeover import REASONS
+        from orchestrator.utils.localization import ui_text
+        assert "offline" in REASONS
+        for lang in ("en", "de"):
+            assert ui_text("hf.takeover.why.offline", lang) != "hf.takeover.why.offline"
+
+
+class TestTheBrowserWindowOffline:
+    """The window refuses before a worker starts or a token is asked for, in a plain box (Tools > Hugging Face Model
+    Browser...)."""
+
+    @pytest.fixture
+    def window(self, qapp, tmp_path, monkeypatch):
+        pytest.importorskip("PySide6")
+        from orchestrator.gui import huggingface_window as hf, plain
+        boxes = []
+        monkeypatch.setattr(plain, "plain_box", lambda parent, kind, title, text, **kw: boxes.append((kind, title,
+                                                                                                    text)))
+        manager = offline_manager(tmp_path)
+        win = hf.HuggingFaceWindow(SimpleNamespace(model_manager=manager, secrets_manager=None))
+        return SimpleNamespace(win=win, boxes=boxes, hf=hf)
+
+    def test_a_search_is_refused_in_a_plain_box(self, window, wire):
+        from orchestrator.utils.localization import ui_text
+        window.win.search_edit.setText("tiny")
+        window.win.start_search()
+        assert window.win.worker is None, "no worker started"
+        assert window.boxes == [("information", ui_text("hf.offline.title", "en"), ui_text("hf.offline", "en"))]
+        assert window.win.status_label.text() == ui_text("blocker.offline_mode", "en")
+        assert wire.seen == []
+
+    def test_a_download_is_refused_before_the_token_question(self, window, monkeypatch):
+        asked = []
+        monkeypatch.setattr(window.hf, "AskTokenDialog", lambda *a, **k: asked.append(a))
+        window.win.populate_table([{"id": "meta/locked", "downloads": 1, "likes": 0, "gated": True}])
+        window.win.on_download_request(0, 0)
+        assert asked == [] and window.win.list_worker is None and len(window.boxes) == 1
+
+    def test_a_worker_reports_the_refusal_in_the_persons_language(self, window):
+        worker = window.hf.SearchWorker(window.win.model_manager, "tiny", lang="de")
+        seen = []
+        worker.error.connect(seen.append)
+        worker.run()
+        from orchestrator.utils.localization import ui_text
+        assert seen == [ui_text("hf.offline", "de")]
