@@ -1305,7 +1305,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   switched on for the person and the `DOCKER_HOST` named; `docker` from Alpine's community repository). No package
   manager is told to skip a signature or to take a key on its own, and `pacman -Sy` (a partial upgrade) never runs. On
   Alpine the framework itself cannot run (onnxruntime, part of its pinned packages, has no musl build): the installer
-  stops after Docker and points to the framework image. Any other family (Gentoo, Void, NixOS, ...) stops naming the
+  stops after Docker and points to the framework image, whose build script also needs `git` and GNU `tar` there
+  (busybox's `tar` has no `--null`: `apk add git tar`). Any other family (Gentoo, Void, NixOS, ...) stops naming the
   family and the manual pages when something must be installed. A `docker-ce.repo` of the person's own in which
   Docker's repository is switched off is never replaced or removed (the installer stops before it changes anything and
   says how to switch it on), and where the `docker` command is Podman (a second run, or `podman-docker` installed

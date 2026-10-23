@@ -1486,7 +1486,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   und dem genannten `DOCKER_HOST`; `docker` aus Alpines Repository community). Keine Paketverwaltung wird angewiesen,
   eine Signatur zu überspringen oder einen Schlüssel von selbst zu übernehmen, und `pacman -Sy` (ein Teil-Upgrade) läuft
   nie. Unter Alpine kann das Framework selbst nicht laufen (onnxruntime, Teil seiner festgelegten Pakete, gibt es nicht
-  für musl): Der Installer hält nach Docker an und verweist auf das Framework-Image. Jede andere Familie (Gentoo, Void,
+  für musl): Der Installer hält nach Docker an und verweist auf das Framework-Image, dessen Build-Skript dort auch `git`
+  und GNU `tar` braucht (das `tar` von busybox kennt kein `--null`: `apk add git tar`). Jede andere Familie (Gentoo, Void,
   NixOS, ...) hält, wenn etwas installiert werden muss, mit der Familie und den Anleitungen an. Eine eigene
   `docker-ce.repo` der Person, in der Dockers Repository ausgeschaltet ist, wird nie ersetzt oder entfernt (der
   Installer hält an, bevor er etwas verändert, und sagt, wie man es einschaltet), und wo der Befehl `docker` Podman ist
