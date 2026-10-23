@@ -41,8 +41,17 @@ HEADLESS="${LCF_HEADLESS:-0}"
 # unbeaufsichtigte Läufe auch LCF_DITTO=... (ohne Rückfragen; Größe und Lizenz des Modells werden trotzdem gezeigt).
 DITTO_CHOICE="${LCF_DITTO:-auto}"
 
-# Docker, falls es fehlt: nur aus Dockers offiziellem apt-Repository (Debian, Ubuntu, Raspberry Pi OS), nie mit einem
-# heruntergeladenen Skript. Dem Signaturschlüssel des Repositorys wird erst vertraut, wenn sein Fingerabdruck dieser
+# --dry-run: ein Probelauf. Er erkennt das System und zeigt, was die Installation hier täte (Paketverwaltung, Pakete,
+# Quellen und Schlüssel), ohne etwas zu verändern oder zu laden; er braucht keine Root-Rechte. Exit-Code 0: die
+# Installation liefe durch; 1: sie hielte an (der Grund steht dabei).
+DRY_RUN=0
+
+# Alles, was der Installer installiert (Python, rsync, Docker), kommt über die Paketverwaltung der Linux-Familie
+# (apt, dnf, zypper, pacman, apk; Familie aus ID und ID_LIKE in /etc/os-release), nie mit einem heruntergeladenen
+# Skript. Jede Paketverwaltung prüft die Signaturen auf ihre Weise; einem fremden Repository (Dockers) wird erst
+# vertraut, wenn der Fingerabdruck seines Schlüssels der hier festgelegte ist.
+# Docker, falls es fehlt, auf Debian, Ubuntu, Raspberry Pi OS und darauf aufbauenden Systemen: nur aus Dockers
+# offiziellem apt-Repository. Dem Signaturschlüssel des Repositorys wird erst vertraut, wenn sein Fingerabdruck dieser
 # ist; danach prüft apt jedes Paket gegen die signierte Paketliste (SHA256).
 # Quelle des Fingerabdrucks: Dockers Installationsanleitung für Debian und Ubuntu ("Verify that you now have the key
 # with the fingerprint 9DC8 5822 9FC7 DD38 854A  E2D8 8D81 803C 0EBF CD88", docs.docker.com/engine/install/; im
@@ -57,6 +66,21 @@ DOCKER_KEYRING="/etc/apt/keyrings/docker.asc"
 DOCKER_SOURCES="/etc/apt/sources.list.d/docker.sources"
 OS_RELEASE_FILE="/etc/os-release"
 DEBIAN_VERSION_FILE="/etc/debian_version"
+# Docker auf Fedora, RHEL und CentOS Stream (Docker veröffentlicht für diese drei ein rpm-Repository): dem Schlüssel
+# wird erst vertraut, wenn sein Fingerabdruck dieser ist; danach prüft dnf die Signatur jedes Pakets (gpgcheck=1).
+# Quelle: Dockers Installationsanleitungen für Fedora, RHEL und CentOS ("verify that the fingerprint matches 060A 61C5
+# 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35", docs.docker.com/engine/install/fedora/, .../rhel/, .../centos/). Am
+# 2026-10-23 nachgeprüft: download.docker.com/linux/{fedora,rhel,centos}/gpg ist genau dieser eine Schlüssel
+# (Docker Release (CE rpm), rsa4096, 2017-02-22). Für andere Systeme der Familie (Rocky Linux, AlmaLinux, Oracle Linux,
+# Amazon Linux) nennt Dockers Anleitung kein Repository: Dort kommt das Paket der Distribution.
+DOCKER_RPM_KEY_FINGERPRINT="060A61C51B558A7F742B77AAC52FEB6B621E9F35"
+DOCKER_RPM_KEYRING="/etc/pki/rpm-gpg/docker-ce.asc"
+# Derselbe Dateiname wie mit Dockers Anleitung (dnf config-manager), damit eine dort angelegte Quelle bleibt.
+DOCKER_RPM_REPO="/etc/yum.repos.d/docker-ce.repo"
+# Alpines Paketquellen (Docker liegt im Repository community).
+APK_REPOSITORIES="/etc/apk/repositories"
+# Die Anleitung zu dem, was das Framework braucht, für eine Installation von Hand.
+MANUAL_URL="https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/blob/main/README_DE.md#voraussetzungen"
 
 # Farben
 RED='\033[0;31m'
@@ -70,7 +94,10 @@ log() { echo -e "[$(date +'%H:%M:%S')] $1"; }
 log_info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
 log_success() { echo -e "${GREEN}✅ $1${NC}"; }
 log_warn() { echo -e "${YELLOW}⚠️  $1${NC}"; }
-log_error() { echo -e "${RED}❌ $1${NC}"; exit 1; }
+log_error() {
+    if [ "$DRY_RUN" = "1" ]; then echo -e "${RED}❌ Probelauf: Hier hielte die Installation an: $1${NC}"; exit 1; fi
+    echo -e "${RED}❌ $1${NC}"; exit 1
+}
 
 check_root() {
     if [ "$EUID" -ne 0 ]; then
@@ -103,6 +130,248 @@ wait_for_internet() {
     log_error "$shown ist per HTTPS nicht erreichbar. Proxy? Dann mit 'sudo -E ./install.sh' starten, damit https_proxy erhalten bleibt (oder PIP_INDEX_URL auf einen erreichbaren Spiegel setzen)."
 }
 
+# --- LINUX-FAMILIE UND PAKETVERWALTUNG ---
+# Die Werte aus $OS_RELEASE_FILE, die der Installer braucht, in einer Unter-Shell gelesen (wie Dockers früheres
+# Installationsskript es tat). Von ID bleiben nur Buchstaben, Ziffern und . _ -, vom Namen nur druckbare Zeichen.
+OS_ID="" OS_LIKE="" OS_CODENAME="" OS_UBUNTU_CODENAME="" OS_DEBIAN_CODENAME="" OS_VERSION_ID="" OS_NAME=""
+read_os_release() {
+    local id="" like="" codename="" ubuntu_codename="" debian_codename="" version_id="" name=""
+    if [ -r "$OS_RELEASE_FILE" ]; then
+        { IFS= read -r id; IFS= read -r like; IFS= read -r codename; IFS= read -r ubuntu_codename
+          IFS= read -r debian_codename; IFS= read -r version_id; IFS= read -r name; } < <(
+            # shellcheck disable=SC1090
+            . "$OS_RELEASE_FILE" > /dev/null 2>&1
+            printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "${ID:-}" "${ID_LIKE:-}" "${VERSION_CODENAME:-}" \
+                "${UBUNTU_CODENAME:-}" "${DEBIAN_CODENAME:-}" "${VERSION_ID:-}" "${PRETTY_NAME:-}")
+    fi
+    OS_ID="${id//[^A-Za-z0-9._-]/}"
+    OS_LIKE="$like" OS_CODENAME="$codename" OS_UBUNTU_CODENAME="$ubuntu_codename"
+    OS_DEBIAN_CODENAME="$debian_codename" OS_VERSION_ID="${version_id//[^A-Za-z0-9._-]/}"
+    OS_NAME="${name//[^[:print:]]/}"
+}
+
+# Die Familie zu einer ID aus /etc/os-release: dieselbe Tabelle wie in scripts/hardware_probe.sh
+# (configs/hardware_probe_schema.yml, tables.os_families; tests/test_install_distros.py prüft, dass sie gleich sind).
+os_family_of() {
+    case "$1" in
+        debian) echo debian ;;
+        ubuntu) echo debian ;;
+        raspbian) echo debian ;;
+        linuxmint) echo debian ;;
+        pop) echo debian ;;
+        elementary) echo debian ;;
+        kali) echo debian ;;
+        devuan) echo debian ;;
+        armbian) echo debian ;;
+        dietpi) echo debian ;;
+        zorin) echo debian ;;
+        neon) echo debian ;;
+        pureos) echo debian ;;
+        deepin) echo debian ;;
+        mx) echo debian ;;
+        rhel) echo rhel ;;
+        centos) echo rhel ;;
+        rocky) echo rhel ;;
+        almalinux) echo rhel ;;
+        ol) echo rhel ;;
+        amzn) echo rhel ;;
+        scientific) echo rhel ;;
+        eurolinux) echo rhel ;;
+        cloudlinux) echo rhel ;;
+        virtuozzo) echo rhel ;;
+        fedora) echo fedora ;;
+        suse) echo suse ;;
+        opensuse) echo suse ;;
+        opensuse-leap) echo suse ;;
+        opensuse-tumbleweed) echo suse ;;
+        sles) echo suse ;;
+        sled) echo suse ;;
+        sle-micro) echo suse ;;
+        arch) echo arch ;;
+        archarm) echo arch ;;
+        manjaro) echo arch ;;
+        manjaro-arm) echo arch ;;
+        endeavouros) echo arch ;;
+        garuda) echo arch ;;
+        artix) echo arch ;;
+        alpine) echo alpine ;;
+        postmarketos) echo alpine ;;
+        gentoo) echo gentoo ;;
+        funtoo) echo gentoo ;;
+        openwrt) echo openwrt ;;
+        void) echo void ;;
+        nixos) echo nixos ;;
+        slackware) echo slackware ;;
+        *) return 1 ;;
+    esac
+}
+
+# Setzt OS_FAMILY (erst ID, dann jeder Eintrag von ID_LIKE der Reihe nach; der erste Treffer der Tabelle zählt, sonst
+# "other", wie bei der Hardware-Untersuchung) und PKG, die Paketverwaltung der Familie: apt (debian), dnf (rhel,
+# fedora), zypper (suse), pacman (arch), apk (alpine), sonst leer.
+OS_FAMILY="" PKG="" SYSTEM_DETECTED=0
+detect_system() {
+    local words=() word family
+    read_os_release
+    OS_FAMILY=other
+    read -r -a words <<< "$OS_ID $OS_LIKE"
+    for word in ${words[@]+"${words[@]}"}; do
+        word="${word//[^A-Za-z0-9._-]/}"
+        if [ -n "$word" ] && family="$(os_family_of "${word,,}")"; then OS_FAMILY="$family"; break; fi
+    done
+    case "$OS_FAMILY" in
+        debian) PKG=apt ;;
+        rhel|fedora) PKG=dnf ;;
+        suse) PKG=zypper ;;
+        arch) PKG=pacman ;;
+        alpine) PKG=apk ;;
+        *) PKG="" ;;
+    esac
+    SYSTEM_DETECTED=1
+}
+
+# Dieses System in Meldungen: sein Name aus /etc/os-release, seine ID und seine Familie.
+system_label() {
+    echo "${OS_NAME:-${OS_ID:-unbekannt}} (ID ${OS_ID:-unbekannt}, Familie $OS_FAMILY)"
+}
+
+# Der Befehl der Paketverwaltung PKG.
+pkg_tool() {
+    case "$PKG" in
+        apt) echo apt-get ;;
+        dnf|zypper|pacman|apk) echo "$PKG" ;;
+    esac
+}
+
+# Setzt PKG_ARGV auf den Befehl, mit dem PKG Pakete installiert. Keiner schaltet eine Signaturprüfung ab oder übernimmt
+# einen Schlüssel ungefragt: apt prüft die signierten Paketlisten, dnf und zypper die Signaturen der Pakete und
+# Repository-Daten mit den Schlüsseln der Distribution, pacman jede Paketsignatur gegen archlinux-keyring, apk die
+# signierten Indizes gegen /etc/apk/keys.
+PKG_ARGV=()
+pkg_argv() {
+    case "$PKG" in
+        apt) PKG_ARGV=(apt-get install -y) ;;
+        dnf) PKG_ARGV=(dnf install -y) ;;
+        zypper) PKG_ARGV=(zypper --non-interactive install) ;;
+        pacman) PKG_ARGV=(pacman -S --needed --noconfirm) ;;
+        apk) PKG_ARGV=(apk add) ;;
+        *) PKG_ARGV=() ;;
+    esac
+}
+
+# Hält an, wenn $1 fehlt und es keine Paketverwaltung gibt, die der Installer dafür nutzen kann: die Familie dieses
+# Systems und die Anleitung für eine Installation von Hand.
+pkg_ready() {
+    local tool
+    [ "$SYSTEM_DETECTED" = "1" ] || detect_system
+    tool="$(pkg_tool)"
+    if [ -z "$tool" ]; then
+        log_error "$1 fehlt, und für $(system_label) kennt der Installer keine Paketverwaltung (er nutzt apt, dnf, zypper, pacman und apk). Installiere es selbst (was das Framework braucht: $MANUAL_URL; Docker: $DOCKER_MANUAL_URL) und starte danach 'sudo ./install.sh' erneut."
+    fi
+    if ! command -v "$tool" &> /dev/null; then
+        log_error "$1 fehlt, und $tool, die Paketverwaltung von $(system_label), fehlt auch. Installiere es selbst (was das Framework braucht: $MANUAL_URL) und starte danach 'sudo ./install.sh' erneut."
+    fi
+}
+
+# Installiert Pakete mit PKG. Vor der ersten Installation lesen apt und apk ihre Paketlisten neu; pacman nie
+# (pacman -Sy allein wäre ein Teil-Upgrade, das Arch nicht unterstützt), dnf und zypper tun es selbst.
+PKG_LISTS_READ=0
+pkg_install() {
+    pkg_argv
+    [ "${#PKG_ARGV[@]}" -gt 0 ] || return 1
+    if [ "$PKG_LISTS_READ" = "0" ]; then
+        case "$PKG" in
+            apt) apt-get update || return 1 ;;
+            apk) apk update || return 1 ;;
+        esac
+        PKG_LISTS_READ=1
+    fi
+    "${PKG_ARGV[@]}" "$@"
+}
+
+# Ein Hinweis, wenn PKG Pakete nicht installieren konnte und es einen bekannten Grund dafür gibt.
+pkg_failure_hint() {
+    case "$PKG" in
+        pacman) echo " Ist die Paketdatenbank veraltet, aktualisiere das System zuerst (sudo pacman -Syu) und starte 'sudo ./install.sh' erneut; der Installer selbst ruft nie 'pacman -Sy' auf (ein Teil-Upgrade, das Arch nicht unterstützt)." ;;
+    esac
+}
+
+# --- PYTHON 3.11 BIS 3.14 ---
+# Die Befehle, unter denen ein passendes Python gesucht wird: python3, auf dnf- und zypper-Systemen auch eine Version
+# mit Nummer im Namen (RHEL 8/9 und ihre Abkömmlinge bringen als python3 3.6 oder 3.9, openSUSE Leap 15 3.6).
+python_commands() {
+    case "$PKG" in
+        dnf|zypper) echo python3 python3.13 python3.12 python3.11 python3.14 ;;
+        *) echo python3 ;;
+    esac
+}
+
+# Die Pakete für python3 mit venv und pip, wie die Distribution sie nennt.
+python_packages() {
+    case "$PKG" in
+        apt) echo python3 python3-venv python3-pip ;;
+        dnf|zypper) echo python3 python3-pip ;;
+        pacman) echo python ;;
+        apk) echo python3 ;;
+    esac
+}
+
+# Die Pakete einer Python-Version mit Nummer im Namen, je Zeile ein Satz, der Reihe nach versucht (3.13 wie unter
+# Windows, dann 3.12, 3.11 und 3.14): dnf (RHEL 9: python3.12 und python3.12-pip) und zypper (Leap 15.6: python312
+# und python312-pip). apt, pacman und apk bringen ein passendes python3 oder keins.
+python_versioned_packages() {
+    local v
+    for v in 13 12 11 14; do
+        case "$PKG" in
+            dnf) echo "python3.$v python3.$v-pip" ;;
+            zypper) echo "python3$v python3$v-pip" ;;
+        esac
+    done
+}
+
+# Setzt PYTHON auf den Pfad des ersten Pythons aus python_commands, das zwischen 3.11 und 3.14 liegt (requirements.txt
+# passt nur dazu; außerhalb installierte pip stillschweigend nichts).
+PYTHON=""
+find_python() {
+    local name path
+    for name in $(python_commands); do
+        path="$(command -v "$name" 2> /dev/null)" || continue
+        if "$path" -c 'import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] < (3, 15) else 1)' 2> /dev/null; then
+            PYTHON="$path"
+            return 0
+        fi
+    done
+    return 1
+}
+
+python_missing_error() {
+    log_error "Python 3.11 bis 3.14 wird benötigt, gefunden: $(python3 --version 2>&1). Bitte eine passende Version installieren (z. B. Debian 12, Ubuntu 24.04 oder 'uv python install 3.13')."
+}
+
+# Ein passendes Python, notfalls über die Paketverwaltung: fehlt python3, die übliche Version der Distribution; passt
+# sie nicht, der Reihe nach eine Version mit Nummer im Namen, bis eine passt.
+ensure_python() {
+    local sets=() set pkgs=()
+    find_python && return 0
+    [ "$SYSTEM_DETECTED" = "1" ] || detect_system
+    if ! command -v python3 &> /dev/null; then
+        log_warn "Python3 fehlt. Installiere..."
+        pkg_ready "Python 3.11 bis 3.14"
+        read -r -a pkgs <<< "$(python_packages)"
+        if ! pkg_install "${pkgs[@]}"; then log_error "Konnte Python nicht installieren."; fi
+        find_python && return 0
+    fi
+    mapfile -t sets < <(python_versioned_packages)
+    for set in ${sets[@]+"${sets[@]}"}; do
+        [ -n "$set" ] || continue
+        pkg_ready "Python 3.11 bis 3.14"
+        log_info "$(python3 --version 2>&1) passt nicht (3.11 bis 3.14); versuche die Pakete $set..."
+        read -r -a pkgs <<< "$set"
+        if pkg_install "${pkgs[@]}" && find_python; then return 0; fi
+    done
+    python_missing_error
+}
+
 # --- DOCKER: NUR MIT GEPRÜFTEM SCHLÜSSEL ---
 # Hält an, ohne Docker zu installieren: der Grund in klaren Worten und Dockers Anleitung für eine Installation von Hand.
 docker_stop() {
@@ -133,16 +402,9 @@ debian_version_codename() {
 # UBUNTU_CODENAME (so nennt es Dockers Anleitung für Linux Mint), bei Debian DEBIAN_CODENAME oder
 # $DEBIAN_VERSION_FILE, nie den eigenen Codenamen. Jedes andere System hält an.
 docker_apt_repo() {
-    local id="" like="" codename="" ubuntu_codename="" debian_codename=""
-    if [ -r "$OS_RELEASE_FILE" ]; then
-        { IFS= read -r id; IFS= read -r like; IFS= read -r codename; IFS= read -r ubuntu_codename
-          IFS= read -r debian_codename; } < <(
-            # shellcheck disable=SC1090
-            . "$OS_RELEASE_FILE" > /dev/null 2>&1
-            printf '%s\n%s\n%s\n%s\n%s\n' "${ID:-}" "${ID_LIKE:-}" "${VERSION_CODENAME:-}" "${UBUNTU_CODENAME:-}" \
-                "${DEBIAN_CODENAME:-}")
-    fi
-    id="${id//[^A-Za-z0-9._-]/}"
+    read_os_release
+    local id="$OS_ID" like="$OS_LIKE" codename="$OS_CODENAME" ubuntu_codename="$OS_UBUNTU_CODENAME"
+    local debian_codename="$OS_DEBIAN_CODENAME"
     case "$id" in
         debian) DOCKER_REPO=debian; DOCKER_SUITE="${codename:-$(debian_version_codename)}" ;;
         raspbian)
@@ -170,14 +432,14 @@ docker_apt_repo() {
 }
 
 # Lädt Dockers Signaturschlüssel für das Repository $1 und legt nach $2 nur einen Schlüssel, dessen Fingerabdruck
-# DOCKER_KEY_FINGERPRINT ist. Wie die Paketquellen eines Moduls (module_generator.vendor_blocks): eingelesen in ein
+# $3 ist (ohne $3: DOCKER_KEY_FINGERPRINT). Wie die Paketquellen eines Moduls (module_generator.vendor_blocks): eingelesen in ein
 # eigenes, leeres GNUPGHOME, verglichen, dann exportiert. Strenger als dort: Die Datei muss genau einen Schlüssel
 # enthalten, und der festgelegte Fingerabdruck muss der seines Hauptschlüssels sein (nicht der eines Unterschlüssels).
 # Vor der Prüfung wird nichts außerhalb eines eigenen temporären Ordners geschrieben. gpg läuft mit --no-autostart: Es
 # startet keinen gpg-agent, der als root nach dem Installer weiterliefe. Rückgabe 0 geschrieben, 1 nicht Dockers
 # Schlüssel, 2 nicht geladen, 3 nicht geschrieben; außer bei 0 bleibt $2, wie es war.
 fetch_docker_key() {
-    local repo="$1" dest="$2" home primary rc=0
+    local repo="$1" dest="$2" want="${3:-$DOCKER_KEY_FINGERPRINT}" home primary rc=0
     home="$(mktemp -d)" || return 3
     if ! curl -fsSL --proto '=https' --tlsv1.2 "$DOCKER_DOWNLOAD_URL/$repo/gpg" -o "$home/download.key"; then
         rc=2
@@ -189,9 +451,9 @@ fetch_docker_key() {
             $1 == "pub" { keys++; want = 1; next }
             want && $1 == "fpr" { fpr = $10; want = 0 }
             END { if (keys == 1) print fpr }')"
-        if [ "$primary" != "$DOCKER_KEY_FINGERPRINT" ]; then
+        if [ "$primary" != "$want" ]; then
             rc=1
-        elif ! GNUPGHOME="$home" gpg --batch --no-autostart --armor --export "$DOCKER_KEY_FINGERPRINT" > "$home/docker.asc" \
+        elif ! GNUPGHOME="$home" gpg --batch --no-autostart --armor --export "$want" > "$home/docker.asc" \
             || [ ! -s "$home/docker.asc" ]; then
             rc=3
         elif ! install -d -m 0755 "$(dirname "$dest")" || ! install -m 0644 "$home/docker.asc" "$dest"; then
@@ -232,25 +494,70 @@ docker_source_exists() {
     return 1
 }
 
+# Prüft Dockers Signaturschlüssel für das Repository $1 gegen den Fingerabdruck $3 und legt ihn nach $2, oder hält mit
+# dem Grund an (fetch_docker_key).
+check_docker_key() {
+    local repo="$1" dest="$2" want="$3" rc=0
+    fetch_docker_key "$repo" "$dest" "$want" || rc=$?
+    case "$rc" in
+        0) log_success "Dockers Signaturschlüssel geprüft (Fingerabdruck $want): $dest" ;;
+        1) docker_stop "Der Schlüssel von $DOCKER_DOWNLOAD_URL/$repo/gpg hat nicht den Fingerabdruck aus Dockers Anleitung ($want) oder enthält mehr als diesen einen Schlüssel; ihm wird nicht vertraut, und nichts wurde eingetragen." ;;
+        2) docker_stop "Dockers Signaturschlüssel ließ sich nicht von $DOCKER_DOWNLOAD_URL/$repo/gpg laden (Proxy? Dann mit 'sudo -E ./install.sh')." ;;
+        *) docker_stop "Der geprüfte Schlüssel ließ sich nicht nach $dest schreiben." ;;
+    esac
+}
+
+# Woher Docker auf diesem System kommt (nach detect_system), oder Anhalten mit dem Grund. Setzt DOCKER_ROUTE:
+#   apt-repo  Dockers apt-Repository (Debian, Ubuntu, Raspberry Pi OS und darauf aufbauende Systeme; docker_apt_repo)
+#   rpm-repo  Dockers rpm-Repository: nur Fedora, RHEL und CentOS Stream, für die Docker eines veröffentlicht
+#   distro    das Docker-Paket der Distribution: Fedora-Abkömmlinge moby-engine, Amazon Linux docker, openSUSE und
+#             SLES docker (SLES: aus dem Containers Module), Arch und Abkömmlinge docker, Alpine docker (community)
+#   podman    die übrigen RHEL-Abkömmlinge (Rocky Linux, AlmaLinux, Oracle Linux, ...): Dockers Anleitung nennt für sie
+#             kein Repository, und die Distribution liefert keine Docker Engine, sondern Podman mit dem Befehl docker
+#             (podman-docker)
+# dazu DOCKER_REPO (Name in Dockers URL), DOCKER_PACKAGES, DOCKER_OPTIONAL (darf fehlen; ohne buildx baut das
+# Framework mit dem älteren Builder) und DOCKER_SERVICE (der Dienst, den der Installer startet).
+DOCKER_ROUTE="" DOCKER_REPO="" DOCKER_SUITE="" DOCKER_PACKAGES=() DOCKER_OPTIONAL=() DOCKER_SERVICE=""
+docker_plan() {
+    DOCKER_ROUTE="" DOCKER_REPO="" DOCKER_SUITE="" DOCKER_PACKAGES=() DOCKER_OPTIONAL=() DOCKER_SERVICE=""
+    [ "$SYSTEM_DETECTED" = "1" ] || detect_system
+    case "$PKG" in
+        apt)
+            docker_apt_repo
+            DOCKER_ROUTE=apt-repo
+            DOCKER_PACKAGES=(docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin) ;;
+        dnf)
+            DOCKER_SERVICE=docker
+            case "$OS_ID" in
+                fedora|rhel|centos)
+                    DOCKER_ROUTE=rpm-repo DOCKER_REPO="$OS_ID"
+                    DOCKER_PACKAGES=(docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin) ;;
+                amzn) DOCKER_ROUTE=distro DOCKER_PACKAGES=(docker) ;;
+                *)
+                    if [ "$OS_FAMILY" = "fedora" ]; then
+                        DOCKER_ROUTE=distro DOCKER_PACKAGES=(moby-engine)
+                    else
+                        DOCKER_ROUTE=podman DOCKER_PACKAGES=(podman-docker) DOCKER_SERVICE=""
+                    fi ;;
+            esac ;;
+        zypper) DOCKER_ROUTE=distro DOCKER_PACKAGES=(docker) DOCKER_OPTIONAL=(docker-buildx) DOCKER_SERVICE=docker ;;
+        pacman) DOCKER_ROUTE=distro DOCKER_PACKAGES=(docker docker-buildx) DOCKER_SERVICE=docker ;;
+        apk) DOCKER_ROUTE=distro DOCKER_PACKAGES=(docker docker-cli-buildx) DOCKER_SERVICE=docker ;;
+        *) docker_stop "Der Installer richtet Docker nur über die Paketverwaltung der Distribution ein: apt (Debian, Ubuntu, Raspberry Pi OS und darauf aufbauende Systeme), dnf (Fedora, RHEL, CentOS Stream, Rocky Linux, AlmaLinux und Verwandte), zypper (openSUSE, SLES), pacman (Arch, Manjaro, EndeavourOS) und apk (Alpine); dieses System laut $OS_RELEASE_FILE: $(system_label)." ;;
+    esac
+}
+
 # Docker Engine aus Dockers offiziellem apt-Repository. Kein heruntergeladenes Skript läuft als root: Der
 # Signaturschlüssel wird gegen den festgelegten Fingerabdruck geprüft, bevor apt ihm vertraut, und apt prüft dann
 # jedes Paket gegen die signierte Paketliste. Passt etwas nicht, hält der Installer mit dem Grund an.
-install_docker() {
-    local arch created=0 rc=0 undone=""
-    DOCKER_REPO="" DOCKER_SUITE=""
-    docker_apt_repo
+install_docker_apt() {
+    local arch created=0 undone=""
     if ! command -v apt-get &> /dev/null; then docker_stop "apt-get fehlt auf diesem System."; fi
     log_info "Quelle: $DOCKER_DOWNLOAD_URL/$DOCKER_REPO ($DOCKER_SUITE). Ihr Schlüssel muss den Fingerabdruck $DOCKER_KEY_FINGERPRINT haben (Dockers Installationsanleitung)."
     if ! apt-get update || ! apt-get install -y --no-install-recommends ca-certificates curl gnupg; then
         docker_stop "Die Werkzeuge für die Schlüsselprüfung (ca-certificates, curl, gnupg) ließen sich nicht installieren (Meldungen oben)."
     fi
-    fetch_docker_key "$DOCKER_REPO" "$DOCKER_KEYRING" || rc=$?
-    case "$rc" in
-        0) log_success "Dockers Signaturschlüssel geprüft (Fingerabdruck $DOCKER_KEY_FINGERPRINT): $DOCKER_KEYRING" ;;
-        1) docker_stop "Der Schlüssel von $DOCKER_DOWNLOAD_URL/$DOCKER_REPO/gpg hat nicht den Fingerabdruck aus Dockers Anleitung ($DOCKER_KEY_FINGERPRINT) oder enthält mehr als diesen einen Schlüssel; ihm wird nicht vertraut, und nichts wurde eingetragen." ;;
-        2) docker_stop "Dockers Signaturschlüssel ließ sich nicht von $DOCKER_DOWNLOAD_URL/$DOCKER_REPO/gpg laden (Proxy? Dann mit 'sudo -E ./install.sh')." ;;
-        *) docker_stop "Der geprüfte Schlüssel ließ sich nicht nach $DOCKER_KEYRING schreiben." ;;
-    esac
+    check_docker_key "$DOCKER_REPO" "$DOCKER_KEYRING" "$DOCKER_KEY_FINGERPRINT"
     arch="$(dpkg --print-architecture 2> /dev/null)"
     if ! [[ "$arch" =~ ^[a-z0-9]+$ ]]; then docker_stop "dpkg nennt keine Architektur dieses Systems."; fi
     if docker_source_exists; then
@@ -268,30 +575,200 @@ install_docker() {
         if [ "$created" = "1" ]; then rm -f -- "$DOCKER_SOURCES"; undone="; $DOCKER_SOURCES ist wieder entfernt"; fi
         docker_stop "apt-get update mit Dockers Repository ist gescheitert (Meldungen oben)$undone."
     fi
-    if ! apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; then
+    if ! apt-get install -y "${DOCKER_PACKAGES[@]}"; then
         docker_stop "Die Docker-Pakete ließen sich nicht installieren (Meldungen oben)."
     fi
     if ! command -v docker &> /dev/null; then docker_stop "Nach der Installation gibt es den Befehl docker nicht."; fi
     log_success "Docker ist installiert (aus $DOCKER_DOWNLOAD_URL/$DOCKER_REPO, Schlüssel und Pakete geprüft)."
 }
 
+# Gibt es schon ein eingeschaltetes dnf-Repository für download.docker.com (Dockers Anleitung, ein früherer Lauf)?
+# Ein Abschnitt mit enabled=0 und auskommentierte Zeilen zählen nicht; ohne enabled ist ein Abschnitt eingeschaltet.
+docker_rpm_repo_exists() {
+    local file
+    for file in "$(dirname "$DOCKER_RPM_REPO")"/*.repo; do
+        if [ -f "$file" ] && awk '
+            function section_end() { if (docker && !off) found = 1; docker = 0; off = 0 }
+            /^[ \t]*[#;]/ { next }
+            /^[ \t]*\[/ { section_end(); next }
+            { line = tolower($0) }
+            line ~ /^[ \t]*(baseurl|mirrorlist|metalink)[ \t]*=.*download\.docker\.com/ { docker = 1 }
+            line ~ /^[ \t]*enabled[ \t]*=[ \t]*(0|no|false|off)[ \t]*$/ { off = 1 }
+            END { section_end(); exit !found }' "$file"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Docker Engine aus Dockers rpm-Repository (Fedora, RHEL, CentOS Stream), wie Dockers Anleitung, aber ohne fremden
+# Schlüssel: Der Signaturschlüssel wird gegen DOCKER_RPM_KEY_FINGERPRINT geprüft und erst dann mit rpm übernommen; das
+# Repository nennt nur diese geprüfte Datei (gpgkey=file://), und dnf prüft die Signatur jedes Pakets (gpgcheck=1).
+install_docker_rpm() {
+    local created=0 undone="" tools=()
+    if ! command -v dnf &> /dev/null; then docker_stop "dnf fehlt auf diesem System."; fi
+    log_info "Quelle: $DOCKER_DOWNLOAD_URL/$DOCKER_REPO. Ihr Schlüssel muss den Fingerabdruck $DOCKER_RPM_KEY_FINGERPRINT haben (Dockers Installationsanleitung)."
+    # Nur, was fehlt: Fedora und RHEL bringen oft curl-minimal mit, das mit dem Paket curl streitet.
+    command -v curl &> /dev/null || tools+=(curl)
+    command -v gpg &> /dev/null || tools+=(gnupg2)
+    if [ "${#tools[@]}" -gt 0 ] && ! dnf install -y "${tools[@]}"; then
+        docker_stop "Die Werkzeuge für die Schlüsselprüfung (${tools[*]}) ließen sich nicht installieren (Meldungen oben)."
+    fi
+    check_docker_key "$DOCKER_REPO" "$DOCKER_RPM_KEYRING" "$DOCKER_RPM_KEY_FINGERPRINT"
+    # rpm vertraut dem geprüften Schlüssel, bevor dnf ein Paket lädt: dnf holt dann keinen Schlüssel selbst.
+    if ! rpm --import "$DOCKER_RPM_KEYRING"; then
+        docker_stop "rpm konnte den geprüften Schlüssel $DOCKER_RPM_KEYRING nicht übernehmen (Meldungen oben)."
+    fi
+    if docker_rpm_repo_exists; then
+        log_info "Ein dnf-Repository für download.docker.com gibt es schon in $(dirname "$DOCKER_RPM_REPO"); es bleibt, wie es ist."
+    else
+        if ! install -d -m 0755 "$(dirname "$DOCKER_RPM_REPO")" || ! printf '%s\n' "[docker-ce-stable]" \
+            "name=Docker CE Stable - \$basearch" \
+            "baseurl=$DOCKER_DOWNLOAD_URL/$DOCKER_REPO/\$releasever/\$basearch/stable" "enabled=1" "gpgcheck=1" \
+            "gpgkey=file://$DOCKER_RPM_KEYRING" > "$DOCKER_RPM_REPO"; then
+            docker_stop "$DOCKER_RPM_REPO ließ sich nicht schreiben."
+        fi
+        created=1
+    fi
+    if ! dnf install -y "${DOCKER_PACKAGES[@]}"; then
+        # Das eben angelegte Repository wieder entfernen: Ein unerreichbares hielte sonst jeden dnf-Aufruf an.
+        if [ "$created" = "1" ]; then rm -f -- "$DOCKER_RPM_REPO"; undone="; $DOCKER_RPM_REPO ist wieder entfernt"; fi
+        docker_stop "Die Docker-Pakete ließen sich nicht installieren (Meldungen oben; nennt dnf einen Konflikt mit podman, buildah oder runc, sagt Dockers Anleitung, was vorher entfernt werden muss)$undone."
+    fi
+    docker_service_start
+    if ! command -v docker &> /dev/null; then docker_stop "Nach der Installation gibt es den Befehl docker nicht."; fi
+    log_success "Docker ist installiert (aus $DOCKER_DOWNLOAD_URL/$DOCKER_REPO, Schlüssel und Pakete geprüft)."
+}
+
+# Alpine: Docker liegt im Repository community (Alpines eigenes, mit denselben Schlüsseln in /etc/apk/keys signiert
+# wie main). Ist es nicht eingeschaltet, schaltet der Installer genau die community-Zeile zur eingeschalteten main-Zeile
+# in APK_REPOSITORIES ein (eine auskommentierte wieder ein, sonst angehängt), wie 'setup-apkrepos -c'; andere Zeilen
+# (etwa edge oder testing) bleiben, wie sie sind.
+apk_enable_community() {
+    local file="$APK_REPOSITORIES" main community tmp
+    [ -f "$file" ] || return 1
+    main="$(awk '/^[ \t]*(#|$)/ { next } { sub(/^[ \t]+/, ""); sub(/[ \t\/]+$/, "") } /\/main$/ { print; exit }' "$file")"
+    [ -n "$main" ] || return 1
+    community="${main%/main}/community"
+    if awk -v want="$community" '/^[ \t]*#/ { next } { sub(/^[ \t]+/, ""); sub(/[ \t\/]+$/, "") }
+        $0 == want { found = 1 } END { exit !found }' "$file"; then
+        return 0
+    fi
+    tmp="$(mktemp)" || return 1
+    if awk -v want="$community" '
+        !done { line = $0; sub(/^[ \t]*#[ \t]*/, "", line); sub(/[ \t\/]+$/, "", line)
+                if ($0 ~ /^[ \t]*#/ && line == want) { print want; done = 1; next } }
+        { print }
+        END { if (!done) print want }' "$file" > "$tmp" && install -m 0644 "$tmp" "$file"; then
+        rm -f "$tmp"
+        log_info "Alpines Repository community ist jetzt eingeschaltet: $community ($file)."
+        PKG_LISTS_READ=0
+        return 0
+    fi
+    rm -f "$tmp"
+    return 1
+}
+
+# SLES 15: Docker kommt aus dem Containers Module, SUSEs eigener Quelle (mit SUSEs Schlüssel signiert). Schaltet es
+# ein, wenn das System dafür registriert ist; 1, wenn das hier nicht geht.
+sles_containers_module() {
+    local product
+    case "$OS_ID" in sles|sled) ;; *) return 1 ;; esac
+    case "$OS_VERSION_ID" in 15|15.*) ;; *) return 1 ;; esac
+    command -v SUSEConnect &> /dev/null || return 1
+    product="sle-module-containers/$OS_VERSION_ID/$(uname -m)"
+    log_info "Docker kommt unter SLES aus dem Containers Module; der Installer schaltet es ein: SUSEConnect -p $product"
+    SUSEConnect -p "$product"
+}
+
+# Startet DOCKER_SERVICE und schaltet ihn für jeden Start ein (systemd, unter Alpine OpenRC). Gelingt das nicht (etwa
+# ohne laufendes systemd), sagt der Installer, wie es geht, und macht weiter.
+docker_service_start() {
+    [ -n "$DOCKER_SERVICE" ] || return 0
+    if [ "$PKG" = "apk" ]; then
+        if rc-update add "$DOCKER_SERVICE" default && rc-service "$DOCKER_SERVICE" start; then return 0; fi
+        log_warn "Docker ist installiert, ließ sich aber nicht starten (Meldungen oben). Selbst starten: rc-update add docker default; rc-service docker start"
+    else
+        if systemctl enable --now "$DOCKER_SERVICE"; then return 0; fi
+        log_warn "Docker ist installiert, ließ sich aber nicht starten (Meldungen oben). Selbst starten: sudo systemctl enable --now docker"
+    fi
+}
+
+# Docker (oder Podman mit dem Befehl docker) aus den Paketquellen der Distribution; die Paketverwaltung prüft die
+# Signaturen mit den Schlüsseln, denen das System schon vertraut. Kein fremdes Repository wird eingetragen.
+install_docker_distro() {
+    local tool package
+    tool="$(pkg_tool)"
+    if ! command -v "$tool" &> /dev/null; then docker_stop "$tool fehlt auf diesem System."; fi
+    log_info "Quelle: die Paketquellen von $(system_label): ${DOCKER_PACKAGES[*]} (mit $tool; die Signaturen prüft $tool mit den Schlüsseln der Distribution)."
+    if [ "$PKG" = "apk" ] && ! apk_enable_community; then
+        docker_stop "Alpines Repository community ließ sich in $APK_REPOSITORIES nicht einschalten (keine eingeschaltete main-Zeile gefunden oder die Datei nicht schreibbar)."
+    fi
+    if ! pkg_install "${DOCKER_PACKAGES[@]}"; then
+        if ! sles_containers_module || ! pkg_install "${DOCKER_PACKAGES[@]}"; then
+            docker_stop "Die Pakete ${DOCKER_PACKAGES[*]} ließen sich mit $tool nicht installieren (Meldungen oben).$(pkg_failure_hint)"
+        fi
+    fi
+    for package in ${DOCKER_OPTIONAL[@]+"${DOCKER_OPTIONAL[@]}"}; do
+        if ! pkg_install "$package"; then
+            log_warn "$package ließ sich nicht installieren; das Framework baut Images dann mit Dockers älterem Builder (langsamer)."
+        fi
+    done
+    docker_service_start
+    if ! command -v docker &> /dev/null; then docker_stop "Nach der Installation gibt es den Befehl docker nicht."; fi
+    if [ "$DOCKER_ROUTE" = "podman" ]; then
+        log_success "Podman ist installiert (${DOCKER_PACKAGES[*]}: der Befehl docker ruft Podman auf; Pakete von $tool geprüft)."
+    else
+        log_success "Docker ist installiert (${DOCKER_PACKAGES[*]} aus den Paketquellen der Distribution, Pakete von $tool geprüft)."
+    fi
+}
+
+# Docker über die Paketverwaltung dieses Systems (docker_plan), nie mit einem heruntergeladenen Skript.
+install_docker() {
+    detect_system
+    docker_plan
+    case "$DOCKER_ROUTE" in
+        apt-repo) install_docker_apt ;;
+        rpm-repo) install_docker_rpm ;;
+        *) install_docker_distro ;;
+    esac
+}
+
+# Podman (podman-docker) läuft ohne Dienst mit Root-Rechten und ohne Gruppe docker: Das Framework erreicht es über
+# Podmans Docker-kompatible Schnittstelle der Person. Der Installer schaltet sie für sie ein (systemd des Benutzers)
+# und sagt, welche Adresse das Framework dafür braucht.
+podman_for_user() {
+    local uid
+    if [ -z "$REAL_USER" ] || [ "$REAL_USER" = "root" ]; then
+        log_warn "Podman: Die Docker-kompatible Schnittstelle wird für deinen Benutzer eingerichtet, nicht für root. Als dein Benutzer: systemctl --user enable --now podman.socket"
+        return 0
+    fi
+    uid="$(id -u "$REAL_USER" 2> /dev/null)"
+    if ! systemctl --user --machine="$REAL_USER@" enable --now podman.socket; then
+        log_warn "Podmans Docker-kompatible Schnittstelle ließ sich für '$REAL_USER' nicht einschalten (Meldungen oben). Als '$REAL_USER' selbst: systemctl --user enable --now podman.socket"
+    fi
+    log_info "Podman braucht keine Gruppe docker und keinen Dienst mit Root-Rechten. Damit das Framework Podman findet, setze für '$REAL_USER' DOCKER_HOST=unix:///run/user/${uid:-UID}/podman/podman.sock (etwa in ~/.bashrc), bevor du es startest."
+}
+
 # --- SCHRITT 1: PREREQUISITES (Docker & Python) ---
 setup_system() {
     log_info "[1/5] Systemprüfung & Vorbereitung..."
-    
-    wait_for_internet
 
-    # Python Check
-    if ! command -v python3 &> /dev/null; then
-        log_warn "Python3 fehlt. Installiere..."
-        if ! apt-get update || ! apt-get install -y python3 python3-venv python3-pip; then
-            log_error "Konnte Python nicht installieren."
+    wait_for_internet
+    detect_system
+
+    # Alpine (musl): nur Docker, dann der Weg, der hier geht (alpine_stop).
+    if [ "$OS_FAMILY" = "alpine" ]; then
+        if [ "$CONTAINER_BUILD" != "1" ] && ! command -v docker &> /dev/null; then
+            log_warn "Docker fehlt. Installiere es über $(pkg_tool) (Signaturen geprüft)..."
+            install_docker
         fi
+        if [ "$CONTAINER_BUILD" != "1" ]; then docker_group; fi
+        alpine_stop
     fi
+
     # requirements.txt only matches Python 3.11-3.14; outside that range pip would silently install nothing.
-    if ! python3 -c 'import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] < (3, 15) else 1)'; then
-        log_error "Python 3.11 bis 3.14 wird benötigt, gefunden: $(python3 --version 2>&1). Bitte eine passende Version installieren (z. B. Debian 12, Ubuntu 24.04 oder 'uv python install 3.13')."
-    fi
+    ensure_python
 
     # In einem selbst gebauten Framework-Image gibt es keine Docker-Engine und keine docker-Gruppe.
     if [ "$CONTAINER_BUILD" = "1" ]; then
@@ -301,19 +778,33 @@ setup_system() {
 
     # Docker Check (Übernommen aus setup_linux.sh)
     if ! command -v docker &> /dev/null; then
-        log_warn "Docker fehlt. Installiere es aus Dockers offiziellem apt-Repository (Signaturschlüssel geprüft)..."
+        log_warn "Docker fehlt. Installiere es über die Paketverwaltung dieses Systems (Schlüssel und Signaturen geprüft)..."
         install_docker
     fi
 
-    # Docker Permissions
-    # Wir nehmen den User, der sudo aufgerufen hat (SUDO_USER), nicht root!
+    docker_group
+}
+
+# Docker Permissions
+# Wir nehmen den User, der sudo aufgerufen hat (SUDO_USER), nicht root!
+docker_group() {
     REAL_USER="${SUDO_USER:-$USER}"
+    if [ "$DOCKER_ROUTE" = "podman" ]; then podman_for_user; return 0; fi
     # Ohne Nachfrage (siebte Runde, Punkt 6), aber mit klaren Worten, was die Gruppe bedeutet.
     if ! groups "$REAL_USER" | grep &>/dev/null "\bdocker\b"; then
         log_info "Füge User '$REAL_USER' zur Gruppe docker hinzu: Das Framework baut damit die Werkzeuge zum Cross-Kompilieren in Containern."
         log_warn "Was das heißt: Wer in der Gruppe docker ist, steuert den Docker-Dienst, und der läuft als root. Jedes Programm, das als '$REAL_USER' läuft, kann damit Root-Rechte auf diesem Rechner bekommen. Rückgängig machen: sudo gpasswd -d $REAL_USER docker (danach kann das Framework ohne sudo nicht mehr bauen)."
-        usermod -aG docker "$REAL_USER"
+        # Alpine hat ohne das Paket shadow kein usermod; dort tut busybox' addgroup dasselbe.
+        if command -v usermod &> /dev/null; then usermod -aG docker "$REAL_USER"; else addgroup "$REAL_USER" docker; fi
     fi
+}
+
+# Alpine und postmarketOS (musl): Die festgelegten Python-Pakete des Frameworks gibt es nicht für musl (onnxruntime,
+# das die lokale Wissensbasis über fastembed braucht, veröffentlicht nur Builds für glibc, ohne Quellpaket), also kann
+# das Framework hier nicht direkt laufen. Der Installer hat Docker eingerichtet und hält mit dem Weg an, der geht: das
+# Framework-Image (Debian), auf diesem Rechner gebaut.
+alpine_stop() {
+    log_error "Das Framework selbst wurde auf $(system_label) nicht installiert: Seine festgelegten Python-Pakete gibt es nicht für musl (onnxruntime, das die lokale Wissensbasis braucht, nur für glibc). Docker ist eingerichtet; baue auf diesem Rechner das Framework-Image (Debian) und nutze das Framework darin: scripts/build_container_image.sh (Anleitung: docs/Container_Setup_DE.md; dafür auch git, bash und docker buildx). Für die Gruppe docker einmal ab- und wieder anmelden."
 }
 
 # --- SCHRITT 2: DATEIEN KOPIEREN ---
@@ -364,8 +855,13 @@ deploy_files() {
 
     log_info "Ziel Code: $INSTALL_DIR"
     
-    # Wir nutzen rsync für sauberes Kopieren (exklusive Müll)
-    if ! command -v rsync &> /dev/null; then apt-get install -y rsync; fi
+    # Wir nutzen rsync für sauberes Kopieren (exklusive Müll); fehlt es, über die Paketverwaltung dieses Systems.
+    if ! command -v rsync &> /dev/null; then
+        pkg_ready "rsync"
+        if ! pkg_install rsync; then
+            log_error "rsync ließ sich mit $(pkg_tool) nicht installieren (Meldungen oben); ohne rsync wird nichts kopiert.$(pkg_failure_hint)"
+        fi
+    fi
 
     # Nur die ausgelieferten Dateien, ohne --delete: Was im Ziel sonst liegt, gehört dem Benutzer oder dem Framework
     # (eigene Targets unter targets/, Community-Packs unter targets/ und community/, configs/config.yml, Builds,
@@ -483,13 +979,15 @@ setup_venv() {
     # Mit grafischer Oberfläche requirements-gui.txt (Basis plus PySide6), mit --headless nur requirements.txt.
     REQUIREMENTS="requirements-gui.txt"
     if [ "$HEADLESS" = "1" ]; then REQUIREMENTS="requirements.txt"; fi
+    # Das Python, das setup_system gefunden hat (auf RHEL 9 etwa python3.12), sonst python3.
+    local python="${PYTHON:-python3}"
 
     # Scheitert ein Schritt (kein venv, ein Paket nicht erreichbar), bricht die Installation ab: Sonst meldete sie
     # "abgeschlossen" mit einer leeren Umgebung, und ein Container-Image würde trotzdem gebaut.
     if ! "${as_user[@]}" bash <<EOF
     set -e
     cd "$INSTALL_DIR"
-    python3 -m venv .venv
+    "$python" -m venv .venv
     # Das pip der Umgebung ist das, was mit Python kommt (ensurepip). Es wird nicht aktualisiert: Das lüde die neueste
     # Version von pip ohne Prüfsumme, und das mitgelieferte genügt für die Installation mit --require-hashes unten.
 
@@ -532,6 +1030,7 @@ ditto_option() {
         case "$arg" in
             --ditto=*) DITTO_CHOICE="${arg#--ditto=}" ;;
             --headless) HEADLESS=1 ;;
+            --dry-run) DRY_RUN=1 ;;
         esac
     done
     case "$DITTO_CHOICE" in
@@ -592,15 +1091,96 @@ finish() {
     
     # Hinweis zum Docker Group Refresh
     REAL_USER="${SUDO_USER:-$USER}"
-    if [ "$CONTAINER_BUILD" != "1" ] && ! groups "$REAL_USER" | grep &>/dev/null "\bdocker\b"; then
+    if [ "$CONTAINER_BUILD" != "1" ] && [ "$DOCKER_ROUTE" != "podman" ] \
+        && ! groups "$REAL_USER" | grep &>/dev/null "\bdocker\b"; then
         log_warn "Du wurdest zur Docker-Gruppe hinzugefügt."
         log_warn "Bitte einmal aus- und einloggen (oder 'newgrp docker' nutzen)."
     fi
 }
 
+# --- PROBELAUF (--dry-run) ---
+# Zeigt, was setup_system und deploy_files hier täten, mit denselben Entscheidungen (detect_system, find_python,
+# python_packages, docker_plan, pkg_argv), ohne etwas zu verändern, zu laden oder eine Paketverwaltung aufzurufen.
+plan_python() {
+    local sets=() rest=""
+    pkg_argv
+    if find_python; then
+        echo "   Python: $PYTHON ($("$PYTHON" --version 2>&1))"
+        return 0
+    fi
+    mapfile -t sets < <(python_versioned_packages)
+    if [ "${#sets[@]}" -gt 1 ]; then rest=" (sonst der Reihe nach: $(printf '%s; ' "${sets[@]:1}" | sed 's/; $//'))"; fi
+    if ! command -v python3 &> /dev/null; then
+        pkg_ready "Python 3.11 bis 3.14"
+        echo "   Python: fehlt -> ${PKG_ARGV[*]} $(python_packages)"
+        if [ "${#sets[@]}" -gt 0 ]; then
+            echo "     passt es nicht (3.11 bis 3.14): ${PKG_ARGV[*]} ${sets[0]}$rest"
+        fi
+    elif [ "${#sets[@]}" -gt 0 ]; then
+        pkg_ready "Python 3.11 bis 3.14"
+        echo "   Python: $(python3 --version 2>&1) passt nicht (3.11 bis 3.14) -> ${PKG_ARGV[*]} ${sets[0]}$rest"
+    else
+        python_missing_error
+    fi
+}
+
+plan_docker() {
+    local service="" optional=""
+    if command -v docker &> /dev/null; then
+        echo "   Docker: vorhanden ($(command -v docker))"
+        return 0
+    fi
+    docker_plan
+    pkg_argv
+    if [ -n "$DOCKER_SERVICE" ]; then
+        if [ "$PKG" = "apk" ]; then service="; rc-update add docker default; rc-service docker start"
+        else service="; systemctl enable --now $DOCKER_SERVICE"; fi
+    fi
+    if [ "${#DOCKER_OPTIONAL[@]}" -gt 0 ]; then optional=" (dazu, wenn es das gibt: ${DOCKER_OPTIONAL[*]})"; fi
+    case "$DOCKER_ROUTE" in
+        apt-repo)
+            echo "   Docker: fehlt -> Dockers apt-Repository $DOCKER_DOWNLOAD_URL/$DOCKER_REPO ($DOCKER_SUITE), sein Schlüssel nur mit dem Fingerabdruck $DOCKER_KEY_FINGERPRINT; apt-get install -y ${DOCKER_PACKAGES[*]}" ;;
+        rpm-repo)
+            echo "   Docker: fehlt -> Dockers dnf-Repository $DOCKER_DOWNLOAD_URL/$DOCKER_REPO, sein Schlüssel nur mit dem Fingerabdruck $DOCKER_RPM_KEY_FINGERPRINT; dnf install -y ${DOCKER_PACKAGES[*]}$service" ;;
+        podman)
+            echo "   Docker: fehlt -> Docker veröffentlicht für ${OS_ID:-dieses System} kein Repository; das Paket der Distribution: ${PKG_ARGV[*]} ${DOCKER_PACKAGES[*]} (Podman mit dem Befehl docker); Podmans Docker-kompatible Schnittstelle für deinen Benutzer (systemctl --user enable --now podman.socket)" ;;
+        *)
+            echo "   Docker: fehlt -> aus den Paketquellen der Distribution: ${PKG_ARGV[*]} ${DOCKER_PACKAGES[*]}$optional$service"
+            if [ "$PKG" = "apk" ]; then echo "     aus Alpines Repository community (wird in $APK_REPOSITORIES eingeschaltet, falls nötig)"; fi ;;
+    esac
+}
+
+plan_installation() {
+    local requirements="requirements-gui.txt"
+    if [ "$HEADLESS" = "1" ]; then requirements="requirements.txt"; fi
+    log_info "Probelauf (--dry-run): Es wird nichts verändert, nichts geladen und keine Paketverwaltung aufgerufen; so liefe die Installation hier ab."
+    detect_system
+    echo "   System: $(system_label); Paketverwaltung: ${PKG:-keine, die der Installer kennt}"
+    if [ "$OS_FAMILY" = "alpine" ]; then
+        if [ "$CONTAINER_BUILD" != "1" ]; then plan_docker; fi
+        alpine_stop
+    fi
+    plan_python
+    if [ "$CONTAINER_BUILD" = "1" ]; then
+        echo "   Docker: im Container-Build nicht"
+    else
+        plan_docker
+    fi
+    if command -v rsync &> /dev/null; then
+        echo "   rsync: vorhanden"
+    else
+        pkg_ready "rsync"
+        pkg_argv
+        echo "   rsync: fehlt -> ${PKG_ARGV[*]} rsync"
+    fi
+    echo "   Danach: Programmdateien nach $INSTALL_DIR, .venv mit $requirements (${PYTHON:-dem eben installierten Python}), Starter /usr/local/bin/llm-framework, Ditto ($DITTO_CHOICE)"
+    log_success "Probelauf fertig: Die Installation liefe hier durch."
+}
+
 # --- MAIN ---
 main() {
     ditto_option "$@"
+    if [ "$DRY_RUN" = "1" ]; then plan_installation; return 0; fi
     check_root
     setup_system
     deploy_files
