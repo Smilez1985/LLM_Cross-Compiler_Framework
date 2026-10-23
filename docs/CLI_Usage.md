@@ -123,6 +123,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `knowledge snapshots` | List the knowledge base's snapshots with full path, name, size and what each is; delete the ones you pick, or export them (unreleased) |
 | `knowledge index-docs` | Add the framework's own documentation (and with `--with-code` its code) to the knowledge base (unreleased) |
 | `knowledge storage` | Where the knowledge base is stored (Qdrant Edge), the conversion of an older one, and its old folder: `convert`, `delete-old` (unreleased) |
+| `knowledge loose` / `knowledge sort` | List the loose knowledge files / sort one into a topic or target folder after the pack checks and your confirmation, then import it (unreleased) |
 | `trash list` / `restore` / `empty` | What deletions moved to the trash; put entries back; delete the ones you pick for good (unreleased) |
 | `targets list` / `targets validate` | List hardware targets with their boards and formats / check that a target loads and its capabilities are valid |
 | `build start` / `build status` | Convert and quantize a model / show builds, also those the GUI, the MCP server or another CLI call started |
@@ -327,7 +328,7 @@ llm-cli knowledge index-docs --with-code
 ### knowledge sources
 
 ```
-llm-cli knowledge sources [--kind web|pack|docs|other|any]
+llm-cli knowledge sources [--kind web|pack|docs|other|any] [--topic NAME]
 ```
 
 Unreleased. Lists what the knowledge base holds: every source with its kind, the licence it names (an SPDX-like id
@@ -335,13 +336,44 @@ such as `CC-BY-4.0`, `other` for one the framework does not recognise, `-` for n
 knowledge pack would carry of it and why: **full text** (its licence allows passing the text on), **link and short
 facts** (a copyright notice and no such licence, code without a licence, an unknown licence) or **not exported** (a
 page of an installed knowledge pack, the framework's own documents). Addresses, titles and notices are site text and
-are shown as plain text. The knowledge base must be switched on.
+are shown as plain text. The knowledge base must be switched on. The column **Topic or target** names the topic or
+target the excerpts of a knowledge pack or a target pack belong to (`-` for your own pages, which get one when you
+export them); `--topic NAME` lists only the sources of that topic or target (ignoring case).
 
-In the GUI: **Tools > Knowledge Sources...** (the same columns; the **Kind** filter is `--kind`).
+In the GUI: **Tools > Knowledge Sources...** (the same columns; the **Kind** filter is `--kind`, the field **Topic or
+target** is `--topic`).
 
 ```bash
 llm-cli knowledge sources
 llm-cli knowledge sources --kind web
+llm-cli knowledge sources --topic Rockchip
+```
+
+### knowledge loose and knowledge sort
+
+```
+llm-cli knowledge loose
+llm-cli knowledge sort NAME --topic NAME | --target NAME
+```
+
+Unreleased. Knowledge always belongs to a topic or a target. An installed knowledge pack lives in the folder of its
+topic or target, `community/knowledge/<topic or target>/<pack>/`, and a loose knowledge file is never imported: a
+`.json` file directly in `community/knowledge/` or in a topic folder, or a `knowledge.json` in a folder without the
+pack's `.lcf-provenance.json`. `knowledge loose` lists them (Mojo names them too). `knowledge sort` sorts one of them
+(`NAME` as `knowledge loose` prints it) into a topic (a topic folder in use, or a new name) or into a target of this
+computer: the file is checked like an installed knowledge pack in the quarantine (a list of pages, each with its
+source; the licence texts and the `NOTICE` its full-text pages need are written next to it), the summary is shown,
+and only after your **y** at a terminal ("No" is the default) is it moved into the folder (trust `local`) and
+imported into the knowledge base, after a snapshot of it. Without a terminal nothing is sorted. A file in the old
+"swarm" format, or one that fails the check, stays where it is with the reason.
+
+In the GUI: **Sort loose knowledge...** in the Community Hub (the list of loose files, **Belongs to:** a topic or a
+target, then the summary with "No" as the default).
+
+```bash
+llm-cli knowledge loose
+llm-cli knowledge sort notes.json --topic llama.cpp
+llm-cli knowledge sort board/knowledge.json --target Rockchip
 ```
 
 ### knowledge storage
@@ -2180,9 +2212,14 @@ Trust levels:
 
 Targets that ship with the framework, such as Rockchip, have no provenance file and do not appear in the zoo.
 
-Installed targets go into the targets folder, recipes into `community/recipes/<id>/` and knowledge packs into
-`community/knowledge/<id>/` of the installation. A knowledge pack is imported into your knowledge base right after
-it is installed or, if the knowledge base is off, as soon as it is turned on.
+Installed targets go into the targets folder, recipes into `community/recipes/<id>/` and knowledge packs into the
+folder of their topic or target, `community/knowledge/<topic or target>/<id>/` of the installation (a pack installed
+by an earlier version stays in `community/knowledge/<id>/`). A knowledge pack is imported into your knowledge base
+right after it is installed or, if the knowledge base is off, as soon as it is turned on; every excerpt carries its
+topic or target. A pack made before packs named their topic gets its id as its topic, which the summary says and
+installing confirms. A newer version of a pack (installed after you removed the older one's folder) replaces the older
+version's excerpts. A target pack that carries a knowledge snapshot (`knowledge/initial_knowledge.json`) has it
+checked like a knowledge pack and imported under its target, also with a snapshot of the knowledge base first.
 
 In the GUI: **Tools > Open Community Hub** (list, filters by kind and trust, "Import file...", "Build" on an
 installed recipe, **Details...**, **Check installed packs**, **Check a pack file...**, **Export...** and **My public
@@ -2327,6 +2364,7 @@ lines per file) and notes.
 | `--license TEXT` | Licence of the pack as an SPDX ID. Default `MIT`; for knowledge `NOASSERTION`, because the pages keep their owners' terms. |
 | `--model-license TEXT` | Recipes: licence ID of the model (default `unknown`). |
 | `--id TEXT` | Knowledge: ID of the pack (default `knowledge-` and today's date, e.g. `knowledge-20261011`). |
+| `--topic TEXT` / `--target TEXT` | Knowledge: **one of them is required**: the topic its pages belong to (e.g. `llama.cpp`), or a target of this computer. The recipient finds the pages under it. Not for `target` and `recipe` (exit code 2). |
 | `--to FILE` | Encrypt the pack for private sharing to the age recipients (`age1...`) in this file: what `llm-cli zoo keys` printed on the recipient's computer, or a public key from `age-keygen`/`rage-keygen`; repeatable. |
 | `--passphrase` | Encrypt the pack for private sharing with a passphrase (asked twice, at least 12 characters). Not together with `--to` (exit code 2): age encrypts to keys or to one passphrase. |
 | `--out DIRECTORY` | Folder for the pack. Default: `community/contributions/` in the installation. |
@@ -2393,7 +2431,7 @@ llm-cli zoo export recipe output/build_20261011_141500/Rockchip/SmolLM2-135M-Ins
   --author "<your name>" --model-license Apache-2.0
 
 # Your knowledge base under an ID of your choice
-llm-cli zoo export knowledge --author "<your name>" --id rk3588-notes
+llm-cli zoo export knowledge --author "<your name>" --id rk3588-notes --target Rockchip
 
 # Encrypted for a colleague, or with a passphrase
 llm-cli zoo export target my-board --author "<your name>" --to colleague.keys

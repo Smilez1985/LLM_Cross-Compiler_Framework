@@ -531,7 +531,8 @@ siehe auch den [Leitfaden für Modulentwickler](docs/Module_Developer_Guide_DE.m
 
 1. **Ein Paket exportieren:** `llm-cli zoo export target <ID> --author "<Name>"` für ein Target,
    `llm-cli zoo export recipe <Build-Ordner> --author "<Name>"` für einen fertigen Build oder
-   `llm-cli zoo export knowledge --author "<Name>"` für deine Wissensbasis. In der GUI: „Export for community after
+   `llm-cli zoo export knowledge --author "<Name>" --topic <Thema>` (oder `--target <Target>`) für deine
+   Wissensbasis: Wissen gehört immer zu einem Thema oder einem Target, und der Empfänger findet seine Seiten darunter. In der GUI: „Export for community after
    creating“ auf der letzten Seite des Modul-Assistenten oder „Export a finished build for the community...“ im
    Kontextmenü des Builder-Logs. Das Paket wird datenschutzbereinigt, geprüft, mit deinem Schlüssel signiert und
    nach `community/contributions/` geschrieben. Gesendet wird noch nichts.
