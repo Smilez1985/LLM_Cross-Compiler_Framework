@@ -341,6 +341,30 @@ def test_the_input_command_writes_the_first_statistics(tmp_path, capsys):
            "tokenizer.json, 1 SafeTensors file." in out
 
 
+def test_the_input_size_counts_the_weights_the_converter_reads(tmp_path, capsys):
+    """Mistral's repositories carry consolidated.safetensors (their own format) beside the Hugging Face shards: the
+    same weights twice, and the build engine stages both. The converter reads the model*.safetensors files only, so
+    the input size, and with it the ratio, leaves the second copy out (and the integrity check does not read it)."""
+    folder = hf_folder(tmp_path)
+    read = sum(p.stat().st_size for p in folder.iterdir())
+    (folder / "consolidated.safetensors").write_bytes(b"not read by the converter, not checked" * 100)
+    (folder / "pytorch_model.bin").write_bytes(b"\x80\x02" + b"\0" * 2000)  # a local folder with both formats
+    info = mc.detect(folder)
+    assert info["weights"] == "safetensors" and [p.name for p in info["safetensors"]] == ["model.safetensors"]
+    stats = tmp_path / "stats.json"
+    assert check("input", folder, "--format", "gguf", "--stats", stats) == 0
+    assert json.loads(stats.read_text())["input_bytes"] == read
+    assert f"Input: a Hugging Face model folder with SafeTensors weights, {read} B; checked: config.json, " \
+           "tokenizer.json, 1 SafeTensors file." in capsys.readouterr().out
+    # PyTorch weights only: the .bin weights are what is read (training_args.bin is no weights file)
+    (folder / "model.safetensors").unlink()
+    (folder / "consolidated.safetensors").unlink()
+    (folder / "training_args.bin").write_bytes(b"\x80\x02" + b"\0" * 300)
+    assert check("input", folder, "--format", "gguf", "--stats", stats) == 0
+    assert json.loads(stats.read_text())["input_bytes"] == \
+        sum(p.stat().st_size for p in folder.iterdir() if p.name != "training_args.bin")
+
+
 def test_a_hidden_folder_beside_the_weights_is_no_part_of_the_input_size(tmp_path):
     folder = hf_folder(tmp_path)
     before = mc.tree_bytes(folder)

@@ -131,6 +131,25 @@ def tree_bytes(path: Path) -> int:
     return total
 
 
+# Suffixes of weights files: in a Hugging Face folder, the ones the converter does not read are no part of the input
+WEIGHTS_SUFFIXES = (".safetensors", ".bin", ".pt", ".pth")
+
+
+def input_bytes(path: Path, info: Dict[str, Any]) -> int:
+    """The size of the input as the converter takes it in (the statistics' input_bytes and ratio): a file, or every
+    file below the folder, without the weights files of a Hugging Face folder that the converter does not read (a
+    second copy of the weights: consolidated.safetensors beside the model*.safetensors shards, PyTorch files beside
+    SafeTensors)."""
+    total = tree_bytes(path)
+    if info["kind"] != "huggingface" or info["weights"] == "none":
+        return total
+    read = set(info["safetensors"] if info["weights"] == "safetensors" else info["pytorch"])
+    for p in path.iterdir():
+        if _visible(p.name) and p.suffix.lower() in WEIGHTS_SUFFIXES and p not in read and p.is_file():
+            total -= p.stat().st_size
+    return total
+
+
 # --- Detection ---------------------------------------------------------------------------------------------------
 
 def detect(path: Path) -> Dict[str, Any]:
@@ -143,7 +162,9 @@ def detect(path: Path) -> Dict[str, Any]:
         return {"kind": kind}
     top = sorted(p for p in path.iterdir() if _visible(p.name))
     files = [p for p in top if p.is_file()]
-    safetensors = [p for p in files if p.suffix.lower() == ".safetensors"]
+    # The weights files convert_hf_to_gguf.py reads (model*.safetensors, else pytorch_model*.bin), the names the
+    # warning of 1.x looks for: a consolidated.safetensors beside them (Mistral's own format) is a second copy
+    safetensors = [p for p in files if p.name.startswith("model") and p.suffix.lower() == ".safetensors"]
     pytorch = [p for p in files if p.name.startswith("pytorch_model") and p.suffix.lower() == ".bin"]
     weights = "safetensors" if safetensors else "pytorch" if pytorch else "none"
     # ONNX files in the folder and one level below, where rknn_module.sh looks for them
@@ -532,7 +553,7 @@ def cmd_input(args) -> None:
     if reason:
         raise Problem(reason)
     checked = check_input(path, info)
-    size = tree_bytes(path)
+    size = input_bytes(path, info)
     log(f"Input: {describe(info)}, {size_text(size)}; checked: {checked}.")
     kind = info["kind"]
     stats = {"input_format": kind, "input_bytes": size, "converted": kind != "gguf"}
