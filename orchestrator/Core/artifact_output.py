@@ -45,6 +45,7 @@ import json
 import os
 import secrets
 import shutil
+import stat
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
@@ -675,8 +676,24 @@ class CopyPlan:
     replaces: Any = None
 
 
+def _same_files(a: Path, b: Path, names) -> bool:
+    """Whether every listed model file lies in `b` as a plain file of the size it has in `a` (a model file deleted or
+    changed after the build is no identical build; no file is read, so this is quick also on the GUI thread)."""
+    for name in names:
+        if not name or Path(name).name != name:
+            return False
+        try:
+            mine, theirs = os.lstat(a / name), os.lstat(b / name)
+        except OSError:
+            return False
+        if not stat.S_ISREG(theirs.st_mode) or theirs.st_size != mine.st_size:
+            return False
+    return True
+
+
 def _same_build(a: Path, b: Path) -> bool:
-    """Whether two build folders hold the same build: the same recorded options and the same model files (sha256)."""
+    """Whether two build folders hold the same build: the same recorded options and the same model files (sha256 in
+    their manifests), each of them there in `b` with its size in `a` (_same_files)."""
     from orchestrator.Core.build_identity import MANIFEST_KEY
     try:
         first = json.loads((a / MANIFEST).read_text(encoding="utf-8"))
@@ -690,7 +707,8 @@ def _same_build(a: Path, b: Path) -> bool:
         return sorted((str(x.get("file")), str(x.get("sha256"))) for x in info.get("artifacts") or []
                       if isinstance(x, dict))
     return bool(files(first)) and files(first) == files(second) and \
-        first.get(MANIFEST_KEY) == second.get(MANIFEST_KEY) and first.get("primary") == second.get("primary")
+        first.get(MANIFEST_KEY) == second.get(MANIFEST_KEY) and first.get("primary") == second.get("primary") and \
+        _same_files(a, b, [name for name, _ in files(first)])
 
 
 def _replace_plan(framework, target: Path, modes=("trash", "permanent")):

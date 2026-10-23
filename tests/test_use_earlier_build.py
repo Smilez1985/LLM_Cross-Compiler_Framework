@@ -69,6 +69,21 @@ def test_the_identical_build_there_already_is_not_copied_again(fw, tmp_path, ear
     assert result.already and sorted(p.name for p in elsewhere.parent.iterdir()) == before
 
 
+@pytest.mark.parametrize("damage", ["model file gone", "model file changed"])
+def test_a_folder_whose_model_file_is_gone_or_changed_is_not_the_identical_build(fw, tmp_path, earlier, damage):
+    """Review cs-cli-gui-v: the identical build "there already" is told from its files too, not from its manifest
+    alone: a folder that still holds the same build_info.json but whose model file was deleted or changed is no
+    identical build. Use then asks before replacing it, and never says that nothing needs copying."""
+    elsewhere = finished_build(tmp_path / "disk2", **OPTIONS)
+    if damage == "model file gone":
+        (elsewhere / "m.gguf").unlink()
+    else:
+        (elsewhere / "m.gguf").write_bytes(b"weights, but changed afterwards")
+    plan = ao.plan_copy(fw, earlier, tmp_path / "disk2", relative="Rockchip/m/Q4_K_M")
+    assert not plan.there, "it does not hold the earlier build's model file"
+    assert plan.replaces is not None and plan.replaces.items[0].full_path == str(plan.target)
+
+
 def test_another_build_under_the_name_is_replaced_only_with_the_persons_yes(fw, tmp_path, earlier):
     from orchestrator.Core.deletion import accept
     other = finished_build(tmp_path / "disk2", payload=b"other weights", zip_payload=b"old zip")
