@@ -1477,7 +1477,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   32-Bit-System auf einer 64-Bit-CPU); die Vorlage lehnt jedes Profil ab, das nicht vom System des Moduls ist, auch
   eines von einem System, das sie nicht kennt. Mit Profil macht die Stufe target eines GGUF-Builds das Paket in
   `output/packages/`: das Modell, `llama-cli` und `llama-server` für das Board, die Toolchain-Datei und das Profil,
-  eine Model Card, `test_model.sh` (prüft die Dateien, dann eine kurze Antwort des Modells), `deploy.sh`
+  eine Model Card, `test_model.sh` (prüft die Dateien und dass der Rechner die Programme des Pakets ausführt, ein
+  32-Bit-Arm-Paket auch auf einem 64-Bit-Arm-Kernel, dann eine kurze Antwort des Modells), `deploy.sh`
   (`USER@HOST [ZIEL]` über `ssh` und `scp` mit `StrictHostKeyChecking=yes`, oder auf dem Board selbst nach
   `/opt/llm`), `MANIFEST.json` mit jedem Detail des Builds und `SHA256SUMS`; das Modell läuft einmal auf diesem
   Rechner, die Programme müssen für das Board sein, und jede Datei muss zu ihrer Prüfsumme passen, bevor das Paket
