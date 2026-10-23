@@ -1301,7 +1301,9 @@ und dem vollen Modellordner. **Empfohlenes Modell herunterladen...** und **Ausge
 `ditto models download` mit derselben Frage (Repository, Datei, Lizenz, Größe, Ordner; „Nein“ ist die Vorgabe); Liste
 und Download laufen im Hintergrund, mit Fortschritt und **Abbrechen** (der Teil bleibt für die Fortsetzung). Der
 empfohlene Download nimmt die Empfehlung, die das Fenster zeigt, damit keine Hardware-Prüfung läuft, während du auf die
-Frage wartest. Ein Download ist eine Aufgabe von Dittos lokaler Laufzeit: Er wartet, solange in **Ditto > Lokale
+Frage wartest; wurde früher eine Stufe für den lokalen Server gewählt, heißt der Knopf **Gewähltes Modell
+herunterladen...** und nimmt diese Stufe, das Modell, das ein einfacher Start lädt (wie `ditto models download` ohne
+Stufe). Ein Download ist eine Aufgabe von Dittos lokaler Laufzeit: Er wartet, solange in **Ditto > Lokale
 Laufzeit...** oder in den KI-Einstellungen ein Build, ein Serverstart oder ein anderer Download läuft, und diese
 warten auf ihn.
 

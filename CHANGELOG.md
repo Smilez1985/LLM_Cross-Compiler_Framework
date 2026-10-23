@@ -2080,6 +2080,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **`ditto models download` without a tier fetches the model a plain `runtime start` loads** (chain port-runtime,
+  from the review of the managed llama-server): `runtime start` loads the tier chosen earlier with `--model`, but
+  the download without a tier fetched the recommendation for this computer, so after choosing another tier the next
+  start still failed with "not downloaded". The download now takes the tier chosen earlier ("Chosen earlier with
+  'runtime start --model': ..."), else the recommendation as before (`runtime/ditto_models.model_to_download`). The
+  GUI's **Ditto > Local Models...** does the same: with a tier chosen earlier its button reads **Download the chosen
+  model...** and asks about that tier. Docs: README, `docs/CLI_Usage.md`, `docs/Features.md` (EN/DE). Regression
+  tests: `tests/test_runtime.py` `test_model_download_defaults_to_the_model_runtime_start_loads`,
+  `tests/test_ditto_models_core.py` `test_without_a_tier_the_download_is_the_model_runtime_start_loads`,
+  `tests/test_gui_ditto_models.py` `test_without_a_selection_the_download_is_the_model_the_server_loads`.
 - **A machine whose GPU has no Vulkan driver gets the CPU build** (chain port-runtime, from the review of the managed
   llama-server): when `vulkaninfo` ran but listed only a software renderer (llvmpipe, lavapipe), the hardware probe
   still set `VULKAN=ON` because a Vulkan loader, a display adapter (Windows) or `vulkan-1.dll` was there, so the

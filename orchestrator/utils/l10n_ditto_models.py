@@ -37,6 +37,7 @@ TEXTS = {
         "ditto_models.note.on request": "on request",
         "ditto_models.note.not pinned": "not pinned (cannot be downloaded)",
         "ditto_models.download_recommended": "Download the recommended model...",
+        "ditto_models.download_chosen": "Download the chosen model...",
         "ditto_models.download": "Download selected...",
         "ditto_models.refresh": "Check again",
         "ditto_models.cancel": "Cancel",
@@ -47,6 +48,8 @@ TEXTS = {
         "ditto_models.question": "{repo} / {file} ({license})\n\nDownload {size} into {folder}?",
         "ditto_models.question_recommended": "Recommended: {why}\n\n{repo} / {file} ({license})\n\nDownload {size} "
                                              "into {folder}?",
+        "ditto_models.question_chosen": "Chosen earlier for the local server: {tier}\n\n{repo} / {file} ({license})\n\n"
+                                        "Download {size} into {folder}?",
         "ditto_models.downloading": "Downloading {file}…",
         "ditto_models.progress": "{name}: {done} of {total}",
         "ditto_models.cancelling": "Cancelling… the download stops after the current piece.",
@@ -198,6 +201,7 @@ TEXTS = {
         "ditto_models.note.on request": "auf Wunsch",
         "ditto_models.note.not pinned": "nicht festgelegt (kann nicht heruntergeladen werden)",
         "ditto_models.download_recommended": "Empfohlenes Modell herunterladen...",
+        "ditto_models.download_chosen": "Gewähltes Modell herunterladen...",
         "ditto_models.download": "Ausgewähltes herunterladen...",
         "ditto_models.refresh": "Erneut prüfen",
         "ditto_models.cancel": "Abbrechen",
@@ -208,6 +212,8 @@ TEXTS = {
         "ditto_models.question": "{repo} / {file} ({license})\n\n{size} nach {folder} herunterladen?",
         "ditto_models.question_recommended": "Empfohlen: {why}\n\n{repo} / {file} ({license})\n\n{size} nach "
                                              "{folder} herunterladen?",
+        "ditto_models.question_chosen": "Früher für den lokalen Server gewählt: {tier}\n\n{repo} / {file} ({license})"
+                                        "\n\n{size} nach {folder} herunterladen?",
         "ditto_models.downloading": "{file} wird heruntergeladen …",
         "ditto_models.progress": "{name}: {done} von {total}",
         "ditto_models.cancelling": "Wird abgebrochen … der Download hält nach dem aktuellen Stück an.",
