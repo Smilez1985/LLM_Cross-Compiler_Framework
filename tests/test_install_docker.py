@@ -15,7 +15,9 @@ made for the test; nothing reaches the network.
 import os
 import re
 import shutil
+import signal
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -123,14 +125,45 @@ class Sandbox:
         path.write_text("#!/bin/sh\n" + body)
         path.chmod(0o755)
 
-    def run(self, function="install_docker"):
+    def run(self, function="install_docker", tmp=None):
+        """`tmp`: mktemp's folder, where the key check's throwaway keyring lands (default: one in the sandbox; its
+        long path is also a test that a key check whose gpg cannot reach an agent still decides by the listing)."""
         script = ('source "$1"; OS_RELEASE_FILE="$2"; DOCKER_KEYRING="$3"; DOCKER_SOURCES="$4"; '
                   f'DOCKER_KEY_FINGERPRINT="$5"; {function}')
+        self.tmp = tmp or self.root / "tmp"
+        self.tmp.mkdir(exist_ok=True)
         run = subprocess.run([str(self.bin / "bash"), "-c", script, "test", str(INSTALL_SH), str(self.os_release),
                               str(self.keyring), str(self.sources), self.pinned],
-                             env={"PATH": str(self.bin), "HOME": str(self.root)},
+                             env={"PATH": str(self.bin), "HOME": str(self.root), "TMPDIR": str(self.tmp)},
                              capture_output=True, text=True, timeout=60, cwd=self.root)
         return run, self.calls.read_text() if self.calls.exists() else ""
+
+
+def processes_naming(folder: Path):
+    """(pid, command line) of the processes whose command line names `folder` (a gpg-agent, for example)."""
+    found = []
+    for cmdline in Path("/proc").glob("[0-9]*/cmdline"):
+        try:
+            text = cmdline.read_bytes()
+        except OSError:
+            continue
+        if str(folder).encode() in text:
+            found.append((int(cmdline.parent.name), text.replace(b"\0", b" ").decode(errors="replace")))
+    return found
+
+
+@pytest.fixture
+def short_tmp():
+    """A short folder under /tmp: there gpg could start an agent (its socket path fits), so a check that leaves one
+    behind is seen. Any process left naming it is ended afterwards."""
+    folder = Path(tempfile.mkdtemp(prefix="lcf-", dir="/tmp"))
+    yield folder
+    for pid, _ in processes_naming(folder):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    shutil.rmtree(folder, ignore_errors=True)
 
 
 # --- the script itself ----------------------------------------------------------------------------------------------
@@ -181,6 +214,17 @@ class TestDockerFromTheAptRepository:
                          "apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin "
                          "docker-compose-plugin"]
         assert "Docker ist installiert" in run.stdout
+
+    @pytest.mark.parametrize("download", ["docker.asc", "other.asc"], ids=["accepted", "refused"])
+    def test_the_key_check_leaves_no_keyring_and_no_gpg_agent_behind(self, tmp_path, keys, download, short_tmp):
+        """gpg runs with --no-autostart: a key check as root on the person's computer starts no agent that outlives
+        it, and its throwaway keyring is removed either way."""
+        box = Sandbox(tmp_path, "debian", keys[download], pinned=keys["pinned"])
+        run, _ = box.run(tmp=short_tmp)
+        assert run.returncode == (0 if download == "docker.asc" else 1), run.stdout + run.stderr
+        assert list(short_tmp.iterdir()) == []
+        if Path("/proc").is_dir():
+            assert processes_naming(short_tmp) == []
 
     def test_ubuntu_uses_its_own_repository_and_codename(self, tmp_path, keys):
         box = Sandbox(tmp_path, "ubuntu", keys["docker.asc"], arch="arm64", pinned=keys["pinned"])

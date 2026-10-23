@@ -140,23 +140,25 @@ docker_apt_repo() {
 # DOCKER_KEY_FINGERPRINT ist. Wie die Paketquellen eines Moduls (module_generator.vendor_blocks): eingelesen in ein
 # eigenes, leeres GNUPGHOME, verglichen, dann exportiert. Strenger als dort: Die Datei muss genau einen Schlüssel
 # enthalten, und der festgelegte Fingerabdruck muss der seines Hauptschlüssels sein (nicht der eines Unterschlüssels).
-# Vor der Prüfung wird nichts außerhalb eines eigenen temporären Ordners geschrieben. Rückgabe 0 geschrieben, 1 nicht
-# Dockers Schlüssel, 2 nicht geladen, 3 nicht geschrieben; außer bei 0 bleibt $2, wie es war.
+# Vor der Prüfung wird nichts außerhalb eines eigenen temporären Ordners geschrieben. gpg läuft mit --no-autostart: Es
+# startet keinen gpg-agent, der als root nach dem Installer weiterliefe. Rückgabe 0 geschrieben, 1 nicht Dockers
+# Schlüssel, 2 nicht geladen, 3 nicht geschrieben; außer bei 0 bleibt $2, wie es war.
 fetch_docker_key() {
     local repo="$1" dest="$2" home primary rc=0
     home="$(mktemp -d)" || return 3
     if ! curl -fsSL --proto '=https' --tlsv1.2 "$DOCKER_DOWNLOAD_URL/$repo/gpg" -o "$home/download.key"; then
         rc=2
-    elif ! GNUPGHOME="$home" gpg --batch --quiet --import "$home/download.key" > /dev/null 2>&1; then
-        rc=1
     else
-        primary="$(GNUPGHOME="$home" gpg --batch --with-colons --list-keys 2> /dev/null | awk -F: '
+        # Was danach im Schlüsselbund steht, entscheidet, nicht der Rückgabewert des Einlesens: Ohne gpg-agent meldet
+        # gpg auch für einen eingelesenen Schlüssel einen Fehler. Ein nicht eingelesener fehlt in der Liste.
+        GNUPGHOME="$home" gpg --batch --no-autostart --quiet --import "$home/download.key" > /dev/null 2>&1 || true
+        primary="$(GNUPGHOME="$home" gpg --batch --no-autostart --with-colons --list-keys 2> /dev/null | awk -F: '
             $1 == "pub" { keys++; want = 1; next }
             want && $1 == "fpr" { fpr = $10; want = 0 }
             END { if (keys == 1) print fpr }')"
         if [ "$primary" != "$DOCKER_KEY_FINGERPRINT" ]; then
             rc=1
-        elif ! GNUPGHOME="$home" gpg --batch --armor --export "$DOCKER_KEY_FINGERPRINT" > "$home/docker.asc" \
+        elif ! GNUPGHOME="$home" gpg --batch --no-autostart --armor --export "$DOCKER_KEY_FINGERPRINT" > "$home/docker.asc" \
             || [ ! -s "$home/docker.asc" ]; then
             rc=3
         elif ! install -d -m 0755 "$(dirname "$dest")" || ! install -m 0644 "$home/docker.asc" "$dest"; then
