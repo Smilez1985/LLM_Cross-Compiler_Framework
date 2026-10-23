@@ -357,6 +357,9 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
                             code="failed", next="Call download_hf_file again through the framework's tool registry.")
         from orchestrator.tools.tools_builds import require_commit
         require_commit(bound, ctx.confirm_channel)  # unattended: only the commit the look-up resolved
+        # The look-up refused in offline mode; the person may have switched it on while the question was open: the
+        # one offline refusal again, before anything is reserved or requested.
+        hub().check_online()
         repo, name, commit = bound["model"], bound["filename"], bound["commit"]
         file = HubFile(name, int(bound["size"]), bound.get("sha256") or None)
         dest = download_path(models_dir(), repo, commit, name)
