@@ -56,6 +56,7 @@ DOCKER_MANUAL_URL="https://docs.docker.com/engine/install/"
 DOCKER_KEYRING="/etc/apt/keyrings/docker.asc"
 DOCKER_SOURCES="/etc/apt/sources.list.d/docker.sources"
 OS_RELEASE_FILE="/etc/os-release"
+DEBIAN_VERSION_FILE="/etc/debian_version"
 
 # Farben
 RED='\033[0;31m'
@@ -108,32 +109,64 @@ docker_stop() {
     log_error "Docker wurde nicht installiert: $1 Installiere Docker selbst nach Dockers Anleitung für dein System ($DOCKER_MANUAL_URL) und starte danach 'sudo ./install.sh' erneut."
 }
 
+# Der Codename der Debian-Version in $DEBIAN_VERSION_FILE ("12.7" -> bookworm, "trixie/sid" -> trixie), so wie Dockers
+# Installationsskript sie las, das der Installer früher ausführte; nichts, wenn dort keine steht (etwa "kali-rolling").
+debian_version_codename() {
+    local version=""
+    if [ -r "$DEBIAN_VERSION_FILE" ]; then IFS= read -r version < "$DEBIAN_VERSION_FILE" || true; fi
+    version="${version%%/*}"
+    case "$version" in
+        10|10.*) echo buster ;;
+        11|11.*) echo bullseye ;;
+        12|12.*) echo bookworm ;;
+        13|13.*) echo trixie ;;
+        *) if [[ "$version" =~ ^[a-z]+$ ]]; then echo "$version"; fi ;;
+    esac
+}
+
 # Setzt DOCKER_REPO und DOCKER_SUITE (etwa "debian" und "bookworm") für dieses System oder hält an. Raspberry Pi OS mit
 # 32 Bit (ID raspbian) bekommt die armhf-Pakete von Debian: Dockers Anleitung nennt sie dafür, und ab Docker Engine 29
 # gibt es keine eigenen Pakete für raspbian mehr. ARMv6 (Raspberry Pi 1, Zero) hat keine offiziellen Pakete.
-# Raspberry Pi OS mit 64 Bit meldet sich als debian. Jedes andere System hält an.
+# Raspberry Pi OS mit 64 Bit meldet sich als debian. Debian testing ohne VERSION_CODENAME: der Codename aus
+# $DEBIAN_VERSION_FILE. Ein System, das auf Ubuntu oder Debian aufbaut (ID_LIKE; etwa Linux Mint, Pop!_OS, LMDE),
+# bekommt wie mit Dockers früher ausgeführtem Installationsskript die Pakete der Version, auf der es aufbaut:
+# UBUNTU_CODENAME (so nennt es Dockers Anleitung für Linux Mint), bei Debian DEBIAN_CODENAME oder
+# $DEBIAN_VERSION_FILE, nie den eigenen Codenamen. Jedes andere System hält an.
 docker_apt_repo() {
-    local id="" codename="" ubuntu_codename=""
+    local id="" like="" codename="" ubuntu_codename="" debian_codename=""
     if [ -r "$OS_RELEASE_FILE" ]; then
-        { IFS= read -r id; IFS= read -r codename; IFS= read -r ubuntu_codename; } < <(
+        { IFS= read -r id; IFS= read -r like; IFS= read -r codename; IFS= read -r ubuntu_codename
+          IFS= read -r debian_codename; } < <(
             # shellcheck disable=SC1090
             . "$OS_RELEASE_FILE" > /dev/null 2>&1
-            printf '%s\n%s\n%s\n' "${ID:-}" "${VERSION_CODENAME:-}" "${UBUNTU_CODENAME:-}")
+            printf '%s\n%s\n%s\n%s\n%s\n' "${ID:-}" "${ID_LIKE:-}" "${VERSION_CODENAME:-}" "${UBUNTU_CODENAME:-}" \
+                "${DEBIAN_CODENAME:-}")
     fi
+    id="${id//[^A-Za-z0-9._-]/}"
     case "$id" in
-        debian) DOCKER_REPO=debian; DOCKER_SUITE="$codename" ;;
+        debian) DOCKER_REPO=debian; DOCKER_SUITE="${codename:-$(debian_version_codename)}" ;;
         raspbian)
             if [ "$(uname -m)" = "armv6l" ]; then
                 docker_stop "Für Raspberry Pi OS auf ARMv6 (Raspberry Pi 1, Zero) gibt es keine offiziellen Docker-Pakete."
             fi
-            DOCKER_REPO=debian; DOCKER_SUITE="$codename" ;;
+            DOCKER_REPO=debian; DOCKER_SUITE="${codename:-$(debian_version_codename)}" ;;
         ubuntu) DOCKER_REPO=ubuntu; DOCKER_SUITE="${ubuntu_codename:-$codename}" ;;
-        *) id="${id//[^A-Za-z0-9._-]/}"
-           docker_stop "Der Installer richtet Docker nur unter Debian, Ubuntu und Raspberry Pi OS ein (dieses System laut $OS_RELEASE_FILE: ${id:-unbekannt})." ;;
+        *)
+            if [[ " $like " == *" ubuntu "* ]]; then
+                DOCKER_REPO=ubuntu; DOCKER_SUITE="$ubuntu_codename"
+            elif [[ " $like " == *" debian "* ]]; then
+                DOCKER_REPO=debian; DOCKER_SUITE="${debian_codename:-$(debian_version_codename)}"
+            else
+                docker_stop "Der Installer richtet Docker nur unter Debian, Ubuntu, Raspberry Pi OS und darauf aufbauenden Systemen ein (dieses System laut $OS_RELEASE_FILE: ${id:-unbekannt})."
+            fi ;;
     esac
     if ! [[ "$DOCKER_SUITE" =~ ^[a-z][a-z0-9-]*$ ]]; then
-        docker_stop "$OS_RELEASE_FILE nennt keine Version dieses Systems (VERSION_CODENAME), also kein passendes Docker-Repository."
+        docker_stop "$OS_RELEASE_FILE nennt keine Version dieses Systems (VERSION_CODENAME; bei einem System, das auf Ubuntu oder Debian aufbaut, UBUNTU_CODENAME oder DEBIAN_CODENAME, sonst die Debian-Version in $DEBIAN_VERSION_FILE), also kein passendes Docker-Repository."
     fi
+    case "$id" in
+        debian|raspbian|ubuntu) ;;
+        *) log_info "${id:-Dieses System} baut auf $DOCKER_REPO $DOCKER_SUITE auf: Docker kommt aus Dockers Repository für $DOCKER_REPO $DOCKER_SUITE (wie bisher mit Dockers Installationsskript; offiziell unterstützt Docker nur $DOCKER_REPO selbst)." ;;
+    esac
 }
 
 # Lädt Dockers Signaturschlüssel für das Repository $1 und legt nach $2 nur einen Schlüssel, dessen Fingerabdruck
@@ -169,12 +202,34 @@ fetch_docker_key() {
     return "$rc"
 }
 
-# Gibt es schon eine apt-Quelle für download.docker.com (Dockers Anleitung, ein früherer Lauf, Dockers Installationsskript)?
+# Gibt es schon eine eingeschaltete apt-Quelle für download.docker.com (Dockers Anleitung, ein früherer Lauf, Dockers
+# Installationsskript)? Eine auskommentierte Zeile und ein Eintrag mit "Enabled: no" zählen nicht: apt liest sie nicht,
+# und so schaltet ein Versions-Upgrade von Ubuntu fremde Quellen ab.
 docker_source_exists() {
-    local dir
+    local dir file
     dir="$(dirname "$DOCKER_SOURCES")"
     [ -e "$DOCKER_SOURCES" ] && return 0
-    grep -q -s -F "download.docker.com" "$dir"/*.list "$dir"/*.sources "$(dirname "$dir")/sources.list"
+    for file in "$(dirname "$dir")/sources.list" "$dir"/*.list; do
+        if [ -f "$file" ] && grep -q -E '^[[:space:]]*deb(-src)?[[:space:]][^#]*download\.docker\.com' "$file"; then
+            return 0
+        fi
+    done
+    for file in "$dir"/*.sources; do
+        # deb822: ein Absatz je Eintrag; Zeilen mit # sind Kommentare.
+        if [ -f "$file" ] && awk 'BEGIN { RS = "" }
+            { docker = 0; off = 0; n = split($0, lines, "\n")
+              for (i = 1; i <= n; i++) {
+                  line = tolower(lines[i])
+                  if (line ~ /^[ \t]*#/) continue
+                  if (line ~ /download\.docker\.com/) docker = 1
+                  if (line ~ /^enabled:[ \t]*(no|false|off|disable)[ \t]*$/) off = 1
+              }
+              if (docker && !off) found = 1 }
+            END { exit !found }' "$file"; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 # Docker Engine aus Dockers offiziellem apt-Repository. Kein heruntergeladenes Skript läuft als root: Der

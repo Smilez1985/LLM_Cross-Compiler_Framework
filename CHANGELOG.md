@@ -2505,14 +2505,19 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **`install.sh` installs Docker only with a checksum** (DECISIONS round 23, item 3): when Docker was missing, the
   installer downloaded `get.docker.com` and ran it as root without any check. Now Docker comes only from Docker's
   official apt repository on Debian, Ubuntu and Raspberry Pi OS (32-bit gets Debian's armhf packages, as Docker's
-  guide says from Engine 29 on). The signing key is read into a throwaway keyring and trusted only when the download
-  holds exactly one key whose primary fingerprint is the one Docker's install guide publishes
+  guide says from Engine 29 on). Systems built on Ubuntu or Debian (`ID_LIKE`: Linux Mint, Pop!_OS, LMDE and the
+  like), which `get.docker.com` served as well, get the packages of the release they are built on, as before
+  (`UBUNTU_CODENAME`; `DEBIAN_CODENAME` or `/etc/debian_version`, which also gives Debian testing its codename). The
+  signing key is read into a throwaway keyring and trusted only when the download holds exactly one key whose
+  primary fingerprint is the one Docker's install guide publishes
   (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`, pinned in the script with its source); apt then checks every
   package against the signed package lists. Nothing is written before the check, and the check starts no gpg-agent
-  that would outlive the installer. Any other system, ARMv6 (Raspberry Pi 1, Zero), a key that does not match or
-  cannot be downloaded, and a failing apt stop in plain words with Docker's manual install link; a new apt source that breaks `apt-get update` is taken back. No downloaded
-  script runs any more. Tests run the installer in a sandbox with fake curl, apt-get, dpkg and uname and a real gpg
-  key made for the test; `install.sh` is ShellCheck-clean (the two findings of the base are fixed too).
+  that would outlive the installer. An apt source for Docker that is already there is kept as it is; a
+  commented-out or `Enabled: no` one (as a release upgrade of Ubuntu leaves it) does not count. Any other system,
+  ARMv6 (Raspberry Pi 1, Zero), a key that does not match or cannot be downloaded, and a failing apt stop in plain
+  words with Docker's manual install link; a new apt source that breaks `apt-get update` is taken back. No
+  downloaded script runs any more. Tests run the installer in a sandbox with fake curl, apt-get, dpkg and uname and
+  a real gpg key made for the test; `install.sh` is ShellCheck-clean (the two findings of the base are fixed too).
 - **The installers no longer download pip without a checksum**: `install.sh` and `install.bat` ran
   `pip install --upgrade pip` before the hash-checked install, which fetched the newest pip from the package index
   unchecked (on Windows as Administrator). The virtual environment now keeps the pip that comes with Python, which

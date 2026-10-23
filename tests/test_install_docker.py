@@ -41,6 +41,15 @@ OS_RELEASE = {
                 'VERSION_CODENAME=bookworm\n',
     "fedora": 'NAME="Fedora Linux"\nID=fedora\nVERSION_ID=42\n',
     "debian-sid": 'PRETTY_NAME="Debian GNU/Linux trixie/sid"\nID=debian\n',
+    # Systems built on Ubuntu or Debian (get.docker.com installed Docker there too, from the upstream repository)
+    "linuxmint": 'NAME="Linux Mint"\nID=linuxmint\nID_LIKE="ubuntu debian"\nVERSION_CODENAME=wilma\n'
+                 'UBUNTU_CODENAME=noble\n',
+    "pop": 'NAME="Pop!_OS"\nID=pop\nID_LIKE="ubuntu debian"\nVERSION_CODENAME=jammy\nUBUNTU_CODENAME=jammy\n',
+    "lmde": 'PRETTY_NAME="LMDE 6 (faye)"\nVERSION_CODENAME=faye\nID=linuxmint\nID_LIKE=debian\n'
+            'DEBIAN_CODENAME=bookworm\n',
+    "debian-like": 'PRETTY_NAME="Some Debian-based system"\nID=somedeb\nID_LIKE=debian\nVERSION_CODENAME=own\n',
+    "kali": 'PRETTY_NAME="Kali GNU/Linux Rolling"\nID=kali\nID_LIKE=debian\nVERSION_CODENAME=kali-rolling\n',
+    "ubuntu-like-no-codename": 'NAME="Something"\nID=something\nID_LIKE=ubuntu\nVERSION_CODENAME=own\n',
 }
 
 
@@ -91,16 +100,19 @@ def keys(tmp_path_factory):
 
 class Sandbox:
     def __init__(self, tmp_path: Path, system: str, key_file, machine="x86_64", arch="amd64", apt_fails="",
-                 pinned=DOCKER_FINGERPRINT):
+                 pinned=DOCKER_FINGERPRINT, debian_version=None):
         self.root = tmp_path / "sandbox"
         self.bin = self.root / "bin"
         self.bin.mkdir(parents=True)
         self.calls = self.root / "calls.log"
         self.os_release = self.root / "etc" / "os-release"
+        self.debian_version = self.root / "etc" / "debian_version"
         self.keyring = self.root / "etc" / "apt" / "keyrings" / "docker.asc"
         self.sources = self.root / "etc" / "apt" / "sources.list.d" / "docker.sources"
         self.os_release.parent.mkdir(parents=True)
         self.os_release.write_text(OS_RELEASE[system])
+        if debian_version is not None:
+            self.debian_version.write_text(debian_version)
         self.pinned = pinned
         for tool in REAL_TOOLS:
             if shutil.which(tool):
@@ -129,11 +141,11 @@ class Sandbox:
         """`tmp`: mktemp's folder, where the key check's throwaway keyring lands (default: one in the sandbox; its
         long path is also a test that a key check whose gpg cannot reach an agent still decides by the listing)."""
         script = ('source "$1"; OS_RELEASE_FILE="$2"; DOCKER_KEYRING="$3"; DOCKER_SOURCES="$4"; '
-                  f'DOCKER_KEY_FINGERPRINT="$5"; {function}')
+                  f'DOCKER_KEY_FINGERPRINT="$5"; DEBIAN_VERSION_FILE="$6"; {function}')
         self.tmp = tmp or self.root / "tmp"
         self.tmp.mkdir(exist_ok=True)
         run = subprocess.run([str(self.bin / "bash"), "-c", script, "test", str(INSTALL_SH), str(self.os_release),
-                              str(self.keyring), str(self.sources), self.pinned],
+                              str(self.keyring), str(self.sources), self.pinned, str(self.debian_version)],
                              env={"PATH": str(self.bin), "HOME": str(self.root), "TMPDIR": str(self.tmp)},
                              capture_output=True, text=True, timeout=60, cwd=self.root)
         return run, self.calls.read_text() if self.calls.exists() else ""
@@ -254,6 +266,65 @@ class TestDockerFromTheAptRepository:
         assert not box.sources.exists() and "deb [signed-by=" in earlier.read_text()
         assert "gibt es schon" in run.stdout and "docker-ce " in calls
 
+    def test_an_existing_deb822_docker_source_is_kept(self, tmp_path, keys):
+        box = Sandbox(tmp_path, "debian", keys["docker.asc"], pinned=keys["pinned"])
+        earlier = box.sources.parent / "docker-ce.sources"
+        earlier.parent.mkdir(parents=True)
+        earlier.write_text("Types: deb\nURIs: https://download.docker.com/linux/debian\nSuites: bookworm\n"
+                           "Components: stable\nEnabled: yes\n")
+        run, _ = box.run()
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert not box.sources.exists() and "gibt es schon" in run.stdout
+
+    @pytest.mark.parametrize("file, text", [
+        # Ubuntu's release upgrade turns a third-party source off like this (and may remove its packages)
+        ("docker.list", ("# deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] "
+                         "https://download.docker.com/linux/debian bookworm stable # disabled on upgrade to noble\n")),
+        ("docker-ce.sources", ("Types: deb\nURIs: https://download.docker.com/linux/debian\nSuites: bookworm\n"
+                               "Components: stable\nEnabled: no\n")),
+        ("old.sources", "# Types: deb\n# URIs: https://download.docker.com/linux/debian\n# Suites: bookworm\n"),
+    ], ids=["commented-line", "deb822-enabled-no", "deb822-commented"])
+    def test_a_switched_off_docker_source_does_not_count(self, tmp_path, keys, file, text):
+        """apt ignores it, so Docker's packages would not be found: the installer writes its own source."""
+        box = Sandbox(tmp_path, "debian", keys["docker.asc"], pinned=keys["pinned"])
+        earlier = box.sources.parent / file
+        earlier.parent.mkdir(parents=True)
+        earlier.write_text(text)
+        run, _ = box.run()
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert "URIs: https://download.docker.com/linux/debian\nSuites: bookworm\n" in box.sources.read_text()
+        assert earlier.read_text() == text and "gibt es schon" not in run.stdout
+
+    @pytest.mark.parametrize("system, repo, suite", [("linuxmint", "ubuntu", "noble"), ("pop", "ubuntu", "jammy")])
+    def test_a_system_built_on_ubuntu_gets_ubuntus_packages_for_its_ubuntu_release(self, tmp_path, keys, system,
+                                                                                    repo, suite):
+        """As get.docker.com did (and Docker's Ubuntu guide says for Linux Mint): UBUNTU_CODENAME, not the system's
+        own codename."""
+        box = Sandbox(tmp_path, system, keys["docker.asc"], pinned=keys["pinned"])
+        run, calls = box.run()
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert f"URIs: https://download.docker.com/linux/{repo}\nSuites: {suite}\n" in box.sources.read_text()
+        assert f"https://download.docker.com/linux/{repo}/gpg" in calls
+        assert keys_in(box.keyring, tmp_path) == [keys["pinned"]]
+        assert "baut auf" in run.stdout
+
+    @pytest.mark.parametrize("system, debian_version", [("lmde", None), ("debian-like", "12.7\n")])
+    def test_a_system_built_on_debian_gets_debians_packages_for_its_debian_release(self, tmp_path, keys, system,
+                                                                                    debian_version):
+        """DEBIAN_CODENAME, else the release in /etc/debian_version (as get.docker.com read it); never the system's
+        own codename."""
+        box = Sandbox(tmp_path, system, keys["docker.asc"], pinned=keys["pinned"], debian_version=debian_version)
+        run, calls = box.run()
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert "URIs: https://download.docker.com/linux/debian\nSuites: bookworm\n" in box.sources.read_text()
+        assert "https://download.docker.com/linux/debian/gpg" in calls
+
+    def test_debian_testing_without_a_codename_takes_it_from_debian_version(self, tmp_path, keys):
+        box = Sandbox(tmp_path, "debian-sid", keys["docker.asc"], pinned=keys["pinned"], debian_version="trixie/sid\n")
+        run, _ = box.run()
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert "Suites: trixie\n" in box.sources.read_text()
+
 
 @needs_bash_and_gpg
 class TestItStopsInPlainWords:
@@ -267,10 +338,13 @@ class TestItStopsInPlainWords:
         assert "docker-ce" not in calls
         assert not box.sources.exists()
 
-    @pytest.mark.parametrize("system, said", [("fedora", "dieses System laut"),
-                                              ("debian-sid", "VERSION_CODENAME")])
-    def test_another_system_or_one_without_a_codename(self, tmp_path, keys, system, said):
-        box = Sandbox(tmp_path, system, keys["docker.asc"], pinned=keys["pinned"])
+    @pytest.mark.parametrize("system, debian_version, said", [
+        ("fedora", None, "dieses System laut"),
+        ("debian-sid", None, "VERSION_CODENAME"),
+        ("kali", "kali-rolling\n", "DEBIAN_CODENAME"),
+        ("ubuntu-like-no-codename", None, "UBUNTU_CODENAME")])
+    def test_another_system_or_one_without_a_codename(self, tmp_path, keys, system, debian_version, said):
+        box = Sandbox(tmp_path, system, keys["docker.asc"], pinned=keys["pinned"], debian_version=debian_version)
         run, calls = box.run()
         self.assert_stopped(run, box, calls, said)
         assert calls == "" and not box.keyring.exists()
