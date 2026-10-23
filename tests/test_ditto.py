@@ -19,9 +19,10 @@ from pydantic import BaseModel, ConfigDict
 pytest.importorskip("anthropic")
 pytest.importorskip("openai")
 
-from orchestrator.Core.ditto_manager import (CONSOLE_WORKSPACE_HINT, ChatHistory, ChatReply,  # noqa: E402
-                                             DittoCoder, DittoError, HealingAnalysis, ModuleDefinition,
-                                             OptimizerRecommendation, ToolUse, describe_llm_error)
+from orchestrator.Core.ditto_manager import (CALL_NOT_RUN, CONSOLE_WORKSPACE_HINT, ChatHistory,  # noqa: E402
+                                             ChatReply, DittoCoder, DittoError, HealingAnalysis,
+                                             ModuleDefinition, OptimizerRecommendation, ToolUse,
+                                             conversation_is_consistent, describe_llm_error)
 from orchestrator.llm import (AuthFailed, BadRequest, BillingError, ChatResult, InvalidOutput, LLMClient,  # noqa: E402
                               Message, NativeMessage, NotConfigured, PermissionDenied, ProviderTimeout,
                               ProviderUnavailable, RateLimited, Refused, ToolCall, Truncated)
@@ -45,7 +46,7 @@ class FakeConfig:
     def get(self, key, default=None):
         return self.values.get(key, default)
 
-    def set(self, key, value):
+    def set(self, key, value, source_type="override"):
         self.values[key] = value
         return True
 
@@ -485,15 +486,171 @@ class TestHistory:
         opening = turn_request.messages[0]
         assert "<untrusted_data" in opening.content[0]["text"] and "RK3588" in opening.content[0]["text"]
         assert opening.content[-1]["text"] == "Next step?"
+        assert reply.new_conversation_reason == "long"
         history.apply(reply)
         assert history.messages == reply.new_messages and history.transcript[0].role == "notice"
+        assert "got long" in history.transcript[0].text
+
+    def test_a_conversation_with_tool_turns_asked_without_tools_continues_as_a_new_one(self, tmp_path, llm,
+                                                                                       registry):
+        """Claude rejects tool turns without tool definitions ("Answer without tools" in the chat panel): the
+        conversation is summarized into a new one, like a long one, instead of being sent without them."""
+        ditto = make_ditto(tmp_path, registry)
+        history = ChatHistory()
+        llm.script += [answer(calls=[call("list_targets")]), answer("Rockchip.")]
+        history.apply(ditto.chat("Targets?", history))
+        earlier = list(history.messages)
+        llm.script += [answer("The user listed the targets: Rockchip."), answer("Rockchip it is.")]
+
+        reply = ditto.chat("Which one again?", history, use_tools=False)
+
+        summary_request, turn_request = llm.requests[2:]
+        assert summary_request.tools == [] and "<untrusted_data" in summary_request.messages[0].text()
+        assert turn_request.tools == [] and len(turn_request.messages) == 1
+        assert not any(m.role == "tool" or m.tool_calls for m in turn_request.messages)
+        opening = turn_request.messages[0]
+        assert "listed the targets" in opening.content[0]["text"] and opening.content[-1]["text"] == "Which one again?"
+        assert reply.new_conversation and reply.new_conversation_reason == "no_tools"
+        assert history.messages == earlier, "the old conversation is never edited"
+        history.apply(reply)
+        assert history.messages == reply.new_messages
+        notice = history.transcript[-3]
+        assert notice.role == "notice" and "without tools" in notice.text and "got long" not in notice.text
+
+    def test_a_conversation_without_tool_turns_asked_without_tools_goes_on(self, tmp_path, llm, registry):
+        ditto = make_ditto(tmp_path, registry)
+        history = ChatHistory()
+        llm.script += [answer("Hello."), answer("Still here.")]
+        history.apply(ditto.chat("Hi", history))
+        reply = ditto.chat("Still there?", history, use_tools=False)
+        assert len(llm.requests) == 2 and llm.requests[1].messages[:2] == history.messages
+        assert not reply.new_conversation and reply.new_conversation_reason == ""
 
     def test_failed_turns_are_not_stored(self, tmp_path, llm):
         history = ChatHistory()
         llm.script.append(ProviderTimeout("late", provider="ollama"))
-        with pytest.raises(DittoError):
+        with pytest.raises(DittoError) as info:
             make_ditto(tmp_path).chat("hi", history)
         assert history.messages == [] and history.transcript == []
+        assert "Already done" not in str(info.value), "no tool ran"
+
+    @pytest.mark.parametrize("error, phrase", [
+        (ProviderTimeout("late", provider="ollama"), "did not answer in time"),
+        (Refused("declined", category="cyber", provider="ollama"), "declined this request (cyber)")],
+        ids=["error", "refusal"])
+    def test_a_failed_turn_after_tools_ran_names_them_and_says_it_is_not_remembered(self, tmp_path, llm,
+                                                                                    registry, error, phrase):
+        history = ChatHistory()
+        llm.script += [answer(calls=[call("list_targets", call_id="a")]),
+                       answer(calls=[call("read_build_log", call_id="b"), call("list_targets", call_id="c")]),
+                       error]
+        with pytest.raises(DittoError) as info:
+            make_ditto(tmp_path, registry).chat("Targets and the log?", history)
+        text = str(info.value)
+        assert phrase in text
+        # The read_build_log call failed (its handler raised): only what ran is named, each tool once.
+        assert "Already done in this turn before the error: List targets." in text
+        assert "Ditto will not remember this turn" in text and "Read build log" not in text
+        assert history.messages == [] and history.transcript == []
+
+
+def cut_off(calls, text=""):
+    """An answer cut off at the length limit while the model was calling a tool."""
+    msg = Message(role="assistant", content=text, tool_calls=calls,
+                  native=NativeMessage(family="scripted", payload={"role": "assistant", "content": text}))
+    return ChatResult(text=text, tool_calls=calls, stop="max_tokens", message=msg, provider="ollama",
+                      model="test-model")
+
+
+def saved(path, messages, transcript=None):
+    path.write_text(json.dumps({"version": 3, "transcript": transcript or [{"role": "user", "text": "hi"}],
+                                "messages": messages}), encoding="utf-8")
+    return ChatHistory.load(path)
+
+
+USER = {"role": "user", "content": "hi"}
+CALLING = {"role": "assistant", "content": "", "tool_calls": [{"id": "t1", "name": "list_targets"}]}
+ANSWERED = {"role": "tool", "tool_call_id": "t1", "content": "Rockchip"}
+
+
+class TestToolCallsAndResultsPairUp:
+    """Every provider rejects a conversation that goes on after an unanswered tool call (Claude also a result whose
+    call is not in the turn before it), so every later question built on such a history would fail."""
+
+    def test_a_saved_conversation_whose_calls_and_results_do_not_pair_up_starts_anew(self, tmp_path):
+        path = tmp_path / "chat_history.json"
+        for messages in ([USER, CALLING, {"role": "user", "content": "next"}],         # a call never answered
+                         [USER, {**ANSWERED, "tool_call_id": "t9"}],                   # a result without its call
+                         [USER, CALLING, ANSWERED, {**ANSWERED, "content": "again"}]):  # one call, two results
+            history = saved(path, messages)
+            assert history.messages == [], messages
+            assert history.transcript[-1].role == "notice" and "could not be read" in history.transcript[-1].text
+
+    def test_a_consistent_conversation_loads_and_an_open_call_at_its_end_is_allowed(self, tmp_path):
+        path = tmp_path / "chat_history.json"
+        assert len(saved(path, [USER, CALLING, ANSWERED, {"role": "assistant", "content": "ok"}]).messages) == 4
+        history = saved(path, [USER, CALLING])   # the next question closes it
+        assert len(history.messages) == 2 and history.transcript[-1].role == "user"
+        assert conversation_is_consistent(history.messages)
+
+    @pytest.mark.parametrize("raw", [{"transcript": 5, "messages": []}, {"transcript": True, "messages": 7},
+                                     {"transcript": [{"role": "user", "text": "hi"}], "messages": "text"},
+                                     {"transcript": None, "messages": {"role": "user"}}])
+    def test_a_transcript_or_messages_that_is_no_list_does_not_break_the_load(self, tmp_path, raw):
+        path = tmp_path / "chat_history.json"
+        path.write_text(json.dumps({"version": 3, **raw}), encoding="utf-8")
+        history = ChatHistory.load(path)
+        assert history.messages == []
+        if raw["messages"] not in ([], None):
+            assert history.transcript[-1].role == "notice"
+
+    def test_an_answer_cut_off_during_a_tool_call_gets_a_result_for_it(self, tmp_path, llm, registry):
+        ditto = make_ditto(tmp_path, registry)
+        history = ChatHistory()
+        llm.script.append(cut_off([call("start_build", {"model": "m", "target": "Rockchip"})], "Let me start"))
+        reply = ditto.chat("Build it", history, confirm=lambda spec, inp: True)
+
+        assert reply.stop == "max_tokens" and "cut off at the length limit" in reply.text
+        assert registry.started == [], "a call cut off in the middle never runs"
+        closing = reply.new_messages[-1]
+        assert (closing.role, closing.tool_call_id, closing.is_error, closing.text()) == ("tool", "t1", True,
+                                                                                         CALL_NOT_RUN)
+        history.apply(reply)
+        assert conversation_is_consistent(history.messages)
+
+        llm.script.append(answer("Shall I try again?"))
+        ditto.chat("And now?", history)
+        sent = llm.requests[-1].messages
+        assert sent[:len(history.messages)] == history.messages and sent[-1].text() == "And now?"
+        assert conversation_is_consistent(sent)
+
+    def test_the_tool_loop_answers_a_call_cut_off_at_the_length_limit(self):
+        from orchestrator.llm import ChatRequest, run_tool_loop
+        ran = []
+        client = SimpleNamespace(chat=lambda request: cut_off([call("list_targets", call_id="a"),
+                                                               call("start_build", call_id="b")]))
+        loop = run_tool_loop(client, ChatRequest(messages=[Message.user("q")]), lambda n, a: ran.append(n))
+        assert loop.stop == "max_tokens" and ran == []
+        assert [(m.role, m.tool_call_id) for m in loop.new_messages] == [("assistant", None), ("tool", "a"),
+                                                                         ("tool", "b")]
+        assert all(m.is_error and m.text() == CALL_NOT_RUN for m in loop.new_messages[1:])
+
+    def test_a_history_with_an_open_call_from_an_earlier_version_is_closed_before_the_question(self, tmp_path,
+                                                                                               llm, registry):
+        history = saved(tmp_path / "chat_history.json", [USER, CALLING])
+        before = list(history.messages)
+        llm.script.append(answer("Hello again."))
+        reply = make_ditto(tmp_path, registry).chat("Still there?", history)
+
+        sent = llm.requests[0].messages
+        assert sent[:2] == before, "the earlier turns go out unchanged: the repair is appended"
+        repair = sent[2]
+        assert (repair.role, repair.tool_call_id, repair.is_error, repair.text()) == ("tool", "t1", True,
+                                                                                     CALL_NOT_RUN)
+        assert sent[3].text() == "Still there?" and conversation_is_consistent(sent)
+        assert reply.new_messages[0] == repair and reply.new_messages[1].text() == "Still there?"
+        history.apply(reply)
+        assert history.messages[:2] == before and conversation_is_consistent(history.messages)
 
 
 # --- errors -----------------------------------------------------------------------------------------------------
@@ -672,6 +829,241 @@ class TestConfirmations:
         # CliRunner has no terminal: the terminal prompt, which denies without one.
         assert calls == [("Which targets?", cli._ditto_confirm, True)]
         assert config.values["ai_provider"] == "ollama"
+
+    @pytest.mark.parametrize("abort_at", ["confirm", "grant"])
+    def test_ctrl_c_or_end_of_input_at_the_prompt_is_a_no(self, monkeypatch, capsys, abort_at):
+        from orchestrator import cli
+        monkeypatch.setattr("sys.stdin", SimpleNamespace(isatty=lambda: True))
+        monkeypatch.setattr("sys.stdout", SimpleNamespace(isatty=lambda: False, write=lambda s: None,
+                                                          flush=lambda: None))
+
+        def abort(*args, **kwargs):
+            raise cli.click.Abort()
+
+        monkeypatch.setattr(cli.click, "confirm", abort)
+        monkeypatch.setattr(cli.click, "prompt", abort)
+        if abort_at == "grant":
+            monkeypatch.setattr("orchestrator.tools.registry.current_grant_offer", lambda: object())
+        assert cli._ditto_confirm(SPEC, BuildIn(model="m", target="t")) is False
+        assert "Denied." in capsys.readouterr().err
+
+    def test_no_stdin_at_all_is_a_no(self, monkeypatch, capsys):
+        from orchestrator import cli
+        monkeypatch.setattr("sys.stdin", None)
+        assert cli._ditto_confirm(SPEC, BuildIn(model="m", target="t")) is False
+        assert "No terminal to confirm in: denied" in capsys.readouterr().err
+
+    def test_an_aborted_prompt_is_an_audited_no_and_the_tool_never_runs(self, tmp_path, llm, registry, monkeypatch):
+        from orchestrator import cli
+        monkeypatch.setattr("sys.stdin", SimpleNamespace(isatty=lambda: True))
+
+        def abort(*args, **kwargs):
+            raise cli.click.Abort()
+
+        monkeypatch.setattr(cli.click, "confirm", abort)
+        llm.script += [answer(calls=[call("start_build", {"model": "m", "target": "Rockchip"})]),
+                       answer("It was not started.")]
+        reply = make_ditto(tmp_path, registry).chat("Build it", confirm=cli._ditto_confirm)
+        assert registry.started == [] and reply.text == "It was not started."
+        result = tool_messages(llm.requests[1])[0]
+        assert result.is_error and "needs your confirmation, which was not given" in result.text()
+        outcomes = [e["outcome"] for e in registry.audit.entries(10) if e["tool"] == "start_build"]
+        assert "not_confirmed" in outcomes and "confirmation_requested" in outcomes
+
+    def test_ditto_ask_keeps_control_characters_of_the_model_out_of_the_terminal(self, monkeypatch):
+        from click.testing import CliRunner
+        from orchestrator import cli
+        hostile = "\x1b]0;owned\x07Rock\x1b[2Jchip‮​\x9b31m\x7f\r\nnext line\tend"
+
+        class FakeDitto:
+            client = SimpleNamespace(catalog=SimpleNamespace(get=lambda p: object(), ids=lambda: ["ollama"]))
+
+            def chat(self, question, confirm=None, use_tools=True, on_tool=None):
+                on_tool(ToolUse("list_targets", "List targets", True))
+                on_tool(ToolUse("x\x1b[31m", "Made‮ up\x1b[2J", False, "handler said \x1b]52;c;evil\x07"))
+                return ChatReply(question=question, text=hostile, new_messages=[])
+
+        framework = SimpleNamespace(config=FakeConfig(), get_component=lambda name: FakeDitto())
+
+        def require(self):
+            self.framework_manager = framework
+            return self
+
+        monkeypatch.setattr(cli.FrameworkContext, "require_framework", require)
+        result = CliRunner().invoke(cli.cli, ["-q", "ditto", "ask", "Targets?"])
+        assert result.exit_code == 0, result.output
+        for bad in ("\x1b", "\x07", "‮", "​", "\x9b", "\x7f", "\r"):
+            assert bad not in result.output, repr(bad)
+        assert "Rock[2Jchip" in result.stdout and "next line\tend" in result.stdout
+        assert "Made up[2J" in result.output and "handler said ]52;c;evil" in result.output
+
+    def test_the_terminal_text_keeps_every_script_and_emoji_as_they_are(self):
+        """Only what can steer the terminal or hide text goes: umlauts, CJK, combining marks, variation selectors and
+        the zero-width joiner inside an emoji sequence (kept as in utils/untrusted, harmless on its own) stay."""
+        from orchestrator import cli
+        text = "Grüße aus Köln, 中文テキスト한국어, ä, 👩‍💻 ❤️ 🇩🇪 👍🏽"
+        assert cli._printable(text) == text
+        assert cli._printable("a​b‮c⁦d﻿e") == "abcde", "other zero-width and bidi characters go"
+
+    def test_ditto_ask_errors_reach_the_terminal_without_control_characters(self, monkeypatch):
+        from click.testing import CliRunner
+        from orchestrator import cli
+
+        class FakeDitto:
+            client = SimpleNamespace(catalog=SimpleNamespace(get=lambda p: object(), ids=lambda: ["ollama"]))
+
+            def chat(self, question, **kwargs):
+                raise DittoError("The AI provider rejected the request.\nDetails: \x1b[2J\x9b2Jgone⁦")
+
+        framework = SimpleNamespace(config=FakeConfig(), get_component=lambda name: FakeDitto())
+
+        def require(self):
+            self.framework_manager = framework
+            return self
+
+        monkeypatch.setattr(cli.FrameworkContext, "require_framework", require)
+        result = CliRunner().invoke(cli.cli, ["-q", "ditto", "ask", "Hi"])
+        assert result.exit_code == 1
+        assert "rejected the request" in result.output and "gone" in result.output
+        assert not any(bad in result.output for bad in ("\x1b", "\x9b", "⁦"))
+
+    @pytest.fixture
+    def generate_ai(self, monkeypatch, tmp_path):
+        """`module generate-ai` with a fake Ditto: run(definition=..., generate=..., save=..., answer=...)."""
+        from click.testing import CliRunner
+        from orchestrator import cli
+        probe = tmp_path / "target_hardware_config.txt"
+        probe.write_text("cpu: rk3588\n", encoding="utf-8")
+        config = FakeConfig(targets_dir=str(tmp_path / "targets"))
+        framework = SimpleNamespace(config=config, resolve_path=lambda p: Path(p))
+
+        def require(self):
+            self.framework_manager = framework
+            return self
+
+        monkeypatch.setattr(cli.FrameworkContext, "require_framework", require)
+        monkeypatch.setattr(cli, "_ditto_notice_once", lambda: None)
+        monkeypatch.setattr("orchestrator.Core.ditto_manager.pin_base_image", lambda definition, offline=False:
+                            definition)
+
+        def run(generate, save=None, answer="n"):
+            ditto = SimpleNamespace(describe=lambda task: {"label": "Ollama", "model": "m"},
+                                    generate_module=generate, save_module=save)
+            monkeypatch.setattr(cli, "_run_ditto", lambda ctx, provider, model: ditto)
+            return CliRunner().invoke(cli.cli, ["-q", "module", "generate-ai", str(probe)], input=answer + "\n")
+        return SimpleNamespace(run=run, probe=probe)
+
+    def test_generate_ai_shows_hidden_characters_of_the_proposal_escaped(self, generate_ai):
+        definition = ModuleDefinition(**{**MODULE, "cpu_flags": "-mcpu=cortex-a76‮\x9b2J\x7f",
+                                         "assumptions": ["the NPU driver\x1b]0;x\x07 is 0.9.8"]})
+        result = generate_ai.run(lambda path: definition)
+        assert result.exit_code == 0, result.output
+        assert not any(bad in result.output for bad in ("‮", "\x9b", "\x7f", "\x1b", "\x07"))
+        # visible(): shown escaped (a hex digit right after an escape is escaped too, so it cannot extend it)
+        assert "-mcpu=cortex-a76\\u202e\\u009b\\u0032J\\u007f" in result.output
+
+    def test_generate_ai_keeps_control_characters_of_the_base_image_out_of_the_pin_error(self, generate_ai,
+                                                                                         monkeypatch):
+        """The base image is the AI's value too: when it cannot be pinned (here in offline mode, whose message quotes
+        it), the error line reaches the terminal without its control characters."""
+        from orchestrator.Core import ditto_manager
+        monkeypatch.setattr("orchestrator.Core.ditto_manager.pin_base_image", lambda definition, offline=False:
+                            definition.model_copy(update={"base_os": ditto_manager.pin_reference(definition.base_os,
+                                                                                                 offline=True)}))
+        definition = ModuleDefinition(**{**MODULE,
+                                         "base_os": "debian\x1b]0;owned\x07\x1b[2J\x9b2J‮:bookworm-slim"})
+        result = generate_ai.run(lambda path: definition)
+        assert result.exit_code == 1 and "cannot be pinned" in result.output, result.output
+        assert "offline mode" in result.output and "bookworm-slim" in result.output
+        assert not any(bad in result.output for bad in ("\x1b", "\x07", "\x9b", "‮")), repr(result.output)
+
+    @pytest.mark.parametrize("error", [IsADirectoryError(21, "Is a directory"),
+                                       FileNotFoundError("Probe file not found: the folder"),
+                                       PermissionError(13, "Permission denied")])
+    def test_generate_ai_reports_a_probe_that_cannot_be_read(self, generate_ai, error):
+        def generate(path):
+            raise error
+        result = generate_ai.run(generate)
+        assert result.exit_code == 1 and "AI generation failed" in result.output
+        assert "Traceback" not in result.output
+
+    def test_generate_ai_reports_a_module_that_cannot_be_saved(self, generate_ai):
+        def save(definition, targets_dir, **kwargs):
+            raise PermissionError(13, "Permission denied")
+        result = generate_ai.run(lambda path: ModuleDefinition(**MODULE), save=save, answer="y")
+        assert result.exit_code == 1 and "The proposal was rejected" in result.output
+        assert "Permission denied" in result.output
+
+    def test_one_command_provider_and_model_are_never_saved(self, monkeypatch, tmp_path):
+        """`ditto ask --provider/--model` holds for this command only: a save of the settings during it (the
+        update_settings tool the person confirms) writes the saved provider and model, never the command's."""
+        import yaml
+        from click.testing import CliRunner
+        from orchestrator import cli
+        from orchestrator.Core.config_manager import ConfigManager
+        from orchestrator.llm import load_catalog
+        config = ConfigManager(tmp_path / "configs")
+        config.set("ai_provider", "custom")
+        config.set("ai_base_url", "http://192.168.1.30:8000/v1")
+        config.set("ai_model", "served-model")
+        assert config.save_user_config()
+        seen = {}
+
+        class FakeDitto:
+            client = SimpleNamespace(catalog=load_catalog(), primary_provider=lambda: load_catalog().get("custom"))
+
+            def chat(self, question, confirm=None, use_tools=True, on_tool=None):
+                seen.update({key: config.get(key) for key in ("ai_provider", "ai_model", "ai_model_chat",
+                                                              "ai_base_url")})
+                config.set("language", "de")   # a setting the person changed through a tool
+                assert config.save_user_config()
+                return ChatReply(question=question, text="ok", new_messages=[])
+
+        framework = SimpleNamespace(config=config, get_component=lambda name: FakeDitto())
+
+        def require(self):
+            self.framework_manager = framework
+            return self
+
+        monkeypatch.setattr(cli.FrameworkContext, "require_framework", require)
+        result = CliRunner().invoke(cli.cli, ["-q", "ditto", "ask", "--provider", "ollama", "--model", "small",
+                                              "Hi"])
+        assert result.exit_code == 0, result.output
+        assert seen == {"ai_provider": "ollama", "ai_model": "small", "ai_model_chat": "small", "ai_base_url": ""}
+        saved = yaml.safe_load((tmp_path / "configs" / "config.yml").read_text())
+        assert saved["ai_provider"] == "custom" and saved["ai_model"] == "served-model"
+        assert saved["ai_base_url"] == "http://192.168.1.30:8000/v1" and saved["language"] == "de"
+        assert "ai_model_chat" not in saved
+        # Another process's save does not replace the command's choice while it runs either.
+        assert config.reload_user_config(["ai_provider"]).conflicts == {"ai_provider": "command_line"}
+        assert config.get("ai_provider") == "ollama"
+
+    def test_the_eval_effort_is_never_saved(self, monkeypatch, tmp_path):
+        import yaml
+        from click.testing import CliRunner
+        from orchestrator import cli
+        from orchestrator.Core.config_manager import ConfigManager
+        from orchestrator.evals import eval_run
+        config = ConfigManager(tmp_path / "configs")
+        framework = SimpleNamespace(config=config, get_component=lambda name: SimpleNamespace(), resolve_path=str)
+
+        def require(self):
+            self.framework_manager = framework
+            return self
+
+        def run(fm, cases, make_ditto, **kw):
+            make_ditto()
+            assert fm.config.get("ai_effort_json") == "low" and fm.config.save_user_config()
+            raise eval_run.EvalRunError("stopped by the test", exit_code=3)
+
+        monkeypatch.setattr(cli.FrameworkContext, "require_framework", require)
+        monkeypatch.setattr(cli, "_ai_override", lambda ctx, provider, model: SimpleNamespace())
+        monkeypatch.setattr(eval_run, "run_evaluation", run)
+        result = CliRunner().invoke(cli.cli, ["-q", "ditto", "eval", "--case", "healing-disk-full", "--effort",
+                                              "low"])
+        assert result.exit_code == 3, result.output
+        saved = yaml.safe_load((tmp_path / "configs" / "config.yml").read_text()) or {}
+        assert not any(key.startswith("ai_effort") for key in saved), saved
 
     def test_removed_provider_on_the_command_line_names_the_alternatives(self, monkeypatch):
         from click.testing import CliRunner

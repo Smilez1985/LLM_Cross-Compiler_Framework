@@ -705,7 +705,11 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   rendering. `recipe.yml` is read only by `community_manager.read_recipe`. A change of the AI settings goes through
   `AISettingsChange` (`orchestrator/llm/settings_change.py`): `problems()`, the channel's own question for
   `plain_http_url()`, then `apply()`. `tests/test_build_parity_core.py` and `tests/test_ai_settings_change.py` check
-  that no window or command goes around them.
+  that no window or command goes around them. A provider, model or effort for one question or run comes from
+  `Core/ai_override.override_values(..., ditto=...)` (another provider than the saved one drops the saved provider's
+  model, address and sign-in method); the CLI sets these values with the settings source `cli`, which
+  `save_user_config` never writes. Tool calls and their results in a conversation are paired only by
+  `orchestrator/llm/tool_loop.py` (`close_open_calls`, `conversation_is_consistent`).
 - The framework never asks for, reads or stores a repository token. Hand work over to GitHub through an installed
   GitHub CLI (it keeps its own sign-in) or the browser, as `llm-cli zoo export --pr` does.
 - Code adapted from another project keeps a comment that names its source ("Adapted from ...") and gets an entry

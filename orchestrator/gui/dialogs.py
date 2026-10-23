@@ -484,10 +484,15 @@ class AIConfigurationDialog(QDialog):
         if preset is None or not preset.live_models:
             self.lbl_models.setText("")
             return
+        # The address field always counts, also when empty (= the provider's own endpoint): the saved ai_base_url
+        # belongs to the saved provider, and another provider's request and key must never be sent there.
         overrides = {"ai_provider": preset.id, "ai_model": self.cb_model.currentText().strip() or preset.id,
-                     "offline_mode": self.chk_offline.isChecked()}
-        if self._base_url(preset):
-            overrides["ai_base_url"] = self._base_url(preset)
+                     "ai_base_url": self._base_url(preset), "offline_mode": self.chk_offline.isChecked()}
+        if preset.base_url_configurable:
+            # The provider's own address (`llm-cli ditto login --base-url`) wins over ai_base_url in the LLM layer; the
+            # field shows it and replaces it on save (AISettingsChange.apply), so a key typed for a new address never
+            # goes to the old one.
+            overrides[f"ai_base_url_{preset.id}"] = self._base_url(preset)
         if takes_workspace_id(preset):
             overrides["ai_anthropic_workspace_id"] = self._workspace_id(preset)  # also when cleared
         config = SettingsOverlay(self._config(), overrides)

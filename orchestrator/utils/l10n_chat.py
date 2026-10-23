@@ -108,6 +108,8 @@ TEXTS = {
         "chat.tool.not_run": "Tool not run: {title} ({detail})",
         "chat.notice.new_conversation": "The conversation got long: Ditto summarized it and continues in a new "
                                         "conversation.",
+        "chat.notice.new_conversation_no_tools": "Answered without tools: Ditto summarized the conversation, which "
+                                                 "used tools, and continues in a new conversation.",
         "chat.notice.source_local": "Ditto now uses its own tools: a new conversation.",
         # LEGACY: the removed remote mode wrote these keys into feed rows; they stay so stored rows still render.
         # Nothing writes them any more.
@@ -299,6 +301,8 @@ TEXTS = {
         "chat.tool.not_run": "Werkzeug nicht ausgeführt: {title} ({detail})",
         "chat.notice.new_conversation": "Das Gespräch wurde lang: Ditto hat es zusammengefasst und macht in einem "
                                         "neuen Gespräch weiter.",
+        "chat.notice.new_conversation_no_tools": "Ohne Werkzeuge beantwortet: Ditto hat das Gespräch, in dem Werkzeuge "
+                                                 "liefen, zusammengefasst und macht in einem neuen Gespräch weiter.",
         "chat.notice.source_local": "Ditto nutzt jetzt seine eigenen Werkzeuge: ein neues Gespräch.",
         # LEGACY (see the English block): stored rows of the removed remote mode still render.
         "chat.notice.source_remote": "Ditto nutzt jetzt die Werkzeuge des Frameworks auf {name}: ein neues Gespräch.",

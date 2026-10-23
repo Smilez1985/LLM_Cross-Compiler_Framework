@@ -102,12 +102,64 @@ def test_provider_problem_names_the_known_providers_and_removed_ones():
 
 
 def test_override_values():
+    """Changed on purpose (port of ditto-rewire-verified): the model is set for every task too (a per-task model wins
+    over ai_model), and a provider named without the Ditto whose settings it overrides counts as a switch."""
+    from orchestrator.llm.types import TASKS
     assert override_values() == {}
-    assert override_values("ollama", "model-a") == {"ai_provider": "ollama", "ai_model": "model-a"}
+    values = override_values("ollama", "model-a")
+    assert values == {"ai_provider": "ollama", "ai_model": "model-a", "ai_base_url": "", "ai_auth": "",
+                      **{f"ai_model_{task}": "model-a" for task in TASKS}}
+    assert override_values(model="model-b") == {"ai_model": "model-b",
+                                                 **{f"ai_model_{task}": "model-b" for task in TASKS}}
     values = override_values(effort="low")
     assert set(values) == set(EFFORT_KEYS) and set(values.values()) == {"low"}
     with pytest.raises(ValueError):
         override_values(effort="max")
+
+
+class TestOneRunProviderSwitch:
+    """What belongs to the saved provider (its model, per-task models, server address and sign-in method) does not
+    carry over to another provider chosen for one question or run: a saved Ollama or custom address must never get
+    another provider's requests (local providers are not privacy-filtered), nor another provider its model."""
+
+    @pytest.fixture
+    def ditto(self, tmp_path):
+        from orchestrator.Core.config_manager import ConfigManager
+        from orchestrator.Core.ditto_manager import DittoCoder
+        config = ConfigManager(tmp_path / "configs")
+        for key, value in {"ai_provider": "custom", "ai_base_url": "http://192.168.1.30:8000/v1",
+                           "ai_model": "served-model", "ai_model_chat": "served-chat-model", "ai_auth": "api_key"
+                           }.items():
+            config.set(key, value)
+        return DittoCoder(config_manager=config, secrets_manager=SimpleNamespace(get_secret=lambda name: None))
+
+    def test_another_provider_gets_its_own_address_and_model(self, ditto):
+        from orchestrator.llm import load_catalog
+        values = override_values("ollama", ditto=ditto)
+        assert values["ai_base_url"] == "" and values["ai_model"] == "" and values["ai_auth"] == ""
+        target = ditto_with(ditto, values).client.resolve("chat")
+        assert target.preset.id == "ollama" and target.base_url == load_catalog().get("ollama").base_url
+        assert "192.168.1.30" not in target.base_url and target.model != "served-chat-model"
+        assert ditto.config.get("ai_base_url") == "http://192.168.1.30:8000/v1", "the saved settings stay"
+
+    def test_the_saved_provider_keeps_its_own_settings(self, ditto):
+        assert override_values("custom", ditto=ditto) == {"ai_provider": "custom"}
+        assert override_values("Custom", ditto=ditto) == {"ai_provider": "Custom"}, "a spelling of the same provider"
+        target = ditto_with(ditto, override_values("custom", ditto=ditto)).client.resolve("chat")
+        assert target.base_url == "http://192.168.1.30:8000/v1" and target.model == "served-chat-model"
+
+    def test_the_model_applies_to_every_task(self, ditto):
+        run = ditto_with(ditto, override_values(model="other-model", ditto=ditto)).client
+        assert {task: run.resolve(task).model for task in ("chat", "tools", "json", "healing")} == dict.fromkeys(
+            ("chat", "tools", "json", "healing"), "other-model")
+
+    def test_for_run_and_the_chat_panel_take_the_same_values(self, ditto, monkeypatch):
+        used = []
+        real = ai_override.ditto_with
+        monkeypatch.setattr(ai_override, "ditto_with", lambda base, values: used.append(values) or real(base, values))
+        run = ditto.for_run("ollama", None)
+        assert used == [override_values("ollama", ditto=ditto)]
+        assert run.client.resolve("chat").base_url != "http://192.168.1.30:8000/v1"
 
 
 def test_overlay_reads_through_and_never_writes_the_real_settings(tmp_path):
@@ -161,11 +213,12 @@ def test_cli_ask_uses_the_shared_check(monkeypatch):
     from orchestrator import cli
     calls = []
     monkeypatch.setattr(ai_override, "provider_problem", lambda catalog, provider: calls.append(provider) or None)
-    values = {}
+    values, sources = {}, set()
     ditto = SimpleNamespace(client=SimpleNamespace(catalog=object()),
                             chat=lambda q, **kw: SimpleNamespace(text="ok"))
-    framework = SimpleNamespace(config=SimpleNamespace(set=lambda k, v: values.update({k: v})),
-                                get_component=lambda name: ditto)
+    framework = SimpleNamespace(
+        config=SimpleNamespace(set=lambda k, v, source_type="override": values.update({k: v}) or sources.add(
+            source_type)), get_component=lambda name: ditto)
 
     def require(self):
         self.framework_manager = framework
@@ -173,7 +226,8 @@ def test_cli_ask_uses_the_shared_check(monkeypatch):
     monkeypatch.setattr(cli.FrameworkContext, "require_framework", require)
     result = CliRunner().invoke(cli.cli, ["-q", "ditto", "ask", "--provider", "p", "--model", "m", "Hi"])
     assert result.exit_code == 0, result.output
-    assert calls == ["p"] and values == {"ai_provider": "p", "ai_model": "m"}
+    # Changed on purpose (port of ditto-rewire-verified): the core's override values, set as one command's own.
+    assert calls == ["p"] and values == override_values("p", "m") and sources == {"cli"}
 
 
 # --- evals/eval_run.py ---------------------------------------------------------------------------------------------

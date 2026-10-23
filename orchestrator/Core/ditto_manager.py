@@ -47,6 +47,9 @@ from orchestrator.llm.task_prompts import (CANNOT_REASONS, CANNOT_RETRY, CANNOT_
                                            SDK_HINTS, base_image_block, format_listing, healing_parts,
                                            healing_query, is_official_image, knowledge_excerpts, module_parts,
                                            module_query, optimizer_parts)
+# Tool calls and results pair up (one implementation, in the tool loop); the names are Ditto's too.
+from orchestrator.llm.tool_loop import (CALL_NOT_RUN, close_open_calls, conversation_is_consistent,  # noqa: F401
+                                        open_tool_calls)
 from orchestrator.tools.registry import ToolContext, ToolDenied, ToolError, ToolInputError
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
@@ -452,7 +455,9 @@ def tool_note(use: ToolUse) -> str:
 class ChatReply:
     question: str
     text: str
-    new_messages: List[Message]       # the user turn and everything the model and the tools added, in order
+    # the results that close an earlier turn's open tool calls (CALL_NOT_RUN), the user turn and everything the model
+    # and the tools added, in order
+    new_messages: List[Message]
     new_conversation: bool = False    # earlier turns were summarized into a new conversation
     tools: List[ToolUse] = field(default_factory=list)
     stop: str = "end"                 # end | max_tokens | max_steps
@@ -462,6 +467,18 @@ class ChatReply:
     # True only once, for a saved conversation of the removed remote mode (a history whose tool source names a
     # framework on another computer): its tool calls named that computer's objects, so it starts anew.
     source_changed: bool = False
+    # Why earlier turns were summarized (new_conversation): "long", or "no_tools" for a conversation with tool turns
+    # asked without tools (tool turns need the tool definitions, which a question without tools does not send).
+    new_conversation_reason: str = ""
+
+
+# The transcript notice of a conversation summarized into a new one, by ChatReply.new_conversation_reason (the chat
+# panel's chat.notice.new_conversation and chat.notice.new_conversation_no_tools).
+NEW_CONVERSATION_NOTICES = {
+    "long": "The conversation got long: Ditto summarized it and continues in a new conversation.",
+    "no_tools": "Answered without tools: Ditto summarized the conversation, which used tools, and continues in a new "
+                "conversation.",
+}
 
 
 class TranscriptEntry(BaseModel):
@@ -532,14 +549,22 @@ class ChatHistory:
     def _read(self, raw: dict) -> None:
         source = raw.get("tool_source")
         self.tool_source = source if isinstance(source, str) and source else "local"
-        for entry in raw.get("transcript") or []:
+        transcript = raw.get("transcript")
+        for entry in transcript if isinstance(transcript, list) else []:
             try:
                 self.transcript.append(TranscriptEntry.model_validate(entry))
             except ValidationError:
                 continue
+        messages = raw.get("messages")
         try:
-            self.messages = [Message.model_validate(m) for m in raw.get("messages") or []]
-        except ValidationError:
+            if messages is not None and not isinstance(messages, list):
+                raise ValueError("messages is not a list")
+            self.messages = [Message.model_validate(m) for m in messages or []]
+            if not conversation_is_consistent(self.messages):
+                # Every provider rejects a conversation that goes on after an unanswered call (an OpenAI-compatible
+                # server may have accepted it): every later question on it would fail.
+                raise ValueError("tool calls and tool results do not pair up")
+        except (ValidationError, ValueError):
             # A conversation with a missing turn could pair a tool call with the wrong result: start anew.
             self.messages = []
             self.transcript.append(TranscriptEntry(role="notice", text="The saved conversation could not be read; "
@@ -592,8 +617,8 @@ class ChatHistory:
             self.transcript.append(TranscriptEntry(role="notice", text=SOURCE_LOCAL_NOTICE))
         elif reply.new_conversation:
             self.messages = []
-            self.transcript.append(TranscriptEntry(role="notice", text="The conversation got long: Ditto summarized "
-                                                                       "it and continues in a new conversation."))
+            notice = NEW_CONVERSATION_NOTICES.get(reply.new_conversation_reason, NEW_CONVERSATION_NOTICES["long"])
+            self.transcript.append(TranscriptEntry(role="notice", text=notice))
         self.tool_source = "local"
         self.messages.extend(reply.new_messages)
         self.transcript.append(TranscriptEntry(role="user", text=reply.question))
@@ -729,7 +754,7 @@ class DittoCoder:
         if problem:
             raise DittoError(problem)
         from orchestrator.Core.ai_override import ditto_with, override_values
-        return ditto_with(self, override_values(provider, model))
+        return ditto_with(self, override_values(provider, model, ditto=self))
 
     def pin_base_image(self, definition: "ModuleDefinition") -> "ModuleDefinition":
         """pin_base_image() in this Ditto's offline mode (the settings' offline_mode)."""
@@ -749,9 +774,16 @@ class DittoCoder:
         except LLMError:
             return False
 
-    def _error(self, err: LLMError) -> DittoError:
+    def _error(self, err: LLMError, done: Sequence[str] = ()) -> DittoError:
+        """The person's message for a failed request. `done`: titles of the tools that already ran in the failed chat
+        turn; the turn is not stored, so the message says so (a build may have started)."""
         self.logger.warning(f"AI request failed: {type(err).__name__}: {err}")
-        return DittoError(describe_llm_error(err), cause=err)
+        message = describe_llm_error(err)
+        done = list(dict.fromkeys(done))
+        if done:
+            message += (f"\nAlready done in this turn before the error: {', '.join(done)}. Ditto will not remember "
+                        "this turn, so check what these tools did before you ask again.")
+        return DittoError(message, cause=err)
 
     # --- knowledge base -----------------------------------------------------------------------------------
     def _knowledge(self, query: str, limit: int = 5, rerank: Optional[bool] = None) -> str:
@@ -993,17 +1025,22 @@ class DittoCoder:
         source_changed = bool(history is not None and earlier and getattr(history, "migrating", lambda: False)())
         if source_changed:
             earlier = []
-        if self._too_long(earlier):
-            summary = self._summarize(client, earlier)
-            earlier, new_conversation = [], True
-            blocks.append(_text_block("Summary of our earlier conversation, for context:\n"
-                                      + wrap_untrusted(summary, "conversation summary")))
         registry = self._registry() if use_tools else None
         tools = self._tool_specs(registry)
-        if not tools and registry is not None and any(m.role == "tool" for m in earlier):
-            # Tool calls in the conversation need tool definitions (Claude rejects the request otherwise); the
-            # registry still denies every call the permissions forbid.
+        has_tool_turns = any(m.role == "tool" or m.tool_calls for m in earlier)
+        # Tool turns need tool definitions (Claude rejects the request otherwise): asked without tools (no registry),
+        # the conversation continues as a new one, like a long one.
+        reason = "long" if self._too_long(earlier) else ("no_tools" if has_tool_turns and registry is None else "")
+        if reason:
+            summary = self._summarize(client, earlier)
+            earlier, new_conversation, has_tool_turns = [], True, False
+            blocks.append(_text_block("Summary of our earlier conversation, for context:\n"
+                                      + wrap_untrusted(summary, "conversation summary")))
+        if not tools and has_tool_turns:
+            # The registry is there (see above) and still denies every call the permissions forbid.
             tools = tool_specs_from_registry(registry)
+        # A turn cut off during a tool call (saved by an earlier version) is closed first, by appending results.
+        repairs = close_open_calls(earlier)
         if not tools:
             # Without tools Ditto cannot search the knowledge base itself, so matching excerpts come along.
             excerpts = self._knowledge(question)
@@ -1012,20 +1049,21 @@ class DittoCoder:
         blocks.append(_text_block(question))
         user_turn = Message(role="user", content=blocks if len(blocks) > 1 else question)
         system = CHAT_INTRO + "\n\n" + (CHAT_TOOLS if tools else CANNOT_RULE) + "\n\n" + UNTRUSTED_RULE
-        request = ChatRequest(system=system, messages=[*earlier, user_turn], tools=tools, task="chat")
+        request = ChatRequest(system=system, messages=[*earlier, *repairs, user_turn], tools=tools, task="chat")
         uses: List[ToolUse] = []
         try:
             if tools:
                 loop = run_tool_loop(client, request, self._executor(registry, confirm, uses, on_tool),
                                      max_steps=MAX_TOOL_STEPS, extra_steps=FIX_EXTRA_STEPS)
                 if loop.stop == "refusal":
-                    raise self._error(loop.refusal)
+                    raise loop.refusal   # the same message as any other failed turn, with the tools that ran
                 results, new, text, stop, usage = loop.results, loop.new_messages, loop.text, loop.stop, loop.usage
             else:
                 result = client.chat(request)
                 results, new, text, stop, usage = [result], result.new_messages, result.text, result.stop, result.usage
+                new = [*new, *close_open_calls(new)]  # the tool loop answers a call cut off in it itself
         except LLMError as e:
-            raise self._error(e) from None
+            raise self._error(e, done=[use.title for use in uses if use.ok]) from None
         text = text.strip()
         if stop == "max_steps":
             steps = getattr(loop, "steps", MAX_TOOL_STEPS) if tools else MAX_TOOL_STEPS
@@ -1036,7 +1074,7 @@ class DittoCoder:
         elif not text:
             text = "(Ditto gave no answer.)"
         last = results[-1] if results else None
-        return ChatReply(question=question, text=text, new_messages=[user_turn, *new],
+        return ChatReply(question=question, text=text, new_messages=[*repairs, user_turn, *new],
                          new_conversation=new_conversation, tools=uses, stop=stop,
                          provider=getattr(last, "provider", ""), model=getattr(last, "model", ""), usage=usage,
-                         source_changed=source_changed)
+                         source_changed=source_changed, new_conversation_reason=reason)

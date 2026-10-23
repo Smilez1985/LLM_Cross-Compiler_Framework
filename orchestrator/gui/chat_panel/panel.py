@@ -682,7 +682,7 @@ class ChatPanel(QWidget):
         ditto = self.ditto
         if choice.provider or choice.model:
             from orchestrator.Core.ai_override import ditto_with, override_values
-            ditto = ditto_with(self.ditto, override_values(choice.provider, choice.model))
+            ditto = ditto_with(self.ditto, override_values(choice.provider, choice.model, ditto=self.ditto))
         worker = chat_window.ChatWorker(ditto, question, self.history, self.confirmation.confirm)
         worker.use_tools = choice.use_tools
         return worker
@@ -754,7 +754,9 @@ class ChatPanel(QWidget):
             # A saved conversation of the removed remote mode named another computer's objects: it starts anew once.
             self.post_notice("chat.notice.source_local")
         elif reply.new_conversation:
-            self.post_notice("chat.notice.new_conversation")
+            # Summarized because it got long, or because it had tool turns and was asked without tools.
+            no_tools = getattr(reply, "new_conversation_reason", "") == "no_tools"
+            self.post_notice("chat.notice.new_conversation_no_tools" if no_tools else "chat.notice.new_conversation")
         if reply.text:
             self._post("ditto_answer", self._ditto_sender(), ai_text=reply.text, ai_text_kind="answer",
                        announce_row=True)

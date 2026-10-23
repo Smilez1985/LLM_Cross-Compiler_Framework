@@ -14,13 +14,23 @@ while the last result is an input error it is fixing, the step budget grows by u
 
 A call that waits for a decision (reason code waiting_for_approval or question_changed, delegation design 3.5) has not
 failed: its result goes back as a plain result (not an error) and never counts toward the failure streak.
+
+Tool calls and results pair up (every provider rejects a conversation that goes on after an unanswered call; Claude
+also a result whose call is not in the assistant turn before it):
+- conversation_is_consistent(messages): every result answers a call of the assistant turn before it, and every call is
+  answered before the conversation goes on (open calls at the very end are allowed: the next turn closes them);
+- open_tool_calls(messages) / close_open_calls(messages): the calls of the last assistant turn that no result answers
+  yet, and an error result (CALL_NOT_RUN) for each, to append (nothing earlier is rebuilt). The loop closes the calls of
+  an answer cut off at the length limit itself; Ditto closes those of a history saved by an earlier version before the
+  next question.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, Sequence
 
 from orchestrator.llm.errors import Refused
-from orchestrator.llm.types import ChatRequest, ChatResult, Message, ToolSpecLLM, Usage, tool_result_text
+from orchestrator.llm.types import (ChatRequest, ChatResult, Message, ToolCall, ToolSpecLLM, Usage,
+                                    tool_result_text)
 from orchestrator.tools.normalize import PENDING_CODES as _PENDING
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.untrusted import wrap_untrusted
@@ -34,6 +44,43 @@ NOT_RUN_TEXT = "Not run: several tool calls failed before. Answer the user now w
 INPUT_ERROR_CODES = frozenset({"unknown_argument", "missing_argument", "invalid_value"})
 # A call that waits for a decision: not a failure (normalize.PENDING_CODES, the one list of them).
 PENDING_CODES = frozenset(_PENDING)
+# The result of a call that never ran because the answer ended before it was complete (length limit).
+CALL_NOT_RUN = "Not run: the answer was cut off before this tool call was complete."
+
+
+def open_tool_calls(messages: Sequence[Message]) -> List[ToolCall]:
+    """The calls of the last assistant turn that no tool result after it answers (only at the end of a conversation:
+    a message other than a tool result after that turn means there is nothing open to close here)."""
+    for index in range(len(messages) - 1, -1, -1):
+        msg = messages[index]
+        if msg.role == "assistant":
+            answered = {m.tool_call_id for m in messages[index + 1:] if m.role == "tool"}
+            return [c for c in msg.tool_calls if c.id not in answered]
+        if msg.role != "tool":
+            return []
+    return []
+
+
+def close_open_calls(messages: Sequence[Message]) -> List[Message]:
+    """An error result (CALL_NOT_RUN) for every open call at the end of `messages`, to append to them."""
+    return [Message.tool_result(c.id, CALL_NOT_RUN, is_error=True) for c in open_tool_calls(messages)]
+
+
+def conversation_is_consistent(messages: Sequence[Message]) -> bool:
+    """Every tool result answers a call of the assistant turn before it (once), and every call is answered before the
+    conversation goes on. Open calls at the very end are allowed: the next turn closes them (close_open_calls)."""
+    pending: set = set()
+    for msg in messages:
+        if msg.role == "tool":
+            if msg.tool_call_id not in pending:
+                return False
+            pending.discard(msg.tool_call_id)
+            continue
+        if pending:
+            return False
+        if msg.role == "assistant":
+            pending = {c.id for c in msg.tool_calls}
+    return True
 
 
 @dataclass
@@ -76,6 +123,9 @@ def run_tool_loop(client: Any, request: ChatRequest, execute_tool: ExecuteTool, 
         history.extend(result.new_messages)
         new.extend(result.new_messages)
         if result.stop != "tool_use" or not result.tool_calls:
+            # Cut off at the length limit while calling a tool: the call never runs, but it is answered, or every
+            # later request with this history would be rejected.
+            new.extend(close_open_calls(new))
             return ToolLoopResult(text=result.text, stop=result.stop, steps=step, new_messages=new,
                                   results=results, usage=usage, parsed=result.parsed)
         fixing = fixed = False
