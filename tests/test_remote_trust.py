@@ -1294,6 +1294,17 @@ class TestCliDevicesEdit:
         assert ProfileStore(b.state).load_deploy_settings(new_id) == {"install": "user", "ssh_user": "radxa"}
         assert ProfileStore(b.state).load_deploy_settings(b.device.device_id) == {}
 
+    def test_a_new_key_still_says_to_probe_a_board_that_was_set_up_anew(self, b, terminal):
+        """A new key mostly means the board was reinstalled: its moved probe may be old. The CLI said to probe it again
+        before P6 and the Boards window still does (boards.edit.probe_again), so the CLI keeps saying it."""
+        from orchestrator.utils.l10n_boards import TEXTS
+        terminal()
+        new = paramiko.ECDSAKey.generate()
+        result = self.edit(b.device.device_id, "--key", f"{new.get_name()} {new.get_base64()}", answer="y\n")
+        assert result.code == 0, result.out
+        assert "If the board was set up anew, probe it again" in " ".join(result.out.split())
+        assert TEXTS["en"]["boards.edit.probe_again"].startswith("If the board was set up anew, probe it again")
+
     def test_an_unknown_board_is_named(self, b, terminal):
         terminal()
         result = self.edit("Garage", "--host", "192.0.2.41")

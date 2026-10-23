@@ -31,7 +31,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   old copies go also when a Ctrl+C ends the login test after it, so the board's data is never left twice. What the new
   ID already holds with other content is never overwritten (it stays under the old ID; the probe and its label and
   address move or stay together), an old copy that cannot be removed stays too, and the CLI and the window name both,
-  also when the board's record could not be written. The work runs
+  also when the board's record could not be written; both also say to probe a board that was set up anew again (its
+  moved probe may be old). The work runs
   in the background; the texts are English and German. No tool, the MCP server, Ditto or the device runtime steps can
   reach it (`orchestrator/remote/pairing.py` `replace_key`, an import-graph test).
 - **Next steps instead of commands, allow-to-run proposals and translated, regrouped menus** (wave 6, chain a0;

@@ -35,7 +35,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   neue ID schon mit anderem Inhalt hat, wird nie überschrieben (es bleibt unter der alten ID; die Prüfung und ihr Name
   und ihre Adresse ziehen gemeinsam um oder bleiben gemeinsam), eine alte Kopie, die sich nicht entfernen lässt,
   bleibt ebenfalls, und CLI und Fenster nennen beides, auch wenn der Eintrag des Boards nicht geschrieben werden
-  konnte. Die Arbeit läuft im Hintergrund; die Texte gibt es auf Englisch und Deutsch. Kein Tool, der MCP-Server,
+  konnte; beide sagen auch, ein neu eingerichtetes Board erneut zu prüfen (seine umgezogene Prüfung kann alt sein).
+  Die Arbeit läuft im Hintergrund; die Texte gibt es auf Englisch und Deutsch. Kein Tool, der MCP-Server,
   Ditto oder die Laufzeit-Schritte für Geräte erreichen sie (`orchestrator/remote/pairing.py` `replace_key`, ein
   Test über den Importgraphen).
 - **Nächste Schritte statt Befehlen, Befehle zum Zulassen und übersetzte, neu geordnete Menüs** (Welle 6, Kette
