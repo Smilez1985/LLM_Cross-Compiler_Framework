@@ -75,7 +75,7 @@ from orchestrator.Core.community_pack import (ID_PATTERN, LICENSE_PATTERN, MAX_P
                                               build_manifest, check_topic, decrypt_pack, encrypt_pack,
                                               is_encrypted_pack, list_files, load_trusted_keys, read_manifest,
                                               read_pack, scrub, sign_manifest, tree_sha256, utc_now, verify_index,
-                                              verify_manifest, write_pack)
+                                              verify_manifest, verify_tree, write_pack)
 from orchestrator.rag import licence_texts, licences, pack_licences
 from orchestrator.rag.licences import FULL_TEXT, LINK_AND_FACTS, SharePlan
 from orchestrator.utils.download import DownloadError, PinnedDownloader, sha256_file, with_reason
@@ -192,6 +192,9 @@ class Provenance(Strict):
     # made before topics and confirmed by the person). Absent for other kinds and for packs installed before it.
     topic: Optional[str] = None
     target: Optional[str] = None
+    # The installed files' digest as this computer's file system reports it, only where that differs from
+    # content_sha256: Windows keeps no execute bit, so a pack's 0o755 scripts read as 0o644 there (installed_unchanged)
+    local_sha256: Optional[str] = Field(default=None, pattern=SHA256_PATTERN)
 
     @field_validator("topic", "target")
     @classmethod
@@ -199,10 +202,15 @@ class Provenance(Strict):
         return None if value is None else check_topic(value)
 
     def to_json(self) -> str:
-        """The provenance file's text; the knowledge fields only when set, so the file of a target or recipe pack stays
-        what earlier versions write and read."""
-        return self.model_dump_json(indent=2, exclude={name for name in ("topic", "target")
+        """The provenance file's text; the fields added later only when set, so the file of a target or recipe pack
+        stays what earlier versions write and read."""
+        return self.model_dump_json(indent=2, exclude={name for name in ("topic", "target", "local_sha256")
                                                        if getattr(self, name) is None})
+
+    def installed_unchanged(self, digest: str) -> bool:
+        """Whether `digest` (tree_sha256 of the installed folder) is the installed content: the pack's own digest, or
+        the one this computer's file system gave right after the install."""
+        return digest in {self.content_sha256, self.local_sha256}
 
 
 @dataclass
@@ -351,6 +359,7 @@ class _KnowledgeImport:
     origin: str             # origin_pack of its excerpts
     tags: Dict[str, str]    # {"topic": ...} or {"target": ...}
     legacy_origins: Tuple[str, ...] = ()   # the origin_pack an earlier, unsorted import of the same file used
+    provenance: Optional["Provenance"] = None   # the installed pack's (installed_unchanged)
 
 
 @dataclass(frozen=True)
@@ -1258,6 +1267,19 @@ class CommunityManager:
         """Moves the checked pack into place (atomic rename) with its provenance; the quarantine is removed."""
         try:
             pack = prepared.quarantine / "pack"
+            if prepared.imports_knowledge:
+                # Its pages are imported only while the installed files are these ones: their digest as this file
+                # system reports it (the same file system as the destination), kept where it is not the pack's own
+                # and only when every file is still the checked one (verify_tree compares paths, sizes and sha256;
+                # what differs is then only what the file system keeps of the modes)
+                local = tree_sha256(pack)
+                if local != prepared.provenance.content_sha256:
+                    try:
+                        verify_tree(pack, prepared.manifest)
+                    except PackError as e:
+                        self.logger.warning(f"{prepared.manifest.id}: not the checked files any more ({e})")
+                    else:
+                        prepared.provenance = prepared.provenance.model_copy(update={"local_sha256": local})
             (pack / PROVENANCE_NAME).write_text(prepared.provenance.to_json(), encoding="utf-8")
             dest = prepared.destination
             if prepared.manifest.kind == "knowledge":
@@ -1347,7 +1369,7 @@ class CommunityManager:
             trust, reason = trust_of_folder(folder, index)
             problems = [f"revoked: {reason}"] if trust == TrustLevel.REVOKED else []
             try:
-                if tree_sha256(folder) != prov.content_sha256:
+                if not prov.installed_unchanged(tree_sha256(folder)):
                     problems.append("changed since it was installed")
             except PackError as e:
                 problems.append(str(e))
@@ -1587,7 +1609,9 @@ class CommunityManager:
             if item.marker.exists():
                 continue
             try:
-                unchanged = tree_sha256(item.folder) == item.expected
+                digest = tree_sha256(item.folder)
+                unchanged = (item.provenance.installed_unchanged(digest) if item.provenance is not None
+                             else digest == item.expected)
             except PackError:
                 unchanged = False
             if not unchanged:
@@ -1652,7 +1676,7 @@ class CommunityManager:
                 legacy = (old,) if old and old.casefold() not in names and not old.startswith(TARGET_ORIGIN) else ()
             items.append(_KnowledgeImport(f"knowledge pack {folder.name}", folder / KNOWLEDGE_FILE, folder,
                                           prov.content_sha256, self.knowledge_dir / f"{folder.name}.imported",
-                                          folder.name, {scope: name}, legacy))
+                                          folder.name, {scope: name}, legacy, prov))
         root = self.targets_dir
         for folder in sorted(root.iterdir()) if root.is_dir() else []:
             prov = None if folder.is_symlink() or not folder.is_dir() else read_provenance(folder)
@@ -1662,7 +1686,7 @@ class CommunityManager:
             items.append(_KnowledgeImport(f"the knowledge of target pack {folder.name}", snapshot, folder,
                                           prov.content_sha256,
                                           self.knowledge_dir / TARGET_MARKERS / f"{folder.name}.imported",
-                                          f"{TARGET_ORIGIN}{folder.name}", {"target": folder.name}))
+                                          f"{TARGET_ORIGIN}{folder.name}", {"target": folder.name}, (), prov))
         return items
 
     def _import_pages(self, item: _KnowledgeImport, rag_manager) -> Tuple[int, str]:
