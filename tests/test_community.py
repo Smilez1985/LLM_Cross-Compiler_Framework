@@ -70,7 +70,8 @@ class TestSwarmRemoval:
         rag = SimpleNamespace(export_records=lambda: iter(records))
         framework = SimpleNamespace(info=SimpleNamespace(installation_path=tmp_path),
                                     get_component=lambda name: rag if name == "rag_manager" else None)
-        exported = Path(CommunityManager(framework).export_knowledge_base("t")).read_text(encoding="utf-8")
+        path = Path(CommunityManager(framework).export_knowledge_base("t", out_dir=tmp_path / "export"))
+        exported = path.read_text(encoding="utf-8")
         for leaked in ("10.1.2.3", "hf_aBcDeF", "jenny"):
             assert leaked not in exported
 
