@@ -2252,15 +2252,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `test_the_leftovers_of_an_interrupted_install_are_removed_before_the_space_check`,
   `test_exit_handler_does_not_wait_for_a_busy_lock`.
 - **A pinned download that cannot work says why at once** (chain port-runtime, from the review of the managed
-  llama-server; `orchestrator/utils/download.py` `PinnedDownloader`, shared by the local runtime's builds and models
-  and the community zoo): a TLS certificate that could not be verified was retried five times with backoff like a
-  dropped connection and ended in "did not complete after 5 attempts"; it now ends at once with "the TLS certificate
-  of <host> could not be verified" (only the host, never the possibly signed download URL; after a redirect the host
-  that failed, such as a release CDN, not the first one, review of port-runtime; behind a proxy that inspects TLS its
-  CA certificate belongs in `REQUESTS_CA_BUNDLE`). Any other request error (too many redirects, an
-  invalid URL) and a `.part` file that cannot be written (a full disk, no permission) used to escape as a raw
-  exception; they now end with a clear message, and the part is kept for a resume. Regression tests:
-  `tests/test_runtime.py` `TestDownloads`.
+  llama-server; `orchestrator/utils/download.py` `PinnedDownloader`, shared by the local runtime's builds and models and
+  the community zoo): a TLS certificate that could not be verified was retried five times with backoff like a dropped
+  connection and ended in "did not complete after 5 attempts"; it now ends at once with "the TLS certificate of <host>
+  could not be verified" (only the host, never the possibly signed download URL; after a redirect the host that failed,
+  such as a release CDN, not the first one, review of port-runtime; behind a proxy that inspects TLS its CA certificate
+  belongs in `REQUESTS_CA_BUNDLE`). Any other request error (too many redirects, an invalid URL) and a `.part` file that
+  cannot be written (a full disk, no permission) used to escape as a raw exception; they now end with a clear message,
+  and the part is kept for a resume. The Hugging Face fetcher (`hf_hub.HubFetcher`: the browser's, the Builder's and an
+  AI's downloads) ran its own copy of the range download without these fixes; it now runs the same one and adds only
+  what is the Hub's own (the token only for huggingface.co, the refusal of another host and of HTTP 401 and 403), so a
+  size on the server other than the one the Hub lists is refused there before anything is written too (stage C wave 3).
+  Regression tests: `tests/test_runtime.py` `TestDownloads`, `tests/test_hf_tools.py` `TestTheFetcherSaysWhyAtOnce`.
 - **The local runtime no longer fails on Windows while another window reads its files** (chain port-runtime, from
   the review of the managed llama-server): Windows refuses to replace or delete a file that another process has open
   at that moment. The GUI's LLMClient reads `server.json` and the server's key file, and a process waiting for the

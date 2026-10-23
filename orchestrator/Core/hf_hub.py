@@ -378,51 +378,25 @@ class HubFetcher(PinnedDownloader):
     def url(repo: str, commit: str, filename: str) -> str:
         return f"{HUB_URL}/{repo}/resolve/{commit}/{quote(filename)}"
 
-    def _download_range(self, url: str, part: Path, have: int, size: int, name: str, progress) -> None:
-        import requests
-        if self.stop.is_set():
-            raise DownloadStopped(f"The download of {name} was stopped; the part already downloaded is kept.")
-        headers = {"Accept-Encoding": "identity", **({"Range": f"bytes={have}-"} if have else {})}
+    # The range download itself is PinnedDownloader._download_range, the one implementation (its retries, its refusal
+    # of a size on the server other than the Hub lists, the TLS host in the error, and a clear error for any other
+    # request error or a .part file that cannot be written); the fetcher adds only what is Hugging Face's own.
+
+    def _request_headers(self, url: str, have: int) -> Dict[str, str]:
+        headers = super()._request_headers(url, have)
         if self._token and urlparse(url).hostname == HUB_HOST:
-            headers["Authorization"] = f"Bearer {self._token}"
-        try:
-            with self.session.get(url, headers=headers, stream=True, timeout=(15, 60), allow_redirects=True) as r:
-                if not str(r.url).startswith("https://") or not _is_hub(str(r.url)):
-                    raise self.error("Refusing a download that left Hugging Face's own servers.")
-                if r.status_code in (401, 403):
-                    raise HubError(f"Hugging Face refused {name} (HTTP {r.status_code}).", code="permission_denied",
-                                   next=TOKEN_NEXT)
-                if r.status_code == 416:
-                    part.unlink(missing_ok=True)
-                    raise _Retry("HTTP 416")
-                if r.status_code == 429 or r.status_code >= 500:
-                    raise _Retry(f"HTTP {r.status_code}")
-                if r.status_code not in (200, 206):
-                    raise self.error(f"Download of {name} failed: HTTP {r.status_code}")
-                resumed = bool(have) and r.status_code == 206
-                if resumed:
-                    match = re.match(r"bytes (\d+)-\d+/(\d+|\*)", str(r.headers.get("Content-Range", "")))
-                    if not match or int(match.group(1)) != have:
-                        part.unlink(missing_ok=True)
-                        raise _Retry("unexpected Content-Range")
-                else:
-                    have = 0
-                with open(part, "ab" if resumed else "wb") as f:
-                    for chunk in r.iter_content(chunk_size=1 << 20):
-                        if self.stop.is_set():
-                            raise DownloadStopped(f"The download of {name} was stopped; the part already "
-                                                  "downloaded is kept.")
-                        if not chunk:
-                            continue
-                        f.write(chunk)
-                        f.flush()  # what is written stays in the .part file when the download stops
-                        have += len(chunk)
-                        if have > size:
-                            break
-                        if progress:
-                            progress(name, have, size)
-        except (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError) as e:
-            raise _Retry(e.__class__.__name__) from e
+            headers["Authorization"] = f"Bearer {self._token}"   # never to the file storage a redirect leads to
+        return headers
+
+    def _check_response(self, r: Any, name: str) -> None:
+        if not str(r.url).startswith("https://") or not _is_hub(str(r.url)):
+            raise self.error("Refusing a download that left Hugging Face's own servers.")
+        if r.status_code in (401, 403):
+            raise HubError(f"Hugging Face refused {name} (HTTP {r.status_code}).", code="permission_denied",
+                           next=TOKEN_NEXT)
+
+    def _stopped(self, name: str) -> Exception:
+        return DownloadStopped(f"The download of {name} was stopped; the part already downloaded is kept.")
 
     def fetch_file(self, repo: str, commit: str, file: HubFile, dest: Path, progress=None,
                    attempts: int = 5) -> Tuple[Path, str]:
@@ -451,7 +425,7 @@ class HubFetcher(PinnedDownloader):
                 if have == file.size and part.exists():
                     break
                 try:
-                    self._download_range(url, part, have, file.size, file.name, progress)
+                    self._download_range(url, part, have, file.size, file.name, progress, self.stop)
                     if part.exists() and part.stat().st_size >= file.size:
                         break
                 except _Retry as e:

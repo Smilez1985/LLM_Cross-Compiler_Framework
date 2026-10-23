@@ -2542,16 +2542,20 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `test_the_leftovers_of_an_interrupted_install_are_removed_before_the_space_check`,
   `test_exit_handler_does_not_wait_for_a_busy_lock`.
 - **Ein gepinnter Download, der nicht gelingen kann, sagt sofort, warum** (Kette port-runtime, aus der Prüfung des
-  verwalteten llama-server; `orchestrator/utils/download.py` `PinnedDownloader`, den die Builds und Modelle der
-  lokalen Laufzeit und der Community-Zoo teilen): Ein TLS-Zertifikat, das sich nicht prüfen ließ, wurde wie eine
-  abgebrochene Verbindung fünfmal mit Wartezeit erneut versucht und endete mit „did not complete after 5 attempts“;
-  jetzt endet es sofort mit „the TLS certificate of <host> could not be verified“ (nur der Host, nie die
-  möglicherweise signierte Download-URL; nach einer Weiterleitung der Host, der scheiterte, etwa ein Release-CDN,
-  nicht der erste, Review von port-runtime; hinter einem Proxy, der TLS prüft, gehört sein CA-Zertifikat in
-  `REQUESTS_CA_BUNDLE`). Jeder andere Anfragefehler (zu viele Weiterleitungen, eine ungültige URL) und eine
-  `.part`-Datei, die sich nicht schreiben lässt (volle Platte, keine Berechtigung), kamen als rohe Ausnahme heraus;
-  jetzt enden sie mit einer klaren Meldung, und der Teil bleibt für die Fortsetzung erhalten. Regressionstests:
-  `tests/test_runtime.py` `TestDownloads`.
+  verwalteten llama-server; `orchestrator/utils/download.py` `PinnedDownloader`, den die Builds und Modelle der lokalen
+  Laufzeit und der Community-Zoo teilen): Ein TLS-Zertifikat, das sich nicht prüfen ließ, wurde wie eine abgebrochene
+  Verbindung fünfmal mit Wartezeit erneut versucht und endete mit „did not complete after 5 attempts“; jetzt endet es
+  sofort mit „the TLS certificate of <host> could not be verified“ (nur der Host, nie die möglicherweise signierte
+  Download-URL; nach einer Weiterleitung der Host, der scheiterte, etwa ein Release-CDN, nicht der erste, Review von
+  port-runtime; hinter einem Proxy, der TLS prüft, gehört sein CA-Zertifikat in `REQUESTS_CA_BUNDLE`). Jeder andere
+  Anfragefehler (zu viele Weiterleitungen, eine ungültige URL) und eine `.part`-Datei, die sich nicht schreiben lässt
+  (volle Platte, keine Berechtigung), kamen als rohe Ausnahme heraus; jetzt enden sie mit einer klaren Meldung, und der
+  Teil bleibt für die Fortsetzung erhalten. Der Hugging-Face-Fetcher (`hf_hub.HubFetcher`: die Downloads des Browsers,
+  des Builders und einer KI) lief mit einer eigenen Kopie des Bereichs-Downloads ohne diese Korrekturen; jetzt läuft er
+  über denselben und ergänzt nur, was zum Hub gehört (das Token nur für huggingface.co, die Ablehnung eines anderen
+  Hosts und von HTTP 401 und 403), deshalb wird auch dort eine Größe auf dem Server, die nicht der vom Hub gelisteten
+  entspricht, abgelehnt, bevor etwas geschrieben wird (Stufe C, Welle 3). Regressionstests: `tests/test_runtime.py`
+  `TestDownloads`, `tests/test_hf_tools.py` `TestTheFetcherSaysWhyAtOnce`.
 - **Die lokale Laufzeit scheitert unter Windows nicht mehr, während ein anderes Fenster ihre Dateien liest** (Kette
   port-runtime, aus der Prüfung des verwalteten llama-server): Windows verweigert das Ersetzen oder Löschen einer
   Datei, die ein anderer Prozess gerade offen hat. Der LLMClient der GUI liest `server.json` und die Schlüsseldatei
