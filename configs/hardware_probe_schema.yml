@@ -262,7 +262,9 @@ keys:
     perf: none
     platforms: [linux, windows, macos, freebsd, android]
     sources: {any: "constant of the emitter"}
-    normalise: none
+    normalise: >-
+      none. A new key is a schema change and raises the version (3.0.0 -> 3.1.0); new keys are never required and
+      never ON/OFF keys, so a file of an older version, which lacks them, is read as it is
     consumers: [gui, mcp]
   PROBE_CONVERTED_FROM:
     group: meta
@@ -632,6 +634,26 @@ keys:
       macos: "constant sysctl"
     normalise: "where the SUPPORTS_* CPU features came from"
     consumers: [recipe, gui]
+  CPU_L2_CACHE_KB:
+    group: cpu
+    type: int
+    min: 1
+    max: 1048576
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux, windows, macos, android]
+    sources:
+      linux: >-
+        /sys/devices/system/cpu/cpu<N>/cache/index<M>/ whose level is 2 and whose type is Unified or Data: its size
+        (the kernel writes KiB, "2048K")
+      windows: "GetLogicalProcessorInformation: the level-2 unified or data caches (RelationCache)"
+      macos: "sysctl hw.perflevel0.l2cachesize, hw.perflevel1.l2cachesize and hw.l2cachesize (bytes)"
+    normalise: >-
+      KiB of the largest level-2 cache (one cache: a cache several cores share counts once, at its full size). A CPU
+      whose caches list no level 2 (many Cortex-A55 boards have only L1 and L3) has no value and no warning; a level-2
+      cache whose size cannot be read, or a Windows that cannot tell: left out with not_determined:CPU_L2_CACHE_KB
+    consumers: [bench, gui, proposal]
 
   # --- x86 CPU features: exactly ggml's x86 options at the pinned llama.cpp commit -----------------------------
   # Linux: ON if every token of cpuinfo is in CPU_FLAGS_ALL, else OFF; UNKNOWN when /proc/cpuinfo has no flags.
@@ -1353,6 +1375,44 @@ keys:
     sources: {any: "number of GPU entries in vulkaninfo --summary (CPU implementations such as llvmpipe not counted)"}
     normalise: "decimal integer"
     consumers: [recipe, ditto]
+  VULKAN_INSTANCE_VERSION:
+    group: gpu
+    type: version
+    pattern: '^\d{1,2}\.\d{1,3}\.\d{1,5}$'
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux, windows]
+    sources:
+      linux: >-
+        the "Vulkan Instance Version: X.Y.Z" line of vulkaninfo --summary (exit code 0); without it the version in the
+        file name of the Vulkan loader, libvulkan.so.1.Y.Z: the first file in /usr/lib/*, /usr/lib, /usr/lib64,
+        /lib/*, /lib and /lib64 (the loader is built with VERSION = its loader version)
+      windows: "the same line; without it the file version of %SystemRoot%\\System32\\vulkan-1.dll (X.Y.Z of X.Y.Z.W)"
+    normalise: >-
+      major.minor.patch: the highest Vulkan version an instance can be created with (the loader's); no loader and no
+      vulkaninfo: left out without a warning
+    consumers: [recipe, ditto, gui]
+  OPENCL_PLATFORMS:
+    group: gpu
+    type: list
+    item_pattern: '^[a-z0-9]([a-z0-9-]{0,46}[a-z0-9])?:\d{1,2}\.\d{1,2}$'
+    max_items: 16
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux, windows]
+    sources:
+      any: >-
+        clinfo without arguments (exit code 0): each "Platform Version" line, which holds CL_PLATFORM_VERSION
+        ("OpenCL <major>.<minor> <platform text>" in the OpenCL specification), with the "Platform Name" line before
+        it
+    normalise: >-
+      <name>:<OpenCL version> per platform in clinfo's order, no duplicates. The name: lower case, "(r)" and "(tm)"
+      removed, every run of characters other than a-z and 0-9 one "-", no "-" at either end, at most 48 characters
+      (NVIDIA CUDA -> nvidia-cuda:3.0, Intel(R) OpenCL Graphics -> intel-opencl-graphics:3.0). Without clinfo, when it
+      fails or lists no platform: left out without a warning
+    consumers: [recipe, gui, proposal]
   HIP_RUNTIME:
     group: gpu
     type: bool

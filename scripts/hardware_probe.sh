@@ -21,7 +21,7 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-PROBE_VERSION=3.0.0
+PROBE_VERSION=3.1.0
 OUTPUT_FILE=target_hardware_config.txt
 INSTALL_TOOLS=0
 TOOLCHAIN=1
@@ -685,6 +685,26 @@ else
     warn "not_determined:CPU_FLAGS_ALL"
 fi
 
+# The largest level-2 unified or data cache of /sys/devices/system/cpu/cpu<N>/cache/index<M> (the kernel writes KiB,
+# "2048K"); a level-2 cache whose size cannot be read is a warning, a CPU without one is not.
+L2_KB=0 L2_LISTED=0
+for idx in "$(f /sys/devices/system/cpu)"/cpu[0-9]*/cache/index[0-9]*; do
+    [ -d "$idx" ] || continue
+    [ "$(trim "$(rdp "$idx/level")")" = 2 ] || continue
+    case "$(trim "$(rdp "$idx/type")")" in Unified|Data) ;; *) continue ;; esac
+    L2_LISTED=1
+    size=$(trim "$(rdp "$idx/size")")
+    case "$size" in *K) n=${size%K} mult=1 ;; *M) n=${size%M} mult=1024 ;; *) continue ;; esac
+    case "$n" in ''|*[!0-9]*) continue ;; esac
+    [ ${#n} -le 9 ] || continue
+    n=$(printf '%s' "$n" | sed 's/^0*//')
+    n=$(( ${n:-0} * mult ))
+    [ "$n" -gt "$L2_KB" ] && L2_KB=$n
+done
+if [ "$L2_KB" -gt 0 ]; then put_int CPU_L2_CACHE_KB "$L2_KB" 1 1048576
+elif [ "$L2_LISTED" = 1 ]; then warn "not_determined:CPU_L2_CACHE_KB"
+fi
+
 # --- memory ----------------------------------------------------------------------------------------------------
 
 meminfo_mb() {
@@ -751,17 +771,18 @@ RKNODE=""
 if exists /dev/rknpu; then RKNODE=/dev/rknpu
 else
     # A DRM node of the vendor rknpu driver or an accel node of the mainline rocket driver (unverified on a board).
-    set -f
     for pattern in renderD card; do
-        for name in $(ls "$(f /sys/class/drm)" 2>/dev/null | grep "^$pattern" | grep -v -- -); do
+        for node in "$(f /sys/class/drm)/$pattern"*; do
+            [ -e "$node" ] || [ -L "$node" ] || continue
+            name=${node##*/}
+            case "$name" in *-*) continue ;; esac   # a connector (card0-eDP-1), not a node
             # The vendor driver registers as "RKNPU" (upper case): compared without case.
-            if [ "$(lower "$(link_name "$(f /sys/class/drm)/$name/device/driver")")" = rknpu ]; then
+            if [ "$(lower "$(link_name "$node/device/driver")")" = rknpu ]; then
                 RKNODE=/dev/dri/$name
                 break 2
             fi
         done
     done
-    set +f
     if [ -z "$RKNODE" ]; then
         for n in "$(f /sys/class/accel)"/accel[0-9]*; do
             if [ "$(link_name "$n/device/driver")" = rocket ]; then RKNODE=/dev/accel/${n##*/}; break; fi
@@ -884,11 +905,12 @@ if have nvidia-smi; then
     fi
 fi
 
-VK_RAN=0 VK_GPUS=""
+VK_RAN=0 VK_GPUS="" VK_INSTANCE=""
 if have vulkaninfo; then
-    out=$(tool vulkaninfo --summary)
-    if [ $? -eq 0 ]; then
+    if out=$(tool vulkaninfo --summary); then
         case "$out" in *Devices*) VK_RAN=1 ;; esac
+        VK_INSTANCE=$(printf '%s\n' "$out" |
+                      sed -n 's/^[[:space:]]*Vulkan Instance Version:[[:space:]]*\([0-9][0-9.]*\).*/\1/p' | head -n1)
     fi
     if [ "$VK_RAN" = 1 ]; then
         RAW=$(printf '%s\n' "$out" | awk '
@@ -932,6 +954,50 @@ if have vulkaninfo; then
     fi
 fi
 
+# The instance version: vulkaninfo's line, else the version in the loader's file name (libvulkan.so.1.Y.Z), the first
+# file in the order of the loader folders.
+if [ -z "$VK_INSTANCE" ]; then
+    for m in "$(f /usr/lib)"/*/libvulkan.so.1.* "$(f /usr/lib)"/libvulkan.so.1.* "$(f /usr/lib64)"/libvulkan.so.1.* \
+             "$(f /lib)"/*/libvulkan.so.1.* "$(f /lib)"/libvulkan.so.1.* "$(f /lib64)"/libvulkan.so.1.*; do
+        [ -e "$m" ] || continue
+        v=${m##*/libvulkan.so.}
+        if valid '^1\.[0-9]+\.[0-9]+$' "$v"; then VK_INSTANCE=$v; break; fi
+    done
+fi
+put VULKAN_INSTANCE_VERSION "$VK_INSTANCE" '^[0-9]{1,2}\.[0-9]{1,3}\.[0-9]{1,5}$' quiet
+
+# OpenCL platforms of clinfo: each "Platform Version" line (OpenCL <major>.<minor> ...) with the "Platform Name" line
+# before it, as <name>:<version> (the name lower case, (r)/(tm) removed, other characters one "-", at most 48).
+opencl_name() {
+    printf '%s' "$1" | tr -c ' -~' ' ' | tr 'A-Z' 'a-z' | sed 's/(r)//g; s/(tm)//g' | tr -c 'a-z0-9' '-' |
+        tr -s '-' | sed 's/^-//; s/-$//' | cut -c1-48 | sed 's/-$//'
+}
+OPENCL=""
+if have clinfo && out=$(tool clinfo); then
+    RAW=$(printf '%s\n' "$out" | awk '
+        { line = $0; gsub(/^[ \t\r]+|[ \t\r]+$/, "", line) }
+        line == "Platform Name" || line ~ /^Platform Name[ \t]/ {
+            name = substr(line, 14); gsub(/^[ \t\r]+|[ \t\r]+$/, "", name); next
+        }
+        line ~ /^Platform Version[ \t]+OpenCL [0-9]+\.[0-9]+/ && name != "" {
+            v = line; sub(/^Platform Version[ \t]+OpenCL /, "", v); match(v, /^[0-9]+\.[0-9]+/)
+            printf "%s\037%s\n", name, substr(v, 1, RLENGTH)
+        }')
+    OLDIFS=$IFS; IFS=$NL
+    set -f
+    for row in $RAW; do
+        name=${row%%"$SEP"*} version=${row#*"$SEP"}
+        item="$(opencl_name "$name"):$version"
+        valid '^[a-z0-9]([a-z0-9-]{0,46}[a-z0-9])?:[0-9]{1,2}\.[0-9]{1,2}$' "$item" || continue
+        case ",$OPENCL," in *",$item,"*) continue ;; esac
+        [ "$(printf '%s' "$OPENCL" | tr ',' '\n' | grep -c .)" -lt 16 ] || break
+        OPENCL="${OPENCL:+$OPENCL,}$item"
+    done
+    set +f
+    IFS=$OLDIFS
+fi
+put OPENCL_PLATFORMS "$OPENCL" "" quiet
+
 # Display-class PCI GPUs of /sys/class/drm, with the amdgpu VRAM and the KFD gfx target.
 FS_GPUS=""
 KFD=""
@@ -946,8 +1012,9 @@ for props in "$(f /sys/class/kfd/kfd/topology/nodes)"/*/properties; do
     KFD="$KFD$minor $(printf 'gfx%d%x%x' $((ver / 10000)) $((ver / 100 % 100)) $((ver % 100)))$NL"
 done
 DRM=$(f /sys/class/drm)
-for num in $(ls "$DRM" 2>/dev/null | grep -E '^card[0-9]+$' | sed 's/^card//' | sort -n); do
-    card=$DRM/card$num dev=$DRM/card$num/device
+for num in $(for c in "$DRM"/card[0-9]*; do n=${c##*/card}; case "$n" in ''|*[!0-9]*) continue ;; esac
+                                          echo "$n"; done | sort -n); do
+    dev=$DRM/card$num/device
     vendor_id=$(hexid "$(rdp "$dev/vendor")" 4) || continue
     [ ${#vendor_id} -eq 6 ] || continue
     device_id=$(hexid "$(rdp "$dev/device")" 4) || device_id=""

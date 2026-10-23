@@ -44,7 +44,7 @@ import sys
 from datetime import datetime, timezone
 
 TOOL = "python"
-TOOL_VERSION = "3.0.0"
+TOOL_VERSION = "3.1.0"
 SCHEMA = "2"
 FILE_NAME = "target_hardware_config.txt"
 MAX_VALUE = 4096
@@ -95,6 +95,7 @@ KEYS = {
     "CPU_CLUSTERS": ("list", (r"^\d{1,4}(-\d{1,4})?:0x[0-9a-f]{2}:0x[0-9a-f]{3}(:\d{1,5})?$", 64), 0, _ARM, ()),
     "CPU_FLAGS_ALL": ("list", ("^[a-z0-9_.]{1,48}$", 1024), 0, (), ()),
     "CPU_FLAGS_SOURCE": ("enum", ("proc-cpuinfo", "sysctl", "windows-api"), 0, (), ()),
+    "CPU_L2_CACHE_KB": ("int", (1, 1048576), 0, (), ()),
     "SUPPORTS_SSE42": ("bool", None, 1, _X86, ()),
     "SUPPORTS_AVX": ("bool", None, 1, _X86, ()),
     "SUPPORTS_AVX2": ("bool", None, 1, _X86, ()),
@@ -148,6 +149,8 @@ KEYS = {
     "SUPPORTS_INTEL_XPU": ("bool", None, 1, (), ()),
     "VULKAN": ("bool", None, 1, (), ()),
     "VULKAN_DEVICES": ("int", (0, 64), 0, (), ()),
+    "VULKAN_INSTANCE_VERSION": ("version", r"^\d{1,2}\.\d{1,3}\.\d{1,5}$", 0, (), ()),
+    "OPENCL_PLATFORMS": ("list", (r"^[a-z0-9]([a-z0-9-]{0,46}[a-z0-9])?:\d{1,2}\.\d{1,2}$", 16), 0, (), ()),
     "HIP_RUNTIME": ("bool", None, 1, (), ("linux",)),
     "ROCM_VERSION": ("version", _VERSION, 0, (), ("linux",)),
     "METAL": ("bool", None, 1, (), ("macos",)),
@@ -498,12 +501,67 @@ def parse_vulkaninfo_summary(output):
     return gpus
 
 
+def vulkan_instance_version(output):
+    """The "Vulkan Instance Version: X.Y.Z" line of vulkaninfo (text and summary output), or None."""
+    match = re.search(r"^\s*Vulkan Instance Version:\s*([0-9][0-9.]*)", output or "", re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def run_vulkaninfo(run):
+    """(vulkaninfo answered with a device list, the GPUs it lists, the instance version it printed)."""
+    rc, out, _ = run(["vulkaninfo", "--summary"], 20)
+    if rc != 0:
+        return False, [], None
+    version = vulkan_instance_version(out)
+    if "Devices" not in (out or ""):
+        return False, [], version
+    return True, parse_vulkaninfo_summary(out), version
+
+
 def probe_vulkaninfo(run):
     """(vulkaninfo answered with a device list, the GPUs it lists)."""
-    rc, out, _ = run(["vulkaninfo", "--summary"], 20)
-    if rc != 0 or "Devices" not in (out or ""):
-        return False, []
-    return True, parse_vulkaninfo_summary(out)
+    ran, gpus, _version = run_vulkaninfo(run)
+    return ran, gpus
+
+
+def opencl_name(name):
+    """An OpenCL platform name as a list item: lower case, (r)/(tm) removed, other runs of characters one "-", at most
+    48 characters ("Intel(R) OpenCL Graphics" -> intel-opencl-graphics). None when nothing is left."""
+    text = re.sub(r"\((r|tm)\)", "", (clean_text(name, 4096) or "").lower())
+    text = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    return text[:48].rstrip("-") or None
+
+
+def parse_clinfo(output):
+    """<name>:<OpenCL version> of each platform of `clinfo` (the human output): each "Platform Version" line with the
+    "Platform Name" line before it. CL_PLATFORM_VERSION is "OpenCL <major>.<minor> <platform text>"."""
+    items, name = [], None
+    for raw in (output or "").splitlines():
+        line = raw.strip(" \t\r")
+        if line == "Platform Name" or re.match(r"^Platform Name[ \t]", line):
+            name = line[len("Platform Name"):].strip(" \t\r")
+            continue
+        match = re.match(r"^Platform Version[ \t]+OpenCL ([0-9]+\.[0-9]+)", line)
+        if match and name:
+            short = opencl_name(name)
+            item = f"{short}:{match.group(1)}" if short else None
+            if item and _regex(KEYS["OPENCL_PLATFORMS"][1][0]).fullmatch(item) and item not in items:
+                items.append(item)
+    return items[:KEYS["OPENCL_PLATFORMS"][1][1]]
+
+
+def probe_opencl(run):
+    """The OpenCL platforms clinfo lists ([] when clinfo is missing, fails or lists none)."""
+    rc, out, _ = run(["clinfo"], 20)
+    return parse_clinfo(out) if rc == 0 else []
+
+
+def cache_size_kb(text):
+    """A cache size of /sys/devices/system/cpu/cpu<N>/cache/index<M>/size ("2048K"; "2M" read as well) in KiB."""
+    match = re.match(r"^\s*([0-9]{1,9})([KM])\s*$", text or "")
+    if not match:
+        return None
+    return int(match.group(1)) * (1024 if match.group(2) == "M" else 1)
 
 
 def guess_discrete(vendor, name):
@@ -790,6 +848,37 @@ class WindowsApi:
             info = ctypes.cast(pointer, ctypes.POINTER(ctypes.c_uint32 * 13)).contents
             ms, ls = info[2], info[3]
             return "{}.{}.{}.{}".format(ms >> 16, ms & 0xFFFF, ls >> 16, ls & 0xFFFF)
+        except (ImportError, AttributeError, OSError, ValueError):
+            return None
+
+    def l2_cache_kb(self):
+        """KiB of the largest level-2 unified or data cache of GetLogicalProcessorInformation (0: none listed), or
+        None when Windows cannot tell. The .ps1 reads the same entries (LlmProbeCache)."""
+        try:
+            import ctypes
+
+            class CacheDescriptor(ctypes.Structure):
+                _fields_ = [("Level", ctypes.c_ubyte), ("Associativity", ctypes.c_ubyte),
+                            ("LineSize", ctypes.c_ushort), ("Size", ctypes.c_uint32), ("Type", ctypes.c_int32)]
+
+            class Detail(ctypes.Union):
+                _fields_ = [("Cache", CacheDescriptor), ("Reserved", ctypes.c_ulonglong * 2)]
+
+            class ProcessorInformation(ctypes.Structure):
+                _fields_ = [("ProcessorMask", ctypes.c_size_t), ("Relationship", ctypes.c_int32), ("Detail", Detail)]
+
+            function = ctypes.windll.kernel32.GetLogicalProcessorInformation
+            length = ctypes.c_uint32(0)
+            function(None, ctypes.byref(length))
+            count = length.value // ctypes.sizeof(ProcessorInformation)
+            if count <= 0:
+                return None
+            entries = (ProcessorInformation * count)()
+            if not function(entries, ctypes.byref(length)):
+                return None
+            sizes = [e.Detail.Cache.Size // 1024 for e in entries[:length.value // ctypes.sizeof(ProcessorInformation)]
+                     if e.Relationship == 2 and e.Detail.Cache.Level == 2 and e.Detail.Cache.Type in (0, 2)]
+            return max(sizes) if sizes else 0  # RelationCache = 2; CacheUnified = 0, CacheData = 2
         except (ImportError, AttributeError, OSError, ValueError):
             return None
 
@@ -1140,10 +1229,13 @@ class Probe:
     def _cpu(self, windows_info):
         if self.os in ("linux", "android"):
             self._cpu_linux()
+            self._l2_cache_linux()
         elif self.os == "windows":
             self._cpu_windows(windows_info)
+            self._l2_cache_windows()
         elif self.os == "macos":
             self._cpu_macos()
+            self._l2_cache_macos()
         elif self.os == "freebsd":
             out = self.tool_stdout(["sysctl", "-n", "hw.model"], 5)
             self.put("CPU_MODEL", (out or "").strip() or None, warn_invalid=False)
@@ -1225,6 +1317,38 @@ class Probe:
                 self.warn("unknown_arm_part")
             result.append((entry, name))
         return result
+
+    def _l2_cache_linux(self):
+        """CPU_L2_CACHE_KB: the largest level-2 unified or data cache of /sys/devices/system/cpu/cpu<N>/cache."""
+        best, listed = 0, False
+        base = self.path("/sys/devices/system/cpu")
+        for index in sorted(glob.glob(os.path.join(glob.escape(base), "cpu[0-9]*", "cache", "index[0-9]*"))):
+            if (_read(os.path.join(index, "level"), 64) or "").strip() != "2":
+                continue
+            if (_read(os.path.join(index, "type"), 64) or "").strip() not in ("Unified", "Data"):
+                continue
+            listed = True
+            best = max(best, cache_size_kb(_read(os.path.join(index, "size"), 64)) or 0)
+        if best:
+            self.put("CPU_L2_CACHE_KB", best)
+        elif listed:
+            self.warn("not_determined", "CPU_L2_CACHE_KB")
+
+    def _l2_cache_windows(self):
+        kb = getattr(self.win, "l2_cache_kb", lambda: None)()
+        if kb is None:
+            self.warn("not_determined", "CPU_L2_CACHE_KB")
+        elif kb > 0:
+            self.put("CPU_L2_CACHE_KB", kb)
+
+    def _l2_cache_macos(self):
+        sizes = []
+        for name in ("hw.perflevel0.l2cachesize", "hw.perflevel1.l2cachesize", "hw.l2cachesize"):
+            out = (self.tool_stdout(["sysctl", "-n", name], 5) or "").strip()
+            if out.isdigit():
+                sizes.append(int(out) // 1024)
+        if sizes and max(sizes) > 0:
+            self.put("CPU_L2_CACHE_KB", max(sizes))
 
     def _features_from_flags(self, tokens):
         """SUPPORTS_* from a /proc/cpuinfo flag list (None: the file had no list -> UNKNOWN for this ARCH)."""
@@ -1522,7 +1646,9 @@ class Probe:
             nvidia, smi = probe_nvidia(run, os_name, self.env)
             if nvidia and smi:
                 self.put("NVIDIA_DRIVER_CUDA_MAX", nvidia_cuda_max(run, smi), warn_invalid=False)
-            vk_ran, vk = probe_vulkaninfo(run)
+            vk_ran, vk, vk_version = run_vulkaninfo(run)
+            self.put("VULKAN_INSTANCE_VERSION", vk_version or self._vulkan_loader_version(), warn_invalid=False)
+            self.put("OPENCL_PLATFORMS", ",".join(probe_opencl(run)) or None, warn_invalid=False)
             others = [g for g in vk if g["VENDOR"] != "nvidia" or not nvidia]
             if os_name == "windows":
                 adapters = [g for g in probe_windows_adapters(run) if g["VENDOR"] != "nvidia" or not nvidia]
@@ -1563,6 +1689,24 @@ class Probe:
             rocm = first_number(self.read("/opt/rocm/.info/version", 4096) or "", 4)
             self.put("ROCM_VERSION", rocm, warn_invalid=False)
         self.values["METAL"] = "ON" if os_name == "macos" and self._metal else "OFF"
+
+    def _vulkan_loader_version(self):
+        """Y.Z of the Vulkan loader's file name (libvulkan.so.1.Y.Z on Linux; the file version of vulkan-1.dll on
+        Windows), the first in the order of the loader folders."""
+        if self.os == "windows":
+            root = self.env.get("SystemRoot") or self.env.get("SYSTEMROOT")
+            version = self.win.file_version(os.path.join(root, "System32", "vulkan-1.dll")) if root else None
+            parts = (version or "").split(".")
+            return ".".join(parts[:3]) if len(parts) >= 3 else None
+        if self.os not in ("linux", "android"):
+            return None
+        for pattern in ("/usr/lib/*/libvulkan.so.1.*", "/usr/lib/libvulkan.so.1.*", "/usr/lib64/libvulkan.so.1.*",
+                        "/lib/*/libvulkan.so.1.*", "/lib/libvulkan.so.1.*", "/lib64/libvulkan.so.1.*"):
+            for path in sorted(glob.glob(self._glob(pattern))):
+                match = re.match(r"^libvulkan\.so\.(1\.[0-9]+\.[0-9]+)$", os.path.basename(path))
+                if match:
+                    return match.group(1)
+        return None
 
     def _vulkan_loader(self):
         if self.injected_find_library is not None or not self.sysroot:
