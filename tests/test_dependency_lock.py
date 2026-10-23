@@ -136,10 +136,12 @@ def test_exports_say_how_they_are_made():
 
 def test_installers_install_only_the_hash_pinned_requirements_of_this_checkout():
     """The desktop installers install the GUI too (requirements-gui.txt, A3); install.sh --headless (a server, the
-    framework image without --gui) installs requirements.txt, without Qt. Each from the hash-pinned export only."""
+    framework image without --gui) installs requirements.txt, without Qt. Each from the hash-pinned export only, and
+    nothing else: no "pip install --upgrade pip", which fetched the newest pip without a checksum (round 23, item 3:
+    the installers download nothing unchecked; the venv keeps the pip that comes with Python)."""
     for name in ("install.sh", "install.bat"):
         text = (REPO_ROOT / name).read_text(encoding="utf-8")
-        installs = re.findall(r"pip(?:\.exe)?\"?\)? install (?!--upgrade pip)[^\r\n|>]*", text.replace("$Pip", "pip"))
+        installs = re.findall(r"pip(?:\.exe)?\"?\)? install [^\r\n|>]*", text.replace("$Pip", "pip"))
         # --no-deps: the export is complete (every package, every hash), so pip installs exactly that set and does not
         # resolve again (pyproject.toml [tool.uv] overrides one upstream cap: Pillow)
         assert installs and all(
