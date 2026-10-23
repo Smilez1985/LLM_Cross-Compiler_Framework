@@ -2366,8 +2366,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   hf-online): Suche, Lizenzprüfung, Dateiliste und Download gingen bei eingeschaltetem Offline-Modus online, während
   die Aufrufe einer KI abgelehnt wurden. **Tools > Hugging Face Model Browser...** lehnt jetzt vor jeder Anfrage ab,
   bevor ein Worker startet oder nach einem Token gefragt wird, in klaren Worten in deiner Sprache: Der Offline-Modus
-  ist an, es wird nichts gesucht, geprüft oder geladen, wo du ihn ausschaltest (Ditto > KI-Einstellungen...), und dass
-  Modelle, die schon auf diesem Computer sind, nutzbar bleiben. `ModelManager` lehnt für jeden Aufrufer gleich ab
+  ist an, es wird nichts gesucht, geprüft oder geladen, dann die Worte, die dir jede andere Ablehnung im
+  Offline-Modus zeigt: den Offline-Modus ausschalten (Ditto > KI-Einstellungen...) oder ein Modell nehmen, das schon
+  auf diesem Computer ist. `ModelManager` lehnt für jeden Aufrufer gleich ab
   (`hf_hub.offline_refusal`, dieselbe Ablehnung, die `HubClient` einer KI gibt; `hf_hub.person_text` gibt einem
   Fenster oder der Kommandozeile die Worte für die Person). **Alte Downloads übernehmen…** funktioniert offline: Eine
   Datei, deren Prüfsumme nur Hugging Face liefern könnte (ein Cache ohne Links), bleibt mit dem Grund „der

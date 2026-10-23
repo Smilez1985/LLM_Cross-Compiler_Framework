@@ -360,9 +360,10 @@ class HuggingFaceWindow(QMainWindow):
         except Exception:  # noqa: BLE001 - an unreadable setting: the core decides
             refused = False
         if refused:
+            from orchestrator.Core.hf_hub import offline_refusal, person_text
             from orchestrator.gui.plain import plain_box
             self.status_label.setText(self._t("blocker.offline_mode"))
-            plain_box(self, "information", self._t("hf.offline.title"), self._t("hf.offline"))
+            plain_box(self, "information", self._t("hf.offline.title"), person_text(offline_refusal(), self.lang))
         return refused
 
     def start_search(self):

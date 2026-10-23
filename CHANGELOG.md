@@ -2095,7 +2095,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   search, licence check, file list and download went online with offline mode on, while an AI caller's calls were
   refused. **Tools > Hugging Face Model Browser...** now refuses before any request, before a worker starts or a token
   is asked for, in plain words in your language: offline mode is on, nothing is searched, checked or downloaded,
-  where to switch it off (Ditto > AI Settings...), and that models already on this computer stay usable.
+  then the words every other offline refusal shows you: switch offline mode off (Ditto > AI Settings...), or use a
+  model already on this computer.
   `ModelManager` refuses the same way for every caller (`hf_hub.offline_refusal`, the refusal `HubClient` gives an
   AI; `hf_hub.person_text` gives a window or the command line the person's words). **Take over old downloads...**
   works offline: a file whose checksum only Hugging Face could give (a cache without links) stays in the old cache
