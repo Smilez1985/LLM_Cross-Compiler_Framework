@@ -504,6 +504,10 @@ def functional_test(gguf: Path, tools: Path, seconds: int) -> Tuple[str, Optiona
         log(f"Functional test: {tool.name} was stopped by signal {-run.returncode} (not enough memory?); not counted "
             "as a failure.")
         return "stopped", tool.name
+    if run.returncode in (126, 127):
+        # The tool itself did not start (a library of the image missing, no permission): nothing said about the GGUF
+        log(f"Functional test skipped: {tool.name} does not start in this image (exit {run.returncode}).")
+        return "skipped", tool.name
     tail = [line for line in (run.stderr or "").splitlines() if line.strip()][-6:]
     raise Problem(f"The functional test failed: {tool.name} could not run {gguf.name} (exit {run.returncode}), so "
                   "the GGUF the converter wrote does not work." + ("" if not tail else " Its last lines:\n  "

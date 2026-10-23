@@ -705,7 +705,7 @@ The statistics (`convert_stats.json` in the stage folder) go into `build_info.js
 `weights`, `input_bytes`, `converted`, `output_format`, `output_type`, `output_bytes`, `ratio` (input / output),
 `seconds`, `functional_test` (`passed`, `skipped`, `timed out` or `stopped`) and `functional_test_tool`; numbers and
 words only, no paths. A functional test that ends with an error fails the stage with the tool's last lines: the GGUF
-does not work. It is skipped with a note when the image has neither tool, for an embedding model, for the NPU formats
+does not work. It is skipped with a note when the image has neither tool or the tool does not start there, for an embedding model, for the NPU formats
 (the model runs on the board) and in the `imatrix` job (`llama-imatrix` runs the model there).
 
 ## 7. Sandbox rules

@@ -422,6 +422,8 @@ if mode == 'completion-hang':
     time.sleep(30)
 if mode == 'completion-signal':
     os.kill(os.getpid(), 9)
+if mode == 'completion-nostart':  # what the loader says when a library of the image is missing
+    sys.exit(127)
 print('Hello world, this is', flush=True)
 """
 
@@ -465,6 +467,16 @@ def test_a_run_that_cannot_finish_here_is_a_note_not_a_failure(tmp_path, monkeyp
     gguf = write_gguf(tmp_path / "model-F16.gguf")
     assert mc.functional_test(gguf, tools_with(tmp_path, "llama-completion"), 1) == (result, "llama-completion")
     assert "not counted as a failure" in capsys.readouterr().out
+
+
+@needs_posix
+def test_a_tool_that_does_not_start_says_nothing_about_the_gguf(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("STUB_LOG", str(tmp_path / "calls.log"))
+    monkeypatch.setenv("STUB_FAIL", "completion-nostart")
+    gguf = write_gguf(tmp_path / "model-F16.gguf")
+    assert mc.functional_test(gguf, tools_with(tmp_path, "llama-completion"), 30) == ("skipped", "llama-completion")
+    assert "Functional test skipped: llama-completion does not start in this image (exit 127)." in \
+        capsys.readouterr().out
 
 
 @needs_posix
