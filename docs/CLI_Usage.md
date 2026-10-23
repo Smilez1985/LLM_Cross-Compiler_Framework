@@ -1842,6 +1842,11 @@ read, 2 for wrong options.
 | `--label TEXT` | Your name for the board in the profile store (with `--device` or `--import`). |
 | `--import FILE` | Store a board's probe file in the probe store and print its probe id (not together with `--device`). |
 
+When the board's network drops during `--device` (a board with Wi-Fi only, for example), the scan waits up to
+300 s for the board and says so once (`Waiting for the board at ... (Ctrl+C)`); Ctrl+C ends the command at once,
+and no profile is stored. A board that does not answer again ends the scan with what that means and the next step, as
+`deploy run` says it.
+
 A machine without network access runs a probe by hand, and you import its file
 ([README](../README.md#probing-the-boards-hardware)).
 

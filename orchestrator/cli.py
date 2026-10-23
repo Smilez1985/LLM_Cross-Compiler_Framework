@@ -4814,6 +4814,10 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
     key = _trust_device(state_dir, host, port, trust_fingerprint, ctx)
     if password is None:
         password = _device_password(None, False, ask_when_omitted=True)
+    from orchestrator.remote.text import wait_lines
+    # The probe's session waits for a board whose network dropped (N5): said as the device runtime commands and the
+    # Builder tab's scan say it, with the key that ends it (Ctrl+C ends the command)
+    lines = wait_lines(lambda text: console.print(escape(text)), host, _config_language(ctx), hint=" (Ctrl+C)")
     # The same core step as the GUI's Builder tab > Scan / Import... > Remote Scan via SSH... (scan_steps.scan_device):
     # login (recorded for Mojo), probe, profile file, profile store, deploy user and the trusted, paired record.
     try:
@@ -4821,10 +4825,14 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
             scan = scan_device(state_dir, host, port, user, key, password=password, label=label,
                                output_file=output_file, as_json=as_json, store=store, record=ctx is not None,
                                via="cli", actor="cli",   # the audit log is opened only for the record, as before
-                               audit_factory=(lambda: _device_audit(ctx, state_dir)) if ctx is not None else None)
+                               audit_factory=(lambda: _device_audit(ctx, state_dir)) if ctx is not None else None,
+                               on_event=lines)
     except DeviceScanError as e:
         if e.kind == "login":   # recorded for Mojo by the core step already
             _unreachable(ctx, host, port, e.error, doing=f"log in to {user}@", state_dir=state_dir)
+        elif e.kind == "probe" and e.reason and getattr(e.error, "kind", "") == "wait":
+            # the board did not answer again after its network dropped: the reason in plain words, as `deploy run`
+            _board_step_failed(ctx, e.error, host, port)
         elif e.kind == "probe":
             console.print(f"[red]The probe on {escape(host)} failed: {escape(str(e.error))}[/red]")
         else:

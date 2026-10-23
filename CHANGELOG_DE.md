@@ -1705,10 +1705,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Protokoll, mit dem Knopf **Scan abbrechen**, solange der Scan läuft, wie ihn das Fenster Boards hat: Er beendet ein
   Warten auf das Board sofort (nicht erst nach 300 s), und nichts wird gespeichert (`scan_steps.scan_device` nimmt den
   `CancelToken` und `on_event` des Aufrufers). Die Wartezeile der CLI bei `device runtime deploy|verify|prune
-  --on-device` nennt die Taste, die das Warten beendet, " (Ctrl+C)", wie die von `deploy run`; ein Strg+C während des
+  --on-device` und bei `scan --device` (das unter seinem Spinner stumm wartete) nennt die Taste, die das Warten beendet, " (Ctrl+C)", wie die von `deploy run`; ein Strg+C während des
   Wartens im Laufzeit-Deployment beendet den Befehl jetzt als Strg+C (das Aufräumen des Staging-Ordners, das das Board
   dann nicht erreicht, ersetzt es nicht mehr durch „the connection to the device is closed“), und ein Board, das nicht
-  wieder antwortet, beendet diese Befehle mit dem verständlichen Grund und seinem nächsten Schritt (`_print_reason`,
+  wieder antwortet, beendet diese Befehle (auch `scan --device`) mit dem verständlichen Grund und seinem nächsten Schritt (`_print_reason`,
   wie `deploy run` es ausgibt), nicht mit einem Satz, der nur den Grundcode nennt. Ein
   `CancelToken` ersetzt die vier Kopien von „den Client halten, damit Abbrechen ihn schließt“, und das Schließen einer
   Sitzung beendet ihr Warten. Die Board-Schritte der Person, `scan --device` und Mojo fragen

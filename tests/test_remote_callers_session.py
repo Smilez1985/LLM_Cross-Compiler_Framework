@@ -823,3 +823,37 @@ def test_a_ctrl_c_during_a_wait_is_not_hidden_by_the_staging_clean_up(tmp_path, 
     session._sleep = ctrl_c
     with pytest.raises(KeyboardInterrupt):
         deploy_over(session, build, packaged)
+
+
+def test_the_cli_scan_says_its_wait_and_ends_a_failed_wait_in_plain_words(tmp_path, monkeypatch):
+    """`scan --device` (cli._scan_device) runs scan_steps.scan_device, whose probe session waits up to 300 s for a
+    board whose network dropped (N5). It says that wait with the key that ends it, as the device runtime commands and
+    the Builder tab's scan do, and a board that did not answer again ends it with the reason's title and next step
+    (cli._board_step_failed), not with the session's sentence that only names the raw code."""
+    from orchestrator import cli as cli_module
+    from orchestrator.remote import transport
+    from orchestrator.remote.session import RemoteEvent, SessionFailure
+    from orchestrator.runtime import scan_steps
+    from orchestrator.runtime.device import reasons
+    from test_cli_builds import quiet_console
+    printed = quiet_console(monkeypatch)
+    monkeypatch.setattr(transport, "available", lambda: (True, ""))
+    monkeypatch.setattr(cli_module, "_trust_device", lambda *a, **k: object())
+
+    def scan_device(state_dir, host, port, user, key, *, on_event=None, **kwargs):
+        if on_event is not None:
+            on_event(RemoteEvent("waiting", elapsed=0, limit=300, step="command"))
+        lost = SessionFailure(f"The board did not answer again within 300 s ({reasons.HOST_DOWN})", "wait",
+                              reasons.HOST_DOWN)
+        raise scan_steps.DeviceScanError(f"The probe on {host} failed: {lost}", "probe", reason=lost.reason,
+                                         error=lost)
+    monkeypatch.setattr(scan_steps, "scan_device", scan_device)
+    with pytest.raises(SystemExit) as code:
+        cli_module._scan_device(None, tmp_path, tmp_path / "board.txt", False, "192.0.2.30", "dietpi", 22, "", None,
+                                None)
+    out = printed.getvalue()
+    assert code.value.code == 1
+    (line,) = [ln for ln in out.splitlines() if ln.startswith("Waiting for the board at 192.0.2.30")]
+    assert line.endswith(" (Ctrl+C)"), line
+    assert reasons.person_title(reasons.HOST_DOWN, "en", address="192.0.2.30", port=22) in out
+    assert "within 300 s" not in out, out
