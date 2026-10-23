@@ -1265,6 +1265,21 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **One deploy step for a build and one flow for a board's runtime, for the CLI, the GUI and the AI** (consolidation
+  chain c3-deploy-flow). `llmcf deploy run` and the Deployment tab's Deploy and Deploy existing package... now go
+  through one core step, `person_steps.deploy_build`: the package, the deploy, then the board's trusted record. The
+  tab now makes its package the way `llmcf deploy package` and Create package only... do (`make_package`): a Docker
+  package carries the inference image's name, and Cancel also stops the packaging between its steps (no package
+  stays). The reason a package cannot be made comes back with the result instead of the shared
+  `DeploymentManager.last_package_error`, which no framework code reads any more (`create_deployment_package` keeps
+  it for older callers). The tab's trusted record is audited as the CLI audits it: without the registry's audit log
+  it now writes its row to the per-user audit log, where it wrote none before. `llmcf device runtime deploy`, the
+  Boards window's Deploy runtime... and the AI's `deploy_device_runtime` run one flow, `steps.deploy_runtime_flow`.
+  It logs in, writes the board's trusted record (person only), reads the board and refuses root before any question,
+  asks about the benchmark model with its consent (person only), installs, closes the session and records "tested
+  on". Each caller hands over its login and its words as hooks. The AI's hooks hold no trusted record, no question
+  and no early root refusal, so its results are unchanged; a test checks this. What the CLI prints and the windows
+  show is otherwise unchanged.
 - **The GUI's Hugging Face browser downloads into the models folder's `hf/` folder, checked, like an AI's download**
   (maintainer decision A6; consolidation chain hf). New location: `<models folder>/hf/<owner>--<name>/<first 12
   characters of the commit>/<file>`, the same folder as an AI's `download_hf_file` (the Builder keeps staging whole

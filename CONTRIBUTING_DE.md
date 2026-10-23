@@ -723,8 +723,15 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   Tools geben ihre eigenen Optionen mit (`local_paths`, `priority`, `output_dir`, ...) und behalten nur ihre Fragen
   und ihre Darstellung. Die `recipe.yml` liest nur `community_manager.read_recipe`. Eine Änderung der
   KI-Einstellungen geht über `AISettingsChange` (`orchestrator/llm/settings_change.py`): `problems()`, die eigene
-  Rückfrage des Kanals zu `plain_http_url()`, dann `apply()`. `tests/test_build_parity_core.py` und
-  `tests/test_ai_settings_change.py` prüfen, dass kein Fenster und kein Befehl an ihnen vorbeigeht.
+  Rückfrage des Kanals zu `plain_http_url()`, dann `apply()`. Ein Build kommt nur über `person_steps.deploy_build`
+  auf ein Board (`llmcf deploy run` und der Deployment-Tab: das Paket über `make_package`, dessen Grund mit dem Aufruf
+  zurückkommt, nie über das geteilte `last_package_error` des Managers; das Deployment; der vertraute Eintrag des
+  Boards mit der Audit-Zeile von `person_steps.device_audit`), und die selbst gebaute Runtime eines Boards nur über
+  `steps.deploy_runtime_flow` (`llmcf device runtime deploy`, das Boards-Fenster, das `service.deploy` der KI): jeder
+  Aufrufer übergibt seine Anmeldung als `DeployHooks`, und nur die Kanäle der Person geben die Hooks dazu, die den
+  vertrauten Eintrag des Boards schreiben oder die Frage zum Benchmark stellen. `tests/test_build_parity_core.py`,
+  `tests/test_ai_settings_change.py` und `tests/test_deploy_flow.py` prüfen, dass kein Fenster und kein Befehl an
+  ihnen vorbeigeht.
 - Das Framework fragt nie nach einem Repository-Token, liest keines und speichert keines. Übergib Arbeit an GitHub
   über eine installierte GitHub CLI (sie behält ihre eigene Anmeldung) oder den Browser, so wie
   `llm-cli zoo export --pr` es tut.
