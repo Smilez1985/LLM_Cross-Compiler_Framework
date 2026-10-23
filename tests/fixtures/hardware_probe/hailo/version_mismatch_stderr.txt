@@ -1,0 +1,1 @@
+libhailort version (4.23.0) does not match HailoRT-CLI version (4.24.0)

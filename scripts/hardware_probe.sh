@@ -135,7 +135,7 @@ P_SOC_VENDOR='^[a-z0-9][a-z0-9-]{0,31}$'
 P_CUDA='^[0-9]{1,2}\.[0-9]{1,3}$'
 P_TOOLCHAIN='^(gcc|clang|appleclang|msvc|icx)-[0-9]{1,4}(\.[0-9]{1,6}){0,3}$'
 P_INT='^(0|[1-9][0-9]{0,11})$'
-P_NPU_DEVICE='^/dev/(rknpu|dri/(renderD|card)[0-9]{1,3}|accel/accel[0-9]{1,3}|hailo[0-9]{1,3}|apex_[0-9]{1,3})$'
+P_NPU_DEVICE='^/dev/(rknpu|dri/(renderD|card)[0-9]{1,3}|accel/accel[0-9]{1,3}|hailo[0-9]{1,3}|h1x(-[0-9]{1,3})?|apex_[0-9]{1,3})$'
 # PCI device ids of AMD APU graphics (amdgpu_drv.c): their "VRAM" is a carve-out of the system RAM.
 AMD_APU_IDS="0x15dd 0x15d8 0x1636 0x1638 0x164c 0x15e7 0x163f 0x1435 0x1681 0x1506 0x164e 0x13c0 0x15bf 0x15c8"
 AMD_APU_IDS="$AMD_APU_IDS 0x150e 0x1114 0x1586"
@@ -802,17 +802,278 @@ if [ -n "$RKNODE" ]; then
     done
     if [ -n "$DRV" ]; then put RKNPU_DRIVER_VERSION "$DRV"; else warn "needs_root:RKNPU_DRIVER_VERSION"; fi
 fi
-HAILO_NODE="" APEX_NODE="" INTEL_NODE=""
-for n in "$(f /dev)"/hailo[0-9]*; do [ -e "$n" ] && { HAILO_NODE=/dev/${n##*/}; break; }; done
+APEX_NODE="" INTEL_NODE=""
 for n in "$(f /dev)"/apex_[0-9]*; do [ -e "$n" ] && { APEX_NODE=/dev/${n##*/}; break; }; done
 for n in "$(f /sys/class/accel)"/accel[0-9]*; do
     if [ "$(link_name "$n/device/driver")" = intel_vpu ]; then INTEL_NODE=/dev/accel/${n##*/}; break; fi
 done
+# --- Hailo (HAILO_PLAN.md section 2; the same read order and rules as hardware_probe.py) -------------------------
+# Files first (no tool): /sys/module/<driver> (never lsmod), the sysfs classes, /dev nodes, PCI and USB ids. Then
+# hailortcli with fixed arguments and an empty stdin: -v, scan, fw-control identify -s <id> for up to 16 devices (never
+# --extended); of identify only the architecture and firmware lines are read. Device ids stay in this script.
+
+hailo_arch_name() {  # identify's "Device Architecture" word -> HAILO_ARCH (tables.hailo_arch_names)
+    case "$1" in
+        HAILO8) echo hailo8 ;;
+        HAILO8_B0) echo hailo8 ;;
+        HAILO8L) echo hailo8l ;;
+        HAILO10H) echo hailo10h ;;
+        HAILO15H) echo hailo15h ;;
+        HAILO15M) echo hailo15m ;;
+        HAILO15L) echo hailo15l ;;
+        HAILO12L) echo hailo12l ;;
+        MARS) echo hailo12l ;;
+        *) return 1 ;;
+    esac
+}
+hailo_arch_family() {  # HAILO_ARCH -> HAILO_FAMILY (tables.hailo_arch_family)
+    case "$1" in
+        hailo8) echo hailo8 ;;
+        hailo8l) echo hailo8 ;;
+        hailo10h) echo hailo1x ;;
+        hailo15h) echo hailo1x ;;
+        hailo15m) echo hailo1x ;;
+        hailo15l) echo hailo1x ;;
+        hailo12l) echo hailo1x ;;
+        *) return 1 ;;
+    esac
+}
+hailo_driver_family() {  # kernel module -> HAILO_FAMILY (tables.hailo_drivers)
+    case "$1" in
+        hailo_pci) echo hailo8 ;;
+        hailo1x_pci) echo hailo1x ;;
+        hailo_integrated_nnc) echo hailo1x ;;
+        *) return 1 ;;
+    esac
+}
+hailo_class_family() {  # sysfs class -> HAILO_FAMILY (tables.hailo_sysfs_classes)
+    case "$1" in
+        hailo_chardev) echo hailo8 ;;
+        hailo1x) echo hailo1x ;;
+        hailo1x_integrated) echo hailo1x ;;
+        *) return 1 ;;
+    esac
+}
+hailo_pci_family() {  # PCI vendor:device -> HAILO_FAMILY (tables.hailo_pci_devices)
+    case "$1" in
+        0x1e60:0x2864) echo hailo8 ;;
+        0x1e60:0x45c4) echo hailo1x ;;
+        0x1e60:0x43a2) echo hailo1x ;;
+        0x1e60:0x26a2) echo hailo1x ;;
+        *) return 1 ;;
+    esac
+}
+hailo_usb_arch() {  # USB vendor:product -> HAILO_ARCH (tables.hailo_usb_devices)
+    case "$1" in
+        0x0b05:0x1d6f) echo hailo10h ;;
+        *) return 1 ;;
+    esac
+}
+hailo_interface() {  # the form of a hailortcli device id -> pcie, usb or integrated
+    case "$1" in
+        '[integrated]') echo integrated ;;
+        usb/*) echo usb ;;
+        *) echo pcie ;;
+    esac
+}
+count_distinct() { printf '%s\n' "$@" | sed '/^$/d' | sort -u | grep -c . ; }
+first_word() { printf '%s\n' "$@" | sed '/^$/d' | head -n1; }
+
+H_MODULE="" H_DRV_VER="" H_FAMS="" H_ENTRIES=0 H_NODE="" H_NODES=0 H_PCI=0 H_USB=0 H_USB_ARCH="" H_INTEGRATED=0
+for m in hailo_pci hailo1x_pci hailo_integrated_nnc; do
+    if [ "$OS" = linux ] && exists "/sys/module/$m"; then
+        H_MODULE=$m
+        H_FAMS="$H_FAMS $(hailo_driver_family "$m")"
+        v=$(first_number "$(rd "/sys/module/$m/version")")
+        if [ -n "$v" ] && valid "$P_DOTTED" "$v"; then H_DRV_VER=$v; fi
+        break
+    fi
+done
+for cls in hailo_chardev hailo1x hailo1x_integrated; do
+    for e in "$(f /sys/class)/$cls"/*; do
+        [ -e "$e" ] || [ -L "$e" ] || continue
+        H_ENTRIES=$((H_ENTRIES + 1))
+        [ -n "$H_NODE" ] || H_NODE=/dev/${e##*/}
+        H_FAMS="$H_FAMS $(hailo_class_family "$cls")"
+        [ "$cls" = hailo1x_integrated ] && H_INTEGRATED=1
+        if [ "$cls" = hailo_chardev ]; then   # the hailo8 driver's device_id reads 1e60:2864
+            did=$(trim "$(rdp "$e/device_id")")
+            case "$did" in
+                *:*) if v=$(hexid "${did%%:*}" 4) && d=$(hexid "${did#*:}" 4) && fam=$(hailo_pci_family "$v:$d"); then
+                         H_FAMS="$H_FAMS $fam"
+                     fi ;;
+            esac
+        fi
+    done
+done
+for n in "$(f /dev)"/hailo[0-9]*; do
+    [ -e "$n" ] || [ -L "$n" ] || continue
+    H_NODES=$((H_NODES + 1))
+    [ -n "$H_NODE" ] || [ "$H_ENTRIES" -gt 0 ] || H_NODE=/dev/${n##*/}
+done
+for id in $PCI_IDS; do
+    case "$id" in 0x1e60:*)
+        H_PCI=$((H_PCI + 1))
+        if fam=$(hailo_pci_family "$id"); then H_FAMS="$H_FAMS $fam"; fi ;;
+    esac
+done
+for id in $USB_IDS; do
+    if arch=$(hailo_usb_arch "$id"); then
+        H_USB=$((H_USB + 1)) H_USB_ARCH=$arch
+        H_FAMS="$H_FAMS $(hailo_arch_family "$arch")"
+    fi
+done
+
+# Step B: hailortcli. A call that does not answer (exit 124 of timeout, 126/127: cannot run) ends the Hailo tools,
+# as a missing tool does in hardware_probe.py; the Hailo part stops after 60 s where date +%s works.
+H_INSTALLED=0 H_WARN="" H_VERSION="" H_SCAN=0 H_IDS="" H_RECORDS=""
+hailo_seconds() { s=$(date +%s 2>/dev/null); case "$s" in ''|*[!0-9]*) echo "" ;; *) echo "$s" ;; esac; }
+H_START=$(hailo_seconds)
+if have hailortcli; then
+    out=$($TIMEOUT hailortcli -v </dev/null 2>&1)
+    rc=$?
+    case "$rc" in 124|125|126|127) ;; *) H_INSTALLED=1 ;; esac
+fi
+if [ "$H_INSTALLED" = 1 ]; then
+    ver=$(printf '%s\n' "$out" | sed -n 's/.*HailoRT-CLI version \([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' |
+          head -n1)
+    if printf '%s\n' "$out" | grep -q 'libhailort version ([0-9.][0-9.]*) does not match HailoRT-CLI version ([0-9.][0-9.]*)'; then
+        H_WARN=version_mismatch
+    elif [ "$rc" -ne 0 ]; then
+        if [ -n "$ver" ]; then H_WARN=not_determined; else H_WARN=version_mismatch; fi
+    elif [ -n "$ver" ] && valid "$P_DOTTED" "$ver"; then
+        H_VERSION=$ver
+    else
+        H_WARN=not_determined
+    fi
+    if [ "$H_WARN" != version_mismatch ] && out=$(tool hailortcli scan); then
+        raw=$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*\[-\][[:space:]]*Device:[[:space:]]*\([^[:space:]][^[:space:]]*\)[[:space:]]*$/\1/p')
+        case "$out" in *"Hailo devices not found"*) H_SCAN=1 ;; esac
+        [ -n "$raw" ] && H_SCAN=1
+        H_IDS=$(printf '%s\n' "$raw" |
+                grep -E '^(\[integrated\]|usb/[0-9]{3}:[0-9]{3}|(pci/)?([0-9a-fA-F]{4}:)?[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7])$' |
+                awk '!seen[$0]++')
+    fi
+    OLDIFS=$IFS; IFS=$NL
+    set -f
+    asked=0
+    for id in $H_IDS; do
+        [ "$asked" -lt 16 ] || break
+        now=$(hailo_seconds)
+        if [ -n "$H_START" ] && [ -n "$now" ] && [ $((now - H_START)) -ge 60 ]; then break; fi
+        asked=$((asked + 1))
+        # NUL bytes removed (as hailo-apps does); the exit code travels behind the output.
+        out=$( { $TIMEOUT hailortcli fw-control identify -s "$id" </dev/null 2>/dev/null; echo "rc=$?"; } | tr -d '\000')
+        rc=${out##*rc=}
+        out=${out%rc=*}
+        case "$rc" in 124|125|126|127) break ;; 0) ;; *) continue ;; esac
+        word=$(printf '%s\n' "$out" |
+               sed -n 's/^[[:space:]]*Device Architecture[[:space:]]*:[[:space:]]*\([A-Za-z0-9_][A-Za-z0-9_]*\)[[:space:]]*$/\1/p' |
+               head -n1 | tr 'a-z' 'A-Z')
+        [ -n "$word" ] || continue
+        fw=$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*Firmware Version[[:space:]]*:[[:space:]]*\([0-9][0-9.]*\).*/\1/p' |
+             head -n1)
+        valid "$P_DOTTED" "$fw" || fw=""
+        H_RECORDS="$H_RECORDS$id$SEP$word$SEP$fw$NL"
+    done
+    set +f
+    IFS=$OLDIFS
+fi
+
+H_PRESENT=0
+if [ "$H_PCI" -gt 0 ] || [ "$H_USB" -gt 0 ] || [ "$H_ENTRIES" -gt 0 ] || [ "$H_NODES" -gt 0 ] || [ -n "$H_IDS" ]; then
+    H_PRESENT=1
+fi
+[ -n "$H_VERSION" ] && put HAILORT_VERSION "$H_VERSION" "$P_DOTTED"
+[ -n "$H_WARN" ] && warn "$H_WARN:HAILORT_VERSION"
+H_ARCHS="" H_UNKNOWN=0 H_FWS="" H_ARCH=""
+OLDIFS=$IFS; IFS=$NL
+set -f
+for rec in $H_RECORDS; do
+    id=${rec%%"$SEP"*} rest=${rec#*"$SEP"}
+    word=${rest%%"$SEP"*} fw=${rest#*"$SEP"}
+    if ! arch=$(hailo_arch_name "$word"); then H_UNKNOWN=1; continue; fi
+    if [ "$arch" = hailo15h ] && [ "$(hailo_interface "$id")" != integrated ]; then arch=hailo10h; fi
+    H_ARCHS="$H_ARCHS$arch$NL"
+    [ -n "$fw" ] && H_FWS="$H_FWS$fw$NL"
+done
+set +f
+IFS=$OLDIFS
+if [ "$(count_distinct "$H_ARCHS")" -gt 1 ] || [ "$H_UNKNOWN" = 1 ]; then warn "not_determined:HAILO_ARCH"
+elif [ -n "$H_ARCHS" ]; then H_ARCH=$(first_word "$H_ARCHS")
+elif [ -n "$H_USB_ARCH" ] && [ "$H_PCI" = 0 ] && [ -z "$H_RECORDS" ]; then H_ARCH=$H_USB_ARCH
+fi
+[ -n "$H_ARCH" ] && H_FAMS="$(hailo_arch_family "$H_ARCH") $H_FAMS"
+set -f
+# shellcheck disable=SC2086 # the families are single words
+H_NFAM=$(count_distinct $H_FAMS)
+# shellcheck disable=SC2086
+H_FAMILY=$(first_word $H_FAMS)
+set +f
+H_CONFLICT=0
+if [ "$H_NFAM" -gt 1 ]; then H_CONFLICT=1 H_FAMILY="" H_ARCH=""; warn "not_determined:HAILO_FAMILY"; fi
+if [ "$H_PRESENT" = 1 ] && [ -z "$H_ARCH" ] && [ "$H_CONFLICT" = 0 ] && [ "$H_WARN" != version_mismatch ]; then
+    if [ "$H_INSTALLED" = 1 ] && [ -n "$H_NODE" ] && { [ -e "$(f "$H_NODE")" ] || [ -L "$(f "$H_NODE")" ]; } &&
+       ! { [ -r "$(f "$H_NODE")" ] && [ -w "$(f "$H_NODE")" ]; }; then
+        warn "needs_root:HAILO_ARCH"
+    else
+        warn "not_determined:HAILO_ARCH"
+    fi
+fi
+if [ "$(count_distinct "$H_FWS")" = 1 ]; then put HAILO_FW_VERSION "$(first_word "$H_FWS")" "$P_DOTTED"
+elif [ "$(count_distinct "$H_FWS")" -gt 1 ]; then warn "not_determined:HAILO_FW_VERSION"
+elif [ "$H_PRESENT" = 1 ] && { [ -n "$H_MODULE" ] || [ "$H_ENTRIES" -gt 0 ]; } && [ "$H_INSTALLED" = 0 ]; then
+    warn "not_determined:HAILO_FW_VERSION"
+fi
+H_IFACES=""
+if [ -n "$H_IDS" ]; then
+    OLDIFS=$IFS; IFS=$NL
+    set -f
+    for id in $H_IDS; do H_IFACES="$H_IFACES$(hailo_interface "$id")$NL"; done
+    set +f
+    IFS=$OLDIFS
+else
+    [ "$H_PCI" -gt 0 ] && H_IFACES="${H_IFACES}pcie$NL"
+    [ "$H_USB" -gt 0 ] && H_IFACES="${H_IFACES}usb$NL"
+    [ "$H_INTEGRATED" = 1 ] && H_IFACES="${H_IFACES}integrated$NL"
+fi
+if [ "$(count_distinct "$H_IFACES")" = 1 ]; then put HAILO_INTERFACE "$(first_word "$H_IFACES")"
+elif [ "$(count_distinct "$H_IFACES")" -gt 1 ]; then warn "not_determined:HAILO_INTERFACE"
+fi
+H_COUNT=""
+if [ -n "$H_IDS" ]; then H_COUNT=$(printf '%s\n' "$H_IDS" | grep -c .)
+elif [ "$H_PRESENT" = 1 ]; then
+    if [ "$H_ENTRIES" -gt 0 ]; then H_COUNT=$H_ENTRIES
+    elif [ "$H_NODES" -gt 0 ]; then H_COUNT=$H_NODES
+    else H_COUNT=$((H_PCI + H_USB))
+    fi
+elif [ "$H_SCAN" = 1 ]; then H_COUNT=0
+fi
+if [ -n "$H_COUNT" ]; then put_int HAILO_DEVICES "$H_COUNT" 0 64
+elif [ "$H_INSTALLED" = 1 ] && [ "$H_WARN" != version_mismatch ]; then warn "not_determined:HAILO_DEVICES"
+fi
+put HAILO_FAMILY "$H_FAMILY"
+put HAILO_ARCH "$H_ARCH"
+if [ -n "$H_MODULE" ]; then
+    put HAILO_DRIVER "$H_MODULE"
+    if [ -n "$H_DRV_VER" ]; then put HAILO_DRIVER_VERSION "$H_DRV_VER"; else warn "not_determined:HAILO_DRIVER_VERSION"; fi
+fi
+if [ "$OS" = linux ]; then
+    for m in "$(f /usr/lib/python3/dist-packages)"/hailort-*.dist-info/METADATA \
+             "$(f /usr/local/lib)"/python3*/dist-packages/hailort-*.dist-info/METADATA; do
+        [ -f "$m" ] || continue
+        v=$(trim "$(sed -n 's/^Version:[ 	]*//p' "$m" | head -n1 | tr -d '\r')")
+        if valid "$P_DOTTED" "$v"; then put HAILO_PYHAILORT_VERSION "$v"; break; fi
+    done
+fi
+H_MODEL=""
+[ -n "$H_ARCH" ] && H_MODEL="hailo-${H_ARCH#hailo}"
+
 describe() {  # VENDOR MODEL DEVICE: the first NPU found is described
     [ -n "$NPU_VENDOR" ] && return 0
     NPU_VENDOR=$1 NPU_MODEL=$2 NPU_DEVICE=$3
 }
-if pci_vendor_seen 0x1e60 || [ -n "$HAILO_NODE" ]; then HAILO=ON; describe hailo "" "$HAILO_NODE"; fi
+if [ "$H_PRESENT" = 1 ]; then HAILO=ON; describe hailo "$H_MODEL" "$H_NODE"; fi
 if pci_vendor_seen 0x1f4b; then METIS=ON; describe axelera "" ""; fi
 if pci_vendor_seen 0x1d6b; then MX3=ON; describe memryx "" ""; fi
 if id_seen 0x1ac1:0x089a "$PCI_IDS" || id_seen 0x1a6e:0x089a "$USB_IDS" || id_seen 0x18d1:0x9302 "$USB_IDS" \

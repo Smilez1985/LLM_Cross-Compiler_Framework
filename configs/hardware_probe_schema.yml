@@ -218,6 +218,48 @@ tables:
     "0x350b": rockusb
     "0x0006": adb-mtp
     "0x0019": adb
+  # Hailo accelerators (HAILO_PLAN.md section 2.2). hailortcli fw-control identify's "Device Architecture:" word (upper
+  # case, looked up exactly: HAILO8 is part of HAILO8L) -> HAILO_ARCH. The words are those of fw_control_command.cpp of
+  # both HailoRT branches; HAILO8_B0 appears only in older sample outputs and is kept for old releases.
+  hailo_arch_names:
+    HAILO8: hailo8
+    HAILO8_B0: hailo8
+    HAILO8L: hailo8l
+    HAILO10H: hailo10h
+    HAILO15H: hailo15h      # on a PCIe or USB device -> hailo10h (see HAILO_ARCH)
+    HAILO15M: hailo15m
+    HAILO15L: hailo15l
+    HAILO12L: hailo12l
+    MARS: hailo12l          # the master branch prints MARS for HAILO_ARCH_HAILO12L
+  # HAILO_ARCH -> HAILO_FAMILY: hailo8 = HailoRT 4.x (branch hailo8), hailo1x = HailoRT 5.x (branch master)
+  hailo_arch_family:
+    hailo8: hailo8
+    hailo8l: hailo8
+    hailo10h: hailo1x
+    hailo15h: hailo1x
+    hailo15m: hailo1x
+    hailo15l: hailo1x
+    hailo12l: hailo1x
+  # Kernel module (/sys/module/<name>) -> HAILO_FAMILY, in the order they are looked for (hailort-drivers)
+  hailo_drivers:
+    hailo_pci: hailo8
+    hailo1x_pci: hailo1x
+    hailo_integrated_nnc: hailo1x
+  # sysfs class (/sys/class/<name>/<entry>; the node is /dev/<entry>) -> HAILO_FAMILY, in this order
+  hailo_sysfs_classes:
+    hailo_chardev: hailo8
+    hailo1x: hailo1x
+    hailo1x_integrated: hailo1x
+  # PCI vendor:device -> HAILO_FAMILY (the drivers' pci_device_id tables). Hailo-8 and 8L share 0x2864, so a PCI id
+  # never sets HAILO_ARCH.
+  hailo_pci_devices:
+    "0x1e60:0x2864": hailo8
+    "0x1e60:0x45c4": hailo1x
+    "0x1e60:0x43a2": hailo1x
+    "0x1e60:0x26a2": hailo1x
+  # USB vendor:product -> HAILO_ARCH (HailoRT's install_usb.sh: the ASUS UGen300 USB AI Accelerator, a Hailo-10H)
+  hailo_usb_devices:
+    "0x0b05:0x1d6f": hailo10h
   # Codes in PROBE_WARNINGS: "<code>" or "<code>:<KEY>". Unknown codes are accepted (display only) if they match
   # the item pattern of PROBE_WARNINGS.
   warning_codes:
@@ -228,6 +270,7 @@ tables:
     converted_from_schema_1: written by the framework from a schema 1 file (today's .sh/.ps1 output)
     reprobe_before_build: the profile lacks facts a build needs; run the probe again on the machine
     cpu_features_unknown: the CPU features of the source file are unreliable and were set to UNKNOWN
+    version_mismatch: two parts of an installed vendor runtime report different versions; the key was left out
   consumers: [recipe, ditto, generator, proposal, preflight, match, mcp, gui, bench, deploy]
 
 keys:
@@ -1136,17 +1179,18 @@ keys:
     platforms: [linux, windows]
     sources:
       linux: >-
-        Rockchip NPU: SOC_MODEL; Intel NPU (intel_vpu driver): intel-npu; others (Hailo, Axelera, MemryX, Coral):
-        left out
-      windows: "Intel: intel-npu; others: left out"
-    normalise: "lower case identifier (rk3566, rk3588, hailo-8, hailo-8l, intel-npu)"
+        Rockchip NPU: SOC_MODEL; Hailo: HAILO_ARCH with a "-" after "hailo" (hailo8l -> hailo-8l, hailo10h ->
+        hailo-10h), left out without HAILO_ARCH; Intel NPU (intel_vpu driver): intel-npu; others (Axelera, MemryX,
+        Coral): left out
+      windows: "Hailo: as on Linux; Intel: intel-npu; others: left out"
+    normalise: "lower case identifier (rk3566, rk3588, hailo-8, hailo-8l, hailo-10h, intel-npu)"
     consumers: [preflight, bench, gui]
   NPU_DEVICE:
     group: npu
     type: pattern
     # Only accelerator nodes: a deploy step may pass this value to `docker run --device`, so an untrusted profile
     # must never name a disk, memory or other device node. A new kind of NPU node is added here on purpose.
-    pattern: '^/dev/(rknpu|dri/(renderD|card)[0-9]{1,3}|accel/accel[0-9]{1,3}|hailo[0-9]{1,3}|apex_[0-9]{1,3})$'
+    pattern: '^/dev/(rknpu|dri/(renderD|card)[0-9]{1,3}|accel/accel[0-9]{1,3}|hailo[0-9]{1,3}|h1x(-[0-9]{1,3})?|apex_[0-9]{1,3})$'
     required: false
     stability: stable
     perf: none
@@ -1155,7 +1199,8 @@ keys:
       linux: >-
         the node that was found: /dev/rknpu, a DRM node of the vendor rknpu driver (/dev/dri/renderD<N> or
         /dev/dri/card<N> whose device driver is "RKNPU", compared without case), /dev/accel/accel<N> (mainline
-        rocket or intel_vpu driver), /dev/hailo<N>, /dev/apex_<N>
+        rocket or intel_vpu driver), a Hailo node (/dev/<entry> of the first entry of the sysfs classes hailo_chardev,
+        hailo1x and hailo1x_integrated: /dev/hailo<N>, /dev/h1x-<N> or /dev/h1x; else /dev/hailo<N>), /dev/apex_<N>
     normalise: "absolute path of one of the accelerator nodes in the pattern"
     consumers: [deploy, preflight]
   RKNPU_DRIVER_VERSION:
@@ -1245,9 +1290,13 @@ keys:
     stability: stable
     perf: key
     platforms: [linux, windows]
-    sources: {linux: "PCI vendor 0x1e60 (lspci -n, /sys/bus/pci/devices/*/vendor)", windows: "PnP VEN_1E60"}
+    sources:
+      linux: >-
+        PCI vendor 0x1e60 (/sys/bus/pci/devices/*/vendor), a USB device of tables.hailo_usb_devices, an entry of a
+        sysfs class of tables.hailo_sysfs_classes, a /dev/hailo<N> node, or a device hailortcli scan lists
+      windows: "PnP VEN_1E60, a USB device of tables.hailo_usb_devices, or a device hailortcli scan lists"
     normalise: "ON/OFF"
-    consumers: [preflight, generator]
+    consumers: [preflight, generator, match]
   SUPPORTS_METIS:
     group: npu
     type: bool
@@ -1290,6 +1339,163 @@ keys:
       windows: "PnP device \"Intel(R) AI Boost\""
     normalise: "ON/OFF"
     consumers: [preflight]
+
+  # --- Hailo accelerators (HAILO_PLAN.md section 2; written whatever NPU NPU_VENDOR describes) ------------------
+  # Linux, files first (no tool): /sys/module/<driver> (never lsmod), the sysfs classes, /dev nodes, PCI and USB ids.
+  # Then hailortcli with fixed arguments, an empty stdin and the time limit, never with sudo, at most 60 s in all:
+  # -v, scan, and fw-control identify -s <id> for up to 16 devices (never --extended, which prints the MAC address and
+  # the SoC and ULT ids; of identify only the "Device Architecture" and "Firmware Version" lines are read, NUL bytes
+  # removed, and a run counts only when the architecture line was there). Device ids stay in memory, never in a file.
+  HAILO_FAMILY:
+    group: npu
+    type: enum
+    values: [hailo8, hailo1x]
+    required: false
+    stability: stable
+    perf: key
+    platforms: [linux, windows]
+    sources:
+      linux: >-
+        all of: HAILO_ARCH via tables.hailo_arch_family, the kernel module via tables.hailo_drivers, each sysfs class
+        entry via tables.hailo_sysfs_classes (and a hailo_chardev entry's device_id via tables.hailo_pci_devices),
+        the PCI ids via tables.hailo_pci_devices, the USB ids via tables.hailo_usb_devices
+      windows: "HAILO_ARCH and the PnP PCI and USB ids through the same tables"
+    normalise: >-
+      the one family these name: hailo8 = HailoRT 4.x (branch hailo8), hailo1x = HailoRT 5.x (branch master). Only
+      from a device or its driver (never from an installed HailoRT alone). Sources that disagree (HAILO8L with module
+      hailo1x_pci, two kinds of devices): HAILO_FAMILY and HAILO_ARCH left out with not_determined:HAILO_FAMILY
+    consumers: [preflight, match, generator, gui, deploy, recipe]
+  HAILO_ARCH:
+    group: npu
+    type: enum
+    values: [hailo8, hailo8l, hailo10h, hailo15h, hailo15m, hailo15l, hailo12l]
+    required: false
+    stability: stable
+    perf: key
+    platforms: [linux, windows]
+    sources:
+      any: >-
+        hailortcli fw-control identify -s <id> for each device of hailortcli scan: the word after "Device
+        Architecture:" via tables.hailo_arch_names (the exact word, never a substring); without one, a USB device of
+        tables.hailo_usb_devices when no Hailo PCI device is there
+    normalise: >-
+      the spelling of the Dataflow Compiler's --hw-arch. HAILO15H on a PCIe or USB device -> hailo10h (what hailo-apps
+      and Application-Code-Examples do; unverified on a board), on the integrated device -> hailo15h. An unknown word
+      or devices of different architectures: left out with not_determined:HAILO_ARCH; a device without an
+      architecture: not_determined:HAILO_ARCH, or needs_root:HAILO_ARCH when hailortcli answered and the node cannot be
+      opened for reading and writing; nothing when version_mismatch or not_determined:HAILO_FAMILY explains it
+    consumers: [preflight, match, generator, gui, deploy, recipe]
+  HAILO_DEVICES:
+    group: npu
+    type: int
+    min: 0
+    max: 64
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows]
+    sources:
+      any: >-
+        the devices hailortcli scan lists ("[-] Device: <id>"; "Hailo devices not found" = 0); when it lists none or
+        did not run and a device was seen: the sysfs class entries, else the /dev/hailo<N> nodes, else the PCI and
+        USB devices of the tables
+    normalise: >-
+      decimal integer; written when SUPPORTS_HAILO=ON or hailortcli scan answered; hailortcli installed without an
+      answer and no device seen: not_determined:HAILO_DEVICES
+    consumers: [preflight, gui, deploy]
+  HAILO_INTERFACE:
+    group: npu
+    type: enum
+    values: [pcie, usb, integrated]
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows]
+    sources:
+      any: >-
+        the form of the ids hailortcli scan lists: pci/<address> or a bare PCI address -> pcie, usb/<bus>:<addr> ->
+        usb, [integrated] -> integrated; without them PCI vendor 0x1e60 -> pcie, a USB id of tables.hailo_usb_devices
+        -> usb, an entry of the sysfs class hailo1x_integrated -> integrated (Ethernet devices are never looked for)
+    normalise: "written only when every device has the same interface, else left out with not_determined:HAILO_INTERFACE"
+    consumers: [preflight, gui, deploy]
+  HAILO_DRIVER:
+    group: npu
+    type: enum
+    values: [hailo_pci, hailo1x_pci, hailo_integrated_nnc]
+    only_os: [linux]
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux]
+    sources:
+      linux: "the first of tables.hailo_drivers with a folder /sys/module/<name> (a built-in driver has one too)"
+    normalise: "the module name"
+    consumers: [preflight, deploy]
+  HAILO_DRIVER_VERSION:
+    group: npu
+    type: pattern
+    pattern: '^\d{1,3}(\.\d{1,4}){1,3}$'
+    only_os: [linux]
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux]
+    sources:
+      linux: "/sys/module/<HAILO_DRIVER>/version (every Hailo driver sets MODULE_VERSION(HAILO_DRV_VER))"
+    normalise: >-
+      the first dotted number; the module there without a readable version: left out with
+      not_determined:HAILO_DRIVER_VERSION. Driver, firmware and HailoRT must be the same release: the preflight and
+      deploy compare them, the probe only reports them
+    consumers: [preflight, deploy]
+  HAILO_FW_VERSION:
+    group: npu
+    type: pattern
+    pattern: '^\d{1,3}(\.\d{1,4}){1,3}$'
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux, windows]
+    sources:
+      any: "the \"Firmware Version:\" line of hailortcli fw-control identify (4.24.0 of \"4.24.0 (release,app,...)\")"
+    normalise: >-
+      the dotted number; devices with different firmware: left out with not_determined:HAILO_FW_VERSION; a device and
+      its driver without hailortcli: left out with not_determined:HAILO_FW_VERSION
+    consumers: [preflight, deploy]
+  HAILORT_VERSION:
+    group: npu
+    type: pattern
+    pattern: '^\d{1,3}(\.\d{1,4}){1,3}$'
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux, windows]
+    sources:
+      any: >-
+        "HailoRT-CLI version X.Y.Z" of hailortcli -v, which is also the libhailort version: the CLI checks the two
+        before it parses any argument and refuses to run when they differ, printing "libhailort version (x) does not
+        match HailoRT-CLI version (y)" on stderr
+    normalise: >-
+      X.Y.Z; that message, or a non-zero exit without the version line: left out with version_mismatch:HAILORT_VERSION
+      (scan and identify are then not run); an answer without the line: not_determined:HAILORT_VERSION
+    consumers: [preflight, deploy, recipe]
+  HAILO_PYHAILORT_VERSION:
+    group: npu
+    type: pattern
+    pattern: '^\d{1,3}(\.\d{1,4}){1,3}$'
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux, windows]
+    sources:
+      linux: >-
+        the pip distribution hailort (imported as hailo_platform), never imported: importlib.metadata in the probe's
+        own interpreter (hardware_probe.py, not in a sysroot), then the first "Version:" line of METADATA in
+        /usr/lib/python3/dist-packages/hailort-*.dist-info and /usr/local/lib/python3*/dist-packages/hailort-*.dist-info
+        (that the Debian package python3-hailort installs it there is unverified); virtual environments are the
+        person's and never searched
+      windows: "importlib.metadata in hardware_probe.py; the .ps1 leaves it out"
+    normalise: "the dotted number"
+    consumers: [preflight, deploy]
 
   # --- GPU (global keys; per-GPU keys in gpu_keys) -------------------------------------------------------------
   GPU_COUNT:

@@ -41,6 +41,7 @@ import shutil
 import struct
 import subprocess  # runs local probe tools with fixed argument lists, never through a shell
 import sys
+import time
 from datetime import datetime, timezone
 
 TOOL = "python"
@@ -131,7 +132,7 @@ KEYS = {
                             "other"), 0, (), ()),
     "NPU_MODEL": ("pattern", _IDENT, 0, (), ()),
     "NPU_DEVICE": ("pattern", "^/dev/(rknpu|dri/(renderD|card)[0-9]{1,3}|accel/accel[0-9]{1,3}|hailo[0-9]{1,3}|"
-                              "apex_[0-9]{1,3})$", 0, (), ()),
+                              "h1x(-[0-9]{1,3})?|apex_[0-9]{1,3})$", 0, (), ()),
     "RKNPU_DRIVER_VERSION": ("pattern", _DOTTED, 0, (), ("linux", "android")),
     "RKLLM_RUNTIME_VERSION": ("pattern", _DOTTED, 0, (), ("linux", "android")),
     "RKNN_RUNTIME_VERSION": ("pattern", _DOTTED, 0, (), ("linux", "android")),
@@ -143,6 +144,16 @@ KEYS = {
     "SUPPORTS_MX3": ("bool", None, 1, (), ()),
     "SUPPORTS_CORAL": ("bool", None, 1, (), ()),
     "SUPPORTS_INTEL_NPU": ("bool", None, 1, (), ()),
+    "HAILO_FAMILY": ("enum", ("hailo8", "hailo1x"), 0, (), ()),
+    "HAILO_ARCH": ("enum", ("hailo8", "hailo8l", "hailo10h", "hailo15h", "hailo15m", "hailo15l", "hailo12l"), 0, (),
+                   ()),
+    "HAILO_DEVICES": ("int", (0, 64), 0, (), ()),
+    "HAILO_INTERFACE": ("enum", ("pcie", "usb", "integrated"), 0, (), ()),
+    "HAILO_DRIVER": ("enum", ("hailo_pci", "hailo1x_pci", "hailo_integrated_nnc"), 0, (), ("linux",)),
+    "HAILO_DRIVER_VERSION": ("pattern", _DOTTED, 0, (), ("linux",)),
+    "HAILO_FW_VERSION": ("pattern", _DOTTED, 0, (), ()),
+    "HAILORT_VERSION": ("pattern", _DOTTED, 0, (), ()),
+    "HAILO_PYHAILORT_VERSION": ("pattern", _DOTTED, 0, (), ()),
     "GPU_COUNT": ("int", (0, 16), 1, (), ()),
     "NVIDIA_DRIVER_CUDA_MAX": ("pattern", r"^\d{1,2}\.\d{1,3}$", 0, (), ()),
     "SUPPORTS_CUDA": ("bool", None, 1, (), ()),
@@ -246,6 +257,16 @@ PCI_VENDORS = {"0x10de": "nvidia", "0x1002": "amd", "0x1022": "amd", "0x8086": "
                "0x13b5": "arm", "0x5143": "qualcomm", "0x1010": "imagination", "0x14e4": "broadcom"}
 SMBIOS_MEMORY_TYPES = {24: "DDR3", 26: "DDR4", 29: "LPDDR3", 30: "LPDDR4", 34: "DDR5", 35: "LPDDR5"}
 USB_ROCKCHIP_PIDS = {"0x350a": "rockusb", "0x350b": "rockusb", "0x0006": "adb-mtp", "0x0019": "adb"}
+HAILO_ARCH_NAMES = {"HAILO8": "hailo8", "HAILO8_B0": "hailo8", "HAILO8L": "hailo8l", "HAILO10H": "hailo10h",
+                    "HAILO15H": "hailo15h", "HAILO15M": "hailo15m", "HAILO15L": "hailo15l", "HAILO12L": "hailo12l",
+                    "MARS": "hailo12l"}
+HAILO_ARCH_FAMILY = {"hailo8": "hailo8", "hailo8l": "hailo8", "hailo10h": "hailo1x", "hailo15h": "hailo1x",
+                     "hailo15m": "hailo1x", "hailo15l": "hailo1x", "hailo12l": "hailo1x"}
+HAILO_DRIVERS = {"hailo_pci": "hailo8", "hailo1x_pci": "hailo1x", "hailo_integrated_nnc": "hailo1x"}  # in this order
+HAILO_SYSFS_CLASSES = {"hailo_chardev": "hailo8", "hailo1x": "hailo1x", "hailo1x_integrated": "hailo1x"}
+HAILO_PCI_DEVICES = {"0x1e60:0x2864": "hailo8", "0x1e60:0x45c4": "hailo1x", "0x1e60:0x43a2": "hailo1x",
+                     "0x1e60:0x26a2": "hailo1x"}
+HAILO_USB_DEVICES = {"0x0b05:0x1d6f": "hailo10h"}
 
 # CPU features: key -> (/proc/cpuinfo tokens, any-of tokens, Windows IsProcessorFeaturePresent constant, lowest
 # Windows build that knows the constant, macOS sysctl name). Linux: ON when every token (or one any-of token) is in
@@ -762,6 +783,77 @@ def hip_runtime(find_library, rocm_globs):
     if find_library("amdhip64"):
         return True
     return any(glob.glob(pattern) for pattern in rocm_globs)
+
+
+# --- Hailo (HAILO_PLAN.md section 2.3; the .sh and the .ps1 parse the same way) -----------------------------------
+
+HAILO_MISMATCH = re.compile(r"libhailort version \(([0-9.]+)\) does not match HailoRT-CLI version \(([0-9.]+)\)")
+# The forms of a device id of `hailortcli scan`: pci/<domain:bus:dev.fn> (5.x), a bare PCI address (4.x),
+# usb/<bus>:<address>, [integrated].
+HAILO_DEVICE_ID = re.compile(r"^(\[integrated\]|usb/[0-9]{3}:[0-9]{3}|(pci/)?([0-9a-fA-F]{4}:)?[0-9a-fA-F]{2}:"
+                             r"[0-9a-fA-F]{2}\.[0-7])$")
+HAILO_TOOL_SECONDS = 60   # the whole Hailo part of the probe
+HAILO_MAX_IDENTIFY = 16
+
+
+def parse_hailo_version(output, returncode):
+    """(HAILORT_VERSION or None, warning code or None) from `hailortcli -v` (stdout and stderr together). The CLI
+    refuses to run when libhailort differs and says so on stderr; a non-zero exit without the version line counts as
+    that mismatch as well."""
+    text = output or ""
+    match = re.search(r"HailoRT-CLI version ([0-9]+\.[0-9]+\.[0-9]+)", text)
+    if HAILO_MISMATCH.search(text):
+        return None, "version_mismatch"
+    if returncode != 0:
+        return None, "not_determined" if match else "version_mismatch"
+    if match and check_value(KEYS["HAILORT_VERSION"], match.group(1)):
+        return match.group(1), None
+    return None, "not_determined"
+
+
+def parse_hailo_scan(text):
+    """The device ids of `hailortcli scan` ("[-] Device: <id>"; "Hailo devices not found": []), each once, only of
+    the known forms; None when the output is neither."""
+    found = re.findall(r"^\s*\[-\]\s*Device:\s*(\S+)\s*$", text or "", re.MULTILINE)
+    if not found and "Hailo devices not found" not in (text or ""):
+        return None
+    ids = []
+    for device in found:
+        if HAILO_DEVICE_ID.fullmatch(device) and device not in ids:
+            ids.append(device)
+    return ids
+
+
+def parse_hailo_identify(text):
+    """(architecture word in upper case or None, firmware version or None) of `hailortcli fw-control identify`. NUL
+    bytes are removed first; every other line (serial and part number, product name) is dropped unread."""
+    clean = (text or "").replace("\0", "")
+    match = re.search(r"^\s*Device Architecture\s*:\s*([A-Za-z0-9_]+)\s*$", clean, re.MULTILINE)
+    word = match.group(1).upper() if match else None
+    match = re.search(r"^\s*Firmware Version\s*:\s*([0-9][0-9.]*)", clean, re.MULTILINE)
+    firmware = match.group(1) if match and check_value(KEYS["HAILO_FW_VERSION"], match.group(1)) else None
+    return word, firmware
+
+
+def hailo_id_interface(device_id):
+    """pcie, usb or integrated from the form of a hailortcli device id."""
+    if device_id == "[integrated]":
+        return "integrated"
+    return "usb" if device_id.startswith("usb/") else "pcie"
+
+
+def hailo_npu_model(arch):
+    """NPU_MODEL of a HAILO_ARCH: hailo8l -> hailo-8l, hailo10h -> hailo-10h."""
+    return "hailo-" + arch[len("hailo"):] if arch else None
+
+
+def distinct(items):
+    """The items each once, in their order."""
+    out = []
+    for item in items:
+        if item not in out:
+            out.append(item)
+    return out
 
 
 # --- Windows -----------------------------------------------------------------------------------------------------
@@ -1558,6 +1650,169 @@ class Probe:
                 return version
         return None
 
+    def _hailo_files(self, pci, usb):
+        """Step A of the Hailo read order (files only, Linux): module, sysfs classes, nodes, PCI and USB ids."""
+        facts = {"module": None, "driver_version": None, "entries": [], "families": [], "nodes": [], "pci": 0,
+                 "usb": 0, "usb_arch": None, "integrated": False}
+        for module, family in HAILO_DRIVERS.items():
+            if self.os == "linux" and self.exists("/sys/module/" + module):
+                facts["module"] = module
+                facts["families"].append(family)
+                version = first_number(self.read(f"/sys/module/{module}/version", 4096) or "", 4)
+                facts["driver_version"] = version if check_value(KEYS["HAILO_DRIVER_VERSION"], version) else None
+                break
+        for cls, family in HAILO_SYSFS_CLASSES.items():
+            base = self.path("/sys/class/" + cls)
+            for entry in sorted(glob.glob(os.path.join(glob.escape(base), "*"))):
+                facts["entries"].append("/dev/" + os.path.basename(entry))
+                facts["families"].append(family)
+                facts["integrated"] = facts["integrated"] or cls == "hailo1x_integrated"
+                if cls == "hailo_chardev":   # the hailo8 driver's device_id reads 1e60:2864
+                    vendor, _, device = (_read(os.path.join(entry, "device_id"), 64) or "").strip().partition(":")
+                    pair = f"{hex_id(vendor, 4)}:{hex_id(device, 4)}"
+                    if pair in HAILO_PCI_DEVICES:
+                        facts["families"].append(HAILO_PCI_DEVICES[pair])
+        facts["nodes"] = ["/dev/" + os.path.basename(n)
+                          for n in sorted(glob.glob(os.path.join(glob.escape(self.path("/dev")), "hailo[0-9]*")))]
+        self._hailo_ids(facts, pci, usb)
+        return facts
+
+    @staticmethod
+    def _hailo_ids(facts, pci, usb):
+        for vendor, device in pci:
+            if vendor == PCI_HAILO:
+                facts["pci"] += 1
+                pair = vendor + ":" + device
+                if pair in HAILO_PCI_DEVICES:
+                    facts["families"].append(HAILO_PCI_DEVICES[pair])
+        for vendor, product in usb:
+            arch = HAILO_USB_DEVICES.get(vendor + ":" + product)
+            if arch:
+                facts["usb"] += 1
+                facts["usb_arch"] = arch
+                facts["families"].append(HAILO_ARCH_FAMILY[arch])
+
+    def _hailo_tools(self):
+        """Step B: hailortcli -v, scan and identify. {installed, warning, version, ids, devices: [(id, word, fw)]}."""
+        tools = {"installed": False, "warning": None, "version": None, "ids": None, "devices": []}
+        start = time.monotonic()
+        rc, out, err = self.run(["hailortcli", "-v"], 15)
+        if rc == -1:
+            return tools   # not installed (or it did not answer)
+        tools["installed"] = True
+        tools["version"], tools["warning"] = parse_hailo_version((out or "") + "\n" + (err or ""), rc)
+        if tools["warning"] == "version_mismatch":
+            return tools   # scan and identify would refuse to run as well
+        rc, out, _err = self.run(["hailortcli", "scan"], 15)
+        tools["ids"] = parse_hailo_scan(out) if rc == 0 else None
+        for device in (tools["ids"] or [])[:HAILO_MAX_IDENTIFY]:
+            if time.monotonic() - start >= HAILO_TOOL_SECONDS:
+                break
+            rc, out, _err = self.run(["hailortcli", "fw-control", "identify", "-s", device], 15)
+            if rc == -1:
+                break   # it did not answer: no further device is asked
+            word, firmware = parse_hailo_identify(out) if rc == 0 else (None, None)
+            if word:
+                tools["devices"].append((device, word, firmware))
+        return tools
+
+    def _pyhailort_version(self):
+        if not self.sysroot:
+            try:
+                from importlib import metadata
+                version = metadata.version("hailort")
+            except Exception:  # noqa: BLE001 - not installed, or broken metadata: nothing to report
+                version = None
+            if version and check_value(KEYS["HAILO_PYHAILORT_VERSION"], version):
+                return version
+        if self.os != "linux":
+            return None
+        for pattern in ("/usr/lib/python3/dist-packages/hailort-*.dist-info/METADATA",
+                        "/usr/local/lib/python3*/dist-packages/hailort-*.dist-info/METADATA"):
+            for path in sorted(glob.glob(self._glob(pattern))):
+                match = re.search(r"^Version:[ \t]*(.*)$", _read(path, 65536) or "", re.MULTILINE)
+                version = match.group(1).strip() if match else None
+                if version and check_value(KEYS["HAILO_PYHAILORT_VERSION"], version):
+                    return version
+        return None
+
+    def _hailo(self, facts):
+        """The Hailo keys (HAILO_PLAN.md 2.1-2.5) from the files of step A and the tools of step B. Returns (present,
+        NPU_MODEL, the node for NPU_DEVICE)."""
+        tools = self._hailo_tools()
+        ids = tools["ids"]
+        present = bool(facts["pci"] or facts["usb"] or facts["entries"] or facts["nodes"] or ids)
+        if tools["version"]:
+            self.put("HAILORT_VERSION", tools["version"])
+        elif tools["warning"]:
+            self.warn(tools["warning"], "HAILORT_VERSION")
+        mismatch = tools["warning"] == "version_mismatch"
+        archs, unknown, firmware = [], False, []
+        for device, word, fw in tools["devices"]:
+            arch = HAILO_ARCH_NAMES.get(word)
+            if arch is None:
+                unknown = True
+                continue
+            if arch == "hailo15h" and hailo_id_interface(device) != "integrated":
+                arch = "hailo10h"
+            archs.append(arch)
+            if fw:
+                firmware.append(fw)
+        archs, firmware = distinct(archs), distinct(firmware)
+        arch = None
+        if len(archs) > 1 or unknown:
+            self.warn("not_determined", "HAILO_ARCH")
+        elif archs:
+            arch = archs[0]
+        elif facts["usb_arch"] and not facts["pci"] and not tools["devices"]:
+            arch = facts["usb_arch"]
+        families = distinct(([HAILO_ARCH_FAMILY[arch]] if arch else []) + facts["families"])
+        family = families[0] if len(families) == 1 else None
+        conflict = len(families) > 1
+        if conflict:
+            arch = None
+            self.warn("not_determined", "HAILO_FAMILY")
+        node = next(iter(facts["entries"] + facts["nodes"]), None)
+        if present and arch is None and not conflict and not mismatch:
+            path = self.path(node) if node else None
+            if tools["installed"] and path and os.path.lexists(path) and not os.access(path, os.R_OK | os.W_OK):
+                self.warn("needs_root", "HAILO_ARCH")
+            else:
+                self.warn("not_determined", "HAILO_ARCH")
+        if len(firmware) == 1:
+            self.put("HAILO_FW_VERSION", firmware[0])
+        elif len(firmware) > 1 or (present and (facts["module"] or facts["entries"]) and not tools["installed"]):
+            self.warn("not_determined", "HAILO_FW_VERSION")
+        if ids:
+            interfaces = distinct(hailo_id_interface(i) for i in ids)
+        else:
+            interfaces = (["pcie"] if facts["pci"] else []) + (["usb"] if facts["usb"] else []) + \
+                (["integrated"] if facts["integrated"] else [])
+        if len(interfaces) == 1:
+            self.put("HAILO_INTERFACE", interfaces[0])
+        elif len(interfaces) > 1:
+            self.warn("not_determined", "HAILO_INTERFACE")
+        if ids:
+            count = len(ids)
+        elif present:
+            count = len(facts["entries"]) or len(facts["nodes"]) or facts["pci"] + facts["usb"]
+        else:
+            count = 0 if ids == [] else None
+        if count is not None:
+            self.put("HAILO_DEVICES", count)
+        elif tools["installed"] and not mismatch:
+            self.warn("not_determined", "HAILO_DEVICES")
+        self.put("HAILO_FAMILY", family)
+        self.put("HAILO_ARCH", arch)
+        if facts["module"]:
+            self.put("HAILO_DRIVER", facts["module"])
+            if facts["driver_version"]:
+                self.put("HAILO_DRIVER_VERSION", facts["driver_version"])
+            else:
+                self.warn("not_determined", "HAILO_DRIVER_VERSION")
+        self.put("HAILO_PYHAILORT_VERSION", self._pyhailort_version(), warn_invalid=False)
+        return present, hailo_npu_model(arch), node
+
     def _npu(self, windows_info):
         flags = {"SUPPORTS_RKNN": "OFF", "SUPPORTS_HAILO": "OFF", "SUPPORTS_METIS": "OFF", "SUPPORTS_MX3": "OFF",
                  "SUPPORTS_CORAL": "OFF", "SUPPORTS_INTEL_NPU": "OFF"}
@@ -1574,7 +1829,7 @@ class Probe:
                     self.put("RKNPU_DRIVER_VERSION", version)
                 else:
                     self.warn("needs_root", "RKNPU_DRIVER_VERSION")
-            hailo_nodes = sorted(glob.glob(os.path.join(glob.escape(self.path("/dev")), "hailo[0-9]*")))
+            hailo_present, hailo_model, hailo_node = self._hailo(self._hailo_files(pci, usb))
             apex_nodes = sorted(glob.glob(os.path.join(glob.escape(self.path("/dev")), "apex_[0-9]*")))
             intel_nodes = []
             accel = self.path("/sys/class/accel")
@@ -1583,19 +1838,18 @@ class Probe:
                     intel_nodes.append("/dev/accel/" + os.path.basename(node_path))
             vendors = {v for v, _d in pci}
             checks = (
-                ("SUPPORTS_HAILO", "hailo", PCI_HAILO in vendors or bool(hailo_nodes),
-                 "/dev/" + os.path.basename(hailo_nodes[0]) if hailo_nodes else None),
-                ("SUPPORTS_METIS", "axelera", PCI_AXELERA in vendors, None),
-                ("SUPPORTS_MX3", "memryx", PCI_MEMRYX in vendors, None),
+                ("SUPPORTS_HAILO", "hailo", hailo_present, hailo_model, hailo_node),
+                ("SUPPORTS_METIS", "axelera", PCI_AXELERA in vendors, None, None),
+                ("SUPPORTS_MX3", "memryx", PCI_MEMRYX in vendors, None, None),
                 ("SUPPORTS_CORAL", "google", bool(set(pci) & set(CORAL_PCI)) or bool(set(usb) & set(CORAL_USB)) or
-                 bool(apex_nodes), "/dev/" + os.path.basename(apex_nodes[0]) if apex_nodes else None),
-                ("SUPPORTS_INTEL_NPU", "intel", bool(intel_nodes), intel_nodes[0] if intel_nodes else None),
+                 bool(apex_nodes), None, "/dev/" + os.path.basename(apex_nodes[0]) if apex_nodes else None),
+                ("SUPPORTS_INTEL_NPU", "intel", bool(intel_nodes), "intel-npu", intel_nodes[0] if intel_nodes else None),
             )
-            for key, vendor, present, device in checks:
+            for key, vendor, present, model, device in checks:
                 if present:
                     flags[key] = "ON"
                     if described is None:
-                        described = (vendor, "intel-npu" if vendor == "intel" else None, device)
+                        described = (vendor, model, device)
             rockchip = [p for v, p in usb if v == USB_ROCKCHIP_VENDOR]
             if rockchip:
                 self.put("USB_ROCKCHIP_PID", rockchip[0])
@@ -1605,18 +1859,24 @@ class Probe:
             pci_vendors = {i.split(":")[1] for i in ids if i.startswith("pci:")}
             coral = ({"pci:{}:{}".format(v[2:], d[2:]) for v, d in CORAL_PCI} |
                      {"usb:{}:{}".format(v[2:], d[2:]) for v, d in CORAL_USB})
+            facts = {"module": None, "driver_version": None, "entries": [], "families": [], "nodes": [], "pci": 0,
+                     "usb": 0, "usb_arch": None, "integrated": False}
+            self._hailo_ids(facts, [("0x" + i.split(":")[1], "0x" + i.split(":")[2]) for i in sorted(ids)
+                                    if i.startswith("pci:")],
+                            [("0x" + i.split(":")[1], "0x" + i.split(":")[2]) for i in sorted(ids) if i.startswith("usb:")])
+            hailo_present, hailo_model, _node = self._hailo(facts)
             checks = (
-                ("SUPPORTS_HAILO", "hailo", PCI_HAILO[2:] in pci_vendors),
-                ("SUPPORTS_METIS", "axelera", PCI_AXELERA[2:] in pci_vendors),
-                ("SUPPORTS_MX3", "memryx", PCI_MEMRYX[2:] in pci_vendors),
-                ("SUPPORTS_CORAL", "google", bool(ids & coral)),
-                ("SUPPORTS_INTEL_NPU", "intel", bool(windows_info.get("intel_npu"))),
+                ("SUPPORTS_HAILO", "hailo", hailo_present, hailo_model),
+                ("SUPPORTS_METIS", "axelera", PCI_AXELERA[2:] in pci_vendors, None),
+                ("SUPPORTS_MX3", "memryx", PCI_MEMRYX[2:] in pci_vendors, None),
+                ("SUPPORTS_CORAL", "google", bool(ids & coral), None),
+                ("SUPPORTS_INTEL_NPU", "intel", bool(windows_info.get("intel_npu")), "intel-npu"),
             )
-            for key, vendor, present in checks:
+            for key, vendor, present, model in checks:
                 if present:
                     flags[key] = "ON"
                     if described is None:
-                        described = (vendor, "intel-npu" if vendor == "intel" else None, None)
+                        described = (vendor, model, None)
             rockchip = sorted(i for i in ids if i.startswith("usb:" + USB_ROCKCHIP_VENDOR[2:] + ":"))
             if rockchip:
                 pid = "0x" + rockchip[0].rsplit(":", 1)[1]

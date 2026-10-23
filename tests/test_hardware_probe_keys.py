@@ -8,6 +8,7 @@ keys, stays readable.
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -23,10 +24,12 @@ from test_hardware_probe import (
     available_shells,
     comparable,
     make_sysroot,
+    pci_device,
     probe,
     py_probe,
     run_emitter,
     tool_dir,
+    usb_device,
     windows_runner,
     write,
 )
@@ -248,3 +251,432 @@ class TestVersion:
             if key.startswith(("CPU_L2", "VULKAN_INSTANCE", "OPENCL", "HAILO", "JETSON", "CUDA_TOOLKIT", "TENSORRT",
                                "OPENVINO", "INTEL_", "ROCM_GFX")):
                 assert spec["type"] != "bool" and not spec.get("required"), key
+
+
+# --- O-HAILO: the Hailo keys (HAILO_PLAN.md section 2, fixtures of 6.1 item 1) ---------------------------------------
+
+HAILO = FIXTURES / "hailo"
+SERIAL = "c0ffee00deadbeef"   # the made-up serial number of the identify fixtures: it must never come out
+
+
+def hailo_text(name):
+    return (HAILO / name).read_bytes().decode("utf-8")
+
+
+def board(tmp_path):
+    """A board without a Rockchip NPU (a Raspberry Pi 5 stand-in), so NPU_VENDOR describes the Hailo."""
+    root = make_sysroot(tmp_path, "rk3566")
+    (root / "dev/rknpu").unlink()
+    write(root, "/proc/device-tree/compatible", b"raspberrypi,5-model-b\0brcm,bcm2712\0")
+    write(root, "/proc/device-tree/model", b"Raspberry Pi 5 Model B Rev 1.0\0")
+    return root
+
+
+def hailo8_files(root, version="4.24.0"):
+    write(root, "/sys/module/hailo_pci/version", version + "\n")
+    write(root, "/sys/class/hailo_chardev/hailo0/device_id", "1e60:2864\n")
+    write(root, "/dev/hailo0", b"")
+    pci_device(root, "0000:01:00.0", "0x1e60", "0x2864", "0x120000")
+
+
+def hailo10_files(root):
+    write(root, "/sys/module/hailo1x_pci/version", "5.4.0\n")
+    write(root, "/sys/class/hailo1x/h1x-0/device_id", "0000:01:00.0\n")
+    write(root, "/dev/h1x-0", b"")
+    pci_device(root, "0000:01:00.0", "0x1e60", "0x45c4", "0x120000")
+
+
+def fake_hailortcli(bindir, version="version_4.24.0.txt", version_err=None, version_rc=0, scan=None, identify=None,
+                    scan_rc=0):
+    """A hailortcli on PATH that answers -v, scan and fw-control identify -s <id> from the fixture files."""
+    data = bindir.parent / "hailo-data"
+    data.mkdir(exist_ok=True)
+    (data / "v.out").write_bytes((HAILO / version).read_bytes() if version else b"")
+    (data / "v.err").write_bytes((HAILO / version_err).read_bytes() if version_err else b"")
+    (data / "scan.out").write_bytes((HAILO / scan).read_bytes() if scan else b"")
+    cases = []
+    for index, (device, name) in enumerate((identify or {}).items()):
+        (data / f"id{index}.out").write_bytes((HAILO / name).read_bytes())
+        cases.append(f"      '{device}') cat \"$D/id{index}.out\" ;;")
+    script = "\n".join([
+        "#!/bin/sh",
+        f"D='{data}'",
+        'case "$1" in',
+        f'  -v) cat "$D/v.out"; cat "$D/v.err" >&2; exit {version_rc} ;;',
+        f'  scan) cat "$D/scan.out"; exit {scan_rc} ;;',
+        '  fw-control)',
+        '    [ "$2" = identify ] && [ "$3" = -s ] || exit 2',
+        '    case "$4" in',
+        *cases,
+        "      *) exit 1 ;;",
+        "    esac ;;",
+        "  *) exit 2 ;;",
+        "esac",
+        ""])
+    fake_tool(bindir, "hailortcli", script)
+
+
+def run_both(tmp_path, root, bindir):
+    """The .py and every available shell's .sh on the same machine: they must agree; the .py's profile."""
+    py_text = run_emitter([sys.executable, "-I", str(PROBE_PY)], root, bindir, tmp_path)
+    for shell in SHELLS:
+        sh_text = run_emitter(shell.split() + [str(PROBE_SH)], root, bindir, tmp_path)
+        assert comparable(sh_text) == comparable(py_text), shell
+        assert SERIAL not in sh_text
+    assert SERIAL not in py_text
+    return parse_profile(py_text)
+
+
+def hailo_view(profile):
+    keys = ("SUPPORTS_HAILO", "NPU_VENDOR", "NPU_MODEL", "NPU_DEVICE", "HAILO_FAMILY", "HAILO_ARCH", "HAILO_DEVICES",
+            "HAILO_INTERFACE", "HAILO_DRIVER", "HAILO_DRIVER_VERSION", "HAILO_FW_VERSION", "HAILORT_VERSION",
+            "HAILO_PYHAILORT_VERSION")
+    return {k: profile.get(k) for k in keys if profile.get(k) is not None}
+
+
+def hailo_warnings(profile):
+    return sorted(w for w in profile.warnings if "HAILO" in w)
+
+
+class TestHailoParsers:
+
+    @pytest.mark.parametrize("name, word, firmware", [
+        ("identify_hailo8l_4.17_rpi5_docs.txt", "HAILO8L", "4.17.0"),
+        ("identify_hailo10h_model_zoo_docs.txt", "HAILO10H", "4.6.0"),
+        ("identify_hailo8_b0_tappas_docs.txt", "HAILO8_B0", None),          # "X.X.X" is no version
+        ("identify_current_hailo8_4.24.0.txt", "HAILO8", "4.24.0"),
+        ("identify_current_hailo8l_4.24.0.txt", "HAILO8L", "4.24.0"),
+        ("identify_current_hailo10h_5.4.0.txt", "HAILO10H", "5.4.0"),
+        ("identify_current_hailo15h_5.4.0.txt", "HAILO15H", "5.4.0"),
+        ("identify_current_hailo15l_5.4.0.txt", "HAILO15L", "5.4.0"),
+        ("identify_current_mars_5.4.0.txt", "MARS", "5.4.0"),
+        ("identify_current_unknown_4.24.0.txt", "UNKNOWN", "4.24.0"),
+        ("identify_current_hailo8l_nul_bytes.txt", "HAILO8L", "4.24.0"),
+        ("identify_empty.txt", None, None),
+    ])
+    def test_identify(self, name, word, firmware):
+        assert probe.parse_hailo_identify(hailo_text(name)) == (word, firmware)
+
+    def test_arch_words_are_looked_up_exactly(self):
+        assert probe.HAILO_ARCH_NAMES["HAILO8L"] == "hailo8l" and probe.HAILO_ARCH_NAMES["HAILO8"] == "hailo8"
+        assert "HAILO8L_X" not in probe.HAILO_ARCH_NAMES and probe.HAILO_ARCH_NAMES["MARS"] == "hailo12l"
+        assert probe.hailo_npu_model("hailo10h") == "hailo-10h" and probe.hailo_npu_model(None) is None
+
+    @pytest.mark.parametrize("name, ids", [
+        ("scan_not_found.txt", []), ("scan_one_bdf_4x.txt", ["0000:01:00.0"]),
+        ("scan_one_pci_5x.txt", ["pci/0000:01:00.0"]), ("scan_two_pci_5x.txt", ["pci/0000:01:00.0", "pci/0000:02:00.0"]),
+        ("scan_usb_5x.txt", ["usb/002:016"]), ("scan_integrated.txt", ["[integrated]"]),
+    ])
+    def test_scan(self, name, ids):
+        assert probe.parse_hailo_scan(hailo_text(name)) == ids
+        assert [probe.hailo_id_interface(i) for i in ids] == [
+            {"[": "integrated", "u": "usb"}.get(i[0], "pcie") for i in ids]
+
+    def test_scan_ids_of_another_form_are_never_passed_on(self):
+        assert probe.parse_hailo_scan("[-] Device: ;reboot\n[-] Device: 0000:01:00.0\n") == ["0000:01:00.0"]
+        assert probe.parse_hailo_scan("garbage") is None
+
+    def test_version(self):
+        assert probe.parse_hailo_version(hailo_text("version_4.24.0.txt"), 0) == ("4.24.0", None)
+        assert probe.parse_hailo_version(hailo_text("version_mismatch_stderr.txt"), 255) == (None, "version_mismatch")
+        assert probe.parse_hailo_version("", 255) == (None, "version_mismatch")
+        assert probe.parse_hailo_version("HailoRT-CLI\n", 0) == (None, "not_determined")
+
+
+@POSIX_ONLY
+@NEEDS_SHELL
+class TestHailoMachines:
+    """Every fixture machine runs through the .py and the .sh (each available shell); the two must agree."""
+
+    def test_hailo8_on_a_pi_with_hailort(self, tmp_path):
+        root = board(tmp_path)
+        hailo8_files(root)
+        write(root, "/usr/lib/python3/dist-packages/hailort-4.24.0.dist-info/METADATA",
+              "Metadata-Version: 2.1\nName: hailort\nVersion: 4.24.0\n")
+        bindir = tool_dir(tmp_path)
+        fake_hailortcli(bindir, scan="scan_one_bdf_4x.txt", identify={"0000:01:00.0": "identify_current_hailo8_4.24.0.txt"})
+        profile = run_both(tmp_path, root, bindir)
+        assert hailo_view(profile) == {
+            "SUPPORTS_HAILO": "ON", "NPU_VENDOR": "hailo", "NPU_MODEL": "hailo-8", "NPU_DEVICE": "/dev/hailo0",
+            "HAILO_FAMILY": "hailo8", "HAILO_ARCH": "hailo8", "HAILO_DEVICES": "1", "HAILO_INTERFACE": "pcie",
+            "HAILO_DRIVER": "hailo_pci", "HAILO_DRIVER_VERSION": "4.24.0", "HAILO_FW_VERSION": "4.24.0",
+            "HAILORT_VERSION": "4.24.0", "HAILO_PYHAILORT_VERSION": "4.24.0"}
+        assert hailo_warnings(profile) == []
+        facts = profile.hailo()
+        assert facts.present and facts.model == "hailo-8" and facts.hailort_line == "4" and facts.devices == 1
+
+    def test_hailo8l_with_the_old_identify_of_the_pi_docs(self, tmp_path):
+        root = board(tmp_path)
+        hailo8_files(root, version="4.17.0")
+        bindir = tool_dir(tmp_path)
+        fake_hailortcli(bindir, scan="scan_one_bdf_4x.txt", identify={"0000:01:00.0": "identify_hailo8l_4.17_rpi5_docs.txt"})
+        profile = run_both(tmp_path, root, bindir)
+        assert (profile.get("HAILO_ARCH"), profile.get("NPU_MODEL"), profile.get("HAILO_FW_VERSION")) == \
+            ("hailo8l", "hailo-8l", "4.17.0")   # "Board Name: Hailo-8" on an 8L is not read
+
+    @pytest.mark.parametrize("identify, arch", [("identify_current_hailo10h_5.4.0.txt", "hailo10h"),
+                                                ("identify_current_hailo15h_5.4.0.txt", "hailo10h")])
+    def test_hailo10h_on_pcie(self, tmp_path, identify, arch):
+        root = board(tmp_path)
+        hailo10_files(root)
+        bindir = tool_dir(tmp_path)
+        fake_hailortcli(bindir, version="version_5.4.0.txt", scan="scan_one_pci_5x.txt",
+                        identify={"pci/0000:01:00.0": identify})
+        profile = run_both(tmp_path, root, bindir)
+        assert hailo_view(profile) == {
+            "SUPPORTS_HAILO": "ON", "NPU_VENDOR": "hailo", "NPU_MODEL": "hailo-10h", "NPU_DEVICE": "/dev/h1x-0",
+            "HAILO_FAMILY": "hailo1x", "HAILO_ARCH": arch, "HAILO_DEVICES": "1", "HAILO_INTERFACE": "pcie",
+            "HAILO_DRIVER": "hailo1x_pci", "HAILO_DRIVER_VERSION": "5.4.0", "HAILO_FW_VERSION": "5.4.0",
+            "HAILORT_VERSION": "5.4.0"}
+        assert profile.hailo().hailort_line == "5"
+
+    @pytest.mark.parametrize("identify, arch", [("identify_current_hailo15h_5.4.0.txt", "hailo15h"),
+                                                ("identify_current_hailo15l_5.4.0.txt", "hailo15l"),
+                                                ("identify_current_mars_5.4.0.txt", "hailo12l")])
+    def test_integrated_device(self, tmp_path, identify, arch):
+        root = board(tmp_path)
+        write(root, "/sys/module/hailo_integrated_nnc/version", "5.4.0\n")
+        write(root, "/sys/class/hailo1x_integrated/h1x/dev", "240:0\n")
+        write(root, "/dev/h1x", b"")
+        bindir = tool_dir(tmp_path)
+        fake_hailortcli(bindir, version="version_5.4.0.txt", scan="scan_integrated.txt", identify={"[integrated]": identify})
+        profile = run_both(tmp_path, root, bindir)
+        assert (profile.get("HAILO_ARCH"), profile.get("HAILO_INTERFACE"), profile.get("NPU_DEVICE"),
+                profile.get("HAILO_FAMILY")) == (arch, "integrated", "/dev/h1x", "hailo1x")
+
+    def test_usb_hailo10h(self, tmp_path):
+        root = board(tmp_path)
+        usb_device(root, "2-1", "0b05", "1d6f")
+        profile = run_both(tmp_path, root, tool_dir(tmp_path))   # no driver, no hailortcli: the USB id tells
+        assert hailo_view(profile) == {"SUPPORTS_HAILO": "ON", "NPU_VENDOR": "hailo", "NPU_MODEL": "hailo-10h",
+                                       "HAILO_FAMILY": "hailo1x", "HAILO_ARCH": "hailo10h", "HAILO_DEVICES": "1",
+                                       "HAILO_INTERFACE": "usb"}
+        bindir = tool_dir(tmp_path)
+        fake_hailortcli(bindir, version="version_5.4.0.txt", scan="scan_usb_5x.txt",
+                        identify={"usb/002:016": "identify_current_hailo10h_5.4.0.txt"})
+        profile = run_both(tmp_path, root, bindir)
+        assert profile.get("HAILO_ARCH") == "hailo10h" and profile.get("HAILO_FW_VERSION") == "5.4.0"
+
+    # The rows of HAILO_PLAN 2.5, one by one.
+
+    def test_no_device_and_no_hailort(self, tmp_path):
+        profile = run_both(tmp_path, board(tmp_path), tool_dir(tmp_path))
+        assert hailo_view(profile) == {"SUPPORTS_HAILO": "OFF"} and hailo_warnings(profile) == []
+        assert profile.hailo() == type(profile.hailo())(present=False)
+
+    def test_hailort_installed_without_a_device(self, tmp_path):
+        bindir = tool_dir(tmp_path)
+        fake_hailortcli(bindir, scan="scan_not_found.txt")
+        profile = run_both(tmp_path, board(tmp_path), bindir)
+        assert hailo_view(profile) == {"SUPPORTS_HAILO": "OFF", "HAILORT_VERSION": "4.24.0", "HAILO_DEVICES": "0"}
+        assert hailo_warnings(profile) == []   # never HAILO_FAMILY from an installed HailoRT alone
+
+    @pytest.mark.parametrize("device, family", [("0x2864", "hailo8"), ("0x45c4", "hailo1x"), ("0xffff", None)])
+    def test_device_on_pcie_without_a_driver(self, tmp_path, device, family):
+        root = board(tmp_path)
+        pci_device(root, "0000:01:00.0", "0x1e60", device, "0x120000")
+        profile = run_both(tmp_path, root, tool_dir(tmp_path))
+        expect = {"SUPPORTS_HAILO": "ON", "NPU_VENDOR": "hailo", "HAILO_DEVICES": "1", "HAILO_INTERFACE": "pcie"}
+        if family:
+            expect["HAILO_FAMILY"] = family
+        assert hailo_view(profile) == expect
+        assert hailo_warnings(profile) == ["not_determined:HAILO_ARCH"]
+
+    def test_driver_loaded_without_hailortcli(self, tmp_path):
+        root = board(tmp_path)
+        hailo8_files(root)
+        profile = run_both(tmp_path, root, tool_dir(tmp_path))
+        assert hailo_view(profile) == {
+            "SUPPORTS_HAILO": "ON", "NPU_VENDOR": "hailo", "NPU_DEVICE": "/dev/hailo0", "HAILO_FAMILY": "hailo8",
+            "HAILO_DEVICES": "1", "HAILO_INTERFACE": "pcie", "HAILO_DRIVER": "hailo_pci",
+            "HAILO_DRIVER_VERSION": "4.24.0"}
+        assert hailo_warnings(profile) == ["not_determined:HAILO_ARCH", "not_determined:HAILO_FW_VERSION"]
+
+    @pytest.mark.skipif(os.name == "posix" and os.geteuid() == 0, reason="root opens every node")
+    def test_node_this_user_cannot_open(self, tmp_path):
+        root = board(tmp_path)
+        hailo8_files(root)
+        (root / "dev/hailo0").chmod(0o600 & 0o400)
+        bindir = tool_dir(tmp_path)
+        fake_hailortcli(bindir, scan="scan_one_bdf_4x.txt", identify={})
+        profile = run_both(tmp_path, root, bindir)
+        assert hailo_warnings(profile) == ["needs_root:HAILO_ARCH"]
+
+    @pytest.mark.parametrize("identify", ["identify_empty.txt", "identify_current_unknown_4.24.0.txt"])
+    def test_identify_without_an_architecture(self, tmp_path, identify):
+        root = board(tmp_path)
+        hailo8_files(root)
+        bindir = tool_dir(tmp_path)
+        fake_hailortcli(bindir, scan="scan_one_bdf_4x.txt", identify={"0000:01:00.0": identify})
+        profile = run_both(tmp_path, root, bindir)
+        assert "HAILO_ARCH" not in profile and profile.get("HAILO_FAMILY") == "hailo8"   # the family from the driver
+        assert hailo_warnings(profile) == ["not_determined:HAILO_ARCH"]
+
+    def test_cli_and_library_differ(self, tmp_path):
+        root = board(tmp_path)
+        hailo8_files(root)
+        bindir = tool_dir(tmp_path)
+        fake_hailortcli(bindir, version=None, version_err="version_mismatch_stderr.txt", version_rc=255,
+                        scan="scan_one_bdf_4x.txt", identify={"0000:01:00.0": "identify_current_hailo8_4.24.0.txt"})
+        profile = run_both(tmp_path, root, bindir)
+        assert "HAILORT_VERSION" not in profile and "HAILO_ARCH" not in profile   # scan and identify not run
+        assert hailo_warnings(profile) == ["version_mismatch:HAILORT_VERSION"]
+        assert profile.hailo().version_mismatch
+
+    def test_sources_that_disagree(self, tmp_path):
+        root = board(tmp_path)
+        hailo10_files(root)
+        bindir = tool_dir(tmp_path)
+        fake_hailortcli(bindir, version="version_5.4.0.txt", scan="scan_one_pci_5x.txt",
+                        identify={"pci/0000:01:00.0": "identify_current_hailo8l_4.24.0.txt"})
+        profile = run_both(tmp_path, root, bindir)
+        assert "HAILO_FAMILY" not in profile and "HAILO_ARCH" not in profile
+        assert hailo_warnings(profile) == ["not_determined:HAILO_FAMILY"]
+
+    @pytest.mark.parametrize("second, arch, warned", [("identify_current_hailo8_4.24.0.txt", "hailo8", []),
+                                                      ("identify_current_hailo8l_4.24.0.txt", None,
+                                                       ["not_determined:HAILO_ARCH"])])
+    def test_two_devices(self, tmp_path, second, arch, warned):
+        root = board(tmp_path)
+        hailo8_files(root)
+        write(root, "/sys/class/hailo_chardev/hailo1/device_id", "1e60:2864\n")
+        write(root, "/dev/hailo1", b"")
+        pci_device(root, "0000:03:00.0", "0x1e60", "0x2864", "0x120000")
+        bindir = tool_dir(tmp_path)
+        fake_hailortcli(bindir, scan="scan_two_bdf_4x.txt", identify={
+            "0000:01:00.0": "identify_current_hailo8_4.24.0.txt", "0000:03:00.0": second})
+        profile = run_both(tmp_path, root, bindir)
+        assert profile.get("HAILO_DEVICES") == "2" and profile.get("HAILO_ARCH") == arch
+        assert profile.get("HAILO_FAMILY") == "hailo8" and hailo_warnings(profile) == warned
+
+    def test_driver_without_a_version_and_nul_bytes(self, tmp_path):
+        root = board(tmp_path)
+        hailo8_files(root)
+        (root / "sys/module/hailo_pci/version").unlink()
+        bindir = tool_dir(tmp_path)
+        fake_hailortcli(bindir, scan="scan_one_bdf_4x.txt",
+                        identify={"0000:01:00.0": "identify_current_hailo8l_nul_bytes.txt"})
+        profile = run_both(tmp_path, root, bindir)
+        assert profile.get("HAILO_ARCH") == "hailo8l" and "HAILO_DRIVER_VERSION" not in profile
+        assert hailo_warnings(profile) == ["not_determined:HAILO_DRIVER_VERSION"]
+
+    def test_a_rockchip_board_with_a_hailo_keeps_both(self, tmp_path):
+        root = make_sysroot(tmp_path, "rk3566")
+        hailo8_files(root)
+        bindir = tool_dir(tmp_path)
+        fake_hailortcli(bindir, scan="scan_one_bdf_4x.txt", identify={"0000:01:00.0": "identify_current_hailo8l_4.24.0.txt"})
+        profile = run_both(tmp_path, root, bindir)
+        assert (profile.get("NPU_VENDOR"), profile.get("NPU_MODEL"), profile.get("NPU_DEVICE")) == \
+            ("rockchip", "rk3566", "/dev/rknpu")
+        assert profile.is_on("SUPPORTS_HAILO") and profile.get("HAILO_ARCH") == "hailo8l"
+
+
+class TestHailoWindows:
+    """The .py on Windows: the PnP ids and hailortcli on PATH (no driver keys); the .ps1 carries the same rules."""
+
+    def hailortcli(self, answers):
+        def run(cmd, timeout):
+            if cmd[0] == "hailortcli":
+                return answers.get(tuple(cmd[1:]), (1, "", ""))
+            return windows_runner(system_answer={"Probe": "system", "Cores": 8, "MemoryType": 26, "MemorySpeed": 3200,
+                                                 "Ids": ["pci:1e60:2864", "pci:8086:3e92"], "IntelNpu": False})(cmd, timeout)
+        return run
+
+    def test_pnp_ids_and_hailortcli(self):
+        run = self.hailortcli({("-v",): (0, hailo_text("version_4.24.0.txt"), ""),
+                               ("scan",): (0, hailo_text("scan_one_bdf_4x.txt"), ""),
+                               ("fw-control", "identify", "-s", "0000:01:00.0"):
+                                   (0, hailo_text("identify_current_hailo8l_4.24.0.txt"), "")})
+        values = probe.collect(system="Windows", windows_api=FakeWindows(), run=run, env={}, root=os.sep)
+        assert {k: values.get(k) for k in ("SUPPORTS_HAILO", "NPU_VENDOR", "NPU_MODEL", "HAILO_FAMILY", "HAILO_ARCH",
+                                           "HAILO_DEVICES", "HAILO_INTERFACE", "HAILO_FW_VERSION", "HAILORT_VERSION")} == {
+            "SUPPORTS_HAILO": "ON", "NPU_VENDOR": "hailo", "NPU_MODEL": "hailo-8l", "HAILO_FAMILY": "hailo8",
+            "HAILO_ARCH": "hailo8l", "HAILO_DEVICES": "1", "HAILO_INTERFACE": "pcie", "HAILO_FW_VERSION": "4.24.0",
+            "HAILORT_VERSION": "4.24.0"}
+        assert "HAILO_DRIVER" not in values and "NPU_DEVICE" not in values
+        parse_profile(probe.render_text(values))
+
+    def test_pnp_id_alone(self):
+        run = self.hailortcli({})
+        values = probe.collect(system="Windows", windows_api=FakeWindows(), run=lambda cmd, t: (
+            (-1, "", "") if cmd[0] == "hailortcli" else run(cmd, t)), env={}, root=os.sep)
+        assert values["SUPPORTS_HAILO"] == "ON" and values["HAILO_FAMILY"] == "hailo8"
+        assert "not_determined:HAILO_ARCH" in values["PROBE_WARNINGS"]
+
+    def test_ps1_carries_the_tables_and_rules(self):
+        from test_hardware_probe import RAW_SCHEMA
+        text = PROBE_PS1.read_text(encoding="utf-8")
+        t = RAW_SCHEMA["tables"]
+        for name, table in (("HailoArchNames", t["hailo_arch_names"]), ("HailoArchFamily", t["hailo_arch_family"]),
+                            ("HailoPciDevices", t["hailo_pci_devices"]), ("HailoUsbDevices", t["hailo_usb_devices"])):
+            line = next(ln for ln in text.splitlines() if ln.startswith(f"${name} = @{{"))
+            assert dict(re.findall(r"'([^']+)' = '([^']+)'", line)) == table, name
+        for needle in ("'-v'", "'scan'", "'fw-control', 'identify', '-s'", "version_mismatch:HAILORT_VERSION",
+                       "not_determined:HAILO_FAMILY", "'(?m)^\\s*Device Architecture\\s*:\\s*([A-Za-z0-9_]+)\\s*$'",
+                       "Replace([string][char]0, '')", "if ($hailoClock.Elapsed.TotalSeconds -ge 60) { break }"):
+            assert needle in text, needle
+        assert "HAILO_DRIVER" not in text   # Linux-only keys
+
+    def test_identify_never_runs_extended(self):
+        """--extended prints the MAC address and the SoC and ULT ids: no probe ever passes it."""
+        for path in (PROBE_PY, PROBE_SH, PROBE_PS1):
+            code = [ln for ln in path.read_text(encoding="utf-8").splitlines()
+                    if not ln.lstrip().startswith("#") and '"""' not in ln]
+            assert not any("--extended" in ln for ln in code), path.name
+
+
+class TestHailoTables:
+
+    def test_tables_are_the_schema(self):
+        from test_hardware_probe import RAW_SCHEMA, sh_table
+        t = RAW_SCHEMA["tables"]
+        assert probe.HAILO_ARCH_NAMES == t["hailo_arch_names"] == sh_table("hailo_arch_name")
+        assert probe.HAILO_ARCH_FAMILY == t["hailo_arch_family"] == sh_table("hailo_arch_family")
+        assert probe.HAILO_DRIVERS == t["hailo_drivers"] == sh_table("hailo_driver_family")
+        assert list(probe.HAILO_DRIVERS) == list(t["hailo_drivers"])   # the order they are looked for
+        assert probe.HAILO_SYSFS_CLASSES == t["hailo_sysfs_classes"] == sh_table("hailo_class_family")
+        assert list(probe.HAILO_SYSFS_CLASSES) == list(t["hailo_sysfs_classes"])
+        assert probe.HAILO_PCI_DEVICES == t["hailo_pci_devices"] == sh_table("hailo_pci_family")
+        assert probe.HAILO_USB_DEVICES == t["hailo_usb_devices"] == sh_table("hailo_usb_arch")
+        assert set(t["hailo_arch_names"].values()) == set(t["hailo_arch_family"]) == set(
+            RAW_SCHEMA["keys"]["HAILO_ARCH"]["values"])
+        assert "version_mismatch" in t["warning_codes"]
+        sh = PROBE_SH.read_text(encoding="utf-8")
+        assert "for m in hailo_pci hailo1x_pci hailo_integrated_nnc; do" in sh
+        assert "for cls in hailo_chardev hailo1x hailo1x_integrated; do" in sh
+
+    @pytest.mark.parametrize("node, ok", [("/dev/h1x-0", True), ("/dev/h1x", True), ("/dev/h1x-12", True),
+                                          ("/dev/hailo3", True), ("/dev/h1x-", False), ("/dev/h1x0", False),
+                                          ("/dev/h1x-0/../sda", False)])
+    def test_npu_device_accepts_the_master_driver_nodes(self, node, ok):
+        text = (FIXTURES / "schema2_rk3566_dietpi.txt").read_text(encoding="utf-8").replace(
+            "NPU_DEVICE=/dev/rknpu", "NPU_DEVICE=" + node)
+        if ok:
+            assert parse_profile(text).get("NPU_DEVICE") == node
+        else:
+            with pytest.raises(Exception, match="NPU_DEVICE"):
+                parse_profile(text)
+
+
+class TestHailoAccess:
+
+    def test_needs_root_when_the_node_cannot_be_opened(self, tmp_path, monkeypatch):
+        """The same rule as TestHailoMachines.test_node_this_user_cannot_open, also where the tests run as root."""
+        root = board(tmp_path)
+        hailo8_files(root)
+
+        def run(cmd, timeout):
+            if cmd == ["hailortcli", "-v"]:
+                return 0, hailo_text("version_4.24.0.txt"), ""
+            if cmd == ["hailortcli", "scan"]:
+                return 0, hailo_text("scan_one_bdf_4x.txt"), ""
+            return (1, "", "cannot open the device") if cmd[0] == "hailortcli" else (-1, "", "")
+
+        monkeypatch.setattr(probe.os, "access", lambda path, mode: False)
+        values = py_probe(root, run=run)
+        assert "needs_root:HAILO_ARCH" in values["PROBE_WARNINGS"] and "HAILO_ARCH" not in values
+        assert values["HAILORT_VERSION"] == "4.24.0" and values["HAILO_DEVICES"] == "1"
+
+    def test_the_accessor_of_a_3_0_0_profile(self):
+        facts = parse_profile((FIXTURES / "schema2_rk3566_dietpi.txt").read_text(encoding="utf-8")).hailo()
+        assert facts.present is False and facts.family is None and facts.model is None and facts.hailort_line is None

@@ -319,9 +319,12 @@ class TestFixtureMachines:
                   "SUPPORTS_I8MM": "OFF", "SOC_MODEL": "rk3588", "BOARD_MODEL": "Radxa ROCK 5B",
                   "NPU_VENDOR": "rockchip", "NPU_MODEL": "rk3588", "NPU_DEVICE": "/dev/dri/renderD129",
                   "RKNPU_DRIVER_VERSION": "0.9.6", "SUPPORTS_RKNN": "ON", "SUPPORTS_HAILO": "ON",
-                  "GPU0_NAME": "Mali (valhall-csf)"}
+                  "GPU0_NAME": "Mali (valhall-csf)", "HAILO_FAMILY": "hailo8", "HAILO_INTERFACE": "pcie",
+                  "HAILO_DEVICES": "1"}
         assert {k: profile.get(k) for k in expect} == expect
-        assert not profile.warnings
+        # Probe 3.1.0 (HAILO_PLAN 2.5, on purpose): the Hailo-8 on the M.2 slot is described as far as the files tell
+        # (its PCI id gives the family); without hailortcli its architecture is not determined.
+        assert profile.warnings == ["not_determined:HAILO_ARCH"] and "HAILO_ARCH" not in profile
 
     @pytest.mark.parametrize("driver", ["RKNPU", "rknpu"])
     def test_rockchip_npu_drm_node_by_driver_name(self, tmp_path, driver):
