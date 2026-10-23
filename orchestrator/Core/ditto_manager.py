@@ -467,6 +467,18 @@ class ChatReply:
     # True only once, for a saved conversation of the removed remote mode (a history whose tool source names a
     # framework on another computer): its tool calls named that computer's objects, so it starts anew.
     source_changed: bool = False
+    # Why earlier turns were summarized (new_conversation): "long", or "no_tools" for a conversation with tool turns
+    # asked without tools (tool turns need the tool definitions, which a question without tools does not send).
+    new_conversation_reason: str = ""
+
+
+# The transcript notice of a conversation summarized into a new one, by ChatReply.new_conversation_reason (the chat
+# panel's chat.notice.new_conversation and chat.notice.new_conversation_no_tools).
+NEW_CONVERSATION_NOTICES = {
+    "long": "The conversation got long: Ditto summarized it and continues in a new conversation.",
+    "no_tools": "Answered without tools: Ditto summarized the conversation, which used tools, and continues in a new "
+                "conversation.",
+}
 
 
 class TranscriptEntry(BaseModel):
@@ -605,8 +617,8 @@ class ChatHistory:
             self.transcript.append(TranscriptEntry(role="notice", text=SOURCE_LOCAL_NOTICE))
         elif reply.new_conversation:
             self.messages = []
-            self.transcript.append(TranscriptEntry(role="notice", text="The conversation got long: Ditto summarized "
-                                                                       "it and continues in a new conversation."))
+            notice = NEW_CONVERSATION_NOTICES.get(reply.new_conversation_reason, NEW_CONVERSATION_NOTICES["long"])
+            self.transcript.append(TranscriptEntry(role="notice", text=notice))
         self.tool_source = "local"
         self.messages.extend(reply.new_messages)
         self.transcript.append(TranscriptEntry(role="user", text=reply.question))
@@ -1013,16 +1025,19 @@ class DittoCoder:
         source_changed = bool(history is not None and earlier and getattr(history, "migrating", lambda: False)())
         if source_changed:
             earlier = []
-        if self._too_long(earlier):
-            summary = self._summarize(client, earlier)
-            earlier, new_conversation = [], True
-            blocks.append(_text_block("Summary of our earlier conversation, for context:\n"
-                                      + wrap_untrusted(summary, "conversation summary")))
         registry = self._registry() if use_tools else None
         tools = self._tool_specs(registry)
-        if not tools and registry is not None and any(m.role == "tool" for m in earlier):
-            # Tool calls in the conversation need tool definitions (Claude rejects the request otherwise); the
-            # registry still denies every call the permissions forbid.
+        has_tool_turns = any(m.role == "tool" or m.tool_calls for m in earlier)
+        # Tool turns need tool definitions (Claude rejects the request otherwise): asked without tools (no registry),
+        # the conversation continues as a new one, like a long one.
+        reason = "long" if self._too_long(earlier) else ("no_tools" if has_tool_turns and registry is None else "")
+        if reason:
+            summary = self._summarize(client, earlier)
+            earlier, new_conversation, has_tool_turns = [], True, False
+            blocks.append(_text_block("Summary of our earlier conversation, for context:\n"
+                                      + wrap_untrusted(summary, "conversation summary")))
+        if not tools and has_tool_turns:
+            # The registry is there (see above) and still denies every call the permissions forbid.
             tools = tool_specs_from_registry(registry)
         # A turn cut off during a tool call (saved by an earlier version) is closed first, by appending results.
         repairs = close_open_calls(earlier)
@@ -1062,4 +1077,4 @@ class DittoCoder:
         return ChatReply(question=question, text=text, new_messages=[*repairs, user_turn, *new],
                          new_conversation=new_conversation, tools=uses, stop=stop,
                          provider=getattr(last, "provider", ""), model=getattr(last, "model", ""), usage=usage,
-                         source_changed=source_changed)
+                         source_changed=source_changed, new_conversation_reason=reason)
