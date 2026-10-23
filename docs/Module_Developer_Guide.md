@@ -706,8 +706,9 @@ The statistics (`convert_stats.json` in the stage folder) go into `build_info.js
 `consolidated.safetensors` beside the `model*.safetensors` shards, is not counted), `converted`, `output_format`,
 `output_type`, `output_bytes`, `ratio` (input / output),
 `seconds`, `functional_test` (`passed`, `skipped`, `timed out` or `stopped`) and `functional_test_tool`; numbers and
-words only, no paths. A functional test that ends with an error fails the stage with the tool's last lines: the GGUF
-does not work. It is skipped with a note when the image has neither tool or the tool does not start there, for an embedding model, for the NPU formats
+words only, no paths. A functional test that ends with an error or crashes (a signal such as llama.cpp's abort on a
+tensor it cannot use) fails the stage with the tool's last lines: the GGUF does not work. A timeout or a run stopped
+from outside (SIGKILL of the out-of-memory killer, SIGTERM) is a note. It is skipped with a note when the image has neither tool or the tool does not start there, for an embedding model, for the NPU formats
 (the model runs on the board) and in the `imatrix` job (`llama-imatrix` runs the model there).
 
 ## 7. Sandbox rules

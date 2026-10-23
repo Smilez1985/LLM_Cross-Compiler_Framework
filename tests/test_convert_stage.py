@@ -518,6 +518,12 @@ if mode == 'completion-signal':
     os.kill(os.getpid(), 9)
 if mode == 'completion-nostart':  # what the loader says when a library of the image is missing
     sys.exit(127)
+if mode == 'completion-abort':  # GGML_ASSERT: llama.cpp aborts on a tensor of the wrong shape
+    print('llama.cpp/src/llama-graph.cpp:42: GGML_ASSERT(ggml_nelements(cur) == n) failed', file=sys.stderr,
+          flush=True)
+    os.abort()
+if mode == 'completion-sigill':  # instructions this CPU does not have
+    os.kill(os.getpid(), 4)
 print('Hello world, this is', flush=True)
 """
 
@@ -561,6 +567,31 @@ def test_a_run_that_cannot_finish_here_is_a_note_not_a_failure(tmp_path, monkeyp
     gguf = write_gguf(tmp_path / "model-F16.gguf")
     assert mc.functional_test(gguf, tools_with(tmp_path, "llama-completion"), 1) == (result, "llama-completion")
     assert "not counted as a failure" in capsys.readouterr().out
+
+
+@needs_posix
+def test_a_run_that_crashes_on_the_gguf_fails_the_test(tmp_path, monkeypatch, capsys):
+    """Only a stop from outside (the out-of-memory killer's SIGKILL, SIGTERM) is a note. llama.cpp aborts (GGML_ASSERT)
+    or crashes on a GGUF it cannot run, such as a tensor of the wrong shape: that GGUF does not work."""
+    monkeypatch.setenv("STUB_LOG", str(tmp_path / "calls.log"))
+    monkeypatch.setenv("STUB_FAIL", "completion-abort")
+    gguf = write_gguf(tmp_path / "model-F16.gguf")
+    with pytest.raises(mc.Problem) as failed:
+        mc.functional_test(gguf, tools_with(tmp_path, "llama-completion"), 30)
+    assert str(failed.value).startswith("The functional test failed: llama-completion crashed running model-F16.gguf "
+                                        "(signal 6), so the GGUF the converter wrote does not work.")
+    assert "GGML_ASSERT(ggml_nelements(cur) == n) failed" in str(failed.value)
+    assert "not counted as a failure" not in capsys.readouterr().out
+
+
+@needs_posix
+def test_a_tool_this_cpu_cannot_run_says_nothing_about_the_gguf(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("STUB_LOG", str(tmp_path / "calls.log"))
+    monkeypatch.setenv("STUB_FAIL", "completion-sigill")
+    gguf = write_gguf(tmp_path / "model-F16.gguf")
+    assert mc.functional_test(gguf, tools_with(tmp_path, "llama-completion"), 30) == ("skipped", "llama-completion")
+    assert "Functional test skipped: llama-completion uses instructions this build host's CPU does not have " \
+           "(signal 4)." in capsys.readouterr().out
 
 
 @needs_posix
