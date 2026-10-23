@@ -12,6 +12,8 @@ import os
 import platform
 import shutil
 import subprocess
+from collections import namedtuple
+from pathlib import Path
 
 import pytest
 
@@ -461,6 +463,111 @@ def test_programs_for_another_processor_get_no_package(image):
     assert ("ERROR: llama-cli is no program for the aarch64 board (ELF machine 62, expected 183); no package was made."
             in result.stderr)
     assert not any((image.output / "packages").glob("granite_*_aarch64_*"))
+
+
+# --- the disk rule before the package's copies (scripts/board_package.py room) ------------------------------------
+
+GIB = 1024 ** 3
+
+
+def small_disk(image, *frees):
+    """The disk the image's python3 measures (tests/board_toolchain.py set_disk): 100 GB, free as given, one value per
+    measurement, the last one for every further measurement."""
+    from board_toolchain import set_disk
+    set_disk(image.toolchain, *frees)
+    return {}
+
+
+def disk_rule_refusal(needed, free, total=100 * 10 ** 9):
+    """The refusal of the framework's disk rule (orchestrator/Core/disk_plan.py) for the package on the output disk."""
+    from orchestrator.Core import disk_plan
+    usage = namedtuple("usage", "total used free")(total, total - free, free)
+    check = disk_plan.room(Path("."), needed, label="output", disk_usage=lambda _path: usage)
+    problem = disk_plan.refusal([check], "the package for the board")
+    return None if problem is None else str(problem)
+
+
+@pytest.mark.parametrize("needed, free, total", [
+    (5 * 10 ** 9, 20 * 10 ** 9, 500 * 10 ** 9),      # fits: 15 GB left, 10 GB (2 %) must stay free
+    (5 * 10 ** 9, 14 * 10 ** 9, 500 * 10 ** 9),      # 9 GB left: less than the 2 %
+    (1 << 20, GIB, 100 * 10 ** 9),                   # a small disk keeps 2 GiB
+    (1 << 20, 2 * GIB + (1 << 20), 100 * 10 ** 9),   # exactly the reserve left: fits
+    (1 << 20, 2 * GIB + (1 << 20) - 1, 100 * 10 ** 9),
+    (900 * 10 ** 6, 3 * 10 ** 9, 0),                 # a measurement without the disk's size keeps 2 GiB
+])
+def test_the_package_s_room_is_the_framework_s_disk_rule(tmp_path, needed, free, total):
+    """The image has no framework, so scripts/board_package.py carries the disk rule's numbers and words: the same
+    verdict and the same refusal as disk_plan.refusal for the output disk, without the reservation ledger (the per-user
+    folder of the computer, which a build container does not see)."""
+    from orchestrator.Core import disk_plan
+    from orchestrator.utils.localization import ui_text
+    board_package = _board_package()
+    model = tmp_path / "model.gguf"
+    with open(model, "wb") as f:
+        f.truncate(needed)  # sparse: the size counts, not the blocks
+    usage = namedtuple("usage", "total used free")(total, total - free, free)
+
+    problem = board_package.room(tmp_path / "packages", [model], "the package for the board",
+                                 disk_usage=lambda _path: usage)
+
+    assert problem == disk_rule_refusal(needed, free, total)
+    assert (board_package.RESERVE_MIN, board_package.RESERVE_SHARE) == (disk_plan.RESERVE_MIN, disk_plan.RESERVE_SHARE)
+    assert board_package.FREE_DISK == ui_text("action.free_disk", "en")
+    for value in (0, 999_999, 10 ** 9 - 1, 10 ** 9, 2 * GIB, 123_456_789_012):
+        assert board_package.gb(value) == disk_plan.gb(value)
+
+
+def test_the_package_s_room_counts_every_file_on_the_disk_of_the_nearest_folder(tmp_path):
+    board_package = _board_package()
+    files = []
+    for name, size in (("model.gguf", 3 * 10 ** 9), ("llama-cli", 10 ** 6), ("llama-server", 10 ** 6)):
+        files.append(tmp_path / name)
+        with open(files[-1], "wb") as f:
+            f.truncate(size)
+    asked = []
+
+    def usage(path):
+        asked.append(path)
+        return namedtuple("usage", "total used free")(100 * 10 ** 9, 0, 2 * GIB + 3 * 10 ** 9 + 10 ** 6)
+
+    assert board_package.room(tmp_path / "packages" / "new", files[:2], "x", disk_usage=usage) is None
+    assert asked == [str(tmp_path)], "measured on the folder that exists"
+    assert board_package.room(tmp_path / "packages", files, "the package for the board", disk_usage=usage) == (
+        "Not enough disk space for the package for the board: output disk: 3.0 GB needed, 5.1 GB free, 2.1 GB must "
+        "stay free. Free disk space (old builds, the model cache, the trash), or choose a smaller model.")
+
+
+@needs_bash
+def test_a_package_the_disk_cannot_hold_is_refused_before_anything_slow(image):
+    """Version 1.x copied the model into the package without a look at the disk. Now the framework's disk rule comes
+    first: the model alone does not fit, so neither the functional test nor the cross build runs."""
+    result = target_by_hand(image, "--model-name", "granite", STUB_TOOLS_LOG=image.root / "tools.log",
+                            **small_disk(image, GIB))
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    model = image.output / "granite-Q4_K_M.gguf"
+    expected = disk_rule_refusal(model.stat().st_size, GIB)
+    assert f"ERROR: {expected} No package was made." in result.stderr
+    assert expected.startswith("Not enough disk space for the package for the board: output disk: 1 MB needed, "
+                               "1.1 GB free, 2.1 GB must stay free. Free disk space")
+    assert not any(c.startswith("cmake ") and "-DCMAKE_TOOLCHAIN_FILE=" in c for c in tools_log(image))
+    assert "Functional test" not in result.stdout
+    assert not (image.output / "packages").exists()
+
+
+@needs_bash
+def test_a_disk_that_fills_during_the_cross_build_stops_the_package_before_the_copy(image):
+    """The check before the copy counts every file the package copies (the model, the programs, the toolchain file);
+    here another job filled the disk while the programs were built."""
+    result = target_by_hand(image, "--model-name", "granite", STUB_TOOLS_LOG=image.root / "tools.log",
+                            **small_disk(image, 50 * 10 ** 9, GIB))
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert any(c.startswith("cmake ") and "-DCMAKE_TOOLCHAIN_FILE=" in c for c in tools_log(image)), "cross build ran"
+    assert ("ERROR: Not enough disk space for the package for the board: output disk: 1 MB needed, 1.1 GB free, "
+            "2.1 GB must stay free.") in result.stderr
+    assert "No package was made." in result.stderr
+    assert not (image.output / "packages").exists()
 
 
 @needs_bash
