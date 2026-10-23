@@ -161,3 +161,96 @@ class TestWhatTheCallersGet:
     def test_the_builders_staging(self, wire, tmp_path, monkeypatch):
         fetched, _ = stage(tmp_path, monkeypatch)
         assert fetched == [("config.json", 12, None, COMMIT), ("model.safetensors", 99, LFS_SHA, COMMIT)]
+
+
+# --- Security: the token goes only to huggingface.co, also with HF_ENDPOINT set -------------------------------------
+
+@pytest.fixture
+def foreign(wire, monkeypatch):
+    """HF_ENDPOINT names another host: huggingface_hub sends every call of an HfApi without its own endpoint there."""
+    from huggingface_hub import constants
+    monkeypatch.setattr(constants, "ENDPOINT", FOREIGN)
+    monkeypatch.setenv("HF_ENDPOINT", FOREIGN)
+    return wire
+
+
+def only_to_huggingface(wire, token):
+    """No request carries a token to the host in HF_ENDPOINT, none carries the implicit HF_TOKEN, every API call goes
+    to huggingface.co, and the token sent there is exactly the framework's own (`token`), or none at all."""
+    assert wire.tokens_to("mirror.example") == [], "a token went to the host in HF_ENDPOINT"
+    assert IMPLICIT not in [token for _, _, token in wire.seen], "the implicit HF_TOKEN was sent"
+    assert wire.api_hosts() == {"huggingface.co"}, wire.seen
+    assert set(wire.tokens_to("huggingface.co")) == ({token} if token else set())
+
+
+class TestTheTokenGoesOnlyToHuggingFace:
+    """Regression (maintainer, stage C wave 3): the wave-2 fix pinned hf_hub's own calls, while the Builder's staging,
+    the build plan's look-up and the GUI's commit check created their own HfApi() and sent the stored token to the
+    host in HF_ENDPOINT, and the browser's search, licence check and file list sent the implicit HF_TOKEN there. Every
+    caller now goes through hf_hub.hub_api."""
+
+    @pytest.mark.parametrize("token", [STORED, None])
+    def test_the_builders_staging(self, foreign, tmp_path, monkeypatch, token):
+        fetched, tokens = stage(tmp_path, monkeypatch, token)
+        assert [f[0] for f in fetched] == ["config.json", "model.safetensors"] and tokens == [token]
+        only_to_huggingface(foreign, token)
+
+    @pytest.mark.parametrize("token", [STORED, None])
+    def test_the_build_plans_look_up(self, foreign, token):
+        assert real_look_up(REPO, None, token).commit == COMMIT
+        only_to_huggingface(foreign, token)
+
+    @pytest.mark.parametrize("token", [STORED, None])
+    def test_the_gui_commit_check_of_an_identical_build(self, foreign, tmp_path, token):
+        from orchestrator.Core.build_service import BuildService
+        assert BuildService(framework(tmp_path, token)).model_commit(REPO) == COMMIT
+        only_to_huggingface(foreign, token)
+
+    @pytest.mark.parametrize("token", [STORED, None])
+    def test_the_browsers_search_licence_check_and_file_list(self, foreign, tmp_path, token):
+        from orchestrator.Core.model_manager import ModelManager
+        manager = ModelManager(framework(tmp_path, token))
+        assert [m["id"] for m in manager.search_huggingface_models("tiny")] == ["acme/free", "acme/locked"]
+        assert manager.check_license(REPO)["license"] == "apache-2.0"
+        assert "config.json" in manager.list_repo_files(REPO)
+        only_to_huggingface(foreign, token)
+
+    def test_the_token_typed_in_the_browser_too(self, foreign, tmp_path):
+        from orchestrator.Core.model_manager import ModelManager
+        typed = "hf_" + "Typed" * 8
+        assert "config.json" in ModelManager(framework(tmp_path, STORED)).list_repo_files(REPO, typed)
+        only_to_huggingface(foreign, typed)
+
+    def test_the_take_overs_hub_list(self, foreign, tmp_path):
+        from orchestrator.Core.model_manager import ModelManager
+        listed = ModelManager(framework(tmp_path, STORED))._hub_lookup()(REPO, COMMIT)
+        assert listed["model.safetensors"].sha256 == LFS_SHA
+        only_to_huggingface(foreign, STORED)
+
+    def test_an_ai_callers_search_and_look_up(self, foreign, tmp_path):
+        from orchestrator.Core.hf_hub import HubClient
+        client = HubClient(framework(tmp_path, STORED))
+        assert [m["id"] for m in client.search("tiny", gated_mode="any")] == ["acme/free", "acme/locked"]
+        assert client.info(REPO).commit == COMMIT
+        only_to_huggingface(foreign, STORED)
+
+
+def test_every_hub_api_object_comes_from_hub_api():
+    """One Hub API (R0): no module but orchestrator/Core/hf_hub.py creates huggingface_hub's HfApi or imports its
+    module-level API functions, which send an implicit token to the host in HF_ENDPOINT; they go through
+    hf_hub.hub_api (huggingface.co, the framework's token or none)."""
+    import ast
+    from conftest import REPO_ROOT
+    api_names = {"HfApi", "model_info", "list_models", "list_repo_files", "list_repo_tree", "auth_check", "whoami",
+                 "get_hf_file_metadata", "hf_hub_url", "get_paths_info", "repo_info", "file_exists"}
+    found = []
+    for path in sorted((REPO_ROOT / "orchestrator").rglob("*.py")):
+        name = path.relative_to(REPO_ROOT).as_posix()
+        if name == "orchestrator/Core/hf_hub.py":
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("huggingface_hub"):
+                found += [f"{name}:{node.lineno} imports {a.name}" for a in node.names if a.name in api_names]
+            elif isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "HfApi":
+                found.append(f"{name}:{node.lineno} calls HfApi")
+    assert found == []

@@ -2499,6 +2499,19 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   only to huggingface.co. Every Hub API call of `orchestrator/Core/hf_hub.py` (`HubClient`) and of the browser's
   download and Take over (`ModelManager`) now goes through `hf_hub.hub_api`, pinned to huggingface.co. Regression
   tests: `tests/test_hf_gui_download.py` `TestTheTokenGoesOnlyToHuggingFace`.
+- **No Hugging Face call of the framework sends a token to the host in `HF_ENDPOINT` or an implicit `HF_TOKEN`
+  any more** (consolidation chain hf-online). Outside `hf_hub` four callers still made their own `HfApi()`: the
+  Builder's staging of a Hugging Face model, the build plan's look-up (`hf_lookup.look_up`) and the GUI's commit
+  check of an identical build (`BuildService.model_commit`) sent the token stored in the framework to the host in
+  `HF_ENDPOINT`, and the Hugging Face browser's search, licence check and file list
+  (`ModelManager.search_huggingface_models`, `check_license`, `list_repo_files`) sent the implicit token (`HF_TOKEN`
+  or the Hugging Face home folder's token file) there. Every one of them now goes through `hf_hub.hub_api`
+  (huggingface.co only; the token the person typed in the browser, else the one stored in the framework, else none),
+  and every file list is read by `hf_hub.hub_file` (the Builder's `_hub_files` delegates to it). The browser's search
+  and licence check use the stored token where they used the implicit one. Regression tests:
+  `tests/test_hf_online.py` drives every caller through huggingface_hub's own HTTP client with `HF_ENDPOINT` naming
+  another host and `HF_TOKEN` set, and fails on a token sent to that host, on the implicit token and on an `HfApi`
+  made outside `hf_hub`.
 - **No other account's home folder or name reaches an AI through a file URL or a space** (D0; default of
   2026-10-17). The path labels for AIs (`security.paths.label_paths`, also inside `device_text`) left the path of a
   `file:///` URL as it was when it named another account's home folder (`file:///home/<name>/...`,

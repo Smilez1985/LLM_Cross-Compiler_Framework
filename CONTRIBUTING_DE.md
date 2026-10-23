@@ -702,7 +702,11 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   landet unter `download_path(models_dir, repo, commit, name)`: `download_hf_file` einer KI und der Browser der GUI
   (`download_for_person`, das außerdem die Speicherplatz-Regel anwendet und während des Downloads eine Reservierung
   hält) teilen ihn. Dateien des alten Caches von huggingface_hub werden über `orchestrator/Core/hf_takeover.py`
-  gelesen; seine alten Kopien gehen nur als angenommener Löschplan (`delete_old_copies`).
+  gelesen; seine alten Kopien gehen nur als angenommener Löschplan (`delete_old_copies`). Jeder Hub-API-Aufruf
+  (Suche, Modellinfo, Dateiliste, Zugriffsprüfung) nutzt das `HfApi`, das `hf_hub.hub_api(token)` anlegt (nur
+  huggingface.co, nie der Host in `HF_ENDPOINT`; das Token des Frameworks oder `False`, nie ein implizites), und eine
+  Dateiliste liest `hf_hub.hub_file`; lege nirgends sonst ein `HfApi` an und rufe nirgends sonst die API-Funktionen
+  von huggingface_hub auf Modulebene auf (`tests/test_hf_online.py` schlägt bei einem solchen Aufruf fehl).
 - **Jede CLI-Aktion hat einen Weg mit der Maus.** Viele Menschen nutzen nie ein Terminal, deshalb kann eine Person
   jeden Befehl und jede Option von `llm-cli` auch in der GUI starten, ohne einen Befehl zu tippen (einen Wert in ein
   Feld zu tippen ist in Ordnung). Ein neuer Befehl oder eine neue Option braucht ihren Weg mit der Maus, einen

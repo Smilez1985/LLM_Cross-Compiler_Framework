@@ -118,7 +118,8 @@ class HubFile:
 
 def hub_file(sibling: Any) -> HubFile:
     """One entry of model_info(files_metadata=True).siblings with its size and LFS sha256 (what the fetcher checks a
-    download against)."""
+    download against). The one parser of the Hub's file list: HubClient.info, file_at_commit, the Take over's Hub
+    list, hf_lookup.look_up and the Builder's staging (BuildEngine._hub_files) read it here."""
     lfs = getattr(sibling, "lfs", None)
     sha = getattr(lfs, "sha256", None) if lfs is not None and not isinstance(lfs, dict) else \
         (lfs.get("sha256") if isinstance(lfs, dict) else None)
@@ -157,8 +158,11 @@ def _error_name(e: BaseException) -> str:
 
 def hub_api(token: Any = False):
     """huggingface_hub's HfApi with `token` (False: none at all) and pinned to huggingface.co: without the pin
-    huggingface_hub sends every call, with the token, to the host in HF_ENDPOINT. Every Hub API call of the
-    framework's own (HubClient, the GUI's browser download and the Take over) comes through here."""
+    huggingface_hub sends every call, with the token, to the host in HF_ENDPOINT, and an HfApi made without a token
+    sends the implicit one (HF_TOKEN, the Hugging Face home folder's token file). The one Hub API of the framework:
+    HubClient, the GUI browser's search, licence check, file list, download and Take over (ModelManager), the build
+    plan's look-up (hf_lookup.look_up), the GUI's commit check of an identical build (BuildService.model_commit) and
+    the Builder's staging all come through here; tests/test_hf_online.py fails on an HfApi made anywhere else."""
     from huggingface_hub import HfApi
     return HfApi(endpoint=HUB_URL, token=token or False)
 
