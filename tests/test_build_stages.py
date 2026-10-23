@@ -935,15 +935,18 @@ def test_config_module_plans_the_board_from_the_file_the_probe_writes(image, fix
 
 @needs_bash
 def test_config_module_plans_an_x86_64_profile_with_its_simd_flags(image):
-    """Native x86 with the SIMD the probe found (AVX2, AVX512 -> GGML flags), never the aarch64 cross toolchain."""
+    """An x86 PC with the SIMD the probe found (AVX2, AVX512 -> GGML flags), never the aarch64 cross toolchain. The
+    profile is of another PC than this build machine, so the flags are its own CPU features, not -march=native (the
+    native plan for a profile of the build machine itself: tests/test_target_stage.py)."""
     profile = image.root / "target_hardware_config.txt"
     profile.write_text((PROBE_FIXTURES / "schema2_linux_z1_extreme.txt").read_text(encoding="utf-8"))
 
-    result = by_hand(image, "config", "--hardware-config", profile.name, MODEL_SOURCE=None)
+    result = by_hand(image, "config", "--hardware-config", profile.name, MODEL_SOURCE=None, STUB_CC_MACHINE="62")
 
     assert result.returncode == 0, result.stdout + result.stderr
     plan = plan_of(image)
-    assert plan["PROFILE_ARCH"] == "x86_64" and "-march=native" in plan["CFLAGS"]
+    assert plan["PROFILE_ARCH"] == "x86_64" and "-march=native" not in plan["CFLAGS"]
+    assert "-march=x86-64" in plan["CFLAGS"] and "-mavx2" in plan["CFLAGS"] and "-mavx512f" in plan["CFLAGS"]
     assert "-DGGML_AVX2=ON" in plan["CMAKE_FLAGS"] and "-DGGML_AVX512=ON" in plan["CMAKE_FLAGS"]
     toolchain = (image.work / "stages" / "build" / "cross_compile_toolchain.cmake").read_text()
     assert "aarch64-linux-gnu" not in toolchain and f"SET(CMAKE_C_COMPILER   {image.toolchain}/gcc)" in toolchain

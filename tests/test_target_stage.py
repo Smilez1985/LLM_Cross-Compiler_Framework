@@ -83,14 +83,162 @@ def test_compilers_that_build_for_another_system_are_refused(image):
     assert not (image.root / STAGES / "build_config.sh").exists()
 
 
+def this_machine_profile(drop_flag=None):
+    """A hardware profile of this test host as the probe writes it (ARCH, CPU_MODEL, CPU_FLAGS_ALL, the x86 features),
+    read from /proc/cpuinfo; None where that is not readable. `drop_flag` leaves one CPU flag out."""
+    try:
+        text = Path("/proc/cpuinfo").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    model = next((line.split(":", 1)[1] for line in text.splitlines() if line.startswith("model name")), None)
+    flags = next((line.split(":", 1)[1].split() for line in text.splitlines() if line.startswith("flags")), None)
+    if not model or not flags:
+        return None
+    flags = [f for f in dict.fromkeys(flags) if f != drop_flag]
+    return (f"PROBE_SCHEMA=2\nARCH=x86_64\nCPU_MODEL={' '.join(model.split())}\nCPU_FLAGS_ALL={','.join(flags)}\n"
+            f"SUPPORTS_AVX2={'ON' if 'avx2' in flags else 'OFF'}\nSUPPORTS_AVX512={'ON' if 'avx512f' in flags else 'OFF'}\n")
+
+
+needs_x86_64_host = pytest.mark.skipif(platform.machine() != "x86_64" or this_machine_profile() is None,
+                                       reason="the native x86_64 plan runs its program on an x86_64 Linux host")
+
+
 @needs_bash
-@pytest.mark.skipif(platform.machine() != "x86_64", reason="the native x86_64 plan runs its program on an x86_64 host")
+@needs_x86_64_host
 def test_the_native_x86_64_plan_runs_its_test_programs(image):
-    result = config_with(image, (PROBE_FIXTURES / "schema2_linux_z1_extreme.txt").read_text(encoding="utf-8"))
+    """-march=native for a profile of this build machine itself (the same CPU model and CPU flags as /proc/cpuinfo):
+    the programs are for this machine, so the compiler test runs them. Before, every x86_64 profile was planned so."""
+    result = config_with(image, this_machine_profile())
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert any(c.startswith("gcc ") and "-march=native" in c for c in tools_log(image))
+    assert "The hardware profile is of this build machine: -march=native" in result.stdout
     assert "Compiler test passed: C and C++ programs for x86_64" in result.stdout
+    assert "-march=native" in plan_of(image)["CFLAGS"]
+
+
+# The x86 PCs of the tests: an AVX-512 PC (the Ryzen Z1 Extreme fixture) and an AVX2-only PC made from it.
+AVX512_PC = (PROBE_FIXTURES / "schema2_linux_z1_extreme.txt").read_text(encoding="utf-8")
+
+
+def _avx2_only(text):
+    lines = []
+    for line in text.splitlines():
+        if line.startswith("SUPPORTS_AVX512"):
+            line = line.split("=")[0] + "=OFF"
+        elif line.startswith("CPU_FLAGS_ALL="):
+            line = "CPU_FLAGS_ALL=" + ",".join(f for f in line.split("=", 1)[1].split(",") if not f.startswith("avx512"))
+        elif line.startswith("CPU_MODEL="):
+            line = "CPU_MODEL=AMD Ryzen 7 5700G"
+        lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
+AVX2_PC = _avx2_only(AVX512_PC)
+
+
+def recipe_x86(profile_text):
+    """The build recipe's x86 CPU options and compiler flags for a build for the machine of a profile
+    (orchestrator/runtime/build/recipe.py, the explicit features of a build for another machine)."""
+    from orchestrator.runtime.build.recipe import X86_FEATURES, _x86_options
+    from orchestrator.runtime.profile import parse_profile
+    options, flags = _x86_options(parse_profile(profile_text), [])
+    return " ".join(f"-D{name}={options[name]}" for name in X86_FEATURES.values()), " ".join(flags)
+
+
+@needs_bash
+@pytest.mark.parametrize("profile, has, lacks", [
+    (AVX2_PC, "-mavx2", "-mavx512f"),
+    (AVX512_PC, "-mavx512f", "-mamx-tile"),
+], ids=["avx2-only", "avx512"])
+def test_an_x86_64_profile_of_another_pc_gets_its_cpu_features_not_march_native(image, profile, has, lacks):
+    """A package planned for another PC is built for that PC's CPU: the explicit features of its probe, as the build
+    recipe plans every build for another machine (recipe.py), on the x86-64 baseline. -march=native would have tuned
+    the programs to the build machine (an AVX-512 build host gives an AVX2-only PC programs it cannot run)."""
+    cmake, flags = recipe_x86(profile)
+
+    result = config_with(image, profile, STUB_CC_MACHINE="62")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    plan = plan_of(image)
+    assert plan["CFLAGS"] == f"-O3 -pthread -fPIC -march=x86-64 {flags}"
+    assert plan["CMAKE_FLAGS"] == f"-DGGML_NATIVE=OFF {cmake}"
+    assert "-march=native" not in plan["CFLAGS"] and has in plan["CFLAGS"] and lacks not in plan["CFLAGS"]
+    assert "The hardware profile is of another machine: its CPU features (-march=x86-64 " in result.stdout
+    # the compiler test builds with these flags and checks the programs' processor; it never runs them here
+    assert any(c.startswith(f"gcc {plan['CFLAGS']} ") for c in tools_log(image)), tools_log(image)
+    assert "Compiler test passed: C and C++ programs for x86_64" in result.stdout
+
+
+def test_the_explicit_x86_features_are_the_build_recipe_s():
+    """The table of config_module.sh is the build recipe's (X86_FEATURES, _X86_NEEDS, _X86_FLAGS) with the probe's
+    /proc/cpuinfo flags (configs/hardware_probe_schema.yml); the plans of a real cross build agree with recipe_x86."""
+    import re
+    from conftest import REPO_ROOT
+
+    from orchestrator.runtime.build import recipe
+    from orchestrator.runtime.catalog import load_catalog
+    from orchestrator.runtime.profile import load_schema, parse_profile
+    text = (REPO_ROOT / "targets" / "Rockchip" / "modules" / "config_module.sh").read_text(encoding="utf-8")
+    table = re.search(r"X86_FEATURE_TABLE=\((.*?)\n\)", text, re.S).group(1)
+    rows = [row.split() for row in re.findall(r'"([^"]+)"', table)]
+    schema = load_schema()
+    assert [r[0] for r in rows] == list(recipe.X86_FEATURES)
+    assert {r[0]: r[1] for r in rows} == dict(recipe.X86_FEATURES)
+    assert {r[0]: r[2] for r in rows if r[2] != "-"} == dict(recipe._X86_NEEDS)
+    assert {r[0]: (r[3],) for r in rows} == {key: schema.keys[key].cpuinfo for key in recipe.X86_FEATURES}
+    flag_rows = re.search(r"X86_FLAG_TABLE=\((.*?)\n\)", text, re.S).group(1)
+    flags = [row.split() for row in re.findall(r'"([^"]+)"', flag_rows)]
+    assert [(r[0], tuple(r[1:])) for r in flags] == list(recipe._X86_FLAGS.items())
+    plan = recipe.plan_build(parse_profile(AVX512_PC), purpose="device-runtime", placement="cross", backend="cpu",
+                             catalog=load_catalog(), toolchain=recipe.ToolchainInfo(host_os="linux", host_arch="x86_64"))
+    assert " ".join(f"-D{n}={plan.options()[n]}" for n in recipe.X86_FEATURES.values()) == recipe_x86(AVX512_PC)[0]
+    assert " ".join(plan.verify["compile_check_flags"]) == recipe_x86(AVX512_PC)[1]
+
+
+@needs_bash
+@needs_x86_64_host
+def test_a_profile_with_this_cpu_model_but_other_cpu_flags_is_another_machine(image):
+    """Only the CPU of this very machine is -march=native: the same model name with one CPU flag less (another PC, a
+    feature switched off) gets the explicit features of its probe."""
+    profile = this_machine_profile(drop_flag="sse2")
+
+    result = config_with(image, profile, STUB_CC_MACHINE="62")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "-march=native" not in plan_of(image)["CFLAGS"] and "-march=x86-64" in plan_of(image)["CFLAGS"]
+
+
+@needs_bash
+def test_features_the_probe_does_not_confirm_are_left_out(image):
+    """A probe that could not tell a feature (UNKNOWN, Windows without a constant for it) gets no option for it: never
+    more than the probe confirmed, as in the build recipe's plan."""
+    profile = "\n".join(line for line in AVX2_PC.splitlines() if not line.startswith("CPU_FLAGS_ALL=")) + "\n"
+    profile = profile.replace("SUPPORTS_FMA=ON", "SUPPORTS_FMA=UNKNOWN").replace("SUPPORTS_F16C=ON", "SUPPORTS_F16C=UNKNOWN")
+
+    result = config_with(image, profile, STUB_CC_MACHINE="62")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    plan = plan_of(image)
+    assert plan["CMAKE_FLAGS"] == f"-DGGML_NATIVE=OFF {recipe_x86(profile)[0]}"
+    assert "-DGGML_FMA=OFF" in plan["CMAKE_FLAGS"] and "-DGGML_F16C=OFF" in plan["CMAKE_FLAGS"]
+    assert "-mfma" not in plan["CFLAGS"] and "-mavx2" in plan["CFLAGS"]
+    assert "does not say whether the CPU has F16C FMA: left out" in result.stdout + result.stderr
+
+
+@needs_bash
+def test_a_probe_file_of_version_1x_gets_the_features_its_cpu_flags_name(image):
+    """The probe of version 1.x wrote SUPPORTS_AVX2 and SUPPORTS_AVX512 only, and the CPU flags separated by spaces:
+    the other features come from its CPU flags, as the framework reads such a file (orchestrator/runtime/profile.py)."""
+    profile = (PROBE_FIXTURES / "schema1_sh_laptop.txt").read_text(encoding="utf-8")
+
+    result = config_with(image, profile, STUB_CC_MACHINE="62")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    cmake, flags = recipe_x86(profile)
+    assert plan_of(image)["CMAKE_FLAGS"] == f"-DGGML_NATIVE=OFF {cmake}"
+    assert plan_of(image)["CFLAGS"] == f"-O3 -pthread -fPIC -march=x86-64 {flags}"
+    assert "-DGGML_FMA=ON" in cmake and "-DGGML_AVX512_VNNI=ON" in cmake and "-DGGML_AVX512_BF16=OFF" in cmake
 
 
 @needs_bash
