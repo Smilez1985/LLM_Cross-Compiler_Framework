@@ -97,7 +97,6 @@ EOF
 
 PACKAGE_SCRIPTS="$(dirname "$MODULES_DIR")/scripts"
 FUNCTIONAL_TEST_SECONDS=120
-FUNCTIONAL_TEST_TOKENS=8
 
 # Without a hardware profile in the build plan (a package on request: build.sh --package, target_module.sh started
 # by hand): the board's part of the plan from the plain defaults of this target, planned and checked by the config
@@ -143,35 +142,29 @@ validate_inputs() {
     log_success "Input validation completed"
 }
 
-# A short run of the model on this build machine with the image's own llama.cpp tools (llama-completion; llama-cli
-# when the image has only that): FUNCTIONAL_TEST_TOKENS tokens, at most FUNCTIONAL_TEST_SECONDS, no network. A run that
-# ends with an error stops the package; a timeout is a note. Without the tools it is skipped, and the manifest says
-# so. The package's test_model.sh runs the same kind of test on the board.
+# A short run of the quantized model on this build machine: the convert stage's functional test (scripts/model_check.py
+# test, the one implementation), with the image's own llama-completion (llama-cli when the image has only that): 8
+# tokens, at most FUNCTIONAL_TEST_SECONDS, offline, the options this tool has. A run that ends with an error or
+# crashes on the model stops the package. A timeout, a stop from outside (the out-of-memory killer), a tool this
+# machine cannot run or start, no tool in the image and an embedding model are notes, and the manifest says which.
+# The package's test_model.sh runs the same kind of test on the board.
 functional_test() {
-    local model="$1" log="$SCRATCH_DIR/functional-test.log" tool rc=0
-    local -a run
-    if [ -x "$LLAMA_BASE/build/bin/llama-completion" ]; then
-        tool="llama-completion"
-        run=("$LLAMA_BASE/build/bin/llama-completion" -m "$model" -p "Hello" -n "$FUNCTIONAL_TEST_TOKENS" -no-cnv)
-    elif [ -x "$LLAMA_BASE/build/bin/llama-cli" ]; then
-        tool="llama-cli"
-        run=("$LLAMA_BASE/build/bin/llama-cli" -m "$model" -p "Hello" -n "$FUNCTIONAL_TEST_TOKENS" -st)
-    else
-        TARGET_CONFIG[FUNCTIONAL_TEST]="skipped: the image has no llama-completion or llama-cli for this machine"
-        log_info "Functional test skipped: the image has no llama-completion or llama-cli for this machine"
-        return 0
-    fi
-    log_info "Functional test: $tool runs the model for $FUNCTIONAL_TEST_TOKENS tokens (at most ${FUNCTIONAL_TEST_SECONDS} s)"
-    timeout "$FUNCTIONAL_TEST_SECONDS" "${run[@]}" --no-warmup < /dev/null > "$log" 2>&1 || rc=$?
-    case "$rc" in
-        0) TARGET_CONFIG[FUNCTIONAL_TEST]="passed ($tool, $FUNCTIONAL_TEST_TOKENS tokens on the build machine)" ;;
-        124)
-            TARGET_CONFIG[FUNCTIONAL_TEST]="timed out after ${FUNCTIONAL_TEST_SECONDS} s ($tool on the build machine); not a failure"
+    local model="$1" result_file="$SCRATCH_DIR/functional-test.result" result="" tool="" summary=""
+    [ -f "$PACKAGE_SCRIPTS/model_check.py" ] || \
+        die "The functional test of the package is missing: scripts/model_check.py is not in the image."
+    rm -f "$result_file"
+    python3 "$PACKAGE_SCRIPTS/model_check.py" test "$model" --tools "$LLAMA_BASE/build/bin" \
+        --test-seconds "$FUNCTIONAL_TEST_SECONDS" --result "$result_file" --what "the quantized model" \
+        --stage TARGET || exit 1
+    { IFS= read -r result; IFS= read -r tool; IFS= read -r summary; } < "$result_file"
+    rm -f "$result_file"
+    TARGET_CONFIG[FUNCTIONAL_TEST]="$summary"
+    case "$result" in
+        "timed out")
             log_warn "The functional test did not finish within ${FUNCTIONAL_TEST_SECONDS} s; the package is made anyway." ;;
-        *) die "The functional test failed: $tool could not run the quantized model (exit $rc): $(tail -n 8 "$log" | tr '\n' ' ')" ;;
+        stopped) log_warn "The functional test was stopped from outside (${tool:-the tool}); the package is made anyway." ;;
     esac
-    rm -f "$log"
-    log_success "Functional test: ${TARGET_CONFIG[FUNCTIONAL_TEST]}"
+    log_success "Functional test: $summary"
 }
 
 cross_compile_target() {
