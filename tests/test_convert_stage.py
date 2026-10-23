@@ -644,6 +644,30 @@ def test_an_embedding_model_is_not_run(tmp_path, capsys):
     assert "an embedding model does not generate text" in capsys.readouterr().out
 
 
+@needs_posix
+def test_the_test_command_is_the_same_functional_test_for_the_target_stage(tmp_path, monkeypatch, capsys):
+    """`model_check.py test` (the target stage's package, tests/test_target_stage.py): the one functional test, its
+    result for the shell in three lines, its log lines and its failure naming what was tested."""
+    monkeypatch.setattr(mc, "STAGE", mc.STAGE)  # the command names its stage in the log lines; restored afterwards
+    monkeypatch.setenv("STUB_LOG", str(tmp_path / "calls.log"))
+    gguf = write_gguf(tmp_path / "model-Q4_K_M.gguf")
+    tools, result = tools_with(tmp_path, "llama-completion"), tmp_path / "result.txt"
+    assert check("test", gguf, "--tools", tools, "--result", result, "--stage", "TARGET") == 0
+    assert result.read_text().splitlines() == ["passed", "llama-completion",
+                                               "passed (llama-completion, 8 tokens on the build machine)"]
+    assert "[TARGET] Functional test passed: llama-completion loaded model-Q4_K_M.gguf" in capsys.readouterr().out
+    monkeypatch.setenv("STUB_FAIL", "completion-abort")
+    assert check("test", gguf, "--tools", tools, "--result", result, "--what", "the quantized model") == 1
+    assert "crashed running model-Q4_K_M.gguf (signal 6), so the quantized model does not work." in \
+        capsys.readouterr().err
+    # without a program to run it, the file is not read (as the target stage's own test did not)
+    plain = tmp_path / "plain.gguf"
+    plain.write_text("not a GGUF", encoding="utf-8")
+    assert check("test", plain, "--tools", tmp_path / "no-tools", "--result", result) == 0
+    assert result.read_text().splitlines() == [
+        "skipped", "", "skipped: the image has no llama-completion or llama-cli for this machine"]
+
+
 # ---------------------------------------------------------------------------------------------------------------
 # In the Rockchip build (stub toolchains)
 # ---------------------------------------------------------------------------------------------------------------
