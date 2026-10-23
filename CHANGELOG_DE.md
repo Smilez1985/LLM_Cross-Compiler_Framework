@@ -1410,6 +1410,29 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Der Hugging-Face-Browser der GUI lädt in den Ordner `hf/` des Modellordners, geprüft, wie ein Download einer KI**
+  (Entscheidung A6 des Maintainers; Konsolidierungskette hf). Neuer Ort: `<Modellordner>/hf/<Owner>--<Name>/<die
+  ersten 12 Zeichen des Commits>/<Datei>`, derselbe Ordner, den `download_hf_file` und die eigenen Downloads des
+  Builders nutzen; bisher speicherte der Browser über huggingface_hub in dessen Cache (`<Modellordner>/models--<Owner>--
+  <Name>/`, Links auf Blobs, die nach ihrer Prüfsumme heißen). Ein Codepfad: `ModelManager.download_file` ruft jetzt
+  `orchestrator/Core/hf_hub.py` `download_for_person` auf, das zuerst den Commit nachschlägt, genau die Datei dieses
+  Commits mit dem Fetcher des Frameworks lädt (`HubFetcher`: fortsetzbare `.part`-Datei, Größe und sha256 des Hubs
+  werden geprüft, bevor die Datei ihren Namen bekommt, das Token nur an huggingface.co, nie ein stilles `HF_TOKEN`)
+  und zuerst die eine Speicherplatz-Regel anwendet (die Reserve von `Core/disk_plan` und was laufende Builds und
+  Downloads reserviert haben; eine Ablehnung in der Sprache der Person) und während des Downloads eine eigene
+  Reservierung im Ledger des Benutzerordners hält, sodass ein Build, der inzwischen startet, ihren Platz mitzählt. Es
+  gilt das Token, das die Person im Browser eingibt, sonst das im Framework gespeicherte (`hf_token`), sonst keins. Das
+  Fenster zeigt den Fortschritt und hat einen Anhalten-Knopf (der bisher geladene Teil bleibt; ein neuer Download setzt
+  ihn fort). Modelle im alten Cache bleiben für KI-Aufrufer aufgeführt und für Builds nutzbar. Der neue Knopf **Alte
+  Downloads übernehmen…** (`orchestrator/Core/hf_takeover.py`, freiwillig und einmalig) kopiert sie in den neuen
+  Ordner, jede Datei gegen die Prüfsumme geprüft, mit der sie geladen wurde (der Name des Blobs: die LFS-sha256 oder
+  die Git-Blob-ID; bei einem Cache ohne Links, was der Hub für diesen Commit führt), unter der Speicherplatz-Regel mit
+  eigener Reservierung; eine Datei, die nicht passt, oder eine andere Datei gleichen Namens im neuen Ordner bleibt, wo
+  sie ist, mit ihrem Grund. Danach bietet er das Entfernen der alten Kopien nur im Löschdialog mit der genauen Liste
+  an (der Cache-Ordner jedes Modells und die Dateien des gemeinsamen Speichers des Caches, die nur sie nutzen, mit
+  vollem Pfad und Größe; Papierkorb oder endgültig; „Nein“ ist die Vorgabe), zuerst im Audit-Log vermerkt; ohne dieses
+  Ja wird nichts gelöscht. Jeder Schritt läuft in einem Worker-Thread. Die Texte stehen in
+  `orchestrator/utils/l10n_hf.py` (Englisch und Deutsch). Der Browser liest den Offline-Modus wie bisher nicht.
 - **Ein Build sind wieder die vier Stufenmodule, und `build.sh` führt sie nur aus** (Entscheidung U9 des
   Maintainers; Konsolidierungskette build4). `targets/Rockchip/modules/build.sh` ist ein Stage-Runner über
   `source_module.sh` (die Quellen der Werkzeuge, aus denen das Image gebaut wurde), `config_module.sh`

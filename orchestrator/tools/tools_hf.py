@@ -200,7 +200,7 @@ def active_downloads() -> int:
 
 
 def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
-    from orchestrator.Core.hf_hub import HubClient, HubError, folder_name, safe_filename
+    from orchestrator.Core.hf_hub import HubClient, HubError, download_path, safe_filename
 
     def hub() -> HubClient:
         factory = getattr(framework, "hf_api_factory", None)  # tests give a stand-in for the Hub
@@ -291,7 +291,7 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
         if file is None or file.size is None:
             raise blocked("size_unknown", f"The Hub lists no size for '{name}'; it is not downloaded.",
                           "Choose another file of the repository.")
-        dest = models_dir() / "hf" / folder_name(inp.model) / facts.commit[:12] / name
+        dest = download_path(models_dir(), inp.model, facts.commit, name)
         part = dest.with_name(dest.name + ".part")
         have = part.stat().st_size if part.is_file() else 0
         disk = disk_check(models_dir(), max(file.size - have, 0), ledger())
@@ -359,7 +359,7 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
         require_commit(bound, ctx.confirm_channel)  # unattended: only the commit the look-up resolved
         repo, name, commit = bound["model"], bound["filename"], bound["commit"]
         file = HubFile(name, int(bound["size"]), bound.get("sha256") or None)
-        dest = models_dir() / "hf" / folder_name(repo) / commit[:12] / name
+        dest = download_path(models_dir(), repo, commit, name)
         token = hub().token()
         stop = threading.Event()
         reservation = take_reservation(repo, commit, name, file.size, dest, ctx.owner,

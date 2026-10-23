@@ -2,7 +2,8 @@
 """
 Hugging Face for AI callers (MCP design 2.4, work package T6): search with the gated filter, one lookup per model
 (licence, gating, access of the stored token, files, size, commit), and one cancellable, resumable fetcher checked
-against the Hub's sha256.
+against the Hub's sha256. The person's own downloads in the GUI's Hugging Face browser go through the same fetcher into
+the same folders (download_for_person, DECISIONS round 11 A6): one code path for both.
 
 Rules that hold for every call here:
 
@@ -15,6 +16,8 @@ Rules that hold for every call here:
 - Offline mode refuses before any network request; a network error is an error, never an empty list.
 - A licence is "permissive" only on a fixed allowlist; `other`, custom, list-valued and unknown licences are
   "unknown", and the base model's licence and gating are reported too (a GGUF re-upload of a gated model shows as such).
+- The person's own download (download_for_person) sends the token the person typed in the browser's token question
+  or stored in the framework, never an implicit one either; like the rest of the browser it does not read offline mode.
 - A download lands in `<models_dir>/hf/<owner>--<name>/<commit[:12]>/<filename>`: one folder per commit (Hugging Face
   forbids `--` in repository ids, so the encoding cannot collide). The file is written to a `.part` file that a
   later run resumes, under a lock per file, and gets its name only after its size and sha256 matched what the Hub
@@ -99,11 +102,29 @@ def safe_filename(name: str) -> bool:
     return bool(parts) and all(p not in ("", ".", "..") for p in parts)
 
 
+def download_path(models_dir: Path, repo: str, commit: str, name: str) -> Path:
+    """Where file `name` of `repo` at `commit` lands: `<models_dir>/hf/<owner>--<name>/<commit[:12]>/<name>`. The one
+    layout of every Hugging Face file the framework downloads for a person or an AI (download_hf_file, the GUI's
+    Hugging Face browser, the Take over of the old cache, Core/hf_takeover.py)."""
+    return Path(models_dir) / "hf" / folder_name(repo) / commit[:12] / name
+
+
 @dataclass
 class HubFile:
     name: str
     size: Optional[int]
     sha256: Optional[str] = None  # the LFS sha256; None for a small file stored without LFS
+
+
+def hub_file(sibling: Any) -> HubFile:
+    """One entry of model_info(files_metadata=True).siblings with its size and LFS sha256 (what the fetcher checks a
+    download against)."""
+    lfs = getattr(sibling, "lfs", None)
+    sha = getattr(lfs, "sha256", None) if lfs is not None and not isinstance(lfs, dict) else \
+        (lfs.get("sha256") if isinstance(lfs, dict) else None)
+    size = getattr(sibling, "size", None)
+    return HubFile(str(sibling.rfilename), int(size) if isinstance(size, int) else None,
+                   str(sha).lower() if sha else None)
 
 
 @dataclass
@@ -132,6 +153,30 @@ class ModelFacts:
 
 def _error_name(e: BaseException) -> str:
     return e.__class__.__name__
+
+
+def hub_error(e: BaseException, what: str, with_token: Any) -> "HubError":
+    """A failed Hub call as the HubError a person and an AI read: a gated repository the token cannot read, a missing
+    revision or repository, or the Hub not reachable. `with_token`: whether a token was sent (permission_denied rather
+    than needs_person), or a callable that tells it, asked only for a gated repository. Never names the token."""
+    try:
+        from huggingface_hub.errors import (GatedRepoError, RepositoryNotFoundError, RevisionNotFoundError)
+    except ImportError:  # pragma: no cover - huggingface_hub is a dependency
+        GatedRepoError = RepositoryNotFoundError = RevisionNotFoundError = ()  # type: ignore
+    if isinstance(e, HubError):
+        return e
+    if GatedRepoError and isinstance(e, GatedRepoError):
+        return HubError(f"{what}: the repository is gated and the stored token has no access.",
+                        code="permission_denied" if (with_token() if callable(with_token) else with_token)
+                        else "needs_person", next=TOKEN_NEXT)
+    if RevisionNotFoundError and isinstance(e, RevisionNotFoundError):
+        return HubError(f"{what}: that revision does not exist.", code="unknown_id",
+                        next="Call get_hf_model_info without a revision for the current commit.")
+    if RepositoryNotFoundError and isinstance(e, RepositoryNotFoundError):
+        return HubError(f"{what}: no such repository (or a private one the stored token cannot read).",
+                        code="unknown_id", next="Check the repository id; search_hf_models finds models.")
+    return HubError(f"{what}: Hugging Face could not be reached or answered with an error ({_error_name(e)}).",
+                    code="failed", next="Try again later; tell the person if it keeps failing.")
 
 
 class HubClient:
@@ -175,23 +220,7 @@ class HubClient:
                            blocker="offline_mode")
 
     def _failed(self, e: BaseException, what: str) -> HubError:
-        try:
-            from huggingface_hub.errors import (GatedRepoError, RepositoryNotFoundError, RevisionNotFoundError)
-        except ImportError:  # pragma: no cover - huggingface_hub is a dependency
-            GatedRepoError = RepositoryNotFoundError = RevisionNotFoundError = ()  # type: ignore
-        if isinstance(e, HubError):
-            return e
-        if GatedRepoError and isinstance(e, GatedRepoError):
-            return HubError(f"{what}: the repository is gated and the stored token has no access.",
-                            code="permission_denied" if self.token() else "needs_person", next=TOKEN_NEXT)
-        if RevisionNotFoundError and isinstance(e, RevisionNotFoundError):
-            return HubError(f"{what}: that revision does not exist.", code="unknown_id",
-                            next="Call get_hf_model_info without a revision for the current commit.")
-        if RepositoryNotFoundError and isinstance(e, RepositoryNotFoundError):
-            return HubError(f"{what}: no such repository (or a private one the stored token cannot read).",
-                            code="unknown_id", next="Check the repository id; search_hf_models finds models.")
-        return HubError(f"{what}: Hugging Face could not be reached or answered with an error ({_error_name(e)}).",
-                        code="failed", next="Try again later; tell the person if it keeps failing.")
+        return hub_error(e, what, lambda: bool(self.token()))
 
     # --- search -------------------------------------------------------------------------------------------------
 
@@ -268,12 +297,7 @@ class HubClient:
         siblings = list(getattr(info, "siblings", None) or [])
         facts.files_truncated = len(siblings) > MAX_FILES
         for s in siblings[:MAX_FILES]:
-            lfs = getattr(s, "lfs", None)
-            sha = getattr(lfs, "sha256", None) if lfs is not None else (lfs.get("sha256") if isinstance(lfs, dict)
-                                                                         else None)
-            size = getattr(s, "size", None)
-            facts.files.append(HubFile(str(s.rfilename), int(size) if isinstance(size, int) else None,
-                                       str(sha).lower() if sha else None))
+            facts.files.append(hub_file(s))
         facts.total_bytes = sum(f.size or 0 for f in facts.files)
         facts.token_access = self.access(repo, facts.gated)
         base = card_get("base_model") if card is not None else None
@@ -488,4 +512,67 @@ def reserve_space(ledger: Any, folder: Path, size: int, owner: str, label: str, 
     except InsufficientSpace as e:
         raise (refusal(e.checks, call, estimate=estimate) or e) from None
     return LedgerReservation(ledger, rid)
+
+
+# --- the person's own download (the GUI's Hugging Face browser, DECISIONS round 11 A6) -------------------------------
+
+def file_at_commit(api: Any, repo: str, filename: str, token: Any = False,
+                   revision: Optional[str] = None) -> Tuple[str, HubFile]:
+    """The commit (`revision`, else the current one) of `repo` and its file `filename` with the size and LFS sha256 the
+    Hub lists for that commit: what HubFetcher checks the download against. `token`: the person's token or False (never
+    an implicit one). HubError when the repository, the commit or the file is not there or the Hub lists no size."""
+    if not REPO_ID.match(repo or ""):
+        raise HubError(f"'{repo}' is not a Hugging Face repository id (owner/name).", code="invalid_value")
+    if not safe_filename(filename):
+        raise HubError("That file name cannot be used as a file on this computer.", code="invalid_value")
+    try:
+        info = api.model_info(repo, revision=revision, files_metadata=True, token=token)
+    except Exception as e:  # noqa: BLE001 - every failure is the person's error message
+        raise hub_error(e, f"The lookup of {repo} failed", bool(token)) from None
+    commit = str(getattr(info, "sha", "") or "")
+    if not COMMIT.match(commit):
+        raise HubError(f"The commit of {repo} could not be found out on Hugging Face; nothing was downloaded.")
+    file = next((hub_file(s) for s in getattr(info, "siblings", None) or [] if str(s.rfilename) == filename), None)
+    if file is None:
+        raise HubError(f"{repo} has no file '{filename}' at commit {commit[:12]}.", code="unknown_id")
+    if file.size is None:
+        raise HubError(f"Hugging Face lists no size for {filename}; it is not downloaded.", code="invalid_value")
+    return commit, file
+
+
+def download_for_person(models_dir: Path, repo: str, filename: str, *, api: Any, token: Optional[str] = None,
+                        ledger: Any = None, stop: Optional[threading.Event] = None,
+                        progress: Optional[Callable[[str, int, int], None]] = None, owner: str = "gui",
+                        disk_usage: Any = None) -> Path:
+    """One file the person chose in the GUI's Hugging Face browser, through the same verified fetcher as the AI's
+    download_hf_file (one code path): pinned to the commit looked up first (file_at_commit), into
+    download_path(models_dir, ...), resumable from its `.part` file, checked against the Hub's size and sha256 before
+    it gets its name, stopped between two chunks by `stop` (DownloadStopped; the part stays). The one disk rule comes
+    first (Core/disk_plan room with the reserve and what other calls reserved in `ledger`): disk_plan.InsufficientSpace
+    with its checks when the file does not fit, so the window shows disk_plan.person_reason in the person's language.
+    While it runs the download holds its own reservation in the ledger (released when it ends, fails or stops), so a
+    build or another download started meanwhile counts its space. Returns the file's path."""
+    from orchestrator.Core.disk_plan import refusal, room
+    commit, file = file_at_commit(api, repo, filename, token or False)
+    dest = download_path(models_dir, repo, commit, filename)
+    part = dest.with_name(dest.name + ".part")
+    try:
+        done = dest.is_file() and dest.stat().st_size == file.size
+        have = part.stat().st_size if part.is_file() else 0
+    except OSError:
+        done, have = False, 0
+    need = 0 if done else max(int(file.size) - have, 0)
+    what = f"download {filename}"
+    problem = refusal([room(Path(models_dir), need, label="models", what=what, ledger=ledger, disk_usage=disk_usage)],
+                      "the download")
+    if problem is not None:
+        raise problem
+    reservation = reserve_space(ledger, Path(models_dir), need, owner, f"{repo}/{filename}", need_label="models",
+                                what=what, key=f"{repo}/{commit}/{filename}", disk_usage=disk_usage)
+    try:
+        path, _digest = HubFetcher(token=token or None, stop=stop).fetch_file(repo, commit, file, dest,
+                                                                              progress=progress)
+    finally:
+        reservation.release()
+    return path
 

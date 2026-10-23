@@ -1238,6 +1238,27 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **The GUI's Hugging Face browser downloads into the models folder's `hf/` folder, checked, like an AI's download**
+  (maintainer decision A6; consolidation chain hf). New location: `<models folder>/hf/<owner>--<name>/<first 12
+  characters of the commit>/<file>`, the same folder `download_hf_file` and the Builder's own downloads use; before,
+  the browser saved through huggingface_hub into that library's cache (`<models folder>/models--<owner>--<name>/`,
+  links to blobs named by their checksum). One code path: `ModelManager.download_file` now calls
+  `orchestrator/Core/hf_hub.py` `download_for_person`, which looks up the commit first, fetches exactly that commit's
+  file with the framework's fetcher (`HubFetcher`: resumable `.part` file, the Hub's size and sha256 checked before the
+  file gets its name, the token only to huggingface.co, never an implicit `HF_TOKEN`) and applies the one disk rule
+  first (`Core/disk_plan` reserve plus what running builds and downloads reserved; a refusal in the person's language)
+  and holds its own reservation in the per-user ledger while it runs, so a build started meanwhile counts its space.
+  The token the person types in the browser is used, else the one stored in the framework (`hf_token`), else none.
+  The window shows the progress and has a Stop button (the part downloaded so far is kept; downloading again resumes
+  it). Models in the old cache stay listed for AI callers and usable for builds. The new button **Take over old
+  downloads...** (`orchestrator/Core/hf_takeover.py`, optional and one-time) copies them into the new folder, each
+  file checked against the checksum it was downloaded with (the blob's name: the LFS sha256 or the git blob id; for
+  a cache without links what the Hub lists for that commit), under the disk rule with its own reservation; a file
+  that does not match, or another file of the same name in the new folder, stays where it is with its reason. Then it
+  offers to remove the old copies only in the deletion dialog with the exact list (each model's cache folder and the
+  files of the cache's shared store only they use, with full path and size; trash or for good; "No" is the default),
+  audited first; nothing is deleted without that yes. Every step runs in a worker thread. The texts are in
+  `orchestrator/utils/l10n_hf.py` (English and German). The browser does not read offline mode, as before.
 - **A build is the four stage modules again, and `build.sh` only runs them** (maintainer decision U9; consolidation
   chain build4). `targets/Rockchip/modules/build.sh` is a stage runner over `source_module.sh` (the toolchain
   sources the image was built from), `config_module.sh` (normalizes the request, refuses what the target cannot
