@@ -2913,8 +2913,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   token store is refused also when its bytes are the very ones a running MCP server or the GUI read before: the
   parsed tokens are cached by the SHA-256 of the file's bytes, and before, such a copy brought the revoked token
   back in that process. The revision is read before the file, so a token change saved meanwhile in another window
-  never looks like an older copy. Without a keyring the signature has no key, as for the audit chain; such a file
-  is refused while the audit log is kept with a key.
+  never looks like an older copy. On Linux and macOS an older copy of either file is refused also when it is the
+  very file a running process read before, put back through a hard link kept to it (the same inode, size and
+  modification time): the revision in the keyring is read again also when the file's change time (ctime) moved.
+  Without a keyring the signature has no key, as for the audit chain; such a file is refused while the audit log is
+  kept with a key.
 - **Pending approvals and requests to stop asking are questions like any other.** They count toward the 30
   questions per hour; a "no" in the approval window stops the same call from being put to you again for 10 minutes
   and counts toward pausing the tool, as a "no" in the client's dialog does; a recent "no", a paused tool or a used-up
