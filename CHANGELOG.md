@@ -2108,9 +2108,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   whose folder exists already is refused before the question, as other packs are. Windows keeps no execute bit, so
   an installed pack with scripts made on Linux or macOS (every target the module wizard makes) never matched its
   digest there: its knowledge snapshot would never be imported and **Check installed packs** called it changed. The
-  provenance now also holds the files' digest as the file system reported it right after the install (only where it
-  differs, and only when every file is still the checked one), and both checks accept it. Crawled pages already
-  replaced their earlier excerpts and are stored right after their download (unchanged).
+  provenance now also holds the pack's digest with the modes as the file system keeps them (only where it differs;
+  the contents stay the manifest's, so a file changed later is still caught), and both checks accept it. Crawled
+  pages already replaced their earlier excerpts and are stored right after their download (unchanged).
 - **A model from the old Hugging Face download cache works in a build again** (A6, "stay usable"): the GUI's Hugging
   Face browser used to save into huggingface_hub's own cache inside the models folder, where a file is a link to a
   blob named by its checksum. A build of such a GGUF file mounted it under that checksum name, so the build no longer

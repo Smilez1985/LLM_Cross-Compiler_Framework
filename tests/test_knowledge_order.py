@@ -15,6 +15,7 @@ import json
 import os
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -384,11 +385,12 @@ class TestTargetKnowledge:
         (root / "knowledge" / "initial_knowledge.json").write_text(json.dumps(PAGES), encoding="utf-8")
         world.add(pack_bytes(root, pack_id="demo-board", version="1.2.0"))
         world.publish()
-        real = cp._pack_files
+        real = cp._scan
 
         def windows_view(folder):   # as os.stat reports the files on Windows: no execute bit
-            return [f.model_copy(update={"mode": 0o644}) for f in real(folder)]
-        monkeypatch.setattr(cp, "_pack_files", windows_view)
+            return [(rel, path, SimpleNamespace(st_mode=st.st_mode & ~0o111, st_size=st.st_size))
+                    for rel, path, st in real(folder)]
+        monkeypatch.setattr(cp, "_scan", windows_view)
         dest = world.cm.finish_install(world.cm.prepare_install("target", "demo-board"))
         assert world.cm.last_sync_problem == "" and len(world.rag.ingested) == 2
         assert all(meta["origin_sha256"] == read_provenance(dest).content_sha256 for _, _, meta in world.rag.ingested)
