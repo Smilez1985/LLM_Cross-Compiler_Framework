@@ -2108,8 +2108,9 @@ with the token's standing approvals, Back to read only). A token is shown once, 
   file checked against the checksum it was downloaded with (for a cache without links, against what the Hub lists for
   that commit); a file that does not match, or another file of the same name in the new folder, stays where it is,
   with its reason. Then it offers to remove the old copies in the deletion dialog with the exact list (each model's
-  cache folder and the files of the cache's shared store only they use, with full path and size; trash or for good;
-  "No" is the default); nothing is removed without your yes, and an AI never removes them.
+  cache folder whose every file was taken over, and the files of the cache's shared store only they use, with full
+  path and size; trash or for good; "No" is the default); nothing is removed without your yes, and an AI never
+  removes them.
 - **Devices and deploy (`list_devices`, `create_deploy_package`, `deploy_to_device`):** `list_devices` shows the
   [trusted devices](#deployment) with the label you gave, address, host key fingerprint, whether the device is
   usable (paired, and its key still the trusted one) and the last deploy; the account the framework logs in with is

@@ -1256,8 +1256,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   file checked against the checksum it was downloaded with (the blob's name: the LFS sha256 or the git blob id; for
   a cache without links what the Hub lists for that commit), under the disk rule with its own reservation; a file
   that does not match, or another file of the same name in the new folder, stays where it is with its reason. Then it
-  offers to remove the old copies only in the deletion dialog with the exact list (each model's cache folder and the
-  files of the cache's shared store only they use, with full path and size; trash or for good; "No" is the default),
+  offers to remove the old copies only in the deletion dialog with the exact list (each model's cache folder whose
+  every file was taken over, and the files of the cache's shared store only they use, with full path and size; a
+  folder that holds a file the Take over cannot list is never offered; trash or for good; "No" is the default),
   audited first; nothing is deleted without that yes. Every step runs in a worker thread. The texts are in
   `orchestrator/utils/l10n_hf.py` (English and German). The browser does not read offline mode, as before.
 - **A build is the four stage modules again, and `build.sh` only runs them** (maintainer decision U9; consolidation
