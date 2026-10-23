@@ -555,6 +555,12 @@ def ai_generated_target(target_path: Path) -> bool:
         meta["metadata"].get("provenance") == "ai-generated"
 
 
+def _folder_key(path: Path) -> str:
+    """An installed pack's folder as a key (sync_knowledge_base's waiting packs): the same folder gives the same key,
+    also in another spelling of its case where the file system ignores case (Windows)."""
+    return os.path.normcase(os.path.abspath(str(path)))
+
+
 def _file_stamp(path: Path) -> str:
     """Size and modification time of a knowledge pack's file: another file (a pack installed again) is another
     stamp."""
@@ -599,8 +605,13 @@ class CommunityManager:
         self.targets_dir = resolve(targets) if callable(resolve) else self.app_root / str(targets)
         self._session = session
         self._keys = keys  # tests pass their own; otherwise configs/community_keys.yml
-        # The last knowledge pack import (sync_knowledge_base): the snapshot taken first, or why nothing was imported
+        # The last knowledge pack import (sync_knowledge_base): the snapshot taken first, or why nothing was imported;
+        # last_sync_waiting: why each installed pack that stays pending waits (by its folder); last_sync_no_room: the
+        # snapshot taken first did not fit, so no pack was imported (finish_install narrows last_sync_problem to the
+        # pack it installed)
         self.last_sync_problem, self.last_sync_snapshot = "", None
+        self.last_sync_waiting: Dict[str, str] = {}
+        self.last_sync_no_room = False
         # Directories are created when something is written, not at every CLI/GUI start.
 
     def _cfg(self, key: str, default: Any = None) -> Any:
@@ -781,16 +792,9 @@ class CommunityManager:
         return sorted({folder.parent.name for folder, _ in self._knowledge_layout()[0]
                        if folder.parent != self.knowledge_dir}, key=str.casefold)
 
-    def _knowledge_destination(self, pack_id: str, topic: Optional[str], target: Optional[str]) -> Path:
-        """community/knowledge/<topic or target>/<pack id>; PackError when a knowledge pack of that name is installed
-        already (pack names are unique across all topics: the knowledge base names a pack's excerpts by it), or when
-        the topic's folder is a pack installed before topic folders."""
-        group = target or topic or derived_topic(pack_id)
-        installed = self._knowledge_layout()[0]
-        taken = next((folder for folder, _ in installed if folder.name.casefold() == pack_id.casefold()), None)
-        if taken is not None:
-            raise PackError(f"{taken} already exists (the knowledge pack {taken.name}); remove it first to install "
-                            f"{pack_id} again.")
+    def _knowledge_group(self, group: str) -> Path:
+        """The folder of a topic or target below community/knowledge/: the one there already (ignoring case, as
+        Windows and macOS do), or the new one. PackError when that name is a pack installed before topic folders."""
         root = self.knowledge_dir
         existing = next((p for p in (root.iterdir() if root.is_dir() else ())
                          if p.name.casefold() == group.casefold() and p.is_dir() and not p.is_symlink()), None)
@@ -798,7 +802,23 @@ class CommunityManager:
             raise PackError(f"{existing} is the knowledge pack {existing.name}, installed before knowledge was sorted "
                             f"into topic folders; it cannot also be the folder of the topic {group}. Choose another "
                             "topic name.")
-        return (existing or root / group) / pack_id
+        return existing or root / group
+
+    def _knowledge_destination(self, pack_id: str, topic: Optional[str], target: Optional[str]) -> Path:
+        """community/knowledge/<topic or target>/<pack id>; PackError when a knowledge pack of that name is installed
+        already (pack names are unique across all topics: the knowledge base names a pack's excerpts by it), when
+        something of that name is in the topic's folder already (refused before the person is asked, as for every
+        other kind), or when the topic's folder is a pack installed before topic folders."""
+        group = target or topic or derived_topic(pack_id)
+        installed = self._knowledge_layout()[0]
+        taken = next((folder for folder, _ in installed if folder.name.casefold() == pack_id.casefold()), None)
+        if taken is not None:
+            raise PackError(f"{taken} already exists (the knowledge pack {taken.name}); remove it first to install "
+                            f"{pack_id} again.")
+        folder = self._knowledge_group(group)
+        if folder.is_dir() and any(p.name.casefold() == pack_id.casefold() for p in folder.iterdir()):
+            raise PackError(f"{folder / pack_id} already exists; remove it first to install {pack_id}.")
+        return folder / pack_id
 
     def _knowledge_choice(self, topic: Optional[str], target: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
         """A topic or a target the person chose for knowledge (an export, a sorted file): exactly one, a valid name,
@@ -844,7 +864,16 @@ class CommunityManager:
                             "no authenticity); ask for a signed knowledge pack instead.")
         stem = loose.path.parent.name if loose.path.name == KNOWLEDGE_FILE else loose.path.stem
         base = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("._-")[:56] or "knowledge"
+        try:   # the pack's folder name: never one Windows reserves for a device (aux, con, nul, ...)
+            check_topic(base)
+        except ValueError:
+            base = f"{base}-knowledge"
+        # a free name: no installed pack has it, nor anything in the folder it goes to (the file's own folder may be
+        # there), so the move after the person's Yes is never refused
         taken = {folder.name.casefold() for folder, _ in self._knowledge_layout()[0]}
+        group = self._knowledge_group(target or topic)
+        if group.is_dir():
+            taken |= {p.name.casefold() for p in group.iterdir()}
         pack_id, count = base, 1
         while pack_id.casefold() in taken:
             count += 1
@@ -1248,11 +1277,21 @@ class CommunityManager:
             # The marker of an earlier version (its folder was deleted to remove it) would skip this one.
             (self.knowledge_dir / f"{dest.name}.imported").unlink(missing_ok=True)
             self.sync_knowledge_base()
+            self.last_sync_problem = self._waits(dest)
         elif prepared.manifest.kind == "target":
             (self.knowledge_dir / TARGET_MARKERS / f"{dest.name}.imported").unlink(missing_ok=True)
             if prepared.knowledge_pages:   # its knowledge snapshot, under its target
                 self.sync_knowledge_base()
+                self.last_sync_problem = self._waits(dest)
         return dest
+
+    def _waits(self, folder: Path) -> str:
+        """After an import: why the pack installed in `folder` is not (completely) in the knowledge base: the snapshot
+        taken first did not fit (then no pack was imported), or that pack's own reason; "" when it is in. Another pack
+        that waits is not this pack's problem (sync_knowledge_base names every one when the knowledge base starts)."""
+        if self.last_sync_no_room:
+            return self.last_sync_problem
+        return self.last_sync_waiting.get(_folder_key(folder), "")
 
     def _remove_sorted(self, prepared: PreparedInstall) -> None:
         """The loose file a sort moved into its pack folder: removed when it is still the file that was checked (it is
@@ -1533,13 +1572,14 @@ class CommunityManager:
         the snapshot taken. A pack that cannot be imported yet is tried again at the next start without another
         snapshot; a pack installed again gets one."""
         self.last_sync_problem, self.last_sync_snapshot = "", None
+        self.last_sync_waiting, self.last_sync_no_room = {}, False
         if rag_manager is None and hasattr(self.framework, "get_component"):
             rag_manager = self.framework.get_component("rag_manager")
         if not rag_manager:
             return 0
 
         imported_count = 0
-        problems: List[str] = []
+        waiting = self.last_sync_waiting   # installed folder -> why its pack waits
         # Only installed packs, never a loose file (DECISIONS round 23 item 1: loose_knowledge lists them, the person
         # sorts them, prepare_sort); a pack whose files changed since it was installed is not imported either.
         pending = []
@@ -1551,8 +1591,9 @@ class CommunityManager:
             except PackError:
                 unchanged = False
             if not unchanged:
-                problems.append(f"{item.label}: its files changed since it was installed, so it is not imported "
-                                "(the check of the installed packs shows it; install it again)")
+                waiting[_folder_key(item.folder)] = (f"{item.label}: its files changed since it was installed, so it "
+                                                     "is not imported (the check of the installed packs shows it; "
+                                                     "install it again)")
                 continue
             pending.append(item)
         # A pack that cannot be imported yet stays pending and is tried again at every start: its snapshot is taken
@@ -1565,7 +1606,7 @@ class CommunityManager:
                 self.last_sync_snapshot = rag_manager.create_snapshot(f"pre_pack_{int(time.time())}",
                                                                       "a knowledge pack is imported")
             except SnapshotNoRoom as e:  # no snapshot, no import: there is no "continue anyway"
-                self.last_sync_problem = str(e)
+                self.last_sync_problem, self.last_sync_no_room = str(e), True
                 self.logger.warning(f"Knowledge packs not imported: {e}")
                 return 0
             for mark, stamp in fresh:
@@ -1579,15 +1620,15 @@ class CommunityManager:
                 count, problem = self._import_pages(item, rag_manager)
                 imported_count += count
                 if problem:
-                    problems.append(problem)
+                    waiting[_folder_key(item.folder)] = problem
                     continue
                 ensure_directory(item.marker.parent)
                 item.marker.write_text(datetime.now().isoformat(), encoding="utf-8")
             except Exception as e:  # noqa: BLE001 - one pack never stops the others; the person reads why
-                problems.append(f"{item.label}: not imported ({redact_secrets(str(e))[:300]})")
+                waiting[_folder_key(item.folder)] = f"{item.label}: not imported ({redact_secrets(str(e))[:300]})"
                 self.logger.error(f"Knowledge import failed for {item.label}: {e}")
-        if problems:
-            self.last_sync_problem = "; ".join(problems)
+        if waiting:
+            self.last_sync_problem = "; ".join(waiting.values())
             self.logger.warning(f"Knowledge packs not imported: {self.last_sync_problem}")
         return imported_count
 
@@ -1597,15 +1638,18 @@ class CommunityManager:
         one of them."""
         from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT
         items = []
-        for folder, prov in self._knowledge_layout()[0]:
+        installed = self._knowledge_layout()[0]
+        names = {folder.name.casefold() for folder, _ in installed}
+        for folder, prov in installed:
             scope, name = knowledge_scope(prov)
             # A sorted loose file that earlier versions imported unsorted: its excerpts named the file (a .json in
-            # community/knowledge/) or its folder (<folder>/knowledge.json); the sorted pack replaces them.
+            # community/knowledge/) or its folder (<folder>/knowledge.json); the sorted pack replaces them. A name an
+            # installed pack has (or the origin of a target pack's knowledge) names that pack's excerpts, never these.
             legacy: Tuple[str, ...] = ()
             if prov.trust == TrustLevel.LOCAL.value and prov.source.startswith(LOOSE_SOURCE):
                 parts = prov.source[len(LOOSE_SOURCE):].split("/")
                 old = parts[0] if len(parts) == 1 or (len(parts) == 2 and parts[1] == KNOWLEDGE_FILE) else ""
-                legacy = (old,) if old and old != folder.name else ()
+                legacy = (old,) if old and old.casefold() not in names and not old.startswith(TARGET_ORIGIN) else ()
             items.append(_KnowledgeImport(f"knowledge pack {folder.name}", folder / KNOWLEDGE_FILE, folder,
                                           prov.content_sha256, self.knowledge_dir / f"{folder.name}.imported",
                                           folder.name, {scope: name}, legacy))

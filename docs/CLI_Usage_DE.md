@@ -373,8 +373,10 @@ Themenordner oder einen neuen Namen) oder in ein Target dieses Computers: Die Da
 installiertes Wissenspaket geprüft (eine Liste von Seiten, jede mit ihrer Quelle; die Lizenztexte und die `NOTICE`,
 die ihre Volltext-Seiten brauchen, werden daneben geschrieben), die Zusammenfassung wird gezeigt, und erst nach
 deinem **y** an einem Terminal („Nein“ ist die Vorgabe) wird sie in den Ordner verschoben (Vertrauensstufe `local`)
-und in die Wissensbasis importiert, nach einem Snapshot von ihr. Ohne Terminal wird nichts einsortiert. Eine Datei im
-alten „Swarm“-Format, oder eine, die die Prüfung nicht besteht, bleibt mit dem Grund liegen.
+und in die Wissensbasis importiert, nach einem Snapshot von ihr. Ohne Terminal wird nichts einsortiert. Das Paket
+heißt wie die Datei (eine `knowledge.json` wie ihr Ordner), mit einer angehängten Zahl, wenn ein installiertes Paket
+oder etwas im gewählten Ordner schon so heißt; die Zusammenfassung nennt den Ordner, bevor du antwortest. Eine Datei
+im alten „Swarm“-Format, oder eine, die die Prüfung nicht besteht, bleibt mit dem Grund liegen.
 
 In der GUI: **Lose Wissensdateien einsortieren...** im Community Hub (die Liste der losen Dateien, **Gehört zu:** ein
 Thema oder ein Target, dann die Zusammenfassung mit „Nein“ als Vorgabe).

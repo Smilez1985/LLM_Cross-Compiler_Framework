@@ -2372,8 +2372,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Seitenquelle, nie die anderer Pakete oder deine eigenen Seiten; eine einsortierte lose Datei ersetzt auch die
   Auszüge, die eine frühere Version unsortiert aus ihr importiert hat. Der Snapshot vor dem Import bleibt. Eine Paketseite,
   die sich nicht importieren ließ, landete früher nur im Log; warum ein Paket wartet, wird jetzt nach der Installation
-  gesagt (`last_sync_problem`). Gecrawlte Seiten ersetzten ihre früheren Auszüge schon und werden direkt nach dem
-  Download gespeichert (unverändert).
+  gesagt (`last_sync_problem`): nur, warum das installierte Paket wartet (ein anderes wartendes Paket wird beim Start
+  der Wissensbasis genannt), und der Community Hub bietet die Liste der Snapshots zum Löschen nur an, wenn der vorher
+  genommene Snapshot nicht passte. Eine einsortierte lose Datei bekommt einen Namen, der in ihrem Ordner frei ist,
+  bevor du gefragt wirst (auch wenn die Datei in einem Ordner dieses Themas lag), nie einen Windows-Gerätenamen, und
+  ihr Einsortieren entfernt nie die Auszüge eines installierten Pakets gleichen Namens oder eines Target-Pakets. Ein
+  Wissenspaket, dessen Ordner es schon gibt, wird vor der Frage abgelehnt, wie andere Pakete. Gecrawlte Seiten
+  ersetzten ihre früheren Auszüge schon und werden direkt nach dem Download gespeichert (unverändert).
 - **Ein Modell aus dem alten Download-Cache von Hugging Face funktioniert wieder im Build** (A6, „bleiben nutzbar“):
   Der Hugging-Face-Browser der GUI speicherte bisher in den eigenen Cache von huggingface_hub im Modellordner, wo eine
   Datei ein Link auf einen Blob ist, der nach seiner Prüfsumme heißt. Ein Build einer solchen GGUF-Datei band sie

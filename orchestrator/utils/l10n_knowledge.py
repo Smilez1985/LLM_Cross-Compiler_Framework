@@ -238,6 +238,7 @@ TEXTS = {
         "zoo.install.installing": "Installing {kind} {id}...",
         "zoo.install.snapshot": "The knowledge base was saved first as the snapshot {name} "
                                 "({path:act_knowledge_snapshots} lists it).",
+        "zoo.install.waiting": "Not imported into the knowledge base yet: {why}",
         "zoo.sort": "Sort loose knowledge...",
         "zoo.sort.tip": "Knowledge always belongs to a topic or a target: a loose knowledge file is never imported. "
                         "Sort it into a topic or target folder; it is checked like a knowledge pack first.",
@@ -506,6 +507,7 @@ TEXTS = {
         "zoo.install.installing": "{kind} {id} wird installiert...",
         "zoo.install.snapshot": "Die Wissensdatenbank wurde zuerst als Snapshot {name} gesichert "
                                 "({path:act_knowledge_snapshots} listet ihn).",
+        "zoo.install.waiting": "Noch nicht in die Wissensdatenbank importiert: {why}",
         "zoo.sort": "Lose Wissensdateien einsortieren...",
         "zoo.sort.tip": "Wissen gehört immer zu einem Thema oder einem Target: eine lose Wissensdatei wird nie "
                         "importiert. Sortiere sie in einen Themen- oder Target-Ordner; vorher wird sie wie ein "

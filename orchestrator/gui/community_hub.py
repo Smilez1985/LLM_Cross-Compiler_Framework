@@ -433,13 +433,18 @@ class CommunityHubWindow(QMainWindow):
         snapshot = getattr(self.comm_manager, "last_sync_snapshot", None) if imports else None
         if snapshot and not problem:   # N13, as `llm-cli zoo install` says it: saved first, so it can be undone
             lines.append(ui_text("zoo.install.snapshot", self.lang, name=one_line(snapshot)))
+        # Only the snapshot that did not fit is a question of disk space (below); any other reason the pack waits is
+        # said here, as `llm-cli zoo install` says it
+        no_room = bool(problem) and getattr(self.comm_manager, "last_sync_no_room", True)
+        if problem and not no_room:
+            lines.append(ui_text("zoo.install.waiting", self.lang, why=one_line(problem)))
         self._install_note = "\n".join(lines)
         self.status_label.setText(self._install_note)
         if prepared.manifest.kind == "target" and tm is not None:   # `llm-cli targets validate` on it, shown
             from orchestrator.gui.targets_window import show_target_check
             show_target_check(self, self.framework_manager, Path(dest).name, lang=self.lang,
                               intro=ui_text("bld.check.after_install", self.lang))
-        if problem:  # installed, but not imported: the snapshot taken first did not fit (N13)
+        if no_room:  # installed, but not imported: the snapshot taken first did not fit (N13)
             from orchestrator.gui.knowledge_snapshots_window import offer_snapshot_list
             offer_snapshot_list(self, self.framework_manager, problem)
         self.installed.emit(prepared.manifest.kind)
