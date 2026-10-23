@@ -91,7 +91,6 @@ DELETION_SITES = {
     ("orchestrator/Core/deployment_manager.py", "DeploymentManager.create_package"): TEMP,
     ("orchestrator/Core/knowledge_snapshots.py", "_copy_checked"): TEMP,   # an export's unfinished copy
     ("orchestrator/Core/artifact_output.py", "_copy_verified"): TEMP,      # a save's unfinished copy
-    ("orchestrator/Core/hf_hub.py", "HubFetcher._download_range"): TEMP,
     ("orchestrator/Core/hf_hub.py", "HubFetcher.fetch_file"): TEMP,
     ("orchestrator/Core/hf_takeover.py", "_copy_one"): TEMP,   # a take-over's unfinished or unchecked copy
     ("orchestrator/gui/gui_state.py", "GuiState.save"): TEMP,

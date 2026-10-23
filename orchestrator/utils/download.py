@@ -8,7 +8,8 @@ matched the pin. get_bytes reads a small file that is verified another way (the 
 size cap. Redirects away from HTTPS are refused. A dropped connection, a timeout or a server error is retried (the
 download resumes); a TLS certificate that cannot be verified is not (it does not go away on its own) and is named by
 its host only, never by the (possibly signed) URL; any other request error and a `.part` file that cannot be written
-end the download with a clear error (the part is kept for a resume).
+end the download with a clear error (the part is kept for a resume). This range download is the only one: the
+Hugging Face fetcher (orchestrator/Core/hf_hub.py HubFetcher) runs it too and adds only its own headers and checks.
 """
 
 import os
@@ -16,7 +17,7 @@ import re
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, Optional
 from urllib.parse import urlparse
 
 import psutil
@@ -198,14 +199,33 @@ class PinnedDownloader:
             os.replace(part, dest)
             return dest
 
+    def _request_headers(self, url: str, have: int) -> Dict[str, str]:
+        """The headers of a range request: identity (a compressed transfer would make the byte counts meaningless) and
+        the range a resume asks for. A subclass adds what only its own server may get (hf_hub.HubFetcher: the token,
+        only for huggingface.co)."""
+        return {"Accept-Encoding": "identity", **({"Range": f"bytes={have}-"} if have else {})}
+
+    def _check_response(self, r: Any, name: str) -> None:
+        """Refuses a response before anything of it is written: a download redirected away from HTTPS. A subclass
+        refuses more (hf_hub.HubFetcher: a host outside Hugging Face's own servers, HTTP 401 and 403)."""
+        if not str(r.url).startswith("https://"):
+            raise self.error(f"Refusing a download that was redirected away from HTTPS: {r.url}")
+
+    def _stopped(self, name: str) -> Exception:
+        """What a set stop event raises (a subclass keeps its own class and words)."""
+        return DownloadStopped(f"The download of {name} was stopped; the part is kept for a resume.")
+
     def _download_range(self, url: str, part: Path, have: int, size: int, name: str,
                         progress: Optional[ProgressFn], stop: Optional[Any] = None) -> None:
-        # identity: a compressed transfer would make the byte counts meaningless
-        headers = {"Accept-Encoding": "identity", **({"Range": f"bytes={have}-"} if have else {})}
+        """One request for the rest of `part`: the one range download of every pinned download, the Hugging Face
+        fetcher's too (hf_hub.HubFetcher adds only its headers, response checks and stop words). A set `stop` event
+        ends it before the next chunk is written; what is written stays in the .part file for a resume."""
+        if stop is not None and stop.is_set():
+            raise self._stopped(name)
+        headers = self._request_headers(url, have)
         try:
             with self.session.get(url, headers=headers, stream=True, timeout=(15, 60), allow_redirects=True) as r:
-                if not str(r.url).startswith("https://"):
-                    raise self.error(f"Refusing a download that was redirected away from HTTPS: {r.url}")
+                self._check_response(r, name)
                 if r.status_code == 416:
                     part.unlink(missing_ok=True)  # our range does not exist on the server: start over
                     raise _Retry("HTTP 416")
@@ -230,13 +250,13 @@ class PinnedDownloader:
                                                "refusing it.")
                 with open(part, "ab" if resumed else "wb") as f:
                     for chunk in r.iter_content(chunk_size=1 << 20):
+                        if stop is not None and stop.is_set():
+                            raise self._stopped(name)
                         if not chunk:
                             continue
                         f.write(chunk)
+                        f.flush()  # what is written stays in the .part file when the download stops
                         have += len(chunk)
-                        if stop is not None and stop.is_set():
-                            raise DownloadStopped(f"The download of {name} was stopped; the part is kept for a "
-                                                  "resume.")
                         if have > size:
                             break  # more than pinned: the hash check refuses it
                         if progress:

@@ -276,6 +276,75 @@ class TestToken:
             fetcher.fetch_file(REPO, COMMIT, HubFile("m.gguf", len(DATA), SHA), tmp_path / "m.gguf")
 
 
+class TestTheFetcherSaysWhyAtOnce:
+    """Seam of stage C wave 3 (chains port-runtime and hf-online): HubFetcher ran its own copy of the pinned
+    downloader's range download, without port-runtime's fixes ("A pinned download that cannot work says why at once"):
+    a TLS failure was retried five times like a dropped connection, and any other request error and a .part file that
+    cannot be written escaped as a raw exception. The fetcher now runs PinnedDownloader._download_range and adds only
+    what is the Hub's own (the token for huggingface.co, the refusal of another host, 401/403)."""
+
+    def fetch(self, tmp_path, session, data=DATA):
+        fetcher = HubFetcher(token=TOKEN, session=session, sleep=lambda s: None)
+        file = HubFile("m.gguf", len(data), hashlib.sha256(data).hexdigest())
+        return fetcher.fetch_file(REPO, COMMIT, file, tmp_path / "m.gguf")
+
+    def test_there_is_one_range_download(self):
+        assert "_download_range" not in vars(HubFetcher), "HubFetcher keeps no copy of the pinned downloader's"
+
+    def test_a_tls_failure_is_not_retried_and_names_only_the_host_that_failed(self, tmp_path):
+        calls = []
+        cdn = "https://cas-bridge.xethub.hf.co/blob?X-Amz-Signature=secret"
+
+        class Session:
+            def get(self, url, **kwargs):
+                calls.append(url)
+                raise requests.exceptions.SSLError("certificate verify failed",
+                                                   request=requests.Request("GET", cdn).prepare())
+        with pytest.raises(hf_hub.DownloadError, match="TLS certificate of cas-bridge.xethub.hf.co could not") as err:
+            self.fetch(tmp_path, Session())
+        assert len(calls) == 1, "a certificate problem does not go away on its own: no retry"
+        assert "Signature" not in str(err.value) and TOKEN not in str(err.value)
+        assert "REQUESTS_CA_BUNDLE" in str(err.value)
+
+    @pytest.mark.parametrize("error", [requests.exceptions.TooManyRedirects("30 redirects"),
+                                       requests.exceptions.InvalidURL("bad")])
+    def test_other_request_errors_end_with_a_clear_message(self, tmp_path, error):
+        class Session:
+            def get(self, url, **kwargs):
+                raise error
+        with pytest.raises(hf_hub.DownloadError, match=f"failed \\({type(error).__name__}\\)"):
+            self.fetch(tmp_path, Session())
+
+    def test_a_part_file_that_cannot_be_written(self, tmp_path):
+        data = os.urandom(100000)
+        (tmp_path / "m.gguf.part").mkdir()   # stands in for a full or read-only disk
+        with pytest.raises(hf_hub.DownloadError, match="Could not write .*resumes on the next run"):
+            self.fetch(tmp_path, FakeSession(body=data), data)
+
+    def test_the_hub_s_own_checks_stay(self, tmp_path):
+        """What only the Hub's fetcher does is kept: the token only to huggingface.co, a stop ends the transfer
+        before the next chunk is written, and the part is kept for a resume."""
+        session = FakeSession()
+        stop = threading.Event()
+
+        class Stopping(Response):
+            def iter_content(self, chunk_size=1):
+                yield self.data[:1024]
+                stop.set()
+                yield self.data[1024:]
+        session.gate = lambda body, start: Stopping(body[start:], start, total=len(body))
+        fetcher = HubFetcher(token=TOKEN, session=session, stop=stop, sleep=lambda s: None)
+        with pytest.raises(hf_hub.DownloadStopped):
+            fetcher.fetch_file(REPO, COMMIT, HubFile("m.gguf", len(DATA), SHA), tmp_path / "m.gguf")
+        assert (tmp_path / "m.gguf.part").stat().st_size == 1024 and not (tmp_path / "m.gguf").exists()
+        assert session.seen[0][1]["Authorization"] == f"Bearer {TOKEN}"
+        stop.clear()
+        session.gate = None
+        path, digest = fetcher.fetch_file(REPO, COMMIT, HubFile("m.gguf", len(DATA), SHA), tmp_path / "m.gguf")
+        assert digest == SHA and path.read_bytes() == DATA
+        assert session.seen[-1][1]["Range"] == "bytes=1024-", "the second run resumes the kept part"
+
+
 # --- licence and gating --------------------------------------------------------------------------------------------------
 
 class TestLicence:
