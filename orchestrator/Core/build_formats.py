@@ -142,9 +142,9 @@ def format_problem(fmt: Optional[str], found: Iterable[TargetFormats], target: s
         return None
     shown = str(fmt or "").strip() or "(none)"
     listing = formats_text(found)
-    if not entry.declared:   # not even a target without capabilities takes it (hf, or no format at all)
-        return f"{shown} is no format a target builds. What each installed target builds: {listing}."
     others = [t.target for t in found if t.declared and t.builds(fmt)]
+    if not entry.declared and not others:   # no target takes it (hf, or no format at all)
+        return f"{shown} is no format a target builds. What each installed target builds: {listing}."
     if others:
         why = f"; {', '.join(others)} {'builds' if len(others) == 1 else 'build'} it"
     elif not any(not t.declared and t.builds(fmt) for t in found):
