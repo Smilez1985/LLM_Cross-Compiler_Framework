@@ -137,12 +137,21 @@ class ProviderPreset(BaseModel):
     def model_for(self, task: str) -> Optional[str]:
         return self.models.get(task) or self.models.get("default")
 
-    def is_local(self, base_url: Optional[str] = None, config: Any = None) -> bool:
-        """The preset's location label: its `location`, or for "auto" (a server whose address the person sets) the
-        network-locality rule for the address (utils/locality.py, with the person's opt-outs in `config`)."""
+    def is_local(self, base_url: Optional[str] = None) -> bool:
+        """Where the server stands, the preset's location label (the privacy filter follows it): its `location`, or for
+        "auto" (a server whose address the person sets) the network-locality rule for the address WITHOUT the person's
+        opt-outs (utils/locality.check_location, DECISIONS round 26 Q3): a public host the person counts as local for
+        offline mode keeps the label "cloud" and the privacy filter, online and offline. Whether offline mode may reach
+        the server is offline_refusal's question."""
         if self.location != "auto":
             return self.location == "local"
-        return is_local_url(base_url or self.base_url, config)
+        return is_local_url(base_url or self.base_url)
+
+    def located_by_address(self, base_url: Optional[str] = None) -> bool:
+        """True when the "local" label comes from the server's address (location "auto" and the address counts as
+        local by check_location): a connection to it then goes only to the checked local addresses (LLMClient), so
+        the label holds for the connection too."""
+        return self.location == "auto" and self.is_local(base_url)
 
     def offline_refusal(self, base_url: Optional[str] = None, config: Any = None) -> Optional[OfflineRefusal]:
         """Why this preset cannot be used in offline mode with `base_url` (None when it can): a cloud provider, or a
@@ -155,8 +164,8 @@ class ProviderPreset(BaseModel):
             return OfflineRefusal(f"Offline mode is on: {self.label} is a cloud provider. Choose a local model.")
         if not url:
             return None
-        from orchestrator.utils.locality import check_url
-        verdict = check_url(url, config)
+        from orchestrator.utils.locality import check_reach
+        verdict = check_reach(url, config)   # may offline mode reach it: the person's opt-outs count (round 26 Q3)
         if verdict.local:
             return None
         return OfflineRefusal(verdict.refusal(f"the server address of {self.label}"), verdict.steps, verdict)
@@ -220,15 +229,17 @@ class Catalog(BaseModel):
         return list(self.providers)
 
 
-def is_local_url(url: Optional[str], config: Any = None) -> bool:
-    """Whether a server address counts as local: the one network-locality rule (utils/locality.py, DECISIONS round 24
-    L-NET): a name by every address it resolves to (a .local or .lan name only when those addresses are local),
-    loopback, private and link-local addresses, a Tailscale address only with the person's own Headscale, and the
-    person's opt-outs in `config`; anything else (or nothing) counts as cloud."""
+def is_local_url(url: Optional[str]) -> bool:
+    """Where a server stands: whether its address counts as local by the one network-locality rule WITHOUT the
+    person's opt-outs (utils/locality.check_location; DECISIONS round 24 L-NET, round 26 Q3): a name by the addresses
+    it resolves to (a .local or .lan name only when it has local ones; a name with local and public addresses by its
+    local ones, which are the only ones a connection then uses), loopback, private and link-local addresses, a
+    Tailscale address only with the person's own Headscale; anything else (or nothing) counts as cloud. The opt-outs
+    count only for offline mode's reach (ProviderPreset.offline_refusal)."""
     if not url:
         return False
-    from orchestrator.utils.locality import check_url
-    return check_url(url, config).local
+    from orchestrator.utils.locality import check_location
+    return check_location(url).local
 
 
 def _read(path: Path) -> dict:

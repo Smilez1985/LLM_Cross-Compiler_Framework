@@ -1123,10 +1123,10 @@ class LocalLLMRuntime:
         """In offline mode: the session a download from `url` uses (only the person's own network, at the address the
         network-locality rule checked; security/http.LocalOnlyAdapter), LocalRuntimeError when `url` is not local
         (the host, why, and that the person can count it as local). None when offline mode is off."""
-        from orchestrator.utils.locality import check_url, offline_mode
+        from orchestrator.utils.locality import check_reach, offline_mode
         if not offline_mode(self.settings):
             return None
-        verdict = check_url(url, self.settings)
+        verdict = check_reach(url, self.settings)
         if not verdict.local:
             raise LocalRuntimeError(verdict.refusal("the download address"))
         from orchestrator.security.http import local_only_session

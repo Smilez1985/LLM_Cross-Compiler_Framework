@@ -68,19 +68,25 @@ def is_loopback_url(url: Optional[str]) -> bool:
         return False
 
 
-def offline_http_client(config: Any):
-    """The SDK client of offline mode (openai_compat servers: Ollama, the managed local model, a custom server): no
-    proxy from the environment, and every connection goes only to the addresses the network-locality rule checked
-    for its host (utils/locality.connect_addresses, from the run's cache, so a DNS answer that changes after the check
-    cannot reach a public host, also not through a redirect), tried in turn as the system's own connection would (a
-    name with an IPv6 and an IPv4 address in the own network, a server that listens on one of them only). A
-    localhost name goes to the loopback addresses: a system that asks a DNS server for *.localhost never decides
-    where it goes. A host that is not local is refused when the connection is opened (LocalityRefused, which
-    map_openai_error turns into the plain refusal)."""
+def offline_http_client(config: Any, *, offline: bool = True):
+    """The pinned SDK client (openai_compat servers: Ollama, the managed local model, a custom server): no proxy from
+    the environment, and every connection goes only to the local addresses the network-locality rule checked for its
+    host (utils/locality.connect_addresses, from the cache, so a DNS answer that changes after the check cannot reach a
+    public host, also not through a redirect; a name with local and public addresses only to its local ones, round 26
+    Q4), tried in turn as the system's own connection would (a name with an IPv6 and an IPv4 address in the own
+    network, a server that listens on one of them only); when every one failed, the lookup is dropped
+    (locality.forget), so the next try asks the resolver again. A localhost name goes to the loopback addresses: a
+    system that asks a DNS server for *.localhost never decides where it goes. A host that is not local is refused
+    when the connection is opened (LocalityRefused, which map_openai_error turns into the plain refusal).
+
+    In offline mode (`offline` True) `config` holds the person's opt-outs (offline mode's reach); online, a server
+    labelled local by its address (ProviderPreset.located_by_address) gets this client with `config` None and
+    `offline` False: the label without the opt-outs (check_location) then holds for the connection too, so prompts
+    sent without the privacy filter never reach a public address."""
     import httpcore2
     import httpx2
     import openai
-    from orchestrator.utils.locality import connect_addresses
+    from orchestrator.utils.locality import connect_addresses, forget
 
     class PinnedBackend(httpcore2.NetworkBackend):
         def __init__(self, inner):
@@ -88,12 +94,13 @@ def offline_http_client(config: Any):
 
         def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
             failed = None
-            for address in connect_addresses(host, config, "the AI provider's server"):
+            for address in connect_addresses(host, config, "the AI provider's server", offline=offline):
                 try:
                     return self._inner.connect_tcp(address, port, timeout=timeout, local_address=local_address,
                                                    socket_options=socket_options)
                 except (httpcore2.ConnectError, httpcore2.ConnectTimeout) as e:   # the next checked address
                     failed = e
+            forget(host)   # every checked address failed: the next connection asks the resolver again
             raise failed
 
         def connect_unix_socket(self, path, timeout=None, socket_options=None):  # pragma: no cover - never used
@@ -139,6 +146,7 @@ class LLMClient:
         self.runtime_resolver = runtime_resolver or self._managed_runtime_endpoint
         self._loopback_http = None
         self._offline_http = None
+        self._located_http = None   # online: the pinned client of a server labelled local by its address
         self._adapters: Dict[tuple, Any] = {}
         self._state_cache: Dict[str, SecretStr] = {}
         self._lock = threading.Lock()
@@ -303,7 +311,7 @@ class LLMClient:
             raise self._unknown_provider(provider)
         primary = preset.id == primary_preset.id
         base_url = self._base_url(preset, primary)
-        local = preset.is_local(base_url, self.config)
+        local = preset.is_local(base_url)   # where the server stands: the privacy filter, never the opt-outs (Q3)
         if offline_mode(self.config):
             # the one network-locality rule (utils/locality.py): a cloud provider never, Ollama and a custom server
             # only at an address on this computer or in the person's own network (or one the person counts as local)
@@ -352,10 +360,11 @@ class LLMClient:
         elif preset.adapter == "openai_responses":
             options.update(prompt_cache_key=self.install_id())
         offline = offline_mode(self.config)   # an adapter made online is never reused offline (its client differs)
-        key = (preset.id, base_url, credential.method, credential.fingerprint, repr(sorted(options.items(), key=str)),
-               offline)
         target = Target(preset=preset, model="", base_url=base_url, auth=credential.method,
-                        local=preset.is_local(base_url, self.config))
+                        local=preset.is_local(base_url))
+        # nor one made while the address counted as local, once it does not (its client differs too)
+        key = (preset.id, base_url, credential.method, credential.fingerprint, repr(sorted(options.items(), key=str)),
+               offline, target.local)
         with self._lock:
             adapter = self._adapters.get(key)
             if adapter is None:
@@ -369,14 +378,22 @@ class LLMClient:
     def _http_client_for(self, target: Target):
         """Loopback servers are reached directly: an HTTP(S)_PROXY from the environment would otherwise receive
         the prompts and the local server's key (the SDKs' default clients honour those variables). In offline mode
-        every server is reached directly and only at the address the locality rule checked (offline_http_client: a
-        DNS answer that changes between the check and the connection cannot reach a public host)."""
+        every server is reached directly and only at the addresses the locality rule checked, with the person's
+        opt-outs (offline_http_client: a DNS answer that changes between the check and the connection cannot reach a
+        public host). Online, a server labelled local by its address (a custom server; its prompts go without the
+        privacy filter) is reached the same way without the opt-outs, so the label holds for the connection: a name
+        with local and public addresses only at its local ones (round 26 Q3, Q4)."""
         if self.http_client is not None or target.preset.adapter != "openai_compat":
             return self.http_client
         if offline_mode(self.config) and target.base_url:
             if self._offline_http is None:
                 self._offline_http = offline_http_client(self.config)
             return self._offline_http
+        if target.local and target.base_url and not is_loopback_url(target.base_url) \
+                and target.preset.located_by_address(target.base_url):
+            if self._located_http is None:
+                self._located_http = offline_http_client(None, offline=False)
+            return self._located_http
         if not is_loopback_url(target.base_url):
             return self.http_client
         if self._loopback_http is None:

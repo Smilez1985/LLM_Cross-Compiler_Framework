@@ -185,9 +185,9 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
         of the model may be used; the person's opt-outs count); "" when none is outside or offline mode is off."""
         if not offline():
             return ""
-        from orchestrator.utils.locality import check_url
+        from orchestrator.utils.locality import check_reach
         for what, url in needs:
-            verdict = check_url(url, getattr(framework, "config", None))
+            verdict = check_reach(url, getattr(framework, "config", None))
             if not verdict.local:
                 return verdict.refusal(what)
         return ""

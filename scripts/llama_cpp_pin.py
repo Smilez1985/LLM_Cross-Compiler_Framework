@@ -9,7 +9,9 @@ Checks the llama.cpp pin (configs/llama_runtime.yml, llama_cpp.source) for a pin
 `check` runs `git ls-remote <repo> refs/tags/<tag>`: GitHub serves commits pushed to any fork through the upstream
 URL, so the commit alone fixes the content but not its origin; the tag on upstream does. It then lists every place
 that names the llama.cpp version (orchestrator/runtime/build/pins.py): derived and reference places must agree,
-legacy places are only reported. Exit code: 0 all good, 1 a mismatch, 2 usage or network error.
+legacy places are only reported. Exit code: 0 all good, 1 a mismatch, 2 usage or network error. In offline mode (the
+framework's settings) the repository is reached only in the own network, as a mirror is (upstream_tag_commit), so the
+upstream check stops with the plain refusal; `check --local` needs no network.
 The procedure around it is in CONTRIBUTING.md ("Bumping the llama.cpp pin").
 """
 
@@ -33,6 +35,15 @@ def _places(source) -> int:
     return 1 if bad else 0
 
 
+def _settings():
+    """The framework's settings (offline mode and the person's opt-outs), None when they cannot be read."""
+    try:
+        from orchestrator.Core.config_manager import ConfigManager
+        return ConfigManager()
+    except Exception:  # noqa: BLE001 - no settings: online, as before
+        return None
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Check the llama.cpp pin for a pin bump.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -48,14 +59,14 @@ def main(argv=None) -> int:
         return 2
     try:
         if args.command == "show":
-            commit = upstream_tag_commit(args.tag, repo=source.repo)
+            commit = upstream_tag_commit(args.tag, repo=source.repo, settings=_settings())
             print(f"{args.tag} = {commit}")
             print("Put it into configs/llama_runtime.yml: llama_cpp.source.commit, .tag and .build_number, and "
                   "llama_cpp.build; then run 'check'.")
             return 0
         print(f"Pin: {source.tag} = {source.commit} ({source.repo})")
         if not args.local:
-            check_pin_upstream(source)
+            check_pin_upstream(source, settings=_settings())
             print(f"  ok       upstream  refs/tags/{source.tag} points at the pinned commit")
     except SourceError as e:
         print(f"error: {e}", file=sys.stderr)
