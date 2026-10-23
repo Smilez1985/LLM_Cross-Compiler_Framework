@@ -12,7 +12,8 @@ maintainer's design (DECISIONS round 16, U9 addendum) and never had.
   convert_stats.json, which the target stage puts into build_info.json ("conversion").
 - Functional test: a short run (8 tokens, bounded, no network) of the written GGUF with llama-completion, the
   one-shot generator that was llama-cli in version 1.x (llama-cli itself when the image has only that); skipped with
-  a note when the image has neither or the model does not generate text.
+  a note when the image has neither or the model does not generate text. The one functional test of the stages:
+  the target stage runs it on the quantized model before it packages it (`test`).
 - Cleanup: a file a converter is about to replace is kept as FILE.convert-backup until the new one passed its checks;
   a failed or stopped stage removes what it wrote and puts the backups back.
 

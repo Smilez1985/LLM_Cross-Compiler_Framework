@@ -488,7 +488,8 @@ The full guide is the [Module Developer Guide](docs/Module_Developer_Guide.md). 
    Rockchip Dockerfile). The conversion has to work in the sandbox: as a non-root user, without network, with a
    read-only image filesystem and only the build's own folders writable. The template's convert stage already
    detects the input's format, checks the input and the written GGUF, runs a short functional test and records
-   statistics; keep its `scripts/model_check.py` in your target.
+   statistics; keep its `scripts/model_check.py` in your target (the target stage's package runs the same
+   functional test on the quantized model, `model_check.py test`).
 5. **Test with a real build**, for example
    `llm-cli build start -m HuggingFaceTB/SmolLM2-135M-Instruct -t <name> -f gguf -b <board> -F`, and add the
    Dockerfile to the hadolint matrix in `.github/workflows/docker.yml` and to `.github/dependabot.yml`.

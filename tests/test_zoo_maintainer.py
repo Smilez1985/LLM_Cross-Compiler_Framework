@@ -695,6 +695,24 @@ def test_no_ai_reachable_code_reaches_the_maintainer_actions():
     assert len(files) > 5 and offenders == []
 
 
+def test_no_module_an_ai_can_reach_imports_the_maintainer_actions_through_any_import():
+    """The guard above reads the AI-reachable files themselves; this one follows every import of them (the layering
+    graph: module level, inside a function, by name; tests/test_remote_trust.py ai_reachable_closure), so a helper an
+    AI tool imports cannot bring the maintainer's core or its window in either (stage C wave 2 review: the maintainer
+    actions came from development, the closure guard from remote-trust, and neither covered the other)."""
+    import test_layering
+    from test_remote_trust import ai_reachable_closure, path_to
+    edges = test_layering.build_graph().edges()
+    via = ai_reachable_closure(edges)
+    assert "orchestrator.tools.tools_community" in via, "the AI's community tools are what the closure starts from"
+    actions = ("orchestrator.Core.community_maintainer", "orchestrator.gui.community_maintainer")
+    for module in actions:
+        assert module not in via, path_to(via, module)
+    # Its texts are merged into the one text table (localization.TEXT_MODULES) as every text module's are, so they
+    # are reachable; they import none of the actions.
+    assert not set(actions) & set(edges.get("orchestrator.utils.l10n_maintainer", ()))
+
+
 def test_no_tool_publishes_revokes_or_signs(booted_framework):
     names = {spec.name for spec in booted_framework.tool_registry.list()}
     assert not any(word in name for name in names for word in ("maintainer", "revoke", "sign", "publish", "merge"))

@@ -1389,7 +1389,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   from outside (the out-of-memory killer), a tool this machine's CPU cannot run or that does not start in the image,
   and an embedding model are notes the manifest names, as in the convert stage (before, the package had a test of its
   own that refused these, so a build could pass its convert stage and then fail its package for the same reason, and
-  an embedding model got no package). Their cross build turns off every llama.cpp option that can download something, as every llama.cpp build of
+  an embedding model got no package). Their cross build turns off every llama.cpp option that can download something, as
+  every llama.cpp build of
   the framework does (`DOWNLOAD_OPTIONS_OFF` of `orchestrator/runtime/build/recipe.py`): at the pin
   `LLAMA_USE_PREBUILT_UI` is on by default and fetched `llama-server`'s web UI from a Hugging Face bucket in a
   container with network. `build.sh --package` (also `target_module.sh` started by hand and the entrypoint modes `target` and
@@ -1503,7 +1504,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `deploy run`'s does; a Ctrl+C during the runtime deploy's wait now ends the
   command as a Ctrl+C (the staging folder's clean-up, which cannot reach the board then, no longer replaces it with
   "the connection to the device is closed"), and a board that does not answer again ends these commands (also
-  `scan --device`) with the plain reason and its next step (`_print_reason`, as `deploy run` prints it), not with a sentence that only names
+  `scan --device`) with the plain reason and its next step (`_print_reason`, as `deploy run` prints it), not with a
+  sentence that only names
   the reason code. One
   `CancelToken` replaces the four "hold the client so Cancel can close it" copies, and closing a session ends its
   waits. The person's board steps, `scan --device` and Mojo ask `remote.transport.available()` whether SSH works, and
