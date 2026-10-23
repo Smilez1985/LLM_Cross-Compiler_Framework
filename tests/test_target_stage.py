@@ -195,6 +195,71 @@ def test_another_system_gets_no_32_bit_advice(image):
     assert result.returncode == 1 and "32-bit" not in result.stderr
 
 
+# --- every quantization method of llama.cpp (target_module.sh of version 1.x: "Q4_0, Q4_K_M, Q8_0, all llama.cpp
+# methods") ---------------------------------------------------------------------------------------------------------
+
+# QUANT_OPTIONS of tools/quantize/quantize.cpp at the pinned commit (llama.cpp b11429 = v0.6.0), in its order.
+PINNED_QUANT_OPTIONS = (
+    "Q1_0 Q2_0 Q4_0 Q4_1 MXFP4_MOE Q5_0 Q5_1 IQ2_XXS IQ2_XS IQ2_S IQ2_M IQ1_S IQ1_M TQ1_0 TQ2_0 Q2_K Q2_K_S IQ3_XXS "
+    "IQ3_S IQ3_M Q3_K IQ3_XS Q3_K_S Q3_K_M Q3_K_L IQ4_NL IQ4_XS Q4_K Q4_K_S Q4_K_M Q5_K Q5_K_S Q5_K_M Q6_K Q8_0 F16 "
+    "BF16 F32 COPY").split()
+ALIASES = {"Q3_K": "Q3_K_M", "Q4_K": "Q4_K_M", "Q5_K": "Q5_K_M"}   # "alias for ..." in QUANT_OPTIONS
+# tensor_requires_imatrix of src/llama-quant.cpp at the pin: the types whose main tensors need an importance matrix
+PINNED_NEEDS_IMATRIX = {"IQ1_S", "IQ1_M", "IQ2_XXS", "IQ2_XS", "IQ2_S", "IQ2_M", "IQ3_XXS", "Q2_K_S"}
+
+
+def script_list(name: str) -> set:
+    import re
+    from conftest import REPO_ROOT
+    text = (REPO_ROOT / "targets" / "Rockchip" / "modules" / "config_module.sh").read_text(encoding="utf-8")
+    return set(re.search(rf'{name}=" (.*?) "', text, re.S).group(1).replace("\\\n", " ").upper().split()) - {"AUTO"}
+
+
+def test_every_quantization_method_of_the_pinned_llama_quantize_is_listed():
+    from orchestrator.Core.orchestrator import LLAMA_CPP_NEEDS_IMATRIX
+    from test_foundation import ROCKCHIP_YML
+    import yaml
+    methods = set(PINNED_QUANT_OPTIONS) - {"COPY"} - set(ALIASES)
+    assert script_list("GGUF_QUANT_TYPES") | script_list("GGUF_CONVERT_TYPES") == methods
+    gguf = yaml.safe_load(ROCKCHIP_YML.read_text())["capabilities"]["formats"]["gguf"]
+    assert set(gguf["quantizations"]) == methods
+    assert {k: gguf["aliases"][k] for k in ALIASES} == ALIASES
+    assert script_list("GGUF_NEEDS_IMATRIX") == set(gguf["needs_imatrix"]) == PINNED_NEEDS_IMATRIX
+    assert LLAMA_CPP_NEEDS_IMATRIX == PINNED_NEEDS_IMATRIX
+    assert not script_list("GGUF_WANTS_IMATRIX") & PINNED_NEEDS_IMATRIX
+
+
+@needs_bash
+@pytest.mark.parametrize("quant, kind", [("Q1_0", "Q1_0"), ("Q2_0", "Q2_0"), ("q4_k", "Q4_K_M"), ("Q3_K", "Q3_K_M"),
+                                         ("Q5_K", "Q5_K_M")])
+def test_the_new_methods_and_the_short_names_are_accepted(image, quant, kind):
+    result = image.run(QUANTIZATION=quant)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert image.calls()[-1].endswith(f"/build-cache/output/model-{kind}.gguf {kind}")
+
+
+@needs_bash
+@pytest.mark.parametrize("quant", ["IQ2_M", "IQ3_XXS", "Q2_K_S"])
+def test_a_method_llama_quantize_refuses_without_an_importance_matrix_is_refused_before_converting(image, quant):
+    """Before, these built until llama-quantize stopped with "this quantization requires an imatrix!"."""
+    result = image.run(QUANTIZATION=quant)
+
+    assert result.returncode == 1
+    assert f"ERROR: {quant} needs an importance matrix; enable IMatrix calibration for this build." in result.stderr
+    assert image.calls() == [], "nothing was converted"
+
+
+def test_the_capabilities_ask_for_the_importance_matrix_of_these_methods():
+    from orchestrator.schemas.targets import TargetCapabilities
+    from test_foundation import ROCKCHIP_YML
+    import yaml
+    caps = TargetCapabilities.model_validate(yaml.safe_load(ROCKCHIP_YML.read_text())["capabilities"])
+    for quant in ("IQ2_M", "IQ3_XXS", "Q2_K_S"):
+        assert any("needs an importance matrix" in p for p in caps.check_request("gguf", "rk3588", quant)), quant
+    assert caps.check_request("gguf", "rk3588", "Q4_K") == [], "the short name of Q4_K_M"
+
+
 # --- the same validation in the template (targets/_template, the module generator's source) ----------------------
 
 def _validation(path):

@@ -231,16 +231,17 @@ capabilities:
       input: [hf]
       quantizations: [Q4_K_M, Q4_0, IQ4_NL, IQ4_XS, Q5_K_M, Q6_K, Q8_0, Q4_1, Q5_0, Q5_1, Q2_K, Q2_K_S,
                       Q3_K_S, Q3_K_M, Q3_K_L, Q4_K_S, Q5_K_S, IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S, IQ2_M,
-                      IQ3_XXS, IQ3_XS, IQ3_S, IQ3_M, TQ1_0, TQ2_0, MXFP4_MOE, F16, BF16, F32]
+                      IQ3_XXS, IQ3_XS, IQ3_S, IQ3_M, TQ1_0, TQ2_0, MXFP4_MOE, Q1_0, Q2_0, F16, BF16, F32]
       default_quantization: Q4_K_M
       board_default_quantization:
         rk3566: Q4_0
         rk3568: Q4_0
       imatrix: true
-      needs_imatrix: [IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S]
+      needs_imatrix: [IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S, IQ2_M, IQ3_XXS, Q2_K_S]
       dataset: optional
       dataset_kind: text
-      aliases: {FP16: F16, FP32: F32, INT8: Q8_0, Q8: Q8_0, INT4: Q4_K_M, Q4: Q4_K_M, Q5: Q5_K_M}   # config_module.sh normalize_gguf_type
+      aliases: {FP16: F16, FP32: F32, INT8: Q8_0, Q8: Q8_0, INT4: Q4_K_M, Q4: Q4_K_M, Q5: Q5_K_M,
+                Q3_K: Q3_K_M, Q4_K: Q4_K_M, Q5_K: Q5_K_M}   # config_module.sh normalize_gguf_type
       notes: "Runs on the CPU of every board. Q4_0 and IQ4_NL are repacked for fast ARM kernels."
     rkllm:
       label: "RKLLM (Rockchip NPU, LLMs)"
