@@ -289,7 +289,14 @@ Commit legt den Inhalt fest; ein Tag lässt sich verschieben. Eine Anhebung läu
    `FetchContent_Declare`, `ExternalProject_Add` und `file(DOWNLOAD` durchsuchen und jede neue ergänzen. Ebenso die
    Regeln für CUDA-Architekturen (`ggml/src/ggml-cuda/CMakeLists.txt`) und welche Ziele `tools/CMakeLists.txt` baut.
    Die Target-Dockerfiles wiederholen beide Listen in ihrem llama.cpp-Bauschritt (die zuletzt gesetzten Optionen und
-   die, die sie ablehnen); `tests/test_target_dockerfiles.py` schlägt fehl, bis sie wieder zum Rezept passen. Prüfe
+   die, die sie ablehnen); `tests/test_target_dockerfiles.py` schlägt fehl, bis sie wieder zum Rezept passen. Der
+   Cross-Build des Board-Pakets in beiden `target_module.sh` setzt sie nach den CMake-Flags eines Moduls
+   (`tests/test_target_stage.py` liest das Rezept) und lehnt ein Flag eines Moduls aus `NEVER_SET` ab (sein
+   `NEVER_SET_OPTIONS`, das `test_the_package_refuses_the_options_the_build_recipe_never_sets` vergleicht), und der
+   Modul-Generator lehnt Flags eines Moduls mit `recipe.refused_option` ab, das dieselben Listen liest. Ändert der
+   neue Baum die x86-Optionen von ggml oder die Flags, die es für sie setzt (`ggml/src/ggml-cpu/CMakeLists.txt`),
+   ändern sich `X86_FEATURES` und `_X86_FLAGS` des Rezepts und mit ihnen die Tabellen in Rockchips `config_module.sh`
+   (`test_the_explicit_x86_features_are_the_build_recipe_s` schlägt fehl, bis sie übereinstimmen). Prüfe
    auch die Quantisierungstypen: `QUANT_OPTIONS` aus dem neuen `tools/quantize/quantize.cpp` nach
    `PINNED_QUANT_OPTIONS` in `tests/test_target_stage.py` übernehmen und nach `PINNED_NEEDS_IMATRIX` jede Methode,
    die `llama-quantize` ohne Importance-Matrix ablehnt: eine, bei der `tensor_requires_imatrix` in
@@ -523,7 +530,9 @@ Der vollständige Leitfaden ist der [Leitfaden für Modulentwickler](docs/Module
    convert der Vorlage erkennt bereits das Format der Eingabe, prüft die Eingabe und das geschriebene GGUF, führt
    einen kurzen Funktionstest aus und hält eine Statistik fest; behalte ihr `scripts/model_check.py` in deinem
    Target (das Paket der Stufe target führt denselben Funktionstest mit dem quantisierten Modell aus,
-   `model_check.py test`).
+   `model_check.py test`). Die CMake-Flags deines Moduls dürfen keine Option von llama.cpp einschalten, die beim
+   Bauen etwas herunterlädt (der Generator und die Ordnerprüfung lehnen sie ab, siehe den
+   [Leitfaden für Modulentwickler](docs/Module_Developer_Guide_DE.md#91-was-die-prüfungen-verlangen)).
 5. **Mit einem echten Build testen**, zum Beispiel
    `llm-cli build start -m HuggingFaceTB/SmolLM2-135M-Instruct -t <Name> -f gguf -b <Board> -F`, und das Dockerfile
    in die hadolint-Matrix in `.github/workflows/docker.yml` und in `.github/dependabot.yml` aufnehmen.
@@ -702,7 +711,10 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   tun ist; ein Fenster zeigt die Worte für die Person mit `person_reason`. Vergleiche `shutil.disk_usage` nie mit
   einem eigenen Spielraum. Ein Download bekommt die Regel als `PinnedDownloader(space=download_rule(ledger=...))`;
   ein langer Aufruf, der später schreibt, hält seinen Platz mit `hf_hub.reserve_space`. Tests lesen eine geräumige
-  Festplatte (die Fixture `roomy_disk_usage`); ein Test einer Prüfung gibt seine eigene vor.
+  Festplatte (die Fixture `roomy_disk_usage`); ein Test einer Prüfung gibt seine eigene vor. Der Build-Container hat
+  kein Framework: Die Prüfung des Board-Pakets vor dem Kopieren ist `scripts/board_package.py room` des Targets, das
+  die Zahlen und Worte der Regel mitbringt (`tests/test_target_stage.py` vergleicht sie mit `disk_plan`); das python3
+  des Images misst in den Stufen-Tests eine Platte, die der Test festlegt (`tests/board_toolchain.py set_disk`).
 - **Ein Hugging-Face-Downloader.** Eine Datei vom Hub kommt über `orchestrator/Core/hf_hub.py` `HubFetcher`
   (festgelegter Commit, fortsetzbare `.part`-Datei, Größe und sha256 des Hubs geprüft, bevor die Datei ihren Namen
   bekommt, das Token nur an huggingface.co); rufe für ein Modell nie `hf_hub_download` oder `snapshot_download` von

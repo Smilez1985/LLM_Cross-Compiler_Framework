@@ -1592,6 +1592,36 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `config repos` für llama.cpp (`LLAMA_CPP_REPO_OVERRIDE`) wirkt jetzt: Das Image holt den gepinnten Commit daraus
   (Build-Argument `LLAMA_CPP_REPO`), wenn sie eine https-Adresse ohne Zugangsdaten ist, und bricht weiterhin ab, wenn
   es nicht genau diesen Commit bekommt; die Doku sagte, sie habe keine Wirkung.
+- **Das Board-Paket hält die Build-Regeln des Frameworks ein: die Platzregel, keine Downloads, die CPU des PCs, für den
+  es ist** (Entscheidungen des Maintainers zur Konsolidierung Stufe C, Welle 3; Kette build-safety; Rockchip und die
+  Vorlage). Das Paket kopiert das Modell neben das des Builds, und Läufe von Hand und im Pipeline-Modus packen immer;
+  jetzt prüft die Stufe target zuerst die eine Platzregel (`scripts/board_package.py room`: Die Platte von
+  `output/packages/` muss fassen, was das Paket kopiert, und 2 GiB oder 2 % von ihr frei lassen, die Reserve von
+  `orchestrator/Core/disk_plan.py`), für das Modell vor dem Funktionstest und dem Cross-Build und für jede kopierte
+  Datei direkt vor dem Kopieren, und stoppt mit den Worten der Regel ("Not enough disk space for the package for the
+  board: output disk: 1.2 GB needed, 2.5 GB free, 2.1 GB must stay free. Free disk space ...") und ohne Paket. Das Image
+  hat kein Framework, deshalb bringt das Skript die Zahlen und Worte der Regel mit (ein Test vergleicht sie); die
+  Reservierungen des Benutzerordners sieht ein Build-Container nicht. Die CMake-Flags eines Moduls können keinen
+  Download von llama.cpp mehr einschalten: Der Modul-Generator lehnt solche `cmake_flags` ab (Wizard, KI-Vorschläge,
+  MCP, CLI; `-DLLAMA_USE_PREBUILT_UI=ON`, `-DLLAMA_CURL=ON`, `-DGGML_CUDA_CCCL_VERSION=...`,
+  `-DFETCHCONTENT_FULLY_DISCONNECTED=OFF`, `-DLLAMA_SUBPROCESS=ON` und ähnliche), mit dem Grund des Build-Rezepts
+  (`recipe.refused_option`, die Regel, die `check_download_options` auf jeden Plan anwendet), die Ordnerprüfung
+  erzeugter Module, Exporte und Community-Pakete lehnt sie in jeder Skriptzeile ab, die nicht die der Vorlage ist (in
+  jeder Schreibweise, die die Shell cmake übergibt: `-D NAME=WERT`, `-DNAME:TYP=WERT`, in Anführungszeichen), und der
+  Cross-Build des Pakets übergibt die Optionen des Frameworks nach den Flags des Moduls, damit sie immer gelten. Was
+  keine spätere Option abschaltet, stoppt das Paket vor allem Langsamen, mit dem Grund und ohne Paket: ein Flag des
+  Moduls, das eine Option aus `NEVER_SET` des Rezepts setzt (sie lädt herunter, sobald sie gesetzt ist), oder CMake ein
+  Skript ausführen lässt (`-C`, ein Initial-Cache, oder `-P`, das jede Option setzen kann; der Generator lehnt diese
+  auch in `cmake_flags` ab). Ein Wert in Anführungszeichen, der einen Download ausgeschaltet lässt
+  (`-DLLAMA_BUILD_TESTS="OFF"`), wird nicht mehr abgelehnt. Sein `llama-server` wird jetzt ohne Unterprozesse gebaut
+  (`LLAMA_SUBPROCESS=OFF`, Entscheidung D22), wie jeder Server des Frameworks; vorher hatte der Server des Pakets sie.
+  Ein x86_64-Hardware-Profil wird nur dann mit `-march=native` geplant, wenn es das dieses Build-Rechners selbst ist
+  (dasselbe CPU-Modell und dieselben CPU-Flags wie `/proc/cpuinfo` hier); ein Profil eines anderen PCs bekommt die
+  CPU-Merkmale seiner Probe, so wie das Build-Rezept einen Build für einen anderen Rechner plant (alle 14 x86-Optionen
+  von GGML ausdrücklich, ihre Compiler-Flags auf `-march=x86-64`, ein Merkmal, das die Probe nicht bestätigt hat,
+  weggelassen, und bei einer Probe-Datei aus 1.x die Merkmale, die ihre CPU-Flags nennen). Vorher bekam jedes
+  x86_64-Profil `-march=native`, und so gab ein Build-Rechner mit AVX-512 einem PC mit nur AVX2 Programme, die er nicht
+  ausführen kann.
 - **Der Code ist in Schichten geordnet, und ein Test hält sie ein** (Konsolidierung; Entscheidung des Maintainers vom
   2026-10-17: ein Repository, Schichten per Test durchgesetzt). `tests/test_layering.py` ordnet jedes Modul von
   `orchestrator/` einer Schicht zu (unten, remote, Kern, Fachlogik, Tool-Definitionen, Adapter), liest jeden Import

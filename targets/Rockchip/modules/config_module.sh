@@ -224,6 +224,106 @@ load_plain_defaults() {
 }
 
 # ============================================================================
+# THE CPU OF AN x86_64 PROFILE: -march=native only for this build machine itself
+# ============================================================================
+
+# The x86 features of a hardware profile as the build recipe plans them for another machine
+# (orchestrator/runtime/build/recipe.py: X86_FEATURES, _X86_NEEDS and _X86_FLAGS; tests/test_target_stage.py compares
+# the plans): the probe's key, the ggml option it switches, the feature it builds on (a feature without it is not
+# used) and its /proc/cpuinfo flag (configs/hardware_probe_schema.yml), which a probe file of version 1.x without
+# the key still names in CPU_FLAGS_ALL.
+X86_FEATURE_TABLE=(
+    "SUPPORTS_SSE42 GGML_SSE42 - sse4_2"
+    "SUPPORTS_AVX GGML_AVX - avx"
+    "SUPPORTS_AVX2 GGML_AVX2 SUPPORTS_AVX avx2"
+    "SUPPORTS_BMI2 GGML_BMI2 - bmi2"
+    "SUPPORTS_F16C GGML_F16C SUPPORTS_AVX f16c"
+    "SUPPORTS_FMA GGML_FMA SUPPORTS_AVX fma"
+    "SUPPORTS_AVX512 GGML_AVX512 SUPPORTS_AVX2 avx512f"
+    "SUPPORTS_AVX512_VBMI GGML_AVX512_VBMI SUPPORTS_AVX512 avx512vbmi"
+    "SUPPORTS_AVX512_VNNI GGML_AVX512_VNNI SUPPORTS_AVX512 avx512_vnni"
+    "SUPPORTS_AVX512_BF16 GGML_AVX512_BF16 SUPPORTS_AVX512 avx512_bf16"
+    "SUPPORTS_AVX_VNNI GGML_AVX_VNNI SUPPORTS_AVX2 avx_vnni"
+    "SUPPORTS_AMX_TILE GGML_AMX_TILE - amx_tile"
+    "SUPPORTS_AMX_INT8 GGML_AMX_INT8 SUPPORTS_AMX_TILE amx_int8"
+    "SUPPORTS_AMX_BF16 GGML_AMX_BF16 SUPPORTS_AMX_TILE amx_bf16"
+)
+# The compiler flags ggml adds for each option without GGML_NATIVE, in ggml's order
+# (ggml/src/ggml-cpu/CMakeLists.txt:347-410 at the pin).
+X86_FLAG_TABLE=(
+    "GGML_SSE42 -msse4.2" "GGML_F16C -mf16c" "GGML_FMA -mfma" "GGML_BMI2 -mbmi2" "GGML_AVX -mavx" "GGML_AVX2 -mavx2"
+    "GGML_AVX_VNNI -mavxvnni" "GGML_AVX512 -mavx512f -mavx512cd -mavx512vl -mavx512dq -mavx512bw"
+    "GGML_AVX512_VBMI -mavx512vbmi" "GGML_AVX512_VNNI -mavx512vnni" "GGML_AVX512_BF16 -mavx512bf16"
+    "GGML_AMX_TILE -mamx-tile" "GGML_AMX_INT8 -mamx-int8" "GGML_AMX_BF16 -mamx-bf16"
+)
+
+cpu_flag_list() {  # stdin: CPU flags (separated by spaces or commas) -> the sorted set, comma-separated, lower case
+    tr 'A-Z,' 'a-z ' | tr -s ' \t' '\n' | sed '/^$/d' | sort -u | paste -sd, -
+}
+
+profile_cpu_flags() {  # CPU_FLAGS_ALL of the profile file as written (the loader drops the spaces of version 1.x)
+    awk '/^[[:space:]]*CPU_FLAGS_ALL[[:space:]]*=/ { sub(/^[^=]*=/, ""); print; exit }' "$HARDWARE_CONFIG_FILE" \
+        | tr -d '"\r'
+}
+
+# The hardware profile describes this build machine itself when it names this machine's CPU: the same system
+# (uname -m), the same CPU model and the same CPU flags as /proc/cpuinfo here (the probe's ARCH, CPU_MODEL and
+# CPU_FLAGS_ALL; spaces are not compared). Only then is -march=native the profile's CPU. A profile of another
+# machine, or one without these facts, gets the explicit features of its probe (explicit_x86_flags).
+profile_is_this_machine() {
+    local here_model here_flags there_flags
+    [ "$(uname -m)" = "${HW_CONFIG[ARCHITECTURE_FULL]}" ] && [ -r /proc/cpuinfo ] || return 1
+    here_model="$(awk -F: '/^model name/ { print $2; exit }' /proc/cpuinfo | tr -d ' \t')"
+    here_flags="$(awk -F: '/^flags/ { print $2; exit }' /proc/cpuinfo | cpu_flag_list)"
+    there_flags="$(profile_cpu_flags | cpu_flag_list)"
+    [ -n "$here_flags" ] && [ "$here_flags" = "$there_flags" ] \
+        && [ -n "$here_model" ] && [ "$here_model" = "${HW_CONFIG[CPU_MODEL_NAME]:-}" ]
+}
+
+# X86_CFLAGS and X86_CMAKE_FLAGS from the profile's x86 features, as the build recipe plans a build for another
+# machine: all 14 ggml options explicit (a feature the probe did not confirm is OFF, never more than it confirmed), a
+# feature without the one it builds on is not used, and the compiler flags of the options that are ON on the x86-64
+# baseline, whatever the image's compiler would choose by default.
+explicit_x86_flags() {
+    local row key option needs token value cpu_flags options=() unknown=()
+    declare -A use
+    cpu_flags="$(profile_cpu_flags | cpu_flag_list)"
+    for row in "${X86_FEATURE_TABLE[@]}"; do
+        read -r key option needs token <<< "$row"
+        value="${HW_CONFIG[$key]:-}"
+        if [ "$value" != ON ] && [ "$value" != OFF ]; then
+            if [ -n "$cpu_flags" ]; then
+                value=OFF
+                if [[ ",$cpu_flags," == *",$token,"* ]]; then
+                    value=ON
+                fi
+            else
+                unknown+=("${key#SUPPORTS_}")
+                value=OFF
+            fi
+        fi
+        if [ "$value" = ON ] && [ "$needs" != - ] && [ "${use[$needs]:-OFF}" != ON ]; then
+            log_warn "$key is ON without $needs in the hardware profile; not used"
+            value=OFF
+        fi
+        use[$key]="$value"
+        options+=("-D$option=$value")
+    done
+    if [ ${#unknown[@]} -gt 0 ]; then
+        log_warn "The hardware profile does not say whether the CPU has ${unknown[*]}: left out (only what the probe confirmed is used)"
+    fi
+    X86_CMAKE_FLAGS="${options[*]}"
+    local cflags="-march=x86-64"
+    for row in "${X86_FLAG_TABLE[@]}"; do
+        option="${row%% *}"
+        if [[ " $X86_CMAKE_FLAGS " == *" -D$option=ON "* ]]; then
+            cflags="$cflags ${row#* }"
+        fi
+    done
+    X86_CFLAGS="$cflags"
+}
+
+# ============================================================================
 # COMPILER FLAGS GENERATION
 # ============================================================================
 
@@ -261,14 +361,23 @@ generate_compiler_flags() {
         fi
     fi
 
-    # x86_64 (Intel)
+    # x86_64 (a PC): -march=native only when the profile is of this build machine itself (version 1.x: "Native
+    # x86"); a profile of another PC gets its own CPU features, as the build recipe plans them (explicit_x86_flags).
     if [[ "${HW_CONFIG[ARCHITECTURE_FULL]}" == "x86_64" ]]; then
-        cflags="$cflags -march=native"
-        if [[ "${HW_CONFIG[SUPPORTS_AVX2]:-OFF}" == "ON" ]]; then
-            cmake_flags="$cmake_flags -DGGML_AVX2=ON"
-        fi
-        if [[ "${HW_CONFIG[SUPPORTS_AVX512]:-OFF}" == "ON" ]]; then
-            cmake_flags="$cmake_flags -DGGML_AVX512=ON"
+        if profile_is_this_machine; then
+            log_info "The hardware profile is of this build machine: -march=native"
+            cflags="$cflags -march=native"
+            if [[ "${HW_CONFIG[SUPPORTS_AVX2]:-OFF}" == "ON" ]]; then
+                cmake_flags="$cmake_flags -DGGML_AVX2=ON"
+            fi
+            if [[ "${HW_CONFIG[SUPPORTS_AVX512]:-OFF}" == "ON" ]]; then
+                cmake_flags="$cmake_flags -DGGML_AVX512=ON"
+            fi
+        else
+            explicit_x86_flags
+            log_info "The hardware profile is of another machine: its CPU features ($X86_CFLAGS), not this machine's (-march=native)"
+            cflags="$cflags $X86_CFLAGS"
+            cmake_flags="$cmake_flags $X86_CMAKE_FLAGS"
         fi
     fi
 

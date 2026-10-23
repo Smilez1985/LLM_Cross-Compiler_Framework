@@ -103,6 +103,11 @@ EOF
 
 PACKAGE_SCRIPTS="$(dirname "$MODULES_DIR")/scripts"
 FUNCTIONAL_TEST_SECONDS=120
+# The options of llama.cpp that download at configure time whenever they are set (NEVER_SET of
+# orchestrator/runtime/build/recipe.py, which the image's Dockerfile refuses in LLAMA_CMAKE_ARGS as well;
+# tests/test_target_stage.py compares): no option after them turns them off again.
+NEVER_SET_OPTIONS=(LLAMA_BUILD_BORINGSSL LLAMA_BUILD_LIBRESSL GGML_CUDA_CCCL_VERSION GGML_ZENDNN GGML_VIRTGPU
+                   LLAMA_BUILD_WEBUI LLAMA_USE_PREBUILT_WEBUI)
 
 # Without a hardware profile in the build plan (a package on request: build.sh --package, target_module.sh started
 # by hand): the board's part of the plan from the plain defaults of this target, planned and checked by the config
@@ -148,6 +153,56 @@ validate_inputs() {
     log_success "Input validation completed"
 }
 
+# The framework's disk rule before the package is made (scripts/board_package.py room, the numbers and words of
+# orchestrator/Core/disk_plan.py): the disk of the package folder must hold FILE... and still keep 2 GiB or 2 % of it
+# free. The package copies the model next to the build's own; so the model is checked before anything slow (the
+# functional test, the cross build) and every file again just before the copy. The framework's reservation ledger is
+# in the per-user folder of the computer, which a build container does not see: the check counts the disk's free space.
+package_room() {  # FILE...: stops the stage with the rule's plain reason when the package does not fit
+    local problem
+    problem="$(python3 "$PACKAGE_SCRIPTS/board_package.py" room "$OUTPUT_DIR/packages" \
+        --what "the package for the board" "$@")" \
+        || die "${problem:-The free space for the package could not be checked.} No package was made."
+}
+
+# The first of the module's CMake flags (FLAG...: the plan's CMAKE_FLAGS, word by word as the cross build passes them)
+# that the cross build refuses, with the reason; nothing when there is none. The options of every build come after
+# the module's flags and win (cross_compile_target), except an option of NEVER_SET_OPTIONS, which downloads whenever it
+# is set, and a CMake script (-C, an initial cache, or -P), which can set any option. cmake reads "-D NAME=VALUE" as
+# one option, and -DNAME:TYPE=VALUE names NAME.
+module_flag_problem() {  # FLAG...
+    local word name
+    while [ $# -gt 0 ]; do
+        word="$1"
+        shift
+        if [ "$word" = -D ] && [ $# -gt 0 ]; then
+            word="-D$1"
+            shift
+        fi
+        case "$word" in
+            -C*|-P*)
+                echo "$word (CMake runs a script with -C or -P, and a script can set any option)"
+                return ;;
+            -D*)
+                name="${word#-D}"
+                name="${name%%=*}"
+                name="${name%%:*}"
+                if [[ " ${NEVER_SET_OPTIONS[*]} " == *" $name "* ]]; then
+                    echo "$word ($name downloads at configure time and is never set)"
+                    return
+                fi ;;
+        esac
+    done
+}
+
+check_module_flags() {  # before anything slow: the module's CMake flags in the plan, as the cross build passes them
+    local problem flags=()
+    read -r -a flags <<< "${CMAKE_FLAGS:-}"
+    [ ${#flags[@]} -gt 0 ] || return 0
+    problem="$(module_flag_problem "${flags[@]}")"
+    [ -z "$problem" ] || die "The CMake flags of the build plan would let llama.cpp download while it is built: $problem; builds have no network: leave it out. No package was made."
+}
+
 # A short run of the quantized model on this build machine: the convert stage's functional test (scripts/model_check.py
 # test, the one implementation), with the image's own llama-completion (llama-cli when the image has only that): 8
 # tokens, at most FUNCTIONAL_TEST_SECONDS, offline, the options this tool has. A run that ends with an error or
@@ -184,14 +239,7 @@ cross_compile_target() {
     local cmake_args=()
     cmake_args+=("-DCMAKE_BUILD_TYPE=Release")
     cmake_args+=("-DBUILD_SHARED_LIBS=OFF")
-    cmake_args+=("-DLLAMA_CURL=OFF")
-    # Nothing is downloaded at configure or build time (the build container has no network, a container started by
-    # hand may have); only what the package needs. Every option of llama.cpp that can download something is off, as
-    # in every llama.cpp build of the framework (DOWNLOAD_OPTIONS_OFF of orchestrator/runtime/build/recipe.py, the
-    # image's Dockerfile): LLAMA_USE_PREBUILT_UI, on by default, would fetch llama-server's web UI while it is built.
-    cmake_args+=("-DFETCHCONTENT_FULLY_DISCONNECTED=ON" "-DLLAMA_OPENSSL=OFF" "-DLLAMA_BUILD_TESTS=OFF")
-    cmake_args+=("-DLLAMA_BUILD_EXAMPLES=OFF" "-DLLAMA_BUILD_APP=OFF" "-DLLAMA_USE_PREBUILT_UI=OFF" "-DLLAMA_BUILD_UI=OFF"
-                 "-DLLAMA_LLGUIDANCE=OFF" "-DGGML_CPU_KLEIDIAI=OFF" "-DGGML_OPENMP_FETCH=OFF")
+    cmake_args+=("-DLLAMA_OPENSSL=OFF")
     cmake_args+=("-DLLAMA_BUILD_SERVER=ON")
 
     # WICHTIG: Setze die Toolchain (mit den Optimierungs-Flags) aus config_module.sh
@@ -201,6 +249,16 @@ cross_compile_target() {
     if [ ${#flags[@]} -gt 0 ]; then
         cmake_args+=("${flags[@]}")
     fi
+    # Nothing is downloaded at configure or build time (the build container has no network, a container started by
+    # hand may have); only what the package needs. Every option of llama.cpp that can download something is off, as
+    # in every llama.cpp build of the framework (DOWNLOAD_OPTIONS_OFF and DEPRECATED_DOWNLOAD_OPTIONS of
+    # orchestrator/runtime/build/recipe.py, the image's Dockerfile): LLAMA_USE_PREBUILT_UI, on by default, would fetch
+    # llama-server's web UI while it is built. llama-server has no subprocesses (LLAMA_SUBPROCESS=OFF, decision D22).
+    # These come after the module's CMake flags, so they always win (CMake keeps the last value); the module generator
+    # refuses such flags in a module (module_generator.download_flag_problems).
+    cmake_args+=("-DLLAMA_CURL=OFF" "-DFETCHCONTENT_FULLY_DISCONNECTED=ON" "-DLLAMA_SUBPROCESS=OFF" "-DLLAMA_BUILD_TESTS=OFF")
+    cmake_args+=("-DLLAMA_BUILD_EXAMPLES=OFF" "-DLLAMA_BUILD_APP=OFF" "-DLLAMA_USE_PREBUILT_UI=OFF" "-DLLAMA_BUILD_UI=OFF"
+                 "-DLLAMA_LLGUIDANCE=OFF" "-DGGML_CPU_KLEIDIAI=OFF" "-DGGML_OPENMP_FETCH=OFF")
 
     log_info "Configuring target build..."
     if ! cmake "$LLAMA_BASE" "${cmake_args[@]}"; then
@@ -410,6 +468,13 @@ create_deployment_package() {
 
     log_info "Schritt 4: Erstelle Deployment-Paket: $package_name"
 
+    local copies=("${TARGET_CONFIG[INPUT_GGUF]}" "${TARGET_CONFIG[LLAMA_CLI_BINARY]}"
+                  "${TARGET_CONFIG[LLAMA_SERVER_BINARY]}" "${CMAKE_TOOLCHAIN_FILE}")
+    if [[ -f "${HARDWARE_PROFILE:-}" ]]; then
+        copies+=("$HARDWARE_PROFILE")
+    fi
+    package_room "${copies[@]}"
+
     rm -rf "$package_dir"
     mkdir -p "$package_dir"
 
@@ -473,6 +538,8 @@ package_for_board() {
         done
     fi
     validate_inputs "${TARGET_CONFIG[QUANTIZED_GGUF]:-}" "${TARGET_CONFIG[QUANT_METHOD]:-}" "$MODEL_NAME"
+    package_room "${TARGET_CONFIG[INPUT_GGUF]}"
+    check_module_flags
     functional_test "${TARGET_CONFIG[QUANTIZED_GGUF]}"
     cross_compile_target
     check_board_binaries

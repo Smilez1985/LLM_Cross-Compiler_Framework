@@ -42,6 +42,12 @@ MODULE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$")
 SDK_RE = re.compile(r"^[\w .+/-]{0,64}$")
 DEB_PACKAGE_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]+(?::[a-z0-9-]+)?(?:=[A-Za-z0-9.+~:-]+)?$")
 FLAG_RE = re.compile(r"^-[A-Za-z][\w.=+,:/-]*$")
+# A CMake option on a command line or in a module's CMake flags: -DNAME=VALUE or -DNAME:TYPE=VALUE, also as cmake gets
+# it from the shell: "-D NAME=VALUE" (cmake reads -D and the next word as one option) and with quotes around the word,
+# the name or the value (-D "NAME=ON", -D'NAME'=ON, -DNAME="OFF").
+CMAKE_OPTION_RE = re.compile(r"(?<![\w-])-D\s*[\"']?([A-Za-z_][A-Za-z0-9_]*)[\"']?(?::[A-Za-z]+)?=[\"']?([^\s'\";|&)]*)")
+# Switches that make cmake run a CMake script (an initial cache -C, script mode -P): a script can set any option.
+CMAKE_SCRIPT_FLAGS = ("-C", "-P")
 # An image reference: an optional registry with a port (registry.example:5000/...; any registry is allowed, DECISIONS
 # round 3), the repository, an optional tag and an optional digest.
 IMAGE_RE = re.compile(r"^(?:[a-z0-9][a-z0-9.-]*(?::\d{1,5})?/)?[a-z0-9][a-z0-9._/-]*(?::[\w][\w.-]{0,127})?"
@@ -111,6 +117,22 @@ that. To share knowledge so that it reaches other users' knowledge bases, export
 knowledge pack (`llm-cli zoo export knowledge --author <name>`); an installed knowledge pack is added to the
 knowledge base.
 """
+
+
+def download_flag_problems(text: str) -> List[str]:
+    """Why the CMake options in `text` (a module's CMake flags, or a line of its scripts) would let llama.cpp download
+    something, or build a server with subprocesses: the build recipe's one rule for every option
+    (orchestrator/runtime/build/recipe.py refused_option). Builds have no network, and the board package's cross build
+    (targets/*/modules/target_module.sh) takes a module's CMake flags as they are; empty when nothing is refused."""
+    from orchestrator.runtime.build.recipe import refused_option
+    problems = []
+    for match in CMAKE_OPTION_RE.finditer(text or ""):
+        problem = refused_option(match.group(1), match.group(2))
+        if problem:
+            option = re.sub(r"[\s\"']", "", match.group(0))  # as cmake reads it: -DNAME=VALUE
+            problems.append(f"{option} would let llama.cpp download while it is built ({problem}); builds have "
+                            "no network: leave it out")
+    return problems
 
 
 def module_slug(module_name: str) -> str:
@@ -404,6 +426,10 @@ def validate_module_data(data: Dict[str, Any]) -> Dict[str, Any]:
         bad = [t for t in tokens if not FLAG_RE.fullmatch(t)]
         if bad:
             problems.append(f"{key}: only plain compiler/CMake options like -mcpu=cortex-a76 or -DGGML_CUDA=ON: {', '.join(bad[:5])}")
+        elif key == "cmake_flags":
+            problems += [f"cmake_flags: {problem}" for problem in download_flag_problems(" ".join(tokens))]
+            problems += [f"cmake_flags: {t} makes CMake run a CMake script (-C, -P), which can switch on any llama.cpp "
+                         "option; leave it out" for t in tokens if t.startswith(CMAKE_SCRIPT_FLAGS)]
         out[key] = " ".join(tokens)
 
     boards = data.get("supported_boards") or []
@@ -525,9 +551,9 @@ def validate_target_folder(root: Path, template_dir: Path = SHIPPED_TEMPLATE) ->
     """Problems of a target folder that others will build (empty: none): target.yml with valid capabilities (and a
     valid runtime: block if it has one), every Dockerfile FROM pinned by digest unless it is an official base image
     or an earlier stage, no prebuilt llama.cpp (images, copied or downloaded binaries, packages: the framework shares
-    recipes, decision D21), the shell deny-list on every script line that is not in the shipped template, bash -n,
-    no template placeholders and no binary files. Used for generated modules, community exports and packs in
-    quarantine."""
+    recipes, decision D21), the shell deny-list and no llama.cpp option that downloads (download_flag_problems) on
+    every script line that is not in the shipped template, bash -n, no template placeholders and no binary files.
+    Used for generated modules, community exports and packs in quarantine."""
     from orchestrator.schemas.targets import TargetCapabilities, TargetRuntime
     root = Path(root)
     problems: List[str] = []
@@ -572,6 +598,8 @@ def validate_target_folder(root: Path, template_dir: Path = SHIPPED_TEMPLATE) ->
                     continue
                 problems += [f"{rel}:{number}: not allowed, {reason}" for pattern, reason in SHELL_DENY_PATTERNS
                              if pattern.search(line)]
+                # the module's CMake flags (CMAKE_OPTIONS of config_module.sh) and any cmake call of its scripts
+                problems += [f"{rel}:{number}: not allowed, {problem}" for problem in download_flag_problems(line)]
     problems += scan_target_folder(root, skip=(KNOWLEDGE_SNAPSHOT,))
     problems += [f"template placeholder left: {p}" for p in _leftover_placeholders(root)]
     return problems + check_shell_syntax(root)

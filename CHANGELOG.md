@@ -1404,6 +1404,33 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (`LLAMA_CPP_REPO_OVERRIDE`) now takes effect: the image fetches the pinned commit from it (build argument
   `LLAMA_CPP_REPO`) when it is an https address without a credential, and still stops unless it got exactly that
   commit; the docs said it had no effect.
+- **The board package keeps the framework's build rules: the disk rule, no downloads, the CPU of the PC it is for**
+  (maintainer decisions of consolidation stage C, wave 3; chain build-safety; Rockchip and the template). The package
+  copies the model next to the build's own, and by-hand and pipeline runs always package; now the target stage
+  checks the one disk rule first (`scripts/board_package.py room`: the disk of `output/packages/` must hold what the
+  package copies and keep 2 GiB or 2 % of it free, the reserve of `orchestrator/Core/disk_plan.py`), for the model
+  before the functional test and the cross build and for every copied file just before the copy, and stops with the
+  rule's words ("Not enough disk space for the package for the board: output disk: 1.2 GB needed, 2.5 GB free, 2.1
+  GB must stay free. Free disk space ...") and no package. The image has no framework, so the script carries the
+  rule's numbers and words (a test compares them); the per-user reservations are not visible in a build container. A
+  module's CMake flags can no longer switch a llama.cpp download back on: the module generator refuses such
+  `cmake_flags` (wizard, AI proposals, MCP, CLI; `-DLLAMA_USE_PREBUILT_UI=ON`, `-DLLAMA_CURL=ON`,
+  `-DGGML_CUDA_CCCL_VERSION=...`, `-DFETCHCONTENT_FULLY_DISCONNECTED=OFF`, `-DLLAMA_SUBPROCESS=ON` and the like) with
+  the build recipe's reason (`recipe.refused_option`, the rule `check_download_options` applies to every plan), the
+  folder check of generated modules, exports and community packs refuses them in every script line that is not the
+  template's (in every spelling the shell hands cmake: `-D NAME=VALUE`, `-DNAME:TYPE=VALUE`, quoted), and the
+  package's cross build passes the framework's options after the module's flags, so they always win. What no later
+  option turns off stops the package before anything slow, with the reason and no package: a module flag that sets
+  an option of the recipe's `NEVER_SET` (it downloads whenever it is set) or makes CMake run a script (`-C`, an
+  initial cache, or `-P`, which can set any option; the generator refuses these in `cmake_flags` as well). A quoted
+  value that keeps a download off (`-DLLAMA_BUILD_TESTS="OFF"`) is no longer refused. Its `llama-server` is built
+  without subprocesses now (`LLAMA_SUBPROCESS=OFF`, decision D22), as every server
+  of the framework; before, the package's server had them. An x86_64 hardware profile is planned with
+  `-march=native` only when it is of this build machine itself (the same CPU model and CPU flags as `/proc/cpuinfo`
+  here); a profile of another PC gets the CPU features of its probe, as the build recipe plans a build for another
+  machine (all 14 GGML x86 options explicit, their compiler flags on `-march=x86-64`, a feature the probe did not
+  confirm left out, and for a 1.x probe file the features its CPU flags name). Before, every x86_64 profile got
+  `-march=native`, so an AVX-512 build machine gave an AVX2-only PC programs it cannot run.
 - **The code is arranged in layers, and a test keeps them** (consolidation; maintainer decision of 2026-10-17: one
   repository, layers enforced by a test). `tests/test_layering.py` maps every module of `orchestrator/` to a layer
   (bottom, remote, kernel, domain, tool definitions, adapters), reads every import (also inside functions, under
