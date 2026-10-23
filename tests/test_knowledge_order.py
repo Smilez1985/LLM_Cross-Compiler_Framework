@@ -370,6 +370,32 @@ class TestTargetKnowledge:
                 f"{TARGET_ORIGIN}demo-board", "demo-board", digest)
         assert (world.cm.knowledge_dir / TARGET_MARKERS / "demo-board.imported").is_file()
         assert world.cm.sync_knowledge_base() == 0, "imported once"
+        if os.name != "nt":   # the modes are kept: the provenance file holds no local digest, as before
+            assert "local_sha256" not in (dest / cp.PROVENANCE_NAME).read_text(encoding="utf-8")
+
+    def test_on_windows_the_snapshot_of_a_target_with_scripts_is_imported(self, world, monkeypatch):
+        """The module wizard writes a target's scripts with mode 755. Windows keeps no execute bit (its stat reports
+        a .sh file as 0o644), so the installed folder never gives the manifest's digest there: the import compares
+        with what this computer's file system reported right after the install, and the check of the installed packs
+        does the same. A file changed later is still refused."""
+        root = make_target(world.tmp / "src" / "demo-board-1.2.0")
+        (root / "modules" / "build.sh").chmod(0o755)
+        (root / "knowledge").mkdir()
+        (root / "knowledge" / "initial_knowledge.json").write_text(json.dumps(PAGES), encoding="utf-8")
+        world.add(pack_bytes(root, pack_id="demo-board", version="1.2.0"))
+        world.publish()
+        real = cp._pack_files
+
+        def windows_view(folder):   # as os.stat reports the files on Windows: no execute bit
+            return [f.model_copy(update={"mode": 0o644}) for f in real(folder)]
+        monkeypatch.setattr(cp, "_pack_files", windows_view)
+        dest = world.cm.finish_install(world.cm.prepare_install("target", "demo-board"))
+        assert world.cm.last_sync_problem == "" and len(world.rag.ingested) == 2
+        assert all(meta["origin_sha256"] == read_provenance(dest).content_sha256 for _, _, meta in world.rag.ingested)
+        assert [problems for folder, _, _, problems in world.cm.verify_installed() if folder == dest] == [[]]
+        (world.cm.knowledge_dir / TARGET_MARKERS / "demo-board.imported").unlink()
+        (dest / "knowledge" / "initial_knowledge.json").write_text(json.dumps(PAGES[:1]), encoding="utf-8")
+        assert world.cm.sync_knowledge_base() == 0 and "changed since it was installed" in world.cm.last_sync_problem
 
     def test_a_target_pack_without_a_snapshot_imports_nothing(self, world):
         world.add(world.target_pack())

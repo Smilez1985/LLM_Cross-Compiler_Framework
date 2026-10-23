@@ -2105,8 +2105,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   snapshots to delete only when the snapshot taken first did not fit. A sorted loose file gets a name that is free in
   its folder before you are asked (also when the file lay in a folder of that topic), never a Windows device name,
   and its sort never removes the excerpts of an installed pack of the same name or of a target pack. A knowledge pack
-  whose folder exists already is refused before the question, as other packs are. Crawled pages already replaced
-  their earlier excerpts and are stored right after their download (unchanged).
+  whose folder exists already is refused before the question, as other packs are. Windows keeps no execute bit, so
+  an installed pack with scripts made on Linux or macOS (every target the module wizard makes) never matched its
+  digest there: its knowledge snapshot would never be imported and **Check installed packs** called it changed. The
+  provenance now also holds the files' digest as the file system reported it right after the install (only where it
+  differs, and only when every file is still the checked one), and both checks accept it. Crawled pages already
+  replaced their earlier excerpts and are stored right after their download (unchanged).
 - **A model from the old Hugging Face download cache works in a build again** (A6, "stay usable"): the GUI's Hugging
   Face browser used to save into huggingface_hub's own cache inside the models folder, where a file is a link to a
   blob named by its checksum. A build of such a GGUF file mounted it under that checksum name, so the build no longer

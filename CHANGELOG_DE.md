@@ -2377,8 +2377,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   genommene Snapshot nicht passte. Eine einsortierte lose Datei bekommt einen Namen, der in ihrem Ordner frei ist,
   bevor du gefragt wirst (auch wenn die Datei in einem Ordner dieses Themas lag), nie einen Windows-Gerätenamen, und
   ihr Einsortieren entfernt nie die Auszüge eines installierten Pakets gleichen Namens oder eines Target-Pakets. Ein
-  Wissenspaket, dessen Ordner es schon gibt, wird vor der Frage abgelehnt, wie andere Pakete. Gecrawlte Seiten
-  ersetzten ihre früheren Auszüge schon und werden direkt nach dem Download gespeichert (unverändert).
+  Wissenspaket, dessen Ordner es schon gibt, wird vor der Frage abgelehnt, wie andere Pakete. Windows speichert kein
+  Ausführungsrecht, also passte ein installiertes Paket mit Skripten von Linux oder macOS (jedes Target, das der
+  Modul-Assistent macht) dort nie zu seinem Digest: Sein Wissens-Snapshot wäre nie importiert worden, und **Installierte
+  Pakete prüfen** nannte es verändert. Die Herkunftsdatei hält jetzt auch den Digest der Dateien, wie das Dateisystem
+  ihn direkt nach der Installation meldete (nur wo er abweicht, und nur wenn jede Datei noch die geprüfte ist), und
+  beide Prüfungen nehmen ihn an. Gecrawlte Seiten ersetzten ihre früheren Auszüge schon und werden direkt nach dem
+  Download gespeichert (unverändert).
 - **Ein Modell aus dem alten Download-Cache von Hugging Face funktioniert wieder im Build** (A6, „bleiben nutzbar“):
   Der Hugging-Face-Browser der GUI speicherte bisher in den eigenen Cache von huggingface_hub im Modellordner, wo eine
   Datei ein Link auf einen Blob ist, der nach seiner Prüfsumme heißt. Ein Build einer solchen GGUF-Datei band sie
