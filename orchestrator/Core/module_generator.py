@@ -952,7 +952,8 @@ echo "Generated $OUTPUT_FILE"
         self._make_executable(dst)
 
     def _copy_scripts(self, target_dir: Path):
-        """Copies static python helper scripts to the target."""
+        """Copies the static helper scripts to the target: the Python helpers and the shell scripts the target stage
+        puts into the package for the board (package_test_model.sh, package_deploy.sh), executable like the stages."""
         src_scripts = self.template_dir / "scripts"
         dst_scripts = target_dir / "scripts"
         
@@ -960,6 +961,8 @@ echo "Generated $OUTPUT_FILE"
             ensure_directory(dst_scripts)
             for item in src_scripts.glob("*.py"):
                 shutil.copy2(item, dst_scripts / item.name)
+            for item in src_scripts.glob("*.sh"):
+                self._write_script(dst_scripts / item.name, item.read_text(encoding="utf-8"))
 
     def _write_standard_modules(self, target_dir: Path):
         """A stage module the template folder did not have (an incomplete installation): a stage that stops the

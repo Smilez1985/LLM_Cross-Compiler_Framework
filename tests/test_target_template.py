@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from board_toolchain import install_toolchain
 from conftest import REPO_ROOT
 from orchestrator.Core.module_generator import ModuleGenerator, check_shell_syntax, validate_target_folder
 
@@ -43,8 +44,8 @@ def stub_llama(root: Path) -> Path:
         f"open({str(root / 'calls.log')!r}, 'a').write('convert ' + ' '.join(a[1:]) + '\\n')\n")
     quantize = llama / "build" / "bin" / "llama-quantize"
     quantize.write_text(f"#!{sys.executable}\n"
-                        "import sys\n"
-                        "open(sys.argv[-2], 'w').write('quantized ' + sys.argv[-1])\n"
+                        "import os, sys\n"
+                        "open(sys.argv[-2], 'w').write('quantized ' + sys.argv[-1] + '.' * int(os.environ.get('STUB_PAD', '0')))\n"
                         f"open({str(root / 'calls.log')!r}, 'a').write('quantize ' + ' '.join(sys.argv[1:]) + '\\n')\n")
     quantize.chmod(0o755)
     return llama
@@ -180,8 +181,13 @@ def test_a_generated_module_takes_the_options_of_the_1x_convert_and_target_modul
     model.mkdir()
     (model / "config.json").write_text("{}")
     work = tmp_path / "work"
-    env = {"PATH": f"{Path(sys.executable).parent}:/usr/bin:/bin", "HOME": str(tmp_path), "BUILD_CACHE_DIR": str(work),
-           "LLAMA_CPP_PATH": str(llama), "TARGET_FORMAT": "gguf", "JOB_TYPE": "build"}
+    # target_module.sh by hand also packages the model for the board (version 1.x): the module's aarch64 cross
+    # compilers (CC, CXX), cmake and make of the image are stubs (tests/board_toolchain.py), and the package's input
+    # check of 1.x wants a model of at least 1 MiB.
+    toolchain, buildtools = install_toolchain(tmp_path)
+    env = {"PATH": f"{toolchain}:{buildtools}:{Path(sys.executable).parent}:/usr/bin:/bin", "HOME": str(tmp_path),
+           "BUILD_CACHE_DIR": str(work), "LLAMA_CPP_PATH": str(llama), "TARGET_FORMAT": "gguf", "JOB_TYPE": "build",
+           "CC": "aarch64-linux-gnu-gcc", "CXX": "aarch64-linux-gnu-g++", "STUB_PAD": str(1 << 20)}
     modules = target / "modules"
     f16 = tmp_path / "granite.fp16.gguf"
 
@@ -196,8 +202,9 @@ def test_a_generated_module_takes_the_options_of_the_1x_convert_and_target_modul
     assert quantize.returncode == 0, quantize.stdout + quantize.stderr
     calls = (tmp_path / "calls.log").read_text().splitlines()
     assert [c.split()[0] for c in calls] == ["convert", "quantize"], "the GGUF input is not converted again"
-    assert (work / "output" / "granite-Q4_K_M.gguf").read_text() == "quantized Q4_K_M"
+    assert (work / "output" / "granite-Q4_K_M.gguf").read_text().rstrip(".") == "quantized Q4_K_M"
     assert f16.is_file(), "the input is the person's file"
+    assert (work / "output" / "packages" / "granite_q4_k_m_latest" / "MANIFEST.json").is_file()
 
 
 @needs_bash

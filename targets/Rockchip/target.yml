@@ -122,8 +122,9 @@ modules:
       runtime: "container"
 
     config:
-      description: "Request checks and the build plan; with a hardware profile also the CMake toolchain for the board"
-      dependencies: ["gcc-aarch64-linux-gnu (hardware profile only)"]
+      description: "Request checks and the build plan; with a hardware profile also the CMake toolchain for the board,
+        checked (compiler test, CMake reads the toolchain file, the plan is a valid shell script)"
+      dependencies: ["gcc-aarch64-linux-gnu, g++-aarch64-linux-gnu (hardware profile or package)", "cmake"]
       runtime: "container"
       inputs: ["the request (environment)", "target_hardware_config.txt (optional)"]
       outputs: ["build_config.sh", "cross_compile_toolchain.cmake (hardware profile only)"]
@@ -137,11 +138,13 @@ modules:
                 "imatrix.dat"]
 
     target:
-      description: "Quantization and the results (build_info.json); with a hardware profile the board package"
-      dependencies: ["llama-quantize"]
+      description: "Quantization and the results (build_info.json); with a hardware profile or on request
+        (--package, target_module.sh by hand) the package for the board: llama-cli, llama-server, model card,
+        test_model.sh, deploy.sh, MANIFEST.json and SHA256SUMS, checked before it is kept"
+      dependencies: ["llama-quantize", "llama-completion (functional test)", "cmake", "make", "python3"]
       runtime: "container"
       inputs: ["quantize_jobs.sh", "build_config.sh"]
-      outputs: ["<model>-<type>.gguf", "build_info.json", "packages/ (hardware profile only)"]
+      outputs: ["<model>-<type>.gguf", "build_info.json", "packages/ (hardware profile or --package)"]
 
 # Hardware optimization profiles: descriptive, nothing reads them. The board's runtime takes llama.cpp's options from
 # the build recipe (orchestrator/runtime/build/recipe.py); a build with a hardware profile (config_module.sh) takes the

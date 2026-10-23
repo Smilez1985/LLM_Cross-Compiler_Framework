@@ -493,8 +493,10 @@ NEW_FOR_THE_STAGE_RUNNER = {"MODEL_REVISION", "HARDWARE_CONFIG_FILE", "LLAMA_CPP
 # Read only by stage code started by hand with an option (source_module.sh --clone-llama-cpp), never in a build.
 ONLY_ON_REQUEST = {"LLAMA_CPP_COMMIT"}
 # What the runner hands its stages (build.sh): not read from the build container's environment. STAGE_LAST (the last
-# stage of this run) and CONVERT_OUTPUT (the --output option) are set by the runner itself, never from outside.
-RUNNER_API = {"STAGE_DIR", "STAGE_NAME", "STAGE_RUNNER", "MODULES_DIR", "STAGE_LAST", "CONVERT_OUTPUT"}
+# stage of this run), CONVERT_OUTPUT (the --output option) and PACKAGE_REQUESTED (the --package option) are set by
+# the runner itself, never from outside.
+RUNNER_API = {"STAGE_DIR", "STAGE_NAME", "STAGE_RUNNER", "MODULES_DIR", "STAGE_LAST", "CONVERT_OUTPUT",
+              "PACKAGE_REQUESTED"}
 BASH_VARIABLES = {"BASH_SOURCE", "SECONDS", "RANDOM", "LINENO", "FUNCNAME", "PIPESTATUS", "BASH_REMATCH", "PWD", "IFS"}
 BUILD_SCRIPTS = ("build.sh", "source_module.sh", "config_module.sh", "convert_module.sh", "rotate_module.sh",
                  "target_module.sh", "rkllm_module.sh", "rknn_module.sh")
@@ -752,6 +754,9 @@ def by_hand(image, module, *args, **values):
 
 
 FROM_OPTIONS = {"MODEL_SOURCE": None, "MODEL_NAME": None, "QUANTIZATION": None}  # the request comes from the options
+# target_module.sh started by hand (and the entrypoint modes target and pipeline) also makes the package for the board,
+# as in version 1.x; the package's input check of 1.x wants a model of at least 1 MiB, so the stub pads its model.
+PAD = {"STUB_PAD": 1 << 20}
 PROFILE = "# probe\nARCHITECTURE_FULL=aarch64\nCPU_MODEL_NAME=Cortex-A55\nSUPPORTS_NEON=ON\nCPU_CORES=4\n"
 
 
@@ -788,13 +793,15 @@ def test_target_module_by_hand_quantizes_a_gguf_input_and_keeps_it(image):
     f16.write_text("gguf f16")
 
     result = by_hand(image, "target", "--input", f16, "--quantization", "Q5_K_M", "--model-name", "granite",
-                     **FROM_OPTIONS)
+                     **FROM_OPTIONS, **PAD)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert stage_lines(result) == ran("source", "config", "convert", "target")
     assert image.calls() == [f"quantize <root>/granite.fp16.gguf {OUT}/granite-Q5_K_M.gguf Q5_K_M"]
     assert f16.read_text() == "gguf f16"
-    assert image.outputs()["granite-Q5_K_M.gguf"] == "quantized Q5_K_M of gguf f16"
+    assert (image.output / "granite-Q5_K_M.gguf").read_text().rstrip(".") == "quantized Q5_K_M of gguf f16"
+    # and packaged for the board, as target_module.sh of 1.x did (tests/test_target_stage.py has the details)
+    assert (image.output / "packages" / "granite_q5_k_m_latest" / "granite-Q5_K_M.gguf").is_file()
     assert image.build_info()["model"] == "granite" and image.build_info()["quantization"] == "Q5_K_M"
 
 
@@ -804,7 +811,7 @@ def test_a_gguf_input_without_type_or_name_follows_the_1x_target_module(image):
     f16 = image.root / "granite.fp16.gguf"
     f16.write_text("gguf f16")
 
-    result = by_hand(image, "target", "--input", f16, **FROM_OPTIONS)
+    result = by_hand(image, "target", "--input", f16, **FROM_OPTIONS, **PAD)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert image.calls() == [f"quantize <root>/granite.fp16.gguf {OUT}/granite-Q4_K_M.gguf Q4_K_M"]
@@ -1050,10 +1057,12 @@ def entrypoint(image, *args, **values):
 @needs_bash
 def test_the_pipeline_mode_runs_the_stages(image):
     result = entrypoint(image, "pipeline", image.model, "granite", "Q5_K_M", MODEL_SOURCE=None, MODEL_NAME=None,
-                        QUANTIZATION=None)
+                        QUANTIZATION=None, **PAD)
     assert result.returncode == 0, result.stdout + result.stderr
     assert stage_lines(result) == ran("source", "config", "convert", "target")
-    assert sorted(image.outputs()) == ["build_info.json", "granite-Q5_K_M.gguf"]
+    assert sorted(p.name for p in image.output.iterdir() if p.is_file()) == ["build_info.json", "granite-Q5_K_M.gguf"]
+    # Stage 4/4 of the 1.x pipeline, "Quantization & Packaging": the package for the board, here without a profile
+    assert (image.output / "packages" / "granite_q5_k_m_latest" / "MANIFEST.json").is_file()
     assert ">>> Pipeline COMPLETED successfully" in result.stderr
 
 
@@ -1070,7 +1079,7 @@ def test_a_stage_mode_runs_the_build_up_to_that_stage(image):
     result = entrypoint(image, "convert")
     assert result.returncode == 0, result.stdout + result.stderr
     assert stage_lines(result) == ran("source", "config", "convert")
-    target = entrypoint(image, "target", "--quantization", "Q4_K_M")
+    target = entrypoint(image, "target", "--quantization", "Q4_K_M", **PAD)
     assert stage_lines(target) == resumed("source", "config", "convert") + ran("target", start=4)
     assert entrypoint(image, "package").returncode != 0
 
@@ -1086,7 +1095,7 @@ def test_the_stage_modes_take_the_options_of_the_1x_modules(image):
     assert f16.read_text() == "gguf f16"
 
     target = entrypoint(image, "target", "--input", f16, "--quantization", "Q4_K_M", "--model-name", "granite",
-                        **FROM_OPTIONS)
+                        **FROM_OPTIONS, **PAD)
     assert target.returncode == 0, target.stdout + target.stderr
     assert image.calls()[-1] == f"quantize <root>/granite.fp16.gguf {OUT}/granite-Q4_K_M.gguf Q4_K_M"
     assert f16.is_file()
@@ -1149,8 +1158,8 @@ import os, sys
 with open(os.environ["STUB_LOG"], 'a') as f:
     f.write('make ' + ' '.join(sys.argv[1:]) + '\\n')
 os.makedirs('bin', exist_ok=True)
-for name in sys.argv[2:]:
-    open(os.path.join('bin', name), 'w').write(name)
+for name in sys.argv[2:]:  # an aarch64 ELF header (machine 183): the target stage checks the programs' processor
+    open(os.path.join('bin', name), 'wb').write(b'\\x7fELF' + bytes([2, 1, 1]) + bytes(9) + bytes([2, 0, 183, 0]))
 """
 
 
@@ -1177,7 +1186,7 @@ def test_a_hardware_profile_also_packages_the_model_for_the_board(image):
     packages = image.output / "packages"
     (package,) = [p for p in packages.iterdir() if not p.is_symlink()]
     assert sorted(p.name for p in package.iterdir()) == [
-        "MANIFEST.json", "README.md", "cmake_toolchain.cmake", "deploy.sh", "llama-cli", "llama-server",
+        "MANIFEST.json", "README.md", "SHA256SUMS", "cmake_toolchain.cmake", "deploy.sh", "llama-cli", "llama-server",
         "model-Q4_K_M.gguf", "target_hardware_config.txt", "test_model.sh"]
     assert "./llama-cli -m model-Q4_K_M.gguf" in (package / "README.md").read_text()
     assert (packages / "model_q4_k_m_latest").is_symlink()
