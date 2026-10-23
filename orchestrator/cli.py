@@ -759,6 +759,7 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
                 use_imatrix=imatrix, dataset_path=str(Path(dataset).resolve()) if dataset else None, use_gpu=gpu),
                 local_paths=True)
 
+        model = _listed_model(ctx, model)   # a label of the models already here (models:...) names its file
         try:
             try:
                 request = checked(model)
@@ -903,6 +904,17 @@ def _earlier_builds(service, request, optimization: str) -> list:
     except Exception as e:  # noqa: BLE001 - the look-up never stops a build; the person builds as asked
         console.print(f"[yellow]Earlier builds not checked: {escape(str(e))}[/yellow]")
         return []
+
+
+def _listed_model(ctx: FrameworkContext, model: str) -> str:
+    """`--model` with a label of the models already on this computer (a local-file reference such as
+    models:hf/<owner>--<name>/<commit>/<file>, as the offline list shows it): the file or folder it names. Anything else
+    (a path, a Hugging Face id) stays as given."""
+    from orchestrator.tools.local_files import is_path, looks_like_reference
+    if not looks_like_reference(model) or is_path(model) or Path(model).expanduser().exists():
+        return model
+    from orchestrator.Core.local_models import choice_for
+    return choice_for(ctx.framework_manager, model) or model
 
 
 def _offline_model_choice(ctx: FrameworkContext, service, error) -> Optional[str]:
