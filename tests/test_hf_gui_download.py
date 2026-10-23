@@ -171,6 +171,49 @@ class TestTheOldCacheIsUsableForABuild:
             str((folder / "blobs" / git_blob_id(CONFIG)).resolve()): {"bind": f"{inner}/config.json", "mode": "ro"},
             str((folder / "blobs" / WEIGHTS_SHA).resolve()): {"bind": f"{inner}/model.safetensors", "mode": "ro"}}
 
+    # Regression (review of chain hf): only a link to a cache blob keeps its own name, and only links to cache blobs
+    # are followed for a person's folder. Every other link is mounted as before: a link's own name changed the
+    # model name of the build (config_module.sh takes MODEL_NAME from the file name), and a person's folder with a
+    # link out of it bound the file it leads to (anything on this computer) into the build container, or failed the
+    # build on a broken link, a folder link or a second name for one file, where the folder was mounted whole before.
+
+    def test_an_own_link_is_bound_under_the_name_it_leads_to_as_before(self, area, engine):
+        real = area.models / "real" / "llama-q4.gguf"
+        real.parent.mkdir()
+        real.write_bytes(WEIGHTS)
+        (area.models / "current.gguf").symlink_to(real)
+        inner, volumes = mount_plan(area.files.resolve("models:current.gguf"), "/build-cache/input-model")
+        assert inner == "/build-cache/input-model/llama-q4.gguf" and list(volumes) == [str(real.resolve())]
+        inner, volumes = self.stage(engine, area.models / "current.gguf")
+        assert inner == "/build-cache/input-model/llama-q4.gguf" and list(volumes) == [str(real.resolve())]
+
+    def test_a_persons_folder_with_a_link_out_of_it_is_bound_whole_as_before(self, area, engine):
+        secret = area.tmp / "elsewhere" / "notes.txt"
+        secret.parent.mkdir()
+        secret.write_text("private")
+        model = area.models / "own-model"
+        model.mkdir()
+        (model / "config.json").write_bytes(CONFIG)
+        (model / "notes.txt").symlink_to(secret)
+        assert self.stage(engine, model) == ("/build-cache/input-model",
+                                             {str(model.resolve()): {"bind": "/build-cache/input-model",
+                                                                     "mode": "ro"}})
+
+    @pytest.mark.parametrize("kind", ["broken", "folder", "second_name"])
+    def test_a_persons_folder_the_binder_refuses_is_bound_whole_as_before(self, area, engine, kind):
+        model = area.models / "own-model"
+        (model / "tokenizer").mkdir(parents=True)
+        (model / "config.json").write_bytes(CONFIG)
+        if kind == "broken":
+            (model / "gone.bin").symlink_to(model / "missing.bin")
+        elif kind == "folder":
+            (model / "tok").symlink_to(model / "tokenizer", target_is_directory=True)
+        else:
+            (model / "config-copy.json").symlink_to(model / "config.json")
+        assert self.stage(engine, model) == ("/build-cache/input-model",
+                                             {str(model.resolve()): {"bind": "/build-cache/input-model",
+                                                                     "mode": "ro"}})
+
     def test_a_folder_without_links_is_bound_whole_as_before(self, area, engine):
         model = area.models / "own-model"
         model.mkdir()

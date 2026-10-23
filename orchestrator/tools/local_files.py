@@ -35,6 +35,9 @@ BUILTIN_LABELS = ("models", "datasets")
 FOLDER_KINDS = ("model", "dataset", "any")
 MAX_FOLDER_ENTRIES = 20000  # files and folders checked inside a folder that is mounted
 MAX_LINKED_BINDS = 512      # files bound one by one from a folder of links (Hugging Face cache snapshots)
+# How huggingface_hub names a file in its cache: blobs/<sha256> (stored with LFS), blobs/<sha1 blob id> (a small
+# file), and its shared store blobs/<2 hex>/<xet hash>.
+CACHE_BLOB_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 MAX_INDEX_ENTRIES = 5000
 FOLDER_WARNING = ("Files in this folder can be mounted into builds that run community or AI-written code, and can "
                   "reach AI clients through build logs.")
@@ -372,12 +375,12 @@ def folder_entries(folder: Path) -> Tuple[List[Path], bool]:
 
 def mount_plan(pin: LocalFilePin, inner: str) -> Tuple[str, Dict[str, Dict[str, str]]]:
     """Docker volumes that make exactly the pinned file or folder visible at `inner` (read-only), never its parent.
-    A folder of links (a Hugging Face cache snapshot) is bound file by file, each link resolved and confined. A linked
-    file keeps the name of its link (a cache blob is named by its checksum; the build tells a GGUF file by its
-    suffix)."""
+    A folder of links (a Hugging Face cache snapshot) is bound file by file, each link resolved and confined. A link to
+    a cache blob keeps the name of its link (the blob is named by its checksum, and the build tells a GGUF file by its
+    suffix); any other file is bound under the name of the file it is, as before."""
     path = pin.verify()
     if not pin.is_dir:
-        linked = os.path.islink(Path(pin.root) / pin.relative)
+        linked = os.path.islink(Path(pin.root) / pin.relative) and cache_blob(path)
         target = f"{inner}/{pin.relative.rsplit('/', 1)[-1] if linked else path.name}"
         return target, {str(path): {"bind": target, "mode": "ro"}}
     entries, has_links = folder_entries(path)
@@ -387,6 +390,13 @@ def mount_plan(pin: LocalFilePin, inner: str) -> Tuple[str, Dict[str, Dict[str, 
     denied = pin._denied()
     return inner, file_binds(path, entries, inner, pin.ref,
                              confine=lambda target, rel: _confine(target, root, denied, f"{pin.ref}/{rel}"))
+
+
+def cache_blob(path: Path) -> bool:
+    """`path` is named like a blob of huggingface_hub's cache (CACHE_BLOB_RE): by its checksum, not by a file name of
+    its own. Only a link to such a file keeps the link's name in a build, and only such links are followed for a
+    person's own folder (linked_folder_binds)."""
+    return bool(CACHE_BLOB_RE.fullmatch(Path(path).name))
 
 
 def file_binds(folder: Path, entries: Iterable[Path], inner: str, name: str,
@@ -422,9 +432,12 @@ def file_binds(folder: Path, entries: Iterable[Path], inner: str, name: str,
 
 
 def linked_folder_binds(folder: Path, inner: str) -> Optional[Dict[str, Dict[str, str]]]:
-    """A person's own model folder that holds links (a Hugging Face cache snapshot, whose links lead to the cache's
-    blobs): its files bound one by one at `inner` (file_binds). None when it holds no link, or more entries than a
-    folder is listed with (MAX_FOLDER_ENTRIES): then the folder itself is bound, as before."""
+    """A person's own model folder whose links lead to blobs of huggingface_hub's cache (a cache snapshot, or a folder
+    huggingface_hub filled with links into its cache): its files bound one by one at `inner` (file_binds). None, and
+    the folder itself is bound as before, when it holds no link, a link to anything but a cache blob (never followed
+    into the container), a link the binder refuses (broken, to a folder, a second name for one file, more than
+    MAX_LINKED_BINDS) or more entries than a folder is listed with (MAX_FOLDER_ENTRIES)."""
+    folder = Path(folder)
     entries: List[Path] = []
     linked = False
     for dirpath, dirnames, filenames in os.walk(folder, followlinks=False):
@@ -434,7 +447,17 @@ def linked_folder_binds(folder: Path, inner: str) -> Optional[Dict[str, Dict[str
             linked = linked or path.is_symlink()
             if len(entries) > MAX_FOLDER_ENTRIES:
                 return None
-    return file_binds(Path(folder), entries, inner, Path(folder).name) if linked else None
+    if not linked:
+        return None
+
+    def only_cache_blobs(target: Path, rel: str) -> None:
+        if (folder / rel).is_symlink() and not cache_blob(target):
+            raise LocalFileError(f"{folder.name} contains a link that does not lead to a cache blob ({rel}).")
+
+    try:
+        return file_binds(folder, entries, inner, folder.name, confine=only_cache_blobs)
+    except LocalFileError:
+        return None
 
 
 def dataset_folder(pin: LocalFilePin) -> Path:
