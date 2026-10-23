@@ -304,7 +304,10 @@ class TestAIConfigurationDialog:
         runs on the GUI thread; the dialog checked only names first, so the save was refused as "not checked yet"
         even with the person's own Headscale."""
         from orchestrator.utils import locality
+        # round 26 h: the address must also be a device of the tailnet (`tailscale status --json`, a third command)
         answers = {"prefs": {"ControlURL": "https://headscale.lan:8080"},
+                   "--json": {"BackendState": "Running", "Self": {"TailscaleIPs": ["100.64.0.1"]},
+                              "Peer": {"nodekey:gpu": {"TailscaleIPs": ["100.64.0.5"]}}},
                    "derp-map": {"Regions": {"900": {"Nodes": [{"HostName": "derp.lan", "IPv4": "192.168.1.3",
                                                                 "IPv6": "none"}]}}}}
         on_gui_thread = []
@@ -323,7 +326,7 @@ class TestAIConfigurationDialog:
         dlg.txt_base_url.setText("http://100.64.0.5:8000/v1")
         dlg._save_config()
         assert wait_for(qapp, lambda: dlg.result() == dialogs.QDialog.Accepted), message_boxes
-        assert on_gui_thread == [False, False], "the tailscale command ran in a worker thread"
+        assert on_gui_thread == [False, False, False], "the tailscale command ran in a worker thread"
 
     def test_offline_mode_accepts_only_local_providers(self, qapp, framework, message_boxes):
         dlg = AIConfigurationDialog(framework)

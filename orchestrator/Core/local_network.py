@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional
 
-from orchestrator.utils.locality import (VPNS, Locality, VpnCheck, check_url, normal_host, parse_address,
+from orchestrator.utils.locality import (VPNS, Locality, VpnCheck, check_reach, normal_host, parse_address,
                                          parse_network, tailscale_vpn)
 from orchestrator.utils.localization import ui_text
 
@@ -153,9 +153,9 @@ def remove_opt_out(config: Any, kind: str, value: str, lang: Optional[str] = Non
 
 
 def check(config: Any, target: str) -> Locality:
-    """The rule for an address, host or URL the person typed, with their opt-outs (a lookup: never on the GUI
-    thread)."""
-    return check_url(target, config)
+    """The rule for an address, host or URL the person typed, with their opt-outs: what offline mode may reach
+    (locality.check_reach; a lookup: never on the GUI thread)."""
+    return check_reach(target, config)
 
 
 def vpn_status() -> VpnCheck:

@@ -12,12 +12,15 @@ it asks, and follows redirects by hand.
 
 LocalOnlyAdapter is the same pinned connection for offline mode (chain offline-lan, DECISIONS round 24 L-NET): it
 connects only to hosts the network-locality rule counts as local (utils/locality.connect_addresses, with the person's
-opt-outs), at the addresses that rule checked for the run (tried in turn), so a DNS answer that changes after the
-check cannot reach a public host (LocalityRefused, a PermissionError). The runtime's model downloads mount it in
-offline mode.
+opt-outs), at the local addresses that rule checked (tried in turn; a name with local and public addresses only at its
+local ones, round 26 Q4), so a DNS answer that changes after the check cannot reach a public host (LocalityRefused, a
+PermissionError); when every checked address failed, the lookup is dropped (locality.forget) and the next connection
+asks the resolver again. The runtime's model downloads mount it in offline mode, and with `crawl` a crawl the person
+starts in offline mode (locality.crawl_addresses: also never a cloud metadata service or a link-local IPv4 address,
+round 26 Q5).
 """
 
-from typing import Any, Callable, Sequence, Union
+from typing import Any, Callable, Optional, Sequence, Union
 
 from requests.adapters import HTTPAdapter
 from urllib3.connection import HTTPConnection, HTTPSConnection
@@ -41,6 +44,7 @@ class _PinnedConnectionMixin:
     not be reached."""
 
     _vet: Vet = staticmethod(_public_address)
+    _forget: Optional[Callable[[str], None]] = None   # called with the host when every checked address failed
 
     def _new_conn(self):
         vetted = self._vet(self._dns_host, self.port)
@@ -57,6 +61,8 @@ class _PinnedConnectionMixin:
                     failed = e
         finally:
             self._dns_host = original
+        if self._forget is not None:
+            self._forget(original)   # the next connection asks the resolver again (another network, a new answer)
         raise failed
 
 
@@ -85,13 +91,18 @@ class PublicOnlyAdapter(HTTPAdapter):
         self.poolmanager.pool_classes_by_scheme = {"http": _PinnedHTTPConnectionPool, "https": _PinnedHTTPSConnectionPool}
 
 
-def _pools(vet: Vet):
-    """Connection pools whose connections go to the address `vet` hands out."""
+def _pools(vet: Vet, forget: Optional[Callable[[str], None]] = None):
+    """Connection pools whose connections go to the address `vet` hands out (`forget`: called with the host when every
+    one of them failed)."""
+    hook = staticmethod(forget) if forget is not None else None
+
     class Connection(_PinnedConnectionMixin, HTTPConnection):
         _vet = staticmethod(vet)
+        _forget = hook
 
     class SecureConnection(_PinnedConnectionMixin, HTTPSConnection):
         _vet = staticmethod(vet)
+        _forget = hook
 
     class Pool(HTTPConnectionPool):
         ConnectionCls = Connection
@@ -104,26 +115,31 @@ def _pools(vet: Vet):
 
 class LocalOnlyAdapter(HTTPAdapter):
     """Offline mode: direct connections only to hosts on this computer or in the person's own network (the
-    network-locality rule with the opt-outs in `settings`), each at its checked address. Mount it on a session with
-    trust_env off, so no proxy from the environment receives the request."""
+    network-locality rule with the opt-outs in `settings`), each at its checked local addresses. `crawl`: a crawl the
+    person starts (locality.crawl_addresses, never a cloud metadata service or a link-local IPv4 address). Mount it on
+    a session with trust_env off, so no proxy from the environment receives the request."""
 
-    def __init__(self, settings: Any = None, what: str = "the download", **kwargs):
-        self._settings, self._what = settings, what
+    def __init__(self, settings: Any = None, what: str = "the download", *, crawl: bool = False, **kwargs):
+        self._settings, self._what, self._crawl = settings, what, crawl
         super().__init__(**kwargs)
 
     def init_poolmanager(self, *args, **kwargs):
-        from orchestrator.utils.locality import connect_addresses
+        from orchestrator.utils.locality import connect_addresses, crawl_addresses, forget
         super().init_poolmanager(*args, **kwargs)
         settings, what = self._settings, self._what
-        self.poolmanager.pool_classes_by_scheme = _pools(lambda host, port: connect_addresses(host, settings, what))
+        if self._crawl:
+            vet = lambda host, port: crawl_addresses(host, settings)  # noqa: E731
+        else:
+            vet = lambda host, port: connect_addresses(host, settings, what)  # noqa: E731
+        self.poolmanager.pool_classes_by_scheme = _pools(vet, forget)
 
 
-def local_only_session(settings: Any = None, what: str = "the download"):
+def local_only_session(settings: Any = None, what: str = "the download", *, crawl: bool = False):
     """A requests session for offline mode: LocalOnlyAdapter for http and https, no proxy from the environment."""
     import requests
     session = requests.Session()
     session.trust_env = False
-    adapter = LocalOnlyAdapter(settings, what)
+    adapter = LocalOnlyAdapter(settings, what, crawl=crawl)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
     return session

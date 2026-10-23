@@ -1,0 +1,404 @@
+"""Offline mode follow-ups (DECISIONS round 26 Q3, Q4, Q5; round 24 L-NET "every reach-out on the rule", items d-i).
+
+- Q3: the person's opt-outs count only for offline mode's reach (locality.check_reach); the privacy filter and the
+  provider's local/cloud label ask where the server stands (locality.check_location) and never count them.
+- Q4: a name with local and public addresses counts as local, and every connection (the pinned provider client, the
+  local-only requests adapter, git's curloptResolve pin) goes only to its checked local addresses, never a public one.
+- (h) with the own Headscale an address of the VPN counts only for a device of the tailnet; a private address inside
+  a peer's subnet route is judged like a VPN address.
+- (i) a lookup lives LOOKUP_TTL seconds and is dropped after a failed connection.
+- (g) an international mirror host is refused in offline mode until it is written in its xn-- form.
+- (f) the pin-bump check (upstream_tag_commit) reads offline mode and reaches a mirror like fetch_source does.
+
+Every public stand-in is a documentation address (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24, 2001:db8::/32) and
+every name an example name.
+"""
+
+import inspect
+import json
+import socket
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
+
+import pytest
+
+from orchestrator.llm.catalog import is_local_url, load_catalog
+from orchestrator.utils import locality
+from orchestrator.utils.locality import (
+    LocalityRefused,
+    VpnCheck,
+    check_host,
+    check_location,
+    check_reach,
+    connect_addresses,
+)
+
+
+class Settings:
+    def __init__(self, **values):
+        self.values = {"ai_security_level": "STRICT", **values}
+        self.config_dir = None
+
+    def get(self, key, default=None):
+        return self.values.get(key, default)
+
+
+@pytest.fixture
+def names(monkeypatch):
+    """The resolver's answers in these tests (anything else does not resolve)."""
+    table = {}
+
+    def lookup(host):
+        if host not in table:
+            raise OSError(f"{host}: unknown")
+        return table[host]
+    monkeypatch.setattr(locality, "_system_lookup", lookup)
+    return table
+
+
+@pytest.fixture
+def server():
+    seen = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append(self.headers.get("Host"))
+            body = b'{"ok": true}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    yield httpd.server_address[1], seen
+    httpd.shutdown()
+    httpd.server_close()
+
+
+def closed_port() -> int:
+    """A port on 127.0.0.1 nobody listens on (a connection to it is refused)."""
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    return port
+
+
+def spy_backend(http):
+    """The addresses the pinned client's own network backend is asked to connect to (after the locality check)."""
+    backend = http._transport._pool._network_backend
+    inner, asked = backend._inner, []
+
+    class Spy:
+        def connect_tcp(self, host, port, **kwargs):
+            asked.append(host)
+            return inner.connect_tcp(host, port, **kwargs)
+
+        def sleep(self, seconds):
+            inner.sleep(seconds)
+    backend._inner = Spy()
+    return asked
+
+
+def client(tmp_path, **settings):
+    from orchestrator.llm import LLMClient
+    return LLMClient(Settings(**settings), None, state_dir=tmp_path / "state")
+
+
+NOT_OWN = lambda: VpnCheck(False, "tailscale_control", "controlplane.tailscale.com")  # noqa: E731
+
+
+# --- Q3: the opt-outs count for offline mode's reach only ---------------------------------------------------------
+
+def test_one_api_for_two_questions(names):
+    """check_reach (may offline mode reach it: the opt-outs count) and check_location (where does it stand: they do
+    not); the catalog's label asks the second, offline_refusal the first."""
+    names["myhome.example.org"] = ["198.51.100.7"]
+    opted = Settings(offline_mode=True, offline_local_hosts=["myhome.example.org"])
+    url = "https://myhome.example.org/v1"
+    assert check_reach(url, opted).local and check_reach(url, opted).reason == "opt_out_host"
+    assert not check_location(url).local and check_location(url).reason == "public"
+    custom = load_catalog().get("custom")
+    assert custom.offline_refusal(url, opted) is None, "offline mode may reach the opted-in host"
+    assert custom.is_local(url) is False and is_local_url(url) is False, "but it keeps its label"
+    # the label has no opt-out argument any more: nobody can pass the person's settings to it by mistake
+    assert list(inspect.signature(custom.is_local).parameters) == ["base_url"]
+    assert list(inspect.signature(is_local_url).parameters) == ["url"]
+
+
+def test_an_opted_in_public_host_keeps_the_privacy_filter_online_and_offline(tmp_path, names):
+    names["myhome.example.org"] = ["198.51.100.7"]
+    url = "https://myhome.example.org/v1"
+    for offline in (True, False):
+        llm = client(tmp_path, ai_provider="custom", ai_model="m", ai_base_url=url, offline_mode=offline,
+                     offline_local_hosts=["myhome.example.org"], offline_local_ranges=["198.51.100.0/24"])
+        target = llm.resolve()
+        assert target.local is False, f"offline={offline}: the privacy filter stays on"
+        assert llm.describe()["privacy"] == "STRICT"
+
+
+def test_the_opt_out_explanations_say_the_privacy_filter_stays_on():
+    from orchestrator.Core.local_network import explain
+    for kind, value in (("host", "myhome.example.org"), ("range", "198.51.100.0/24"), ("vpn", "tailscale")):
+        assert "privacy filter stays on" in explain(kind, value, "en")
+        assert "Datenschutzfilter bleibt" in explain(kind, value, "de")
+    from orchestrator.utils.localization import ui_text
+    assert "privacy filter stays on" in ui_text("net.intro", "en")
+
+
+# --- Q4: a name with local and public addresses ------------------------------------------------------------------
+
+def test_a_name_with_local_and_public_addresses_is_local_by_its_local_ones(names):
+    names["nas.lan"] = ["2001:db8::20", "192.168.1.20", "203.0.113.9", "fd00::20"]
+    verdict = check_host("nas.lan")
+    assert verdict.local and verdict.reason == "own_network"
+    assert verdict.local_addresses == ("192.168.1.20", "fd00::20"), "the resolver's order, the local ones only"
+    assert verdict.outside == ("2001:db8::20", "203.0.113.9") and verdict.address == "192.168.1.20"
+    assert "never to 2001:db8::20, 203.0.113.9" in verdict.why()
+    assert "nie mit 2001:db8::20, 203.0.113.9" in verdict.why("de")
+    assert connect_addresses("nas.lan") == ("192.168.1.20", "fd00::20"), "a public address is never used"
+    names["cloud.example.com"] = ["203.0.113.9", "2001:db8::9"]
+    locality.clear_cache()
+    assert check_host("cloud.example.com").reason == "public", "only public addresses: not local"
+    with pytest.raises(LocalityRefused):
+        connect_addresses("cloud.example.com")
+
+
+def test_a_vpn_address_in_a_mixed_answer_follows_the_vpn_rule(names):
+    own = lambda: VpnCheck(True, "own_headscale", "headscale.lan", members=frozenset({"100.64.0.9"}))  # noqa: E731
+    answer = ["100.64.0.9", "192.168.1.20", "203.0.113.9"]
+    verdict = check_host("gpu.lan", resolver=lambda name: answer, vpn=NOT_OWN)
+    assert verdict.local and verdict.local_addresses == ("192.168.1.20",), "no proof: the VPN address is not used"
+    assert verdict.outside == ("203.0.113.9", "100.64.0.9")
+    verdict = check_host("gpu.lan", resolver=lambda name: answer, vpn=own)
+    assert verdict.local_addresses == ("100.64.0.9", "192.168.1.20") and verdict.reason == "own_vpn"
+    only_vpn_and_public = check_host("x.lan", resolver=lambda name: ["100.64.0.9", "203.0.113.9"], vpn=NOT_OWN)
+    assert not only_vpn_and_public.local and only_vpn_and_public.reason == "public"
+
+
+def test_the_pinned_provider_client_connects_only_to_the_local_address(names, server):
+    from orchestrator.llm.client import offline_http_client
+    port, seen = server
+    names["box.lan"] = ["203.0.113.66", "127.0.0.1"]     # public first: it must never be tried
+    http = offline_http_client(Settings(offline_mode=True))
+    asked = spy_backend(http)
+    assert http.get(f"http://box.lan:{port}/v1/models", timeout=10).status_code == 200
+    assert asked == ["127.0.0.1"] and seen == [f"box.lan:{port}"]
+
+
+def test_the_local_only_session_connects_only_to_the_local_address(names, server, monkeypatch):
+    from urllib3.connection import HTTPConnection
+
+    from orchestrator.security.http import local_only_session
+    port, seen = server
+    names["models.lan"] = ["203.0.113.66", "127.0.0.1"]
+    asked = []
+    real = HTTPConnection._new_conn
+
+    def spy(conn):
+        asked.append(conn._dns_host)
+        return real(conn)
+    monkeypatch.setattr(HTTPConnection, "_new_conn", spy)
+    session = local_only_session(Settings(offline_mode=True))
+    assert session.get(f"http://models.lan:{port}/model.gguf", timeout=10).status_code == 200
+    assert asked == ["127.0.0.1"] and seen == [f"models.lan:{port}"]
+
+
+def test_the_git_pin_names_only_the_local_addresses(names):
+    from orchestrator.runtime.build.source import offline_reach
+    names["mirror.lan"] = ["2001:db8::9", "192.168.1.5", "203.0.113.5", "fd00::5"]
+    assert offline_reach("https://mirror.lan/llama.cpp.git", Settings(offline_mode=True)) == \
+        "mirror.lan:443:192.168.1.5,[fd00::5]"
+
+
+def test_online_a_server_labelled_local_by_its_address_is_reached_only_there(tmp_path, names, server):
+    """A custom server whose name has local and public addresses is labelled local (no privacy filter), so online too
+    its connection goes only to the checked local addresses, never the public one; Ollama (labelled local by its
+    preset) and a cloud provider keep the SDK's own client online."""
+    port, seen = server
+    names["box.lan"] = ["203.0.113.66", "127.0.0.1"]
+    llm = client(tmp_path, ai_provider="custom", ai_model="m", ai_base_url=f"http://box.lan:{port}/v1")
+    target = llm.resolve()
+    assert target.local is True
+    http = llm._http_client_for(target)
+    assert http is not None and type(http._transport._pool._network_backend).__name__ == "PinnedBackend"
+    asked = spy_backend(http)
+    assert http.get(f"http://box.lan:{port}/v1/models", timeout=10).status_code == 200 and asked == ["127.0.0.1"]
+    names["gpu.lan"] = ["192.168.1.40"]
+    ollama = client(tmp_path, ai_provider="ollama", ai_base_url="http://gpu.lan:11434/v1")
+    assert ollama._http_client_for(ollama.resolve()) is None, "Ollama online: the SDK default, as before"
+
+
+def test_online_a_name_that_turned_public_is_refused_without_naming_an_opt_out(names, server):
+    from orchestrator.llm.client import offline_http_client
+    port, _seen = server
+    names["box.lan"] = ["203.0.113.66"]
+    http = offline_http_client(None, offline=False)
+    with pytest.raises(LocalityRefused) as info:
+        http.get(f"http://box.lan:{port}/v1/models", timeout=2)
+    text = str(info.value)
+    assert "no longer counts as local" in text and "privacy filter" in text and "Offline mode is on" not in text
+    assert not info.value.steps and info.value.offline is False
+
+
+# --- (h) the tailnet's devices and subnet routes -----------------------------------------------------------------
+
+PREFS = {"ControlURL": "https://headscale.lan:8080"}
+DERP = {"Regions": {"900": {"Nodes": [{"HostName": "derp.lan", "IPv4": "192.168.1.3", "IPv6": "none"}]}}}
+STATUS = {"BackendState": "Running", "TailscaleIPs": ["100.64.0.1", "fd7a:115c:a1e0::1"],
+          "Self": {"TailscaleIPs": ["100.64.0.1", "fd7a:115c:a1e0::1"]},
+          "Peer": {"nodekey:a": {"TailscaleIPs": ["100.64.0.2"], "AllowedIPs": ["100.64.0.2/32", "10.20.0.0/16"],
+                                 "PrimaryRoutes": ["10.20.0.0/16"]},
+                   "nodekey:b": {"TailscaleIPs": ["100.64.0.3"],
+                                 "AllowedIPs": ["100.64.0.3/32", "0.0.0.0/0", "::/0"]}}}
+
+
+def tailscale(prefs=PREFS, status=STATUS, derp=DERP, calls=None):
+    def run(argv):
+        if calls is not None:
+            calls.append(list(argv[1:]))
+        key = argv[2] if argv[1] == "debug" else "status"
+        return json.dumps({"prefs": prefs, "derp-map": derp, "status": status}[key])
+    return run
+
+
+def which(name):
+    return "/usr/bin/tailscale" if name == "tailscale" else None
+
+
+NAMES = {"headscale.lan": ["192.168.1.2"]}
+
+
+def vpn_check(**kw):
+    return locality.tailscale_vpn(tailscale(**kw), lambda host: NAMES[host], which)
+
+
+def test_the_tailnet_is_read_with_the_field_names_of_ipnstate_status():
+    calls = []
+    check = vpn_check(calls=calls)
+    assert check.local and check.reason == "own_headscale"
+    assert calls == [["debug", "prefs"], ["status", "--json"], ["debug", "derp-map"]]
+    assert check.members == {"100.64.0.1", "fd7a:115c:a1e0::1", "100.64.0.2", "100.64.0.3"}
+    # a peer's own address and an exit node's default routes are no subnet routes
+    assert [str(r) for r in check.routes] == ["10.20.0.0/16"]
+
+
+def test_with_the_own_headscale_only_a_device_of_the_tailnet_counts_as_local():
+    own = vpn_check()
+    member = check_host("100.64.0.2", vpn=lambda: own)
+    assert member.local and member.reason == "own_vpn"
+    stranger = check_host("100.64.9.9", vpn=lambda: own)   # e.g. a carrier-grade NAT address of the provider
+    assert not stranger.local and stranger.reason == "vpn"
+    assert "belongs to no device in your tailnet" in stranger.why()
+    assert "keinem Gerät deines Tailnets" in stranger.why("de")
+    assert stranger.steps == ("settings.local_network",)
+
+
+def test_a_private_address_behind_a_peers_subnet_route_is_judged_like_a_vpn_address():
+    own = vpn_check()
+    assert check_host("10.20.3.4", vpn=lambda: own).reason == "own_vpn", "own Headscale, own relays: local"
+    cloud = vpn_check(prefs={"ControlURL": ""})                # Tailscale's own control server
+    assert cloud.reason == "tailscale_control" and [str(r) for r in cloud.routes] == ["10.20.0.0/16"]
+    routed = check_host("10.20.3.4", vpn=lambda: cloud)
+    assert not routed.local and routed.reason == "vpn" and "Tailscale's own servers" in routed.why()
+    assert check_host("192.168.1.20", vpn=lambda: cloud).reason == "own_network", "outside the route: as before"
+    assert check_host("10.20.3.4", {"offline_local_vpns": ["tailscale"]}, vpn=lambda: cloud).reason == "opt_out_vpn"
+    assert check_host("10.20.3.4", {"offline_local_ranges": ["10.20.0.0/16"]},
+                      vpn=lambda: cloud).reason == "opt_out_range"
+
+
+def test_a_vpn_that_is_not_connected_or_cannot_be_read_is_not_local():
+    assert vpn_check(status={"BackendState": "Stopped", "Peer": {}}).reason == "not_running"
+    assert vpn_check(status=[]).reason == "unreadable"
+    assert vpn_check(status={"BackendState": "Running", "Peer": "x"}).reason == "unreadable"
+
+
+# --- (i) a lookup lives a short time and a failed connection drops it --------------------------------------------
+
+def test_a_lookup_is_kept_five_minutes(names, monkeypatch):
+    assert locality.LOOKUP_TTL == 300.0
+    names["nas.lan"] = ["192.168.1.20"]
+    assert check_host("nas.lan").local
+    names["nas.lan"] = ["10.0.0.20"]              # the laptop moved to another network
+    assert check_host("nas.lan").addresses == ("192.168.1.20",), "within the time: the kept answer"
+    monkeypatch.setattr(locality, "LOOKUP_TTL", 0.0)
+    assert check_host("nas.lan").addresses == ("10.0.0.20",), "after it: a fresh answer"
+
+
+def test_a_failed_connection_drops_the_lookup(names):
+    from orchestrator.llm.client import offline_http_client
+    names["box.lan"] = ["127.0.0.1"]
+    http = offline_http_client(Settings(offline_mode=True))
+    with pytest.raises(Exception):
+        http.get(f"http://box.lan:{closed_port()}/v1/models", timeout=5)
+    assert locality.cached("box.lan") is None, "the next connection asks the resolver again"
+
+
+def test_a_failed_download_connection_drops_the_lookup(names):
+    import requests
+
+    from orchestrator.security.http import local_only_session
+    names["models.lan"] = ["127.0.0.1"]
+    with pytest.raises(requests.exceptions.ConnectionError):
+        local_only_session(Settings(offline_mode=True)).get(f"http://models.lan:{closed_port()}/m.gguf", timeout=5)
+    assert locality.cached("models.lan") is None
+
+
+def test_forget_drops_the_vpn_check_for_a_vpn_address(names, monkeypatch):
+    monkeypatch.setattr(locality.shutil, "which", which)
+    monkeypatch.setattr(locality, "_run_cli", tailscale())
+    monkeypatch.setattr(locality, "_system_lookup", lambda host: NAMES[host])
+    assert check_host("100.64.0.2").reason == "own_vpn"
+    assert locality._vpn_cache
+    locality.forget("192.168.1.99")
+    assert locality._vpn_cache, "an address outside the VPN keeps the VPN check"
+    locality.forget("100.64.0.2")
+    assert not locality._vpn_cache, "a VPN address drops it: the tailnet may have changed"
+
+
+# --- (g) an international mirror host --------------------------------------------------------------------------------
+
+def test_an_international_mirror_host_is_refused_with_its_xn_form(names):
+    from orchestrator.runtime.build.source import SourceError, offline_reach
+    with pytest.raises(SourceError) as info:
+        offline_reach("https://bücher.example/llama.cpp.git", Settings(offline_mode=True))
+    text = str(info.value)
+    assert "bücher.example" in text and "xn--bcher-kva.example" in text and "xn--" in text
+    assert offline_reach("https://bücher.example/llama.cpp.git", Settings()) is None, "online: as before"
+    names["xn--bcher-kva.example"] = ["192.168.1.5"]
+    assert offline_reach("https://xn--bcher-kva.example/llama.cpp.git", Settings(offline_mode=True)) == \
+        "xn--bcher-kva.example:443:192.168.1.5"
+
+
+# --- (f) the pin-bump check reads offline mode -------------------------------------------------------------------
+
+def test_the_pin_bump_check_reaches_only_a_mirror_in_the_own_network(names):
+    from orchestrator.runtime.build.source import SourceError, check_pin_upstream, upstream_tag_commit
+    names["github.example"] = ["203.0.113.4"]
+    names["mirror.lan"] = ["192.168.1.5"]
+    calls = []
+
+    def git(args, **kwargs):
+        calls.append((list(args), kwargs.get("resolve"), kwargs.get("offline")))
+        return SimpleNamespace(stdout=f"{'c' * 40}\trefs/tags/b42\n", returncode=0)
+    offline = Settings(offline_mode=True)
+    with pytest.raises(SourceError, match="github.example resolves to 203.0.113.4 on the internet"):
+        upstream_tag_commit("b42", repo="https://github.example/ggml-org/llama.cpp", git=git, settings=offline)
+    assert calls == [], "nothing reached the public repository"
+    assert upstream_tag_commit("b42", repo="https://mirror.lan/llama.cpp.git", git=git, settings=offline) == "c" * 40
+    assert calls[-1][1] == "mirror.lan:443:192.168.1.5"
+    assert upstream_tag_commit("b42", repo="https://192.168.1.5/llama.cpp.git", git=git, settings=offline)
+    assert calls[-1][1:] == (None, True), "an address: no pin, but no proxy and no redirect either"
+    upstream_tag_commit("b42", repo="https://github.example/ggml-org/llama.cpp", git=git, settings=Settings())
+    assert calls[-1][1:] == (None, None), "online: as before"
+    source = SimpleNamespace(tag="b42", commit="c" * 40, repo="https://github.example/ggml-org/llama.cpp")
+    with pytest.raises(SourceError):
+        check_pin_upstream(source, git=git, settings=offline)
+    assert check_pin_upstream(source, repo="https://mirror.lan/llama.cpp.git", git=git, settings=offline) == "c" * 40

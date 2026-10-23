@@ -524,13 +524,13 @@ class AIConfigurationDialog(QDialog):
     def _check_address_first(self, address: str) -> None:
         """Offline mode judges the server address by every address its name resolves to (utils/locality.py): the
         lookup runs in a worker thread, never on the GUI thread; the save goes on when it is in the run's cache."""
-        from orchestrator.utils.locality import check_url
+        from orchestrator.utils.locality import check_reach
         token = self._address_check = object()
         config, relay = self._config(), worker_relay()
 
         def work():
             try:
-                check_url(address, config)
+                check_reach(address, config)
             finally:
                 relay.done.emit(token, ("address", address))
 
