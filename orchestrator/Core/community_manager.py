@@ -1270,7 +1270,10 @@ class CommunityManager:
             # The pack's digest with the modes as this file system keeps them (the same file system as the
             # destination), kept where it is not the pack's own (Windows: no execute bit); the files' contents stay
             # the manifest's, so a file changed later still makes the installed pack "changed"
-            local = local_sha256(pack, prepared.manifest)
+            try:
+                local = local_sha256(pack, prepared.manifest)
+            except PackError:   # never a reason to refuse an install that was checked (read_pack wrote no link)
+                local = None
             if local and local != prepared.provenance.content_sha256:
                 prepared.provenance = prepared.provenance.model_copy(update={"local_sha256": local})
             (pack / PROVENANCE_NAME).write_text(prepared.provenance.to_json(), encoding="utf-8")

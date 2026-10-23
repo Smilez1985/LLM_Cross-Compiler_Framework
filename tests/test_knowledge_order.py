@@ -13,6 +13,7 @@
 import io
 import json
 import os
+import shutil
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -481,8 +482,11 @@ class TestExport:
         world.rag.export_records = lambda: iter([{"source": "https://docs.example/a", "content": "text",
                                                   "metadata": {}}])
         path = Path(world.cm.export_knowledge_base("knowledge_board"))
-        assert world.cm.knowledge_dir not in path.parents and path.is_file()
-        assert world.cm.loose_knowledge() == []
+        try:
+            assert world.cm.knowledge_dir not in path.parents and path.is_file()
+            assert world.cm.loose_knowledge() == []
+        finally:   # the private scratch folder the caller removes (the test leaves nothing in the temp folder)
+            shutil.rmtree(path.parent, ignore_errors=True)
 
     def test_the_module_generator_leaves_no_loose_file(self, world):
         from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT, ModuleGenerator
