@@ -18,14 +18,16 @@ The move never loses anything and never deletes the old ID's data before its cop
 1. stage(): every item is copied to the new ID and checked: a file is written atomically and read back, the runtime
    folder is made under a temporary name (each file a hard link of the original, else a copy whose sha256 is
    compared) and renamed to the new ID in one step, a record gets its copy next to it in one atomic write of its
-   file. When anything fails, the copies made so far are removed again (BoardMoveError): nothing has changed then.
-2. The caller makes the change itself (known_hosts and the board's trusted record); when that fails, undo() removes
-   the copies, and the board's data is where it was.
-3. finish(): only now the old ID's items go; one that cannot be removed stays and is named in the result (`left`;
-   its checked copy is under the new ID).
+   file. When anything fails, the copies made so far are removed again (BoardMoveError; a Ctrl+C goes on after
+   that): nothing has changed then.
+2. The caller makes the change itself (known_hosts and the board's trusted record); when known_hosts is not changed
+   (refused, or the change ends any other way), undo() removes the copies, and the board's data is where it was.
+3. finish(): once known_hosts holds the change, the old ID's items go (also when the record step after it ends early);
+   one that cannot be removed stays and is named in the result (`left`; its checked copy is under the new ID).
 
 What the new ID holds already is never overwritten: an item the new ID has with the same content counts as moved
-(its old copy goes at the end), one with other content stays under the old ID (`kept`).
+(its old copy goes at the end), one with other content stays under the old ID (`kept`). The probe's two files (its
+profile and its label and address) are one item: they move or stay together.
 
 Only the person's board steps use this module (the GUI and the CLI behind person_steps.change_board); no module an AI
 can reach imports it (tests/test_remote_trust.py follows the imports).
@@ -80,31 +82,44 @@ class _Item:
 
 
 class _File(_Item):
-    """A small text file of the profile store, written atomically for the new ID with the profile store's own writer
-    (utils/atomic.py write_private: mode 0600) and read back."""
+    """The small text files of one kind in the profile store, given as (old, new) pairs, each written atomically for
+    the new ID with the profile store's own writer (utils/atomic.py write_private: mode 0600) and read back. The files
+    of one kind belong together (the probe: its profile and its label and address file): when the new ID holds one of
+    them with other content, or one the old ID does not have, none of them is copied (kept)."""
 
-    def __init__(self, kind: str, source: Path, target: Path):
-        self.kind, self.source, self.target = kind, Path(source), Path(target)
+    def __init__(self, kind: str, *pairs: Any):
+        self.kind = kind
+        self.pairs = [(Path(source), Path(target)) for source, target in pairs]
+        self.written: List[Path] = []
 
     def stage(self) -> None:
         from orchestrator.utils.atomic import write_private
-        if not self.source.is_file():
+        texts = [(target, source.read_text(encoding="utf-8") if source.is_file() else None)
+                 for source, target in self.pairs]
+        if all(text is None for _target, text in texts):
             return
-        text = self.source.read_text(encoding="utf-8")
-        if self.target.exists():
-            self.state = "present" if self.target.read_text(encoding="utf-8") == text else "kept"
+        if any(target.exists() and (text is None or target.read_text(encoding="utf-8") != text)
+               for target, text in texts):
+            self.state = "kept"
             return
-        write_private(self.target, text)
-        self.state = "staged"
-        if self.target.read_text(encoding="utf-8") != text:
-            raise OSError("the copy does not read back")
+        self.state = "present"
+        for target, text in texts:
+            if text is None or target.exists():
+                continue
+            write_private(target, text)
+            self.written.append(target)
+            self.state = "staged"
+            if target.read_text(encoding="utf-8") != text:
+                raise OSError("the copy does not read back")
 
     def undo(self) -> None:
         if self.state == "staged":
-            self.target.unlink(missing_ok=True)
+            for target in self.written:
+                target.unlink(missing_ok=True)
 
     def finish(self) -> None:
-        self.source.unlink(missing_ok=True)
+        for source, _target in self.pairs:
+            source.unlink(missing_ok=True)
 
 
 def _same_file(a: Path, b: Path) -> bool:
@@ -259,9 +274,9 @@ class BoardDataMove:
         profiles = ProfileStore(self.state_dir)
         old_files, new_files = profiles.device_files(old_id), profiles.device_files(new_id)
         self.items: List[_Item] = [
-            _File("probe", old_files["probe"], new_files["probe"]),
-            _File("probe", old_files["probe_info"], new_files["probe_info"]),
-            _File("deploy_settings", old_files["deploy_settings"], new_files["deploy_settings"]),
+            _File("probe", (old_files["probe"], new_files["probe"]),
+                  (old_files["probe_info"], new_files["probe_info"])),
+            _File("deploy_settings", (old_files["deploy_settings"], new_files["deploy_settings"])),
             _Folder("runtime", DeviceRuntimeStore(self.state_dir, old_id).root,
                     DeviceRuntimeStore(self.state_dir, new_id).root),
             _DeployRecord(self.state_dir, old_id, new_id),
@@ -270,14 +285,16 @@ class BoardDataMove:
 
     def stage(self) -> None:
         """Copies and checks every item for the new ID; BoardMoveError (with the copies removed again) when one
-        cannot be copied: nothing has changed then."""
+        cannot be copied: nothing has changed then. A Ctrl+C meanwhile also removes the copies before it goes on."""
         done: List[_Item] = []
         for item in self.items:
             try:
                 item.stage()
-            except Exception as e:  # noqa: BLE001 - an OSError, a lock that timed out, a record that is too large
+            except BaseException as e:  # an OSError, a lock that timed out, a record that is too large; a Ctrl+C
                 done.append(item)
                 self._undo(done)
+                if not isinstance(e, Exception):
+                    raise
                 raise BoardMoveError(f"The board's {_WORDS[item.kind]} could not be copied to its new device ID "
                                      f"{self.new_id} ({e.__class__.__name__}); nothing was changed.",
                                      item.kind) from None
