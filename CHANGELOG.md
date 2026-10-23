@@ -1331,7 +1331,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   would remove or replace for Docker CE (`podman-docker`; on RHEL 8 rebuilds also `runc`, `podman`, `buildah`, ...),
   without changing anything: the installer names exactly these packages and asks the person on the terminal, and
   only a yes uses `--allowerasing`; a no (or no terminal) removes nothing, takes back the repository file and key it
-  wrote, and gives the Podman fallback (on Fedora, RHEL and CentOS Stream, which get the same question, it stops). The
+  wrote, and gives the Podman fallback. Fedora, RHEL and CentOS Stream keep their way exactly (no trial run, no
+  question, `dnf install -y` without `--allowerasing`; a conflict stops with the reason): round 26 decided the
+  question and the fallback for the rebuilds only (consolidation review install-followups-v). The
   dry run names both ways and why; a second run where `docker` is Podman says how to switch. Checked for real in
   Rocky Linux 9.8 containers (Docker CE fresh; with `podman-docker` and a no; with `podman-docker` and a yes). SLES:
   when no Python 3.11 to 3.14 is there, the installer offers to switch on SUSE's Python 3 Module

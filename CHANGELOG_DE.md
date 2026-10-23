@@ -1513,8 +1513,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   dnf für Docker CE entfernen oder ersetzen müsste (`podman-docker`; unter Nachbauten von RHEL 8 auch `runc`, `podman`,
   `buildah`, ...), ohne etwas zu verändern: Der Installer nennt genau diese Pakete und fragt die Person am Terminal,
   und nur ein Ja nutzt `--allowerasing`; ein Nein (oder kein Terminal) entfernt nichts, nimmt die Repository-Datei und
-  den Schlüssel zurück, die er geschrieben hat, und führt zum Ersatzweg Podman (unter Fedora, RHEL und CentOS Stream,
-  die dieselbe Frage bekommen, hält er an). Der Probelauf nennt beide Wege und warum; ein zweiter Lauf, bei dem
+  den Schlüssel zurück, die er geschrieben hat, und führt zum Ersatzweg Podman. Fedora, RHEL und CentOS Stream gehen
+  ihren Weg genau wie bisher (kein Probedurchlauf von dnf, keine Frage, `dnf install -y` ohne `--allowerasing`; ein
+  Konflikt hält mit dem Grund an): Runde 26 hat die Frage und den Ersatzweg nur für die Nachbauten entschieden
+  (Konsolidierungsprüfung install-followups-v). Der Probelauf nennt beide Wege und warum; ein zweiter Lauf, bei dem
   `docker` Podman ist, sagt, wie man wechselt. Echt geprüft in Containern mit Rocky Linux 9.8 (Docker CE frisch; mit
   `podman-docker` und einem Nein; mit `podman-docker` und einem Ja). SLES: Gibt es kein Python 3.11 bis 3.14, bietet
   der Installer an, SUSEs Python 3 Module einzuschalten (`SUSEConnect -p sle-module-python3/<Version>/<Architektur>`,
