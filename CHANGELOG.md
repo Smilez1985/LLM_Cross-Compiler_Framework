@@ -2204,6 +2204,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **`llm-cli deploy devices edit` gives the plain reason instead of a traceback**: it caught only the board steps'
+  own errors, so the framework's `known_hosts` held by another process (a `LockTimeout` of `pairing.replace_key`),
+  settings that could not be read after you said yes, or a file that could not be read before the question ended in
+  a traceback. Each now prints the `local_problem` reason with its next step (`_print_reason`) and what failed, exits
+  with code 1 and changes nothing.
 - **Removing old Hugging Face downloads works with the real audit log**: the audit log refuses outcomes it does not
   know, and the deletion of old downloads (Take over, `hf_takeover.delete_old_copies`) recorded
   `old_downloads_deleted`, which it did not know, so the deletion stopped with "The audit log cannot record the

@@ -2488,6 +2488,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **`llm-cli deploy devices edit` nennt den Grund statt eines Tracebacks**: Der Befehl fing nur die eigenen Fehler
+  der Board-Schritte ab; eine von einem anderen Prozess belegte `known_hosts` des Frameworks (ein `LockTimeout` von
+  `pairing.replace_key`), Einstellungen, die sich nach deinem Ja nicht lesen ließen, oder eine Datei, die sich vor
+  der Frage nicht lesen ließ, endeten in einem Traceback. Jetzt zeigt er jeweils den Grund `local_problem` mit seinem
+  nächsten Schritt (`_print_reason`) und was nicht ging, endet mit Exit-Code 1 und ändert nichts.
 - **Alte Hugging-Face-Downloads entfernen geht mit dem echten Audit-Log**: Das Audit-Log lehnt Ergebnisse ab, die es
   nicht kennt, und das Löschen alter Downloads (Übernehmen, `hf_takeover.delete_old_copies`) schrieb
   `old_downloads_deleted`, das es nicht kannte; das Löschen stoppte also mit „The audit log cannot record the
