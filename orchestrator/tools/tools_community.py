@@ -43,6 +43,8 @@ from orchestrator.tools.spec import CallFacts, Fact, FieldMeta, GrantRule, Rate,
 from orchestrator.utils.lazy_imports import lazy_attributes
 
 PACK_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+# = Core/community_pack.TOPIC_PATTERN (the pack code loads on first use; tests/test_knowledge_order.py keeps them equal)
+TOPIC_PATTERN = r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9_-])?$"
 LICENSE_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$"
 ARTIFACT_PATTERN = r"^a_[0-9a-f]{16}$"
 PAGE_SIZE = 50
@@ -241,6 +243,12 @@ class ExportPackIn(BaseModel):
                                description="Recipe only: the model's licence (default unknown)")
     pack_id: Optional[str] = Field(default=None, pattern=PACK_ID_PATTERN,
                                    description="Knowledge only: the pack id (default knowledge-<date>)")
+    topic: Optional[str] = Field(default=None, pattern=TOPIC_PATTERN,
+                                 description="Knowledge only (it or target is required): the topic the pages belong "
+                                             "to, e.g. llama.cpp")
+    target: Optional[str] = Field(default=None, pattern=TOPIC_PATTERN,
+                                  description="Knowledge only (it or topic is required): the target the pages belong "
+                                              "to (list_targets), e.g. Rockchip")
 
 
 class ScrubOut(BaseModel):
@@ -538,6 +546,12 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                  Fact("Download", f"{entry.size} bytes, sha256 {entry.sha256} (checked)"),
                  Fact("Files", f"{len(m.files)} ({sum(f.size for f in m.files)} bytes)"),
                  Fact("Installs to", dest)]
+        if prepared.target:
+            facts.append(Fact("Target", f"{prepared.target} (its pages are found under this target)"))
+        elif prepared.topic:
+            facts.append(Fact("Topic", prepared.topic + (" (taken from the pack id: the pack was made before packs "
+                                                         "named their topic; installing confirms it)"
+                                                         if prepared.topic_from_id else "")))
         if room is not None:  # free space moves while a question waits: shown, never part of the decision
             facts.append(Fact("Disk", f"knowledge snapshot taken first: {room.sentence()}", volatile=True))
         model_warnings: tuple = ()
@@ -567,8 +581,9 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                  "grant": {"source": "index", "kind": m.kind, "trust": prepared.trust.value,
                            "signing_key": getattr(state, "signer", "") or ""}}
         standing = pack_disk(inp.kind, entry.size, standing=True)
-        if standing is None or not standing.fits:
-            # design 6.5: under a standing approval the larger reserve (20 GiB or 10 %) must stay free, else it asks
+        if standing is None or not standing.fits or prepared.topic_from_id:
+            # design 6.5: under a standing approval the larger reserve (20 GiB or 10 %) must stay free, else it asks;
+            # a pack made before topics gets its topic from its id only with the person's "Yes" (round 23 item 1)
             bound["grant"] = None
         numbers = {"size_class": size_class(int(entry.size)), "size_bytes": int(entry.size)}
         if disk is not None:
@@ -623,12 +638,8 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
             result = {"installed_to": label(cm, dest), "kind": prepared.manifest.kind, "pack_id": prepared.manifest.id,
                       "version": prepared.manifest.version, "trust": prepared.trust.value,
                       "notes": list(prepared.notes)}
-            if prepared.manifest.kind == "knowledge":
-                try:
-                    pages = json.loads((Path(dest) / "knowledge.json").read_text(encoding="utf-8"))
-                    result["knowledge_pages"] = len(pages) if isinstance(pages, list) else 0
-                except (OSError, ValueError):
-                    result["knowledge_pages"] = 0
+            if prepared.imports_knowledge:   # a knowledge pack, or a target pack's knowledge snapshot
+                result["knowledge_pages"] = int(prepared.knowledge_pages)
                 # the snapshot taken before the import (N13), or why nothing was imported yet (no room for it)
                 result["snapshot"] = getattr(cm, "last_sync_snapshot", None) or ""
                 if getattr(cm, "last_sync_problem", ""):
@@ -697,10 +708,21 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
     def export_source(cm, inp: ExportPackIn) -> Tuple[Optional[str], str]:
         """(the source the community manager takes, its speaking name)."""
         from orchestrator.Core.community_manager import read_provenance
+        if inp.kind != "knowledge" and (inp.topic or inp.target):
+            raise ToolError("Only a knowledge pack names a topic or target.", code="invalid_value",
+                            next=f"Leave topic and target out for kind {inp.kind}.")
         if inp.kind == "knowledge":
             if inp.source:
                 raise ToolError("A knowledge pack takes no source: it holds your own pages of the knowledge base.",
                                 code="invalid_value", next="Leave source out for kind knowledge.")
+            if bool(inp.topic) == bool(inp.target):
+                raise ToolError("A knowledge pack names the topic or the target its pages belong to: give topic or "
+                                "target (not both).", code="missing_argument",
+                                next="Ask the person which topic or target the pack is about (list_targets lists the "
+                                     "targets).")
+            if inp.target and cm._target_folder(inp.target) is None:
+                raise ToolError(f"Unknown target '{inp.target}'.", code="unknown_id",
+                                next="Call list_targets for the target ids, or give a topic instead.")
             return None, "your own pages of the knowledge base"
         if not inp.source:
             raise ToolError(f"export_pack needs 'source' for kind {inp.kind}: "
@@ -755,6 +777,7 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
         if inp.kind == "recipe":
             facts.append(Fact("Model licence", inp.model_license))
         if inp.kind == "knowledge":
+            facts.append(Fact("Target" if inp.target else "Topic", inp.target or inp.topic or ""))
             facts.append(Fact("Pages", "your own crawled pages; pages from installed knowledge packs are left out, and "
                                        "every page keeps its source address"))
             facts.append(Fact("Licences", "a page goes in with its full text only where its licence allows passing "
@@ -767,7 +790,8 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                                                "every page with its source address, copyright line and licence; the "
                                                "result names each licence text and why"))
         bound = {"kind": inp.kind, "source": source, "author": author, "license": licence,
-                 "model_license": inp.model_license, "pack_id": inp.pack_id, "signer": key}
+                 "model_license": inp.model_license, "pack_id": inp.pack_id, "signer": key,
+                 "topic": inp.topic, "target": inp.target}
         # always the person: the pack goes out under their name (design 4.3)
         return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound, warnings=(warn("signs_as_you"),),
                          consequence_template=consequence)
@@ -775,7 +799,8 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
     def run_export(cm, bound: Dict[str, Any]) -> Dict[str, Any]:
         try:
             result = cm.export_pack(bound["kind"], bound["source"], author=bound["author"], license=bound["license"],
-                                    pack_id=bound.get("pack_id"), model_license=bound["model_license"])
+                                    pack_id=bound.get("pack_id"), model_license=bound["model_license"],
+                                    topic=bound.get("topic"), target=bound.get("target"))
         except PackError as e:
             raise ValueError(_no_paths(str(e))) from None
         if result.signer != bound["signer"]:  # the key changed after the question: not the statement shown
@@ -850,14 +875,17 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                  "Writes a target, recipe or knowledge pack to a local file in the contributions folder, privacy-"
                  "scrubbed and signed with the person's community key; always asked, and nothing is uploaded. Needs "
                  "an existing signing key. Returns the file as a label, how many lines the scrub changed per file and "
-                 "the licence texts the pack ships (LICENSES/ with a NOTICE) and why. "
+                 "the licence texts the pack ships (LICENSES/ with a NOTICE) and why. A knowledge pack names the topic "
+                 "or the target its pages belong to (topic or target). "
                  'Example: {"kind": "target", "source": "MyBoard", "author": "pat"}',
                  ToolTier.LOCAL_WRITE, ExportPackIn, ExportPackOut, export_pack, takes_context=True,
                  prepare=prepare_export, default_decision=Decision.ASK, max_decision=Decision.ASK,
                  fields={"kind": kind_field, "source": FieldMeta(kind="id"), "license": FieldMeta(kind="trust"),
                          "model_license": FieldMeta(kind="trust"), "pack_id": FieldMeta(kind="id"),
-                         "author": FieldMeta(kind="trust")},
-                 examples=({"kind": "target", "source": "MyBoard", "author": "pat"},),
+                         "author": FieldMeta(kind="trust"), "topic": FieldMeta(kind="value"),
+                         "target": FieldMeta(kind="id", list_tool="list_targets")},
+                 examples=({"kind": "target", "source": "MyBoard", "author": "pat"},
+                           {"kind": "knowledge", "topic": "llama.cpp", "author": "pat"}),
                  limits=ToolLimits(per_day=20, what="exports"),
                  summary=lambda o: f"Exported {fact(o.kind)} pack, signed with key {fact(o.signer_key_id)}."),
     ]

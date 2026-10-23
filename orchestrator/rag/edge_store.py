@@ -275,6 +275,16 @@ class EdgeKnowledgeStore(KnowledgeStore):
         shard.flush()
         self.written += 1
 
+    def delete_origin_stale(self, origin_pack: str, keep_sha256: str) -> None:
+        """Removes the excerpts of an installed pack (origin_pack) that its current import did not write (their
+        origin_sha256 is another one, or missing)."""
+        shard = self._shard
+        flt = qe.Filter(must=[qe.FieldCondition(key="origin_pack", match=qe.MatchValue(value=origin_pack))],
+                        must_not=[qe.FieldCondition(key="origin_sha256", match=qe.MatchValue(value=keep_sha256))])
+        shard.update(qe.UpdateOperation.delete_points_by_filter(flt))
+        shard.flush()
+        self.written += 1
+
     def query(self, dense: List[float], sparse: Optional[SparseVec], limit: int,
               dense_floor: Optional[float] = None) -> List[ScoredHit]:
         """Hybrid query: dense and (if given) BM25 candidates, fused with RRF, so scores are always rank-based."""

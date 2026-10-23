@@ -3,10 +3,12 @@
 import json
 import math
 import re
+import shutil
 import socket
 import time
 import zlib
 from collections import Counter
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -966,15 +968,23 @@ class TestCommunityRoundtrip:
                                     get_component=lambda name: rag if name == "rag_manager" else None)
         community = CommunityManager(framework)
 
-        export = community.export_knowledge_base("pack")
+        export = Path(community.export_knowledge_base("pack"))
+        assert community.knowledge_dir not in export.parents, "a private scratch folder, never a loose knowledge file"
         data = json.loads(open(export, encoding="utf-8").read())
         assert {e["source"] for e in data} == set(DOCS)
         assert all("chunk_hash" in e["metadata"] and e["metadata"]["shared_as"] == "full_text" for e in data)
 
         rag.clear_knowledge_base()
-        assert community.sync_knowledge_base() == len(data)
-        assert rag.search("what does E2041 mean")[0].source == "https://docs.example/e2041"
+        # Handed back as a loose file (DECISIONS round 23 item 1): never imported unsorted, sorted into a topic first
+        community.knowledge_dir.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(export), str(community.knowledge_dir / export.name))
+        shutil.rmtree(export.parent, ignore_errors=True)
+        assert community.sync_knowledge_base() == 0 and rag.get_status()["vector_count"] == 0
+        community.finish_install(community.prepare_sort(export.name, topic="npu"))
+        hit = rag.search("what does E2041 mean")[0]
+        assert hit.source == "https://docs.example/e2041" and hit.metadata["topic"] == "npu"
         assert rag.get_status()["vector_count"] == len(data)
+        assert community.loose_knowledge() == []
 
 
 class TestFastEmbedApi:
@@ -1253,7 +1263,10 @@ class TestHiddenCarriersAtIngest:
         ]
         community.knowledge_dir.mkdir(parents=True, exist_ok=True)
         (community.knowledge_dir / "carriers.json").write_text(json.dumps(pages), encoding="utf-8")
-        assert community.sync_knowledge_base() == 2
+        prepared = community.prepare_sort("carriers.json", topic="radios")   # a loose file: sorted, then imported
+        assert prepared.knowledge_pages == 2
+        community.finish_install(prepared)
+        assert {s["source"] for s in rag.list_sources()} == {p["source"] for p in pages}
         listed = {e["source"]: e for e in rag.list_sources()}
         whole = stored_text(rag, "https://pack.example/display-none")
         assert flat(carriers["display-none"].visible) in whole and "evil-" not in whole and "<p" not in whole

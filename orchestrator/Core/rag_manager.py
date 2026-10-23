@@ -96,7 +96,7 @@ SOURCE_ID_PREFIX = "ks_"
 REMOVED_FIELD = "hidden_removed"
 # Payload fields a source listing reads (never the chunk text): provenance, and what the page says about its licence.
 _SOURCE_FIELDS = ["source", "title", "content_type", "type", "origin_pack", "root_url", "ingested_at",
-                  *licences.META_KEYS, REMOVED_FIELD, "chunk_index"]
+                  *licences.META_KEYS, REMOVED_FIELD, "chunk_index", "topic", "target"]
 NOT_EXPORTED = "not_exported"   # a source no knowledge pack carries (an installed pack's page, the framework's docs)
 _RESERVED_PAYLOAD = {"content", "source", "section", "chunk_index", "chunk_hash", "embedding_model", "ingested_at",
                      "fused_score", "reranker", REMOVED_FIELD}
@@ -784,6 +784,24 @@ class RAGManager:
             self._fail(e)
             return False
 
+    def remove_pack_leftovers(self, origin_pack: str, keep_sha256: str) -> bool:
+        """After every page of an installed pack was imported (CommunityManager.sync_knowledge_base): removes the
+        excerpts of that pack (origin_pack) that this import did not write, the ones of an older version (another
+        origin_sha256, or none: imported before excerpts carried it). A newer version of a knowledge pack, or of a
+        target pack's knowledge, thus replaces the old one without stale excerpts, per pack and page source rather than
+        per piece. Excerpts of other packs and your own pages stay. False when the knowledge base cannot be written."""
+        if not origin_pack or not keep_sha256:
+            return False
+        try:
+            def remove(store: "KnowledgeStore"):
+                self._sources = None
+                store.delete_origin_stale(origin_pack, keep_sha256)
+            self._with_store(remove)
+            return True
+        except KnowledgeBaseError as e:
+            self._fail(e)
+            return False
+
     def ingest_page(self, doc: Any, root_url: str = "") -> int:
         """Stores one page the crawler extracted (a crawler Document: page_content, metadata and hidden_removed, the
         hidden elements it left out), replacing its earlier version, as outside text: cleaned like every outside text,
@@ -1249,6 +1267,7 @@ class RAGManager:
     def list_sources(self) -> List[Dict[str, Any]]:
         """Every source of the knowledge base with its provenance: source_id, source (address, pack entry or file
         label), title, kind (web, pack, docs, other), origin_pack, root (the crawl's start address or the pack),
+        topic and target (the topic or target a knowledge pack's or a target pack's excerpts belong to, "" otherwise),
         ingested_at (the newest chunk) and chunks; its licence (licence_view: licence, copyright, licence_state,
         pack_share, share_reason); and hidden_removed: how much hidden text was left out before it was stored, by kind
         (the counts of every stored piece added up: a crawled page is one piece, a pack page may be several), None
@@ -1271,7 +1290,7 @@ class RAGManager:
                         "source_id": source_id(source), "source": source, "title": "", "kind": kind,
                         "origin_pack": str(payload.get("origin_pack") or ""),
                         "root": str(payload.get("origin_pack") or payload.get("root_url") or ""),
-                        "ingested_at": "", "chunks": 0, REMOVED_FIELD: None}
+                        "ingested_at": "", "chunks": 0, REMOVED_FIELD: None, "topic": "", "target": ""}
                 removed = payload.get(REMOVED_FIELD)
                 if isinstance(removed, dict):
                     # Each stored piece carries its counts on every excerpt: its first excerpt counts them once.
@@ -1283,6 +1302,9 @@ class RAGManager:
                     if key not in meta and payload.get(key) not in (None, ""):
                         meta[key] = payload[key]
                 entry["chunks"] += 1
+                for key in ("topic", "target"):   # the topic or target a pack's excerpts belong to
+                    if not entry[key] and isinstance(payload.get(key), str):
+                        entry[key] = payload[key][:64]
                 if not entry["title"] and payload.get("title"):
                     entry["title"] = str(payload["title"])[:500]
                 stamp = str(payload.get("ingested_at") or "")

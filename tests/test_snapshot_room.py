@@ -168,12 +168,26 @@ class PackRag:
         return True
 
 
+def installed_pack(cm, name, text, topic="docs"):
+    """An installed knowledge pack as finish_install leaves it: community/knowledge/<topic>/<name>/ with its
+    knowledge.json and its provenance (a loose file is never imported: DECISIONS round 23 item 1)."""
+    from orchestrator.Core.community_manager import Provenance
+    from orchestrator.Core.community_pack import PROVENANCE_NAME, tree_sha256, utc_now
+    folder = cm.knowledge_dir / topic / name
+    shutil.rmtree(folder, ignore_errors=True)
+    folder.mkdir(parents=True)
+    (folder / "knowledge.json").write_text(text)
+    prov = Provenance(kind="knowledge", id=name, version="1.0.0", trust="local", source="a test", pack_sha256="0" * 64,
+                      content_sha256=tree_sha256(folder), author="t", installed_at=utc_now(), topic=topic)
+    (folder / PROVENANCE_NAME).write_text(prov.to_json())
+    return folder
+
+
 def pack_manager(tmp_path, rag):
     framework = SimpleNamespace(info=SimpleNamespace(installation_path=tmp_path),
                                 get_component=lambda name: rag if name == "rag_manager" else None)
     cm = CommunityManager(framework)
-    cm.knowledge_dir.mkdir(parents=True)
-    (cm.knowledge_dir / "docs.json").write_text('[{"source": "s", "content": "c", "metadata": {}}]')
+    installed_pack(cm, "docs", '[{"source": "s", "content": "c", "metadata": {}}]')
     return cm
 
 
@@ -197,27 +211,27 @@ def test_a_knowledge_pack_is_not_imported_when_its_snapshot_does_not_fit(tmp_pat
 
 
 def test_a_pack_that_stays_pending_is_snapshotted_once_not_at_every_start(tmp_path):
-    """A pack that cannot be imported yet (its pages are refused, e.g. offline without the embedding model, or the old
-    'swarm' format) stays pending, and the framework tries again whenever the knowledge base starts. The snapshot
-    before its import is taken once: snapshots are never deleted by themselves, so one per start would fill the
-    disk. A pack installed later gets its own snapshot before its first page."""
+    """A pack that cannot be imported yet (its pages are refused, e.g. offline without the embedding model) stays
+    pending, and the framework tries again whenever the knowledge base starts. The snapshot before its import is
+    taken once: snapshots are never deleted by themselves, so one per start would fill the disk. A pack installed
+    later gets its own snapshot before its first page. Why a pack waits is said, not only logged."""
     rag = PackRag()
     rag.ingest_document = lambda source, content, meta: False  # refused every time
     cm = pack_manager(tmp_path, rag)
-    (cm.knowledge_dir / "old.json").write_text('{"swarm_encrypted": true}')
+    installed_pack(cm, "old", '[{"source": "o", "content": "c", "metadata": {}}]')
     for _ in range(3):
         assert cm.sync_knowledge_base() == 0
+        assert "not imported yet" in cm.last_sync_problem
     assert len(rag.snapshots) == 1, "one snapshot for the packs that wait, not one per start"
     assert not (cm.knowledge_dir / "docs.imported").exists(), "still pending: imported once it can be"
-    (cm.knowledge_dir / "new.json").write_text('[{"source": "n", "content": "c", "metadata": {}}]')
+    installed_pack(cm, "new", '[{"source": "n", "content": "c", "metadata": {}}]')
     assert cm.sync_knowledge_base() == 0 and len(rag.snapshots) == 2, "a new pack: a snapshot before its import"
     rag.ingest_document = lambda source, content, meta: rag.ingested.append(source) or True
-    assert cm.sync_knowledge_base() == 2 and len(rag.snapshots) == 2
+    assert cm.sync_knowledge_base() == 3 and len(rag.snapshots) == 2
     # installed again (an earlier version was removed): its marker goes, and it gets a snapshot of its own again
     rag.ingested.clear()
     (cm.knowledge_dir / "docs.imported").unlink()
-    docs = cm.knowledge_dir / "docs.json"
-    docs.write_text('[{"source": "s2", "content": "c2", "metadata": {}}]')
+    docs = installed_pack(cm, "docs", '[{"source": "s2", "content": "c2", "metadata": {}}]') / "knowledge.json"
     os.utime(docs, ns=(docs.stat().st_atime_ns, docs.stat().st_mtime_ns + 10 ** 9))
     assert cm.sync_knowledge_base() == 1 and len(rag.snapshots) == 3
 
