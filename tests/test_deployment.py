@@ -349,30 +349,32 @@ class TestSSHDeployment:
         assert subprocess.run([dash, "-n", str(path)]).returncode == 0
 
     def test_system_ssh_fallback_never_prompts_or_accepts_keys(self, config, tmp_path, monkeypatch):
-        dm = DeploymentManager(FakeFramework(config))
+        # Since decision A5 the fallback is the board session over OpenSSH (consolidation chain c2-remote-system):
+        # the calls are the session's steps, the upload streams into cat over ssh (no scp), deploy.sh runs detached.
+        # The fake OpenSSH in front of a fake board is tests/test_remote_system_ssh.py's (it pins the rest).
+        # A plain import: a broken helper module fails here instead of skipping (the module itself skips where
+        # paramiko is missing, as the fake board it builds on does).
+        import test_remote_system_ssh as fake
+        board = fake.openssh_board(monkeypatch)
+        dm = fake.on_fake_clock(DeploymentManager(FakeFramework(config)), board)
         monkeypatch.setattr(dm, "_check_conn", lambda *a, **k: True)
-        monkeypatch.setattr("orchestrator.Core.deployment_manager.PARAMIKO_AVAILABLE", False)
-        calls = []
-
-        def fake_run(args, **kwargs):
-            assert isinstance(args, list) and not kwargs.get("shell")
-            # Over MCP stdio, an inherited stdin would forward the protocol stream to the device (G25).
-            assert kwargs.get("stdin") is subprocess.DEVNULL
-            calls.append(args)
-            return subprocess.CompletedProcess(args, 0, stdout="/tmp/llm_deploy.Ab12Cd34\n", stderr="")
-
-        monkeypatch.setattr("orchestrator.Core.deployment_manager.subprocess.run", fake_run)
         pkg = tmp_path / "deploy_model_1.zip"
         pkg.write_bytes(b"zip")
 
         assert dm.deploy_package(pkg, "192.168.1.50", "radxa").success is True
-        # mktemp, the upload, the installation, and a look for the old Qdrant sidecar (never a removal)
-        assert [c[0] for c in calls] == ["ssh", "scp", "ssh", "ssh"]
+        calls = board.fake.calls
         from orchestrator.Core.deployment_manager import OLD_SIDECAR_CHECK
-        assert calls[3][-1] == OLD_SIDECAR_CHECK
-        assert calls[1][-1] == "radxa@192.168.1.50:/tmp/llm_deploy.Ab12Cd34/"
+        # the login, the private folder, ..., and a look for the old Qdrant sidecar (never a removal)
+        assert [c.program for c in calls] == ["ssh"] * len(calls)
+        assert [c.script for c in calls][:2] == ["true", DeploymentManager.REMOTE_MKTEMP]
+        assert calls[-1].script == OLD_SIDECAR_CHECK
+        assert calls[0].rest[0] == "radxa@192.168.1.50"
         for call in calls:
-            assert "BatchMode=yes" in call and "StrictHostKeyChecking=yes" in call and "IdentitiesOnly=yes" in call
+            assert isinstance(call.argv, list) and not call.kwargs.get("shell")
+            # Over MCP stdio, an inherited stdin would forward the protocol stream to the device (G25).
+            assert call.kwargs.get("stdin") in (subprocess.DEVNULL, subprocess.PIPE)
+            assert "BatchMode=yes" in call.argv and "StrictHostKeyChecking=yes" in call.argv
+            assert "IdentitiesOnly=yes" in call.argv
 
     def test_untrusted_device_gets_nothing(self, config, tmp_path, monkeypatch):
         pytest.importorskip("paramiko")

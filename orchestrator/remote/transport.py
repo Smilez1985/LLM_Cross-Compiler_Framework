@@ -24,21 +24,31 @@ MCP server and the GUI start without it).
   password for this connection only, the host key checked against the framework's known_hosts, and paramiko_quiet
   around it so no password or key material reaches a log.
 
+- SystemSshTransport: the second Transport, over this computer's OpenSSH client for an installation without paramiko
+  (consolidation chain c2-remote-system, decision A5). The deploy's OpenSSH fallback is a RemoteSession over it, so
+  it waits for the board, resumes the upload and follows the detached installation like the paramiko deploy.
+  openssh_options(state_dir) are the options of every OpenSSH call: the framework key and known_hosts only, never a
+  question or a new key, a login time limit and keepalive. openssh_argv() is the one place an ssh, scp or sftp
+  command line is built; config_value() quotes a path for OpenSSH's own option parser (a folder with a space).
+
 A failure of the network (OSError, EOFError, socket.timeout) leaves run() as it is: the caller decides whether it is a
 drop to wait through (alive() is false, or timed_out(error): no answer within the time limit) or the end. Only more
-output than the cap is the transport's own failure, TooMuchOutput. The OpenSSH fallback becomes a second Transport in
-consolidation chain c2-remote-system.
+output than the cap is the transport's own failure, TooMuchOutput. Over OpenSSH a failure of ssh itself (its exit
+status 255) is SshFailed, an OSError with the reason code OpenSSH's words name.
 """
 
 import contextlib
 import logging
+import os
 import shlex
 import socket
+import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Iterable, Iterator, List, Optional, Tuple
+from pathlib import Path, PureWindowsPath
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 from orchestrator.remote.errors import RemoteFailure
 
@@ -50,6 +60,10 @@ HASH_TIMEOUT = 900             # ... while it hashes a large file (the board pri
 MAX_OUTPUT = 1024 * 1024       # bytes of a command's stdout (and of its stderr) the framework reads at most
 LOGIN_TIMEOUT = 10.0
 KEEPALIVE_SECONDS = 15         # an idle session sends a keepalive this often, so a dead network shows up
+KEEPALIVE_COUNT = 3            # OpenSSH ends a session after this many keepalives without an answer
+OPENSSH_FAILED = 255           # OpenSSH's own exit status: ssh itself failed, not the command on the board
+
+_log = logging.getLogger(__name__)
 
 
 def paramiko_module() -> Any:
@@ -316,6 +330,392 @@ class ParamikoTransport(Transport):
             pass
 
 
-__all__ = ["COMMAND_TIMEOUT", "HASH_TIMEOUT", "KEEPALIVE_SECONDS", "LOGIN_TIMEOUT", "MAX_OUTPUT", "PARAMIKO_AVAILABLE",
-           "ParamikoTransport", "Result", "TooMuchOutput", "Transport", "available", "imported_paramiko", "open_client",
-           "paramiko_module", "paramiko_quiet", "read_limited", "sh_command", "timed_out"]
+# --- OpenSSH ------------------------------------------------------------------------------------------------------
+
+_PORT_FLAG = {"ssh": "-p", "scp": "-P", "sftp": "-P"}
+# What this computer's OpenSSH prints (English whatever the locale) when the board's host key is not in the
+# framework's known_hosts yet (the first contact; a changed key is reasons.classify_ssh_output's), and when it refuses
+# the framework's own key file (its permissions, a damaged file): a problem on this computer, not the board.
+_UNKNOWN_KEY_OUTPUT = ("Host key verification failed", "host key is known for")
+_KEY_FILE_OUTPUT = ("UNPROTECTED PRIVATE KEY FILE", "Load key", "Bad owner or permissions")
+_KEY_TOO_OPEN = ("are too open",)   # "Permissions 0644 for '<key>' are too open." (the line that names the key)
+
+
+def config_value(path: Any) -> str:
+    """`path` as one value of an OpenSSH -o option: in double quotes, so a space (a Windows account name with one, in
+    the profile folder) does not split it into two files. A backslash or a double quote inside is escaped as OpenSSH's
+    option parser reads it (misc.c argv_split). A Windows path is written with forward slashes, which OpenSSH for
+    Windows reads as the same path, so it holds no backslash at all."""
+    text = path.as_posix() if isinstance(path, PureWindowsPath) else str(path)
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def openssh_options(state_dir: Path) -> List[str]:
+    """The options of every OpenSSH call of the framework: the framework key only (IdentitiesOnly, -i), the
+    framework's known_hosts only, and never a question or an accepted new key (BatchMode, StrictHostKeyChecking); a
+    connection that gives up after LOGIN_TIMEOUT seconds (ConnectTimeout) and a keepalive every KEEPALIVE_SECONDS that
+    ends a session after KEEPALIVE_COUNT unanswered ones (ServerAliveInterval, ServerAliveCountMax), so a dropped
+    network ends the call instead of holding it. The key file is made private to this account first (OpenSSH refuses
+    a key others can read: utils/atomic.py owner_only, an ACL on Windows). The framework key and known_hosts are read
+    through orchestrator/utils/ssh_trust at call time (ssh_trust.system_ssh_options is this function's old name)."""
+    from orchestrator.utils import ssh_trust
+    from orchestrator.utils.atomic import owner_only
+    private, _ = ssh_trust.client_key(state_dir)
+    try:
+        owner_only(private)
+    except OSError as e:   # OpenSSH then says what it refuses; the login fails with local_problem
+        _log.warning(f"The framework's SSH key could not be made private to this account ({e.strerror or e}).")
+    return ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+            "-o", f"UserKnownHostsFile={config_value(ssh_trust.known_hosts_path(state_dir))}",
+            "-o", "IdentitiesOnly=yes", "-o", f"ConnectTimeout={int(LOGIN_TIMEOUT)}",
+            "-o", f"ServerAliveInterval={KEEPALIVE_SECONDS}", "-o", f"ServerAliveCountMax={KEEPALIVE_COUNT}",
+            "-i", str(private)]
+
+
+def remote_location(endpoint: Any, user: str, path: Optional[str] = None) -> str:
+    """The board as scp and sftp name it: user@host, with `path` user@host:path; an IPv6 address in brackets, since
+    both read a path after the first colon."""
+    host = f"[{endpoint.host}]" if ":" in endpoint.host else endpoint.host
+    return f"{user}@{host}" + (f":{path}" if path is not None else "")
+
+
+def openssh_argv(program: str, endpoint: Any, user: str, options: Sequence[str], *rest: str) -> List[str]:
+    """The one place the framework builds an OpenSSH command line (a list: no shell reads it):
+    ssh OPTIONS -T -p PORT user@host COMMAND, scp OPTIONS -P PORT SOURCE... TARGET, sftp OPTIONS -P PORT DESTINATION.
+    `program` is ssh, scp or sftp, or the path of one (its file name says which). For scp and sftp a board's place is
+    remote_location(...). `endpoint` and `user` are checked ones (valid_host, valid_user: neither starts with '-', so
+    OpenSSH never reads them as an option)."""
+    kind = str(program).replace("\\", "/").rpartition("/")[2].lower()
+    kind = kind[:-4] if kind.endswith(".exe") else kind
+    if kind not in _PORT_FLAG:
+        raise ValueError(f"no OpenSSH program: {program!r}")
+    argv = [str(program), *options]
+    if kind == "ssh":
+        return argv + ["-T", _PORT_FLAG[kind], str(int(endpoint.port)), f"{user}@{endpoint.host}", *rest]
+    return argv + [_PORT_FLAG[kind], str(int(endpoint.port)), *rest]
+
+
+class SshFailed(OSError):
+    """OpenSSH itself failed (its exit status 255, or it was stopped), not the command on the board: it could not
+    connect or log in, the host key is unknown or changed, the framework's key file was refused, or the connection
+    broke. `reason`: the SSH reason code OpenSSH's words name (reasons.classify_ssh_output; "" when they name none),
+    `unknown_key`: the board's key is not in the framework's known_hosts yet, `output`: what OpenSSH printed (this
+    computer's words, which can quote the board's banner: kept apart, never in the message). A refused key file is a
+    problem on this computer: errno EACCES and the key's file name (reasons.local_problem)."""
+
+    def __init__(self, message: str, *, reason: str = "", unknown_key: bool = False, key_file: str = "",
+                 output: Sequence[str] = ()):
+        if key_file:
+            import errno
+            super().__init__(errno.EACCES, message, key_file)
+        else:
+            super().__init__(message)
+        self.reason, self.unknown_key, self.output = reason, unknown_key, list(output)
+
+    @classmethod
+    def of(cls, text: str, key_file: str = "") -> "SshFailed":
+        """The failure OpenSSH's words `text` describe. OpenSSH ignores a key file it refuses ("This private key will
+        be ignored") and goes on without it, so the board then refuses the login and OpenSSH's last words are
+        "Permission denied": when the framework's key file (`key_file`, named by its file name) is the one refused,
+        the cause is still this computer, not the board."""
+        from orchestrator.remote import reasons
+        output = [line for line in (text or "").splitlines() if line.strip()]
+        reason = reasons.classify_ssh_output(text) or ""
+        name = str(key_file).replace("\\", "/").rpartition("/")[2]
+        if reason == reasons.AUTH_FAILED and name and any(
+                name in line and any(needle in line for needle in _KEY_FILE_OUTPUT + _KEY_TOO_OPEN)
+                for line in output):
+            reason = ""   # the board refused the login because OpenSSH did not offer the framework's key
+        if not reason and any(needle in (text or "") for needle in _KEY_FILE_OUTPUT):
+            return cls("OpenSSH refuses the framework's SSH key file (other accounts may read it, or it is damaged)",
+                       key_file=key_file or "the framework's SSH key", output=output)
+        if not reason and any(needle in (text or "") for needle in _UNKNOWN_KEY_OUTPUT):
+            return cls("the board's host key is not in the framework's known_hosts", unknown_key=True, output=output)
+        if reason:
+            return cls(f"OpenSSH could not reach or log in to the board ({reason})", reason=reason, output=output)
+        return cls("OpenSSH lost the connection to the board or could not make it (its words are in the device "
+                   "output)", output=output)
+
+
+def _no_window() -> Dict[str, Any]:
+    """On Windows, OpenSSH (a console program) opens no console window when the GUI starts it."""
+    return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)} if os.name == "nt" else {}
+
+
+class _Readers:
+    """Reads a child's stdout and stderr in the background, each up to `limit` bytes plus one (more is too much)."""
+
+    def __init__(self, process: Any, limit: int):
+        self.limit, self.box = limit, {}
+        self.threads = [threading.Thread(target=self._read, args=(name, stream), daemon=True)
+                        for name, stream in (("out", process.stdout), ("err", process.stderr)) if stream is not None]
+        for thread in self.threads:
+            thread.start()
+
+    def _read(self, name: str, stream: Any) -> None:
+        try:
+            self.box[name] = read_limited(stream, self.limit)
+        except (OSError, ValueError):   # the pipe was closed under the reader (a kill)
+            self.box.setdefault(name, b"")
+
+    def too_much(self) -> bool:
+        return any(len(data) > self.limit for data in self.box.values())
+
+    def wait(self, deadline: float) -> bool:
+        """True when both are read before `deadline` (time.monotonic) and none read too much."""
+        while True:
+            alive = [t for t in self.threads if t.is_alive()]
+            if self.too_much() or not alive:
+                return not self.too_much() and not alive
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return False
+            alive[0].join(min(0.2, left))
+
+    @property
+    def out(self) -> bytes:
+        return self.box.get("out", b"")
+
+    @property
+    def err(self) -> bytes:
+        return self.box.get("err", b"")
+
+
+class _PipeWriter:
+    """The board's file as SystemSshTransport.open_write gives it: write() sends into `cat` on the board."""
+
+    def __init__(self, transport: "SystemSshTransport", process: Any, readers: _Readers):
+        self.transport, self.process, self.readers = transport, process, readers
+
+    def write(self, data: bytes) -> int:
+        try:
+            self.process.stdin.write(data)
+        except (OSError, ValueError):   # OpenSSH or the board's cat ended: its exit status says which
+            raise self.transport._write_failed(self.process, self.readers) from None
+        return len(data)
+
+    def finish(self) -> None:
+        try:
+            self.process.stdin.close()
+        except (OSError, ValueError):
+            raise self.transport._write_failed(self.process, self.readers) from None
+        # what is still in OpenSSH's buffers goes out first (on a dead network keepalive ends it within ~45 s)
+        status = self.transport._wait(self.process, self.readers, HASH_TIMEOUT)
+        failure = self.transport._failed(self.process, self.readers, status)
+        if failure is not None:
+            raise failure
+        if status != 0:
+            raise OSError(f"the device could not write the file (exit {status})")
+
+
+class SystemSshTransport(Transport):
+    """The Transport over this computer's OpenSSH client, for an installation without paramiko (decision A5). There
+    is no standing connection: every run() is one `ssh ... sh -c '<script>'` with openssh_options and a time limit,
+    stdin a pipe of ours or nothing (never this process's stdin: over MCP stdio that is the protocol stream).
+    open_write() streams a file into `cat` on the board (continued with `cat >>` after what arrived), stat_size() asks
+    the board for a file's size, alive() says whether the last call reached the board (False once OpenSSH itself
+    failed: the network dropped), close() ends every OpenSSH process still running (a cancel). OpenSSH checks the host
+    key against the framework's known_hosts on every call (StrictHostKeyChecking=yes), so host_key is None: OpenSSH does
+    not hand the key out, and a fingerprint the person was shown cannot be compared (RemoteSession refuses that)."""
+
+    def __init__(self, endpoint: Any, user: str, state_dir: Path, *, program: str = "ssh"):
+        self.endpoint, self.user, self.state_dir, self.program = endpoint, user, Path(state_dir), program
+        self._options: Optional[List[str]] = None
+        self._alive = False
+        self._closed = False
+        self._lock = threading.Lock()
+        self._running: List[Any] = []
+
+    # --- the OpenSSH processes ---
+
+    def options(self) -> List[str]:
+        if self._options is None:
+            self._options = openssh_options(self.state_dir)
+        return self._options
+
+    def argv(self, script: str) -> List[str]:
+        """The ssh command line of one script on the board (one `sh -c`)."""
+        return openssh_argv(self.program, self.endpoint, self.user, self.options(), sh_command(script))
+
+    def _start(self, argv: List[str], stdin: bool) -> Any:
+        with self._lock:
+            if self._closed:
+                raise SshFailed("the session with the board was closed")
+        process = subprocess.Popen(argv, stdin=subprocess.PIPE if stdin else subprocess.DEVNULL,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, **_no_window())
+        with self._lock:
+            self._running.append(process)
+            closed = self._closed
+        if closed:
+            self._kill(process)
+        return process
+
+    def _forget(self, process: Any, readers: Optional[_Readers] = None) -> None:
+        """The call is over: it is no longer one a close() ends, and the pipes of an ended process are closed once
+        its readers are done (a pipe a reader still reads stays open; it goes with the process object)."""
+        with self._lock:
+            self._running = [p for p in self._running if p is not process]
+        for thread in (readers.threads if readers is not None else []):
+            thread.join(2)
+        if process.poll() is None or (readers is not None and any(t.is_alive() for t in readers.threads)):
+            return
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None:
+                with contextlib.suppress(OSError, ValueError):
+                    stream.close()
+
+    @staticmethod
+    def _kill(process: Any) -> None:
+        try:
+            process.kill()
+        except Exception:  # noqa: BLE001 - it ended already
+            pass
+
+    def _wait(self, process: Any, readers: _Readers, timeout: float, deadline: Optional[float] = None) -> int:
+        """The exit status of `process` once its output is read, within `timeout` seconds (or by `deadline`, a
+        time.monotonic() of a call whose limit began earlier; TimeoutError after, the process ended); TooMuchOutput
+        when it printed more than the readers take."""
+        deadline = time.monotonic() + timeout if deadline is None else deadline
+        if not readers.wait(deadline):
+            self._kill(process)
+            if readers.too_much():
+                raise TooMuchOutput(f"the device sent more than {readers.limit} bytes")
+            raise TimeoutError(f"no answer from the device within {int(timeout)} s")
+        try:
+            return process.wait(timeout=max(0.1, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            self._kill(process)
+            raise TimeoutError(f"no answer from the device within {int(timeout)} s") from None
+
+    def _feed(self, process: Any, stdin: Iterable[bytes], timeout: float, deadline: float) -> None:
+        """Writes `stdin` into the pipe of `process` and closes it. A board that does not read it (the pipe stays
+        full, write() waits) ends the call at its time limit (`deadline`, time.monotonic()): OpenSSH is stopped and
+        TimeoutError raised, as paramiko's channel time limit ends a write."""
+        expired = threading.Event()
+
+        def stop() -> None:
+            expired.set()
+            self._kill(process)
+        watchdog = threading.Timer(max(0.0, deadline - time.monotonic()), stop)
+        watchdog.daemon = True
+        watchdog.start()
+        try:
+            for chunk in stdin:
+                process.stdin.write(chunk)
+            process.stdin.flush()
+        except (OSError, ValueError):   # OpenSSH ended early (or at the time limit): its exit status says why
+            pass
+        finally:
+            watchdog.cancel()
+            with contextlib.suppress(OSError, ValueError):
+                process.stdin.close()
+        if expired.is_set():
+            raise TimeoutError(f"no answer from the device within {int(timeout)} s")
+
+    def _failed(self, process: Any, readers: _Readers, status: Optional[int]) -> Optional[SshFailed]:
+        """SshFailed when OpenSSH itself failed or was stopped (then the session counts as dropped), else None."""
+        if self._closed:
+            self._alive = False
+            return SshFailed("the session with the board was closed")
+        if status is None or status < 0 or status == OPENSSH_FAILED:
+            self._alive = False
+            if status is None or status < 0:
+                return SshFailed("OpenSSH was stopped before the board answered")
+            return SshFailed.of(_text(readers.err), key_file=self._key_file())
+        self._alive = True
+        return None
+
+    def _key_file(self) -> str:
+        options = self._options or []
+        return options[options.index("-i") + 1] if "-i" in options else ""
+
+    def _write_failed(self, process: Any, readers: _Readers) -> OSError:
+        """Why writing into the board's `cat` stopped: OpenSSH failed (SshFailed, the network dropped), or the board's
+        `cat` ended with an error (a full disk: the connection is fine). The board's words stay out of the message."""
+        try:
+            status = self._wait(process, readers, 10)
+        except (TimeoutError, TooMuchOutput):
+            status = None
+        failure = self._failed(process, readers, status)
+        if failure is not None:
+            return failure
+        return OSError(f"the device could not write the file (exit {status})")
+
+    # --- the interface ---
+
+    def login(self) -> None:
+        """One `true` on the board: OpenSSH connects, checks the host key against the framework's known_hosts and logs
+        in with the framework key (SshFailed says why not)."""
+        self.run("true")
+
+    def run(self, script: str, *, stdin: Optional[Iterable[bytes]] = None, timeout: float = COMMAND_TIMEOUT,
+            limit: int = MAX_OUTPUT) -> Result:
+        """One `ssh ... sh -c '<script>'`: `stdin` is written into a pipe and closed, stdout and stderr are each read
+        up to `limit` bytes. The whole call ends after `timeout` seconds (TimeoutError); more output than `limit`
+        raises TooMuchOutput; a failure of OpenSSH itself (exit status 255) raises SshFailed."""
+        deadline = time.monotonic() + timeout
+        process = self._start(self.argv(script), stdin is not None)
+        readers = None
+        try:
+            readers = _Readers(process, limit)
+            if stdin is not None:
+                self._feed(process, stdin, timeout, deadline)
+            status = self._wait(process, readers, timeout, deadline)   # the limit covers the writing too
+        except BaseException:
+            self._kill(process)
+            raise
+        finally:
+            self._forget(process, readers)
+        failure = self._failed(process, readers, status)
+        if failure is not None:
+            raise failure
+        return Result(status, _text(readers.out), _text(readers.err))
+
+    def stat_size(self, path: str) -> Optional[int]:
+        q = shlex.quote(path)
+        result = self.run(f"if [ -f {q} ]; then wc -c < {q}; else echo none; fi")
+        answer = result.out.strip()
+        if result.status == 0 and answer == "none":
+            return None
+        if result.status == 0 and answer.isdigit():
+            return int(answer)
+        raise OSError(f"the device did not say the size of the file (exit {result.status})")
+
+    @contextlib.contextmanager
+    def open_write(self, path: str, offset: int = 0) -> Iterator[Any]:
+        """The file at `path` on the board, written through `cat` from a pipe: created anew, or continued after its
+        first `offset` bytes, which RemoteSession has just found on the board and checked (`cat >>`)."""
+        q = shlex.quote(path)
+        process = self._start(self.argv(f"cat > {q}" if not offset else f"cat >> {q}"), True)
+        readers = None
+        try:
+            readers = _Readers(process, MAX_OUTPUT)
+            writer = _PipeWriter(self, process, readers)
+            yield writer
+            writer.finish()
+        except BaseException:
+            self._kill(process)
+            raise
+        finally:
+            self._forget(process, readers)
+
+    def alive(self) -> bool:
+        return self._alive and not self._closed
+
+    @property
+    def host_key(self) -> Any:
+        return None
+
+    def close(self) -> None:
+        with self._lock:
+            self._closed = True
+            running, self._running = self._running, []
+        for process in running:
+            self._kill(process)
+
+
+__all__ = ["COMMAND_TIMEOUT", "HASH_TIMEOUT", "KEEPALIVE_COUNT", "KEEPALIVE_SECONDS", "LOGIN_TIMEOUT", "MAX_OUTPUT",
+           "OPENSSH_FAILED", "PARAMIKO_AVAILABLE", "ParamikoTransport", "Result", "SshFailed", "SystemSshTransport",
+           "TooMuchOutput", "Transport", "available", "config_value", "imported_paramiko", "open_client",
+           "openssh_argv", "openssh_options", "paramiko_module", "paramiko_quiet", "read_limited", "remote_location",
+           "sh_command", "timed_out"]
