@@ -1541,7 +1541,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   einem Bauer (`openssh_argv`, `openssh_options`; `ssh_trust.system_ssh_options` ist sein alter Name): nur der
   Schlüssel und die known_hosts des Frameworks, nie eine Frage und nie ein neuer Schlüssel, wie bisher, jetzt auch ein
   Zeitlimit für die Anmeldung (`ConnectTimeout`) und Keepalive (`ServerAliveInterval`, `ServerAliveCountMax`), jeder
-  Befehl als ein `sh -c` mit Zeitlimit und Ausgabegrenze, und `UserKnownHostsFile` in Anführungszeichen: Ein
+  Befehl als ein `sh -c` mit Zeitlimit (das auch gilt, während die Eingabe des Befehls geschrieben wird) und
+  Ausgabegrenze, und `UserKnownHostsFile` in Anführungszeichen: Ein
   Zustandsordner mit einem Leerzeichen im Pfad (ein Windows-Kontoname wie „Jane Doe“) teilte die known_hosts des
   Frameworks in zwei Dateien, die es nicht gibt, sodass der Schlüssel jedes Boards als unbekannt galt. Ein Passwort
   geht nicht mehr stillschweigend verloren: OpenSSH fragt nie danach, also meldet sich das Deployment mit dem

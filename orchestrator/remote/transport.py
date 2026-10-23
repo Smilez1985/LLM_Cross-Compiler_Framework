@@ -571,10 +571,11 @@ class SystemSshTransport(Transport):
         except Exception:  # noqa: BLE001 - it ended already
             pass
 
-    def _wait(self, process: Any, readers: _Readers, timeout: float) -> int:
-        """The exit status of `process` once its output is read, within `timeout` seconds (TimeoutError after, the
-        process ended); TooMuchOutput when it printed more than the readers take."""
-        deadline = time.monotonic() + timeout
+    def _wait(self, process: Any, readers: _Readers, timeout: float, deadline: Optional[float] = None) -> int:
+        """The exit status of `process` once its output is read, within `timeout` seconds (or by `deadline`, a
+        time.monotonic() of a call whose limit began earlier; TimeoutError after, the process ended); TooMuchOutput
+        when it printed more than the readers take."""
+        deadline = time.monotonic() + timeout if deadline is None else deadline
         if not readers.wait(deadline):
             self._kill(process)
             if readers.too_much():
@@ -585,6 +586,31 @@ class SystemSshTransport(Transport):
         except subprocess.TimeoutExpired:
             self._kill(process)
             raise TimeoutError(f"no answer from the device within {int(timeout)} s") from None
+
+    def _feed(self, process: Any, stdin: Iterable[bytes], timeout: float, deadline: float) -> None:
+        """Writes `stdin` into the pipe of `process` and closes it. A board that does not read it (the pipe stays
+        full, write() waits) ends the call at its time limit (`deadline`, time.monotonic()): OpenSSH is stopped and
+        TimeoutError raised, as paramiko's channel time limit ends a write."""
+        expired = threading.Event()
+
+        def stop() -> None:
+            expired.set()
+            self._kill(process)
+        watchdog = threading.Timer(max(0.0, deadline - time.monotonic()), stop)
+        watchdog.daemon = True
+        watchdog.start()
+        try:
+            for chunk in stdin:
+                process.stdin.write(chunk)
+            process.stdin.flush()
+        except (OSError, ValueError):   # OpenSSH ended early (or at the time limit): its exit status says why
+            pass
+        finally:
+            watchdog.cancel()
+            with contextlib.suppress(OSError, ValueError):
+                process.stdin.close()
+        if expired.is_set():
+            raise TimeoutError(f"no answer from the device within {int(timeout)} s")
 
     def _failed(self, process: Any, readers: _Readers, status: Optional[int]) -> Optional[SshFailed]:
         """SshFailed when OpenSSH itself failed or was stopped (then the session counts as dropped), else None."""
@@ -627,21 +653,14 @@ class SystemSshTransport(Transport):
         """One `ssh ... sh -c '<script>'`: `stdin` is written into a pipe and closed, stdout and stderr are each read
         up to `limit` bytes. The whole call ends after `timeout` seconds (TimeoutError); more output than `limit`
         raises TooMuchOutput; a failure of OpenSSH itself (exit status 255) raises SshFailed."""
+        deadline = time.monotonic() + timeout
         process = self._start(self.argv(script), stdin is not None)
         readers = None
         try:
             readers = _Readers(process, limit)
             if stdin is not None:
-                try:
-                    for chunk in stdin:
-                        process.stdin.write(chunk)
-                    process.stdin.flush()
-                except (OSError, ValueError):   # OpenSSH ended early: its exit status says why
-                    pass
-                finally:
-                    with contextlib.suppress(OSError, ValueError):
-                        process.stdin.close()
-            status = self._wait(process, readers, timeout)
+                self._feed(process, stdin, timeout, deadline)
+            status = self._wait(process, readers, timeout, deadline)   # the limit covers the writing too
         except BaseException:
             self._kill(process)
             raise
