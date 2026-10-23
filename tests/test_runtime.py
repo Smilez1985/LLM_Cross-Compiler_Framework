@@ -530,6 +530,96 @@ class FakeSession:
         return FakeResponse(200, data, {"Content-Length": str(len(data))}, final, cut)
 
 
+def self_signed_certificate(folder: Path):
+    """A throwaway certificate for 127.0.0.1 (its own CA) and its key, as PEM files in `folder`."""
+    import datetime
+    import ipaddress
+    x509 = pytest.importorskip("cryptography.x509")
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "127.0.0.1")])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    public = key.public_key()
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(public)
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - datetime.timedelta(minutes=5)).not_valid_after(now + datetime.timedelta(days=1))
+            .add_extension(x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]),
+                           critical=False)
+            .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+            .add_extension(x509.KeyUsage(digital_signature=True, key_cert_sign=True, crl_sign=True,
+                                         content_commitment=False, key_encipherment=False, data_encipherment=False,
+                                         key_agreement=False, encipher_only=False, decipher_only=False), critical=True)
+            .add_extension(x509.SubjectKeyIdentifier.from_public_key(public), critical=False)
+            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(public), critical=False)
+            .sign(key, hashes.SHA256()))
+    cert_file, key_file = folder / "tls-cert.pem", folder / "tls-key.pem"
+    cert_file.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_file.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                           serialization.NoEncryption()))
+    return cert_file, key_file
+
+
+@contextlib.contextmanager
+def tls_server(cert: Path, key: Path, body: bytes, drops: int = 0):
+    """An HTTPS server on 127.0.0.1 that serves `body` at /blob; its first `drops` connections end during the TLS
+    handshake (the ClientHello is read, then the connection is closed without an answer, as a flapping link or a proxy
+    ends it). `connections` counts every connection."""
+    import socket
+    import ssl
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(cert, key)
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(5)
+    listener.settimeout(20)
+    state = SimpleNamespace(url=f"https://127.0.0.1:{listener.getsockname()[1]}/blob", connections=0)
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    def serve():
+        left = drops
+        while True:
+            try:
+                raw, address = listener.accept()
+            except OSError:
+                return
+            state.connections += 1
+            raw.settimeout(10)
+            try:
+                if left > 0:
+                    left -= 1
+                    raw.recv(65536)
+                    time.sleep(0.05)
+                    raw.shutdown(socket.SHUT_WR)
+                    time.sleep(0.2)
+                    continue
+                conn = context.wrap_socket(raw, server_side=True)
+                Handler(conn, address, None)
+                conn.close()
+            except (OSError, ssl.SSLError):
+                pass
+            finally:
+                raw.close()
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    try:
+        yield state
+    finally:
+        listener.close()
+        thread.join(5)
+
+
 def runtime_catalog(model_bytes: bytes = b"", assets=None, models=None, **server) -> RuntimeCatalog:
     return RuntimeCatalog.model_validate({
         "llama_cpp": {"build": "b1", "base_url": "https://example.invalid/releases/", "assets": assets or [
@@ -678,6 +768,53 @@ class TestDownloads:
         with pytest.raises(LocalRuntimeError, match="TLS certificate of objects.cdn.invalid could not") as err:
             self.fetch(tmp_path, session, b"abc")
         assert "Signature" not in str(err.value) and "example.invalid" not in str(err.value)
+
+    def test_a_tls_connection_that_ends_during_its_handshake_is_retried_against_a_real_server(self, tmp_path):
+        """Review of stage C wave 3: every TLS error was taken for a certificate that cannot be verified. A connection
+        that a flapping link or a proxy ends during its TLS handshake (requests raises SSLError(SSLEOFError) for it)
+        ended the download at once, with the certificate text and the advice to set REQUESTS_CA_BUNDLE, although the
+        certificate is fine. It is a dropped connection and is retried; a certificate the client does not trust is
+        still refused at once, by the host's name only."""
+        data = os.urandom(300000)
+        cert, key = self_signed_certificate(tmp_path)
+        with tls_server(cert, key, data, drops=1) as server:
+            session = requests.Session()
+            session.trust_env, session.verify = False, str(cert)
+            rt = LocalLLMRuntime(data_dir=tmp_path / "state", models_dir=tmp_path / "models",
+                                 catalog=runtime_catalog(), hardware=CPU_HW, session=session, sleep=lambda s: None)
+            path = rt._fetch(server.url, tmp_path / "dl" / "blob.bin", len(data), sha(data))
+            assert path.read_bytes() == data and server.connections == 2
+        with tls_server(cert, key, data, drops=0) as server:
+            session = requests.Session()
+            session.trust_env = False   # the system's CAs: they do not know this certificate
+            rt = LocalLLMRuntime(data_dir=tmp_path / "state2", models_dir=tmp_path / "models",
+                                 catalog=runtime_catalog(), hardware=CPU_HW, session=session, sleep=lambda s: None)
+            with pytest.raises(LocalRuntimeError, match="TLS certificate of 127.0.0.1 could not be verified"):
+                rt._fetch(server.url, tmp_path / "dl2" / "blob.bin", len(data), sha(data))
+            assert server.connections == 1
+
+    def test_a_tls_record_that_breaks_mid_way_resumes(self, tmp_path):
+        import ssl
+        import urllib3
+        data = os.urandom(20000)
+        session = FakeSession({self.URL: data})
+        get = session.get
+
+        def broken_once(url, headers=None, **kw):
+            response = get(url, headers=headers, **kw)
+            if len(session.calls) == 1:
+                body = response.body
+
+                def iter_content(chunk_size=1):
+                    yield body[:6000]
+                    raise requests.exceptions.SSLError(urllib3.exceptions.SSLError(ssl.SSLError(
+                        1, "[SSL: DECRYPTION_FAILED_OR_BAD_RECORD_MAC] decryption failed or bad record mac")))
+                response.iter_content = iter_content
+            return response
+        session.get = broken_once
+        _, path, sleeps = self.fetch(tmp_path, session, data)
+        assert path.read_bytes() == data
+        assert session.calls == [(self.URL, None), (self.URL, "bytes=6000-")] and len(sleeps) == 1
 
     @pytest.mark.parametrize("error", [requests.exceptions.TooManyRedirects("30 redirects"),
                                        requests.exceptions.InvalidURL("bad")])
