@@ -655,6 +655,10 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
             pass
     plan.image_build = ("a Docker image for the target is built first if none exists yet; the image build runs with "
                         "network access on this computer, outside the build sandbox (size unknown, first build only)")
+    from orchestrator.utils.locality import offline_mode as _offline
+    if _offline(getattr(framework, "config", None)):
+        plan.image_build = ("offline mode: no image is pulled or built; only an image of this target built earlier on "
+                            "this computer with the same settings is used, and without one the build stops")
     pairs = _target_image_pairs(target_folder)
     if plan.support_level != "official" or plan.target_trust != "shipped" or not all(_official(i) for _, i in pairs):
         plan.base_image = _base_image(target_folder)

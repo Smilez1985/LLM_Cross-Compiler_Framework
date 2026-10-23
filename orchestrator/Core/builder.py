@@ -15,6 +15,7 @@ Updates v2.4.0-IMatrix:
 
 import os
 import sys
+import hashlib
 import json
 import subprocess
 import threading
@@ -68,6 +69,10 @@ def ensure_directory(path: Path):
         path.mkdir(parents=True, exist_ok=True)
 
 class ValidationError(Exception): pass
+
+
+class OfflineImageMissing(RuntimeError):
+    """Offline mode and no image of the target built earlier from the same inputs: nothing is pulled or built."""
 
 
 class BuildCancelled(Exception):
@@ -129,6 +134,9 @@ from orchestrator.Core.build_formats import ModelFormat, OptimizationLevel  # no
 
 TERMINAL_STATES = ("completed", "failed", "cancelled")
 IMAGE_LABEL = "org.llm-framework.target"
+# What a target image was built from (its target folder, Dockerfile and build arguments, as one sha256): an offline
+# build uses only an image of the target built earlier from exactly these (DECISIONS round 24 L-NET, round 25).
+INPUTS_LABEL = "org.llm-framework.inputs"
 # The stable name of each target's newest build image (llm-framework/<target>:last-build): the next build reuses its
 # layers. The builder never deletes an image (round 7 item 12); older ones are listed for the person.
 LAST_BUILD_TAG = "last-build"
@@ -925,8 +933,11 @@ class BuildEngine:
                 buildargs["USER_ID"] = str(os.getuid())
                 buildargs["GROUP_ID"] = str(os.getgid())
 
-            labels = {IMAGE_LABEL: config.target_arch}
+            labels = {IMAGE_LABEL: config.target_arch, INPUTS_LABEL: self._image_inputs(config, path, buildargs)}
             self._build_images[config.build_id] = tag
+            from orchestrator.utils.locality import offline_mode
+            if offline_mode(self.config):   # no pull and no build-time download: an image already on this computer
+                return self._offline_image(config, progress, tag, labels[INPUTS_LABEL], path)
             if self._buildkit_available():
                 self._build_with_buildkit(tag, path, buildargs, progress, labels)
             else:
@@ -947,8 +958,51 @@ class BuildEngine:
             
             return self.docker_client.images.get(tag)
             
+        except OfflineImageMissing:
+            raise
         except Exception as e:
             raise RuntimeError(f"Image build failed: {e}\n{self._log_tail(progress, 'BUILD: ')}")
+
+    @staticmethod
+    def _image_inputs(config: BuildConfiguration, dockerfile: Path, buildargs: Dict[str, str]) -> str:
+        """One sha256 of what the target image is built from: the target, its folder's content digest, the Dockerfile
+        and the build arguments (INPUTS_LABEL)."""
+        try:
+            text = dockerfile.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        data = {"target": getattr(config, "target_arch", ""), "pack": getattr(config, "target_pack_sha256", "") or "",
+                "dockerfile": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                "args": sorted((str(k), str(v)) for k, v in buildargs.items())}
+        return hashlib.sha256(json.dumps(data, sort_keys=True).encode("utf-8")).hexdigest()
+
+    def _offline_image(self, config: BuildConfiguration, progress: BuildProgress, tag: str, inputs: str,
+                       dockerfile: Path) -> Image:
+        """Offline mode: building the target image would pull its base images and download what its Dockerfile
+        fetches, so nothing is built. The image of this target built earlier from exactly the same inputs (its
+        INPUTS_LABEL) is used, named for this build like a built one; without one the build stops naming the images
+        and the step to take while online (OfflineImageMissing)."""
+        found = list(self.docker_client.images.list(
+            filters={"label": [f"{IMAGE_LABEL}={config.target_arch}", f"{INPUTS_LABEL}={inputs}"]}) or [])
+        if not found:
+            from orchestrator.Core.community_pack import dockerfile_bases
+            try:
+                bases = dockerfile_bases(dockerfile.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                bases = []
+            shown = ", ".join(dict.fromkeys(bases)) or "its base image"
+            raise OfflineImageMissing(
+                f"Offline mode is on, and the image of the target {config.target_arch} for these settings is not on "
+                f"this computer. Building it pulls {shown} and downloads what its Dockerfile fetches, which offline "
+                "mode does not allow. Start this build once with offline mode off; later builds with the same "
+                "settings use that image offline.")
+        image = max(found, key=lambda i: str((getattr(i, "attrs", None) or {}).get("Created") or ""))
+        repository, name = tag.rsplit(":", 1)
+        image.tag(repository, name)
+        progress.add_log(f"Offline mode: using the image of {config.target_arch} built earlier from the same settings "
+                         f"({getattr(image, 'short_id', '') or 'an image on this computer'}); nothing is pulled or "
+                         "downloaded.")
+        return self.docker_client.images.get(tag)
 
     def _llama_cpp_args(self, config: BuildConfiguration, progress: BuildProgress, dockerfile: Path) -> Dict[str, str]:
         """LLAMA_CPP_TAG and LLAMA_CPP_COMMIT from the pin, and LLAMA_CMAKE_ARGS from the build recipe's plan for the
