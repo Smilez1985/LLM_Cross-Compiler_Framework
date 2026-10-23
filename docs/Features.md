@@ -2590,7 +2590,9 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   trusted devices as by the CLI) and **Import from File (USB/Disk)...** (`--import`, asking for the board's name).
   It keeps a copy of each result in `<cache_dir>/probes/` for the target match. The GUI's SSH scan runs the same
   remote probe as `llm-cli scan --device`: the script travels over the SSH channel, so it also works on boards that
-  mount `/tmp` with `noexec`, and the profile is kept under the board's ID.
+  mount `/tmp` with `noexec`, and the profile is kept under the board's ID. When the board's network drops during
+  the scan, the log says that it waits for the board and when it answers again, and **Cancel scan** ends the scan,
+  also during that wait; nothing is stored then.
   Machines without network access run a probe by hand ([README](../README.md#probing-the-boards-hardware)).
 - **Ditto's local model** uses the same probe: the hardware its build and model choice are based on comes from a
   probe profile, and free RAM and free VRAM are read again at every start.

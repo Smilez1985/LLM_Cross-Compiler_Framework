@@ -238,6 +238,44 @@ class TestScanDevice:
             scan_device(tmp_path / "state", "192.0.2.10", 22, "dietpi", FakeHostKey(), label="x" * 65)
         assert raised.value.kind == "save"
 
+    def test_a_wait_for_the_board_is_said_and_the_cancel_ends_it_at_once(self, tmp_path, ssh, monkeypatch):
+        """Stage C wave 2 (remote-callers + N5): the probe's session waits up to 300 s for a board whose network
+        dropped. The caller's on_event gets the wait (the person's line through remote/text.py wait_lines, as the
+        Boards window says it) and its CancelToken ends the wait at once: DeviceScanError "cancelled", nothing
+        stored."""
+        from orchestrator.remote import reasons as remote_reasons
+        from orchestrator.remote.session import CancelToken
+        from orchestrator.remote.text import wait_lines
+        from orchestrator.runtime import remote_probe as rp
+        from orchestrator.runtime.profile import ProfileStore
+        from orchestrator.runtime.scan_steps import DeviceScanError, scan_device
+        monkeypatch.setattr(remote_reasons, "check_port", lambda host, port=22, timeout=3.0: remote_reasons.HOST_DOWN)
+        monkeypatch.setattr(rp, "probe_over_ssh", lambda session: session.wait_for_host("command"))  # a drop
+        cancel, lines, kinds = CancelToken(), [], []
+        say = wait_lines(lines.append, "192.0.2.10", "en")
+
+        def on_event(event):
+            kinds.append(event.kind)
+            say(event)
+            if event.kind == "waiting":
+                cancel.cancel()   # the person's Cancel while the scan waits for the board
+        with pytest.raises(DeviceScanError) as raised:
+            scan_device(tmp_path / "state", "192.0.2.10", 22, "dietpi", FakeHostKey(), cancel=cancel,
+                        on_event=on_event)
+        assert raised.value.kind == "cancelled" and kinds == ["waiting"], kinds
+        assert len(lines) == 1 and lines[0].startswith("Waiting for the board at 192.0.2.10"), lines
+        assert ProfileStore(tmp_path / "state").list_devices() == [] and ssh["closed"] >= 1
+
+    def test_a_cancel_before_the_probe_starts_stores_nothing(self, tmp_path, ssh):
+        from orchestrator.remote.session import CancelToken
+        from orchestrator.runtime.profile import ProfileStore
+        from orchestrator.runtime.scan_steps import DeviceScanError, scan_device
+        cancel = CancelToken()
+        cancel.cancel()
+        with pytest.raises(DeviceScanError) as raised:
+            scan_device(tmp_path / "state", "192.0.2.10", 22, "dietpi", FakeHostKey(), cancel=cancel)
+        assert raised.value.kind == "cancelled" and ProfileStore(tmp_path / "state").list_devices() == []
+
     def test_the_audit_log_is_opened_only_for_the_record(self, tmp_path, ssh):
         """Review (w5-deploy-v): the CLI opened its audit log (the OS keyring's audit key, created on first use) only
         after a successful probe; the extracted step got it before the login. `audit_factory` opens it when the
