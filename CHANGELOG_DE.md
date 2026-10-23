@@ -2824,13 +2824,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **`install.sh` installiert Docker nur mit Prüfsumme** (DECISIONS Runde 23, Punkt 3): Fehlte Docker, lud der
   Installer `get.docker.com` herunter und führte es ungeprüft als root aus. Jetzt kommt Docker nur aus Dockers
   offiziellem apt-Repository unter Debian, Ubuntu und Raspberry Pi OS (32 Bit bekommt die armhf-Pakete von Debian,
-  wie Dockers Anleitung es ab Engine 29 sagt). Der Signaturschlüssel wird in einen Wegwerf-Schlüsselbund gelesen und
-  nur vertraut, wenn der Download genau einen Schlüssel enthält, dessen Hauptfingerabdruck der aus Dockers
-  Installationsanleitung ist (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`, mit Quelle fest im Skript); apt
-  prüft danach jedes Paket gegen die signierten Paketlisten. Vor der Prüfung wird nichts geschrieben, und die Prüfung
-  startet keinen gpg-agent, der den Installer überdauert. Jedes andere System, ARMv6 (Raspberry Pi 1, Zero), ein
-  Schlüssel, der nicht passt oder sich nicht laden lässt, und ein scheiterndes apt halten mit klaren Worten und dem
-  Link zu Dockers Anleitung an; eine neue apt-Quelle, an der
+  wie Dockers Anleitung es ab Engine 29 sagt). Systeme, die auf Ubuntu oder Debian aufbauen (`ID_LIKE`: Linux Mint,
+  Pop!_OS, LMDE und ähnliche), die `get.docker.com` ebenfalls bediente, bekommen wie bisher die Pakete der Version,
+  auf der sie aufbauen (`UBUNTU_CODENAME`; `DEBIAN_CODENAME` oder `/etc/debian_version`, das auch Debian testing
+  seinen Codenamen gibt). Der Signaturschlüssel wird in einen Wegwerf-Schlüsselbund gelesen und nur vertraut, wenn
+  der Download genau einen Schlüssel enthält, dessen Hauptfingerabdruck der aus Dockers Installationsanleitung ist
+  (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`, mit Quelle fest im Skript); apt prüft danach jedes Paket
+  gegen die signierten Paketlisten. Vor der Prüfung wird nichts geschrieben, und die Prüfung startet keinen
+  gpg-agent, der den Installer überdauert. Eine apt-Quelle für Docker, die es schon gibt, bleibt, wie sie ist; eine
+  auskommentierte oder mit `Enabled: no` (so hinterlässt sie ein Versions-Upgrade von Ubuntu) zählt nicht. Jedes
+  andere System, ARMv6 (Raspberry Pi 1, Zero), ein Schlüssel, der nicht passt oder sich nicht laden lässt, und ein
+  scheiterndes apt halten mit klaren Worten und dem Link zu Dockers Anleitung an; eine neue apt-Quelle, an der
   `apt-get update` scheitert, wird wieder entfernt. Kein heruntergeladenes Skript läuft mehr. Tests führen den
   Installer in einer Sandbox mit falschem curl, apt-get, dpkg und uname und einem echten, für den Test erzeugten
   gpg-Schlüssel aus; `install.sh` ist ohne ShellCheck-Befund (die beiden Befunde der Basis sind mit behoben).
