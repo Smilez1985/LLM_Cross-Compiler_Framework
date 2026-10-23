@@ -2119,10 +2119,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   outside the lock (each file has its own); under the lock the install checks again whether another process
   installed the same build meanwhile (then it is used as it is), whether a server runs from it, and fetches the
   archives again if a concurrent install removed them; a running server is still refused before anything is
-  downloaded. The exit handler of a server tied to its process (`start(tie_to_process=True)`) waits at most 5 s for
+  downloaded, and the folders an interrupted install left behind are still removed (under the lock) before the space
+  for unpacking is checked (review of port-runtime: the check had moved in front of that removal). The exit handler of a server tied to its process (`start(tie_to_process=True)`) waits at most 5 s for
   the lock and then still ends the exact process it started (pid, start time and program checked), instead of
   keeping the exiting process alive behind another start. Regression tests: `tests/test_runtime.py`
   `test_downloads_do_not_hold_the_runtime_lock`, `test_an_install_finished_meanwhile_by_another_process`,
+  `test_the_leftovers_of_an_interrupted_install_are_removed_before_the_space_check`,
   `test_exit_handler_does_not_wait_for_a_busy_lock`.
 - **A pinned download that cannot work says why at once** (chain port-runtime, from the review of the managed
   llama-server; `orchestrator/utils/download.py` `PinnedDownloader`, shared by the local runtime's builds and models
