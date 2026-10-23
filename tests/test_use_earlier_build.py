@@ -332,3 +332,60 @@ def test_the_real_audit_log_takes_the_replacement_and_the_old_downloads_deletion
     result = ao.copy_artifact(fw, plan, replace=accept(plan.replaces, "cli", "permanent"), audit=log)
     assert Path(result.folder) == plan.target and result.notes == []
     assert sha(plan.target / "m.gguf") == sha(earlier / "m.gguf")
+
+
+# --- an AI never reaches "Use" (stage C wave 3c: the guards of offline-lan and deploy-flow over the merged modules) --
+
+# "Use" with its replacement of what lay under the build's name (the person's accepted deletion) and the copy into the
+# person's folder: the core step and the CLI's and the GUI's callers (tests/test_deploy_flow.py PERSON_ONLY_NAMES
+# carries the same names for the files an AI calls directly).
+USE_NAMES = {"plan_copy", "copy_artifact", "_replace_with_copy", "CopyPlan", "CopyWorker", "ask_and_use",
+             "_use_earlier", "_ask_earlier"}
+# The one module an AI can reach that names them: their definition (artifact_output comes in through the deployment
+# manager's package paths).
+USE_HOME = "orchestrator.Core.artifact_output"
+
+
+def use_references(source: str):
+    """Every name, attribute, import or plain string (getattr(module, "copy_artifact")) naming a part of Use or the
+    GUI's Use module, as test_zoo_maintainer's guard reads them."""
+    import ast
+    found = []
+    for node in ast.walk(ast.parse(source)):
+        names = []
+        if isinstance(node, ast.Attribute):
+            names.append(node.attr)
+        elif isinstance(node, ast.Name):
+            names.append(node.id)
+        elif isinstance(node, ast.ImportFrom):
+            names += [node.module or ""] + [a.name for a in node.names]
+        elif isinstance(node, ast.Import):
+            names += [a.name for a in node.names]
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            names.append(node.value)
+        found += [(node.lineno, n) for n in names if n in USE_NAMES or n.split(".")[-1] == "artifact_save"]
+    return found
+
+
+def test_no_module_an_ai_can_reach_names_use_or_imports_the_gui_s_use():
+    """Like the person's opt-outs (tests/test_local_network.py) and the person's board steps
+    (tests/test_deploy_flow.py, tests/test_board_steps.py): no module an AI can reach, followed through every import
+    (tests/test_remote_trust.py ai_reachable_closure), imports gui/artifact_save.py or names the copy of an earlier
+    build and its replacement, so an AI can neither copy into the person's folder nor replace what lies there."""
+    import test_layering
+    from test_remote_trust import ai_reachable_closure, path_to
+    via = ai_reachable_closure(test_layering.build_graph().edges())
+    assert "orchestrator.tools.tools_deploy" in via and USE_HOME in via, "the closure reaches the core module"
+    assert "orchestrator.gui.artifact_save" not in via, path_to(via, "orchestrator.gui.artifact_save")
+    modules = test_layering.all_modules()
+    found = [f"{module}:{line} {name} ({path_to(via, module)})"
+             for module in sorted(via) if module != USE_HOME and module in modules
+             for line, name in use_references(modules[module].read_text(encoding="utf-8"))]
+    assert found == []
+
+
+def test_the_use_guard_bites():
+    source = ("from orchestrator.gui import artifact_save\nfrom orchestrator.Core.artifact_output import plan_copy\n"
+              "def f(ao, fw, plan):\n    getattr(ao, 'copy_artifact')(fw, plan)\n    return ao.CopyPlan\n")
+    assert sorted(set(use_references(source))) == [(1, "artifact_save"), (2, "plan_copy"), (4, "copy_artifact"),
+                                                   (5, "CopyPlan")]

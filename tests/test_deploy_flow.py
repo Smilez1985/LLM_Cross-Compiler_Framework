@@ -648,9 +648,14 @@ def test_the_ai_s_deploy_reaches_no_person_hook_from_any_ai_reachable_module():
 
 # The person's board steps of both chains: deploy-flow's deploy of a build with its trusted record and audit, and
 # trust-followups' key change with the move of the board's data (P6) and the deprecated trust_host delegate (P5).
+# Stage C wave 3c (cli-gui, round 23 item 9): "Use" of an earlier build, the copy into the person's folder and the
+# replacement of what lay under the build's name with the person's accepted deletion (artifact_output's core step, the
+# CLI's and the GUI's callers; tests/test_use_earlier_build.py follows every import as well).
 PERSON_ONLY_NAMES = {"deploy_build", "remember_deployed", "device_audit", "change_board", "plan_board_change",
                      "moved_lines", "BoardChange", "BoardDataMove", "copy_deploys", "drop_deploys", "copy_board_rows",
-                     "drop_board_rows", "trust_host", "trust_presented_key", "PersonChannel", "replace_key"}
+                     "drop_board_rows", "trust_host", "trust_presented_key", "PersonChannel", "replace_key",
+                     "plan_copy", "copy_artifact", "_replace_with_copy", "CopyPlan", "CopyWorker", "ask_and_use",
+                     "_use_earlier", "_ask_earlier"}
 
 
 def person_only_references(source: str):
