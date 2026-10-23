@@ -1469,6 +1469,33 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **`install.sh` auf jeder Linux-Familie, über die Paketverwaltung der Familie** (DECISIONS Runde 24 PKG): Der Installer
+  erkennt die Familie aus `ID` und `ID_LIKE` in `/etc/os-release` mit der Tabelle der Hardware-Untersuchung und
+  installiert, was er braucht (Python 3.11 bis 3.14, `rsync`, Docker), mit `apt`, `dnf`, `zypper`, `pacman` oder `apk`,
+  unter den echten Paketnamen der Distribution; vorher kannte er nur `apt` (auch für Python und `rsync`: `rsync` wurde
+  mit `apt-get` installiert, und ein Fehler blieb unbemerkt). Python: das `python3` der Distribution und, wo das älter
+  als 3.11 ist (RHEL 8/9 und ihre Nachbauten, openSUSE Leap 15), eines mit Nummer im Namen (`python3.13`, `python3.12`,
+  ...; `python313`, `python312`, ...), mit dem dann die virtuelle Umgebung angelegt wird. Docker: Dockers apt-Repository
+  wie bisher; unter Fedora, RHEL und CentOS Stream Dockers rpm-Repository, dessen Schlüssel nur mit dem Fingerabdruck
+  aus Dockers Installationsanleitung vertraut wird (`060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35`, mit Quelle fest
+  im Skript, geprüft wie der apt-Schlüssel), wobei die Repository-Datei nur diesen geprüften Schlüssel nennt und dnf
+  jedes Paket prüft; wo Docker kein Repository veröffentlicht, das Paket der Distribution (`moby-engine` auf anderen
+  Systemen, die auf Fedora aufbauen, `docker` unter Amazon Linux, openSUSE und SLES, wo das Containers Module mit
+  `SUSEConnect` eingeschaltet wird, und unter Arch, Manjaro und EndeavourOS mit `docker-buildx`; `podman-docker` unter
+  Rocky Linux, AlmaLinux und Oracle Linux, mit Podmans Docker-kompatibler Schnittstelle, für die Person eingeschaltet,
+  und dem genannten `DOCKER_HOST`; `docker` aus Alpines Repository community). Keine Paketverwaltung wird angewiesen,
+  eine Signatur zu überspringen oder einen Schlüssel von selbst zu übernehmen, und `pacman -Sy` (ein Teil-Upgrade) läuft
+  nie. Unter Alpine kann das Framework selbst nicht laufen (onnxruntime, Teil seiner festgelegten Pakete, gibt es nicht
+  für musl): Der Installer hält nach Docker an und verweist auf das Framework-Image, dessen Build-Skript dort auch `git`
+  und GNU `tar` braucht (das `tar` von busybox kennt kein `--null`: `apk add git tar`). Jede andere Familie (Gentoo, Void,
+  NixOS, ...) hält, wenn etwas installiert werden muss, mit der Familie und den Anleitungen an. Eine eigene
+  `docker-ce.repo` der Person, in der Dockers Repository ausgeschaltet ist, wird nie ersetzt oder entfernt (der
+  Installer hält an, bevor er etwas verändert, und sagt, wie man es einschaltet), und wo der Befehl `docker` Podman ist
+  (ein zweiter Lauf, oder früher installiertes `podman-docker`), geht der Installer Podmans Weg statt über die Gruppe
+  `docker`. Neu: `./install.sh --dry-run` zeigt den Plan (Familie, Paketverwaltung, Pakete, Repositorys,
+  Fingerabdrücke der Schlüssel), ohne etwas zu verändern, zu laden oder aufzurufen und ohne Root-Rechte, mit Exit-Code
+  0 oder 1, wie die Installation enden würde. Tests führen den Installer gegen die `/etc/os-release`-Dateien echter
+  Distributionen mit nachgebauten Paketverwaltungen aus (`tests/test_install_distros.py`).
 - **Wissen gehört immer zu einem Thema oder einem Target** (DECISIONS Runde 23 Punkte 1 und 8): Ein installiertes
   Wissenspaket liegt in `community/knowledge/<Thema oder Target>/<Paket>/` (früher installierte Pakete bleiben, wo sie
   sind), und jeder Auszug, den es bringt, trägt sein Thema oder Target. Ein Wissenspaket nennt sein Thema oder Target
@@ -3078,23 +3105,24 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
-- **`install.sh` installiert Docker nur mit Prüfsumme** (DECISIONS Runde 23, Punkt 3): Fehlte Docker, lud der
-  Installer `get.docker.com` herunter und führte es ungeprüft als root aus. Jetzt kommt Docker nur aus Dockers
-  offiziellem apt-Repository unter Debian, Ubuntu und Raspberry Pi OS (32 Bit bekommt die armhf-Pakete von Debian,
-  wie Dockers Anleitung es ab Engine 29 sagt). Systeme, die auf Ubuntu oder Debian aufbauen (`ID_LIKE`: Linux Mint,
-  Pop!_OS, LMDE und ähnliche), die `get.docker.com` ebenfalls bediente, bekommen wie bisher die Pakete der Version,
-  auf der sie aufbauen (`UBUNTU_CODENAME`; `DEBIAN_CODENAME` oder `/etc/debian_version`, das auch Debian testing
-  seinen Codenamen gibt). Der Signaturschlüssel wird in einen Wegwerf-Schlüsselbund gelesen und nur vertraut, wenn
-  der Download genau einen Schlüssel enthält, dessen Hauptfingerabdruck der aus Dockers Installationsanleitung ist
-  (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`, mit Quelle fest im Skript); apt prüft danach jedes Paket
-  gegen die signierten Paketlisten. Vor der Prüfung wird nichts geschrieben, und die Prüfung startet keinen
-  gpg-agent, der den Installer überdauert. Eine apt-Quelle für Docker, die es schon gibt, bleibt, wie sie ist; eine
-  auskommentierte oder mit `Enabled: no` (so hinterlässt sie ein Versions-Upgrade von Ubuntu) zählt nicht. Jedes
-  andere System, ARMv6 (Raspberry Pi 1, Zero), ein Schlüssel, der nicht passt oder sich nicht laden lässt, und ein
-  scheiterndes apt halten mit klaren Worten und dem Link zu Dockers Anleitung an; eine neue apt-Quelle, an der
-  `apt-get update` scheitert, wird wieder entfernt. Kein heruntergeladenes Skript läuft mehr. Tests führen den
-  Installer in einer Sandbox mit falschem curl, apt-get, dpkg und uname und einem echten, für den Test erzeugten
-  gpg-Schlüssel aus; `install.sh` ist ohne ShellCheck-Befund (die beiden Befunde der Basis sind mit behoben).
+- **`install.sh` installiert Docker nur mit Prüfsumme** (DECISIONS Runde 23, Punkt 3): Fehlte Docker, lud der Installer
+  `get.docker.com` herunter und führte es ungeprüft als root aus. Jetzt kommt Docker nur aus Dockers offiziellem
+  apt-Repository unter Debian, Ubuntu und Raspberry Pi OS (32 Bit bekommt die armhf-Pakete von Debian, wie Dockers
+  Anleitung es ab Engine 29 sagt). Systeme, die auf Ubuntu oder Debian aufbauen (`ID_LIKE`: Linux Mint, Pop!_OS, LMDE
+  und ähnliche), die `get.docker.com` ebenfalls bediente, bekommen wie bisher die Pakete der Version, auf der sie
+  aufbauen (`UBUNTU_CODENAME`; `DEBIAN_CODENAME` oder `/etc/debian_version`, das auch Debian testing seinen Codenamen
+  gibt). Der Signaturschlüssel wird in einen Wegwerf-Schlüsselbund gelesen und nur vertraut, wenn der Download genau
+  einen Schlüssel enthält, dessen Hauptfingerabdruck der aus Dockers Installationsanleitung ist
+  (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`, mit Quelle fest im Skript); apt prüft danach jedes Paket gegen
+  die signierten Paketlisten. Vor der Prüfung wird nichts geschrieben, und die Prüfung startet keinen gpg-agent, der den
+  Installer überdauert. Eine apt-Quelle für Docker, die es schon gibt, bleibt, wie sie ist; eine auskommentierte oder
+  mit `Enabled: no` (so hinterlässt sie ein Versions-Upgrade von Ubuntu) zählt nicht. Ein System ohne eine
+  Paketverwaltung, die der Installer nutzt (die anderen Familien: siehe Geändert), ARMv6 (Raspberry Pi 1, Zero), ein
+  Schlüssel, der nicht passt oder sich nicht laden lässt, und ein scheiterndes apt halten mit klaren Worten und dem Link
+  zu Dockers Anleitung an; eine neue apt-Quelle, an der `apt-get update` scheitert, wird wieder entfernt. Kein
+  heruntergeladenes Skript läuft mehr. Tests führen den Installer in einer Sandbox mit falschem curl, apt-get, dpkg und
+  uname und einem echten, für den Test erzeugten gpg-Schlüssel aus; `install.sh` ist ohne ShellCheck-Befund (die beiden
+  Befunde der Basis sind mit behoben).
 - **Die Installer laden pip nicht mehr ohne Prüfsumme**: `install.sh` und `install.bat` führten vor der Installation
   mit Hash-Prüfung `pip install --upgrade pip` aus und luden damit das neueste pip ungeprüft vom Paketindex (unter
   Windows als Administrator). Die virtuelle Umgebung behält jetzt das pip, das mit Python kommt; es genügt für

@@ -158,6 +158,14 @@ python -m pytest
   integrity checks of the input and of the written GGUF, the statistics in `build_info.json`, the functional test,
   and the backups and cleanup on failure; `tests/model_files.py` writes the small valid GGUF and SafeTensors files
   the stub toolchains use.
+- `tests/test_install_docker.py` and `tests/test_install_distros.py` run `install.sh` in a sandbox: the
+  `/etc/os-release` files of the real distributions, fake package managers (`apt-get`, `dnf`, `zypper`, `pacman`,
+  `apk`) and tools that write down their calls, and the real gpg with keys made for the test. They pin, per family,
+  which packages come from where, the key checks of Docker's repositories, the stops in plain words and the plan of
+  `install.sh --dry-run`. `install.sh` finds the family with the hardware probe's table (`os_family_of`, the same
+  as in `scripts/hardware_probe.sh` and `tables.os_families` in `configs/hardware_probe_schema.yml`; a test checks
+  that they match): a new distribution ID goes into all three together. On a real computer,
+  `./install.sh --dry-run` shows the plan without changing anything.
 
 ### The Python 3.11 to 3.14 matrix
 

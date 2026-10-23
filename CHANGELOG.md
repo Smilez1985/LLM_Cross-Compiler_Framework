@@ -1289,6 +1289,31 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **`install.sh` on every Linux family, through the family's own package manager** (DECISIONS round 24 PKG): the
+  installer finds the family from `ID` and `ID_LIKE` in `/etc/os-release` with the hardware probe's table and installs
+  what it needs (Python 3.11 to 3.14, `rsync`, Docker) with `apt`, `dnf`, `zypper`, `pacman` or `apk`, under the
+  distribution's real package names; before, it knew only `apt` (Python and `rsync` too: `rsync` was installed with
+  `apt-get` and a failure went unnoticed). Python: the distribution's `python3`, and where that is older than 3.11 (RHEL
+  8/9 and their rebuilds, openSUSE Leap 15) a numbered one (`python3.13`, `python3.12`, ...; `python313`, `python312`,
+  ...), with which the virtual environment is then made. Docker: Docker's apt repository as before; on Fedora, RHEL and
+  CentOS Stream Docker's rpm repository, its key trusted only with the fingerprint Docker's install guide publishes
+  (`060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35`, pinned in the script with its source, checked like the apt key),
+  the repository file naming only that checked key and dnf checking every package; where Docker publishes no repository,
+  the distribution's own package (`moby-engine` on other Fedora-based systems, `docker` on Amazon Linux, openSUSE and
+  SLES, where the Containers Module is switched on with `SUSEConnect`, and on Arch, Manjaro and EndeavourOS with
+  `docker-buildx`; `podman-docker` on Rocky Linux, AlmaLinux and Oracle Linux, with Podman's Docker-compatible socket
+  switched on for the person and the `DOCKER_HOST` named; `docker` from Alpine's community repository). No package
+  manager is told to skip a signature or to take a key on its own, and `pacman -Sy` (a partial upgrade) never runs. On
+  Alpine the framework itself cannot run (onnxruntime, part of its pinned packages, has no musl build): the installer
+  stops after Docker and points to the framework image, whose build script also needs `git` and GNU `tar` there
+  (busybox's `tar` has no `--null`: `apk add git tar`). Any other family (Gentoo, Void, NixOS, ...) stops naming the
+  family and the manual pages when something must be installed. A `docker-ce.repo` of the person's own in which
+  Docker's repository is switched off is never replaced or removed (the installer stops before it changes anything and
+  says how to switch it on), and where the `docker` command is Podman (a second run, or `podman-docker` installed
+  earlier) the installer takes Podman's way instead of the `docker` group. New: `./install.sh --dry-run` shows the plan
+  (family, package manager, packages, repositories, key fingerprints) without changing, downloading or calling
+  anything and without root, exit code 0 or 1 as the installation would end. Tests run the installer against the
+  `/etc/os-release` files of real distributions with fake package managers (`tests/test_install_distros.py`).
 - **Knowledge always belongs to a topic or a target** (DECISIONS round 23 items 1 and 8): an installed knowledge pack
   lives in `community/knowledge/<topic or target>/<pack>/` (packs installed earlier stay where they are), and every
   excerpt it brings carries its topic or target. A knowledge pack names its topic or target in its manifest:
@@ -2733,20 +2758,20 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ### Security
 - **`install.sh` installs Docker only with a checksum** (DECISIONS round 23, item 3): when Docker was missing, the
   installer downloaded `get.docker.com` and ran it as root without any check. Now Docker comes only from Docker's
-  official apt repository on Debian, Ubuntu and Raspberry Pi OS (32-bit gets Debian's armhf packages, as Docker's
-  guide says from Engine 29 on). Systems built on Ubuntu or Debian (`ID_LIKE`: Linux Mint, Pop!_OS, LMDE and the
-  like), which `get.docker.com` served as well, get the packages of the release they are built on, as before
-  (`UBUNTU_CODENAME`; `DEBIAN_CODENAME` or `/etc/debian_version`, which also gives Debian testing its codename). The
-  signing key is read into a throwaway keyring and trusted only when the download holds exactly one key whose
-  primary fingerprint is the one Docker's install guide publishes
-  (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`, pinned in the script with its source); apt then checks every
-  package against the signed package lists. Nothing is written before the check, and the check starts no gpg-agent
-  that would outlive the installer. An apt source for Docker that is already there is kept as it is; a
-  commented-out or `Enabled: no` one (as a release upgrade of Ubuntu leaves it) does not count. Any other system,
-  ARMv6 (Raspberry Pi 1, Zero), a key that does not match or cannot be downloaded, and a failing apt stop in plain
-  words with Docker's manual install link; a new apt source that breaks `apt-get update` is taken back. No
-  downloaded script runs any more. Tests run the installer in a sandbox with fake curl, apt-get, dpkg and uname and
-  a real gpg key made for the test; `install.sh` is ShellCheck-clean (the two findings of the base are fixed too).
+  official apt repository on Debian, Ubuntu and Raspberry Pi OS (32-bit gets Debian's armhf packages, as Docker's guide
+  says from Engine 29 on). Systems built on Ubuntu or Debian (`ID_LIKE`: Linux Mint, Pop!_OS, LMDE and the like), which
+  `get.docker.com` served as well, get the packages of the release they are built on, as before (`UBUNTU_CODENAME`;
+  `DEBIAN_CODENAME` or `/etc/debian_version`, which also gives Debian testing its codename). The signing key is read
+  into a throwaway keyring and trusted only when the download holds exactly one key whose primary fingerprint is the one
+  Docker's install guide publishes (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`, pinned in the script with its
+  source); apt then checks every package against the signed package lists. Nothing is written before the check, and the
+  check starts no gpg-agent that would outlive the installer. An apt source for Docker that is already there is kept as
+  it is; a commented-out or `Enabled: no` one (as a release upgrade of Ubuntu leaves it) does not count. A system
+  without a package manager the installer uses (the other families: see Changed), ARMv6 (Raspberry Pi 1, Zero), a key
+  that does not match or cannot be downloaded, and a failing apt stop in plain words with Docker's manual install link;
+  a new apt source that breaks `apt-get update` is taken back. No downloaded script runs any more. Tests run the
+  installer in a sandbox with fake curl, apt-get, dpkg and uname and a real gpg key made for the test; `install.sh` is
+  ShellCheck-clean (the two findings of the base are fixed too).
 - **The installers no longer download pip without a checksum**: `install.sh` and `install.bat` ran
   `pip install --upgrade pip` before the hash-checked install, which fetched the newest pip from the package index
   unchecked (on Windows as Administrator). The virtual environment now keeps the pip that comes with Python, which
