@@ -29,8 +29,10 @@ mirror (runtime/build/source.py); the provider presets' local/cloud labels follo
 (e) The lookup uses the system resolver only (socket.getaddrinfo: no DNS-over-HTTPS, no other library), with a short
     timeout (RESOLVE_TIMEOUT), never on the GUI thread (mark_ui_thread: a lookup there is refused as "not checked";
     the GUI checks in a worker first), and is cached for the run (failures for FAILURE_TTL seconds). Where a
-    connection follows the check, it goes to the checked address (Locality.address, connect_address), so a DNS answer
-    that changes between the check and the connection cannot reach a public host.
+    connection follows the check, it goes only to the checked addresses (connect_addresses: every address the check
+    judged, tried in turn as the system's own connection would, a link-local one with its zone; a localhost name to
+    the loopback addresses), so a DNS answer that changes between the check and the connection cannot reach a public
+    host.
 
 offline_mode(config) is the one offline check: every caller that asks whether offline mode is on reads it here.
 
@@ -161,10 +163,12 @@ def is_home_name(host: str) -> bool:
 
 
 def url_host(url: Any) -> Tuple[str, Optional[int]]:
-    """(host, port) of a URL or of a bare host[:port]; ("", None) when there is none."""
+    """(host, port) of a URL, of a bare host[:port] or of a bare IPv6 address; ("", None) when there is none."""
     text = str(url or "").strip()
     if not text:
         return "", None
+    if ":" in text and "/" not in text and parse_address(text) is not None:
+        return normal_host(text), None      # a bare IPv6 address (fd00::1, fe80::1%eth0): no port to split off
     try:
         parts = urlsplit(text if "//" in text else f"//{text}")
         port = parts.port
@@ -255,9 +259,27 @@ def clear_cache() -> None:
 
 
 def _system_lookup(host: str) -> List[str]:
-    """Every address of `host` from the system resolver (getaddrinfo), in its order."""
-    infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
-    return [str(info[4][0]).split("%", 1)[0] for info in infos]
+    """Every address of `host` from the system resolver (getaddrinfo), in its order. A link-local IPv6 address keeps
+    its zone (getaddrinfo gives it as the scope id beside the text, e.g. for an mDNS .local name on macOS or
+    Windows): a connection to fe80::... fails without it. The zone does not change how the address is judged."""
+    found = []
+    for info in socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP):
+        sockaddr = info[4]
+        text = str(sockaddr[0])
+        if "%" not in text and len(sockaddr) >= 4 and sockaddr[3]:
+            text = f"{text}%{sockaddr[3]}"
+        found.append(text)
+    return found
+
+
+def _address_text(text: str) -> str:
+    """An address as a connection uses it: the address itself (IPv4 inside IPv6 unwrapped), with the zone of a
+    link-local IPv6 address kept."""
+    ip = parse_address(text)
+    if ip is None:
+        return str(text)
+    zone = str(text).strip().strip("[]").split("%", 1)[1] if "%" in str(text) else ""
+    return f"{ip}%{zone}" if zone and ip.version == 6 else str(ip)
 
 
 def cached(host: str) -> Optional[Tuple[str, ...]]:
@@ -413,7 +435,7 @@ def check_host(host: str, config: Any = None, *, resolver: Optional[Resolver] = 
     if not name:
         return Locality("", False, "no_host")
     if parse_address(name) is not None:
-        return _judge(name, (str(parse_address(name)),), optouts, vpn)
+        return _judge(name, (_address_text(name),), optouts, vpn)
     if is_localhost_name(name):
         return Locality(name, True, "this_computer", ("127.0.0.1", "::1"))
     try:
@@ -444,20 +466,36 @@ def label(url: Any, config: Any = None) -> Optional[bool]:
 
 
 def needs_lookup(url: Any) -> bool:
-    """True when checking `url` would ask the resolver (a name that is not cached yet): the GUI then checks it in a
-    worker thread first."""
+    """True when checking `url` would ask the resolver (a name that is not cached yet) or run the VPN check (a
+    Tailscale address, by itself or behind a cached name, while this computer's VPN was not checked yet): the GUI
+    then checks it in a worker thread first."""
     host, _port = url_host(url)
-    return bool(host) and parse_address(host) is None and not is_localhost_name(host) and cached(host) is None
+    if not host or is_localhost_name(host):
+        return False
+    addresses = (host,) if parse_address(host) is not None else cached(host)
+    if addresses is None:
+        return True
+    with _lock:
+        vpn_checked = "tailscale" in _vpn_cache
+    return not vpn_checked and any(address_kind(a) == "vpn" for a in addresses)
+
+
+def connect_addresses(host: str, config: Any = None, what: str = "") -> Tuple[str, ...]:
+    """Every checked address a connection to `host` may go to (rule e), in the resolver's order: the address itself,
+    the addresses of a name that counts as local, or the loopback addresses of a localhost name (never looked up
+    again, so no DNS server decides where a localhost name goes); LocalityRefused otherwise. Uses the run's cache,
+    so the connection goes where the check looked; a caller tries them in turn, as the system's own connection
+    would."""
+    verdict = check_host(host, config)
+    if not verdict.local or not verdict.addresses:
+        raise LocalityRefused(verdict, what)
+    return verdict.addresses
 
 
 def connect_address(host: str, config: Any = None, what: str = "") -> str:
-    """The checked address a connection to `host` goes to (rule e): the address itself, or the first address of a name
-    that counts as local; LocalityRefused otherwise. Uses the run's cache, so the connection goes where the check
-    looked."""
-    verdict = check_host(host, config)
-    if not verdict.local or verdict.address is None:
-        raise LocalityRefused(verdict, what)
-    return verdict.address
+    """The first checked address a connection to `host` goes to (connect_addresses); LocalityRefused when the host
+    is not local."""
+    return connect_addresses(host, config, what)[0]
 
 
 # --- Tailscale and Headscale (rule b) ------------------------------------------------------------------------------
@@ -484,10 +522,15 @@ CliRunner = Callable[[Sequence[str]], str]
 
 
 def _run_cli(argv: Sequence[str]) -> str:
-    """The output of one tailscale CLI command (CalledProcessError, TimeoutExpired or OSError on failure)."""
-    done = subprocess.run(list(argv), capture_output=True, text=True, timeout=CLI_TIMEOUT, check=True,
-                          stdin=subprocess.DEVNULL)
-    return done.stdout
+    """The output of one tailscale CLI command, run as every helper command of the framework is
+    (utils/helpers.execute_command: no shell, stdin closed, no console window on Windows when the GUI starts it,
+    output decoded with replacement characters). CalledProcessError (a SubprocessError) when it fails, does not start
+    or runs past CLI_TIMEOUT."""
+    from orchestrator.utils.helpers import execute_command
+    code, out, err = execute_command(list(argv), timeout=CLI_TIMEOUT)
+    if code != 0:
+        raise subprocess.CalledProcessError(code, list(argv), out, err)
+    return out
 
 
 def _relay_hosts(derp_map: Any) -> Optional[List[Tuple[str, List[str]]]]:
@@ -573,5 +616,5 @@ __all__ = ["CLI_TIMEOUT", "FAILURE_TTL", "HOME_SUFFIXES", "LINK_LOCAL_NETWORKS",
            "Locality", "LocalityRefused", "LookupFailed", "LookupOnUiThread", "NOT_LOCAL_REASONS", "OPT_OUT_SETTINGS",
            "OptOuts", "PRIVATE_NETWORKS", "RESOLVE_TIMEOUT", "TAILSCALE_CONTROL_HOSTS", "VPNS", "VPN_NETWORKS",
            "VpnCheck", "address_kind", "cached", "check_host", "check_url", "clear_cache", "connect_address",
-           "is_home_name", "is_localhost_name", "label", "mark_ui_thread", "needs_lookup", "normal_host",
-           "offline_mode", "on_ui_thread", "parse_address", "parse_network", "resolve", "tailscale_vpn", "url_host"]
+           "connect_addresses", "is_home_name", "is_localhost_name", "label", "mark_ui_thread", "needs_lookup",
+           "normal_host", "offline_mode", "on_ui_thread", "parse_address", "parse_network", "resolve", "tailscale_vpn", "url_host"]

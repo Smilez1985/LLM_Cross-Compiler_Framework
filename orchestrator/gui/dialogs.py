@@ -536,6 +536,12 @@ class AIConfigurationDialog(QDialog):
 
         threading.Thread(target=work, name="ai-address-check", daemon=True).start()
 
+    def done(self, result: int) -> None:
+        """Closing the dialog (Save, Cancel, Escape, the window's close button) drops an address check that is still
+        running: its answer, arriving later, saves nothing."""
+        self._address_check = None
+        super().done(result)
+
     def _on_models_listed(self, request: object, ids, message: str):
         if request is not self._model_request:
             return  # another dialog's list, or the provider changed meanwhile

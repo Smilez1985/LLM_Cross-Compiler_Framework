@@ -11,20 +11,22 @@ crawler and the registry client mount it for http and https; each checks every U
 it asks, and follows redirects by hand.
 
 LocalOnlyAdapter is the same pinned connection for offline mode (chain offline-lan, DECISIONS round 24 L-NET): it
-connects only to hosts the network-locality rule counts as local (utils/locality.connect_address, with the person's
-opt-outs), at the address that rule checked for the run, so a DNS answer that changes after the check cannot reach a
-public host (LocalityRefused, a PermissionError). The runtime's model downloads mount it in offline mode.
+connects only to hosts the network-locality rule counts as local (utils/locality.connect_addresses, with the person's
+opt-outs), at the addresses that rule checked for the run (tried in turn), so a DNS answer that changes after the
+check cannot reach a public host (LocalityRefused, a PermissionError). The runtime's model downloads mount it in
+offline mode.
 """
 
-from typing import Any, Callable
+from typing import Any, Callable, Sequence, Union
 
 from requests.adapters import HTTPAdapter
 from urllib3.connection import HTTPConnection, HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
+from urllib3.exceptions import ConnectTimeoutError, NewConnectionError
 
 from orchestrator.utils.validation import resolve_public_addresses
 
-Vet = Callable[[str, int], str]
+Vet = Callable[[str, int], Union[str, Sequence[str]]]
 
 
 def _public_address(host: str, port: int) -> str:
@@ -34,17 +36,28 @@ def _public_address(host: str, port: int) -> str:
 class _PinnedConnectionMixin:
     """Re-checks the address at connect time and connects to exactly that IP (defeats DNS rebinding).
     TLS still verifies against the original host name, which urllib3 reads after _new_conn(). `_vet` is the check:
-    (host, port) -> the address to connect to, raising PermissionError when the host may not be reached."""
+    (host, port) -> the address to connect to, or the checked addresses to try in turn (offline mode's
+    connect_addresses, as the system's own connection tries every address), raising PermissionError when the host may
+    not be reached."""
 
     _vet: Vet = staticmethod(_public_address)
 
     def _new_conn(self):
         vetted = self._vet(self._dns_host, self.port)
-        original, self._dns_host = self._dns_host, vetted
+        candidates = (vetted,) if isinstance(vetted, str) else tuple(vetted)
+        if not candidates:
+            raise PermissionError(f"{self._dns_host} has no checked address")
+        original, failed = self._dns_host, None
         try:
-            return super()._new_conn()
+            for address in candidates:
+                self._dns_host = address
+                try:
+                    return super()._new_conn()
+                except (NewConnectionError, ConnectTimeoutError) as e:   # the next checked address
+                    failed = e
         finally:
             self._dns_host = original
+        raise failed
 
 
 class _PinnedHTTPConnection(_PinnedConnectionMixin, HTTPConnection):
@@ -99,10 +112,10 @@ class LocalOnlyAdapter(HTTPAdapter):
         super().__init__(**kwargs)
 
     def init_poolmanager(self, *args, **kwargs):
-        from orchestrator.utils.locality import connect_address
+        from orchestrator.utils.locality import connect_addresses
         super().init_poolmanager(*args, **kwargs)
         settings, what = self._settings, self._what
-        self.poolmanager.pool_classes_by_scheme = _pools(lambda host, port: connect_address(host, settings, what))
+        self.poolmanager.pool_classes_by_scheme = _pools(lambda host, port: connect_addresses(host, settings, what))
 
 
 def local_only_session(settings: Any = None, what: str = "the download"):

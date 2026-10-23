@@ -270,6 +270,61 @@ class TestAIConfigurationDialog:
         named._save_config()
         assert wait_for(qapp, lambda: named.result() == dialogs.QDialog.Accepted), message_boxes
 
+    def test_a_dialog_cancelled_during_the_address_check_saves_nothing(self, qapp, framework, message_boxes,
+                                                                        monkeypatch):
+        """Review offline-lan-v: Save in offline mode looks the server name up in a worker first; the person pressed
+        Cancel while it ran, and when the answer came the dialog saved the settings all the same."""
+        import time
+        from orchestrator.utils import locality
+        release = threading.Event()
+
+        def slow_lookup(host):
+            release.wait(5)
+            return ["192.168.1.31"]
+        monkeypatch.setattr(locality, "_system_lookup", slow_lookup)
+        saved = {key: framework.config.get(key) for key in ("ai_provider", "offline_mode", "ai_base_url")}
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "custom")
+        dlg.cb_model.setCurrentText("my-model")
+        dlg.chk_offline.setChecked(True)
+        dlg.txt_base_url.setText("http://llm-box.local:8000/v1")
+        dlg._save_config()
+        dlg.reject()
+        release.set()
+        assert wait_for(qapp, lambda: locality.cached("llm-box.local") is not None)
+        deadline = time.monotonic() + 0.5
+        while time.monotonic() < deadline:   # the relay delivers the worker's answer to the GUI thread
+            qapp.processEvents()
+            time.sleep(0.01)
+        assert {key: framework.config.get(key) for key in saved} == saved, "nothing is saved"
+        assert dlg.result() == dialogs.QDialog.Rejected and message_boxes == []
+
+    def test_offline_mode_checks_a_vpn_address_in_a_worker_first(self, qapp, framework, message_boxes, monkeypatch):
+        """Review offline-lan-v: a literal Headscale address needs the VPN check (the tailscale command), which never
+        runs on the GUI thread; the dialog checked only names first, so the save was refused as "not checked yet"
+        even with the person's own Headscale."""
+        from orchestrator.utils import locality
+        answers = {"prefs": {"ControlURL": "https://headscale.lan:8080"},
+                   "derp-map": {"Regions": {"900": {"Nodes": [{"HostName": "derp.lan", "IPv4": "192.168.1.3",
+                                                                "IPv6": "none"}]}}}}
+        on_gui_thread = []
+
+        def run(argv):
+            on_gui_thread.append(threading.current_thread() is threading.main_thread())
+            return json.dumps(answers[argv[2]])
+        monkeypatch.setattr(locality.shutil, "which", lambda name: "/usr/bin/tailscale" if name == "tailscale" else None)
+        monkeypatch.setattr(locality, "_run_cli", run)
+        monkeypatch.setattr(locality, "_system_lookup", lambda host: {"headscale.lan": ["192.168.1.2"]}[host])
+        locality.mark_ui_thread()   # as gui/app.py does
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "custom")
+        dlg.cb_model.setCurrentText("my-model")
+        dlg.chk_offline.setChecked(True)
+        dlg.txt_base_url.setText("http://100.64.0.5:8000/v1")
+        dlg._save_config()
+        assert wait_for(qapp, lambda: dlg.result() == dialogs.QDialog.Accepted), message_boxes
+        assert on_gui_thread == [False, False], "the tailscale command ran in a worker thread"
+
     def test_offline_mode_accepts_only_local_providers(self, qapp, framework, message_boxes):
         dlg = AIConfigurationDialog(framework)
         select_provider(dlg, "openai")
