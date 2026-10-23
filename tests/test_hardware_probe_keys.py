@@ -626,6 +626,78 @@ class TestHailoMachines:
         assert profile.is_on("SUPPORTS_HAILO") and profile.get("HAILO_ARCH") == "hailo8l"
 
 
+@POSIX_ONLY
+@NEEDS_SHELL
+class TestHailoTimeCap:
+    """The Hailo part asks no further device once it has run for 60 s (HAILO_TOOL_SECONDS in the .py). The .sh's clock:
+    date +%s where it gives a number (%s is not POSIX; some busybox builds and date tools lack it), else the whole
+    seconds since boot from /proc/uptime; with neither, the 16-device cap alone applies (as before)."""
+
+    def machine(self, tmp_path, date_seconds):
+        """Two Hailo-8 on PCIe; every 'fw-control identify' moves both clocks on by 61 s. `date_seconds`: whether the
+        date on PATH knows +%s."""
+        root = board(tmp_path)
+        hailo8_files(root)
+        write(root, "/sys/class/hailo_chardev/hailo1/device_id", "1e60:2864\n")
+        write(root, "/dev/hailo1", b"")
+        pci_device(root, "0000:03:00.0", "0x1e60", "0x2864", "0x120000")
+        write(root, "/proc/uptime", "1000.25 3000.50\n")
+        bindir = tool_dir(tmp_path)
+        fake_hailortcli(bindir, scan="scan_two_bdf_4x.txt", identify={
+            "0000:01:00.0": "identify_current_hailo8_4.24.0.txt", "0000:03:00.0": "identify_current_hailo8_4.24.0.txt"})
+        clock, log = tmp_path / "clock", tmp_path / "identify.log"
+        clock.write_text("1000\n")
+        (bindir / "hailortcli").rename(bindir / "hailortcli.fixture")
+        fake_tool(bindir, "hailortcli", "\n".join([
+            "#!/bin/sh",
+            'if [ "$1" = fw-control ]; then',
+            f'    echo "$4" >> "{log}"',
+            f'    n=$(cat "{clock}"); n=$((n + 61)); echo "$n" > "{clock}"',
+            f'    echo "$n.25 3000.50" > "{root}/proc/uptime"',
+            "fi",
+            f'exec "{bindir / "hailortcli.fixture"}" "$@"', ""]))
+        real_date = shutil.which("date")
+        (bindir / "date").unlink()
+        answer = f'cat "{clock}"; exit 0' if date_seconds else 'echo "date: invalid date format" >&2; exit 1'
+        fake_tool(bindir, "date", f'#!/bin/sh\nif [ "$1" = "+%s" ]; then {answer}; fi\nexec "{real_date}" "$@"\n')
+        return root, bindir, log
+
+    @pytest.mark.parametrize("date_seconds", [True, False], ids=["date", "proc-uptime"])
+    @pytest.mark.parametrize("shell", SHELLS)
+    def test_no_device_is_asked_after_60_seconds(self, tmp_path, shell, date_seconds):
+        root, bindir, log = self.machine(tmp_path, date_seconds)
+        text = run_emitter(shell.split() + [str(PROBE_SH)], root, bindir, tmp_path)
+        assert log.read_text().split() == ["0000:01:00.0"], "the second device comes after 61 s"
+        assert parse_profile(text).get("HAILO_DEVICES") == "2"
+
+    @pytest.mark.parametrize("shell", SHELLS)
+    def test_without_any_clock_both_devices_are_asked(self, tmp_path, shell):
+        root, bindir, log = self.machine(tmp_path, date_seconds=False)
+        (root / "proc/uptime").unlink()
+        text = run_emitter(shell.split() + [str(PROBE_SH)], root, bindir, tmp_path)
+        assert log.read_text().split() == ["0000:01:00.0", "0000:03:00.0"]
+        assert parse_profile(text).get("HAILO_ARCH") == "hailo8"
+
+    def test_the_sh_reads_seconds_only_where_they_work(self):
+        text = PROBE_SH.read_text(encoding="utf-8")
+        code = [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
+        assert [ln.strip() for ln in code if "date +%s" in ln] == ['date) s=$(date +%s 2>/dev/null) ;;'], \
+            "date +%s is used only as the first of two clocks"
+        assert "rd /proc/uptime" in text
+
+
+class TestPs1Arch:
+
+    def test_the_hailo_loop_never_overwrites_the_scripts_arch(self):
+        """PowerShell variable names ignore case: a Hailo loop variable named $arch (or $ARCH) would overwrite the
+        ARCH value the script wrote above. Every assignment to it comes before 'Put 'ARCH' $arch'."""
+        text = PROBE_PS1.read_text(encoding="utf-8")
+        put = text.index("Put 'ARCH' $arch")
+        assignments = [m.start() for m in re.finditer(r"\$arch\s*=(?!=)", text, re.IGNORECASE)]
+        assert assignments and all(pos < put for pos in assignments)
+        assert "$recordArch = $HailoArchNames[$record[1]]" in text
+
+
 class TestHailoWindows:
     """The .py on Windows: the PnP ids and hailortcli on PATH (no driver keys); the .ps1 carries the same rules."""
 

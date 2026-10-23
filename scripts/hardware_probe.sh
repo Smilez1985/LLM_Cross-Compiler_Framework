@@ -952,10 +952,23 @@ for id in $USB_IDS; do
 done
 
 # Step B: hailortcli. A call that does not answer (exit 124 of timeout, 126/127: cannot run) ends the Hailo tools,
-# as a missing tool does in hardware_probe.py; the Hailo part stops after 60 s where date +%s works.
+# as a missing tool does in hardware_probe.py; no device is asked once the Hailo part has run for 60 s
+# (HAILO_TOOL_SECONDS there). The clock: date +%s where it gives a number (%s is not POSIX: some busybox builds and
+# other date tools lack it), else the whole seconds since boot from /proc/uptime (every Linux, busybox too); with
+# neither, the 16-device cap alone applies. One clock for the start and every check.
 H_INSTALLED=0 H_WARN="" H_VERSION="" H_SCAN=0 H_IDS="" H_RECORDS=""
-hailo_seconds() { s=$(date +%s 2>/dev/null); case "$s" in ''|*[!0-9]*) echo "" ;; *) echo "$s" ;; esac; }
+H_CLOCK=""
+hailo_seconds() {
+    case "$H_CLOCK" in
+        date) s=$(date +%s 2>/dev/null) ;;
+        uptime) s=$(rd /proc/uptime | sed -n '1s/^\([0-9][0-9]*\).*/\1/p') ;;
+        *) s="" ;;
+    esac
+    case "$s" in ''|*[!0-9]*) echo "" ;; *) echo "$s" ;; esac
+}
+H_CLOCK='date'
 H_START=$(hailo_seconds)
+if [ -z "$H_START" ]; then H_CLOCK=uptime; H_START=$(hailo_seconds); fi
 if have hailortcli; then
     out=$($TIMEOUT hailortcli -v </dev/null 2>&1)
     rc=$?

@@ -84,14 +84,17 @@ OS_RELEASE = {
     "nixos": 'NAME=NixOS\nID=nixos\nVERSION_ID="25.05"\nPRETTY_NAME="NixOS 25.05 (Warbler)"\n',
 }
 
-# A package manager: writes its call down, fails when a line of a file in $LCF_FAILS is in its arguments, and
+# A package manager: writes its call down, fails when a line of a file in $LCF_FAILS is in its arguments (printing
+# $LCF_STASH/fail-output, when a test put dnf's real error there), answers dnf's --assumeno with the transaction in
+# $LCF_STASH/dnf-plan (dnf's real output; it changes nothing and ends with "Operation aborted.", exit 1), and
 # "installs" what it is asked for (the package's command appears on the PATH).
 PACKAGE_MANAGER = r'''#!/bin/sh
 echo "$(basename "$0") $*" >> "$LCF_CALLS"
 for f in "$LCF_FAILS"/*; do
     [ -f "$f" ] || continue
-    case " $* " in *"$(cat "$f")"*) exit 100 ;; esac
+    case " $* " in *"$(cat "$f")"*) [ -f "$LCF_STASH/fail-output" ] && cat "$LCF_STASH/fail-output"; exit 100 ;; esac
 done
+case " $* " in *" --assumeno "*) cat "$LCF_STASH/dnf-plan"; exit 1 ;; esac
 for arg in "$@"; do
     case "$arg" in
         python3|python) "$LCF_MAKE" python3 "$LCF_PY_BASE" ;;
@@ -132,6 +135,149 @@ while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done
 [ -n "$LCF_KEY" ] || exit 22
 cp "$LCF_KEY" "$out"
 '''
+# SUSEConnect: --status prints $LCF_STASH/suse-status (the JSON of the real tool), anything else is an activation, which
+# makes what failed until then installable.
+SUSECONNECT = r'''#!/bin/sh
+echo "$(basename "$0") $*" >> "$LCF_CALLS"
+case "$1" in --status|-s) [ -f "$LCF_STASH/suse-status" ] && cat "$LCF_STASH/suse-status"; exit 0 ;; esac
+for f in "$LCF_FAILS"/*; do
+    [ -f "$f" ] || continue
+    case " $(basename "$0") $* " in *"$(cat "$f")"*) exit 100 ;; esac
+done
+rm -f "$LCF_FAILS/until-suseconnect"
+exit 0
+'''
+
+# What dnf 4 printed for 'LC_ALL=C dnf install --assumeno --allowerasing <Docker CE>' with Docker's RHEL repository on
+# Rocky Linux 9.8 (real runs, 2026-10-23; the dependency lists shortened): nothing to remove; podman-docker installed
+# (its docker conflicts with docker-ce's); a package name Docker does not publish; the repository unreachable.
+DNF_PLAN_CLEAN = """Dependencies resolved.
+================================================================================
+ Package                   Arch   Version                Repository        Size
+================================================================================
+Installing:
+ containerd.io             x86_64 2.4.2-3.el9            docker-ce-stable  35 M
+ docker-buildx-plugin      x86_64 0.38.1-1.el9           docker-ce-stable  18 M
+ docker-ce                 x86_64 3:29.9.2-1.el9         docker-ce-stable  26 M
+ docker-ce-cli             x86_64 1:29.9.2-1.el9         docker-ce-stable 8.9 M
+ docker-compose-plugin     x86_64 5.6.1-1.el9            docker-ce-stable 8.4 M
+Installing dependencies:
+ container-selinux         noarch 4:2.245.0-1.el9        appstream         57 k
+ iptables-nft              x86_64 1.8.10-11.el9_5        baseos           187 k
+Installing weak dependencies:
+ docker-ce-rootless-extras x86_64 29.9.2-1.el9           docker-ce-stable 5.6 M
+
+Transaction Summary
+================================================================================
+Install  31 Packages
+
+Total download size: 116 M
+Installed size: 426 M
+Operation aborted.
+"""
+DNF_PLAN_PODMAN_DOCKER = """Last metadata expiration check: 0:00:40 ago on Fri Oct 23 21:36:26 2026.
+Dependencies resolved.
+========================================================================================
+ Package                     Arch    Version                     Repository         Size
+========================================================================================
+Installing:
+ containerd.io               x86_64  2.4.2-3.el9                 docker-ce-stable   35 M
+ docker-buildx-plugin        x86_64  0.38.1-1.el9                docker-ce-stable   18 M
+ docker-ce                   x86_64  3:29.9.2-1.el9              docker-ce-stable   26 M
+ docker-ce-cli               x86_64  1:29.9.2-1.el9              docker-ce-stable  8.9 M
+ docker-compose-plugin       x86_64  5.6.1-1.el9                 docker-ce-stable  8.4 M
+Installing dependencies:
+ container-selinux           noarch  4:2.245.0-1.el9             appstream          57 k
+ passt-selinux               noarch  0^20251210.gd04c480-7.el9_8 appstream          25 k
+Installing weak dependencies:
+ docker-ce-rootless-extras   x86_64  29.9.2-1.el9                docker-ce-stable  5.6 M
+Removing dependent packages:
+ podman-docker               noarch  6:5.8.2-7.el9_8             @appstream         12 k
+
+Transaction Summary
+========================================================================================
+Install  23 Packages
+Remove    1 Package
+
+Total download size: 114 M
+Operation aborted.
+"""
+DNF_NO_MATCH = """Last metadata expiration check: 0:00:40 ago on Fri Oct 23 21:36:26 2026.
+No match for argument: docker-ce
+Error: Unable to find a match: docker-ce
+"""
+DNF_UNREACHABLE = """Errors during downloading metadata for repository 'docker-ce-stable':
+  - Curl error (56): Failure when receiving data from the peer for https://download.docker.com/linux/rhel/9/x86_64/stable/repodata/repomd.xml [Received HTTP code 502 from proxy after CONNECT]
+Error: Failed to download metadata for repo 'docker-ce-stable': Cannot download repomd.xml: Cannot download repodata/repomd.xml: All mirrors were tried
+"""
+# Rocky Linux 8.10 with podman, buildah, runc and podman-docker (real run): containerd.io replaces runc, and podman,
+# buildah, containers-common, podman-catatonit and podman-docker would be removed.
+DNF_PLAN_EL8_PODMAN = """Dependencies resolved.
+=======================================================================================================
+ Package                     Arch    Version                                    Repository         Size
+=======================================================================================================
+Installing:
+ containerd.io               x86_64  2.4.2-3.el8                                docker-ce-stable   35 M
+     replacing  runc.x86_64 4:1.2.9-6.module+el8.10.0+40310+c25440c1
+ docker-buildx-plugin        x86_64  0.38.1-1.el8                               docker-ce-stable   19 M
+ docker-ce                   x86_64  3:29.9.2-1.el8                             docker-ce-stable   26 M
+ docker-ce-cli               x86_64  1:29.9.2-1.el8                             docker-ce-stable  9.0 M
+ docker-compose-plugin       x86_64  5.6.1-1.el8                                docker-ce-stable  8.6 M
+Installing dependencies:
+ libcgroup                   x86_64  0.41-19.el8                                baseos             69 k
+ xz                          x86_64  5.2.4-4.el8_6                              baseos            152 k
+Installing weak dependencies:
+ docker-ce-rootless-extras   x86_64  29.9.2-1.el8                               docker-ce-stable  5.6 M
+Removing dependent packages:
+ buildah                     x86_64  2:1.33.14-6.module+el8.10.0+40310+c25440c1 @appstream         34 M
+ containers-common           x86_64  2:1-82.module+el8.10.0+40133+32c21f88      @appstream        581 k
+ podman                      x86_64  4:4.9.4-37.module+el8.10.0+40310+c25440c1  @appstream         56 M
+ podman-catatonit            x86_64  4:4.9.4-37.module+el8.10.0+40310+c25440c1  @appstream        799 k
+ podman-docker               noarch  4:4.9.4-37.module+el8.10.0+40310+c25440c1  @appstream         10 k
+Enabling module streams:
+ container-tools                     rhel8
+
+Transaction Summary
+=======================================================================================================
+Install  8 Packages
+Remove   5 Packages
+
+Total download size: 104 M
+Operation aborted.
+"""
+# Fedora 42 (dnf5 5.2.18) with podman-docker installed, Docker's Fedora repository (real run): the removals come first,
+# and the summary lists "Removing:" indented, which is no package.
+DNF5_PLAN_PODMAN_DOCKER = """Updating and loading repositories:
+Repositories loaded.
+Package                    Arch   Version                    Repository            Size
+Removing dependent packages:
+ podman-docker             noarch 5:5.8.2-1.fc42             updates           11.7 KiB
+Installing:
+ containerd.io             x86_64 2.2.4-1.fc42               docker-ce-stable 120.4 MiB
+ docker-ce                 x86_64 3:29.5.3-1.fc42            docker-ce-stable 102.7 MiB
+Installing dependencies:
+ container-selinux         noarch 4:2.247.0-1.fc42           updates           74.3 KiB
+
+Transaction Summary:
+ Installing:        17 packages
+ Removing:           1 package
+
+Total size of inbound packages is 108 MiB. Need to download 108 MiB.
+Operation aborted by the user.
+"""
+DNF5_NO_MATCH = """Updating and loading repositories:
+Repositories loaded.
+Failed to resolve the transaction:
+No match for argument: docker-ce
+You can try to add to command line:
+  --skip-unavailable to skip unavailable packages
+"""
+# Rocky Linux 8.10 with a RHEL version Docker publishes nothing for (rhel/11): the repository answers 404.
+DNF_404 = """Docker CE Stable - x86_64                       797  B/s | 382  B     00:00
+Errors during downloading metadata for repository 'docker-ce-stable':
+  - Status code: 404 for https://download.docker.com/linux/rhel/11/x86_64/stable/repodata/repomd.xml (IP: 192.0.2.10)
+Error: Failed to download metadata for repo 'docker-ce-stable': Cannot download repomd.xml: Cannot download repodata/repomd.xml: All mirrors were tried
+"""
 
 
 class Box:
@@ -140,7 +286,8 @@ class Box:
     one that SUSEConnect lifts (the Containers Module makes docker installable)."""
 
     def __init__(self, tmp_path, system, key_file=None, present=("curl",), fails=(), failing_until_suseconnect=None,
-                 py_base="3.13", pinned=None, machine="x86_64", tools=()):
+                 py_base="3.13", pinned=None, machine="x86_64", tools=(), dnf_plan=DNF_PLAN_CLEAN, answer=None,
+                 fail_output=None, suse_status=None):
         self.root = tmp_path / "sandbox"
         self.bin = self.root / "bin"
         self.etc = self.root / "etc"
@@ -160,13 +307,20 @@ class Box:
                 (self.bin / tool).symlink_to(shutil.which(tool))
         (self.bin / "cut").symlink_to(shutil.which("cut"))
         self.write(self.stash / "curl", CURL)
+        (self.stash / "dnf-plan").write_text(dnf_plan)
+        if fail_output is not None:
+            (self.stash / "fail-output").write_text(fail_output)
+        if suse_status is not None:
+            (self.stash / "suse-status").write_text(suse_status)
+        if answer is not None:   # the person's answer on the terminal (ASK_TTY); without it there is no terminal
+            (self.etc / "answer").write_text(answer + "\n")
         self.write(self.root / "make", MAKE)
         for name in ("apt-get", "dnf", "zypper", "pacman", "apk"):
             if name in tools or not tools:
                 self.write(self.bin / name, PACKAGE_MANAGER)
         for name in ("rpm", "systemctl", "rc-update", "rc-service", "usermod", "addgroup"):
             self.write(self.bin / name, RECORDER)
-        self.write(self.bin / "SUSEConnect", RECORDER.replace("exit 0\n", f'rm -f "{self.fails}/until-suseconnect"\n'))
+        self.write(self.bin / "SUSEConnect", SUSECONNECT)
         self.write(self.bin / "groups", "#!/bin/sh\nexit 0\n")
         self.write(self.bin / "dpkg", "#!/bin/sh\necho amd64\n")
         self.write(self.bin / "uname", f"#!/bin/sh\necho {machine}\n")
@@ -206,7 +360,7 @@ class Box:
         script = ('source "$1"; OS_RELEASE_FILE="$2/os-release"; DEBIAN_VERSION_FILE="$2/debian_version"; '
                   'DOCKER_KEYRING="$2/apt/keyrings/docker.asc"; DOCKER_SOURCES="$2/apt/sources.list.d/docker.sources"; '
                   'DOCKER_RPM_KEYRING="$2/pki/rpm-gpg/docker-ce.asc"; DOCKER_RPM_REPO="$2/yum.repos.d/docker-ce.repo"; '
-                  'APK_REPOSITORIES="$2/apk/repositories"; PACMAN_SYNC_DIR="$2/pacman-sync"; '
+                  'APK_REPOSITORIES="$2/apk/repositories"; PACMAN_SYNC_DIR="$2/pacman-sync"; ASK_TTY="$2/answer"; '
                   'wait_for_internet() { :; }; ')
         if self.pinned:
             script += 'DOCKER_KEY_FINGERPRINT="$3"; DOCKER_RPM_KEY_FINGERPRINT="$3"; '
@@ -286,9 +440,12 @@ class TestTheDryRun:
         ("centos", "rhel", "dnf install -y python3 python3-pip",
          "Dockers dnf-Repository https://download.docker.com/linux/centos,"),
         ("rocky", "rhel", "dnf install -y python3 python3-pip",
-         "Docker veröffentlicht für rocky kein Repository; das Paket der Distribution: dnf install -y podman-docker"),
-        ("almalinux", "rhel", "dnf install -y python3 python3-pip", "dnf install -y podman-docker"),
-        ("ol", "rhel", "dnf install -y python3 python3-pip", "dnf install -y podman-docker"),
+         f"Dockers dnf-Repository https://download.docker.com/linux/rhel (9, x86_64), sein Schlüssel nur mit dem "
+         f"Fingerabdruck {RPM_FINGERPRINT}; dnf install -y {DOCKER_CE}; systemctl enable --now docker"),
+        ("almalinux", "rhel", "dnf install -y python3 python3-pip",
+         "Dockers dnf-Repository https://download.docker.com/linux/rhel (9, x86_64)"),
+        ("ol", "rhel", "dnf install -y python3 python3-pip",
+         "Dockers dnf-Repository https://download.docker.com/linux/rhel (9, x86_64)"),
         ("amzn", "rhel", "dnf install -y python3 python3-pip",
          "aus den Paketquellen der Distribution: dnf install -y docker; systemctl enable --now docker"),
         ("ultramarine", "fedora", "dnf install -y python3 python3-pip", "dnf install -y moby-engine"),
@@ -340,7 +497,8 @@ class TestTheDryRun:
         assert ("apk add docker docker-cli-buildx; rc-update add docker default; rc-service docker start" in text
                 and "Repository community" in text)
         assert "musl" in text and "onnxruntime" in text and "scripts/build_container_image.sh" in text
-        assert "apk add git tar" in text
+        assert "git, GNU tar (für scripts/build_container_image.sh): fehlen -> apk add git tar" in text
+        assert "richtet der Installer vorher ein (apk add git tar)" in text
         assert "Python:" not in text
 
     def test_the_way_alpine_is_pointed_to_takes_busybox_tar_into_account(self):
@@ -404,6 +562,7 @@ class TestDockersRpmRepository:
         assert calls == ["dnf install -y python3 python3-pip",
                          f"curl -fsSL --proto =https --tlsv1.2 https://download.docker.com/linux/{system}/gpg -o "
                          + calls[1].rsplit(" -o ", 1)[1],
+                         f"dnf install --assumeno --allowerasing {DOCKER_CE}",
                          f"rpm --import {box.keyring}",
                          f"dnf install -y {DOCKER_CE}",
                          "systemctl enable --now docker",
@@ -522,15 +681,17 @@ class TestTheDistributionsOwnPackages:
         assert not (box.etc / "yum.repos.d").exists() and not (box.etc / "pki").exists()
 
     @pytest.mark.parametrize("system", ["rocky", "almalinux", "ol"])
-    def test_rhel_rebuilds_get_podman_docker_without_a_docker_group(self, tmp_path, system):
-        """Docker's install docs name no repository for them; their own package is podman-docker."""
-        box = Box(tmp_path, system, present=("python3=3.12",))
+    def test_the_podman_fallback_has_no_docker_group(self, tmp_path, system):
+        """Podman, the fallback of the RHEL rebuilds (here: Docker publishes nothing for this architecture), needs no
+        group docker; the person's Podman socket is switched on and named."""
+        box = Box(tmp_path, system, present=("python3=3.12",), machine="ppc64le")
         run, calls = box.run("setup_system")
         assert run.returncode == 0, said(run)
         assert calls == ["dnf install -y podman-docker",
                          "systemctl --user --machine=lcf@ enable --now podman.socket"]
         assert "Podman ist installiert" in run.stdout and "/podman/podman.sock" in run.stdout
         assert "DOCKER_HOST=unix:///run/user/" in run.stdout and "Gruppe docker" in run.stdout
+        assert "ppc64le" in said(run) and "Docker CE wird hier nicht installiert" in said(run)
 
     @pytest.mark.parametrize("system", ["rocky", "fedora"])
     def test_a_docker_command_that_is_podman_gets_the_podman_way_on_a_second_run(self, tmp_path, system):
@@ -665,6 +826,322 @@ class TestPython:
         assert calls == ["apt-get update", "apt-get install -y python3 python3-venv python3-pip"]
 
 
+# --- Rocky Linux, AlmaLinux, Oracle Linux: Docker CE, Podman only as the fallback -----------------------------------
+
+@needs_bash_and_gpg
+class TestRhelRebuilds:
+    """DECISIONS round 26 Q1: on the RHEL rebuilds Docker CE from Docker's RHEL repository is the standard (its key
+    checked against the pinned fingerprint, as for Fedora, RHEL and CentOS); Podman (podman-docker) is the fallback
+    when Docker CE cannot be installed or when the person says no to the packages dnf would have to remove."""
+
+    def box(self, tmp_path, keys, system="rocky", **kw):
+        kw.setdefault("present", ("curl", "python3=3.12"))
+        return Box(tmp_path, system, kw.pop("key_file", keys["docker.asc"]), pinned=keys["pinned"], **kw)
+
+    def assert_fallback(self, box, run, calls, reason):
+        assert run.returncode == 0, said(run)
+        assert "Docker CE wird hier nicht installiert" in said(run) and reason in said(run), said(run)
+        assert calls[-2:] == ["dnf install -y podman-docker",
+                              "systemctl --user --machine=lcf@ enable --now podman.socket"], calls
+        assert not any(c.startswith(("rpm --import", f"dnf install -y {DOCKER_CE}")) for c in calls)
+        assert not any("--allowerasing" in c and "--assumeno" not in c for c in calls), "never --allowerasing unasked"
+        assert not box.repo.exists() and not box.keyring.exists(), "what install.sh created is taken back"
+        assert "Podman ist installiert" in run.stdout and "sudo dnf remove podman-docker" in run.stdout
+
+    @pytest.mark.parametrize("system", ["rocky", "almalinux", "ol"])
+    def test_docker_ce_from_dockers_rhel_repository_with_the_checked_key(self, tmp_path, keys, system):
+        box = self.box(tmp_path, keys, system)
+        run, calls = box.run("setup_system")
+        assert run.returncode == 0, said(run)
+        assert calls == [f"curl -fsSL --proto =https --tlsv1.2 https://download.docker.com/linux/rhel/gpg -o "
+                         + calls[0].rsplit(" -o ", 1)[1],
+                         f"dnf install --assumeno --allowerasing {DOCKER_CE}",
+                         f"rpm --import {box.keyring}",
+                         f"dnf install -y {DOCKER_CE}",
+                         "systemctl enable --now docker",
+                         "usermod -aG docker lcf"]
+        assert keys_in(box.keyring, tmp_path) == [keys["pinned"]]
+        # The RHEL version in the address, from PLATFORM_ID (el9) or VERSION_ID (9.4): Docker's RHEL folders are 8, 9
+        # and 10, whatever a rebuild calls its own release.
+        assert box.repo.read_text() == ("[docker-ce-stable]\nname=Docker CE Stable - $basearch\n"
+                                        "baseurl=https://download.docker.com/linux/rhel/9/$basearch/stable\n"
+                                        f"enabled=1\ngpgcheck=1\ngpgkey=file://{box.keyring}\n")
+        assert "Docker ist installiert" in run.stdout and "BuildKit" in run.stdout and "podman" not in calls[-1]
+
+    def test_the_rhel_version_comes_from_platform_id(self, tmp_path, keys):
+        box = self.box(tmp_path, keys)
+        box.os_release.write_text(OS_RELEASE["rocky"].replace('VERSION_ID="9.4"', 'VERSION_ID="8.10"')
+                                  .replace("platform:el9", "platform:el8"))
+        run, _ = box.run("install_docker")
+        assert run.returncode == 0, said(run)
+        assert "baseurl=https://download.docker.com/linux/rhel/8/$basearch/stable" in box.repo.read_text()
+
+    @pytest.mark.parametrize("plan, removals", [
+        (DNF_PLAN_PODMAN_DOCKER, "podman-docker"),
+        (DNF_PLAN_EL8_PODMAN, "buildah containers-common podman podman-catatonit podman-docker runc")],
+        ids=["podman-docker", "el8-podman-and-runc"])
+    def test_what_dnf_would_remove_is_named_and_a_yes_installs_docker_ce(self, tmp_path, keys, plan, removals):
+        box = self.box(tmp_path, keys, dnf_plan=plan, answer="j")
+        run, calls = box.run("install_docker")
+        assert run.returncode == 0, said(run)
+        assert f"Für Docker CE müsste dnf diese Pakete entfernen oder ersetzen: {removals}" in run.stdout
+        assert "Diese Pakete entfernen und Docker CE installieren? [j/N]" in run.stdout
+        assert calls[1:] == [f"dnf install --assumeno --allowerasing {DOCKER_CE}", f"rpm --import {box.keyring}",
+                             f"dnf install -y --allowerasing {DOCKER_CE}", "systemctl enable --now docker"]
+        assert box.repo.exists() and box.keyring.exists()
+
+    @pytest.mark.parametrize("answer", ["n", "", "irgendwas", None], ids=["no", "enter", "other", "no-terminal"])
+    def test_without_a_yes_nothing_is_removed_and_podman_comes(self, tmp_path, keys, answer):
+        """No (also: Enter, any other answer, or no terminal at all, as in an unattended run) never removes anything:
+        Docker CE is not installed, what install.sh created is taken back, and the Podman fallback comes."""
+        box = self.box(tmp_path, keys, dnf_plan=DNF_PLAN_EL8_PODMAN, answer=answer)
+        run, calls = box.run("install_docker; docker_group")
+        self.assert_fallback(box, run, calls, "du hast Nein gesagt")
+        assert "podman podman-catatonit podman-docker runc" in run.stdout
+        if answer is None:
+            assert "Kein Terminal für die Antwort" in run.stdout
+
+    @pytest.mark.parametrize("plan, why", [
+        (DNF_NO_MATCH, "Docker veröffentlicht in https://download.docker.com/linux/rhel keine Pakete für dieses System "
+                       "(Rocky Linux 9.4 (Blue Onyx), RHEL 9, x86_64)"),
+        (DNF_404, "keine Pakete für dieses System"),
+        (DNF_UNREACHABLE, "Dockers Repository https://download.docker.com/linux/rhel ist nicht erreichbar")],
+        ids=["no-package", "404", "unreachable"])
+    def test_when_dnf_cannot_install_docker_ce_podman_comes(self, tmp_path, keys, plan, why):
+        box = self.box(tmp_path, keys, fails=("--assumeno",), fail_output=plan)
+        run, calls = box.run("install_docker; docker_group")
+        self.assert_fallback(box, run, calls, why)
+        assert "dnf: " in run.stdout, "dnf's own words are shown"
+
+    @pytest.mark.parametrize("download, why", [
+        ("other.asc", "hat nicht den Fingerabdruck aus Dockers Anleitung"),
+        (None, "ließ sich nicht von https://download.docker.com/linux/rhel/gpg laden")],
+        ids=["key-check-fails", "repository-unreachable"])
+    def test_when_the_key_is_not_dockers_or_not_there_podman_comes(self, tmp_path, keys, download, why):
+        box = self.box(tmp_path, keys, key_file=keys[download] if download else None)
+        run, calls = box.run("install_docker; docker_group")
+        self.assert_fallback(box, run, calls, why)
+        assert not any("--assumeno" in c for c in calls), "an untrusted repository is never added"
+
+    @pytest.mark.parametrize("machine", ["ppc64le", "riscv64"])
+    def test_an_architecture_docker_publishes_nothing_for_gets_podman_at_once(self, tmp_path, keys, machine):
+        box = self.box(tmp_path, keys, machine=machine)
+        run, calls = box.run("install_docker; docker_group")
+        assert calls == ["dnf install -y podman-docker", "systemctl --user --machine=lcf@ enable --now podman.socket"]
+        assert f"keine Pakete für die Architektur {machine} (nur für x86_64, aarch64, s390x)" in said(run)
+
+    def test_a_failing_docker_ce_install_falls_back_too(self, tmp_path, keys):
+        box = self.box(tmp_path, keys, fails=(f"install -y {DOCKER_CE}",))
+        run, calls = box.run("install_docker; docker_group")
+        assert run.returncode == 0, said(run)
+        assert f"rpm --import {box.keyring}" in calls and calls[-2] == "dnf install -y podman-docker"
+        assert not box.repo.exists() and "Die Docker-Pakete ließen sich nicht installieren" in said(run)
+
+    def test_a_switched_off_docker_repository_of_the_person_still_stops(self, tmp_path, keys):
+        """The person's own docker-ce.repo with Docker switched off is a choice: no Podman instead, a plain stop."""
+        box = self.box(tmp_path, keys)
+        box.repo.parent.mkdir(parents=True)
+        box.repo.write_text("[docker-ce-stable]\nbaseurl=https://download.docker.com/linux/rhel/9/x86_64/stable\n"
+                            "enabled=0\n")
+        run, calls = box.run("install_docker")
+        assert run.returncode == 1 and "enabled=1" in said(run) and calls == []
+
+    def test_the_dry_run_names_both_ways(self, tmp_path, keys):
+        box = self.box(tmp_path, keys, present=("curl",))
+        run, calls = box.run("main --dry-run")
+        assert run.returncode == 0 and calls == [], said(run)
+        text = said(run)
+        assert "Dockers dnf-Repository https://download.docker.com/linux/rhel (9, x86_64)" in text
+        assert "Docker CE ist hier der Standard: Das Framework braucht BuildKit (etwa für Hailo)." in text
+        assert ("nennt der Installer sie genau und fragt dich. Bei Nein, ohne Paket für dieses System, ohne Verbindung "
+                "zum Repository oder mit einem falschen Schlüssel kommt der Ersatzweg: dnf install -y podman-docker") in text
+
+    def test_the_dry_run_on_an_architecture_without_packages_names_podman_and_why(self, tmp_path, keys):
+        box = self.box(tmp_path, keys, present=("curl",), machine="ppc64le")
+        run, calls = box.run("main --dry-run")
+        assert run.returncode == 0 and calls == [], said(run)
+        assert ("Docker: fehlt -> Podman (der Ersatzweg), denn Docker CE geht hier nicht: Docker veröffentlicht in "
+                "seinem RHEL-Repository keine Pakete für die Architektur ppc64le") in said(run)
+        assert "Stattdessen: dnf install -y podman-docker" in said(run)
+
+    def test_a_second_run_with_podman_says_how_to_switch(self, tmp_path):
+        box = Box(tmp_path, "rocky", present=("python3=3.12", "rsync"))
+        box.write(box.bin / "docker", '#!/bin/sh\n[ "$1" = --version ] && echo "podman version 5.8.2"\nexit 0\n')
+        run, calls = box.run("setup_system")
+        assert run.returncode == 0, said(run)
+        assert calls == ["systemctl --user --machine=lcf@ enable --now podman.socket"]
+        assert "Standard ist Docker CE" in run.stdout and "'sudo dnf remove podman-docker'" in run.stdout
+
+
+@needs_bash_and_gpg
+class TestFedoraRhelCentosRemovals:
+    """The same removal question for Docker's own Fedora, RHEL and CentOS repositories; there a no stops (no Podman
+    instead: round 26 decided the fallback for the rebuilds)."""
+
+    @pytest.mark.parametrize("system", ["fedora", "rhel", "centos"])
+    def test_a_no_stops_and_takes_back_what_was_created(self, tmp_path, keys, system):
+        box = Box(tmp_path, system, keys["docker.asc"], present=("python3=3.13",), pinned=keys["pinned"],
+                  dnf_plan=DNF5_PLAN_PODMAN_DOCKER, answer="n")
+        run, calls = box.run("install_docker")
+        assert run.returncode == 1, said(run)
+        assert "Docker wurde nicht installiert: Für Docker CE müsste dnf diese Pakete entfernen: podman-docker" in said(run)
+        assert "wieder entfernt" in said(run) and not box.repo.exists() and not box.keyring.exists()
+        assert not any(c.startswith(("rpm", "dnf install -y docker", "dnf install -y --allowerasing")) for c in calls)
+
+    def test_a_yes_on_fedora_installs_with_allowerasing(self, tmp_path, keys):
+        box = Box(tmp_path, "fedora", keys["docker.asc"], present=("python3=3.13",), pinned=keys["pinned"],
+                  dnf_plan=DNF5_PLAN_PODMAN_DOCKER, answer="ja")
+        run, calls = box.run("install_docker")
+        assert run.returncode == 0, said(run)
+        assert f"dnf install -y --allowerasing {DOCKER_CE}" in calls
+
+    def test_dnf5_without_the_package_stops_with_the_reason(self, tmp_path, keys):
+        box = Box(tmp_path, "fedora", keys["docker.asc"], present=("python3=3.13",), pinned=keys["pinned"],
+                  fails=("--assumeno",), fail_output=DNF5_NO_MATCH)
+        run, _ = box.run("install_docker")
+        assert run.returncode == 1 and "keine Pakete für dieses System" in said(run), said(run)
+        assert not box.repo.exists()
+
+
+@needs_bash_and_gpg
+@pytest.mark.parametrize("plan, removals", [
+    (DNF_PLAN_CLEAN, ""), (DNF_PLAN_PODMAN_DOCKER, "podman-docker"),
+    (DNF_PLAN_EL8_PODMAN, "buildah containers-common podman podman-catatonit podman-docker runc"),
+    (DNF5_PLAN_PODMAN_DOCKER, "podman-docker")], ids=["clean", "dnf4", "el8", "dnf5"])
+def test_what_dnf_would_remove_is_read_from_its_own_output(tmp_path, plan, removals):
+    box = Box(tmp_path, "rocky")
+    (box.root / "plan.txt").write_text(plan)
+    run, _ = box.run(f'printf "<%s>\\n" "$(dnf_removals < "{box.root / "plan.txt"}")"')
+    assert run.stdout.splitlines() == [f"<{removals}>"], said(run)
+
+
+# --- SLES: Python from SUSE's Python 3 Module --------------------------------------------------------------------------
+
+SUSE_REGISTERED = ('[{"identifier":"SLES","version":"15.6","arch":"x86_64","status":"Registered",'
+                   '"regcode":"EXAMPLE-NOT-A-CODE","type":"full"},{"identifier":"sle-module-basesystem",'
+                   '"version":"15.6","arch":"x86_64","status":"Registered"}]\n')
+SUSE_WITH_PYTHON3 = SUSE_REGISTERED.replace(']\n', ',{"identifier":"sle-module-python3","version":"15.6",'
+                                                   '"arch":"x86_64","status":"Registered"}]\n')
+SUSE_NOT_REGISTERED = '[{"identifier":"SLES","version":"15.6","arch":"x86_64","status":"Not Registered"}]\n'
+PYTHON_MODULE = "sle-module-python3/15.6/x86_64"   # SUSE Customer Center: python311 is there for SLES 15.6 x86_64
+
+
+@needs_bash_and_gpg
+class TestSlesPythonModule:
+    """SLES 15 has python3 3.6; python311/312/313 come from SUSE's Python 3 Module, which is off by default."""
+
+    TRIED = ["zypper --non-interactive install python313 python313-pip",
+             "zypper --non-interactive install python312 python312-pip",
+             "zypper --non-interactive install python311 python311-pip",
+             "zypper --non-interactive install python314 python314-pip"]
+
+    def box(self, tmp_path, **kw):
+        return Box(tmp_path, "sles", present=("python3=3.6", "docker", "rsync"),
+                   failing_until_suseconnect="install python31", **kw)
+
+    def test_with_a_yes_the_module_is_switched_on_and_python_comes(self, tmp_path):
+        box = self.box(tmp_path, suse_status=SUSE_REGISTERED, answer="j")
+        run, calls = box.run('ensure_python; echo "PYTHON=$PYTHON"')
+        assert run.returncode == 0, said(run)
+        assert calls == self.TRIED + ["SUSEConnect --status", f"SUSEConnect -p {PYTHON_MODULE}", self.TRIED[0]]
+        assert f"PYTHON={box.bin / 'python3.13'}" in run.stdout
+        assert f"SUSEs Python 3 Module einschalten (SUSEConnect -p {PYTHON_MODULE})? [j/N]" in run.stdout
+        assert "EXAMPLE-NOT-A-CODE" not in said(run), "the registration status is read, never shown"
+
+    @pytest.mark.parametrize("answer", ["n", None], ids=["no", "no-terminal"])
+    def test_without_a_yes_it_stops_with_the_step(self, tmp_path, answer):
+        box = self.box(tmp_path, suse_status=SUSE_REGISTERED, answer=answer)
+        run, calls = box.run("ensure_python")
+        assert run.returncode == 1, said(run)
+        assert calls == self.TRIED + ["SUSEConnect --status"]
+        assert f"Selbst einschalten: sudo SUSEConnect -p {PYTHON_MODULE}" in said(run)
+
+    def test_an_unregistered_system_stops_naming_the_registration(self, tmp_path):
+        box = self.box(tmp_path, suse_status=SUSE_NOT_REGISTERED, answer="j")
+        run, calls = box.run("ensure_python")
+        assert run.returncode == 1, said(run)
+        assert "dieses SLES ist nicht registriert" in said(run) and "sudo SUSEConnect -r" in said(run)
+        assert f"sudo SUSEConnect -p {PYTHON_MODULE}" in said(run) and "[j/N]" not in run.stdout
+        assert calls == self.TRIED + ["SUSEConnect --status"]
+
+    def test_with_the_module_on_and_still_no_python_the_hint_names_the_module(self, tmp_path):
+        box = Box(tmp_path, "sles", present=("python3=3.6", "docker", "rsync"), fails=("install python31",),
+                  suse_status=SUSE_WITH_PYTHON3)
+        run, calls = box.run("ensure_python")
+        assert run.returncode == 1, said(run)
+        assert calls == self.TRIED + ["SUSEConnect --status"]
+        assert "Python 3.11 bis 3.14 wird benötigt, gefunden: Python 3.6.0" in said(run)
+        assert f"unter SLES aus SUSEs Python 3 Module: sudo SUSEConnect -p {PYTHON_MODULE}" in said(run)
+
+    def test_opensuse_is_not_asked_about_a_module(self, tmp_path):
+        box = Box(tmp_path, "opensuse-leap", present=("python3=3.6", "docker", "rsync"), fails=("install python31",),
+                  answer="j")
+        run, calls = box.run("ensure_python")
+        assert run.returncode == 1 and calls == self.TRIED, said(run)
+        assert "Python 3 Module" not in said(run) and "uv python install 3.13" in said(run)
+
+    def test_the_dry_run_names_the_module_step(self, tmp_path):
+        box = Box(tmp_path, "sles", present=("curl", "python3=3.6", "docker", "rsync"))
+        run, calls = box.run("main --dry-run")
+        assert run.returncode == 0 and calls == [], said(run)
+        assert ("unter SLES liegen diese Pakete in SUSEs Python 3 Module: Gibt es keins davon, fragt der Installer, "
+                f"ob er das Modul einschaltet (SUSEConnect -p {PYTHON_MODULE}; nur auf einem registrierten System)"
+                ) in said(run)
+
+
+# --- Alpine: git and GNU tar for the framework image ------------------------------------------------------------------
+
+GNU_TAR = '#!/bin/sh\n[ "$1" = --version ] && echo "tar (GNU tar) 1.35"\nexit 0\n'
+BUSYBOX_TAR = '#!/bin/sh\necho "tar: unrecognized option: version" >&2\nexit 1\n'
+
+
+@needs_bash_and_gpg
+class TestAlpineImageTools:
+
+    def box(self, tmp_path, **kw):
+        box = Box(tmp_path, "alpine", present=("curl", "docker"), **kw)
+        box.apk_repositories.parent.mkdir(parents=True)
+        box.apk_repositories.write_text(f"{TestAlpine.MAIN}\n{TestAlpine.COMMUNITY}\n")
+        (box.bin / "usermod").unlink()
+        return box
+
+    def test_busybox_tar_and_no_git_get_both(self, tmp_path):
+        box = self.box(tmp_path)
+        box.write(box.bin / "tar", BUSYBOX_TAR)
+        run, calls = box.run("setup_system")
+        assert run.returncode == 1, said(run)
+        assert calls == ["addgroup lcf docker", "apk update", "apk add git tar"]
+        assert "fehlen: git tar" in run.stdout and "sind installiert" in said(run)
+
+    def test_with_git_and_gnu_tar_nothing_is_installed(self, tmp_path):
+        box = self.box(tmp_path)
+        box.write(box.bin / "tar", GNU_TAR)
+        box.make("git")
+        run, calls = box.run("setup_system")
+        assert run.returncode == 1, said(run)
+        assert calls == ["addgroup lcf docker"] and "sind installiert" in said(run)
+
+    def test_only_what_is_missing_is_installed(self, tmp_path):
+        box = self.box(tmp_path)
+        box.make("git")
+        box.write(box.bin / "tar", BUSYBOX_TAR)
+        run, calls = box.run("setup_system")
+        assert calls[-1] == "apk add tar", calls
+
+    def test_when_apk_cannot_install_them_the_stop_says_how(self, tmp_path):
+        box = self.box(tmp_path, fails=("add git tar",))
+        run, calls = box.run("setup_system")
+        assert run.returncode == 1, said(run)
+        assert "Das Skript braucht dafür auch git und GNU tar (busybox' tar genügt nicht): sudo apk add git tar." in said(run)
+
+    def test_the_dry_run_with_both_there(self, tmp_path):
+        box = self.box(tmp_path)
+        box.write(box.bin / "tar", GNU_TAR)
+        box.make("git")
+        run, calls = box.run("main --dry-run")
+        assert calls == [] and "git, GNU tar (für scripts/build_container_image.sh): vorhanden" in said(run)
+
+
 @needs_bash_and_gpg
 class TestAlpine:
 
@@ -689,13 +1166,14 @@ class TestAlpine:
         assert run.returncode == 1, said(run)
         assert box.apk_repositories.read_text() == after
         assert calls == ["apk update", "apk add docker docker-cli-buildx", "rc-update add docker default",
-                         "rc-service docker start", "addgroup lcf docker"]
+                         "rc-service docker start", "addgroup lcf docker", "apk add git tar"]
         text = said(run)
         assert "musl" in text and "onnxruntime" in text and "scripts/build_container_image.sh" in text
         assert "Docker ist eingerichtet" in text
         # The way it points to needs git and GNU tar, which Alpine does not bring: build_container_image.sh stages the
         # context with 'tar --null --files-from', and busybox' tar stops at once ("unrecognized option: null").
-        assert "apk add git tar" in text and "GNU tar" in text
+        # install.sh installs both (apk add git tar) and says so.
+        assert "git und GNU tar" in text and "sind installiert" in text
 
     def test_without_a_main_line_it_stops(self, tmp_path):
         box = self.box(tmp_path, "#nothing here\n")
