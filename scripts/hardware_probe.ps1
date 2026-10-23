@@ -30,7 +30,7 @@ param(
     [switch]$NoToolchain
 )
 
-$ProbeVersion = '3.0.0'
+$ProbeVersion = '3.1.0'
 if ($OutputFile -eq '') { [Console]::Error.WriteLine('Usage: hardware_probe.ps1 [-OutputFile FILE|-] [-Elevate] [-NoToolchain]'); Exit 2 }
 if ($OutputFile -ne '-') {
     # Absolute, because an elevated restart starts in another folder.
@@ -227,6 +227,49 @@ $HaveNative = $true
 try { if (-not ('LlmProbeNative' -as [type])) { Add-Type -TypeDefinition $NativeCode -Language CSharp } }
 catch { $HaveNative = $false }
 
+# The caches of GetLogicalProcessorInformation (its own type: a failure here costs only CPU_L2_CACHE_KB). An entry is
+# SYSTEM_LOGICAL_PROCESSOR_INFORMATION: ProcessorMask, Relationship (RelationCache = 2) and a 16-byte union whose
+# CACHE_DESCRIPTOR has Level (byte 0), Size (bytes 4-7) and Type (bytes 8-11; CacheUnified = 0, CacheData = 2).
+$CacheCode = @"
+using System;
+using System.Runtime.InteropServices;
+public static class LlmProbeCache {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ProcessorInformation { public UIntPtr Mask; public int Relationship; public ulong Data0; public ulong Data1; }
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool GetLogicalProcessorInformation(IntPtr buffer, ref uint length);
+
+    // KiB of the largest level-2 unified or data cache; 0 when none is listed, -1 when Windows cannot tell.
+    public static long LargestL2Kb() {
+        uint length = 0;
+        GetLogicalProcessorInformation(IntPtr.Zero, ref length);
+        int size = Marshal.SizeOf(typeof(ProcessorInformation));
+        if (length < size) { return -1; }
+        IntPtr buffer = Marshal.AllocHGlobal((int)length);
+        try {
+            if (!GetLogicalProcessorInformation(buffer, ref length)) { return -1; }
+            long best = 0;
+            for (long offset = 0; offset + size <= length; offset += size) {
+                ProcessorInformation info = (ProcessorInformation)Marshal.PtrToStructure(
+                    new IntPtr(buffer.ToInt64() + offset), typeof(ProcessorInformation));
+                if (info.Relationship != 2) { continue; }
+                long level = (long)(info.Data0 & 0xFF);
+                long kb = (long)((info.Data0 >> 32) & 0xFFFFFFFF) / 1024;
+                long type = (long)(info.Data1 & 0xFFFFFFFF);
+                if (level == 2 && (type == 0 || type == 2) && kb > best) { best = kb; }
+            }
+            return best;
+        } finally { Marshal.FreeHGlobal(buffer); }
+    }
+}
+"@
+$L2Kb = -1
+try {
+    if (-not ('LlmProbeCache' -as [type])) { Add-Type -TypeDefinition $CacheCode -Language CSharp }
+    $L2Kb = [LlmProbeCache]::LargestL2Kb()
+} catch { $L2Kb = -1 }
+
 Write-Log "Hardware probe $ProbeVersion (schema 2)..."
 
 # --- meta and system ---------------------------------------------------------------------------------------------
@@ -314,6 +357,9 @@ foreach ($key in $Features.Keys) {
     elseif ($answer -eq $false -and $build -ge $minBuild) { Set-Flag $key 'OFF' }
     else { Set-Flag $key 'UNKNOWN' }
 }
+if ($L2Kb -lt 0) { Add-Warning 'not_determined:CPU_L2_CACHE_KB' }
+elseif ($L2Kb -gt 1048576) { Add-Warning 'not_determined:CPU_L2_CACHE_KB' }
+elseif ($L2Kb -gt 0) { Put 'CPU_L2_CACHE_KB' ([string]$L2Kb) }
 
 # --- memory ------------------------------------------------------------------------------------------------------
 $memory = $null
@@ -460,7 +506,11 @@ if ($nvidia.Count -gt 0 -and $smi) {
 # Vulkan devices (software renderers such as llvmpipe are skipped).
 $vk = New-Object System.Collections.ArrayList
 $vkRan = $false
+$vkInstance = $null
 $result = Invoke-Tool 'vulkaninfo' @('--summary') 20000
+if ($null -ne $result -and $result.Code -eq 0 -and ([string]$result.Out) -match '(?m)^\s*Vulkan Instance Version:\s*([0-9][0-9.]*)') {
+    $vkInstance = $Matches[1]
+}
 if ($null -ne $result -and $result.Code -eq 0 -and ([string]$result.Out).Contains('Devices')) {
     $vkRan = $true
     $devicesFound = New-Object System.Collections.ArrayList
@@ -549,6 +599,44 @@ if ($vk.Count -eq 0) {
 }
 if (-not $vulkan -and -not $vkRan -and $env:SystemRoot) { $vulkan = Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32\vulkan-1.dll') -PathType Leaf }
 if ($vkRan) { Put 'VULKAN_DEVICES' $vk.Count '^[0-9]{1,2}$' -Quiet }
+# The instance version: vulkaninfo's line, else the file version of the loader vulkan-1.dll (X.Y.Z of X.Y.Z.W).
+if (-not $vkInstance -and $env:SystemRoot) {
+    try {
+        $loader = Join-Path $env:SystemRoot 'System32\vulkan-1.dll'
+        if (Test-Path -LiteralPath $loader -PathType Leaf) {
+            $info = [Diagnostics.FileVersionInfo]::GetVersionInfo($loader)
+            $vkInstance = "$($info.FileMajorPart).$($info.FileMinorPart).$($info.FileBuildPart)"
+        }
+    } catch { }
+}
+Put 'VULKAN_INSTANCE_VERSION' $vkInstance '^[0-9]{1,2}\.[0-9]{1,3}\.[0-9]{1,5}$' -Quiet
+
+# OpenCL platforms of clinfo: each "Platform Version" line with the "Platform Name" line before it, as
+# <name>:<OpenCL version> (the name lower case, (r)/(tm) removed, other characters one "-", at most 48 characters).
+function OpenCL-Name([string]$Name) {
+    $t = (Clean-Text $Name 4096).ToLowerInvariant().Replace('(r)', '').Replace('(tm)', '')
+    $t = ($t -creplace '[^a-z0-9]+', '-').Trim('-')
+    if ($t.Length -gt 48) { $t = $t.Substring(0, 48) }
+    return $t.TrimEnd('-')
+}
+$openCl = New-Object System.Collections.Generic.List[string]
+$result = Invoke-Tool 'clinfo'
+if ($null -ne $result -and $result.Code -eq 0) {
+    $platformName = $null
+    foreach ($raw in (([string]$result.Out) -split "`n")) {
+        $line = $raw.Trim(" `t`r".ToCharArray())
+        if ($line -ceq 'Platform Name' -or $line -cmatch '^Platform Name[ \t]') {
+            $platformName = $line.Substring(13).Trim(" `t`r".ToCharArray()); continue
+        }
+        if ($platformName -and $line -cmatch '^Platform Version[ \t]+OpenCL ([0-9]+\.[0-9]+)') {
+            $item = (OpenCL-Name $platformName) + ':' + $Matches[1]
+            if ($item -cmatch '^[a-z0-9]([a-z0-9-]{0,46}[a-z0-9])?:[0-9]{1,2}\.[0-9]{1,2}$' -and -not $openCl.Contains($item) -and $openCl.Count -lt 16) {
+                $openCl.Add($item)
+            }
+        }
+    }
+}
+if ($openCl.Count -gt 0) { Put 'OPENCL_PLATFORMS' ($openCl -join ',') }
 
 $gpus = @(@($nvidia) + @($others) | Select-Object -First 16)
 Put 'GPU_COUNT' $gpus.Count
