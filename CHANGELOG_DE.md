@@ -3248,7 +3248,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Client, auch wenn sich die Antwort für den Namen zwischen der Prüfung des Durchgangs und seiner Verbindung geändert
   hat. Die festgelegten Clients lassen nur den Proxy weg: Eine eigene CA in `SSL_CERT_FILE` oder `SSL_CERT_DIR` bleibt
   vertrauenswürdig, wie beim eigenen Client des SDK. Ein online geöffneter Qdrant-Server wird nach der Regel neu
-  geöffnet, sobald der Offline-Modus eingeschaltet wird (ein Qdrant in der Cloud wird dann abgelehnt).
+  geöffnet, sobald der Offline-Modus eingeschaltet wird (ein Qdrant in der Cloud wird dann abgelehnt), und ein
+  online begonnener Crawl liest nichts mehr, sobald der Offline-Modus eingeschaltet wird.
 - **`install.sh` installiert Docker nur mit Prüfsumme** (DECISIONS Runde 23, Punkt 3): Fehlte Docker, lud der Installer
   `get.docker.com` herunter und führte es ungeprüft als root aus. Jetzt kommt Docker nur aus Dockers offiziellem
   apt-Repository unter Debian, Ubuntu und Raspberry Pi OS (32 Bit bekommt die armhf-Pakete von Debian, wie Dockers

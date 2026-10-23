@@ -256,3 +256,26 @@ def test_a_qdrant_client_opened_online_is_not_used_once_offline_mode_is_on(names
 
     settings.values["offline_mode"] = False   # and back online: opened again as before
     assert rag._ensure_store() is not None and len(opened) == 2 and "transport" not in opened[1]
+
+
+# --- a crawl that runs while offline mode is switched on ----------------------------------------------------------
+
+@pytest.mark.parametrize("actor", ["", "mcp", "gui"])
+def test_a_crawl_started_online_reads_nothing_more_once_offline_mode_is_on(monkeypatch, actor):
+    """The crawler read offline mode once, when it was made: a long crawl (an AI's crawl_docs_site job or the
+    person's Deep Ingest) started online kept reading public sites through the public-only guard after offline mode
+    was switched on. Every address is judged again, so the rest of such a crawl is refused."""
+    from orchestrator.Core import crawler_manager
+    from orchestrator.Core.crawler_manager import OFFLINE_REFUSAL, CrawlerManager
+    monkeypatch.setattr(crawler_manager, "validate_public_url", lambda url: True)   # a public site, online
+    settings = Settings()
+    crawler = CrawlerManager(SimpleNamespace(config=settings), {"request_delay": 0, "languages": []}, actor=actor,
+                             _skip_robots_txt_for_tests=True)
+    assert crawler._address_refusal("https://docs.example.com/guide") is None, "online: the public-only guard"
+    settings.values["offline_mode"] = True
+    assert crawler._address_refusal("https://docs.example.com/next") == OFFLINE_REFUSAL
+    # the crawl's own loop says so for the next page, and asks for nothing
+    asked = []
+    monkeypatch.setattr(crawler.session, "send", lambda *a, **k: asked.append(a) or pytest.fail("a request was sent"))
+    assert crawler.crawl("https://docs.example.com/next") == [] and asked == []
+    assert [s.reason for s in crawler.skipped] == [OFFLINE_REFUSAL]
