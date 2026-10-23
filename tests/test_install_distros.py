@@ -562,7 +562,6 @@ class TestDockersRpmRepository:
         assert calls == ["dnf install -y python3 python3-pip",
                          f"curl -fsSL --proto =https --tlsv1.2 https://download.docker.com/linux/{system}/gpg -o "
                          + calls[1].rsplit(" -o ", 1)[1],
-                         f"dnf install --assumeno --allowerasing {DOCKER_CE}",
                          f"rpm --import {box.keyring}",
                          f"dnf install -y {DOCKER_CE}",
                          "systemctl enable --now docker",
@@ -974,33 +973,56 @@ class TestRhelRebuilds:
 
 
 @needs_bash_and_gpg
-class TestFedoraRhelCentosRemovals:
-    """The same removal question for Docker's own Fedora, RHEL and CentOS repositories; there a no stops (no Podman
-    instead: round 26 decided the fallback for the rebuilds)."""
+class TestFedoraRhelCentosAsBefore:
+    """DECISIONS round 26 Q1 decided the removal question and the Podman fallback for Rocky Linux, AlmaLinux and Oracle
+    Linux only. Fedora, RHEL and CentOS Stream keep their way exactly as before: the checked key, rpm --import, then
+    'dnf install -y' without --allowerasing; dnf itself stops at a conflict, and the installer stops with the reason
+    (TestDockersRpmRepository). No dnf trial run, no question, no other text."""
 
     @pytest.mark.parametrize("system", ["fedora", "rhel", "centos"])
-    def test_a_no_stops_and_takes_back_what_was_created(self, tmp_path, keys, system):
-        box = Box(tmp_path, system, keys["docker.asc"], present=("python3=3.13",), pinned=keys["pinned"],
-                  dnf_plan=DNF5_PLAN_PODMAN_DOCKER, answer="n")
-        run, calls = box.run("install_docker")
-        assert run.returncode == 1, said(run)
-        assert "Docker wurde nicht installiert: Für Docker CE müsste dnf diese Pakete entfernen: podman-docker" in said(run)
-        assert "wieder entfernt" in said(run) and not box.repo.exists() and not box.keyring.exists()
-        assert not any(c.startswith(("rpm", "dnf install -y docker", "dnf install -y --allowerasing")) for c in calls)
-
-    def test_a_yes_on_fedora_installs_with_allowerasing(self, tmp_path, keys):
-        box = Box(tmp_path, "fedora", keys["docker.asc"], present=("python3=3.13",), pinned=keys["pinned"],
-                  dnf_plan=DNF5_PLAN_PODMAN_DOCKER, answer="ja")
+    def test_no_trial_run_and_no_question(self, tmp_path, keys, system):
+        box = Box(tmp_path, system, keys["docker.asc"], present=("curl", "python3=3.13"), pinned=keys["pinned"],
+                  dnf_plan=DNF5_PLAN_PODMAN_DOCKER, answer="j")
         run, calls = box.run("install_docker")
         assert run.returncode == 0, said(run)
-        assert f"dnf install -y --allowerasing {DOCKER_CE}" in calls
+        assert calls[1:] == [f"rpm --import {box.keyring}", f"dnf install -y {DOCKER_CE}",
+                             "systemctl enable --now docker"], calls
+        assert not any("--assumeno" in c or "--allowerasing" in c for c in calls)
+        assert "[j/N]" not in run.stdout and "entfernen oder ersetzen" not in said(run)
+        assert "Podman" not in said(run) and "BuildKit" not in said(run)
 
-    def test_dnf5_without_the_package_stops_with_the_reason(self, tmp_path, keys):
-        box = Box(tmp_path, "fedora", keys["docker.asc"], present=("python3=3.13",), pinned=keys["pinned"],
-                  fails=("--assumeno",), fail_output=DNF5_NO_MATCH)
-        run, _ = box.run("install_docker")
-        assert run.returncode == 1 and "keine Pakete für dieses System" in said(run), said(run)
-        assert not box.repo.exists()
+    @pytest.mark.parametrize("system", ["fedora", "rhel", "centos"])
+    def test_a_conflict_stops_as_before_and_never_falls_back_to_podman(self, tmp_path, keys, system):
+        box = Box(tmp_path, system, keys["docker.asc"], present=("python3=3.13",), pinned=keys["pinned"],
+                  fails=(f"install -y {DOCKER_CE}",), answer="j")
+        run, calls = box.run("install_docker")
+        assert run.returncode == 1, said(run)
+        assert ("Docker wurde nicht installiert: Die Docker-Pakete ließen sich nicht installieren (Meldungen oben; nennt "
+                "dnf einen Konflikt mit podman, buildah oder runc, sagt Dockers Anleitung, was vorher entfernt werden "
+                f"muss); {box.repo} ist wieder entfernt.") in said(run)
+        assert not any("podman-docker" in c for c in calls) and "[j/N]" not in run.stdout
+
+    @pytest.mark.parametrize("system", ["fedora", "rhel", "centos"])
+    def test_the_dry_run_line_is_the_one_from_before(self, tmp_path, keys, system):
+        box = Box(tmp_path, system, keys["docker.asc"], present=("curl", "python3=3.13", "rsync"),
+                  pinned=keys["pinned"])
+        run, calls = box.run("main --dry-run")
+        assert run.returncode == 0 and calls == [], said(run)
+        docker = [line for line in said(run).splitlines() if "Docker" in line]
+        assert docker == [f"   Docker: fehlt -> Dockers dnf-Repository https://download.docker.com/linux/{system}, sein "
+                          f"Schlüssel nur mit dem Fingerabdruck {keys['pinned']}; dnf install -y {DOCKER_CE}; "
+                          "systemctl enable --now docker"], docker
+        assert "Müsste dnf" not in said(run) and "podman" not in said(run).lower()
+
+    def test_a_second_run_on_fedora_with_podman_gets_no_switch_hint(self, tmp_path):
+        """The hint to switch to Docker CE belongs to the rebuilds' fallback (TestRhelRebuilds); on Fedora a docker
+        command that is Podman gets the Podman way as before."""
+        box = Box(tmp_path, "fedora", present=("python3=3.13", "rsync"))
+        box.write(box.bin / "docker", '#!/bin/sh\n[ "$1" = --version ] && echo "podman version 5.8.2"\nexit 0\n')
+        run, calls = box.run("setup_system")
+        assert run.returncode == 0, said(run)
+        assert calls == ["systemctl --user --machine=lcf@ enable --now podman.socket"]
+        assert "Standard ist Docker CE" not in said(run) and "sudo dnf remove podman-docker" not in said(run)
 
 
 @needs_bash_and_gpg

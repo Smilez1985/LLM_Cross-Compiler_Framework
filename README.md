@@ -154,11 +154,13 @@ The installer:
      podman.socket`), and the framework finds it by itself (it sets `DOCKER_HOST` when no Docker daemon is there).
      What Podman cannot do is listed in [Features](docs/Features.md#podman-instead-of-docker); to switch later:
      `sudo dnf remove podman-docker`, then `sudo ./install.sh` again.
-   - **Packages dnf would remove:** before it installs Docker CE on Fedora, RHEL, CentOS Stream or a rebuild, dnf
-     works out what it would have to remove or replace for it (`podman-docker`, and on RHEL 8 rebuilds also `runc`,
-     `podman`, `buildah`, ...) without changing anything. The installer names exactly these packages and asks you;
-     only a yes removes them (`dnf --allowerasing`, never without asking). A no, or no terminal to answer on, removes
-     nothing: on a rebuild Podman comes as the fallback, elsewhere the installer stops.
+   - **Packages dnf would remove (the rebuilds):** before it installs Docker CE on Rocky Linux, AlmaLinux, Oracle
+     Linux or another rebuild, dnf works out what it would have to remove or replace for it (`podman-docker`, and on
+     RHEL 8 rebuilds also `runc`, `podman`, `buildah`, ...) without changing anything. The installer names exactly
+     these packages and asks you; only a yes removes them (`dnf --allowerasing`, never without asking). A no, or no
+     terminal to answer on, removes nothing, and Podman comes as the fallback. Fedora, RHEL and CentOS Stream keep
+     their way: `dnf install -y` without `--allowerasing`; if dnf reports a conflict (for example with
+     `podman-docker`), the installer stops with the reason.
    - Where Docker publishes no repository, the distribution's own package: `moby-engine` on other systems built on
      Fedora; `docker` on Amazon Linux, on openSUSE and SLES (on SLES from the Containers Module, which the installer
      switches on with `SUSEConnect`) and on Arch, Manjaro and EndeavourOS (with `docker-buildx`; the installer never

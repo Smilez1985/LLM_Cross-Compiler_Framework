@@ -645,10 +645,10 @@ docker_plan() {
                     DOCKER_PACKAGES=("${DOCKER_CE_PACKAGES[@]}") ;;
                 amzn) DOCKER_ROUTE=distro DOCKER_PACKAGES=(docker) ;;
                 *)
-                    if [ "$OS_FAMILY" = "fedora" ]; then
-                        DOCKER_ROUTE=distro DOCKER_PACKAGES=(moby-engine)
-                    else
+                    if rhel_rebuild; then
                         docker_rhel_rebuild_plan
+                    else
+                        DOCKER_ROUTE=distro DOCKER_PACKAGES=(moby-engine)
                     fi ;;
             esac ;;
         zypper) DOCKER_ROUTE=distro DOCKER_PACKAGES=(docker) DOCKER_OPTIONAL=(docker-buildx) DOCKER_SERVICE=docker ;;
@@ -656,6 +656,15 @@ docker_plan() {
         apk) DOCKER_ROUTE=distro DOCKER_PACKAGES=(docker docker-cli-buildx) DOCKER_SERVICE=docker ;;
         *) docker_stop "Der Installer richtet Docker nur über die Paketverwaltung der Distribution ein: apt (Debian, Ubuntu, Raspberry Pi OS und darauf aufbauende Systeme), dnf (Fedora, RHEL, CentOS Stream, Rocky Linux, AlmaLinux und Verwandte), zypper (openSUSE, SLES), pacman (Arch, Manjaro, EndeavourOS) und apk (Alpine); dieses System laut $OS_RELEASE_FILE: $(system_label)." ;;
     esac
+}
+
+# Ein Abkömmling von RHEL (Rocky Linux, AlmaLinux, Oracle Linux, ...): dnf, weder Fedora, RHEL, CentOS Stream noch
+# Amazon Linux und kein System, das auf Fedora aufbaut. Nur für sie gilt DECISIONS Runde 26 Q1 (Docker CE aus Dockers
+# RHEL-Repository, die Frage nach dem, was dnf dafür entfernen müsste, und Podman als Ersatzweg).
+rhel_rebuild() {
+    [ "$PKG" = "dnf" ] || return 1
+    case "$OS_ID" in fedora|rhel|centos|amzn) return 1 ;; esac
+    [ "$OS_FAMILY" != "fedora" ]
 }
 
 # Die Hauptversion von RHEL, auf der dieses System aufbaut: aus PLATFORM_ID ("platform:el9"), sonst aus VERSION_ID
@@ -822,15 +831,26 @@ docker_rpm_transaction() {
     DNF_REMOVALS="$(dnf_removals <<< "$out")"
 }
 
+# Was der Installer sagt, wenn dnf die Docker-Pakete nicht installieren konnte (danach, was er zurückgenommen hat).
+DOCKER_RPM_INSTALL_FAILED="Die Docker-Pakete ließen sich nicht installieren (Meldungen oben; nennt dnf einen Konflikt mit podman, buildah oder runc, sagt Dockers Anleitung, was vorher entfernt werden muss)"
+
+# Schreibt DOCKER_RPM_REPO: Dockers Repository DOCKER_REPO, das nur den geprüften Schlüssel nennt (gpgkey=file://), mit
+# gpgcheck=1; die RHEL-Version ist DOCKER_RPM_RELEASE, ohne sie $releasever des Systems.
+docker_rpm_write_repo() {
+    install -d -m 0755 "$(dirname "$DOCKER_RPM_REPO")" && printf '%s\n' "[docker-ce-stable]" \
+        "name=Docker CE Stable - \$basearch" \
+        "baseurl=$DOCKER_DOWNLOAD_URL/$DOCKER_REPO/${DOCKER_RPM_RELEASE:-\$releasever}/\$basearch/stable" "enabled=1" \
+        "gpgcheck=1" "gpgkey=file://$DOCKER_RPM_KEYRING" > "$DOCKER_RPM_REPO"
+}
+
 # Docker Engine aus Dockers rpm-Repository (Fedora, RHEL, CentOS Stream je aus ihrem eigenen, die übrigen
 # RHEL-Abkömmlinge aus dem für RHEL), wie Dockers Anleitung, aber ohne fremden Schlüssel: Der Signaturschlüssel wird
 # gegen DOCKER_RPM_KEY_FINGERPRINT geprüft und erst dann mit rpm übernommen; das Repository nennt nur diese geprüfte
-# Datei (gpgkey=file://), und dnf prüft die Signatur jedes Pakets (gpgcheck=1). Vorher rechnet dnf aus, was es dafür
-# entfernen müsste (docker_rpm_transaction): Das nennt der Installer genau und fragt die Person; nie --allowerasing
-# ungefragt. Geht Docker CE nicht, gibt die Funktion mit dem Ersatzweg 1 zurück (docker_ce_fail), sonst hält sie an.
+# Datei (gpgkey=file://), und dnf prüft die Signatur jedes Pakets (gpgcheck=1). Die RHEL-Abkömmlinge fragen vorher, was
+# dnf dafür entfernen müsste (docker_rpm_asked); geht Docker CE dort nicht, gibt die Funktion 1 zurück (Ersatzweg
+# Podman). Fedora, RHEL und CentOS Stream gehen ihren Weg wie bisher (docker_rpm_as_before) und halten sonst an.
 install_docker_rpm() {
-    local tools=() rc=0 allow=() repo_created=0 key_created=0 no
-    DOCKER_RPM_CREATED=() DOCKER_RPM_UNDONE=""
+    local tools=()
     if ! command -v dnf &> /dev/null; then docker_stop "dnf fehlt auf diesem System."; fi
     docker_rpm_repo_check
     log_info "Quelle: $DOCKER_DOWNLOAD_URL/$DOCKER_REPO. Ihr Schlüssel muss den Fingerabdruck $DOCKER_RPM_KEY_FINGERPRINT haben (Dockers Installationsanleitung)."
@@ -844,6 +864,46 @@ install_docker_rpm() {
         docker_ce_fail "Die Werkzeuge für die Schlüsselprüfung (${tools[*]}) ließen sich nicht installieren (Meldungen oben)."
         return 1
     fi
+    if [ "$DOCKER_FALLBACK" = "podman" ]; then
+        docker_rpm_asked || return 1
+    else
+        docker_rpm_as_before
+    fi
+    docker_service_start
+    if ! command -v docker &> /dev/null; then docker_stop "Nach der Installation gibt es den Befehl docker nicht."; fi
+    log_success "Docker ist installiert (aus $DOCKER_DOWNLOAD_URL/$DOCKER_REPO, Schlüssel und Pakete geprüft)."
+}
+
+# Fedora, RHEL und CentOS Stream, genau wie vor DECISIONS Runde 26 (die Frage nach dem, was dnf entfernen müsste, und
+# der Ersatzweg Podman sind nur für die RHEL-Abkömmlinge entschieden): Schlüssel prüfen, rpm vertraut ihm, das
+# Repository, dann 'dnf install -y' ohne --allowerasing. Einen Konflikt meldet dnf selbst, und der Installer hält an.
+docker_rpm_as_before() {
+    local created=0 undone=""
+    check_docker_key "$DOCKER_REPO" "$DOCKER_RPM_KEYRING" "$DOCKER_RPM_KEY_FINGERPRINT"
+    # rpm vertraut dem geprüften Schlüssel, bevor dnf ein Paket lädt: dnf holt dann keinen Schlüssel selbst.
+    if ! rpm --import "$DOCKER_RPM_KEYRING"; then
+        docker_stop "rpm konnte den geprüften Schlüssel $DOCKER_RPM_KEYRING nicht übernehmen (Meldungen oben)."
+    fi
+    if docker_rpm_repo_exists; then
+        log_info "Ein dnf-Repository für download.docker.com gibt es schon in $(dirname "$DOCKER_RPM_REPO"); es bleibt, wie es ist."
+    else
+        if ! docker_rpm_write_repo; then docker_stop "$DOCKER_RPM_REPO ließ sich nicht schreiben."; fi
+        created=1
+    fi
+    if ! dnf install -y "${DOCKER_PACKAGES[@]}"; then
+        # Das eben angelegte Repository wieder entfernen: Ein unerreichbares hielte sonst jeden dnf-Aufruf an.
+        if [ "$created" = "1" ]; then rm -f -- "$DOCKER_RPM_REPO"; undone="; $DOCKER_RPM_REPO ist wieder entfernt"; fi
+        docker_stop "$DOCKER_RPM_INSTALL_FAILED$undone."
+    fi
+}
+
+# Die RHEL-Abkömmlinge (DECISIONS Runde 26 Q1). Bevor rpm dem Schlüssel vertraut, rechnet dnf aus, was es für Docker CE
+# entfernen müsste (docker_rpm_transaction): Das nennt der Installer genau und fragt die Person; nie --allowerasing
+# ungefragt. Geht Docker CE nicht (kein Paket, Repository nicht erreichbar, Schlüssel passt nicht, ein Nein, dnf
+# scheitert), nimmt sie zurück, was sie angelegt hat, merkt sich den Grund (docker_ce_fail) und gibt 1 zurück.
+docker_rpm_asked() {
+    local rc=0 allow=() repo_created=0 key_created=0
+    DOCKER_RPM_CREATED=() DOCKER_RPM_UNDONE=""
     if [ ! -e "$DOCKER_RPM_KEYRING" ] && [ ! -L "$DOCKER_RPM_KEYRING" ]; then key_created=1; fi
     fetch_docker_key "$DOCKER_REPO" "$DOCKER_RPM_KEYRING" "$DOCKER_RPM_KEY_FINGERPRINT" || rc=$?
     if [ "$rc" != 0 ]; then
@@ -855,10 +915,7 @@ install_docker_rpm() {
     if docker_rpm_repo_exists; then
         log_info "Ein dnf-Repository für download.docker.com gibt es schon in $(dirname "$DOCKER_RPM_REPO"); es bleibt, wie es ist."
     else
-        if ! install -d -m 0755 "$(dirname "$DOCKER_RPM_REPO")" || ! printf '%s\n' "[docker-ce-stable]" \
-            "name=Docker CE Stable - \$basearch" \
-            "baseurl=$DOCKER_DOWNLOAD_URL/$DOCKER_REPO/${DOCKER_RPM_RELEASE:-\$releasever}/\$basearch/stable" "enabled=1" \
-            "gpgcheck=1" "gpgkey=file://$DOCKER_RPM_KEYRING" > "$DOCKER_RPM_REPO"; then
+        if ! docker_rpm_write_repo; then
             docker_rpm_undo
             docker_ce_fail "$DOCKER_RPM_REPO ließ sich nicht schreiben$DOCKER_RPM_UNDONE."
             return 1
@@ -873,11 +930,7 @@ install_docker_rpm() {
     fi
     if [ -n "$DNF_REMOVALS" ]; then
         log_warn "Für Docker CE müsste dnf diese Pakete entfernen oder ersetzen: $DNF_REMOVALS"
-        no="Nein: Docker wird nicht installiert, und nichts wird entfernt."
-        if [ "$DOCKER_FALLBACK" = "podman" ]; then
-            no="Nein: Docker CE wird nicht installiert, nichts wird entfernt, und Podman kommt als Ersatzweg."
-        fi
-        echo "   $no"
+        echo "   Nein: Docker CE wird nicht installiert, nichts wird entfernt, und Podman kommt als Ersatzweg."
         if ! ask_person "Diese Pakete entfernen und Docker CE installieren?"; then
             docker_rpm_undo
             docker_ce_fail "Für Docker CE müsste dnf diese Pakete entfernen: $DNF_REMOVALS; du hast Nein gesagt$DOCKER_RPM_UNDONE."
@@ -897,12 +950,9 @@ install_docker_rpm() {
     if [ "$repo_created" = "1" ]; then DOCKER_RPM_CREATED=("$DOCKER_RPM_REPO"); fi
     if ! dnf install -y ${allow[@]+"${allow[@]}"} "${DOCKER_PACKAGES[@]}"; then
         docker_rpm_undo
-        docker_ce_fail "Die Docker-Pakete ließen sich nicht installieren (Meldungen oben; nennt dnf einen Konflikt mit podman, buildah oder runc, sagt Dockers Anleitung, was vorher entfernt werden muss)$DOCKER_RPM_UNDONE."
+        docker_ce_fail "$DOCKER_RPM_INSTALL_FAILED$DOCKER_RPM_UNDONE."
         return 1
     fi
-    docker_service_start
-    if ! command -v docker &> /dev/null; then docker_stop "Nach der Installation gibt es den Befehl docker nicht."; fi
-    log_success "Docker ist installiert (aus $DOCKER_DOWNLOAD_URL/$DOCKER_REPO, Schlüssel und Pakete geprüft)."
 }
 
 # Alpine: Docker liegt im Repository community (Alpines eigenes, mit denselben Schlüsseln in /etc/apk/keys signiert
@@ -1082,8 +1132,8 @@ docker_group() {
     # hat) und ist es Podman: derselbe Weg wie nach der Installation von podman-docker, ohne Gruppe docker.
     if [ -z "$DOCKER_ROUTE" ] && docker_is_podman; then
         DOCKER_ROUTE=podman
-        # Wo Docker CE der Standard ist (Fedora, RHEL und ihre Abkömmlinge), sagt der Installer, wie man wechselt.
-        if [ "$PKG" = "dnf" ] && [ "$OS_ID" != "amzn" ] && { [ "$OS_FAMILY" = "rhel" ] || [ "$OS_ID" = "fedora" ]; }; then
+        # Unter den RHEL-Abkömmlingen, wo Podman nur der Ersatzweg für Docker CE ist, sagt der Installer, wie man wechselt.
+        if rhel_rebuild; then
             log_info "Der Befehl docker ist hier Podman. Standard ist Docker CE: Das Framework braucht BuildKit (etwa für Hailo) und lehnt unter Podman ab, was das braucht. Wechseln: 'sudo dnf remove podman-docker', dann 'sudo ./install.sh' erneut (der Installer nennt, was dnf dafür sonst noch entfernen müsste, und fragt dich)."
         fi
     fi
@@ -1477,8 +1527,6 @@ plan_docker() {
             if [ "$DOCKER_FALLBACK" = "podman" ]; then
                 echo "     Docker CE ist hier der Standard: Das Framework braucht BuildKit (etwa für Hailo)."
                 echo "     Müsste dnf dafür Pakete entfernen (etwa podman-docker oder runc), nennt der Installer sie genau und fragt dich. Bei Nein, ohne Paket für dieses System, ohne Verbindung zum Repository oder mit einem falschen Schlüssel kommt der Ersatzweg: ${PKG_ARGV[*]} podman-docker (Podman mit dem Befehl docker); systemctl --user enable --now podman.socket"
-            else
-                echo "     Müsste dnf dafür Pakete entfernen (etwa podman-docker oder runc), nennt der Installer sie genau und fragt dich; bei Nein hält er an."
             fi ;;
         podman)
             echo "   Docker: fehlt -> Podman (der Ersatzweg), denn Docker CE geht hier nicht: $DOCKER_PODMAN_WHY Stattdessen: ${PKG_ARGV[*]} ${DOCKER_PACKAGES[*]} (Podman mit dem Befehl docker); Podmans Docker-kompatible Schnittstelle für deinen Benutzer (systemctl --user enable --now podman.socket)" ;;
