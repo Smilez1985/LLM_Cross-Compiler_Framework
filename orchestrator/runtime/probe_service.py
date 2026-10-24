@@ -202,6 +202,15 @@ class HardwareProbes:
         out.sort(key=lambda p: p.updated, reverse=True)
         return out[:max(0, int(limit))]
 
+    def for_board(self, board: Optional[str]) -> Optional[ProbeInfo]:
+        """The probe a build for `board` (a board id such as rk3588) uses when the request names none (DECISIONS round
+        23 item 5): the newest stored probe whose SoC is that board (SOC_MODEL; letter case and separators ignored),
+        this computer's own included. None when there is none or no board is named."""
+        wanted = _canon(board or "")
+        if not wanted:
+            return None
+        return next((info for info in self.list(limit=10 ** 6) if _canon(info.soc or "") == wanted), None)
+
     # --- adding -------------------------------------------------------------------------------------------------
 
     def import_text(self, data: Union[str, bytes], label: Optional[str] = None) -> str:

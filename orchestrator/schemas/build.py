@@ -36,6 +36,10 @@ class BuildRequestIn(BaseModel):
                                                     "datasets:calib/de.txt) or its file id; never a path")
     use_gpu: bool = False
     max_context_length: Optional[int] = Field(default=None, ge=256, le=1_048_576)
+    probe: Optional[str] = Field(default=None, pattern=r"^(local|[0-9a-f]{16})$",
+                                 description="The board's hardware probe by its id (get_hardware_probe): the build "
+                                             "is tuned to it, and NPU formats need its NPU. Omitted: the newest "
+                                             "stored probe of a board of this SoC, if there is one")
 
 
 OPTIMIZATION_LEVELS = ("fast", "balanced", "size", "speed", "aggressive")
