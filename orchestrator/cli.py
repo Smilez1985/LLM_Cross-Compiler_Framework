@@ -3604,18 +3604,21 @@ def _mojo_print_circle(result) -> None:
     """Mojo closes the circle (DECISIONS round 27): after Mojo Oracle at a terminal, the crystal ball and one line,
     "[Mojo] Miracle managed. The oracle is pleased." or "[Mojo] 404 - miracle not found" (Core/mojo/banner.circle_line;
     nothing for any other outcome). Printed as rich Text, never as markup ("[Mojo]", the brackets and the drawing's
-    backslashes stay as they are), through the console, which shows colour only where the console can show it."""
+    backslashes stay as they are), through the console, which shows colour only where the console can show it (no
+    terminal: plain text). Where the console was told NO_COLOR, the drawing is plain text too: rich would drop only its
+    colours and keep the bold."""
     from rich.text import Text
 
     from orchestrator.Core.mojo.banner import banner_lines, circle_line
     line = circle_line(result)
     if line is None:
         return
+    plain = bool(getattr(console, "no_color", False))
     console.print()
     for runs in banner_lines(line, styled=True):
         text = Text()
         for part, style in runs:
-            text.append(part, style=style or None)
+            text.append(part, style=None if plain or not style else style)
         console.print(text, soft_wrap=True)   # a console narrower than the drawing wraps it itself
 
 

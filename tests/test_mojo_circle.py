@@ -104,11 +104,22 @@ def test_without_colour_the_console_shows_the_drawing_and_the_line_byte_for_byte
     assert out.splitlines()[-1].index("[Mojo]") == (60 - len(line)) // 2, "centred under the drawing"
 
 
+def test_no_color_shows_plain_text_also_at_a_terminal(monkeypatch):
+    """NO_COLOR (rich's no_color): rich would drop the colours and keep the bold; the drawing is plain text instead."""
+    out = print_circle(monkeypatch, NOTHING, force_terminal=True, color_system="truecolor", no_color=True,
+                       legacy_windows=False)
+    assert out == plain(banner.NOT_FOUND_LINE)
+    monkeypatch.setenv("NO_COLOR", "1")
+    out = print_circle(monkeypatch, NOTHING, force_terminal=True, color_system="truecolor", legacy_windows=False)
+    assert out == plain(banner.NOT_FOUND_LINE), "the console reads NO_COLOR from the environment itself"
+
+
 def test_with_colour_forced_on_every_character_has_its_style(monkeypatch):
     from rich.color import ColorSystem
     from rich.style import Style
     from rich.text import Text
-    out = print_circle(monkeypatch, SUCCESS, force_terminal=True, color_system="truecolor", no_color=False)
+    out = print_circle(monkeypatch, SUCCESS, force_terminal=True, color_system="truecolor", no_color=False,
+                       legacy_windows=False)
     for style in (*banner.STYLES.values(), banner.LINE_STYLE):   # rich's own codes for each style, none by hand
         code = Style.parse(style).render("X", color_system=ColorSystem.TRUECOLOR).split("X")[0]
         assert code and code in out, style
