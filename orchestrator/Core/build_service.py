@@ -1024,18 +1024,20 @@ class BuildService:
         probe_id, profile = self._board_probe(request.probe, board, caps)
         from orchestrator.Core.build_formats import build_host_arch, format_refusal
         refusal = format_refusal(fmt, profile=profile, board=board, host_arch=build_host_arch())
-        if refusal:
-            error = BuildServiceError(refusal, code="not_supported", field="format",
-                                      next="Build the gguf format for this board (it runs on its CPU).")
-            error.problems = [refusal]
-            raise error
         problems = caps.check_request(fmt, board, quant, dataset=bool(dataset),
                                       imatrix=request.use_imatrix) if caps is not None else []
         if problems:
+            # The target's own refusal first, as before; the probe's or the build computer's reason after it
+            problems = list(problems) + ([refusal] if refusal else [])
             error = BuildServiceError(" ".join(problems), code="not_supported",
                                       next=f"Call get_target_capabilities for {target}, then choose a supported "
                                            "combination.")
             error.problems = list(problems)  # one by one, as the CLI and the Builder tab show them
+            raise error
+        if refusal:
+            error = BuildServiceError(refusal, code="not_supported", field="format",
+                                      next="Build the gguf format for this board (it runs on its CPU).")
+            error.problems = [refusal]
             raise error
         if local_paths or getattr(inputs, "model", None) is not None:
             model = self._check_model_source(request.model, None if local_paths else inputs.model.ref)
