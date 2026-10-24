@@ -182,6 +182,31 @@ class TestFetch:
             assert "credential.helper=" in argv and kwargs["stdin"] == subprocess.DEVNULL
             assert isinstance(argv, list) and "shell" not in kwargs
 
+    def test_git_starts_like_the_one_helper_starts_a_console_program(self, upstream, tmp_path):
+        """Port follow-up f: git opens no console window on Windows (the Boards window and Ditto's runtime export run
+        it from the GUI) and reads output that is not UTF-8 with replacement characters, as utils/helpers.
+        execute_command does (the same creation flags, windowless_flags); stdin stays closed."""
+        from orchestrator.utils import helpers
+        rec = Recorder()
+        fetch_source(pin(upstream["second"]), tmp_path / "state", url=upstream["url"], git=Git(rec))
+        assert rec.calls
+        for _argv, kwargs in rec.calls:
+            assert kwargs["creationflags"] == helpers.windowless_flags() and kwargs["errors"] == "replace"
+            assert kwargs["stdin"] == subprocess.DEVNULL and kwargs["text"] is True
+
+    @pytest.mark.skipif(os.name != "posix", reason="a shell script stands in for git")
+    def test_a_message_that_is_not_utf8_is_reported_never_a_traceback(self, tmp_path):
+        fake = tmp_path / "git"
+        fake.write_bytes(b"#!/bin/sh\nprintf 'fatal: \\377\\376 broken\\n' >&2\nexit 128\n")
+        fake.chmod(0o755)
+        with pytest.raises(SourceError, match=r"failed \(exit 128\): fatal: .* broken"):
+            Git(git=str(fake))(["status"])
+
+    def test_the_creation_flags_open_no_console_window_on_windows(self):
+        from orchestrator.utils import helpers
+        expected = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        assert helpers.windowless_flags() == expected
+
     def test_only_https_is_allowed_for_remote_repositories(self, tmp_path):
         rec = Recorder()
         with pytest.raises(SourceError):

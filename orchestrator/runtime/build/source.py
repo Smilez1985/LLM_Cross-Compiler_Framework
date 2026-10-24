@@ -42,6 +42,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Union
 from orchestrator import __version__
 from orchestrator.runtime.catalog import LlamaCppSource
 from orchestrator.utils.helpers import sha256_file as _sha256
+from orchestrator.utils.helpers import windowless_flags
 
 GIT_TIMEOUT = 3600            # seconds for a fetch (about 215 MB at the pin)
 LOCAL_TIMEOUT = 300           # seconds for local git commands
@@ -171,7 +172,10 @@ def _git_config(allow_file: bool, resolve: Optional[str] = None, offline: bool =
 
 
 class Git:
-    """Runs git with the restrictions above. `runner` is subprocess.run, replaceable in tests."""
+    """Runs git with the restrictions above. `runner` is subprocess.run, replaceable in tests. Started the way the
+    repository's one helper starts a console program (utils/helpers.execute_command): stdin closed, output that is not
+    UTF-8 decoded with replacement characters (a non-UTF-8 message never ends in a traceback), and on Windows no
+    console window (windowless_flags: the Boards window and Ditto's runtime export run it from the GUI)."""
 
     def __init__(self, runner: Optional[Runner] = None, git: Optional[str] = None):
         self.runner = runner or subprocess.run
@@ -188,7 +192,8 @@ class Git:
         argv = [self.git, *_git_config(allow_file, resolve, offline), *args]
         try:
             result = self.runner(argv, cwd=str(cwd) if cwd else None, env=_git_env(offline), capture_output=True,
-                                 text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+                                 text=True, errors="replace", timeout=timeout, stdin=subprocess.DEVNULL,
+                                 creationflags=windowless_flags())
         except subprocess.TimeoutExpired:
             raise SourceError(f"git {args[0]} did not finish within {timeout} s") from None
         except OSError as e:
