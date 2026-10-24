@@ -3,18 +3,21 @@
 #
 # Toolchains, each in its own venv because their pins conflict:
 #   /opt/venv        llama.cpp GGUF conversion (convert_hf_to_gguf.py, torch 2.11 CPU)
-#   /opt/venv-rkllm  RKLLM-Toolkit (torch 2.6, transformers 5.8)
-#   /opt/venv-rknn   RKNN-Toolkit2 (torch <= 2.4)
+#   /opt/venv-rkllm  RKLLM-Toolkit (torch 2.6, transformers 5.8); an x86_64 build computer only (its wheels are
+#                    linux_x86_64): on another one the folder holds NOT_INSTALLED with the reason
+#   /opt/venv-rknn   RKNN-Toolkit2 (torch <= 2.4); x86_64 and arm64 (its wheels exist for both)
 # Debian Bookworm (Python 3.11) because the Rockchip wheels exist only for cp310-cp312.
+#
+# Two stages (DECISIONS round 23 item 14). The builder stage has what fetches and builds llama.cpp's tools and installs
+# the venvs (build-essential, python3-dev, the compilers' headers). The final image gets what the build stages run:
+# the venvs and the llama.cpp source tree with its tools (build/bin), copied to the same paths onto the same base image
+# and Python; CMake, make, gcc and g++ with the aarch64 compilers for the package's cross build and the config stage's
+# compiler test; git for `source_module.sh --clone-llama-cpp` by hand; gosu, the modules and the llmbuilder user.
+# On an arm64 build computer the aarch64 compilers are the image's own gcc and g++ (Debian has no
+# gcc-aarch64-linux-gnu for arm64; its gcc and g++ packages name them aarch64-linux-gnu-gcc and -g++).
 
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim AS builder
 
-LABEL maintainer="LLM Cross-Compiler Framework"
-LABEL description="Model conversion for Rockchip RK3588/RK3576 (RKLLM, GGUF) and RK3566 (GGUF)"
-LABEL target.architecture="aarch64"
-
-ARG USER_ID=1000
-ARG GROUP_ID=1000
 # Parallel compile jobs; empty = all cores (the framework lowers it after an out-of-memory build).
 ARG BUILD_JOBS=
 ARG RKLLM_VERSION=1.3.1
@@ -22,15 +25,13 @@ ARG RKLLM_WHEEL_SHA256=ce58a734bf50289e059c31a057dc494fb43d8a791acb002c60f02145c
 ARG RKNN_TOOLKIT2_VERSION=2.3.2
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV BUILD_CACHE_DIR=/build-cache
 ENV LLAMA_CPP_PATH=/usr/src/llama.cpp
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# libgl1/libglib2.0-0: opencv (rknn-toolkit2); gosu: privilege drop that keeps PATH.
+# libgl1/libglib2.0-0: opencv (rknn-toolkit2), which the RKNN venv's check below imports.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential cmake git ca-certificates curl gosu \
+        build-essential cmake git ca-certificates \
         python3 python3-venv python3-dev pkg-config libgomp1 libgl1 libglib2.0-0 \
-        gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
     && rm -rf /var/lib/apt/lists/*
 
 # --- llama.cpp conversion tools (convert, quantize, imatrix; completion, perplexity, bench): the source ---
@@ -71,13 +72,25 @@ RUN python3 -m venv "${VIRTUAL_ENV}" \
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 
 # --- RKLLM venv (LLMs on the RK3588/RK3576 NPU) ---
-RUN python3 -m venv /opt/venv-rkllm \
-    && /opt/venv-rkllm/bin/pip install --upgrade pip setuptools wheel \
-    && /opt/venv-rkllm/bin/pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu \
-    && /opt/venv-rkllm/bin/pip install \
-        "rkllm-toolkit @ https://raw.githubusercontent.com/airockchip/rknn-llm/release-v${RKLLM_VERSION}/rkllm-toolkit/packages/rkllm_toolkit-${RKLLM_VERSION}-cp311-cp311-linux_x86_64.whl#sha256=${RKLLM_WHEEL_SHA256}" \
-    && /opt/venv-rkllm/bin/python -c "from rkllm.api import RKLLM; RKLLM(); print('RKLLM toolkit ok')"
-ENV RKLLM_PYTHON=/opt/venv-rkllm/bin/python
+# RKLLM-Toolkit ships Linux x86_64 wheels only (rknn-llm release-v1.3.1, rkllm-toolkit/packages). An image built on
+# another computer has no RKLLM venv: /opt/venv-rkllm/NOT_INSTALLED gives the reason, the entrypoint's test reports it,
+# rkllm_module.sh refuses with it, and the build service refuses RKLLM there before a build starts
+# (build_formats.format_refusal).
+RUN set -eu; \
+    arch="$(dpkg --print-architecture)"; \
+    if [ "${arch}" != amd64 ]; then \
+        mkdir -p /opt/venv-rkllm; \
+        echo "RKLLM-Toolkit ${RKLLM_VERSION} ships Linux x86_64 wheels only, and this build computer is ${arch}: build GGUF here (it converts natively), or build RKLLM on an x86_64 computer." \
+            > /opt/venv-rkllm/NOT_INSTALLED; \
+        cat /opt/venv-rkllm/NOT_INSTALLED; \
+    else \
+        python3 -m venv /opt/venv-rkllm; \
+        /opt/venv-rkllm/bin/pip install --upgrade pip setuptools wheel; \
+        /opt/venv-rkllm/bin/pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu; \
+        /opt/venv-rkllm/bin/pip install \
+            "rkllm-toolkit @ https://raw.githubusercontent.com/airockchip/rknn-llm/release-v${RKLLM_VERSION}/rkllm-toolkit/packages/rkllm_toolkit-${RKLLM_VERSION}-cp311-cp311-linux_x86_64.whl#sha256=${RKLLM_WHEEL_SHA256}"; \
+        /opt/venv-rkllm/bin/python -c "from rkllm.api import RKLLM; RKLLM(); print('RKLLM toolkit ok')"; \
+    fi
 
 # --- RKNN venv (vision/voice models via ONNX on the NPU) ---
 # rknn-toolkit2 2.3.2 imports pkg_resources (gone in setuptools >= 81) and onnx.mapping (gone after onnx 1.16);
@@ -87,7 +100,6 @@ RUN python3 -m venv /opt/venv-rknn \
     && /opt/venv-rknn/bin/pip install torch==2.4.0 --index-url https://download.pytorch.org/whl/cpu \
     && /opt/venv-rknn/bin/pip install "rknn-toolkit2==${RKNN_TOOLKIT2_VERSION}" "onnx==1.16.2" \
     && /opt/venv-rknn/bin/python -c "from rknn.api import RKNN; RKNN(verbose=False); print('RKNN toolkit ok')"
-ENV RKNN_PYTHON=/opt/venv-rknn/bin/python
 
 # --- llama.cpp conversion tools: the build (after the venvs, so a new LLAMA_CMAKE_ARGS rebuilds only this layer) ---
 # Every build: no option that downloads at configure or build time, no subprocess support in llama.cpp, no FetchContent
@@ -132,14 +144,62 @@ RUN set -euf; \
     esac; \
     rm -rf "${LLAMA_CPP_PATH}/build/CMakeFiles"
 
+# Of the build tree the final image needs the tools (build/bin; statically linked, BUILD_SHARED_LIBS=OFF): the static
+# libraries and CMake files stay in this stage. The source tree goes along (the package's cross build, the converter).
+RUN find "${LLAMA_CPP_PATH}/build" -mindepth 1 -maxdepth 1 ! -name bin -exec rm -rf {} +
+
+# ============================================================================
+# The image: what the build stages run
+# ============================================================================
+FROM debian:bookworm-slim
+
+LABEL maintainer="LLM Cross-Compiler Framework"
+LABEL description="Model conversion for Rockchip RK3588/RK3576 (RKLLM, GGUF) and RK3566 (GGUF)"
+LABEL target.architecture="aarch64"
+
+ARG USER_ID=1000
+ARG GROUP_ID=1000
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV BUILD_CACHE_DIR=/build-cache
+ENV LLAMA_CPP_PATH=/usr/src/llama.cpp
+ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# cmake, make, gcc, g++, libc6-dev: the package's cross build and the config stage's compiler test (gcc and g++ also
+# for a native x86_64 plan, and on arm64 as the aarch64 compilers); gcc-/g++-aarch64-linux-gnu on amd64; libgomp1:
+# the OpenMP runtime of the llama.cpp tools; libgl1/libglib2.0-0: opencv (rknn-toolkit2); git: the llama.cpp source
+# by hand (source_module.sh --clone-llama-cpp); gosu: privilege drop that keeps PATH.
+# hadolint ignore=DL3008,SC2086
+RUN set -eu; \
+    cross=""; \
+    if [ "$(dpkg --print-architecture)" = amd64 ]; then \
+        cross="gcc-aarch64-linux-gnu g++-aarch64-linux-gnu"; \
+    fi; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        cmake make gcc g++ libc6-dev pkg-config git ca-certificates gosu \
+        python3 libgomp1 libgl1 libglib2.0-0 ${cross}; \
+    rm -rf /var/lib/apt/lists/*
+
+# The venvs and the llama.cpp tools of the builder stage, at the paths they were made for
+COPY --from=builder /usr/src/llama.cpp /usr/src/llama.cpp
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /opt/venv-rkllm /opt/venv-rkllm
+COPY --from=builder /opt/venv-rknn /opt/venv-rknn
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
+ENV RKLLM_PYTHON=/opt/venv-rkllm/bin/python
+ENV RKNN_PYTHON=/opt/venv-rknn/bin/python
+
 # --- Framework modules and user ---
 WORKDIR /app
 COPY modules/ ./modules/
 COPY scripts/ ./scripts/
 RUN find modules scripts -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} +
 
+# useradd -l: no lastlog/faillog entry, whose sparse file would grow with a high USER_ID
 RUN groupadd -g "${GROUP_ID}" llmbuilder \
-    && useradd -u "${USER_ID}" -g llmbuilder -d /app -s /bin/bash llmbuilder \
+    && useradd -l -u "${USER_ID}" -g llmbuilder -d /app -s /bin/bash llmbuilder \
     && mkdir -p "${BUILD_CACHE_DIR}" \
     && chown -R llmbuilder:llmbuilder /app "${BUILD_CACHE_DIR}"
 

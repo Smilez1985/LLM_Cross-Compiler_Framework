@@ -15,7 +15,20 @@ log() { echo ">> [RKLLM] $*"; }
 die() { echo ">> [RKLLM] ERROR: $*" >&2; exit 1; }
 
 [ -d "$MODEL_SOURCE" ] || die "MODEL_SOURCE '$MODEL_SOURCE' must be a HuggingFace model directory."
-[ -x "$RKLLM_PYTHON" ] || die "RKLLM toolkit venv not found at $RKLLM_PYTHON"
+# RKLLM-Toolkit 1.3.1 has Linux x86_64 wheels only: an image built on another computer has no RKLLM venv (its folder
+# holds NOT_INSTALLED). The same sentence as the build service's refusal (build_formats.format_refusal).
+BUILD_ARCH="$(uname -m)"
+case "$BUILD_ARCH" in
+    x86_64|amd64) ;;
+    *)
+        [ "$BUILD_ARCH" = aarch64 ] && BUILD_ARCH=arm64
+        die "RKLLM-Toolkit 1.3.1 ships Linux x86_64 wheels only, and this build computer is $BUILD_ARCH: build GGUF here (it converts natively), or build RKLLM on an x86_64 computer." ;;
+esac
+if [ ! -x "$RKLLM_PYTHON" ]; then
+    NOT_INSTALLED="$(dirname "$(dirname "$RKLLM_PYTHON")")/NOT_INSTALLED"
+    [ -f "$NOT_INSTALLED" ] && die "RKLLM-Toolkit is not in this image: $(cat "$NOT_INSTALLED")"
+    die "RKLLM toolkit venv not found at $RKLLM_PYTHON: the image needs RKLLM-Toolkit in that venv (targets/Rockchip/dockerfile installs the pinned wheel); a build has no network, so nothing is installed here."
+fi
 [ -f "$CONVERTER" ] || die "Converter $CONVERTER missing."
 
 case "$BOARD" in
