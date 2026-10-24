@@ -9,7 +9,9 @@ run at a terminal).
 import io
 import json
 import os
+import re
 import stat
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -102,6 +104,16 @@ def test_without_colour_the_console_shows_the_drawing_and_the_line_byte_for_byte
     assert out == plain(line)
     assert "\x1b" not in out
     assert out.splitlines()[-1].index("[Mojo]") == (60 - len(line)) // 2, "centred under the drawing"
+
+
+@pytest.mark.parametrize("result,line", [(SUCCESS, banner.MANAGED_LINE), (NOTHING, banner.NOT_FOUND_LINE)])
+def test_in_a_pipe_the_console_finds_no_colour_by_itself(monkeypatch, result, line):
+    """`llmcf mojo --miracle | tee log` at a terminal: the CLI's console as it is made (rich detects the colours
+    itself) writes into something that is no terminal, so the drawing and the line come byte for byte, no escape code."""
+    for name in ("FORCE_COLOR", "TTY_COMPATIBLE", "TTY_INTERACTIVE", "NO_COLOR"):
+        monkeypatch.delenv(name, raising=False)
+    out = print_circle(monkeypatch, result)
+    assert out == plain(line) and "\x1b" not in out
 
 
 def test_no_color_shows_plain_text_also_at_a_terminal(monkeypatch):
@@ -316,13 +328,16 @@ def test_the_record_is_private_and_belongs_to_this_llm_framework_home(booted_fra
     assert path == home / "mojo" / "oracle_open.json" and path.parent == lock_path(booted_framework).parent
     if os.name == "posix":
         assert mode(path) == 0o600 and mode(path.parent) == 0o700
-    data = json.loads(path.read_text(encoding="utf-8"))
-    assert set(data) == {"mojo_oracle", "via", "at"} and data["mojo_oracle"] == "open" and data["via"] == "cli"
     text = path.read_text(encoding="utf-8")
+    data = json.loads(text)
+    # Exactly the two fixed words and the time, so nothing in it can carry a path or an account name. The account
+    # name is looked for in the time only: the fixed words contain names an account can have ("oracle", "mojo").
+    assert data == {"mojo_oracle": "open", "via": "cli", "at": data["at"]}
+    assert re.fullmatch(r"[0-9T:+-]+", data["at"]) and datetime.fromisoformat(data["at"]).utcoffset() == timedelta(0)
     assert str(tmp_path) not in text and "/" not in text and "\\" not in text, "no path"
     import getpass
     for name in {getpass.getuser(), os.environ.get("USERNAME", ""), Path.home().name}:
-        assert len(name) < 3 or name not in text, "no account name"
+        assert len(name) < 3 or name not in data["at"], "no account name"
     assert [p.name for p in path.parent.iterdir() if p.name.endswith(".tmp")] == [], "no temporary file left"
     monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "other-home"))
     assert not banner.oracle_open(booted_framework), "another LLM_FRAMEWORK_HOME has its own Oracle runs"
