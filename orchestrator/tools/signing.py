@@ -203,6 +203,7 @@ class RevisionAnchor:
         self._read_value, self._write_value = read, write
         self._known = 0
         self._seen: Any = _UNSEEN   # the identity of the file the known value was last read for
+        self._adopt_seen: Any = _UNSEEN   # the identity of the file adopt() last looked at the entry for
         self._lock = threading.Lock()
 
     @staticmethod
@@ -239,17 +240,25 @@ class RevisionAnchor:
         keeps none for it yet (the entry could be read and is empty: the first start of a framework home with its own
         entry, a file saved before there was a keyring), so an older copy put back afterwards is refused from this look
         on, not only after the next save. Nothing is written when this process knows a revision already, when an
-        entry exists (another process anchored meanwhile) or when the entry cannot be read."""
+        entry exists (another process anchored meanwhile: its value is taken, as current() would) or when the entry
+        cannot be read. The entry is looked at once per state of the file, so the many reads of an unchanged file
+        never ask the keyring again."""
         if int(revision) <= 0:
             return
+        identity = self._identity(path)
         with self._lock:
-            if self._known:
+            if self._known or identity == self._adopt_seen:
                 return
+            self._adopt_seen = identity
         try:
             raw = self._read_value()
         except Exception:  # unreachable for now: anchored at the next save, as before
             return
-        if str(raw or "").strip():
+        text = str(raw or "").strip()
+        if text:
+            if text.isdigit() and len(text) <= 18:
+                with self._lock:
+                    self._known = max(self._known, int(text))
             return
         self.saved(path, revision)
 

@@ -494,6 +494,35 @@ class TestOlderCopiesAndRemovedFiles:
         RevisionAnchor(lambda: None, writes.append).adopt(tmp_path, 0)
         assert writes == [], "revision 0 (a file from before revisions) anchors nothing"
 
+    def test_a_revision_another_process_adopted_is_taken_and_the_keyring_is_not_asked_again(self, tmp_path):
+        """Two processes take their first look at the same file: the second one finds the first one's entry, takes it
+        and does not read the keyring again on every later read of the unchanged file."""
+        slots = {}
+        reads = []
+        first = memory_anchor(slots)[1]
+        second = RevisionAnchor(lambda: reads.append(1) or slots.get("rev"), lambda v: slots.__setitem__("rev", v))
+        store = store_at(tmp_path)
+        store.save(ToolPolicy(configured=True))
+        store.save(ToolPolicy(configured=True, revision=1))
+        assert second.current(store.path) == 0  # looked before the first process anchored
+        first.adopt(store.path, 2)
+        assert slots["rev"] == "2"
+        second.adopt(store.path, 2)
+        assert second.current(store.path) == 2 and slots == {"rev": "2"}
+        before = len(reads)
+        for _ in range(5):
+            second.current(store.path)
+            second.adopt(store.path, 2)
+        assert len(reads) == before, "no keyring read for an unchanged file"
+        # An entry that is no revision (written by hand) is looked at once per state of the file, never per read.
+        reads.clear()
+        slots["rev"] = "not a number"
+        third = RevisionAnchor(lambda: reads.append(1) or slots.get("rev"), lambda v: slots.__setitem__("rev", v))
+        for _ in range(5):
+            assert third.current(store.path) == 0
+            third.adopt(store.path, 2)
+        assert len(reads) == 2 and slots["rev"] == "not a number", "one look by current(), one by adopt()"
+
     def test_two_framework_homes_keep_their_own_revision(self, tmp_path, memory_keyring):
         """Two LLM_FRAMEWORK_HOME folders of one account never share an anchor: saves in one home do not make the
         other home's file an older copy (all tools denied, no token accepted)."""
