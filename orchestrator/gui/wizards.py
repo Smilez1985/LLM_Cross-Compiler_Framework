@@ -985,7 +985,11 @@ Setup commands:
             if config.get("SUPPORTS_AVX2") == "ON": 
                 cmake_flags.append("-DGGML_AVX2=ON")
                 cpu_flags.append("-mavx2")
-            if config.get("SUPPORTS_AVX512") == "ON": 
+            # GGML_AVX512 only with every part of AVX-512 it compiles for (the build recipe's rule: a Xeon Phi has
+            # AVX-512 F without BW, VL and DQ, and a probe without CPU flags cannot tell)
+            from orchestrator.runtime.build.recipe import avx512_missing
+            if config.get("SUPPORTS_AVX512") == "ON" and not avx512_missing(
+                    re.split(r"[\s,]+", str(config.get("CPU_FLAGS_ALL") or ""))):
                 cmake_flags.append("-DGGML_AVX512=ON")
                 cpu_flags.append("-mavx512f")
             if config.get("SUPPORTS_F16C") == "ON":
