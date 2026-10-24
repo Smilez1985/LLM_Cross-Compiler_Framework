@@ -20,9 +20,9 @@
 #         It is made for a GGUF build with a hardware profile in the build plan (config_module.sh), and on request
 #         (build.sh --package: target_module.sh started by hand, the entrypoint modes target and pipeline) also without
 #         one, with the plain defaults of this target (plan_package_defaults), which the manifest names. A build of the
-#         BuildEngine has no profile and asks for no package: the board's runtime comes from the runtime builder
-#         (llm-cli device runtime build) and the board package from llm-cli deploy package or llm-cli device runtime
-#         deploy.
+#         BuildEngine gets the board's stored probe when there is one (DECISIONS round 23 item 5), and a GGUF build then
+#         makes the package too; the board's own llama.cpp runtime still comes from the runtime builder (llm-cli device
+#         runtime build).
 
 set -euo pipefail
 

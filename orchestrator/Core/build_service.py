@@ -970,7 +970,8 @@ class BuildService:
             target=req.target, target_sha256=target_sha, board=req.board, fmt=req.format,
             quantization=req.quantization, imatrix=imatrix, dataset_sha256=dataset,
             optimization=str(optimization or "balanced").lower(), max_context_length=req.max_context_length,
-            use_gpu=req.use_gpu, model_task=model_task)
+            use_gpu=req.use_gpu, model_task=model_task,
+            hardware_sha256=build_identity.text_sha256(self.probe_text(req.probe)))
 
     def earlier_builds(self, request: BuildRequestIn, *, revision: Optional[str] = None,
                        optimization: str = "balanced", local_paths: bool = False, model_task: str = "LLM"):
@@ -1020,6 +1021,14 @@ class BuildService:
                                         next="Name an existing dataset file as <label>:<relative path>.",
                                         field="dataset_path")
             dataset = str(path.resolve())
+        probe_id, profile = self._board_probe(request.probe, board, caps)
+        from orchestrator.Core.build_formats import build_host_arch, format_refusal
+        refusal = format_refusal(fmt, profile=profile, board=board, host_arch=build_host_arch())
+        if refusal:
+            error = BuildServiceError(refusal, code="not_supported", field="format",
+                                      next="Build the gguf format for this board (it runs on its CPU).")
+            error.problems = [refusal]
+            raise error
         problems = caps.check_request(fmt, board, quant, dataset=bool(dataset),
                                       imatrix=request.use_imatrix) if caps is not None else []
         if problems:
@@ -1037,7 +1046,41 @@ class BuildService:
                                     code="invalid_value", next="Leave out the revision for a local model.",
                                     field="revision")
         return request.model_copy(update={"target": target, "format": fmt, "board": board, "quantization": quant,
-                                          "dataset_path": dataset, "model": model}), inputs
+                                          "dataset_path": dataset, "model": model, "probe": probe_id}), inputs
+
+    def probes(self):
+        """The hardware probes of this user (runtime.probe_service.HardwareProbes over the profile store)."""
+        from orchestrator.runtime.probe_service import HardwareProbes
+        return HardwareProbes.for_framework(self.framework)
+
+    def _board_probe(self, probe_id: Optional[str], board: Optional[str],
+                     caps: Optional[TargetCapabilities]) -> Tuple[Optional[str], Any]:
+        """(probe id, profile) of the board the build is for (DECISIONS round 23 item 5): the probe the request names,
+        else the newest stored probe of a board of this SoC (HardwareProbes.for_board); (None, None) when there is
+        none. A named probe of another board of the target is refused: its CPU flags and its NPU are not this
+        board's."""
+        from orchestrator.runtime.probe_service import ProbeError
+        probes = self.probes()
+        if not probe_id:
+            found = probes.for_board(board)
+            if found is None:
+                return None, None
+            probe_id = found.probe_id
+        try:
+            profile = probes.get(probe_id)
+        except ProbeError as e:
+            raise BuildServiceError(str(e), code=e.code, next=e.next, field="probe") from None
+        soc = str(profile.get("SOC_MODEL") or "").lower()
+        known = caps.canonical_board(soc) if caps is not None and soc else None
+        if known and board and known.casefold() != str(board).casefold():
+            raise BuildServiceError(f"The hardware probe {probe_id} is of a board with the SoC {soc}, not of {board}.",
+                                    code="invalid_value", field="probe",
+                                    next=f"Build for {known}, or name the probe of the {board} board.")
+        return probe_id, profile
+
+    def probe_text(self, probe_id: Optional[str]) -> Optional[str]:
+        """The stored probe as the build uses it (a schema-2 file), None without one."""
+        return self.probes().text(probe_id) if probe_id else None
 
     @staticmethod
     def request_in(**values: Any) -> BuildRequestIn:
@@ -1109,6 +1152,7 @@ class BuildService:
             dataset_path=req.dataset_path,
             dataset_sha256=dataset_sha256 if req.dataset_path else None,
             target_board=req.board,
+            hardware_probe=req.probe,
             max_context_length=req.max_context_length,
             local_inputs=inputs,
             owner=owner,

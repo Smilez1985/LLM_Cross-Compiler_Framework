@@ -10,8 +10,9 @@
 #         With a hardware profile (HARDWARE_CONFIG_FILE, or $BUILD_CACHE_DIR/target_hardware_config.txt: the file
 #         scripts/hardware_probe.sh writes on the board) it also writes the CMake toolchain and the compiler flags
 #         for that board into the plan, as the hardware agent of version 1.x did; the target stage then packages
-#         llama-cli and llama-server for the board as well. A build of the BuildEngine has no profile: the board's
-#         runtime is planned from the board's own probe by the runtime builder (orchestrator/runtime/build/recipe.py).
+#         llama-cli and llama-server for the board as well. The BuildEngine hands the board's stored probe to every
+#         build (read-only, HARDWARE_CONFIG_FILE=/build-cache/hardware/...; DECISIONS round 23 item 5) when there is
+#         one; without one, nothing of the board is planned.
 #         The toolchain is the one this image has: the compilers are looked up where the shell finds them (the
 #         aarch64 cross compilers for a Rockchip board, the image's own for an x86_64 profile), and a profile of a
 #         system this image has no compiler for (a 32-bit armv7 system) is refused with the reason.

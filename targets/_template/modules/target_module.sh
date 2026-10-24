@@ -20,8 +20,8 @@
 #         model with the image's llama-completion, ELF programs for [IHRE_ARCHITEKTUR], every file against SHA256SUMS).
 #         It is made with a hardware profile in the build plan (config_module.sh), and on request (build.sh --package:
 #         target_module.sh started by hand, the entrypoint modes target and pipeline) also without one, with the
-#         module's own flags (plain defaults), which the manifest names. A build of the BuildEngine has no profile and
-#         asks for no package: the board's runtime comes from the runtime builder (llm-cli device runtime build).
+#         module's own flags (plain defaults), which the manifest names. A build of the BuildEngine gets the board's
+#         stored probe when there is one (DECISIONS round 23 item 5), and then makes the package too.
 
 set -euo pipefail
 

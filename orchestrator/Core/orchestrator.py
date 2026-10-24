@@ -92,6 +92,9 @@ class BuildRequest:
 
     # Board within the target family (e.g. rk3588 vs rk3566) and model kind
     target_board: Optional[str] = None
+    # The board's hardware probe by its id in the probe store (runtime/probe_service.py): the build engine hands it to
+    # every build container read-only, and the config stage plans the build for it (DECISIONS round 23 item 5)
+    hardware_probe: Optional[str] = None
     model_task: str = "LLM"
     max_context_length: Optional[int] = None
     # True when the dataset is the framework's shipped calibration text (used for GGUF importance matrices only)
@@ -525,6 +528,7 @@ class LLMOrchestrator:
             base_image=base_img,
             source_format=ModelFormat.HUGGINGFACE,
             target_board=req.target_board,
+            hardware_probe=getattr(req, "hardware_probe", None),
             model_task=req.model_task,
             max_context_length=req.max_context_length,
             # The importance matrix is GGUF-only; the shipped calibration text is never an NPU calibration set.
