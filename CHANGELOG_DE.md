@@ -3824,11 +3824,22 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Eintrag der Versionen davor; ein anderer Ordner bekommt einen Eintrag, der nach einem Digest des Ordners benannt
   ist (kein Pfad darin). Ein Home, dessen Eintrag noch leer ist, verankert beim ersten Blick die Revision der echt
   signierten Datei, die es annimmt, daher wird eine danach zurückgelegte ältere Kopie ab da abgelehnt, nicht erst
-  nach dem nächsten Speichern. Regressionstests: `tests/test_policy_signing.py` `TestOlderCopiesAndRemovedFiles`
-  (`test_on_windows_the_ntfs_change_time_tells_the_very_file_put_back`,
+  nach dem nächsten Speichern. Die Builds, die die Person bestätigt hat (`confirmed_builds.json`), führen ebenso eine
+  Revision im Schlüsselbund: Eine zurückgelegte ältere signierte Kopie brachte eine Bestätigung zurück, die eine
+  spätere ersetzt hatte (ein Modul, das eine KI mit seinem früheren Inhalt neu erstellt hat, ein Pack, das in einer
+  früheren Version neu installiert wurde), daher deckte ein Build-Dauerauftrag es ohne die Person ab; eine solche
+  Kopie enthält jetzt keine Bestätigung, und die Person wird erneut gefragt. Die ausstehenden Freigaben und die Liste
+  des Papierkorbs brauchen keine: Ein zurückgelegtes Ja führt nichts aus, außer es beantwortet die Frage, die der
+  haltende Prozess jetzt stellt, und ein Eintrag verlässt die Liste des Papierkorbs erst, wenn sein Element den
+  Papierkorb-Ordner verlassen hat. Regressionstests: `tests/test_policy_signing.py`
+  `TestOlderCopiesAndRemovedFiles` (`test_on_windows_the_ntfs_change_time_tells_the_very_file_put_back`,
   `test_the_ntfs_change_time_moves_when_the_file_is_put_back` unter Windows,
   `test_two_framework_homes_keep_their_own_revision`,
-  `test_a_home_without_a_kept_revision_anchors_the_file_it_accepts`). Ohne Schlüsselbund hat die Signatur keinen
+  `test_a_home_without_a_kept_revision_anchors_the_file_it_accepts`), `tests/test_confirmed_builds.py`
+  `test_an_older_copy_put_back_brings_no_replaced_confirmation_back`,
+  `tests/test_approvals_two_phase.py` `test_an_older_copy_with_an_earlier_yes_runs_nothing_the_person_did_not_approve`,
+  `tests/test_trash.py` `test_an_older_index_put_back_brings_nothing_back_to_restore_or_empty`. Ohne Schlüsselbund hat
+  die Signatur keinen
   Schlüssel, wie die Audit-Kette; eine solche Datei wird abgelehnt, solange das Audit-Log mit Schlüssel geführt
   wird.
 - **Ausstehende Freigaben und Bitten, nicht mehr zu fragen, sind Rückfragen wie alle anderen.** Sie zählen zu den

@@ -11,7 +11,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from orchestrator.Core.confirmed_builds import FILE_NAME, ConfirmedBuilds
+from orchestrator.Core.confirmed_builds import FILE_NAME, KIND, ConfirmedBuilds
+from orchestrator.Core.vault_key import revision_anchor_name
+from orchestrator.tools.signing import RevisionAnchor
 
 KEY = b"audit-key"
 VIA = "grant:g_" + "1" * 16
@@ -96,3 +98,73 @@ def test_the_removed_remote_modes_artifact_kind_is_never_written_or_matched(tmp_
     assert not store.confirmed("artifact", "a_0123456789abcdef")
     assert store.record("target", "Rockchip", channel="framework-gui"), "the file stays usable"
     assert store.confirmed("target", "Rockchip")
+
+
+def memory_anchor(slots=None):
+    """A revision anchor whose value lives in a dict (as the OS keyring keeps it, outside the per-user folder)."""
+    slots = {} if slots is None else slots
+    return slots, RevisionAnchor(lambda: slots.get("rev"), lambda v: slots.__setitem__("rev", v))
+
+
+def test_an_older_copy_put_back_brings_no_replaced_confirmation_back(tmp_path):
+    """The person confirmed a build of a module an AI created, then of its recreated content; the first content needs
+    the person again. An older signed copy of the file put back (port follow-up e: the same attack as on the tokens)
+    would bring the first confirmation back, so it holds no confirmation that counts, also for a fresh process; the
+    person's next confirmation replaces it."""
+    slots, anchor = memory_anchor()
+    store = ConfirmedBuilds(tmp_path, key=KEY, anchor=anchor)
+    first, second = "c" * 64, "d" * 64
+    assert store.record("module", "my-board", definition_sha256=first, channel="framework-gui")
+    older = (tmp_path / FILE_NAME).read_bytes()
+    assert store.record("module", "my-board", definition_sha256=second, channel="framework-gui")
+    assert not store.confirmed("module", "my-board", definition_sha256=first) and slots["rev"] == "2"
+    (tmp_path / FILE_NAME).write_bytes(older)  # genuinely signed, revision 1
+    assert not store.confirmed("module", "my-board", definition_sha256=first), "the replaced confirmation stays gone"
+    assert not store.confirmed("module", "my-board", definition_sha256=second)
+    assert "older copy" in store.problem and "asked again" in store.problem
+    fresh = ConfirmedBuilds(tmp_path, key=KEY, anchor=memory_anchor(slots)[1])
+    assert not fresh.confirmed("module", "my-board", definition_sha256=first)
+    assert fresh.record("module", "my-board", definition_sha256=first, channel="framework-cli")
+    assert json.loads((tmp_path / FILE_NAME).read_text())["revision"] == 3 and slots["rev"] == "3"
+    assert store.confirmed("module", "my-board", definition_sha256=first) and store.problem is None
+
+
+def test_a_reinstalled_earlier_pack_needs_the_person_again_despite_an_older_copy(tmp_path):
+    """The same for a target pack: confirmed in one version, then updated and confirmed again; the earlier version
+    reinstalled under the same standing approval is not covered by the older file put back."""
+    slots, anchor = memory_anchor()
+    store = ConfirmedBuilds(tmp_path, key=KEY, anchor=anchor)
+    assert store.record("target", "Demo", installed_via=VIA, pack_sha256=PACK, channel="framework-gui")
+    older = (tmp_path / FILE_NAME).read_bytes()
+    assert store.record("target", "Demo", installed_via=VIA, pack_sha256="b" * 64, channel="framework-gui")
+    (tmp_path / FILE_NAME).write_bytes(older)
+    assert not confirmed_target(ConfirmedBuilds(tmp_path, key=KEY, anchor=memory_anchor(slots)[1]))
+
+
+def test_a_file_from_before_revisions_counts_and_the_first_look_anchors_a_revision(tmp_path):
+    """A file of an earlier version has no revision: it still counts (nothing to compare with). A home whose entry is
+    still empty anchors the revision of the file it accepts at its first look."""
+    plain = ConfirmedBuilds(tmp_path, key=KEY)  # no keyring entry: as saved by a framework without an anchor
+    assert plain.record("target", "Demo", installed_via=VIA, pack_sha256=PACK, channel="framework-gui")
+    data = json.loads((tmp_path / FILE_NAME).read_text())
+    assert data["revision"] == 1 and data["version"] == 2
+    slots, anchor = memory_anchor()
+    assert confirmed_target(ConfirmedBuilds(tmp_path, key=KEY, anchor=anchor)) and slots["rev"] == "1"
+    old_format = {k: v for k, v in data.items() if k not in ("revision", "signature")}
+    from orchestrator.tools.signing import sign
+    (tmp_path / FILE_NAME).write_text(json.dumps(sign(KIND, old_format, KEY)))
+    assert confirmed_target(ConfirmedBuilds(tmp_path, key=KEY, anchor=memory_anchor()[1])), "revision 0 counts"
+
+
+def test_the_framework_store_keeps_its_revision_per_framework_home(tmp_path, memory_keyring):
+    """With a keyring (the permission file has an anchor) the framework's store anchors its revision in the entry of
+    this framework home; without one it keeps none."""
+    policy_store = SimpleNamespace(key=KEY, refuse_unkeyed=None, anchor=memory_anchor()[1])
+    framework = SimpleNamespace(tool_registry=SimpleNamespace(policy_store=policy_store))
+    store = ConfirmedBuilds.for_framework(framework, tmp_path)
+    assert store.anchor is not None
+    assert store.record("target", "Demo", installed_via=VIA, pack_sha256=PACK, channel="framework-gui")
+    stored = {name: value for (_, name), value in memory_keyring.store.items()}
+    assert stored.get(revision_anchor_name(KIND, tmp_path)) == "1"
+    unanchored = SimpleNamespace(tool_registry=SimpleNamespace(policy_store=SimpleNamespace(key=KEY, anchor=None)))
+    assert ConfirmedBuilds.for_framework(unanchored, tmp_path).anchor is None

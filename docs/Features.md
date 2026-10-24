@@ -2306,9 +2306,13 @@ There are no `external` or `forbidden` tools yet; deploying and uploading are no
   the old and new decisions before it takes effect; if the entry cannot be written, nothing changes. Each save
   raises a revision number under a lock shared by the GUI, the CLI and MCP servers, and a save based on an older
   revision (a window opened before another change) is refused, so it never undoes a change made meanwhile. The
-  newest saved revision of both files is kept in the keyring too: an older signed copy put back over a file (it
-  would bring back a revoked standing approval, a revoked token or a looser permission) is refused like a hand edit,
-  and a removed permission file denies every tool instead of falling back to the defaults. Without a keyring the
+  newest saved revision of both files is kept in the keyring too, one entry per framework home (two
+  `LLM_FRAMEWORK_HOME` folders never refuse each other's files): an older signed copy put back over a file (it would
+  bring back a revoked standing approval, a revoked token or a looser permission) is refused like a hand edit, also
+  when it is the very file a running process read before, put back through a hard link (on Windows NTFS's own change
+  time tells it), and a removed permission file denies every tool instead of falling back to the defaults. The builds
+  you confirmed keep their revision the same way, so an older copy put back counts as no confirmation. Without a
+  keyring the
   signature has no key (as for the audit chain) and `llm-cli mojo` warns; such a file is refused while the audit
   log is kept with a key.
 - A [named MCP token](#mcp-server) has its own permissions, set with `llm-cli tools permissions --token NAME`; an

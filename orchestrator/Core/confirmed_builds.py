@@ -23,7 +23,10 @@ is bound to its content (`definition_sha256`): one recreated under the same name
 The file lives in the per-user folder (`confirmed_builds.json`, mode 0600), written under a lock by framework code
 only, after a confirmed build was accepted; no tool writes it from its arguments. It is signed like the permission
 file (orchestrator/tools/signing.py): a file edited by hand, damaged, unsigned or signed with another key holds no
-confirmation, so the person is asked again.
+confirmation, so the person is asked again. Each save raises its revision, and the newest one is kept in the OS keyring
+(signing.RevisionAnchor, one entry per framework home), as for the permissions and the tokens: an older signed copy put
+back over the file would bring back a confirmation a later one replaced (a module recreated with its earlier content,
+a pack reinstalled in an earlier version), so it holds no confirmation either and the person is asked again.
 """
 
 import json
@@ -33,7 +36,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
-from orchestrator.tools.signing import SignatureError, sign, verify
+from orchestrator.tools.signing import RevisionAnchor, SignatureError, sign, verify
 from orchestrator.utils.file_lock import file_lock
 
 FILE_NAME = "confirmed_builds.json"
@@ -88,26 +91,42 @@ def _key(kind: str, item_id: str) -> str:
 class ConfirmedBuilds:
     """The builds of a target or recipe (and the AI-made modules and fetched models) the person confirmed, per user.
     `key`: the audit key (OS keyring) the file is signed with, None without a keyring (an unkeyed signature, refused
-    while `refuse_unkeyed()` says the audit log is kept with a key)."""
+    while `refuse_unkeyed()` says the audit log is kept with a key). `anchor`: where the newest saved revision is kept
+    outside the per-user folder (the OS keyring); with it an older signed copy put back holds no confirmation."""
 
     def __init__(self, state_dir: Path, key: Optional[bytes] = None,
-                 refuse_unkeyed: Optional[Callable[[], bool]] = None):
+                 refuse_unkeyed: Optional[Callable[[], bool]] = None, anchor: Optional[RevisionAnchor] = None):
         self.state_dir = Path(state_dir)
         self.path = self.state_dir / FILE_NAME
         self.key = key
         self.refuse_unkeyed = refuse_unkeyed
+        self.anchor = anchor
         self.problem: Optional[str] = None  # set when the stored file exists but could not be used
+        self._revision = 0                  # the revision the file named at the last read (0: none, or unreadable)
 
     @classmethod
     def for_framework(cls, framework, state_dir: Path) -> "ConfirmedBuilds":
         """The store with the signing key of the framework's permission file (the same key and the same refusal of
-        unkeyed signatures), or unkeyed when the framework has no tool registry."""
+        unkeyed signatures), or unkeyed when the framework has no tool registry. Its revision is kept in the keyring
+        when the permission file's is (a framework with a keyring), in the entry of this framework home."""
         policy_store = getattr(getattr(framework, "tool_registry", None), "policy_store", None)
         key = getattr(policy_store, "key", None)
+        anchor = None
+        if isinstance(key, bytes) and isinstance(getattr(policy_store, "anchor", None), RevisionAnchor):
+            from orchestrator.Core.vault_key import revision_anchor
+            anchor = revision_anchor(KIND, state_dir)
         return cls(state_dir, key=key if isinstance(key, bytes) else None,
-                   refuse_unkeyed=getattr(policy_store, "refuse_unkeyed", None))
+                   refuse_unkeyed=getattr(policy_store, "refuse_unkeyed", None), anchor=anchor)
+
+    def _anchored(self) -> int:
+        """The newest revision the framework saved of this file (kept in the keyring), 0 without an anchor."""
+        return self.anchor.current(self.path) if self.anchor is not None else 0
 
     def _load(self) -> Dict[str, dict]:
+        # The anchor before the file, as for the token store: a confirmation saved meanwhile by another process is then
+        # newer than the anchor read, never older.
+        anchored = self._anchored()
+        self._revision = 0
         try:
             if self.path.is_symlink():
                 raise ValueError("it is a symbolic link")
@@ -120,7 +139,19 @@ class ConfirmedBuilds:
             first = (str(e).splitlines() or [type(e).__name__])[0][:200]
             self.problem = f"{FILE_NAME} holds no confirmation that counts ({first}); the person is asked again."
             return {}
+        revision = data.get("revision", 0)
+        self._revision = revision if isinstance(revision, int) and not isinstance(revision, bool) and \
+            revision > 0 else 0
+        if self._revision < anchored:
+            # Genuinely signed, but older than what the framework saved last: put back to bring back a confirmation a
+            # later one replaced.
+            self.problem = (f"{FILE_NAME} holds no confirmation that counts (it is an older copy: revision "
+                            f"{self._revision}; the framework saved revision {anchored} last); the person is asked "
+                            "again.")
+            return {}
         self.problem = None
+        if not anchored and self.anchor is not None:  # no revision kept for this home yet: from now on this one
+            self.anchor.adopt(self.path, self._revision)
         items = data.get("confirmed")
         return {k: v for k, v in items.items() if isinstance(v, dict)} if isinstance(items, dict) else {}
 
@@ -128,10 +159,14 @@ class ConfirmedBuilds:
         self.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         tmp = self.path.with_name(f".{self.path.name}.{os.getpid()}.tmp")
         tmp.unlink(missing_ok=True)
-        data = sign(KIND, {"version": 2, "confirmed": items}, self.key)
+        revision = max(self._revision, self._anchored()) + 1
+        data = sign(KIND, {"version": 2, "revision": revision, "confirmed": items}, self.key)
         with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as f:
             json.dump(data, f, indent=1, sort_keys=True)
         os.replace(tmp, self.path)
+        self._revision = revision
+        if self.anchor is not None:  # after the file: a reader in between sees a newer file, never an older one
+            self.anchor.saved(self.path, revision)
 
     def get(self, kind: str, item_id: str) -> Optional[dict]:
         return self._load().get(_key(kind, item_id))

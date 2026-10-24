@@ -14,10 +14,13 @@ doctor` reports it. A reader that has a key never accepts an unkeyed signature, 
 one too while the audit log is kept with a key (so a process started without the keyring cannot be made to accept
 a file someone edited).
 
-A signature only says that the framework wrote a file at some time. So the newest revision saved of the permissions
-and of the token store is also kept in the OS keyring (RevisionAnchor): an older signed copy put back over the file
-(to bring back a revoked standing approval, a revoked token or a looser permission) is refused like a hand edit, and a
-removed permission file denies everything instead of falling back to the defaults.
+A signature only says that the framework wrote a file at some time. So the newest revision saved of the permissions,
+of the token store and of the confirmed builds is also kept in the OS keyring (RevisionAnchor, one entry per framework
+home: Core/vault_key.revision_anchor): an older signed copy put back over the file (to bring back a revoked standing
+approval, a revoked token, a looser permission or a replaced confirmation) is refused like a hand edit, and a removed
+permission file denies everything instead of falling back to the defaults. The pending approvals and the trash's list
+keep none: an approval put back runs nothing unless its yes answers the question the holding process asks now, and an
+entry leaves the trash's list only once its item has left the trash folder.
 """
 
 import functools
