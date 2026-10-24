@@ -410,3 +410,22 @@ class TestCliHealingPrompt:
         out = capsys.readouterr().out
         assert "[/usr/lib/aarch64-linux-gnu]" in out and 's/[/]usr//' in out
         assert decisions == [("r1", False)]
+
+    def test_the_proposal_loses_its_control_characters_and_keeps_its_text(self, capsys):
+        """The texts come from a build log or an AI: printed through cli._printable like every other CLI text, so an
+        escape sequence, a C1 control or a bidi override cannot rewrite the screen or reorder what the person reads;
+        the words, umlauts and the emoji joiner stay."""
+        from orchestrator import cli
+        decisions = []
+        orchestrator = SimpleNamespace(resolve_healing=lambda rid, ok: decisions.append((rid, ok)))
+        proposal = HealingProposal("Lib\x1b]0;owned\x07 fehlt \u00fc \U0001f469\u200d\U0001f4bb",
+                                   "cause\x9b2J \u202eesrever\u202c", "make clean\r\x1b[2Kok", 0.4,
+                                   HealingStrategy.MANUAL_INTERVENTION, "HOST", is_ai_generated=True)
+        cli._resolve_healing_interactively(orchestrator, "r1", proposal)
+        out = capsys.readouterr().out
+        for bad in ("\x1b", "\x07", "\x9b", "\u202e", "\u202c", "\r"):
+            assert bad not in out, repr(bad)
+        flat = " ".join(out.split())
+        assert "Lib]0;owned fehlt \u00fc \U0001f469\u200d\U0001f4bb" in flat
+        assert "cause2J esrever" in flat and "make clean[2Kok" in flat
+        assert decisions == [("r1", False)]

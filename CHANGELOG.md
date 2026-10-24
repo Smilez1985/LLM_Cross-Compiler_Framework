@@ -2929,10 +2929,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the line of `module generate-ai` that says the AI's base image cannot be pinned; the zero-width joiner inside an
   emoji sequence stays, as in the cleaning of outside text (`utils/untrusted`), and umlauts, CJK and other scripts are
   shown as they are. The `module generate-ai` proposal and its facts show hidden characters as escapes
-  (`tools.confirmation.visible`). Regression tests: `tests/test_ditto.py`
+  (`tools.confirmation.visible`). The self-healing proposal a build shows at the terminal (summary, cause, fix) and
+  the AI clients' fix proposals in `llm-cli build status` go through the same cleaning (`cli._printable`); before,
+  they only had their markup escaped, and the client proposals lost format characters but kept ESC, C1 and BEL.
+  Regression tests: `tests/test_ditto.py`
   `test_ditto_ask_keeps_control_characters_of_the_model_out_of_the_terminal`,
   `test_the_terminal_text_keeps_every_script_and_emoji_as_they_are`,
-  `test_generate_ai_keeps_control_characters_of_the_base_image_out_of_the_pin_error` and the tests next to them.
+  `test_generate_ai_keeps_control_characters_of_the_base_image_out_of_the_pin_error` and the tests next to them,
+  `tests/test_ai_safety.py` `test_the_proposal_loses_its_control_characters_and_keeps_its_text`,
+  `tests/test_client_proposals.py` `test_cli_prints_the_proposal_without_control_characters`.
 - **The AI settings dialog's model list never sends a key to the saved provider's address**: choosing another
   provider before typing its address (a saved Ollama on the local network, then **custom**) listed models at the
   saved provider's server with the other provider's key. The address field now always counts for the list, an empty

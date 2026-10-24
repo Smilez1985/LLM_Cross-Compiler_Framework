@@ -3294,10 +3294,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `module generate-ai`, die sagt, dass das Basis-Image der KI nicht gepinnt werden kann; der Nullbreiten-Verbinder
   (Zero Width Joiner) in einer Emoji-Folge bleibt, wie bei der Bereinigung von Text von außen (`utils/untrusted`), und
   Umlaute, CJK und andere Schriften erscheinen, wie sie sind. Der Vorschlag von `module generate-ai` und seine Fakten
-  zeigen versteckte Zeichen als Escapes (`tools.confirmation.visible`). Regressionstests: `tests/test_ditto.py`
+  zeigen versteckte Zeichen als Escapes (`tools.confirmation.visible`). Der Self-Healing-Vorschlag, den ein Build im
+  Terminal zeigt (Zusammenfassung, Ursache, Fix), und die Fix-Vorschläge der KI-Clients in `llm-cli build status`
+  laufen durch dieselbe Bereinigung (`cli._printable`); vorher wurde nur ihr Markup escaped, und die Vorschläge der
+  Clients verloren Formatzeichen, behielten aber ESC, C1 und BEL. Regressionstests: `tests/test_ditto.py`
   `test_ditto_ask_keeps_control_characters_of_the_model_out_of_the_terminal`,
   `test_the_terminal_text_keeps_every_script_and_emoji_as_they_are`,
-  `test_generate_ai_keeps_control_characters_of_the_base_image_out_of_the_pin_error` und die Tests daneben.
+  `test_generate_ai_keeps_control_characters_of_the_base_image_out_of_the_pin_error` und die Tests daneben,
+  `tests/test_ai_safety.py` `test_the_proposal_loses_its_control_characters_and_keeps_its_text`,
+  `tests/test_client_proposals.py` `test_cli_prints_the_proposal_without_control_characters`.
 - **Die Modellliste des KI-Einstellungsdialogs schickt nie einen Schlüssel an die Adresse des gespeicherten
   Anbieters**: Wer einen anderen Anbieter wählte, bevor er dessen Adresse eintippte (ein gespeichertes Ollama im
   lokalen Netz, dann **custom**), ließ die Modelle beim Server des gespeicherten Anbieters mit dem Schlüssel des
