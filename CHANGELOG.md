@@ -3392,11 +3392,20 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   The default home (~/.llm-framework) keeps the entry of the versions before; another folder gets an entry named by
   a digest of the folder (no path in it). A home whose entry is still empty anchors the revision of the genuinely
   signed file it accepts at its first look, so an older copy put back afterwards is refused from then on, not only
-  after the next save. Regression tests: `tests/test_policy_signing.py` `TestOlderCopiesAndRemovedFiles`
+  after the next save. The builds the person confirmed (`confirmed_builds.json`) keep a revision in the keyring the
+  same way: an older signed copy put back brought back a confirmation a later one had replaced (a module an AI
+  recreated with its earlier content, a pack reinstalled in an earlier version), so a build standing approval covered
+  it without the person; such a copy now holds no confirmation and the person is asked again. The pending approvals
+  and the trash's list need none: a yes put back runs nothing unless it answers the question the holding process asks
+  now, and an entry leaves the trash's list only once its item has left the trash folder. Regression tests:
+  `tests/test_policy_signing.py` `TestOlderCopiesAndRemovedFiles`
   (`test_on_windows_the_ntfs_change_time_tells_the_very_file_put_back`,
   `test_the_ntfs_change_time_moves_when_the_file_is_put_back` on Windows,
   `test_two_framework_homes_keep_their_own_revision`,
-  `test_a_home_without_a_kept_revision_anchors_the_file_it_accepts`).
+  `test_a_home_without_a_kept_revision_anchors_the_file_it_accepts`), `tests/test_confirmed_builds.py`
+  `test_an_older_copy_put_back_brings_no_replaced_confirmation_back`,
+  `tests/test_approvals_two_phase.py` `test_an_older_copy_with_an_earlier_yes_runs_nothing_the_person_did_not_approve`,
+  `tests/test_trash.py` `test_an_older_index_put_back_brings_nothing_back_to_restore_or_empty`.
   Without a keyring the signature has no key, as for the audit chain; such a file is refused while the audit log is
   kept with a key.
 - **Pending approvals and requests to stop asking are questions like any other.** They count toward the 30
