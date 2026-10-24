@@ -3384,7 +3384,19 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   back in that process. The revision is read before the file, so a token change saved meanwhile in another window
   never looks like an older copy. On Linux and macOS an older copy of either file is refused also when it is the
   very file a running process read before, put back through a hard link kept to it (the same inode, size and
-  modification time): the revision in the keyring is read again also when the file's change time (ctime) moved.
+  modification time): the revision in the keyring is read again also when the file's change time (ctime) moved. On
+  Windows, where st_ctime is the creation time (which a hard link keeps), NTFS's own change time is used for this
+  (GetFileInformationByHandleEx, no new dependency); before, a running process there still accepted the file put
+  back. Each framework home keeps its own revisions: two LLM_FRAMEWORK_HOME folders of one account shared one
+  keyring entry, so a save in one made the other home's file an "older copy" (every tool denied, no token accepted).
+  The default home (~/.llm-framework) keeps the entry of the versions before; another folder gets an entry named by
+  a digest of the folder (no path in it). A home whose entry is still empty anchors the revision of the genuinely
+  signed file it accepts at its first look, so an older copy put back afterwards is refused from then on, not only
+  after the next save. Regression tests: `tests/test_policy_signing.py` `TestOlderCopiesAndRemovedFiles`
+  (`test_on_windows_the_ntfs_change_time_tells_the_very_file_put_back`,
+  `test_the_ntfs_change_time_moves_when_the_file_is_put_back` on Windows,
+  `test_two_framework_homes_keep_their_own_revision`,
+  `test_a_home_without_a_kept_revision_anchors_the_file_it_accepts`).
   Without a keyring the signature has no key, as for the audit chain; such a file is refused while the audit log is
   kept with a key.
 - **Pending approvals and requests to stop asking are questions like any other.** They count toward the 30
