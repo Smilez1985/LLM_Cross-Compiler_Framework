@@ -502,7 +502,7 @@ EOF
 check_toolchain_file() {
     local file="$1" key
     if command -v cmake > /dev/null 2>&1; then
-        cmake -P "$file" > "$file.log" 2>&1 \
+        command cmake -P "$file" > "$file.log" 2>&1 \
             || die "The CMake toolchain file is not valid: $(tail -n 5 "$file.log" | tr '\n' ' ')"
         rm -f "$file.log"
     fi

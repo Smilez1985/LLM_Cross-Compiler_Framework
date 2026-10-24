@@ -877,6 +877,32 @@ class TestGenerator:
         shutil.copytree(REPO_ROOT / "targets" / "Rockchip", tmp_path / "rk-variant")
         assert validate_target_folder(tmp_path / "rk-variant") == []
 
+    @pytest.mark.parametrize("line, option", [
+        ('ARG LLAMA_CMAKE_ARGS="-DGGML_NATIVE=OFF -DLLAMA_BUILD_BORINGSSL=ON"', "-DLLAMA_BUILD_BORINGSSL=ON"),
+        ("RUN cmake -S /src -B /b -D LLAMA_BUILD_TESTS=ON && cmake --build /b", "-DLLAMA_BUILD_TESTS=ON"),
+        ("ENV CMAKE_ARGS=-DFETCHCONTENT_FULLY_DISCONNECTED=OFF", "-DFETCHCONTENT_FULLY_DISCONNECTED=OFF"),
+    ], ids=["arg", "run", "env"])
+    def test_a_target_dockerfile_cannot_switch_on_a_download_option(self, tmp_path, line, option):
+        """The build-safety leftover: the folder check read a target's Dockerfile for pinned images only, so a
+        community pack could set a llama.cpp option that downloads in its own image build. Its lines get the modules'
+        rule (download_flag_problems); the template's own lines (its refusal names those options) are not reported."""
+        from orchestrator.Core.module_generator import validate_target_folder
+        target = make_target(tmp_path / "t", dockerfile=f"FROM debian:bookworm-slim\n{line}\n")
+        problems = validate_target_folder(target)
+        assert any(p.startswith("Dockerfile:2: not allowed, ") and option in p and "would let llama.cpp download" in p
+                   for p in problems), problems
+        commented = make_target(tmp_path / "c", dockerfile=f"FROM debian:bookworm-slim\n# {line}\n")
+        assert validate_target_folder(commented) == []
+
+    def test_the_template_dockerfiles_pass_their_own_option_check(self, tmp_path):
+        from conftest import REPO_ROOT
+        from orchestrator.Core.module_generator import validate_target_folder
+        for name in ("Dockerfile", "Dockerfile.gpu"):
+            text = (REPO_ROOT / "targets" / "_template" / name).read_text(encoding="utf-8")
+            assert "-DLLAMA_BUILD_BORINGSSL=*" in text
+            target = make_target(tmp_path / name, dockerfile=text)
+            assert not [p for p in validate_target_folder(target) if "download while it is built" in p], name
+
     def test_every_image_a_dockerfile_pulls_must_be_pinned(self, tmp_path):
         from orchestrator.Core.module_generator import validate_target_folder
         lower = make_target(tmp_path / "lower")

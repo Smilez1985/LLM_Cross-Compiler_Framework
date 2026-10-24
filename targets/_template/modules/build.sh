@@ -134,6 +134,26 @@ export STAGE_RUNNER STAGE_DIR MODULES_DIR STAGE_LAST CONVERT_OUTPUT PACKAGE_REQU
 stage_output() { printf '%s\n' "$1" >> "$STAGE_DIR/$STAGE_NAME.outputs"; }
 export -f stage_output
 
+# Every cmake call of the stages' own scripts (a module's setup, conversion and packaging commands, and the bash
+# scripts they start): the words cmake gets, as the shell expanded them (-DLLAMA_BUILD_${X}=ON included), go through
+# the one verdict of the CMake flags (module_flag_problem --alone of target_module.sh) before cmake runs. The
+# framework's own calls (the toolchain check, the package's cross build, checked by check_module_flags) run
+# `command cmake`.
+cmake() {
+    local problem
+    problem="$(bash -c 'source "$1" && shift && module_flag_problem --alone "$@"' _ \
+        "$MODULES_DIR/target_module.sh" "$@")" || {
+        echo "ERROR: The CMake flags of this cmake call could not be checked; cmake was not started." >&2
+        return 1
+    }
+    if [ -n "$problem" ]; then
+        echo "ERROR: A cmake call of this build would let llama.cpp download while it is built: $problem; builds have no network: leave it out. cmake was not started." >&2
+        return 1
+    fi
+    command cmake "$@"
+}
+export -f cmake
+
 # --- Resume markers -------------------------------------------------------------------------------------------------
 
 file_digest() {

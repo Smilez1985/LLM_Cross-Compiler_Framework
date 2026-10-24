@@ -550,12 +550,24 @@ def _leftover_placeholders(root: Path) -> List[str]:
     return found
 
 
+def _template_dockerfile_lines(template_dir: Path) -> set:
+    """The lines of the shipped template's Dockerfiles (Dockerfile, Dockerfile.gpu): a target's Dockerfile line that is
+    one of them is the template's own (its refusal of the download options names them, for example)."""
+    known: set = set()
+    for name in ("Dockerfile", "Dockerfile.gpu"):
+        path = Path(template_dir) / name
+        if path.is_file():
+            known.update(path.read_text(encoding="utf-8", errors="replace").splitlines())
+    return known
+
+
 def validate_target_folder(root: Path, template_dir: Path = SHIPPED_TEMPLATE) -> List[str]:
     """Problems of a target folder that others will build (empty: none): target.yml with valid capabilities (and a
     valid runtime: block if it has one), every Dockerfile FROM pinned by digest unless it is an official base image
     or an earlier stage, no prebuilt llama.cpp (images, copied or downloaded binaries, packages: the framework shares
     recipes, decision D21), the shell deny-list and no llama.cpp option that downloads (download_flag_problems) on
-    every script line that is not in the shipped template, bash -n, no template placeholders and no binary files.
+    every script line that is not in the shipped template, the same option check on every Dockerfile line that is not
+    in the shipped template's Dockerfiles, bash -n, no template placeholders and no binary files.
     Used for generated modules, community exports and packs in quarantine."""
     from orchestrator.schemas.targets import TargetCapabilities, TargetRuntime
     root = Path(root)
@@ -593,6 +605,13 @@ def validate_target_folder(root: Path, template_dir: Path = SHIPPED_TEMPLATE) ->
                         problems.append(f"{rel}: {label}{image} must be pinned by digest (image@sha256:...)")
                 if m and m.group(2):
                     stages.add(m.group(2).lower())
+            # no llama.cpp option that downloads in a line the shipped template Dockerfiles do not have (their own
+            # check of LLAMA_CMAKE_ARGS names the options it refuses): the same rule as the modules' lines
+            known = _template_dockerfile_lines(template_dir)
+            for number, line in enumerate(lines, 1):
+                if line in known or line.lstrip().startswith("#"):
+                    continue
+                problems += [f"{rel}:{number}: not allowed, {problem}" for problem in download_flag_problems(line)]
         elif path.suffix == ".sh":
             template = template_dir / rel
             known = set(template.read_text(encoding="utf-8", errors="replace").splitlines()) if template.is_file() else set()
