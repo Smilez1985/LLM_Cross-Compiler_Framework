@@ -912,6 +912,71 @@ def test_the_package_refuses_the_options_the_build_recipe_never_sets():
     assert names == list(NEVER_SET)
 
 
+def test_a_module_s_own_cmake_call_refuses_what_every_build_keeps_off():
+    """DOWNLOAD_OFF_OPTIONS of target_module.sh are the recipe's DOWNLOAD_OPTIONS_OFF and DEPRECATED_DOWNLOAD_OPTIONS:
+    a cmake call of a module's own scripts has no option of every build after its words."""
+    from conftest import REPO_ROOT
+
+    from orchestrator.runtime.build.recipe import DEPRECATED_DOWNLOAD_OPTIONS, DOWNLOAD_OPTIONS_OFF
+    for target in ("Rockchip", "_template"):
+        text = (REPO_ROOT / "targets" / target / "modules" / "target_module.sh").read_text(encoding="utf-8")
+        names = re.search(r"^DOWNLOAD_OFF_OPTIONS=\(([^)]*)\)", text, re.M).group(1).split()
+        assert names == [*DOWNLOAD_OPTIONS_OFF, *DEPRECATED_DOWNLOAD_OPTIONS], target
+
+
+def _verdict(*words):
+    """module_flag_problem of target_module.sh (the one verdict of the CMake flags), sourced as build.sh's cmake does."""
+    from conftest import REPO_ROOT
+    modules = REPO_ROOT / "targets" / "Rockchip" / "modules"
+    result = subprocess.run([posix_shell("bash"), "-c", 'source "$1" && shift && module_flag_problem "$@"', "_",
+                             str(modules / "target_module.sh"), *words], capture_output=True, text=True, timeout=30,
+                            stdin=subprocess.DEVNULL, env={**os.environ, "MODULES_DIR": str(modules)})
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+@needs_bash
+@pytest.mark.parametrize("words, alone, package", [
+    (["-DLLAMA_BUILD_TESTS=ON"], "-DLLAMA_BUILD_TESTS=ON (LLAMA_BUILD_TESTS must be OFF on every build: it lets "
+                                 "llama.cpp download)", ""),
+    (["-D", "LLAMA_CURL=ON"], "-DLLAMA_CURL=ON (LLAMA_CURL must be OFF on every build: it lets llama.cpp download)", ""),
+    (["-DFETCHCONTENT_FULLY_DISCONNECTED=OFF"], "-DFETCHCONTENT_FULLY_DISCONNECTED=OFF "
+                                                "(FETCHCONTENT_FULLY_DISCONNECTED must be ON on every build)", ""),
+    (["-DLLAMA_SUBPROCESS:BOOL=ON"], "-DLLAMA_SUBPROCESS:BOOL=ON (LLAMA_SUBPROCESS must be OFF on every build)", ""),
+    (["-DLLAMA_BUILD_BORINGSSL=OFF"], "-DLLAMA_BUILD_BORINGSSL=OFF (LLAMA_BUILD_BORINGSSL downloads at configure time "
+                                      "and is never set)", "same"),
+    (["-P", "x.cmake"], "-P (CMake runs a script with -C or -P, and a script can set any option)", "same"),
+    (["-DLLAMA_BUILD_TESTS=OFF", "-DGGML_NATIVE=OFF", "-S", "src", "--build", "b"], "", ""),
+], ids=["tests-on", "curl-two-words", "fetchcontent", "subprocess-typed", "never-set", "script", "fine"])
+def test_one_verdict_for_the_package_s_flags_and_a_module_s_own_cmake_call(words, alone, package):
+    """The package's cross build sets every build's options after the module's flags, so only what no later option
+    turns off is refused there; a module's own cmake call (--alone) has nothing after its words, so an option every
+    build keeps OFF must be OFF there too (recipe.refused_option)."""
+    assert _verdict("--alone", *words) == alone
+    assert _verdict(*words) == (alone if package == "same" else package)
+
+
+@needs_bash
+def test_every_cmake_call_of_a_module_is_checked_with_its_expanded_words(image):
+    """A module's own script builds an option name from variables (-DLLAMA_BUILD_${X}=ON): no check of the script's
+    text can see it, but build.sh's cmake gets the expanded words and stops before cmake runs. A clean call runs."""
+    source = image.app / "modules" / "source_module.sh"
+    text = source.read_text(encoding="utf-8")
+    assert '    report_sources\n' in text
+    source.write_text(text.replace('    report_sources\n', '    report_sources\n    cmake --version\n'
+                                   '    X=BORINGSSL\n    cmake -S /nowhere -B /nowhere/b "-DLLAMA_BUILD_${X}=ON"\n',
+                                   1), encoding="utf-8")
+
+    result = by_hand(image, "source", MODEL_SOURCE=None, STUB_TOOLS_LOG=image.root / "tools.log")
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert ("ERROR: A cmake call of this build would let llama.cpp download while it is built: "
+            "-DLLAMA_BUILD_BORINGSSL=ON (LLAMA_BUILD_BORINGSSL downloads at configure time and is never set); builds "
+            "have no network: leave it out. cmake was not started.") in result.stderr
+    calls = [c for c in tools_log(image) if c.startswith("cmake ")]
+    assert calls == ["cmake --version"], calls
+
+
 @needs_bash
 def test_package_is_an_input_of_the_target_stage_only(image):
     """The convert stage first, then the target stage with --package: the stages before target resume (the request
