@@ -10,6 +10,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Mojo schließt den Kreis: die Kristallkugel nach Mojo Miracle** (DECISIONS Runde 27 und ihr Nachtrag): Endet Mojo
+  Miracle nach Mojo Oracle im Terminal (die Antwort `y` auf „Run Mojo Miracle now?“, oder `llmcf mojo --miracle`,
+  während ein früherer Oracle-Lauf im Terminal noch offen ist), zeigt `llmcf mojo` eine große ASCII-Kristallkugel,
+  farbig, wo die Konsole Farben zeigen kann (die Konsole von rich entscheidet: keine Farbe ohne Terminal, mit
+  `NO_COLOR` oder auf einer Konsole, die es nicht kann), und darunter „[Mojo] Miracle managed. The oracle is pleased.“,
+  wenn mindestens ein Problem repariert wurde, keines übrig ist und die Prüfung danach nichts Neues fand, oder „[Mojo]
+  404 - miracle not found“, wenn es nichts zu reparieren gab (kein Problem, oder jedes war schon weg). Jedes andere
+  Ergebnis (ein Problem übrig oder abgelehnt, ein neues) zeigt kein Logo. Der offene Oracle-Lauf ist eine kleine private
+  Datei neben der Sperre von Mojo Miracle im persönlichen Zustandsordner des verwendeten `LLM_FRAMEWORK_HOME` (kein Pfad,
+  kein Kontoname); jeder Lauf von Mojo Miracle im Terminal entfernt sie an seinem Ende, wie er auch ausgeht. Nie mit
+  `--json`, ohne Terminal, über `run_mojo_oracle` und `run_mojo_miracle` oder in der GUI: Für eine KI ändert sich
+  nichts. Die Zeichnung (reines ASCII, 60 Spalten) und ihre Farbmaske stehen in `orchestrator/Core/mojo/banner.py`, an
+  einer Stelle zum Austauschen; ein Test prüft, dass beide dieselbe Form haben.
 - **Hardware-Probe 3.1.0: L2-Cache, Version der Vulkan-Instanz, OpenCL-Plattformen, die Hailo-Schlüssel und die
   Hersteller-Laufzeiten** (Konsolidierungskette probe-keys; Entscheidungen Runde 23 Punkt 11, O-PREP und O-HAILO,
   HAILO_PLAN.md Abschnitt 2): `scripts/hardware_probe.py` (und seine Kopie im Paket), `hardware_probe.sh` und
