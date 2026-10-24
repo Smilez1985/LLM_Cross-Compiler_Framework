@@ -18,6 +18,8 @@ from click.testing import CliRunner
 
 # cli first: importing pydantic's BaseModel before the framework's CLI trips PySide's import hook in this environment
 from orchestrator import cli as cli_module
+from orchestrator.Core.vault_key import revision_anchor, revision_anchor_name
+from orchestrator.tools import signing
 from orchestrator.tools.audit import AuditLog
 from orchestrator.tools.mcp_tokens import TokenStore, TokenStoreError, token_digest
 from orchestrator.tools.output import ToolOutput
@@ -381,8 +383,7 @@ class TestOlderCopiesAndRemovedFiles:
             assert server.find(token).name == "laptop"
         assert [t.name for t in server.list()] == ["laptop", "phone"] and slots["rev"] == "2"
 
-    @pytest.mark.skipif(os.name != "posix" or not hasattr(os, "link"),
-                        reason="Windows gives no change time (st_ctime is the creation time there)")
+    @pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links on this system")
     def test_an_older_copy_put_back_as_the_very_file_this_process_looked_at_is_refused(self, tmp_path):
         """A hard link kept to the token store puts back the very file the server read last: the same inode, size and
         modification time, so a look at the file (stat) alone cannot tell that it was replaced and came back while
@@ -400,8 +401,7 @@ class TestOlderCopiesAndRemovedFiles:
         with pytest.raises(TokenStoreError, match="older copy"):
             server.list()
 
-    @pytest.mark.skipif(os.name != "posix" or not hasattr(os, "link"),
-                        reason="Windows gives no change time (st_ctime is the creation time there)")
+    @pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links on this system")
     def test_older_permissions_put_back_as_the_very_file_this_process_looked_at_deny_everything(self, tmp_path):
         """The same for the permissions (one revision anchor for both): the denial a person saved in another window
         is not undone by putting back the very file this process read before."""
@@ -417,6 +417,126 @@ class TestOlderCopiesAndRemovedFiles:
         os.replace(kept, mine.path)
         assert denies_everything(mine.load()) and "older copy" in mine.problem
 
+    @pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links on this system")
+    def test_on_windows_the_ntfs_change_time_tells_the_very_file_put_back(self, tmp_path, monkeypatch):
+        """Windows gives the creation time as st_ctime, which a hard link keeps; there the identity carries NTFS's
+        own change time (windows_change_time). Here it is stood in for by this system's change time, which a rename
+        moves as NTFS's does: the hard-link restore is refused through the Windows way too."""
+        monkeypatch.setattr(signing, "_POSIX", False)
+        monkeypatch.setattr(signing, "windows_change_time", lambda path: os.stat(path).st_ctime_ns)
+        slots, anchor = memory_anchor()
+        server = TokenStore(tmp_path, key=KEY, anchor=anchor)
+        token = server.add("laptop")
+        assert server.find(token).name == "laptop"
+        time.sleep(0.05)
+        kept = tmp_path / "kept.json"
+        os.link(server.path, kept)
+        TokenStore(tmp_path, key=KEY, anchor=memory_anchor(slots)[1]).revoke("laptop")
+        os.replace(kept, server.path)
+        assert server.find(token) is None, "the revoked token stays revoked"
+        monkeypatch.setattr(signing, "windows_change_time", lambda path: None)  # a file system that keeps none
+        assert RevisionAnchor._identity(server.path)[4] is None
+
+    @pytest.mark.skipif(os.name != "nt", reason="NTFS's change time is read on Windows only")
+    def test_the_ntfs_change_time_moves_when_the_file_is_put_back(self, tmp_path):
+        """The real Windows call: GetFileInformationByHandleEx gives the file's change time, a rename of a kept hard
+        link back over the file moves it, and the file's identity changes with it."""
+        path = tmp_path / "store.json"
+        path.write_text("{}", encoding="utf-8")
+        before = signing.windows_change_time(path)
+        identity = RevisionAnchor._identity(path)
+        assert isinstance(before, int) and before > 0 and identity[4] == before
+        time.sleep(0.05)
+        kept = tmp_path / "kept.json"
+        os.link(path, kept)
+        os.replace(kept, path)
+        assert signing.windows_change_time(path) != before and RevisionAnchor._identity(path) != identity
+        assert signing.windows_change_time(tmp_path / "missing.json") is None
+
+    @pytest.mark.skipif(os.name == "nt", reason="off Windows only")
+    def test_off_windows_no_ntfs_change_time_is_read(self, tmp_path):
+        path = tmp_path / "store.json"
+        path.write_text("{}", encoding="utf-8")
+        assert signing.windows_change_time(path) is None
+
+    def test_a_home_without_a_kept_revision_anchors_the_file_it_accepts(self, tmp_path):
+        """The first look at a genuinely signed file whose home keeps no revision yet (a framework home's first start
+        with its own entry, a file saved before there was a keyring) anchors its revision: an older copy put back
+        afterwards is refused, not only after the next save."""
+        store = store_at(tmp_path)  # saved without an anchor: revision 2, nothing kept
+        store.save(ToolPolicy(configured=True, overrides={"start_build": Decision.ALLOW}))
+        older = store.path.read_bytes()
+        store.save(ToolPolicy(configured=True, overrides={"start_build": Decision.DENY}, revision=1))
+        slots, anchor = memory_anchor()
+        mine = store_at(tmp_path, anchor=anchor)
+        assert mine.load().overrides == {"start_build": Decision.DENY} and slots["rev"] == "2"
+        store.path.write_bytes(older)
+        assert denies_everything(mine.load()) and "older copy" in mine.problem
+        assert denies_everything(store_at(tmp_path, anchor=memory_anchor(slots)[1]).load()), "a fresh process too"
+        tokens = TokenStore(tmp_path / "t", key=KEY)
+        token = tokens.add("laptop")
+        old_tokens = tokens.path.read_bytes()
+        tokens.revoke("laptop")
+        token_slots, token_anchor = memory_anchor()
+        assert TokenStore(tmp_path / "t", key=KEY, anchor=token_anchor).list() == [] and token_slots["rev"] == "2"
+        tokens.path.write_bytes(old_tokens)
+        assert TokenStore(tmp_path / "t", key=KEY, anchor=memory_anchor(token_slots)[1]).find(token) is None
+
+    def test_an_anchor_kept_already_is_never_replaced_by_a_first_look(self, tmp_path):
+        """adopt() writes only into an empty entry: what another process anchored meanwhile, or a value that cannot
+        be read, stays."""
+        slots, anchor = memory_anchor({"rev": "5"})
+        anchor.adopt(tmp_path / "x.json", 2)
+        assert slots == {"rev": "5"}
+        writes = []
+        RevisionAnchor(lambda: (_ for _ in ()).throw(RuntimeError("locked")), writes.append).adopt(tmp_path, 2)
+        assert writes == []
+        RevisionAnchor(lambda: None, writes.append).adopt(tmp_path, 0)
+        assert writes == [], "revision 0 (a file from before revisions) anchors nothing"
+
+    def test_two_framework_homes_keep_their_own_revision(self, tmp_path, memory_keyring):
+        """Two LLM_FRAMEWORK_HOME folders of one account never share an anchor: saves in one home do not make the
+        other home's file an older copy (all tools denied, no token accepted)."""
+        first, second = tmp_path / "home-a", tmp_path / "home-b"
+        a = store_at(first, anchor=revision_anchor("tool_policy", first))
+        for _ in range(3):
+            a.update(lambda p: p.model_copy(update={"configured": True}))
+        b = store_at(second, anchor=revision_anchor("tool_policy", second))
+        b.save(ToolPolicy(configured=True, overrides={"start_build": Decision.DENY}))
+        assert a.load().revision == 3 and b.load().revision == 1
+        fresh_b = store_at(second, anchor=revision_anchor("tool_policy", second))
+        assert fresh_b.load().overrides == {"start_build": Decision.DENY} and fresh_b.problem is None
+        ta = TokenStore(first, key=KEY, anchor=revision_anchor("mcp_tokens", first))
+        for name in ("one", "two", "three"):
+            ta.add(name)
+        tb = TokenStore(second, key=KEY, anchor=revision_anchor("mcp_tokens", second))
+        token = tb.add("laptop")
+        assert TokenStore(second, key=KEY, anchor=revision_anchor("mcp_tokens", second)).find(token).name == "laptop"
+        names = {name for (_, name) in memory_keyring.store}
+        assert {revision_anchor_name("tool_policy", first), revision_anchor_name("tool_policy", second),
+                revision_anchor_name("mcp_tokens", first), revision_anchor_name("mcp_tokens", second)} <= names
+        assert len({revision_anchor_name("tool_policy", h) for h in (first, second)}) == 2
+        # an older copy is still refused within one home
+        older = b.path.read_bytes()
+        b.update(lambda p: p.model_copy(update={"overrides": {}}))
+        b.path.write_bytes(older)
+        assert denies_everything(store_at(second, anchor=revision_anchor("tool_policy", second)).load())
+
+    def test_the_default_home_keeps_its_entry_and_no_name_holds_a_path(self, tmp_path, monkeypatch):
+        """The default home (~/.llm-framework) keeps the entry of the versions before, so its protection carries
+        over; another folder's entry names a digest of the folder, never the folder."""
+        home = tmp_path / "me"
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        default = home / ".llm-framework"
+        assert revision_anchor_name("tool_policy", default) == "tool_policy-revision"
+        assert revision_anchor_name("tool_policy") == "tool_policy-revision"
+        assert revision_anchor_name("mcp_tokens", default / "sub" / "..") == "mcp_tokens-revision"
+        other = revision_anchor_name("tool_policy", tmp_path / "elsewhere")
+        assert other.startswith("tool_policy-revision-") and len(other) == len("tool_policy-revision-") + 16
+        assert "elsewhere" not in other and str(tmp_path) not in other
+        assert revision_anchor_name("tool_policy", tmp_path / "elsewhere" / ".") == other
+
     def test_the_framework_keeps_the_revisions_in_the_keyring(self, make_framework, memory_keyring):
         fm = make_framework()
         registry = fm.tool_registry
@@ -424,8 +544,11 @@ class TestOlderCopiesAndRemovedFiles:
         registry.policy_store.replace(ToolPolicy(configured=True))
         registry.tokens.add("laptop")
         stored = {name: value for (service, name), value in memory_keyring.store.items()}
-        assert stored.get("tool_policy-revision") == str(registry.policy().revision)
-        assert stored.get("mcp_tokens-revision") == "1"
+        # The test framework's home is LLM_FRAMEWORK_HOME (not ~/.llm-framework): its own entries, one per home.
+        state = registry.policy_store.path.parent
+        assert revision_anchor_name("tool_policy", state) != "tool_policy-revision"
+        assert stored.get(revision_anchor_name("tool_policy", state)) == str(registry.policy().revision)
+        assert stored.get(revision_anchor_name("mcp_tokens", state)) == "1"
         older = registry.policy_store.path.read_bytes()
         registry.policy_store.replace(ToolPolicy(configured=True, overrides={"start_build": Decision.DENY}))
         registry.policy_store.path.write_bytes(older)

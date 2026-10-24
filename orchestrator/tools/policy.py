@@ -511,6 +511,8 @@ class PolicyStore:
                                           f"tools are denied. A copy was kept as {self.path.name}.bad; set the "
                                           "permissions up again with 'llm-cli tools permissions' or in the GUI "
                                           "(Tool Permissions)."), policy.revision
+        if not anchored and self.anchor is not None:  # no revision kept for this home yet: from now on this one
+            self.anchor.adopt(self.path, policy.revision)
         return policy, None, policy.revision
 
     def _anchored(self) -> int:

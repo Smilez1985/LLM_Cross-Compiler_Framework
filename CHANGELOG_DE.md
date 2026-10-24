@@ -3815,9 +3815,22 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   gespeichert wird, nie wie eine ältere Kopie aus. Unter Linux und macOS wird eine ältere Kopie einer der beiden
   Dateien auch dann abgelehnt, wenn sie genau die Datei ist, die ein laufender Prozess vorher gelesen hat, über einen
   aufbewahrten Hardlink zurückgelegt (gleicher Inode, gleiche Größe und gleiche mtime): Die Revision im
-  Schlüsselbund wird auch dann neu gelesen, wenn sich die ctime der Datei geändert hat. Ohne Schlüsselbund hat die
-  Signatur keinen Schlüssel, wie die Audit-Kette; eine solche Datei wird abgelehnt, solange das Audit-Log mit
-  Schlüssel geführt wird.
+  Schlüsselbund wird auch dann neu gelesen, wenn sich die ctime der Datei geändert hat. Unter Windows, wo st_ctime
+  die Erstellungszeit ist (die ein Hardlink behält), wird dafür die eigene Änderungszeit von NTFS benutzt
+  (GetFileInformationByHandleEx, keine neue Abhängigkeit); bisher nahm ein laufender Prozess dort die zurückgelegte
+  Datei noch an. Jedes Framework-Home führt seine eigenen Revisionen: Zwei LLM_FRAMEWORK_HOME-Ordner eines Kontos
+  teilten einen Eintrag im Schlüsselbund, daher machte ein Speichern im einen die Datei des anderen Homes zur
+  „älteren Kopie" (jedes Tool verboten, kein Token angenommen). Das Standard-Home (~/.llm-framework) behält den
+  Eintrag der Versionen davor; ein anderer Ordner bekommt einen Eintrag, der nach einem Digest des Ordners benannt
+  ist (kein Pfad darin). Ein Home, dessen Eintrag noch leer ist, verankert beim ersten Blick die Revision der echt
+  signierten Datei, die es annimmt, daher wird eine danach zurückgelegte ältere Kopie ab da abgelehnt, nicht erst
+  nach dem nächsten Speichern. Regressionstests: `tests/test_policy_signing.py` `TestOlderCopiesAndRemovedFiles`
+  (`test_on_windows_the_ntfs_change_time_tells_the_very_file_put_back`,
+  `test_the_ntfs_change_time_moves_when_the_file_is_put_back` unter Windows,
+  `test_two_framework_homes_keep_their_own_revision`,
+  `test_a_home_without_a_kept_revision_anchors_the_file_it_accepts`). Ohne Schlüsselbund hat die Signatur keinen
+  Schlüssel, wie die Audit-Kette; eine solche Datei wird abgelehnt, solange das Audit-Log mit Schlüssel geführt
+  wird.
 - **Ausstehende Freigaben und Bitten, nicht mehr zu fragen, sind Rückfragen wie alle anderen.** Sie zählen zu den
   30 Rückfragen pro Stunde; ein Nein im Freigabefenster verhindert für 10 Minuten, dass dir derselbe Aufruf erneut
   vorgelegt wird, und zählt zur Pause des Tools, wie ein Nein im Dialog des Clients; ein kürzliches Nein, ein
