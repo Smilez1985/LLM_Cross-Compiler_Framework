@@ -1020,10 +1020,12 @@ def _resolve_healing_interactively(orchestrator, request_id, proposal):
     automatic = (not getattr(proposal, "is_ai_generated", False)
                  and getattr(getattr(proposal, "strategy", None), "value", "") in AUTOMATIC_STRATEGIES)
     origin = "AI suggestion" if getattr(proposal, "is_ai_generated", False) else "Known issue"
-    console.print(f"[bold magenta]Self-Healing ({origin}): {escape(str(proposal.summary))}[/bold magenta]")
-    console.print(f"Cause: {escape(str(proposal.root_cause))}")
+    # The texts come from a build log, the known-issue list or an AI: printed through _printable like every other
+    # CLI text (no escape sequence, C1 control or bidi override reaches the terminal), markup escaped.
+    console.print(f"[bold magenta]Self-Healing ({origin}): {escape(_printable(proposal.summary))}[/bold magenta]")
+    console.print(f"Cause: {escape(_printable(proposal.root_cause))}")
     label = "The framework will" if automatic else "Manual step (not run by the framework)"
-    console.print(f"{label}: [italic]{escape(str(proposal.fix_command))}[/italic]")
+    console.print(f"{label}: [italic]{escape(_printable(proposal.fix_command))}[/italic]")
     approved = False
     if automatic and sys.stdin.isatty():
         try:
@@ -1159,18 +1161,19 @@ def _print_client_proposals(proposals: list) -> None:
     """Who proposed each fix, marked as AI-generated; the texts are the AI's and are printed as plain text."""
     from orchestrator.utils.untrusted import sanitize_untrusted
 
-    def text(value) -> str:  # invisible characters out, markup escaped
-        return escape(sanitize_untrusted(str(value), 2000))
+    def text(value) -> str:  # invisible characters and control characters out (_printable), markup escaped
+        return escape(_printable(sanitize_untrusted(str(value), 2000)))
 
     for p in proposals:
-        console.print(f"[bold magenta]Fix proposal {escape(p.proposal_id)} (AI-generated), proposed by "
+        console.print(f"[bold magenta]Fix proposal {escape(_printable(p.proposal_id))} (AI-generated), proposed by "
                       f"{text(p.who())}[/bold magenta]")
         console.print(f"  Summary: {text(p.summary)}")
         if p.root_cause:
             console.print(f"  Cause: {text(p.root_cause)}")
-        console.print(f"  Manual step ({escape(p.where)}, not run by the framework): [italic]{text(p.manual_step)}"
-                      f"[/italic]")
-        console.print(f"  Confidence: {p.confidence:.0%}" + (f", {escape(p.created)}" if p.created else ""))
+        console.print(f"  Manual step ({escape(_printable(p.where))}, not run by the framework): "
+                      f"[italic]{text(p.manual_step)}[/italic]")
+        console.print(f"  Confidence: {p.confidence:.0%}" + (f", {escape(_printable(p.created))}" if p.created
+                                                                else ""))
         console.print("")
 
 

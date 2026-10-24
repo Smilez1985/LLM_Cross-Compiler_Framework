@@ -198,6 +198,22 @@ class TestShownToThePerson:
         assert "AI clients proposed fixes for 1 failed build(s): llm-cli build status req_1" in " ".join(
             listing.output.split())
 
+    def test_cli_prints_the_proposal_without_control_characters(self, capsys):
+        """An AI's texts go through cli._printable like every other CLI text: no ESC, C1, BEL, carriage return or
+        bidi control reaches the terminal; markup is still shown, never applied, and the words stay."""
+        from orchestrator import cli
+        proposal = ClientProposal("hp_1", "req_1", "Out of\x1b[2J memory \u00e4", "cause\x9b31m \u202eA\u202c",
+                                  "Add swap\r\x07 [bold]now[/bold]", 0.6, "HOST", "mcp:ci",
+                                  client="Evil\x1b]0;title\x07Client", created="2026-10-24T10:00:00+00:00")
+        cli._print_client_proposals([proposal])
+        out = capsys.readouterr().out
+        for bad in ("\x1b", "\x07", "\x9b", "\u202e", "\u202c", "\r"):
+            assert bad not in out, repr(bad)
+        flat = " ".join(out.split())
+        assert "Out of[2J memory \u00e4" in flat and "cause31m A" in flat
+        assert "Add swap [bold]now[/bold]" in flat, "markup is shown, never applied"
+        assert "the AI client with the token 'ci' (Evil]0;titleClient, self-reported)" in flat
+
     def test_the_gui_lists_proposals_as_plain_text(self, env, qapp):
         from orchestrator.gui.proposals_window import ClientProposalsDialog, proposal_text
         env.build()
