@@ -2397,8 +2397,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   access the file". The runtime's state files (also those of the build store and the runtime mode) are now replaced
   with `utils/atomic.replace_file`, and `server.json`, the key files and the lock files of `utils/download.FileLock`
   (the runtime lock, the build store's lock and the per-download locks) are deleted with the new
-  `utils/atomic.remove_file`; both try again for a moment on Windows, never elsewhere. Regression tests:
-  `tests/test_atomic.py`, `tests/test_runtime.py` `test_windows_sharing_violations_are_retried`.
+  `utils/atomic.remove_file`; both try again for a moment on Windows, never elsewhere. The downloaded archives of
+  `ditto runtime install --prebuilt` go through `remove_file` too, and one that still cannot be deleted (a second
+  process installing the same build hashes it, a virus scanner reads it) no longer fails a finished install: it stays
+  in the downloads folder, with a warning in the log. Regression tests: `tests/test_atomic.py`,
+  `tests/test_runtime.py` `test_windows_sharing_violations_are_retried`,
+  `test_an_archive_that_cannot_be_deleted_fails_no_finished_install`.
 - **Ditto's tool calls and their results always pair up** (port of the kept worktree ditto-rewire-verified): every
   provider rejects a conversation that goes on after an unanswered tool call, so every later question on such a
   history failed. An answer cut off at the length limit while calling a tool left the call unanswered; the tool

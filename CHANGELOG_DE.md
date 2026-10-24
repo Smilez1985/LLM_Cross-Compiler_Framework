@@ -2700,8 +2700,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Zustandsdateien der Laufzeit (auch die des Build-Speichers und des Laufzeitmodus) werden jetzt mit
   `utils/atomic.replace_file` ersetzt, und `server.json`, die Schlüsseldateien und die Sperrdateien von
   `utils/download.FileLock` (die Laufzeit-Sperre, die des Build-Speichers und die einzelner Downloads) mit dem neuen
-  `utils/atomic.remove_file` gelöscht; beide versuchen es unter Windows kurz erneut, sonst nie. Regressionstests:
-  `tests/test_atomic.py`, `tests/test_runtime.py` `test_windows_sharing_violations_are_retried`.
+  `utils/atomic.remove_file` gelöscht; beide versuchen es unter Windows kurz erneut, sonst nie. Die heruntergeladenen
+  Archive von `ditto runtime install --prebuilt` laufen ebenfalls über `remove_file`, und eines, das sich trotzdem
+  nicht löschen lässt (ein zweiter Prozess, der denselben Build installiert, prüft gerade seinen Hash, ein
+  Virenscanner liest es), lässt eine fertige Installation nicht mehr scheitern: Es bleibt im Download-Ordner, mit
+  einer Warnung im Log. Regressionstests: `tests/test_atomic.py`, `tests/test_runtime.py`
+  `test_windows_sharing_violations_are_retried`, `test_an_archive_that_cannot_be_deleted_fails_no_finished_install`.
 - **Dittos Tool-Aufrufe und ihre Ergebnisse passen immer zusammen** (Übernahme aus dem behaltenen Worktree
   ditto-rewire-verified): Jeder Anbieter lehnt ein Gespräch ab, das nach einem unbeantworteten Tool-Aufruf
   weitergeht, also scheiterte jede spätere Frage auf so einem Verlauf. Eine an der Längengrenze abgeschnittene

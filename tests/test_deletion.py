@@ -89,8 +89,10 @@ DELETION_SITES = {
     ("orchestrator/Core/vault_key.py", "KeyFileHolder._write"): TEMP,
     ("orchestrator/utils/atomic.py", "write_private"): TEMP,
     # the helper that deletes the local runtime's state and key files and the lock files (with the Windows retry);
-    # its callers are listed (FileLock, LocalLLMRuntime._stop_locked and _cleanup_stale_locked)
+    # its callers are listed (FileLock, LocalLLMRuntime._stop_locked and _cleanup_stale_locked, and the downloaded
+    # archives of install_prebuilt)
     ("orchestrator/utils/atomic.py", "remove_file"): TEMP,
+    ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime.install_prebuilt.discard"): TEMP,  # an unpacked archive
     ("orchestrator/utils/ssh_trust.py", "save_host_keys"): TEMP,   # known_hosts' temporary file when writing fails
     ("orchestrator/Core/deployment_manager.py", "DeploymentManager.create_package"): TEMP,
     ("orchestrator/Core/knowledge_snapshots.py", "_copy_checked"): TEMP,   # an export's unfinished copy
