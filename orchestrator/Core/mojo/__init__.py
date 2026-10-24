@@ -18,6 +18,8 @@ items 11', M' and T); it never deletes: deleting is the person's, from the frame
 - views.py: what an AI reads of the findings (folders by label, other paths by file name, secrets redacted).
 - docker_objects.py: the framework's Docker images, listed for the person and deleted only as the person ticked and
   confirmed them in the framework's own window (never over MCP, never under a delegation).
+- banner.py: Mojo closes the circle (round 27): the crystal ball and its line after Mojo Miracle ends after Mojo
+  Oracle at a terminal (the CLI only), the drawing and its colour mask in one place, and the open Oracle run's note.
 
 `orchestrator/Core/doctor.py` stays as a compatibility module that re-exports all of this.
 """
