@@ -226,6 +226,15 @@ run_module() {
     exec bash "$STAGE_RUNNER_SCRIPT" --to "$module_name" "$@"
 }
 
+# PYTHON: the interpreter of an SDK venv (VENV/bin/python). True, after saying why, when VENV/NOT_INSTALLED gives the
+# reason the image has no such venv (an image built on arm64 has no RKLLM-Toolkit, whose wheels are x86_64 only).
+sdk_not_installed() {
+    local reason
+    reason="$(dirname "$(dirname "$1")")/NOT_INSTALLED"
+    [ -f "$reason" ] || return 1
+    echo "ℹ️  Not in this image: $(cat "$reason")"
+}
+
 run_system_tests() {
     log_info "Running system integrity tests..."
     python3 -c "import torch, gguf; print('✅ GGUF toolchain: torch ' + torch.__version__)" || exit 1
@@ -241,17 +250,21 @@ run_system_tests() {
     done
     [ -f "$llama/convert_hf_to_gguf.py" ] || { log_error "convert_hf_to_gguf.py missing"; exit 1; }
 
-    # Optional SDK venvs (only targets that ship them)
-    if [ -n "${RKLLM_PYTHON:-}" ]; then
+    # Optional SDK venvs (only targets that ship them). A venv the image cannot have on the computer it was built for
+    # (RKLLM-Toolkit has x86_64 wheels only) is a folder with NOT_INSTALLED, the reason: reported, not tested.
+    if [ -n "${RKLLM_PYTHON:-}" ] && ! sdk_not_installed "$RKLLM_PYTHON"; then
         "$RKLLM_PYTHON" -c "from rkllm.api import RKLLM; RKLLM()" >/dev/null && echo "✅ RKLLM toolkit" || { log_error "RKLLM toolkit broken"; exit 1; }
     fi
-    if [ -n "${RKNN_PYTHON:-}" ]; then
+    if [ -n "${RKNN_PYTHON:-}" ] && ! sdk_not_installed "$RKNN_PYTHON"; then
         "$RKNN_PYTHON" -c "from rknn.api import RKNN; RKNN(verbose=False)" >/dev/null && echo "✅ RKNN toolkit" || { log_error "RKNN toolkit broken"; exit 1; }
     fi
 
     # Each toolchain venv must be internally consistent (the SDKs pin conflicting torch versions).
     local py
     for py in python3 ${RKLLM_PYTHON:-} ${RKNN_PYTHON:-}; do
+        if [ "$py" != python3 ] && sdk_not_installed "$py" >/dev/null; then
+            continue
+        fi
         "$py" -m pip check >/dev/null || { log_error "Broken requirements in $("$py" -c 'import sys; print(sys.prefix)')"; "$py" -m pip check; exit 1; }
     done
     echo "✅ Python environments consistent (pip check)"

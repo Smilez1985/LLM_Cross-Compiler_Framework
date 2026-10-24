@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Convert a HuggingFace model directory to .rkllm with RKLLM-Toolkit (run inside /opt/venv-rkllm)."""
+"""Convert a HuggingFace model directory to .rkllm with RKLLM-Toolkit (run inside /opt/venv-rkllm).
+
+The same file in targets/Rockchip/scripts and targets/_template/scripts (tests/test_target_template.py compares
+them)."""
 
 import argparse
 import json

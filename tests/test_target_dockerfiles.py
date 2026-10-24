@@ -150,6 +150,121 @@ class TestTheRecipeInTheDockerfiles:
         assert 'LABEL org.llm-framework.cuda-source="${CUDA_SOURCE}"' in gpu
 
 
+# --- the stages of the Rockchip image (DECISIONS round 23 items 14 and 15) -------------------------------------------
+
+def stages(dockerfile_text: str) -> list:
+    """(FROM arguments, [(INSTRUCTION, arguments), ...]) of every stage, in order."""
+    found: list = []
+    for word, rest in instructions(dockerfile_text):
+        if word == "FROM":
+            found.append((rest, []))
+        elif found:
+            found[-1][1].append((word, rest))
+    return found
+
+
+def stub(folder: Path, name: str, body: str) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / name
+    path.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    return path
+
+
+class TestTheRockchipImageStages:
+    """The image was one stage: build-essential, python3-dev and the whole llama.cpp build tree stayed in it. Now the
+    builder stage fetches and builds llama.cpp's tools and installs the venvs; the image gets the venvs and the source
+    tree with build/bin at the same paths, and only what the build stages run."""
+
+    def test_the_builder_stage_builds_and_the_image_gets_what_the_stages_run(self):
+        rockchip = text(ROCKCHIP)
+        (builder_from, builder), (image_from, image) = stages(rockchip)
+        assert builder_from == "debian:bookworm-slim AS builder" and image_from == "debian:bookworm-slim"
+        builder_runs = [rest for word, rest in builder if word == "RUN"]
+        assert find_run(rockchip, FETCH_MARKER) in builder_runs and find_run(rockchip, BUILD_MARKER) in builder_runs
+        assert find_run(rockchip, "venv-rkllm/bin/pip") in builder_runs
+        assert find_run(rockchip, "venv-rknn/bin/pip") in builder_runs
+        image_runs = " ".join(rest for word, rest in image if word == "RUN")
+        for package in ("build-essential", "python3-dev", "python3-venv", "curl"):
+            assert not re.search(rf"(?<![\w-]){re.escape(package)}(?![\w-])", image_runs), package
+        for package in ("cmake", "make", "gcc", "g++", "libc6-dev", "git", "gosu", "python3", "libgomp1", "libgl1",
+                        "libglib2.0-0", "gcc-aarch64-linux-gnu", "g++-aarch64-linux-gnu"):
+            assert re.search(rf"(?<![\w-]){re.escape(package)}(?![\w-])", image_runs), package
+        copies = {rest for word, rest in image if word == "COPY" and rest.startswith("--from=")}
+        assert copies == {f"--from=builder {p} {p}" for p in
+                          ("/usr/src/llama.cpp", "/opt/venv", "/opt/venv-rkllm", "/opt/venv-rknn")}
+        image_env = defaults("\n".join(f"{word} {rest}" for word, rest in image if word == "ENV"))
+        assert image_env["RKLLM_PYTHON"] == "/opt/venv-rkllm/bin/python"
+        assert image_env["RKNN_PYTHON"] == "/opt/venv-rknn/bin/python"
+        assert image_env["VIRTUAL_ENV"] == "/opt/venv" and image_env["LLAMA_CPP_PATH"] == "/usr/src/llama.cpp"
+        assert image[-3:] == [("USER", "llmbuilder"), ("ENTRYPOINT", '["/entrypoint.sh"]'), ("CMD", '["interactive"]')]
+        assert "useradd -l -u \"${USER_ID}\" -g llmbuilder -d /app -s /bin/bash llmbuilder" in image_runs
+        assert {word for word, _ in builder} >= {"ARG", "ENV", "RUN"} and "USER" not in {w for w, _ in builder}
+
+    def test_every_pin_of_the_image_stays(self):
+        rockchip = text(ROCKCHIP)
+        values = defaults(rockchip)
+        assert re.fullmatch(r"\d+\.\d+\.\d+", values["RKLLM_VERSION"])
+        assert re.fullmatch(r"[0-9a-f]{64}", values["RKLLM_WHEEL_SHA256"])
+        assert re.fullmatch(r"\d+\.\d+\.\d+", values["RKNN_TOOLKIT2_VERSION"])
+        rkllm, rknn = find_run(rockchip, "venv-rkllm/bin/pip"), find_run(rockchip, "venv-rknn/bin/pip")
+        assert "torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu" in rkllm
+        assert ("rkllm_toolkit-${RKLLM_VERSION}-cp311-cp311-linux_x86_64.whl#sha256=${RKLLM_WHEEL_SHA256}" in rkllm)
+        assert 'install --upgrade pip wheel "setuptools<81"' in rknn
+        assert "torch==2.4.0 --index-url https://download.pytorch.org/whl/cpu" in rknn
+        assert '"rknn-toolkit2==${RKNN_TOOLKIT2_VERSION}" "onnx==1.16.2"' in rknn
+
+    @needs_sh
+    def test_only_the_tools_of_the_build_tree_go_into_the_image(self, tmp_path):
+        step = find_run(text(ROCKCHIP), '! -name bin')
+        build = tmp_path / "llama.cpp" / "build"
+        for part in ("bin/llama-quantize", "src/libllama.a", "CMakeCache.txt"):
+            (build / part).parent.mkdir(parents=True, exist_ok=True)
+            (build / part).write_text("x")
+        result = run(step, {"PATH": os.environ.get("PATH", ""), "LLAMA_CPP_PATH": str(tmp_path / "llama.cpp")})
+        assert result.returncode == 0, result.stderr
+        assert sorted(p.relative_to(build).as_posix() for p in build.rglob("*")) == ["bin", "bin/llama-quantize"]
+
+    @needs_sh
+    def test_an_image_built_on_arm64_has_no_rkllm_venv_but_the_reason(self, tmp_path):
+        """RKLLM-Toolkit ships linux_x86_64 wheels only: on an arm64 build computer the step installs nothing and
+        leaves the build service's sentence in NOT_INSTALLED (rkllm_module.sh and the entrypoint's test read it)."""
+        from orchestrator.Core.build_formats import format_refusal
+        step = find_run(text(ROCKCHIP), "NOT_INSTALLED")
+        assert step.count("/opt/venv-rkllm") >= 4
+        venv = tmp_path / "venv-rkllm"
+        bin_dir = tmp_path / "bin"
+        stub(bin_dir, "dpkg", 'echo arm64\n')
+        stub(bin_dir, "python3", f'echo "python3 $*" >> "{tmp_path}/python.log"\nexit 1\n')
+        result = run(step.replace("/opt/venv-rkllm", str(venv)),
+                     {"PATH": os.pathsep.join([str(bin_dir), "/usr/bin", "/bin"]),
+                      "RKLLM_VERSION": defaults(text(ROCKCHIP))["RKLLM_VERSION"]})
+        assert result.returncode == 0, result.stderr
+        assert (venv / "NOT_INSTALLED").read_text().strip() == format_refusal("rkllm", host_arch="arm64")
+        assert not (tmp_path / "python.log").exists() and not (venv / "bin").exists()
+
+    @needs_sh
+    @pytest.mark.parametrize("arch, cross", [("amd64", True), ("arm64", False)])
+    def test_the_aarch64_compilers_are_the_cross_packages_on_amd64_and_the_own_ones_on_arm64(self, tmp_path, arch,
+                                                                                               cross):
+        """Debian has gcc-aarch64-linux-gnu for amd64, not for arm64, where gcc and g++ are aarch64-linux-gnu-gcc and
+        -g++ themselves (packages.debian.org, bookworm)."""
+        step = find_run(text(ROCKCHIP), 'cross=""')
+        assert "rm -rf /var/lib/apt/lists/*" in step
+        step = step.replace("rm -rf /var/lib/apt/lists/*", "true")  # the host's apt lists stay untouched
+        bin_dir = tmp_path / "bin"
+        stub(bin_dir, "dpkg", f"echo {arch}\n")
+        stub(bin_dir, "apt-get", f'echo "$*" >> "{tmp_path}/apt.log"\n')
+        result = run(step, {"PATH": os.pathsep.join([str(bin_dir), "/usr/bin", "/bin"])})
+        assert result.returncode == 0, result.stderr
+        update, install = (tmp_path / "apt.log").read_text().splitlines()
+        assert update == "update"
+        words = install.split()
+        assert words[:3] == ["install", "-y", "--no-install-recommends"]
+        assert ("gcc-aarch64-linux-gnu" in words and "g++-aarch64-linux-gnu" in words) is cross
+        assert {"gcc", "g++", "cmake", "make"} <= set(words)
+
+
 # --- the fetch step --------------------------------------------------------------------------------------------------
 
 IDENTITY = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false",

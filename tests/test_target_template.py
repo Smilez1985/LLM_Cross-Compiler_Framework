@@ -381,3 +381,67 @@ def test_an_invalid_runtime_block_in_a_pack_is_reported(tmp_path, change):
     meta["runtime"].update(change)
     (target / "target.yml").write_text(yaml.safe_dump(meta))
     assert any("invalid runtime block" in p for p in validate_target_folder(target))
+
+
+# --- the convert stage's format helpers (DECISIONS round 23 item 5) ---------------------------------------------
+# The template's rknn_module.sh was a stub: it cloned rknn-toolkit2 at its newest commit and pip-installed a wheel at
+# build time (a build container has no network) and then converted nothing ("Dummy call for template");
+# rkllm_module.sh cloned rknn-llm the same way. Both are now the Rockchip helpers, which use the image's venv
+# (RKNN_PYTHON, RKLLM_PYTHON) and refuse in plain words without it; the converters they start are the Rockchip ones.
+
+ROCKCHIP = REPO_ROOT / "targets" / "Rockchip"
+HELPERS = ("modules/rknn_module.sh", "modules/rkllm_module.sh")
+CONVERTERS = ("scripts/rknn_converter.py", "scripts/export_rkllm.py")
+FETCHES = re.compile(r"\bgit\s+clone\b|\bpip3?\s+install\b|\bcurl\b|\bwget\b")
+
+
+def _below_header(text: str) -> str:
+    lines = text.splitlines(keepends=True)
+    start = next(i for i, line in enumerate(lines) if i > 0 and not line.startswith("#"))
+    return "".join(lines[start:])
+
+
+def test_the_template_format_helpers_are_the_rockchip_ones():
+    for rel in HELPERS:
+        template, rockchip = (TEMPLATE / rel).read_text(encoding="utf-8"), (ROCKCHIP / rel).read_text(encoding="utf-8")
+        assert _below_header(template) == _below_header(rockchip), rel
+        assert "Below this header the same script as targets/Rockchip/" + rel in template.replace("\n# ", " "), rel
+    for rel in CONVERTERS:
+        assert (TEMPLATE / rel).read_bytes() == (ROCKCHIP / rel).read_bytes(), rel
+    for rel in HELPERS + CONVERTERS:
+        for target in (TEMPLATE, ROCKCHIP):
+            code = "\n".join(line for line in (target / rel).read_text(encoding="utf-8").splitlines()
+                             if not line.lstrip().startswith("#"))
+            assert not FETCHES.search(code), (target.name, rel)
+
+
+@needs_bash
+@pytest.mark.parametrize("helper, venv, message", [
+    ("rknn_module.sh", "RKNN_PYTHON", "RKNN toolkit venv not found at {python}: the image needs RKNN-Toolkit2 in that "
+                                      "venv"),
+    ("rkllm_module.sh", "RKLLM_PYTHON", "RKLLM toolkit venv not found at {python}: the image needs RKLLM-Toolkit in "
+                                        "that venv"),
+])
+def test_a_template_helper_without_the_toolkit_refuses_and_fetches_nothing(tmp_path, helper, venv, message):
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    log = tmp_path / "fetch.log"
+    for name in ("git", "pip", "pip3", "curl", "wget"):
+        tool = tools / name
+        tool.write_text(f'#!/bin/sh\necho "{name} $*" >> "{log}"\n')
+        tool.chmod(0o755)
+    uname = tools / "uname"  # the x86_64 image the toolkits have wheels for, on every machine that runs the test
+    uname.write_text('#!/bin/sh\n[ "$1" = -m ] && { echo x86_64; exit 0; }\n'
+                     '[ -x /bin/uname ] && exec /bin/uname "$@"\nexec /usr/bin/uname "$@"\n')
+    uname.chmod(0o755)
+    model = tmp_path / "model"
+    model.mkdir()
+    (model / "model.onnx").write_bytes(b"onnx")
+    python = tmp_path / "no-venv" / "bin" / "python"
+    env = {"PATH": os.pathsep.join([str(tools), "/usr/bin", "/bin"]), "MODEL_SOURCE": str(model),
+           "BUILD_CACHE_DIR": str(tmp_path / "cache"), venv: str(python)}
+    result = subprocess.run(["bash", str(TEMPLATE / "modules" / helper)], env=env, capture_output=True, text=True,
+                            timeout=60, stdin=subprocess.DEVNULL)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert message.format(python=python) in result.stderr
+    assert not log.exists(), "nothing is cloned, installed or downloaded"
