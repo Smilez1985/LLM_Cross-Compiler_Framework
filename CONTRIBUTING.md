@@ -647,7 +647,11 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   chmod or ACL helper). One-time notices:
   `orchestrator/utils/notice_store.py` (`OneTimeNotice`). Docker image references:
   `orchestrator/utils/image_ref.py`. HTTP that reaches only public addresses: `orchestrator/security/http.py`
-  (`PublicOnlyAdapter`). The audit key: `Core/vault_key.audit_key`; a pack's base images:
+  (`PublicOnlyAdapter`). A console program the framework runs and reads: `utils/helpers.execute_command` (stdin
+  closed, replacement decoding; a runner that needs its own error handling, such as the pinned source's git, passes
+  the same `windowless_flags()`, so no console window opens on Windows). The audit key: `Core/vault_key.audit_key`;
+  the revision anchor of a signed per-user file, one keyring entry per framework home:
+  `Core/vault_key.revision_anchor`; a pack's base images:
   `Core/community_pack.py`; the snapshot check before an index: `Core/knowledge_snapshots.snapshot_space`; the
   audit of a saved module: `Core/module_generator.record_module_saved`.
 - **Outside text enters the knowledge base cleaned, through one path.** HTML is read with

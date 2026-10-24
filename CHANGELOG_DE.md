@@ -2583,6 +2583,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Das git der gepinnten llama.cpp-Quelle öffnet kein Konsolenfenster und liest jede Ausgabe** (Nacharbeit der
+  Übernahmen): `runtime/build/source.Git` startete git ohne `CREATE_NO_WINDOW`, daher blitzte unter Windows ein
+  Konsolenfenster auf, wenn das Boards-Fenster die Laufzeit eines Boards baute oder Dittos Laufzeit-Export es aus der
+  GUI startete, und eine Ausgabe von git, die kein UTF-8 war, endete in einem `UnicodeDecodeError`-Traceback statt
+  in der klaren Ablehnung. Git startet jetzt so, wie `utils/helpers.execute_command` ein Konsolenprogramm startet:
+  dieselben Startflags (`helpers.windowless_flags`), Ausgabe mit Ersatzzeichen dekodiert, stdin geschlossen; die
+  Optionen des Offline-Modus bleiben, wie sie sind. Regressionstests: `tests/test_build_source.py`
+  `test_git_starts_like_the_one_helper_starts_a_console_program`,
+  `test_a_message_that_is_not_utf8_is_reported_never_a_traceback`.
 - **`llm-cli deploy devices edit` nennt den Grund statt eines Tracebacks**: Der Befehl fing nur die eigenen Fehler
   der Board-Schritte ab; eine von einem anderen Prozess belegte `known_hosts` des Frameworks (ein `LockTimeout` von
   `pairing.replace_key`), Einstellungen, die sich nach deinem Ja nicht lesen ließen, oder eine Datei, die sich vor

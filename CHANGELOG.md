@@ -2293,6 +2293,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **The pinned llama.cpp source's git opens no console window and reads any output** (port follow-up):
+  `runtime/build/source.Git` started git without `CREATE_NO_WINDOW`, so on Windows a console window flashed up when
+  the Boards window built a board's runtime or Ditto's runtime export ran it from the GUI, and git output that was
+  not UTF-8 ended in a `UnicodeDecodeError` traceback instead of the plain refusal. Git now starts as
+  `utils/helpers.execute_command` starts a console program: the same creation flags (`helpers.windowless_flags`),
+  output decoded with replacement characters, stdin closed; the options of offline mode are unchanged. Regression
+  tests: `tests/test_build_source.py` `test_git_starts_like_the_one_helper_starts_a_console_program`,
+  `test_a_message_that_is_not_utf8_is_reported_never_a_traceback`.
 - **`llm-cli deploy devices edit` gives the plain reason instead of a traceback**: it caught only the board steps'
   own errors, so the framework's `known_hosts` held by another process (a `LockTimeout` of `pairing.replace_key`),
   settings that could not be read after you said yes, or a file that could not be read before the question ended in
