@@ -35,11 +35,12 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from orchestrator.runtime.catalog import BuildBase, CudaToolkit, RuntimeCatalog, version_tuple
 from orchestrator.runtime.profile import HardwareProfile
 
-RECIPE_VERSION = 3  # bump when the same inputs give different options: every build ID changes with it
+RECIPE_VERSION = 4  # bump when the same inputs give different options: every build ID changes with it
 # 2: Linux Clang builds use OpenMP only with a usable libomp; ARM CPU variants need a compiler that knows +sme;
 #    the CPU variant modules of device builds link the C++ runtime statically too
 # 3: conversion tools (host-tools, built in the target's image) get the build host's CPU features as explicit
 #    options instead of GGML_NATIVE
+# 4: GGML_AVX512 only when the probe's CPU flags name AVX-512 F, CD, VL, DQ and BW (AVX512_SET), else the AVX2 plan
 
 PURPOSES = ("host-runtime", "host-tools", "device-runtime")
 PLACEMENTS = ("native", "container", "cross", "on-device")
@@ -107,6 +108,10 @@ _X86_NEEDS: Mapping[str, str] = {
     "SUPPORTS_AVX_VNNI": "SUPPORTS_AVX2", "SUPPORTS_AMX_INT8": "SUPPORTS_AMX_TILE",
     "SUPPORTS_AMX_BF16": "SUPPORTS_AMX_TILE",
 }
+# The CPU flags (/proc/cpuinfo names) GGML_AVX512 compiles for: -mavx512f -mavx512cd -mavx512vl -mavx512dq
+# -mavx512bw (_X86_FLAGS). GGML_AVX512 is used only when the probe's CPU flags name all of them (avx512_missing);
+# SUPPORTS_AVX512 alone is AVX-512 F (configs/hardware_probe_schema.yml).
+AVX512_SET: Tuple[str, ...] = ("avx512f", "avx512cd", "avx512vl", "avx512dq", "avx512bw")
 # The compiler flags ggml adds per option without GGML_NATIVE (ggml/src/ggml-cpu/CMakeLists.txt:347-410).
 _X86_FLAGS: Mapping[str, Tuple[str, ...]] = {
     "GGML_SSE42": ("-msse4.2",), "GGML_F16C": ("-mf16c",), "GGML_FMA": ("-mfma",), "GGML_BMI2": ("-mbmi2",),
@@ -724,8 +729,22 @@ def _check_arm_variants(compiler: Optional[Tuple[str, Optional[str]]], base: Opt
                         "its CPU features), and the build uses exactly those")
 
 
+def avx512_missing(cpu_flags: Sequence[str]) -> List[str]:
+    """The parts of AVX512_SET (what GGML_AVX512 compiles for) that the CPU flags do not name, in that order. Empty:
+    GGML_AVX512 may be used. Every AVX-512 CPU since Skylake-X has them all; a Xeon Phi (Knights Landing, Knights
+    Mill) has AVX-512 F and CD without BW, VL and DQ, and a probe without CPU flags (Windows) cannot tell."""
+    have = {str(flag).strip().lower() for flag in cpu_flags}
+    return [part for part in AVX512_SET if part not in have]
+
+
 def _x86_options(profile: HardwareProfile, notes: List[str]) -> Tuple[Dict[str, str], List[str]]:
     state = {key: _flag(profile, key) == "ON" for key in X86_FEATURES}
+    missing = avx512_missing(profile.items_of("CPU_FLAGS_ALL")) if state["SUPPORTS_AVX512"] else []
+    if missing:
+        state["SUPPORTS_AVX512"] = False
+        notes.append(f"SUPPORTS_AVX512 is ON, but GGML_AVX512 also compiles for {', '.join(missing)}, which the "
+                     "probe's CPU flags do not name (a Xeon Phi has AVX-512 F without BW, VL and DQ; a probe without "
+                     "CPU flags cannot tell): the AVX2 plan, no AVX-512")
     for key in X86_FEATURES:  # dependents follow their base (in table order, so chains resolve)
         base = _X86_NEEDS.get(key)
         if base and state[key] and not state[base]:
