@@ -21,13 +21,9 @@ record below). Only the CLI shows it, at a terminal: never with --json, never th
   its outcome. Neither of these raises: the greeting never stops Mojo.
 """
 
-import json
 import logging
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
-from orchestrator.utils.atomic import remove_file, write_private
 
 logger = logging.getLogger(__name__)
 
@@ -142,45 +138,11 @@ def circle_line(result) -> Optional[str]:
 
 
 # --- the open Oracle run -----------------------------------------------------------------------------------------------
-
-RECORD_NAME = "oracle_open.json"
-
-
-def record_path(framework) -> Path:
-    """Where the open Oracle run is noted: next to Mojo Miracle's lock in the per-user state folder (of this
-    LLM_FRAMEWORK_HOME)."""
-    from orchestrator.Core.mojo.repairs.engine import lock_path
-    return lock_path(framework).with_name(RECORD_NAME)
-
-
-def record_oracle(framework) -> None:
-    """Notes that Mojo Oracle ran for the person at a terminal (the CLI); a later `llmcf mojo --miracle` at a terminal
-    closes the circle. Only "open", "cli" and the time: no path, no account name."""
-    try:
-        write_private(record_path(framework), json.dumps(
-            {"mojo_oracle": "open", "via": "cli",
-             "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}) + "\n")
-    except (OSError, ValueError) as e:   # e.g. a read-only state folder: no greeting later, Mojo itself unchanged
-        logger.debug("The open Mojo Oracle run could not be noted: %s", type(e).__name__)
-
-
-def oracle_open(framework) -> bool:
-    """Whether an Oracle run of the person at a terminal is still open (noted and not closed by a Miracle run)."""
-    try:
-        data = json.loads(record_path(framework).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return False
-    return isinstance(data, dict) and data.get("mojo_oracle") == "open"
-
-
-def close_oracle(framework) -> None:
-    """Removes the note of the open Oracle run (a Miracle run at a terminal ended, whatever its outcome)."""
-    try:
-        remove_file(record_path(framework))
-    except OSError as e:
-        logger.debug("The note of the open Mojo Oracle run could not be removed: %s", type(e).__name__)
-
+# The note lives in Core/mojo/oracle_note.py (Qt-free, no drawing, also used by Mojo.miracle for the GUI's run); the
+# names stay importable from here for the CLI.
+from orchestrator.Core.mojo.oracle_note import (  # noqa: E402,F401 - re-exported
+    OPEN_FOR, RECORD_NAME, close_oracle, oracle_open, record_oracle, record_path)
 
 __all__ = ["ART", "ART_LINES", "LINE_STYLE", "MANAGED_LINE", "MASK", "MASK_LINES", "NOT_FOUND_LINE", "RECORD_NAME",
-           "STYLES", "WIDTH", "banner_lines", "centred", "circle_line", "close_oracle", "oracle_open",
+           "OPEN_FOR", "STYLES", "WIDTH", "banner_lines", "centred", "circle_line", "close_oracle", "oracle_open",
            "record_oracle", "record_path"]

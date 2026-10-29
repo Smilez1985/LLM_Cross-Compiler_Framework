@@ -206,7 +206,8 @@ Mojos Kristallkugel, farbig, wo die Konsole Farben zeigen kann, und darunter „
 pleased.“ (das Wunder ist gelungen: mindestens ein Problem repariert, keines übrig, nichts Neues dazugekommen) oder
 „[Mojo] 404 - miracle not found“ (es gab nichts zu reparieren, also auch kein Wunder). Sie erscheint nie mit
 `--json`, ohne Terminal, über die KI-Tools oder in der GUI; der offene Oracle-Lauf ist eine kleine private Notiz in
-deinem persönlichen Ordner, die jeder Lauf von Mojo Miracle im Terminal an seinem Ende entfernt.
+deinem persönlichen Ordner; sie verfällt nach einer Stunde, und jeder deiner Läufe von Mojo Miracle entfernt sie an
+seinem Ende (auch `--miracle --json` und `llm-cli doctor --fix`, die kein Logo zeigen).
 
 | Option | Bedeutung |
 |---|---|

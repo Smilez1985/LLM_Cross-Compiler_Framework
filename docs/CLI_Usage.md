@@ -202,8 +202,8 @@ When Mojo Miracle ends after Mojo Oracle at a terminal (you answered `y` to "Run
 ball, in colour where the console can show colour, and under it "[Mojo] Miracle managed. The oracle is pleased." when
 it repaired at least one problem, none is left and nothing new turned up, or "[Mojo] 404 - miracle not found" when
 there was nothing to repair. It never shows with `--json`, without a terminal, through the AI tools or in the GUI;
-the open Oracle run is a small private note in your personal folder that every Mojo Miracle run at a terminal
-removes when it ends.
+the open Oracle run is a small private note in your personal folder; it expires after one hour, and every Mojo
+Miracle run of yours removes it when it ends (also `--miracle --json` and `llm-cli doctor --fix`, which show no logo).
 
 | Option | Meaning |
 |---|---|

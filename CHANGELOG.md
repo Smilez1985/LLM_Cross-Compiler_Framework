@@ -26,6 +26,15 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   switches SUSE's Containers Module on with `SUSEConnect`, as it does for the Python 3 Module (a no or an
   unregistered system stops with the step to take; the registration status is read, never shown; the dry run names
   the step). Amazon Linux and the other systems built on Fedora keep the distribution's own package.
+- `2026-10-29 23:40 UTC` · `v3.2.0` **Mojo circle follow-ups: the open-Oracle note expires, every Miracle run of the person closes it**
+  ([design](docs/DESIGN.md#mojo-the-health-check)): the note of an open Mojo Oracle run expires after one hour (an
+  older note, one whose time is in the future or cannot be read, or a file that is no note counts as not open and is
+  removed), so an old note no longer brings the crystal ball days later. `llmcf mojo --miracle --json`, `llm-cli
+  doctor --fix` (with or without `--json`) and a Mojo Miracle run in the GUI now close the note too, without a logo;
+  the GUI does it through Core (`Mojo.miracle(closes_circle=True)`), and an AI's run (`run_mojo_miracle`) still leaves
+  it. The note's functions moved to `orchestrator/Core/mojo/oracle_note.py` (still importable from `banner.py`) and
+  never raise for any bad state folder (a folder in place of the file, bad JSON, a non-dict, a read-only folder, any
+  other error); only the error's type name is logged.
 
 ### Fixed
 - `2026-10-29 23:36 UTC` · `v3.2.0` **Container engine follow-ups: a `DOCKER_HOST` left from Podman, `/dev/dri` under rootless Podman,

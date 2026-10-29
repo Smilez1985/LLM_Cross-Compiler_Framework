@@ -104,7 +104,18 @@ class Mojo:
 
     oracle = run
 
-    def miracle(self, *, actor: str, at_terminal: bool, before: Optional[MojoReport] = None,
+    def miracle(self, *, closes_circle: bool = False, **kwargs) -> MiracleReport:
+        """Mojo Miracle (_miracle). `closes_circle`: a Miracle run of the person without the console's logo (the GUI's
+        run, `llmcf mojo --miracle --json`, `llm-cli doctor --fix`): it closes the note of an open Oracle run
+        (oracle_note.close_oracle) whatever its outcome. An AI's run (run_mojo_miracle) leaves the note."""
+        try:
+            return self._miracle(**kwargs)
+        finally:
+            if closes_circle:
+                from orchestrator.Core.mojo.oracle_note import close_oracle
+                close_oracle(self.framework)
+
+    def _miracle(self, *, actor: str, at_terminal: bool, before: Optional[MojoReport] = None,
                 free_space: Optional[Callable[[], Tuple[int, str]]] = None, decision: str = "allow",
                 answered_by: str = "", confirm_channel: str = "",
                 offered: Optional[List["Offer"]] = None) -> MiracleReport:

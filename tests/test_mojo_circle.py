@@ -353,7 +353,7 @@ def test_a_damaged_record_opens_no_circle_and_a_failing_one_never_stops_mojo(boo
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("not json", encoding="utf-8")
     assert not banner.oracle_open(booted_framework)
-    from orchestrator.Core.mojo import banner as module
+    from orchestrator.Core.mojo import oracle_note as module   # the note moved there; banner re-exports it
 
     def refuse(*_args, **_kwargs):
         raise PermissionError("read-only")
