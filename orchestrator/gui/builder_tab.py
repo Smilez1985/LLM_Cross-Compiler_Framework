@@ -1265,7 +1265,8 @@ class BuilderTab(QWidget):
                 # Exactly the recipe: the recipe as installed now (refused when the community index revoked it or it
                 # changed since it filled the form), with its calibration dataset checked against its pin.
                 rid = service.start_recipe(recipe.id, dataset_path=values["dataset"], use_gpu=values["use_gpu"],
-                                           expect=self._recipe_expect(values), **options).request_id
+                                           expect=self._recipe_expect(values), probe=values.get("probe"),
+                                           **options).request_id
             else:
                 if recipe is not None:  # the person's own values at the recipe's commit: still never a revoked one
                     service.installed_recipe(recipe.id)
