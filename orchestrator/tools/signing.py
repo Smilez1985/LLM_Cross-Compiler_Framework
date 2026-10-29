@@ -197,7 +197,8 @@ class RevisionAnchor:
     `read()` returns the stored text (None when nothing is stored yet) and `write(text)` stores it; either may raise.
     The value only ever grows, and this process keeps the highest one it has seen, so a keyring that cannot be read for
     a moment or an entry someone removed never lowers it. It is read again only when the file changed since the last
-    look (a cheap stat), so checking it costs nothing on the many reads of an unchanged file."""
+    look (a cheap stat), so checking it costs nothing on the many reads of an unchanged file; where that look cannot
+    tell (Windows without a change time for the file) it is read on every look."""
 
     def __init__(self, read: Callable[[], Optional[str]], write: Callable[[str], None]):
         self._read_value, self._write_value = read, write
@@ -215,15 +216,22 @@ class RevisionAnchor:
         # With the change time: a hard link kept to the file puts back the very file read before (same inode, size and
         # modification time) after another process saved a newer one; a link or rename moves the change time. POSIX
         # gives it as st_ctime; Windows gives the creation time there (which a hard link keeps), so on Windows it is
-        # NTFS's own change time (windows_change_time). None where the file system keeps none.
+        # NTFS's own change time (windows_change_time). None where the file system keeps none (_tells_a_restore).
         changed = st.st_ctime_ns if _POSIX else windows_change_time(path)
         return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, changed
+
+    @staticmethod
+    def _tells_a_restore(identity: Optional[tuple]) -> bool:
+        """Whether an unchanged identity proves the file was not put back meanwhile. Not without a change time (Windows
+        where the file system keeps none or it cannot be read): the kept revision is then read on every look instead
+        of the check being skipped. A missing file (None) is a missing file."""
+        return identity is None or _POSIX or identity[4] is not None
 
     def current(self, path: Any) -> int:
         """The highest revision the framework saved of the file at `path` (0 when it never saved one)."""
         identity = self._identity(path)
         with self._lock:
-            if identity == self._seen:
+            if identity == self._seen and self._tells_a_restore(identity):
                 return self._known
             try:
                 raw = self._read_value()
@@ -242,14 +250,17 @@ class RevisionAnchor:
         on, not only after the next save. Nothing is written when this process knows a revision already, when an
         entry exists (another process anchored meanwhile: its value is taken, as current() would) or when the entry
         cannot be read. The entry is looked at once per state of the file, so the many reads of an unchanged file
-        never ask the keyring again."""
+        never ask the keyring again. Nothing is written either when the file changed since this process looked at it
+        (current() before the file was read, else the start of this call): another process saved a newer one meanwhile,
+        and the older revision written now would lower the anchor below that save."""
         if int(revision) <= 0:
             return
         identity = self._identity(path)
         with self._lock:
-            if self._known or identity == self._adopt_seen:
+            if self._known or (identity == self._adopt_seen and self._tells_a_restore(identity)):
                 return
             self._adopt_seen = identity
+            accepted = identity if self._seen is _UNSEEN else self._seen   # the file this process read
         try:
             raw = self._read_value()
         except Exception:  # unreachable for now: anchored at the next save, as before
@@ -259,6 +270,8 @@ class RevisionAnchor:
             if text.isdigit() and len(text) <= 18:
                 with self._lock:
                     self._known = max(self._known, int(text))
+            return
+        if self._identity(path) != accepted:  # replaced meanwhile: that save anchors its own revision
             return
         self.saved(path, revision)
 

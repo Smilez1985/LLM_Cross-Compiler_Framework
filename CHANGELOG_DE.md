@@ -3831,13 +3831,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schlüsselbund wird auch dann neu gelesen, wenn sich die ctime der Datei geändert hat. Unter Windows, wo st_ctime
   die Erstellungszeit ist (die ein Hardlink behält), wird dafür die eigene Änderungszeit von NTFS benutzt
   (GetFileInformationByHandleEx, keine neue Abhängigkeit); bisher nahm ein laufender Prozess dort die zurückgelegte
-  Datei noch an. Jedes Framework-Home führt seine eigenen Revisionen: Zwei LLM_FRAMEWORK_HOME-Ordner eines Kontos
+  Datei noch an. Wo Windows für die Datei keine Änderungszeit liefert (ein Dateisystem, das keine führt), wird die
+  Revision bei jedem Blick gelesen, statt diese Prüfung auszulassen. Jedes Framework-Home führt seine eigenen Revisionen: Zwei LLM_FRAMEWORK_HOME-Ordner eines Kontos
   teilten einen Eintrag im Schlüsselbund, daher machte ein Speichern im einen die Datei des anderen Homes zur
   „älteren Kopie" (jedes Tool verboten, kein Token angenommen). Das Standard-Home (~/.llm-framework) behält den
   Eintrag der Versionen davor; ein anderer Ordner bekommt einen Eintrag, der nach einem Digest des Ordners benannt
   ist (kein Pfad darin). Ein Home, dessen Eintrag noch leer ist, verankert beim ersten Blick die Revision der echt
   signierten Datei, die es annimmt, daher wird eine danach zurückgelegte ältere Kopie ab da abgelehnt, nicht erst
-  nach dem nächsten Speichern. Die Builds, die die Person bestätigt hat (`confirmed_builds.json`), führen ebenso eine
+  nach dem nächsten Speichern; es schreibt nie, wenn ein anderer Prozess zwischendurch eine neuere Datei gespeichert
+  hat (das würde die geführte Revision unter dieses Speichern senken). Die Builds, die die Person bestätigt hat (`confirmed_builds.json`), führen ebenso eine
   Revision im Schlüsselbund: Eine zurückgelegte ältere signierte Kopie brachte eine Bestätigung zurück, die eine
   spätere ersetzt hatte (ein Modul, das eine KI mit seinem früheren Inhalt neu erstellt hat, ein Pack, das in einer
   früheren Version neu installiert wurde), daher deckte ein Build-Dauerauftrag es ohne die Person ab; eine solche

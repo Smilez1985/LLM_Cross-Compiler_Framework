@@ -437,6 +437,30 @@ class TestOlderCopiesAndRemovedFiles:
         monkeypatch.setattr(signing, "windows_change_time", lambda path: None)  # a file system that keeps none
         assert RevisionAnchor._identity(server.path)[4] is None
 
+    @pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links on this system")
+    def test_on_windows_without_a_change_time_the_keyring_is_asked_on_every_read(self, tmp_path, monkeypatch):
+        """Where Windows gives no change time for the file (a file system that keeps none, a refused open), a look at
+        the file cannot tell the very file put back: the check is not skipped then, the kept revision is read on every
+        read instead, so the hard-link restore is refused there too."""
+        monkeypatch.setattr(signing, "_POSIX", False)
+        monkeypatch.setattr(signing, "windows_change_time", lambda path: None)
+        slots, reads = {}, []
+        anchor = RevisionAnchor(lambda: reads.append(1) or slots.get("rev"), lambda v: slots.__setitem__("rev", v))
+        server = TokenStore(tmp_path, key=KEY, anchor=anchor)
+        token = server.add("laptop")
+        assert server.find(token).name == "laptop"
+        kept = tmp_path / "kept.json"
+        os.link(server.path, kept)
+        TokenStore(tmp_path, key=KEY, anchor=memory_anchor(slots)[1]).revoke("laptop")
+        os.replace(kept, server.path)
+        assert RevisionAnchor._identity(server.path)[4] is None
+        with pytest.raises(TokenStoreError, match="older copy"):
+            server.list()
+        before = len(reads)
+        anchor.current(server.path)
+        anchor.current(server.path)
+        assert len(reads) == before + 2, "no cached look for a file whose identity cannot tell a restore"
+
     @pytest.mark.skipif(os.name != "nt", reason="NTFS's change time is read on Windows only")
     def test_the_ntfs_change_time_moves_when_the_file_is_put_back(self, tmp_path):
         """The real Windows call: GetFileInformationByHandleEx gives the file's change time, a rename of a kept hard
@@ -522,6 +546,30 @@ class TestOlderCopiesAndRemovedFiles:
             assert third.current(store.path) == 0
             third.adopt(store.path, 2)
         assert len(reads) == 2 and slots["rev"] == "not a number", "one look by current(), one by adopt()"
+
+    def test_a_first_look_never_lowers_a_revision_another_process_saved_meanwhile(self, tmp_path):
+        """adopt() writes into an empty entry only for the file this process accepted: when another process saved a
+        newer file while this one looked at the empty entry, writing the older revision would lower the anchor below
+        the other process's save, and the older copy would count again in every new process."""
+        store = store_at(tmp_path)  # saved without an anchor: revision 2, nothing kept
+        store.save(ToolPolicy(configured=True))
+        store.save(ToolPolicy(configured=True, revision=1))
+        older = store.path.read_bytes()
+        slots, reads = {}, []
+
+        def read_entry():
+            value = slots.get("rev")
+            reads.append(value)
+            if len(reads) == 2:  # adopt()'s look at the empty entry: meanwhile another process saves revision 3
+                other = store_at(tmp_path, anchor=memory_anchor(slots)[1])
+                other.save(ToolPolicy(configured=True, overrides={"start_build": Decision.DENY}, revision=2))
+            return value
+
+        mine = store_at(tmp_path, anchor=RevisionAnchor(read_entry, lambda v: slots.__setitem__("rev", v)))
+        assert mine.load().revision == 2 and len(reads) == 2
+        assert slots["rev"] == "3", "the other process's save stays anchored"
+        store.path.write_bytes(older)
+        assert denies_everything(store_at(tmp_path, anchor=memory_anchor(slots)[1]).load()), "the older copy counts"
 
     def test_two_framework_homes_keep_their_own_revision(self, tmp_path, memory_keyring):
         """Two LLM_FRAMEWORK_HOME folders of one account never share an anchor: saves in one home do not make the
