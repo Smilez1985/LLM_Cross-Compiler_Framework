@@ -401,6 +401,19 @@ Mit dem Rockchip-Block:
 | `-f rkllm -q int4` | Board `rk3588` (Standard-Board), Quantisierung `w4a16` (Alias), dann abgelehnt: „Quantization 'w4a16' is not supported for rkllm on rk3588 (allowed: w8a8, w8a8_g128, w8a8_g256, w8a8_g512).“ |
 | `-f gguf -b rk3566 -q IQ2_XS` ohne IMatrix | abgelehnt: „IQ2_XS needs an importance matrix: enable IMatrix.“ |
 
+**Die Formate folgen der Probe des Boards.** Nach den Capabilities prüft ein Urteil (`format_refusal` in
+`orchestrator/Core/build_formats.py`) das Format gegen die Hardware-Probe des Boards (die, die der Auftrag nennt, sonst
+die neueste gespeicherte Probe eines Boards seines SoC) und den Build-Rechner; der Build-Dienst lehnt mit diesem Satz
+ab, und der Builder-Tab bietet nur die übrigen Formate an (`probe_formats`):
+
+- Ein NPU-Format (RKLLM, RKNN) nur, wenn die Probe die Rockchip-NPU zeigt (`SUPPORTS_RKNN=ON`); ohne sie GGUF, das auf
+  der CPU des Boards läuft.
+- RKLLM nur für RK3588, RK3576, RK3562 und RV1126B (RKLLM-Toolkit 1.3.1); ein RK3566 oder RK3568 wird mit dem Grund
+  abgelehnt.
+- RKLLM nur auf einem x86_64-Build-Rechner (RKLLM-Toolkit 1.3.1 liefert nur Wheels für Linux x86_64); auf einem
+  ARM-Build-Rechner wird es mit dem Grund abgelehnt und GGUF angeboten. GGUF und RKNN (rknn-toolkit2 2.3.2 hat
+  aarch64-Wheels) wandeln dort nativ um.
+
 ### 4.4 Weitere Blöcke
 
 Die Build-Pipeline liest nur `metadata` und `capabilities`. Ein optionaler Block `hardware:` (`cpu.architecture`,
@@ -457,6 +470,12 @@ Was das Image bieten muss (siehe `targets/Rockchip/dockerfile`):
   das RKLLM-Wheel).
 - **Ein venv je Werkzeugkette**, wenn sich ihre Abhängigkeiten widersprechen (Rockchip: `/opt/venv`,
   `/opt/venv-rkllm`, `/opt/venv-rknn`).
+- **Bauwerkzeuge in einer Builder-Stufe.** Das Image von Rockchip ist ein Multi-Stage-Build: Die Stufe `builder` holt
+  und baut die Werkzeuge von llama.cpp und installiert die venvs mit jeder Festlegung; die letzte Stufe kopiert die
+  venvs und den Quellbaum mit `build/bin` an dieselben Pfade und installiert nur, was die Build-Stufen ausführen
+  (cmake, make, die Compiler, git, gosu und die Bibliotheken der Toolkits), nicht `build-essential`, `python3-dev`
+  oder `curl`. Auf einem arm64-Build-Rechner fehlt das RKLLM-venv (seine Wheels gibt es nur für x86_64):
+  `/opt/venv-rkllm/NOT_INSTALLED` enthält den Grund, den `rkllm_module.sh` und der Test des Entrypoints melden.
 - Keine Binärdateien im Repository: Wheels und Bibliotheken im Dockerfile herunterladen und ihre Hashes prüfen.
 
 ### 5.1 llama.cpp im Image: Rezepte, keine Binärdateien
@@ -481,7 +500,8 @@ den gemeinsamen Schritten aus `targets/Rockchip/dockerfile`, die die Vorlage unv
 **Abgestimmt auf den Build-Rechner.** Das Image läuft auf dem Rechner, der es baut, deshalb übergibt die Engine den
 Plan des Rezepts für den Zweck `host-tools` aus einer Probe dieses Rechners, unmittelbar vor dem Image-Build erstellt
 (oder, wenn das scheitert, aus dem Profil, das `llm-cli scan` gespeichert hat): die CPU-Merkmale ausgeschrieben (etwa
-`-DGGML_AVX512=ON` nur, wo die CPU AVX-512 hat), oder alle CPU-Varianten, von denen zur Laufzeit die beste gewählt
+`-DGGML_AVX512=ON` nur, wo die CPU-Flags der Probe den ganzen Satz nennen, für den `GGML_AVX512` kompiliert:
+AVX-512 F, BW, VL, DQ und CD; eine CPU nur mit AVX-512 F, etwa ein Xeon Phi, bekommt den AVX2-Plan), oder alle CPU-Varianten, von denen zur Laufzeit die beste gewählt
 wird, wenn die Probe nicht jedes Merkmal erkennen konnte. Ohne Probe, oder wenn der Docker-Daemon auf einem anderen
 Rechner läuft, entfällt das Argument und die Vorgabe des Dockerfiles gilt: die feste x86-64-Basis, die diese Werkzeuge
 immer hatten (AVX2, FMA, F16C, kein AVX-512), statisch gelinkt, ausgeschrieben. Das Build-Log sagt, was gilt, und
@@ -611,6 +631,7 @@ Umgebungsvariablen, die die Engine setzt:
 | `DATASET_PATH` | Kalibrierdatensatz, wenn der Build einen nutzt |
 | `BUILD_SCRATCH_DIR`, `TMPDIR`, `HOME`, `XDG_CACHE_HOME` | beschreibbarer Arbeitsordner `/build-cache/work` und seine Unterordner |
 | `HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE`, `HF_DATASETS_OFFLINE` | `1` in der Sandbox: Bibliotheken versuchen nie das Netzwerk |
+| `HARDWARE_CONFIG_FILE` | wenn der Build die Hardware-Probe des Boards hat: `/build-cache/hardware/target_hardware_config.txt`; die Stufe config plant den Build für dieses Board ([Abschnitt 10](#10-was-die-stufenmodule-aus-version-1x-behalten-haben)) |
 | `PUID`, `PGID` | die IDs des Host-Benutzers (nicht unter Windows) |
 
 Was der Stage-Runner jeder Stufe mitgibt:
@@ -632,6 +653,7 @@ Einbindungen:
 | `/build-cache/work` | lesen und schreiben | Zwischenablage für große Zwischendateien |
 | `/build-cache/input-model` | nur lesen | ein lokaler Modellordner oder der Ordner einer lokalen Modelldatei |
 | `/build-cache/models` | nur lesen in der Sandbox | Hugging-Face-Downloads unter `hf/<Besitzer>__<Name>` |
+| `/build-cache/hardware` | nur lesen | die Hardware-Probe des Boards (`target_hardware_config.txt`), im Build- und im Imatrix-Job, wenn der Build eine hat |
 | `/build-cache/dataset.txt`, `/build-cache/dataset.json` oder `/build-cache/dataset/` | nur lesen | Kalibrierdatensatz (eine RKNN-Beispielliste bekommt ihren Ordner); ein Datensatz im Modellordner wird über die Modell-Einbindung erreicht |
 
 ### 6.2 Ausgaben und Exit-Code
@@ -843,7 +865,7 @@ seiner Datei und bei Skripten mit seiner Zeile gemeldet.
 | Festgelegte Images | In jeder Datei, deren Name in beliebiger Schreibweise mit `dockerfile` beginnt (`Dockerfile`, `dockerfile`, `Dockerfile.gpu`), muss jedes Image, das `FROM`, `COPY --from=` oder `RUN --mount=...,from=` verwendet, per Digest festgelegt sein (`name@sha256:` und 64 Hex-Ziffern). Ausgenommen sind offizielle Basis-Images mit Tag (Namen, die mit `debian:`, `ubuntu:`, `rocm/dev-ubuntu-`, `rocm/rocm-terminal:` oder `python:` beginnen), eine frühere Build-Stufe (`FROM ... AS builder`, danach `COPY --from=builder`) und eine Stufennummer (`--from=0`). Die `nvidia/cuda`-Images von NVIDIA brauchen einen Digest. Kommentarzeilen werden übersprungen. Eine Variable wie `FROM ${BASE_IMAGE}` wird abgelehnt, weil sie keine Image-Angabe ist. |
 | Kein vorgebautes llama.cpp | Das Framework teilt Rezepte, keine Binärdateien ([Abschnitt 5.1](#51-llamacpp-im-image-rezepte-keine-binärdateien)). In Dockerfiles: kein Image, dessen Name `llama.cpp`, `llama-cpp`, `llamacpp` oder `llama-server` enthält, und keines der früheren Laufzeit-Images des Frameworks (`ghcr.io/smilez1985/llm-runtime`, `ghcr.io/llm-framework/builder`, `ghcr.io/llm-framework/inference-node`), auch nicht per Digest festgelegt; kein `COPY --from=` (oder `RUN --mount=...,from=`) von llama.cpp-Programmen aus einem anderen Image, auch nicht über eine Build-Stufe, die nur dieses Image nennt (`FROM acme/tools@sha256:... AS tools`, dann `COPY --from=tools /usr/bin/llama-server ...`). Eine Stufe, deren `RUN`-Schritt mit CMake kompiliert oder die die Programme aus einer solchen Stufe kopiert hat, baut sie aus dem Quelltext. In Dockerfiles, Skripten (`.sh`, `.py`, `.ps1`, `.bat`, `.cmd` und jede Datei, deren erste Zeile mit `#!` beginnt) und YAML-Dateien: kein Download eines llama.cpp-Releases (`.../llama.cpp/releases/download/...`, Namen von Release-Archiven wie `llama-b11429-bin-...`), kein Download eines llama.cpp-Programms (`curl`, `wget`, `ADD` und Ähnliches mit `llama-server`, `llama-quantize`, `libllama` und den anderen Werkzeugnamen im selben Befehl; eine Pipeline wie `curl ... \| tar -x ... llama-server` ist ein Befehl), keine Paketquelle mit vorgebauten `llama-cpp-python`-Wheels und keine Installation eines llama.cpp-Pakets (`apt-get install llama.cpp`, `apk add`, `conda install` und andere). Kommentarzeilen werden übersprungen; der Wissens-Schnappschuss wird nicht geprüft. |
 | Shell-Sperrliste | Jede Zeile jeder `*.sh`-Datei, Kommentare eingeschlossen, außer die gleiche Zeile steht in der Datei der Vorlage mit demselben Pfad (für `modules/build.sh`: `targets/_template/modules/build.sh`). Abgelehnt werden: Downloads (`curl`, `wget`, `aria2c` und `fetch` als Wort, also auch `git fetch`), das Löschen von `/` (`rm -rf /`), `chmod 777`, `sudo`, `mkfs` und `dd if=`, der Docker-Socket oder `docker run`, `eval`, `source` oder `.` mit dem Ergebnis von `$(...)`, `sh -c "$(...)"` und Prozess-Substitution `<(...)`, außer als reine Eingabe (`done < <(grep ...)`). Downloads gehören festgelegt ins Dockerfile. |
-| Keine Download-Option von llama.cpp | Dieselben Skriptzeilen (jede Zeile, die nicht die der Vorlage ist): keine CMake-Option `-DNAME=WERT`, mit der llama.cpp beim Bauen etwas herunterladen oder `llama-server` Unterprozesse bekommen würde, nach der Regel des Build-Rezepts (`refused_option`): eine Option aus `NEVER_SET` mit beliebigem Wert, eine aus `DOWNLOAD_OPTIONS_OFF` oder `LLAMA_CURL` mit einem anderen Wert als `OFF`, `FETCHCONTENT_FULLY_DISCONNECTED` anders als `ON`, `LLAMA_SUBPROCESS` anders als `OFF`. Jede Schreibweise zählt, die die Shell cmake als solche Option übergibt: `-DNAME:TYP=WERT`, `-D NAME=WERT` (cmake liest `-D` und das nächste Wort als eine Option) und Anführungszeichen um das Wort, den Namen oder den Wert. Das deckt die CMake-Flags eines Moduls ab (`CMAKE_OPTIONS` in `modules/config_module.sh`) und jeden `cmake`-Aufruf seiner Skripte. |
+| Keine Download-Option von llama.cpp | Dieselben Skriptzeilen (jede Zeile, die nicht die der Vorlage ist): keine CMake-Option `-DNAME=WERT`, mit der llama.cpp beim Bauen etwas herunterladen oder `llama-server` Unterprozesse bekommen würde, nach der Regel des Build-Rezepts (`refused_option`): eine Option aus `NEVER_SET` mit beliebigem Wert, eine aus `DOWNLOAD_OPTIONS_OFF` oder `LLAMA_CURL` mit einem anderen Wert als `OFF`, `FETCHCONTENT_FULLY_DISCONNECTED` anders als `ON`, `LLAMA_SUBPROCESS` anders als `OFF`. Jede Schreibweise zählt, die die Shell cmake als solche Option übergibt: `-DNAME:TYP=WERT`, `-D NAME=WERT` (cmake liest `-D` und das nächste Wort als eine Option) und Anführungszeichen um das Wort, den Namen oder den Wert. Das deckt die CMake-Flags eines Moduls ab (`CMAKE_OPTIONS` in `modules/config_module.sh`), jeden `cmake`-Aufruf seiner Skripte und die Zeilen des Dockerfiles des Targets, die die Dockerfiles der Vorlage nicht haben. Beim Build prüft `build.sh` jeden `cmake`-Aufruf der Module noch einmal, mit den Wörtern, wie die Shell sie erweitert hat (`module_flag_problem --alone` in `target_module.sh`), und ein abgelehnter Aufruf startet cmake nicht. |
 | Shell-Syntax | Jede `*.sh`-Datei besteht `bash -n` (entfällt, wo bash nicht installiert ist). |
 | Nur Text | Keine Datei enthält ein NUL-Byte: Binärdateien werden abgelehnt. Beim Export muss außerdem jede Datei UTF-8-Text sein. |
 | Platzhalter | Keine Datei außer dem Wissens-Schnappschuss `knowledge/initial_knowledge.json` (gecrawlte Seiten) und seinen Lizenzdateien `knowledge/NOTICE` und `knowledge/LICENSES/` enthält einen Platzhalter der Vorlage (`[MODULE_NAME]`, `[Hardware-Familie]`, `[IHRE_ARCHITEKTUR]`, `[Hersteller]`, `[QUANTIZATION_LOGIC]`, `[CPU_FLAGS]`, `[CMAKE_FLAGS]`, `[SDK_SETUP_COMMANDS]`, `[PACKAGING_COMMANDS]`, `[ihr-target-name]`, `{packages_str}` oder `YYYY-MM-DD`), und kein Wert in `target.yml` enthält Text in eckigen Klammern wie `[Board Name 1]`. |
@@ -915,9 +937,14 @@ Funktionen aus 1.x sind geblieben:
   Build-Rechners. Ein 32-Bit-ARM-System (`ARCH=armv7` und ähnliche) wird mit dem
   schlichten Grund abgelehnt: Die Rockchip-Boards haben 64-Bit-CPUs, und das Image hat nur die aarch64-Cross-Compiler;
   installiere also das 64-Bit-System des Boards und lass die Probe erneut laufen. Die Build-Jobs werden auf die Kerne
-  des Boards begrenzt (`CPU_CORES` oder `CPU_CORES_LOGICAL` der Probe-Datei). Ein Build des Frameworks hat kein
-  Profil: Die Runtime des Boards wird aus der eigenen Probe des Boards gebaut (`llm-cli device runtime build`), und
-  das Board-Paket kommt von `llm-cli deploy package` oder `llm-cli device runtime deploy`.
+  des Boards begrenzt (`CPU_CORES` oder `CPU_CORES_LOGICAL` der Probe-Datei). Ein Build des Frameworks bekommt
+  die Probe des Boards (die, die der Auftrag mit `llm-cli build start --probe ID` nennt oder die der Builder-Tab
+  zuletzt importiert oder erfasst hat, sonst die neueste gespeicherte Probe eines Boards des SoC des Auftrags) nur
+  lesbar als `HARDWARE_CONFIG_FILE`, damit die Stufe config ihn für dieses Board plant; ihr sha256 gehört zu einem
+  identischen Build. Die Runtime des Boards wird aus der eigenen Probe des Boards gebaut (`llm-cli device runtime
+  build`), und das Board-Paket kommt von `llm-cli deploy package` oder `llm-cli device runtime deploy`. Die Stufe
+  config der Vorlage plant genauso (der x86-Block ist der von Rockchip, Byte für Byte), und ihre `rknn_module.sh` und
+  `rkllm_module.sh` sind die Helfer von Rockchip: Sie nutzen das venv des Images und lehnen ohne es schlicht ab.
 - **Der Plan wird geprüft, bevor er bleibt.** Die Stufe config sucht die geplanten Compiler im Image (fehlt einer,
   plant sie nichts), baut und linkt ein kleines C- und C++-Programm mit den geplanten Flags (und führt sie aus, wenn
   sie für diesen Rechner sind), prüft am ELF-Kopf, dass sie für das System des Boards sind, lässt `cmake -P` die

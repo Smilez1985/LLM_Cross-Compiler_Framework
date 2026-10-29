@@ -1310,6 +1310,37 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   site text and never reaches an AI).
 
 ### Changed
+- **The board's hardware probe drives every build; NPU formats only with its NPU** (DECISIONS round 23 items 5 and
+  15): a build request names the board's probe by its id (`llm-cli build start --probe ID`, `BuildRequestIn.probe`;
+  the Builder tab the probe it imported or scanned last); without one the newest stored probe of a board of the
+  request's SoC is used, and a probe of another board is refused. The build engine writes it into the build's folder
+  and mounts it read-only into every build container, the importance-matrix job too, as `HARDWARE_CONFIG_FILE`: the
+  config stage plans the build for that board, and the probe's sha256 is part of an identical build. Formats follow
+  the probe through one verdict (`build_formats.format_refusal`): RKLLM and RKNN only when the probe shows the
+  Rockchip NPU, else GGUF; RKLLM only for the RK3588, RK3576, RK3562 and RV1126B (not the RK3566 or RK3568) and only
+  on an x86_64 build computer (RKLLM-Toolkit 1.3.1 ships Linux x86_64 wheels only); GGUF and RKNN (rknn-toolkit2
+  2.3.2 has aarch64 wheels) also natively on an ARM build computer. The build service refuses with the reason after
+  the target's own refusal; the Builder tab offers only the formats left.
+- **`GGML_AVX512` only with the whole AVX-512 set; the template plans x86 like the build recipe** (round 25 Q7):
+  `GGML_AVX512` compiles for AVX-512 F, CD, VL, DQ and BW, but the probe's `SUPPORTS_AVX512` is AVX-512 F alone, so a
+  Xeon Phi (Knights Landing) got `-mavx512bw` and illegal instructions. The build recipe and both config stages now
+  use it only when the probe's CPU flags name every part, else the AVX2 plan (`recipe.AVX512_SET`,
+  `avx512_missing`; recipe version 4). The template's config stage has Rockchip's x86 block byte for byte: explicit
+  features for another PC, `-march=native` only for this build machine.
+- **Every `cmake` call of a module is checked, and a target's Dockerfile too**: `build.sh` checks the words of each
+  `cmake` call of the modules (also in their setup, conversion and packaging commands) as the shell expanded them
+  with `module_flag_problem --alone` of `target_module.sh` before cmake runs, and a refused call does not start
+  cmake; before, only the module's `CMAKE_FLAGS` of the package's cross build were checked. `validate_target_folder`
+  also reads a target's Dockerfile lines that the template's Dockerfiles do not have for a llama.cpp option that
+  downloads. The verdicts stay in that one function.
+- **Rockchip image in two stages; the template's format helpers are real** (round 23 item 14): the `builder` stage
+  builds llama.cpp's tools and the three venvs with every pin; the image gets the venvs and the source tree with its
+  tools at the same paths and only what the build stages run (no `build-essential`, `python3-dev`, `python3-venv` or
+  `curl`), keeping the `llmbuilder` user and the entrypoint; hadolint has one warning fewer. On an arm64 build computer
+  the RKLLM venv is left out with the reason in `/opt/venv-rkllm/NOT_INSTALLED`, which `rkllm_module.sh` and the
+  entrypoint's test report. The template's `rknn_module.sh` and `rkllm_module.sh` cloned toolkits at their newest
+  commit and installed wheels during the build (which has no network) and converted nothing: they are now Rockchip's
+  helpers, using the image's venv and refusing plainly without it.
 - **`install.sh` on every Linux family, through the family's own package manager** (DECISIONS round 24 PKG): the
   installer finds the family from `ID` and `ID_LIKE` in `/etc/os-release` with the hardware probe's table and installs
   what it needs (Python 3.11 to 3.14, `rsync`, Docker) with `apt`, `dnf`, `zypper`, `pacman` or `apk`, under the
@@ -2293,6 +2324,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Rockchip image's size and its layers into the job summary instead, with the runner's own docker CLI.
 
 ### Fixed
+- **An unquoted vendor id of a `target.yml` matches the probe again**: YAML reads `vendor_id: 0x1e60` without quotes
+  as the integer 7776, and the target suggestion of a probe import compared it with the probe's `0x1e60` and matched
+  nothing. `target_manager.hardware_id` gives one spelling for an integer and for hex text in any letter case, for
+  the target's vendor and device ids and the probe's.
 - **`llm-cli deploy devices edit` gives the plain reason instead of a traceback**: it caught only the board steps'
   own errors, so the framework's `known_hosts` held by another process (a `LockTimeout` of `pairing.replace_key`),
   settings that could not be read after you said yes, or a file that could not be read before the question ended in

@@ -1491,6 +1491,39 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine KI).
 
 ### Geändert
+- **Die Hardware-Probe des Boards steuert jeden Build; NPU-Formate nur mit seiner NPU** (DECISIONS Runde 23 Punkte 5
+  und 15): Ein Build-Auftrag nennt die Probe des Boards mit ihrer ID (`llm-cli build start --probe ID`,
+  `BuildRequestIn.probe`; der Builder-Tab die Probe, die er zuletzt importiert oder erfasst hat); ohne sie gilt die
+  neueste gespeicherte Probe eines Boards des SoC des Auftrags, und eine Probe eines anderen Boards wird abgelehnt. Die
+  Build-Engine schreibt sie in den Ordner des Builds und bindet sie nur lesbar in jeden Build-Container ein, auch in
+  den Importance-Matrix-Job, als `HARDWARE_CONFIG_FILE`: Die Stufe config plant den Build für dieses Board, und der
+  sha256 der Probe gehört zu einem identischen Build. Die Formate folgen der Probe über ein Urteil
+  (`build_formats.format_refusal`): RKLLM und RKNN nur, wenn die Probe die Rockchip-NPU zeigt, sonst GGUF; RKLLM nur
+  für RK3588, RK3576, RK3562 und RV1126B (nicht RK3566 oder RK3568) und nur auf einem x86_64-Build-Rechner
+  (RKLLM-Toolkit 1.3.1 liefert nur Wheels für Linux x86_64); GGUF und RKNN (rknn-toolkit2 2.3.2 hat aarch64-Wheels)
+  auch nativ auf einem ARM-Build-Rechner. Der Build-Dienst lehnt nach der eigenen Ablehnung des Targets mit dem Grund
+  ab; der Builder-Tab bietet nur die übrigen Formate an.
+- **`GGML_AVX512` nur mit dem ganzen AVX-512-Satz; die Vorlage plant x86 wie das Build-Rezept** (Runde 25 Q7):
+  `GGML_AVX512` kompiliert für AVX-512 F, CD, VL, DQ und BW, aber `SUPPORTS_AVX512` der Probe ist nur AVX-512 F, also
+  bekam ein Xeon Phi (Knights Landing) `-mavx512bw` und ungültige Befehle. Das Build-Rezept und beide Stufen config
+  nutzen es jetzt nur, wenn die CPU-Flags der Probe jeden Teil nennen, sonst den AVX2-Plan (`recipe.AVX512_SET`,
+  `avx512_missing`; Rezeptversion 4). Die Stufe config der Vorlage hat den x86-Block von Rockchip Byte für Byte:
+  ausdrückliche Merkmale für einen anderen PC, `-march=native` nur für diesen Build-Rechner.
+- **Jeder `cmake`-Aufruf eines Moduls wird geprüft, und auch das Dockerfile eines Targets**: `build.sh` prüft die
+  Wörter jedes `cmake`-Aufrufs der Module (auch in ihren Befehlen für Einrichtung, Umwandlung und Paket), wie die
+  Shell sie erweitert hat, mit `module_flag_problem --alone` in `target_module.sh`, bevor cmake läuft, und ein
+  abgelehnter Aufruf startet cmake nicht; vorher wurden nur die `CMAKE_FLAGS` des Moduls beim Cross-Build des Pakets
+  geprüft. `validate_target_folder` liest auch die Zeilen des Dockerfiles eines Targets, die die Dockerfiles der
+  Vorlage nicht haben, auf eine llama.cpp-Option, die herunterlädt. Die Urteile bleiben in dieser einen Funktion.
+- **Rockchip-Image in zwei Stufen; die Format-Helfer der Vorlage sind echt** (Runde 23 Punkt 14): Die Stufe `builder`
+  baut die Werkzeuge von llama.cpp und die drei venvs mit jeder Festlegung; das Image bekommt die venvs und den
+  Quellbaum mit seinen Werkzeugen an denselben Pfaden und nur, was die Build-Stufen ausführen (kein `build-essential`,
+  `python3-dev`, `python3-venv` oder `curl`), und behält den Benutzer `llmbuilder` und den Entrypoint; hadolint hat
+  eine Warnung weniger. Auf einem arm64-Build-Rechner fehlt das RKLLM-venv, mit dem Grund in
+  `/opt/venv-rkllm/NOT_INSTALLED`, den `rkllm_module.sh` und der Test des Entrypoints melden. `rknn_module.sh` und
+  `rkllm_module.sh` der Vorlage klonten die Toolkits auf ihrem neuesten Commit und installierten Wheels während des
+  Builds (der kein Netzwerk hat) und wandelten nichts um: Jetzt sind sie die Helfer von Rockchip, nutzen das venv des
+  Images und lehnen ohne es schlicht ab.
 - **`install.sh` auf jeder Linux-Familie, über die Paketverwaltung der Familie** (DECISIONS Runde 24 PKG): Der Installer
   erkennt die Familie aus `ID` und `ID_LIKE` in `/etc/os-release` mit der Tabelle der Hardware-Untersuchung und
   installiert, was er braucht (Python 3.11 bis 3.14, `rsync`, Docker), mit `apt`, `dnf`, `zypper`, `pacman` oder `apk`,
@@ -2583,6 +2616,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
+- **Eine Hersteller-ID ohne Anführungszeichen in einer `target.yml` passt wieder zur Probe**: YAML liest
+  `vendor_id: 0x1e60` ohne Anführungszeichen als die Ganzzahl 7776, und der Target-Vorschlag beim Import einer Probe
+  verglich sie mit `0x1e60` der Probe und fand nichts. `target_manager.hardware_id` gibt eine Schreibweise für eine
+  Ganzzahl und für Hex-Text in jeder Groß- und Kleinschreibung, für die Hersteller- und Geräte-IDs des Targets und
+  die der Probe.
 - **`llm-cli deploy devices edit` nennt den Grund statt eines Tracebacks**: Der Befehl fing nur die eigenen Fehler
   der Board-Schritte ab; eine von einem anderen Prozess belegte `known_hosts` des Frameworks (ein `LockTimeout` von
   `pairing.replace_key`), Einstellungen, die sich nach deinem Ja nicht lesen ließen, oder eine Datei, die sich vor
