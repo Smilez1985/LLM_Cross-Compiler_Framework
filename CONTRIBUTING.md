@@ -6,7 +6,8 @@ Version 3.0.0 + unreleased changes · Last updated 2026-10-17
 
 Thank you for helping. This guide explains how to set up a development environment, run the same checks as the
 CI, keep credentials out of the repository, and submit changes. If you only want to use the framework, start with
-the [README](README.md). How the framework is built is described in the [blueprint](docs/BLUEPRINT.md).
+the [README](README.md). How the framework is built is described in the [design](docs/DESIGN.md), one of the three files of the
+[blueprint](docs/BLUEPRINT.md) (design, roadmap, changelog).
 
 Ways to contribute:
 
@@ -925,7 +926,7 @@ text:
   Removed, Fixed and Security, and the matching sections in the German changelog.
 - Write for users: what changed and what it means for them.
 - **The roadmap says what comes.** Planned or unfinished work belongs in the roadmap
-  ([docs/BLUEPRINT.md](docs/BLUEPRINT.md#roadmap)), not in the changelog. When you finish a roadmap item, set its
+  ([docs/ROADMAP.md](docs/ROADMAP.md)), not in the changelog. When you finish a roadmap item, set its
   status to "done" in both language versions of the blueprint and add the changelog entry.
 - For a release, the maintainers turn `[Unreleased]` into `## [x.y.z] - YYYY-MM-DD`, set the same version in
   `orchestrator/__init__.py` (`__version__`) and `pyproject.toml`, and remove the released items from the roadmap.

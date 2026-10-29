@@ -10,7 +10,7 @@ that lets AI clients such as Claude Code, Claude Desktop or VS Code operate it (
 called **Ditto**.
 
 This README describes the state of the development branch: release 3.0.0 (2026-10-10) plus the work listed under
-"Unreleased" in the [CHANGELOG](CHANGELOG.md). What comes next is in the [roadmap](docs/BLUEPRINT.md#roadmap).
+"Unreleased" in the [CHANGELOG](CHANGELOG.md). What comes next is in the [roadmap](docs/ROADMAP.md).
 
 ---
 
@@ -39,8 +39,8 @@ runtimes stay yours to install (see [The board](#the-board)).
 | Target | Status | Boards | Formats |
 |---|---|---|---|
 | Rockchip | official | RK3566, RK3568, RK3576, RK3588 | GGUF, RKLLM, RKNN |
-| NVIDIA GPUs, AMD (Ryzen Z1 Extreme) | planned ([roadmap](docs/BLUEPRINT.md#roadmap)) | – | – |
-| Generic ARM64 CPU (Raspberry Pi 4 and 5) | planned ([roadmap](docs/BLUEPRINT.md#roadmap)) | – | GGUF |
+| NVIDIA GPUs, AMD (Ryzen Z1 Extreme) | planned ([roadmap](docs/ROADMAP.md)) | – | – |
+| Generic ARM64 CPU (Raspberry Pi 4 and 5) | planned ([roadmap](docs/ROADMAP.md)) | – | GGUF |
 
 You can add other hardware yourself: [docs/Module_Developer_Guide.md](docs/Module_Developer_Guide.md).
 
@@ -872,7 +872,7 @@ The roadmap lists what is planned; finished items move to the [CHANGELOG](CHANGE
   repository), building them yourself stays an opt-in. No prebuilt Docker images for targets, no Go, the GUI stays
   Qt.
 
-Full list: [docs/BLUEPRINT.md](docs/BLUEPRINT.md#roadmap).
+Full list: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
@@ -882,7 +882,9 @@ Full list: [docs/BLUEPRINT.md](docs/BLUEPRINT.md#roadmap).
 |---|---|
 | [docs/CLI_Usage.md](docs/CLI_Usage.md) | Every CLI command and option, with examples |
 | [docs/Features.md](docs/Features.md) | Features in detail: build pipeline, sandbox, Ditto, evaluation, local runtime, knowledge base, Deep Ingest, MCP, community zoo |
-| [docs/BLUEPRINT.md](docs/BLUEPRINT.md) | Architecture and roadmap |
+| [docs/BLUEPRINT.md](docs/BLUEPRINT.md) | The blueprint: an index of the three files below |
+| [docs/DESIGN.md](docs/DESIGN.md) | Design: every component and decision (what, how, why) |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Roadmap: what comes |
 | [docs/Module_Developer_Guide.md](docs/Module_Developer_Guide.md) | Adding a new hardware target |
 | [docs/Container_Setup.md](docs/Container_Setup.md) | The framework in a container you build yourself (server, NAS, Proxmox) |
 | [docs/Mojo.md](docs/Mojo.md) | The health check: Mojo Oracle looks, Mojo Miracle repairs (formerly the doctor) |

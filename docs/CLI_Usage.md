@@ -2699,7 +2699,7 @@ llm-cli models take-over
 - `deploy package --docker` is experimental.
 - There is no CLI command yet to choose Ditto's provider permanently; use the GUI, `config.yml` or
   `LLM_FRAMEWORK_AI_PROVIDER` (`ditto login` signs in but does not switch the provider). Browser and cloud
-  sign-ins (OAuth, AWS, Google Cloud, Azure) come later ([roadmap](BLUEPRINT.md#roadmap)).
+  sign-ins (OAuth, AWS, Google Cloud, Azure) come later ([roadmap](ROADMAP.md)).
 - The community repository is set (`community_repo`: `Smilez1985/Edge-LLM-Knowledge-Base`), but its contribution
   workflow, signed index and maintainer key are not published yet (`community_index_url` is empty,
   `configs/community_keys.yml` lists no key): `zoo list` shows only installed packs, and `zoo install <id>` stops

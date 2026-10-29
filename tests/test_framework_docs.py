@@ -404,7 +404,7 @@ class TestExportsAndDocs:
         assert left_out == 1, "the pack page is counted as left out, as before"
 
     def test_the_docs_no_longer_claim_it_happens_by_itself(self):
-        for name in ("docs/BLUEPRINT.md", "docs/BLUEPRINT_DE.md", "docs/Features.md", "docs/Features_DE.md"):
+        for name in ("docs/DESIGN.md", "docs/DESIGN_DE.md", "docs/Features.md", "docs/Features_DE.md"):
             text = (REPO_ROOT / name).read_text(encoding="utf-8")
             assert "index-docs" in text, name
 

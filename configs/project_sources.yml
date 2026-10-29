@@ -14,7 +14,7 @@
 #   pypi_package, docker_tag, metadata) into detailed_project_sources.yml.
 # - Its versions are references, not the versions builds use: builds use what a target's Dockerfile pins and the
 #   setting llama_cpp_version; the local model server uses llama_runtime.yml.
-# - The project's roadmap is in docs/BLUEPRINT.md (section "Roadmap"), not here.
+# - The project's roadmap is in docs/ROADMAP.md, not here.
 #
 # STRUCTURE:
 # - Each entry: links and short notes

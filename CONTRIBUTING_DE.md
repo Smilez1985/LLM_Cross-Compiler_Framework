@@ -7,7 +7,8 @@ Version 3.0.0 + unveröffentlichte Änderungen · Stand 2026-10-17
 Danke, dass du hilfst. Dieser Leitfaden erklärt, wie du eine Entwicklungsumgebung einrichtest, dieselben Prüfungen
 wie die CI ausführst, Zugangsdaten aus dem Repository heraushältst und Änderungen einreichst. Wenn du das Framework
 nur benutzen willst, beginne mit der [README](README_DE.md). Wie das Framework aufgebaut ist, steht im
-[Bauplan](docs/BLUEPRINT_DE.md).
+[Design](docs/DESIGN_DE.md), einer der drei Dateien des [Bauplans](docs/BLUEPRINT_DE.md) (Design, Roadmap,
+Changelog).
 
 Möglichkeiten mitzuhelfen:
 
@@ -989,7 +990,7 @@ Befehl oder ein von Hand geschriebener Menüpfad in einem Text:
   Added, Changed, Deprecated, Removed, Fixed und Security und im deutschen Changelog die entsprechenden Abschnitte.
 - Schreib für Benutzer: was sich geändert hat und was das für sie bedeutet.
 - **Die Roadmap sagt, was kommt.** Geplante oder unfertige Arbeit gehört in die Roadmap
-  ([docs/BLUEPRINT_DE.md](docs/BLUEPRINT_DE.md#roadmap)), nicht in den Changelog. Wenn du einen Roadmap-Punkt
+  ([docs/ROADMAP_DE.md](docs/ROADMAP_DE.md)), nicht in den Changelog. Wenn du einen Roadmap-Punkt
   fertigstellst, setze seinen Status in beiden Sprachfassungen des Bauplans auf „fertig“ und ergänze den
   Changelog-Eintrag.
 - Für ein Release machen die Maintainer aus `[Unreleased]` ein `## [x.y.z] - JJJJ-MM-TT`, setzen dieselbe Version in

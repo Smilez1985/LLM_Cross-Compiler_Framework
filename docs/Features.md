@@ -6,7 +6,7 @@ Version 3.0.0 plus the [unreleased changes](../CHANGELOG.md#unreleased) · Last 
 
 This document explains what the framework does inside and why, so you always know what your tools are doing. It
 describes the state of the development branch: release 3.0.0 plus the unreleased changes in the
-[CHANGELOG](../CHANGELOG.md). Planned work is in the [roadmap](BLUEPRINT.md#roadmap), not here.
+[CHANGELOG](../CHANGELOG.md). Planned work is in the [roadmap](ROADMAP.md), not here.
 
 Back to the [README](../README.md) · All commands: [CLI_Usage.md](CLI_Usage.md)
 
@@ -2101,7 +2101,8 @@ with the token's standing approvals, Back to read only). A token is shown once, 
   `lcf://knowledge/doc-sources/<probe id>` (the documentation links of the source catalogue, all of them or those for
   a probe's vendor and SDK; read-only, a crawl stays `crawl_docs_site` with its question), and the installation's
   documents
-  `lcf://docs/<name>` (`CLI_Usage`, `Features`, `Module_Developer_Guide`, `BLUEPRINT` and their German `_DE` twins;
+  `lcf://docs/<name>` (`CLI_Usage`, `Features`, `Module_Developer_Guide`, `DESIGN`, `ROADMAP`, `BLUEPRINT` (the index of
+  the blueprint) and their German `_DE` twins;
   only the ones that exist are listed). A resource returns what its read tool returns and is read through the tool
   registry: your permission for that tool decides (a resource of a denied tool is neither listed nor readable, and
   one whose tool is set to "ask" is refused with the tool to call instead, because reading a resource cannot ask
@@ -3319,4 +3320,4 @@ What does not work yet, so you are not surprised:
   installed.
 - Smaller CLI gaps are listed in [CLI_Usage.md](CLI_Usage.md#known-limitations).
 
-What is planned: [roadmap](BLUEPRINT.md#roadmap). What changed: [CHANGELOG](../CHANGELOG.md).
+What is planned: [roadmap](ROADMAP.md). What changed: [CHANGELOG](../CHANGELOG.md).

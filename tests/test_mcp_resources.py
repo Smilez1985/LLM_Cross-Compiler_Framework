@@ -195,7 +195,8 @@ class TestFrameworkResources:
                 features = (await client.read_resource("lcf://docs/Features_DE")).contents[0]
                 return listed, templates, targets, caps, permissions, features
         listed, templates, targets, caps, permissions, features = run(go())
-        assert {"lcf://targets", "lcf://permissions", "lcf://docs/Features", "lcf://docs/BLUEPRINT_DE"} <= listed
+        assert {"lcf://targets", "lcf://permissions", "lcf://docs/Features", "lcf://docs/BLUEPRINT_DE",
+                "lcf://docs/DESIGN", "lcf://docs/ROADMAP_DE"} <= listed, "the blueprint: DESIGN, ROADMAP and the index"
         assert {"lcf://docs/{name}", "lcf://targets/{target}/capabilities", "lcf://builds/{request_id}/status",
                 "lcf://builds/{request_id}/log"} <= templates
         assert targets.startswith("<untrusted_data") and '"id": "Rockchip"' in targets

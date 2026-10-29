@@ -17,8 +17,9 @@ from typing import Dict, List, Optional
 
 from orchestrator.tools.registry import ResourceSpec, ResourceUnknown, ToolError, ToolRegistry
 
-# The documents an AI client may read, without the language suffix; each also exists as <name>_DE.
-DOC_NAMES = ("CLI_Usage", "Features", "Module_Developer_Guide", "BLUEPRINT")
+# The documents an AI client may read, without the language suffix; each also exists as <name>_DE. The blueprint is
+# three files (DESIGN, ROADMAP and the changelog in the repository root); BLUEPRINT is their short index.
+DOC_NAMES = ("CLI_Usage", "Features", "Module_Developer_Guide", "DESIGN", "ROADMAP", "BLUEPRINT")
 DOCS = tuple(name + suffix for name in DOC_NAMES for suffix in ("", "_DE"))
 LOG_LINES = 200  # lines of a build log in its resource (the read_build_log default)
 
@@ -88,8 +89,9 @@ def register_framework_resources(registry: ToolRegistry, framework) -> ToolRegis
     builds = {"request_id": own_builds}
     specs = [
         ResourceSpec("lcf://docs/{name}", "docs", "Framework documentation",
-                     "A document of this installation: CLI_Usage, Features, Module_Developer_Guide or BLUEPRINT, "
-                     "each also in German (_DE).", "text/markdown", read=read_doc, listed=existing,
+                     "A document of this installation: CLI_Usage, Features, Module_Developer_Guide, DESIGN (how the "
+                     "framework is built and why), ROADMAP (what comes) or BLUEPRINT (their index), each also in "
+                     "German (_DE).", "text/markdown", read=read_doc, listed=existing,
                      completions={"name": lambda _args, _ctx: existing_docs(framework)}),
         ResourceSpec("lcf://targets", "targets", "Targets",
                      "The hardware targets with boards, formats and quantization types (as list_targets). External "

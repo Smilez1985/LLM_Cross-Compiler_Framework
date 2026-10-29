@@ -5,7 +5,7 @@ Englische Fassung: [CHANGELOG.md](CHANGELOG.md).
 
 Das Format basiert auf [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/),
 und dieses Projekt hält sich an [Semantic Versioning 2.0.0](https://semver.org/lang/de/spec/v2.0.0.html).
-Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht hier.
+Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
 
 ## [Unreleased]
 

@@ -6,7 +6,7 @@ Version 3.0.0 plus die [unveröffentlichten Änderungen](../CHANGELOG_DE.md) · 
 
 Dieses Dokument erklärt, was das Framework im Inneren tut und warum, damit du immer weißt, was deine Werkzeuge
 machen. Es beschreibt den Stand des Entwicklungszweigs: Release 3.0.0 plus die unveröffentlichten Änderungen im
-[CHANGELOG](../CHANGELOG_DE.md). Geplantes steht in der [Roadmap](BLUEPRINT_DE.md#roadmap), nicht hier.
+[CHANGELOG](../CHANGELOG_DE.md). Geplantes steht in der [Roadmap](ROADMAP_DE.md), nicht hier.
 
 Zurück zur [README](../README_DE.md) · Alle Befehle: [CLI_Usage_DE.md](CLI_Usage_DE.md)
 
@@ -2325,7 +2325,8 @@ wurde.
   `lcf://knowledge/doc-sources` und `lcf://knowledge/doc-sources/<Probe-ID>` (die Dokumentations-Links des
   Quellenkatalogs, alle oder die für Hersteller und SDK einer Probe; nur lesend, ein Crawl bleibt `crawl_docs_site`
   mit seiner Frage) sowie die Dokumente der Installation
-  `lcf://docs/<Name>` (`CLI_Usage`, `Features`, `Module_Developer_Guide`, `BLUEPRINT` und ihre deutschen
+  `lcf://docs/<Name>` (`CLI_Usage`, `Features`, `Module_Developer_Guide`, `DESIGN`, `ROADMAP`, `BLUEPRINT` (das
+  Verzeichnis des Bauplans) und ihre deutschen
   `_DE`-Zwillinge; aufgeführt werden nur die vorhandenen). Eine Ressource liefert, was ihr Lese-Tool liefert, und wird
   über die Tool-Registry gelesen: Deine Berechtigung für dieses Tool entscheidet (die Ressource eines verbotenen Tools
   wird weder aufgeführt noch gelesen, und eine, deren Tool auf „fragen“ steht, wird mit dem Tool abgelehnt, das
@@ -3681,4 +3682,4 @@ Was noch nicht funktioniert, damit dich nichts überrascht:
   liegt); installieren lassen sich deshalb nur Pack-Dateien.
 - Kleinere Lücken der CLI stehen in [CLI_Usage_DE.md](CLI_Usage_DE.md#bekannte-einschränkungen).
 
-Was geplant ist: [Roadmap](BLUEPRINT_DE.md#roadmap). Was sich geändert hat: [CHANGELOG](../CHANGELOG_DE.md).
+Was geplant ist: [Roadmap](ROADMAP_DE.md). Was sich geändert hat: [CHANGELOG](../CHANGELOG_DE.md).
