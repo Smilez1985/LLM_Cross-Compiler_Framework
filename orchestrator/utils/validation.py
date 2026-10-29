@@ -734,39 +734,52 @@ def _idna_host(host: str) -> str:
             return host.lower()
 
 
-def validate_public_url(url: str) -> ValidationResult:
-    """Validate that a URL is http(s) and only resolves to public addresses (SSRF guard)."""
-    def _fail(message: str) -> ValidationResult:
-        return ValidationResult(
-            valid=False,
-            severity=ValidationSeverity.ERROR,
-            message=message,
-            validation_type=ValidationType.SECURITY,
-            details={"url": url}
-        )
+def _url_failure(url: Any, message: str) -> ValidationResult:
+    return ValidationResult(
+        valid=False,
+        severity=ValidationSeverity.ERROR,
+        message=message,
+        validation_type=ValidationType.SECURITY,
+        details={"url": url}
+    )
 
+
+def _url_shape(url: Any):
+    """The checks of an http(s) URL before its host is judged, shared by validate_public_url and
+    validate_own_network_url: (failure or None, parsed URL, the host urllib3 connects to, the port)."""
     # urllib and urllib3/requests split authorities differently on these characters
     # (e.g. "http://127.0.0.1\\@example.com/"), so such URLs are rejected outright.
     if not isinstance(url, str) or "\\" in url or any(ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7f for ch in url):
-        return _fail(f"URL contains backslashes, whitespace or control characters: {url!r}")
+        return _url_failure(url, f"URL contains backslashes, whitespace or control characters: {url!r}"), None, "", None
 
     try:
         parsed = urllib.parse.urlparse(url)
         port = parsed.port
     except Exception as e:
-        return _fail(f"URL validation error: {e}")
+        return _url_failure(url, f"URL validation error: {e}"), None, "", None
 
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        return _fail(f"Only http(s) URLs with a host are allowed: {url}")
+        return _url_failure(url, f"Only http(s) URLs with a host are allowed: {url}"), parsed, "", None
 
     try:
         from urllib3.util import parse_url
         fetch_host = (parse_url(url).host or "").strip("[]").lower()
     except Exception as e:
-        return _fail(f"URL validation error: {e}")
+        return _url_failure(url, f"URL validation error: {e}"), parsed, "", None
     host = parsed.hostname.lower()
     if fetch_host != host and fetch_host != _idna_host(host):
-        return _fail(f"Ambiguous URL host ({parsed.hostname!r} vs {fetch_host!r}): {url}")
+        return _url_failure(url, f"Ambiguous URL host ({parsed.hostname!r} vs {fetch_host!r}): {url}"), parsed, "", None
+    return None, parsed, fetch_host, port
+
+
+def validate_public_url(url: str) -> ValidationResult:
+    """Validate that a URL is http(s) and only resolves to public addresses (SSRF guard)."""
+    def _fail(message: str) -> ValidationResult:
+        return _url_failure(url, message)
+
+    failure, parsed, fetch_host, port = _url_shape(url)
+    if failure is not None:
+        return failure
 
     try:
         # Resolve the IDNA host that urllib3 will actually connect to.
@@ -780,6 +793,29 @@ def validate_public_url(url: str) -> ValidationResult:
         valid=True,
         severity=ValidationSeverity.SUCCESS,
         message=f"Public URL valid: {url}",
+        validation_type=ValidationType.SECURITY,
+        details={"url": url, "host": parsed.hostname}
+    )
+
+
+def validate_own_network_url(url: str, config: Any = None) -> ValidationResult:
+    """The address check of a crawl the person starts in offline mode (DECISIONS round 26 Q5): the URL passes the same
+    checks as validate_public_url, and its host counts as local by the one network-locality rule with the person's
+    opt-outs in `config` (utils/locality.crawl_addresses: a name with local and public addresses by its local ones;
+    never a cloud metadata service or a link-local IPv4 address, in any spelling). The message of a refusal is the
+    rule's plain refusal."""
+    failure, parsed, fetch_host, _port = _url_shape(url)
+    if failure is not None:
+        return failure
+    from orchestrator.utils.locality import LocalityRefused, crawl_addresses
+    try:
+        crawl_addresses(fetch_host, config)
+    except LocalityRefused as e:
+        return _url_failure(url, str(e))
+    return ValidationResult(
+        valid=True,
+        severity=ValidationSeverity.SUCCESS,
+        message=f"URL in the own network: {url}",
         validation_type=ValidationType.SECURITY,
         details={"url": url, "host": parsed.hostname}
     )

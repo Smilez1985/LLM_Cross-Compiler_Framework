@@ -347,6 +347,7 @@ class RAGManager:
         self.client = None
         self._connected = False
         self._server_mode = False
+        self._server_offline: Optional[bool] = None  # offline mode when the Qdrant server client was opened
         self._file_lock = None  # the local storage's cross-process lock while it is open (edge_store.storage_lock)
         self._convert_now = False  # the person asked to try the conversion of the old storage again
         self._conversion_checked = False  # the conversion was looked at (and tried when due) in this process
@@ -463,6 +464,30 @@ class RAGManager:
                                          "sent in clear text.")
         return key or None
 
+    def _offline_now(self) -> bool:
+        """Offline mode (the setting offline_mode) as a Qdrant server client is opened under it."""
+        from orchestrator.utils.locality import offline_mode
+        return offline_mode(self.config)
+
+    def _offline_server_options(self, url: str) -> Dict[str, Any]:
+        """In offline mode (round 24 L-NET: every reach-out on the rule) the Qdrant server must be on this computer or in
+        the person's own network by the network-locality rule with the person's opt-outs (a cloud Qdrant is refused
+        with the plain text, KnowledgeBaseError); qdrant-client then connects only to the checked local addresses,
+        through no proxy (security/http.pinned_transport), and skips its own version request (an unpinned request in
+        a thread of its own). {} when offline mode is off."""
+        from orchestrator.utils.locality import check_reach, offline_mode
+        if not offline_mode(self.config):
+            return {}
+        verdict = check_reach(url, self.config)
+        if not verdict.local:
+            raise KnowledgeBaseError(verdict.refusal("the Qdrant server (setting qdrant_url)"))
+        import httpcore
+        import httpx
+
+        from orchestrator.security.http import pinned_transport
+        return {"check_compatibility": False, "trust_env": False,
+                "transport": pinned_transport(self.config, "the Qdrant server", httpx=httpx, httpcore=httpcore)}
+
     # --- storage lifecycle ---
 
     def _open_client(self) -> Tuple[Any, bool, type]:
@@ -472,7 +497,8 @@ class RAGManager:
             from qdrant_client import QdrantClient
 
             from orchestrator.rag.client_store import ClientKnowledgeStore
-            client = QdrantClient(url=url, api_key=self._server_api_key(url), timeout=10)
+            pinned = self._offline_server_options(url)   # offline mode: only a Qdrant server in the own network
+            client = QdrantClient(url=url, api_key=self._server_api_key(url), timeout=10, **pinned)
             client.get_collections()  # fail now, not on the first search
             return client, True, ClientKnowledgeStore
         return self._open_local()
@@ -568,7 +594,12 @@ class RAGManager:
     def _ensure_store(self) -> "KnowledgeStore":
         with self._lock:
             if self._store is not None:
-                return self._store
+                if not getattr(self, "_server_mode", False) \
+                        or getattr(self, "_server_offline", None) == self._offline_now():
+                    return self._store
+                # offline mode was switched since the Qdrant server was opened: the client is not used again, the
+                # server is judged by the locality rule anew (round 24 L-NET: every reach-out on the rule)
+                self._close_client()
             try:
                 client, server, store_cls = self._open_client()
             except KnowledgeBaseError:
@@ -599,6 +630,7 @@ class RAGManager:
                     raise
                 raise KnowledgeBaseError(f"Could not prepare the knowledge base: {redact_secrets(str(e))}") from e
             self.client, self._store, self._connected, self._server_mode = client, store, True, server
+            self._server_offline = self._offline_now() if server else None   # how the Qdrant server was opened
             self.storage_format = store.store_format
             self.last_error = ""
             kind = "Qdrant Edge" if store.store_format == "qdrant-edge" else "old format: " + self.storage_reason
@@ -876,11 +908,13 @@ class RAGManager:
     # --- DEEP INGEST (WEB/PDF) ---
     def ingest_url(self, url: str, crawler_options: Optional[Dict[str, Any]] = None,
                    stop: Optional[threading.Event] = None,
-                   progress: Optional[Callable[[int, int, str], None]] = None) -> Dict[str, Any]:
+                   progress: Optional[Callable[[int, int, str], None]] = None, *, actor: str = "") -> Dict[str, Any]:
         """
         Crawls a URL and stores each page as soon as it is read. A snapshot is taken first, so a bad crawl can
         be rolled back. crawler_options apply to this crawl only (see CrawlerManager). Setting stop ends the
-        crawl after the current page and keeps what is stored; progress gets (page, max pages, url).
+        crawl after the current page and keeps what is stored; progress gets (page, max pages, url). `actor`: who
+        starts it ("gui" or "cli" for the person: in offline mode the crawl may then read the own network;
+        CrawlerManager); an AI's crawl (crawl_jobs) passes none.
 
         "outcome" is "success" (pages stored, nothing failed or reserved), "partial" (pages stored, but others
         failed, were reserved by the site, or the crawl was stopped) or "failure" (nothing stored). "skipped"
@@ -899,7 +933,8 @@ class RAGManager:
 
         crawler, pages, chunks, error = None, 0, 0, None
         try:
-            crawler = crawler_class(self.framework, crawler_options)
+            # the person's actor only when there is one: a stand-in crawler class of earlier tests takes none
+            crawler = crawler_class(self.framework, crawler_options, **({"actor": actor} if actor else {}))
             self.logger.info(f"Invoking Crawler for {url}...")
             for doc in crawler.iter_crawl(url, stop=stop, progress=progress):
                 added = self.ingest_page(doc, url)

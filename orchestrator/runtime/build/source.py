@@ -13,17 +13,21 @@ git bundle.
   cannot.
 - upstream_tag_commit() runs the pin-bump check: `git ls-remote <repo> refs/tags/<tag>` must name the pinned commit,
   because GitHub serves commits pushed to any fork through the upstream URL, so a commit alone fixes the content but
-  not its origin.
+  not its origin. With `settings` in offline mode it follows the mirror's rule below (the own network only, pinned).
 
 Git runs with an argument list (never a shell), a cleared environment, no user or system git configuration, no hooks,
 no credential helpers or prompts, and only the https transport (plus local files for bundles and local mirrors).
 
-Offline mode (fetch_source and export_source with `settings`; DECISIONS round 24 L-NET): a network repository is
-fetched only from the person's own network (a local mirror), judged by the one network-locality rule
-(utils/locality.py, with the person's opt-outs), and git connects only to the addresses that were checked
-(http.curloptResolve, git 2.37 or newer), so a DNS answer that changes in between cannot reach a public host; it uses
-no proxy (an empty http.proxy and no proxy variables: a proxy would resolve the name itself) and follows no redirect
-(http.followRedirects=false: a redirect could lead to a host nobody checked). A local file or path needs no network.
+Offline mode (fetch_source, export_source and upstream_tag_commit with `settings`; DECISIONS round 24 L-NET, round 26
+Q4, f, g): a network repository is reached only in the person's own network (a local mirror), judged by the one
+network-locality rule (utils/locality.check_reach, with the person's opt-outs), and git connects only to the local
+addresses that were checked (http.curloptResolve, git 2.37 or newer; a name with local and public addresses only to its
+local ones), so a DNS answer that changes in between cannot reach a public host; it uses no proxy (an empty http.proxy
+and no proxy variables: a proxy would resolve the name itself) and follows no redirect (http.followRedirects=false: a
+redirect could lead to a host nobody checked). An international host name is refused until it is written in its xn--
+form: Python (IDNA 2003) and git's curl (IDNA 2008) convert a few characters differently, so the checked name might not
+be the one curl looks up. A fetch that fails drops the lookup (locality.forget), so the next one asks again. A local
+file or path needs no network.
 Bundle files and remote output are untrusted: sizes are capped and every value is checked before it is used.
 """
 
@@ -112,34 +116,75 @@ def _git_env(offline: bool = False) -> Dict[str, str]:
     return env
 
 
-def offline_reach(url: str, settings: Any) -> Optional[str]:
-    """In offline mode (the settings `settings`), the git option value that pins the repository at `url` to the
-    addresses the network-locality rule checked ("HOST:PORT:ADDRESS[,ADDRESS...]" for http.curloptResolve, every
-    checked address in the resolver's order, which curl tries in turn; HOST spelled as git and curl look it up, a
-    trailing dot kept, an international name in its IDNA form); SourceError when the repository is not on this
-    computer or in the person's own network. None for a local file or path, when offline mode is off, or for an
-    address (nothing to resolve: git connects to the address that was checked). fetch_source passes git the other
-    options of offline mode in every case (no proxy, no redirect)."""
-    from urllib.parse import urlsplit
-
-    from orchestrator.utils.locality import check_url, offline_mode, parse_address
-    if _is_local(url) or not offline_mode(settings):
-        return None
-    verdict = check_url(url, settings)
-    if not verdict.local or not verdict.addresses:
-        raise SourceError(verdict.refusal("the llama.cpp source repository"))
-    parts = urlsplit(url)
-    host = parts.hostname or ""
-    if parse_address(host) is not None:
+def idn_refusal(host: str, what: str = "the repository") -> Optional[str]:
+    """The plain refusal of an international host name in offline mode (round 26 g), with the xn-- form to write
+    instead (IDNA 2008 as the idna package and curl's libidn2 give it, else Python's IDNA 2003); None for an ASCII
+    name."""
+    if not host or host.isascii():
         return None
     try:
-        host = host.encode("idna").decode("ascii")
-    except UnicodeError:
-        pass   # git refuses such a URL itself
+        import idna
+        ascii_form = idna.encode(host, uts46=True).decode("ascii")
+    except Exception:  # noqa: BLE001 - the idna package missing or the name not valid in IDNA 2008
+        try:
+            ascii_form = host.encode("idna").decode("ascii")
+        except UnicodeError:
+            ascii_form = "xn--..."
+    from orchestrator.utils.localization import ui_text
+    return ui_text("net.idn", "en", host=host, what=what, ascii=ascii_form)
+
+
+def offline_reach(url: str, settings: Any, what: str = "the llama.cpp source repository") -> Optional[str]:
+    """In offline mode (the settings `settings`), the git option value that pins the repository at `url` to the
+    local addresses the network-locality rule checked ("HOST:PORT:ADDRESS[,ADDRESS...]" for http.curloptResolve,
+    every checked local address in the resolver's order, which curl tries in turn, never a public one of a name with
+    both; HOST spelled as git and curl look it up, a trailing dot kept); SourceError when the repository is not on
+    this computer or in the person's own network, or its host is an international name not written in its xn-- form
+    (idn_refusal). None for a local file or path, when offline mode is off, or for an address (nothing to resolve: git
+    connects to the address that was checked). fetch_source and upstream_tag_commit pass git the other options of
+    offline mode in every case (no proxy, no redirect)."""
+    from urllib.parse import urlsplit
+
+    from orchestrator.utils.locality import check_reach, offline_mode, parse_address
+    if _is_local(url) or not offline_mode(settings):
+        return None
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    refused = idn_refusal(host, what)
+    if refused:
+        raise SourceError(refused)
+    verdict = check_reach(url, settings)
+    if not verdict.local_addresses:
+        raise SourceError(verdict.refusal(what))
+    if parse_address(host) is not None:
+        return None
+    checked = verdict.local_addresses
     # curl takes no zone in the address list: a link-local address with one is left out (unless it is the only one)
-    addresses = [a for a in verdict.addresses if "%" not in a] or [verdict.addresses[0].split("%", 1)[0]]
+    addresses = [a for a in checked if "%" not in a] or [checked[0].split("%", 1)[0]]
     port = parts.port or (443 if parts.scheme.lower() == "https" else 80)
     return f"{host}:{port}:" + ",".join(f"[{a}]" if ":" in a else a for a in addresses)
+
+
+def offline_git_options(url: str, settings: Any, what: str = "the llama.cpp source repository") -> Dict[str, Any]:
+    """The options a git call that reaches `url` gets in offline mode: {"resolve": pin} for a name (offline_reach),
+    {"offline": True} for an address (no proxy, no redirect either way); {} for a local file or path or when offline
+    mode is off. SourceError as offline_reach."""
+    from orchestrator.utils.locality import offline_mode
+    pin = offline_reach(url, settings, what)
+    if _is_local(url) or not offline_mode(settings):
+        return {}
+    return {"resolve": pin} if pin else {"offline": True}
+
+
+def _forget_host(url: str) -> None:
+    """A fetch from `url` failed: its lookup is dropped (locality.forget), so the next one asks the resolver again."""
+    from urllib.parse import urlsplit
+
+    from orchestrator.utils.locality import forget
+    try:
+        forget(urlsplit(url).hostname or "")
+    except ValueError:
+        pass
 
 
 def _git_config(allow_file: bool, resolve: Optional[str] = None, offline: bool = False) -> List[str]:
@@ -332,10 +377,9 @@ def fetch_source(source: LlamaCppSource, state_dir: Union[str, Path], *, url: Op
         say(f"The cached source in {target} is damaged; it is fetched again.")
         remove_tree(target)
     local = _is_local(url)
-    pin = offline_reach(url, settings)        # offline mode: only the own network, at the checked addresses
-    from orchestrator.utils.locality import offline_mode
-    # offline mode: git also uses no proxy and follows no redirect (also for a mirror given by its address)
-    pinned = ({"resolve": pin} if pin else {"offline": True}) if not local and offline_mode(settings) else {}
+    # offline mode: only the own network, at the checked local addresses; git also uses no proxy and follows no
+    # redirect (also for a mirror given by its address)
+    pinned = offline_git_options(url, settings)
     staging = _staging(state_dir)
     try:
         _init(staging, git)
@@ -345,8 +389,13 @@ def fetch_source(source: LlamaCppSource, state_dir: Union[str, Path], *, url: Op
         if fetched.returncode != 0:
             # Some mirrors refuse a fetch by commit; the tag is fetched instead and must give the same commit.
             say("The server refused a fetch by commit; fetching the tag and checking its commit.")
-            git(["fetch", "--quiet", "--depth", "1", "--no-tags", url, f"refs/tags/{source.tag}"], cwd=staging,
-                allow_file=local, timeout=GIT_TIMEOUT, **pinned)
+            try:
+                git(["fetch", "--quiet", "--depth", "1", "--no-tags", url, f"refs/tags/{source.tag}"], cwd=staging,
+                    allow_file=local, timeout=GIT_TIMEOUT, **pinned)
+            except SourceError:
+                if pinned:
+                    _forget_host(url)   # the checked addresses did not answer: the next fetch asks again
+                raise
         _checkout(staging, git, source.commit)
         return _install(staging, source, state_dir, git)
     finally:
@@ -472,18 +521,27 @@ def import_source(source: LlamaCppSource, state_dir: Union[str, Path], bundle: P
 
 # --- the pin-bump check ------------------------------------------------------------------------------------------
 
-def upstream_tag_commit(tag: str, *, repo: str, git: Optional[Git] = None, cwd: Optional[Path] = None) -> str:
-    """The commit `refs/tags/<tag>` points at upstream (peeled for annotated tags), from `git ls-remote`."""
+def upstream_tag_commit(tag: str, *, repo: str, git: Optional[Git] = None, cwd: Optional[Path] = None,
+                        settings: Any = None) -> str:
+    """The commit `refs/tags/<tag>` points at upstream (peeled for annotated tags), from `git ls-remote`. With
+    `settings` in offline mode the repository must be in the person's own network, and git reaches it as a mirror
+    (offline_git_options: the checked local addresses, no proxy, no redirect); SourceError otherwise."""
     if not _TAG.fullmatch(tag):
         raise SourceError("a llama.cpp tag looks like b11429")
     if repo.startswith("-"):
         raise SourceError("the repository URL must not start with '-'")
+    pinned = offline_git_options(repo, settings, "the repository of the pin check")
     git = git or Git()
     with tempfile.TemporaryDirectory(prefix="llama-pin-") as empty:
         # Never inside the caller's checkout: git would apply that repository's config (url.<x>.insteadOf could send
         # the check to another repository).
-        out = git(["ls-remote", repo, f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}"], cwd=cwd or Path(empty),
-                  allow_file=_is_local(repo), timeout=120).stdout
+        try:
+            out = git(["ls-remote", repo, f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}"], cwd=cwd or Path(empty),
+                      allow_file=_is_local(repo), timeout=120, **pinned).stdout
+        except SourceError:
+            if pinned:
+                _forget_host(repo)
+            raise
     found: Dict[str, str] = {}
     for line in out.splitlines()[:16]:
         parts = line.split("\t")
@@ -497,9 +555,10 @@ def upstream_tag_commit(tag: str, *, repo: str, git: Optional[Git] = None, cwd: 
 
 
 def check_pin_upstream(source: LlamaCppSource, *, repo: Optional[str] = None, git: Optional[Git] = None,
-                       cwd: Optional[Path] = None) -> str:
-    """Raises SourceError unless upstream's tag of the pin points at the pinned commit. Returns the commit."""
-    commit = upstream_tag_commit(source.tag, repo=repo or source.repo, git=git, cwd=cwd)
+                       cwd: Optional[Path] = None, settings: Any = None) -> str:
+    """Raises SourceError unless upstream's tag of the pin points at the pinned commit. Returns the commit. `settings`:
+    offline mode and the person's opt-outs (upstream_tag_commit)."""
+    commit = upstream_tag_commit(source.tag, repo=repo or source.repo, git=git, cwd=cwd, settings=settings)
     if commit != source.commit:
         raise SourceError(f"upstream's {source.tag} points at {commit}, but the catalog pins {source.commit}")
     return commit

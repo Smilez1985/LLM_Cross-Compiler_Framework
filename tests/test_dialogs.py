@@ -304,7 +304,10 @@ class TestAIConfigurationDialog:
         runs on the GUI thread; the dialog checked only names first, so the save was refused as "not checked yet"
         even with the person's own Headscale."""
         from orchestrator.utils import locality
+        # round 26 h: the address must also be a device of the tailnet (`tailscale status --json`, a third command)
         answers = {"prefs": {"ControlURL": "https://headscale.lan:8080"},
+                   "--json": {"BackendState": "Running", "Self": {"TailscaleIPs": ["100.64.0.1"]},
+                              "Peer": {"nodekey:gpu": {"TailscaleIPs": ["100.64.0.5"]}}},
                    "derp-map": {"Regions": {"900": {"Nodes": [{"HostName": "derp.lan", "IPv4": "192.168.1.3",
                                                                 "IPv6": "none"}]}}}}
         on_gui_thread = []
@@ -323,7 +326,7 @@ class TestAIConfigurationDialog:
         dlg.txt_base_url.setText("http://100.64.0.5:8000/v1")
         dlg._save_config()
         assert wait_for(qapp, lambda: dlg.result() == dialogs.QDialog.Accepted), message_boxes
-        assert on_gui_thread == [False, False], "the tailscale command ran in a worker thread"
+        assert on_gui_thread == [False, False, False], "the tailscale command ran in a worker thread"
 
     def test_offline_mode_accepts_only_local_providers(self, qapp, framework, message_boxes):
         dlg = AIConfigurationDialog(framework)
@@ -903,8 +906,9 @@ class ScriptedRag:
         self.events = [] if events is None else events
         self.calls = []
 
-    def ingest_url(self, url, crawler_options=None, stop=None, progress=None):
+    def ingest_url(self, url, crawler_options=None, stop=None, progress=None, actor=""):
         self.calls.append(url)
+        self.actors = getattr(self, "actors", []) + [actor]   # the person's crawl (round 26 Q5)
         result = self.results[url]
         if callable(result):
             result = result(stop, progress)
@@ -940,6 +944,7 @@ class TestDeepIngestOutcome:
         message = "Deep Ingest finished: 3 pages (7 chunks) are now searchable."
         assert done == [("success", message)]
         assert rag.events == [("stored", "https://a.example/"), ("stored", "https://b.example/"), ("spoken", message)]
+        assert rag.actors == ["gui", "gui"], "the person's crawl: in offline mode it may read the own network"
 
     def test_one_failed_site_makes_the_crawl_partial(self, qapp):
         rag = ScriptedRag({"https://a.example/": page_result("success", 2, 5),
@@ -1123,7 +1128,7 @@ class TestDeepIngestControls:
         release, started, events = threading.Event(), threading.Event(), []
 
         class SlowRag:
-            def ingest_url(self, url, crawler_options=None, stop=None, progress=None):
+            def ingest_url(self, url, crawler_options=None, stop=None, progress=None, actor=""):
                 started.set()
                 release.wait(10)   # embedding and storing a long page
                 events.append(("stored", stop.is_set()))
@@ -1187,21 +1192,30 @@ class TestDeepIngestControls:
         assert wizard.status_label.text() == "Deep Ingest finished: 1 pages (2 chunks) are now searchable."
         assert offered == [[], ["https://docs.example/"]]   # crawled URLs are offered the next time
 
-    def test_offline_mode_reads_no_web_site_for_the_person_either(self, qapp, wizard, tmp_path, monkeypatch,
-                                                                 wizard_boxes):
-        """Chain offline-lan: in offline mode the framework reaches only the person's own network, and the crawler
-        reads only public sites, so the person's Deep Ingest refuses as an AI's crawl_docs_site does (it used to
-        crawl the web in offline mode)."""
+    def test_offline_mode_lets_the_person_crawl_only_the_own_network(self, qapp, wizard, tmp_path, monkeypatch,
+                                                                    wizard_boxes):
+        """Round 26 Q5 (changed on purpose: chain offline-lan refused the person's Deep Ingest in offline mode): the
+        person's crawl may read sites in the own network then. The wizard says so once and asks for the addresses as
+        online; the crawler judges every address, redirect and link by the locality rule (tests in
+        tests/test_offline_followups.py). An AI's crawl_docs_site stays refused in offline mode."""
         from orchestrator.gui import wizards
         cfg = ConfigManager(tmp_path / "configs")
         cfg.set("offline_mode", True)
-        crawled = []
-        wizard.framework_manager = SimpleNamespace(config=cfg, get_component=lambda name: crawled.append(name))
+        asked = []
+        wizard.framework_manager = SimpleNamespace(config=cfg, get_component=lambda name: SimpleNamespace())
         monkeypatch.setattr(dialogs.CrawlNoticeDialog, "exec", lambda self: 0)
-        monkeypatch.setattr(wizards, "URLInputDialog", lambda *a, **k: pytest.fail("no address is asked for"))
+
+        class Addresses:
+            def __init__(self, *args, **kwargs):
+                asked.append(True)
+
+            def exec(self):
+                return 0   # the person cancels: nothing is crawled
+        monkeypatch.setattr(wizards, "URLInputDialog", Addresses)
         wizard.run_deep_ingest()
         assert [kind for kind, _title, _text in wizard_boxes] == ["information"]
-        assert "Offline mode is on" in wizard_boxes[0][2] and crawled == [] and wizard.crawl_worker is None
+        assert "only sites on this computer or in your own network" in wizard_boxes[0][2]
+        assert asked == [True] and wizard.crawl_worker is None
 
     def test_finish_waits_for_a_running_crawl(self, qapp, wizard, tmp_path, monkeypatch, wizard_boxes):
         """Finish used to create the module, and its knowledge snapshot of the crawled pages, while Deep Ingest
@@ -1211,7 +1225,7 @@ class TestDeepIngestControls:
         release, started, generated = threading.Event(), threading.Event(), []
 
         class SlowRag:
-            def ingest_url(self, url, crawler_options=None, stop=None, progress=None):
+            def ingest_url(self, url, crawler_options=None, stop=None, progress=None, actor=""):
                 started.set()
                 release.wait(10)
                 return page_result("success", 1, 1)
