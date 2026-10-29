@@ -1,4 +1,4 @@
-Version 3.1.0 · Last updated 2026-10-29
+Version 3.2.0 · Last updated 2026-10-29
 
 **English** · [Deutsch](README_DE.md)
 
@@ -143,27 +143,29 @@ The installer:
      must hold exactly that one key with the fingerprint Docker's install guide publishes
      (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`); apt then checks every package against the signed package
      lists.
-   - **Fedora, RHEL and CentOS Stream:** Docker's rpm repository, its key trusted only with the fingerprint Docker's
-     guide publishes (`060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35`); dnf checks the signature of every package.
-   - **Rocky Linux, AlmaLinux, Oracle Linux** and the other RHEL rebuilds: Docker CE as well, from Docker's RHEL
-     repository (`download.docker.com/linux/rhel/<RHEL version>`, the same key check), because the framework needs
-     BuildKit (for example for Hailo). Podman is only the fallback: when Docker publishes nothing for this
-     architecture or release, the repository cannot be reached or the key does not match, `podman-docker` (Podman
+   - **The RHEL family, one rule:** Fedora, RHEL and CentOS Stream get Docker CE from Docker's rpm repository for
+     their own system, Rocky Linux, AlmaLinux, Oracle Linux and the other RHEL rebuilds from Docker's RHEL repository
+     (`download.docker.com/linux/rhel/<RHEL version>`); the key is trusted only with the fingerprint Docker's guide
+     publishes (`060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35`) and dnf checks the signature of every package.
+     Docker CE is the standard because the framework needs BuildKit (for example for Hailo). Podman is only the
+     fallback: when Docker publishes nothing for this architecture or release, the repository cannot be reached, the
+     key does not match or you say no to what dnf would remove, `podman-docker` (Podman
      with the `docker` command) comes from the distribution's own sources. There is no `docker` group then; the
      installer switches on Podman's Docker-compatible socket for your user (`systemctl --user enable --now
      podman.socket`), and the framework finds it by itself (it sets `DOCKER_HOST` when no Docker daemon is there).
      What Podman cannot do is listed in [Features](docs/Features.md#podman-instead-of-docker); to switch later:
      `sudo dnf remove podman-docker`, then `sudo ./install.sh` again.
-   - **Packages dnf would remove (the rebuilds):** before it installs Docker CE on Rocky Linux, AlmaLinux, Oracle
-     Linux or another rebuild, dnf works out what it would have to remove or replace for it (`podman-docker`, and on
-     RHEL 8 rebuilds also `runc`, `podman`, `buildah`, ...) without changing anything. The installer names exactly
-     these packages and asks you; only a yes removes them (`dnf --allowerasing`, never without asking). A no, or no
-     terminal to answer on, removes nothing, and Podman comes as the fallback. Fedora, RHEL and CentOS Stream keep
-     their way: `dnf install -y` without `--allowerasing`; if dnf reports a conflict (for example with
-     `podman-docker`), the installer stops with the reason.
+   - **Packages dnf would remove (the whole RHEL family):** before it installs Docker CE, dnf works out what it would
+     have to remove or replace for it (`podman-docker`, and on RHEL 8 systems also `runc`, `podman`, `buildah`,
+     `containers-common`, ...) in a trial run that changes nothing. The installer names exactly these packages and
+     asks you; only a yes removes them (`dnf --allowerasing`, never without asking, and never a silent replacement
+     through a package's obsoletes). A no, or no terminal to answer on, removes nothing, and Podman comes as the
+     fallback. `./install.sh --dry-run` says which way it would take and why. Amazon Linux and the other systems
+     built on Fedora keep the distribution's own package (below).
    - Where Docker publishes no repository, the distribution's own package: `moby-engine` on other systems built on
-     Fedora; `docker` on Amazon Linux, on openSUSE and SLES (on SLES from the Containers Module, which the installer
-     switches on with `SUSEConnect`) and on Arch, Manjaro and EndeavourOS (with `docker-buildx`; the installer never
+     Fedora; `docker` on Amazon Linux, on openSUSE and SLES (on SLES from the Containers Module: when the package is
+     missing, the installer asks you before it switches the module on with `SUSEConnect`, as for the Python 3
+     Module; a no or an unregistered system stops with the step to take) and on Arch, Manjaro and EndeavourOS (with `docker-buildx`; the installer never
      runs `pacman -Sy`, a partial upgrade: if pacman cannot find a package, update the system with `sudo pacman -Syu`
      first).
    - **Alpine:** `docker` from Alpine's community repository (switched on in `/etc/apk/repositories` if needed). The

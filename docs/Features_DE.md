@@ -1,4 +1,4 @@
-Version 3.1.0 · Stand 2026-10-29
+Version 3.2.0 · Stand 2026-10-29
 
 [English](Features.md) · **Deutsch**
 
@@ -305,8 +305,8 @@ die Toolkits (beim Image-Build).
 
 ### Podman statt Docker
 
-Die Container-Engine des Frameworks ist Docker CE. Unter Rocky Linux, AlmaLinux und Oracle Linux greift `install.sh`
-nur dann auf Podman zurück (`podman-docker` und dein rootless `podman.socket`), wenn Docker CE dort nicht geht oder
+Die Container-Engine des Frameworks ist Docker CE. In der ganzen RHEL-Familie (Fedora, RHEL, CentOS Stream, Rocky
+Linux, AlmaLinux, Oracle Linux und die übrigen Nachbauten) greift `install.sh` nur dann auf Podman zurück (`podman-docker` und dein rootless `podman.socket`), wenn Docker CE dort nicht geht oder
 du die Pakete behältst, die dnf dafür entfernen müsste (siehe [Installation](../README_DE.md#installation)). Das
 Framework findet Podman dann selbst: Ist `DOCKER_HOST` nicht gesetzt und antwortet kein Docker-Dienst (weder der
 des Systems noch ein rootless Docker), setzt es `DOCKER_HOST` für den eigenen Prozess und die Programme, die es
@@ -326,7 +326,7 @@ Geprüft mit Podman 5.8.2 und buildah 1.43.1 unter Rocky Linux 9.8 und an den Qu
 | Nicht getestet | Ein vollständiger Target-Build und ein Lauf von Dittos Container unter Podman von Anfang bis Ende (die Container-Einstellungen des Builder-Containers und der Build-Stufe liefen gegen Podman 5.8.9 rootless); eine AMD- oder Intel-GPU, die unter rootless Podman als `/dev/dri` weitergegeben wird (die render-Gruppe des Rechners ist im Container nicht abgebildet). |
 
 Später zu Docker CE wechseln: `sudo dnf remove podman-docker`, dann `sudo ./install.sh` erneut; es installiert
-Docker CE aus Dockers RHEL-Repository und fragt, bevor dnf etwas entfernt.
+Docker CE aus Dockers Repository für dein System und fragt, bevor dnf etwas entfernt oder ersetzt.
 
 ---
 

@@ -1,4 +1,4 @@
-Version 3.1.0 · Last updated 2026-10-29
+Version 3.2.0 · Last updated 2026-10-29
 
 **English** · [Deutsch](DESIGN_DE.md)
 
@@ -1464,7 +1464,14 @@ dependencies; each Linux distribution through its own package manager.
 | Each Linux distribution through its native package manager and sources (apt, dnf, zypper, pacman, apk), signatures checked the way each manager does; Docker only with a checked key (repository key against the published fingerprint, any script pinned by sha256, a mismatch stops in plain words); for the whole RHEL family Docker CE from Docker's repository, with the exact list shown before dnf would remove a package (never `--allowerasing` silently); Podman as the fallback with `DOCKER_HOST` set by llmcf and the features it lacks refused plainly. | Family detection, the dry-run plan and the package mapping in `install.sh`; the Docker engine helper. | No detour scripts; the person's system stays the person's. |
 | The repository is named LLM_Cross-Compiler_Framework and every place tied to the old name follows (package name, install folders, bot name and keyring service with the old ones still honoured). | `pyproject.toml` (`llm-cross-compiler-framework`), the installers, the keyring fallback. | One name everywhere, without breaking older installations. |
 | Every dependency stays on the highest version that fits, and updates must not break anything; a cooldown of 7 days (14 for majors and exact pins, security fixes exempt); the next major of the Anthropic SDK after its cooldown; a bot as a scheduled job first, an app only if needed. | Exact pins in `pyproject.toml` and `uv.lock`; the mechanism is planned: ROADMAP row "Step 7". | Old versions collect advisories; a careless update breaks builds. |
+| One install rule for the whole RHEL family: Fedora, RHEL, CentOS Stream and the RHEL rebuilds (Rocky Linux, AlmaLinux, Oracle Linux, ...) get Docker CE from Docker's repository (the system's own one, Docker's RHEL repository for the rebuilds) through the same dnf trial run; what dnf would remove or replace, also through a package's obsoletes, is listed exactly and installed only after the person's yes; a no, no terminal, an unreachable repository, a key that does not match or no package for the release means Podman (`podman-docker` from the distribution, the person's rootless socket, `DOCKER_HOST` set by llmcf), with the reason; Amazon Linux and the systems built on Fedora keep the distribution's package. On SLES a SUSE module (the Python 3 Module, the Containers Module) is switched on only after the person's yes; an unregistered system stops with the registration step. | `install.sh`: `rhel_family`, `docker_rpm_asked` with `docker_rpm_transaction` (`dnf install --assumeno --allowerasing`, which changes nothing and is the only `--allowerasing` without a yes), `install_podman_fallback`, `sles_python_module` and `sles_containers_module`; `--dry-run` names the way and why. | The framework needs BuildKit (for example for Hailo), so Docker CE is the standard wherever it can be had; a package of the person's system is never removed or replaced without their yes, and a module subscription is the person's choice. |
 | The image security scan reads a saved image archive and gets no Docker socket. | The builder's Trivy step scans the archive. | The socket would give the scanner control over Docker. |
+
+**History**
+
+- Until 2026-10-24 Fedora, RHEL and CentOS Stream kept their own way (`dnf install -y` without a trial run; a conflict
+  stopped the installer), and only the rebuilds had the question and the Podman fallback; the one install rule for
+  the whole RHEL family replaced that.
 
 ### Updates, backups and board images (planned)
 
