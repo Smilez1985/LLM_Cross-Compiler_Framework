@@ -1607,7 +1607,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (`tests/test_deploy_docker_model.py`).
 - **Die Hardware-Probe des Boards steuert jeden Build; NPU-Formate nur mit seiner NPU** (DECISIONS Runde 23 Punkte 5
   und 15): Ein Build-Auftrag nennt die Probe des Boards mit ihrer ID (`llm-cli build start --probe ID`,
-  `BuildRequestIn.probe`; der Builder-Tab die Probe, die er zuletzt importiert oder erfasst hat); ohne sie gilt die
+  `BuildRequestIn.probe`; der Builder-Tab die Probe, die er zuletzt importiert oder erfasst hat, auch für ein Rezept,
+  das er wie festgelegt baut, `BuildService.start_recipe(probe=...)`); ohne sie gilt die
   neueste gespeicherte Probe eines Boards des SoC des Auftrags, und eine Probe eines anderen Boards wird abgelehnt: ein
   anderes Board des Targets, ein Board eines anderen SoC (ein RK3588S zählt als RK3588) oder ein System einer anderen
   Architektur als der des Targets (die Probe dieses PCs für ein Rockchip-Board); der Builder-Tab nutzt seine Probe nur

@@ -935,12 +935,17 @@ class BuildService:
 
     def start_recipe(self, recipe_id: str, *, dataset_path: Optional[str] = None, use_gpu: bool = False,
                      owner: str = "", local_paths: bool = False, disk_reservation: str = "",
-                     expect: Optional[Dict[str, Any]] = None, **build_options: Any) -> BuildHandle:
+                     expect: Optional[Dict[str, Any]] = None, probe: Optional[str] = None,
+                     **build_options: Any) -> BuildHandle:
         """Builds an installed recipe exactly as pinned, through start_build: the use-time revocation check, the
         calibration-dataset pin. `expect`: the request values the person was shown (model, revision, target, format,
-        board, quantization, recipe_sha256); a recipe changed since is refused. `build_options`: start_build's
-        optimization, priority, output_dir, parallel_builds and description (the Builder tab's)."""
+        board, quantization, recipe_sha256); a recipe changed since is refused. `probe`: the board's hardware probe the
+        caller named (BuildRequestIn.probe; a recipe pins none), checked like start_build's; without one the board's
+        newest stored probe. `build_options`: start_build's optimization, priority, output_dir, parallel_builds and
+        description (the Builder tab's)."""
         request, recipe, _prov = self.recipe_request(recipe_id, dataset_path, use_gpu)
+        if probe:
+            request = request.model_copy(update={"probe": probe})
         validated, _ = self._validated(request, local_paths)
         if expect is not None:
             now = {"model": request.model, "revision": request.revision, "target": validated.target,

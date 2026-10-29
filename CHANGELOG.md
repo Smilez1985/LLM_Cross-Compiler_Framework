@@ -1412,7 +1412,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   model. The generated script is run in a test with a stand-in `docker` (`tests/test_deploy_docker_model.py`).
 - **The board's hardware probe drives every build; NPU formats only with its NPU** (DECISIONS round 23 items 5 and
   15): a build request names the board's probe by its id (`llm-cli build start --probe ID`, `BuildRequestIn.probe`;
-  the Builder tab the probe it imported or scanned last); without one the newest stored probe of a board of the
+  the Builder tab the probe it imported or scanned last, also for a recipe it builds as pinned,
+  `BuildService.start_recipe(probe=...)`); without one the newest stored probe of a board of the
   request's SoC is used, and a probe of another board is refused: another board of the target, a board of another
   SoC (an RK3588S counts as an RK3588) or a system of another architecture than the target's (this PC's probe for a
   Rockchip board); the Builder tab uses its probe only for the target the probe matched. The build engine writes it into the build's folder

@@ -237,6 +237,17 @@ class TestTheBuildServiceTakesTheBoardsProbe:
         old = {k: v for k, v in without.items() if k != "hardware_sha256"}  # a manifest from before the option
         assert "hardware_sha256" not in build_identity.compare(without, old)[1]
 
+    def test_a_recipe_build_keeps_the_probe_the_person_named(self, service, monkeypatch):
+        """The recipe path is start_build too: the probe the Builder tab names (and compared with earlier builds) is
+        the probe the build runs with, not the newest stored probe of the board's SoC."""
+        recipe = SimpleNamespace(id="r", options=SimpleNamespace(dataset=None))
+        monkeypatch.setattr(service, "recipe_request",
+                            lambda rid, dataset_path=None, use_gpu=False: (request(board="rk3588"), recipe, None))
+        service.start_recipe("r", local_paths=True, probe=service.ids["rk3588"])
+        assert service.framework.orchestrator.requests[-1].hardware_probe == service.ids["rk3588"]
+        service.start_recipe("r", local_paths=True)   # none named: the board's newest probe, as for start_build
+        assert service.framework.orchestrator.requests[-1].hardware_probe == service.ids["rk3588-no-npu"]
+
 
 # --- the build engine mounts it ----------------------------------------------------------------------------------
 
@@ -348,6 +359,29 @@ def test_the_builder_s_request_names_the_probe_it_imported(builder_tab):
               "recipe": None, "probe": "0123456789abcdef"}
     assert builder_tab._service_request(values).probe == "0123456789abcdef"
     assert builder_tab._service_request({**values, "probe": None}).probe is None
+
+
+def test_the_builder_s_recipe_build_names_the_probe_too(builder_tab, monkeypatch):
+    from orchestrator.Core.builder import ModelFormat, OptimizationLevel
+    seen = {}
+
+    class Service:
+        def start_recipe(self, recipe_id, **kwargs):
+            seen.update(kwargs)
+            return SimpleNamespace(request_id="r1")
+
+    monkeypatch.setattr(builder_tab, "_build_service", lambda: Service())
+    monkeypatch.setattr(builder_tab, "_recipe_as_pinned", lambda values: True)
+    monkeypatch.setattr(builder_tab, "_recipe_expect", lambda values: {})
+    for name in ("_track_build", "_remember_build"):
+        monkeypatch.setattr(builder_tab, name, lambda *a, **k: None)
+    monkeypatch.setattr("orchestrator.gui.builder_tab.QMessageBox.information", lambda *a, **k: None)
+    values = {"model": "Qwen/Qwen2.5-0.5B-Instruct", "target": "Rockchip", "target_fmt": ModelFormat.GGUF,
+              "board": "rk3588", "quant": "Q4_K_M", "use_imatrix": False, "dataset": None, "use_gpu": False,
+              "recipe": SimpleNamespace(id="demo"), "probe": "0123456789abcdef", "output_dir": "out",
+              "opt_lvl": OptimizationLevel.BALANCED}
+    builder_tab._start_or_reuse(values, [])
+    assert seen.get("probe") == "0123456789abcdef"
 
 
 @pytest.mark.parametrize("soc, board, fits", [
