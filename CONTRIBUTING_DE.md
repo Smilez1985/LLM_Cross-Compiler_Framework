@@ -789,7 +789,8 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   Docker-Images enthält, kommen nur aus `deployment_manager.package_containers` (`llmcf deploy package --docker` und die
   Container-Tabelle des Deployment-Tabs, deren Haken über `package_docker_config` bei `make_package` ankommen); die
   Formate, die ein Target anbietet, nur aus `build_formats.offered_formats` (die Formatliste des Builder-Tabs und
-  `llmcf build start --format`); einen gleichen früheren Build legt nur `artifact_output.plan_copy` und
+  `llmcf build start --format`), und die, die ein Board bekommt, nur aus `build_formats.format_refusal` (die Probe
+  des Boards und der Build-Rechner: der Build-Dienst und der Builder-Tab); einen gleichen früheren Build legt nur `artifact_output.plan_copy` und
   `copy_artifact` in einen gewählten Ordner („Nehmen“, CLI und GUI). `tests/test_build_parity_core.py`,
   `tests/test_ai_settings_change.py` und `tests/test_deploy_flow.py` prüfen, dass kein Fenster und kein Befehl an ihnen
   vorbeigeht. Anbieter, Modell oder Aufwand für eine Frage oder einen Lauf kommen aus
