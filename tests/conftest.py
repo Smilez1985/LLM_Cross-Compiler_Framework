@@ -270,6 +270,20 @@ def hermetic_locality(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def hermetic_docker_engine(monkeypatch):
+    """The container engine choice (utils/docker_engine.py) never reads this computer's Docker or Podman sockets in a
+    test and never sets DOCKER_HOST for the test process: the process's choice is "nothing to change" and no client's
+    engine is remembered from another test. Tests of the choice pass their own environment and sockets."""
+    from orchestrator.utils import docker_engine
+    monkeypatch.setattr(docker_engine, "_CHOICE", docker_engine.EngineChoice("", False, "tests"))
+    docker_engine._ENGINES.clear()
+    docker_engine._ROOTLESS.clear()
+    yield
+    docker_engine._ENGINES.clear()
+    docker_engine._ROOTLESS.clear()
+
+
+@pytest.fixture(autouse=True)
 def no_network_llama_source(monkeypatch):
     """Tests never fetch the llama.cpp source from the network: a real fetch is about 215 MB, and a test that reaches
     it would go on to a real build. Local mirrors and bundles (the source tests) still work."""

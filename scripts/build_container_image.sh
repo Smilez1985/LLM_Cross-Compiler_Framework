@@ -75,10 +75,34 @@ if [ "$gid" = 0 ]; then gid=1000; fi
 # --- prerequisites -----------------------------------------------------------------------------------------------
 command -v docker >/dev/null 2>&1 ||
     fail "Docker is not installed. Install Docker Engine (Linux) or Docker Desktop, then run this again."
+# No Docker daemon, but the person's Podman socket (install.sh's fallback on Rocky Linux, AlmaLinux and Oracle Linux):
+# the framework's own choice (orchestrator/utils/docker_engine.py, standard library only), asked with the system's
+# python3 when there is one. A DOCKER_HOST you set always wins.
+engine_helper="$repo/orchestrator/utils/docker_engine.py"
+if [ -z "${DOCKER_HOST:-}" ] && command -v python3 >/dev/null 2>&1; then
+    podman_host=$(python3 -I "$engine_helper" --docker-host 2>/dev/null || true)
+    if [ -n "$podman_host" ]; then
+        export DOCKER_HOST="$podman_host"
+        echo "No Docker daemon here: building through Podman's Docker-compatible socket (DOCKER_HOST=$podman_host)."
+    fi
+fi
 docker info >/dev/null 2>&1 ||
     fail "the Docker daemon is not reachable (is it running, and may your user use it? 'docker info' shows why)."
-docker buildx version >/dev/null 2>&1 ||
-    fail "BuildKit (docker buildx) is missing; the Dockerfile needs it. Install the docker-buildx plugin."
+engine=""
+if command -v python3 >/dev/null 2>&1; then
+    engine=$(python3 -I "$engine_helper" --engine 2>/dev/null || true)
+fi
+if docker --version 2>/dev/null | grep -qi '^podman'; then engine=podman; fi
+buildkit=1
+if [ "$engine" = podman ]; then
+    # Podman builds with its own builder (buildah), which knows the one BuildKit feature the Dockerfile uses: the
+    # read-only bind mount of the staged context (RUN --mount=type=bind). Docker's CLI must not ask Podman for BuildKit.
+    buildkit=0
+    echo "The container engine is Podman: it builds the image with its own builder (buildah), not BuildKit."
+else
+    docker buildx version >/dev/null 2>&1 ||
+        fail "BuildKit (docker buildx) is missing; the Dockerfile needs it. Install the docker-buildx plugin."
+fi
 if ! command -v git >/dev/null 2>&1 ||
         ! git -C "$repo" -c safe.directory="$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     fail "$repo is not a git checkout: the image is built from the files the repository ships (git ls-files). Clone the repository and run this there."
@@ -105,7 +129,7 @@ printf 'Build context staged by scripts/build_container_image.sh: only the files
     > "$stage/$marker"
 
 echo "Building $tag on this computer from $(tr -cd '\0' < "$list" | wc -c) shipped files (GUI libraries: $([ "$gui" = 1 ] && echo yes || echo no))..."
-if ! DOCKER_BUILDKIT=1 docker build \
+if ! DOCKER_BUILDKIT=$buildkit docker build \
         --file "$stage/$dockerfile_rel" \
         --build-arg "WITH_GUI=$gui" \
         --build-arg "LCF_UID=$uid" \

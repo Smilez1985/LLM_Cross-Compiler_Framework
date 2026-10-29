@@ -170,8 +170,18 @@ class DockerEngine(ContainerEngine):
     def client(self) -> Any:
         if self._client is None:
             import docker
+            from orchestrator.utils.docker_engine import ensure_docker_host
+            ensure_docker_host()   # no Docker daemon: the person's Podman socket (DECISIONS round 26 Q1)
             self._client = docker.from_env(timeout=120)
         return self._client
+
+    def engine(self) -> str:
+        """'docker' or 'podman' (Podman's Docker-compatible interface), '' when the engine does not answer."""
+        from orchestrator.utils.docker_engine import engine_name
+        try:
+            return engine_name(self.client())
+        except Exception:  # noqa: BLE001 - no client: unknown
+            return ""
 
     def unavailable(self) -> Optional[str]:
         try:
@@ -201,9 +211,10 @@ class DockerEngine(ContainerEngine):
 
     def run(self, image: str, command: Sequence[str], *, mounts: Sequence[Mount], env: Mapping[str, str],
             options: Mapping[str, Any], log: Path, timeout: float, stop: Optional[threading.Event] = None) -> int:
+        from orchestrator.utils.docker_engine import create_container   # rootless Podman: keep-id
         volumes = {str(m.source): {"bind": m.target, "mode": "ro" if m.read_only else "rw"} for m in mounts}
-        container = self.client().containers.create(image=image, command=list(command), volumes=volumes,
-                                                    environment=dict(env), **dict(options))
+        container = create_container(self.client(), image=image, command=list(command), volumes=volumes,
+                                     environment=dict(env), **dict(options))
         timer = threading.Timer(timeout, lambda: _quiet(container.kill))
         ended = threading.Event()
 

@@ -303,6 +303,31 @@ sind sie abgeschottet (Einstellung `build_sandbox`, standardmäßig an):
 Weil die Sandbox kein Netzwerk hat, wird alles vorher auf dem Host heruntergeladen: das Modell (Schritt 4 oben) und
 die Toolkits (beim Image-Build).
 
+### Podman statt Docker
+
+Die Container-Engine des Frameworks ist Docker CE. Unter Rocky Linux, AlmaLinux und Oracle Linux greift `install.sh`
+nur dann auf Podman zurück (`podman-docker` und dein rootless `podman.socket`), wenn Docker CE dort nicht geht oder
+du die Pakete behältst, die dnf dafür entfernen müsste (siehe [Installation](../README_DE.md#installation)). Das
+Framework findet Podman dann selbst: Ist `DOCKER_HOST` nicht gesetzt und antwortet kein Docker-Dienst (weder der
+des Systems noch ein rootless Docker), setzt es `DOCKER_HOST` für den eigenen Prozess und die Programme, die es
+startet, auf deinen Podman-Socket (`orchestrator/utils/docker_engine.py`, ein Helfer für die Build-Engine, das
+Builder-Image, Dittos Container, die Docker-Prüfung und `scripts/build_container_image.sh`). Ein `DOCKER_HOST`, das
+du setzt, gilt immer. `podman-docker` verlinkt Dockers Socket-Namen (`/run/docker.sock`,
+`$XDG_RUNTIME_DIR/docker.sock`) auf Podmans Sockets; ein solcher Name oder ein Socket, an dem Podman antwortet, zählt
+als Podman, nicht als Docker-Dienst. `llm-cli mojo` nennt die Engine, die gerade läuft.
+
+Geprüft mit Podman 5.8.2 und buildah 1.43.1 unter Rocky Linux 9.8 und an den Quellen von Podman:
+
+| Unter Podman | |
+|---|---|
+| Geht | Die Docker-API, die das Framework nutzt (Container, Images, Logs, `docker save` für den Sicherheitsscan); Image-Builds über Podmans Builder (buildah) mit Build-Argumenten, Labels und Zielstufen; `RUN --mount=type=bind` (wie bei BuildKit standardmäßig nur lesend), mehrstufige Builds und Heredocs (buildah ab 1.35; das buildah von Debian und Ubuntu lässt Heredocs weg); `scripts/build_container_image.sh` (es baut mit `DOCKER_BUILDKIT=0`, damit Dockers CLI Podman nie nach BuildKit fragt); die abgeschotteten Container des Frameworks, die als dein Benutzer laufen: Unter rootless Podman bekommen sie Podmans User-Namespace-Modus `keep-id`, deine uid ist also drinnen dieselbe wie draußen, sie können in deine Ordner schreiben, und was sie schreiben, gehört dir (ohne ihn sieht ein Container mit deiner uid deine Ordner als die von root und hält mit "Permission denied" an; geprüft mit Podman 5.8.9 rootless). |
+| Vor dem Start abgelehnt | Ein GPU-Build mit einer NVIDIA-GPU: Podmans Docker-kompatible Schnittstelle nimmt nur CDI-Geräteanfragen und übergeht Dockers GPU-Anfrage (`--gpus`) ohne ein Wort, der Build liefe also ohne die GPU. Er wird mit dem Grund abgelehnt; Dittos Container rechnet auf der CPU und sagt warum. |
+| Gibt es nicht | BuildKit selbst: Podmans `docker buildx` ist buildah, ohne die Frontends von BuildKit (`# syntax=`), seinen Cache-Export und seine Treiber. Images entstehen stattdessen über Podmans API. Was BuildKit braucht, etwa die geplanten Hailo-Images, wird unter Podman mit dem Grund abgelehnt (`podman_refusal`). |
+| Nicht getestet | Ein vollständiger Target-Build und ein Lauf von Dittos Container unter Podman von Anfang bis Ende (die Container-Einstellungen des Builder-Containers und der Build-Stufe liefen gegen Podman 5.8.9 rootless); eine AMD- oder Intel-GPU, die unter rootless Podman als `/dev/dri` weitergegeben wird (die render-Gruppe des Rechners ist im Container nicht abgebildet). |
+
+Später zu Docker CE wechseln: `sudo dnf remove podman-docker`, dann `sudo ./install.sh` erneut; es installiert
+Docker CE aus Dockers RHEL-Repository und fragt, bevor dnf etwas entfernt.
+
 ---
 
 ## Self-Healing

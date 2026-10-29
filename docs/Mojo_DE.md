@@ -74,8 +74,10 @@ Eine Informationszeile (ℹ) zeigt ihren Hinweis ebenfalls. Am Ende zählt ein S
 lässt, zum Beispiel: „Mojo Oracle found 3 problems (1 error, 2 warnings): Mojo Miracle can repair 1; 1 needs your list
 of what to delete; 1 needs you.“ Nichts wird ausgelassen. Mojo Oracle ändert nichts.
 
-Es prüft Python, Docker und buildx, wo Docker seine Images ablegt, den freien Speicher für die Ordner cache, output
-und den Build-Ordner, die Targets, den Zustandsordner, den Secrets-Speicher und den Schlüsselbund, die
+Es prüft Python, Docker und buildx (und nennt die Container-Engine: Unter Podman, dem Ersatzweg unter Rocky Linux,
+AlmaLinux und Oracle Linux, nennt `docker.engine`, was Podman nicht kann, und den Weg zu Docker CE; siehe
+[Funktionen](Features_DE.md#podman-statt-docker)), wo Docker seine Images ablegt, den freien Speicher für die Ordner
+cache, output und den Build-Ordner, die Targets, den Zustandsordner, den Secrets-Speicher und den Schlüsselbund, die
 Tool-Berechtigungen, die MCP-Token und das Audit-Log, den Chat-Feed, die Kalibrierdaten, die Community-Pakete, die
 Wissens-Snapshots im Vergleich zum freien Platz ihrer Platte, den Speicher der Wissensbasis, die lokale
 llama.cpp-Laufzeit (im Docker-Modus: ob Dittos Image da ist, auf diesem Rechner gebaut und geprüft) und die Boards,
@@ -171,7 +173,7 @@ Jedes Problem, das Mojo Miracle nicht repariert, bekommt einen dieser Gründe:
 |---|---|---|
 | Löschen braucht deine Liste | Platz freigeben heißt löschen, und das Framework löscht nur, was du in seinem eigenen Fenster ankreuzt und bestätigst. Im Terminal zeigt Mojo Miracle dir die Build-Images des Frameworks (Name, ID, Größe, was jedes ist; nichts ist angekreuzt). Du tippst die Nummern der zu löschenden ein und bestätigst genau diese; Nein ist die Vorgabe. Die GUI hat dieselbe Liste unter **Tools > Framework Build Images...**. Docker-Images werden nie gelöscht, außer du tust es, und Dockers Build-Cache wird nie angefasst. Für Wissens-Snapshots ist die Liste **Tools > Knowledge Snapshots...** oder `llm-cli knowledge snapshots`. | `disk.cache`, `disk.output`, `disk.builds`, `knowledge.snapshots` |
 | braucht dich | Nur du kannst das: deine Schlüssel, die Tool-Berechtigungen, das Audit-Log, deine Einstellungen und Dateien. Eine KI ändert sie nie. | `secrets.store`, `secrets.storage`, `tools.permissions`, `tools.tokens`, `tools.audit`, `chat_feed.store`, `targets.none`, `devices.<Geräte-ID>` (ein Board, das SSH ablehnt oder dessen Host-Schlüssel sich geändert hat), `knowledge.storage` (eine fehlgeschlagene Umwandlung der Wissensbasis oder Qdrant Edge, das sich nicht laden lässt), ein zurückgezogenes Community-Paket (seinen Ordner löschst du selbst) |
-| braucht einen Administrator | Es ändert das System außerhalb des Frameworks. | `docker.daemon`, `docker.buildx`, `python.version`, `secrets.keyring`, `runtime.docker.unavailable` |
+| braucht einen Administrator | Es ändert das System außerhalb des Frameworks. | `docker.daemon`, `docker.buildx`, `docker.engine`, `python.version`, `secrets.keyring`, `runtime.docker.unavailable` |
 | nicht automatisch reparierbar | Nichts im Framework kann das von selbst. Der Hinweis sagt, was hilft. | `runtime.build.damaged`, `runtime.build.outdated`, `runtime.docker.image` (Dittos Image neu machen mit `llm-cli ditto runtime ensure --mode docker --force`), `data.calibration`, eine abgestürzte Prüfung |
 
 Eine Reparatur kann auch so enden, immer mit ihrem Grund:

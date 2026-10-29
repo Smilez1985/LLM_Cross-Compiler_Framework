@@ -479,9 +479,10 @@ $hailoFws = New-Object System.Collections.Generic.List[string]
 $hailoUnknown = $false
 foreach ($record in $hailoRecords) {
     if (-not $HailoArchNames.ContainsKey($record[1])) { $hailoUnknown = $true; continue }
-    $arch = $HailoArchNames[$record[1]]
-    if ($arch -eq 'hailo15h' -and (Hailo-Interface $record[0]) -ne 'integrated') { $arch = 'hailo10h' }
-    $hailoArchs.Add($arch)
+    # Not $arch: PowerShell names ignore case, so that would overwrite the script's ARCH value ($arch above).
+    $recordArch = $HailoArchNames[$record[1]]
+    if ($recordArch -eq 'hailo15h' -and (Hailo-Interface $record[0]) -ne 'integrated') { $recordArch = 'hailo10h' }
+    $hailoArchs.Add($recordArch)
     if ($record[2]) { $hailoFws.Add($record[2]) }
 }
 $hailoArchs = Distinct-List $hailoArchs
