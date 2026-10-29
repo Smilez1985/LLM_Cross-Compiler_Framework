@@ -1004,6 +1004,17 @@ class LocalLLMRuntime:
         def leftovers() -> List[Path]:
             return list(self.root.glob(".staging-*")) + list(self.root.glob(".old-*"))
 
+        def discard(archive: Path) -> None:
+            """A downloaded archive goes once it is not needed, through the one helper (atomic.remove_file, tried
+            again for a moment on Windows while another process has it open). One that still cannot be deleted (a
+            concurrent install hashing it, a virus scanner) fails no finished install: it stays in the downloads
+            folder."""
+            try:
+                remove_file(archive)
+            except OSError as e:
+                self.logger.warning(f"The downloaded archive {archive.name} could not be deleted ({type(e).__name__});"
+                                    " it stays in the runtime's downloads folder.")
+
         archives: List[Path] = []
         if up_to_date() is None:
             refuse_if_running()  # before minutes of downloading, not after
@@ -1017,7 +1028,7 @@ class LocalLLMRuntime:
             current = up_to_date()  # possibly installed by another process in the meantime
             if current:
                 for archive in archives:
-                    archive.unlink(missing_ok=True)  # not needed any more
+                    discard(archive)  # not needed any more
                 self._update_active(variant=asset.variant, asset_id=asset.id, use="prebuilt")
                 return current
             refuse_if_running()
@@ -1049,7 +1060,7 @@ class LocalLLMRuntime:
                 if old is not None:
                     shutil.rmtree(old, ignore_errors=True)
             for archive in archives:
-                archive.unlink(missing_ok=True)
+                discard(archive)
             self._update_active(variant=asset.variant, asset_id=asset.id, use="prebuilt")
         inst = self._read_manifest(target)
         if inst is None:

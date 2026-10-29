@@ -1034,6 +1034,52 @@ class TestInstall:
         inst = rt.install_prebuilt()
         assert inst == rt.installed() and not leftover.exists()
 
+    def test_the_archives_are_removed_through_the_one_helper(self, tmp_path, monkeypatch):
+        """Port follow-up d: the downloaded archives go through atomic.remove_file (tried again on Windows while
+        another process has the file open), not a bare unlink."""
+        rt, _ = self.setup_runtime(tmp_path)
+        removed = []
+        original = ls.remove_file
+        monkeypatch.setattr(ls, "remove_file", lambda path: (removed.append(Path(path).name), original(path)))
+        rt.install_prebuilt()
+        assert sorted(removed) == sorted(f.name for f in rt.select_backend().asset.files)
+        assert not list((rt.root / "downloads").glob("*.tar.gz"))
+
+    @pytest.mark.parametrize("meanwhile", [False, True])
+    def test_an_archive_that_cannot_be_deleted_fails_no_finished_install(self, tmp_path, monkeypatch, caplog,
+                                                                        meanwhile):
+        """On Windows a second process installing the same build may still be hashing the verified archive (or a
+        virus scanner reads it) when this install deletes it: the install is done and is reported as done; the
+        archive stays in the downloads folder. Also when another process installed it meanwhile."""
+        rt, session = self.setup_runtime(tmp_path)
+        downloads = rt.root / "downloads"
+        real_unlink = os.unlink
+
+        def busy(path, *args, **kwargs):
+            if Path(path).parent == downloads and str(path).endswith(".tar.gz"):
+                raise PermissionError(32, "The process cannot access the file because it is being used", str(path))
+            return real_unlink(path, *args, **kwargs)
+        if meanwhile:
+            other = LocalLLMRuntime(data_dir=rt.data_dir, models_dir=rt.models_dir, catalog=rt.catalog,
+                                    hardware=rt.hardware(), session=FakeSession(dict(session.files)),
+                                    sleep=lambda s: None)
+            lock = rt._lock
+
+            def other_installs_first():
+                monkeypatch.setattr(os, "unlink", real_unlink)
+                other.install_prebuilt(force=False)  # reuses our verified archives and deletes them
+                (downloads / rt.select_backend().asset.files[0].name).write_bytes(b"kept")  # ours, still downloaded
+                monkeypatch.setattr(os, "unlink", busy)
+                return lock()
+            rt._lock = other_installs_first
+        monkeypatch.setattr(os, "unlink", busy)
+        with caplog.at_level("WARNING"):
+            inst = rt.install_prebuilt()
+        monkeypatch.setattr(os, "unlink", real_unlink)
+        assert inst == rt.installed() and inst.server.is_file()
+        assert list(downloads.glob("*.tar.gz")), "the archive stays"
+        assert "could not be deleted (PermissionError)" in caplog.text
+
     @pytest.mark.parametrize("force", [False, True])
     def test_an_install_finished_meanwhile_by_another_process(self, tmp_path, force):
         rt, session = self.setup_runtime(tmp_path)

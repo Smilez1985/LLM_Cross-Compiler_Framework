@@ -2762,6 +2762,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   verglich sie mit `0x1e60` der Probe und fand nichts. `target_manager.hardware_id` gibt eine Schreibweise für eine
   Ganzzahl und für Hex-Text in jeder Groß- und Kleinschreibung, für die Hersteller- und Geräte-IDs des Targets und
   die der Probe.
+- **Das git der gepinnten llama.cpp-Quelle öffnet kein Konsolenfenster und liest jede Ausgabe** (Nacharbeit der
+  Übernahmen): `runtime/build/source.Git` startete git ohne `CREATE_NO_WINDOW`, daher blitzte unter Windows ein
+  Konsolenfenster auf, wenn das Boards-Fenster die Laufzeit eines Boards baute oder Dittos Laufzeit-Export es aus der
+  GUI startete, und eine Ausgabe von git, die kein UTF-8 war, endete in einem `UnicodeDecodeError`-Traceback statt
+  in der klaren Ablehnung. Git startet jetzt so, wie `utils/helpers.execute_command` ein Konsolenprogramm startet:
+  dieselben Startflags (`helpers.windowless_flags`), Ausgabe mit Ersatzzeichen dekodiert, stdin geschlossen; die
+  Optionen des Offline-Modus bleiben, wie sie sind. Regressionstests: `tests/test_build_source.py`
+  `test_git_starts_like_the_one_helper_starts_a_console_program`,
+  `test_a_message_that_is_not_utf8_is_reported_never_a_traceback`.
 - **`llm-cli deploy devices edit` nennt den Grund statt eines Tracebacks**: Der Befehl fing nur die eigenen Fehler
   der Board-Schritte ab; eine von einem anderen Prozess belegte `known_hosts` des Frameworks (ein `LockTimeout` von
   `pairing.replace_key`), Einstellungen, die sich nach deinem Ja nicht lesen ließen, oder eine Datei, die sich vor
@@ -2879,8 +2888,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Zustandsdateien der Laufzeit (auch die des Build-Speichers und des Laufzeitmodus) werden jetzt mit
   `utils/atomic.replace_file` ersetzt, und `server.json`, die Schlüsseldateien und die Sperrdateien von
   `utils/download.FileLock` (die Laufzeit-Sperre, die des Build-Speichers und die einzelner Downloads) mit dem neuen
-  `utils/atomic.remove_file` gelöscht; beide versuchen es unter Windows kurz erneut, sonst nie. Regressionstests:
-  `tests/test_atomic.py`, `tests/test_runtime.py` `test_windows_sharing_violations_are_retried`.
+  `utils/atomic.remove_file` gelöscht; beide versuchen es unter Windows kurz erneut, sonst nie. Die heruntergeladenen
+  Archive von `ditto runtime install --prebuilt` laufen ebenfalls über `remove_file`, und eines, das sich trotzdem
+  nicht löschen lässt (ein zweiter Prozess, der denselben Build installiert, prüft gerade seinen Hash, ein
+  Virenscanner liest es), lässt eine fertige Installation nicht mehr scheitern: Es bleibt im Download-Ordner, mit
+  einer Warnung im Log. Regressionstests: `tests/test_atomic.py`, `tests/test_runtime.py`
+  `test_windows_sharing_violations_are_retried`, `test_an_archive_that_cannot_be_deleted_fails_no_finished_install`.
 - **Dittos Tool-Aufrufe und ihre Ergebnisse passen immer zusammen** (Übernahme aus dem behaltenen Worktree
   ditto-rewire-verified): Jeder Anbieter lehnt ein Gespräch ab, das nach einem unbeantworteten Tool-Aufruf
   weitergeht, also scheiterte jede spätere Frage auf so einem Verlauf. Eine an der Längengrenze abgeschnittene
@@ -3514,10 +3527,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `module generate-ai`, die sagt, dass das Basis-Image der KI nicht gepinnt werden kann; der Nullbreiten-Verbinder
   (Zero Width Joiner) in einer Emoji-Folge bleibt, wie bei der Bereinigung von Text von außen (`utils/untrusted`), und
   Umlaute, CJK und andere Schriften erscheinen, wie sie sind. Der Vorschlag von `module generate-ai` und seine Fakten
-  zeigen versteckte Zeichen als Escapes (`tools.confirmation.visible`). Regressionstests: `tests/test_ditto.py`
+  zeigen versteckte Zeichen als Escapes (`tools.confirmation.visible`). Der Self-Healing-Vorschlag, den ein Build im
+  Terminal zeigt (Zusammenfassung, Ursache, Fix), und die Fix-Vorschläge der KI-Clients in `llm-cli build status`
+  laufen durch dieselbe Bereinigung (`cli._printable`); vorher wurde nur ihr Markup escaped, und die Vorschläge der
+  Clients verloren Formatzeichen, behielten aber ESC, C1 und BEL. Regressionstests: `tests/test_ditto.py`
   `test_ditto_ask_keeps_control_characters_of_the_model_out_of_the_terminal`,
   `test_the_terminal_text_keeps_every_script_and_emoji_as_they_are`,
-  `test_generate_ai_keeps_control_characters_of_the_base_image_out_of_the_pin_error` und die Tests daneben.
+  `test_generate_ai_keeps_control_characters_of_the_base_image_out_of_the_pin_error` und die Tests daneben,
+  `tests/test_ai_safety.py` `test_the_proposal_loses_its_control_characters_and_keeps_its_text`,
+  `tests/test_client_proposals.py` `test_cli_prints_the_proposal_without_control_characters`.
 - **Die Modellliste des KI-Einstellungsdialogs schickt nie einen Schlüssel an die Adresse des gespeicherten
   Anbieters**: Wer einen anderen Anbieter wählte, bevor er dessen Adresse eintippte (ein gespeichertes Ollama im
   lokalen Netz, dann **custom**), ließ die Modelle beim Server des gespeicherten Anbieters mit dem Schlüssel des
@@ -4031,9 +4049,35 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   gespeichert wird, nie wie eine ältere Kopie aus. Unter Linux und macOS wird eine ältere Kopie einer der beiden
   Dateien auch dann abgelehnt, wenn sie genau die Datei ist, die ein laufender Prozess vorher gelesen hat, über einen
   aufbewahrten Hardlink zurückgelegt (gleicher Inode, gleiche Größe und gleiche mtime): Die Revision im
-  Schlüsselbund wird auch dann neu gelesen, wenn sich die ctime der Datei geändert hat. Ohne Schlüsselbund hat die
-  Signatur keinen Schlüssel, wie die Audit-Kette; eine solche Datei wird abgelehnt, solange das Audit-Log mit
-  Schlüssel geführt wird.
+  Schlüsselbund wird auch dann neu gelesen, wenn sich die ctime der Datei geändert hat. Unter Windows, wo st_ctime
+  die Erstellungszeit ist (die ein Hardlink behält), wird dafür die eigene Änderungszeit von NTFS benutzt
+  (GetFileInformationByHandleEx, keine neue Abhängigkeit); bisher nahm ein laufender Prozess dort die zurückgelegte
+  Datei noch an. Wo Windows für die Datei keine Änderungszeit liefert (ein Dateisystem, das keine führt), wird die
+  Revision bei jedem Blick gelesen, statt diese Prüfung auszulassen. Jedes Framework-Home führt seine eigenen Revisionen: Zwei LLM_FRAMEWORK_HOME-Ordner eines Kontos
+  teilten einen Eintrag im Schlüsselbund, daher machte ein Speichern im einen die Datei des anderen Homes zur
+  „älteren Kopie" (jedes Tool verboten, kein Token angenommen). Das Standard-Home (~/.llm-framework) behält den
+  Eintrag der Versionen davor; ein anderer Ordner bekommt einen Eintrag, der nach einem Digest des Ordners benannt
+  ist (kein Pfad darin). Ein Home, dessen Eintrag noch leer ist, verankert beim ersten Blick die Revision der echt
+  signierten Datei, die es annimmt, daher wird eine danach zurückgelegte ältere Kopie ab da abgelehnt, nicht erst
+  nach dem nächsten Speichern; es schreibt nie, wenn ein anderer Prozess zwischendurch eine neuere Datei gespeichert
+  hat (das würde die geführte Revision unter dieses Speichern senken). Die Builds, die die Person bestätigt hat (`confirmed_builds.json`), führen ebenso eine
+  Revision im Schlüsselbund: Eine zurückgelegte ältere signierte Kopie brachte eine Bestätigung zurück, die eine
+  spätere ersetzt hatte (ein Modul, das eine KI mit seinem früheren Inhalt neu erstellt hat, ein Pack, das in einer
+  früheren Version neu installiert wurde), daher deckte ein Build-Dauerauftrag es ohne die Person ab; eine solche
+  Kopie enthält jetzt keine Bestätigung, und die Person wird erneut gefragt. Die ausstehenden Freigaben und die Liste
+  des Papierkorbs brauchen keine: Ein zurückgelegtes Ja führt nichts aus, außer es beantwortet die Frage, die der
+  haltende Prozess jetzt stellt, und ein Eintrag verlässt die Liste des Papierkorbs erst, wenn sein Element den
+  Papierkorb-Ordner verlassen hat. Regressionstests: `tests/test_policy_signing.py`
+  `TestOlderCopiesAndRemovedFiles` (`test_on_windows_the_ntfs_change_time_tells_the_very_file_put_back`,
+  `test_the_ntfs_change_time_moves_when_the_file_is_put_back` unter Windows,
+  `test_two_framework_homes_keep_their_own_revision`,
+  `test_a_home_without_a_kept_revision_anchors_the_file_it_accepts`), `tests/test_confirmed_builds.py`
+  `test_an_older_copy_put_back_brings_no_replaced_confirmation_back`,
+  `tests/test_approvals_two_phase.py` `test_an_older_copy_with_an_earlier_yes_runs_nothing_the_person_did_not_approve`,
+  `tests/test_trash.py` `test_an_older_index_put_back_brings_nothing_back_to_restore_or_empty`. Ohne Schlüsselbund hat
+  die Signatur keinen
+  Schlüssel, wie die Audit-Kette; eine solche Datei wird abgelehnt, solange das Audit-Log mit Schlüssel geführt
+  wird.
 - **Ausstehende Freigaben und Bitten, nicht mehr zu fragen, sind Rückfragen wie alle anderen.** Sie zählen zu den
   30 Rückfragen pro Stunde; ein Nein im Freigabefenster verhindert für 10 Minuten, dass dir derselbe Aufruf erneut
   vorgelegt wird, und zählt zur Pause des Tools, wie ein Nein im Dialog des Clients; ein kürzliches Nein, ein

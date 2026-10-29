@@ -825,3 +825,42 @@ def audit_key(framework, state_dir: Optional[Path] = None) -> Optional[bytes]:
         return key.encode("utf-8") if key else None
     except Exception:
         return None
+
+
+# --- revision anchors (one per framework home) -------------------------------------------------------------------
+
+DEFAULT_HOME_NAME = ".llm-framework"
+
+
+def _home_key(state_dir: Any) -> str:
+    """A framework home's folder as the anchors tell homes apart: absolute, links resolved, the case Windows ignores
+    folded, so two spellings of one folder share their anchors and two folders never do."""
+    return os.path.normcase(os.path.realpath(os.path.abspath(os.fspath(state_dir))))
+
+
+def revision_anchor_name(kind: str, state_dir: Any = None) -> str:
+    """The keyring entry that keeps the newest saved revision of a signed per-user file (`kind`: tool_policy,
+    mcp_tokens, confirmed_builds) of one framework home. Each home has its own (two LLM_FRAMEWORK_HOME folders of one
+    account never share one, so a save in one never makes the other's file an "older copy"). The default home
+    (~/.llm-framework, also when LLM_FRAMEWORK_HOME names it) keeps the entry of the versions before, `<kind>-revision`,
+    so its protection carries over unchanged; any other folder gets `<kind>-revision-<16 hex of the sha256 of the
+    folder>` (no path in the entry name). None for `state_dir`: the default home's entry."""
+    base = f"{kind}-revision"
+    if state_dir is None or _home_key(state_dir) == _home_key(Path.home() / DEFAULT_HOME_NAME):
+        return base
+    digest = hashlib.sha256(_home_key(state_dir).encode("utf-8", "surrogatepass")).hexdigest()[:16]
+    return f"{base}-{digest}"
+
+
+def revision_anchor(kind: str, state_dir: Any = None) -> Any:
+    """The RevisionAnchor (orchestrator/tools/signing.py) of a signed per-user file of the framework home `state_dir`:
+    its entry in the OS keyring next to the audit key (revision_anchor_name), so an older copy put back into the
+    per-user folder (or a removed file) is noticed although its signature is genuine. A revision kept under the keyring
+    service name from before the rename is read (and copied) when the new name has none (read_entry), so the
+    protection carries over. Only for a framework that has a keyring (its audit key came from there)."""
+    import keyring
+    from orchestrator.Core.secrets_manager import SecretsManager
+    from orchestrator.tools.signing import RevisionAnchor
+    service, name = SecretsManager.SERVICE_ID, revision_anchor_name(kind, state_dir)
+    return RevisionAnchor(lambda: read_entry(keyring, service, name),
+                          lambda value: keyring.set_password(service, name, value))

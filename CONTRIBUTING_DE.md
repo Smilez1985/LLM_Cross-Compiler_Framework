@@ -696,7 +696,12 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   geschützte ACL nur für dieses Konto; jede „nur du“-Datei nutzt es, nie ein zweiter chmod- oder ACL-Helfer).
   Einmalige Hinweise: `orchestrator/utils/notice_store.py` (`OneTimeNotice`).
   Docker-Image-Referenzen: `orchestrator/utils/image_ref.py`. HTTP, das nur öffentliche Adressen erreicht:
-  `orchestrator/security/http.py` (`PublicOnlyAdapter`). Der Audit-Schlüssel: `Core/vault_key.audit_key`; die
+  `orchestrator/security/http.py` (`PublicOnlyAdapter`). Ein Konsolenprogramm, das das Framework startet und liest:
+  `utils/helpers.execute_command` (stdin geschlossen, Dekodierung mit Ersatzzeichen; ein Aufruf, der seine Fehler
+  selbst behandeln muss, etwa das git der gepinnten Quelle, übergibt dieselben `windowless_flags()`, damit sich unter
+  Windows kein Konsolenfenster öffnet). Der Audit-Schlüssel: `Core/vault_key.audit_key`; der Revisionsanker einer
+  signierten Datei im Benutzerordner, ein Eintrag im Schlüsselbund je Framework-Home:
+  `Core/vault_key.revision_anchor`; die
   Basis-Images eines Pakets: `Core/community_pack.py`; die Snapshot-Prüfung vor einem Index:
   `Core/knowledge_snapshots.snapshot_space`; das Audit eines gespeicherten Moduls:
   `Core/module_generator.record_module_saved`.

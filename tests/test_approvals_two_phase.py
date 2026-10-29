@@ -152,6 +152,28 @@ class TestThePendingQuestionIsTheTwoPhaseQuestion:
         decide(env, again)
         assert wait_job(env, job_id).state == "done" and env.state.seen == ["c2"]
 
+    def test_an_older_copy_with_an_earlier_yes_runs_nothing_the_person_did_not_approve(self, env):
+        """Why the pending approvals keep no revision anchor (port follow-up e): an older signed copy of
+        tool_approvals.json put back as the very file brings back the person's "yes" to a question that has changed
+        since (here even with the facts changed back to the ones of that question). Nothing runs on it: a yes counts
+        only for the question the holding process asks now, so the person is asked again; a standing approval is never
+        read from this file (the deciding window saves it with the permissions)."""
+        job_id, record = ask_pending(env)
+        env.state.commit = "c2"  # a new upstream commit while the question waited
+        result = cli(env.registry, "tools", "approvals", "approve", record.id, input="y\n")
+        assert result.exit_code == 0, result.output
+        older = env.store.path.read_bytes()  # the yes to the c1 question
+        env.registry.approvals.poll_once()   # the question changed: asked again
+        assert env.store.get(record.id).state == "pending" and env.state.seen == []
+        env.state.commit = "c1"
+        env.store.path.write_bytes(older)    # the earlier yes put back
+        env.registry.approvals.poll_once()
+        again = env.store.get(record.id)
+        assert again.state == "pending" and "Upstream commit: c1" in again.question
+        assert env.state.seen == [], "nothing ran on the yes that was put back"
+        decide(env, again)
+        assert wait_job(env, job_id).state == "done" and env.state.seen == ["c1"]
+
     def test_an_approved_call_runs_once_when_two_looks_see_the_yes_at_once(self, env):
         """Two looks at the store at the same time (the watch thread and another poll_once) both find the yes: the
         call runs once. Before, both started it while the first run was still going on."""
