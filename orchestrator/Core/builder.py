@@ -13,6 +13,7 @@ Updates v2.4.0-IMatrix:
 - Robust ConfigManager integration (retained from v2.3).
 """
 
+import hashlib
 import os
 import sys
 import hashlib
@@ -190,6 +191,10 @@ class BuildConfiguration:
     model_branch: Optional[str] = "main"
     source_format: ModelFormat = ModelFormat.HUGGINGFACE
     target_board: Optional[str] = None
+    # The board's hardware probe by its id in the probe store (BuildService chooses it): written into the build's
+    # folder and mounted read-only into every build container as HARDWARE_CONFIG_FILE (_hardware_probe_mount)
+    hardware_probe: Optional[str] = None
+    hardware_sha256: Optional[str] = None  # sha256 of the probe file the build read (set by _hardware_probe_mount)
     optimization_level: OptimizationLevel = OptimizationLevel.BALANCED
     quantization: Optional[str] = None
     max_context_length: Optional[int] = None
@@ -1740,6 +1745,43 @@ class BuildEngine:
         if getattr(inputs, "dataset", None) is not None and config.dataset_path:
             inputs.dataset.verify()
 
+    HARDWARE_MOUNT = "/build-cache/hardware"  # the board's probe in every build container (read-only)
+
+    def _hardware_probe_mount(self, config: BuildConfiguration, progress: BuildProgress,
+                              build_temp: Path) -> Tuple[Dict[str, Dict[str, str]], Dict[str, str]]:
+        """(volumes, environment) that hand the board's hardware probe to a build container (DECISIONS round 23 item
+        5): the stored probe, written as a schema-2 file into the build's own folder and mounted read-only, with
+        HARDWARE_CONFIG_FILE naming it. The config stage then plans the build for that board (its CPU flags, the
+        toolchain, the package for the board). Nothing without a probe; a probe that is gone or damaged stops the
+        build with the reason."""
+        if not config.hardware_probe:
+            return {}, {}
+        from orchestrator.runtime.probe_service import HardwareProbes, ProbeError
+        from orchestrator.runtime.profile import PROFILE_FILE_NAME
+        state = getattr(self.config, "user_state_dir", None)
+        probes = HardwareProbes(Path(state)) if isinstance(state, (str, Path)) else HardwareProbes()
+        try:
+            profile = probes.get(config.hardware_probe)
+            label = probes.info(config.hardware_probe, profile).label
+        except ProbeError as e:
+            raise RuntimeError(f"The hardware probe of the board ({config.hardware_probe}) cannot be used: {e} "
+                               f"{e.next}") from None
+        text = profile.to_text()
+        folder = build_temp / "hardware"
+        ensure_directory(folder)
+        target = folder / PROFILE_FILE_NAME
+        if not target.is_file() or target.read_text(encoding="utf-8") != text:
+            target.write_text(text, encoding="utf-8")
+            os.chmod(target, 0o644)  # read by the container's user through a read-only mount
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if config.hardware_sha256 != digest:
+            config.hardware_sha256 = digest
+            soc = profile.get("SOC_MODEL") or profile.arch or "unknown"
+            progress.add_log(f"Hardware probe of the board: {label} (probe {config.hardware_probe}, {soc}): the "
+                             f"build is planned for it (read-only in the container at {self.HARDWARE_MOUNT}).")
+        return ({str(folder): {"bind": self.HARDWARE_MOUNT, "mode": "ro"}},
+                {"HARDWARE_CONFIG_FILE": f"{self.HARDWARE_MOUNT}/{PROFILE_FILE_NAME}"})
+
     SANDBOX_FALLBACK_USER = FALLBACK_USER  # the image's build user, used when the host user is root or on Windows
 
     def _sandbox(self, config: BuildConfiguration, build_temp: Path) -> Tuple[Dict[str, Any], Dict[str, str], Dict[str, Dict[str, str]]]:
@@ -1793,8 +1835,9 @@ class BuildEngine:
         
         build_temp = self.cache_dir / "builds" / config.build_id
         imatrix_dir = build_temp / "imatrix"
-        
-        # Volumes for IMatrix run
+
+        # Volumes for IMatrix run (the board's probe too: the config stage plans with it in this job as well)
+        probe_vols, probe_env = self._hardware_probe_mount(config, progress, build_temp)
         sandbox, sandbox_env, sandbox_vols = self._sandbox(config, build_temp)
         vols = {
             str(imatrix_dir): {"bind": "/build-cache/imatrix", "mode": "rw"},
@@ -1805,9 +1848,11 @@ class BuildEngine:
         vols.update(dataset_vols)
         vols.update(staged[1])
         vols.update(sandbox_vols)
-        
+        vols.update(probe_vols)
+
         env = self._container_env(config, staged[0])
         env.update(sandbox_env)
+        env.update(probe_env)
         env.update({
             "JOB_TYPE": "imatrix", # Signal to build.sh to run --imatrix mode
             "DATASET_PATH": dataset_inner,
@@ -1847,8 +1892,10 @@ class BuildEngine:
         progress.add_log("Starting Main Build Container...")
         
         build_temp = self.cache_dir / "builds" / config.build_id
+        # The board's hardware probe, read-only (DECISIONS round 23 item 5): the config stage plans the build for it
+        probe_vols, probe_env = self._hardware_probe_mount(config, progress, build_temp)
         sandbox, sandbox_env, sandbox_vols = self._sandbox(config, build_temp)
-        
+
         # 1. Volume Setup
         vols = {
             str(build_temp / "output"): {"bind": "/build-cache/output", "mode": "rw"},
@@ -1859,10 +1906,12 @@ class BuildEngine:
         }
         vols.update(staged[1])
         vols.update(sandbox_vols)
-        
+        vols.update(probe_vols)
+
         # 2. Environment Setup
         env = self._container_env(config, staged[0])
         env.update(sandbox_env)
+        env.update(probe_env)
         env["JOB_TYPE"] = "build"
         
         # Check for IMatrix from previous step
@@ -2114,7 +2163,8 @@ class BuildEngine:
             quantization=config.quantization or info.get("quantization"),
             imatrix=bool(config.use_imatrix and config.target_format == ModelFormat.GGUF),
             dataset_sha256=(dataset or {}).get("sha256"), optimization=config.optimization_level.value,
-            max_context_length=config.max_context_length, use_gpu=config.use_gpu, model_task=config.model_task)
+            max_context_length=config.max_context_length, use_gpu=config.use_gpu, model_task=config.model_task,
+            hardware_sha256=config.hardware_sha256)
 
     def _dataset_ref(self, config: BuildConfiguration, progress: Optional[BuildProgress]) -> Optional[Dict[str, str]]:
         path = Path(config.dataset_path) if config.dataset_path else None

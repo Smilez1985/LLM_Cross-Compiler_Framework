@@ -38,6 +38,7 @@ CLI_PATHS: Dict[str, str] = {
     "build start --target": "combo_builder_target",
     "build start --format": "combo_builder_format",
     "build start --board": "combo_builder_board",
+    "build start --probe": "btn_deploy_scan",                 # the probe the tab imported or scanned last
     "build start --quantization": "combo_builder_quantization",
     "build start --output": "act_file_output_folder",         # and the save dialog after every finished build
     "build start --optimization": "combo_builder_optimization",

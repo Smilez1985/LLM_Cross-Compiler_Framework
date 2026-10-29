@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 RKNN Converter Script
-Bridge between Shell and RKNN Toolkit2 API.
+Bridge between Shell and RKNN Toolkit2 API (run with the image's RKNN venv, RKNN_PYTHON, by rknn_module.sh).
+The same file in targets/Rockchip/scripts and targets/_template/scripts (tests/test_target_template.py compares them).
 """
 
 import sys
@@ -61,5 +62,12 @@ if __name__ == "__main__":
     parser.add_argument('--dtype', default='i8')
     parser.add_argument('--dataset', default=None, help='Path to calibration dataset')
     args = parser.parse_args()
-    
+
+    if not os.path.exists(args.model):
+        logger.error(f"Input file not found: {args.model}")
+        sys.exit(1)
+    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
+
+    start_ts = time.time()
     convert_to_rknn(args.model, args.output, args.target, args.dtype, args.dataset)
+    logger.info(f"Total time: {time.time() - start_ts:.2f}s")

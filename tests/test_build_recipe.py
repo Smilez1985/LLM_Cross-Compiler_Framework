@@ -223,6 +223,57 @@ class TestDerivedOptions:
         assert p.builder["base"] == "debian-11" and p.steps[0].toolchain_file is None
         assert any("GCC 10" in n for n in p.notes), "the unverified compiler floor is said"
 
+    # The three x86 PCs of the AVX-512 rule (wave 3c-2): an AVX2-only PC, a PC with the full AVX-512 set (the Z1
+    # Extreme, Zen 4) and a Xeon Phi (Knights Landing: AVX-512 F, CD, ER and PF, without BW, VL and DQ).
+    @staticmethod
+    def _flags_without(profile, *drop):
+        return ",".join(f for f in profile.get("CPU_FLAGS_ALL").split(",") if f not in drop)
+
+    def _x86_cross(self, profile):
+        return plan_build(profile, purpose="device-runtime", placement="cross", backend="cpu", catalog=CATALOG,
+                          toolchain=LINUX_BUILD_HOST)
+
+    def test_an_avx2_only_pc_gets_the_avx2_plan(self):
+        avx2 = changed(Z1_LINUX, CPU_FLAGS_ALL=self._flags_without(Z1_LINUX, *[f for f in Z1_LINUX.get(
+            "CPU_FLAGS_ALL").split(",") if f.startswith("avx512")]), SUPPORTS_AVX512="OFF",
+            SUPPORTS_AVX512_VBMI="OFF", SUPPORTS_AVX512_VNNI="OFF", SUPPORTS_AVX512_BF16="OFF")
+        p = self._x86_cross(avx2)
+        o = p.options()
+        assert o["GGML_AVX2"] == "ON" and o["GGML_AVX512"] == "OFF" and o["GGML_AVX512_VNNI"] == "OFF"
+        assert not any(f.startswith("-mavx512") for f in p.verify["compile_check_flags"])
+
+    def test_a_pc_with_the_full_avx512_set_gets_avx512(self):
+        p = self._x86_cross(Z1_LINUX)
+        o = p.options()
+        assert o["GGML_AVX512"] == "ON" and o["GGML_AVX512_VNNI"] == "ON" and o["GGML_AVX512_BF16"] == "ON"
+        flags = p.verify["compile_check_flags"]
+        assert all(f in flags for f in ("-mavx512f", "-mavx512cd", "-mavx512vl", "-mavx512dq", "-mavx512bw"))
+        assert not any("AVX2 plan" in n for n in p.notes)
+
+    def test_a_cpu_with_avx512f_only_gets_the_avx2_plan(self):
+        """Knights Landing: SUPPORTS_AVX512 (avx512f) is ON, but GGML_AVX512 also compiles for BW, VL and DQ, which
+        that CPU does not have: before, it got -mavx512bw and illegal instructions. Now the AVX2 plan, and the AVX-512
+        features that build on it go too."""
+        knl = changed(Z1_LINUX, CPU_FLAGS_ALL=self._flags_without(Z1_LINUX, "avx512bw", "avx512vl", "avx512dq"),
+                      CPU_MODEL="Intel(R) Xeon Phi(TM) CPU 7250 @ 1.40GHz")
+        p = self._x86_cross(knl)
+        o = p.options()
+        assert o["GGML_AVX2"] == "ON" and o["GGML_FMA"] == "ON"
+        assert o["GGML_AVX512"] == "OFF" and o["GGML_AVX512_VBMI"] == "OFF" and o["GGML_AVX512_VNNI"] == "OFF"
+        assert not any(f.startswith("-mavx512") for f in p.verify["compile_check_flags"])
+        assert any("avx512vl, avx512dq, avx512bw" in n and "AVX2 plan" in n for n in p.notes), p.notes
+
+    def test_a_probe_without_cpu_flags_cannot_confirm_avx512(self):
+        """A Windows probe has SUPPORTS_AVX512 (AVX-512 F) but no CPU flags: the parts GGML_AVX512 also needs are not
+        confirmed, so the explicit plan is the AVX2 plan (never more than the probe confirmed)."""
+        assert Z1_WINDOWS.get("CPU_FLAGS_ALL") is None and Z1_WINDOWS.flag("SUPPORTS_AVX512") == "ON"
+        from orchestrator.runtime.build.recipe import AVX512_SET, _x86_options, avx512_missing
+        notes = []
+        options, flags = _x86_options(Z1_WINDOWS, notes)
+        assert options["GGML_AVX512"] == "OFF" and "-mavx512f" not in flags
+        assert avx512_missing([]) == list(AVX512_SET) and avx512_missing(["AVX512F", "avx512cd", "avx512vl",
+                                                                          "avx512dq", "avx512bw"]) == []
+
     def test_windows_profile_with_unknown_features_gets_all_cpu_variants(self):
         p = plan("windows_unknown_features_variants")
         o = p.options()

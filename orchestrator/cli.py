@@ -690,6 +690,10 @@ class _FormatOption(click.Option):
 @click.option('--format', '-f', default='gguf', type=_TargetFormat(), cls=_FormatOption, show_default=True,
               help='Target format, one the target builds')
 @click.option('--board', '-b', help='Board within the target family, e.g. rk3588, rk3576, rk3566')
+@click.option('--probe', 'probe', default=None, metavar='ID',
+              help="The board's hardware probe by its id ('llm-cli device list'; 'local' is this computer): the "
+                   "build is tuned to it, and NPU formats need its NPU. Default: the newest stored probe of a board "
+                   "of this SoC")
 @click.option('--quantization', '-q', help='Quantization, e.g. Q4_K_M, IQ4_XS, F16 (gguf) or w4a16, w8a8 (rkllm)')
 @click.option('--output', '--output-dir', '-o', 'output_dir',
               help="Folder the finished model (golden artifact) is saved to; default: the output folder ('llm-cli "
@@ -711,7 +715,7 @@ class _FormatOption(click.Option):
 @click.option('--dataset', type=click.Path(exists=True), help='Custom calibration dataset path (txt)')
 @pass_context
 def start_build(ctx: FrameworkContext, model: str, target: str, format: str, board: Optional[str],
-                quantization: Optional[str], output_dir: Optional[str], 
+                probe: Optional[str], quantization: Optional[str], output_dir: Optional[str], 
                 optimization: str, priority: str, parallel: bool, follow: bool, gpu: bool,
                 imatrix: bool, dataset: Optional[str]):
     """Start a new build job. Ctrl+C cancels it (its container is stopped) and exits with code 130.
@@ -756,8 +760,8 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
         def checked(model_value: str):
             return service.validate(service.request_in(
                 model=model_value, target=target, format=format, board=board, quantization=quantization,
-                use_imatrix=imatrix, dataset_path=str(Path(dataset).resolve()) if dataset else None, use_gpu=gpu),
-                local_paths=True)
+                use_imatrix=imatrix, dataset_path=str(Path(dataset).resolve()) if dataset else None, use_gpu=gpu,
+                probe=probe), local_paths=True)
 
         model = _listed_model(ctx, model)   # a label of the models already here (models:...) names its file
         try:
@@ -808,6 +812,8 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
                     # the format the build runs with, as the target spells it (a target.yml format id is free text)
                     f"[bold]Format:[/bold] {escape(str(request.format))}\n"
                     f"[bold]Quantization:[/bold] {escape(quantization or 'None')}\n"
+                    # the board's probe the build is planned for (round 23 item 5), or none
+                    f"[bold]Hardware probe:[/bold] {escape(request.probe or 'none (the target defaults)')}\n"
                     f"[bold]Output:[/bold] {escape(output_dir)}\n"
                     f"[bold]GPU:[/bold] {'✅ Enabled' if gpu else '❌ Disabled'}\n"
                     f"[bold]Smart Calibration (IMatrix):[/bold] {'✅ Enabled' if imatrix else '❌ Disabled'}",

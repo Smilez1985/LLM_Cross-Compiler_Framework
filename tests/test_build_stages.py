@@ -100,6 +100,19 @@ with open(out, 'w') as f:
 """
 
 
+# `uname -m` of the image: x86_64 (the image these stubs are, with the aarch64 cross compilers), or STUB_MACHINE; every
+# other uname call goes to the real one. rkllm_module.sh refuses another build computer (RKLLM-Toolkit has x86_64
+# wheels only), so the tests do not depend on the machine that runs them.
+UNAME_STUB = """\
+import os, sys
+if sys.argv[1:] == ['-m']:
+    print(os.environ.get('STUB_MACHINE', 'x86_64'))
+    sys.exit(0)
+real = next(p for p in ('/usr/bin/uname', '/bin/uname') if os.path.exists(p))
+os.execv(real, [real] + sys.argv[1:])
+"""
+
+
 def _script(path: Path, body: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"#!{sys.executable}\n{body}", encoding="utf-8")
@@ -144,6 +157,7 @@ class Image:
         # The image's compilers (the aarch64 cross toolchain, gcc and g++), cmake and make: stubs that never write to
         # the calls log (tests/board_toolchain.py)
         self.toolchain, self.buildtools = install_toolchain(root)
+        _script(self.buildtools / "uname", UNAME_STUB)
 
     def env(self, **values) -> dict:
         """The environment the BuildEngine gives the build container (builder.py _container_env and _sandbox)."""
@@ -458,6 +472,32 @@ def test_rkllm_outcomes(image, values, code, message):
         assert not (image.output / "build_info.json").exists()
     else:
         assert image.build_info()["board"] == "rk3588"
+
+
+@needs_bash
+@pytest.mark.parametrize("machine", ["aarch64", "armv7l"])
+def test_rkllm_is_refused_on_a_build_computer_its_toolkit_has_no_wheels_for(image, machine):
+    """DECISIONS round 23 item 15: RKLLM-Toolkit 1.3.1 has Linux x86_64 wheels only. An image built on an ARM computer
+    has no RKLLM venv; the helper refuses with the build service's sentence (build_formats.format_refusal) before it
+    looks for one, and no converter runs."""
+    from orchestrator.Core.build_formats import build_host_arch, format_refusal
+    result = image.run(TARGET_FORMAT="rkllm", STUB_MACHINE=machine)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert format_refusal("rkllm", host_arch=build_host_arch(machine)) in result.stderr
+    assert image.calls() == [] and not (image.output / "build_info.json").exists()
+
+
+@needs_bash
+def test_rkllm_names_the_reason_the_image_has_no_toolkit(image):
+    """The Rockchip image built on another computer holds the reason in /opt/venv-rkllm/NOT_INSTALLED; the helper says
+    it instead of only 'not found'."""
+    venv = image.root / "venv-rkllm-missing"
+    venv.mkdir()
+    (venv / "NOT_INSTALLED").write_text("RKLLM-Toolkit 1.3.1 ships Linux x86_64 wheels only.\n")
+    result = image.run(TARGET_FORMAT="rkllm", RKLLM_PYTHON=venv / "bin" / "python")
+    assert result.returncode == 1
+    assert ("ERROR: RKLLM-Toolkit is not in this image: RKLLM-Toolkit 1.3.1 ships Linux x86_64 wheels only."
+            in result.stderr)
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -1101,6 +1141,27 @@ def test_the_pipeline_mode_keeps_the_stages_exit_code_and_needs_its_arguments(im
     assert failed.returncode == 4 and "Pipeline failed (exit 4)" in failed.stderr
     usage = entrypoint(image, "pipeline")
     assert usage.returncode == 2 and "Usage: pipeline INPUT_PATH MODEL_NAME" in usage.stderr
+
+
+@needs_bash
+def test_the_image_test_reports_a_venv_the_image_cannot_have_and_still_fails_a_missing_one(image):
+    """The Rockchip image built on arm64 has no RKLLM venv, only /opt/venv-rkllm/NOT_INSTALLED with the reason: the
+    entrypoint's test says why and passes. A venv that is missing without that file still fails the test."""
+    venv = image.root / "venv-rkllm-missing"
+    venv.mkdir()
+    (venv / "NOT_INSTALLED").write_text("RKLLM-Toolkit 1.3.1 ships Linux x86_64 wheels only.\n")
+    python3 = image.root / "test-python" / "python3"  # the GGUF venv's python3: imports and pip check pass
+    python3.parent.mkdir()
+    python3.write_text("#!/bin/sh\nexit 0\n")
+    python3.chmod(0o755)
+    path = os.pathsep.join([str(python3.parent), image.env()["PATH"]])
+    result = entrypoint(image, "test", RKLLM_PYTHON=venv / "bin" / "python", RKNN_PYTHON=None, PATH=path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Not in this image: RKLLM-Toolkit 1.3.1 ships Linux x86_64 wheels only." in result.stdout
+    assert "All tests passed." in result.stdout + result.stderr
+    (venv / "NOT_INSTALLED").unlink()
+    broken = entrypoint(image, "test", RKLLM_PYTHON=venv / "bin" / "python", RKNN_PYTHON=None, PATH=path)
+    assert broken.returncode == 1 and "RKLLM toolkit broken" in broken.stdout + broken.stderr
 
 
 @needs_bash

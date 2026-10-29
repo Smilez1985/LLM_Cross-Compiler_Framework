@@ -13,7 +13,7 @@ BOARD="$(echo "${TARGET_BOARD:-rk3588}" | tr '[:upper:]' '[:lower:]')"
 log() { echo ">> [RKNN] $*"; }
 die() { echo ">> [RKNN] ERROR: $*" >&2; exit 1; }
 
-[ -x "$RKNN_PYTHON" ] || die "RKNN toolkit venv not found at $RKNN_PYTHON"
+[ -x "$RKNN_PYTHON" ] || die "RKNN toolkit venv not found at $RKNN_PYTHON: the image needs RKNN-Toolkit2 in that venv (targets/Rockchip/dockerfile installs the pinned version); a build has no network, so nothing is installed here."
 
 # Input: an .onnx file, or a directory containing exactly one.
 ONNX_FILE="$MODEL_SOURCE"

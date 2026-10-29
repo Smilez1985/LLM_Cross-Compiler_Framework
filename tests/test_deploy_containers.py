@@ -382,3 +382,42 @@ def test_the_probe_import_suggests_a_target_next_to_an_empty_hardware_block(empt
     """The real targets of a target folder (one with its hardware lines commented out, one with empty npu and gpu
     blocks): the suggestion runs through and finds nothing to match."""
     assert empty_hardware.target_manager.find_matching_target({"ARCH": "aarch64", "NPU_VENDOR_ID": "0x1e60"}) is None
+
+
+# --- vendor and device ids: an integer and hex text are one id (stage C wave 3c-2, from the cs-c4-v review) -------
+
+@pytest.mark.parametrize("written", ["0x1e60", "0x1E60", " 0x1e60 ", 0x1E60, 7776])
+def test_an_unquoted_vendor_id_is_the_same_id_as_its_hex_text(written):
+    """YAML reads an unquoted `vendor_id: 0x1e60` as the integer 7776; before, str(7776) matched no probe and the
+    probe import suggested no target. An integer and hex text in any letter case are one id."""
+    import yaml
+
+    from orchestrator.Core.target_manager import hardware_id
+    unquoted = yaml.safe_load("npu:\n  vendor_id: 0x1e60\n")["npu"]["vendor_id"]
+    assert unquoted == 7776
+    assert hardware_id(written) == hardware_id(unquoted) == "0x1e60"
+    targets = {"Rk": {"hardware": {"cpu": {"architecture": "aarch64"}, "npu": {"vendor_id": written}}}}
+    for probe_value in ("0x1e60", "0x1E60"):
+        assert matching(targets, {"ARCH": "aarch64", "NPU_VENDOR_ID": probe_value}) == "Rk"
+
+
+def test_an_unquoted_gpu_vendor_id_of_a_target_yml_suggests_its_target(tmp_path):
+    """The real reader: a target.yml with `vendor_id: 0x10de` unquoted (YAML: 4318) is found for an NVIDIA probe."""
+    from types import SimpleNamespace
+
+    from orchestrator.Core.target_manager import TargetManager
+    folder = tmp_path / "targets" / "Nv"
+    folder.mkdir(parents=True)
+    (folder / "target.yml").write_text("metadata:\n  name: Nv\nhardware:\n  cpu:\n    architecture: x86_64\n"
+                                       "  gpu:\n    vendor_id: 0x10de\n", encoding="utf-8")
+    tm = TargetManager(SimpleNamespace(config=SimpleNamespace(targets_dir=str(tmp_path / "targets")),
+                                       resolve_path=Path))
+    tm.initialize()
+    assert tm.find_matching_target({"ARCH": "x86_64", "GPU_VENDOR_ID": "0x10DE"}) == "Nv"
+
+
+@pytest.mark.parametrize("value, expected", [(None, ""), (True, ""), (0, ""), ("", ""), ("rockchip", "rockchip"),
+                                             ("0xZZ", "0xzz"), (0x2207, "0x2207"), ("0x02207", "0x2207")])
+def test_hardware_id_spellings(value, expected):
+    from orchestrator.Core.target_manager import hardware_id
+    assert hardware_id(value) == expected

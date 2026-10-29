@@ -20,9 +20,9 @@
 #         It is made for a GGUF build with a hardware profile in the build plan (config_module.sh), and on request
 #         (build.sh --package: target_module.sh started by hand, the entrypoint modes target and pipeline) also without
 #         one, with the plain defaults of this target (plan_package_defaults), which the manifest names. A build of the
-#         BuildEngine has no profile and asks for no package: the board's runtime comes from the runtime builder
-#         (llm-cli device runtime build) and the board package from llm-cli deploy package or llm-cli device runtime
-#         deploy.
+#         BuildEngine gets the board's stored probe when there is one (DECISIONS round 23 item 5), and a GGUF build then
+#         makes the package too; the board's own llama.cpp runtime still comes from the runtime builder (llm-cli device
+#         runtime build).
 
 set -euo pipefail
 
@@ -108,6 +108,14 @@ FUNCTIONAL_TEST_SECONDS=120
 # tests/test_target_stage.py compares): no option after them turns them off again.
 NEVER_SET_OPTIONS=(LLAMA_BUILD_BORINGSSL LLAMA_BUILD_LIBRESSL GGML_CUDA_CCCL_VERSION GGML_ZENDNN GGML_VIRTGPU
                    LLAMA_BUILD_WEBUI LLAMA_USE_PREBUILT_WEBUI)
+# The CMake variables that make CMake run a script at project() (SCRIPT_VARIABLE_RE of recipe.py; tests/test_target_stage.py
+# compares): the script runs after the command line's options and can set any of them, like -C.
+SCRIPT_VARIABLE_PATTERN='^CMAKE_PROJECT_([^[:space:]=:]+_)?INCLUDE(_BEFORE)?$|^CMAKE_PROJECT_TOP_LEVEL_INCLUDES$'
+# The options every build sets to OFF (DOWNLOAD_OPTIONS_OFF and DEPRECATED_DOWNLOAD_OPTIONS of recipe.py;
+# tests/test_target_stage.py compares): the package's cross build sets them after the module's flags, but a cmake call
+# of a module's own scripts has nothing after its words (module_flag_problem --alone).
+DOWNLOAD_OFF_OPTIONS=(LLAMA_BUILD_TESTS LLAMA_BUILD_EXAMPLES LLAMA_BUILD_APP LLAMA_USE_PREBUILT_UI LLAMA_BUILD_UI
+                      LLAMA_LLGUIDANCE GGML_CPU_KLEIDIAI GGML_OPENMP_FETCH LLAMA_CURL)
 
 # Without a hardware profile in the build plan (a package on request: build.sh --package, target_module.sh started
 # by hand): the board's part of the plan from the plain defaults of this target, planned and checked by the config
@@ -168,10 +176,17 @@ package_room() {  # FILE...: stops the stage with the rule's plain reason when t
 # The first of the module's CMake flags (FLAG...: the plan's CMAKE_FLAGS, word by word as the cross build passes them)
 # that the cross build refuses, with the reason; nothing when there is none. The options of every build come after
 # the module's flags and win (cross_compile_target), except an option of NEVER_SET_OPTIONS, which downloads whenever it
-# is set, and a CMake script (-C, an initial cache, or -P), which can set any option. cmake reads "-D NAME=VALUE" as
-# one option, and -DNAME:TYPE=VALUE names NAME.
-module_flag_problem() {  # FLAG...
-    local word name
+# is set, and a CMake script (-C, an initial cache, -P, or a project include: SCRIPT_VARIABLE_PATTERN), which can set
+# any option. cmake reads "-D NAME=VALUE" as one option, and -DNAME:TYPE=VALUE names NAME.
+# With --alone (every cmake call of a module's own scripts, build.sh's cmake): no option of every build comes after the
+# words, so an option every build keeps OFF must be OFF there too, FETCHCONTENT_FULLY_DISCONNECTED ON and
+# LLAMA_SUBPROCESS OFF (refused_option of recipe.py: the one rule). The verdicts of the CMake flags are all here.
+module_flag_problem() {  # [--alone] FLAG...
+    local word name value alone=0
+    if [ "${1:-}" = --alone ]; then
+        alone=1
+        shift
+    fi
     while [ $# -gt 0 ]; do
         word="$1"
         shift
@@ -189,6 +204,24 @@ module_flag_problem() {  # FLAG...
                 name="${name%%:*}"
                 if [[ " ${NEVER_SET_OPTIONS[*]} " == *" $name "* ]]; then
                     echo "$word ($name downloads at configure time and is never set)"
+                    return
+                fi
+                if [[ "$name" =~ $SCRIPT_VARIABLE_PATTERN ]]; then
+                    echo "$word ($name makes CMake run a CMake script, which can set any option)"
+                    return
+                fi
+                [ "$alone" = 1 ] || continue
+                value=""
+                if [[ "$word" == *=* ]]; then
+                    value="${word#*=}"
+                fi
+                if [[ " ${DOWNLOAD_OFF_OPTIONS[*]} " == *" $name "* ]] && [ "$value" != OFF ]; then
+                    echo "$word ($name must be OFF on every build: it lets llama.cpp download)"
+                    return
+                fi
+                if { [ "$name" = FETCHCONTENT_FULLY_DISCONNECTED ] && [ "$value" != ON ]; } \
+                        || { [ "$name" = LLAMA_SUBPROCESS ] && [ "$value" != OFF ]; }; then
+                    echo "$word ($name must be $([ "$name" = LLAMA_SUBPROCESS ] && echo OFF || echo ON) on every build)"
                     return
                 fi ;;
         esac
@@ -261,7 +294,8 @@ cross_compile_target() {
                  "-DLLAMA_LLGUIDANCE=OFF" "-DGGML_CPU_KLEIDIAI=OFF" "-DGGML_OPENMP_FETCH=OFF")
 
     log_info "Configuring target build..."
-    if ! cmake "$LLAMA_BASE" "${cmake_args[@]}"; then
+    # command cmake: the framework's own call (check_module_flags checked the module's flags of it before)
+    if ! command cmake "$LLAMA_BASE" "${cmake_args[@]}"; then
         die "CMake configuration failed"
     fi
 
