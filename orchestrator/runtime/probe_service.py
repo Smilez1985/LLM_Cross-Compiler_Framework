@@ -86,6 +86,22 @@ _ARCH_FAMILIES = {"arm64": ("aarch64", "arm64"), "armv7": ("armv7l", "armv7", "a
                   "x86_64": ("x86_64", "amd64", "x64"), "riscv64": ("riscv64",)}
 
 
+def arch_fits(arch: Optional[str], family: Optional[str]) -> bool:
+    """True when the probe's ARCH is of a target's architecture_family (target.yml), or either is not known."""
+    family = _canon(family or "")
+    return not (family and arch and family not in {_canon(a) for a in _ARCH_FAMILIES.get(arch, (arch,))})
+
+
+def soc_fits(soc: Optional[str], board: Optional[str]) -> bool:
+    """True when the probe's SOC_MODEL is the board (letter case and separators ignored), a variant of it with a
+    letter after the number (rk3588s is an RK3588), or either is not known."""
+    have, want = _canon(soc or ""), _canon(board or "")
+    if not have or not want or have == want:
+        return True
+    rest = have[len(want):] if have.startswith(want) else ""
+    return bool(rest) and rest.isalpha() and len(rest) <= 2 and want[-1:].isdigit()
+
+
 def match_target(profile: HardwareProfile, target_manager: Any) -> Optional[TargetMatch]:
     """The target that fits a probe best, from validated probe values only (SOC_MODEL, SOC_VENDOR, NPU_VENDOR, ARCH)
     against each target's boards, vendor and architecture family: a board named like the probe's SoC is the strongest
@@ -104,8 +120,7 @@ def match_target(profile: HardwareProfile, target_manager: Any) -> Optional[Targ
         tid = str(meta.get("id") or "")
         if not tid:
             continue
-        family = _canon(meta.get("architecture_family") or "")
-        if family and arch and family not in {_canon(a) for a in _ARCH_FAMILIES.get(arch, (arch,))}:
+        if not arch_fits(arch, meta.get("architecture_family")):
             continue
         boards: List[str] = []
         try:

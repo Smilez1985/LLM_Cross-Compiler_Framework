@@ -37,6 +37,12 @@ def without_npu(profile):
 RK3588_NO_NPU = without_npu(RK3588)
 
 
+def with_soc(profile, soc):
+    """The same board probe with another SoC_MODEL."""
+    data = {**profile.as_dict(), "SOC_MODEL": soc}
+    return parse_profile("\n".join(f"{k}={v}" for k, v in data.items()) + "\n")
+
+
 def rockchip_caps():
     from orchestrator.Core.target_manager import read_target_folders
     from orchestrator.schemas.targets import TargetCapabilities
@@ -179,6 +185,37 @@ class TestTheBuildServiceTakesTheBoardsProbe:
         assert exc.value.code == "invalid_value" and exc.value.field == "probe"
         assert "SoC rk3566, not of rk3588" in str(exc.value)
 
+    def test_a_probe_of_a_board_that_is_not_one_of_the_target_s_is_refused(self, service):
+        """Review: an RK3399 is no board of the Rockchip target, so canonical_board gave nothing and the probe was
+        taken for an RK3588 build: its CPU and its NPU would have planned the package."""
+        from orchestrator.Core.build_service import BuildServiceError
+        ProfileStore(Path(service.framework.config.user_state_dir)).save_device(
+            "00000000000000aa", with_soc(RK3588, "rk3399"), label="rk3399")
+        with pytest.raises(BuildServiceError) as exc:
+            service.validate(request(board="rk3588", probe="00000000000000aa"))
+        assert exc.value.code == "invalid_value" and exc.value.field == "probe"
+        assert "SoC rk3399, not of rk3588" in str(exc.value)
+
+    def test_a_probe_of_a_pc_is_refused_for_an_aarch64_board(self, service):
+        """Review: a PC's probe has no SoC, so it was taken for an RK3588 build (the Builder tab's scan of this
+        computer sets probe 'local'): the config stage planned an x86_64 package for the board."""
+        from orchestrator.Core.build_service import BuildServiceError
+        pc = parse_profile((PROBES / "schema2_linux_z1_extreme.txt").read_text(encoding="utf-8"))
+        assert pc.get("SOC_MODEL") is None and pc.arch == "x86_64"
+        ProfileStore(Path(service.framework.config.user_state_dir)).save_device("00000000000000bb", pc, label="pc")
+        with pytest.raises(BuildServiceError) as exc:
+            service.validate(request(board="rk3588", probe="00000000000000bb"))
+        assert exc.value.field == "probe"
+        assert str(exc.value) == ("The hardware probe 00000000000000bb is of an x86_64 system, and the target "
+                                  "Rockchip builds for aarch64.")
+
+    def test_a_variant_of_the_board_s_soc_is_the_board(self, service):
+        """An RK3588S board (Radxa ROCK 5A: device tree rockchip,rk3588s) is an RK3588 for the build."""
+        ProfileStore(Path(service.framework.config.user_state_dir)).save_device(
+            "00000000000000cc", with_soc(RK3588, "rk3588s"), label="rock-5a")
+        ok = service.validate(request(board="rk3588", format="rkllm", probe="00000000000000cc"))
+        assert ok.probe == "00000000000000cc" and ok.board == "rk3588"
+
     def test_an_unknown_probe_is_refused_with_the_next_step(self, service):
         from orchestrator.Core.build_service import BuildServiceError
         with pytest.raises(BuildServiceError) as exc:
@@ -311,3 +348,39 @@ def test_the_builder_s_request_names_the_probe_it_imported(builder_tab):
               "recipe": None, "probe": "0123456789abcdef"}
     assert builder_tab._service_request(values).probe == "0123456789abcdef"
     assert builder_tab._service_request({**values, "probe": None}).probe is None
+
+
+@pytest.mark.parametrize("soc, board, fits", [
+    ("rk3588", "rk3588", True), ("RK3588", "rk3588", True), ("rk3588s", "rk3588", True), (None, "rk3588", True),
+    ("rk3588", None, True), ("rk3399", "rk3588", False), ("rk3566", "rk3588", False), ("rk35881", "rk3588", False),
+    ("rk3588", "rk3588s", False), ("rk3588sxyz", "rk3588", False)])
+def test_a_probe_s_soc_against_the_board(soc, board, fits):
+    from orchestrator.runtime.probe_service import soc_fits
+    assert soc_fits(soc, board) is fits
+
+
+@pytest.mark.parametrize("arch, family, fits", [
+    ("arm64", "aarch64", True), ("x86_64", "aarch64", False), ("arm64", "x86_64", False), ("x86_64", "x86_64", True),
+    ("x86_64", None, True), (None, "aarch64", True), ("armv7", "aarch64", False)])
+def test_a_probe_s_architecture_against_the_target(arch, family, fits):
+    from orchestrator.runtime.probe_service import arch_fits
+    assert arch_fits(arch, family) is fits
+
+
+def test_a_probe_that_fits_no_target_drives_no_build_of_the_builder(builder_tab, tmp_path):
+    """Review: a scan of this PC (probe 'local') fits no Rockchip board, yet its profile hid the NPU formats of the
+    Rockchip target and its id went into the next Rockchip build, which the build service then refused with no way
+    in the tab to build without it. A probe drives the formats and the build of the target it matched only."""
+    builder_tab._probe_id = "local"  # what the scan of this computer sets before it loads the file
+    builder_tab._load_probe_config(PROBES / "schema2_linux_z1_extreme.txt")
+    builder_tab.target_combo.setCurrentIndex(builder_tab.target_combo.findData("Rockchip"))
+    assert _formats(builder_tab) == ["gguf", "rkllm", "rknn"]
+    assert builder_tab._board_probe_id("Rockchip") is None
+    # the board's own probe drives the Rockchip build, and only that target's
+    builder_tab._probe_id = "0123456789abcdef"
+    board = tmp_path / "no_npu.txt"
+    board.write_text(RK3588_NO_NPU.to_text(), encoding="utf-8")
+    builder_tab._load_probe_config(board)
+    assert builder_tab._board_probe_id("Rockchip") == "0123456789abcdef"
+    assert builder_tab._board_probe_id("SomeOtherTarget") is None
+    assert _formats(builder_tab) == ["gguf"]

@@ -1021,7 +1021,7 @@ class BuildService:
                                         next="Name an existing dataset file as <label>:<relative path>.",
                                         field="dataset_path")
             dataset = str(path.resolve())
-        probe_id, profile = self._board_probe(request.probe, board, caps)
+        probe_id, profile = self._board_probe(request.probe, board, caps, target)
         from orchestrator.Core.build_formats import build_host_arch, format_refusal
         refusal = format_refusal(fmt, profile=profile, board=board, host_arch=build_host_arch())
         problems = caps.check_request(fmt, board, quant, dataset=bool(dataset),
@@ -1056,10 +1056,11 @@ class BuildService:
         return HardwareProbes.for_framework(self.framework)
 
     def _board_probe(self, probe_id: Optional[str], board: Optional[str],
-                     caps: Optional[TargetCapabilities]) -> Tuple[Optional[str], Any]:
+                     caps: Optional[TargetCapabilities], target: Optional[str] = None) -> Tuple[Optional[str], Any]:
         """(probe id, profile) of the board the build is for (DECISIONS round 23 item 5): the probe the request names,
         else the newest stored probe of a board of this SoC (HardwareProbes.for_board); (None, None) when there is
-        none. A named probe of another board of the target is refused: its CPU flags and its NPU are not this
+        none. A named probe of another board is refused (another board of the target, a board of another SoC, or a
+        system whose architecture is not the target's architecture_family): its CPU flags and its NPU are not this
         board's."""
         from orchestrator.runtime.probe_service import ProbeError
         probes = self.probes()
@@ -1078,7 +1079,29 @@ class BuildService:
             raise BuildServiceError(f"The hardware probe {probe_id} is of a board with the SoC {soc}, not of {board}.",
                                     code="invalid_value", field="probe",
                                     next=f"Build for {known}, or name the probe of the {board} board.")
+        # A probe of a board that is not one of the target's (an RK3399 for an RK3588 build), or of a system of another
+        # architecture (this PC for an aarch64 board): the config stage would plan the package for that machine.
+        from orchestrator.runtime.probe_service import arch_fits, soc_fits
+        if board and not known and not soc_fits(soc, board):
+            raise BuildServiceError(f"The hardware probe {probe_id} is of a board with the SoC {soc}, not of {board}.",
+                                    code="invalid_value", field="probe",
+                                    next=f"Name the probe of the {board} board, or build without a probe.")
+        family = self._architecture_family(target)
+        if not arch_fits(profile.arch, family):
+            raise BuildServiceError(f"The hardware probe {probe_id} is of an {profile.arch} system, and the target "
+                                    f"{target} builds for {family}.", code="invalid_value", field="probe",
+                                    next=f"Name the probe of the {board or target} board, or build without a probe.")
         return probe_id, profile
+
+    def _architecture_family(self, target: Optional[str]) -> Optional[str]:
+        """The architecture_family of a target's target.yml (metadata), None when it names none."""
+        try:
+            data = self._targets().get_target(target) if target else None
+        except Exception:  # noqa: BLE001 - a registry without it: not checked
+            return None
+        meta = data.get("metadata") if isinstance(data, dict) else None
+        family = meta.get("architecture_family") if isinstance(meta, dict) else None
+        return str(family) if family else None
 
     def probe_text(self, probe_id: Optional[str]) -> Optional[str]:
         """The stored probe as the build uses it (a schema-2 file), None without one."""
