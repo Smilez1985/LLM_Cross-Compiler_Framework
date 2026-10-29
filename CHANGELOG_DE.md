@@ -12,6 +12,20 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 
 ## [3.2.0] - 2026-10-29
 
+### Hinzugefügt
+- `2026-10-29 23:59 UTC` · `v3.2.0` **Modellvorschläge aus dem Quellenkatalog** (Konsolidierungskette models-data; die Modellliste der Entscheidung, die
+  ungenutzten Daten nutzbar zu machen, Punkt 10): Die Abschnitte `models` und `tiny_models` der
+  `configs/project_sources.yml` sind durch aktuelle Hugging-Face-Repositorys mit genauen IDs ersetzt, jedes über die
+  Hub-API geprüft (ID, Größe der Gewichtsdateien, Lizenz, Gating, Prüfdatum), mit einer empfohlenen Quantisierung; die
+  veralteten Einträge aus 2024 und 2025 (TinyLlama 1.1B, Qwen1.5 0.5B, h2o-danube 1.8B, Phi-3-mini) sind entfernt, und
+  das eine gated Modell (Llama 3.2 3B) steht in der Liste, wird aber nie vorgeschlagen.
+  `orchestrator/Core/doc_sources.py`, der Leser des Katalogs, liefert sie als `model_suggestions()` (kleine Modelle
+  zuerst): Die Modell-Liste des Builders bietet sie nach den zuletzt verwendeten Modellen an (das Feld bleibt
+  editierbar), das neue `llm-cli models suggestions [--json]` listet sie, und KI-Clients lesen sie als Ressource
+  `lcf://models/suggestions`. `scripts/validate_ssot.py` liest `configs/project_sources.yml` (vorher eine
+  `project_sources.yml` im aktuellen Ordner) und prüft den Abschnitt: genaue IDs, Größen, Quantisierungstypen, Gating,
+  Daten, keine ID doppelt. Der Kopf des Katalogs sagt jetzt, wer ihn liest.
+
 ### Geändert
 - `2026-10-29 23:54 UTC` · `v3.2.0` **Die Optimierungsprofile und Benchmark-Zeilen der `target.yml` sind korrigiert und werden genutzt**
   (Konsolidierungskette models-data; die Entscheidung, die ungenutzten Daten nutzbar zu machen, Punkt 10): Jedes Board

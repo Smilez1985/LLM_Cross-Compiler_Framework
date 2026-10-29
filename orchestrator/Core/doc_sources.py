@@ -10,6 +10,12 @@ them through a read-only resource (lcf://knowledge/doc-sources). Nothing here fe
 links and starts the crawl, with the usual confirmation, robots.txt and the other opt-outs, and the limits.
 
 Only https links are used, from the catalogue in this installation; a probe value never becomes a link.
+
+The catalogue's sections models and tiny_models are the model suggestions (DECISIONS round 23 item 10): exact Hugging
+Face repository ids with their size, recommended quantization, licence and gating, and the day they were checked.
+model_suggestions() gives them in order (small models first, gated ones only on request), for the Builder's model
+field (free text stays allowed), `llm-cli models suggestions` and the read-only resource lcf://models/suggestions;
+model_problems() is the check scripts/validate_ssot.py runs on the section.
 """
 
 import re
@@ -145,5 +151,119 @@ def catalogue_text(links: Iterable[DocLink], heading: str) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["CATALOGUE", "DocLink", "MAX_LINKS", "catalogue_text", "links_for", "load_catalogue", "vendors_for_probe",
-           "vendors_for_sdk"]
+# --- the model suggestions (sections tiny_models and models) ------------------------------------------------------
+
+MODEL_SECTIONS = ("tiny_models", "models")   # in this order: small models first
+_REPO_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
+_QUANT = re.compile(r"^[A-Z0-9][A-Z0-9_]{1,15}$")
+_CHECKED = re.compile(r"^(\d{4}-\d{2}-\d{2}|unchecked)$")
+
+
+@dataclass(frozen=True)
+class ModelSuggestion:
+    key: str
+    repo_id: str
+    size_mb: int
+    recommended_quant: str
+    license: str
+    gated: bool
+    checked: str      # YYYY-MM-DD the Hub API was asked, or "unchecked"
+    note: str
+    section: str      # tiny_models or models
+
+    def label(self) -> str:
+        gated = "; gated: needs a Hugging Face token" if self.gated else ""
+        checked = "not checked on the Hub" if self.checked == "unchecked" else f"checked {self.checked}"
+        return (f"{self.repo_id} ({self.size_mb} MB, {self.recommended_quant}, {self.license or 'licence unknown'}"
+                f"{gated}; {checked})")
+
+
+def model_problems(data: Any) -> List[str]:
+    """What is wrong with the sections models and tiny_models of the catalogue's data (empty: valid): every entry needs
+    an exact repo_id (owner/name), a positive size_mb, a GGUF type as recommended_quant, gated true or false, checked
+    as a date or "unchecked"; a repository id appears once."""
+    problems: List[str] = []
+    seen: Dict[str, str] = {}
+    sections = data if isinstance(data, dict) else {}
+    for section in MODEL_SECTIONS:
+        entries = sections.get(section)
+        if entries is None:
+            problems.append(f"{section}: missing")
+            continue
+        if not isinstance(entries, dict):
+            problems.append(f"{section}: not a mapping")
+            continue
+        for key, entry in entries.items():
+            where = f"{section}.{key}"
+            if not isinstance(entry, dict):
+                problems.append(f"{where}: not a mapping")
+                continue
+            repo = entry.get("repo_id")
+            if not isinstance(repo, str) or not _REPO_ID.fullmatch(repo):
+                problems.append(f"{where}: repo_id must be an exact Hugging Face id (owner/name)")
+            elif repo.casefold() in seen:
+                problems.append(f"{where}: {repo} is listed twice (also {seen[repo.casefold()]})")
+            else:
+                seen[repo.casefold()] = where
+            size = entry.get("size_mb")
+            if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+                problems.append(f"{where}: size_mb must be a positive number of MB")
+            if not isinstance(entry.get("recommended_quant"), str) or not _QUANT.fullmatch(entry["recommended_quant"]):
+                problems.append(f"{where}: recommended_quant must be a GGUF type such as Q4_K_M")
+            if not isinstance(entry.get("gated"), bool):
+                problems.append(f"{where}: gated must be true or false")
+            if not isinstance(entry.get("checked"), str) or not _CHECKED.fullmatch(entry["checked"]):
+                problems.append(f"{where}: checked must be the date of the Hub check (YYYY-MM-DD) or unchecked")
+    return problems
+
+
+def _models_of(data: Any) -> List[ModelSuggestion]:
+    out: List[ModelSuggestion] = []
+    for section in MODEL_SECTIONS:
+        entries = (data or {}).get(section) if isinstance(data, dict) else None
+        for key, entry in (entries or {}).items() if isinstance(entries, dict) else ():
+            if not isinstance(entry, dict):
+                continue
+            repo, size = entry.get("repo_id"), entry.get("size_mb")
+            if not isinstance(repo, str) or not _REPO_ID.fullmatch(repo) or isinstance(size, bool) or \
+                    not isinstance(size, int) or size <= 0:
+                continue   # validate_ssot names it; a broken entry is never suggested
+            quant = str(entry.get("recommended_quant") or "Q4_K_M")
+            out.append(ModelSuggestion(
+                key=str(key), repo_id=repo, size_mb=size,
+                recommended_quant=quant if _QUANT.fullmatch(quant) else "Q4_K_M",
+                license=" ".join(str(entry.get("license") or "").split())[:40],
+                gated=entry.get("gated") is not False, checked=str(entry.get("checked") or "unchecked")[:10],
+                note=" ".join(str(entry.get("note") or "").split())[:200], section=section))
+    return out
+
+
+@lru_cache(maxsize=4)
+def load_models(path: Path = CATALOGUE) -> Tuple[ModelSuggestion, ...]:
+    """Every valid entry of the sections tiny_models and models, in the catalogue's order (small models first). An
+    unreadable catalogue gives none (the Builder then offers the person's recent models only)."""
+    try:
+        data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return ()
+    return tuple(_models_of(data))
+
+
+def model_suggestions(include_gated: bool = False, path: Path = CATALOGUE) -> List[ModelSuggestion]:
+    """The model suggestions: ungated ones only unless `include_gated` (an entry without gated: false counts as
+    gated, so nothing that needs a token is a suggestion by default)."""
+    return [m for m in load_models(path) if include_gated or not m.gated]
+
+
+def suggestions_text(models: Iterable[ModelSuggestion], heading: str) -> str:
+    lines = [heading, ""] + [f"- {m.label()}: {m.note}" if m.note else f"- {m.label()}" for m in models]
+    if len(lines) == 2:
+        lines.append("(no model suggestions in the source catalogue)")
+    lines += ["", "Any other Hugging Face id or a local model works as well; check_build_request shows its size and "
+              "licence before a build."]
+    return "\n".join(lines)
+
+
+__all__ = ["CATALOGUE", "DocLink", "MAX_LINKS", "MODEL_SECTIONS", "ModelSuggestion", "catalogue_text", "links_for",
+           "load_catalogue", "load_models", "model_problems", "model_suggestions", "suggestions_text",
+           "vendors_for_probe", "vendors_for_sdk"]

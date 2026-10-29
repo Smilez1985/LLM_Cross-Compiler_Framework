@@ -143,7 +143,8 @@ def register_framework_resources(registry: ToolRegistry, framework) -> ToolRegis
 
 def doc_source_resources(framework) -> List[ResourceSpec]:
     """The source catalogue's documentation links (configs/project_sources.yml), all of them or those that fit a
-    stored probe's vendor and SDK (N10): read-only framework text; crawling stays crawl_docs_site's, confirmed."""
+    stored probe's vendor and SDK (N10): read-only framework text; crawling stays crawl_docs_site's, confirmed. And
+    its model suggestions (sections tiny_models and models, round 23 item 10)."""
     from orchestrator.Core.doc_sources import catalogue_text, links_for, load_catalogue
 
     def every(_params: Dict[str, str]) -> str:
@@ -163,6 +164,11 @@ def doc_source_resources(framework) -> List[ResourceSpec]:
         return catalogue_text(links_for(profile), "Documentation links for this probe's vendor and SDK (from the "
                                                   "source catalogue):")
 
+    def suggestions(_params: Dict[str, str]) -> str:
+        from orchestrator.Core.doc_sources import model_suggestions, suggestions_text
+        return suggestions_text(model_suggestions(), "Model suggestions of the source catalogue (no Hugging Face "
+                                                     "token needed):")
+
     def probe_ids(_args, _ctx) -> List[str]:
         try:
             return [p.probe_id for p in probes().list()]
@@ -177,4 +183,8 @@ def doc_source_resources(framework) -> List[ResourceSpec]:
         ResourceSpec("lcf://knowledge/doc-sources/{probe_id}", "doc-sources-probe", "Documentation links for a probe",
                      "The source catalogue's documentation links that fit a stored hardware probe's vendor and SDK "
                      "(read-only).", "text/plain", read=for_probe, completions={"probe_id": probe_ids}),
+        ResourceSpec("lcf://models/suggestions", "model-suggestions", "Model suggestions",
+                     "The model suggestions of the source catalogue (read-only): exact Hugging Face ids that need no "
+                     "token, small ones first, with size, recommended quantization, licence and the day they were "
+                     "checked. Any other id works with start_build as well.", "text/plain", read=suggestions),
     ]

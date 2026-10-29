@@ -126,6 +126,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `knowledge storage` | Where the knowledge base is stored (Qdrant Edge), the conversion of an older one, and its old folder: `convert`, `delete-old` |
 | `knowledge loose` / `knowledge sort` | List the loose knowledge files / sort one into a topic or target folder after the pack checks and your confirmation, then import it |
 | `trash list` / `restore` / `empty` | What deletions moved to the trash; put entries back; delete the ones you pick for good |
+| `models suggestions` | The model suggestions of the source catalogue: exact Hugging Face ids that need no token, small models first |
 | `models take-over` | Copy what earlier versions of the Hugging Face browser saved in the Hugging Face cache into the models folder, each file checked, then offer to remove the old copies |
 | `targets list` / `targets validate` | List hardware targets with their boards and formats / check that a target loads and its capabilities are valid |
 | `targets boards` | Each board of a target with its optimization profile and its benchmark rows (measured, published or unmeasured) |
@@ -2687,6 +2688,17 @@ llm-cli trash empty --due
 ---
 
 ## models
+
+```
+llm-cli models suggestions [--json]
+```
+
+Lists the model suggestions of the source catalogue (`configs/project_sources.yml`, sections `tiny_models` and
+`models`): exact Hugging Face ids that need no token, small models first, each with the size of its weights, the
+recommended quantization, its licence and the day it was checked on the Hub. A gated model is never a suggestion. The
+Builder's model list offers the same after your recent models; `--model` of `build start` takes any other Hugging Face
+id or a local model too. `--json` prints the list for scripts. AI clients read it as the resource
+`lcf://models/suggestions`.
 
 ```
 llm-cli models take-over
