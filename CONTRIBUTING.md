@@ -165,7 +165,20 @@ python -m pytest
   `install.sh --dry-run`. `install.sh` finds the family with the hardware probe's table (`os_family_of`, the same
   as in `scripts/hardware_probe.sh` and `tables.os_families` in `configs/hardware_probe_schema.yml`; a test checks
   that they match): a new distribution ID goes into all three together. On a real computer,
-  `./install.sh --dry-run` shows the plan without changing anything.
+  `./install.sh --dry-run` shows the plan without changing anything. The fake dnf answers `--assumeno` with real
+  dnf 4 and dnf 5 outputs (Rocky Linux 8.10 and 9.8, Fedora 42), from which `install.sh` reads what dnf would remove
+  (`dnf_removals`); a question to the person (`ask_person`) reads the answer from `ASK_TTY` (a file in the sandbox,
+  `/dev/tty` otherwise; none means no), never from stdin or an environment variable.
+- Every place that connects to Docker calls `orchestrator/utils/docker_engine.py` first: `ensure_docker_host()` (the
+  person's Podman socket as `DOCKER_HOST` when no Docker daemon is there), `engine_name(client)` (Docker or Podman)
+  and `podman_refusal(feature, engine)` for what Podman cannot do (`gpu`, `buildkit`). A new `docker.from_env()`
+  without the helper before it fails `tests/test_docker_engine.py`; a new feature that needs BuildKit or Docker-only
+  API calls refuses under Podman through `podman_refusal`, before it starts. Every container of the framework is
+  created with `create_container(client, ...)`, never with `client.containers.create` (a test fails otherwise):
+  under rootless Podman it adds Podman's `keep-id` for a container that runs as the person. The helper uses the
+  standard library
+  only (Python 3.9 too): `scripts/build_container_image.sh` runs it with the system's `python3 -I`. In tests the
+  autouse fixture `hermetic_docker_engine` keeps this computer's sockets out.
 
 ### The Python 3.11 to 3.14 matrix
 

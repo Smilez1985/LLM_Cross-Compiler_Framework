@@ -166,6 +166,8 @@ class DittoDocker(DockerEngine):
     def client(self) -> Any:
         if self._client is None:
             import docker
+            from orchestrator.utils.docker_engine import ensure_docker_host
+            ensure_docker_host()   # no Docker daemon: the person's Podman socket (DECISIONS round 26 Q1)
             self._client = docker.from_env(timeout=self._timeout)
         return self._client
 
@@ -219,9 +221,10 @@ class DittoDocker(DockerEngine):
                   options: Mapping[str, Any], timeout: float) -> Tuple[int, str]:
         """Runs a short check in a new container of `image` (created by its ID: nothing is pulled) and returns its exit
         status and its output; the container is removed right after (-1: it did not end in time)."""
+        from orchestrator.utils.docker_engine import create_container   # rootless Podman: keep-id
         volumes = {str(m.source): {"bind": m.target, "mode": "ro" if m.read_only else "rw"} for m in mounts}
-        container = self.client().containers.create(image=image, command=list(command), volumes=volumes,
-                                                    environment=dict(env), **dict(options))
+        container = create_container(self.client(), image=image, command=list(command), volumes=volumes,
+                                     environment=dict(env), **dict(options))
         try:
             container.start()
             try:
@@ -237,8 +240,9 @@ class DittoDocker(DockerEngine):
 
     def start_container(self, image: str, command: Sequence[str], *, volumes: Mapping[str, Mapping[str, str]],
                         env: Mapping[str, str], options: Mapping[str, Any]) -> str:
-        container = self.client().containers.create(image=image, command=list(command), volumes=dict(volumes),
-                                                    environment=dict(env), **dict(options))
+        from orchestrator.utils.docker_engine import create_container   # rootless Podman: keep-id
+        container = create_container(self.client(), image=image, command=list(command), volumes=dict(volumes),
+                                     environment=dict(env), **dict(options))
         container.start()
         return str(container.id)
 
@@ -307,7 +311,12 @@ def gpu_passthrough(docker: Any, hardware: Any, backend: str, dri: Optional[Path
         return GpuPassthrough("none", {}, {}, "CPU build: the container needs no GPU")
     vendors = {getattr(g, "vendor", "") for g in getattr(hardware, "gpus", []) or []}
     notes = []
-    if "nvidia" in vendors:
+    engine = docker.engine() if "nvidia" in vendors and callable(getattr(docker, "engine", None)) else ""
+    if "nvidia" in vendors and engine == "podman":
+        # Podman's Docker-compatible interface drops Docker's GPU request without a word (DECISIONS round 26 Q1).
+        notes.append("the NVIDIA GPU is not passed through: under Podman, Docker's GPU request does not reach the "
+                     "container (with Docker CE it does)")
+    elif "nvidia" in vendors:
         try:
             runtimes = docker.info().get("Runtimes") or {}
         except Exception:  # noqa: BLE001

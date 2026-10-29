@@ -1519,13 +1519,31 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   im Skript, geprüft wie der apt-Schlüssel), wobei die Repository-Datei nur diesen geprüften Schlüssel nennt und dnf
   jedes Paket prüft; wo Docker kein Repository veröffentlicht, das Paket der Distribution (`moby-engine` auf anderen
   Systemen, die auf Fedora aufbauen, `docker` unter Amazon Linux, openSUSE und SLES, wo das Containers Module mit
-  `SUSEConnect` eingeschaltet wird, und unter Arch, Manjaro und EndeavourOS mit `docker-buildx`; `podman-docker` unter
-  Rocky Linux, AlmaLinux und Oracle Linux, mit Podmans Docker-kompatibler Schnittstelle, für die Person eingeschaltet,
-  und dem genannten `DOCKER_HOST`; `docker` aus Alpines Repository community). Keine Paketverwaltung wird angewiesen,
+  `SUSEConnect` eingeschaltet wird, und unter Arch, Manjaro und EndeavourOS mit `docker-buildx`; `docker` aus Alpines
+  Repository community). Rocky Linux, AlmaLinux, Oracle Linux und die übrigen RHEL-Nachbauten bekommen Docker CE aus
+  Dockers RHEL-Repository (DECISIONS Runde 26 Q1: Das Framework braucht BuildKit, etwa für Hailo), mit derselben
+  Schlüsselprüfung und der RHEL-Version aus `PLATFORM_ID` oder `VERSION_ID`; Podman (`podman-docker` aus der
+  Distribution, das `podman.socket` der Person eingeschaltet) ist nur der Ersatzweg, wenn Docker für die Architektur
+  nichts veröffentlicht, das Repository nicht erreichbar ist, der Schlüssel nicht passt, dnf kein Paket findet oder die
+  Installation scheitert. Bevor dem Schlüssel vertraut wird, rechnet `dnf install --assumeno --allowerasing` aus, was
+  dnf für Docker CE entfernen oder ersetzen müsste (`podman-docker`; unter Nachbauten von RHEL 8 auch `runc`, `podman`,
+  `buildah`, ...), ohne etwas zu verändern: Der Installer nennt genau diese Pakete und fragt die Person am Terminal,
+  und nur ein Ja nutzt `--allowerasing`; ein Nein (oder kein Terminal) entfernt nichts, nimmt die Repository-Datei und
+  den Schlüssel zurück, die er geschrieben hat, und führt zum Ersatzweg Podman. Fedora, RHEL und CentOS Stream gehen
+  ihren Weg genau wie bisher (kein Probedurchlauf von dnf, keine Frage, `dnf install -y` ohne `--allowerasing`; ein
+  Konflikt hält mit dem Grund an): Runde 26 hat die Frage und den Ersatzweg nur für die Nachbauten entschieden
+  (Konsolidierungsprüfung install-followups-v). Der Probelauf nennt beide Wege und warum; ein zweiter Lauf, bei dem
+  `docker` Podman ist, sagt, wie man wechselt. Echt geprüft in Containern mit Rocky Linux 9.8 (Docker CE frisch; mit
+  `podman-docker` und einem Nein; mit `podman-docker` und einem Ja). SLES: Gibt es kein Python 3.11 bis 3.14, bietet
+  der Installer an, SUSEs Python 3 Module einzuschalten (`SUSEConnect -p sle-module-python3/<Version>/<Architektur>`,
+  die Kennung in der Paketsuche des SUSE Customer Center geprüft), und fragt vorher; ein nicht registriertes System
+  hält mit dem Schritt der Registrierung an, und der Hinweis zu Python nennt das Modul (auch eine Zeile im Probelauf).
+  Keine Paketverwaltung wird angewiesen,
   eine Signatur zu überspringen oder einen Schlüssel von selbst zu übernehmen, und `pacman -Sy` (ein Teil-Upgrade) läuft
   nie. Unter Alpine kann das Framework selbst nicht laufen (onnxruntime, Teil seiner festgelegten Pakete, gibt es nicht
   für musl): Der Installer hält nach Docker an und verweist auf das Framework-Image, dessen Build-Skript dort auch `git`
-  und GNU `tar` braucht (das `tar` von busybox kennt kein `--null`: `apk add git tar`). Jede andere Familie (Gentoo, Void,
+  und GNU `tar` braucht (das `tar` von busybox kennt kein `--null`): Der Installer richtet sie mit `apk add git tar` ein
+  (nur, was fehlt; der Probelauf nennt es). Jede andere Familie (Gentoo, Void,
   NixOS, ...) hält, wenn etwas installiert werden muss, mit der Familie und den Anleitungen an. Eine eigene
   `docker-ce.repo` der Person, in der Dockers Repository ausgeschaltet ist, wird nie ersetzt oder entfernt (der
   Installer hält an, bevor er etwas verändert, und sagt, wie man es einschaltet), und wo der Befehl `docker` Podman ist
@@ -1534,6 +1552,21 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Fingerabdrücke der Schlüssel), ohne etwas zu verändern, zu laden oder aufzurufen und ohne Root-Rechte, mit Exit-Code
   0 oder 1, wie die Installation enden würde. Tests führen den Installer gegen die `/etc/os-release`-Dateien echter
   Distributionen mit nachgebauten Paketverwaltungen aus (`tests/test_install_distros.py`).
+- **Podman statt Docker: Das Framework findet es und lehnt ab, was es nicht kann** (DECISIONS Runde 26 Q1): Ist
+  `DOCKER_HOST` nicht gesetzt und antwortet kein Docker-Dienst, setzt das Framework `DOCKER_HOST` für sich und die
+  Programme, die es startet, auf den Podman-Socket der Person (`orchestrator/utils/docker_engine.py`, ein Helfer für
+  die Build-Engine, das Builder-Image, Dittos Container, die eine Docker-Prüfung und
+  `scripts/build_container_image.sh`; ein `DOCKER_HOST`, das die Person setzt, gilt immer). Unter Podman (geprüft mit
+  Podman 5.8.2 und buildah 1.43.1): Images entstehen über Podmans API statt über `docker buildx`; ein GPU-Build mit
+  einer NVIDIA-GPU wird abgelehnt, bevor er in die Warteschlange kommt, weil Podmans Docker-kompatible Schnittstelle
+  Dockers GPU-Anfrage ohne ein Wort übergeht, und Dittos Container sagt dann, warum er auf der CPU rechnet; was
+  BuildKit braucht, wird mit dem Grund und dem Weg zu Docker CE abgelehnt; `scripts/build_container_image.sh` baut mit
+  `DOCKER_BUILDKIT=0`. `llm-cli mojo` nennt die Engine (`docker.daemon`) und Podmans Grenzen (`docker.engine`).
+  Jeder Container des Frameworks entsteht über `create_container` (die Build-Stufen, der llama.cpp-Builder, Dittos
+  Container): Unter rootless Podman, und das ist der Ersatzweg immer, bekommt einer, der als die Person läuft, Podmans
+  `keep-id`; ohne ihn sieht ein solcher Container die Ordner der Person als die von root, und jeder Build hielt mit
+  "Permission denied" an (gefunden und gegen Podman 5.8.9 rootless geprüft in der Konsolidierungsprüfung
+  install-followups-v).
 - **Hardware-Probe: Version 3.1.0, breitere Hailo-Erkennung** (Konsolidierungskette probe-keys):
   `PROBE_TOOL_VERSION` ist in allen drei Probes 3.1.0 (neue Schlüssel sind eine Änderung des Schemas; HAILO_PLAN
   Frage 5, Vorgabe in Runde 23 festgehalten). Die neuen Schlüssel sind nie Pflicht und nie `ON`/`OFF`-Schlüssel, darum
@@ -1542,7 +1575,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   einen Hailo gefüllt (`hailo-8l`, `hailo-10h`), und `SUPPORTS_HAILO` ist auch `ON` für den USB-Hailo-10H, einen
   Eintrag einer Hailo-sysfs-Klasse und ein Gerät, das `hailortcli scan` auflistet; `HAILO_FAMILY` und `HAILO_ARCH`
   gehen in den Leistungsschlüssel ein. Ein Board, dessen Probe einen Hailo ohne `hailortcli` sieht, bekommt jetzt
-  `HAILO_FAMILY`, `HAILO_INTERFACE`, `HAILO_DEVICES` und die Warnung `not_determined:HAILO_ARCH`. `hardware_probe.sh`
+  `HAILO_FAMILY`, `HAILO_INTERFACE`, `HAILO_DEVICES` und die Warnung `not_determined:HAILO_ARCH`. Die Grenze von 60
+  Sekunden für den Hailo-Teil in `hardware_probe.sh` hängt nicht mehr an `date +%s` (nicht POSIX; manchen
+  busybox-Builds fehlt es): Ohne es zählen die ganzen Sekunden seit dem Start aus `/proc/uptime`. `hardware_probe.ps1`
+  nennt die Schleifenvariable seines Hailo-Teils nicht mehr `$arch`: PowerShell unterscheidet bei Namen keine Groß-
+  und Kleinschreibung, darum überschrieb sie den Wert `ARCH` des Skripts. `hardware_probe.sh`
   nutzt für die DRM-Knoten kein `ls | grep` mehr (ShellCheck auf Warnungsstufe sauber).
 - **Der Offline-Modus erreicht nur diesen Computer und dein eigenes Netz, und was dazugehört, entscheidest du**
   (DECISIONS Runde 24, L-NET und „L-NET final“): Eine Regel des eigenen Netzes (`orchestrator/utils/locality.py`)
