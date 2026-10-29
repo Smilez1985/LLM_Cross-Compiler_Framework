@@ -519,7 +519,17 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   Verbindungen, unter anderem. Ein `ProxyJump` oder ein `ProxyCommand` kommt erst hinzu, nachdem du gelesen hast, was
   er tut (er entscheidet, über welchen Computer oder mit welchem Programm die Verbindung läuft), und Ja gesagt hast;
   „Nein“ ist bei jeder Frage die Vorgabe, und die Änderung wird ins Audit-Log geschrieben. Eine von Hand bearbeitete
-  Datei mit einer abgelehnten Zeile stoppt jeden OpenSSH-Aufruf mit Grund (`local_problem`). Kein KI-Tool schreibt
+  Datei mit einer abgelehnten Zeile stoppt jeden OpenSSH-Aufruf mit Grund (`local_problem`). Dein Ja wird
+  festgehalten (der sha256 des genauen Blocks, in `ssh_config.accepted.json` neben der Datei): Ein `ProxyJump` oder
+  `ProxyCommand`, der danach von Hand geändert oder geschrieben wurde, bevor das Framework das Ja festhielt, wird nicht
+  benutzt; jeder OpenSSH-Aufruf hält an mit dem, was die Zeile tut, und deinem Weg, sie anzunehmen (dieselben Zeilen
+  noch einmal in SSH-Einstellungen... oder mit `deploy ssh-config edit` eingeben und Ja sagen). Zeilen, die andere
+  Anmeldeschlüssel wählen, laden oder weitergeben würden (`IdentityFile`, `CertificateFile`, `IdentityAgent`,
+  `AddKeysToAgent`) oder dem Board eine Umgebung mitgeben (`SetEnv`, `SendEnv`), werden ebenfalls abgelehnt;
+  `LogLevel` bleibt erlaubt (es ändert nur, was OpenSSH meldet). Ein Board, das hier über einen `ProxyJump` oder ein
+  `ProxyCommand` erreicht wird, geht immer über OpenSSH, nie über paramiko (das keine Einstellungsdatei liest); wo
+  OpenSSH den Schritt nicht kann (kein `ssh`, ein Einmal-Passwort, ein an den gezeigten Fingerabdruck gebundener
+  Schritt), wird er in klaren Worten abgelehnt. Kein KI-Tool schreibt
   diese Datei; paramiko liest überhaupt keine SSH-Einstellungsdatei. Ein `%` in den eigenen Pfaden des Frameworks
   (sein Schlüssel, seine `known_hosts`) wird dort, wo OpenSSH Tokens ersetzt, als `%%` geschrieben, so dass ein
   Zustandsordner mit `%` im Namen funktioniert; unter Windows wird der Pfad mit Schrägstrichen übergeben (ein

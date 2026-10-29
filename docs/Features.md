@@ -478,7 +478,16 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   `Include`, `Match` (also `Match exec`), forwardings and connection sharing, among others. A `ProxyJump` or a
   `ProxyCommand` is added only after you read what it does (it decides through which computer, or with which
   program, the connection runs) and say yes; "No" is the default for every question, and the change is written to
-  the audit log. A file edited by hand with a refused line stops every OpenSSH call with the reason (`local_problem`).
+  the audit log. Your yes is kept (the sha256 of the exact block, in `ssh_config.accepted.json` next to the file):
+  a `ProxyJump` or `ProxyCommand` changed by hand afterwards, or written before the framework kept the yes, is not
+  used; every OpenSSH call stops with what the line does and your way to accept it (enter the same lines again in
+  SSH settings... or with `deploy ssh-config edit` and say yes). Lines that would choose, load or hand out other
+  login keys (`IdentityFile`, `CertificateFile`, `IdentityAgent`, `AddKeysToAgent`) or pass an environment to the
+  board (`SetEnv`, `SendEnv`) are refused too; `LogLevel` stays allowed (it only changes what OpenSSH reports). A
+  board reached through a `ProxyJump` or `ProxyCommand` here always goes through OpenSSH, never paramiko (which
+  reads no settings file); where OpenSSH cannot do the step (no `ssh`, a one-time password, a step bound to the
+  fingerprint shown) it is refused in plain words. A file edited by hand with a refused line stops every OpenSSH call
+  with the reason (`local_problem`).
   No AI tool writes this file; paramiko reads no SSH settings file at all. A `%` in the framework's own paths (its
   key, its `known_hosts`) is written `%%` where OpenSSH expands tokens, so a state folder with `%` in its name works;
   on Windows the path is given with forward slashes (a space in it is quoted). Connection sharing (`ControlMaster`) stays off.

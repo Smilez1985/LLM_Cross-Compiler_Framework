@@ -61,6 +61,24 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   und Fehler einer Anfrage und eines Build-Eintrags durch den einen Filter der CLI für gesteuerten Text aus
   (`_printable`), damit Steuer- und Bidi-Zeichen aus einem Build-Log nicht mehr das Terminal erreichen.
 
+### Sicherheit
+- `2026-10-29 23:50 UTC` · `v3.2.0` **Die SSH-Einstellungen von llmcf: ein Sprung oder Proxy-Befehl nur mit dem festgehaltenen Ja der
+  Person, keine anderen Anmeldeschlüssel, Sprünge immer über OpenSSH**
+  ([Design](docs/DESIGN_DE.md#ssh-host-schlüssel-und-das-paket-remote)): Das wissentliche Ja der Person zu einem
+  `ProxyJump` oder `ProxyCommand` wird jetzt festgehalten (der sha256 des genauen Host-Blocks, in
+  `ssh_config.accepted.json` neben der Datei, geschrieben von `person_steps.save_ssh_block`), und
+  `ssh_config.prepare` lehnt vor jedem OpenSSH-Aufruf einen `ProxyJump` oder `ProxyCommand` ab, den kein
+  festgehaltenes Ja abdeckt: einen nach dem Ja von Hand geänderten, einen vor dem ersten Host-Block oder einen vor
+  dieser Version geschriebenen (so eine Zeile muss noch einmal bestätigt werden). Die Ablehnung sagt, was die Zeile
+  tut und wie die Person sie annimmt (dieselben Zeilen noch einmal in SSH-Einstellungen... oder mit `deploy
+  ssh-config edit`, das sie mit einem Ja jetzt so annimmt, wie sie sind). `IdentityFile`, `CertificateFile`,
+  `IdentityAgent` und `AddKeysToAgent` werden als neue Art abgelehnt (`keys`: sie würden andere Anmeldeschlüssel als
+  den eigenen Schlüssel des Frameworks wählen, laden oder weitergeben), `SetEnv` und `SendEnv` als Änderungen der
+  Sitzung; `LogLevel` bleibt erlaubt. paramiko liest keine Einstellungsdatei, deshalb geht ein Board, dessen Block
+  einen Sprung oder einen Proxy-Befehl nennt, jetzt über den OpenSSH-Transport (`RemoteSession`, das Deploy), und wo
+  das nicht geht (kein `ssh`, ein Einmal-Passwort, ein an den gezeigten Fingerabdruck gebundener Schritt), wird der
+  Schritt in klaren Worten abgelehnt (`needs_openssh`), statt am Sprung vorbei direkt zu verbinden.
+
 ## [3.1.0] - 2026-10-29
 
 ### Hinzugefügt
