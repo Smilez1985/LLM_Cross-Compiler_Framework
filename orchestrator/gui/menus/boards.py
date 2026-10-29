@@ -36,6 +36,12 @@ CLI_PATHS: Dict[str, str] = {
     "deploy devices edit --port": "btn_boards_edit",
     "deploy devices edit --key": "btn_boards_edit",
     "deploy devices edit --read-key": "btn_boards_edit",
+    # round 25 Q4: the framework's own OpenSSH settings (the file shown whole, a board's block set or imported)
+    "deploy ssh-config": "btn_boards_ssh",
+    "deploy ssh-config show": "btn_boards_ssh",
+    "deploy ssh-config edit": "btn_boards_ssh",
+    "deploy ssh-config edit --line": "btn_boards_ssh",
+    "deploy ssh-config import": "btn_boards_ssh",            # its dialog's Import from ~/.ssh/config
     "device": ACTION_NAME,
     "device list": ACTION_NAME,                      # the table: system, deploy settings, deployed runtime
     "device settings": "btn_boards_settings",

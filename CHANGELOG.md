@@ -1345,6 +1345,56 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the target built earlier from the same settings is used (new label `org.llm-framework.inputs`), and without one the
   build stops naming the base images and the step to take while online. Tests: `tests/test_offline_models.py`,
   `tests/test_offline_images.py`.
+- **The framework's own OpenSSH settings file; OpenSSH reads neither `~/.ssh/config` nor `/etc/ssh/ssh_config`**
+  (DECISIONS round 25 Q4 and Q5): every call of this computer's OpenSSH client (the fallback without paramiko) gets
+  `-F` with `ssh_config` in the framework's state folder from the one command-line builder
+  (`orchestrator/remote/transport.py` `openssh_options`), created owner-only on first use and holding only what you
+  add: `llm-cli deploy ssh-config show|edit HOST --line ...|import HOST` and **Boards > Boards and Devices... > SSH
+  settings...** show it, set a board's `Host` block, or copy one block from your own `~/.ssh/config` after showing it
+  (that file is only read). The trust options stay first on the command line, where the first value wins, and lines
+  that would change them, run a command, include a file or share connections are refused with the reason
+  (`StrictHostKeyChecking`, `UserKnownHostsFile`, `GlobalKnownHostsFile`, `KnownHostsCommand`, `HostKeyAlias`,
+  `HostName`, `LocalCommand`, `RemoteCommand`, `Include`, `Match`, `ControlMaster`, forwardings, ...); a `ProxyJump` or
+  `ProxyCommand` is added only after you read what it does and say yes ("No" is the default), audited. A hand-edited
+  file with a refused line stops every OpenSSH call with the reason (`local_problem`). No AI tool writes the file
+  (`orchestrator/remote/ssh_config.py`; written only by `person_steps.save_ssh_block` for the CLI and the GUI);
+  paramiko reads no settings file. A `%` in the framework's own key and `known_hosts` paths is written `%%` where
+  OpenSSH expands tokens, so a state folder with `%` in its name works (a real `sshd` test); on Windows the `-F` path
+  is given with forward slashes. Connection sharing (`ControlMaster`) stays off; it is on the roadmap as an option.
+  Tests: `tests/test_ssh_config.py`, `tests/test_remote_system_ssh.py` (the pinned command lines now start with `-F`).
+- **The board's temperature during the checks on it, with a warning when it is hot** (DECISIONS round 23 item 16): a
+  runtime deploy's checks, `llm-cli device runtime verify` and the benchmark (CLI, Boards window, Deployment tab, the
+  AI's tools) read the board's thermal zones (temperature, type, trip points) and, on a Raspberry Pi, `vcgencmd` with
+  one read-only command over the session they already have, before the short `llama-bench` run and after it; nothing
+  is installed. The limit is the zone's own passive (else hot) trip point, else a careful default per SoC family (80 °C
+  for a Raspberry Pi and other boards, 85 °C for Rockchip), never above the critical trip point less 10 °C; the
+  firmware's soft temperature limit counts as hot. The check lines name the temperature; a hot board gets a warning in
+  your language with what helps (a heatsink or a fan, fewer threads, a smaller quantization, a pause between runs) and
+  a Mojo line: Mojo Oracle warns about a board that was hot at its last checks (recorded with the board's facts in
+  `device_deploys.json`) until a cooler reading replaces it. A hot board fails no check. An AI gets the same facts in
+  English (`temperature`, `temperature_note`) without a path or an account. No key of the hardware probe
+  (`orchestrator/runtime/device/thermal.py`; `VerifyReport.heat`). Tests: `tests/test_board_heat.py`.
+- **A cancelled benchmark stops on the board too** (the wave-3 trust-followups open item): `llama-bench` runs on the
+  board on its own; a Cancel in the Boards window or of an AI's job, Ctrl+C at a terminal and the
+  follower's own time limit now stop exactly the process (its process group where the board has `setsid`) the
+  framework started there, by the PID it recorded in the run's folder, never a program found by its name; when the
+  Cancel closed the connection, one new login with the same host-key check stops it (`RemoteSession.for_cleanup`).
+  Where the board has a working `timeout`, the board's own limit (900 s) wraps the run too, and the check names it
+  when it ended the run. The clean-up of the run's folder stays as before. Tests: `tests/test_bench_stop.py`.
+- **One audit sink for the person's board rows** (DECISIONS round 25 Q3): the CLI, the GUI (the Deployment tab, its
+  hardware scan, the Boards window) and the person's consents behind the service's steps write their device, trust
+  and consent rows through `person_steps.device_audit` (the tool registry's log, else the per-user `audit.db`); the
+  Boards window's `audit` and the CLI's consent row no longer open their own. A test pins that each surface writes
+  each row exactly once (`tests/test_audit_sink.py`).
+- **A busy `deploy devices edit` in the Boards window says why, as the CLI does**: a change of a board's address or
+  host key that another part of the framework holds (`LockTimeout`), or that a file on this computer stops, used to
+  show "The step failed: <message>"; it now shows the CLI's plain reason (`local_problem`, "something on this
+  computer") through the shared step error text, with nothing changed. The texts of the other steps stay as they were
+  (pinned).
+- **The Docker branch of a package's `deploy.sh` hands the model to the inference container**: it installs the model
+  as the native branch does (into `$MODEL_DIR`, by default `~/models`) and starts the container with that folder
+  mounted read-only at `/models` and `MODEL_FILE` naming the model there; before, the container started without the
+  model. The generated script is run in a test with a stand-in `docker` (`tests/test_deploy_docker_model.py`).
 - **`install.sh` on every Linux family, through the family's own package manager** (DECISIONS round 24 PKG): the
   installer finds the family from `ID` and `ID_LIKE` in `/etc/os-release` with the hardware probe's table and installs
   what it needs (Python 3.11 to 3.14, `rsync`, Docker) with `apt`, `dnf`, `zypper`, `pacman` or `apk`, under the

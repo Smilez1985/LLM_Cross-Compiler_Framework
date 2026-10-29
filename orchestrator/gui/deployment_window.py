@@ -309,9 +309,10 @@ class BoardBenchWorker(QThread):
     def _consent(self, digest: str) -> None:
         """The person's yes to an untrusted model, written to the audit log before the board loads it."""
         from orchestrator.remote.pairing import record_consent
-        from orchestrator.runtime.device.person_steps import UNTRUSTED_CONSENT
+        from orchestrator.runtime.device.person_steps import UNTRUSTED_CONSENT, device_audit
         from orchestrator.runtime.device.service import DeviceRuntimeError
-        audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
+        state = Path(getattr(getattr(self.framework, "config", None), "user_state_dir", "") or ".")
+        audit = device_audit(self.framework, state)   # the one sink (round 25 Q3): the registry's, else audit.db
         tool, detail = UNTRUSTED_CONSENT
         try:
             record_consent(audit, tool, {"device": self.device_id, "model_sha256": digest}, detail,
@@ -354,6 +355,9 @@ class BoardBenchWorker(QThread):
                  f"{ui_text('device.bench.gen')}: {out.get('gen_ts') or '-'} t/s",
                  f"{ui_text('device.bench.checks')}: " + ", ".join(f"{c['name']} {c['result']}"
                                                                    for c in out.get("checks", []))]
+        # the board's temperature during the run, as the CLI and the Boards window show it (round 23 item 16)
+        from orchestrator.runtime.device.thermal import from_dict, person_lines
+        lines += person_lines(from_dict(out.get("temperature")))
         board = profile.get("BOARD_MODEL") or device.label
         lines.append(ui_text("device.bench.recorded", board=board, count=out["recorded_builds"])
                      if out.get("recorded_builds") else ui_text("device.bench.not_recorded"))

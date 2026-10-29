@@ -8,6 +8,7 @@ The person's texts of the board deployment (eighth round N4-N7, seventh round 2'
 - `device.wait.*`: the visible "waiting for the board" state of a deploy whose network dropped.
 - `device.kv.*`: the KV-cache choice of the deploy settings.
 - `device.bench.*`: the benchmark window, which measures on the board.
+- `device.heat.*`: the board's temperature, read during the checks on the board (runtime/device/thermal.py).
 
 Plain words for laypeople. The placeholders are values the framework computed or the person entered (the board's
 address or host name, a port, times, sizes); never the device account's name and never text from the board. This
@@ -119,6 +120,19 @@ TEXTS = {
         "device.bench.not_recorded": "No build of this model was found in the output folder, so the result is kept "
                                      "only with the board.",
         "device.tested_on": "tested on {boards}",
+        # --- the board's temperature (round 23 item 16): read during the checks on the board ---
+        "device.heat.fine": "Board temperature: {celsius} °C ({zone}); it slows itself down from {limit} °C.",
+        "device.heat.hot": "The board is hot: {celsius} °C ({zone}). From {limit} °C ({limit_from}) it slows itself "
+                           "down, so it measures and answers slower than it can.",
+        "device.heat.from_trip": "the limit the board itself sets",
+        "device.heat.from_default": "a careful default for {family}, as the board names no limit of its own",
+        "device.heat.from_generic": "a careful default, as the board names no limit of its own",
+        "device.heat.throttled": "Its firmware says it is slowing down for heat right now.",
+        "device.heat.advice": "What helps: a heatsink or a fan; fewer threads (for example half of the cores); a "
+                              "smaller quantization (for example Q4_K_M instead of Q8_0); a pause between runs so the "
+                              "board cools down.",
+        "device.heat.mojo": "Mojo Oracle keeps this reading and names it in its check of the boards until a cooler "
+                            "one replaces it.",
     },
     "de": {
         # --- warum ein Board nicht erreichbar ist (N6) ---
@@ -229,5 +243,19 @@ TEXTS = {
         "device.bench.not_recorded": "Im Ausgabeordner wurde kein Build dieses Modells gefunden, daher bleibt das "
                                      "Ergebnis nur beim Board.",
         "device.tested_on": "getestet auf {boards}",
+        # --- die Temperatur des Boards (Runde 23 Punkt 16): gelesen bei den Prüfungen auf dem Board ---
+        "device.heat.fine": "Temperatur des Boards: {celsius} °C ({zone}); ab {limit} °C bremst es sich selbst.",
+        "device.heat.hot": "Das Board ist heiß: {celsius} °C ({zone}). Ab {limit} °C ({limit_from}) bremst es sich "
+                           "selbst, darum misst und antwortet es langsamer, als es kann.",
+        "device.heat.from_trip": "die Grenze, die das Board selbst setzt",
+        "device.heat.from_default": "ein vorsichtiger Standardwert für {family}, weil das Board keine eigene Grenze "
+                                    "nennt",
+        "device.heat.from_generic": "ein vorsichtiger Standardwert, weil das Board keine eigene Grenze nennt",
+        "device.heat.throttled": "Seine Firmware meldet, dass es sich gerade wegen Hitze bremst.",
+        "device.heat.advice": "Was hilft: ein Kühlkörper oder ein Lüfter; weniger Threads (zum Beispiel die Hälfte "
+                              "der Kerne); eine kleinere Quantisierung (zum Beispiel Q4_K_M statt Q8_0); eine Pause "
+                              "zwischen den Läufen, damit das Board abkühlt.",
+        "device.heat.mojo": "Mojo Oracle merkt sich diese Messung und nennt sie bei seiner Prüfung der Boards, bis "
+                            "eine kühlere sie ersetzt.",
     },
 }

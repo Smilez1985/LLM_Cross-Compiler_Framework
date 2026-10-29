@@ -1529,6 +1529,65 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   gebaut: Es kommt das Image des Targets, das früher mit denselben Einstellungen gebaut wurde (neues Label
   `org.llm-framework.inputs`), und ohne eines hält der Build an und nennt die Basis-Images und den Schritt, der online
   nötig ist. Tests: `tests/test_offline_models.py`, `tests/test_offline_images.py`.
+- **Die eigene OpenSSH-Einstellungsdatei des Frameworks; OpenSSH liest weder `~/.ssh/config` noch
+  `/etc/ssh/ssh_config`** (DECISIONS Runde 25 Q4 und Q5): Jeder Aufruf des OpenSSH-Clients dieses Computers (der
+  Rückfallweg ohne paramiko) bekommt vom einen Bauer der Befehlszeile (`orchestrator/remote/transport.py`
+  `openssh_options`) `-F` mit `ssh_config` im Zustandsordner des Frameworks, bei der ersten Nutzung nur für den
+  Besitzer lesbar angelegt und nur mit dem, was du hinzufügst: `llm-cli deploy ssh-config show|edit HOST --line
+  ...|import HOST` und **Boards > Boards und Geräte... > SSH-Einstellungen...** zeigen sie, setzen den `Host`-Block
+  eines Boards oder übernehmen einen Block aus deiner eigenen `~/.ssh/config`, nachdem er gezeigt wurde (diese Datei
+  wird nur gelesen). Die Vertrauensoptionen bleiben vorn auf der Befehlszeile, wo der erste Wert gilt, und Zeilen,
+  die sie ändern, einen Befehl ausführen, eine Datei einbinden oder Verbindungen teilen würden, werden mit Grund
+  abgelehnt (`StrictHostKeyChecking`, `UserKnownHostsFile`, `GlobalKnownHostsFile`, `KnownHostsCommand`,
+  `HostKeyAlias`, `HostName`, `LocalCommand`, `RemoteCommand`, `Include`, `Match`, `ControlMaster`, Weiterleitungen,
+  ...); ein `ProxyJump` oder `ProxyCommand` kommt erst hinzu, nachdem du gelesen hast, was er tut, und Ja gesagt hast
+  („Nein“ ist die Vorgabe), mit Audit-Eintrag. Eine von Hand bearbeitete Datei mit einer abgelehnten Zeile stoppt
+  jeden OpenSSH-Aufruf mit Grund (`local_problem`). Kein KI-Tool schreibt die Datei
+  (`orchestrator/remote/ssh_config.py`; geschrieben nur von `person_steps.save_ssh_block` für CLI und GUI); paramiko
+  liest keine Einstellungsdatei. Ein `%` in den Pfaden des eigenen Schlüssels und der `known_hosts` des Frameworks
+  wird dort, wo OpenSSH Tokens ersetzt, als `%%` geschrieben, so dass ein Zustandsordner mit `%` im Namen funktioniert
+  (ein Test mit echtem `sshd`); unter Windows wird der Pfad für `-F` mit Schrägstrichen übergeben. Geteilte
+  Verbindungen (`ControlMaster`) bleiben aus; sie stehen als Option in der Roadmap. Tests: `tests/test_ssh_config.py`,
+  `tests/test_remote_system_ssh.py` (die festgehaltenen Befehlszeilen beginnen jetzt mit `-F`).
+- **Die Temperatur des Boards während der Prüfungen darauf, mit einer Warnung, wenn es heiß ist** (DECISIONS Runde 23
+  Punkt 16): Die Prüfungen eines Laufzeit-Deployments, `llm-cli device runtime verify` und der Benchmark (CLI,
+  Fenster Boards und Geräte, Deployment-Tab, die Tools der KI) lesen die Thermalzonen des Boards (Temperatur, Typ,
+  Trip-Points) und auf einem Raspberry Pi `vcgencmd` mit einem nur lesenden Befehl über die Sitzung, die sie schon
+  haben, vor dem kurzen `llama-bench`-Lauf und danach; nichts wird installiert. Die Grenze ist der eigene
+  passive (sonst hot) Trip-Point der Zone, sonst ein vorsichtiger Standardwert je SoC-Familie (80 °C für einen
+  Raspberry Pi und andere Boards, 85 °C für Rockchip), nie über dem kritischen Trip-Point minus 10 °C; die weiche
+  Temperaturgrenze der Firmware zählt als heiß. Die Prüfzeilen nennen die Temperatur; ein heißes Board bekommt eine
+  Warnung in deiner Sprache mit dem, was hilft (ein Kühlkörper oder ein Lüfter, weniger Threads, eine kleinere
+  Quantisierung, eine Pause zwischen den Läufen), und eine Zeile zu Mojo: Mojo Oracle warnt vor einem Board, das bei
+  seinen letzten Prüfungen heiß war (bei den Fakten des Boards in `device_deploys.json` vermerkt), bis eine kühlere
+  Messung sie ersetzt. Ein heißes Board lässt keine Prüfung scheitern. Eine KI bekommt dieselben Fakten auf Englisch
+  (`temperature`, `temperature_note`) ohne Pfad und ohne Konto. Kein Schlüssel der Hardware-Untersuchung
+  (`orchestrator/runtime/device/thermal.py`; `VerifyReport.heat`). Tests: `tests/test_board_heat.py`.
+- **Ein abgebrochener Benchmark stoppt auch auf dem Board** (der offene Punkt der wave-3 trust-followups):
+  `llama-bench` läuft auf dem Board selbständig; ein Abbrechen im Fenster Boards und Geräte oder des Jobs einer KI,
+  Strg+C an einem Terminal und das eigene Zeitlimit des Verfolgens stoppen jetzt genau den Prozess
+  (seine Prozessgruppe, wo das Board `setsid` hat), den das Framework dort gestartet hat, über die PID, die es im
+  Ordner des Laufs vermerkt hat, nie ein Programm, das über seinen Namen gefunden wird; hat das Abbrechen die
+  Verbindung geschlossen, stoppt es eine neue Anmeldung mit derselben Prüfung des Host-Schlüssels
+  (`RemoteSession.for_cleanup`). Wo das Board ein funktionierendes `timeout` hat, umschließt auch das Board selbst den
+  Lauf mit seiner Grenze (900 s), und die Prüfung nennt sie, wenn sie den Lauf beendet hat. Das Aufräumen des Ordners
+  des Laufs bleibt wie bisher. Tests: `tests/test_bench_stop.py`.
+- **Ein Ziel für die Audit-Einträge der Person zu Boards** (DECISIONS Runde 25 Q3): Die CLI, die GUI (der
+  Deployment-Tab, seine Hardware-Untersuchung, das Fenster Boards und Geräte) und die Zustimmungen der Person hinter
+  den Schritten des Dienstes schreiben ihre Einträge zu Geräten, Vertrauen und Zustimmungen über
+  `person_steps.device_audit` (das Log der Tool-Registry, sonst die `audit.db` je Benutzer); `audit` des Fensters
+  Boards und Geräte und der Zustimmungseintrag der CLI öffnen kein eigenes mehr. Ein Test hält fest, dass jede
+  Oberfläche jeden Eintrag genau einmal schreibt (`tests/test_audit_sink.py`).
+- **Ein belegtes `deploy devices edit` im Fenster Boards und Geräte sagt wie die CLI, warum**: Eine Änderung von
+  Adresse oder Host-Schlüssel eines Boards, die ein anderer Teil des Frameworks gerade hält (`LockTimeout`) oder die
+  eine Datei auf diesem Computer verhindert, zeigte „Der Schritt ist fehlgeschlagen: <Meldung>“; jetzt zeigt sie den
+  einfachen Grund der CLI (`local_problem`, „etwas auf diesem Computer“) über den gemeinsamen Fehlertext der
+  Schritte, und nichts wird geändert. Die Texte der anderen Schritte bleiben, wie sie waren (festgehalten).
+- **Der Docker-Zweig der `deploy.sh` eines Pakets gibt das Modell an den Inferenz-Container**: Er installiert das
+  Modell wie der native Zweig (nach `$MODEL_DIR`, standardmäßig `~/models`) und startet den Container mit diesem
+  Ordner nur lesbar unter `/models` eingebunden und `MODEL_FILE`, das das Modell dort nennt; vorher startete der
+  Container ohne das Modell. Das erzeugte Skript läuft in einem Test mit einem Ersatz für `docker`
+  (`tests/test_deploy_docker_model.py`).
 - **`install.sh` auf jeder Linux-Familie, über die Paketverwaltung der Familie** (DECISIONS Runde 24 PKG): Der Installer
   erkennt die Familie aus `ID` und `ID_LIKE` in `/etc/os-release` mit der Tabelle der Hardware-Untersuchung und
   installiert, was er braucht (Python 3.11 bis 3.14, `rsync`, Docker), mit `apt`, `dnf`, `zypper`, `pacman` oder `apk`,

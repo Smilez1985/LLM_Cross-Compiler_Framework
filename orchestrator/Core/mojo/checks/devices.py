@@ -9,7 +9,8 @@ there is a problem to find there"). It reports what the framework recorded, from
 - the last contact with a board that failed with an SSH reason code (device_host_down, device_port_closed,
   device_auth_failed, device_host_key_changed): a deploy, runtime deploy, verify, benchmark or probe, recorded by
   TrustedDevices.note_reach;
-- what the last deploy saw on the board (an old Qdrant sidecar).
+- what the last deploy saw on the board (an old Qdrant sidecar);
+- the board's temperature at the last checks on it, when it was hot (TrustedDevices.note_heat, round 23 item 16).
 
 A board with such a recorded problem is offered for a check (Finding.board_check): at a terminal "Check <board> now?
 [y/N]", for an AI the request it can make. A board is contacted only on request, for that one board (`contact`:
@@ -64,6 +65,31 @@ def _old_sidecars(store, boards) -> List[Finding]:
             "of that old package stays until you delete it).",
             where=device.address, why="A container nothing uses any more takes space on the board, and memory while "
                                       "it runs.", cannot="person"))
+    return findings
+
+
+def _hot_boards(store, boards) -> List[Finding]:
+    """Boards that were hot at the last checks on them (the temperature the framework read during a deploy, verify or
+    benchmark there; runtime/device/thermal.py): named with what helps. Mojo reads only the record; a cooler reading at
+    the next checks replaces it."""
+    from orchestrator.runtime.device.thermal import ADVICE, FAMILY_NAMES
+    findings = []
+    for device in boards:
+        seen = store.last_heat(device)
+        heat = seen["heat"] if seen else None
+        if heat is None or not heat.hot:
+            continue
+        source = ("its own limit" if heat.limit_from == "trip" else
+                  f"a careful default for {FAMILY_NAMES[heat.family]}" if heat.family in FAMILY_NAMES else
+                  "a careful default")
+        findings.append(Finding(
+            "devices", f"devices.{device.device_id}.heat", Severity.WARN,
+            f"Board {device.label}: it was hot at the last checks on it ({seen['at']}): {round(heat.celsius, 1):g} °C "
+            f"({heat.zone}); from {round(heat.limit, 1):g} °C ({source}) it slows itself down"
+            + (", and its firmware said it was slowing down for heat" if heat.throttled else "")
+            + f". {NO_CONTACT}", ADVICE, where=device.address,
+            why="A hot board slows itself down: benchmarks measure less than it can do and its answers come slower.",
+            cannot="person"))
     return findings
 
 
@@ -172,4 +198,4 @@ def check_devices(framework, contact: Sequence[str] = ()) -> List[Finding]:
                             "the one you trusted, and no deploy, verify or benchmark failed to reach "
                             f"{'it' if quiet == 1 else 'them'}). Mojo contacts a board only when you ask it to "
                             "check that one."))
-    return findings + _old_sidecars(store, boards)
+    return findings + _old_sidecars(store, boards) + _hot_boards(store, boards)

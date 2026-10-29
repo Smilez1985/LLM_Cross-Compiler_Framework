@@ -395,7 +395,10 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   stops the package instead of leaving the image out. A digest-pinned image is packed under the local name
   `<repository>:lcf-<first 12 hex characters of the digest>` (`docker load` does not restore registry digests), and
   `deploy.sh` starts every packed image with `--pull never`: the board runs exactly the packed image, and a board
-  where it is missing stops instead of pulling one from a registry. Packages of earlier versions also started a
+  where it is missing stops instead of pulling one from a registry. `deploy.sh` installs the model as without Docker
+  (into `$MODEL_DIR`, by default `~/models`) and gives that folder to the inference container read-only at `/models`,
+  with `MODEL_FILE` naming the model there (before, the container started without the model). Packages of earlier
+  versions also started a
   Qdrant sidecar (`qdrant-sidecar`) that nothing uses any more: after a deploy the framework looks whether it is
   still on the board and tells you (the deploy result, and a Mojo Oracle line for that board), with the command to
   remove it there. The framework never stops or removes it.
@@ -447,15 +450,34 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   the board": the runtime checks and a short `llama-bench` run there (the board needs the framework's model server,
   `llm-cli device runtime deploy`). You are asked first, with No preselected and with the board and the model named,
   whether a model that is not a catalog model may be loaded there; your yes is written to the audit log. A passed run is recorded with the build of that
-  model, and the build list shows "tested on <board>".
+  model, and the build list shows "tested on <board>". The result also names the board's temperature during the run
+  ([below](#runtime-on-the-board-self-built-llamacpp)).
 - **Errors with their reason:** packaging and deploying return why they failed (no Docker, an image not pinned, the
   host key changed, `deploy.sh` exit status) instead of only logging it. A package is written under a temporary name
   and renamed when complete. Without paramiko the deploy runs over this computer's OpenSSH client and does all of the
   above too (waiting for the board, resuming the upload, `deploy.sh` on its own), with the framework's key and
-  known_hosts only, a login time limit and keepalive; `ssh` never gets the framework's standard input (over MCP stdio
+  known_hosts only, a login time limit and keepalive, and the framework's own SSH settings file (below) instead of
+  `~/.ssh/config` and `/etc/ssh/ssh_config`; `ssh` never gets the framework's standard input (over MCP stdio
   that is the protocol stream). A password needs paramiko there (OpenSSH never asks for one): the result says it was
   not used. A deploy bound to a fingerprint you were shown is refused. `deploy run` and the Deployment tab read the
   board's host key with paramiko before they deploy, so they still need it.
+- **The framework's own SSH settings** (`llm-cli deploy ssh-config show|edit|import`; GUI: **Boards > Boards and
+  Devices... > SSH settings...**; [CLI](CLI_Usage.md#deploy-ssh-config)): every call of this computer's OpenSSH
+  client (the deploy without paramiko; connections over paramiko do not use the file) gets the file `ssh_config` in the framework's state folder with `-F`, so neither `~/.ssh/config` nor `/etc/ssh/ssh_config` is
+  read. It is created on first use, readable only by you, and holds only what you add: a `Host` block per board (its
+  address or host name as the framework names it), for example a `User` or a `ProxyJump` through a jump host. You can
+  show it, edit a board's block, or copy one block from your own `~/.ssh/config` after it is shown to you (that file
+  is only read). The trust settings stay on OpenSSH's command line, where the first value wins (strict host-key
+  check, the framework's `known_hosts`, the null device as the global one, its key only), and lines that would change
+  them or run a command are refused with the reason: `StrictHostKeyChecking`, `UserKnownHostsFile`,
+  `GlobalKnownHostsFile`, `KnownHostsCommand`, `HostKeyAlias`, `HostName`, `LocalCommand`, `RemoteCommand`,
+  `Include`, `Match` (also `Match exec`), forwardings and connection sharing, among others. A `ProxyJump` or a
+  `ProxyCommand` is added only after you read what it does (it decides through which computer, or with which
+  program, the connection runs) and say yes; "No" is the default for every question, and the change is written to
+  the audit log. A file edited by hand with a refused line stops every OpenSSH call with the reason (`local_problem`).
+  No AI tool writes this file; paramiko reads no SSH settings file at all. A `%` in the framework's own paths (its
+  key, its `known_hosts`) is written `%%` where OpenSSH expands tokens, so a state folder with `%` in its name works;
+  on Windows the path is given with forward slashes (a space in it is quoted). Connection sharing (`ControlMaster`) stays off.
 
 ### Runtime on the board (self-built llama.cpp)
 
@@ -524,7 +546,24 @@ board...**).
   device runtime status` says whether the deployed build is still the one the profile and the pin call for. A
   passed short benchmark is the proof "tested on <board>": it is recorded with every build of that model in the
   output folder, the framework's build folder and the folders builds were saved to (`device_tests.json`, found by the
-  model's sha256) and shown in the Deployment window.
+  model's sha256) and shown in the Deployment window. The short benchmark runs on the board on its own; a Cancel in
+  the Boards window or of an AI's job, and Ctrl+C at a terminal, stop it there too: exactly the process (its process
+  group where the board has `setsid`) the framework started, by the number it recorded, never a program found by its
+  name; when the Cancel closed the connection, one new login with the same host-key check stops it. Where the board
+  has `timeout`, the board's own time limit (900 s) also ends a run nobody follows any more.
+- **The board's temperature** during these checks (during a runtime deploy, `device runtime verify` and the
+  benchmark): the framework reads the board's thermal zones (`/sys/class/thermal/thermal_zone*/temp`, their type and
+  trip points) and, on a Raspberry Pi, `vcgencmd measure_temp` and `get_throttled`, with one read-only command over
+  the session it already has, before the short `llama-bench` run and after it; nothing is installed. The limit is
+  the zone's own `passive` trip point (else its `hot` one), where the kernel starts to slow the chip down; a zone
+  without one is judged by a careful default for its SoC family (from `/proc/device-tree/compatible`): 80 °C for a
+  Raspberry Pi and any other board, 85 °C for Rockchip, never above the zone's critical trip point less 10 °C. The
+  firmware's soft temperature limit (bit 0x8 of `get_throttled`) counts as hot too. The check lines name the
+  temperature; a hot board gets a warning with what helps (a heatsink or a fan, fewer threads, a smaller
+  quantization, a pause between runs) and the note that Mojo Oracle keeps the reading: Mojo warns about a board that
+  was hot at its last checks until a cooler reading replaces it. A hot board fails no check. An AI gets the same
+  facts in English (`temperature`, `temperature_note`), without a path or an account. The temperature is no key of
+  the hardware probe: it is a moment, not a property of the board.
 - **Measured** with real programs instead of a board: `llama-server` and `llama-bench` built natively with the device
   plan's options for an x86-64 machine (GCC 13.3, `-j4`, about 8 minutes on 4 shared cores) gave 30 MB of programs
   and an 11.6 MB tarball; the format check (glibc 2.38 needed, no shared C++ runtime), the deployment to a local

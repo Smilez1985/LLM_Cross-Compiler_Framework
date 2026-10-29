@@ -687,10 +687,137 @@ def remove_board_builds(shell: Any, accepted: Any, prune: BoardPrune, device_id:
                                audit=audit)
 
 
+# --- the framework's own OpenSSH settings (DECISIONS round 25 Q4) --------------------------------------------------
+
+SSH_BLOCK_QUESTION = "Write these settings into the framework's own SSH settings file?"
+SSH_KNOWINGLY_QUESTION = "These lines connect through another computer or run a command (see above). Add them anyway?"
+
+
+@dataclass(frozen=True)
+class SshBlockPlan:
+    """The person's change of one Host block of the framework's own SSH settings file (orchestrator/remote/
+    ssh_config.py; every OpenSSH call reads it with -F): `host` the block's Host argument, `old` and `new` its option
+    lines (empty: there is none / it goes), `refused` the lines the file may not hold (ssh_config.LineProblem, with
+    the reason: nothing is written while there is one), `knowingly` the ProxyJump and ProxyCommand lines the person
+    says yes to after reading what they do (ssh_config.Knowingly), `text` the file's text the plan was made from (a
+    change made meanwhile is refused as stale)."""
+    host: str
+    old: Tuple[str, ...]
+    new: Tuple[str, ...]
+    refused: Tuple[Any, ...]
+    knowingly: Tuple[Any, ...]
+    text: str
+
+    @property
+    def unchanged(self) -> bool:
+        return self.old == self.new
+
+
+def ssh_settings(state_dir: Path) -> Tuple[Path, str]:
+    """(the file, its text) of the framework's own SSH settings: `llmcf deploy ssh-config show` and the Boards window's
+    SSH settings... (the file is created, private to this account, when it is missing, as every OpenSSH call does)."""
+    from orchestrator.remote import ssh_config
+    path = ssh_config.ensure(Path(state_dir))
+    return path, ssh_config.read(Path(state_dir))
+
+
+def plan_ssh_block(state_dir: Path, host: str, lines: Sequence[str]) -> SshBlockPlan:
+    """The change of `host`'s block to `lines` (option lines such as "ProxyJump jump.example"; none removes the block),
+    checked line by line (ssh_config.check_lines; a ProxyJump also against the file's path). BoardStepError kind
+    ssh_host for a Host argument OpenSSH would not read."""
+    from orchestrator.remote import ssh_config
+    host = (host or "").strip()
+    if not ssh_config.valid_host(host):
+        raise BoardStepError(f"{host!r} is no host name, address or pattern OpenSSH reads (letters, digits, '.', '-', "
+                             "':', '_' and the patterns '*', '?', '!').", "ssh_host")
+    path = ssh_config.ensure(Path(state_dir))
+    text = ssh_config.read(Path(state_dir))
+    new = tuple(line.strip() for line in lines if line and line.strip() and not line.strip().startswith("#"))
+    check = ssh_config.check_lines(new, jump_path=ssh_config.argument(path))
+    old = tuple(ssh_config.block_lines(text, host) or ())
+    return SshBlockPlan(host, old, new, tuple(check.refused), tuple(check.knowingly), text)
+
+
+def ssh_block_lines(plan: SshBlockPlan) -> List[str]:
+    """What the person reads before saying yes (the CLI prints these; the Boards window shows the same facts): the
+    block now and after the change, every refused line with its reason, and what each ProxyJump or ProxyCommand line
+    does."""
+    lines = [f"Host {plan.host}, now: " + ("; ".join(plan.old) if plan.old else "no settings"),
+             f"Host {plan.host}, after the change: " + ("; ".join(plan.new) if plan.new else "no settings (the block "
+                                                                                           "goes)")]
+    lines += [f"Refused: {problem.text()}" for problem in plan.refused]
+    lines += [f"{item.line}: {item.what}" for item in plan.knowingly]
+    return lines
+
+
+def save_ssh_block(state_dir: Path, plan: SshBlockPlan, *, via: str, knowingly: bool = False, audit: Any = None,
+                   actor: str = "") -> Path:
+    """Writes the planned block into the framework's own SSH settings file (atomically, readable by this account
+    only) and audits it (the person's channels only: PermissionError for any other `via`; no module an AI can reach
+    imports this one). BoardStepError kinds: ssh_refused (a refused line; facts["problems"]), ssh_knowingly (a
+    ProxyJump or ProxyCommand without the person's knowing yes), ssh_unchanged, ssh_stale (the file changed since the
+    plan was made). The audit row names no host: the number of lines and whether a jump or a command is among them."""
+    from orchestrator.remote import ssh_config
+    from orchestrator.remote.pairing import PERSON_CHANNELS
+    from orchestrator.utils.atomic import write_private
+    from orchestrator.utils.file_lock import file_lock
+    if via not in PERSON_CHANNELS:
+        raise PermissionError("Only the person changes the framework's SSH settings (the GUI or the CLI).")
+    if plan.refused:
+        raise BoardStepError("The settings hold a line the framework never uses: " + "; ".join(
+            p.text() for p in plan.refused), "ssh_refused", problems=[p.text() for p in plan.refused])
+    if plan.knowingly and not knowingly:
+        raise BoardStepError("A ProxyJump or ProxyCommand is added only with your yes after reading what it does.",
+                             "ssh_knowingly")
+    if plan.unchanged:
+        raise BoardStepError(f"The settings of {plan.host} are already these; nothing was changed.", "ssh_unchanged")
+    state_dir = Path(state_dir)
+    path = ssh_config.ensure(state_dir)
+    with file_lock(state_dir / ".ssh_config.lock"):
+        if ssh_config.read(state_dir) != plan.text:
+            raise BoardStepError("The framework's SSH settings file changed since these settings were read; read them "
+                                 "again.", "ssh_stale")
+        write_private(path, ssh_config.with_block(plan.text, plan.host, plan.new))
+    ssh_config.ensure(state_dir)   # private to this account (an ACL on Windows), as the framework key
+    from orchestrator.remote.pairing import _open_audit
+    log = _open_audit(audit)
+    if log is not None:
+        try:
+            log.record(actor or via, "ssh_config_changed", "framework", "ask", "ok",
+                       arguments={"lines": len(plan.new), "removed": not plan.new,
+                                  "jump_or_command": bool(plan.knowingly)},
+                       approved=True, extra={"confirm_channel": f"framework-{via}", "answer": "accepted"})
+        except Exception:  # noqa: BLE001 - the file holds the person's change; the log reports its own failure
+            pass
+    return path
+
+
+def import_ssh_block(host: str, home_config: Optional[Path] = None) -> List[str]:
+    """The person-only import (round 25 Q4): the option lines of `host`'s Host block in the person's own ~/.ssh/config
+    (`home_config`; tests give their own file), read only. The caller shows them and writes them through plan_ssh_block
+    and save_ssh_block with the same checks; Include and Match are not followed. BoardStepError kind ssh_import_none
+    when the file has no Host block naming `host` exactly, ssh_import_unreadable when it cannot be read."""
+    from orchestrator.remote import ssh_config
+    path = Path(home_config) if home_config is not None else Path.home() / ".ssh" / "config"
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        raise BoardStepError("There is no ~/.ssh/config on this computer.", "ssh_import_none") from None
+    except OSError as e:
+        raise BoardStepError(f"~/.ssh/config cannot be read ({e.strerror or e}).", "ssh_import_unreadable",
+                             error=e) from None
+    lines = ssh_config.in_home_config(text, host)
+    if not lines:
+        raise BoardStepError(f"~/.ssh/config has no Host block for {host}.", "ssh_import_none")
+    return lines
+
+
 __all__ = ["BoardPrune", "BoardStepError", "DAMAGED_QUESTION", "SUDO_QUESTION", "SYSTEMD_CONSENT",
            "UNTRUSTED_CONSENT", "UNTRUSTED_QUESTION", "add_trusted_board", "board_address", "boards_overview",
            "change_settings", "check_board_entry", "connect_stored", "device_rows", "list_board_builds",
            "load_settings", "not_known_error", "previous_build", "read_host_key", "record_consent", "remember_board",
            "remove_board_builds", "remove_trust", "settings_to_change", "trusted_rows", "unreachable_error",
            "BoardChange", "CHANGE_QUESTION", "change_board", "change_lines", "framework_key_logs_in",
-           "moved_lines", "plan_board_change", "BuildDeploy", "deploy_build", "device_audit", "remember_deployed"]
+           "moved_lines", "plan_board_change", "BuildDeploy", "deploy_build", "device_audit", "remember_deployed",
+           "SSH_BLOCK_QUESTION", "SSH_KNOWINGLY_QUESTION", "SshBlockPlan", "import_ssh_block", "plan_ssh_block",
+           "save_ssh_block", "ssh_block_lines", "ssh_settings"]

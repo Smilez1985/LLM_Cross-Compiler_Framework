@@ -239,6 +239,7 @@ def install_runtime(shell: Any, *, state_dir: Path, device_id: str, profile: Any
     result = deploy_runtime(shell, tarball=packaged.path, tarball_sha256=packaged.sha256, build_id=build.build_id,
                             arch=arch, settings=settings, check=check_new_build, say=say, kv_cache=kv_cache)
     report = result.report
+    record_heat(state_dir, device_id, getattr(report, "heat", None))   # for Mojo, also when the checks failed
     if not result.activated or report is None or not report.ok:
         return InstallOutcome(result, report, False)
     now = utc_stamp()
@@ -384,7 +385,32 @@ def check_runtime(shell: Any, *, state_dir: Path, device_id: str, home: str, rec
     record.update({"verification": report.as_dict(), "verified_at": utc_stamp()})
     record.pop("format", None)
     DeviceRuntimeStore(state_dir, device_id).save_record(record)
+    record_heat(state_dir, device_id, report.heat)
     return report
+
+
+def record_heat(state_dir: Path, device_id: str, heat: Any) -> None:
+    """The board's temperature at these checks, kept for Mojo Oracle until the next reading (trusted.record_heat)."""
+    from orchestrator.runtime.device.trusted import record_heat as record
+    record(state_dir, device_id, heat)
+
+
+def heat_lines(report: Any, lang: Optional[str] = None) -> List[str]:
+    """The person's lines about the board's temperature at the checks of `report` (thermal.person_lines): the
+    temperature, and for a hot board the warning, what helps and the Mojo line; none without a reading."""
+    from orchestrator.runtime.device.thermal import person_lines
+    return person_lines(getattr(report, "heat", None), lang)
+
+
+def heat_facts(report: Any) -> Dict[str, Any]:
+    """The reading for an AI or the GUI's benchmark window: {"temperature": numbers, zone type, family} and, for a hot
+    board, {"temperature_note": thermal.ai_text}: no path, no account; {} without a reading."""
+    from orchestrator.runtime.device.thermal import ai_text
+    heat = getattr(report, "heat", None)
+    if heat is None:
+        return {}
+    note = ai_text(heat)
+    return {"temperature": heat.as_dict(), **({"temperature_note": note} if note else {})}
 
 
 def check_lines(report: Any) -> List[Dict[str, Any]]:
@@ -395,5 +421,6 @@ def check_lines(report: Any) -> List[Dict[str, Any]]:
 __all__ = ["BenchChoice", "BuildCancelled", "DeployHooks", "InstallOutcome", "NotBuilt", "PackageNeedsSource",
            "RootUser", "RuntimeBuild", "RuntimeDeploy", "SourceDeclined", "StoredRuntime", "build_runtime",
            "catalog_model_digests", "check_lines", "check_runtime", "choose_bench_model", "deploy_runtime_flow",
-           "deployed_verify_plan", "ensure_package", "install_runtime", "older_package_count", "plan_runtime",
-           "plan_view", "runtime_status", "stored_runtime", "utc_stamp"]
+           "deployed_verify_plan", "ensure_package", "heat_facts", "heat_lines", "install_runtime",
+           "older_package_count", "plan_runtime", "plan_view", "record_heat", "runtime_status", "stored_runtime",
+           "utc_stamp"]

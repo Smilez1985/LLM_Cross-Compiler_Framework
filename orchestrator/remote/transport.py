@@ -363,34 +363,73 @@ def config_value(path: Any) -> str:
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def openssh_file(path: Any) -> str:
+    """`path` as the value of an OpenSSH option that expands %-tokens (IdentityFile, UserKnownHostsFile, ...): quoted
+    as config_value does, with each '%' written as '%%' (DECISIONS round 25 Q5), so a '%' in the framework's own
+    folder names that very file. A Windows path is written with forward slashes."""
+    from orchestrator.remote import ssh_config
+    text = path.as_posix() if isinstance(path, PureWindowsPath) else str(path)
+    return config_value(ssh_config.tokens(text))
+
+
+def key_file_of(options: Sequence[str]) -> str:
+    """The framework key's file in `options` (openssh_options' IdentityFile option, or an older list's -i), as
+    OpenSSH names it in what it prints: unquoted, each '%%' read back as '%'."""
+    options = list(options)
+    for i, word in enumerate(options[:-1]):
+        if word == "-i":
+            return options[i + 1]
+        if word == "-o" and options[i + 1].startswith("IdentityFile="):
+            value = options[i + 1][len("IdentityFile="):]
+            if len(value) >= 2 and value[0] == value[-1] == '"':
+                value = value[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+            return value.replace("%%", "%")
+    return ""
+
+
 # The null device as OpenSSH names a file: GlobalKnownHostsFile points here, so this computer's system-wide known_hosts
 # (/etc/ssh/ssh_known_hosts, on Windows %ProgramData%\ssh\ssh_known_hosts) never decides about a board's host key.
 NULL_DEVICE = "NUL" if os.name == "nt" else "/dev/null"
 
 
 def openssh_options(state_dir: Path) -> List[str]:
-    """The options of every OpenSSH call of the framework: the framework key only (IdentitiesOnly, -i), the
-    framework's known_hosts only (UserKnownHostsFile; GlobalKnownHostsFile is the null device, so a key in this
-    computer's system-wide known_hosts is never taken either), and never a question or an accepted new key
-    (BatchMode, StrictHostKeyChecking); a connection that gives up after LOGIN_TIMEOUT seconds (ConnectTimeout) and a
-    keepalive every KEEPALIVE_SECONDS that ends a session after KEEPALIVE_COUNT unanswered ones (ServerAliveInterval,
-    ServerAliveCountMax), so a dropped network ends the call instead of holding it. The key file is made private to
-    this account first (OpenSSH refuses a key others can read: utils/atomic.py owner_only, an ACL on Windows). The
-    framework key and known_hosts are read through orchestrator/utils/ssh_trust at call time
-    (ssh_trust.system_ssh_options is this function's old name)."""
+    """The options of every OpenSSH call of the framework, all on the command line, which OpenSSH reads first (the
+    first value it obtains for an option wins):
+
+    - -F with the framework's own configuration file (orchestrator/remote/ssh_config.py, DECISIONS round 25 Q4), so
+      OpenSSH reads neither ~/.ssh/config nor /etc/ssh/ssh_config; it holds only what the person added (a ProxyJump,
+      for example) and is checked before each use (SshConfigRefused, a local problem, when a hand edit put a line in
+      it the framework never uses);
+    - the framework's known_hosts only (UserKnownHostsFile; GlobalKnownHostsFile is the null device, so a key in this
+      computer's system-wide known_hosts is never taken either), never a question or an accepted new key (BatchMode,
+      StrictHostKeyChecking), and OpenSSH never writes to it or trusts a key another way (CheckHostIP, UpdateHostKeys
+      and VerifyHostKeyDNS off);
+    - the framework key only (IdentitiesOnly, IdentityFile);
+    - a connection that gives up after LOGIN_TIMEOUT seconds (ConnectTimeout) and a keepalive every KEEPALIVE_SECONDS
+      that ends a session after KEEPALIVE_COUNT unanswered ones (ServerAliveInterval, ServerAliveCountMax), so a
+      dropped network ends the call instead of holding it.
+
+    The framework's own paths in options that expand %-tokens are written with '%%' for a '%' (Q5, openssh_file); -F's
+    path is read literally. The key file is made private to this account first (OpenSSH refuses a key others can read:
+    utils/atomic.py owner_only, an ACL on Windows). The framework key and known_hosts are read through
+    orchestrator/utils/ssh_trust at call time (ssh_trust.system_ssh_options is this function's old name)."""
+    from orchestrator.remote import ssh_config
     from orchestrator.utils import ssh_trust
     from orchestrator.utils.atomic import owner_only
+    config = ssh_config.prepare(state_dir)
     private, _ = ssh_trust.client_key(state_dir)
     try:
         owner_only(private)
     except OSError as e:   # OpenSSH then says what it refuses; the login fails with local_problem
         _log.warning(f"The framework's SSH key could not be made private to this account ({e.strerror or e}).")
-    return ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
-            "-o", f"UserKnownHostsFile={config_value(ssh_trust.known_hosts_path(state_dir))}",
+    return ["-F", ssh_config.argument(config),
+            "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+            "-o", f"UserKnownHostsFile={openssh_file(ssh_trust.known_hosts_path(state_dir))}",
             "-o", f"GlobalKnownHostsFile={NULL_DEVICE}",
+            "-o", "CheckHostIP=no", "-o", "UpdateHostKeys=no", "-o", "VerifyHostKeyDNS=no",
             "-o", "IdentitiesOnly=yes", "-o", f"ConnectTimeout={int(LOGIN_TIMEOUT)}",
             "-o", f"ServerAliveInterval={KEEPALIVE_SECONDS}", "-o", f"ServerAliveCountMax={KEEPALIVE_COUNT}",
-            "-i", str(private)]
+            "-o", f"IdentityFile={openssh_file(private)}"]
 
 
 def remote_location(endpoint: Any, user: str, path: Optional[str] = None) -> str:
@@ -647,8 +686,7 @@ class SystemSshTransport(Transport):
         return None
 
     def _key_file(self) -> str:
-        options = self._options or []
-        return options[options.index("-i") + 1] if "-i" in options else ""
+        return key_file_of(self._options or [])
 
     def _write_failed(self, process: Any, readers: _Readers) -> OSError:
         """Why writing into the board's `cat` stopped: OpenSSH failed (SshFailed, the network dropped), or the board's
@@ -738,5 +776,5 @@ class SystemSshTransport(Transport):
 __all__ = ["COMMAND_TIMEOUT", "HASH_TIMEOUT", "KEEPALIVE_COUNT", "KEEPALIVE_SECONDS", "LOGIN_TIMEOUT", "MAX_OUTPUT",
            "NULL_DEVICE", "OPENSSH_FAILED", "PARAMIKO_AVAILABLE", "ParamikoTransport", "Result", "SshFailed",
            "SystemSshTransport", "TooMuchOutput", "Transport", "available", "config_value", "imported_paramiko",
-           "open_client", "openssh_argv", "openssh_options", "paramiko_module", "paramiko_quiet", "read_limited", "remote_location",
-           "sh_command", "timed_out"]
+           "key_file_of", "open_client", "openssh_argv", "openssh_file", "openssh_options", "paramiko_module",
+           "paramiko_quiet", "read_limited", "remote_location", "sh_command", "timed_out"]

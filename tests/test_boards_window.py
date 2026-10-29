@@ -380,7 +380,10 @@ def test_settings_refusals_are_the_clis(qapp, window, monkeypatch):
     assert "does not run systemd" in boxes.asked[-1].text and "sysvinit" in boxes.asked[-1].text
     assert window.change_settings(entry, DEVUAN, current, {"ssh_user": "root"}) is False
     assert "never runs as root" in boxes.asked[-1].text
-    window.framework.tool_registry.audit = None   # no audit log: no consent, nothing changes
+    # no audit log: no consent, nothing changes. Since round 25 Q3 the window falls back to the per-user audit.db as
+    # the CLI does (tests/test_audit_sink.py), so "none" means neither the registry's log nor audit.db can be opened.
+    from orchestrator.runtime.device import person_steps
+    monkeypatch.setattr(person_steps, "device_audit", lambda framework, state_dir: None)
     stored(state, device_id="fedcba9876543210")
     window.reload()
     entry = next(e for e in window.entries if e["device_id"] == "fedcba9876543210")
