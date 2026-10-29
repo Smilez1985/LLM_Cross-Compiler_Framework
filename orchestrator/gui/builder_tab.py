@@ -860,6 +860,9 @@ class BuilderTab(QWidget):
                 self._set_state("default")
                 self._log("No matching profile found in database.")
                 after_probe(self, profile, None)
+            # The probe drives the formats and the build of the target it fits only (a scan of this PC fits no
+            # Rockchip board: the build service would refuse it for one, and its NPU is not the board's)
+            self._probe_target = match or None
             if hasattr(self, "format_combo"):
                 self._apply_target_capabilities()
 
@@ -875,6 +878,20 @@ class BuilderTab(QWidget):
         from orchestrator.gui.targets_window import declares_capabilities
         return bool(self.framework) and declares_capabilities(self.framework, target)
 
+    def _board_probe(self, target):
+        """The profile of the probe the tab scanned or imported last, when it fits `target` (the target it matched);
+        None otherwise: then the target's formats are not narrowed by it."""
+        if target is None or target != getattr(self, "_probe_target", None):
+            return None
+        return getattr(self, "_probe_profile", None)
+
+    def _board_probe_id(self, target):
+        """The id of that probe for a build of `target` (BuildRequestIn.probe), None when it does not fit `target`:
+        the build service then takes the newest stored probe of the board, if any."""
+        if self._board_probe(target) is None:
+            return None
+        return getattr(self, "_probe_id", None)
+
     def _apply_target_capabilities(self):
         """Offers exactly the formats the selected target declares. A target that declares none gets what the CLI
         allows (every format), and the note that its boards, formats and quantizations are not checked."""
@@ -888,7 +905,7 @@ class BuilderTab(QWidget):
         # only on an x86_64 computer; the build service refuses the others with the reason.
         offered = offered_formats(caps)
         if caps is not None:
-            offered = probe_formats(caps, profile=getattr(self, "_probe_profile", None),
+            offered = probe_formats(caps, profile=self._board_probe(self.target_combo.currentData()),
                                     host_arch=build_host_arch()) or offered
         for label, value in offered:
             self.format_combo.addItem(label, value)
@@ -1190,7 +1207,7 @@ class BuilderTab(QWidget):
                   "target_fmt": target_fmt, "opt_lvl": opt_lvl, "quant": quant, "board": board,
                   "dataset": self.dataset_path, "recipe": recipe, "output_dir": output_dir,
                   "use_gpu": self.chk_gpu.isChecked(), "use_imatrix": self.chk_imatrix.isChecked(),
-                  "priority": self._priority(), "probe": getattr(self, "_probe_id", None)}
+                  "priority": self._priority(), "probe": self._board_probe_id(self.target_combo.currentData())}
         found, lookup = self._earlier_builds(values)
         if lookup is not None:
             self._look_up_commit(values, found, lookup)
