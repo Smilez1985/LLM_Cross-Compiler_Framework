@@ -405,6 +405,10 @@ class CrawlerManager:
         person's crawl the one network-locality rule (validate_own_network_url); an AI's crawl in offline mode reads
         nothing."""
         from orchestrator.utils.locality import offline_mode
+        if self.own_network and not offline_mode(self.config):
+            # offline mode was switched off during the crawl: judged again, like the switch the other way, so the
+            # own network is no longer read; the crawl goes on with the public-only guard
+            self._leave_own_network()
         if self.own_network:
             check = validate_own_network_url(url, self.config)
         elif self.offline or offline_mode(self.config):
@@ -413,6 +417,15 @@ class CrawlerManager:
         else:
             check = validate_public_url(url)
         return None if check else check.message
+
+    def _leave_own_network(self) -> None:
+        """Drops the own-network reading of a person's offline crawl: the public-only adapter replaces the
+        local-only one, and every later URL is judged by the public-only guard."""
+        self.own_network = False
+        self.offline = False
+        adapter = PublicOnlyAdapter()
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
 
     def _guarded_get(self, url: str, kind: str = "page", timeout: int = 10) -> requests.Response:
         """Fetches exactly the URL that passed the SSRF check, without following redirects. kind is "page",
