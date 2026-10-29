@@ -3517,11 +3517,14 @@ def mojo(ctx: FrameworkContext, mode: str, as_json: bool, board: Optional[str]):
             data = {"mode": mode, **_mojo_dict(report, offered)}
         click.echo(json.dumps(data, indent=2))
         sys.exit(data["exit_code"])
+    from orchestrator.Core.mojo.banner import close_oracle, oracle_open, record_oracle
     terminal = _interactive()
     _mojo_print_oracle(report, offered, terminal)
     _mojo_offer_boards(framework, report, terminal)
     if mode == "oracle":
         from orchestrator.Core.mojo.views import miracle_acts
+        if terminal:   # an open Oracle run: a Miracle run at a terminal after it closes the circle (round 27)
+            record_oracle(framework)
         acts = miracle_acts(offered)   # the GUI's Mojo window offers Mojo Miracle under the same rule
         if not acts:
             sys.exit(report.exit_code)
@@ -3533,12 +3536,20 @@ def mojo(ctx: FrameworkContext, mode: str, as_json: bool, board: Optional[str]):
         if not click.confirm("Run Mojo Miracle now?", default=False):
             console.print("Mojo Miracle did not run; nothing was changed.")
             sys.exit(report.exit_code)
+    # After Mojo Oracle: its question answered yes here, or an Oracle run at a terminal still open (round 27).
+    circle = terminal and (mode == "oracle" or oracle_open(framework))
     console.print("\n[bold]Mojo Miracle: repairing what can be repaired[/bold]")
     asked = {"decision": "person", "answered_by": "person", "confirm_channel": "framework-cli"} if terminal else {}
-    # The plans printed above bind the repairs: a problem that changed since then is not repaired (plan_changed).
-    result = engine.miracle(actor="cli", at_terminal=terminal, before=report, offered=offered,
-                            free_space=(lambda: _mojo_free_space(framework)) if terminal else None, **asked)
-    _mojo_print_miracle(result)
+    try:
+        # The plans printed above bind the repairs: a problem that changed since then is not repaired (plan_changed).
+        result = engine.miracle(actor="cli", at_terminal=terminal, before=report, offered=offered,
+                                free_space=(lambda: _mojo_free_space(framework)) if terminal else None, **asked)
+        _mojo_print_miracle(result)
+        if circle:
+            _mojo_print_circle(result)
+    finally:
+        if terminal:   # any Miracle run at a terminal closes the open Oracle run, whatever its outcome
+            close_oracle(framework)
     sys.exit(result.exit_code)
 
 
@@ -3644,6 +3655,28 @@ def _mojo_print_miracle(result) -> None:
         if finding.fix_hint:
             console.print(f"    → {escape(finding.fix_hint)}")
     console.print(miracle_summary(result))
+
+
+def _mojo_print_circle(result) -> None:
+    """Mojo closes the circle (DECISIONS round 27): after Mojo Oracle at a terminal, the crystal ball and one line,
+    "[Mojo] Miracle managed. The oracle is pleased." or "[Mojo] 404 - miracle not found" (Core/mojo/banner.circle_line;
+    nothing for any other outcome). Printed as rich Text, never as markup ("[Mojo]", the brackets and the drawing's
+    backslashes stay as they are), through the console, which shows colour only where the console can show it (no
+    terminal: plain text). Where the console was told NO_COLOR, the drawing is plain text too: rich would drop only its
+    colours and keep the bold."""
+    from rich.text import Text
+
+    from orchestrator.Core.mojo.banner import banner_lines, circle_line
+    line = circle_line(result)
+    if line is None:
+        return
+    plain = bool(getattr(console, "no_color", False))
+    console.print()
+    for runs in banner_lines(line, styled=True):
+        text = Text()
+        for part, style in runs:
+            text.append(part, style=None if plain or not style else style)
+        console.print(text, soft_wrap=True)   # a console narrower than the drawing wraps it itself
 
 
 def _mojo_free_space(framework) -> Tuple[int, str]:

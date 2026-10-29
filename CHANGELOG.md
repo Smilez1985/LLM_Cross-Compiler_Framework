@@ -10,6 +10,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **Mojo closes the circle: the crystal ball after Mojo Miracle** (DECISIONS round 27 and its addendum): when Mojo
+  Miracle ends after Mojo Oracle at a terminal (the answer `y` to "Run Mojo Miracle now?", or `llmcf mojo --miracle`
+  while an earlier Oracle run at the terminal is still open), `llmcf mojo` shows a large ASCII crystal ball, in colour
+  where the console can show colour (rich's console decides: no colour without a terminal, with `NO_COLOR` or on a
+  console that cannot show it), and under it "[Mojo] Miracle managed. The oracle is pleased." when at least one problem
+  was repaired, none is left and the check afterwards found nothing new, or "[Mojo] 404 - miracle not found" when there
+  was nothing to repair (no problem, or every one already gone). Any other outcome (a problem left or declined, a new
+  one) shows no logo. The open Oracle run is one small private file next to Mojo Miracle's lock in the per-user state
+  folder of the `LLM_FRAMEWORK_HOME` in use (no path, no account name); every Miracle run at a terminal removes it when
+  it ends, whatever its outcome. Never with `--json`, without a terminal, through `run_mojo_oracle` and
+  `run_mojo_miracle` or in the GUI: nothing AI-facing changes. The drawing (pure ASCII, 60 columns) and its colour mask
+  live in `orchestrator/Core/mojo/banner.py`, one place to swap them; a test checks that they have the same shape.
 - **Hardware probe 3.1.0: L2 cache, Vulkan instance version, OpenCL platforms, the Hailo keys and the vendor
   runtimes** (consolidation chain probe-keys; decisions round 23 item 11, O-PREP and O-HAILO, HAILO_PLAN.md section 2):
   `scripts/hardware_probe.py` (and its package copy), `hardware_probe.sh` and `hardware_probe.ps1` write, validated by

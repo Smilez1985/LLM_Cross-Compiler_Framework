@@ -51,6 +51,14 @@ Run Mojo Miracle now? [y/N]:
 With `y` Mojo Miracle runs right away; you do not type the command again. No is the default: then nothing is
 changed.
 
+When Mojo Miracle ends after Mojo Oracle at a terminal (your `y` here, or `llmcf mojo --miracle` while an earlier
+`llmcf mojo` at the terminal is still open), the console shows Mojo's crystal ball and under it "[Mojo] Miracle
+managed. The oracle is pleased." when it repaired at least one problem, none is left and nothing new turned up, or
+"[Mojo] 404 - miracle not found" when there was nothing to repair. Any other outcome shows no logo, and neither do
+`--json`, a run without a terminal, the AI tools or the GUI. The open Oracle run is a small private note next to
+Mojo Miracle's lock in your personal folder (`mojo/oracle_open.json`, with no path and no account name in it); every
+Mojo Miracle run at a terminal removes it when it ends.
+
 In the GUI (unreleased): **Tools > Mojo Health Check...** runs Mojo Oracle when the window opens and shows the same
 findings with an overall line for the exit code; **Run Mojo Miracle...** asks the same question (No is the default),
 opens the framework's build images in the deletion dialog and shows what was repaired, what was not and why. The
