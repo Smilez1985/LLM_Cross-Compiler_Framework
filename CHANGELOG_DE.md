@@ -1494,8 +1494,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Die Hardware-Probe des Boards steuert jeden Build; NPU-Formate nur mit seiner NPU** (DECISIONS Runde 23 Punkte 5
   und 15): Ein Build-Auftrag nennt die Probe des Boards mit ihrer ID (`llm-cli build start --probe ID`,
   `BuildRequestIn.probe`; der Builder-Tab die Probe, die er zuletzt importiert oder erfasst hat); ohne sie gilt die
-  neueste gespeicherte Probe eines Boards des SoC des Auftrags, und eine Probe eines anderen Boards wird abgelehnt. Die
-  Build-Engine schreibt sie in den Ordner des Builds und bindet sie nur lesbar in jeden Build-Container ein, auch in
+  neueste gespeicherte Probe eines Boards des SoC des Auftrags, und eine Probe eines anderen Boards wird abgelehnt: ein
+  anderes Board des Targets, ein Board eines anderen SoC (ein RK3588S zählt als RK3588) oder ein System einer anderen
+  Architektur als der des Targets (die Probe dieses PCs für ein Rockchip-Board); der Builder-Tab nutzt seine Probe nur
+  für das Target, zu dem sie passte. Die Build-Engine schreibt sie in den Ordner des Builds und bindet sie nur lesbar in jeden Build-Container ein, auch in
   den Importance-Matrix-Job, als `HARDWARE_CONFIG_FILE`: Die Stufe config plant den Build für dieses Board, und der
   sha256 der Probe gehört zu einem identischen Build. Die Formate folgen der Probe über ein Urteil
   (`build_formats.format_refusal`): RKLLM und RKNN nur, wenn die Probe die Rockchip-NPU zeigt, sonst GGUF; RKLLM nur
@@ -1514,7 +1516,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Shell sie erweitert hat, mit `module_flag_problem --alone` in `target_module.sh`, bevor cmake läuft, und ein
   abgelehnter Aufruf startet cmake nicht; vorher wurden nur die `CMAKE_FLAGS` des Moduls beim Cross-Build des Pakets
   geprüft. `validate_target_folder` liest auch die Zeilen des Dockerfiles eines Targets, die die Dockerfiles der
-  Vorlage nicht haben, auf eine llama.cpp-Option, die herunterlädt. Die Urteile bleiben in dieser einen Funktion.
+  Vorlage nicht haben, auf eine llama.cpp-Option, die herunterlädt. Die Urteile bleiben in dieser einen Funktion. Ein
+  Project-Include (`CMAKE_PROJECT_INCLUDE`, `CMAKE_PROJECT_INCLUDE_BEFORE`, `CMAKE_PROJECT_<name>_INCLUDE`,
+  `CMAKE_PROJECT_TOP_LEVEL_INCLUDES`) führt ein Skript aus, das jede Option wieder einschalten kann, und wird deshalb
+  wie `-C` und `-P` abgelehnt (`recipe.refused_option`, beide Urteile).
 - **Rockchip-Image in zwei Stufen; die Format-Helfer der Vorlage sind echt** (Runde 23 Punkt 14): Die Stufe `builder`
   baut die Werkzeuge von llama.cpp und die drei venvs mit jeder Festlegung; das Image bekommt die venvs und den
   Quellbaum mit seinen Werkzeugen an denselben Pfaden und nur, was die Build-Stufen ausführen (kein `build-essential`,
