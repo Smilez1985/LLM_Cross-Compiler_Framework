@@ -2,10 +2,12 @@
 orchestrator/utils/locality.py).
 
 (a) a host counts by every address it resolves to (loopback, RFC 1918 / fc00::/7 and link-local are local; a name
-never makes a public address local; local and public together is not local); (b) Tailscale's ranges only with
-Headscale in the own network and only own relays, read from the tailscale CLI (field names of ipn.Prefs and
-tailcfg.DERPMap); (c) a public name is not local; (d) the person's opt-outs; (e) the system resolver with a timeout,
-cached for the run, never on the GUI thread, and the checked address is the one a connection uses."""
+never makes a public address local; local and public together count as local by the local ones, round 26 Q4); (b)
+Tailscale's ranges only with Headscale in the own network and only own relays, read from the tailscale CLI (field
+names of ipn.Prefs, ipnstate.Status and tailcfg.DERPMap), and only for a device of the tailnet (round 26 h); (c) a
+public name is not local; (d) the person's opt-outs; (e) the system resolver with a timeout, cached for LOOKUP_TTL,
+never on the GUI thread, and the checked address is the one a connection uses. The round 26 follow-ups have their own
+tests in tests/test_offline_followups.py."""
 
 import json
 import subprocess
@@ -57,7 +59,9 @@ def table(**names):
 
 
 NOT_OWN = lambda: VpnCheck(False, "tailscale_control", "controlplane.tailscale.com")  # noqa: E731
-OWN = lambda: VpnCheck(True, "own_headscale", "headscale.lan")  # noqa: E731
+# the own Headscale with the tailnet's devices (round 26 h: a VPN address counts only for a device of the tailnet)
+TAILNET = frozenset({"100.101.102.103", "fd7a:115c:a1e0::5", "100.64.0.5", "100.64.1.1", "100.64.1.2"})
+OWN = lambda: VpnCheck(True, "own_headscale", "headscale.lan", members=TAILNET)  # noqa: E731
 
 
 # --- (a) addresses --------------------------------------------------------------------------------------------------
@@ -82,7 +86,8 @@ def test_address_kinds(address, kind):
     ("server.home.arpa", ["fe80::2"], True, "own_network"),
     ("gpu.internal", ["172.20.0.4"], True, "own_network"),
     ("box.local", ["203.0.113.9"], False, "public"),                    # a suffix never makes a public address local
-    ("nas", ["192.168.1.20", "203.0.113.9"], False, "mixed"),           # local and public: not local
+    # local and public (round 26 Q4, changed on purpose): local by its local addresses; the public one is never used
+    ("nas", ["192.168.1.20", "203.0.113.9"], True, "own_network"),
     ("myhome.duckdns.org", ["198.51.100.7"], False, "public"),          # (c) a reverse proxy's public name
     ("ollama.example.com", ["10.0.0.9"], True, "own_network"),          # any name counts by its addresses
     ("selfhosted.example", ["127.0.0.1"], True, "this_computer"),
@@ -131,13 +136,20 @@ def test_a_tailscale_address_is_local_in_the_own_headscale():
     assert verdict.reason == "vpn"
 
 
-def cli(prefs, derp, calls=None):
-    """A stand-in for `tailscale debug prefs` and `tailscale debug derp-map` (JSON as the CLI prints it)."""
+# `tailscale status --json` of a running tailnet (ipnstate.Status) whose devices are TAILNET
+STATUS = {"BackendState": "Running", "TailscaleIPs": ["100.64.0.1"], "Self": {"TailscaleIPs": ["100.64.0.1"]},
+          "Peer": {f"nodekey:{i}": {"TailscaleIPs": [a], "AllowedIPs": [f"{a}/{128 if ':' in a else 32}"]}
+                   for i, a in enumerate(sorted(TAILNET))}}
+
+
+def cli(prefs, derp, calls=None, status=None):
+    """A stand-in for `tailscale debug prefs`, `tailscale status --json` and `tailscale debug derp-map` (JSON as the
+    CLI prints it; the status of a running tailnet with the devices of TAILNET unless `status` is given)."""
     def run(argv):
         if calls is not None:
             calls.append(list(argv))
-        assert argv[0] == "/usr/bin/tailscale" and argv[1] == "debug"
-        out = {"prefs": prefs, "derp-map": derp}[argv[2]]
+        assert argv[0] == "/usr/bin/tailscale" and (argv[1] == "debug" or list(argv[1:]) == ["status", "--json"])
+        out = {"prefs": prefs, "derp-map": derp, "--json": STATUS if status is None else status}[argv[2]]
         if isinstance(out, Exception):
             raise out
         return out if isinstance(out, str) else json.dumps(out)
@@ -164,7 +176,9 @@ def test_headscale_with_only_own_relays_is_the_own_vpn():
     calls = []
     check = tailscale_vpn(cli(HEADSCALE, derp_map({"HostName": "derp.lan"}), calls), NAMES, which)
     assert check == VpnCheck(True, "own_headscale", "headscale.lan")
-    assert calls == [["/usr/bin/tailscale", "debug", "prefs"], ["/usr/bin/tailscale", "debug", "derp-map"]]
+    # prefs, the tailnet (round 26 h, a third command on purpose) and the relays
+    assert calls == [["/usr/bin/tailscale", "debug", "prefs"], ["/usr/bin/tailscale", "status", "--json"],
+                     ["/usr/bin/tailscale", "debug", "derp-map"]]
 
 
 @pytest.mark.parametrize("node", [{"HostName": "derp.lan", "IPv4": "192.168.1.3", "IPv6": "fd00::3"},
@@ -207,10 +221,10 @@ def test_the_vpn_check_runs_once_per_run(monkeypatch):
     monkeypatch.setattr(locality, "_system_lookup", lambda host: {"headscale.lan": ["192.168.1.2"]}[host])
     assert check_host("100.64.1.1").reason == "own_vpn"
     assert check_host("100.64.1.2").reason == "own_vpn"
-    assert len(calls) == 2, "prefs and derp-map once"
+    assert len(calls) == 3, "prefs, status and derp-map once"
     locality.clear_cache()
     check_host("100.64.1.1")
-    assert len(calls) == 4
+    assert len(calls) == 6
 
 
 # --- (d) the person's opt-outs --------------------------------------------------------------------------------------
@@ -275,7 +289,10 @@ def test_a_failed_lookup_is_asked_again_only_after_a_while(monkeypatch):
 
 def test_no_lookup_and_no_vpn_command_on_the_gui_thread(monkeypatch):
     locality.mark_ui_thread()
-    monkeypatch.setattr(locality.shutil, "which", lambda name: pytest.fail("tailscale on the GUI thread"))
+    # the tailscale command never on the GUI thread; a worker may run it (round 26 h: a private address is checked
+    # against the tailnet's subnet routes there), here without the command installed
+    monkeypatch.setattr(locality.shutil, "which",
+                        lambda name: pytest.fail("tailscale on the GUI thread") if locality.on_ui_thread() else None)
     verdict = check_host("nas.lan")
     assert not verdict.local and verdict.reason == "not_checked" and "not checked yet" in verdict.why()
     assert check_host("100.64.0.1").reason == "vpn"
@@ -393,7 +410,8 @@ def test_the_tailscale_command_runs_as_every_helper_command(monkeypatch):
 # and deliberate edges of a range (just outside 172.16.0.0/12 and 198.51.100.0/24; multicast).
 PUBLIC_KEPT = {"8.8.8.8", "93.184.215.14", "172.32.0.1", "198.51.101.1", "224.0.0.1"}
 DOCUMENTATION = ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32")
-OFFLINE_TESTS = ("test_locality.py", "test_offline_reach.py", "test_local_network.py", "test_offline_check.py")
+OFFLINE_TESTS = ("test_locality.py", "test_offline_reach.py", "test_local_network.py", "test_offline_check.py",
+                 "test_offline_followups.py", "test_offline_followups_review.py")
 
 
 def test_a_public_stand_in_is_a_documentation_address():

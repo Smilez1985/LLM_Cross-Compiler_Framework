@@ -260,7 +260,7 @@ class _ClaudeAPI:
     base_url = "https://api.anthropic.com"
 
     @staticmethod
-    def is_local(url=None, config=None) -> bool:
+    def is_local(url=None) -> bool:
         return False
 
 

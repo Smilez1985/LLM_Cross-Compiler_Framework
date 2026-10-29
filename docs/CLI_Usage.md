@@ -2193,11 +2193,14 @@ llm-cli config local-network [--add KIND VALUE | --remove KIND VALUE | --check A
 ```
 
 What offline mode counts as local (unreleased): this computer, your own network, and what you count as local
-yourself. A name counts by every address it resolves to (loopback, private and link-local addresses are local; a
-`.local` or `.lan` name only when it resolves to such an address; a name with a public address is never local), and
-an address of a Tailscale or Headscale VPN only when its control server and every relay are in your own network
-(read with the `tailscale` command when it is installed). Without options the command lists what you count as
-local, with what can then leave your network, and the check of this computer's VPN.
+yourself. A name counts by the addresses it resolves to (loopback, private and link-local addresses are local; a
+`.local` or `.lan` name only when it resolves to such an address; a name with only public addresses is never local;
+a name with local and public addresses counts as local, and the framework connects only to its local ones, which
+`--check` says), and an address of a Tailscale or Headscale VPN only when its control server and every relay are in
+your own network and it belongs to a device of your tailnet (read with the `tailscale` command when it is
+installed; a private address behind a device's subnet route counts like a VPN address). Without options the command
+lists what you count as local, with what can then leave your network, and the check of this computer's VPN. What
+you count as local here counts only for what offline mode may reach: the privacy filter stays on for it.
 
 `--add` counts one more as local: `vpn tailscale` (every Tailscale or Headscale address, also with Tailscale's
 servers or outside relays), `host NAME` (for example your reverse proxy's public name, whatever it resolves to) or

@@ -5,6 +5,14 @@ LLM Cross-Compiler Framework - Crawler Manager
 Deep Ingest of documentation: crawls web pages breadth-first, extracts text from HTML and PDFs and prepares
 it for the knowledge base. Rate-limited, behind the SSRF guard (every request and every redirect hop).
 
+Which addresses a crawl may read (DECISIONS round 26 Q5): online, public addresses only, for every crawl
+(validate_public_url, PublicOnlyAdapter). In offline mode a crawl the person starts (actor "gui" or "cli", the
+person's channels) reads only sites on this computer or in the own network, by the one network-locality rule with the
+person's opt-outs, over a pinned connection without a proxy (validate_own_network_url, LocalOnlyAdapter with crawl):
+every redirect and every followed link is checked again by the same rule, and IPv4 link-local addresses and the cloud
+metadata services are never read (utils/locality.crawl_addresses). A crawl an AI starts (crawl_jobs: no person actor)
+keeps the public-only guard, so in offline mode it reads nothing.
+
 Text and data mining of public pages is allowed unless the rightsholder reserved it in machine-readable form
 (EU DSM Directive Art. 4, German UrhG 44b). The crawler therefore honours, with no switch to turn them off:
 * robots.txt as in RFC 9309, per scheme, host and port (the groups naming our product token merged, else the
@@ -74,7 +82,7 @@ from orchestrator.security.http import (PublicOnlyAdapter, _PinnedConnectionMixi
                                         _PinnedHTTPSConnectionPool)
 from orchestrator.tools.confirmation import visible
 from orchestrator.utils.logging import get_logger
-from orchestrator.utils.validation import validate_public_url
+from orchestrator.utils.validation import validate_own_network_url, validate_public_url
 
 DEFAULT_LANGUAGES = ("en", "de")
 
@@ -96,6 +104,11 @@ _KIB, _MIB = 1024, 1024 * 1024
 _BODY_LABELS = {"html": "HTML pages", "pdf": "PDFs", "robots": "robots.txt", "tdmrep": "tdmrep.json"}
 _READ_SIZE = 64 * 1024
 _PDF_TDM_RESERVATION = re.compile(rb"tdm:reservation\s*(?:=\s*[\"']\s*1\s*[\"']|>\s*1\s*<)")
+# The person's own channels (the actor of a call: "gui", "cli"; an AI is "ditto", "mcp" or "mcp:<token>"): only a crawl
+# the person starts may read the own network in offline mode.
+PERSON_ACTORS = ("gui", "cli")
+OFFLINE_REFUSAL = ("Offline mode is on, so this crawl reads no web site: only a crawl the person starts reads sites in "
+                   "the own network then.")
 
 
 class ResponseRefused(Exception):
@@ -337,10 +350,16 @@ class CrawlerManager:
     # line. No opt-out check is among them: robots.txt, the robots directives and TDMRep are always checked.
     OPTION_KEYS = frozenset({"max_depth", "max_pages", "request_delay", "download_pdfs", "languages"})
 
-    def __init__(self, framework_manager, options: Optional[Dict[str, Any]] = None, *,
+    def __init__(self, framework_manager, options: Optional[Dict[str, Any]] = None, *, actor: str = "",
                  _skip_robots_txt_for_tests: bool = False):
+        """`actor`: who starts the crawl ("gui" or "cli" for the person; anything else, also none, is an AI's crawl,
+        which reads public sites only and nothing in offline mode)."""
         self.logger = get_logger(__name__)
         self.config = framework_manager.config
+        from orchestrator.utils.locality import offline_mode
+        self.offline = offline_mode(self.config)
+        # Round 26 Q5: in offline mode a crawl the person starts reads the own network (and only that)
+        self.own_network = self.offline and actor in PERSON_ACTORS
         opts = dict(options or {})
         ignored = sorted(str(k) for k in opts if k not in self.OPTION_KEYS)
         if ignored:
@@ -372,10 +391,28 @@ class CrawlerManager:
         self.robot_rules: Dict[str, List[Tuple[bool, str]]] = {}   # per origin, from robots.txt
         self.tdm_rules: Dict[str, List[TdmRule]] = {}   # per origin, from /.well-known/tdmrep.json
         self.session = requests.Session()
-        adapter = PublicOnlyAdapter()
+        if self.own_network:   # only the checked local addresses, also after a DNS answer changed (rule e and f)
+            from orchestrator.security.http import LocalOnlyAdapter
+            adapter = LocalOnlyAdapter(self.config, "the crawl", crawl=True)
+        else:
+            adapter = PublicOnlyAdapter()
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
         self.session.headers.update({"User-Agent": USER_AGENT})
+
+    def _address_refusal(self, url: str) -> Optional[str]:
+        """Why the crawl may not read `url` (None when it may): the public-only SSRF guard, or in offline mode for the
+        person's crawl the one network-locality rule (validate_own_network_url); an AI's crawl in offline mode reads
+        nothing."""
+        from orchestrator.utils.locality import offline_mode
+        if self.own_network:
+            check = validate_own_network_url(url, self.config)
+        elif self.offline or offline_mode(self.config):
+            # offline mode, also when it was switched on during a crawl that started online: nothing more is read
+            return OFFLINE_REFUSAL
+        else:
+            check = validate_public_url(url)
+        return None if check else check.message
 
     def _guarded_get(self, url: str, kind: str = "page", timeout: int = 10) -> requests.Response:
         """Fetches exactly the URL that passed the SSRF check, without following redirects. kind is "page",
@@ -384,12 +421,14 @@ class CrawlerManager:
         Headers and body must arrive within the deadline (ResponseTooSlow); a set stop event ends the wait at once.
         The request runs in a worker thread, so neither a slow server nor a stop has to wait for a socket read."""
         prepared = self.session.prepare_request(requests.Request("GET", url))
-        check = validate_public_url(prepared.url)
-        if not check:
-            raise PermissionError(check.message)
+        refused = self._address_refusal(prepared.url)
+        if refused:
+            raise PermissionError(refused)
         # send() alone skips what get() does: env proxies and REQUESTS_CA_BUNDLE / CURL_CA_BUNDLE. Streamed: the
         # body is read below, within its limit.
         settings = self.session.merge_environment_settings(prepared.url, {}, True, None, None)
+        if self.own_network:
+            settings["proxies"] = {}   # offline mode: no proxy, which would resolve the name itself
         start = time.monotonic()
         deadline = [self.REQUEST_DEADLINE]  # seconds; the worker extends it for a PDF
         result: Dict[str, Any] = {}
@@ -477,9 +516,12 @@ class CrawlerManager:
                 continue
             self.visited.add(url)
 
-            # 1. SSRF / format check
-            if not validate_public_url(url):
-                self._skip(url, "unsafe or invalid address (security check)", level=logging.WARNING)
+            # 1. SSRF / format check (offline mode: the own network only, for the person's crawl)
+            refused = self._address_refusal(url)
+            if refused:
+                reason = refused if self.offline or refused == OFFLINE_REFUSAL \
+                    else "unsafe or invalid address (security check)"
+                self._skip(url, reason, level=logging.WARNING)
                 continue
 
             if not self.download_pdfs and urlparse(url).path.lower().endswith('.pdf'):
