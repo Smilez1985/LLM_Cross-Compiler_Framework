@@ -3296,7 +3296,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   KI-Einstellungen lehnen einen Anbieter, den der Offline-Modus nicht erreichen darf, ab, bevor ein Socket aufgeht; die
   llama.cpp-Überschreibung eines Image-Builds (`LLAMA_CPP_REPO_OVERRIDE`) und die Prüfung beim Anheben der Festlegung
   (`scripts/llama_cpp_pin.py`) erreichen nur einen Spiegel in deinem eigenen Netz, festgelegt wie das Holen der Quelle
-  (der Image-Build bekommt `--add-host` für die geprüften Adressen und keinen Proxy); ein internationaler Hostname
+  (der Offline-Modus baut kein Target-Image, also kommt das früher mit derselben Überschreibung gebaute Image); ein internationaler Hostname
   eines Spiegels wird abgelehnt, bis er in seiner `xn--`-Form geschrieben ist (Python und das curl von git wandeln
   einige Zeichen verschieden um). Ein Crawl liest nie eine IPv4-Link-Local-Adresse oder einen Metadatendienst einer
   Cloud (AWS, Google, Azure, Oracle, OpenStack, Akamai/Linode, Alibaba, Scaleway, Tencent, nach ihrer Dokumentation;

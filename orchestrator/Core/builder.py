@@ -951,15 +951,17 @@ class BuildEngine:
 
             labels = {IMAGE_LABEL: config.target_arch, INPUTS_LABEL: self._image_inputs(config, path, buildargs)}
             self._build_images[config.build_id] = tag
+            # The override's check pinned these in offline mode. Offline mode builds no image (below); they still
+            # hold when offline mode was switched off since that check: no proxy, only the checked local addresses.
             hosts = self._repo_hosts.pop(config.build_id, None)
             if hosts is not None:   # offline mode with the override: no proxy, which would resolve the name itself
                 buildargs.update(OFFLINE_NO_PROXY_ARGS)
-            if engine_name(self.docker_client) == "podman":
-                progress.add_log("Podman builds the image (its builder buildah, through its Docker-compatible "
-                                 "interface); BuildKit is not used.")
             from orchestrator.utils.locality import offline_mode
             if offline_mode(self.config):   # no pull and no build-time download: an image already on this computer
                 return self._offline_image(config, progress, tag, labels[INPUTS_LABEL], path)
+            if engine_name(self.docker_client) == "podman":
+                progress.add_log("Podman builds the image (its builder buildah, through its Docker-compatible "
+                                 "interface); BuildKit is not used.")
             if self._buildkit_available():
                 self._build_with_buildkit(tag, path, buildargs, progress, labels, **({"hosts": hosts} if hosts else {}))
             else:

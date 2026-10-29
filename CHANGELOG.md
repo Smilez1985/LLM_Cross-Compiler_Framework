@@ -2932,7 +2932,7 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   **Check**, `ditto login --check` and the AI settings' sign-in panel refuse a provider offline mode may not reach
   before any socket opens; the llama.cpp repository override of an image build (`LLAMA_CPP_REPO_OVERRIDE`) and the
   pin-bump check (`scripts/llama_cpp_pin.py`) reach only a mirror in your own network, pinned like the source fetch
-  (the image build gets `--add-host` for the checked addresses and no proxy); an international mirror host is refused
+  (offline mode builds no target image, so the image built earlier with the same override is used); an international mirror host is refused
   until it is written in its `xn--` form (Python and git's curl convert a few characters differently). A crawl never
   reads an IPv4 link-local address or a cloud metadata service (AWS, Google, Azure, Oracle, OpenStack, Akamai/Linode,
   Alibaba, Scaleway, Tencent, from their documentation; also IPv4-mapped, NAT64 and 6to4 spellings, and a name with
