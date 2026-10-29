@@ -1200,13 +1200,14 @@ def _print_request_summary(r: dict) -> None:
         if name == "owner":
             value = value or "the person"
         if value not in (None, ""):
-            console.print(f"[bold]{_BUILD_FIELD_LABELS[name]}:[/bold] {escape(str(value))}")
+            console.print(f"[bold]{_BUILD_FIELD_LABELS[name]}:[/bold] {escape(_printable(str(value)))}")
     for error in r.get("errors") or []:
-        console.print(f"[bold]Error:[/bold] {escape(str(error))}")
+        console.print(f"[bold]Error:[/bold] {escape(_printable(str(error)))}")
     if r.get("status") == "interrupted":
         console.print("[yellow]The process that ran this request has ended before it finished.[/yellow]")
     elif r.get("awaiting_decision"):
-        console.print(f"[yellow]Waits for a decision on a self-healing proposal in the {escape(str(r.get('program')))}"
+        program = escape(_printable(str(r.get('program'))))
+        console.print(f"[yellow]Waits for a decision on a self-healing proposal in the {program}"
                       " that started it.[/yellow]")
     console.print("")
 
@@ -1235,7 +1236,7 @@ def _print_build_record(r: dict) -> None:
     from orchestrator.Core.build_history import record_rows
     for name, value in record_rows(r):
         if value not in (None, ""):
-            console.print(f"[bold]{_BUILD_FIELD_LABELS[name]}:[/bold] {escape(str(value))}")
+            console.print(f"[bold]{_BUILD_FIELD_LABELS[name]}:[/bold] {escape(_printable(str(value)))}")
     if r.get("status") == "interrupted":
         console.print("[yellow]The process that ran this build has ended before the build finished.[/yellow]")
     console.print("")
