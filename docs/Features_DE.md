@@ -2871,7 +2871,7 @@ Die Eingabefelder der GUI bieten an, was du zuletzt verwendet hast, das Neueste 
 
 | Feld | Wo | Vorausgefüllt | Gemerkt, wenn |
 |---|---|---|---|
-| Modell | Builder, **Source Model** | das zuletzt verwendete | ein Build abgeschickt wird |
+| Modell | Builder, **Source Model** (nach deinen zuletzt verwendeten Modellen: die Modellvorschläge des Quellenkatalogs, `llm-cli models suggestions`; jede andere ID oder jeder Pfad lässt sich eintippen) | das zuletzt verwendete | ein Build abgeschickt wird |
 | Kalibrierungsdatensatz | Builder, **Calibration** | nein, nur angeboten | ein Build mit Datensatz abgeschickt wird |
 | Target und Board | Builder | das zuletzt gebaute Target und Board, die die Target-Definitionen noch anbieten; ein Target ohne festgelegte Boards bietet die letzten Boards als Vorschläge an | ein Build abgeschickt wird |
 | Profil | Deployment | das vorher gewählte Profil, sonst das zuletzt verwendete | ein Deployment gestartet wird |

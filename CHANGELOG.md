@@ -11,6 +11,19 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 
 ## [3.2.0] - 2026-10-29
 
+### Added
+- `2026-10-29 23:59 UTC` · `v3.2.0` **Model suggestions from the source catalogue** (consolidation chain models-data; the model list of the decision to
+  make the unused data usable, item 10): the sections `models` and `tiny_models` of `configs/project_sources.yml` are
+  replaced by current Hugging Face repositories with exact ids, each checked on the Hub API (id, size of the weight
+  files, licence, gating, the check date), with a recommended quantization; the stale entries of 2024 and 2025
+  (TinyLlama 1.1B, Qwen1.5 0.5B, h2o-danube 1.8B, Phi-3-mini) are gone, and the one gated model (Llama 3.2 3B) is
+  listed but never suggested. `orchestrator/Core/doc_sources.py`, the catalogue's reader, gives them as
+  `model_suggestions()` (small models first): the Builder's model list offers them after the person's recent models
+  (the field stays editable), the new `llm-cli models suggestions [--json]` lists them, and AI clients read them as
+  the resource `lcf://models/suggestions`. `scripts/validate_ssot.py` reads `configs/project_sources.yml` (before, a
+  `project_sources.yml` in the current folder) and checks the section: exact ids, sizes, quantization types, gating,
+  dates, no id twice. The catalogue's header says who reads it now.
+
 ### Changed
 - `2026-10-29 23:54 UTC` · `v3.2.0` **The optimization profiles and benchmark rows of `target.yml` are corrected and used** (consolidation chain
   models-data; the decision to make the unused data usable, item 10): every board of the Rockchip target has an

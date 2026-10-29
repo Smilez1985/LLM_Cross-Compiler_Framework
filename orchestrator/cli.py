@@ -4347,6 +4347,22 @@ def models():
     pass
 
 
+@models.command('suggestions')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+def models_suggestions(as_json: bool):
+    """The model suggestions of the source catalogue (configs/project_sources.yml): exact Hugging Face ids that need
+    no token, small models first, each with its size, recommended quantization, licence and the day it was checked.
+    The Builder's model list offers the same; any other Hugging Face id or a local model works with --model too."""
+    from orchestrator.Core.doc_sources import model_suggestions, suggestions_text
+    found = model_suggestions()
+    if as_json:
+        click.echo(json.dumps([{"repo_id": m.repo_id, "size_mb": m.size_mb, "recommended_quant": m.recommended_quant,
+                                "license": m.license, "checked": m.checked, "note": m.note, "small": m.section ==
+                                "tiny_models"} for m in found], indent=2))
+        return
+    console.print(escape(suggestions_text(found, "Model suggestions (no Hugging Face token needed):")))
+
+
 @models.command('take-over')
 @pass_context
 def models_take_over(ctx: FrameworkContext):

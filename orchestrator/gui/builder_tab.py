@@ -68,8 +68,12 @@ QUANT_SUGGESTIONS = {
     "rkllm": ["w4a16", "w4a16_g128", "w8a8", "w8a8_g256"],
     "rknn": ["fp16", "i8"],
 }
-# Ungated models that build without a Hugging Face token (offered after the user's recent models)
-MODEL_SUGGESTIONS = ["Qwen/Qwen3.5-0.8B", "Qwen/Qwen3.5-2B", "Qwen/Qwen3.5-4B", "HuggingFaceTB/SmolLM2-135M-Instruct"]
+# Ungated models that build without a Hugging Face token, offered after the user's recent models: the model
+# suggestions of the source catalogue (configs/project_sources.yml, sections tiny_models and models; small ones first),
+# as `llm-cli models suggestions` lists them. The field stays editable: any Hugging Face id or local path works.
+from orchestrator.Core.doc_sources import model_suggestions  # noqa: E402
+
+MODEL_SUGGESTIONS = [m.repo_id for m in model_suggestions()]
 
 class SSHConnectDialog(QDialog):
     """Simple Dialog to get SSH Credentials. recent: devices used before (newest first)."""

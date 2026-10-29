@@ -26,6 +26,7 @@ CLI_PATHS: Dict[str, str] = {
     "trash empty --all": "btn_trash_delete",        # the window lists every entry; the person ticks
     "trash empty --due": "btn_trash_delete",        # the Reminder column shows which ones are due; the person ticks
     "ditto setup": "act_tools_permissions",         # Tools > Tool Permissions (Ditto / MCP)... (also at first start)
+    "models suggestions": "combo_builder_model",    # the Builder's model list offers the same suggestions
     "models take-over": "btn_hf_take_over",         # the browser's Take over old downloads... (the same list and yes)
     "--version": "act_help_about",                  # Help > About shows the version
 }
@@ -35,6 +36,7 @@ WINDOW_OBJECTS: Dict[str, str] = {
     "btn_hf_take_over": ACT_HF_BROWSER,
 }
 MACHINE_ONLY: Dict[str, str] = {
+    "models suggestions --json": "machine-readable output; the Builder's model list shows the same suggestions",
     "--config": "start switch of the command line program; the GUI uses its own settings (File > Settings...)",
     "--verbose": "how much the command line prints; the GUI shows its messages in its own windows",
     "--quiet": "how much the command line prints; the GUI shows its messages in its own windows",

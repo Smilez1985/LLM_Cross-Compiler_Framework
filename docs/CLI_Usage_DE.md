@@ -127,6 +127,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `knowledge storage` | Wo die Wissensbasis liegt (Qdrant Edge), die Umwandlung einer älteren und ihr alter Ordner: `convert`, `delete-old` |
 | `knowledge loose` / `knowledge sort` | Die losen Wissensdateien auflisten / eine nach den Paketprüfungen und deiner Bestätigung in einen Themen- oder Target-Ordner einsortieren und importieren |
 | `trash list` / `restore` / `empty` | Was Löschungen in den Papierkorb verschoben haben; Einträge zurücklegen; die ausgewählten endgültig löschen |
+| `models suggestions` | Die Modellvorschläge des Quellenkatalogs: genaue Hugging-Face-IDs, die kein Token brauchen, kleine Modelle zuerst |
 | `models take-over` | Was frühere Versionen des Hugging-Face-Browsers im Hugging-Face-Cache gespeichert haben, in den Modellordner kopieren, jede Datei geprüft, und danach das Entfernen der alten Kopien anbieten |
 | `targets list` / `targets validate` | Hardware-Targets mit ihren Boards und Formaten auflisten / prüfen, ob ein Target lädt und seine Capabilities gültig sind |
 | `targets boards` | Jedes Board eines Targets mit seinem Optimierungsprofil und seinen Benchmark-Zeilen (gemessen, veröffentlicht oder ungemessen) |
@@ -2814,6 +2815,17 @@ llm-cli trash empty --due
 ---
 
 ## models
+
+```
+llm-cli models suggestions [--json]
+```
+
+Listet die Modellvorschläge des Quellenkatalogs (`configs/project_sources.yml`, Abschnitte `tiny_models` und
+`models`): genaue Hugging-Face-IDs, die kein Token brauchen, kleine Modelle zuerst, jeweils mit der Größe der Gewichte,
+der empfohlenen Quantisierung, der Lizenz und dem Tag, an dem sie am Hub geprüft wurden. Ein gated Modell ist nie ein
+Vorschlag. Die Modell-Liste des Builders bietet dieselben nach deinen zuletzt verwendeten Modellen an; `--model` von
+`build start` nimmt auch jede andere Hugging-Face-ID oder ein lokales Modell. `--json` gibt die Liste für Skripte aus.
+KI-Clients lesen sie als Ressource `lcf://models/suggestions`.
 
 ```
 llm-cli models take-over

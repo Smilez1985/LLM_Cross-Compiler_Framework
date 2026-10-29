@@ -2584,7 +2584,7 @@ The GUI's input fields offer what you used recently, newest first.
 
 | Field | Where | Filled in | Remembered when |
 |---|---|---|---|
-| Model | Builder, **Source Model** | the most recent one | a build is submitted |
+| Model | Builder, **Source Model** (after your recent models: the model suggestions of the source catalogue, `llm-cli models suggestions`; any other id or path can be typed) | the most recent one | a build is submitted |
 | Calibration dataset | Builder, **Calibration** | no, only offered | a build with a dataset is submitted |
 | Target and board | Builder | the most recently built target and board that the target definitions still offer; a target without declared boards offers recent boards as suggestions | a build is submitted |
 | Profile | Deployment | the profile chosen before, else the most recent one | a deployment is started |
