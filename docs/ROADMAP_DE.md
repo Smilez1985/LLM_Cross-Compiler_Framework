@@ -1,4 +1,4 @@
-Version 3.1.0 · Stand 2026-10-29
+Version 3.2.0 · Stand 2026-10-29
 
 [English](ROADMAP.md) · **Deutsch**
 
@@ -20,14 +20,14 @@ der Entscheidungen des Maintainers, aus der sie stammt.
 
 | Version | Thema | Status |
 |---|---|---|
-| 3.2.0 | Dittos Kontext, das Board-Bündel, die Laufzeit auf dem Gerät und mehr Hardware | in Arbeit |
+| Rest von 3.2.0 | Dittos Kontext, das Board-Bündel, die Laufzeit auf dem Gerät und mehr Hardware | in Arbeit |
 | als Nächstes | Build-Dienst, Warteschlange und Modi | geplant |
 | 3.3.0 | LoRA und große Modelle | geplant |
 | 3.4.0 | Lieferkette und Community | geplant |
 | später | Rust-Teile für das Netzwerk und das Board | geplant |
 | später | Mehr Hardware und MCP-Erweiterungen | geplant |
 
-## 3.2.0 - Dittos Kontext, das Board-Bündel, die Laufzeit auf dem Gerät und mehr Hardware (in Arbeit)
+## Rest von 3.2.0 - Dittos Kontext, das Board-Bündel, die Laufzeit auf dem Gerät und mehr Hardware (in Arbeit)
 
 Diese Version kommt in dieser Reihenfolge: zuerst Dittos Kontext, daneben das Board-Bündel, dann das Gateway,
 Sprache und MCP auf dem Board. Die erste Hardware setzt die Prioritäten für die Laufzeit auf dem Gerät:

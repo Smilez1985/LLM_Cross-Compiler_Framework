@@ -251,6 +251,160 @@ class TargetRuntime(BaseModel):
     advisory: Optional[RuntimeAdvisory] = None
 
 
+# --- the optimization_profiles: and performance_benchmarks: blocks (orchestrator/Core/board_profiles.py reads them) ---
+
+# The optimization levels of a build (start_build, `llm-cli build start --optimization`, the Builder); the build
+# scripts get the level as OPTIMIZATION_LEVEL. schemas/build.py imports them from here.
+OPTIMIZATION_LEVELS = ("fast", "balanced", "size", "speed", "aggressive")
+# What a board's memory allows (the target side of a profile): low_memory boards (1-4 GB) take models up to about 1.5B
+# parameters at 4 bit, medium_memory (4-8 GB) up to about 4B, high_memory (8 GB and more) up to about 8B.
+MEMORY_PROFILES = ("low_memory", "medium_memory", "high_memory")
+# CPU features a profile names, as the hardware probe reports them (SUPPORTS_<NAME>): the ARM ones the build recipe
+# turns into GGML_CPU_ARM_ARCH (fp16 is SUPPORTS_FP16_ARITH), and the x86 ones it turns into GGML_<NAME> options.
+PROFILE_CPU_FEATURES = ("neon", "dotprod", "fp16", "i8mm", "sve", "sse42", "avx", "avx2", "bmi2", "f16c", "fma",
+                        "avx512", "avx512_vbmi", "avx512_vnni", "avx512_bf16", "avx_vnni", "amx_tile", "amx_int8",
+                        "amx_bf16")
+_OPTION_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$", re.ASCII)
+_OPTION_VALUE = re.compile(r"^[A-Za-z0-9._+-]{1,64}$", re.ASCII)
+
+
+class OptimizationProfile(BaseModel):
+    """The optimization profile of one board (`optimization_profiles.<board>` in target.yml). Its source side is what
+    the build recipe (orchestrator/runtime/build/recipe.py, the one place that decides llama.cpp's options and the
+    compiler flags) plans for a cross build for this SoC; a test and the target check (TargetManager.validate) see that the two
+    agree (Core/board_profiles.plan_problems), so the profile is never a second planner. Its target side is the
+    framework's recommendation for the board: the quantizations offered first, the memory profile and the
+    optimization level the Builder, the CLI and AI callers start from."""
+    model_config = ConfigDict(extra="forbid")
+
+    arch: Literal["arm64", "x86_64"]
+    # The cores as GCC's -mcpu names them (cortex-a76.cortex-a55 for big.LITTLE): for the reader and the tuning note;
+    # the plan sets the architecture (-march) from cpu_features, so a board of the same SoC never gets more.
+    cpu: str = Field(pattern=r"^[a-z0-9][a-z0-9.+-]{1,63}$")
+    cpu_features: List[Literal[PROFILE_CPU_FEATURES]] = Field(default_factory=list, max_length=20)
+    # Source side: llama.cpp's CMake options and the compiler flags of the recipe's cross-build plan for this SoC.
+    cmake_options: Dict[str, str] = Field(default_factory=dict, max_length=32)
+    cpu_flags: str = Field(default="", max_length=200)
+    # Target side: the recommendation for the board.
+    memory_profile: Literal[MEMORY_PROFILES]
+    optimization: Literal[OPTIMIZATION_LEVELS] = "balanced"
+    recommended_quantization: List[str] = Field(min_length=1, max_length=12)
+    note: Optional[untrusted_text(300)] = None
+
+    @model_validator(mode="after")
+    def _plain(self):
+        problems = []
+        for name, value in self.cmake_options.items():
+            if not _OPTION_NAME.fullmatch(name) or not _OPTION_VALUE.fullmatch(str(value)):
+                problems.append(f"cmake_options: {name!r} is not a plain CMake option")
+        if self.cmake_options.get("GGML_NATIVE", "OFF") != "OFF":
+            problems.append("cmake_options: GGML_NATIVE must be OFF (the build for a board is a cross build; ON would "
+                            "take the build computer's CPU)")
+        flags = self.cpu_flags.split()
+        bad = [t for t in flags if not _FLAG_TOKEN.fullmatch(t)]
+        if bad:
+            problems.append(f"cpu_flags must be plain options like -march=armv8.2-a: {', '.join(bad[:3])}")
+        if any(t in ("-march=native", "-mcpu=native", "-mtune=native") for t in flags):
+            problems.append("cpu_flags: native is the build computer's CPU, never the board's")
+        if self.arch == "arm64" and any(t.startswith("-mfpu") or t.startswith("-mfloat-abi") for t in flags):
+            problems.append("cpu_flags: -mfpu and -mfloat-abi are AArch32 options; an arm64 compiler refuses them "
+                            "(NEON is part of every ARMv8-A)")
+        if self.arch == "arm64" and any(f not in ("neon", "dotprod", "fp16", "i8mm", "sve") for f in self.cpu_features):
+            problems.append("cpu_features: an arm64 board has ARM features only (neon, dotprod, fp16, i8mm, sve)")
+        if problems:
+            raise ValueError("; ".join(problems))
+        return self
+
+
+# The values of a benchmark row. gen_ts and prompt_ts are the ones a measurement on the board fills (llama-bench -n 128
+# and -p 512 in the board test, runtime/device/tested.py: device_tests.json gen_ts and prompt_ts).
+BENCHMARK_VALUES = ("gen_ts", "prompt_ts", "first_token_ms", "memory_usage_mb", "cpu_usage_percent")
+MEASURED_VALUES = ("gen_ts", "prompt_ts")
+_DATE = r"^\d{4}-\d{2}-\d{2}$"
+
+
+class BenchmarkSource(BaseModel):
+    """Where the numbers of a benchmark row come from: measured on a board by the framework (a board test record), published
+    (an https address and the date it was read) or unmeasured (an estimate without a source, shown as such)."""
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["measured", "published", "unmeasured"]
+    url: Optional[str] = Field(default=None, max_length=500, pattern=r"^https://[^\s]{4,490}$")
+    date: Optional[str] = Field(default=None, pattern=_DATE)
+    board_label: Optional[untrusted_text(64)] = None   # measured: the label the person gave the board, never an address
+    note: Optional[untrusted_text(300)] = None
+
+    @model_validator(mode="after")
+    def _complete(self):
+        if self.kind == "published" and not (self.url and self.date):
+            raise ValueError("a published value needs its url and the date it was read")
+        if self.kind == "measured" and not (self.board_label and self.date):
+            raise ValueError("a measured value needs the board's label and the date of the measurement")
+        if self.kind == "unmeasured" and (self.url or self.board_label):
+            raise ValueError("an unmeasured value has no url and no board: give kind published or measured")
+        return self
+
+    def label(self) -> str:
+        """How the row's source is shown (plain text): never a measurement unless it is one."""
+        if self.kind == "measured":
+            return f"measured by llmcf (board {self.board_label}, {self.date})"
+        if self.kind == "published":
+            return f"published: {self.url} (read {self.date})"
+        return "unmeasured (an estimate, no measurement or publication behind it)"
+
+
+class BenchmarkEntry(BaseModel):
+    """One row of `performance_benchmarks:` in target.yml: a model at a quantization on a board, and its source."""
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,95}$")
+    board: str = Field(min_length=1, max_length=64)
+    quantization: str = Field(min_length=1, max_length=32)
+    gen_ts: Optional[float] = Field(default=None, ge=0)
+    prompt_ts: Optional[float] = Field(default=None, ge=0)
+    first_token_ms: Optional[float] = Field(default=None, ge=0)
+    memory_usage_mb: Optional[float] = Field(default=None, ge=0)
+    cpu_usage_percent: Optional[float] = Field(default=None, ge=0, le=100 * 256)
+    source: BenchmarkSource
+
+    @property
+    def measured(self) -> bool:
+        return self.source.kind == "measured"
+
+    def values(self) -> Dict[str, float]:
+        return {name: getattr(self, name) for name in BENCHMARK_VALUES if getattr(self, name) is not None}
+
+
+class BoardData(BaseModel):
+    """The optimization_profiles: and performance_benchmarks: blocks of a target.yml, checked against its
+    capabilities (every board known, every recommended quantization one the board's formats accept)."""
+    model_config = ConfigDict(extra="forbid")
+
+    optimization_profiles: Dict[str, OptimizationProfile] = Field(default_factory=dict)
+    performance_benchmarks: List[BenchmarkEntry] = Field(default_factory=list, max_length=500)
+
+    def problems(self, caps: Optional[TargetCapabilities]) -> List[Tuple[str, str]]:
+        """(field, message) for every board or quantization the capabilities do not have (empty: none)."""
+        if caps is None:
+            return []
+        found: List[Tuple[str, str]] = []
+        for board, profile in self.optimization_profiles.items():
+            if caps.canonical_board(board) != board:
+                found.append((f"optimization_profiles.{board}", f"{board!r} is not one of the boards "
+                                                                f"({', '.join(caps.boards)})"))
+                continue
+            allowed = {q.casefold() for fid, fmt in caps.formats.items() if board in caps.boards_for(fid)
+                       for q in fmt.quantizations_for(board)}
+            unknown = [q for q in profile.recommended_quantization if q.casefold() not in allowed]
+            if unknown:
+                found.append((f"optimization_profiles.{board}.recommended_quantization",
+                              f"not offered for {board}: {', '.join(unknown)}"))
+        for number, row in enumerate(self.performance_benchmarks):
+            if caps.canonical_board(row.board) != row.board:
+                found.append((f"performance_benchmarks.{number}.board", f"{row.board!r} is not one of the boards"))
+        return found
+
+
 # --- the input of the tools that name one target ----------------------------------------------------------------------
 # First written in tools/framework_tools.py, which keeps the name; it lives here so the target tool module
 # (tools/tools_targets.py, whose TargetCheckIn builds on it) does not import the tool hub. Its JSON schema, which an AI

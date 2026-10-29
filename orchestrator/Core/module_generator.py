@@ -675,6 +675,7 @@ class ModuleGenerator:
         """
         data = validate_module_data(data)
         data["runtime_block"] = self._runtime_block(data, profile)
+        data["optimization_probe"] = profile   # for the boards' optimization profiles (_update_yaml_config)
         module_name = data["module_name"]
         slug = module_slug(module_name)
         targets_root = Path(self.targets_dir).resolve()
@@ -943,6 +944,13 @@ class ModuleGenerator:
         config["supported_boards"] = [{"name": b} for b in boards]
         config.setdefault("docker", {})["image_name"] = f"llm-framework/{module_slug(name).replace('_', '-')}"
         config["capabilities"] = capabilities_block(boards, data.get("quantization_logic", ""))
+        # One optimization profile per board: the build recipe's plan for the board's probe (or the plain defaults of
+        # the architecture), so `llm-cli targets validate` finds it in agreement.
+        from orchestrator.Core.board_profiles import generated_profile
+        quants = config["capabilities"]["formats"]["gguf"]["quantizations"]
+        made = generated_profile(data["architecture"], data.get("optimization_probe"), quants)
+        config["optimization_profiles"] = {b: dict(made) for b in config["capabilities"]["boards"]} if made else {}
+        config.pop("performance_benchmarks", None)   # none yet: a board test measures them
         if data.get("runtime_block"):
             config["runtime"] = data["runtime_block"]
 

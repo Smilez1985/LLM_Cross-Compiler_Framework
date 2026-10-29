@@ -1,4 +1,4 @@
-Version 3.1.0 · Last updated 2026-10-29
+Version 3.2.0 · Last updated 2026-10-29
 
 **English** · [Deutsch](CLI_Usage_DE.md)
 
@@ -128,6 +128,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `trash list` / `restore` / `empty` | What deletions moved to the trash; put entries back; delete the ones you pick for good |
 | `models take-over` | Copy what earlier versions of the Hugging Face browser saved in the Hugging Face cache into the models folder, each file checked, then offer to remove the old copies |
 | `targets list` / `targets validate` | List hardware targets with their boards and formats / check that a target loads and its capabilities are valid |
+| `targets boards` | Each board of a target with its optimization profile and its benchmark rows (measured, published or unmeasured) |
 | `build start` / `build status` | Convert and quantize a model / show builds, also those the GUI, the MCP server or another CLI call started |
 | `build save` | Save a build that waits in the framework's build folder to the output folder or another folder |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | List finished builds / pack a build into a ZIP / upload and install it on a board |
@@ -443,6 +444,25 @@ target's folder name works as well. `json` and `yaml` give the same data with th
 In the GUI: **Build > Targets...** (the same list, with each target's support level), or **Targets...** next to the
 Builder's target list.
 
+### targets boards
+
+```
+llm-cli targets boards TARGET_NAME
+```
+
+Prints each board of the target with its optimization profile: the recommended quantizations (offered first by the
+Builder), the memory profile, the optimization level a build starts from when `--optimization` is not given, the
+llama.cpp options and compiler flags the build recipe plans for the board's SoC, and the board's CPU. Under it come the
+board's benchmark rows (model, quantization, values) with their source at the end: `measured by llmcf (board <label>, <date>)`,
+`published: <address>` or `unmeasured` (an estimate; never shown as a measurement). Exit code 2 for an unknown target,
+1 when its profiles or benchmarks are not valid (`targets validate` names why).
+
+```bash
+llm-cli targets boards Rockchip
+```
+
+In the GUI: **Build > Targets... > Boards...** (the same text), and the line under the Builder's board list.
+
 ### targets validate
 
 ```
@@ -450,7 +470,9 @@ llm-cli targets validate TARGET_NAME
 ```
 
 Checks that the target loads (by id or folder name) and that its `capabilities:` block passes the schema that
-the GUI, the CLI, the build service and the tools use; every schema error is printed. Exit code 1 if the target is
+the GUI, the CLI, the build service and the tools use; every schema error is printed. Its `optimization_profiles:` and
+`performance_benchmarks:` are checked too: their schema, their boards and quantizations, no option that downloads, and
+every profile against the build recipe's plan for its SoC (a value that differs is named). Exit code 1 if the target is
 not found or its capabilities are invalid. A target without capabilities is reported but counts as valid.
 
 ```bash
@@ -485,7 +507,7 @@ target's defaults. A target without a capabilities block is built unchecked.
 | `-b, --board TEXT` | Board of the target family, e.g. `rk3588`, `rk3576`, `rk3566`. Default: the target's default board (Rockchip: `rk3588`). Not case-sensitive. |
 | `-q, --quantization TEXT` | Quantization, e.g. `Q4_K_M`, `IQ4_XS`, `F16` (GGUF), `w8a8`, `w4a16` (RKLLM), `fp16`, `i8` (RKNN). Default: the format's default for the board. Common spellings such as `INT8` are translated. |
 | `-o, --output TEXT` | Folder the finished model (golden artifact) is saved to, relative to the current folder; made when it does not exist. Default: the output folder ([`config output-folder`](#config-output-folder), `~/llmcf/output`). At a terminal without it you are asked, with the output folder as the default; `-` keeps the build in the framework's build folder ([`build save`](#build-save) saves it later). A system folder or the framework's program folder is refused (exit code 2). `--output-dir` is the old name and still works. |
-| `--optimization [fast\|balanced\|size\|speed\|aggressive]` | Optimization level (default `balanced`), passed to the build scripts as `OPTIMIZATION_LEVEL`. The Rockchip scripts do not use it. |
+| `--optimization [fast\|balanced\|size\|speed\|aggressive]` | Optimization level, passed to the build scripts as `OPTIMIZATION_LEVEL`. Default: the level of the board's optimization profile (`targets boards`; for example `size` on an RK3566), else `balanced`. The Rockchip scripts do not use it. |
 | `--priority [low\|normal\|high\|urgent\|critical]` | Position in this process's build queue (default `normal`). |
 | `--parallel` | Deprecated and hidden from `--help`: it has no effect (one call runs one build) and prints a warning. |
 | `-F, --follow` | Print each stage while the build runs. |

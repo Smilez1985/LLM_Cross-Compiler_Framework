@@ -1,4 +1,4 @@
-Version 3.1.0 · Stand 2026-10-29
+Version 3.2.0 · Stand 2026-10-29
 
 [English](Features.md) · **Deutsch**
 
@@ -166,6 +166,17 @@ Weiteres Verhalten:
 - **Optimierung und Priorität (GUI):** Die Liste **Optimization** des Builders bietet jede Stufe von `--optimization`
   (auch `FAST`), und **Priorität** setzt die Build-Priorität von `--priority` (Vorgabe normal; ein fehlgeschlagener
   kritischer Build beendet die Pipeline).
+- **Das Optimierungsprofil des Boards:** Jedes Board eines Targets hat in seiner `target.yml` ein Profil
+  (`optimization_profiles`): die llama.cpp-Optionen und Compiler-Flags, die das Build-Rezept für seinen SoC plant
+  (von `llm-cli targets validate` gegen das Rezept geprüft), die empfohlenen Quantisierungen, das Speicherprofil und
+  die Optimierungsstufe. Der Builder listet die empfohlenen Quantisierungen zuerst und stellt die Liste
+  **Optimization** auf die Stufe des Profils, bis du selbst eine wählst; eine Zeile unter der Board-Liste zeigt das
+  Profil und die Benchmark-Zeilen des Boards, jede gekennzeichnet als `measured by llmcf (board <Name>, <Datum>)`, `published` oder
+  `unmeasured` (die mitgelieferten Zeilen sind Schätzungen ohne Messung und sagen das). `llm-cli build start` und
+  KI-Aufrufer (`start_build`, `check_build_request`) nehmen dieselbe Stufe, wenn keine angegeben ist;
+  `llm-cli targets boards`, **Build > Targets… > Boards…** und die MCP-Tools `list_targets` und
+  `get_target_capabilities` zeigen die Profile und die gekennzeichneten Zeilen. Ein Board-Test füllt die gemessenen
+  Werte später (`gen_ts`, `prompt_ts`).
 - **Build-Slots:** In einem Programm laufen höchstens `max_concurrent_builds` Builds gleichzeitig (Einstellung, 1
   bis 10, Vorgabe 2); ein weiterer Build wartet auf einen freien Slot (seine Stufe zeigt „Waiting for a free build
   slot“), statt zu scheitern. Ein abgebrochener Build behält seinen Slot, bis sein Container gestoppt ist.

@@ -321,6 +321,29 @@ def list_targets(ctx: FrameworkContext, format: str):
     console.print(table)
 
 
+@targets.command('boards')
+@click.argument('target_name')
+@pass_context
+def target_boards(ctx: FrameworkContext, target_name: str):
+    """Each board of a target with its optimization profile (the llama.cpp options the build recipe plans for it,
+    the recommended quantizations, memory profile and optimization level) and its benchmark rows, each marked
+    measured, published or unmeasured. The same as Build > Targets... > Boards..."""
+    from orchestrator.Core.board_profiles import board_lines
+    ctx.require_framework()
+    tm = ctx.framework_manager.get_component("target_manager")
+    tid = tm.resolve(target_name) if tm else None
+    if tid is None:
+        console.print(f"[red]Unknown target '{escape(target_name)}'.[/red]")
+        sys.exit(2)
+    data = tm.get_board_data(tid)
+    if data is None:
+        console.print(f"[red]The optimization profiles or benchmarks of '{escape(tid)}' are not valid; "
+                      f"'llm-cli targets validate {escape(tid)}' names why.[/red]")
+        sys.exit(1)
+    for line in board_lines(tm.get_capabilities(tid), data):
+        console.print(escape(line))
+
+
 @targets.command('validate')
 @click.argument('target_name')
 @pass_context
@@ -699,10 +722,11 @@ class _FormatOption(click.Option):
               help="Folder the finished model (golden artifact) is saved to; default: the output folder ('llm-cli "
                    "config output-folder'). At a terminal without it you are asked; '-' keeps it in the framework's "
                    "build folder")
-@click.option('--optimization', default='balanced',
+@click.option('--optimization', default=None,
               type=click.Choice(['fast', 'balanced', 'size', 'speed', 'aggressive']),
               help='Optimization level, passed to the target\'s build scripts as OPTIMIZATION_LEVEL '
-                   '(the Rockchip target ignores it)')
+                   '(the Rockchip target ignores it). Default: the level of the board\'s optimization profile '
+                   '(\'llm-cli targets boards\'), else balanced')
 @click.option('--priority', default='normal',
               type=click.Choice(['low', 'normal', 'high', 'urgent', 'critical']),
               help='Build priority')
@@ -716,7 +740,7 @@ class _FormatOption(click.Option):
 @pass_context
 def start_build(ctx: FrameworkContext, model: str, target: str, format: str, board: Optional[str],
                 probe: Optional[str], quantization: Optional[str], output_dir: Optional[str], 
-                optimization: str, priority: str, parallel: bool, follow: bool, gpu: bool,
+                optimization: Optional[str], priority: str, parallel: bool, follow: bool, gpu: bool,
                 imatrix: bool, dataset: Optional[str]):
     """Start a new build job. Ctrl+C cancels it (its container is stopped) and exits with code 130.
 
@@ -778,6 +802,10 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
                 console.print(f"[red]{escape(problem)}[/red]")
             sys.exit(2)
         board, quantization = request.board, request.quantization
+        # the level given, else the board profile's (round 23 item 10), as the Builder and start_build choose it
+        resolve = getattr(service, "optimization_for", None)
+        chosen = resolve(request, optimization) if callable(resolve) else None
+        optimization = chosen if isinstance(chosen, str) else (optimization or "balanced")
 
         # A finished build with 100 % the same options (eighth round N11; round 23 item 9): the Builder tab's check
         # and question. Use it (copied into the folder below), build it again, or cancel; nothing is skipped by itself.

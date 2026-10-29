@@ -973,3 +973,36 @@ def test_generate_ai_with_provider_leaves_the_settings_unchanged(tmp_path, monke
     assert config.get("ai_provider") == "anthropic" and config.get("ai_model") != "other-model"
     refused = CliRunner().invoke(cli.cli, ["-q", "module", "generate-ai", str(probe), "--provider", "nope"])
     assert refused.exit_code == 2 and "Unknown AI provider 'nope'" in " ".join(refused.output.split())
+
+
+# --- the board's optimization profile and benchmark rows (DECISIONS round 23 item 10) ---------------------------
+
+def test_targets_window_boards_shows_profiles_and_marks_unmeasured_rows(qapp, tmp_path, monkeypatch):
+    from orchestrator.gui.targets_window import TargetsDialog
+    framework, _folder = targets_framework(tmp_path)
+    boxes = Boxes(monkeypatch)
+    dialog = TargetsDialog(framework, select="Rockchip", lang="en")
+    assert dialog.btn_boards.objectName() == "btn_targets_boards" and dialog.btn_boards.isEnabled()
+    dialog._boards()
+    text = " ".join(str(part) for shown in boxes.shown for part in shown)
+    assert "rk3566: RK3566" in text and "recommended quantization: Q4_0, IQ4_NL, Q4_K_M" in text
+    assert "[unmeasured" in text
+    dialog.close()
+
+
+def test_the_builder_offers_the_board_profile_first_and_its_level(builder):
+    from test_review_capabilities_paths import select
+    select(builder.target_combo, "Rockchip")
+    select(builder.board_combo, "rk3566")
+    items = [builder.quant_combo.itemText(i) for i in range(builder.quant_combo.count())]
+    assert items[:3] == ["Q4_0", "IQ4_NL", "Q4_K_M"]
+    assert builder.quant_combo.currentText() == "Q4_0"          # the board's default stays the default
+    assert builder.opt_combo.currentText() == "SIZE"             # the profile's level until the person picks one
+    assert not builder.lbl_board_profile.isHidden()
+    assert "unmeasured" in builder.lbl_board_profile.text()
+    select(builder.board_combo, "rk3588")
+    assert builder.opt_combo.currentText() == "BALANCED"
+    builder.opt_combo.setCurrentIndex(builder.opt_combo.findText("SPEED"))
+    builder._mark_opt_user_set()
+    select(builder.board_combo, "rk3566")
+    assert builder.opt_combo.currentText() == "SPEED"            # the person's choice is kept
