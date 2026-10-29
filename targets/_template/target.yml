@@ -78,20 +78,28 @@ modules:
       inputs: ["quantize_jobs.sh", "build_config.sh"]
       outputs: ["<model>-<type>.gguf", "build_info.json", "packages/ (hardware profile or --package)"]
 
-# Hardware optimization profiles: descriptive, nothing reads them. The board's runtime takes llama.cpp's options from
-# the build recipe (orchestrator/runtime/build/recipe.py).
-optimization_profiles:
-  default:
-    cpu_flags: "-mcpu=native -march=native"
-    cmake_flags: "-DGGML_NATIVE=ON"
-    memory_profile: "medium_memory"
-    recommended_quantization: ["Q4_K_M", "Q8_0"]
-    
-  performance:
-    cpu_flags: "-mcpu=cortex-a76 -mfpu=neon-fp-armv8"
-    cmake_flags: "-DGGML_NATIVE=ON -DGGML_NEON=ON" 
-    memory_profile: "high_memory"
-    recommended_quantization: ["Q6_K", "Q8_0"]
+# Hardware optimization profiles, one per board of the capabilities block (schema: orchestrator/schemas/targets.py
+# OptimizationProfile; read by orchestrator/Core/board_profiles.py; docs/Module_Developer_Guide.md, "target.yml").
+# The module generator writes one per board from the build recipe's plan (orchestrator/runtime/build/recipe.py) for
+# the board's probe, or for the plain defaults of the architecture without one. The source side (cmake_options,
+# cpu_flags) must be what the recipe plans for the SoC (`llm-cli targets validate` checks it); the target side
+# (recommended_quantization, memory_profile, optimization) is what the Builder, the CLI and AI callers offer first.
+# Example:
+#   my_board:
+#     arch: arm64
+#     cpu: cortex-a55
+#     cpu_features: [neon, dotprod, fp16]
+#     cmake_options: {GGML_NATIVE: "OFF", GGML_CPU_ARM_ARCH: "armv8.2-a+dotprod+fp16"}
+#     cpu_flags: "-march=armv8.2-a+dotprod+fp16"
+#     memory_profile: low_memory
+#     optimization: size
+#     recommended_quantization: [Q4_0, Q4_K_M]
+optimization_profiles: {}
+
+# Benchmark rows (schema: BenchmarkEntry): model, board, quantization, the values (gen_ts and prompt_ts are what a
+# board test measures) and their source: measured (board label and date), published (https address and date) or
+# unmeasured (shown as such).
+performance_benchmarks: []
 
 # Anforderungen
 requirements:

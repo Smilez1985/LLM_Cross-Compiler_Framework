@@ -120,6 +120,12 @@ def check_capabilities(name: str, target_id: str, data: Dict[str, Any]) -> Targe
             where = ".".join(str(part) for part in err.get("loc", ())) or "capabilities"
             errors.append((f"capabilities.{where}", str(err.get("msg", ""))))
         return TargetCheck(name, target_id, declared=True, errors=tuple(errors))
+    # The optimization profiles and benchmark rows (Core/board_profiles.py): their schema, their boards, no download
+    # option, and every profile in agreement with the build recipe's plan for its SoC.
+    from orchestrator.Core.board_profiles import check_board_data
+    errors = check_board_data(data, caps)
+    if errors:
+        return TargetCheck(name, target_id, declared=True, errors=tuple(errors))
     return TargetCheck(name, target_id, declared=True, boards=len(caps.boards), formats=tuple(caps.formats))
 
 
@@ -188,6 +194,21 @@ class TargetManager:
         if not self._initialized: self.initialize()
         # Return list of metadata for UI/CLI
         return [t['metadata'] for t in self._targets.values()]
+
+    def get_board_data(self, target_id: str):
+        """The target's optimization profiles and benchmark rows (schemas/targets.py BoardData), or None when they
+        are not valid (`llm-cli targets validate` names why); an empty BoardData when the target has none."""
+        if not self._initialized: self.initialize()
+        data = self._targets.get(target_id)
+        if data is None:
+            return None
+        from orchestrator.Core.board_profiles import board_data
+        try:
+            return board_data(data)
+        except ValueError as e:  # pydantic.ValidationError is a ValueError
+            self.logger.warning(f"Invalid optimization profiles or benchmarks in target {target_id}: "
+                                f"{str(e).splitlines()[0][:200]}")
+            return None
 
     def get_capabilities(self, target_id: str) -> Optional[TargetCapabilities]:
         """Validated capabilities of a target (None if it declares none or they are invalid)."""

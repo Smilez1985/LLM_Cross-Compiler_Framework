@@ -10,6 +10,31 @@ weicht bewusst ab: Es gibt keinen Abschnitt `[Unreleased]`. Jeder Eintrag beginn
 der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und warum, steht im
 [Design](docs/DESIGN_DE.md).
 
+## [3.2.0] - 2026-10-29
+
+### Geändert
+- `2026-10-29 23:54 UTC` · `v3.2.0` **Die Optimierungsprofile und Benchmark-Zeilen der `target.yml` sind korrigiert und werden genutzt**
+  (Konsolidierungskette models-data; die Entscheidung, die ungenutzten Daten nutzbar zu machen, Punkt 10): Jedes Board
+  des Rockchip-Targets hat ein Optimierungsprofil (Schema `OptimizationProfile` in `orchestrator/schemas/targets.py`,
+  gelesen vom neuen `orchestrator/Core/board_profiles.py`), dessen Quellseite das ist, was das Build-Rezept für einen
+  Cross-Build seines SoC plant: `GGML_NATIVE` OFF, `GGML_CPU_ARM_ARCH` und `-march=armv8.2-a+dotprod+fp16` für RK3566,
+  RK3568 und RK3588, `armv8-a` für den RK3576 (Cortex-A72 und A53); die alten Werte waren für aarch64 falsch
+  (`-mfpu=neon-fp-armv8` ist eine AArch32-Option, `-DGGML_NATIVE=ON` nimmt die CPU des Build-Rechners). Das Rezept
+  bleibt der eine Planer: `llm-cli targets validate` (und ein Test für jedes mitgelieferte Board) plant den Build aus
+  einer Referenz-Probe des SoC und nennt jeden abweichenden Wert, und lehnt `-mfpu`, `GGML_NATIVE` ON, `native`-Flags
+  und Download-Optionen ab. Die Zielseite (empfohlene Quantisierungen, Speicherprofil, Optimierungsstufe) speist den
+  Build: Der Builder listet die empfohlenen Quantisierungen zuerst und stellt **Optimization** auf die Stufe des
+  Profils, bis die Person selbst eine wählt; `llm-cli build start --optimization` und
+  `start_build`/`check_build_request` nehmen ohne Angabe die Stufe des Profils (sonst balanced; vorher immer balanced).
+  Jede Benchmark-Zeile nennt jetzt ihre Quelle (`measured`, von llmcf auf einem Board gemessen, mit seinem Namen und dem
+  Datum, `published` mit Adresse und Datum, oder `unmeasured`); die mitgelieferten Zeilen sind Schätzungen aus Version
+  1.x und werden als ungemessen gezeigt; ein Board-Test-Eintrag wird zu einer gemessenen Zeile (`gen_ts`,
+  `prompt_ts`). Neu: `llm-cli targets boards TARGET` und **Build > Targets… > Boards…** zeigen das Profil jedes Boards
+  und die gekennzeichneten Zeilen, eine Zeile unter der Board-Liste des Builders zeigt sie auch, und `list_targets` und
+  `get_target_capabilities` liefern `board_profiles` und `benchmarks` (mit `source_label`). Der Modulgenerator schreibt
+  je Board ein Profil, geplant aus der Probe des Boards. Die Beispielprofile der Vorlage sind durch einen leeren Block
+  mit beschriebenem Schema ersetzt.
+
 ## [3.1.0] - 2026-10-29
 
 ### Hinzugefügt
@@ -4466,6 +4491,7 @@ Cross-Kompilierung zu ermöglichen.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Grundlegende Unterstützung für die Cross-Kompilierung für Rockchip RK3588/RK3566.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Einstiegspunkte für CLI (`llm-cli`) und GUI (`llm-gui`).
 
+[3.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v2.4.0...v3.0.0
 [2.4.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v1.7.0...v2.4.0

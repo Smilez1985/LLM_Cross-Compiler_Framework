@@ -1,4 +1,4 @@
-Version 3.1.0 · Last updated 2026-10-29
+Version 3.2.0 · Last updated 2026-10-29
 
 **English** · [Deutsch](Features_DE.md)
 
@@ -158,6 +158,16 @@ Further behaviour:
 - **Optimization and priority (GUI):** the Builder's **Optimization** list offers every level of `--optimization`
   (also `FAST`), and **Priority** sets the build priority of `--priority` (default normal; a failed critical build
   stops the pipeline).
+- **The board's optimization profile:** every board of a target has a profile in its `target.yml`
+  (`optimization_profiles`): the llama.cpp options and compiler flags the build recipe plans for its SoC (checked
+  against the recipe by `llm-cli targets validate`), the recommended quantizations, the memory profile and the
+  optimization level. The Builder lists the recommended quantizations first and starts the **Optimization** list at
+  the profile's level until you pick one; a line under the board list shows the profile and the board's benchmark
+  rows, each marked `measured by llmcf (board <label>, <date>)`, `published` or `unmeasured` (the shipped rows are estimates
+  without a measurement and say so). `llm-cli build start` and AI callers (`start_build`, `check_build_request`)
+  take the same level when none is given; `llm-cli targets boards`, **Build > Targets... > Boards...** and the MCP
+  tools `list_targets` and `get_target_capabilities` show the profiles and the marked rows. A board test fills the
+  measured values later (`gen_ts`, `prompt_ts`).
 - **Build slots:** at most `max_concurrent_builds` builds (setting, 1 to 10, default 2) run at the same time in one
   program; a further build waits for a free slot (its stage shows "Waiting for a free build slot") instead of
   failing. A cancelled build keeps its slot until its container has stopped.

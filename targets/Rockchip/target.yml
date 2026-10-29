@@ -149,33 +149,56 @@ modules:
       inputs: ["quantize_jobs.sh", "build_config.sh"]
       outputs: ["<model>-<type>.gguf", "build_info.json", "packages/ (hardware profile or --package)"]
 
-# Hardware optimization profiles: descriptive, nothing reads them. The board's runtime takes llama.cpp's options from
-# the build recipe (orchestrator/runtime/build/recipe.py); a build with a hardware profile (config_module.sh) takes the
-# flags from that profile.
+# Hardware optimization profiles, one per board of the capabilities below (schema: orchestrator/schemas/targets.py
+# OptimizationProfile; read by orchestrator/Core/board_profiles.py).
+# - Source side (cmake_options, cpu_flags): what the build recipe (orchestrator/runtime/build/recipe.py, the one place
+#   that decides llama.cpp's options and the compiler flags) plans for a cross build for the SoC, from the CPU features
+#   its probe reports. tests/test_board_profiles.py and `llm-cli targets validate` plan that build and refuse a profile
+#   that differs: no -mfpu (an AArch32 option), GGML_NATIVE OFF (a cross build), no download option. `cpu` names the
+#   cores as GCC's -mcpu does, for the reader; the plan sets -march from the features.
+# - Target side (recommended_quantization, memory_profile, optimization): the Builder, `llm-cli build start` and
+#   start_build offer these quantizations first and start from this level when none is given. Q4_0 and IQ4_NL are
+#   repacked for llama.cpp's ARM kernels.
 optimization_profiles:
-  rk3566_default:
-    cpu_flags: "-mcpu=cortex-a55 -mfpu=neon-fp-armv8"
-    cmake_flags: "-DGGML_NATIVE=ON -DGGML_NEON=ON"
-    memory_profile: "low_memory"
-    recommended_quantization: ["Q4_0", "Q4_K_M", "Q5_0"]
-    
-  rk3568_default:
-    cpu_flags: "-mcpu=cortex-a55 -mfpu=neon-fp-armv8" 
-    cmake_flags: "-DGGML_NATIVE=ON -DGGML_NEON=ON"
-    memory_profile: "medium_memory"
-    recommended_quantization: ["Q4_K_M", "Q5_K_M", "Q8_0"]
-    
-  rk3576_performance:
-    cpu_flags: "-mcpu=cortex-a72 -mfpu=neon-fp-armv8"
-    cmake_flags: "-DGGML_NATIVE=ON -DGGML_NEON=ON"
-    memory_profile: "high_memory"
-    recommended_quantization: ["Q5_K_M", "Q6_K", "Q8_0"]
-    
-  rk3588_performance:
-    cpu_flags: "-mcpu=cortex-a76 -mfpu=neon-fp-armv8"
-    cmake_flags: "-DGGML_NATIVE=ON -DGGML_NEON=ON" 
-    memory_profile: "high_memory"
-    recommended_quantization: ["Q6_K", "Q8_0", "F16"]
+  rk3566:
+    arch: arm64
+    cpu: cortex-a55
+    cpu_features: [neon, dotprod, fp16]
+    cmake_options: {GGML_NATIVE: "OFF", GGML_CPU_ARM_ARCH: "armv8.2-a+dotprod+fp16"}
+    cpu_flags: "-march=armv8.2-a+dotprod+fp16"
+    memory_profile: low_memory
+    optimization: size
+    recommended_quantization: [Q4_0, IQ4_NL, Q4_K_M]
+
+  rk3568:
+    arch: arm64
+    cpu: cortex-a55
+    cpu_features: [neon, dotprod, fp16]
+    cmake_options: {GGML_NATIVE: "OFF", GGML_CPU_ARM_ARCH: "armv8.2-a+dotprod+fp16"}
+    cpu_flags: "-march=armv8.2-a+dotprod+fp16"
+    memory_profile: medium_memory
+    optimization: size
+    recommended_quantization: [Q4_0, IQ4_NL, Q4_K_M]
+
+  rk3576:
+    arch: arm64
+    cpu: cortex-a72.cortex-a53
+    cpu_features: [neon]   # Cortex-A72 and A53 are ARMv8.0-A: no dot product, no FP16 arithmetic
+    cmake_options: {GGML_NATIVE: "OFF", GGML_CPU_ARM_ARCH: "armv8-a"}
+    cpu_flags: "-march=armv8-a"
+    memory_profile: medium_memory
+    optimization: balanced
+    recommended_quantization: [Q4_K_M, Q4_0, Q5_K_M]
+
+  rk3588:
+    arch: arm64
+    cpu: cortex-a76.cortex-a55
+    cpu_features: [neon, dotprod, fp16]
+    cmake_options: {GGML_NATIVE: "OFF", GGML_CPU_ARM_ARCH: "armv8.2-a+dotprod+fp16"}
+    cpu_flags: "-march=armv8.2-a+dotprod+fp16"
+    memory_profile: high_memory
+    optimization: balanced
+    recommended_quantization: [Q4_K_M, Q4_0, Q5_K_M, Q6_K, Q8_0]
 
 # Framework requirements
 requirements:
@@ -319,30 +342,39 @@ supported_formats:
         - "Q5_K_M"  # 5-bit k-quantization (medium)
         - "Q6_K"    # 6-bit k-quantization (high quality)
 
-# Performance benchmarks (reference values)
+# Performance benchmarks (schema: orchestrator/schemas/targets.py BenchmarkEntry; shown by `llm-cli targets boards`,
+# Build > Targets..., the Builder's board line, list_targets and get_target_capabilities). Every row names its source:
+# measured (by llmcf on a board: its label and the date of the board test), published (https address and the date it
+# was read) or unmeasured (an estimate, always shown as such, never as a measurement). A board test fills gen_ts and
+# prompt_ts (llama-bench -n 128 and -p 512 on the board, device_tests.json of the build); the other values stay
+# estimates until a measurement replaces them. The rows below are the estimates of version 1.x: nothing measured them.
 performance_benchmarks:
-  granite_350m:
-    rk3566:
-      q4_k_m:
-        memory_usage_mb: 180
-        first_token_ms: 800
-        tokens_per_second: 12
-        cpu_usage_percent: 85
-        
-    rk3588:
-      q4_k_m:
-        memory_usage_mb: 180 
-        first_token_ms: 450
-        tokens_per_second: 25
-        cpu_usage_percent: 60
-        
-  llama2_7b:
-    rk3588:
-      q4_k_m:
-        memory_usage_mb: 4200
-        first_token_ms: 2000
-        tokens_per_second: 8
-        cpu_usage_percent: 95
+  - model: ibm-granite/granite-4.0-h-350m
+    board: rk3566
+    quantization: Q4_K_M
+    gen_ts: 12
+    first_token_ms: 800
+    memory_usage_mb: 180
+    cpu_usage_percent: 85
+    source: {kind: unmeasured, note: "estimate of version 1.x, no measurement behind it"}
+
+  - model: ibm-granite/granite-4.0-h-350m
+    board: rk3588
+    quantization: Q4_K_M
+    gen_ts: 25
+    first_token_ms: 450
+    memory_usage_mb: 180
+    cpu_usage_percent: 60
+    source: {kind: unmeasured, note: "estimate of version 1.x, no measurement behind it"}
+
+  - model: llama-2-7b
+    board: rk3588
+    quantization: Q4_K_M
+    gen_ts: 8
+    first_token_ms: 2000
+    memory_usage_mb: 4200
+    cpu_usage_percent: 95
+    source: {kind: unmeasured, note: "estimate of version 1.x for a 7B Llama 2 model, no measurement behind it"}
 
 # Validation and testing
 validation:
