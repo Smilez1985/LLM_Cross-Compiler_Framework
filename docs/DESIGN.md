@@ -1120,8 +1120,419 @@ Nothing secret is remembered.
 
 ## Components and decisions
 
-Every component in detail, with the decisions that shape it: what each decision says, how the code does it
-(or the roadmap row that will) and why.
+Every component in detail, with the decisions that shape it: what each decision says, how the code does it (or the
+roadmap row that will) and why. The maintainer's decisions are collected in a working log outside the repository; each
+one is written here at the component it concerns, without private data. The newest decision wins; a replaced one stays
+as one line under **History** (round and date, what it said, what replaced it). Decisions that concern no single
+component are under [Key decisions](#key-decisions).
+
+### Build pipeline and target modules
+
+A build turns a model into a package for one board. `BuildEngine` in `orchestrator/Core/builder.py` stages the model on
+the host, builds the target's toolchain image and runs the target's `build.sh` in a sandboxed container without network;
+`build.sh` is a stage runner over the four modules source, config, convert and target.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| The four modules source, config, convert and target are the build: `build.sh` only orchestrates them, each module also runs on its own with its options, the hardware profile becomes the toolchain and the build plan. | `targets/Rockchip/build.sh` and the template's `build.sh` run `modules/source_module.sh`, `config_module.sh`, `convert_module.sh` and `target_module.sh` with resume markers and progress per stage; the module generator writes working stage modules. | It is the maintainer's original design and keeps each step testable and resumable; the inline dispatcher had hidden it. |
+| A rotation stage (SpinQuant, QuaRot) comes before quantization, only where the target format supports it. | The slot exists: the stage runner calls a target's `modules/rotate_module.sh` between convert and target; the algorithm is planned: ROADMAP row "Rotation stage before quantization". | 4-bit Llama models keep their quality on small boards; whether it applies is a property of the format. |
+| The hardware probe goes into every build: the config module turns the probe file into compiler and GGML flags, and the template helpers clone llama.cpp at its pinned commit. | `builder.py` mounts the request's probe into the build container; `config_module.sh` reads it (L2 cache, Vulkan, OpenCL among the keys of probe 3.1.0). | A build tuned to the real board is faster and never uses an instruction the board lacks. |
+| CMake flags of a module follow an allowlist; a valid flag outside it is explained and the person decides (remembered per module version); download options are never run inside the build: what they would fetch is fetched before, pinned and hash-checked, and handed in read-only. | The allowlist and the refusal of download options are in the build-safety checks of `module_generator.py` and `builder.py`; the pre-fetch into a dependency cache is planned: ROADMAP row "Dependencies of module CMake options fetched before the build". | Code-loading CMake variables could run anything; the sandbox has no network, so a download inside it cannot work anyway. |
+| The template plans x86 with the same plan as the recipe: explicit flags for another machine, `-march=native` only for this machine. | `orchestrator/runtime/build/recipe.py` plans the flags; the template's config module uses the same rule. | A build for another computer must not take this computer's CPU features. |
+| No hard time limit for a step: a soft cap the person can override, loop protection and an idle timeout; the package manifest records duration, sizes, quantization and tool versions. | The manifest part is built (`MANIFEST.json` of the target stage); the time rule is planned: ROADMAP row "No hard time limit for a build step" (today `build_timeout`). | A step takes as long as it takes; a build stopped shortly before its end wastes the person's time. |
+| "Identical build" means exactly the same chosen options; other weights or another quantization is not identical. | `check_build_request` and the builder form compare the full option set and offer the earlier result ("Use"). | Rebuilding the same thing wastes hours; a near match must not pass for the same. |
+| The Builder shows a progress bar with stage and percent and the live log; the model download shows a percentage. | The stage runner reports progress per stage; the Builder tab and the download worker show it. | A person must see that a long build moves. |
+| The build form keeps the person's values; clearing it is a separate button with a question; recipes are kept or published only for a successful build, a failed one is analysed and a fix proposed. | The Builder tab keeps its fields after a build; recipes are written from finished builds only. | A person must never face an empty form after a mistake, and a recipe must work. |
+| hadolint runs at build time with its findings shown ("tool missing" and "lint failed" told apart); ruff style and ShellCheck at warning level cover the repository, the template and generated modules. | The builder runs hadolint before an image build; CI runs ruff and ShellCheck. | Mistakes in Dockerfiles and scripts are found before a long build. |
+| The Rockchip image is a multi-stage build. | `targets/Rockchip/dockerfile` builds the tools in one stage and copies the results into the final one. | Smaller images and no build tools left in the final image. |
+| Unused data is made usable instead of removed: optimization profiles corrected and wired, performance benchmarks given a source, the model list of the source catalogue feeds the Builder suggestions; unmeasured values are marked as such. | `configs/project_sources.yml` and the optimization profiles are read by the Builder; values carry a measured flag. | Data that exists should serve the person; a value that was never measured must say so. |
+| Offline mode may build the build container image (the toolchain image) when every source is local by the one locality rule; otherwise it stops early and names the missing source; images can be imported and exported as checked files. Terms: "build container image" is the toolchain image, "target artifact, package or bundle" is what goes to the board. | Today the cross-compile runs offline when the image exists (`_offline_image`, `INPUTS_LABEL` in `Core/builder.py`) and building it offline is refused (`OfflineImageMissing`); the rest is planned: ROADMAP row "Offline builds of the build container image". | Air-gapped computers must be able to cross-compile when everything is there; the result is saved and deployed later or over the local network. |
+| Docker images are never deleted without the person; the person may choose where images are stored. | No cleanup path removes an image by itself; image removals go through the deletion list (`Core/deletion.py`). | Images take long to build and may belong to other projects. |
+| Builds run locally in Docker that emulates the target hardware; SSH and SCP are for deploying the finished artifact to the board, never for build hosts. | `BuildEngine` runs local containers; `orchestrator/remote/` serves deployment only. | The framework builds itself; there are no remote build hosts to trust. |
+
+**History**
+
+- Round 14 (2026-10-22) planned an own executor over SSH and SCP for builds; round 15 (2026-10-22) replaced it: SSH and
+  SCP are for deployment only, build hosts were dropped.
+- Round 10c (2026-10-17) kept the four-module scripts while their role was open; round 11 (2026-10-17) made them the
+  canonical build.
+
+### Targets, hardware and templates
+
+A target is a hardware family with its own toolchain image and `target.yml` (capabilities as data). The module wizard
+and `create_target_module` let a person or an AI make a target for hardware the maintainer cannot test; every generated
+module stays marked untested until a run on the board proves it.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| Any base image is allowed for an AI-made module, but pinned by digest; an official image gets the normal question, another registry is shown plainly (registry, image, digest, "prebuilt image, built with network") and the person decides; Ditto prefers an official image plus the vendor's package sources and says why when it picks a vendor image. | `validate_module_data` and `validate_target_folder` in `Core/module_generator.py` check digests and official names; the confirmation shows non-official images. | Some vendors ship their toolchain only as an image; a block would make those targets impossible, an unpinned image would make them unsafe. |
+| Vendor toolchains in AI-made modules (pip packages, pinned downloads) have soft caps: exceeding one shows a clear warning and needs the person's override, never a hard block; https, sha256, size and pinned versions stay required and listed. | `soft_cap` checks in `Core/module_generator.py` and `tools/tools_targets.py`; the facts catalogue marks them person-only. | The person must be free to build their own projects; the security checks protect them. |
+| Rockchip was only the start: a generic ARM64 target, and the further families and formats (Llama, ONNX, NVIDIA, Hailo, Intel, Qualcomm) and the "useful later" list are on the roadmap. | planned: ROADMAP sections 3.2.0 and Later. | One family must not limit the framework. |
+| Targets come from the hardware probe the person runs on the board (also air-gapped, carried back) or that Ditto runs over SSH; a benchmark on the board is the proof ("tested on <board>"). | `llm-cli scan --import` and the probe tools read probes; a passed benchmark is recorded with the build; the proof in packs is planned: ROADMAP row "Targets from the hardware probe, proven on the board". | The maintainer does not own most boards; only the real board shows that a target works. |
+| On the RK3566 the LLM runs on the CPU (GGUF); RKNN only as an optional step for voice and vision models that never blocks the LLM build; the RK3566 gets its own template, the other Rockchip SoCs keep the standard one, updated to the newest toolkits; the RK3568 question is open. | planned: ROADMAP row "An own target template for the RK3566". | RKLLM does not support the RK3566 and its NPU is too weak for language models. |
+| Formats follow the probe: NPU formats only when the board's probe shows an NPU; on an ARM build computer GGUF runs natively, RKNN natively too (it has ARM wheels), RKLLM is refused with the reason (x86-64 wheels only, GGUF offered). | The builder and the CLI offer formats from the probe and the target capabilities; the RKLLM SoC list is RK3588, RK3576, RK3562 and RV1126B. | Offering a format the board cannot run, or a toolkit the build computer cannot install, only produces failed builds. |
+| The NVIDIA GPU target is planned; Jetson, TensorRT, OpenVINO and ROCm are prepared for people who make targets for them (template and wizard choices, probe keys, recipe hooks, docs). | Probe keys `JETSON_L4T_VERSION`, `CUDA_TOOLKIT_VERSION`, `TENSORRT_VERSION`, `OPENVINO_VERSION`, `ROCM_GFX_TARGETS` and others in the hardware probe; the NVIDIA target is planned: ROADMAP row "NVIDIA GPU target". | The maintainer cannot test every platform, but the community can when the groundwork is there. |
+| Hailo: the probe reads the Hailo architecture (keys of probe 3.1.0, `HardwareProfile.hailo()`); the gated Dataflow Compiler is never built in or shipped, only found where the person has it (pip install, the vendor's suite image or a wheel, mounted read-only) and what needs it is shown locked until then; Hailo-8 first, Hailo-10 experimental; optimize on the CPU for now; measurements stay on the PC and the board, packs carry only "tested on"; a local Hailo model server is detection-only with a warning when it listens openly. | The probe part is built (`scripts/hardware_probe.py`, `.sh`, `.ps1`; `llm-cli scan` prints a "Hailo:" line); the target is planned: ROADMAP Later "Hailo". | The compiler's licence forbids shipping it, and vendor benchmark terms must be respected. |
+| When the board's temperature can be read and gets too hot, the person gets a warning with a recommendation. | Benchmark, verify and deploy read the board's temperature and warn. | A hot board throttles and gives wrong benchmark numbers. |
+| CUDA per detected GPU with a strict driver clamp; the GPU template on Ubuntu 24.04 LTS; the Rockchip image and the CPU template on Debian 12 pinned by digest; Alpine 3.24, Ubuntu 26.04 only with a recipe fallback, Debian 11 kept with an end-of-life note. | `recipe.choose_cuda_toolkit` picks the toolkit from the probe; the image bases are in the target Dockerfiles; the rest follows planned: ROADMAP row "Step 7 - Newest fitting versions kept automatically". | The newest version that fits the driver and the board avoids both old advisories and broken builds. |
+| llama.cpp follows its semver releases. | The pinned commit lives in `configs/llama_runtime.yml`; images and templates check it. | A release is a tested point; a person still moves the pin. |
+
+**History**
+
+- Round 23 (2026-10-23) first took the default "refuse x86-only toolkits on an ARM build computer"; the maintainer
+  replaced it the same day: RKNN runs natively there, only RKLLM is refused.
+- Round 23 (2026-10-23) planned the Dataflow Compiler as a vendor file the person provides; round 24 (2026-10-23)
+  replaced that: llmcf only finds and uses an installed compiler.
+
+### Deployment to boards
+
+A finished build reaches a board over SSH. There are three ways, and the person picks one: way 1, the golden artifact
+ZIP with `deploy.sh` (`deploy package`, `deploy run`); way 2, the runtime package with `SHA256SUMS` into a private
+folder (`device runtime deploy`, MCP `deploy_device_runtime`); way 3, the bundle (planned), which reuses the code of
+ways 1 and 2.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| Both existing ways stay exactly as they are; way 1 keeps accepting root as the SSH user (at most a plain notice). | `person_steps.deploy_build` (way 1) and `steps.deploy_runtime_flow` (way 2); no chain changes their behaviour. | They serve different use cases; the person chooses. |
+| The bundle is a third, hybrid way: llmcf and the person prepare a complete, hash-listed bundle on the host (LLM, speech, voice, vision, the gateway, a harness, each cross-compiled in its own step) and send it with an idempotent installer that sets up users, units, cgroups and files; offline the bundle is complete, online the installer fetches only pinned, hash-checked items of the manifest through the locality rule; root only with the person's yes at deploy time. | planned: ROADMAP rows "The bundle, deploy way 3" and "An idempotent installer on the board"; it extends the existing deploy path, golden artifact and runtime package, never a parallel one. | One prepared image for the whole board, built where the tools are, set up the same way every time. |
+| A harness installer may fetch what it needs (apt, curl, git); llmcf runs it after the person's yes, does not block it, watches what it does (network targets, packages, files, processes), flags suspicious activity and reports plainly before (what it may do; the responsibility is the person's) and after (what it did). | planned: ROADMAP row "An agent harness as a bundle component". | The person decides about their own board; llmcf must make it transparent, not patronize. |
+| An AI may deploy to a device only after asking, and only to a device whose host key a person already confirmed in the GUI or CLI. | `deploy_to_device` is capped at "ask"; an unknown or changed host key is refused over MCP. | The first trust of a device is a person's decision. |
+| A device is reached by host name or address, whatever the person knows; a deploy waits for a board whose network drops and continues; SSH failures have reason codes with next steps; the KV-cache quantization is always offered, on by default with an opt-out where memory is small. | `remote/address.py`, the wait in `RemoteSession`, `remote/reasons.py` (`device_host_down`, `device_port_closed`, `device_auth_failed`, `device_host_key_changed`, `local_problem`), the KV-cache choice in the deploy settings. | Small boards on Wi-Fi drop often; the person needs to know why and what to do. |
+| Benchmarks of target artifacts run on the target after deploy (or optionally in Docker once the artifact is ready), never natively on the host; host-native runs only for Ditto's own local model. | Bench runs on the board through `RemoteSession.run_detached`/`follow`; a passed run is recorded as "tested on <board>". | Only the real hardware gives real numbers; taking a target model out of its container is meaningless. |
+| On a board the person enters the admin password once and may choose the device account; the framework creates the account and its key and keeps the key, never the password; what build and deploy need as root goes through a root-owned helper with a fixed set of subcommands and one sudoers rule, no general sudo. | planned: ROADMAP rows "An own account `llmcf` on the host and on boards" and "An idempotent installer on the board" (the Rust root helper `llmcf-install`). | A fixed account makes paths the same everywhere; a narrow helper is safer than sudo. |
+| Board processes run under their own Linux users: `llmcf` for gateway, model server and voice, each harness under its own user; two ways for the privileged set-up: the person created the users beforehand, or the installer runs as root with the person's yes. | planned: ROADMAP row "An idempotent installer on the board". | Separate users keep a harness from touching llmcf's files and the other way round. |
+| The first deployment target is SCP plus SSH: the file goes to the board and is installed there, the self-built llama.cpp server included. | `orchestrator/remote/` (`RemoteSession` over Paramiko or the system OpenSSH) with resumable upload. | It needs nothing on the board but SSH. |
+
+**History**
+
+- Round 33 (2026-10-29) made the bundle the one deploy path; round 35 (2026-10-29) replaced that with three ways: the
+  two existing ones stay and the bundle is the third. The planned "deploy run refuses root" was dropped.
+- Round 7 (2026-10-15) kept native host benchmarks of models by default; its second message the same day replaced that
+  for target models: benchmarks run on the target.
+
+### SSH, host keys and the remote package
+
+`orchestrator/remote/` is the one way to a board: address parsing, one OpenSSH argument builder, two transports
+(Paramiko and the system OpenSSH) behind `RemoteSession`, the trust store and pairing.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| The system OpenSSH fallback is a full second transport: wait for the board, resume, detached install, timeouts, keepalive, quoted options. | `SystemSshTransport` beside `ParamikoTransport` behind `RemoteSession`. | A fallback that can do less than the main path fails exactly when it is needed. |
+| llmcf keeps its own OpenSSH config file and passes it with `-F`, so neither `~/.ssh/config` nor the system file is read; entries the person needs (for example a jump host) are added by the person; a `%` in llmcf's paths is passed as `%%`; connection sharing comes later as an option. | The argument builder of `orchestrator/remote/` writes the trust options first and refuses lines that would change them; connection sharing is planned: ROADMAP row "One SSH connection shared by a board step's commands". | llmcf is sealed off from the host's SSH set-up, as with its own known_hosts. |
+| A board's host-key mapping is editable by the person (new host name, new address, new key, pasted, old and new fingerprint shown, "No" by default, audited, never over MCP); after a confirmed new key the board's data moves to the new device id; the old `trust_host` stays as a person-only delegate. | `remote/trust.py` (`replace_key`), `remote/pairing.py` (`trust_presented_key`), `DeploymentManager.trust_host` delegating to it. | A reflashed board gets a new key; the person must be able to say so without losing its history. |
+| One audit sink for every surface: CLI, GUI and the service record a device action through the same function. | `person_steps.device_audit` (the registry's log when there is one, else the per-user `audit.db`). | One source of truth; the Boards window's benchmark consent works without a registry, as in the CLI. |
+| A local error (permissions, a full or read-only disk of this computer) is not "the board does not answer" but its own reason with a next step; the hardware scan of a device checks its SSH user like every board path; path labels for an AI also cover file URLs and account names with spaces. | `reach_code` returns `local_problem`; `scan_device` uses `valid_user`; `security.paths.label_paths` and `device_text`. | Wrong reasons send the person to the wrong place; a host path must never reach an AI. |
+
+### MCP server, tools and permissions
+
+One tool registry (`orchestrator/tools/`) serves the MCP server and Ditto alike: typed tools with risk tiers, the
+person's stored permissions on every call, confirmations, pending and standing approvals and an HMAC-chained audit log.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| No secret or credential passes through MCP; an AI never changes its own permissions, the vault protection or the audit log; every call is audited; untrusted text stays marked. | The registry's policy, `AISettingsChange` with `TIGHTEN_ONLY` and `PERSON_ONLY_SETTINGS`, the audit chain, `orchestrator/utils/untrusted.py`. | These are the limits that keep the person in control. |
+| There is no "ask Ditto" tool: an MCP client takes Ditto's job itself and gets everything Ditto gets (the same knowledge base, build logs, probes, capabilities, the same actions with the same filters), plus prompts that mirror Ditto's tasks; the server came first, then the tools, MCP Apps later. | The core tools of `tools/` and the prompts of `tools/framework_prompts.py`; MCP Apps are in the roadmap's Later list. | The client already has a capable model; a second model behind a tool would only add cost and a weaker answer. |
+| An AI may change ordinary settings after asking; never tool permissions, secrets, vault protection, the audit log or anything that widens what an AI may do. | `update_settings` through `AISettingsChange.problems()`; person-only keys in `PERSON_ONLY_SETTINGS`. | Settings are work people gladly hand over; the limits of an AI are not. |
+| An argument a tool does not know is never dropped silently on any path: tool inputs forbid extra fields, the server checks the raw arguments first, schemas are closed, declared aliases are the only mapping; a guard test covers every registered tool. | Input models with `extra="forbid"`, the raw-argument check in `mcp_server.py`, the registry-wide guard test. | A dropped argument makes a tool do something else than asked; this was a bug of 3.0.0. |
+| When a client cannot ask the person (also a headless client), the request becomes a pending approval in the framework instead of a refusal. | `tools/approvals.py` (pending approvals), shown under Tools > Pending Approvals... and `llm-cli tools approvals`. | A client without a person in front would decline by itself; the person decides later instead. |
+| Permissions per caller: Ditto, local stdio clients and each named HTTP token; a new token can only read; tokens are managed only in GUI and CLI; standing approvals for the shared stdio caller come with a warning and the narrowest scope; one click releases the shared caller; stdio is not outdated (stdio and Streamable HTTP are the two standard transports). | `tools/mcp_tokens.py`, per-caller policies in `tools/policy.py`, the warning in the standing-approval dialog. | Each client should get only what the person gives that client. |
+| Packs over MCP: knowledge, target and recipe packs from the signed index, each confirmed, with an optional "yes, and do not ask again" (only knowledge and recipe packs of both trust levels and verified target packs); `export_pack` always asks; publishing a pull request over MCP is not offered, only the local export. | `add_pack_from_index`, `export_pack` and the standing-approval rules of `tools/approvals.py`. | A shared pack leaves the person's computer; that must be the person's step. |
+| Small models get the same tool set; they must say honestly and specifically when they cannot do a task (what is missing: information, capability, permission, hardware, a tool); the tools are made fool-proof. | `report_cannot_do` and the reason codes with next steps on every refusal. | A smaller tool set would make small models useless; a vague refusal helps nobody. |
+| No fixed size cap for weight downloads: free disk and whether the hardware can run the model are checked and the size is shown in the question; technical defaults: fail-closed audit, shared build state, own builds cancellable without a question, denied tools hidden, new tools start at "ask". | The disk rule (`Core/disk_plan.py`), the registry's listing and default tiers. | A large model must be possible when the person's hardware can take it. |
+| An AI app's builds are not cancelled when the app disconnects or its server crashes; the app (or the person) can reconnect and follow them; the owner identity allows re-attaching, never a takeover by another app. | Build ownership by caller in the build service; `get_build_status` follows a running build. | The person's time is precious; a run stopped shortly before its end is annoying. |
+| Toward an AI: ids and labels; whatever the person sees uses speaking names (device labels, target and model names, folder labels), translated back before display. | `Core/speaking_names.py`; the facts an AI may see never hold person-only facts (D0). | The AI's text must stay readable for the person without giving the AI host paths or accounts. |
+| Delegations: the person's release lets an AI answer its own routine questions (situation warnings: disk tight but enough, slow hardware, long build, large download); security and legal warnings, licences, the first trust of a host key, the AI's own permissions, stopping another client's work and every deletion stay with the person; lifetimes 8 hours, 24 hours or 30 days, "until revoked" lapses after 90 days without use; the first build of AI-made code is shown once; a parked question waits until the person interacts. | The shared vocabulary exists (`tools/delegation.py`: ids, scopes, tools never covered); the engine is planned: ROADMAP row "Delegations". | Real work should be the AI's so that a layperson can run the software; the hard rules stay the person's. |
+| "Do not ask again" is a tick box; presence is proved by a click, PIN, password or fingerprint only as an opt-in. | Standing approvals (`tools/approvals.py`) are created only in the framework's own window; the opt-ins are planned: ROADMAP row "Presence proof and access control as opt-ins". | Asking for a password every time annoys people without making it safer. |
+| Harness-agnostic: everything that speaks MCP can operate the framework; the framework never starts a client program itself; it reaches running clients through a message box for every client, optional client-specific pushes, and an optional wake-up the person sets up that carries only fixed keywords (details over MCP); the broker is open to other applications' feeds and activated automatically when needed; the framework builds its own mechanism, taking ideas from an earlier design, no foreign code. | planned: ROADMAP row "A message box and a wake-up for every MCP client" and the MQTT broker of the Rust gateway. | People use many different harnesses; a wake-up payload lands in a model's prompt, so it must be fixed text. |
+| A remote agent reaches the framework directly through the MCP server, authenticated by OAuth, a token or a pre-shared key; a pre-shared key is an HMAC signature on every request, a token serves apps that can only send a fixed header. | Streamable HTTP is loopback-only today; the network gateway is planned: ROADMAP row "Network MCP gateway in Rust". | A phone app must be able to connect safely without a second installation. |
+| External AI apps get the GUI tools the same way as Ditto, with the same rules, the mark "filled by <app>" and the same audit; they work while the GUI is open. | The `gui` tool over the private bridge (`tools/gui_bridge.py`, `tools/tools_gui.py`). | One harness for every AI; the person sees who filled what. |
+| Transparency everywhere: what was done, found and decided and why, except secrets, which are never shown. | The chat feed, the audit log and every result say what happened; secrets are redacted everywhere. | The person must be able to follow every step. |
+
+**History**
+
+- Round 2 (2026-10-11) took the default "cancel a session's builds on disconnect"; round 16 (2026-10-22) replaced it:
+  builds keep running and can be followed again.
+- Round 5 (2026-10-12) proposed lapsing after twice the lifetime without use; round 6 (2026-10-12) replaced it: fixed
+  lifetimes, only "until revoked" lapses after 90 days.
+- Round 5 (2026-10-12) planned a broker run by the person and then an asyncio broker inside the framework's process;
+  round 8 (2026-10-16) replaced both: the MQTT broker sits inside the Rust network gateway.
+- Round 5 (2026-10-12) named an existing wake-on-agent project of the same author as the model; round 6 (2026-10-12):
+  that project does not go into the framework, only its useful ideas.
+- Round 8 (2026-10-15) built the GUI tools for Ditto first and left external apps open; its answers of 2026-10-16 gave
+  them to external apps too.
+
+### Ditto, the local runtime and the LLM layer
+
+Ditto is the built-in assistant: optional, experimental, with a cloud provider or a local model. Its hands are the
+framework's own tools; its local model runs on a self-built llama.cpp server.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| Ditto's hands are the framework's own tools, the same ones every MCP client gets; there is no remote mode (Ditto as a client of a framework on another computer): it was removed, local files stay reachable. | Ditto calls the registry in process; the remote mode's code, CLI and texts were removed in wave 3b. | Ditto is a harness for a local model or a cloud API; remote compiling was never planned. |
+| Ditto stays optional and marked experimental, with a notice "use at your own risk and responsibility; the creator is not liable" at first use and in the documents. | The one-time notice in the GUI and CLI; README and Features say so. | An assistant can be wrong; the person must know it. |
+| The person can question a decision of an AI: a connected client is asked; otherwise Ditto explains from the recorded facts and reason and says it did not decide; Ditto re-sends the recorded facts per request; the framework never starts a person's subscription client itself. | The chat feed keeps the reason of every decision (`Core/chat_feed.py`). | Consumer subscriptions must not be routed through third-party apps; the record lets anyone explain later. |
+| Ditto's local server runs bare metal or in Docker, chosen automatically with the least work for the person, as an idempotent module of the installer; switching from one to the other removes the first completely, only after the second was verified, with the disk for both checked first and one question with the full list. | `orchestrator/runtime/runtime_mode.py`; `llm-cli ditto runtime` and the switch with its removal list. | Bare metal avoids Docker's overhead; leftovers of an old mode only cost disk and confuse. |
+| Ditto's own local model runs natively on the host, its server under a powerless identity. | `orchestrator/runtime/llama_server.py` with the launch policy of `server_policy.py`. | Only Ditto's model really runs on the host. |
+| A wave "Ditto: security and measurability": eval verdicts with fingerprint, seeded repeats, intervals, pass^k and a pass-to-fail gate, a tainted-turn rule, provenance on knowledge excerpts, new eval case groups, replay cases, fuller tool-use metrics, excerpt packing for small contexts, fact-keeping summaries. | planned: ROADMAP row "Ditto: security and measurability". | What Ditto does must be measurable, and outside text must not steer it. |
+| Context and cache: lower cost with cloud providers and a local KV cache that does not overflow so fast; the context limit and compaction depend on the model (local from the measured hardware, API models from the provider's server where possible); cache lifetime a setting whose default follows the resources with a soft cap; cloud caching follows each provider's own way and guides. | planned: ROADMAP section "Ditto's context". | Every token costs money in the cloud and memory on the device. |
+| Ditto keeps a searchable archive that everyone who uses the harness may read (Ditto and AI clients over MCP); only knowledge about llmcf and building, never the person's private talk; kept until the person deletes it or a newer fact replaces it (a real upsert); stored as its own collection in the knowledge base's storage; first facts from tool results, facts from Ditto's answers later. | planned: ROADMAP rows "Ditto's archive, phase 1" and "phase 2". | What Ditto learned must not be lost between sessions, and nothing private may stay. |
+| LLMLingua-2 if feasible: about 150 lines of the MIT method ported, the model fetched on demand from its original source and only if missing, never shipped in the repository. | planned: ROADMAP row "LLMLingua-2 on demand". | Compression saves tokens; shipping the model would make the repository carry a model. |
+| One paid test call with the person's own OpenAI key is allowed, to settle the 12-hour cache and token counting; it runs in the person's own llmcf, started by the person, never from a development sandbox; the key never leaves the person's computer. | planned: ROADMAP row "Real token numbers first". | Only a real call shows how the provider behaves; the key is the person's. |
+| A token-saving middleware can run on the target after deploy, in front of the local model llmcf built, offered as a finished deployment together with a harness, voice and vision. | planned: ROADMAP row "`llmcf-gateway`, stage 1 in Rust". | The same savings help on the board, where memory is smallest. |
+
+**History**
+
+- Round 2 (2026-10-11) read "hybrid" as Ditto also working as an MCP client of a framework on another computer; round 5
+  (2026-10-12) kept the local registry always; round 8 (2026-10-15) clarified "hybrid" as the tools being Ditto's hands
+  and removed the remote mode.
+
+### On the board: gateway, voice and MCP (planned)
+
+The board side is Rust, prebuilt and signed: a gateway in front of the board's local model, voice with whisper.cpp,
+vision, an MCP server and a bridge to other MCP servers, all deployed as components of the bundle.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| The board's gateway is Rust, prebuilt and signed; Rust wherever possible. | planned: ROADMAP rows "Prebuilt, signed Rust binaries for boards" and "`llmcf-gateway`, stage 1 in Rust". | Memory safety and a small process on a small board. |
+| Network: loopback first, the local network only with TLS (own certificate, pinned fingerprint), never plain HTTP. | planned: ROADMAP rows "The gateway as a bundle component" and "MCP on the board's network address". | A board on a home network must not offer an open, unencrypted port. |
+| The board's memory reserve comes from a measurement per board; whether the LLM runs on the board is the person's choice first, then the measured limits decide; an LLM off the board stays the fallback. | planned: ROADMAP rows "Measure the board before any board default is set" and "The start script passes context, cache budget and a per-board reserve". | Guessed limits either waste the board or make it swap. |
+| Speech recognition and wake word with (tiny) whisper.cpp, a special Hailo build later; other voice parts may be offered with their licence shown before download and use, never on by default for non-free terms. | planned: ROADMAP row "Voice with whisper.cpp". | One open engine for both jobs; the person decides about other terms. |
+| The board's middleware gets an MCP server too, and a bridge mode that connects to MCP servers that already run (never starts one) and offers their tools in one place; discovered tools are listed automatically but offered only after the person enables them; bridged tools are untrusted, no secrets are passed on; the gateway starts and stops the model server, which runs in its own unit outside the gateway's memory limit. | planned: ROADMAP rows of the MCP set on the board (server, host link, approvals, change tools, bridge, tool loop, network address). | Anything can plug in on the board; the person keeps the allow-list. |
+| A harness may ask its own person, except a harness that listens to the room; standing approvals are offered by llmcf only as a recommendation with a soft cap. | planned: ROADMAP row "Approvals for the board's tools". | A television in the room can say "yes". |
+
+### Knowledge base and Deep Ingest
+
+The knowledge base is local: FastEmbed embeddings on the CPU and Qdrant Edge in the process. Deep Ingest reads public
+documentation sites after the person starts it (or confirms an AI's request) and checks every opt-out.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| Deep Ingest over MCP: yes, capped at "ask", the question shows every address, and the opt-out checks, limits and the one-time notice apply as in the GUI. | `crawl_docs_site` in `tools/tools_crawl.py`; a guard test keeps every other way to the crawler out of reach. | Text in a log or a page could steer an AI into crawling. |
+| Only publicly accessible knowledge is shared, robots.txt and the other opt-outs respected; copyright is kept wherever it is recognisable and licences decide (no licence means all rights reserved: link and short facts only); a pack that carries text under a licence that asks for its text ships that text. | `orchestrator/rag/licences.py`, the licence texts from the SPDX list, the pack exporter. | We follow the law and still need the information Ditto may use. |
+| The local knowledge base is stored in Qdrant Edge (the Rust engine in the process), with a verified migration; qdrant-client stays only for an optional Qdrant server. | `orchestrator/rag/` with `qdrant-edge-py`; the conversion keeps the old folder until the person deletes it. | The old local mode compared every query with every point in Python. |
+| A newer Qdrant Edge comes only after a cross-version shard test and an automatic snapshot. | The pin stays exact; the update follows planned: ROADMAP row "Step 7". | The person's knowledge must survive an engine update. |
+| Hidden HTML carriers are stripped and text is sanitized at Deep Ingest, with fixture pages in CI. | `orchestrator/rag/html_text.py`, `RAGManager.ingest_page`; the nightly retrieval evaluation. | Hidden text is a common way to inject instructions. |
+| Knowledge snapshots have no count limit and are never deleted automatically; before a snapshot its size is estimated (does not fit: blocked with the list to delete or export; little room: a warning); a snapshot is taken before every pack import. | `create_snapshot` with `snapshot_estimate`; Mojo Oracle reports the snapshot folder against free space. | The disk is the real limit, and an import must be undoable. |
+| The source catalogue's documentation links feed the wizard and Ditto, with a Deep Ingest offer when knowledge is missing; the framework's own code can be indexed. | `orchestrator/Core/doc_sources.py`; `knowledge index-docs --with-code` and `index_framework_docs`. | Ditto answers better with the vendor's own documents. |
+| Knowledge always belongs to a topic or a target; loose files are sorted into such folders, never imported unsorted or without the pack checks; a newer pack version or a new crawl replaces the old version's chunks. | `knowledge loose` / `knowledge sort`, upsert per pack in `RAGManager`. | Old and new answers must not mix. |
+| A crawl the person starts may reach own-network addresses in offline mode (by the one locality rule, pinned, every hop judged again), except link-local and the known cloud metadata addresses; an AI's crawl keeps the public-only guard. | `PublicOnlyAdapter` and the locality rule in `Core/crawler_manager.py` and `utils/locality.py`. | A local documentation server is legitimate; a metadata service never is. |
+
+### Community, recipes and packs
+
+People share target templates, recipes and knowledge as packs through a public git repository; the framework pulls the
+signed index and installs through a quarantine.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| A recipe is a target template: it holds the build code, and model, quantization, format and deployment are variables the person picks in the build menu, never bound to the creator's choice; what a recipe holds must be used by the builder; data-only packs are "tested settings"; existing templates are fixed and improved, not reinvented. | `schemas/recipes.py` and the recipe loader; recipes as templates are planned: ROADMAP row "Recipes as target templates". | A template is about the hardware; the person who pulls it decides the rest. |
+| What people share are target templates through the public community repository (pull request hand-off); nothing image-like goes into the hub, never models to Hugging Face; a person's own images are free; the framework pulls the list of ready templates automatically; companies build cluster images themselves from the Dockerfiles into their own registry. | `Core/community_manager.py` (`submit_contribution`, the index), the Community Hub. | Templates are small and checkable; images would need a rebuild for every update. |
+| The community repository is the project's knowledge-base repository (default of `community_repo`); the index address follows once the first signed index exists; workflows of fork pull requests need approval for all outside contributors. | `community_repo` default; publishing the index is planned: ROADMAP row "Community repository and index published". | A pull request from outside must not run the repository's checks unreviewed. |
+| Board knowledge in a target pack is imported at the recipient. | The pack installer imports a target's `knowledge/` into the knowledge base. | The template's documentation belongs with it. |
+| A bot may propose new models with a compatibility test as a tested pull request; it never takes anything over by itself. | Roadmap Later. | New models appear faster than releases; a person still decides. |
+
+**History**
+
+- Round 14 (2026-10-22) said "we publish no images" without a scope; round 15 (2026-10-22) narrowed it: only templates
+  go into the shared hub, a user's own images are free.
+
+### Offline mode and the own network
+
+Offline mode means no internet; a local network may be there. One locality rule decides every reach-out.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| Host names are judged by their addresses (private, loopback and link-local count as local); a VPN address counts as local only with the person's own control server and no public relays (a relay in the own network is fine); a public name, also of a reverse proxy, is not local unless the person opts in; every default has a person-only opt-out with a plain explanation. | `orchestrator/utils/locality.py`, `Core/local_network.py`; `config local-network`. | The person decides what their own network allows; llmcf must not patronize. |
+| The person's opt-outs count only for what offline mode may reach, never for the privacy filter; a name with local and public addresses counts as local and is reached only through its checked local addresses. | `check_reach` versus the location API in `utils/locality.py`; `pinned_transport`. | A host counted as local for convenience must still not see unfiltered data; pinning makes mixed answers safe. |
+| A build started in offline mode never downloads: it offers a local file or folder (a preloaded model or one already on this computer); an AI picks only among local models by label, a file pick is the person's. | The offline choice in the Builder and `build start`; the AI label list of local models. | Offline means nobody can load from the internet. |
+
+**History**
+
+- Round 24 (2026-10-23) first asked whether a VPN control server must also avoid public relays; its final answer the
+  same day settled it and added the person's opt-outs.
+
+### Hugging Face
+
+Models and datasets are only downloaded from Hugging Face, never uploaded; every call goes through one helper.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| Single-file downloads (gated files with proper checks) and local preloaded files; the "ungated only" filter matters; GUI downloads use the same verified downloader as the AI path into `models/hf/<owner>--<name>/<commit>/`; the old cache stays listed and usable with an optional one-time take-over. | `Core/hf_hub.py` (`HubFetcher`), `ModelManager.download_file`, `models take-over`. | One checked path for every caller; nothing the person downloaded before is lost. |
+| Tokens never leave the device except on Hugging Face's own encrypted way and only when it needs one (gated or private); no implicit token for any library, telemetry and side requests off, public files without a token. | `HF_HUB_DISABLE_IMPLICIT_TOKEN` and `HF_HUB_DISABLE_TELEMETRY` for the process; fastembed gets the token only through `hf_hub` and only for huggingface.co. | Nothing is sent that does not have to be. |
+
+### Secrets, sign-in and accounts
+
+Secrets live in an encrypted vault whose key is in the OS keyring; sign-in follows each access type; the framework is
+for everyone who can start it.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| Private mode uses the framework's own keyring solution; enterprise mode adds HashiCorp Vault and CyberArk Conjur (also opt-in in private mode): values fetched at use, kept in memory only, never in the local store, every fetch audited, leases renewed and revoked; later dynamic secrets and signed SSH certificates for boards. | `Core/secrets_manager.py` and `Core/vault_key.py` today; the backends are planned: ROADMAP row "Step 4 - Secret backends". | Companies keep secrets centrally and must see every use. |
+| On Linux the framework ships its own keyring service; on Windows the Windows Credential Manager. | planned: ROADMAP row "Step 6 - Own keyring service on Linux" (the open decision is written there). | Many Linux installations have no usable keyring. |
+| A dedicated account `llmcf` on the host, created by the installer with the folder rights it needs, used for everything that needs no admin rights; on Windows code and data under the program folder (code admin-only and readable for `llmcf`, data folders writable by `llmcf` through explicit permissions), on Linux the same idea. | planned: ROADMAP row "An own account `llmcf` on the host and on boards". | A fixed account keeps paths the same and separates the framework from the person's own files. |
+| Everyone who can start the program may use it; it is installed for all users; access control is only an opt-in; no prompts to join or leave the docker group. | No account check at start; access control is planned: ROADMAP row "Presence proof and access control as opt-ins". | Opening the software is not security-critical; constant prompts annoy. |
+| A locked vault waits for unlock; the GUI and the CLI pass their environment, an AI-started service gets only basics. | The vault's unlock path; the service part is planned: ROADMAP row "Step 1 - Build service". | An AI must not inherit the person's whole environment. |
+
+### GUI and the person's path
+
+The GUI is for people who never use a terminal. Ditto never controls the mouse: it works through the framework's
+functions, and the person sees fields fill and windows show the result.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| Ditto never controls the mouse; the mouse path is for the person: the GUI never tells a person to type a command, every next step names the mouse path in the person's language, what an AI does shows up in the GUI, every window gets a usability review; every action a person can start in the CLI is also startable by mouse. | The `gui` tool fills fields visibly; `orchestrator/utils/next_steps/` renders steps for CLI, GUI and AI; `tests/test_cli_gui_parity.py` and `tests/test_no_command_texts.py`. | A missing or unintuitive GUI means the software is not used, however good it is. |
+| Finished models go to an output folder the person sets once (default `~/llmcf/output`), with a save dialog for every golden artifact; without a person the default folder is used and the report says where; Cancel keeps it in the build folder for "Save..." later. | Setting `output_dir`, `config output-folder`, `build save`. | The storage path the person meant is where results go, not Docker's storage. |
+| GUI tools for AIs: read what the person entered, fill fields visibly and marked (the person can change and undo), steer the template wizard, open a window; secrets only as set or not set, paths as labels, nothing submitted silently, a field the person edits never overwritten; the board preselection from the probe is only a recommendation that says where it came from and how sure it is; when unsure, ask instead of guessing. | `tools/tools_gui.py`, `tools/gui_surface.py`, `gui/form_surface.py`; the board recommendation of the Builder. | The person knows which board is in their hand. |
+| When a step needs the person's yes, the command is prepared and the person asked "Allow `<command>`?" with what it does and why; yes runs exactly that, no runs nothing; only steps from the closed catalogue with checked arguments; secrets are asked in a field, never on a command line. | Allow-to-run proposals of `orchestrator/utils/next_steps/`. | The person never has to type, and still sees the full command. |
+| Menu paths in texts come from the live menu labels; starting without a terminal is the normal case (launchers, no console window, a crash handler with a visible message); the activity of Ditto and AI apps shows in a console next to the chat, resizable; technical terms explain themselves on mouse-over with a link to a good source. | `mouse_path` and the `{path:}` placeholder, the chat panel with the Ditto console, the glossary hover cards (`utils/l10n_glossary.py`). | Paths typed by hand drift; people must understand what they read. |
+| German form of address asked at first start; menus regrouped (Ditto menu with "Set up Ditto..." first); the permission dialog moves into "Set up Ditto..." and the first AI app connection; a Models tab as a real list; settings without a mouse path become editable; technical terms stay English, error reports are in the person's language with the English detail folded away. | The first-run dialog, the menu modules, File > Settings..., the error box. | The GUI must speak to the person, not to a developer. |
+
+### Mojo, the health check
+
+Mojo Oracle looks and reports what it found; Mojo Miracle repairs what can be repaired safely and says what it repaired,
+what not and why.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| The doctor is called Mojo: `llmcf mojo --oracle` (default, look only) and `--miracle` (repair); when Oracle finds something it proposes Miracle and a yes runs it without typing; an AI uses both through MCP tools; the old command name stays an alias. | `orchestrator/Core/mojo/`, `run_mojo_oracle`, `run_mojo_miracle`, Tools > Mojo Health Check.... | A health check that names and repairs is what a layperson needs. |
+| The default Oracle run makes no network contact with boards; a board is checked only on request or when a recorded fact points to a problem with it. | Oracle reports recorded facts and offers `check_board`; the Deployment tab's "Check this board". | Contacting every board for nothing is noise and leaks presence. |
+| After a successful Miracle following an Oracle run at a terminal, a large ASCII crystal ball shows with "Miracle managed", or with "404 - miracle not found" when there was nothing to repair; in colour where the console can; never with `--json`, for AI tools or in the GUI. | `orchestrator/Core/mojo/banner.py`. | A small reward for closing the circle, without touching anything an AI reads. |
+| The open-Oracle note expires after one hour; `--miracle --json` and `doctor --fix` clear it without a logo, so does a Miracle run in the GUI; its functions never raise for a bad state folder. | planned: ROADMAP row "Mojo circle follow-ups". | An old note must not trigger a logo days later. |
+| Mojo's disk verdicts follow the one disk rule (reserves), not fixed thresholds. | `Core/disk_plan.py` (`reserve_for`, the reservation ledger) used by Mojo. | One rule for every free-space check. |
+| Mojo's freshness check is offline by default, online only on request. | planned: ROADMAP row "Step 7". | A health check must not reach out unasked. |
+
+**History**
+
+- Round 7 (2026-10-15) named the commands; its second message the same day added that Oracle proposes Miracle right
+  away.
+
+### Deletion and the trash
+
+Nothing is deleted without the person: every deletion shows the exact list and defaults to "No".
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| Deleting never happens without asking the person first, listing exactly what goes (full path, file name, size, what it is), for every deletion, the trash included; never delegable, never a standing approval; the person sees full paths, the AI labels; the Docker cleanup names every object with name, id and size; clearing the chat lists path, file and size with "No" preselected. | `Core/deletion.py` (`AcceptedDeletion`), `Core/trash.py`; the registry registers a deleting tool only when the framework's own window can ask. | A deletion cannot be undone; the person must know exactly what goes. |
+| Residues are removed only when they are truly unneeded, otherwise used; never removed without a replacement; each case decided and reported. | The removals of the consolidation each came with proof (see the changelog of 3.1.0). | Unfinished feature code is the maintainer's plan, not waste. |
+
+**History**
+
+- Round 5 (2026-10-12) first made deleting to the trash delegable; its third message the same day replaced that: no
+  deletion without asking, never delegable.
+
+### Installer, platforms and dependencies
+
+`install.sh` and the Windows installer set up the framework from the repository's own files with hash-pinned
+dependencies; each Linux distribution through its own package manager.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| No prebuilt framework images are published; people who want the framework in a container build it locally by running the same installation inside it; defaults name no registry image; the installer always uses the newest framework state with the current `pyproject.toml`, the stale copy is gone. | `scripts/build_container_image.sh` (`make build`), docs/Container_Setup.md; the image settings name local images. | A published image would need a rebuild and maintenance for every update. |
+| uv replaces Poetry: PEP 621 metadata, `uv.lock`, a hash-pinned requirements export for the installer, Dependabot on uv. | `pyproject.toml`, `uv.lock`, `requirements*.txt` exported exactly as CI checks. | Poetry was more pain than use; the installer needs plain pip with hashes. |
+| PySide6 is an optional `gui` extra; desktop installers install it, headless, server and container installs skip Qt. | The extra in `pyproject.toml`, `requirements-gui.txt`, `install.sh --headless`; Core stays Qt-free (`tests/test_layering.py`). | A server needs no desktop libraries. |
+| Each Linux distribution through its native package manager and sources (apt, dnf, zypper, pacman, apk), signatures checked the way each manager does; Docker only with a checked key (repository key against the published fingerprint, any script pinned by sha256, a mismatch stops in plain words); for the whole RHEL family Docker CE from Docker's repository, with the exact list shown before dnf would remove a package (never `--allowerasing` silently); Podman as the fallback with `DOCKER_HOST` set by llmcf and the features it lacks refused plainly. | Family detection, the dry-run plan and the package mapping in `install.sh`; the Docker engine helper. | No detour scripts; the person's system stays the person's. |
+| The repository is named LLM_Cross-Compiler_Framework and every place tied to the old name follows (package name, install folders, bot name and keyring service with the old ones still honoured). | `pyproject.toml` (`llm-cross-compiler-framework`), the installers, the keyring fallback. | One name everywhere, without breaking older installations. |
+| Every dependency stays on the highest version that fits, and updates must not break anything; a cooldown of 7 days (14 for majors and exact pins, security fixes exempt); the next major of the Anthropic SDK after its cooldown; a bot as a scheduled job first, an app only if needed. | Exact pins in `pyproject.toml` and `uv.lock`; the mechanism is planned: ROADMAP row "Step 7". | Old versions collect advisories; a careless update breaks builds. |
+| The image security scan reads a saved image archive and gets no Docker socket. | The builder's Trivy step scans the archive. | The socket would give the scanner control over Docker. |
+
+### Updates, backups and board images (planned)
+
+Updates of boards and of llmcf itself and the backups of boards follow one imported update orchestrator; the PC does the
+heavy work, the board only reads and streams.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| An update orchestrator of the same author is imported natively into llmcf with its origin recorded and reworked there; its own repository stays as it is; llmcf's own release is the verified source; Windows follows the same steps without OS updates; releases with SHA256SUMS and a signature, "newest" inside the declared compatible range. | planned: ROADMAP row "The update orchestrator imported natively". | Changing the original repository would break the routine that already runs on it. |
+| Board privileges: root only through cron, llmcf only exact sudo lines, updates on boards person-only with the root password until the Rust root helper; PCs need no root; OS updates offered and switched on with a plain sentence; without a backup they wait (the backup's maximum age a setting, 14 days by default) unless the person ticks the override; the git update path stays for developer checkouts, shut-down and shortcut options stay. | planned: ROADMAP row "The update orchestrator imported natively". | An update without a backup can brick a board. |
+| The PC pulls every board backup over the deploy's SSH session; nothing is written to the board's own card; the image is built and shrunk on the PC and exported where the person wants it; two kinds: a device backup restores exactly this board, a fleet image is generalised (new host keys and machine id at first boot, per-board values from a list in the framework or a file on the boot partition); the unshrunk image is deleted once the small one is verified; the framework's own images come from an unprivileged assembler, PiShrink (pinned) only for raw card images from outside; a twin is named when one is seen. | planned: ROADMAP row "Board backups pulled by the PC, two image kinds". | A card-sized image eats storage, and writing to the board's card wears it. |
+
+**History**
+
+- Round 18 (2026-10-22) planned to publish the orchestrator under MIT after a history scan and fetch its newest release
+  tag; round 19 (2026-10-22) replaced that: it is imported natively and ships with llmcf.
+- Round 19 (2026-10-22) said PiShrink never runs on a board and stays out; round 20 (2026-10-22) imported it into the
+  framework; round 22 (2026-10-23) narrowed it to images brought in from outside.
+- Round 20 (2026-10-22) sent images through the NAS; round 21 (2026-10-22) replaced that: the PC pulls every backup, any
+  export target except the board's own card.
+
+### Build service, queue and modes (planned)
+
+A background build service per account will own every build; GUI, CLI and MCP become its clients.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| A build worker of its own: a GUI crash no longer ends a build, it can be stopped and restarted without losing anything and resumes at the last finished stage; on demand, stops after 10 minutes idle, autostart as opt-in, a running conversion survives a stop or update and is re-attached. | planned: ROADMAP row "Step 1 - Build service" (the state already lives in files). | Today a build ends with the program that started it. |
+| One queue across processes, admission by RAM, CPU and disk, extending what exists; no Celery; Kubernetes and Nomad only as opt-in executors; model builds first, own builds wait too, person before AI at equal priority. | planned: ROADMAP rows "Step 2" and "Step 5" (the queue in `Core/orchestrator.py`, `Core/disk_plan.py`). | Several programs start builds on one computer. |
+| Private mode is the default, enterprise mode optional, chosen in the installer and in File > Settings...; an AI can read it, never change it; it reuses the existing advanced and enterprise scaffolding; later enterprise may be gated by a licence key. | The scaffolding in `Core/config_manager.py`; planned: ROADMAP row "Step 3 - Private and enterprise mode". | Company features must not burden a private installation. |
+| A read-only recon and design run comes before anything is built. | Every chain starts with a recon of what exists (see Repository and consolidation). | Building twice costs more than looking once. |
+
+### Repository, layers and consolidation
+
+One repository with layers enforced by a test; every change extends what exists.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| Recon first: look at what exists and what a change touches before designing; use, extend and wire the existing implementation, never build a duplicate; "done" means wired and tested; check every change against the design, the roadmap and the changelog. | Every work chain starts with a recon; reports name the existing code checked first. | The maintainer's original came first and could have been used. |
+| One repository; layers enforced by a test with a shrinking allowlist and a cycle ratchet; no separately installable packages for now. | `tests/test_layering.py`. | Layers keep Core free of Qt and the GUI; a test keeps them from eroding. |
+| One disk rule for every free-space check: reserves plus a cross-process reservation ledger; downloads count the space a running build reserved (wait or refuse with a plain reason). | `Core/disk_plan.py` (`reserve_for`, `ReservationLedger`). | Separate checks disagreed and let two jobs fill the same disk. |
+| The removal answers of the unwired audit: one implementation per job, the original one where it is adequate (the duplicate link question, old text keys, duplicate localization keys, menu-name lookups, the legacy Docker build path, the credential check, the old validation module, the smoke-test script, an unused probe worker), each wired to the kept one or removed with proof. | The consolidation chains of 3.1.0 (see the changelog's "One implementation per job" entry). | Two copies of the same job drift apart. |
+| Everything that exists but is not wired gets wired, then checked that it works, is complete or needs improving. | The wave-6 wiring and the consolidation stages. | Unwired code helps nobody. |
+| Work lands on the branch `development`; it is merged into main with a normal merge commit (all commits kept) when it is stable and CI is green; CI runs on pushes to development. | The push triggers of `.github/workflows/ci.yml`. | Main stays the stable state; the history stays readable. |
+| Questions come grouped, a few at a time; what is not asked now goes onto the roadmap as an ordered item with its open decisions in the row; nothing may be orphaned. | The roadmap rows carry their open decisions (for example the build-service steps). | The roadmap is a to-do list, not a dump. |
+
+### Documentation and the blueprint
+
+Every document exists in English and German; the blueprint is three files: this design, the roadmap and the changelog.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| The blueprint is three files with German twins: DESIGN (every component and decision: what, how, why), ROADMAP (what comes) and CHANGELOG (what was: only finished, wired, tested and committed work, Keep a Changelog types, no Unreleased section, every entry with time stamp and version, committed with its code); every decision goes into DESIGN at its component, scrubbed; the decisions log stays outside the repository as a working log. | docs/BLUEPRINT.md is the index; `tests/test_docs.py` checks the files, the stamps, the roadmap and this section's decision blocks. | One place for each question: how and why, what comes, what was. |
+| The documents get a clean-up pass (Keep a Changelog, roadmap); Auto-Tuning is planned and goes into the roadmap; technical terms stay English in the German texts. | The documentation rules in this design and CONTRIBUTING; `tests/test_docs.py`. | Readers need one consistent structure in both languages. |
+
+**History**
+
+- Round 34 (2026-10-29) first proposed an [Unreleased] section with the version 3.1.0-dev; its correction the same day
+  dropped it: no Unreleased, planned work only in the roadmap; round 35 (2026-10-29) settled the version: [3.1.0] with
+  the version bump in the same commit.
 
 ## Security model
 
@@ -1243,6 +1654,15 @@ These are real limitations of the current state. Most are scheduled in the [road
 | **Full text only where the licence allows it** | Text and data mining allows a copy for the miner, not passing the text on. So a pack carries a page's text only under a licence that allows it, with the attribution it requires; every other page goes as its address and short facts, and the recipient crawls it under their own checks. Code without a licence is all rights reserved. |
 | **Recipes instead of shared model files** | Model files are large and come with their own licences. A recipe pins the model commit, the target fingerprint and the toolchain image and lists the artifact hashes, so anyone can rebuild the model and compare; "verified" means reproduced independently. |
 | **Input history per user and without secrets** | The shared `config.yml` may sit in the installation folder and be shared. Recent inputs are personal, so they live in the per-user folder (mode 0600), and values that look like credentials are never written. |
+
+**Further key decisions** (what, how, why):
+
+| What | How | Why |
+|---|---|---|
+| The core stays Python; standalone parts at a trust boundary that are not built yet are Rust (the network MCP gateway with the MQTT broker inside, the board's root helper), prebuilt and signed, self-building an opt-in; the rest moves only after a measurement; lazy loading first; no Go; the GUI stays Qt; Rust wherever possible on the board. | Lazy loading is built (the CLI, the MCP server and the GUI load heavy parts on first use); the Rust parts are ROADMAP "Rust parts". | Speed and safety where the network and the board are; one compiled language next to Python is enough. |
+| No builds in the cloud or on rented machines; if builds on another computer ever come, the framework builds them itself. | The roadmap names them only as "not planned"; a test keeps it so. | Remote compiling was never the plan. |
+| Order: the rotation stage and the generic ARM64 target right after the recipes. | ROADMAP 3.2.0 lists them in this order. | They help the most boards soonest. |
+| Messages of AIs arrive in a chat panel on the right of the main window, with bubbles per answer, where the person can ask, give tasks and question decisions. | `orchestrator/gui/chat_panel/` and the chat feed. | The person must see and question what AIs do, in one place. |
 
 ## Versioning and documentation policy
 
