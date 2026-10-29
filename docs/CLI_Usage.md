@@ -197,6 +197,14 @@ is never cleared. Then it reports every problem: repaired (checked again), alrea
 repaired with the reason (deleting needs your list, needs you, needs an administrator, not repairable automatically,
 failed). A problem the check afterwards finds for the first time is listed as new. Details: [Mojo.md](Mojo.md).
 
+When Mojo Miracle ends after Mojo Oracle at a terminal (you answered `y` to "Run Mojo Miracle now?", or ran
+`llmcf mojo --miracle` while an earlier `llmcf mojo` at the terminal is still open), the console shows Mojo's crystal
+ball, in colour where the console can show colour, and under it "[Mojo] Miracle managed. The oracle is pleased." when
+it repaired at least one problem, none is left and nothing new turned up, or "[Mojo] 404 - miracle not found" when
+there was nothing to repair. It never shows with `--json`, without a terminal, through the AI tools or in the GUI;
+the open Oracle run is a small private note in your personal folder that every Mojo Miracle run at a terminal
+removes when it ends.
+
 | Option | Meaning |
 |---|---|
 | `--oracle` | Only look and report what was found (the default); at a terminal it then offers Mojo Miracle. |

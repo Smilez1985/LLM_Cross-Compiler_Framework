@@ -200,6 +200,14 @@ meldet es jedes Problem: repariert (erneut geprüft), schon weg, noch da oder ni
 braucht deine Liste, braucht dich, braucht einen Administrator, nicht automatisch reparierbar, fehlgeschlagen). Ein
 Problem, das die Prüfung danach zum ersten Mal findet, wird als neu genannt. Einzelheiten: [Mojo_DE.md](Mojo_DE.md).
 
+Endet Mojo Miracle nach Mojo Oracle im Terminal (du hast „Run Mojo Miracle now?“ mit `y` beantwortet oder
+`llmcf mojo --miracle` aufgerufen, während ein früheres `llmcf mojo` im Terminal noch offen ist), zeigt die Konsole
+Mojos Kristallkugel, farbig, wo die Konsole Farben zeigen kann, und darunter „[Mojo] Miracle managed. The oracle is
+pleased.“ (das Wunder ist gelungen: mindestens ein Problem repariert, keines übrig, nichts Neues dazugekommen) oder
+„[Mojo] 404 - miracle not found“ (es gab nichts zu reparieren, also auch kein Wunder). Sie erscheint nie mit
+`--json`, ohne Terminal, über die KI-Tools oder in der GUI; der offene Oracle-Lauf ist eine kleine private Notiz in
+deinem persönlichen Ordner, die jeder Lauf von Mojo Miracle im Terminal an seinem Ende entfernt.
+
 | Option | Bedeutung |
 |---|---|
 | `--oracle` | Nur schauen und melden, was gefunden wurde (Standard); im Terminal bietet es danach Mojo Miracle an. |
