@@ -162,6 +162,46 @@ def test_the_whole_file_reads_its_host_lines_and_refuses_match_exec():
     assert [p.kind for p in bad.refused] == ["command"]
 
 
+MATCH_EXEC = ['Match exec=true', 'Match "exec" true', 'Match host=x exec=true', 'Match exec="touch ran"',
+              'Match e"xec" true', 'Match host x !exec=true', "Match\texec\ttrue", 'Match Exec = true']
+
+
+@pytest.mark.parametrize("line", MATCH_EXEC)
+def test_a_match_exec_is_refused_however_openssh_s_words_are_written(line):
+    """OpenSSH splits a Match line's words at a blank, a single '=' and a quote (readconf.c strdelim), so `exec=CMD`,
+    `"exec" CMD` and `e"xec" CMD` run CMD on this computer as `exec CMD` does: each is refused."""
+    from orchestrator.remote import ssh_config
+    check = ssh_config.check_lines([line], whole_file=True)
+    assert [p.kind for p in check.refused] == ["command"], line
+
+
+@pytest.mark.skipif(shutil.which("ssh") is None or sys.platform == "win32", reason="needs OpenSSH's ssh -G")
+def test_openssh_really_runs_such_a_match_exec(tmp_path):
+    """The refusal above is about real behaviour: `ssh -G` with `Match exec="touch ran"` runs touch."""
+    config = tmp_path / "config"
+    config.write_text('Match exec="touch ran"\n    User someone\n')
+    subprocess.run(["ssh", "-G", "-F", str(config), BOARD], cwd=tmp_path, capture_output=True, timeout=60,
+                   stdin=subprocess.DEVNULL)
+    assert (tmp_path / "ran").exists()
+
+
+@pytest.mark.skipif(shutil.which("ssh") is None or sys.platform == "win32", reason="needs OpenSSH's ssh -G")
+def test_a_real_openssh_never_reads_a_hostile_home_config(tmp_path, monkeypatch):
+    """The person's own ~/.ssh/config sets StrictHostKeyChecking no, a KnownHostsCommand, a ProxyCommand and a port:
+    with the framework's -F none of it reaches OpenSSH."""
+    from orchestrator.remote import transport
+    from orchestrator.remote.address import Endpoint
+    home = tmp_path / "home"
+    (home / ".ssh").mkdir(parents=True)
+    (home / ".ssh" / "config").write_text("Host *\n  StrictHostKeyChecking no\n  KnownHostsCommand /bin/echo bad\n"
+                                          "  ProxyCommand /bin/false\n  Port 2222\n")
+    monkeypatch.setenv("HOME", str(home))
+    options = transport.openssh_options(state_dir(tmp_path))
+    seen = _effective(transport.openssh_argv("ssh", Endpoint(BOARD), "pi", ["-G", *options]))
+    assert seen["port"] == "22" and seen["stricthostkeychecking"] == "true"
+    assert "proxycommand" not in seen and "knownhostscommand" not in seen
+
+
 def test_a_hand_edit_with_a_refused_line_stops_every_openssh_call_as_a_local_problem(tmp_path):
     from orchestrator.remote import reasons, ssh_config, transport
     state = state_dir(tmp_path)

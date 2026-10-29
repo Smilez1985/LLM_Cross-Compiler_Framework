@@ -197,6 +197,15 @@ def valid_host(host: str) -> bool:
     return bool(host) and not host.startswith("-") and bool(_HOST_ARGUMENT.fullmatch(host))
 
 
+def _match_runs_a_command(value: str) -> bool:
+    """Whether a Match line's criteria hold `exec` as OpenSSH reads them: it splits the words at a blank, a single '='
+    and a quote (readconf.c strdelim), so `exec=CMD`, `"exec" CMD` and `e"xec" CMD` run CMD as `exec CMD` does. The
+    quotes are dropped before the words are split (stricter than OpenSSH: a word that only reads as exec without its
+    quotes is refused too)."""
+    words = re.split(r"[\s=]+", value.replace('"', "").replace("'", ""))
+    return any(word.lstrip("!").lower() == "exec" for word in words)
+
+
 def check_lines(lines: Sequence[str], *, jump_path: Optional[str] = None, whole_file: bool = False) -> LineCheck:
     """The option lines of one Host block as the person wants to write them (`whole_file`: every line of the file,
     its Host lines included): each refused line with its reason, the lines that need the person's knowing yes. In a
@@ -219,7 +228,7 @@ def check_lines(lines: Sequence[str], *, jump_path: Optional[str] = None, whole_
         keyword, value = match.group(1), match.group(2)
         name = keyword.lower()
         if name in ("host", "match"):
-            if name == "match" and any(w.lstrip("!").lower() == "exec" for w in value.split()):
+            if name == "match" and _match_runs_a_command(value):
                 check.refused.append(LineProblem(number, keyword, COMMAND, "Match exec: " + REASONS[COMMAND]))
             elif not whole_file:
                 check.refused.append(LineProblem(number, keyword, "syntax",
