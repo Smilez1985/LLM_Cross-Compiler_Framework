@@ -577,3 +577,104 @@ class TestTheImageScript:
         build = next(line for line in calls.splitlines() if line.startswith("ARGV: build "))
         assert "DOCKER_HOST=unix:///run/example/docker.sock" in build and "DOCKER_BUILDKIT=1" in build
         assert "ARGV: buildx version" in calls
+
+
+# --- follow-ups: a DOCKER_HOST left from Podman, /dev/dri under rootless Podman, rootless Docker ----------------------
+
+@POSIX_SOCKETS
+class TestADockerHostLeftFromPodman:
+    """DOCKER_HOST still points at a Podman socket while a Docker daemon runs (an earlier Podman session): the person's
+    DOCKER_HOST still wins (_decide), and Mojo names it with the way out."""
+
+    def test_it_is_seen_when_docker_runs(self, short_dir):
+        podman = listening(short_dir / "run" / "podman" / "podman.sock")
+        docker = listening(short_dir / "docker.sock")
+        env = {"DOCKER_HOST": f"unix://{short_dir}/run/podman/podman.sock", "XDG_RUNTIME_DIR": str(short_dir / "run")}
+        assert docker_engine.stale_podman_host(env, docker_sockets=[str(short_dir / "docker.sock")])
+        choice = ensure_docker_host(env, docker_sockets=[str(short_dir / "docker.sock")])
+        assert choice == EngineChoice(env["DOCKER_HOST"], False, "DOCKER_HOST is set"), "the person's setting wins"
+        podman.close(), docker.close()
+
+    def test_not_without_a_docker_daemon_or_with_a_docker_host_of_docker(self, short_dir):
+        podman = listening(short_dir / "run" / "podman" / "podman.sock")
+        dead(short_dir / "docker.sock")
+        env = {"DOCKER_HOST": f"unix://{short_dir}/run/podman/podman.sock"}
+        assert not docker_engine.stale_podman_host(env, docker_sockets=[str(short_dir / "docker.sock")])
+        docker = listening(short_dir / "real.sock")
+        for host in (f"unix://{short_dir}/real.sock", "tcp://192.0.2.10:2375", ""):
+            assert not docker_engine.stale_podman_host({"DOCKER_HOST": host},
+                                                       docker_sockets=[str(short_dir / "real.sock")])
+        podman.close(), docker.close()
+
+
+class TestMojoNamesADockerHostLeftFromPodman:
+
+    @pytest.mark.parametrize("version", [DOCKER_VERSION, PODMAN_VERSION], ids=["docker", "podman"])
+    def test_with_the_way_out(self, monkeypatch, version):
+        monkeypatch.setattr(docker_engine, "stale_podman_host", lambda *a, **k: True)
+        findings = TestTheDockerCheck()._mojo(FakeClient(version), monkeypatch)
+        stale = [f for f in findings if f.code == "docker.host_stale"]
+        assert len(stale) == 1 and stale[0].severity.value == "warn", findings
+        assert "Podman socket" in stale[0].message and "~/.bashrc" in stale[0].fix_hint
+        assert stale[0].where and stale[0].why and stale[0].cannot == "person"
+
+    def test_nothing_without_it(self, monkeypatch):
+        monkeypatch.setattr(docker_engine, "stale_podman_host", lambda *a, **k: False)
+        findings = TestTheDockerCheck()._mojo(FakeClient(DOCKER_VERSION), monkeypatch)
+        assert "docker.host_stale" not in [f.code for f in findings]
+
+
+class TestRenderNodeUnderRootlessPodman:
+    """Podman's --group-add keep-groups passes the person's own groups on (its documentation of --group-add); the
+    host's numeric render gid is not mapped into a rootless user namespace. keep-id stays."""
+
+    def test_dev_dri_gets_keep_groups_and_keep_id(self, monkeypatch):
+        api = RealApiClient(monkeypatch)
+        docker_engine.create_container(api.client, image="example", command=["true"], user="1000:1000",
+                                       devices=["/dev/dri:/dev/dri"], group_add=["44", "105"])
+        assert api.host_config["GroupAdd"] == ["keep-groups"] and api.host_config["UsernsMode"] == "keep-id"
+
+    def test_as_root_too(self):
+        calls = []
+        client = types.SimpleNamespace(version=lambda: PODMAN_VERSION, info=lambda: PODMAN_ROOTLESS_INFO,
+                                       containers=types.SimpleNamespace(create=lambda **kw: calls.append(kw) or "c"))
+        docker_engine.create_container(client, image="example", devices=["/dev/dri/renderD128:/dev/dri/renderD128"])
+        assert calls[0]["group_add"] == ["keep-groups"]
+
+    @pytest.mark.parametrize("version, info", [(DOCKER_VERSION, {"SecurityOptions": []}),
+                                               (PODMAN_VERSION, {"SecurityOptions": ["name=seccomp"]})],
+                             ids=["docker", "podman-rootful"])
+    def test_elsewhere_the_groups_stay(self, version, info):
+        calls = []
+        client = types.SimpleNamespace(version=lambda: version, info=lambda: info,
+                                       containers=types.SimpleNamespace(create=lambda **kw: calls.append(kw) or "c"))
+        docker_engine.create_container(client, image="example", user="0:0", devices=["/dev/dri:/dev/dri"],
+                                       group_add=["44"])
+        assert calls[0]["group_add"] == ["44"]
+
+
+class TestRootlessDocker:
+    """Under rootless Docker uid 0 in a container is the person outside; any other uid is a sub-uid that cannot write
+    the person's folders. The person's containers run as 0:0 there (Docker has no keep-id)."""
+
+    def _client(self, info):
+        calls = []
+        client = types.SimpleNamespace(version=lambda: DOCKER_VERSION, info=lambda: info,
+                                       containers=types.SimpleNamespace(create=lambda **kw: calls.append(kw) or "c"))
+        return client, calls
+
+    def test_the_persons_container_runs_as_root_there(self):
+        client, calls = self._client({"SecurityOptions": ["name=seccomp,profile=builtin", "name=rootless"]})
+        docker_engine.create_container(client, image="example", user="1000:1000", read_only=True)
+        assert calls == [{"image": "example", "user": "0:0", "read_only": True}]
+
+    def test_rootful_docker_keeps_the_persons_uid(self):
+        client, calls = self._client({"SecurityOptions": ["name=seccomp,profile=builtin"]})
+        docker_engine.create_container(client, image="example", user="1000:1000")
+        assert calls[0]["user"] == "1000:1000"
+
+    def test_rootless_docker_is_seen_and_podman_is_not_docker(self):
+        client, _ = self._client({"SecurityOptions": ["name=rootless"]})
+        assert docker_engine.rootless_docker(client) and not docker_engine.rootless_podman(client)
+        podman = types.SimpleNamespace(version=lambda: PODMAN_VERSION, info=lambda: PODMAN_ROOTLESS_INFO)
+        assert not docker_engine.rootless_docker(podman) and docker_engine.rootless_podman(podman)

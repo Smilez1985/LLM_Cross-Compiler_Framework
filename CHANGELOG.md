@@ -27,6 +27,17 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   unregistered system stops with the step to take; the registration status is read, never shown; the dry run names
   the step). Amazon Linux and the other systems built on Fedora keep the distribution's own package.
 
+### Fixed
+- `2026-10-29 23:36 UTC` · `v3.2.0` **Container engine follow-ups: a `DOCKER_HOST` left from Podman, `/dev/dri` under rootless Podman,
+  rootless Docker** ([design](docs/DESIGN.md#installer-platforms-and-dependencies)): a `DOCKER_HOST` that still points
+  at a Podman socket while a Docker daemon runs still wins, but `llm-cli mojo` (and `llm-cli doctor`) now warns about
+  it in plain words with the way out (`docker.host_stale`, `utils/docker_engine.stale_podman_host`, no path in the
+  text). Under rootless Podman a container that gets `/dev/dri` (AMD or Intel GPU passthrough) gets Podman's
+  `--group-add keep-groups` instead of the host's render gid, which a rootless user namespace does not map, and keeps
+  `keep-id`. Under rootless Docker (`docker info` lists `name=rootless`) the framework's containers that would run as
+  the person's uid run as `0:0`, which is the person outside; before, they ran as a sub-uid that could not write the
+  person's folders. All through the one helper `create_container`.
+
 ## [3.1.0] - 2026-10-29
 
 ### Added

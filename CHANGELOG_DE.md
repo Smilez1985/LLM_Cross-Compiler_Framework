@@ -30,6 +30,18 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   gezeigt; der Probelauf nennt den Schritt). Amazon Linux und die übrigen Systeme, die auf Fedora aufbauen, behalten
   das Paket der Distribution.
 
+### Behoben
+- `2026-10-29 23:36 UTC` · `v3.2.0` **Nacharbeiten an der Container-Engine: ein `DOCKER_HOST` aus Podman-Zeiten, `/dev/dri` unter rootless
+  Podman, rootless Docker** ([Design](docs/DESIGN_DE.md#installer-plattformen-und-abhängigkeiten)): Ein `DOCKER_HOST`,
+  der noch auf einen Podman-Socket zeigt, während ein Docker-Dienst läuft, gilt weiter, aber `llm-cli mojo` (und
+  `llm-cli doctor`) warnt jetzt in klaren Worten mit dem Ausweg (`docker.host_stale`,
+  `utils/docker_engine.stale_podman_host`, kein Pfad im Text). Unter rootless Podman bekommt ein Container mit
+  `/dev/dri` (Weitergabe einer AMD- oder Intel-GPU) Podmans `--group-add keep-groups` statt der render-gid des
+  Rechners, die ein rootless User-Namespace nicht abbildet, und behält `keep-id`. Unter rootless Docker (`docker info`
+  nennt `name=rootless`) laufen die Container des Frameworks, die als uid der Person liefen, als `0:0`, das ist
+  draußen die Person; vorher liefen sie als Sub-uid, die die Ordner der Person nicht beschreiben konnte. Alles über
+  den einen Helfer `create_container`.
+
 ## [3.1.0] - 2026-10-29
 
 ### Hinzugefügt
