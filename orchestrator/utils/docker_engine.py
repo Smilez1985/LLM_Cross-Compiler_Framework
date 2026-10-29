@@ -51,9 +51,10 @@ PODMAN_LIMITS = {
     "buildkit": ("this needs BuildKit, Docker's builder behind docker buildx: under Podman 'docker buildx' is "
                  "Podman's own builder (buildah), without BuildKit's frontends, cache export or drivers"),
 }
-DOCKER_CE_WAY = ("Docker CE is the standard for the framework. On Rocky Linux, AlmaLinux or Oracle Linux: "
-                 "'sudo dnf remove podman-docker', then 'sudo ./install.sh' again (it installs Docker CE from Docker's "
-                 "RHEL repository and asks before dnf removes anything); elsewhere: " + DOCKER_CE_URL)
+DOCKER_CE_WAY = ("Docker CE is the standard for the framework. On Fedora, RHEL, CentOS Stream, Rocky Linux, AlmaLinux "
+                 "or Oracle Linux: 'sudo dnf remove podman-docker', then 'sudo ./install.sh' again (it installs Docker "
+                 "CE from Docker's repository for the system and asks before dnf removes or replaces anything); "
+                 "elsewhere: " + DOCKER_CE_URL)
 
 
 @dataclass(frozen=True)
@@ -132,8 +133,7 @@ def _decide(environ: MutableMapping[str, str], uid: Optional[int], docker_socket
         return EngineChoice(given, False, "DOCKER_HOST is set")
     if not sys.platform.startswith("linux"):
         return EngineChoice("", False, "Docker's default address on this system")
-    rootless = [str(Path(environ["XDG_RUNTIME_DIR"]) / "docker.sock")] if environ.get("XDG_RUNTIME_DIR") else []
-    if any(_docker_daemon_at(Path(p)) for p in list(docker_sockets) + rootless):
+    if _docker_daemon_running(environ, docker_sockets):
         return EngineChoice("", False, "a Docker daemon is there")
     found = podman_socket(environ, uid)
     if found is None:
@@ -141,6 +141,37 @@ def _decide(environ: MutableMapping[str, str], uid: Optional[int], docker_socket
     host = "unix://" + str(found)
     environ["DOCKER_HOST"] = host
     return EngineChoice(host, True, "no Docker daemon is there, the person's Podman socket is")
+
+
+def _docker_daemon_running(environ: Mapping[str, str], docker_sockets: Sequence[str]) -> bool:
+    rootless = [str(Path(environ["XDG_RUNTIME_DIR"]) / "docker.sock")] if environ.get("XDG_RUNTIME_DIR") else []
+    return any(_docker_daemon_at(Path(p)) for p in list(docker_sockets) + rootless)
+
+
+# What Mojo says when DOCKER_HOST still points at a Podman socket while a Docker daemon runs (no path in it).
+STALE_PODMAN_HOST = ("DOCKER_HOST still points at a Podman socket (probably left from an earlier Podman session), while a "
+                     "Docker daemon runs on this computer. Your DOCKER_HOST always wins, so the framework talks to "
+                     "Podman, with Podman's limits (no NVIDIA GPU in a container, no BuildKit).")
+STALE_PODMAN_WAY = ("To use Docker: remove the DOCKER_HOST line from your shell's start file (for example the line "
+                    "'export DOCKER_HOST=...podman.sock' in ~/.bashrc), open a new terminal and start the framework "
+                    "again. To keep Podman on purpose, leave it as it is.")
+
+
+def stale_podman_host(environ: Optional[Mapping[str, str]] = None, *,
+                      docker_sockets: Sequence[str] = DOCKER_SOCKETS) -> bool:
+    """Whether DOCKER_HOST points at a Podman socket (a podman path, or Podman answers there) while a Docker daemon
+    answers on Docker's sockets: a DOCKER_HOST left from an earlier Podman session. The person's DOCKER_HOST still wins
+    (_decide); Mojo names it (STALE_PODMAN_HOST, STALE_PODMAN_WAY). Linux only; never raises."""
+    env = os.environ if environ is None else environ
+    try:
+        given = str(env.get("DOCKER_HOST") or "").strip()
+        if not given.startswith("unix://") or not sys.platform.startswith("linux"):
+            return False
+        path = Path(given[len("unix://"):])
+        podman = "podman" in path.parts or _points_to_podman(path) or engine_at(given, timeout=1.0) == "podman"
+        return bool(podman) and _docker_daemon_running(env, docker_sockets)
+    except Exception:  # noqa: BLE001 - a health hint must never stop a check
+        return False
 
 
 def ensure_docker_host(environ: Optional[MutableMapping[str, str]] = None, *, uid: Optional[int] = None,
@@ -233,7 +264,13 @@ def engine_at(docker_host: str = "", timeout: float = 5.0) -> str:
 
 # Podman's user namespace mode that maps the person's uid and gid to the same ids inside the container.
 USERNS_KEEP_ID = "keep-id"
-# Whether the Podman behind each docker-py client already asked runs rootless (a client talks to one daemon).
+# Podman's --group-add value that keeps the person's own supplementary groups in the container (Podman's
+# documentation of --group-add: "keep-groups" passes the user's groups on, only with crun, and cannot be combined with
+# other groups). Under rootless Podman the host's render/video gids are not mapped into the user namespace, so a
+# numeric group_add does not open /dev/dri; keep-groups does. Podman's Docker-compatible API passes HostConfig.GroupAdd
+# into the same options as the command line (pkg/api/handlers/compat/containers_create.go: GroupAdd -> cliOpts).
+GROUP_KEEP_GROUPS = "keep-groups"
+# Whether the engine behind each docker-py client already asked runs rootless (a client talks to one daemon).
 _ROOTLESS: "weakref.WeakKeyDictionary[Any, bool]" = weakref.WeakKeyDictionary()
 
 
@@ -242,8 +279,17 @@ def rootless_podman(client: Any) -> bool:
     'name=rootless'; the person's podman.socket always is). There the person is root inside a container's user
     namespace, and a container that runs as the person's uid sees the person's folders as root's. False for Docker,
     rootful Podman and when Podman does not answer (asked again next time)."""
-    if engine_name(client) != "podman":
-        return False
+    return engine_name(client) == "podman" and _rootless(client)
+
+
+def rootless_docker(client: Any) -> bool:
+    """Whether the API behind `client` is Docker in rootless mode (docker info's SecurityOptions list 'name=rootless').
+    There uid 0 inside a container is the person outside, and any other uid is a sub-uid that cannot write the
+    person's folders; Docker has no keep-id."""
+    return engine_name(client) == "docker" and _rootless(client)
+
+
+def _rootless(client: Any) -> bool:
     try:
         known = _ROOTLESS.get(client)
     except TypeError:   # a client that cannot be weakly referenced: asked every time
@@ -271,7 +317,16 @@ def create_container(client: Any, **kwargs: Any) -> Any:
     stops with "Permission denied". docker-py's create() refuses any userns_mode but "host", so there the request goes
     through docker-py's own conversion of create()'s arguments (docker 7.2.0) and the low-level API, and the container
     comes back exactly as create() returns it."""
+    devices = [str(d) for d in kwargs.get("devices") or []]
+    if any(d.split(":", 1)[0].startswith("/dev/dri") for d in devices) and rootless_podman(client):
+        # The render node under rootless Podman: the person's own groups, not the host's (unmapped) gids.
+        kwargs = dict(kwargs, group_add=[GROUP_KEEP_GROUPS])
     user = str(kwargs.get("user") or "").split(":")[0]
+    if user not in ("", "0", "root") and rootless_docker(client):
+        # Rootless Docker: uid 0 in the container is the person outside, so a container of the person runs as 0:0
+        # there (the sandbox's other limits stay: no capabilities, read-only root, no network).
+        kwargs = dict(kwargs, user="0:0")
+        user = "0"
     if user in ("", "0", "root") or not rootless_podman(client):
         return client.containers.create(**kwargs)
     from docker.models.containers import _create_container_args   # docker-py's create(): its arguments -> the API's
