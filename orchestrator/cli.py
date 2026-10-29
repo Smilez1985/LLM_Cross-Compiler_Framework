@@ -5304,9 +5304,13 @@ def _ssh_block_change(ctx: FrameworkContext, host: str, lines) -> None:
         console.print("[red]Nothing was changed: the framework never uses these lines (its own trust settings stay "
                       "on OpenSSH's command line).[/red]")
         sys.exit(1)
-    if plan.unchanged:
+    if plan.unchanged and not plan.pending_yes:
         console.print("These are the settings already; nothing was changed.")
         return
+    if plan.pending_yes:
+        console.print("These are the settings already, but you have not said yes to their ProxyJump or ProxyCommand "
+                      "(changed by hand, or written before the framework kept your yes): the framework does not use "
+                      "them until you do.")
     if not _interactive():
         console.print("[red]'deploy ssh-config' needs a terminal: you read and confirm the settings yourself.[/red]")
         sys.exit(1)

@@ -192,7 +192,9 @@ TEXTS = {
         "boards.ssh.title": "The framework's SSH settings",
         "boards.ssh.intro": "Every connection the framework makes with this computer's OpenSSH client (the deploy "
                             "without paramiko) reads only this file ({file}), never your ~/.ssh/config or "
-                            "/etc/ssh/ssh_config; connections over paramiko (when it is installed) do not use it. Add "
+                            "/etc/ssh/ssh_config; connections over paramiko (when it is installed) do not use it, so a "
+                            "board whose settings here name a ProxyJump or ProxyCommand always goes through OpenSSH. "
+                            "Add "
                             "what a board needs, for example a ProxyJump for a board behind a jump host. The "
                             "framework's own trust settings (its known_hosts, its key) always win over this file.",
         "boards.ssh.file": "The file now:",
@@ -211,6 +213,8 @@ TEXTS = {
         "boards.ssh.why.reuse": "{line}: it would reuse or forward the connection; the framework opens its own "
                                 "connection each time.",
         "boards.ssh.why.session": "{line}: it would change how the framework's commands run on the board.",
+        "boards.ssh.why.keys": "{line}: it would choose, load or hand out login keys other than the framework's own "
+                               "key.",
         "boards.ssh.why.syntax": "{line}: this is no 'Option value' line of a board's settings.",
         "boards.ssh.why.jump_path": "{line}: OpenSSH hands the path of this file to the jump host's ssh without "
                                     "quotes, and the framework's folder has a space, a '%' or another sign a shell "
@@ -580,7 +584,8 @@ TEXTS = {
         "boards.ssh.intro": "Jede Verbindung, die das Framework mit dem OpenSSH-Client dieses Computers aufbaut "
                             "(das Deploy ohne paramiko), liest nur diese Datei ({file}), nie deine ~/.ssh/config oder "
                             "/etc/ssh/ssh_config; Verbindungen über paramiko (wenn es installiert ist) nutzen sie "
-                            "nicht. Trage ein, was ein Board braucht, zum Beispiel einen ProxyJump für ein Board "
+                            "nicht, deshalb geht ein Board, dessen Einstellungen hier einen ProxyJump oder ein "
+                            "ProxyCommand nennen, immer über OpenSSH. Trage ein, was ein Board braucht, zum Beispiel einen ProxyJump für ein Board "
                             "hinter einem Jump-Host. Die eigenen Vertrauens-Einstellungen des Frameworks (seine "
                             "known_hosts, sein Schlüssel) gelten immer vor dieser Datei.",
         "boards.ssh.file": "Die Datei jetzt:",
@@ -600,6 +605,8 @@ TEXTS = {
         "boards.ssh.why.reuse": "{line}: würde die Verbindung wiederverwenden oder weiterleiten; das Framework öffnet "
                                 "jedes Mal seine eigene Verbindung.",
         "boards.ssh.why.session": "{line}: würde ändern, wie die Befehle des Frameworks auf dem Board laufen.",
+        "boards.ssh.why.keys": "{line}: würde andere Anmeldeschlüssel als den eigenen Schlüssel des Frameworks "
+                               "wählen, laden oder weitergeben.",
         "boards.ssh.why.syntax": "{line}: das ist keine Zeile 'Option Wert' für die Einstellungen eines Boards.",
         "boards.ssh.why.jump_path": "{line}: OpenSSH gibt den Pfad dieser Datei ohne Anführungszeichen an das ssh des "
                                     "Jump-Hosts weiter, und der Ordner des Frameworks hat ein Leerzeichen, ein '%' "

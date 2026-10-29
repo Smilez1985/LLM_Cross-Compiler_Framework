@@ -54,6 +54,22 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   one, in `adopt` and in `saved` (regression test with an interleaving double). `llm-cli build status` prints the values and errors of a request summary and of a build record through the CLI's one filter for
   steered text (`_printable`), so control and bidi characters from a build log no longer reach the terminal.
 
+### Security
+- `2026-10-29 23:50 UTC` · `v3.2.0` **llmcf's SSH settings: a jump or proxy command only with the person's kept yes, no other login
+  keys, and jumps always over OpenSSH** ([design](docs/DESIGN.md#ssh-host-keys-and-the-remote-package)): the person's
+  knowing yes to a `ProxyJump` or `ProxyCommand` is now kept (the sha256 of the exact Host block, in
+  `ssh_config.accepted.json` next to the file, written by `person_steps.save_ssh_block`), and `ssh_config.prepare`
+  refuses before every OpenSSH call a `ProxyJump` or `ProxyCommand` that no kept yes covers: one changed by hand after
+  the yes, one before the first Host block, or one written before this version (such a line must be confirmed once
+  again). The refusal says what the line does and how the person accepts it (the same lines again in SSH settings...
+  or with `deploy ssh-config edit`, which now accepts them as they are with a yes). `IdentityFile`, `CertificateFile`,
+  `IdentityAgent` and `AddKeysToAgent` are refused as a new kind (`keys`: they would choose, load or hand out login
+  keys other than the framework's own key), `SetEnv` and `SendEnv` as session changes; `LogLevel` stays allowed.
+  paramiko reads no settings file, so a board whose block names a jump or a proxy command now goes through the
+  OpenSSH transport (`RemoteSession`, the deploy), and where that cannot be (no `ssh`, a one-time password, a step
+  bound to the fingerprint shown) the step is refused in plain words (`needs_openssh`) instead of connecting
+  directly past the jump.
+
 ## [3.1.0] - 2026-10-29
 
 ### Added

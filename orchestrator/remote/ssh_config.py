@@ -31,6 +31,13 @@ reading what they do (KNOWINGLY, shown plainly).
   checked; SshConfigRefused (an OSError naming the file: reasons.local_problem) when it holds a refused line.
 - in_home_config(text, host): the lines of one Host block of the person's ~/.ssh/config text (for the person-only
   import: person_steps.import_ssh_block shows it before anything is written).
+- The person's knowing yes: save_ssh_block records the sha256 of each Host block with a ProxyJump or ProxyCommand the
+  person accepted (block_digest) in <state>/ssh_config.accepted.json (record_accepted, accepted_digests). prepare()
+  refuses a ProxyJump or ProxyCommand line that no recorded yes covers (a hand edit after the yes, or a line written
+  before there was a record): never used silently; the refusal says what the line does and how the person accepts it.
+- needs_proxy(state_dir, host): whether OpenSSH would reach `host` through a ProxyJump or ProxyCommand of this file.
+  paramiko reads no configuration file, so such a board goes through the OpenSSH transport (remote/session.py) or
+  gets a plain refusal where that cannot be.
 
 The person's writer of the file is runtime/device/person_steps.py save_ssh_block (person-only: no module an AI can
 reach imports it; tests/test_remote_trust.py follows the imports). This module writes nothing but the empty file.
@@ -56,6 +63,7 @@ COMMAND = "command"    # runs a command or loads code on this computer (or on th
 FILES = "files"        # reads another configuration file
 REUSE = "reuse"        # reuses or forwards the connection
 SESSION = "session"    # changes how the framework's commands run on the board
+KEYS = "keys"          # chooses, loads or hands out login keys other than the framework's own key
 REASONS = {
     TRUST: "it would change how a board's host key is checked or which machine is reached; the framework's own "
            "known_hosts decides that",
@@ -64,6 +72,7 @@ REASONS = {
     REUSE: "it would reuse or forward the connection; the framework opens its own connection each time",
     SESSION: "it would change how the framework's commands run on the board (each is one command with its own input "
              "and output)",
+    KEYS: "it would choose, load or hand out login keys other than the framework's own key",
 }
 # The options a line may not set (lower case, as OpenSSH reads keywords), each with its kind.
 REFUSED: Dict[str, str] = {
@@ -74,7 +83,12 @@ REFUSED: Dict[str, str] = {
                                 "nohostauthenticationforlocalhost")},
     **{name: COMMAND for name in ("localcommand", "permitlocalcommand", "remotecommand", "pkcs11provider",
                                   "securitykeyprovider")},
-    **{name: SESSION for name in ("sessiontype", "forkafterauthentication", "stdinnull", "requesttty")},
+    # SetEnv and SendEnv hand this computer's or a written environment to the board's commands.
+    **{name: SESSION for name in ("sessiontype", "forkafterauthentication", "stdinnull", "requesttty", "setenv",
+                                  "sendenv")},
+    # The framework logs in with its own key only (IdentitiesOnly and -i on the command line); these would choose,
+    # load into an agent or hand out other keys. LogLevel stays allowed: it only changes what OpenSSH reports.
+    **{name: KEYS for name in ("addkeystoagent", "identityfile", "certificatefile", "identityagent")},
     "include": FILES,
     **{name: REUSE for name in ("controlmaster", "controlpath", "controlpersist", "forwardagent", "forwardx11",
                                 "forwardx11trusted", "forwardx11timeout", "localforward", "remoteforward",
@@ -312,17 +326,127 @@ def with_block(text: str, host: str, lines: Sequence[str]) -> str:
     return result
 
 
+ACCEPTED_NAME = "ssh_config.accepted.json"
+# How the person accepts a ProxyJump or ProxyCommand line (both are the person's own ways; an AI has none).
+ACCEPT_WAY = ("to use it, open the board's SSH settings in the Boards window (SSH settings...) or run the command "
+              "line's deploy ssh-config edit for that host, read what the line does and say yes")
+
+
+def block_digest(host: str, lines: Sequence[str]) -> str:
+    """The sha256 of one Host block as the person accepted it: its exact Host argument and its option lines (stripped,
+    without blank lines and comments), in order."""
+    import hashlib
+    kept = [line.strip() for line in lines if line.strip() and not line.strip().startswith("#")]
+    return hashlib.sha256(("Host " + host + "\n" + "\n".join(kept)).encode("utf-8")).hexdigest()
+
+
+def accepted_path(state_dir: Path) -> Path:
+    return Path(state_dir) / ACCEPTED_NAME
+
+
+def accepted_digests(state_dir: Path) -> set:
+    """The blocks the person accepted with their ProxyJump or ProxyCommand (block_digest), from the record next to the
+    file; an empty set when there is none or it cannot be read (then nothing counts as accepted)."""
+    import json
+    try:
+        data = json.loads(accepted_path(state_dir).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    found = data.get("accepted") if isinstance(data, dict) else None
+    return {d for d in found if isinstance(d, str) and re.fullmatch(r"[0-9a-f]{64}", d)} if isinstance(found, list) \
+        else set()
+
+
+def record_accepted(state_dir: Path, host: str, lines: Sequence[str]) -> None:
+    """Records the person's knowing yes to `host`'s block as written (person_steps.save_ssh_block, the person's
+    channels only); the record keeps only the digests of blocks the file still holds."""
+    import json
+    from orchestrator.utils.atomic import write_private
+    try:
+        current = {block_digest(b.host, b.lines) for b in blocks(read(state_dir))[1]}
+    except OSError:
+        current = set()
+    keep = (accepted_digests(state_dir) & current) | {block_digest(host, lines)}
+    write_private(accepted_path(state_dir), json.dumps({"version": 1, "accepted": sorted(keep)}) + "\n")
+
+
+def _knowing_lines(lines: Sequence[str]) -> List[str]:
+    out = []
+    for raw in lines:
+        match = _LINE.match(raw.strip())
+        if match and match.group(1).lower() in KNOWINGLY and match.group(2).strip().lower() != "none":
+            out.append(raw.strip())
+    return out
+
+
+def unaccepted(state_dir: Path, text: str) -> List[Tuple[str, str]]:
+    """(host, line) of every ProxyJump or ProxyCommand line in `text` that no recorded yes covers ("" as the host for
+    a line before the first Host block, which no yes covers)."""
+    head, found = blocks(text)
+    accepted = accepted_digests(state_dir)
+    out = [("", line) for line in _knowing_lines(head)]
+    for block in found:
+        knowing = _knowing_lines(block.lines)
+        if knowing and block_digest(block.host, block.lines) not in accepted:
+            out += [(block.host, line) for line in knowing]
+    return out
+
+
 def prepare(state_dir: Path) -> Path:
     """The file before an OpenSSH call: created when missing, private to this account, and checked; SshConfigRefused
-    when it holds a line the framework never uses (a hand edit since it was written), OSError when it cannot be read
-    or made private. Every OpenSSH call then reads only this file."""
+    when it holds a line the framework never uses (a hand edit since it was written) or a ProxyJump or ProxyCommand
+    that no knowing yes of the person covers (the text says what it does and how to accept it), OSError when it
+    cannot be read or made private. Every OpenSSH call then reads only this file."""
     path = ensure(state_dir)
     text = read(state_dir)
     check = check_lines(text.splitlines(), jump_path=argument(path), whole_file=True)
     if not check.ok:
         raise SshConfigRefused(f"the framework's own SSH settings file holds a line it never uses: "
                                f"{check.refused[0].text()}", path, check.refused)
+    pending = unaccepted(state_dir, text)
+    if pending:
+        problems = []
+        for number, (host, line) in enumerate(pending, 1):
+            keyword = _LINE.match(line).group(1)
+            where = f" for {host}" if host else " before the first Host block"
+            problems.append(LineProblem(number, keyword, "knowingly",
+                                        f"{line}{where} has no yes of yours yet (it was changed by hand, or written "
+                                        f"before the framework kept your yes): it {KNOWINGLY[keyword.lower()]}; "
+                                        f"{ACCEPT_WAY}"))
+        raise SshConfigRefused("the framework's own SSH settings file holds a ProxyJump or ProxyCommand you have not "
+                               f"said yes to: {problems[0].reason}", path, problems)
     return path
+
+
+def _host_matches(patterns: str, host: str) -> bool:
+    """Whether `host` matches a Host line's patterns as OpenSSH reads them: any pattern matches (case-insensitive, *
+    and ?) and no negated one (!pattern) does."""
+    import fnmatch
+    name, hit = host.lower(), False
+    for pattern in patterns.split():
+        negated = pattern.startswith("!")
+        if fnmatch.fnmatchcase(name, pattern.lstrip("!").lower()):
+            if negated:
+                return False
+            hit = True
+    return hit
+
+
+def needs_proxy(state_dir: Path, host: str) -> bool:
+    """Whether OpenSSH would reach `host` through a ProxyJump or ProxyCommand of this file: the first value OpenSSH
+    obtains (lines before the first Host block, then the matching blocks in order) is one that is not "none". False
+    when the file does not exist or cannot be read (prepare() then says why)."""
+    try:
+        text = read(Path(state_dir))
+    except OSError:
+        return False
+    head, found = blocks(text)
+    for lines in [head] + [b.lines for b in found if _host_matches(b.host, host)]:
+        for raw in lines:
+            match = _LINE.match(raw.strip())
+            if match and match.group(1).lower() in KNOWINGLY:
+                return match.group(2).strip().lower() != "none"
+    return False
 
 
 def in_home_config(text: str, host: str) -> Optional[List[str]]:
@@ -335,7 +459,9 @@ def in_home_config(text: str, host: str) -> Optional[List[str]]:
     return None
 
 
-__all__ = ["COMMAND", "CONFIG_NAME", "FILES", "HEADER", "HostBlock", "KNOWINGLY", "Knowingly", "LineCheck",
+__all__ = ["ACCEPTED_NAME", "ACCEPT_WAY", "KEYS", "accepted_digests", "accepted_path", "block_digest", "needs_proxy",
+           "record_accepted", "unaccepted",
+           "COMMAND", "CONFIG_NAME", "FILES", "HEADER", "HostBlock", "KNOWINGLY", "Knowingly", "LineCheck",
            "LineProblem", "REASONS", "REFUSED", "REUSE", "SESSION", "SshConfigRefused", "TRUST", "argument",
            "block_lines",
            "blocks", "check_lines", "config_path", "ensure", "in_home_config", "prepare", "read", "tokens",
