@@ -550,17 +550,11 @@ from orchestrator.Core.vault_key import (AUDIT_KEY_ID, _KEY_THREAD_LOCK, _key_lo
                                          audit_key as _audit_key)
 
 
-def _revision_anchor(kind: str) -> RevisionAnchor:
-    """Where the newest saved revision of a signed per-user file is kept: the OS keyring, next to the audit key, so
-    an older copy put back into the per-user folder (or a removed file) is noticed although its signature is genuine.
-    A revision kept under the keyring service name from before the rename is read (and copied) when the new name has
-    none, so the protection carries over."""
-    import keyring
-    from orchestrator.Core.secrets_manager import SecretsManager
-    from orchestrator.Core.vault_key import read_entry
-    service, name = SecretsManager.SERVICE_ID, f"{kind}-revision"
-    return RevisionAnchor(lambda: read_entry(keyring, service, name),
-                          lambda value: keyring.set_password(service, name, value))
+def _revision_anchor(kind: str, state_dir: Optional[Path] = None) -> RevisionAnchor:
+    """Where the newest saved revision of a signed per-user file of the framework home `state_dir` is kept: its own
+    entry in the OS keyring (Core/vault_key.revision_anchor, one per framework home; None: the default home's)."""
+    from orchestrator.Core.vault_key import revision_anchor
+    return revision_anchor(kind, state_dir)
 
 
 def build_tool_registry(framework) -> ToolRegistry:
@@ -573,9 +567,9 @@ def build_tool_registry(framework) -> ToolRegistry:
     # revision of each is kept there too (an older signed copy or a removed permission file then denies everything).
     refuse_unkeyed = None if key else audit.kept_with_key
     registry = ToolRegistry(PolicyStore(state_dir, key=key, audit=audit, refuse_unkeyed=refuse_unkeyed,
-                                        anchor=_revision_anchor("tool_policy") if key else None), audit,
+                                        anchor=_revision_anchor("tool_policy", state_dir) if key else None), audit,
                             tokens=TokenStore(state_dir, key=key, refuse_unkeyed=refuse_unkeyed,
-                                              anchor=_revision_anchor("mcp_tokens") if key else None))
+                                              anchor=_revision_anchor("mcp_tokens", state_dir) if key else None))
     # Tools, resources and prompts all go through this one registry: the same policy, limits and audit (design S10/S11).
     from orchestrator.tools.framework_prompts import register_framework_prompts
     from orchestrator.tools.framework_resources import register_framework_resources

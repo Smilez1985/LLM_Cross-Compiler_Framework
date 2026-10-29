@@ -2453,6 +2453,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   as the integer 7776, and the target suggestion of a probe import compared it with the probe's `0x1e60` and matched
   nothing. `target_manager.hardware_id` gives one spelling for an integer and for hex text in any letter case, for
   the target's vendor and device ids and the probe's.
+- **The pinned llama.cpp source's git opens no console window and reads any output** (port follow-up):
+  `runtime/build/source.Git` started git without `CREATE_NO_WINDOW`, so on Windows a console window flashed up when
+  the Boards window built a board's runtime or Ditto's runtime export ran it from the GUI, and git output that was
+  not UTF-8 ended in a `UnicodeDecodeError` traceback instead of the plain refusal. Git now starts as
+  `utils/helpers.execute_command` starts a console program: the same creation flags (`helpers.windowless_flags`),
+  output decoded with replacement characters, stdin closed; the options of offline mode are unchanged. Regression
+  tests: `tests/test_build_source.py` `test_git_starts_like_the_one_helper_starts_a_console_program`,
+  `test_a_message_that_is_not_utf8_is_reported_never_a_traceback`.
 - **`llm-cli deploy devices edit` gives the plain reason instead of a traceback**: it caught only the board steps'
   own errors, so the framework's `known_hosts` held by another process (a `LockTimeout` of `pairing.replace_key`),
   settings that could not be read after you said yes, or a file that could not be read before the question ended in
@@ -2557,8 +2565,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   access the file". The runtime's state files (also those of the build store and the runtime mode) are now replaced
   with `utils/atomic.replace_file`, and `server.json`, the key files and the lock files of `utils/download.FileLock`
   (the runtime lock, the build store's lock and the per-download locks) are deleted with the new
-  `utils/atomic.remove_file`; both try again for a moment on Windows, never elsewhere. Regression tests:
-  `tests/test_atomic.py`, `tests/test_runtime.py` `test_windows_sharing_violations_are_retried`.
+  `utils/atomic.remove_file`; both try again for a moment on Windows, never elsewhere. The downloaded archives of
+  `ditto runtime install --prebuilt` go through `remove_file` too, and one that still cannot be deleted (a second
+  process installing the same build hashes it, a virus scanner reads it) no longer fails a finished install: it stays
+  in the downloads folder, with a warning in the log. Regression tests: `tests/test_atomic.py`,
+  `tests/test_runtime.py` `test_windows_sharing_violations_are_retried`,
+  `test_an_archive_that_cannot_be_deleted_fails_no_finished_install`.
 - **Ditto's tool calls and their results always pair up** (port of the kept worktree ditto-rewire-verified): every
   provider rejects a conversation that goes on after an unanswered tool call, so every later question on such a
   history failed. An answer cut off at the length limit while calling a tool left the call unanswered; the tool
@@ -3125,10 +3137,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the line of `module generate-ai` that says the AI's base image cannot be pinned; the zero-width joiner inside an
   emoji sequence stays, as in the cleaning of outside text (`utils/untrusted`), and umlauts, CJK and other scripts are
   shown as they are. The `module generate-ai` proposal and its facts show hidden characters as escapes
-  (`tools.confirmation.visible`). Regression tests: `tests/test_ditto.py`
+  (`tools.confirmation.visible`). The self-healing proposal a build shows at the terminal (summary, cause, fix) and
+  the AI clients' fix proposals in `llm-cli build status` go through the same cleaning (`cli._printable`); before,
+  they only had their markup escaped, and the client proposals lost format characters but kept ESC, C1 and BEL.
+  Regression tests: `tests/test_ditto.py`
   `test_ditto_ask_keeps_control_characters_of_the_model_out_of_the_terminal`,
   `test_the_terminal_text_keeps_every_script_and_emoji_as_they_are`,
-  `test_generate_ai_keeps_control_characters_of_the_base_image_out_of_the_pin_error` and the tests next to them.
+  `test_generate_ai_keeps_control_characters_of_the_base_image_out_of_the_pin_error` and the tests next to them,
+  `tests/test_ai_safety.py` `test_the_proposal_loses_its_control_characters_and_keeps_its_text`,
+  `tests/test_client_proposals.py` `test_cli_prints_the_proposal_without_control_characters`.
 - **The AI settings dialog's model list never sends a key to the saved provider's address**: choosing another
   provider before typing its address (a saved Ollama on the local network, then **custom**) listed models at the
   saved provider's server with the other provider's key. The address field now always counts for the list, an empty
@@ -3575,7 +3592,30 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   back in that process. The revision is read before the file, so a token change saved meanwhile in another window
   never looks like an older copy. On Linux and macOS an older copy of either file is refused also when it is the
   very file a running process read before, put back through a hard link kept to it (the same inode, size and
-  modification time): the revision in the keyring is read again also when the file's change time (ctime) moved.
+  modification time): the revision in the keyring is read again also when the file's change time (ctime) moved. On
+  Windows, where st_ctime is the creation time (which a hard link keeps), NTFS's own change time is used for this
+  (GetFileInformationByHandleEx, no new dependency); before, a running process there still accepted the file put
+  back. Where Windows gives no change time for the file (a file system that keeps none), the revision is read on
+  every look instead of that check being skipped. Each framework home keeps its own revisions: two LLM_FRAMEWORK_HOME folders of one account shared one
+  keyring entry, so a save in one made the other home's file an "older copy" (every tool denied, no token accepted).
+  The default home (~/.llm-framework) keeps the entry of the versions before; another folder gets an entry named by
+  a digest of the folder (no path in it). A home whose entry is still empty anchors the revision of the genuinely
+  signed file it accepts at its first look, so an older copy put back afterwards is refused from then on, not only
+  after the next save; it never writes when another process saved a newer file meanwhile (that would lower the kept
+  revision below the other save). The builds the person confirmed (`confirmed_builds.json`) keep a revision in the keyring the
+  same way: an older signed copy put back brought back a confirmation a later one had replaced (a module an AI
+  recreated with its earlier content, a pack reinstalled in an earlier version), so a build standing approval covered
+  it without the person; such a copy now holds no confirmation and the person is asked again. The pending approvals
+  and the trash's list need none: a yes put back runs nothing unless it answers the question the holding process asks
+  now, and an entry leaves the trash's list only once its item has left the trash folder. Regression tests:
+  `tests/test_policy_signing.py` `TestOlderCopiesAndRemovedFiles`
+  (`test_on_windows_the_ntfs_change_time_tells_the_very_file_put_back`,
+  `test_the_ntfs_change_time_moves_when_the_file_is_put_back` on Windows,
+  `test_two_framework_homes_keep_their_own_revision`,
+  `test_a_home_without_a_kept_revision_anchors_the_file_it_accepts`), `tests/test_confirmed_builds.py`
+  `test_an_older_copy_put_back_brings_no_replaced_confirmation_back`,
+  `tests/test_approvals_two_phase.py` `test_an_older_copy_with_an_earlier_yes_runs_nothing_the_person_did_not_approve`,
+  `tests/test_trash.py` `test_an_older_index_put_back_brings_nothing_back_to_restore_or_empty`.
   Without a keyring the signature has no key, as for the audit chain; such a file is refused while the audit log is
   kept with a key.
 - **Pending approvals and requests to stop asking are questions like any other.** They count toward the 30

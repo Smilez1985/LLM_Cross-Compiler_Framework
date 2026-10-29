@@ -14,12 +14,16 @@ doctor` reports it. A reader that has a key never accepts an unkeyed signature, 
 one too while the audit log is kept with a key (so a process started without the keyring cannot be made to accept
 a file someone edited).
 
-A signature only says that the framework wrote a file at some time. So the newest revision saved of the permissions
-and of the token store is also kept in the OS keyring (RevisionAnchor): an older signed copy put back over the file
-(to bring back a revoked standing approval, a revoked token or a looser permission) is refused like a hand edit, and a
-removed permission file denies everything instead of falling back to the defaults.
+A signature only says that the framework wrote a file at some time. So the newest revision saved of the permissions,
+of the token store and of the confirmed builds is also kept in the OS keyring (RevisionAnchor, one entry per framework
+home: Core/vault_key.revision_anchor): an older signed copy put back over the file (to bring back a revoked standing
+approval, a revoked token, a looser permission or a replaced confirmation) is refused like a hand edit, and a removed
+permission file denies everything instead of falling back to the defaults. The pending approvals and the trash's list
+keep none: an approval put back runs nothing unless its yes answers the question the holding process asks now, and an
+entry leaves the trash's list only once its item has left the trash folder.
 """
 
+import functools
 import hashlib
 import hmac
 import json
@@ -37,6 +41,7 @@ UNKEYED = "unkeyed"
 # index, is no kind any more: nothing reads its old file.)
 KINDS = ("tool_policy", "mcp_tokens", "tool_approvals", "confirmed_builds", "tool_trash")
 _UNSEEN = object()
+_POSIX = os.name == "posix"   # which change time a file's identity carries (tests try the Windows way with a fake)
 
 
 class SignatureError(ValueError):
@@ -192,12 +197,14 @@ class RevisionAnchor:
     `read()` returns the stored text (None when nothing is stored yet) and `write(text)` stores it; either may raise.
     The value only ever grows, and this process keeps the highest one it has seen, so a keyring that cannot be read for
     a moment or an entry someone removed never lowers it. It is read again only when the file changed since the last
-    look (a cheap stat), so checking it costs nothing on the many reads of an unchanged file."""
+    look (a cheap stat), so checking it costs nothing on the many reads of an unchanged file; where that look cannot
+    tell (Windows without a change time for the file) it is read on every look."""
 
     def __init__(self, read: Callable[[], Optional[str]], write: Callable[[str], None]):
         self._read_value, self._write_value = read, write
         self._known = 0
         self._seen: Any = _UNSEEN   # the identity of the file the known value was last read for
+        self._adopt_seen: Any = _UNSEEN   # the identity of the file adopt() last looked at the entry for
         self._lock = threading.Lock()
 
     @staticmethod
@@ -206,16 +213,25 @@ class RevisionAnchor:
             st = os.stat(path)
         except OSError:
             return None
-        # With the change time on POSIX: a hard link kept to the file puts back the very file read before (same inode,
-        # size and modification time) after another process saved a newer one; a link or rename moves the change time.
-        # Windows gives the creation time as st_ctime, which a hard link keeps, so there it adds nothing.
-        return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, (st.st_ctime_ns if os.name == "posix" else None)
+        # With the change time: a hard link kept to the file puts back the very file read before (same inode, size and
+        # modification time) after another process saved a newer one; a link or rename moves the change time. POSIX
+        # gives it as st_ctime; Windows gives the creation time there (which a hard link keeps), so on Windows it is
+        # NTFS's own change time (windows_change_time). None where the file system keeps none (_tells_a_restore).
+        changed = st.st_ctime_ns if _POSIX else windows_change_time(path)
+        return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, changed
+
+    @staticmethod
+    def _tells_a_restore(identity: Optional[tuple]) -> bool:
+        """Whether an unchanged identity proves the file was not put back meanwhile. Not without a change time (Windows
+        where the file system keeps none or it cannot be read): the kept revision is then read on every look instead
+        of the check being skipped. A missing file (None) is a missing file."""
+        return identity is None or _POSIX or identity[4] is not None
 
     def current(self, path: Any) -> int:
         """The highest revision the framework saved of the file at `path` (0 when it never saved one)."""
         identity = self._identity(path)
         with self._lock:
-            if identity == self._seen:
+            if identity == self._seen and self._tells_a_restore(identity):
                 return self._known
             try:
                 raw = self._read_value()
@@ -226,6 +242,38 @@ class RevisionAnchor:
                 self._known = max(self._known, int(text))
             self._seen = identity
             return self._known
+
+    def adopt(self, path: Any, revision: int) -> None:
+        """Takes the revision of a genuinely signed file this process just accepted as the anchor when the framework
+        keeps none for it yet (the entry could be read and is empty: the first start of a framework home with its own
+        entry, a file saved before there was a keyring), so an older copy put back afterwards is refused from this look
+        on, not only after the next save. Nothing is written when this process knows a revision already, when an
+        entry exists (another process anchored meanwhile: its value is taken, as current() would) or when the entry
+        cannot be read. The entry is looked at once per state of the file, so the many reads of an unchanged file
+        never ask the keyring again. Nothing is written either when the file changed since this process looked at it
+        (current() before the file was read, else the start of this call): another process saved a newer one meanwhile,
+        and the older revision written now would lower the anchor below that save."""
+        if int(revision) <= 0:
+            return
+        identity = self._identity(path)
+        with self._lock:
+            if self._known or (identity == self._adopt_seen and self._tells_a_restore(identity)):
+                return
+            self._adopt_seen = identity
+            accepted = identity if self._seen is _UNSEEN else self._seen   # the file this process read
+        try:
+            raw = self._read_value()
+        except Exception:  # unreachable for now: anchored at the next save, as before
+            return
+        text = str(raw or "").strip()
+        if text:
+            if text.isdigit() and len(text) <= 18:
+                with self._lock:
+                    self._known = max(self._known, int(text))
+            return
+        if self._identity(path) != accepted:  # replaced meanwhile: that save anchors its own revision
+            return
+        self.saved(path, revision)
 
     def saved(self, path: Any, revision: int) -> None:
         """Records the revision just written to `path` (the file is replaced before the anchor moves, so another
@@ -240,3 +288,62 @@ class RevisionAnchor:
             logging.getLogger("SignedFiles").warning(f"The revision of {Path(str(path)).name} could not be kept in the "
                                                      f"keyring ({type(e).__name__}); an older copy put back would not "
                                                      "be noticed until the next save.")
+
+
+# --- NTFS change time (Windows) --------------------------------------------------------------------------------------
+
+_FILE_READ_ATTRIBUTES = 0x0080
+_FILE_SHARE_ALL = 0x0007                 # read, write and delete: never in the way of a save or a replace
+_OPEN_EXISTING = 3
+_FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+_FILE_BASIC_INFO = 0                     # FILE_INFO_BY_HANDLE_CLASS FileBasicInfo
+
+
+@functools.lru_cache(maxsize=1)
+def _windows_file_api() -> Any:
+    """kernel32 with the argument types windows_change_time uses (an own instance, so the types stay local) and the
+    FILE_BASIC_INFO structure."""
+    import ctypes
+    from ctypes import wintypes
+
+    class FileBasicInfo(ctypes.Structure):
+        _fields_ = [("CreationTime", ctypes.c_int64), ("LastAccessTime", ctypes.c_int64),
+                    ("LastWriteTime", ctypes.c_int64), ("ChangeTime", ctypes.c_int64),
+                    ("FileAttributes", wintypes.DWORD)]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                                     wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.GetFileInformationByHandleEx.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p,
+                                                      wintypes.DWORD]
+    kernel32.GetFileInformationByHandleEx.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    return kernel32, FileBasicInfo, ctypes.c_void_p(-1).value
+
+
+def windows_change_time(path: Any) -> Optional[int]:
+    """NTFS's change time of the file at `path` (FILE_BASIC_INFO.ChangeTime from GetFileInformationByHandleEx, in
+    100 ns ticks): moved by every rename, new link and attribute change, as st_ctime is on POSIX. None when it cannot
+    be read (not Windows, a file system that keeps none, a refused open). Opened for its attributes only and shared for
+    read, write and delete, so a save or a replace by another process is never in the way. No program is started."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        kernel32, FileBasicInfo, invalid = _windows_file_api()
+        handle = kernel32.CreateFileW(str(path), _FILE_READ_ATTRIBUTES, _FILE_SHARE_ALL, None, _OPEN_EXISTING,
+                                      _FILE_FLAG_BACKUP_SEMANTICS, None)
+        if handle in (None, invalid):
+            return None
+        try:
+            info = FileBasicInfo()
+            if not kernel32.GetFileInformationByHandleEx(handle, _FILE_BASIC_INFO, ctypes.byref(info),
+                                                         ctypes.sizeof(info)):
+                return None
+            return int(info.ChangeTime) or None
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:  # noqa: BLE001 - without it the identity is what it was before (no change time)
+        return None

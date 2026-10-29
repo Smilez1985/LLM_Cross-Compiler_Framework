@@ -2636,10 +2636,13 @@ Verfügung.
   Speichern erhöht eine Revisionsnummer unter einer Sperre, die GUI, CLI und MCP-Server teilen, und ein Speichern auf
   Grundlage einer älteren Revision (ein Fenster, das vor einer anderen Änderung geöffnet wurde) wird abgelehnt, damit
   es nie eine zwischenzeitliche Änderung rückgängig macht. Die neueste gespeicherte Revision beider Dateien steht
-  zusätzlich im Schlüsselbund: Eine ältere signierte Kopie, die über eine Datei zurückgelegt wird (sie brächte eine
-  widerrufene dauerhafte Freigabe, ein widerrufenes Token oder eine lockerere Berechtigung zurück), wird wie eine
-  Bearbeitung von Hand abgelehnt, und eine entfernte Berechtigungsdatei verbietet jedes Tool, statt auf die Vorgaben
-  zurückzufallen. Ohne Schlüsselbund hat die Signatur keinen Schlüssel (wie die Audit-Kette) und `llm-cli mojo`
+  zusätzlich im Schlüsselbund, ein Eintrag je Framework-Home (zwei `LLM_FRAMEWORK_HOME`-Ordner lehnen nie die Dateien
+  des anderen ab): Eine ältere signierte Kopie, die über eine Datei zurückgelegt wird (sie brächte eine widerrufene
+  dauerhafte Freigabe, ein widerrufenes Token oder eine lockerere Berechtigung zurück), wird wie eine Bearbeitung von
+  Hand abgelehnt, auch wenn sie genau die Datei ist, die ein laufender Prozess vorher gelesen hat, über einen
+  Hardlink zurückgelegt (unter Windows verrät das die eigene Änderungszeit von NTFS), und eine entfernte
+  Berechtigungsdatei verbietet jedes Tool, statt auf die Vorgaben zurückzufallen. Die Builds, die du bestätigt hast,
+  führen ihre Revision ebenso, daher zählt eine zurückgelegte ältere Kopie als keine Bestätigung. Ohne Schlüsselbund hat die Signatur keinen Schlüssel (wie die Audit-Kette) und `llm-cli mojo`
   warnt; eine solche Datei wird abgelehnt, solange das Audit-Log mit Schlüssel geführt wird.
 - Ein [benanntes MCP-Token](#mcp-server) hat eigene Berechtigungen, gesetzt mit
   `llm-cli tools permissions --token NAME`; ein unbekanntes oder widerrufenes Token, oder eine Token-Datei, die sich

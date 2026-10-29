@@ -121,6 +121,30 @@ def test_restore_and_collision(tmp_path):
     assert [e["outcome"] for e in trash.audit.entries] == ["trash_restored", "trash_restored"]
 
 
+def test_an_older_index_put_back_brings_nothing_back_to_restore_or_empty(tmp_path):
+    """Why the trash's index keeps no revision anchor (port follow-up e): an entry leaves the index only when its moved
+    item has left the trash folder (restored or emptied), and what decides who may restore it (who deleted it, where it
+    came from) never changes after the move. An older signed index put back lists an entry whose item is gone:
+    restoring it is refused and emptying leaves it out; the other entry keeps its rules (the reminder date it may bring
+    back only reminds). Its folder list is read without the signature on purpose (a list of folders to deny grants
+    nothing), so an anchor would not cover it either."""
+    state = tmp_path / "state"
+    trash, entries = trashed(state, "s1", "s2")
+    first, second = entries
+    older = (state / "tool_trash.json").read_bytes()
+    trash.restore(first.id, "gui")
+    (state / "tool_trash.json").write_bytes(older)
+    with pytest.raises(TrashError) as exc:
+        trash.restore(first.id, "gui")
+    assert exc.value.code == "trash_unknown"
+    assert (state / "knowledge_snapshots" / "s1.jsonl.gz").read_bytes() == b"AAAA", "the restored file stays"
+    assert [item.speaking_name for item in trash.plan().items] == [second.label]
+    with pytest.raises(TrashError) as exc:
+        trash.restore(second.id, "mcp:laptop")
+    assert exc.value.code == "trash_not_yours", "the person deleted it: no AI restores it, older index or not"
+    assert second.stored().is_file()
+
+
 def test_restore_never_follows_a_link(tmp_path):
     state = tmp_path / "state"
     trash, entries = trashed(state, "s1")

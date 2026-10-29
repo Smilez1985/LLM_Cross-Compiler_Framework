@@ -188,6 +188,8 @@ class TokenStore:
                                   "create the tokens again ('llm-cli mcp token add NAME').") from None
         if data.revision < anchored:  # genuinely signed, but put back over a newer one (a revoked token returns)
             raise self._older_copy(data.revision, anchored)
+        if not anchored and self.anchor is not None:  # no revision kept for this home yet: from now on this one
+            self.anchor.adopt(self.path, data.revision)
         records = {t.name: t for t in data.tokens}
         with self._cache_lock:
             self._cache = (key, records, data.revision)

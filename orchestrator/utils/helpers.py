@@ -44,12 +44,19 @@ def safe_json_load(path: Path, default: Any = None, kind: Optional[type] = None)
         return default
     return data if kind is None or isinstance(data, kind) else default
 
+def windowless_flags() -> int:
+    """The creation flags of a console program the framework runs and reads: CREATE_NO_WINDOW on Windows, so no
+    console window flashes up when the GUI (or another program without a console) starts it; 0 elsewhere. The one
+    value execute_command and the pinned source's git (runtime/build/source.Git) use."""
+    return getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if os.name == "nt" else 0
+
+
 def execute_command(command: List[str], cwd=None, timeout=None, env=None):
     """Runs a command without a shell and returns (returncode, stdout, stderr); never raises for the command: a
     missing program, a hang past `timeout` or another failure to start gives (-1, "", the reason). stdin is closed (a
     command that asks for input ends instead of waiting), output that is not UTF-8 is decoded with replacement
-    characters, and on Windows no console window opens."""
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    characters, and on Windows no console window opens (windowless_flags)."""
+    flags = windowless_flags()
     try:
         res = subprocess.run(list(command), cwd=cwd, timeout=timeout, env=env, capture_output=True, text=True,
                              errors="replace", check=False, stdin=subprocess.DEVNULL, creationflags=flags)
