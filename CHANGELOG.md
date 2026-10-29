@@ -53,6 +53,18 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   anchor under one lock per file (`<file>.anchor.lock` next to it), reads the stored value first and keeps the higher
   one, in `adopt` and in `saved` (regression test with an interleaving double). `llm-cli build status` prints the values and errors of a request summary and of a build record through the CLI's one filter for
   steered text (`_printable`), so control and bidi characters from a build log no longer reach the terminal.
+- `2026-10-29 23:56 UTC` · `v3.2.0` **Offline mode follow-ups: the tailnet as this node uses it, the GUI before the VPN check, the
+  sign-in check, a crawl when offline mode is switched off** ([design](docs/DESIGN.md#offline-mode-and-the-own-network)):
+  a peer's subnet route now counts as the own VPN only when this node accepts routes (Tailscale's `RouteAll`, read
+  from `tailscale debug prefs`, whose JSON keys are ipn.Prefs' Go field names); before, any advertised route
+  counted. With an exit node in use and no LAN access (`ExitNodeID` or `ExitNodeIP` set, `ExitNodeAllowLANAccess`
+  off) private addresses go through the VPN rule, since the traffic leaves through the tailnet. On the GUI thread a
+  private address is "not checked yet" (`label` gives None) until the VPN check ran in a worker, instead of being
+  shown as the own network; without a tailscale command it is the own network at once (only the PATH is looked at,
+  no command runs). A refusal of the locality rule raised during the sign-in check (`SignIn.check`) is now a plain
+  result error with the person's way out, never a traceback or the raw exception. A person's crawl started in
+  offline mode drops its own-network reading when offline mode is switched off during the crawl and goes on with
+  the public-only guard, like the switch the other way.
 
 ### Security
 - `2026-10-29 23:50 UTC` · `v3.2.0` **llmcf's SSH settings: a jump or proxy command only with the person's kept yes, no other login

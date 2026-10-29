@@ -60,6 +60,20 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   `saved` (Regressionstest mit einem verschränkten Doppel). `llm-cli build status` gibt die Werte
   und Fehler einer Anfrage und eines Build-Eintrags durch den einen Filter der CLI für gesteuerten Text aus
   (`_printable`), damit Steuer- und Bidi-Zeichen aus einem Build-Log nicht mehr das Terminal erreichen.
+- `2026-10-29 23:56 UTC` · `v3.2.0` **Nacharbeiten am Offline-Modus: das Tailnet so, wie dieser Knoten es nutzt, die GUI vor der
+  VPN-Prüfung, die Anmeldeprüfung, ein Crawl beim Ausschalten des Offline-Modus**
+  ([Design](docs/DESIGN_DE.md#offline-modus-und-das-eigene-netz-1)): Die Subnetz-Route eines Peers zählt jetzt nur
+  als eigenes VPN, wenn dieser Knoten Routen annimmt (Tailscales `RouteAll`, gelesen aus `tailscale debug prefs`,
+  dessen JSON-Schlüssel die Go-Feldnamen von ipn.Prefs sind); vorher zählte jede angebotene Route. Ist ein Exit-Node
+  ohne LAN-Zugang in Gebrauch (`ExitNodeID` oder `ExitNodeIP` gesetzt, `ExitNodeAllowLANAccess` aus), gehen private
+  Adressen durch die VPN-Regel, weil der Verkehr über das Tailnet hinausgeht. Auf dem GUI-Thread ist eine private
+  Adresse „noch nicht geprüft“ (`label` gibt None), bis die VPN-Prüfung in einem Worker lief, statt als eigenes Netz
+  angezeigt zu werden; ohne tailscale-Befehl ist sie sofort das eigene Netz (nur der PATH wird angesehen, kein
+  Befehl läuft). Eine Ablehnung der Ortsregel während der Anmeldeprüfung (`SignIn.check`) ist jetzt ein klarer
+  Fehler im Ergebnis mit dem Ausweg der Person, nie ein Traceback oder die rohe Ausnahme. Ein Crawl der Person, der
+  im Offline-Modus startete, liest das eigene Netz nicht mehr, wenn der Offline-Modus während des Crawls
+  ausgeschaltet wird, und geht mit der Sperre für nur öffentliche Seiten weiter, wie beim Wechsel in die andere
+  Richtung.
 
 ### Sicherheit
 - `2026-10-29 23:50 UTC` · `v3.2.0` **Die SSH-Einstellungen von llmcf: ein Sprung oder Proxy-Befehl nur mit dem festgehaltenen Ja der

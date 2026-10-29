@@ -457,6 +457,15 @@ class SignIn:
                                          timeout=self.timeout,
                                          list_models=lambda: self.client.adapter_for(preset, url,
                                                                                      credential).list_models())
+        except Exception as e:  # noqa: BLE001 - only the locality rule's refusal is turned into the result
+            from orchestrator.utils.locality import LocalityRefused
+            if not isinstance(e, LocalityRefused):
+                raise
+            # The pinned connection found the address no longer allowed (offline mode, a name that changed its
+            # answer): the plain refusal with the person's way out, never a traceback or the raw exception.
+            result = ValidationResult(ok=False, provider=preset.id, method=spec.id)
+            result.error = NotConfigured(str(e), provider=preset.id).with_steps(*(e.steps or ()))
+            return result
         finally:
             if pinned is not None:
                 pinned.close()
