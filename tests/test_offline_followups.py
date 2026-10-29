@@ -726,7 +726,7 @@ def test_the_repository_override_is_a_pinned_mirror_in_offline_mode(tmp_path, na
     with pytest.raises(OfflineImageMissing):
         image_build(tmp_path, monkeypatch, repos)
     image = SimpleNamespace(attrs={"Created": "2026"}, short_id="i1", tag=lambda *a: None)
-    seen, progress = image_build(tmp_path, monkeypatch, repos, images=[image])
+    seen, _ = image_build(tmp_path, monkeypatch, repos, images=[image])
     assert seen["pinned"] == ["mirror.lan:192.168.1.5", "mirror.lan=[fd00::5]"], "only the checked local addresses"
     assert "args" not in seen, "offline mode builds no image, also not from a mirror in the own network"
     label = [f for f in seen["listed"][0]["label"] if f.startswith("org.llm-framework.inputs=")]
