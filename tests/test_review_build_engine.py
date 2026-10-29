@@ -1641,3 +1641,49 @@ class TestScanWithoutTheDockerSocket:
             engine._scan_image_security(self.TAG, progress, build_id="b1")
         assert client.scan_runs == []
         assert not list((engine.cache_dir / "builds" / "b1").glob("trivy-*"))
+
+    # Offline mode (round 24 L-NET, hf-local's "offline mode uses only local images or local registries"): the scan
+    # neither pulls Trivy's image nor lets Trivy download its vulnerability database.
+    def test_offline_mode_scans_without_any_network(self, engine, client):
+        engine.config.set("offline_mode", True)
+        progress = self.scan(engine)
+        (run,) = client.scan_runs
+        assert run.get("network_mode") == "none", "offline mode: the scanner gets no network"
+        assert {"--skip-db-update", "--skip-java-db-update", "--offline-scan"} <= set(run["command"])
+        assert any("Security scan passed." in line for line in progress.logs)
+
+    def test_offline_mode_without_the_scanner_image_skips_the_scan_and_pulls_nothing(self, engine, client):
+        engine.config.set("offline_mode", True)
+        here = client.images.get
+
+        def get(ref):
+            if ref.startswith("aquasec/trivy"):
+                raise docker.errors.ImageNotFound(f"No such image: {ref}")
+            return here(ref)
+
+        client.images.get = get
+        progress = self.scan(engine)
+        assert client.scan_runs == [], "containers.run would pull the scanner image from its registry"
+        (warning,) = [w for w in progress.warnings if w.startswith("Security scan skipped")]
+        assert "offline mode" in warning.lower() and "aquasec/trivy:0.75.0" in warning
+        assert not list((engine.cache_dir / "builds" / "b1").glob("trivy-*")), "nothing saved for a scan not run"
+
+    def test_offline_mode_takes_the_scanner_image_from_a_registry_in_the_own_network(self, engine, client):
+        engine.config.set("offline_mode", True)
+        engine.config.set("image_trivy", "192.168.1.5:5000/aquasec/trivy:0.75.0")
+        here = client.images.get
+
+        def get(ref):
+            if "trivy" in ref:
+                raise docker.errors.ImageNotFound(f"No such image: {ref}")
+            return here(ref)
+
+        client.images.get = get
+        self.scan(engine)
+        (run,) = client.scan_runs
+        assert run["image"] == "192.168.1.5:5000/aquasec/trivy:0.75.0" and run.get("network_mode") == "none"
+
+    def test_online_the_scan_is_as_before(self, engine, client):
+        self.scan(engine)
+        (run,) = client.scan_runs
+        assert "network_mode" not in run and "--offline-scan" not in run["command"]

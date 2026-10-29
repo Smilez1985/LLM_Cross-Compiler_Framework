@@ -1239,8 +1239,23 @@ class BuildEngine:
         if not self._get_conf("enable_security_scan", True):
             progress.add_log("Security scan disabled (enable_security_scan=false).")
             return
-        progress.add_log(f"Scanning image {image_tag} for vulnerabilities...")
         build_id = build_id or progress.build_id
+        trivy_image = self._get_conf('image_trivy', "aquasec/trivy:0.75.0")
+        # Offline mode (round 24 L-NET: only images on this computer or from a registry in the own network): a missing
+        # scanner image would be pulled by containers.run, and Trivy would download its vulnerability database. So the
+        # scanner runs without any network, with the database it already has, and its image is pulled only from a
+        # registry the one locality rule counts as local (utils/image_ref.offline_pull_refusal, as for packages).
+        from orchestrator.utils.locality import offline_mode
+        offline = offline_mode(self.config)
+        if offline and not self._image_here(trivy_image):
+            from orchestrator.utils.image_ref import offline_pull_refusal
+            if offline_pull_refusal(trivy_image, self.config):
+                progress.add_warning(f"Security scan skipped: offline mode is on and the scanner image {trivy_image} "
+                                     "is not on this computer; it would be pulled from a registry outside your own "
+                                     "network. Run a build once with offline mode off; later scans use that image "
+                                     "and its vulnerability database offline.")
+                return
+        progress.add_log(f"Scanning image {image_tag} for vulnerabilities...")
         container = None
         folder = None
         try:
@@ -1250,7 +1265,8 @@ class BuildEngine:
             if archive is None:
                 return
             scan_cmd = ["image", "--input", SCAN_ARCHIVE, "--exit-code", "1", "--severity", "HIGH,CRITICAL"]
-            trivy_image = self._get_conf('image_trivy', "aquasec/trivy:0.75.0")
+            if offline:   # the database already in the trivy_cache volume; a missing one ends the scan with an error
+                scan_cmd += ["--skip-db-update", "--skip-java-db-update", "--offline-scan"]
 
             # Detached and registered like the stage containers, so cancel_build can stop it.
             container = self.docker_client.containers.run(
@@ -1263,6 +1279,7 @@ class BuildEngine:
                 cap_drop=["ALL"],
                 security_opt=["no-new-privileges:true"],
                 detach=True,
+                **({"network_mode": "none"} if offline else {}),
             )
             with self._lock:
                 self._active_containers[build_id] = container
@@ -1320,6 +1337,15 @@ class BuildEngine:
                 # The framework's own temporary copy of the image, made for this scan only (the image itself stays).
                 shutil.rmtree(folder, ignore_errors=True)
                 progress.add_log("Removed the temporary image archive of the scan.")
+
+    def _image_here(self, reference: str) -> bool:
+        """Whether the image is on this computer (a look-up in the engine, never a pull). An engine that cannot
+        answer counts as no."""
+        try:
+            self.docker_client.images.get(reference)
+            return True
+        except Exception:  # noqa: BLE001 - docker.errors.ImageNotFound, or no answer from the engine
+            return False
 
     def _save_image_for_scan(self, image_tag: str, progress: BuildProgress,
                              build_id: str) -> Tuple[Optional[Path], Optional[Path]]:

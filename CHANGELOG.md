@@ -1355,8 +1355,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   uses images already here or a registry the one locality rule counts as local, and otherwise stops naming the image
   (`utils/image_ref.offline_pull_refusal`). The target image is neither pulled nor built in offline mode: the image of
   the target built earlier from the same settings is used (new label `org.llm-framework.inputs`), and without one the
-  build stops naming the base images and the step to take while online. Tests: `tests/test_offline_models.py`,
-  `tests/test_offline_images.py`.
+  build stops naming the base images and the step to take while online. The build's security scan in offline mode
+  runs Trivy without any network and with the vulnerability database it already has (`--skip-db-update`,
+  `--offline-scan`); its image is pulled only from a registry in your own network, otherwise the scan is skipped
+  with a warning (before, the scan pulled `aquasec/trivy` from Docker Hub and Trivy downloaded its database).
+  Tests: `tests/test_offline_models.py`, `tests/test_offline_images.py`, `tests/test_review_build_engine.py`.
 - **The framework's own OpenSSH settings file; OpenSSH reads neither `~/.ssh/config` nor `/etc/ssh/ssh_config`**
   (DECISIONS round 25 Q4 and Q5): every call of this computer's OpenSSH client (the fallback without paramiko) gets
   `-F` with `ssh_config` in the framework's state folder from the one command-line builder
