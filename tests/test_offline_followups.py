@@ -683,7 +683,7 @@ def test_the_sign_in_check_of_a_local_server_goes_only_to_its_checked_address(tm
 
 # --- (f) LLAMA_CPP_REPO_OVERRIDE in offline mode ---------------------------------------------------------------------
 
-def image_build(tmp_path, monkeypatch, repos, offline=True):
+def image_build(tmp_path, monkeypatch, repos, offline=True, images=()):
     from orchestrator.Core import builder as builder_module
     from orchestrator.Core.builder import BuildEngine, BuildProgress, BuildStatus
     from orchestrator.Core.config_manager import ConfigManager
@@ -698,7 +698,14 @@ def image_build(tmp_path, monkeypatch, repos, offline=True):
         seen.update(args=dict(args), **kwargs)
     monkeypatch.setattr(engine, "_build_with_buildkit", buildkit)
     monkeypatch.setattr(engine, "_buildkit_available", lambda: True)
-    monkeypatch.setattr(engine, "docker_client", SimpleNamespace(images=SimpleNamespace(get=lambda tag: tag)))
+    monkeypatch.setattr(engine, "docker_client", SimpleNamespace(images=SimpleNamespace(
+        get=lambda tag: tag, list=lambda filters=None: seen.setdefault("listed", []).append(filters) or images)))
+    record = engine._offline_repo_hosts
+
+    def hosts(url, progress):   # what the override's check pinned, before the image step uses or drops it
+        record(url, progress)
+        seen["pinned"] = list(engine._repo_hosts.get(progress.build_id, []))
+    monkeypatch.setattr(engine, "_offline_repo_hosts", hosts)
     dockerfile = tmp_path / "ctx" / "Dockerfile"
     dockerfile.parent.mkdir(exist_ok=True)
     dockerfile.write_text("FROM scratch\nARG LLAMA_CPP_REPO=x\n")
@@ -709,13 +716,25 @@ def image_build(tmp_path, monkeypatch, repos, offline=True):
 
 
 def test_the_repository_override_is_a_pinned_mirror_in_offline_mode(tmp_path, names, monkeypatch):
+    """Offline mode judges the override as a mirror of the own network and pins only its checked local addresses
+    (offline-followups). The target image itself is never built offline (hf-local, round 24 L-NET: its Dockerfile also
+    fetches with apt and pip): the image built earlier from the same settings, override included, is used, and
+    without one the build stops before anything is built or pulled. Online the image build is as before."""
+    from orchestrator.Core.builder import OfflineImageMissing
     names["mirror.lan"] = ["192.168.1.5", "2001:db8::5", "fd00::5"]
-    seen, progress = image_build(tmp_path, monkeypatch, {"llama.cpp": {"url": "https://mirror.lan/llama.cpp.git"}})
-    assert seen["args"]["LLAMA_CPP_REPO"] == "https://mirror.lan/llama.cpp.git"
-    assert seen["hosts"] == ["mirror.lan:192.168.1.5", "mirror.lan=[fd00::5]"], "only the checked local addresses"
-    assert seen["args"]["HTTPS_PROXY"] == "" and seen["args"]["NO_PROXY"] == "*", "no proxy in the image build"
-    online, _ = image_build(tmp_path, monkeypatch, {"llama.cpp": {"url": "https://mirror.lan/llama.cpp.git"}},
-                            offline=False)
+    repos = {"llama.cpp": {"url": "https://mirror.lan/llama.cpp.git"}}
+    with pytest.raises(OfflineImageMissing):
+        image_build(tmp_path, monkeypatch, repos)
+    image = SimpleNamespace(attrs={"Created": "2026"}, short_id="i1", tag=lambda *a: None)
+    seen, progress = image_build(tmp_path, monkeypatch, repos, images=[image])
+    assert seen["pinned"] == ["mirror.lan:192.168.1.5", "mirror.lan=[fd00::5]"], "only the checked local addresses"
+    assert "args" not in seen, "offline mode builds no image, also not from a mirror in the own network"
+    label = [f for f in seen["listed"][0]["label"] if f.startswith("org.llm-framework.inputs=")]
+    assert label, "the image of the same settings is looked for"
+    other, _ = image_build(tmp_path, monkeypatch, {}, images=[image])
+    assert other["listed"][0]["label"] != seen["listed"][0]["label"], "the override is one of the settings"
+    online, _ = image_build(tmp_path, monkeypatch, repos, offline=False)
+    assert online["args"]["LLAMA_CPP_REPO"] == "https://mirror.lan/llama.cpp.git"
     assert "hosts" not in online and "HTTPS_PROXY" not in online["args"], "online: as before"
 
 
