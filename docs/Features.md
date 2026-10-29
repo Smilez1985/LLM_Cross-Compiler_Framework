@@ -2170,7 +2170,8 @@ with the token's standing approvals, Back to read only). A token is shown once, 
   mode the browser contacts nobody: a search, a licence check, a file list or a download is
   refused at once, in plain words, with where to switch offline mode off; the Take over works offline (a file only
   Hugging Face could check stays in the old cache, with that reason). Every Hub call (search, look-up, file list) goes
-  to huggingface.co only, never to the host in `HF_ENDPOINT`, with your typed or stored token, never an implicit one.
+  to huggingface.co only, never to the host in `HF_ENDPOINT`, never with an implicit token; your typed or stored
+  token goes only to a gated or private repository (a public one's files, look-ups and searches carry none).
 - **Devices and deploy (`list_devices`, `create_deploy_package`, `deploy_to_device`):** `list_devices` shows the
   [trusted devices](#deployment) with the label you gave, address, host key fingerprint, whether the device is
   usable (paired, and its key still the trusted one) and the last deploy; the account the framework logs in with is

@@ -340,7 +340,7 @@ class FakeHub:
             def model_info(self, repo, revision=None, token=None, files_metadata=False):
                 hub.calls.append(("model_info", token))
                 siblings = [SimpleNamespace(rfilename=n, size=1, lfs=None) for n in hub.FILES]
-                return SimpleNamespace(sha=hub.commit, siblings=siblings)
+                return SimpleNamespace(sha=hub.commit, siblings=siblings, gated=getattr(hub, "gated", False))
 
         class Fetcher:
             def __init__(self, token, stop):
@@ -380,10 +380,21 @@ class TestStaging:
         assert engine.staging_folder(MODEL, COMMIT_A, None) != engine.staging_folder(MODEL, COMMIT_B, None)
 
     def test_the_stored_token_is_used(self, engine, monkeypatch):
+        # Changed on purpose (DECISIONS round 25 Q2): the stored token goes only where Hugging Face needs one. A gated
+        # repository's files get it; its look-ups are public and carry none (before, every call carried it).
+        hub = FakeHub().install(monkeypatch)
+        hub.gated = "manual"
+        engine.secrets_manager = SimpleNamespace(get_secret=lambda key: "stored-value" if key == "hf_token" else None)
+        engine._stage_model(config(), BuildProgress("b1", BuildStatus.QUEUED, ""))
+        assert {c[-1] for c in hub.calls if c[0] == "download"} == {"stored-value"}
+        assert {c[-1] for c in hub.calls if c[0] == "model_info"} == {False}
+
+    def test_a_public_repositorys_files_never_get_the_stored_token(self, engine, monkeypatch):
+        # Regression (DECISIONS round 25 Q2): the stored token went with every file of a public repository.
         hub = FakeHub().install(monkeypatch)
         engine.secrets_manager = SimpleNamespace(get_secret=lambda key: "stored-value" if key == "hf_token" else None)
         engine._stage_model(config(), BuildProgress("b1", BuildStatus.QUEUED, ""))
-        assert {c[-1] for c in hub.calls} == {"stored-value"}
+        assert {c[-1] for c in hub.calls} == {False, None}, "no request and no file carries the token"
 
     def test_staging_uses_the_framework_fetcher_with_the_hubs_sizes_and_hashes(self, engine, monkeypatch):
         """Round-1 leftover: staging goes through the Hugging Face fetcher of T6 (cancellable, resumable, each file

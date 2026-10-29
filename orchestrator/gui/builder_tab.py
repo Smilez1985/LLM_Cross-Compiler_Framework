@@ -1176,11 +1176,37 @@ class BuilderTab(QWidget):
                   "dataset": self.dataset_path, "recipe": recipe, "output_dir": output_dir,
                   "use_gpu": self.chk_gpu.isChecked(), "use_imatrix": self.chk_imatrix.isChecked(),
                   "priority": self._priority()}
+        if not self._model_on_this_computer(values):
+            return
         found, lookup = self._earlier_builds(values)
         if lookup is not None:
             self._look_up_commit(values, found, lookup)
             return
         self._start_or_reuse(values, found)
+
+    def _model_on_this_computer(self, values) -> bool:
+        """Offline mode (DECISIONS round 25 Q1): a Hugging Face model that is not on this computer is never
+        downloaded. The person chooses a model already here or a model file or folder of their own (the choice window,
+        gui/offline_model.py); the build then starts with it. False: nothing starts. Reads the disk only."""
+        from orchestrator.Core.build_service import BuildService, ModelNotHere
+        from orchestrator.Core.builder import HF_REPO_ID
+        model, recipe = values["model"], values["recipe"]
+        if not HF_REPO_ID.match(model) or Path(model).expanduser().exists():
+            return True   # a local file or folder: used as it is
+        service = self._build_service() or BuildService(self.framework)
+        try:
+            service.check_model_here(model, recipe.model.revision if recipe else None, for_ai=False)
+            return True
+        except ModelNotHere as e:
+            from orchestrator.gui.offline_model import OfflineModelDialog
+            chosen = OfflineModelDialog.choose(self, e)
+        if not chosen:
+            self._log(ui_text("bld.offline.not_here", repo=values["model"]))
+            return False
+        self.model_input.setEditText(chosen)
+        self.gui_form.person_edited("model")  # the person's pick: never overwritten by an AI
+        values["model"], values["recipe"] = chosen, (recipe if recipe and chosen == recipe.model.repo else None)
+        return True
 
     def _start_or_reuse(self, values, found):
         """Asks about earlier builds with the same options (if any), then submits exactly `values`."""

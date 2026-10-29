@@ -92,4 +92,28 @@ def model_to_download(rt: Any, tier: Optional[str] = None) -> Tuple[Any, Optiona
     return rt.catalog.model(tier), None
 
 
-__all__ = ["NOTES", "STATES", "ModelRow", "ModelsOverview", "gib", "model_to_download", "models_overview"]
+def offline_refusal(rt: Any, model: Any, lang: Optional[str] = None) -> Optional[str]:
+    """`ditto models download` (and every other download of a model for Ditto: Ditto > Local Models..., the runtime
+    tools) in offline mode (DECISIONS round 25 Q1): the plain refusal that names the models already on this computer,
+    before any request; None when offline mode is off or the download address is in the person's own network (a local
+    mirror, by the framework's one locality rule, utils/locality.py)."""
+    from orchestrator.utils.locality import check_url, offline_mode
+    settings = getattr(rt, "settings", None)
+    if not offline_mode(settings):
+        return None
+    verdict = check_url(model.url(rt.catalog.model_base_url), settings)
+    if verdict.local:
+        return None
+    from orchestrator.utils.locality import OPT_OUT_HELPS
+    from orchestrator.utils.localization import ui_text
+    here = [m for m in rt.catalog.models if rt.model_state(m) == "ready"]
+    text = ui_text("ditto_models.offline", lang, file=model.file, why=verdict.why(lang))
+    if verdict.reason in OPT_OUT_HELPS:   # as the locality rule's own refusal: the person may count it as local
+        text += ui_text("net.refusal.opt_out", lang)
+    listed = ", ".join(f"{m.tier} ({m.file})" for m in here)
+    return f"{text} " + (ui_text("ditto_models.offline.here", lang, models=listed) if here else
+                         ui_text("ditto_models.offline.none", lang))
+
+
+__all__ = ["NOTES", "STATES", "ModelRow", "ModelsOverview", "gib", "model_to_download", "models_overview",
+           "offline_refusal"]

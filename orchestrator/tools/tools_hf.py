@@ -327,6 +327,8 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
             lines.append(Fact("Warning", "PyTorch pickle weights: they can run code when loaded"))
         bound = {"model": inp.model, "filename": name, "commit": facts.commit, "size": file.size,
                  "sha256": file.sha256 or "",
+                 # the token goes only to a gated or private repository (DECISIONS round 25 Q2)
+                 "token_needed": facts.needs_token,
                  # the facts a standing approval is matched against (grants.DOWNLOAD_RULE), never the AI's words
                  "grant": {"repo": inp.model, "filename": name, "size_bytes": file.size,
                            "gated": facts.gated != "false", "base_gated": (facts.base_gated not in ("false", None))
@@ -371,7 +373,7 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
         def work(handle) -> Dict[str, Any]:
             from orchestrator.tools.local_files import LocalFiles
             try:
-                fetcher = HubFetcher(token=token, stop=stop)
+                fetcher = HubFetcher(token=token, stop=stop, token_needed=bool(bound.get("token_needed", True)))
                 path, digest = fetcher.fetch_file(
                     repo, commit, file, dest,
                     progress=lambda _n, done, total: handle.progress(done, total, f"{name}: {done} of {total} bytes"))

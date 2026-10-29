@@ -228,16 +228,23 @@ class SearchResult:
     metadata: Dict[str, Any]
 
 
+def fetch_model_files(cache_dir: Path, repo: str, required, optional=(), *, offline: bool = False):
+    """The knowledge base's models come from Hugging Face through the framework's own fetcher into fastembed's cache
+    (DECISIONS round 25 Q2): hf_hub.fetch_snapshot, without any token; in offline mode only a copy that is there."""
+    from orchestrator.Core.hf_hub import fetch_snapshot
+    return fetch_snapshot(cache_dir, repo, required, optional, offline=offline)
+
+
 def create_dense_embedder(spec: EmbeddingModelSpec, cache_dir: Path, offline: Callable[[], bool]) -> DenseEmbedder:
-    return FastEmbedDenseEmbedder(spec, cache_dir, offline)
+    return FastEmbedDenseEmbedder(spec, cache_dir, offline, fetch=fetch_model_files)
 
 
 def create_sparse_embedder(cache_dir: Path, offline: Callable[[], bool]) -> SparseEmbedder:
-    return FastEmbedSparseEmbedder(cache_dir, offline)
+    return FastEmbedSparseEmbedder(cache_dir, offline, fetch=fetch_model_files)
 
 
 def create_reranker(spec: RerankerSpec, cache_dir: Path, offline: Callable[[], bool]):
-    return FastEmbedReranker(spec, cache_dir, offline)
+    return FastEmbedReranker(spec, cache_dir, offline, fetch=fetch_model_files)
 
 
 def _clean_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:

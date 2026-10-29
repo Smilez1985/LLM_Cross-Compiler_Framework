@@ -9,10 +9,16 @@ Rules that hold for every call here:
 
 - Only the token the person stored in the framework (`hf_token` in the vault) is used, and it is read here, inside the
   framework. Without one every call passes `token=False`, so huggingface_hub never falls back to an implicit token
-  (`HF_TOKEN`, the Hugging Face home folder's token file, an OIDC exchange) the person never gave the framework. The
-  token never appears in a result, a note, an error or the audit log, and it is sent only to huggingface.co: every
-  API call goes there (hub_api; never to the host in HF_ENDPOINT), and a redirect to the Hub's file storage carries
-  no token (requests drops the header on a cross-host redirect, and the fetcher refuses any other host).
+  (`HF_TOKEN`, the Hugging Face home folder's token file, an OIDC exchange) the person never gave the framework; the
+  process also runs with HF_HUB_DISABLE_IMPLICIT_TOKEN and HF_HUB_DISABLE_TELEMETRY (orchestrator/__init__.py), so
+  no other library that uses huggingface_hub sends one either. The token never appears in a result, a note, an error
+  or the audit log, and it is sent only to huggingface.co: every API call goes there (hub_api; never to the host in
+  HF_ENDPOINT), and a redirect to the Hub's file storage carries no token (requests drops the header on a cross-host
+  redirect, and the fetcher refuses any other host).
+- The token goes only where Hugging Face needs one (DECISIONS round 25 Q2): searches, listings and the files of a
+  public repository are fetched without it. A repository whose information says it is gated or private
+  (needs_token), or a request the Hub answered with 401 or 403 without a token (refused_without_token), gets it:
+  then one request with the token (tokenless_first; HubFetcher's token_needed).
 - Offline mode refuses before any network request (offline_refusal, the one refusal: AI callers, the GUI's browser
   and the Take over's Hub list; a person reads it in plain words with person_text); a network error is an error,
   never an empty list.
@@ -33,7 +39,7 @@ import shutil  # noqa: F401 - tests and tools_hf replace or read shutil.disk_usa
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 from urllib.parse import quote, urlparse
 
 from orchestrator.tools.grants import PERMISSIVE_LICENSES
@@ -150,6 +156,12 @@ class ModelFacts:
     base_license: str = ""
     base_license_restrictive: str = ""
     base_gated: Optional[str] = None  # None: no base model named, or it could not be looked up
+    private: bool = False             # a private repository: read with the stored token only
+
+    @property
+    def needs_token(self) -> bool:
+        """Hugging Face needs the token for this repository's files (gated or private): the fetcher sends it then."""
+        return self.gated != "false" or self.private
 
     def file(self, name: str) -> Optional[HubFile]:
         return next((f for f in self.files if f.name == name), None)
@@ -168,6 +180,39 @@ def hub_api(token: Any = False):
     the Builder's staging all come through here; tests/test_hf_online.py fails on an HfApi made anywhere else."""
     from huggingface_hub import HfApi
     return HfApi(endpoint=HUB_URL, token=token or False)
+
+
+T = TypeVar("T")
+
+
+def needs_token(info: Any) -> bool:
+    """Hugging Face needs a token for this repository: its information (model_info) says it is gated (any gating mode)
+    or private. Public files and listings are fetched without one."""
+    return gating(getattr(info, "gated", False)) != "false" or getattr(info, "private", False) is True
+
+
+def refused_without_token(error: BaseException) -> bool:
+    """The Hub answered a request with 401 or 403 (a private repository, which huggingface_hub reports as
+    RepositoryNotFoundError, or a gated one, GatedRepoError): the one other case in which the token is sent."""
+    try:
+        from huggingface_hub.errors import GatedRepoError
+    except ImportError:  # pragma: no cover - huggingface_hub is a dependency
+        GatedRepoError = ()  # type: ignore
+    if GatedRepoError and isinstance(error, GatedRepoError):
+        return True
+    return getattr(getattr(error, "response", None), "status_code", None) in (401, 403)
+
+
+def tokenless_first(call: Callable[[Any], T], token: Optional[str]) -> T:
+    """`call(False)`: the request without a token. Only when Hugging Face refused it (refused_without_token) and there
+    is a token, one request more with it (`call(token)`); the callers build that request with hub_api, so it goes to
+    huggingface.co only. Every other answer, and a refusal without a token to send, is the caller's as it came."""
+    try:
+        return call(False)
+    except Exception as e:  # noqa: BLE001 - only a refusal is asked again, with the token
+        if not token or not refused_without_token(e):
+            raise
+    return call(token)
 
 
 def offline(config: Any) -> bool:
@@ -244,10 +289,12 @@ class HubClient:
         Hugging Face home folder)."""
         return self.token() or False
 
-    def api(self):
+    def api(self, token: Any = None):
+        """The Hub's API with `token` (False: none at all), or with the stored token when `token` is None."""
+        token = self.token_arg() if token is None else token
         if self._api_factory is not None:
-            return self._api_factory(self.token_arg())
-        return hub_api(self.token_arg())
+            return self._api_factory(token)
+        return hub_api(token)
 
     def offline(self) -> bool:
         return offline(getattr(self.framework, "config", None))
@@ -266,10 +313,9 @@ class HubClient:
         accepting conditions), gated (only gated ones) or any."""
         self.check_online()
         flag = {"free": False, "gated": True, "any": None}[gated_mode]
-        try:
-            models = list(self.api().list_models(search=query, limit=limit, sort="downloads", gated=flag,
-                                                 expand=["gated", "downloads", "likes", "tags"],
-                                                 token=self.token_arg()))
+        try:  # a listing is public: never with the token
+            models = list(self.api(False).list_models(search=query, limit=limit, sort="downloads", gated=flag,
+                                                      expand=["gated", "downloads", "likes", "tags"], token=False))
         except Exception as e:  # noqa: BLE001 - every failure is an error, never an empty list
             raise self._failed(e, "The search failed") from None
         found = []
@@ -312,8 +358,13 @@ class HubClient:
         if revision is not None and not COMMIT.match(revision):
             raise HubError("A revision is a 40-character commit hash.", code="invalid_value",
                            next="Leave revision out for the current commit.")
-        try:
-            info = self.api().model_info(repo, revision=revision, files_metadata=with_files, token=self.token_arg())
+        sent: List[Any] = []
+
+        def model_info(token: Any):
+            sent.append(token)
+            return self.api(token).model_info(repo, revision=revision, files_metadata=with_files, token=token)
+        try:  # without the token; with it only when the Hub refused that (a private repository)
+            info = tokenless_first(model_info, self.token())
         except Exception as e:  # noqa: BLE001
             raise self._failed(e, f"The lookup of {repo} failed") from None
         card = getattr(info, "card_data", None)
@@ -324,7 +375,8 @@ class HubClient:
                                 if isinstance(t, str) and t.startswith("license:")), None)
         licence, restrictive = classify_license(raw_licence)
         facts = ModelFacts(repo=repo, commit=str(getattr(info, "sha", "") or ""), license=licence,
-                           license_restrictive=restrictive, gated=gating(getattr(info, "gated", False)))
+                           license_restrictive=restrictive, gated=gating(getattr(info, "gated", False)),
+                           private=getattr(info, "private", False) is True or bool(sent and sent[-1]))
         if licence.lower() == "other" and card is not None:
             facts.license_name = str(card_get("license_name") or "")[:200]
             facts.license_link = str(card_get("license_link") or "")[:500]
@@ -336,13 +388,13 @@ class HubClient:
         for s in siblings[:MAX_FILES]:
             facts.files.append(hub_file(s))
         facts.total_bytes = sum(f.size or 0 for f in facts.files)
-        facts.token_access = self.access(repo, facts.gated)
+        facts.token_access = "yes" if facts.private and facts.gated == "false" else self.access(repo, facts.gated)
         base = card_get("base_model") if card is not None else None
         base = base[0] if isinstance(base, (list, tuple)) and base else base
         if isinstance(base, str) and REPO_ID.match(base) and base != repo:
             facts.base_model = base
             try:
-                base_info = self.api().model_info(base, token=self.token_arg())
+                base_info = tokenless_first(lambda token: self.api(token).model_info(base, token=token), self.token())
                 base_card = getattr(base_info, "card_data", None)
                 base_raw = (base_card.get("license") if hasattr(base_card, "get")
                             else getattr(base_card, "license", None)) if base_card is not None else None
@@ -361,15 +413,19 @@ def _is_hub(url: str) -> bool:
 
 
 class HubFetcher(PinnedDownloader):
-    """One file of one commit, resumable and stoppable. The token goes only into the request to huggingface.co."""
+    """One file of one commit, resumable and stoppable. The token goes only into the request to huggingface.co, and
+    only where Hugging Face needs it: from the first request when the repository is gated or private (`token_needed`,
+    the caller read it from the repository's information: needs_token), otherwise only after the Hub refused a request
+    without it (401/403), then one request with it."""
 
     def __init__(self, token: Optional[str] = None, stop: Optional[threading.Event] = None, session=None,
-                 sleep=None, logger=None):
+                 sleep=None, logger=None, *, token_needed: bool = True):
         kwargs = {"session": session, "logger": logger}
         if sleep is not None:
             kwargs["sleep"] = sleep
         super().__init__(**kwargs)
         self._token = token
+        self._send_token = bool(token) and token_needed
         self.stop = stop or threading.Event()
 
     @staticmethod
@@ -382,9 +438,19 @@ class HubFetcher(PinnedDownloader):
 
     def _request_headers(self, url: str, have: int) -> Dict[str, str]:
         headers = super()._request_headers(url, have)
-        if self._token and urlparse(url).hostname == HUB_HOST:
+        if self._send_token and self._token and urlparse(url).hostname == HUB_HOST:
             headers["Authorization"] = f"Bearer {self._token}"   # never to the file storage a redirect leads to
         return headers
+
+    def _range(self, url: str, part: Path, have: int, size: int, name: str, progress) -> None:
+        """The range download; a refusal (401/403) of a request without the token is asked once more with it."""
+        try:
+            self._download_range(url, part, have, size, name, progress, self.stop)
+        except HubError as e:
+            if e.code != "permission_denied" or self._send_token or not self._token:
+                raise
+            self._send_token = True   # Hugging Face needs it after all: one request with the token
+            self._download_range(url, part, have, size, name, progress, self.stop)
 
     def _check_response(self, r: Any, name: str) -> None:
         if not str(r.url).startswith("https://") or not _is_hub(str(r.url)):
@@ -423,7 +489,7 @@ class HubFetcher(PinnedDownloader):
                 if have == file.size and part.exists():
                     break
                 try:
-                    self._download_range(url, part, have, file.size, file.name, progress, self.stop)
+                    self._range(url, part, have, file.size, file.name, progress)
                     if part.exists() and part.stat().st_size >= file.size:
                         break
                 except _Retry as e:
@@ -442,6 +508,75 @@ class HubFetcher(PinnedDownloader):
                                      + f"; got {actual} bytes, sha256 {digest}). It was deleted and is not used.")
             os.replace(part, dest)
             return dest, digest
+
+
+# --- fastembed's models (DECISIONS round 25 Q2: through the framework's fetcher into fastembed's cache) --------------
+
+def cache_folder(cache_dir: Path, repo: str) -> Path:
+    """`<cache_dir>/models--<owner>--<name>`: where huggingface_hub's cache layout (the one fastembed reads) keeps a
+    repository."""
+    return Path(cache_dir) / f"models--{folder_name(repo)}"
+
+
+def cached_snapshot(cache_dir: Path, repo: str, required: Any) -> Optional[Path]:
+    """The folder of `repo`'s current files in huggingface_hub's cache layout (`refs/main` names the commit, its files in
+    `snapshots/<commit>/`) when every one of `required` is there; None otherwise. Reads only, never asks anybody: also
+    a copy fastembed downloaded itself is found."""
+    storage = cache_folder(cache_dir, repo)
+    try:
+        commit = (storage / "refs" / "main").read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError):
+        return None
+    if not COMMIT.match(commit):
+        return None
+    folder = storage / "snapshots" / commit
+    names = list(required)
+    return folder if names and all(safe_filename(n) and (folder / n).is_file() for n in names) else None
+
+
+def fetch_snapshot(cache_dir: Path, repo: str, required: Any, optional: Any = (), *, offline: bool = False,
+                   stop: Optional[threading.Event] = None, api: Any = None, fetcher: Any = None) -> Optional[Path]:
+    """The files fastembed loads for one model, in fastembed's cache (huggingface_hub's layout, so a copy fastembed
+    downloaded itself is used as it is): the folder holding `required` (the model file and its extra files) and those
+    of `optional` (config and tokenizer files) the repository has. A model already there is used without asking
+    anybody; in offline mode only that (None when it is not there: the caller says the model is not on this computer).
+    Otherwise it is fetched like every Hugging Face download of the framework: the repository's current commit looked
+    up on huggingface.co (hub_api, never the host in HF_ENDPOINT), each file through HubFetcher (resumable, checked
+    against the Hub's size and sha256 before it gets its name), without any token: fastembed's models are public, and a
+    gated or private repository is refused here. HubError (and the fetcher's errors) when it cannot be done.
+    `api` (a factory per token) and `fetcher` stand in for the Hub in tests."""
+    required = [str(n) for n in required]
+    found = cached_snapshot(cache_dir, repo, required)
+    if found is not None or offline:
+        return found
+    if not REPO_ID.match(repo or "") or not all(safe_filename(n) for n in required):
+        raise HubError(f"'{repo}' cannot be fetched as a model of the knowledge base.", code="invalid_value")
+    try:
+        info = _api_for(api or hub_api)(False).model_info(repo, files_metadata=True, token=False)
+    except Exception as e:  # noqa: BLE001 - every failure is the caller's error message
+        raise hub_error(e, f"The lookup of {repo} failed", False) from None
+    commit = str(getattr(info, "sha", "") or "")
+    if not COMMIT.match(commit):
+        raise HubError(f"The commit of {repo} could not be found out on Hugging Face; nothing was downloaded.")
+    if needs_token(info):
+        raise HubError(f"{repo} is gated or private; the knowledge base's models are downloaded only from public "
+                       "repositories, without a token.", code="not_supported")
+    files = {f.name: f for f in (hub_file(s) for s in getattr(info, "siblings", None) or [])}
+    missing = [n for n in required if n not in files]
+    if missing:
+        raise HubError(f"{repo} has no file {missing[0]} at commit {commit[:12]}; nothing was downloaded.",
+                       code="unknown_id")
+    names = required + [str(n) for n in optional if str(n) in files and str(n) not in required and safe_filename(n)]
+    folder = cache_folder(cache_dir, repo) / "snapshots" / commit
+    fetcher = fetcher or HubFetcher(stop=stop)
+    for name in names:
+        fetcher.fetch_file(repo, commit, files[name], folder / name)
+    refs = cache_folder(cache_dir, repo) / "refs"
+    refs.mkdir(parents=True, exist_ok=True)
+    temporary = refs / ".main.tmp"
+    temporary.write_text(commit, encoding="utf-8")
+    os.replace(temporary, refs / "main")
+    return folder
 
 
 # --- disk space ----------------------------------------------------------------------------------------------------
@@ -527,17 +662,38 @@ def reserve_space(ledger: Any, folder: Path, size: int, owner: str, label: str, 
 
 # --- the person's own download (the GUI's Hugging Face browser, DECISIONS round 11 A6) -------------------------------
 
+def _api_for(api: Any) -> Callable[[Any], Any]:
+    """`api` as a factory of the Hub's API per token: a factory as it is, an API object (a test's stand-in) for every
+    token (each call names its token, so the object's own does not decide)."""
+    return api if callable(api) and not hasattr(api, "model_info") else (lambda _token: api)
+
+
 def file_at_commit(api: Any, repo: str, filename: str, token: Any = False,
                    revision: Optional[str] = None) -> Tuple[str, HubFile]:
     """The commit (`revision`, else the current one) of `repo` and its file `filename` with the size and LFS sha256 the
-    Hub lists for that commit: what HubFetcher checks the download against. `token`: the person's token or False (never
-    an implicit one). HubError when the repository, the commit or the file is not there or the Hub lists no size."""
+    Hub lists for that commit: what HubFetcher checks the download against. `api`: the Hub's API, or a factory of it
+    per token (hub_api); `token`: the person's token or False (never an implicit one), sent only when the Hub refuses
+    the look-up without it. HubError when the repository, the commit or the file is not there or the Hub lists no
+    size."""
+    commit, file, _needed = repository_file(api, repo, filename, token, revision)
+    return commit, file
+
+
+def repository_file(api: Any, repo: str, filename: str, token: Any = False,
+                    revision: Optional[str] = None) -> Tuple[str, HubFile, bool]:
+    """file_at_commit and whether Hugging Face needs the token for the file (the repository is gated or private:
+    needs_token, or the look-up was refused without the token)."""
     if not REPO_ID.match(repo or ""):
         raise HubError(f"'{repo}' is not a Hugging Face repository id (owner/name).", code="invalid_value")
     if not safe_filename(filename):
         raise HubError("That file name cannot be used as a file on this computer.", code="invalid_value")
+    api_for, sent = _api_for(api), []
+
+    def model_info(t: Any):
+        sent.append(t)
+        return api_for(t).model_info(repo, revision=revision, files_metadata=True, token=t)
     try:
-        info = api.model_info(repo, revision=revision, files_metadata=True, token=token)
+        info = tokenless_first(model_info, token or None)
     except Exception as e:  # noqa: BLE001 - every failure is the person's error message
         raise hub_error(e, f"The lookup of {repo} failed", bool(token)) from None
     commit = str(getattr(info, "sha", "") or "")
@@ -548,7 +704,7 @@ def file_at_commit(api: Any, repo: str, filename: str, token: Any = False,
         raise HubError(f"{repo} has no file '{filename}' at commit {commit[:12]}.", code="unknown_id")
     if file.size is None:
         raise HubError(f"Hugging Face lists no size for {filename}; it is not downloaded.", code="invalid_value")
-    return commit, file
+    return commit, file, needs_token(info) or bool(sent and sent[-1])
 
 
 def download_for_person(models_dir: Path, repo: str, filename: str, *, api: Any, token: Optional[str] = None,
@@ -562,9 +718,11 @@ def download_for_person(models_dir: Path, repo: str, filename: str, *, api: Any,
     first (Core/disk_plan room with the reserve and what other calls reserved in `ledger`): disk_plan.InsufficientSpace
     with its checks when the file does not fit, so the window shows disk_plan.person_reason in the person's language.
     While it runs the download holds its own reservation in the ledger (released when it ends, fails or stops), so a
-    build or another download started meanwhile counts its space. Returns the file's path."""
+    build or another download started meanwhile counts its space. `api`: the Hub's API or a factory of it per token
+    (hub_api); `token` (typed or stored) goes only where Hugging Face needs it (repository_file, HubFetcher's
+    token_needed). Returns the file's path."""
     from orchestrator.Core.disk_plan import refusal, room
-    commit, file = file_at_commit(api, repo, filename, token or False)
+    commit, file, needed = repository_file(api, repo, filename, token or False)
     dest = download_path(models_dir, repo, commit, filename)
     part = dest.with_name(dest.name + ".part")
     try:
@@ -584,8 +742,8 @@ def download_for_person(models_dir: Path, repo: str, filename: str, *, api: Any,
     reservation = reserve_space(ledger, Path(models_dir), need, owner, f"{repo}/{filename}", need_label="models",
                                 what=what, key=f"{repo}/{commit}/{filename}", disk_usage=disk_usage)
     try:
-        path, _digest = HubFetcher(token=token or None, stop=stop).fetch_file(repo, commit, file, dest,
-                                                                              progress=progress)
+        fetcher = HubFetcher(token=token or None, stop=stop, token_needed=needed)
+        path, _digest = fetcher.fetch_file(repo, commit, file, dest, progress=progress)
     finally:
         reservation.release()
     return path
