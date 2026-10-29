@@ -707,6 +707,121 @@ def test_nothing_of_the_old_blueprint_is_lost(index):
     assert not problems, "\n  ".join(problems)
 
 
+# --- (3c) The blueprint is scrubbed, and every component of the design has its decisions (DECISIONS round 35) ------
+
+BLUEPRINT_TEXTS = [rel for pair in BLUEPRINT_FILES for rel in pair]
+# Addresses that may appear: the documentation ranges (RFC 5737, RFC 3849) and the well-known special addresses; a
+# range written with its prefix (10.0.0.0/8) names a class of addresses, not a host. Public resolvers are named
+# where the text explains that the framework no longer contacts them.
+DOC_NETWORKS = ["192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32"]
+WELL_KNOWN_ADDRESSES = {"8.8.8.8", "1.1.1.1"}
+# Account names in home paths that are no person's: defaults of CI runners and board images, the framework's own
+# account, and placeholders.
+DEFAULT_ACCOUNTS = {"runner", "pi", "dietpi", "ubuntu", "llmcf", "...", "<name>", "<user>"}
+# E-mail addresses the project lists itself (none today).
+PROJECT_EMAILS: Set[str] = set()
+_V4 = re.compile(r"(?<![\w.])(\d{1,3}(?:\.\d{1,3}){3})(/\d{1,2})?(?![\w.]*\d)")
+_V6 = re.compile(r"(?<![\w:.])((?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4})(/\d{1,3})?(?![\w:])")
+_MAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}")
+_HOME = re.compile(r"/home/([^/\s`)\]]+)|[A-Za-z]:\\\\?Users\\\\?([^\\\s`)\]]+)")
+
+
+def scrub_findings(text: str) -> List[str]:
+    """What in a text looks like private data: a host address, an e-mail address, a person's home folder or a
+    secret (the patterns of the repository's secret scan)."""
+    import ipaddress
+
+    from orchestrator.security.secret_patterns import find_secrets
+    networks = [ipaddress.ip_network(n) for n in DOC_NETWORKS]
+    found = []
+    for number, line in enumerate(text.splitlines(), 1):
+        for pattern in (_V4, _V6):
+            for m in pattern.finditer(line):
+                try:
+                    address = ipaddress.ip_address(m.group(1))
+                except ValueError:
+                    continue
+                if m.group(2) or str(address) in WELL_KNOWN_ADDRESSES or any(address in n for n in networks if
+                                                                             n.version == address.version):
+                    continue
+                if address.is_loopback or address.is_unspecified or address.is_link_local or address.is_multicast:
+                    continue
+                found.append(f"{number}: address {m.group(1)}")
+        found += [f"{number}: e-mail {m.group(0)}" for m in _MAIL.finditer(line) if m.group(0) not in PROJECT_EMAILS]
+        for m in _HOME.finditer(line):
+            account = m.group(1) or m.group(2)
+            if account not in DEFAULT_ACCOUNTS and not account.startswith(("<", "$", "%")):
+                found.append(f"{number}: home folder {m.group(0)}")
+        found += [f"{number}: {kind}" for kind, _ in find_secrets(line)]
+    return found
+
+
+@pytest.mark.parametrize("rel", BLUEPRINT_TEXTS)
+def test_the_blueprint_holds_no_private_data(rel):
+    """The design, roadmap and changelog are public: no host address outside the documentation ranges, no e-mail
+    address, no person's home folder and no token-like string."""
+    found = scrub_findings(_read(rel))
+    assert not found, f"{rel}:\n  " + "\n  ".join(found[:20])
+
+
+def test_the_scrub_finds_private_data():
+    text = ("board at 192.168.1.20\nmail me: someone@example.org\nsee /home/alice/models\n"
+            "C:\\Users\\bob\\llmcf\nkey ghp_" + "a" * 36 + "\n")
+    found = " ".join(scrub_findings(text))
+    for part in ("192.168.1.20", "someone@example.org", "/home/alice", "bob"):
+        assert part in found, part
+    kept = "doc address 192.0.2.10, range 100.64.0.0/10, loopback 127.0.0.1, ::1, fe80::1, /home/<name>, /home/llmcf"
+    assert scrub_findings(kept) == []
+
+
+COMPONENT_SECTIONS = {"docs/DESIGN.md": ("components-and-decisions", "#### Decisions", "| What | How | Why |"),
+                      "docs/DESIGN_DE.md": ("bausteine-und-entscheidungen", "#### Entscheidungen",
+                                            "| Was | Wie | Warum |")}
+
+
+def design_components(rel: str) -> List[Tuple[str, int]]:
+    """(component, number of decision rows) for every component of the design's chapter of components."""
+    section, block, head = COMPONENT_SECTIONS[rel]
+    lines = section_lines(rel, section)
+    out: List[Tuple[str, int]] = []
+    in_block = False
+    for line in lines:
+        if line.startswith("### "):
+            out.append((line[4:].strip(), -1))
+            in_block = False
+        elif out and line.strip() == block:
+            out[-1] = (out[-1][0], 0)
+            in_block = True
+        elif in_block and line.startswith("| ") and line.strip() != head and not set(line.strip()) <= set("|-"):
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if len(cells) == 3 and all(cells):
+                out[-1] = (out[-1][0], out[-1][1] + 1)
+        elif in_block and line.strip() and not line.startswith("|"):
+            in_block = False
+    return out
+
+
+@pytest.mark.parametrize("rel", sorted(COMPONENT_SECTIONS))
+def test_every_design_component_has_its_decisions(rel):
+    """Every component of the design has a decisions block whose rows say what, how and why."""
+    components = design_components(rel)
+    assert len(components) >= 10, f"{rel}: the chapter of components is missing or nearly empty"
+    without = [name for name, rows in components if rows < 1]
+    assert not without, f"{rel}: components without a decisions table (what, how, why): {without}"
+
+
+def test_the_design_components_match_in_both_languages():
+    english = design_components("docs/DESIGN.md")
+    german = design_components("docs/DESIGN_DE.md")
+    assert [rows for _, rows in english] == [rows for _, rows in german], \
+        f"the two designs differ in their components or decisions: {english} / {german}"
+
+
+def test_the_design_says_where_the_decisions_log_is():
+    for rel, phrase in (("docs/DESIGN.md", "outside the repository"), ("docs/DESIGN_DE.md", "außerhalb des Repositorys")):
+        assert phrase in " ".join(_read(rel).split()), f"{rel} must say that the decisions log lives outside the repo"
+
+
 # --- (4) One version everywhere -----------------------------------------------------------------------------
 
 @pytest.mark.parametrize("changelog", ["CHANGELOG.md", "CHANGELOG_DE.md"])
