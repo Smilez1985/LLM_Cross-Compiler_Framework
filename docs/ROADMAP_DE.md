@@ -29,11 +29,10 @@ der Entscheidungen des Maintainers, aus der sie stammt.
 
 ## 3.2.0 - Dittos Kontext, das Board-Bündel, die Laufzeit auf dem Gerät und mehr Hardware (in Arbeit)
 
-Hier landet Stapel 3 der Arbeit, in der Reihenfolge seiner Wellen: zuerst Dittos Kontext, daneben das
-Board-Bündel, dann das Gateway, Sprache und MCP auf dem Board. Die erste Hardware setzt die Prioritäten für die
-Laufzeit auf dem Gerät: RK3566-Boards (etwa ein RK3566-Board mit 4-8 GB), NVIDIA-RTX-GPUs und der AMD Ryzen Z1
-Extreme, unter Windows und Linux. Die Rezepte kommen dort zuerst; die Rotationsstufe und das allgemeine ARM64-Target
-folgen direkt danach.
+Diese Version kommt in dieser Reihenfolge: zuerst Dittos Kontext, daneben das Board-Bündel, dann das Gateway,
+Sprache und MCP auf dem Board. Die erste Hardware setzt die Prioritäten für die Laufzeit auf dem Gerät:
+RK3566-Boards, NVIDIA-RTX-GPUs und der AMD Ryzen Z1 Extreme, unter Windows und Linux. Die Rezepte kommen dort
+zuerst; die Rotationsstufe und das allgemeine ARM64-Target folgen direkt danach.
 
 ### Aus 3.1.0 übernommen
 
