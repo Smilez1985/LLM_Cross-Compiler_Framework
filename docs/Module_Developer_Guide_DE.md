@@ -1,4 +1,4 @@
-Version 3.0.0 + unveröffentlichte Änderungen · Stand 2026-10-11
+Version 3.1.0 · Stand 2026-10-29
 
 [English](Module_Developer_Guide.md) · **Deutsch**
 
@@ -277,7 +277,7 @@ Auf deinem Computer wird der Schnappschuss nicht importiert: seine Seiten sind s
 Exportierst du das Target als Paket, reist der Schnappschuss mit, und das Framework des Empfängers prüft ihn bei der
 Installation wie ein Wissenspaket (eine Liste von Seiten, jede mit ihrer Quelle, und seine Lizenzdateien) und
 importiert ihn unter diesem Target in dessen Wissensbasis, mit einem Snapshot dieser Wissensbasis vorher; eine neuere
-Version deines Target-Pakets ersetzt dort die Auszüge der älteren (unveröffentlicht, DECISIONS Runde 23 Punkt 8).
+Version deines Target-Pakets ersetzt dort die Auszüge der älteren (DECISIONS Runde 23 Punkt 8).
 
 Das Ergebnis ist ein **Gerüst**, noch kein funktionierendes Target:
 

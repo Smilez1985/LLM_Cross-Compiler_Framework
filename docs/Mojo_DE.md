@@ -1,4 +1,4 @@
-Version 3.0.0 plus die [unveröffentlichten Änderungen](../CHANGELOG_DE.md#unreleased) · Zuletzt aktualisiert am 2026-10-16
+Version 3.1.0 · Stand 2026-10-29
 
 [English](Mojo.md) · **Deutsch**
 
@@ -61,7 +61,7 @@ wenig `--json`, ein Lauf ohne Terminal, die KI-Tools oder die GUI. Der offene Or
 Notiz neben der Sperre von Mojo Miracle in deinem persönlichen Ordner (`mojo/oracle_open.json`, ohne Pfad und ohne
 Kontonamen darin); jeder Lauf von Mojo Miracle im Terminal entfernt sie an seinem Ende.
 
-In der GUI (unveröffentlicht): **Tools > Mojo-Gesundheitscheck...** startet Mojo Oracle beim Öffnen des Fensters und
+In der GUI: **Tools > Mojo-Gesundheitscheck...** startet Mojo Oracle beim Öffnen des Fensters und
 zeigt dieselben Befunde mit einer Gesamtzeile für den Exit-Code; **Mojo Miracle ausführen...** stellt dieselbe Frage
 (Nein ist die Vorgabe), öffnet die Build-Images des Frameworks im Löschdialog und zeigt, was repariert wurde, was nicht
 und warum. Fenster und Befehl rufen dieselben Funktionen auf.

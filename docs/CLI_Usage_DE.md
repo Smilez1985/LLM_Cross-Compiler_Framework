@@ -1,4 +1,4 @@
-Version 3.0.0 plus die [unveröffentlichten Änderungen](../CHANGELOG_DE.md) · Zuletzt aktualisiert am 2026-10-17
+Version 3.1.0 · Stand 2026-10-29
 
 [English](CLI_Usage.md) · **Deutsch**
 
@@ -54,7 +54,7 @@ Ordner auf oder setze `PYTHONPATH`. Unter Linux funktioniert dieser Alias aus je
 alias llm-cli='PYTHONPATH=/opt/llm-cross-compiler-framework /opt/llm-cross-compiler-framework/.venv/bin/python -m orchestrator.cli'
 ```
 
-Die Beispiele unten verwenden `llm-cli`. `llmcf` ist dasselbe Programm unter seinem neuen Namen (unveröffentlicht):
+Die Beispiele unten verwenden `llm-cli`. `llmcf` ist dasselbe Programm unter seinem neuen Namen:
 Die Entwicklungsumgebung und der Framework-Container haben beide Befehle, und `llmcf mojo` tut genau dasselbe wie
 `llm-cli mojo`.
 
@@ -120,17 +120,17 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 
 | Befehl | Was er tut |
 |---|---|
-| `mojo` | Die Installation prüfen (Mojo Oracle) und reparieren, was sich sicher reparieren lässt (Mojo Miracle) (unveröffentlicht) |
+| `mojo` | Die Installation prüfen (Mojo Oracle) und reparieren, was sich sicher reparieren lässt (Mojo Miracle) |
 | `doctor` | Der alte Name von `mojo`, mit seinen Optionen aus 3.0.0 |
-| `knowledge snapshots` | Die Snapshots der Wissensbasis mit vollem Pfad, Namen, Größe und was jeder ist auflisten; die ausgewählten löschen oder exportieren (unveröffentlicht) |
-| `knowledge index-docs` | Die eigene Dokumentation des Frameworks (und mit `--with-code` seinen Code) in die Wissensbasis aufnehmen (unveröffentlicht) |
-| `knowledge storage` | Wo die Wissensbasis liegt (Qdrant Edge), die Umwandlung einer älteren und ihr alter Ordner: `convert`, `delete-old` (unveröffentlicht) |
-| `knowledge loose` / `knowledge sort` | Die losen Wissensdateien auflisten / eine nach den Paketprüfungen und deiner Bestätigung in einen Themen- oder Target-Ordner einsortieren und importieren (unveröffentlicht) |
-| `trash list` / `restore` / `empty` | Was Löschungen in den Papierkorb verschoben haben; Einträge zurücklegen; die ausgewählten endgültig löschen (unveröffentlicht) |
-| `models take-over` | Was frühere Versionen des Hugging-Face-Browsers im Hugging-Face-Cache gespeichert haben, in den Modellordner kopieren, jede Datei geprüft, und danach das Entfernen der alten Kopien anbieten (unveröffentlicht) |
+| `knowledge snapshots` | Die Snapshots der Wissensbasis mit vollem Pfad, Namen, Größe und was jeder ist auflisten; die ausgewählten löschen oder exportieren |
+| `knowledge index-docs` | Die eigene Dokumentation des Frameworks (und mit `--with-code` seinen Code) in die Wissensbasis aufnehmen |
+| `knowledge storage` | Wo die Wissensbasis liegt (Qdrant Edge), die Umwandlung einer älteren und ihr alter Ordner: `convert`, `delete-old` |
+| `knowledge loose` / `knowledge sort` | Die losen Wissensdateien auflisten / eine nach den Paketprüfungen und deiner Bestätigung in einen Themen- oder Target-Ordner einsortieren und importieren |
+| `trash list` / `restore` / `empty` | Was Löschungen in den Papierkorb verschoben haben; Einträge zurücklegen; die ausgewählten endgültig löschen |
+| `models take-over` | Was frühere Versionen des Hugging-Face-Browsers im Hugging-Face-Cache gespeichert haben, in den Modellordner kopieren, jede Datei geprüft, und danach das Entfernen der alten Kopien anbieten |
 | `targets list` / `targets validate` | Hardware-Targets mit ihren Boards und Formaten auflisten / prüfen, ob ein Target lädt und seine Capabilities gültig sind |
 | `build start` / `build status` | Ein Modell konvertieren und quantisieren / Builds zeigen, auch solche, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat |
-| `build save` | Einen Build, der im Build-Ordner des Frameworks wartet, im Ausgabeordner oder einem anderen Ordner speichern (unveröffentlicht) |
+| `build save` | Einen Build, der im Build-Ordner des Frameworks wartet, im Ausgabeordner oder einem anderen Ordner speichern |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | Fertige Builds auflisten / einen Build in eine ZIP-Datei packen / sie auf ein Board laden und installieren |
 | `deploy ssh-config show/edit/import` | Die eigene OpenSSH-Einstellungsdatei des Frameworks (gelesen statt `~/.ssh/config`): zeigen, den Block eines Boards setzen, einen Block aus `~/.ssh/config` übernehmen |
 | `ditto login` / `ditto logout` | Ditto bei einem Anbieter anmelden (der Schlüssel verdeckt abgefragt, von stdin oder aus einer Umgebungsvariable, vor dem Speichern geprüft) / abmelden |
@@ -150,8 +150,8 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `device list` / `device settings` | Die untersuchten Boards / wie die Laufzeit auf einem Board installiert wird (Startskript oder systemd), vor einem Deployment entschieden |
 | `device runtime plan/build/deploy/verify/status` | Die selbst gebaute llama.cpp-Laufzeit eines Boards: aus seinem Profil planen, cross-kompilieren, per SSH installieren und dort prüfen |
 | `config show` / `config repos` | Die wirksamen Einstellungen und ihre Herkunft zeigen / Überschreibungen für Quell-Repositorys verwalten |
-| `config local-network` | Was der Offline-Modus als lokal zählt, und was du selbst als lokal zählst (ein VPN, ein Host, ein Adressbereich) (unveröffentlicht) |
-| `config output-folder` | Den Ausgabeordner zeigen oder festlegen, in dem fertige Modelle gespeichert werden (unveröffentlicht) |
+| `config local-network` | Was der Offline-Modus als lokal zählt, und was du selbst als lokal zählst (ein VPN, ein Host, ein Adressbereich) |
+| `config output-folder` | Den Ausgabeordner zeigen oder festlegen, in dem fertige Modelle gespeichert werden |
 | `zoo list` / `zoo show` | Den Community-Zoo und die installierten Pakete auflisten / einen Eintrag zeigen |
 | `zoo install` / `zoo verify` | Ein Community-Paket nach Prüfungen und deiner Bestätigung installieren / installierte Pakete oder eine Paketdatei prüfen |
 | `zoo export` / `zoo keys` | Ein signiertes Paket aus deinem Target, Build oder deiner Wissensbasis machen (und einen Pull-Request öffnen) / deine öffentlichen Schlüssel zeigen |
@@ -165,7 +165,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 llm-cli mojo [--oracle | --miracle] [--json] [--board NAME]
 ```
 
-Der Gesundheitscheck (unveröffentlicht; er hieß `doctor`). **Mojo Oracle** (Standard) schaut nur: Es prüft Python, den
+Der Gesundheitscheck (er hieß `doctor`). **Mojo Oracle** (Standard) schaut nur: Es prüft Python, den
 Docker-Daemon und buildx, den freien Speicherplatz für den Cache-, den Ausgabe- und den Build-Ordner, die Targets und
 ihre Capabilities, ob der persönliche Ordner privat ist, den Secrets-Speicher und den Schlüsselbund, die
 Tool-Berechtigungen, die MCP-Token, das Audit-Log, den Chat-Verlauf (er lässt sich schreiben, seine neuesten Einträge
@@ -250,7 +250,7 @@ stderr nennt `llmcf mojo`.
 | Option | Bedeutung |
 |---|---|
 | `--json` | Maschinenlesbare Ausgabe (Befunde, Korrekturen, Exit-Code). Mit `--fix --tier 2` listet sie auch die Build-Images des Frameworks und wo Docker sie ablegt (`framework_images`), löscht sie aber nie. |
-| `--fix` | Die automatischen Korrekturen bis `--tier` anwenden, dann erneut prüfen. Das sind die harmlosen, protokollierten Reparaturen von Mojo Miracle (unveröffentlicht); ein Problem, das noch da ist, wird mit dem Grund gezeigt. |
+| `--fix` | Die automatischen Korrekturen bis `--tier` anwenden, dann erneut prüfen. Das sind die harmlosen, protokollierten Reparaturen von Mojo Miracle; ein Problem, das noch da ist, wird mit dem Grund gezeigt. |
 | `--tier INTEGER RANGE` | `1` (Standard): harmlose Korrekturen (macht den persönlichen Ordner privat). `2`: listet auch jedes Build-Image des Frameworks (die ohne Namen aus früheren Builds, die benannten Images `llm-framework/<Target>:last-build` und die Builder-Images der Laufzeit; Name, Image-ID, Größe und was jedes ist), nichts ausgewählt. Du gibst die Nummern der zu löschenden ein und bestätigst genau diese im Terminal (die Vorgabe ist Nein). Ohne Terminal (eine Pipe, ein Skript, eine KI-App) listet es sie nur. **Tools > Framework Build Images...** in der GUI ist dieselbe Liste. Der Docker-Build-Cache wird nie geleert: Er lässt sich nicht auf das Framework beschränken. |
 
 ```bash
@@ -275,7 +275,7 @@ llm-cli knowledge snapshots delete NAME...
 llm-cli knowledge snapshots export NAME... --to ORDNER
 ```
 
-Unveröffentlicht. Vor jedem Deep Ingest, jeder Aufnahme der eigenen Dokumente des Frameworks (`knowledge index-docs`),
+Vor jedem Deep Ingest, jeder Aufnahme der eigenen Dokumente des Frameworks (`knowledge index-docs`),
 jeder Wiederherstellung und jedem Import eines Wissens-Packs wird die Wissensbasis als Snapshot in
 `knowledge_snapshots/` des persönlichen Ordners gesichert, damit sich die Änderung rückgängig machen lässt. Bevor ein
 Snapshot angelegt wird, wird seine Größe geschätzt: passt er nicht auf die Platte (neben der Reserve, die immer frei
@@ -317,7 +317,7 @@ llm-cli knowledge snapshots export pre_ingest_20261001_101500 --to /media/usb/ba
 llm-cli knowledge index-docs [--with-code]
 ```
 
-Unveröffentlicht. Nimmt die eigene Dokumentation des Frameworks (README, CONTRIBUTING und den Ordner `docs`, in beiden
+Nimmt die eigene Dokumentation des Frameworks (README, CONTRIBUTING und den Ordner `docs`, in beiden
 Sprachen) in die Wissensbasis auf, damit Ditto Fragen zum Framework selbst beantworten kann und KI-Clients sie mit
 `search_knowledge` (Art `docs`) finden. `--with-code` nimmt auch Code und Konfiguration auf (viel mehr Dateien, dauert
 Minuten): die Shell-Skripte im obersten Ordner der Installation (`install.sh`, `entrypoint.sh`; nicht `install.bat`),
@@ -350,7 +350,7 @@ llm-cli knowledge index-docs --with-code
 llm-cli knowledge sources [--kind web|pack|docs|other|any] [--topic NAME]
 ```
 
-Unveröffentlicht. Listet, was die Wissensbasis enthält: jede Quelle mit ihrer Art, der Lizenz, die sie nennt (eine
+Listet, was die Wissensbasis enthält: jede Quelle mit ihrer Art, der Lizenz, die sie nennt (eine
 SPDX-ähnliche ID wie `CC-BY-4.0`, `other` für eine, die das Framework nicht erkennt, `-` für keine), ihrem
 Urheberrechtshinweis und dem, was ein Wissenspaket von ihr enthielte, und warum: **full text** (ihre Lizenz erlaubt
 die Weitergabe des Textes), **link and short facts** (ein Urheberrechtshinweis ohne eine solche Lizenz, Code ohne
@@ -376,7 +376,7 @@ llm-cli knowledge loose
 llm-cli knowledge sort NAME --topic NAME | --target NAME
 ```
 
-Unveröffentlicht. Wissen gehört immer zu einem Thema oder einem Target. Ein installiertes Wissenspaket liegt im Ordner
+Wissen gehört immer zu einem Thema oder einem Target. Ein installiertes Wissenspaket liegt im Ordner
 seines Themas oder Targets, `community/knowledge/<Thema oder Target>/<Paket>/`, und eine lose Wissensdatei wird nie
 importiert: eine `.json`-Datei direkt in `community/knowledge/` oder in einem Themenordner, oder eine `knowledge.json`
 in einem Ordner ohne die `.lcf-provenance.json` des Pakets. `knowledge loose` listet sie (Mojo nennt sie auch).
@@ -407,7 +407,7 @@ llm-cli knowledge storage convert
 llm-cli knowledge storage delete-old
 ```
 
-Unveröffentlicht. Die Wissensbasis liegt in Qdrant Edge (`~/.llm-framework/qdrant_edge`). Eine Wissensbasis einer
+Die Wissensbasis liegt in Qdrant Edge (`~/.llm-framework/qdrant_edge`). Eine Wissensbasis einer
 früheren Version (`~/.llm-framework/qdrant`) wird bei ihrer ersten Nutzung umgewandelt; Vektoren und Texte werden
 kopiert und geprüft, nichts wird neu eingebettet. `show` (die Vorgabe) liest den Eintrag dieser Umwandlung und öffnet
 nichts: wann sie umgewandelt wurde, wie viele Auszüge, und den alten Ordner mit vollem Pfad und Größe; oder, wenn die
@@ -591,7 +591,7 @@ llm-cli build start -m ./my-model -t Rockchip -o ./builds -F
 llm-cli build save ARTIFACT [--to ORDNER]
 ```
 
-Unveröffentlicht. Speichert einen fertigen Build, der im Build-Ordner des Frameworks wartet (ein GUI-Build, den du nicht
+Speichert einen fertigen Build, der im Build-Ordner des Frameworks wartet (ein GUI-Build, den du nicht
 gespeichert hast, oder `build start -o -`), genau wie **Speichern…** im Tab „Deployment“ der GUI. `ARTIFACT` ist sein
 Ordner, wie ihn `deploy list-artifacts` zeigt (`Rockchip/SmolLM2-135M-Instruct/Q4_0`), sein voller Pfad oder seine ID
 (`a_...`). Ohne `--to` kommt er in den Ausgabeordner; an einem Terminal wirst du gefragt, mit dem Ausgabeordner als
@@ -1360,7 +1360,7 @@ Name nicht so endet).
 llm-cli ditto runtime prune
 ```
 
-Listet die alten Builds von Dittos Server mit je einer Nummer (unveröffentlicht): ältere selbst gebaute Builds und
+Listet die alten Builds von Dittos Server mit je einer Nummer: ältere selbst gebaute Builds und
 Installationen des vorgebauten Archivs einer anderen llama.cpp-Version, jeweils mit vollem Pfad, Größe und was es
 ist. Nichts ist ausgewählt. Du gibst die Nummern der zu löschenden ein, wählst den Papierkorb (Standard) oder
 endgültiges Löschen und bestätigst genau diese (Standard: nein). Das braucht ein Terminal; ohne eines wird nur
@@ -1516,7 +1516,7 @@ Die Tools des Frameworks sind das, was Ditto und MCP-Clients verwenden: 16 nur l
 etwas ändern (`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`, `propose_healing_fix`,
 `download_hf_file`, `create_deploy_package`, `run_mojo_miracle`), und `deploy_to_device`, das ein Gerät erreicht, dem
 du vertraust (Stufe `external`: immer mit Frage). `run_doctor`, der Name von `run_mojo_oracle` in 3.0.0, bleibt
-aufrufbar, wird aber nicht aufgelistet (unveröffentlicht). `gui` (unveröffentlicht) liest und füllt das offene
+aufrufbar, wird aber nicht aufgelistet. `gui` liest und füllt das offene
 Framework-Fenster (Stufe `local_write`; seine lesenden Aktionen `read_form`, `wizard_state` und `show_window` werden
 wie Lese-Tools entschieden, und deine Einstellung für `gui` gilt für alle seine Aktionen; siehe
 [Funktionen](Features_DE.md)).
@@ -1718,7 +1718,7 @@ Tools ohne Nachfrage, alles andere fragt (kann der Client nicht fragen, wartet d
 [tools approvals](#tools-approvals)).
 
 Solange das Framework-Fenster (die GUI) offen ist, erreicht das Tool `gui` seine Formulare über eine private Brücke,
-die nur dein Konto nutzen kann (unveröffentlicht): Der Client liest und füllt sie wie Ditto, und jedes Feld, das er
+die nur dein Konto nutzen kann: Der Client liest und füllt sie wie Ditto, und jedes Feld, das er
 ausfüllt, wird mit dem Namen seines MCP-Tokens oder mit dem Namen markiert, den der Client sich selbst gibt. Ist kein
 Framework-Fenster offen, antwortet `gui` mit dem Blocker `gui_not_open` („Das Framework-Fenster öffnen.“). Dafür musst
 du nichts einrichten.
@@ -2124,7 +2124,7 @@ den Bauplan im Builder-Container ohne Netz (`--jobs` setzt die parallelen Jobs; 
 Speicher), prüft das Format der Programme auf deinem PC und packt den Tarball nach
 `~/.llm-framework/runtime/llama.cpp/device/<ID>/llama-runtime-<Arch>-<Build-ID>.tar.gz`. Ein schon abgelegter Build
 wird nur neu gepackt. Exit-Code 1, wenn Docker nicht antwortet, der Build scheitert oder seine Prüfungen scheitern.
-Ältere Pakete des Geräts bleiben (unveröffentlicht; vorher entfernte ein Build oder ein Deployment sie); die Ausgabe
+Ältere Pakete des Geräts bleiben (vorher entfernte ein Build oder ein Deployment sie); die Ausgabe
 sagt, wie viele, und `device runtime prune` listet sie, damit du sie löschst.
 
 In der GUI: **Boards > Boards und Geräte...** **> Laufzeit bauen...** (parallele Jobs, ein Quell-Spiegel und dieselbe Frage nach dem
@@ -2155,7 +2155,7 @@ aus `--user`.
    `llama-bench`-Lauf mit diesem Modell.
 5. Nur ein Build, der besteht, wird zu `current`. Ein Build, der scheitert (zum Beispiel mit `SIGILL`, weil die
    CPU-Grundlage nicht zum Board passt), wird wieder entfernt, der vorige Build bleibt aktiv, und sonst ändert sich
-   nichts. Nach dem Umschalten bleibt jeder ältere Build auf dem Board (unveröffentlicht; vorher wurden alle außer
+   nichts. Nach dem Umschalten bleibt jeder ältere Build auf dem Board (vorher wurden alle außer
    dem vorigen ohne Frage entfernt). Die Ausgabe sagt, wie viele geblieben sind und wie groß sie sind;
    `device runtime prune GERÄT --on-device` listet sie, damit du sie entfernst.
 6. Mit der systemd-Einstellung wird die Unit `llm-llama-server.service` mit `sudo -n` geschrieben und aktiviert und
@@ -2285,7 +2285,7 @@ In der GUI: **Datei > Einstellungen…**, Tab **Wirksame Einstellungen** (nur le
 llm-cli config output-folder [ORDNER]
 ```
 
-Unveröffentlicht. Ohne `ORDNER` zeigt es den Ausgabeordner (Einstellung `output_dir`, Standard `~/llmcf/output`) und
+Ohne `ORDNER` zeigt es den Ausgabeordner (Einstellung `output_dir`, Standard `~/llmcf/output`) und
 den Build-Ordner des Frameworks (Einstellung `build_dir`). Mit `ORDNER` legt es den Ausgabeordner fest und speichert
 `config.yml`, zum Beispiel auf einen Ordner auf einer großen zweiten Platte; der Ordner wird angelegt, wenn es ihn
 noch nicht gibt. Ein Systemordner, der Programmordner des Frameworks, sein Build-Ordner und sein persönlicher Ordner
@@ -2342,7 +2342,7 @@ In der GUI: **Datei > Einstellungen…**, Tab **Quell-Repositorys**: die Liste, 
 llm-cli config local-network [--add ART WERT | --remove ART WERT | --check ADRESSE] [--yes]
 ```
 
-Was der Offline-Modus als lokal zählt (unveröffentlicht): diesen Computer, dein eigenes Netz und was du selbst als
+Was der Offline-Modus als lokal zählt: diesen Computer, dein eigenes Netz und was du selbst als
 lokal zählst. Ein Name zählt nach den Adressen, zu denen er auflöst (Loopback, private und Link-Local-Adressen sind
 lokal; ein `.local`- oder `.lan`-Name nur, wenn er zu einer solchen Adresse auflöst; ein Name mit nur öffentlichen
 Adressen ist nie lokal; ein Name mit lokalen und öffentlichen Adressen zählt als lokal, und das Framework verbindet
@@ -2713,7 +2713,7 @@ llm-cli zoo maintainer review [ITEM] [--review-dir ORDNER] [--key NAME] [--trust
 llm-cli zoo maintainer revoke KIND ID --reason TEXT [--version V | --sha256 S] [--key NAME]
 ```
 
-Unveröffentlicht. Für den Maintainer des Community-Repositorys (`community_repo`), nicht für Benutzer. GitHub wird mit
+Für den Maintainer des Community-Repositorys (`community_repo`), nicht für Benutzer. GitHub wird mit
 deinem eigenen Login der GitHub CLI (`gh`) und git erreicht, beide installiert und angemeldet (`gh auth login`); das
 Framework liest, speichert und zeigt nie einen Token. Kein KI-Client und kein Weg von Ditto erreicht diese Befehle. Jeder
 Schritt wird ausgegeben und ins Audit-Log geschrieben; Strg+C bricht vor dem nächsten Schritt ab, bis zum letzten
@@ -2768,7 +2768,7 @@ llm-cli trash restore ID...
 llm-cli trash empty ID... | --all | --due
 ```
 
-Unveröffentlicht. Was Löschungen in den Papierkorb verschoben haben: gebaute Modelle (im `.trash` des
+Was Löschungen in den Papierkorb verschoben haben: gebaute Modelle (im `.trash` des
 Ausgabeordners) und Wissens-Snapshots (im `.trash` des persönlichen Ordners). `list` (die Vorgabe) zeigt jeden
 Eintrag mit ID, was er ist, Größe, wann er verschoben wurde, wer es angefordert hat (`gui`, `cli` oder eine KI-App wie
 `mcp:laptop`), Erinnerungsdatum und woher er kam. Nichts verlässt den Papierkorb von selbst: Nach
@@ -2796,7 +2796,7 @@ llm-cli trash empty --due
 llm-cli models take-over
 ```
 
-Unveröffentlicht. Frühere Versionen des Hugging-Face-Browsers der GUI speicherten ihre Downloads im Cache von
+Frühere Versionen des Hugging-Face-Browsers der GUI speicherten ihre Downloads im Cache von
 huggingface_hub im Modellordner (`models/models--<owner>--<name>/`); diese Modelle bleiben aufgeführt und nutzbar.
 `take-over` macht, was **Alte Downloads übernehmen…** in **Tools > Hugging Face Model Browser...** macht, über dieselben
 Aufrufe im Kern: Es listet jede Datei, die noch zu übernehmen ist (Modell, Datei, Größe), fragt „Copy exactly N files

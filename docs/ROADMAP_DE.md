@@ -1,4 +1,4 @@
-Version 3.0.0 + unveröffentlichte Änderungen · Stand 2026-10-29
+Version 3.1.0 · Stand 2026-10-29
 
 [English](ROADMAP.md) · **Deutsch**
 
@@ -6,55 +6,41 @@ Version 3.0.0 + unveröffentlichte Änderungen · Stand 2026-10-29
 
 Was als Nächstes kommt. Versionsnummern und Inhalte können sich noch ändern; nichts in diesem Dokument ist Teil
 einer veröffentlichten Version. Es ist eine der drei Dateien des [Bauplans](BLUEPRINT_DE.md): Wie das Framework
-gebaut ist, steht im [Design](DESIGN_DE.md). Die neueste Veröffentlichung ist 3.0.0 (2026-10-10, siehe
-[Changelog](../CHANGELOG_DE.md)).
+gebaut ist und warum, steht im [Design](DESIGN_DE.md), was jede Version enthält, im [Changelog](../CHANGELOG_DE.md).
+Die neueste Version ist 3.1.0 (siehe Changelog).
 
 Status je Punkt:
 
-- **fertig**: gebaut und im Changelog unter „Unreleased“ aufgeführt; Teil der nächsten Veröffentlichung.
 - **in Arbeit**: wird gerade gebaut.
 - **geplant**: beschlossen, noch nicht begonnen.
 
-Wird eine Version veröffentlicht, verlassen ihre fertigen Punkte die Roadmap und erscheinen im Changelog unter
-dieser Version.
+Ist ein Punkt fertig, verlässt seine Zeile die Roadmap im selben Commit, der seinen Eintrag in den Changelog schreibt,
+unter der Version, in der er landet; ein teilweise fertiger Punkt behält nur, was fehlt. Jede Zeile nennt die Runde
+der Entscheidungen des Maintainers, aus der sie stammt.
 
 | Version | Thema | Status |
 |---|---|---|
-| 3.1.0 | Ditto-Neubau, Anmeldung und lokale KI | in Arbeit |
+| 3.2.0 | Dittos Kontext, das Board-Bündel, die Laufzeit auf dem Gerät und mehr Hardware | in Arbeit |
 | als Nächstes | Build-Dienst, Warteschlange und Modi | geplant |
-| 3.2.0 | Laufzeit auf dem Gerät und die Hardware des Maintainers | geplant |
 | 3.3.0 | LoRA und große Modelle | geplant |
 | 3.4.0 | Lieferkette und Community | geplant |
 | später | Rust-Teile für das Netzwerk und das Board | geplant |
 | später | Mehr Hardware und MCP-Erweiterungen | geplant |
 
-## 3.1.0 - Ditto-Neubau, Anmeldung und lokale KI (in Arbeit)
+## 3.2.0 - Dittos Kontext, das Board-Bündel, die Laufzeit auf dem Gerät und mehr Hardware (in Arbeit)
+
+Hier landet Stapel 3 der Arbeit, in der Reihenfolge seiner Wellen: zuerst Dittos Kontext, daneben das
+Board-Bündel, dann das Gateway, Sprache und MCP auf dem Board. Die erste Hardware setzt die Prioritäten für die
+Laufzeit auf dem Gerät: RK3566-Boards (etwa ein RK3566-Board mit 4-8 GB), NVIDIA-RTX-GPUs und der AMD Ryzen Z1
+Extreme, unter Windows und Linux. Die Rezepte kommen dort zuerst; die Rotationsstufe und das allgemeine ARM64-Target
+folgen direkt danach.
+
+### Aus 3.1.0 übernommen
 
 | Punkt | Status |
 |---|---|
-| **Ditto auf eigener Anbieterschicht neu gebaut.** Offizielle SDKs `anthropic` und `openai` statt LiteLLM; Anbieter als Daten (`configs/llm_providers.yml`) mit Modell und Aufwand je Aufgabe und einer live geladenen Modellliste; Wiederholungen, Fallback-Kette, geprüfte strukturierte Antworten, Prompt-Caching, Datenschutzfilter für Cloud-Anbieter; Ditto nutzt die Tools des Frameworks im Rahmen deiner Berechtigungen (GUI-Chat und `llm-cli ditto ask`). | fertig |
-| **Lokale Wissensbasis.** FastEmbed-Embeddings auf der CPU, im Prozess eingebettetes Qdrant, hybride Suche (BM25 plus dichte Vektoren, Reciprocal Rank Fusion); kein Vektordatenbank-Server und keine Cloud-Embeddings. | fertig |
-| **Wissensbasis in Qdrant Edge.** Die Rust-Engine von Qdrant im Prozess statt des lokalen Modus von qdrant-client; eine ältere Wissensbasis wird bei der ersten Nutzung umgewandelt und geprüft, ihr alter Ordner bleibt, bis du ihn löschst (siehe [Der Speicher der Wissensbasis](DESIGN_DE.md#der-speicher-der-wissensbasis-qdrant-edge-unveröffentlicht)). | fertig |
-| **Verwaltetes lokales Modell mit Stufen bis hinunter zu 2 Bit.** llama.cpp-`llama-server`, auf deinem Rechner aus einem festgelegten Commit selbst gebaut (Linux: CPU, dann Vulkan; siehe die selbst gebaute Laufzeit unten), das offizielle vorgebaute Archiv (CUDA, Vulkan, Metal oder CPU; ROCm nur auf Wunsch) nur als ausdrücklicher Opt-in `--prebuilt`, gekennzeichnet mit „not self-built“, und festgelegte Qwen3.5-Modelle von 9B bis hinunter zu 2-Bit-Modellen für schwache Hardware (3 GB RAM); `llm-cli ditto runtime` und `llm-cli ditto models`. | fertig |
-| **Selbst gebautes llama.cpp, Stufe 1: eine Hardware-Probe.** Probe-Format Schema 2 mit der Python-Probe als Hauptweg und den Skripten `.sh` und `.ps1` als Rückfallwege, die dieselben Schlüssel schreiben: Betriebssystem, Version, Init-System, C-Bibliothek und ihre Version, Architektur und CPU-Merkmale des Rechners, der die Programme ausführt, auf einem Board per SSH gelesen, ohne dort etwas zu schreiben; keine Hostnamen, Serien- oder Teilenummern in Profilen. | fertig |
-| **Selbst gebautes llama.cpp, Stufe 1: ein Rezept, per Commit festgelegt, ohne Netz gebaut.** Ein Build-Rezept macht aus einem Profil einen Bauplan mit Build-ID; llama.cpp ist an einer Stelle per Commit festgelegt, die Target-Images, Vorlagen und der Katalog holen und prüfen (aus 3.4.0 vorgezogen); der Quelltext wird einmal geholt und geprüft und als Bundle auf Rechner ohne Netz gebracht; Konfiguration und Build laufen nativ oder im Builder-Container ohne Netz; jeder Build wird geprüft (Format, glibc-Symbolversionen, Version und Commit, Geräte, der Server lehnt `--tools` ab) und in einem Build-Speicher abgelegt; ein Build von einem deiner anderen Rechner kann importiert werden. | fertig |
-| **Selbst gebautes llama.cpp, Stufe 1: Konvertierungswerkzeuge abgestimmt auf den Build-Rechner.** Target-Images bauen `llama-quantize`, `llama-imatrix`, `llama-perplexity`, `llama-completion` und `llama-bench` nach dem Rezept für die CPU des Build-Rechners; neue Target-Module bekommen einen Block `runtime:`; Target-Module bauen llama.cpp aus dem Quelltext und beziehen nie vorgebaute llama.cpp-Images oder -Programme. | fertig |
-| **Selbst gebautes llama.cpp, Stufe 1: Ditto auf dem selbst gebauten Server (Linux).** `llm-cli ditto runtime install` baut `llama-server` (zuerst CPU, dann den GPU-Build), statt ihn herunterzuladen; eine Startregel (verbotene Optionen in jeder Schreibweise, eine geleerte Umgebung, Loopback und eine Schlüsseldatei) für jedes Programm, das das Framework startet, auf dem PC und auf einem Board; die Perplexity-Prüfung nutzt das selbst gebaute `llama-perplexity` ohne geholtes Image. | fertig |
-| **Selbst gebautes llama.cpp, Stufe 1: die Laufzeit auf dem Board.** `llama-server`, `llama-cli`, `llama-bench` und `llama-perplexity`, aus der eigenen Probe des Boards im Builder-Container cross-kompiliert (Basis passend zur glibc oder musl des Boards, C++-Laufzeit statisch gelinkt, `libgomp.so.1` dabei), als Tarball mit Startskript gepackt, per SSH als unprivilegierter Benutzer deployt und auf dem Board geprüft, bevor er aktiv wird; Startskript oder systemd-Unit vorher in den Deploy-Einstellungen gewählt. Getestet mit Nachbildungen und einem lokal nachgebildeten Board, noch nicht auf einem echten Board. | fertig |
-| **Deployment auf ein Board über ein Netzwerk, das wegbricht.** Adresse oder Hostname; das Deployment wartet auf ein Board, dessen WLAN wegbricht (sichtbares Warten, Grenze, Abbrechen), und setzt den Upload nach einer sha256-Prüfung fort, `deploy.sh` läuft auf dem Board für sich und wird einmal gestartet; vier SSH-Grund-Codes mit nächsten Schritten auf Englisch und Deutsch und reinen Codes für KIs; der KV-Cache (`f16`, `q8_0`, `q4_0`) in den Deploy-Einstellungen, automatisch `q8_0` auf Boards mit wenig Speicher; für ein Board gebaute Modelle werden auf dem Board gemessen (oder in der Docker-Sandbox), nie nativ auf diesem Computer, und ein bestandener Lauf auf dem Board wird beim Build als „getestet auf <Board>“ vermerkt. | fertig |
-| **Ditto-Evaluation.** `llm-cli ditto eval` mit festen, nach Regeln bewerteten Fällen, je Anbieter oder lokaler Modellstufe. Die erste Messung hat Lücken in Dittos Prompts gefunden; sie sind behoben, eine neue Messung läuft. | fertig |
 | **Anmeldung je Zugangsart** für alle gängigen Cloud- und API-Anbieter und für lokale Engines (Einzelheiten unten). | in Arbeit |
-| **Entfernung des Anbieters `claude_code`.** Anthropic erlaubt Drittanbieter-Apps die Anmeldung mit einem Claude-Abo nicht. Wer ein Claude-Abo hat, nutzt das Framework aus Claude Code oder Claude Desktop über den MCP-Server (`llm-cli mcp config` zeigt die Einrichtung) oder gibt Ditto einen Anthropic-API-Schlüssel; die Tarife Max und Team enthalten monatliches API-Guthaben. | fertig |
-| **Das Framework in einem Container, lokal gebaut.** Kein Framework-Image wird veröffentlicht oder geladen: `scripts/build_container_image.sh` (`make build`) baut das Image auf deinem Computer, indem es aus den ausgelieferten Dateien dieselbe Installation ausführt wie auf dem Rechner selbst (`install.sh`); standardmäßig CLI und MCP-Server ohne Oberfläche, die GUI nur als Option; eine funktionierende Compose-Datei, Makefile-Ziele und eine Bauanleitung ([Container-Einrichtung](Container_Setup_DE.md)). | fertig |
-| **Dokumentation auf Englisch und Deutsch** für jedes Dokument. | in Arbeit |
-| **Crawler, der die eigenen Signale der Seite prüft.** Ob eine Seite ausgewertet werden darf, kann ein Nutzer nicht wissen. Deshalb prüft der Crawler die maschinenlesbaren Nutzungsvorbehalte selbst (robots.txt nach RFC 9309, den Header `X-Robots-Tag`, Robots-Meta-Tags einschließlich `noai` und seines eigenen Bot-Namens, das TDM Reservation Protocol) und überspringt vorbehaltene Seiten mit Nennung im Log; jeder Vorbehalt gewinnt, und keine Prüfung lässt sich abschalten. Statt einer rechtlichen Bestätigung erklärt ein einmaliger Hinweis (je Benutzer, erneut, wenn sich sein Text ändert), was gelesen und behalten wird, mit Sprachansage über die Sprachausgabe des Betriebssystems (die Technik des USB-Watchers aus rag4ll); ein Stopp-Knopf behält das Gespeicherte, der Fortschritt zeigt „Seite N von M“, das Ergebnis nennt ehrlich Erfolg, Teilerfolg oder Fehler, und der Crawler meldet seine echte Version. Eine Person startet Deep Ingest in der GUI oder bestätigt das `crawl_docs_site` eines KI-Clients (unveröffentlicht). | fertig |
-| **Eingabe-Historie**: zuletzt verwendete Modelle, Targets, Boards, URLs, Geräte und Datensätze als Auswahl in den GUI-Feldern, je Benutzer, ohne Geheimnisse; Tools > Eingabeverlauf löschen... vergisst sie. | fertig |
-| **Schnellerer Start durch Lazy Loading.** CLI, MCP-Server und GUI laden einen schweren Teil erst, wenn ein Befehl ihn zum ersten Mal braucht: die Manager des Frameworks (nicht für Befehle, die kein Framework brauchen), die Wissensbasis und den Crawler, Qt außerhalb der GUI, die Prüfungen von Mojo (auch seine Prüfung der Boards), die Brücke des MCP-Servers zum offenen Fenster (beim ersten Aufruf seines Werkzeugs `gui`), die Lizenztexte der Wissenspakete (mit dem ersten Paket), rich für `--help`. Der Import der URL-Prüfungen prüft den Host nicht mehr (Mojo meldet die Python-Version und den freien Speicherplatz). Warum: `llm-cli mcp serve` muss einem KI-Client schnell antworten, und `llm-cli --help` soll nicht alles laden. | fertig |
-| **Die GUI ist ein optionales Extra.** PySide6 ist das Extra `gui` (`requirements-gui.txt`): Die Desktop-Installer installieren es, `install.sh --headless` und das Framework-Image ohne `--gui` lassen Qt und seine Systembibliotheken weg, und Kommandozeile und MCP-Server laden nie Qt (die Texte des Kerns kommen ohne Qt aus). `llm-gui` ohne das Extra sagt, wie du es ergänzt. Qts eigene Schaltflächen (Schließen, Abbrechen) folgen der Sprache des Fensters. Warum: Ein Server oder Container braucht keine Desktop-Bibliotheken. | fertig |
-| **CPU und Speicher des Build-Containers im Builder**, und eine Warnung im Build-Protokoll, bevor dem Container der Speicher ausgeht (die Grenze von Docker oder der VM von WSL2 / Docker Desktop). Warum: Ein Build kann den Speicher von Docker oder WSL2 aufbrauchen. | fertig |
-| **Bessere Antworten aus der Wissensbasis**, aus rag4ll übernommen und klein gehalten: Reranking mit einem Cross-Encoder auf der CPU und eine Relevanzschwelle, die unpassende Auszüge aus Dittos Prompt heraushält (eingeschaltet für Build-Empfehlungen; für Chat und MCP-Suchen mit `rag_rerank_default`), ein Größenbudget für die Auszüge, das Aufteilen übergroßer Code- und Tabellenblöcke, eine Stichwortsuche, die Bezeichner wie `-DGGML_CUDA=ON` versteht, und das Entladen unbenutzter Modelle; gemessen mit der Abruf-Evaluation (`llm-cli ditto eval --kind retrieval`). | fertig |
-| **Community-Pakete mit echter Kryptografie**: Pakete mit einem Manifest jeder Datei, öffentliche Pakete mit Ed25519 signiert, private Pakete im Format age (rage, über `pyrage`) an die Schlüssel der Empfänger oder eine Passphrase verschlüsselt, vom Absender signiert und mit den üblichen age-Werkzeugen lesbar. Der Upload mit der XOR-„SwarmCipher“ und seine Abfrage eines GitHub-Tokens entfallen; das Framework fragt nie nach einem Token. | fertig |
-| **Model-Zoo aus der Community**: Rezepte (Modell mit festgelegtem Commit, Target-Fingerabdruck, Format, Quantisierung, Toolchain-Image und geprüfte Hashes), aus fertigen Builds erzeugt; ein signierter Index mit Widerrufen, Installation über eine Quarantäne mit Vertrauensstufen, `llm-cli zoo`, der Community-Hub, der Export für die Community mit Übergabe an einen Pull-Request und die Werkzeuge des Maintainers für das Community-Repository. | fertig |
+| **Dokumentation auf Englisch und Deutsch, der Rest**: Jedes Dokument hat seinen deutschen Zwilling (geprüft von `tests/test_docs.py`); offen ist noch der Durchgang über die Texte jedes Fensters (siehe „Jedes Fenster übersetzt“ unter Später). | in Arbeit |
 | **Community-Repository und Index veröffentlicht**: Das Repository ist gewählt ([Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base), seit 2026-10-22 der Standardwert von `community_repo`, Pull Requests gehen also schon dorthin). Noch zu tun: sein Beitrags-Workflow, der erste signierte Index, der Schlüssel des Maintainers in `configs/community_keys.yml` und die ausgefüllte Einstellung `community_index_url`, ausgeliefert mit einem Release. Bis dahin installiert der Zoo nur Paketdateien. | geplant |
 
 Anmeldung je Zugangsart, wie entworfen. Schon gebaut (im Changelog aufgeführt): der API-Schlüssel zuerst bei
@@ -80,6 +66,81 @@ Anbieter, Prüfung, Fehler mit nächstem Schritt) und der Anmeldebereich der GUI
   Schlüsselwechsel; ist kein Schlüsselbund nutzbar, wählst du einen Ausweichweg ausdrücklich.
 - **Eine Mustertabelle** für den Secret-Scan des Repositorys und die Schwärzung in Logs.
 
+### Dittos Kontext (DECISIONS Runden 29, 32 und 33)
+
+| Punkt | Status |
+|---|---|
+| **Erst echte Token-Zahlen.** Die Tokens jeder Anfrage je Anbieter und Modell und die Cache-Treffer zählen, und die 12-Stunden-Lebensdauer des Caches und die Token-Zählung von OpenAI mit einem bezahlten Testaufruf klären, den die Person in ihrem eigenen llmcf mit ihrem eigenen Schlüssel startet (nie aus einer Sandbox oder der CI; der Schlüssel verlässt den Rechner nie). Runde 29 (Q1), Runde 33 (Punkt 2). | geplant |
+| **Kleinere Tool-Ergebnisse und sauberere Logs** für jedes Modell: Was ein Tool zurückgibt und was eine Log-Zeile trägt, schrumpft auf das, was das Modell braucht. Runde 29 (Q1). | geplant |
+| **Ein Speicherbudget für Dittos lokalen Server**: der KV-Cache nach derselben automatischen Regel quantisiert wie auf Boards (`local_kv_cache = auto`), das RAM-Budget aus der gemessenen Hardware, ein Abstand für das Betriebssystem. Runde 29 (Q1, Q4), Runde 32 (Kontext 4). | geplant |
+| **Das echte Kontextfenster je Modell**, mit Zählen, Budget und Verdichtung: Dittos lokales Modell aus den gemessenen Grenzen der Hardware, API-Modelle je Modell, beim Server des Anbieters erfragt, wo er es sagt. Runde 29 (Q3), Runde 32 (Kontext 4). | geplant |
+| **Cloud-Caching so, wie der Anbieter es vorsieht**: das eigene Caching des Anbieters und seine Anleitungen für Cache-Punkte (Anthropic, OpenRouter), die Lebensdauer des Caches eine Einstellung mit kurzer Vorgabe und einer Kostengrenze als weicher Obergrenze. Runde 29 (Q4), Runde 32 (Kontext 5). | geplant |
+| **Dittos Archiv, Phase 1: Fakten aus Tool-Ergebnissen.** Ein durchsuchbares Archiv dessen, was Ditto über llmcf und das Bauen gelernt hat (nie die privaten Gespräche der Person), lesbar für alle, die den Harness nutzen, in einer eigenen Collection des vorhandenen Speichers der Wissensbasis; ein neuerer Fakt ersetzt den älteren. Runde 29 (Q2), Runde 32 (Kontext 2, 3), Runde 33 (Punkt 1). | geplant |
+| **LLMLingua-2 bei Bedarf**, standardmäßig aus: etwa 150 Zeilen der MIT-Methode übernommen (ein numpy-Runner in der App), das Modell bei Bedarf von seiner Originalquelle geholt und nur, wenn es fehlt, nie im Repository mitgeliefert. Runde 29 (Q5), Runde 32 (Kontext 1). | geplant |
+| **Dittos Archiv, Phase 2**: Fakten aus Dittos eigenen Antworten, Export und Import, Schnappschüsse. Runde 33 (Punkt 1). | geplant |
+| **Gespeicherte Gesprächs-Caches auf der Platte**, nur wenn die Messung zeigt, dass Leute oft zurückkommen, nachdem der Server geschlafen hat. Runde 29 (Q1). | geplant |
+
+### Board-Bündel, Gateway, Sprache, MCP auf dem Board (DECISIONS Runden 31 bis 35)
+
+| Punkt | Status |
+|---|---|
+| **Das Board messen, bevor eine Board-Vorgabe gesetzt wird**: Die RAM-Reserve eines Boards kommt aus einer Messung auf diesem Board, nie aus einer Schätzung. Runde 32 (Board 3). | geplant |
+| **Das Startskript gibt Kontext, Cache-Budget und eine Reserve je Board weiter.** Runde 32 (Board 3, 5). | geplant |
+| **Fertig gebaute, signierte Rust-Programme für Boards** (die Board-Seite von „Die Rust-Teile des Frameworks fertig gebaut und signiert ausgeliefert“ unter Rust-Teile). Runde 32 (Board 1, Q6). | geplant |
+| **Gemeinsame goldene Vektoren für die Kontextregeln**, damit der Rust-Code des Boards und der Python-Code des Hosts gleich entscheiden. Runde 32 (Q6). | geplant |
+| **Das Bündel, Deploy-Weg 3**: ein vollständiges Bündel mit Hash-Liste, das die Person auf dem Host vorbereitet (mehrere Bestandteile, jeder in einem eigenen Schritt cross-kompiliert), mit signiertem Manifest und eigenem Speicher; es steht neben Weg 1 (goldenes Artefakt und `deploy.sh`) und Weg 2 (Laufzeitpaket) und ruft ihren Code auf, statt ihn zu kopieren. Runde 33 (Punkt 3), Runde 35. | geplant |
+| **Ein idempotenter Installer auf dem Board**: Benutzer, Units, cgroups, Dateien, Hashes, Rücknahme und Deinstallation, über den Rust-Root-Helfer `llmcf-install`; root nur über `sudo -n` mit dem Ja der Person für dieses Deployment, oder Benutzer, die die Person vorher angelegt hat; offline ist das Bündel vollständig, online holt der Installer nur festgelegte, per Hash geprüfte Teile des Manifests. Runde 33 (Punkt 3 und Nachtrag), Runde 32 (Board 6), Runde 35. | geplant |
+| **`llmcf-gateway`, Stufe 1 in Rust**: eine Token sparende Zwischenschicht vor dem lokalen Modell auf dem Board; sie startet und stoppt `llama-server`, der in einer eigenen Unit außerhalb der Speichergrenze des Gateways läuft. Runde 29 (Q6), Runde 32 (Board 1, 8). | geplant |
+| **Das Gateway als Bestandteil des Bündels**, mit Prüfung und Benchmark; zuerst nur Loopback, das lokale Netz nur mit TLS (eigenes Zertifikat, festgelegter Fingerabdruck), nie einfaches HTTP. Runde 32 (Board 2). | geplant |
+| **Sprache mit whisper.cpp** für Spracherkennung und Weckwort; andere Sprachteile (NeMo, das GigaSpeech-Weckwort, eSpeak NG, ein fertiges onnxruntime) nur als Opt-in mit ihrer Lizenz vor dem Download gezeigt, nie standardmäßig an bei unfreien Bedingungen. Runde 32 (Sprache, Board 4). | geplant |
+| **Bilderkennung mit `--mmproj`** als Bestandteil des Bündels. Runde 33 (Punkt 3). | geplant |
+| **Ein Agenten-Harness als Bestandteil des Bündels**, auf einem festgelegten Commit, unter einem eigenen Linux-Benutzer, installiert von seinem eigenen Installer nach dem Ja der Person; llmcf blockiert nicht, was dieser Installer holt, beobachtet, was er tut (Netzziele, Pakete, Dateien, Prozesse), markiert Verdächtiges und berichtet vorher und nachher. Runde 33 (Punkt 3), Runde 35. | geplant |
+| **Ein Fenster „Board-Bündel...“, CLI und MCP**: Die Person wählt die Bestandteile, mit Vorlagen und einem Vorschlag von Ditto; ob das LLM auf dem Board läuft, entscheidet zuerst die Person, dann die gemessenen Grenzen; das MCP-Tool `bundle_deploy` steht neben `deploy_device_runtime`. Runde 32 (Board 5), Runde 35. | geplant |
+| **Ein Vertragstest für Harnesses**, die sich an das Gateway anschließen, ohne Harness-Code in llmcf. Runde 32 (Board 7). | geplant |
+| **Ein optionaler Sitzungsspeicher auf dem Board**, jederzeit, nachdem das Gateway deployt ist. Runde 29 (Q6). | geplant |
+| **Ein MCP-Server im Gateway**: nur Loopback, zuerst lesende Tools (Modellstatus, Zustand, Benchmark, Logs). Runde 31, Runde 32. | geplant |
+| **Der Host erreicht das MCP des Boards über SSH-stdio** (Tools `device_board_*` neben `probe_remote_device` und `deploy_device_runtime`); er spricht mit dem eigenen Gateway des Boards, nie mit einer anderen Installation von llmcf. Runde 31. | geplant |
+| **Freigaben für die Tools des Boards**, über die vorhandenen ausstehenden Freigaben: Ein Harness darf seine eigene Person fragen, außer einem Harness, der in den Raum hört; dauerhafte Freigaben nur als Empfehlung mit weicher Obergrenze angeboten. Runde 32 (Board 7). | geplant |
+| **Modell, Sprache und Bilderkennung auf dem Board wechseln, neu starten, messen** über MCP. Runde 31. | geplant |
+| **Brückenmodus mit Autodiscovery**: Das Gateway verbindet sich mit MCP-Servern, die schon laufen, und bietet ihre Tools an einer Stelle an; gefundene Tools werden aufgelistet, aber erst angeboten, wenn die Person sie ankreuzt, überbrückte Tools gelten als nicht vertrauenswürdig, und das Gateway startet nie einen Server. Runde 31, Runde 32 (Board 6, Brücke). | geplant |
+| **Die eigene Tool-Schleife des Gateways** für das lokale Modell des Boards, mit Tool-Profilen. Runde 31. | geplant |
+| **MCP auf der Netzadresse des Boards**, nur mit TLS und dem festgelegten Fingerabdruck. Runde 32 (Board 2). | geplant |
+
+### Beschlossen, wartet auf seine Reihe
+
+| Punkt | Status |
+|---|---|
+| **Nacharbeiten am Mojo-Kreis**: Die Notiz eines offenen Oracle-Laufs verfällt nach einer Stunde; `llmcf mojo --miracle --json` und `llm-cli doctor --fix` löschen sie ohne Logo, ebenso ein Lauf von Mojo Miracle in der GUI; die Funktionen der Notiz werfen bei keinem kaputten Zustandsordner. Runde 30. | geplant |
+| **Offline-Builds des Build-Container-Images**: Der Offline-Modus darf das Image mit der Werkzeugkette bauen, wenn jede Quelle nach der einen Lokalitätsregel lokal ist (Basis-Images auf diesem Rechner oder in einer Registry im eigenen Netz, llama.cpp vom lokalen Spiegel oder aus einer lokalen Kopie, apt und pip nur über Spiegel oder Caches im eigenen Netz, die die Person einstellt), sonst hält er früh an und nennt die fehlende Quelle; dazu Import und Export eines Build-Container-Images als geprüfte Datei für Rechner ohne Netz. Runde 36. | geplant |
+| **Vollmachten**: Eine Freigabe, die die Person im Framework erstellt (nie über MCP), lässt eine KI ihre eigenen Routinefragen beantworten, Hinweise zur Lage eingeschlossen; Sicherheits- und Rechtshinweise, Lizenzen, das erste Vertrauen in einen Host-Schlüssel, die eigenen Rechte der KI und jedes Löschen bleiben bei der Person; Laufzeiten 8 Stunden, 24 Stunden oder 30 Tage, „bis zum Widerruf“ verfällt nach 90 Tagen ohne Nutzung. Runde 5 (a, b, f), Runde 6 (Punkt 1). | geplant |
+| **„Für diese Modellversion nicht mehr fragen“** als Kästchen in der Build-Frage, auf den festen Codes der Hinweise. Runde 5 (r, Q3). | geplant |
+| **Ein Postfach und ein Weckruf für jeden MCP-Client**: ein Hinweis bei jedem Ergebnis plus Tools zum Lesen und Antworten; ein optionaler Weckruf, den die Person einrichtet, trägt nur feste Stichwörter („Build fertig“, „Fehler beim Bauen“), die Einzelheiten kommen über MCP; der Broker ist der MQTT-Broker des Rust-Gateways (Rust-Teile). Runde 5 (o), Runde 6 (Punkte 4-7), Runde 7 (Punkt 8). | geplant |
+| **Ein eigenes Konto `llmcf` auf dem Host und auf Boards**: Der Installer legt es an und gibt ihm die Ordner, die es braucht (unter Windows unter dem Programmordner mit ausdrücklichen Rechten), damit ein Pfad, der eine KI erreicht, immer gleich ist; auf einem Board gibt die Person das Admin-Passwort einmal ein, das Framework legt das Konto und seinen Schlüssel an und behält den Schlüssel, nie das Passwort. Runde 5 (q), Runde 6 (Punkte 2, 3), Runde 7 (Punkt 1). | geplant |
+| **Anwesenheitsnachweis und Zugriffskontrolle als Opt-in**: Ein Klick reicht zum Bestätigen; PIN, Passwort oder Fingerabdruck nur, wenn die Person sie einschaltet; Benutzerkonten im Framework nur als Opt-in. Runde 7 (Punkte 3, 5, 6). | geplant |
+| **Eine eigene Target-Vorlage für den RK3566**: das LLM auf der CPU (Cortex-A55, NEON, GGUF), RKNN nur als optionaler Schritt für Sprach- und Bildmodelle, der den LLM-Build nie blockiert; die anderen Rockchip-SoCs behalten die Standardvorlage, auf die neuesten Toolkits gebracht. Runde 17 (K1-K3). | geplant |
+| **Der Update-Orchestrator nativ übernommen**: Ein Update-Orchestrator desselben Autors wird mit festgehaltener Herkunft in llmcf übernommen und dort überarbeitet (sein eigenes Repository bleibt, wie es ist); auf Boards root nur über cron und genaue sudo-Zeilen; OS-Updates ohne Sicherung warten, bis Sicherungen an sind (das Höchstalter der Sicherung eine Einstellung, Vorgabe 14 Tage) oder die Person die Ausnahme für dieses Board ankreuzt; Windows folgt denselben Schritten ohne OS-Updates; llmcfs eigene Releases mit SHA256SUMS und Signatur, der Update-Weg über git bleibt für Entwickler. Runden 18, 19 und 22 (P2, P3). | geplant |
+| **Board-Sicherungen holt der PC, zwei Arten von Images**: Der PC holt jede Sicherung über die SSH-Sitzung des Deployments, nichts wird auf die eigene Karte des Boards geschrieben; das Image wird auf dem PC gebaut und verkleinert (ein Assembler ohne Rechte; PiShrink, festgelegt, nur für rohe Karten-Images von außerhalb), das unverkleinerte Image gelöscht, sobald das kleine geprüft ist; eine Gerätesicherung stellt genau dieses Board wieder her, ein Flotten-Image ist verallgemeinert (neue Host-Schlüssel und Machine-ID beim ersten Start, Werte je Board als Variablen aus einer Liste im Framework oder einer Datei auf der Boot-Partition). Runden 20, 21 und 22 (P1, P4). | geplant |
+| **Abhängigkeiten von CMake-Optionen eines Moduls vor dem Build geholt**: Was eine FetchContent- oder ExternalProject-Option herunterladen würde, wird außerhalb der Sandbox geholt (nie offline), festgelegt und per Hash geprüft in einen lokalen Abhängigkeits-Cache gelegt und dem Build nur lesend übergeben, damit der Build selbst ohne Netz bleibt. Runde 25 (Q6, Nachtrag). | geplant |
+| **Keine harte Zeitgrenze für einen Build-Schritt**: eine weiche Obergrenze, die die Person aufheben kann, ein Schutz vor Schleifen (ein Modell, das sich wiederholt, eine Stufe, die immer neu startet) und eine Grenze für Stillstand statt des heutigen festen `build_timeout`. Runde 25 (Q8). | geplant |
+
+### Laufzeit auf dem Gerät und mehr Hardware
+
+| Punkt | Status |
+|---|---|
+| **Rezepte als Target-Vorlagen.** Eine Target-Vorlage enthält den Build-Code; Modell, Quantisierung, Format und Deployment sind Variablen, die du im Build-Menü wählst, und der Builder nutzt alles, was ein Rezept enthält. Warum: Du bist nie an die Wahl der Person gebunden, die die Vorlage gemacht hat. | geplant |
+| **Rotationsstufe vor der Quantisierung** (SpinQuant, QuaRot), direkt nach den Rezepten: Rotationen werden vor Konvertierung und Quantisierung in die Gewichte eingerechnet, nur wo das Zielformat sie unterstützt (eine Fähigkeit des Formats, kein fester Schritt). Warum: 4-Bit-Modelle der Llama-Familie behalten auf kleinen Boards ihre Qualität. Der Platz ist da: Der Stage-Runner führt das `modules/rotate_module.sh` eines Targets zwischen den Stufen convert und target aus; der Algorithmus kommt noch. | geplant |
+| **Allgemeines ARM64-CPU-Target (GGUF)** mit Board-Vorgaben für den Raspberry Pi 4 und 5, direkt nach den Rezepten. Warum: Rockchip war nur der Anfang, und diese Boards brauchen kein Hersteller-SDK. | geplant |
+| **Targets aus der Hardware-Probe, auf dem Board bewiesen.** Ein neues Target beginnt mit der Probe, die du auf dem Board ausführst (auch ohne Netz, die Datei zurückgetragen), oder, wenn du willst, mit Ditto, der es über SSH prüft; ein bestandener Benchmark auf dem Board ist der Beweis, gezeigt als „getestet auf <Board>“ im Community-Hub und in Paketen mitgegeben. Warum: Der Maintainer besitzt die meisten Boards nicht, und nur ein Lauf auf dem echten Board zeigt, dass ein Target funktioniert. | geplant |
+| **Laufzeit auf dem Gerät, der Rest.** Der erste Lauf der selbst gebauten Board-Laufzeit auf einem echten RK3566-Board; die Geräte-Laufzeit in Deployment-Paketen; das Laufzeit-Image für Docker-Deployments, lokal aus einem Geräte-Build gebaut (statt des geholten Laufzeit-Images); Benchmarks auf dem Gerät und eine gemessene Quantisierungsempfehlung je Board; ein Build auf dem Board, wenn keine Builder-Basis alt genug für seine C-Bibliothek ist; Vulkan auf Mali erst, wenn llama-bench zeigt, dass es den CPU-Build schlägt; MCP-Tools zum Proben, Deployen und Messen von Geräten. | geplant |
+| **Selbst gebautes llama.cpp, Stufe 2.** CUDA-Builds (die Redist-Archive von NVIDIA, das Toolkit nach Treiber, Compute Capability, Host-Compiler und CMake gewählt), Windows-Builds (Clang für das CPU-Backend, MSVC nur als CUDA-Host-Compiler; bis dahin Dittos lokales Modell unter Windows und macOS nur über den Opt-in `--prebuilt`), macOS (ungetestet), Benchmarks auf dem PC, die Dittos Modellstufe wählen, und MCP-Tools für die Laufzeit. | geplant |
+| **Weitere Rockchip-SoCs für RKLLM** (RK3562, RV1126B) mit einer Tabelle der unterstützten Typen je SoC. | geplant |
+| **NVIDIA-GPU-Target**: GGUF mit CUDA für RTX-GPUs der Serien 20 und 30 (CUDA-Version je nach Treiber), die vLLM-Formate AWQ und GPTQ, EXL3 und natives Deployment auf Windows-Rechner mit NVIDIA-GPU. | geplant |
+| **GPU-Beschleunigung** für die Importance-Matrix und den RKLLM-Export. | geplant |
+| **Target für AMD-RDNA3-APUs** für den Ryzen Z1 Extreme: llama.cpp mit Vulkan und HIP, Linux-Container und natives Deployment unter Windows. | geplant |
+| **Prüfung vor dem Build** (`orchestrator/Core/consistency_manager.py`, in Entwicklung): vergleicht die Treiber, die die Hardware-Probe gefunden hat, mit dem, was das SDK des Targets braucht (etwa die CUDA- und Treiber-Matrix), und hält einen Build an, der nicht gelingen kann, bevor er startet; muss noch in den Build-Start eingebunden werden. | geplant |
+| **Benchmark-Fenster** (`orchestrator/gui/benchmark_window.py`, in Entwicklung): llama-bench ausführen und die Ergebnisse als Tabelle zeigen; muss noch auf Basis der Laufzeit auf dem Gerät fertig gebaut und in der GUI erreichbar gemacht werden. | geplant |
+| **Eine SSH-Verbindung für die Befehle eines Board-Schritts** (OpenSSH `ControlMaster`, als Option): Der OpenSSH-Rückfallweg meldet sich einmal je Schritt an statt einmal je Befehl; geteilte Verbindungen bleiben bis dahin aus, und die eigenen SSH-Einstellungen des Frameworks lehnen sie ab. | geplant |
+
 ## Als Nächstes - Build-Dienst, Warteschlange und Modi (geplant; beginnt direkt nach der Architektur-Konsolidierung)
 
 Die Schritte kommen in dieser Reihenfolge. Entscheidungen, die noch offen sind, stehen in ihrer Zeile; sie werden
@@ -94,28 +155,6 @@ gefragt, wenn der Schritt beginnt.
 | **Schritt 5 - Kubernetes und Nomad**: Orte für Builds als Opt-in, neben den lokalen Docker-Builds, die die Vorgabe bleiben. Sie nutzen Images, die die Firma selbst aus den Dockerfiles des Frameworks in ihre eigene Registry baut, per Digest festgelegt, nie Images aus dem Community Hub. Warum: Eine Firma will Builds vielleicht auf ihrem eigenen Cluster. Offene Entscheidungen: beide Modi oder nur der Enterprise-Modus; über `kubectl`/`nomad` oder ihre HTTP-APIs. | geplant |
 | **Schritt 6 - Eigener Schlüsselbund-Dienst unter Linux**: Das Framework bringt unter Linux einen eigenen Schlüsselbund-Dienst mit (beschlossen in Runde 7 am 2026-10-15, nicht gebaut; Windows behält die Windows-Anmeldeinformationsverwaltung); nach Schritt 4. Warum: Viele Linux-Installationen haben keinen nutzbaren Schlüsselbund, und der Tresor lehnt einen ab, der hängt, nichts behält oder im Klartext speichert. Offene Entscheidung: bauen oder beim Schlüsselbund des Systems bleiben. | geplant |
 | **Schritt 7 - Neueste passende Versionen, automatisch gehalten**: Jede Abhängigkeit (Python, CUDA, Docker-Basis-Images, Toolkits, GitHub Actions) bleibt auf der höchsten Version, die passt, und jedes Update wird getestet, bevor es übernommen wird. Ein Plan wird vorbereitet. Warum: Alte Versionen sammeln Sicherheitsmeldungen, und ein Update darf nichts kaputt machen. | geplant |
-
-## 3.2.0 - Laufzeit auf dem Gerät und die Hardware des Maintainers (geplant)
-
-Die eigene Hardware des Maintainers setzt die Prioritäten: Radxa ZERO 3W (RK3566), NVIDIA RTX 2080 Ti und RTX 3090,
-AMD Ryzen Z1 Extreme, unter Windows und Linux. Die Rezepte kommen zuerst; die Rotationsstufe und das allgemeine
-ARM64-Target folgen direkt danach.
-
-| Punkt | Status |
-|---|---|
-| **Rezepte als Target-Vorlagen.** Eine Target-Vorlage enthält den Build-Code; Modell, Quantisierung, Format und Deployment sind Variablen, die du im Build-Menü wählst, und der Builder nutzt alles, was ein Rezept enthält. Warum: Du bist nie an die Wahl der Person gebunden, die die Vorlage gemacht hat. | geplant |
-| **Rotationsstufe vor der Quantisierung** (SpinQuant, QuaRot), direkt nach den Rezepten: Rotationen werden vor Konvertierung und Quantisierung in die Gewichte eingerechnet, nur wo das Zielformat sie unterstützt (eine Fähigkeit des Formats, kein fester Schritt). Warum: 4-Bit-Modelle der Llama-Familie behalten auf kleinen Boards ihre Qualität. Der Platz ist da: Der Stage-Runner führt das `modules/rotate_module.sh` eines Targets zwischen den Stufen convert und target aus; der Algorithmus kommt noch. | geplant |
-| **Allgemeines ARM64-CPU-Target (GGUF)** mit Board-Vorgaben für den Raspberry Pi 4 und 5, direkt nach den Rezepten. Warum: Rockchip war nur der Anfang, und diese Boards brauchen kein Hersteller-SDK. | geplant |
-| **Targets aus der Hardware-Probe, auf dem Board bewiesen.** Ein neues Target beginnt mit der Probe, die du auf dem Board ausführst (auch ohne Netz, die Datei zurückgetragen), oder, wenn du willst, mit Ditto, der es über SSH prüft; ein bestandener Benchmark auf dem Board ist der Beweis, gezeigt als „getestet auf <Board>“ im Community-Hub und in Paketen mitgegeben. Warum: Der Maintainer besitzt die meisten Boards nicht, und nur ein Lauf auf dem echten Board zeigt, dass ein Target funktioniert. | geplant |
-| **Laufzeit auf dem Gerät, der Rest.** Der erste Lauf der selbst gebauten Board-Laufzeit auf einem echten Radxa ZERO 3W; die Geräte-Laufzeit in Deployment-Paketen; das Laufzeit-Image für Docker-Deployments, lokal aus einem Geräte-Build gebaut (statt des geholten Laufzeit-Images); Benchmarks auf dem Gerät und eine gemessene Quantisierungsempfehlung je Board; ein Build auf dem Board, wenn keine Builder-Basis alt genug für seine C-Bibliothek ist; Vulkan auf Mali erst, wenn llama-bench zeigt, dass es den CPU-Build schlägt; MCP-Tools zum Proben, Deployen und Messen von Geräten. | geplant |
-| **Selbst gebautes llama.cpp, Stufe 2.** CUDA-Builds (die Redist-Archive von NVIDIA, das Toolkit nach Treiber, Compute Capability, Host-Compiler und CMake gewählt), Windows-Builds (Clang für das CPU-Backend, MSVC nur als CUDA-Host-Compiler; bis dahin Dittos lokales Modell unter Windows und macOS nur über den Opt-in `--prebuilt`), macOS (ungetestet), Benchmarks auf dem PC, die Dittos Modellstufe wählen, und MCP-Tools für die Laufzeit. | geplant |
-| **Weitere Rockchip-SoCs für RKLLM** (RK3562, RV1126B) mit einer Tabelle der unterstützten Typen je SoC. | geplant |
-| **NVIDIA-GPU-Target**: GGUF mit CUDA für die RTX 2080 Ti und RTX 3090 (CUDA-Version je nach Treiber), die vLLM-Formate AWQ und GPTQ, EXL3 und natives Deployment auf Windows-Rechner mit NVIDIA-GPU. | geplant |
-| **GPU-Beschleunigung** für die Importance-Matrix und den RKLLM-Export. | geplant |
-| **Target für AMD-RDNA3-APUs** für den Ryzen Z1 Extreme: llama.cpp mit Vulkan und HIP, Linux-Container und natives Deployment unter Windows. | geplant |
-| **Prüfung vor dem Build** (`orchestrator/Core/consistency_manager.py`, in Entwicklung): vergleicht die Treiber, die die Hardware-Probe gefunden hat, mit dem, was das SDK des Targets braucht (etwa die CUDA- und Treiber-Matrix), und hält einen Build an, der nicht gelingen kann, bevor er startet; muss noch in den Build-Start eingebunden werden. | geplant |
-| **Benchmark-Fenster** (`orchestrator/gui/benchmark_window.py`, in Entwicklung): llama-bench ausführen und die Ergebnisse als Tabelle zeigen; muss noch auf Basis der Laufzeit auf dem Gerät fertig gebaut und in der GUI erreichbar gemacht werden. | geplant |
-| **Eine SSH-Verbindung für die Befehle eines Board-Schritts** (OpenSSH `ControlMaster`, als Option): Der OpenSSH-Rückfallweg meldet sich einmal je Schritt an statt einmal je Befehl; geteilte Verbindungen bleiben bis dahin aus, und die eigenen SSH-Einstellungen des Frameworks lehnen sie ab. | geplant |
 
 ## 3.3.0 - LoRA und große Modelle (geplant)
 
@@ -138,8 +177,6 @@ Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht i
 | **Dependabot-Wartezeit** für LLM-SDKs. | geplant |
 | **Ein zweiter Secret-Scanner in der CI** (das gitleaks-Programm, festgelegt und per Prüfsumme geprüft) und GitHub-Push-Schutz. | geplant |
 | **Signierte Updates** des Frameworks selbst (`orchestrator/utils/updater.py`, in Entwicklung: Update-Prüfung, Update und Neustart; noch nicht eingebunden), fertig gebaut als geprüfte Updates einer signierten Veröffentlichung statt eines einfachen `git pull`. Werkzeugketten-Images gehören nicht dazu: Das Framework teilt Rezepte, nie kompilierte Images, daher werden sie weiter auf deinem Rechner aus dem Dockerfile des Targets gebaut; die Einstellungen `docker_registry` (standardmäßig leer) und `docker_namespace`, die nichts liest, bleiben erhalten. Keine Vorgabe nennt ein Image aus einer Registry: Die Image-Einstellungen nennen lokale Images (`llm-framework/...`) oder Images Dritter wie Trivy und Qdrant, und der Block `docker` in der `target.yml` eines Targets nennt ein lokales Image ohne Registry. | geplant |
-| **Die vier Module sind die Build-Struktur** (das geplante Aufräumen der Vier-Module-Skripte, anders erledigt als geplant): Statt sie zu entfernen, hat die Entscheidung U9 des Maintainers sie zum Build gemacht. `build.sh` von Rockchip und der Vorlage ist ein Stage-Runner über `source_module.sh`, `config_module.sh`, `convert_module.sh` und `target_module.sh`, mit Marken zum Fortsetzen je Stufe, Fortschritt je Stufe und dem Platz für die Rotation; die Arbeit des Verteilers liegt in der Stufe, zu der sie gehört, und der Modulgenerator schreibt funktionierende Stufenmodule statt Platzhaltern. | fertig |
-| **SSOT-Korrekturen** für den Katalog der Projektquellen und seine Skripte. | fertig |
 
 ## Rust-Teile (geplant)
 
@@ -170,7 +207,9 @@ Rust geschrieben; andere Teile wechseln nur, wenn eine Messung einen Gewinn zeig
     kann.
   - **NVIDIA Jetson** (das RTX-GPU-Target steht in 3.2.0). Warum: eine verbreitete Edge-Plattform mit eigener
     Werkzeugkette.
-  - **Hailo.** Warum: eine verbreitete NPU-Erweiterung, etwa für den Raspberry Pi 5.
+  - **Hailo.** Warum: eine verbreitete NPU-Erweiterung, etwa für den Raspberry Pi 5. Zuerst Hailo-8 auf einem Board der
+    Klasse Raspberry Pi 5 (Hailo-10 experimentell, bis ein Lauf besteht); der zugangsbeschränkte Dataflow Compiler wird
+    nie mitgeliefert, nur gefunden und genutzt, wo die Person ihn hat (Runde 24).
   - **Intel** NPU und GPU. Warum: Viele kleine PCs haben eine.
   - **Qualcomm.** Warum: Viele ARM-Boards und Laptops haben seine NPU.
   - **Hersteller-SDK-Dateien, die du bereitstellst:** eine Datei, die du hinter einer Hersteller-Anmeldung
@@ -222,8 +261,6 @@ Rust geschrieben; andere Teile wechseln nur, wenn eine Messung einen Gewinn zeig
 - **Aufräumen** (Einstellungen `auto_cleanup` und `logs_dir`, in Entwicklung): Arbeitsordner nach Builds aufräumen und
   ein einstellbarer Log-Ordner.
 - **MCP-Apps-Oberfläche.**
-- **Ein MCP-Server auf Edge-Geräten.**
 
 Nicht geplant: Builds in der Cloud (AWS, Azure) oder auf gemieteten Maschinen. Kompilieren auf entfernten Rechnern war
 nie geplant; kommen je Builds auf einem anderen Rechner, baut das Framework sie selbst.
-

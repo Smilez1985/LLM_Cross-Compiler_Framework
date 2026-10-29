@@ -1,4 +1,4 @@
-Version 3.0.0 plus the [unreleased changes](CHANGELOG.md#unreleased) · Last updated 2026-10-17
+Version 3.1.0 · Last updated 2026-10-29
 
 **English** · [Deutsch](README_DE.md)
 
@@ -9,8 +9,8 @@ such as the Radxa ZERO 3W or the Radxa ROCK 5B. It has a desktop app (GUI), a co
 that lets AI clients such as Claude Code, Claude Desktop or VS Code operate it (MCP), and a built-in assistant
 called **Ditto**.
 
-This README describes the state of the development branch: release 3.0.0 (2026-10-10) plus the work listed under
-"Unreleased" in the [CHANGELOG](CHANGELOG.md). What comes next is in the [roadmap](docs/ROADMAP.md).
+This README describes the state of the development branch: version 3.1.0 and what the [CHANGELOG](CHANGELOG.md) lists
+since. What comes next is in the [roadmap](docs/ROADMAP.md).
 
 ---
 
@@ -302,7 +302,7 @@ In a development setup (see [CONTRIBUTING.md](CONTRIBUTING.md)) the command `llm
 | What | Where |
 |---|---|
 | Program and Python environment | Linux: `/opt/llm-cross-compiler-framework` · Windows: `C:\Program Files\LLM-Cross-Compiler-Framework` |
-| Finished models | The output folder `~/llmcf/output` (Windows: `%USERPROFILE%\llmcf\output`), set once with **File > Output Folder...** or `llm-cli config output-folder`; in the GUI a save dialog opens there for every finished build (unreleased) |
+| Finished models | The output folder `~/llmcf/output` (Windows: `%USERPROFILE%\llmcf\output`), set once with **File > Output Folder...** or `llm-cli config output-folder`; in the GUI a save dialog opens there for every finished build |
 | Builds not saved yet, cache, downloaded models | `output/` (the framework's build folder; earlier builds stay there and stay listed), `cache/` and `models/` in the installation folder if your user may write there (Linux), otherwise in the personal folder below (Windows: `%USERPROFILE%\.llm-framework\output` and so on); created when they are first needed. The settings `build_dir`, `cache_dir` and `models_dir` set other folders |
 | Settings (`config.yml`) | `configs/` in the installation folder if your user may write there, otherwise the personal folder below; `LLM_FRAMEWORK_CONFIG_DIR` sets another folder |
 | Personal state: tool permissions, audit log, SSH key and known devices, MCP token, chat history, input history, knowledge base, local model server, community index cache | `~/.llm-framework` (Windows: `%USERPROFILE%\.llm-framework`); `LLM_FRAMEWORK_HOME` sets another folder |
@@ -486,7 +486,7 @@ llm-cli build start -m ./my_model.onnx -t Rockchip -f rknn -b rk3566 -q fp16 -F
 
 - Results go to the output folder, `~/llmcf/output/Rockchip/<model>/<quantization>/` (model file, `build_info.json`,
   `Model_Card.md`, and the ZIP next to it). At a terminal you are asked first, with the output folder as the default;
-  `-o/--output` sets another folder (unreleased; before, `output/build_<date>_<time>/` in the installation).
+  `-o/--output` sets another folder (before, `output/build_<date>_<time>/` in the installation).
 - A combination the target does not support stops before anything runs, with exit code 2 and the reason (for
   example "Format 'rkllm' does not run on rk3566").
 - Gated Hugging Face models need a token: `llm-cli secrets set hf_token` (asks for the value).

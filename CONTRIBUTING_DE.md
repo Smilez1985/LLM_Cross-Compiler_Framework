@@ -1,4 +1,4 @@
-Version 3.0.0 + unveröffentlichte Änderungen · Stand 2026-10-17
+Version 3.1.0 · Stand 2026-10-29
 
 [English](CONTRIBUTING.md) · **Deutsch**
 
@@ -29,7 +29,9 @@ Möglichkeiten mitzuhelfen:
 - [ ] Neues Verhalten ist durch Tests in `tests/` abgedeckt
 - [ ] Ein neuer CLI-Befehl oder eine neue Option hat ihren Weg mit der Maus in der GUI und einen Eintrag in
   `CLI_PATHS`, oder einen Grund in `MACHINE_ONLY` ([Abschnitt 8](#8-regeln-für-den-code))
-- [ ] Eintrag unter `[Unreleased]` in `CHANGELOG.md` und `CHANGELOG_DE.md`
+- [ ] Changelog-Eintrag unter der Version, in der die Änderung landet, mit Stempel, in `CHANGELOG.md` und
+  `CHANGELOG_DE.md`; die Entscheidung in `docs/DESIGN.md` (+ `_DE`); die fertige Roadmap-Zeile aus `docs/ROADMAP.md`
+  (+ `_DE`) entfernt
 - [ ] Dokumentation auf Englisch und Deutsch aktualisiert
 - [ ] Keine Secrets, kein persönlicher Zustand, keine Binärdateien und keine Modelldateien im Diff
 
@@ -985,17 +987,26 @@ Befehl oder ein von Hand geschriebener Menüpfad in einem Text:
 
 - Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/); Versionen folgen
   [Semantic Versioning 2.0.0](https://semver.org/lang/de/spec/v2.0.0.html).
-- **Der Changelog sagt, was war.** Jede Änderung, die Benutzer bemerken, bekommt einen Eintrag unter
-  `## [Unreleased]` in `CHANGELOG.md` und denselben Eintrag auf Deutsch in `CHANGELOG_DE.md`. Nutze die Abschnitte
-  Added, Changed, Deprecated, Removed, Fixed und Security und im deutschen Changelog die entsprechenden Abschnitte.
+- **Der Bauplan besteht aus drei Dateien**: [docs/DESIGN_DE.md](docs/DESIGN_DE.md) (Was, Wie und Warum jedes Teils
+  und jeder Entscheidung), [docs/ROADMAP_DE.md](docs/ROADMAP_DE.md) (was kommt) und `CHANGELOG_DE.md` (was war), jede
+  mit ihrem englischen Zwilling. Lies alle drei, bevor du eine Änderung entwirfst, und aktualisiere alle drei im selben
+  Commit wie den Code.
+- **Der Changelog sagt, was war, und nur das.** Es gibt keinen Abschnitt `[Unreleased]`. Fertige Arbeit (verdrahtet,
+  getestet, committet) bekommt ihren Eintrag im selben Commit wie ihr Code, unter der Version, in der sie landet
+  (`## [x.y.z] - JJJJ-MM-TT`), in `CHANGELOG.md` und denselben Eintrag auf Deutsch in `CHANGELOG_DE.md`. Jeder Eintrag
+  beginnt mit `` `JJJJ-MM-TT HH:MM UTC` · `vX.Y.Z` `` (der deutsche Zwilling trägt denselben Stempel). Nutze die
+  Abschnitte Added, Changed, Deprecated, Removed, Fixed und Security und im deutschen Changelog die entsprechenden
+  Abschnitte. Der Commit, der einen neuen Versionsabschnitt öffnet, setzt diese Version auch in
+  `orchestrator/__init__.py` (`__version__`) und `pyproject.toml`.
 - Schreib für Benutzer: was sich geändert hat und was das für sie bedeutet.
 - **Die Roadmap sagt, was kommt.** Geplante oder unfertige Arbeit gehört in die Roadmap
-  ([docs/ROADMAP_DE.md](docs/ROADMAP_DE.md)), nicht in den Changelog. Wenn du einen Roadmap-Punkt
-  fertigstellst, setze seinen Status in beiden Sprachfassungen des Bauplans auf „fertig“ und ergänze den
-  Changelog-Eintrag.
-- Für ein Release machen die Maintainer aus `[Unreleased]` ein `## [x.y.z] - JJJJ-MM-TT`, setzen dieselbe Version in
-  `orchestrator/__init__.py` (`__version__`) und `pyproject.toml` und nehmen die veröffentlichten Punkte aus der
-  Roadmap.
+  ([docs/ROADMAP_DE.md](docs/ROADMAP_DE.md)), mit dem Status „in Arbeit“ oder „geplant“, nie in den Changelog. Wenn du
+  einen Roadmap-Punkt fertigstellst, entferne seine Zeile (oder verkleinere sie auf das, was fehlt) in beiden Sprachen
+  im selben Commit wie den Changelog-Eintrag.
+- **Entscheidungen kommen ins Design.** Jede Entscheidung, die eine Änderung umsetzt, wird in `docs/DESIGN_DE.md`
+  (+ englisch) beim Baustein eingetragen, den sie betrifft, mit dem, was sie sagt, wie der Code sie umsetzt und warum,
+  im selben Commit; eine ersetzte Entscheidung bleibt als eine Zeile Geschichte stehen. Keine privaten Daten: keine
+  Secrets, Adressen, Host- oder Kontonamen, keine Details der eigenen Geräte von irgendwem.
 
 ---
 
@@ -1006,9 +1017,8 @@ Befehl oder ein von Hand geschriebener Menüpfad in einem Text:
 - Schreib natürliches Deutsch mit korrekten Umlauten (ä, ö, ü, ß) und typografischen Anführungszeichen („…“), keine
   Wort-für-Wort-Übersetzung.
 - Beide Dateien verlinken oben aufeinander. Jedes Dokument beginnt mit einer Zeile wie
-  `Version 3.0.0 · Stand 2026-10-10` (Englisch: `Version 3.0.0 · Last updated 2026-10-10`); aktualisiere sie, wenn
-  du das Dokument änderst. Beschreibt es auch unveröffentlichte Arbeit, sag das:
-  `Version 3.0.0 + unveröffentlichte Änderungen`.
+  `Version 3.1.0 · Stand 2026-10-29` (Englisch: `Version 3.1.0 · Last updated 2026-10-29`); aktualisiere sie, wenn
+  du das Dokument änderst.
 - Beschreibe nur, was es auf dem aktuellen Zweig gibt; geplante Funktionen kommen in die Roadmap. Prüfe jeden
   Befehl, jede Option, jeden Pfad und jeden Konfigurationsschlüssel am Code oder an der Ausgabe von `--help`, bevor
   du ihn aufschreibst.

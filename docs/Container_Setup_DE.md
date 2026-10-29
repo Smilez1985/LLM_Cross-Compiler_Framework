@@ -1,4 +1,4 @@
-Version 3.0.0 plus die [unveröffentlichten Änderungen](../CHANGELOG_DE.md#unreleased) · Zuletzt aktualisiert am 2026-10-17
+Version 3.1.0 · Stand 2026-10-29
 
 [English](Container_Setup.md) · **Deutsch**
 
@@ -55,7 +55,7 @@ Was passiert:
      `requirements.txt` an (mit `--gui`: `requirements-gui.txt`, das PySide6 für die GUI ergänzt) und schreibt den
      Starter `llm-framework`. Nur die Docker-Engine und die Gruppe `docker` fallen weg (`LCF_CONTAINER_BUILD=1`), und
      das Image ohne Oberfläche installiert wie `install.sh --headless`: kein Qt und keine Systembibliotheken für Qt;
-   - `llm-cli` liegt im PATH, und `llmcf`, sein neuer Name (unveröffentlicht);
+   - `llm-cli` liegt im PATH, und `llmcf`, sein neuer Name;
    - die Quellen sind während des Builds nur lesbar eingebunden und werden nie zu einer Image-Schicht; in keiner
      Schicht steht ein Geheimnis;
    - am Ende prüft der Build die Installation: Die Befehlszeile muss sich importieren lassen; das Image ohne
@@ -229,7 +229,7 @@ führe `make up` erneut aus und installiere die Packs wieder.
 
 ## 10. Wo Docker Images ablegt
 
-Das gilt für jeden Computer, der mit Docker baut, nicht nur für die Container-Einrichtung (unveröffentlicht).
+Das gilt für jeden Computer, der mit Docker baut, nicht nur für die Container-Einrichtung.
 
 - `llm-cli mojo` zeigt, wo Docker seine Images ablegt (Dockers Datenordner, `DockerRootDir`), wie viel Platz auf
   dieser Platte frei ist und wie viel die Build-Images des Frameworks belegen.

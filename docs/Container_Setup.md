@@ -1,4 +1,4 @@
-Version 3.0.0 plus the [unreleased changes](../CHANGELOG.md#unreleased) · Last updated 2026-10-17
+Version 3.1.0 · Last updated 2026-10-29
 
 **English** · [Deutsch](Container_Setup_DE.md)
 
@@ -54,7 +54,7 @@ What happens:
      `requirements.txt` (with `--gui`: `requirements-gui.txt`, which adds the GUI's PySide6) and writes the
      `llm-framework` launcher. Only the Docker engine and the `docker` group are left out (`LCF_CONTAINER_BUILD=1`),
      and the headless image installs as with `install.sh --headless`: no Qt and no Qt system libraries;
-   - `llm-cli` is put on the PATH, and `llmcf`, its new name (unreleased);
+   - `llm-cli` is put on the PATH, and `llmcf`, its new name;
    - the sources are a read-only mount during the build, so they never become an image layer, and no secret is in
      any layer;
    - at the end the build checks the installation: the command line must import; the headless image must not
@@ -221,7 +221,7 @@ volume first (a target of your own as a pack:
 
 ## 10. Where Docker keeps images
 
-This holds for every computer that builds with Docker, not only for the container set-up (unreleased).
+This holds for every computer that builds with Docker, not only for the container set-up.
 
 - `llm-cli mojo` shows where Docker keeps its images (Docker's data folder, `DockerRootDir`), how much space is
   free on that disk, and how much the framework's build images use.

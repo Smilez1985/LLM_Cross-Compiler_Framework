@@ -1,4 +1,4 @@
-Version 3.0.0 plus the [unreleased changes](../CHANGELOG.md#unreleased) · Last updated 2026-10-16
+Version 3.1.0 · Last updated 2026-10-29
 
 **English** · [Deutsch](Mojo_DE.md)
 
@@ -59,7 +59,7 @@ managed. The oracle is pleased." when it repaired at least one problem, none is 
 Mojo Miracle's lock in your personal folder (`mojo/oracle_open.json`, with no path and no account name in it); every
 Mojo Miracle run at a terminal removes it when it ends.
 
-In the GUI (unreleased): **Tools > Mojo Health Check...** runs Mojo Oracle when the window opens and shows the same
+In the GUI: **Tools > Mojo Health Check...** runs Mojo Oracle when the window opens and shows the same
 findings with an overall line for the exit code; **Run Mojo Miracle...** asks the same question (No is the default),
 opens the framework's build images in the deletion dialog and shows what was repaired, what was not and why. The
 window and the command call the same functions.

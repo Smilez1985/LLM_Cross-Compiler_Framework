@@ -1,12 +1,12 @@
-Version 3.0.0 plus the [unreleased changes](../CHANGELOG.md#unreleased) · Last updated 2026-10-17
+Version 3.1.0 · Last updated 2026-10-29
 
 **English** · [Deutsch](Features_DE.md)
 
 # Features in detail
 
 This document explains what the framework does inside and why, so you always know what your tools are doing. It
-describes the state of the development branch: release 3.0.0 plus the unreleased changes in the
-[CHANGELOG](../CHANGELOG.md). Planned work is in the [roadmap](ROADMAP.md), not here.
+describes the state of the development branch: version 3.1.0 and what the [CHANGELOG](../CHANGELOG.md) lists
+since. Planned work is in the [roadmap](ROADMAP.md), not here.
 
 Back to the [README](../README.md) · All commands: [CLI_Usage.md](CLI_Usage.md)
 
@@ -172,7 +172,7 @@ Further behaviour:
 ### Where finished models go
 
 A finished build (a golden artifact: the model files, `build_info.json`, `Model_Card.md` and the ZIP next to the
-folder) is saved to a folder you choose (unreleased; eighth round, answer 3):
+folder) is saved to a folder you choose (eighth round, answer 3):
 
 - **The output folder** (setting `output_dir`, default `~/llmcf/output`; on Windows `C:\Users\<name>\llmcf\output`).
   You set it once: **File > Output Folder...** in the GUI (the system's own folder dialog) or `llm-cli config
@@ -215,7 +215,7 @@ per-user folder). `llm-cli deploy list-artifacts`, the Deployment tab and
 
 Before a build, `check_build_request`, `llm-cli build start` and the GUI's builder form look for a finished build
 with 100 % the same
-chosen options (unreleased; eighth round, N11): the model and its exact commit (a local model: every weights file by
+chosen options (eighth round, N11): the model and its exact commit (a local model: every weights file by
 name, size and modification time), the target and the sha256 of its folder, board, format, quantization, importance
 matrix and the sha256 of the calibration data, optimization, context length, GPU use and task. Other weights or
 another quantization is never identical. Every build records these options in its manifest (`build_options`, with
@@ -331,7 +331,7 @@ built-in fixes itself:
 | Network problem | Retries once |
 
 Everything else, including every AI suggestion, is shown as a manual step and never executed. A full disk is such a
-manual step too, because the framework deletes nothing without your list (unreleased; before, a "yes" removed the
+manual step too, because the framework deletes nothing without your list (before, a "yes" removed the
 framework's dangling images and cleared the whole Docker build cache, other projects' too): when Docker's disk is
 full, the dialog's **Free Docker space...** button (also **Tools > Framework Build Images...**) or `llm-cli doctor
 --fix --tier 2` in a terminal lists the framework's build images with name, id, size and what each is; nothing is
@@ -741,7 +741,7 @@ its support level is community.
 - **Fallback chain** (`ai_fallback_chain`, e.g. `local, ollama:qwen3.5:4b`): when the model declines or the
   provider is unavailable, the next entry is tried. Entries that are not set up are skipped.
 - **Offline mode** (`offline_mode`): only local providers are used; a cloud provider is refused with a clear
-  message. The knowledge base downloads nothing in offline mode either. "Local" follows one rule (unreleased): a
+  message. The knowledge base downloads nothing in offline mode either. "Local" follows one rule: a
   server name counts by the addresses it resolves to (a `.local` or `.lan` name only when it resolves to an address
   in your own network; a public name such as a reverse proxy's is not local; a name with addresses in your network
   and on the internet counts as local, and the framework connects only to the ones in your network), and a Tailscale
@@ -815,7 +815,7 @@ gives the defaults).
   each MCP server). The panel reads the signed chat feed once a second and never waits on it; an entry that does not
   verify is not shown, and the panel says how many were skipped. Without the feed it shows Ditto's conversation as
   before and says that new messages are not kept.
-- **What AIs did** (unreleased, wave 6): whatever Ditto or an AI app does through the framework's tools becomes one
+- **What AIs did** (wave 6): whatever Ditto or an AI app does through the framework's tools becomes one
   signed entry, written by the framework process that did the work: a call that changed something ("Started a
   build.", "Changed settings: language."), the end of work an AI started (a download, a deploy, a Deep Ingest, a
   build, with the folder a finished build was saved in by its label), a use of a standing approval, a question that
@@ -1352,7 +1352,7 @@ official prebuilt download stays only as the explicit choice `--prebuilt`, shown
 - **Store:** `~/.llm-framework/runtime/llama.cpp/builds/<build ID>/` holds the binaries with `build.json` (the plan)
   and `manifest.json` (sha256 of every file, duration, build host, verification results). The build ID is the hash of
   everything that changes the binaries, so a stored build is reused and never stamped again. Only a build verified on
-  this machine can become the active one. The framework deletes no build by itself (unreleased; before, it kept only
+  this machine can become the active one. The framework deletes no build by itself (before, it kept only
   the two newest others): `llm-cli ditto runtime prune` lists the old ones for you to tick, never the active build,
   the CPU fallback or the build a running server uses. A build made on another of your machines can be imported: every file is
   checked against its manifest, the build ID against its plan and the commit against the pin, you confirm before any
@@ -1520,7 +1520,7 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
   `qdrant_api_key` (never credentials in the URL). Searches are exact (no approximate graph index), as before. On a
   computer without a build of Qdrant Edge (Windows on ARM), the knowledge base keeps the older local storage of
   qdrant-client: slower, but complete; Mojo Oracle says so.
-- **Conversion of an older knowledge base (unreleased):** earlier versions stored it in qdrant-client's local mode
+- **Conversion of an older knowledge base:** earlier versions stored it in qdrant-client's local mode
   (`~/.llm-framework/qdrant`, a pure-Python stand-in for Qdrant meant for development). On first use it is converted:
   the vectors and texts are copied (nothing is embedded again), every collection's count is compared and a sample of
   points and searches is checked against the old store. The result is recorded in
@@ -1550,9 +1550,9 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
   tables](#large-code-blocks-and-tables)).
 - **Snapshots:** before every crawl, every index of the framework's own documents, every restore and every knowledge
   pack import the knowledge base is saved as a snapshot in `~/.llm-framework/knowledge_snapshots`; a name that is
-  taken gets `-2`, so no snapshot is ever written over. There is no limit (unreleased; before, only the newest 5 were
+  taken gets `-2`, so no snapshot is ever written over. There is no limit (before, only the newest 5 were
   kept, on every channel): the framework keeps as many as the disk holds, deletes none by itself, and no number of
-  them brings a reminder or a warning. What counts is the disk (unreleased; eighth round, answer 2): before a
+  them brings a reminder or a warning. What counts is the disk (eighth round, answer 2): before a
   snapshot is made, its size is estimated. When it does not fit beside the reserve that always stays free, no
   snapshot is made and the change does not run either; there is no "continue anyway". You get the list to delete or
   export snapshots (the GUI offers **Knowledge Snapshots...**; AI clients get the blocker `snapshot_no_room` with your
@@ -1588,7 +1588,7 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
   and the situation warning `embedding_model_download`.
 - **Adding documentation:** [Deep Ingest](#deep-ingest) in the module wizard, and [knowledge packs](#community-zoo)
   from the community zoo.
-- **The framework's own documents** (unreleased): **Tools > Index the Framework's Documentation...**,
+- **The framework's own documents**: **Tools > Index the Framework's Documentation...**,
   `llm-cli knowledge index-docs` or the tool `index_framework_docs` add its documentation (README, CONTRIBUTING, the
   `docs` folder), and on request its code and configuration, as kind `docs`, so Ditto can explain the framework's
   internals (how a probe value reaches a build script, what a setting does). It never happens by itself; a snapshot
@@ -1719,7 +1719,7 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
   address it in robots.txt and in a meta tag with that name. Rules a site wrote for its name before the repository
   was renamed, `LLM-Conversion-Framework-Bot`, still apply to it, so an opt-out made earlier holds.
 
-### Hidden text is left out (unreleased)
+### Hidden text is left out
 
 Text that a person reading a page does not see is a known way to hide instructions for an AI in a web page (prompt
 injection). So Deep Ingest stores only what a reader sees (`orchestrator/rag/html_text.py`):
@@ -2191,7 +2191,7 @@ with the token's standing approvals, Back to read only). A token is shown once, 
   folders the AI may use (a Hugging Face model folder as one entry, PyTorch pickle weights flagged, links out of the
   folder, hard-linked and hidden files and unfinished downloads left out; 50 per page), each with its file id and
   `<label>:<relative path>`, which `start_build` takes; a downloaded file shows up there too.
-- **Hugging Face downloads in the GUI (unreleased, decision A6):** **Tools > Hugging Face Model Browser...**
+- **Hugging Face downloads in the GUI (decision A6):** **Tools > Hugging Face Model Browser...**
   downloads through the same fetcher as `download_hf_file`, into the same folder `models/hf/<owner>--<name>/<first
   12 characters of the commit>/`: the commit is looked up first, the file is checked against the Hub's size and
   sha256 before it gets its name, and a download that stopped resumes from its `.part` file. The disk rule comes
@@ -2597,7 +2597,7 @@ The GUI's input fields offer what you used recently, newest first.
 ## Technical terms, errors and the form of address
 
 Technical terms stay English in both languages, so they match what you find elsewhere; the framework explains them
-where they appear (unreleased).
+where they appear.
 
 - **Explanations on mouse-over:** rest the mouse on a marked label (the mouse pointer shows a question mark), and a
   small card shows the term, one or two plain sentences in your language and a link to the page that explains it
@@ -2627,7 +2627,7 @@ where they appear (unreleased).
 
 ## Deleting and the trash
 
-Nothing the framework deletes on your behalf is deleted without your question (unreleased). The question lists
+Nothing the framework deletes on your behalf is deleted without your question. The question lists
 exactly what goes: for each item its name, the full path (or the Docker id of an image), the file name, the size and
 what it is. "No" is the default. An AI app or Ditto never sees the paths, only names, kinds and sizes, and never
 decides a deletion: not through its own form, a standing approval or a delegation.
@@ -2793,7 +2793,7 @@ Details: [Module_Developer_Guide.md](Module_Developer_Guide.md).
 
 ## Health check (Mojo)
 
-**Mojo** is the health check (it was called the doctor; unreleased). `llmcf mojo` (the same as `llm-cli mojo`) runs
+**Mojo** is the health check (it was called the doctor). `llmcf mojo` (the same as `llm-cli mojo`) runs
 deterministic checks; nothing asks a model what is wrong. The whole guide: [Mojo.md](Mojo.md).
 
 | Area | Checks |
@@ -2803,12 +2803,12 @@ deterministic checks; nothing asks a model what is wrong. The whole guide: [Mojo
 | Disk | free space for the cache, output and build folders by the one disk rule: an error when less than the reserve (2 GiB or 2 % of the disk) stays free after what running builds and downloads reserved, a warning below twice the reserve |
 | Targets | targets found, capabilities readable |
 | Security | personal folder private, secrets store usable, keyring protects secrets |
-| AI | tool permissions set up and readable, MCP tokens readable, audit log intact (changed, removed, wrong key, missing anchor, no key); the chat feed can be written and its newest entries verify (changed or foreign entries, no key; unreleased) |
+| AI | tool permissions set up and readable, MCP tokens readable, audit log intact (changed, removed, wrong key, missing anchor, no key); the chat feed can be written and its newest entries verify (changed or foreign entries, no key) |
 | Data | shipped calibration data intact (checksums) |
 | Community | installed community packs against the cached index: revoked (error), changed since installation (warning), trust `local` (information) |
-| Knowledge | how many knowledge snapshots there are, their size against the free space of their disk, and their folder; a warning when the next snapshot would not fit, information when it fits but leaves little space (no limit: their number is never a warning; nothing is deleted; unreleased); the storage of the knowledge base, from the record of its conversion to Qdrant Edge without opening it (`knowledge.storage`): a failed conversion (warning, with the reason and how to try again), Qdrant Edge that cannot be loaded for a knowledge base stored in it (error), the old storage folder still kept (information, with its full path and size and where you delete it), the older storage on a computer without a build of Qdrant Edge (information; unreleased) |
-| Runtime | the self-built llama.cpp build in use: changed files (error), older than the pin (warning), missing (warning); the prebuilt archive, labelled not self-built, in use or installed but not in use (information); whether this machine has the toolchain for a native build (information); in Docker mode, Ditto's image: there, built on this computer, of the pin and verified (OK), Docker not reachable or the image gone or another one (warning; unreleased) |
-| Boards | each trusted board (unreleased), from what was recorded, without any network contact: its host key in the framework's `known_hosts` (changed or gone: warning), and the last deploy, runtime deploy, verify, benchmark or probe that could not reach it (`device_host_down` information; `device_port_closed`, `device_auth_failed`, `device_host_key_changed` warnings) with the next step and the offer to check it; `--board NAME` (or `run_mojo_oracle` with a board's label) checks one board now by one connection to its SSH port, without a login; never the device account |
+| Knowledge | how many knowledge snapshots there are, their size against the free space of their disk, and their folder; a warning when the next snapshot would not fit, information when it fits but leaves little space (no limit: their number is never a warning; nothing is deleted); the storage of the knowledge base, from the record of its conversion to Qdrant Edge without opening it (`knowledge.storage`): a failed conversion (warning, with the reason and how to try again), Qdrant Edge that cannot be loaded for a knowledge base stored in it (error), the old storage folder still kept (information, with its full path and size and where you delete it), the older storage on a computer without a build of Qdrant Edge (information) |
+| Runtime | the self-built llama.cpp build in use: changed files (error), older than the pin (warning), missing (warning); the prebuilt archive, labelled not self-built, in use or installed but not in use (information); whether this machine has the toolchain for a native build (information); in Docker mode, Ditto's image: there, built on this computer, of the pin and verified (OK), Docker not reachable or the image gone or another one (warning) |
+| Boards | each trusted board, from what was recorded, without any network contact: its host key in the framework's `known_hosts` (changed or gone: warning), and the last deploy, runtime deploy, verify, benchmark or probe that could not reach it (`device_host_down` information; `device_port_closed`, `device_auth_failed`, `device_host_key_changed` warnings) with the next step and the offer to check it; `--board NAME` (or `run_mojo_oracle` with a board's label) checks one board now by one connection to its SSH port, without a login; never the device account |
 
 **Mojo Oracle** (the default) only looks. For every warning and error it says what it found, where (the full path or
 the object), why it matters, a hint and whether Mojo Miracle can repair it; one sentence at the end counts every
@@ -2837,7 +2837,7 @@ codes: 0 OK, 1 warnings, 2 errors; `--json` for scripts.
 names `llmcf mojo`; `--fix` makes the same audited harmless repairs, and `--tier 2` also shows the list of the
 framework's build images.
 
-GUI (unreleased): **Tools > Mojo Health Check...** does all of this with the mouse, through the same functions as the
+GUI: **Tools > Mojo Health Check...** does all of this with the mouse, through the same functions as the
 command. Mojo Oracle runs when the window opens, off the GUI thread, and shows every finding as `llmcf mojo` prints it
 (the severity as text with its mark and icon, never colour alone; where, why it matters, the next step, what Mojo
 Miracle can do with its plan; the summary sentence and an overall line with the exit code). **Run Mojo Miracle...**
@@ -2980,13 +2980,13 @@ Targets go to `targets/`, recipes to `community/recipes/`, knowledge to the fold
 `community/knowledge/` (see [Knowledge belongs to a topic or a target](#knowledge-belongs-to-a-topic-or-a-target)). A
 knowledge pack is imported into the knowledge base right after its installation or, if the knowledge base is off, as
 soon as it is turned on. Before its first page is imported, the knowledge base is saved as a snapshot (`pre_pack_<time>`), so the
-import can be undone (unreleased). When that snapshot does not fit on the disk, nothing is imported: the pack stays
+import can be undone. When that snapshot does not fit on the disk, nothing is imported: the pack stays
 installed and is imported once there is room. A pack that cannot be imported yet (for example offline without the
 embedding model) is tried again at the next start without another snapshot; a pack installed again gets a new one.
 
 ### Knowledge belongs to a topic or a target
 
-Unreleased (DECISIONS round 23 items 1, 2 and 8). Every piece of shared knowledge belongs to a topic (for example
+Every piece of shared knowledge belongs to a topic (for example
 `llama.cpp`) or to a target (for example `Rockchip`), and it is kept that way on disk and in the knowledge base:
 
 - **Folders:** an installed knowledge pack lives in `community/knowledge/<topic or target>/<pack>/` with its

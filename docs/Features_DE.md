@@ -1,12 +1,12 @@
-Version 3.0.0 plus die [unveröffentlichten Änderungen](../CHANGELOG_DE.md) · Zuletzt aktualisiert am 2026-10-17
+Version 3.1.0 · Stand 2026-10-29
 
 [English](Features.md) · **Deutsch**
 
 # Funktionen im Detail
 
 Dieses Dokument erklärt, was das Framework im Inneren tut und warum, damit du immer weißt, was deine Werkzeuge
-machen. Es beschreibt den Stand des Entwicklungszweigs: Release 3.0.0 plus die unveröffentlichten Änderungen im
-[CHANGELOG](../CHANGELOG_DE.md). Geplantes steht in der [Roadmap](ROADMAP_DE.md), nicht hier.
+machen. Es beschreibt den Stand des Entwicklungszweigs: Version 3.1.0 und was der [CHANGELOG](../CHANGELOG_DE.md)
+seitdem aufführt. Geplantes steht in der [Roadmap](ROADMAP_DE.md), nicht hier.
 
 Zurück zur [README](../README_DE.md) · Alle Befehle: [CLI_Usage_DE.md](CLI_Usage_DE.md)
 
@@ -180,7 +180,7 @@ Weiteres Verhalten:
 ### Wohin fertige Modelle kommen
 
 Ein fertiger Build (ein Golden-Artefakt: die Modelldateien, `build_info.json`, `Model_Card.md` und das ZIP neben dem
-Ordner) wird in einem Ordner deiner Wahl gespeichert (unveröffentlicht; achte Runde, Antwort 3):
+Ordner) wird in einem Ordner deiner Wahl gespeichert (achte Runde, Antwort 3):
 
 - **Der Ausgabeordner** (Einstellung `output_dir`, Standard `~/llmcf/output`; unter Windows
   `C:\Users\<Name>\llmcf\output`). Du legst ihn einmal fest: **File > Output Folder...** in der GUI (der Ordnerdialog
@@ -227,7 +227,7 @@ die Bezeichnungen `output:`, `builds:` und `saved:`.
 
 Vor einem Build suchen `check_build_request`, `llm-cli build start` und das Build-Formular der GUI einen fertigen
 Build mit zu 100 %
-denselben gewählten Optionen (unveröffentlicht; achte Runde, N11): das Modell und sein genauer Commit (ein lokales
+denselben gewählten Optionen (achte Runde, N11): das Modell und sein genauer Commit (ein lokales
 Modell: jede Gewichtsdatei mit Name, Größe und Änderungszeit), das Target und der sha256 seines Ordners, Board,
 Format, Quantisierung, Importance-Matrix und der sha256 der Kalibrierdaten, Optimierung, Kontextlänge,
 GPU-Nutzung und Aufgabe. Andere Gewichte oder eine andere Quantisierung sind nie gleich. Jeder Build hält diese
@@ -351,7 +351,7 @@ das Framework nur feste, eingebaute Korrekturen an:
 | Netzwerkproblem | Versucht es einmal erneut |
 
 Alles andere, auch jeder KI-Vorschlag, wird als manueller Schritt angezeigt und nie ausgeführt. Eine volle Platte ist
-ebenfalls ein solcher manueller Schritt, weil das Framework nichts ohne deine Liste löscht (unveröffentlicht; bisher
+ebenfalls ein solcher manueller Schritt, weil das Framework nichts ohne deine Liste löscht (bisher
 entfernte ein „Ja“ die verwaisten Images des Frameworks und leerte den ganzen Docker-Build-Cache, auch den anderer
 Projekte): Ist Dockers Platte voll, listet die Schaltfläche **Free Docker space...** im Dialog (auch **Tools >
 Framework Build Images...**) oder `llm-cli doctor --fix --tier 2` im Terminal die Build-Images des Frameworks mit
@@ -814,8 +814,8 @@ die Annahmen; seine Unterstützungsstufe ist community.
 - **Ersatzkette** (`ai_fallback_chain`, z. B. `local, ollama:qwen3.5:4b`): Lehnt das Modell ab oder ist der Anbieter
   nicht erreichbar, wird der nächste Eintrag versucht. Nicht eingerichtete Einträge werden übersprungen.
 - **Offline-Modus** (`offline_mode`): Es werden nur lokale Anbieter genutzt; ein Cloud-Anbieter wird mit einer
-  klaren Meldung abgelehnt. Auch die Wissensbasis lädt im Offline-Modus nichts herunter. „Lokal“ folgt einer Regel
-  (unveröffentlicht): Ein Servername zählt nach den Adressen, zu denen er auflöst (ein `.local`- oder `.lan`-Name
+  klaren Meldung abgelehnt. Auch die Wissensbasis lädt im Offline-Modus nichts herunter. „Lokal“ folgt einer Regel:
+  Ein Servername zählt nach den Adressen, zu denen er auflöst (ein `.local`- oder `.lan`-Name
   nur, wenn er zu einer Adresse in deinem eigenen Netz auflöst; ein öffentlicher Name wie der eines Reverse Proxys
   ist nicht lokal; ein Name mit Adressen in deinem Netz und im Internet zählt als lokal, und das Framework verbindet
   sich nur mit denen in deinem Netz), und eine Tailscale- oder Headscale-Adresse nur, wenn ihr Steuerserver und jedes
@@ -896,7 +896,7 @@ die Vorgaben).
   pro Sekunde und wartet nie darauf; ein Eintrag, der sich nicht prüfen lässt, wird nicht gezeigt, und der Bereich
   sagt, wie viele übersprungen wurden. Ohne den Verlauf zeigt er Dittos Gespräch wie bisher und sagt, dass neue
   Nachrichten nicht behalten werden.
-- **Was KIs getan haben** (unveröffentlicht, Welle 6): Was Ditto oder eine KI-App mit den Werkzeugen des Frameworks
+- **Was KIs getan haben** (Welle 6): Was Ditto oder eine KI-App mit den Werkzeugen des Frameworks
   tut, wird zu einem signierten Eintrag, geschrieben von dem Prozess des Frameworks, der die Arbeit getan hat: ein
   Aufruf, der etwas geändert hat („Hat einen Build gestartet.“, „Hat Einstellungen geändert: language.“), das Ende
   einer Arbeit, die eine KI gestartet hat (ein Download, eine Übertragung, ein Deep Ingest, ein Build, mit dem Ordner
@@ -1493,7 +1493,7 @@ self-built“.
   Bauplan) und `manifest.json` (sha256 jeder Datei, Dauer, Bau-Rechner, Prüfergebnisse). Die Build-ID ist der Hash
   von allem, was die Programme verändert, also wird ein abgelegter Build wiederverwendet und nie neu gestempelt. Nur
   ein auf diesem Rechner geprüfter Build kann der aktive werden. Das Framework löscht keinen Build von selbst
-  (unveröffentlicht; vorher behielt es nur die zwei neuesten anderen): `llm-cli ditto runtime prune` listet die alten
+  (vorher behielt es nur die zwei neuesten anderen): `llm-cli ditto runtime prune` listet die alten
   zum Ankreuzen, nie den aktiven Build, den CPU-Ersatz oder den Build, aus dem ein laufender Server gestartet wurde.
   Ein Build von
   einem deiner anderen Rechner kann importiert werden: Jede Datei wird gegen sein Manifest geprüft, die Build-ID
@@ -1680,7 +1680,7 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
   braucht https und den API-Schlüssel als Geheimnis `qdrant_api_key` (nie Zugangsdaten in der URL). Suchen sind exakt
   (kein angenäherter Graph-Index), wie bisher. Auf einem Rechner ohne Build von Qdrant Edge (Windows auf ARM) behält
   die Wissensbasis den älteren lokalen Speicher von qdrant-client: langsamer, aber vollständig; Mojo Oracle sagt es.
-- **Umwandlung einer älteren Wissensbasis (unveröffentlicht):** Frühere Versionen speicherten sie im lokalen Modus von
+- **Umwandlung einer älteren Wissensbasis:** Frühere Versionen speicherten sie im lokalen Modus von
   qdrant-client (`~/.llm-framework/qdrant`, ein reiner Python-Ersatz für Qdrant, gedacht für die Entwicklung). Bei der
   ersten Nutzung wird sie umgewandelt: Vektoren und Texte werden kopiert (nichts wird neu eingebettet), die Anzahl
   jeder Collection wird verglichen und eine Stichprobe von Punkten und Suchen gegen den alten Speicher geprüft. Das
@@ -1713,9 +1713,9 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
 - **Schnappschüsse:** Vor jedem Crawl, jeder Aufnahme der eigenen Dokumente des Frameworks, jeder Wiederherstellung
   und jedem Import eines Wissens-Packs wird die Wissensbasis als Schnappschuss in
   `~/.llm-framework/knowledge_snapshots` gesichert; ein belegter Name bekommt `-2`, so wird nie ein Schnappschuss
-  überschrieben. Es gibt keine Grenze (unveröffentlicht; bisher blieben auf jedem Weg nur die neuesten 5): Das
+  überschrieben. Es gibt keine Grenze (bisher blieben auf jedem Weg nur die neuesten 5): Das
   Framework behält so viele, wie die Platte fasst, löscht keinen von selbst, und keine Anzahl bringt eine Erinnerung
-  oder eine Warnung. Was zählt, ist die Platte (unveröffentlicht; achte Runde, Antwort 2): bevor ein Schnappschuss
+  oder eine Warnung. Was zählt, ist die Platte (achte Runde, Antwort 2): bevor ein Schnappschuss
   angelegt wird, wird seine Größe geschätzt. Passt er neben der Reserve, die immer frei bleibt, nicht mehr hin, wird
   kein Schnappschuss angelegt, und die Änderung läuft auch nicht; ein „trotzdem weiter“ gibt es nicht. Du bekommst die
   Liste, um Schnappschüsse zu löschen oder zu exportieren (die GUI bietet **Knowledge Snapshots...** an; KI-Clients
@@ -1755,7 +1755,7 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
   heruntergeladen werden, mit der Größe und der Situationswarnung `embedding_model_download`.
 - **Dokumentation aufnehmen:** [Deep Ingest](#deep-ingest) im Modul-Assistenten und
   [Wissens-Packs](#community-zoo) aus dem Community-Zoo.
-- **Die eigenen Dokumente des Frameworks** (unveröffentlicht): **Tools > Index the Framework's Documentation...**,
+- **Die eigenen Dokumente des Frameworks**: **Tools > Index the Framework's Documentation...**,
   `llm-cli knowledge index-docs` oder das Tool `index_framework_docs` nehmen seine Dokumentation (README,
   CONTRIBUTING, den Ordner `docs`) und auf Wunsch seinen Code und seine Konfiguration als Art `docs` auf, damit Ditto
   das Innenleben des Frameworks erklären kann (wie ein Wert der Probe ein Build-Skript erreicht, was eine Einstellung
@@ -1897,7 +1897,7 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
   für seinen Namen von vor der Umbenennung des Repositorys geschrieben hat, `LLM-Conversion-Framework-Bot`, gelten
   weiter für ihn, ein früher erklärter Nutzungsvorbehalt bleibt also bestehen.
 
-### Versteckter Text bleibt draußen (unveröffentlicht)
+### Versteckter Text bleibt draußen
 
 Text, den eine Person beim Lesen einer Seite nicht sieht, ist ein bekannter Weg, in einer Webseite Anweisungen für
 eine KI zu verstecken (Prompt Injection). Deshalb speichert Deep Ingest nur, was eine Leserin oder ein Leser sieht
@@ -2429,7 +2429,7 @@ wurde.
   markiert, Links aus dem Ordner hinaus, mehrfach verlinkte und versteckte Dateien und unfertige Downloads
   weggelassen; 50 je Seite), jede mit Datei-ID und `<Label>:<relativer Pfad>`, die `start_build` annimmt; eine
   heruntergeladene Datei erscheint dort auch.
-- **Hugging-Face-Downloads in der GUI (unveröffentlicht, Entscheidung A6):** **Tools > Hugging Face Model
+- **Hugging-Face-Downloads in der GUI (Entscheidung A6):** **Tools > Hugging Face Model
   Browser...** lädt über denselben Fetcher wie `download_hf_file` in denselben Ordner `models/hf/<owner>--<name>/<die
   ersten 12 Zeichen des Commits>/`: Zuerst wird der Commit nachgeschlagen, die Datei wird gegen Größe und sha256 des
   Hubs geprüft, bevor sie ihren Namen bekommt, und ein angehaltener Download setzt an seiner `.part`-Datei fort. Die
@@ -2885,7 +2885,7 @@ Die Eingabefelder der GUI bieten an, was du zuletzt verwendet hast, das Neueste 
 ## Fachbegriffe, Fehlermeldungen und Anrede
 
 Fachbegriffe bleiben in beiden Sprachen Englisch, damit sie zu dem passen, was du anderswo findest; das Framework
-erklärt sie dort, wo sie stehen (unveröffentlicht).
+erklärt sie dort, wo sie stehen.
 
 - **Erklärungen beim Überfahren mit der Maus:** Lass die Maus auf einer markierten Beschriftung ruhen (der Mauszeiger
   zeigt ein Fragezeichen), und eine kleine Karte zeigt den Begriff, ein oder zwei einfache Sätze in deiner Sprache und
@@ -2917,7 +2917,7 @@ erklärt sie dort, wo sie stehen (unveröffentlicht).
 
 ## Löschen und der Papierkorb
 
-Nichts, was das Framework für dich löscht, wird ohne deine Frage gelöscht (unveröffentlicht). Die Frage zählt genau
+Nichts, was das Framework für dich löscht, wird ohne deine Frage gelöscht. Die Frage zählt genau
 auf, was weggeht: zu jedem Teil den Namen, den vollen Pfad (bei einem Image die Docker-ID), den Dateinamen, die Größe
 und was es ist. „Nein“ ist die Vorgabe. Eine KI-App oder Ditto sieht nie die Pfade, nur Namen, Arten und Größen, und
 entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauerfreigabe oder eine Vollmacht.
@@ -3099,7 +3099,7 @@ Einzelheiten: [Module_Developer_Guide_DE.md](Module_Developer_Guide_DE.md).
 
 ## Gesundheitscheck (Mojo)
 
-**Mojo** ist der Gesundheitscheck (er hieß doctor; unveröffentlicht). `llmcf mojo` (dasselbe wie `llm-cli mojo`) führt
+**Mojo** ist der Gesundheitscheck (er hieß doctor). `llmcf mojo` (dasselbe wie `llm-cli mojo`) führt
 feste Prüfungen aus; nichts fragt ein Modell, was falsch ist. Die ganze Anleitung: [Mojo_DE.md](Mojo_DE.md).
 
 | Bereich | Prüfungen |
@@ -3109,12 +3109,12 @@ feste Prüfungen aus; nichts fragt ein Modell, was falsch ist. Die ganze Anleitu
 | Speicherplatz | freier Platz für den Cache-, den Ausgabe- und den Build-Ordner nach der einen Speicherplatz-Regel: ein Fehler, wenn weniger als die Reserve (2 GiB oder 2 % der Festplatte) frei bleibt, nach dem, was laufende Builds und Downloads reserviert haben, eine Warnung unter der doppelten Reserve |
 | Targets | Targets gefunden, Capabilities lesbar |
 | Sicherheit | persönlicher Ordner privat, Secrets-Speicher nutzbar, Schlüsselbund schützt Geheimnisse |
-| KI | Tool-Berechtigungen eingerichtet und lesbar, MCP-Token lesbar, Audit-Log intakt (geändert, entfernt, falscher Schlüssel, fehlender Anker, kein Schlüssel); der Chat-Verlauf lässt sich schreiben und seine neuesten Einträge stimmen (geänderte oder fremde Einträge, kein Schlüssel; unveröffentlicht) |
+| KI | Tool-Berechtigungen eingerichtet und lesbar, MCP-Token lesbar, Audit-Log intakt (geändert, entfernt, falscher Schlüssel, fehlender Anker, kein Schlüssel); der Chat-Verlauf lässt sich schreiben und seine neuesten Einträge stimmen (geänderte oder fremde Einträge, kein Schlüssel) |
 | Daten | mitgelieferte Kalibrierungsdaten intakt (Prüfsummen) |
 | Community | installierte Community-Packs gegen den zwischengespeicherten Index: gesperrt (Fehler), seit der Installation verändert (Warnung), Vertrauensstufe `local` (Information) |
-| Wissen | wie viele Snapshots der Wissensbasis es gibt, ihre Größe im Vergleich zum freien Platz ihrer Platte und ihr Ordner; eine Warnung, wenn der nächste Snapshot nicht mehr passen würde, eine Information, wenn er passt, aber wenig Platz übrig lässt (keine Grenze: ihre Zahl ist nie eine Warnung; nichts wird gelöscht; unveröffentlicht); der Speicher der Wissensbasis, aus dem Eintrag ihrer Umwandlung in Qdrant Edge, ohne ihn zu öffnen (`knowledge.storage`): eine fehlgeschlagene Umwandlung (Warnung, mit dem Grund und wie du es erneut versuchst), Qdrant Edge, das sich für eine darin gespeicherte Wissensbasis nicht laden lässt (Fehler), der alte Speicherordner, der noch da ist (Information, mit vollem Pfad, Größe und wo du ihn löschst), der ältere Speicher auf einem Rechner ohne Build von Qdrant Edge (Information; unveröffentlicht) |
-| Laufzeit | der genutzte selbst gebaute llama.cpp-Build: veränderte Dateien (Fehler), älter als der Pin (Warnung), fehlt (Warnung); das vorgefertigte Archiv, als nicht selbst gebaut gekennzeichnet, genutzt oder installiert, aber nicht genutzt (Information); ob dieser Rechner die Werkzeuge für einen nativen Build hat (Information); im Docker-Modus Dittos Image: da, auf diesem Rechner gebaut, vom Pin und geprüft (OK), Docker nicht erreichbar oder das Image weg oder ein anderes (Warnung; unveröffentlicht) |
-| Boards | jedes vertraute Board (unveröffentlicht), aus dem, was aufgezeichnet ist, ohne jeden Netzwerkkontakt: sein Host-Schlüssel in den `known_hosts` des Frameworks (geändert oder fehlt: Warnung) und das letzte Deployment, Laufzeit-Deployment, die letzte Prüfung, der letzte Benchmark oder die letzte Hardware-Prüfung, die es nicht erreicht haben (`device_host_down` Information; `device_port_closed`, `device_auth_failed`, `device_host_key_changed` Warnungen), mit dem nächsten Schritt und dem Angebot, es zu prüfen; `--board NAME` (oder `run_mojo_oracle` mit der Bezeichnung eines Boards) prüft ein Board sofort mit einer Verbindung zu seinem SSH-Port, ohne Anmeldung; nie das Gerätekonto |
+| Wissen | wie viele Snapshots der Wissensbasis es gibt, ihre Größe im Vergleich zum freien Platz ihrer Platte und ihr Ordner; eine Warnung, wenn der nächste Snapshot nicht mehr passen würde, eine Information, wenn er passt, aber wenig Platz übrig lässt (keine Grenze: ihre Zahl ist nie eine Warnung; nichts wird gelöscht); der Speicher der Wissensbasis, aus dem Eintrag ihrer Umwandlung in Qdrant Edge, ohne ihn zu öffnen (`knowledge.storage`): eine fehlgeschlagene Umwandlung (Warnung, mit dem Grund und wie du es erneut versuchst), Qdrant Edge, das sich für eine darin gespeicherte Wissensbasis nicht laden lässt (Fehler), der alte Speicherordner, der noch da ist (Information, mit vollem Pfad, Größe und wo du ihn löschst), der ältere Speicher auf einem Rechner ohne Build von Qdrant Edge (Information) |
+| Laufzeit | der genutzte selbst gebaute llama.cpp-Build: veränderte Dateien (Fehler), älter als der Pin (Warnung), fehlt (Warnung); das vorgefertigte Archiv, als nicht selbst gebaut gekennzeichnet, genutzt oder installiert, aber nicht genutzt (Information); ob dieser Rechner die Werkzeuge für einen nativen Build hat (Information); im Docker-Modus Dittos Image: da, auf diesem Rechner gebaut, vom Pin und geprüft (OK), Docker nicht erreichbar oder das Image weg oder ein anderes (Warnung) |
+| Boards | jedes vertraute Board, aus dem, was aufgezeichnet ist, ohne jeden Netzwerkkontakt: sein Host-Schlüssel in den `known_hosts` des Frameworks (geändert oder fehlt: Warnung) und das letzte Deployment, Laufzeit-Deployment, die letzte Prüfung, der letzte Benchmark oder die letzte Hardware-Prüfung, die es nicht erreicht haben (`device_host_down` Information; `device_port_closed`, `device_auth_failed`, `device_host_key_changed` Warnungen), mit dem nächsten Schritt und dem Angebot, es zu prüfen; `--board NAME` (oder `run_mojo_oracle` mit der Bezeichnung eines Boards) prüft ein Board sofort mit einer Verbindung zu seinem SSH-Port, ohne Anmeldung; nie das Gerätekonto |
 
 **Mojo Oracle** (Standard) schaut nur. Zu jeder Warnung und jedem Fehler sagt es, was es gefunden hat, wo (den vollen
 Pfad oder das Objekt), warum das wichtig ist, einen Hinweis und ob Mojo Miracle es reparieren kann; ein Satz am Ende
@@ -3145,7 +3145,7 @@ Docker-Images auf eine andere Platte zu verlegen ist ein Schritt für Administra
 einem kurzen Hinweis, der `llmcf mojo` nennt; `--fix` macht dieselben protokollierten harmlosen Reparaturen, und
 `--tier 2` zeigt auch die Liste der Build-Images des Frameworks.
 
-GUI (unveröffentlicht): **Tools > Mojo-Gesundheitscheck...** erledigt all das mit der Maus, über dieselben Funktionen
+GUI: **Tools > Mojo-Gesundheitscheck...** erledigt all das mit der Maus, über dieselben Funktionen
 wie der Befehl. Mojo Oracle läuft beim Öffnen des Fensters, außerhalb des GUI-Threads, und zeigt jeden Befund so, wie
 `llmcf mojo` ihn ausgibt (die Schwere als Text mit Zeichen und Symbol, nie nur als Farbe; wo, warum es wichtig ist,
 den nächsten Schritt, was Mojo Miracle tun kann, mit seinem Plan; den zusammenfassenden Satz und eine Gesamtzeile mit
@@ -3302,7 +3302,7 @@ Targets kommen nach `targets/`, Rezepte nach `community/recipes/`, Wissen in den
 in `community/knowledge/` (siehe [Wissen gehört zu einem Thema oder einem Target](#wissen-gehört-zu-einem-thema-oder-einem-target)).
 Ein Wissens-Pack wird direkt nach seiner Installation in die Wissensbasis aufgenommen oder, wenn die Wissensbasis
 ausgeschaltet ist, sobald sie eingeschaltet wird. Bevor seine erste Seite aufgenommen wird, wird die Wissensbasis als
-Schnappschuss gesichert (`pre_pack_<Zeit>`), damit sich der Import rückgängig machen lässt (unveröffentlicht). Passt
+Schnappschuss gesichert (`pre_pack_<Zeit>`), damit sich der Import rückgängig machen lässt. Passt
 dieser Schnappschuss nicht mehr auf die Platte, wird nichts aufgenommen: das Pack bleibt installiert und wird
 aufgenommen, sobald Platz da ist. Ein Pack, das sich noch nicht aufnehmen lässt (zum Beispiel offline ohne das
 Embedding-Modell), wird beim nächsten Start ohne weiteren Schnappschuss noch einmal versucht; ein erneut installiertes
@@ -3310,7 +3310,7 @@ Pack bekommt einen neuen.
 
 ### Wissen gehört zu einem Thema oder einem Target
 
-Unveröffentlicht (DECISIONS Runde 23 Punkte 1, 2 und 8). Jedes geteilte Wissen gehört zu einem Thema (zum Beispiel
+Jedes geteilte Wissen gehört zu einem Thema (zum Beispiel
 `llama.cpp`) oder zu einem Target (zum Beispiel `Rockchip`), und so wird es auch auf der Platte und in der Wissensbasis
 gehalten:
 

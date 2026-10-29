@@ -6,12 +6,15 @@ targets/, data/ and wherever else one is added), except the commented EXCEPTIONS
 - Every document exists twice: X.md in English (primary) and X_DE.md in German, and each links to its twin.
 - Every relative link points to an existing file and, with an #anchor, to an existing heading
   (GitHub anchor rules).
-- CHANGELOG.md and CHANGELOG_DE.md (Keep a Changelog 1.1.0) say what was done: the same versions in the same
-  order with the same dates and the same sections. The roadmap (docs/BLUEPRINT.md#roadmap and its German twin)
-  says what comes: the changelogs link to it, it names no version that is already released, both languages give
-  every item the same status, and items marked "done" have entries under [Unreleased] in the changelog.
-- The newest released version in both changelogs is orchestrator.__version__, and the version line at the top
-  of every other document names that version.
+- The blueprint is three files (DECISIONS round 34): docs/DESIGN.md, docs/ROADMAP.md and CHANGELOG.md, each with
+  its German twin; docs/BLUEPRINT.md is their short index.
+- CHANGELOG.md and CHANGELOG_DE.md (Keep a Changelog 1.1.0, without an [Unreleased] section) say what was done: the
+  same versions in the same order with the same dates and the same sections, every entry stamped with its time and
+  version (the German twin with the same stamp), a link per version. The roadmap (docs/ROADMAP.md and its German
+  twin) says what comes: the changelogs link to it, it names no version that is already released, both languages
+  give every item the same status, no item is "done", and no item is also a changelog entry.
+- The newest version in both changelogs is orchestrator.__version__, and the version line at the top of every other
+  document names that version.
 """
 
 import fnmatch
@@ -122,15 +125,54 @@ BLUEPRINT_FILES: List[Tuple[str, str]] = [
 ]
 BLUEPRINT_INDEX: Tuple[str, str] = ("docs/BLUEPRINT.md", "docs/BLUEPRINT_DE.md")
 # The index stays short: what each file holds and where the old sections went.
-BLUEPRINT_INDEX_MAX_LINES = 80
+BLUEPRINT_INDEX_MAX_LINES = 60
 
-# The status in the last column of every roadmap table row, and its German name. "done" means built and listed
-# under [Unreleased] in the changelog; at release such items leave the roadmap.
+# Every second- and third-level anchor of docs/BLUEPRINT(_DE).md before the split (at cs-c5-v), in order. Nothing is
+# lost: each one stays an anchor of the index, a design anchor survives in DESIGN (without its "(unreleased)" mark),
+# a roadmap anchor (from "roadmap" up to "history") leads into ROADMAP.
+OLD_BLUEPRINT_ANCHORS: Dict[str, List[str]] = {
+    "docs/BLUEPRINT.md": [
+    "contents", "in-short", "purpose-and-principles", "architecture-overview", "layers-unreleased", "components",
+    "where-things-are-stored", "data-flows", "a-build-from-request-to-device", "a-tool-call-from-an-mcp-client",
+    "an-ai-app-in-the-open-window-unreleased", "a-question-to-ditto-unreleased", "self-healing-approval",
+    "the-local-model-for-offline-mode-unreleased", "offline-mode-and-the-local-network-unreleased",
+    "deep-ingest-from-a-web-page-to-the-knowledge-base-unreleased", "a-knowledge-base-search-unreleased",
+    "the-knowledge-bases-storage-qdrant-edge-unreleased", "community-packs-format-trust-and-exchange-unreleased",
+    "recent-inputs-unreleased", "security-model", "known-gaps", "key-decisions",
+    "versioning-and-documentation-policy", "roadmap", "310---ditto-rebuild-sign-in-and-local-ai-in-progress",
+    "next---build-service-queue-and-modes-planned-starts-right-after-the-architecture-consolidation",
+    "320---device-runtime-and-the-maintainers-hardware-planned", "330---lora-and-large-models-planned",
+    "340---supply-chain-and-community-planned", "rust-parts-planned", "later-planned", "history", "glossary",
+    ],
+    "docs/BLUEPRINT_DE.md": [
+    "inhalt", "kurz-gesagt", "zweck-und-grundsätze", "architektur-im-überblick", "schichten-unveröffentlicht",
+    "bausteine", "wo-was-liegt", "datenflüsse", "ein-build-vom-auftrag-bis-zum-gerät",
+    "ein-tool-aufruf-eines-mcp-clients", "eine-ki-app-im-offenen-fenster-unveröffentlicht",
+    "eine-frage-an-ditto-unveröffentlicht", "freigabe-beim-self-healing",
+    "das-lokale-modell-für-den-offline-modus-unveröffentlicht", "offline-modus-und-das-eigene-netz-unveröffentlicht",
+    "deep-ingest-von-der-webseite-in-die-wissensbasis-unveröffentlicht",
+    "eine-suche-in-der-wissensbasis-unveröffentlicht", "der-speicher-der-wissensbasis-qdrant-edge-unveröffentlicht",
+    "community-pakete-format-vertrauen-und-austausch-unveröffentlicht",
+    "zuletzt-verwendete-eingaben-unveröffentlicht", "sicherheitsmodell", "bekannte-lücken",
+    "wichtige-entscheidungen", "versionierung-und-dokumentationsregeln", "roadmap",
+    "310---ditto-neubau-anmeldung-und-lokale-ki-in-arbeit",
+    "als-nächstes---build-dienst-warteschlange-und-modi-geplant-beginnt-direkt-nach-der-architektur-konsolidierung",
+    "320---laufzeit-auf-dem-gerät-und-die-hardware-des-maintainers-geplant", "330---lora-und-große-modelle-geplant",
+    "340---lieferkette-und-community-geplant", "rust-teile-geplant", "später-geplant", "geschichte", "glossar",
+    ],
+}
+
+# The status in the last column of every roadmap table row, and its German name. There is no "done": a finished item
+# leaves the roadmap in the commit that writes its changelog entry (DECISIONS round 34).
 ROADMAP_STATUS_DE: Dict[str, str] = {
-    "done": "fertig",
     "in progress": "in Arbeit",
     "planned": "geplant",
 }
+DONE_STATUSES = {"done", "fertig"}
+
+# Every changelog entry starts with its stamp: `YYYY-MM-DD HH:MM UTC` · `vX.Y.Z` (DECISIONS round 34).
+STAMP = re.compile(r"^[-*] `(\d{4}-\d{2}-\d{2}) (\d{2}):(\d{2}) UTC` · `v(\d+\.\d+\.\d+)` \S")
+STAMP_PREFIX = re.compile(r"^`\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC` · `v[^`]+` ")
 
 # --- Finding the documents ------------------------------------------------------------------------------
 
@@ -413,12 +455,14 @@ def test_changelogs_have_the_same_versions_dates_and_sections():
                                            f"(English {sections_en}, German {sections_de})")
 
 
-def test_changelog_versions_are_newest_first_with_dates():
-    entries = changelog_entries("CHANGELOG.md")
-    assert entries and entries[0][0] == "Unreleased" and entries[0][1] is None, \
-        "the changelog starts with an undated [Unreleased] section"
-    released = entries[1:]
-    assert all(date for _, date, _ in released), "every released version has a date"
+@pytest.mark.parametrize("changelog", ["CHANGELOG.md", "CHANGELOG_DE.md"])
+def test_changelog_versions_are_newest_first_with_dates(changelog):
+    """No [Unreleased] and no other undated section: the changelog lists only what is done (DECISIONS round 34)."""
+    entries = changelog_entries(changelog)
+    assert entries, f"{changelog} has no version"
+    assert all(v != "Unreleased" for v, _, _ in entries), f"{changelog} has an [Unreleased] section"
+    released = entries
+    assert all(date for _, date, _ in released), "every version has a date (YYYY-MM-DD)"
     versions = [_semver(v) for v, _, _ in released]
     assert versions == sorted(versions, reverse=True) and len(set(versions)) == len(versions), \
         "versions must be unique and newest first"
@@ -454,7 +498,7 @@ def roadmap_versions(rel: str) -> List[str]:
 
 def test_roadmap_lists_only_what_comes():
     """Finished versions leave the roadmap at release; it names only versions newer than the newest release."""
-    newest = next(v for v, _, _ in changelog_entries("CHANGELOG.md") if v != "Unreleased")
+    newest = changelog_entries("CHANGELOG.md")[0][0]
     found = {}
     for target in ROADMAP_LINKS.values():
         rel = target.partition("#")[0]
@@ -478,19 +522,129 @@ def roadmap_statuses(rel: str, known: Set[str]) -> List[str]:
     return statuses
 
 
-def test_roadmap_statuses_match_and_done_items_are_unreleased():
-    """Both roadmaps give every item the same status; "done" items must be in the changelog under [Unreleased]."""
+def test_roadmap_statuses_match_and_nothing_is_done():
+    """Both roadmaps give every item the same status, and no item is "done": finished work is in the changelog."""
     english_doc, german_doc = (target.partition("#")[0] for target in ROADMAP_LINKS.values())
     for rel in (english_doc, german_doc):
-        assert (REPO_ROOT / rel).is_file(), f"{rel}, the document with the roadmap, is missing"
+        assert (REPO_ROOT / rel).is_file(), f"{rel}, the roadmap, is missing"
     english = roadmap_statuses(english_doc, set(ROADMAP_STATUS_DE))
     german = roadmap_statuses(german_doc, set(ROADMAP_STATUS_DE.values()))
     assert [ROADMAP_STATUS_DE[s] for s in english] == german, \
         f"the English and German roadmaps differ in their item statuses: {english} / {german}"
-    if "done" in english:
-        version, _, sections = changelog_entries("CHANGELOG.md")[0]
-        assert version == "Unreleased" and sum(count for _, count in sections) > 0, \
-            "the roadmap marks items as done, but the changelog has no [Unreleased] entries for them"
+    done = roadmap_statuses(english_doc, DONE_STATUSES) + roadmap_statuses(german_doc, DONE_STATUSES)
+    assert not done, "the roadmap lists done items; they belong in the changelog under their version"
+
+
+def _bold_title(text: str) -> str:
+    m = re.match(r"^\*\*(.+?)\*\*", text.strip())
+    return " ".join(m.group(1).split()).rstrip(".:").lower() if m else ""
+
+
+def roadmap_titles(rel: str) -> List[str]:
+    """The bold title at the start of every roadmap table row and list item."""
+    titles = []
+    for item in roadmap_items(rel):
+        body = item.strip("|").strip() if item.startswith("|") else item[2:] if item.startswith("- ") else ""
+        title = _bold_title(body)
+        if title:
+            titles.append(title)
+    return titles
+
+
+def changelog_entry_texts(rel: str) -> List[str]:
+    """Every top-level entry of a changelog with its wrapped lines, in order."""
+    entries: List[str] = []
+    for line in _prose_lines(_read(rel)):
+        if line.startswith("#") or _REFERENCE_DEF.match(line):
+            entries.append("")
+            continue
+        if re.match(r"^[-*] ", line):
+            entries.append(line)
+        elif entries and entries[-1] and line.strip():
+            entries[-1] += " " + line.strip()
+    return [e for e in entries if e]
+
+
+def changelog_titles(rel: str) -> Set[str]:
+    titles = set()
+    for entry in changelog_entry_texts(rel):
+        title = _bold_title(STAMP_PREFIX.sub("", entry[2:]))
+        if title:
+            titles.add(title)
+    return titles
+
+
+@pytest.mark.parametrize("roadmap,changelog", [("docs/ROADMAP.md", "CHANGELOG.md"),
+                                               ("docs/ROADMAP_DE.md", "CHANGELOG_DE.md")])
+def test_no_roadmap_item_is_also_a_changelog_entry(roadmap, changelog):
+    """What is done is in the changelog and has left the roadmap; a row with the title of an entry is a leftover."""
+    both = sorted(set(roadmap_titles(roadmap)) & changelog_titles(changelog))
+    assert not both, f"{roadmap} still lists finished items (their entries are in {changelog}): {both}"
+
+
+# --- (3b) Every changelog entry carries its stamp; the two languages agree (DECISIONS round 34) ----------------
+
+def changelog_stamps(rel: str) -> List[Tuple[str, str, str, Optional[str]]]:
+    """(version, type, entry's first line, stamp "YYYY-MM-DD HH:MM vX.Y.Z" or None) for every entry, in order."""
+    out = []
+    version = section = None
+    for line in _prose_lines(_read(rel)):
+        heading = _VERSION_HEADING.match(line)
+        if heading:
+            version, section = heading.group(1), None
+        elif line.startswith("### "):
+            section = line[4:].strip()
+        elif version and section and re.match(r"^[-*] ", line):
+            m = STAMP.match(line)
+            out.append((version, section, line[:100],
+                        f"{m.group(1)} {m.group(2)}:{m.group(3)} v{m.group(4)}" if m else None))
+    return out
+
+
+@pytest.mark.parametrize("changelog", ["CHANGELOG.md", "CHANGELOG_DE.md"])
+def test_every_changelog_entry_starts_with_its_stamp(changelog):
+    """`YYYY-MM-DD HH:MM UTC` · `vX.Y.Z`: the version is its section's, the time a real one not after the section's
+    date."""
+    dates = {v: d for v, d, _ in changelog_entries(changelog)}
+    problems = []
+    for version, section, first, stamp in changelog_stamps(changelog):
+        if stamp is None:
+            problems.append(f"[{version}] {section}: no stamp: {first}")
+            continue
+        day, clock, v = stamp.split(" ")
+        if v != f"v{version}":
+            problems.append(f"[{version}] {section}: stamp names {v}: {first}")
+        hours, minutes = clock.split(":")
+        if not (0 <= int(hours) < 24 and 0 <= int(minutes) < 60):
+            problems.append(f"[{version}] {section}: no such time {clock}: {first}")
+        if dates.get(version) and day > dates[version]:
+            problems.append(f"[{version}] {section}: stamped {day}, after the section's date {dates[version]}: {first}")
+    assert not problems, f"{changelog}:\n  " + "\n  ".join(problems[:40])
+
+
+def test_the_german_changelog_entries_carry_the_stamps_of_their_english_twins():
+    english = [(v, s, stamp) for v, s, _, stamp in changelog_stamps("CHANGELOG.md")]
+    german = [(v, s, stamp) for v, s, _, stamp in changelog_stamps("CHANGELOG_DE.md")]
+    translated = [(v, CHANGELOG_SECTIONS_DE.get(s, s), stamp) for v, s, stamp in english]
+    assert len(translated) == len(german), "both changelogs have the same number of entries"
+    differ = [f"{e} / {g}" for e, g in zip(translated, german) if e != g]
+    assert not differ, "entries paired by order differ in version, type or stamp:\n  " + "\n  ".join(differ[:20])
+
+
+@pytest.mark.parametrize("changelog", ["CHANGELOG.md", "CHANGELOG_DE.md"])
+def test_every_changelog_version_has_its_link(changelog):
+    """Keep a Changelog: linkable versions, one link reference per version heading."""
+    text = _read(changelog)
+    versions = [v for v, _, _ in changelog_entries(changelog)]
+    refs = dict(re.findall(r"^\[([^\]]+)\]: (\S+)$", text, re.M))
+    missing = [v for v in versions if not refs.get(v, "").startswith("https://")]
+    assert not missing, f"{changelog}: versions without a link reference: {missing}"
+
+
+def test_the_stamp_check_finds_a_missing_or_wrong_stamp():
+    assert STAMP.match("- `2026-10-29 21:26 UTC` · `v3.1.0` **Title** text")
+    for line in ["- **Title** text", "- `2026-10-29 21:26` · `v3.1.0` **Title**", "- `2026-10-29 UTC` · `v3.1` x"]:
+        assert not STAMP.match(line), line
 
 
 @pytest.mark.parametrize("changelog", sorted(ROADMAP_LINKS))
@@ -529,12 +683,35 @@ def test_the_blueprint_is_a_short_index_of_the_three_files(index):
                    "security-model" if not german else "sicherheitsmodell", "glossary" if not german else "glossar"):
         assert anchor in old, f"{index}: the old anchor #{anchor} must still lead somewhere"
 
+@pytest.mark.parametrize("index", BLUEPRINT_INDEX)
+def test_nothing_of_the_old_blueprint_is_lost(index):
+    """Every heading the blueprint had before the split is still there: in the design (its "(unreleased)" mark
+    gone) or in the roadmap, and its old anchor in the index leads to it."""
+    german = index.endswith(GERMAN_SUFFIX)
+    design = "docs/DESIGN_DE.md" if german else "docs/DESIGN.md"
+    roadmap = "docs/ROADMAP_DE.md" if german else "docs/ROADMAP.md"
+    old = OLD_BLUEPRINT_ANCHORS[index]
+    road_start, road_end = old.index("roadmap"), old.index("geschichte" if german else "history")
+    kept = anchors(_read(index))
+    new_design = anchors(_read(design))
+    targets = {t.partition("#")[0]: t for t in links(_read(index))}
+    assert roadmap.rsplit("/", 1)[-1] in targets, f"{index} must link to {roadmap}"
+    problems = []
+    for n, anchor in enumerate(old):
+        if anchor not in kept:
+            problems.append(f"#{anchor} is no longer an anchor of {index}")
+        if not road_start <= n < road_end:
+            plain = re.sub(r"-(unreleased|unveröffentlicht)$", "", anchor)
+            if plain not in new_design:
+                problems.append(f"#{anchor}: {design} has no heading #{plain}")
+    assert not problems, "\n  ".join(problems)
+
 
 # --- (4) One version everywhere -----------------------------------------------------------------------------
 
 @pytest.mark.parametrize("changelog", ["CHANGELOG.md", "CHANGELOG_DE.md"])
 def test_newest_changelog_version_is_the_package_version(changelog):
-    released = [v for v, d, _ in changelog_entries(changelog) if v != "Unreleased"]
+    released = [v for v, d, _ in changelog_entries(changelog)]
     assert released and released[0] == __version__, \
         f"{changelog}: newest version {released[:1]} differs from orchestrator.__version__ {__version__}"
 
@@ -580,11 +757,11 @@ PUBLISHED_IMAGE_WORDING = [
 
 
 def _current_text(rel: str) -> str:
-    """The text a reader takes as current: for a changelog only [Unreleased]; released versions record history."""
+    """The text a reader takes as current: for a changelog only the newest version; older versions record history."""
     text = _read(rel)
     if Path(rel).name.startswith("CHANGELOG"):
-        released = re.search(r"^## \[\d+\.\d+\.\d+\]", text, re.M)
-        return text[:released.start()] if released else text
+        versions = list(re.finditer(r"^## \[\d+\.\d+\.\d+\]", text, re.M))
+        return text[:versions[1].start()] if len(versions) > 1 else text
     return text
 
 

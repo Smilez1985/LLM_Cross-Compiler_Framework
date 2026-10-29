@@ -1,4 +1,4 @@
-Version 3.0.0 + unreleased changes · Last updated 2026-10-17
+Version 3.1.0 · Last updated 2026-10-29
 
 **English** · [Deutsch](CONTRIBUTING_DE.md)
 
@@ -27,7 +27,8 @@ Ways to contribute:
 - [ ] New behaviour is covered by tests in `tests/`
 - [ ] A new CLI command or option has its mouse path in the GUI and a `CLI_PATHS` entry, or a `MACHINE_ONLY` reason
   ([section 8](#8-code-guidelines))
-- [ ] Entry under `[Unreleased]` in `CHANGELOG.md` and `CHANGELOG_DE.md`
+- [ ] Changelog entry under the version the change lands in, with its stamp, in `CHANGELOG.md` and `CHANGELOG_DE.md`;
+  the decision in `docs/DESIGN.md` (+ `_DE`); the finished roadmap row removed from `docs/ROADMAP.md` (+ `_DE`)
 - [ ] Documentation updated in English and German
 - [ ] No secrets, personal state, binaries or model files in the diff
 
@@ -921,15 +922,25 @@ text:
 
 - Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/); versions follow
   [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
-- **The changelog says what was done.** Every change users notice gets an entry under `## [Unreleased]` in
-  `CHANGELOG.md`, and the same entry in German in `CHANGELOG_DE.md`. Use the sections Added, Changed, Deprecated,
-  Removed, Fixed and Security, and the matching sections in the German changelog.
+- **The blueprint is three files**: [docs/DESIGN.md](docs/DESIGN.md) (what, how and why of every part and decision),
+  [docs/ROADMAP.md](docs/ROADMAP.md) (what comes) and `CHANGELOG.md` (what was), each with its German twin. Read all
+  three before you design a change, and update all three in the same commit as the code.
+- **The changelog says what was done, and only that.** There is no `[Unreleased]` section. Finished work (wired,
+  tested, committed) gets its entry in the same commit as its code, under the version it lands in
+  (`## [x.y.z] - YYYY-MM-DD`), in `CHANGELOG.md` and the same entry in German in `CHANGELOG_DE.md`. Every entry starts
+  with `` `YYYY-MM-DD HH:MM UTC` · `vX.Y.Z` `` (the German twin carries the same stamp). Use the sections Added,
+  Changed, Deprecated, Removed, Fixed and Security, and the matching sections in the German changelog. The commit that
+  opens a new version section also sets that version in `orchestrator/__init__.py` (`__version__`) and
+  `pyproject.toml`.
 - Write for users: what changed and what it means for them.
 - **The roadmap says what comes.** Planned or unfinished work belongs in the roadmap
-  ([docs/ROADMAP.md](docs/ROADMAP.md)), not in the changelog. When you finish a roadmap item, set its
-  status to "done" in both language versions of the blueprint and add the changelog entry.
-- For a release, the maintainers turn `[Unreleased]` into `## [x.y.z] - YYYY-MM-DD`, set the same version in
-  `orchestrator/__init__.py` (`__version__`) and `pyproject.toml`, and remove the released items from the roadmap.
+  ([docs/ROADMAP.md](docs/ROADMAP.md)), with the status "in progress" or "planned", never in the changelog. When you
+  finish a roadmap item, remove its row (or narrow it to what is missing) in both languages in the same commit as the
+  changelog entry.
+- **Decisions go into the design.** Every decision a change implements is written into `docs/DESIGN.md` (+ `_DE`) at
+  the component it concerns, with what it says, how the code does it and why, in the same commit; a replaced decision
+  stays as one history line. No private data: no secrets, addresses, host or account names, no details of anyone's
+  own devices.
 
 ---
 
@@ -940,8 +951,8 @@ text:
 - Write natural German with correct umlauts (ä, ö, ü, ß) and typographic quotes („…“), not a word-by-word
   translation.
 - Both files link to each other at the top. Every document starts with a line like
-  `Version 3.0.0 · Last updated 2026-10-10` (German: `Version 3.0.0 · Stand 2026-10-10`); update it when you change
-  the document. If it also describes unreleased work, say so: `Version 3.0.0 + unreleased changes`.
+  `Version 3.1.0 · Last updated 2026-10-29` (German: `Version 3.1.0 · Stand 2026-10-29`); update it when you change
+  the document.
 - Describe only what exists on the current branch; planned features go to the roadmap. Check every command,
   option, path and configuration key against the code or the `--help` output before you write it down.
 - Write for newcomers first, then add the details. No marketing language.

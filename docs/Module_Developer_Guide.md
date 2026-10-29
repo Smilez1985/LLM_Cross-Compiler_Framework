@@ -1,4 +1,4 @@
-Version 3.0.0 + unreleased changes · Last updated 2026-10-11
+Version 3.1.0 · Last updated 2026-10-29
 
 **English** · [Deutsch](Module_Developer_Guide_DE.md)
 
@@ -269,7 +269,7 @@ On your computer the snapshot is not imported: its pages are in your knowledge b
 target as a pack, the snapshot travels with it, and the recipient's framework checks it at the install like a
 knowledge pack (a list of pages, each with its source, and its licence files) and imports it into their knowledge base
 under this target, with a snapshot of their knowledge base first; a newer version of your target pack replaces the
-excerpts of the older one there (unreleased, DECISIONS round 23 item 8).
+excerpts of the older one there (DECISIONS round 23 item 8).
 
 The result is a **skeleton**, not a working target yet:
 

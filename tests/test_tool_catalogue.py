@@ -13,7 +13,7 @@ from orchestrator.Core import disk_plan, hf_hub, hf_lookup
 # Design section 2.1: 37 core tools, 6 optional (default deny) and 2 later ones; the trash (delegation design 3.10)
 # adds two optional tools. Mojo (round 7 item 11') replaces run_doctor by run_mojo_oracle and adds run_mojo_miracle;
 # run_doctor stays registered under its 3.0.0 name, callable but never listed (HIDDEN). index_framework_docs (N12)
-# adds one core tool. The GUI tool `gui` (W4: one tool with an action field instead of the five unreleased GUI tools of
+# adds one core tool. The GUI tool `gui` (W4: one tool with an action field instead of the five GUI tools, never released, of
 # wave 3) is the fortieth core tool, the same for Ditto and MCP clients, so a client lists exactly MAX_LISTED_TOOLS.
 CORE = {
     "list_build_requests", "get_build_status", "read_build_log", "list_artifacts", "get_artifact_details",
