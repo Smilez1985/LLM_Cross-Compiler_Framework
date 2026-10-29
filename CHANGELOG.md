@@ -1313,7 +1313,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **The board's hardware probe drives every build; NPU formats only with its NPU** (DECISIONS round 23 items 5 and
   15): a build request names the board's probe by its id (`llm-cli build start --probe ID`, `BuildRequestIn.probe`;
   the Builder tab the probe it imported or scanned last); without one the newest stored probe of a board of the
-  request's SoC is used, and a probe of another board is refused. The build engine writes it into the build's folder
+  request's SoC is used, and a probe of another board is refused: another board of the target, a board of another
+  SoC (an RK3588S counts as an RK3588) or a system of another architecture than the target's (this PC's probe for a
+  Rockchip board); the Builder tab uses its probe only for the target the probe matched. The build engine writes it into the build's folder
   and mounts it read-only into every build container, the importance-matrix job too, as `HARDWARE_CONFIG_FILE`: the
   config stage plans the build for that board, and the probe's sha256 is part of an identical build. Formats follow
   the probe through one verdict (`build_formats.format_refusal`): RKLLM and RKNN only when the probe shows the
@@ -1332,7 +1334,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   with `module_flag_problem --alone` of `target_module.sh` before cmake runs, and a refused call does not start
   cmake; before, only the module's `CMAKE_FLAGS` of the package's cross build were checked. `validate_target_folder`
   also reads a target's Dockerfile lines that the template's Dockerfiles do not have for a llama.cpp option that
-  downloads. The verdicts stay in that one function.
+  downloads. The verdicts stay in that one function. A project include (`CMAKE_PROJECT_INCLUDE`,
+  `CMAKE_PROJECT_INCLUDE_BEFORE`, `CMAKE_PROJECT_<name>_INCLUDE`, `CMAKE_PROJECT_TOP_LEVEL_INCLUDES`) runs a script
+  that can switch any option back on, so it is refused like `-C` and `-P` (`recipe.refused_option`, both verdicts).
 - **Rockchip image in two stages; the template's format helpers are real** (round 23 item 14): the `builder` stage
   builds llama.cpp's tools and the three venvs with every pin; the image gets the venvs and the source tree with its
   tools at the same paths and only what the build stages run (no `build-essential`, `python3-dev`, `python3-venv` or

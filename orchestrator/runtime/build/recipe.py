@@ -87,6 +87,11 @@ DEPRECATED_DOWNLOAD_OPTIONS: Mapping[str, str] = {
                   "download models",
 }
 
+# CMake variables that make CMake run a script file at project() (cmake-variables(7): CMAKE_PROJECT_INCLUDE,
+# CMAKE_PROJECT_INCLUDE_BEFORE, CMAKE_PROJECT_<name>_INCLUDE[_BEFORE], CMAKE_PROJECT_TOP_LEVEL_INCLUDES). The script runs
+# after the command line's options and can switch any of them back on, like an initial cache (-C): never set.
+SCRIPT_VARIABLE_RE = re.compile(r"^CMAKE_PROJECT_(?:[^\s=:]+_)?INCLUDE(?:_BEFORE)?$|^CMAKE_PROJECT_TOP_LEVEL_INCLUDES$")
+
 # Options that do not change the binaries and stay out of the build ID.
 _NOT_IN_BUILD_ID = frozenset({"GGML_CCACHE"})
 
@@ -363,12 +368,15 @@ def build_id_of(inputs: Mapping[str, Any]) -> str:
 
 def refused_option(name: str, value: Optional[str]) -> Optional[str]:
     """Why the CMake option NAME=VALUE has no place in a llama.cpp build of the framework, or None: it downloads at
-    configure time whenever it is set (NEVER_SET), or it switches on what every build keeps off (DOWNLOAD_OPTIONS_OFF
+    configure time whenever it is set (NEVER_SET), it makes CMake run a script (SCRIPT_VARIABLE_RE), or it switches on what
+    every build keeps off (DOWNLOAD_OPTIONS_OFF
     and DEPRECATED_DOWNLOAD_OPTIONS other than OFF, FETCHCONTENT_FULLY_DISCONNECTED other than ON) or a server with
     subprocesses (LLAMA_SUBPROCESS other than OFF, decision D22). The one rule: check_download_options applies it to
     a plan, the module generator to the CMake flags of a target module (module_generator.download_flag_problems)."""
     if name in NEVER_SET:
         return f"{name} must never be set: {NEVER_SET[name]}"
+    if SCRIPT_VARIABLE_RE.match(name):
+        return f"{name} makes CMake run a CMake script, which can set any option"
     if name in DOWNLOAD_OPTIONS_OFF and value != "OFF":
         return f"{name} must be OFF on every build: {DOWNLOAD_OPTIONS_OFF[name]}"
     if name in DEPRECATED_DOWNLOAD_OPTIONS and value != "OFF":

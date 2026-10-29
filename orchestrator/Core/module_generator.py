@@ -46,7 +46,7 @@ FLAG_RE = re.compile(r"^-[A-Za-z][\w.=+,:/-]*$")
 # A CMake option on a command line or in a module's CMake flags: -DNAME=VALUE or -DNAME:TYPE=VALUE, also as cmake gets
 # it from the shell: "-D NAME=VALUE" (cmake reads -D and the next word as one option) and with quotes around the word,
 # the name or the value (-D "NAME=ON", -D'NAME'=ON, -DNAME="OFF").
-CMAKE_OPTION_RE = re.compile(r"(?<![\w-])-D\s*[\"']?([A-Za-z_][A-Za-z0-9_]*)[\"']?(?::[A-Za-z]+)?=[\"']?([^\s'\";|&)]*)")
+CMAKE_OPTION_RE = re.compile(r"(?<![\w-])-D\s*[\"']?([A-Za-z_][A-Za-z0-9_.]*)[\"']?(?::[A-Za-z]+)?=[\"']?([^\s'\";|&)]*)")
 # Switches that make cmake run a CMake script (an initial cache -C, script mode -P): a script can set any option.
 CMAKE_SCRIPT_FLAGS = ("-C", "-P")
 # An image reference: an optional registry with a port (registry.example:5000/...; any registry is allowed, DECISIONS

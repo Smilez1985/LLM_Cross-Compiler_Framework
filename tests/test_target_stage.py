@@ -957,6 +957,42 @@ def test_one_verdict_for_the_package_s_flags_and_a_module_s_own_cmake_call(words
 
 
 @needs_bash
+@pytest.mark.parametrize("words", [
+    ["-DCMAKE_PROJECT_INCLUDE=/build-cache/x.cmake"], ["-D", "CMAKE_PROJECT_INCLUDE_BEFORE:FILEPATH=x.cmake"],
+    ["-DCMAKE_PROJECT_llama.cpp_INCLUDE=x.cmake"], ["-DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=x.cmake"]],
+    ids=["include", "include-before-typed", "include-of-the-project", "top-level-includes"])
+def test_a_project_include_runs_a_script_and_is_refused_like_c_and_p(words):
+    """Review: CMake runs a CMAKE_PROJECT_INCLUDE file at project(), after the command line's options, and the file can
+    switch any option back on (set(... CACHE ... FORCE)): the same as an initial cache (-C), in both verdicts. The
+    module data check and the folder check refuse it the same way (recipe.refused_option)."""
+    from orchestrator.Core.module_generator import download_flag_problems
+    word = "".join(words) if words[0] == "-D" else words[0]
+    name = word[2:].split("=")[0].split(":")[0]
+    expected = f"{word} ({name} makes CMake run a CMake script, which can set any option)"
+    assert _verdict("--alone", *words) == expected
+    assert _verdict(*words) == expected
+    problems = download_flag_problems(f"cmake -S . -B b {' '.join(words)}")
+    assert len(problems) == 1 and f"{name} makes CMake run a CMake script" in problems[0], problems
+
+
+def test_the_shell_s_project_include_pattern_is_the_recipe_s():
+    import re
+
+    from conftest import REPO_ROOT
+    from orchestrator.runtime.build.recipe import SCRIPT_VARIABLE_RE
+    names = ["CMAKE_PROJECT_INCLUDE", "CMAKE_PROJECT_INCLUDE_BEFORE", "CMAKE_PROJECT_llama.cpp_INCLUDE",
+             "CMAKE_PROJECT_ggml_INCLUDE_BEFORE", "CMAKE_PROJECT_TOP_LEVEL_INCLUDES", "CMAKE_PROJECT_NAME",
+             "CMAKE_TOOLCHAIN_FILE", "LLAMA_INCLUDE", "CMAKE_PROJECT_INCLUDES", "XCMAKE_PROJECT_INCLUDE"]
+    refused = [n for n in names if SCRIPT_VARIABLE_RE.match(n)]
+    assert refused == names[:5]
+    for target in ("Rockchip", "_template"):
+        text = (REPO_ROOT / "targets" / target / "modules" / "target_module.sh").read_text(encoding="utf-8")
+        pattern = re.search(r"^SCRIPT_VARIABLE_PATTERN='([^']*)'$", text, re.M).group(1)
+        shell = re.compile(pattern.replace("[:space:]", r"\s"))  # the POSIX class in Python's spelling
+        assert [n for n in names if shell.search(n)] == refused, target
+
+
+@needs_bash
 def test_every_cmake_call_of_a_module_is_checked_with_its_expanded_words(image):
     """A module's own script builds an option name from variables (-DLLAMA_BUILD_${X}=ON): no check of the script's
     text can see it, but build.sh's cmake gets the expanded words and stops before cmake runs. A clean call runs."""
