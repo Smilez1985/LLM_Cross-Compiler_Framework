@@ -265,6 +265,23 @@ Transaction Summary:
 Total size of inbound packages is 108 MiB. Need to download 108 MiB.
 Operation aborted by the user.
 """
+# CentOS Stream 9 (dnf 4), where docker-ce's obsoletes replace a distribution package: dnf prints it as "replacing"
+# under the package that takes its place (no "Removing" section), the silent replacement the trial run must catch.
+DNF_PLAN_OBSOLETES = """Dependencies resolved.
+================================================================================
+ Package                   Arch   Version                Repository        Size
+================================================================================
+Installing:
+ containerd.io             x86_64 2.4.2-3.el9            docker-ce-stable  35 M
+     replacing  runc.x86_64 4:1.2.4-1.el9
+ docker-ce                 x86_64 3:29.9.2-1.el9         docker-ce-stable  26 M
+
+Transaction Summary
+================================================================================
+Install  5 Packages
+
+Operation aborted.
+"""
 DNF5_NO_MATCH = """Updating and loading repositories:
 Repositories loaded.
 Failed to resolve the transaction:
@@ -552,7 +569,8 @@ class TestTheDryRun:
 
 @needs_bash_and_gpg
 class TestDockersRpmRepository:
-    """Fedora, RHEL and CentOS Stream: Docker's own repository, its key checked against the pinned fingerprint."""
+    """Fedora, RHEL and CentOS Stream: Docker's own repository, its key checked against the pinned fingerprint, through
+    the same trial run as the RHEL rebuilds (one install rule for the whole RHEL family, TestRhelFamilyRule)."""
 
     @pytest.mark.parametrize("system", ["fedora", "rhel", "centos"])
     def test_python_docker_and_the_group_with_the_checked_key(self, tmp_path, keys, system):
@@ -562,6 +580,7 @@ class TestDockersRpmRepository:
         assert calls == ["dnf install -y python3 python3-pip",
                          f"curl -fsSL --proto =https --tlsv1.2 https://download.docker.com/linux/{system}/gpg -o "
                          + calls[1].rsplit(" -o ", 1)[1],
+                         f"dnf install --assumeno --allowerasing {DOCKER_CE}",
                          f"rpm --import {box.keyring}",
                          f"dnf install -y {DOCKER_CE}",
                          "systemctl enable --now docker",
@@ -581,19 +600,21 @@ class TestDockersRpmRepository:
 
     @pytest.mark.parametrize("download", ["other.asc", None], ids=["another-key", "no-download"])
     def test_a_key_that_is_not_dockers_is_not_trusted(self, tmp_path, keys, download):
+        """Not trusted, and (the RHEL family's rule) Podman comes instead of a stop."""
         box = Box(tmp_path, "fedora", keys[download] if download else None, present=("python3=3.13",),
                   pinned=keys["pinned"])
         run, calls = box.run("install_docker")
-        assert run.returncode == 1, said(run)
-        assert "Docker wurde nicht installiert" in said(run) and DOCKER_MANUAL in said(run)
+        assert run.returncode == 0, said(run)
+        assert "Docker CE wird hier nicht installiert" in said(run) and "Podman ist installiert" in said(run)
         assert not box.keyring.exists() and not box.repo.exists()
         assert not any(call.startswith(("rpm", "dnf install -y docker")) for call in calls)
 
     def test_dockers_real_fingerprint_does_not_accept_another_key(self, tmp_path, keys):
         box = Box(tmp_path, "rhel", keys["docker.asc"], present=("python3=3.13",))
-        run, _ = box.run("install_docker")
-        assert run.returncode == 1 and RPM_FINGERPRINT in said(run), said(run)
+        run, calls = box.run("install_docker")
+        assert run.returncode == 0 and RPM_FINGERPRINT in said(run), said(run)
         assert not box.keyring.exists() and not box.repo.exists()
+        assert calls[-1] == "dnf install -y podman-docker"
 
     def test_an_existing_docker_repository_is_kept(self, tmp_path, keys):
         box = Box(tmp_path, "fedora", keys["docker.asc"], present=("python3=3.13",), pinned=keys["pinned"])
@@ -625,9 +646,10 @@ class TestDockersRpmRepository:
         box = Box(tmp_path, "rhel", keys["docker.asc"], present=("python3=3.13",), fails=("install -y docker-ce",),
                   pinned=keys["pinned"])
         run, calls = box.run("install_docker")
-        assert run.returncode == 1, said(run)
+        assert run.returncode == 0, said(run)
         assert "wieder entfernt" in said(run) and "podman, buildah oder runc" in said(run)
         assert not box.repo.exists() and "systemctl enable --now docker" not in calls
+        assert calls[-1] == "dnf install -y podman-docker"
 
     @pytest.mark.parametrize("body", ["install_docker", "main --dry-run"])
     @pytest.mark.parametrize("text", [
@@ -727,14 +749,41 @@ class TestTheDistributionsOwnPackages:
         assert run.returncode == 0 and "AFTER" in run.stdout, said(run)
         assert "docker-buildx ließ sich nicht installieren" in run.stdout and "älterem Builder" in run.stdout
 
-    def test_sles_switches_the_containers_module_on(self, tmp_path):
-        box = Box(tmp_path, "sles", present=("python3=3.13",),
+    def test_sles_switches_the_containers_module_on_after_a_yes(self, tmp_path):
+        """Asked first, like the Python 3 Module (the registration status is read, never shown)."""
+        box = Box(tmp_path, "sles", present=("python3=3.13",), suse_status=SUSE_REGISTERED, answer="j",
                   failing_until_suseconnect="--non-interactive install docker ")
         run, calls = box.run("install_docker")
         assert run.returncode == 0, said(run)
-        assert calls[:3] == ["zypper --non-interactive install docker",
-                             "SUSEConnect -p sle-module-containers/15.6/x86_64",
-                             "zypper --non-interactive install docker"]
+        assert calls[:4] == ["zypper --non-interactive install docker", "SUSEConnect --status",
+                             f"SUSEConnect -p {CONTAINERS_MODULE}", "zypper --non-interactive install docker"]
+        assert f"SUSEs Containers Module einschalten (SUSEConnect -p {CONTAINERS_MODULE})? [j/N]" in run.stdout
+        assert "EXAMPLE-NOT-A-CODE" not in said(run)
+
+    @pytest.mark.parametrize("answer", ["n", None], ids=["no", "no-terminal"])
+    def test_sles_without_a_yes_switches_nothing_on_and_stops_with_the_step(self, tmp_path, answer):
+        box = Box(tmp_path, "sles", present=("python3=3.13",), suse_status=SUSE_REGISTERED, answer=answer,
+                  failing_until_suseconnect="--non-interactive install docker ")
+        run, calls = box.run("install_docker")
+        assert run.returncode == 1, said(run)
+        assert calls == ["zypper --non-interactive install docker", "SUSEConnect --status"]
+        assert f"Selbst einschalten: sudo SUSEConnect -p {CONTAINERS_MODULE}" in said(run)
+
+    def test_an_unregistered_sles_stops_naming_the_registration(self, tmp_path):
+        box = Box(tmp_path, "sles", present=("python3=3.13",), suse_status=SUSE_NOT_REGISTERED, answer="j",
+                  failing_until_suseconnect="--non-interactive install docker ")
+        run, calls = box.run("install_docker")
+        assert run.returncode == 1, said(run)
+        assert "dieses SLES ist nicht registriert" in said(run) and "[j/N]" not in run.stdout
+        assert calls == ["zypper --non-interactive install docker", "SUSEConnect --status"]
+
+    def test_the_dry_run_names_the_containers_module_step(self, tmp_path):
+        box = Box(tmp_path, "sles", present=("curl", "python3=3.13", "rsync"))
+        run, calls = box.run("main --dry-run")
+        assert run.returncode == 0 and calls == [], said(run)
+        assert ("unter SLES liegt Docker in SUSEs Containers Module: Gibt es das Paket nicht, fragt der Installer, ob "
+                f"er das Modul einschaltet (SUSEConnect -p {CONTAINERS_MODULE}; nur auf einem registrierten System)"
+                ) in said(run)
 
     def test_opensuse_without_a_docker_package_stops(self, tmp_path):
         box = Box(tmp_path, "opensuse-leap", present=("python3=3.13",), fails=("install docker ",))
@@ -973,56 +1022,105 @@ class TestRhelRebuilds:
 
 
 @needs_bash_and_gpg
-class TestFedoraRhelCentosAsBefore:
-    """DECISIONS round 26 Q1 decided the removal question and the Podman fallback for Rocky Linux, AlmaLinux and Oracle
-    Linux only. Fedora, RHEL and CentOS Stream keep their way exactly as before: the checked key, rpm --import, then
-    'dnf install -y' without --allowerasing; dnf itself stops at a conflict, and the installer stops with the reason
-    (TestDockersRpmRepository). No dnf trial run, no question, no other text."""
+class TestRhelFamilyRule:
+    """One install rule for the whole RHEL family: Fedora, RHEL and CentOS Stream get the rule of the RHEL rebuilds.
+    Docker CE from Docker's repository for the system (its key checked), through the same dnf trial run: no conflict
+    means no question; when dnf would remove or replace a distribution package (also through obsoletes) the exact list
+    comes first and only a yes installs; a no, an unreachable repository, a key mismatch or no package for the release
+    means the Podman fallback with the reason. This replaces, on purpose, the earlier tests that pinned the old way of
+    these three systems (dnf install -y without a trial run, a conflict stopped the installer)."""
+
+    def box(self, tmp_path, keys, system, **kw):
+        kw.setdefault("present", ("curl", "python3=3.13"))
+        return Box(tmp_path, system, kw.pop("key_file", keys["docker.asc"]), pinned=keys["pinned"], **kw)
+
+    def assert_podman(self, box, run, calls, reason):
+        assert run.returncode == 0, said(run)
+        assert "Docker CE wird hier nicht installiert" in said(run) and reason in said(run), said(run)
+        assert calls[-2:] == ["dnf install -y podman-docker",
+                              "systemctl --user --machine=lcf@ enable --now podman.socket"], calls
+        assert not any(c.startswith(("rpm --import", f"dnf install -y {DOCKER_CE}")) for c in calls)
+        assert not any("--allowerasing" in c and "--assumeno" not in c for c in calls), "never --allowerasing unasked"
+        assert not box.repo.exists() and not box.keyring.exists(), "what install.sh created is taken back"
+        assert "Podman ist installiert" in run.stdout and "sudo dnf remove podman-docker" in run.stdout
 
     @pytest.mark.parametrize("system", ["fedora", "rhel", "centos"])
-    def test_no_trial_run_and_no_question(self, tmp_path, keys, system):
-        box = Box(tmp_path, system, keys["docker.asc"], present=("curl", "python3=3.13"), pinned=keys["pinned"],
-                  dnf_plan=DNF5_PLAN_PODMAN_DOCKER, answer="j")
+    def test_no_conflict_means_no_question(self, tmp_path, keys, system):
+        box = self.box(tmp_path, keys, system, answer="n")
         run, calls = box.run("install_docker")
         assert run.returncode == 0, said(run)
-        assert calls[1:] == [f"rpm --import {box.keyring}", f"dnf install -y {DOCKER_CE}",
-                             "systemctl enable --now docker"], calls
-        assert not any("--assumeno" in c or "--allowerasing" in c for c in calls)
+        assert calls[1:] == [f"dnf install --assumeno --allowerasing {DOCKER_CE}", f"rpm --import {box.keyring}",
+                             f"dnf install -y {DOCKER_CE}", "systemctl enable --now docker"], calls
         assert "[j/N]" not in run.stdout and "entfernen oder ersetzen" not in said(run)
-        assert "Podman" not in said(run) and "BuildKit" not in said(run)
+        assert f"https://download.docker.com/linux/{system}/$releasever/" in box.repo.read_text()
 
-    @pytest.mark.parametrize("system", ["fedora", "rhel", "centos"])
-    def test_a_conflict_stops_as_before_and_never_falls_back_to_podman(self, tmp_path, keys, system):
-        box = Box(tmp_path, system, keys["docker.asc"], present=("python3=3.13",), pinned=keys["pinned"],
-                  fails=(f"install -y {DOCKER_CE}",), answer="j")
+    @pytest.mark.parametrize("system, plan, removals", [
+        ("fedora", DNF5_PLAN_PODMAN_DOCKER, "podman-docker"),
+        ("rhel", DNF_PLAN_EL8_PODMAN, "buildah containers-common podman podman-catatonit podman-docker runc"),
+        ("centos", DNF_PLAN_OBSOLETES, "runc")], ids=["fedora-dnf5", "rhel-el8", "centos-obsoletes"])
+    def test_a_conflict_shows_the_exact_list_and_a_yes_installs(self, tmp_path, keys, system, plan, removals):
+        box = self.box(tmp_path, keys, system, dnf_plan=plan, answer="j")
         run, calls = box.run("install_docker")
-        assert run.returncode == 1, said(run)
-        assert ("Docker wurde nicht installiert: Die Docker-Pakete ließen sich nicht installieren (Meldungen oben; nennt "
-                "dnf einen Konflikt mit podman, buildah oder runc, sagt Dockers Anleitung, was vorher entfernt werden "
-                f"muss); {box.repo} ist wieder entfernt.") in said(run)
-        assert not any("podman-docker" in c for c in calls) and "[j/N]" not in run.stdout
+        assert run.returncode == 0, said(run)
+        assert f"Für Docker CE müsste dnf diese Pakete entfernen oder ersetzen: {removals}" in run.stdout
+        assert "Diese Pakete entfernen und Docker CE installieren? [j/N]" in run.stdout
+        assert calls[1:] == [f"dnf install --assumeno --allowerasing {DOCKER_CE}", f"rpm --import {box.keyring}",
+                             f"dnf install -y --allowerasing {DOCKER_CE}", "systemctl enable --now docker"]
 
     @pytest.mark.parametrize("system", ["fedora", "rhel", "centos"])
-    def test_the_dry_run_line_is_the_one_from_before(self, tmp_path, keys, system):
-        box = Box(tmp_path, system, keys["docker.asc"], present=("curl", "python3=3.13", "rsync"),
-                  pinned=keys["pinned"])
+    @pytest.mark.parametrize("answer", ["n", None], ids=["no", "no-terminal"])
+    def test_a_no_means_podman_and_nothing_removed(self, tmp_path, keys, system, answer):
+        box = self.box(tmp_path, keys, system, dnf_plan=DNF5_PLAN_PODMAN_DOCKER, answer=answer)
+        run, calls = box.run("install_docker; docker_group")
+        self.assert_podman(box, run, calls, "du hast Nein gesagt")
+
+    @pytest.mark.parametrize("system", ["fedora", "rhel", "centos"])
+    @pytest.mark.parametrize("plan, why", [
+        (DNF_NO_MATCH, "keine Pakete für dieses System"),
+        (DNF_UNREACHABLE, "ist nicht erreichbar")], ids=["no-package", "unreachable"])
+    def test_no_package_or_an_unreachable_repository_means_podman_with_the_reason(self, tmp_path, keys, system,
+                                                                                   plan, why):
+        box = self.box(tmp_path, keys, system, fails=("--assumeno",), fail_output=plan)
+        run, calls = box.run("install_docker; docker_group")
+        self.assert_podman(box, run, calls, why)
+        assert f"https://download.docker.com/linux/{system}" in said(run)
+
+    @pytest.mark.parametrize("system", ["fedora", "rhel", "centos"])
+    @pytest.mark.parametrize("download, why", [
+        ("other.asc", "hat nicht den Fingerabdruck aus Dockers Anleitung"),
+        (None, "ließ sich nicht von https://download.docker.com/linux/")], ids=["key-mismatch", "key-unreachable"])
+    def test_a_key_failure_means_podman_with_the_reason(self, tmp_path, keys, system, download, why):
+        box = self.box(tmp_path, keys, system, key_file=keys[download] if download else None)
+        run, calls = box.run("install_docker; docker_group")
+        self.assert_podman(box, run, calls, why)
+        assert not any("--assumeno" in c for c in calls), "an untrusted repository is never added"
+
+    @pytest.mark.parametrize("system", ["fedora", "rhel", "centos"])
+    def test_the_dry_run_says_which_way_and_why(self, tmp_path, keys, system):
+        box = self.box(tmp_path, keys, system, present=("curl", "python3=3.13", "rsync"))
         run, calls = box.run("main --dry-run")
         assert run.returncode == 0 and calls == [], said(run)
-        docker = [line for line in said(run).splitlines() if "Docker" in line]
-        assert docker == [f"   Docker: fehlt -> Dockers dnf-Repository https://download.docker.com/linux/{system}, sein "
-                          f"Schlüssel nur mit dem Fingerabdruck {keys['pinned']}; dnf install -y {DOCKER_CE}; "
-                          "systemctl enable --now docker"], docker
-        assert "Müsste dnf" not in said(run) and "podman" not in said(run).lower()
+        text = said(run)
+        assert f"Dockers dnf-Repository https://download.docker.com/linux/{system}, sein Schlüssel" in text
+        assert "Docker CE ist hier der Standard: Das Framework braucht BuildKit (etwa für Hailo)." in text
+        assert ("nennt der Installer sie genau und fragt dich. Bei Nein, ohne Paket für dieses System, ohne Verbindung "
+                "zum Repository oder mit einem falschen Schlüssel kommt der Ersatzweg: dnf install -y podman-docker") in text
 
-    def test_a_second_run_on_fedora_with_podman_gets_no_switch_hint(self, tmp_path):
-        """The hint to switch to Docker CE belongs to the rebuilds' fallback (TestRhelRebuilds); on Fedora a docker
-        command that is Podman gets the Podman way as before."""
+    def test_a_second_run_on_fedora_with_podman_says_how_to_switch(self, tmp_path):
         box = Box(tmp_path, "fedora", present=("python3=3.13", "rsync"))
         box.write(box.bin / "docker", '#!/bin/sh\n[ "$1" = --version ] && echo "podman version 5.8.2"\nexit 0\n')
         run, calls = box.run("setup_system")
         assert run.returncode == 0, said(run)
         assert calls == ["systemctl --user --machine=lcf@ enable --now podman.socket"]
-        assert "Standard ist Docker CE" not in said(run) and "sudo dnf remove podman-docker" not in said(run)
+        assert "Standard ist Docker CE" in run.stdout and "'sudo dnf remove podman-docker'" in run.stdout
+
+    @pytest.mark.parametrize("system, package", [("amzn", "docker"), ("ultramarine", "moby-engine")])
+    def test_amazon_linux_and_the_fedora_derivatives_keep_their_way(self, tmp_path, system, package):
+        box = Box(tmp_path, system, present=("python3=3.13", "rsync"))
+        run, calls = box.run("install_docker; docker_group")
+        assert run.returncode == 0, said(run)
+        assert calls[0] == f"dnf install -y {package}" and not any("--assumeno" in c for c in calls)
+        assert "Standard ist Docker CE" not in said(run)
 
 
 @needs_bash_and_gpg
@@ -1045,7 +1143,8 @@ SUSE_REGISTERED = ('[{"identifier":"SLES","version":"15.6","arch":"x86_64","stat
 SUSE_WITH_PYTHON3 = SUSE_REGISTERED.replace(']\n', ',{"identifier":"sle-module-python3","version":"15.6",'
                                                    '"arch":"x86_64","status":"Registered"}]\n')
 SUSE_NOT_REGISTERED = '[{"identifier":"SLES","version":"15.6","arch":"x86_64","status":"Not Registered"}]\n'
-PYTHON_MODULE = "sle-module-python3/15.6/x86_64"   # SUSE Customer Center: python311 is there for SLES 15.6 x86_64
+PYTHON_MODULE = "sle-module-python3/15.6/x86_64"
+CONTAINERS_MODULE = "sle-module-containers/15.6/x86_64"   # SUSE Customer Center: python311 is there for SLES 15.6 x86_64
 
 
 @needs_bash_and_gpg

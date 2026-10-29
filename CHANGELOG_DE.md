@@ -10,6 +10,26 @@ weicht bewusst ab: Es gibt keinen Abschnitt `[Unreleased]`. Jeder Eintrag beginn
 der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und warum, steht im
 [Design](docs/DESIGN_DE.md).
 
+## [3.2.0] - 2026-10-29
+
+### Geändert
+- `2026-10-29 23:31 UTC` · `v3.2.0` **Eine Install-Regel für die ganze RHEL-Familie** ([Design](docs/DESIGN_DE.md#installer-plattformen-und-abhängigkeiten)):
+  Fedora, RHEL und CentOS Stream bekommen jetzt die Regel von Rocky Linux, AlmaLinux und Oracle Linux. `install.sh`
+  installiert Docker CE aus Dockers Repository für das System, dessen Schlüssel gegen den veröffentlichten
+  Fingerabdruck geprüft, über denselben Probelauf von dnf (`dnf install --assumeno --allowerasing`, der nichts
+  verändert und die einzige Stelle ist, an der `--allowerasing` ohne ein Ja steht): Würde dnf ein Paket der
+  Distribution entfernen oder ersetzen (`runc`, `podman`, `buildah`, `containers-common`, ..., auch ein Ersatz über
+  die obsoletes eines Pakets), kommt zuerst die genaue Liste, und nur ein Ja installiert; ein Nein, kein Terminal für
+  die Antwort, ein nicht erreichbares Repository, ein Schlüssel, der nicht passt, oder kein Paket für die Version
+  heißt der Ersatzweg Podman (`podman-docker` aus den eigenen Quellen der Distribution, der rootless Socket der
+  Person, `DOCKER_HOST` von llmcf gesetzt), mit dem Grund. Vorher liefen diese drei Systeme `dnf install -y` ohne
+  Probelauf und hielten bei einem Konflikt an. `./install.sh --dry-run` nennt den Weg und den Grund, und ein zweiter
+  Lauf, bei dem `docker` Podman ist, sagt, wie man zu Docker CE wechselt. Unter SLES fragt der Installer jetzt,
+  bevor er SUSEs Containers Module mit `SUSEConnect` einschaltet, wie beim Python 3 Module (ein Nein oder ein nicht
+  registriertes System hält mit dem Schritt an, den du tun kannst; der Registrierungsstatus wird gelesen, nie
+  gezeigt; der Probelauf nennt den Schritt). Amazon Linux und die übrigen Systeme, die auf Fedora aufbauen, behalten
+  das Paket der Distribution.
+
 ## [3.1.0] - 2026-10-29
 
 ### Hinzugefügt
@@ -4466,6 +4486,7 @@ Cross-Kompilierung zu ermöglichen.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Grundlegende Unterstützung für die Cross-Kompilierung für Rockchip RK3588/RK3566.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Einstiegspunkte für CLI (`llm-cli`) und GUI (`llm-gui`).
 
+[3.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v2.4.0...v3.0.0
 [2.4.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v1.7.0...v2.4.0
