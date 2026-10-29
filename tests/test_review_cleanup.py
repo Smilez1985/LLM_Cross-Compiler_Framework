@@ -256,8 +256,11 @@ class TestRepoOverrideNames:
         read = set()
         for script in (REPO_ROOT / "targets").glob("*/modules/*.sh"):
             read |= set(re.findall(r"\$\{(\w+)_REPO_OVERRIDE", script.read_text(encoding="utf-8")))
-        assert {"LLAMA_CPP", "RKLLM_TOOLKIT"} <= read
-        for base in read:
+        # The template's rkllm_module.sh no longer clones rknn-llm at build time (a build container has no network;
+        # the RKLLM toolkit comes with the image), so no script reads RKLLM_TOOLKIT_REPO_OVERRIDE any more; its
+        # natural name still gives that variable.
+        assert {"LLAMA_CPP"} <= read
+        for base in read | {"RKLLM_TOOLKIT"}:
             for name in (base.lower(), base.lower().replace("_", "."), base.lower().replace("_", "-")):
                 assert repo_override_names(name)[0] == f"{base}_REPO_OVERRIDE", name
 

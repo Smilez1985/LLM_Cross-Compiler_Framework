@@ -5,8 +5,9 @@ LLM Cross-Compiler Framework - Identical builds (DECISIONS, eighth round, N11)
 An earlier build counts as identical only when 100 % of the chosen options are the same: the model and its exact
 revision (the Hugging Face commit; for a local model every weights file by name, size and modification time), the
 target and the sha256 of its definition (every file of its folder), the board, the format, the quantization, the
-importance matrix and the sha256 of the calibration data, the optimization level, the context length, GPU use and the
-model's task. Other weights or another quantization is never identical.
+importance matrix and the sha256 of the calibration data, the optimization level, the context length, GPU use, the
+model's task and the sha256 of the board's hardware probe the build was tuned to (none without one: a manifest written
+before the probe was an option counts as none). Other weights or another quantization is never identical.
 
 The build engine records these options in every build's manifest (`build_options`, with their sha256). Before a build,
 check_build_request and the GUI's builder form look for a finished build with the same options and say so; the person
@@ -31,7 +32,8 @@ MANIFEST_KEY = "build_options"
 DIGEST_KEY = "build_options_sha256"
 # Every option an identical build shares (the manifest's build_options holds exactly these plus "version").
 OPTION_KEYS = ("model", "revision", "weights", "target", "target_sha256", "board", "format", "quantization",
-               "imatrix", "dataset_sha256", "optimization", "max_context_length", "use_gpu", "model_task")
+               "imatrix", "dataset_sha256", "optimization", "max_context_length", "use_gpu", "model_task",
+               "hardware_sha256")
 # Compared without letter case (a repo id, a board or a quantization type in another case is the same choice).
 CASELESS = ("model", "target", "board", "format", "quantization", "optimization", "model_task")
 MAX_WEIGHT_FILES = 10000
@@ -71,6 +73,11 @@ def file_sha256(path: Any) -> Optional[str]:
         return None
 
 
+def text_sha256(text: Optional[str]) -> Optional[str]:
+    """sha256 of a text as UTF-8 (the board's probe as the build writes it), None without a text."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest() if text else None
+
+
 def shipped_calibration_sha256(language: str) -> Optional[str]:
     """The sha256 of the shipped calibration text as a build writes it (orchestrator writes it with the system's line
     ends before the build hashes the file)."""
@@ -85,13 +92,16 @@ def shipped_calibration_sha256(language: str) -> Optional[str]:
 def build_options(*, model: Optional[str], revision: Optional[str], weights: Optional[List[Dict[str, Any]]],
                   target: str, target_sha256: Optional[str], board: Optional[str], fmt: str,
                   quantization: Optional[str], imatrix: bool, dataset_sha256: Optional[str], optimization: str,
-                  max_context_length: Optional[int], use_gpu: bool, model_task: str = "LLM") -> Dict[str, Any]:
+                  max_context_length: Optional[int], use_gpu: bool, model_task: str = "LLM",
+                  hardware_sha256: Optional[str] = None) -> Dict[str, Any]:
     """The chosen options of one build, as the manifest records them. `model`: the Hugging Face repo id (None for a
-    local model, which is named by its `weights` instead: never its path)."""
+    local model, which is named by its `weights` instead: never its path). `hardware_sha256`: the board's probe the
+    build was tuned to (text_sha256 of the file the build reads), None without one."""
     return {"version": OPTIONS_VERSION, "model": model, "revision": revision, "weights": weights, "target": target,
             "target_sha256": target_sha256, "board": board, "format": fmt, "quantization": quantization,
             "imatrix": bool(imatrix), "dataset_sha256": dataset_sha256, "optimization": optimization,
-            "max_context_length": max_context_length, "use_gpu": bool(use_gpu), "model_task": model_task or "LLM"}
+            "max_context_length": max_context_length, "use_gpu": bool(use_gpu), "model_task": model_task or "LLM",
+            "hardware_sha256": hardware_sha256}
 
 
 def options_sha256(options: Dict[str, Any]) -> str:

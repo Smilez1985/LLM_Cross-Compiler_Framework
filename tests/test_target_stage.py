@@ -10,6 +10,7 @@ CPU_CORES of version 1.x did, and a 32-bit (armv7) profile is refused with the p
 
 import os
 import platform
+import re
 import shutil
 import subprocess
 from collections import namedtuple
@@ -262,6 +263,64 @@ def test_every_x86_probe_fixture_is_planned_as_the_build_recipe_plans_it(image, 
     for option, option_flags in _X86_FLAGS.items():
         on = f"-D{option}=ON" in plan["CMAKE_FLAGS"].split()
         assert all((f in words) == on for f in option_flags), (option, plan["CFLAGS"])
+
+
+def _knights_landing(text):
+    """The AVX-512 PC with the CPU flags of a Xeon Phi: AVX-512 F and CD, without BW, VL and DQ."""
+    lines = []
+    for line in text.splitlines():
+        if line.startswith("CPU_FLAGS_ALL="):
+            line = "CPU_FLAGS_ALL=" + ",".join(f for f in line.split("=", 1)[1].split(",")
+                                               if f not in ("avx512bw", "avx512vl", "avx512dq"))
+        elif line.startswith("CPU_MODEL="):
+            line = "CPU_MODEL=Intel(R) Xeon Phi(TM) CPU 7250 @ 1.40GHz"
+        lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
+KNIGHTS_LANDING = _knights_landing(AVX512_PC)
+
+
+@needs_bash
+@pytest.mark.parametrize("profile, avx512", [(AVX2_PC, False), (AVX512_PC, True), (KNIGHTS_LANDING, False)],
+                         ids=["avx2-only", "full-avx512", "avx512f-only"])
+def test_avx512_is_planned_only_with_every_part_ggml_avx512_compiles_for(image, profile, avx512):
+    """GGML_AVX512 adds -mavx512f -mavx512cd -mavx512vl -mavx512dq -mavx512bw. A Xeon Phi (Knights Landing) has
+    AVX-512 F (SUPPORTS_AVX512=ON) without BW, VL and DQ: before, its package got those and illegal instructions; now
+    it gets the AVX2 plan, as the build recipe plans it."""
+    cmake, flags = recipe_x86(profile)
+
+    result = config_with(image, profile, STUB_CC_MACHINE="62")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    plan = plan_of(image)
+    assert plan["CMAKE_FLAGS"] == f"-DGGML_NATIVE=OFF {cmake}"
+    assert plan["CFLAGS"] == f"-O3 -pthread -fPIC -march=x86-64 {flags}"
+    assert ("-DGGML_AVX512=ON" in plan["CMAKE_FLAGS"]) is avx512
+    assert ("-mavx512bw" in plan["CFLAGS"]) is avx512 and "-mavx2" in plan["CFLAGS"]
+    if profile is KNIGHTS_LANDING:
+        assert ("GGML_AVX512 also compiles for avx512vl, avx512dq, avx512bw, which the probe's CPU flags do not "
+                "name: the AVX2 plan") in result.stdout + result.stderr
+        assert "-DGGML_AVX512_VNNI=OFF" in plan["CMAKE_FLAGS"]
+
+
+@needs_bash
+@pytest.mark.parametrize("flags, missing", [
+    ("avx512f,avx512cd,avx512vl,avx512dq,avx512bw,avx2", ""),
+    ("avx512f,avx512cd,avx512er,avx512pf", "avx512vl avx512dq avx512bw"),
+    ("", "avx512f avx512cd avx512vl avx512dq avx512bw"),
+])
+def test_the_config_stage_names_the_same_missing_avx512_parts_as_the_recipe(flags, missing):
+    from conftest import REPO_ROOT
+
+    from orchestrator.runtime.build.recipe import AVX512_SET, avx512_missing
+    script = REPO_ROOT / "targets" / "Rockchip" / "modules" / "config_module.sh"
+    result = subprocess.run([posix_shell("bash"), "-c", 'source "$1"; avx512_missing "$2"', "_", str(script), flags],
+                            capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == missing == " ".join(avx512_missing(flags.split(",") if flags else []))
+    assert re.search(r'^X86_AVX512_SET="([^"]+)"', script.read_text(encoding="utf-8"), re.M).group(1) == \
+        " ".join(AVX512_SET)
 
 
 @needs_bash
@@ -853,6 +912,107 @@ def test_the_package_refuses_the_options_the_build_recipe_never_sets():
     assert names == list(NEVER_SET)
 
 
+def test_a_module_s_own_cmake_call_refuses_what_every_build_keeps_off():
+    """DOWNLOAD_OFF_OPTIONS of target_module.sh are the recipe's DOWNLOAD_OPTIONS_OFF and DEPRECATED_DOWNLOAD_OPTIONS:
+    a cmake call of a module's own scripts has no option of every build after its words."""
+    from conftest import REPO_ROOT
+
+    from orchestrator.runtime.build.recipe import DEPRECATED_DOWNLOAD_OPTIONS, DOWNLOAD_OPTIONS_OFF
+    for target in ("Rockchip", "_template"):
+        text = (REPO_ROOT / "targets" / target / "modules" / "target_module.sh").read_text(encoding="utf-8")
+        names = re.search(r"^DOWNLOAD_OFF_OPTIONS=\(([^)]*)\)", text, re.M).group(1).split()
+        assert names == [*DOWNLOAD_OPTIONS_OFF, *DEPRECATED_DOWNLOAD_OPTIONS], target
+
+
+def _verdict(*words):
+    """module_flag_problem of target_module.sh (the one verdict of the CMake flags), sourced as build.sh's cmake does."""
+    from conftest import REPO_ROOT
+    modules = REPO_ROOT / "targets" / "Rockchip" / "modules"
+    result = subprocess.run([posix_shell("bash"), "-c", 'source "$1" && shift && module_flag_problem "$@"', "_",
+                             str(modules / "target_module.sh"), *words], capture_output=True, text=True, timeout=30,
+                            stdin=subprocess.DEVNULL, env={**os.environ, "MODULES_DIR": str(modules)})
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+@needs_bash
+@pytest.mark.parametrize("words, alone, package", [
+    (["-DLLAMA_BUILD_TESTS=ON"], "-DLLAMA_BUILD_TESTS=ON (LLAMA_BUILD_TESTS must be OFF on every build: it lets "
+                                 "llama.cpp download)", ""),
+    (["-D", "LLAMA_CURL=ON"], "-DLLAMA_CURL=ON (LLAMA_CURL must be OFF on every build: it lets llama.cpp download)", ""),
+    (["-DFETCHCONTENT_FULLY_DISCONNECTED=OFF"], "-DFETCHCONTENT_FULLY_DISCONNECTED=OFF "
+                                                "(FETCHCONTENT_FULLY_DISCONNECTED must be ON on every build)", ""),
+    (["-DLLAMA_SUBPROCESS:BOOL=ON"], "-DLLAMA_SUBPROCESS:BOOL=ON (LLAMA_SUBPROCESS must be OFF on every build)", ""),
+    (["-DLLAMA_BUILD_BORINGSSL=OFF"], "-DLLAMA_BUILD_BORINGSSL=OFF (LLAMA_BUILD_BORINGSSL downloads at configure time "
+                                      "and is never set)", "same"),
+    (["-P", "x.cmake"], "-P (CMake runs a script with -C or -P, and a script can set any option)", "same"),
+    (["-DLLAMA_BUILD_TESTS=OFF", "-DGGML_NATIVE=OFF", "-S", "src", "--build", "b"], "", ""),
+], ids=["tests-on", "curl-two-words", "fetchcontent", "subprocess-typed", "never-set", "script", "fine"])
+def test_one_verdict_for_the_package_s_flags_and_a_module_s_own_cmake_call(words, alone, package):
+    """The package's cross build sets every build's options after the module's flags, so only what no later option
+    turns off is refused there; a module's own cmake call (--alone) has nothing after its words, so an option every
+    build keeps OFF must be OFF there too (recipe.refused_option)."""
+    assert _verdict("--alone", *words) == alone
+    assert _verdict(*words) == (alone if package == "same" else package)
+
+
+@needs_bash
+@pytest.mark.parametrize("words", [
+    ["-DCMAKE_PROJECT_INCLUDE=/build-cache/x.cmake"], ["-D", "CMAKE_PROJECT_INCLUDE_BEFORE:FILEPATH=x.cmake"],
+    ["-DCMAKE_PROJECT_llama.cpp_INCLUDE=x.cmake"], ["-DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=x.cmake"]],
+    ids=["include", "include-before-typed", "include-of-the-project", "top-level-includes"])
+def test_a_project_include_runs_a_script_and_is_refused_like_c_and_p(words):
+    """Review: CMake runs a CMAKE_PROJECT_INCLUDE file at project(), after the command line's options, and the file can
+    switch any option back on (set(... CACHE ... FORCE)): the same as an initial cache (-C), in both verdicts. The
+    module data check and the folder check refuse it the same way (recipe.refused_option)."""
+    from orchestrator.Core.module_generator import download_flag_problems
+    word = "".join(words) if words[0] == "-D" else words[0]
+    name = word[2:].split("=")[0].split(":")[0]
+    expected = f"{word} ({name} makes CMake run a CMake script, which can set any option)"
+    assert _verdict("--alone", *words) == expected
+    assert _verdict(*words) == expected
+    problems = download_flag_problems(f"cmake -S . -B b {' '.join(words)}")
+    assert len(problems) == 1 and f"{name} makes CMake run a CMake script" in problems[0], problems
+
+
+def test_the_shell_s_project_include_pattern_is_the_recipe_s():
+    import re
+
+    from conftest import REPO_ROOT
+    from orchestrator.runtime.build.recipe import SCRIPT_VARIABLE_RE
+    names = ["CMAKE_PROJECT_INCLUDE", "CMAKE_PROJECT_INCLUDE_BEFORE", "CMAKE_PROJECT_llama.cpp_INCLUDE",
+             "CMAKE_PROJECT_ggml_INCLUDE_BEFORE", "CMAKE_PROJECT_TOP_LEVEL_INCLUDES", "CMAKE_PROJECT_NAME",
+             "CMAKE_TOOLCHAIN_FILE", "LLAMA_INCLUDE", "CMAKE_PROJECT_INCLUDES", "XCMAKE_PROJECT_INCLUDE"]
+    refused = [n for n in names if SCRIPT_VARIABLE_RE.match(n)]
+    assert refused == names[:5]
+    for target in ("Rockchip", "_template"):
+        text = (REPO_ROOT / "targets" / target / "modules" / "target_module.sh").read_text(encoding="utf-8")
+        pattern = re.search(r"^SCRIPT_VARIABLE_PATTERN='([^']*)'$", text, re.M).group(1)
+        shell = re.compile(pattern.replace("[:space:]", r"\s"))  # the POSIX class in Python's spelling
+        assert [n for n in names if shell.search(n)] == refused, target
+
+
+@needs_bash
+def test_every_cmake_call_of_a_module_is_checked_with_its_expanded_words(image):
+    """A module's own script builds an option name from variables (-DLLAMA_BUILD_${X}=ON): no check of the script's
+    text can see it, but build.sh's cmake gets the expanded words and stops before cmake runs. A clean call runs."""
+    source = image.app / "modules" / "source_module.sh"
+    text = source.read_text(encoding="utf-8")
+    assert '    report_sources\n' in text
+    source.write_text(text.replace('    report_sources\n', '    report_sources\n    cmake --version\n'
+                                   '    X=BORINGSSL\n    cmake -S /nowhere -B /nowhere/b "-DLLAMA_BUILD_${X}=ON"\n',
+                                   1), encoding="utf-8")
+
+    result = by_hand(image, "source", MODEL_SOURCE=None, STUB_TOOLS_LOG=image.root / "tools.log")
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert ("ERROR: A cmake call of this build would let llama.cpp download while it is built: "
+            "-DLLAMA_BUILD_BORINGSSL=ON (LLAMA_BUILD_BORINGSSL downloads at configure time and is never set); builds "
+            "have no network: leave it out. cmake was not started.") in result.stderr
+    calls = [c for c in tools_log(image) if c.startswith("cmake ")]
+    assert calls == ["cmake --version"], calls
+
+
 @needs_bash
 def test_package_is_an_input_of_the_target_stage_only(image):
     """The convert stage first, then the target stage with --package: the stages before target resume (the request
@@ -1268,11 +1428,27 @@ def test_the_template_validates_with_the_same_functions_as_the_rockchip_target()
         assert f"\n{name}() {{" in rockchip
 
 
-def generated_config(tmp_path, profile_text, **env_values):
+def _x86_block(path):
+    text = path.read_text(encoding="utf-8")
+    start = text.index("# THE CPU OF AN x86_64 PROFILE")
+    return text[start:text.index("# END OF THE x86_64 CPU", start)]
+
+
+def test_the_template_plans_an_x86_cpu_with_the_same_functions_as_the_rockchip_target():
+    """Decision Q7 of round 25: the template plans x86 as the build recipe does (explicit features for another machine,
+    -march=native only for this one), with the very functions of the Rockchip target."""
+    from conftest import REPO_ROOT
+    rockchip = _x86_block(REPO_ROOT / "targets" / "Rockchip" / "modules" / "config_module.sh")
+    assert _x86_block(REPO_ROOT / "targets" / "_template" / "modules" / "config_module.sh") == rockchip
+    for name in ("explicit_x86_flags", "profile_is_this_machine", "avx512_missing", "plan_x86_cpu"):
+        assert f"\n{name}() {{" in rockchip
+
+
+def generated_config(tmp_path, profile_text, architecture="aarch64", cpu_flags="-mcpu=cortex-a55", **env_values):
     """config_module.sh --hardware-config of a module the generator made from the template (aarch64)."""
     from board_toolchain import install_toolchain
     from test_target_template import generate, stub_llama
-    target = generate(tmp_path, cpu_flags="-mcpu=cortex-a55")
+    target = generate(tmp_path, cpu_flags=cpu_flags, architecture=architecture)
     llama = stub_llama(tmp_path)
     toolchain, buildtools = install_toolchain(tmp_path)
     profile = tmp_path / "target_hardware_config.txt"
@@ -1299,6 +1475,38 @@ def test_a_generated_module_tests_the_image_s_compilers_with_the_module_s_flags(
     assert f"SET(CMAKE_C_COMPILER   {toolchain}/cc)" in text and f"SET(CMAKE_CXX_COMPILER {toolchain}/c++)" in text
     plan = (stages / "build_config.sh").read_text()
     assert "BOARD_PACKAGE=1" in plan and "PROFILE_SOURCE=profile" in plan and "BUILD_JOBS=" in plan
+
+
+@needs_bash
+@pytest.mark.parametrize("profile, avx512", [(AVX2_PC, False), (AVX512_PC, True), (KNIGHTS_LANDING, False)],
+                         ids=["avx2-only", "full-avx512", "avx512f-only"])
+def test_a_generated_x86_module_plans_another_pc_s_cpu_as_the_build_recipe(tmp_path, profile, avx512):
+    """An x86_64 module of the template with the profile of another PC: the probe's own CPU features after the
+    module's flags (so their -march wins), all 14 ggml options explicit after GGML_NATIVE=OFF, never -march=native;
+    the module's own SUPPORTS_AVX2/AVX512 options are the plan's, not an extra -DGGML_AVX512=ON."""
+    cmake, flags = recipe_x86(profile)
+
+    result, stages, _ = generated_config(tmp_path, profile, architecture="x86_64", cpu_flags="-O2",
+                                         STUB_CC_MACHINE="62")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    plan = (stages / "build_config.sh").read_text()
+    assert f"CFLAGS=-O2\\ -march=x86-64\\ {flags.replace(' ', chr(92) + ' ')}\n" in plan, plan
+    assert f"CMAKE_FLAGS=-DGGML_NATIVE=OFF\\ {cmake.replace(' ', chr(92) + ' ')}\n" in plan, plan
+    assert "-march=native" not in plan and ("-DGGML_AVX512=ON" in plan) is avx512
+    toolchain = (stages / "cross_compile_toolchain.cmake").read_text()
+    assert f'SET(CMAKE_C_FLAGS "${{CMAKE_C_FLAGS}} -march=x86-64 {flags}")' in toolchain
+    assert "The hardware profile is of another machine: its CPU features (-march=x86-64 " in result.stdout
+
+
+@needs_bash
+def test_a_generated_arm_module_keeps_its_own_flags_and_options(tmp_path):
+    """The x86 plan is for x86_64 modules only: an aarch64 module's plan is unchanged (its flags, no x86 option)."""
+    result, stages, _ = generated_config(tmp_path, RK3566, STUB_CC_MACHINE="183")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    plan = (stages / "build_config.sh").read_text()
+    assert "CFLAGS=-mcpu=cortex-a55\n" in plan and "GGML_NATIVE" not in plan and "-march=x86-64" not in plan
 
 
 @needs_bash

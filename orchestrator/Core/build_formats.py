@@ -152,3 +152,107 @@ def format_problem(fmt: Optional[str], found: Iterable[TargetFormats], target: s
     else:
         why = ""
     return f"The target {target} does not build the format {shown}{why}. What each installed target builds: {listing}."
+
+
+# --- formats and the board's probe (DECISIONS round 23 item 15) ----------------------------------------------------
+#
+# A format that runs on an NPU is offered and chosen only when the board's probe shows that NPU; otherwise GGUF (the
+# board's CPU). The conversion runs on the build computer: a vendor toolkit without wheels for its architecture is
+# refused there with the reason. One function decides (format_refusal); probe_formats, the Builder tab and the build
+# service read it. Facts, checked against the airockchip repositories on 2026-10-23 and again for this rule:
+# rkllm-toolkit 1.3.1 ships rkllm_toolkit-1.3.1-cp310/cp311/cp312-linux_x86_64 wheels only (rknn-llm, release-v1.3.1,
+# rkllm-toolkit/packages); its README's "Support Platform" lists the RK3588, RK3576, RK3562 and RV1126B series, not
+# the RK3566 or RK3568. rknn-toolkit2 ships x86_64 and arm64 wheels (rknn-toolkit2/packages/x86_64 and /arm64; on
+# PyPI, 2.3.2 has manylinux x86_64 and aarch64 wheels), so RKNN converts natively on an ARM build computer.
+
+# Format -> the NPU vendor whose NPU runs it (NPU_VENDOR of the probe schema)
+NPU_FORMATS = {"rkllm": "rockchip", "rknn": "rockchip"}
+# The SoCs RKLLM-Toolkit 1.3.1 converts for
+RKLLM_SOCS = ("rk3588", "rk3576", "rk3562", "rv1126b")
+# Format -> (the one build-computer architecture its toolkit has wheels for, the toolkit in words)
+SINGLE_ARCH_FORMATS = {"rkllm": ("x86_64", "RKLLM-Toolkit 1.3.1 ships Linux x86_64 wheels only")}
+_MACHINES = {"x86_64": "x86_64", "amd64": "x86_64", "x64": "x86_64", "aarch64": "arm64", "arm64": "arm64"}
+
+
+def build_host_arch(machine: Optional[str] = None) -> str:
+    """The architecture of the build computer (this one, or `machine` as platform.machine() names it): x86_64, arm64,
+    or the machine's own name in lower case for another one."""
+    if machine is None:
+        import platform
+        machine = platform.machine()
+    text = str(machine or "").strip().lower()
+    return _MACHINES.get(text, text)
+
+
+def probe_npu(profile: Any) -> Optional[str]:
+    """The vendor of the NPU the board's probe shows, or None. A Rockchip NPU counts when the probe found the SoC's NPU
+    node (SUPPORTS_RKNN=ON); a Rockchip board attached over USB is no NPU of the probed machine. Another vendor's NPU
+    counts with its NPU_VENDOR and NPU_DEVICE."""
+    if profile is None:
+        return None
+    get = getattr(profile, "get", None)
+    flag = getattr(profile, "flag", None)
+    if callable(flag) and flag("SUPPORTS_RKNN") == "ON":
+        return "rockchip"
+    vendor = str(get("NPU_VENDOR") or "").lower() if callable(get) else ""
+    if vendor and vendor != "rockchip" and get("NPU_DEVICE"):
+        return vendor
+    return None
+
+
+def _soc_of(profile: Any, board: Optional[str]) -> str:
+    get = getattr(profile, "get", None) if profile is not None else None
+    soc = board or (get("SOC_MODEL") if callable(get) else None)
+    return str(soc or "").strip().lower()
+
+
+def format_refusal(fmt: Optional[str], *, profile: Any = None, board: Optional[str] = None,
+                   host_arch: Optional[str] = None) -> Optional[str]:
+    """Why `fmt` is not built for this board on this build computer, as one plain sentence; None when nothing stands
+    against it. `profile`: the board's probe (None: not known, no NPU check); `board`: the board id of the request
+    (else the probe's SoC); `host_arch`: the build computer (build_host_arch(); None: not checked). The one verdict of
+    DECISIONS round 23 item 15: an NPU format only with that NPU in the probe; RKLLM only for its SoCs and only on an
+    x86_64 build computer; GGUF always."""
+    fid = str(fmt or "").strip().lower()
+    label = fid.upper()
+    vendor = NPU_FORMATS.get(fid)
+    if vendor and profile is not None and probe_npu(profile) != vendor:
+        return (f"The board's hardware probe shows no {vendor.title()} NPU, and {label} runs on that NPU only: build "
+                "GGUF, which runs on the board's CPU.")
+    if fid == "rkllm":
+        soc = _soc_of(profile, board)
+        if soc and soc not in RKLLM_SOCS:
+            return (f"RKLLM-Toolkit 1.3.1 converts for the RK3588, RK3576, RK3562 and RV1126B only, not for the "
+                    f"{soc.upper()}: an LLM runs on its CPU there, so build GGUF.")
+    single = SINGLE_ARCH_FORMATS.get(fid)
+    if single and host_arch and host_arch != single[0]:
+        return (f"{single[1]}, and this build computer is {host_arch}: build GGUF here (it converts natively), or "
+                f"build {label} on an {single[0]} computer.")
+    return None
+
+
+@dataclass(frozen=True)
+class FormatVerdict:
+    """A format of a target for one board and build computer: offered, or not with the reason (format_refusal)."""
+    format: str
+    label: str
+    offered: bool
+    reason: str = ""
+
+
+def format_verdicts(caps: Any, *, profile: Any = None, board: Optional[str] = None,
+                    host_arch: Optional[str] = None) -> List[FormatVerdict]:
+    """Every format of offered_formats(caps) with its verdict for the board's probe and the build computer."""
+    out = []
+    for label, fid in offered_formats(caps):
+        reason = format_refusal(fid, profile=profile, board=board, host_arch=host_arch)
+        out.append(FormatVerdict(fid, label, reason is None, reason or ""))
+    return out
+
+
+def probe_formats(caps: Any, *, profile: Any = None, board: Optional[str] = None,
+                  host_arch: Optional[str] = None) -> List[Tuple[str, str]]:
+    """(label, format id) offered for the board's probe on this build computer: offered_formats(caps) without what
+    format_refusal refuses, in the target's order (GGUF, the CPU format, stays, so it is chosen without an NPU)."""
+    return [(v.label, v.format) for v in format_verdicts(caps, profile=profile, board=board, host_arch=host_arch)
+            if v.offered]

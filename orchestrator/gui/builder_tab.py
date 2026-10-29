@@ -47,7 +47,8 @@ except ImportError:
 # Formats with a working pipeline, and quantization suggestions per format (free text is allowed). The lists of what a
 # target offers live in Core/build_formats.py (the CLI's `build start --format` offers the same); kept here under
 # their old names.
-from orchestrator.Core.build_formats import PIPELINE_FORMATS, offered_formats, unchecked_formats  # noqa: E402
+from orchestrator.Core.build_formats import (PIPELINE_FORMATS, build_host_arch, offered_formats,  # noqa: E402
+                                             probe_formats, unchecked_formats)
 
 BUILD_FORMATS = list(PIPELINE_FORMATS)
 
@@ -185,6 +186,7 @@ class LocalScanWorker(QThread):
         lines.append(ui_text("deploy.scan.stored", path=str(scan.local_path)))
         if scan.needs_reprobe:
             lines.append(ui_text("deploy.scan.reprobe"))
+        self.probe_id = "local"  # the probe id of this computer: the build the tab starts next is planned for it
         self.finished.emit(True, "\n".join(lines), str(load))
 
 
@@ -256,6 +258,7 @@ class SSHProbeWorker(QThread):
         lines += [ui_text("deploy.scan.note", note=note) for note in scan.notes]
         if scan.trusted is not None:
             lines.append(ui_text("deploy.trusted", device_id=scan.trusted.device_id, label=scan.trusted.label))
+        self.probe_id = scan.device_id  # the board's stored probe: the build the tab starts next is planned for it
         self.finished.emit(True, "\n".join(lines), str(local_output))
 
 
@@ -713,10 +716,12 @@ class BuilderTab(QWidget):
             from orchestrator.runtime.probe_service import HardwareProbes
             tm = self.framework.get_component("target_manager") if hasattr(self.framework, "get_component") else None
             imported = import_probe(HardwareProbes.for_framework(self.framework), path, label, tm)
+            self._probe_id = imported.probe_id  # the build the tab starts next is planned for this board
             self._log(ui_text("deploy.import.done", probe_id=imported.probe_id, label=imported.info.label))
             if imported.profile.needs_reprobe:
                 self._log(ui_text("deploy.import.reprobe"))
         except Exception as e:  # not a probe file the framework can read: the match below still runs
+            self._probe_id = None
             self._log(ui_text("deploy.import.failed", reason=str(e)))
             if getattr(e, "next", ""):   # the next step, as `llmcf scan --import` prints it
                 self._log(str(e.next))
@@ -816,6 +821,7 @@ class BuilderTab(QWidget):
         self.scan_cancel_btn.setVisible(False)
         if success:
             self._log(f"Scan finished: {msg}")
+            self._probe_id = getattr(getattr(self, "probe_worker", None), "probe_id", None)
             if output_path:
                 self._load_probe_config(Path(output_path))
         else:
@@ -835,6 +841,7 @@ class BuilderTab(QWidget):
             match = tm.find_matching_target(data)
             self._last_probe_path = config_path
             profile = read_probe(config_path)
+            self._probe_profile = profile  # the formats follow it (NPU formats only with its NPU)
             if not match:  # a schema-2 probe: its SoC, vendor and architecture against the targets
                 try:
                     from orchestrator.runtime.probe_service import match_target
@@ -861,6 +868,11 @@ class BuilderTab(QWidget):
                 self._set_state("default")
                 self._log("No matching profile found in database.")
                 after_probe(self, profile, None)
+            # The probe drives the formats and the build of the target it fits only (a scan of this PC fits no
+            # Rockchip board: the build service would refuse it for one, and its NPU is not the board's)
+            self._probe_target = match or None
+            if hasattr(self, "format_combo"):
+                self._apply_target_capabilities()
 
     # --- STANDARD LOGIC ---
 
@@ -874,6 +886,20 @@ class BuilderTab(QWidget):
         from orchestrator.gui.targets_window import declares_capabilities
         return bool(self.framework) and declares_capabilities(self.framework, target)
 
+    def _board_probe(self, target):
+        """The profile of the probe the tab scanned or imported last, when it fits `target` (the target it matched);
+        None otherwise: then the target's formats are not narrowed by it."""
+        if target is None or target != getattr(self, "_probe_target", None):
+            return None
+        return getattr(self, "_probe_profile", None)
+
+    def _board_probe_id(self, target):
+        """The id of that probe for a build of `target` (BuildRequestIn.probe), None when it does not fit `target`:
+        the build service then takes the newest stored probe of the board, if any."""
+        if self._board_probe(target) is None:
+            return None
+        return getattr(self, "_probe_id", None)
+
     def _apply_target_capabilities(self):
         """Offers exactly the formats the selected target declares. A target that declares none gets what the CLI
         allows (every format), and the note that its boards, formats and quantizations are not checked."""
@@ -882,8 +908,14 @@ class BuilderTab(QWidget):
         self.format_combo.blockSignals(True)
         self.format_combo.clear()
         # build_formats.offered_formats: exactly the declared formats, else every format (UNCHECKED_FORMATS), the
-        # list the CLI's `build start --format` takes for this target too
-        for label, value in offered_formats(caps):
+        # list the CLI's `build start --format` takes for this target too. With the board's probe and this build
+        # computer they follow probe_formats (DECISIONS round 23 item 15): an NPU format only with that NPU, RKLLM
+        # only on an x86_64 computer; the build service refuses the others with the reason.
+        offered = offered_formats(caps)
+        if caps is not None:
+            offered = probe_formats(caps, profile=self._board_probe(self.target_combo.currentData()),
+                                    host_arch=build_host_arch()) or offered
+        for label, value in offered:
             self.format_combo.addItem(label, value)
         if hasattr(self, "lbl_no_caps"):
             target = self.target_combo.currentData()
@@ -1183,7 +1215,7 @@ class BuilderTab(QWidget):
                   "target_fmt": target_fmt, "opt_lvl": opt_lvl, "quant": quant, "board": board,
                   "dataset": self.dataset_path, "recipe": recipe, "output_dir": output_dir,
                   "use_gpu": self.chk_gpu.isChecked(), "use_imatrix": self.chk_imatrix.isChecked(),
-                  "priority": self._priority()}
+                  "priority": self._priority(), "probe": self._board_probe_id(self.target_combo.currentData())}
         if not self._model_on_this_computer(values):
             return
         found, lookup = self._earlier_builds(values)
@@ -1291,7 +1323,7 @@ class BuilderTab(QWidget):
                                        target=values["target"], format=values["target_fmt"].value,
                                        board=values["board"], quantization=values["quant"],
                                        use_imatrix=values["use_imatrix"], dataset_path=values["dataset"],
-                                       use_gpu=values["use_gpu"],
+                                       use_gpu=values["use_gpu"], probe=values.get("probe"),
                                        max_context_length=recipe.options.max_context_length if recipe else None)
 
     def _earlier_builds(self, values):

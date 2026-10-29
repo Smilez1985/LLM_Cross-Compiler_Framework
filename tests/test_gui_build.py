@@ -569,6 +569,24 @@ def wizard(qapp, tmp_path, monkeypatch):
     w.close()
 
 
+@pytest.mark.parametrize("flags, avx512", [
+    ("avx2,fma,avx512f,avx512cd,avx512vl,avx512dq,avx512bw", True),
+    ("avx2,fma,avx512f,avx512cd,avx512er,avx512pf", False),      # a Xeon Phi (Knights Landing)
+    ("", False),                                                  # no CPU flags: AVX-512 BW, VL, DQ not confirmed
+], ids=["full-avx512", "avx512f-only", "no-flags"])
+def test_the_wizard_proposes_avx512_only_with_every_part_ggml_avx512_compiles_for(wizard, tmp_path, monkeypatch,
+                                                                                    flags, avx512):
+    """The module wizard's flags from a probe follow the build recipe's rule (recipe.avx512_missing): GGML_AVX512 adds
+    -mavx512cd/vl/dq/bw too, which a CPU with AVX-512 F alone cannot run."""
+    monkeypatch.setattr(wizard, "_store_probe", lambda path: None)
+    probe = tmp_path / "probe.txt"
+    probe.write_text(f"ARCH=x86_64\nSUPPORTS_AVX=ON\nSUPPORTS_AVX2=ON\nSUPPORTS_AVX512=ON\nCPU_FLAGS_ALL={flags}\n")
+    wizard.import_probe_file(str(probe))
+    assert ("-DGGML_AVX512=ON" in wizard.cmake_flags.text()) is avx512
+    assert ("-mavx512f" in wizard.cpu_flags.text()) is avx512
+    assert "-DGGML_AVX2=ON" in wizard.cmake_flags.text()
+
+
 def test_the_description_field_is_written_and_defaults_like_the_cli(wizard):
     wizard.name_edit.setText("My_Board")
     assert wizard.desc_edit.placeholderText() == "Target for My_Board"

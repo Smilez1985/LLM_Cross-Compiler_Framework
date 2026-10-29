@@ -1,6 +1,6 @@
 {
   "backend": "cpu",
-  "build_id": "5bcb24332cba40e202a6375855d13f1e043c13b1a6b8518d153a7f93796185d5",
+  "build_id": "391a7a30bb2d1edb8586fef29f72d4fef0513f45f16da62fa3f311af860d360b",
   "builder": {
     "base": "debian-12",
     "gcc": "12.2",
@@ -14,7 +14,7 @@
   ],
   "placement": "cross",
   "purpose": "device-runtime",
-  "recipe_version": 3,
+  "recipe_version": 4,
   "source": {
     "build_number": 11429,
     "commit": "d81235049384534c167caea52b85a694f6103d14",
