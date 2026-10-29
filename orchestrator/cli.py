@@ -3398,7 +3398,8 @@ def _doctor_fix(doc):
     did: `fixed` and `still_present`, plus why each one still present was not repaired (for the person's output)."""
     terminal = _interactive()
     asked = {"decision": "person", "answered_by": "person", "confirm_channel": "framework-cli"} if terminal else {}
-    result = doc.miracle(actor="cli", at_terminal=False, **asked)
+    # A Miracle run of the person: it closes an open Oracle run, without the logo.
+    result = doc.miracle(actor="cli", at_terminal=False, closes_circle=True, **asked)
     report = result.after
     report.fixed, report.still_present, why_not = _miracle_fixed(result)
     return report, why_not
@@ -3510,7 +3511,8 @@ def mojo(ctx: FrameworkContext, mode: str, as_json: bool, board: Optional[str]):
     if as_json:
         if mode == "miracle":
             # Without a person at a terminal: only the harmless repairs (round 6 Q11); nothing is deleted.
-            result = engine.miracle(actor="cli", at_terminal=False, before=report)
+            # A Miracle run of the person: it closes an open Oracle run, without the logo (--json shows none).
+            result = engine.miracle(actor="cli", at_terminal=False, before=report, closes_circle=True)
             data = {"mode": mode, **_mojo_dict(result.after, offers(framework, result.after)),
                     **_mojo_miracle_dict(result)}
         else:

@@ -289,7 +289,9 @@ class MojoWindow(QDialog):
                 return outcome.count, outcome.why
 
             # The plans shown bind the repairs: a problem that changed since then is not repaired (plan_changed).
+            # closes_circle: the person's Miracle run closes the console's open Oracle run (Core does it, no logo).
             result = Mojo(framework).miracle(actor="gui", at_terminal=True, before=report, offered=offered,
+                                             closes_circle=True,
                                              decision="person", answered_by="person", confirm_channel="framework-gui",
                                              free_space=free_space)
             return (result, offers(framework, result.after), boards_to_offer(framework, result.after),

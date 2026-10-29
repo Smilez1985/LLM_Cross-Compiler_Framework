@@ -56,8 +56,11 @@ When Mojo Miracle ends after Mojo Oracle at a terminal (your `y` here, or `llmcf
 managed. The oracle is pleased." when it repaired at least one problem, none is left and nothing new turned up, or
 "[Mojo] 404 - miracle not found" when there was nothing to repair. Any other outcome shows no logo, and neither do
 `--json`, a run without a terminal, the AI tools or the GUI. The open Oracle run is a small private note next to
-Mojo Miracle's lock in your personal folder (`mojo/oracle_open.json`, with no path and no account name in it); every
-Mojo Miracle run at a terminal removes it when it ends.
+Mojo Miracle's lock in your personal folder (`mojo/oracle_open.json`, with no path and no account name in it). It
+expires after one hour (an older note, or one that cannot be read, counts as not open and is removed), and every Mojo
+Miracle run of yours removes it when it ends: at a terminal, and without a logo also `llmcf mojo --miracle --json`,
+`llm-cli doctor --fix` (with or without `--json`) and a Mojo Miracle run in the GUI. An AI's Mojo Miracle run leaves
+it.
 
 In the GUI: **Tools > Mojo Health Check...** runs Mojo Oracle when the window opens and shows the same
 findings with an overall line for the exit code; **Run Mojo Miracle...** asks the same question (No is the default),

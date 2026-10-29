@@ -59,7 +59,10 @@ The oracle is pleased.“, wenn es mindestens ein Problem repariert hat, keines 
 „[Mojo] 404 - miracle not found“, wenn es nichts zu reparieren gab. Jedes andere Ergebnis zeigt kein Logo, ebenso
 wenig `--json`, ein Lauf ohne Terminal, die KI-Tools oder die GUI. Der offene Oracle-Lauf ist eine kleine private
 Notiz neben der Sperre von Mojo Miracle in deinem persönlichen Ordner (`mojo/oracle_open.json`, ohne Pfad und ohne
-Kontonamen darin); jeder Lauf von Mojo Miracle im Terminal entfernt sie an seinem Ende.
+Kontonamen darin). Sie verfällt nach einer Stunde (eine ältere Notiz oder eine, die sich nicht lesen lässt, zählt
+als nicht offen und wird entfernt), und jeder deiner Läufe von Mojo Miracle entfernt sie an seinem Ende: im Terminal,
+und ohne Logo auch `llmcf mojo --miracle --json`, `llm-cli doctor --fix` (mit oder ohne `--json`) und ein Lauf von
+Mojo Miracle in der GUI. Ein Lauf von Mojo Miracle durch eine KI lässt sie stehen.
 
 In der GUI: **Tools > Mojo-Gesundheitscheck...** startet Mojo Oracle beim Öffnen des Fensters und
 zeigt dieselben Befunde mit einer Gesamtzeile für den Exit-Code; **Mojo Miracle ausführen...** stellt dieselbe Frage

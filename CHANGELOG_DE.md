@@ -29,6 +29,16 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   registriertes System hält mit dem Schritt an, den du tun kannst; der Registrierungsstatus wird gelesen, nie
   gezeigt; der Probelauf nennt den Schritt). Amazon Linux und die übrigen Systeme, die auf Fedora aufbauen, behalten
   das Paket der Distribution.
+- `2026-10-29 23:40 UTC` · `v3.2.0` **Nacharbeiten am Mojo-Kreis: Die Notiz des offenen Oracle-Laufs verfällt, jeder Miracle-Lauf der
+  Person schließt sie** ([Design](docs/DESIGN_DE.md#mojo-der-gesundheitscheck)): Die Notiz eines offenen Laufs von
+  Mojo Oracle verfällt nach einer Stunde (eine ältere Notiz, eine mit einer Zeit in der Zukunft oder einer, die sich
+  nicht lesen lässt, oder eine Datei, die keine Notiz ist, zählt als nicht offen und wird entfernt), damit eine alte
+  Notiz nicht Tage später die Kristallkugel bringt. `llmcf mojo --miracle --json`, `llm-cli doctor --fix` (mit oder
+  ohne `--json`) und ein Lauf von Mojo Miracle in der GUI schließen die Notiz jetzt auch, ohne Logo; die GUI tut es
+  über Core (`Mojo.miracle(closes_circle=True)`), und ein Lauf einer KI (`run_mojo_miracle`) lässt sie weiter stehen.
+  Die Funktionen der Notiz liegen jetzt in `orchestrator/Core/mojo/oracle_note.py` (weiter aus `banner.py`
+  importierbar) und werfen bei keinem kaputten Zustandsordner (ein Ordner an Stelle der Datei, kaputtes JSON, kein
+  Wörterbuch, ein schreibgeschützter Ordner, jeder andere Fehler); protokolliert wird nur die Art des Fehlers.
 
 ### Behoben
 - `2026-10-29 23:36 UTC` · `v3.2.0` **Nacharbeiten an der Container-Engine: ein `DOCKER_HOST` aus Podman-Zeiten, `/dev/dri` unter rootless
