@@ -438,8 +438,8 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   not used. A deploy bound to a fingerprint you were shown is refused. `deploy run` and the Deployment tab read the
   board's host key with paramiko before they deploy, so they still need it.
 - **The framework's own SSH settings** (`llm-cli deploy ssh-config show|edit|import`; GUI: **Boards > Boards and
-  Devices... > SSH settings...**; [CLI](CLI_Usage.md#deploy-ssh-config)): every OpenSSH call gets the file
-  `ssh_config` in the framework's state folder with `-F`, so neither `~/.ssh/config` nor `/etc/ssh/ssh_config` is
+  Devices... > SSH settings...**; [CLI](CLI_Usage.md#deploy-ssh-config)): every call of this computer's OpenSSH
+  client (the deploy without paramiko; connections over paramiko do not use the file) gets the file `ssh_config` in the framework's state folder with `-F`, so neither `~/.ssh/config` nor `/etc/ssh/ssh_config` is
   read. It is created on first use, readable only by you, and holds only what you add: a `Host` block per board (its
   address or host name as the framework names it), for example a `User` or a `ProxyJump` through a jump host. You can
   show it, edit a board's block, or copy one block from your own `~/.ssh/config` after it is shown to you (that file

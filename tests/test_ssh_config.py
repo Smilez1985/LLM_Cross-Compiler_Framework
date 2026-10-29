@@ -558,3 +558,12 @@ def test_the_other_steps_keep_their_shared_error_text(boards):
     assert boards._error_text(BoardStepError("x", "stale")) == boards._t("boards.edit.err.stale")
     assert boards._error_text(BoardStepError("x", "unreachable"), address=BOARD).startswith(
         boards._t("boards.err.unreachable", address=BOARD, reason="x")[:20])
+
+
+def test_the_window_s_intro_says_that_paramiko_connections_do_not_read_the_file():
+    """Only the OpenSSH client gets -F; paramiko (a hard dependency, the usual transport) reads no settings file, so
+    the Boards window must not tell the person that every SSH connection reads it."""
+    from orchestrator.utils.localization import ui_text
+    for lang in ("en", "de"):
+        text = ui_text("boards.ssh.intro", lang, file="ssh_config")
+        assert "paramiko" in text and "OpenSSH" in text, lang

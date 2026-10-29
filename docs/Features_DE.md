@@ -475,7 +475,8 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   `deploy run` und der Deployment-Tab lesen den Host-Schlüssel des Boards vor dem Deployment mit paramiko, brauchen
   es also weiterhin.
 - **Die eigenen SSH-Einstellungen des Frameworks** (`llm-cli deploy ssh-config show|edit|import`; GUI: **Boards >
-  Boards und Geräte... > SSH-Einstellungen...**; [CLI](CLI_Usage_DE.md#deploy-ssh-config)): Jeder OpenSSH-Aufruf
+  Boards und Geräte... > SSH-Einstellungen...**; [CLI](CLI_Usage_DE.md#deploy-ssh-config)): Jeder Aufruf des
+  OpenSSH-Clients dieses Computers (das Deploy ohne paramiko; Verbindungen über paramiko nutzen die Datei nicht)
   bekommt die Datei `ssh_config` im Zustandsordner des Frameworks mit `-F`, darum werden weder `~/.ssh/config` noch
   `/etc/ssh/ssh_config` gelesen. Sie wird bei der ersten Nutzung angelegt, ist nur für dich lesbar und enthält nur,
   was du hinzufügst: einen `Host`-Block je Board (seine Adresse oder sein Hostname, wie das Framework es nennt), zum

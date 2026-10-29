@@ -190,10 +190,11 @@ TEXTS = {
         # the framework's own SSH settings (round 25 Q4)
         "boards.btn.ssh": "SSH settings...",
         "boards.ssh.title": "The framework's SSH settings",
-        "boards.ssh.intro": "Every SSH connection of the framework reads only this file ({file}), never your "
-                            "~/.ssh/config or /etc/ssh/ssh_config. Add what a board needs, for example a ProxyJump "
-                            "for a board behind a jump host. The framework's own trust settings (its known_hosts, its "
-                            "key) always win over this file.",
+        "boards.ssh.intro": "Every connection the framework makes with this computer's OpenSSH client (the deploy "
+                            "without paramiko) reads only this file ({file}), never your ~/.ssh/config or "
+                            "/etc/ssh/ssh_config; connections over paramiko (when it is installed) do not use it. Add "
+                            "what a board needs, for example a ProxyJump for a board behind a jump host. The "
+                            "framework's own trust settings (its known_hosts, its key) always win over this file.",
         "boards.ssh.file": "The file now:",
         "boards.ssh.host": "Board (address or host name):",
         "boards.ssh.lines": "Its settings, one per line (e.g. ProxyJump jump.example):",
@@ -576,11 +577,12 @@ TEXTS = {
                                    "Boards.",
         "boards.btn.ssh": "SSH-Einstellungen...",
         "boards.ssh.title": "SSH-Einstellungen des Frameworks",
-        "boards.ssh.intro": "Jede SSH-Verbindung des Frameworks liest nur diese Datei ({file}), nie deine "
-                            "~/.ssh/config oder /etc/ssh/ssh_config. Trage ein, was ein Board braucht, zum Beispiel "
-                            "einen ProxyJump für ein Board hinter einem Jump-Host. Die eigenen Vertrauens-"
-                            "Einstellungen des Frameworks (seine known_hosts, sein Schlüssel) gelten immer vor dieser "
-                            "Datei.",
+        "boards.ssh.intro": "Jede Verbindung, die das Framework mit dem OpenSSH-Client dieses Computers aufbaut "
+                            "(das Deploy ohne paramiko), liest nur diese Datei ({file}), nie deine ~/.ssh/config oder "
+                            "/etc/ssh/ssh_config; Verbindungen über paramiko (wenn es installiert ist) nutzen sie "
+                            "nicht. Trage ein, was ein Board braucht, zum Beispiel einen ProxyJump für ein Board "
+                            "hinter einem Jump-Host. Die eigenen Vertrauens-Einstellungen des Frameworks (seine "
+                            "known_hosts, sein Schlüssel) gelten immer vor dieser Datei.",
         "boards.ssh.file": "Die Datei jetzt:",
         "boards.ssh.host": "Board (Adresse oder Hostname):",
         "boards.ssh.lines": "Seine Einstellungen, eine pro Zeile (z. B. ProxyJump jump.example):",
