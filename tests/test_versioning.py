@@ -14,7 +14,9 @@ def test_pyproject_matches_the_package_version():
 def test_changelog_has_an_entry_for_the_current_version():
     text = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     released = re.findall(r"^## \[(\d+\.\d+\.\d+)\] - (\d{4}-\d{2}-\d{2})$", text, re.M)
-    assert "## [Unreleased]" in text
+    # No [Unreleased] section (DECISIONS round 34): the newest dated section is the version being built, so a new
+    # section and the version bump land in the same commit.
+    assert "## [Unreleased]" not in text, "the changelog has no [Unreleased] section; planned work is in the roadmap"
     assert released and released[0][0] == __version__, "newest changelog version differs from __version__"
 
 

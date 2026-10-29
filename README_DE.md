@@ -1,4 +1,4 @@
-Version 3.0.0 plus die [unveröffentlichten Änderungen](CHANGELOG_DE.md#unreleased) · Zuletzt aktualisiert am 2026-10-17
+Version 3.1.0 · Stand 2026-10-29
 
 [English](README.md) · **Deutsch**
 
@@ -9,9 +9,8 @@ Rockchip-Boards wie dem Radxa ZERO 3W oder dem Radxa ROCK 5B. Es besteht aus ein
 Kommandozeile (`llm-cli`), einem Server, über den KI-Clients wie Claude Code, Claude Desktop oder VS Code das
 Framework bedienen (MCP), und dem eingebauten Assistenten **Ditto**.
 
-Diese README beschreibt den Stand des Entwicklungszweigs: Release 3.0.0 (2026-10-10) plus die Arbeiten, die im
-[CHANGELOG](CHANGELOG_DE.md) unter „Unreleased“ stehen. Was als Nächstes kommt, steht in der
-[Roadmap](docs/ROADMAP_DE.md).
+Diese README beschreibt den Stand des Entwicklungszweigs: Version 3.1.0 und was der [CHANGELOG](CHANGELOG_DE.md)
+seitdem aufführt. Was als Nächstes kommt, steht in der [Roadmap](docs/ROADMAP_DE.md).
 
 ---
 
@@ -317,7 +316,7 @@ Befehl `llm-cli`. Die Beispiele in dieser README verwenden `llm-cli`.
 | Was | Wo |
 |---|---|
 | Programm und Python-Umgebung | Linux: `/opt/llm-cross-compiler-framework` · Windows: `C:\Program Files\LLM-Cross-Compiler-Framework` |
-| Fertige Modelle | Der Ausgabeordner `~/llmcf/output` (Windows: `%USERPROFILE%\llmcf\output`), einmal festgelegt mit **File > Output Folder...** oder `llm-cli config output-folder`; in der GUI öffnet sich dort für jeden fertigen Build ein Speichern-Dialog (unveröffentlicht) |
+| Fertige Modelle | Der Ausgabeordner `~/llmcf/output` (Windows: `%USERPROFILE%\llmcf\output`), einmal festgelegt mit **File > Output Folder...** oder `llm-cli config output-folder`; in der GUI öffnet sich dort für jeden fertigen Build ein Speichern-Dialog |
 | Noch nicht gespeicherte Builds, Cache, heruntergeladene Modelle | `output/` (der Build-Ordner des Frameworks; frühere Builds bleiben dort und werden weiter aufgelistet), `cache/` und `models/` im Installationsordner, wenn dein Benutzer dort schreiben darf (Linux), sonst im persönlichen Ordner unten (Windows: `%USERPROFILE%\.llm-framework\output` und so weiter); sie entstehen, wenn sie zum ersten Mal gebraucht werden. Die Einstellungen `build_dir`, `cache_dir` und `models_dir` legen andere Ordner fest |
 | Einstellungen (`config.yml`) | `configs/` im Installationsordner, wenn dein Benutzer dort schreiben darf, sonst der persönliche Ordner unten; `LLM_FRAMEWORK_CONFIG_DIR` legt einen anderen Ordner fest |
 | Persönlicher Zustand: Tool-Berechtigungen, Audit-Log, SSH-Schlüssel und bekannte Geräte, MCP-Token, Chatverlauf, Eingabeverlauf, Wissensbasis, lokaler Modellserver, zwischengespeicherter Community-Index | `~/.llm-framework` (Windows: `%USERPROFILE%\.llm-framework`); `LLM_FRAMEWORK_HOME` legt einen anderen Ordner fest |
@@ -510,7 +509,7 @@ llm-cli build start -m ./my_model.onnx -t Rockchip -f rknn -b rk3566 -q fp16 -F
 
 - Ergebnisse landen im Ausgabeordner, `~/llmcf/output/Rockchip/<Modell>/<Quantisierung>/` (Modelldatei,
   `build_info.json`, `Model_Card.md` und das ZIP daneben). Im Terminal wirst du vorher gefragt, mit dem Ausgabeordner
-  als Vorgabe; `-o/--output` legt einen anderen Ordner fest (unveröffentlicht; vorher `output/build_<Datum>_<Uhrzeit>/`
+  als Vorgabe; `-o/--output` legt einen anderen Ordner fest (vorher `output/build_<Datum>_<Uhrzeit>/`
   in der Installation).
 - Eine Kombination, die das Target nicht unterstützt, stoppt, bevor etwas läuft, mit Exit-Code 2 und dem Grund
   (zum Beispiel „Format 'rkllm' does not run on rk3566“).

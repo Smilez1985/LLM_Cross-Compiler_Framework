@@ -1,4 +1,4 @@
-Version 3.0.0 · Last updated 2026-10-11
+Version 3.1.0 · Last updated 2026-10-29
 
 **English** · [Deutsch](README_DE.md)
 

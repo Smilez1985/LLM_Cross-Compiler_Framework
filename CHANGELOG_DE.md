@@ -1,16 +1,19 @@
 # Changelog
 
-Alle nennenswerten Änderungen an diesem Projekt stehen in dieser Datei.
-Englische Fassung: [CHANGELOG.md](CHANGELOG.md).
+Alle nennenswerten Änderungen an diesem Projekt stehen in dieser Datei: nur fertige Arbeit, verdrahtet, getestet
+und zusammen mit ihrem Code committet. Englische Fassung: [CHANGELOG.md](CHANGELOG.md).
 
 Das Format basiert auf [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/),
-und dieses Projekt hält sich an [Semantic Versioning 2.0.0](https://semver.org/lang/de/spec/v2.0.0.html).
-Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
+und dieses Projekt hält sich an [Semantic Versioning 2.0.0](https://semver.org/lang/de/spec/v2.0.0.html). Ein Punkt
+weicht bewusst ab: Es gibt keinen Abschnitt `[Unreleased]`. Jeder Eintrag beginnt mit Zeitstempel und Version
+(`` `JJJJ-MM-TT HH:MM UTC` · `vX.Y.Z` ``) und steht unter der Version, in der er landet. Geplante Arbeiten stehen in
+der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und warum, steht im
+[Design](docs/DESIGN_DE.md).
 
-## [Unreleased]
+## [3.1.0] - 2026-10-29
 
 ### Hinzugefügt
-- **Mojo schließt den Kreis: die Kristallkugel nach Mojo Miracle** (DECISIONS Runde 27 und ihr Nachtrag): Endet Mojo
+- `2026-10-24 00:06 UTC` · `v3.1.0` **Mojo schließt den Kreis: die Kristallkugel nach Mojo Miracle** (DECISIONS Runde 27 und ihr Nachtrag): Endet Mojo
   Miracle nach Mojo Oracle im Terminal (die Antwort `y` auf „Run Mojo Miracle now?“, oder `llmcf mojo --miracle`,
   während ein früherer Oracle-Lauf im Terminal noch offen ist), zeigt `llmcf mojo` eine große ASCII-Kristallkugel,
   farbig, wo die Konsole Farben zeigen kann (die Konsole von rich entscheidet: keine Farbe ohne Terminal, mit
@@ -23,7 +26,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `--json`, ohne Terminal, über `run_mojo_oracle` und `run_mojo_miracle` oder in der GUI: Für eine KI ändert sich
   nichts. Die Zeichnung (reines ASCII, 60 Spalten) und ihre Farbmaske stehen in `orchestrator/Core/mojo/banner.py`, an
   einer Stelle zum Austauschen; ein Test prüft, dass beide dieselbe Form haben.
-- **Hardware-Probe 3.1.0: L2-Cache, Version der Vulkan-Instanz, OpenCL-Plattformen, die Hailo-Schlüssel und die
+- `2026-10-23 17:39 UTC` · `v3.1.0` **Hardware-Probe 3.1.0: L2-Cache, Version der Vulkan-Instanz, OpenCL-Plattformen, die Hailo-Schlüssel und die
   Hersteller-Laufzeiten** (Konsolidierungskette probe-keys; Entscheidungen Runde 23 Punkt 11, O-PREP und O-HAILO,
   HAILO_PLAN.md Abschnitt 2): `scripts/hardware_probe.py` (und seine Kopie im Paket), `hardware_probe.sh` und
   `hardware_probe.ps1` schreiben, geprüft durch `configs/hardware_probe_schema.yml`, `CPU_L2_CACHE_KB` (der größte
@@ -45,7 +48,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   HAILO_PLAN 6.1 (Ausgaben von identify und scan aus Hailos Dokumentation und aus den heutigen Formatstrings, die
   abweichende Version auf stderr, Sysroot-Bäume) mit einem nachgebildeten `hailortcli` und stimmen überein; der
   Leitfaden für Modulentwickler (Abschnitt 11.6) sagt, wie ein Stage-Modul und das Framework die Schlüssel nutzen.
-- **`llm-cli models take-over`: die Übernahme alter Hugging-Face-Downloads im Terminal** (Konsolidierungskette
+- `2026-10-23 08:49 UTC` · `v3.1.0` **`llm-cli models take-over`: die Übernahme alter Hugging-Face-Downloads im Terminal** (Konsolidierungskette
   hf-online): Installationen ohne GUI konnten nicht übernehmen, was frühere Versionen des Hugging-Face-Browsers der
   GUI im Cache von huggingface_hub im Modellordner gespeichert haben. Der Befehl ruft im Kern dasselbe auf wie **Alte
   Downloads übernehmen…** in **Tools > Hugging Face Model Browser...** (`ModelManager.old_downloads`, `take_over`,
@@ -58,7 +61,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   klaren Zeile „Es wurde nichts übernommen: ...“ mit dem Grund, wie das Fenster sie zeigt, nie mit einem Traceback.
   Der GUI-Paritätstest nennt seinen Weg mit der Maus (`orchestrator/gui/menus/existing.py`: `btn_hf_take_over` im
   Browser). Tests: `tests/test_hf_takeover.py` `TestTheCommandLinesTakeOver`.
-- **Adresse und Host-Schlüssel eines vertrauten Boards kannst du ändern** (DECISIONS Runde 10 Q5): `llm-cli deploy
+- `2026-10-22 14:37 UTC` · `v3.1.0` **Adresse und Host-Schlüssel eines vertrauten Boards kannst du ändern** (DECISIONS Runde 10 Q5): `llm-cli deploy
   devices edit GERÄT [--host] [--port] [--key "SCHLÜSSELZEILE" | --read-key]` und **Adresse oder Schlüssel ändern...**
   in **Boards > Boards und Geräte...** ändern Hostname oder IP-Adresse, SSH-Port oder Host-Schlüssel des Boards in der
   `known_hosts` des Frameworks, zum Beispiel nachdem sich seine Adresse geändert hat oder es neu installiert wurde.
@@ -87,7 +90,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Die Arbeit läuft im Hintergrund; die Texte gibt es auf Englisch und Deutsch. Kein Tool, der MCP-Server,
   Ditto oder die Laufzeit-Schritte für Geräte erreichen sie (`orchestrator/remote/pairing.py` `replace_key`, ein
   Test über den Importgraphen).
-- **Nächste Schritte statt Befehlen, Befehle zum Zulassen und übersetzte, neu geordnete Menüs** (Welle 6, Kette
+- `2026-10-17 12:38 UTC` · `v3.1.0` **Nächste Schritte statt Befehlen, Befehle zum Zulassen und übersetzte, neu geordnete Menüs** (Welle 6, Kette
   a0; DECISIONS Runde 10 V1, V2, Q2, Q7): Der Qt-freie Katalog `orchestrator/utils/next_steps/` enthält jeden nächsten
   Schritt, den das Audit der Welle 6 nennt (104 Schritte in neun Bereichsmodulen, die von selbst gefunden werden,
   Texte auf Englisch und Deutsch), und ein Renderer macht aus einem Schritt den Befehl für die Kommandozeile
@@ -111,23 +114,22 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   bewacht die Texte samt ihrer Sie-Form und zählt den Rest gegen eine Ausgangslage, die nur sinken darf. Die
   deutschen Texte des Katalogs folgen der gewählten Anrede: Die Tabelle `FORMAL` eines Moduls hält die Sie-Form jedes
   Textes, der anders lautet.
-- **Was Ditto und KI-Apps tun, wird zu Einträgen des Chat-Verlaufs, in jedem Prozess** (Welle 6, DECISIONS Runde 9
-  U1, Folge b): `orchestrator/Core/activity.py` schreibt einen signierten Eintrag je Ereignis, aus dem Prozess, der die
-  Arbeit getan hat (der GUI, `llm-cli`, jedem stdio-MCP-Server und dem HTTP-Kindprozess): ein Aufruf, der etwas
-  geändert hat (das neue Registry-Ereignis `call_done`, Eintragsart `ai_action`), das Ende jeder Job-Art (ein
-  Ende-Listener des Job-Dienstes), das Ende eines Builds (der Orchestrator; wer ihn abgebrochen hat, der gespeicherte
-  Ordner als Bezeichnung), Nutzungen von Dauerfreigaben, ausstehende Freigaben und ihr Ende sowie abgelehnte Arbeit
-  (`blocked`). Die eigenen Aufrufe der Person erzeugen keine Einträge; der Absender ist die vertrauenswürdige
-  Aufrufer-ID, der eigene Name einer App nur ihre Angabe; Einträge enthalten nur geschlossene Werte und nennen das
-  Fenster, das das Ergebnis zeigt (`orchestrator/tools/tool_windows.py`: die geschlossene Fensterliste, ein Fenster für
-  jedes Werkzeug, das etwas ändert, geprüft von einem Test über die ganze Registry, für jede Job-Art, und was jedes
-  Fenster öffnet), dazu die Schritt-IDs des Katalogs der nächsten Schritte (nie ein Textschlüssel, der wie eine
-  aussieht); `refs.asked_in` markiert Dittos Runden im eigenen Chat der GUI. Er
-  versagt offen, und dieselbe Ablehnung wird einmal in 30 Sekunden geschrieben. `ActivityProducer.add_listener` gibt
-  der GUI die Einträge ihres eigenen Prozesses sofort, und `ConfigManager.reload_user_config` übernimmt Einstellungen,
-  die ein anderer Prozess gespeichert hat, außer Werten, die dieser Prozess selbst hält (als Konflikte gemeldet). Die
-  Seite der GUI (Fenster zeigen, Hinweise mit Zeigen) folgt in Welle 6.
-- **Fachbegriffe beim Überfahren mit der Maus erklärt, ein verständliches Fehlerfenster und „du“ oder „Sie“ auf
+- `2026-10-17 06:42 UTC` · `v3.1.0` **Was Ditto und KI-Apps tun, wird zu Einträgen des Chat-Verlaufs, in jedem Prozess** (Welle 6, DECISIONS Runde 9 U1,
+  Folge b): `orchestrator/Core/activity.py` schreibt einen signierten Eintrag je Ereignis, aus dem Prozess, der die
+  Arbeit getan hat (der GUI, `llm-cli`, jedem stdio-MCP-Server und dem HTTP-Kindprozess): ein Aufruf, der etwas geändert
+  hat (das neue Registry-Ereignis `call_done`, Eintragsart `ai_action`), das Ende jeder Job-Art (ein Ende-Listener des
+  Job-Dienstes), das Ende eines Builds (der Orchestrator; wer ihn abgebrochen hat, der gespeicherte Ordner als
+  Bezeichnung), Nutzungen von Dauerfreigaben, ausstehende Freigaben und ihr Ende sowie abgelehnte Arbeit (`blocked`).
+  Die eigenen Aufrufe der Person erzeugen keine Einträge; der Absender ist die vertrauenswürdige Aufrufer-ID, der eigene
+  Name einer App nur ihre Angabe; Einträge enthalten nur geschlossene Werte und nennen das Fenster, das das Ergebnis
+  zeigt (`orchestrator/tools/tool_windows.py`: die geschlossene Fensterliste, ein Fenster für jedes Werkzeug, das etwas
+  ändert, geprüft von einem Test über die ganze Registry, für jede Job-Art, und was jedes Fenster öffnet), dazu die
+  Schritt-IDs des Katalogs der nächsten Schritte (nie ein Textschlüssel, der wie eine aussieht); `refs.asked_in`
+  markiert Dittos Runden im eigenen Chat der GUI. Er versagt offen, und dieselbe Ablehnung wird einmal in 30 Sekunden
+  geschrieben. `ActivityProducer.add_listener` gibt der GUI die Einträge ihres eigenen Prozesses sofort, und
+  `ConfigManager.reload_user_config` übernimmt Einstellungen, die ein anderer Prozess gespeichert hat, außer Werten, die
+  dieser Prozess selbst hält (als Konflikte gemeldet).
+- `2026-10-17 11:20 UTC` · `v3.1.0` **Fachbegriffe beim Überfahren mit der Maus erklärt, ein verständliches Fehlerfenster und „du“ oder „Sie“ auf
   Deutsch** (Welle 6, DECISIONS Runde 10, V6, Q1, Q7): ein Glossar mit 74 Fachbegriffen
   (`orchestrator/utils/l10n_glossary.py`, zum Beispiel GGUF, Quantization und ihre Typen, Importance Matrix, KV Cache,
   RKLLM, RKNN, Qdrant, MCP, SSH Host Key, Fingerprint, Digest, Keyring), jeder mit einer kurzen Erklärung auf Englisch
@@ -143,7 +145,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   **Allgemein**, in dem du stattdessen „Sie“ wählst (Einstellung `form_of_address`), sofort wirksam, auch für die
   nächsten Schritte. Größen im Löschdialog folgen deiner
   Sprache („1,5 GB“ auf Deutsch).
-- **Aktionen für den Maintainer des Community-Repositorys** (Entscheidung vom 2026-10-22: die Arbeit des Maintainers
+- `2026-10-22 19:07 UTC` · `v3.1.0` **Aktionen für den Maintainer des Community-Repositorys** (Entscheidung vom 2026-10-22: die Arbeit des Maintainers
   als wenige Klicks statt einer Anleitung): **Tools > Community Hub öffnen > Maintainer** und
   `llm-cli zoo maintainer key|review|revoke`, eine Implementierung in `orchestrator/Core/community_maintainer.py`
   (`scripts/zoo_sign_index.py` ist jetzt eine dünne Hülle darüber). **Signaturschlüssel anlegen** (einmalig) legt den
@@ -175,7 +177,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Fenster als Ort (`hub.refresh`, `maint.review` und `audit.verify` des Katalogs der nächsten Schritte, die
   Einstellungen mit ihrem Menüpfad), im Fenster nie einen Befehl; der Knopf **Aktualisieren** des Community Hubs ist
   jetzt übersetzt.
-- **`tests/test_cli_gui_parity.py`: Jeder Befehl und jede Option der CLI für Personen hat einen Weg mit der Maus**
+- `2026-10-17 02:35 UTC` · `v3.1.0` **`tests/test_cli_gui_parity.py`: Jeder Befehl und jede Option der CLI für Personen hat einen Weg mit der Maus**
   (W1', Runde 9 U2): Der Test geht den ganzen Befehlsbaum von `llm-cli` durch (294 Pfade: Befehle, Unterbefehle und
   Optionen) und liest `CLI_PATHS`, `MACHINE_ONLY` und die Fenster- und Reitertabellen jedes Moduls in
   `orchestrator/gui/menus/`. Er schlägt fehl, wenn ein Befehl oder eine Option weder einen Weg mit der Maus noch einen
@@ -188,7 +190,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Menüs aller Bereiche werden über ihre Objektnamen mit einer Hilfsfunktion gefunden
   (`orchestrator/gui/menus/place.py`), deshalb fügt ein übersetzter Menütitel nie ein zweites Menü hinzu.
   CONTRIBUTING nennt die Regel.
-- **Tools > Mojo-Gesundheitscheck... in der GUI** (DECISIONS W1': jede Aktion der Kommandozeile auch mit der Maus):
+- `2026-10-16 20:14 UTC` · `v3.1.0` **Tools > Mojo-Gesundheitscheck... in der GUI** (DECISIONS W1': jede Aktion der Kommandozeile auch mit der Maus):
   Das Mojo-Fenster startet Mojo Oracle beim Öffnen, außerhalb des GUI-Threads, und zeigt jeden Befund so, wie
   `llmcf mojo` ihn ausgibt (die Schwere als Text mit Zeichen und Symbol, nie nur als Farbe; wo mit dem vollen Pfad,
   warum es wichtig ist, den nächsten Schritt, was Mojo Miracle tun kann, mit den Schritten seines Plans; den
@@ -200,11 +202,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   prüfen...** prüft ein beliebiges vertrautes Board, das du auswählst (an Bezeichnung und Adresse, und auch an der
   Geräte-ID, wo zwei Boards gleich aussehen; eine Verbindung zu seinem SSH-Port, keine Anmeldung). Befehl und Fenster teilen dieselben Kernfunktionen (`Core/mojo/boards.py`, die Sicht der Person in
   `Core/mojo/views.py`, `docker_objects.offer_image_list`), die Ausgabe von `llmcf mojo` bleibt also, wie sie war.
-- **Dieses Board prüfen im Deployment-Tab** (Gruppe „Benchmark auf einem Board“, DECISIONS W1'): prüft das gewählte
+- `2026-10-16 20:14 UTC` · `v3.1.0` **Dieses Board prüfen im Deployment-Tab** (Gruppe „Benchmark auf einem Board“, DECISIONS W1'): prüft das gewählte
   Board so, wie es `llmcf mojo --oracle --board` tut, im Hintergrund (eine Verbindung zu seinem SSH-Port, keine
   Anmeldung), und zeigt seinen Befund mit dem nächsten Schritt unter der Zeile; ein Problem wird auch in einer Meldung
   genannt.
-- **Boards > Boards und Geräte...: jeder Befehl von `deploy devices` und `device` mit der Maus** (W1'): Ein neues
+- `2026-10-16 20:23 UTC` · `v3.1.0` **Boards > Boards und Geräte...: jeder Befehl von `deploy devices` und `device` mit der Maus** (W1'): Ein neues
   Menü Boards öffnet ein Fenster für jedes Board, das du untersucht hast oder dem du vertraust, mit dem Konto auf
   dem Board, dem vollen Fingerabdruck des Host-Schlüssels und seinem Stand in `known_hosts`, seit wann ihm vertraut
   wird, dem letzten Deployment, seinem System, den Deploy-Einstellungen und der installierten Laufzeit. Seine Knöpfe
@@ -219,7 +221,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   (Mojo). Jeder Kontakt mit einem Board und jeder Build laufen im Hintergrund. Die Laufzeit-Tools der KI bauen und
   installieren mit denselben Schritten. Beschädigte Deploy-Einstellungen ("damaged; set them again") lassen sich jetzt
   neu festlegen, im Fenster und mit `device settings`, nach einer Frage, die die Datei mit vollem Pfad und Größe nennt.
-- **Tools > Tool Permissions (Ditto / MCP)...: jede Option von `tools list` und `tools permissions` per Maus** (W1'):
+- `2026-10-16 21:52 UTC` · `v3.1.0` **Tools > Tool Permissions (Ditto / MCP)...: jede Option von `tools list` und `tools permissions` per Maus** (W1'):
   eine Spalte „Gilt jetzt“ zeigt die Entscheidung jedes Tools mit ihrem Grund (wie `tools list` sie ausgibt), und ein
   Hinweis nennt die Aufrufer mit eigenen Berechtigungen; „Wessen Berechtigungen“ zeigt und bearbeitet die gemeinsamen
   Berechtigungen oder den eigenen Abschnitt von Ditto oder den lokalen MCP-Clients (`--caller`); „Auf die empfohlenen
@@ -230,13 +232,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Tokens beginnen (`mcp token add --policy-from TOKEN`). CLI und GUI teilen sich die Kernfunktionen
   (`policy.with_section`, `reset_policy`, `reset_changes`, `mcp_tokens.add_token`, `copied_policy`,
   `set_token_policy`, `reset_token_policy`, `revoke_token`); die Ausgabe der CLI bleibt gleich.
-- **Security > Prüfprotokoll...: jede Option von `tools audit` per Maus** (W1'): die Zeilen des Audit-Logs, wie die
+- `2026-10-16 21:52 UTC` · `v3.1.0` **Security > Prüfprotokoll...: jede Option von `tools audit` per Maus** (W1'): die Zeilen des Audit-Logs, wie die
   CLI sie zeigt (gemeinsames `tools/audit_view.py`), Seite für Seite mit „Einträge pro Seite“, „Neuere“ und
   „Ältere“; „Details“ (`--details`); „Unversehrtheit prüfen“ (`--verify`) mit dem Ergebnis in einfachen Worten;
   „Archivieren...“ (`--archive`) nach einer Rückfrage, nichts wird gelöscht; und der Reiter „Übersicht je Aufrufer“
   (`--summary`). Prüfung, Archivieren und Übersicht laufen im Hintergrund. `AuditLog.entries` nimmt einen Versatz,
   und `AuditLog.count` nennt die Größe, zum Blättern.
-- **Security > Verbindungen zu KI-Apps (MCP)...: jede Aktion von `mcp config`, `mcp serve --transport http` und
+- `2026-10-16 21:52 UTC` · `v3.1.0` **Security > Verbindungen zu KI-Apps (MCP)...: jede Aktion von `mcp config`, `mcp serve --transport http` und
   `mcp token` per Maus** (W1'): die Einträge für Claude Code, Claude Desktop (mit dem Pfad seiner
   Konfigurationsdatei) und VS Code, jeder mit einer Schaltfläche zum Kopieren; „In Claude Desktop eintragen...“ zeigt
   die Datei, ob es sie gibt, die Änderung, die Einträge, die bleiben, und die Sicherung, fragt zuerst und schreibt
@@ -248,12 +250,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   nach 5 Sekunden, ein sofortiges Ende nach 15); und die Liste der Tokens (Hinzufügen, auch als Kopie der Berechtigungen eines
   anderen Tokens, Rotieren, Widerrufen, Zurück auf nur lesen, Berechtigungen). Ein Token wird einmal gezeigt, direkt
   nachdem es angelegt oder rotiert wurde.
-- **Tools > Hinweis zu Deep Ingest... und die Art eines KI-Ordners** (W1'): der Deep-Ingest-Hinweis hat einen eigenen
+- `2026-10-16 21:52 UTC` · `v3.1.0` **Tools > Hinweis zu Deep Ingest... und die Art eines KI-Ordners** (W1'): der Deep-Ingest-Hinweis hat einen eigenen
   Eintrag und lässt sich jederzeit lesen (`tools crawl-notice`; bestätigt auf das Ja der Person, „Nein“ ist
   vorgewählt, mit der Funktion der CLI `crawl_notice.acknowledge_and_audit`); der Modul-Assistent zeigt ihn vor der
   Prüfung der Wissensdatenbank. Tools > Folders the AI May Use... > Add folder... fragt, was im Ordner liegt
   (Modell-Dateien, Datensatz-Dateien oder beides: `tools folders add --kind`).
-- **Security > Anmeldeübersicht...: jeder Weg von `ditto login`, `ditto logout` und `ditto auth status|methods` mit
+- `2026-10-16 21:18 UTC` · `v3.1.0` **Security > Anmeldeübersicht...: jeder Weg von `ditto login`, `ditto logout` und `ditto auth status|methods` mit
   der Maus** (W1'): Ein Fenster zeigt die Anmeldung aller Anbieter auf einmal (Verfahren, Quelle, Konto oder die
   letzten vier Zeichen eines Schlüssels, Zustand, Dittos Anbieter markiert) und wie der Tresor geschützt ist, mit
   seiner Datei; **Alle prüfen** führt im Hintergrund die kostenlose Prüfung jedes Anbieters mit Zugangsdaten aus
@@ -267,21 +269,21 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   aufruft); ein Server ohne Anmeldung (Ollama, `custom` ohne Schlüssel) hat **Vergessen** (`logout`: die gemerkte
   Adresse und das gemerkte Verfahren). Vor dem Abmelden oder Vergessen fragt es („Nein“ ist vorgewählt). Das
   Framework liest, speichert und übergibt nie Zugangsdaten eines Claude-Abos und startet nie den Befehl claude.
-- **Security > Schlüsselspeicher...: `ditto auth storage` und `ditto auth rotate-key` mit der Maus** (W1'): wie der
+- `2026-10-16 21:18 UTC` · `v3.1.0` **Security > Schlüsselspeicher...: `ditto auth storage` und `ditto auth rotate-key` mit der Maus** (W1'): wie der
   Tresor geschützt ist und seine Datei, auch während er funktioniert (bisher zeigte die GUI das nur, wenn er
   scheiterte); **Anders schützen** wechselt zwischen dem Schlüsselbund des Betriebssystems (neu als Wahl in der GUI,
   so braucht der Weg zurück zum Schlüsselbund die CLI nicht mehr), einem Credential-Helper mit seinem Befehl, einer
   Passphrase und der unverschlüsselten Schlüsseldatei (nach der Bestätigung und der Frage der CLI, „Nein“ ist
   vorgewählt); **Schlüssel erneuern...** fragt vorher („Nein“ ist vorgewählt). Der Tresor wird im Hintergrund mit
   denselben Kernfunktionen wie in der CLI neu verschlüsselt.
-- **Security > Geheimnisse...: `secrets list` und `secrets set` mit der Maus** (W1'): die Namen, die das Framework
+- `2026-10-16 21:18 UTC` · `v3.1.0` **Security > Geheimnisse...: `secrets list` und `secrets set` mit der Maus** (W1'): die Namen, die das Framework
   liest (`hf_token`, `qdrant_api_key`, die Schlüssel der Community-Pakete), und jeder gespeicherte Name mit
   „gespeichert“ oder „nicht gespeichert“ und wofür, nie ein Wert; **Ein Geheimnis setzen** nimmt einen Namen aus der
   Liste oder einen anderen Namen und den Wert zweimal in verdeckten Feldern. CLI und Fenster rufen dasselbe neue
   `Core/secret_entries.py` auf (`store_secret`, `secret_entries`; die Ausgabe der CLI bleibt gleich): Im Speicher
   `ephemeral` sagen beide, dass nichts gespeichert wurde, und ebenso Security > Set OpenAI API Key, das dort
   „gespeichert“ meldete.
-- **Tab Deployment: jede Option von `deploy package` und `deploy run` mit der Maus** (W1', GUI-Parität): **Nur Paket
+- `2026-10-16 23:00 UTC` · `v3.1.0` **Tab Deployment: jede Option von `deploy package` und `deploy run` mit der Maus** (W1', GUI-Parität): **Nur Paket
   erstellen…** erstellt das Paket des ausgewählten Builds für das gewählte Profil, ohne ein Board zu kontaktieren, mit
   Docker-Images für ein Board ohne Netz, wenn du Docker ankreuzt, und **Anderer Build oder Modelldatei…** fügt der
   Build-Liste jeden Build-Ordner und jede Modelldatei hinzu (auch die CLI nimmt jeden Pfad); der
@@ -292,7 +294,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Host-Schlüssel des Boards wird jetzt im Hintergrund gelesen und sein Fingerabdruck mit „Nein“ als Vorgabe gezeigt; ein
   fehlgeschlagenes Paket bei **Deploy to Target** sagt, warum; die Erfolgsmeldung nennt den vollen Pfad des Pakets, wie
   oft das Deployment auf das Board gewartet hat, und den Namen des vertrauten Boards.
-- **Tab Builder > Scan / Import...: jede Option von `llm-cli scan` mit der Maus** (W1', GUI-Parität): **Scan Local
+- `2026-10-16 23:00 UTC` · `v3.1.0` **Tab Builder > Scan / Import...: jede Option von `llm-cli scan` mit der Maus** (W1', GUI-Parität): **Scan Local
   Host** führt jetzt den Schritt der CLI aus, die Python-Probe, und speichert das Ergebnis als Probe dieses Rechners
   (Probe-ID `local`, die KI-Clients und Ditto nennen), mit seinen Hinweisen und der Warnung „Probe noch einmal laufen
   lassen“ im Protokoll; **Lokalen Rechner mit dem Ersatz-Skript scannen** (`--script`), **Lokalen Rechner scannen
@@ -302,7 +304,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Boards als vertraut und gekoppelt (im Audit-Log), so dass das Board in der Benchmark-Liste erscheint und
   KI-Deployments es nennen können; CLI und GUI teilen einen Schritt im Kern (`scan_steps.scan_device`). **Import from
   File** fragt nach dem Namen des Boards (`--label`).
-- **Build > Targets…** (GUI-Parität, jede CLI-Aktion mit der Maus): jedes Target mit seiner ID (dem Wert für
+- `2026-10-16 21:58 UTC` · `v3.1.0` **Build > Targets…** (GUI-Parität, jede CLI-Aktion mit der Maus): jedes Target mit seiner ID (dem Wert für
   `--target`), Name, Architektur, Boards, Formaten und Unterstützungsgrad, oder „keine Fähigkeiten angegeben“ (oder dass
   sein Fähigkeiten-Block ungültig ist), aus der Abfrage von `llm-cli targets list`. **Target prüfen** (dort und neben
   der Target-Liste des Builders, neben der neuen Schaltfläche **Targets…**) prüft das gewählte Target wie `llm-cli
@@ -310,23 +312,23 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   gelesener `target.yml`, und nennt jeden Schemafehler mit seinem Feld. Dieselbe Prüfung läuft, nachdem der
   Modul-Assistent ein Target angelegt hat und nach der Installation eines Targets aus dem Community Hub, und ihr
   Ergebnis wird angezeigt.
-- **Build > Build-Verlauf…**: jeder Build jedes Programms (GUI, CLI, MCP-Server), alle wie `llm-cli build status
+- `2026-10-16 20:29 UTC` · `v3.1.0` **Build > Build-Verlauf…**: jeder Build jedes Programms (GUI, CLI, MCP-Server), alle wie `llm-cli build status
   --all`, auch gescheiterte, abgebrochene, unterbrochene und wartende; **Details anzeigen** (oder ein Doppelklick)
   zeigt einen Build wie `build status REQUEST_ID`: seine Anfrage mit Fehlern und Hinweisen, jeden Versuch mit seinem
   Ausgabeordner (voller Pfad) und Fehler und die Korrekturvorschläge der KI-Clients, als KI-generiert markiert. CLI und
   Fenster lesen eine Abfrage (`orchestrator/Core/build_history.py`). Die Statusleiste nennt für Builds anderer
   Programme jetzt dieses Fenster statt eines Befehls.
-- **Datei > Einstellungen…**: die wirksamen Einstellungen und woher jeder Wert kommt, Geheimnisse geschwärzt (wie
+- `2026-10-16 20:29 UTC` · `v3.1.0` **Datei > Einstellungen…**: die wirksamen Einstellungen und woher jeder Wert kommt, Geheimnisse geschwärzt (wie
   `llm-cli config show`), und die Repository-Überschreibungen mit der Variablen, zu der jede wird, zum Hinzufügen und
   Entfernen (wie `llm-cli config repos`; Entfernen fragt zuerst, „Nein“ ist die Vorgabe). Beide nutzen ein Kernmodul
   (`orchestrator/Core/settings_view.py`), das jetzt auch die CLI aufruft; ein Speichern, das scheitert, lässt die
   Einstellung auch im laufenden Programm unverändert.
-- **Der Builder bietet, was die CLI bietet**: Ein Target ohne Fähigkeiten bekommt jedes Format von `--format` (nicht
+- `2026-10-16 20:29 UTC` · `v3.1.0` **Der Builder bietet, was die CLI bietet**: Ein Target ohne Fähigkeiten bekommt jedes Format von `--format` (nicht
   nur GGUF, RKLLM und RKNN), mit dem Hinweis, dass seine Boards, Formate und Quantisierungen nicht geprüft werden (für
   ein Target mit ungültigem Fähigkeiten-Block sagt der Hinweis das, und **Target prüfen** nennt jeden Fehler); die
   Optimierungsstufe `FAST`; eine Liste **Priorität** (`--priority`, Vorgabe normal; ein fehlgeschlagener kritischer
   Build beendet die Pipeline).
-- **Modul-Assistent: Beschreibung und Anbieter und Modell für eine Analyse**: Die Hardware-Seite hat ein Feld
+- `2026-10-16 21:58 UTC` · `v3.1.0` **Modul-Assistent: Beschreibung und Anbieter und Modell für eine Analyse**: Die Hardware-Seite hat ein Feld
   **Beschreibung** (`llm-cli module create` fragt danach; leer ergibt „Target for <Name>“). Nur du füllst es aus: Bei
   einem Modul, an dem eine KI mitgewirkt hat, steht deine Beschreibung vorn, und der Hinweis des Frameworks, dass das
   Modul KI-generiert und ungetestet ist, folgt. Die erste Seite bietet Anbieter und Modell **nur für diese Analyse**
@@ -334,7 +336,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   in der CLI nutzt, und die gespeicherten KI-Einstellungen bleiben unverändert. `for_run` nutzt dieselbe Prüfung
   des Anbieters und dieselbe Überlagerung der Einstellungen wie die Wahl für eine Frage im Chat-Bereich und Ditto >
   Bewertung... (`orchestrator/Core/ai_override.py`): ein Code-Weg für jede solche Wahl.
-- **Ditto > Lokale Laufzeit...: jeder Befehl `llm-cli ditto runtime` mit der Maus** (W1'): Ein Fenster zeigt, was
+- `2026-10-16 20:19 UTC` · `v3.1.0` **Ditto > Lokale Laufzeit...: jeder Befehl `llm-cli ditto runtime` mit der Maus** (W1'): Ein Fenster zeigt, was
   `ditto runtime status` zeigt (Hardware, Betriebsart, der Build in Gebrauch und seine Prüfungen, Probleme und der Rat
   zum Neubau, der Plan für den eigenen Build, das fertige Archiv, der Server mit Adresse, Modell und Kontext, das
   empfohlene und das gewählte Modell, die Protokolldatei), und erledigt `install` (**llama-server bauen...** mit
@@ -355,7 +357,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   behält die Platzprüfung und das vollständige Entfernen der alten Art. Sein neuer Knopf **Status und mehr...** öffnet
   das Fenster aus den KI-Einstellungen. Ein gestoppter lokaler Server und ein abgelehntes Holen des Quellcodes nennen
   jetzt neben dem Befehl auch den Weg in der GUI.
-- **Tools > Knowledge Snapshots... sagt vorher, ob der nächste Snapshot passt, und zeigt den Speicher in jedem
+- `2026-10-16 21:23 UTC` · `v3.1.0` **Tools > Knowledge Snapshots... sagt vorher, ob der nächste Snapshot passt, und zeigt den Speicher in jedem
   Zustand** (W1'): Die Zeile zur Festplatte sagt jetzt mit den Worten von `llm-cli knowledge snapshots`, wenn der
   nächste Snapshot (etwa so groß wie der neueste) nicht passen würde, sodass Deep Ingest, eine Wiederherstellung und ein
   Paket-Import abgelehnt würden, oder nur wenig Platz ließe. Die Zeile zum Speicher erscheint in jedem Zustand, so wie
@@ -364,14 +366,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   angeboten, unter der Bedingung von `llm-cli knowledge storage convert`. CLI und Fenster rufen dieselben neuen
   Kernfunktionen auf (`knowledge_snapshots.snapshot_disk`, `migration.storage_status`, `storage_lines` und
   `convert_refusal`); die Ausgabe der CLI bleibt gleich, außer bei einem eingestellten Qdrant-Server (siehe Behoben).
-- **Tools > Wissensquellen...: jede Quelle der Wissensbasis per Maus** (W1'): Ein neues Fenster listet jede Quelle mit
+- `2026-10-16 21:23 UTC` · `v3.1.0` **Tools > Wissensquellen...: jede Quelle der Wissensbasis per Maus** (W1'): Ein neues Fenster listet jede Quelle mit
   ihrer Art, der Lizenz und dem Urheberrechtshinweis, die sie zeigt, und was ein Wissenspaket von ihr mitnähme (voller
   Text, Link und kurze Fakten, nicht exportiert) und warum, mit einem Filter nach Art (Webseiten, Seiten aus
   Wissenspaketen, Dokumente des Frameworks, sonstige). Es liest die Liste im Hintergrund über das neue Kernmodul
   `knowledge_sources`, das auch `llm-cli knowledge sources` nutzt, sodass beide dieselben Worte zeigen. Die Verdrahtung
   des Menüs liegt in `orchestrator/gui/menus/knowledge.py`, dessen `CLI_PATHS` den Mausweg jedes `knowledge`- und
   `zoo`-Befehls nennt.
-- **Community Hub: jede Aktion von `llm-cli zoo` per Maus** (W1'): **Details...** (oder ein Doppelklick) zeigt, was
+- `2026-10-16 21:23 UTC` · `v3.1.0` **Community Hub: jede Aktion von `llm-cli zoo` per Maus** (W1'): **Details...** (oder ein Doppelklick) zeigt, was
   `zoo show` zeigt (Lizenz, Vertrauensstufe, installierter Ordner, Download-Adresse, Größe, sha256, die `recipe.yml`
   eines installierten Rezepts); **Import file...** nimmt eine Passphrase (nie gespeichert oder angezeigt) und die
   Schlüsseldateien der einzigen Absender, die angenommen werden, wie `zoo install --file --passphrase / --from`;
@@ -382,7 +384,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Speichern.... Jede ruft die Kernfunktion der CLI auf (neu: `CommunityManager.details`, `exportable_targets`,
   `read_public_key_files`, `needs_passphrase`), im Hintergrund; Fragen behalten „Nein“ als Vorgabe, und ein
   verschlüsseltes Paket wird nie eingereicht.
-- **Ditto > Lokale Modelle...: `llm-cli ditto models list` und `download` mit der Maus** (W1'): jede Stufe von
+- `2026-10-16 21:39 UTC` · `v3.1.0` **Ditto > Lokale Modelle...: `llm-cli ditto models list` und `download` mit der Maus** (W1'): jede Stufe von
   Dittos festgelegtem Katalog mit Datei, Größe, Lizenz, ob sie heruntergeladen (und geprüft) ist, und ihrem Hinweis
   (empfohlen für diesen Computer, gewählt, auf Wunsch, nicht festgelegt), dem Grund der Empfehlung und dem vollen
   Modellordner; **Empfohlenes Modell herunterladen...** oder **Ausgewähltes herunterladen...** nach der Frage der CLI
@@ -393,7 +395,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   der Laufzeit in den KI-Einstellungen nennt dieses Fenster statt des CLI-Befehls. Ein Download ist eine Aufgabe von
   Dittos lokaler Laufzeit: Er wartet, solange in Ditto > Lokale Laufzeit... oder in den KI-Einstellungen ein Build,
   ein Serverstart oder ein anderer Download läuft, und diese warten auf ihn.
-- **Ditto > Bewertung...: `llm-cli ditto eval` mit der Maus** (W1'): Arten und Retrieval-Varianten (fused, rerank),
+- `2026-10-16 21:39 UTC` · `v3.1.0` **Ditto > Bewertung...: `llm-cli ditto eval` mit der Maus** (W1'): Arten und Retrieval-Varianten (fused, rerank),
   einzelne Fälle, eine andere Falldatei, Läufe pro Fall, mehrere lokale Stufen, oder Anbieter, Modell und Denkaufwand
   nur für diesen Lauf (die gespeicherten KI-Einstellungen bleiben unverändert); eine Frage vor dem Lauf sagt, was
   aufgerufen wird und ob es Geld kostet, auch wenn die Ersatzkette der KI-Einstellungen einen Cloud-Anbieter nennt, und
@@ -407,13 +409,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `orchestrator/evals/eval_run.py`, das auch die CLI aufruft; ihre Ausgabe und Exit-Codes bleiben gleich, nur wird ein
   Server von dir, den eine Stufe ersetzt hat, jetzt auch gemeldet, wenn der Lauf früher endet (eine spätere Stufe, die
   in der CLI nicht startet, Abbrechen im Fenster).
-- **Chat-Bereich: Optionen für eine Frage** (W1', `llm-cli ditto ask --no-tools/--provider/--model` mit der Maus):
+- `2026-10-16 21:39 UTC` · `v3.1.0` **Chat-Bereich: Optionen für eine Frage** (W1', `llm-cli ditto ask --no-tools/--provider/--model` mit der Maus):
   **Optionen für diese Frage** über dem Nachrichtenfeld bieten **Ohne Werkzeuge antworten**, einen Anbieter und ein
   Modell nur für die nächste Frage. Die gespeicherten KI-Einstellungen bleiben unverändert (die Frage geht an einen
   Ditto mit diesen Werten über den Einstellungen, `orchestrator/Core/ai_override.py`, das den Anbieter auch wie die CLI
   prüft), der Bereich sagt, was die Frage verwendet hat, und die Optionen werden nach dem Senden zurückgesetzt; Feed,
   Fragen und Freigaben arbeiten wie bisher.
-- **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
+- `2026-10-16 15:23 UTC` · `v3.1.0` **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
   knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den
   Eintrag, und seine erste Zeile nennt den Speicher, der wirklich genutzt wird. `convert` und **Tools > Knowledge
@@ -423,13 +425,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Audit-Log als `old_store_deleted`); nichts löscht ihn von selbst, und eine KI kann es nie. Mojo Oracle meldet eine
   fehlgeschlagene Umwandlung (mit dem Grund und beiden Wegen zum neuen Versuch) und einen alten Ordner, der noch da
   ist.
-- **Ein Deployment sagt dir, wenn ein alter Qdrant-Sidecar auf dem Board ist**: Pakete mit Docker-Images früherer
+- `2026-10-16 08:50 UTC` · `v3.1.0` **Ein Deployment sagt dir, wenn ein alter Qdrant-Sidecar auf dem Board ist**: Pakete mit Docker-Images früherer
   Versionen starteten den Container `qdrant-sidecar`, den nichts mehr nutzt. Nach einem erfolgreichen Deployment
   (`llm-cli deploy run`, das Deployment-Fenster, das KI-Tool `deploy_to_device`) schaut das Framework mit `docker ps`
   (höchstens 20 Sekunden lang), ob er noch auf dem Board ist, und sagt dann, ob er läuft oder gestoppt ist und wie du
   ihn dort entfernst. Mojo Oracle zeigt für dieses Board eine Zeile aus dem letzten Deployment. Das Framework stoppt
   oder entfernt den Container nie.
-- **Wohin fertige Modelle kommen: der Ausgabeordner und ein Speichern-Dialog** (achte Runde, Antwort 3): fertige
+- `2026-10-16 01:03 UTC` · `v3.1.0` **Wohin fertige Modelle kommen: der Ausgabeordner und ein Speichern-Dialog** (achte Runde, Antwort 3): fertige
   Builds (Golden-Artefakte) werden im Ausgabeordner gespeichert (Einstellung `output_dir`, Standard `~/llmcf/output`;
   unter Windows in deinem Benutzerordner), den du einmal mit **File > Output Folder...** oder `llm-cli config
   output-folder PFAD` festlegst, zum Beispiel auf einen Ordner auf einer großen zweiten Platte; eine KI kann ihn nicht
@@ -448,7 +450,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `deploy list-artifacts` und `list_artifacts` listen den Ausgabeordner, den Build-Ordner (frühere Builds bleiben
   dort), frühere Ausgabeordner, nachdem du ihn geändert hast, und die Ordner, in die du gespeichert hast;
   `start_build` sagt einer KI, wohin der Build kommt.
-- **Gleiche Builds werden vor dem Bauen genannt** (achte Runde, N11): `check_build_request` (`earlier_builds`, mit
+- `2026-10-16 01:03 UTC` · `v3.1.0` **Gleiche Builds werden vor dem Bauen genannt** (achte Runde, N11): `check_build_request` (`earlier_builds`, mit
   einem Hinweis) und das Build-Formular der GUI melden einen fertigen Build mit zu 100 % denselben gewählten
   Optionen: das Modell und sein genauer Commit (ein lokales Modell über Name, Größe und Zeit jeder Gewichtsdatei),
   das Target und der sha256 seines Ordners, Board, Format, Quantisierung, Importance-Matrix und Kalibrierdaten,
@@ -456,7 +458,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Du nimmst ihn oder baust noch einmal (**Den vorhandenen Build nehmen** / **Noch einmal bauen** / **Abbrechen**);
   die Frage von `start_build` sagt, wenn sie einen gleichen Build noch einmal baut. Nichts wird von selbst
   übersprungen. Jeder Build hält seine Optionen in `build_info.json` fest (`build_options` mit ihrem sha256).
-- **Platzprüfung vor jedem Wissens-Snapshot und ein Snapshot vor jedem Import eines Wissens-Packs** (achte Runde,
+- `2026-10-16 01:03 UTC` · `v3.1.0` **Platzprüfung vor jedem Wissens-Snapshot und ein Snapshot vor jedem Import eines Wissens-Packs** (achte Runde,
   Antwort 2, N13): bevor ein Snapshot angelegt wird, wird seine Größe geschätzt. Passt er neben der Reserve, die immer
   frei bleibt, nicht hin, wird kein Snapshot angelegt, und die Änderung läuft nicht (Deep Ingest, eine
   Wiederherstellung, ein Pack-Import, die Aufnahme der eigenen Dokumente des Frameworks); ein „trotzdem weiter“ gibt es
@@ -468,7 +470,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   wird nie ein Snapshot überschrieben. Die Wissenszeile von Mojo Oracle (mit Ort, Grund und dem Hinweis, dass nur deine
   Liste Platz schafft) und `llm-cli knowledge snapshots` zeigen, was die Snapshots im Vergleich zum freien Platz
   belegen. Mojo prüft auch den freien Platz des Build-Ordners des Frameworks. Nichts wird von selbst gelöscht.
-- **Löschen mit der vollen Liste, und der Papierkorb** (Delegationsentwurf 3.10, Runde 5 f; Runde 6 10.4): Jedes
+- `2026-10-15 21:27 UTC` · `v3.1.0` **Löschen mit der vollen Liste, und der Papierkorb** (Delegationsentwurf 3.10, Runde 5 f; Runde 6 10.4): Jedes
   Löschen von etwas, das du sehen kannst, fragt zuerst im eigenen Fenster des Frameworks (der Lösch-Dialog der GUI oder
   eine Tabelle und eine Frage im Terminal) und nennt jedes Teil mit Namen, vollem Pfad oder Docker-ID, Dateinamen,
   Größe und was es ist; „Nein“ ist die Vorgabe. Wo du aus einer Liste wählst, ist nichts angehakt, die Liste wird aus
@@ -486,31 +488,28 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   der Selbstheilungs-Dialog für eine volle Docker-Platte öffnet es. `llm-cli doctor` sagt, wo Docker seine Images ablegt
   und wie viel die Images des Frameworks belegen; diesen Ordner zu verlegen ist ein Schritt für Administratoren
   ([Container-Einrichtung](docs/Container_Setup_DE.md#10-wo-docker-images-ablegt)).
-- **Der Faktenkatalog und die Einordnung je Tool** (Delegationsentwurf 4.1-4.6, `orchestrator/tools/
-  facts_catalog.py`, Texte in `orchestrator/utils/l10n_facts.py`): Jeder Befund vor einer Rückfrage hat eine feste
-  Art. Harte Hindernisse (volle Platte, Offline-Modus, ein nicht gekoppeltes Board oder ein geänderter Host-Schlüssel,
-  ein Modell mit Bedingungen ohne Zugang, der nicht gelesene Hinweis zu Deep Ingest, ein zurückgezogenes Pack, ...)
-  lehnen vor jeder Rückfrage ab, mit ihrem Grund-Code, einem nächsten Schritt für die KI und, getrennt davon, dem,
-  was die Person tun kann; ein Hindernis, das eine KI beheben kann, nennt das Tool, das es behebt.
-  Situationshinweise (knapper Speicherplatz, ein großer Download, knapper oder zu kleiner Arbeitsspeicher, viele
-  Seiten, ein ungetestetes Modul, eine ersetzte Board-Laufzeit; nie die Zahl der Wissens-Snapshots, die keine Grenze
-  haben) bringen eine Regel für eine KI mit; Sicherheits- und
-  Rechtshinweise (Pickle-Gewichte, ein Basis-Image außerhalb der Docker Official Images oder nicht gepinnt,
-  Hersteller-Downloads über der weichen Grenze, ein ungeprüftes oder Community-Target, der erste Build von KI-Build-
-  Code, ein nicht vertrauenswürdiges Modell nativ auf einem Board oder in der Sandbox, die die Person nicht für KIs
-  erlaubt hat
-  (`bench_untrusted_sandbox_ok`), Signieren als die Person, Modelle mit Bedingungen, Lizenzen) bleiben immer bei der
-  Person, ein Basis-Image außerhalb der Docker Official Images auch nach einem bestätigten Build damit, und Fakten,
-  die sich nicht prüfen ließen, sind der Sicherheitshinweis `facts_unknown`, nie „kein Problem“ (die Person liest in
-  klaren Worten, was nicht geprüft werden konnte, nie einen internen Code). Builds, Rezept-Builds, Downloads, Pack-Importe und -Exporte, Deep Ingest,
-  Deployment-Pakete und Deployments, die Board-Tools, die lokale Laufzeit, Benchmarks, das Erstellen von Modulen und
-  Einstellungen melden sie. Eine Entscheidung ist an den Entscheidungs-Digest der Fakten gebunden, der freien
-  Speicher und Byte-Zahlen auslässt; ein Build oder Download unter einem Dauerauftrag (und später einer Vollmacht)
-  nutzt nur den Commit, den sein Nachschlagen ermittelt hat (Hindernis `commit_required`, wenn Hugging Face nicht
-  gefragt werden konnte). Die Sicht der KI auf die Fakten (`delegation.ai_view`) enthält nie einen Fakt, den nur die
-  Person sieht. Die Codes der Hinweise sind feste Bezeichner, bereit für eine spätere Wahl „für diese Modellversion
-  nicht mehr fragen“ (Entwurfsfrage Q3), die noch nicht gebaut ist.
-- **Ein Smoke-Test mit einem echten Client** (`scripts/mcp_client_smoke.sh`, Prüfung `scripts/mcp_smoke_check.py`):
+- `2026-10-12 17:38 UTC` · `v3.1.0` **Der Faktenkatalog und die Einordnung je Tool** (Delegationsentwurf 4.1-4.6, `orchestrator/tools/ facts_catalog.py`,
+  Texte in `orchestrator/utils/l10n_facts.py`): Jeder Befund vor einer Rückfrage hat eine feste Art. Harte Hindernisse
+  (volle Platte, Offline-Modus, ein nicht gekoppeltes Board oder ein geänderter Host-Schlüssel, ein Modell mit
+  Bedingungen ohne Zugang, der nicht gelesene Hinweis zu Deep Ingest, ein zurückgezogenes Pack, ...) lehnen vor jeder
+  Rückfrage ab, mit ihrem Grund-Code, einem nächsten Schritt für die KI und, getrennt davon, dem, was die Person tun
+  kann; ein Hindernis, das eine KI beheben kann, nennt das Tool, das es behebt. Situationshinweise (knapper
+  Speicherplatz, ein großer Download, knapper oder zu kleiner Arbeitsspeicher, viele Seiten, ein ungetestetes Modul,
+  eine ersetzte Board-Laufzeit; nie die Zahl der Wissens-Snapshots, die keine Grenze haben) bringen eine Regel für eine
+  KI mit; Sicherheits- und Rechtshinweise (Pickle-Gewichte, ein Basis-Image außerhalb der Docker Official Images oder
+  nicht gepinnt, Hersteller-Downloads über der weichen Grenze, ein ungeprüftes oder Community-Target, der erste Build
+  von KI-Build- Code, ein nicht vertrauenswürdiges Modell nativ auf einem Board oder in der Sandbox, die die Person
+  nicht für KIs erlaubt hat (`bench_untrusted_sandbox_ok`), Signieren als die Person, Modelle mit Bedingungen, Lizenzen)
+  bleiben immer bei der Person, ein Basis-Image außerhalb der Docker Official Images auch nach einem bestätigten Build
+  damit, und Fakten, die sich nicht prüfen ließen, sind der Sicherheitshinweis `facts_unknown`, nie „kein Problem“ (die
+  Person liest in klaren Worten, was nicht geprüft werden konnte, nie einen internen Code). Builds, Rezept-Builds,
+  Downloads, Pack-Importe und -Exporte, Deep Ingest, Deployment-Pakete und Deployments, die Board-Tools, die lokale
+  Laufzeit, Benchmarks, das Erstellen von Modulen und Einstellungen melden sie. Eine Entscheidung ist an den
+  Entscheidungs-Digest der Fakten gebunden, der freien Speicher und Byte-Zahlen auslässt; ein Build oder Download unter
+  einem Dauerauftrag (und später einer Vollmacht) nutzt nur den Commit, den sein Nachschlagen ermittelt hat (Hindernis
+  `commit_required`, wenn Hugging Face nicht gefragt werden konnte). Die Sicht der KI auf die Fakten
+  (`delegation.ai_view`) enthält nie einen Fakt, den nur die Person sieht. Die Codes der Hinweise sind feste Bezeichner.
+- `2026-10-12 11:44 UTC` · `v3.1.0` **Ein Smoke-Test mit einem echten Client** (`scripts/mcp_client_smoke.sh`, Prüfung `scripts/mcp_smoke_check.py`):
   lässt Claude Code (`claude -p`, vier vorgegebene Prompts) in einer Wegwerf-Umgebung gegen den stdio-Server des
   Frameworks laufen (Home, Hugging-Face-Home, XDG-Ordner, Benutzerordner, Zugangsdaten nur im Speicher, das
   Null-Keyring-Backend, kein Fenstersystem; der Server läuft unter `env -i` und bekommt so keine Variable des Aufrufers)
@@ -523,7 +522,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   übergibt nie Claude-Zugangsdaten oder Tokens, löscht seinen temporären Ordner (samt dem Protokoll des Clients über den
   Server und dessen temporären Dateien) und braucht kein Docker; eine manuelle oder optionale CI-Prüfung (CONTRIBUTING,
   „Der Smoke-Test mit einem echten Client“).
-- **`start_recipe_build` und die Ressource `lcf://packs/index`** (MCP-Design T9): ein KI-Client baut ein
+- `2026-10-12 09:16 UTC` · `v3.1.0` **`start_recipe_build` und die Ressource `lcf://packs/index`** (MCP-Design T9): ein KI-Client baut ein
   installiertes Community-Rezept genau wie festgelegt (das Modell beim Commit des Rezepts, Target, Format, Board,
   Quantisierung, Importance-Matrix, Kontextlänge) über den zweistufigen Weg von `start_build` (dieselbe Frage,
   Speicherreservierung, Kontingente und derselbe Umfang für Daueraufträge; `BuildService.start_recipe`). Ein
@@ -531,7 +530,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   zeigt Importance-Matrix und Kontextlänge, und ein nach der Frage in irgendeinem Feld geändertes Rezept wird nicht
   gebaut. Die Ressource zeigt den zwischengespeicherten Index und die
   installierten Packs wie `list_packs`, nie aktualisiert.
-- **Ein bestätigter Build gibt den Build-Dauerauftrag für Packs frei, die unter einem installiert wurden**
+- `2026-10-12 09:16 UTC` · `v3.1.0` **Ein bestätigter Build gibt den Build-Dauerauftrag für Packs frei, die unter einem installiert wurden**
   (MCP-Design 6.10): ein Target- oder Rezept-Pack, das eine KI unter einem Dauerauftrag installiert hat, wird
   erfragt, bis die Person einen Build davon im eigenen Fenster des Frameworks bestätigt (eine Antwort per
   Elicitation, die Nutzung eines Dauerauftrags oder „erlauben“ zählen nie); das Framework vermerkt diesen Build
@@ -544,10 +543,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Build“ (die Person sieht von einer KI erstellten oder installierten Build-Code einmal selbst, Entwurfsfrage Q1),
   auch für ein Hardware-Modul, das eine KI ohne das Ja der Person erstellt hat (gebunden an das sha256 seiner
   Definition: unter demselben Namen neu erstellt, wird es erneut gezeigt).
-- **Das Ende eines Deployments im Audit-Log**: Endet ein `deploy_to_device`-Job (erledigt, gescheitert oder
+- `2026-10-12 09:20 UTC` · `v3.1.0` **Das Ende eines Deployments im Audit-Log**: Endet ein `deploy_to_device`-Job (erledigt, gescheitert oder
   abgebrochen), wird ein eigener Abschlusseintrag mit Job, Gerätenamen und Gerätezustand geschrieben, verknüpft mit dem
   `started`-Eintrag des Aufrufs.
-- **Optionale Tools `delete_artifact` und `restore_knowledge_snapshot`** (MCP-Entwurf T10): ein gebautes Modell
+- `2026-10-12 07:24 UTC` · `v3.1.0` **Optionale Tools `delete_artifact` und `restore_knowledge_snapshot`** (MCP-Entwurf T10): ein gebautes Modell
   (Ordner und Golden-ZIP) per ID und sha256 löschen oder die Wissensbasis als Job durch einen früheren Snapshot
   ersetzen. Beide zerstören etwas: standardmäßig verboten und verborgen, bis du sie freigibst (die ganze Klasse
   „extern“ zu erlauben genügt nicht), jeder Aufruf mit Frage, nie ein Dauerauftrag. Über ein Löschen entscheidest nur
@@ -564,10 +563,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   und löscht keinen Snapshot; sie bleibt außerhalb jeder Dauerfreigabe. `delete_artifact` verschiebt das Modell und
   sein Golden-ZIP in den Papierkorb, wo du sie wiederherstellen kannst (siehe „Löschen mit der vollen Liste, und der
   Papierkorb“).
-- **Der MCP-Server in einem Container, den du gebaut hast** (`llm-cli mcp serve --transport http --container`):
+- `2026-10-16 00:39 UTC` · `v3.1.0` **Der MCP-Server in einem Container, den du gebaut hast** (`llm-cli mcp serve --transport http --container`):
   bindet die Schnittstellen des Containers, und nur innerhalb eines Containers; benanntes Token, Host- und
   Origin-Prüfung bleiben gleich. Veröffentliche den Port nur auf dem Loopback des Hosts (`-p 127.0.0.1:8765:8765`).
-- **Das Framework in einem Container, auf deinem eigenen Computer gebaut** (Runde 5 h): Kein Framework-Image wird
+- `2026-10-12 14:23 UTC` · `v3.1.0` **Das Framework in einem Container, auf deinem eigenen Computer gebaut** (Runde 5 h): Kein Framework-Image wird
   veröffentlicht oder geladen. `scripts/build_container_image.sh` (`make build`) prüft Docker, BuildKit und den
   Klon, stellt genau die Dateien bereit, die das Repository ausliefert, und baut `Docker Setup/Dockerfile` mit einem
   lokalen Tag (`lcf-framework:local`; ein Name mit Registry wird abgelehnt); danach zeigt es, wie du es startest. Das
@@ -589,7 +588,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   vollständigem Pfad, Dateiname, Größe und was sie ist (`make kept-files`, `scripts/container_kept_files.sh`).
   `docker.registry` und `docker.tags` der Target-Dateien sind als nur lokale Image-Namen beschrieben. Anleitung:
   `docs/Container_Setup_DE.md`.
-- **Gemeinsamer Build-Zustand** (MCP-Entwurf T11): Jedes Programm des Frameworks (die GUI, ein CLI-Aufruf, jeder
+- `2026-10-12 06:38 UTC` · `v3.1.0` **Gemeinsamer Build-Zustand** (MCP-Entwurf T11): Jedes Programm des Frameworks (die GUI, ein CLI-Aufruf, jeder
   MCP-Server) schreibt eine Zusammenfassung jeder Build-Anfrage in den Benutzerordner (`build_requests/`), sodass die
   Statusleiste der GUI, `llm-cli build status`, `list_build_requests` und `get_build_status` dieselben Builds sehen,
   gleich welches Programm sie gestartet hat, auch eine Anfrage, die noch in der Warteschlange eines anderen Programms
@@ -598,22 +597,22 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `Where`); Fehler sind geschwärzt. Eine Anfrage, deren Programm endete, bevor sie fertig war, erscheint als
   unterbrochen. Builds eines anderen Programms bleiben nur lesbar. Der Hinweis, nur Builds dieses Prozesses seien
   sichtbar, entfällt.
-- **Ditto nutzt die Tools des Frameworks**: Im Chat (GUI) und mit `llm-cli ditto ask "<Frage>"` kann Ditto
+- `2026-10-10 21:50 UTC` · `v3.1.0` **Ditto nutzt die Tools des Frameworks**: Im Chat (GUI) und mit `llm-cli ditto ask "<Frage>"` kann Ditto
   Targets auflisten, Capabilities prüfen, Builds starten und abbrechen, Logs lesen, die Wissensbasis durchsuchen
   und den Doctor ausführen, immer im Rahmen deiner Tool-Berechtigungen. Tools, die eine Bestätigung brauchen,
   zeigen ihren Titel und jedes Argument (ein Dialog in der GUI, eine Abfrage in der CLI; ohne Terminal wird
   abgelehnt).
-- **KI-Einstellungen**: Anbieter aus `configs/llm_providers.yml`, eine Modellliste, die live beim Anbieter
+- `2026-10-10 21:50 UTC` · `v3.1.0` **KI-Einstellungen**: Anbieter aus `configs/llm_providers.yml`, eine Modellliste, die live beim Anbieter
   abgerufen wird (freie Eingabe geht weiterhin), Aufwand, Datenschutzstufe für Cloud-Anbieter, Offline-Modus und
   eine Ersatzkette.
-- **Anbieterschicht für KI** (`orchestrator/llm`): ein Client für alle Anbieter, gebaut auf den offiziellen SDKs
+- `2026-10-10 23:50 UTC` · `v3.1.0` **Anbieterschicht für KI** (`orchestrator/llm`): ein Client für alle Anbieter, gebaut auf den offiziellen SDKs
   `anthropic` und `openai` (OpenAI-kompatible Server über `openai`). Anbieter sind Daten
   (`configs/llm_providers.yml`): Modell und Aufwand je Aufgabe, Wiederholungen, eine Ersatzkette, strukturierte
   Antworten, die gegen Schemas geprüft werden, und ein Datenschutzfilter für Cloud-Anbieter (Einstellung
   `ai_security_level`): Secrets werden immer geschwärzt; Adressen, E-Mail-Adressen, Logins, Benutzernamen,
   Hostnamen und Seriennummern werden durch stabile Platzhalter ersetzt, die in der Antwort lokal zurückübersetzt
   werden.
-- **Lokale Wissensbasis** auf lokalen Embeddings (FastEmbed, ONNX auf der CPU) und einem eingebetteten
+- `2026-10-10 23:50 UTC` · `v3.1.0` **Lokale Wissensbasis** auf lokalen Embeddings (FastEmbed, ONNX auf der CPU) und einem eingebetteten
   Qdrant-Speicher: kein Vektordatenbank-Server und keine Cloud-Embeddings nötig, und sie funktioniert offline,
   sobald ihre Modelle heruntergeladen sind. Vor jeder Aufnahme, jeder Wiederherstellung und jedem Import eines
   Wissens-Packs sichert sie einen Snapshot in `knowledge_snapshots/` des persönlichen Ordners; passt ein Snapshot nicht
@@ -623,7 +622,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   eine Warnung. `llm-cli knowledge snapshots` (in der GUI: Tools > Knowledge Snapshots...) listet jeden mit vollem
   Pfad, Namen, Größe und was er ist, damit du die, die du anhakst, löschst (zuerst in den Papierkorb) oder
   exportierst (woandershin kopierst, per sha256 geprüft).
-- **Die Wissensbasis, die Ditto nutzt, für KI-Clients** (MCP-Tools `list_knowledge_sources` und
+- `2026-10-12 02:57 UTC` · `v3.1.0` **Die Wissensbasis, die Ditto nutzt, für KI-Clients** (MCP-Tools `list_knowledge_sources` und
   `read_knowledge_source`, Ressource `lcf://knowledge/sources/<Quellen-ID>`): Ein Client, der Dittos Aufgabe
   übernimmt, sieht, was die Wissensbasis enthält, und liest die Auszüge einer Quelle der Reihe nach.
   `search_knowledge` gibt jedem Auszug jetzt seine Herkunft mit (Quellen-ID, Adresse oder Pack, Titel, Abschnitt, Art
@@ -631,7 +630,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   IDs benannt, nie über Pfade; ihr ganzer Text ist als nicht vertrauenswürdig markiert. Ein Tool-Aufruf lädt nie das
   Embedding- oder Reranking-Modell herunter: Ohne Embedding-Modell wird die Suche mit dem nächsten Schritt abgelehnt,
   statt einen Download von etwa einem Gigabyte zu starten, und die Ablehnung nennt keinen Ordner.
-- **Deep Ingest für KI-Clients** (MCP-Tool `crawl_docs_site`, Entscheidung vom 11.10.2026): Ein KI-Client oder Ditto
+- `2026-10-12 05:51 UTC` · `v3.1.0` **Deep Ingest für KI-Clients** (MCP-Tool `crawl_docs_site`, Entscheidung vom 11.10.2026): Ein KI-Client oder Ditto
   kann Dokumentations-Websites in die Wissensbasis aufnehmen, als Job, mit genau dem Crawler und den Opt-out-Prüfungen
   der GUI (robots.txt, Robots-Anweisungen einschließlich `noai`, TDMRep). Du wirst jedes Mal gefragt (nie „nicht mehr
   fragen“, ein „erlauben“ pro Tool wird gedeckelt), und die Frage nennt jede Startadresse. Abgelehnt, solange du den
@@ -643,7 +642,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   behält, was gespeichert ist; das Ergebnis enthält Zahlen und die übersprungenen oder fehlgeschlagenen Adressen mit
   Gründen, nie Seitentext oder einen Ordner dieses Computers. Neu: `llm-cli tools crawl-notice` zeigt den Hinweis in einem Terminal und hält fest, dass
   du ihn gelesen hast.
-- **Der Community-Zoo für KI-Clients** (MCP-Tools `list_packs`, `add_pack_from_index`, `export_pack`): Ein Client
+- `2026-10-12 06:09 UTC` · `v3.1.0` **Der Community-Zoo für KI-Clients** (MCP-Tools `list_packs`, `add_pack_from_index`, `export_pack`): Ein Client
   listet den signierten Index und die installierten Packs (Details, Prüfung; `refresh` einmal pro Stunde), fügt ein
   Wissens-, Target- oder Rezept-Pack aus dem signierten Index hinzu (Vertrauensstufe verified oder community, nie
   zurückgezogen, nie aus einer Datei), nachdem du die in der Quarantäne geprüfte Zusammenfassung gesehen hast, bei
@@ -657,7 +656,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `verified`-Target-Packs); darunter installierte Packs sind mit `installed_via` markiert; eine Installation darunter muss die größere
   Speicherreserve (20 GiB oder 10 %) frei lassen, sonst wird gefragt. Kein Tool veröffentlicht
   einen Pull Request.
-- **Korrekturvorschläge von KI-Clients** (MCP-Tool `propose_healing_fix`): Ein Client, der einen gescheiterten Build
+- `2026-10-12 03:20 UTC` · `v3.1.0` **Korrekturvorschläge von KI-Clients** (MCP-Tool `propose_healing_fix`): Ein Client, der einen gescheiterten Build
   analysiert, übergibt dem Framework Zusammenfassung, Ursache, manuellen Schritt und Sicherheit. Der Vorschlag
   durchläuft dieselben Prüfungen wie Dittos eigene Analyse, einschließlich des Filters für gefährliche Befehle, wird
   wie jede lokale Änderung von dir bestätigt, nur für einen gescheiterten Build angenommen (höchstens 10 je Build) und
@@ -665,7 +664,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `get_build_status`, `llm-cli build status <Request>` und der GUI (**Tools > Fix Proposals from AI Clients...**)
   angezeigt. Das Framework führt ihn nie aus, und `resolve_healing` lehnt ab, ihn anzuwenden. Der Prompt
   `diagnose_build_failure` führt zu dem Tool.
-- **Hugging Face und lokale Dateien für KI-Clients** (MCP-Tools `search_hf_models`, `get_hf_model_info`,
+- `2026-10-12 03:49 UTC` · `v3.1.0` **Hugging Face und lokale Dateien für KI-Clients** (MCP-Tools `search_hf_models`, `get_hf_model_info`,
   `download_hf_file`, `list_local_files`): Die Suche filtert zugangsbeschränkte Modelle standardmäßig mit
   `gated: free` (`any`, `gated`) und sagt, was sie weggelassen hat; die Modelldetails zeigen die Lizenz (freizügig nur
   auf einer Positivliste; `other` mit Name und Link; Lizenz und Zugangsbeschränkung des Basismodells), die Art der
@@ -677,7 +676,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   gespeicherte Token oder gar keins (nie `HF_TOKEN` oder das Token des Hugging-Face-Home-Ordners), und nur an
   huggingface.co; das Token erscheint nie in Eingaben, Ergebnissen oder dem Audit-Log. Der Prompt
   `convert_model_for_board` führt zu diesen Tools.
-- **Reranking der Ergebnisse der Wissensbasis**: Ein lokaler mehrsprachiger Cross-Encoder (FastEmbed/ONNX, etwa
+- `2026-10-11 02:31 UTC` · `v3.1.0` **Reranking der Ergebnisse der Wissensbasis**: Ein lokaler mehrsprachiger Cross-Encoder (FastEmbed/ONNX, etwa
   120 MB, beim ersten Gebrauch heruntergeladen, nie im Offline-Modus) liest die Frage zusammen mit jedem
   Kandidaten und verwirft die unter einer Relevanzschwelle, sodass Ditto lieber keinen Auszug bekommt als
   unpassende. Build-Empfehlungen nutzen ihn. Einstellungen: `rag_reranker` (`auto`: ab 6 GB RAM, das größere
@@ -693,18 +692,18 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   fehlgeschlagener Builds fand der Reranker den relevanten Auszug in 2 von 6 Fällen unter den ersten 3 (hybride
   Suche: 5 von 6) und schob ihn in einem Fall unter die Schwelle, und beim Suchbegriff für Module verwarf er jeden
   Auszug.
-- **Die Stichwortsuche versteht Bezeichner**: `-DGGML_CUDA=ON`, `rknn_toolkit2` oder `rknnToolkitLite` werden
+- `2026-10-11 02:31 UTC` · `v3.1.0` **Die Stichwortsuche versteht Bezeichner**: `-DGGML_CUDA=ON`, `rknn_toolkit2` oder `rknnToolkitLite` werden
   auch über ihre Teile gefunden (`GGML_CUDA`, `rknn toolkit2`), und Suchen aus einem oder zwei Wörtern wie `E2041`
   oder `GGML_CUDA` nutzen den Stichwortindex. Bezeichner-Fragen des Retrieval-Satzes: hit@3 von 83 % auf 100 %,
   der Rest unverändert.
-- **Große Codeblöcke und Tabellen**, die über den Kontext des Embedding-Modells hinausgehen (512 Tokens beim
+- `2026-10-11 02:31 UTC` · `v3.1.0` **Große Codeblöcke und Tabellen**, die über den Kontext des Embedding-Modells hinausgehen (512 Tokens beim
   Standardmodell), werden an Zeilengrenzen geteilt, jedes Stück mit dem Tabellenkopf oder dem Code-Zaun, sodass
   ihre hinteren Teile überhaupt gefunden werden (Antworten tief in solchen Blöcken: hit@1 von 50 % auf 100 %).
   Kleinere Blöcke bleiben ganz. Importiere ein Dokument erneut, damit es wirkt.
-- Modelle der Wissensbasis werden nach 10 Minuten ohne Nutzung entladen und bei der nächsten Suche wieder geladen
+- `2026-10-11 02:31 UTC` · `v3.1.0` Modelle der Wissensbasis werden nach 10 Minuten ohne Nutzung entladen und bei der nächsten Suche wieder geladen
   (Einstellung `rag_model_idle_minutes`, 0 hält sie geladen, höchstens 7 Tage). Die Zeit läuft ab dem Ende der
   letzten Suche oder des letzten Imports, nie währenddessen.
-- **Verwaltetes lokales Modell** für Dittos Offline-Modus: `llm-cli ditto runtime install` baut `llama-server` auf
+- `2026-10-12 00:37 UTC` · `v3.1.0` **Verwaltetes lokales Modell** für Dittos Offline-Modus: `llm-cli ditto runtime install` baut `llama-server` auf
   deinem Rechner aus dem gepinnten llama.cpp-Commit, zuerst den CPU-Build (ein paar Minuten, danach funktioniert
   `runtime start`) und dann den GPU-Build, den das Bau-Rezept für Betriebssystem, Architektur und C-Bibliothek des
   Rechners wählt (in dieser Version Vulkan unter Linux; CUDA-, ROCm-, Windows- und macOS-Builds folgen), jeder auf
@@ -721,7 +720,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   (`models_dir`, den Ditto nutzt; die Laufzeit nimmt ihn auch, wenn sie keinen Ordner bekommt) und prüft sie
   anhand von Größe und sha256. Die Modellstufen reichen bis zu 2-Bit-Modellen für schwache Hardware (3 GB RAM).
   Der Anbieter „local“ folgt dem laufenden Server ohne Konfiguration.
-- **Dittos lokaler Server direkt oder in Docker** (DECISIONS Runde 7 D): `llm-cli ditto runtime ensure [--mode
+- `2026-10-15 22:54 UTC` · `v3.1.0` **Dittos lokaler Server direkt oder in Docker** (DECISIONS Runde 7 D): `llm-cli ditto runtime ensure [--mode
   auto|bare-metal|docker] [--force]` installiert ihn, wenn er fehlt, und tut nichts, wenn er da ist (in einer der
   beiden Arten). Ist nichts installiert, wählt er direkt (ohne den Aufwand von Docker), oder Docker, wenn direkt hier
   nicht geht, und sagt warum. Solange Docker nicht erreichbar ist, bleibt der Docker-Modus, wie du ihn gewählt hast;
@@ -756,12 +755,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   vor dem Download zeigt und die Installation nie scheitern lässt. Die KI-Einstellungen zeigen die Art und bieten den
   Wechsel über denselben Code-Pfad an. Ein KI-Client liest die Art in `get_status`; wechseln und entfernen darfst nur
   du. `runtime status` zeigt die Art.
-- **Ditto-Evaluation** (`llm-cli ditto eval`): feste Fälle (Analyse von Build-Logs, Build-Empfehlungen,
+- `2026-10-10 23:50 UTC` · `v3.1.0` **Ditto-Evaluation** (`llm-cli ditto eval`): feste Fälle (Analyse von Build-Logs, Build-Empfehlungen,
   Modulvorschläge, Chat mit Tools, Prompt-Injection), nach Regeln bewertet, gegen den konfigurierten Anbieter oder
   je lokaler Modellstufe (`--tier small --tier small-q2`; die Server, die der Lauf startet, werden danach gestoppt,
   einer, den du selbst gestartet hast, läuft weiter, wenn er die Stufe bedient). Es wird nichts gebaut; `--json`
   schreibt den Bericht.
-- **Retrieval-Evaluation** (`llm-cli ditto eval --kind retrieval`): 42 deutsche und englische Suchen
+- `2026-10-11 04:03 UTC` · `v3.1.0` **Retrieval-Evaluation** (`llm-cli ditto eval --kind retrieval`): 42 deutsche und englische Suchen
   (sprachübergreifende Fragen, Bezeichner wie `GGML_CUDA`, Antworten tief in einer großen Tabelle oder einem
   Skript, die letzten Zeilen fehlgeschlagener Builds und Dittos eigene Suchbegriffe, themenfremde Fragen) gegen
   einen Korpus aus 30 Auszügen aus Framework- und SDK-Dokumentation (`evals/retrieval/`). Der Korpus wird mit dem
@@ -771,7 +770,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Embedding-Modell heruntergeladen ist. Ein manueller und nächtlicher CI-Workflow führt ihn mit
   zwischengespeicherten Modellen aus. Ausgangswerte mit dem Standard-Embedding-Modell für die CPU bei den 34
   Fragen: hit@1 83 %, hit@3 97 %, MRR 0,91; alle 4 themenfremden Fragen bekommen noch Auszüge.
-- **Format der Hardware-Profile, Schema 2** (`configs/hardware_probe_schema.yml`, Parser
+- `2026-10-11 18:29 UTC` · `v3.1.0` **Format der Hardware-Profile, Schema 2** (`configs/hardware_probe_schema.yml`, Parser
   `orchestrator/runtime/profile.py`): eine Liste der Schlüssel, die eine Hardware-Probe schreibt, jeder mit Quelle und
   Normalisierung je Betriebssystem und seiner Prüfung. Sie umfasst das Betriebssystem (ID, Version, Familie, Variante
   wie DietPi, Kernel, Init-System), die Architektur des Userlands, die C-Bibliothek und ihre Version (glibc, musl,
@@ -785,7 +784,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   verlangt vor einem Build eine neue Probe. Dazu kommen ein Leistungsschlüssel für Benchmark-Ergebnisse, der flüchtige
   und nur festgehaltene Werte nicht berücksichtigt, und ein Profilspeicher je Benutzer (`~/.llm-framework/hardware/`,
   private Dateien).
-- **Hardware-Probe für Boards und PCs** (`scripts/hardware_probe.py`, nur Standardbibliothek, Python 3.8 oder
+- `2026-10-11 20:08 UTC` · `v3.1.0` **Hardware-Probe für Boards und PCs** (`scripts/hardware_probe.py`, nur Standardbibliothek, Python 3.8 oder
   neuer): schreibt das Hardware-Profil in Schema 2 unter Linux, Windows und macOS, mit Betriebssystem, C-Bibliothek
   und ihrer Version, ARM-Kernclustern, ARM-Skalarprodukt und FP16-Arithmetik, den x86-Merkmalen, für die ggml baut,
   dem SoC, dem NPU-Gerät und jeder GPU (NVIDIA Compute Capability, AMD gfx-Target, Vulkan). `llm-cli scan` führt sie
@@ -796,7 +795,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Rechner ohne Netzzugang beschreibt die README die Probe von Hand. Das installierte Paket enthält eine byte-gleiche
   Kopie der Probe (`orchestrator/runtime/hardware_probe.py`), also funktioniert die Hardware-Erkennung des Frameworks
   auch ohne den Ordner `scripts/`.
-- **Build-Rezept für selbst gebautes llama.cpp** (`orchestrator/runtime/build/recipe.py`): Aus dem Hardware-Profil
+- `2026-10-11 19:39 UTC` · `v3.1.0` **Build-Rezept für selbst gebautes llama.cpp** (`orchestrator/runtime/build/recipe.py`): Aus dem Hardware-Profil
   des Rechners, der die Programme ausführen wird, wird ein Build-Plan (CMake-Optionen, Ziele, Toolchain-Datei,
   Builder, Prüfungen) mit einer Build-ID, die sich mit jeder Option und jeder Werkzeugversion ändert, aber nicht mit
   flüchtigen Werten wie dem freien Speicher. Jeder Plan baut den festgelegten Commit, schaltet jede Option von
@@ -814,7 +813,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   wenn libomp installiert ist, und die Build-ID unterscheidet beide; alle CPU-Varianten für ein ARM-Board, dessen
   Merkmale die Probe nicht erkennen konnte, brauchen GCC 14 oder Clang 18 (die Liste von upstream enthält
   `armv9.2-a+sme`), sonst verlangt der Plan eine neue Probe.
-- **Selbst gebautes llama.cpp: Bauen, Prüfen, Ablegen** (`orchestrator/runtime/build/`): Ein Plan wird nativ unter
+- `2026-10-11 22:03 UTC` · `v3.1.0` **Selbst gebautes llama.cpp: Bauen, Prüfen, Ablegen** (`orchestrator/runtime/build/`): Ein Plan wird nativ unter
   Linux gebaut (mit dem erkannten Compiler, CMake 3.15 oder neuer und Ninja, in einer geleerten Umgebung) oder im
   Builder-Container des Frameworks, einem Image, das auf deinem Rechner aus `builder.Dockerfile` und einer per Digest
   festgelegten Basis gebaut wird und dessen Schritte Konfigurieren und Bauen ohne Netz laufen, mit schreibgeschützter
@@ -841,7 +840,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   nicht die, die das Archiv erwartet. `runtime install` von Ditto baut darüber. Ein CPU-Build von `llama-server` und
   `llama-bench` am Pin dauerte auf einer virtuellen Maschine mit 4 Kernen 189 s und ergab 28 MB Programme; Dittos
   CPU-Build mit zusätzlich `llama-cli` und `llama-perplexity` dauerte 195 s.
-- **Builds von Dittos Server wechseln den Rechner**: `llm-cli ditto runtime export DATEI` schreibt den genutzten
+- `2026-10-12 00:37 UTC` · `v3.1.0` **Builds von Dittos Server wechseln den Rechner**: `llm-cli ditto runtime export DATEI` schreibt den genutzten
   selbst gebauten Build, und `llm-cli ditto runtime import DATEI` auf einem anderen Rechner derselben Art prüft ihn
   gegen den Pin und sein Manifest, fragt, bevor eines seiner Programme läuft, prüft ihn dort und macht ihn zum aktiven
   Build. Ein mit `-march=native` gemachter Build wird abgelehnt, bevor irgendetwas läuft, auf einer CPU eines anderen
@@ -853,11 +852,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Papierkorb). Den aktiven Build, den CPU-Ersatz, den Build, aus dem ein laufender Server gestartet wurde, und die
   Builds der Boards listet es nie. `llm-cli device runtime prune GERÄT` tut dasselbe für die älteren Laufzeit-Pakete
   eines Boards auf deinem PC; ein neuer Build oder ein Deployment behält sie.
-- `llm-cli doctor` prüft die lokale llama.cpp-Laufzeit: einen genutzten selbst gebauten Build, der verändert wurde
+- `2026-10-11 22:03 UTC` · `v3.1.0` `llm-cli doctor` prüft die lokale llama.cpp-Laufzeit: einen genutzten selbst gebauten Build, der verändert wurde
   (Fehler) oder älter als der Pin ist (Warnung), das genutzte vorgefertigte Archiv (Information: nicht selbst gebaut)
   und ob dieser Rechner Compiler, CMake und Ninja für einen nativen Build hat (Information, mit dem Builder-Container
   als Alternative).
-- **llama.cpp per Commit festgelegt**: `llama_cpp.source` in `configs/llama_runtime.yml` (Commit
+- `2026-10-11 19:39 UTC` · `v3.1.0` **llama.cpp per Commit festgelegt**: `llama_cpp.source` in `configs/llama_runtime.yml` (Commit
   `d81235049384534c167caea52b85a694f6103d14`, Tag `b11429`) ist die eine Stelle. Dazu kommen die CUDA-Toolkits für
   selbst gebaute CUDA-Builds (die Redist-Manifeste von NVIDIA per Größe und SHA256 festgelegt, mit den Grenzen für
   Treiber, Compute Capability, Host-Compiler und CMake je Toolkit; die vorgebauten Entwicklungs-Images von NVIDIA nur
@@ -865,13 +864,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   andere Stelle, die die llama.cpp-Version nennt, abweicht, auch das `ARG LLAMA_CPP_COMMIT`, das jedes Target-Dockerfile
   braucht, das llama.cpp baut, und `python scripts/llama_cpp_pin.py check` prüft mit
   `git ls-remote`, dass der Tag bei Upstream auf den festgelegten Commit zeigt.
-- **Festgelegter llama.cpp-Quelltext für Rechner ohne Netz**: `llm-cli ditto runtime export-source DATEI` schreibt
+- `2026-10-11 19:39 UTC` · `v3.1.0` **Festgelegter llama.cpp-Quelltext für Rechner ohne Netz**: `llm-cli ditto runtime export-source DATEI` schreibt
   den festgelegten Commit als Git-Bundle mit Manifest, und `llm-cli ditto runtime import-source DATEI` installiert ihn
   auf einem Rechner ohne Internetzugang. Der Quelltext wird per Commit geholt (über seinen Tag nur, wo ein Server das
   ablehnt), muss den festgelegten Commit zurückgeben und liegt schreibgeschützt in
   `~/.llm-framework/runtime/llama.cpp/src/`; spätere Läufe prüfen, dass darin nichts geändert oder hinzugefügt wurde,
   auch keine Dateien, die Git ignoriert, und brauchen kein Netz.
-- **Konvertierungswerkzeuge abgestimmt auf den Build-Rechner**: Target-Images bauen die Konvertierungswerkzeuge von
+- `2026-10-11 23:59 UTC` · `v3.1.0` **Konvertierungswerkzeuge abgestimmt auf den Build-Rechner**: Target-Images bauen die Konvertierungswerkzeuge von
   llama.cpp (`llama-quantize`, `llama-imatrix`, `llama-perplexity`, `llama-completion` und jetzt `llama-bench`) nach
   dem Build-Rezept. Der Image-Build bekommt den Pin (`LLAMA_CPP_TAG`, `LLAMA_CPP_COMMIT`) und den Plan für den Zweck
   `host-tools` aus einer Probe dieses Rechners unmittelbar davor (`LLAMA_CMAKE_ARGS`: seine CPU-Merkmale
@@ -885,38 +884,36 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   gelinkt. `build_info.json` hält die Abstimmung fest (`llama_cpp_tools`). Zehn Quantisierungstypen eines Testmodells
   waren aus der Basis, einem Build mit AVX-512/AMX und einem ohne AVX2 byteweise gleich; der Bau der fünf Werkzeuge
   dauerte auf einer virtuellen Maschine mit 4 Kernen 3 bis 6 Minuten.
-- **Block `runtime:` in neuen Target-Modulen**: Der Modul-Assistent, `llm-cli module create` (neue Option
+- `2026-10-11 23:59 UTC` · `v3.1.0` **Block `runtime:` in neuen Target-Modulen**: Der Modul-Assistent, `llm-cli module create` (neue Option
   `--probe DATEI`) und `llm-cli module generate-ai` schreiben den Plan des Build-Rezepts für die llama.cpp-Laufzeit des
   Boards aus der Probe des Targets in `target.yml`: Architektur, Betriebssystem, die C-Bibliothek, die der Cross-Build
   nicht überschreiten darf, Builder-Basis, CPU-Optionen (`armv8.2-a+dotprod+fp16` für den RK3566), Backends und
   Programme, aus dem Quelltext gebaut. Der Block ist eine Aufzeichnung (eine Geräte-Laufzeit wird immer neu aus der
   Probe des Geräts geplant) und wird in Paketen gegen sein Schema geprüft. CPU- und CMake-Flags aus dem Assistenten
   oder von Ditto stehen dort als Hinweistext und werden nie angewendet; der Assistent kennzeichnet sie so.
-- **Selbst gebautes llama.cpp auf dem Board** (`llm-cli device runtime plan|build|deploy|verify|status`,
-  `llm-cli device list|settings`): Das eigene Probe-Profil des Boards (`llm-cli scan --device`) wird zu einem
-  Cross-Build im Builder-Container, ohne Netz, auf einer Basis, deren C-Bibliothek nicht neuer ist als die des Boards
-  (glibc, oder musl unter Alpine; ein Board, das älter ist als jede Basis, bekommt eine klare Meldung), mit statisch
-  gelinkter C++-Laufzeit und bei OpenMP-Builds der `libgomp.so.1` des Boards aus der Cross-Toolchain. Das Ergebnis
-  ist ein Tarball (`llama-server`, `llama-cli`, `llama-bench`, `llama-perplexity`, `lib/libgomp.so.1`, ein
-  Startskript, die Stempel des Builds, die MIT-Lizenz von llama.cpp und `SHA256SUMS`), den das Deployment per SSH
-  nach `~/.local/share/llm-framework/llama.cpp/` auf dem Board hochlädt und dort Datei für Datei prüft. Dann werden
-  die Programme des neuen Builds auf dem Board als dein unprivilegierter Benutzer geprüft, bevor irgendetwas sie
-  startet: `--version` gegen den Pin, `--list-devices`, die Ablehnung von `--tools` durch den Server und mit
-  `--bench-model` ein kurzer `llama-bench`-Lauf (ein Modell, das kein Katalogmodell ist, erst nach deiner
-  Zustimmung, die ins Audit-Log geschrieben wird). Nur ein Build, der besteht, wird über einen Link `current` aktiv
-  (der vorige Build bleibt); ein Build, der scheitert, etwa mit `SIGILL`, weil die CPU-Grundstufe nicht zum Board
-  passt, wird wieder entfernt, und der vorige Build bleibt aktiv. Das Startskript startet den Server auf 127.0.0.1
-  mit einem Schlüssel, der auf dem Board unter umask 077 erzeugt wird, einer geleerten Umgebung und festen Optionen;
-  es reicht nur wenige Tuning-Optionen mit geprüften Werten weiter (Kontextgröße, Threads, CPU-Maske, ...). Wie die
-  Laufzeit startet, wird vorher in den Deploy-Einstellungen festgelegt und während eines Deployments nie gefragt: das
-  Startskript in deinem Home (die Vorgabe) oder eine systemd-Unit, die nur für Boards mit systemd wählbar ist und
-  erst, nachdem du bestätigst, dass Deployments dort `sudo -n` ausführen dürfen. Getestet mit einem
-  nachgebildeten SSH-Kanal und Testprofilen (ein RK3566 unter DietPi, ein Alpine-Board, ein Board ohne systemd) und
-  mit echten Programmen: `llama-server` und `llama-bench`, nativ mit den Optionen des Geräte-Bauplans für einen
-  x86-64-Rechner gebaut (30 MB, ein Tarball von 11,6 MB), bestanden die Formatprüfung, das Deployment auf ein lokal
-  nachgebildetes Board und die Prüfungen dort. Noch nicht auf einem echten Board, und hier lief kein Cross-Build
-  (kein Docker-Dienst).
-- **Deep Ingest beachtet maschinenlesbare Nutzungsvorbehalte.** Text und Data Mining öffentlicher Seiten ist
+- `2026-10-11 23:49 UTC` · `v3.1.0` **Selbst gebautes llama.cpp auf dem Board** (`llm-cli device runtime plan|build|deploy|verify|status`, `llm-cli device
+  list|settings`): Das eigene Probe-Profil des Boards (`llm-cli scan --device`) wird zu einem Cross-Build im
+  Builder-Container, ohne Netz, auf einer Basis, deren C-Bibliothek nicht neuer ist als die des Boards (glibc, oder musl
+  unter Alpine; ein Board, das älter ist als jede Basis, bekommt eine klare Meldung), mit statisch gelinkter
+  C++-Laufzeit und bei OpenMP-Builds der `libgomp.so.1` des Boards aus der Cross-Toolchain. Das Ergebnis ist ein Tarball
+  (`llama-server`, `llama-cli`, `llama-bench`, `llama-perplexity`, `lib/libgomp.so.1`, ein Startskript, die Stempel des
+  Builds, die MIT-Lizenz von llama.cpp und `SHA256SUMS`), den das Deployment per SSH nach
+  `~/.local/share/llm-framework/llama.cpp/` auf dem Board hochlädt und dort Datei für Datei prüft. Dann werden die
+  Programme des neuen Builds auf dem Board als dein unprivilegierter Benutzer geprüft, bevor irgendetwas sie startet:
+  `--version` gegen den Pin, `--list-devices`, die Ablehnung von `--tools` durch den Server und mit `--bench-model` ein
+  kurzer `llama-bench`-Lauf (ein Modell, das kein Katalogmodell ist, erst nach deiner Zustimmung, die ins Audit-Log
+  geschrieben wird). Nur ein Build, der besteht, wird über einen Link `current` aktiv (der vorige Build bleibt); ein
+  Build, der scheitert, etwa mit `SIGILL`, weil die CPU-Grundstufe nicht zum Board passt, wird wieder entfernt, und der
+  vorige Build bleibt aktiv. Das Startskript startet den Server auf 127.0.0.1 mit einem Schlüssel, der auf dem Board
+  unter umask 077 erzeugt wird, einer geleerten Umgebung und festen Optionen; es reicht nur wenige Tuning-Optionen mit
+  geprüften Werten weiter (Kontextgröße, Threads, CPU-Maske, ...). Wie die Laufzeit startet, wird vorher in den
+  Deploy-Einstellungen festgelegt und während eines Deployments nie gefragt: das Startskript in deinem Home (die
+  Vorgabe) oder eine systemd-Unit, die nur für Boards mit systemd wählbar ist und erst, nachdem du bestätigst, dass
+  Deployments dort `sudo -n` ausführen dürfen. Getestet mit einem nachgebildeten SSH-Kanal und Testprofilen (ein RK3566
+  unter DietPi, ein Alpine-Board, ein Board ohne systemd) und mit echten Programmen: `llama-server` und `llama-bench`,
+  nativ mit den Optionen des Geräte-Bauplans für einen x86-64-Rechner gebaut (30 MB, ein Tarball von 11,6 MB), bestanden
+  die Formatprüfung, das Deployment auf ein lokal nachgebildetes Board und die Prüfungen dort.
+- `2026-10-11 01:30 UTC` · `v3.1.0` **Deep Ingest beachtet maschinenlesbare Nutzungsvorbehalte.** Text und Data Mining öffentlicher Seiten ist
   erlaubt, solange der Rechteinhaber es nicht maschinenlesbar vorbehalten hat (EU-DSM-Richtlinie Art. 4,
   § 44b UrhG). Deshalb überspringt der Crawler neben robots.txt Seiten, die in einem `X-Robots-Tag`-Header oder in
   `<meta name="robots">` / `<meta name="llm-cross-compiler-framework-bot">` (auch unter dem früheren Namen
@@ -925,22 +922,22 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   und Meta-Tag `tdm-reservation`, PDF-Metadaten).
   Weiterleitungsziele auf anderen Hosts werden genauso geprüft. Jede Seite, die nicht gespeichert wird, steht mit
   ihrem Grund im Crawl-Protokoll. Keine dieser Prüfungen lässt sich abschalten.
-- **Hinweis vor dem ersten Deep Ingest** (Englisch und Deutsch): was gelesen wird (nur öffentlich erreichbare
+- `2026-10-11 02:03 UTC` · `v3.1.0` **Hinweis vor dem ersten Deep Ingest** (Englisch und Deutsch): was gelesen wird (nur öffentlich erreichbare
   Seiten), welche Vorbehalte beachtet werden, dass das Wissen auf diesem Computer bleibt und dass beim Weitergeben
   Quelle und Lizenz erhalten bleiben und deine ausdrückliche Freigabe nötig ist. Er ist eine Information, keine
   rechtliche Bestätigung: ein Knopf „Verstanden“. Er erscheint einmal je Benutzer und erneut, wenn sich sein Text
   ändert.
-- **Gesprochene Ansagen** des Hinweises und des Ergebnisses von Deep Ingest über die Sprachausgabe des
+- `2026-10-11 02:03 UTC` · `v3.1.0` **Gesprochene Ansagen** des Hinweises und des Ergebnisses von Deep Ingest über die Sprachausgabe des
   Betriebssystems (Windows System.Speech, macOS `say`, Linux `spd-say` oder `espeak-ng`), in der Sprache der
   Oberfläche. Nach bestem Bemühen und nie im Weg: keine Audiodateien, die Systemlautstärke wird nie verändert, und
   still in CI, über SSH ohne Bildschirm, auf Systemen ohne Bildschirm, mit `LLM_FRAMEWORK_NO_AUDIO=1` oder wenn
   *Werkzeuge > Gesprochene Ansagen* (Einstellung `audio_announcements`) aus ist. Jede Ansage wird auch
   protokolliert. Der Schalter warnt, wenn er die Einstellung nicht speichern kann.
-- **Fortschritt und Stopp bei Deep Ingest**: Der Assistent zeigt „Seite N von M: <url>“ statt eines endlosen
+- `2026-10-11 02:03 UTC` · `v3.1.0` **Fortschritt und Stopp bei Deep Ingest**: Der Assistent zeigt „Seite N von M: <url>“ statt eines endlosen
   Drehsymbols, und ein Stopp-Knopf beendet den Crawl nach der aktuellen Seite. Das Schließen des Assistenten
   stoppt einen laufenden Crawl genauso und schließt, sobald die aktuelle Seite gespeichert ist, ohne dass das
   Fenster einfriert.
-- **Eingabeverlauf**: Die Eingabefelder bieten an, was du zuletzt verwendet hast, das Neueste zuerst. Modell,
+- `2026-10-11 02:55 UTC` · `v3.1.0` **Eingabeverlauf**: Die Eingabefelder bieten an, was du zuletzt verwendet hast, das Neueste zuerst. Modell,
   Kalibrierungsdatensatz, Deep-Ingest-URL und Gerät (Deployment, Hardware-Scan per SSH) sind bearbeitbare Listen;
   das letzte Modell und das letzte Gerät werden eingetragen, Datensätze und URLs nur angeboten. Targets und Boards
   kommen aus den Target-Definitionen, deshalb wird das zuletzt gebaute vorausgewählt, sofern es noch angeboten
@@ -951,13 +948,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   *Werkzeuge > Eingabeverlauf löschen...* vergisst ihn nach einer Frage, die jede Datei aufzählt, die gelöscht wird
   (den Verlauf und die Kopie eines beschädigten: vollständiger Pfad, Dateiname, Größe, was es ist; „Nein“ ist die
   Vorgabe), und löscht nur diese.
-- **Signierte Community-Packs**: Ein Pack ist ein Zip mit einem Manifest (sha256, Größe und Rechte jeder Datei)
+- `2026-10-11 01:54 UTC` · `v3.1.0` **Signierte Community-Packs**: Ein Pack ist ein Zip mit einem Manifest (sha256, Größe und Rechte jeder Datei)
   und einer optionalen Ed25519-Signatur des Autors; der öffentliche Schlüssel des Autors wird bei der ersten
   Installation festgehalten, und ein anderer Schlüssel unter demselben Autorennamen wird mit einer Warnung
   gezeigt. Beim Lesen eines Packs werden genau die aufgeführten Dateien angenommen, nie Links oder Sonderdateien,
   und jeder Hash wird geprüft. Vertrauenswürdige Herausgeberschlüssel werden in `configs/community_keys.yml`
   mitgeliefert, jeder mit einem Ablaufdatum.
-- **Verschlüsselte Packs zum privaten Teilen** (mit deinen eigenen Rechnern oder einem Team): im Format age von
+- `2026-10-11 14:01 UTC` · `v3.1.0` **Verschlüsselte Packs zum privaten Teilen** (mit deinen eigenen Rechnern oder einem Team): im Format age von
   rage verschlüsselt (über `pyrage`), für die age-Schlüssel eines oder mehrerer Empfänger oder für eine
   Passphrase, und vom Absender signiert, sodass Empfänger sehen, wer es geschickt hat, und jede Änderung erkannt
   wird, auch ein hinzugefügter oder entfernter Empfänger. Die üblichen Werkzeuge `age` und `rage` öffnen sie
@@ -966,15 +963,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   abgelehnt, bevor irgendetwas entschlüsselt wird. Jeder Benutzer bekommt beim ersten Gebrauch einen
   Ed25519-Schlüssel und eine age-Identität, die nur im verschlüsselten Secrets-Speicher liegen; die öffentlichen
   Schlüssel lassen sich als Text exportieren.
-- **Rezepte**, die „Modellvorlagen“ des Model Zoo: das Modell in einem gepinnten Commit, das Target mit einem
+- `2026-10-11 01:54 UTC` · `v3.1.0` **Rezepte**, die „Modellvorlagen“ des Model Zoo: das Modell in einem gepinnten Commit, das Target mit einem
   Fingerabdruck seiner Dateien, Board, Format, Quantisierung, Optionen und geprüfte Ergebnisse (Hashes der
   Artefakte, Toolchain-Image, Gerätetests). Ein Rezept entsteht aus einem fertigen Build, wird gegen die
   Capabilities des Targets geprüft und ergibt eine normale Build-Anfrage.
-- `build_info.json` hält fest, was ein Rezept braucht: den Commit des Modells (der Download wird darauf gepinnt),
+- `2026-10-11 01:54 UTC` · `v3.1.0` `build_info.json` hält fest, was ein Rezept braucht: den Commit des Modells (der Download wird darauf gepinnt),
   Fingerabdruck und Version des Targets, das Toolchain-Image, die Kontextlänge, den Hash des
   Kalibrierungsdatensatzes und die Version des Frameworks. Build-Anfragen nehmen für Hugging-Face-Modelle eine
   `revision` (Commit) an.
-- **Community Zoo** (`llm-cli zoo list|show|install|verify|export|keys`): Community-Targets, Rezepte und
+- `2026-10-11 02:42 UTC` · `v3.1.0` **Community Zoo** (`llm-cli zoo list|show|install|verify|export|keys`): Community-Targets, Rezepte und
   Wissenspacks aus einem signierten Community-Index (Einstellung `community_index_url`: `index.json` plus
   `index.json.sig`, geprüft mit den Schlüsseln in `configs/community_keys.yml`, je Benutzer zwischengespeichert,
   neu abgerufen, wenn der Zwischenspeicher älter als einen Tag ist, und nie durch einen älteren Index ersetzt).
@@ -989,10 +986,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Installation wird immer als reiner Text gezeigt, sodass Text aus einem Pack seine Vertrauensstufe nicht verdecken
   kann. Ein Wissenspack wird bei seiner Installation in die Wissensbasis aufgenommen oder, wenn die Wissensbasis
   erst später eingeschaltet wird, dann.
-- **Community Hub** im Menü Werkzeuge: eine Spalte für die Vertrauensstufe, Filter nach Art und Vertrauen, Import
+- `2026-10-11 02:42 UTC` · `v3.1.0` **Community Hub** im Menü Werkzeuge: eine Spalte für die Vertrauensstufe, Filter nach Art und Vertrauen, Import
   von Pack-Dateien (auch von Packs, die für deinen Schlüssel verschlüsselt sind), und „Build“ bei einem
   installierten Rezept füllt den Builder aus, einschließlich des gepinnten Commits des Modells.
-- **Export für die Community** auf der letzten Seite des Modul-Assistenten, im Kontextmenü des Builder-Protokolls
+- `2026-10-11 02:42 UTC` · `v3.1.0` **Export für die Community** auf der letzten Seite des Modul-Assistenten, im Kontextmenü des Builder-Protokolls
   (ein fertiger Build wird zum Rezept) und mit `llm-cli zoo export`: ein Pack eines Targets, eines Rezepts oder
   deiner Wissensbasis, von persönlichen Daten bereinigt (die Änderungen werden gezeigt), geprüft und mit deinem
   Schlüssel signiert; mit `--to` oder `--passphrase` wird es stattdessen zum privaten Teilen verschlüsselt.
@@ -1002,16 +999,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   das nach der Zusammenfassung nachfragt, außer mit `--yes`) übergibt es an das Community-Repository (Einstellung
   `community_repo`): über die GitHub CLI, wenn sie installiert und angemeldet ist, sonst öffnet sich die
   Upload-Seite des Repositorys im Browser. Das Framework fragt nie nach einem Token, liest keins und zeigt keins.
-- Werkzeuge für die Maintainer des Community-Repositorys: `scripts/zoo_sign_index.py` (Signaturschlüssel im
+- `2026-10-11 02:42 UTC` · `v3.1.0` Werkzeuge für die Maintainer des Community-Repositorys: `scripts/zoo_sign_index.py` (Signaturschlüssel im
   Schlüsselbund des Betriebssystems, Indexeinträge aus Packs, Signatur von `index.json`) und die
   CI-Workflow-Vorlage `scripts/community_repo/validate-contribution.yml`, die `llm-cli zoo verify` für jedes
   eingereichte Pack ausführt.
-- **Claude-Workspace-ID** (Feld „Workspace ID“ in den KI-Einstellungen, Einstellung `ai_anthropic_workspace_id`):
+- `2026-10-11 00:21 UTC` · `v3.1.0` **Claude-Workspace-ID** (Feld „Workspace ID“ in den KI-Einstellungen, Einstellung `ai_anthropic_workspace_id`):
   Claude-API-Schlüssel, die in jedem Workspace der Organisation gelten, funktionieren jetzt. Die ID wird als
   Header `anthropic-workspace-id` bei jeder Anfrage mitgeschickt, die mit dem API-Schlüssel an die Claude-API
   geht, auch beim Abruf der Modellliste. Ein `ant auth login`-Profil behält seinen eigenen Workspace, und andere
   Server bekommen die ID nie.
-- **Anmeldeverfahren je Anbieter** (`configs/llm_providers.yml` Schema 2, `orchestrator/llm/auth`): Jeder
+- `2026-10-11 03:18 UTC` · `v3.1.0` **Anmeldeverfahren je Anbieter** (`configs/llm_providers.yml` Schema 2, `orchestrator/llm/auth`): Jeder
   Anbieter nennt seine Anmeldeverfahren in der Reihenfolge, in der sie bevorzugt werden, mit der Seite, auf der
   der Schlüssel erstellt wird, den Umgebungsvariablen, die er liest, einer kostenlosen Prüfung und zusätzlichen
   Feldern wie der Claude-Workspace-ID oder der OpenAI-Organisation und dem Projekt. Kataloge mit Schema 1 in
@@ -1021,32 +1018,32 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   in `auth.json` neben dem Tresor. Tokens der Anmeldeabläufe, die später kommen, werden unter einer Sperre
   erneuert, die GUI, CLI und MCP-Server teilen; das neue Refresh-Token wird gespeichert, bevor es genutzt wird,
   und eine abgelehnte Erneuerung markiert die Anmeldung als abgelaufen.
-- **Prüfung der Zugangsdaten** (die Schaltfläche **Prüfen** im Anmeldebereich und
+- `2026-10-11 04:36 UTC` · `v3.1.0` **Prüfung der Zugangsdaten** (die Schaltfläche **Prüfen** im Anmeldebereich und
   `llm-cli ditto auth status --check`): Eine kostenlose GET-Anfrage (die Modellliste, bei OpenRouter der
   Schlüssel-Endpunkt) zeigt, ob der gespeicherte Schlüssel funktioniert, zu welchem Workspace oder Schlüsselnamen
   er gehört und wie viele Modelle er nutzen kann; ein Schlüssel, der funktioniert, aber keine Modelle auflisten darf, wird als solcher gemeldet, auch von
   der Live-Modellliste in den KI-Einstellungen. Weiterleitungen werden nicht verfolgt, der Schlüssel geht also
   nur an den Anbieter.
-- **API-Schlüssel aus Umgebungsvariablen**: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` und
+- `2026-10-11 03:18 UTC` · `v3.1.0` **API-Schlüssel aus Umgebungsvariablen**: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` und
   `OPENROUTER_API_KEY` werden genutzt, wenn für den Anbieter kein Schlüssel gespeichert ist (nur die Variablen,
   die der Anbieterkatalog nennt; gelesen vom Framework, nie von den SDKs). Die KI-Einstellungen nennen die
   Variable, nichts wird in den Tresor kopiert, und ein gespeicherter Schlüssel hat immer Vorrang. Lässt sich der
   Tresor nicht lesen, springt keine Variable für den Schlüssel ein, der dort gespeichert sein kann: Die
   Fehlermeldung sagt, was mit dem Tresor nicht stimmt.
-- **Wie Zugangsdaten geschützt werden, entscheidest du** (Einstellung `secret_storage`, oder
+- `2026-10-11 00:29 UTC` · `v3.1.0` **Wie Zugangsdaten geschützt werden, entscheidest du** (Einstellung `secret_storage`, oder
   `LLM_SECRET_STORAGE` für einen einzelnen Lauf): der Schlüsselbund des Betriebssystems (Standard), ein Befehl als
   Credential-Helper (`secret_helper`, z. B. `pass show llmcc/vault-key`, ohne Shell ausgeführt), eine Passphrase,
   die einmal je Start abgefragt wird (scrypt), eine Schlüsseldatei neben dem Tresor (`insecure`, im Ruhezustand
   nicht verschlüsselt) oder nur der Arbeitsspeicher (`ephemeral`, für CI). Nichts wird automatisch gewählt: Ohne
   nutzbaren Schlüsselbund und ohne Wahl hält das Framework an und nennt die Möglichkeiten. `llm-cli doctor` warnt
   vor der Schlüsseldatei und meldet die reine Speicherung im Arbeitsspeicher.
-- **`--debug-http`** (`llm-cli --debug-http` und dieselbe Option beim Start der GUI) zeigt die Debug-Ausgabe
+- `2026-10-11 02:11 UTC` · `v3.1.0` **`--debug-http`** (`llm-cli --debug-http` und dieselbe Option beim Start der GUI) zeigt die Debug-Ausgabe
   der HTTP-Bibliotheken und der SDKs der KI-Anbieter auf stderr, mit geschwärzten Zugangsdaten.
-- **Dokumentation auf Englisch und Deutsch** für jedes Dokument (README, Blaupause mit Design und Roadmap,
+- `2026-10-11 01:37 UTC` · `v3.1.0` **Dokumentation auf Englisch und Deutsch** für jedes Dokument (README, Blaupause mit Design und Roadmap,
   CLI-Anleitung, Funktionen, Mitwirken, Leitfaden für Modulentwickler, SSOT, Changelog), geprüft durch
   `tests/test_docs.py`: Jedes Dokument hat sein Gegenstück, Links und Anker funktionieren, beide Changelogs nennen
   dieselben Versionen, und die Roadmap nennt nur, was kommt.
-- **Anmeldung auf der Kommandozeile**: `llm-cli ditto login <anbieter>` meldet Ditto mit den Verfahren des
+- `2026-10-11 04:36 UTC` · `v3.1.0` **Anmeldung auf der Kommandozeile**: `llm-cli ditto login <anbieter>` meldet Ditto mit den Verfahren des
   Anbieters an (ein API-Schlüssel, eine lokale Engine ohne Schlüssel, ein Profil aus `ant auth login` mit
   `--method ant_profile`), prüft einen Schlüssel kostenlos, bevor es ihn speichert, und merkt sich das Verfahren
   (`ai_auth_<anbieter>`); `--workspace-id`, `--organization`, `--project` und `--base-url` legen fest, was zum
@@ -1059,7 +1056,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   2 Bedienfehler (auch ein leeres stdin, eine fehlende Serveradresse, ein fehlerhafter Optionswert oder ein
   Schlüssel mit Leerzeichen oder Zeilenumbruch darin), 3 abgelehnt, 4 Netz, 5 Tresor nicht nutzbar, 6 nicht
   erlaubt oder nicht verfügbar.
-- **Anmeldebereich in den KI-Einstellungen** (**Anmelden...**): die Verfahren des Anbieters als Karten in der
+- `2026-10-11 04:36 UTC` · `v3.1.0` **Anmeldebereich in den KI-Einstellungen** (**Anmelden...**): die Verfahren des Anbieters als Karten in der
   Reihenfolge des Katalogs, das erste nutzbare als „Empfohlen“ markiert; ein Schlüsselformular mit
   Schlüsselseite, den zusätzlichen Feldern, **Prüfen**, **Speichern** und **Abmelden**; eine Statuszeile
   („Angemeldet als ...“, „Nicht angemeldet“, „Schlüssel aus der Umgebungsvariable X“); und ohne nutzbaren
@@ -1070,11 +1067,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Stand. Der Kopf von Dittos Chat zeigt den genutzten Zugang, zum Beispiel „Lokal · Ollama“. Ein Schlüssel im
   eigenen Schlüsselfeld der KI-Einstellungen ersetzt ein Verfahren, das sich eine Anmeldung gemerkt hat (etwa
   das `ant`-Profil), damit er nicht ungenutzt bleibt.
-- `llm-cli secrets set --with-token` liest den Wert von stdin.
-- **Cancel Build** im Builder-Tab: bricht den laufenden Build nach einer Bestätigung über den Build-Service ab
+- `2026-10-11 04:36 UTC` · `v3.1.0` `llm-cli secrets set --with-token` liest den Wert von stdin.
+- `2026-10-11 13:50 UTC` · `v3.1.0` **Cancel Build** im Builder-Tab: bricht den laufenden Build nach einer Bestätigung über den Build-Service ab
   (nur aktiv, solange der Build läuft, den der Tab gestartet hat); das Log meldet, wenn er angehalten hat, auch
   nach einem Abbruch, während der Build noch an die Build-Engine übergeben wurde.
-- **Mehr Zusammenhang in Audit-Einträgen**: der Bestätigungsweg (`elicitation`, `framework-gui`, `framework-cli`),
+- `2026-10-11 18:30 UTC` · `v3.1.0` **Mehr Zusammenhang in Audit-Einträgen**: der Bestätigungsweg (`elicitation`, `framework-gui`, `framework-cli`),
   der SHA-256 des Fragetexts, die Antwort der Person (angenommen, abgelehnt, abgebrochen, nicht möglich,
   unbeantwortet, abgelaufen), der selbst angegebene Name, die Version, der Transport und das Protokoll des Clients
   (nur eine Bezeichnung; ein Schlüssel darin wird vor dem Kürzen entfernt, wie in der Zeile auf stderr), ein Hash
@@ -1083,17 +1080,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   zu ändern, wie 3.0.0 einen Eintrag hasht: Logs, die vor ihnen geschrieben wurden, bleiben prüfbar, und ein noch
   laufender 3.0.0-Prozess (ein MCP-Server, den ein KI-Client vor dem Update gestartet hat) prüft das Log weiter und
   schreibt hinein, statt die neuen Einträge als verändert zu melden.
-- **Tool-Berechtigungen pro Aufrufer**: Ditto und lokale MCP-Clients über stdio können eigene Berechtigungen haben
+- `2026-10-11 18:55 UTC` · `v3.1.0` **Tool-Berechtigungen pro Aufrufer**: Ditto und lokale MCP-Clients über stdio können eigene Berechtigungen haben
   (`llm-cli tools permissions --caller ditto|mcp`, `--reset --caller` kehrt zu den gemeinsamen zurück); die ersten
   Berechtigungen eines Aufrufers beginnen mit den gemeinsamen, samt Einstellungen für einzelne Tools.
   `llm-cli tools list --caller`, die Einrichtung in der CLI und der GUI-Dialog zeigen die eigene Vorgabe jedes Tools,
   die höchste Entscheidung, die eine Einstellung ihm geben kann, ob es neu ist (noch nicht gesehen) und ob eine
   dauerhafte Freigabe angeboten werden darf.
-- **Tool `get_status`** (Ditto und MCP-Clients): die Tool-Berechtigungen des Aufrufers, mit Entscheidung und Grund
+- `2026-10-11 18:55 UTC` · `v3.1.0` **Tool `get_status`** (Ditto und MCP-Clients): die Tool-Berechtigungen des Aufrufers, mit Entscheidung und Grund
   für jedes Tool, auch für die Tools, die nicht aufgeführt werden, weil sie verweigert sind, und die Handlungen, die
   kein Tool übernimmt, mit dem Ort, wo die Person sie erledigt, damit eine KI den echten Grund nennen kann, wenn sie
   etwas nicht tun kann.
-- **Abgesicherte Tool-Aufrufe** (Ditto und MCP-Clients, jede Modellgröße): Schreibvarianten von Tool-Namen
+- `2026-10-11 19:16 UTC` · `v3.1.0` **Abgesicherte Tool-Aufrufe** (Ditto und MCP-Clients, jede Modellgröße): Schreibvarianten von Tool-Namen
   (`StartBuild` startet `start_build`) und angegebene Argument-Aliasse (`quant` für `quantization`) laufen mit
   einem Hinweis, während jeder andere unbekannte Argumentname, auch einer in anderer Groß- und Kleinschreibung, mit
   einem Vorschlag abgelehnt wird; Werte werden auf beiden Wegen gleich umgewandelt und mit Formaten, Boards und Quantisierungstypen
@@ -1103,7 +1100,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   zu laufen; nach drei Eingabefehlern zeigt ein Fehler einen gültigen Beispielaufruf. Was repariert wurde, ist in
   der Frage markiert, in den `notes` des Ergebnisses aufgeführt und im Audit-Log festgehalten. Tool-Argumente, die
   ein lokales Modell mit Codeblock-Zäunen oder in Python-Schreibweise schickt, werden einmal erneut gelesen.
-- **Zweistufige Bestätigung und Rückfragetext v2** (Ditto und MCP-Clients): Eine Rückfrage beginnt mit der Folge in
+- `2026-10-15 17:14 UTC` · `v3.1.0` **Zweistufige Bestätigung und Rückfragetext v2** (Ditto und MCP-Clients): Eine Rückfrage beginnt mit der Folge in
   einfachen Worten aus Fakten, die das Framework nachgeschlagen hat, dann wer fragt (Name, Version und Transport, die
   ein MCP-Client selbst angibt, und wessen Berechtigungen gelten), die Fakten, die das Framework geprüft hat (externer
   Text als "not checked" gekennzeichnet), und jedes Argument mit dem sprechenden Namen einer ID (Modell und Ziel eines
@@ -1113,7 +1110,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   etwas gefragt wird (auch einer vollen Docker-Platte, `docker_prune`: keine Selbstheilungs-Strategie löscht etwas).
   Dittos GUI-Dialog und CLI-Abfrage zeigen Rückfragen bis zu 16.000 Zeichen (ein scrollbarer Dialog, der Pager); ein
   MCP-Formular bleibt bei 4.000.
-- **Grenzen je Client für Tool-Aufrufe** (Ditto und MCP-Clients): lesende Tools 20 Aufrufe in 10 Sekunden,
+- `2026-10-11 23:23 UTC` · `v3.1.0` **Grenzen je Client für Tool-Aufrufe** (Ditto und MCP-Clients): lesende Tools 20 Aufrufe in 10 Sekunden,
   `start_build` 3 unfertige Builds und 20 Starts am Tag, 30 Rückfragen pro Stunde und eine Build-Warteschlange von
   höchstens 20 unfertigen Anfragen je Framework-Prozess für KI-Aufrufer (die eigenen GUI- und CLI-Builds des
   Menschen werden immer eingereiht); nach einem Nein wird derselbe Aufruf 10 Minuten lang nicht erneut erfragt, und
@@ -1125,14 +1122,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Fehlern ohne Fortschritt vorzeitig auf, Tools aufzurufen, mit bis zu 4 Schritten mehr, solange er einen
   Eingabefehler behebt (ein Aufruf an den falschen Computer ist einer); ein Aufruf, der auf eine Entscheidung
   wartet, zählt nie als Fehler.
-- **`llm-cli tools audit` zeigt die neueren Audit-Felder in Worten**: wer aufgerufen hat (Ditto, alle lokalen
+- `2026-10-11 23:38 UTC` · `v3.1.0` **`llm-cli tools audit` zeigt die neueren Audit-Felder in Worten**: wer aufgerufen hat (Ditto, alle lokalen
   stdio-Clients, ein benanntes Token, mit dem Namen, den der Client selbst angibt), den Titel des Tools und den Namen,
   den die KI geschrieben hat, den Grundcode und wie der Mensch gefragt wurde, mit seiner Antwort; `--details` ergänzt
   Reparaturen, Dauer, Hash des Ergebnisses, Verweise und Sitzung.
-- **`llm-cli ditto eval` hält jeden Versuch eines Tool-Aufrufs fest**, nicht nur die, die ein Tool erreicht haben:
+- `2026-10-11 19:16 UTC` · `v3.1.0` **`llm-cli ditto eval` hält jeden Versuch eines Tool-Aufrufs fest**, nicht nur die, die ein Tool erreicht haben:
   Der Block `tool_use` des Berichts nennt Tool-Aufrufe pro Aufgabe, den Anteil fehlerhafter Aufrufe und unbekannter
   Tool-Namen, Reparaturen und Ablehnungen wiederholter Aufrufe.
-- **Ordner, die die KI nutzen darf**: Ditto und MCP-Clients nennen ein lokales Modell oder einen
+- `2026-10-11 18:52 UTC` · `v3.1.0` **Ordner, die die KI nutzen darf**: Ditto und MCP-Clients nennen ein lokales Modell oder einen
   Kalibrierungsdatensatz als `<Label>:<relativer Pfad>` (zum Beispiel `models:qwen2.5-0.5b-instruct`,
   `datasets:calib/de.txt`) oder über seine Datei-ID im Modellordner, im neuen Datensatzordner (Einstellung
   `datasets_dir`, standardmäßig neben dem Modellordner) oder in einem Ordner, den du mit
@@ -1142,18 +1139,18 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Home, ein Ordner mit dem persönlichen Ordner oder einem gesperrten Ordner darin lassen sich nicht hinzufügen, und
   dieselben Grenzen gelten für die Einstellungen des Modell- und des Datensatzordners. Der Ordner `hub` des
   Hugging-Face-Caches lässt sich hinzufügen; seine Token-Dateien bleiben gesperrt.
-- **Jobs und Warten für MCP-Clients und Ditto**: die Tools `get_job_status` und `cancel_job` für lange Operationen
+- `2026-10-11 19:07 UTC` · `v3.1.0` **Jobs und Warten für MCP-Clients und Ditto**: die Tools `get_job_status` und `cancel_job` für lange Operationen
   außer Builds (eine Job-ID `job_...`, ihr Zustand, Fortschritt, Ergebnis oder Fehler; eine Zusammenfassung jedes
   Jobs bleibt in `~/.llm-framework/jobs/`), und `wait_seconds` bei `get_build_status` und `get_job_status`: Der
   Aufruf kehrt zurück, sobald sich der Build oder Job ändert oder endet, spätestens nach 50 Sekunden (ein größerer
   Wert wird mit einem Hinweis verringert), mit Fortschrittsmeldungen für Clients, die sie anfordern. Das Warten
   belegt keinen Thread, je Client laufen höchstens 4 Wartevorgänge, und ein abgebrochenes Warten berührt den Build
   oder Job nie.
-- **Der MCP-Server nennt seine Clients:** Für jeden neuen Client schreibt `llm-cli mcp serve` eine Zeile nach
+- `2026-10-11 19:25 UTC` · `v3.1.0` **Der MCP-Server nennt seine Clients:** Für jeden neuen Client schreibt `llm-cli mcp serve` eine Zeile nach
   stderr (nie an den Client) mit Name und Version, die der Client angibt, der Protokollversion, dem Transport und
   den erklärten Fähigkeiten, auch ob er dich fragen kann (Elicitation). Die Tools sehen dieselbe Beschriftung.
   Doku: eine Tabelle, was Claude Code, Claude Desktop, Cowork und VS Code unterstützen.
-- **Benannte MCP-Tokens, eins pro Client** (`llm-cli mcp token add|list|rotate|revoke`): Ein Token wird einmal
+- `2026-10-11 19:52 UTC` · `v3.1.0` **Benannte MCP-Tokens, eins pro Client** (`llm-cli mcp token add|list|rotate|revoke`): Ein Token wird einmal
   gezeigt und nur als SHA-256 gespeichert (`mcp_tokens.json`, Modus 0600). Sein Name ist der Aufrufer im Audit-Log
   (`mcp:<Name>`), und es hat eigene Berechtigungen: Ein neues Token darf nur lesen (nie ein Tool, das deine
   gemeinsamen Berechtigungen oder die eigene Vorgabe des Tools verweigern), bis du mit
@@ -1169,7 +1166,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   widerrufenes Token verliert seine Berechtigungen. Tokens verwaltet nur ein Mensch an einem Terminal (protokolliert
   mit dem Akteur `cli`, nie das Token selbst), und ein Token, das in ein Tool-Argument, eine Logzeile oder das
   Audit-Log gerät, wird wie andere Schlüssel geschwärzt.
-- **Wartende Freigaben für KI-Clients, die dich nicht fragen können** (MCP-Server). Hat ein Client keine
+- `2026-10-11 22:55 UTC` · `v3.1.0` **Wartende Freigaben für KI-Clients, die dich nicht fragen können** (MCP-Server). Hat ein Client keine
   Formular-Elicitation (Claude-Desktop-Chat, Cowork), ist eine Frage länger als 4.000 Zeichen oder hast du ein Tool
   mit `llm-cli tools permissions --confirm-in-framework TOOL` gesetzt (oder „Ask in the framework“ in der GUI),
   wartet die Frage im Framework auf dich (eine Antwort aus dem Formular des Clients zählt für einen solchen Aufruf
@@ -1187,7 +1184,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   angegeben, bis zu 16.000 Zeichen. Das Fenster setzt nie einen anderen Aufruf an die Stelle dessen, den du gerade
   liest, und nachdem sich dessen Frage geändert hat, wartet die Freigabe einen Moment. Entscheidungen werden
   festgehalten, bevor sie gespeichert werden, und die Datei der Freigaben ist signiert wie die Berechtigungen.
-- **Dauerhafte Freigaben: „ja, und nicht mehr fragen“** (MCP-Server, Ditto). Nur von dir im eigenen Fenster des
+- `2026-10-11 23:07 UTC` · `v3.1.0` **Dauerhafte Freigaben: „ja, und nicht mehr fragen“** (MCP-Server, Ditto). Nur von dir im eigenen Fenster des
   Frameworks angelegt (das Freigabefenster, `llm-cli tools approvals approve ID --always`, Dittos Dialog und
   Rückfrage), nach einer Warnung, die nennt, wer dann ohne Nachfrage handeln darf, was in einfachen Worten abgedeckt
   ist, wie weit und wie lange. Das Formular eines MCP-Clients kann das Framework nur darum bitten, was du in dessen
@@ -1205,7 +1202,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `llm-cli tools permissions --grants`, `--revoke-grant ID` und der Dialog Tool Permissions führen sie auf
   und widerrufen sie; solange die GUI läuft, kann die Kommandozeile keine anlegen. Noch bietet kein aktuelles Tool
   eine an: Die Regeln kommen mit den Tools, deren Fakten das Framework nachschlägt.
-- **MCP-Ressourcen**: `lcf://targets`, `lcf://targets/<Target>/capabilities`, `lcf://builds/<ID>/status`,
+- `2026-10-11 23:38 UTC` · `v3.1.0` **MCP-Ressourcen**: `lcf://targets`, `lcf://targets/<Target>/capabilities`, `lcf://builds/<ID>/status`,
   `lcf://builds/<ID>/log`, `lcf://permissions` und die Dokumente der Installation `lcf://docs/<Name>` (CLI_Usage,
   Features, Module_Developer_Guide, BLUEPRINT und ihre `_DE`-Zwillinge, aus einer festen Liste). Eine Ressource wird
   über die Tool-Registry gelesen wie das Lese-Tool, das sie spiegelt: Die Berechtigung dieses Tools entscheidet (ein
@@ -1218,7 +1215,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   2026-07-28 können auf Änderungen hören: Die Listen der Tools, Prompts und Ressourcen ändern sich mit den
   Berechtigungen, und die Status- und Log-Ressourcen eines Builds melden jede Änderung an den Aufrufer, der den Build
   gestartet hat, über den eigenen Ereignisbus des Servers.
-- **MCP-Prompts**: Dittos Aufgaben für einen Client, der Dittos Arbeit übernimmt, mit demselben Aufgabentext und
+- `2026-10-11 23:52 UTC` · `v3.1.0` **MCP-Prompts**: Dittos Aufgaben für einen Client, der Dittos Arbeit übernimmt, mit demselben Aufgabentext und
   Wissenskontext: `ask_about_framework`, `convert_model_for_board`, `recommend_build_settings`,
   `diagnose_build_failure`, dazu `add_board` und `deploy_to_board`, die angeboten werden, sobald es die Tools gibt, zu
   denen sie führen. Die erste Nachricht ist der feste Text des Frameworks, die zweite der Kontext, in dem jeder Wert
@@ -1230,7 +1227,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   auch der Berechtigung dieses Tools (verborgen, solange es verboten ist, abgelehnt bei „fragen“), und Auszüge aus
   der Wissensbasis kommen nur, solange `search_knowledge` erlaubt ist. Vervollständigung
   (VS Code) bietet Target-IDs, Boards, Dokumentnamen und die eigenen Build-Requests des Aufrufers an.
-- **Ehrliches „kann ich nicht“ für Dittos Modulvorschläge und Build-Empfehlungen**: Das Modell darf mit `cannot` und
+- `2026-10-11 23:52 UTC` · `v3.1.0` **Ehrliches „kann ich nicht“ für Dittos Modulvorschläge und Build-Empfehlungen**: Das Modell darf mit `cannot` und
   einem Grundcode antworten (fehlende Information, nicht unterstützt, kein Tool, Berechtigung, braucht einen Menschen,
   Hardware, Ressourcen, Limit; „ungetestet“ ist keiner davon). Ditto fragt noch einmal, wenn die Prüfung des
   Frameworks in den Eingaben der Aufgabe findet, was die Aufgabe braucht, und zeigt ein zweites `cannot` als vom
@@ -1239,18 +1236,18 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Docker Official Image ist) und können ohne Probe vom Board und seinem SoC ausgehen. Der Assistent und
   `llm-cli module generate-ai` zeigen das Basis-Image offen, bevor das Modul angelegt wird: Registry, Digest,
   offizielles Image oder fertiges Image einer anderen Registry, Netzwerkzugriff des Image-Builds und den Grund der KI.
-- **MCP-Tokens in der GUI**: Der Dialog Tool Permissions (Tools > Tool Permissions (Ditto / MCP)) hat einen
+- `2026-10-12 00:11 UTC` · `v3.1.0` **MCP-Tokens in der GUI**: Der Dialog Tool Permissions (Tools > Tool Permissions (Ditto / MCP)) hat einen
   Abschnitt „MCP tokens“, der die Tokens auflistet und eines anlegt (einmal gezeigt; nur lesend, eine Kopie der
   Berechtigungen der lokalen stdio-Clients oder Dittos, oder an Dittos gebunden), rotiert, widerruft und die eigenen
   Berechtigungen jedes Tokens festlegt, protokolliert mit dem Akteur `gui`, nie mit dem Token.
-- **Hardware-Probes über ihre ID für KI-Clients und Ditto**: `llm-cli scan --import DATEI [--label TEXT]` (und
+- `2026-10-12 04:17 UTC` · `v3.1.0` **Hardware-Probes über ihre ID für KI-Clients und Ditto**: `llm-cli scan --import DATEI [--label TEXT]` (und
   **Import from File** in der GUI und die Importe des Modul-Assistenten) legt die Probe-Datei eines Boards im
   Probe-Speicher ab, geprüft und ohne Hostnamen, und zeigt ihre Probe-ID und das passende Target. Das Lese-Tool
   `get_hardware_probe` zeigt die neuesten Probes mit ihrem passenden Target oder die Werte einer Probe (Text von
   außen); die Ressource `lcf://probes/{probe_id}` spiegelt es; `probe_local_hardware` (fragt standardmäßig; „nicht mehr
   fragen“ wird angeboten) untersucht diesen Rechner als Job und behält das Ergebnis als `local`. Der Prompt
   `add_board` wird jetzt angeboten und liest eine Probe über ihre ID. Kein Tool liest eine Probe über einen Pfad.
-- **`create_target_module`**: Ein KI-Client in Dittos Rolle (oder Ditto) legt ein Target-Modul für ein Board an, das
+- `2026-10-12 04:17 UTC` · `v3.1.0` **`create_target_module`**: Ein KI-Client in Dittos Rolle (oder Ditto) legt ein Target-Modul für ein Board an, das
   hier vielleicht niemand testen kann, durch die Prüfungen des Modulgenerators. Die Frage zeigt das Basis-Image,
   festgelegt auf den Digest, auf den sein Tag gerade zeigt (jede Registry; eine nicht offizielle klar als fertiges
   Image ihres Herausgebers; der Image-Build läuft mit Netzzugang), die Plattformen des Images und ob eine zu diesem
@@ -1258,14 +1255,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Werte und dass das Modul ungetestet ist; das Modul wird mit genau diesem Digest geschrieben, mit Support-Stufe
   `community`, `ai-generated` und dem aus der Probe des Boards geplanten `runtime:`-Block. Es fragt immer, bietet nie
   „nicht mehr fragen“ an, und eine lange Definition wird zu einer ausstehenden Freigabe.
-- **Hersteller-Software in Target-Modulen**: `package_sources` (eine https-Paketquelle für apt, deren
+- `2026-10-12 04:17 UTC` · `v3.1.0` **Hersteller-Software in Target-Modulen**: `package_sources` (eine https-Paketquelle für apt, deren
   Signaturschlüssel der Image-Build gegen seinen Fingerabdruck prüft), `pip_packages` (festgelegt als
   `name==version`, von PyPI oder einem https-Index) und `pinned_downloads` (https, genaue Größe und sha256, nach
   `/opt/vendor`), eingefügt von der Dockerfile-Vorlage des Frameworks, für Dittos Vorschläge, den Assistenten und das
   MCP-Tool. Ihre Anzahlen sind weiche Grenzen (3, 30, 5): Darüber zu gehen ist eine Warnung, über die die Zustimmung der
   Person hinweggeht, nie eine Ablehnung; ein vorgebautes llama.cpp bleibt abgelehnt.
 
-- **Deployment für KI-Clients** (MCP-Tools `list_devices`, `create_deploy_package`, `deploy_to_device`, Prompt
+- `2026-10-12 06:03 UTC` · `v3.1.0` **Deployment für KI-Clients** (MCP-Tools `list_devices`, `create_deploy_package`, `deploy_to_device`, Prompt
   `deploy_to_board`; Entscheidung 2): Ein Client listet die Geräte, denen du vertraut und die du gekoppelt hast,
   paketiert ein gebautes Modell als Job (die Platte muss das Doppelte des Modells fassen) und überträgt es als Job.
   Bevor das Deployment erfragt wird, liest das Framework den Host-Schlüssel des Geräts (keine Anmeldung) und lehnt
@@ -1280,14 +1277,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   ein Client lesen kann, und nicht im sprechenden Namen eines Geräts), und Ausgabe, Fehler und Begründung des
   Deployments erreichen eine KI ohne den Namen des Kontos, seinen Home-Ordner und Gerätepfade, auch wenn das
   Deployment geklappt hat.
-- **Vertraute Geräte** (`~/.llm-framework/devices.json`, `llm-cli deploy devices list|add|remove`, `deploy run
+- `2026-10-12 06:03 UTC` · `v3.1.0` **Vertraute Geräte** (`~/.llm-framework/devices.json`, `llm-cli deploy devices list|add|remove`, `deploy run
   --label`): `deploy run`, `scan --device`, `device runtime deploy` und das Deployment-Fenster der GUI tragen ein
   Gerät ein, nachdem du seinen Host-Schlüssel bestätigt hast und sich das Framework angemeldet hat (im Audit-Log
   vermerkt); `devices add` übernimmt ein Gerät, dem du schon vorher vertraut hast (nur im Terminal, nie ein neuer
   Schlüssel, nie ein Passwort). Nur diese Geräte können KI-Tools nennen, und nur, solange die `known_hosts` des
   Frameworks noch genau diesen Schlüssel enthält; kein Tool schreibt einen Eintrag.
 
-- **Optionale Laufzeit-Tools für KI-Clients** (MCP-Tools `build_local_runtime`, `start_local_runtime`,
+- `2026-10-12 06:32 UTC` · `v3.1.0` **Optionale Laufzeit-Tools für KI-Clients** (MCP-Tools `build_local_runtime`, `start_local_runtime`,
   `stop_local_runtime`, `run_benchmark`, `probe_remote_device`, `deploy_device_runtime`, `run_device_benchmark`;
   Ressource `lcf://runtime/catalog`; Prompt `set_up_offline_assistant`): mit ihren Laufzeitpaketen registriert und
   verborgen, bis du sie freigibst, auch wenn die ganze Stufe erlaubt ist. Der lokale Server ist immer aus dem
@@ -1305,10 +1302,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   des Modells). Ist Dittos Server noch nicht gebaut oder das Modell einer Stufe noch nicht
   heruntergeladen, lautet die Ablehnung `missing_information` und nennt `build_local_runtime`, das die KI selbst
   aufrufen kann.
-- **Benchmark-Läufe dieses Rechners** (`~/.llm-framework/benchmarks/`): `llama-bench`-Ergebnisse des selbst gebauten
+- `2026-10-12 06:32 UTC` · `v3.1.0` **Benchmark-Läufe dieses Rechners** (`~/.llm-framework/benchmarks/`): `llama-bench`-Ergebnisse des selbst gebauten
   Builds (Prompt- und Erzeugungsgeschwindigkeit, höchster Speicherbedarf) mit dem sha256 des Modells und der Build-ID;
   `get_status` zeigt die neuesten.
-- **Der Chat-Verlauf mit signierten Zeilen** (`chat_feed.sqlite` im Benutzerordner, Modus 0600; Delegations-Entwurf
+- `2026-10-12 13:40 UTC` · `v3.1.0` **Der Chat-Verlauf mit signierten Zeilen** (`chat_feed.sqlite` im Benutzerordner, Modus 0600; Delegations-Entwurf
   5.3): der eine Speicher für das, was das kommende Chat-Panel zeigt - deine Nachrichten, Dittos Antworten, Hinweise,
   wartende Fragen, Entscheidungen einer KI mit ihrer Begründung (das Audit-Log behält nur den Hash der Begründung),
   Ergebnisse von Arbeit, die eine KI gestartet hat. Jeder Prozess des Frameworks hängt in einer eigenen Transaktion an;
@@ -1332,7 +1329,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Werte in KI-Text bei der Anzeige mit Namen, nie in Code und nie bei einer bloßen Ähnlichkeit, und behalten die
   ursprünglichen Worte; `llm-cli doctor` prüft, dass sich der Verlauf schreiben lässt und seine neuesten Zeilen
   stimmen. Noch entfernt nichts Zeilen von selbst.
-- **Der Chat-Bereich rechts im Hauptfenster** (Delegations-Entwurf 5.1-5.9): ein andockbarer Bereich (F9 oder
+- `2026-10-12 18:24 UTC` · `v3.1.0` **Der Chat-Bereich rechts im Hauptfenster** (Delegations-Entwurf 5.1-5.9): ein andockbarer Bereich (F9 oder
   **Ansicht > KI-Chat-Bereich**, Strg+Umschalt+C schreibt hinein, ein Klick auf Ditto oder die Schaltfläche **KI-Chat
   (n)** zeigt ihn; nach links verschiebbar, frei schwebend möglich) mit deinem Gespräch mit Ditto, Hinweisen und den
   Einträgen darüber, was KI-Apps getan haben, einmal pro Sekunde aus dem signierten Chat-Verlauf aller Prozesse des
@@ -1348,7 +1345,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Fenster sie zeigt). Wo der Bereich sitzt, ob er gezeigt wird, sein
   Filter und der neueste gesehene Eintrag stehen in `gui_state.json` im Benutzerordner (nie in QSettings); eine
   beschädigte Datei ergibt die Vorgaben.
-- **Mojo: Der Gesundheitscheck schaut (Mojo Oracle) und repariert (Mojo Miracle)** (sechste Runde, Entscheidung 9;
+- `2026-10-16 00:25 UTC` · `v3.1.0` **Mojo: Der Gesundheitscheck schaut (Mojo Oracle) und repariert (Mojo Miracle)** (sechste Runde, Entscheidung 9;
   siebte Runde, Punkte 11', M' und T; [docs/Mojo_DE.md](docs/Mojo_DE.md)): `llmcf mojo` (Mojo Oracle, Standard;
   `--oracle`) schaut nur. Zu jeder Warnung und jedem Fehler sagt es, was es gefunden hat, wo (der volle Pfad; eine KI
   liest eine Bezeichnung), warum das wichtig ist, einen Hinweis und ob Mojo Miracle es reparieren kann, und ein Satz
@@ -1364,7 +1361,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   fehlgeschlagen), und ein Problem, das danach zum ersten Mal gefunden wird. Speicherplatz freigeben geht nur über
   die Liste der Build-Images des Frameworks im Terminal, nichts angehakt; ohne Terminal laufen nur die harmlosen
   Reparaturen, und nichts wird gelöscht. `--json` fragt nie und löscht nie.
-- **Mojo Oracle meldet die vertrauten Boards und prüft Dittos Image** (achte Runde N6; W1 vom 2026-10-16; siebte
+- `2026-10-16 15:09 UTC` · `v3.1.0` **Mojo Oracle meldet die vertrauten Boards und prüft Dittos Image** (achte Runde N6; W1 vom 2026-10-16; siebte
   Runde D): Ein normaler Lauf nimmt keinen Netzwerkkontakt zu einem Board auf. Er meldet, was aufgezeichnet ist: einen
   Host-Schlüssel in den `known_hosts` des Frameworks, der sich geändert hat oder fehlt, und das letzte Deployment, das
   letzte Laufzeit-Deployment, die letzte Prüfung, den letzten Benchmark oder die letzte Hardware-Prüfung, die ein
@@ -1376,20 +1373,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   sofort: eine Verbindung zu seinem SSH-Port, ohne Anmeldung, ohne Passwort und ohne den Namen des Gerätekontos. Im
   Docker-Modus prüft es, dass Dittos Image da ist, auf diesem Rechner gebaut wurde (nie gezogen), vom festgelegten
   Commit ist und das geprüfte ist (`runtime.docker`); es baut, zieht oder entfernt nie ein Image.
-- **`llmcf`, der neue Name der Kommandozeile** (siebte Runde, Punkt 11): ein zweites Konsolenskript neben `llm-cli`,
+- `2026-10-16 00:25 UTC` · `v3.1.0` **`llmcf`, der neue Name der Kommandozeile** (siebte Runde, Punkt 11): ein zweites Konsolenskript neben `llm-cli`,
   dasselbe Programm; `llm-cli` bleibt. Der Framework-Container hat beide Befehle.
-- **Die MCP-Tools `run_mojo_oracle` und `run_mojo_miracle` und der Prompt `check_installation`** (siebte Runde, Punkt
+- `2026-10-16 00:25 UTC` · `v3.1.0` **Die MCP-Tools `run_mojo_oracle` und `run_mojo_miracle` und der Prompt `check_installation`** (siebte Runde, Punkt
   11'): `run_mojo_oracle` (nur lesen) liefert jeden Befund mit `where` als Bezeichnung (nie ein Host-Pfad), `why` und
   `repair` (`how`: `miracle`, `deletion_list`, `person`, `admin` oder `not_automatic`, mit dem nächsten Schritt).
   `run_mojo_miracle` repariert ein Problem, dessen `repair.how` `miracle` ist: Jeder Aufruf wird mit dem Plan gefragt
   (der volle Pfad nur im eigenen Fenster des Frameworks), keine dauerhafte Freigabe, keine Vollmacht, nie ein Löschen;
   jedes andere Problem wird vor der Frage mit seinem Grund abgelehnt, und das Ergebnis sagt, ob repariert wurde und,
-  wenn nicht, warum. Die Vollmachtsgruppe für harmlose Reparaturen kommt mit den Vollmachten. `run_mojo_oracle` nimmt
-  keinen Kontakt zu einem Board auf; der Befund eines Boards, auf das ein aufgezeichneter Fakt zeigt, nennt die Anfrage,
-  die es prüft (`check_board`), und `{"board": "<Bezeichnung>"}` prüft dieses eine vertraute Board sofort. Eine KI
-  nennt ein Board mit seiner Bezeichnung oder Geräte-ID, nie mit einer Adresse (ein Board ohne eigenen Namen, dessen
-  Bezeichnung seine Adresse ist, mit seiner Geräte-ID).
-- **Die eigenen Dokumente des Frameworks in der Wissensbasis** (ENTSCHEIDUNGEN Runde 8, N12): **Tools > Index the
+  wenn nicht, warum. `run_mojo_oracle` nimmt keinen Kontakt zu einem Board auf; der Befund eines Boards, auf das ein
+  aufgezeichneter Fakt zeigt, nennt die Anfrage, die es prüft (`check_board`), und `{"board": "<Bezeichnung>"}` prüft
+  dieses eine vertraute Board sofort. Eine KI nennt ein Board mit seiner Bezeichnung oder Geräte-ID, nie mit einer
+  Adresse (ein Board ohne eigenen Namen, dessen Bezeichnung seine Adresse ist, mit seiner Geräte-ID).
+- `2026-10-16 00:39 UTC` · `v3.1.0` **Die eigenen Dokumente des Frameworks in der Wissensbasis** (ENTSCHEIDUNGEN Runde 8, N12): **Tools > Index the
   Framework's Documentation...**, `llm-cli knowledge index-docs [--with-code]` und das MCP-Tool `index_framework_docs`
   (jedes Mal gefragt, läuft als Job) nehmen die Dokumentation des Frameworks (README, CONTRIBUTING, den Ordner `docs`)
   und auf Wunsch seinen Code und seine Konfiguration (nur was es mitliefert: nie deine Einstellungen, eigene Targets
@@ -1400,7 +1396,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   ebenfalls an; bei wenig übrigem Platz sagen es die Frage oder der Befehl), eine erneut aufgenommene Datei wird
   ersetzt, eine gelesene, aber nicht aufgenommene Datei wird mit dem Grund genannt, und ein Export als Wissenspaket
   lässt diese Texte weg.
-- **Deployment auf ein Board über ein Netzwerk, das wegbricht** (achte Runde, N4 und N5): Du nennst das Board über
+- `2026-10-16 02:12 UTC` · `v3.1.0` **Deployment auf ein Board über ein Netzwerk, das wegbricht** (achte Runde, N4 und N5): Du nennst das Board über
   seine Adresse oder seinen Hostnamen (`myboard.local`; `llm-cli deploy run --host`, `--ip` bleibt als alter Name).
   Bricht das Netzwerk während eines Deployments weg (ein Board nur mit WLAN), wartet das Deployment auf das Board
   (Vorgabe 300 s, `--wait`), zeigt mit Zeit und Grenze, dass es wartet, und lässt sich abbrechen („Abbrechen“ im
@@ -1409,26 +1405,26 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   und macht weiter: Der Upload setzt bei den angekommenen Bytes fort, sobald ihre sha256 passt, und `deploy.sh` läuft
   auf dem Board für sich und wird einmal gestartet, nie zweimal. Ergebnisse von `deploy_to_device` haben zusätzlich
   `reason_code`, `resumed` und `waited_s`; sein Fortschritt nennt das Board über deinen Namen dafür.
-- **Warum ein Board nicht erreichbar ist** (N6): die Grund-Codes `device_host_down`, `device_port_closed`,
+- `2026-10-16 02:12 UTC` · `v3.1.0` **Warum ein Board nicht erreichbar ist** (N6): die Grund-Codes `device_host_down`, `device_port_closed`,
   `device_auth_failed` und `device_host_key_changed` (`orchestrator/runtime/device/reasons.py`) mit dem, was passiert
   ist, und dem nächsten Schritt für die Person auf Englisch und Deutsch, in GUI und CLI. Eine KI bekommt den reinen
   Code mit einem nächsten Schritt, ohne Adresse und ohne Konto; sie sind die Blocker der Board-Tools und ersetzen
   `device_unreachable` und `host_key_changed` des Faktenkatalogs.
-- **KV-Cache des Servers auf einem Board** (N7): `f16`, `q8_0` oder `q4_0` (`-ctk`/`-ctv`, geprüfte Wörter der
+- `2026-10-16 02:12 UTC` · `v3.1.0` **KV-Cache des Servers auf einem Board** (N7): `f16`, `q8_0` oder `q4_0` (`-ctk`/`-ctv`, geprüfte Wörter der
   gemeinsamen Startregel und des Startskripts). Standardmäßig automatisch: `q8_0`, wenn neben dem Modell auf dem Board
   wenig Speicher frei bleibt (aus seiner Probe), sonst `f16`; du kannst immer einen Typ wählen, und `f16` schaltet ihn
   aus. Gewählt mit `llm-cli device settings --kv-cache` oder im Deployment-Fenster (eine gespeicherte Wahl, die das
   Fenster nicht zeigt, bleibt, außer du wählst dort); die systemd-Unit und der Startbefehl nehmen ihn aus den
   Deploy-Einstellungen des Boards, ein im Deployment-Fenster gemachtes Paket nennt ihn im Startbefehl seines
   `deploy.sh`, und die Frage von `deploy_device_runtime` nennt ihn.
-- **„Getestet auf Board X“** (N3): Ein bestandener Benchmark auf dem Board (`llm-cli device runtime verify` oder
+- `2026-10-16 02:12 UTC` · `v3.1.0` **„Getestet auf Board X“** (N3): Ein bestandener Benchmark auf dem Board (`llm-cli device runtime verify` oder
   `deploy` mit `--bench-model`, `run_device_benchmark` und der neue Teil „Benchmark auf einem Board“ im
   Deployment-Fenster) wird bei jedem Build dieses Modells im Ausgabeordner, im Build-Ordner des Frameworks und in den
   Ordnern, in die Builds gespeichert wurden, vermerkt (`device_tests.json`, gefunden über die sha256 des Modells), mit
   dem KV-Cache der Messung neben dem, auf den der Server des Boards eingestellt ist. Das Deployment-Fenster zeigt einen
   solchen Build als „getestet auf <Board>“ und trägt nach dem Deployment eines GGUF-Modells Board und Modell für diese
   Messung ein.
-- **Die Hände der KI im Fenster: das GUI-Tool `gui`, für Ditto und für KI-Apps gleich** (`orchestrator/tools/tools_gui.py`,
+- `2026-10-16 16:20 UTC` · `v3.1.0` **Die Hände der KI im Fenster: das GUI-Tool `gui`, für Ditto und für KI-Apps gleich** (`orchestrator/tools/tools_gui.py`,
   `orchestrator/tools/gui_surface.py`, `orchestrator/tools/gui_bridge.py`, `orchestrator/gui/form_surface.py`): Das
   Build-Formular, der Assistent für Target-Module (Seite für Seite) und der Dialog der KI-Einstellungen melden ihre
   Felder an, und eine KI liest, was du eingegeben hast, und füllt Felder sichtbar aus. Ein Tool mit einem Feld
@@ -1456,7 +1452,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   seinen ersten Build einmal siehst. Die KI-Einstellungen lassen eine KI nie den Anbieter, die Adresse, die
   Datenschutzstufe oder die Ersatzkette ändern. Jeder Aufruf geht durch die Tool-Registry des Aufrufers selbst
   (Berechtigungen, Grenzen, Audit-Eintrag mit dem Aufrufer).
-- **Die Board-Empfehlung aus der Hardware-Probe** (`orchestrator/runtime/board_recommendation.py`): Nach einer Probe
+- `2026-10-16 02:40 UTC` · `v3.1.0` **Die Board-Empfehlung aus der Hardware-Probe** (`orchestrator/runtime/board_recommendation.py`): Nach einer Probe
   empfiehlt der Builder das Board des passenden Targets mit seiner Quelle (der SoC der Probe oder der Board-Name der
   Probe in der Liste bekannter Boards des Targets) und wie sicher es ist. Nur ein genauer Treffer wird eingetragen;
   sonst werden die Kandidaten und der Grund gezeigt, und du wählst; bis du wählst, fragt **Start Build**, ob das Board
@@ -1469,19 +1465,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   erst, wenn du zustimmst. Passt kein Target, bietet der Builder **Target mit dem Assistenten erstellen** (beginnend
   mit dieser Probe) und **Ditto fragen** an (eine Frage im Chat, die du abschickst; ein Entwurf, den du dort getippt
   hast, bleibt).
-- **Dokumentations-Links für Deep Ingest** (`orchestrator/Core/doc_sources.py`): Die `docs_*`-Links des
+- `2026-10-16 00:55 UTC` · `v3.1.0` **Dokumentations-Links für Deep Ingest** (`orchestrator/Core/doc_sources.py`): Die `docs_*`-Links des
   Quellenkatalogs für den Hersteller der Probe und das SDK füllen das Deep-Ingest-Fenster des Assistenten; du prüfst
   sie und startest das Einlesen. Sagt Ditto, dass für ein Modul Informationen fehlen, bietet der Assistent Deep Ingest
   mit diesen Links an. KI-Clients lesen sie über die Ressourcen `lcf://knowledge/doc-sources` und
   `lcf://knowledge/doc-sources/{probe_id}`, nur lesend; der MCP-Prompt `add_board` verweist auf sie, wenn
   Informationen fehlen. Der Kopf des Katalogs und die Dokumente sagen jetzt, dass diese Links zur Laufzeit gelesen
   werden.
-- **Build-Fortschritt und Live-Protokoll im Builder** (`orchestrator/gui/builder_parts.py`): ein Fortschrittsbalken mit
+- `2026-10-16 00:55 UTC` · `v3.1.0` **Build-Fortschritt und Live-Protokoll im Builder** (`orchestrator/gui/builder_parts.py`): ein Fortschrittsbalken mit
   dem Schritt und dem Prozentwert aus dem Build-Service (der eigene Schritt des laufenden Builds, siehe Behoben) und
   darunter das Protokoll des Builds live (Geheimnisse geschwärzt, volle Pfade, reiner Text, jede Zeile einmal, höchstens
   20.000 Zeilen in der Ansicht; eine KI, die das Protokoll liest, bekommt die Ordner als Label), mit Suchfeld und einem
   Filter für Info, Warnungen oder Fehler. Zeilen, die der Service nicht mehr liefert, werden vermerkt.
-- **Ditto ist als experimentell gekennzeichnet** (achte Runde, Q-2; `orchestrator/utils/ditto_notice.py`): Ditto
+- `2026-10-16 08:38 UTC` · `v3.1.0` **Ditto ist als experimentell gekennzeichnet** (achte Runde, Q-2; `orchestrator/utils/ditto_notice.py`): Ditto
   bleibt optional. Der Chat-Bereich und die KI-Einstellungen zeigen ein Abzeichen **Experimentell**, und ein Hinweis
   sagt einmal je Benutzer, auf Deutsch oder Englisch: „Nutzung auf eigene Gefahr und Verantwortung. Der Ersteller von
   LLMCF haftet nicht.“ Er wiederholt den Gewährleistungsausschluss aus `LICENSE.txt` und fügt ihm nichts hinzu. In der
@@ -1489,7 +1485,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Chat-Bereich zeigt sich dafür einmal (ohne den Fokus), weil der Builder und der Modul-Assistent Ditto ohne den
   Chat-Bereich nutzen. `llm-cli ditto` und `llm-cli module generate-ai` geben ihn an einem Terminal einmal auf stderr
   aus (ohne Terminal wird nichts ausgegeben oder gespeichert). README und Features sagen dasselbe.
-- **Lizenz und Urheberrecht jeder gecrawlten Seite** (achte Runde, Q-1 und Q-1'; `orchestrator/rag/licences.py`):
+- `2026-10-16 09:37 UTC` · `v3.1.0` **Lizenz und Urheberrecht jeder gecrawlten Seite** (achte Runde, Q-1 und Q-1'; `orchestrator/rag/licences.py`):
   Deep Ingest hält je Seite fest, bevor die Fußzeile entfernt wird, einen Lizenz-Link (`rel="license"`, den
   HTTP-Header `Link`), Lizenz-Metadaten (`<meta name="license">`, `dc.rights`, `dcterms.license`, schema.org
   `license`; in einem PDF seine XMP-Metadaten), einen Creative-Commons-Link in der Fußzeile oder in einem Satz, der
@@ -1504,7 +1500,28 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   eine KI).
 
 ### Geändert
-- **Offline-Modus: Deine Ausnahmen zählen nur dafür, was er erreichen darf, ein Name mit lokalen und öffentlichen
+- `2026-10-29 21:26 UTC` · `v3.1.0` **Der Bauplan besteht aus drei Dateien: dem Design, der Roadmap und dem Changelog, und jede Entscheidung steht im
+  Design** (DECISIONS Runden 34 und 35): `docs/BLUEPRINT_DE.md` enthielt Design und Roadmap in einem Dokument; es ist
+  Wort für Wort aufgeteilt in `docs/DESIGN_DE.md` (was das Framework ist, jeder Baustein und jede Entscheidung mit dem,
+  was sie sagt, wie der Code sie umsetzt und warum) und `docs/ROADMAP_DE.md` (was kommt, nur „in Arbeit“ und „geplant“),
+  jedes mit seinem englischen Zwilling, und `docs/BLUEPRINT_DE.md` bleibt als kurzes Verzeichnis, dessen Tabelle jeden
+  alten Anker an seinen neuen Ort schickt. Der Changelog hat keinen Abschnitt `[Unreleased]` mehr: Jeder seiner Einträge
+  wurde am Code geprüft und gehört zu dieser Version 3.1.0 (`pyproject.toml` und `orchestrator.__version__` sagen
+  3.1.0), geplante Teile sind in die Roadmap gezogen, und jeder Eintrag jeder Version beginnt mit Zeitstempel und
+  Version des Commits, der ihn zuerst geschrieben hat (`` `JJJJ-MM-TT HH:MM UTC` · `vX.Y.Z` ``, der deutsche Eintrag mit
+  dem Stempel seines englischen Zwillings); jede Version hat ihren Link. Das Design enthält jede Entscheidung des
+  Maintainers beim Baustein, den sie betrifft (was, wie, warum; eine ersetzte Entscheidung als eine Zeile Geschichte),
+  und sagt, dass das Entscheidungsprotokoll außerhalb des Repositorys liegt. Die Vermerke „(unveröffentlicht)“ sind aus
+  jedem Dokument verschwunden, und die Versionszeilen sagen 3.1.0. Die MCP-Ressourcen `lcf://docs/DESIGN` und
+  `lcf://docs/ROADMAP` (und `_DE`) stehen neben `lcf://docs/BLUEPRINT`, das das Verzeichnis liefert.
+  `tests/test_docs.py` prüft die drei Dateien und das Verzeichnis, dass kein Abschnitt ohne Datum ist, den Stempel jedes
+  Eintrags (seine Version ist die seines Abschnitts, sein Datum nicht nach dem des Abschnitts), dieselben Abschnitte,
+  Arten, Anzahlen und Stempel auf Englisch und Deutsch, nur die sechs Arten mit der neuesten Version zuerst und einem
+  Link je Version, keine Zeile „fertig“ in der Roadmap und keine Roadmap-Zeile, die auch ein Changelog-Eintrag ist,
+  jeden relativen Link und Anker, eine Prüfung der drei Dateien auf private Daten (keine Adresse außerhalb der
+  Dokumentationsbereiche, keine E-Mail-Adresse, kein Home-Ordner, keine tokenähnliche Zeichenkette) und einen Block
+  „Entscheidungen“ in jedem Baustein des Designs.
+- `2026-10-23 22:37 UTC` · `v3.1.0` **Offline-Modus: Deine Ausnahmen zählen nur dafür, was er erreichen darf, ein Name mit lokalen und öffentlichen
   Adressen zählt nach seinen lokalen, und dein eigener Crawl liest dein eigenes Netz** (DECISIONS Runde 26 Q3, Q4,
   Q5): Die Regel des eigenen Netzes beantwortet jetzt zwei Fragen mit einer API, `check_reach` (darf der Offline-Modus
   das erreichen: deine Ausnahmen zählen) und `check_location` (wo steht dieser Server: sie zählen nie). Der
@@ -1520,7 +1537,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   eine Adresse des VPN nur für diesen Computer oder ein Gerät des Tailnets als lokal (`tailscale status --json`), und
   eine private Adresse hinter der Subnet-Route eines Geräts zählt wie eine VPN-Adresse. Eine Auflösung und die
   VPN-Prüfung gelten 5 Minuten und werden nach einer gescheiterten Verbindung verworfen, statt für den ganzen Lauf.
-- **Offline-Modus: Ein Build nutzt ein Modell, das schon auf diesem Computer ist, und Docker-Images kommen nur von
+- `2026-10-23 23:28 UTC` · `v3.1.0` **Offline-Modus: Ein Build nutzt ein Modell, das schon auf diesem Computer ist, und Docker-Images kommen nur von
   diesem Computer oder aus deinem eigenen Netz** (Konsolidierungskette hf-local; Entscheidungen Runde 25 Q1 und
   Runde 24 L-NET). Ein Build, den du im Offline-Modus startest, lädt sein Modell nicht mehr von Hugging Face
   (`BuildEngine._stage_model` las den Offline-Modus nicht; nur Builds einer KI und die Commit-Prüfung der GUI lehnten
@@ -1546,7 +1563,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Registry in deinem eigenen Netz gezogen, sonst entfällt der Scan mit einer Warnung (vorher zog der Scan
   `aquasec/trivy` von Docker Hub, und Trivy lud seine Datenbank). Tests: `tests/test_offline_models.py`,
   `tests/test_offline_images.py`, `tests/test_review_build_engine.py`.
-- **Die eigene OpenSSH-Einstellungsdatei des Frameworks; OpenSSH liest weder `~/.ssh/config` noch
+- `2026-10-23 23:48 UTC` · `v3.1.0` **Die eigene OpenSSH-Einstellungsdatei des Frameworks; OpenSSH liest weder `~/.ssh/config` noch
   `/etc/ssh/ssh_config`** (DECISIONS Runde 25 Q4 und Q5): Jeder Aufruf des OpenSSH-Clients dieses Computers (der
   Rückfallweg ohne paramiko) bekommt vom einen Bauer der Befehlszeile (`orchestrator/remote/transport.py`
   `openssh_options`) `-F` mit `ssh_config` im Zustandsordner des Frameworks, bei der ersten Nutzung nur für den
@@ -1566,7 +1583,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   (ein Test mit echtem `sshd`); unter Windows wird der Pfad für `-F` mit Schrägstrichen übergeben. Geteilte
   Verbindungen (`ControlMaster`) bleiben aus; sie stehen als Option in der Roadmap. Tests: `tests/test_ssh_config.py`,
   `tests/test_remote_system_ssh.py` (die festgehaltenen Befehlszeilen beginnen jetzt mit `-F`).
-- **Die Temperatur des Boards während der Prüfungen darauf, mit einer Warnung, wenn es heiß ist** (DECISIONS Runde 23
+- `2026-10-23 23:48 UTC` · `v3.1.0` **Die Temperatur des Boards während der Prüfungen darauf, mit einer Warnung, wenn es heiß ist** (DECISIONS Runde 23
   Punkt 16): Die Prüfungen eines Laufzeit-Deployments, `llm-cli device runtime verify` und der Benchmark (CLI,
   Fenster Boards und Geräte, Deployment-Tab, die Tools der KI) lesen die Thermalzonen des Boards (Temperatur, Typ,
   Trip-Points) und auf einem Raspberry Pi `vcgencmd` mit einem nur lesenden Befehl über die Sitzung, die sie schon
@@ -1580,7 +1597,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Messung sie ersetzt. Ein heißes Board lässt keine Prüfung scheitern. Eine KI bekommt dieselben Fakten auf Englisch
   (`temperature`, `temperature_note`) ohne Pfad und ohne Konto. Kein Schlüssel der Hardware-Untersuchung
   (`orchestrator/runtime/device/thermal.py`; `VerifyReport.heat`). Tests: `tests/test_board_heat.py`.
-- **Ein abgebrochener Benchmark stoppt auch auf dem Board** (der offene Punkt der wave-3 trust-followups):
+- `2026-10-23 23:48 UTC` · `v3.1.0` **Ein abgebrochener Benchmark stoppt auch auf dem Board** (der offene Punkt der wave-3 trust-followups):
   `llama-bench` läuft auf dem Board selbständig; ein Abbrechen im Fenster Boards und Geräte oder des Jobs einer KI,
   Strg+C an einem Terminal und das eigene Zeitlimit des Verfolgens stoppen jetzt genau den Prozess
   (seine Prozessgruppe, wo das Board `setsid` hat), den das Framework dort gestartet hat, über die PID, die es im
@@ -1589,23 +1606,23 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   (`RemoteSession.for_cleanup`). Wo das Board ein funktionierendes `timeout` hat, umschließt auch das Board selbst den
   Lauf mit seiner Grenze (900 s), und die Prüfung nennt sie, wenn sie den Lauf beendet hat. Das Aufräumen des Ordners
   des Laufs bleibt wie bisher. Tests: `tests/test_bench_stop.py`.
-- **Ein Ziel für die Audit-Einträge der Person zu Boards** (DECISIONS Runde 25 Q3): Die CLI, die GUI (der
+- `2026-10-23 23:48 UTC` · `v3.1.0` **Ein Ziel für die Audit-Einträge der Person zu Boards** (DECISIONS Runde 25 Q3): Die CLI, die GUI (der
   Deployment-Tab, seine Hardware-Untersuchung, das Fenster Boards und Geräte) und die Zustimmungen der Person hinter
   den Schritten des Dienstes schreiben ihre Einträge zu Geräten, Vertrauen und Zustimmungen über
   `person_steps.device_audit` (das Log der Tool-Registry, sonst die `audit.db` je Benutzer); `audit` des Fensters
   Boards und Geräte und der Zustimmungseintrag der CLI öffnen kein eigenes mehr. Ein Test hält fest, dass jede
   Oberfläche jeden Eintrag genau einmal schreibt (`tests/test_audit_sink.py`).
-- **Ein belegtes `deploy devices edit` im Fenster Boards und Geräte sagt wie die CLI, warum**: Eine Änderung von
+- `2026-10-23 23:48 UTC` · `v3.1.0` **Ein belegtes `deploy devices edit` im Fenster Boards und Geräte sagt wie die CLI, warum**: Eine Änderung von
   Adresse oder Host-Schlüssel eines Boards, die ein anderer Teil des Frameworks gerade hält (`LockTimeout`) oder die
   eine Datei auf diesem Computer verhindert, zeigte „Der Schritt ist fehlgeschlagen: <Meldung>“; jetzt zeigt sie den
   einfachen Grund der CLI (`local_problem`, „etwas auf diesem Computer“) über den gemeinsamen Fehlertext der
   Schritte, und nichts wird geändert. Die Texte der anderen Schritte bleiben, wie sie waren (festgehalten).
-- **Der Docker-Zweig der `deploy.sh` eines Pakets gibt das Modell an den Inferenz-Container**: Er installiert das
+- `2026-10-23 23:48 UTC` · `v3.1.0` **Der Docker-Zweig der `deploy.sh` eines Pakets gibt das Modell an den Inferenz-Container**: Er installiert das
   Modell wie der native Zweig (nach `$MODEL_DIR`, standardmäßig `~/models`) und startet den Container mit diesem
   Ordner nur lesbar unter `/models` eingebunden und `MODEL_FILE`, das das Modell dort nennt; vorher startete der
   Container ohne das Modell. Das erzeugte Skript läuft in einem Test mit einem Ersatz für `docker`
   (`tests/test_deploy_docker_model.py`).
-- **Die Hardware-Probe des Boards steuert jeden Build; NPU-Formate nur mit seiner NPU** (DECISIONS Runde 23 Punkte 5
+- `2026-10-29 15:08 UTC` · `v3.1.0` **Die Hardware-Probe des Boards steuert jeden Build; NPU-Formate nur mit seiner NPU** (DECISIONS Runde 23 Punkte 5
   und 15): Ein Build-Auftrag nennt die Probe des Boards mit ihrer ID (`llm-cli build start --probe ID`,
   `BuildRequestIn.probe`; der Builder-Tab die Probe, die er zuletzt importiert oder erfasst hat, auch für ein Rezept,
   das er wie festgelegt baut, `BuildService.start_recipe(probe=...)`); ohne sie gilt die
@@ -1620,13 +1637,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   (RKLLM-Toolkit 1.3.1 liefert nur Wheels für Linux x86_64); GGUF und RKNN (rknn-toolkit2 2.3.2 hat aarch64-Wheels)
   auch nativ auf einem ARM-Build-Rechner. Der Build-Dienst lehnt nach der eigenen Ablehnung des Targets mit dem Grund
   ab; der Builder-Tab bietet nur die übrigen Formate an.
-- **`GGML_AVX512` nur mit dem ganzen AVX-512-Satz; die Vorlage plant x86 wie das Build-Rezept** (Runde 25 Q7):
+- `2026-10-29 15:08 UTC` · `v3.1.0` **`GGML_AVX512` nur mit dem ganzen AVX-512-Satz; die Vorlage plant x86 wie das Build-Rezept** (Runde 25 Q7):
   `GGML_AVX512` kompiliert für AVX-512 F, CD, VL, DQ und BW, aber `SUPPORTS_AVX512` der Probe ist nur AVX-512 F, also
   bekam ein Xeon Phi (Knights Landing) `-mavx512bw` und ungültige Befehle. Das Build-Rezept und beide Stufen config
   nutzen es jetzt nur, wenn die CPU-Flags der Probe jeden Teil nennen, sonst den AVX2-Plan (`recipe.AVX512_SET`,
   `avx512_missing`; Rezeptversion 4). Die Stufe config der Vorlage hat den x86-Block von Rockchip Byte für Byte:
   ausdrückliche Merkmale für einen anderen PC, `-march=native` nur für diesen Build-Rechner.
-- **Jeder `cmake`-Aufruf eines Moduls wird geprüft, und auch das Dockerfile eines Targets**: `build.sh` prüft die
+- `2026-10-29 15:08 UTC` · `v3.1.0` **Jeder `cmake`-Aufruf eines Moduls wird geprüft, und auch das Dockerfile eines Targets**: `build.sh` prüft die
   Wörter jedes `cmake`-Aufrufs der Module (auch in ihren Befehlen für Einrichtung, Umwandlung und Paket), wie die
   Shell sie erweitert hat, mit `module_flag_problem --alone` in `target_module.sh`, bevor cmake läuft, und ein
   abgelehnter Aufruf startet cmake nicht; vorher wurden nur die `CMAKE_FLAGS` des Moduls beim Cross-Build des Pakets
@@ -1635,7 +1652,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Project-Include (`CMAKE_PROJECT_INCLUDE`, `CMAKE_PROJECT_INCLUDE_BEFORE`, `CMAKE_PROJECT_<name>_INCLUDE`,
   `CMAKE_PROJECT_TOP_LEVEL_INCLUDES`) führt ein Skript aus, das jede Option wieder einschalten kann, und wird deshalb
   wie `-C` und `-P` abgelehnt (`recipe.refused_option`, beide Urteile).
-- **Rockchip-Image in zwei Stufen; die Format-Helfer der Vorlage sind echt** (Runde 23 Punkt 14): Die Stufe `builder`
+- `2026-10-29 15:08 UTC` · `v3.1.0` **Rockchip-Image in zwei Stufen; die Format-Helfer der Vorlage sind echt** (Runde 23 Punkt 14): Die Stufe `builder`
   baut die Werkzeuge von llama.cpp und die drei venvs mit jeder Festlegung; das Image bekommt die venvs und den
   Quellbaum mit seinen Werkzeugen an denselben Pfaden und nur, was die Build-Stufen ausführen (kein `build-essential`,
   `python3-dev`, `python3-venv` oder `curl`), und behält den Benutzer `llmbuilder` und den Entrypoint; hadolint hat
@@ -1644,7 +1661,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `rkllm_module.sh` der Vorlage klonten die Toolkits auf ihrem neuesten Commit und installierten Wheels während des
   Builds (der kein Netzwerk hat) und wandelten nichts um: Jetzt sind sie die Helfer von Rockchip, nutzen das venv des
   Images und lehnen ohne es schlicht ab.
-- **`install.sh` auf jeder Linux-Familie, über die Paketverwaltung der Familie** (DECISIONS Runde 24 PKG): Der Installer
+- `2026-10-23 17:16 UTC` · `v3.1.0` **`install.sh` auf jeder Linux-Familie, über die Paketverwaltung der Familie** (DECISIONS Runde 24 PKG): Der Installer
   erkennt die Familie aus `ID` und `ID_LIKE` in `/etc/os-release` mit der Tabelle der Hardware-Untersuchung und
   installiert, was er braucht (Python 3.11 bis 3.14, `rsync`, Docker), mit `apt`, `dnf`, `zypper`, `pacman` oder `apk`,
   unter den echten Paketnamen der Distribution; vorher kannte er nur `apt` (auch für Python und `rsync`: `rsync` wurde
@@ -1689,7 +1706,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Fingerabdrücke der Schlüssel), ohne etwas zu verändern, zu laden oder aufzurufen und ohne Root-Rechte, mit Exit-Code
   0 oder 1, wie die Installation enden würde. Tests führen den Installer gegen die `/etc/os-release`-Dateien echter
   Distributionen mit nachgebauten Paketverwaltungen aus (`tests/test_install_distros.py`).
-- **Podman statt Docker: Das Framework findet es und lehnt ab, was es nicht kann** (DECISIONS Runde 26 Q1): Ist
+- `2026-10-23 22:32 UTC` · `v3.1.0` **Podman statt Docker: Das Framework findet es und lehnt ab, was es nicht kann** (DECISIONS Runde 26 Q1): Ist
   `DOCKER_HOST` nicht gesetzt und antwortet kein Docker-Dienst, setzt das Framework `DOCKER_HOST` für sich und die
   Programme, die es startet, auf den Podman-Socket der Person (`orchestrator/utils/docker_engine.py`, ein Helfer für
   die Build-Engine, das Builder-Image, Dittos Container, die eine Docker-Prüfung und
@@ -1704,7 +1721,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `keep-id`; ohne ihn sieht ein solcher Container die Ordner der Person als die von root, und jeder Build hielt mit
   "Permission denied" an (gefunden und gegen Podman 5.8.9 rootless geprüft in der Konsolidierungsprüfung
   install-followups-v).
-- **Hardware-Probe: Version 3.1.0, breitere Hailo-Erkennung** (Konsolidierungskette probe-keys):
+- `2026-10-23 17:39 UTC` · `v3.1.0` **Hardware-Probe: Version 3.1.0, breitere Hailo-Erkennung** (Konsolidierungskette probe-keys):
   `PROBE_TOOL_VERSION` ist in allen drei Probes 3.1.0 (neue Schlüssel sind eine Änderung des Schemas; HAILO_PLAN
   Frage 5, Vorgabe in Runde 23 festgehalten). Die neuen Schlüssel sind nie Pflicht und nie `ON`/`OFF`-Schlüssel, darum
   wird ein Profil der Probe 3.0.0 gelesen und gespeichert wie bisher (getestet mit jedem Testprofil in Schema 2).
@@ -1718,7 +1735,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   nennt die Schleifenvariable seines Hailo-Teils nicht mehr `$arch`: PowerShell unterscheidet bei Namen keine Groß-
   und Kleinschreibung, darum überschrieb sie den Wert `ARCH` des Skripts. `hardware_probe.sh`
   nutzt für die DRM-Knoten kein `ls | grep` mehr (ShellCheck auf Warnungsstufe sauber).
-- **Der Offline-Modus erreicht nur diesen Computer und dein eigenes Netz, und was dazugehört, entscheidest du**
+- `2026-10-23 17:59 UTC` · `v3.1.0` **Der Offline-Modus erreicht nur diesen Computer und dein eigenes Netz, und was dazugehört, entscheidest du**
   (DECISIONS Runde 24, L-NET und „L-NET final“): Eine Regel des eigenen Netzes (`orchestrator/utils/locality.py`)
   entscheidet jede Verbindung des Offline-Modus nach außen. Ein Servername zählt nach jeder Adresse, zu der er
   auflöst: Loopback, private (RFC 1918, `fc00::/7`) und Link-Local-Adressen sind lokal, ein `.local`-, `.lan`-,
@@ -1750,7 +1767,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   die Ausnahme. Die Kennzeichnungen lokal/Cloud der mitgelieferten Anbieter ändern sich nicht. Jede Stelle, die die
   Einstellung liest, fragt jetzt die eine Prüfung `locality.offline_mode` (`hf_hub.offline` und die übrigen Abfragen
   geben weiter; Verhalten und Texte unverändert).
-- **`llm-cli build start --format` bietet, was die installierten Targets bauen** (DECISIONS Runde 23 Punkt 7): statt
+- `2026-10-23 17:18 UTC` · `v3.1.0` **`llm-cli build start --format` bietet, was die installierten Targets bauen** (DECISIONS Runde 23 Punkt 7): statt
   jedes Formats der Engine (`tensorrt`, `coreml`, ..., die kein Target baut) nimmt `--format` ein Format, das das
   Target baut, wie seine Capabilities in `target.yml` es angeben, die Liste, die die Formatauswahl des Builder-Tabs
   anbietet (`build_formats.offered_formats`, eine Liste für beide; ein Target ohne Capabilities nimmt wie bisher jedes
@@ -1759,7 +1776,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   klaren Worten, die nennen, was jedes installierte Target baut (`build_formats.format_problem`). Groß- und
   Kleinschreibung des Formats spielt keine Rolle mehr, und die Startübersicht nennt es so, wie das Target es
   schreibt, das Format, mit dem der Build läuft (`-f RKLLM` zeigt `rkllm`), nie als Markup gelesen.
-- **„Den vorhandenen Build nehmen“ kopiert ihn in den gewählten Ordner, und `llm-cli build start` fragt auch**
+- `2026-10-23 17:18 UTC` · `v3.1.0` **„Den vorhandenen Build nehmen“ kopiert ihn in den gewählten Ordner, und `llm-cli build start` fragt auch**
   (DECISIONS Runde 23 Punkt 9): `build start` prüft vor allem anderen auf einen fertigen Build mit zu 100 % denselben
   Optionen, wie der Builder-Tab (`BuildService.earlier_builds`, der Commit einmal nachgeschlagen, wenn er gleich sein
   könnte), und stellt am Terminal dieselbe Frage (nehmen, noch einmal bauen, abbrechen; ohne Terminal baut er wie
@@ -1772,7 +1789,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   ersetzt, wenn du die vollständige Liste dessen angenommen hast, was ersetzt wird („Nein“ ist die Vorgabe; in den
   Papierkorb oder endgültig; vorher ins Audit-Log geschrieben), und nur durch eine vollständige Kopie (eine, die einen
   Link ausgelassen hat, behält einen eigenen Namen).
-- **Die Docker-Tabelle im Deployment-Tab entscheidet, was das Paket enthält** (DECISIONS Runde 23 Punkt 6): Die
+- `2026-10-23 17:05 UTC` · `v3.1.0` **Die Docker-Tabelle im Deployment-Tab entscheidet, was das Paket enthält** (DECISIONS Runde 23 Punkt 6): Die
   Tabelle in **Use Docker Containerization?** zeigt keine Attrappen-Auswahl mehr, die nichts bewirkte (Llama.cpp
   (CPU), RKLLM (NPU), TensorRT (GPU)); sie listet die Container, die ein Paket mit Docker-Images für das gewählte Profil
   enthält, aus der einen Liste, die `llm-cli deploy package --docker` verpackt
@@ -1785,7 +1802,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   auskommentierten Zeilen) gibt keinen Gerätezugriff, wie gar kein Block, statt den Tab nicht mehr öffnen zu lassen;
   der Probe-Import des Builder-Tabs liest einen solchen Block (und einen leeren `cpu:`-Block) genauso, wenn er ein
   Target vorschlägt, statt dort anzuhalten.
-- **Wissen gehört immer zu einem Thema oder einem Target** (DECISIONS Runde 23 Punkte 1 und 8): Ein installiertes
+- `2026-10-23 09:33 UTC` · `v3.1.0` **Wissen gehört immer zu einem Thema oder einem Target** (DECISIONS Runde 23 Punkte 1 und 8): Ein installiertes
   Wissenspaket liegt in `community/knowledge/<Thema oder Target>/<Paket>/` (früher installierte Pakete bleiben, wo sie
   sind), und jeder Auszug, den es bringt, trägt sein Thema oder Target. Ein Wissenspaket nennt sein Thema oder Target
   im Manifest: `llm-cli zoo export knowledge` braucht `--topic` oder `--target` (ein Target dieses Computers), ebenso
@@ -1800,7 +1817,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   diesem Target in die Wissensbasis des Empfängers importiert, mit einem Snapshot vorher; die README, die der
   Modul-Assistent daneben schreibt, sagt das. Der vorläufige Wissens-Export des Modul-Assistenten landet in einem
   privaten Arbeitsordner statt in `community/knowledge/`.
-- **Ein Deploy-Schritt für einen Build und ein Ablauf für die Runtime eines Boards, für CLI, GUI und KI**
+- `2026-10-23 08:53 UTC` · `v3.1.0` **Ein Deploy-Schritt für einen Build und ein Ablauf für die Runtime eines Boards, für CLI, GUI und KI**
   (Konsolidierungskette c3-deploy-flow). `llmcf deploy run` und Deploy sowie Vorhandenes Paket deployen... im
   Deployment-Tab laufen jetzt über einen Kernschritt, `person_steps.deploy_build`: das Paket, das Deployment, dann
   der vertraute Eintrag des Boards. Der Tab baut sein Paket jetzt so wie `llmcf deploy package` und Nur Paket
@@ -1818,7 +1835,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   vermerkt „getestet auf“. Jeder Aufrufer übergibt seine Anmeldung und seine Worte als Hooks. Die Hooks der KI
   enthalten keinen vertrauten Eintrag, keine Frage und keine frühe Ablehnung von root, ihre Ergebnisse bleiben also
   gleich; ein Test prüft das. Was die CLI ausgibt und die Fenster zeigen, bleibt sonst gleich.
-- **Der Hugging-Face-Browser der GUI lädt in den Ordner `hf/` des Modellordners, geprüft, wie ein Download einer KI**
+- `2026-10-23 00:01 UTC` · `v3.1.0` **Der Hugging-Face-Browser der GUI lädt in den Ordner `hf/` des Modellordners, geprüft, wie ein Download einer KI**
   (Entscheidung A6 des Maintainers; Konsolidierungskette hf). Neuer Ort: `<Modellordner>/hf/<Owner>--<Name>/<die
   ersten 12 Zeichen des Commits>/<Datei>`, derselbe Ordner wie bei `download_hf_file` einer KI (der Builder legt
   ganze Modelle weiter in `cache/models/hf/` ab); bisher speicherte der Browser über huggingface_hub in dessen Cache (`<Modellordner>/models--<Owner>--
@@ -1844,7 +1861,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Ja wird nichts gelöscht. Jeder Schritt läuft in einem Worker-Thread. Die Texte stehen in
   `orchestrator/utils/l10n_hf.py` (Englisch und Deutsch). Im Offline-Modus lehnt der Browser vor jeder Anfrage ab
   (siehe Behoben).
-- **Ein Build sind wieder die vier Stufenmodule, und `build.sh` führt sie nur aus** (Entscheidung U9 des
+- `2026-10-22 16:50 UTC` · `v3.1.0` **Ein Build sind wieder die vier Stufenmodule, und `build.sh` führt sie nur aus** (Entscheidung U9 des
   Maintainers; Konsolidierungskette build4). `targets/Rockchip/modules/build.sh` ist ein Stage-Runner über
   `source_module.sh` (die Quellen der Werkzeuge, aus denen das Image gebaut wurde), `config_module.sh`
   (vereinheitlicht den Auftrag, lehnt ab, was das Target nicht bauen kann, und schreibt den Build-Plan),
@@ -1886,7 +1903,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   statt Programme zu bekommen, die dort nicht laufen. Die Prüfsumme zum Fortsetzen umfasst auch den Ausgabeordner
   und das Hardware-Profil, das die Stufe config liest, wenn keins genannt ist, und eine verspätete Stufenzeile eines fertigen
   Containers nimmt dem Build seinen nächsten Schritt nicht mehr weg.
-- **Die Stufe convert erkennt, prüft, zählt und testet, was sie umwandelt, und hinterlässt nichts Halbfertiges**
+- `2026-10-23 00:37 UTC` · `v3.1.0` **Die Stufe convert erkennt, prüft, zählt und testet, was sie umwandelt, und hinterlässt nichts Halbfertiges**
   (der Entwurf des Maintainers für das convert-Modul von 1.x, Nachtrag zur Entscheidung U9; Konsolidierungskette
   how2-convert). `scripts/model_check.py` (das Rockchip-Target und die Vorlage bringen dieselbe Datei mit; sie braucht
   nur das Python des Images und seine Standardbibliothek) erkennt die Eingabe: einen Hugging-Face-Ordner mit
@@ -1919,7 +1936,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   über die gleichnamige Datei des ersten geschrieben hat. Die Module bleiben mit ihren Optionen von 1.x einzeln
   aufrufbar. Die Charakterisierungstests vergleichen `build_info.json` ohne den neuen Schlüssel, und ihre
   nachgebauten Werkzeugketten schreiben GGUF- und SafeTensors-Dateien mit gültigen Headern (`tests/model_files.py`).
-- **Neue Targets bekommen funktionierende Stufenmodule, und die Entrypoint-Modi führen den Stage-Runner aus.** Das
+- `2026-10-22 16:50 UTC` · `v3.1.0` **Neue Targets bekommen funktionierende Stufenmodule, und die Entrypoint-Modi führen den Stage-Runner aus.** Das
   `build.sh` der Vorlage ist derselbe Runner wie der von Rockchip (ein Test hält sie gleich), und ihre vier
   Stufenmodule nehmen die Werte des Wizards auf: Die Einrichtungsbefehle laufen einmal in der Stufe source (was sie
   exportieren, erreicht die späteren Stufen, auch beim Fortsetzen), die Quantisierungslogik ist das `case` der Stufe
@@ -1932,7 +1949,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `llm-cli module create` (dessen nächste Schritte die Module nicht mehr Altlasten nennen) und die Leitfäden nennen
   die Stufe, zu der jeder Teil gehört; der Roadmap-Punkt, die Vier-Module-Skripte zu entfernen, ist anders erledigt
   (sie sind der Build).
-- **Die Stufe config prüft ihren Plan, und die Stufe target macht wieder das einsatzfertige Paket der Version 1.x**
+- `2026-10-23 02:26 UTC` · `v3.1.0` **Die Stufe config prüft ihren Plan, und die Stufe target macht wieder das einsatzfertige Paket der Version 1.x**
   (Nachtrag zu U9, DECISIONS Runde 16; Rockchip und die Vorlage). Mit dem Hardware-Profil eines Boards sucht die Stufe
   config die geplanten Compiler im Image (fehlt einer, wird nichts geplant), baut und linkt ein kleines C- und
   C++-Programm mit den geplanten Flags (und führt sie aus, wenn sie für diesen Rechner sind), prüft am ELF-Kopf, dass
@@ -1969,7 +1986,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `config repos` für llama.cpp (`LLAMA_CPP_REPO_OVERRIDE`) wirkt jetzt: Das Image holt den gepinnten Commit daraus
   (Build-Argument `LLAMA_CPP_REPO`), wenn sie eine https-Adresse ohne Zugangsdaten ist, und bricht weiterhin ab, wenn
   es nicht genau diesen Commit bekommt; die Doku sagte, sie habe keine Wirkung.
-- **Das Board-Paket hält die Build-Regeln des Frameworks ein: die Platzregel, keine Downloads, die CPU des PCs, für den
+- `2026-10-23 10:13 UTC` · `v3.1.0` **Das Board-Paket hält die Build-Regeln des Frameworks ein: die Platzregel, keine Downloads, die CPU des PCs, für den
   es ist** (Entscheidungen des Maintainers zur Konsolidierung Stufe C, Welle 3; Kette build-safety; Rockchip und die
   Vorlage). Das Paket kopiert das Modell neben das des Builds, und Läufe von Hand und im Pipeline-Modus packen immer;
   jetzt prüft die Stufe target zuerst die eine Platzregel (`scripts/board_package.py room`: Die Platte von
@@ -1999,7 +2016,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   weggelassen, und bei einer Probe-Datei aus 1.x die Merkmale, die ihre CPU-Flags nennen). Vorher bekam jedes
   x86_64-Profil `-march=native`, und so gab ein Build-Rechner mit AVX-512 einem PC mit nur AVX2 Programme, die er nicht
   ausführen kann.
-- **Der Code ist in Schichten geordnet, und ein Test hält sie ein** (Konsolidierung; Entscheidung des Maintainers vom
+- `2026-10-17 17:14 UTC` · `v3.1.0` **Der Code ist in Schichten geordnet, und ein Test hält sie ein** (Konsolidierung; Entscheidung des Maintainers vom
   2026-10-17: ein Repository, Schichten per Test durchgesetzt). `tests/test_layering.py` ordnet jedes Modul von
   `orchestrator/` einer Schicht zu (unten, remote, Kern, Fachlogik, Tool-Definitionen, Adapter), liest jeden Import
   (auch in Funktionen, unter `TYPE_CHECKING` und verzögerte) und schlägt fehl bei einem Import, der nach oben zeigt,
@@ -2016,7 +2033,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `Core/knowledge_snapshots.py` und das Audit eines gespeicherten Moduls nach `Core/module_generator.py`. Für die
   Person ändert sich nichts; die Fachlogik importiert dafür keine Tool-Definitionen mehr, und der größte
   Import-Zyklus schrumpfte von 81 auf 9 Module.
-- **Ein nur lesender Host-Schlüssel-Speicher und die Vertrauens-Schreiber der Person**
+- `2026-10-22 14:37 UTC` · `v3.1.0` **Ein nur lesender Host-Schlüssel-Speicher und die Vertrauens-Schreiber der Person**
   (Konsolidierungskette c2-remote-trust): `orchestrator/remote/trust.py` (`TrustStore`: `status`, `status_of`,
   `check` mit einem `KeyCheck`, `read_presented_key`; die Host-Schlüssel-Fehler sind dorthin umgezogen) nutzen die
   neun Kopien von „Schlüssel lesen und prüfen“, jede behält nur ihre Regel (die Person darf vertrauen, eine KI wird
@@ -2028,7 +2045,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   an den Schlüssel, den du in seiner Frage bestätigt hast, und trägt das Board damit ein, sodass ein Deployment aus
   der GUI vier statt fünf Verbindungen zum SSH-Port des Boards öffnet. Die alten Namen in
   `orchestrator/utils/ssh_trust.py` funktionieren weiter.
-- **Der Code, der mit einem Board spricht, bekommt sein eigenes Paket, `orchestrator/remote/`**
+- `2026-10-17 16:08 UTC` · `v3.1.0` **Der Code, der mit einem Board spricht, bekommt sein eigenes Paket, `orchestrator/remote/`**
   (Konsolidierungskette c2-remote-base; für die Person und eine KI ändert sich nichts). Die vorhandenen
   Umsetzungen sind dorthin umgezogen, statt eine zweite Kopie zu bekommen: die Host-Prüfung der Remote-Probe, die
   Speicher- und die known_hosts-Schreibweise und das Lesen einer gespeicherten Adresse (`address.py`), die Grundcodes
@@ -2041,7 +2058,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   importiert, deshalb laden `orchestrator/utils/ssh_trust.py` und alles, was es importiert, keine SSH-Bibliothek, und
   das Deployment und der Builder-Tab fragen mit einem echten Import, ob SSH geht (eine kaputte Installation galt dort
   als vorhanden und bei der Anmeldung als fehlend).
-- **Eine Board-Sitzung für jeden Kontakt mit einem Board, `orchestrator/remote/session.py`** (Konsolidierungskette
+- `2026-10-22 14:18 UTC` · `v3.1.0` **Eine Board-Sitzung für jeden Kontakt mit einem Board, `orchestrator/remote/session.py`** (Konsolidierungskette
   c2-remote-session, Befund 2 des Architektur-Audits). Was nur die Board-Sitzung des Deployments konnte (sich erneut
   anmelden und dabei den Host-Schlüssel wie bei der ersten Anmeldung prüfen, auf ein Board warten, dessen Netz
   abgebrochen ist, einen Upload bei dem fortsetzen, was angekommen ist, eine Installation verfolgen, die auf dem Board
@@ -2064,7 +2081,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Verbindung von paramiko steht dann noch, bis TCP aufgibt): Das Deployment wartet wie nach jedem Abbruch auf das
   Board, meldet sich mit erneut geprüftem Host-Schlüssel wieder an und setzt den Upload fort oder verfolgt die
   Installation weiter, höchstens 20-mal, statt mit „could not be followed“ zu enden.
-- **Der OpenSSH-Rückfallweg des Deployments ist ein zweiter Transport, kein zweites Deployment** (Entscheidung A5,
+- `2026-10-22 22:51 UTC` · `v3.1.0` **Der OpenSSH-Rückfallweg des Deployments ist ein zweiter Transport, kein zweites Deployment** (Entscheidung A5,
   Konsolidierungskette c2-remote-system, Befund 3 des Architektur-Audits). Wo paramiko nicht importiert werden kann,
   läuft `deploy_package` jetzt über dieselbe Board-Sitzung wie mit paramiko, über den OpenSSH-Client dieses Computers
   (`orchestrator/remote/transport.py` `SystemSshTransport`): Das Deployment wartet auf ein Board, dessen Netzwerk
@@ -2094,7 +2111,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   diesem Computer gemeldet (`local_problem`, nie beim Board vermerkt), nicht als Ablehnung der Anmeldung durch das
   Board, obwohl OpenSSH dann ohne den Schlüssel weitermacht und mit dem „Permission denied“ des Boards endet. Auch
   gegen einen echten `sshd` getestet (`tests/test_remote_system_ssh.py`).
-- **Das Laufzeit-Deployment, die Prüfungen auf dem Board, der Benchmark auf dem Board und die Board-Prüfung laufen
+- `2026-10-22 23:26 UTC` · `v3.1.0` **Das Laufzeit-Deployment, die Prüfungen auf dem Board, der Benchmark auf dem Board und die Board-Prüfung laufen
   über die eine Board-Sitzung** (Konsolidierungskette c2-remote-callers). Ein WLAN-Abbruch beendet sie nicht mehr mit
   „the SSH connection failed“: `runtime/device/remote.py` `RemoteShell` ist eine Fassade über `RemoteSession`, also
   wartet die Sitzung auf das Board (N5), meldet sich mit erneut geprüftem Host-Schlüssel wieder an und macht weiter.
@@ -2141,7 +2158,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `umask 077 && cat >` nur dem Benutzer. Ein Abbruch genau dann, wenn das Deployment fragt, ob das Board SFTP hat,
   wartet auf das Board und lädt über SFTP hoch, statt das Deployment zu beenden. Und die Sätze der Board-Sitzung, die
   eine KI als externen Text bekommt, nennen das Board mit seinem Label, nie mit seiner Adresse (D0).
-- **Ein Datei-Hash und ein Disk-Watchdog** (Architektur-Konsolidierung c1-hashing und c1-disk, Regel R0 des Maintainers:
+- `2026-10-17 19:26 UTC` · `v3.1.0` **Ein Datei-Hash und ein Disk-Watchdog** (Architektur-Konsolidierung c1-hashing und c1-disk, Regel R0 des Maintainers:
   zuerst die vorhandene Implementierung). Die 24 Kopien des sha256 einer Datei (15 benannte Helfer, 9 Schleifen; die
   Schleife von `utils/network.py` ist mit diesem Modul gegangen, siehe unten) laufen über das Modul der ältesten,
   `orchestrator/utils/helpers.py` (wo `calculate_file_checksum` war), das eine Hash-Schleife bekommen hat, mit
@@ -2156,7 +2173,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `free_space`, `nearest_existing` und `DiskWatchdog`, das der Container-Watchdog und der Staging-Wächter jetzt sind);
   die Build-Engine behält ihre alten Methodennamen als Delegates, die Texte bleiben gleich und behalten "No space left
   on device", worauf das Self-Healing-Muster (jetzt aus denselben Phrasen gebaut) passt. Die Spielräume bleiben gleich.
-- **Eine Speicherplatz-Regel für jede Prüfung des freien Platzes** (Architektur-Konsolidierung c3-disk-callers,
+- `2026-10-22 15:43 UTC` · `v3.1.0` **Eine Speicherplatz-Regel für jede Prüfung des freien Platzes** (Architektur-Konsolidierung c3-disk-callers,
   Entscheidung A4 des Maintainers). Jede Prüfung misst über `orchestrator/Core/disk_plan.py` (`room`, die eine Prüfung
   einer Festplatte, auf der `check_disk` und `require` aufbauen) und lässt die Reserve frei, die Builds frei lassen,
   2 GiB oder 2 % der Festplatte (20 GiB oder 10 % unter einer Dauerfreigabe), neben dem, was angenommene Aufrufe
@@ -2178,7 +2195,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   liegt (`ReservationLedger.landed`, über `LandedMeter`: das Wachstum seines bereitgestellten Downloads, seines
   Build-Ordners und seines Zwischenordners, nach jeder Stufe und in jeder Runde seiner Festplatten-Watchdogs), so
   zählen andere Prüfungen diese Bytes nicht mehr doppelt, einmal im freien Platz und einmal in der Reservierung.
-- **Die GUI ist ein optionales Extra; Kommandozeile, MCP-Server und Kern laufen ohne Qt.** PySide6 ist das Extra
+- `2026-10-17 15:58 UTC` · `v3.1.0` **Die GUI ist ein optionales Extra; Kommandozeile, MCP-Server und Kern laufen ohne Qt.** PySide6 ist das Extra
   `gui` in `pyproject.toml` (die per Hash festgelegte `requirements-gui.txt`, ein Export von `uv.lock` wie
   `requirements.txt`). Die Installer für Linux und Windows installieren es wie bisher; `sudo ./install.sh --headless`
   (`LCF_HEADLESS=1`) und das Framework-Image ohne `--gui` lassen Qt und seine Systembibliotheken weg (das Image ohne
@@ -2190,11 +2207,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   es installierst, statt eines Tracebacks. Der Katalog der nächsten Schritte liest seine Beschriftungen aus der einen
   Texttabelle statt mit einem zweiten Leser der `l10n_*`-Module. Ein CI-Job führt die Qt-freien Prüfungen und die ganze
   Testsuite ohne PySide6 aus.
-- **Qts eigene Schaltflächen sprechen die Sprache des Fensters**: Deutsche Dialoge zeigten Qts
+- `2026-10-17 15:58 UTC` · `v3.1.0` **Qts eigene Schaltflächen sprechen die Sprache des Fensters**: Deutsche Dialoge zeigten Qts
   Standard-Schaltflächen auf Englisch („Close“, „Cancel“, „Yes“, „No“). Das Fenster installiert jetzt Qts eigene
   Übersetzung (`qtbase_de`, mit PySide6 geliefert) mit seiner Sprache und tauscht sie beim Sprachwechsel; ein offener
   Dialog folgt.
-- **Der Builder zeigt CPU und Speicher des Build-Containers**, unter dem Fortschrittsbalken, solange ein
+- `2026-10-17 15:58 UTC` · `v3.1.0` **Der Builder zeigt CPU und Speicher des Build-Containers**, unter dem Fortschrittsbalken, solange ein
   Stufen-Container läuft („Build-Container: CPU 251 % · Arbeitsspeicher 2,0 GB von 8,0 GB“), und das Build-Protokoll
   warnt einmal, wenn der Container 90 % seiner Speichergrenze nutzt (der von Docker oder der VM von WSL2 / Docker
   Desktop), mit dem, was zu tun ist. Die Werte stammen aus dem älteren Build-Weg des Docker-Managers, den nichts mehr
@@ -2203,7 +2220,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   älteren Wegs (Start, Überwachung, Stopp, ein Self-Healing-Auslöser und sechs Qt-Signale, auf die niemand hörte) wurde
   entfernt, weil der eine Build-Weg all das tut (Entscheidung Runde 12, Punkt 6). Der Build-Status für die KI bleibt
   gleich.
-- **Ein Dienst für Änderungen der KI-Einstellungen, für jeden Kanal** (`orchestrator/llm/settings_change.py`,
+- `2026-10-17 16:17 UTC` · `v3.1.0` **Ein Dienst für Änderungen der KI-Einstellungen, für jeden Kanal** (`orchestrator/llm/settings_change.py`,
   `AISettingsChange`): Die Regeln, die nur der Dialog der KI-Einstellungen kannte (bekannte Provider in der
   Fallback-Kette, kein Cloud-Provider im Offline-Modus, ein Schlüssel ist nötig und kein Admin-Schlüssel, die Form der
   Workspace-ID, die Serveradresse, ein Modell, die Rückfrage bei einem Schlüssel über plain http, der Schlüssel wird
@@ -2220,7 +2237,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   (etwa ein fehlender Schlüssel), lehnt nichts ab. Die Ablehnung nennt Ordner nur mit ihrem Label und Dateien nur mit
   ihrem Namen: Eine unlesbare Provider-Liste (`llm_providers.yml`) zeigt der KI nicht mehr den Pfad des
   Konfigurationsordners.
-- **Ein Weg, Builds zu starten, für CLI, GUI und KI-Aufrufer**: `llmcf build start` und **Start Build** im
+- `2026-10-17 15:44 UTC` · `v3.1.0` **Ein Weg, Builds zu starten, für CLI, GUI und KI-Aufrufer**: `llmcf build start` und **Start Build** im
   Builder-Tab reihen ihren Build über `BuildService.start_build` ein, den Weg, den der MCP-Server und Ditto schon
   nutzten, statt jeweils einen eigenen Auftrag an den Orchestrator zu bauen. CLI und GUI prüfen einen Auftrag deshalb
   gleich, bevor etwas startet: Ein Auftrag ohne Modell, ein lokales Modell, das es nicht gibt (oder das nicht wie ein
@@ -2232,7 +2249,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   den Build über denselben Dienst. Die Prüfung des Builders auf einen früheren Build mit denselben Optionen erfasst
   jetzt auch ein Target ohne Capabilities (vorher lehnte der Dienst den Vergleich eines solchen Auftrags ab, und der
   Builder vermerkte das nur im Log).
-- **Eine Umsetzung je Aufgabe, die ältere, wo sie genügt (Runde 12 der Entscheidungen).** Jeder Punkt der Liste
+- `2026-10-17 18:03 UTC` · `v3.1.0` **Eine Umsetzung je Aufgabe, die ältere, wo sie genügt (Runde 12 der Entscheidungen).** Jeder Punkt der Liste
   unverdrahteter Teile wurde an seiner Geschichte geprüft (`git log -S`) und ist verdrahtet oder mit Nachweis entfernt:
   Die Frage vor dem Öffnen eines Links im Chat ist `bubbles.confirm_open_link` (die ungenutzte Kopie des Panels ist
   weg); die kostenlose Prüfung der Zugangsdaten ist `SignIn.check` (`LLMClient.check_credentials` ist weg, sein Test
@@ -2263,7 +2280,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `_with_message`, `BoardOut`, `is_probe_id`, `SOURCE_KINDS`, `snapshot_listing`, `_write_profile_file`,
   `TokenStore.policy_of`, `deploy_artifact` (Aufrufer nutzen `deploy_package`), `WIDTH_LABELS` und `REQUEST_TTL`.
   CONTRIBUTING (EN/DE) nennt die Regel: erst nutzen, was es gibt.
-- **Community-Pakete gehen an das Community-Repository
+- `2026-10-22 18:00 UTC` · `v3.1.0` **Community-Pakete gehen an das Community-Repository
   [Smilez1985/Edge-LLM-Knowledge-Base](https://github.com/Smilez1985/Edge-LLM-Knowledge-Base)**: Der Maintainer hat es
   gewählt (2026-10-22), und es ist jetzt der Standardwert der Einstellung `community_repo`; „Open pull request“ im
   Export-Fenster und `llm-cli zoo export --pr` übergeben ein Paket also dorthin, statt mit „No community repository is
@@ -2271,7 +2288,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   nicht veröffentlicht: `community_index_url` bleibt leer, bis in diesem Repository der erste signierte Index liegt;
   der Zoo installiert deshalb weiterhin nur Paketdateien. Leerst du die Einstellung selbst, wird wie bisher nichts
   übergeben. Ein Test hält den Standardwert fest und prüft ihn gegen die Regel der Einstellung und die der Übergabe.
-- **Das Repository und die Kennungen des Produkts tragen den Namen LLM Cross-Compiler Framework.** Das Repository
+- `2026-10-17 10:54 UTC` · `v3.1.0` **Das Repository und die Kennungen des Produkts tragen den Namen LLM Cross-Compiler Framework.** Das Repository
   heißt jetzt `Smilez1985/LLM_Cross-Compiler_Framework` (GitHub leitet die alte Adresse
   `Smilez1985/llm_conversion_framework` weiter), und was noch nach dem LLM Conversion Framework benannt war, folgt:
   die Links im User-Agent des Crawlers, im Fehlerbericht und im Workflow des Community-Repositorys; die
@@ -2296,36 +2313,29 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   wird nichts entfernt). `make` behält einen Container von vor der Umbenennung, solange er Dateien
   von dir im alten Programmordner enthält. Siehe
   [README: Eine Installation von vor der Umbenennung](README_DE.md#eine-installation-von-vor-der-umbenennung).
-- **Schnellerer Start: schwere Teile laden erst, wenn sie gebraucht werden** (unveröffentlicht; Entscheidung des
-  Maintainers RG1, Lazy Loading): `llm-cli`, der MCP-Server und die GUI importierten beim Start das ganze Framework.
-  Jetzt importiert ein CLI-Befehl das Framework, die Build-Engine und die Manager erst, wenn er sie nutzt; das
-  Framework importiert seine Manager beim Hochfahren und die Wissensbasis erst, wenn sie eingeschaltet ist; Qt wird
-  außerhalb der GUI nur geladen, wenn ein Signal des Docker-Managers genutzt wird; der Crawler (mit seinen Parsern für
-  HTML und PDF), numpy, die Prüfungen von Mojo, die Anbieterschicht von `orchestrator.llm` und die Teile von
-  `orchestrator.runtime` laden bei ihrer ersten Nutzung, auch bei eingeschalteter Wissensbasis; `--help` lädt kein
-  rich. Die Host-Prüfung, die beim Import der URL-Prüfungen lief, nahm eine CPU-Stichprobe von einer Sekunde und
-  suchte zwei Programme, deren Ergebnisse sie nie zeigte; sie führt jetzt nur die Prüfungen aus, deren Fehler sie
-  meldet (Platte, Speicher, Python, Plattform), daher erscheint ihre Warnung zum Plattenplatz bei der ersten Nutzung
-  der URL-Prüfungen und nicht bei jedem Start. Gemessen auf derselben Maschine mit einem temporären Home, vorher und
-  nachher, in abwechselnden Läufen (Median aus 5): `llm-cli --help` 3,15 s und 140 MB auf 0,25 s und 27 MB;
-  `llm-cli mcp serve`, bis es auf `initialize` antwortet, 4,77 s und 191 MB auf 2,67 s und 118 MB (2,69 s und 118 MB
-  bei eingeschalteter Wissensbasis); das Hauptfenster der GUI 3,97 s und 210 MB auf 2,66 s und 177 MB. Das
-  Hochfahren prüft Docker weiter wie bisher, daher laden `mcp serve` und die GUI weiter das Docker-SDK. Befehle,
-  Ergebnisse und Meldungen bleiben gleich. Ein Teil des Frameworks, der sich nicht importieren lässt (eine kaputte
-  Installation), beendet das Hochfahren jetzt mit seiner Ursache wie andere Fehler beim Hochfahren: Die CLI gibt
-  „Failed to initialize framework: ...“ aus und endet mit 1 statt mit einem Traceback, und `--help` funktioniert
-  weiter. Tests starten die CLI, `mcp serve` (auch bei eingeschalteter Wissensbasis) und die GUI in einem frischen
-  Interpreter und prüfen, dass Crawler, die Bibliotheken für Embeddings, die SDKs der Anbieter, Qt, die Prüfungen
-  von Mojo (auch seine Prüfung der Boards), der Speicher der Wissensbasis und die private Brücke zum offenen Fenster
-  nicht geladen werden und kein Lizenztext der Wissenspakete gelesen wird; der MCP-Server lädt die Brücke beim ersten
-  Aufruf seines Werkzeugs `gui`, die GUI startet sie mit ihrem Fenster.
-- **Roadmap: Rust dort, wo das Framework auf das Netzwerk oder ein Board trifft** (unveröffentlicht; Entscheidungen
-  des Maintainers RG2 bis RG4): Die Roadmap im Blueprint plant das Netzwerk-Gateway für MCP in Rust mit dem
-  MQTT-Broker rumqttd darin (statt des im Python-Prozess geplanten amqtt-Brokers), den Root-Helfer auf dem Board als
-  statisches Rust-Programm und die Rust-Teile des Frameworks als fertig gebaute, mit Sigstore signierte
-  Release-Dateien, mit ihren Prüfsummen im Repository und selbst bauen als Opt-in. Sie hält außerdem fest: keine
-  fertigen Docker-Images für Targets, kein Go, und die GUI bleibt Qt.
-- **Die lokale Wissensbasis liegt in Qdrant Edge** (DECISIONS RG5): Die Rust-Engine von Qdrant läuft im
+- `2026-10-16 15:21 UTC` · `v3.1.0` **Schnellerer Start: schwere Teile laden erst, wenn sie gebraucht werden** (Entscheidung des Maintainers RG1, Lazy
+  Loading): `llm-cli`, der MCP-Server und die GUI importierten beim Start das ganze Framework. Jetzt importiert ein
+  CLI-Befehl das Framework, die Build-Engine und die Manager erst, wenn er sie nutzt; das Framework importiert seine
+  Manager beim Hochfahren und die Wissensbasis erst, wenn sie eingeschaltet ist; Qt wird außerhalb der GUI nur geladen,
+  wenn ein Signal des Docker-Managers genutzt wird; der Crawler (mit seinen Parsern für HTML und PDF), numpy, die
+  Prüfungen von Mojo, die Anbieterschicht von `orchestrator.llm` und die Teile von `orchestrator.runtime` laden bei
+  ihrer ersten Nutzung, auch bei eingeschalteter Wissensbasis; `--help` lädt kein rich. Die Host-Prüfung, die beim
+  Import der URL-Prüfungen lief, nahm eine CPU-Stichprobe von einer Sekunde und suchte zwei Programme, deren Ergebnisse
+  sie nie zeigte; sie führt jetzt nur die Prüfungen aus, deren Fehler sie meldet (Platte, Speicher, Python, Plattform),
+  daher erscheint ihre Warnung zum Plattenplatz bei der ersten Nutzung der URL-Prüfungen und nicht bei jedem Start.
+  Gemessen auf derselben Maschine mit einem temporären Home, vorher und nachher, in abwechselnden Läufen (Median aus 5):
+  `llm-cli --help` 3,15 s und 140 MB auf 0,25 s und 27 MB; `llm-cli mcp serve`, bis es auf `initialize` antwortet, 4,77
+  s und 191 MB auf 2,67 s und 118 MB (2,69 s und 118 MB bei eingeschalteter Wissensbasis); das Hauptfenster der GUI 3,97
+  s und 210 MB auf 2,66 s und 177 MB. Das Hochfahren prüft Docker weiter wie bisher, daher laden `mcp serve` und die GUI
+  weiter das Docker-SDK. Befehle, Ergebnisse und Meldungen bleiben gleich. Ein Teil des Frameworks, der sich nicht
+  importieren lässt (eine kaputte Installation), beendet das Hochfahren jetzt mit seiner Ursache wie andere Fehler beim
+  Hochfahren: Die CLI gibt „Failed to initialize framework: ...“ aus und endet mit 1 statt mit einem Traceback, und
+  `--help` funktioniert weiter. Tests starten die CLI, `mcp serve` (auch bei eingeschalteter Wissensbasis) und die GUI
+  in einem frischen Interpreter und prüfen, dass Crawler, die Bibliotheken für Embeddings, die SDKs der Anbieter, Qt,
+  die Prüfungen von Mojo (auch seine Prüfung der Boards), der Speicher der Wissensbasis und die private Brücke zum
+  offenen Fenster nicht geladen werden und kein Lizenztext der Wissenspakete gelesen wird; der MCP-Server lädt die
+  Brücke beim ersten Aufruf seines Werkzeugs `gui`, die GUI startet sie mit ihrem Fenster.
+- `2026-10-16 15:23 UTC` · `v3.1.0` **Die lokale Wissensbasis liegt in Qdrant Edge** (DECISIONS RG5): Die Rust-Engine von Qdrant läuft im
   Framework-Prozess (neue Abhängigkeit `qdrant-edge-py` 0.8.0, Apache-2.0, exakt gepinnt; Wheels für Linux x86_64 und
   aarch64, Windows x86_64 und macOS, ein Wheel für jedes Python ab 3.10) statt des lokalen Modus von qdrant-client,
   einer Python-Nachbildung für die Entwicklung. Die Daten liegen jetzt in `~/.llm-framework/qdrant_edge`. Collections
@@ -2344,50 +2354,48 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   1,6 bis 2 GB; die Umwandlung dauerte 68 bis 159 s (5 000 Auszüge: 13,5 s). qdrant-client bleibt für einen
   optionalen Qdrant-Server (`qdrant_url`) und um den alten Speicher zu lesen. Qdrant Edge hat keinen Build für
   Windows auf ARM; dort behält die Wissensbasis den lokalen Modus von qdrant-client, und Mojo Oracle sagt es.
-- **Wissens-Schnappschüsse nennen den Speicher, aus dem sie kommen (Format 2)**: Ein Schnappschuss bleibt eine
+- `2026-10-16 15:23 UTC` · `v3.1.0` **Wissens-Schnappschüsse nennen den Speicher, aus dem sie kommen (Format 2)**: Ein Schnappschuss bleibt eine
   portable Datei, für jeden Speicher gleich. Schnappschüsse im Format 1, von früheren Versionen geschrieben, lassen
   sich in Qdrant Edge wiederherstellen und werden so umgewandelt; ein neueres Format, ein Vektor der falschen Dimension
   oder ein kaputter Stichwort-Vektor wird abgelehnt, bevor sich etwas ändert.
-- **Die Prüfung auf gleiche Builds blockiert das Builder-Fenster nicht mehr** (unveröffentlicht; achte Runde, N11):
-  Vor einem Build fragte die Prüfung Hugging Face im Thread des Fensters nach dem aktuellen Commit des Modells, daher
-  reagierte das Fenster bei langsamem Netz nicht (bis zu 10 Sekunden). Die Abfrage läuft jetzt im Hintergrund; Start
-  wartet so lange, und das Formular bleibt bedienbar. Der Build übernimmt genau die geprüften Werte.
-- **Builds im alten Standardordner behalten ihre ID, und Pakete werden dort gefunden** (unveröffentlicht; achte Runde,
-  Antwort 3): Seit der Einstellung für den Ausgabeordner ist der Build-Ordner des Frameworks nicht mehr der
-  Ausgabeordner, daher bekam ein Build dort eine neue ID, und das KI-Tool `deploy_to_device` fand die Deploy-Pakete
-  darin nicht mehr über ihre ID. Die frühere ID eines Builds erreicht ihn weiter (Feed-Zeilen, offene Freigaben und
-  KI-Aufrufer, die sie behalten haben), außer ein anderer Build hat diese ID jetzt. Pakete werden zuerst im
-  Ausgabeordner gesucht, dann im Build-Ordner und in früheren Ausgabeordnern, die du eingestellt hattest.
-- **`get_status` nennt den Datenträger des Build-Ordners** (unveröffentlicht; achte Runde, Antwort 3): Die Angabe zum
-  Speicherplatz nannte nur den Cache und den Ausgabeordner, nicht den Build-Ordner, in den ein Build zuerst schreibt.
-  Jetzt nennt sie alle drei; Ordner auf einem Datenträger werden zusammen genannt, nur mit ihrer Bezeichnung.
-- **Die Tools, die Text speichern, sagen, wann das Suchmodell zuerst heruntergeladen wird** (unveröffentlicht;
-  next-fixes 119): Die Situationswarnung `embedding_model_download` war erklärt, erschien aber nie. Jetzt prüfen
-  `crawl_docs_site`, `index_framework_docs` und ein Wissens-Pack über `add_pack_from_index`, ohne etwas herunterzuladen
-  oder zu laden, ob die Modelle der Wissensbasis auf diesem Rechner liegen. Ihre Frage sagt es, mit der Größe und der
-  Warnung, wenn ein Download nötig ist oder sich nicht ausschließen lässt. Ein MCP-Prompt mit Auszügen aus der
-  Wissensbasis startet den Download nie: Wie `search_knowledge` liest er nur mit den Modellen auf diesem Rechner und
-  sagt, wenn sie fehlen. Dittos automatische Diagnose eines gescheiterten Builds, nach der niemand gefragt wird, liest
-  genauso.
-- **Reparaturhinweise für KI-Aufrufer nennen Mojo** (unveröffentlicht; Runde 7 Punkt 11'): Ablehnungen und Fehler, die
-  KI-Aufrufer lesen, schickten sie zu `llm-cli doctor`. Jetzt nennen sie das Tool `run_mojo_oracle` (oder `llmcf mojo`
-  im Terminal). Der Hinweis auf fehlende Builder-Images behält `llm-cli doctor --fix --tier 2`, das sie baut.
-- **Dittos alte Laufzeit-Art verschwindet ganz** (unveröffentlicht; W2 vom 2026-10-16, Runde 7 D): Nach einem
-  Wechsel zwischen direkt und Docker standen nur die Build-Ordner, Images und Container der alten Art in der Liste, und
-  die Build-Ordner kamen in den Papierkorb. Jetzt steht jedes Objekt der alten Art in der Liste, auch ihre Einträge in
-  `mode.json` und `active.json` und das Log der Image-Builds, und die Liste wird endgültig gelöscht, nicht in den
-  Papierkorb, sodass von der alten Art nichts bleibt. Sie wird erst angeboten, wenn die neue Art funktioniert, und das
-  Entfernen lehnt ab, solange sie das nicht tut. Eine Frage bestätigt die ganze Liste („Nein“ als Standard).
-- **Die Adressprüfungen sind sich bei IPv6 in Klammern einig** (unveröffentlicht): `deploy run --host [fe80::1]`
-  bestand die Prüfung der CLI, aber das Deployment lehnte die Adresse ab. Jetzt lehnt jede Stelle, die eine
-  Board-Adresse nimmt (Deployment, `scan --device`, `deploy devices add`, die Prüfung und das Deployment-Fenster der
-  GUI), eine IPv6-Adresse in Klammern ab, bevor etwas gesendet wird. Schreib sie ohne Klammern (`fe80::1`); der Port
-  hat eine eigene Option.
-- **Der Benutzerordner wird beim Anlegen privat gemacht** (next-fixes 118): Jedes Lesen der Einstellungen setzte
+- `2026-10-16 09:39 UTC` · `v3.1.0` **Die Prüfung auf gleiche Builds blockiert das Builder-Fenster nicht mehr** (achte Runde, N11): Vor einem Build fragte
+  die Prüfung Hugging Face im Thread des Fensters nach dem aktuellen Commit des Modells, daher reagierte das Fenster bei
+  langsamem Netz nicht (bis zu 10 Sekunden). Die Abfrage läuft jetzt im Hintergrund; Start wartet so lange, und das
+  Formular bleibt bedienbar. Der Build übernimmt genau die geprüften Werte.
+- `2026-10-16 09:39 UTC` · `v3.1.0` **Builds im alten Standardordner behalten ihre ID, und Pakete werden dort gefunden** (achte Runde, Antwort 3): Seit
+  der Einstellung für den Ausgabeordner ist der Build-Ordner des Frameworks nicht mehr der Ausgabeordner, daher bekam
+  ein Build dort eine neue ID, und das KI-Tool `deploy_to_device` fand die Deploy-Pakete darin nicht mehr über ihre ID.
+  Die frühere ID eines Builds erreicht ihn weiter (Feed-Zeilen, offene Freigaben und KI-Aufrufer, die sie behalten
+  haben), außer ein anderer Build hat diese ID jetzt. Pakete werden zuerst im Ausgabeordner gesucht, dann im
+  Build-Ordner und in früheren Ausgabeordnern, die du eingestellt hattest.
+- `2026-10-16 09:39 UTC` · `v3.1.0` **`get_status` nennt den Datenträger des Build-Ordners** (achte Runde, Antwort 3): Die Angabe zum Speicherplatz nannte
+  nur den Cache und den Ausgabeordner, nicht den Build-Ordner, in den ein Build zuerst schreibt. Jetzt nennt sie alle
+  drei; Ordner auf einem Datenträger werden zusammen genannt, nur mit ihrer Bezeichnung.
+- `2026-10-16 09:39 UTC` · `v3.1.0` **Die Tools, die Text speichern, sagen, wann das Suchmodell zuerst heruntergeladen wird** (next-fixes 119): Die
+  Situationswarnung `embedding_model_download` war erklärt, erschien aber nie. Jetzt prüfen `crawl_docs_site`,
+  `index_framework_docs` und ein Wissens-Pack über `add_pack_from_index`, ohne etwas herunterzuladen oder zu laden, ob
+  die Modelle der Wissensbasis auf diesem Rechner liegen. Ihre Frage sagt es, mit der Größe und der Warnung, wenn ein
+  Download nötig ist oder sich nicht ausschließen lässt. Ein MCP-Prompt mit Auszügen aus der Wissensbasis startet den
+  Download nie: Wie `search_knowledge` liest er nur mit den Modellen auf diesem Rechner und sagt, wenn sie fehlen.
+  Dittos automatische Diagnose eines gescheiterten Builds, nach der niemand gefragt wird, liest genauso.
+- `2026-10-16 09:39 UTC` · `v3.1.0` **Reparaturhinweise für KI-Aufrufer nennen Mojo** (Runde 7 Punkt 11'): Ablehnungen und Fehler, die KI-Aufrufer lesen,
+  schickten sie zu `llm-cli doctor`. Jetzt nennen sie das Tool `run_mojo_oracle` (oder `llmcf mojo` im Terminal). Der
+  Hinweis auf fehlende Builder-Images behält `llm-cli doctor --fix --tier 2`, das sie baut.
+- `2026-10-16 15:09 UTC` · `v3.1.0` **Dittos alte Laufzeit-Art verschwindet ganz** (W2 vom 2026-10-16, Runde 7 D): Nach einem Wechsel zwischen direkt und
+  Docker standen nur die Build-Ordner, Images und Container der alten Art in der Liste, und die Build-Ordner kamen in
+  den Papierkorb. Jetzt steht jedes Objekt der alten Art in der Liste, auch ihre Einträge in `mode.json` und
+  `active.json` und das Log der Image-Builds, und die Liste wird endgültig gelöscht, nicht in den Papierkorb, sodass von
+  der alten Art nichts bleibt. Sie wird erst angeboten, wenn die neue Art funktioniert, und das Entfernen lehnt ab,
+  solange sie das nicht tut. Eine Frage bestätigt die ganze Liste („Nein“ als Standard).
+- `2026-10-16 09:39 UTC` · `v3.1.0` **Die Adressprüfungen sind sich bei IPv6 in Klammern einig**: `deploy run --host [fe80::1]` bestand die Prüfung der
+  CLI, aber das Deployment lehnte die Adresse ab. Jetzt lehnt jede Stelle, die eine Board-Adresse nimmt (Deployment,
+  `scan --device`, `deploy devices add`, die Prüfung und das Deployment-Fenster der GUI), eine IPv6-Adresse in Klammern
+  ab, bevor etwas gesendet wird. Schreib sie ohne Klammern (`fe80::1`); der Port hat eine eigene Option.
+- `2026-10-16 09:39 UTC` · `v3.1.0` **Der Benutzerordner wird beim Anlegen privat gemacht** (next-fixes 118): Jedes Lesen der Einstellungen setzte
   `~/.llm-framework` wortlos auf Modus 0700, daher erschien Mojos Befund `state.permissions` fast nie. Jetzt bekommt der
   Ordner 0700, wenn das Framework ihn anlegt; ein vorhandener Ordner behält seinen Modus, Mojo Oracle meldet einen, den
   andere lesen können, und Mojo Miracle repariert ihn nach deinem Ja.
-- **Ein Deployment auf ein Board behält jeden älteren Laufzeit-Build** (Runde 5 f): `llm-cli device runtime deploy`
+- `2026-10-16 08:50 UTC` · `v3.1.0` **Ein Deployment auf ein Board behält jeden älteren Laufzeit-Build** (Runde 5 f): `llm-cli device runtime deploy`
   und das KI-Tool `deploy_device_runtime` entfernten alle älteren Laufzeit-Builds auf dem Board außer dem vorigen, ohne
   Frage. Jetzt bleibt jeder ältere Build. Das Ergebnis sagt, wie viele geblieben sind und wie groß sie sind, und
   `llm-cli device runtime prune GERÄT --on-device` listet sie für dich: voller Pfad auf dem Board, Ordnername, Größe
@@ -2396,20 +2404,20 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   einer, den ein laufendes Programm nutzt, stehen nie in der Liste. Eine KI liest nur, wie viele Builds geblieben
   sind und dass nur du sie entfernst. Wird ein Build erneut deployt, der schon auf dem Board liegt, bleibt er dort,
   auch wenn seine Prüfungen scheitern.
-- **Der Ausgabeordner ist `~/llmcf/output`; der alte Ausgabeordner ist der Build-Ordner des Frameworks** (achte
+- `2026-10-16 01:03 UTC` · `v3.1.0` **Der Ausgabeordner ist `~/llmcf/output`; der alte Ausgabeordner ist der Build-Ordner des Frameworks** (achte
   Runde, Antwort 3): die Einstellung `output_dir` nennt jetzt den Ordner, in dem fertige Modelle gespeichert werden
   (Standard `~/llmcf/output`, bisher `output/` der Installation oder des persönlichen Ordners). Dieser alte Ordner ist
   die neue Einstellung `build_dir`: GUI-Builds warten dort, bis sie gespeichert sind, und jeder frühere Build bleibt
   dort und wird weiter aufgelistet. CLI-Builds ohne `--output` legen keinen Ordner `build_<Datum>_<Uhrzeit>` mehr an
   (ein späterer Build kommt stattdessen neben einen früheren). Das Container-Image setzt
   `LLM_FRAMEWORK_BUILD_DIR=/data/builds`.
-- **Der Builder löscht keine Images mehr** (veröffentlicht in 3.0.0; Runde 7 Punkt 12): Jeder Build endete damit, sein
+- `2026-10-15 21:27 UTC` · `v3.1.0` **Der Builder löscht keine Images mehr** (veröffentlicht in 3.0.0; Runde 7 Punkt 12): Jeder Build endete damit, sein
   Image zu entfernen und die verwaisten Images des Frameworks zu prunen. Jetzt heißt das Image des Builds
   `llm-framework/<Target>:last-build` (der nächste Build dieses Targets nutzt es wieder), und nur sein Name für den
   einzelnen Build wird entfernt, nachdem der neue Name am Image zu sehen ist. Das Image, das diesen Namen vorher hatte,
   bleibt ohne Namen und wird dir zum Löschen gelistet (Tools > Framework Build Images..., `llm-cli doctor --fix --tier
   2`). Nichts im Framework prunt Docker-Objekte; Docker-Images werden nur gelöscht, wenn du sie anhakst.
-- **Keine Vorgabe nennt mehr ein Image aus einer Registry** (Runde 5 h, sechste Runde): Das Framework veröffentlicht
+- `2026-10-15 21:06 UTC` · `v3.1.0` **Keine Vorgabe nennt mehr ein Image aus einer Registry** (Runde 5 h, sechste Runde): Das Framework veröffentlicht
   keine Images, daher nennen die Vorgaben lokale Images. `image_inference_runtime` ist `llm-framework/inference:local`;
   ein Deployment-Paket nimmt es erst, wenn du es auf diesem Rechner gebaut hast, wie jedes Image ohne Digest.
   `docker_registry` ist leer (nichts liest es). Das experimentelle Benchmark-Fenster nutzt
@@ -2417,7 +2425,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   lassen. Der Block `docker` in `targets/_template/target.yml` und `targets/Rockchip/target.yml` nennt ein lokales
   Image ohne Registry (`registry: ""`); Kommentare sagen, dass nichts `registry` oder `tags` liest.
   `prebuilt_llama.KNOWN_PREBUILT_IMAGES` behält die früheren `ghcr.io`-Namen als Liste zum Erkennen.
-- **uv ersetzt Poetry für die Festlegung der Abhängigkeiten** (sechste Runde, Entscheidung 14): `pyproject.toml`
+- `2026-10-15 20:23 UTC` · `v3.1.0` **uv ersetzt Poetry für die Festlegung der Abhängigkeiten** (sechste Runde, Entscheidung 14): `pyproject.toml`
   nutzt die Standardtabelle `[project]` (die Entwicklungswerkzeuge in `[dependency-groups]`), `uv.lock` ersetzt
   `poetry.lock`, und `requirements.txt` und `requirements-dev.txt` sind mit Hashes festgelegte Ausgaben von
   `uv export`, deren erste Zeilen den Befehl nennen. Keine Version hat sich geändert: Alle 121 Festlegungen sind die
@@ -2427,7 +2435,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `install.bat` bricht ab, wenn pip scheitert, statt weiterzumachen. Dependabot aktualisiert `uv.lock`, der neue
   CI-Job "Lock files" prüft, dass `uv.lock` und beide Exporte zusammenpassen, und `make test` und die
   Entwicklungsumgebung nutzen uv (`uv sync`).
-- **Rückfragen zeigen eine Kurzfassung und die Arten der Hinweise** (Delegationsentwurf 4.5, LAY-L2): Eine Rückfrage
+- `2026-10-12 17:38 UTC` · `v3.1.0` **Rückfragen zeigen eine Kurzfassung und die Arten der Hinweise** (Delegationsentwurf 4.5, LAY-L2): Eine Rückfrage
   im eigenen Fenster des Frameworks (Dittos Dialog, die CLI-Abfrage, das Freigabefenster) beginnt nach ihrer ersten
   Zeile mit 3 bis 6 Zeilen in der Sprache der Person (Englisch oder Deutsch): was passiert, mit sprechenden Namen, wie
   viel heruntergeladen wird und wie viel Speicherplatz nötig ist, „Braucht deine Entscheidung, weil: ...“ mit jedem
@@ -2435,20 +2443,20 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Die Kurzfassung entsteht nur aus berechneten Zahlen, den Hinweisen und sprechenden Namen, nie aus Text aus einem
   Repository, einem Log oder von einer KI. Jede Rückfrage, auch ein MCP-Formular, nennt nach den geprüften Fakten
   „Situation:“ und „Needs you (security / legal):“.
-- **Abgelehnte MCP-Aufrufe tragen ihren Grund-Code als strukturierten Inhalt** (`{"error": {"code", "field",
+- `2026-10-12 17:38 UTC` · `v3.1.0` **Abgelehnte MCP-Aufrufe tragen ihren Grund-Code als strukturierten Inhalt** (`{"error": {"code", "field",
   "blocker"}}`, nur Fakten des Frameworks, der Text unverändert; `blocker` nennt das harte Hindernis aus dem
   Faktenkatalog, das den Aufruf vor jeder Rückfrage abgelehnt hat, etwa `disk_full`). Ein Client liest Code und Feld
   daraus, statt sie aus den Worten zu raten; ein unbekannter Code wird als `failed` gesendet, und ein Feld, das kein
   einfacher Argumentname ist, wird weggelassen.
-- **`ArtifactStore` (`delete_artifact`) nutzt nur öffentliche Methoden von `BuildService`** (`output_folder`,
+- `2026-10-12 09:20 UTC` · `v3.1.0` **`ArtifactStore` (`delete_artifact`) nutzt nur öffentliche Methoden von `BuildService`** (`output_folder`,
   `artifact_entries`, `busy_output_folders`, `ArtifactStore.for_service`).
-- **Der Deep-Ingest-Hinweis hält wieder fest, wer ihn gelesen hat**: Seine Zustandsdatei speichert, wo er bestätigt
+- `2026-10-12 05:51 UTC` · `v3.1.0` **Der Deep-Ingest-Hinweis hält wieder fest, wer ihn gelesen hat**: Seine Zustandsdatei speichert, wo er bestätigt
   wurde (`via`: `gui` oder `cli`), und das Lesen landet im Audit-Log (Akteur `gui` oder `cli`). Nur eine Person
   bestätigt ihn; `CrawlNotice.acknowledge` lehnt jeden anderen Weg ab.
-- **Ein Target-Pack übernimmt nie den Namen eines anderen Targets**: Ein Target-Pack, dessen ID (oder angegebene
+- `2026-10-12 06:09 UTC` · `v3.1.0` **Ein Target-Pack übernimmt nie den Namen eines anderen Targets**: Ein Target-Pack, dessen ID (oder angegebene
   Target-ID) ohne Rücksicht auf Groß- und Kleinschreibung und Trennzeichen der eines vorhandenen Targets gleicht, wird
   abgelehnt, im Community Hub, in der CLI und über MCP.
-- **Builds und Downloads teilen eine Speicherplatz-Reservierung; Bereitstellung über den Abrufer des Frameworks**
+- `2026-10-12 07:38 UTC` · `v3.1.0` **Builds und Downloads teilen eine Speicherplatz-Reservierung; Bereitstellung über den Abrufer des Frameworks**
   (Reste von MCP-Phase T, Runde 1): `download_hf_file` reserviert seinen Speicherplatz in dem prozessübergreifenden
   Verzeichnis, das Builds nutzen. Ein Build stellt sein Hugging-Face-Modell über den Abrufer des Frameworks bereit
   (fortsetzbare `.part`-Dateien, jede Datei gegen Größe und sha256 des Hubs geprüft, durch einen Abbruch binnen
@@ -2458,76 +2466,76 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Target, safetensors oder GGUF, nicht zugangsbeschränktes Modell und Basismodell, freizügige Lizenz, offizielles
   Basis-Image, Größenklasse), nur wenn das Laufwerk die größere Reserve behält. `report_cannot_do` zählt nur die
   Aufrufe der laufenden Sitzung, und Hugging-Face-Abfragen von `check_build_request` zählen zur Rate von 30 pro Stunde.
-- **Eine Hugging-Face-Einordnung für Builds und Downloads**: `check_build_request` und `start_build` lesen Lizenz, Zugangsbeschränkung und Dateien eines Modells jetzt nach denselben Regeln wie `get_hf_model_info` und `download_hf_file` (Lizenzen wie GPL, DeepSeek oder Qwen Research waren auf dem Build-Weg „unbekannt“ und auf dem Download-Weg „einschränkend“), und beide halten dieselbe Speicherreserve frei.
-- **MCP über HTTP**: Ein Token hält höchstens 4 der 8 Sitzungen, damit ein Client die anderen nicht aussperren kann;
+- `2026-10-12 05:23 UTC` · `v3.1.0` **Eine Hugging-Face-Einordnung für Builds und Downloads**: `check_build_request` und `start_build` lesen Lizenz, Zugangsbeschränkung und Dateien eines Modells jetzt nach denselben Regeln wie `get_hf_model_info` und `download_hf_file` (Lizenzen wie GPL, DeepSeek oder Qwen Research waren auf dem Build-Weg „unbekannt“ und auf dem Download-Weg „einschränkend“), und beide halten dieselbe Speicherreserve frei.
+- `2026-10-12 00:11 UTC` · `v3.1.0` **MCP über HTTP**: Ein Token hält höchstens 4 der 8 Sitzungen, damit ein Client die anderen nicht aussperren kann;
   eine Sitzung schließt nach 10 Minuten ohne Anfrage (die Vorgabe des SDK sind 30); eine noch offene Anfrage, wenn ihr
   Token widerrufen oder rotiert wird (ein Warten, ein Ereignisstrom, ein Listen-Strom), wird sofort geschlossen, und
   ebenso die Sitzungen dieses Tokens: Eine Sitzung gehört dem Token-Wert, der sie geöffnet hat, sodass der Client nach
   einer Rotation eine neue öffnet und die alten weder seinen Anteil noch die Plätze des Servers belegen.
-- **Dittos Aufgabentexte** (Chat mit Tools, Healing-Analyse, Modulvorschlag, Build-Empfehlung) stehen in einem Modul,
+- `2026-10-11 23:52 UTC` · `v3.1.0` **Dittos Aufgabentexte** (Chat mit Tools, Healing-Analyse, Modulvorschlag, Build-Empfehlung) stehen in einem Modul,
   `orchestrator/llm/task_prompts.py`, das sie mit den MCP-Prompts teilen, und jeder trägt die Regel für das ehrliche
   „kann ich nicht“: den konkreten Grund nennen, nie ein Ergebnis behaupten, das man nicht bekommen hat, und
   ungetestete Hardware ist kein Grund abzulehnen. Die Modulaufgabe beschränkt Basis-Images nicht mehr auf `debian:*`
   und `ubuntu:*`: Sie bevorzugt ein Docker Official Image mit den Paketen des Herstellers und begründet jedes andere
   Image. Ein von Ditto vorgeschlagenes Modul sagt in seiner Beschreibung, dass es auf echter Hardware ungetestet ist,
   und nennt die Annahmen, auch eines, das im Modul-Assistenten aus Dittos Vorschlag angelegt wird.
-- **Ditto läuft auf der neuen Anbieterschicht** (offizielle SDKs anthropic und openai) statt auf LiteLLM, und das
+- `2026-10-10 21:50 UTC` · `v3.1.0` **Ditto läuft auf der neuen Anbieterschicht** (offizielle SDKs anthropic und openai) statt auf LiteLLM, und das
   eingebaute Transformers-Modell für den Offline-Modus ist entfernt (der Offline-Modus nutzt lokale Anbieter:
   Ollama, den verwalteten llama-server, einen Server in deinem Netzwerk). Healing-Analysen, Modulvorschläge und
   Build-Empfehlungen sind geprüfte strukturierte Antworten; eine ungültige Antwort ist ein Fehler und wird nie
   angewendet.
-- Der **Chatverlauf** wird nur noch ergänzt, nie überschrieben, und je Benutzer geführt; ein langes Gespräch wird
+- `2026-10-10 21:50 UTC` · `v3.1.0` Der **Chatverlauf** wird nur noch ergänzt, nie überschrieben, und je Benutzer geführt; ein langes Gespräch wird
   in einem neuen zusammengefasst. Verläufe früherer Versionen werden übernommen.
-- Fehler der Anbieter werden in einfacher Sprache erklärt, z. B. ein Claude-API-Schlüssel, der eine Workspace-ID
+- `2026-10-11 00:21 UTC` · `v3.1.0` Fehler der Anbieter werden in einfacher Sprache erklärt, z. B. ein Claude-API-Schlüssel, der eine Workspace-ID
   braucht, ein Workspace, den der Schlüssel nicht nutzen darf, ein falscher, widerrufener oder abgelaufener
   Schlüssel oder ein `ant auth login`-Profil, das eine neue Anmeldung braucht.
-- Mehr Fehler der Anbieter sagen, was passiert ist und was zu tun ist, mit einem Code für GUI und CLI: kein
+- `2026-10-11 03:18 UTC` · `v3.1.0` Mehr Fehler der Anbieter sagen, was passiert ist und was zu tun ist, mit einem Code für GUI und CLI: kein
   Guthaben oder ein Ausgabenlimit in der Claude Console, ein abgelehnter OpenAI-Schlüssel oder ein aufgebrauchtes
   OpenAI-Kontingent, ein Gemini-Schlüssel, den Google ablehnt, ein OpenRouter-Schlüssel an seinem Kreditlimit, ein
   lokaler Server, der nicht läuft oder einen Schlüssel verlangt, Ollama ohne seine Anmeldung bei ollama.com, ein
   gesperrter Schlüsselbund und ein unlesbarer Tresor. Ein Claude-Ausgabenlimit wird nicht mehr wie ein
   Ratenlimit wiederholt.
-- **Anmeldung bei der Claude-API**: Ein gespeicherter API-Schlüssel wird immer zuerst genutzt. Ein
+- `2026-10-11 00:21 UTC` · `v3.1.0` **Anmeldung bei der Claude-API**: Ein gespeicherter API-Schlüssel wird immer zuerst genutzt. Ein
   `ant auth login`-Profil wird nur verwendet, wenn du es auswählst (`ai_auth_anthropic: ant_profile`); bisher
   ersetzte ein Profil auf der Festplatte stillschweigend den gespeicherten Schlüssel und damit das Konto, das
   abgerechnet wird. Der frühere Name `oauth` bedeutet weiterhin das Profil, in der Einstellung und in einem
   Anbieterkatalog in deinem Konfigurationsordner.
-- Dittos Prompts: Build-Fehler werden richtig der Build-Maschine oder dem Gerät zugeordnet, Build-Empfehlungen
+- `2026-10-10 23:50 UTC` · `v3.1.0` Dittos Prompts: Build-Fehler werden richtig der Build-Maschine oder dem Gerät zugeordnet, Build-Empfehlungen
   wissen, welche Eingaben jedes Format annimmt (ein ONNX-Modell wird nicht an GGUF geschickt), Fragen zu Targets
   und Builds werden aus den Tools beantwortet, und Modulvorschläge verwenden Compiler-Flags statt der Liste der
   CPU-Features.
-- Lokales Modell: Aufwand „low“ schaltet das Nachdenken (Thinking) ab (Qwen3.5 auf llama-server denkt sonst in
+- `2026-10-10 23:50 UTC` · `v3.1.0` Lokales Modell: Aufwand „low“ schaltet das Nachdenken (Thinking) ab (Qwen3.5 auf llama-server denkt sonst in
   voller Länge, was auf einer CPU Minuten dauert); ab „medium“ bleibt es an.
-- Abhängigkeiten: `anthropic` 1.13.0, `openai` 3.28.0 (vorher 2.54.0), `fastembed` 0.8.1 (lokale Embeddings, ONNX
+- `2026-10-11 14:01 UTC` · `v3.1.0` Abhängigkeiten: `anthropic` 1.13.0, `openai` 3.28.0 (vorher 2.54.0), `fastembed` 0.8.1 (lokale Embeddings, ONNX
   auf der CPU) und `pyrage` 1.4.0 (age-Verschlüsselung privat geteilter Community-Packs) sind exakt gepinnt;
   pip-audit meldet keine bekannten Schwachstellen.
-- **Dittos Wissensauszüge passen in den Kontext**: Sie belegen höchstens ein Drittel von `chat_context_limit`; ein
+- `2026-10-11 02:31 UTC` · `v3.1.0` **Dittos Wissensauszüge passen in den Kontext**: Sie belegen höchstens ein Drittel von `chat_context_limit`; ein
   Auszug, der nicht passt, wird übersprungen, und ein zu langer erster wird an einer Zeile gekürzt (ein offener
   Codeblock wird geschlossen).
-- **Ergebnis von Deep Ingest**: Es meldete „Deep Ingest complete“, selbst wenn jede URL fehlschlug. Jetzt meldet
+- `2026-10-11 02:03 UTC` · `v3.1.0` **Ergebnis von Deep Ingest**: Es meldete „Deep Ingest complete“, selbst wenn jede URL fehlschlug. Jetzt meldet
   es Erfolg (alles gespeichert), teilweise (einige Seiten gespeichert; andere schlugen fehl, waren von der Site
   vorbehalten, oder der Crawl wurde gestoppt) oder Fehlschlag (nichts gespeichert), jeweils mit eigener Meldung und
   erst, nachdem der letzte Schreibvorgang zurückgekehrt ist. Seiten werden gespeichert, sobald sie gelesen sind;
   ein gestoppter oder unterbrochener Crawl behält also, was er schon gespeichert hat, und Seiten, die nicht
   abgerufen werden konnten, stehen im Crawl-Protokoll.
-- Der User-Agent des Crawlers nennt die echte Version des Frameworks (er nannte 1.6.0).
-- Deep Ingest: Ein Link, der auf einen anderen Host weiterleitet, wird wie jeder andere externe Link übersprungen;
+- `2026-10-11 01:30 UTC` · `v3.1.0` Der User-Agent des Crawlers nennt die echte Version des Frameworks (er nannte 1.6.0).
+- `2026-10-11 01:30 UTC` · `v3.1.0` Deep Ingest: Ein Link, der auf einen anderen Host weiterleitet, wird wie jeder andere externe Link übersprungen;
   nur eine Weiterleitung der Start-URL kann den Crawl auf einen anderen Host verlegen.
-- Wissensexporte und mit ihnen der Wissens-Snapshot neuer Target-Module werden bereinigt: Home-Ordner, IP- und
+- `2026-10-11 01:54 UTC` · `v3.1.0` Wissensexporte und mit ihnen der Wissens-Snapshot neuer Target-Module werden bereinigt: Home-Ordner, IP- und
   MAC-Adressen, E-Mail-Adressen, JWTs, der Hostname und der Benutzername werden entfernt, zusätzlich zu
   API-Schlüsseln. Image-Digests (`name@sha256:...`) und die Pfade von Standardkonten wie `/root` oder
   `/home/runner` bleiben, wie sie sind, sodass ein bereinigtes Target weiterhin baut.
-- Der Wissens-Snapshot eines neuen Target-Moduls ist freiwillig (ein Kontrollkästchen auf der letzten Seite des
+- `2026-10-11 02:42 UTC` · `v3.1.0` Der Wissens-Snapshot eines neuen Target-Moduls ist freiwillig (ein Kontrollkästchen auf der letzten Seite des
   Assistenten) und enthält nur die Seiten, die im Assistenten für dieses Target gecrawlt wurden, und zwar alle:
   Finish bleibt gesperrt, solange ein Crawl läuft. Vorher ging die ganze lokale Wissensbasis in jedes Modul. Eine
   `README.md` daneben sagt, was er enthält und dass das Framework ihn nicht einliest; ließ sich nichts anhängen,
   sagt der Assistent das.
-- Target-Module, die mit dem Assistenten, `llm-cli module create` oder Ditto erstellt werden, bekommen einen Block
+- `2026-10-11 02:42 UTC` · `v3.1.0` Target-Module, die mit dem Assistenten, `llm-cli module create` oder Ditto erstellt werden, bekommen einen Block
   `capabilities:` (Support-Level community: ihre Boards und GGUF mit den Typen, die ihr Build-Skript verarbeitet),
   sodass Builder, CLI und KI-Clients ihre Build-Einstellungen prüfen. Die Erzeugung schlägt fehl, wenn irgendwo ein
   Platzhalter der Vorlage übrig bleibt, außer im Wissens-Snapshot, dessen gecrawlte Seiten Text wie `YYYY-MM-DD`
   enthalten dürfen.
-- **Tresor für Zugangsdaten im Format v2**: Jeder Eintrag trägt eine Schlüssel-ID, und der Schlüssel des Tresors
+- `2026-10-11 00:29 UTC` · `v3.1.0` **Tresor für Zugangsdaten im Format v2**: Jeder Eintrag trägt eine Schlüssel-ID, und der Schlüssel des Tresors
   lässt sich wechseln (jeder Eintrag wird neu verschlüsselt, der alte Schlüssel entfernt; ein unterbrochener
   Wechsel wird beim nächsten Start abgeschlossen). Jeder Tresor hält seinen Schlüssel in einem eigenen Eintrag im
   Schlüsselbund, sodass ein Schlüsselwechsel oder ein anderer Schutz nie einen anderen Tresor berührt (etwa den
@@ -2535,27 +2543,27 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Schlüsselwechsel in seinen eigenen Eintrag um. Anbieterschlüssel werden als Datensätze unter
   `cred/<anbieter>/api_key` gespeichert; Speicher und Schlüsselnamen früherer Versionen werden wie bisher gelesen
   und bei der nächsten Änderung umgestellt.
-- Das Lesen eines Geheimnisses wird einmal je Prozess und Name ins Audit-Log der Secrets geschrieben, nicht bei
+- `2026-10-11 00:29 UTC` · `v3.1.0` Das Lesen eines Geheimnisses wird einmal je Prozess und Name ins Audit-Log der Secrets geschrieben, nicht bei
   jedem Zugriff.
-- Befehle, die den Tresor brauchen, enden mit Exit-Code 5, wenn er sich nicht nutzen lässt (kein nutzbarer
+- `2026-10-11 04:36 UTC` · `v3.1.0` Befehle, die den Tresor brauchen, enden mit Exit-Code 5, wenn er sich nicht nutzen lässt (kein nutzbarer
   Schlüsselbund, keine Passphrase, ein beschädigter Tresor), statt mit 1, und nennen die Möglichkeiten, auch
   `llm-cli ditto auth storage --use ...`.
-- Fehlermeldungen und Hinweise nennen `llm-cli ditto login <anbieter>` statt
+- `2026-10-11 04:36 UTC` · `v3.1.0` Fehlermeldungen und Hinweise nennen `llm-cli ditto login <anbieter>` statt
   `llm-cli secrets set <Schlüsselname>`; `llm-cli module generate-ai` nutzt die gespeicherte Anmeldung und fragt
   nie selbst nach einem Schlüssel.
-- `scripts/hardware_probe.sh` und `scripts/hardware_probe.ps1` schreiben Schema 2 mit denselben Schlüsseln wie die
+- `2026-10-11 20:08 UTC` · `v3.1.0` `scripts/hardware_probe.sh` und `scripts/hardware_probe.ps1` schreiben Schema 2 mit denselben Schlüsseln wie die
   Python-Probe (Tests führen die `.sh` und die `.py` auf denselben Testrechnern aus). Beide sind standardmäßig nicht
   interaktiv: Die Paketinstallations-Abfrage der `.sh` braucht `--install-tools` (sie bietet jetzt `vulkan-tools` an,
   das einzige Hilfsprogramm, das die Probe nutzt), und die `.ps1` startet sich nur mit `-Elevate` mit erhöhten Rechten
   neu. Die `.sh` läuft in jeder POSIX-Shell (dash, BusyBox ash), und `llm-cli scan --script` und der GUI-Scan dieses
   PCs führen sie mit `sh` aus, also geht es auch ohne bash; sie liest `/proc` und `/sys` direkt statt über `lspci` und
   `lsusb` und schreibt alle GPUs; die `.ps1` liest den nutzbaren Speicher statt der Summe der Speicherplätze.
-- Target-Images bauen den llama.cpp-Pin aus `configs/llama_runtime.yml` per Commit (`b11429`, `d8123504`): Die
+- `2026-10-11 23:59 UTC` · `v3.1.0` Target-Images bauen den llama.cpp-Pin aus `configs/llama_runtime.yml` per Commit (`b11429`, `d8123504`): Die
   Engine übergibt Tag und Commit, und das Image prüft den Commit. Die Einstellung `llama_cpp_version` hat als Vorgabe
   den Tag des Pins statt eines fest geschriebenen `v0.6.0` und ändert nicht mehr, was gebaut wird (ein anderer Wert
   ergibt eine Warnung im Build-Log). Die Dockerfiles, die Build-Argumente in `target.yml` und
   `configs/project_sources.yml` (dort stand noch `b4009`) nennen denselben Tag und Commit.
-- Die Target-Vorlage baut die Konvertierungswerkzeuge von llama.cpp mit denselben Schritten wie das Rockchip-Image,
+- `2026-10-11 23:59 UTC` · `v3.1.0` Die Target-Vorlage baut die Konvertierungswerkzeuge von llama.cpp mit denselben Schritten wie das Rockchip-Image,
   ein erzeugtes Modul bricht also nicht mehr mit „llama.cpp converter not found“ ab. Die GPU-Vorlage nimmt CUDA 12.9.1
   aus den Redist-Archiven von NVIDIA (Manifest per sha256 festgelegt, jede Komponente geprüft) auf Ubuntu 22.04, per
   Digest festgelegt, statt der nicht festgelegten `nvidia/cuda:12.2.2`-Images; das vorgebaute Entwicklungs-Image von
@@ -2563,62 +2571,62 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Vorschläge enthalten nie eines, weil eine Probe-Datei sie lenken könnte) und gekennzeichnet mit
   `org.llm-framework.cuda-source=prebuilt-image`, in den Logs mit „not self-built“. Der Assistent trägt für NVIDIA-Hardware kein `nvidia/cuda`-Image
   mehr ein.
-- `deploy.sh` eines GGUF-Pakets schlägt keinen `llama-server` mehr vor, der im `PATH` des Boards gefunden wird: Es
+- `2026-10-11 23:49 UTC` · `v3.1.0` `deploy.sh` eines GGUF-Pakets schlägt keinen `llama-server` mehr vor, der im `PATH` des Boards gefunden wird: Es
   nennt das Startskript der selbst gebauten Geräte-Laufzeit, wenn sie installiert ist, und sonst, wie man sie
   deployt (`llm-cli device runtime build` und `deploy`). `llm-cli scan --device` merkt sich den SSH-Benutzer als
   Deploy-Benutzer des Boards (nie root).
-- Die Perplexity-Prüfung des Dataset-Managers nutzt das selbst gebaute `llama-perplexity` dieses Rechners, statt
+- `2026-10-12 00:37 UTC` · `v3.1.0` Die Perplexity-Prüfung des Dataset-Managers nutzt das selbst gebaute `llama-perplexity` dieses Rechners, statt
   `ghcr.io/smilez1985/llm-runtime` zu holen: Katalogmodelle (Dittos eigene) nativ oder in der Docker-Sandbox; jedes
   andere Modell, etwa ein für ein Board umgewandeltes, nur in der Docker-Sandbox (das eigene, lokal gebaute Image des
   Builds, ohne Netzwerk), nie nativ auf diesem Computer. Eine gescheiterte Messung ist ein Fehler mit Grund statt
   der Werte 999.99 oder 888.88.
-- **MCP-Ergebnisse**: Der Textblock eines Tool-Ergebnisses beginnt mit einem Satz, der nur aus Fakten des Frameworks
+- `2026-10-11 18:40 UTC` · `v3.1.0` **MCP-Ergebnisse**: Der Textblock eines Tool-Ergebnisses beginnt mit einem Satz, der nur aus Fakten des Frameworks
   besteht (IDs, Zustände, Anzahlen), gefolgt vom JSON, eingepackt als nicht vertrauenswürdige Daten;
   Ausgabeschemas markieren jedes Feld mit externem Text (`"untrusted": true`); Ergebnisse tragen `notes`, die das
   Framework schreibt (zum Beispiel „die Wissensbasis ist erreichbar; kein Auszug passte“ oder dass nur die Builds
   dieses Prozesses aufgeführt sind); `suggested_step` eines offenen Self-Healing-Vorschlags heißt jetzt
   `manual_step_text`, Text zum Lesen für die Person. Die Serveranweisungen sagen, wie markierte Felder zu behandeln
   sind und dass der Client eine Aufgabe, die er nicht erledigen kann, mit dem konkreten Grund meldet.
-- **MCP-Clients sehen nur die Tools, die sie nutzen dürfen**: Tools, die deine Berechtigungen verweigern, fehlen in
+- `2026-10-15 17:14 UTC` · `v3.1.0` **MCP-Clients sehen nur die Tools, die sie nutzen dürfen**: Tools, die deine Berechtigungen verweigern, fehlen in
   der Tool-Liste (dieselben Tools, die Ditto bei denselben Berechtigungen bekommt); ein Aufruf eines solchen Tools
   wird trotzdem abgelehnt und festgehalten. `destructiveHint` folgt der eigenen Angabe jedes Tools statt seiner Stufe
   (`resolve_healing` bleibt als zerstörend markiert: es ändert eine Einstellung und wiederholt einen Build), und
   Tools, die andere Geräte erreichen, bitten den Client, bei jedem Aufruf seine eigene Rückfrage zu zeigen
   (`anthropic/requiresUserInteraction`).
-- Eine lokale Modelldatei wird allein in die Build-Container eingebunden, nicht mehr zusammen mit dem Ordner, in
+- `2026-10-11 18:52 UTC` · `v3.1.0` Eine lokale Modelldatei wird allein in die Build-Container eingebunden, nicht mehr zusammen mit dem Ordner, in
   dem sie liegt (ein Modell, das Dateien daneben braucht, etwa externe ONNX-Daten, wird als Ordner angegeben). Eine
   RKNN-Beispielliste neben einer Modelldatei bekommt jetzt ihre eigene Ordnereinbindung.
-- MCP und Ditto: Builds gehören dem Aufrufer, der sie gestartet hat (einer MCP-Verbindung, jedem benannten Token
+- `2026-10-11 21:51 UTC` · `v3.1.0` MCP und Ditto: Builds gehören dem Aufrufer, der sie gestartet hat (einer MCP-Verbindung, jedem benannten Token
   über HTTP, Ditto). Den eigenen Build
   mit `cancel_build` abzubrechen fragt nicht mehr; den Build eines anderen Clients abzubrechen folgt den
   Tool-Berechtigungen (standardmäßig fragt es). Eine Einstellung für das einzelne Tool gilt weiter, eine verweigerte
   Stufe bleibt verweigert, und eine beschädigte Berechtigungsdatei verbietet weiter. `get_build_status` zeigt die
   Aufruferklasse, die einen Build gestartet hat.
-- **MCP über HTTP braucht ein benanntes Token je Client.** Das eine gemeinsame Token je Benutzer aus 3.0.0
+- `2026-10-11 19:52 UTC` · `v3.1.0` **MCP über HTTP braucht ein benanntes Token je Client.** Das eine gemeinsame Token je Benutzer aus 3.0.0
   (`~/.llm-framework/mcp_http_token`) wird nicht mehr akzeptiert: Lege mit `llm-cli mcp token add NAME` ein Token je
   Client an, gib es dem Client und lösche die alte Datei. `llm-cli mcp serve --transport http` startet nicht, bevor
   es ein benanntes Token gibt.
-- **Ein Client, der dich nicht fragen kann, wird nicht mehr abgewiesen**, wenn ein Tool auf „fragen“ steht: Der
+- `2026-10-11 22:55 UTC` · `v3.1.0` **Ein Client, der dich nicht fragen kann, wird nicht mehr abgewiesen**, wenn ein Tool auf „fragen“ steht: Der
   Aufruf wartet stattdessen im Framework auf deine Freigabe (siehe Hinzugefügt); bisher scheiterte er mit einem
   Hinweis, wie du das Tool erlaubst.
-- **Bestätige deine Tool-Berechtigungen nach dem Update einmal.** Die Berechtigungsdatei ist jetzt signiert, und eine
+- `2026-10-11 22:32 UTC` · `v3.1.0` **Bestätige deine Tool-Berechtigungen nach dem Update einmal.** Die Berechtigungsdatei ist jetzt signiert, und eine
   von 3.0.0 gespeicherte trägt keine Signatur, daher ist jedes Tool verboten, bis du die Berechtigungen neu einrichtest
   (die GUI zeigt den Dialog beim ersten Start und nennt den Grund; `llm-cli tools permissions`).
   `llm-cli tools permissions`, auch mit `--reset`, und `llm-cli ditto setup` brauchen eine Person an einem Terminal:
   Weitergeleitete Antworten werden abgelehnt.
-- **Targets für KI-Aufrufer**: `list_targets` zeigt das Vertrauen jedes Targets (`shipped`, das Vertrauen eines
+- `2026-10-12 04:17 UTC` · `v3.1.0` **Targets für KI-Aufrufer**: `list_targets` zeigt das Vertrauen jedes Targets (`shipped`, das Vertrauen eines
   Pakets, `ai-generated`, `own`) und ob es ungetestet ist; `get_target_capabilities` ergänzt das Vertrauen, die
   Annahmen und die Begründung des Basis-Images eines KI-erstellten Targets (Text von außen) und mit `check_files` die
   Probleme, die die Modul- und Paketprüfungen in seinen Dateien finden. KI-erstellte Targets tragen
   `provenance: ai-generated` und `untested: true` in `target.yml`, und ihre Builds warnen, dass sie ungetestet sind und
   ihr Image mit Netzzugang gebaut wird.
-- **Probe und KI-Module ohne Terminal**: Die lokale Probe (`llm-cli scan`, `probe_local_hardware`) führt das
+- `2026-10-12 04:17 UTC` · `v3.1.0` **Probe und KI-Module ohne Terminal**: Die lokale Probe (`llm-cli scan`, `probe_local_hardware`) führt das
   Ersatzskript mit Eingabe aus `/dev/null`, `NON_INTERACTIVE=true` und eigenem Arbeitsordner aus und hört nach 120
   Sekunden auf. `llm-cli module generate-ai` legt das Basis-Image vor der Frage auf seinen Digest fest; es und der
   Assistent halten das gespeicherte Modul im Audit-Log fest (`module_saved`), und der Assistent gibt jedes Feld von
   Dittos Vorschlag weiter.
 
-- **MCP: Builds werden mit dem gefragt, was das Framework nachgeschlagen hat** (Design T1, DECISIONS Runde 2 Punkt
+- `2026-10-12 03:20 UTC` · `v3.1.0` **MCP: Builds werden mit dem gefragt, was das Framework nachgeschlagen hat** (Design T1, DECISIONS Runde 2 Punkt
   8): `start_build` zeigt den Hugging-Face-Commit, den es baut (und baut genau diesen), Downloadgröße, Art der
   Gewichte, Lizenz, Zugangsbeschränkung und den Zugriff des gespeicherten Tokens, den Platz auf jedem Laufwerk mit
   Konvertierungsreserve und dreifach gezählter Ausgabe, eine Schätzung, ob dieser Rechner und das Board es tragen,
@@ -2627,19 +2635,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   (`insufficient_resources`, mit den Zahlen); Reservierungen liegen in `~/.llm-framework/disk_reservations.json` und
   werden geprüft, wenn ein Build die Warteschlange verlässt. Neues Lese-Tool `check_build_request`: derselbe Plan als
   Probelauf. `start_build` nimmt `optimization`.
-- **MCP: Build-Abfragen mit ID und Label**: `list_artifacts` benennt gebaute Modelle mit einer ID und
+- `2026-10-12 03:20 UTC` · `v3.1.0` **MCP: Build-Abfragen mit ID und Label**: `list_artifacts` benennt gebaute Modelle mit einer ID und
   `output:<relativer Pfad>` mit Größe und Hash (seitenweise, gefiltert), das neue `get_artifact_details` liefert
   Manifest (externer Text), Model Card und Dateien, mit den Ressourcen `lcf://artifacts/{id}/manifest` und
   `/model-card`; `list_build_requests` (seitenweise) und `get_build_status` zeigen auch Builds anderer
   Framework-Prozesse aus ihren Build-Records, nur lesbar; `get_build_status` sagt, was die Anfrage baut;
   `read_build_log` liefert höchstens 1000 Zeilen und blättert mit `before_line` zurück.
-- **Hugging-Face-Modelle werden in einem Ordner pro Commit bereitgestellt**,
+- `2026-10-12 03:20 UTC` · `v3.1.0` **Hugging-Face-Modelle werden in einem Ordner pro Commit bereitgestellt**,
   `<cache_dir>/models/hf/<owner>--<name>/<commit>/`, Datei für Datei unter einer Sperre; nur dieser Ordner wird in die
   Build-Container eingebunden (nicht mehr der ganze Modell-Cache), ein Abbruch stoppt den Download vor der nächsten
   Datei, und der Download stoppt, wenn das Cache-Laufwerk unter die Hälfte seiner Reserve fällt. Ein volles Laufwerk
   wird als `insufficient_resources` mit dem freien Platz gemeldet.
 
-- **MCP: Status und Einstellungen des Frameworks** (Design T2, DECISIONS Runde 1 Punkt 4): `get_status` zeigt die
+- `2026-10-12 03:34 UTC` · `v3.1.0` **MCP: Status und Einstellungen des Frameworks** (Design T2, DECISIONS Runde 1 Punkt 4): `get_status` zeigt die
   Abschnitte Framework, Rechner, lokale Laufzeit (ein vorgebautes Archiv als „nicht selbst gebaut“ gekennzeichnet),
   Wissensbasis, KI-Zugang (nur Zustände, nie ein Schlüsselteil, Konto oder Endpunkt), Berechtigungen und die
   Audit-Einträge dieses Aufrufers; neu sind `get_settings` (eine feste Leseliste, Adressen als Schema und Host, Ordner
@@ -2650,25 +2658,25 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Ansagen, kann keine KI ändern, und `update_settings` wird nicht registriert, wenn es eine davon erreichen könnte;
   Berechtigungen, Geheimnisse, Tresor, Einstellungen des KI-Anbieters, Adressen und Ordner vor der Frage abgelehnt;
   kein Wert wird als „Standard“ gelesen).
-- **MCP: ehrliches „kann nicht“, vom Framework geprüft** (DECISIONS Runde 3): Das neue `report_cannot_do` nimmt einen
+- `2026-10-12 03:34 UTC` · `v3.1.0` **MCP: ehrliches „kann nicht“, vom Framework geprüft** (DECISIONS Runde 3): Das neue `report_cannot_do` nimmt einen
   Grundcode (kein „ungetestet“) und was fehlt, prüft ihn an den Berechtigungen des Aufrufers, den Audit-Einträgen und
   Grenzen dieser Sitzung, dem Laufwerk und den Aktionen, die kein Tool tut, und antwortet confirmed, contradicted,
   premature (mit den Tools, die zuerst zu versuchen sind) oder unchecked, mit einem Satz nur aus Fakten des
   Frameworks (ein Tool nur mit seinem registrierten Namen); „die Hardware ist nicht verfügbar“ wird für jedes Tool widersprochen, das kein Gerät nutzt. Meldungen
   werden als `cannot_reported` protokolliert; `llm-cli tools audit --summary` zählt sie je Aufrufer.
 
-- **Paketieren und Übertragen sagen, warum sie gescheitert sind**: `DeploymentManager` gibt den Grund zurück (kein
+- `2026-10-12 06:03 UTC` · `v3.1.0` **Paketieren und Übertragen sagen, warum sie gescheitert sind**: `DeploymentManager` gibt den Grund zurück (kein
   Docker, ein nicht festgelegtes Image, ein geänderter Host-Schlüssel, der Exit-Status von `deploy.sh`) statt `None`
   oder `False` mit einer Logzeile (G23); `llm-cli deploy package` gibt ihn aus. Ein Paket wird unter einem vorläufigen
   Namen geschrieben und erst umbenannt, wenn es vollständig ist.
 
-- **Der Reiter „AI Chat“ ist in den Chat-Bereich umgezogen**: Das Hauptfenster hat den Reiter nicht mehr; alles,
+- `2026-10-12 18:24 UTC` · `v3.1.0` **Der Reiter „AI Chat“ ist in den Chat-Bereich umgezogen**: Das Hauptfenster hat den Reiter nicht mehr; alles,
   was er konnte, funktioniert im Bereich (Dittos Runden in einem Worker-Thread, der Bestätigungsdialog für Dittos
   Tools, die Zeile mit dem Zugang, das gespeicherte Gespräch in `chat_history.json`, das einmal in den Chat-Verlauf
   übernommen wird). `gui/chat_window.py` behält `ChatWorker`, `describe_access` und `ChatWindow` (jetzt der Bereich)
   mit den alten Attributnamen. Enter sendet, Umschalt+Enter fügt eine Zeile ein. Die Hinweise der Statusleiste zu einem
   Korrekturvorschlag eines KI-Clients und zur Nutzung einer Dauerfreigabe kommen auch im Chat an.
-- **„Chat leeren“ zählt auf, was es löscht, bevor es fragt**: Das frühere „Clear History“ löschte Dittos ganzen
+- `2026-10-12 18:24 UTC` · `v3.1.0` **„Chat leeren“ zählt auf, was es löscht, bevor es fragt**: Das frühere „Clear History“ löschte Dittos ganzen
   Chatverlauf nach einem bloßen „Sind Sie sicher?“. Die Frage nennt jetzt für Dittos Gespräch (`chat_history.json`,
   so wie die Datei es jetzt hält, auch wenn ein anderes Fenster oder das Terminal es inzwischen gespeichert hat) und
   für die Gesprächszeilen des Chat-Verlaufs den vollständigen Pfad, den Dateinamen, die Größe und was es ist, sagt,
@@ -2677,7 +2685,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   bevor etwas gelöscht wird. Nichts wird gelöscht ohne Audit-Log (auch ohne Chat-Verlauf), wenn sich der Chat oder
   Dittos Gespräch geändert hat, während du gefragt wurdest, oder wenn das Fenster ein Gespräch hält, das seine Datei
   nicht zeigt.
-- **Der Doctor ist jetzt Mojo** (veröffentlicht in 3.0.0; sechste Runde, Entscheidung 9): Der Code liegt jetzt in
+- `2026-10-16 00:25 UTC` · `v3.1.0` **Der Doctor ist jetzt Mojo** (veröffentlicht in 3.0.0; sechste Runde, Entscheidung 9): Der Code liegt jetzt in
   `orchestrator/Core/mojo/` (`orchestrator/Core/doctor.py` exportiert jeden Namen weiter, den es hatte); Befundcodes,
   Exit-Codes und JSON-Schlüssel bleiben, und das JSON nennt je Befund zusätzlich `where`, `why`, `repair_id` und
   `cannot`. `llm-cli doctor` behält seine Optionen und seine Ausgabe und schreibt einen kurzen Hinweis auf stderr, der
@@ -2687,7 +2695,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   der Build-Images des Frameworks. Das Tool `run_doctor` bleibt aufrufbar, wird aber nicht mehr aufgelistet; eine
   Einstellung für `run_doctor` oder `run_mojo_oracle` gilt für beide, und die strengere gewinnt. `make mojo` neben
   `make doctor`.
-- **Wissenspakete enthalten den vollen Text einer Seite nur, wo ihre Lizenz es erlaubt, mit den Lizenztexten, die sie
+- `2026-10-16 15:52 UTC` · `v3.1.0` **Wissenspakete enthalten den vollen Text einer Seite nur, wo ihre Lizenz es erlaubt, mit den Lizenztexten, die sie
   verlangt** (achte Runde, Q-1 und Q-1'; W3 vom 16.10.2026): Ein Wissenspaket und der Wissens-Snapshot, den der
   Modul-Assistent einem Target beilegt, behalten den vollen Text einer Seite nur unter einer Lizenz, die die
   Weitergabe erlaubt (CC0, Gemeinfreiheit, CC BY, CC BY-SA, MIT, Apache-2.0, BSD, ISC, 0BSD, Unlicense, MPL-2.0), mit
@@ -2713,15 +2721,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Der einmalige Hinweis vor Deep Ingest sagt das, deshalb erscheint er noch einmal.
 
 ### Veraltet
-- `--password WERT` bei `deploy run`, `scan --device` und `device runtime deploy`: Jeder Benutzer sieht den Wert in
+- `2026-10-15 20:45 UTC` · `v3.1.0` `--password WERT` bei `deploy run`, `scan --device` und `device runtime deploy`: Jeder Benutzer sieht den Wert in
   der Prozessliste, und er bleibt im Shell-Verlauf. Es funktioniert weiter und gibt eine Warnung aus; nimm `--password`
   ohne Wert (verdeckte Abfrage) oder `--password-stdin`.
-- `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der
+- `2026-10-11 04:36 UTC` · `v3.1.0` `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der
   Prozessliste. Nutze die verdeckte Abfrage oder `--with-token`.
-- `llm-cli build start --parallel`: Die Option hatte nie eine Wirkung (ein Aufruf startet einen Build). Sie ist in
+- `2026-10-11 13:50 UTC` · `v3.1.0` `llm-cli build start --parallel`: Die Option hatte nie eine Wirkung (ein Aufruf startet einen Build). Sie ist in
   der Hilfe ausgeblendet und gibt eine Warnung aus. `--optimization` bleibt; seine Hilfe sagt jetzt, dass das
   Rockchip-Target die Option nicht auswertet.
-- `DeploymentManager.trust_host` (DECISIONS Runde 22, P5): der alte Schreiber eines bestätigten Host-Schlüssels, ohne
+- `2026-10-23 09:38 UTC` · `v3.1.0` `DeploymentManager.trust_host` (DECISIONS Runde 22, P5): der alte Schreiber eines bestätigten Host-Schlüssels, ohne
   Audit-Zeile, den nichts im Framework aufruft. Er ist jetzt ein schlanker Delegate an `orchestrator/remote/pairing.py`
   `trust_presented_key`, den einen Schreiber, der den Schlüssel unter seiner Sperre speichert und im selben Schritt die
   Audit-Zeile des Vertrauens schreibt. Nur die Person kann ihn nutzen: Er nimmt den `pairing.PersonChannel` des Kanals
@@ -2731,26 +2739,26 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   überhaupt keinen Vertrauens-Schreiber mehr.
 
 ### Entfernt
-- Der ungenutzte `LocalProbeWorker` des Builder-Tabs, ein zweiter Starter des Fallback-Probe-Skripts (ein eigener
+- `2026-10-17 15:24 UTC` · `v3.1.0` Der ungenutzte `LocalProbeWorker` des Builder-Tabs, ein zweiter Starter des Fallback-Probe-Skripts (ein eigener
   Subprocess-Aufruf ohne Zeitlimit, mit geerbtem stdin, im Arbeitsordner der GUI). Jeder lokale Scan
   startet das Skript über `HardwareProbes.run_local` (den einen Starter, den `llmcf scan --script` und das
   Scan-Menü nutzen); seine Tests sind dorthin umgezogen.
-- Die veraltete Kopie `Docker Setup/pyproject.toml` (Version 1.6.0, von nichts gelesen): Das Container-Image entsteht
+- `2026-10-15 20:23 UTC` · `v3.1.0` Die veraltete Kopie `Docker Setup/pyproject.toml` (Version 1.6.0, von nichts gelesen): Das Container-Image entsteht
   aus der `pyproject.toml` und der `requirements.txt` des Repositorys selbst.
-- Dittos generierte Füll-Kalibrierungsdaten (Builds nutzen den mitgelieferten Kalibrierungstext oder deinen
+- `2026-10-10 21:50 UTC` · `v3.1.0` Dittos generierte Füll-Kalibrierungsdaten (Builds nutzen den mitgelieferten Kalibrierungstext oder deinen
   eigenen Datensatz).
-- `litellm` und `tiktoken` und mit ihnen 19 indirekte Pakete (aiohttp, boto3, jinja2 und andere).
-- Die ungenutzte Einstellung `input_history` (der Eingabeverlauf ist persönlich und liegt im Zustandsordner des
+- `2026-10-10 22:57 UTC` · `v3.1.0` `litellm` und `tiktoken` und mit ihnen 19 indirekte Pakete (aiohttp, boto3, jinja2 und andere).
+- `2026-10-11 02:55 UTC` · `v3.1.0` Die ungenutzte Einstellung `input_history` (der Eingabeverlauf ist persönlich und liegt im Zustandsordner des
   Benutzers, nicht in der gemeinsamen `configs/config.yml`).
-- Die Option *Respect robots.txt* im Deep-Ingest-Dialog und die Einstellung `crawler_respect_robots`: robots.txt
+- `2026-10-11 03:30 UTC` · `v3.1.0` Die Option *Respect robots.txt* im Deep-Ingest-Dialog und die Einstellung `crawler_respect_robots`: robots.txt
   ist ein maschinenlesbarer Vorbehalt wie die anderen und wird deshalb immer beachtet.
-- Der „Swarm“-Upload: die XOR-„SwarmCipher“ (eine Verschleierung, die jeder rückgängig machen konnte),
+- `2026-10-11 01:54 UTC` · `v3.1.0` Der „Swarm“-Upload: die XOR-„SwarmCipher“ (eine Verschleierung, die jeder rückgängig machen konnte),
   `llm-cli swarm upload`, der Knopf „Contribute to Swarm“ im Community Hub und seine Abfrage eines GitHub-Tokens.
   Das Framework fragt nie nach einem Repository-Token und speichert keins. Alte Swarm-Pakete in
   `community/knowledge/` werden mit einer Warnung übersprungen.
-- Die Installation von Hand kopierter Modulordner aus `community/`: Community-Packs werden mit
+- `2026-10-11 02:42 UTC` · `v3.1.0` Die Installation von Hand kopierter Modulordner aus `community/`: Community-Packs werden mit
   `llm-cli zoo install` oder dem Community Hub installiert.
-- **Der Claude-Abo-Anbieter `claude_code`** (Ditto über `claude -p` mit den Limits eines Claude-Pro/Max-Abos):
+- `2026-10-11 00:21 UTC` · `v3.1.0` **Der Claude-Abo-Anbieter `claude_code`** (Ditto über `claude -p` mit den Limits eines Claude-Pro/Max-Abos):
   Anthropic erlaubt anderen Apps nicht, die Limits eines Claude-Abos ohne Genehmigung zu nutzen. Ein
   gespeichertes `ai_provider: claude_code` (oder `ClaudeCode`, `Claude Code`), derselbe Name in der Ersatzkette
   oder bei `--provider` bricht jetzt mit einer Meldung ab, die in den KI-Einstellungen einmal angezeigt wird und
@@ -2759,28 +2767,28 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Code selbst heraus nutzen (`llm-cli mcp config`). Es wechselt nie von sich aus zur Claude-API. Ein
   `claude_code`-Eintrag in einem Anbieterkatalog in deinem Konfigurationsordner wird mit einer Warnung
   übersprungen; die anderen Anbieter funktionieren weiter.
-- Die Einstellung `preferred_tiny_model` des entfernten Transformers-Offline-Modus. Eine `config.yml`, die sie noch
+- `2026-10-11 15:48 UTC` · `v3.1.0` Die Einstellung `preferred_tiny_model` des entfernten Transformers-Offline-Modus. Eine `config.yml`, die sie noch
   enthält, lädt wie bisher; der Wert wird ignoriert und bleibt in der Datei.
-- Reste des entfernten Transformers-Offline-Modus und des Qdrant-Containers: der Download kleiner Modelle im
+- `2026-10-11 13:54 UTC` · `v3.1.0` Reste des entfernten Transformers-Offline-Modus und des Qdrant-Containers: der Download kleiner Modelle im
   Model-Manager (er las `source_repositories['tiny_models']`) und `DockerManager.ensure_qdrant_service` (die
   Wissensbasis nutzt ein eingebettetes Qdrant), und der Qdrant-Beiwagen der Gerätepakete: Ein Paket mit `--docker`
   und eingeschalteter Wissensbasis bringt das Qdrant-Image, einen leeren Ordner `data/qdrant` und `QDRANT_HOST` nicht
   mehr mit, weil nichts auf dem Gerät sie nutzte (die Wissensbasis dient Ditto auf diesem Computer), und das
   Deployment-Fenster bietet „Qdrant Sidecar“ nicht mehr an. Die Einstellung `image_qdrant` wird mit einer Logzeile
   ignoriert.
-- Ungenutzter Code: `orchestrator/Core/transparency_manager.py` (RepE: es brauchte ein transformers-Modell im eigenen
+- `2026-10-16 00:39 UTC` · `v3.1.0` Ungenutzter Code: `orchestrator/Core/transparency_manager.py` (RepE: es brauchte ein transformers-Modell im eigenen
   Prozess des Frameworks, das weder der verwaltete llama-server noch ein Cloud-Anbieter liefert) und
   `scripts/ci_image_audit.sh` (von nichts aufgerufen; es startete ein nicht festgelegtes `dive`-Image mit
   eingebundenem Docker-Socket). Der Docker-Workflow schreibt stattdessen die Größe des Rockchip-Images und seine
   Schichten in die Job-Zusammenfassung, mit dem eigenen docker-Befehl des Runners.
 
 ### Behoben
-- **Eine Hersteller-ID ohne Anführungszeichen in einer `target.yml` passt wieder zur Probe**: YAML liest
+- `2026-10-29 15:08 UTC` · `v3.1.0` **Eine Hersteller-ID ohne Anführungszeichen in einer `target.yml` passt wieder zur Probe**: YAML liest
   `vendor_id: 0x1e60` ohne Anführungszeichen als die Ganzzahl 7776, und der Target-Vorschlag beim Import einer Probe
   verglich sie mit `0x1e60` der Probe und fand nichts. `target_manager.hardware_id` gibt eine Schreibweise für eine
   Ganzzahl und für Hex-Text in jeder Groß- und Kleinschreibung, für die Hersteller- und Geräte-IDs des Targets und
   die der Probe.
-- **Das git der gepinnten llama.cpp-Quelle öffnet kein Konsolenfenster und liest jede Ausgabe** (Nacharbeit der
+- `2026-10-24 00:54 UTC` · `v3.1.0` **Das git der gepinnten llama.cpp-Quelle öffnet kein Konsolenfenster und liest jede Ausgabe** (Nacharbeit der
   Übernahmen): `runtime/build/source.Git` startete git ohne `CREATE_NO_WINDOW`, daher blitzte unter Windows ein
   Konsolenfenster auf, wenn das Boards-Fenster die Laufzeit eines Boards baute oder Dittos Laufzeit-Export es aus der
   GUI startete, und eine Ausgabe von git, die kein UTF-8 war, endete in einem `UnicodeDecodeError`-Traceback statt
@@ -2789,17 +2797,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Optionen des Offline-Modus bleiben, wie sie sind. Regressionstests: `tests/test_build_source.py`
   `test_git_starts_like_the_one_helper_starts_a_console_program`,
   `test_a_message_that_is_not_utf8_is_reported_never_a_traceback`.
-- **`llm-cli deploy devices edit` nennt den Grund statt eines Tracebacks**: Der Befehl fing nur die eigenen Fehler
+- `2026-10-23 17:21 UTC` · `v3.1.0` **`llm-cli deploy devices edit` nennt den Grund statt eines Tracebacks**: Der Befehl fing nur die eigenen Fehler
   der Board-Schritte ab; eine von einem anderen Prozess belegte `known_hosts` des Frameworks (ein `LockTimeout` von
   `pairing.replace_key`), Einstellungen, die sich nach deinem Ja nicht lesen ließen, oder eine Datei, die sich vor
   der Frage nicht lesen ließ, endeten in einem Traceback. Jetzt zeigt er jeweils den Grund `local_problem` mit seinem
   nächsten Schritt (`_print_reason`) und was nicht ging, endet mit Exit-Code 1 und ändert nichts.
-- **Alte Hugging-Face-Downloads entfernen geht mit dem echten Audit-Log**: Das Audit-Log lehnt Ergebnisse ab, die es
+- `2026-10-23 17:18 UTC` · `v3.1.0` **Alte Hugging-Face-Downloads entfernen geht mit dem echten Audit-Log**: Das Audit-Log lehnt Ergebnisse ab, die es
   nicht kennt, und das Löschen alter Downloads (Übernehmen, `hf_takeover.delete_old_copies`) schrieb
   `old_downloads_deleted`, das es nicht kannte; das Löschen stoppte also mit „The audit log cannot record the
   deletion“ (die Tests nutzten ein Ersatz-Log). Es ist jetzt ein bekanntes Ergebnis, ebenso `earlier_build_replaced`
   von „Nehmen“.
-- **hadolint-Funde beim Build werden gezeigt statt weggeworfen** (DECISIONS Runde 23, Punkt 4): Der Build meldete
+- `2026-10-23 09:15 UTC` · `v3.1.0` **hadolint-Funde beim Build werden gezeigt statt weggeworfen** (DECISIONS Runde 23, Punkt 4): Der Build meldete
   jedes Ergebnis seiner Dockerfile-Prüfung als „Hadolint check skipped (tool not found or failed)“ und verwarf, was
   hadolint fand. `BuildEngine._validate_dockerfile_hadolint` führt hadolint jetzt über das neue
   `orchestrator/utils/hadolint.py` aus (im Ordner des Dockerfiles mit seinem Dateinamen, ohne Farben, höchstens 60 s)
@@ -2810,7 +2818,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Hinweis: Der Build läuft immer weiter. Der lokale hadolint-Befehl in CONTRIBUTING legt das Image per Digest fest
   (`hadolint/hadolint:v2.15.1@sha256:32dac941...`, FRESHNESS_PLAN F-5) und nennt alle fünf Dockerfiles, die die CI
   prüft.
-- **Eine neuere Version eines Wissenspakets ließ die Auszüge der alten Version zurück** (DECISIONS Runde 23 Punkt 2):
+- `2026-10-23 09:33 UTC` · `v3.1.0` **Eine neuere Version eines Wissenspakets ließ die Auszüge der alten Version zurück** (DECISIONS Runde 23 Punkt 2):
   Paketseiten werden Stück für Stück ohne Ersetzen gespeichert, also behielt eine geänderte oder weggefallene Seite
   ihre alten Auszüge. Jeder Auszug trägt jetzt den Inhalts-Digest des installierten Pakets; sobald jede Seite der neuen
   Version drin ist, werden die Auszüge der älteren entfernt (`RAGManager.remove_pack_leftovers`), je Paket und
@@ -2829,7 +2837,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   das Dateisystem sie behält (nur wo er abweicht; die Inhalte bleiben die des Manifests, also fällt eine später
   geänderte Datei weiter auf), und beide Prüfungen nehmen ihn an. Gecrawlte Seiten ersetzten ihre früheren Auszüge
   schon und werden direkt nach dem Download gespeichert (unverändert).
-- **`ditto models download` ohne Stufe lädt das Modell, das ein einfaches `runtime start` lädt** (Kette
+- `2026-10-23 09:22 UTC` · `v3.1.0` **`ditto models download` ohne Stufe lädt das Modell, das ein einfaches `runtime start` lädt** (Kette
   port-runtime, aus der Prüfung des verwalteten llama-server): `runtime start` lädt die früher mit `--model` gewählte
   Stufe, der Download ohne Stufe holte aber die Empfehlung für diesen Computer; nach der Wahl einer anderen Stufe
   scheiterte der nächste Start daher weiter mit „not downloaded“. Der Download nimmt jetzt die früher gewählte Stufe
@@ -2840,7 +2848,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `test_model_download_defaults_to_the_model_runtime_start_loads`, `tests/test_ditto_models_core.py`
   `test_without_a_tier_the_download_is_the_model_runtime_start_loads`, `tests/test_gui_ditto_models.py`
   `test_without_a_selection_the_download_is_the_model_the_server_loads`.
-- **Ein Rechner, dessen GPU keinen Vulkan-Treiber hat, bekommt den CPU-Build** (Kette port-runtime, aus der Prüfung des
+- `2026-10-23 09:18 UTC` · `v3.1.0` **Ein Rechner, dessen GPU keinen Vulkan-Treiber hat, bekommt den CPU-Build** (Kette port-runtime, aus der Prüfung des
   verwalteten llama-server): Lief `vulkaninfo`, listete aber nur einen Software-Renderer (llvmpipe, lavapipe), setzte
   die Hardware-Erkennung trotzdem `VULKAN=ON`, weil ein Vulkan-Loader, ein Grafikadapter (Windows) oder
   `vulkan-1.dll` da war; die Wahl des offiziellen vorgebauten Archivs und der Plan des selbst gebauten Servers nahmen
@@ -2851,7 +2859,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `test_vulkaninfo_with_only_a_software_renderer_means_no_gpu_driver`,
   `test_windows_vulkaninfo_with_only_a_software_renderer`, `tests/test_hardware_probe.py`
   `test_a_software_renderer_only_means_no_vulkan` (das .sh und das .py auf demselben Rechner).
-- **`runtime start --model` und `--sleep-idle` zählen auch, während ein Server läuft** (Kette port-runtime, aus der
+- `2026-10-23 09:06 UTC` · `v3.1.0` **`runtime start --model` und `--sleep-idle` zählen auch, während ein Server läuft** (Kette port-runtime, aus der
   Prüfung des verwalteten llama-server): Ein Start, der den laufenden Server schon mit dem gewählten Modell vorfand,
   kehrte zurück, bevor die Wahl gespeichert war; `runtime start --model X` (oder `--model auto`, und die Modellwahl
   der GUI) bei laufendem Server ging daher verloren, und der nächste einfache Start lud wieder die Empfehlung. Die
@@ -2864,7 +2872,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `test_an_explicit_idle_time_restarts_a_server_started_with_another`,
   `test_an_idle_time_the_build_cannot_use_restarts_nothing`, `tests/test_runtime_mode.py`
   `test_a_reused_container_remembers_the_tier_and_another_idle_time_restarts_it`.
-- **Die Sperre der lokalen Laufzeit wird nicht mehr minutenlang gehalten** (Kette port-runtime, aus der Prüfung des
+- `2026-10-23 09:02 UTC` · `v3.1.0` **Die Sperre der lokalen Laufzeit wird nicht mehr minutenlang gehalten** (Kette port-runtime, aus der Prüfung des
   verwalteten llama-server): `ditto runtime install --prebuilt` (und **Offizielles fertiges Archiv
   installieren…** in der GUI) lud die Archive herunter, während es die Laufzeit-Sperre hielt; ein
   `runtime start` oder `runtime stop` anderswo wartete daher den ganzen Download ab (ein CUDA-Build hat Hunderte MB),
@@ -2881,7 +2889,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `test_an_install_finished_meanwhile_by_another_process`,
   `test_the_leftovers_of_an_interrupted_install_are_removed_before_the_space_check`,
   `test_exit_handler_does_not_wait_for_a_busy_lock`.
-- **Ein gepinnter Download, der nicht gelingen kann, sagt sofort, warum** (Kette port-runtime, aus der Prüfung des
+- `2026-10-23 08:56 UTC` · `v3.1.0` **Ein gepinnter Download, der nicht gelingen kann, sagt sofort, warum** (Kette port-runtime, aus der Prüfung des
   verwalteten llama-server; `orchestrator/utils/download.py` `PinnedDownloader`, den die Builds und Modelle der lokalen
   Laufzeit und der Community-Zoo teilen): Ein TLS-Zertifikat, das sich nicht prüfen ließ, wurde wie eine abgebrochene
   Verbindung fünfmal mit Wartezeit erneut versucht und endete mit „did not complete after 5 attempts“; jetzt endet es
@@ -2898,7 +2906,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Ablehnung eines anderen Hosts und von HTTP 401 und 403), deshalb wird auch dort eine Größe auf dem Server, die nicht
   der vom Hub gelisteten entspricht, abgelehnt, bevor etwas geschrieben wird (Stufe C, Welle 3). Regressionstests:
   `tests/test_runtime.py` `TestDownloads`, `tests/test_hf_tools.py` `TestTheFetcherSaysWhyAtOnce`.
-- **Die lokale Laufzeit scheitert unter Windows nicht mehr, während ein anderes Fenster ihre Dateien liest** (Kette
+- `2026-10-23 08:52 UTC` · `v3.1.0` **Die lokale Laufzeit scheitert unter Windows nicht mehr, während ein anderes Fenster ihre Dateien liest** (Kette
   port-runtime, aus der Prüfung des verwalteten llama-server): Windows verweigert das Ersetzen oder Löschen einer
   Datei, die ein anderer Prozess gerade offen hat. Der LLMClient der GUI liest `server.json` und die Schlüsseldatei
   des Servers, und ein Prozess, der auf die Laufzeit-Sperre wartet, liest die Sperrdatei; ein Start, Stopp oder eine
@@ -2912,7 +2920,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Virenscanner liest es), lässt eine fertige Installation nicht mehr scheitern: Es bleibt im Download-Ordner, mit
   einer Warnung im Log. Regressionstests: `tests/test_atomic.py`, `tests/test_runtime.py`
   `test_windows_sharing_violations_are_retried`, `test_an_archive_that_cannot_be_deleted_fails_no_finished_install`.
-- **Dittos Tool-Aufrufe und ihre Ergebnisse passen immer zusammen** (Übernahme aus dem behaltenen Worktree
+- `2026-10-23 10:01 UTC` · `v3.1.0` **Dittos Tool-Aufrufe und ihre Ergebnisse passen immer zusammen** (Übernahme aus dem behaltenen Worktree
   ditto-rewire-verified): Jeder Anbieter lehnt ein Gespräch ab, das nach einem unbeantworteten Tool-Aufruf
   weitergeht, also scheiterte jede spätere Frage auf so einem Verlauf. Eine an der Längengrenze abgeschnittene
   Antwort ließ einen Tool-Aufruf unbeantwortet; die Tool-Schleife beantwortet ihn jetzt mit einem Fehlerergebnis
@@ -2923,30 +2931,30 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `transcript` oder `messages`, der keine Liste ist, bricht das Laden des Chats nicht mehr ab. Eine Umsetzung in
   `orchestrator/llm/tool_loop.py` (`CALL_NOT_RUN`, `open_tool_calls`, `close_open_calls`,
   `conversation_is_consistent`). Regressionstests: `tests/test_ditto.py` `TestToolCallsAndResultsPairUp`.
-- **Eine gescheiterte Ditto-Runde, in der schon Tools liefen, sagt das**: Scheitert der Anbieter oder lehnt das
+- `2026-10-23 10:01 UTC` · `v3.1.0` **Eine gescheiterte Ditto-Runde, in der schon Tools liefen, sagt das**: Scheitert der Anbieter oder lehnt das
   Modell ab, nachdem in der Runde schon Tools liefen, nennt die Meldung sie und sagt, dass Ditto sich die Runde
   nicht merkt, damit du prüfst, was sie getan haben (vielleicht wurde ein Build gestartet), bevor du noch einmal
   fragst. Eine Ablehnung in der Tool-Schleife nimmt denselben Weg. Regressionstest: `tests/test_ditto.py`
   `test_a_failed_turn_after_tools_ran_names_them_and_says_it_is_not_remembered`.
-- **Ein Gespräch mit Tool-Runden, das ohne Tools gefragt wird, geht als neues weiter**: **Ohne Werkzeuge
+- `2026-10-23 10:01 UTC` · `v3.1.0` **Ein Gespräch mit Tool-Runden, das ohne Tools gefragt wird, geht als neues weiter**: **Ohne Werkzeuge
   antworten** im Chat-Bereich schickte die früheren Tool-Aufrufe und Ergebnisse ohne Tool-Definitionen, was Claude
   ablehnt. So ein Gespräch wird jetzt wie ein langes zu einem neuen zusammengefasst, und der Hinweis sagt, warum
   (`ChatReply.new_conversation_reason`, `chat.notice.new_conversation_no_tools`). Regressionstests:
   `tests/test_ditto.py` `test_a_conversation_with_tool_turns_asked_without_tools_continues_as_a_new_one`,
   `tests/test_chat_panel.py` `test_the_new_conversation_notice_says_why`.
-- **Strg+C an Dittos Bestätigung im Terminal ist ein Nein**: `llm-cli ditto ask` stürzte ohne stdin ab, und Strg+C
+- `2026-10-23 10:01 UTC` · `v3.1.0` **Strg+C an Dittos Bestätigung im Terminal ist ein Nein**: `llm-cli ditto ask` stürzte ohne stdin ab, und Strg+C
   oder das Ende der Eingabe an der Bestätigung oder an der y/a/n-Rückfrage einer dauerhaften Freigabe kam beim Modell
   als gescheiterter Tool-Aufruf an („Abort“), ohne Zeile `not_confirmed` im Audit-Log. Beides ist jetzt ein
   protokolliertes Nein; `module generate-ai` meldet eine Probe, die sich nicht lesen lässt (ein Ordner, keine
   Berechtigung), oder ein Modul, das sich nicht speichern lässt, statt eines Tracebacks. Regressionstests:
   `tests/test_ditto.py` `TestConfirmations`.
-- **Der Offline-Modus lehnt beim Speichern einen eigenen Server außerhalb dieses Computers und des lokalen Netzes
+- `2026-10-23 10:01 UTC` · `v3.1.0` **Der Offline-Modus lehnt beim Speichern einen eigenen Server außerhalb dieses Computers und des lokalen Netzes
   ab**: Die KI-Einstellungen (Dialog, Anmeldung, MCP `update_settings`) lehnten im Offline-Modus nur Cloud-Vorlagen
   ab, also wurde ein eigener Server mit öffentlicher Adresse gespeichert und erst abgelehnt, wenn Ditto gefragt
   wurde. `AISettingsChange.problems()` nutzt jetzt die Regel der LLM-Schicht selbst (`preset.is_local(address)`).
   Regressionstests: `tests/test_ai_settings_change.py` und `tests/test_dialogs.py`
   `test_offline_mode_accepts_a_custom_server_only_on_the_local_network`.
-- **Im Offline-Modus nimmt der Hugging-Face-Browser keinen Kontakt mehr zu Hugging Face auf** (Konsolidierungskette
+- `2026-10-23 08:44 UTC` · `v3.1.0` **Im Offline-Modus nimmt der Hugging-Face-Browser keinen Kontakt mehr zu Hugging Face auf** (Konsolidierungskette
   hf-online): Suche, Lizenzprüfung, Dateiliste und Download gingen bei eingeschaltetem Offline-Modus online, während
   die Aufrufe einer KI abgelehnt wurden. **Tools > Hugging Face Model Browser...** lehnt jetzt vor jeder Anfrage ab,
   bevor ein Worker startet oder nach einem Token gefragt wird, in klaren Worten in deiner Sprache: Der Offline-Modus
@@ -2962,7 +2970,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   reserviert oder angefragt wird. Regressionstests: `tests/test_hf_online.py` `TestOfflineMode`,
   `TestTheBrowserWindowOffline`, `tests/test_hf_tools.py`
   `test_offline_mode_switched_on_while_the_person_is_asked_refuses_before_any_request`.
-- **Ein Modell aus dem alten Download-Cache von Hugging Face funktioniert wieder im Build** (A6, „bleiben nutzbar“):
+- `2026-10-22 23:41 UTC` · `v3.1.0` **Ein Modell aus dem alten Download-Cache von Hugging Face funktioniert wieder im Build** (A6, „bleiben nutzbar“):
   Der Hugging-Face-Browser der GUI speicherte bisher in den eigenen Cache von huggingface_hub im Modellordner, wo eine
   Datei ein Link auf einen Blob ist, der nach seiner Prüfsumme heißt. Ein Build einer solchen GGUF-Datei band sie
   unter diesem Prüfsummen-Namen ein, sodass der Build keine `.gguf`-Datei mehr sah (`config_module.sh` erkennt eine
@@ -2976,7 +2984,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   eingebunden: Der eigene Name eines Links würde den Modellnamen des Builds ändern, und ein Link aus einem eigenen
   Ordner hinaus wird nie in den Container verfolgt. Regressionstests: `tests/test_hf_gui_download.py`
   `TestTheOldCacheIsUsableForABuild`.
-- **Ein Problem auf diesem Computer heißt nicht mehr „das Board antwortet nicht“**: Jeder Kontakt mit einem Board
+- `2026-10-22 13:58 UTC` · `v3.1.0` **Ein Problem auf diesem Computer heißt nicht mehr „das Board antwortet nicht“**: Jeder Kontakt mit einem Board
   zählte einen Fehler, der keiner der vier Grundcodes war, als `device_host_down`. Eine volle oder schreibgeschützte
   Festplatte oder fehlende Rechte an den eigenen Dateien des Frameworks (sein SSH-Schlüssel, known_hosts) sagten der
   Person deshalb, sie solle das Board einschalten, das Deployment wartete umsonst, und das Board wurde für Mojo als
@@ -2990,7 +2998,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   und der Name jedes Home-Ordners, den `orchestrator/security/paths.py` `home_folders` kennt, auch USERPROFILE); die
   CLI zeigt zusätzlich den Fehler selbst. Er ist keine Sperre der Delegationsregeln, deshalb
   veraltet keine Delegation.
-- **Ein Deployment klappt auch auf einem Board, dessen Konto eine andere Login-Shell nutzt**: sshd gibt jeden Befehl
+- `2026-10-22 13:44 UTC` · `v3.1.0` **Ein Deployment klappt auch auf einem Board, dessen Konto eine andere Login-Shell nutzt**: sshd gibt jeden Befehl
   an die Login-Shell des Kontos auf dem Board. Die Befehle des Deployments (der private Ordner, die Hash-Prüfungen, der
   Start der Installation, die auf dem Board selbständig läuft, und das Abfragen ihres Endes) und die Installation des
   Framework-Schlüssels gingen so dorthin, wie sie waren; bei einem Konto mit fish, csh oder einer anderen Shell, die
@@ -2998,13 +3006,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   als ein `sh -c '...'` auf dem Board an (`orchestrator/remote/transport.py` `sh_command`, die Form, die die
   Geräte-Laufzeit und die Board-Prüfung schon nutzten), sodass das sh des Boards das Skript liest, egal welche
   Login-Shell das Konto hat.
-- **Die `known_hosts` des Frameworks wird wie jede andere private Datei geschrieben**: Das Vertrauen in den
+- `2026-10-22 17:32 UTC` · `v3.1.0` **Die `known_hosts` des Frameworks wird wie jede andere private Datei geschrieben**: Das Vertrauen in den
   Host-Schlüssel eines Boards (und die Änderung von Adresse oder Schlüssel eines Boards) schrieb die Datei über eine
   temporäre Datei, die liegen blieb, wenn das Schreiben scheiterte (zum Beispiel bei voller Platte), und unter Windows
   scheiterte das Vertrauen, wenn ein anderes Programm die Datei gerade offen hatte. Die temporäre Datei verschwindet
   jetzt wieder, und das Ersetzen ist das aus `orchestrator/utils/atomic.py`, das es unter Windows kurz erneut versucht
   (`orchestrator/utils/ssh_trust.py` `save_host_keys`).
-- **Ein Deployment wartet weiter, während der SSH-Server des Boards neu startet**: Nach einem Netzabbruch wartet das
+- `2026-10-17 15:50 UTC` · `v3.1.0` **Ein Deployment wartet weiter, während der SSH-Server des Boards neu startet**: Nach einem Netzabbruch wartet das
   Deployment auf das Board (N5). Antwortete das Board wieder, während sein SSH-Server noch startete, öffnete sich die
   Verbindung und brach wieder ab (ein Reset, ein Abbruch, eine unterbrochene Pipe oder EOF beim Schlüsselaustausch);
   keiner dieser Fälle hatte einen Grundcode, deshalb gab das Deployment sofort auf, statt weiter zu warten. Während es
@@ -3012,31 +3020,31 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   (`orchestrator/remote/reasons.py`, `reach_code(..., while_waiting=True)`). Der erste Kontakt des Deployments nutzt
   außerdem die Regel aller anderen Wege: Ein Verbindungsfehler, der keiner der vier Codes ist, heißt, dass das Board
   nicht antwortet (`device_host_down`, für Mojo festgehalten), statt eines leeren Codes.
-- **Die beim ersten Start gewählte Sprache gilt sofort**: Der Dialog beim ersten Start lief mit englischen Texten des
+- `2026-10-17 15:47 UTC` · `v3.1.0` **Die beim ersten Start gewählte Sprache gilt sofort**: Der Dialog beim ersten Start lief mit englischen Texten des
   Fensters, und die Wahl Deutsch ließ sie bis zum nächsten Start englisch (auch Qts eigene Schaltflächen). Das Fenster
   wechselt jetzt in die gewählte Sprache, bevor es sich öffnet (`orchestrator/gui/app.py`).
-- **Dependabot schlägt für die GPU-Vorlage kein anderes Ubuntu-Release mehr vor**:
+- `2026-10-22 13:47 UTC` · `v3.1.0` **Dependabot schlägt für die GPU-Vorlage kein anderes Ubuntu-Release mehr vor**:
   `targets/_template/Dockerfile.gpu` baut auf dem Ubuntu-Release auf, auf das die CUDA-Redist-Archive und der
   Katalog der Build-Basen festgelegt sind (Entscheidung D6), deshalb brach ein Sprung auf 25.10 die Tests.
   `.github/dependabot.yml` ignoriert Wechsel des Ubuntu-Releases (major und minor); ein Test hält die Regel fest.
-- **Die nächtliche Retrieval-Evaluation läuft wieder**: Der Workflow `.github/workflows/retrieval-eval.yml` startete
+- `2026-10-22 13:45 UTC` · `v3.1.0` **Die nächtliche Retrieval-Evaluation läuft wieder**: Der Workflow `.github/workflows/retrieval-eval.yml` startete
   das Framework auf einem GitHub-Runner, der keinen System-Keyring hat, ohne anzugeben, wie der Schlüsseltresor
   gehalten wird; deshalb verweigerte das Framework jede Nacht den Start (Exit-Code 5). Der Job setzt jetzt
   `LLM_SECRET_STORAGE=ephemeral` (nur im Arbeitsspeicher; die Evaluation braucht keine Zugangsdaten), und ein Test
   schlägt fehl, wenn ein Workflow-Schritt das Framework ohne diese Angabe startet.
-- **Auf ein Board, dessen Home-Ordner einen langen Pfad hat, lässt sich deployen**: Die Geräte-Laufzeit lehnte einen
+- `2026-10-17 01:49 UTC` · `v3.1.0` **Auf ein Board, dessen Home-Ordner einen langen Pfad hat, lässt sich deployen**: Die Geräte-Laufzeit lehnte einen
   Home-Ordner des Board-Benutzers mit mehr als 200 Zeichen ab (und dessen Staging-Ordner sowie Modelle darunter ab
   400), deshalb brach ein Home auf einem tief liegenden Einhängepunkt das Deployment mit „not a plain absolute path“
   ab. Die Zeichen werden wie bisher geprüft; die Länge ist jetzt nur noch eine Plausibilitätsgrenze weit unter der
   Grenze des Systems (1024 Zeichen für einen Ordner, 1536 für eine Datei darin, an einer Stelle in
   `runtime/device/launcher.py`). Die Gerätetests laufen auch unter einem langen temporären Ordner (wie auf dem
   Windows-Runner).
-- **Ein beschädigter Speicher der festgehaltenen Autorenschlüssel wird einmal kopiert, nicht zweimal**: Eine
+- `2026-10-17 01:49 UTC` · `v3.1.0` **Ein beschädigter Speicher der festgehaltenen Autorenschlüssel wird einmal kopiert, nicht zweimal**: Eine
   Installation liest den Speicher zweimal (für ihre Zusammenfassung, dann zum Festhalten des Schlüssels), und die
   zweite Kopie derselben Beschädigung entstand noch einmal, wenn dieses Lesen in die nächste Sekunde fiel, weil die
   Kopie nur nach der Uhrzeit benannt war. Eine gleiche Kopie wird jetzt einmal aufbewahrt, und eine andere
   Beschädigung in derselben Sekunde bekommt einen eigenen Namen, statt eine aufbewahrte Kopie zu ersetzen.
-- **Das Widerrufen eines MCP-Tokens in der GUI entfernt auch seine dauerhaften Freigaben, und der neue eigene
+- `2026-10-16 21:52 UTC` · `v3.1.0` **Das Widerrufen eines MCP-Tokens in der GUI entfernt auch seine dauerhaften Freigaben, und der neue eigene
   Abschnitt eines Aufrufers behält die Tools, die nur im Framework gefragt werden**: Widerrufen in der GUI löschte das
   Token, ließ aber seine dauerhaften Freigaben (die von `mcp:NAME`) in der Berechtigungsdatei stehen, aufgelistet, bis
   man sie einzeln widerrief (sie galten nicht mehr); das Token, seine Berechtigungen und seine dauerhaften Freigaben
@@ -3044,7 +3052,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   --caller ditto|mcp` legte den neuen Abschnitt eines Aufrufers ohne die gemeinsame Liste der Tools an, deren Fragen
   dir nur im Framework gestellt werden, sodass diese Fragen für diesen Aufrufer wieder im eigenen Dialog des
   KI-Clients landen konnten; der neue Abschnitt beginnt jetzt auch mit dieser Liste, wie bei `--confirm-in-framework`.
-- **Die Liste der Tools, die nur im Framework gefragt werden, geht nicht mehr durch einen zweiten Aufruf, eine Kopie
+- `2026-10-16 23:31 UTC` · `v3.1.0` **Die Liste der Tools, die nur im Framework gefragt werden, geht nicht mehr durch einen zweiten Aufruf, eine Kopie
   oder die ersten eigenen Berechtigungen eines Tokens verloren**: `llm-cli tools permissions --caller ditto|mcp` für
   einen Aufrufer, der schon eigene Berechtigungen hatte, baute dessen Abschnitt ohne diese Liste neu; ein Token, das
   als Kopie der Berechtigungen Dittos oder der lokalen MCP-Clients entstand (`llm-cli mcp token add --policy-from`
@@ -3053,13 +3061,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   begann. Jedes Mal konnten die Fragen zu diesen Tools wieder im eigenen Dialog des KI-Clients landen. Die
   Berechtigungen, die für einen Aufrufer gezeigt und kopiert werden, tragen jetzt die Liste, die für ihn gilt
   (`ToolRegistry.policy`).
-- **Die Token-Liste spricht die Sprache des Fensters, und „Server starten“ sagt, warum es nicht geht**: der Abschnitt
+- `2026-10-16 23:47 UTC` · `v3.1.0` **Die Token-Liste spricht die Sprache des Fensters, und „Server starten“ sagt, warum es nicht geht**: der Abschnitt
   „MCP-Tokens (eines je Client)“ in Security > Verbindungen zu KI-Apps (MCP)... und in Tools > Tool Permissions (Ditto
   / MCP)... war nur englisch (Überschrift, Hinweis, Spalten, Schaltflächen, die Fragen beim Hinzufügen und Rotieren);
   er ist jetzt englisch und deutsch, und Rotieren sowie die Frage zu einem verknüpften Token kommen als reiner Text mit
   „Nein“ als Vorwahl. Ein Installationspfad, den PYTHONPATH nicht aufnehmen kann, ließ „Server starten“ ohne jede
   Meldung scheitern; jetzt sagt das Fenster den Grund, und nichts wird gestartet.
-- **Community Hub und Speicher der Wissensbasis: Installation im Hintergrund, die Frage vor dem Pull Request, ein
+- `2026-10-16 22:46 UTC` · `v3.1.0` **Community Hub und Speicher der Wissensbasis: Installation im Hintergrund, die Frage vor dem Pull Request, ein
   Qdrant-Server** (Prüfung von W1'): Ein Paket zu installieren (Install, Import file...) schob es nach deinem „Ja“
   im GUI-Thread an seinen Platz, was bei einem Wissenspaket einen Snapshot der Wissensbasis und den Import jeder Seite
   bei eingefrorenem Fenster bedeutete; das läuft jetzt im Hintergrund, und die Statuszeile nennt den zuvor
@@ -3070,11 +3078,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   boten an, ihn umzuwandeln, was den Server öffnete und nichts umwandelte; beide nennen jetzt den Server, und die
   Umwandlung wird abgelehnt, solange er eingestellt ist. Eine in **Import file...** oder im Export-Fenster eingegebene
   Passphrase bleibt nach Abbrechen oder Schließen nicht mehr im verborgenen Fenster.
-- **Ein Build ersetzt keinen früheren Build mit demselben Namen mehr**: in 3.0.0 verschob ein abgeschlossener Build
+- `2026-10-16 01:03 UTC` · `v3.1.0` **Ein Build ersetzt keinen früheren Build mit demselben Namen mehr**: in 3.0.0 verschob ein abgeschlossener Build
   seine Dateien in den Ordner `<Target>/<Modell>/<Quantisierung>` und ersetzte dort die Dateien eines früheren Builds
   (zum Beispiel eines für ein anderes Board), so dass ein fertiges Golden-Artefakt ohne Frage verloren ging. Ein
   späterer Build kommt jetzt daneben (`Q4_K_M-2`, mit eigenem ZIP); der frühere Build bleibt ganz.
-- **Das „Docker-Aufräumen“ der Selbstheilung löscht nichts mehr** (veröffentlicht in 3.0.0; Runde 5 f): Wer den
+- `2026-10-15 17:14 UTC` · `v3.1.0` **Das „Docker-Aufräumen“ der Selbstheilung löscht nichts mehr** (veröffentlicht in 3.0.0; Runde 5 f): Wer den
   Vorschlag für eine volle Docker-Platte freigab (`docker_prune`, im GUI-Dialog, an der CLI-Abfrage oder über
   `resolve_healing`), ließ die verwaisten Images des Frameworks löschen, ohne dass sie gezeigt wurden, und den ganzen
   Build-Cache des Docker-Daemons leeren, auch den anderer Projekte. Jetzt ist es ein manueller Schritt: Der Vorschlag
@@ -3082,7 +3090,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Images...**, `llm-cli doctor --fix --tier 2`), die nur die Images löscht, die du anhakst und bestätigst, und eine
   Freigabe wird abgelehnt, bevor etwas gefragt wird. Kein Code des Frameworks
   leert den Docker-Build-Cache mehr.
-- **`llm-cli doctor --fix --tier 2` löscht nicht mehr ohne Liste** (veröffentlicht in 3.0.0; Runde 5 f): es leerte den
+- `2026-10-15 17:14 UTC` · `v3.1.0` **`llm-cli doctor --fix --tier 2` löscht nicht mehr ohne Liste** (veröffentlicht in 3.0.0; Runde 5 f): es leerte den
   ganzen Build-Cache des Docker-Daemons, auch den anderer Projekte, und löschte die verwaisten Images des Frameworks,
   ohne sie zu zeigen. Der Build-Cache wird nicht mehr angerührt (er lässt sich nicht auf das Framework beschränken).
   Stufe 2 listet jetzt jedes Build-Image des Frameworks (ohne Namen, benannt `llm-framework/<Target>:last-build`,
@@ -3093,7 +3101,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Framework-Programms), bleibt erhalten. Kein Tool, keine Ressource und kein Prompt erreicht es, eine KI-App oder
   Ditto kann es also weder ausführen noch unter einer Vollmacht bekommen. Die Befunde zum Speicherplatz sagen, was
   Stufe 2 listet, statt ein Aufräumen zu versprechen.
-- **Eine Reparatur wird genannt, wie auch immer der Aufruf endet** (Befund eines echten Laufs mit Claude Code 2.1.296
+- `2026-10-12 10:42 UTC` · `v3.1.0` **Eine Reparatur wird genannt, wie auch immer der Aufruf endet** (Befund eines echten Laufs mit Claude Code 2.1.296
   über stdio, Protokoll 2026-07-28): ein erklärter Alias, den der Aufruf benutzte (`quant` gelesen als
   `quantization`), wurde im Audit-Log festgehalten, aber ein Aufruf, der vor oder statt der Frage abgelehnt wurde (zu
   wenig Speicherplatz laut Vorabprüfung, ein Limit, ein ungültiger Wert, eine verweigerte Berechtigung, ein „Nein“,
@@ -3110,43 +3118,43 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   jetzt wird sie im Ergebnis und in jeder Ablehnung danach auf jedem Weg genannt und nur mit Art und Feld
   festgehalten. Der Job einer wartenden Freigabe, der abgelehnt oder verweigert endet, nennt die Reparaturen des
   Aufrufs in `get_job_status` (`error.notes`), wie es die Hinweise seines Ergebnisses tun.
-- **Die größere Speicherreserve eines Dauerauftrags wird unter der Sperre des Reservierungsbuchs geprüft** für
+- `2026-10-12 09:16 UTC` · `v3.1.0` **Die größere Speicherreserve eines Dauerauftrags wird unter der Sperre des Reservierungsbuchs geprüft** für
   `start_build`, `start_recipe_build`, `download_hf_file` und `add_pack_from_index`: die Reservierung wird mit der
   Reserve von 20 GiB / 10 % im Reservierungsbuch genommen, das alle Framework-Prozesse teilen, so dass eine
   Reservierung, die ein anderer Prozess zwischen Frage und Start genommen hat, mitzählt (vorher nur eine Momentaufnahme
   zur Zeit der Frage). `add_pack_from_index` nimmt jetzt überhaupt eine Reservierung und zählt die Reservierungen
   anderer Aufrufe schon vor der Frage.
-- **Die Build-Frage nennt jedes Basis-Image des Targets**: vorher zeigte ein Build auf einem nicht mitgelieferten
+- `2026-10-12 09:39 UTC` · `v3.1.0` **Die Build-Frage nennt jedes Basis-Image des Targets**: vorher zeigte ein Build auf einem nicht mitgelieferten
   Target nur das erste `FROM` seines obersten Dockerfiles, so dass ein Hersteller-Image einer späteren Stufe
   (`COPY --from`, `RUN --mount=...,from=`) oder eines anderen Dockerfiles nie gezeigt, von einem bestätigten Build
   aber für den Build-Dauerauftrag als bestätigt vermerkt wurde. Jetzt wird jedes Image jedes Dockerfiles einzeln
   gezeigt (Registry, Digest, offiziell oder nicht), auch bei einem mitgelieferten Target, das ein Image außerhalb
   der Docker Official Images zieht.
-- **GitHub-CLI und git der Pull-Request-Übergabe lesen nie stdin** (`stdin=DEVNULL`, G25): über stdio ist stdin
+- `2026-10-12 09:16 UTC` · `v3.1.0` **GitHub-CLI und git der Pull-Request-Übergabe lesen nie stdin** (`stdin=DEVNULL`, G25): über stdio ist stdin
   des MCP-Servers der Protokollstrom.
-- **Der KI-Import des Modul-Assistenten und die Modelllisten der KI-Einstellungen geben ihre Ergebnisse über das eine
+- `2026-10-12 09:20 UTC` · `v3.1.0` **Der KI-Import des Modul-Assistenten und die Modelllisten der KI-Einstellungen geben ihre Ergebnisse über das eine
   Worker-Relay an die GUI**: Der Assistent sendet nicht mehr aus einem einfachen Thread über ein selbst erzeugtes
   `WizardSignals`-Objekt ohne Eltern (ein geschlossener Assistent konnte es mitnehmen), und das eigene Relay der
   KI-Einstellungen ist in `WorkerRelay` aufgegangen.
-- **Stopp-Texte von Deep Ingest** (Schaltfläche, Tooltip und die Meldung `crawl.stopping` auf Englisch und Deutsch)
+- `2026-10-12 09:20 UTC` · `v3.1.0` **Stopp-Texte von Deep Ingest** (Schaltfläche, Tooltip und die Meldung `crawl.stopping` auf Englisch und Deutsch)
   sagen, dass Stoppen auch eine Seite verwirft, die noch ankommt, statt „nach der aktuellen Seite“.
-- **Ein beschädigtes `authors.json` verliert die beim ersten Kontakt festgehaltenen Autorenschlüssel nicht mehr**:
+- `2026-10-12 09:20 UTC` · `v3.1.0` **Ein beschädigtes `authors.json` verliert die beim ersten Kontakt festgehaltenen Autorenschlüssel nicht mehr**:
   Es bleibt als `authors.json.bad` erhalten, die Zusammenfassung der Installation warnt, dass der Schlüssel nicht
   verglichen werden konnte, und kein Schlüssel wird festgehalten (die Datei wird nie überschrieben), bis sie
   repariert oder entfernt ist.
-- **Per Digest festgelegte Images in einem Deployment-Paket starten auf einem Board ohne Netz**: Ein über seinen
+- `2026-10-12 07:15 UTC` · `v3.1.0` **Per Digest festgelegte Images in einem Deployment-Paket starten auf einem Board ohne Netz**: Ein über seinen
   Digest gezogenes Image hat kein Tag, wurde deshalb ohne Namen gespeichert, kam nach `docker load` als `<none>`
   zurück, und `deploy.sh` konnte es ohne Registry nicht über seine Digest-Referenz starten. Es wird jetzt unter
   `<Repository>:lcf-<12 Hex-Zeichen des Digests>` eingepackt und unter diesem Namen gestartet (ein hier gebautes Image
   behält sein eigenes Tag), und `deploy.sh` startet jedes eingepackte Image mit `--pull never`, sodass ein Board, auf
   dem ein Image fehlt, abbricht, statt eines aus einer Registry zu ziehen.
-- **Hugging-Face-Abfragen verbergen keine Fehler mehr**: Der Modellmanager hinter dem Hugging-Face-Browser der GUI
+- `2026-10-12 03:49 UTC` · `v3.1.0` **Hugging-Face-Abfragen verbergen keine Fehler mehr**: Der Modellmanager hinter dem Hugging-Face-Browser der GUI
   lieferte ein leeres Suchergebnis, eine leere Dateiliste oder eine „nicht einschränkende“ Lizenz, wenn Hugging Face
   nicht erreichbar war; jetzt meldet er den Fehler. Eine Lizenz gilt nur auf einer festen Positivliste als
   freizügig: `other`, eigene, listenförmige und unbekannte Lizenzen werden als unbekannt gezeigt, und der Browser
   fragt vor dem Download eines solchen Modells nach. Eine Datei, die der Browser herunterlädt, kommt aus dem Commit,
   den er zuerst ermittelt hat, nicht aus einem Branch, der sich inzwischen bewegen kann.
-- Rückfragen des 2026-07-28-Protokolls werden je Aufrufer und Sitzung geführt (die Antwort eines Clients schließt die
+- `2026-10-11 23:38 UTC` · `v3.1.0` Rückfragen des 2026-07-28-Protokolls werden je Aufrufer und Sitzung geführt (die Antwort eines Clients schließt die
   gleiche Rückfrage eines anderen Clients nicht mehr), eine unbeantwortete wird von einem Timer als `unanswered`
   festgehalten, auch wenn keine weitere Anfrage kommt, und die beim Ende einer Sitzung noch offenen als
   `client_disconnected`; die Berechtigungsprüfung eines Long-Polls liest die Berechtigungsdatei nicht mehr in der
@@ -3154,98 +3162,98 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Eingabe-Ablehnungen des Build-Service tragen ihren eigenen Grundcode; eine MCP-Bestätigung, die scheiterte oder
   nicht rechtzeitig beantwortet wurde, wird mit einem Grundcode festgehalten (`failed`, `needs_person`), und ihre
   Ablehnung nennt einen nächsten Schritt.
-- Zweistufige Bestätigung, auf beiden Wegen gleich: Eine MCP-Rückfrage, die für ein Formular zu lang ist, wird mit
+- `2026-10-12 00:42 UTC` · `v3.1.0` Zweistufige Bestätigung, auf beiden Wegen gleich: Eine MCP-Rückfrage, die für ein Formular zu lang ist, wird mit
   dem Grund `limit_reached` und der Antwort `unavailable` festgehalten und nennt einen nächsten Schritt, wie in
   Dittos Fenstern; eine Rückfrage, die ein nachgeschlagener Fakt nötig gemacht hat, wird mit der Entscheidung `ask`
   festgehalten (bisher `allow`); `resolve_healing` entscheidet nichts ohne die Fakten seiner Rückfrage, und die erste
   Zeile seiner Rückfrage nennt den Build, nicht nur seine ID; ein lokales Modell oder Dataset, das eine KI benannt hat
   und das vor dem Build verschwunden ist, wird in der Ablehnung bei seinem Label genannt, nie bei seinem echten Pfad.
-- Grenzen, auf beiden Wegen gleich: Dittos vorzeitiges Aufhören sieht, um welches Feld es bei einem Eingabefehler
+- `2026-10-12 00:54 UTC` · `v3.1.0` Grenzen, auf beiden Wegen gleich: Dittos vorzeitiges Aufhören sieht, um welches Feld es bei einem Eingabefehler
   geht (die Registry ließ es weg, sodass ein Modell, das ein Feld nach dem anderen behob, gestoppt und sein richtiger
   Aufruf nicht ausgeführt wurde); eine Ablehnung der Rückfrage-Grenzen (nach einem Nein, ein pausiertes Tool, zu
   viele Rückfragen) ist auch auf Dittos Weg kein gescheiterter Aufruf (dort wurde daraus "Stop retrying", während ein
   MCP-Client die einfache Ablehnung bekam); ein verweigerter Start, etwa wegen einer vollen Warteschlange, verbraucht
   keinen der 20 Builds am Tag mehr; nach dem Stopp-Hinweis bekommt ein Modell, das weiter Tools aufruft, höchstens
   zwei weitere Runden statt des restlichen Budgets.
-- Modul-Assistent: Ein Basis-Image, das Ditto vorgeschlagen hatte, wurde durch `debian:bookworm-slim` oder
+- `2026-10-11 23:52 UTC` · `v3.1.0` Modul-Assistent: Ein Basis-Image, das Ditto vorgeschlagen hatte, wurde durch `debian:bookworm-slim` oder
   `ubuntu:22.04` ersetzt, wenn sein Name nur „debian“ oder „ubuntu“ enthielt (zum Beispiel ein Hersteller-Image auf
   `nvcr.io`), sodass ein anderes Image als das vorgeschlagene gebaut worden wäre. Das vorgeschlagene Image bleibt jetzt
   unverändert und wird mit seiner Registry gezeigt, und die Meldungen mit dem Text der KI (auch Dittos Fehler und
   Absagen) erscheinen als reiner Text statt als Rich Text.
-- MCP-Server: Auf Protokoll 2026-07-28 kündigte er Änderungsmeldungen für Tools, Prompts und Ressourcen sowie
+- `2026-10-11 23:38 UTC` · `v3.1.0` MCP-Server: Auf Protokoll 2026-07-28 kündigte er Änderungsmeldungen für Tools, Prompts und Ressourcen sowie
   Ressourcen-Abonnements an, schickte aber nie eine. Jetzt kündigt er sie nur zusammen mit den Ereignissen an, die er
   veröffentlicht, und ohne Ereignisse wird er mit abgeschalteten Abonnements gebaut.
-- MCP-Server: Ein Client, der die Verbindung trennt, lässt seine Builds nicht mehr ohne jemanden laufen, der
+- `2026-10-11 19:07 UTC` · `v3.1.0` MCP-Server: Ein Client, der die Verbindung trennt, lässt seine Builds nicht mehr ohne jemanden laufen, der
   aufräumt. Die Builds und Jobs, die seine Sitzung gestartet hat, werden abgebrochen, jeweils mit einem Audit-Eintrag
   („client disconnected“), der Server wartet bis zu 30 Sekunden, bis ihre Container gestoppt sind, und
   `llm-cli mcp serve` fährt danach das Framework herunter. Ein SIGTERM des Clients (so beenden Clients einen
   stdio-Server, der nach dem Schließen seiner Eingabe nicht endet) beendet den Prozess nicht mehr vor diesem
   Aufräumen.
-- Secrets-Speicher: Ein Speicher einer früheren Version, der sich nicht entschlüsseln lässt, wird von
+- `2026-10-11 02:01 UTC` · `v3.1.0` Secrets-Speicher: Ein Speicher einer früheren Version, der sich nicht entschlüsseln lässt, wird von
   `llm-cli doctor` gemeldet, statt unlesbar in den Speicher im Benutzerordner übernommen zu werden.
-- Lesen oder Speichern eines Geheimnisses scheitert nicht mehr in einem Container, dessen Benutzer keinen Namen hat
+- `2026-10-11 01:34 UTC` · `v3.1.0` Lesen oder Speichern eines Geheimnisses scheitert nicht mehr in einem Container, dessen Benutzer keinen Namen hat
   (keine Variable `USER` und kein Eintrag in passwd).
-- Unter Windows scheitert das Speichern eines Geheimnisses nicht mehr, wenn ein anderer Prozess oder ein
+- `2026-10-11 01:34 UTC` · `v3.1.0` Unter Windows scheitert das Speichern eines Geheimnisses nicht mehr, wenn ein anderer Prozess oder ein
   Virenscanner den Speicher kurz geöffnet hat.
-- Unter Windows landet der Build eines lokalen Modells wieder im Ausgabeordner (veröffentlicht in 3.0.0): Der
+- `2026-10-16 05:55 UTC` · `v3.1.0` Unter Windows landet der Build eines lokalen Modells wieder im Ausgabeordner (veröffentlicht in 3.0.0): Der
   Build-Ordner hieß nach dem Teil des Modells hinter dem letzten `/`, und das ist bei einem Windows-Pfad wie
   `C:\models\my-model` der ganze Pfad, also ging der Build in den Ordner des Modells selbst
   (`C:\models\my-model\<quantization>`), und keine Liste fand ihn. Der Ordner heißt jetzt auf jedem System nach
   dem letzten Teil an `/` oder `\`.
-- `llm-cli secrets set` sagt, wohin das Geheimnis ging (in den verschlüsselten Tresor oder mit `ephemeral` nur in
+- `2026-10-11 01:44 UTC` · `v3.1.0` `llm-cli secrets set` sagt, wohin das Geheimnis ging (in den verschlüsselten Tresor oder mit `ephemeral` nur in
   den Arbeitsspeicher), statt immer „Keyring“. Auch die GUI nennt den verschlüsselten Tresor für Zugangsdaten (der
   Dialog für Geheimnisse, das Feld für den API-Schlüssel und seine Fehlermeldung in den KI-Einstellungen, das
   Kontrollkästchen für das Token im Hugging-Face-Browser).
-- Die CLI und die CLI-Anleitungen raten nicht mehr dazu, das GitHub-Token auf der Kommandozeile zu übergeben, wo
+- `2026-10-11 01:30 UTC` · `v3.1.0` Die CLI und die CLI-Anleitungen raten nicht mehr dazu, das GitHub-Token auf der Kommandozeile zu übergeben, wo
   der Shell-Verlauf es behält (diese Form funktionierte auch nicht). `llm-cli secrets set <name>` fragt den Wert
   verdeckt ab.
-- Der Deep-Ingest-Dialog öffnet sich mit den Einstellungen `crawler_max_depth`, `crawler_download_pdfs` und
+- `2026-10-11 14:39 UTC` · `v3.1.0` Der Deep-Ingest-Dialog öffnet sich mit den Einstellungen `crawler_max_depth`, `crawler_download_pdfs` und
   `crawler_rate_limit` (Tiefe 0 und Pausen unter einer Sekunde möglich, größere Werte bleiben); vorher setzten
   sich seine festen Werte (2, PDFs an, 1 s) immer über sie hinweg.
-- `llm-cli --help` und die Beschreibung der CLI nannten Version 2.4.0; jede Versionsangabe kommt jetzt aus der
+- `2026-10-11 13:50 UTC` · `v3.1.0` `llm-cli --help` und die Beschreibung der CLI nannten Version 2.4.0; jede Versionsangabe kommt jetzt aus der
   Paketversion.
-- `llm-cli build status` listet Builds, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat: Jede
+- `2026-10-11 13:50 UTC` · `v3.1.0` `llm-cli build status` listet Builds, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat: Jede
   Build-Engine schreibt je Build einen Eintrag nach `<cache_dir>/build_records/` (Status, Stufe, Fortschritt, der
   Fehler geschwärzt), und ein Build, dessen Programm endete, bevor er fertig war, erscheint als unterbrochen. Der
   Befehl braucht weder den Tresor für Zugangsdaten noch Docker; `--all` listet jeden aufbewahrten Build statt der
   20 neuesten. Unter Linux und macOS sind die Einträge nur für den Benutzer lesbar, der gebaut hat (Ordner 0700,
   Dateien 0600). Ein Eintrag nennt das Ergebnis des Builds, bevor sein Build-Platz frei wird: Wer sieht, dass der
   Build zu Ende ist, liest dort das Ergebnis, nie die Stufe davor.
-- Strg+C in `llm-cli build start` bricht den Build über den Build-Service ab: Sein Container wird gestoppt, die CLI
+- `2026-10-11 13:50 UTC` · `v3.1.0` Strg+C in `llm-cli build start` bricht den Build über den Build-Service ab: Sein Container wird gestoppt, die CLI
   wartet, bis der Build angehalten hat (auch wenn er gerade noch an die Build-Engine übergeben wurde), sagt das
   und endet mit Exit-Code 130. Vorher liefen Build und Container weiter.
-- `llm-cli scan --output DATEI` erreicht die Hardware-Probe (`hardware_probe.sh --output`,
+- `2026-10-11 13:50 UTC` · `v3.1.0` `llm-cli scan --output DATEI` erreicht die Hardware-Probe (`hardware_probe.sh --output`,
   `hardware_probe.ps1 -OutputFile`), die immer `target_hardware_config.txt` in den aktuellen Ordner schrieb. Unter
   Windows ohne Administratorrechte wartet die CLI auf den Neustart der Probe mit erhöhten Rechten, statt sofort zu
   melden, dass keine Datei geschrieben wurde.
-- `llm-cli module create` schreibt in den eingestellten Targets-Ordner (`targets_dir`, relativ zur Installation)
+- `2026-10-11 13:50 UTC` · `v3.1.0` `llm-cli module create` schreibt in den eingestellten Targets-Ordner (`targets_dir`, relativ zur Installation)
   statt nach `targets/` im aktuellen Ordner; seine nächsten Schritte nennen `modules/build.sh`, das Skript, das
   Builds ausführen, statt der Altlast `config_module.sh`.
-- `llm-cli config show` gibt die wirksamen Einstellungen aus (`config.yml`, eine Datei aus `-c`, Variablen
+- `2026-10-11 13:50 UTC` · `v3.1.0` `llm-cli config show` gibt die wirksamen Einstellungen aus (`config.yml`, eine Datei aus `-c`, Variablen
   `LLM_FRAMEWORK_*`, Vorgaben), jeweils mit ihrer Herkunft und mit geschwärzten Zugangsdaten, statt der
   eingebauten Vorgaben der CLI.
-- `llm-cli config repos --add` speichert den Eintrag `{url: ...}`, den die Build-Engine als `<NAME>_REPO_OVERRIDE`
+- `2026-10-11 13:50 UTC` · `v3.1.0` `llm-cli config repos --add` speichert den Eintrag `{url: ...}`, den die Build-Engine als `<NAME>_REPO_OVERRIDE`
   weiterreicht; reine URLs aus früheren Versionen werden ebenfalls weitergereicht. Der Name kommt aus dem ganzen
   Eintragsnamen (`llama.cpp` und `llama_cpp` ergeben beide `LLAMA_CPP_REPO_OVERRIDE`, den Namen, den die
   Target-Skripte lesen; `llama.cpp` ergab `CPP_REPO_OVERRIDE`). `--add` und `--remove` enden mit Exit-Code 1,
   wenn sich die `config.yml` nicht speichern lässt, statt Erfolg zu melden; `--add` lehnt einen Namen ohne
   ASCII-Buchstaben und Ziffern ab (Exit-Code 2).
-- Eine mit `-c` angegebene Einstellungsdatei, die sich nicht lesen lässt, verwirft nicht mehr auch die Variablen
+- `2026-10-11 16:38 UTC` · `v3.1.0` Eine mit `-c` angegebene Einstellungsdatei, die sich nicht lesen lässt, verwirft nicht mehr auch die Variablen
   `LLM_FRAMEWORK_*`: Sie wird auf stderr genannt und übergangen, und die übrigen Einstellungen gelten.
-- Der Hardware-Scan dieses PCs in der GUI (**Scan / Import...**) schreibt sein Ergebnis nach `<cache_dir>/probes/`
+- `2026-10-11 16:42 UTC` · `v3.1.0` Der Hardware-Scan dieses PCs in der GUI (**Scan / Import...**) schreibt sein Ergebnis nach `<cache_dir>/probes/`
   statt in den Arbeitsordner der GUI, und *Auto-fill from Probe Result* im Modul-Assistenten liest es dort.
-- Der SSH-Scan eines Boards in der GUI (**Scan / Import...**) scheiterte auf Boards, die `/tmp` mit `noexec`
+- `2026-10-11 23:49 UTC` · `v3.1.0` Der SSH-Scan eines Boards in der GUI (**Scan / Import...**) scheiterte auf Boards, die `/tmp` mit `noexec`
   einhängen: Er kopierte `hardware_probe.sh` dorthin und führte es dort aus. Jetzt schickt er die Probe über den
   SSH-Kanal wie `llm-cli scan --device` (die Python-Probe ab Python 3.8, sonst die Shell-Probe), schreibt nichts auf
   das Board und legt das Profil unter der ID des Boards ab.
-- Das Deployment eines Modellpakets auf ein Board scheiterte, wo `/tmp` mit `noexec` eingehängt ist (das Paket wird
+- `2026-10-12 00:25 UTC` · `v3.1.0` Das Deployment eines Modellpakets auf ein Board scheiterte, wo `/tmp` mit `noexec` eingehängt ist (das Paket wird
   dort entpackt, und `deploy.sh` wurde von dort ausgeführt), und auf Boards ohne bash (das Skript begann mit
   `#!/bin/bash`). `deploy.sh` ist jetzt ein reines POSIX-`sh`-Skript und wird mit `sh deploy.sh` gestartet.
-- Das Deployment aus der GUI schreibt das Paket in den eingestellten Ausgabeordner (`output_dir`, relativ zur
+- `2026-10-11 16:55 UTC` · `v3.1.0` Das Deployment aus der GUI schreibt das Paket in den eingestellten Ausgabeordner (`output_dir`, relativ zur
   Installation) statt nach `output/` im Arbeitsordner.
-- Der Dialog der KI-Einstellungen warnt, wenn sich die Einstellungen nicht in der `config.yml` speichern ließen
+- `2026-10-11 16:50 UTC` · `v3.1.0` Der Dialog der KI-Einstellungen warnt, wenn sich die Einstellungen nicht in der `config.yml` speichern ließen
   (sie gelten bis zum Programmende); vorher stand das nur im Protokoll.
-- Windows: Der Uninstaller (`scripts/Uninstall-LLM-Cross-Compiler-Framework.bat`) findet die Installation.
+- `2026-10-17 10:54 UTC` · `v3.1.0` Windows: Der Uninstaller (`scripts/Uninstall-LLM-Cross-Compiler-Framework.bat`) findet die Installation.
   `install.bat` schreibt jetzt die Markierungsdatei mit dem Installationsordner, die der Uninstaller liest, neben
   `install.bat`, wo der Uninstaller sie sucht; vorher schrieb kein Installer sie, und der Uninstaller meldete immer,
   es sei nichts installiert. Meldet PowerShell keinen Skriptpfad (der PowerShell-Teil von `install.bat` läuft über
@@ -3253,50 +3261,50 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Das Startskript
   `scripts/start-llm_cross_compiler_framework.bat` funktioniert auch aus `scripts\` (es suchte `orchestrator\main.py`
   und `.venv` dort).
-- `llm-cli targets list` zeigt für jedes Target die ID (den Wert für `--target`), den Namen sowie Boards und
+- `2026-10-11 13:50 UTC` · `v3.1.0` `llm-cli targets list` zeigt für jedes Target die ID (den Wert für `--target`), den Namen sowie Boards und
   Formate aus seinen Capabilities statt Platzhaltern; `llm-cli targets validate` prüft den Block `capabilities:`
   gegen das Schema und gibt jeden Fehler aus (Exit-Code 1).
-- `llm-cli deploy package`, `secrets set` und `scan` enden mit Exit-Code 1, wenn sie scheitern (vorher mit 0).
-- Die Hilfe zu `llm-cli doctor --tier` nennt nur Korrekturen, die es gibt (Stufe 1 macht den persönlichen Ordner
+- `2026-10-11 13:50 UTC` · `v3.1.0` `llm-cli deploy package`, `secrets set` und `scan` enden mit Exit-Code 1, wenn sie scheitern (vorher mit 0).
+- `2026-10-11 13:50 UTC` · `v3.1.0` Die Hilfe zu `llm-cli doctor --tier` nennt nur Korrekturen, die es gibt (Stufe 1 macht den persönlichen Ordner
   privat; eine Korrektur für Ordner gibt es nicht).
-- Ein Target, dessen `metadata.id` vom Ordnernamen abweicht, lässt sich bauen: CLI, Build-Service, Orchestrator und
+- `2026-10-11 13:50 UTC` · `v3.1.0` Ein Target, dessen `metadata.id` vom Ordnernamen abweicht, lässt sich bauen: CLI, Build-Service, Orchestrator und
   Build-Engine lösen Targets über eine einzige Zuordnung von ID zu Ordner auf (vorher übersprang der Orchestrator
   ein solches Target mit „Nothing to build“), und `-t` nimmt die ID oder den Ordnernamen.
-- Die Einstellung `max_concurrent_builds` legt die Zahl der Build-Slots fest (sie hatte keine Wirkung; die Engine
+- `2026-10-11 13:50 UTC` · `v3.1.0` Die Einstellung `max_concurrent_builds` legt die Zahl der Build-Slots fest (sie hatte keine Wirkung; die Engine
   nutzte immer 2).
-- Audit-Log: Schrieben mehrere Prozesse (GUI, CLI, MCP-Server) gleichzeitig die ersten Einträge eines neuen Logs,
+- `2026-10-11 13:31 UTC` · `v3.1.0` Audit-Log: Schrieben mehrere Prozesse (GUI, CLI, MCP-Server) gleichzeitig die ersten Einträge eines neuen Logs,
   konnte das Log als beschädigt gemeldet werden („The audit anchor file was missing when entry 2 was written“).
   Der Anker eines neuen Logs wird jetzt geschrieben, bevor sein erster Eintrag für andere Prozesse sichtbar ist.
-- CLI, GUI und MCP-Server legen nicht mehr bei jedem Start leere Ordner `cache/`, `models/` und `output/` in der
+- `2026-10-11 13:46 UTC` · `v3.1.0` CLI, GUI und MCP-Server legen nicht mehr bei jedem Start leere Ordner `cache/`, `models/` und `output/` in der
   Installation an, auch nicht, wenn `LLM_FRAMEWORK_CONFIG_DIR` oder `LLM_FRAMEWORK_HOME` woanders hinzeigen; ein
   Build oder ein Download legt die Ordner an, die er nutzt. Die `.gitignore` des Repositorys erfasst `output/`,
   `cache/`, `models/` und `logs/`, damit Build-Ergebnisse und Downloads nicht committet werden können.
-- Die beim ersten Start der GUI gewählte Sprache wird im tatsächlich genutzten Einstellungsordner gespeichert
+- `2026-10-11 13:46 UTC` · `v3.1.0` Die beim ersten Start der GUI gewählte Sprache wird im tatsächlich genutzten Einstellungsordner gespeichert
   (`LLM_FRAMEWORK_CONFIG_DIR`, das `configs/` der Installation, wenn beschreibbar, sonst der Benutzerordner) statt
   immer im `configs/` der Installation.
-- Das Speichern einer Einstellung (zum Beispiel der Sprache beim ersten Start oder der KI-Einstellungen)
+- `2026-10-11 15:00 UTC` · `v3.1.0` Das Speichern einer Einstellung (zum Beispiel der Sprache beim ersten Start oder der KI-Einstellungen)
   überschreibt eine `config.yml`, die sich nicht lesen lässt (ein YAML-Fehler oder keine Einstellungen der Form
   `schlüssel: wert`), nicht mehr mit den geänderten Werten allein; die Datei bleibt, wie sie ist, und der Fehler
   wird protokolliert.
-- Eine Zahl in `config.yml`, die nicht zu ihrer Einstellung passt (`.inf` für eine ganze Zahl oder `.inf`/`.nan`
+- `2026-10-11 15:58 UTC` · `v3.1.0` Eine Zahl in `config.yml`, die nicht zu ihrer Einstellung passt (`.inf` für eine ganze Zahl oder `.inf`/`.nan`
   für eine Dezimalzahl), wird mit einer Warnung übergangen, und der Standardwert gilt; vorher brach `.inf` für eine
   ganze Zahl das Lesen der Datei ab, sodass auch jede Einstellung danach übergangen wurde.
-- Windows: Liegt das Framework in `C:\Program Files`, wo normale Benutzer nicht schreiben dürfen, liegen die
+- `2026-10-11 13:46 UTC` · `v3.1.0` Windows: Liegt das Framework in `C:\Program Files`, wo normale Benutzer nicht schreiben dürfen, liegen die
   Einstellungen und die Datenordner `output/`, `cache/` und `models/` im Benutzerordner
   (`%USERPROFILE%\.llm-framework`). Die Prüfung auf Schreibrechte verlässt sich nicht mehr auf `os.access`, das
   unter Windows die Ordnerrechte nicht beachtet. Der Installer legt keinen ungenutzten Datenordner im öffentlichen
   Dokumente-Ordner mit Desktop-Verknüpfung mehr an.
-- Windows: Ein Zielmodul aus dem Modul-Assistenten, `llm-cli module create` oder `create_target_module`
+- `2026-10-16 05:47 UTC` · `v3.1.0` Windows: Ein Zielmodul aus dem Modul-Assistenten, `llm-cli module create` oder `create_target_module`
   (veröffentlicht in 3.0.0) hatte Windows-Zeilenenden (CRLF) in seinem `modules/build.sh`, seinen anderen Skripten,
   seinen Dockerfiles und seiner `target.yml`, sodass bash im Linux-Build-Container schon an der ersten Zeile abbrach
   (`$'\r': command not found`). Seine Skripte, Dockerfiles und `target.yml` werden jetzt auf jedem Rechner mit LF
   geschrieben. Auch ein Windows-Checkout des Repositorys behält in jeder Textdatei LF (`.gitattributes`: die
   Dockerfiles der Build-Container, Python-Skripte, LICENSE-Dateien und Git-Hooks waren nicht erfasst), außer in den
   nur unter Windows laufenden `.bat`- und `.ps1`-Skripten.
-- Windows: Der Kalibriertext für die Importance-Matrix (veröffentlicht in 3.0.0) wurde mit Windows-Zeilenenden
+- `2026-10-16 05:47 UTC` · `v3.1.0` Windows: Der Kalibriertext für die Importance-Matrix (veröffentlicht in 3.0.0) wurde mit Windows-Zeilenenden
   geschrieben, sodass `llama-imatrix` sie aus anderem Text berechnete als unter Linux und macOS; er wird jetzt auf
   jedem Rechner mit LF geschrieben.
-- `install.sh` prüft die Verbindung per HTTPS zum Paketindex (`pypi.org` oder `PIP_INDEX_URL`) statt mit einem Ping
+- `2026-10-11 13:46 UTC` · `v3.1.0` `install.sh` prüft die Verbindung per HTTPS zum Paketindex (`pypi.org` oder `PIP_INDEX_URL`) statt mit einem Ping
   an 8.8.8.8, den viele Netze sperren. Er lädt dazu eine kleine Projektseite statt des ganzen Index, zeigt
   Zugangsdaten in `PIP_INDEX_URL` nicht an und bricht mit einer klaren Meldung ab, wenn er mit `sh` statt bash
   gestartet wird. Er legt keinen ungenutzten Datenordner im Home-Ordner von root mehr an. Ein erneuter Aufruf
@@ -3310,7 +3318,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   jeden Ordner namens `build` (darunter das frameworkeigene `orchestrator/runtime/build/`). Lässt sich die
   Python-Umgebung nicht einrichten (kein Modul `venv`, ein festgelegtes Paket, das der Index nicht anbietet), bricht
   er mit einer Meldung ab; vorher meldete er die Installation mit leerer Umgebung als abgeschlossen.
-- `make build`, `make up`, `make gui`, `make down` und `Docker Setup/docker-compose.yml` funktionieren: Die
+- `2026-10-12 14:23 UTC` · `v3.1.0` `make build`, `make up`, `make gui`, `make down` und `Docker Setup/docker-compose.yml` funktionieren: Die
   Compose-Datei baute aus einer `orchestrator/Dockerfile`, die es nie gab, und das Makefile rief damit das alte
   `docker-compose` und das fehlende `scripts/setup_linux.sh` auf. Das Makefile nutzt `docker compose` (v2) und den
   Builder; `make setup` und `make test-container` sind weg (sie brauchten die fehlenden Dateien; Tests laufen mit
@@ -3318,48 +3326,48 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   ctop, Trivy). `make audit` prüft ein Archiv des Images mit der festgelegten Trivy-Version, ohne den Docker-Socket.
   `make clean` löscht das Datenvolume, `output/` und `cache/` nicht mehr ohne Nachfrage: Es entfernt nur Container,
   die außerhalb des Volumes nichts von dir enthalten, und zeigt, was Daten enthält.
-- Deployment-Pakete übernehmen Benutzerprofile, Sprachvorlagen und Prompts nur aus dem Einstellungsordner, nie aus
+- `2026-10-11 13:46 UTC` · `v3.1.0` Deployment-Pakete übernehmen Benutzerprofile, Sprachvorlagen und Prompts nur aus dem Einstellungsordner, nie aus
   einem Ordner `config/` im Arbeitsverzeichnis.
-- Der Hugging-Face-Modellbrowser lässt sich wieder öffnen: **Tools > Hugging Face Model Browser...** (kein Menü
+- `2026-10-11 14:01 UTC` · `v3.1.0` Der Hugging-Face-Modellbrowser lässt sich wieder öffnen: **Tools > Hugging Face Model Browser...** (kein Menü
   führte zu ihm). Seine Lizenzprüfung friert das Fenster nicht mehr ein, und Enter während einer Suche oder ein
   Doppelklick auf ein anderes Modell während eines Downloads bringt die GUI nicht mehr zum Absturz.
-- `scripts/sync_ssot.py` nutzt die echte Datei `configs/detailed_project_sources.yml` (es legte stattdessen eine
+- `2026-10-11 14:09 UTC` · `v3.1.0` `scripts/sync_ssot.py` nutzt die echte Datei `configs/detailed_project_sources.yml` (es legte stattdessen eine
   Kopie namens `detailed_project.sources.yml` an) und funktioniert aus jedem Ordner. Es listet die Unterschiede auf
   und ändert mit `--write` nur diese Werte; Kommentare und Layout bleiben (es schrieb die ganze Datei mit
   `yaml.dump` neu).
-- Der Kopfkommentar von `configs/project_sources.yml` sagt, wer die Datei liest (kein Teil des Frameworks im
+- `2026-10-11 14:09 UTC` · `v3.1.0` Der Kopfkommentar von `configs/project_sources.yml` sagt, wer die Datei liest (kein Teil des Frameworks im
   Betrieb; die beiden SSOT-Skripte), und ihr veralteter Roadmap-Abschnitt (v2.2 bis v2.4) ist entfernt.
-- Erzeugte Target-Module (Modul-Assistent, `llm-cli module create`, `llm-cli module generate-ai`): Das
+- `2026-10-11 14:17 UTC` · `v3.1.0` Erzeugte Target-Module (Modul-Assistent, `llm-cli module create`, `llm-cli module generate-ai`): Das
   Vorlagen-`build.sh` folgt dem Rockchip-Dispatcher. Es nutzt `convert_hf_to_gguf.py` und `build/bin/llama-quantize`
   von llama.cpp, schreibt die F16-Zwischendatei in den Arbeitsordner statt nach `/tmp` (in der Sandbox ein
   1-GB-tmpfs) und bricht mit einem Fehler ab, statt das Modell unverändert zu kopieren. Sein Paketierschritt kopiert
   keinen Ordner `build/` mehr, den es nicht gibt, was jeden Build eines erzeugten Moduls am Ende scheitern ließ.
-- Secret-Scan mit dem Werkzeug pre-commit: Seine pre-push-Stufe durchsucht die Commits, die gepusht werden
+- `2026-10-11 14:23 UTC` · `v3.1.0` Secret-Scan mit dem Werkzeug pre-commit: Seine pre-push-Stufe durchsucht die Commits, die gepusht werden
   (`--push`, das den gepushten Commit jetzt aus `PRE_COMMIT_TO_REF` liest), wie `.githooks/pre-push`, statt der
   ganzen Historie. Die Prüfung vor dem Commit (`--staged`) durchsucht auch eine Datei, die einen symbolischen Link
   ersetzt hat, und Dateien, deren Name einen Zeilenumbruch enthält oder wie `0:` beginnt; die übersprang sie vorher.
-- `hardware_probe.ps1` fragte Windows nach den falschen CPU-Merkmalen: Konstante 40 (AVX2) als AVX-512 und 37
+- `2026-10-11 20:08 UTC` · `v3.1.0` `hardware_probe.ps1` fragte Windows nach den falschen CPU-Merkmalen: Konstante 40 (AVX2) als AVX-512 und 37
   (SSE4.1) als NEON, sodass fast jeder PC AVX-512 und NEON meldete. Jetzt fragt es die dokumentierten Konstanten (AVX
   39, AVX2 40, AVX-512 F 41, BMI2 60; auf ARM NEON 29, Skalarprodukt 43, i8mm 66, FP16 67, SVE 46, SME 70) und schreibt
   `UNKNOWN`, wo Windows es nicht sagen kann. Außerdem weist es der schreibgeschützten Variable `$PID` keinen Wert mehr
   zu, was die Probe abbrach, sobald ein Rockchip-Board per USB angeschlossen war.
-- `hardware_probe.sh` sah weder das ARM-Skalarprodukt noch die FP16-Arithmetik, schrieb das x86-Flag `f16c` auf ARM
+- `2026-10-11 20:08 UTC` · `v3.1.0` `hardware_probe.sh` sah weder das ARM-Skalarprodukt noch die FP16-Arithmetik, schrieb das x86-Flag `f16c` auf ARM
   als FP16-Unterstützung, erkannte nur RK3588 und RK3566 und behielt nur die erste GPU; jetzt schreibt es die
   ARM-Merkmale, die Kerncluster, jeden SoC aus dem Device Tree und alle GPUs.
-- **Unbeantwortete, abgelaufene und abgebrochene Bestätigungen werden protokolliert** (MCP-Server): Eine Frage
+- `2026-10-11 18:30 UTC` · `v3.1.0` **Unbeantwortete, abgelaufene und abgebrochene Bestätigungen werden protokolliert** (MCP-Server): Eine Frage
   während des Aufrufs (klassisches Protokoll) wartet höchstens 5 Minuten und wird dann als `confirmation_timeout`
   festgehalten, eine nie beantwortete Frage des Protokolls 2026-07-28 nach 15 Minuten als `unanswered`, und ein
   Aufruf, den der Client abbricht, auch während seine Frage offen ist, als `cancelled`. Bisher endeten diese ohne
   Audit-Eintrag, und eine Frage konnte unbegrenzt offen bleiben.
-- **Der Abbruch eines Clients erreicht einen laufenden Aufruf sofort** (MCP-Server): Der Aufruf wird als abgebrochen
+- `2026-10-11 18:30 UTC` · `v3.1.0` **Der Abbruch eines Clients erreicht einen laufenden Aufruf sofort** (MCP-Server): Der Aufruf wird als abgebrochen
   festgehalten und der laufende Handler sofort benachrichtigt; was schon läuft, endet, und sein Abschlusseintrag
   folgt. Bisher kam der Abbruch erst an, nachdem der Handler fertig war, und nichts wurde festgehalten.
-- **Unbekannte Argumente werden über MCP nicht mehr weggelassen**: `quant` statt `quantization` baute die
+- `2026-10-11 19:16 UTC` · `v3.1.0` **Unbekannte Argumente werden über MCP nicht mehr weggelassen**: `quant` statt `quantization` baute die
   Standard-Quantisierung des Targets und meldete Erfolg, während Dittos Weg denselben Aufruf ablehnte. Beide Wege
   lassen jetzt denselben Normalisierer über die rohen Argumente laufen, MCP-Clients bekommen die geschlossenen
   Eingabeschemas der Tools (`additionalProperties: false`) statt offener, JSON-Text in einem Listenfeld wird auf
   beiden Wegen angenommen, und unbekannte Tool-Namen werden im Audit-Log festgehalten (bisher auf keinem Weg).
-- **Die Tests berühren den echten Benutzerordner nicht mehr.** Ein Testlauf hatte dort SSH- und Hugging-Face-Dateien
+- `2026-10-11 22:15 UTC` · `v3.1.0` **Die Tests berühren den echten Benutzerordner nicht mehr.** Ein Testlauf hatte dort SSH- und Hugging-Face-Dateien
   angelegt (`~/.ssh`, `~/.cache/huggingface`). Bevor irgendetwas das Framework importiert, lenkt `tests/conftest.py`
   jetzt `HOME`, `USERPROFILE`, die `XDG_*`-Ordner, `HF_HOME`, `HF_TOKEN_PATH` und die übrigen Variablen für
   Benutzerordner in einen temporären Ordner um (jeder Test bekommt seinen eigenen), entfernt Zugangsdaten wie
@@ -3368,7 +3376,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   macOS-Schlüsselbund, Windows-Anmeldeinformationsverwaltung) und lässt den Lauf scheitern, wenn sich die Schlüssel-,
   Token-, Schlüsselbund- oder Framework-Ordner des echten Benutzerordners verändert haben (er vergleicht ihre
   Auflistungen und öffnet nie eine Datei).
-- **Ausstehende Freigaben zeigen die zweiphasige Rückfrage und laufen gebunden an sie.** Ein Aufruf, der im
+- `2026-10-12 01:44 UTC` · `v3.1.0` **Ausstehende Freigaben zeigen die zweiphasige Rückfrage und laufen gebunden an sie.** Ein Aufruf, der im
   Framework auf dich wartet, zeigt dieselbe Rückfrage wie jedes andere Fenster: die Fakten, die das Framework
   nachgeschlagen hat, die sprechenden Namen seiner IDs und wer fragt. Wenn du ihn freigibst, werden die Fakten erneut
   nachgeschlagen; hat sich ein Fakt geändert, von dem die Entscheidung abhängt (etwa ein neuer Upstream-Commit; freier
@@ -3378,22 +3386,22 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   nachgeschlagenen Fakten gemessen (ein Client, der fragen könnte, fragt nicht, wenn eine den Aufruf abdeckt), Dittos
   scrollbarer Dialog für lange Rückfragen bietet ebenfalls "nicht mehr fragen" an, und die Kontingente eines
   freigegebenen Aufrufs werden vor dem Ausführen noch einmal geprüft.
-- **Target-Namen, die sich gleich lesen**: Ein neues Target (Modulgenerator, Assistent, `create_target_module`), dessen
+- `2026-10-12 04:17 UTC` · `v3.1.0` **Target-Namen, die sich gleich lesen**: Ein neues Target (Modulgenerator, Assistent, `create_target_module`), dessen
   Name ohne Rücksicht auf Groß- und Kleinschreibung und Trennzeichen der ID oder dem Ordner eines vorhandenen Targets
   gleicht (`rockchip`, `Rock-Chip` neben `Rockchip`), wird abgelehnt, damit es nie den Namen eines anderen Targets
   übernimmt.
-- **Ein Modul auf der GPU-Vorlage baut das Basis-Image, das es nennt**: Ein Modul auf der GPU-Vorlage mit einem
+- `2026-10-12 04:17 UTC` · `v3.1.0` **Ein Modul auf der GPU-Vorlage baut das Basis-Image, das es nennt**: Ein Modul auf der GPU-Vorlage mit einem
   anderen Basis-Image als dem Standard (zum Beispiel einem Toolchain-Image eines Herstellers) behielt still die
   Ubuntu-Basis der Vorlage; jetzt beginnen beide Stufen damit, und der Generator prüft, dass die Builder-Stufe mit dem
   Basis-Image des Moduls beginnt. Image-Angaben mit Registry-Port (`registry.example:5000/img@sha256:...`) werden
   angenommen.
 
-- **`start_build` über MCP ignorierte die Optimierungsstufe** (immer balanced, G26), und **zwei Builds verschiedener
+- `2026-10-12 03:20 UTC` · `v3.1.0` **`start_build` über MCP ignorierte die Optimierungsstufe** (immer balanced, G26), und **zwei Builds verschiedener
   Commits eines Modells teilten sich einen Bereitstellungsordner** (und `a/b__c` und `a__b/c` kollidierten, G38).
-- **Ein volles Laufwerk schlug immer vor, Docker aufzuräumen** (G40): Der Vorschlag ist jetzt ein manueller Schritt,
+- `2026-10-12 03:20 UTC` · `v3.1.0` **Ein volles Laufwerk schlug immer vor, Docker aufzuräumen** (G40): Der Vorschlag ist jetzt ein manueller Schritt,
   der die Ordner des Frameworks auf dem vollen Laufwerk mit ihrer Größe nennt; Docker aufzuräumen wird nur
   vorgeschlagen, wenn Dockers Datenverzeichnis voll ist.
-- **Ein Sandbox-Benchmark eines Modells in einem schreibgeschützten Ordner scheiterte mit einem allgemeinen Fehler**:
+- `2026-10-12 10:35 UTC` · `v3.1.0` **Ein Sandbox-Benchmark eines Modells in einem schreibgeschützten Ordner scheiterte mit einem allgemeinen Fehler**:
   `run_benchmark` mit `sandbox=true` legte seinen privaten Link des geprüften Modells nur neben dem Modell an. Jetzt
   weicht es auf einen privaten Ordner im eigenen Cache- oder Zustandsordner des Frameworks auf demselben Dateisystem
   aus, sonst auf eine Kopie, die aus der geprüften offenen Datei gelesen und erneut gehasht wird (ihr sha256 muss der
@@ -3401,7 +3409,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `needs_person`). Der private Ordner wird entfernt, wenn der Lauf endet, auch bei einem Fehler und bei `cancel_job`,
   das jetzt auch den Sandbox-Container beendet, eine noch laufende Kopie anhält und nach dem Abbruch keinen Container
   mehr startet; einen Ordner, den ein Absturz zurückließ, entfernt ein späterer Lauf.
-- **Job-Enden im Audit-Log**: Wenn das Eintragen eines fertigen Deployments in die Geräteliste scheiterte, schrieb
+- `2026-10-12 10:35 UTC` · `v3.1.0` **Job-Enden im Audit-Log**: Wenn das Eintragen eines fertigen Deployments in die Geräteliste scheiterte, schrieb
   `deploy_to_device` keinen End-Eintrag, obwohl das Deployment stattgefunden hatte; der End-Eintrag wird jetzt auf
   jedem Weg aus dem Job geschrieben (das Ergebnis sagt dann, dass die Geräteliste es nicht eingetragen hat).
   `create_deploy_package`, die Board-Laufzeit-Jobs (`probe_remote_device`, `deploy_device_runtime`,
@@ -3410,19 +3418,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   verknüpft mit dem Start-Eintrag des Aufrufs und mit Geräten und Modellen unter ihren Bezeichnungen. Die Deploy- und
   Laufzeit-Tools erreichen gebaute Modelle über die öffentliche Methode `BuildService.artifact_entry` statt über eine
   private.
-- **Der Katalog der Upstream-Projekte ist stimmig** (`configs/detailed_project_sources.yml` und
+- `2026-10-16 00:39 UTC` · `v3.1.0` **Der Katalog der Upstream-Projekte ist stimmig** (`configs/detailed_project_sources.yml` und
   `configs/project_sources.yml`, ausgeliefert in 3.0.0): Jeder Größenfaktor hat eine Bezugsgröße (FP16 = 1.0x,
   berechnet aus den Bits pro Gewicht) statt FP32 für manche Formate und Q8_0 für andere, und die Beispielgrößen folgen
   daraus; die Tabelle der Tokens pro Sekunde und die Beschleunigungsfaktoren ohne Quelle sind entfernt; der Hinweis zu
   Hailo nennt „nicht für LLM-Inferenz“ nicht mehr als Tatsache, sondern sagt, die aktuelle Dokumentation von Hailo zu
   prüfen; der alte TensorRT-LLM-Stand v0.10.0 ist als nicht gegen aktuelle Releases geprüft markiert.
-- **Der Build-Fortschritt zählt den laufenden Build mit** (veröffentlicht in 3.0.0): `get_build_status` sagte bei einer
+- `2026-10-16 02:19 UTC` · `v3.1.0` **Der Build-Fortschritt zählt den laufenden Build mit** (veröffentlicht in 3.0.0): `get_build_status` sagte bei einer
   Anfrage mit einem Build 0 %, bis der Build endete, und nannte nur die Stufe der Anfrage. Prozent und Schritt
   enthalten jetzt den eigenen Fortschritt des laufenden Builds (Vorbereitung, Image, Modell, Module, Archiv); eine
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
-- **Jede Verbindung des Offline-Modus nach außen geht jetzt über die Regel des eigenen Netzes** (DECISIONS Runde 24
+- `2026-10-23 22:37 UTC` · `v3.1.0` **Jede Verbindung des Offline-Modus nach außen geht jetzt über die Regel des eigenen Netzes** (DECISIONS Runde 24
   L-NET, Runde 26 d-g): Ein Qdrant-Server (`qdrant_url`) wird nach ihr beurteilt, ein Qdrant in der Cloud wird in
   einfachen Worten abgelehnt, und qdrant-client verbindet sich nur mit den geprüften Adressen, ohne Proxy und ohne
   seine eigene Versionsanfrage; das **Prüfen** der Anmeldung, `ditto login --check` und der Anmeldebereich der
@@ -3442,7 +3450,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   vertrauenswürdig, wie beim eigenen Client des SDK. Ein online geöffneter Qdrant-Server wird nach der Regel neu
   geöffnet, sobald der Offline-Modus eingeschaltet wird (ein Qdrant in der Cloud wird dann abgelehnt), und ein
   online begonnener Crawl liest nichts mehr, sobald der Offline-Modus eingeschaltet wird.
-- **Hugging-Face-Tokens verlassen diesen Computer nur dort, wo Hugging Face eines braucht, und keine Bibliothek
+- `2026-10-23 23:28 UTC` · `v3.1.0` **Hugging-Face-Tokens verlassen diesen Computer nur dort, wo Hugging Face eines braucht, und keine Bibliothek
   schickt selbst eines** (Konsolidierungskette hf-local; Entscheidung Runde 25 Q2). Jede Abfrage, Dateiliste und
   Datei eines öffentlichen Repositorys trug bisher das im Framework gespeicherte (oder im Browser eingegebene) Token
   zu huggingface.co; jetzt keine mehr, auch wenn ein Token gespeichert ist. Das Token geht nur an ein gated oder
@@ -3463,7 +3471,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `tests/test_hf_tokens.py` (`HF_ENDPOINT` auf einem anderen Host mit gesetztem `HF_TOKEN`: keine Anfrage trägt ein
   Token irgendwohin außer zu huggingface.co; eine öffentliche Datei ohne Authorization-Header; der Weg von fastembed
   ohne Token; der Offline-Modus ohne Socket; die Abfrage der Agent-Harness-Liste), `tests/test_hf_online.py`.
-- **`install.sh` installiert Docker nur mit Prüfsumme** (DECISIONS Runde 23, Punkt 3): Fehlte Docker, lud der Installer
+- `2026-10-23 09:15 UTC` · `v3.1.0` **`install.sh` installiert Docker nur mit Prüfsumme** (DECISIONS Runde 23, Punkt 3): Fehlte Docker, lud der Installer
   `get.docker.com` herunter und führte es ungeprüft als root aus. Jetzt kommt Docker nur aus Dockers offiziellem
   apt-Repository unter Debian, Ubuntu und Raspberry Pi OS (32 Bit bekommt die armhf-Pakete von Debian, wie Dockers
   Anleitung es ab Engine 29 sagt). Systeme, die auf Ubuntu oder Debian aufbauen (`ID_LIKE`: Linux Mint, Pop!_OS, LMDE
@@ -3481,19 +3489,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   heruntergeladenes Skript läuft mehr. Tests führen den Installer in einer Sandbox mit falschem curl, apt-get, dpkg und
   uname und einem echten, für den Test erzeugten gpg-Schlüssel aus; `install.sh` ist ohne ShellCheck-Befund (die beiden
   Befunde der Basis sind mit behoben).
-- **Die Installer laden pip nicht mehr ohne Prüfsumme**: `install.sh` und `install.bat` führten vor der Installation
+- `2026-10-23 09:15 UTC` · `v3.1.0` **Die Installer laden pip nicht mehr ohne Prüfsumme**: `install.sh` und `install.bat` führten vor der Installation
   mit Hash-Prüfung `pip install --upgrade pip` aus und luden damit das neueste pip ungeprüft vom Paketindex (unter
   Windows als Administrator). Die virtuelle Umgebung behält jetzt das pip, das mit Python kommt; es genügt für
   `--require-hashes --no-deps`, und der Installer-Test hält jeden pip-Aufruf am Export mit Hashes fest.
   `install.bat` lädt sonst nichts ungeprüft (winget prüft den Python-Installer gegen den SHA256 seines Manifests).
-- **Lose Wissensdateien werden nicht mehr ohne die Paketprüfungen importiert** (DECISIONS Runde 23 Punkt 1): Jede
+- `2026-10-23 09:33 UTC` · `v3.1.0` **Lose Wissensdateien werden nicht mehr ohne die Paketprüfungen importiert** (DECISIONS Runde 23 Punkt 1): Jede
   `.json`-Datei in `community/knowledge/` und jede `knowledge.json` in einem Ordner ohne die Herkunftsdatei des Pakets
   wurde bei jedem Start in die Wissensbasis importiert, ohne Manifest, Signatur, Quarantäne oder Prüfung. Jetzt werden
   nur installierte Pakete importiert, und nur solange ihre Dateien dem Installierten entsprechen; eine lose Datei
   wartet, bis die Person sie über die Prüfungen eines installierten Pakets einsortiert. Eine Paketseite kann die Felder
   nicht mehr setzen, die der Import selbst setzt (`origin_pack`, `origin_sha256`, `topic`, `target`), und ein Thema
   oder Target erreicht einen KI-Client nur als schlichter Name.
-- **Der neue Schlüssel eines neu gestarteten lokalen Modellservers geht nie an seinen alten Port** (Kette
+- `2026-10-23 09:15 UTC` · `v3.1.0` **Der neue Schlüssel eines neu gestarteten lokalen Modellservers geht nie an seinen alten Port** (Kette
   port-runtime, aus der Prüfung des verwalteten llama-server): Jeder Start gibt dem Server einen neuen Port und einen
   neuen Schlüssel. `LLMClient` bestimmte das Ziel (mit der URL) und baute danach den Adapter mit einem
   Anmeldenachweis, der den Zustand des Servers erneut las; ein Neustart dazwischen paarte daher die alte URL mit dem
@@ -3503,7 +3511,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   für den alten Port nichts gebaut oder geschickt wird (`orchestrator/llm/client.py` `adapter`; der
   Anmelde-Resolver nimmt diesen Schlüssel, `CredentialResolver.resolve(..., runtime_key=...)`). Regressionstest:
   `tests/test_runtime.py` `test_a_new_key_never_goes_to_the_port_of_the_previous_server`.
-- **Ein anderes Programm auf dem Port des lokalen Modellservers bekommt nie dessen Schlüssel oder einen Prompt**
+- `2026-10-23 09:12 UTC` · `v3.1.0` **Ein anderes Programm auf dem Port des lokalen Modellservers bekommt nie dessen Schlüssel oder einen Prompt**
   (Kette port-runtime, aus der Prüfung des verwalteten llama-server): `runtime start` wählte einen freien Port,
   startete llama-server darauf und nahm jede Antwort von `/health` auf diesem Port für den Server. Ein Programm, das
   den Port zwischen der Wahl und dem Binden durch llama-server belegt hatte (ein anderer Prozess eines beliebigen
@@ -3525,7 +3533,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `test_other_processes_get_no_endpoint_before_the_port_is_confirmed`,
   `test_a_server_that_holds_its_port_is_handed_out_while_it_loads`,
   `test_a_start_that_died_before_the_port_was_confirmed_leaves_no_server_behind`.
-- **Ein für einen Befehl gewählter Anbieter oder ein Modell wird nie zur gespeicherten Einstellung** (Übernahme aus
+- `2026-10-23 10:01 UTC` · `v3.1.0` **Ein für einen Befehl gewählter Anbieter oder ein Modell wird nie zur gespeicherten Einstellung** (Übernahme aus
   dem behaltenen Worktree ditto-rewire-verified): `llm-cli ditto ask --provider/--model` und der Aufwand von `ditto
   eval` wurden als gewöhnliche Laufzeitwerte gesetzt, die `save_user_config` schreibt, also speicherte ein Speichern
   der Einstellungen während des Befehls (das Tool `update_settings`, das du bestätigst) die Wahl des einen Befehls als
@@ -3537,7 +3545,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   eines anderen Anbieters bekommt; ein Modell gilt für jede Aufgabe. Regressionstests: `tests/test_ditto.py`
   `test_one_command_provider_and_model_are_never_saved`, `test_the_eval_effort_is_never_saved`,
   `tests/test_ditto_models_core.py` `TestOneRunProviderSwitch`.
-- **Ausgaben des Modells können das Terminal nicht steuern**: `llm-cli ditto ask` gab die Antwort, Fehlertexte, die
+- `2026-10-23 10:01 UTC` · `v3.1.0` **Ausgaben des Modells können das Terminal nicht steuern**: `llm-cli ditto ask` gab die Antwort, Fehlertexte, die
   einen Anbieter oder ein Tool zitieren, und Tool-Zeilen (ein erfundener Tool-Name, der Fehler eines Handlers) so aus,
   wie sie kamen, also konnten von einem Build-Log oder einer Webseite gesteuerte Escape-Sequenzen den Bildschirm, den
   Fenstertitel oder die Zwischenablage überschreiben. Steuerzeichen (C0 mit Wagenrücklauf, DEL, C1) und
@@ -3554,7 +3562,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   `test_generate_ai_keeps_control_characters_of_the_base_image_out_of_the_pin_error` und die Tests daneben,
   `tests/test_ai_safety.py` `test_the_proposal_loses_its_control_characters_and_keeps_its_text`,
   `tests/test_client_proposals.py` `test_cli_prints_the_proposal_without_control_characters`.
-- **Die Modellliste des KI-Einstellungsdialogs schickt nie einen Schlüssel an die Adresse des gespeicherten
+- `2026-10-23 10:01 UTC` · `v3.1.0` **Die Modellliste des KI-Einstellungsdialogs schickt nie einen Schlüssel an die Adresse des gespeicherten
   Anbieters**: Wer einen anderen Anbieter wählte, bevor er dessen Adresse eintippte (ein gespeichertes Ollama im
   lokalen Netz, dann **custom**), ließ die Modelle beim Server des gespeicherten Anbieters mit dem Schlüssel des
   anderen auflisten. Das Adressfeld zählt für die Liste jetzt immer, ein leeres bedeutet den eigenen Endpunkt des
@@ -3562,14 +3570,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   und die das Speichern ersetzt), sodass ein für eine neue Adresse eingetippter Schlüssel nie an die alte geht.
   Regressionstests: `tests/test_dialogs.py` `test_model_list_never_sends_a_key_to_the_saved_providers_url`,
   `test_model_list_sends_a_typed_key_only_to_the_typed_address`.
-- **Das Hugging-Face-Token geht nur an huggingface.co, auch wenn `HF_ENDPOINT` einen anderen Host nennt** (Review
+- `2026-10-23 03:09 UTC` · `v3.1.0` **Das Hugging-Face-Token geht nur an huggingface.co, auch wenn `HF_ENDPOINT` einen anderen Host nennt** (Review
   der Kette hf): huggingface_hub schickt seine API-Aufrufe an den Host in der Umgebungsvariable `HF_ENDPOINT` (einen
   Mirror). Die Commit-Abfrage des Downloads im GUI-Browser und die Hub-Liste von **Alte Downloads übernehmen…**
   schickten das eingegebene oder gespeicherte Token dorthin, ebenso jede Suche und Abfrage eines KI-Aufrufers,
   während der Fetcher es nur an huggingface.co schickt. Jeder Hub-API-Aufruf von `orchestrator/Core/hf_hub.py`
   (`HubClient`) und von Download und Übernahme des Browsers (`ModelManager`) läuft jetzt über `hf_hub.hub_api`, fest
   auf huggingface.co. Regressionstests: `tests/test_hf_gui_download.py` `TestTheTokenGoesOnlyToHuggingFace`.
-- **Kein Hugging-Face-Aufruf im eigenen Code des Frameworks schickt mehr ein Token an den Host in `HF_ENDPOINT`
+- `2026-10-23 11:57 UTC` · `v3.1.0` **Kein Hugging-Face-Aufruf im eigenen Code des Frameworks schickt mehr ein Token an den Host in `HF_ENDPOINT`
   oder ein implizites `HF_TOKEN`** (Konsolidierungskette hf-online). Außerhalb von `hf_hub` legten vier Aufrufer
   noch ihr eigenes `HfApi()` an: Das Bereitstellen eines Hugging-Face-Modells im Builder, die Abfrage des Build-Plans
   (`hf_lookup.look_up`) und die Commit-Prüfung der GUI für einen gleichen Build (`BuildService.model_commit`)
@@ -3587,7 +3595,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   führt jeden Aufrufer durch den HTTP-Client von huggingface_hub selbst, mit `HF_ENDPOINT` auf einem anderen Host und
   gesetztem `HF_TOKEN`, und schlägt bei einem Token an diesen Host, beim impliziten Token, bei einem Token, das einer
   Umleitung auf einen anderen Host folgt, und bei einem `HfApi` außerhalb von `hf_hub` fehl.
-- **Kein Home-Ordner und kein Name eines anderen Kontos erreicht eine KI über eine Datei-URL oder ein Leerzeichen**
+- `2026-10-22 15:49 UTC` · `v3.1.0` **Kein Home-Ordner und kein Name eines anderen Kontos erreicht eine KI über eine Datei-URL oder ein Leerzeichen**
   (D0; Vorgabe vom 2026-10-17). Die Pfad-Bezeichnungen für KIs (`security.paths.label_paths`, auch in `device_text`)
   ließen den Pfad einer `file:///`-URL stehen, wenn er den Home-Ordner eines anderen Kontos nannte
   (`file:///home/<Name>/...`, `file:///C:/Users/<Name>/...`, `file://localhost/...`, `file://server/Users/<Name>`); ihr
@@ -3598,7 +3606,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   der eigene Kontoname dieses Computers wird jetzt nach jeder Wurzel ganz genommen, und nach dem Windows-Home-Ordner
   eines anderen Kontos gehören die folgenden Wörter, die mit einem Großbuchstaben oder einer Ziffer beginnen, zum
   Namen (ein POSIX-Kontoname hat kein Leerzeichen, so behält `/home/pi Failed` sein nächstes Wort).
-- **Das GUI-Werkzeug verbirgt den Home-Ordner dieses Computers in jeder Schreibweise**: Ein Formularwert, den eine KI
+- `2026-10-17 16:42 UTC` · `v3.1.0` **Das GUI-Werkzeug verbirgt den Home-Ordner dieses Computers in jeder Schreibweise**: Ein Formularwert, den eine KI
   über das Tool `gui` liest (Ditto oder eine KI-App), zeigte den Home-Ordner nur dann als `~`, wenn er genau so
   geschrieben war, wie `Path.home()` ihn liefert. Über HOME oder USERPROFILE benannt (die MSYS-Form
   `/c/Users/<Name>`), mit dem anderen Trennzeichen, in anderer Groß- und Kleinschreibung (`c:/users/<Name>`) oder mit
@@ -3607,7 +3615,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Muster für die Home-Ordner anderer Konten. Der Fehlerbericht (`utils/telemetry.py`, der Link zum GitHub-Issue)
   ersetzte nur `os.path.expanduser("~")` Buchstabe für Buchstabe; er ersetzt jetzt jede Schreibweise über dieselben
   Funktionen aus `security.paths` und behält seine Markierung `~USER`.
-- **Jede Stelle nimmt dieselben SSH-Benutzernamen an**: Das Deployment (`llm-cli deploy run`, **Deploy to Target**
+- `2026-10-17 15:44 UTC` · `v3.1.0` **Jede Stelle nimmt dieselben SSH-Benutzernamen an**: Das Deployment (`llm-cli deploy run`, **Deploy to Target**
   im Deployment-Tab) und `llm-cli deploy devices add` prüften den Benutzernamen ohne `re.ASCII`, deshalb ließ Pythons
   Groß-/Kleinschreibungs-Faltung ein langes s (`ſ`) oder das Kelvin-Zeichen als `s` und `k` durch, und das `match()`
   des Deployments ließ auch einen Zeilenumbruch am Ende durch. Ein solches Deployment lief, und der vertrauenswürdige
@@ -3619,11 +3627,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Der Board-Scan (`llm-cli scan --device`, **Remote Scan via SSH...** im Builder-Tab) prüft den Namen genauso, bevor
   das Board kontaktiert wird, mit der Ablehnung in der Sprache der Person; vorher erreichte ein solcher Name die
   Anmeldung des Boards.
-- **Der Dialog der KI-Einstellungen lehnt eine Serveradresse mit Benutzername oder Passwort darin ab**, wie es die
+- `2026-10-17 18:19 UTC` · `v3.1.0` **Der Dialog der KI-Einstellungen lehnt eine Serveradresse mit Benutzername oder Passwort darin ab**, wie es die
   Anmeldung und `llmcf ditto login` schon taten (dieselbe Adressregel aus `AISettingsChange`): Vorher wurde eine
   solche Adresse (oder eine mit Leerzeichen oder Backslash, die Parser als zwei verschiedene Hosts lesen können) so,
   wie sie eingegeben war, in die `config.yml` gespeichert.
-- **Ein Community-Rezept, das du in der GUI baust, wird beim Bauen geprüft, wie über MCP**: Der Knopf **Build** im
+- `2026-10-17 15:51 UTC` · `v3.1.0` **Ein Community-Rezept, das du in der GUI baust, wird beim Bauen geprüft, wie über MCP**: Der Knopf **Build** im
   Community Hub und **Start Build** im Builder-Tab gehen über `BuildService.installed_recipe` und
   `BuildService.start_recipe`, den Weg, den `start_recipe_build` nutzt. Ein Rezept, das der Community-Index
   zurückgezogen hat, nachdem die Liste des Hubs angezeigt wurde, oder eines, das sich nicht mehr lesen lässt, wird
@@ -3634,7 +3642,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   gefüllt hat, wird ebenfalls abgelehnt. Änderst du im Formular einen Wert des Rezepts, baust du weiter deine eigenen
   Werte auf dem Commit des Rezepts, nach derselben Prüfung auf Rückzug; ebenso, wie bisher, mit einem
   Kalibrierungsdatensatz für ein Rezept, das keinen nennt, oder ohne einen für ein Rezept, das einen nennt.
-- **Text, den eine Leserin oder ein Leser nicht sieht, kommt nie in die Wissensbasis** (Recon P1): Text, den eine
+- `2026-10-17 16:54 UTC` · `v3.1.0` **Text, den eine Leserin oder ein Leser nicht sieht, kommt nie in die Wissensbasis** (Recon P1): Text, den eine
   Webseite vor der lesenden Person versteckt (Inline-`display:none` oder `visibility:hidden`, eine Schriftgröße oder
   Deckkraft nahe null, Boxen außerhalb des Bildschirms oder weggeschnitten, Text in seiner eigenen Hintergrundfarbe,
   das Attribut `hidden`, `aria-hidden="true"`, `<template>`, `<noscript>` und ein CDATA-Abschnitt, den der Umwandler
@@ -3664,7 +3672,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   die scheitert, wenn eine Nutzlast in die gespeicherten Auszüge gelangt; die Evaluation liest ihr Korpus jetzt
   ebenfalls als Text von außen ein. Früher gespeicherte Seiten behalten ihre Auszüge, bis sie erneut eingelesen
   werden.
-- **Ein Pull Request kann die Pflichtprüfung des Community-Repositorys nicht mehr umschreiben**: Die Vorlage des
+- `2026-10-22 21:55 UTC` · `v3.1.0` **Ein Pull Request kann die Pflichtprüfung des Community-Repositorys nicht mehr umschreiben**: Die Vorlage des
   Prüf-Workflows `scripts/community_repo/validate-contribution.yml` lief bei `pull_request`, also führte ein Pull
   Request aus einem Fork seine eigene, geänderte Kopie aus: Er konnte die Prüfung bestehen lassen und ein schlechtes
   Pack hinzufügen, oder `.github/`, `index.json`, `packs/` oder eine README ändern, die die Prüfung nie ansah (sie
@@ -3697,7 +3705,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   ändert dessen Maintainer (die Vorlage sagt, wie eine Kopie umgestellt wird, die noch bei `pull_request` läuft, und
   nennt die Einstellung, die das Repository außerdem braucht: Fork-Pull-Request-Workflows nur mit Freigabe, weil ein
   Pull Request immer noch einen eigenen Workflow mit einem Job namens `validate` mitbringen kann).
-- **Abhängigkeiten auf den neuesten passenden Versionen, die Advisories vom Oktober 2026 behoben**: `uv lock
+- `2026-10-22 17:46 UTC` · `v3.1.0` **Abhängigkeiten auf den neuesten passenden Versionen, die Advisories vom Oktober 2026 behoben**: `uv lock
   --upgrade` hob jede Abhängigkeit auf die neueste Version, die ihr Bereich erlaubt (darunter pypdf 6.21.2, certifi
   2026.10.19, paramiko 5.1.0, qdrant-client 1.20.0, filelock 4.2.4), und Pillow geht auf 13.0.0, das 35 Advisories
   von 12.3.0 behebt. fastembed (bis 0.9.0) verlangt noch Pillow < 13; das Framework nutzt nur dessen Textmodelle und
@@ -3713,7 +3721,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Build-Basis-Katalogs (`configs/llama_runtime.yml`) auf ihren aktuellen Digest, beide zusammen (Dependabot-PRs #10
   bis #12, von Hand übernommen: Dependabot hatte nur die Vorlage geändert und überlässt uns die Exporte mit Hashes).
   Dependabot öffnet seine Pull Requests jetzt gegen `development`, wo die Arbeit landet, statt gegen `main`.
-- **Ein Basis-Image, das eine KI in den Modul-Assistenten einträgt, wird ebenfalls auf seinen Digest festgelegt**:
+- `2026-10-17 03:07 UTC` · `v3.1.0` **Ein Basis-Image, das eine KI in den Modul-Assistenten einträgt, wird ebenfalls auf seinen Digest festgelegt**:
   `llm-cli module generate-ai` und das Tool `create_target_module` schreiben das Basis-Image einer KI mit dem Digest,
   auf den sein Tag zeigt, und der Assistent tat das für Dittos eigenen Vorschlag auch; ein Basis-Image, das eine KI
   über die GUI-Werkzeuge eingetragen hatte (Ditto im Chat oder eine KI-App), wurde als bloßes Tag wie `ubuntu:24.04`
@@ -3722,7 +3730,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   wird über `DittoManager.save_module` mit genau diesem Image gespeichert. Lässt sich der Digest nicht nachschlagen
   (Offline-Modus, keine Registry), wird nichts gespeichert, und das Fenster sagt, warum und was zu tun ist. Das Feld
   behält den Wert der KI und ihre Markierung.
-- **Eine URL für ein Quell-Repository nimmt kein Passwort und kein Token mehr auf**: `llm-cli config repos --add` und
+- `2026-10-17 01:41 UTC` · `v3.1.0` **Eine URL für ein Quell-Repository nimmt kein Passwort und kein Token mehr auf**: `llm-cli config repos --add` und
   **Datei > Einstellungen… > Hinzufügen** speicherten eine URL genau wie eingegeben, deshalb landeten
   `https://user:passwort@...`, ein Token als Benutzername oder ein Parameter wie `?private_token=` als reiner Text in
   der `config.yml`. Beide lehnen eine solche URL jetzt mit einer Prüfung im Kern ab (`settings_view.url_credential` in
@@ -3730,7 +3738,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   (`llm-cli secrets set`, **Security > Geheimnisse...**); ein einfacher Kontoname wie der einer SSH-Adresse zählt
   nicht als Zugangsdaten. Ein früher so gespeicherter Eintrag erreicht die Builds weiter und wird nur mit
   `REDACTED` statt der Zugangsdaten gezeigt (die Liste, `config show`, Datei > Einstellungen…).
-- **Der Modul-Assistent speichert Dittos Vorschlag so wie `llm-cli module generate-ai`**: Er speicherte ein von der
+- `2026-10-16 20:29 UTC` · `v3.1.0` **Der Modul-Assistent speichert Dittos Vorschlag so wie `llm-cli module generate-ai`**: Er speicherte ein von der
   KI erstelltes Modul nur über den Modul-Generator, deshalb fielen die Prüfungen von DittoManager.save_module weg (die
   Ablehnung jedes vorgefertigten `nvidia/cuda`-Images in einem KI-Vorschlag und die Pflicht zur Begründung der KI für
   ein Image, das kein Docker Official Image ist), und er legte das vorgeschlagene Basis-Image nicht auf seinen Digest
@@ -3741,65 +3749,65 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   regelbasierter Import einer Probe nach Dittos Vorschlag ersetzt jetzt auch Dittos Pakete, Setup-Befehle und
   Quantisierungslogik: Sie blieben in ihren Feldern und gelangten in ein Modul, das als deines gespeichert wurde, ohne
   Markierung und ohne Audit-Eintrag.
-- **Das Koppeln eines Boards sendet nur eine geprüfte Schlüsselzeile** (bandit B601): Der Befehl, der den öffentlichen
+- `2026-10-16 09:39 UTC` · `v3.1.0` **Das Koppeln eines Boards sendet nur eine geprüfte Schlüsselzeile** (bandit B601): Der Befehl, der den öffentlichen
   Schlüssel des Frameworks in `authorized_keys` des Boards einträgt, ist fest, und sein einziger Wert, die
   Schlüsselzeile, wurde für die Shell maskiert. Jetzt muss die Zeile außerdem ein reiner öffentlicher SSH-Schlüssel
   sein (Typ, Schlüssel, ein optionaler einfacher Kommentar); alles andere wird abgelehnt, bevor der Befehl gesendet
   wird.
-- **`get_build_status` und `get_build_log` nennen fertige Builds über ihre Bezeichnung, nie über ihren Pfad**: in
+- `2026-10-16 01:03 UTC` · `v3.1.0` **`get_build_status` und `get_build_log` nennen fertige Builds über ihre Bezeichnung, nie über ihren Pfad**: in
   3.0.0 gaben der Status einer Build-Anfrage und Log-Zeilen wie „Golden Artifact created“ KI-Clients den vollen Pfad
   jedes fertigen Builds (mit dem Benutzernamen darin). Jetzt nennt der Status `output:<Target>/<Modell>/<Quantisierung>`
   (oder `builds:`, `saved:`, sonst einen Dateinamen), und eine Log-Zeile mit einem Pfad auf diesem Computer nennt die
   Ordner des Frameworks über ihre Bezeichnung und jeden anderen Pfad über seinen Dateinamen (auch unter `/home/`,
   `/media/`, `/Users/` und `C:\Users\`, zum Beispiel ein lokales Modell auf einem USB-Stick); deine eigenen Fenster
   behalten den vollen Pfad.
-- **Kein Löschen ohne deine Bestätigung im Framework** (Runde 5 f; WP7): Jeder Codepfad, der ein gebautes Modell, einen
+- `2026-10-15 21:27 UTC` · `v3.1.0` **Kein Löschen ohne deine Bestätigung im Framework** (Runde 5 f; WP7): Jeder Codepfad, der ein gebautes Modell, einen
   Wissens-Snapshot, einen Papierkorb-Eintrag, ein Image des Frameworks, einen alten llama.cpp-Laufzeit-Build oder ein
   Laufzeit-Paket eines Boards löscht, nimmt nur den Plan, den du in der GUI oder im Terminal bestätigt hast, baut ihn unmittelbar vorher aus dem neu, was auf der Platte liegt, und löscht nichts,
   wenn er sich geändert hat oder das Audit-Log ihn nicht vorher festhalten kann. `delete_artifact` einer KI verschiebt
   nur in den Papierkorb; den Papierkorb leeren und endgültig löschen bleibt bei dir. Eine Prüfung des Quelltexts listet
   jede Stelle im Code, die löscht, mit ihrer Absicherung; eine neue Stelle lässt sie scheitern, bis über sie entschieden
   ist.
-- **Gerätepasswörter gehören nicht mehr auf die Befehlszeile** (Design der sechsten Runde, 4.3): `deploy run`,
+- `2026-10-15 20:45 UTC` · `v3.1.0` **Gerätepasswörter gehören nicht mehr auf die Befehlszeile** (Design der sechsten Runde, 4.3): `deploy run`,
   `scan --device` und `device runtime deploy` fragen verdeckt, wenn `--password` keinen Wert hat, und
   `--password-stdin` liest eine Zeile aus einer Weiterleitung (in einem Terminal abgelehnt, wo das Passwort beim Tippen
   sichtbar wäre). Die Logger von paramiko bleiben während der Anmeldung auf INFO oder höher, sodass ein Passwort nie in
   ein Log gelangt, auch nicht bei DEBUG.
-- **Der Trivy-Scan bekommt den Docker-Socket nicht mehr** (veröffentlicht in 3.0.0): Der Scanner-Container hatte den
+- `2026-10-15 20:45 UTC` · `v3.1.0` **Der Trivy-Scan bekommt den Docker-Socket nicht mehr** (veröffentlicht in 3.0.0): Der Scanner-Container hatte den
   Docker-Socket des Rechners, der Root-Rechte auf diesem Rechner gibt, auch schreibgeschützt eingebunden. Der Builder
   speichert das Image jetzt als Archiv in einem privaten Ordner (0700) des Builds, und Trivy liest nur diese Datei,
   schreibgeschützt, ohne Capabilities und mit `no-new-privileges`. Das Log sagt, wann das Archiv gespeichert und wieder
   entfernt wird; ohne Platz dafür auf der Cache-Platte wird der Scan mit einer Warnung übersprungen, die die Größen
   nennt. Lehnt Docker den Scan ab, nennt die Warnung das Archiv mit der Bezeichnung des Cache-Ordners
   (`cache:...`), nie mit seinem Pfad auf diesem Rechner.
-- **Der MCP-HTTP-Listener auf Loopback beachtet keine Proxy-Header und schreibt kein Zugriffsprotokoll:** uvicorn
+- `2026-10-15 20:45 UTC` · `v3.1.0` **Der MCP-HTTP-Listener auf Loopback beachtet keine Proxy-Header und schreibt kein Zugriffsprotokoll:** uvicorn
   vertraute `X-Forwarded-For` und `X-Forwarded-Proto` von 127.0.0.1, sodass jedes lokale Programm eine andere Adresse
   vorgeben konnte. `mcp serve --transport http` läuft jetzt mit `proxy_headers=False` und `access_log=False`.
-- **Der Installer sagt, was die Gruppe `docker` bedeutet:** `install.sh` nimmt dich weiter ohne Nachfrage in die
+- `2026-10-15 20:45 UTC` · `v3.1.0` **Der Installer sagt, was die Gruppe `docker` bedeutet:** `install.sh` nimmt dich weiter ohne Nachfrage in die
   Gruppe auf (siebte Runde, Punkt 6) und sagt jetzt klar, dass ihre Mitglieder den Docker-Dienst steuern, der als root
   läuft, sodass jedes Programm, das als dein Benutzer läuft, Root-Rechte bekommen kann; er nennt auch den Befehl, der es
   rückgängig macht.
-- **`run_doctor` gibt KI-Clients keinen Pfad des Rechners** (veröffentlicht in 3.0.0): die Befunde, die eine KI las,
+- `2026-10-12 18:37 UTC` · `v3.1.0` **`run_doctor` gibt KI-Clients keinen Pfad des Rechners** (veröffentlicht in 3.0.0): die Befunde, die eine KI las,
   nannten den persönlichen Ordner, das Audit-Log, Pack-Ordner, die Ordner der Speicherplatz-Prüfung und jeden Pfad,
   den der Fehler einer abgestürzten Prüfung zitierte, samt Benutzernamen. Was eine KI liest, nennt die Ordner des
   Frameworks jetzt unter ihrer Bezeichnung (`state:audit.db`, "the state folder", `targets:<Pack>`) und jeden anderen
   Pfad nur mit seinem Dateinamen, Geheimnisse geschwärzt; `llm-cli doctor` (auch `--json`) behält die vollen Pfade
   für dich.
-- **`run_benchmark` startet genau die Datei, die es gehasht hat**: das Modell wird einmal geöffnet, über die offene
+- `2026-10-12 09:16 UTC` · `v3.1.0` **`run_benchmark` startet genau die Datei, die es gehasht hat**: das Modell wird einmal geöffnet, über die offene
   Datei gehasht und llama-bench als genau diese offene Datei übergeben (nativ ein geerbter Deskriptor, in der
   Sandbox ein privater Hardlink), so dass ein Katalogmodell zwischen Prüfung und einem nativen Lauf nicht gegen ein
   anderes Modell ausgetauscht werden kann.
-- **Fehler der Board- und lokalen Laufzeit-Tools nennen keinen Pfad des Rechners**: Pfade in ihren Meldungen
+- `2026-10-12 09:20 UTC` · `v3.1.0` **Fehler der Board- und lokalen Laufzeit-Tools nennen keinen Pfad des Rechners**: Pfade in ihren Meldungen
   erscheinen als Ordner-Bezeichnungen des Frameworks (`state:...`, `cache:...`, `output:...`, `models:...`) oder nur
   als Dateiname, nie als Pfad des Rechners oder `~/...` (auch nach einem Doppelpunkt wie in `file:/...` oder
   `user@board:/...` und in einer `file:///`-URL).
-- **robots.txt lässt sich nicht mehr über Crawl-Optionen abschalten**: Der Crawler nimmt nur seine eigenen
+- `2026-10-12 05:51 UTC` · `v3.1.0` **robots.txt lässt sich nicht mehr über Crawl-Optionen abschalten**: Der Crawler nimmt nur seine eigenen
   Optionsschlüssel (Seiten, Tiefe, Pause, PDFs, Sprachen) und übergeht jeden anderen Schlüssel, auch
   `respect_robots`, mit einer Log-Zeile; der Schalter für Tests mit einem nachgebildeten Web ist ein eigener
   Schlüsselwort-Parameter, den kein Produktcode übergibt (ein Wächtertest prüft das). Zeichenketten im Ergebnis eines
   Jobs (etwa die Adressen, die ein Crawl übersprungen hat, und die Gründe der Websites) werden jetzt wie der Rest des
   Job-Status als externer Text bereinigt, gekürzt und markiert.
-- **Fehler von Geräten und Benchmarks tragen keinen fremden Text und keine Pfade des Rechners mehr in den Kontext
+- `2026-10-12 07:15 UTC` · `v3.1.0` **Fehler von Geräten und Benchmarks tragen keinen fremden Text und keine Pfade des Rechners mehr in den Kontext
   einer KI**: Scheiterte ein Job von `probe_remote_device`, `deploy_device_runtime`, `run_device_benchmark` oder
   `run_benchmark`, enthielt die Fehlermeldung unmarkiert die Fehlerausgabe des Geräts oder die letzte Ausgabe von
   `llama-bench` (das die Metadaten des geladenen GGUF ausgibt, Text, den ein nicht vertrauenswürdiges Modell
@@ -3808,68 +3816,68 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Home-Ordner nennen. Meldung und `reason` sind jetzt die eigenen Sätze des Frameworks ohne Pfade des Rechners, und
   was das Gerät oder das Programm ausgegeben hat, kommt in `get_job_status.external_text` zurück, als externer Text
   markiert (auch bei gescheiterten Jobs).
-- **Ein abgebrochener Job von `restore_knowledge_snapshot` ersetzt die Wissensbasis nicht mehr** (MCP-Entwurf T10):
+- `2026-10-12 08:09 UTC` · `v3.1.0` **Ein abgebrochener Job von `restore_knowledge_snapshot` ersetzt die Wissensbasis nicht mehr** (MCP-Entwurf T10):
   Ein Abbruch (`cancel_job` oder das Ende der Sitzung) markierte den Job sofort als abgebrochen, während die
   Wiederherstellung weiterlief. Sie prüft den Abbruch jetzt nach der Sicherung und bevor die Wissensbasis ersetzt
   wird, und lässt sie dann, wie sie war.
-- **Ein lokaler Modellordner mit Pickle-Gewichten fällt nicht mehr unter einen Dauerauftrag für Builds**
+- `2026-10-12 08:09 UTC` · `v3.1.0` **Ein lokaler Modellordner mit Pickle-Gewichten fällt nicht mehr unter einen Dauerauftrag für Builds**
   (Entwurf 6.10): Pickle-Dateien neben einer safetensors-Datei (der ganze Ordner wird in den Build eingebunden)
   zählten als safetensors. Pickle-Gewichte irgendwo im Ordner machen ihn jetzt zu „pickle“, also wird die Person
   gefragt.
-- **Jedes Basismodell eines zusammengeführten Modells wird auf Zugangsbeschränkung geprüft** (Entwurf 6.10): Nannte
+- `2026-10-12 08:09 UTC` · `v3.1.0` **Jedes Basismodell eines zusammengeführten Modells wird auf Zugangsbeschränkung geprüft** (Entwurf 6.10): Nannte
   eine Modellkarte mehrere Basismodelle, wurde nur das erste nachgeschlagen, sodass ein beschränktes zweites
   Basismodell den Build oder Download nicht aus einem Dauerauftrag heraushielt. Jetzt wird jedes nachgeschlagen; ein
   beschränktes oder nicht nachschlagbares hält ihn heraus.
-- **Der Filter für gefährliche Befehle lässt sich nicht mehr mit unsichtbaren Zeichen oder Zeichen in voller
+- `2026-10-12 04:22 UTC` · `v3.1.0` **Der Filter für gefährliche Befehle lässt sich nicht mehr mit unsichtbaren Zeichen oder Zeichen in voller
   Breite umgehen** (Healing-Analysen und Empfehlungen von Ditto sowie Korrekturvorschläge von KI-Clients): Er
   prüft den Text auch so, wie GUI und CLI ihn zeigen (normalisiert, unsichtbare Zeichen und Verbinder entfernt),
   sodass `r<Leerzeichen ohne Breite>m -rf ~` oder Buchstaben in voller Breite nicht mehr durchkommen und dann als
   lesbarer Befehl erscheinen. Der Vorschlag eines Clients wird in dieser bereinigten Form aufbewahrt; der Hinweis
   in der Statusleiste der GUI nennt den Build bei seinem sprechenden Namen und zeigt den Namen des Clients
   bereinigt.
-- **Die Abfrage des Basis-Images eines neuen Target-Moduls bleibt bei öffentlichen Adressen**: Eine Registry (jeder
+- `2026-10-12 05:11 UTC` · `v3.1.0` **Die Abfrage des Basis-Images eines neuen Target-Moduls bleibt bei öffentlichen Adressen**: Eine Registry (jeder
   öffentliche Host, den eine KI in `base_os` nennt) konnte die anonyme Digest-Abfrage oder ihre Token-Anfrage per
   Weiterleitung ins lokale Netz umlenken, weil Weiterleitungen ungeprüft gefolgt wurde. Jede Weiterleitung wird jetzt
   von Hand verfolgt und muss wie die erste Adresse https und öffentlich sein, Verbindungen gehen nur zur geprüften
   Adresse, und das Pull-Token einer Registry geht nie an einen anderen Host.
-- **`create_target_module` plant den `runtime:`-Block aus genau der Probe, die der Person gezeigt wurde**: Eine Probe,
+- `2026-10-12 05:11 UTC` · `v3.1.0` **`create_target_module` plant den `runtime:`-Block aus genau der Probe, die der Person gezeigt wurde**: Eine Probe,
   die zwischen Frage und Schreiben ersetzt wurde (zum Beispiel `local` neu gemessen, während eine ausstehende Freigabe
   wartete), stoppt das Schreiben, statt verwendet zu werden.
-- **Ein fehlgeschlagener `probe_local_hardware`-Auftrag nennt keinen Host-Pfad**: Konnte die Probe nicht gespeichert
+- `2026-10-12 05:11 UTC` · `v3.1.0` **Ein fehlgeschlagener `probe_local_hardware`-Auftrag nennt keinen Host-Pfad**: Konnte die Probe nicht gespeichert
   werden, enthielt der Fehler des Auftrags (den der KI-Client liest) den vollen Pfad des Benutzerordners; jetzt nennt
   er nur den Grund, und `llm-cli scan` zeigt den vollen Fehler weiterhin im Terminal.
-- **Dittos Modul-Weg folgt derselben Regel für Basis-Images wie das MCP-Tool**: `llm-cli module generate-ai` lehnt ein
+- `2026-10-12 05:11 UTC` · `v3.1.0` **Dittos Modul-Weg folgt derselben Regel für Basis-Images wie das MCP-Tool**: `llm-cli module generate-ai` lehnt ein
   Basis-Image, das kein Docker Official Image ist, ohne `base_image_reason` der KI ab, wie `create_target_module`.
   Die Anzahl der Herstellerquellen, pip-Pakete und Downloads hat nirgends mehr eine harte Grenze (über 20, 200 und 50
   wurden sie abgelehnt); es bleiben nur die weichen Grenzen mit ihrer Warnung.
-- **KI-Clients sehen nie den Host-Pfad eines lokalen Modells, das sie benannt haben** (MCP-Clients und Ditto): Der
+- `2026-10-11 22:39 UTC` · `v3.1.0` **KI-Clients sehen nie den Host-Pfad eines lokalen Modells, das sie benannt haben** (MCP-Clients und Ditto): Der
   Stufentext des Builds, der Kontext der Selbstheilung, `model_source` im Build-Manifest und `list_artifacts` nennen
   es bei seinem `<label>:<relativer Pfad>` (den Host-Pfad eines älteren Manifests beim Label, sonst nur beim
   Dateinamen).
-- **Ein MCP-Client kann den Eintrag und die Grenzen einer Rückfrage nicht mehr umgehen, indem er seinem Aufruf eine
+- `2026-10-12 00:42 UTC` · `v3.1.0` **Ein MCP-Client kann den Eintrag und die Grenzen einer Rückfrage nicht mehr umgehen, indem er seinem Aufruf eine
   Antwort mitgibt** (2026-07-28-Runden): Eine Runde zählt nur als Antwort auf eine Rückfrage, die das Framework genau
   diesem Client gestellt hat und die noch offen ist. Bisher wurde jeder Aufruf, der irgendeine Antwort mitbrachte,
   ohne den vorab geschriebenen Eintrag `confirmation_requested` gefragt und ohne die 10 Minuten Wartezeit nach einem
   Nein, die Pause nach drei Nein und die Zählung der Rückfragen pro Stunde.
-- Dittos Build-Empfehlung und der Prompt `recommend_build_settings` geben dem Modell die Formate,
+- `2026-10-12 01:05 UTC` · `v3.1.0` Dittos Build-Empfehlung und der Prompt `recommend_build_settings` geben dem Modell die Formate,
   Quantisierungstypen und Format-Hinweise des Targets (Text aus `target.yml`, den ein Community-Target-Pack
   installiert) in einem nicht vertrauenswürdigen Block; vorher standen sie als einfacher Text neben den Anweisungen.
-- `LCF_MCP_TOKEN` nimmt `llm-cli` selbst aus der Umgebung, bevor irgendein Befehl läuft, und gibt es nur an
+- `2026-10-12 00:11 UTC` · `v3.1.0` `LCF_MCP_TOKEN` nimmt `llm-cli` selbst aus der Umgebung, bevor irgendein Befehl läuft, und gibt es nur an
   `mcp serve` weiter; vorher entfernte es nur `mcp serve`, sodass jeder andere Befehl und seine Kindprozesse es erbten.
-- MCP-Server: Was außerhalb einer vom Server geprüften Anfrage läuft, bekommt den Aufrufer ohne jede Berechtigung,
+- `2026-10-12 00:11 UTC` · `v3.1.0` MCP-Server: Was außerhalb einer vom Server geprüften Anfrage läuft, bekommt den Aufrufer ohne jede Berechtigung,
   auch auf einem stdio-Server, der vorher auf seinen eigenen Aufrufer zurückfiel.
-- Der MCP-Token-Speicher wird anhand des SHA-256 der Dateibytes zwischengespeichert statt anhand von Identität, Größe
+- `2026-10-12 00:11 UTC` · `v3.1.0` Der MCP-Token-Speicher wird anhand des SHA-256 der Dateibytes zwischengespeichert statt anhand von Identität, Größe
   und Änderungszeit der Datei, sodass ein laufender Server ein widerrufenes oder rotiertes Token nach einer Änderung
   gleicher Größe innerhalb der Auflösung des Zeitstempels nicht weiter annehmen kann.
-- Ditto verwirft einen Healing-Fix oder eine Build-Empfehlung, die einen gefährlichen Befehl enthält (einen
+- `2026-10-10 23:50 UTC` · `v3.1.0` Ditto verwirft einen Healing-Fix oder eine Build-Empfehlung, die einen gefährlichen Befehl enthält (einen
   Download, der direkt in eine Shell geleitet wird, das Löschen des Wurzel- oder Home-Ordners, Schreibrechte für
   alle, das Überschreiben eines Datenträgers), ganz gleich, welche Anweisungen ein Build-Log oder ein
   Modellname dem Modell gegeben hat.
-- Anfragen an lokale Modellserver auf 127.0.0.1 laufen nie über einen HTTP(S)-Proxy aus der Umgebung.
-- Downloads lokaler Modelle werden abgelehnt, wenn Größe und sha256 nicht gepinnt sind; das offizielle vorgebaute
+- `2026-10-10 23:50 UTC` · `v3.1.0` Anfragen an lokale Modellserver auf 127.0.0.1 laufen nie über einen HTTP(S)-Proxy aus der Umgebung.
+- `2026-10-12 00:37 UTC` · `v3.1.0` Downloads lokaler Modelle werden abgelehnt, wenn Größe und sha256 nicht gepinnt sind; das offizielle vorgebaute
   Archiv mit dem Server-Programm (nur mit `runtime install --prebuilt`) wird genauso geprüft, atomar installiert und
   nie auf musl oder einer älteren glibc angeboten als der, gegen die es gebaut wurde.
-- Eine Startregel für jedes llama.cpp-Programm, das das Framework startet (`orchestrator/runtime/server_policy.py`):
+- `2026-10-12 00:37 UTC` · `v3.1.0` Eine Startregel für jedes llama.cpp-Programm, das das Framework startet (`orchestrator/runtime/server_policy.py`):
   Dittos Server, die Prüfungen nach dem Build, die Perplexity-Prüfung, das Startskript und die systemd-Unit auf einem
   Board und die Prüfungen dort teilen eine Liste verbotener Optionen (Tools, Agentenmodus, MCP, Weboberfläche,
   entferntes Rechnen, Downloads, ein Prompt-Protokoll auf der Platte, ein Port, den ein anderer Prozess mitbenutzen
@@ -3882,7 +3890,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   nichts); ein selbst gebauter Build, der nicht genutzt werden kann, weicht nie von selbst auf das vorgebaute Archiv
   aus, und ein offizielles Archiv, das eine frühere Version heruntergeladen hat, wird erst nach
   `runtime install --prebuilt` genutzt (das es übernimmt, ohne es neu herunterzuladen).
-- Deep Ingest liest robots.txt so, wie RFC 9309 es beschreibt, mit einer vorsichtigen Abweichung. Regeln mit `*`
+- `2026-10-11 14:39 UTC` · `v3.1.0` Deep Ingest liest robots.txt so, wie RFC 9309 es beschreibt, mit einer vorsichtigen Abweichung. Regeln mit `*`
   oder `$` (etwa `Disallow: /*.pdf$`), ein `Allow` vor einem längeren `Disallow`, jede Gruppe `User-agent: *` nach
   der ersten und eine Datei, die mit einer Byte Order Mark beginnt, wurden bisher ignoriert, sodass der Crawler
   Seiten abrief, die die Site ausgeschlossen hatte. Seine Gruppen werden am genauen Produkt-Token
@@ -3891,13 +3899,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   jeder Port hat eine eigene robots.txt. Die Abweichung: Eine robots.txt, die mit 401 oder 403 antwortet, heißt
   „alles verboten“, wo RFC 9309 das Crawlen erlauben würde; ein Vorbehalt, den der Crawler nicht lesen kann, zählt
   trotzdem.
-- Deep Ingest liest jede Antwort bis zu einer Grenze (HTML-Seiten 8 MiB, PDFs 64 MiB, robots.txt 500 KiB,
+- `2026-10-11 16:13 UTC` · `v3.1.0` Deep Ingest liest jede Antwort bis zu einer Grenze (HTML-Seiten 8 MiB, PDFs 64 MiB, robots.txt 500 KiB,
   `tdmrep.json` 1 MiB) und innerhalb einer Frist für die ganze Anfrage (60 s, PDFs 180 s). Vorher konnte eine Site
   eine endlose oder tröpfelnde Antwort schicken, die den Speicher füllte oder den Crawl, und damit Stoppen oder das
   Schließen des Assistenten, für immer festhielt: Der HTTP-Timeout begrenzt nur jeden einzelnen Lesevorgang am
   Socket. Eine größere Seite wird übersprungen, eine langsamere scheitert, beide mit Grund im Crawl-Protokoll;
   Stoppen wartet nicht mehr auf eine Seite, die noch ankommt.
-- Community-Packs werden nur über einen Quarantäne-Ordner und nach ihren Prüfungen installiert: eine ID ohne
+- `2026-10-11 04:03 UTC` · `v3.1.0` Community-Packs werden nur über einen Quarantäne-Ordner und nach ihren Prüfungen installiert: eine ID ohne
   Pfade, genau die aufgeführten Dateien mit ihren Hashes, keine Links, Sonder- oder Binärdateien, jedes Image, das
   ein Dockerfile bezieht (`FROM`, `COPY --from`, `RUN --mount=...,from=`, auch in einem kleingeschriebenen
   `dockerfile`), per Digest gepinnt, außer es ist ein offizielles Basis-Image, die Sperrliste für Shell-Code auf
@@ -3906,43 +3914,43 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   wenn es vollständig ist, und nie über einem bestehenden Target (auch nicht, wenn sich nur die Groß- und
   Kleinschreibung unterscheidet). Vorher konnte ein Link in einem Community-Modul jede Datei des Benutzers nach
   `targets/` kopieren.
-- Der Docker-Build-Kontext folgt nie symbolischen Links oder Sonderdateien eines Targets, ein verlinktes Dockerfile
+- `2026-10-11 01:54 UTC` · `v3.1.0` Der Docker-Build-Kontext folgt nie symbolischen Links oder Sonderdateien eines Targets, ein verlinktes Dockerfile
   wird abgelehnt, und der Target-Name eines Builds kann keinen Pfad enthalten.
-- `OPENAI_CUSTOM_HEADERS` und `ANTHROPIC_CUSTOM_HEADERS` werden beim Start der CLI, der GUI und des MCP-Servers
+- `2026-10-11 00:21 UTC` · `v3.1.0` `OPENAI_CUSTOM_HEADERS` und `ANTHROPIC_CUSTOM_HEADERS` werden beim Start der CLI, der GUI und des MCP-Servers
   mit einer Warnung verworfen, außer die Einstellung `ai_allow_sdk_env_headers` ist wahr (ein `"false"` in
   Anführungszeichen gilt als falsch; Einstellungen, die sich nicht lesen lassen, gelten als falsch): Sie könnten
   den gespeicherten API-Schlüssel ersetzen und jeden Server erreichen, auch lokale. Die Adapter für OpenAI und
   OpenAI-kompatible Server schicken den gespeicherten Schlüssel außerdem als ausdrücklichen
   `Authorization`-Header.
-- Die Debug-Ausgabe der SDKs der Anbieter und der HTTP-Bibliotheken (Optionen der Anfragen, Prompts, Header)
+- `2026-10-11 02:06 UTC` · `v3.1.0` Die Debug-Ausgabe der SDKs der Anbieter und der HTTP-Bibliotheken (Optionen der Anfragen, Prompts, Header)
   bleibt aus, außer `--debug-http` ist angegeben: Ihre Logger gehen nie unter INFO, auch nicht mit
   `--log-level DEBUG`, und `ANTHROPIC_LOG=debug` / `OPENAI_LOG=debug` werden auf `info` gesenkt.
-- Admin-API-Schlüssel von Claude (`sk-ant-admin01-`) werden abgelehnt, bevor eine Anfrage gesendet wird, auch
+- `2026-10-11 00:59 UTC` · `v3.1.0` Admin-API-Schlüssel von Claude (`sk-ant-admin01-`) werden abgelehnt, bevor eine Anfrage gesendet wird, auch
   wenn sie mit Leerzeichen davor oder danach gespeichert wurden.
-- Der Tresor für Zugangsdaten wird unter einer Sperre über Prozesse hinweg geändert: GUI, CLI und ein MCP-Server,
+- `2026-10-11 00:29 UTC` · `v3.1.0` Der Tresor für Zugangsdaten wird unter einer Sperre über Prozesse hinweg geändert: GUI, CLI und ein MCP-Server,
   die gleichzeitig schreiben, verlieren nicht mehr die Änderungen der anderen.
-- Ein Schlüsselbund, der nichts behält (etwa `keyring.backends.null`) oder nicht innerhalb von 3 Sekunden
+- `2026-10-11 00:29 UTC` · `v3.1.0` Ein Schlüsselbund, der nichts behält (etwa `keyring.backends.null`) oder nicht innerhalb von 3 Sekunden
   antwortet, wird nicht mehr verwendet; bisher waren damit gespeicherte Geheimnisse nach dem nächsten Start
   unlesbar. Ein Schlüsselbund-Backend, das ohne Verschlüsselung speichert (`keyrings.alt`), wird ebenfalls nicht
   verwendet: Das wäre `secret_storage: insecure`, und das kannst nur du wählen.
-- Unter Windows bleibt der Schlüssel des Tresors auf dem lokalen Rechner, statt mit dem Benutzerprofil zu wandern.
-- Der Secrets-Speicher lehnt einen Ort innerhalb einer Git-Arbeitskopie ab (setze `LLM_FRAMEWORK_HOME` woanders
+- `2026-10-11 00:29 UTC` · `v3.1.0` Unter Windows bleibt der Schlüssel des Tresors auf dem lokalen Rechner, statt mit dem Benutzerprofil zu wandern.
+- `2026-10-11 00:29 UTC` · `v3.1.0` Der Secrets-Speicher lehnt einen Ort innerhalb einer Git-Arbeitskopie ab (setze `LLM_FRAMEWORK_HOME` woanders
   hin).
-- Namen von Geheimnissen mit Zeilenumbrüchen oder Steuerzeichen werden abgelehnt, und das Audit-Log der Secrets
+- `2026-10-11 01:34 UTC` · `v3.1.0` Namen von Geheimnissen mit Zeilenumbrüchen oder Steuerzeichen werden abgelehnt, und das Audit-Log der Secrets
   maskiert sie, sodass ein Name (oder ein Benutzername) keine Audit-Einträge fälschen kann.
-- **Zugangsdaten werden in jedem Log geschwärzt**: in den eigenen Logs des Frameworks, in denen der SDKs der
+- `2026-10-11 00:59 UTC` · `v3.1.0` **Zugangsdaten werden in jedem Log geschwärzt**: in den eigenen Logs des Frameworks, in denen der SDKs der
   Anbieter und der HTTP-Bibliotheken (anthropic, openai, httpx, httpcore, urllib3, botocore, google.auth, azure,
   msal), in Tracebacks und in den Zusatzfeldern des JSON-Logformats. Geschwärzt werden die Werte von Headern mit
   Zugangsdaten (`Authorization`, `x-api-key`, `api-key`, `x-goog-api-key`, `Cookie`, `Set-Cookie`, auch in JSON
   mit maskierten Anführungszeichen), Anmelde- und Schlüsselparameter in URLs und in formularkodierten
   Token-Anfragen (`code`, `state`, `key`, `access_token`, `token`, …) und jedes bekannte Schlüsselformat.
-- Die Schwärzung findet Zugangsdaten auch an ihrem Kontext, gleich in welchem Format: ein Bearer-Token, das eine
+- `2026-10-11 01:30 UTC` · `v3.1.0` Die Schwärzung findet Zugangsdaten auch an ihrem Kontext, gleich in welchem Format: ein Bearer-Token, das eine
   Fehlermeldung eines Servers zitiert, Werte in Token-Form in Feldern wie `api_key`, `secret`, `token` oder
   `password` und Umgebungszeilen wie `HF_TOKEN=...` oder `export OPENAI_API_KEY=...`. Tokenizer-Einstellungen in
   Build-Logs (zum Beispiel `"pad_token": "<|...|>"`) bleiben lesbar.
-- Die Schwärzung lässt sich nicht mehr durch präparierten Text ausbremsen: Eine Fehlermeldung oder ein Build-Log
+- `2026-10-11 01:30 UTC` · `v3.1.0` Die Schwärzung lässt sich nicht mehr durch präparierten Text ausbremsen: Eine Fehlermeldung oder ein Build-Log
   mit einer langen Folge von `sk-` brauchte vorher Minuten.
-- **Eine Tabelle der Secret-Formate** (`orchestrator/security/secret_patterns.py`) für den Secret-Scan und die
+- `2026-10-11 00:59 UTC` · `v3.1.0` **Eine Tabelle der Secret-Formate** (`orchestrator/security/secret_patterns.py`) für den Secret-Scan und die
   Schwärzung zur Laufzeit, die vorher nur fünf Formate kannte. Neu: Schlüssel von Unsloth Studio (`sk-unsloth-`),
   kurzlebige Bedrock-Schlüssel (`bedrock-api-key-`), LocalAI-Schlüssel (`lai-`), geheime age-Schlüssel
   (`AGE-SECRET-KEY-1...`), Organisations-Tokens von Hugging Face (`api_org_`), Test-Schlüssel von Stripe
@@ -3961,14 +3969,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Wert eines anderen Formats, der ihn enthält, wird weiterhin gemeldet, die übrigen Regeln lesen die Zeile auch ohne
   ihn, und eine Zeile der Liste mit einem Steuer- oder unsichtbaren Zeichen ist fehlerhaft (Exit-Code 2), damit ein
   Kommentar keinen Eintrag verstecken kann.
-- API-Schlüssel, die Dittos Anbieterschicht im Speicher hält, erscheinen in `str()` und `repr()` als
+- `2026-10-11 00:59 UTC` · `v3.1.0` API-Schlüssel, die Dittos Anbieterschicht im Speicher hält, erscheinen in `str()` und `repr()` als
   `<redacted>` und lassen sich nicht mit pickle serialisieren.
-- Ein Schlüssel eines eigenen OpenAI-kompatiblen Servers gehört zu der Adresse, für die er gespeichert wurde
+- `2026-10-11 03:18 UTC` · `v3.1.0` Ein Schlüssel eines eigenen OpenAI-kompatiblen Servers gehört zu der Adresse, für die er gespeichert wurde
   (Schema, Host und Port): Nach einer Änderung der Basis-URL wird er nicht mehr mitgeschickt. Ein Schlüssel, den
   eine frühere Version gespeichert hat, wird an die Adresse gebunden, mit der er als Nächstes genutzt wird.
   Claude-Admin-API-Schlüssel werden auch für eine Claude-API-Vorlage in deinem eigenen Anbieterkatalog
   abgelehnt, die sie nicht nennt.
-- Härtung der Anmeldung: Der Hinweis zum Schlüssel in den KI-Einstellungen bindet einen Schlüssel einer früheren
+- `2026-10-11 03:45 UTC` · `v3.1.0` Härtung der Anmeldung: Der Hinweis zum Schlüssel in den KI-Einstellungen bindet einen Schlüssel einer früheren
   Version nie an eine Adresse, die gerade noch eingetippt wird; Abmelden entfernt auch einen solchen Schlüssel;
   die Prüfung der Zugangsdaten schickt einen an eine Adresse gebundenen Schlüssel nur an diese Adresse; eine
   Schlüsselvariable einer lokalen Engine in deinem eigenen Katalog geht nur an die Adresse, die der Katalog
@@ -3977,7 +3985,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Eine gescheiterte Token-Erneuerung nennt nur die Art des Fehlers, und eine Meldung des Anbieters, die das
   Refresh-Token zitiert, wird ohne es angezeigt. Ein Schlüssel einer früheren Version wird an die Adresse
   gebunden, bevor eine Prüfung mit eingetippten Feldern ihn dorthin schickt.
-- Die Anmeldung nimmt nie ein Geheimnis von der Kommandozeile (`ditto login` hat keine Option für einen
+- `2026-10-11 04:36 UTC` · `v3.1.0` Die Anmeldung nimmt nie ein Geheimnis von der Kommandozeile (`ditto login` hat keine Option für einen
   Schlüssel, und ein unbekannter Anbietername oder `--method`-Wert, der wie ein Schlüssel aussieht, wird nicht
   ausgegeben), zeigt einen Schlüssel nur mit seinen letzten vier Zeichen (auch in `auth status --json`, und als
   `REDACTED`, wenn ein Fehlertext oder Kontoname des Servers ihn wiederholt, auch in Fehlern von Dittos Chat),
@@ -3986,19 +3994,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   wird: `--insecure-storage` ersetzt nie einen Schutz, der funktioniert, und auch keinen Credential-Helper und
   keine Passphrase, die du gewählt hast. Ein Schlüssel mit einem Leerzeichen, einem Zeilenumbruch oder einem
   unsichtbaren Zeichen darin wird abgelehnt, bevor etwas gesendet oder gespeichert wird.
-- Das Builder-Log zeigt jede Meldung als reinen Text, sodass Namen aus Community-Rezepten, Dittos Antworten oder
+- `2026-10-11 13:50 UTC` · `v3.1.0` Das Builder-Log zeigt jede Meldung als reinen Text, sodass Namen aus Community-Rezepten, Dittos Antworten oder
   Build-Ausgaben nicht als HTML erscheinen (Links, Bilder, Formatierung).
-- Hardware-Profile enthalten keine identifizierenden Werte: Die Probe-Skripte schreiben weder den Hostnamen noch die
+- `2026-10-11 20:08 UTC` · `v3.1.0` Hardware-Profile enthalten keine identifizierenden Werte: Die Probe-Skripte schreiben weder den Hostnamen noch die
   RAM-Teilenummern oder die CPU-ID, die Serial-Zeile von `/proc/cpuinfo` und das Serial-Attribut von USB-Geräten
   werden nie gelesen, und freier Text wird auf druckbares ASCII reduziert. Werte, die auf einem Board gelesen werden,
   werden vor dem Schreiben geprüft, und der SSH-Scan behandelt die Antwort des Boards als nicht vertrauenswürdig
   (Größengrenze, strenger Parser).
-- **Aufrufe, die etwas ändern, laufen nur, wenn sie festgehalten werden** (Ditto und MCP-Clients): Bevor ein solcher
+- `2026-10-11 18:30 UTC` · `v3.1.0` **Aufrufe, die etwas ändern, laufen nur, wenn sie festgehalten werden** (Ditto und MCP-Clients): Bevor ein solcher
   Aufruf läuft, wird ein Eintrag `started` ins Audit-Log geschrieben; lässt er sich nicht schreiben, wird der Aufruf
   abgelehnt, und eine Frage dazu wird nicht gestellt. Lesende Aufrufe bleiben verfügbar. Bisher wurde ein
   gescheiterter Audit-Eintrag nur protokolliert und der Aufruf lief trotzdem, und der einzige Eintrag entstand nach
   dem Handler, sodass ein Absturz mitten in einer Änderung keine Spur hinterließ.
-- **Jedes Tool-Ergebnis wird zentral gefiltert** (Ditto und MCP-Clients): Secrets werden in jeder Zeichenkette eines
+- `2026-10-11 18:40 UTC` · `v3.1.0` **Jedes Tool-Ergebnis wird zentral gefiltert** (Ditto und MCP-Clients): Secrets werden in jeder Zeichenkette eines
   Ergebnisses geschwärzt, externer Text (Build-Logs und Stufennamen, Healing-Vorschläge, Build-Manifeste, Auszüge
   aus der Wissensbasis, Doctor-Meldungen, Bezeichnungen und Hinweise von Targets aus der `target.yml`) wird von
   unsichtbaren und bidirektionalen Steuerzeichen befreit und gekürzt, andere Zeichenketten werden auf 16 KiB
@@ -4007,7 +4015,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   Teil, der externen Text zitiert, als nicht vertrauenswürdige Daten eingepackt, wie Dittos Modell. Bisher wurden
   nur Fehler, Warnungen und Log-Zeilen geschwärzt, nur Auszüge aus der Wissensbasis bereinigt, Log-Zeilen und
   Ergebnisse hatten keine Größengrenze, und ein MCP-Client bekam Fehlertext eines Tools unmarkiert.
-- **Neue Tools erben nie eine gelockerte Einstellung der Stufe, und die Obergrenze eines Tools gilt**: Die
+- `2026-10-11 18:55 UTC` · `v3.1.0` **Neue Tools erben nie eine gelockerte Einstellung der Stufe, und die Obergrenze eines Tools gilt**: Die
   Berechtigungsdatei hält fest, welche Tools du gesehen hast, und ein später hinzugekommenes Tool nutzt seine eigene
   Vorgabe (oder die empfohlene Einstellung der Stufe), bis du es gesehen hast; eine einmal erlaubte Stufe erlaubt also
   nicht mehr jedes Tool, das ihr später hinzugefügt wird. Die eigene Vorgabe eines Tools (zum Beispiel `deny` für ein
@@ -4015,7 +4023,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   ein Tool, das andere Geräte erreicht oder Daten löscht, fragt höchstens. Bisher konnte eine Einstellung für ein
   einzelnes Tool ein solches Tool ohne Rückfrage erlauben. Eine Berechtigungsdatei aus 3.0.0 zählt ihre elf Tools als
   gesehen; 3.0.0 selbst liest eine von dieser Version gespeicherte Datei als beschädigt und verweigert jedes Tool.
-- MCP und Ditto: `start_build` nimmt für `model` und `dataset_path` keinen Pfad mehr an (ein MCP-Client konnte jede
+- `2026-10-11 18:52 UTC` · `v3.1.0` MCP und Ditto: `start_build` nimmt für `model` und `dataset_path` keinen Pfad mehr an (ein MCP-Client konnte jede
   lesbare Datei, etwa `~/.ssh/id_ed25519`, in einen Build einbinden und über das Log zurücklesen). Nur Verweise in
   den Ordnern, die die KI nutzen darf, werden angenommen; die aufgelöste Datei muss in ihrem Ordner und außerhalb
   jedes gesperrten Ordners liegen (Schlüssel, Anmeldedaten, die eigenen Anmeldungen der KI-Clients, das
@@ -4026,7 +4034,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   eines Build-Containers erneut geprüft. Eine Hugging-Face-Repo-ID eines KI-Aufrufers wird nicht mehr als lokaler
   Pfad nachgeschlagen, weder vom Build-Service noch von der Build-Engine (die einen gleichnamigen Ordner unter ihrem
   Arbeitsverzeichnis einband). Ablehnungen nennen das Label, nie den echten Pfad.
-- **MCP über HTTP ist für Webseiten und DNS-Rebinding geschlossen.** In 3.0.0 kam eine Seite von einem beliebigen
+- `2026-10-11 19:52 UTC` · `v3.1.0` **MCP über HTTP ist für Webseiten und DNS-Rebinding geschlossen.** In 3.0.0 kam eine Seite von einem beliebigen
   Port auf localhost durch die Origin-Prüfung (nur das Token hielt sie auf), die Host-Prüfung nahm einen
   Loopback-Namen mit jedem Port an, und alle HTTP-Clients teilten sich ein Token und einen Audit-Akteur. Jetzt wird
   jede Anfrage mit `Origin`-Header (auch ein CORS-Preflight) abgelehnt, bevor das Token geprüft wird, der
@@ -4035,7 +4043,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   eine Sitzung und eine offene Fragerunde des Protokolls 2026-07-28 antworten nur dem Token, das sie geöffnet hat,
   und kein Token wird angenommen (und der Server startet nicht), solange andere Benutzer die Token-Datei lesen oder
   ändern können oder sie einem anderen Benutzer gehört.
-- **Kein vorgebautes llama.cpp in Targets**: Erzeugte Module, Community-Exporte und Target-Pakete in Quarantäne
+- `2026-10-11 23:59 UTC` · `v3.1.0` **Kein vorgebautes llama.cpp in Targets**: Erzeugte Module, Community-Exporte und Target-Pakete in Quarantäne
   werden abgelehnt, wenn ein Dockerfile ein vorgebautes llama.cpp-Image bezieht (nach seinem Namen, auch per Digest
   festgelegt, oder eines der früheren Laufzeit-Images des Frameworks) oder llama.cpp-Programme aus einem anderen Image
   kopiert (auch über eine Build-Stufe, die es nur nennt), oder wenn ein Dockerfile, ein Skript (auch eines ohne
@@ -4043,12 +4051,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   (auch über eine Pipeline wie `curl ... | tar -x`), eine Paketquelle mit vorgebauten `llama-cpp-python`-Wheels nutzt oder ein llama.cpp-Paket installiert:
   Das Framework teilt Rezepte, keine Binärdateien. `nvidia/cuda`-Images gelten nicht mehr als offizielle Basis-Images
   und brauchen einen Digest, und ein llama.cpp-Image wird als Basis-Image eines Moduls abgelehnt.
-- Der llama.cpp-Server auf einem Board lauscht nur auf 127.0.0.1 und braucht einen Schlüssel, der auf dem Board
+- `2026-10-11 23:49 UTC` · `v3.1.0` Der llama.cpp-Server auf einem Board lauscht nur auf 127.0.0.1 und braucht einen Schlüssel, der auf dem Board
   erzeugt wird und es nie verlässt. Ein Deployment erreicht nur das Board, mit dessen Host-Schlüssel das Profil
   erstellt wurde, läuft als unprivilegierter Benutzer (root wird abgelehnt) und nutzt sudo nur für eine systemd-Unit,
   die du in den Deploy-Einstellungen erlaubt hast, nie mit einer Passwortabfrage. Jeder Wert, der vom Board gelesen
   wird (Home-Ordner, Benutzer-ID, Architektur), wird geprüft, bevor er einen Befehl erreicht.
-- **Nur eine Person ändert, was eine KI darf.** Die Tool-Berechtigungen (`tool_policy.json`) und der MCP-Token-Speicher
+- `2026-10-11 22:32 UTC` · `v3.1.0` **Nur eine Person ändert, was eine KI darf.** Die Tool-Berechtigungen (`tool_policy.json`) und der MCP-Token-Speicher
   (`mcp_tokens.json`) sind mit einem Schlüssel signiert, der aus dem Audit-Schlüssel im Schlüsselbund des Systems
   abgeleitet ist. Eine von Hand bearbeitete, beschädigte, mit einem anderen Schlüssel signierte oder unsignierte Datei
   verbietet jedes Tool, und der Token-Speicher nimmt kein Token an, bis eine Person sie neu einrichtet; `llm-cli doctor`
@@ -4096,34 +4104,34 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   die Signatur keinen
   Schlüssel, wie die Audit-Kette; eine solche Datei wird abgelehnt, solange das Audit-Log mit Schlüssel geführt
   wird.
-- **Ausstehende Freigaben und Bitten, nicht mehr zu fragen, sind Rückfragen wie alle anderen.** Sie zählen zu den
+- `2026-10-12 01:44 UTC` · `v3.1.0` **Ausstehende Freigaben und Bitten, nicht mehr zu fragen, sind Rückfragen wie alle anderen.** Sie zählen zu den
   30 Rückfragen pro Stunde; ein Nein im Freigabefenster verhindert für 10 Minuten, dass dir derselbe Aufruf erneut
   vorgelegt wird, und zählt zur Pause des Tools, wie ein Nein im Dialog des Clients; ein kürzliches Nein, ein
   pausiertes Tool oder eine aufgebrauchte Stunde lehnen eine neue ausstehende Freigabe ab; und die Grenze von 5
   offenen ausstehenden Freigaben ist eine protokollierte Ablehnung, die nie als gescheiterter Aufruf zählt. Vorher
   konnte ein Client, der nicht fragen kann, Rückfragen ohne diese Grenzen einreihen.
 
-- **Kein implizites Hugging-Face-Token**: Builds übergaben huggingface_hub `token=None`, wenn kein Token gespeichert
+- `2026-10-12 03:20 UTC` · `v3.1.0` **Kein implizites Hugging-Face-Token**: Builds übergaben huggingface_hub `token=None`, wenn kein Token gespeichert
   war, sodass ein Token aus `HF_TOKEN` oder dem Hugging-Face-Home-Ordner verwendet wurde, ohne dass die Person es dem
   Framework gegeben hatte (G37). Jeder Hugging-Face-Aufruf eines Builds sendet jetzt das gespeicherte Token oder
   `token=False`.
-- **Image-Builds lesen nie den MCP-Protokollstrom**: `docker buildx build` lief mit der Standardeingabe des Servers,
+- `2026-10-12 03:20 UTC` · `v3.1.0` **Image-Builds lesen nie den MCP-Protokollstrom**: `docker buildx build` lief mit der Standardeingabe des Servers,
   die über stdio der Protokollstrom ist (G25); es bekommt jetzt `stdin=DEVNULL`.
-- **Deployment-Pakete nehmen Images nur per Digest festgelegt oder hier gebaut**: Das voreingestellte
+- `2026-10-12 06:03 UTC` · `v3.1.0` **Deployment-Pakete nehmen Images nur per Digest festgelegt oder hier gebaut**: Das voreingestellte
   Inferenz-Image war `...:latest`, und ein fehlgeschlagenes Ziehen über ein Tag wurde verschluckt, sodass ein Paket
   enthalten konnte, was die Registry gerade auslieferte (G17). Ein Image kommt jetzt nur als `name@sha256:...` ins
   Paket oder wenn es auf diesem Rechner gebaut wurde; ein Tag wird mit Grund abgelehnt, ein fehlendes festgelegtes
   Image nur über seinen Digest gezogen, und ein fehlgeschlagener Export bricht das Paket ab.
-- **Deployments leiten nie den MCP-Protokollstrom weiter**: Ohne paramiko liefen `ssh` und `scp` mit der
+- `2026-10-12 06:03 UTC` · `v3.1.0` **Deployments leiten nie den MCP-Protokollstrom weiter**: Ohne paramiko liefen `ssh` und `scp` mit der
   Standardeingabe des Frameworks, die über MCP-stdio der Protokollstrom ist (G25); sie bekommen jetzt
   `stdin=DEVNULL`.
-- **Der Kalibrierdatensatz eines Rezepts wird in einem Zug geprüft und benutzt**: `start_recipe_build` prüfte den
+- `2026-10-12 10:35 UTC` · `v3.1.0` **Der Kalibrierdatensatz eines Rezepts wird in einem Zug geprüft und benutzt**: `start_recipe_build` prüfte den
   sha256 des Datensatzes beim Festschreiben des Aufrufs, aber der Build öffnete den Pfad später erneut, sodass eine
   dazwischen ausgetauschte Datei benutzt wurde. Die Build-Engine öffnet die Datei jetzt einmal (nie über einen Link),
   kopiert ihre Bytes in den eigenen Ordner des Builds, während sie sie hasht, und benutzt nur diese Kopie, und nur wenn
   ihr sha256 der ist, den das Rezept festlegt (eine RKNN-Beispielliste behält ihren Ordner, die geprüfte Liste wird
   über ihren eigenen Namen gelegt).
-- **Pfade mit Leerzeichen in Fehlern an eine KI oder die Person**: Ein Pfad mit einem Leerzeichen (ein Ordner wie
+- `2026-10-12 10:35 UTC` · `v3.1.0` **Pfade mit Leerzeichen in Fehlern an eine KI oder die Person**: Ein Pfad mit einem Leerzeichen (ein Ordner wie
   `My Models` oder ein Home-Ordner, dessen Benutzername eines enthält) wurde am ersten Leerzeichen abgeschnitten,
   sodass die Bezeichnung falsch war und ein Stück des Benutzernamens oder des Host-Pfads übrig bleiben konnte. Pfade
   in Anführungszeichen, die Ordner des Frameworks und der Home-Ordner (auch unter seinem echten Pfad, wenn er ein
@@ -4132,7 +4140,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/ROADMAP_DE.md), nicht hier.
   und ein Leerzeichen setzt einen Pfad fort, wenn das nächste Wort klar dazugehört (oder, in einem bekannten Ordner,
   der längere Pfad existiert), sodass der Fehler nur eine Bezeichnung oder den Dateinamen nennt.
 
-- **Kein Rich Text für nicht vertrauenswürdigen Text im Chat-Bereich und in den Fenstern, die er berührt**
+- `2026-10-12 18:24 UTC` · `v3.1.0` **Kein Rich Text für nicht vertrauenswürdigen Text im Chat-Bereich und in den Fenstern, die er berührt**
   (Entwurf 5.2 R1-R7, SEC-M2): Jeder Text des Bereichs ist ein Label mit reinem Text (in `gui/chat_panel/` gibt es kein
   Rich-Text-Widget und keinen solchen Aufruf, ein Quelltext-Test prüft es, auch im Freigabe-Fenster, in den
   Einstellungsdialogen und im Hauptfenster); versteckte Zeichen erscheinen als Escape-Folgen; ein Wert von außerhalb
@@ -4154,133 +4162,133 @@ können das Framework über das Model Context Protocol steuern, und Konvertierun
 Sandbox.
 
 ### Hinzugefügt
-- **MCP-Server** (`llm-cli mcp serve`, offizielles SDK `mcp` 2.3.0, Spezifikation 2026-07-28): Claude Code,
+- `2026-10-10 16:48 UTC` · `v3.0.0` **MCP-Server** (`llm-cli mcp serve`, offizielles SDK `mcp` 2.3.0, Spezifikation 2026-07-28): Claude Code,
   Claude Desktop oder VS Code können Targets auflisten, Capabilities prüfen, Builds starten und abbrechen, Logs und
   Artefakte lesen, die Wissensbasis durchsuchen, den Doctor ausführen und über Self-Healing-Vorschläge
   entscheiden. Standardmäßig über stdio; optional Streamable HTTP auf Loopback mit einem Bearer-Token je
   Benutzer. `llm-cli mcp config` gibt die Client-Einrichtung aus, `--write claude-desktop` trägt sie in Claude
   Desktop ein.
-- **Tool-Registry mit Berechtigungen und Audit-Log**, gemeinsam genutzt von Ditto und dem MCP-Server: typisierte
+- `2026-10-10 16:48 UTC` · `v3.0.0` **Tool-Registry mit Berechtigungen und Audit-Log**, gemeinsam genutzt von Ditto und dem MCP-Server: typisierte
   Tools mit Risikostufen (Lesen, lokales Schreiben, extern, verboten), Berechtigungen, die einmal bei Dittos erster
   Einrichtung abgefragt werden (GUI-Dialog, `llm-cli ditto setup`, `llm-cli tools permissions`), Bestätigungen
   über MCP-Elicitation und ein HMAC-verkettetes Audit-Log (`llm-cli tools audit --verify`).
-- **Target-Capabilities** (Block `capabilities:` in `target.yml`, pydantic-Schema): Boards, Formate,
+- `2026-10-10 16:48 UTC` · `v3.0.0` **Target-Capabilities** (Block `capabilities:` in `target.yml`, pydantic-Schema): Boards, Formate,
   Quantisierungen je Board, Standardwerte und Kalibrierungsbedarf. GUI, CLI, Build-Dienst und MCP-Tools bieten
   genau das an, was ein Target angibt, und prüfen genau das.
-- **Build-Dienst**: ein typisierter Einstiegspunkt für Builds (prüfen, starten, Status, abbrechen, Logs,
+- `2026-10-10 16:48 UTC` · `v3.0.0` **Build-Dienst**: ein typisierter Einstiegspunkt für Builds (prüfen, starten, Status, abbrechen, Logs,
   Artefakte).
-- **`llm-cli doctor`**: deterministische Gesundheitsprüfungen (Docker, Speicherplatz, Targets, Sicherheit,
+- `2026-10-10 16:48 UTC` · `v3.0.0` **`llm-cli doctor`**: deterministische Gesundheitsprüfungen (Docker, Speicherplatz, Targets, Sicherheit,
   Tool-Berechtigungen, Kalibrierungsdaten) mit Hinweisen zur Behebung, gestuften automatischen Korrekturen und
   JSON-Ausgabe (angelehnt an „Mojo“ in rag4ll).
-- **Kuratierter Kalibrierungstext** (`data/calibration`, MIT, mit Prüfsummen gesicherte Textsätze auf Deutsch,
+- `2026-10-10 16:48 UTC` · `v3.0.0` **Kuratierter Kalibrierungstext** (`data/calibration`, MIT, mit Prüfsummen gesicherte Textsätze auf Deutsch,
   Englisch und zur Tool-Nutzung) für Importance Matrices.
-- **Build-Manifeste**: Jeder Build ergänzt `build_info.json` um seine Modelldateien und deren SHA256-Hashes; das
+- `2026-10-10 16:48 UTC` · `v3.0.0` **Build-Manifeste**: Jeder Build ergänzt `build_info.json` um seine Modelldateien und deren SHA256-Hashes; das
   Deployment-Fenster listet Builds anhand dieser Manifeste.
-- **Echter Build-Abbruch und Zeitlimits je Stufe**.
-- **SSH-Vertrauen bei der ersten Verbindung** (Trust on First Use): Fingerabdrücke von Host-Schlüsseln bestätigt
+- `2026-10-10 16:48 UTC` · `v3.0.0` **Echter Build-Abbruch und Zeitlimits je Stufe**.
+- `2026-10-10 16:48 UTC` · `v3.0.0` **SSH-Vertrauen bei der ersten Verbindung** (Trust on First Use): Fingerabdrücke von Host-Schlüsseln bestätigt
   der Benutzer, gespeichert werden sie in der eigenen `known_hosts` des Frameworks; ein Ed25519-Schlüssel des
   Frameworks wird einmalig auf dem Gerät installiert („Pairing“).
-- **Echte CI-Workflows** (Lint, Tests unter Ubuntu mit 3.11 bis 3.14 und unter Windows, bandit, pip-audit,
+- `2026-10-10 16:48 UTC` · `v3.0.0` **Echte CI-Workflows** (Lint, Tests unter Ubuntu mit 3.11 bis 3.14 und unter Windows, bandit, pip-audit,
   Docker-Build und Smoke-Tests einschließlich der Sandbox) und Dependabot.
-- Unterstützung für Python 3.14; Zustandsordner je Benutzer `~/.llm-framework` (`LLM_FRAMEWORK_HOME`).
+- `2026-10-10 16:48 UTC` · `v3.0.0` Unterstützung für Python 3.14; Zustandsordner je Benutzer `~/.llm-framework` (`LLM_FRAMEWORK_HOME`).
 
 ### Geändert
-- **Rockchip-Pipeline neu aufgebaut** und von Anfang bis Ende geprüft: llama.cpp v0.6.0 (GGUF einschließlich
+- `2026-10-10 16:48 UTC` · `v3.0.0` **Rockchip-Pipeline neu aufgebaut** und von Anfang bis Ende geprüft: llama.cpp v0.6.0 (GGUF einschließlich
   IQ-Typen und Importance Matrix), RKLLM-Toolkit 1.3.1 und RKNN-Toolkit2 2.3.2, jedes in einer eigenen venv;
   Modelle werden auf dem Host bereitgestellt (Hugging-Face-Repo oder lokaler Pfad), Verteilung nach Format
   `gguf`/`rkllm`/`rknn`, Standardwerte passend zum Board.
-- Image-Builds nutzen BuildKit, wenn es verfügbar ist, und melden die echte Ursache von Fehlern; die Images
+- `2026-10-10 16:48 UTC` · `v3.0.0` Image-Builds nutzen BuildKit, wenn es verfügbar ist, und melden die echte Ursache von Fehlern; die Images
   einzelner Builds werden nach dem Build entfernt.
-- Der Kalibrierungsdatensatz ist von der Importance Matrix getrennt (IMatrix nur für GGUF, der Datensatz geht
+- `2026-10-10 16:48 UTC` · `v3.0.0` Der Kalibrierungsdatensatz ist von der Importance Matrix getrennt (IMatrix nur für GGUF, der Datensatz geht
   direkt an RKLLM/RKNN).
-- Das gespeicherte Hugging-Face-Token erreicht die Builds (eine gemeinsame Build-Engine).
-- Relative Datenpfade werden gegen das Installationsverzeichnis aufgelöst, nicht gegen das Arbeitsverzeichnis.
-- Self-Healing: Vorschläge warten auf eine ausdrückliche Entscheidung (GUI-Dialog, CLI-Abfrage oder MCP-Tool);
+- `2026-10-10 16:48 UTC` · `v3.0.0` Das gespeicherte Hugging-Face-Token erreicht die Builds (eine gemeinsame Build-Engine).
+- `2026-10-10 16:48 UTC` · `v3.0.0` Relative Datenpfade werden gegen das Installationsverzeichnis aufgelöst, nicht gegen das Arbeitsverzeichnis.
+- `2026-10-10 16:48 UTC` · `v3.0.0` Self-Healing: Vorschläge warten auf eine ausdrückliche Entscheidung (GUI-Dialog, CLI-Abfrage oder MCP-Tool);
   angewendet werden nur feste, vom Framework definierte Korrekturen (weniger Compile-Jobs, nachdem einem
   Image-Build der Arbeitsspeicher ausging, Aufräumen von Framework-Images); KI-Vorschläge sind nur Ratschläge.
-- Ditto: Fehler und Ablehnungen lösen Ausnahmen aus, statt als Antworten angezeigt zu werden; API-Schlüssel
+- `2026-10-10 16:48 UTC` · `v3.0.0` Ditto: Fehler und Ablehnungen lösen Ausnahmen aus, statt als Antworten angezeigt zu werden; API-Schlüssel
   werden je Aufruf übergeben; Text aus der Wissensbasis, Logs und Probe-Dateien kommen als bereinigte, als nicht
   vertrauenswürdig markierte Blöcke in die Benutzernachricht.
-- Abhängigkeiten mit Hash-Pins aktualisiert (Poetry-2-Lock, `requirements*.txt`); `pyside6-essentials` statt des
+- `2026-10-10 16:48 UTC` · `v3.0.0` Abhängigkeiten mit Hash-Pins aktualisiert (Poetry-2-Lock, `requirements*.txt`); `pyside6-essentials` statt des
   vollständigen PySide6; `pydantic` und `mcp` hinzugefügt.
-- Installer und Smoke-Test verlangen Python 3.11 bis 3.14.
-- Eine einzige Versionsquelle (`orchestrator.__version__`).
-- **Die Konfiguration wird nie mehr aus dem Arbeitsverzeichnis gelesen**: `LLM_FRAMEWORK_CONFIG_DIR`, dann
+- `2026-10-10 16:48 UTC` · `v3.0.0` Installer und Smoke-Test verlangen Python 3.11 bis 3.14.
+- `2026-10-10 16:48 UTC` · `v3.0.0` Eine einzige Versionsquelle (`orchestrator.__version__`).
+- `2026-10-10 20:56 UTC` · `v3.0.0` **Die Konfiguration wird nie mehr aus dem Arbeitsverzeichnis gelesen**: `LLM_FRAMEWORK_CONFIG_DIR`, dann
   `configs/` der Installation, dann `~/.llm-framework` (`framework.yml` im aktuellen Verzeichnis wird ignoriert).
-- Der Secrets-Speicher liegt im Ordner des Benutzers (`~/.llm-framework/secrets.store`, einmalig vom alten Ort
+- `2026-10-10 20:56 UTC` · `v3.0.0` Der Secrets-Speicher liegt im Ordner des Benutzers (`~/.llm-framework/secrets.store`, einmalig vom alten Ort
   herüberkopiert); der Schlüssel des Audit-Logs hat einen eigenen Keyring-Eintrag.
-- Capabilities: `default_board` (das Board, das die Build-Skripte verwenden, wenn keins angegeben ist), Aliasse
+- `2026-10-10 20:56 UTC` · `v3.0.0` Capabilities: `default_board` (das Board, das die Build-Skripte verwenden, wenn keins angegeben ist), Aliasse
   für Quantisierungen je Format (z. B. `INT8` -> `Q8_0`), Board-Namen ohne Beachtung der Groß- und
   Kleinschreibung; CLI, Build-Dienst und GUI übergeben genau die Werte, die sie geprüft haben. IMatrix ohne eigenen
   Datensatz ist wieder gültig (mitgelieferter Kalibrierungstext).
-- `build start -o` wird gegen das Arbeitsverzeichnis aufgelöst, der konfigurierte Standard gegen die
+- `2026-10-10 20:56 UTC` · `v3.0.0` `build start -o` wird gegen das Arbeitsverzeichnis aufgelöst, der konfigurierte Standard gegen die
   Installation; `deploy list-artifacts` und `deploy package` lesen die Build-Manifeste im konfigurierten
   Ausgabeordner.
 
 ### Entfernt
-- Die Abhängigkeiten LangChain, python-dotenv, pywin32 und winshell.
-- Das gespeicherte SSH-Passwort (`target_password`) und sein Menüeintrag: Geräte nutzen den Schlüssel des
+- `2026-10-10 16:48 UTC` · `v3.0.0` Die Abhängigkeiten LangChain, python-dotenv, pywin32 und winshell.
+- `2026-10-10 16:48 UTC` · `v3.0.0` Das gespeicherte SSH-Passwort (`target_password`) und sein Menüeintrag: Geräte nutzen den Schlüssel des
   Frameworks.
-- Dittos generierte Füll-Kalibrierung (sie lud eine URL, die 404 liefert, und fiel auf wiederholte Sätze
+- `2026-10-10 16:48 UTC` · `v3.0.0` Dittos generierte Füll-Kalibrierung (sie lud eine URL, die 404 liefert, und fiel auf wiederholte Sätze
   zurück).
 
 ### Behoben
-- Viele Abstürze und tote Pfade: Enum für den Build-Status, GUI-Builds, die stoppten, sobald ein Slot
+- `2026-10-10 16:48 UTC` · `v3.0.0` Viele Abstürze und tote Pfade: Enum für den Build-Status, GUI-Builds, die stoppten, sobald ein Slot
   zurückkehrte, Healing-Dialog, Chatfenster (schickte jede Frage zweimal, stürzte mit PySide6 6.12 bei jeder
   Nachricht ab), Import des Modul-Assistenten, harte Abbrüche und Log-Stufen der CLI, Deployment von Ordnern und
   Archiven.
-- RKNN: Datensatz-Mounts ersetzen nicht mehr den Modell-Mount; JSON-Datensätze behalten ihre Endung; veraltete
+- `2026-10-10 16:48 UTC` · `v3.0.0` RKNN: Datensatz-Mounts ersetzen nicht mehr den Modell-Mount; JSON-Datensätze behalten ihre Endung; veraltete
   Artefakte anderer Boards werden nie ausgeliefert.
-- Neustartschleife des Entrypoints, wenn der Host-Benutzer root ist; Prüfsummen mit Windows-Zeilenenden.
-- Der Abbruch eines Builds kann nicht mehr von einer späteren Stufe rückgängig gemacht werden (Sicherheitsscan,
+- `2026-10-10 16:48 UTC` · `v3.0.0` Neustartschleife des Entrypoints, wenn der Host-Benutzer root ist; Prüfsummen mit Windows-Zeilenenden.
+- `2026-10-10 20:56 UTC` · `v3.0.0` Der Abbruch eines Builds kann nicht mehr von einer späteren Stufe rückgängig gemacht werden (Sicherheitsscan,
   Image-Build und Stufen-Container werden gestoppt); nur echte Lese-Zeitüberschreitungen zählen als
   Zeitüberschreitung; ein erneuter Versuch nach einem Healing-Fix behält seine eigene Build-ID und sein Log; eine
   beschädigte Audit-Datenbank oder ein beschädigter Benutzerordner hindert das Framework nicht mehr am Start.
-- Audit-Log: entfernte neueste Einträge bleiben auch nach späteren Aufrufen erkennbar; keine falschen
+- `2026-10-10 00:00 UTC` · `v3.0.0` Audit-Log: entfernte neueste Einträge bleiben auch nach späteren Aufrufen erkennbar; keine falschen
   Manipulationsalarme nach einem fehlgeschlagenen Commit, einem fehlgeschlagenen Schreiben der Ankerdatei oder
   einem Eintrag mit einem anderen Schlüssel; das Audit-Log wird weitergeführt, nachdem die Datenbank beiseitegelegt
   wurde; `llm-cli tools audit --archive` beginnt eine neue Kette und lässt die alte prüfbar.
-- Secrets: der Speicher einer früheren Version wird genau einmal übernommen (auch in einen bestehenden Speicher im
+- `2026-10-10 00:00 UTC` · `v3.0.0` Secrets: der Speicher einer früheren Version wird genau einmal übernommen (auch in einen bestehenden Speicher im
   Benutzerordner), und ein beschädigter wird gemeldet; ein laufender MCP-Server sieht Secrets, die ein anderer
   Prozess hinzugefügt oder gelöscht hat; nichts wird mehr in das Arbeitsverzeichnis geschrieben (Audit-Log der
   Secrets, Modellordner).
-- Tool-Berechtigungen: eine tief verschachtelte Berechtigungsdatei oder ein Link, dessen Ziel fehlt, verweigert
+- `2026-10-10 00:00 UTC` · `v3.0.0` Tool-Berechtigungen: eine tief verschachtelte Berechtigungsdatei oder ein Link, dessen Ziel fehlt, verweigert
   jedes Tool, wie andere Schäden auch.
-- MCP: ein ausdrückliches „Nein“ bleibt endgültig, auch wenn sich die Berechtigungen inzwischen ändern; jede
+- `2026-10-10 00:00 UTC` · `v3.0.0` MCP: ein ausdrückliches „Nein“ bleibt endgültig, auch wenn sich die Berechtigungen inzwischen ändern; jede
   Ablehnung wird im Audit-Log festgehalten; Fehler beim Schreiben der Claude-Desktop-Konfiguration werden ohne
   Traceback gemeldet; `XDG_CONFIG_HOME` wird unter Linux beachtet; `-v` schreibt keine Log-Zeilen mehr in den
   Protokollkanal.
-- Builds: ein abgebrochener Build hinterlässt kein Manifest und kein Archiv; ein fertiger Build gibt seinen Slot
+- `2026-10-10 00:00 UTC` · `v3.0.0` Builds: ein abgebrochener Build hinterlässt kein Manifest und kein Archiv; ein fertiger Build gibt seinen Slot
   frei, bevor sein Endzustand sichtbar wird; Links im Ausgabeordner werden nie verfolgt; die GUI sendet für ein
   Target ohne Capabilities kein Board, außer es wurde eines eingetippt.
 
 ### Sicherheit
-- **Konvertierungs-Container in der Sandbox**: Host-Benutzer statt root, kein Netzwerk, keine Capabilities,
+- `2026-10-10 16:48 UTC` · `v3.0.0` **Konvertierungs-Container in der Sandbox**: Host-Benutzer statt root, kein Netzwerk, keine Capabilities,
   no-new-privileges, schreibgeschütztes Image-Dateisystem, Grenzen für Prozesse und Arbeitsspeicher.
-- Crawler: SSRF-Schutz mit Verbindungs-Pinning, das gegen DNS-Rebinding sicher ist, robots.txt nach RFC 9309,
+- `2026-10-10 16:48 UTC` · `v3.0.0` Crawler: SSRF-Schutz mit Verbindungs-Pinning, das gegen DNS-Rebinding sicher ist, robots.txt nach RFC 9309,
   Grenzen für Weiterleitungen und Anfragen.
-- Modulerzeugung: strenge Prüfung von Namen, Images, Paketen, Flags und Shell-Code (Sperrliste, `bash -n`),
+- `2026-10-10 16:48 UTC` · `v3.0.0` Modulerzeugung: strenge Prüfung von Namen, Images, Paketen, Flags und Shell-Code (Sperrliste, `bash -n`),
   Beschränkung auf `targets/`, kein Überschreiben bestehender Targets.
-- Chat-Ausgaben werden maskiert; Links öffnen sich erst nach Bestätigung.
-- Das Entpacken von Archiven blockiert Path Traversal, Links und Gerätedateien; Secrets werden in Logs
+- `2026-10-10 16:48 UTC` · `v3.0.0` Chat-Ausgaben werden maskiert; Links öffnen sich erst nach Bestätigung.
+- `2026-10-10 16:48 UTC` · `v3.0.0` Das Entpacken von Archiven blockiert Path Traversal, Links und Gerätedateien; Secrets werden in Logs
   geschwärzt.
-- pip-audit meldet keine bekannten Schwachstellen (vorher 279); GitHub Actions sind per Commit-SHA gepinnt.
-- Ein Projektordner kann die Einstellungen eines darin gestarteten MCP-Servers nicht mehr ändern (z. B. die
+- `2026-10-10 16:48 UTC` · `v3.0.0` pip-audit meldet keine bekannten Schwachstellen (vorher 279); GitHub Actions sind per Commit-SHA gepinnt.
+- `2026-10-10 20:56 UTC` · `v3.0.0` Ein Projektordner kann die Einstellungen eines darin gestarteten MCP-Servers nicht mehr ändern (z. B. die
   Quell-Repositories der Build-Toolchain).
-- Ein beschädigter Secrets-Speicher wird nie überschrieben; Secrets werden atomar mit den Rechten 0600
+- `2026-10-10 20:56 UTC` · `v3.0.0` Ein beschädigter Secrets-Speicher wird nie überschrieben; Secrets werden atomar mit den Rechten 0600
   geschrieben.
-- Audit-Log: eine Schreibtransaktion je Eintrag (keine verzweigten Ketten bei mehreren Prozessen), eine
+- `2026-10-10 20:56 UTC` · `v3.0.0` Audit-Log: eine Schreibtransaktion je Eintrag (keine verzweigten Ketten bei mehreren Prozessen), eine
   Schlüssel-ID je Log, eine Ankerdatei, die entfernte neueste Einträge aufdeckt.
-- Eine beschädigte Datei mit Tool-Berechtigungen verweigert jedes Tool, statt auf lockerere Standardwerte
+- `2026-10-10 20:56 UTC` · `v3.0.0` Eine beschädigte Datei mit Tool-Berechtigungen verweigert jedes Tool, statt auf lockerere Standardwerte
   zurückzufallen.
-- MCP: Bestätigungen zeigen jedes Argument vollständig (zu lang: abgelehnt), nur eine echte Antwort des Benutzers
+- `2026-10-10 20:56 UTC` · `v3.0.0` MCP: Bestätigungen zeigen jedes Argument vollständig (zu lang: abgelehnt), nur eine echte Antwort des Benutzers
   zählt als Zustimmung, abgelehnte und abgebrochene Aufrufe werden im Audit-Log festgehalten, Client-Snippets
   sind korrekt gequotet, und die Sicherungskopie der Claude-Desktop-Konfiguration ist privat.
-- Der Startbefehl des MCP-Servers, der in Client-Konfigurationen geschrieben wird, importiert nie Code aus dem
+- `2026-10-10 00:00 UTC` · `v3.0.0` Der Startbefehl des MCP-Servers, der in Client-Konfigurationen geschrieben wird, importiert nie Code aus dem
   Ordner, in dem der Client ihn startet (`python -P`); Snippets für Windows sind für cmd und PowerShell gequotet;
   unsichtbare und kombinierende Zeichen in Bestätigungstexten werden maskiert angezeigt; Fehlermeldungen von Tools
   werden geschwärzt, bevor sie einen Client erreichen.
-- **Secret-Scan** (`scripts/secret_scan.py`, nur Standardbibliothek): API-Schlüssel von Anbietern, Tokens,
+- `2026-10-10 22:50 UTC` · `v3.0.0` **Secret-Scan** (`scripts/secret_scan.py`, nur Standardbibliothek): API-Schlüssel von Anbietern, Tokens,
   private Schlüssel, Zertifikate und Dateien mit Zugangsdaten werden von einem pre-commit- und einem
   pre-push-Hook (`make hooks`) und von einem CI-Job über die gesamte Historie abgewiesen. Persönliche
   Zeichenketten (E-Mail-Adresse, Benutzername) kommen in die nie committete Datei `.git/info/secret-patterns`;
@@ -4291,39 +4299,39 @@ Sandbox.
 stammt aus den Kopfzeilen der Quelldateien und der Git-Historie (2025-12-13 bis 2026-01-14).
 
 ### Hinzugefügt
-- Self-Healing-Manager (Regex-Heuristiken plus KI-Analyse von Build-Logs).
-- Offline-Modus für Ditto mit kleinen lokalen Modellen, Telemetrie (Opt-in), Updater, Community-Hub.
-- IMatrix „Smart Calibration“ für die GGUF-Quantisierung.
-- Eine einzige Quelle der Wahrheit für Projektquellen (`configs/project_sources.yml`, `SSOT_ARCHITECTURE.md`,
+- `2026-01-14 00:00 UTC` · `v2.4.0` Self-Healing-Manager (Regex-Heuristiken plus KI-Analyse von Build-Logs).
+- `2026-01-14 00:00 UTC` · `v2.4.0` Offline-Modus für Ditto mit kleinen lokalen Modellen, Telemetrie (Opt-in), Updater, Community-Hub.
+- `2026-01-14 00:00 UTC` · `v2.4.0` IMatrix „Smart Calibration“ für die GGUF-Quantisierung.
+- `2026-01-14 00:00 UTC` · `v2.4.0` Eine einzige Quelle der Wahrheit für Projektquellen (`configs/project_sources.yml`, `SSOT_ARCHITECTURE.md`,
   `validate_ssot.py`, `sync_ssot.py`).
-- Deutsche Stimmmodelle (GLaDOS, Thorsten) im Quellenkatalog; Transparenz-Manager (experimentell).
+- `2026-01-14 00:00 UTC` · `v2.4.0` Deutsche Stimmmodelle (GLaDOS, Thorsten) im Quellenkatalog; Transparenz-Manager (experimentell).
 
 ### Geändert
-- Container-Images zentral konfigurierbar; Sicherheitshärtung der GUI-Fenster.
+- `2026-01-14 00:00 UTC` · `v2.4.0` Container-Images zentral konfigurierbar; Sicherheitshärtung der GUI-Fenster.
 
 ## [1.7.0] - 2025-12-10
 **Hardware- und Deployment-Update.** Schließt die Lücke zwischen Build und Betrieb mit einem Deployment-Manager
 ohne zusätzliche Abhängigkeiten und voller Unterstützung für Intel-Hardware.
 
 ### Hinzugefügt
-- **Deployment-Manager:** Integrierter SSH/SCP-Client, um Artefakte direkt auf Edge-Geräte zu übertragen. Mit
+- `2025-12-10 00:00 UTC` · `v1.7.0` **Deployment-Manager:** Integrierter SSH/SCP-Client, um Artefakte direkt auf Edge-Geräte zu übertragen. Mit
   einem Modus „Zero-Dependency“ (nutzt Programme des Systems oder Paramiko) und einer Ping-Schleife „Network
   Guard“ für eine stabile Verbindung.
-- **Intel-Ökosystem:** Volle Unterstützung für Intel IPEX-LLM und OpenVINO. `hardware_probe` erkennt jetzt
+- `2025-12-10 00:00 UTC` · `v1.7.0` **Intel-Ökosystem:** Volle Unterstützung für Intel IPEX-LLM und OpenVINO. `hardware_probe` erkennt jetzt
   Intel-Arc-GPUs, iGPUs und NPU-Beschleuniger (Meteor Lake).
-- **Live-Überwachung:** Anzeige der CPU- und RAM-Auslastung des Build-Containers in Echtzeit direkt in der GUI
+- `2025-12-10 00:00 UTC` · `v1.7.0` **Live-Überwachung:** Anzeige der CPU- und RAM-Auslastung des Build-Containers in Echtzeit direkt in der GUI
   (ersetzt externe Werkzeuge wie `ctop`).
-- **Visuelle Identität:** „Ditto“ erwacht zum Leben! Dynamische Avatar-Zustände im Assistenten (Denken, Lesen,
+- `2025-12-10 00:00 UTC` · `v1.7.0` **Visuelle Identität:** „Ditto“ erwacht zum Leben! Dynamische Avatar-Zustände im Assistenten (Denken, Lesen,
   Erfolg, Fehler) verbessern das Benutzererlebnis.
-- **Automatische Dokumentation:** Der Builder erzeugt jetzt automatisch eine `Model_Card.md` mit SHA256-Hashes
+- `2025-12-10 00:00 UTC` · `v1.7.0` **Automatische Dokumentation:** Der Builder erzeugt jetzt automatisch eine `Model_Card.md` mit SHA256-Hashes
   und einer Gebrauchsanleitung, gebündelt im ZIP „Golden Artifact“.
 
 ### Geändert
-- **Hardware-Probe:** `hardware_probe.sh` und `.ps1` stark erweitert, um die Flags AVX512-VNNI und AMX zu
+- `2025-12-10 00:00 UTC` · `v1.7.0` **Hardware-Probe:** `hardware_probe.sh` und `.ps1` stark erweitert, um die Flags AVX512-VNNI und AMX zu
   erkennen, die für die Intel-Optimierung wesentlich sind.
-- **GUI:** Schaltfläche „Deploy“ im Hauptfenster (aktiv nach einem erfolgreichen Build) und ein sicherer
+- `2025-12-10 00:00 UTC` · `v1.7.0` **GUI:** Schaltfläche „Deploy“ im Hauptfenster (aktiv nach einem erfolgreichen Build) und ein sicherer
   `DeploymentDialog`, der Zugangsdaten nur im RAM hält.
-- **Builder:** Behandlung der Artefakte aktualisiert, um Modelldateien deterministisch zu erkennen und ein
+- `2025-12-10 00:00 UTC` · `v1.7.0` **Builder:** Behandlung der Artefakte aktualisiert, um Modelldateien deterministisch zu erkennen und ein
   standardisiertes ZIP-Paket („Golden Artifact“) zu erzeugen.
 
 ## [1.6.0] - 2025-12-06
@@ -4331,24 +4339,24 @@ ohne zusätzliche Abhängigkeiten und voller Unterstützung für Intel-Hardware.
 crawlen, zu filtern und daraus zu lernen.
 
 ### Hinzugefügt
-- **Deep-Crawler-Engine:** Integrierter rekursiver URL-Loader auf Basis von `LangChain`, um ganze
+- `2025-12-06 00:00 UTC` · `v1.6.0` **Deep-Crawler-Engine:** Integrierter rekursiver URL-Loader auf Basis von `LangChain`, um ganze
   Dokumentations-Websites zu verarbeiten (nicht nur einzelne Seiten).
-- **PDF-Intelligenz:** Natives Einlesen von PDFs mit `pypdf`, damit Ditto Datenblätter und technische Handbücher
+- `2025-12-06 00:00 UTC` · `v1.6.0` **PDF-Intelligenz:** Natives Einlesen von PDFs mit `pypdf`, damit Ditto Datenblätter und technische Handbücher
   lesen kann.
-- **Intelligentes Filtern:** Spracherkennung (nicht englische Inhalte werden ignoriert) und Entfernen von
+- `2025-12-06 00:00 UTC` · `v1.6.0` **Intelligentes Filtern:** Spracherkennung (nicht englische Inhalte werden ignoriert) und Entfernen von
   Navigation und Fußzeilen für saubereres Wissen.
-- **Wissens-Snapshots:** Der Modulgenerator extrahiert gelerntes Wissen jetzt automatisch aus Qdrant und bündelt
+- `2025-12-06 00:00 UTC` · `v1.6.0` **Wissens-Snapshots:** Der Modulgenerator extrahiert gelerntes Wissen jetzt automatisch aus Qdrant und bündelt
   es als `knowledge.json` im Target-Modul, damit es geteilt werden kann.
-- **GUI-Dialoge:** Neuer `URLInputDialog`, um Dokumentations-Links gesammelt hinzuzufügen, mit Einstellungen für
+- `2025-12-06 00:00 UTC` · `v1.6.0` **GUI-Dialoge:** Neuer `URLInputDialog`, um Dokumentations-Links gesammelt hinzuzufügen, mit Einstellungen für
   Crawl-Tiefe und Seitenlimit.
-- **Rechtliche Vorgaben:** Verpflichtende Beachtung von „Robots.txt“ und ein Kontrollkästchen mit Haftungshinweis
+- `2025-12-06 00:00 UTC` · `v1.6.0` **Rechtliche Vorgaben:** Verpflichtende Beachtung von „Robots.txt“ und ein Kontrollkästchen mit Haftungshinweis
   vor dem Crawlen.
 
 ### Geändert
-- **Ablauf im Assistenten:** Schritt „Deep Ingest“ mit Live-Fortschrittsprotokoll in den Assistenten zur
+- `2025-12-06 00:00 UTC` · `v1.6.0` **Ablauf im Assistenten:** Schritt „Deep Ingest“ mit Live-Fortschrittsprotokoll in den Assistenten zur
   Modulerstellung integriert.
-- **RAG-Manager:** `ingest_url` erweitert, um Ergebnisse des rekursiven Crawlens und PDF-Streams zu verarbeiten.
-- **Config-Manager:** Einstellungen für `crawler_max_depth`, `crawler_max_pages` und den Eingabeverlauf
+- `2025-12-06 00:00 UTC` · `v1.6.0` **RAG-Manager:** `ingest_url` erweitert, um Ergebnisse des rekursiven Crawlens und PDF-Streams zu verarbeiten.
+- `2025-12-06 00:00 UTC` · `v1.6.0` **Config-Manager:** Einstellungen für `crawler_max_depth`, `crawler_max_pages` und den Eingabeverlauf
   hinzugefügt.
 
 ## [1.5.0] - 2025-12-01
@@ -4356,27 +4364,27 @@ crawlen, zu filtern und daraus zu lernen.
 einem aktiven Expertensystem.
 
 ### Hinzugefügt
-- **Lokales RAG (experimentell):** Einbindung der Vektordatenbank Qdrant, um semantische Suche über
+- `2025-12-01 00:00 UTC` · `v1.5.0` **Lokales RAG (experimentell):** Einbindung der Vektordatenbank Qdrant, um semantische Suche über
   Hardware-Dokumentation statt naivem Scraping zu ermöglichen.
-- **Dynamische Sidecar-Architektur:** Qdrant läuft als Container bei Bedarf. Er wird nur heruntergeladen und
+- `2025-12-01 00:00 UTC` · `v1.5.0` **Dynamische Sidecar-Architektur:** Qdrant läuft als Container bei Bedarf. Er wird nur heruntergeladen und
   gestartet, wenn der Benutzer die „Knowledge Base“ ausdrücklich einschaltet, um Ressourcen zu sparen.
-- **Community Brain:** Neuer Ablauf, um indexierte Wissens-Snapshots über Git zu teilen. Benutzer können von der
+- `2025-12-01 00:00 UTC` · `v1.5.0` **Community Brain:** Neuer Ablauf, um indexierte Wissens-Snapshots über Git zu teilen. Benutzer können von der
   Community kuratierte Wissenspakete (`community/knowledge/*.json`) für Wissen ohne Internetverbindung
   importieren.
-- **RAGManager:** Neue Kernkomponente (`orchestrator/Core/rag_manager.py`) für das Einlesen von Dokumenten, das
+- `2025-12-01 00:00 UTC` · `v1.5.0` **RAGManager:** Neue Kernkomponente (`orchestrator/Core/rag_manager.py`) für das Einlesen von Dokumenten, das
   Zerlegen in Abschnitte (Chunking) und die Vektorsuche.
 
 ### Geändert
-- **Ditto-Agent:** Logik von `_fetch_documentation` aktualisiert, damit Ergebnisse der Vektorsuche Vorrang vor dem
+- `2025-12-01 00:00 UTC` · `v1.5.0` **Ditto-Agent:** Logik von `_fetch_documentation` aktualisiert, damit Ergebnisse der Vektorsuche Vorrang vor dem
   Herunterladen roher URLs haben, für mehr Präzision bei der Modulerzeugung.
-- **DockerManager:** Logik ergänzt, um den Container `llm-qdrant` je nach Benutzerkonfiguration dynamisch zu
+- `2025-12-01 00:00 UTC` · `v1.5.0` **DockerManager:** Logik ergänzt, um den Container `llm-qdrant` je nach Benutzerkonfiguration dynamisch zu
   starten und zu stoppen.
-- **GUI:** Schalter „Enable Local Knowledge Base“ im Dialog der KI-Einstellungen hinzugefügt.
+- `2025-12-01 00:00 UTC` · `v1.5.0` **GUI:** Schalter „Enable Local Knowledge Base“ im Dialog der KI-Einstellungen hinzugefügt.
 
 ### Sicherheit
-- **Datenschutz:** Vektordaten bleiben streng lokal (127.0.0.1). Es wird kein externer Vektorspeicher in der Cloud
+- `2025-12-01 00:00 UTC` · `v1.5.0` **Datenschutz:** Vektordaten bleiben streng lokal (127.0.0.1). Es wird kein externer Vektorspeicher in der Cloud
   verwendet.
-- **Bereinigung:** Export-Werkzeuge für Community-Wissen entfernen automatisch mögliche sensible Pfade oder
+- `2025-12-01 00:00 UTC` · `v1.5.0` **Bereinigung:** Export-Werkzeuge für Community-Wissen entfernen automatisch mögliche sensible Pfade oder
   API-Schlüssel, bevor Snapshots erstellt werden.
 
 ## [1.4.0] - 2025-11-30
@@ -4384,23 +4392,23 @@ einem aktiven Expertensystem.
 ein, um auf NPU-Targets eine Modellqualität auf Enterprise-Niveau sicherzustellen.
 
 ### Hinzugefügt
-- **Smart Calibration:** Automatischer Ablauf, der erkennt, ob ein Modell Kalibrierungsdaten braucht (z. B. INT8),
+- `2025-11-30 00:00 UTC` · `v1.4.0` **Smart Calibration:** Automatischer Ablauf, der erkennt, ob ein Modell Kalibrierungsdaten braucht (z. B. INT8),
   und sie erzeugt oder auswählt.
-- **DatasetManager:** Neue Kernkomponente (`orchestrator/Core/dataset_manager.py`) für deterministische
+- `2025-11-30 00:00 UTC` · `v1.4.0` **DatasetManager:** Neue Kernkomponente (`orchestrator/Core/dataset_manager.py`) für deterministische
   Domänenerkennung und die Prüfung von Datensätzen.
-- **Human-in-the-Loop:** `DatasetReviewDialog` hinzugefügt, damit Benutzer KI-erzeugte Kalibrierungsdaten vor dem
+- `2025-11-30 00:00 UTC` · `v1.4.0` **Human-in-the-Loop:** `DatasetReviewDialog` hinzugefügt, damit Benutzer KI-erzeugte Kalibrierungsdaten vor dem
   Build prüfen und bearbeiten können.
-- **Ditto-KI-Upgrade:** Dittos Fähigkeiten erweitert, synthetische domänenspezifische Trainingsdaten (Code, Chat,
+- `2025-11-30 00:00 UTC` · `v1.4.0` **Ditto-KI-Upgrade:** Dittos Fähigkeiten erweitert, synthetische domänenspezifische Trainingsdaten (Code, Chat,
   Medizin) auf Basis des SSOT-Wissens zu erzeugen.
 
 ### Geändert
-- **Build-Pipeline:** `builder.py` und `docker_manager.py` aktualisiert, um Kalibrierungsdatensätze
+- `2025-11-30 00:00 UTC` · `v1.4.0` **Build-Pipeline:** `builder.py` und `docker_manager.py` aktualisiert, um Kalibrierungsdatensätze
   (`dataset.json`) in den Build-Container einzubringen.
-- **Rockchip-Module:** `rkllm_module.sh` und `rknn_module.sh` (und ihre Python-Wrapper) aktualisiert, damit sie
+- `2025-11-30 00:00 UTC` · `v1.4.0` **Rockchip-Module:** `rkllm_module.sh` und `rknn_module.sh` (und ihre Python-Wrapper) aktualisiert, damit sie
   externe Kalibrierungsdatensätze annehmen und für eine genauere Quantisierung nutzen.
-- **GUI:** Das `MainWindow` fragt jetzt gezielt nach Datensätzen, wenn empfindliche Quantisierungsmodi
+- `2025-11-30 00:00 UTC` · `v1.4.0` **GUI:** Das `MainWindow` fragt jetzt gezielt nach Datensätzen, wenn empfindliche Quantisierungsmodi
   (INT8/W8A8) gewählt werden.
-- **Richtlinie:** Heuristisches Raten von Modell-Domänen entfernt; stattdessen strenge Metadatenprüfungen oder
+- `2025-11-30 00:00 UTC` · `v1.4.0` **Richtlinie:** Heuristisches Raten von Modell-Domänen entfernt; stattdessen strenge Metadatenprüfungen oder
   Rückfragen beim Benutzer.
 
 ## [1.3.0] - 2025-11-29
@@ -4408,52 +4416,64 @@ ein, um auf NPU-Targets eine Modellqualität auf Enterprise-Niveau sicherzustell
 darauf, den Kreis zwischen GUI und Build-Engine zu schließen.
 
 ### Hinzugefügt
-- **I18n-Unterstützung:** Vollständige englische und deutsche Lokalisierung für GUI und Assistent.
-- **LocalizationManager:** Zentraler Dienst für den dynamischen Sprachwechsel
+- `2025-11-29 00:00 UTC` · `v1.3.0` **I18n-Unterstützung:** Vollständige englische und deutsche Lokalisierung für GUI und Assistent.
+- `2025-11-29 00:00 UTC` · `v1.3.0` **LocalizationManager:** Zentraler Dienst für den dynamischen Sprachwechsel
   (`orchestrator/utils/localization.py`).
-- **GUI-Erweiterungen:**
+- `2025-11-29 00:00 UTC` · `v1.3.0` **GUI-Erweiterungen:**
     - Neue Auswahllisten für **Task** (LLM, Voice, VLM) und **Quantisierung** (INT8, INT4, FP16).
     - Kontrollkästchen **„Use GPU“** für NVIDIA-Passthrough hinzugefügt.
     - Dialog zur Sprachauswahl beim ersten Start integriert.
     - **SecretsManager:** AES-256-Verschlüsselung für sensible API-Schlüssel.
 
 ### Geändert
-- **Refactoring:** Textressourcen im `LocalizationManager` zentralisiert.
-- **Abhängigkeiten:** `litellm`, `rich`, `psutil` und `cryptography` zu den Kernabhängigkeiten hinzugefügt.
-- **Docker:** Statische Builder-Dienste zugunsten dynamisch gestarteter Container entfernt.
+- `2025-11-29 00:00 UTC` · `v1.3.0` **Refactoring:** Textressourcen im `LocalizationManager` zentralisiert.
+- `2025-11-29 00:00 UTC` · `v1.3.0` **Abhängigkeiten:** `litellm`, `rich`, `psutil` und `cryptography` zu den Kernabhängigkeiten hinzugefügt.
+- `2025-11-29 00:00 UTC` · `v1.3.0` **Docker:** Statische Builder-Dienste zugunsten dynamisch gestarteter Container entfernt.
 
 ## [1.2.0] - 2025-11-29
 **AI-Integration-Release.** Führt den Ditto-Agenten für automatische Hardware-Erkennung und Target-Erzeugung ein.
 
 ### Hinzugefügt
-- **Ditto-KI-Agent:** Automatische Analyse von Hardware-Probes und Abruf von Dokumentation aus dem SSOT.
-- **Smart Dispatcher:** Dynamische `build.sh`-Vorlage, die nach Task und Hardware verzweigt.
-- **Vorlagen:** Vorlagen `rkllm_module` und `rknn_module` für die Unterstützung der Rockchip-NPU hinzugefügt.
-- **Sicherheit:** `trivy-infra-scanner` für die automatische Schwachstellenprüfung der Container hinzugefügt.
-- **NetworkGuard:** Robuste Verbindungsprüfungen und sichere Downloads.
+- `2025-11-29 00:00 UTC` · `v1.2.0` **Ditto-KI-Agent:** Automatische Analyse von Hardware-Probes und Abruf von Dokumentation aus dem SSOT.
+- `2025-11-29 00:00 UTC` · `v1.2.0` **Smart Dispatcher:** Dynamische `build.sh`-Vorlage, die nach Task und Hardware verzweigt.
+- `2025-11-29 00:00 UTC` · `v1.2.0` **Vorlagen:** Vorlagen `rkllm_module` und `rknn_module` für die Unterstützung der Rockchip-NPU hinzugefügt.
+- `2025-11-29 00:00 UTC` · `v1.2.0` **Sicherheit:** `trivy-infra-scanner` für die automatische Schwachstellenprüfung der Container hinzugefügt.
+- `2025-11-29 00:00 UTC` · `v1.2.0` **NetworkGuard:** Robuste Verbindungsprüfungen und sichere Downloads.
 
 ### Geändert
-- **Hardware-Probe:** Erkennung unter Windows über die native API (C#-Injection) gehärtet, für zuverlässige
+- `2025-11-29 00:00 UTC` · `v1.2.0` **Hardware-Probe:** Erkennung unter Windows über die native API (C#-Injection) gehärtet, für zuverlässige
   CPU-Flags.
-- **Pipeline:** Erzeugungslogik in Python von den Bash-Skripten entkoppelt.
+- `2025-11-29 00:00 UTC` · `v1.2.0` **Pipeline:** Erzeugungslogik in Python von den Bash-Skripten entkoppelt.
 
 ## [1.1.0] - 2025-11-28
 **Architektur-Refactoring.** Entkoppelt den Kern-Builder von targetspezifischer Logik, um universelle
 Cross-Kompilierung zu ermöglichen.
 
 ### Geändert
-- **Architektur:** Fest codierte `TargetArch`-Enums entfernt; der Builder ist jetzt unabhängig vom Target.
-- **Clean Code:** Eingebetteten Python-Code aus Bash-Skripten in eigenständige Dateien ausgelagert.
-- **Builder:** Auf dynamisches Einhängen von Volumes für die Modulausführung umgestellt.
+- `2025-11-28 00:00 UTC` · `v1.1.0` **Architektur:** Fest codierte `TargetArch`-Enums entfernt; der Builder ist jetzt unabhängig vom Target.
+- `2025-11-28 00:00 UTC` · `v1.1.0` **Clean Code:** Eingebetteten Python-Code aus Bash-Skripten in eigenständige Dateien ausgelagert.
+- `2025-11-28 00:00 UTC` · `v1.1.0` **Builder:** Auf dynamisches Einhängen von Volumes für die Modulausführung umgestellt.
 
 ### Behoben
-- **Stabilität:** Typfehler mit list/set im Windows-Installer behoben.
-- **Cross-Kompilierung:** Fehlende Cross-Compiler (`gcc-aarch64`) in den Docker-Vorlagen ergänzt.
+- `2025-11-28 00:00 UTC` · `v1.1.0` **Stabilität:** Typfehler mit list/set im Windows-Installer behoben.
+- `2025-11-28 00:00 UTC` · `v1.1.0` **Cross-Kompilierung:** Fehlende Cross-Compiler (`gcc-aarch64`) in den Docker-Vorlagen ergänzt.
 
 ## [1.0.0] - 2025-11-20
 **Erstes Release.** Legt die Grundstruktur des Frameworks und eine grundlegende Rockchip-Unterstützung an.
 
 ### Hinzugefügt
-- Grundstruktur des Frameworks (Orchestrator, Builder, Docker-Manager).
-- Grundlegende Unterstützung für die Cross-Kompilierung für Rockchip RK3588/RK3566.
-- Einstiegspunkte für CLI (`llm-cli`) und GUI (`llm-gui`).
+- `2025-11-20 00:00 UTC` · `v1.0.0` Grundstruktur des Frameworks (Orchestrator, Builder, Docker-Manager).
+- `2025-11-20 00:00 UTC` · `v1.0.0` Grundlegende Unterstützung für die Cross-Kompilierung für Rockchip RK3588/RK3566.
+- `2025-11-20 00:00 UTC` · `v1.0.0` Einstiegspunkte für CLI (`llm-cli`) und GUI (`llm-gui`).
+
+[3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0
+[3.0.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v2.4.0...v3.0.0
+[2.4.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v1.7.0...v2.4.0
+[1.7.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v1.6.0...v1.7.0
+[1.6.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v1.3.0...v1.4.0
+[1.3.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/releases/tag/v1.0.0

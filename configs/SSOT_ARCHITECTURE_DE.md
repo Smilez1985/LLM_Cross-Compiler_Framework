@@ -1,4 +1,4 @@
-Version 3.0.0 + unveröffentlichte Änderungen · Stand 2026-10-11
+Version 3.1.0 · Stand 2026-10-29
 
 [English](SSOT_ARCHITECTURE.md) · **Deutsch**
 
