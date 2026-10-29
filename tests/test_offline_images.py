@@ -54,6 +54,13 @@ class TestThePullRule:
         assert offline_pull_refusal(LOCAL_IMAGE, {"offline_mode": True}) == ""
         assert offline_pull_refusal(f"localhost:5000/acme/runtime@{DIGEST}", {"offline_mode": True}) == ""
 
+    def test_the_refusal_names_the_persons_opt_out(self, names):
+        # Regression (review of hf-local): the one locality rule's refusals say that the person can count a host of
+        # the own network as local (a registry behind a reverse proxy or a VPN); this refusal left that out.
+        from orchestrator.utils.image_ref import offline_pull_refusal
+        from orchestrator.utils.localization import ui_text
+        assert ui_text("net.refusal.opt_out", "en").strip() in offline_pull_refusal(HUB_IMAGE, {"offline_mode": True})
+
     def test_the_persons_opt_out_counts(self, names):
         from orchestrator.utils.image_ref import offline_pull_refusal
         assert offline_pull_refusal(HUB_IMAGE, {"offline_mode": True, "offline_local_hosts": ["ghcr.io"]}) == ""

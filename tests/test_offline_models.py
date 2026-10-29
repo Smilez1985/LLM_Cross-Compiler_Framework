@@ -390,3 +390,21 @@ class TestDittoModelsDownload:
         assert offline_refusal(LocalLLMRuntime(data_dir=tmp_path / "s2", models_dir=tmp_path / "m2", settings={}),
                                rt.catalog.models[0]) is None, "online: as before"
         locality.clear_cache()
+
+    def test_the_refusal_keeps_the_persons_opt_out_as_before(self, tmp_path, monkeypatch):
+        # Regression (review of hf-local): before this chain the download refusal was the locality rule's own
+        # (verdict.refusal), which says that the person can count a host of the own network as local. The new text
+        # that names the models already here dropped that sentence, so a mirror behind a reverse proxy or a VPN could
+        # not be found out from the refusal any more.
+        from orchestrator.runtime.ditto_models import offline_refusal
+        from orchestrator.runtime.llama_server import LocalLLMRuntime
+        from orchestrator.utils import locality
+        from orchestrator.utils.localization import ui_text
+        locality.clear_cache()
+        monkeypatch.setattr(locality, "_system_lookup", lambda host: ["192.0.2.18"])   # a public address
+        rt = LocalLLMRuntime(data_dir=tmp_path / "state", models_dir=tmp_path / "models",
+                             settings={"offline_mode": True})
+        model = rt.catalog.models[0]
+        assert ui_text("net.refusal.opt_out", "en").strip() in offline_refusal(rt, model)
+        assert ui_text("net.refusal.opt_out", "de").strip() in offline_refusal(rt, model, "de")
+        locality.clear_cache()
