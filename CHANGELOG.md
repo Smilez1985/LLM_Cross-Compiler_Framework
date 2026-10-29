@@ -3399,12 +3399,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   modification time): the revision in the keyring is read again also when the file's change time (ctime) moved. On
   Windows, where st_ctime is the creation time (which a hard link keeps), NTFS's own change time is used for this
   (GetFileInformationByHandleEx, no new dependency); before, a running process there still accepted the file put
-  back. Each framework home keeps its own revisions: two LLM_FRAMEWORK_HOME folders of one account shared one
+  back. Where Windows gives no change time for the file (a file system that keeps none), the revision is read on
+  every look instead of that check being skipped. Each framework home keeps its own revisions: two LLM_FRAMEWORK_HOME folders of one account shared one
   keyring entry, so a save in one made the other home's file an "older copy" (every tool denied, no token accepted).
   The default home (~/.llm-framework) keeps the entry of the versions before; another folder gets an entry named by
   a digest of the folder (no path in it). A home whose entry is still empty anchors the revision of the genuinely
   signed file it accepts at its first look, so an older copy put back afterwards is refused from then on, not only
-  after the next save. The builds the person confirmed (`confirmed_builds.json`) keep a revision in the keyring the
+  after the next save; it never writes when another process saved a newer file meanwhile (that would lower the kept
+  revision below the other save). The builds the person confirmed (`confirmed_builds.json`) keep a revision in the keyring the
   same way: an older signed copy put back brought back a confirmation a later one had replaced (a module an AI
   recreated with its earlier content, a pack reinstalled in an earlier version), so a build standing approval covered
   it without the person; such a copy now holds no confirmation and the person is asked again. The pending approvals
