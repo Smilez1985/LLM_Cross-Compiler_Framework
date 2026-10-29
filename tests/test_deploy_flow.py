@@ -655,7 +655,10 @@ PERSON_ONLY_NAMES = {"deploy_build", "remember_deployed", "device_audit", "chang
                      "moved_lines", "BoardChange", "BoardDataMove", "copy_deploys", "drop_deploys", "copy_board_rows",
                      "drop_board_rows", "trust_host", "trust_presented_key", "PersonChannel", "replace_key",
                      "plan_copy", "copy_artifact", "_replace_with_copy", "CopyPlan", "CopyWorker", "ask_and_use",
-                     "_use_earlier", "_ask_earlier"}
+                     "_use_earlier", "_ask_earlier",
+                     # wave 3c-2 (chain boards, round 25 Q4): the person's writer of the framework's own SSH
+                     # settings file and the import from ~/.ssh/config (tests/test_ssh_config.py)
+                     "plan_ssh_block", "save_ssh_block", "import_ssh_block", "SshBlockPlan"}
 
 
 def person_only_references(source: str):

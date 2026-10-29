@@ -45,12 +45,14 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from orchestrator.remote.errors import RemoteFailure
+from orchestrator.remote.session import JOB_STATUS   # the detached job's exit status file (RemoteSession.run_detached)
 from orchestrator.remote.text import one_line as _tail   # a board's answer as one plain line
 from orchestrator.remote.transport import COMMAND_TIMEOUT, HASH_TIMEOUT, MAX_OUTPUT  # the one board session's limits
 from orchestrator.remote.transport import ParamikoTransport  # noqa: F401 - its old import path here
 from orchestrator.remote.transport import Result, TooMuchOutput, sh_command
 from orchestrator.remote.transport import read_limited as _read_limited  # noqa: F401 - its old name here
 from orchestrator.runtime.build.verify import Check, VerifyReport, parse_bench_json, parse_devices, parse_version
+from orchestrator.runtime.device import thermal   # the board's temperature during the checks (round 23 item 16)
 from orchestrator.runtime.device.launcher import (DEVICE_FOLDER_MAX, DEVICE_PATH_MAX, KEY_REL, START_SCRIPT,
                                                   UNIT_NAME, UNIT_PATH, install_root,
                                                   render_systemd_unit)
@@ -645,6 +647,54 @@ def _run_program(shell: RemoteShell, home: str, argv: Sequence[str], timeout: fl
     return shell.run(f"PATH={POSIX_CLEARED_PATH}; export PATH; {script}", timeout=timeout, again=True)
 
 
+# What the board offers for the detached benchmark (one look, read only): nohup (else it runs attached), setsid (its
+# own process group, so a stop reaches the program and every child it starts) and a `timeout SECS PROG` that works
+# (GNU coreutils, BusyBox 1.30 and later: the board stops the benchmark by itself when nobody follows it any more).
+_BENCH_TOOLS = ("command -v nohup >/dev/null 2>&1 && echo nohup=yes || echo nohup=no; "
+                "command -v setsid >/dev/null 2>&1 && echo setsid=yes; "
+                "timeout 5 true >/dev/null 2>&1 && echo timeout=yes; true")
+BENCH_PID = ".lcf-bench.pid"   # the PID (with setsid also the process group) the framework started in the folder
+BENCH_STOP_GRACE = 10          # seconds between the stop's TERM and its KILL
+TIMED_OUT = 124                # timeout's exit status when it stopped the program
+
+
+def bench_stop_command(folder: str, group: bool) -> str:
+    """The command that stops the benchmark the framework started in `folder` on the board: the PID recorded in
+    BENCH_PID (with `group`: its whole process group, which setsid made it lead), only while its job has no exit
+    status yet, never anything found by name; TERM first, KILL after BENCH_STOP_GRACE seconds."""
+    d = _q(folder)
+    target = '-"$p"' if group else '"$p"'
+    return (f'p=$(cat {d}/{BENCH_PID} 2>/dev/null); case "$p" in ""|*[!0-9]*) exit 0;; esac; '
+            f"[ -e {d}/{JOB_STATUS} ] && exit 0; "
+            f"kill -TERM {target} 2>/dev/null || exit 0; i=0; "
+            f"while [ $i -lt {BENCH_STOP_GRACE} ] && kill -0 {target} 2>/dev/null; do sleep 1; i=$((i+1)); done; "
+            f"kill -KILL {target} 2>/dev/null; true")
+
+
+def _stop_bench(shell: RemoteShell, folder: str, group: bool) -> bool:
+    """Stops the benchmark the framework started in `folder` (a Cancel, or the follower gave up at its time limit):
+    over the step's own connection while it stands (a Ctrl+C at the terminal), else over one new login with the same
+    host-key check (a Cancel that closed the connection: the Boards window, an AI's cancel_job). True when the stop
+    command reached the board; never raises (the board's own time limit ends the job otherwise). The benchmark's
+    folder stays to the next run's sweep, as before."""
+    script = bench_stop_command(folder, group)
+    session = shell.session
+    try:
+        if session.transport is not None and not session.ended and not session.cancel.cancelled:
+            shell.run(script, again=True, timeout=BENCH_STOP_GRACE + 30)
+            return True
+        fresh = session.for_cleanup()
+        if fresh is None:
+            return False
+        try:
+            fresh.run(script, timeout=BENCH_STOP_GRACE + 30)
+        finally:
+            fresh.close()
+        return True
+    except Exception:  # noqa: BLE001 - the stop is best effort; the board's timeout and the sweep remain
+        return False
+
+
 def _run_on_its_own(shell: RemoteShell, home: str, root: str, argv: Sequence[str], timeout: float) -> Result:
     """Runs a program of the runtime on the device on its own, as _run_program does (the user, the home folder, the
     cleared environment, an empty stdin), but detached from the SSH session (round 16 G4: work keeps running when the
@@ -652,18 +702,32 @@ def _run_on_its_own(shell: RemoteShell, home: str, root: str, argv: Sequence[str
     (<root>/.bench.XXXXXXXX), its stdout and stderr go into files there, and the session follows it to its exit status,
     also after a network drop (the on-board benchmark, up to BENCH_TIMEOUT). Then both are read (within the output cap)
     and the folder goes. Returns the program's exit status, stdout and stderr. A board without nohup runs it attached
-    to the session as before (_run_program), so the run never waits for a job that could not start."""
+    to the session as before (_run_program), so the run never waits for a job that could not start.
+
+    The program's PID is recorded in the folder (with setsid it also leads its own process group), and with a working
+    `timeout` the board stops it by itself after `timeout` seconds (exit status TIMED_OUT). A Cancel, a Ctrl+C or the
+    follower's own time limit stops exactly that PID or group (_stop_bench; never a program found by name)."""
     check_command(argv)   # the shared forbidden-option list (D22)
-    if shell.run("command -v nohup >/dev/null 2>&1 && echo nohup=yes || echo nohup=no", again=True).out.strip() \
-            != "nohup=yes":
+    tools = set(shell.run(_BENCH_TOOLS, again=True).out.split())
+    if "nohup=yes" not in tools:
         return _run_program(shell, home, argv, timeout, merge=False)
+    group = "setsid=yes" in tools
+    wrap = ("setsid " if group else "") + (f"timeout {int(timeout)} " if "timeout=yes" in tools else "")
     env = " ".join(f"{k}={_q(v)}" for k, v in posix_cleared_env(home).items())
-    job = (f"(PATH={POSIX_CLEARED_PATH}; export PATH; cd {_q(home)} && exec env -i {env} "
-           + " ".join(_q(a) for a in argv) + " </dev/null) >out 2>err")
+    job = (f"(PATH={POSIX_CLEARED_PATH}; export PATH; cd {_q(home)} && exec {wrap}env -i {env} "
+           + " ".join(_q(a) for a in argv) + f" </dev/null) >out 2>err & echo $! > {BENCH_PID}; wait $!")
     sweep_bench_folders(shell, root)
     folder = shell.private_dir(root, BENCH_PREFIX)
     try:
-        status = shell.run_detached(folder, job, timeout=timeout, poll=BENCH_POLL, step="bench")
+        try:
+            status = shell.run_detached(folder, job, timeout=timeout, poll=BENCH_POLL, step="bench")
+        except RemoteError as e:
+            if e.kind in ("stopped", "job_timeout"):   # nobody follows it any more: it stops now
+                _stop_bench(shell, folder, group)
+            raise
+        except KeyboardInterrupt:
+            _stop_bench(shell, folder, group)
+            raise
         out = shell.run(f"cat {_q(folder + '/out')}", again=True).out
         err = shell.run(f"cat {_q(folder + '/err')}", again=True).out
     finally:
@@ -773,6 +837,10 @@ def verify_on_device(shell: RemoteShell, *, home: str, plan_verify: Mapping[str,
         report.checks.append(Check("server-tools", False, f"llama-server did not refuse --tools (exit {r.status}): "
                                    f"{_tail(r.out)}"))
 
+    # The board's temperature (round 23 item 16): read-only, before the short benchmark and again after it ran; the
+    # reading closer to its limit stays with the report (a hot board warns, it fails no check)
+    report.heat = thermal.read_heat(shell)
+
     # Short benchmark
     if bench_model is None:
         report.checks.append(Check("smoke", None, "no model on the device was given for the short llama-bench run "
@@ -787,11 +855,14 @@ def verify_on_device(shell: RemoteShell, *, home: str, plan_verify: Mapping[str,
         if threads:
             argv += ["-t", str(int(threads))]
         r = _run_on_its_own(shell, home, root, argv, BENCH_TIMEOUT)
+        report.heat = thermal.hotter(report.heat, thermal.read_heat(shell))
         if r.status != 0:
             sigill = r.status in (132, -4) or "Illegal instruction" in r.err
             report.checks.append(Check("smoke", False, f"llama-bench failed on the device (exit {r.status})"
                                        + ("; SIGILL: the CPU baseline of the build is wrong for this CPU"
-                                          if sigill else "") + f": {_tail(r.err or r.out)}"))
+                                          if sigill else "")
+                                       + (f"; the board's time limit of {BENCH_TIMEOUT} s stopped it"
+                                          if r.status == TIMED_OUT else "") + f": {_tail(r.err or r.out)}"))
         else:
             try:
                 records = parse_bench_json(r.out)

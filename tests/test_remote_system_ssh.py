@@ -29,6 +29,7 @@ paramiko = pytest.importorskip("paramiko")
 
 from orchestrator.Core import deployment_manager as dmod  # noqa: E402
 from orchestrator.Core.deployment_manager import DeploymentManager  # noqa: E402
+from orchestrator.remote import ssh_config  # noqa: E402
 from orchestrator.runtime.device import reasons  # noqa: E402
 from orchestrator.utils import ssh_trust  # noqa: E402
 
@@ -414,7 +415,12 @@ class TestTheFallbacksGuarantees:
             assert call.option("UserKnownHostsFile") in ([str(known_hosts)], [known_hosts.as_posix()])
             # this computer's system-wide known_hosts never decides either (/dev/null, NUL on Windows)
             assert call.option("GlobalKnownHostsFile") == ["NUL" if os.name == "nt" else "/dev/null"]
-            assert call.option("-i") == [str(state / ssh_trust.KEY_NAME)]
+            # round 25 Q4/Q5: the key as IdentityFile ('%' written '%%'), the framework's own settings file with -F
+            key = state / ssh_trust.KEY_NAME
+            assert call.option("IdentityFile") in ([str(key)], [key.as_posix()]) and call.option("-i") == []
+            assert call.option("-F") == [ssh_config.argument(ssh_config.config_path(state))]
+            assert call.option("CheckHostIP") == call.option("UpdateHostKeys") == ["no"]
+            assert call.option("VerifyHostKeyDNS") == ["no"]
 
     def test_the_one_deploy_step_keeps_every_call_to_the_framework_s_key_and_known_hosts(self, sys_manager,
                                                                                           system_board, package):
@@ -436,7 +442,9 @@ class TestTheFallbacksGuarantees:
             assert call.option("UserKnownHostsFile") in ([str(ssh_trust.known_hosts_path(state))],
                                                          [ssh_trust.known_hosts_path(state).as_posix()])
             assert call.option("GlobalKnownHostsFile") == ["NUL" if os.name == "nt" else "/dev/null"]
-            assert call.option("-i") == [str(state / ssh_trust.KEY_NAME)]
+            key = state / ssh_trust.KEY_NAME
+            assert call.option("IdentityFile") in ([str(key)], [key.as_posix()]) and call.option("-i") == []
+            assert call.option("-F") == [ssh_config.argument(ssh_config.config_path(state))]
 
     def test_no_call_inherits_this_process_stdin_or_goes_through_a_shell(self, sys_manager, system_board, package):
         assert deploy(sys_manager, package)[0].success
@@ -871,7 +879,10 @@ class TestTheFrameworkKeyIsOwnerOnly:
         assert private.stat().st_mode & 0o777 == 0o600
         os.chmod(private, 0o644)   # copied with another umask, for example
         options = transport.openssh_options(tmp_path)
-        assert private.stat().st_mode & 0o777 == 0o600 and options[-2:] == ["-i", str(private)]
+        # round 25 Q5: the key goes as IdentityFile (its '%' written '%%'), since OpenSSH expands tokens in -i's path
+        # but checks -i's file before that expansion, so no spelling of a '%' works with -i
+        assert private.stat().st_mode & 0o777 == 0o600 and transport.key_file_of(options) == str(private)
+        assert options[-2:] == ["-o", f"IdentityFile={transport.openssh_file(private)}"]
 
     def test_the_key_is_narrowed_when_it_is_made_and_before_each_openssh_session(self, tmp_path, monkeypatch):
         from orchestrator.remote import transport
@@ -881,7 +892,9 @@ class TestTheFrameworkKeyIsOwnerOnly:
         private, _ = ssh_trust.client_key(tmp_path)
         assert narrowed == [private], "made private before the key is written into it"
         transport.openssh_options(tmp_path)
-        assert narrowed == [private, private]
+        assert [p for p in narrowed if p == private] == [private, private]
+        from orchestrator.remote.ssh_config import config_path
+        assert config_path(tmp_path) in narrowed, "the framework's own SSH settings file is made private too (Q4)"
 
     def test_a_key_that_cannot_be_narrowed_still_works_and_is_logged(self, tmp_path, monkeypatch, caplog):
         from orchestrator.remote import transport
@@ -892,7 +905,7 @@ class TestTheFrameworkKeyIsOwnerOnly:
         monkeypatch.setattr(atomic, "owner_only", refuse)
         private, _ = ssh_trust.client_key(tmp_path)
         assert readable_key(private)
-        assert transport.openssh_options(tmp_path)[-1] == str(private)
+        assert transport.key_file_of(transport.openssh_options(tmp_path)) == str(private)
         assert "could not be made private" in caplog.text and str(tmp_path) not in caplog.text
 
     def test_windows_gets_a_protected_acl_with_this_account_alone(self, tmp_path, monkeypatch):
@@ -1194,14 +1207,35 @@ def test_a_real_openssh_takes_no_key_from_a_system_wide_known_hosts(real_sshd, t
     known_hosts.write_text("")
     config_file = tmp_path / "ssh_config"
     config_file.write_text(f"GlobalKnownHostsFile {system_wide}\n")
-    argv = transport.openssh_argv("ssh", Endpoint("127.0.0.1", real_sshd["port"]), real_sshd["user"],
-                                  ["-F", str(config_file), *transport.openssh_options(state)], "true")
+    # Since round 25 Q4 the options name the framework's own settings file with -F (which refuses such a line):
+    # a hand-made file in its place stands for any configuration OpenSSH may read.
+    options = transport.openssh_options(state)
+    assert options[0] == "-F"
+    options[1] = str(config_file)
+    argv = transport.openssh_argv("ssh", Endpoint("127.0.0.1", real_sshd["port"]), real_sshd["user"], options,
+                                  "true")
     done = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
     assert done.returncode == 255 and "Host key verification failed" in done.stderr, done.stderr
     i = argv.index(f"GlobalKnownHostsFile={transport.NULL_DEVICE}")
     trusting = argv[:i - 1] + argv[i + 1:]   # the same call without the option: the system-wide file lets it in
     done = subprocess.run(trusting, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, done.stderr
+
+
+def test_a_real_openssh_logs_in_from_a_state_folder_with_a_percent(real_sshd, tmp_path):
+    """Round 25 Q5: OpenSSH expands %-tokens in UserKnownHostsFile and in the key's path (-i too, after checking that
+    -i's file exists), so a '%u' in the framework's folder named another file and the login failed ("no such
+    identity"). The options write each '%' as '%%' and pass the key as IdentityFile; -F's path is read as it is."""
+    import shutil as copying
+    from orchestrator.remote import transport
+    from orchestrator.remote.address import Endpoint
+    state = tmp_path / "Jane%u Doe" / ".llm-framework"
+    copying.copytree(real_sshd["state"], state)
+    argv = transport.openssh_argv("ssh", Endpoint("127.0.0.1", real_sshd["port"]), real_sshd["user"],
+                                  transport.openssh_options(state), "echo framework-key")
+    done = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0 and done.stdout.strip() == "framework-key", done.stderr
+    assert (state / "ssh_config").is_file(), "the framework's own settings file, read with -F from that folder"
 
 
 def test_a_real_openssh_refuses_an_unknown_host_key(real_sshd, config, monkeypatch, tmp_path):

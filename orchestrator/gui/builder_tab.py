@@ -200,7 +200,8 @@ class SSHProbeWorker(QThread):
     finished = Signal(bool, str, str) # success, message, file_path
     line = Signal(str)   # a line for the log while the scan runs: the wait for the board and its answer
 
-    def __init__(self, ip, user, password, state_dir, result_dir, port=22, *, label=None, audit=None):
+    def __init__(self, ip, user, password, state_dir, result_dir, port=22, *, label=None, audit=None,
+                 audit_factory=None):
         from orchestrator.remote.session import CancelToken
         super().__init__()
         self.ip = ip
@@ -209,6 +210,7 @@ class SSHProbeWorker(QThread):
         self.port = port
         self.label = label
         self.audit = audit
+        self.audit_factory = audit_factory   # opens the audit log only when the board's record is written
         self.state_dir = Path(state_dir)
         self.result_dir = Path(result_dir)
         self.cancel = CancelToken()
@@ -231,7 +233,7 @@ class SSHProbeWorker(QThread):
         try:
             scan = scan_device(self.state_dir, self.ip, int(self.port), self.user, None, password=password,
                                label=self.label, output_file=local_output, via="gui", actor="gui", audit=self.audit,
-                               cancel=self.cancel, on_event=wait_lines(self.line.emit, self.ip))
+                               audit_factory=self.audit_factory, cancel=self.cancel, on_event=wait_lines(self.line.emit, self.ip))
         except DeviceScanError as e:
             if e.kind == "cancelled":
                 text = ui_text("deploy.remote.cancelled", address=self.ip)
@@ -753,9 +755,15 @@ class BuilderTab(QWidget):
             config = self.framework.config
             state_dir = getattr(config, "user_state_dir", Path.home() / ".llm-framework")
             result_dir = probe_result_dir(self.framework)
-            audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
+            framework = self.framework
+
+            def audit():
+                """The one sink of the person's device rows (round 25 Q3), as `scan --device` writes them: the
+                registry's log, else the per-user audit.db; opened only when the board's record is written."""
+                from orchestrator.runtime.device.person_steps import device_audit
+                return device_audit(framework, Path(state_dir))
             self.probe_worker = SSHProbeWorker(ip, user, password or None, state_dir, result_dir, port=port,
-                                               label=label, audit=audit)
+                                               label=label, audit_factory=audit)
             self.probe_worker.line.connect(self._log)   # the wait for the board (N5) and its answer
             self.probe_worker.finished.connect(self._on_probe_finished)
             self.scan_cancel_btn.setEnabled(True)

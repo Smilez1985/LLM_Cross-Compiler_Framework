@@ -690,8 +690,12 @@ class FakeDevice:
         return FakeStdin(job), FakeStream(job, 1), FakeStream(job, 2)
 
     def answer(self, command, stdin):
+        # the board's thermal zones and device tree are the fake root's too (thermal.THERMAL_COMMAND): none unless a
+        # test gives the board some, so this computer's own temperature never shows in a test
         moved = command.replace("/run/systemd/system", f"{self.fakeroot}/run/systemd/system") \
-                       .replace("/etc/systemd/system/", f"{self.fakeroot}/etc/systemd/system/")
+                       .replace("/etc/systemd/system/", f"{self.fakeroot}/etc/systemd/system/") \
+                       .replace("/sys/class/thermal/", f"{self.fakeroot}/sys/class/thermal/") \
+                       .replace("/proc/device-tree/", f"{self.fakeroot}/proc/device-tree/")
         env = {"HOME": str(self.home), "PATH": f"{self.stubs}:/usr/bin:/bin", "LANG": "C",
                "FAKE_LOG": str(self.log), "LLAMA_ARG_TOOLS": "all", "LLAMA_ARG_HOST": "0.0.0.0"}
         res = subprocess.run([SHELL, "-c", moved], input=stdin, env=env, capture_output=True, timeout=120,
@@ -1599,7 +1603,9 @@ def test_a_cli_consent_is_written_to_the_real_audit_log(tmp_path, monkeypatch):
     from orchestrator import cli as cli_module
     from orchestrator.tools.audit import AuditLog
     audit = AuditLog(tmp_path / "audit.db")
-    monkeypatch.setattr(cli_module, "_tool_registry", lambda ctx: SimpleNamespace(audit=audit))
+    # the CLI's one opener of the person's device rows (round 25 Q3: _device_audit, the registry's log or audit.db)
+    monkeypatch.setattr(cli_module, "_state_dir", lambda ctx: tmp_path)
+    monkeypatch.setattr(cli_module, "_device_audit", lambda ctx, state: audit)
     cli_module._record_consent(None, "device_runtime_deploy", {"device": "dev-1"}, "systemd unit allowed")
     entry = audit.entries(1)[0]
     assert (entry["tool"], entry["outcome"], entry["approved"]) == ("device_runtime_deploy", "ok", 1)
