@@ -242,7 +242,7 @@ What the file is **not** (its header comment says the same):
 - Its versions are not the versions builds use. Builds use what the target's Dockerfile pins and the llama.cpp pin
   in `llama_runtime.yml`, which target images and the local model server build by commit. Its llama.cpp entry is
   still checked against that pin.
-- It has no roadmap. The project's roadmap is in [docs/BLUEPRINT.md](../docs/BLUEPRINT.md#roadmap).
+- It has no roadmap. The project's roadmap is in [docs/ROADMAP.md](../docs/ROADMAP.md).
 
 Use it as a list of links and notes. Keep notes short, use full URLs, and run the validation script after a change.
 
@@ -322,7 +322,7 @@ rule. The other overrides reach the stage containers, which have no network, and
 | llama.cpp version | `llama_cpp.source` in `configs/llama_runtime.yml` (the commit) | `tests/test_build_recipe.py`, `python scripts/llama_cpp_pin.py check` |
 | Other versions inside target images | the target's Dockerfile | hadolint and the image build in `.github/workflows/docker.yml` |
 | What was done | [CHANGELOG.md](../CHANGELOG.md) | `tests/test_versioning.py` (newest version) |
-| What comes next | [docs/BLUEPRINT.md#roadmap](../docs/BLUEPRINT.md#roadmap) | review |
+| What comes next | [docs/ROADMAP.md](../docs/ROADMAP.md) | review |
 
 ## Which file to change
 

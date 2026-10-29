@@ -128,5 +128,5 @@ def test_project_sources_header_says_who_reads_it():
     assert "orchestrator/Core/doc_sources.py" in header and "Nothing\n#   is crawled until a person starts it" in header
     assert "scripts/validate_ssot.py" in header and "scripts/sync_ssot.py" in header
     data = yaml.safe_load(text)
-    assert "roadmap" not in data, "the roadmap lives in docs/BLUEPRINT.md"
+    assert "roadmap" not in data, "the roadmap lives in docs/ROADMAP.md"
     assert "Crawler extracts" not in data["metadata"]["purpose"]

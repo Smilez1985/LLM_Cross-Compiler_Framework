@@ -248,7 +248,7 @@ Was die Datei **nicht** ist (ihr Kopfkommentar sagt dasselbe):
 - Ihre Versionen sind nicht die Versionen, mit denen gebaut wird. Builds nutzen, was das Dockerfile des Targets
   festlegt, und den llama.cpp-Pin in `llama_runtime.yml`, nach dessen Commit Target-Images und der lokale
   Modellserver bauen. Ihr llama.cpp-Eintrag wird trotzdem gegen diesen Pin geprüft.
-- Sie hat keine Roadmap. Die Roadmap des Projekts steht in [docs/BLUEPRINT_DE.md](../docs/BLUEPRINT_DE.md#roadmap).
+- Sie hat keine Roadmap. Die Roadmap des Projekts steht in [docs/ROADMAP_DE.md](../docs/ROADMAP_DE.md).
 
 Nutze sie als Liste von Links und Notizen. Halte Notizen kurz, verwende vollständige URLs und führe nach einer
 Änderung das Prüfskript aus.
@@ -331,7 +331,7 @@ Netzwerk haben, und ändern dort nichts.
 | llama.cpp-Version | `llama_cpp.source` in `configs/llama_runtime.yml` (der Commit) | `tests/test_build_recipe.py`, `python scripts/llama_cpp_pin.py check` |
 | Weitere Versionen in den Target-Images | das Dockerfile des Targets | hadolint und der Image-Build in `.github/workflows/docker.yml` |
 | Was war | [CHANGELOG_DE.md](../CHANGELOG_DE.md) | `tests/test_versioning.py` (neueste Version, an `CHANGELOG.md`) |
-| Was kommt | [docs/BLUEPRINT_DE.md#roadmap](../docs/BLUEPRINT_DE.md#roadmap) | Durchsicht |
+| Was kommt | [docs/ROADMAP_DE.md](../docs/ROADMAP_DE.md) | Durchsicht |
 
 ## Welche Datei du änderst
 

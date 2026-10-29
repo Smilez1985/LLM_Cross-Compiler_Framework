@@ -11,7 +11,7 @@ Framework bedienen (MCP), und dem eingebauten Assistenten **Ditto**.
 
 Diese README beschreibt den Stand des Entwicklungszweigs: Release 3.0.0 (2026-10-10) plus die Arbeiten, die im
 [CHANGELOG](CHANGELOG_DE.md) unter „Unreleased“ stehen. Was als Nächstes kommt, steht in der
-[Roadmap](docs/BLUEPRINT_DE.md#roadmap).
+[Roadmap](docs/ROADMAP_DE.md).
 
 ---
 
@@ -41,8 +41,8 @@ RKLLM und RKNN installierst du selbst (siehe [Das Board](#das-board)).
 | Target | Stand | Boards | Formate |
 |---|---|---|---|
 | Rockchip | offiziell | RK3566, RK3568, RK3576, RK3588 | GGUF, RKLLM, RKNN |
-| NVIDIA-GPUs, AMD (Ryzen Z1 Extreme) | geplant ([Roadmap](docs/BLUEPRINT_DE.md#roadmap)) | – | – |
-| Allgemeine ARM64-CPU (Raspberry Pi 4 und 5) | geplant ([Roadmap](docs/BLUEPRINT_DE.md#roadmap)) | – | GGUF |
+| NVIDIA-GPUs, AMD (Ryzen Z1 Extreme) | geplant ([Roadmap](docs/ROADMAP_DE.md)) | – | – |
+| Allgemeine ARM64-CPU (Raspberry Pi 4 und 5) | geplant ([Roadmap](docs/ROADMAP_DE.md)) | – | GGUF |
 
 Andere Hardware kannst du selbst ergänzen: [docs/Module_Developer_Guide_DE.md](docs/Module_Developer_Guide_DE.md).
 
@@ -923,7 +923,7 @@ Die Roadmap führt auf, was geplant ist; Erledigtes wandert beim Release in den 
   ausgeliefert (Sigstore, Prüfsummen im Repository), selbst bauen bleibt ein Opt-in. Keine fertigen Docker-Images für
   Targets, kein Go, die GUI bleibt Qt.
 
-Vollständige Liste: [docs/BLUEPRINT_DE.md](docs/BLUEPRINT_DE.md#roadmap).
+Vollständige Liste: [docs/ROADMAP_DE.md](docs/ROADMAP_DE.md).
 
 ---
 
@@ -933,7 +933,9 @@ Vollständige Liste: [docs/BLUEPRINT_DE.md](docs/BLUEPRINT_DE.md#roadmap).
 |---|---|
 | [docs/CLI_Usage_DE.md](docs/CLI_Usage_DE.md) | Alle CLI-Befehle und Optionen mit Beispielen |
 | [docs/Features_DE.md](docs/Features_DE.md) | Funktionen im Detail: Build-Pipeline, Sandbox, Ditto, Evaluation, lokale Laufzeit, Wissensbasis, Deep Ingest, MCP, Community-Zoo |
-| [docs/BLUEPRINT_DE.md](docs/BLUEPRINT_DE.md) | Architektur und Roadmap |
+| [docs/BLUEPRINT_DE.md](docs/BLUEPRINT_DE.md) | Der Bauplan: ein Verzeichnis der drei Dateien unten |
+| [docs/DESIGN_DE.md](docs/DESIGN_DE.md) | Design: jeder Baustein und jede Entscheidung (was, wie, warum) |
+| [docs/ROADMAP_DE.md](docs/ROADMAP_DE.md) | Roadmap: was kommt |
 | [docs/Module_Developer_Guide_DE.md](docs/Module_Developer_Guide_DE.md) | Ein neues Hardware-Target hinzufügen |
 | [docs/Container_Setup_DE.md](docs/Container_Setup_DE.md) | Das Framework in einem Container, den du selbst baust (Server, NAS, Proxmox) |
 | [docs/Mojo_DE.md](docs/Mojo_DE.md) | Der Gesundheitscheck: Mojo Oracle schaut, Mojo Miracle repariert (früher der Doctor) |

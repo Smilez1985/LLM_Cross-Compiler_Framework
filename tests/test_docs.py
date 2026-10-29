@@ -36,7 +36,11 @@ EXPECTED_PAIRS: List[Tuple[str, str]] = [
     ("README.md", "README_DE.md"),
     ("CONTRIBUTING.md", "CONTRIBUTING_DE.md"),
     ("CHANGELOG.md", "CHANGELOG_DE.md"),
-    ("docs/BLUEPRINT.md", "docs/BLUEPRINT_DE.md"),  # design and roadmap
+    # The blueprint is three files (DECISIONS round 34): DESIGN (what, how, why), ROADMAP (what comes) and the
+    # CHANGELOG above (what was); BLUEPRINT is their short index, kept so that old links lead somewhere.
+    ("docs/DESIGN.md", "docs/DESIGN_DE.md"),
+    ("docs/ROADMAP.md", "docs/ROADMAP_DE.md"),
+    ("docs/BLUEPRINT.md", "docs/BLUEPRINT_DE.md"),
     ("docs/CLI_Usage.md", "docs/CLI_Usage_DE.md"),
     ("docs/Features.md", "docs/Features_DE.md"),
     ("docs/Module_Developer_Guide.md", "docs/Module_Developer_Guide_DE.md"),
@@ -103,11 +107,22 @@ CHANGELOG_SECTIONS_DE: Dict[str, str] = {
     "Security": "Sicherheit",
 }
 
-# The roadmap lists what comes; the changelogs link to it from their header.
+# The roadmap lists what comes; the changelogs link to it from their header. The roadmap is a document of its own:
+# everything in it is roadmap.
 ROADMAP_LINKS: Dict[str, str] = {
-    "CHANGELOG.md": "docs/BLUEPRINT.md#roadmap",
-    "CHANGELOG_DE.md": "docs/BLUEPRINT_DE.md#roadmap",
+    "CHANGELOG.md": "docs/ROADMAP.md",
+    "CHANGELOG_DE.md": "docs/ROADMAP_DE.md",
 }
+
+# The three files of the blueprint and their index (English, German), DECISIONS round 34.
+BLUEPRINT_FILES: List[Tuple[str, str]] = [
+    ("docs/DESIGN.md", "docs/DESIGN_DE.md"),
+    ("docs/ROADMAP.md", "docs/ROADMAP_DE.md"),
+    ("CHANGELOG.md", "CHANGELOG_DE.md"),
+]
+BLUEPRINT_INDEX: Tuple[str, str] = ("docs/BLUEPRINT.md", "docs/BLUEPRINT_DE.md")
+# The index stays short: what each file holds and where the old sections went.
+BLUEPRINT_INDEX_MAX_LINES = 80
 
 # The status in the last column of every roadmap table row, and its German name. "done" means built and listed
 # under [Unreleased] in the changelog; at release such items leave the roadmap.
@@ -411,17 +426,29 @@ def test_changelog_versions_are_newest_first_with_dates():
     assert dates == sorted(dates, reverse=True), "release dates must not increase downwards"
 
 
-def roadmap_versions(rel: str) -> List[str]:
-    """Versions the roadmap section of a document names in its headings and table rows, in order."""
-    versions, inside = [], False
-    for line in _prose_lines(_read(rel)):
+def section_lines(rel: str, section: Optional[str] = None) -> List[str]:
+    """The prose lines of a document's second-level section (by its anchor), or of the whole document below its
+    title when `section` is None (the roadmap is a document of its own)."""
+    lines = _prose_lines(_read(rel))
+    if section is None:
+        return [line for line in lines if not line.startswith("# ")]
+    out, inside = [], False
+    for line in lines:
         if line.startswith("## "):
-            inside = github_slug(line[3:]) == "roadmap"
+            inside = github_slug(line[3:]) == section
             continue
         if inside:
-            m = re.match(r"^#{3,6} (\d+\.\d+\.\d+)\b", line) or re.match(r"^\|\s*(\d+\.\d+\.\d+)\s*\|", line)
-            if m:
-                versions.append(m.group(1))
+            out.append(line)
+    return out
+
+
+def roadmap_versions(rel: str) -> List[str]:
+    """Versions the roadmap names in its headings and table rows, in order."""
+    versions = []
+    for line in section_lines(rel):
+        m = re.match(r"^#{2,6} (\d+\.\d+\.\d+)\b", line) or re.match(r"^\|\s*(\d+\.\d+\.\d+)\s*\|", line)
+        if m:
+            versions.append(m.group(1))
     return versions
 
 
@@ -431,8 +458,7 @@ def test_roadmap_lists_only_what_comes():
     found = {}
     for target in ROADMAP_LINKS.values():
         rel = target.partition("#")[0]
-        assert (REPO_ROOT / rel).is_file(), f"{rel}, the document with the roadmap, is missing"
-        assert "roadmap" in anchors(_read(rel)), f"{rel} has no '## Roadmap' section"
+        assert (REPO_ROOT / rel).is_file(), f"{rel}, the roadmap, is missing"
         found[rel] = roadmap_versions(rel)
         released = [v for v in found[rel] if _semver(v) <= _semver(newest)]
         assert not released, (f"{rel}: the roadmap still lists released version(s) {sorted(set(released))}; "
@@ -443,12 +469,9 @@ def test_roadmap_lists_only_what_comes():
 
 def roadmap_statuses(rel: str, known: Set[str]) -> List[str]:
     """The status (last table cell) of every roadmap table row whose last cell is a known status, in order."""
-    statuses, inside = [], False
-    for line in _prose_lines(_read(rel)):
-        if line.startswith("## "):
-            inside = github_slug(line[3:]) == "roadmap"
-            continue
-        if inside and line.lstrip().startswith("|"):
+    statuses = []
+    for line in section_lines(rel):
+        if line.lstrip().startswith("|"):
             last = line.strip().strip("|").split("|")[-1].strip()
             if last in known:
                 statuses.append(last)
@@ -478,6 +501,33 @@ def test_changelog_header_links_twin_and_roadmap(changelog):
     for target in (ROADMAP_LINKS[changelog], _twin(changelog)):
         problem = link_problem(changelog, target)
         assert problem is None, problem
+
+
+# --- (3a) The blueprint is three files and a short index (DECISIONS round 34) --------------------------------
+
+@pytest.mark.parametrize("english,german", BLUEPRINT_FILES + [BLUEPRINT_INDEX])
+def test_the_blueprint_files_and_their_twins_exist(english, german):
+    missing = [rel for rel in (english, german) if not (REPO_ROOT / rel).is_file()]
+    assert not missing, f"the blueprint is DESIGN, ROADMAP and CHANGELOG, each with its German twin: missing {missing}"
+
+
+@pytest.mark.parametrize("index", BLUEPRINT_INDEX)
+def test_the_blueprint_is_a_short_index_of_the_three_files(index):
+    """docs/BLUEPRINT(_DE).md only says what each file holds and where the old sections went, so old links keep
+    leading somewhere; it holds no design or roadmap text of its own."""
+    text = _read(index)
+    german = index.endswith(GERMAN_SUFFIX)
+    targets = {link_destination(index, t) for t in links(text)}
+    for english, de in BLUEPRINT_FILES:
+        wanted = Path(os.path.normpath(REPO_ROOT / (de if german else english)))
+        assert wanted in targets, f"{index} must link to {wanted.relative_to(REPO_ROOT).as_posix()}"
+    assert len(text.splitlines()) <= BLUEPRINT_INDEX_MAX_LINES, f"{index} is an index, not a document"
+    assert not [line for line in _prose_lines(text) if line.startswith("### ")], f"{index} has no subsections"
+    # The old anchors that outside links use most stay valid (each row: old anchor -> new place).
+    old = anchors(text)
+    for anchor in ("roadmap", "key-decisions" if not german else "wichtige-entscheidungen",
+                   "security-model" if not german else "sicherheitsmodell", "glossary" if not german else "glossar"):
+        assert anchor in old, f"{index}: the old anchor #{anchor} must still lead somewhere"
 
 
 # --- (4) One version everywhere -----------------------------------------------------------------------------
@@ -573,15 +623,12 @@ NOT_PLANNED = re.compile(r"\bnot planned\b|\bnicht geplant\b", re.I)
 ROADMAP_SUMMARIES = {"README.md": "what-comes-next", "README_DE.md": "wie-es-weitergeht"}
 
 
-def roadmap_items(rel: str, section: str = "roadmap") -> List[str]:
-    """The items of the roadmap section (or of another section, by its anchor): table rows, list items with their
-    wrapped lines, and paragraphs."""
-    items, inside = [], False
-    for line in _prose_lines(_read(rel)):
+def roadmap_items(rel: str, section: Optional[str] = None) -> List[str]:
+    """The items of the roadmap (or of a section of another document, by its anchor): table rows, list items with
+    their wrapped lines, and paragraphs."""
+    items: List[str] = []
+    for line in section_lines(rel, section):
         if line.startswith("## "):
-            inside = github_slug(line[3:]) == section
-            continue
-        if not inside:
             continue
         stripped = line.strip()
         if not stripped:
