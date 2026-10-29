@@ -46,6 +46,13 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   `keep-id`. Under rootless Docker (`docker info` lists `name=rootless`) the framework's containers that would run as
   the person's uid run as `0:0`, which is the person outside; before, they ran as a sub-uid that could not write the
   person's folders. All through the one helper `create_container`.
+- `2026-10-29 23:43 UTC` · `v3.2.0` **The revision anchor of a signed file never goes down, and build records print plainly**
+  ([design](docs/DESIGN.md#secrets-sign-in-and-accounts)): `tools/signing.RevisionAnchor.adopt` left a window: when
+  another process replaced the file between this process's last look and its keyring write, and that process's write
+  finished first, the older revision written afterwards lowered the anchor. Every process now compares and writes the
+  anchor under one lock per file (`<file>.anchor.lock` next to it), reads the stored value first and keeps the higher
+  one, in `adopt` and in `saved` (regression test with an interleaving double). `llm-cli build status` prints the values and errors of a request summary and of a build record through the CLI's one filter for
+  steered text (`_printable`), so control and bidi characters from a build log no longer reach the terminal.
 
 ## [3.1.0] - 2026-10-29
 

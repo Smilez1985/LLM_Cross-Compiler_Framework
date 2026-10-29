@@ -800,3 +800,34 @@ class TestDoctor:
         assert findings["tools.permissions"].severity == Severity.ERROR
         assert "cannot be trusted" in findings["tools.permissions"].message
         assert findings["tools.tokens"].severity == Severity.ERROR
+
+
+def test_the_anchor_never_goes_down_when_a_save_finishes_during_adopt(tmp_path):
+    """The window adopt() left: this process looked at the empty entry and at the unchanged file, then another process
+    replaced the file with revision 3 and wrote its anchor while this process was still writing revision 2. The
+    compare-and-write runs under one lock per file for every process, so the other save writes after this one and keeps
+    the higher revision."""
+    import threading
+    path = tmp_path / "tool_policy.json"
+    path.write_text("revision 2")
+    slots = {}
+    replaced, other_done = threading.Event(), threading.Event()
+
+    def other_process():
+        other = RevisionAnchor(lambda: slots.get("rev"), lambda v: slots.__setitem__("rev", v))
+        path.write_text("revision 3, a newer save")   # its file replace comes first, outside any lock
+        os.utime(path, ns=(1, 1))
+        replaced.set()
+        other.saved(path, 3)
+        other_done.set()
+
+    def my_write(value):
+        threading.Thread(target=other_process, daemon=True).start()
+        assert replaced.wait(5)
+        other_done.wait(0.5)   # without the lock the other write lands first, then this one would lower it
+        slots["rev"] = value
+
+    mine = RevisionAnchor(lambda: slots.get("rev"), my_write)
+    mine.adopt(path, 2)
+    assert other_done.wait(10)
+    assert slots["rev"] == "3", "the anchor never goes down"

@@ -51,6 +51,15 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   nennt `name=rootless`) laufen die Container des Frameworks, die als uid der Person liefen, als `0:0`, das ist
   draußen die Person; vorher liefen sie als Sub-uid, die die Ordner der Person nicht beschreiben konnte. Alles über
   den einen Helfer `create_container`.
+- `2026-10-29 23:43 UTC` · `v3.2.0` **Der Revisionsanker einer signierten Datei sinkt nie, und Build-Einträge erscheinen ohne
+  Steuerzeichen** ([Design](docs/DESIGN_DE.md#secrets-anmeldung-und-konten)): `tools/signing.RevisionAnchor.adopt`
+  ließ ein Fenster offen: Ersetzte ein anderer Prozess die Datei zwischen dem letzten Blick dieses Prozesses und
+  seinem Schreiben in den Schlüsselbund, und war das Schreiben des anderen zuerst fertig, senkte die danach
+  geschriebene ältere Revision den Anker. Jeder Prozess vergleicht und schreibt den Anker jetzt unter einer Sperre je
+  Datei (`<Datei>.anchor.lock` daneben), liest zuerst den gespeicherten Wert und behält den höheren, in `adopt` und in
+  `saved` (Regressionstest mit einem verschränkten Doppel). `llm-cli build status` gibt die Werte
+  und Fehler einer Anfrage und eines Build-Eintrags durch den einen Filter der CLI für gesteuerten Text aus
+  (`_printable`), damit Steuer- und Bidi-Zeichen aus einem Build-Log nicht mehr das Terminal erreichen.
 
 ## [3.1.0] - 2026-10-29
 
