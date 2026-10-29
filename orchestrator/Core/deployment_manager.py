@@ -502,8 +502,7 @@ class DeploymentManager:
                     refused = offline_pull_refusal(img_name, getattr(self.framework, "config", None))
                     if refused:   # offline mode: no pull from outside the own network (DECISIONS round 24 L-NET)
                         raise DeployError(refused, code="needs_person",
-                                          next="Ask the person to package while offline mode is off, or without "
-                                               "Docker images.")
+                                          next="Package while offline mode is off, or without Docker images.")
                     client.images.pull(img_name)
                     img = client.images.get(img_name)
                 name = self._load_name(img_name)

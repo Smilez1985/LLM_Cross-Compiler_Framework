@@ -48,15 +48,19 @@ def offline_pull_refusal(reference: str, config) -> str:
     to a registry the one locality rule counts as local (utils/locality.py: this computer, the own network, the
     person's opt-outs); otherwise the plain refusal naming the image and what to do while online. "" when the pull may
     go (offline mode off, or a local registry)."""
-    from orchestrator.utils.locality import check_host, offline_mode, url_host
+    from orchestrator.utils.locality import OPT_OUT_HELPS, check_host, offline_mode, url_host
     if not offline_mode(config):
         return ""
     verdict = check_host(url_host(registry_host(reference))[0], config)   # host[:port], [v6]:port
     if verdict.local:
         return ""
-    return (f"Offline mode is on, and the image {reference} is not on this computer; it would be pulled from "
+    text = (f"Offline mode is on, and the image {reference} is not on this computer; it would be pulled from "
             f"{verdict.host}, which is not in your own network ({verdict.why()}). Pull it once while offline mode is "
             "off (or package without Docker images), then package again offline.")
+    if verdict.reason in OPT_OUT_HELPS:   # as the locality rule's own refusal (Verdict.refusal)
+        from orchestrator.utils.localization import ui_text
+        text += ui_text("net.refusal.opt_out", "en")
+    return text
 
 
 __all__ = ["is_official_image", "offline_pull_refusal", "registry_host", "split_image"]
