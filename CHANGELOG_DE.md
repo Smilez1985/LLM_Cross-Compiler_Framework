@@ -1541,7 +1541,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   nennt das Image (`utils/image_ref.offline_pull_refusal`). Das Target-Image wird im Offline-Modus weder gezogen noch
   gebaut: Es kommt das Image des Targets, das früher mit denselben Einstellungen gebaut wurde (neues Label
   `org.llm-framework.inputs`), und ohne eines hält der Build an und nennt die Basis-Images und den Schritt, der online
-  nötig ist. Tests: `tests/test_offline_models.py`, `tests/test_offline_images.py`.
+  nötig ist. Der Security-Scan des Builds läuft im Offline-Modus mit Trivy ohne jedes Netz und mit der
+  Schwachstellen-Datenbank, die er schon hat (`--skip-db-update`, `--offline-scan`); sein Image wird nur aus einer
+  Registry in deinem eigenen Netz gezogen, sonst entfällt der Scan mit einer Warnung (vorher zog der Scan
+  `aquasec/trivy` von Docker Hub, und Trivy lud seine Datenbank). Tests: `tests/test_offline_models.py`,
+  `tests/test_offline_images.py`, `tests/test_review_build_engine.py`.
 - **Die eigene OpenSSH-Einstellungsdatei des Frameworks; OpenSSH liest weder `~/.ssh/config` noch
   `/etc/ssh/ssh_config`** (DECISIONS Runde 25 Q4 und Q5): Jeder Aufruf des OpenSSH-Clients dieses Computers (der
   Rückfallweg ohne paramiko) bekommt vom einen Bauer der Befehlszeile (`orchestrator/remote/transport.py`

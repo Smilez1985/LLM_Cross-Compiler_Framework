@@ -700,7 +700,10 @@ Adressbereich als lokal zählen.
   (`build start --model`, die Auswahl im Builder-Tab; siehe die Zeile „Modelle auf diesem Computer“ oben). Eine KI
   wählt nur unter den Modellen, die schon hier sind, nach Label. Das Image des Targets wird weder gezogen noch
   gebaut: Es kommt das Image des Targets, das früher mit denselben Einstellungen gebaut wurde (Label
-  `org.llm-framework.inputs`), und ohne eines hält der Build an und nennt die Basis-Images.
+  `org.llm-framework.inputs`), und ohne eines hält der Build an und nennt die Basis-Images. Der Security-Scan läuft
+  mit Trivy ohne jedes Netz und mit der Schwachstellen-Datenbank, die er schon hat; sein Image kommt von diesem
+  Computer oder aus einer Registry, die die Regel als lokal zählt (`utils/image_ref.offline_pull_refusal`), sonst
+  entfällt der Scan mit einer Warnung.
 - **Docker-Images.** Ein Paket mit Docker-Images (`deploy package --docker`, der Tab Deployment,
   `create_deploy_package` einer KI mit `include_docker_images`) nutzt nur Images, die schon auf diesem Computer
   sind, oder zieht aus einer Registry, die die Regel als lokal zählt (`utils/image_ref.offline_pull_refusal`); sonst

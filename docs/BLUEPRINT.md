@@ -658,7 +658,10 @@ its ending, and you can count a VPN, a host such as your reverse proxy or an add
   here or a model file or folder of your own (`build start --model`, the Builder tab's choice; see the row "Models
   on this computer" above). An AI picks only among the models already here, by label. The target's image is neither
   pulled nor built: the image of the target built earlier from the same settings is used (label
-  `org.llm-framework.inputs`), and without one the build stops and names the base images.
+  `org.llm-framework.inputs`), and without one the build stops and names the base images. The security scan runs
+  Trivy without any network and with the vulnerability database it already has; its image comes from this computer
+  or a registry the rule counts as local (`utils/image_ref.offline_pull_refusal`), otherwise the scan is skipped
+  with a warning.
 - **Docker images.** A package with Docker images (`deploy package --docker`, the Deployment tab, the AI's
   `create_deploy_package` with `include_docker_images`) uses only images already on this computer, or pulls from a
   registry the rule counts as local (`utils/image_ref.offline_pull_refusal`); otherwise it stops and names the image.
