@@ -641,6 +641,35 @@ def test_every_changelog_version_has_its_link(changelog):
     assert not missing, f"{changelog}: versions without a link reference: {missing}"
 
 
+# Entries whose first line was rewrapped or edited after the entry was written. Their stamp is the time the entry
+# was first written (the first commit that added a line starting with the entry's opening words), never the time of
+# the later rewrap: a stamp says when the entry was made, not when it was last touched.
+FIRST_WRITTEN = {
+    "**Two-phase confirmation and question text v2**": "2026-10-11 22:39",
+    "**MCP clients see only the tools they may use**": "2026-10-11 18:55",
+    "**`llm-cli doctor --fix --tier 2` no longer deletes": "2026-10-12 18:37",
+    "**Encrypted packs for private sharing**": "2026-10-11 01:54",
+    "**One file hash and one disk watchdog**": "2026-10-17 15:50",
+    "**Refused MCP calls carry their reason code": "2026-10-12 09:20",
+    "**Retrieval evaluation**": "2026-10-11 01:38",
+    "**Credential check**": "2026-10-11 03:18",
+    "Windows: the uninstaller (`scripts/Uninstall-LLM": "2026-10-11 16:55",
+    "Dependencies: `anthropic` 1.13.0, `openai` 3.28.0 (was 2.54.0)": "2026-10-10 22:57",
+}
+
+
+def test_a_rewrapped_entry_keeps_the_stamp_of_its_first_writing():
+    english = {first: stamp for _, _, first, stamp in changelog_stamps("CHANGELOG.md")}
+    problems = []
+    for start, when in FIRST_WRITTEN.items():
+        hits = [(first, stamp) for first, stamp in english.items() if STAMP_PREFIX.sub("", first[2:]).startswith(start)]
+        if len(hits) != 1:
+            problems.append(f"{start}: {len(hits)} entries")
+        elif not hits[0][1].startswith(when + " "):
+            problems.append(f"{start}: stamped {hits[0][1]}, first written {when} UTC")
+    assert not problems, "\n  ".join(problems)
+
+
 def test_the_stamp_check_finds_a_missing_or_wrong_stamp():
     assert STAMP.match("- `2026-10-29 21:26 UTC` · `v3.1.0` **Title** text")
     for line in ["- **Title** text", "- `2026-10-29 21:26` · `v3.1.0` **Title**", "- `2026-10-29 UTC` · `v3.1` x"]:
@@ -774,7 +803,24 @@ def test_the_scrub_finds_private_data():
     assert scrub_findings(kept) == []
 
 
-COMPONENT_SECTIONS = {"docs/DESIGN.md": ("components-and-decisions", "#### Decisions", "| What | How | Why |"),
+# The maintainer's own devices stay private (DECISIONS round 35): the blueprint names hardware classes and example
+# boards, never which hardware the maintainer owns or how much memory or storage their board has.
+MAINTAINER_DEVICE_WORDING = [
+    re.compile(r"maintainer'?s (?:own )?(?:hardware|boards?|radxa|devices?|gpus?|computers?|machines?)", re.I),
+    re.compile(r"(?:Hardware|Boards?|Geräte?|Rechner|Radxa) des Maintainers", re.I),
+    re.compile(r"\b\d+\s*(?:-|–|to|or|bis|oder)\s*\d+\s*GB\b"),
+    re.compile(r"\b\d+\s*GB eMMC\b", re.I),
+]
+
+
+@pytest.mark.parametrize("rel", ["docs/DESIGN.md", "docs/DESIGN_DE.md", "docs/ROADMAP.md", "docs/ROADMAP_DE.md"])
+def test_the_blueprint_names_no_device_of_the_maintainer(rel):
+    text = " ".join(_read(rel).split())
+    found = [m.group(0) for pattern in MAINTAINER_DEVICE_WORDING for m in pattern.finditer(text)]
+    assert not found, f"{rel}: wording that describes the maintainer's own devices: {found}"
+
+
+COMPONENT_SECTIONS = {"docs/DESIGN.md":("components-and-decisions", "#### Decisions", "| What | How | Why |"),
                       "docs/DESIGN_DE.md": ("bausteine-und-entscheidungen", "#### Entscheidungen",
                                             "| Was | Wie | Warum |")}
 

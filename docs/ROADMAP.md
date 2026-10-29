@@ -29,10 +29,10 @@ decisions it comes from.
 
 ## 3.2.0 - Ditto's context, the board bundle, the device runtime and more hardware (in progress)
 
-Batch 3 of the work lands here, in the order of its waves: Ditto's context first, the board bundle next to it, then
-the gateway, voice and MCP on the board. The first hardware sets the priorities for the device runtime: RK3566 boards
-(for example a 4-8 GB RK3566 board), NVIDIA RTX GPUs and the AMD Ryzen Z1 Extreme, on Windows and Linux. The recipes
-come first there; the rotation stage and the generic ARM64 target follow right after them.
+This version comes in this order: Ditto's context first, the board bundle next to it, then the gateway, voice and MCP
+on the board. The first hardware sets the priorities for the device runtime: RK3566 boards, NVIDIA RTX GPUs and the
+AMD Ryzen Z1 Extreme, on Windows and Linux. The recipes come first there; the rotation stage and the generic ARM64
+target follow right after them.
 
 ### Carried over from 3.1.0
 

@@ -270,7 +270,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   --device`, writes the board's trusted, paired record (audited), so the board appears in the benchmark list and AI
   deploys can name it; the CLI and the GUI share one core step (`scan_steps.scan_device`). **Import from File** asks
   for the board's name (`--label`).
-- `2026-10-16 21:58 UTC` · `v3.1.0` **Build > Targets...** (GUI parity, every CLI action by mouse): every target with its ID (the value for `--target`),
+- `2026-10-16 20:29 UTC` · `v3.1.0` **Build > Targets...** (GUI parity, every CLI action by mouse): every target with its ID (the value for `--target`),
   name, architecture, boards, formats and support level, or "no capabilities declared" (or that its capabilities block
   is invalid), from the query of `llm-cli targets list`. **Check target** (there and next to the Builder's target list,
   beside the new **Targets...** button) checks the selected target as `llm-cli targets validate` does, through one core
@@ -291,7 +291,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   GGUF, RKLLM and RKNN), with the note that its boards, formats and quantizations are not checked (for a target whose
   capabilities block is invalid the note says so, and **Check target** names each error); the optimization level
   `FAST`; a **Priority** list (`--priority`, default normal; a failed critical build stops the pipeline).
-- `2026-10-16 21:58 UTC` · `v3.1.0` **Module wizard: description, and provider and model for one analysis**: the hardware page has a **Description** field
+- `2026-10-16 20:29 UTC` · `v3.1.0` **Module wizard: description, and provider and model for one analysis**: the hardware page has a **Description** field
   (`llm-cli module create` asks for one; empty gives "Target for <name>"). Only you fill it: for a module an AI helped
   with, your description leads and the framework's note that the module is AI-generated and untested follows. The first
   page offers provider and model **for this analysis only** (`module generate-ai --provider --model`): Ditto runs on
@@ -453,7 +453,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   a delegation) uses only the commit its look-up resolved (blocker `commit_required` when Hugging Face could not be
   asked). The AI's view of the facts (`delegation.ai_view`) never carries a fact only the person sees. Warning codes are
   stable identifiers.
-- `2026-10-12 11:44 UTC` · `v3.1.0` **A real-client smoke test** (`scripts/mcp_client_smoke.sh`, checker `scripts/mcp_smoke_check.py`): runs Claude Code
+- `2026-10-12 10:42 UTC` · `v3.1.0` **A real-client smoke test** (`scripts/mcp_client_smoke.sh`, checker `scripts/mcp_smoke_check.py`): runs Claude Code
   (`claude -p`, four scripted prompts) against the framework's stdio server in a throw-away environment (home, Hugging
   Face home, XDG folders, per-user folder, secrets in memory only, the null keyring backend, no window system; the
   server runs under `env -i`, so it gets none of the caller's variables) and checks from the isolated audit database,
@@ -670,7 +670,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local
   model tier (`--tier small --tier small-q2`; the servers the run starts are stopped afterwards, one you started
   yourself keeps running if it serves the tier). Nothing is built; `--json` writes the report.
-- `2026-10-11 04:03 UTC` · `v3.1.0` **Retrieval evaluation** (`llm-cli ditto eval --kind retrieval`): 42 German and English searches (cross-lingual
+- `2026-10-11 01:38 UTC` · `v3.1.0` **Retrieval evaluation** (`llm-cli ditto eval --kind retrieval`): 42 German and English searches (cross-lingual
   questions, identifiers such as `GGML_CUDA`, answers deep inside a large table or script, the last lines of
   failed builds and Ditto's own search strings, unrelated questions) against a corpus of 30 framework and SDK
   documentation excerpts (`evals/retrieval/`). The corpus is indexed into a temporary knowledge base with the
@@ -844,7 +844,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   under the same author name is shown with a warning. Reading a pack accepts exactly the listed files, never links
   or special files, and checks every hash. Trusted publisher keys ship in `configs/community_keys.yml`, each with
   an expiry date.
-- `2026-10-11 14:01 UTC` · `v3.1.0` **Encrypted packs for private sharing** (with your own machines or a team): encrypted in the age format by rage
+- `2026-10-11 01:54 UTC` · `v3.1.0` **Encrypted packs for private sharing** (with your own machines or a team): encrypted in the age format by rage
   (through `pyrage`) to one or more recipients' age keys or to one passphrase, and signed by the sender, so
   recipients see who sent it and any change, including an added or removed recipient, is detected. The standard
   `age` and `rage` tools open them too when they are encrypted to a passphrase or to a key made with `age-keygen`
@@ -899,7 +899,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   checked) are kept in `auth.json` next to the credential vault. Tokens of the sign-in flows that come later are
   renewed under a lock shared by the GUI, the CLI and the MCP server; the new refresh token is stored before it
   is used, and a refused renewal marks the sign-in as expired.
-- `2026-10-11 04:36 UTC` · `v3.1.0` **Credential check** (the **Check** button in the sign-in panel and `llm-cli ditto auth status --check`): one
+- `2026-10-11 03:18 UTC` · `v3.1.0` **Credential check** (the **Check** button in the sign-in panel and `llm-cli ditto auth status --check`): one
   free GET request (the model list, OpenRouter's key endpoint) says whether the stored key works, which workspace
   or key name it belongs to and how many models it can use; a key that works but may not list models is reported as such, also
   by the live model list in the AI settings. Redirects are not followed, so the key goes to the provider only.
@@ -968,7 +968,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   without running the third time; after three input errors an error shows a valid example call. What was repaired
   is marked in the question, listed in the result's `notes` and recorded in the audit log. Tool arguments a local
   model sends with a code fence or in Python notation are read once more.
-- `2026-10-15 17:14 UTC` · `v3.1.0` **Two-phase confirmation and question text v2** (Ditto and MCP clients): a question starts with the consequence in
+- `2026-10-11 22:39 UTC` · `v3.1.0` **Two-phase confirmation and question text v2** (Ditto and MCP clients): a question starts with the consequence in
   plain words from facts the framework looked up, then who asks (an MCP client's self-reported name, version and
   transport, and whose permissions apply), the facts the framework checked (external text labelled "not checked"), and
   every argument with the speaking name of an id (a build's model and target, a local file's label). A tool can look
@@ -1276,7 +1276,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   your clicks, and a module an AI filled is marked AI-generated, so its first build is shown to you once. The AI
   settings never let an AI change the provider, the address, the privacy level or the fallback chain. Every call goes
   through the caller's own tool registry (permissions, limits, audit entry with the caller).
-- `2026-10-16 02:40 UTC` · `v3.1.0` **The board recommendation from the hardware probe** (`orchestrator/runtime/board_recommendation.py`): after a probe
+- `2026-10-16 00:55 UTC` · `v3.1.0` **The board recommendation from the hardware probe** (`orchestrator/runtime/board_recommendation.py`): after a probe
   the Builder recommends the matched target's board with its source (the probe's SoC, or the probe's board name in the
   target's list of known boards) and how sure it is. Only an exact match is filled in; otherwise the candidates and
   the reason are shown and you pick; until you pick, **Start Build** asks whether the board in the form is yours. A
@@ -1911,7 +1911,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   just as the deploy asks whether the board has SFTP waits for the board and uploads over SFTP instead of ending the
   deploy; and the board session's sentences an AI gets as external text name the board by its label, never its
   address (D0).
-- `2026-10-17 19:26 UTC` · `v3.1.0` **One file hash and one disk watchdog** (architecture consolidation c1-hashing and c1-disk, maintainer rule R0: the
+- `2026-10-17 15:50 UTC` · `v3.1.0` **One file hash and one disk watchdog** (architecture consolidation c1-hashing and c1-disk, maintainer rule R0: the
   existing implementation first). The 24 copies of the file sha256 (15 named helpers, 9 loops; the loop of
   `utils/network.py` left with that module, see below) run through the oldest one's module,
   `orchestrator/utils/helpers.py` (where `calculate_file_checksum` was), which gained one hashing loop with optional
@@ -2169,7 +2169,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   to weigh, a safer option and who may decide. The summary is built only from computed numbers, the warnings and
   speaking names, never from repository, log or AI text. Every question, an MCP form included, lists "Situation:" and
   "Needs you (security / legal):" after the facts it checked.
-- `2026-10-12 17:38 UTC` · `v3.1.0` **Refused MCP calls carry their reason code as structured content** (`{"error": {"code", "field", "blocker"}}`,
+- `2026-10-12 09:20 UTC` · `v3.1.0` **Refused MCP calls carry their reason code as structured content** (`{"error": {"code", "field", "blocker"}}`,
   framework facts only, the text unchanged; `blocker` names the facts catalogue's hard fact that refused the call
   before any question, such as `disk_full`). A client reads the code and field from it instead of guessing them from
   the words; an unknown code is sent as `failed`, and a field that is not a plain argument name is left out.
@@ -2226,7 +2226,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   CPU feature list.
 - `2026-10-10 23:50 UTC` · `v3.1.0` Local model: effort "low" turns thinking off (Qwen3.5 on llama-server otherwise thinks at full length, which
   takes minutes on a CPU); "medium" and up keep it.
-- `2026-10-11 14:01 UTC` · `v3.1.0` Dependencies: `anthropic` 1.13.0, `openai` 3.28.0 (was 2.54.0), `fastembed` 0.8.1 (local embeddings, ONNX on
+- `2026-10-10 22:57 UTC` · `v3.1.0` Dependencies: `anthropic` 1.13.0, `openai` 3.28.0 (was 2.54.0), `fastembed` 0.8.1 (local embeddings, ONNX on
   the CPU) and `pyrage` 1.4.0 (age encryption of privately shared community packs) are pinned exactly; pip-audit
   reports no known vulnerabilities.
 - `2026-10-11 02:31 UTC` · `v3.1.0` **Ditto's knowledge excerpts fit the context**: they take at most a third of `chat_context_limit`; an excerpt
@@ -2298,7 +2298,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   reachable; no excerpt matched" or that only the builds of this process are listed); a pending self-healing
   proposal's `suggested_step` is now `manual_step_text`, text for the person to read. The server instructions say
   how to treat marked fields and that a task the client cannot do is reported with its specific reason.
-- `2026-10-15 17:14 UTC` · `v3.1.0` **MCP clients see only the tools they may use**: tools your permissions deny are left out of the tool list (the same
+- `2026-10-11 18:55 UTC` · `v3.1.0` **MCP clients see only the tools they may use**: tools your permissions deny are left out of the tool list (the same
   tools Ditto gets for the same permissions); a call to one is still refused and audited. `destructiveHint` follows
   each tool's own flag instead of its tier (`resolve_healing` stays marked destructive: it changes a setting and
   retries a build), and tools that reach other devices ask the client to show its own prompt on every call
@@ -2306,7 +2306,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 - `2026-10-11 18:52 UTC` · `v3.1.0` A local model file is mounted into the build containers alone, no longer together with the folder it lies in
   (a model that needs files next to it, such as ONNX external data, is given as its folder). An RKNN sample list
   next to a model file now gets its own folder mount.
-- `2026-10-11 21:51 UTC` · `v3.1.0` MCP and Ditto: builds belong to the caller that started them (an MCP connection, each named token over HTTP,
+- `2026-10-11 19:07 UTC` · `v3.1.0` MCP and Ditto: builds belong to the caller that started them (an MCP connection, each named token over HTTP,
   Ditto). Cancelling its own build
   with `cancel_build` no longer asks; cancelling another client's build follows the tool permissions (by default it
   asks). A per-tool setting still wins, a tier you denied stays denied, and a damaged permission file still denies.
@@ -2394,7 +2394,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   still shows the list of the framework's build images. The tool `run_doctor` stays callable but is no longer listed; a
   setting for `run_doctor` or `run_mojo_oracle` applies to both, and the stricter one wins. `make mojo` next to
   `make doctor`.
-- `2026-10-16 15:52 UTC` · `v3.1.0` **Knowledge packs carry a page's full text only where its licence allows it, with the licence texts it asks for**
+- `2026-10-16 09:37 UTC` · `v3.1.0` **Knowledge packs carry a page's full text only where its licence allows it, with the licence texts it asks for**
   (eighth round, Q-1 and Q-1'; W3 of 2026-10-16): a knowledge pack and the knowledge snapshot the module wizard
   attaches to a target keep the full text of a page only under a licence that allows passing it on (CC0, public
   domain, CC BY, CC BY-SA, MIT, Apache-2.0, BSD, ISC, 0BSD, Unlicense, MPL-2.0), with the attribution it requires
@@ -2744,7 +2744,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   daemon, other projects' too. It is now a manual step: the proposal points to the framework's list of its build
   images (the dialog's **Free Docker space...**, **Tools > Framework Build Images...**, `llm-cli doctor --fix --tier
   2`), which deletes only the images you tick and confirm, and an approval is refused before anything is asked. No code of the framework clears Docker's build cache any more.
-- `2026-10-15 17:14 UTC` · `v3.1.0` **`llm-cli doctor --fix --tier 2` no longer deletes without a list** (released in 3.0.0; round 5 f): it cleared the
+- `2026-10-12 18:37 UTC` · `v3.1.0` **`llm-cli doctor --fix --tier 2` no longer deletes without a list** (released in 3.0.0; round 5 f): it cleared the
   whole build cache of the Docker daemon, other projects' too, and deleted the framework's dangling images without
   showing them. The build cache is no longer touched (it cannot be limited to the framework). Tier 2 now lists every
   build image of the framework (without a name, named `llm-framework/<target>:last-build`, runtime builders), each with
@@ -2889,7 +2889,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   installation) instead of `output/` in the working folder.
 - `2026-10-11 16:50 UTC` · `v3.1.0` The AI settings dialog warns when the settings could not be saved to `config.yml` (they apply until the program
   ends); before, only the log said so.
-- `2026-10-17 10:54 UTC` · `v3.1.0` Windows: the uninstaller (`scripts/Uninstall-LLM-Cross-Compiler-Framework.bat`) finds the installation. `install.bat`
+- `2026-10-11 16:55 UTC` · `v3.1.0` Windows: the uninstaller (`scripts/Uninstall-LLM-Cross-Compiler-Framework.bat`) finds the installation. `install.bat`
   now writes the marker with the installation folder that the uninstaller reads, next to `install.bat`, where the
   uninstaller looks for it; before, no installer wrote it and the uninstaller always reported that nothing was
   installed. When PowerShell reports no script path (the PowerShell part of `install.bat` runs through
@@ -3457,7 +3457,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   fallback, else nothing); a self-built build that cannot be used never falls back to the prebuilt archive on its
   own, and an official archive an earlier version downloaded is used only after `runtime install --prebuilt` (which
   takes it without downloading it again).
-- `2026-10-11 14:39 UTC` · `v3.1.0` Deep Ingest reads robots.txt as RFC 9309 describes it, with one cautious deviation. Rules with `*` or `$` (such
+- `2026-10-11 03:30 UTC` · `v3.1.0` Deep Ingest reads robots.txt as RFC 9309 describes it, with one cautious deviation. Rules with `*` or `$` (such
   as `Disallow: /*.pdf$`), an `Allow` listed before a longer `Disallow`, every `User-agent: *` group after the
   first and a file that starts with a byte order mark used to be ignored, so the crawler fetched pages the site had
   excluded. Its groups are found by the exact product token `LLM-Cross-Compiler-Framework-Bot` or its earlier name
@@ -3469,7 +3469,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   endless or dripping response that filled the memory or held the crawl, and Stop or closing the wizard, forever:
   the HTTP timeout only bounds each socket read. A larger page is skipped and a slower one fails, each named in the
   crawl log; Stop no longer waits for a page that is still arriving.
-- `2026-10-11 04:03 UTC` · `v3.1.0` Community packs are installed only through a quarantine folder after their checks: an id without paths, exactly
+- `2026-10-11 02:42 UTC` · `v3.1.0` Community packs are installed only through a quarantine folder after their checks: an id without paths, exactly
   the listed files with their hashes, no links, special or binary files, every image a Dockerfile pulls (`FROM`,
   `COPY --from`, `RUN --mount=...,from=`, also in a lowercase `dockerfile`) pinned by digest unless it is an
   official base image, the shell deny-list on every script line that is not from the shipped template, and
@@ -3486,7 +3486,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 - `2026-10-11 02:06 UTC` · `v3.1.0` The debug output of the provider SDKs and HTTP libraries (request options, prompts, headers) stays off unless
   `--debug-http` is given: their loggers never go below INFO, even with `--log-level DEBUG`, and
   `ANTHROPIC_LOG=debug` / `OPENAI_LOG=debug` are lowered to `info`.
-- `2026-10-11 00:59 UTC` · `v3.1.0` Claude Admin API keys (`sk-ant-admin01-`) are refused before any request is sent, also when they were stored
+- `2026-10-11 00:21 UTC` · `v3.1.0` Claude Admin API keys (`sk-ant-admin01-`) are refused before any request is sent, also when they were stored
   with surrounding spaces.
 - `2026-10-11 00:29 UTC` · `v3.1.0` The credential vault is changed under a cross-process lock: the GUI, the CLI and an MCP server writing at
   the same time no longer lose each other's changes.

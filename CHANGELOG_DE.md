@@ -304,7 +304,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Boards als vertraut und gekoppelt (im Audit-Log), so dass das Board in der Benchmark-Liste erscheint und
   KI-Deployments es nennen können; CLI und GUI teilen einen Schritt im Kern (`scan_steps.scan_device`). **Import from
   File** fragt nach dem Namen des Boards (`--label`).
-- `2026-10-16 21:58 UTC` · `v3.1.0` **Build > Targets…** (GUI-Parität, jede CLI-Aktion mit der Maus): jedes Target mit seiner ID (dem Wert für
+- `2026-10-16 20:29 UTC` · `v3.1.0` **Build > Targets…** (GUI-Parität, jede CLI-Aktion mit der Maus): jedes Target mit seiner ID (dem Wert für
   `--target`), Name, Architektur, Boards, Formaten und Unterstützungsgrad, oder „keine Fähigkeiten angegeben“ (oder dass
   sein Fähigkeiten-Block ungültig ist), aus der Abfrage von `llm-cli targets list`. **Target prüfen** (dort und neben
   der Target-Liste des Builders, neben der neuen Schaltfläche **Targets…**) prüft das gewählte Target wie `llm-cli
@@ -328,7 +328,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   ein Target mit ungültigem Fähigkeiten-Block sagt der Hinweis das, und **Target prüfen** nennt jeden Fehler); die
   Optimierungsstufe `FAST`; eine Liste **Priorität** (`--priority`, Vorgabe normal; ein fehlgeschlagener kritischer
   Build beendet die Pipeline).
-- `2026-10-16 21:58 UTC` · `v3.1.0` **Modul-Assistent: Beschreibung und Anbieter und Modell für eine Analyse**: Die Hardware-Seite hat ein Feld
+- `2026-10-16 20:29 UTC` · `v3.1.0` **Modul-Assistent: Beschreibung und Anbieter und Modell für eine Analyse**: Die Hardware-Seite hat ein Feld
   **Beschreibung** (`llm-cli module create` fragt danach; leer ergibt „Target for <Name>“). Nur du füllst es aus: Bei
   einem Modul, an dem eine KI mitgewirkt hat, steht deine Beschreibung vorn, und der Hinweis des Frameworks, dass das
   Modul KI-generiert und ungetestet ist, folgt. Die erste Seite bietet Anbieter und Modell **nur für diese Analyse**
@@ -509,7 +509,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   einem Dauerauftrag (und später einer Vollmacht) nutzt nur den Commit, den sein Nachschlagen ermittelt hat (Hindernis
   `commit_required`, wenn Hugging Face nicht gefragt werden konnte). Die Sicht der KI auf die Fakten
   (`delegation.ai_view`) enthält nie einen Fakt, den nur die Person sieht. Die Codes der Hinweise sind feste Bezeichner.
-- `2026-10-12 11:44 UTC` · `v3.1.0` **Ein Smoke-Test mit einem echten Client** (`scripts/mcp_client_smoke.sh`, Prüfung `scripts/mcp_smoke_check.py`):
+- `2026-10-12 10:42 UTC` · `v3.1.0` **Ein Smoke-Test mit einem echten Client** (`scripts/mcp_client_smoke.sh`, Prüfung `scripts/mcp_smoke_check.py`):
   lässt Claude Code (`claude -p`, vier vorgegebene Prompts) in einer Wegwerf-Umgebung gegen den stdio-Server des
   Frameworks laufen (Home, Hugging-Face-Home, XDG-Ordner, Benutzerordner, Zugangsdaten nur im Speicher, das
   Null-Keyring-Backend, kein Fenstersystem; der Server läuft unter `env -i` und bekommt so keine Variable des Aufrufers)
@@ -760,7 +760,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   je lokaler Modellstufe (`--tier small --tier small-q2`; die Server, die der Lauf startet, werden danach gestoppt,
   einer, den du selbst gestartet hast, läuft weiter, wenn er die Stufe bedient). Es wird nichts gebaut; `--json`
   schreibt den Bericht.
-- `2026-10-11 04:03 UTC` · `v3.1.0` **Retrieval-Evaluation** (`llm-cli ditto eval --kind retrieval`): 42 deutsche und englische Suchen
+- `2026-10-11 01:38 UTC` · `v3.1.0` **Retrieval-Evaluation** (`llm-cli ditto eval --kind retrieval`): 42 deutsche und englische Suchen
   (sprachübergreifende Fragen, Bezeichner wie `GGML_CUDA`, Antworten tief in einer großen Tabelle oder einem
   Skript, die letzten Zeilen fehlgeschlagener Builds und Dittos eigene Suchbegriffe, themenfremde Fragen) gegen
   einen Korpus aus 30 Auszügen aus Framework- und SDK-Dokumentation (`evals/retrieval/`). Der Korpus wird mit dem
@@ -954,7 +954,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   gezeigt. Beim Lesen eines Packs werden genau die aufgeführten Dateien angenommen, nie Links oder Sonderdateien,
   und jeder Hash wird geprüft. Vertrauenswürdige Herausgeberschlüssel werden in `configs/community_keys.yml`
   mitgeliefert, jeder mit einem Ablaufdatum.
-- `2026-10-11 14:01 UTC` · `v3.1.0` **Verschlüsselte Packs zum privaten Teilen** (mit deinen eigenen Rechnern oder einem Team): im Format age von
+- `2026-10-11 01:54 UTC` · `v3.1.0` **Verschlüsselte Packs zum privaten Teilen** (mit deinen eigenen Rechnern oder einem Team): im Format age von
   rage verschlüsselt (über `pyrage`), für die age-Schlüssel eines oder mehrerer Empfänger oder für eine
   Passphrase, und vom Absender signiert, sodass Empfänger sehen, wer es geschickt hat, und jede Änderung erkannt
   wird, auch ein hinzugefügter oder entfernter Empfänger. Die üblichen Werkzeuge `age` und `rage` öffnen sie
@@ -1018,7 +1018,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   in `auth.json` neben dem Tresor. Tokens der Anmeldeabläufe, die später kommen, werden unter einer Sperre
   erneuert, die GUI, CLI und MCP-Server teilen; das neue Refresh-Token wird gespeichert, bevor es genutzt wird,
   und eine abgelehnte Erneuerung markiert die Anmeldung als abgelaufen.
-- `2026-10-11 04:36 UTC` · `v3.1.0` **Prüfung der Zugangsdaten** (die Schaltfläche **Prüfen** im Anmeldebereich und
+- `2026-10-11 03:18 UTC` · `v3.1.0` **Prüfung der Zugangsdaten** (die Schaltfläche **Prüfen** im Anmeldebereich und
   `llm-cli ditto auth status --check`): Eine kostenlose GET-Anfrage (die Modellliste, bei OpenRouter der
   Schlüssel-Endpunkt) zeigt, ob der gespeicherte Schlüssel funktioniert, zu welchem Workspace oder Schlüsselnamen
   er gehört und wie viele Modelle er nutzen kann; ein Schlüssel, der funktioniert, aber keine Modelle auflisten darf, wird als solcher gemeldet, auch von
@@ -1100,7 +1100,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   zu laufen; nach drei Eingabefehlern zeigt ein Fehler einen gültigen Beispielaufruf. Was repariert wurde, ist in
   der Frage markiert, in den `notes` des Ergebnisses aufgeführt und im Audit-Log festgehalten. Tool-Argumente, die
   ein lokales Modell mit Codeblock-Zäunen oder in Python-Schreibweise schickt, werden einmal erneut gelesen.
-- `2026-10-15 17:14 UTC` · `v3.1.0` **Zweistufige Bestätigung und Rückfragetext v2** (Ditto und MCP-Clients): Eine Rückfrage beginnt mit der Folge in
+- `2026-10-11 22:39 UTC` · `v3.1.0` **Zweistufige Bestätigung und Rückfragetext v2** (Ditto und MCP-Clients): Eine Rückfrage beginnt mit der Folge in
   einfachen Worten aus Fakten, die das Framework nachgeschlagen hat, dann wer fragt (Name, Version und Transport, die
   ein MCP-Client selbst angibt, und wessen Berechtigungen gelten), die Fakten, die das Framework geprüft hat (externer
   Text als "not checked" gekennzeichnet), und jedes Argument mit dem sprechenden Namen einer ID (Modell und Ziel eines
@@ -1452,7 +1452,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   seinen ersten Build einmal siehst. Die KI-Einstellungen lassen eine KI nie den Anbieter, die Adresse, die
   Datenschutzstufe oder die Ersatzkette ändern. Jeder Aufruf geht durch die Tool-Registry des Aufrufers selbst
   (Berechtigungen, Grenzen, Audit-Eintrag mit dem Aufrufer).
-- `2026-10-16 02:40 UTC` · `v3.1.0` **Die Board-Empfehlung aus der Hardware-Probe** (`orchestrator/runtime/board_recommendation.py`): Nach einer Probe
+- `2026-10-16 00:55 UTC` · `v3.1.0` **Die Board-Empfehlung aus der Hardware-Probe** (`orchestrator/runtime/board_recommendation.py`): Nach einer Probe
   empfiehlt der Builder das Board des passenden Targets mit seiner Quelle (der SoC der Probe oder der Board-Name der
   Probe in der Liste bekannter Boards des Targets) und wie sicher es ist. Nur ein genauer Treffer wird eingetragen;
   sonst werden die Kandidaten und der Grund gezeigt, und du wählst; bis du wählst, fragt **Start Build**, ob das Board
@@ -2158,7 +2158,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   `umask 077 && cat >` nur dem Benutzer. Ein Abbruch genau dann, wenn das Deployment fragt, ob das Board SFTP hat,
   wartet auf das Board und lädt über SFTP hoch, statt das Deployment zu beenden. Und die Sätze der Board-Sitzung, die
   eine KI als externen Text bekommt, nennen das Board mit seinem Label, nie mit seiner Adresse (D0).
-- `2026-10-17 19:26 UTC` · `v3.1.0` **Ein Datei-Hash und ein Disk-Watchdog** (Architektur-Konsolidierung c1-hashing und c1-disk, Regel R0 des Maintainers:
+- `2026-10-17 15:50 UTC` · `v3.1.0` **Ein Datei-Hash und ein Disk-Watchdog** (Architektur-Konsolidierung c1-hashing und c1-disk, Regel R0 des Maintainers:
   zuerst die vorhandene Implementierung). Die 24 Kopien des sha256 einer Datei (15 benannte Helfer, 9 Schleifen; die
   Schleife von `utils/network.py` ist mit diesem Modul gegangen, siehe unten) laufen über das Modul der ältesten,
   `orchestrator/utils/helpers.py` (wo `calculate_file_checksum` war), das eine Hash-Schleife bekommen hat, mit
@@ -2443,7 +2443,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Die Kurzfassung entsteht nur aus berechneten Zahlen, den Hinweisen und sprechenden Namen, nie aus Text aus einem
   Repository, einem Log oder von einer KI. Jede Rückfrage, auch ein MCP-Formular, nennt nach den geprüften Fakten
   „Situation:“ und „Needs you (security / legal):“.
-- `2026-10-12 17:38 UTC` · `v3.1.0` **Abgelehnte MCP-Aufrufe tragen ihren Grund-Code als strukturierten Inhalt** (`{"error": {"code", "field",
+- `2026-10-12 09:20 UTC` · `v3.1.0` **Abgelehnte MCP-Aufrufe tragen ihren Grund-Code als strukturierten Inhalt** (`{"error": {"code", "field",
   "blocker"}}`, nur Fakten des Frameworks, der Text unverändert; `blocker` nennt das harte Hindernis aus dem
   Faktenkatalog, das den Aufruf vor jeder Rückfrage abgelehnt hat, etwa `disk_full`). Ein Client liest Code und Feld
   daraus, statt sie aus den Worten zu raten; ein unbekannter Code wird als `failed` gesendet, und ein Feld, das kein
@@ -2506,7 +2506,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   CPU-Features.
 - `2026-10-10 23:50 UTC` · `v3.1.0` Lokales Modell: Aufwand „low“ schaltet das Nachdenken (Thinking) ab (Qwen3.5 auf llama-server denkt sonst in
   voller Länge, was auf einer CPU Minuten dauert); ab „medium“ bleibt es an.
-- `2026-10-11 14:01 UTC` · `v3.1.0` Abhängigkeiten: `anthropic` 1.13.0, `openai` 3.28.0 (vorher 2.54.0), `fastembed` 0.8.1 (lokale Embeddings, ONNX
+- `2026-10-10 22:57 UTC` · `v3.1.0` Abhängigkeiten: `anthropic` 1.13.0, `openai` 3.28.0 (vorher 2.54.0), `fastembed` 0.8.1 (lokale Embeddings, ONNX
   auf der CPU) und `pyrage` 1.4.0 (age-Verschlüsselung privat geteilter Community-Packs) sind exakt gepinnt;
   pip-audit meldet keine bekannten Schwachstellen.
 - `2026-10-11 02:31 UTC` · `v3.1.0` **Dittos Wissensauszüge passen in den Kontext**: Sie belegen höchstens ein Drittel von `chat_context_limit`; ein
@@ -2587,7 +2587,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   dieses Prozesses aufgeführt sind); `suggested_step` eines offenen Self-Healing-Vorschlags heißt jetzt
   `manual_step_text`, Text zum Lesen für die Person. Die Serveranweisungen sagen, wie markierte Felder zu behandeln
   sind und dass der Client eine Aufgabe, die er nicht erledigen kann, mit dem konkreten Grund meldet.
-- `2026-10-15 17:14 UTC` · `v3.1.0` **MCP-Clients sehen nur die Tools, die sie nutzen dürfen**: Tools, die deine Berechtigungen verweigern, fehlen in
+- `2026-10-11 18:55 UTC` · `v3.1.0` **MCP-Clients sehen nur die Tools, die sie nutzen dürfen**: Tools, die deine Berechtigungen verweigern, fehlen in
   der Tool-Liste (dieselben Tools, die Ditto bei denselben Berechtigungen bekommt); ein Aufruf eines solchen Tools
   wird trotzdem abgelehnt und festgehalten. `destructiveHint` folgt der eigenen Angabe jedes Tools statt seiner Stufe
   (`resolve_healing` bleibt als zerstörend markiert: es ändert eine Einstellung und wiederholt einen Build), und
@@ -2596,7 +2596,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 - `2026-10-11 18:52 UTC` · `v3.1.0` Eine lokale Modelldatei wird allein in die Build-Container eingebunden, nicht mehr zusammen mit dem Ordner, in
   dem sie liegt (ein Modell, das Dateien daneben braucht, etwa externe ONNX-Daten, wird als Ordner angegeben). Eine
   RKNN-Beispielliste neben einer Modelldatei bekommt jetzt ihre eigene Ordnereinbindung.
-- `2026-10-11 21:51 UTC` · `v3.1.0` MCP und Ditto: Builds gehören dem Aufrufer, der sie gestartet hat (einer MCP-Verbindung, jedem benannten Token
+- `2026-10-11 19:07 UTC` · `v3.1.0` MCP und Ditto: Builds gehören dem Aufrufer, der sie gestartet hat (einer MCP-Verbindung, jedem benannten Token
   über HTTP, Ditto). Den eigenen Build
   mit `cancel_build` abzubrechen fragt nicht mehr; den Build eines anderen Clients abzubrechen folgt den
   Tool-Berechtigungen (standardmäßig fragt es). Eine Einstellung für das einzelne Tool gilt weiter, eine verweigerte
@@ -2695,7 +2695,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   der Build-Images des Frameworks. Das Tool `run_doctor` bleibt aufrufbar, wird aber nicht mehr aufgelistet; eine
   Einstellung für `run_doctor` oder `run_mojo_oracle` gilt für beide, und die strengere gewinnt. `make mojo` neben
   `make doctor`.
-- `2026-10-16 15:52 UTC` · `v3.1.0` **Wissenspakete enthalten den vollen Text einer Seite nur, wo ihre Lizenz es erlaubt, mit den Lizenztexten, die sie
+- `2026-10-16 09:37 UTC` · `v3.1.0` **Wissenspakete enthalten den vollen Text einer Seite nur, wo ihre Lizenz es erlaubt, mit den Lizenztexten, die sie
   verlangt** (achte Runde, Q-1 und Q-1'; W3 vom 16.10.2026): Ein Wissenspaket und der Wissens-Snapshot, den der
   Modul-Assistent einem Target beilegt, behalten den vollen Text einer Seite nur unter einer Lizenz, die die
   Weitergabe erlaubt (CC0, Gemeinfreiheit, CC BY, CC BY-SA, MIT, Apache-2.0, BSD, ISC, 0BSD, Unlicense, MPL-2.0), mit
@@ -3090,7 +3090,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Images...**, `llm-cli doctor --fix --tier 2`), die nur die Images löscht, die du anhakst und bestätigst, und eine
   Freigabe wird abgelehnt, bevor etwas gefragt wird. Kein Code des Frameworks
   leert den Docker-Build-Cache mehr.
-- `2026-10-15 17:14 UTC` · `v3.1.0` **`llm-cli doctor --fix --tier 2` löscht nicht mehr ohne Liste** (veröffentlicht in 3.0.0; Runde 5 f): es leerte den
+- `2026-10-12 18:37 UTC` · `v3.1.0` **`llm-cli doctor --fix --tier 2` löscht nicht mehr ohne Liste** (veröffentlicht in 3.0.0; Runde 5 f): es leerte den
   ganzen Build-Cache des Docker-Daemons, auch den anderer Projekte, und löschte die verwaisten Images des Frameworks,
   ohne sie zu zeigen. Der Build-Cache wird nicht mehr angerührt (er lässt sich nicht auf das Framework beschränken).
   Stufe 2 listet jetzt jedes Build-Image des Frameworks (ohne Namen, benannt `llm-framework/<Target>:last-build`,
@@ -3253,7 +3253,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Installation) statt nach `output/` im Arbeitsordner.
 - `2026-10-11 16:50 UTC` · `v3.1.0` Der Dialog der KI-Einstellungen warnt, wenn sich die Einstellungen nicht in der `config.yml` speichern ließen
   (sie gelten bis zum Programmende); vorher stand das nur im Protokoll.
-- `2026-10-17 10:54 UTC` · `v3.1.0` Windows: Der Uninstaller (`scripts/Uninstall-LLM-Cross-Compiler-Framework.bat`) findet die Installation.
+- `2026-10-11 16:55 UTC` · `v3.1.0` Windows: Der Uninstaller (`scripts/Uninstall-LLM-Cross-Compiler-Framework.bat`) findet die Installation.
   `install.bat` schreibt jetzt die Markierungsdatei mit dem Installationsordner, die der Uninstaller liest, neben
   `install.bat`, wo der Uninstaller sie sucht; vorher schrieb kein Installer sie, und der Uninstaller meldete immer,
   es sei nichts installiert. Meldet PowerShell keinen Skriptpfad (der PowerShell-Teil von `install.bat` läuft über
@@ -3890,7 +3890,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   nichts); ein selbst gebauter Build, der nicht genutzt werden kann, weicht nie von selbst auf das vorgebaute Archiv
   aus, und ein offizielles Archiv, das eine frühere Version heruntergeladen hat, wird erst nach
   `runtime install --prebuilt` genutzt (das es übernimmt, ohne es neu herunterzuladen).
-- `2026-10-11 14:39 UTC` · `v3.1.0` Deep Ingest liest robots.txt so, wie RFC 9309 es beschreibt, mit einer vorsichtigen Abweichung. Regeln mit `*`
+- `2026-10-11 03:30 UTC` · `v3.1.0` Deep Ingest liest robots.txt so, wie RFC 9309 es beschreibt, mit einer vorsichtigen Abweichung. Regeln mit `*`
   oder `$` (etwa `Disallow: /*.pdf$`), ein `Allow` vor einem längeren `Disallow`, jede Gruppe `User-agent: *` nach
   der ersten und eine Datei, die mit einer Byte Order Mark beginnt, wurden bisher ignoriert, sodass der Crawler
   Seiten abrief, die die Site ausgeschlossen hatte. Seine Gruppen werden am genauen Produkt-Token
@@ -3905,7 +3905,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Schließen des Assistenten, für immer festhielt: Der HTTP-Timeout begrenzt nur jeden einzelnen Lesevorgang am
   Socket. Eine größere Seite wird übersprungen, eine langsamere scheitert, beide mit Grund im Crawl-Protokoll;
   Stoppen wartet nicht mehr auf eine Seite, die noch ankommt.
-- `2026-10-11 04:03 UTC` · `v3.1.0` Community-Packs werden nur über einen Quarantäne-Ordner und nach ihren Prüfungen installiert: eine ID ohne
+- `2026-10-11 02:42 UTC` · `v3.1.0` Community-Packs werden nur über einen Quarantäne-Ordner und nach ihren Prüfungen installiert: eine ID ohne
   Pfade, genau die aufgeführten Dateien mit ihren Hashes, keine Links, Sonder- oder Binärdateien, jedes Image, das
   ein Dockerfile bezieht (`FROM`, `COPY --from`, `RUN --mount=...,from=`, auch in einem kleingeschriebenen
   `dockerfile`), per Digest gepinnt, außer es ist ein offizielles Basis-Image, die Sperrliste für Shell-Code auf
@@ -3925,7 +3925,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 - `2026-10-11 02:06 UTC` · `v3.1.0` Die Debug-Ausgabe der SDKs der Anbieter und der HTTP-Bibliotheken (Optionen der Anfragen, Prompts, Header)
   bleibt aus, außer `--debug-http` ist angegeben: Ihre Logger gehen nie unter INFO, auch nicht mit
   `--log-level DEBUG`, und `ANTHROPIC_LOG=debug` / `OPENAI_LOG=debug` werden auf `info` gesenkt.
-- `2026-10-11 00:59 UTC` · `v3.1.0` Admin-API-Schlüssel von Claude (`sk-ant-admin01-`) werden abgelehnt, bevor eine Anfrage gesendet wird, auch
+- `2026-10-11 00:21 UTC` · `v3.1.0` Admin-API-Schlüssel von Claude (`sk-ant-admin01-`) werden abgelehnt, bevor eine Anfrage gesendet wird, auch
   wenn sie mit Leerzeichen davor oder danach gespeichert wurden.
 - `2026-10-11 00:29 UTC` · `v3.1.0` Der Tresor für Zugangsdaten wird unter einer Sperre über Prozesse hinweg geändert: GUI, CLI und ein MCP-Server,
   die gleichzeitig schreiben, verlieren nicht mehr die Änderungen der anderen.
