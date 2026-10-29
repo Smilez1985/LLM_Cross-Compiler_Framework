@@ -58,7 +58,8 @@ def test_prune_lists_every_snapshot_and_deletes_only_the_picked_ones(booted_fram
                      answer="1,3\ntrash\ny\n")
     assert sorted(p.name for p in folder.iterdir()) == ["pre_ingest_2.jsonl.gz"]
     assert "Moved to the trash: pre_ingest_1" in out and "llm-cli trash restore" in out
-    assert [e.label for e in Trash.for_framework(booted_framework).entries()] == ["pre_codebase_3", "pre_ingest_1"]
+    # entries() sorts by deletion time first (second resolution): the two moves may fall into different seconds
+    assert sorted(e.label for e in Trash.for_framework(booted_framework).entries()) == ["pre_codebase_3", "pre_ingest_1"]
     entries = booted_framework.tool_registry.audit.entries(20)
     pruned = [e for e in entries if e["outcome"] == "snapshots_pruned"]
     assert len(pruned) == 1 and pruned[0]["actor"] == "cli"
