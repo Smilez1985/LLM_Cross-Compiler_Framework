@@ -15,6 +15,10 @@ TEXTS = {
         "ditto_models.menu.eval": "Evaluation...",
 
         # Ditto > Local Models... (`ditto models list` / `ditto models download`)
+        # offline mode (DECISIONS round 25 Q1)
+        "ditto_models.offline": "Offline mode is on, so {file} is not downloaded: {why}.",
+        "ditto_models.offline.here": "Already on this computer: {models}.",
+        "ditto_models.offline.none": "No model for Ditto is on this computer yet.",
         "ditto_models.title": "Ditto's Local Models",
         "ditto_models.intro": "The models Ditto can run on this computer. Each one is pinned to a fixed revision; a "
                               "download is checked by its size and sha256 before it is used. They are saved in: "
@@ -176,6 +180,9 @@ TEXTS = {
         "ditto_eval.col.p50": "p50 ms",
     },
     "de": {
+        "ditto_models.offline": "Der Offline-Modus ist an, deshalb wird {file} nicht geladen: {why}.",
+        "ditto_models.offline.here": "Schon auf diesem Computer: {models}.",
+        "ditto_models.offline.none": "Auf diesem Computer ist noch kein Modell für Ditto.",
         "ditto_models.menu.models": "Lokale Modelle...",
         "ditto_models.menu.eval": "Bewertung...",
 

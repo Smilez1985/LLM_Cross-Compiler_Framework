@@ -1325,6 +1325,26 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   for this computer or a device of the tailnet (`tailscale status --json`), and a private address behind a device's
   subnet route counts like a VPN address. A lookup and the VPN check are kept 5 minutes and dropped after a failed
   connection, instead of for the whole run.
+- **Offline mode: a build uses a model already on this computer, and Docker images come only from this computer or
+  your own network** (consolidation chain hf-local; decisions round 25 Q1 and round 24 L-NET). A build you start in
+  offline mode no longer downloads its model from Hugging Face (`BuildEngine._stage_model` did not read offline mode;
+  only AI builds and the GUI's commit check refused): a model named by its Hugging Face id is used from its complete
+  copy on this computer without any connection (`orchestrator/Core/local_models.py` `local_copy`: the Builder's own
+  copy, which its staging now records as complete; a model folder the Hugging Face browser downloaded; the old
+  huggingface_hub cache). Without one nothing starts and the models already here are listed with their labels (the
+  models folder and the folders shared with the AI by their local-file references, the Builder's copies by their
+  repository id, the inputs of earlier builds by their path): `llm-cli build start` prints them and takes a listed label
+  or a local path with `--model` (asked at a terminal, exit code 2 without one), the Builder tab opens a choice with an
+  open dialog for a model file or folder of your own, and an AI's build plan names the labels only (no host path; a
+  file pick is yours only). `llm-cli ditto models download` (and Ditto > Local Models...) in offline mode refuses in
+  plain words and names the Ditto models already here; a local model mirror still serves it. A package with Docker
+  images (`deploy package --docker`, the Deployment tab, the AI's `create_deploy_package` with
+  `include_docker_images`) no longer pulls a digest-pinned image from outside your own network in offline mode: it
+  uses images already here or a registry the one locality rule counts as local, and otherwise stops naming the image
+  (`utils/image_ref.offline_pull_refusal`). The target image is neither pulled nor built in offline mode: the image of
+  the target built earlier from the same settings is used (new label `org.llm-framework.inputs`), and without one the
+  build stops naming the base images and the step to take while online. Tests: `tests/test_offline_models.py`,
+  `tests/test_offline_images.py`.
 - **`install.sh` on every Linux family, through the family's own package manager** (DECISIONS round 24 PKG): the
   installer finds the family from `ID` and `ID_LIKE` in `/etc/os-release` with the hardware probe's table and installs
   what it needs (Python 3.11 to 3.14, `rsync`, Docker) with `apt`, `dnf`, `zypper`, `pacman` or `apk`, under the
@@ -2923,6 +2943,25 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `SSL_CERT_FILE` or `SSL_CERT_DIR` stays trusted, as with the SDK's own client. A Qdrant server opened online is
   opened again under the rule once offline mode is switched on (a cloud Qdrant is refused then), and a crawl that
   started online reads nothing more once offline mode is switched on.
+- **Hugging Face tokens leave this computer only where Hugging Face needs one, and no library sends one by itself**
+  (consolidation chain hf-local; decision round 25 Q2). Every look-up, file list and file of a public repository used
+  to carry the token stored in the framework (or typed in the browser) to huggingface.co; now none of them does, also
+  with a token stored. The token goes only to a gated or private repository, only to huggingface.co: from its
+  repository information (`hf_hub.needs_token`: gated or private) or after the Hub answered 401/403 to a request
+  without it, then one request with it (`hf_hub.tokenless_first`, `HubFetcher(token_needed=...)`), for the Builder's
+  staging, the build plan's look-up, the GUI's commit check, the Hugging Face browser, the Take over and every AI
+  caller; searches and listings never carry it. The process runs with huggingface_hub's
+  `HF_HUB_DISABLE_IMPLICIT_TOKEN` and `HF_HUB_DISABLE_TELEMETRY` on, set when the package `orchestrator` is imported
+  and also after a library imported huggingface_hub first (`orchestrator/utils/hf_env.py`; huggingface_hub 1.33 reads
+  both once, in `huggingface_hub.constants`): no library sends `HF_TOKEN` or the Hugging Face home folder's token file
+  by itself, and huggingface_hub's daily agent-harnesses registry request to the host in `HF_ENDPOINT` stops (its user
+  agent asks `detect_agent()` only while telemetry is on). The knowledge base's fastembed models no longer come
+  through fastembed's own download with huggingface_hub's defaults: the framework fetches them through its verified
+  fetcher into fastembed's cache, without any token and only from huggingface.co (`hf_hub.fetch_snapshot`, handed to
+  the embedders by the Core), and fastembed loads that folder without contacting anybody; in offline mode only a copy
+  that is there. Regression tests: `tests/test_hf_tokens.py` (`HF_ENDPOINT` on another host with `HF_TOKEN` set: no
+  request carries a token anywhere but huggingface.co; a public file without an Authorization header; the fastembed
+  path without a token; offline mode without a socket; the agent-harnesses request), `tests/test_hf_online.py`.
 - **`install.sh` installs Docker only with a checksum** (DECISIONS round 23, item 3): when Docker was missing, the
   installer downloaded `get.docker.com` and ran it as root without any check. Now Docker comes only from Docker's
   official apt repository on Debian, Ubuntu and Raspberry Pi OS (32-bit gets Debian's armhf packages, as Docker's guide
@@ -3025,9 +3064,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (huggingface.co only; the token the person typed in the browser, else the one stored in the framework, else none),
   and every file list is read by `hf_hub.hub_file` (the Builder's `_hub_files` delegates to it). The browser's search
   and licence check use the stored token where they used the implicit one. A mirror named in `HF_ENDPOINT` is no
-  longer used by any of these calls either, as for the browser's downloads since A6; only fastembed, the knowledge
-  base's embedding library, still fetches its models with huggingface_hub's own defaults (`HF_ENDPOINT`, an implicit
-  token). A redirect of an API answer to another host is followed without the token. Regression tests:
+  longer used by any of these calls either, as for the browser's downloads since A6; fastembed, the knowledge
+  base's embedding library, fetched its models with huggingface_hub's own defaults until its models came through
+  the framework's fetcher (the entry "Hugging Face tokens leave this computer only where Hugging Face needs one"). A redirect of an API answer to another host is followed without the token. Regression tests:
   `tests/test_hf_online.py` drives every caller through huggingface_hub's own HTTP client with `HF_ENDPOINT` naming
   another host and `HF_TOKEN` set, and fails on a token sent to that host, on the implicit token, on a token that
   follows a redirect to another host and on an `HfApi` made outside `hf_hub`.

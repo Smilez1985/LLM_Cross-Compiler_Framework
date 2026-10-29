@@ -1190,6 +1190,10 @@ class LocalLLMRuntime:
         path = self.model_path(model)
         if self.model_ready(model):
             return path
+        from orchestrator.runtime.ditto_models import offline_refusal
+        refused = offline_refusal(self, model)   # offline mode: names the models already here, before any request
+        if refused:
+            raise LocalRuntimeError(refused)
         self._fetch(model.url(self.catalog.model_base_url), path, model.size, model.sha256, progress, stop=stop)
         self._write_marker(model)
         return path

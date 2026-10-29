@@ -100,10 +100,18 @@ def look_up(repo: str, revision: Optional[str], token: Optional[str], api: Any =
     cannot be read; a gated repository the stored token cannot read is refused here, before any question:
     needs_person without a stored token, permission_denied with one that has no access."""
     from huggingface_hub.utils import GatedRepoError, HfHubHTTPError, RepositoryNotFoundError
-    api = api or hub_api(token)  # huggingface.co only, never the host in HF_ENDPOINT
-    auth = token or False
+    from orchestrator.Core.hf_hub import tokenless_first
+    # huggingface.co only, never the host in HF_ENDPOINT; without the token, and with it only when the Hub refuses
+    # that (a private repository; DECISIONS round 25 Q2). A gated repository's facts are public; its access is
+    # checked with the token below.
+    api_for = (lambda _t: api) if api is not None else hub_api
+    sent = []
+
+    def model_info(t):
+        sent.append(t)
+        return api_for(t).model_info(repo, revision=revision, files_metadata=True, token=t)
     try:
-        info = api.model_info(repo, revision=revision, files_metadata=True, token=auth)
+        info = tokenless_first(model_info, token or None)
     except GatedRepoError:
         info = None  # gated and this token (or none) cannot see the file list: decided below
     except RepositoryNotFoundError:
@@ -146,6 +154,8 @@ def look_up(repo: str, revision: Optional[str], token: Optional[str], api: Any =
                        gated=gated, license=str(shown)[:200], license_class=klass,
                        parameters=int(parameters) if isinstance(parameters, int) and parameters > 0 else None,
                        base_model=str(base)[:200] if isinstance(base, str) else None)
+    if sent and sent[-1] and gated == "false":
+        facts.token_access = "yes"   # a private repository: read with the stored token
     # Every base model the card names (a merge names several): one gated or unknown one is enough to keep the call
     # outside every standing approval.
     others = [b for b in bases if b != repo]
@@ -154,7 +164,8 @@ def look_up(repo: str, revision: Optional[str], token: Optional[str], api: Any =
     else:
         for name in others:
             try:
-                gated_base = gating(getattr(api.model_info(str(name)[:200], token=auth), "gated", False)) != "false"
+                base_info = tokenless_first(lambda t: api_for(t).model_info(str(name)[:200], token=t), token or None)
+                gated_base = gating(getattr(base_info, "gated", False)) != "false"
             except Exception:  # noqa: BLE001 - unknown: outside every standing approval
                 facts.base_gated = None
                 break
@@ -166,7 +177,7 @@ def look_up(repo: str, revision: Optional[str], token: Optional[str], api: Any =
             facts.token_access = "no_token"
         else:
             try:
-                api.auth_check(repo, token=token)
+                api_for(token).auth_check(repo, token=token)
                 facts.token_access = "yes"
             except (GatedRepoError, RepositoryNotFoundError):
                 facts.token_access = "no"

@@ -13,6 +13,32 @@ nothing from the framework.
 
 TEXTS = {
     "en": {
+        # offline mode: a model that is not on this computer (DECISIONS round 25 Q1; Core/local_models.py)
+        "bld.offline.not_here": "Offline mode is on, so {repo} is not downloaded from Hugging Face, and it is not on "
+                                "this computer.",
+        "bld.offline.none.person": "No model is on this computer yet: choose a model file or folder of your own, or "
+                                   "switch offline mode off to download it.",
+        "bld.offline.none.ai": "No model is on this computer yet: the person adds a model file or folder (or "
+                               "switches offline mode off).",
+        "bld.offline.here": "Models already on this computer:",
+        "bld.offline.use.person": "Use one of them (its label or path), or choose a model file or folder of your own.",
+        "bld.offline.use.ai": "Use one of these labels as the model.",
+        "bld.offline.where.models_folder": "in the models folder",
+        "bld.offline.where.folder": "in a folder you share with the AI",
+        "bld.offline.where.build_cache": "downloaded by an earlier build, commit {commit}",
+        "bld.offline.where.earlier_build": "the input of an earlier build",
+        "bld.offline.title": "Model not on this computer",
+        "bld.offline.col.label": "Label",
+        "bld.offline.col.where": "Where",
+        "bld.offline.col.path": "Path",
+        "bld.offline.file": "Choose a file...",
+        "bld.offline.folder": "Choose a folder...",
+        "bld.offline.use": "Use the selected model",
+        "bld.offline.cancel": "Cancel",
+        "bld.offline.pick": "Choose a model in the list first, or a file or folder of your own.",
+        "bld.offline.ask": "Model to use (a label or path from the list; empty to cancel)",
+        "bld.offline.not_a_choice": "That is neither a listed label nor an existing model file or folder.",
+        "bld.offline.no_terminal": "Without a terminal nothing is asked: start it again with --model <label or path>.",
         # menus
         "bld.menu": "Build",
         "bld.menu.targets": "Targets...",
@@ -191,6 +217,35 @@ TEXTS = {
                                     "pinned to its digest ({reason}). {next}",
     },
     "de": {
+        # Offline-Modus: ein Modell, das nicht auf diesem Computer ist
+        "bld.offline.not_here": "Der Offline-Modus ist an, deshalb wird {repo} nicht von Hugging Face geladen, und "
+                                "es ist nicht auf diesem Computer.",
+        "bld.offline.none.person": "Auf diesem Computer ist noch kein Modell: Wähle eine eigene Modelldatei oder "
+                                   "einen Modellordner, oder schalte den Offline-Modus aus, um es zu laden.",
+        "bld.offline.none.ai": "Auf diesem Computer ist noch kein Modell: Die Person fügt eine Modelldatei oder einen "
+                               "Modellordner hinzu (oder schaltet den Offline-Modus aus).",
+        "bld.offline.here": "Modelle, die schon auf diesem Computer sind:",
+        "bld.offline.use.person": "Nimm eins davon (sein Label oder seinen Pfad), oder wähle eine eigene Modelldatei "
+                                  "oder einen Modellordner.",
+        "bld.offline.use.ai": "Nimm eines dieser Labels als Modell.",
+        "bld.offline.where.models_folder": "im Modellordner",
+        "bld.offline.where.folder": "in einem Ordner, den du mit der KI teilst",
+        "bld.offline.where.build_cache": "von einem früheren Build geladen, Commit {commit}",
+        "bld.offline.where.earlier_build": "die Eingabe eines früheren Builds",
+        "bld.offline.title": "Modell nicht auf diesem Computer",
+        "bld.offline.col.label": "Label",
+        "bld.offline.col.where": "Ort",
+        "bld.offline.col.path": "Pfad",
+        "bld.offline.file": "Datei wählen...",
+        "bld.offline.folder": "Ordner wählen...",
+        "bld.offline.use": "Gewähltes Modell nehmen",
+        "bld.offline.cancel": "Abbrechen",
+        "bld.offline.pick": "Wähle zuerst ein Modell in der Liste, oder eine eigene Datei oder einen Ordner.",
+        "bld.offline.ask": "Modell (ein Label oder Pfad aus der Liste; leer bricht ab)",
+        "bld.offline.not_a_choice": "Das ist weder ein Label aus der Liste noch eine vorhandene Modelldatei oder ein "
+                                    "Modellordner.",
+        "bld.offline.no_terminal": "Ohne Terminal wird nichts gefragt: Starte es noch einmal mit --model <Label oder "
+                                   "Pfad>.",
         "bld.menu": "Build",
         "bld.menu.targets": "Targets…",
         "bld.menu.history": "Build-Verlauf…",

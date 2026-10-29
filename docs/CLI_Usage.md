@@ -511,7 +511,14 @@ Behaviour:
   new one goes next to it (`Q4_K_M-2`). A folder you chose outside the output folder stays listed by
   `deploy list-artifacts`.
 - Gated Hugging Face models need a token: `llm-cli secrets set hf_token`. Only the token stored in the framework is
-  sent; a token in `HF_TOKEN` or from `hf auth login` is never used.
+  sent, and only where Hugging Face needs it (a gated or private repository; a public one's files and look-ups
+  carry no token); a token in `HF_TOKEN` or from `hf auth login` is never used.
+- In offline mode nothing is downloaded: a Hugging Face model is used from its copy on this computer (an earlier
+  build's, the Hugging Face browser's or the old download cache's). Without one nothing starts and the models
+  already here are listed with their labels (`models:...` for the models folder, the repository id for an earlier
+  build's copy, the path of an earlier build's input); at a terminal you are asked for one of the labels or a
+  local path, without one the command ends with exit code 2 and you start it again with `--model`. The target's
+  image is neither pulled nor built offline: the image built earlier with the same settings is used.
 - A Hugging Face model is downloaded into `<cache_dir>/models/hf/<owner>--<name>/<commit>/`, one folder per commit,
   file by file; only that folder is mounted into the build containers. A second build of the same commit reuses
   it, and a build of another commit never mixes files with it. Ctrl+C stops the download before its next file.
@@ -1384,6 +1391,8 @@ llm-cli ditto models download [TIER] [-y]
 Downloads a model at its pinned Hugging Face revision and checks size and sha256. Without `TIER` the model a plain
 `ditto runtime start` loads: the tier chosen earlier with `runtime start --model` ("Chosen earlier with 'runtime start
 --model': ..."), else the recommended tier for this machine ("Recommended: ..."). Interrupted downloads resume.
+In offline mode it refuses in plain words and names the Ditto models already on this computer, unless the
+download address is in your own network (a local model mirror).
 
 | Argument / option | Meaning |
 |---|---|

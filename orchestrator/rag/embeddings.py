@@ -7,6 +7,12 @@ with and, for models FastEmbed does not ship, where the ONNX export lives. BM25 
 "Qdrant/bm25"; Qdrant applies the IDF) complement them for exact keywords such as error codes and flags;
 identifiers such as -DGGML_CUDA=ON or rknn_toolkit2 also count by their parts.
 Models are cached under the framework's models directory. In offline mode nothing is downloaded.
+
+Where a model comes from Hugging Face, the framework fetches its files itself (DECISIONS round 25 Q2): the Core hands
+each embedder a `fetch` function (Core/hf_hub.fetch_snapshot) that puts them into fastembed's cache through the
+framework's verified fetcher, without any token, and fastembed then loads that folder (specific_model_path) without
+contacting anybody. A model without a Hugging Face source, or an embedder made without `fetch`, is downloaded by
+fastembed itself, with huggingface_hub's implicit token off for the whole process (orchestrator/utils/hf_env.py).
 """
 
 import math
@@ -226,18 +232,69 @@ def _quiet_fastembed() -> None:
         pass
 
 
+# fastembed's own allow list next to a model's files (download_files_from_huggingface): config and tokenizer files at the
+# repository's top, fetched when the repository has them.
+FASTEMBED_EXTRA_FILES = ("config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json",
+                         "preprocessor_config.json")
+
+# fetch(cache_dir, repo, required, optional, offline=...) -> the folder holding the files, None offline when they are
+# not there (Core/hf_hub.fetch_snapshot).
+Fetch = Callable[..., Optional[Path]]
+
+
+def fastembed_source(model_class, model_id: str) -> Optional[Tuple[str, List[str]]]:
+    """(Hugging Face repository, the model file and its extra files) of a model fastembed lists, None when it has no
+    Hugging Face source (fastembed's own archive) or is not listed."""
+    try:
+        desc = next((d for d in model_class.list_supported_models()
+                     if str(d.get("model", "")).lower() == model_id.lower()), None)
+    except Exception:  # noqa: BLE001 - not listed: fastembed decides
+        return None
+    if not desc:
+        return None
+    sources = desc.get("sources") or {}
+    repo = sources.get("hf") if isinstance(sources, dict) else getattr(sources, "hf", None)
+    model_file = desc.get("model_file")
+    if not repo or not model_file:
+        return None
+    return str(repo), [str(model_file), *[str(f) for f in desc.get("additional_files") or []]]
+
+
 class _FastEmbedBase:
     kind = "embedding model"  # for messages
 
-    def __init__(self, cache_dir: Path, offline: Callable[[], bool], size_gb: float):
+    def __init__(self, cache_dir: Path, offline: Callable[[], bool], size_gb: float, fetch: Optional[Fetch] = None):
         self.cache_dir = Path(cache_dir)
         self._offline = offline
         self._size_gb = size_gb
         self._model = None
         self._lock = threading.Lock()
+        self._fetch = fetch
+        self._local_dir: Optional[Path] = None  # the folder fastembed loads from, when the framework fetched it
 
     def _create(self, offline: bool):
         raise NotImplementedError
+
+    def _hub_files(self) -> Optional[Tuple[str, List[str], Sequence[str]]]:
+        """(repository, required files, optional files) the framework fetches for this model; None: fastembed
+        downloads it itself."""
+        return None
+
+    def _fetched(self, offline: bool) -> Optional[Path]:
+        """The model's folder in fastembed's cache, fetched through the framework (`fetch`) when it is not there yet;
+        in offline mode only a copy that is there. None without `fetch` or a Hugging Face source."""
+        files = self._hub_files() if self._fetch is not None else None
+        if files is None:
+            return None
+        repo, required, optional = files
+        return self._fetch(self.cache_dir, repo, required, optional, offline=offline)
+
+    def _local_kwargs(self, offline: bool) -> Dict[str, object]:
+        """What fastembed is given besides the model's name: the fetched folder (it then contacts nobody) or, without
+        one, its own cache with offline mode honoured."""
+        if self._local_dir is not None:
+            return {"local_files_only": True, "specific_model_path": str(self._local_dir)}
+        return {"local_files_only": offline}
 
     def _load(self):
         with self._lock:
@@ -252,6 +309,7 @@ class _FastEmbedBase:
             offline = bool(self._offline())
             self.cache_dir.mkdir(parents=True, exist_ok=True)
             try:
+                self._local_dir = self._fetched(offline)
                 self._model = self._create(offline)
             except EmbeddingError:
                 raise
@@ -312,8 +370,9 @@ class FastEmbedDenseEmbedder(_FastEmbedBase):
     BATCH_SIZE = 8
     QUERY_CACHE_SIZE = 256
 
-    def __init__(self, spec: EmbeddingModelSpec, cache_dir: Path, offline: Callable[[], bool] = lambda: False):
-        super().__init__(cache_dir, offline, spec.size_gb)
+    def __init__(self, spec: EmbeddingModelSpec, cache_dir: Path, offline: Callable[[], bool] = lambda: False,
+                 fetch: Optional[Fetch] = None):
+        super().__init__(cache_dir, offline, spec.size_gb, fetch)
         self.spec = spec
         self.model_id = spec.model_id
         self.dim = spec.dim
@@ -324,9 +383,15 @@ class FastEmbedDenseEmbedder(_FastEmbedBase):
     def _create(self, offline: bool):
         from fastembed import TextEmbedding
         _register_custom(self.spec)
-        model = TextEmbedding(model_name=self.model_id, cache_dir=str(self.cache_dir), local_files_only=offline)
+        model = TextEmbedding(model_name=self.model_id, cache_dir=str(self.cache_dir), **self._local_kwargs(offline))
         self._tokenizer = _untruncated_tokenizer(model)
         return model
+
+    def _hub_files(self) -> Optional[Tuple[str, List[str], Sequence[str]]]:
+        from fastembed import TextEmbedding
+        _register_custom(self.spec)
+        source = fastembed_source(TextEmbedding, self.model_id)
+        return (source[0], source[1], FASTEMBED_EXTRA_FILES) if source else None
 
     def _released(self) -> None:
         self._tokenizer = None
@@ -391,21 +456,26 @@ class FastEmbedSparseEmbedder(_FastEmbedBase):
     BATCH_SIZE = 64
 
     def __init__(self, cache_dir: Path, offline: Callable[[], bool] = lambda: False, language: str = BM25_LANGUAGE,
-                 model_dir: Optional[Path] = None):
-        super().__init__(cache_dir, offline, 0.01)
+                 model_dir: Optional[Path] = None, fetch: Optional[Fetch] = None):
+        super().__init__(cache_dir, offline, 0.01, fetch)
         self.model_id = SPARSE_MODEL
         self.language = language
         self._model_dir = model_dir  # a local copy of the stop word files, used instead of the cache
 
     def _create(self, offline: bool):
         from fastembed import SparseTextEmbedding
-        model_dir = self._model_dir or (self._cached_copy() if offline else None)
+        model_dir = self._model_dir or self._local_dir or (self._cached_copy() if offline else None)
         extra = {"specific_model_path": str(model_dir)} if model_dir else {}
         return SparseTextEmbedding(model_name=SPARSE_MODEL, cache_dir=str(self.cache_dir),
-                                   local_files_only=offline, language=self.language, **extra)
+                                   local_files_only=offline or bool(model_dir), language=self.language, **extra)
 
     def _source(self) -> Optional[Tuple[str, str]]:
         return SPARSE_MODEL, f"{self.language}.txt"
+
+    def _hub_files(self) -> Optional[Tuple[str, List[str], Sequence[str]]]:
+        # BM25 reads only the stop word file of its language (fastembed lists every language's file and a mock model
+        # file the repository does not have).
+        return (SPARSE_MODEL, [f"{self.language}.txt"], ()) if self._model_dir is None else None
 
     def _cached_copy(self) -> Optional[Path]:
         """The folder of the downloaded stop word file. FastEmbed 0.8.1 checks its cache for a model file that

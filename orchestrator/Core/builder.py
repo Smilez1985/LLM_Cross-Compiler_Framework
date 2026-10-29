@@ -15,6 +15,7 @@ Updates v2.4.0-IMatrix:
 
 import os
 import sys
+import hashlib
 import json
 import subprocess
 import threading
@@ -69,6 +70,10 @@ def ensure_directory(path: Path):
         path.mkdir(parents=True, exist_ok=True)
 
 class ValidationError(Exception): pass
+
+
+class OfflineImageMissing(RuntimeError):
+    """Offline mode and no image of the target built earlier from the same inputs: nothing is pulled or built."""
 
 
 class BuildCancelled(Exception):
@@ -135,6 +140,9 @@ from orchestrator.Core.build_formats import ModelFormat, OptimizationLevel  # no
 
 TERMINAL_STATES = ("completed", "failed", "cancelled")
 IMAGE_LABEL = "org.llm-framework.target"
+# What a target image was built from (its target folder, Dockerfile and build arguments, as one sha256): an offline
+# build uses only an image of the target built earlier from exactly these (DECISIONS round 24 L-NET, round 25).
+INPUTS_LABEL = "org.llm-framework.inputs"
 # The stable name of each target's newest build image (llm-framework/<target>:last-build): the next build reuses its
 # layers. The builder never deletes an image (round 7 item 12); older ones are listed for the person.
 LAST_BUILD_TAG = "last-build"
@@ -941,7 +949,7 @@ class BuildEngine:
                 buildargs["USER_ID"] = str(os.getuid())
                 buildargs["GROUP_ID"] = str(os.getgid())
 
-            labels = {IMAGE_LABEL: config.target_arch}
+            labels = {IMAGE_LABEL: config.target_arch, INPUTS_LABEL: self._image_inputs(config, path, buildargs)}
             self._build_images[config.build_id] = tag
             hosts = self._repo_hosts.pop(config.build_id, None)
             if hosts is not None:   # offline mode with the override: no proxy, which would resolve the name itself
@@ -949,6 +957,9 @@ class BuildEngine:
             if engine_name(self.docker_client) == "podman":
                 progress.add_log("Podman builds the image (its builder buildah, through its Docker-compatible "
                                  "interface); BuildKit is not used.")
+            from orchestrator.utils.locality import offline_mode
+            if offline_mode(self.config):   # no pull and no build-time download: an image already on this computer
+                return self._offline_image(config, progress, tag, labels[INPUTS_LABEL], path)
             if self._buildkit_available():
                 self._build_with_buildkit(tag, path, buildargs, progress, labels, **({"hosts": hosts} if hosts else {}))
             else:
@@ -971,8 +982,51 @@ class BuildEngine:
             
             return self.docker_client.images.get(tag)
             
+        except OfflineImageMissing:
+            raise
         except Exception as e:
             raise RuntimeError(f"Image build failed: {e}\n{self._log_tail(progress, 'BUILD: ')}")
+
+    @staticmethod
+    def _image_inputs(config: BuildConfiguration, dockerfile: Path, buildargs: Dict[str, str]) -> str:
+        """One sha256 of what the target image is built from: the target, its folder's content digest, the Dockerfile
+        and the build arguments (INPUTS_LABEL)."""
+        try:
+            text = dockerfile.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        data = {"target": getattr(config, "target_arch", ""), "pack": getattr(config, "target_pack_sha256", "") or "",
+                "dockerfile": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                "args": sorted((str(k), str(v)) for k, v in buildargs.items())}
+        return hashlib.sha256(json.dumps(data, sort_keys=True).encode("utf-8")).hexdigest()
+
+    def _offline_image(self, config: BuildConfiguration, progress: BuildProgress, tag: str, inputs: str,
+                       dockerfile: Path) -> Image:
+        """Offline mode: building the target image would pull its base images and download what its Dockerfile
+        fetches, so nothing is built. The image of this target built earlier from exactly the same inputs (its
+        INPUTS_LABEL) is used, named for this build like a built one; without one the build stops naming the images
+        and the step to take while online (OfflineImageMissing)."""
+        found = list(self.docker_client.images.list(
+            filters={"label": [f"{IMAGE_LABEL}={config.target_arch}", f"{INPUTS_LABEL}={inputs}"]}) or [])
+        if not found:
+            from orchestrator.Core.community_pack import dockerfile_bases
+            try:
+                bases = dockerfile_bases(dockerfile.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                bases = []
+            shown = ", ".join(dict.fromkeys(bases)) or "its base image"
+            raise OfflineImageMissing(
+                f"Offline mode is on, and the image of the target {config.target_arch} for these settings is not on "
+                f"this computer. Building it pulls {shown} and downloads what its Dockerfile fetches, which offline "
+                "mode does not allow. Start this build once with offline mode off; later builds with the same "
+                "settings use that image offline.")
+        image = max(found, key=lambda i: str((getattr(i, "attrs", None) or {}).get("Created") or ""))
+        repository, name = tag.rsplit(":", 1)
+        image.tag(repository, name)
+        progress.add_log(f"Offline mode: using the image of {config.target_arch} built earlier from the same settings "
+                         f"({getattr(image, 'short_id', '') or 'an image on this computer'}); nothing is pulled or "
+                         "downloaded.")
+        return self.docker_client.images.get(tag)
 
     def _llama_cpp_args(self, config: BuildConfiguration, progress: BuildProgress, dockerfile: Path) -> Dict[str, str]:
         """LLAMA_CPP_TAG and LLAMA_CPP_COMMIT from the pin, and LLAMA_CMAKE_ARGS from the build recipe's plan for the
@@ -1333,21 +1387,31 @@ class BuildEngine:
 
         if not HF_REPO_ID.match(source) or ".." in source:
             raise ValueError(f"Model '{source}' is neither an existing local path nor a HuggingFace repo id (owner/name).")
+        from orchestrator.utils.locality import offline_mode
+        if offline_mode(self.config):   # never a download in offline mode: the copy on this computer, or no build
+            return self._stage_local_copy(config, progress, source)
 
         from orchestrator.Core.hf_hub import DownloadStopped, hub_api
         from orchestrator.Core.hf_lookup import staged_files
         # The token stored in the framework, or none at all: never an implicit token (HF_TOKEN, the Hugging Face home
         # folder's token file) the person did not give the framework (G37), and only to huggingface.co, never to the
-        # host in HF_ENDPOINT (hf_hub.hub_api, the one Hub API of the framework).
-        auth = self._hf_token() or False
-        api = hub_api(auth)
+        # host in HF_ENDPOINT (hf_hub.hub_api, the one Hub API of the framework); and only where Hugging Face needs
+        # it (DECISIONS round 25 Q2): a gated or private repository, never a public one's files.
+        auth = self._hf_token() or None
+        # one API without a token, made first; one with the token only when the Hub refuses a request without it
+        apis: Dict[Any, Any] = {False: hub_api(False)}
+
+        def api_for(token: Any):
+            if token not in apis:
+                apis[token] = hub_api(token)
+            return apis[token]
         revision = config.model_branch or None
-        commit = self._model_commit(api, source, revision, auth)
+        commit = self._model_commit(api_for, source, revision, auth)
         if not commit:
             raise ValueError(f"The commit of {source} could not be found out on Hugging Face (not reachable, or no "
                              f"such revision '{revision or 'main'}'); nothing was downloaded.")
         revision = config.model_revision = commit  # listing and download see the same commit
-        files = self._hub_files(api, source, commit, auth)
+        files, needed = self._hub_files(api_for, source, commit, auth)
         keep = staged_files(list(files))
         dest = self.staging_folder(source, commit, revision)
         progress.add_log(f"Downloading {source} ({len(keep)} files, commit {commit}) from Hugging Face ...")
@@ -1372,7 +1436,7 @@ class BuildEngine:
         watcher = DiskWatchdog(dest, "Staging", STAGING_WATCH_EVERY, low, stop, also_stop_when=cancelled,
                                check=self._disk_check(config), name=f"staging-watch-{config.build_id}")
         self._report_landed(config, dest)  # the download counts as landed while it arrives
-        fetcher = self._hub_fetcher(auth or None, stop)
+        fetcher = self._hub_fetcher(auth if needed else None, stop)
         try:
             with StagingLock(dest.parent / f".{dest.name}.lock"):
                 watcher.start()
@@ -1390,16 +1454,50 @@ class BuildEngine:
         finally:
             stop.set()
         self._check_cancelled(progress)
+        from orchestrator.Core.local_models import write_complete
+        try:  # every file is there: an offline build may use this copy (local_models.local_copy)
+            write_complete(dest, source, commit, {name: files[name].size for name in keep})
+        except OSError as e:
+            self.logger.debug(f"The record of the complete copy of {source} was not written: {e}")
         inner = "/build-cache/input-model"
         return inner, {str(dest): {"bind": inner, "mode": "ro"}}
 
+    def _stage_local_copy(self, config: BuildConfiguration, progress: BuildProgress,
+                          source: str) -> Tuple[str, Dict[str, Dict[str, str]]]:
+        """Offline mode (DECISIONS round 25 Q1): a model named by its Hugging Face id is never downloaded. Its complete
+        copy on this computer (local_models.local_copy: an earlier build's, the Hugging Face browser's, the old cache's)
+        is mounted read-only, at the commit asked for when the branch is a commit; without one the build stops naming
+        what to do (the build service refuses such a build before it is queued and lists the models already here)."""
+        from orchestrator.Core.local_models import local_copy
+        copy = local_copy(self.cache_dir, self.models_dir, source, config.model_branch)
+        if copy is None:
+            raise ValueError(f"Offline mode is on, so {source} is not downloaded from Hugging Face, and no copy of it "
+                             "is on this computer. Choose a model already here or a model file or folder of your own, "
+                             "or switch offline mode off.")
+        if COMMIT_ID.fullmatch(copy.commit or ""):   # a browser download's folder names only the commit's first 12
+            config.model_revision = copy.commit
+        progress.add_log(f"Offline mode: using the copy of {source} on this computer (commit {copy.commit[:12]}); "
+                         "nothing is downloaded.")
+        inner = "/build-cache/input-model"
+        # a cache snapshot's links lead out of the folder: bound file by file
+        binds = local_files.linked_folder_binds(copy.path, inner)
+        return inner, binds or {str(copy.path): {"bind": inner, "mode": "ro"}}
+
     @staticmethod
-    def _hub_files(api, source: str, commit: str, auth: Any) -> Dict[str, Any]:
+    def _hub_files(api_for, source: str, commit: str, token: Optional[str]) -> Tuple[Dict[str, Any], bool]:
         """The commit's files with the sizes and LFS sha256 the Hub lists (what the fetcher checks each file against),
-        read by hf_hub.hub_file, the one parser of the Hub's file list."""
-        from orchestrator.Core.hf_hub import hub_file
-        info = api.model_info(source, revision=commit, files_metadata=True, token=auth)
-        return {f.name: f for f in (hub_file(s) for s in getattr(info, "siblings", None) or [])}
+        read by hf_hub.hub_file, the one parser of the Hub's file list, and whether the files need the token (a gated
+        or private repository). Asked without the token; with it only when the Hub refuses that
+        (hf_hub.tokenless_first). `api_for(token)`: the Hub's API (hf_hub.hub_api)."""
+        from orchestrator.Core.hf_hub import hub_file, needs_token, tokenless_first
+        sent: List[Any] = []
+
+        def model_info(t: Any):
+            sent.append(t)
+            return api_for(t).model_info(source, revision=commit, files_metadata=True, token=t)
+        info = tokenless_first(model_info, token)
+        files = {f.name: f for f in (hub_file(s) for s in getattr(info, "siblings", None) or [])}
+        return files, needs_token(info) or bool(sent and sent[-1])
 
     @staticmethod
     def _hub_fetcher(token: Optional[str], stop: threading.Event):
@@ -1464,12 +1562,15 @@ class BuildEngine:
         return check
 
     @staticmethod
-    def _model_commit(api, source: str, revision: Optional[str], token: Any = False) -> Optional[str]:
-        """The commit a branch or tag points to (None when it cannot be found out)."""
+    def _model_commit(api_for, source: str, revision: Optional[str], token: Optional[str] = None) -> Optional[str]:
+        """The commit a branch or tag points to (None when it cannot be found out). Asked without the token; with it
+        only when the Hub refuses that (a private repository). `api_for(token)`: the Hub's API (hf_hub.hub_api)."""
+        from orchestrator.Core.hf_hub import tokenless_first
         if revision and COMMIT_ID.fullmatch(revision):
             return revision
         try:
-            sha = getattr(api.model_info(source, revision=revision, token=token), "sha", None)
+            sha = getattr(tokenless_first(lambda t: api_for(t).model_info(source, revision=revision, token=t),
+                                          token), "sha", None)
         except Exception:
             return None
         return sha if isinstance(sha, str) and COMMIT_ID.fullmatch(sha) else None

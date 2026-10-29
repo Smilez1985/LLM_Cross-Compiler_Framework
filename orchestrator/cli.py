@@ -718,8 +718,12 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
 
     When a finished build with exactly the same options exists, you are asked first, as in the Builder tab: use it
     (it is copied into the folder this build would go to), build it again, or cancel. Without a terminal the build
-    starts as given (nothing is skipped by itself)."""
-    from orchestrator.Core.build_service import BuildServiceError
+    starts as given (nothing is skipped by itself).
+
+    In offline mode nothing is downloaded: a Hugging Face model is used from its copy on this computer; without one the
+    models already here are listed, and --model takes one of their labels or a local path (at a terminal you are
+    asked)."""
+    from orchestrator.Core.build_service import BuildServiceError, ModelNotHere
     from orchestrator.Core.orchestrator import OrchestrationStatus
     ctx.require_framework()
     if parallel:
@@ -749,11 +753,22 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
         # Checked by the service against the target's declared capabilities (a target without them is built
         # unchecked), with its defaults filled: the values the build really runs with (canonical spellings, the
         # scripts' default board).
-        try:
-            request = service.validate(service.request_in(
-                model=model, target=target, format=format, board=board, quantization=quantization,
+        def checked(model_value: str):
+            return service.validate(service.request_in(
+                model=model_value, target=target, format=format, board=board, quantization=quantization,
                 use_imatrix=imatrix, dataset_path=str(Path(dataset).resolve()) if dataset else None, use_gpu=gpu),
                 local_paths=True)
+
+        model = _listed_model(ctx, model)   # a label of the models already here (models:...) names its file
+        try:
+            try:
+                request = checked(model)
+            except ModelNotHere as e:   # offline mode: a model already here, or one of the person's own
+                model = _offline_model_choice(ctx, service, e)
+                if model is None:
+                    console.print("Nothing was started.")
+                    return
+                request = checked(model)
         except BuildServiceError as e:
             for problem in getattr(e, "problems", None) or [str(e)]:
                 console.print(f"[red]{escape(problem)}[/red]")
@@ -889,6 +904,39 @@ def _earlier_builds(service, request, optimization: str) -> list:
     except Exception as e:  # noqa: BLE001 - the look-up never stops a build; the person builds as asked
         console.print(f"[yellow]Earlier builds not checked: {escape(str(e))}[/yellow]")
         return []
+
+
+def _listed_model(ctx: FrameworkContext, model: str) -> str:
+    """`--model` with a label of the models already on this computer (a local-file reference such as
+    models:hf/<owner>--<name>/<commit>/<file>, as the offline list shows it): the file or folder it names. Anything else
+    (a path, a Hugging Face id) stays as given."""
+    from orchestrator.tools.local_files import is_path, looks_like_reference
+    if not looks_like_reference(model) or is_path(model) or Path(model).expanduser().exists():
+        return model
+    from orchestrator.Core.local_models import choice_for
+    return choice_for(ctx.framework_manager, model) or model
+
+
+def _offline_model_choice(ctx: FrameworkContext, service, error) -> Optional[str]:
+    """Offline mode and a Hugging Face model that is not on this computer (DECISIONS round 25 Q1): the models already
+    here, as the Builder tab's choice window lists them (BuildService.models_here); at a terminal the person types a
+    listed label or a local path (the same --model input), else the command ends with exit code 2. None: cancelled."""
+    from orchestrator.Core.local_models import choice_for
+    from orchestrator.utils.localization import ui_text
+    lang = _config_language(ctx)
+    console.print(f"[yellow]{escape(error.text(lang))}[/yellow]")
+    if not _interactive():
+        console.print(escape(ui_text("bld.offline.no_terminal", lang)))
+        sys.exit(2)
+    for _ in range(3):
+        answer = click.prompt(ui_text("bld.offline.ask", lang), default="", show_default=False).strip()
+        if not answer:
+            return None
+        chosen = choice_for(ctx.framework_manager, answer)
+        if chosen is not None:
+            return chosen
+        console.print(f"[red]{escape(ui_text('bld.offline.not_a_choice', lang))}[/red]")
+    sys.exit(2)
 
 
 def _ask_earlier(ctx: FrameworkContext, found) -> str:
