@@ -365,6 +365,20 @@ class TestRuntimeEnds:
         assert end["links"] == [started_entry(fm, "deploy_device_runtime")["id"]]
         assert "not activated: 1 checks passed, 1 failed" in end["detail"] and "Living room board" in end["detail"]
 
+    def test_a_board_runtime_deploy_of_an_ai_stops_at_its_soft_cap(self, board, monkeypatch):
+        """The deploy tool's build of the device runtime is AI-started: its soft cap stops it (DECISIONS round 25
+        Q8)."""
+        from orchestrator.runtime.device import service
+        fm, rtt, device = board
+        self.fake_device_service(monkeypatch, fm, device)
+        fake = service.deploy
+        seen = []
+        monkeypatch.setattr(service, "deploy", lambda *a, **k: seen.append(k.get("ai_started")) or fake(*a, **k))
+        rtt.allow(fm, "deploy_device_runtime")
+        started = rtt.call(fm, "deploy_device_runtime", {"device_id": device.device_id}, confirm=rtt.asking(True))
+        assert rtt.wait_job(fm, started.job_id).state == "done"
+        assert seen == [True]
+
     def test_a_board_benchmark_writes_its_end_without_the_device_path(self, board, monkeypatch):
         fm, rtt, device = board
         self.fake_device_service(monkeypatch, fm, device)

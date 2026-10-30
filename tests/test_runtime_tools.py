@@ -161,6 +161,18 @@ class TestBuild:
         (question,) = confirm.asked
         assert "pinned commit" in question and "self-built" in question and "cpu build" in question
 
+    def test_the_build_of_an_ai_stops_at_its_soft_cap(self, fw, fake_rt, monkeypatch):
+        """An AI-started runtime build is never extended past its soft cap (DECISIONS round 25 Q8): the tool builds
+        with ai_started=True."""
+        rt = fake_rt["rt"]
+        seen = []
+        original = rt.install
+        monkeypatch.setattr(rt, "install", lambda *a, **k: seen.append(k.get("ai_started")) or original(*a, **k))
+        allow(fw, "build_local_runtime")
+        job = wait_job(fw, call(fw, "build_local_runtime", {"backend": "cpu"}, confirm=asking(True)).job_id)
+        assert job.state == "done", job.error
+        assert seen == [True]
+
     def test_the_build_of_an_ai_removes_no_old_build(self, fw, fake_rt, monkeypatch):
         from orchestrator.runtime.build.store import BuildStore
         removed = []   # BuildStore.remove deletes only what the person chose from the list (WP7)

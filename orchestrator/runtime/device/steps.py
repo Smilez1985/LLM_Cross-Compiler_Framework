@@ -93,7 +93,7 @@ def build_runtime(state_dir: Path, device_id: str, profile: Any, plan: Any, sour
                   may_fetch: Callable[[], bool] = lambda: True,
                   on_step: Callable[[str, Any], None] = lambda _kind, _build: None,
                   log: Say = lambda _m: None, cancelled: Callable[[], bool] = lambda: False,
-                  reuse_package: bool = False, settings: Any = None) -> RuntimeBuild:
+                  reuse_package: bool = False, settings: Any = None, ai_started: bool = False) -> RuntimeBuild:
     """Builds the board's runtime as `llmcf device runtime build`: the pinned llama.cpp source from the cache, or
     fetched (from `mirror` when given) only after `may_fetch()` said yes; the cross build in the builder container
     without network (`jobs` parallel compile jobs; None: the CPUs, limited by the memory); then the tarball for the
@@ -101,7 +101,9 @@ def build_runtime(state_dir: Path, device_id: str, profile: Any, plan: Any, sour
     before the build, "stored" when the plan's build was stored already. `cancelled()` is asked between the steps
     (the build in the container itself runs to its end). With `reuse_package` a checked tarball of the build that is
     there already is used again. `settings`: the framework's settings; in offline mode the source comes only from the
-    person's own network (a local mirror), at its checked address (runtime/build/source.offline_reach)."""
+    person's own network (a local mirror), at its checked address (runtime/build/source.offline_reach).
+    `ai_started`: a tool caller (an AI) started it, so the soft caps of the build's steps stop it
+    (utils/step_limits.py, DECISIONS round 25 Q8)."""
     from orchestrator.runtime.build.executor import BuildExecutor, DockerEngine
     from orchestrator.runtime.build.source import cached_source, fetch_source
     from orchestrator.runtime.build.store import BuildStore
@@ -123,7 +125,7 @@ def build_runtime(state_dir: Path, device_id: str, profile: Any, plan: Any, sour
     built_now = build is None
     if build is None:
         on_step("build", None)
-        executor = BuildExecutor(engine=DockerEngine(), log=log)
+        executor = BuildExecutor(engine=DockerEngine(), log=log, ai_started=ai_started)
         build = builds.build(plan, source=src, executor=executor, verifier=Verifier(), jobs=jobs,
                              perf_key=profile.perf_key(), host=host_platform())
     else:

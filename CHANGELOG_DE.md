@@ -76,7 +76,10 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   außen angehalten wurden, und startet sie kein viertes Mal (`STAGE_RESTART_LIMIT`, Exit-Code 75); der Funktionstest
   (`model_check.py` beider Targets) liest die Ausgabe des Modells mit, stoppt ein Modell, das sich wiederholt
   (`stopped`, kein Fehler) und nimmt `FUNCTIONAL_TEST_SECONDS` als die Zeit, die er nichts ausgeben darf (`timed out`,
-  kein Fehler), nie als harte Grenze. Tests: `tests/test_step_limits.py`, die Warte-Tests in
+  kein Fehler), nie als harte Grenze. Die llama.cpp-Laufzeit-Builds, die eine KI startet (die Tools
+  `build_local_runtime` und `deploy_device_runtime`), geben das an ihren Executor weiter (`LocalLLMRuntime.install`,
+  `steps.build_runtime`, `service.ensure_build` und `service.deploy` nehmen `ai_started`), also stoppt sie ihre weiche
+  Obergrenze ebenso. Tests: `tests/test_step_limits.py`, die Warte-Tests in
   `tests/test_review_build_engine.py` (ein von einer KI gestarteter Build stoppt, der einer Person läuft weiter, die
   Grenze für Stillstand), die Schleifen-Tests in `tests/test_build_stages.py` und `tests/test_convert_stage.py`.
 - `2026-10-30 03:55 UTC` · `v3.2.0` **Ein Urteil über die CMake-Flags eines Moduls: eine Allowlist, Ablehnungen und die

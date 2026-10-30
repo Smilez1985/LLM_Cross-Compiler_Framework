@@ -6,6 +6,7 @@ follows the same rule."""
 
 import os
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -127,3 +128,43 @@ def test_the_executor_stops_an_ai_started_step_at_its_soft_cap_and_a_number_stay
     executor = BuildExecutor(ai_started=True, idle_timeout=60)
     limits = executor._limits(executor.build_timeout)
     assert (limits.soft_cap, limits.idle, limits.ai_started) == (executor.build_timeout, 60, True)
+
+
+# --- an AI-started llama.cpp runtime build (the build_local_runtime and deploy_device_runtime tools) ----------------
+
+def test_the_runtime_executor_of_an_ai_started_build_stops_at_its_soft_cap(tmp_path):
+    """LocalLLMRuntime.install(ai_started=True) builds with an executor whose soft caps stop (an AI-started build is
+    never extended); the person's install keeps the soft caps that only warn."""
+    from orchestrator.runtime.llama_server import LocalLLMRuntime
+    rt = LocalLLMRuntime(data_dir=tmp_path / "state", models_dir=tmp_path / "models")
+    assert rt.executor(ai_started=True).ai_started is True
+    assert rt.executor().ai_started is False
+
+
+def test_the_device_runtime_build_of_an_ai_stops_at_its_soft_cap(tmp_path, monkeypatch):
+    """steps.build_runtime and service.ensure_build/deploy carry ai_started to the BuildExecutor."""
+    import inspect
+    from orchestrator.runtime.device import service, steps
+    assert "ai_started" in inspect.signature(steps.build_runtime).parameters
+    assert "ai_started" in inspect.signature(service.ensure_build).parameters
+    assert "ai_started" in inspect.signature(service.deploy).parameters
+    from orchestrator.runtime.build.executor import BuildExecutor
+    seen = []
+
+    class Stop(Exception):
+        pass
+
+    def build(self, plan, **kw):
+        seen.append(self.ai_started)
+        raise Stop()
+    monkeypatch.setattr(BuildExecutor, "build", build)
+    monkeypatch.setattr("orchestrator.runtime.build.executor.DockerEngine", lambda: None)
+    monkeypatch.setattr("orchestrator.runtime.build.source.cached_source", lambda pin, state: tmp_path)
+    monkeypatch.setattr("orchestrator.runtime.build.store.BuildStore.find", lambda self, plan: None)
+    monkeypatch.setattr("orchestrator.runtime.build.store.BuildStore.build",
+                        lambda self, plan, executor=None, **kw: executor.build(plan))
+    for ai in (True, False):
+        with pytest.raises(Stop):
+            steps.build_runtime(tmp_path, "0123456789abcdef", SimpleNamespace(perf_key=lambda: "k"), object(),
+                                object(), ai_started=ai)
+    assert seen == [True, False]
