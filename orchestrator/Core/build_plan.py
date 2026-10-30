@@ -26,6 +26,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from orchestrator.Core import disk_plan
 from orchestrator.Core.disk_plan import DiskCheck, DiskNeed, Fit, gb
+# state_dir lives in disk_plan (the per-user folder the reservation ledger sits in); importable here as before.
+from orchestrator.Core.disk_plan import state_dir  # noqa: F401
 from orchestrator.Core.hf_lookup import HubLookupError, ModelFacts
 from orchestrator.tools import facts_catalog as catalog
 from orchestrator.tools.spec import CallFacts, CallWarning, Fact
@@ -321,15 +323,6 @@ def folder(framework, key: str, default: str) -> Path:
     resolve = getattr(framework, "resolve_path", None)
     value = _config(framework, key, default) or default
     return Path(resolve(value)) if callable(resolve) else Path(str(value)).expanduser()
-
-
-def state_dir(framework) -> Optional[Path]:
-    """The per-user folder (None for a stand-in framework without one)."""
-    try:
-        value = getattr(getattr(framework, "config", None), "user_state_dir", None)
-    except Exception:  # noqa: BLE001 - ConfigManager raises AttributeError for unknown names
-        value = None
-    return Path(value) if isinstance(value, (str, Path)) else None
 
 
 def host_hardware(framework) -> Optional[Any]:

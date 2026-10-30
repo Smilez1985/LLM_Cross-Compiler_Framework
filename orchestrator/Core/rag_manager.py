@@ -467,8 +467,7 @@ class RAGManager:
     def _disk_ledger(self):
         """The disk reservation ledger every process of this user shares (downloads and builds), or None without a
         per-user folder: the model downloads of the knowledge base reserve their space there (ModelManager._ledger)."""
-        from orchestrator.Core.build_plan import state_dir
-        from orchestrator.Core.disk_plan import ReservationLedger
+        from orchestrator.Core.disk_plan import ReservationLedger, state_dir
         folder = state_dir(self.framework)
         return ReservationLedger(folder) if folder is not None else None
 

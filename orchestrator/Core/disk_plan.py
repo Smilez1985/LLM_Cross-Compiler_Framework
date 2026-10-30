@@ -66,6 +66,17 @@ class InsufficientSpace(ValueError):
                      "model cache) or pick a smaller model or quantization. Do not retry unchanged.")
 
 
+def state_dir(framework) -> Optional[Path]:
+    """The per-user folder (None for a stand-in framework without one): where the reservation ledger of this user's
+    builds and downloads sits. It lives here, beside the ledger, so every domain module can find it without importing
+    the build planner (build_plan re-exports it)."""
+    try:
+        value = getattr(getattr(framework, "config", None), "user_state_dir", None)
+    except Exception:  # noqa: BLE001 - ConfigManager raises AttributeError for unknown names
+        value = None
+    return Path(value) if isinstance(value, (str, Path)) else None
+
+
 def gb(value: float) -> str:
     """Bytes in decimal gigabytes, as people and Hugging Face show sizes."""
     if value < GB:
