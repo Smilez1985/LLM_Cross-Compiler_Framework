@@ -281,7 +281,8 @@ def test_the_probing_client_chains_the_previous_response_id():
     seen = []
 
     class Client:
-        def chat(self, request):
+        def chat(self, request, *, fallback=True):
+            assert fallback is False   # a measurement stays on the measured provider
             seen.append(request.cache_probe)
             return reply("ok", Usage(input_tokens=3), response_id=f"msg_{len(seen)}")
 
@@ -438,6 +439,35 @@ def test_the_count_goes_through_the_privacy_filter_and_is_compared_with_usage(tm
     m = attempt.measurement
     assert m["count_tokens"] == 2090 and m["usage_input_tokens"] == 2100 and m["count_difference"] == -10
     assert m["count_matches_usage"] is False and m["count_response_has_cost_field"] is False
+
+
+def test_the_paid_test_never_falls_back_to_another_provider(tmp_path):
+    """The person's yes covers OpenAI calls only: an OpenAI outage ends the check, it never sends the paid prompt to
+    the next provider of ai_fallback_chain (another bill, another provider)."""
+    outage = {"error": {"message": "overloaded", "type": "server_error", "param": None, "code": None}}
+    http = FakeHTTP()
+    for _ in range(10):
+        http.add(outage, status=503)
+    config = FakeConfig(ai_provider="openai", ai_fallback_chain=["anthropic"])
+    client = LLMClient(config, SimpleNamespace(get_secret=SECRETS.get), state_dir=tmp_path / "state",
+                       http_client=http.client(), sleep=lambda s: None)
+    ev = DittoEval(DittoCoder(None, config_manager=config, client=client), TARGETS)
+    for case_id in ("openai-cache-ttl-12h", "openai-count-tokens"):
+        attempt = ev.run_case(case(case_id))
+        assert not attempt.passed
+    assert http.requests and all("api.openai.com" in r.url for r in http.requests), \
+        sorted({r.url for r in http.requests})
+
+
+def test_a_tokens_turn_is_measured_on_the_chosen_provider_only(tmp_path, llm):
+    """Numbers of a measurement belong to the provider it runs on: an outage fails the turn instead of answering
+    from the fallback chain (whose Usage would be reported as the measured provider's)."""
+    from orchestrator.llm import ProviderUnavailable
+    config = FakeConfig(ai_fallback_chain=["ollama:other-model"])
+    llm.script += [ProviderUnavailable("down", retry_after=999), reply("from the fallback", Usage(input_tokens=5))]
+    attempt = make_eval(tmp_path, config).run_case(case("tokens-boards-on-the-network"))
+    assert not attempt.passed and attempt.turns[0]["calls"] == 0
+    assert len(llm.requests) == 1
 
 
 def test_the_result_file_holds_booleans_and_numbers_only(tmp_path):

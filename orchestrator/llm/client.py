@@ -524,15 +524,17 @@ class LLMClient:
                 self.logger.info(f"{target.provider}: {type(e).__name__}, retry {attempt}/{MAX_RETRIES} in {wait:.1f}s")
                 self.sleep(wait)
 
-    def chat(self, request: ChatRequest) -> ChatResult:
-        """One model turn. Refusals and outages move on along ai_fallback_chain; other errors are raised."""
+    def chat(self, request: ChatRequest, *, fallback: bool = True) -> ChatResult:
+        """One model turn. Refusals and outages move on along ai_fallback_chain; other errors are raised.
+        fallback=False: only the configured provider of the task, for a measurement of that provider (the evaluation's
+        tokens and openai_paid kinds: another provider's answer, bill and Usage would not belong to it)."""
         if request.task not in TASKS:
             raise NotConfigured(f"Unknown task profile '{request.task}'.")
         effort = self._effort(request)
         if effort and effort != request.effort:
             request = request.model_copy(update={"effort": effort})
         primary = self.resolve(request.task, model=request.model)
-        targets: List[Any] = [primary, *self.fallback_targets(request.task)]
+        targets: List[Any] = [primary, *(self.fallback_targets(request.task) if fallback else ())]
         last_error: Optional[LLMError] = None
         for index, target in enumerate(targets):
             if not isinstance(target, Target):

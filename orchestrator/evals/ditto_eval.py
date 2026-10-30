@@ -790,7 +790,8 @@ class ProbingClient:
     def chat(self, request):
         from orchestrator.llm.types import CacheProbe
         probe = CacheProbe(anthropic_diagnostics=True, previous_message_id=self._previous)
-        result = self._client.chat(request.model_copy(update={"cache_probe": probe}))
+        # fallback=False: the numbers belong to the provider being measured (an outage fails the turn instead)
+        result = self._client.chat(request.model_copy(update={"cache_probe": probe}), fallback=False)
         self._previous = result.response_id or self._previous
         row = usage_row(result.usage)
         if result.cache_miss_reason is not None:
@@ -921,8 +922,11 @@ class DittoEval:
         m: Dict[str, Any] = {"check": case.check}
 
         def call(probe=None):
-            result = client.chat(request.model_copy(update={"cache_probe": probe}) if probe else request)
-            if result.provider != target.provider:   # a fallback answered: not a measurement of OpenAI
+            # fallback=False: the person's yes covers OpenAI only; an outage ends the check instead of sending the
+            # paid prompt to the next provider of ai_fallback_chain
+            result = client.chat(request.model_copy(update={"cache_probe": probe}) if probe else request,
+                                 fallback=False)
+            if result.provider != target.provider:   # not a measurement of OpenAI (the last guard)
                 raise LLMError("another provider answered (the fallback chain); not a measurement of OpenAI")
             return result
 
