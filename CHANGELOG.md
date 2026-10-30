@@ -35,6 +35,10 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   all of them as before, in the settings, the Prompt cache group and `llm-cli ditto cache set`.
 
 ### Fixed
+- `2026-10-30 15:11 UTC` · `v3.3.0` **`llm-cli ditto cache`, `ditto cache set` and `ditto models list` say plainly when they cannot work it
+  out**: when the memory budget or the model choice for this computer cannot be computed (a probe that fails, a model
+  the catalogue lacks, a damaged file), they print one red line with the reason (secrets redacted) and exit with 1,
+  instead of a Python traceback.
 - `2026-10-30 15:08 UTC` · `v3.3.0` **Uninstalling a pack in the Community Hub no longer freezes the window**: **Uninstall...** removes the pack's
   excerpts from the knowledge base and moves its folders in a worker thread, as the hub's other actions do; the hub's
   buttons and the pack list are off while it runs, and the result box comes when it is done (before, the window did

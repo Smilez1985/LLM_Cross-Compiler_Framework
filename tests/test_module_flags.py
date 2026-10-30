@@ -66,7 +66,7 @@ def test_the_shell_lists_are_the_recipe_s():
     for target in ("Rockchip", "_template"):
         text = (REPO_ROOT / "targets" / target / "modules" / "target_module.sh").read_text(encoding="utf-8")
 
-        def names(variable):
+        def names(variable, text=text):
             return re.search(rf"^{variable}=\(([^)]*)\)", text, re.M).group(1).split()
         assert names("DECISION_SWITCH_NAMES") == list(recipe.DECISION_SWITCHES), target
         assert names("REFUSED_SWITCH_NAMES") == list(recipe.REFUSED_SWITCHES), target

@@ -2867,7 +2867,8 @@ def ditto_models():
 def models_list(ctx: FrameworkContext):
     """Pinned models, their size and whether they are downloaded"""
     from orchestrator.runtime.ditto_models import models_overview
-    view = models_overview(_local_runtime(ctx))  # the GUI's Ditto > Local Models... shows the same
+    # the GUI's Ditto > Local Models... shows the same
+    view = _plain_runtime_call("The model choice for this computer", models_overview, _local_runtime(ctx))
     table = Table(title="Ditto models")
     for column in ("Tier", "File", "Size", "License", "Status", "Note"):
         table.add_column(column)
@@ -2918,6 +2919,18 @@ CACHE_NAMES = {"ram": "local_cache_ram_mib", "keep": "local_cache_keep_minutes",
                "over-cap-ok": "local_cache_over_cap_ok"}
 
 
+def _plain_runtime_call(what: str, fn, *args, **kwargs):
+    """`fn(*args)` for `ditto cache`, `cache set` and `models list`: the budget and the model choice probe this
+    computer and read the catalogue, and when that fails the person reads one plain line (redacted), never a
+    traceback; exit code 1."""
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:  # noqa: BLE001 - shown to the person as one line
+        reason = redact_secrets(str(e)).strip() or type(e).__name__
+        console.print(f"[red]{escape(what)} could not be worked out: {escape(reason)}[/red]")
+        sys.exit(1)
+
+
 @ditto.group('cache', invoke_without_command=True)
 @click.option('--json', 'as_json', is_flag=True, help='Print the budget as JSON')
 @click.pass_context
@@ -2933,7 +2946,8 @@ def ditto_cache(click_ctx, as_json: bool):
 def ditto_cache_show(ctx: FrameworkContext, as_json: bool = False):
     """The saved values, what auto stands for on this computer, the soft caps and hard limits, the running server"""
     from orchestrator.runtime.ditto_models import cache_overview
-    view = cache_overview(_local_runtime(ctx))  # the AI settings' Prompt cache group shows the same
+    # the AI settings' Prompt cache group shows the same
+    view = _plain_runtime_call("The memory budget of Ditto's local server", cache_overview, _local_runtime(ctx))
     if as_json:
         click.echo(json.dumps(view.to_dict(), indent=2, sort_keys=True))
         return
@@ -2977,7 +2991,8 @@ def ditto_cache_set(ctx: FrameworkContext, name: str, value: str, yes_over_cap: 
             sys.exit(2)
         value = word in ("1", "true", "yes", "on")
     try:
-        change = AISettingsChange.cache_change({key: value}, rt.cache_budget())
+        change = AISettingsChange.cache_change(
+            {key: value}, _plain_runtime_call("The memory budget of Ditto's local server", rt.cache_budget))
     except (KeyError, ValueError) as e:
         console.print(f"[red]{escape(str(e.args[0] if isinstance(e, KeyError) else e))}[/red]")
         sys.exit(2)
@@ -3303,7 +3318,6 @@ def _auth_catalog(ctx: FrameworkContext):
 
 
 def _auth_preset(catalog, name: str):
-    from orchestrator.utils.helpers import redact_secrets
     preset = catalog.get(name)
     if preset is not None:
         return preset
@@ -3327,7 +3341,6 @@ def _method_tags(info) -> str:
 
 def _named_method(service, preset, method_id: str):
     """--method: a method of the provider, else a usage error (the value redacted like a provider name)."""
-    from orchestrator.utils.helpers import redact_secrets
     spec = service.method(preset, method_id)
     if spec is None:
         _usage(f"{preset.label} has no sign-in method '{redact_secrets(str(method_id))}'. Methods: "

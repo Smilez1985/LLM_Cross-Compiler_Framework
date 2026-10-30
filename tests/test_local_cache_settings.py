@@ -193,6 +193,6 @@ def test_an_ai_cannot_change_the_idle_timeout_over_mcp(fw):
 
 
 def test_the_person_only_acceptance_is_no_key_for_an_ai(fw):
-    with pytest.raises(Exception):
+    with pytest.raises(ToolError):
         _call(fw, [{"key": "local_cache_over_cap_ok", "value": "true"}])
     assert "local_cache_over_cap_ok" not in tools_status.READABLE
