@@ -17,10 +17,17 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # The fields of a request summary and of a build record, in the order they are shown; each front end labels them
 # (the CLI in English, the GUI in the person's language).
-REQUEST_FIELDS = ("request", "status", "stage", "progress", "model", "target", "board", "format", "quantization",
-                  "optimization", "owner", "where", "started", "ended")
-RECORD_FIELDS = ("build", "request", "status", "stage", "progress", "model", "target", "board", "format",
+REQUEST_FIELDS = ("request", "status", "end", "stage", "progress", "model", "target", "board", "format",
+                  "quantization", "optimization", "owner", "where", "started", "ended")
+RECORD_FIELDS = ("build", "request", "status", "end", "stage", "progress", "model", "target", "board", "format",
                  "quantization", "output", "statistics", "started", "ended", "process", "error")
+
+
+def end_of(record: Dict[str, Any]) -> Optional[str]:
+    """A summary's or build record's end reason (Core/build_end.py END_REASONS), None for anything else."""
+    from orchestrator.Core.build_end import END_REASONS
+    value = record.get("end_reason")
+    return value if value in END_REASONS else None
 
 
 def shared_requests(config: Any) -> List[Dict[str, Any]]:
@@ -48,7 +55,8 @@ def request_rows(request: Dict[str, Any]) -> List[Tuple[str, Any]]:
     """(field, value) of a request summary in REQUEST_FIELDS order; empty values included (the front end skips
     them; the CLI shows an empty owner as "the person")."""
     summary = _summary(request)
-    values = {"request": request.get("request_id"), "status": request.get("status"), "stage": request.get("stage"),
+    values = {"request": request.get("request_id"), "status": request.get("status"), "end": end_of(request),
+              "stage": request.get("stage"),
               "progress": f"{request.get('progress') or 0}%", "model": summary.get("model"),
               "target": summary.get("target"), "board": summary.get("board"), "format": summary.get("format"),
               "quantization": summary.get("quantization"), "optimization": summary.get("optimization"),
@@ -88,6 +96,7 @@ def statistics_text(output_dir: Any) -> str:
 def record_rows(record: Dict[str, Any]) -> List[Tuple[str, Any]]:
     """(field, value) of one build attempt (a build record) in RECORD_FIELDS order; empty values included."""
     values = {"build": record.get("build_id"), "request": record.get("request_id"), "status": record.get("status"),
+              "end": end_of(record),
               "stage": record.get("stage"), "progress": f"{record.get('progress') or 0}%",
               "model": record.get("model"), "target": record.get("target"), "board": record.get("board"),
               "format": record.get("format"), "quantization": record.get("quantization"),

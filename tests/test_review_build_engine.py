@@ -58,6 +58,19 @@ TERMINAL = (BuildStatus.COMPLETED, BuildStatus.FAILED, BuildStatus.CANCELLED)
 # Fakes
 # ---------------------------------------------------------------------------------------------------
 
+def write_end_record(volumes, name, exit_code):
+    """What the stage runner (targets/*/modules/build.sh) writes as its very last step into the mounted work folder
+    (Core/build_end.py, DECISIONS round 40): a fake stage container that exits by itself writes it too."""
+    for host, bind in (volumes or {}).items():
+        if bind.get("bind") == "/build-cache/work":
+            job = "imatrix" if "imatrix" in str(name) else "build"
+            folder = Path(host) / "stages" / job
+            folder.mkdir(parents=True, exist_ok=True)
+            status = "done" if exit_code == 0 else "failed"
+            (folder / "build.end").write_text(f"status {status}\nexit {exit_code}\nstage target\njob {job}\n"
+                                              "inputs -\ntime 2026-10-30T12:00:00Z\n")
+
+
 class FakeContainer:
     """A Docker container. `auto_exit` containers print their lines and exit with `exit_code` once
     started; the others run until they are stopped, killed or force-removed."""
@@ -92,6 +105,7 @@ class FakeContainer:
                 if bind.get("bind") == "/build-cache/output":
                     for name, data in self.outputs.items():
                         (Path(host) / name).write_bytes(data)
+        write_end_record(self.volumes, self.name, self.exit_code)
         self._finish(self.exit_code)
 
     def start(self):

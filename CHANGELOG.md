@@ -12,6 +12,14 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 ## [3.3.0] - 2026-10-30
 
 ### Added
+- `2026-10-30 13:28 UTC` · `v3.3.0` **Ditto follows up on its own builds** ([design](docs/DESIGN.md#ditto-the-local-runtime-and-the-llm-layer)):
+  in the framework window, when a build ends that Ditto started or waited for (`get_build_status` with
+  `wait_seconds`), Ditto gets one turn of its own for it: the chat says "Ditto looks at how its build ... ended", and
+  Ditto checks the result with `get_build_status` and `read_build_log` and proposes or runs the next step within its
+  permissions and approvals. The turn's input is a fixed framework note with the end's fixed words and the request id
+  only. While your own turn runs, the build's turn waits and follows it; other builds give no turn, nor does one that
+  Ditto only cancelled (your own build that Ditto stopped); at most three such turns in a row without a message from
+  you, so a chain of builds never loops.
 - `2026-10-30 13:26 UTC` · `v3.3.0` **Every CPU feature ggml can use is found by the probe and planned by the build recipe** ([design](docs/DESIGN.md#targets-hardware-and-templates)):
   the hardware probe 3.2.0 (`.py`, `.sh`, `.ps1`) also writes the CPU features of RISC-V (RVV, Zfh, Zvfh, Zicbop,
   Zihintpause, Zvfbfwma, Zba, XTheadVector), LoongArch (LSX, LASX), POWER (VSX, the POWER generation) and s390x
@@ -24,6 +32,48 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   with its reason (SME with a compiler older than GCC 14 or Clang 18, BF16 on ARM, which the pin has no kernel
   for, and a tag without the one it builds on, such as `+sve2` without `+sve` or `+i8mm` on an armv8.0 board).
   A board of a system the recipe does not plan yet is refused with the features its probe found.
+- `2026-10-30 13:17 UTC` · `v3.3.0` **A doorbell on your own MQTT broker for every build's end** ([design](docs/DESIGN.md#mcp-server-tools-and-permissions)):
+  when you set a broker (`llm-cli config doorbell --broker mqtts://HOST:PORT`, or File > Settings... > Build
+  doorbell), every build's end is published once to `<prefix>/v1/build/<request_id>/end` and `<prefix>/v1/events`
+  (QoS 1, not retained), and `<prefix>/v1/status` says online or offline (retained, also as the last will). The
+  payload is `{v, event, reason, name, request_id, ts}` with fixed words only (build_ready, build_error,
+  build_stopped; done, failed, cancelled, soft_cap, idle), never a path, log text or a model's name; the framework
+  only publishes and never subscribes. A broker that is down never blocks or fails a build: the doorbell has its own
+  thread, a bounded queue and timeouts, logs what went wrong without the password, and Mojo shows the last failed
+  send. **Send a test doorbell** (`config doorbell --test` and the button in the settings) sends one through the same
+  code. The settings (`mqtt_broker_url`, `mqtt_username`, `mqtt_topic_prefix`, default `llmcf`, and `mqtt_ca_file`)
+  are yours alone, the password is kept only in the credential vault (`mqtt_password`), plain `mqtt://` works only on
+  this computer (the name `localhost` or a loopback address; a name under `.localhost` goes to the system resolver
+  and needs `mqtts://` like every other broker) and every other broker needs `mqtts://` with its certificate checked;
+  in offline mode only a local broker. A program that ends right after a build (every `llm-cli build start`) still
+  sends its doorbell and writes its chat row first, at most 15 s more. New dependencies, pinned with hashes: aiomqtt 2.5.1 (BSD-3-Clause) and paho-mqtt 2.1.0 (EPL-2.0 or
+  EDL-1.0), loaded only when a doorbell is sent.
+- `2026-10-30 12:56 UTC` · `v3.3.0` **Every build's end in the chat, once** ([design](docs/DESIGN.md#mcp-server-tools-and-permissions)):
+  when a build ends, the chat feed gets exactly one row for it (deduplicated by its request id), for every build, also
+  the person's own (from the framework; an AI's build in the AI's name as before): "Build ready.", "Error while
+  building: ..." with the reason as a fixed word (a stage failed, the soft cap, the idle timeout) or "Build stopped.".
+  The row holds only the end reason, the AI that cancelled it and the request id, never log text, a model's name or a
+  path; the details come over MCP (`get_build_status`, `read_build_log`).
+- `2026-10-30 12:55 UTC` · `v3.3.0` **Every waiter ends on the build's end reason** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
+  `llm-cli build status REQUEST_ID --wait SECONDS` waits for a build of any program (the shared build state) and
+  ends on its end reason; `build start --follow` too. Both say it in plain words ("Build ready", "Error while
+  building: ...", "Build stopped: ...") and exit with 0 (done), 1 (failed, soft_cap, idle), 2 (cancelled) or, for
+  `--wait`, 3 (still running). The Builder's progress line says how the build ended. `get_build_status` has the new
+  field `end_reason` (None while the build runs) and its long poll, like Ditto's waits, returns at once when it is
+  set; `get_job_status` gives a runtime build job (`build_local_runtime`) the same `end_reason`. Build history (CLI
+  and GUI) shows it as the field "End".
+- `2026-10-30 12:45 UTC` · `v3.3.0` **A build ends on its done marker** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
+  the stage runner (`build.sh` of every target, and the runner the module generator writes) writes ONE end record as
+  its very last step, `stages/<job>/build.end` in the work folder (`status done|failed`, `exit`, `stage`, `job`, the
+  inputs digest and a UTC time), "done" only after the last stage's marker; a failing stage, a refused loop and every
+  other end write "failed" through the same writer. The build engine reads it: once it says done the step's clock is
+  switched off, so neither the idle timeout nor an AI build's soft cap can stop the build after the marker; the
+  container gets 30 s to exit by itself, then the framework stops it and the build is still done. A container that
+  exits 0 without the record is a failed build ("the build ended without its end record"), never a silent success.
+  Every build has one end reason from a fixed vocabulary (done, failed, cancelled, soft_cap, idle), kept in its build
+  record and, for a finished build, as `end` (reason, exit, stage) in `build_info.json`. A record behind a link (the
+  record, its job folder or the stages folder: the container writes the work folder) never counts, and a stale one
+  is never removed through such a link.
 
 ### Changed
 - `2026-10-30 14:55 UTC` · `v3.3.0` **Your board tests show up in the target's benchmarks, and ignored old entries are named** ([design](docs/DESIGN.md#targets-hardware-and-templates)):
@@ -47,6 +97,13 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   Ditto, the GUI tools) refuses them with a plain text that says why; `get_settings` still shows them, marked
   read-only. `build_timeout` and `local_cache_keep_minutes` stay as they were: an AI may only lower them. You change
   all of them as before, in the settings, the Prompt cache group and `llm-cli ditto cache set`.
+- `2026-10-30 12:56 UTC` · `v3.3.0` **A build's chat row names how it ended, not its folder** ([design](docs/DESIGN.md#mcp-server-tools-and-permissions)):
+  the row of an AI's build said "finished and was saved as <folder label>" or "finished with errors: N done, M failed";
+  it now says "Build ready.", "Error while building: ..." or "Build stopped." with the end reason as its only value
+  (the folder label could carry a model's name).
+- `2026-10-30 12:55 UTC` · `v3.3.0` **`build start --follow` exits with 2 for a cancelled build** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
+  a build cancelled elsewhere (the GUI, an AI) ended the follow with exit code 1 like a failure; it now ends with 2,
+  the exit code of the end reason cancelled. Ctrl+C in the command itself stays 130.
 
 ### Fixed
 - `2026-10-30 15:11 UTC` · `v3.3.0` **`llm-cli ditto cache`, `ditto cache set` and `ditto models list` say plainly when they cannot work it
@@ -109,6 +166,11 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   (and `GGML_NEON`, which is no option of ggml). It now plans `-march` and `GGML_CPU_ARM_ARCH` from the probe's
   features as the build recipe does (`armv8.2-a+dotprod+fp16` on these boards), and a table test runs both on the
   same profiles.
+- `2026-10-30 12:45 UTC` · `v3.3.0` **A person's Cancel no longer counts as a restart of the loop protection** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
+  a stage stopped from outside counted towards `STAGE_RESTART_LIMIT`, also when the person (or an AI) cancelled the
+  build, so three cancels refused the next build as a loop. The framework's cancel now writes a note into the stage
+  folder before it stops the container, and the stage runner gives back the start of the stage that was running; a
+  stop from outside without the note still counts.
 
 ### Security
 - `2026-10-30 14:40 UTC` · `v3.3.0` **The dependency pre-fetch unpacks through the framework's one safe extraction**

@@ -78,6 +78,9 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(self._repos_tab(), self._t("bld.settings.tab.repos"))
         self.page_net = self._network_tab()
         self.tabs.addTab(self.page_net, self._t("net.tab"))
+        from orchestrator.gui.doorbell_settings import DoorbellSettings
+        self.page_bell = DoorbellSettings(framework, self, self.lang)
+        self.tabs.addTab(self.page_bell, self._t("bell.tab"))
         self.tabs.currentChanged.connect(self._tab_changed)
         layout.addWidget(self.tabs)
         buttons = QDialogButtonBox(QDialogButtonBox.Close, self)

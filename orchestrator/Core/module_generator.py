@@ -1046,6 +1046,30 @@ WORK_DIR="${{BUILD_CACHE_DIR:-/build-cache}}"
 OUTPUT_DIR="${{WORK_DIR}}/output"
 mkdir -p "$OUTPUT_DIR"
 
+# The end record the framework reads (the same as targets/_template/modules/build.sh): written as the very last step
+JOB="build"
+[ "${{JOB_TYPE:-build}}" = "imatrix" ] && JOB="imatrix"
+STAGE_DIR="${{BUILD_SCRATCH_DIR:-$WORK_DIR}}/stages/$JOB"
+mkdir -p "$STAGE_DIR"
+END_RECORD="$STAGE_DIR/build.end"
+END_WRITTEN=0
+rm -f "$END_RECORD" "$END_RECORD.tmp"
+write_end() {{
+    printf 'status %s\\nexit %s\\nstage %s\\njob %s\\ninputs -\\ntime %s\\n' "$1" "$2" "${{3:--}}" "$JOB" \\
+        "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$END_RECORD.tmp" && mv -f "$END_RECORD.tmp" "$END_RECORD"
+    END_WRITTEN=1
+}}
+on_exit() {{
+    local rc=$?
+    if [ "$END_WRITTEN" = 0 ]; then
+        [ "$rc" -ne 0 ] || rc=1
+        write_end failed "$rc" build || true
+    fi
+    exit "$rc"
+}}
+trap on_exit EXIT
+trap 'exit 143' TERM
+
 echo "=== Build Started: {data['module_name']} ==="
 echo "Model: $MODEL_SOURCE"
 echo "Task:  ${{MODEL_TASK:-LLM}}"
@@ -1058,6 +1082,7 @@ case "$QUANT_TYPE" in
 esac
 
 echo "=== Build Completed ==="
+write_end "done" 0 build
 '''
         dst = target_dir / "modules" / "build.sh"
         self._write_file(dst, content)

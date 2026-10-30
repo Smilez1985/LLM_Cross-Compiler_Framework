@@ -184,6 +184,17 @@ Further behaviour:
   restarting without finishing and a model that repeats itself in the functional test are stopped as loops. An AI
   may only lower `build_timeout`; `build_idle_timeout` is yours alone (a lower value could stop your own long
   builds).
+- **A build ends on its done marker:** the stage runner writes one end record as its very last step; a build is
+  done only when that record says so, no clock can stop it after it, and a container that ends without it is a
+  failed build. Every build has one end reason (done, failed, cancelled, soft_cap, idle), which the Builder,
+  `llm-cli build status`, `get_build_status` and `build_info.json` show; the CLI's waits end on it with their own exit
+  codes ([CLI](CLI_Usage.md#build-status)).
+- **A doorbell for every build's end:** with your own MQTT broker set, every build's end is published once with
+  fixed words only (event, reason, request id), for your phone, your home automation or an AI client that waits;
+  the framework never subscribes, a broker that is down never stops a build, and only you set it
+  ([CLI](CLI_Usage.md#config-doorbell)).
+- **Ditto follows up on its builds:** in the framework window, a build Ditto started or waited for gives Ditto one
+  turn when it ends: it checks the result and proposes or runs the next step within its approvals.
 - **Where a build goes:** see [Where finished models go](#where-finished-models-go) below. Every build lands in
   `<folder>/<target>/<model>/<quantization>/` with its golden ZIP next to it.
 

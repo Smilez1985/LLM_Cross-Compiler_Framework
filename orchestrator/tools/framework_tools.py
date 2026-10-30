@@ -314,7 +314,8 @@ def _job_out(job, ctx: ToolContext) -> JobStatusOut:
     return JobStatusOut(job_id=job.job_id, kind=job.kind, state=job.state,
                         progress=JobProgress(done=job.done, total=job.total, message=job.message),
                         result=result, external_text=external, error=error, owner=job_service.owner_actor(job.owner),
-                        yours=job.owner == ctx.owner, created=job.created, updated=job.updated, note=job.note)
+                        yours=job.owner == ctx.owner, created=job.created, updated=job.updated, note=job.note,
+                        end_reason=getattr(job, "end_reason", None))
 
 
 def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
@@ -359,6 +360,9 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
     def get_build_status(inp: BuildStatusIn, ctx: ToolContext) -> BuildStatusOut:
         ctx.notes.extend(ctx.metadata.get("wait_notes", []))
         seconds = _wait_seconds(inp.wait_seconds, ctx.notes)
+        if seconds:   # Ditto waits for this build: its end gives Ditto a turn in the GUI (Core/ditto_build_turns.py)
+            from orchestrator.Core.ditto_build_turns import note_wait
+            note_wait(ctx.actor, inp.request_id)
         if seconds and not ctx.metadata.get("waited"):  # Ditto: waits in its own thread; MCP waited on its loop
             service.wait_for_change(inp.request_id, seconds)
         return service.get_status(inp.request_id)

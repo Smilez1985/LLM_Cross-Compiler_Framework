@@ -194,6 +194,18 @@ Weiteres Verhalten:
   und ein Modell, das sich im Funktionstest wiederholt, werden als Schleife gestoppt. Eine KI darf nur
   `build_timeout` senken; `build_idle_timeout` setzt nur du (ein kleinerer Wert könnte deine eigenen langen Builds
   stoppen).
+- **Ein Build endet an seiner Fertig-Marke:** Der Stufen-Runner schreibt als allerletzten Schritt einen
+  Abschluss-Eintrag; ein Build ist erst fertig, wenn dieser Eintrag das sagt, keine Uhr kann ihn danach stoppen, und
+  ein Container, der ohne ihn endet, ist ein fehlgeschlagener Build. Jeder Build hat einen Endgrund (done, failed,
+  cancelled, soft_cap, idle), den der Builder, `llm-cli build status`, `get_build_status` und `build_info.json`
+  zeigen; die Wartebefehle der CLI enden daran mit eigenen Exit-Codes ([CLI](CLI_Usage_DE.md#build-status)).
+- **Eine Türklingel für jedes Build-Ende:** mit deinem eigenen MQTT-Broker wird jedes Build-Ende einmal nur mit
+  festen Wörtern gesendet (Ereignis, Grund, Anfrage-ID), für dein Telefon, deine Hausautomation oder einen
+  KI-Client, der wartet; das Framework abonniert nie, ein Broker, der nicht läuft, hält nie einen Build auf, und
+  nur du stellst sie ein ([CLI](CLI_Usage_DE.md#config-doorbell)).
+- **Ditto kümmert sich um seine Builds:** im Framework-Fenster gibt ein Build, den Ditto gestartet oder auf den es
+  gewartet hat, Ditto einen Zug, wenn er endet: es prüft das Ergebnis und schlägt den nächsten Schritt vor oder
+  führt ihn im Rahmen seiner Freigaben aus.
 - **Wohin ein Build kommt:** siehe [Wohin fertige Modelle kommen](#wohin-fertige-modelle-kommen) unten. Jeder Build
   landet in `<Ordner>/<Target>/<Modell>/<Quantisierung>/`, sein Golden-ZIP daneben.
 
