@@ -12,6 +12,12 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 
 ## [3.2.0] - 2026-10-30
 
+### Hinzugefügt
+- `2026-10-30 01:02 UTC` · `v3.2.0` **Deine eigenen gecrawlten Seiten gehören von Anfang an zu einem Thema**: Das Deep-Ingest-Fenster fragt nach
+  dem Thema der Seiten des Crawls (leer: der Name der Site, etwa `docs.example.com`), und jeder Auszug des Crawls
+  trägt es, sodass `search_knowledge(topic=...)`, die Spalte „Thema“ und die Wissensexporte sie darunter finden. Ein
+  Crawl, den eine KI gestartet hat (`crawl_docs_site`), nimmt den Namen der Site; sie nennt nie selbst ein Thema.
+
 ### Behoben
 - `2026-10-30 00:48 UTC` · `v3.2.0` **Ein Rezept zu einem unter Linux gemachten Target-Paket besteht unter Windows**: Windows hält kein
   Ausführungsbit, deshalb gab die installierte Kopie eines Target-Pakets mit `0o755`-Skripten dort einen anderen
@@ -30,6 +36,12 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   neuere Paketversion, ein neuer Crawl oder eine Deinstallation gibt nur den eigenen Halt auf, und ein Auszug geht erst,
   wenn ihn niemand mehr hält (`RAGManager.release_holder`). Ein geteilter Auszug wird unter dem Thema oder Target jedes
   Halters gefunden. Früher gespeicherte Auszüge haben einen Halter, den ihre Felder nennen.
+- `2026-10-30 01:03 UTC` · `v3.2.0` **Ein neuer Crawl einer Site entfernt die Seiten, die es nicht mehr gibt**: Seiten, die von einer gecrawlten
+  Site verschwunden waren, behielten ihre Auszüge für immer. Ein neuer Crawl derselben Startadresse ersetzt ihre
+  Seiten, und wenn er die ganze Site gelesen hat (er war erfolgreich, kein Seitenlimit und kein Anfragebudget hat ihn
+  beendet, nichts ist fehlgeschlagen, wurde vorbehalten oder gestoppt), werden auch die Auszüge der früheren Seiten
+  entfernt, die er nicht mehr erreicht hat, nur wo dieser Crawl ihr letzter Halter war; das Ergebnis nennt sie
+  (`removed`). Ein teilweiser oder fehlgeschlagener Crawl entfernt nichts.
 
 ## [3.1.0] - 2026-10-29
 

@@ -112,6 +112,14 @@ _RESERVED_PAYLOAD = {"content", "source", "section", "chunk_index", "chunk_hash"
                      "fused_score", "reranker", REMOVED_FIELD, HOLDERS, HOLDER_INFO}
 
 
+def site_topic(url: str) -> str:
+    """The topic a crawl's pages get when the person names none (and every AI-started crawl): the site's host name
+    without "www.", as a topic name (docs.example.com)."""
+    from orchestrator.Core.community_manager import derived_topic
+    host = (urlparse(str(url or "")).hostname or "").lower()
+    return derived_topic(host[4:] if host.startswith("www.") else host or "web")
+
+
 def holder_of(payload: Dict[str, Any]) -> str:
     """The holder an excerpt's own fields name: its pack (origin_pack), your crawl of a start address, or "own"."""
     if payload.get("origin_pack"):
@@ -407,6 +415,7 @@ class RAGManager:
         self._sparse = sparse_embedder
         self.model_reason = "provided by the caller" if embedder is not None else ""
         self.last_error = ""
+        self.last_released: List[str] = []   # the sources the last release_holder removed
         self.last_snapshot_room = None  # the disk room of the last snapshot looked at (knowledge_snapshots.SnapshotRoom)
         self.idle_close_seconds = self.IDLE_CLOSE_SECONDS
         self._lock = threading.RLock()
@@ -882,6 +891,7 @@ class RAGManager:
         or only of those whose holder fields `keep` does not accept, or only of the sources `sources` accepts. An
         excerpt another holder still has stays (only this holder is taken off it); one nobody holds any more is
         removed. False when the knowledge base cannot be written."""
+        self.last_released = []
         if not holder:
             return False
         try:
@@ -896,7 +906,7 @@ class RAGManager:
                 records = [r for r in found.values()
                            if (sources is None or sources(str(r.payload.get("source") or "")))
                            and not (keep and keep(holder_info(r.payload).get(holder, {})))]
-                self._release(store, records, holder)
+                self.last_released = self._release(store, records, holder)
             self._with_store(remove)
             return True
         except KnowledgeBaseError as e:
@@ -904,9 +914,9 @@ class RAGManager:
             return False
 
     @staticmethod
-    def _release(store: "KnowledgeStore", records, holder: str) -> None:
+    def _release(store: "KnowledgeStore", records, holder: str) -> List[str]:
         """Takes `holder` off these stored points (read with their vectors): a point nobody else holds is removed, one
-        another holder has keeps that holder's fields."""
+        another holder has keeps that holder's fields. Returns the sources whose points were removed, sorted."""
         from orchestrator.rag.store import DENSE, sparse_of
         gone, kept = [], []
         for record in records:
@@ -924,15 +934,20 @@ class RAGManager:
             store.upsert(kept)
         if gone:
             store.delete_ids(gone)
+        return sorted({str(r.payload.get("source") or "") for r in records if r.id in set(gone)})
 
-    def ingest_page(self, doc: Any, root_url: str = "") -> int:
+    def ingest_page(self, doc: Any, root_url: str = "", topic: str = "") -> int:
         """Stores one page the crawler extracted (a crawler Document: page_content, metadata and hidden_removed, the
         hidden elements it left out), replacing its earlier version, as outside text: cleaned like every outside text,
-        with what was left out in REMOVED_FIELD. root_url: the address the crawl started at. Returns the number of
-        excerpts stored; raises KnowledgeBaseError. Deep Ingest (ingest_url) stores every page through this."""
-        meta = dict(getattr(doc, "metadata", None) or {})
+        with what was left out in REMOVED_FIELD. root_url: the address the crawl started at; topic: the topic its
+        pages belong to (site_topic of root_url when none is given; knowledge always belongs to a topic). Returns the
+        number of excerpts stored; raises KnowledgeBaseError. Deep Ingest (ingest_url) stores every page through
+        this."""
+        meta = {k: v for k, v in dict(getattr(doc, "metadata", None) or {}).items()
+                if k not in ("origin_pack", "origin_sha256", "target")}   # a crawled page is your own, never a pack's
         if root_url:
             meta["root_url"] = root_url
+        meta["topic"] = topic or site_topic(root_url or str(meta.get("source") or ""))
         return self._ingest(meta.get("source", root_url), doc.page_content, meta, replace=True, outside=True,
                             markup=False, removed=getattr(doc, "hidden_removed", None))
 
@@ -1008,7 +1023,8 @@ class RAGManager:
     # --- DEEP INGEST (WEB/PDF) ---
     def ingest_url(self, url: str, crawler_options: Optional[Dict[str, Any]] = None,
                    stop: Optional[threading.Event] = None,
-                   progress: Optional[Callable[[int, int, str], None]] = None, *, actor: str = "") -> Dict[str, Any]:
+                   progress: Optional[Callable[[int, int, str], None]] = None, *, actor: str = "",
+                   topic: str = "") -> Dict[str, Any]:
         """
         Crawls a URL and stores each page as soon as it is read. A snapshot is taken first, so a bad crawl can
         be rolled back. crawler_options apply to this crawl only (see CrawlerManager). Setting stop ends the
@@ -1019,6 +1035,12 @@ class RAGManager:
         "outcome" is "success" (pages stored, nothing failed or reserved), "partial" (pages stored, but others
         failed, were reserved by the site, or the crawl was stopped) or "failure" (nothing stored). "skipped"
         and "failed" list pages as {"url", "reason", "opt_out"}.
+
+        Every page carries `topic` (the person's choice, or site_topic(url): an AI's crawl takes the derived one). A
+        crawl of the same start address again replaces its pages; when it succeeded and read the whole site (no page
+        limit or request budget reached, nothing failed, reserved or stopped), the excerpts of its earlier pages it no
+        longer reached are let go of too ("removed": their addresses), only where this crawl was their last holder
+        (release_holder). A partial or failed crawl removes nothing.
         """
         crawler_class = _crawler_class()
         if not crawler_class:
@@ -1036,18 +1058,28 @@ class RAGManager:
             # the person's actor only when there is one: a stand-in crawler class of earlier tests takes none
             crawler = crawler_class(self.framework, crawler_options, **({"actor": actor} if actor else {}))
             self.logger.info(f"Invoking Crawler for {url}...")
+            topic = topic or site_topic(url)
+            stored = set()
             for doc in crawler.iter_crawl(url, stop=stop, progress=progress):
-                added = self.ingest_page(doc, url)
+                added = self.ingest_page(doc, url, topic)
                 if added:
                     pages += 1
                     chunks += added
+                    stored.add(str((getattr(doc, "metadata", None) or {}).get("source") or url))
         except KnowledgeBaseError as e:
             self._fail(e)
             error = self.last_error
         except Exception as e:
             error = redact_secrets(str(e))
             self.logger.error(f"Deep Ingest failed: {error}")
-        return dict(self._crawl_result(crawler, pages, chunks, error), snapshot=snapshot)
+        result = dict(self._crawl_result(crawler, pages, chunks, error), snapshot=snapshot, removed=[])
+        if result["outcome"] == "success" and getattr(crawler, "complete", False):
+            seen = stored | {str(u) for u in getattr(crawler, "visited", ())}
+            if self.release_holder(f"{CRAWL_HOLDER}{url}", sources=lambda s: s not in seen):
+                result["removed"] = list(self.last_released)
+                if self.last_released:
+                    result["message"] += f"; {len(self.last_released)} page(s) no longer on the site were removed"
+        return result
 
     @staticmethod
     def _crawl_result(crawler: Any, pages: int, chunks: int, error: Optional[str]) -> Dict[str, Any]:

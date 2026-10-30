@@ -799,6 +799,15 @@ class URLInputDialog(QDialog):
         self.spin_delay.setToolTip("Delay between requests (be polite!)")
         opt_layout.addRow("Request Delay:", self.spin_delay)
 
+        # Knowledge always belongs to a topic: every page of this crawl carries it. Empty: the site's name
+        # (docs.example.com), which a crawl an AI started takes too.
+        self.txt_topic = QLineEdit()
+        self.txt_topic.setPlaceholderText("from the site's name")
+        self.txt_topic.setToolTip("The topic every page of this crawl belongs to (a name such as llama.cpp or "
+                                  "rk3588-npu); empty: the site's name. A crawl of the same site again replaces "
+                                  "its pages.")
+        opt_layout.addRow("Topic:", self.txt_topic)
+
         grp_options.setLayout(opt_layout)
         layout.addWidget(grp_options)
 
@@ -825,6 +834,13 @@ class URLInputDialog(QDialog):
             QMessageBox.warning(self, "Invalid URLs",
                 f"The following URLs are invalid:\n" + "\n".join(invalid_urls[:5]))
             return
+        if self.get_topic():
+            from orchestrator.Core.community_pack import check_topic
+            try:
+                check_topic(self.get_topic())
+            except ValueError as e:
+                QMessageBox.warning(self, "Topic", str(e))
+                return
 
         self.accept()
 
@@ -843,6 +859,10 @@ class URLInputDialog(QDialog):
 
         urls = [line.strip() for line in text.split('\n') if line.strip()]
         return urls
+
+    def get_topic(self) -> str:
+        """The topic the person named for the crawl's pages ("" for the site's name)."""
+        return self.txt_topic.text().strip()
 
     def get_options(self):
         """Get crawl options as dict."""
