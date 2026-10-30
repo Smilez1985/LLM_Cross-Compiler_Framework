@@ -524,10 +524,11 @@ Build arguments the engine passes:
 | `LLAMA_CPP_TAG`, `LLAMA_CPP_COMMIT` | the llama.cpp pin in `configs/llama_runtime.yml` (`b11429`, `d81235049384534c167caea52b85a694f6103d14`). The setting `llama_cpp_version` cannot move them: a different value only gives a warning in the build log |
 | `LLAMA_CMAKE_ARGS` | only when the Dockerfile declares `ARG LLAMA_CMAKE_ARGS`: the build recipe's plan for the conversion tools on this machine, as `-DNAME=VALUE` words ([section 5.1](#51-llamacpp-in-the-image-recipes-not-binaries)) |
 | `BUILD_JOBS` | the setting `build_jobs`, only if it is greater than 0; self-healing lowers it to 1 after a compiler ran out of memory |
-| `USER_ID`, `GROUP_ID` | the host user's ids (Linux and macOS, when the host user is not root) |
 
 The three llama.cpp arguments come only from the pin and the recipe: build arguments a build request carries
-cannot replace them.
+cannot replace them. The host user's ids are not build arguments (since 3.3.0): the image keeps the Dockerfile's
+default build user, and the stage containers run as the host user (the sandbox's `--user`, or the entrypoint's
+`PUID`/`PGID` mapping), so an exported image works on another computer.
 
 What the image must provide (see `targets/Rockchip/dockerfile`):
 

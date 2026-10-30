@@ -113,7 +113,9 @@ def write_file(path, text: str) -> None:
     except FileNotFoundError:
         mode = None
     tmp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+    # O_BINARY (Windows only): a text-mode descriptor would turn every LF into CR LF a second time below the text
+    # layer, which already writes the system's line ends (Path.write_text semantics, as mkstemp gives write_private).
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o666)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)

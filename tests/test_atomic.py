@@ -276,3 +276,24 @@ def test_the_released_note_of_an_uninstall_is_written_atomically(tmp_path, monke
     from orchestrator.Core import community_manager
     source = inspect.getsource(community_manager.CommunityManager.uninstall)
     assert "write_file(note" in source and "note.write_text" not in source
+
+
+def test_write_file_opens_its_temporary_file_in_binary_mode_where_the_system_has_one(tmp_path, monkeypatch):
+    """Windows: os.open without O_BINARY gives a text-mode descriptor whose C runtime turns every LF into CR LF, on top
+    of the text layer's own newline translation (CR CR LF). write_file opens the temporary file with O_BINARY where
+    the system has it, like tempfile.mkstemp does for write_private, so the text layer alone decides the line ends
+    (Path.write_text semantics)."""
+    from orchestrator.utils import atomic
+    real_binary = getattr(os, "O_BINARY", 0)   # Windows: the real flag; elsewhere none
+    fake_binary = 0x40000000   # a stand-in flag the spy swaps back for the real one (or nothing) below
+    monkeypatch.setattr(os, "O_BINARY", fake_binary, raising=False)
+    real_open, flags_seen = os.open, []
+
+    def spy(path, flags, mode=0o777, **kwargs):
+        flags_seen.append(flags)
+        return real_open(path, (flags & ~fake_binary) | (real_binary if flags & fake_binary else 0), mode, **kwargs)
+    monkeypatch.setattr(os, "open", spy)
+    target = tmp_path / "pack-a.released"
+    atomic.write_file(target, "a\nb\n")
+    assert flags_seen and all(f & fake_binary for f in flags_seen), "the temporary file is opened with O_BINARY"
+    assert target.read_text(encoding="utf-8") == "a\nb\n"

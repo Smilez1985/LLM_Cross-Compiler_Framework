@@ -539,10 +539,12 @@ Build-Argumente, die die Engine übergibt:
 | `LLAMA_CPP_TAG`, `LLAMA_CPP_COMMIT` | der llama.cpp-Pin in `configs/llama_runtime.yml` (`b11429`, `d81235049384534c167caea52b85a694f6103d14`). Die Einstellung `llama_cpp_version` kann sie nicht verschieben: Ein anderer Wert ergibt nur eine Warnung im Build-Log |
 | `LLAMA_CMAKE_ARGS` | nur wenn das Dockerfile `ARG LLAMA_CMAKE_ARGS` deklariert: der Plan des Build-Rezepts für die Konvertierungswerkzeuge auf diesem Rechner, als `-DNAME=WERT`-Wörter ([Abschnitt 5.1](#51-llamacpp-im-image-rezepte-keine-binärdateien)) |
 | `BUILD_JOBS` | die Einstellung `build_jobs`, nur wenn sie größer als 0 ist; das Self-Healing senkt sie auf 1, wenn einem Compiler der Speicher ausging |
-| `USER_ID`, `GROUP_ID` | die IDs des Host-Benutzers (Linux und macOS, wenn der Host-Benutzer nicht root ist) |
 
 Die drei llama.cpp-Argumente kommen nur aus dem Pin und dem Rezept: Build-Argumente, die ein Build-Auftrag
-mitbringt, können sie nicht ersetzen.
+mitbringt, können sie nicht ersetzen. Die IDs des Host-Benutzers sind keine Build-Argumente (seit 3.3.0): Das Image
+behält den Standard-Build-Benutzer des Dockerfiles, und die Stufen-Container laufen als Benutzer des Hosts (das
+`--user` der Sandbox oder die Zuordnung `PUID`/`PGID` des Entrypoints), so funktioniert ein exportiertes Image auf
+einem anderen Computer.
 
 Was das Image bieten muss (siehe `targets/Rockchip/dockerfile`):
 
