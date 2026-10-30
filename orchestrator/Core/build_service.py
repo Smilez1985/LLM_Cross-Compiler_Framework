@@ -300,7 +300,10 @@ class BuildService:
 
     def _end_reason(self, state: WorkflowState) -> Optional[str]:
         """The request's end reason (the orchestrator's one rule, Core/build_end.py), None while it runs."""
-        rule = getattr(self._orchestrator, "end_reason_of", None)
+        try:   # the rule of the orchestrator, when there is one (a status read needs none)
+            rule = getattr(self._orchestrator, "end_reason_of", None)
+        except BuildServiceError:
+            rule = None
         if callable(rule):
             try:
                 return rule(state)
