@@ -48,6 +48,9 @@ CLI_PATHS: Dict[str, str] = {
     "ditto eval --repeat": "sp_ditto_eval_repeat",
     "ditto eval --json": "btn_ditto_eval_save",
     "ditto eval --effort": "cb_ditto_eval_effort",
+    "ditto eval --pause-minutes": "sp_ditto_eval_pause",
+    # the paid OpenAI test's yes: Run evaluation... asks it with the calls and tokens it costs (No by default)
+    "ditto eval --i-pay": "btn_ditto_eval_run",
 }
 # Objects that live in a window, and the menu action that opens it (the chat panel's objects need none).
 WINDOW_OBJECTS: Dict[str, str] = {

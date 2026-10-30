@@ -68,7 +68,7 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 
 | Item | Status |
 |---|---|
-| **Real token numbers first.** Count the tokens of every request per provider and model and the cache hits, and settle the 12-hour cache lifetime and the token count of OpenAI with one paid test call that the person starts in their own llmcf with their own key (never from a sandbox or CI; the key never leaves the computer). | planned |
+| **Real token numbers: the person's paid run.** The measurement is built (the evaluation's `tokens` cases and the paid test `openai_paid`); what is left is the run itself: the person starts the paid OpenAI test once in their own llmcf with their own key (never from a sandbox or CI; the key never leaves the computer), and its `openai_cache_check.json` settles the 12-hour cache lifetime and the token count of OpenAI. | planned |
 | **The real context window per model**, with counting, a budget and compaction: Ditto's local model from the measured hardware limits, API models per model, asked from the provider's server where it tells. | planned |
 | **Cloud caching the provider's way**: the provider's own caching and its guides for placing cache points (Anthropic, OpenRouter), the cache lifetime a setting with a short default and a cost limit as soft cap. | planned |
 | **Ditto's archive, phase 1: facts from tool results.** A searchable archive of what Ditto learned about llmcf and building (never the person's private talk), readable by everyone who uses the harness, in its own collection of the existing knowledge-base storage; a newer fact replaces the older one. | planned |

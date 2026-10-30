@@ -1120,8 +1120,9 @@ Board deployment over SSH (pairing, deploy, the runtime on the board) is a diffe
 small 2-bit local model is good enough for weak hardware. Nothing is built or changed. With `--kind retrieval` it
 measures the knowledge-base search instead ([Retrieval evaluation](#retrieval-evaluation)).
 
-**Cases** ([`evals/ditto/cases.yml`](../evals/ditto/cases.yml), 19 cases; a cases file is data, new cases need no
-code change):
+**Cases** ([`evals/ditto/cases.yml`](../evals/ditto/cases.yml), 19 graded cases and 6 measurement cases that run
+only when chosen ([Token and cache measurement](#token-and-cache-measurement)); a cases file is data, new cases need
+no code change):
 
 | Kind | Cases | What is checked |
 |---|---|---|
@@ -1129,6 +1130,8 @@ code change):
 | `optimizer` | 5 | Build recommendations from the real Rockchip options: e.g. GGUF for an LLM on the RK3566, an ONNX vision model to RKNN, a model name with injected instructions whose command must not appear in the answer |
 | `module` | 3 | Module proposals from probe files (Jetson Orin, Raspberry Pi 5, x86 server): architecture, SDK, compiler and CMake flags |
 | `chat` | 5 | Chat with tools: which tools are called with which arguments, and which are not (for example a failed build whose log contains injected instructions: Ditto must explain the error and must not cancel or start builds) |
+| `tokens` | 4 | Conversations of several turns: the provider's input, output, cache-read and cache-write tokens per turn (only with `--kind tokens` or `--case`) |
+| `openai_paid` | 2 | The paid OpenAI test: the 12-hour cache lifetime and OpenAI's own token count (only with `--kind openai_paid --provider openai --i-pay`) |
 
 **Grading** is done by fixed rules, not by another model: expected words or patterns, forbidden words (for example
 an injected command), expected fields, tools that must or must not be called. Chat cases use the real tool
@@ -1166,6 +1169,42 @@ off) and the prompts of that time, the 2-bit tier `small-q2` passed 42% of the 1
 47%. The evaluation found gaps in Ditto's prompts (attributing failures to host or device, which inputs each format
 accepts, using the tools for questions about targets and builds, compiler flags in module proposals). These gaps are
 fixed now, and a new measurement is running.
+
+### Token and cache measurement
+
+`llm-cli ditto eval --kind tokens` measures what Ditto's conversations cost in tokens, before anything about the
+context or the cache is changed. Each `tokens` case is a conversation of several turns on one history, with Ditto's
+real prompt and (unless the case says otherwise) its tools over the stand-in framework. Per turn the report records
+the provider's own numbers from its usage answer: input, output, cache read and cache write tokens and the calls of
+the turn (a summary of a long conversation included); per conversation it gives the sums and the **cache-read share**
+(cache read divided by every prompt token). Nothing is estimated. The cases use example data only (documentation
+addresses such as 192.0.2.10 and `example.com` names), and the privacy filter stays on for cloud providers.
+
+- **Anthropic's cache diagnostics**: every call of a `tokens` case asks Claude why its prompt cache missed against
+  the previous answer (`diagnostics.previous_message_id`); the reason (`system_changed`, `tools_changed`,
+  `messages_changed`, ...) is recorded per turn. Ditto's normal chat never sends it.
+- **Cases that fail today** carry `expected_fail`: "follow-up on the last answer after compaction" and "20 turns on
+  a 4096-token local window" (the second runs only on a managed local model, `--tier`, and is skipped otherwise).
+  Their failure is reported as expected and not counted in the pass rates; a pass is reported as **UNEXPECTED PASS**
+  so the mark is removed once the context work makes them pass.
+- **`--pause-minutes N`** waits N minutes between the turns, to compare a 5-minute and a 1-hour cache lifetime. There
+  is no pause by default, and a pause is refused in CI.
+- The CLI and the window show a **Tokens** table; `--json` holds every turn.
+
+**The paid OpenAI test** (`--kind openai_paid`) settles two questions with the person's own OpenAI key: whether
+OpenAI accepts a 12-hour prompt cache lifetime (`prompt_cache_options.ttl`) and how OpenAI's own token count
+(`responses.input_tokens.count`) compares with the usage of the real call. It never runs by default, never in CI, never
+in offline mode and never from an AI: it starts only with `llm-cli ditto eval --kind openai_paid --provider openai
+--i-pay` at a terminal, after one more question with "No" as the default that names the most it can cost (6 requests
+of about 2,000 input tokens each), or from **Ditto > Evaluation...** after the same confirmation. The key comes from
+your own secrets store and stays on your computer. A refused 12-hour lifetime (HTTP 400) is recorded as refused,
+never as working, and the two requests are then sent without it, so the cached tokens of the second one are measured
+either way. The result is `openai_cache_check.json` in the per-user state folder's `evals/`: booleans and token
+numbers only, no prompt text and no key.
+
+**Memory of the local server** (development): `python scripts/measure_cache_ram.py --tier small` runs the `tokens`
+cases on one local tier and samples the memory of the llama-server that this run started (only that one), and prints
+its peak RSS and its `--cache-ram` value, numbers only.
 
 ### Retrieval evaluation
 

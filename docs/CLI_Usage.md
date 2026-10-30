@@ -1137,7 +1137,9 @@ and repeat). How it works: [Features.md](Features.md#ditto-evaluation).
 | `--provider TEXT` | Provider for the run. Default: AI settings. |
 | `--model TEXT` | Model for the run. Default: AI settings. |
 | `--tier TEXT` | Run against the managed local model of this tier; repeatable (`--tier small --tier small-q2`). Cannot be combined with `--provider`/`--model` (exit code 2). |
-| `--kind [healing\|optimizer\|module\|chat\|retrieval]` | Only cases of this kind; repeatable. `retrieval` runs only when it is chosen here, when `--case` is given without `--kind`, or when the `--cases` file holds retrieval cases. |
+| `--kind [healing\|optimizer\|module\|chat\|retrieval\|tokens\|openai_paid]` | Only cases of this kind; repeatable. `retrieval` runs only when it is chosen here, when `--case` is given without `--kind`, or when the `--cases` file holds retrieval cases. `tokens` (the [token and cache measurement](#token-and-cache-measurement)) runs only when chosen here or by `--case`; `openai_paid` (the paid OpenAI test) only when chosen here, alone, with `--provider openai --i-pay`. |
+| `--pause-minutes FLOAT RANGE` | `tokens` and `openai_paid` only: wait this many minutes between the turns (0.1 to 180), to compare cache lifetimes. Default: no pause. Refused in CI (exit code 2). |
+| `--i-pay` | `openai_paid` only: you start the paid test yourself, billed to your own OpenAI key. The CLI asks once more at the terminal with the most it can cost ("No" is the default); without a terminal, without `--i-pay`, in CI or in offline mode it does not run (exit code 2). |
 | `--rag-variant [fused\|rerank]` | Retrieval only: the search variant to grade; repeatable, one run per variant. `fused` (default): the hybrid search. `rerank`: the hybrid search plus the reranker of `rag_reranker` and its relevance floor. |
 | `--case TEXT` | Only this case ID; repeatable. |
 | `--repeat INTEGER RANGE` | Runs per case, 1 to 20 (default 1). |
@@ -1171,6 +1173,30 @@ of the AI settings names a cloud provider ("No" is the default); a tier that is 
 pointer to **Ditto > Local Models...**. The run goes in the background with progress and **Cancel** and shows the same
 tables (a replaced server of yours is reported, also after Cancel); **Save report...** writes the `--json` report to a
 file you choose. `--min-pass` only sets the exit code for scripts.
+
+#### Token and cache measurement
+
+`llm-cli ditto eval --kind tokens` runs multi-turn conversations with example data and records, per turn, the
+provider's own input, output, cache-read and cache-write tokens (from its usage answer, never an estimate), and per
+conversation the cache-read share; with Claude it also records why the prompt cache missed against the previous
+answer (Anthropic's cache diagnostics). Two cases that fail today are marked `expected_fail`: their failure is not
+counted, and a pass is printed as `UNEXPECTED PASS`. The extra table is **Tokens**.
+
+```bash
+# The token cases against the configured provider, with the report
+llm-cli ditto eval --kind tokens --json tokens.json
+
+# The same on the local 2B model, 6 minutes between the turns (a 5-minute cache has expired by then)
+llm-cli ditto eval --kind tokens --tier small --pause-minutes 6
+
+# The paid OpenAI test (12-hour cache lifetime, OpenAI's own token count), with your own key
+llm-cli ditto eval --kind openai_paid --provider openai --i-pay
+```
+
+The paid test asks once more before it starts ("No" is the default) and names the most it can cost. It writes
+`openai_cache_check.json` into `evals/` of your per-user state folder (booleans and token numbers only) and prints
+where. In the GUI: tick the kind in **Ditto > Evaluation...**, the pause is **Pause between turns**, and
+**Run evaluation...** asks the paid test's question with its cost. Details: [Features.md](Features.md#token-and-cache-measurement).
 
 #### Retrieval evaluation
 
