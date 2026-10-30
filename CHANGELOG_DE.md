@@ -13,6 +13,16 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 ## [3.2.0] - 2026-10-30
 
 ### Geändert
+- `2026-10-30 01:33 UTC` · `v3.2.0` **Ein wiederholtes Tool-Ergebnis geht als Verweis an das Modell** (Konsolidierungskette
+  ctx-slim; Entscheidung: kleinere Tool-Ergebnisse): In Dittos Tool-Schleife (`orchestrator/llm/tool_loop.py`,
+  `ResultIndex`) wird ein Aufruf, dessen Ergebnis Byte für Byte dem eines früheren Aufrufs desselben Tools mit
+  denselben Argumenten gleicht (derselbe sha256; die Reihenfolge der Argumente und die zufällige ID eines Blocks
+  nicht vertrauenswürdiger Daten zählen nicht), mit „same result as tool call #<id>“ beantwortet, solange das
+  frühere Ergebnis noch in der Anfrage steht. Nur Ergebnisse ohne Fehler zählen, jeder Aufruf läuft trotzdem, alte
+  Turns werden nie umgeschrieben, und auf ein Ergebnis, das nicht mehr in der Anfrage steht (ein langes Gespräch,
+  zusammengefasst und weitergeführt), wird nie verwiesen. Die Testvektoren stehen in
+  `tests/fixtures/context_rules/duplicate_result.json`. Damit ist der Roadmap-Punkt „Kleinere Tool-Ergebnisse und
+  sauberere Logs“ erledigt.
 - `2026-10-30 01:29 UTC` · `v3.2.0` **Jedes Log, das ein Modell liest, wird gereinigt, geschwärzt und erst dann gekürzt, und
   die Zusammenfassung des Gesprächs hält Fakten genau** (Konsolidierungskette ctx-slim): Die Self-Healing-Analyse,
   der MCP-Prompt `diagnose_build_failure` (beide über `healing_parts` in `orchestrator/llm/task_prompts.py`, neu

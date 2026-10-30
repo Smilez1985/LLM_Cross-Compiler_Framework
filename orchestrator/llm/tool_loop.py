@@ -12,6 +12,12 @@ model to stop calling tools and answer the user with what it tried, what failed 
 answered without running, and the loop ends at most two turns later. A model that fixes one input error after another makes progress and is not stopped, and
 while the last result is an input error it is fixing, the step budget grows by up to `extra_steps`.
 
+A repeated result (decision: smaller tool results): a call whose result is byte for byte what an earlier call of the same
+tool with the same arguments returned, while that earlier result is still in the request, is answered with
+DUPLICATE_TEXT ("same result as tool call #<id>") instead of the bytes again (ResultIndex). Only results that went
+through without an error count; old turns are never rewritten, and a result no longer in the request (a conversation
+summarized and continued) is never pointed at. The random id of an untrusted-data block is not part of the bytes.
+
 A call that waits for a decision (reason code waiting_for_approval or question_changed, delegation design 3.5) has not
 failed: its result goes back as a plain result (not an error) and never counts toward the failure streak.
 
@@ -25,15 +31,16 @@ also a result whose call is not in the assistant turn before it):
   next question.
 """
 
+import hashlib
 from dataclasses import dataclass, field
-from typing import Any, Callable, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from orchestrator.llm.errors import Refused
-from orchestrator.llm.types import (ChatRequest, ChatResult, Message, ToolCall, ToolSpecLLM, Usage,
+from orchestrator.llm.types import (ChatRequest, ChatResult, Message, ToolCall, ToolSpecLLM, Usage, json_dumps,
                                     tool_result_text)
 from orchestrator.tools.normalize import PENDING_CODES as _PENDING
 from orchestrator.utils.helpers import redact_secrets
-from orchestrator.utils.untrusted import wrap_untrusted
+from orchestrator.utils.untrusted import without_boundary_ids, wrap_untrusted
 
 ExecuteTool = Callable[[str, dict], Any]
 
@@ -46,6 +53,40 @@ INPUT_ERROR_CODES = frozenset({"unknown_argument", "missing_argument", "invalid_
 PENDING_CODES = frozenset(_PENDING)
 # The result of a call that never ran because the answer ended before it was complete (length limit).
 CALL_NOT_RUN = "Not run: the answer was cut off before this tool call was complete."
+# The answer to a call whose result is byte for byte one still in the request (ResultIndex).
+DUPLICATE_TEXT = "same result as tool call #{call_id}"
+
+
+def result_key(name: str, arguments: Any, text: str) -> Tuple[str, str, str]:
+    """What makes two tool results the same: the tool, its arguments (as json_dumps writes them, so their order does
+    not matter) and the sha256 of the result text without the random ids of its untrusted-data blocks."""
+    digest = hashlib.sha256(without_boundary_ids(text).encode("utf-8", "surrogatepass")).hexdigest()
+    return str(name), json_dumps(arguments if arguments is not None else {}), digest
+
+
+class ResultIndex:
+    """The successful text results in a request, by result_key, each with the id of the call that first returned it.
+    `sent(call, text)` is what goes to the model for a new result: DUPLICATE_TEXT naming that call when the same result
+    is still in the request, else the text itself (which is then indexed)."""
+
+    def __init__(self, messages: Sequence[Message] = ()):
+        self._seen: Dict[Tuple[str, str, str], str] = {}
+        calls: Dict[str, ToolCall] = {}
+        for msg in messages:
+            if msg.role == "assistant":
+                calls.update({c.id: c for c in msg.tool_calls})
+            elif msg.role == "tool" and not msg.is_error and isinstance(msg.content, str):
+                call = calls.get(msg.tool_call_id or "")
+                if call is not None and not call.parse_error:
+                    self._seen.setdefault(result_key(call.name, call.arguments, msg.content), call.id)
+
+    def sent(self, call: ToolCall, text: str) -> str:
+        key = result_key(call.name, call.arguments, text)
+        original = self._seen.get(key)
+        if original is not None and original != call.id:
+            return DUPLICATE_TEXT.format(call_id=original)
+        self._seen.setdefault(key, call.id)
+        return text
 
 
 def open_tool_calls(messages: Sequence[Message]) -> List[ToolCall]:
@@ -102,6 +143,7 @@ def run_tool_loop(client: Any, request: ChatRequest, execute_tool: ExecuteTool, 
     early stop). `execute_tool(name, arguments)` returns the result (text, dict or pydantic model) or raises on
     failure; an exception's `code` and `field` (ToolError) tell progress from a repeat."""
     history = list(request.messages)
+    seen = ResultIndex(history)  # results still in this request (a summarized conversation's are not)
     new: List[Message] = []
     results: List[ChatResult] = []
     usage = Usage()
@@ -140,7 +182,8 @@ def run_tool_loop(client: Any, request: ChatRequest, execute_tool: ExecuteTool, 
             else:
                 waiting = False
                 try:
-                    outcome = Message.tool_result(call.id, tool_result_text(execute_tool(call.name, call.arguments)))
+                    text = tool_result_text(execute_tool(call.name, call.arguments))
+                    outcome = Message.tool_result(call.id, seen.sent(call, text))
                 except Exception as e:  # the model sees the failure and can adapt
                     code = str(getattr(e, "code", "") or "failed")
                     waiting = code in PENDING_CODES

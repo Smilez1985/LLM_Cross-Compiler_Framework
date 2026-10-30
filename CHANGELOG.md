@@ -12,6 +12,15 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 ## [3.2.0] - 2026-10-30
 
 ### Changed
+- `2026-10-30 01:33 UTC` · `v3.2.0` **A repeated tool result goes to the model as a pointer** (consolidation chain ctx-slim;
+  decision: smaller tool results): in Ditto's tool loop (`orchestrator/llm/tool_loop.py`, `ResultIndex`), a call
+  whose result is byte for byte what an earlier call of the same tool with the same arguments returned (the same
+  sha256; the order of the arguments and the random id of an untrusted-data block do not count) is answered with
+  "same result as tool call #<id>" while that earlier result is still in the request. Only results that went
+  through without an error count, every call still runs, old turns are never rewritten, and a result that is no
+  longer in the request (a long conversation summarized and continued) is never pointed at. The test vectors are in
+  `tests/fixtures/context_rules/duplicate_result.json`. With this the roadmap item "Smaller tool results and
+  cleaner logs" is done.
 - `2026-10-30 01:29 UTC` · `v3.2.0` **Every log a model reads is cleaned, scrubbed and then cut, and the conversation summary
   keeps facts exact** (consolidation chain ctx-slim): the self-healing analysis, the MCP prompt
   `diagnose_build_failure` (both through `healing_parts` in `orchestrator/llm/task_prompts.py`, new `log_for_ai`) and
