@@ -331,10 +331,12 @@ def test_the_chat_client_finds_the_managed_server_of_its_state_folder(tmp_path, 
 
 def test_the_target_tool_models_keep_their_schemas():
     from orchestrator.tools.tools_targets import TargetCheckIn, TargetDetailsOut
-    assert list(TargetCheckIn.model_fields) == ["target", "check_files"]
+    # Round 36 (on purpose): check_image and build_image, the read-only status of the build container image.
+    assert list(TargetCheckIn.model_fields) == ["target", "check_files", "check_image"]
     assert list(TargetDetailsOut.model_fields) == [
         "notes", "schema_version", "support_level", "boards", "formats", "default_board", "target", "trust",
-        "untested", "description", "assumptions", "base_image", "base_image_reason", "checked_files", "problems"]
+        "untested", "description", "assumptions", "base_image", "base_image_reason", "checked_files", "problems",
+        "build_image"]
     schema = TargetCheckIn.model_json_schema()
     assert schema["additionalProperties"] is False and schema["required"] == ["target"]
     assert schema["properties"]["target"] == {"description": "Target id, e.g. Rockchip", "maxLength": 64,
@@ -352,7 +354,12 @@ def test_the_target_tool_input_schema_an_ai_reads_is_the_one_of_before():
                        "type": "string"},
             "check_files": {"default": False, "description": "Also check the target's files (target.yml, Dockerfile "
                                                              "pins, scripts) the way a module or pack is checked",
-                            "title": "Check Files", "type": "boolean"}}}
+                            "title": "Check Files", "type": "boolean"},
+            # round 36 (on purpose): the build container image's status on request
+            "check_image": {"default": False, "description": "Also show the target's build container image: how many "
+                                                             "are on this computer and whether an offline build could "
+                                                             "make one (each source by its label)",
+                            "title": "Check Image", "type": "boolean"}}}
 
 
 def test_the_shared_target_models_keep_their_schemas():

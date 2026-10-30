@@ -29,7 +29,6 @@ on Rocky Linux 9.8 with Podman 5.8.2 and buildah 1.43.1 (2026-10-23) and against
   cache export and import, or its drivers. llmcf's Hailo images are planned for BuildKit (HAILO_PLAN).
 """
 
-import hashlib
 import json
 import os
 import socket
@@ -292,14 +291,13 @@ def save_image(image: Any, path: Any, *, named: Any = True, cancelled: Optional[
     archive carries (True: the image's own, or one name); `cancelled()` is called between two chunks and may raise to
     stop. The one docker save of the framework: the deployment manager's package export, the security scan's archive
     and the export of a build container image (Core/build_image.py) use it."""
-    digest = hashlib.sha256()
     with open(path, "wb") as handle:
         for chunk in image.save(named=named):
             if cancelled is not None:
                 cancelled()
             handle.write(chunk)
-            digest.update(chunk)
-    return digest.hexdigest()
+    from orchestrator.utils.helpers import sha256_file   # the one hash (framework code only; not for the script use)
+    return sha256_file(path)
 
 
 def podman_refusal(feature: str, engine: str) -> Optional[str]:
