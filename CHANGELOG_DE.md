@@ -121,6 +121,11 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   einen Sprung oder einen Proxy-Befehl nennt, jetzt über den OpenSSH-Transport (`RemoteSession`, das Deploy), und wo
   das nicht geht (kein `ssh`, ein Einmal-Passwort, ein an den gezeigten Fingerabdruck gebundener Schritt), wird der
   Schritt in klaren Worten abgelehnt (`needs_openssh`), statt am Sprung vorbei direkt zu verbinden.
+- `2026-10-30 00:24 UTC` · `v3.2.0` **Der Benchmark-Container läuft ohne Netz und ohne Capabilities** ([Design](docs/DESIGN_DE.md#installer-plattformen-und-abhängigkeiten)):
+  Der llama-bench-Container des Benchmark-Fensters bekommt `network_mode="none"`, keine Capabilities und keine
+  neuen Rechte (er liest nur ein Modell aus dem Cache und gibt Zahlen aus). Ein Test hält jetzt die zwei Stellen
+  fest, die einen Container mit `containers.run` von docker-py starten (den Trivy-Scan und den Benchmark), damit ein
+  neuer Container den einen Container-Helfer nicht unbemerkt umgeht.
 
 ## [3.1.0] - 2026-10-29
 

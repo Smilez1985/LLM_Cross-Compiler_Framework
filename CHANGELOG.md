@@ -107,6 +107,11 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   OpenSSH transport (`RemoteSession`, the deploy), and where that cannot be (no `ssh`, a one-time password, a step
   bound to the fingerprint shown) the step is refused in plain words (`needs_openssh`) instead of connecting
   directly past the jump.
+- `2026-10-30 00:24 UTC` · `v3.2.0` **The benchmark container runs without network or capabilities** ([design](docs/DESIGN.md#installer-platforms-and-dependencies)):
+  the benchmark window's llama-bench container gets `network_mode="none"`, no capabilities and no new privileges
+  (it only reads a model from the cache and prints numbers). A test now pins the two places that start a container
+  with docker-py's `containers.run` (the Trivy scan and the benchmark), so a new container cannot bypass the one
+  container helper unnoticed.
 
 ## [3.1.0] - 2026-10-29
 
