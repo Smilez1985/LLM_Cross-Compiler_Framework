@@ -296,14 +296,14 @@ def kv_fallback_text(wanted: str) -> str:
     """What the person reads when the server runs with f16 instead of the automatic quantised cache."""
     return (f"Ditto's server runs with the f16 KV cache instead of {wanted}: this llama.cpp build has no flash "
             "attention, which a quantised cache needs, so the same memory holds a shorter context. Use a build with "
-            "flash attention, or set local_kv_cache to f16 to make it your choice (llm-cli ditto cache set kv f16).")
+            "flash attention, or set the setting local_kv_cache to f16 to make it your choice.")
 
 
 def kv_needs_flash_attention_text(kind: str) -> str:
     """The refusal when the person set a quantised cache and the build has no flash attention."""
     return (f"Ditto's server could not start: your setting local_kv_cache = {kind} quantises the KV cache, and this "
-            "llama.cpp build has no flash attention, which a quantised cache needs. Set local_kv_cache to f16 or auto "
-            "(llm-cli ditto cache set kv f16), or use a build with flash attention.")
+            "llama.cpp build has no flash attention, which a quantised cache needs. Set the setting local_kv_cache to f16 "
+            "or auto, or use a build with flash attention.")
 
 
 _RE_BUILD_INFO = re.compile(r"[^A-Za-z0-9 ._:/()+-]")
