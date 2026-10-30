@@ -48,6 +48,9 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   design, and a replaced decision's history line by its date. `tests/test_docs.py` checks every Markdown file for
   it, and the two messages that still named a round (a Mojo finding about loose knowledge files and a tool
   registration error) say only the rule.
+- `2026-10-30 00:33 UTC` · `v3.2.0` **The README's "What comes next" summarizes the 3.2.0 roadmap** ([roadmap](docs/ROADMAP.md)): a
+  short list of the version in progress (carried-over items, Ditto's context, the board bundle, device runtime and
+  more hardware, decided items waiting for their turn) and what follows after it, linking the full roadmap.
 
 ### Fixed
 - `2026-10-29 23:36 UTC` · `v3.2.0` **Container engine follow-ups: a `DOCKER_HOST` left from Podman, `/dev/dri` under rootless Podman,

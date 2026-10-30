@@ -857,22 +857,25 @@ The knowledge-base, Deep Ingest and community settings are explained in [docs/Fe
 
 ## What comes next
 
-The roadmap lists what is planned; finished items move to the [CHANGELOG](CHANGELOG.md) at release. In short:
+The [roadmap](docs/ROADMAP.md) lists what is planned; finished items move to the [CHANGELOG](CHANGELOG.md). Version
+3.2.0 is in progress. In short:
 
-- **In progress:** the remaining sign-in methods per access type, browser sign-in and cloud platforms (API keys,
-  local engines and the `ant` profile work in the GUI and with `llm-cli ditto login`; the Claude-subscription
-  provider is removed, and Claude subscribers use MCP or an API key); a new
-  Ditto evaluation run with the improved prompts; the self-built llama.cpp runtime on the board (the command line
-  works; the GUI, the MCP tools and a run on a real board follow).
-- **Planned:** recipes as target templates, then right after them a rotation stage before quantization (SpinQuant,
-  QuaRot; only where the format supports it) and a generic ARM64 target for the Raspberry Pi; targets for NVIDIA GPUs
-  and AMD (Ryzen Z1 Extreme); later Llama-family models in every format, ONNX, Hailo, Intel and Qualcomm; LoRA and
-  large models, and supply-chain hardening. New targets start from the hardware probe, and a benchmark on the board
-  is the proof ("tested on <board>"). Builds in the cloud are not planned.
-- **Rust where the framework meets the network or a board:** the network MCP gateway with the MQTT broker rumqttd
-  inside it, and the board's root helper as a static binary; shipped prebuilt and signed (Sigstore, checksums in the
-  repository), building them yourself stays an opt-in. No prebuilt Docker images for targets, no Go, the GUI stays
-  Qt.
+- **Carried over from 3.1.0:** the remaining sign-in methods per access type (browser sign-in where the vendor allows
+  it, cloud platforms), the last pass over the German texts of every window, and the published community index.
+- **Ditto's context:** real token numbers per provider and model, one memory budget for Ditto's local server, the
+  real context window per model with compaction, cloud caching the provider's way, and Ditto's archive of what it
+  learned about llmcf and building (never the person's private talk).
+- **The board bundle:** a complete, hash-listed bundle as a third deploy way, an idempotent installer on the board,
+  the token-saving gateway `llmcf-gateway` in Rust, voice and vision as bundle components, and MCP on the board
+  (loopback first, the network only with TLS).
+- **Device runtime and more hardware:** recipes as target templates, a rotation stage before quantization, a generic
+  ARM64 target for the Raspberry Pi, targets from the hardware probe proven on the board, the self-built llama.cpp
+  with CUDA and on Windows, and targets for NVIDIA GPUs and the AMD Ryzen Z1 Extreme.
+- **Decided, waiting for its turn:** offline builds of the build container image, delegations, an own `llmcf`
+  account, board backups pulled by the PC, and the shared OpenSSH connection for a board step.
+
+After 3.2.0: the build service with one queue across all programs, LoRA and large models (3.3.0), supply-chain
+hardening (3.4.0), and Rust where the framework meets the network or a board. Builds in the cloud are not planned.
 
 Full list: [docs/ROADMAP.md](docs/ROADMAP.md).
 
