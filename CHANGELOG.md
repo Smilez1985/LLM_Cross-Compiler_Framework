@@ -117,7 +117,8 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   bound to the fingerprint shown) the step is refused in plain words (`needs_openssh`) instead of connecting
   directly past the jump. Such a board's SSH port is not checked directly from this computer (it answers only
   through the jump host), neither before the deploy nor while waiting for the board to come back: the login through
-  the jump tells.
+  the jump tells. A deploy bound to the fingerprint shown to such a board says that the jump, which only OpenSSH
+  takes, is why it cannot go (not a missing paramiko).
 - `2026-10-30 00:24 UTC` · `v3.2.0` **The benchmark container runs without network or capabilities** ([design](docs/DESIGN.md#installer-platforms-and-dependencies)):
   the benchmark window's llama-bench container gets `network_mode="none"`, no capabilities and no new privileges
   (it only reads a model from the cache and prints numbers). A test now pins the two places that start a container
