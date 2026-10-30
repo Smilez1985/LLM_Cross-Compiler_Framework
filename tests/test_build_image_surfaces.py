@@ -28,6 +28,16 @@ def no_docker(monkeypatch, framework, client=None):
     return engine
 
 
+def with_entrypoint(engine):
+    """The framework's own entrypoint.sh in the engine's app folder (the test framework's is a temporary folder): every
+    staged build context copies it, so the labels of a build, and the ones an import expects, need it."""
+    from pathlib import Path
+    entrypoint = Path(engine.base_dir) / "entrypoint.sh"
+    if not entrypoint.is_file():
+        entrypoint.write_text("#!/bin/sh\nexec \"$@\"\n", encoding="utf-8")
+    return entrypoint
+
+
 def test_the_cli_plan_names_each_source_and_its_json_carries_labels_only(cli, booted_framework, monkeypatch):
     from orchestrator.Core import build_image
     monkeypatch.setattr(build_image, "local_llama_copy", lambda state: None)
@@ -79,7 +89,7 @@ def test_the_import_compares_with_the_labels_a_build_here_looks_for(booted_frame
     the one a build of the target here would compute is refused."""
     from orchestrator.Core import build_image
     from orchestrator.Core.builder import IMAGE_LABEL, INPUTS_LABEL
-    no_docker(monkeypatch, booted_framework, Docker())
+    with_entrypoint(no_docker(monkeypatch, booted_framework, Docker()))
     expected = build_image.expected_labels(booted_framework, "Rockchip")
     assert expected[IMAGE_LABEL] == "Rockchip" and len(expected[INPUTS_LABEL]) == 64
     assert build_image.expected_labels(booted_framework, "Rockchip") == expected, "the same settings: the same labels"
@@ -159,3 +169,22 @@ def test_the_menu_opens_the_window(qapp, booted_framework, monkeypatch):
     window = SimpleNamespace(framework=booted_framework)
     menu.open_window(window)
     assert opened["window"] is window
+
+
+def test_the_import_expects_the_labels_of_the_build_context_a_build_stages(booted_framework, tmp_path, monkeypatch):
+    """Integration seam (offline-builder-image x development's image inputs): a build computes INPUTS_LABEL on its
+    staged build context, whose CONTEXT_COPIES include docker/entrypoint.sh, and with the target's installed digest;
+    expected_labels must give exactly that, or every imported image built here with the same settings is refused."""
+    from orchestrator.Core import build_image
+    from orchestrator.Core.builder import BuildConfiguration, BuildProgress, BuildStatus, ModelFormat
+    from orchestrator.Core.community_manager import installed_digest
+    from orchestrator.utils.build_context import stage_build_context
+    engine = no_docker(monkeypatch, booted_framework, Docker())
+    folder = engine.resolve_target_dir("Rockchip")
+    with_entrypoint(engine)
+    staged = stage_build_context(folder, engine.base_dir, tmp_path / "context", "Dockerfile")
+    config = BuildConfiguration(build_id="b1", timestamp="", model_source="-", target_arch="Rockchip",
+                                target_format=ModelFormat.GGUF, output_dir="-", use_gpu=False)
+    config.target_pack_sha256 = installed_digest(folder)
+    built = engine.image_labels(config, BuildProgress("b1", BuildStatus.QUEUED, ""), staged)[1]
+    assert build_image.expected_labels(booted_framework, "Rockchip") == built

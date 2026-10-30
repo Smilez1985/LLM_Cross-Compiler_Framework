@@ -103,8 +103,10 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   kommt als Datei auf einen anderen Offline-Rechner: `llm-cli build image export TARGET --to DATEI` schreibt
   `docker save` und `DATEI.sha256`; `llm-cli build image import DATEI [--sha256 HEX] [--target T]` prüft die sha256
   und die Labels des Images (sein Target und die Eingaben, die ein Build hier berechnet, sodass ein Image für eine
-  andere CPU oder einen anderen llama.cpp-Pin abgelehnt wird), bevor `docker load` oder `podman load` etwas lädt.
-  Beide folgen der Platzregel und sind Sache der Person (eine KI bekommt `needs_person`). Bekannte Grenze: Ein
+  andere CPU oder einen anderen llama.cpp-Pin abgelehnt wird), bevor `docker load` oder `podman load` etwas lädt;
+  diese Eingaben werden auf einem Build-Kontext berechnet, der genau wie bei einem Build bereitgelegt wird (die
+  kopierten Module, Skripte und der Entrypoint des Frameworks), mit dem festgehaltenen Digest des Targets, sodass ein
+  Image mit denselben Einstellungen von einem anderen Rechner angenommen wird. Beide folgen der Platzregel und sind Sache der Person (eine KI bekommt `needs_person`). Bekannte Grenze: Ein
   `--add-host`-Eintrag mit einer IPv6-Adresse nutzt die Form `NAME=[ADRESSE]` von buildx, die ein neueres
   docker buildx braucht.
 - `2026-10-30 05:33 UTC` · `v3.2.0` **Die Statistik des Builds im Paket-Manifest und im Build-Eintrag**

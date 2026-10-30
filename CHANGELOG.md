@@ -95,7 +95,9 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   offline computer as a file: `llm-cli build image export TARGET --to FILE` writes `docker save` and `FILE.sha256`;
   `llm-cli build image import FILE [--sha256 HEX] [--target T]` checks the sha256 and the image's labels (its target
   and the inputs a build here computes, so an image tuned to another CPU or another llama.cpp pin is refused) before
-  `docker load` or `podman load` loads anything. Both follow the disk rule and are the person's (an AI gets
+  `docker load` or `podman load` loads anything; those inputs are computed on a build context staged exactly as a
+  build stages it (the copied modules, scripts and the framework's entrypoint) with the target's recorded digest, so
+  an image built with the same settings on another computer is taken. Both follow the disk rule and are the person's (an AI gets
   `needs_person`). Known limit: an `--add-host` entry with an IPv6 address uses buildx's `NAME=[ADDRESS]` form, which
   needs a recent docker buildx.
 - `2026-10-30 05:33 UTC` · `v3.2.0` **The build's statistics in the package manifest and the build record**

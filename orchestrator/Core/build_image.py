@@ -791,15 +791,21 @@ def _tar_json(tar: tarfile.TarFile, name: str) -> Any:
 
 def expected_labels(framework: Any, target: str, *, gpu: bool = False) -> Dict[str, str]:
     """The labels a build of `target` here looks for (IMAGE_LABEL and INPUTS_LABEL with the default build options and
-    this computer's settings: the same computation as the build, BuildEngine.image_labels)."""
+    this computer's settings: the same computation as the build, BuildEngine.image_labels, on a build context staged
+    as a build stages it (utils/build_context.stage_build_context: the inputs cover the files it copies, the
+    framework's entrypoint included) and with the target's digest as a build records it (installed_digest))."""
+    import tempfile
     from orchestrator.Core.builder import BuildConfiguration, BuildProgress, BuildStatus, ModelFormat
-    from orchestrator.Core.community_pack import tree_sha256
+    from orchestrator.Core.community_manager import installed_digest
+    from orchestrator.utils.build_context import stage_build_context
     engine = _engine(framework)
     folder, dockerfile = target_dockerfile(engine, target, gpu)
     config = BuildConfiguration(build_id="image-check", timestamp="", model_source="-", target_arch=target,
                                 target_format=ModelFormat.GGUF, output_dir="-", use_gpu=gpu)
-    config.target_pack_sha256 = tree_sha256(folder)
-    return engine.image_labels(config, BuildProgress("image-check", BuildStatus.QUEUED, ""), dockerfile)[1]
+    config.target_pack_sha256 = installed_digest(folder)
+    with tempfile.TemporaryDirectory(prefix="llmcf-image-check-") as scratch:
+        staged = stage_build_context(folder, engine.base_dir, Path(scratch) / "context", dockerfile.name)
+        return engine.image_labels(config, BuildProgress("image-check", BuildStatus.QUEUED, ""), staged)[1]
 
 
 @dataclass(frozen=True)
