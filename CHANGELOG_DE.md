@@ -21,6 +21,15 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   nutzen jetzt einen Helfer (`community_manager.installed_digest` / `same_content`, über
   `Provenance.installed_unchanged`): Ein seit der Installation unverändertes Paket gilt als der eigene Inhalt des
   Pakets; ein bearbeitetes Target bleibt ein anderes Target.
+- `2026-10-30 00:57 UTC` · `v3.2.0` **Zwei Pakete mit derselben Seite behalten sie füreinander**: Die Id eines Auszugs ist seine Seite und sein
+  Stück, nie sein Paket, deshalb teilten sich zwei installierte Pakete (oder ein Paket und dein eigener Crawl) mit
+  derselben Seite die gespeicherten Auszüge, und der letzte Import besaß sie. Eine neuere Version dieses Pakets ohne die
+  Seite entfernte sie, obwohl das andere Paket sie noch hatte, und dessen Markierung verhinderte einen neuen Import;
+  ebenso entfernte ein neuer Crawl einer Seite die Auszüge eines Pakets davon. Jeder Auszug nennt jetzt seine Halter
+  (`holders`, mit Digest, Thema oder Target jedes Halters in `holder_info`; die Id des Auszugs bleibt gleich); eine
+  neuere Paketversion, ein neuer Crawl oder eine Deinstallation gibt nur den eigenen Halt auf, und ein Auszug geht erst,
+  wenn ihn niemand mehr hält (`RAGManager.release_holder`). Ein geteilter Auszug wird unter dem Thema oder Target jedes
+  Halters gefunden. Früher gespeicherte Auszüge haben einen Halter, den ihre Felder nennen.
 
 ## [3.1.0] - 2026-10-29
 

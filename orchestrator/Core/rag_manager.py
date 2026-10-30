@@ -98,8 +98,50 @@ REMOVED_FIELD = "hidden_removed"
 _SOURCE_FIELDS = ["source", "title", "content_type", "type", "origin_pack", "root_url", "ingested_at",
                   *licences.META_KEYS, REMOVED_FIELD, "chunk_index", "topic", "target"]
 NOT_EXPORTED = "not_exported"   # a source no knowledge pack carries (an installed pack's page, the framework's docs)
+# Who holds an excerpt (one stored point): two installed packs, or a pack and your own crawl, that carry the same page
+# share its points (a point's id is its source and chunk hash, never the pack). HOLDERS lists every holder (a pack's
+# origin_pack, "crawl:<start address>" for your own crawl, "own" for anything else you stored), HOLDER_INFO keeps each
+# holder's own fields (OWNER_FIELDS: its digest, topic or target, start address). A newer version of one pack, a
+# re-crawl or an uninstall releases only its own hold: a point goes when no holder is left (_release).
+HOLDERS = "holders"
+HOLDER_INFO = "holder_info"
+OWN_HOLDER = "own"
+CRAWL_HOLDER = "crawl:"
+OWNER_FIELDS = ("origin_pack", "origin_sha256", "topic", "target", "root_url")
 _RESERVED_PAYLOAD = {"content", "source", "section", "chunk_index", "chunk_hash", "embedding_model", "ingested_at",
-                     "fused_score", "reranker", REMOVED_FIELD}
+                     "fused_score", "reranker", REMOVED_FIELD, HOLDERS, HOLDER_INFO}
+
+
+def holder_of(payload: Dict[str, Any]) -> str:
+    """The holder an excerpt's own fields name: its pack (origin_pack), your crawl of a start address, or "own"."""
+    if payload.get("origin_pack"):
+        return str(payload["origin_pack"])
+    root = payload.get("root_url")
+    return f"{CRAWL_HOLDER}{root}" if root else OWN_HOLDER
+
+
+def holder_info(payload: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """{holder: its own fields} of a stored excerpt; an excerpt stored before holders has one, the one its fields
+    name."""
+    info = payload.get(HOLDER_INFO)
+    if isinstance(info, dict) and info and all(isinstance(v, dict) for v in info.values()):
+        return {str(k): dict(v) for k, v in info.items()}
+    return {holder_of(payload): {k: payload[k] for k in OWNER_FIELDS if payload.get(k) not in (None, "")}}
+
+
+def _with_holders(payload: Dict[str, Any], info: Dict[str, Dict[str, Any]], lead: Optional[str] = None) -> dict:
+    """The payload with these holders; its own fields are those of `lead` (default: the holder they name now, or the
+    first other one: your own pages first)."""
+    payload = dict(payload)
+    lead = lead if lead in info else holder_of(payload)
+    if lead not in info:
+        lead = sorted(info, key=lambda h: (h != OWN_HOLDER and not h.startswith(CRAWL_HOLDER), h))[0]
+        for key in OWNER_FIELDS:
+            payload.pop(key, None)
+        payload.update(info[lead])
+    payload[HOLDERS] = sorted(info)
+    payload[HOLDER_INFO] = info
+    return payload
 
 
 _LOCAL = threading.local()
@@ -832,15 +874,56 @@ class RAGManager:
         per piece. Excerpts of other packs and your own pages stay. False when the knowledge base cannot be written."""
         if not origin_pack or not keep_sha256:
             return False
+        return self.release_holder(origin_pack, keep=lambda own: own.get("origin_sha256") == keep_sha256)
+
+    def release_holder(self, holder: str, keep: Optional[Callable[[Dict[str, Any]], bool]] = None,
+                       sources: Optional[Callable[[str], bool]] = None) -> bool:
+        """Lets `holder` (an installed pack's origin_pack, "crawl:<start address>") go of its excerpts: of every one,
+        or only of those whose holder fields `keep` does not accept, or only of the sources `sources` accepts. An
+        excerpt another holder still has stays (only this holder is taken off it); one nobody holds any more is
+        removed. False when the knowledge base cannot be written."""
+        if not holder:
+            return False
         try:
             def remove(store: "KnowledgeStore"):
                 self._sources = None
-                store.delete_origin_stale(origin_pack, keep_sha256)
+                found = {r.id: r for r in store.records_where(HOLDERS, holder, with_vectors=True)}
+                legacy = "root_url" if holder.startswith(CRAWL_HOLDER) else "origin_pack"   # stored before holders
+                value = holder[len(CRAWL_HOLDER):] if holder.startswith(CRAWL_HOLDER) else holder
+                if holder != OWN_HOLDER:
+                    found.update({r.id: r for r in store.records_where(legacy, value, with_vectors=True)
+                                  if r.id not in found and holder in holder_info(r.payload)})
+                records = [r for r in found.values()
+                           if (sources is None or sources(str(r.payload.get("source") or "")))
+                           and not (keep and keep(holder_info(r.payload).get(holder, {})))]
+                self._release(store, records, holder)
             self._with_store(remove)
             return True
         except KnowledgeBaseError as e:
             self._fail(e)
             return False
+
+    @staticmethod
+    def _release(store: "KnowledgeStore", records, holder: str) -> None:
+        """Takes `holder` off these stored points (read with their vectors): a point nobody else holds is removed, one
+        another holder has keeps that holder's fields."""
+        from orchestrator.rag.store import DENSE, sparse_of
+        gone, kept = [], []
+        for record in records:
+            info = holder_info(record.payload)
+            if holder not in info:
+                continue
+            info.pop(holder)
+            vector = record.vector if isinstance(record.vector, dict) else {}
+            if not info or vector.get(DENSE) is None:
+                gone.append(record.id)
+                continue
+            kept.append(store.point(record.id, list(vector[DENSE]), sparse_of(vector),
+                                    _with_holders(record.payload, info)))
+        if kept:
+            store.upsert(kept)
+        if gone:
+            store.delete_ids(gone)
 
     def ingest_page(self, doc: Any, root_url: str = "") -> int:
         """Stores one page the crawler extracted (a crawler Document: page_content, metadata and hidden_removed, the
@@ -903,11 +986,21 @@ class RAGManager:
                            chunk_hash=chunk.hash, embedding_model=embedder.model_id, ingested_at=now)
             payloads.append(payload)
 
+        me = holder_of(meta)
+
         def write(store: "KnowledgeStore"):
             self._sources = None
+            # the holders the points have already (another pack, your own crawl of the same page) stay
+            before = {r.id: r.payload for r in store.retrieve(ids, with_vectors=False)}
+            for pid, payload in zip(ids, payloads):
+                info = holder_info(before[pid]) if pid in before else {}
+                info[me] = {k: payload[k] for k in OWNER_FIELDS if payload.get(k) not in (None, "")}
+                payload.update(_with_holders(payload, info, me))
             store.upsert([store.point(*row) for row in zip(ids, dense, sparse_vectors, payloads)])
-            if replace:
-                store.delete_stale(source, ids)
+            if replace:   # what this source's new version no longer has: only this holder lets go of it
+                keep = set(ids)
+                self._release(store, [r for r in store.source_records(source, with_vectors=True) if r.id not in keep],
+                              me)
 
         self._with_store(write)
         return len(ids)
@@ -1380,6 +1473,8 @@ class RAGManager:
         records = self._with_store(lambda store: list(store.records()))
         for record in records:
             payload = dict(record.payload or {})
+            for key in (HOLDERS, HOLDER_INFO):   # this installation's bookkeeping, never part of a page
+                payload.pop(key, None)
             yield {"source": payload.pop("source", ""), "content": payload.pop("content", ""), "metadata": payload}
 
     def clear_knowledge_base(self) -> bool:

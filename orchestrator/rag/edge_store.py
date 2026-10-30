@@ -321,10 +321,25 @@ class EdgeKnowledgeStore(KnowledgeStore):
         for record in self._scroll(512, list(fields)):
             yield dict(record.payload or {})
 
-    def source_records(self, source: str) -> Iterator[StoredRecord]:
+    def source_records(self, source: str, with_vectors: bool = False) -> Iterator[StoredRecord]:
         """The points of one source (filtered on the `source` payload field)."""
-        for record in self._scroll(256, True, flt=self._source_filter(source)):
+        for record in self._scroll(256, True, with_vectors, flt=self._source_filter(source)):
             yield _record(record)
+
+    def records_where(self, key: str, value: str, with_vectors: bool = False) -> Iterator[StoredRecord]:
+        """The points whose payload field `key` is `value`, or holds it (a list field such as the holders)."""
+        flt = qe.Filter(must=[qe.FieldCondition(key=key, match=qe.MatchValue(value=value))])
+        for record in self._scroll(256, True, with_vectors, flt=flt):
+            yield _record(record)
+
+    def delete_ids(self, point_ids: Sequence[str]) -> None:
+        """Removes exactly these points."""
+        if not point_ids:
+            return
+        shard = self._shard
+        shard.update(qe.UpdateOperation.delete_points([str(i) for i in point_ids]))
+        shard.flush()
+        self.written += 1
 
     def retrieve(self, point_ids: Sequence[str], with_vectors: bool = True) -> List[StoredRecord]:
         return [_record(r) for r in self._shard.retrieve([str(i) for i in point_ids], with_payload=True,

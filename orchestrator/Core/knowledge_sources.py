@@ -72,7 +72,10 @@ def belongs_to(entry: Dict[str, Any], topic: Optional[str]) -> bool:
     if not topic:
         return True
     wanted = str(topic).strip().casefold()
-    return any(str(entry.get(key) or "").casefold() == wanted for key in ("topic", "target"))
+    # an excerpt several packs (or a pack and your own crawl) hold belongs to the topic or target of each of them
+    holders = entry.get("holder_info")
+    owners = [entry] + [v for v in holders.values() if isinstance(v, dict)] if isinstance(holders, dict) else [entry]
+    return any(str(owner.get(key) or "").casefold() == wanted for owner in owners for key in ("topic", "target"))
 
 
 def carried(entry: Dict[str, Any]) -> str:

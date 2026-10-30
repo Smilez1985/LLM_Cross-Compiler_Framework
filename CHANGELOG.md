@@ -19,6 +19,14 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   install check now use one helper (`community_manager.installed_digest` / `same_content`, over
   `Provenance.installed_unchanged`): an installed pack unchanged since its install counts as the pack's own content;
   an edited target is still another target.
+- `2026-10-30 00:57 UTC` · `v3.2.0` **Two packs that hold the same page keep it for each other**: an excerpt's id is its page and chunk, never its
+  pack, so two installed packs (or a pack and your own crawl) carrying the same page shared the stored excerpts, and
+  the last import owned them. A newer version of that pack that dropped the page removed it while the other pack still
+  held it, and that pack's marker kept it from being imported again; a re-crawl of a page likewise removed a pack's
+  excerpts of it. Every excerpt now names its holders (`holders`, with each holder's digest, topic or target in
+  `holder_info`; the excerpt id is unchanged); a newer pack version, a re-crawl or an uninstall lets go of only its
+  own hold, and an excerpt goes when nobody holds it any more (`RAGManager.release_holder`). A shared excerpt is found
+  under the topic or target of every holder. Excerpts stored before this name one holder, the one their fields name.
 
 ## [3.1.0] - 2026-10-29
 
