@@ -32,7 +32,9 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   (die letzten 6.000 Zeichen für den Self-Healing-Prompt). Vorher schickte der Self-Healing-Prompt die rohen letzten
   6.000 Zeichen (mit Farbcodes, neu gezeichnetem Fortschritt, einem Pfad dieses Computers und einem Secret), so
   konnten ein paar tausend wiederholte Zeilen den Fehler daraus verdrängen. `read_build_log` behält die rohen
-  Zeilennummern (`first_line`, `before_line`): Eine zusammengefasste Zeile zählt als die Zeilen, für die sie steht.
+  Zeilennummern (`first_line`, `before_line`): Eine zusammengefasste Zeile zählt als die Zeilen, für die sie steht,
+  und eine zusammengefasste Folge erscheint an der Grenze von 48.000 Zeichen ganz oder gar nicht, so beginnt die
+  nächste Seite noch mit ihr.
   Die eigene Log-Ansicht der Person (das Live-Log des Builders) bleibt roh. Die Suche in der Wissensbasis bei einer
   Self-Healing-Aufgabe liest die letzten drei gereinigten Zeilen. Der Systemtext von Dittos Gesprächszusammenfassung
   ist nach `task_prompts.py` umgezogen (`SUMMARY_SYSTEM`, eine Quelle; der alte Name in `Core/ditto_manager.py` ist
