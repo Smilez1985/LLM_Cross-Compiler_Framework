@@ -1227,7 +1227,9 @@ nur den Exit-Code für Skripte.
 eigenen Eingabe-, Ausgabe-, Cache-Lese- und Cache-Schreib-Tokens des Anbieters fest (aus seiner Usage-Antwort, nie
 geschätzt) und je Gespräch den Anteil aus dem Cache; mit Claude hält sie auch fest, warum der Prompt-Cache gegenüber
 der vorigen Antwort nicht getroffen hat (Anthropics Cache-Diagnose). Zwei Fälle, die heute scheitern, sind mit
-`expected_fail` markiert: Ihr Scheitern wird nicht gezählt, und ein Bestehen wird als `UNEXPECTED PASS` ausgegeben.
+`expected_fail` und dem Grund markiert, aus dem sie scheitern (`expected_fail_reason`): Dieses Scheitern wird nicht
+gezählt, ein Scheitern aus einem anderen Grund zählt wie jedes andere, und ein Bestehen wird als `UNEXPECTED PASS`
+ausgegeben.
 Die zusätzliche Tabelle heißt **Tokens**.
 
 ```bash
@@ -1242,7 +1244,8 @@ llm-cli ditto eval --kind openai_paid --provider openai --i-pay
 ```
 
 Der bezahlte Test fragt vor dem Start noch einmal („Nein“ ist die Vorgabe) und nennt, was er höchstens kostet. Er
-schreibt `openai_cache_check.json` nach `evals/` in deinem Zustandsordner (nur Wahrheitswerte und Token-Zahlen) und
+schreibt `openai_cache_check.json` nach `evals/` in deinem Zustandsordner (nur Wahrheitswerte und Token-Zahlen;
+eine Prüfung, die dieser Lauf nicht gemessen hat, behält ihr früheres Ergebnis) und
 gibt aus, wohin. In der GUI: die Art in **Ditto > Bewertung...** anhaken, die Pause ist **Pause zwischen den
 Runden**, und **Bewertung starten...** stellt die Frage des bezahlten Tests mit seinen Kosten. Einzelheiten:
 [Features_DE.md](Features_DE.md#token--und-cache-messung).

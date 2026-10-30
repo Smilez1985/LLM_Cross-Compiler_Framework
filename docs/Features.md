@@ -1186,8 +1186,9 @@ addresses such as 192.0.2.10 and `example.com` names), and the privacy filter st
   `messages_changed`, ...) is recorded per turn. Ditto's normal chat never sends it.
 - **Cases that fail today** carry `expected_fail`: "follow-up on the last answer after compaction" and "20 turns on
   a 4096-token local window" (the second runs only on a managed local model, `--tier`, and is skipped otherwise).
-  Their failure is reported as expected and not counted in the pass rates; a pass is reported as **UNEXPECTED PASS**
-  so the mark is removed once the context work makes them pass.
+  Each names the reason it fails for today (`expected_fail_reason`); only that failure is reported as expected and
+  not counted in the pass rates, a failure for another reason counts like any other; a pass is reported as
+  **UNEXPECTED PASS** so the mark is removed once the context work makes them pass.
 - **`--pause-minutes N`** waits N minutes between the turns, to compare a 5-minute and a 1-hour cache lifetime. There
   is no pause by default, and a pause is refused in CI.
 - The CLI and the window show a **Tokens** table; `--json` holds every turn.
@@ -1201,7 +1202,7 @@ of about 2,000 input tokens each), or from **Ditto > Evaluation...** after the s
 your own secrets store and stays on your computer. A refused 12-hour lifetime (HTTP 400) is recorded as refused,
 never as working, and the two requests are then sent without it, so the cached tokens of the second one are measured
 either way. The result is `openai_cache_check.json` in the per-user state folder's `evals/`: booleans and token
-numbers only, no prompt text and no key.
+numbers only, no prompt text and no key; a check a run did not measure keeps its earlier result.
 
 **Memory of the local server** (development): `python scripts/measure_cache_ram.py --tier small` runs the `tokens`
 cases on one local tier and samples the memory of the llama-server that this run started (only that one), and prints

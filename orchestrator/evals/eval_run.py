@@ -201,13 +201,24 @@ def openai_check_path(config: Any) -> Path:
 
 
 def save_openai_check(path: Path, runs: Sequence[Any]) -> Optional[Path]:
-    """Writes openai_cache_check.json (owner-only where the system has modes); None when no measurement finished."""
+    """Writes openai_cache_check.json (owner-only where the system has modes); None when no measurement finished.
+    Merged per check: a check this run measured replaces its earlier result, every other check keeps the result the
+    file already holds (a run of one check never drops the other's complete result)."""
     data = openai_check_data(runs)
     if data is None:
         return None
     path = Path(path)
+    try:
+        earlier = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        earlier = None
+    if isinstance(earlier, dict):
+        for check in de.PAID_CHECKS:
+            if check not in data and isinstance(earlier.get(check), dict):
+                data[check] = earlier[check]
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    from orchestrator.utils.atomic import write_file
+    write_file(path, json.dumps(data, indent=2, sort_keys=True) + "\n")
     try:
         os.chmod(path, 0o600)
     except OSError:
