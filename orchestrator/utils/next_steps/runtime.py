@@ -31,6 +31,7 @@ MOUSE_LABELS = {
     "cb_ditto_runtime_backend": (_RT, "ditto_runtime.options.backend"),
     "cb_ditto_runtime_tier": (_RT, "ditto_runtime.server.tier"),
     "btn_ditto_models_download": ("act_ditto_models_open", "ditto_models.download"),
+    "btn_prompt_cache_apply": ("act_ditto_models_open", "prompt_cache.apply"),
 }
 
 STEPS = (
@@ -84,6 +85,10 @@ STEPS = (
          target="btn_ditto_models_download", runnable=True),
     Step("models.show", cli="ditto models list", tool="get_status", window="ditto_models",
          target="act_ditto_models_open", runnable=True),
+    # the local server's memory budget: only the person raises it (an AI may lower it with update_settings)
+    Step("cache.auto", cli="ditto cache set", cli_args=("{name}", "auto"),
+         params={"name": Param("choice", ("local_cache_ram_mib", "local_cache_keep_minutes"))},
+         person_only="permission", window="ditto_models", target="btn_prompt_cache_apply"),
 )
 
 TEXTS = {
@@ -134,6 +139,10 @@ TEXTS = {
         "step.models.download.why": "The model is not downloaded yet.",
         "step.models.show": "Look at Ditto's local models",
         "step.models.show.what": "Lists the model tiers with file, size, licence and whether each is downloaded.",
+        "step.cache.auto": "Let the local server's memory follow this computer",
+        "step.cache.auto.what": "Sets the prompt cache and the keep time of Ditto's local server back to auto: the "
+                                "values measured on this computer.",
+        "step.cache.auto.why": "A saved value is above what this computer has to spare now.",
     },
     "de": {
         "step.runtime.install": "Dittos lokales Modellprogramm bauen",
@@ -184,6 +193,10 @@ TEXTS = {
         "step.models.download.why": "Das Modell ist noch nicht heruntergeladen.",
         "step.models.show": "Dittos lokale Modelle ansehen",
         "step.models.show.what": "Listet die Modellstufen mit Datei, Größe, Lizenz und ob jede heruntergeladen ist.",
+        "step.cache.auto": "Den Speicher des lokalen Servers diesem Computer folgen lassen",
+        "step.cache.auto.what": "Setzt den Prompt-Cache und die Haltezeit von Dittos lokalem Server zurück auf auto: "
+                                "die Werte, die auf diesem Computer gemessen werden.",
+        "step.cache.auto.why": "Ein gespeicherter Wert liegt über dem, was dieser Computer gerade übrig hat.",
     },
 }
 

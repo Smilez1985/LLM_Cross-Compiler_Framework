@@ -677,6 +677,7 @@ llm-cli ditto models list          # die Modellstufen, ihre Größe und ob sie h
 llm-cli ditto models download      # das Modell, das `runtime start` lädt (oder eine Stufe, z. B. small-q2)
 llm-cli ditto runtime start        # startet llama-server; er läuft weiter bis „runtime stop“
 llm-cli ditto runtime stop
+llm-cli ditto cache                # sein Speicherbudget (Prompt-Cache, Haltezeit, KV-Cache), auf diesem Computer gemessen
 ```
 
 **Der Build.** `runtime install` zeigt, was es bauen wird, und fragt vorher. Es braucht einen C/C++-Compiler (GCC

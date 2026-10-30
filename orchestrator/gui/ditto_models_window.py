@@ -71,6 +71,10 @@ class LocalModelsWindow(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.table, stretch=1)
+        # The server's memory budget with the KV-cache choice (`ditto cache`; the same group as in the AI settings).
+        from orchestrator.gui.prompt_cache_box import PromptCacheBox
+        self.prompt_cache = PromptCacheBox(framework, self, runtime_factory=self._factory, lang=self.lang)
+        layout.addWidget(self.prompt_cache)
 
         self.progress = QProgressBar(self)
         self.progress.setObjectName("pb_ditto_models")

@@ -215,7 +215,10 @@ class TestMenu:
         named = set(menu.CLI_PATHS) | set(menu.MACHINE_ONLY)
         assert not set(menu.CLI_PATHS) & set(menu.MACHINE_ONLY)
         commands = {"ditto models list": cli.models_list, "ditto models download": cli.models_download,
-                    "ditto ask": cli.ditto_ask, "ditto eval": cli.ditto_eval}
+                    "ditto ask": cli.ditto_ask, "ditto eval": cli.ditto_eval,
+                    # the Prompt cache group in this window (chain ctx-local-mem)
+                    "ditto cache": cli.ditto_cache, "ditto cache show": cli.ditto_cache_show,
+                    "ditto cache set": cli.ditto_cache_set}
         assert "ditto models" in menu.CLI_PATHS
         assert set(cli.ditto_models.commands) == {"list", "download"}
         for path, command in commands.items():
