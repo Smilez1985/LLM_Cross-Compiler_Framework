@@ -35,6 +35,10 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   all of them as before, in the settings, the Prompt cache group and `llm-cli ditto cache set`.
 
 ### Fixed
+- `2026-10-30 14:58 UTC` · `v3.3.0` **An AI client is told that it reads the build log cleaned**: the description of the tool `read_build_log` and of
+  the build-log resource now say that the log an AI reads has its colour codes and progress redraws removed and its
+  repeated lines collapsed, with every failure line kept, and that you see the raw log (before, an AI could take the
+  cleaned lines for the whole log).
 - `2026-10-30 14:47 UTC` · `v3.3.0` **The token measurement of the Ditto evaluation counts what it should** ([design](docs/DESIGN.md#ditto-the-local-runtime-and-the-llm-layer)):
   Ditto's summary of a long conversation (compaction) is a request of its own, so it no longer takes or moves the
   chain of Anthropic's cache diagnostics: the next real turn is compared with the last real turn. A case marked
