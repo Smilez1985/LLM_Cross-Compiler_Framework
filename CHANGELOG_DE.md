@@ -39,6 +39,11 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Prompt-Cache und mit `llm-cli ditto cache set`.
 
 ### Behoben
+- `2026-10-30 15:08 UTC` · `v3.3.0` **Ein Paket im Community Hub zu deinstallieren friert das Fenster nicht mehr ein**: **Deinstallieren...**
+  entfernt die Auszüge des Pakets aus der Wissensbasis und verschiebt seine Ordner in einem Hintergrund-Thread, wie
+  die anderen Aktionen des Hubs; die Schaltflächen des Hubs und die Paketliste sind währenddessen aus, und das
+  Ergebnisfenster kommt, wenn es fertig ist (vorher reagierte das Fenster nicht, bis die Wissensbasis neu geschrieben
+  war).
 - `2026-10-30 15:05 UTC` · `v3.3.0` **Dittos Server startet auf einem llama.cpp-Build ohne Flash Attention** ([Design](docs/DESIGN_DE.md#ditto-die-lokale-laufzeit-und-die-llm-schicht)):
   Ein quantisierter KV-Cache (q8_0, q4_0) braucht Flash Attention, und ein Build oder Backend ohne sie ließ den Server
   beim Start enden, sobald `local_kv_cache` auf auto stand und die Regel der Boards einen quantisierten Cache wählte.

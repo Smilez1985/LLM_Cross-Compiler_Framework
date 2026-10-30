@@ -35,6 +35,10 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   all of them as before, in the settings, the Prompt cache group and `llm-cli ditto cache set`.
 
 ### Fixed
+- `2026-10-30 15:08 UTC` · `v3.3.0` **Uninstalling a pack in the Community Hub no longer freezes the window**: **Uninstall...** removes the pack's
+  excerpts from the knowledge base and moves its folders in a worker thread, as the hub's other actions do; the hub's
+  buttons and the pack list are off while it runs, and the result box comes when it is done (before, the window did
+  not answer until the knowledge base was rewritten).
 - `2026-10-30 15:05 UTC` · `v3.3.0` **Ditto's server starts on a llama.cpp build without flash attention** ([design](docs/DESIGN.md#ditto-the-local-runtime-and-the-llm-layer)):
   a quantised KV cache (q8_0, q4_0) needs flash attention, and a build or backend without it made the server exit
   during startup whenever `local_kv_cache` was auto and the boards' rule chose a quantised cache. The start now tries
