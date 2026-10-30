@@ -814,6 +814,14 @@ class DittoCoder:
                              "Try again or choose a more capable model.")
         return result.parsed
 
+    def _folder_labels(self) -> Optional[Dict[str, str]]:
+        """The framework's own folders by the label an AI may read (output, builds, framework, ...), for the healing
+        log; None without a framework (the log then keeps the home-folder rule only)."""
+        if self.framework is None:
+            return None
+        from orchestrator.Core.folder_labels import ai_folder_labels
+        return ai_folder_labels(self.framework)
+
     def analyze_error_log(self, log_content: str, context_info: str = "") -> HealingAnalysis:
         """A fix proposal for a failed build, from the log and context given here and this framework's knowledge
         base. Raises DittoError; the proposal is advice, never executed."""
@@ -821,7 +829,7 @@ class DittoCoder:
         # Never reranked: the cross-encoder scores log lines against prose poorly and lost relevant excerpts in the
         # retrieval evaluation (cases tagged log).
         known = self._knowledge(healing_query(log_content), limit=3, rerank=False)
-        parts = healing_parts(log_content, context_info, known)
+        parts = healing_parts(log_content, context_info, known, roots=self._folder_labels())
         parts.append("Analyze why the build failed and propose one fix.")
         analysis = self._structured("healing", HEALING_SYSTEM, "\n\n".join(parts), HealingAnalysis)
         danger = dangerous_command(analysis.fix_command, analysis.root_cause, analysis.summary)

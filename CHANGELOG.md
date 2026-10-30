@@ -35,6 +35,10 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   all of them as before, in the settings, the Prompt cache group and `llm-cli ditto cache set`.
 
 ### Fixed
+- `2026-10-30 15:02 UTC` · `v3.3.0` **Ditto's healing prompt names the framework's folders by label** ([design](docs/DESIGN.md#self-healing-approval)):
+  a path in the framework's output, build or installation folder now reaches the AI as `output:<path inside>`,
+  `builds:...` or `framework:...`, and any other path on this computer by its file name, as `read_build_log` already
+  had it (before, the healing prompt only shortened the home folder, so an output folder elsewhere was named whole).
 - `2026-10-30 14:58 UTC` · `v3.3.0` **An AI client is told that it reads the build log cleaned**: the description of the tool `read_build_log` and of
   the build-log resource now say that the log an AI reads has its colour codes and progress redraws removed and its
   repeated lines collapsed, with every failure line kept, and that you see the raw log (before, an AI could take the
