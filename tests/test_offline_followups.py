@@ -699,6 +699,7 @@ def image_build(tmp_path, monkeypatch, repos, offline=True, images=()):
         seen.update(args=dict(args), **kwargs)
     monkeypatch.setattr(engine, "_build_with_buildkit", buildkit)
     monkeypatch.setattr(engine, "_buildkit_available", lambda: True)
+    monkeypatch.setattr(engine, "_buildx_driver", lambda: "docker", raising=False)   # the daemon's own buildx builder
     monkeypatch.setattr(engine, "docker_client", SimpleNamespace(images=SimpleNamespace(
         get=lambda tag: tag, list=lambda filters=None: seen.setdefault("listed", []).append(filters) or images)))
     record = engine._offline_repo_hosts
@@ -718,18 +719,20 @@ def image_build(tmp_path, monkeypatch, repos, offline=True, images=()):
 
 def test_the_repository_override_is_a_pinned_mirror_in_offline_mode(tmp_path, names, monkeypatch):
     """Offline mode judges the override as a mirror of the own network and pins only its checked local addresses
-    (offline-followups). The target image itself is never built offline (hf-local, round 24 L-NET: its Dockerfile also
-    fetches with apt and pip): the image built earlier from the same settings, override included, is used, and
-    without one the build stops before anything is built or pulled. Online the image build is as before."""
-    from orchestrator.Core.builder import OfflineImageMissing
+    (offline-followups). The image built earlier from the same settings, override included, is used first. Without
+    one, round 36 (changed on purpose: before, offline mode never built the image) builds it when every source is
+    local: here the Dockerfile needs only llama.cpp, and the mirror is in the own network, so the build goes to the
+    mirror's checked local addresses with no proxy (Core/build_image.offline_plan). Online the image build is as
+    before."""
     names["mirror.lan"] = ["192.168.1.5", "2001:db8::5", "fd00::5"]
     repos = {"llama.cpp": {"url": "https://mirror.lan/llama.cpp.git"}}
-    with pytest.raises(OfflineImageMissing):
-        image_build(tmp_path, monkeypatch, repos)
+    built, _ = image_build(tmp_path, monkeypatch, repos)
+    assert built["args"]["LLAMA_CPP_REPO"] == "https://mirror.lan/llama.cpp.git" and built["args"]["NO_PROXY"] == "*"
+    assert built["hosts"] == ["mirror.lan:192.168.1.5", "mirror.lan=[fd00::5]"], "only the checked local addresses"
     image = SimpleNamespace(attrs={"Created": "2026"}, short_id="i1", tag=lambda *a: None)
     seen, _ = image_build(tmp_path, monkeypatch, repos, images=[image])
     assert seen["pinned"] == ["mirror.lan:192.168.1.5", "mirror.lan=[fd00::5]"], "only the checked local addresses"
-    assert "args" not in seen, "offline mode builds no image, also not from a mirror in the own network"
+    assert "args" not in seen, "the image built earlier from the same settings is used, nothing is built"
     label = [f for f in seen["listed"][0]["label"] if f.startswith("org.llm-framework.inputs=")]
     assert label, "the image of the same settings is looked for"
     other, _ = image_build(tmp_path, monkeypatch, {}, images=[image])

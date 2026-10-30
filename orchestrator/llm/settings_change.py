@@ -34,7 +34,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional, Sequence
 from urllib.parse import urlparse, urlsplit
 
-from orchestrator.utils.locality import OPT_OUT_SETTINGS
+from orchestrator.utils.locality import BUILD_SOURCE_SETTINGS, OPT_OUT_SETTINGS
 
 # --- the settings an AI may only tighten (MCP update_settings, the dialog's GUI-tool fields) --------------------------
 
@@ -45,9 +45,19 @@ TIGHTEN_ONLY: Dict[str, Any] = {
     "crawler_download_pdfs": False}
 MIN_MEMORY_LIMIT = 6 * 1024 ** 2  # Docker refuses a smaller container memory limit
 # Settings only the person sets, in the window or the command line, never through a change of this module or an AI.
-PERSON_ONLY_SETTINGS = tuple(OPT_OUT_SETTINGS)
+# The build sources in the own network (BUILD_SOURCE_SETTINGS: apt mirror, apt cache, pip index) are the person's too:
+# they say where an offline build may fetch from.
+PERSON_ONLY_SETTINGS = tuple(OPT_OUT_SETTINGS) + tuple(BUILD_SOURCE_SETTINGS)
 PERSON_ONLY_TEXT = ("{key} says what offline mode counts as local besides this computer and the own network. Only the "
                     "person sets it, in the framework's settings; no AI and no settings change of an AI can.")
+BUILD_SOURCE_TEXT = ("{key} says where an offline build of the build container image fetches packages from in the own "
+                     "network. Only the person sets it, in the framework's settings; no AI and no settings change of "
+                     "an AI can.")
+
+
+def person_only_text(key: str) -> str:
+    """Why `key` (one of PERSON_ONLY_SETTINGS) is refused for every change but the person's."""
+    return (BUILD_SOURCE_TEXT if key in BUILD_SOURCE_SETTINGS else PERSON_ONLY_TEXT).format(key=key)
 
 
 def memory_bytes(value: Any) -> Optional[int]:
@@ -422,7 +432,7 @@ class AISettingsChange:
         as "person_only"."""
         person = [key for key in values if key in PERSON_ONLY_SETTINGS]
         if person:
-            return [SettingsProblem("person_only", "Offline Mode", PERSON_ONLY_TEXT.format(key=key)) for key in person]
+            return [SettingsProblem("person_only", "Offline Mode", person_only_text(key)) for key in person]
         names = [key for key in values if key in AI_SETTINGS]
         if not names:
             return []
@@ -441,7 +451,7 @@ class AISettingsChange:
         workspace and model from `config` (never the old provider's); KeyError for a setting that is not an AI
         setting, ValueError for a value it cannot take."""
         if key in PERSON_ONLY_SETTINGS:
-            raise PermissionError(PERSON_ONLY_TEXT.format(key=key))
+            raise PermissionError(person_only_text(key))
         name = AI_SETTINGS.get(key)
         if name is None:
             raise KeyError(f"{key} is not an AI setting (AI settings: {', '.join(AI_SETTINGS)}).")

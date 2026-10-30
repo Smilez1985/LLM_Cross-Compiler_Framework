@@ -1278,6 +1278,136 @@ def _print_client_proposals(proposals: list) -> None:
         console.print("")
 
 
+
+# --- build image: the build container image (DECISIONS round 36) ---------------------------------------------------
+
+@build.group('image')
+def build_image_group():
+    """The build container image: the Docker image with a target's toolchain (not the package that goes to the
+    board). Offline plan, build sources in your own network, export to and import from a checked file."""
+    pass
+
+
+def _image_framework(ctx: FrameworkContext):
+    ctx.require_framework()
+    return ctx.framework_manager
+
+
+@build_image_group.command('plan')
+@click.argument('target')
+@click.option('--gpu', is_flag=True, help='The GPU variant of the target (its Dockerfile.gpu)')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output (labels only, as an AI reads it)')
+@pass_context
+def build_image_plan(ctx: FrameworkContext, target: str, gpu: bool, as_json: bool):
+    """Shows whether an offline build can make TARGET's build container image: every source it needs (base images,
+    llama.cpp, apt, pip, other downloads) and whether it is on this computer or in your own network, by the one
+    locality rule. Nothing is pulled, fetched or built."""
+    from orchestrator.Core import build_image
+    fm = _image_framework(ctx)
+    try:
+        plan = build_image.target_plan(fm, target, gpu=gpu)
+        images = build_image.target_images(build_image.docker_client(fm, getattr(
+            getattr(fm, "orchestrator", None), "build_engine", None)), target)
+    except build_image.ImageTransferError as e:
+        console.print(f"[red]{escape(str(e))}[/red] {escape(e.next)}")
+        sys.exit(2)
+    if as_json:
+        click.echo(json.dumps({"target": target, "images_here": len(images), **plan.ai()}, indent=2))
+        return
+    from orchestrator.Core.knowledge_snapshots import size_text
+    console.print(f"[bold]Build container images of {escape(target)} on this computer:[/bold] "
+                  + (", ".join(escape(", ".join(i.tags) or i.image_id[:19]) + f" ({size_text(i.size)})"
+                               for i in images) or "none"))
+    head = ("[green]An offline build can make this image: every source is on this computer or in your own "
+            "network.[/green]" if plan.ready else
+            f"[yellow]An offline build cannot make this image yet; {len(plan.missing)} source(s) are not "
+            "local:[/yellow]")
+    console.print(head)
+    for line in plan.lines(person=True):
+        console.print("  - " + escape(line))
+    if not plan.ready:
+        console.print("Set the build sources with 'llm-cli build image sources', or bring a build container image "
+                      "exported on another computer with 'llm-cli build image import FILE'.")
+
+
+@build_image_group.command('sources')
+@click.option('--apt-mirror', default=None, help='apt mirror in your own network (http or https; "" clears it)')
+@click.option('--apt-proxy', default=None, help='apt cache proxy in your own network, e.g. apt-cacher-ng ("" clears)')
+@click.option('--pip-index', default=None, help='pip index in your own network, a PyPI mirror ("" clears it)')
+@pass_context
+def build_image_sources(ctx: FrameworkContext, apt_mirror: Optional[str], apt_proxy: Optional[str],
+                        pip_index: Optional[str]):
+    """Shows or sets the build sources in your own network that an offline build of a build container image may
+    fetch apt and pip packages through. Only you set them (an AI cannot); every offline build judges each one again by
+    the locality rule."""
+    from orchestrator.Core.local_network import LocalNetworkError, build_sources, check, set_build_source
+    config, _resolve = _settings(ctx)
+    given = {"build_apt_mirror": apt_mirror, "build_apt_proxy": apt_proxy, "build_pip_index": pip_index}
+    try:
+        for key, value in given.items():
+            if value is not None:
+                set_build_source(config, key, value)
+                console.print(f"[green]{key} {'cleared' if not value.strip() else 'saved'}.[/green]")
+    except LocalNetworkError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
+    for key, value in build_sources(config).items():
+        if not value:
+            console.print(f"{key}: not set")
+            continue
+        verdict = check(config, value)
+        state = "[green]local[/green]" if verdict.local else "[yellow]NOT local[/yellow]"
+        console.print(f"{key}: {escape(value)} - {state} ({escape(verdict.why())})")
+
+
+@build_image_group.command('export')
+@click.argument('target')
+@click.option('--to', 'dest', required=True, type=click.Path(dir_okay=False, path_type=Path),
+              help='The file to write (a new file; its sha256 goes into FILE.sha256 next to it)')
+@click.option('--image', default=None, help='Which image of the target (a tag or id; default: the newest)')
+@pass_context
+def build_image_export(ctx: FrameworkContext, target: str, dest: Path, image: Optional[str]):
+    """Saves TARGET's build container image into a file with its sha256 file, for another offline computer
+    (docker save). Nothing on this computer changes."""
+    from orchestrator.Core import build_image
+    from orchestrator.Core.knowledge_snapshots import size_text
+    fm = _image_framework(ctx)
+    try:
+        result = build_image.export_image(fm, target, dest, actor="cli", image=image)
+    except build_image.ImageTransferError as e:
+        console.print(f"[red]{escape(str(e))}[/red] {escape(e.next)}")
+        sys.exit(1)
+    console.print(f"[green]Exported {escape(', '.join(result.image.tags) or result.image.image_id[:19])} to "
+                  f"{escape(str(result.file))}[/green] ({size_text(result.bytes)}); sha256 {result.sha256} in "
+                  f"{escape(result.sidecar.name)}.")
+    console.print("On the other computer: llm-cli build image import " + escape(result.file.name))
+
+
+@build_image_group.command('import')
+@click.argument('file', type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option('--sha256', 'digest', default=None, help='The file\'s sha256 (default: FILE.sha256 next to it)')
+@click.option('--target', default=None, help='Refuse the file unless its image is for this target')
+@click.option('--yes', is_flag=True, help='Do not ask before loading the image')
+@pass_context
+def build_image_import(ctx: FrameworkContext, file: Path, digest: Optional[str], target: Optional[str], yes: bool):
+    """Loads a build container image from FILE (docker load or podman load) after checking it against its sha256
+    and its labels: only an image a build of its target here would use is loaded; any mismatch loads nothing."""
+    from orchestrator.Core import build_image
+    fm = _image_framework(ctx)
+    if not yes and not click.confirm(f"Load the build container image from {file} into Docker after checking it?",
+                                     default=False):
+        console.print("Nothing was loaded.")
+        return
+    try:
+        result = build_image.import_image(fm, file, actor="cli", sha256=digest, target=target)
+    except build_image.ImageTransferError as e:
+        console.print(f"[red]{escape(str(e))}[/red] {escape(e.next)}")
+        sys.exit(1)
+    console.print(f"[green]Loaded the build container image of {escape(result.target)}[/green] "
+                  f"({escape(', '.join(result.images) or 'no tag')}); sha256 {result.sha256[:12]}... checked. "
+                  "Offline builds of this target with these settings use it.")
+
+
 def _print_build_record(r: dict) -> None:
     from orchestrator.Core.build_history import record_rows
     for name, value in record_rows(r):

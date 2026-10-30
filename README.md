@@ -728,6 +728,16 @@ where the server runs and can switch it; starting and stopping it is on the comm
 
 Ollama or another OpenAI-compatible server on your network also count as local providers in offline mode.
 
+**Building without internet.** Offline mode means no internet; your own network may be there. A build then needs the
+target's build container image (the Docker image with its toolchain, not the package that goes to the board): one
+built earlier with the same settings, one brought from another computer (`llm-cli build image export` there,
+`llm-cli build image import FILE` here; the file is checked by its sha256 and its labels), or one built from sources
+in your own network only: base images on this computer or in a registry of your network, llama.cpp from your mirror or
+its local copy, apt and pip through the mirror, apt cache or pip index you set (`llm-cli build image sources`).
+`llm-cli build image plan TARGET` and **Build > Build Container Images...** show what is still missing; a build stops
+early and names it too. More: [building offline](docs/Features.md#calls-retries-and-fallback) and
+[build image](docs/CLI_Usage.md#build-image).
+
 ---
 
 ## The knowledge base

@@ -132,6 +132,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `targets boards` | Each board of a target with its optimization profile and its benchmark rows (measured, published or unmeasured) |
 | `build start` / `build status` | Convert and quantize a model / show builds, also those the GUI, the MCP server or another CLI call started |
 | `build save` | Save a build that waits in the framework's build folder to the output folder or another folder |
+| `build image plan/sources/export/import` | The build container image of a target: can an offline build make it, the build sources in your network, move it to another offline computer as a checked file |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | List finished builds / pack a build into a ZIP / upload and install it on a board |
 | `deploy ssh-config show/edit/import` | The framework's own OpenSSH settings file (read instead of `~/.ssh/config`): show it, set a board's block, copy one block from `~/.ssh/config` |
 | `ditto login` / `ditto logout` | Sign Ditto in to a provider (the key from a hidden prompt, stdin or an environment variable, checked before it is stored) / sign out |
@@ -652,6 +653,45 @@ the framework never runs. Without an ID, a line says for how many failed builds 
 In the GUI: **Build > Build History...**: every build (all of them, as `--all`); **Show details** (or a double click)
 shows one build as with `REQUEST_ID`, with its errors, every attempt and its output folder, and the AI clients' fix
 proposals.
+
+### build image
+
+The build container image is the Docker image with a target's toolchain that its build stages run in (not the target
+artifact, package or bundle that goes to the board). Offline mode builds it only when every source its Dockerfile
+needs is on this computer or in your own network; these commands show that, set the sources and move a finished image
+to another offline computer.
+
+```
+llm-cli build image plan TARGET [--gpu] [--json]
+llm-cli build image sources [--apt-mirror URL] [--apt-proxy URL] [--pip-index URL]
+llm-cli build image export TARGET --to FILE [--image TAG_OR_ID]
+llm-cli build image import FILE [--sha256 HEX] [--target TARGET] [--yes]
+```
+
+- `plan` lists the build container images of TARGET on this computer and every source an offline build of a new one
+  needs: the base images (on this computer, from a registry in your network, or through a registry mirror of the
+  Docker daemon there; every mirror the daemon has is judged), llama.cpp (the repository override in your network or
+  the verified local copy of the pinned commit, as `ditto runtime import-source` stores it), apt and pip packages
+  (only through the sources below) and every other address the Dockerfile fetches from. Each line says local or not,
+  how it is or can be provided and, for you, the host and why. Nothing is pulled, fetched or built. `--json` gives the
+  labels only, as an AI reads them (no address, no path).
+- `sources` shows or sets the apt mirror (it serves the distribution's paths, such as `/debian`), the apt cache proxy
+  (such as apt-cacher-ng) and the pip index in your network, and judges each by the locality rule (your opt-outs of
+  `config local-network` count). An address is http or https without a user name, password, token or query; `""`
+  clears one. Only you set them: an AI and MCP `update_settings` are refused.
+- `export` writes the newest image of TARGET (or `--image`) with `docker save` into a new FILE and its sha256 into
+  `FILE.sha256` next to it; nothing is replaced, and the destination disk must keep its reserve free.
+- `import` checks FILE against `--sha256` or `FILE.sha256`, then reads the image's labels: its target and the inputs
+  a build of that target here computes must match (an image built for another CPU, another llama.cpp pin or other
+  settings is refused, with nothing loaded), then loads it (`docker load`, also under Podman). Exit code 1 on a
+  refusal. It asks before loading unless `--yes`.
+
+A build in offline mode uses an image built earlier with the same settings first; without one it builds one from the
+sources above, or stops before anything slow and names each source that is not local. Known limit: a pinned IPv6
+address of a mirror reaches BuildKit as `NAME=[ADDRESS]`, which needs a recent docker buildx.
+
+In the GUI: **Build > Build Container Images...** (target, the images, **Check offline sources**, the sources in your
+network with **Save sources**, **Export to file...** and **Import from file...** with the sha256 field).
 
 ---
 

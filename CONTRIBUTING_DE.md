@@ -777,8 +777,13 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   Offline-Modus lädt sein Modell nie: Er nutzt `orchestrator/Core/local_models.local_copy`, und
   `BuildService.check_model_here` lehnt mit `ModelNotHere` ab (die Modelle, die schon hier sind, nach Label; für
   eine KI nie ein Pfad). Ein Docker-Image wird im Offline-Modus nur aus einer Registry gezogen, die die Regel des
-  eigenen Netzes als lokal zählt (`utils/image_ref.offline_pull_refusal`), und ein Target-Image wird dann nicht
-  gebaut (`BuildEngine._offline_image`).
+  eigenen Netzes als lokal zählt (`utils/image_ref.offline_pull_refusal`). Das Build-Container-Image (das
+  Werkzeug-Image eines Targets) wird offline nur aus lokalen Quellen gebaut: Jede Quelle, die sein Dockerfile
+  braucht, läuft über den einen Plan `orchestrator/Core/build_image.offline_plan` (der Builder, die CLI, das Fenster
+  und der MCP-Status fragen ihn; nie eine eigene Prüfung), und ein Dockerfile, das etwas holt, nimmt die
+  Quellen-Argumente des Module Developer Guide an (Abschnitt 5.4). Ein `docker save` läuft über
+  `utils/docker_engine.save_image`, nie über eine eigene Schleife; Build-Argumente und Labels eines Images kommen nur
+  aus `BuildEngine.image_labels`.
 - **Offline-Modus: eine Prüfung, eine Regel des eigenen Netzes.** Ob der Offline-Modus an ist, fragst du mit
   `orchestrator.utils.locality.offline_mode(config)`, nie mit einem eigenen `config.get("offline_mode")`
   (`tests/test_offline_check.py` schlägt dann fehl). Ob eine Adresse im Offline-Modus erreicht werden darf,

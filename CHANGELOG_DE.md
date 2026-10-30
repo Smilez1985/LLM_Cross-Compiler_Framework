@@ -71,6 +71,29 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   ist die erste Reparatur der Klasse `person_yes` (Urteil `miracle_yes`): Sie läuft nur nach dem eigenen Ja der
   Person, nie für eine KI, für die sie als Sache der Person gilt. Die Tool-Beschreibung von `search_knowledge` sagt,
   was `topic` bis dahin übersieht.
+- `2026-10-30 04:20 UTC` · `v3.2.0` **Offline-Builds des Build-Container-Images und seine Übertragung ohne Netz** (offline heißt ohne Internet;
+  das eigene Netz darf da sein): Der Offline-Modus baut jetzt das Build-Container-Image eines Targets (das
+  Docker-Image mit seiner Werkzeugkette; nicht das Target-Artefakt, Paket oder Bündel, das aufs Board geht), wenn
+  jede Quelle, die sein Dockerfile braucht, nach der einen Lokalitätsregel mit deinen Abwahlen auf diesem Computer
+  oder in deinem eigenen Netz liegt: seine Basis-Images auf diesem Computer, in einer Registry deines Netzes oder
+  hinter einem Registry-Spiegel des Docker-Daemons dort (jeder Spiegel des Daemons wird geprüft); llama.cpp von der
+  Repository-Überschreibung in deinem Netz (auf ihre geprüften lokalen Adressen festgelegt) oder aus der geprüften
+  lokalen Kopie des festgelegten Commits (dem Quellen-Speicher der lokalen Laufzeit, in den Build-Kontext kopiert);
+  apt und pip nur über den apt-Spiegel, den apt-Cache-Proxy oder den pip-Index, die du in deinem Netz einstellst
+  (`build_apt_mirror`, `build_apt_proxy`, `build_pip_index`: nur du setzt sie, mit `llm-cli build image sources`
+  oder unter Build > Build-Container-Images...; eine KI und MCP `update_settings` werden abgelehnt); jede andere
+  Adresse, von der das Dockerfile holt, nach ihrem Host. Ein Plan (`orchestrator/Core/build_image.py`,
+  `offline_plan`) dient dem Build, `llm-cli build image plan TARGET` (`--json` nur mit Labels), dem Fenster und dem
+  MCP-Status (`get_target_capabilities` mit `check_image`: wie viele Images hier sind, ob ein Offline-Build eines
+  bauen könnte, jede Quelle mit ihrem Label, nie eine Adresse oder ein Pfad). Ist eine Quelle nicht lokal, hält der
+  Build an, bevor etwas gezogen oder geholt wird, und nennt jede und wie man sie bereitstellt. Ein fertiges Image
+  kommt als Datei auf einen anderen Offline-Rechner: `llm-cli build image export TARGET --to DATEI` schreibt
+  `docker save` und `DATEI.sha256`; `llm-cli build image import DATEI [--sha256 HEX] [--target T]` prüft die sha256
+  und die Labels des Images (sein Target und die Eingaben, die ein Build hier berechnet, sodass ein Image für eine
+  andere CPU oder einen anderen llama.cpp-Pin abgelehnt wird), bevor `docker load` oder `podman load` etwas lädt.
+  Beide folgen der Platzregel und sind Sache der Person (eine KI bekommt `needs_person`). Bekannte Grenze: Ein
+  `--add-host`-Eintrag mit einer IPv6-Adresse nutzt die Form `NAME=[ADRESSE]` von buildx, die ein neueres
+  docker buildx braucht.
 
 ### Geändert
 - `2026-10-29 23:31 UTC` · `v3.2.0` **Eine Install-Regel für die ganze RHEL-Familie** ([Design](docs/DESIGN_DE.md#installer-plattformen-und-abhängigkeiten)):
@@ -192,6 +215,33 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   jetzt dieses (`utils/hadolint.py` importiert `ANSI_RE`). Die Testvektoren sind JSON-Dateien in
   `tests/fixtures/context_rules/` (`clean_log.json`, `compact_json.json`), damit das Board-Gateway seine eigenen
   Regeln an denselben Fällen prüfen kann.
+- `2026-10-30 04:20 UTC` · `v3.2.0` **Die Target-Dockerfiles nehmen Quellen im eigenen Netz an, und ein Offline-Build hält nicht mehr an, wenn
+  jede Quelle lokal ist** (vorher baute der Offline-Modus das Build-Container-Image nie):
+  `targets/Rockchip/dockerfile`, `targets/_template/Dockerfile` und `Dockerfile.gpu` nehmen `APT_MIRROR` und
+  `APT_PROXY` in jeder Stufe an, die apt ausführt (die Quellen werden auf den Spiegel umgeschrieben, der Proxy kommt in
+  die Konfiguration von apt), `PIP_INDEX_URL` und `PIP_TRUSTED_HOST` in der Builder-Stufe (mit einem pip-Index
+  entfällt das eigene `--extra-index-url` der Requirements) und `LLAMA_CPP_SOURCE=context` mit `COPY sources/` für
+  die lokale llama.cpp-Kopie, die wie ein Abruf an ihrem Commit geprüft wird; Rockchips PyTorch-Index und der Ort
+  des RKLLM-Wheels wurden die Build-Argumente `TORCH_PIP_URL` und `RKLLM_PIP_URL` (ein ARG namens `..._PIP_URL` ist
+  ein pip-Ort, den der Index ersetzt; das Wheel aus einem Index wird gegen dieselbe sha256 geprüft). Online ändert
+  sich nichts: Keines dieser Argumente wird übergeben. Die Argumente, die nur sagen, woher Quellen kommen, sind keine
+  Eingaben des Images (sein Label `org.llm-framework.inputs`), sodass ein online gebautes Image offline genutzt wird
+  und umgekehrt; weil sich die Dockerfiles geändert haben, baut der erste Build jedes Targets nach diesem Update ein
+  neues Image. Der Build-Kontext hat immer einen leeren Ordner `sources/`. Ein Helfer für `docker save`
+  (`utils/docker_engine.save_image`) dient jetzt dem Paket-Export des Deployment-Managers, dem Archiv des
+  Security-Scans und dem Image-Export; `BuildEngine.image_labels` ist die eine Berechnung der Build-Argumente und
+  Labels eines Images.
+  Ein Offline-Build prüft jede Quelle so, wie der Build sie nutzt: Ein llama.cpp-Repository-Override, den der
+  Image-Build nicht annimmt (nur https ohne Zugangsdaten; etwa ein http-Spiegel), ist nicht lokal, denn das Image holte
+  llama.cpp dann von GitHub; Adressen jedes Schemas (git, ssh, die scp-artige Form) zählen, und ein Paketmanager außer
+  apt und pip (apk, dnf, npm und ähnliche) wird als nicht lokal genannt. Ein Docker-Hub-Basis-Image, das über einen
+  Registry-Spiegel des Docker-Daemons kommt, wird vor dem Build von der eigenen Adresse des Spiegels geholt, denn die
+  Spiegel-Einstellung des Daemons fällt auf Docker Hub zurück, wenn der Spiegel versagt; ein Spiegel, der es nicht
+  liefert, hält den Build an. Ein Offline-Build läuft nie auf einem buildx-Builder außerhalb des Docker-Daemons
+  (Treiber docker-container, remote, kubernetes), der jedes Basis-Image selbst holen würde; der Daemon baut es mit
+  seinem eigenen Builder. Ein Import hasht, prüft und lädt eine einzige offene Datei und lehnt ein Archiv ab, das das
+  Image anders als `llm-framework/<target>:...` benennen würde (mit dem Namen eines Basis-Images oder eines anderen
+  Targets) oder dessen OCI-`index.json` ein anderes Image nennt als seine `manifest.json`.
 
 ### Behoben
 - `2026-10-29 23:36 UTC` · `v3.2.0` **Nacharbeiten an der Container-Engine: ein `DOCKER_HOST` aus Podman-Zeiten, `/dev/dri` unter rootless

@@ -148,6 +148,8 @@ DELETION_SITES = {
     # old records
     ("orchestrator/Core/build_records.py", "prune"): RECORDS,
     ("orchestrator/Core/builder.py", "BuildEngine.build_model"): RECORDS,
+    # the export's own .partial file when docker save fails (round 36)
+    ("orchestrator/Core/build_image.py", "export_image"): TEMP,
     ("orchestrator/Core/job_service.py", "JobService._prune"): RECORDS,
     ("orchestrator/Core/request_store.py", "RequestStore.prune"): RECORDS,
     ("orchestrator/Core/orchestrator.py", "LLMOrchestrator.submit_build_request"): RECORDS,

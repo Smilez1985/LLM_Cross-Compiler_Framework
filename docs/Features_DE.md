@@ -859,6 +859,19 @@ die Annahmen; seine Unterstützungsstufe ist community.
   Laufzeit-Tools und Paketinstallationen einer KI sehen nach deiner Antwort noch einmal auf den Offline-Modus. Ein
   Deep Ingest, den du im Offline-Modus startest, liest nur Seiten in deinem eigenen Netz (nie einen Metadatendienst
   einer Cloud); der Crawl einer KI liest dann nichts.
+- **Offline bauen** (ohne Netz: kein Internet, vielleicht ein lokales Netz): Das Cross-Kompilieren und die
+  Target-Artefakte brauchen das Build-Container-Image des Targets, das Docker-Image mit seiner Werkzeugkette. Ein
+  früher mit denselben Einstellungen gebautes Image wird genutzt; ohne eines baut der Offline-Modus es, wenn jede
+  Quelle lokal ist: die Basis-Images auf diesem Computer oder in einer Registry (oder einem Docker-Registry-Spiegel)
+  deines Netzes, llama.cpp von deinem Spiegel oder aus der lokalen Kopie des festgelegten Commits, apt und pip nur
+  über den apt-Spiegel, den apt-Cache oder den pip-Index, die du in deinem Netz einstellst
+  (`llm-cli build image sources`, **Build > Build-Container-Images...**), jeder andere Download in deinem Netz. Sonst
+  hält der Build vor allem Langsamen an und nennt jede fehlende Quelle und wie man sie bereitstellt
+  (`llm-cli build image plan TARGET` zeigt denselben Plan vorher; eine KI sieht ihn als Labels über
+  `get_target_capabilities` mit `check_image`). Ein fertiges Image kommt als Datei mit seiner sha256 auf einen
+  anderen Offline-Rechner (`llm-cli build image export` / `import`); der Import lehnt eine Datei ab, deren sha256 oder
+  deren Labels nicht zu einem Build dort passen. Nur du setzt die Quellen und bringst Images hin und her; eine KI
+  bekommt `needs_person`.
 - Anfragen an Server auf 127.0.0.1 gehen nie über einen HTTP(S)-Proxy aus der Umgebung; der Proxy sieht also weder
   Prompts noch den Schlüssel des lokalen Servers.
 - Fehler werden verständlich erklärt, zum Beispiel dass ein Claude-API-Schlüssel eine Workspace-ID braucht, dass

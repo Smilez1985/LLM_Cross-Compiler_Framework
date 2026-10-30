@@ -65,6 +65,27 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   snapshot is taken before the import. It is the first repair of class `person_yes` (verdict `miracle_yes`): it runs
   only after the person's own yes, never for an AI, which reads it as the person's. The tool description of
   `search_knowledge` says what `topic` misses until then.
+- `2026-10-30 04:20 UTC` · `v3.2.0` **Offline builds of the build container image, and its air-gapped transfer** (offline mode means no
+  internet; the own network may be there): offline mode now builds a target's build container image (the Docker
+  image with its toolchain; not the target artifact, package or bundle that goes to the board) when every source its
+  Dockerfile needs is on this computer or in your own network by the one locality rule, with your opt-outs:
+  its base images on this computer, in a registry of your network or behind a registry mirror of the Docker daemon
+  there (every mirror of the daemon is judged); llama.cpp from the repository override in your network (pinned to
+  its checked local addresses) or the verified local copy of the pinned commit (the local runtime's source store,
+  copied into the build context); apt and pip only through the apt mirror, apt cache proxy or pip index you set in
+  your network (`build_apt_mirror`, `build_apt_proxy`, `build_pip_index`: only you set them, with
+  `llm-cli build image sources` or in Build > Build Container Images...; an AI and MCP `update_settings` are refused);
+  every other address the Dockerfile fetches from, by its host. One plan (`orchestrator/Core/build_image.py`,
+  `offline_plan`) serves the build, `llm-cli build image plan TARGET` (`--json` with labels only), the window and the
+  MCP status (`get_target_capabilities` with `check_image`: how many images are here, whether an offline build could
+  make one, each source by its label, never an address or a path). When a source is not local the build stops
+  before anything is pulled or fetched and names each one and how to provide it. A finished image moves to another
+  offline computer as a file: `llm-cli build image export TARGET --to FILE` writes `docker save` and `FILE.sha256`;
+  `llm-cli build image import FILE [--sha256 HEX] [--target T]` checks the sha256 and the image's labels (its target
+  and the inputs a build here computes, so an image tuned to another CPU or another llama.cpp pin is refused) before
+  `docker load` or `podman load` loads anything. Both follow the disk rule and are the person's (an AI gets
+  `needs_person`). Known limit: an `--add-host` entry with an IPv6 address uses buildx's `NAME=[ADDRESS]` form, which
+  needs a recent docker buildx.
 
 ### Changed
 - `2026-10-29 23:31 UTC` · `v3.2.0` **One install rule for the whole RHEL family** ([design](docs/DESIGN.md#installer-platforms-and-dependencies)):
@@ -172,6 +193,31 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   idempotent. hadolint's own escape pattern is now this one (`utils/hadolint.py` imports `ANSI_RE`). The test
   vectors are JSON files in `tests/fixtures/context_rules/` (`clean_log.json`, `compact_json.json`), so the board
   gateway can check its own rules against the same cases.
+- `2026-10-30 04:20 UTC` · `v3.2.0` **The target Dockerfiles take sources in the own network, and an offline build no longer stops when every
+  source is local** (before, offline mode never built the build container image): `targets/Rockchip/dockerfile`,
+  `targets/_template/Dockerfile` and `Dockerfile.gpu` take `APT_MIRROR` and `APT_PROXY` in every stage that runs apt
+  (the sources are rewritten to the mirror, the proxy goes into apt's configuration), `PIP_INDEX_URL` and
+  `PIP_TRUSTED_HOST` in the builder stage (with a pip index the requirements' own `--extra-index-url` is left out),
+  and `LLAMA_CPP_SOURCE=context` with `COPY sources/` for the local llama.cpp copy, checked by its commit as a fetch
+  is; Rockchip's PyTorch index and RKLLM wheel location became the build arguments `TORCH_PIP_URL` and
+  `RKLLM_PIP_URL` (an ARG named `..._PIP_URL` is a pip location the index replaces; the wheel from an index is checked
+  against the same sha256). Online nothing changes: none of these arguments is passed. The arguments that only say
+  where sources come from are no inputs of the image (its `org.llm-framework.inputs` label), so an image built online
+  is used offline and the other way round; because the Dockerfiles changed, the first build of each target after
+  this update makes a new image. The build context always has an empty `sources/` folder. One `docker save` helper
+  (`utils/docker_engine.save_image`) now serves the deployment manager's package export, the security scan's archive
+  and the image export; `BuildEngine.image_labels` is the one computation of an image's build arguments and labels.
+  An offline build judges every source as the build uses it: a llama.cpp repository override the image build does
+  not take (only https without credentials; an http mirror, for example) is not local, because the image would fetch
+  llama.cpp from GitHub; addresses of every scheme (git, ssh, the scp-like form) count, and a package manager other
+  than apt and pip (apk, dnf, npm and the like) is named as not local. A Docker Hub base image that comes through a
+  registry mirror of the Docker daemon is pulled from the mirror's own address before the build, because the
+  daemon's mirror setting falls back to Docker Hub when the mirror fails; a mirror that does not provide it stops the
+  build. An offline build never runs on a buildx builder apart from the Docker daemon (driver docker-container,
+  remote, kubernetes), which would pull every base image itself; the daemon's own builder builds it. An import
+  hashes, checks and loads one open file, and refuses an archive that would name the image other than
+  `llm-framework/<target>:...` (a base image's name, another target's) or whose OCI `index.json` names another image
+  than its `manifest.json`.
 
 ### Fixed
 - `2026-10-29 23:36 UTC` · `v3.2.0` **Container engine follow-ups: a `DOCKER_HOST` left from Podman, `/dev/dri` under rootless Podman,

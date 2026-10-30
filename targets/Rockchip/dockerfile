@@ -28,6 +28,27 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV LLAMA_CPP_PATH=/usr/src/llama.cpp
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# Sources in your own network for an offline build (orchestrator/Core/build_image.py): the person's apt mirror (it
+# serves the distribution's paths, such as /debian and /debian-security) or apt cache proxy. The framework passes them
+# only in offline mode, after the locality rule judged them; empty (the default) keeps the distribution's own sources.
+# No credentials: a build argument shows in the image's history.
+ARG APT_MIRROR
+ARG APT_PROXY
+RUN set -eu; \
+    if [ -n "${APT_MIRROR:-}" ]; then \
+        for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do \
+            if [ -f "${f}" ]; then sed -Ei "s#https?://[^/[:space:]]+#${APT_MIRROR%/}#g" "${f}"; fi; \
+        done; \
+    fi; \
+    if [ -n "${APT_PROXY:-}" ]; then \
+        printf 'Acquire::http::Proxy "%s";\n' "${APT_PROXY}" > /etc/apt/apt.conf.d/01llmcf-proxy; \
+    fi
+
+# The person's pip index in the own network for an offline build (pip reads both from the environment; PIP_TRUSTED_HOST
+# only for an http index). Not set: PyPI and the Dockerfile's own addresses.
+ARG PIP_INDEX_URL
+ARG PIP_TRUSTED_HOST
+
 # libgl1/libglib2.0-0: opencv (rknn-toolkit2), which the RKNN venv's check below imports.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake git ca-certificates \
@@ -41,6 +62,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # CPU features of the build host's hardware probe, because the tools run on the machine that builds this image. The
 # defaults are for builds outside the framework (CI): the pin, and the fixed x86-64 baseline (AVX2, no AVX-512) these
 # tools always had, written out.
+# LLAMA_CPP_SOURCE=context (an offline build without a mirror in the own network): the verified local copy of the
+# pinned commit that the framework staged into sources/llama.cpp of the build context, checked here by its commit too;
+# git (the default) fetches the commit from LLAMA_CPP_REPO.
+ARG LLAMA_CPP_SOURCE=git
+COPY sources/ /tmp/llmcf-sources/
 ARG LLAMA_CPP_REPO=https://github.com/ggml-org/llama.cpp.git
 ARG LLAMA_CPP_TAG=b11429
 ARG LLAMA_CPP_COMMIT=d81235049384534c167caea52b85a694f6103d14
@@ -49,13 +75,21 @@ RUN set -eu; \
         || { echo "LLAMA_CPP_COMMIT must be a full commit id (40 hex characters)" >&2; exit 1; }; \
     printf '%s\n' "${LLAMA_CPP_TAG}" | grep -Eqx 'b[0-9]{1,7}' \
         || { echo "LLAMA_CPP_TAG must be a build tag such as b11429" >&2; exit 1; }; \
-    git init -q "${LLAMA_CPP_PATH}"; \
-    git -C "${LLAMA_CPP_PATH}" remote add origin "${LLAMA_CPP_REPO}"; \
-    if ! git -C "${LLAMA_CPP_PATH}" fetch -q --depth 1 origin "${LLAMA_CPP_COMMIT}"; then \
-        echo "fetching the commit failed; fetching tag ${LLAMA_CPP_TAG}, which must be that commit" >&2; \
-        git -C "${LLAMA_CPP_PATH}" fetch -q --depth 1 origin "refs/tags/${LLAMA_CPP_TAG}"; \
+    if [ "${LLAMA_CPP_SOURCE:-git}" = context ]; then \
+        [ -d /tmp/llmcf-sources/llama.cpp/.git ] \
+            || { echo "LLAMA_CPP_SOURCE=context, but the build context holds no llama.cpp copy" >&2; exit 1; }; \
+        cp -a /tmp/llmcf-sources/llama.cpp "${LLAMA_CPP_PATH}"; \
+        [ -z "$(git -C "${LLAMA_CPP_PATH}" status --porcelain=v1 --untracked-files=normal --ignored=traditional)" ] \
+            || { echo "llama.cpp: the local copy has changed or added files" >&2; exit 1; }; \
+    else \
+        git init -q "${LLAMA_CPP_PATH}"; \
+        git -C "${LLAMA_CPP_PATH}" remote add origin "${LLAMA_CPP_REPO}"; \
+        if ! git -C "${LLAMA_CPP_PATH}" fetch -q --depth 1 origin "${LLAMA_CPP_COMMIT}"; then \
+            echo "fetching the commit failed; fetching tag ${LLAMA_CPP_TAG}, which must be that commit" >&2; \
+            git -C "${LLAMA_CPP_PATH}" fetch -q --depth 1 origin "refs/tags/${LLAMA_CPP_TAG}"; \
+        fi; \
+        git -C "${LLAMA_CPP_PATH}" -c advice.detachedHead=false checkout -q FETCH_HEAD; \
     fi; \
-    git -C "${LLAMA_CPP_PATH}" -c advice.detachedHead=false checkout -q FETCH_HEAD; \
     head="$(git -C "${LLAMA_CPP_PATH}" rev-parse HEAD)"; \
     [ "${head}" = "${LLAMA_CPP_COMMIT}" ] \
         || { echo "llama.cpp: got commit ${head}, the pin is ${LLAMA_CPP_COMMIT}" >&2; exit 1; }; \
@@ -64,8 +98,11 @@ RUN set -eu; \
     printf '%s\n' "${LLAMA_CPP_COMMIT}" > "${LLAMA_CPP_PATH}/.llama_cpp_commit"
 
 # --- GGUF venv (default python3 on PATH) ---
+# With a pip index of the own network the requirements' own --extra-index-url (the PyTorch index) is left out: the
+# index serves every wheel.
 ENV VIRTUAL_ENV=/opt/venv
-RUN python3 -m venv "${VIRTUAL_ENV}" \
+RUN if [ -n "${PIP_INDEX_URL:-}" ]; then sed -i '/^[[:space:]]*--extra-index-url/d' "${LLAMA_CPP_PATH}"/requirements/*.txt; fi \
+    && python3 -m venv "${VIRTUAL_ENV}" \
     && "${VIRTUAL_ENV}/bin/pip" install --upgrade pip setuptools wheel \
     && "${VIRTUAL_ENV}/bin/pip" install -r "${LLAMA_CPP_PATH}/requirements/requirements-convert_hf_to_gguf.txt" \
     && "${VIRTUAL_ENV}/bin/pip" install "${LLAMA_CPP_PATH}/gguf-py"
@@ -75,7 +112,12 @@ ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 # RKLLM-Toolkit ships Linux x86_64 wheels only (rknn-llm release-v1.3.1, rkllm-toolkit/packages). An image built on
 # another computer has no RKLLM venv: /opt/venv-rkllm/NOT_INSTALLED gives the reason, the entrypoint's test reports it,
 # rkllm_module.sh refuses with it, and the build service refuses RKLLM there before a build starts
-# (build_formats.format_refusal).
+# (build_formats.format_refusal). The CPU-only PyTorch wheels come from the PyTorch index (TORCH_PIP_URL) and the wheel
+# from Rockchip's repository (RKLLM_PIP_URL), checked against RKLLM_WHEEL_SHA256; with a pip index of the own network
+# both come from that index instead (an ARG named ..._PIP_URL is a pip location the index replaces), the wheel again
+# checked against the same sha256.
+ARG TORCH_PIP_URL=https://download.pytorch.org/whl/cpu
+ARG RKLLM_PIP_URL=https://raw.githubusercontent.com/airockchip/rknn-llm
 RUN set -eu; \
     arch="$(dpkg --print-architecture)"; \
     if [ "${arch}" != amd64 ]; then \
@@ -86,9 +128,17 @@ RUN set -eu; \
     else \
         python3 -m venv /opt/venv-rkllm; \
         /opt/venv-rkllm/bin/pip install --upgrade pip setuptools wheel; \
-        /opt/venv-rkllm/bin/pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu; \
-        /opt/venv-rkllm/bin/pip install \
-            "rkllm-toolkit @ https://raw.githubusercontent.com/airockchip/rknn-llm/release-v${RKLLM_VERSION}/rkllm-toolkit/packages/rkllm_toolkit-${RKLLM_VERSION}-cp311-cp311-linux_x86_64.whl#sha256=${RKLLM_WHEEL_SHA256}"; \
+        /opt/venv-rkllm/bin/pip install torch==2.6.0 torchvision==0.21.0 --index-url "${PIP_INDEX_URL:-${TORCH_PIP_URL}}"; \
+        wheel="rkllm_toolkit-${RKLLM_VERSION}-cp311-cp311-linux_x86_64.whl"; \
+        if [ -n "${PIP_INDEX_URL:-}" ]; then \
+            /opt/venv-rkllm/bin/pip download --no-deps --only-binary=:all: --dest /tmp/rkllm "rkllm-toolkit==${RKLLM_VERSION}"; \
+            printf '%s  %s\n' "${RKLLM_WHEEL_SHA256}" "/tmp/rkllm/${wheel}" | sha256sum -c -; \
+            /opt/venv-rkllm/bin/pip install "/tmp/rkllm/${wheel}"; \
+            rm -rf /tmp/rkllm; \
+        else \
+            /opt/venv-rkllm/bin/pip install \
+                "rkllm-toolkit @ ${RKLLM_PIP_URL}/release-v${RKLLM_VERSION}/rkllm-toolkit/packages/${wheel}#sha256=${RKLLM_WHEEL_SHA256}"; \
+        fi; \
         /opt/venv-rkllm/bin/python -c "from rkllm.api import RKLLM; RKLLM(); print('RKLLM toolkit ok')"; \
     fi
 
@@ -97,7 +147,7 @@ RUN set -eu; \
 # its own requirements leave both unbounded.
 RUN python3 -m venv /opt/venv-rknn \
     && /opt/venv-rknn/bin/pip install --upgrade pip wheel "setuptools<81" \
-    && /opt/venv-rknn/bin/pip install torch==2.4.0 --index-url https://download.pytorch.org/whl/cpu \
+    && /opt/venv-rknn/bin/pip install torch==2.4.0 --index-url "${PIP_INDEX_URL:-${TORCH_PIP_URL}}" \
     && /opt/venv-rknn/bin/pip install "rknn-toolkit2==${RKNN_TOOLKIT2_VERSION}" "onnx==1.16.2" \
     && /opt/venv-rknn/bin/python -c "from rknn.api import RKNN; RKNN(verbose=False); print('RKNN toolkit ok')"
 
@@ -169,6 +219,22 @@ ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 # for a native x86_64 plan, and on arm64 as the aarch64 compilers); gcc-/g++-aarch64-linux-gnu on amd64; libgomp1:
 # the OpenMP runtime of the llama.cpp tools; libgl1/libglib2.0-0: opencv (rknn-toolkit2); git: the llama.cpp source
 # by hand (source_module.sh --clone-llama-cpp); gosu: privilege drop that keeps PATH.
+# Sources in your own network for an offline build (orchestrator/Core/build_image.py): the person's apt mirror (it
+# serves the distribution's paths, such as /debian and /debian-security) or apt cache proxy. The framework passes them
+# only in offline mode, after the locality rule judged them; empty (the default) keeps the distribution's own sources.
+# No credentials: a build argument shows in the image's history.
+ARG APT_MIRROR
+ARG APT_PROXY
+RUN set -eu; \
+    if [ -n "${APT_MIRROR:-}" ]; then \
+        for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do \
+            if [ -f "${f}" ]; then sed -Ei "s#https?://[^/[:space:]]+#${APT_MIRROR%/}#g" "${f}"; fi; \
+        done; \
+    fi; \
+    if [ -n "${APT_PROXY:-}" ]; then \
+        printf 'Acquire::http::Proxy "%s";\n' "${APT_PROXY}" > /etc/apt/apt.conf.d/01llmcf-proxy; \
+    fi
+
 # hadolint ignore=DL3008,SC2086
 RUN set -eu; \
     cross=""; \

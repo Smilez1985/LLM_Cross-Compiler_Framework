@@ -733,8 +733,13 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   command line shows the person `hf_hub.person_text(error, lang)`. A build in offline mode never downloads its
   model: it uses `orchestrator/Core/local_models.local_copy`, and `BuildService.check_model_here` refuses with
   `ModelNotHere` (the models already here, by label; never a path for an AI). A Docker image is pulled in
-  offline mode only from a registry the locality rule counts as local (`utils/image_ref.offline_pull_refusal`),
-  and a target image is not built then (`BuildEngine._offline_image`).
+  offline mode only from a registry the locality rule counts as local (`utils/image_ref.offline_pull_refusal`).
+  The build container image (a target's toolchain image) is built offline only from local sources: every source its
+  Dockerfile needs goes through the one plan `orchestrator/Core/build_image.offline_plan` (the builder, the CLI, the
+  window and the MCP status ask it; never a check of your own), and a Dockerfile that fetches takes the source
+  arguments of the Module Developer Guide (section 5.4). A `docker save` goes through
+  `utils/docker_engine.save_image`, never a loop of your own; an image's build arguments and labels come only from
+  `BuildEngine.image_labels`.
 - **Offline mode: one check, one locality rule.** Ask whether offline mode is on with
   `orchestrator.utils.locality.offline_mode(config)`, never with your own `config.get("offline_mode")`
   (`tests/test_offline_check.py` fails on one). Whether an address may be reached in offline mode is decided only by
