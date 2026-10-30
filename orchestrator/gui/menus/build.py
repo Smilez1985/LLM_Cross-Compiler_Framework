@@ -59,6 +59,8 @@ CLI_PATHS: Dict[str, str] = {
     "build deps delete": "btn_build_deps_delete",
     "build status": "act_build_history",
     "build status --all": "act_build_history",
+    # the Builder's progress panel follows a build until its end record and says how it ended
+    "build status --wait": "panel_builder_progress",
     "config show": "act_file_settings",
     "config output-folder": "act_file_output_folder",
     "config repos": "act_file_settings",

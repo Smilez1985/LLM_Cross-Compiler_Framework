@@ -183,6 +183,11 @@ Further behaviour:
   extended. `build_idle_timeout` (default 1800 s) stops a step that prints nothing for that long. A stage that keeps
   restarting without finishing and a model that repeats itself in the functional test are stopped as loops. An AI
   may only lower both settings.
+- **A build ends on its done marker:** the stage runner writes one end record as its very last step; a build is
+  done only when that record says so, no clock can stop it after it, and a container that ends without it is a
+  failed build. Every build has one end reason (done, failed, cancelled, soft_cap, idle), which the Builder,
+  `llm-cli build status`, `get_build_status` and `build_info.json` show; the CLI's waits end on it with their own exit
+  codes ([CLI](CLI_Usage.md#build-status)).
 - **Where a build goes:** see [Where finished models go](#where-finished-models-go) below. Every build lands in
   `<folder>/<target>/<model>/<quantization>/` with its golden ZIP next to it.
 

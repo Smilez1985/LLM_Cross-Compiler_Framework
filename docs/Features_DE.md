@@ -193,6 +193,11 @@ Weiteres Verhalten:
   1800 s) stoppt einen Schritt, der so lange nichts ausgibt. Eine Stufe, die immer neu startet, ohne fertig zu werden,
   und ein Modell, das sich im Funktionstest wiederholt, werden als Schleife gestoppt. Eine KI darf beide
   Einstellungen nur senken.
+- **Ein Build endet an seiner Fertig-Marke:** Der Stufen-Runner schreibt als allerletzten Schritt einen
+  Abschluss-Eintrag; ein Build ist erst fertig, wenn dieser Eintrag das sagt, keine Uhr kann ihn danach stoppen, und
+  ein Container, der ohne ihn endet, ist ein fehlgeschlagener Build. Jeder Build hat einen Endgrund (done, failed,
+  cancelled, soft_cap, idle), den der Builder, `llm-cli build status`, `get_build_status` und `build_info.json`
+  zeigen; die Wartebefehle der CLI enden daran mit eigenen Exit-Codes ([CLI](CLI_Usage_DE.md#build-status)).
 - **Wohin ein Build kommt:** siehe [Wohin fertige Modelle kommen](#wohin-fertige-modelle-kommen) unten. Jeder Build
   landet in `<Ordner>/<Target>/<Modell>/<Quantisierung>/`, sein Golden-ZIP daneben.
 

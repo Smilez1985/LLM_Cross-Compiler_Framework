@@ -314,7 +314,8 @@ def _job_out(job, ctx: ToolContext) -> JobStatusOut:
     return JobStatusOut(job_id=job.job_id, kind=job.kind, state=job.state,
                         progress=JobProgress(done=job.done, total=job.total, message=job.message),
                         result=result, external_text=external, error=error, owner=job_service.owner_actor(job.owner),
-                        yours=job.owner == ctx.owner, created=job.created, updated=job.updated, note=job.note)
+                        yours=job.owner == ctx.owner, created=job.created, updated=job.updated, note=job.note,
+                        end_reason=getattr(job, "end_reason", None))
 
 
 def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:

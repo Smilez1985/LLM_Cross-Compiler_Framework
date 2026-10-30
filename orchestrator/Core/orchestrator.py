@@ -143,6 +143,9 @@ class WorkflowState:
     client_proposals: List[Any] = field(default_factory=list)
     # Who cancelled it, when an AI did (its caller id: ditto, mcp, mcp:<token>); "" for the person or the framework
     cancelled_by: str = ""
+    # How the request ended (Core/build_end.py END_REASONS: done, failed, cancelled, soft_cap, idle); None while it
+    # runs. Set once when it ends (LLMOrchestrator.end_reason_of); the status above stays for old readers.
+    end_reason: Optional[str] = None
 
     @property
     def progress_percent(self) -> int:
@@ -160,7 +163,7 @@ class WorkflowState:
 
 # WorkflowState fields whose change is written to the shared build state (request_store)
 WATCHED_FIELDS = frozenset({"status", "current_stage", "total_builds", "completed_builds", "failed_builds",
-                            "end_time"})
+                            "end_time", "end_reason"})
 
 class BuildQueueFull(RuntimeError):
     """The build queue holds MAX_UNFINISHED_REQUESTS unfinished requests; a tool caller's new one is refused, not
@@ -393,11 +396,40 @@ class LLMOrchestrator:
             label = last_part(str(path))
         return label
 
+    def end_reason_of(self, state: "WorkflowState") -> Optional[str]:
+        """The request's one end reason (Core/build_end.py), None while it runs: cancelled for a cancel; done only when
+        it completed with no failed build; otherwise the end reason of its first build that did not finish (failed,
+        soft_cap or idle, from the build engine), else failed. Set on the state the first time it is asked after the
+        end, so every reader sees the same reason."""
+        if state.end_reason is not None:
+            return state.end_reason
+        if state.status not in (OrchestrationStatus.COMPLETED, OrchestrationStatus.ERROR,
+                                OrchestrationStatus.CANCELLED):
+            return None
+        if state.status == OrchestrationStatus.CANCELLED:
+            reason = "cancelled"
+        elif state.status == OrchestrationStatus.COMPLETED and not state.failed_builds:
+            reason = "done"
+        else:
+            reason = "failed"
+            for build_id in list(state.build_ids):
+                try:
+                    progress = self.build_engine.get_build_status(build_id)
+                except Exception:  # noqa: BLE001 - an engine without the build: failed
+                    progress = None
+                found = getattr(progress, "end_reason", None)
+                if found in ("failed", "soft_cap", "idle"):
+                    reason = found
+                    break
+        state.end_reason = reason
+        return reason
+
     def _announce_end(self, state: "WorkflowState") -> None:
         """Tells the end listeners once that a request ended (completed, error, cancelled): framework facts only."""
         if state.status not in (OrchestrationStatus.COMPLETED, OrchestrationStatus.ERROR,
                                 OrchestrationStatus.CANCELLED):
             return
+        self.end_reason_of(state)
         with self._end_lock:
             if state.request_id in self._ended:
                 return
@@ -406,7 +438,8 @@ class LLMOrchestrator:
         if not listeners:
             return
         from orchestrator.Core.job_service import owner_actor
-        facts = {"request_id": state.request_id, "status": state.status.value, "owner": owner_actor(state.owner),
+        facts = {"request_id": state.request_id, "status": state.status.value, "end_reason": state.end_reason,
+                 "owner": owner_actor(state.owner),
                  "cancelled_by": state.cancelled_by or "",
                  "saved": self._saved_label(state.artifacts[0]) if state.artifacts else "",
                  "artifacts": len(state.artifacts), "completed": int(state.completed_builds),
@@ -469,6 +502,7 @@ class LLMOrchestrator:
         finally:
             self._release_disk(request)
             if request.request_id in self._workflows:
+                self.end_reason_of(self._workflows[request.request_id])  # with the end, before it is shared
                 self._share(self._workflows[request.request_id])  # errors and warnings added at the end
                 self._announce_end(self._workflows[request.request_id])  # with them: the end, once
             self._active_tasks.pop(request.request_id, None)
