@@ -31,6 +31,12 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Prompt-Cache und mit `llm-cli ditto cache set`.
 
 ### Behoben
+- `2026-10-30 14:39 UTC` · `v3.3.0` **Das Koppeln eines Boards hinter einem Jump-Host liest seinen Schlüssel durch den Jump** ([Design](docs/DESIGN_DE.md#ssh-host-schlüssel-und-das-paket-remote)):
+  Erreichen die eigenen SSH-Einstellungen des Frameworks ein Board über ein `ProxyJump` oder `ProxyCommand`, wird
+  der Schlüssel, den das Board zeigt, jetzt über das OpenSSH dieses Computers mit diesen Einstellungen gelesen
+  (vorher wurde eine direkte Verbindung versucht, die so ein Board nicht erreicht) und dir wie bei jedem Board mit
+  seinem Fingerabdruck gezeigt; vor deinem Ja wird nichts vertraut. Ein Jump-Host, dem das SSH dieses Computers noch
+  nicht vertraut, wird klar benannt: Kopple zuerst den Jump-Host. Ein direkt erreichtes Board wird wie bisher gelesen.
 - `2026-10-30 14:34 UTC` · `v3.3.0` **Die Notiz einer Deinstallation wird von einem Absturz nie abgeschnitten** ([Design](docs/DESIGN_DE.md#community-rezepte-und-pakete)):
   Verlassen die Auszüge eines Pakets die Wissensbasis, schreibt seine Deinstallation die Notiz `<pack>.released`
   atomar (über das neue `utils/atomic.write_file`: eine temporäre Datei daneben, synchronisiert, dann an ihren Platz
