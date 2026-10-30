@@ -407,7 +407,8 @@ def tokens_table(runs: Sequence[Any]) -> Optional[Tuple[List[str], List[List[str
     output, cache read and cache write tokens and the cache-read share; None when no run had one."""
     rows = []
     for report in runs:
-        for row in report.conversations():
+        conversations = getattr(report, "conversations", None)   # a report without tokens cases may not have it
+        for row in (conversations() if callable(conversations) else ()):
             share = row.get("cache_read_share")
             rows.append([str(report.setup.get("label", "")), str(row["id"]), str(row["turns"]),
                          str(row["input_tokens"]), str(row["output_tokens"]), str(row["cache_read_tokens"]),
