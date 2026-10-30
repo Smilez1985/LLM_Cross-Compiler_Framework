@@ -42,12 +42,14 @@ from orchestrator.runtime.build.recipe import BuildPlan, PlanError, check_downlo
 from orchestrator.runtime.build.toolchain import DetectedToolchain, host_resources, parallel_jobs
 from orchestrator.utils.helpers import sha256_file as _sha256
 from orchestrator.utils.sandbox import container_sandbox, hand_over, sandbox_user
+from orchestrator.utils import step_limits as _step_limits
 
 BUILDER_DOCKERFILE = Path(__file__).resolve().with_name("builder.Dockerfile")
 BUILDER_LABEL = "org.llm-framework.builder"
 CONFIGURE_TIMEOUT = 1800     # soft caps (utils/step_limits.py): they stop only an AI-started build
 BUILD_TIMEOUT = 6 * 3600
-DEFAULT_IDLE = 1800          # a step whose log stops growing this long is stopped
+# a step whose log stops growing this long is stopped: the one default of the setting build_idle_timeout
+DEFAULT_IDLE = _step_limits.DEFAULT_IDLE
 
 # Lines upstream's CMake prints when it fetches or downloads (design 3.2). Any of them in a configure log fails the
 # build, even when the download failed (it was attempted).
@@ -320,7 +322,10 @@ class BuildExecutor:
                  idle_timeout: Optional[float] = None, ai_started: bool = False,
                  pids_limit: int = 4096, mem_limit: Optional[str] = None,
                  log: Optional[Callable[[str], None]] = None, dockerfile: Path = BUILDER_DOCKERFILE,
-                 per_job_mib: Optional[Callable[[str], int]] = None):
+                 per_job_mib: Optional[Callable[[str], int]] = None, settings: Any = None):
+        """`settings`: the framework's settings (ConfigManager); the idle timeout is their build_idle_timeout, read as
+        the stage containers read it (utils/step_limits.StepLimits.from_settings: one setting, one meaning), unless
+        `idle_timeout` names a number."""
         self.per_job_mib = per_job_mib or _catalog_per_job_mib
         self.runner = runner or default_process_runner
         self.engine = engine
@@ -328,7 +333,10 @@ class BuildExecutor:
         # only an AI-started build, and the idle timeout for a step whose log stops growing
         self.configure_timeout = configure_timeout
         self.build_timeout = build_timeout
-        self.idle_timeout = DEFAULT_IDLE if idle_timeout is None else idle_timeout
+        if idle_timeout is None:
+            get = getattr(settings, "get", None)
+            idle_timeout = (_step_limits.StepLimits.from_settings(get).idle if callable(get) else DEFAULT_IDLE)
+        self.idle_timeout = idle_timeout
         self.ai_started = ai_started
         self.pids_limit = pids_limit
         self.mem_limit = mem_limit

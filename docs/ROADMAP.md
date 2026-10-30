@@ -1,4 +1,4 @@
-Version 3.2.0 · Last updated 2026-10-30
+Version 3.3.0 · Last updated 2026-10-30
 
 **English** · [Deutsch](ROADMAP_DE.md)
 
@@ -22,8 +22,8 @@ decisions it comes from.
 |---|---|---|
 | Rest of 3.2.0 | Ditto's context, the board bundle, the device runtime and more hardware | in progress |
 | next | Build service, queue and modes | planned |
-| 3.3.0 | LoRA and large models | planned |
-| 3.4.0 | Supply chain and community | planned |
+| 3.4.0 | LoRA and large models | planned |
+| 3.5.0 | Supply chain and community | planned |
 | later | Rust parts for the network and the board | planned |
 | later | More hardware and MCP extensions | planned |
 
@@ -149,7 +149,7 @@ step starts.
 | **Step 6 - Own keyring service on Linux**: the framework ships its own keyring service on Linux (decided on 2026-10-15, not built; Windows keeps the Windows Credential Manager); after step 4. Why: many Linux installations have no usable keyring, and the vault refuses one that hangs, keeps nothing or stores in plain text. Open decision: build it or keep the OS keyring. | planned |
 | **Step 7 - Newest fitting versions kept automatically**: every dependency (Python, CUDA, Docker base images, toolkits, GitHub Actions) stays on the highest version that fits, and each update is tested before it lands. A plan is being prepared. Why: old versions collect security advisories, and an update must not break anything. | planned |
 
-## 3.3.0 - LoRA and large models (planned)
+## 3.4.0 - LoRA and large models (planned)
 
 | Item | Status |
 |---|---|
@@ -160,7 +160,7 @@ step starts.
 
 Not planned: airllm. It is a runtime, not a converter, and does not belong in the pipeline.
 
-## 3.4.0 - Supply chain and community (planned)
+## 3.5.0 - Supply chain and community (planned)
 
 | Item | Status |
 |---|---|
