@@ -12,6 +12,13 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 ## [3.3.0] - 2026-10-30
 
 ### Changed
+- `2026-10-30 14:32 UTC` · `v3.3.0` **A build container image exported on one computer is accepted on another** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
+  the image's inputs label no longer holds anything of the computer that built it (your user and group id, the
+  number of build jobs, the address llama.cpp was fetched from), and the image is no longer built with your user id:
+  the build runs as your user when the container starts, as before. An image exported with `llm-cli build image
+  export` on one computer is now taken by `import` on another one with the same target version and settings; an
+  image that holds something else (another target folder, Dockerfile, llama.cpp pin or CPU tuning) is still
+  refused. Images built before 3.3.0 carry the old label: each target's image is built once more.
 - `2026-10-30 14:28 UTC` · `v3.3.0` **The idle timeout, the prompt cache size and the KV-cache type are yours alone** ([design](docs/DESIGN.md#ditto-the-local-runtime-and-the-llm-layer)):
   an AI can no longer change `build_idle_timeout`, `local_cache_ram_mib` or `local_kv_cache`, in either direction
   (before, it could lower them over MCP). A lower idle timeout can stop your own long builds, and a number in place

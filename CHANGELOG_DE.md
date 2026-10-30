@@ -13,6 +13,14 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 ## [3.3.0] - 2026-10-30
 
 ### Geändert
+- `2026-10-30 14:32 UTC` · `v3.3.0` **Ein auf einem Computer exportiertes Build-Container-Image wird auf einem anderen angenommen** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
+  Das Eingaben-Label des Images enthält nichts mehr vom Computer, der es gebaut hat (deine Benutzer- und Gruppen-ID,
+  die Zahl der Build-Jobs, die Adresse, von der llama.cpp geholt wurde), und das Image wird nicht mehr mit deiner
+  Benutzer-ID gebaut: Der Build läuft wie bisher beim Start des Containers als dein Benutzer. Ein mit `llm-cli build
+  image export` auf einem Computer exportiertes Image nimmt `import` jetzt auf einem anderen mit derselben
+  Target-Version und denselben Einstellungen an; ein Image mit anderem Inhalt (anderer Target-Ordner, anderes
+  Dockerfile, anderer llama.cpp-Pin oder andere CPU-Abstimmung) wird weiter abgelehnt. Images von vor 3.3.0 tragen
+  das alte Label: Das Image jedes Targets wird einmal neu gebaut.
 - `2026-10-30 14:28 UTC` · `v3.3.0` **Die Grenze für Stillstand, die Größe des Prompt-Caches und der KV-Cache-Typ gehören nur dir** ([Design](docs/DESIGN_DE.md#ditto-die-lokale-laufzeit-und-die-llm-schicht)):
   Eine KI kann `build_idle_timeout`, `local_cache_ram_mib` und `local_kv_cache` nicht mehr ändern, in keine Richtung
   (vorher durfte sie sie über MCP senken). Eine kleinere Grenze für Stillstand kann deine eigenen langen Builds
