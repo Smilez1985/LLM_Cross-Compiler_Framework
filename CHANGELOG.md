@@ -12,6 +12,13 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 ## [3.3.0] - 2026-10-30
 
 ### Added
+- `2026-10-30 13:28 UTC` · `v3.3.0` **Ditto follows up on its own builds** ([design](docs/DESIGN.md#ditto-the-local-runtime-and-the-llm-layer)):
+  in the framework window, when a build ends that Ditto started or waited for (`get_build_status` with
+  `wait_seconds`), Ditto gets one turn of its own for it: the chat says "Ditto looks at how its build ... ended", and
+  Ditto checks the result with `get_build_status` and `read_build_log` and proposes or runs the next step within its
+  permissions and approvals. The turn's input is a fixed framework note with the end's fixed words and the request id
+  only. While your own turn runs, the build's turn waits and follows it; other builds give no turn; at most three such
+  turns in a row without a message from you, so a chain of builds never loops.
 - `2026-10-30 13:17 UTC` · `v3.3.0` **A doorbell on your own MQTT broker for every build's end** ([design](docs/DESIGN.md#mcp-server-tools-and-permissions)):
   when you set a broker (`llm-cli config doorbell --broker mqtts://HOST:PORT`, or File > Settings... > Build
   doorbell), every build's end is published once to `<prefix>/v1/build/<request_id>/end` and `<prefix>/v1/events`

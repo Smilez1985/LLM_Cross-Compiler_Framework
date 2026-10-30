@@ -13,6 +13,14 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 ## [3.3.0] - 2026-10-30
 
 ### Hinzugefügt
+- `2026-10-30 13:28 UTC` · `v3.3.0` **Ditto kümmert sich um seine eigenen Builds** ([Design](docs/DESIGN_DE.md#ditto-die-lokale-laufzeit-und-die-llm-schicht)):
+  im Framework-Fenster bekommt Ditto, wenn ein Build endet, den Ditto gestartet oder auf den es gewartet hat
+  (`get_build_status` mit `wait_seconds`), einen eigenen Zug dafür: der Chat sagt „Ditto schaut, wie sein Build ...
+  geendet hat“, und Ditto prüft das Ergebnis mit `get_build_status` und `read_build_log` und schlägt den nächsten
+  Schritt vor oder führt ihn im Rahmen seiner Berechtigungen und Freigaben aus. Die Eingabe des Zugs ist ein fester
+  Hinweis des Frameworks nur mit den festen Wörtern des Endes und der Anfrage-ID. Während dein eigener Zug läuft,
+  wartet der Zug des Builds und folgt ihm; andere Builds geben keinen Zug; höchstens drei solche Züge hintereinander
+  ohne eine Nachricht von dir, damit eine Kette von Builds nie in eine Schleife gerät.
 - `2026-10-30 13:17 UTC` · `v3.3.0` **Eine Türklingel auf deinem eigenen MQTT-Broker für jedes Build-Ende** ([Design](docs/DESIGN_DE.md#mcp-server-tools-und-berechtigungen)):
   wenn du einen Broker einstellst (`llm-cli config doorbell --broker mqtts://HOST:PORT` oder Datei > Einstellungen... >
   Build-Türklingel), wird jedes Build-Ende einmal an `<prefix>/v1/build/<request_id>/end` und `<prefix>/v1/events`

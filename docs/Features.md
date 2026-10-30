@@ -192,6 +192,8 @@ Further behaviour:
   fixed words only (event, reason, request id), for your phone, your home automation or an AI client that waits;
   the framework never subscribes, a broker that is down never stops a build, and only you set it
   ([CLI](CLI_Usage.md#config-doorbell)).
+- **Ditto follows up on its builds:** in the framework window, a build Ditto started or waited for gives Ditto one
+  turn when it ends: it checks the result and proposes or runs the next step within its approvals.
 - **Where a build goes:** see [Where finished models go](#where-finished-models-go) below. Every build lands in
   `<folder>/<target>/<model>/<quantization>/` with its golden ZIP next to it.
 
