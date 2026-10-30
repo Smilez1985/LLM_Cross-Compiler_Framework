@@ -3404,7 +3404,8 @@ tun, was `zoo verify`, `zoo verify DATEI`, `zoo export` und `zoo keys` tun; jede
 **Deinstallieren...** bei einem installierten Pack tut, was `llm-cli zoo uninstall` tut: Das Löschfenster listet seinen
 Ordner, seine Import-Notizen und die Auszüge, die nur es hält, „Nein“ ist die Vorgabe, und es geht in den Papierkorb
 oder endgültig; Auszüge, die ein anderes Pack noch hält, bleiben. Eine KI darf nur darum bitten (das optionale Tool
-`remove_pack`), und du entscheidest im selben Fenster.
+`remove_pack`), und du entscheidest im selben Fenster. Holst du es aus dem Papierkorb zurück, werden seine Seiten
+beim nächsten Wissensimport erneut importiert.
 
 ### Export für die Community
 

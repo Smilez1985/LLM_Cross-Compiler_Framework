@@ -3069,7 +3069,8 @@ installed version and folder, the download address with size and sha256, the des
 `zoo verify`, `zoo verify FILE`, `zoo export` and `zoo keys` do; each runs in the background. **Uninstall...** on an
 installed pack does what `llm-cli zoo uninstall` does: the deletion window lists its folder, its import notes and the
 excerpts only it holds, "No" is the default, and it goes to the trash or for good; excerpts another pack still holds
-stay. An AI may only ask for it (the optional tool `remove_pack`), and you decide in the same window.
+stay. An AI may only ask for it (the optional tool `remove_pack`), and you decide in the same window. Restored from the
+trash, the pack's pages are imported again at the next knowledge import.
 
 ### Export for community
 

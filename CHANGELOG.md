@@ -23,7 +23,8 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   import notes, and how many excerpts only this pack holds), "No" by default, then the trash (`Core/trash.py`) or for
   good, audited before anything goes (`pack_uninstalled`); excerpts another pack or your own crawl still holds stay
   (`CommunityManager.uninstall_plan` / `uninstall`, `RAGManager.holding`). A pack whose pages are in the knowledge base
-  is refused while the knowledge base is off.
+  is refused while the knowledge base is off. A pack restored from the trash after its uninstall is imported again at
+  the next knowledge import (its excerpts left with the uninstall; a note `<pack>.released` says so until then).
 - `2026-10-30 01:38 UTC` · `v3.2.0` **Index entries and the maintainer's review say where a knowledge pack belongs**: a signed index entry of a knowledge
   pack now carries the topic or target of its manifest (`topic`, `target`; written by the maintainer's publish, left
   out when unset, so older entries keep their form), and `llm-cli zoo show`, the Community Hub's **Details...**
@@ -62,7 +63,9 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   excerpts of it. Every excerpt now names its holders (`holders`, with each holder's digest, topic or target in
   `holder_info`; the excerpt id is unchanged); a newer pack version, a re-crawl or an uninstall lets go of only its
   own hold, and an excerpt goes when nobody holds it any more (`RAGManager.release_holder`). A shared excerpt is found
-  under the topic or target of every holder. Excerpts stored before this name one holder, the one their fields name.
+  under the topic or target of every holder. Excerpts stored before this name one holder, the one their fields name;
+  when that pack lets go of such a page (an uninstall or a newer version without it), the other imported packs that
+  carry the page store their copy of it again (`CommunityManager._reimport_shared`), so it stays.
 - `2026-10-30 01:03 UTC` · `v3.2.0` **A re-crawl of a site removes the pages that are gone**: pages that vanished from a crawled site kept their
   excerpts for ever. A crawl of the same start address again replaces its pages, and when it read the whole site
   (it succeeded, no page limit or request budget ended it, no link was left unread at its depth limit or behind a page

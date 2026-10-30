@@ -25,7 +25,9 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   nur dieses Paket hält), „Nein“ als Vorgabe, dann der Papierkorb (`Core/trash.py`) oder endgültig, protokolliert, bevor
   etwas geht (`pack_uninstalled`); Auszüge, die ein anderes Paket oder dein eigener Crawl noch hält, bleiben
   (`CommunityManager.uninstall_plan` / `uninstall`, `RAGManager.holding`). Ein Paket, dessen Seiten in der Wissensbasis
-  sind, wird abgelehnt, solange die Wissensbasis aus ist.
+  sind, wird abgelehnt, solange die Wissensbasis aus ist. Ein Paket, das nach seiner Deinstallation aus dem Papierkorb
+  zurückgeholt wird, wird beim nächsten Wissensimport erneut importiert (seine Auszüge gingen mit der Deinstallation;
+  bis dahin sagt es eine Notiz `<pack>.released`).
 - `2026-10-30 01:38 UTC` · `v3.2.0` **Indexeinträge und die Prüfung des Maintainers sagen, wohin ein Wissenspaket gehört**: Ein signierter Indexeintrag
   eines Wissenspakets trägt jetzt das Thema oder Target seines Manifests (`topic`, `target`; geschrieben beim
   Veröffentlichen durch den Maintainer, weggelassen, wenn nicht gesetzt, sodass ältere Einträge ihre Form behalten),
@@ -68,7 +70,9 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   (`holders`, mit Digest, Thema oder Target jedes Halters in `holder_info`; die Id des Auszugs bleibt gleich); eine
   neuere Paketversion, ein neuer Crawl oder eine Deinstallation gibt nur den eigenen Halt auf, und ein Auszug geht erst,
   wenn ihn niemand mehr hält (`RAGManager.release_holder`). Ein geteilter Auszug wird unter dem Thema oder Target jedes
-  Halters gefunden. Früher gespeicherte Auszüge haben einen Halter, den ihre Felder nennen.
+  Halters gefunden. Früher gespeicherte Auszüge haben einen Halter, den ihre Felder nennen; gibt dieses Paket eine solche
+  Seite auf (eine Deinstallation oder eine neuere Version ohne sie), speichern die anderen importierten Pakete mit der
+  Seite ihre Fassung davon erneut (`CommunityManager._reimport_shared`), sodass sie bleibt.
 - `2026-10-30 01:03 UTC` · `v3.2.0` **Ein neuer Crawl einer Site entfernt die Seiten, die es nicht mehr gibt**: Seiten, die von einer gecrawlten
   Site verschwunden waren, behielten ihre Auszüge für immer. Ein neuer Crawl derselben Startadresse ersetzt ihre
   Seiten, und wenn er die ganze Site gelesen hat (er war erfolgreich, kein Seitenlimit und kein Anfragebudget hat ihn
