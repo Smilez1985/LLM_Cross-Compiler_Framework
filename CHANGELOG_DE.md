@@ -57,7 +57,10 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   und die gekennzeichneten Zeilen, eine Zeile unter der Board-Liste des Builders zeigt sie auch, und `list_targets` und
   `get_target_capabilities` liefern `board_profiles` und `benchmarks` (mit `source_label`). Der Modulgenerator schreibt
   je Board ein Profil, geplant aus der Probe des Boards. Die Beispielprofile der Vorlage sind durch einen leeren Block
-  mit beschriebenem Schema ersetzt.
+  mit beschriebenem Schema ersetzt. Eine `target.yml` einer früheren Version (ein Community-Pack, ein Target eines
+  früheren Modul-Assistenten) besteht `llm-cli targets validate` weiter: Ihre Profile im alten Format (`cmake_flags`)
+  und Benchmarks als Zuordnung werden nie gelesen, keiner ihrer Werte wird verwendet oder gezeigt. Eine
+  `published`-Quelle muss eine einfache https-Adresse sein (ohne Zugangsdaten, ohne Text).
 
 ## [3.1.0] - 2026-10-29
 

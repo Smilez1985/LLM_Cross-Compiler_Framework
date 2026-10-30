@@ -321,6 +321,8 @@ class OptimizationProfile(BaseModel):
 BENCHMARK_VALUES = ("gen_ts", "prompt_ts", "first_token_ms", "memory_usage_mb", "cpu_usage_percent")
 MEASURED_VALUES = ("gen_ts", "prompt_ts")
 _DATE = r"^\d{4}-\d{2}-\d{2}$"
+_PUBLISHED_URL = (r"^https://(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}(?::\d{1,5})?"
+                  r"(?:[/?#][A-Za-z0-9._~%/?#=&+:,;!*()'-]*)?$")
 
 
 class BenchmarkSource(BaseModel):
@@ -329,7 +331,9 @@ class BenchmarkSource(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["measured", "published", "unmeasured"]
-    url: Optional[str] = Field(default=None, max_length=500, pattern=r"^https://[^\s]{4,490}$")
+    # a plain https address (host name with a dot, optional port, path/query/fragment of URL characters): no
+    # credential, no markup, no prose; it is shown to the person and to AI callers (list_targets)
+    url: Optional[str] = Field(default=None, max_length=500, pattern=_PUBLISHED_URL)
     date: Optional[str] = Field(default=None, pattern=_DATE)
     board_label: Optional[untrusted_text(64)] = None   # measured: the label the person gave the board, never an address
     note: Optional[untrusted_text(300)] = None

@@ -455,6 +455,12 @@ den Werten `gen_ts` und `prompt_ts` (Tokens pro Sekunde beim Erzeugen und für d
 `prompt_ts` (`device_tests.json` des Builds). `llm-cli targets boards`, Build > Targets... > Boards..., die
 Board-Zeile des Builders und die MCP-Tools `list_targets` und `get_target_capabilities` zeigen die Zeilen mit dieser
 Kennzeichnung.
+Eine `published`-Quelle ist eine einfache https-Adresse (ohne Benutzernamen oder Passwort darin).
+
+Eine `target.yml` einer früheren Version (ein Community-Pack, ein Target eines früheren Modul-Assistenten) besteht
+`llm-cli targets validate` weiter: Ein Profil im alten Format (eine Zeile `cmake_flags` statt `arch` und
+`cmake_options`) und Benchmarks als Zuordnung nach Modell und Board werden nie gelesen, keiner ihrer Werte wird
+verwendet oder gezeigt. Schreib sie im Format oben neu, damit die Boards ein Profil bekommen.
 
 `docker.image_name`, `docker.registry` und `docker.tags` sind **nur lokale Image-Namen**. Kein Framework-Image wird
 veröffentlicht oder geladen: Die Build-Engine baut das Image jedes Targets auf deinem Computer und versieht es lokal

@@ -444,6 +444,12 @@ values `gen_ts` and `prompt_ts` (tokens per second while generating and for the 
 `kind: unmeasured` (an estimate; shown as "unmeasured", never as a measurement). A board test fills `gen_ts` and
 `prompt_ts` (`device_tests.json` of the build). `llm-cli targets boards`, Build > Targets... > Boards..., the
 Builder's board line and the MCP tools `list_targets` and `get_target_capabilities` show the rows with that mark.
+A `published` source is a plain https address (no user name or password in it).
+
+A `target.yml` of an earlier version (a community pack, a target an earlier module wizard made) keeps passing
+`llm-cli targets validate`: a profile in the old format (a `cmake_flags` line instead of `arch` and
+`cmake_options`) and benchmarks as a mapping by model and board are never read, so none of their values is used or
+shown. Rewrite them in the format above to give the boards a profile.
 
 `docker.image_name`, `docker.registry` and `docker.tags` are **local image names only**. No framework image is
 published or pulled: the build engine builds each target's image on your computer and tags it locally as

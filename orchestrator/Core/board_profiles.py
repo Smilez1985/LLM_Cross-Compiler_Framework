@@ -35,12 +35,41 @@ _VALUE_LABELS = {"gen_ts": "generation {} tokens/s", "prompt_ts": "prompt {} tok
                  "cpu_usage_percent": "CPU {} %"}
 
 
+# The keys of a profile in the format every target.yml had before 3.2.0 (the template, Rockchip, the targets an
+# earlier module wizard made, community packs built from them): descriptive only, nothing read them.
+_OLD_PROFILE_KEYS = frozenset({"cpu_flags", "cmake_flags", "memory_profile", "recommended_quantization"})
+
+
+def _old_profile(entry: Any) -> bool:
+    """A profile in the format before 3.2.0: its `cmake_flags` line, none of the new keys (arch, cmake_options)."""
+    return isinstance(entry, Mapping) and "cmake_flags" in entry and set(entry) <= _OLD_PROFILE_KEYS
+
+
+def old_format_entries(meta: Mapping[str, Any]) -> List[str]:
+    """The fields of a target.yml in the format before 3.2.0 (a profile with `cmake_flags`, the benchmarks as a
+    mapping by model and board instead of a list of rows with their source): never read, never refused, so an older
+    target or community pack still passes `llm-cli targets validate`; the Module Developer Guide shows the new format."""
+    meta = meta if isinstance(meta, Mapping) else {}
+    profiles = meta.get("optimization_profiles")
+    found = [f"optimization_profiles.{name}" for name, entry in profiles.items() if _old_profile(entry)] \
+        if isinstance(profiles, Mapping) else []
+    if isinstance(meta.get("performance_benchmarks"), Mapping):
+        found.append("performance_benchmarks")
+    return found
+
+
 def board_data(meta: Mapping[str, Any]) -> BoardData:
     """The two blocks of a target.yml's data, validated (ValueError / ValidationError when they are not valid; a
-    target without them has none)."""
+    target without them has none). Entries in the format before 3.2.0 (old_format_entries) are left out: they never
+    became a profile or a benchmark row, so an old value (GGML_NATIVE=ON, -mfpu, a number without a source) is never
+    used or shown."""
     meta = meta if isinstance(meta, Mapping) else {}
     profiles = meta.get("optimization_profiles")
     rows = meta.get("performance_benchmarks")
+    if isinstance(profiles, Mapping):
+        profiles = {name: entry for name, entry in profiles.items() if not _old_profile(entry)}
+    if isinstance(rows, Mapping):
+        rows = None
     return BoardData.model_validate({"optimization_profiles": profiles if profiles is not None else {},
                                      "performance_benchmarks": rows if rows is not None else []})
 
@@ -253,5 +282,5 @@ def benchmark_fields_text() -> str:
 
 
 __all__ = ["DEFAULT_OPTIMIZATION", "benchmark_fields_text", "board_data", "board_lines", "check_board_data",
-           "measured_row", "optimization_for", "ordered_quantizations", "plan_problems", "planned_profile_values",
+           "measured_row", "old_format_entries", "optimization_for", "ordered_quantizations", "plan_problems", "planned_profile_values",
            "profile_for", "profile_text", "recipe_plan", "reference_probe", "row_text", "rows_for"]
