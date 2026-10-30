@@ -1453,7 +1453,8 @@ warten auf ihn.
   und die `--tools`-Prüfung des Servers ist hier und auf einem Board derselbe Befehl.
 - **Ein Speicherbudget:** Vor dem Kontext wird der Speicher des Servers einmal aus der gemessenen Hardware dieses
   Computers geplant (`runtime/hardware.py local_budget`): der KV-Cache-Typ (`f16`, oder `q8_0`, wenn neben dem Modell
-  weniger als 2 GiB RAM übrig sind, dieselbe Regel wie auf Boards; ein quantisierter Cache bekommt Flash Attention auf
+  weniger als 2 GiB RAM übrig sind, dieselbe Regel wie auf Boards, und `f16`, wenn eine eigene GPU das Modell und
+  seinen KV-Cache hält; ein quantisierter Cache bekommt Flash Attention auf
   `auto`), der Prompt-Cache im RAM (`--cache-ram`: ein Achtel des RAMs, 256 bis 8192 MiB wie bisher, aber nie mehr als
   die Hälfte des freien RAMs, der neben dem Modell, seinem Mindestkontext und 1 GiB Abstand für das System übrig ist;
   unter 64 MiB ist er aus) und wie lange das Modell geladen bleibt. Der Server bekommt einen Slot (`-np 1`), damit

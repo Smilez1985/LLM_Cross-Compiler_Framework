@@ -82,7 +82,8 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 - `2026-10-30 07:39 UTC` · `v3.2.0` **One memory budget for Ditto's local server** ([design](docs/DESIGN.md#ditto-the-local-runtime-and-the-llm-layer)):
   the server's memory is planned once from the measured hardware (`runtime/hardware.py local_budget`), and the context
   is computed in what is left, so nothing is counted twice or not at all. The KV cache follows the same automatic rule
-  as on boards (`q8_0` when less than 2 GiB of RAM is left next to the model, else `f16`), with flash attention on
+  as on boards (`q8_0` when less than 2 GiB of RAM is left next to the model, else `f16`; `f16` when a dedicated GPU
+  holds the model and its KV cache), with flash attention on
   auto for a quantised cache; the server gets one slot (`-np 1`), so Ditto's conversation has the whole context. The
   prompt cache (`--cache-ram`) keeps the 3.1.0 rule (an eighth of the RAM, 256 to 8192 MiB) but never takes more than
   half of the free RAM left next to the model, its minimum context and a 1 GiB margin for the system, and is off

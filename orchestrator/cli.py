@@ -2681,7 +2681,12 @@ def ditto_cache_set(ctx: FrameworkContext, name: str, value: str, yes_over_cap: 
     rt = _local_runtime(ctx)
     config = rt.settings
     if key == CACHE_OVER_CAP_OK:
-        value = str(value).strip().lower() in ("1", "true", "yes", "on")
+        word = str(value).strip().lower()
+        if word not in ("1", "true", "yes", "on", "0", "false", "no", "off"):
+            console.print(f"[red]{escape(key)} is true or false (yes/no, on/off, 1/0), not '{escape(str(value))}'."
+                          "[/red]")
+            sys.exit(2)
+        value = word in ("1", "true", "yes", "on")
     try:
         change = AISettingsChange.cache_change({key: value}, rt.cache_budget())
     except (KeyError, ValueError) as e:

@@ -618,16 +618,23 @@ def local_budget(hw: HardwareInfo, model_bytes: int, kv_bytes_per_token: int, ct
     saved = dict(saved or {})
     reasons: Dict[str, str] = {}
     weights = int((model_bytes or 0) * 1.05)
-    auto_kind, left_gib = kv_cache_default(hw.ram_total, model_bytes or None)
+    floor_ctx = max(int(ctx or 0), 0)
+    if _ram_in_use(hw, weights, kv_bytes_for(kv_bytes_per_token, "f16") * floor_ctx, choice) == 0:
+        # A dedicated GPU holds the weights and the f16 KV cache: the boards' RAM rule does not apply (nothing of
+        # the model is in RAM), so the cache keeps llama.cpp's f16.
+        auto_kind, auto_why = "f16", "f16 (automatic: the GPU holds the model and its KV cache)"
+    else:
+        auto_kind, left_gib = kv_cache_default(hw.ram_total, model_bytes or None)
+        auto_why = (f"{auto_kind} (automatic, the boards' rule: {left_gib:g} GiB RAM left next to the model and the "
+                    "system reserve)")
     chosen_kind = str(saved.get("local_kv_cache") or "auto").strip().lower()
     if chosen_kind in KV_TYPE_FACTORS:
         kind = chosen_kind
         reasons["local_kv_cache"] = f"{kind} (your setting)"
     else:
         kind = auto_kind
-        reasons["local_kv_cache"] = (f"{auto_kind} (automatic, the boards' rule: {left_gib:g} GiB RAM left next to the "
-                                     "model and the system reserve)")
-    kv = kv_bytes_for(kv_bytes_per_token, kind) * max(int(ctx or 0), 0)
+        reasons["local_kv_cache"] = auto_why
+    kv = kv_bytes_for(kv_bytes_per_token, kind) * floor_ctx
     in_ram = _ram_in_use(hw, weights, kv, choice)
     low, high = CACHE_RAM_RULE_MIB
     rule = max(low, min(high, hw.ram_total // (8 * MIB)))

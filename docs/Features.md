@@ -1321,7 +1321,8 @@ download is a task of Ditto's local runtime: it waits while a build, a server st
   `--tools` check is the same command here and on a board.
 - **One memory budget:** before the context, the server's memory is planned once from this computer's measured
   hardware (`runtime/hardware.py local_budget`): the KV-cache type (`f16`, or `q8_0` when less than 2 GiB of RAM is
-  left next to the model, the same rule as on boards; a quantised cache gets flash attention on `auto`), the prompt
+  left next to the model, the same rule as on boards, and `f16` when a dedicated GPU holds the model and its KV cache;
+  a quantised cache gets flash attention on `auto`), the prompt
   cache in RAM (`--cache-ram`: an eighth of the RAM, 256 to 8192 MiB as before, but never more than half of the free
   RAM left next to the model, its minimum context and a 1 GiB margin for the system; below 64 MiB it is off) and how
   long the model stays loaded. The server gets one slot (`-np 1`), so Ditto's one conversation has the whole context.

@@ -148,6 +148,29 @@ def test_the_automatic_prompt_cache_is_never_larger_than_before_and_never_makes_
         assert used <= hw.ram_available
 
 
+def test_a_dedicated_gpu_that_holds_the_model_keeps_the_f16_cache():
+    """Review ctx-local-mem-v: the boards' RAM rule counted the weights in RAM although a dedicated GPU holds them and
+    the KV cache, so a computer with 8 GiB RAM and a 12 GiB GPU got q8_0 (quality lost for nothing)."""
+    hw = HardwareInfo(os="linux", arch="x86_64", ram_total=8 * GIB, ram_available=6 * GIB,
+                      gpus=[GpuInfo(vendor="nvidia", name="NVIDIA Example 12G", discrete=True, vram_mib=12288,
+                                    vram_free_mib=11800)])
+    model = CATALOG.model("large")
+    gpu = backend_choice(hw, "cuda")
+    budget = local_budget(hw, model.size, model.kv_bytes_per_token, CATALOG.server.ctx_min, choice=gpu)
+    assert budget.kv_cache == "f16" and budget.auto["local_kv_cache"] == "f16"
+    assert "GPU" in budget.reasons["local_kv_cache"]
+    # The same machine without the GPU build keeps the boards' rule (weights and KV cache in RAM).
+    cpu = local_budget(hw, model.size, model.kv_bytes_per_token, CATALOG.server.ctx_min,
+                       choice=backend_choice(hw, "cpu"))
+    assert cpu.kv_cache == "q8_0"
+    # A GPU too small for the model: the layers left in RAM count, the boards' rule stays.
+    small = hw.model_copy(update={"gpus": [GpuInfo(vendor="nvidia", name="NVIDIA Example 4G", discrete=True,
+                                                    vram_mib=4096, vram_free_mib=3900)]})
+    part = local_budget(small, model.size, model.kv_bytes_per_token, CATALOG.server.ctx_min,
+                        choice=backend_choice(small, "cuda"))
+    assert part.kv_cache == "q8_0"
+
+
 def test_no_value_reaches_no_limit():
     for value in ("-1", "-5", "1.5", "lots", "99999999"):
         with pytest.raises(ValueError):
