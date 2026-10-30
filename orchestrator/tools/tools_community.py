@@ -970,8 +970,8 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
         ToolSpec("remove_pack", "Ask to uninstall a community pack",
                  "Asks the person to uninstall one installed pack (knowledge, target or recipe): the framework's own "
                  "window shows the exact list (its folder, its import notes, the excerpts only it holds) and the person "
-                 "decides; it goes to the trash, never for good. Excerpts another pack or the person's crawl still "
-                 "holds stay. Optional and destructive: hidden until the person enables it, and every call is asked. "
+                 "decides; it goes to the trash, never for good. Excerpts that another pack or the person's own "
+                 "pages also hold stay. Optional and destructive: hidden until the person enables it, and every call is asked. "
                  'Example: {"kind": "knowledge", "pack_id": "rk3588-docs"}',
                  ToolTier.EXTERNAL, RemovePackIn, RemovePackOut, remove_pack, takes_context=True,
                  destructive=True, default_decision=Decision.DENY, max_decision=Decision.ASK,
