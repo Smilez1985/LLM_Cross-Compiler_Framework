@@ -229,8 +229,9 @@ def dockerfile(tmp_path, text=DOCKERFILE):
     return path
 
 
-def build(engine, monkeypatch, tmp_path, docker, **settings_values):
+def build(engine, monkeypatch, tmp_path, docker, driver=lambda: "docker", **settings_values):
     seen = {}
+    monkeypatch.setattr(engine, "_buildx_driver", driver, raising=False)   # the buildx builder of the Docker daemon
 
     def buildkit(tag, path, args, progress, labels=None, hosts=None):
         seen.update(args=dict(args), labels=dict(labels or {}), hosts=hosts)
@@ -430,3 +431,197 @@ def test_the_person_sets_a_build_source_and_a_bad_one_is_refused(tmp_path):
     with pytest.raises(LocalNetworkError):
         set_build_source(config, "offline_mode", APT)
     assert set_build_source(config, "build_apt_proxy", "") == ""
+
+
+# --- review (offline-builder-image-v): the attacks a first build let through ------------------------------------------
+
+class TestReviewOfflineSources:
+
+    def test_an_override_the_builder_cannot_use_is_not_a_local_llama_source(self, names):
+        """Regression: an http (or credential-carrying) llama.cpp override in the own network counted as local, but the
+        builder ignores such an override (only https without credentials) and the image fetched llama.cpp from GitHub
+        in offline mode."""
+        for bad in ("http://192.0.2.20/llama.cpp.git", "https://tok3n@192.0.2.20/llama.cpp.git",
+                    "file:///srv/llama.cpp"):
+            plan = plan_of(config=settings(build_apt_proxy=APT, build_pip_index=PIP), llama_repo=bad)
+            llama = source(plan, "llama_cpp")
+            assert not llama.local and "GitHub" in llama.how, bad
+            assert not plan.ready
+
+    def test_an_unusable_override_stops_the_offline_build(self, engine, monkeypatch, tmp_path, names):
+        monkeypatch.setattr(build_image, "local_llama_copy", no_copy)
+        engine.config.set("source_repositories", {"llama.cpp": {"url": "http://192.0.2.20/llama.cpp.git"}})
+        with pytest.raises(OfflineImageMissing, match="llama.cpp source"):
+            build(engine, monkeypatch, tmp_path, Docker(here={"debian:bookworm-slim"}), offline_mode=True,
+                  offline_local_ranges=[LAN], build_apt_proxy=APT, build_pip_index=PIP)
+
+    def test_fetches_of_every_scheme_and_other_package_managers_are_judged(self, names):
+        """Regression: only http(s) addresses were judged; a git://, ssh:// or scp-like address and a package manager
+        other than apt and pip fetched from the internet while the plan said every source was local."""
+        text = ("FROM scratch\nRUN git clone git://cdn.example.com/tool.git /t\n"
+                "ADD git@cdn.example.com:org/repo.git /src\nRUN git clone ssh://git@192.0.2.41/r.git /r\n"
+                "RUN apk add --no-cache curl && npm install left-pad\n")
+        plan = plan_of(text)
+        labels = {s.label: s.local for s in plan.sources}
+        assert labels["downloads from cdn.example.com"] is False
+        assert labels["downloads from 192.0.2.41"] is True
+        assert labels["packages through apk"] is False and labels["packages through npm"] is False
+        assert not plan.ready
+
+    def test_the_shipped_dockerfiles_name_no_other_package_manager(self):
+        root = Path(__file__).resolve().parents[1] / "targets"
+        for name in ("Rockchip/dockerfile", "_template/Dockerfile", "_template/Dockerfile.gpu"):
+            text = (root / name).read_text(encoding="utf-8")
+            body = "\n".join(build_image._logical_lines(text))
+            assert not build_image._other_package_sources(body), name
+
+
+class MirrorImages(Images):
+    def __init__(self, here=(), fail=False):
+        super().__init__(here)
+        self.pulls, self.tags, self.fail = [], [], fail
+
+    def pull(self, repository, tag=None):
+        self.pulls.append((repository, tag))
+        if self.fail:
+            raise RuntimeError("manifest unknown at 192.0.2.30:5000")
+        return SimpleNamespace(tag=lambda name, t: self.tags.append((name, t)))
+
+
+class TestReviewDaemonMirror:
+
+    def test_a_hub_base_image_is_pulled_from_the_mirror_address_never_through_the_daemon_fallback(
+            self, engine, monkeypatch, tmp_path, names):
+        """Regression: a Docker Hub base image through the daemon's registry mirror was left to the build's own pull,
+        which falls back to Docker Hub on the internet when the mirror fails."""
+        monkeypatch.setattr(build_image, "local_llama_copy", no_copy)
+        engine.config.set("source_repositories", {"llama.cpp": {"url": "https://192.0.2.20/llama.cpp.git"}})
+        docker = Docker(mirrors=["http://192.0.2.30:5000"])
+        docker.images = MirrorImages()
+        build(engine, monkeypatch, tmp_path, docker, offline_mode=True, offline_local_ranges=[LAN],
+              build_apt_proxy=APT, build_pip_index=PIP)
+        assert docker.images.pulls == [("192.0.2.30:5000/library/debian", "bookworm-slim")]
+        assert docker.images.tags == [("debian", "bookworm-slim")]
+
+    def test_a_mirror_that_does_not_provide_the_image_stops_the_build(self, engine, monkeypatch, tmp_path, names):
+        monkeypatch.setattr(build_image, "local_llama_copy", no_copy)
+        engine.config.set("source_repositories", {"llama.cpp": {"url": "https://192.0.2.20/llama.cpp.git"}})
+        docker = Docker(mirrors=["http://192.0.2.30:5000"])
+        docker.images = MirrorImages(fail=True)
+        with pytest.raises(OfflineImageMissing) as stopped:
+            build(engine, monkeypatch, tmp_path, docker, offline_mode=True, offline_local_ranges=[LAN],
+                  build_apt_proxy=APT, build_pip_index=PIP)
+        assert "debian:bookworm-slim" in str(stopped.value) and "192.0.2.30" not in str(stopped.value)
+
+    def test_a_digest_pinned_image_is_pulled_by_digest_from_the_mirror_first(self):
+        images = MirrorImages()
+        ref = "ubuntu:22.04@sha256:" + "0" * 64
+        build_image.pull_from_mirror(SimpleNamespace(images=images), ref, "https://mirror.test")
+        assert images.pulls == [("mirror.test/library/ubuntu", "sha256:" + "0" * 64), (ref, None)]
+        assert build_image.mirror_reference("acme/base:1", "http://192.0.2.30:5000") == \
+            ("192.0.2.30:5000/acme/base", "1")
+
+
+class TestReviewBuildxDriver:
+
+    def test_an_offline_build_never_uses_a_buildx_builder_apart_from_the_daemon(self, engine, monkeypatch, tmp_path,
+                                                                                names):
+        """Regression: a docker-container (or remote) buildx builder does not see this computer's images or the
+        daemon's mirrors and pulls every base image from its registry on the internet itself."""
+        monkeypatch.setattr(build_image, "local_llama_copy", no_copy)
+        engine.config.set("source_repositories", {"llama.cpp": {"url": "https://192.0.2.20/llama.cpp.git"}})
+        monkeypatch.setattr(engine, "_buildx_driver", lambda: "docker-container", raising=False)
+        legacy = []
+        docker = Docker(here={"debian:bookworm-slim"})
+        docker.api = SimpleNamespace(build=lambda **kw: legacy.append(kw) or iter(()))
+        monkeypatch.setattr(engine, "_buildkit_available", lambda: True)
+        monkeypatch.setattr(engine, "_build_with_buildkit", lambda *a, **k: pytest.fail("not the buildx builder"))
+        monkeypatch.setattr(engine, "docker_client", docker)
+        for key, value in dict(offline_mode=True, offline_local_ranges=[LAN], build_apt_proxy=APT,
+                               build_pip_index=PIP).items():
+            engine.config.set(key, value)
+        engine._build_docker_image(config(), BuildProgress("b1", BuildStatus.QUEUED, ""), dockerfile(tmp_path))
+        assert len(legacy) == 1 and legacy[0]["buildargs"]["APT_PROXY"] == APT
+        assert not legacy[0].get("pull"), "no pull of the base images"
+
+    def test_online_the_buildx_builder_stays_whatever_its_driver(self, engine, monkeypatch, tmp_path, names):
+        seen, _ = build(engine, monkeypatch, tmp_path, Docker(here={"debian:bookworm-slim"}), offline_mode=False,
+                        driver=lambda: pytest.fail("online: not asked"))
+        assert seen["labels"]
+
+
+def oci_archive(path: Path, labels, *, repo_tags=("llm-framework/rockchip:last-build",), index_config=None,
+                index_name=None) -> Path:
+    """A docker save archive of Docker 25 and later: manifest.json and an OCI index.json naming the image."""
+    config = json.dumps({"config": {"Labels": labels}}).encode()
+    config_digest = hashlib.sha256(config).hexdigest()
+    other = json.dumps({"config": {"Labels": {}}}).encode()
+    other_digest = hashlib.sha256(other).hexdigest()
+    wanted = other_digest if index_config == "other" else config_digest
+    image_manifest = json.dumps({"config": {"digest": f"sha256:{wanted}"}, "layers": []}).encode()
+    manifest_digest = hashlib.sha256(image_manifest).hexdigest()
+    entry = {"digest": f"sha256:{manifest_digest}"}
+    if index_name:
+        entry["annotations"] = {"io.containerd.image.name": index_name}
+    files = {"manifest.json": json.dumps([{"Config": f"blobs/sha256/{config_digest}", "RepoTags": list(repo_tags),
+                                           "Layers": []}]).encode(),
+             "index.json": json.dumps({"manifests": [entry]}).encode(),
+             f"blobs/sha256/{config_digest}": config, f"blobs/sha256/{other_digest}": other,
+             f"blobs/sha256/{manifest_digest}": image_manifest}
+    with tarfile.open(path, "w") as tar:
+        for name, data in files.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    return path
+
+
+class TestReviewImport:
+
+    def load(self, file, docker):
+        digest = hashlib.sha256(file.read_bytes()).hexdigest()
+        return build_image.import_image(None, file, actor="cli", sha256=digest, client=docker, expected=GOOD)
+
+    def test_an_image_named_like_a_base_image_is_never_loaded(self, tmp_path):
+        """Regression: the archive's names were not checked, so an import could take over debian:bookworm-slim (a
+        base image of every target) or another target's image name."""
+        for tags in (["debian:bookworm-slim"], ["llm-framework/rockchip:last-build", "llm-framework/hailo:last-build"]):
+            docker = Docker()
+            file = oci_archive(tmp_path / f"t{len(tags)}.tar", GOOD, repo_tags=tags)
+            with pytest.raises(build_image.ImageTransferError) as refused:
+                self.load(file, docker)
+            assert refused.value.code == "mismatch" and docker.images.loaded == []
+        docker = Docker()
+        file = oci_archive(tmp_path / "named.tar", GOOD, index_name="docker.io/library/debian:bookworm-slim")
+        with pytest.raises(build_image.ImageTransferError):
+            self.load(file, docker)
+        assert docker.images.loaded == []
+
+    def test_an_oci_index_naming_another_image_is_never_loaded(self, tmp_path):
+        """Regression: a load with the containerd image store reads index.json, which could name another image than
+        the manifest.json whose labels were checked."""
+        docker = Docker()
+        file = oci_archive(tmp_path / "other.tar", GOOD, index_config="other")
+        with pytest.raises(build_image.ImageTransferError) as refused:
+            self.load(file, docker)
+        assert refused.value.code == "invalid_value" and docker.images.loaded == []
+        good = oci_archive(tmp_path / "good.tar", GOOD, index_name="docker.io/llm-framework/rockchip:last-build")
+        assert self.load(good, docker).target == "Rockchip" and docker.images.loaded == [good.read_bytes()]
+
+    def test_the_loaded_file_is_the_checked_file(self, tmp_path, monkeypatch):
+        """Regression: the file was hashed by its name and opened again for the load; another file put under the
+        same name in between was loaded unchecked."""
+        file = archive(tmp_path / "rk.tar", GOOD)
+        checked = file.read_bytes()
+        other = archive(tmp_path / "evil.tar", {IMAGE_LABEL: "Rockchip", INPUTS_LABEL: "a" * 64, "x": "y"})
+        swapped = []
+
+        def swap(*a, **k):
+            if not swapped:
+                swapped.append(True)
+                other.replace(file)   # another file under the checked name, after the check
+            return GOOD
+        monkeypatch.setattr(build_image, "expected_labels", swap)
+        docker = Docker()
+        build_image.import_image(None, file, actor="cli", sha256=hashlib.sha256(checked).hexdigest(), client=docker)
+        assert swapped and docker.images.loaded == [checked]

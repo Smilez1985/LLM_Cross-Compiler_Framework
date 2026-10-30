@@ -698,6 +698,7 @@ def image_build(tmp_path, monkeypatch, repos, offline=True, images=()):
         seen.update(args=dict(args), **kwargs)
     monkeypatch.setattr(engine, "_build_with_buildkit", buildkit)
     monkeypatch.setattr(engine, "_buildkit_available", lambda: True)
+    monkeypatch.setattr(engine, "_buildx_driver", lambda: "docker", raising=False)   # the daemon's own buildx builder
     monkeypatch.setattr(engine, "docker_client", SimpleNamespace(images=SimpleNamespace(
         get=lambda tag: tag, list=lambda filters=None: seen.setdefault("listed", []).append(filters) or images)))
     record = engine._offline_repo_hosts

@@ -54,6 +54,17 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   (`utils/docker_engine.save_image`) dient jetzt dem Paket-Export des Deployment-Managers, dem Archiv des
   Security-Scans und dem Image-Export; `BuildEngine.image_labels` ist die eine Berechnung der Build-Argumente und
   Labels eines Images.
+  Ein Offline-Build prüft jede Quelle so, wie der Build sie nutzt: Ein llama.cpp-Repository-Override, den der
+  Image-Build nicht annimmt (nur https ohne Zugangsdaten; etwa ein http-Spiegel), ist nicht lokal, denn das Image holte
+  llama.cpp dann von GitHub; Adressen jedes Schemas (git, ssh, die scp-artige Form) zählen, und ein Paketmanager außer
+  apt und pip (apk, dnf, npm und ähnliche) wird als nicht lokal genannt. Ein Docker-Hub-Basis-Image, das über einen
+  Registry-Spiegel des Docker-Daemons kommt, wird vor dem Build von der eigenen Adresse des Spiegels geholt, denn die
+  Spiegel-Einstellung des Daemons fällt auf Docker Hub zurück, wenn der Spiegel versagt; ein Spiegel, der es nicht
+  liefert, hält den Build an. Ein Offline-Build läuft nie auf einem buildx-Builder außerhalb des Docker-Daemons
+  (Treiber docker-container, remote, kubernetes), der jedes Basis-Image selbst holen würde; der Daemon baut es mit
+  seinem eigenen Builder. Ein Import hasht, prüft und lädt eine einzige offene Datei und lehnt ein Archiv ab, das das
+  Image anders als `llm-framework/<target>:...` benennen würde (mit dem Namen eines Basis-Images oder eines anderen
+  Targets) oder dessen OCI-`index.json` ein anderes Image nennt als seine `manifest.json`.
 
 ## [3.1.0] - 2026-10-29
 

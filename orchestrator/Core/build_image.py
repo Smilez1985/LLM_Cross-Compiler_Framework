@@ -57,7 +57,19 @@ LLAMA_COPY = "llama.cpp"
 # no user, password, token, query or fragment (a build argument is visible in the image's history).
 MIRROR_URL = re.compile(r"https?://(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::[0-9]{1,5})?(?:/[A-Za-z0-9._~%+/-]*)?",
                         re.ASCII)
-_URL = re.compile(r"https?://[^\s\"'`<>|;&)]+", re.ASCII)
+# Every address a RUN or ADD line or an ARG default may fetch from: a URL of any scheme (http, https, git, ssh, ftp,
+# rsync, ...) and the scp-like form user@host:path.
+_URL = re.compile(r"\b[A-Za-z][A-Za-z0-9+.-]*://[^\s\"'`<>|;&)]+|\b[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}:"
+                  r"[^\s\"'`<>|;&)]*", re.ASCII)
+# Package managers other than apt and pip: an offline build has no mirror setting for them, so a Dockerfile that uses
+# one fetches from the internet (DECISIONS round 36: apt and pip through the person's mirrors; anything else is named).
+_OTHER_PACKAGES = re.compile(
+    r"\b(?:apk\s+(?:-\S+\s+)*(?:add|update|upgrade|fetch)|(?:dnf|yum|microdnf|tdnf)\s+(?:-\S+\s+)*(?:install|update|"
+    r"upgrade|makecache|groupinstall)|zypper\s+(?:-\S+\s+)*(?:in|install|ref|refresh|up|update)|pacman\s+-S\w*|"
+    r"conda\s+(?:install|create|update)|mamba\s+(?:install|create|update)|micromamba\s+(?:install|create)|"
+    r"npm\s+(?:install|i|ci)|yarn\s+(?:install|add)|pnpm\s+(?:install|add)|cargo\s+(?:install|fetch|build)|"
+    r"go\s+(?:install|get|mod\s+download)|gem\s+install|pipx\s+install|uv\s+(?:pip\s+install|sync|add|tool\s+install)|"
+    r"poetry\s+install|snap\s+install|flatpak\s+install)\b", re.ASCII)
 _PROVIDED = re.compile(r"\$\{([A-Z_][A-Z0-9_]*):-[^}]*\}")
 _APT = re.compile(r"\bapt(?:-get)?\s+(?:-\S+\s+)*(?:update|install|upgrade|dist-upgrade)\b")
 _PIP = re.compile(r"\bpip3?\s+(?:-\S+\s+)*(?:install|download|wheel)\b|-m\s+pip\s+(?:-\S+\s+)*(?:install|download)\b")
@@ -103,6 +115,10 @@ class ImagePlan:
     hosts: List[str] = field(default_factory=list)
     llama_copy: Optional[Path] = None
     bases: List[str] = field(default_factory=list)
+    # (base image, registry mirror): Docker Hub images that come through a registry mirror of the Docker daemon in the
+    # own network; the builder pulls each from that mirror's own address before the build (pull_from_mirror), because
+    # the daemon falls back to Docker Hub when a mirror fails.
+    mirror_pulls: List[Tuple[str, str]] = field(default_factory=list)
 
     @property
     def ready(self) -> bool:
@@ -264,6 +280,7 @@ def _base_sources(text: str, config: Any, client: Any, plan: ImagePlan) -> List[
             mirrors = _daemon_mirrors(client)
             local = [m for m in mirrors if check_reach(m, config).local]
             if local:
+                plan.mirror_pulls.append((ref, local[0]))
                 out.append(ImageSource("base_image", label, True, "pulled through the Docker daemon's registry "
                                        "mirror in your own network"))
                 continue
@@ -292,6 +309,12 @@ def _llama_source(text: str, config: Any, plan: ImagePlan, state_dir: Any, llama
     if not re.search(r"^\s*ARG\s+LLAMA_CPP_REPO\b", text, re.MULTILINE):
         return None
     label = "llama.cpp source (the pinned commit)"
+    if llama_repo and not usable_override(llama_repo):
+        # The builder fetches from upstream (GitHub) instead of an override it cannot use (Core/builder.py
+        # _llama_cpp_repo), so the override is not the source of this build.
+        return ImageSource("llama_cpp", label, False, "the llama.cpp repository override you set is not usable for "
+                           "the image (only an https address without a user name, password, token or query is), so "
+                           "the image would fetch llama.cpp from GitHub; set an https mirror in your own network")
     if llama_repo:
         local, words, detail, hosts = _judge_url(llama_repo, config,
                                                  "the llama.cpp repository override (LLAMA_CPP_REPO_OVERRIDE)")
@@ -311,6 +334,15 @@ def _llama_source(text: str, config: Any, plan: ImagePlan, state_dir: Any, llama
     if copy is not None:
         how = "the target's Dockerfile takes no local copy (ARG LLAMA_CPP_SOURCE); " + how
     return ImageSource("llama_cpp", label, False, how, "it would be fetched from the llama.cpp repository on GitHub")
+
+
+def usable_override(url: str) -> bool:
+    """Whether the image build takes `url` as the llama.cpp repository (LLAMA_CPP_REPO), the builder's own rule
+    (Core/builder.py LLAMA_REPO_URL, no credential): otherwise the builder warns and fetches from upstream."""
+    from orchestrator.Core.builder import LLAMA_REPO_URL
+    from orchestrator.Core.settings_view import url_credential
+    text = str(url or "")
+    return bool(LLAMA_REPO_URL.fullmatch(text)) and not url_credential(text)
 
 
 def local_llama_copy(state_dir: Any) -> Optional[Path]:
@@ -363,7 +395,7 @@ def _mirror_source(kind: str, label: str, keys: Iterable[str], text: str, config
 def _download_sources(text: str, config: Any) -> Tuple[List[ImageSource], bool]:
     """Every other address the Dockerfile fetches from, one source per host; and whether it has a pip location
     (an ARG ..._PIP_URL) that the pip index replaces."""
-    from orchestrator.utils.locality import check_reach, url_host
+    from orchestrator.utils.locality import check_reach
     hosts: Dict[str, List[str]] = {}
     pip_urls = False
     for line in _logical_lines(text):
@@ -384,7 +416,7 @@ def _download_sources(text: str, config: Any) -> Tuple[List[ImageSource], bool]:
         else:
             continue
         for url in found:
-            host = url_host(url)[0]
+            host = _fetch_host(url)
             if host and "$" not in host:
                 hosts.setdefault(host, []).append(url)
     out = []
@@ -395,6 +427,26 @@ def _download_sources(text: str, config: Any) -> Tuple[List[ImageSource], bool]:
                                "the Dockerfile fetches from this address at build time; put it in your own network "
                                "or import the whole build container image", verdict.why()))
     return out, pip_urls
+
+
+def _fetch_host(url: str) -> str:
+    """The host a fetch of `url` goes to (an scp-like user@host:path too); "" for a local file."""
+    from orchestrator.utils.locality import url_host
+    if "://" not in url:
+        return url.split("@", 1)[1].split(":", 1)[0] if "@" in url else ""
+    if url.lower().startswith("file:"):
+        return ""
+    return url_host(url)[0]
+
+
+def _other_package_sources(body: str) -> List[ImageSource]:
+    """One source per package manager other than apt and pip that the Dockerfile runs: never local (no mirror setting
+    exists for it)."""
+    found = dict.fromkeys(m.group(0).split()[0] for m in _OTHER_PACKAGES.finditer(body))
+    return [ImageSource("download", f"packages through {name}", False,
+                        "an offline build fetches packages only through apt and pip mirrors you set; this package "
+                        "manager would fetch from the internet: import the whole build container image, or build it "
+                        "once with offline mode off", "") for name in found]
 
 
 def offline_plan(text: str, config: Any, client: Any, *, state_dir: Any = None, llama_repo: Optional[str] = None,
@@ -421,8 +473,38 @@ def offline_plan(text: str, config: Any, client: Any, *, state_dir: Any = None, 
     if pip is not None:
         plan.sources.append(pip)
     plan.sources += downloads
+    plan.sources += _other_package_sources(body)
     plan.hosts = list(dict.fromkeys(plan.hosts))
     return plan
+
+
+def mirror_reference(ref: str, mirror: str) -> Tuple[str, str]:
+    """(repository, tag or digest) of the Docker Hub image `ref` at the registry mirror `mirror` (its own address,
+    e.g. 192.0.2.30:5000/library/debian and bookworm-slim)."""
+    from urllib.parse import urlsplit
+
+    from orchestrator.utils.image_ref import split_image
+    parts = split_image(ref)
+    netloc = urlsplit(mirror if "://" in mirror else f"https://{mirror}").netloc
+    repository = parts["repository"] if "/" in parts["repository"] else f"library/{parts['repository']}"
+    return f"{netloc}/{repository}", parts["digest"] or parts["tag"] or "latest"
+
+
+def pull_from_mirror(client: Any, ref: str, mirror: str) -> None:
+    """Brings the Docker Hub image `ref` onto this computer from the registry mirror `mirror` in the own network
+    (its own address, so the Docker daemon cannot fall back to Docker Hub on the internet as it does for a failing
+    registry mirror), named `ref` as a pull through the mirror would name it. An image pinned by digest is pulled by
+    that digest from the mirror first and then by its own name through the daemon, which the mirror now serves.
+    Raises the engine's error when the mirror does not provide it."""
+    from orchestrator.utils.image_ref import split_image
+    repository, tag = mirror_reference(ref, mirror)
+    image = client.images.pull(repository, tag=tag)
+    parts = split_image(ref)
+    if parts["digest"]:
+        client.images.pull(ref)
+        return
+    name = ref.rsplit(":", 1)[0] if parts["tag"] else ref
+    image.tag(name, parts["tag"] or "latest")
 
 
 def stop_text(target: str, plan: ImagePlan) -> str:
@@ -623,23 +705,76 @@ def export_image(framework: Any, target: str, dest: Path, *, actor: str, image: 
     return ExportResult(dest, sidecar, digest, dest.stat().st_size, info)
 
 
-def archive_labels(file: Path) -> Dict[str, str]:
+def archive_labels(file: Any) -> Dict[str, str]:
     """The labels of the image in a docker save archive (manifest.json -> its config's Labels), read without loading
-    it. ImageTransferError when the file is no such archive or holds more than one image."""
+    it. ImageTransferError when the file is no such archive or holds more than one image. `file`: a path or an open
+    binary file (read from its start)."""
+    return _archive(file)[0]
+
+
+def _archive(file: Any) -> Tuple[Dict[str, str], List[str]]:
+    """(labels, names) of the one image in a docker save archive: the labels of its config and every name a load
+    would give it (manifest.json RepoTags, the OCI index's image names). An OCI index.json (Docker 25 and later, which a
+    load with the containerd image store reads) must name the same image config as manifest.json: a load never brings
+    another image than the one checked here."""
     try:
-        with tarfile.open(file, "r:*") as tar:
+        if isinstance(file, (str, Path)):
+            tar = tarfile.open(file, "r:*")
+        else:
+            file.seek(0)
+            tar = tarfile.open(fileobj=file, mode="r:*")
+        with tar:
             manifest = _tar_json(tar, "manifest.json")
             if not isinstance(manifest, list) or len(manifest) != 1 or not isinstance(manifest[0], dict):
                 raise ImageTransferError("The file must hold exactly one image (a docker save of one build container "
                                          "image).", "invalid_value", "Export the image again with the framework.")
-            config = _tar_json(tar, str(manifest[0].get("Config") or ""))
+            config_name = str(manifest[0].get("Config") or "")
+            config = _tar_json(tar, config_name)
+            names = [str(t) for t in (manifest[0].get("RepoTags") or []) if isinstance(t, str)]
+            if "index.json" in tar.getnames():
+                names += _index_names(tar, config_name)
     except (tarfile.TarError, OSError, ValueError) as e:
         if isinstance(e, ImageTransferError):
             raise
         raise ImageTransferError(f"The file is not an image archive: {e}", "invalid_value",
                                  "Choose the file the export wrote.") from None
     labels = ((config or {}).get("config") or {}).get("Labels") or {} if isinstance(config, dict) else {}
-    return {str(k): str(v) for k, v in labels.items()} if isinstance(labels, dict) else {}
+    labels = {str(k): str(v) for k, v in labels.items()} if isinstance(labels, dict) else {}
+    return labels, names
+
+
+def _index_names(tar: tarfile.TarFile, config_name: str) -> List[str]:
+    """The image names of an archive's OCI index.json; ValueError unless every image it lists has the config
+    `config_name` of manifest.json (blobs/sha256/<digest>)."""
+    index = _tar_json(tar, "index.json")
+    entries = (index or {}).get("manifests") if isinstance(index, dict) else None
+    if not isinstance(entries, list) or not entries:
+        raise ValueError("index.json lists no image")
+    names: List[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError("index.json is not an image index")
+        notes = entry.get("annotations") or {}
+        if isinstance(notes, dict):
+            names += [str(notes[k]) for k in ("io.containerd.image.name", "org.opencontainers.image.ref.name")
+                      if isinstance(notes.get(k), str) and ("/" in notes[k] or ":" in notes[k])]
+        blob = _tar_json(tar, _blob_name(entry.get("digest")))
+        if isinstance(blob, dict) and isinstance(blob.get("manifests"), list):   # a nested index (one platform)
+            inner = [m for m in blob["manifests"] if isinstance(m, dict)]
+            if len(inner) != 1:
+                raise ValueError("index.json lists more than one image")
+            blob = _tar_json(tar, _blob_name(inner[0].get("digest")))
+        config = (blob or {}).get("config") if isinstance(blob, dict) else None
+        if not isinstance(config, dict) or _blob_name(config.get("digest")) != config_name:
+            raise ValueError("index.json names another image than manifest.json")
+    return names
+
+
+def _blob_name(digest: Any) -> str:
+    algorithm, _, value = str(digest or "").partition(":")
+    if algorithm != "sha256" or not SHA256.fullmatch(value):
+        raise ValueError("an image index entry has no sha256 digest")
+    return f"blobs/sha256/{value}"
 
 
 def _tar_json(tar: tarfile.TarFile, name: str) -> Any:
@@ -681,7 +816,7 @@ def import_image(framework: Any, file: Path, *, actor: str, sha256: Optional[str
     against those a build of its target here looks for (`expected`, else expected_labels). Any mismatch refuses
     before anything is loaded. Person-only; the one disk rule in Docker's image folder when it is visible here."""
     from orchestrator.Core.builder import IMAGE_LABEL, INPUTS_LABEL, TARGET_ID
-    from orchestrator.utils.helpers import sha256_file
+    from orchestrator.utils.helpers import sha256_fileobj
     _person_only(actor, "imports")
     file = Path(file).expanduser()
     if not file.is_file():
@@ -694,32 +829,44 @@ def import_image(framework: Any, file: Path, *, actor: str, sha256: Optional[str
     if not SHA256.fullmatch(wanted):
         raise ImageTransferError("The sha256 must be 64 hexadecimal characters.", "invalid_value",
                                  "Give the sha256 the export wrote.")
-    actual = sha256_file(file)
-    if actual != wanted:
-        raise ImageTransferError(f"The file does not match its sha256 (expected {wanted[:12]}..., the file has "
-                                 f"{actual[:12]}...): it is damaged or another file; nothing was loaded.", "mismatch",
-                                 "Copy the file again from the computer that exported it.")
-    labels = archive_labels(file)
-    found_target, inputs = labels.get(IMAGE_LABEL, ""), labels.get(INPUTS_LABEL, "")
-    if not TARGET_ID.fullmatch(found_target) or not SHA256.fullmatch(inputs):
-        raise ImageTransferError("The image carries no build container image labels of the framework "
-                                 f"({IMAGE_LABEL}, {INPUTS_LABEL}); nothing was loaded.", "mismatch",
-                                 "Export a build container image with the framework.")
-    if target and found_target.lower() != target.lower():
-        raise ImageTransferError(f"The image is for the target {found_target}, not {target}; nothing was loaded.",
-                                 "mismatch", "Choose the image of this target.")
-    want = expected if expected is not None else expected_labels(framework, found_target)
-    if want.get(INPUTS_LABEL) != inputs or str(want.get(IMAGE_LABEL, found_target)).lower() != found_target.lower():
-        raise ImageTransferError(
-            f"The image of {found_target} was built from other settings than a build here uses (another target "
-            "folder, Dockerfile, llama.cpp pin, build host CPU features or user id), so a build here would not use "
-            "it; nothing was loaded.", "mismatch",
-            "Export it again from a computer with the same target version and settings, or build it here.")
-    client = client or docker_client(framework, getattr(getattr(framework, "orchestrator", None), "build_engine", None))
-    if client is None:
-        raise ImageTransferError("Docker is not available on this computer.", "failed", "Start Docker.")
-    _docker_room(client, file.stat().st_size)
+    # One open file for the digest, the labels and the load: the file that is loaded is the file that was checked
+    # (a file swapped in under the same name between the check and the load is never loaded).
     with open(file, "rb") as handle:
+        actual = sha256_fileobj(handle)
+        if actual != wanted:
+            raise ImageTransferError(f"The file does not match its sha256 (expected {wanted[:12]}..., the file has "
+                                     f"{actual[:12]}...): it is damaged or another file; nothing was loaded.",
+                                     "mismatch", "Copy the file again from the computer that exported it.")
+        labels, names = _archive(handle)
+        found_target, inputs = labels.get(IMAGE_LABEL, ""), labels.get(INPUTS_LABEL, "")
+        if not TARGET_ID.fullmatch(found_target) or not SHA256.fullmatch(inputs):
+            raise ImageTransferError("The image carries no build container image labels of the framework "
+                                     f"({IMAGE_LABEL}, {INPUTS_LABEL}); nothing was loaded.", "mismatch",
+                                     "Export a build container image with the framework.")
+        if target and found_target.lower() != target.lower():
+            raise ImageTransferError(f"The image is for the target {found_target}, not {target}; nothing was loaded.",
+                                     "mismatch", "Choose the image of this target.")
+        # The names a load gives the image: only the framework's own names of this target (llm-framework/<target>:...),
+        # so an import never takes over the name of a base image or of another target's image.
+        prefix = f"llm-framework/{found_target.lower()}:"
+        foreign = [n for n in names if not n.lower().removeprefix("docker.io/").startswith(prefix)]
+        if foreign:
+            raise ImageTransferError(f"The image would also be named {', '.join(foreign[:3])}, which is not a name of "
+                                     f"the framework's build container images of {found_target}; nothing was loaded.",
+                                     "mismatch", "Export the image again with the framework.")
+        want = expected if expected is not None else expected_labels(framework, found_target)
+        if want.get(INPUTS_LABEL) != inputs or str(want.get(IMAGE_LABEL, found_target)).lower() != found_target.lower():
+            raise ImageTransferError(
+                f"The image of {found_target} was built from other settings than a build here uses (another target "
+                "folder, Dockerfile, llama.cpp pin, build host CPU features or user id), so a build here would not use "
+                "it; nothing was loaded.", "mismatch",
+                "Export it again from a computer with the same target version and settings, or build it here.")
+        client = client or docker_client(framework, getattr(getattr(framework, "orchestrator", None), "build_engine",
+                                                            None))
+        if client is None:
+            raise ImageTransferError("Docker is not available on this computer.", "failed", "Start Docker.")
+        _docker_room(client, file.stat().st_size)
+        handle.seek(0)
         loaded = client.images.load(handle)
     tags = tuple(t for i in (loaded or []) for t in (getattr(i, "tags", None) or ()))
     return ImportResult(found_target, inputs, actual, tags)
@@ -737,5 +884,6 @@ def _docker_room(client: Any, needed: int) -> None:
 
 __all__ = ["CONTEXT_SOURCES", "ExportResult", "ImageInfo", "ImagePlan", "ImageSource", "ImageTransferError",
            "ImportResult", "SOURCE_ARGS", "add_host_entries", "archive_labels", "expected_labels", "export_image",
-           "import_image", "local_llama_copy", "mirror_problem", "offline_plan", "read_sidecar", "sidecar_path",
+           "import_image", "local_llama_copy", "mirror_problem", "mirror_reference", "offline_plan",
+           "pull_from_mirror", "read_sidecar", "sidecar_path", "usable_override",
            "stage_llama_copy", "status", "stop_text", "target_dockerfile", "target_images", "target_plan"]

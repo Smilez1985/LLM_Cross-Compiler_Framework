@@ -965,10 +965,22 @@ class BuildEngine:
                 buildargs.update(plan.build_args)
                 buildargs.update(OFFLINE_NO_PROXY_ARGS)
                 hosts = list(dict.fromkeys((hosts or []) + plan.hosts)) or None
+                offline_build = True
+            else:
+                offline_build = False
             if engine_name(self.docker_client) == "podman":
                 progress.add_log("Podman builds the image (its builder buildah, through its Docker-compatible "
                                  "interface); BuildKit is not used.")
-            if self._buildkit_available():
+            use_buildkit = self._buildkit_available()
+            if use_buildkit and offline_build and self._buildx_driver() != "docker":
+                # A buildx builder of another driver (docker-container, remote, kubernetes) runs BuildKit apart from
+                # the Docker daemon: it sees none of the images on this computer and none of the daemon's registry
+                # mirrors and pulls every base image from its registry itself. The daemon's own builder builds from
+                # the images the plan found here.
+                use_buildkit = False
+                progress.add_log("Offline mode: the current docker buildx builder does not use the Docker daemon's "
+                                 "images, so the Docker daemon's own builder builds the image.")
+            if use_buildkit:
                 self._build_with_buildkit(tag, path, buildargs, progress, labels, **({"hosts": hosts} if hosts else {}))
             else:
                 resp = self.docker_client.api.build(
@@ -1038,11 +1050,44 @@ class BuildEngine:
             progress.add_log(f"Offline image plan: {line}")
         if not plan.ready:
             raise OfflineImageMissing(stop_text(config.target_arch, plan))
+        self._pull_mirrored_bases(config, plan, progress)
         if plan.llama_copy is not None:
             stage_llama_copy(plan.llama_copy, dockerfile.parent)
         progress.add_log(f"Offline mode: building the image of {config.target_arch} from local sources only (every "
                          "source is on this computer or in your own network; no proxy).")
         return plan
+
+    def _pull_mirrored_bases(self, config: BuildConfiguration, plan: Any, progress: BuildProgress) -> None:
+        """Offline mode: each Docker Hub base image the plan takes through a registry mirror of the Docker daemon in the
+        own network is pulled from that mirror's own address before the build (Core/build_image.pull_from_mirror). A
+        pull through the daemon's mirror setting falls back to Docker Hub on the internet when the mirror fails; this
+        one cannot. A mirror that does not provide the image stops the build before anything is built, naming the
+        image only (labels: never the mirror's address)."""
+        from orchestrator.Core.build_image import pull_from_mirror
+        for ref, mirror in getattr(plan, "mirror_pulls", None) or ():
+            self._check_cancelled(progress)
+            try:
+                pull_from_mirror(self.docker_client, ref, mirror)
+            except Exception as e:  # noqa: BLE001 - the engine's error names the mirror: the person's log only
+                self.logger.warning(f"Offline mode: pulling {ref} from the registry mirror failed: {e}")
+                raise OfflineImageMissing(
+                    f"Offline mode is on, and the base image {ref} of the target {config.target_arch} could not be "
+                    "pulled from the Docker daemon's registry mirror in your own network (it does not provide the "
+                    "image, is not reachable, or, as an http mirror, is not among the daemon's insecure-registries). "
+                    "Nothing was built. Bring the image onto this computer, fix the mirror, or import a build "
+                    "container image exported on another computer.") from None
+            progress.add_log(f"Offline mode: base image {ref} pulled from the registry mirror in your own network.")
+
+    def _buildx_driver(self) -> str:
+        """The driver of the current docker buildx builder ("docker", "docker-container", "remote", ...; "" when it
+        cannot be told)."""
+        try:
+            out = subprocess.run(["docker", "buildx", "inspect"], capture_output=True, text=True, timeout=30,
+                                 stdin=subprocess.DEVNULL, errors="replace").stdout
+        except Exception:  # noqa: BLE001 - no answer: not known
+            return ""
+        found = re.search(r"^Driver:\s*(\S+)", out or "", re.MULTILINE)
+        return found.group(1).strip().lower() if found else ""
 
     @staticmethod
     def _image_inputs(config: BuildConfiguration, dockerfile: Path, buildargs: Dict[str, str]) -> str:
