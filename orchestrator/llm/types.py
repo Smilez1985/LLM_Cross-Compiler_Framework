@@ -8,6 +8,7 @@ every provider's prompt cache is a prefix match, so earlier turns must never be 
 """
 
 import json
+import re
 from typing import Any, Dict, List, Literal, Optional, Type, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -144,10 +145,25 @@ class ModelInfo(BaseModel):
     capabilities: Dict[str, Any] = Field(default_factory=dict)
 
 
+def json_dumps(value: Any) -> str:
+    """Deterministic JSON for anything that becomes part of a prompt (stable prefix = cache hits): sorted keys, no
+    spaces, non-ASCII text as it is (fewer tokens than \\u escapes). The provider adapters serialize tool call
+    arguments with it on every request, so its output for a given value never changes (append-only rule above)."""
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+
+
+# DEL and the C1 controls: JSON escapes only C0 by itself, and ensure_ascii=False would let these through raw. A lone
+# surrogate too (a POSIX file name that is not UTF-8, as os.fsdecode gives it): written raw, the request to the provider
+# cannot be encoded; escaped, it is valid JSON that reads back as the same value.
+_CONTROLS = re.compile("[\x7f-\x9f\ud800-\udfff]")
+
+
 def tool_result_text(value: Any) -> str:
-    """Tool outputs as text for the model (pydantic models and dicts as compact JSON)."""
+    """Tool outputs as text for the model: text as it is; pydantic models and dicts as json_dumps (compact, sorted
+    keys; a list keeps its order), with every control character escaped. Only new tool results are made this way: a
+    stored turn keeps the bytes it was sent with."""
     if isinstance(value, str):
         return value
     if isinstance(value, BaseModel):
-        return value.model_dump_json()
-    return json.dumps(value, ensure_ascii=False, default=str, sort_keys=True)
+        value = value.model_dump(mode="json")
+    return _CONTROLS.sub(lambda m: f"\\u{ord(m.group()):04x}", json_dumps(value))

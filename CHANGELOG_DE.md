@@ -139,6 +139,58 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   heraus: Was installiert und geprüft ist, muss dort bleiben, wo es geprüft wurde), und jetzt nennen die Paketliste
   (`llm-cli zoo list`, der Community Hub) und Mojo Oracle (`community.knowledge.links`) jeden Link, sagen warum und
   dass der Ordner stattdessen dorthin verschoben werden soll (`CommunityManager.ignored_links` / `links_note`).
+- `2026-10-30 01:33 UTC` · `v3.2.0` **Ein wiederholtes Tool-Ergebnis geht als Verweis an das Modell** (Konsolidierungskette
+  ctx-slim; Entscheidung: kleinere Tool-Ergebnisse): In Dittos Tool-Schleife (`orchestrator/llm/tool_loop.py`,
+  `ResultIndex`) wird ein Aufruf, dessen Ergebnis Byte für Byte dem eines früheren Aufrufs desselben Tools mit
+  denselben Argumenten gleicht (derselbe sha256; die Reihenfolge der Argumente und die zufällige ID eines Blocks
+  nicht vertrauenswürdiger Daten zählen nicht), mit „same result as tool call #<id>“ beantwortet, solange das
+  frühere Ergebnis noch in der Anfrage steht. Nur Ergebnisse ohne Fehler zählen, jeder Aufruf läuft trotzdem, alte
+  Turns werden nie umgeschrieben, und auf ein Ergebnis, das nicht mehr in der Anfrage steht (ein langes Gespräch,
+  zusammengefasst und weitergeführt), wird nie verwiesen. Die Testvektoren stehen in
+  `tests/fixtures/context_rules/duplicate_result.json`. Damit ist der Roadmap-Punkt „Kleinere Tool-Ergebnisse und
+  sauberere Logs“ erledigt.
+- `2026-10-30 01:29 UTC` · `v3.2.0` **Jedes Log, das ein Modell liest, wird gereinigt, geschwärzt und erst dann gekürzt, und
+  die Zusammenfassung des Gesprächs hält Fakten genau** (Konsolidierungskette ctx-slim): Die Self-Healing-Analyse,
+  der MCP-Prompt `diagnose_build_failure` (beide über `healing_parts` in `orchestrator/llm/task_prompts.py`, neu
+  `log_for_ai`) und das Tool `read_build_log` (`BuildService.log_tail`) lesen ein Build-Log in einer Reihenfolge:
+  zuerst `clean_log`, dann das Schwärzen (Secrets geschwärzt; der Home-Ordner dieses Computers als `~` im
+  Self-Healing-Prompt, die Ordner des Frameworks über ihr Label in `read_build_log` wie bisher), dann das Kürzen
+  (die letzten 6.000 Zeichen für den Self-Healing-Prompt; das Schwärzen hat dort keine eigene Grenze, denn es kann
+  den Text verlängern, und eine Grenze schnitte den Fehler an seinem Ende ab). Vorher schickte der Self-Healing-Prompt die rohen letzten
+  6.000 Zeichen (mit Farbcodes, neu gezeichnetem Fortschritt, einem Pfad dieses Computers und einem Secret), so
+  konnten ein paar tausend wiederholte Zeilen den Fehler daraus verdrängen. `read_build_log` behält die rohen
+  Zeilennummern (`first_line`, `before_line`): Eine zusammengefasste Zeile zählt als die Zeilen, für die sie steht,
+  und eine zusammengefasste Folge erscheint an der Grenze von 48.000 Zeichen ganz oder gar nicht, so beginnt die
+  nächste Seite noch mit ihr.
+  Die eigene Log-Ansicht der Person (das Live-Log des Builders) bleibt roh. Die Suche in der Wissensbasis bei einer
+  Self-Healing-Aufgabe liest die letzten drei gereinigten Zeilen. Der Systemtext von Dittos Gesprächszusammenfassung
+  ist nach `task_prompts.py` umgezogen (`SUMMARY_SYSTEM`, eine Quelle; der alte Name in `Core/ditto_manager.py` ist
+  dasselbe Objekt) und sagt jetzt: „Copy ids, numbers, version strings, labels and error messages exactly. Do not
+  invent paths.“
+- `2026-10-30 01:23 UTC` · `v3.2.0` **Tool-Ergebnisse gehen als kompaktes JSON an das Modell, und ein Log-Reiniger**
+  (Konsolidierungskette ctx-slim; Entscheidung: kleinere Tool-Ergebnisse und sauberere Logs für jedes Modell): Die
+  Ausgabe eines Tools (ein pydantic-Modell oder ein dict) erreicht das Modell als `json_dumps` aus
+  `orchestrator/llm/types.py`: sortierte Schlüssel, keine Leerzeichen nach `,` und `:`, Text außerhalb von ASCII so,
+  wie er ist; jedes Steuerzeichen bleibt maskiert (C0 wie JSON es tut, DEL und C1 auch, die `ensure_ascii=False`
+  allein durchließe, und ein einzelnes Surrogat, ein Dateiname, der kein UTF-8 ist, mit dem sich die Anfrage nicht
+  kodieren ließe). Vorher ging eine pydantic-Ausgabe als `model_dump_json` in Feldreihenfolge und ein dict mit
+  Leerzeichen hinter den Trennern. `json_dumps` ist dorthin aus `orchestrator/llm/providers/base.py` umgezogen, das
+  es importiert (der alte Import geht weiter); seine Ausgabe für die Argumente von Tool-Aufrufen bleibt gleich. Nur
+  neue Tool-Ergebnisse ändern sich: Ein gespeicherter Turn behält die Bytes, mit denen er gesendet wurde, so hält
+  der Präfix des Prompt-Caches eines gespeicherten Gesprächs. Das neue `orchestrator/utils/logtext.py` ist der eine
+  Log-Reiniger, `clean_log`, mit fünf Regeln in dieser Reihenfolge: Escape-Sequenzen des Terminals entfernt (CSI und
+  OSC, `ANSI_RE`; eine Sequenz reicht nie über einen Zeilenumbruch, und ein einzelnes ESC fällt allein weg, damit
+  sich kein Text dahinter versteckt), nur der Text nach dem letzten Wagenrücklauf einer Zeile behalten (ein
+  Windows-Zeilenende ist kein Neuzeichnen), eine Folge gleicher Zeilen zur Zeile plus „(repeated N times)“
+  zusammengefasst, eine Folge von drei oder mehr Zeilen, die sich nur in ihren Zahlen unterscheiden, zur ersten Zeile,
+  einer Zeile mit der Anzahl und der letzten Zeile zusammengefasst, und eine Zeile, die ein Problem meldet, nie
+  angefasst (error, warning, fatal, failed, Traceback und die anderen Wörter, mit denen Tools es sagen: fail,
+  exception, panic, abort, denied, cannot, unable, undefined, not found, no such, segmentation fault, killed, `ERR!`
+  von npm, `E:` von apt; ein Linker nennt jedes fehlende Symbol in einer eigenen Zeile, und Symbole, die sich nur in
+  Ziffern unterscheiden, verlören sonst die mittleren); zweimal angewandt ändert er nichts mehr. hadolints eigenes Escape-Muster ist
+  jetzt dieses (`utils/hadolint.py` importiert `ANSI_RE`). Die Testvektoren sind JSON-Dateien in
+  `tests/fixtures/context_rules/` (`clean_log.json`, `compact_json.json`), damit das Board-Gateway seine eigenen
+  Regeln an denselben Fällen prüfen kann.
 
 ### Behoben
 - `2026-10-29 23:36 UTC` · `v3.2.0` **Nacharbeiten an der Container-Engine: ein `DOCKER_HOST` aus Podman-Zeiten, `/dev/dri` unter rootless

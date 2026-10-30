@@ -1483,8 +1483,10 @@ class TestHealingRetryLog:
                           "===== r1_001_r1 =====", *map(redact_secrets, retry.logs)]
         # An AI reads the same lines with a host path in the user's folder by its label or file name: on Windows
         # tmp_path lies there (C:\Users\<name>\AppData\Local\Temp), on Linux in /tmp (the lines stay as they are).
+        # The AI's view is cleaned line by line (utils/logtext.clean_lines): an entry with a line break is read as its
+        # lines; nothing here repeats, so the text is the same.
         clean = service._log_paths()
-        assert service.log_tail("r1", lines=2000).lines == [clean(line) for line in person]
+        assert "\n".join(service.log_tail("r1", lines=2000).lines) == "\n".join(clean(line) for line in person)
 
     @staticmethod
     def service_for(build_ids, logs):

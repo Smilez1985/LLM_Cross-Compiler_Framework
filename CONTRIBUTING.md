@@ -638,7 +638,10 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
 - Start subprocesses with argument lists, never with shell strings that contain user input. Quote values for remote
   shell commands with `shlex.quote`.
 - External text (web pages, logs, probe files, knowledge base, tool results) reaches a language model only through
-  `orchestrator/utils/untrusted.py`, and never in a system prompt.
+  `orchestrator/utils/untrusted.py`, and never in a system prompt. A log goes through the one log cleaner first,
+  in the order clean, scrub, cut: `orchestrator/utils/logtext.clean_log` (no second escape pattern or repeat filter
+  anywhere else), then `security/paths.scrub_for_ai` (or the build service's path labels), then the length cut.
+  Tool results go out as `llm/types.tool_result_text` (compact JSON); never serialize them another way.
 - **Imports point down the layers.** Every module of `orchestrator/` has a layer, and it imports only its own layer or
   a lower one: (1) bottom: `utils/`, `security/`, `schemas/`; (2) remote: `remote/` and `utils/ssh_trust.py`; (3)
   kernel: the modules of `tools/` that define no tools (registry, policy, audit, approvals, signing, spec, ...); (4)

@@ -69,7 +69,6 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 | Item | Status |
 |---|---|
 | **Real token numbers first.** Count the tokens of every request per provider and model and the cache hits, and settle the 12-hour cache lifetime and the token count of OpenAI with one paid test call that the person starts in their own llmcf with their own key (never from a sandbox or CI; the key never leaves the computer). | planned |
-| **Smaller tool results and cleaner logs** for every model: what a tool returns and what a log line carries shrinks to what the model needs. | planned |
 | **One memory budget for Ditto's local server**: the KV cache quantised by the same automatic rule as on boards (`local_kv_cache = auto`), the RAM budget from the measured hardware, one margin for the operating system. | planned |
 | **The real context window per model**, with counting, a budget and compaction: Ditto's local model from the measured hardware limits, API models per model, asked from the provider's server where it tells. | planned |
 | **Cloud caching the provider's way**: the provider's own caching and its guides for placing cache points (Anthropic, OpenRouter), the cache lifetime a setting with a short default and a cost limit as soft cap. | planned |
