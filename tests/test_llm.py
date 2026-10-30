@@ -530,7 +530,7 @@ class TestOpenAICompat:
                              lambda name, args: executed.append((name, args)) or {"ok": True})
         assert executed == [("start_build", {"target": "Rockchip"})]
         tool_msgs = [m for m in http.requests[1].json["messages"] if m["role"] == "tool"]
-        assert tool_msgs[0] == {"role": "tool", "tool_call_id": "c1", "content": '{"ok": true}'}
+        assert tool_msgs[0] == {"role": "tool", "tool_call_id": "c1", "content": '{"ok":true}'}
         assert tool_msgs[1]["tool_call_id"] == "c2" and tool_msgs[1]["content"].startswith("Error: Invalid arguments")
         assert http.requests[1].json["messages"][2]["tool_calls"] == calls  # assistant turn passed back unchanged
         assert loop.stop == "end" and loop.text == "done"
@@ -573,7 +573,7 @@ class TestOpenAIResponses:
         assert "temperature" not in body and "user" not in body
         # the output items go back unchanged, followed by the tool result
         assert second.json["input"][1:] == [reasoning, call, {"type": "function_call_output", "call_id": "call_1",
-                                                              "output": '{"request_id": "r1"}'}]
+                                                              "output": '{"request_id":"r1"}'}]
         assert second.json["tools"] == body["tools"]
         assert loop.text == "Started." and loop.usage.cache_read_tokens == 60 and loop.usage.input_tokens == 40
 
@@ -629,7 +629,7 @@ class TestToolLoop:
         results = r2.json["messages"][2]
         assert results["role"] == "user" and [b["tool_use_id"] for b in results["content"]] == ["toolu_1", "toolu_2"]
         assert results["content"][0] == {"type": "tool_result", "tool_use_id": "toolu_1",
-                                         "content": '{"request_id": "r1"}'}
+                                         "content": '{"request_id":"r1"}'}
         assert results["content"][1]["is_error"] is True and KEY not in results["content"][1]["content"]
         assert r1.json["tools"] == r2.json["tools"] and r1.json["system"] == r2.json["system"]
         assert loop.stop == "end" and loop.steps == 2 and loop.text == "Build started on 192.168.1.20."

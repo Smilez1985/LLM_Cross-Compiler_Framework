@@ -9,6 +9,27 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 (`` `YYYY-MM-DD HH:MM UTC` · `vX.Y.Z` ``) and is written under the version it lands in. Planned work is listed in the
 [roadmap](docs/ROADMAP.md), not here; how the framework is built and why is in the [design](docs/DESIGN.md).
 
+## [3.2.0] - 2026-10-30
+
+### Changed
+- `2026-10-30 01:23 UTC` · `v3.2.0` **Tool results go to the model as compact JSON, and one log cleaner** (consolidation
+  chain ctx-slim; decision: smaller tool results and cleaner logs for every model): a tool's output (a pydantic
+  model or a dict) reaches the model as `json_dumps` from `orchestrator/llm/types.py`: sorted keys, no spaces after
+  `,` and `:`, non-ASCII text as it is; every control character stays escaped (C0 as JSON does, DEL and C1 too,
+  which `ensure_ascii=False` alone would let through). Before, a pydantic output went as `model_dump_json` in field
+  order and a dict with spaced separators. `json_dumps` moved there from `orchestrator/llm/providers/base.py`,
+  which imports it (the old import keeps working); its output for tool call arguments is unchanged. Only new tool
+  results change: a stored turn keeps the bytes it was sent with, so the prompt cache prefix of a saved
+  conversation holds. New `orchestrator/utils/logtext.py` is the one log cleaner, `clean_log`, with five rules in
+  this order: terminal escape sequences removed (CSI and OSC, `ANSI_RE`; a sequence never reaches over a line
+  break, and a lone ESC goes by itself so no text hides behind it), only the text after the last carriage return
+  of a line kept (a Windows line end is not a redraw), a run of identical lines collapsed to the line plus
+  "(repeated N times)", a run of three or more lines that differ only in their numbers collapsed to the first line,
+  a count line and the last line, and a line that says error, warning, fatal, failed or Traceback never touched; it
+  is idempotent. hadolint's own escape pattern is now this one (`utils/hadolint.py` imports `ANSI_RE`). The test
+  vectors are JSON files in `tests/fixtures/context_rules/` (`clean_log.json`, `compact_json.json`), so the board
+  gateway can check its own rules against the same cases.
+
 ## [3.1.0] - 2026-10-29
 
 ### Added
@@ -3933,6 +3954,7 @@ taken from source headers and the git history (2025-12-13 to 2026-01-14).
 - `2025-11-20 00:00 UTC` · `v1.0.0` Basic support for Rockchip RK3588/RK3566 cross-compilation.
 - `2025-11-20 00:00 UTC` · `v1.0.0` CLI (`llm-cli`) and GUI (`llm-gui`) entry points.
 
+[3.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v2.4.0...v3.0.0
 [2.4.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v1.7.0...v2.4.0

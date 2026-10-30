@@ -496,15 +496,29 @@ def roadmap_versions(rel: str) -> List[str]:
     return versions
 
 
+def roadmap_in_progress(rel: str) -> Set[str]:
+    """The versions the roadmap's version table marks as being built ("in progress", "in Arbeit")."""
+    building = {"in progress", ROADMAP_STATUS_DE["in progress"]}
+    found = set()
+    for line in section_lines(rel):
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if line.lstrip().startswith("|") and re.fullmatch(r"\d+\.\d+\.\d+", cells[0]) and cells[-1] in building:
+            found.add(cells[0])
+    return found
+
+
 def test_roadmap_lists_only_what_comes():
-    """Finished versions leave the roadmap at release; it names only versions newer than the newest release."""
+    """Finished versions leave the roadmap at release; it names only versions newer than the newest release. The
+    version being built is the one exception: its finished entries are in the changelog under it (no Unreleased
+    section) while the roadmap still lists what is missing of it, marked "in progress"."""
     newest = changelog_entries("CHANGELOG.md")[0][0]
     found = {}
     for target in ROADMAP_LINKS.values():
         rel = target.partition("#")[0]
         assert (REPO_ROOT / rel).is_file(), f"{rel}, the roadmap, is missing"
         found[rel] = roadmap_versions(rel)
-        released = [v for v in found[rel] if _semver(v) <= _semver(newest)]
+        building = roadmap_in_progress(rel)
+        released = [v for v in found[rel] if _semver(v) < _semver(newest) or (v == newest and v not in building)]
         assert not released, (f"{rel}: the roadmap still lists released version(s) {sorted(set(released))}; "
                               f"they belong in the changelog (newest release: {newest})")
     english, german = found.values()
