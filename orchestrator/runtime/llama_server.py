@@ -351,11 +351,21 @@ def owned_process(state: Optional[dict]) -> Optional[psutil.Process]:
 
 def listens_on(pid: int, port: int) -> Optional[bool]:
     """Whether process `pid` has a listening TCP socket on `port` (the connection table of psutil); None when that
-    cannot be checked (no permission, a system psutil cannot read)."""
+    cannot be checked (no permission, a system psutil cannot read). A process that has exited listens on nothing:
+    False, also where an account without root rights cannot read the sockets of the exited (zombie) process and
+    psutil says AccessDenied; taken for "cannot be checked", a stand-in that took the port got the key."""
     try:
-        connections = psutil.Process(pid).net_connections(kind="tcp")
+        process = psutil.Process(pid)
+        connections = process.net_connections(kind="tcp")
+    except psutil.NoSuchProcess:  # gone (ZombieProcess is a NoSuchProcess too)
+        return False
     except (psutil.Error, OSError):
-        return None
+        try:
+            return False if psutil.Process(pid).status() == psutil.STATUS_ZOMBIE else None
+        except psutil.NoSuchProcess:
+            return False
+        except (psutil.Error, OSError):
+            return None
     return any(c.status == psutil.CONN_LISTEN and c.laddr and c.laddr.port == port for c in connections)
 
 

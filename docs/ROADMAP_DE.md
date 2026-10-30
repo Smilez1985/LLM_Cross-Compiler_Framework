@@ -1,4 +1,4 @@
-Version 3.2.0 · Stand 2026-10-30
+Version 3.3.0 · Stand 2026-10-30
 
 [English](ROADMAP.md) · **Deutsch**
 
@@ -22,7 +22,7 @@ der Entscheidungen des Maintainers, aus der sie stammt.
 |---|---|---|
 | Rest von 3.2.0 | Dittos Kontext, das Board-Bündel, die Laufzeit auf dem Gerät und mehr Hardware | in Arbeit |
 | als Nächstes | Build-Dienst, Warteschlange und Modi | geplant |
-| 3.3.0 | LoRA und große Modelle | geplant |
+| 3.3.0 | LoRA und große Modelle | in Arbeit |
 | 3.4.0 | Lieferkette und Community | geplant |
 | später | Rust-Teile für das Netzwerk und das Board | geplant |
 | später | Mehr Hardware und MCP-Erweiterungen | geplant |
@@ -150,7 +150,7 @@ gefragt, wenn der Schritt beginnt.
 | **Schritt 6 - Eigener Schlüsselbund-Dienst unter Linux**: Das Framework bringt unter Linux einen eigenen Schlüsselbund-Dienst mit (beschlossen am 2026-10-15, nicht gebaut; Windows behält die Windows-Anmeldeinformationsverwaltung); nach Schritt 4. Warum: Viele Linux-Installationen haben keinen nutzbaren Schlüsselbund, und der Tresor lehnt einen ab, der hängt, nichts behält oder im Klartext speichert. Offene Entscheidung: bauen oder beim Schlüsselbund des Systems bleiben. | geplant |
 | **Schritt 7 - Neueste passende Versionen, automatisch gehalten**: Jede Abhängigkeit (Python, CUDA, Docker-Basis-Images, Toolkits, GitHub Actions) bleibt auf der höchsten Version, die passt, und jedes Update wird getestet, bevor es übernommen wird. Ein Plan wird vorbereitet. Warum: Alte Versionen sammeln Sicherheitsmeldungen, und ein Update darf nichts kaputt machen. | geplant |
 
-## 3.3.0 - LoRA und große Modelle (geplant)
+## 3.3.0 - LoRA und große Modelle (in Arbeit)
 
 | Punkt | Status |
 |---|---|

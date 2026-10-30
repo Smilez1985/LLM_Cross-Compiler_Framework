@@ -1,4 +1,4 @@
-Version 3.2.0 · Last updated 2026-10-30
+Version 3.3.0 · Last updated 2026-10-30
 
 **English** · [Deutsch](BLUEPRINT_DE.md)
 
@@ -51,7 +51,7 @@ anchor is listed here with its new place.
 | <a id="310---ditto-rebuild-sign-in-and-local-ai-in-progress"></a>`#310---ditto-rebuild-sign-in-and-local-ai-in-progress` | [ROADMAP](ROADMAP.md) |
 | <a id="next---build-service-queue-and-modes-planned-starts-right-after-the-architecture-consolidation"></a>`#next---build-service-queue-and-modes-planned-starts-right-after-the-architecture-consolidation` | [ROADMAP: Next - build service, queue and modes (planned; starts right after the architecture consolidation)](ROADMAP.md#next---build-service-queue-and-modes-planned-starts-right-after-the-architecture-consolidation) |
 | <a id="320---device-runtime-and-the-maintainers-hardware-planned"></a>`#320---device-runtime-and-the-maintainers-hardware-planned` | [ROADMAP: Rest of 3.2.0 - Ditto's context, the board bundle, the device runtime and more hardware (in progress)](ROADMAP.md#rest-of-320---dittos-context-the-board-bundle-the-device-runtime-and-more-hardware-in-progress) |
-| <a id="330---lora-and-large-models-planned"></a>`#330---lora-and-large-models-planned` | [ROADMAP: 3.3.0 - LoRA and large models (planned)](ROADMAP.md#330---lora-and-large-models-planned) |
+| <a id="330---lora-and-large-models-planned"></a>`#330---lora-and-large-models-planned` | [ROADMAP: 3.3.0 - LoRA and large models (in progress)](ROADMAP.md#330---lora-and-large-models-in-progress) |
 | <a id="340---supply-chain-and-community-planned"></a>`#340---supply-chain-and-community-planned` | [ROADMAP: 3.4.0 - Supply chain and community (planned)](ROADMAP.md#340---supply-chain-and-community-planned) |
 | <a id="rust-parts-planned"></a>`#rust-parts-planned` | [ROADMAP: Rust parts (planned)](ROADMAP.md#rust-parts-planned) |
 | <a id="later-planned"></a>`#later-planned` | [ROADMAP: Later (planned)](ROADMAP.md#later-planned) |
