@@ -898,6 +898,9 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
             _cancel_interrupted_build(ctx, request_id)
 
         if workflow_status:
+            if workflow_status.status in (OrchestrationStatus.COMPLETED, OrchestrationStatus.ERROR,
+                                          OrchestrationStatus.CANCELLED):
+                _deliver_end_notices(ctx, request_id)   # the chat row and the doorbell before this process ends
             for artifact in workflow_status.artifacts:
                 console.print(f"[green]Artifacts: {escape(str(artifact))}[/green]")
                 if chosen:  # outside the output folder: the listings keep showing it
@@ -930,6 +933,30 @@ def _end_reason(service, state) -> Optional[str]:
         return rule(state) if callable(rule) else getattr(state, "end_reason", None)
     except Exception:  # noqa: BLE001 - a stand-in orchestrator: the state's own value
         return getattr(state, "end_reason", None)
+
+
+END_NOTICE_WAIT = 5.0      # seconds the CLI waits for the orchestrator to announce a build's end it just saw
+END_NOTICE_FLUSH = 15.0    # seconds it then gives the chat row and the doorbell to go out (doorbell.EXIT_FLUSH)
+
+
+def _deliver_end_notices(ctx, request_id: str) -> None:
+    """A build this process ran has ended: wait until the orchestrator told its end listeners (its status is final a
+    moment before), then until the chat feed's row and the MQTT doorbell are out; this process ends right after, and
+    their writers are daemon threads. Bounded; nothing to wait for on a stand-in context."""
+    wait = getattr(getattr(ctx, "orchestrator", None), "wait_end_announced", None)
+    if callable(wait):
+        try:
+            wait(request_id, timeout=END_NOTICE_WAIT)
+        except Exception:  # noqa: BLE001 - the notices never change the build's result
+            pass
+    framework = getattr(ctx, "framework_manager", None)
+    for part in ("activity", "doorbell"):
+        flush = getattr(getattr(framework, part, None), "flush", None)
+        if callable(flush):
+            try:
+                flush(timeout=END_NOTICE_FLUSH)
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def _say_end(reason: Optional[str]) -> None:

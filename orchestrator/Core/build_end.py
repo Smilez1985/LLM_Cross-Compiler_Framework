@@ -68,12 +68,18 @@ class EndRecord:
         return self.status == "done"
 
 
+def _linked(path: Path) -> bool:
+    """Whether the record, its job folder or the stages folder is a link: the container writes the work folder, so a
+    link there may point anywhere on this computer and is never followed."""
+    return any(p.is_symlink() for p in (path, path.parent, path.parent.parent))
+
+
 def read_end_record(path: Path) -> Optional[EndRecord]:
     """The end record at `path`, or None when there is none or it does not fit (a half-written or foreign file is no
-    record). Never follows a link: the container writes this folder."""
+    record). Never follows a link (the record, its job folder or the stages folder): the container writes them."""
     try:
         path = Path(path)
-        if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_RECORD_BYTES:
+        if _linked(path) or not path.is_file() or path.stat().st_size > MAX_RECORD_BYTES:
             return None
         text = path.read_text(encoding="ascii", errors="strict")
     except (OSError, UnicodeDecodeError, ValueError):

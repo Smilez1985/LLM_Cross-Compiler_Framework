@@ -17,8 +17,9 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   `wait_seconds`), Ditto gets one turn of its own for it: the chat says "Ditto looks at how its build ... ended", and
   Ditto checks the result with `get_build_status` and `read_build_log` and proposes or runs the next step within its
   permissions and approvals. The turn's input is a fixed framework note with the end's fixed words and the request id
-  only. While your own turn runs, the build's turn waits and follows it; other builds give no turn; at most three such
-  turns in a row without a message from you, so a chain of builds never loops.
+  only. While your own turn runs, the build's turn waits and follows it; other builds give no turn, nor does one that
+  Ditto only cancelled (your own build that Ditto stopped); at most three such turns in a row without a message from
+  you, so a chain of builds never loops.
 - `2026-10-30 13:17 UTC` · `v3.3.0` **A doorbell on your own MQTT broker for every build's end** ([design](docs/DESIGN.md#mcp-server-tools-and-permissions)):
   when you set a broker (`llm-cli config doorbell --broker mqtts://HOST:PORT`, or File > Settings... > Build
   doorbell), every build's end is published once to `<prefix>/v1/build/<request_id>/end` and `<prefix>/v1/events`
@@ -30,8 +31,10 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   send. **Send a test doorbell** (`config doorbell --test` and the button in the settings) sends one through the same
   code. The settings (`mqtt_broker_url`, `mqtt_username`, `mqtt_topic_prefix`, default `llmcf`, and `mqtt_ca_file`)
   are yours alone, the password is kept only in the credential vault (`mqtt_password`), plain `mqtt://` works only on
-  this computer and every other broker needs `mqtts://` with its certificate checked; in offline mode only a local
-  broker. New dependencies, pinned with hashes: aiomqtt 2.5.1 (BSD-3-Clause) and paho-mqtt 2.1.0 (EPL-2.0 or
+  this computer (the name `localhost` or a loopback address; a name under `.localhost` goes to the system resolver
+  and needs `mqtts://` like every other broker) and every other broker needs `mqtts://` with its certificate checked;
+  in offline mode only a local broker. A program that ends right after a build (every `llm-cli build start`) still
+  sends its doorbell and writes its chat row first, at most 15 s more. New dependencies, pinned with hashes: aiomqtt 2.5.1 (BSD-3-Clause) and paho-mqtt 2.1.0 (EPL-2.0 or
   EDL-1.0), loaded only when a doorbell is sent.
 - `2026-10-30 12:56 UTC` · `v3.3.0` **Every build's end in the chat, once** ([design](docs/DESIGN.md#mcp-server-tools-and-permissions)):
   when a build ends, the chat feed gets exactly one row for it (deduplicated by its request id), for every build, also
@@ -56,7 +59,9 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   container gets 30 s to exit by itself, then the framework stops it and the build is still done. A container that
   exits 0 without the record is a failed build ("the build ended without its end record"), never a silent success.
   Every build has one end reason from a fixed vocabulary (done, failed, cancelled, soft_cap, idle), kept in its build
-  record and, for a finished build, as `end` (reason, exit, stage) in `build_info.json`.
+  record and, for a finished build, as `end` (reason, exit, stage) in `build_info.json`. A record behind a link (the
+  record, its job folder or the stages folder: the container writes the work folder) never counts, and a stale one
+  is never removed through such a link.
 
 ### Changed
 - `2026-10-30 12:56 UTC` · `v3.3.0` **A build's chat row names how it ended, not its folder** ([design](docs/DESIGN.md#mcp-server-tools-and-permissions)):
