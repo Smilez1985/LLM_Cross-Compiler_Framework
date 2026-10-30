@@ -1179,8 +1179,9 @@ file you choose. `--min-pass` only sets the exit code for scripts.
 `llm-cli ditto eval --kind tokens` runs multi-turn conversations with example data and records, per turn, the
 provider's own input, output, cache-read and cache-write tokens (from its usage answer, never an estimate), and per
 conversation the cache-read share; with Claude it also records why the prompt cache missed against the previous
-answer (Anthropic's cache diagnostics). Two cases that fail today are marked `expected_fail`: their failure is not
-counted, and a pass is printed as `UNEXPECTED PASS`. The extra table is **Tokens**.
+answer (Anthropic's cache diagnostics). Two cases that fail today are marked `expected_fail` with the reason they
+fail for (`expected_fail_reason`): that failure is not counted, a failure for another reason is counted like any
+other, and a pass is printed as `UNEXPECTED PASS`. The extra table is **Tokens**.
 
 ```bash
 # The token cases against the configured provider, with the report
@@ -1194,8 +1195,8 @@ llm-cli ditto eval --kind openai_paid --provider openai --i-pay
 ```
 
 The paid test asks once more before it starts ("No" is the default) and names the most it can cost. It writes
-`openai_cache_check.json` into `evals/` of your per-user state folder (booleans and token numbers only) and prints
-where. In the GUI: tick the kind in **Ditto > Evaluation...**, the pause is **Pause between turns**, and
+`openai_cache_check.json` into `evals/` of your per-user state folder (booleans and token numbers only; a check this
+run did not measure keeps its earlier result) and prints where. In the GUI: tick the kind in **Ditto > Evaluation...**, the pause is **Pause between turns**, and
 **Run evaluation...** asks the paid test's question with its cost. Details: [Features.md](Features.md#token-and-cache-measurement).
 
 #### Retrieval evaluation

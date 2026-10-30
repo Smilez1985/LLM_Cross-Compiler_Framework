@@ -28,6 +28,13 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   all of them as before, in the settings, the Prompt cache group and `llm-cli ditto cache set`.
 
 ### Fixed
+- `2026-10-30 14:47 UTC` · `v3.3.0` **The token measurement of the Ditto evaluation counts what it should** ([design](docs/DESIGN.md#ditto-the-local-runtime-and-the-llm-layer)):
+  Ditto's summary of a long conversation (compaction) is a request of its own, so it no longer takes or moves the
+  chain of Anthropic's cache diagnostics: the next real turn is compared with the last real turn. A case marked
+  `expected_fail` now names the reason it fails for today (`expected_fail_reason`, one of a fixed list); a failure for
+  another reason is an ordinary failure, counted in the pass rates and listed as `failed_otherwise`, never hidden as
+  expected. `openai_cache_check.json` is merged per check: a run that measured one check keeps the other check's
+  earlier result instead of dropping it.
 - `2026-10-30 14:39 UTC` · `v3.3.0` **Pairing a board behind a jump host reads its key through the jump** ([design](docs/DESIGN.md#ssh-host-keys-and-the-remote-package)):
   when the framework's own SSH settings reach a board through a `ProxyJump` or `ProxyCommand`, the key the board
   presents is now read through this computer's OpenSSH with those settings (before, a direct connection was tried,

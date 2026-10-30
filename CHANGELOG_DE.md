@@ -31,6 +31,14 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Prompt-Cache und mit `llm-cli ditto cache set`.
 
 ### Behoben
+- `2026-10-30 14:47 UTC` · `v3.3.0` **Die Token-Messung der Ditto-Bewertung zählt, was sie soll** ([Design](docs/DESIGN_DE.md#ditto-die-lokale-laufzeit-und-die-llm-schicht)):
+  Dittos Zusammenfassung eines langen Gesprächs (Verdichtung) ist eine eigene Anfrage, sie nimmt und verschiebt die
+  Kette der Cache-Diagnose von Anthropic also nicht mehr: Die nächste echte Runde wird mit der letzten echten Runde
+  verglichen. Ein mit `expected_fail` markierter Fall nennt jetzt den Grund, aus dem er heute scheitert
+  (`expected_fail_reason`, einer aus einer festen Liste); ein Scheitern aus einem anderen Grund ist ein gewöhnliches
+  Scheitern, zählt in den Bestehensquoten und steht unter `failed_otherwise`, nie als erwartet versteckt.
+  `openai_cache_check.json` wird je Prüfung zusammengeführt: Ein Lauf, der eine Prüfung gemessen hat, behält das
+  frühere Ergebnis der anderen, statt es zu verwerfen.
 - `2026-10-30 14:39 UTC` · `v3.3.0` **Das Koppeln eines Boards hinter einem Jump-Host liest seinen Schlüssel durch den Jump** ([Design](docs/DESIGN_DE.md#ssh-host-schlüssel-und-das-paket-remote)):
   Erreichen die eigenen SSH-Einstellungen des Frameworks ein Board über ein `ProxyJump` oder `ProxyCommand`, wird
   der Schlüssel, den das Board zeigt, jetzt über das OpenSSH dieses Computers mit diesen Einstellungen gelesen
