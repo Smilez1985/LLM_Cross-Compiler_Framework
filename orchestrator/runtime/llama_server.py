@@ -713,19 +713,21 @@ class LocalLLMRuntime:
     def install(self, plan: Any = None, *, backend: str = "auto", placement: str = "auto",
                 jobs: Optional[int] = None, log: Optional[Callable[[str], None]] = None,
                 fetch_source: Optional[Callable[[], bool]] = None,
-                cancelled: Optional[Callable[[], bool]] = None):
+                cancelled: Optional[Callable[[], bool]] = None, ai_started: bool = False):
         """Builds llama-server on this machine from the pinned commit (the plan of plan_install): the CPU build first,
         verified and made active, then the GPU build, active once it is verified. A running server keeps running; the
         next start uses the new build. fetch_source() is asked before the pinned source (about 215 MB) is fetched;
         without it the source is fetched. `cancelled()` is checked before every build and before every activation: a
         cancelled install activates nothing more (the step running at that moment finishes, its result is kept in the
         store but not made active). Returns the HostInstallResult; raises LocalRuntimeError when the CPU build cannot be
-        built or the install was cancelled before it was activated (nothing is activated then)."""
+        built or the install was cancelled before it was activated (nothing is activated then). `ai_started`: a tool
+        caller (an AI) started it, so the soft caps of its steps stop it (utils/step_limits.py, DECISIONS round 25
+        Q8); a person's install goes on past them with a note."""
         from orchestrator.runtime.build.host import HostBuildError, install_host_runtime
         from orchestrator.runtime.build.store import smoke_model_file
         plan = plan or self.plan_install(backend=backend, placement=placement)
         source = self.pinned_source(plan.needs_source, fetch_source=fetch_source, log=log)
-        executor = self.executor(log=log)
+        executor = self.executor(log=log, ai_started=ai_started)
         verifier = self.verifier()
         smoke = smoke_model_file(self.catalog.smoke_model, self.models_dir.parent / "smoke")
         try:
@@ -741,10 +743,11 @@ class LocalLLMRuntime:
                          f"({result.active.backend}), CPU fallback {result.fallback.build_id[:16]}")
         return result
 
-    def executor(self, log: Optional[Callable[[str], None]] = None):
-        """The build executor (natively, or in the builder container through engine())."""
+    def executor(self, log: Optional[Callable[[str], None]] = None, ai_started: bool = False):
+        """The build executor (natively, or in the builder container through engine()); `ai_started`: its soft caps
+        stop the build (an AI started it)."""
         from orchestrator.runtime.build.executor import BuildExecutor
-        return self._executor or BuildExecutor(engine=self.engine(), log=log)
+        return self._executor or BuildExecutor(engine=self.engine(), log=log, ai_started=ai_started)
 
     def verifier(self):
         """The verification of builds that runs their programs on this machine itself."""
