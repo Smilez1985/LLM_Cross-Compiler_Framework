@@ -44,7 +44,7 @@ from orchestrator.llm import (AuthFailed, BadRequest, BillingError, ChatRequest,
                               run_tool_loop, tool_specs_from_registry)
 from orchestrator.llm.task_prompts import (CANNOT_REASONS, CANNOT_RETRY, CANNOT_RULE, CHAT_INTRO,  # noqa: F401
                                            CHAT_TOOLS, FRAMEWORK, HEALING_SYSTEM, MODULE_SYSTEM, OPTIMIZER_SYSTEM,
-                                           SDK_HINTS, base_image_block, format_listing, healing_parts,
+                                           SDK_HINTS, SUMMARY_SYSTEM, base_image_block, format_listing, healing_parts,
                                            healing_query, is_official_image, knowledge_excerpts, module_parts,
                                            module_query, optimizer_parts)
 # Tool calls and results pair up (one implementation, in the tool loop); the names are Ditto's too.
@@ -652,10 +652,7 @@ def render_transcript(messages: Sequence[Message], tool_text: int = 800) -> str:
 # --- prompts ----------------------------------------------------------------------------------------------------
 # The task texts live in orchestrator/llm/task_prompts.py, one source for Ditto and the MCP prompts.
 
-SUMMARY_SYSTEM = ("You summarize a conversation between a user and Ditto, the assistant of the LLM Cross-Compiler "
-                  f"Framework. {FRAMEWORK} Keep what matters to continue it: the user's goal, hardware, models, "
-                  "targets, settings, build request ids, errors and decisions. At most 12 short sentences.\n"
-                  + UNTRUSTED_RULE)
+# SUMMARY_SYSTEM, the conversation summary's system text, lives there too (imported above under the same name).
 
 
 def _text_block(text: str) -> Dict[str, str]:

@@ -15,7 +15,9 @@ to state, not a reason to refuse.
 
 from typing import Any, Dict, List, Optional, Sequence
 
+from orchestrator.security.paths import scrub_for_ai
 from orchestrator.utils.image_ref import is_official_image, split_image  # noqa: F401 (moved there, re-exported)
+from orchestrator.utils.logtext import clean_log
 from orchestrator.utils.untrusted import UNTRUSTED_RULE, sanitize_untrusted, wrap_untrusted
 
 FRAMEWORK = ("The LLM Cross-Compiler Framework converts and quantizes language models for edge hardware (GGUF for "
@@ -94,6 +96,14 @@ MODULE_SYSTEM = (f"You are Ditto, an expert embedded systems engineer for the LL
 OPTIMIZER_SYSTEM = (f"You are Ditto, the build engineer of the LLM Cross-Compiler Framework. {FRAMEWORK} "
                     + OPTIMIZER_TASK + " When you cannot, fill cannot.\n" + CANNOT_RULE + "\n" + UNTRUSTED_RULE)
 
+# Ditto's conversation summary (a long conversation continues as a new one with it). One source: Core/ditto_manager.py
+# imports it under the same name.
+SUMMARY_SYSTEM = ("You summarize a conversation between a user and Ditto, the assistant of the LLM Cross-Compiler "
+                  f"Framework. {FRAMEWORK} Keep what matters to continue it: the user's goal, hardware, models, "
+                  "targets, settings, build request ids, errors and decisions. Copy ids, numbers, version strings, "
+                  "labels and error messages exactly. Do not invent paths. At most 12 short sentences.\n"
+                  + UNTRUSTED_RULE)
+
 # The reasons a model may give for "cannot" (design 6.11 D10). "Untested" is not one.
 CANNOT_REASONS = ("missing_information", "not_supported", "no_tool", "permission_denied", "needs_person",
                   "hardware_unavailable", "insufficient_resources", "limit_reached")
@@ -102,6 +112,7 @@ CANNOT_RETRY = ("Your answer said you cannot do this, but the framework checked 
 
 PROBE_CHARS = 8000       # a hardware probe in a module task
 LOG_CHARS = 6000         # the end of a build log in a healing task
+RAW_LOG_CHARS = 50 * LOG_CHARS  # the most of a raw log end that is cleaned for it (bounds the work on a huge log)
 CONTEXT_CHARS = 2000     # build context in a healing task
 KNOWLEDGE_TOKENS = 2000  # knowledge excerpts in an MCP prompt (Ditto: a third of its context limit)
 
@@ -127,10 +138,24 @@ def knowledge_excerpts(rag: Any, query: str, limit: int = 5, rerank: Optional[bo
     return wrap_untrusted(text, "knowledge base") if text else ""
 
 
+def log_for_ai(log_content: str, limit: int = LOG_CHARS) -> str:
+    """The end of a build log as a model reads it, in the one order: clean_log (escapes, redraws and repeats out,
+    utils/logtext.py), then scrub_for_ai (this computer's home folder as '~', secrets redacted), then the cut to the last
+    `limit` characters. Cleaning comes first so a colour code cannot hide a path from the scrubber and repeated lines
+    do not push the error out of the part that is kept. Only the last RAW_LOG_CHARS of the raw log are read."""
+    raw = log_content or ""
+    if len(raw) > RAW_LOG_CHARS:
+        raw = raw[-RAW_LOG_CHARS:]
+        raw = raw.split("\n", 1)[1] if "\n" in raw else raw   # from a line start
+    text = clean_log(raw)
+    text = scrub_for_ai(text, limit=max(len(text), 1))
+    return text[-limit:]
+
+
 def healing_query(log_content: str) -> str:
-    """What a healing task searches the knowledge base for: the last three log lines (never reranked: the
-    cross-encoder scores log lines against prose poorly)."""
-    return "\n".join((log_content or "").strip().splitlines()[-3:])
+    """What a healing task searches the knowledge base for: the last three lines of the cleaned log (never reranked:
+    the cross-encoder scores log lines against prose poorly)."""
+    return "\n".join(clean_log(log_content or "").strip().splitlines()[-3:])
 
 
 def module_query(probe: str, board: str = "") -> str:
@@ -147,7 +172,7 @@ SDK_HINTS = (("nvidia", "nvidia"), ("tegra", "nvidia"), ("rockchip", "rockchip")
 
 def healing_parts(log_content: str, context_info: str = "", knowledge: str = "") -> List[str]:
     parts = ["Build context:\n" + wrap_untrusted(context_info or "(none)", "build context", max_len=CONTEXT_CHARS),
-             "Build log (last part):\n" + wrap_untrusted((log_content or "")[-LOG_CHARS:], "build log")]
+             "Build log (last part):\n" + wrap_untrusted(log_for_ai(log_content), "build log")]
     if knowledge:
         parts.append("Possibly related knowledge-base excerpts:\n" + knowledge)
     return parts
