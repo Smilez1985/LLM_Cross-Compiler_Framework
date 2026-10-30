@@ -116,11 +116,11 @@ def test_the_tags_follow_ggml_s_arch_tags_order():
 
 
 def test_sme_needs_a_compiler_that_knows_it():
-    sme = changed(RK3566, SUPPORTS_SME="ON")
-    assert arm_arch(sme) == "armv8.2-a+dotprod+fp16"          # compiler not known: no +sme
-    assert arm_arch(sme, ("gcc", "13.3")) == "armv8.2-a+dotprod+fp16"
-    assert arm_arch(sme, ("gcc", "14.2")) == "armv8.2-a+dotprod+fp16+sme"
-    assert arm_arch(sme, ("clang", "18.1.3")) == "armv8.2-a+dotprod+fp16+sme"
+    sme = changed(RK3566, SUPPORTS_SVE="ON", SUPPORTS_SVE2="ON", SUPPORTS_SME="ON")  # +sme builds on +sve2
+    assert arm_arch(sme) == "armv8.2-a+dotprod+fp16+sve+sve2"          # compiler not known: no +sme
+    assert arm_arch(sme, ("gcc", "13.3")) == "armv8.2-a+dotprod+fp16+sve+sve2"
+    assert arm_arch(sme, ("gcc", "14.2")) == "armv8.2-a+dotprod+fp16+sve+sve2+sme"
+    assert arm_arch(sme, ("clang", "18.1.3")) == "armv8.2-a+dotprod+fp16+sve+sve2+sme"
     assert "compiler too old" in sme_problem(("gcc", "12.2")) and sme_problem(("gcc", "14.2")) is None
     _march, _used, unusable = arm_plan(sme, ("gcc", "12.2"))
     assert unusable == [{"feature": "SME", "reason": sme_problem(("gcc", "12.2"))}]
@@ -196,19 +196,68 @@ def test_an_imported_plan_with_odd_cpu_features_is_refused(bad):
         BuildPlan.from_dict(data)
 
 
-def test_a_native_arm_build_keeps_its_build_id_when_the_board_has_no_later_feature():
-    """The native identity records SVE2/SME only when ON: the ID of every earlier native ARM build stays."""
-    from orchestrator.runtime.build.recipe import _cpu_identity, _Target
+def test_a_native_arm_build_keeps_its_build_id_for_every_board():
+    """The native identity records the four base features only, as before 3.3.0 (the CPU model already tells boards
+    apart): the ID of an earlier native build stays, also on a board with SVE2 or SME (before the review, SVE2 and SME
+    entered the identity when ON and changed the ID of an unchanged native plan)."""
+    from orchestrator.runtime.build.recipe import ARM_FEATURES, _cpu_identity, _Target
     target = _Target("linux", "arm64", "glibc", "2.36")
-    assert set(_cpu_identity(RK3566, target)["features"]) == {"SUPPORTS_DOTPROD", "SUPPORTS_FP16_ARITH",
-                                                             "SUPPORTS_I8MM", "SUPPORTS_SVE"}
-    assert _cpu_identity(ARMV9, target)["features"]["SUPPORTS_SME"] == "ON"
+    for profile in (RK3566, ARMV9):
+        assert set(_cpu_identity(profile, target)["features"]) == set(ARM_FEATURES)
 
 
 def test_a_build_on_the_board_itself_names_bf16_as_unusable():
-    board = ToolchainInfo(host_os="linux", host_arch="arm64", compiler="gcc-12.2.0", cmake="3.25.1")
+    board = ToolchainInfo(host_os="linux", host_arch="arm64", compiler="gcc-14.2.0", cmake="3.28.3")
     plan = plan_build(ARMV9, purpose="device-runtime", placement="on-device", backend="cpu", catalog=CATALOG,
                       toolchain=board)
     assert plan.options()["GGML_NATIVE"] == "ON"
     assert [u["feature"] for u in plan.cpu_features["unusable"]] == ["BF16_ARM"]
     assert "SVE2" in plan.cpu_features["used"] and "SME" in plan.cpu_features["used"]
+
+
+def test_a_native_build_names_sme_as_unusable_when_the_compiler_is_too_old():
+    """-mcpu=native of GCC 12 does not know SME: the plan's summary does not claim it as used."""
+    board = ToolchainInfo(host_os="linux", host_arch="arm64", compiler="gcc-12.2.0", cmake="3.25.1")
+    plan = plan_build(ARMV9, purpose="device-runtime", placement="on-device", backend="cpu", catalog=CATALOG,
+                      toolchain=board)
+    assert plan.options()["GGML_NATIVE"] == "ON"
+    assert "SME" not in plan.cpu_features["used"] and "SVE2" in plan.cpu_features["used"]
+    assert [u["feature"] for u in plan.cpu_features["unusable"]] == ["SME", "BF16_ARM"]
+    assert plan.cpu_features["unusable"][0]["reason"] == sme_problem(("gcc", "12.2.0"))
+
+
+# --- a dependent tag is planned only with the tag it builds on ---------------------------------------------------
+
+# (the profile's ARM features, GGML_CPU_ARM_ARCH, the features named as unusable). GCC and Clang make +sve imply
+# +fp16 and +sve2 imply +sve, GCC 14 makes +sme imply +sve2, and every upstream variant with MATMUL_INT8 has DOTPROD:
+# a tag without its base compiles instructions the board does not have, and +i8mm alone would raise the base of an
+# armv8.0 board (no dotprod, no fp16) to armv8.2-a.
+DEPENDENTS = {
+    "sve2-without-sve": (dict(SUPPORTS_SVE2="ON"), "armv8.2-a+dotprod+fp16", ["SVE2"]),
+    "sme-without-sve2": (dict(SUPPORTS_SVE="ON", SUPPORTS_I8MM="ON", SUPPORTS_SME="ON"),
+                         "armv8.2-a+dotprod+fp16+sve+i8mm", ["SME"]),
+    "i8mm-on-armv8.0": (dict(SUPPORTS_DOTPROD="OFF", SUPPORTS_FP16_ARITH="OFF", SUPPORTS_I8MM="ON"), "armv8-a",
+                        ["I8MM"]),
+    "sve-without-fp16": (dict(SUPPORTS_FP16_ARITH="OFF", SUPPORTS_SVE="ON", SUPPORTS_SVE2="ON"),
+                         "armv8.2-a+dotprod", ["SVE", "SVE2"]),
+    "fp16-unknown": (dict(SUPPORTS_FP16_ARITH="UNKNOWN", SUPPORTS_SVE="ON"), "armv8.2-a+dotprod", ["SVE"]),
+}
+
+
+@pytest.mark.parametrize("case", sorted(DEPENDENTS))
+def test_a_dependent_arm_tag_is_never_planned_without_its_base(case):
+    values, march, unusable = DEPENDENTS[case]
+    got, used, dropped = arm_plan(changed(RK3566, **values), ("gcc", "14.2"))
+    assert got == march
+    assert [u["feature"] for u in dropped] == unusable
+    assert all(u["reason"].startswith("builds on ") for u in dropped)
+    assert not set(used) & set(unusable)
+
+
+def test_the_arm_bases_are_the_inventory_s():
+    from orchestrator.runtime.build import ggml_cpu_options as inv
+    from orchestrator.runtime.build.recipe import ARM_NEEDS
+    assert dict(ARM_NEEDS) == {"SUPPORTS_SVE": "SUPPORTS_FP16_ARITH", "SUPPORTS_I8MM": "SUPPORTS_DOTPROD",
+                               "SUPPORTS_SVE2": "SUPPORTS_SVE", "SUPPORTS_SME": "SUPPORTS_SVE2"}
+    assert dict(ARM_NEEDS) == {r.probe_key: r.builds_on for r in inv.rows("arm64", inv.ARM_ARCH_TAG)
+                               if r.state == inv.PLANNED and r.builds_on}

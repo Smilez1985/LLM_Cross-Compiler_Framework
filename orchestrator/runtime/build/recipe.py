@@ -141,6 +141,12 @@ ARM_ARCH_TAGS: Tuple[Tuple[str, str], ...] = tuple(
 ARM_UNUSABLE: Mapping[str, str] = {
     row.probe_key: row.reason for row in _cpu_options.rows("arm64", _cpu_options.ARM_ARCH_TAG)
     if row.state == _cpu_options.NOT_USABLE and row.probe_key}
+# The tag each ARM tag builds on (probe keys, from the inventory): a tag is planned only when its base is planned, as
+# _X86_NEEDS for x86 (GCC and Clang make +sve imply +fp16 and +sve2 imply +sve, GCC 14 makes +sme imply +sve2, and
+# +i8mm without +dotprod or +fp16 would raise an armv8.0 board to armv8.2-a).
+ARM_NEEDS: Mapping[str, str] = {
+    row.probe_key: row.builds_on for row in _cpu_options.rows("arm64", _cpu_options.ARM_ARCH_TAG)
+    if row.state == _cpu_options.PLANNED and row.probe_key and row.builds_on}
 
 _SUPPORTED_ARCH = ("x86_64", "arm64")
 _SUPPORTED_OS = ("linux", "windows", "macos")
@@ -959,18 +965,26 @@ def arm_plan(profile: HardwareProfile, compiler: Optional[Tuple[str, Optional[st
     the features that are ON, armv8-a when none is (RK3566/RK3568/RK3588: armv8.2-a+dotprod+fp16). UNKNOWN counts as
     OFF, so the plan never asks for more than the probe confirmed. +sme only with a compiler of SME_COMPILER_MIN
     (`compiler`: (family, version); None when not known): else SME is named as unusable and the rest is built. BF16
-    has no kernel for ARM at the pin (ARM_UNUSABLE)."""
+    has no kernel for ARM at the pin (ARM_UNUSABLE). A tag whose base (ARM_NEEDS) is not planned is named as unusable
+    too, so an inconsistent probe file cannot add +sve2 without +sve or +i8mm on an armv8.0 board."""
     tags: List[str] = []
     used: List[str] = []
+    planned: List[str] = []
     unusable: List[Dict[str, str]] = []
     for key, tag in ARM_ARCH_TAGS:
         if _flag(profile, key) != "ON":
+            continue
+        base = ARM_NEEDS.get(key)
+        if base and base not in planned:
+            unusable.append({"feature": _cpu_options.feature_label(key),
+                             "reason": f"builds on {_cpu_options.feature_label(base)}, which the build does not use"})
             continue
         problem = sme_problem(compiler) if tag == "sme" else None
         if problem:
             unusable.append({"feature": _cpu_options.feature_label(key), "reason": problem})
             continue
         tags.append(tag)
+        planned.append(key)
         used.append(_cpu_options.feature_label(key))
     for key, reason in ARM_UNUSABLE.items():
         if _flag(profile, key) == "ON":
@@ -1201,10 +1215,6 @@ def _cpu_identity(profile: HardwareProfile, target: _Target) -> Dict[str, Any]:
     keys = ("ARCH", "CPU_VENDOR", "CPU_MODEL", "CPU_CLUSTERS")
     out: Dict[str, Any] = {k: profile.get(k) for k in keys if profile.get(k) is not None}
     out["features"] = {k: _flag(profile, k) for k in features}
-    if target.arch == "arm64":
-        # the tags beyond the four base features count only when ON, so the ID of every earlier native ARM build stays
-        out["features"].update({k: "ON" for k, _tag in ARM_ARCH_TAGS
-                                if k not in features and _flag(profile, k) == "ON"})
     return out
 
 
@@ -1297,6 +1307,11 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
             expect_sdot = "+dotprod" in march
             unusable.extend(arm_unusable)
     elif target.arch == "arm64":  # GGML_NATIVE or the CPU variants: no code of the pin uses these
+        cid = toolchain.compiler_id()
+        if mode == "native" and cid is not None and cid[1] is not None and _flag(profile, "SUPPORTS_SME") == "ON":
+            problem = sme_problem((cid[0], cid[1]))  # -mcpu=native of a compiler without +sme leaves SME out
+            if problem:
+                unusable.append({"feature": _cpu_options.feature_label("SUPPORTS_SME"), "reason": problem})
         unusable.extend({"feature": _cpu_options.feature_label(k), "reason": reason}
                         for k, reason in ARM_UNUSABLE.items() if _flag(profile, k) == "ON")
     if mode == "variants":

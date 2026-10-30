@@ -1355,8 +1355,9 @@ Hinweise des Profils sagen `probe_again:<SCHLÜSSEL>`; eine Datei, die 3.2.0 sag
 
 **Der eine Planer.** Nur das Build-Rezept (`orchestrator/runtime/build/recipe.py`) macht aus diesen Schlüsseln
 GGML-Optionen und Compiler-Flags: `arm_plan` für aarch64 (`armv8.2-a` plus `+dotprod +fp16 +sve +i8mm +sve2 +sme` in
-der Reihenfolge von ggml für die Fähigkeiten, die `ON` sind, `armv8-a` ohne eine; `+sme` nur mit GCC 14 oder Clang
-18), `_x86_options` für x86_64. `orchestrator/runtime/build/ggml_cpu_options.py` führt jede CPU-Option des
+der Reihenfolge von ggml für die Fähigkeiten, die `ON` sind, `armv8-a` ohne eine; ein Tag nur mit dem, auf dem er
+aufbaut: `+fp16` für `+sve`, `+dotprod` für `+i8mm`, `+sve` für `+sve2`, `+sve2` für `+sme`; `+sme` nur mit
+GCC 14 oder Clang 18), `_x86_options` für x86_64. `orchestrator/runtime/build/ggml_cpu_options.py` führt jede CPU-Option des
 festgelegten llama.cpp mit dem Probe-Schlüssel, den sie braucht, und ob das Rezept sie plant oder warum es das nicht
 kann (zum Beispiel `+bf16` auf ARM, für das die Festlegung keinen Kernel hat). Der Plan hält `cpu_features` fest
 (`used`, und `unusable` mit dem Grund), und `llm-cli runtime device plan`, das Board-Fenster und das `MANIFEST.json`

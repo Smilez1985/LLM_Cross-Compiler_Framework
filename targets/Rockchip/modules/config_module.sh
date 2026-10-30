@@ -419,14 +419,15 @@ plan_x86_cpu() {
 
 # The tags of GGML_CPU_ARM_ARCH as the build recipe plans them (orchestrator/runtime/build/recipe.py: ARM_ARCH_TAGS,
 # in ggml's ARCH_TAGS order; the one planner): the probe's key, the -march tag and its /proc/cpuinfo flags
-# (configs/hardware_probe_schema.yml), which a probe file of version 1.x without the key still names in CPU_FLAGS_ALL.
+# (configs/hardware_probe_schema.yml), which a probe file of version 1.x without the key still names in CPU_FLAGS_ALL,
+# and the key of the tag it builds on (recipe.ARM_NEEDS, - for none): a tag is planned only when its base is.
 ARM_TAG_TABLE=(
-    "SUPPORTS_DOTPROD dotprod asimddp"
-    "SUPPORTS_FP16_ARITH fp16 fphp,asimdhp"
-    "SUPPORTS_SVE sve sve"
-    "SUPPORTS_I8MM i8mm i8mm"
-    "SUPPORTS_SVE2 sve2 sve2"
-    "SUPPORTS_SME sme sme"
+    "SUPPORTS_DOTPROD dotprod asimddp -"
+    "SUPPORTS_FP16_ARITH fp16 fphp,asimdhp -"
+    "SUPPORTS_SVE sve sve SUPPORTS_FP16_ARITH"
+    "SUPPORTS_I8MM i8mm i8mm SUPPORTS_DOTPROD"
+    "SUPPORTS_SVE2 sve2 sve2 SUPPORTS_SVE"
+    "SUPPORTS_SME sme sme SUPPORTS_SVE2"
 )
 # ARM features the board may have that no code of the pinned llama.cpp uses (recipe.ARM_UNUSABLE, from
 # ggml_cpu_options.py): the probe's key, its flags, and why.
@@ -494,15 +495,21 @@ sme_problem() {  # "family version" of the compiler: why it cannot build +sme, e
 # +sme only with a compiler that knows it (COMMAND: the plan's C compiler), else SME is named as unusable and the rest is
 # built. Never -mcpu: the cores of a board say nothing the probe's features do not (a second planner drifted before).
 plan_arm_cpu() {  # [C COMPILER COMMAND]
-    local row key tag flags value cpu_flags problem reason tags="" used=() unusable=()
+    local row key tag flags base value cpu_flags problem reason tags="" planned=" " used=() unusable=()
     cpu_flags=""
     if [ "${PROFILE_SOURCE:-}" = profile ]; then
         cpu_flags="$(profile_cpu_flags | cpu_flag_list)"
     fi
     for row in "${ARM_TAG_TABLE[@]}"; do
-        read -r key tag flags <<< "$row"
+        read -r key tag flags base <<< "$row"
         value="$(arm_feature_value "$key" "$flags" "$cpu_flags")"
         [ "$value" = ON ] || continue
+        if [ "$base" != - ] && [[ "$planned" != *" $base "* ]]; then
+            reason="builds on ${base#SUPPORTS_}, which the build does not use"
+            unusable+=("${key#SUPPORTS_}:$reason")
+            log_warn "The board has ${key#SUPPORTS_}, the build cannot use it: $reason"
+            continue
+        fi
         if [ "$tag" = sme ]; then
             problem="$(sme_problem "$(plan_c_compiler_version "${1:-}")")"  # asked only for a board with SME
             if [ -n "$problem" ]; then
@@ -512,6 +519,7 @@ plan_arm_cpu() {  # [C COMPILER COMMAND]
             fi
         fi
         tags="$tags+$tag"
+        planned="$planned$key "
         used+=("${key#SUPPORTS_}")
     done
     for row in "${ARM_UNUSABLE_TABLE[@]}"; do

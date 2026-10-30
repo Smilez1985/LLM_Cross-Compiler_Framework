@@ -23,7 +23,8 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   eine hinzufügt. Der Build-Plan (`cpu_features`), das `MANIFEST.json` des Board-Pakets
   (`hardware.cpu_features`), `llm-cli runtime device plan`, das Board-Fenster und die Deploy-Fakten über MCP nennen
   die Fähigkeiten, die der Build nutzt, und die, die das Board hat, der Build aber nicht nutzen kann, jede mit Grund
-  (SME mit einem Compiler älter als GCC 14 oder Clang 18, BF16 auf ARM, für das die Festlegung keinen Kernel hat).
+  (SME mit einem Compiler älter als GCC 14 oder Clang 18, BF16 auf ARM, für das die Festlegung keinen Kernel hat,
+  und ein Tag ohne den, auf dem er aufbaut, etwa `+sve2` ohne `+sve` oder `+i8mm` auf einem armv8.0-Board).
   Ein Board eines Systems, das das Rezept noch nicht plant, wird mit den Fähigkeiten abgelehnt, die seine Probe
   fand.
 

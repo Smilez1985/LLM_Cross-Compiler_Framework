@@ -1610,6 +1610,7 @@ def test_the_template_plans_an_arm_cpu_with_the_same_functions_as_the_rockchip_t
     rows = [row.split() for row in re.findall(r'"([^"]+)"', table)]
     assert [(r[0], r[1]) for r in rows] == list(recipe.ARM_ARCH_TAGS)
     assert {r[0]: tuple(r[2].split(",")) for r in rows} == {r[0]: schema.keys[r[0]].cpuinfo for r in rows}
+    assert {r[0]: r[3] for r in rows if r[3] != "-"} == dict(recipe.ARM_NEEDS)
     unusable = re.search(r"ARM_UNUSABLE_TABLE=\((.*?)\n\)", rockchip, re.S).group(1)
     rows = [row.split(" ", 2) for row in re.findall(r'"([^"]+)"', unusable)]
     assert {r[0]: r[2] for r in rows} == dict(recipe.ARM_UNUSABLE)
@@ -1641,6 +1642,12 @@ ARM_PARITY = {
     "armv9-sme-clang18": (_arm_profile(RK3566, **_ARMV9), "Debian clang version 18.1.3 (1)", "18.1.3"),
     "armv9-sme-no-compiler": (_arm_profile(RK3566, **_ARMV9), None, None),
     "bf16": (_arm_profile(RK3566, BF16_ARM="ON"), None, None),
+    # a tag without the one it builds on (recipe.ARM_NEEDS) is named as unusable, never planned
+    "sve2-without-sve": (_arm_profile(RK3566, SVE2="ON"), None, None),
+    "sme-without-sve2-gcc14": (_arm_profile(RK3566, SVE="ON", I8MM="ON", SME="ON"),
+                               "aarch64-linux-gnu-gcc (GCC) 14.2.0", "14.2.0"),
+    "i8mm-on-armv8.0": (_arm_profile(RK3566, DOTPROD="OFF", FP16_ARITH="OFF", I8MM="ON"), None, None),
+    "sve-without-fp16": (_arm_profile(RK3566, FP16_ARITH="UNKNOWN", SVE="ON", SVE2="ON"), None, None),
 }
 
 

@@ -101,10 +101,14 @@ OPTIONS: Tuple[CpuOption, ...] = (
     CpuOption("+dotprod", "arm64", ARM_ARCH_TAG, "SUPPORTS_DOTPROD", "+dotprod", None, PLANNED, variant="DOTPROD"),
     CpuOption("+fp16", "arm64", ARM_ARCH_TAG, "SUPPORTS_FP16_ARITH", "+fp16", None, PLANNED,
               variant="FP16_VECTOR_ARITHMETIC"),
-    CpuOption("+sve", "arm64", ARM_ARCH_TAG, "SUPPORTS_SVE", "+sve", None, PLANNED, variant="SVE"),
-    CpuOption("+i8mm", "arm64", ARM_ARCH_TAG, "SUPPORTS_I8MM", "+i8mm", None, PLANNED, variant="MATMUL_INT8"),
-    CpuOption("+sve2", "arm64", ARM_ARCH_TAG, "SUPPORTS_SVE2", "+sve2", None, PLANNED, variant="SVE2"),
-    CpuOption("+sme", "arm64", ARM_ARCH_TAG, "SUPPORTS_SME", "+sme", None, PLANNED,
+    # A tag is planned only with the one it builds on: GCC and Clang make +sve imply +fp16 and +sve2 imply +sve, GCC 14
+    # makes +sme imply +sve2, and every upstream variant with MATMUL_INT8 or SVE has DOTPROD and FP16 (ggml/src/
+    # CMakeLists.txt): without its base a tag compiles instructions the board lacks, or raises an armv8.0 board to 8.2.
+    CpuOption("+sve", "arm64", ARM_ARCH_TAG, "SUPPORTS_SVE", "+sve", "SUPPORTS_FP16_ARITH", PLANNED, variant="SVE"),
+    CpuOption("+i8mm", "arm64", ARM_ARCH_TAG, "SUPPORTS_I8MM", "+i8mm", "SUPPORTS_DOTPROD", PLANNED,
+              variant="MATMUL_INT8"),
+    CpuOption("+sve2", "arm64", ARM_ARCH_TAG, "SUPPORTS_SVE2", "+sve2", "SUPPORTS_SVE", PLANNED, variant="SVE2"),
+    CpuOption("+sme", "arm64", ARM_ARCH_TAG, "SUPPORTS_SME", "+sme", "SUPPORTS_SVE2", PLANNED,
               "only with a compiler that knows it (recipe.SME_COMPILER_MIN), else the plan names it as unusable",
               variant="SME"),
     CpuOption("+nosve", "arm64", ARM_ARCH_TAG, None, "+nosve", None, NOT_USABLE,

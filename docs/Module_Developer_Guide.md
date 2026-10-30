@@ -1300,7 +1300,8 @@ say `probe_again:<KEY>`; a file that says 3.2.0 and lacks one is refused.
 
 **The one planner.** Only the build recipe (`orchestrator/runtime/build/recipe.py`) turns these keys into GGML options
 and compiler flags: `arm_plan` for aarch64 (`armv8.2-a` plus `+dotprod +fp16 +sve +i8mm +sve2 +sme` in ggml's order
-for the features that are `ON`, `armv8-a` without any; `+sme` only with GCC 14 or Clang 18), `_x86_options` for
+for the features that are `ON`, `armv8-a` without any; a tag only with the one it builds on: `+fp16` for `+sve`,
+`+dotprod` for `+i8mm`, `+sve` for `+sve2`, `+sve2` for `+sme`; `+sme` only with GCC 14 or Clang 18), `_x86_options` for
 x86_64. `orchestrator/runtime/build/ggml_cpu_options.py` lists every CPU option of the pinned llama.cpp with the probe
 key it needs and whether the recipe plans it or why it cannot (for example `+bf16` on ARM, for which the pin has no
 kernel). The plan records `cpu_features` (`used`, and `unusable` with each reason), and `llm-cli runtime device plan`,
