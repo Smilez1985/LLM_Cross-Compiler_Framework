@@ -42,7 +42,9 @@ TIGHTEN_ONLY: Dict[str, Any] = {
     "offline_mode": True, "enable_telemetry": False, "enable_security_scan": True, "build_sandbox": True,
     "enable_rag_knowledge": False, "crawler_max_pages": "lower", "crawler_max_depth": "lower",
     "crawler_rate_limit": "higher", "build_memory_limit": "lower", "build_pids_limit": "lower",
-    "crawler_download_pdfs": False}
+    "crawler_download_pdfs": False,
+    # the soft cap and the idle timeout of a build step (utils/step_limits.py): an AI may only shorten them
+    "build_timeout": "lower", "build_idle_timeout": "lower"}
 MIN_MEMORY_LIMIT = 6 * 1024 ** 2  # Docker refuses a smaller container memory limit
 # Settings only the person sets, in the window or the command line, never through a change of this module or an AI.
 PERSON_ONLY_SETTINGS = tuple(OPT_OUT_SETTINGS)

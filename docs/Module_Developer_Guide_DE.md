@@ -654,6 +654,12 @@ jeder Datei in `modules/` und `scripts/`. Erneut auf demselben Arbeitsordner ges
 Stufe, deren Marke dieselbe Prüfsumme hat und deren Dateien noch da sind; läuft eine Stufe erneut, laufen auch alle
 späteren erneut. Eine Stufe, die scheitert, schreibt keine Marke. `build.sh --fresh` übergeht die Marken.
 
+**Schutz vor Schleifen.** Eine Stufe, die mit denselben Eingaben gestartet und von außen angehalten wurde, bevor sie
+fertig war (ihr Container gestoppt, der Build fortgesetzt, immer wieder), ist eine Schleife, kein langer Build. Der
+Runner zählt diese Starts in `<Stufe>.starts` und startet die Stufe kein viertes Mal (`STAGE_RESTART_LIMIT`, Vorgabe 3):
+Sie scheitert mit Exit-Code 75 und sagt das. Eine Stufe, die mit ihrem eigenen Fehler endet (Exit-Code unter 128),
+und eine fertige Stufe setzen die Zählung zurück; `--fresh` vergisst sie.
+
 **Fortschritt.** Der Runner schreibt eine Zeile, wenn eine Stufe beginnt, endet, fortgesetzt wird oder scheitert:
 `=== Stage 3/4: convert ===`, `=== Stage 3/4: convert done in 41 s ===`, `=== Stage 1/4: source resumed ===`,
 `=== Stage 3/4: convert failed (exit 1) ===`. Die Build-Engine liest diese Zeilen aus dem Container-Log: Build-Status,
@@ -804,7 +810,7 @@ versprochen hat:
 | `input PFAD --format FORMAT --stats DATEI` | vor dem Umwandeln | Erkennt die Eingabe: einen Hugging-Face-Ordner mit SafeTensors- oder PyTorch-Gewichten, eine GGUF-Datei (nichts umzuwandeln), ein ONNX-Modell, eine einzelne Gewichtsdatei, einen Ordner mit GGUF-Dateien. Lehnt mit dem Grund ab, was das Format nicht verwenden kann (`--onnx-next TEXT` ergänzt, wohin ein ONNX-Modell auf diesem Target gehört), prüft die Integrität der Eingabe (ihre JSON-Dateien, die SafeTensors-Header gegen die Dateigrößen, die Teildateien, die ein Index nennt, PyTorch-Archive, einen GGUF-Header) und beginnt die Statistik. |
 | `begin DATEI --state DATEI [--scratch ORDNER]` | bevor ein Konverter DATEI schreibt | Behält eine vorhandene DATEI als `DATEI.convert-backup`, bis die neue ihre Prüfungen bestanden hat (eine Zwischendatei `tmp-*` des Arbeitsordners wird einfach ersetzt). |
 | `watch ORDNER --state DATEI` | bevor ein Format-Helfer läuft | Merkt sich die Dateien von ORDNER mit Größe und Zeit, damit `output --watched` das Modell findet, das der Helfer geschrieben hat (eine neue Datei oder eine, die er überschrieben hat), und ein Fehler es entfernt. |
-| `output DATEI --format gguf --type TYP --seconds N --stats DATEI --tools ORDNER` | nach dem Konverter | Prüft das GGUF (die Daten jedes Tensors liegen in der Datei), führt den Funktionstest mit `llama-completion` (oder `llama-cli`) aus ORDNER aus: 8 Tokens, höchstens `--test-seconds` (120), offline. `--test-skip GRUND` überspringt den Test mit einem Hinweis. Vervollständigt die Statistik. |
+| `output DATEI --format gguf --type TYP --seconds N --stats DATEI --tools ORDNER` | nach dem Konverter | Prüft das GGUF (die Daten jedes Tensors liegen in der Datei), führt den Funktionstest mit `llama-completion` (oder `llama-cli`) aus ORDNER aus: 8 Tokens, offline; er wird gestoppt, wenn er `--test-seconds` (120, `FUNCTIONAL_TEST_SECONDS`) lang nichts ausgibt oder sich das Modell wiederholt, nie allein nach der Uhr. `--test-skip GRUND` überspringt den Test mit einem Hinweis. Vervollständigt die Statistik. |
 | `test DATEI --tools ORDNER --result DATEI` | in der Stufe target, bevor das Paket bleibt | Derselbe Funktionstest eines anderen GGUF (des quantisierten Modells; ein Embedding-Modell läuft nicht): `--what TEXT` nennt es bei einem Fehler, `--stage NAME` seine Logzeilen. Schreibt das Ergebnis, das Werkzeug und die Zeile des Manifests nach `--result`. |
 | `keep --state DATEI` | wenn die Stufe gelungen ist | Entfernt die Sicherungen. |
 | `restore --state DATEI --failed` oder `--stopped` | wenn die Stufe scheitert; bei ihrem nächsten Start | Entfernt, was der Lauf geschrieben hat, und legt die Sicherungen zurück (`--stopped`: was ein abgebrochener Lauf hinterlassen hat). Eine Datei, deren Sicherung nicht mehr da ist, bleibt, wie sie ist: Die frühere Datei wurde von Hand zurückgelegt. |
@@ -816,8 +822,9 @@ Die Statistik (`convert_stats.json` im Stufenordner) kommt als `conversion` in `
 `seconds`, `functional_test` (`passed`, `skipped`, `timed out` oder `stopped`) und `functional_test_tool`; nur Zahlen
 und Wörter, keine Pfade. Ein Funktionstest, der mit einem Fehler endet oder abstürzt (ein Signal wie der Abbruch von
 llama.cpp bei einem Tensor, den es nicht verwenden kann), lässt die Stufe mit den letzten Zeilen des Werkzeugs
-scheitern: Das GGUF funktioniert nicht. Eine Zeitüberschreitung oder ein von außen angehaltener Lauf (SIGKILL des
-Out-of-Memory-Killers, SIGTERM) ist ein Hinweis. Übersprungen wird er mit einem Hinweis, wenn das Image keines der beiden Werkzeuge hat oder es dort nicht startet, bei einem Embedding-Modell, bei den NPU-Formaten (das Modell läuft auf dem Board) und im
+scheitern: Das GGUF funktioniert nicht. Ein Lauf, der `FUNCTIONAL_TEST_SECONDS` lang nichts ausgibt (`timed out`),
+ein Modell, das sich wiederholt (`stopped`), und ein von außen angehaltener Lauf (SIGKILL des Out-of-Memory-Killers,
+SIGTERM) sind ein Hinweis. Übersprungen wird er mit einem Hinweis, wenn das Image keines der beiden Werkzeuge hat oder es dort nicht startet, bei einem Embedding-Modell, bei den NPU-Formaten (das Modell läuft auf dem Board) und im
 Auftrag `imatrix` (dort führt `llama-imatrix` das Modell aus).
 
 ## 7. Regeln der Sandbox

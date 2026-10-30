@@ -48,6 +48,23 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 
 ### Changed
 
+- `2026-10-30 05:20 UTC` · `v3.2.0` **No hard time limit for a build step** (consolidation chain build-flags-time;
+  decision on time limits): a step takes as long as it takes. The new `orchestrator/utils/step_limits.py` (StepLimits,
+  StepClock, StepTimedOut, a TimeoutError) is the one rule for the build's stage containers (`BuildEngine._run_container`
+  now waits in short rounds) and the runtime build's configure and build steps (`runtime/build/executor.py`,
+  `default_process_runner` and `DockerEngine.run`; a plain number of seconds stays a plain limit): the setting
+  `build_timeout` (deprecate-and-delegate: its meaning moved from a hard limit to a soft cap) stops an AI-started
+  build (the request's owner, now carried into `BuildConfiguration.owner`) and is never extended for it; a build the
+  person started goes on past it with one warning that Cancel stops it. The new setting `build_idle_timeout` (default
+  1800 s) stops a step that prints nothing for that long, for everyone. An AI may only lower both (`TIGHTEN_ONLY`;
+  `build_timeout` is no longer read-only for an AI); both are in the settings the CLI's `config show` and File >
+  Settings... list. Loop protection: the stage runner (`build.sh` of both targets) counts the starts of a stage with
+  the same inputs that were stopped from outside and does not start it a fourth time (`STAGE_RESTART_LIMIT`, exit code
+  75); the functional test (`model_check.py` of both targets) streams the model's output, stops a model that repeats
+  itself (`stopped`, no failure) and treats `FUNCTIONAL_TEST_SECONDS` as the time it may print nothing (`timed out`,
+  no failure), never as a hard limit. Tests: `tests/test_step_limits.py`, the wait tests of
+  `tests/test_review_build_engine.py` (an AI-started build stops, a person's goes on, the idle timeout), the loop tests
+  of `tests/test_build_stages.py` and `tests/test_convert_stage.py`.
 - `2026-10-30 03:55 UTC` · `v3.2.0` **One verdict for a module's CMake flags: an allowlist, refusals and the person's
   decision** (consolidation chain build-flags-time; decision on module CMake flags): `recipe.cmake_flag_verdicts`
   (`orchestrator/runtime/build/recipe.py`) judges every word of a module's CMake flags: `-DNAME=VALUE` (also `-D

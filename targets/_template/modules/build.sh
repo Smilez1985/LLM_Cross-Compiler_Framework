@@ -265,6 +265,28 @@ write_marker() {  # STAGE: written only after the stage exited 0
     mv -f "$STAGE_DIR/$stage.done.tmp" "$STAGE_DIR/$stage.done"
 }
 
+# --- Loop protection (DECISIONS round 25 Q8) -----------------------------------------------------------------------
+# A stage that was started with the same inputs and never finished (the container was stopped, the build was resumed,
+# again and again) is a loop, not a long build: no clock stops it, this count does. STAGE.starts holds the inputs and
+# how often the stage started with them; a finished stage removes it, --fresh forgets it.
+STAGE_RESTART_LIMIT="${STAGE_RESTART_LIMIT:-3}"
+case "$STAGE_RESTART_LIMIT" in ''|*[!0-9]*) STAGE_RESTART_LIMIT=3 ;; esac
+
+count_start() {  # STAGE: records one more start; fails when the stage already started too often without finishing
+    local stage="$1" file="$STAGE_DIR/$1.starts" inputs count=0
+    inputs="$(stage_inputs "$stage")"
+    if [ -f "$file" ] && [ "$(sed -n 's/^inputs //p' "$file")" = "$inputs" ]; then
+        count="$(sed -n 's/^count //p' "$file")"
+        case "$count" in ''|*[!0-9]*) count=0 ;; esac
+    fi
+    if [ "$count" -ge "$STAGE_RESTART_LIMIT" ]; then
+        echo "ERROR: The stage $stage started $count times with the same inputs and never finished; it is not started again (a loop, not a long build). Look at its log for the cause, then start the build again with --fresh." >&2
+        return 1
+    fi
+    printf 'inputs %s\ncount %s\n' "$inputs" "$((count + 1))" > "$file.tmp"
+    mv -f "$file.tmp" "$file"
+}
+
 # --- Run ------------------------------------------------------------------------------------------------------------
 
 echo "=== Build Started: $TARGET_LABEL (stages: ${STAGES[*]}) ==="
@@ -283,6 +305,9 @@ if [ "$FRESH" = "0" ]; then
     while [ "$START" -gt 0 ] && ! outputs_present "${STAGES[$((START - 1))]}"; do
         START=$((START - 1))
     done
+fi
+if [ "$FRESH" = "1" ]; then
+    rm -f "$STAGE_DIR"/*.starts
 fi
 # A stage that runs makes every later marker stale; when every stage up to --to resumes, the later ones stay valid.
 if [ "$START" -lt "$LAST" ]; then
@@ -304,12 +329,20 @@ for i in "${!STAGES[@]}"; do
     echo "=== Stage $number: $name ==="
     started=$SECONDS
     rm -f "$STAGE_DIR/$name.outputs"
+    if ! count_start "$name"; then
+        echo "=== Stage $number: $name failed (exit 75) ===" >&2
+        exit 75
+    fi
     rc=0
     STAGE_NAME="$name" bash "$MODULES_DIR/${name}_module.sh" || rc=$?
     if [ "$rc" -ne 0 ]; then
+        if [ "$rc" -lt 128 ]; then
+            rm -f "$STAGE_DIR/$name.starts"   # it ended with its own error; only a stage stopped from outside counts
+        fi
         echo "=== Stage $number: $name failed (exit $rc) ===" >&2
         exit "$rc"
     fi
+    rm -f "$STAGE_DIR/$name.starts"
     write_marker "$name"
     echo "=== Stage $number: $name done in $((SECONDS - started)) s ==="
 done

@@ -172,8 +172,12 @@ Weiteres Verhalten:
 - **Unbekanntes Target:** CLI, Ditto und MCP-Clients lehnen ein unbekanntes Target ab, bevor etwas läuft (die CLI
   mit Exit-Code 2). Eine Anfrage, bei der trotzdem nichts zu bauen bleibt, scheitert mit „Nothing to build“, statt
   Erfolg zu melden.
-- **Zeitlimits:** Jeder Container-Schritt hat ein Zeitlimit (Einstellung `build_timeout`, Standard 3600 s); nur
-  ein echtes Überschreiten zählt als Zeitüberschreitung.
+- **Keine harte Zeitgrenze:** Ein Schritt dauert so lange, wie er dauert. `build_timeout` (Standard 3600 s) ist
+  eine weiche Obergrenze: Ein Build, den du gestartet hast, läuft mit einer Warnung darüber hinaus (Abbrechen stoppt
+  ihn), einer, den eine KI gestartet hat, stoppt dort und wird nie verlängert. `build_idle_timeout` (Standard
+  1800 s) stoppt einen Schritt, der so lange nichts ausgibt. Eine Stufe, die immer neu startet, ohne fertig zu werden,
+  und ein Modell, das sich im Funktionstest wiederholt, werden als Schleife gestoppt. Eine KI darf beide
+  Einstellungen nur senken.
 - **Wohin ein Build kommt:** siehe [Wohin fertige Modelle kommen](#wohin-fertige-modelle-kommen) unten. Jeder Build
   landet in `<Ordner>/<Target>/<Modell>/<Quantisierung>/`, sein Golden-ZIP daneben.
 

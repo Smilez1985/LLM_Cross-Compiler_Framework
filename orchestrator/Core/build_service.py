@@ -863,6 +863,8 @@ class BuildService:
         options outside the allowlist, what each does and the recommendation for this model and quantization. The CLI
         and the Builder ask the person with it before start_build."""
         from orchestrator.Core import module_flags
+        if not hasattr(getattr(self.framework, "target_manager", None), "folder_of"):
+            return None, None   # no module folder to read (a stand-in framework): no options to decide
         try:
             req = self._validated(request, local_paths)[0]   # canonical board and quantization for the recommendation
         except BuildServiceError:
@@ -884,6 +886,8 @@ class BuildService:
         from orchestrator.Core.module_flags import module_cmake_words
         from orchestrator.runtime.build import deps
         from orchestrator.utils.locality import offline_mode
+        if not hasattr(getattr(self.framework, "target_manager", None), "folder_of"):
+            return []   # no module folder to read (a stand-in framework)
         target = self.resolve_target(request.target)   # only the module's flags count: no other check of the request
         tm = self._targets()
         folder = tm.folder_of(target) if hasattr(tm, "folder_of") else None

@@ -83,6 +83,7 @@ class BuildCancelled(Exception):
 
 STAGING_WATCH_EVERY = 2.0    # seconds between two disk checks while a model is staged
 CONTAINER_WATCH_EVERY = 5.0  # seconds between two disk checks while a stage container runs
+CONTAINER_WAIT_POLL = 30.0   # the longest single wait for a stage container between two checks of its time limits
 RESOURCES_EVERY = 5.0        # seconds between two CPU and memory samples of a running stage container
 
 # The line the stage runner (targets/*/modules/build.sh, DECISIONS U9) prints for each of its stages: started
@@ -205,7 +206,10 @@ class BuildConfiguration:
     build_args: Dict[str, str] = field(default_factory=dict)
     dockerfile_template: Optional[str] = None
     parallel_jobs: int = 4
+    # The soft cap of one step (setting build_timeout, utils/step_limits.py): it stops only an AI-started build; a
+    # person's build goes on with a warning. build_idle_timeout stops a step that prints nothing for that long.
     build_timeout: int = 3600
+    build_idle_timeout: Optional[int] = 1800
     cleanup_after_build: bool = True
     enable_hadolint: bool = True
     poetry_version: str = "latest"
@@ -237,6 +241,9 @@ class BuildConfiguration:
     # The person's decision on the module's CMake options outside the allowlist (Core/module_flags.FlagDecision
     # .as_dict): its variables go into the build container (_execute_build_modules)
     module_flags: Optional[Dict[str, Any]] = None
+    # Who started it through a tool (BuildRequest.owner: "mcp#<session>", "ditto"; empty for the GUI and the CLI):
+    # an AI-started build stops at the soft cap (_step_limits)
+    owner: str = ""
 
 @dataclass
 class BuildProgress:
@@ -518,8 +525,11 @@ class BuildEngine:
 
     def _run_container(self, config: "BuildConfiguration", progress: "BuildProgress", container: Container,
                        prefix: str) -> int:
-        """Runs a stage container: streams its log into the progress, enforces the build timeout,
-        honours cancellation and always removes the container. Returns the exit code."""
+        """Runs a stage container: streams its log into the progress, applies the step's time limits
+        (utils/step_limits.py: a soft cap that stops only an AI-started build, an idle timeout for a step that prints
+        nothing), honours cancellation and always removes the container. Returns the exit code."""
+        from orchestrator.utils.step_limits import StepClock, StepTimedOut
+        clock = StepClock(self._step_limits(config), prefix.strip(': ').lower() or 'build')
         with self._lock:
             self._active_containers[config.build_id] = container
         try:
@@ -537,6 +547,7 @@ class BuildEngine:
                 try:
                     for line in container.logs(stream=True, follow=True):
                         text = line.decode(errors='replace').rstrip()
+                        clock.output()
                         progress.add_log(f"{prefix}{text}")
                         self._note_stage(progress, prefix, text)
                 except Exception as e:  # the container may be removed while streaming
@@ -561,26 +572,40 @@ class BuildEngine:
                          check=self._disk_check(config), name=f"disk-watch-{config.build_id}").start()
             threading.Thread(target=self._sample_resources, args=(container, progress, prefix, watched),
                              name=f"resources-{config.build_id}", daemon=True).start()
-            timeout = config.build_timeout or self.default_timeout
-            started = time.monotonic()
-            try:
-                result = container.wait(timeout=timeout)
-            except Exception as e:
-                self._check_cancelled(progress)
+            while True:
+                wait_for = clock.next_wait(CONTAINER_WAIT_POLL)
+                started = time.monotonic()
                 try:
-                    container.kill()
-                except Exception:
-                    pass
-                if full:  # the disk watchdog stopped it
-                    from orchestrator.Core.disk_plan import InsufficientSpace
-                    raise InsufficientSpace(full["text"]) from e
-                stage = prefix.strip(': ').lower() or 'build'
-                if _is_read_timeout(e) or time.monotonic() - started >= timeout:
-                    raise TimeoutError(f"The {stage} stage ran longer than {timeout} s and was stopped "
-                                       f"(setting build_timeout).") from e
-                # Anything else (container removed, daemon restarted, API error) keeps its own message.
-                raise RuntimeError(f"The {stage} stage failed while waiting for its container: {e}\n"
-                                   f"{self._log_tail(progress, prefix)}") from e
+                    result = container.wait(timeout=wait_for)
+                    break
+                except Exception as e:
+                    self._check_cancelled(progress)
+                    expired = not full and (_is_read_timeout(e) or time.monotonic() - started >= wait_for)
+                    if expired:
+                        # one wait ended: the step goes on unless its limits stop it
+                        try:
+                            note = clock.check()
+                        except StepTimedOut as stop:
+                            try:
+                                container.kill()
+                            except Exception:
+                                pass
+                            raise stop from e
+                        if note:
+                            progress.add_warning(note)
+                        # a wait that ended early (the daemon answered at once) must not turn this into a busy loop
+                        time.sleep(max(0.0, min(wait_for, 1.0) - (time.monotonic() - started)))
+                        continue
+                    try:
+                        container.kill()
+                    except Exception:
+                        pass
+                    if full:  # the disk watchdog stopped it
+                        from orchestrator.Core.disk_plan import InsufficientSpace
+                        raise InsufficientSpace(full["text"]) from e
+                    # Anything else (container removed, daemon restarted, API error) keeps its own message.
+                    raise RuntimeError(f"The {clock.stage} stage failed while waiting for its container: {e}\n"
+                                       f"{self._log_tail(progress, prefix)}") from e
             reader.join(timeout=10)
             watched.set()
             self._check_cancelled(progress)
@@ -622,6 +647,14 @@ class BuildEngine:
         if label != progress.current_stage:
             progress.current_stage = label
             self._save_record(progress.build_id)
+
+    def _step_limits(self, config: "BuildConfiguration"):
+        """The time limits of the build's steps (utils/step_limits.py): the soft cap (build_timeout), the idle timeout
+        (build_idle_timeout), and whether an AI started it (the request's owner), so the soft cap stops it."""
+        from orchestrator.utils.step_limits import StepLimits
+        idle = getattr(config, "build_idle_timeout", None)
+        return StepLimits(soft_cap=float(getattr(config, "build_timeout", 0) or self.default_timeout),
+                          idle=float(idle) if idle else None, ai_started=bool(getattr(config, "owner", "")))
 
     @staticmethod
     def _sample_resources(container: Container, progress: "BuildProgress", prefix: str, stop: threading.Event) -> None:

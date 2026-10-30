@@ -993,7 +993,7 @@ def _connection_error_after_retries():
 
 class TestWaitErrors:
 
-    def run_stage(self, engine, client, tmp_path, wait_error, build_timeout=5):
+    def run_stage(self, engine, client, tmp_path, wait_error, build_timeout=5, owner=""):
         container = FakeContainer(client, "llm-build-b1", auto_exit=False, lines=["building layer 3"])
 
         def raise_after_the_log(error=wait_error):
@@ -1003,7 +1003,7 @@ class TestWaitErrors:
         container.wait_error = raise_after_the_log
         progress = BuildProgress("b1", BuildStatus.BUILDING, "")
         engine._builds["b1"] = progress
-        cfg = config_for(tmp_path, build_timeout=build_timeout)
+        cfg = config_for(tmp_path, build_timeout=build_timeout, owner=owner)
         return container, progress, lambda: engine._run_container(cfg, progress, container, "CONT: ")
 
     @pytest.mark.parametrize("error, message", [
@@ -1029,8 +1029,10 @@ class TestWaitErrors:
         _connection_error_after_retries,
     ], ids=["read-timeout", "connection-error-wrapping-read-timeout", "chained-through-max-retries"])
     def test_a_read_timeout_is_a_build_timeout(self, engine, client, tmp_path, make_error):
-        container, _, run = self.run_stage(engine, client, tmp_path, make_error)
-        with pytest.raises(TimeoutError, match=r"ran longer than 5 s .*build_timeout"):
+        """An AI-started build stops at its soft cap (DECISIONS round 25 Q8: never extended)."""
+        container, _, run = self.run_stage(engine, client, tmp_path, make_error, build_timeout=0.2, owner="mcp#s1")
+        with pytest.raises(TimeoutError, match=r"ran longer than 0.2 s and was stopped \(setting build_timeout\): "
+                                               r"an AI started this build"):
             run()
         assert ("llm-build-b1", "kill") in client.events and container.removed
 
@@ -1039,9 +1041,56 @@ class TestWaitErrors:
             time.sleep(0.15)
             return requests.exceptions.ConnectionError("Connection aborted.")
 
-        _, _, run = self.run_stage(engine, client, tmp_path, late_disconnect, build_timeout=0.05)
+        _, _, run = self.run_stage(engine, client, tmp_path, late_disconnect, build_timeout=0.05, owner="mcp#s1")
         with pytest.raises(TimeoutError, match="ran longer than"):
             run()
+
+    def test_a_person_s_build_goes_on_past_the_soft_cap_with_one_warning(self, engine, client, tmp_path,
+                                                                        monkeypatch):
+        """No hard time limit (DECISIONS round 25 Q8): a build the person started goes on past build_timeout; the
+        person is told once, and Cancel stops it."""
+        from orchestrator.Core import builder as builder_module
+        monkeypatch.setattr(builder_module, "CONTAINER_WAIT_POLL", 0.05)
+        container = FakeContainer(client, "llm-build-b1", auto_exit=False, lines=["building layer 3"])
+        calls = []
+
+        def still_running():
+            calls.append(1)
+            time.sleep(0.05)
+            if len(calls) >= 8:            # it ends by itself, long after the soft cap
+                container.wait_error = None
+                container._finish(0)
+            return requests.exceptions.ReadTimeout("Read timed out.")
+
+        container.wait_error = still_running
+        progress = BuildProgress("b1", BuildStatus.BUILDING, "")
+        engine._builds["b1"] = progress
+        cfg = config_for(tmp_path, build_timeout=0.1)
+        assert engine._run_container(cfg, progress, container, "CONT: ") == 0
+        notes = [w for w in progress.warnings if "soft cap" in w]
+        assert len(notes) == 1 and "It goes on because you started it; Cancel stops it" in notes[0]
+        assert ("llm-build-b1", "kill") not in client.events
+
+    @pytest.mark.parametrize("owner", ["", "mcp#s1"], ids=["person", "ai"])
+    def test_a_step_that_prints_nothing_is_stopped_at_the_idle_timeout(self, engine, client, tmp_path, monkeypatch,
+                                                                     owner):
+        from orchestrator.Core import builder as builder_module
+        monkeypatch.setattr(builder_module, "CONTAINER_WAIT_POLL", 0.05)
+        container = FakeContainer(client, "llm-build-b1", auto_exit=False, lines=[])
+
+        def hanging():
+            time.sleep(0.05)
+            return requests.exceptions.ReadTimeout("Read timed out.")
+
+        container.wait_error = hanging
+        progress = BuildProgress("b1", BuildStatus.BUILDING, "")
+        engine._builds["b1"] = progress
+        cfg = config_for(tmp_path, build_timeout=3600, build_idle_timeout=0.2, owner=owner)
+        with pytest.raises(TimeoutError, match=r"printed nothing for 0.2 s and was stopped "
+                                               r"\(setting build_idle_timeout\)") as e:
+            engine._run_container(cfg, progress, container, "CONT: ")
+        assert e.value.kind == "idle"
+        assert ("llm-build-b1", "kill") in client.events and container.removed
 
     def test_an_error_caused_by_a_cancel_is_the_cancel(self, engine, client, tmp_path):
         container = FakeContainer(client, "llm-build-b1", auto_exit=False)

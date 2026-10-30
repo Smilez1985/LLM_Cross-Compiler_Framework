@@ -90,6 +90,12 @@ TEST_TOKENS = 8
 # failure. SIGILL: the tool uses instructions this CPU lacks, which says nothing about the GGUF. Numbers, not the
 # signal module's names, so the file runs the same everywhere (the container is Linux).
 STOP_SIGNALS = (1, 2, 9, 15)
+# Loop protection of the functional test (DECISIONS round 25 Q8): the end of the generated text one piece repeated
+# REPEAT_TIMES times, REPEAT_LEAST characters in all, within the last REPEAT_WINDOW characters
+REPEAT_TIMES = 4
+REPEAT_LEAST = 24
+REPEAT_WINDOW = 512
+WATCH_EVERY = 0.2
 SIGILL = 4
 BACKUP_SUFFIX = ".convert-backup"
 
@@ -514,6 +520,66 @@ def functional_test(gguf: Path, tools: Path, seconds: int,
     return result, tool
 
 
+def repeats(text: str, times: int = REPEAT_TIMES, least: int = REPEAT_LEAST) -> bool:
+    """The end of `text` is one piece repeated `times` times in a row, at least `least` characters in all, and the
+    piece is more than white space: the model is in a loop."""
+    tail = text[-REPEAT_WINDOW:]
+    for size in range(1, len(tail) // times + 1):
+        piece = tail[-size:]
+        if piece.strip() and size * times >= least and tail.endswith(piece * times):
+            return True
+    return False
+
+
+class WatchedRun:
+    """What watched_run saw: the exit code, the last lines of stderr, and why it ended early ("idle", "repeating")."""
+
+    def __init__(self, returncode: int, stderr: str, ended: str = ""):
+        self.returncode, self.stderr, self.ended = returncode, stderr, ended
+
+
+def watched_run(args: List[str], seconds: int) -> WatchedRun:
+    """Runs the functional test without a hard time limit (DECISIONS round 25 Q8): it is stopped when it prints
+    nothing for `seconds` (FUNCTIONAL_TEST_SECONDS, the idle limit) or when the model repeats itself; past `seconds`
+    while it still prints, it goes on (one note in the log). The token count (-n) ends it by itself."""
+    import threading
+    proc = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    last = [time.monotonic()]
+    out: List[str] = []
+    err: List[str] = []
+
+    def pump(stream, into) -> None:
+        for chunk in iter(lambda: stream.read1(4096) if hasattr(stream, "read1") else stream.read(4096), b""):
+            last[0] = time.monotonic()
+            into.append(chunk.decode("utf-8", "replace"))
+            if len(into) > 256:
+                into[:] = ["".join(into)[-REPEAT_WINDOW * 4:]]
+
+    readers = [threading.Thread(target=pump, args=(proc.stdout, out), daemon=True),
+               threading.Thread(target=pump, args=(proc.stderr, err), daemon=True)]
+    for reader in readers:
+        reader.start()
+    started, noted, ended = time.monotonic(), False, ""
+    while proc.poll() is None:
+        time.sleep(WATCH_EVERY)
+        now = time.monotonic()
+        if now - last[0] >= seconds:
+            ended = "idle"
+        elif repeats("".join(out)):
+            ended = "repeating"
+        elif not noted and now - started >= seconds:
+            noted = True
+            log(f"Functional test: still running after {seconds} s and still printing; it goes on "
+                f"(FUNCTIONAL_TEST_SECONDS is the time it may print nothing).")
+        if ended:
+            proc.kill()
+            break
+    proc.wait()
+    for reader in readers:
+        reader.join(timeout=5)
+    return WatchedRun(proc.returncode, "".join(err)[-8000:], ended)
+
+
 def run_test(gguf: Path, tools: Path, seconds: int, what: str) -> Tuple[str, Optional[str], str]:
     """functional_test with its note: (result, the tool, what the result rests on in a few words, for the package's
     manifest). The one functional test of the framework's stages: the convert stage's of what the converter wrote,
@@ -540,15 +606,18 @@ def run_test(gguf: Path, tools: Path, seconds: int, what: str) -> Tuple[str, Opt
             args += [option] + ([value] if value else [])
     started = time.monotonic()
     try:
-        run = subprocess.run(args, check=False, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                             stderr=subprocess.PIPE, text=True, errors="replace", timeout=seconds)
-    except subprocess.TimeoutExpired:
-        log(f"Functional test: {tool.name} did not finish within {seconds} s on this build host (a large model?); "
-            "not counted as a failure.")
-        return "timed out", tool.name, f"after {seconds} s ({tool.name} on the build machine)"
+        run = watched_run(args, seconds)
     except OSError as e:
         log(f"Functional test skipped: {tool.name} could not be started ({e.strerror or e}).")
         return "skipped", tool.name, f"{tool.name} could not be started"
+    if run.ended == "idle":
+        log(f"Functional test: {tool.name} printed nothing for {seconds} s on this build host (a large model?); "
+            "not counted as a failure.")
+        return "timed out", tool.name, f"after {seconds} s without output ({tool.name} on the build machine)"
+    if run.ended == "repeating":
+        log(f"Functional test: the model repeated itself and {tool.name} was stopped (a loop in the text, not a "
+            "failure of the GGUF); not counted as a failure.")
+        return "stopped", tool.name, f"the model repeated itself ({tool.name} on the build machine)"
     took = int(time.monotonic() - started)
     if run.returncode == 0:
         log(f"Functional test passed: {tool.name} loaded {gguf.name} and generated {TEST_TOKENS} tokens ({took} s).")

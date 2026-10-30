@@ -13,6 +13,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import time
 import types
 import zipfile
 from pathlib import Path
@@ -524,6 +525,15 @@ if mode == 'completion-abort':  # GGML_ASSERT: llama.cpp aborts on a tensor of t
     os.abort()
 if mode == 'completion-sigill':  # instructions this CPU does not have
     os.kill(os.getpid(), 4)
+if mode == 'completion-repeat':  # a model in a loop: the same words again and again, never done
+    while True:
+        print('the cat sat on ', end='', flush=True)
+        time.sleep(0.01)
+if mode == 'completion-slow':  # a slow build machine: still printing after the test's seconds
+    for word in 'Hello world this is slow'.split():
+        print(word, end=' ', flush=True)
+        time.sleep(0.4)
+    sys.exit(0)
 print('Hello world, this is', flush=True)
 """
 
@@ -567,6 +577,43 @@ def test_a_run_that_cannot_finish_here_is_a_note_not_a_failure(tmp_path, monkeyp
     gguf = write_gguf(tmp_path / "model-F16.gguf")
     assert mc.functional_test(gguf, tools_with(tmp_path, "llama-completion"), 1) == (result, "llama-completion")
     assert "not counted as a failure" in capsys.readouterr().out
+
+
+@needs_posix
+def test_a_model_that_repeats_itself_is_stopped_and_is_no_failure(tmp_path, monkeypatch, capsys):
+    """Loop protection (DECISIONS round 25 Q8): the text ends in one piece repeated again and again: the run is
+    stopped, which says nothing against the GGUF."""
+    monkeypatch.setenv("STUB_LOG", str(tmp_path / "calls.log"))
+    monkeypatch.setenv("STUB_FAIL", "completion-repeat")
+    gguf = write_gguf(tmp_path / "model-F16.gguf")
+    started = time.monotonic()
+    result, tool, note = mc.run_test(gguf, tools_with(tmp_path, "llama-completion"), 60, "the GGUF")
+    assert (result, tool) == ("stopped", "llama-completion") and "repeated itself" in note
+    assert time.monotonic() - started < 30, "stopped long before the idle limit"
+    assert "not counted as a failure" in capsys.readouterr().out
+
+
+@needs_posix
+def test_a_run_still_printing_after_its_seconds_goes_on(tmp_path, monkeypatch, capsys):
+    """FUNCTIONAL_TEST_SECONDS is the time the run may print nothing, no hard limit: a slow machine that keeps
+    printing finishes the test."""
+    monkeypatch.setenv("STUB_LOG", str(tmp_path / "calls.log"))
+    monkeypatch.setenv("STUB_FAIL", "completion-slow")
+    gguf = write_gguf(tmp_path / "model-F16.gguf")
+    assert mc.functional_test(gguf, tools_with(tmp_path, "llama-completion"), 1) == ("passed", "llama-completion")
+    assert "still running after 1 s and still printing; it goes on" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("text, looped", [
+    ("Hello world, this is a test of the model", False),
+    ("the cat sat on " * 4, True),
+    ("ab" * 20, True),
+    ("ab" * 5, False),          # too short to call it a loop
+    ("\n" * 200, False),        # white space is no text
+    ("1 2 3 4 5 6 7 8 9 10 11 12 13 14", False),
+])
+def test_repeats_tells_a_loop_from_text(text, looped):
+    assert mc.repeats(text) is looped
 
 
 @needs_posix
