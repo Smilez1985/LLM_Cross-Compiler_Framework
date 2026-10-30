@@ -738,11 +738,17 @@ class _FormatOption(click.Option):
 # --- NEU v2.4.0: IMatrix Flags ---
 @click.option('--imatrix/--no-imatrix', default=False, help='Enable Smart Calibration (IMatrix) for quantization')
 @click.option('--dataset', type=click.Path(exists=True), help='Custom calibration dataset path (txt)')
+@click.option('--module-flags', 'module_flags', type=click.Choice(['allow', 'standard']), default=None,
+              help="Your decision on the module's CMake options outside llmcf's allowed list: allow them, or go on "
+                   "with the standard flags (they are left out). At a terminal without it you are asked")
+@click.option('--remember-flags', is_flag=True, default=False,
+              help='Remember this decision for this module version and flag set')
 @pass_context
 def start_build(ctx: FrameworkContext, model: str, target: str, format: str, board: Optional[str],
                 probe: Optional[str], quantization: Optional[str], output_dir: Optional[str], 
                 optimization: Optional[str], priority: str, parallel: bool, follow: bool, gpu: bool,
-                imatrix: bool, dataset: Optional[str]):
+                imatrix: bool, dataset: Optional[str], module_flags: Optional[str] = None,
+                remember_flags: bool = False):
     """Start a new build job. Ctrl+C cancels it (its container is stopped) and exits with code 130.
 
     When a finished build with exactly the same options exists, you are asked first, as in the Builder tab: use it
@@ -824,10 +830,27 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
             _use_earlier(ctx, found[0], output_dir)
             return
 
+        # A module's CMake options outside the allowlist (DECISIONS round 25 Q6): you decide, after what each one
+        # does and the recommendation for this model and quantization (a decision remembered before is used).
+        module_flags, remember_flags = _ask_module_flags(service, request, module_flags, remember_flags)
+        if module_flags == "cancel":
+            console.print("Nothing was started.")
+            return
+        # What the build fetches before it starts (pinned, checked, then mounted read-only; DECISIONS round 25 Q6
+        # addendum): part of the plan you see; in offline mode one that is not in the cache stops here
+        from orchestrator.runtime.build.deps import DependencyMissing
+        try:
+            for line in service.dependency_lines(request):
+                console.print(f"Build dependency: {escape(line)}")
+        except DependencyMissing as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(2)
+
         # The orchestrator runs on the framework's background loop (as for the GUI and the build service), so the
         # build service can cancel the build from here on Ctrl+C.
         request_id = service.start_build(request, local_paths=True, optimization=optimization, priority=priority,
-                                         output_dir=output_dir,
+                                         output_dir=output_dir, flag_decision=module_flags,
+                                         remember_flags=remember_flags, flag_channel="framework-cli",
                                          description=f"CLI build: {model} -> {target} ({format})").request_id
 
         # The CLI stays until the build has ended; from here on Ctrl+C cancels it.
@@ -991,6 +1014,33 @@ def _offline_model_choice(ctx: FrameworkContext, service, error) -> Optional[str
     sys.exit(2)
 
 
+def _ask_module_flags(service, request, decision: Optional[str], remember: bool):
+    """The question about the module's CMake options outside the allowlist, at the terminal (the Builder tab asks the
+    same): what each option does, the recommendation, then allow them, the standard flags or cancel. A decision given
+    with --module-flags or remembered for this module version and flag set is used without a question; without a
+    terminal and without a decision nothing is started. Returns (decision or None, remember)."""
+    question, kept = service.flag_question(request)
+    if question is None:
+        return None, False
+    if decision is not None:
+        return decision, remember
+    if kept is not None:
+        console.print(escape(f"The module's CMake options outside the allowed list: your remembered decision "
+                             f"({kept.decision}) is used."))
+        return None, False
+    console.print(f"[bold yellow]{escape(question.text())}[/bold yellow]")
+    if not _interactive():
+        console.print("Without a terminal nothing is asked and nothing was started: give --module-flags allow or "
+                      "--module-flags standard.")
+        sys.exit(2)
+    answer = click.prompt("a = allow these options, s = the standard flags, c = Cancel",
+                          type=click.Choice(["a", "s", "c"]), default="s")
+    if answer == "c":
+        return "cancel", False
+    keep = click.confirm("Remember this decision for this module version?", default=False)
+    return {"a": "allow", "s": "standard"}[answer], keep
+
+
 def _ask_earlier(ctx: FrameworkContext, found) -> str:
     """The Builder tab's question about an earlier build with the same options, at the terminal: "use", "again" or
     "cancel" (use is the default; the full path is shown). Without a terminal nothing is asked: "again", the build
@@ -1141,6 +1191,81 @@ def _resolve_healing_interactively(orchestrator, request_id, proposal):
 STATUS_ROWS = 20  # builds `build status` lists without --all
 
 
+@build.group('deps')
+def build_deps():
+    """The dependency cache: what a download option of a module's CMake flags would fetch (BoringSSL, LibreSSL,
+    KleidiAI), fetched before the build, pinned and checked, and mounted read-only into the build"""
+
+
+def _dependency_cache(ctx: FrameworkContext):
+    from orchestrator.runtime.build.deps import DependencyCache
+    ctx.require_framework()
+    return DependencyCache.for_framework(ctx.framework_manager)
+
+
+@build_deps.command('list')
+@pass_context
+def build_deps_list(ctx: FrameworkContext):
+    """Every dependency llmcf can fetch for a build, with its source, pin and whether it is in the cache"""
+    from orchestrator.runtime.build.deps import DEPENDENCIES
+    from orchestrator.Core.deletion import size_text
+    cache = _dependency_cache(ctx)
+    table = Table(title="Build dependencies")
+    for column in ("Name", "Needed by", "Source", "Pin", "In the cache", "sha256"):
+        table.add_column(column, overflow="fold")
+    for dep in DEPENDENCIES.values():
+        entry = cache.entry(dep)
+        table.add_row(dep.name, f"-D{dep.option}=ON", escape(dep.source), escape(dep.ref),
+                      f"yes, {size_text(entry.size_bytes)}" if entry else "no",
+                      entry.sha256[:16] + "..." if entry else "-")
+    console.print(table)
+
+
+@build_deps.command('fetch')
+@click.argument('name')
+@pass_context
+def build_deps_fetch(ctx: FrameworkContext, name: str):
+    """Fetch one dependency into the cache now (online only), pinned and checked"""
+    from orchestrator.runtime.build.deps import DEPENDENCIES, DependencyError
+    from orchestrator.utils.locality import offline_mode
+    cache = _dependency_cache(ctx)
+    dep = DEPENDENCIES.get(name.upper())
+    if dep is None:
+        console.print(f"[red]Unknown dependency {escape(name)} (known: {', '.join(DEPENDENCIES)}).[/red]")
+        sys.exit(2)
+    try:
+        entry = cache.ensure(dep, offline=offline_mode(ctx.framework_manager.config), owner="cli",
+                             progress=lambda text: console.print(escape(text)))
+    except DependencyError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]{escape(dep.name)} {escape(dep.ref)} is in the cache (sha256 {entry.sha256}).[/green]")
+
+
+@build_deps.command('delete')
+@pass_context
+def build_deps_delete(ctx: FrameworkContext):
+    """List the dependencies in the cache and delete the ones you pick, after you confirm them in a terminal"""
+    from orchestrator.Core.deletion import PlanChanged, size_text
+    cache = _dependency_cache(ctx)
+    plan = cache.deletion_plan()
+    if plan is None:
+        console.print("No build dependency is in the cache.")
+        return
+    accepted = confirm_deletion(plan, title=f"Build dependencies ({len(plan.items)}, {size_text(plan.total_bytes)})",
+                                multiple=True, again="llm-cli build deps delete")
+    if accepted is None:
+        return
+    from orchestrator.Core.build_plan import state_dir
+    trash, audit = _person_trash(ctx, Path(state_dir(ctx.framework_manager) or cache.root))
+    try:
+        result = cache.delete(accepted, trash=trash, audit=audit)
+    except (PlanChanged, PermissionError, RuntimeError) as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        return
+    _print_deletion_result(result, accepted)
+
+
 @build.command('save')
 @click.argument('artifact')
 @click.option('--to', 'destination', help="Folder to save it to (default: the output folder; at a terminal you are "
@@ -1237,7 +1362,7 @@ _BUILD_FIELD_LABELS = {"request": "Request", "build": "Build", "status": "Status
                        "progress": "Progress", "model": "Model", "target": "Target", "board": "Board",
                        "format": "Format", "quantization": "Quantization", "optimization": "Optimization",
                        "owner": "Started by", "where": "Where", "started": "Started", "ended": "Ended",
-                       "output": "Output", "process": "Process", "error": "Error"}
+                       "output": "Output", "statistics": "Statistics", "process": "Process", "error": "Error"}
 
 
 def _print_request_summary(r: dict) -> None:

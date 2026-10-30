@@ -18,6 +18,7 @@ MOUSE_LABELS = {
     "act_deploy_scan_save": (_SCAN, "deploy.scan.save"),
     "btn_builder_check_target": ("builder_tab", "bld.builder.check"),
     "btn_builder_targets": ("builder_tab", "bld.builder.targets"),
+    "btn_builder_start": ("builder_tab", "bld.builder.start"),
 }
 
 STEPS = (
@@ -38,6 +39,11 @@ STEPS = (
          target="btn_builder_check_target"),
     Step("build.history", cli="build status", tool="list_build_requests", window="build_history",
          target="act_build_history", runnable=True),
+    # a module's CMake options outside the allowlist (DECISIONS round 25 Q6): the person decides when they start the
+    # build in the Builder (or with build start --module-flags)
+    Step("build.decide_flags", cli="build start --module-flags", cli_args=("--module-flags", "{decision}"),
+         params={"decision": Param("choice", choices=("allow", "standard"))}, person_only="permission",
+         window="builder", target="btn_builder_start"),
 )
 
 TEXTS = {
@@ -57,6 +63,9 @@ TEXTS = {
         "step.targets.check": "Check the target",
         "step.build.history": "Look at the build history",
         "step.build.history.what": "Lists the builds of every framework process with their state.",
+        "step.build.decide_flags": "Decide on the module's CMake options",
+        "step.build.decide_flags.what": "Start the build yourself: you see the options outside the allowed list, what "
+                                        "they do and a recommendation, and allow them or use the standard flags.",
     },
     "de": {
         "step.probe.local": "Diesen Computer prüfen",
@@ -74,5 +83,18 @@ TEXTS = {
         "step.targets.check": "Das Target prüfen",
         "step.build.history": "Den Build-Verlauf ansehen",
         "step.build.history.what": "Listet die Builds aller Framework-Prozesse mit ihrem Zustand.",
+        "step.build.decide_flags": "Über die CMake-Optionen des Moduls entscheiden",
+        "step.build.decide_flags.what": "Den Build selbst starten: Du siehst die Optionen außerhalb der erlaubten "
+                                        "Liste, was sie tun, und eine Empfehlung, und erlaubst sie oder nimmst die "
+                                        "Standard-Flags.",
+    },
+}
+
+# The "Sie" form of the German texts above that address the person (Q1); only the texts that differ.
+FORMAL = {
+    "de": {
+        "step.build.decide_flags.what": "Den Build selbst starten: Sie sehen die Optionen außerhalb der erlaubten "
+                                        "Liste, was sie tun, und eine Empfehlung, und erlauben sie oder nehmen die "
+                                        "Standard-Flags.",
     },
 }

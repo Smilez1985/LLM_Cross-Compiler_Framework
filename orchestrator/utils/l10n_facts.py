@@ -63,6 +63,8 @@ TEXTS = {
         "blocker.disk_full": "There is not enough free disk space.",
         "blocker.offline_mode": "Offline mode is on.",
         "blocker.sandbox_off": "The build sandbox is switched off.",
+        "blocker.module_flags_undecided": "The module sets CMake options outside the allowed list; only you decide "
+                                          "whether they are used.",
         "blocker.knowledge_off": "The knowledge base is switched off.",
         "blocker.target_revoked": "This hardware module was withdrawn by the community.",
         "blocker.pack_revoked": "This pack was withdrawn by the community.",
@@ -124,6 +126,8 @@ TEXTS = {
                               "computer.",
         "action.sandbox_on": "Switch the build sandbox on: today only in the settings file; "
                              "{path:act_file_settings} shows the setting.",
+        "action.decide_module_flags": "Start the build yourself in the Builder: it shows the module's CMake options "
+                                      "outside the allowed list, what they do and a recommendation, and you decide.",
         "action.knowledge_on": "Switch the knowledge base on ({path:act_ditto_settings}).",
         "action.remove_target": "Remove the hardware module in the Community Hub.",
         "action.pin_image": "Give the program image with its exact version in "
@@ -248,6 +252,8 @@ TEXTS = {
         "blocker.disk_full": "Es ist nicht genug Speicherplatz frei.",
         "blocker.offline_mode": "Der Offline-Modus ist an.",
         "blocker.sandbox_off": "Die Build-Sandbox ist ausgeschaltet.",
+        "blocker.module_flags_undecided": "Das Modul setzt CMake-Optionen außerhalb der erlaubten Liste; nur du "
+                                          "entscheidest, ob sie genutzt werden.",
         "blocker.knowledge_off": "Die Wissensbasis ist ausgeschaltet.",
         "blocker.target_revoked": "Dieses Hardware-Modul wurde von der Community zurückgezogen.",
         "blocker.pack_revoked": "Dieses Paket wurde von der Community zurückgezogen.",
@@ -314,6 +320,9 @@ TEXTS = {
                               "schon auf diesem Computer ist.",
         "action.sandbox_on": "Die Build-Sandbox einschalten: derzeit nur in der Einstellungsdatei; "
                              "{path:act_file_settings} zeigt die Einstellung.",
+        "action.decide_module_flags": "Den Build selbst im Builder starten: Er zeigt die CMake-Optionen des Moduls "
+                                      "außerhalb der erlaubten Liste, was sie tun, und eine Empfehlung, und du "
+                                      "entscheidest.",
         "action.knowledge_on": "Die Wissensbasis einschalten ({path:act_ditto_settings}).",
         "action.remove_target": "Das Hardware-Modul im Community-Hub entfernen.",
         "action.pin_image": "Das Programm-Image mit seiner genauen Version unter "

@@ -583,6 +583,13 @@ def test_the_manifest_holds_every_build_detail_and_the_checksums_cover_every_fil
         "board": "rk3588"}
     assert manifest["build"]["llama_cpp"]["tag"] == "b11429" and manifest["build"]["source_model"] == "granite.fp16.gguf"
     assert manifest["build"]["input_format"] == "gguf" and isinstance(manifest["build"]["jobs"], int)
+    # the convert statistics (DECISIONS round 25 Q8): durations, sizes and tool versions, numbers and words only; a
+    # GGUF input still has the convert stage's numbers of its check
+    build = manifest["build"]
+    assert all(isinstance(build[k], int) and build[k] >= 0 for k in ("convert_seconds", "quantize_seconds",
+                                                                       "input_bytes", "converted_bytes"))
+    assert build["tools"]["python"].startswith("Python 3") and set(build["tools"]) == {"python", "cmake", "compiler"}
+    assert all("/" not in value for value in build["tools"].values())
     assert manifest["hardware"]["source"] == "profile" and manifest["hardware"]["cpu"] == "Cortex-A55"
     assert "-mcpu=cortex-a55" in manifest["hardware"]["cflags"]
     assert manifest["tests"]["functional"] == "skipped: the image has no llama-completion or llama-cli for this machine"
@@ -610,8 +617,8 @@ def short_functional_test(image, seconds=1):
 
 @needs_bash
 @pytest.mark.parametrize("fail, outcome", [(None, "passed (llama-completion, 8 tokens on the build machine)"),
-                                           ("completion-hang", "timed out after 1 s (llama-completion on the build "
-                                                               "machine); not a failure")])
+                                           ("completion-hang", "timed out after 1 s without output (llama-completion "
+                                                               "on the build machine); not a failure")])
 def test_the_functional_test_runs_the_model_on_the_build_machine(image, fail, outcome):
     """The package's functional test is the convert stage's (scripts/model_check.py test, one implementation): 8
     tokens of the quantized model, bounded, offline, with the options this llama-completion has."""
@@ -626,6 +633,19 @@ def test_the_functional_test_runs_the_model_on_the_build_machine(image, fail, ou
                    "--no-warmup --temp 0 --simple-io"]
     assert manifest_of(package_of(image))["tests"]["functional"] == outcome
     assert "[TARGET] Functional test" in result.stdout, "the target stage's log line"
+
+
+@needs_bash
+def test_the_warning_of_a_silent_functional_test_names_the_idle_limit(image):
+    """FUNCTIONAL_TEST_SECONDS is the time the test may print nothing (DECISIONS round 25 Q8), not a time to finish:
+    the package stage's warning says so."""
+    _script(image.llama / "build" / "bin" / "llama-completion", COMPLETION_STUB)
+    short_functional_test(image)
+    result = target_by_hand(image, "--model-name", "granite", STUB_FAIL="completion-hang")
+    assert result.returncode == 0, result.stdout + result.stderr
+    out = result.stdout + result.stderr
+    assert "The functional test printed nothing for 1 s; the package is made anyway." in out
+    assert "did not finish within" not in out
 
 
 @needs_bash
@@ -946,7 +966,10 @@ def _verdict(*words):
     (["-DLLAMA_BUILD_BORINGSSL=OFF"], "-DLLAMA_BUILD_BORINGSSL=OFF (LLAMA_BUILD_BORINGSSL downloads at configure time "
                                       "and is never set)", "same"),
     (["-P", "x.cmake"], "-P (CMake runs a script with -C or -P, and a script can set any option)", "same"),
-    (["-DLLAMA_BUILD_TESTS=OFF", "-DGGML_NATIVE=OFF", "-S", "src", "--build", "b"], "", ""),
+    # A module's own cmake call may name its folders; the module's flags may not (DECISIONS round 25 Q6: -S and -B
+    # are the plan's), so the package refuses them there.
+    (["-DLLAMA_BUILD_TESTS=OFF", "-DGGML_NATIVE=OFF", "-S", "src", "--build", "b"], "",
+     "-S src (a switch llmcf never allows in a module's flags)"),
 ], ids=["tests-on", "curl-two-words", "fetchcontent", "subprocess-typed", "never-set", "script", "fine"])
 def test_one_verdict_for_the_package_s_flags_and_a_module_s_own_cmake_call(words, alone, package):
     """The package's cross build sets every build's options after the module's flags, so only what no later option

@@ -43,10 +43,12 @@ FILE_NAME = "confirmed_builds.json"
 KIND = "confirmed_builds"   # the signed file kind
 MAX_ENTRIES = 2000
 MAX_IMAGES = 16
-# What can be confirmed: a target or recipe as installed (pack sha256) and a module an AI created (its content). An
-# entry of the kind `artifact` (a model fetched from another computer, planned for the removed remote mode) is never
-# written and never matched.
-KINDS = ("target", "recipe", "module")
+# What can be confirmed: a target or recipe as installed (pack sha256), a module an AI created (its content) and the
+# person's decision on a module's CMake flags outside the allowlist, per module version and flag set
+# (`module_flags`, Core/module_flags.py: "allow" or "standard"). An entry of the kind `artifact` (a model fetched from
+# another computer, planned for the removed remote mode) is never written and never matched.
+KINDS = ("target", "recipe", "module", "module_flags")
+FLAG_DECISIONS = ("allow", "standard")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 # Confirmation channels where the person answered the framework's own question (registry: ctx.confirm_channel).
 PERSON_CHANNELS = ("framework", "framework-gui", "framework-cli")
@@ -172,13 +174,17 @@ class ConfirmedBuilds:
         return self._load().get(_key(kind, item_id))
 
     def record(self, kind: str, item_id: str, *, installed_via: str = "", pack_sha256: str = "",
-               base_images: Iterable[str] = (), channel: str = "", definition_sha256: str = "") -> bool:
-        """Records a confirmed build of a target, a recipe or an AI-made module (bound to `definition_sha256`); False
+               base_images: Iterable[str] = (), channel: str = "", definition_sha256: str = "",
+               decision: str = "") -> bool:
+        """Records a confirmed build of a target, a recipe or an AI-made module (bound to `definition_sha256`), or the
+        person's `decision` on a module's CMake flags (kind module_flags, bound to the flag set's sha256); False
         (nothing written) unless `channel` is a confirmation by the person in the framework's own window, or the
         content it binds to is missing."""
         if kind not in KINDS or not item_id or not person_confirmed(channel):
             return False
-        if kind == "module" and not _SHA256.fullmatch(definition_sha256 or ""):
+        if kind in ("module", "module_flags") and not _SHA256.fullmatch(definition_sha256 or ""):
+            return False
+        if kind == "module_flags" and decision not in FLAG_DECISIONS:
             return False
         images: List[str] = [i for i in dict.fromkeys(base_images) if pinned(i)][:MAX_IMAGES]
         with file_lock(self.state_dir / f".{FILE_NAME}.lock", timeout=10):
@@ -193,6 +199,7 @@ class ConfirmedBuilds:
             items[key] = {"installed_via": installed_via or "", "pack_sha256": pack_sha256 or "",
                           "definition_sha256": definition_sha256 or "",
                           "base_images": images, "channel": str(channel)[:80],
+                          **({"decision": decision} if kind == "module_flags" else {}),
                           "confirmed": datetime.now(timezone.utc).isoformat(timespec="seconds")}
             if len(items) > MAX_ENTRIES:  # the oldest confirmations go first
                 for old_key in sorted(items, key=lambda k: str(items[k].get("confirmed")))[:len(items) - MAX_ENTRIES]:

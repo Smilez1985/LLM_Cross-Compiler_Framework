@@ -94,6 +94,49 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Beide folgen der Platzregel und sind Sache der Person (eine KI bekommt `needs_person`). Bekannte Grenze: Ein
   `--add-host`-Eintrag mit einer IPv6-Adresse nutzt die Form `NAME=[ADRESSE]` von buildx, die ein neueres
   docker buildx braucht.
+- `2026-10-30 05:33 UTC` · `v3.2.0` **Die Statistik des Builds im Paket-Manifest und im Build-Eintrag**
+  (Konsolidierungskette build-flags-time; Entscheidung zu den Zeitgrenzen, Teil Manifest): Das `MANIFEST.json` des
+  Pakets (`create_package_manifest` beider Target-Vorlagen) ergänzt nur, was es noch nicht hatte:
+  `build.convert_seconds`, `build.quantize_seconds`, `build.input_bytes` und `build.converted_bytes` der Konvertierung,
+  und `build.tools` mit der ersten Zeile von `--version` von `python3`, `cmake` und dem Cross-Compiler, den die
+  Toolchain-Datei des Build-Plans nennt (eine Zeile mit einem Pfad bleibt draußen). `build_info.json` hält
+  `quantize_seconds` fest. `llm-cli build status REQUEST_ID` und Build > Build-Verlauf… zeigen die „Statistik“ eines
+  fertigen Builds (`build_history.statistics_text`: Sekunden der Konvertierung, Größe davor und danach, Sekunden der
+  Quantisierung). Tests: `tests/test_build_statistics.py`, der Manifest-Test in `tests/test_target_stage.py`.
+- `2026-10-30 04:30 UTC` · `v3.2.0` **Abhängigkeiten von CMake-Optionen eines Moduls vor dem Build geholt**
+  (Konsolidierungskette build-flags-time; Entscheidung zu den CMake-Flags von Modulen, Nachtrag zu den Abhängigkeiten):
+  Was `-DLLAMA_BUILD_BORINGSSL=ON`, `-DLLAMA_BUILD_LIBRESSL=ON` oder `-DGGML_CPU_KLEIDIAI=ON` llama.cpp beim Bauen
+  herunterladen ließe, holt das neue `orchestrator/runtime/build/deps.py` vor dem Build: außerhalb der Sandbox und nie
+  im Offline-Modus, festgelegt, wie das festgelegte llama.cpp es angibt (BoringSSL-Tag `0.20260929.0` per Git, LibreSSL
+  4.3.2 und KleidiAI v1.24.0 als Archive, KleidiAI auch gegen seine angegebene MD5), die sha256 des Baums beim ersten
+  Holen festgehalten und bei jeder späteren Nutzung und jedem späteren Holen geprüft (eine Quelle, die sich unter
+  demselben Pin geändert hat, wird abgelehnt), schreibgeschützt in einem Abhängigkeits-Cache unter dem Cache-Ordner des
+  Frameworks abgelegt (ein Holen nimmt eine Reservierung im ReservationLedger) und nur lesend in den Build-Container
+  eingehängt (`LLMCF_DEPS`). Der Cross-Build beider Target-Vorlagen lässt `FETCHCONTENT_SOURCE_DIR_<NAME>` auf die
+  eingehängte Kopie zeigen und behält `FETCHCONTENT_FULLY_DISCONNECTED=ON`; KleidiAI wird nicht mehr auf OFF gezwungen,
+  sobald es eingehängt ist. Der Modul-Generator und die Ordnerprüfung erlauben diese drei Optionen; der Build-Plan nennt
+  Quelle, Pin und Größe jeder Abhängigkeit als Fakten der Frage (ein von einer KI gestarteter Build zeigt der Person den
+  Download), und im Offline-Modus stoppt eine, die nicht im Cache ist, den Build in klaren Worten. Neu: `llm-cli build
+  deps list|fetch|delete` und Build > Build-Abhängigkeiten… (Löschen über die Liste von `Core/deletion.py`, neue
+  Löschart `build_dependency`, Papierkorb oder endgültig). Tests: `tests/test_build_deps.py` (ein lokales Git-Repository
+  und ein lokaler HTTP-Server, MD5- und sha256-Abweichung, offline mit und ohne Cache, die nur lesende Einbindung,
+  `FULLY_DISCONNECTED` im Cross-Build beider Vorlagen).
+- `2026-10-30 04:15 UTC` · `v3.2.0` **Die Person entscheidet über CMake-Optionen eines Moduls außerhalb der Allowlist**
+  (Konsolidierungskette build-flags-time; Entscheidung zu den CMake-Flags von Modulen): Bevor ein Modul mit einer
+  gültigen CMake-Option außerhalb der Allowlist (`-G Ninja`, `--trace`, ...) gebaut wird, zeigen der Builder (eine Frage
+  mit „Diese Optionen erlauben“, „Die Standard-Flags nehmen“ (die Vorgabe) und einem Häkchen zum Merken) und `llm-cli
+  build start` (eine Abfrage im Terminal; ohne Terminal `--module-flags allow|standard` und `--remember-flags`), was
+  jede Option tut, und eine Empfehlung für das Modell und die Quantisierung, die gebaut werden, aus dem Rezept-Plan des
+  Targets für diese Hardware (`Core/module_flags.py` FlagQuestion). `BuildService.start_build(flag_decision=,
+  remember_flags=, flag_channel=)` trägt die Antwort über den Orchestrator (`BuildRequest.flag_decision`,
+  `BuildConfiguration.module_flags`) in den Build-Container (`LLMCF_ALLOWED_FLAGS`, `LLMCF_FLAG_DECISION=standard`), wo
+  die letzte Prüfung des Pakets die erlaubten Optionen behält oder die anderen weglässt. Eine gemerkte Entscheidung
+  liegt je Modulversion und Flags im Speicher der Build-Bestätigungen der Person (`Core/confirmed_builds.py`, neue Art
+  `module_flags`; nur die eigenen Kanäle der Person schreiben sie). Nur die Person: Ein KI-Aufrufer kann keine
+  Entscheidung übergeben (`permission_denied`), und sein Build ohne gemerkte Entscheidung stoppt im Build-Plan und beim
+  Start mit `needs_person` (neuer Blocker `module_flags_undecided`, Schritt `build.decide_flags`;
+  `DELEGATION_RULES_VERSION` 5, frühere Delegationen werden also neu erteilt). Tests:
+  `tests/test_module_flag_decision.py`.
 
 ### Geändert
 - `2026-10-29 23:31 UTC` · `v3.2.0` **Eine Install-Regel für die ganze RHEL-Familie** ([Design](docs/DESIGN_DE.md#installer-plattformen-und-abhängigkeiten)):
@@ -242,6 +285,49 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   seinem eigenen Builder. Ein Import hasht, prüft und lädt eine einzige offene Datei und lehnt ein Archiv ab, das das
   Image anders als `llm-framework/<target>:...` benennen würde (mit dem Namen eines Basis-Images oder eines anderen
   Targets) oder dessen OCI-`index.json` ein anderes Image nennt als seine `manifest.json`.
+- `2026-10-30 05:19 UTC` · `v3.2.0` **Keine harte Zeitgrenze für einen Build-Schritt** (Konsolidierungskette
+  build-flags-time; Entscheidung zu den Zeitgrenzen): Ein Schritt dauert so lange, wie er dauert. Das neue
+  `orchestrator/utils/step_limits.py` (StepLimits, StepClock, StepTimedOut, ein TimeoutError) ist die eine Regel für
+  die Stufen-Container des Builds (`BuildEngine._run_container` wartet jetzt in kurzen Runden) und die Schritte
+  configure und build des Laufzeit-Builds (`runtime/build/executor.py`, `default_process_runner` und
+  `DockerEngine.run`; eine einfache Sekundenzahl bleibt eine einfache Grenze): Die Einstellung `build_timeout`
+  (Deprecate-and-delegate: Ihre Bedeutung wechselt von einer harten Grenze zu einer weichen Obergrenze) stoppt einen
+  von einer KI gestarteten Build (der Owner der Anfrage, jetzt in `BuildConfiguration.owner`) und wird für ihn nie
+  verlängert; ein Build, den die Person gestartet hat, läuft mit einer Warnung darüber hinaus, dass Abbrechen ihn
+  stoppt. Die neue Einstellung `build_idle_timeout` (Vorgabe 1800 s) stoppt einen Schritt, der so lange nichts
+  ausgibt, für alle. Eine KI darf beide nur senken (`TIGHTEN_ONLY`; `build_timeout` ist für eine KI nicht mehr nur
+  lesbar); beide stehen in den Einstellungen, die `config show` der CLI und Datei > Einstellungen… zeigen. Schutz vor
+  Schleifen: Der Stage-Runner (`build.sh` beider Targets) zählt die Starts einer Stufe mit denselben Eingaben, die von
+  außen angehalten wurden, und startet sie kein viertes Mal (`STAGE_RESTART_LIMIT`, Exit-Code 75); der Funktionstest
+  (`model_check.py` beider Targets) liest die Ausgabe des Modells mit, stoppt ein Modell, das sich wiederholt
+  (`stopped`, kein Fehler) und nimmt `FUNCTIONAL_TEST_SECONDS` als die Zeit, die er nichts ausgeben darf (`timed out`,
+  kein Fehler), nie als harte Grenze (die Warnung der Paket-Stufe nennt sie so). Die llama.cpp-Laufzeit-Builds, die eine KI startet (die Tools
+  `build_local_runtime` und `deploy_device_runtime`), geben das an ihren Executor weiter (`LocalLLMRuntime.install`,
+  `steps.build_runtime`, `service.ensure_build` und `service.deploy` nehmen `ai_started`), also stoppt sie ihre weiche
+  Obergrenze ebenso. Tests: `tests/test_step_limits.py`, die Warte-Tests in
+  `tests/test_review_build_engine.py` (ein von einer KI gestarteter Build stoppt, der einer Person läuft weiter, die
+  Grenze für Stillstand), die Schleifen-Tests in `tests/test_build_stages.py` und `tests/test_convert_stage.py`.
+- `2026-10-30 03:55 UTC` · `v3.2.0` **Ein Urteil über die CMake-Flags eines Moduls: eine Allowlist, Ablehnungen und die
+  Entscheidung der Person** (Konsolidierungskette build-flags-time; Entscheidung zu den CMake-Flags von Modulen):
+  `recipe.cmake_flag_verdicts` (`orchestrator/runtime/build/recipe.py`) beurteilt jedes Wort der CMake-Flags eines
+  Moduls: `-DNAME=VALUE` (auch `-D NAME=VALUE` und `-DNAME:TYPE=VALUE`) und CMakes eigene `-W`-Wörter sind erlaubt; was
+  Code oder eine andere Toolchain lädt (ein Project-Include, `CMAKE_TOOLCHAIN_FILE`, `CMAKE_MODULE_PATH`,
+  `CMAKE_USER_MAKE_RULES_OVERRIDE*`, `-C`, `-P`, `--preset`, `--toolchain`), eine Variable, die ein anderes Programm
+  ausführt (ein Compiler- oder Linker-Launcher, ein Code-Prüfer, `CMAKE_CROSSCOMPILING_EMULATOR`,
+  `CMAKE_MAKE_PROGRAM`), Quell- und Build-Ordner (`-S`, `-B`), die
+  `FETCHCONTENT_*`-Variablen, die nur llmcfs Abhängigkeits-Cache setzt, ein `CMAKE_PREFIX_PATH` außerhalb des
+  Build-Containers, eine Download-Option und alles, was keine CMake-Option ist, wird mit Grund abgelehnt; eine gültige
+  CMake-Option außerhalb der Allowlist (`-G`, `-U`, `--log-level`, `--trace` und die übrigen Schalter von
+  `DECISION_SWITCHES`) bekommt das Urteil "decision" mit dem, was sie tut, und die Person entscheidet. Der
+  Modul-Generator (`module_generator.cmake_flag_problems`, von `validate_module_data` genutzt), die Ordnerprüfung
+  (`validate_target_folder`, jetzt auch für `CMAKE_OPTIONS` von `config_module.sh` und `LLAMA_CMAKE_ARGS` eines
+  Dockerfiles) und die letzte Prüfung des Board-Pakets im Build-Container (`module_flag_verdicts` und
+  `module_flag_problem` von `targets/*/modules/target_module.sh`) urteilen gleich: `tests/test_module_flags.py` lässt
+  das Python- und das Shell-Urteil über eine gemeinsame Liste laufen (`tests/data/cmake_flag_vectors.json`), in den drei
+  Kontexten Modul, Paket und eigener cmake-Aufruf eines Moduls. Ein Wort, das die Shell erweitert (`$X`), bleibt eine
+  dokumentierte Grenze der Ordnerprüfung; das cmake von build.sh und die Paketprüfung sehen die erweiterten Wörter.
+  Bewusst geändert: `-S` und `-B` in den Flags eines Moduls stoppen jetzt das Paket (`tests/test_target_stage.py`, Fall
+  "fine").
 
 ### Behoben
 - `2026-10-29 23:36 UTC` · `v3.2.0` **Nacharbeiten an der Container-Engine: ein `DOCKER_HOST` aus Podman-Zeiten, `/dev/dri` unter rootless
@@ -371,6 +457,13 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   neuen Rechte (er liest nur ein Modell aus dem Cache und gibt Zahlen aus). Ein Test hält jetzt die zwei Stellen
   fest, die einen Container mit `containers.run` von docker-py starten (den Trivy-Scan und den Benchmark), damit ein
   neuer Container den einen Container-Helfer nicht unbemerkt umgeht.
+- `2026-10-30 03:55 UTC` · `v3.2.0` **Ein cmake-Aufruf eines Moduls startet mit frischem Cache und ignoriert eine
+  Toolchain aus der Umgebung** (Konsolidierungskette build-flags-time; Rest aus build-safety): Das cmake von build.sh
+  (die Prüfung jedes cmake-Aufrufs der eigenen Skripte eines Moduls) hängt an einen Configure-Lauf `--fresh` an, wenn
+  das CMake des Images es kennt, damit eine im Build-Ordner des Moduls liegende `CMakeCache.txt` keine Option ohne ein
+  Wort auf der Kommandozeile setzen kann, und entfernt eine Umgebungsvariable `CMAKE_TOOLCHAIN_FILE`, außer der
+  Build-Plan hat genau diese Datei gesetzt. Tests: `tests/test_module_flags.py` (frischer Cache, Toolchain aus der
+  Umgebung entfernt, die Toolchain des Plans bleibt).
 
 ## [3.1.0] - 2026-10-29
 

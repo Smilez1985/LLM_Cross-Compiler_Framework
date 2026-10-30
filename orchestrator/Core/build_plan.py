@@ -91,6 +91,8 @@ class BuildPlan:
     # (only an acknowledgement bound to the digest, design question Q3, could lift it; none exists yet)
     outside_images: List[str] = field(default_factory=list)
     problems: List[Problem] = field(default_factory=list)
+    # what the build fetches before it starts (runtime/build/deps.py): one line each, source, pin and size
+    dependencies: List[str] = field(default_factory=list)
 
     # --- the question --------------------------------------------------------------------------------------------
 
@@ -169,6 +171,8 @@ class BuildPlan:
                 facts.append(Fact(f"Base image ({file})", base_image_line(image), TARGET_TEXT))
         elif self.base_image:
             facts.append(Fact("Base image", f"{self.base_image} ({self.base_image_class})", TARGET_TEXT))
+        for line in self.dependencies:
+            facts.append(Fact("Build dependency", line, TARGET_TEXT))
         facts.append(Fact("Sandbox", "the conversion runs without network, capabilities or root (build_sandbox)"
                           if self.sandbox else "build_sandbox is off"))
         return tuple(facts)
@@ -661,6 +665,27 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
         plan.base_image_class = registry_class(plan.base_image) if plan.base_image else ""
         # every image, not only the first FROM: a later stage can pull a vendor image too (DECISIONS round 3)
         plan.base_images = pairs
+
+    # the module's CMake options outside the allowlist (DECISIONS round 25 Q6): only the person decides; an AI-started
+    # build goes on only with the decision the person remembered for this module version and flag set
+    try:
+        question, kept = service.flag_question(BuildRequestIn(**base), local_paths=False)
+    except Exception:  # noqa: BLE001 - a target whose flags cannot be read is checked again by start_build
+        question, kept = None, None
+    # what a download option of the module would fetch: fetched before the build (runtime/build/deps.py), a download
+    # like any other (its source, pin and size are facts of the question); offline only from the cache
+    try:
+        plan.dependencies = service.dependency_lines(BuildRequestIn(**base), local_paths=False)
+    except Exception as e:  # noqa: BLE001 - offline mode and a dependency not in the cache
+        from orchestrator.runtime.build.deps import DependencyMissing
+        if isinstance(e, DependencyMissing):
+            plan.problems.append(Problem("needs_person", str(e), "Ask the person to fetch the dependency while "
+                                         "online, then start the build again.", "offline_mode"))
+    if question is not None and kept is None:
+        plan.problems.append(Problem("needs_person", question.ai_text(),
+                                     "Ask the person to start this build in the GUI or CLI, where they decide on the "
+                                     "module's CMake options, or to remember a decision for this module version.",
+                                     "module_flags_undecided"))
 
     # sandbox
     plan.sandbox = bool(_config(framework, "build_sandbox", True))

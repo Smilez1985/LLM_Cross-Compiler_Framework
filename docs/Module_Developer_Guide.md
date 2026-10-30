@@ -293,6 +293,54 @@ The result is a **skeleton**, not a working target yet:
   `llama-bench` tuned to the build host, and the converter's requirements. Keep these steps when you change the
   Dockerfile.
 
+### 3.5 CMake flags of a module
+
+A module's CMake flags (`cmake_flags` of the wizard or of an AI's proposal, written as `CMAKE_OPTIONS` into
+`modules/config_module.sh`, and a Dockerfile's `LLAMA_CMAKE_ARGS`) follow one verdict, `cmake_flag_verdicts` of
+`orchestrator/runtime/build/recipe.py`. The module generator, the folder check, the build plan and the package's last
+check in the build container (`module_flag_verdicts` of `target_module.sh`) give the same verdicts
+(`tests/test_module_flags.py` runs both over `tests/data/cmake_flag_vectors.json`).
+
+- **Allowed:** `-DNAME=VALUE`, also `-D NAME=VALUE` and `-DNAME:TYPE=VALUE`, and CMake's own warning words (`-Wdev`,
+  `-Wno-dev`, `-Werror=dev`, `-Wdeprecated`, `-Wno-deprecated` and their `error=` forms).
+- **Never:** what makes CMake load code or another toolchain (`CMAKE_PROJECT_INCLUDE`, `CMAKE_PROJECT_INCLUDE_BEFORE`,
+  `CMAKE_PROJECT_<name>_INCLUDE`, `CMAKE_PROJECT_TOP_LEVEL_INCLUDES`, `CMAKE_TOOLCHAIN_FILE`, `CMAKE_MODULE_PATH`,
+  `CMAKE_USER_MAKE_RULES_OVERRIDE*`, `-C`, `-P`, `--preset`, `--toolchain`), what makes CMake or the build run
+  another program (`CMAKE_<LANG>_COMPILER_LAUNCHER`, `CMAKE_<LANG>_LINKER_LAUNCHER`, `CMAKE_<LANG>_CLANG_TIDY`,
+  `_CPPCHECK`, `_CPPLINT`, `_INCLUDE_WHAT_YOU_USE`, `_ICSTAT`, `CMAKE_LINK_WHAT_YOU_USE_CHECK`,
+  `CMAKE_CROSSCOMPILING_EMULATOR`, `CMAKE_MAKE_PROGRAM`; for ccache use `GGML_CCACHE`), the source and build folders (`-S`,
+  `-B`: the build plan sets them), the `FETCHCONTENT_*` variables (only the framework's dependency cache sets them),
+  a `CMAKE_PREFIX_PATH` that names anything but absolute folders inside the build container, an option that would let
+  llama.cpp download, and every word that is not a CMake option.
+- **The person decides:** a valid CMake switch outside the allowlist (`-G`, `-T`, `-A`, `-U`, `--fresh`,
+  `--log-level`, `--log-context`, `--debug-output`, `--debug-find`, `--trace`, `--trace-expand`,
+  `--warn-uninitialized`, `--no-warn-unused-cli`, `--check-system-vars`, `--compile-no-warning-as-error`,
+  `--install-prefix`) is no refusal. When the module is built, the Builder (or `llm-cli build start` at a terminal)
+  shows what each option does and a recommendation for the model and quantization being built, from the target's
+  recipe plan for that hardware; the person allows the options or goes on with the standard flags (the options are
+  left out of the package's cross build). The decision can be remembered for this module version and flag set
+  (`--remember-flags`, or the check box of the question): a new version or another flag set asks again. Only the
+  person decides: an AI-started build stops with `needs_person` (blocker `module_flags_undecided`) unless the person
+  remembered a decision. Without a terminal, `--module-flags allow` or `--module-flags standard` gives the decision.
+- **Fresh cache, no toolchain from the environment:** every cmake call of a module's own scripts (build.sh's `cmake`)
+  starts a configure run with `--fresh` (when the image's CMake knows it), so a `CMakeCache.txt` left in a build
+  folder sets nothing, and runs without a `CMAKE_TOOLCHAIN_FILE` environment variable unless the build plan set
+  exactly that file. The folder check reads the flags as written: a word the shell expands (`$X`) is a limit of that
+  check; build.sh's cmake and the package's last check see the expanded words.
+- **Download options with a fetched dependency:** `-DLLAMA_BUILD_BORINGSSL=ON`, `-DLLAMA_BUILD_LIBRESSL=ON` and
+  `-DGGML_CPU_KLEIDIAI=ON` would make llama.cpp download BoringSSL, LibreSSL or KleidiAI while it is built. In a
+  module's flags they are allowed, because the framework fetches that dependency before the build
+  (`orchestrator/runtime/build/deps.py`): outside the sandbox, never in offline mode, pinned exactly as the pinned
+  llama.cpp declares it (a git tag, or an archive checked against the MD5 llama.cpp names), with the sha256 of its tree
+  recorded on the first fetch and checked at every later use. It is kept read-only in a dependency cache below the
+  framework's cache folder and mounted read-only into the build (`LLMCF_DEPS`); the cross build points
+  `FETCHCONTENT_SOURCE_DIR_<NAME>` at it and keeps `FETCHCONTENT_FULLY_DISCONNECTED=ON`, so the build itself still
+  downloads nothing. In offline mode a dependency that is not in the cache stops the build with what is missing. The
+  build plan lists each dependency with its source, pin and size, so an AI-started build shows the download in the
+  question the person answers. `llm-cli build deps list|fetch|delete` (Build > Build Dependencies... in the GUI)
+  lists, fetches and deletes the cache's entries. Other download options (CUDA CCCL, ZenDNN, llguidance, the virtual
+  GPU header, OpenMP on Windows) have no pinned source and stay refused.
+
 ## 4. target.yml and the capabilities block
 
 ### 4.1 metadata
@@ -643,6 +691,12 @@ folder, the runner skips every stage whose marker has the same digest and whose 
 runs again makes every later stage run again. A stage that fails writes no marker. `build.sh --fresh` ignores the
 markers.
 
+**Loop protection.** A stage that was started with the same inputs and was stopped from outside before it finished
+(its container stopped, the build resumed, again and again) is a loop, not a long build. The runner counts these
+starts in `<stage>.starts` and does not start the stage a fourth time (`STAGE_RESTART_LIMIT`, default 3): it fails
+with exit code 75 and says so. A stage that ends with its own error (exit code below 128) and a finished stage reset
+the count; `--fresh` forgets it.
+
 **Progress.** The runner prints one line when a stage starts, ends, is resumed or fails:
 `=== Stage 3/4: convert ===`, `=== Stage 3/4: convert done in 41 s ===`, `=== Stage 1/4: source resumed ===`,
 `=== Stage 3/4: convert failed (exit 1) ===`. The build engine reads these lines from the container log: the build
@@ -790,7 +844,7 @@ it there). What it does is what the convert module of version 1.x promised in th
 | `input PATH --format FORMAT --stats FILE` | before converting | Detects the input: a Hugging Face folder with SafeTensors or PyTorch weights, a GGUF file (nothing to convert), an ONNX model, a single weights file, a folder of GGUF files. Refuses what the format cannot use with the reason (`--onnx-next TEXT` adds where an ONNX model goes on this target), checks the input's integrity (its JSON files, SafeTensors headers against the file sizes, the shards an index lists, PyTorch archives, a GGUF header) and starts the statistics. |
 | `begin FILE --state FILE [--scratch DIR]` | before a converter writes FILE | Keeps an existing FILE as `FILE.convert-backup` until the new one passed its checks (an intermediate `tmp-*` of the work folder is simply replaced). |
 | `watch DIR --state FILE` | before a format helper runs | Notes the files of DIR with their sizes and times, so that `output --watched` finds the model the helper wrote (a new file, or one it wrote over) and a failure removes it. |
-| `output FILE --format gguf --type TYPE --seconds N --stats FILE --tools DIR` | after the converter | Checks the GGUF (every tensor's data inside the file), runs the functional test with `llama-completion` (or `llama-cli`) from DIR: 8 tokens, at most `--test-seconds` (120), offline. `--test-skip REASON` skips the test with a note. Completes the statistics. |
+| `output FILE --format gguf --type TYPE --seconds N --stats FILE --tools DIR` | after the converter | Checks the GGUF (every tensor's data inside the file), runs the functional test with `llama-completion` (or `llama-cli`) from DIR: 8 tokens, offline; it is stopped when it prints nothing for `--test-seconds` (120, `FUNCTIONAL_TEST_SECONDS`) or the model repeats itself, never by the clock alone. `--test-skip REASON` skips the test with a note. Completes the statistics. |
 | `test FILE --tools DIR --result FILE` | in the target stage, before the package is kept | The same functional test of another GGUF (the quantized model; an embedding model is not run): `--what TEXT` names it in a failure, `--stage NAME` its log lines. Writes the result, the tool and the manifest's line to `--result`. |
 | `keep --state FILE` | when the stage succeeded | Removes the backups. |
 | `restore --state FILE --failed` or `--stopped` | when the stage fails; at its next start | Removes what the run wrote and puts the backups back (`--stopped`: what a killed run left). A file whose backup is no longer there stays as it is: the earlier file was put back by hand. |
@@ -801,8 +855,9 @@ The statistics (`convert_stats.json` in the stage folder) go into `build_info.js
 `output_type`, `output_bytes`, `ratio` (input / output),
 `seconds`, `functional_test` (`passed`, `skipped`, `timed out` or `stopped`) and `functional_test_tool`; numbers and
 words only, no paths. A functional test that ends with an error or crashes (a signal such as llama.cpp's abort on a
-tensor it cannot use) fails the stage with the tool's last lines: the GGUF does not work. A timeout or a run stopped
-from outside (SIGKILL of the out-of-memory killer, SIGTERM) is a note. It is skipped with a note when the image has neither tool or the tool does not start there, for an embedding model, for the NPU formats
+tensor it cannot use) fails the stage with the tool's last lines: the GGUF does not work. A run that prints nothing
+for `FUNCTIONAL_TEST_SECONDS` (`timed out`), a model that repeats itself (`stopped`) and a run stopped from outside
+(SIGKILL of the out-of-memory killer, SIGTERM) are a note. It is skipped with a note when the image has neither tool or the tool does not start there, for an embedding model, for the NPU formats
 (the model runs on the board) and in the `imatrix` job (`llama-imatrix` runs the model there).
 
 ## 7. Sandbox rules
@@ -982,8 +1037,11 @@ are the build again, with the dispatcher's work moved into the stage it belongs 
   `deploy.sh` (`./deploy.sh USER@HOST [DEST]` copies the package over `ssh` and `scp` with
   `StrictHostKeyChecking=yes`, so the board's host key must already be known, to DEST, default `llm/<package>` in the
   user's home on the board, and checks the copy there; `./deploy.sh [DEST]` on the board itself copies it to DEST, default `/opt/llm`), `MANIFEST.json` with every build
-  detail (model, quantization, llama.cpp, board, profile, flags, tests, each file with its size and SHA-256) and
-  `SHA256SUMS`. The helpers come from the target's `scripts/package_test_model.sh`, `scripts/package_deploy.sh` and
+  detail (model, quantization, llama.cpp, board, profile, flags, tests, each file with its size and SHA-256; the
+  build's statistics in `build`: `convert_seconds`, `quantize_seconds`, `cross_compile_seconds`, `input_bytes` and
+  `converted_bytes` of the conversion, and `tools` with the first line of `python3`, `cmake` and the cross compiler's
+  `--version`, never a path) and `SHA256SUMS`. `build_info.json` records `quantize_seconds` next to the convert
+  stage's `conversion`. The helpers come from the target's `scripts/package_test_model.sh`, `scripts/package_deploy.sh` and
   `scripts/board_package.py`. Before the package is kept, the model is run once on this machine (`llama-completion`
   of the image, when it has one) with the convert stage's functional test (`scripts/model_check.py test`,
   [section 6.5](#65-the-checks-of-the-convert-stage)): a run that ends with an error or crashes stops the package,
