@@ -202,6 +202,9 @@ Weiteres Verhalten:
   festen Wörtern gesendet (Ereignis, Grund, Anfrage-ID), für dein Telefon, deine Hausautomation oder einen
   KI-Client, der wartet; das Framework abonniert nie, ein Broker, der nicht läuft, hält nie einen Build auf, und
   nur du stellst sie ein ([CLI](CLI_Usage_DE.md#config-doorbell)).
+- **Ditto kümmert sich um seine Builds:** im Framework-Fenster gibt ein Build, den Ditto gestartet oder auf den es
+  gewartet hat, Ditto einen Zug, wenn er endet: es prüft das Ergebnis und schlägt den nächsten Schritt vor oder
+  führt ihn im Rahmen seiner Freigaben aus.
 - **Wohin ein Build kommt:** siehe [Wohin fertige Modelle kommen](#wohin-fertige-modelle-kommen) unten. Jeder Build
   landet in `<Ordner>/<Target>/<Modell>/<Quantisierung>/`, sein Golden-ZIP daneben.
 
