@@ -35,6 +35,7 @@ from orchestrator.Core.self_healing_manager import AUTOMATIC_STRATEGIES
 from orchestrator.utils.any_path import is_absolute_anywhere, last_part
 from orchestrator.utils.helpers import digest_matches, redact_secrets, sha256_file
 from orchestrator.utils.logging import get_logger
+from orchestrator.utils.logtext import clean_lines
 from orchestrator.utils.next_steps import WithSteps
 
 MODEL_NEXT = ("Give a Hugging Face repo id (owner/name), or a local model file or a folder with config.json as "
@@ -703,8 +704,10 @@ class BuildService:
                  for_person: bool = False) -> LogTail:
         """The last `lines` lines (at most 1,000), or those before line `before_line` (paging back). Each line is cut
         at 2,000 characters and the whole tail at 48,000; `truncated` says older lines exist or lines were cut.
-        Secrets are always redacted. A host path reaches an AI by its label or file name (_log_paths); `for_person`:
-        the Builder's live log, the person's own window, keeps the full paths (round 5 f)."""
+        Secrets are always redacted. An AI reads the lines cleaned first (utils/logtext.clean_lines: escapes, redraws
+        and repeats out; the line numbers stay those of the raw log) and a host path by its label or file name
+        (_log_paths); `for_person`: the Builder's live log, the person's own window, keeps the raw lines and the full
+        paths (round 5 f)."""
         state = self._state(request_id)
         engine = self._orchestrator.build_engine
         collected: List[str] = []
@@ -721,17 +724,31 @@ class BuildService:
         begin = max(0, end - lines)
         chosen, size, cut = [], 0, False
         clean = (lambda text: text) if for_person else self._log_paths()
-        for line in reversed(collected[begin:end]):  # newest first, so a cut drops the oldest lines
+        # An AI reads the window in the one order clean_log -> scrub -> cut (utils/logtext.py): escapes, redraws and
+        # repeats out first, so a colour code cannot hide a path; each cleaned line keeps the index of its first raw
+        # line, so first_line and before_line stay raw line numbers. The person's window stays raw.
+        window = collected[begin:end]
+        numbered = list(enumerate(window)) if for_person else clean_lines(window)
+        oldest, indices = len(window), []
+        for index, line in reversed(numbered):  # newest first, so a cut drops the oldest lines
             text = clean(redact_secrets(line))
             if len(text) > LOG_LINE_CHARS:
                 text, cut = text[:LOG_LINE_CHARS] + " [... cut ...]", True
             if size + len(text) > LOG_TOTAL_CHARS:
                 cut = True
+                # A collapsed run is shown whole or not at all: its lines share their first raw line, which the next
+                # page (before_line) must still show.
+                while indices and indices[-1] == index:
+                    indices.pop()
+                    chosen.pop()
+                oldest = indices[-1] if indices else len(window)
                 break
             chosen.append(text)
+            indices.append(index)
             size += len(text)
+            oldest = index
         chosen.reverse()
-        first = end - len(chosen) + 1 if chosen else end + 1
+        first = begin + oldest + 1
         return LogTail(request_id=request_id, lines=chosen, first_line=first, total_lines=total,
                        truncated=cut or first > 1)
 

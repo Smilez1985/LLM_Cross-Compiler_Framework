@@ -584,16 +584,18 @@ class TestReads:
         assert status.request.revision == COMMIT_A and status.request.optimization == "balanced"
 
     def test_log_paging(self, env, monkeypatch):
-        logs = [f"line {i}" for i in range(1, 501)]
+        # Neighbouring lines differ in a word, not only in their number: the AI's view collapses a run of lines that
+        # differ only in numbers (utils/logtext.clean_log), and this test is about paging.
+        logs = [f"line {i} " + "abc"[i % 3] for i in range(1, 501)]
         state = WorkflowState("r1", OrchestrationStatus.BUILDING, datetime.now(), build_ids=["b1"])
         env.orch._workflows["r1"] = state
         env.orch.build_engine = SimpleNamespace(get_build_status=lambda bid: SimpleNamespace(logs=logs))
         last = env.registry.call("read_build_log", {"request_id": "r1", "lines": 100}, ToolContext("ditto"))
-        assert last.lines[0] == "line 401" and last.first_line == 401 and last.truncated
+        assert last.lines[0] == logs[400] and last.first_line == 401 and last.truncated
         assert any("before_line=401" in n for n in last.notes)
         back = env.registry.call("read_build_log", {"request_id": "r1", "lines": 100, "before_line": 401},
                                  ToolContext("ditto"))
-        assert back.lines[0] == "line 301" and back.lines[-1] == "line 400"
+        assert back.lines[0] == logs[300] and back.lines[-1] == logs[399]
         big = env.registry.call("read_build_log", {"request_id": "r1", "lines": 5000}, ToolContext("ditto"))
         assert len(big.lines) == 500 and any("reduced to 1000" in n for n in big.notes)
 

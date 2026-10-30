@@ -1,0 +1,112 @@
+[
+ {
+  "name": "csi_colours",
+  "input": "\u001b[1;31mred\u001b[0m text\n\u001b[2K\u001b[1Gdone",
+  "output": "red text\ndone"
+ },
+ {
+  "name": "osc_title_and_link",
+  "input": "\u001b]0;build title\u0007step \u001b]8;;https://example.com/doc\u001b\\link\u001b]8;;\u001b\\ end",
+  "output": "step link end"
+ },
+ {
+  "name": "unterminated_osc_keeps_text",
+  "input": "\u001b]0;no end here\nerror: next line stays",
+  "output": "]0;no end here\nerror: next line stays"
+ },
+ {
+  "name": "lone_escape",
+  "input": "before\u001b after",
+  "output": "before after"
+ },
+ {
+  "name": "eight_bit_csi",
+  "input": "31mred0m",
+  "output": "red"
+ },
+ {
+  "name": "carriage_return_progress",
+  "input": "Downloading  10%\rDownloading  55%\rDownloading 100%\nnext",
+  "output": "Downloading 100%\nnext"
+ },
+ {
+  "name": "windows_line_ends",
+  "input": "one\r\ntwo\r\nthree",
+  "output": "one\ntwo\nthree"
+ },
+ {
+  "name": "redraw_keeps_error_part",
+  "input": "error: disk full\r 42%",
+  "output": "error: disk full\n 42%"
+ },
+ {
+  "name": "identical_run",
+  "input": "same\nsame\nsame\nother",
+  "output": "same (repeated 3 times)\nother"
+ },
+ {
+  "name": "empty_run",
+  "input": "a\n\n\n\nb",
+  "output": "a\n\nb"
+ },
+ {
+  "name": "numbers_run",
+  "input": "[1/5] Building CXX object a1.o\n[2/5] Building CXX object a2.o\n[3/5] Building CXX object a3.o\n[4/5] Building CXX object a4.o\n[5/5] Building CXX object a5.o\nLinking",
+  "output": "[1/5] Building CXX object a1.o\n(5 lines like these, only their numbers differ: the first and the last are shown)\n[5/5] Building CXX object a5.o\nLinking"
+ },
+ {
+  "name": "two_numbered_lines_stay",
+  "input": "step 1\nstep 2",
+  "output": "step 1\nstep 2"
+ },
+ {
+  "name": "error_lines_never_collapse",
+  "input": "error: x\nerror: x\nerror: x",
+  "output": "error: x\nerror: x\nerror: x"
+ },
+ {
+  "name": "warning_breaks_run",
+  "input": "item 1\nitem 2\nWARNING: item 3 slow\nitem 4\nitem 5",
+  "output": "item 1\nitem 2\nWARNING: item 3 slow\nitem 4\nitem 5"
+ },
+ {
+  "name": "traceback_kept",
+  "input": "Traceback (most recent call last):\n  File \"a.py\", line 1\n  File \"a.py\", line 1\nValueError: bad",
+  "output": "Traceback (most recent call last):\n  File \"a.py\", line 1 (repeated 2 times)\nValueError: bad"
+ },
+ {
+  "name": "failed_and_fatal_kept",
+  "input": "Build FAILED 1\nBuild FAILED 1\nfatal: 2\nfatal: 2",
+  "output": "Build FAILED 1\nBuild FAILED 1\nfatal: 2\nfatal: 2"
+ },
+ {
+  "name": "escape_hides_no_keyword",
+  "input": "\u001b[31mer\u001b[0mror: split by colour\nerror: split by colour",
+  "output": "error: split by colour\nerror: split by colour"
+ },
+ {
+  "name": "versions_differ_by_letters",
+  "input": "Installing libfoo 1.2.3\nInstalling libbar 2.0.1\nInstalling libbaz 3.1",
+  "output": "Installing libfoo 1.2.3\nInstalling libbar 2.0.1\nInstalling libbaz 3.1"
+ },
+ {
+  "name": "trailing_newline",
+  "input": "line\n",
+  "output": "line\n"
+ },
+ {
+  "name": "empty",
+  "input": "",
+  "output": ""
+ },
+ {
+  "name": "linker_symbols_kept",
+  "input": "/usr/bin/ld: a.c:(.text+0x10): undefined reference to `vec_dot_q4_0'\n/usr/bin/ld: a.c:(.text+0x20): undefined reference to `vec_dot_q5_1'\n/usr/bin/ld: a.c:(.text+0x30): undefined reference to `vec_dot_q8_0'\ncollect2: error: ld returned 1 exit status",
+  "output": "/usr/bin/ld: a.c:(.text+0x10): undefined reference to `vec_dot_q4_0'\n/usr/bin/ld: a.c:(.text+0x20): undefined reference to `vec_dot_q5_1'\n/usr/bin/ld: a.c:(.text+0x30): undefined reference to `vec_dot_q8_0'\ncollect2: error: ld returned 1 exit status"
+ },
+ {
+  "name": "test_failures_kept",
+  "input": "FAIL: test_1\nFAIL: test_2\nFAIL: test_3",
+  "output": "FAIL: test_1\nFAIL: test_2\nFAIL: test_3"
+ }
+]

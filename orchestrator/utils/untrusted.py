@@ -85,6 +85,16 @@ def sanitize_untrusted(text: str, max_len: int = 20000) -> str:
     return text
 
 
+_BOUNDARY_ID = re.compile(r'(</?untrusted_data id=")[0-9a-f]{12}(")')
+
+
+def without_boundary_ids(text: str) -> str:
+    """`text` with the random id of every wrap_untrusted block taken out, so two wrappings of the same content compare
+    equal (the tool loop's duplicate check). The content's own tags were defused by wrap_untrusted, so only the
+    block's own boundaries match."""
+    return _BOUNDARY_ID.sub(r"\1\2", text)
+
+
 def wrap_untrusted(text: str, source: str, max_len: int = 20000) -> str:
     """Wraps sanitized text in a delimited block. The random id keeps the content from closing the block."""
     boundary = secrets.token_hex(6)

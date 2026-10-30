@@ -1,0 +1,72 @@
+[
+ {
+  "name": "sorted_keys_no_spaces",
+  "value": {
+   "b": 1,
+   "a": [
+    3,
+    1,
+    2
+   ],
+   "c": {
+    "z": true,
+    "y": null
+   }
+  },
+  "output": "{\"a\":[3,1,2],\"b\":1,\"c\":{\"y\":null,\"z\":true}}"
+ },
+ {
+  "name": "list_order_kept",
+  "value": [
+   {
+    "id": 2
+   },
+   {
+    "id": 1
+   }
+  ],
+  "output": "[{\"id\":2},{\"id\":1}]"
+ },
+ {
+  "name": "unicode_stays_readable",
+  "value": {
+   "text": "Gr\u00fc\u00dfe, \u6771\u4eac"
+  },
+  "output": "{\"text\":\"Gr\u00fc\u00dfe, \u6771\u4eac\"}"
+ },
+ {
+  "name": "c0_controls_escaped",
+  "value": {
+   "log": "a\nb\tc\u0000d\u001b[31m"
+  },
+  "output": "{\"log\":\"a\\nb\\tc\\u0000d\\u001b[31m\"}"
+ },
+ {
+  "name": "del_and_c1_escaped",
+  "value": {
+   "log": "x\u007fy\u0085z\u009b1m"
+  },
+  "output": "{\"log\":\"x\\u007fy\\u0085z\\u009b1m\"}"
+ },
+ {
+  "name": "numbers_and_strings_as_they_are",
+  "value": {
+   "version": "1.2.3",
+   "size": 1048576,
+   "ratio": 0.5
+  },
+  "output": "{\"ratio\":0.5,\"size\":1048576,\"version\":\"1.2.3\"}"
+ },
+ {
+  "name": "quotes_and_backslashes",
+  "value": {
+   "path": "C:\\models\\a \"b\""
+  },
+  "output": "{\"path\":\"C:\\\\models\\\\a \\\"b\\\"\"}"
+ },
+ {
+  "name": "empty_object",
+  "value": {},
+  "output": "{}"
+ }
+]

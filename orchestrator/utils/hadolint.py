@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 
+from orchestrator.utils.logtext import ANSI_RE
+
 INSTALL_URL = "https://github.com/hadolint/hadolint/releases"
 INSTALL_HINT = (f"To have the Dockerfile of each build checked, install hadolint: {INSTALL_URL} (one file for Linux, "
                 "macOS and Windows); CONTRIBUTING.md, section 5, shows the same check with Docker.")
@@ -30,7 +32,7 @@ RULES_URL = "https://github.com/hadolint/hadolint#rules"
 TIMEOUT_SECONDS = 60
 MESSAGE_CHARS = 300  # a finding's message is cut there; hadolint's own messages are shorter
 
-_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_ANSI = ANSI_RE  # the one escape pattern (utils/logtext.py); hadolint writes CSI colours
 # "Dockerfile:12 DL3008 warning: Pin versions ..." or, for a Dockerfile hadolint cannot parse, "Dockerfile:2:4 ...".
 _LINE = re.compile(r"^(?P<file>[^:\s][^:]*):(?P<line>\d+)(?::\d+)?\s+"
                    r"(?:(?P<rule>[A-Z]{2}\d{4})\s+(?P<level>error|warning|info|style):\s*)?(?P<message>.*)$")

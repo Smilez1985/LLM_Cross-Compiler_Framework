@@ -2,7 +2,6 @@
 """Shared adapter logic: JSON answers with local validation and one repair attempt, schema normalization."""
 
 import copy
-import json
 import re
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
@@ -10,7 +9,7 @@ from pydantic import BaseModel, ValidationError
 
 from orchestrator.llm.catalog import ProviderPreset
 from orchestrator.llm.errors import InvalidOutput, NotConfigured, Truncated
-from orchestrator.llm.types import ChatRequest, ChatResult, Message, ModelInfo
+from orchestrator.llm.types import ChatRequest, ChatResult, Message, ModelInfo, json_dumps  # noqa: F401 (moved there)
 from orchestrator.security.redaction import SecretStr, reveal
 
 DEFAULT_MAX_TOKENS = 16000  # non-streaming; room for adaptive thinking plus the answer
@@ -163,7 +162,3 @@ class ProviderAdapter:
         second.new_messages = [*result.new_messages, repair, *second.new_messages]
         return second
 
-
-def json_dumps(value: Any) -> str:
-    """Deterministic JSON for anything that becomes part of a prompt (stable prefix = cache hits)."""
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
