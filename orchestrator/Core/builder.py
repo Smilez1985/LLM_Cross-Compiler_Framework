@@ -87,6 +87,7 @@ class BuildCancelled(Exception):
 STAGING_WATCH_EVERY = 2.0    # seconds between two disk checks while a model is staged
 CONTAINER_WATCH_EVERY = 5.0  # seconds between two disk checks while a stage container runs
 CONTAINER_WAIT_POLL = 30.0   # the longest single wait for a stage container between two checks of its time limits
+END_RECORD_POLL = 5.0        # the same while the stage runner's end record is watched for (Core/build_end.py)
 RESOURCES_EVERY = 5.0        # seconds between two CPU and memory samples of a running stage container
 
 # The line the stage runner (targets/*/modules/build.sh, DECISIONS U9) prints for each of its stages: started
@@ -275,7 +276,20 @@ class BuildProgress:
     # The running stage container's CPU and memory (docker_manager.container_resources: cpu_percent, memory_bytes,
     # memory_limit_bytes), sampled every RESOURCES_EVERY seconds; None while no stage container runs
     resources: Optional[Dict[str, float]] = None
-    
+    # How the build ended (Core/build_end.py END_REASONS: done, failed, cancelled, soft_cap, idle); None while it runs
+    end_reason: Optional[str] = None
+    # The stage runner's end record of the last stage container (build_end.EndRecord), when it wrote one
+    end_record: Optional[Any] = None
+
+    def end_facts(self) -> Optional[Dict[str, Any]]:
+        """{'reason', 'exit', 'stage'} of an ended build (build_info.json's "end", the build record), else None."""
+        if self.end_reason is None:
+            return None
+        record = self.end_record
+        stage = getattr(record, "stage", None)
+        return {"reason": self.end_reason, "exit": getattr(record, "exit", None),
+                "stage": stage if stage and stage != "-" else None}
+
     def add_log(self, message: str, level: str = "INFO"):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.logs.append(f"[{timestamp}] [{level}] {message}")
@@ -466,7 +480,7 @@ class BuildEngine:
         if info is None or progress is None:
             return
         record = dict(info, status=progress.status.value, stage=progress.current_stage,
-                      progress=progress.progress_percent,
+                      progress=progress.progress_percent, end_reason=progress.end_reason,
                       ended=progress.end_time.isoformat(timespec="seconds") if progress.end_time else None,
                       error=progress.errors[-1] if progress.errors else None)
         try:
@@ -498,6 +512,10 @@ class BuildEngine:
             process = self._active_processes.get(build_id)
         progress.add_log("Build cancelled by user.")
         self._save_record(build_id)
+        if container:
+            # The stage runner must not count this stop as a restart of its loop protection (build_end.CANCEL_NOTE)
+            from orchestrator.Core.build_end import write_cancel_note
+            write_cancel_note(self.cache_dir / "builds" / build_id / "work")
 
         # Stop whatever runs right now (image build, security scan, imatrix or conversion container);
         # every stage checks the status afterwards and ends the build.
@@ -536,12 +554,25 @@ class BuildEngine:
             self._settled.add(progress.build_id)
 
     def _run_container(self, config: "BuildConfiguration", progress: "BuildProgress", container: Container,
-                       prefix: str) -> int:
+                       prefix: str, end_record: Optional[Path] = None) -> int:
         """Runs a stage container: streams its log into the progress, applies the step's time limits
         (utils/step_limits.py: a soft cap that stops only an AI-started build, an idle timeout for a step that prints
-        nothing), honours cancellation and always removes the container. Returns the exit code."""
+        nothing), honours cancellation and always removes the container. Returns the exit code.
+
+        `end_record`: where the stage runner writes its end record (Core/build_end.py, in the mounted work folder).
+        Once it says "status done" the step's clock is switched off (no soft cap or idle stop after the done marker)
+        and the container gets END_GRACE seconds to exit by itself; then the framework stops it, and the build is
+        still done (exit 0). The record that was seen is kept in progress.end_record."""
+        from orchestrator.Core.build_end import END_GRACE, read_end_record
         from orchestrator.utils.step_limits import StepClock, StepTimedOut
         clock = StepClock(self._step_limits(config), prefix.strip(': ').lower() or 'build')
+        if end_record is not None:
+            progress.end_record = None
+            try:
+                Path(end_record).unlink(missing_ok=True)   # a record of an earlier run never ends this one
+            except OSError:
+                pass
+        grace_until: Optional[float] = None
         with self._lock:
             self._active_containers[config.build_id] = container
         try:
@@ -585,7 +616,9 @@ class BuildEngine:
             threading.Thread(target=self._sample_resources, args=(container, progress, prefix, watched),
                              name=f"resources-{config.build_id}", daemon=True).start()
             while True:
-                wait_for = clock.next_wait(CONTAINER_WAIT_POLL)
+                wait_for = clock.next_wait(CONTAINER_WAIT_POLL if end_record is None else END_RECORD_POLL)
+                if grace_until is not None:
+                    wait_for = max(0.05, min(wait_for, grace_until - time.monotonic()))
                 started = time.monotonic()
                 try:
                     result = container.wait(timeout=wait_for)
@@ -593,6 +626,24 @@ class BuildEngine:
                 except Exception as e:
                     self._check_cancelled(progress)
                     expired = not full and (_is_read_timeout(e) or time.monotonic() - started >= wait_for)
+                    if expired and end_record is not None:
+                        # The done marker first: once it is there, no clock may stop the step.
+                        if grace_until is None:
+                            record = read_end_record(end_record)
+                            if record is not None and record.done:
+                                clock.finish()
+                                grace_until = time.monotonic() + END_GRACE
+                                progress.add_log(f"{prefix}The build wrote its end record (done); the container has "
+                                                 f"{int(END_GRACE)} s to exit by itself.")
+                        elif time.monotonic() >= grace_until:
+                            progress.add_log(f"{prefix}The container had not exited {int(END_GRACE)} s after its end "
+                                             "record (done); the framework stopped it. The build is done.")
+                            try:
+                                container.kill()
+                            except Exception:
+                                pass
+                            result = {"StatusCode": 0}
+                            break
                     if expired:
                         # one wait ended: the step goes on unless its limits stop it
                         try:
@@ -624,6 +675,8 @@ class BuildEngine:
             if full:
                 from orchestrator.Core.disk_plan import InsufficientSpace
                 raise InsufficientSpace(full["text"])
+            if end_record is not None:
+                progress.end_record = read_end_record(end_record)
             return int(result.get("StatusCode", 1))
         finally:
             if "watched" in locals():
@@ -770,11 +823,22 @@ class BuildEngine:
             with self._lock:
                 if prog.status != BuildStatus.CANCELLED:
                     prog.status = outcome
+                prog.end_reason = self._end_reason_of(prog)
                 prog.end_time = prog.end_time or datetime.now()
                 self._save_record(bid)
                 self._running.discard(bid)
                 self._settled.discard(bid)
                 self.__dict__.get("_meters", {}).pop(bid, None)
+
+    @staticmethod
+    def _end_reason_of(prog: "BuildProgress") -> str:
+        """The build's one end reason (Core/build_end.py): cancelled for a cancel, done only for a completed build, a
+        time limit's kind (soft_cap, idle) when one stopped it, else failed."""
+        if prog.status == BuildStatus.CANCELLED:
+            return "cancelled"
+        if prog.status == BuildStatus.COMPLETED:
+            return "done"
+        return prog.end_reason if prog.end_reason in ("soft_cap", "idle") else "failed"
 
     def _execute_build_stages(self, config: BuildConfiguration, prog: "BuildProgress") -> "BuildStatus":
         """Runs the stages and returns the outcome; _execute_build publishes it."""
@@ -859,6 +923,8 @@ class BuildEngine:
                 return self._end_cancelled(config, prog)
             self._discard_staged(config, prog)
             prog.end_time = datetime.now()
+            from orchestrator.Core.build_end import reason_of_timeout
+            prog.end_reason = reason_of_timeout(e) or "failed"
             prog.add_error(self._disk_full_text(e) or str(e))
             self.logger.error(f"Build {bid} failed: {e}", exc_info=True)
             # Try cleanup even on failure
@@ -2088,7 +2154,10 @@ class BuildEngine:
             **sandbox,
         )
         # A requested importance matrix that fails stops the build (low-bit types would be unusable).
-        exit_code = self._run_container(config, progress, container, "IMATRIX: ")
+        from orchestrator.Core.build_end import end_record_path
+        exit_code = self._run_container(config, progress, container, "IMATRIX: ",
+                                        end_record=end_record_path(build_temp / "work", "imatrix"))
+        exit_code = self._ended_by_record(progress, exit_code, "IMATRIX: ")
         if exit_code != 0:
             raise RuntimeError(f"IMatrix calculation failed (exit code {exit_code})\n{self._log_tail(progress, 'IMATRIX: ')}")
         if (imatrix_dir / "imatrix.dat").exists():
@@ -2177,9 +2246,24 @@ class BuildEngine:
             **sandbox,
         )
         
-        exit_code = self._run_container(config, progress, container, "CONT: ")
+        from orchestrator.Core.build_end import end_record_path
+        exit_code = self._run_container(config, progress, container, "CONT: ",
+                                        end_record=end_record_path(build_temp / "work", "build"))
+        exit_code = self._ended_by_record(progress, exit_code, "CONT: ")
         if exit_code != 0:
             raise RuntimeError(f"Build script failed with exit code {exit_code}\n{self._log_tail(progress, 'CONT: ')}")
+
+    def _ended_by_record(self, progress: "BuildProgress", exit_code: int, prefix: str) -> int:
+        """The stage container's end by its end record (Core/build_end.py): "status done" is done (0), also when the
+        framework stopped the container after the grace; an exit 0 WITHOUT a record is a failure with a plain text
+        (never a silent success); otherwise the container's exit code."""
+        from orchestrator.Core.build_end import NO_RECORD_TEXT
+        record = progress.end_record
+        if record is not None and record.done:
+            return 0
+        if exit_code == 0:
+            raise RuntimeError(f"{NO_RECORD_TEXT}\n{self._log_tail(progress, prefix)}")
+        return exit_code
 
     def _build_dependencies(self, config: BuildConfiguration, progress: BuildProgress,
                             target_path: Path) -> Tuple[Dict[str, Dict[str, str]], Dict[str, str]]:
@@ -2364,6 +2448,11 @@ class BuildEngine:
         multi_file = len(preferred) > 1 or bool(primary and primary.lower().endswith((".safetensors", ".bin")))
         dataset = self._dataset_ref(config, progress)
         options = self._build_options(config, info, dataset)
+        record = getattr(progress, "end_record", None) if progress is not None else None
+        if record is not None and record.done:
+            # How the build ended (Core/build_end.py): only a build whose end record says done gets here
+            stage = record.stage if record.stage != "-" else None
+            info["end"] = {"reason": "done", "exit": record.exit, "stage": stage}
         info.update({
             "build_id": config.build_id,
             # A local model an AI caller pinned is recorded by its label, never its host path (it reaches AI callers)

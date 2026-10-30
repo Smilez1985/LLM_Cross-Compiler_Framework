@@ -1,4 +1,4 @@
-Version 3.2.0 · Last updated 2026-10-30
+Version 3.3.0 · Last updated 2026-10-30
 
 **English** · [Deutsch](ROADMAP_DE.md)
 
@@ -22,7 +22,7 @@ decisions it comes from.
 |---|---|---|
 | Rest of 3.2.0 | Ditto's context, the board bundle, the device runtime and more hardware | in progress |
 | next | Build service, queue and modes | planned |
-| 3.3.0 | LoRA and large models | planned |
+| 3.3.0 | LoRA and large models | in progress |
 | 3.4.0 | Supply chain and community | planned |
 | later | Rust parts for the network and the board | planned |
 | later | More hardware and MCP extensions | planned |

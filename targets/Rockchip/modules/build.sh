@@ -28,6 +28,21 @@
 #   === Stage 1/4: source resumed ===           finished in an earlier run with the same inputs
 #   === Stage 3/4: convert failed (exit 1) ===  stopped; the build ends with the stage's exit code
 #
+# End record. The very last thing a run does is to write ONE end record, $BUILD_SCRATCH_DIR/stages/<job>/build.end
+# (written to a temporary file and moved into place), which the BuildEngine reads from the mounted work folder: a
+# build ends because it is DONE, never because a clock ran out after it finished (orchestrator/Core/build_end.py).
+#   status done|failed   done only after the last stage's marker and "Done." (or the --to stage's marker)
+#   exit N               the run's exit code
+#   stage NAME           the stage that failed (for done: the last stage)
+#   job build|imatrix    inputs DIGEST    time (UTC, ISO 8601 with a trailing Z)
+# A failing stage, a refused loop and every `set -e` path write "failed" through the same writer (an EXIT trap); a
+# run killed with SIGKILL leaves no record, which reads as "not finished". A record left by an earlier run is removed
+# at the start.
+#
+# Cancel. A person's or an AI's Cancel writes the note stages/<job>/cancelled before the framework stops the
+# container (Core/builder.py cancel_build): the stage that was running then does not count as a restart of the loop
+# protection below; the note is removed when it is found. A stop from outside without the note still counts.
+#
 # Usage: build.sh [--to STAGE] [--fresh] [--input PATH] [--output FILE] [--model-name NAME] [--quantization TYPE]
 #                 [--hardware-config FILE] [--package]
 #   --to STAGE   run the stages up to STAGE (source, config, convert, rotate or target) and stop there
@@ -123,6 +138,37 @@ fi
 WORK_DIR="${BUILD_SCRATCH_DIR:-${BUILD_CACHE_DIR:-/build-cache}}"
 STAGE_DIR="$WORK_DIR/stages/$JOB"
 mkdir -p "$STAGE_DIR"
+
+# --- The end record (see the header) -----------------------------------------------------------------------------
+END_RECORD="$STAGE_DIR/build.end"
+END_STAGE=""
+END_WRITTEN=0
+DIGEST=""
+rm -f "$END_RECORD" "$END_RECORD.tmp"   # a record of an earlier run never ends this one
+
+write_end() {  # STATUS EXIT: the one writer of the end record
+    {
+        echo "status $1"
+        echo "exit $2"
+        echo "stage ${END_STAGE:--}"
+        echo "job $JOB"
+        echo "inputs ${DIGEST:--}"
+        echo "time $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    } > "$END_RECORD.tmp" && mv -f "$END_RECORD.tmp" "$END_RECORD"
+    END_WRITTEN=1
+}
+
+on_exit() {  # every way the run ends that did not write its record: a failure (set -e, a refusal, a signal)
+    local rc=$?
+    if [ "$END_WRITTEN" = 0 ]; then
+        [ "$rc" -ne 0 ] || rc=1
+        write_end failed "$rc" || true
+    fi
+    exit "$rc"
+}
+trap on_exit EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 STAGE_RUNNER=1
 STAGE_LAST="${STAGES[$((LAST - 1))]}"
 export STAGE_RUNNER STAGE_DIR MODULES_DIR STAGE_LAST CONVERT_OUTPUT PACKAGE_REQUESTED
@@ -285,10 +331,35 @@ count_start() {  # STAGE: records one more start; fails when the stage already s
     mv -f "$file.tmp" "$file"
 }
 
+# A person's or an AI's Cancel is not a restart: the stage that was running when the framework wrote the cancel note
+# (stages/<job>/cancelled) gives back the start it counted. The note is removed; a stop without it still counts.
+forget_cancelled_start() {
+    local stage file count
+    [ -f "$STAGE_DIR/cancelled" ] || return 0
+    stage="$(sed -n '1p' "$STAGE_DIR/running" 2>/dev/null || true)"
+    file="$STAGE_DIR/$stage.starts"
+    case "$stage" in
+        source|config|convert|rotate|target)
+            if [ -f "$file" ]; then
+                count="$(sed -n 's/^count //p' "$file")"
+                case "$count" in ''|*[!0-9]*) count=0 ;; esac
+                if [ "$count" -le 1 ]; then
+                    rm -f "$file"
+                else
+                    printf 'inputs %s\ncount %s\n' "$(sed -n 's/^inputs //p' "$file")" "$((count - 1))" > "$file.tmp"
+                    mv -f "$file.tmp" "$file"
+                fi
+            fi ;;
+    esac
+    rm -f "$STAGE_DIR/cancelled" "$STAGE_DIR/running"
+}
+
 # --- Run ------------------------------------------------------------------------------------------------------------
 
 echo "=== Build Started: $TARGET_LABEL (stages: ${STAGES[*]}) ==="
 
+forget_cancelled_start
+rm -f "$STAGE_DIR/running"
 DIGEST="$(inputs_digest)"
 # The first stage to run: the first one without a matching marker, moved back over every finished stage whose files
 # are gone (the stage after it needs them). With every marker matching, the last stage's files decide.
@@ -327,20 +398,24 @@ for i in "${!STAGES[@]}"; do
     echo "=== Stage $number: $name ==="
     started=$SECONDS
     rm -f "$STAGE_DIR/$name.outputs"
+    END_STAGE="$name"
     if ! count_start "$name"; then
         echo "=== Stage $number: $name failed (exit 75) ===" >&2
         exit 75
     fi
+    printf '%s\n' "$name" > "$STAGE_DIR/running"
     rc=0
     STAGE_NAME="$name" bash "$MODULES_DIR/${name}_module.sh" || rc=$?
     if [ "$rc" -ne 0 ]; then
         if [ "$rc" -lt 128 ]; then
             rm -f "$STAGE_DIR/$name.starts"   # it ended with its own error; only a stage stopped from outside counts
         fi
+        forget_cancelled_start               # stopped by a Cancel: not a restart either
+        rm -f "$STAGE_DIR/running"
         echo "=== Stage $number: $name failed (exit $rc) ===" >&2
         exit "$rc"
     fi
-    rm -f "$STAGE_DIR/$name.starts"
+    rm -f "$STAGE_DIR/$name.starts" "$STAGE_DIR/running"
     write_marker "$name"
     echo "=== Stage $number: $name done in $((SECONDS - started)) s ==="
 done
@@ -352,3 +427,6 @@ elif [ "$JOB" = "imatrix" ]; then
 else
     echo "Done."
 fi
+# The very last step: the end record (the stages asked for have finished, with their markers)
+END_STAGE="$STAGE_LAST"
+write_end "done" 0

@@ -9,6 +9,27 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 (`` `YYYY-MM-DD HH:MM UTC` · `vX.Y.Z` ``) and is written under the version it lands in. Planned work is listed in the
 [roadmap](docs/ROADMAP.md), not here; how the framework is built and why is in the [design](docs/DESIGN.md).
 
+## [3.3.0] - 2026-10-30
+
+### Added
+- `2026-10-30 12:45 UTC` · `v3.3.0` **A build ends on its done marker** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
+  the stage runner (`build.sh` of every target, and the runner the module generator writes) writes ONE end record as
+  its very last step, `stages/<job>/build.end` in the work folder (`status done|failed`, `exit`, `stage`, `job`, the
+  inputs digest and a UTC time), "done" only after the last stage's marker; a failing stage, a refused loop and every
+  other end write "failed" through the same writer. The build engine reads it: once it says done the step's clock is
+  switched off, so neither the idle timeout nor an AI build's soft cap can stop the build after the marker; the
+  container gets 30 s to exit by itself, then the framework stops it and the build is still done. A container that
+  exits 0 without the record is a failed build ("the build ended without its end record"), never a silent success.
+  Every build has one end reason from a fixed vocabulary (done, failed, cancelled, soft_cap, idle), kept in its build
+  record and, for a finished build, as `end` (reason, exit, stage) in `build_info.json`.
+
+### Fixed
+- `2026-10-30 12:45 UTC` · `v3.3.0` **A person's Cancel no longer counts as a restart of the loop protection** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
+  a stage stopped from outside counted towards `STAGE_RESTART_LIMIT`, also when the person (or an AI) cancelled the
+  build, so three cancels refused the next build as a loop. The framework's cancel now writes a note into the stage
+  folder before it stops the container, and the stage runner gives back the start of the stage that was running; a
+  stop from outside without the note still counts.
+
 ## [3.2.0] - 2026-10-30
 
 ### Added
@@ -4362,6 +4383,7 @@ taken from source headers and the git history (2025-12-13 to 2026-01-14).
 - `2025-11-20 00:00 UTC` · `v1.0.0` Basic support for Rockchip RK3588/RK3566 cross-compilation.
 - `2025-11-20 00:00 UTC` · `v1.0.0` CLI (`llm-cli`) and GUI (`llm-gui`) entry points.
 
+[3.3.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v2.4.0...v3.0.0

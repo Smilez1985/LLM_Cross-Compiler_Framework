@@ -1,4 +1,4 @@
-Version 3.2.0 · Stand 2026-10-30
+Version 3.3.0 · Stand 2026-10-30
 
 [English](ROADMAP.md) · **Deutsch**
 
@@ -22,7 +22,7 @@ der Entscheidungen des Maintainers, aus der sie stammt.
 |---|---|---|
 | Rest von 3.2.0 | Dittos Kontext, das Board-Bündel, die Laufzeit auf dem Gerät und mehr Hardware | in Arbeit |
 | als Nächstes | Build-Dienst, Warteschlange und Modi | geplant |
-| 3.3.0 | LoRA und große Modelle | geplant |
+| 3.3.0 | LoRA und große Modelle | in Arbeit |
 | 3.4.0 | Lieferkette und Community | geplant |
 | später | Rust-Teile für das Netzwerk und das Board | geplant |
 | später | Mehr Hardware und MCP-Erweiterungen | geplant |
