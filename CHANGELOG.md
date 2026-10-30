@@ -26,7 +26,9 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   archive, the Community Hub's quarantine, export and review folders, the bench's private model copy, the knowledge
   base's half-built conversion copy and a half-written target module now go through the one removal helper
   (`orchestrator/utils/atomic.remove_tree`): read-only files are made writable and removed, a pass is repeated on
-  Windows, and what still cannot be removed is logged by name.
+  Windows, and what still cannot be removed is logged by name. Only what is inside the removed folder is changed: the
+  folder around it (a model folder, the Hugging Face cache) keeps its permissions, and a folder that cannot be opened
+  is made accessible and removed (or ends in that list) instead of stopping the clean-up with an error.
 - `2026-10-30 16:38 UTC` · `v3.3.0` **A git dependency is kept without its git metadata on Windows too**
   ([design](docs/DESIGN.md#security-model)): git keeps its objects read-only, and the dependency pre-fetch removed
   `.git` with `shutil.rmtree(ignore_errors=True)`, which on Windows failed without a word: `.git` stayed in the cached

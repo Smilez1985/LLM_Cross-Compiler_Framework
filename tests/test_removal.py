@@ -238,7 +238,9 @@ class TestCallersThatNeedTheFolderGone:
 
     def test_a_half_built_conversion_copy_that_stays_stops_the_conversion(self, tmp_path, monkeypatch):
         pytest.importorskip("qdrant_edge")
-        from orchestrator.rag import migration, storage_lock
+        # edge_store binds storage_lock.remove_tree when first imported: imported before the patch below, so the
+        # patch never outlives this test there (it made a later test_windows_host test fail when this ran first)
+        from orchestrator.rag import edge_store, migration, storage_lock  # noqa: F401
         state = tmp_path / "state"
         work = migration.edge_folder(state).with_name(migration.edge_folder(state).name + migration.CONVERTING_SUFFIX)
         work.mkdir(parents=True)
@@ -254,7 +256,7 @@ class TestCallersThatNeedTheFolderGone:
 
 # The one implementation: its error handler makes a read-only entry writable and tries once more, and what still stays
 # is returned and logged. The allowlist of other places is empty and stays so.
-THE_HELPER = ("orchestrator/utils/atomic.py", "remove_tree")
+THE_HELPER = ("orchestrator/utils/atomic.py", "_one_pass")   # remove_tree's one rmtree pass
 ALLOWED = set()
 
 
@@ -262,8 +264,8 @@ def _silent_rmtree(call: ast.Call) -> bool:
     f = call.func
     if not ((isinstance(f, ast.Attribute) and f.attr == "rmtree") or (isinstance(f, ast.Name) and f.id == "rmtree")):
         return False
-    if len(call.args) > 1:   # rmtree(path, True) or a positional handler
-        return True
+    if len(call.args) > 1 or any(isinstance(a, ast.Starred) for a in call.args):   # rmtree(path, True), a
+        return True                                                                  # positional handler or *args
     for kw in call.keywords:
         if kw.arg == "ignore_errors" and not (isinstance(kw.value, ast.Constant) and kw.value.value is False):
             return True
@@ -313,9 +315,107 @@ def test_the_ratchet_sees_every_silent_form(tmp_path):
         "class K:\n    def c(self, p):\n        shutil.rmtree(p, onexc=lambda *a: None)\n"
         "def d(p):\n    shutil.rmtree(p, onerror=print)\n"
         "def fine(p):\n    shutil.rmtree(p)\n"
-        "def also_fine(p):\n    shutil.rmtree(p, ignore_errors=False)\n", encoding="utf-8")
+        "def also_fine(p):\n    shutil.rmtree(p, ignore_errors=False)\n"
+        "def e(a):\n    shutil.rmtree(*a)\n", encoding="utf-8")
     (tmp_path / "scripts" / "s.py").write_text("import shutil\nshutil.rmtree('x', ignore_errors=1)\n",
                                                encoding="utf-8")
     assert silent_rmtrees(tmp_path) == {("orchestrator/m.py", "a"), ("orchestrator/m.py", "b"),
                                         ("orchestrator/m.py", "K.c"), ("orchestrator/m.py", "d"),
+                                        ("orchestrator/m.py", "e"),
                                         ("scripts/s.py", "<module>")}
+
+
+# --- the helper never changes what is around the tree, and never raises on a folder it cannot open ------------------
+
+@pytest.fixture
+def still_open(monkeypatch):
+    """A file named 'open.log' cannot be deleted, as a file another process still holds open on Windows."""
+    real = os.unlink
+
+    def unlink(path, *, dir_fd=None):
+        if os.path.basename(os.fsdecode(path)) == "open.log":
+            raise PermissionError(13, "The process cannot access the file (in use)", os.fsdecode(path))
+        return real(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "unlink", unlink)
+    monkeypatch.setattr(os, "remove", unlink)
+
+
+@pytest.fixture
+def unreadable_folders(monkeypatch):
+    """A folder without its owner's read and search bits cannot be opened or listed, as for an account that is not
+    root (CI runners, every person's machine), also through the descriptor-relative calls shutil.rmtree makes."""
+    real_open, real_scandir = os.open, os.scandir
+    locked = stat.S_IRUSR | stat.S_IXUSR
+
+    def refuse(path, dir_fd=None):
+        st = os.stat(path, dir_fd=dir_fd, follow_symlinks=False) if dir_fd is not None else os.lstat(path)
+        if stat.S_ISDIR(st.st_mode) and st.st_mode & locked != locked:
+            raise PermissionError(13, "Permission denied", os.fsdecode(path))
+
+    def open_(path, flags, mode=0o777, *, dir_fd=None):
+        refuse(path, dir_fd)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    def scandir(path="."):
+        if not isinstance(path, int):
+            refuse(path)
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "open", open_)
+    monkeypatch.setattr(os, "scandir", scandir)
+
+
+class TestAroundTheTree:
+
+    def test_the_folder_around_the_tree_keeps_its_mode_when_something_stays(self, tmp_path, still_open):
+        """The base's best-effort callers never touched the folder that holds the removed one (often a person's
+        folder: the model folder of a bench copy, the Hugging Face cache, targets/)."""
+        around = tmp_path / "models"
+        tree = around / ".bench-copy"
+        tree.mkdir(parents=True)
+        (tree / "open.log").write_text("busy")
+        os.chmod(around, 0o755)
+        left = atomic.remove_tree(tree)
+        assert [p.name for p in left] == ["open.log"]
+        assert stat.S_IMODE(os.stat(around).st_mode) == 0o755
+
+    def test_a_folder_that_vanished_meanwhile_leaves_the_folder_around_alone(self, tmp_path, monkeypatch):
+        around = tmp_path / "models"
+        tree = around / ".bench-copy"
+        tree.mkdir(parents=True)
+        os.chmod(around, 0o755)
+        real = atomic.shutil.rmtree
+
+        def gone_first(path, **kw):   # another clean-up removed it between the check and the removal
+            real(path)
+            real(path, **kw)
+        monkeypatch.setattr(atomic.shutil, "rmtree", gone_first)
+        assert atomic.remove_tree(tree) == []
+        assert stat.S_IMODE(os.stat(around).st_mode) == 0o755
+
+    def test_a_folder_that_cannot_be_opened_is_made_accessible_and_removed(self, tmp_path, unreadable_folders):
+        """rmtree's error handler got os.open for such a folder; calling os.open(path) again raised TypeError (a
+        missing argument), which escaped every best-effort clean-up (rmtree(ignore_errors=True) never raised)."""
+        tree = tmp_path / "staging"
+        (tree / "locked" / "inner").mkdir(parents=True)
+        (tree / "locked" / "inner" / "f").write_text("1")
+        os.chmod(tree / "locked" / "inner", 0o200)
+        os.chmod(tree / "locked", 0o000)
+        assert atomic.remove_tree(tree) == []
+        assert not tree.exists()
+
+    def test_a_folder_that_stays_unopenable_is_reported_not_raised(self, tmp_path, unreadable_folders, monkeypatch):
+        tree = tmp_path / "staging"
+        (tree / "locked").mkdir(parents=True)
+        os.chmod(tree / "locked", 0o000)
+        real_chmod = os.chmod
+
+        def chmod(p, m, **kw):   # not the owner of that folder
+            if os.path.basename(os.fsdecode(p)) == "locked":
+                raise PermissionError(1, "Operation not permitted", os.fsdecode(p))
+            return real_chmod(p, m, **kw)
+        monkeypatch.setattr(os, "chmod", chmod)
+        left = atomic.remove_tree(tree)
+        assert [p.name for p in left] == ["locked"]
+        real_chmod(tree / "locked", 0o700)
