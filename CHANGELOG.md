@@ -35,6 +35,13 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   all of them as before, in the settings, the Prompt cache group and `llm-cli ditto cache set`.
 
 ### Fixed
+- `2026-10-30 15:05 UTC` · `v3.3.0` **Ditto's server starts on a llama.cpp build without flash attention** ([design](docs/DESIGN.md#ditto-the-local-runtime-and-the-llm-layer)):
+  a quantised KV cache (q8_0, q4_0) needs flash attention, and a build or backend without it made the server exit
+  during startup whenever `local_kv_cache` was auto and the boards' rule chose a quantised cache. The start now tries
+  once more with f16, plans the context for it, and that server goes straight to f16 from then on; `llm-cli ditto
+  runtime start`, `llm-cli ditto cache`, the Prompt cache group of the GUI and Mojo (`runtime.kv_cache.fallback`) say
+  so. A q8_0 or q4_0 you set yourself is never replaced: the start fails with a text that names `local_kv_cache` and
+  f16.
 - `2026-10-30 15:02 UTC` · `v3.3.0` **Ditto's healing prompt names the framework's folders by label** ([design](docs/DESIGN.md#self-healing-approval)):
   a path in the framework's output, build or installation folder now reaches the AI as `output:<path inside>`,
   `builds:...` or `framework:...`, and any other path on this computer by its file name, as `read_build_log` already
