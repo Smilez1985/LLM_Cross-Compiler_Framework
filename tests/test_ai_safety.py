@@ -286,7 +286,8 @@ class TestModuleGenerator:
         ("-DGGML_OPENMP_FETCH=1", "GGML_OPENMP_FETCH must be OFF on every build"),
         ("-DLLAMA_CURL=ON", "LLAMA_CURL must be OFF on every build: CMakeLists.txt:195 deprecated"),
         ("-DGGML_CUDA_CCCL_VERSION=v3.4.3", "GGML_CUDA_CCCL_VERSION must never be set"),
-        ("-DLLAMA_BUILD_BORINGSSL=OFF", "LLAMA_BUILD_BORINGSSL must never be set"),
+        # (LLAMA_BUILD_BORINGSSL, LLAMA_BUILD_LIBRESSL, GGML_CPU_KLEIDIAI: allowed, fetched before the build, deps.py)
+        ("-DGGML_ZENDNN=OFF", "GGML_ZENDNN must never be set"),
         ("-DFETCHCONTENT_FULLY_DISCONNECTED=OFF", "FETCHCONTENT_FULLY_DISCONNECTED must be ON on every build"),
         ("-DLLAMA_SUBPROCESS=ON", "LLAMA_SUBPROCESS must be OFF on every build (decision D22)"),
     ])
@@ -327,7 +328,7 @@ class TestModuleGenerator:
 
     @pytest.mark.parametrize("line, rule", [
         # cmake reads "-D NAME=VALUE" (two words) as one option
-        ("CMAKE_OPTIONS='-DGGML_NATIVE=OFF -D LLAMA_BUILD_BORINGSSL=ON'", "LLAMA_BUILD_BORINGSSL must never be set"),
+        ("CMAKE_OPTIONS='-DGGML_NATIVE=OFF -D GGML_VIRTGPU=ON'", "GGML_VIRTGPU must never be set"),
         ('cmake -S . -B b -D "LLAMA_USE_PREBUILT_UI=ON"', "LLAMA_USE_PREBUILT_UI must be OFF on every build"),
         ("cmake -S . -B b -D'GGML_CUDA_CCCL_VERSION'=v3.4.3", "GGML_CUDA_CCCL_VERSION must never be set"),
         ("cmake -S . -B b -DLLAMA_CURL='ON'", "LLAMA_CURL must be OFF on every build"),

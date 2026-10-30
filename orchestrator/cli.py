@@ -807,6 +807,15 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
         if module_flags == "cancel":
             console.print("Nothing was started.")
             return
+        # What the build fetches before it starts (pinned, checked, then mounted read-only; DECISIONS round 25 Q6
+        # addendum): part of the plan you see; in offline mode one that is not in the cache stops here
+        from orchestrator.runtime.build.deps import DependencyMissing
+        try:
+            for line in service.dependency_lines(request):
+                console.print(f"Build dependency: {escape(line)}")
+        except DependencyMissing as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(2)
 
         # The orchestrator runs on the framework's background loop (as for the GUI and the build service), so the
         # build service can cancel the build from here on Ctrl+C.
@@ -1134,6 +1143,81 @@ def _resolve_healing_interactively(orchestrator, request_id, proposal):
 
 
 STATUS_ROWS = 20  # builds `build status` lists without --all
+
+
+@build.group('deps')
+def build_deps():
+    """The dependency cache: what a download option of a module's CMake flags would fetch (BoringSSL, LibreSSL,
+    KleidiAI), fetched before the build, pinned and checked, and mounted read-only into the build"""
+
+
+def _dependency_cache(ctx: FrameworkContext):
+    from orchestrator.runtime.build.deps import DependencyCache
+    ctx.require_framework()
+    return DependencyCache.for_framework(ctx.framework_manager)
+
+
+@build_deps.command('list')
+@pass_context
+def build_deps_list(ctx: FrameworkContext):
+    """Every dependency llmcf can fetch for a build, with its source, pin and whether it is in the cache"""
+    from orchestrator.runtime.build.deps import DEPENDENCIES
+    from orchestrator.Core.deletion import size_text
+    cache = _dependency_cache(ctx)
+    table = Table(title="Build dependencies")
+    for column in ("Name", "Needed by", "Source", "Pin", "In the cache", "sha256"):
+        table.add_column(column, overflow="fold")
+    for dep in DEPENDENCIES.values():
+        entry = cache.entry(dep)
+        table.add_row(dep.name, f"-D{dep.option}=ON", escape(dep.source), escape(dep.ref),
+                      f"yes, {size_text(entry.size_bytes)}" if entry else "no",
+                      entry.sha256[:16] + "..." if entry else "-")
+    console.print(table)
+
+
+@build_deps.command('fetch')
+@click.argument('name')
+@pass_context
+def build_deps_fetch(ctx: FrameworkContext, name: str):
+    """Fetch one dependency into the cache now (online only), pinned and checked"""
+    from orchestrator.runtime.build.deps import DEPENDENCIES, DependencyError
+    from orchestrator.utils.locality import offline_mode
+    cache = _dependency_cache(ctx)
+    dep = DEPENDENCIES.get(name.upper())
+    if dep is None:
+        console.print(f"[red]Unknown dependency {escape(name)} (known: {', '.join(DEPENDENCIES)}).[/red]")
+        sys.exit(2)
+    try:
+        entry = cache.ensure(dep, offline=offline_mode(ctx.framework_manager.config), owner="cli",
+                             progress=lambda text: console.print(escape(text)))
+    except DependencyError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]{escape(dep.name)} {escape(dep.ref)} is in the cache (sha256 {entry.sha256}).[/green]")
+
+
+@build_deps.command('delete')
+@pass_context
+def build_deps_delete(ctx: FrameworkContext):
+    """List the dependencies in the cache and delete the ones you pick, after you confirm them in a terminal"""
+    from orchestrator.Core.deletion import PlanChanged, size_text
+    cache = _dependency_cache(ctx)
+    plan = cache.deletion_plan()
+    if plan is None:
+        console.print("No build dependency is in the cache.")
+        return
+    accepted = confirm_deletion(plan, title=f"Build dependencies ({len(plan.items)}, {size_text(plan.total_bytes)})",
+                                multiple=True, again="llm-cli build deps delete")
+    if accepted is None:
+        return
+    from orchestrator.Core.build_plan import state_dir
+    trash, audit = _person_trash(ctx, Path(state_dir(ctx.framework_manager) or cache.root))
+    try:
+        result = cache.delete(accepted, trash=trash, audit=audit)
+    except (PlanChanged, PermissionError, RuntimeError) as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        return
+    _print_deletion_result(result, accepted)
 
 
 @build.command('save')

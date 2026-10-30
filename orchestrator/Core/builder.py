@@ -1936,11 +1936,17 @@ class BuildEngine:
         vols.update(staged[1])
         vols.update(sandbox_vols)
         vols.update(probe_vols)
+        # What a download option of the module would fetch: fetched before the build, outside the sandbox, pinned and
+        # checked (runtime/build/deps.py; never in offline mode), and mounted read-only (DECISIONS round 25 Q6
+        # addendum); the build itself stays without network
+        dep_vols, dep_env = self._build_dependencies(config, progress, target_path)
+        vols.update(dep_vols)
 
         # 2. Environment Setup
         env = self._container_env(config, staged[0])
         env.update(sandbox_env)
         env.update(probe_env)
+        env.update(dep_env)
         env["JOB_TYPE"] = "build"
         
         # Check for IMatrix from previous step
@@ -1991,6 +1997,38 @@ class BuildEngine:
         exit_code = self._run_container(config, progress, container, "CONT: ")
         if exit_code != 0:
             raise RuntimeError(f"Build script failed with exit code {exit_code}\n{self._log_tail(progress, 'CONT: ')}")
+
+    def _build_dependencies(self, config: BuildConfiguration, progress: BuildProgress,
+                            target_path: Path) -> Tuple[Dict[str, Dict[str, str]], Dict[str, str]]:
+        """(volumes, environment) of the dependencies the module's CMake flags switch on (runtime/build/deps.py):
+        each fetched now when it is not in the cache (never in offline mode: DependencyMissing names it), checked
+        against the sha256 recorded on its first fetch, and handed to the build read-only."""
+        from orchestrator.Core.module_flags import module_cmake_words
+        from orchestrator.runtime.build import deps
+        needed = deps.needed_for(module_cmake_words(target_path))
+        if not needed:
+            return {}, {}
+        from orchestrator.utils.locality import offline_mode
+        cache = deps.DependencyCache(self.cache_dir, ledger=self._dependency_ledger())
+        offline = offline_mode(self.config)
+        entries = [cache.ensure(dep, offline=offline, owner=f"build {config.build_id}",
+                                progress=lambda text: progress.add_log(text)) for dep in needed]
+        for entry in entries:
+            progress.add_log(f"Build dependency {entry.dependency.name} {entry.dependency.ref}: from the dependency "
+                             f"cache, read-only (sha256 {entry.sha256[:16]}...).")
+        return cache.mounts(entries), cache.environment(entries)
+
+    def _dependency_ledger(self):
+        """The per-user reservation ledger (the disk rule counts a dependency's fetch), None without a state folder."""
+        framework = getattr(self, "framework", None)
+        if framework is None:
+            return None
+        from orchestrator.Core.build_plan import state_dir
+        state = state_dir(framework)
+        if state is None:
+            return None
+        from orchestrator.Core.disk_plan import ReservationLedger
+        return ReservationLedger(Path(state))
 
     @staticmethod
     def _staging_root(config: BuildConfiguration) -> Path:

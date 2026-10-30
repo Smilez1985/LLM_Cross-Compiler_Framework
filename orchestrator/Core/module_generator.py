@@ -122,14 +122,16 @@ of the older one. To share knowledge on a topic of its own, export a knowledge p
 """
 
 
-def download_flag_problems(text: str) -> List[str]:
+def download_flag_problems(text: str, prefetched=()) -> List[str]:
     """Why the CMake options in `text` (a module's CMake flags, or a line of its scripts) would let llama.cpp download
     something, or build a server with subprocesses: the build recipe's one rule for every option
     (orchestrator/runtime/build/recipe.py refused_option). Builds have no network, and the board package's cross build
     (targets/*/modules/target_module.sh) takes a module's CMake flags as they are; empty when nothing is refused."""
-    from orchestrator.runtime.build.recipe import refused_option
+    from orchestrator.runtime.build.recipe import DEPENDENCY_OF_OPTION, refused_option
     problems = []
     for match in CMAKE_OPTION_RE.finditer(text or ""):
+        if DEPENDENCY_OF_OPTION.get(match.group(1)) in prefetched:
+            continue   # its dependency is fetched before the build and mounted (runtime/build/deps.py)
         problem = refused_option(match.group(1), match.group(2))
         if problem:
             option = re.sub(r"[\s\"']", "", match.group(0))  # as cmake reads it: -DNAME=VALUE
@@ -167,6 +169,11 @@ def cmake_flag_problems(words, prefetched=()) -> List[str]:
 # writes) and a Dockerfile's LLAMA_CMAKE_ARGS (ARG or ENV). The folder check gives these words the module verdict.
 _FLAG_LINE_RE = re.compile(r"^\s*(?:CMAKE_OPTIONS=|(?:ARG|ENV)\s+LLAMA_CMAKE_ARGS[= ])\s*([\"']?)(.*?)\1\s*(?:\\)?\s*$",
                            re.IGNORECASE)
+
+
+def _FETCHED_DEPENDENCIES() -> tuple:
+    from orchestrator.runtime.build.deps import DEPENDENCIES
+    return tuple(DEPENDENCIES)
 
 
 def flag_line_problems(line: str) -> List[str]:
@@ -479,7 +486,10 @@ def validate_module_data(data: Dict[str, Any]) -> Dict[str, Any]:
             if bad:
                 problems.append(f"cmake_flags: only plain CMake options like -DGGML_CUDA=ON: {', '.join(bad[:5])}")
             else:
-                problems += [f"cmake_flags: {problem}" for problem in cmake_flag_problems(tokens)]
+                # an option whose dependency the framework fetches before the build (runtime/build/deps.py) is no
+                # download inside the build
+                from orchestrator.runtime.build.deps import DEPENDENCIES
+                problems += [f"cmake_flags: {problem}" for problem in cmake_flag_problems(tokens, tuple(DEPENDENCIES))]
         else:
             bad = [t for t in tokens if not FLAG_RE.fullmatch(t)]
             if bad:
@@ -672,8 +682,11 @@ def validate_target_folder(root: Path, template_dir: Path = SHIPPED_TEMPLATE) ->
                     continue
                 problems += [f"{rel}:{number}: not allowed, {reason}" for pattern, reason in SHELL_DENY_PATTERNS
                              if pattern.search(line)]
-                # the module's CMake flags (CMAKE_OPTIONS of config_module.sh) and any cmake call of its scripts
-                problems += [f"{rel}:{number}: not allowed, {problem}" for problem in download_flag_problems(line)]
+                # the module's CMake flags (CMAKE_OPTIONS of config_module.sh: an option whose dependency the
+                # framework fetches before the build is no download there) and any cmake call of its scripts
+                fetched = _FETCHED_DEPENDENCIES() if _FLAG_LINE_RE.match(line) else ()
+                problems += [f"{rel}:{number}: not allowed, {problem}"
+                             for problem in download_flag_problems(line, fetched)]
                 problems += [f"{rel}:{number}: not allowed, {problem}" for problem in flag_line_problems(line)]
     problems += scan_target_folder(root, skip=(KNOWLEDGE_SNAPSHOT,))
     problems += [f"template placeholder left: {p}" for p in _leftover_placeholders(root)]

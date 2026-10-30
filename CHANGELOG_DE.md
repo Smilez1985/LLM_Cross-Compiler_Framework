@@ -14,6 +14,24 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 
 ### Hinzugefügt
 
+- `2026-10-30 04:30 UTC` · `v3.2.0` **Abhängigkeiten von CMake-Optionen eines Moduls vor dem Build geholt**
+  (Konsolidierungskette build-flags-time; Entscheidung zu den CMake-Flags von Modulen, Nachtrag zu den Abhängigkeiten):
+  Was `-DLLAMA_BUILD_BORINGSSL=ON`, `-DLLAMA_BUILD_LIBRESSL=ON` oder `-DGGML_CPU_KLEIDIAI=ON` llama.cpp beim Bauen
+  herunterladen ließe, holt das neue `orchestrator/runtime/build/deps.py` vor dem Build: außerhalb der Sandbox und nie
+  im Offline-Modus, festgelegt, wie das festgelegte llama.cpp es angibt (BoringSSL-Tag `0.20260929.0` per Git, LibreSSL
+  4.3.2 und KleidiAI v1.24.0 als Archive, KleidiAI auch gegen seine angegebene MD5), die sha256 des Baums beim ersten
+  Holen festgehalten und bei jeder späteren Nutzung und jedem späteren Holen geprüft (eine Quelle, die sich unter
+  demselben Pin geändert hat, wird abgelehnt), schreibgeschützt in einem Abhängigkeits-Cache unter dem Cache-Ordner des
+  Frameworks abgelegt (ein Holen nimmt eine Reservierung im ReservationLedger) und nur lesend in den Build-Container
+  eingehängt (`LLMCF_DEPS`). Der Cross-Build beider Target-Vorlagen lässt `FETCHCONTENT_SOURCE_DIR_<NAME>` auf die
+  eingehängte Kopie zeigen und behält `FETCHCONTENT_FULLY_DISCONNECTED=ON`; KleidiAI wird nicht mehr auf OFF gezwungen,
+  sobald es eingehängt ist. Der Modul-Generator und die Ordnerprüfung erlauben diese drei Optionen; der Build-Plan nennt
+  Quelle, Pin und Größe jeder Abhängigkeit als Fakten der Frage (ein von einer KI gestarteter Build zeigt der Person den
+  Download), und im Offline-Modus stoppt eine, die nicht im Cache ist, den Build in klaren Worten. Neu: `llm-cli build
+  deps list|fetch|delete` und Build > Build-Abhängigkeiten… (Löschen über die Liste von `Core/deletion.py`, neue
+  Löschart `build_dependency`, Papierkorb oder endgültig). Tests: `tests/test_build_deps.py` (ein lokales Git-Repository
+  und ein lokaler HTTP-Server, MD5- und sha256-Abweichung, offline mit und ohne Cache, die nur lesende Einbindung,
+  `FULLY_DISCONNECTED` im Cross-Build beider Vorlagen).
 - `2026-10-30 04:15 UTC` · `v3.2.0` **Die Person entscheidet über CMake-Optionen eines Moduls außerhalb der Allowlist**
   (Konsolidierungskette build-flags-time; Entscheidung zu den CMake-Flags von Modulen): Bevor ein Modul mit einer
   gültigen CMake-Option außerhalb der Allowlist (`-G Ninja`, `--trace`, ...) gebaut wird, zeigen der Builder (eine Frage
