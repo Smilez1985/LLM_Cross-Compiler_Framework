@@ -65,6 +65,12 @@ TEXTS = {
         "bld.targets.invalid": "- (capabilities block invalid: Check target names each error)",
         "bld.targets.check": "Check target",
         "bld.targets.reload": "Reload",
+        "bld.targets.boards": "Boards...",
+        "bld.targets.boards_title": "Boards of {id}",
+        "bld.targets.boards_invalid": "The optimization profiles or benchmarks of {id} are not valid; Check target "
+                                      "names why.",
+        "bld.board.profile": "Profile: {quants} first; {memory}; optimization {level}. Benchmark: {bench}",
+        "bld.board.no_bench": "none recorded",
         "bld.targets.pick": "Choose a target in the list first.",
         "bld.targets.unavailable": "The target list is not available: {reason}",
 
@@ -275,6 +281,12 @@ TEXTS = {
         "bld.targets.invalid": "- (Fähigkeiten-Block ungültig: „Target prüfen“ nennt jeden Fehler)",
         "bld.targets.check": "Target prüfen",
         "bld.targets.reload": "Neu laden",
+        "bld.targets.boards": "Boards...",
+        "bld.targets.boards_title": "Boards von {id}",
+        "bld.targets.boards_invalid": "Die Optimierungsprofile oder Benchmarks von {id} sind ungültig; „Target "
+                                      "prüfen“ nennt den Grund.",
+        "bld.board.profile": "Profil: zuerst {quants}; {memory}; Optimierung {level}. Benchmark: {bench}",
+        "bld.board.no_bench": "keiner erfasst",
         "bld.targets.pick": "Wähle zuerst ein Target in der Liste.",
         "bld.targets.unavailable": "Die Target-Liste ist nicht verfügbar: {reason}",
 

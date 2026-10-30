@@ -434,23 +434,23 @@ class TestStaging:
         from orchestrator.Core.hf_hub import DownloadStopped
         monkeypatch.setattr(builder, "STAGING_WATCH_EVERY", 0.01)
         FakeHub().install(monkeypatch)
-        progress = BuildProgress("b1", BuildStatus.QUEUED, "")
+        build_progress = BuildProgress("b1", BuildStatus.QUEUED, "")
 
         class Slow:
             def __init__(self, token, stop):
                 self.stop = stop
 
-            def fetch_file(self, repo, commit, file, dest, progress_cb=None):
+            def fetch_file(self, repo, commit, file, dest, progress=None):
                 Path(str(dest) + ".part").parent.mkdir(parents=True, exist_ok=True)
                 Path(str(dest) + ".part").write_text("half")
-                progress.status = BuildStatus.CANCELLED
+                build_progress.status = BuildStatus.CANCELLED
                 if not self.stop.wait(5):
                     raise AssertionError("the stop event was never set")
                 raise DownloadStopped("stopped")
         monkeypatch.setattr(BuildEngine, "_hub_fetcher", staticmethod(lambda token, stop: Slow(token, stop)))
         started = time.monotonic()
         with pytest.raises(BuildCancelled):
-            engine._stage_model(config(), progress)
+            engine._stage_model(config(), build_progress)
         assert time.monotonic() - started < 5
         assert list((engine.cache_dir / "models" / "hf").rglob("*.part")), "the part already downloaded is kept"
 

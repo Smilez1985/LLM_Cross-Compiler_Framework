@@ -17,6 +17,26 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   `start_build`, and as the Builder tab and the CLI do: it is checked before the question (another board's probe is
   refused), and the build is tuned to exactly that probe. Without it, the newest stored probe of a board of the
   recipe's SoC, as before.
+- `2026-10-29 23:59 UTC` · `v3.2.0` **Model suggestions from the source catalogue** (consolidation chain models-data; the model list of the decision to
+  make the unused data usable, item 10): the sections `models` and `tiny_models` of `configs/project_sources.yml` are
+  replaced by current Hugging Face repositories with exact ids, each checked on the Hub API (id, size of the weight
+  files, licence, gating, the check date), with a recommended quantization; the stale entries of 2024 and 2025
+  (TinyLlama 1.1B, Qwen1.5 0.5B, h2o-danube 1.8B, Phi-3-mini) are gone, and the one gated model (Llama 3.2 3B) is
+  listed but never suggested. `orchestrator/Core/doc_sources.py`, the catalogue's reader, gives them as
+  `model_suggestions()` (small models first): the Builder's model list offers them after the person's recent models
+  (the field stays editable), the new `llm-cli models suggestions [--json]` lists them, and AI clients read them as
+  the resource `lcf://models/suggestions`. `scripts/validate_ssot.py` reads `configs/project_sources.yml` (before, a
+  `project_sources.yml` in the current folder) and checks the section: exact ids, sizes, quantization types, gating,
+  dates, no id twice. The catalogue's header says who reads it now.
+- `2026-10-30 00:05 UTC` · `v3.2.0` **The build's model download shows a percentage** (consolidation chain models-data; decision item 12): while a build
+  fetches its model from Hugging Face, its stage says how far the download is over all files of the model's snapshot,
+  "Fetching model 37 % (1.2 GB of 3.4 GB)", and its percent moves from 40 to 50 with it (before, one "Downloading ..."
+  log line and a percent that stood still). The bytes come from the Hugging Face fetcher's progress callback through
+  the new `orchestrator/utils/download.SnapshotProgress` (at most one update a second, never one per chunk); the
+  files and `.part` files already there from an earlier attempt count from the start; with a size the Hub does not
+  list, the stage shows the bytes without a percent; after a cancel nothing is written any more. The Builder's
+  progress bar, `get_build_status` and `llm-cli build start --follow` show it; the follow line now carries the live
+  stage and percent of the running build (`BuildService.live_progress`).
 
 ### Changed
 - `2026-10-29 23:31 UTC` · `v3.2.0` **One install rule for the whole RHEL family** ([design](docs/DESIGN.md#installer-platforms-and-dependencies)):
@@ -51,6 +71,28 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 - `2026-10-30 00:33 UTC` · `v3.2.0` **The README's "What comes next" summarizes the 3.2.0 roadmap** ([roadmap](docs/ROADMAP.md)): a
   short list of the version in progress (carried-over items, Ditto's context, the board bundle, device runtime and
   more hardware, decided items waiting for their turn) and what follows after it, linking the full roadmap.
+- `2026-10-29 23:54 UTC` · `v3.2.0` **The optimization profiles and benchmark rows of `target.yml` are corrected and used** (consolidation chain
+  models-data; the decision to make the unused data usable, item 10): every board of the Rockchip target has an
+  optimization profile (schema `OptimizationProfile` in `orchestrator/schemas/targets.py`, read by the new
+  `orchestrator/Core/board_profiles.py`) whose source side is what the build recipe plans for a cross build of its SoC:
+  `GGML_NATIVE` OFF, `GGML_CPU_ARM_ARCH` and `-march=armv8.2-a+dotprod+fp16` for the RK3566, RK3568 and RK3588,
+  `armv8-a` for the RK3576 (Cortex-A72 and A53); the old values were wrong for aarch64 (`-mfpu=neon-fp-armv8` is an
+  AArch32 option, `-DGGML_NATIVE=ON` takes the build computer's CPU). The recipe stays the one planner:
+  `llm-cli targets validate` (and a test for every shipped board) plans the build from a reference probe of the SoC and
+  names every value that differs, and refuses `-mfpu`, `GGML_NATIVE` ON, `native` flags and download options. The
+  target side (recommended quantizations, memory profile, optimization level) feeds the build: the Builder lists the
+  recommended quantizations first and starts **Optimization** at the profile's level until the person picks one;
+  `llm-cli build start --optimization` and `start_build`/`check_build_request` default to the profile's level (else
+  balanced; before, always balanced). Every benchmark row now names its source (`measured` by llmcf on a board with its
+  label and date, `published` with address and date, or `unmeasured`); the shipped rows are estimates of version 1.x and
+  are shown as unmeasured; a board test record becomes a measured row (`gen_ts`, `prompt_ts`). New: `llm-cli targets
+  boards TARGET` and **Build > Targets... > Boards...** show each board's profile and marked rows, a line under the
+  Builder's board list shows them too, and `list_targets` and `get_target_capabilities` carry `board_profiles` and
+  `benchmarks` (with `source_label`). The module generator writes a profile per board planned from the board's probe.
+  The template's example profiles are replaced by an empty block with the schema described. A `target.yml` of an
+  earlier version (a community pack, a target an earlier module wizard made) still passes `llm-cli targets
+  validate`: its profiles in the old format (`cmake_flags`) and benchmarks as a mapping are never read, so none of
+  their values is used or shown. A `published` source must be a plain https address (no credential, no text).
 
 ### Fixed
 - `2026-10-29 23:36 UTC` · `v3.2.0` **Container engine follow-ups: a `DOCKER_HOST` left from Podman, `/dev/dri` under rootless Podman,

@@ -321,6 +321,29 @@ def list_targets(ctx: FrameworkContext, format: str):
     console.print(table)
 
 
+@targets.command('boards')
+@click.argument('target_name')
+@pass_context
+def target_boards(ctx: FrameworkContext, target_name: str):
+    """Each board of a target with its optimization profile (the llama.cpp options the build recipe plans for it,
+    the recommended quantizations, memory profile and optimization level) and its benchmark rows, each marked
+    measured, published or unmeasured. The same as Build > Targets... > Boards..."""
+    from orchestrator.Core.board_profiles import board_lines
+    ctx.require_framework()
+    tm = ctx.framework_manager.get_component("target_manager")
+    tid = tm.resolve(target_name) if tm else None
+    if tid is None:
+        console.print(f"[red]Unknown target '{escape(target_name)}'.[/red]")
+        sys.exit(2)
+    data = tm.get_board_data(tid)
+    if data is None:
+        console.print(f"[red]The optimization profiles or benchmarks of '{escape(tid)}' are not valid; "
+                      f"'llm-cli targets validate {escape(tid)}' names why.[/red]")
+        sys.exit(1)
+    for line in board_lines(tm.get_capabilities(tid), data):
+        console.print(escape(line))
+
+
 @targets.command('validate')
 @click.argument('target_name')
 @pass_context
@@ -700,10 +723,11 @@ class _FormatOption(click.Option):
               help="Folder the finished model (golden artifact) is saved to; default: the output folder ('llm-cli "
                    "config output-folder'). At a terminal without it you are asked; '-' keeps it in the framework's "
                    "build folder")
-@click.option('--optimization', default='balanced',
+@click.option('--optimization', default=None,
               type=click.Choice(['fast', 'balanced', 'size', 'speed', 'aggressive']),
               help='Optimization level, passed to the target\'s build scripts as OPTIMIZATION_LEVEL '
-                   '(the Rockchip target ignores it)')
+                   '(the Rockchip target ignores it). Default: the level of the board\'s optimization profile '
+                   '(\'llm-cli targets boards\'), else balanced')
 @click.option('--priority', default='normal',
               type=click.Choice(['low', 'normal', 'high', 'urgent', 'critical']),
               help='Build priority')
@@ -717,7 +741,7 @@ class _FormatOption(click.Option):
 @pass_context
 def start_build(ctx: FrameworkContext, model: str, target: str, format: str, board: Optional[str],
                 probe: Optional[str], quantization: Optional[str], output_dir: Optional[str], 
-                optimization: str, priority: str, parallel: bool, follow: bool, gpu: bool,
+                optimization: Optional[str], priority: str, parallel: bool, follow: bool, gpu: bool,
                 imatrix: bool, dataset: Optional[str]):
     """Start a new build job. Ctrl+C cancels it (its container is stopped) and exits with code 130.
 
@@ -779,6 +803,10 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
                 console.print(f"[red]{escape(problem)}[/red]")
             sys.exit(2)
         board, quantization = request.board, request.quantization
+        # the level given, else the board profile's (round 23 item 10), as the Builder and start_build choose it
+        resolve = getattr(service, "optimization_for", None)
+        chosen = resolve(request, optimization) if callable(resolve) else None
+        optimization = chosen if isinstance(chosen, str) else (optimization or "balanced")
 
         # A finished build with 100 % the same options (eighth round N11; round 23 item 9): the Builder tab's check
         # and question. Use it (copied into the folder below), build it again, or cancel; nothing is skipped by itself.
@@ -825,13 +853,17 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
             while True:
                 workflow_status = service.request_state(request_id)
                 if workflow_status:
-                    line = (workflow_status.status, workflow_status.current_stage, workflow_status.completed_builds)
+                    # the running build's own step and percent (the model download: "Fetching model 37 % (...)"),
+                    # as get_build_status and the Builder show them
+                    stage, percent = _follow_progress(service, workflow_status)
+                    line = (workflow_status.status, stage, percent, workflow_status.completed_builds)
                     if follow and line != last:
                         status_color = {OrchestrationStatus.COMPLETED: "green", OrchestrationStatus.ERROR: "red",
                                         OrchestrationStatus.HEALING: "magenta"}.get(workflow_status.status, "yellow")
                         # Stages, proposals and errors can contain model or log text: never parse it as markup.
-                        console.print(f"[{status_color}]Status: {workflow_status.status.value} - {escape(workflow_status.current_stage)} "
-                                      f"({workflow_status.completed_builds}/{workflow_status.total_builds} builds)[/{status_color}]")
+                        console.print(f"[{status_color}]Status: {workflow_status.status.value} - {escape(stage)} "
+                                      f"({percent} %, {workflow_status.completed_builds}/"
+                                      f"{workflow_status.total_builds} builds)[/{status_color}]")
                     last = line
                     if (workflow_status.status == OrchestrationStatus.AWAITING_APPROVAL
                             and workflow_status.healing_proposal is not None):
@@ -860,6 +892,19 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
 
 
 BUILD_POLL_SECONDS = 2
+
+
+def _follow_progress(service, state) -> Tuple[str, int]:
+    """(stage, percent) of the follow line: the service's live progress (the running build's step counted in), else
+    the request's own values."""
+    live = getattr(service, "live_progress", None)
+    try:
+        found = live(state) if callable(live) else None
+    except Exception:  # noqa: BLE001 - the follow line never stops the build
+        found = None
+    if isinstance(found, tuple) and len(found) == 2:
+        return str(found[0] or ""), int(found[1] or 0)
+    return str(getattr(state, "current_stage", "") or ""), int(getattr(state, "progress_percent", 0) or 0)
 KEEP_IN_BUILD_FOLDER = "-"
 
 
@@ -4321,6 +4366,22 @@ def trash_empty(ctx: FrameworkContext, ids: Tuple[str, ...], everything: bool, d
 def models():
     """The models folder: take over what earlier versions downloaded from Hugging Face"""
     pass
+
+
+@models.command('suggestions')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+def models_suggestions(as_json: bool):
+    """The model suggestions of the source catalogue (configs/project_sources.yml): exact Hugging Face ids that need
+    no token, small models first, each with its size, recommended quantization, licence and the day it was checked.
+    The Builder's model list offers the same; any other Hugging Face id or a local model works with --model too."""
+    from orchestrator.Core.doc_sources import model_suggestions, suggestions_text
+    found = model_suggestions()
+    if as_json:
+        click.echo(json.dumps([{"repo_id": m.repo_id, "size_mb": m.size_mb, "recommended_quant": m.recommended_quant,
+                                "license": m.license, "checked": m.checked, "note": m.note, "small": m.section ==
+                                "tiny_models"} for m in found], indent=2))
+        return
+    console.print(escape(suggestions_text(found, "Model suggestions (no Hugging Face token needed):")))
 
 
 @models.command('take-over')

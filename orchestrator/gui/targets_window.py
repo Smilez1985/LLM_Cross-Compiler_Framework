@@ -115,7 +115,11 @@ class TargetsDialog(QDialog):
         self.btn_check.setObjectName("btn_targets_check")
         self.btn_reload = QPushButton(button_text(self._t("bld.targets.reload")), self)
         self.btn_reload.setObjectName("btn_targets_reload")
-        for button, slot in ((self.btn_check, self._check), (self.btn_reload, self._reload)):
+        # the boards with their optimization profile and benchmark rows (`llm-cli targets boards`)
+        self.btn_boards = QPushButton(button_text(self._t("bld.targets.boards")), self)
+        self.btn_boards.setObjectName("btn_targets_boards")
+        for button, slot in ((self.btn_check, self._check), (self.btn_boards, self._boards),
+                             (self.btn_reload, self._reload)):
             button.setAutoDefault(False)
             button.clicked.connect(slot)
             buttons.addButton(button, QDialogButtonBox.ActionRole)
@@ -158,6 +162,7 @@ class TargetsDialog(QDialog):
                 self.table.selectRow(row)
         has = bool(self.targets)
         self.btn_check.setEnabled(has)
+        self.btn_boards.setEnabled(has)
 
     def selected(self) -> Optional[str]:
         rows = self.table.selectionModel().selectedRows() if self.table.selectionModel() else []
@@ -172,6 +177,28 @@ class TargetsDialog(QDialog):
             plain_box(self, "information", self._t("bld.targets.title"), self._t("bld.targets.pick"))
             return
         show_target_check(self, self.framework, name, self.lang)
+
+    def boards_text(self, name: str) -> Optional[str]:
+        """The boards of target `name` as `llm-cli targets boards` prints them (board_profiles.board_lines), or None
+        when its profiles or benchmarks are not valid."""
+        from orchestrator.Core.board_profiles import board_lines
+        tm = _target_manager(self.framework)
+        data = tm.get_board_data(name) if tm is not None and hasattr(tm, "get_board_data") else None
+        if data is None:
+            return None
+        caps = tm.get_capabilities(name) if hasattr(tm, "get_capabilities") else None
+        return "\n".join(one_line(line) if not line.startswith("  ") else "  " + one_line(line)
+                         for line in board_lines(caps, data))
+
+    def _boards(self) -> None:
+        name = self.selected()
+        if not name:
+            plain_box(self, "information", self._t("bld.targets.title"), self._t("bld.targets.pick"))
+            return
+        text = self.boards_text(name)
+        plain_box(self, "information" if text is not None else "warning",
+                  self._t("bld.targets.boards_title", id=one_line(name)),
+                  text if text is not None else self._t("bld.targets.boards_invalid", id=one_line(name)))
 
     def _reload(self) -> None:
         tm = _target_manager(self.framework)

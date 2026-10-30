@@ -944,6 +944,15 @@ class TestTargets:
     def test_validate_unknown_target(self, cli_targets):
         assert cli_targets.invoke("targets", "validate", "Nope").code == 1
 
+    def test_boards_shows_each_profile_and_marks_unmeasured_benchmarks(self, cli_targets):
+        # DECISIONS round 23 item 10: the optimization profiles and benchmark rows are shown, every row marked
+        result = cli_targets.invoke("targets", "boards", "rockchip")
+        assert result.code == 0, result.out
+        out = " ".join(result.out.split())
+        assert "rk3576: RK3576" in out and "GGML_CPU_ARM_ARCH=armv8-a" in out
+        assert "recommended quantization: Q4_0, IQ4_NL, Q4_K_M" in out and "[unmeasured" in out
+        assert cli_targets.invoke("targets", "boards", "Nope").code == 2
+
 
 # ---------------------------------------------------------------------------------------------------------------
 # 12. doctor --tier help

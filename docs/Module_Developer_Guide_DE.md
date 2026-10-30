@@ -416,15 +416,51 @@ ab, und der Builder-Tab bietet nur die übrigen Formate an (`probe_formats`):
 
 ### 4.4 Weitere Blöcke
 
-Die Build-Pipeline liest nur `metadata` und `capabilities`. Ein optionaler Block `hardware:` (`cpu.architecture`,
+Die Build-Pipeline liest `metadata`, `capabilities` und, für die Auswahl eines Builds, `optimization_profiles`. Ein optionaler Block `hardware:` (`cpu.architecture`,
 `gpu.vendor`, `gpu.vendor_id`, `npu.vendor`, `npu.vendor_id`) wird an zwei Stellen genutzt: um beim Einlesen einer
 Probe-Datei im Build-Reiter ein passendes Target vorzuschlagen, und für Geräteoptionen in den Startbefehlen eines
 Deployment-Pakets mit Docker-Images. Der Block `runtime:` erzeugter Module
 ([Abschnitt 3.4](#34-was-der-generator-schreibt-und-was-du-ergänzt)) zeichnet den Plan des Rezepts auf und wird gegen
 sein Schema geprüft, aber kein Build liest ihn. Die übrigen Blöcke in der Rockchip-`target.yml` (`supported_boards`,
-`docker`, `modules`, `optimization_profiles`, `requirements` usw.) sind beschreibend: `modules` führt den
-Stage-Runner, die vier Stufenmodule und die Format-Helfer auf, und `docker.build_args` wiederholt nur den Pin für
-Builds außerhalb des Frameworks.
+`docker`, `modules`, `requirements` usw.) sind beschreibend: `modules` führt den Stage-Runner, die vier Stufenmodule
+und die Format-Helfer auf, und `docker.build_args` wiederholt nur den Pin für Builds außerhalb des Frameworks.
+
+**`optimization_profiles`** (Schema `OptimizationProfile` in `orchestrator/schemas/targets.py`, gelesen von
+`orchestrator/Core/board_profiles.py`): ein Eintrag je Board-ID des capabilities-Blocks.
+
+| Feld | Seite | Bedeutung |
+|---|---|---|
+| `arch` | Quelle | `arm64` oder `x86_64` |
+| `cpu` | Quelle | die Kerne, wie GCCs `-mcpu` sie nennt (`cortex-a76.cortex-a55` bei big.LITTLE), für Lesende |
+| `cpu_features` | Quelle | was die Probe des Boards als `SUPPORTS_<NAME>` meldet: `neon`, `dotprod`, `fp16`, `i8mm`, `sve` (ARM) oder die x86-Namen (`avx2`, `fma`, ...) |
+| `cmake_options` | Quelle | die CMake-Optionen von llama.cpp, die das Build-Rezept für einen Cross-Build dieses SoC plant, z. B. `GGML_NATIVE: "OFF"`, `GGML_CPU_ARM_ARCH: "armv8.2-a+dotprod+fp16"` |
+| `cpu_flags` | Quelle | die Compiler-Flags dieses Plans, z. B. `-march=armv8.2-a+dotprod+fp16` |
+| `memory_profile` | Ziel | `low_memory` (1-4 GB, Modelle bis etwa 1,5B mit 4 Bit), `medium_memory` (4-8 GB, bis etwa 4B), `high_memory` (ab 8 GB, bis etwa 8B) |
+| `optimization` | Ziel | die Optimierungsstufe, mit der ein Build beginnt, wenn keine angegeben ist (`fast`, `balanced`, `size`, `speed`, `aggressive`) |
+| `recommended_quantization` | Ziel | die Quantisierungen, die Builder, `llm-cli build start` und KI-Clients zuerst anbieten; jede muss eine sein, die ein Format des Boards annimmt |
+| `note` | - | optionaler Text für Lesende |
+
+Das Build-Rezept (`orchestrator/runtime/build/recipe.py`) bleibt die eine Stelle, die die Optionen von llama.cpp und
+die Compiler-Flags festlegt: Die Quellseite muss genau das sein, was es für eine Probe mit diesen CPU-Features plant.
+`llm-cli targets validate` plant diesen Build und nennt jeden abweichenden Wert; es lehnt außerdem `-mfpu` und
+`-mfloat-abi` auf arm64 ab (AArch32-Optionen), `GGML_NATIVE` anders als OFF (ein Build für ein Board ist ein
+Cross-Build), ein `native`-Flag und jede Option, die etwas herunterlädt. Der Modulgenerator schreibt je Board ein
+Profil aus der Probe des Boards (ohne Probe: generisches ARMv8-A mit NEON oder x86-64).
+
+**`performance_benchmarks`** (Schema `BenchmarkEntry`): eine Liste von Zeilen mit `model`, `board`, `quantization`,
+den Werten `gen_ts` und `prompt_ts` (Tokens pro Sekunde beim Erzeugen und für den Prompt, llama-bench `-n 128` und
+`-p 512`), `first_token_ms`, `memory_usage_mb`, `cpu_usage_percent` und einer `source`: `kind: measured` (mit
+`board_label` und `date`: von llmcf auf diesem Board gemessen), `kind: published` (mit `url` und `date`) oder
+`kind: unmeasured` (eine Schätzung; als „ungemessen“ gezeigt, nie als Messung). Ein Board-Test füllt `gen_ts` und
+`prompt_ts` (`device_tests.json` des Builds). `llm-cli targets boards`, Build > Targets... > Boards..., die
+Board-Zeile des Builders und die MCP-Tools `list_targets` und `get_target_capabilities` zeigen die Zeilen mit dieser
+Kennzeichnung.
+Eine `published`-Quelle ist eine einfache https-Adresse (ohne Benutzernamen oder Passwort darin).
+
+Eine `target.yml` einer früheren Version (ein Community-Pack, ein Target eines früheren Modul-Assistenten) besteht
+`llm-cli targets validate` weiter: Ein Profil im alten Format (eine Zeile `cmake_flags` statt `arch` und
+`cmake_options`) und Benchmarks als Zuordnung nach Modell und Board werden nie gelesen, keiner ihrer Werte wird
+verwendet oder gezeigt. Schreib sie im Format oben neu, damit die Boards ein Profil bekommen.
 
 `docker.image_name`, `docker.registry` und `docker.tags` sind **nur lokale Image-Namen**. Kein Framework-Image wird
 veröffentlicht oder geladen: Die Build-Engine baut das Image jedes Targets auf deinem Computer und versieht es lokal

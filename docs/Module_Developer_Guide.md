@@ -406,15 +406,50 @@ sentence, and the Builder tab offers only the formats left (`probe_formats`):
 
 ### 4.4 Other blocks
 
-The build pipeline reads only `metadata` and `capabilities`. An optional `hardware:` block (`cpu.architecture`,
+The build pipeline reads `metadata`, `capabilities` and, for the choices of a build, `optimization_profiles`. An optional `hardware:` block (`cpu.architecture`,
 `gpu.vendor`, `gpu.vendor_id`, `npu.vendor`, `npu.vendor_id`) is used in two places: to suggest a matching target
 when a probe file is imported in the build tab, and for device options in the run commands of a deployment package
 that includes Docker images. The `runtime:` block of generated modules
 ([section 3.4](#34-what-the-generator-writes-and-what-you-add)) is a record of the recipe's plan and is checked
 against its schema, but no build reads it. The other blocks in the Rockchip `target.yml` (`supported_boards`,
-`docker`, `modules`, `optimization_profiles`, `requirements` and so on) are descriptive: `modules` lists the stage
-runner, the four stage modules and the format helpers, and `docker.build_args` only repeats the pin for builds
-outside the framework.
+`docker`, `modules`, `requirements` and so on) are descriptive: `modules` lists the stage runner, the four stage
+modules and the format helpers, and `docker.build_args` only repeats the pin for builds outside the framework.
+
+**`optimization_profiles`** (schema `OptimizationProfile` in `orchestrator/schemas/targets.py`, read by
+`orchestrator/Core/board_profiles.py`): one entry per board id of the capabilities block.
+
+| Field | Side | Meaning |
+|---|---|---|
+| `arch` | source | `arm64` or `x86_64` |
+| `cpu` | source | the cores as GCC's `-mcpu` names them (`cortex-a76.cortex-a55` for big.LITTLE), for the reader |
+| `cpu_features` | source | what the board's probe reports as `SUPPORTS_<NAME>`: `neon`, `dotprod`, `fp16`, `i8mm`, `sve` (ARM) or the x86 names (`avx2`, `fma`, ...) |
+| `cmake_options` | source | llama.cpp's CMake options the build recipe plans for a cross build of this SoC, e.g. `GGML_NATIVE: "OFF"`, `GGML_CPU_ARM_ARCH: "armv8.2-a+dotprod+fp16"` |
+| `cpu_flags` | source | the compiler flags of that plan, e.g. `-march=armv8.2-a+dotprod+fp16` |
+| `memory_profile` | target | `low_memory` (1-4 GB, models up to about 1.5B at 4 bit), `medium_memory` (4-8 GB, up to about 4B), `high_memory` (8 GB and more, up to about 8B) |
+| `optimization` | target | the optimization level a build starts from when none is given (`fast`, `balanced`, `size`, `speed`, `aggressive`) |
+| `recommended_quantization` | target | the quantizations the Builder, `llm-cli build start` and AI clients offer first; each must be one a format of the board accepts |
+| `note` | - | optional text for the reader |
+
+The build recipe (`orchestrator/runtime/build/recipe.py`) stays the one place that decides llama.cpp's options and
+the compiler flags: the source side must be exactly what it plans for a probe with these CPU features.
+`llm-cli targets validate` plans that build and names every value that differs; it also refuses `-mfpu` and
+`-mfloat-abi` on arm64 (AArch32 options), `GGML_NATIVE` other than OFF (a build for a board is a cross build), a
+`native` flag and any option that downloads. The module generator writes a profile per board from the board's probe
+(without one: generic ARMv8-A with NEON, or x86-64).
+
+**`performance_benchmarks`** (schema `BenchmarkEntry`): a list of rows with `model`, `board`, `quantization`, the
+values `gen_ts` and `prompt_ts` (tokens per second while generating and for the prompt, llama-bench `-n 128` and
+`-p 512`), `first_token_ms`, `memory_usage_mb`, `cpu_usage_percent`, and a `source`: `kind: measured` (with
+`board_label` and `date`: measured by llmcf on that board), `kind: published` (with `url` and `date`) or
+`kind: unmeasured` (an estimate; shown as "unmeasured", never as a measurement). A board test fills `gen_ts` and
+`prompt_ts` (`device_tests.json` of the build). `llm-cli targets boards`, Build > Targets... > Boards..., the
+Builder's board line and the MCP tools `list_targets` and `get_target_capabilities` show the rows with that mark.
+A `published` source is a plain https address (no user name or password in it).
+
+A `target.yml` of an earlier version (a community pack, a target an earlier module wizard made) keeps passing
+`llm-cli targets validate`: a profile in the old format (a `cmake_flags` line instead of `arch` and
+`cmake_options`) and benchmarks as a mapping by model and board are never read, so none of their values is used or
+shown. Rewrite them in the format above to give the boards a profile.
 
 `docker.image_name`, `docker.registry` and `docker.tags` are **local image names only**. No framework image is
 published or pulled: the build engine builds each target's image on your computer and tags it locally as

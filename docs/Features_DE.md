@@ -147,7 +147,11 @@ Weiteres Verhalten:
   Builds läuft live darunter mit (Geheimnisse geschwärzt, volle Pfade, reiner Text, jede Zeile einmal; eine KI, die das
   Protokoll liest, bekommt die Ordner als Label). Schritt und Prozentwert enthalten den eigenen Fortschritt des
   laufenden Builds (Vorbereitung, Image, Modell, Module, Archiv), sodass sich der Balken während eines Builds bewegt;
-  100 % zeigt er erst, wenn die Anfrage beendet ist. Ein Suchfeld findet Zeilen; ein Filter zeigt alle Zeilen oder nur
+  100 % zeigt er erst, wenn die Anfrage beendet ist. Während das Modell von Hugging Face geladen wird, sagt der
+  Schritt, wie weit der Download über alle Dateien des Modells ist, etwa „Fetching model 37 % (1.2 GB of 3.4 GB)“ (nur
+  die Bytes, wenn eine Größe nicht bekannt ist), und der Balken bewegt sich mit; die Dateien, die von einem früheren
+  Versuch schon da sind, zählen von Anfang an mit, und die Anzeige wird etwa einmal pro Sekunde aktualisiert.
+  `llm-cli build start --follow` und `get_build_status` zeigen denselben Schritt. Ein Suchfeld findet Zeilen; ein Filter zeigt alle Zeilen oder nur
   Info, Warnungen oder Fehler. Zeilen, die der Service nicht mehr liefert, werden vermerkt statt still weggelassen, und
   die Ansicht behält die neuesten 20.000 Zeilen.
 - **Build-Status über Programme hinweg (gemeinsamer Build-Zustand):** Jedes Programm, das baut (die GUI, ein
@@ -166,6 +170,17 @@ Weiteres Verhalten:
 - **Optimierung und Priorität (GUI):** Die Liste **Optimization** des Builders bietet jede Stufe von `--optimization`
   (auch `FAST`), und **Priorität** setzt die Build-Priorität von `--priority` (Vorgabe normal; ein fehlgeschlagener
   kritischer Build beendet die Pipeline).
+- **Das Optimierungsprofil des Boards:** Jedes Board eines Targets hat in seiner `target.yml` ein Profil
+  (`optimization_profiles`): die llama.cpp-Optionen und Compiler-Flags, die das Build-Rezept für seinen SoC plant
+  (von `llm-cli targets validate` gegen das Rezept geprüft), die empfohlenen Quantisierungen, das Speicherprofil und
+  die Optimierungsstufe. Der Builder listet die empfohlenen Quantisierungen zuerst und stellt die Liste
+  **Optimization** auf die Stufe des Profils, bis du selbst eine wählst; eine Zeile unter der Board-Liste zeigt das
+  Profil und die Benchmark-Zeilen des Boards, jede gekennzeichnet als `measured by llmcf (board <Name>, <Datum>)`, `published` oder
+  `unmeasured` (die mitgelieferten Zeilen sind Schätzungen ohne Messung und sagen das). `llm-cli build start` und
+  KI-Aufrufer (`start_build`, `check_build_request`) nehmen dieselbe Stufe, wenn keine angegeben ist;
+  `llm-cli targets boards`, **Build > Targets… > Boards…** und die MCP-Tools `list_targets` und
+  `get_target_capabilities` zeigen die Profile und die gekennzeichneten Zeilen. Ein Board-Test füllt die gemessenen
+  Werte später (`gen_ts`, `prompt_ts`).
 - **Build-Slots:** In einem Programm laufen höchstens `max_concurrent_builds` Builds gleichzeitig (Einstellung, 1
   bis 10, Vorgabe 2); ein weiterer Build wartet auf einen freien Slot (seine Stufe zeigt „Waiting for a free build
   slot“), statt zu scheitern. Ein abgebrochener Build behält seinen Slot, bis sein Container gestoppt ist.
@@ -2874,7 +2889,7 @@ Die Eingabefelder der GUI bieten an, was du zuletzt verwendet hast, das Neueste 
 
 | Feld | Wo | Vorausgefüllt | Gemerkt, wenn |
 |---|---|---|---|
-| Modell | Builder, **Source Model** | das zuletzt verwendete | ein Build abgeschickt wird |
+| Modell | Builder, **Source Model** (nach deinen zuletzt verwendeten Modellen: die Modellvorschläge des Quellenkatalogs, `llm-cli models suggestions`; jede andere ID oder jeder Pfad lässt sich eintippen) | das zuletzt verwendete | ein Build abgeschickt wird |
 | Kalibrierungsdatensatz | Builder, **Calibration** | nein, nur angeboten | ein Build mit Datensatz abgeschickt wird |
 | Target und Board | Builder | das zuletzt gebaute Target und Board, die die Target-Definitionen noch anbieten; ein Target ohne festgelegte Boards bietet die letzten Boards als Vorschläge an | ein Build abgeschickt wird |
 | Profil | Deployment | das vorher gewählte Profil, sonst das zuletzt verwendete | ein Deployment gestartet wird |
