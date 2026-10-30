@@ -189,3 +189,56 @@ def test_where_openssh_cannot_do_it_the_refusal_is_plain(tmp_path, monkeypatch, 
         _session(folder, **kw).open()
     assert e.value.args and "jump host or a proxy command" in str(e.value)
     assert getattr(e.value, "kind", "needs_openssh") == "needs_openssh"
+
+
+# --- a board behind a jump is not reachable from here directly ------------------------------------------------------
+
+class _Config:
+    def __init__(self, folder):
+        self.user_state_dir = folder
+
+
+class _Framework:
+    def __init__(self, folder):
+        self.config = _Config(folder)
+
+
+def test_a_deploy_to_a_board_behind_a_jump_is_not_stopped_by_a_direct_port_check(tmp_path, monkeypatch):
+    """The board answers only through the jump host, so the direct check of its SSH port from this computer fails;
+    the deploy still goes to OpenSSH, which reaches it through the accepted ProxyJump."""
+    from orchestrator.Core import deployment_manager as dmod
+    folder = state(tmp_path)
+    write_block(folder, [f"ProxyJump {JUMP}"])
+    package = tmp_path / "deploy_model_1.zip"
+    package.write_bytes(b"PK")
+    manager = dmod.DeploymentManager(_Framework(folder))
+    monkeypatch.setattr(dmod, "PARAMIKO_AVAILABLE", True)
+    monkeypatch.setattr(manager, "_check_conn", lambda *a, **k: False)
+    went = []
+    monkeypatch.setattr(manager, "_deploy_system", lambda *a, **k: went.append(a[1]) or dmod.DeployResult(True))
+    monkeypatch.setattr(manager, "_deploy_paramiko", lambda *a, **k: pytest.fail("paramiko reads no settings file"))
+    result = manager._deploy_package(package, BOARD, "pi")
+    assert went == [BOARD] and result.success, result.reason
+
+
+def test_a_board_without_a_jump_still_gets_the_direct_port_check(tmp_path, monkeypatch):
+    from orchestrator.Core import deployment_manager as dmod
+    folder = state(tmp_path)
+    package = tmp_path / "deploy_model_1.zip"
+    package.write_bytes(b"PK")
+    manager = dmod.DeploymentManager(_Framework(folder))
+    monkeypatch.setattr(manager, "_check_conn", lambda *a, **k: False)
+    monkeypatch.setattr("orchestrator.runtime.device.reasons.check_port", lambda *a, **k: "host_down")
+    monkeypatch.setattr(manager, "_deploy_system", lambda *a, **k: pytest.fail("not reachable: no deploy"))
+    result = manager._deploy_package(package, BOARD, "pi")
+    assert not result.success and result.code == "host_down"
+
+
+def test_waiting_for_a_board_behind_a_jump_does_not_ask_its_port_directly(tmp_path):
+    folder = state(tmp_path)
+    write_block(folder, [f"ProxyJump {JUMP}"])
+    s = _session(folder, reachable=lambda host, port: False)
+    assert s._port_open() is True, "only the login through the jump host tells whether the board is back"
+    (tmp_path / "other").mkdir()
+    plain = _session(state(tmp_path / "other"), reachable=lambda host, port: False)
+    assert plain._port_open() is False

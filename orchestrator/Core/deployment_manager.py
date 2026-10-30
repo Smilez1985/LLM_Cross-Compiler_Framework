@@ -708,16 +708,19 @@ class DeploymentManager:
         if not Path(package).is_file():
             return DeployResult(False, reason=f"The package {Path(package).name} does not exist.")
 
-        if not self._check_conn(host, port):
+        from orchestrator.remote.ssh_config import needs_proxy
+        # A board reached through a ProxyJump or ProxyCommand of the framework's own settings answers only through the
+        # jump host, so its SSH port is not checked from here: OpenSSH's login through the jump tells.
+        proxied = needs_proxy(self._state_dir(), host)
+        if not proxied and not self._check_conn(host, port):
             from orchestrator.runtime.device import reasons
             down = reasons.check_port(host, port) or reasons.HOST_DOWN
             return DeployResult(False, code=down, reason=f"Target {host} not reachable on port {port} ({down}).")
 
         self.logger.info(f"Deploying to {host}...")
-        from orchestrator.remote.ssh_config import needs_proxy
         # paramiko reads no SSH settings file: a board reached through a ProxyJump or ProxyCommand of the framework's
         # own settings goes through OpenSSH (the session refuses plainly what OpenSSH cannot do there).
-        if PARAMIKO_AVAILABLE and not needs_proxy(self._state_dir(), host):
+        if PARAMIKO_AVAILABLE and not proxied:
             return self._deploy_paramiko(Path(package), host, user, password, port, pair, expect_fingerprint,
                                          expect_sha256, on_client, stop, wait_seconds, on_event)
         if expect_fingerprint:

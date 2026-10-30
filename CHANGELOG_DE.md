@@ -130,7 +130,9 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Sitzung; `LogLevel` bleibt erlaubt. paramiko liest keine Einstellungsdatei, deshalb geht ein Board, dessen Block
   einen Sprung oder einen Proxy-Befehl nennt, jetzt über den OpenSSH-Transport (`RemoteSession`, das Deploy), und wo
   das nicht geht (kein `ssh`, ein Einmal-Passwort, ein an den gezeigten Fingerabdruck gebundener Schritt), wird der
-  Schritt in klaren Worten abgelehnt (`needs_openssh`), statt am Sprung vorbei direkt zu verbinden.
+  Schritt in klaren Worten abgelehnt (`needs_openssh`), statt am Sprung vorbei direkt zu verbinden. Den SSH-Port so
+  eines Boards prüft das Framework nicht direkt von diesem Computer aus (es antwortet nur über den Jump-Host), weder
+  vor dem Deploy noch beim Warten darauf, dass das Board wieder da ist: Die Anmeldung über den Sprung sagt es.
 - `2026-10-30 00:24 UTC` · `v3.2.0` **Der Benchmark-Container läuft ohne Netz und ohne Capabilities** ([Design](docs/DESIGN_DE.md#installer-plattformen-und-abhängigkeiten)):
   Der llama-bench-Container des Benchmark-Fensters bekommt `network_mode="none"`, keine Capabilities und keine
   neuen Rechte (er liest nur ein Modell aus dem Cache und gibt Zahlen aus). Ein Test hält jetzt die zwei Stellen
