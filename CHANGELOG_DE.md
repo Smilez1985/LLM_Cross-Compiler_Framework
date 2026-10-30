@@ -13,6 +13,13 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 ## [3.3.0] - 2026-10-30
 
 ### Hinzugefügt
+- `2026-10-30 12:56 UTC` · `v3.3.0` **Das Ende jedes Builds im Chat, einmal** ([Design](docs/DESIGN_DE.md#mcp-server-tools-und-berechtigungen)):
+  wenn ein Build endet, bekommt der Chat-Verlauf genau eine Zeile dafür (entdoppelt über seine Anfrage-ID), für jeden
+  Build, auch den eigenen der Person (vom Framework; der Build einer KI wie bisher in deren Namen): „Build fertig.“,
+  „Fehler beim Bauen: …“ mit dem Grund als festem Wort (eine Stufe ist fehlgeschlagen, die weiche Grenze, die
+  Leerlauf-Grenze) oder „Build gestoppt.“. Die Zeile enthält nur den Endgrund, die KI, die ihn abgebrochen hat, und
+  die Anfrage-ID, nie Log-Text, den Namen eines Modells oder einen Pfad; die Einzelheiten kommen über MCP
+  (`get_build_status`, `read_build_log`).
 - `2026-10-30 12:55 UTC` · `v3.3.0` **Jedes Warten endet am Endgrund des Builds** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
   `llm-cli build status REQUEST_ID --wait SEKUNDEN` wartet auf einen Build jedes Programms (der geteilte Build-Stand)
   und endet an seinem Endgrund; `build start --follow` ebenso. Beide sagen ihn in klaren Worten („Build ready“, „Error
@@ -35,6 +42,10 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   `build_info.json`.
 
 ### Geändert
+- `2026-10-30 12:56 UTC` · `v3.3.0` **Die Chat-Zeile eines Builds nennt, wie er endete, nicht seinen Ordner** ([Design](docs/DESIGN_DE.md#mcp-server-tools-und-berechtigungen)):
+  die Zeile eines KI-Builds sagte „fertig und als <Ordner-Label> gespeichert“ oder „mit Fehlern fertig: N geschafft, M
+  fehlgeschlagen“; jetzt sagt sie „Build fertig.“, „Fehler beim Bauen: …“ oder „Build gestoppt.“ mit dem Endgrund als
+  einzigem Wert (das Ordner-Label konnte den Namen eines Modells tragen).
 - `2026-10-30 12:55 UTC` · `v3.3.0` **`build start --follow` endet bei einem abgebrochenen Build mit 2** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
   ein anderswo abgebrochener Build (in der GUI, von einer KI) beendete das Folgen mit Exit-Code 1 wie ein Fehler; jetzt
   endet es mit 2, dem Exit-Code des Endgrunds cancelled. Strg+C im Befehl selbst bleibt 130.
