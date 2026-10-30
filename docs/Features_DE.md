@@ -1,4 +1,4 @@
-Version 3.1.0 · Stand 2026-10-29
+Version 3.2.0 · Stand 2026-10-30
 
 [English](Features.md) · **Deutsch**
 
@@ -1192,8 +1192,9 @@ ist.
 Beispiel ob ein kleines lokales 2-Bit-Modell für schwache Hardware reicht. Nichts wird gebaut oder geändert. Mit
 `--kind retrieval` misst es stattdessen die Suche in der Wissensbasis ([Retrieval-Evaluation](#retrieval-evaluation)).
 
-**Fälle** ([`evals/ditto/cases.yml`](../evals/ditto/cases.yml), 19 Fälle; eine Datei mit Fällen ist Daten, neue
-Fälle brauchen keine Codeänderung):
+**Fälle** ([`evals/ditto/cases.yml`](../evals/ditto/cases.yml), 19 bewertete Fälle und 6 Messfälle, die nur
+laufen, wenn sie gewählt sind ([Token- und Cache-Messung](#token--und-cache-messung)); eine Datei mit Fällen ist
+Daten, neue Fälle brauchen keine Codeänderung):
 
 | Art | Fälle | Was geprüft wird |
 |---|---|---|
@@ -1201,6 +1202,8 @@ Fälle brauchen keine Codeänderung):
 | `optimizer` | 5 | Build-Empfehlungen aus den echten Rockchip-Optionen: z. B. GGUF für ein LLM auf dem RK3566, ein ONNX-Bildmodell zu RKNN, ein Modellname mit eingeschleusten Anweisungen, deren Befehl nicht in der Antwort auftauchen darf |
 | `module` | 3 | Modulvorschläge aus Probe-Dateien (Jetson Orin, Raspberry Pi 5, x86-Server): Architektur, SDK, Compiler- und CMake-Flags |
 | `chat` | 5 | Chat mit Tools: welche Tools mit welchen Argumenten aufgerufen werden und welche nicht (zum Beispiel ein gescheiterter Build, dessen Log eingeschleuste Anweisungen enthält: Ditto muss den Fehler erklären und darf keine Builds abbrechen oder starten) |
+| `tokens` | 4 | Gespräche über mehrere Runden: die Eingabe-, Ausgabe-, Cache-Lese- und Cache-Schreib-Tokens des Anbieters je Runde (nur mit `--kind tokens` oder `--case`) |
+| `openai_paid` | 2 | Der bezahlte OpenAI-Test: die 12-Stunden-Cache-Lebensdauer und OpenAIs eigene Token-Zählung (nur mit `--kind openai_paid --provider openai --i-pay`) |
 
 **Bewertet** wird mit festen Regeln, nicht von einem weiteren Modell: erwartete Wörter oder Muster, verbotene Wörter
 (zum Beispiel ein eingeschleuster Befehl), erwartete Felder, Tools, die aufgerufen oder nicht aufgerufen werden
@@ -1242,6 +1245,45 @@ Lauf gestoppt, und ein Server von dir, den er ersetzt hat, wird gemeldet), das F
 `small` 47 %. Die Evaluation hat Lücken in Dittos Prompts gefunden (Fehler dem Host oder dem Gerät zuordnen, welche
 Eingaben jedes Format annimmt, die Tools für Fragen zu Targets und Builds nutzen, Compiler-Flags in
 Modulvorschlägen). Diese Lücken sind inzwischen behoben, und eine neue Messung läuft.
+
+### Token- und Cache-Messung
+
+`llm-cli ditto eval --kind tokens` misst, was Dittos Gespräche an Tokens kosten, bevor am Kontext oder am Cache
+etwas geändert wird. Jeder `tokens`-Fall ist ein Gespräch über mehrere Runden auf einem Verlauf, mit Dittos echtem
+Prompt und (wenn der Fall nichts anderes sagt) seinen Tools über das Stellvertreter-Framework. Je Runde hält der
+Bericht die eigenen Zahlen des Anbieters aus seiner Usage-Antwort fest: Eingabe-, Ausgabe-, Cache-Lese- und
+Cache-Schreib-Tokens und die Aufrufe der Runde (eine Zusammenfassung eines langen Gesprächs eingeschlossen); je
+Gespräch nennt er die Summen und den **Anteil aus dem Cache** (Cache gelesen geteilt durch alle Prompt-Tokens).
+Nichts wird geschätzt. Die Fälle nutzen nur Beispieldaten (Dokumentationsadressen wie 192.0.2.10 und Namen unter
+`example.com`), und der Privacy-Filter bleibt für Cloud-Anbieter an.
+
+- **Anthropics Cache-Diagnose**: Jeder Aufruf eines `tokens`-Falls fragt Claude, warum sein Prompt-Cache gegenüber der
+  vorigen Antwort nicht getroffen hat (`diagnostics.previous_message_id`); der Grund (`system_changed`,
+  `tools_changed`, `messages_changed`, ...) wird je Runde festgehalten. Dittos normaler Chat schickt das nie.
+- **Fälle, die heute scheitern**, tragen `expected_fail`: „Nachfrage zur letzten Antwort nach der Verdichtung“ und
+  „20 Runden auf einem lokalen Fenster mit 4096 Tokens“ (der zweite läuft nur auf einem verwalteten lokalen Modell,
+  `--tier`, und wird sonst übersprungen). Ihr Scheitern wird als erwartet gemeldet und nicht in den Bestehensquoten
+  gezählt; ein Bestehen wird als **UNERWARTET BESTANDEN** gemeldet, damit die Markierung entfernt wird, sobald die
+  Arbeit am Kontext sie bestehen lässt.
+- **`--pause-minutes N`** wartet N Minuten zwischen den Runden, um eine Cache-Lebensdauer von 5 Minuten mit einer von
+  1 Stunde zu vergleichen. Ohne Angabe gibt es keine Pause, und in CI wird eine Pause abgelehnt.
+- Die CLI und das Fenster zeigen eine Tabelle **Tokens**; `--json` enthält jede Runde.
+
+**Der bezahlte OpenAI-Test** (`--kind openai_paid`) klärt mit dem eigenen OpenAI-Key der Person zwei Fragen: ob
+OpenAI eine Prompt-Cache-Lebensdauer von 12 Stunden annimmt (`prompt_cache_options.ttl`) und wie OpenAIs eigene
+Token-Zählung (`responses.input_tokens.count`) zur Usage des echten Aufrufs passt. Er läuft nie von selbst, nie in CI,
+nie im Offline-Modus und nie durch eine KI: Er startet nur mit `llm-cli ditto eval --kind openai_paid --provider openai
+--i-pay` an einem Terminal, nach einer weiteren Frage mit „Nein“ als Vorgabe, die nennt, was er höchstens kostet
+(6 Anfragen mit je etwa 2.000 Eingabe-Tokens), oder aus **Ditto > Bewertung...** nach derselben Bestätigung. Der Key
+kommt aus deinem eigenen Secrets-Speicher und bleibt auf deinem Computer. Eine abgelehnte 12-Stunden-Lebensdauer
+(HTTP 400) wird als abgelehnt festgehalten, nie als funktionierend, und die beiden Anfragen gehen dann ohne sie
+hinaus, sodass die gecachten Tokens der zweiten in jedem Fall gemessen werden. Das Ergebnis ist
+`openai_cache_check.json` in `evals/` des Zustandsordners des Benutzers: nur Wahrheitswerte und Token-Zahlen, kein
+Prompt-Text und kein Key.
+
+**Speicher des lokalen Servers** (Entwicklung): `python scripts/measure_cache_ram.py --tier small` lässt die
+`tokens`-Fälle auf einer lokalen Stufe laufen, misst den Speicher des llama-server, den dieser Lauf gestartet hat (nur
+diesen), und gibt seinen höchsten RSS-Wert und seinen Wert für `--cache-ram` aus, nur Zahlen.
 
 ### Retrieval-Evaluation
 

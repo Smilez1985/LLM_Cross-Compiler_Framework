@@ -19,7 +19,8 @@ from typing import Any, Dict, List, Optional
 from orchestrator.llm.errors import NotConfigured, Refused, map_openai_error
 from orchestrator.llm.providers.base import DEFAULT_MAX_TOKENS, ProviderAdapter, json_dumps, schema_name
 from orchestrator.llm.providers.openai_compat import parse_arguments, prepare_schema
-from orchestrator.llm.types import ChatRequest, ChatResult, Message, ModelInfo, NativeMessage, ToolCall, Usage
+from orchestrator.llm.types import (ChatRequest, ChatResult, Message, ModelInfo, NativeMessage, TokenCount, ToolCall,
+                                    Usage)
 
 
 class OpenAIResponsesAdapter(ProviderAdapter):
@@ -74,7 +75,29 @@ class OpenAIResponsesAdapter(ProviderAdapter):
             params["reasoning"] = {"effort": effort}
         if request.cache and self.prompt_cache_key:
             params["prompt_cache_key"] = self.prompt_cache_key
+        probe = request.cache_probe
+        if probe is not None and probe.openai_cache_ttl:
+            # Evaluation only (the paid OpenAI test): the pinned SDK types prompt_cache_options.ttl as "30m" only, so
+            # the value goes as a plain body field; whether OpenAI accepts it is what the test records.
+            params["extra_body"] = {"prompt_cache_options": {"ttl": probe.openai_cache_ttl}}
         return params
+
+    # The fields of a request that responses.input_tokens.count takes (the rest only shapes the answer).
+    COUNT_FIELDS = ("model", "input", "instructions", "tools", "tool_choice", "reasoning", "text")
+
+    def count_input_tokens(self, request: ChatRequest, model: str) -> TokenCount:
+        """OpenAI's own count of this request's input tokens (responses.input_tokens.count), through this adapter's
+        one SDK client. The caller (LLMClient.count_input_tokens) has sanitized the request like a call."""
+        effort = self.preset.map_effort(request.effort or self.preset.efforts.get(request.task))
+        params = self.build_params(request, model, effort)
+        client = self.client()
+        try:
+            answer = client.responses.input_tokens.count(**{k: params[k] for k in self.COUNT_FIELDS if k in params})
+        except Exception as e:
+            raise map_openai_error(e, label="OpenAI", provider=self.provider, preset=self.preset,
+                                   base_url=self.base_url, secret=self._api_key) from None
+        fields = sorted(answer.to_dict()) if hasattr(answer, "to_dict") else []
+        return TokenCount(input_tokens=int(getattr(answer, "input_tokens", 0) or 0), response_fields=fields)
 
     def _complete(self, request: ChatRequest, model: str) -> ChatResult:
         effort = self.preset.map_effort(request.effort or self.preset.efforts.get(request.task))
@@ -123,6 +146,7 @@ class OpenAIResponsesAdapter(ProviderAdapter):
                         cache_write_tokens=getattr(details, "cache_write_tokens", 0) or 0),
             message=Message(role="assistant", content=text, tool_calls=calls,
                             native=NativeMessage(family=self.family, payload={"items": items})),
+            response_id=str(getattr(response, "id", "") or ""),
         )
         if stop == "refusal":
             result.refusal_category = "content_filter" if incomplete == "content_filter" else "refusal"

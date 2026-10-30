@@ -89,7 +89,7 @@ TEXTS = {
         "ditto_eval.group.cases": "Cases",
         "ditto_eval.group.model": "Model",
         "ditto_eval.group.results": "Results",
-        "ditto_eval.kinds": "Kinds (none ticked: every kind except retrieval):",
+        "ditto_eval.kinds": "Kinds (none ticked: every kind except retrieval, tokens and openai_paid):",
         "ditto_eval.kind.healing": "Build-log analysis (healing)",
         "ditto_eval.kind.optimizer": "Build recommendations (optimizer)",
         "ditto_eval.kind.module": "Module proposals (module)",
@@ -178,6 +178,30 @@ TEXTS = {
         "ditto_eval.col.avg": "Avg s/case",
         "ditto_eval.col.unrelated": "Unrelated: no excerpt",
         "ditto_eval.col.p50": "p50 ms",
+        "ditto_eval.kind.tokens": "Token and cache measurement (tokens; several turns, runs only when ticked)",
+        "ditto_eval.kind.openai_paid": "Paid OpenAI test (openai_paid; your own key, asked before it starts)",
+        "ditto_eval.pause": "Pause between turns (tokens and openai_paid only; 0: none):",
+        "ditto_eval.pause.none": "no pause",
+        "ditto_eval.pause.suffix": " min",
+        "ditto_eval.paid.question": "This is the paid OpenAI test. It sends at most {calls} requests with about "
+                                    "{tokens} input tokens in all to OpenAI, billed to your OpenAI account. Your key "
+                                    "stays on this computer; the result file holds only booleans and token numbers "
+                                    "(it is written to {path}).\n\nStart the paid test now?",
+        "ditto_eval.paid.provider": "The paid OpenAI test runs only with the provider OpenAI (your own OpenAI key): "
+                                    "choose OpenAI as the provider.",
+        "ditto_eval.paid.saved": "Measurement written to {path}",
+        "ditto_eval.log.xfail": "expected to fail {id} ({seconds}s): {problem}",
+        "ditto_eval.log.xpass": "UNEXPECTED PASS {id} ({seconds}s): the change it waited for has come; remove "
+                                "expected_fail",
+        "ditto_eval.log.skipped": "skipped {id}: {problem}",
+        "ditto_eval.tokens": "Tokens (from the provider's usage)",
+        "ditto_eval.col.case": "Case",
+        "ditto_eval.col.turns": "Turns",
+        "ditto_eval.col.input": "Input",
+        "ditto_eval.col.output": "Output",
+        "ditto_eval.col.cache_read": "Cache read",
+        "ditto_eval.col.cache_write": "Cache write",
+        "ditto_eval.col.cache_share": "Cache-read share",
     },
     "de": {
         "ditto_models.offline": "Der Offline-Modus ist an, deshalb wird {file} nicht geladen: {why}.",
@@ -256,7 +280,7 @@ TEXTS = {
         "ditto_eval.group.cases": "Fälle",
         "ditto_eval.group.model": "Modell",
         "ditto_eval.group.results": "Ergebnisse",
-        "ditto_eval.kinds": "Arten (nichts angehakt: jede Art außer Retrieval):",
+        "ditto_eval.kinds": "Arten (nichts angehakt: jede Art außer retrieval, tokens und openai_paid):",
         "ditto_eval.kind.healing": "Build-Log-Analyse (healing)",
         "ditto_eval.kind.optimizer": "Build-Empfehlungen (optimizer)",
         "ditto_eval.kind.module": "Modulvorschläge (module)",
@@ -349,5 +373,30 @@ TEXTS = {
         "ditto_eval.col.avg": "Mittel s/Fall",
         "ditto_eval.col.unrelated": "Unpassend: kein Auszug",
         "ditto_eval.col.p50": "p50 ms",
+        "ditto_eval.kind.tokens": "Token- und Cache-Messung (tokens; mehrere Runden, läuft nur angehakt)",
+        "ditto_eval.kind.openai_paid": "Bezahlter OpenAI-Test (openai_paid; dein eigener Key, vor dem Start gefragt)",
+        "ditto_eval.pause": "Pause zwischen den Runden (nur tokens und openai_paid; 0: keine):",
+        "ditto_eval.pause.none": "keine Pause",
+        "ditto_eval.pause.suffix": " min",
+        "ditto_eval.paid.question": "Das ist der bezahlte OpenAI-Test. Er schickt höchstens {calls} Anfragen mit "
+                                    "zusammen etwa {tokens} Eingabe-Tokens an OpenAI, abgerechnet über dein "
+                                    "OpenAI-Konto. Dein Key bleibt auf diesem Computer; die Ergebnisdatei enthält nur "
+                                    "Wahrheitswerte und Token-Zahlen (sie wird nach {path} geschrieben).\n\nDen "
+                                    "bezahlten Test jetzt starten?",
+        "ditto_eval.paid.provider": "Der bezahlte OpenAI-Test läuft nur mit dem Anbieter OpenAI (dein eigener "
+                                    "OpenAI-Key): wähle OpenAI als Anbieter.",
+        "ditto_eval.paid.saved": "Messung geschrieben nach {path}",
+        "ditto_eval.log.xfail": "erwartet fehlgeschlagen {id} ({seconds}s): {problem}",
+        "ditto_eval.log.xpass": "UNERWARTET BESTANDEN {id} ({seconds}s): die Änderung, auf die der Fall wartete, ist "
+                                "da; entferne expected_fail",
+        "ditto_eval.log.skipped": "übersprungen {id}: {problem}",
+        "ditto_eval.tokens": "Tokens (aus der Usage des Anbieters)",
+        "ditto_eval.col.case": "Fall",
+        "ditto_eval.col.turns": "Runden",
+        "ditto_eval.col.input": "Eingabe",
+        "ditto_eval.col.output": "Ausgabe",
+        "ditto_eval.col.cache_read": "Cache gelesen",
+        "ditto_eval.col.cache_write": "Cache geschrieben",
+        "ditto_eval.col.cache_share": "Anteil aus dem Cache",
     },
 }

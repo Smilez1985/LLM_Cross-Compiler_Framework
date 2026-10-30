@@ -2634,9 +2634,17 @@ def ditto_ask(ctx: FrameworkContext, question: str, no_tools: bool, provider: Op
 @click.option('--tier', 'tiers', multiple=True,
               help='Run against the managed local model of this tier (repeatable, e.g. --tier small --tier small-q2)')
 @click.option('--kind', 'kinds', multiple=True,
-              type=click.Choice(["healing", "optimizer", "module", "chat", "retrieval"]),
+              type=click.Choice(["healing", "optimizer", "module", "chat", "retrieval", "tokens", "openai_paid"]),
               help='Only cases of this kind (repeatable). retrieval grades knowledge-base searches on a fixture '
-                   'corpus with the local embedding model (no AI model) and runs only when chosen')
+                   'corpus with the local embedding model (no AI model) and runs only when chosen; tokens measures '
+                   'multi-turn conversations (input, output and cache tokens per turn) and runs only when chosen; '
+                   'openai_paid is the paid OpenAI cache and count test (with --provider openai --i-pay)')
+@click.option('--pause-minutes', type=click.FloatRange(0.1, 180), default=None,
+              help='tokens and openai_paid: pause this many minutes between turns (to compare cache lifetimes); '
+                   'default: no pause; never in CI')
+@click.option('--i-pay', 'i_pay', is_flag=True, default=False,
+              help='openai_paid only: you start the paid test yourself, billed to your own OpenAI key (asked once '
+                   'more at the terminal, No by default)')
 @click.option('--rag-variant', 'rag_variants', multiple=True, type=click.Choice(["fused", "rerank"]),
               help='Retrieval only: search variant to grade (repeatable): fused (hybrid search) or rerank (plus '
                    'the cross-encoder of rag_reranker and its relevance floor); default: fused')
@@ -2652,23 +2660,41 @@ def ditto_ask(ctx: FrameworkContext, question: str, no_tools: bool, provider: Op
 def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Optional[str], model: Optional[str],
                tiers: Tuple[str, ...], kinds: Tuple[str, ...], rag_variants: Tuple[str, ...],
                case_ids: Tuple[str, ...], repeat: int, json_out: Optional[Path], min_pass: Optional[float],
-               effort: Optional[str]):
+               effort: Optional[str], pause_minutes: Optional[float], i_pay: bool):
     """Grade Ditto on fixed cases with the chosen provider/model, e.g. to check whether a 2-bit local model is
     good enough, or the knowledge-base search (--kind retrieval, works offline once the embedding model is
-    downloaded). Nothing is built or changed. Cloud providers bill every request (about 20 per run and repeat)."""
+    downloaded), or measure tokens and cache hits per turn (--kind tokens). Nothing is built or changed. Cloud
+    providers bill every request (about 20 per run and repeat)."""
     from orchestrator.Core.ai_override import CLI_SOURCE, override_values
     from orchestrator.Core.ditto_manager import DittoError
-    from orchestrator.evals.eval_run import (EvalEvents, EvalRunError, check_choice, retrieval_table, run_evaluation,
-                                             select_cases, summary_table, write_report)
+    from orchestrator.evals.eval_run import (EvalEvents, EvalRunError, check_choice, check_paid, openai_check_path,
+                                             outcome_note, paid_estimate, retrieval_table, run_evaluation,
+                                             save_openai_check, select_cases, summary_table, tokens_table,
+                                             write_report)
     from orchestrator.runtime.llama_server import LocalRuntimeError
     ctx.require_framework()
     # The same run as the GUI's Ditto > Evaluation... (evals/eval_run.py); this command prints it.
     try:
         check_choice(tiers, provider, model)
         cases = select_cases(cases_file, kinds, case_ids)
+        check_paid(ctx.framework_manager, cases, provider=provider, tiers=tiers, i_pay=i_pay)
     except EvalRunError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(e.exit_code)
+    paid = any(c.kind == "openai_paid" for c in cases)
+    if paid:
+        # --i-pay is the person's own yes, given once more at a terminal: never from a script, CI or an AI's shell.
+        if not _interactive():
+            console.print("[red]The paid OpenAI test asks you at a terminal before it starts; without one it does "
+                          "not run.[/red]")
+            sys.exit(2)
+        cost = paid_estimate(cases, repeat)
+        console.print(f"[bold yellow]Paid OpenAI test:[/bold yellow] at most {cost['calls']} calls with about "
+                      f"{cost['input_tokens']} input tokens in all, billed to your OpenAI account. Your key stays on "
+                      "this computer; the result file holds only booleans and token numbers.")
+        if not click.confirm("Start the paid test now?", default=False):
+            console.print("Not started.")
+            sys.exit(1)
     fm = ctx.framework_manager
 
     class Printed(EvalEvents):
@@ -2687,6 +2713,11 @@ def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Opti
             mark = "[green]pass[/green]" if result.pass_rate == 1 else (
                 "[red]fail[/red]" if result.pass_rate == 0 else f"[yellow]{result.pass_rate:.0%}[/yellow]")
             note = f"  [dim]{escape(result.first_problem()[:160])}[/dim]" if result.pass_rate < 1 else ""
+            special = outcome_note(result)   # an expected failure, an unexpected pass or a skipped case
+            if special:
+                style = "bold yellow" if result.outcome == "xpass" else "dim"
+                mark = f"[{style}]{escape(special)}[/{style}]"
+                note = "" if result.outcome == "xpass" else note
             console.print(f"  {mark} {escape(result.case.id)} ({result.seconds:.1f}s){note}")
 
         def server_replaced(self, served):
@@ -2705,7 +2736,8 @@ def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Opti
     try:
         runs = run_evaluation(fm, cases, make_ditto=make_ditto, make_runtime=lambda: _local_runtime(ctx), tiers=tiers,
                               provider=provider, model=model, effort=effort, cases_file=cases_file,
-                              rag_variants=rag_variants, repeat=repeat, events=Printed())
+                              rag_variants=rag_variants, repeat=repeat, events=Printed(),
+                              pause_minutes=pause_minutes, i_pay=i_pay and paid)
     except EvalRunError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(e.exit_code)
@@ -2731,6 +2763,19 @@ def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Opti
         for row in rows:
             table.add_row(escape(row[0]), *row[1:])
         console.print(table)
+    tokens = tokens_table(runs)
+    if tokens is not None:
+        columns, rows = tokens
+        table = Table(title="Tokens (from the provider's usage)")
+        for column in columns:
+            table.add_column(column)
+        for row in rows:
+            table.add_row(escape(row[0]), escape(row[1]), *row[2:])
+        console.print(table)
+    if paid:
+        saved = save_openai_check(openai_check_path(fm.config), runs)
+        if saved is not None:
+            console.print(f"Measurement written to {escape(str(saved))}")
     if json_out:
         write_report(json_out, runs)
         console.print(f"Report written to {escape(str(json_out))}")

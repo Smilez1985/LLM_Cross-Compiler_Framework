@@ -46,7 +46,7 @@ from orchestrator.llm.catalog import Catalog, ProviderPreset, load_catalog
 from orchestrator.llm.errors import LLMError, NotConfigured, ProviderUnavailable, RateLimited, Refused
 from orchestrator.llm.privacy import PrivacyFilter, normalize_level, restore, restore_obj
 from orchestrator.llm.providers import adapter_class
-from orchestrator.llm.types import EFFORTS, TASKS, ChatRequest, ChatResult, Message, ModelInfo
+from orchestrator.llm.types import EFFORTS, TASKS, ChatRequest, ChatResult, Message, ModelInfo, TokenCount
 from orchestrator.security.redaction import SecretStr, reveal
 from orchestrator.utils.locality import offline_mode
 from orchestrator.utils.logging import get_logger
@@ -551,6 +551,25 @@ class LLMClient:
                 last_error = e
         assert last_error is not None
         raise last_error
+
+    def count_input_tokens(self, request: ChatRequest) -> TokenCount:
+        """The provider's own count of `request`'s input tokens, for the configured provider of its task (no
+        fallback: a count from another provider would not say anything about this one). The request goes out exactly
+        as a call would: through the privacy filter for every provider that is not local, with the adapter's one SDK
+        client. NotConfigured when the provider has no count endpoint (today only OpenAI's Responses API has one in
+        this layer). Used by the paid OpenAI test of the evaluation (`ditto eval --kind openai_paid`)."""
+        effort = self._effort(request)
+        if effort and effort != request.effort:
+            request = request.model_copy(update={"effort": effort})
+        target = self.resolve(request.task, model=request.model)
+        adapter = self.adapter(target)
+        counter = getattr(adapter, "count_input_tokens", None)
+        if counter is None:
+            raise NotConfigured(f"{target.preset.label} has no token count endpoint in this framework.",
+                                provider=target.provider)
+        if not target.local:
+            request, _ = self._sanitize(request)
+        return counter(request, target.model)
 
     def describe(self, task: str = "chat") -> Dict[str, Any]:
         """What a call for `task` would use, for the settings dialog and Ditto's header (no secrets). `source`

@@ -1,4 +1,4 @@
-Version 3.1.0 · Stand 2026-10-29
+Version 3.2.0 · Stand 2026-10-30
 
 [English](CLI_Usage.md) · **Deutsch**
 
@@ -1081,7 +1081,9 @@ wird gebaut oder geändert: Chat-Fälle laufen gegen einen Ersatz-Build-Dienst. 
 | `--provider TEXT` | Anbieter für den Lauf. Standard: KI-Einstellungen. |
 | `--model TEXT` | Modell für den Lauf. Standard: KI-Einstellungen. |
 | `--tier TEXT` | Gegen das verwaltete lokale Modell dieser Stufe laufen; wiederholbar (`--tier small --tier small-q2`). Nicht mit `--provider`/`--model` kombinierbar (Exit-Code 2). |
-| `--kind [healing\|optimizer\|module\|chat\|retrieval]` | Nur Fälle dieser Art; wiederholbar. `retrieval` läuft nur, wenn es hier gewählt ist, wenn `--case` ohne `--kind` angegeben ist oder wenn die Datei aus `--cases` Retrieval-Fälle enthält. |
+| `--kind [healing\|optimizer\|module\|chat\|retrieval\|tokens\|openai_paid]` | Nur Fälle dieser Art; wiederholbar. `retrieval` läuft nur, wenn es hier gewählt ist, wenn `--case` ohne `--kind` angegeben ist oder wenn die Datei aus `--cases` Retrieval-Fälle enthält. `tokens` (die [Token- und Cache-Messung](#token--und-cache-messung)) läuft nur, wenn es hier oder mit `--case` gewählt ist; `openai_paid` (der bezahlte OpenAI-Test) nur, wenn es hier gewählt ist, allein und mit `--provider openai --i-pay`. |
+| `--pause-minutes FLOAT RANGE` | Nur `tokens` und `openai_paid`: so viele Minuten zwischen den Runden warten (0,1 bis 180), um Cache-Lebensdauern zu vergleichen. Standard: keine Pause. In CI abgelehnt (Exit-Code 2). |
+| `--i-pay` | Nur `openai_paid`: Du startest den bezahlten Test selbst, abgerechnet über deinen eigenen OpenAI-Key. Die CLI fragt am Terminal noch einmal mit dem, was er höchstens kostet („Nein“ ist die Vorgabe); ohne Terminal, ohne `--i-pay`, in CI oder im Offline-Modus läuft er nicht (Exit-Code 2). |
 | `--rag-variant [fused\|rerank]` | Nur Retrieval: die zu bewertende Suchvariante; wiederholbar, ein Lauf je Variante. `fused` (Standard): die hybride Suche. `rerank`: die hybride Suche plus der Reranker aus `rag_reranker` mit seiner Relevanzschwelle. |
 | `--case TEXT` | Nur diese Fall-ID; wiederholbar. |
 | `--repeat INTEGER RANGE` | Läufe pro Fall, 1 bis 20 (Standard 1). |
@@ -1116,6 +1118,32 @@ heruntergeladen ist, wird mit einem Hinweis auf **Ditto > Lokale Modelle...** ab
 mit Fortschritt und **Abbrechen** und zeigt dieselben Tabellen (ein ersetzter Server von dir wird gemeldet, auch nach
 **Abbrechen**); **Bericht speichern...** schreibt den `--json`-Bericht in eine Datei deiner Wahl. `--min-pass` setzt
 nur den Exit-Code für Skripte.
+
+#### Token- und Cache-Messung
+
+`llm-cli ditto eval --kind tokens` lässt Gespräche über mehrere Runden mit Beispieldaten laufen und hält je Runde die
+eigenen Eingabe-, Ausgabe-, Cache-Lese- und Cache-Schreib-Tokens des Anbieters fest (aus seiner Usage-Antwort, nie
+geschätzt) und je Gespräch den Anteil aus dem Cache; mit Claude hält sie auch fest, warum der Prompt-Cache gegenüber
+der vorigen Antwort nicht getroffen hat (Anthropics Cache-Diagnose). Zwei Fälle, die heute scheitern, sind mit
+`expected_fail` markiert: Ihr Scheitern wird nicht gezählt, und ein Bestehen wird als `UNEXPECTED PASS` ausgegeben.
+Die zusätzliche Tabelle heißt **Tokens**.
+
+```bash
+# Die Token-Fälle gegen den eingestellten Anbieter, mit dem Bericht
+llm-cli ditto eval --kind tokens --json tokens.json
+
+# Dasselbe auf dem lokalen 2B-Modell, 6 Minuten zwischen den Runden (ein 5-Minuten-Cache ist dann abgelaufen)
+llm-cli ditto eval --kind tokens --tier small --pause-minutes 6
+
+# Der bezahlte OpenAI-Test (12-Stunden-Cache-Lebensdauer, OpenAIs eigene Token-Zählung), mit deinem eigenen Key
+llm-cli ditto eval --kind openai_paid --provider openai --i-pay
+```
+
+Der bezahlte Test fragt vor dem Start noch einmal („Nein“ ist die Vorgabe) und nennt, was er höchstens kostet. Er
+schreibt `openai_cache_check.json` nach `evals/` in deinem Zustandsordner (nur Wahrheitswerte und Token-Zahlen) und
+gibt aus, wohin. In der GUI: die Art in **Ditto > Bewertung...** anhaken, die Pause ist **Pause zwischen den
+Runden**, und **Bewertung starten...** stellt die Frage des bezahlten Tests mit seinen Kosten. Einzelheiten:
+[Features_DE.md](Features_DE.md#token--und-cache-messung).
 
 #### Retrieval-Evaluation
 
