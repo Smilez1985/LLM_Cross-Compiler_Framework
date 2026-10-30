@@ -33,6 +33,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+from orchestrator.utils.atomic import replace_file
+
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 REPO_RE = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
 COMPLETE_MARKER = ".{name}.complete.json"     # next to a staged commit folder: <cache>/models/hf/<o>--<n>/.<commit>...
@@ -105,7 +107,7 @@ def write_complete(folder: Path, repo: str, commit: str, files: Dict[str, Option
     temporary = marker.with_name(marker.name + ".tmp")
     temporary.write_text(json.dumps({"repo": repo, "commit": commit, "files": files}, sort_keys=True),
                          encoding="utf-8")
-    os.replace(temporary, marker)
+    replace_file(temporary, marker)   # tried again for a moment on Windows while a reader has the record open
 
 
 def _marker_complete(folder: Path) -> Optional[bool]:

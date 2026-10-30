@@ -72,6 +72,13 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   is a new image; an image labelled before this version is not reused offline, and the stop says so. In the Builder
   tab a recipe that pins commit X while the copy on this computer is commit Y no longer brings the model choice back
   after you pick that copy: it asks whether to build the copy as your own build without the recipe, or cancel.
+- `2026-10-30 00:10 UTC` · `v3.2.0` **The knowledge base's model downloads follow the one disk rule** ([design](docs/DESIGN.md#components)):
+  a fastembed model the framework fetches from Hugging Face now takes its reservation in the shared reservation
+  ledger while it downloads, records the bytes that landed after each file and releases it when the fetch ends,
+  fails or stops; without room it stops before the first file with the disk rule's text (as every other download
+  does), instead of filling the disk. The record of a complete Builder copy, the fetcher's last move of a file and
+  the `refs/main` record are moved into place with the framework's one replace helper, which tries again for a
+  moment on Windows while another program reads the file.
 
 ### Security
 - `2026-10-29 23:50 UTC` · `v3.2.0` **llmcf's SSH settings: a jump or proxy command only with the person's kept yes, no other login

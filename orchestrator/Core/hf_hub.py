@@ -33,7 +33,6 @@ Rules that hold for every call here:
   lists for that commit. A stop event ends the transfer between two chunks and keeps the `.part` file.
 """
 
-import os
 import re
 import shutil  # noqa: F401 - tests and tools_hf replace or read shutil.disk_usage through this module
 import threading
@@ -44,6 +43,7 @@ from urllib.parse import quote, urlparse
 
 from orchestrator.tools.grants import PERMISSIVE_LICENSES
 from orchestrator.utils.download import DownloadError, IntegrityError, PinnedDownloader, _Retry, sha256_file
+from orchestrator.utils.atomic import replace_file
 from orchestrator.utils.helpers import digest_matches
 
 HUB_HOST = "huggingface.co"
@@ -506,7 +506,7 @@ class HubFetcher(PinnedDownloader):
                 raise IntegrityError(f"{file.name} does not match what Hugging Face lists for commit {commit[:12]} "
                                      f"(expected {file.size} bytes" + (f", sha256 {file.sha256}" if file.sha256 else "")
                                      + f"; got {actual} bytes, sha256 {digest}). It was deleted and is not used.")
-            os.replace(part, dest)
+            replace_file(part, dest)   # tried again for a moment on Windows while a reader has `dest` open
             return dest, digest
 
 
@@ -534,8 +534,27 @@ def cached_snapshot(cache_dir: Path, repo: str, required: Any) -> Optional[Path]
     return folder if names and all(safe_filename(n) and (folder / n).is_file() for n in names) else None
 
 
+def _still_to_write(folder: Path, files: List["HubFile"]) -> int:
+    """The bytes the fetcher still writes into `folder` for `files`: nothing for a file there complete, the rest of a
+    resumable `.part` file, the whole size otherwise."""
+    need = 0
+    for file in files:
+        size = int(file.size or 0)
+        dest = folder / file.name
+        part = dest.with_name(dest.name + ".part")
+        try:
+            if dest.is_file() and dest.stat().st_size == size:
+                continue
+            have = part.stat().st_size if part.is_file() else 0
+        except OSError:
+            have = 0
+        need += size - have if 0 <= have <= size else size
+    return need
+
+
 def fetch_snapshot(cache_dir: Path, repo: str, required: Any, optional: Any = (), *, offline: bool = False,
-                   stop: Optional[threading.Event] = None, api: Any = None, fetcher: Any = None) -> Optional[Path]:
+                   stop: Optional[threading.Event] = None, api: Any = None, fetcher: Any = None, ledger: Any = None,
+                   owner: str = "knowledge", disk_usage: Any = None) -> Optional[Path]:
     """The files fastembed loads for one model, in fastembed's cache (huggingface_hub's layout, so a copy fastembed
     downloaded itself is used as it is): the folder holding `required` (the model file and its extra files) and those
     of `optional` (config and tokenizer files) the repository has. A model already there is used without asking
@@ -544,7 +563,11 @@ def fetch_snapshot(cache_dir: Path, repo: str, required: Any, optional: Any = ()
     up on huggingface.co (hub_api, never the host in HF_ENDPOINT), each file through HubFetcher (resumable, checked
     against the Hub's size and sha256 before it gets its name), without any token: fastembed's models are public, and a
     gated or private repository is refused here. HubError (and the fetcher's errors) when it cannot be done.
-    `api` (a factory per token) and `fetcher` stand in for the Hub in tests."""
+    The one disk rule comes first, as for every download (Core/disk_plan room with the reserve and what other calls
+    reserved in `ledger`, the per-user ReservationLedger): disk_plan.InsufficientSpace with its text when the files do
+    not fit; while they download they hold their own reservation in the ledger, recorded as landed as each file
+    arrives and released when the fetch ends, fails or stops. `api` (a factory per token), `fetcher` and `disk_usage`
+    stand in for the Hub and the disk in tests."""
     required = [str(n) for n in required]
     found = cached_snapshot(cache_dir, repo, required)
     if found is not None or offline:
@@ -568,14 +591,31 @@ def fetch_snapshot(cache_dir: Path, repo: str, required: Any, optional: Any = ()
                        code="unknown_id")
     names = required + [str(n) for n in optional if str(n) in files and str(n) not in required and safe_filename(n)]
     folder = cache_folder(cache_dir, repo) / "snapshots" / commit
-    fetcher = fetcher or HubFetcher(stop=stop)
-    for name in names:
-        fetcher.fetch_file(repo, commit, files[name], folder / name)
+    from orchestrator.Core.disk_plan import LandedMeter, refusal, room
+    need = _still_to_write(folder, [files[n] for n in names])
+    what = f"download the knowledge base model {repo}"
+    problem = refusal([room(Path(cache_dir), need, label="models", what=what, ledger=ledger,
+                            disk_usage=disk_usage)], "the download") if need else None
+    if problem is not None:
+        raise problem
+    reservation = reserve_space(ledger, Path(cache_dir), need, owner, repo, need_label="models", what=what,
+                                key=f"{repo}/{commit}", disk_usage=disk_usage)
+    meter = LandedMeter(ledger, reservation.rid) if isinstance(reservation, LedgerReservation) else None
+    if meter is not None:
+        meter.watch(folder)
+    try:
+        fetcher = fetcher or HubFetcher(stop=stop)
+        for name in names:
+            fetcher.fetch_file(repo, commit, files[name], folder / name)
+            if meter is not None:
+                meter.report()
+    finally:
+        reservation.release()
     refs = cache_folder(cache_dir, repo) / "refs"
     refs.mkdir(parents=True, exist_ok=True)
     temporary = refs / ".main.tmp"
     temporary.write_text(commit, encoding="utf-8")
-    os.replace(temporary, refs / "main")
+    replace_file(temporary, refs / "main")
     return folder
 
 

@@ -331,7 +331,7 @@ class TestCollections:
 
         built = []
         monkeypatch.setattr(rm, "create_dense_embedder",
-                            lambda spec, cache_dir, offline: built.append(spec.model_id) or FakeEmbedder(spec.model_id,
+                            lambda spec, cache_dir, offline, **_: built.append(spec.model_id) or FakeEmbedder(spec.model_id,
                                                                                                          spec.dim))
         monkeypatch.setattr(rm, "recommend_model", lambda: ("intfloat/multilingual-e5-small", "test hardware"))
 
@@ -352,7 +352,7 @@ class TestCollections:
         from orchestrator.rag.embeddings import recommend_model
 
         monkeypatch.setattr(rm, "create_dense_embedder",
-                            lambda spec, cache_dir, offline: FakeEmbedder(spec.model_id, spec.dim))
+                            lambda spec, cache_dir, offline, **_: FakeEmbedder(spec.model_id, spec.dim))
         rag = make_rag(embedder=None)
         rag._embedder = None
 
@@ -902,12 +902,12 @@ class TestOfflineMode:
 
         seen = {}
 
-        def fake_dense(spec, cache_dir, offline):
+        def fake_dense(spec, cache_dir, offline, **_):
             seen.update(offline=offline(), cache_dir=cache_dir)
             return FakeEmbedder(spec.model_id, spec.dim)
 
         monkeypatch.setattr(rm, "create_dense_embedder", fake_dense)
-        monkeypatch.setattr(rm, "create_sparse_embedder", lambda cache_dir, offline: FakeSparse())
+        monkeypatch.setattr(rm, "create_sparse_embedder", lambda cache_dir, offline, **_: FakeSparse())
         fm = booted_framework
         fm.config.set("enable_rag_knowledge", True)
         fm.config.set("offline_mode", True)
@@ -939,8 +939,8 @@ class TestOfflineMode:
         import orchestrator.Core.rag_manager as rm
         from orchestrator.tools.registry import ToolContext
 
-        monkeypatch.setattr(rm, "create_dense_embedder", lambda spec, cache_dir, offline: FakeEmbedder())
-        monkeypatch.setattr(rm, "create_sparse_embedder", lambda cache_dir, offline: FakeSparse())
+        monkeypatch.setattr(rm, "create_dense_embedder", lambda spec, cache_dir, offline, **_: FakeEmbedder())
+        monkeypatch.setattr(rm, "create_sparse_embedder", lambda cache_dir, offline, **_: FakeSparse())
         fm = booted_framework
         fm.config.set("enable_rag_knowledge", True)
         rag = fm.ensure_rag_manager()
