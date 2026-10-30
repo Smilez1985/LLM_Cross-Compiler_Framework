@@ -39,6 +39,10 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Prompt-Cache und mit `llm-cli ditto cache set`.
 
 ### Behoben
+- `2026-10-30 15:11 UTC` · `v3.3.0` **`llm-cli ditto cache`, `ditto cache set` und `ditto models list` sagen klar, wenn sie es nicht
+  ermitteln können**: Lässt sich das Speicherbudget oder die Modellwahl für diesen Computer nicht berechnen (eine
+  Messung, die scheitert, ein Modell, das der Katalog nicht kennt, eine beschädigte Datei), geben sie eine rote Zeile
+  mit dem Grund aus (Secrets geschwärzt) und enden mit 1, statt mit einem Python-Traceback.
 - `2026-10-30 15:08 UTC` · `v3.3.0` **Ein Paket im Community Hub zu deinstallieren friert das Fenster nicht mehr ein**: **Deinstallieren...**
   entfernt die Auszüge des Pakets aus der Wissensbasis und verschiebt seine Ordner in einem Hintergrund-Thread, wie
   die anderen Aktionen des Hubs; die Schaltflächen des Hubs und die Paketliste sind währenddessen aus, und das
