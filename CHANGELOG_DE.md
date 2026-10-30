@@ -13,6 +13,12 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 ## [3.3.0] - 2026-10-30
 
 ### Behoben
+- `2026-10-30 16:38 UTC` · `v3.3.0` **Eine Git-Abhängigkeit wird auch unter Windows ohne ihre Git-Daten
+  behalten** ([Design](docs/DESIGN_DE.md#sicherheitsmodell)): Git legt seine Objekte schreibgeschützt ab, und der
+  Abhängigkeits-Vorabruf entfernte `.git` mit `shutil.rmtree(ignore_errors=True)`, was unter Windows wortlos
+  scheiterte: `.git` blieb in der zwischengespeicherten Kopie und in ihrer SHA-256, und Arbeits- und Entpackordner
+  blieben auf der Platte. Sie werden jetzt wie jeder schreibgeschützte Baum entfernt (`remove_tree`), und eine
+  Abhängigkeit, deren `.git` danach noch steht, wird abgelehnt statt behalten.
 - `2026-10-30 14:19 UTC` · `v3.3.0` **Ein fehlendes OpenSSH unter Windows ist ein Problem auf diesem Rechner, kein
   Board, das nicht antwortet** ([Design](docs/DESIGN_DE.md#ssh-host-schlüssel-und-das-paket-remote)): Der
   Prozessstart von Windows nennt keine Datei, wenn das Programm fehlt (POSIX nennt sie), deshalb las sich der Fehler

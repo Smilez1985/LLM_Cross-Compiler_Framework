@@ -12,6 +12,11 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 ## [3.3.0] - 2026-10-30
 
 ### Fixed
+- `2026-10-30 16:38 UTC` · `v3.3.0` **A git dependency is kept without its git metadata on Windows too**
+  ([design](docs/DESIGN.md#security-model)): git keeps its objects read-only, and the dependency pre-fetch removed
+  `.git` with `shutil.rmtree(ignore_errors=True)`, which on Windows failed without a word: `.git` stayed in the cached
+  copy and in its sha256, and the work and staging folders stayed on the disk. They are now removed like every
+  read-only tree (`remove_tree`), and a dependency whose `.git` still stands is refused instead of kept.
 - `2026-10-30 14:19 UTC` · `v3.3.0` **A missing OpenSSH on Windows is a problem on this computer, not a board that is
   down** ([design](docs/DESIGN.md#ssh-host-keys-and-the-remote-package)): Windows' process start names no file when the
   program is missing (POSIX names it), so the error read as `device_host_down` and the person was sent to the board.
