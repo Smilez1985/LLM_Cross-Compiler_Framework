@@ -978,10 +978,10 @@ class BuildService:
         local = Path(pin.path) if pin is not None else (Path(req.model) if Path(req.model).is_absolute() else None)
         target_sha = None
         try:
-            from orchestrator.Core.community_pack import tree_sha256
+            from orchestrator.Core.community_manager import installed_digest
             tm = self._targets()
             folder = tm.folder_of(req.target) if hasattr(tm, "folder_of") else None
-            target_sha = tree_sha256(Path(folder)) if folder is not None else None
+            target_sha = installed_digest(Path(folder)) if folder is not None else None
         except Exception:  # noqa: BLE001 - a target that cannot be hashed is never the same as an earlier one
             target_sha = None
         imatrix = bool(req.use_imatrix and str(req.format).lower() == "gguf")

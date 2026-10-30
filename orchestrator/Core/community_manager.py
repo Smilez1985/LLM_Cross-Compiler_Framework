@@ -538,6 +538,31 @@ def trust_of_folder(folder: Path, index: Optional[CommunityIndex]) -> Tuple[Opti
     return TrustLevel(prov.trust), ""
 
 
+def _content_digests(folder: Path) -> Tuple[str, Optional[str]]:
+    """(tree_sha256 of the folder as this computer reads it, the installed pack's own content digest when the folder
+    is unchanged since its install, else None)."""
+    digest = tree_sha256(Path(folder))
+    prov = read_provenance(Path(folder))
+    return digest, (prov.content_sha256 if prov is not None and prov.installed_unchanged(digest) else None)
+
+
+def installed_digest(folder: Path) -> str:
+    """The content digest of a target (or another pack) folder as a build record and a recipe name it: for an
+    installed pack unchanged since its install (Provenance.installed_unchanged), the pack's own digest, also where this
+    computer's file system did not keep its modes (Windows keeps no execute bit, so a pack's 0o755 scripts read as
+    0o644 there); otherwise tree_sha256 of the folder. The one rule of the builder, the build service, the recipe tools
+    and the recipe install check (same_content). Raises PackError (a link or special file) and OSError."""
+    digest, own = _content_digests(folder)
+    return own or digest
+
+
+def same_content(folder: Path, expected: Optional[str]) -> bool:
+    """Whether `folder` holds the content `expected` names (a recipe's target.pack_sha256): the digest the folder
+    gives on this computer, or the pack's own digest of an installed pack unchanged since its install, so a recipe
+    bound to a target pack made on Linux verifies on Windows too. Raises PackError and OSError."""
+    return bool(expected) and expected in _content_digests(folder)
+
+
 def build_trust_check(target_path: Path, cache_dir: Optional[Path]) -> Optional[str]:
     """For the builder: raises PackError for a revoked target; returns a warning for a local one."""
     index = CommunityManager.read_cached_index(cache_dir, revocations=True) if cache_dir else None
@@ -1237,10 +1262,10 @@ class CommunityManager:
         except (OSError, yaml.YAMLError, ValidationError, AttributeError):
             notes.append(f"target {recipe.target.id} declares no valid capabilities; the recipe was not checked")
         try:
-            if tree_sha256(folder) != recipe.target.pack_sha256:
+            if not same_content(folder, recipe.target.pack_sha256):
                 notes.append(f"your copy of target {recipe.target.id} differs from the one the recipe was built "
                              "with; results may differ")
-        except PackError:
+        except (PackError, OSError):
             pass
         return problems
 

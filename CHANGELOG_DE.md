@@ -10,6 +10,18 @@ weicht bewusst ab: Es gibt keinen Abschnitt `[Unreleased]`. Jeder Eintrag beginn
 der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und warum, steht im
 [Design](docs/DESIGN_DE.md).
 
+## [3.2.0] - 2026-10-30
+
+### Behoben
+- `2026-10-30 00:48 UTC` · `v3.2.0` **Ein Rezept zu einem unter Linux gemachten Target-Paket besteht unter Windows**: Windows hält kein
+  Ausführungsbit, deshalb gab die installierte Kopie eines Target-Pakets mit `0o755`-Skripten dort einen anderen
+  Ordner-Digest, und die Rezeptprüfung bei der Installation sagte „deine Kopie von Target ... weicht ab“, die
+  Rezept-Tools nannten das Target anders, und ein Build hielt einen Digest fest, den kein Linux-Rezept nennt. Der
+  Builder, die Prüfung auf gleiche Builds im Build-Service, die Rezept-Tools und die Rezeptprüfung bei der Installation
+  nutzen jetzt einen Helfer (`community_manager.installed_digest` / `same_content`, über
+  `Provenance.installed_unchanged`): Ein seit der Installation unverändertes Paket gilt als der eigene Inhalt des
+  Pakets; ein bearbeitetes Target bleibt ein anderes Target.
+
 ## [3.1.0] - 2026-10-29
 
 ### Hinzugefügt
@@ -4466,6 +4478,7 @@ Cross-Kompilierung zu ermöglichen.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Grundlegende Unterstützung für die Cross-Kompilierung für Rockchip RK3588/RK3566.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Einstiegspunkte für CLI (`llm-cli`) und GUI (`llm-gui`).
 
+[3.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v2.4.0...v3.0.0
 [2.4.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v1.7.0...v2.4.0

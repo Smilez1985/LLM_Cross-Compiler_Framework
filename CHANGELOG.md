@@ -9,6 +9,17 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 (`` `YYYY-MM-DD HH:MM UTC` · `vX.Y.Z` ``) and is written under the version it lands in. Planned work is listed in the
 [roadmap](docs/ROADMAP.md), not here; how the framework is built and why is in the [design](docs/DESIGN.md).
 
+## [3.2.0] - 2026-10-30
+
+### Fixed
+- `2026-10-30 00:48 UTC` · `v3.2.0` **A recipe bound to a target pack made on Linux verifies on Windows**: Windows keeps no execute bit, so the
+  installed copy of a target pack with `0o755` scripts gave another folder digest there, and the recipe install check
+  said "your copy of target ... differs", the recipe tools called the target different, and a build recorded a digest
+  no Linux recipe names. The builder, the build service's identical-build check, the recipe tools and the recipe
+  install check now use one helper (`community_manager.installed_digest` / `same_content`, over
+  `Provenance.installed_unchanged`): an installed pack unchanged since its install counts as the pack's own content;
+  an edited target is still another target.
+
 ## [3.1.0] - 2026-10-29
 
 ### Added
@@ -3933,6 +3944,7 @@ taken from source headers and the git history (2025-12-13 to 2026-01-14).
 - `2025-11-20 00:00 UTC` · `v1.0.0` Basic support for Rockchip RK3588/RK3566 cross-compilation.
 - `2025-11-20 00:00 UTC` · `v1.0.0` CLI (`llm-cli`) and GUI (`llm-gui`) entry points.
 
+[3.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v2.4.0...v3.0.0
 [2.4.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v1.7.0...v2.4.0
