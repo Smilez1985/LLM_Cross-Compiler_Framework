@@ -1588,7 +1588,25 @@ class CommunityManager:
             if not rag_manager.release_holder(holder):
                 result.failed.append((f"the excerpts of {kind} pack {prov.id}",
                                       "not removed: the knowledge base could not be written"))
+            else:
+                # the pack's import notes may come back from the trash with it: this note makes the next import
+                # store its pages again, since they left the knowledge base now
+                note = self._released_note(holder)
+                try:
+                    ensure_directory(note.parent)
+                    note.write_text(datetime.now().isoformat(), encoding="utf-8")
+                except OSError as e:
+                    self.logger.warning(f"Could not note that {kind} pack {prov.id} left the knowledge base: {e}")
+                self._reimport_shared(rag_manager, getattr(rag_manager, "last_released", None) or (), holder)
         return result
+
+    def _released_note(self, origin: str) -> Path:
+        """The note an uninstall leaves for a pack whose excerpts left the knowledge base (`origin`: its holder): while
+        it is there, the pack's import note does not count, so a pack restored from the trash with its notes is
+        imported again; the import removes it."""
+        if origin.startswith(TARGET_ORIGIN):
+            return self.knowledge_dir / TARGET_MARKERS / f"{origin[len(TARGET_ORIGIN):]}.released"
+        return self.knowledge_dir / f"{origin}.released"
 
     # --- verify -----------------------------------------------------------------------------------------------
     def verify_installed(self) -> List[Tuple[Path, Provenance, Optional[TrustLevel], List[str]]]:
@@ -1837,8 +1855,8 @@ class CommunityManager:
         # sorts them, prepare_sort); a pack whose files changed since it was installed is not imported either.
         pending = []
         for item in self._knowledge_imports():
-            if item.marker.exists():
-                continue
+            if item.marker.exists() and not self._released_note(item.origin).exists():
+                continue   # imported (a pack restored from the trash after an uninstall is imported again)
             try:
                 digest = tree_sha256(item.folder)
                 unchanged = (item.provenance.installed_unchanged(digest) if item.provenance is not None
@@ -1853,8 +1871,9 @@ class CommunityManager:
             pending.append(item)
         # A pack that cannot be imported yet stays pending and is tried again at every start: its snapshot is taken
         # once (<pack>.snapshotted names the file it was taken for), never one per start (none is deleted by itself)
-        fresh = [(item.marker.with_suffix(".snapshotted"), _file_stamp(item.file)) for item in pending]
-        fresh = [(mark, stamp) for mark, stamp in fresh if _read_text(mark) != stamp]
+        fresh = [(item.marker.with_suffix(".snapshotted"), _file_stamp(item.file), item) for item in pending]
+        fresh = [(mark, stamp) for mark, stamp, item in fresh
+                 if _read_text(mark) != stamp or self._released_note(item.origin).exists()]
         if fresh and callable(getattr(rag_manager, "create_snapshot", None)):
             from orchestrator.Core.knowledge_snapshots import SnapshotNoRoom
             try:
@@ -1879,6 +1898,7 @@ class CommunityManager:
                     continue
                 ensure_directory(item.marker.parent)
                 item.marker.write_text(datetime.now().isoformat(), encoding="utf-8")
+                self._released_note(item.origin).unlink(missing_ok=True)
             except Exception as e:  # noqa: BLE001 - one pack never stops the others; the person reads why
                 waiting[_folder_key(item.folder)] = f"{item.label}: not imported ({redact_secrets(str(e))[:300]})"
                 self.logger.error(f"Knowledge import failed for {item.label}: {e}")
@@ -1986,12 +2006,10 @@ class CommunityManager:
         for entry in data:
             if not isinstance(entry, dict):
                 continue
-            meta = entry.get("metadata")
-            meta = {k: v for k, v in (meta.items() if isinstance(meta, dict) else ()) if k not in ORIGIN_FIELDS}
-            meta.update(origin_pack=item.origin, origin_sha256=item.expected, **item.tags)
             # A page with origin_pack is outside text: the knowledge base stores it cleaned (hidden HTML, invisible
             # characters and HTML comments left out; RAGManager.ingest_document)
-            if rag_manager.ingest_document(entry.get("source", ""), entry.get("content", ""), meta):
+            if rag_manager.ingest_document(entry.get("source", ""), entry.get("content", ""),
+                                           self._page_meta(item, entry)):
                 imported += 1
             elif str(entry.get("content") or "").strip():
                 failed += 1  # refused, e.g. offline without the embedding model
@@ -2001,11 +2019,51 @@ class CommunityManager:
             return imported, (f"{item.label}: {failed} page(s) not imported yet; tried again when the knowledge base "
                               "starts next time")
         remove = getattr(rag_manager, "remove_pack_leftovers", None)
-        if callable(remove) and any(remove(origin, item.expected) is False
-                                    for origin in (item.origin, *item.legacy_origins)):
-            return imported, (f"{item.label}: the excerpts of its older version could not be removed yet; tried "
-                              "again when the knowledge base starts next time")
+        released: set = set()
+        if callable(remove):
+            for origin in (item.origin, *item.legacy_origins):
+                if remove(origin, item.expected) is False:
+                    return imported, (f"{item.label}: the excerpts of its older version could not be removed yet; "
+                                      "tried again when the knowledge base starts next time")
+                released |= set(getattr(rag_manager, "last_released", None) or ())
+        self._reimport_shared(rag_manager, released, item.origin)
         return imported, ""
+
+    @staticmethod
+    def _page_meta(item: _KnowledgeImport, entry: dict) -> dict:
+        """The metadata one page of a pack is stored with: its own (without the fields only the import sets), the
+        pack (origin_pack), its content digest (origin_sha256) and its topic or target."""
+        meta = entry.get("metadata")
+        meta = {k: v for k, v in (meta.items() if isinstance(meta, dict) else ()) if k not in ORIGIN_FIELDS}
+        meta.update(origin_pack=item.origin, origin_sha256=item.expected, **item.tags)
+        return meta
+
+    def _reimport_shared(self, rag_manager, sources: Iterable[str], released_by: str) -> int:
+        """After `released_by` let go of the excerpts of `sources` and nobody else was named as holding them: the other
+        imported packs that carry one of these pages store it again. An excerpt stored before excerpts named their
+        holders (3.1.0) names only the pack that wrote it last, so the other pack's hold was not known; its own copy of
+        the page comes back from its own pages. Returns the pages stored again; a pack that cannot be read is
+        skipped (logged)."""
+        gone = {str(s) for s in sources if s}
+        if not gone or rag_manager is None:
+            return 0
+        again = 0
+        for item in self._knowledge_imports():
+            if item.origin == released_by or not item.marker.exists():
+                continue   # a pack not imported yet stores every page at its own import
+            try:
+                data = json.loads(item.file.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as e:
+                self.logger.warning(f"Could not read {item.label} to keep its shared pages: {e}")
+                continue
+            for entry in data if isinstance(data, list) else ():
+                if isinstance(entry, dict) and str(entry.get("source") or "") in gone and \
+                        rag_manager.ingest_document(entry.get("source", ""), entry.get("content", ""),
+                                                    self._page_meta(item, entry)):
+                    again += 1
+        if again:
+            self.logger.info(f"{again} shared page(s) stored again for the packs that still carry them.")
+        return again
 
     def _knowledge_pages(self, root_urls: Optional[Iterable[str]] = None) -> Tuple[List[dict], int]:
         """knowledge_share without the list of pages."""

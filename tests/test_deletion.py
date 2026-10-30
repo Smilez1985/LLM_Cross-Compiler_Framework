@@ -43,6 +43,8 @@ BOARD_MOVED = ("a move the person confirmed (Q5/P6, a board's new host key): the
 UNUSED = "OPEN (reported): no caller; must get a plan before it is wired"
 IMPORT_MARKS = ("bookkeeping: the framework's own import note of an installed pack (and its snapshot note), removed so "
                 "the pack is imported again after the person's yes in Mojo Miracle (knowledge.reimport)")
+RELEASED_NOTE = ("bookkeeping: the framework's own note that an uninstalled pack's excerpts left the knowledge base, "
+                 "removed once the pack (restored from the trash or installed again) is imported again")
 KNOWLEDGE_REPLACED = ("the knowledge base's own storage: a collection replaced by a restore, which saves the current "
                       "content as a snapshot first (round 5 b); clear_knowledge_base, its other caller, has no caller "
                       "(OPEN, reported)")
@@ -82,6 +84,7 @@ DELETION_SITES = {
     # covers no plan, another actor and a changed list)
     ("orchestrator/Core/community_manager.py", "CommunityManager.uninstall"): PERSON,
     ("orchestrator/Core/community_manager.py", "CommunityManager.import_again"): IMPORT_MARKS,
+    ("orchestrator/Core/community_manager.py", "CommunityManager.sync_knowledge_base"): RELEASED_NOTE,
     # temporary and partial files
     ("orchestrator/Core/build_records.py", "write_record"): TEMP,
     ("orchestrator/Core/client_proposals.py", "ClientProposalStore._write"): TEMP,
