@@ -37,6 +37,34 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   list, the stage shows the bytes without a percent; after a cancel nothing is written any more. The Builder's
   progress bar, `get_build_status` and `llm-cli build start --follow` show it; the follow line now carries the live
   stage and percent of the running build (`BuildService.live_progress`).
+- `2026-10-30 01:02 UTC` · `v3.2.0` **Your own crawled pages belong to a topic from the start**: the Deep Ingest window asks for the topic of the
+  crawl's pages (empty: the site's name, such as `docs.example.com`), and every excerpt of the crawl carries it, so
+  `search_knowledge(topic=...)`, the Topic column and the knowledge exports find them under it. A crawl an AI started
+  (`crawl_docs_site`) takes the site's name; it never names a topic itself.
+- `2026-10-30 01:16 UTC` · `v3.2.0` **Uninstall an installed community pack**: `llm-cli zoo uninstall PACK_ID --kind target|recipe|knowledge`, the
+  Community Hub's **Uninstall...** and, for an AI only as a request the person decides, the optional tool
+  `remove_pack` (hidden until enabled, always asked, never granted or delegated, trash only). Everything goes
+  through the deletion rules (`Core/deletion.py`): the exact list first (the pack's folder with its provenance, its
+  import notes, and how many excerpts only this pack holds), "No" by default, then the trash (`Core/trash.py`) or for
+  good, audited before anything goes (`pack_uninstalled`); excerpts another pack or your own crawl still holds stay
+  (`CommunityManager.uninstall_plan` / `uninstall`, `RAGManager.holding`). A pack whose pages are in the knowledge base
+  is refused while the knowledge base is off. A pack restored from the trash after its uninstall is imported again at
+  the next knowledge import (its excerpts left with the uninstall; a note `<pack>.released` says so until then).
+- `2026-10-30 01:38 UTC` · `v3.2.0` **Index entries and the maintainer's review say where a knowledge pack belongs**: a signed index entry of a knowledge
+  pack now carries the topic or target of its manifest (`topic`, `target`; written by the maintainer's publish, left
+  out when unset, so older entries keep their form), and `llm-cli zoo show`, the Community Hub's **Details...**
+  (**Belongs to**), the tool `list_packs` and the maintainer's review line (CLI and GUI) name it before anything is
+  downloaded. A pack must belong where its entry says, or it is not installed. An index with these fields is read
+  only by 3.2.0 and later.
+- `2026-10-30 01:54 UTC` · `v3.2.0` **Packs imported without their topic are found and imported again after your yes**: excerpts an earlier version
+  imported carry neither their pack's digest nor its topic or target, so `search_knowledge(topic=...)`, the Topic or
+  target column and the knowledge exports miss them. When the knowledge base is open, Mojo Oracle names those packs
+  with their excerpts (`community.knowledge.untagged`; `CommunityManager.untagged_imports`, `RAGManager.untagged`), and
+  Mojo Miracle offers to import them again (`knowledge.reimport`, `CommunityManager.import_again`): it shows each pack
+  with its folder, pages and size first and asks you (No is the default), at a terminal or in the Mojo window; a
+  snapshot is taken before the import. It is the first repair of class `person_yes` (verdict `miracle_yes`): it runs
+  only after the person's own yes, never for an AI, which reads it as the person's. The tool description of
+  `search_knowledge` says what `topic` misses until then.
 
 ### Changed
 - `2026-10-29 23:31 UTC` · `v3.2.0` **One install rule for the whole RHEL family** ([design](docs/DESIGN.md#installer-platforms-and-dependencies)):
@@ -93,6 +121,11 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   earlier version (a community pack, a target an earlier module wizard made) still passes `llm-cli targets
   validate`: its profiles in the old format (`cmake_flags`) and benchmarks as a mapping are never read, so none of
   their values is used or shown. A `published` source must be a plain https address (no credential, no text).
+- `2026-10-30 01:26 UTC` · `v3.2.0` **A linked knowledge folder is ignored, and said so**: a symbolic link as `community/knowledge` or in its first two
+  levels was silently left out, so the packs behind it seemed missing. They are still ignored (the framework never
+  follows a link out of its own folders: what is installed and checked must stay where it was checked), and now the
+  pack listing (`llm-cli zoo list`, the Community Hub) and Mojo Oracle (`community.knowledge.links`) name each link,
+  say why, and say to move the folder there instead (`CommunityManager.ignored_links` / `links_note`).
 
 ### Fixed
 - `2026-10-29 23:36 UTC` · `v3.2.0` **Container engine follow-ups: a `DOCKER_HOST` left from Podman, `/dev/dri` under rootless Podman,
@@ -142,6 +175,45 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   distribution's mirrors) is no longer built; one that is on this computer is used, otherwise Docker mode stops
   before anything is built, naming the image and what to do while online, instead of failing deep in a build. A tag
   of a base image an AI proposed for a new module is pinned offline when its registry is in your own network.
+- `2026-10-30 00:48 UTC` · `v3.2.0` **A recipe bound to a target pack made on Linux verifies on Windows**: Windows keeps no execute bit, so the
+  installed copy of a target pack with `0o755` scripts gave another folder digest there, and the recipe install check
+  said "your copy of target ... differs", the recipe tools called the target different, and a build recorded a digest
+  no Linux recipe names. The builder, the build service's identical-build check, the recipe tools and the recipe
+  install check now use one helper (`community_manager.installed_digest` / `same_content`, over
+  `Provenance.installed_unchanged`): an installed pack unchanged since its install counts as the pack's own content;
+  an edited target is still another target.
+- `2026-10-30 00:57 UTC` · `v3.2.0` **Two packs that hold the same page keep it for each other**: an excerpt's id is its page and chunk, never its
+  pack, so two installed packs (or a pack and your own crawl) carrying the same page shared the stored excerpts, and
+  the last import owned them. A newer version of that pack that dropped the page removed it while the other pack still
+  held it, and that pack's marker kept it from being imported again; a re-crawl of a page likewise removed a pack's
+  excerpts of it. Every excerpt now names its holders (`holders`, with each holder's digest, topic or target in
+  `holder_info`; the excerpt id is unchanged); a newer pack version, a re-crawl or an uninstall lets go of only its
+  own hold, and an excerpt goes when nobody holds it any more (`RAGManager.release_holder`). A shared excerpt is found
+  under the topic or target of every holder. Excerpts stored before this name one holder, the one their fields name;
+  when that pack lets go of such a page (an uninstall or a newer version without it), the other imported packs that
+  carry the page store their copy of it again (`CommunityManager._reimport_shared`), so it stays.
+- `2026-10-30 01:03 UTC` · `v3.2.0` **A re-crawl of a site removes the pages that are gone**: pages that vanished from a crawled site kept their
+  excerpts for ever. A crawl of the same start address again replaces its pages, and when it read the whole site
+  (it succeeded, no page limit or request budget ended it, no link was left unread at its depth limit or behind a page
+  left out for its language, nothing failed, was reserved or stopped) the excerpts of the
+  earlier pages it no longer reached are removed too, only where this crawl was their last holder; the result names
+  them (`removed`). A partial or failed crawl removes nothing.
+- `2026-10-30 01:26 UTC` · `v3.2.0` **A topic folder taken by an older pack names that pack and the way out**: when a knowledge pack's topic or target
+  is the folder of a pack installed before knowledge was sorted into topic folders, the refusal said only "choose
+  another topic name", which the person cannot do for a pack from the index. It now names the older pack (kind, id,
+  version) and the way out: uninstall that pack, or install it again (it then moves into its own topic folder), and
+  then install this one; the next step points to **Uninstall...** (`llm-cli zoo uninstall`). Sorting a loose file,
+  where the person chooses the topic, also offers another topic name.
+- `2026-10-30 01:26 UTC` · `v3.2.0` **An edited target or knowledge pack says why it is not imported and how to go on**: a pack whose files changed
+  since its install is still not imported (the check against the signed digest is the security gate), but the
+  waiting reason of the knowledge import and Mojo Oracle's finding now say why and what to do: to undo the edits,
+  uninstall it and install it again; to keep them, copy the target folder under a name of your own and export that
+  as a new pack (a knowledge pack: export your version as a new knowledge pack). Mojo's findings for a revoked or
+  changed pack point to **Uninstall...** instead of telling the person to delete a folder or type a command.
+- `2026-10-30 01:30 UTC` · `v3.2.0` **Tools > Knowledge Sources... shows Topic or target third, as the CLI does**: the window listed the topic or target
+  as its last column, while `llm-cli knowledge sources` shows it third. Both now take their order from one list
+  (`knowledge_sources.COLUMNS`): Source, Kind, Topic or target, Hidden text left out, Licence, Copyright notice, In a
+  pack, Why.
 
 ### Security
 - `2026-10-29 23:50 UTC` · `v3.2.0` **llmcf's SSH settings: a jump or proxy command only with the person's kept yes, no other login

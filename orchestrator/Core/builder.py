@@ -839,14 +839,16 @@ class BuildEngine:
     def _record_target(self, config: BuildConfiguration, progress: BuildProgress, target_path: Path):
         """Notes which target content the build used, for build_info.json and recipes. A community target the
         signed index revoked is not built; one imported from a file without an index entry gets a warning."""
-        from orchestrator.Core.community_manager import build_trust_check
-        from orchestrator.Core.community_pack import PackError, tree_sha256
+        from orchestrator.Core.community_manager import build_trust_check, installed_digest
+        from orchestrator.Core.community_pack import PackError
         state = getattr(self.config, "user_state_dir", None)
         warning = build_trust_check(target_path, Path(state) / "community" if state else None)
         if warning:
             progress.add_warning(warning)
         try:
-            config.target_pack_sha256 = tree_sha256(target_path)
+            # the installed pack's own digest where this file system dropped its modes (Windows), so a recipe made
+            # here binds to the same target as one made elsewhere
+            config.target_pack_sha256 = installed_digest(target_path)
         except (PackError, OSError) as e:
             progress.add_warning(f"Target fingerprint not recorded, so this build cannot become a recipe: {e}")
         try:

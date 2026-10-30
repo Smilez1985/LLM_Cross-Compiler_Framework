@@ -131,7 +131,9 @@ class CommunityHubWindow(QMainWindow):
         self.export_btn = self._action_button("zoo.export", self.export_pack, "btn_zoo_export")
         self.sort_btn = self._action_button("zoo.sort", self.sort_loose, "btn_zoo_sort")
         self.keys_btn = self._action_button("zoo.keys", self.show_keys, "btn_zoo_keys")
-        for button in (self.details_btn, self.verify_btn, self.verify_file_btn, self.export_btn, self.sort_btn):
+        self.uninstall_btn = self._action_button("zoo.uninstall", self.uninstall_selected, "btn_zoo_uninstall")
+        for button in (self.details_btn, self.verify_btn, self.verify_file_btn, self.export_btn, self.sort_btn,
+                       self.uninstall_btn):
             actions.addWidget(button)
         actions.addStretch()
         actions.addWidget(self.keys_btn)
@@ -260,6 +262,54 @@ class CommunityHubWindow(QMainWindow):
         self._details_for = item.id
         self.status_label.setText(ui_text("zoo.details.loading", self.lang, kind=item.kind, id=item.id))
         self._run(self.comm_manager.details, self._show_details, item.id, item.kind)
+
+    def uninstall_selected(self):
+        """Uninstall...: the selected installed pack's exact list (CommunityManager.uninstall_plan: its folder, its
+        import notes, the excerpts only it holds) in the deletion dialog, "No" by default, to the trash or for good;
+        then CommunityManager.uninstall, the same as `llm-cli zoo uninstall ID --kind KIND`."""
+        from orchestrator.Core.community_pack import PackError
+        from orchestrator.Core.deletion import PlanChanged
+        from orchestrator.Core.trash import Trash
+        from orchestrator.gui.deletion_dialog import ask_deletion
+        item = self.selected_item()
+        if item is None:
+            self.status_label.setText(ui_text("zoo.choose_first", self.lang))
+            return
+        if not self.comm_manager:
+            self.on_error("Community Manager missing.")
+            return
+        if not item.installed_version:
+            self.status_label.setText(ui_text("zoo.uninstall.not_installed", self.lang, id=item.id))
+            return
+        try:
+            plan = self.comm_manager.uninstall_plan(item.kind, item.id)
+        except PackError as e:
+            self.on_error(str(e))
+            return
+        accepted = ask_deletion(self, plan, title=ui_text("zoo.uninstall.title", self.lang, kind=item.kind,
+                                                          id=item.id), lang=self.lang)
+        if accepted is None:
+            return
+        audit = getattr(getattr(self.framework_manager, "tool_registry", None), "audit", None)
+        try:
+            trash = Trash.for_framework(self.framework_manager) if accepted.mode == "trash" else None
+            result = self.comm_manager.uninstall(item.kind, item.id, accepted, trash=trash, audit=audit)
+        except PlanChanged:
+            self.on_error(ui_text("deletion.changed", self.lang))
+            self.refresh_list()
+            return
+        except (PermissionError, RuntimeError) as e:
+            self.on_error(ui_text("deletion.failed", self.lang, reason=one_line(str(e))))
+            return
+        done = "deletion.done.trash" if accepted.mode == "trash" else "deletion.done.permanent"
+        lines = [ui_text(done, self.lang, name=one_line(n)) for n in result.done]
+        lines += [ui_text("deletion.kept", self.lang, name=one_line(n), reason=one_line(r)) for n, r in result.failed]
+        self.refresh_list()
+        plain_box(self, "warning" if result.failed else "information",
+                  ui_text("zoo.uninstall.title", self.lang, kind=item.kind, id=item.id), "\n".join(lines))
+        if item.kind == "target" and getattr(self.framework_manager, "target_manager", None):
+            self.framework_manager.target_manager.initialize()
+        self.installed.emit(item.kind)
 
     def _show_details(self, found):
         if not found:

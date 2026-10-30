@@ -82,8 +82,8 @@ def sparse_of(vector: Any) -> Optional[SparseVec]:
 
 class KnowledgeStore:
     """The active collection of one embedding model. Subclasses implement the storage (ensure, point, upsert,
-    delete_stale, delete_origin_stale, query, count, records, payloads, source_records, recreate, drop_all,
-    knowledge_collections, status);
+    delete_stale, delete_origin_stale, records_where, retrieve, delete_ids, query, count, records, payloads,
+    source_records, recreate, drop_all, knowledge_collections, status);
     the snapshot files are the same for all of them."""
 
     UPSERT_BATCH = 64

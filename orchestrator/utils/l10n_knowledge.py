@@ -124,6 +124,12 @@ TEXTS = {
         "zoo.keys": "My public keys...",
         "zoo.keys.tip": "Your public keys, to give to people who send you encrypted packs or check your signed packs",
         "zoo.choose_first": "Choose a pack in the list first.",
+        "zoo.uninstall": "Uninstall...",
+        "zoo.uninstall.tip": "Uninstalls the selected installed pack: the exact list first (its folder, its import "
+                             "notes, the excerpts only it holds), to the trash or for good; excerpts another pack "
+                             "still holds stay",
+        "zoo.uninstall.title": "Uninstall {kind} pack {id}",
+        "zoo.uninstall.not_installed": "{id} is not installed; there is nothing to uninstall.",
         "zoo.details.loading": "Reading the details of {kind} {id}...",
         "zoo.details.title": "Pack details",
         "zoo.details.none": "{id} is neither in the cached index nor installed; Refresh downloads the index again.",
@@ -136,6 +142,8 @@ TEXTS = {
         "zoo.field.size": "Size",
         "zoo.field.sha256": "sha256",
         "zoo.field.description": "Description",
+        "zoo.field.belongs": "Belongs to",
+        "zoo.value.belongs.none": "no topic or target named (made before topics: installs under its id)",
         "zoo.field.recipe": "recipe.yml",
         "zoo.value.pack": "{kind} {id} {version} by {author}",
         "zoo.value.unknown_licence": "licence unknown",
@@ -388,6 +396,12 @@ TEXTS = {
         "zoo.keys.tip": "Deine öffentlichen Schlüssel, für Leute, die dir verschlüsselte Pakete schicken oder deine "
                         "signierten Pakete prüfen",
         "zoo.choose_first": "Wähle zuerst ein Paket in der Liste.",
+        "zoo.uninstall": "Deinstallieren...",
+        "zoo.uninstall.tip": "Deinstalliert das gewählte installierte Paket: zuerst die genaue Liste (sein Ordner, "
+                             "seine Import-Notizen, die Auszüge, die nur es hält), in den Papierkorb oder endgültig; "
+                             "Auszüge, die ein anderes Paket noch hält, bleiben",
+        "zoo.uninstall.title": "{kind}-Paket {id} deinstallieren",
+        "zoo.uninstall.not_installed": "{id} ist nicht installiert; es gibt nichts zu deinstallieren.",
         "zoo.details.loading": "Die Details von {kind} {id} werden gelesen...",
         "zoo.details.title": "Paket-Details",
         "zoo.details.none": "{id} ist weder im zwischengespeicherten Index noch installiert; Refresh lädt den Index "
@@ -401,6 +415,9 @@ TEXTS = {
         "zoo.field.size": "Größe",
         "zoo.field.sha256": "sha256",
         "zoo.field.description": "Beschreibung",
+        "zoo.field.belongs": "Gehört zu",
+        "zoo.value.belongs.none": "kein Thema oder Target genannt (vor den Themen erstellt: wird unter seiner ID "
+                                  "installiert)",
         "zoo.field.recipe": "recipe.yml",
         "zoo.value.pack": "{kind} {id} {version} von {author}",
         "zoo.value.unknown_licence": "Lizenz unbekannt",

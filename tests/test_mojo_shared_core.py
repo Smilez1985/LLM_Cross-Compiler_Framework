@@ -112,7 +112,7 @@ def test_miracle_can_names_one_kind_for_every_verdict_in_the_clis_words():
     assert miracle_can(snapshots, True) == ("other_list", {"reason": "deleting needs your list",
                                                            "where": OTHER_LISTS["knowledge.snapshots"]})
     assert miracle_line(person, True) == "Mojo Miracle cannot repair it: needs you."
-    assert set(MIRACLE_LINES) == {"repair", "list", "list_elsewhere", "other_list", "cannot"}
+    assert set(MIRACLE_LINES) == {"repair", "list", "list_elsewhere", "other_list", "cannot", "ask", "ask_elsewhere"}
     assert miracle_acts([repair, images, snapshots, person]) == [repair, images], \
         "Mojo Miracle is offered for its repairs and the lists it opens"
 

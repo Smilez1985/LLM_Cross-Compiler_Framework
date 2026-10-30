@@ -122,11 +122,12 @@ class CrawlWorker(QThread):
     error = Signal(str)
 
     def __init__(self, rag_manager, urls: List[str], options: Dict[str, Any],
-                 announcer: Optional[Callable[[str], Any]] = None, lang: Optional[str] = None):
+                 announcer: Optional[Callable[[str], Any]] = None, lang: Optional[str] = None, topic: str = ""):
         super().__init__()
         self.rag_manager = rag_manager
         self.urls = urls
         self.options = options
+        self.topic = topic   # every page's topic; "" for each site's name
         self.announcer = announcer
         self.lang = lang or current_language()
         self._stop = threading.Event()
@@ -144,7 +145,7 @@ class CrawlWorker(QThread):
                 self.progress.emit(f"Crawling root: {url}...")
                 # the person's crawl (actor "gui"): in offline mode it may read the own network (round 26 Q5)
                 result = self.rag_manager.ingest_url(url, self.options, stop=self._stop, progress=self.page.emit,
-                                                     actor="gui")
+                                                     actor="gui", **({"topic": self.topic} if self.topic else {}))
                 if result.get("blocker") == "snapshot_no_room":  # no snapshot, no crawl: nothing more is read
                     self.no_room = str(result.get("message") or "")
                     outcomes.append("failure")
@@ -811,7 +812,8 @@ Setup commands:
             self.status_label.setText(ui_text("crawl.progress.start", lang))
 
             # Start Worker
-            self.crawl_worker = CrawlWorker(rag, urls, options, announcer=speak, lang=lang)
+            topic = dlg.get_topic() if hasattr(dlg, "get_topic") else ""
+            self.crawl_worker = CrawlWorker(rag, urls, options, announcer=speak, lang=lang, topic=topic)
             self.crawl_worker.progress.connect(self.on_crawl_progress)
             self.crawl_worker.page.connect(self.on_crawl_page)
             self.crawl_worker.done.connect(self.on_crawl_done)

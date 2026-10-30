@@ -28,6 +28,10 @@ REMOVED = {"template": "template", "noscript": "noscript", "hidden_attribute": "
            "clipped": "clipped away", "same_colour": "text in its background colour",
            "invisible_characters": "invisible characters", "html_comments": "HTML comments"}
 REMOVED_NONE = "none"
+# The columns of the list, in this order on both (`llm-cli knowledge sources`, Tools > Knowledge Sources...: its
+# sources.col.* texts in English are these words): what a source is and where it belongs come first.
+COLUMNS = ("Source", "Kind", "Topic or target", "Hidden text left out", "Licence", "Copyright notice", "In a pack",
+           "Why")
 
 
 class KnowledgeOff(RuntimeError):
@@ -72,7 +76,10 @@ def belongs_to(entry: Dict[str, Any], topic: Optional[str]) -> bool:
     if not topic:
         return True
     wanted = str(topic).strip().casefold()
-    return any(str(entry.get(key) or "").casefold() == wanted for key in ("topic", "target"))
+    # an excerpt several packs (or a pack and your own crawl) hold belongs to the topic or target of each of them
+    holders = entry.get("holder_info")
+    owners = [entry] + [v for v in holders.values() if isinstance(v, dict)] if isinstance(holders, dict) else [entry]
+    return any(str(owner.get(key) or "").casefold() == wanted for owner in owners for key in ("topic", "target"))
 
 
 def carried(entry: Dict[str, Any]) -> str:

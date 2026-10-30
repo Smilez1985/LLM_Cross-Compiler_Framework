@@ -347,7 +347,8 @@ class TestScope:
         assert NEVER_GRANT == {"deploy_to_device", "probe_remote_device", "deploy_device_runtime",
                                "run_device_benchmark", "update_settings", "crawl_docs_site",
                                "create_target_module", "export_pack", "resolve_healing", "cancel_build", "cancel_job",
-                               "delete_artifact", "restore_knowledge_snapshot"}
+                               "delete_artifact", "restore_knowledge_snapshot",
+                               "remove_pack"}   # an AI's uninstall request: the person decides each time
         for name in sorted(NEVER_GRANT):
             with pytest.raises(ValueError, match="never gets a standing approval"):
                 env.registry.register(ToolSpec(name, name, "", ToolTier.LOCAL_WRITE, PackIn, PackOut,

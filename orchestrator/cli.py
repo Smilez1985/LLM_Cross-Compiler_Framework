@@ -3592,7 +3592,8 @@ def mojo(ctx: FrameworkContext, mode: str, as_json: bool, board: Optional[str]):
     try:
         # The plans printed above bind the repairs: a problem that changed since then is not repaired (plan_changed).
         result = engine.miracle(actor="cli", at_terminal=terminal, before=report, offered=offered,
-                                free_space=(lambda: _mojo_free_space(framework)) if terminal else None, **asked)
+                                free_space=(lambda: _mojo_free_space(framework)) if terminal else None,
+                                confirm=_mojo_confirm if terminal else None, **asked)
         _mojo_print_miracle(result)
         if circle:
             _mojo_print_circle(result)
@@ -3680,6 +3681,17 @@ def _mojo_print_oracle(report, offered, terminal: bool) -> None:
             console.print(f"      Plan: {escape(step.target_label)}{escape(where)}: {escape(step.before)} → "
                           f"{escape(step.after)}" + (", can be undone" if step.undoable else ""))
     console.print(escape(oracle_summary(offered, person=True)))
+
+
+def _mojo_confirm(offer) -> bool:
+    """The person's own yes to one repair of class person (its plan with what it costs, printed again), "No" the
+    default; Mojo Miracle asks it only at a terminal."""
+    from orchestrator.Core.mojo.views import plan_steps
+    console.print(f"\n{escape(offer.plan.summary)}.")
+    for step in plan_steps(offer):
+        where = f" ({step.full_path})" if step.full_path else ""
+        console.print(f"  {escape(step.target_label)}{escape(where)}: {escape(step.before)} → {escape(step.after)}")
+    return click.confirm("Do it now?", default=False)
 
 
 def _mojo_print_miracle(result) -> None:
@@ -4183,8 +4195,7 @@ def knowledge_sources(ctx: FrameworkContext, kind: str, topic: Optional[str]):
         console.print(escape(ks.empty_sentence(kind, topic)))
         return
     table = Table(title="Knowledge sources, their licence and what a knowledge pack carries of them")
-    for column in ("Source", "Kind", "Topic or target", "Hidden text left out", "Licence", "Copyright notice",
-                   "In a pack", "Why"):
+    for column in ks.COLUMNS:
         table.add_column(column, overflow="fold")
     for e in entries:   # addresses, titles and notices are site text: escaped, never markup
         table.add_row(escape(e["source"]), e["kind"], escape(ks.topic_of(e)), ks.removed_text(e),
@@ -6641,6 +6652,40 @@ def _say_knowledge_import(cm) -> None:
     elif getattr(cm, "last_sync_snapshot", None):
         console.print(f"The knowledge base was saved first as the snapshot {escape(cm.last_sync_snapshot)} "
                       "('llm-cli knowledge snapshots' lists it).")
+
+
+@zoo.command('uninstall')
+@click.argument('pack_id')
+@click.option('--kind', type=click.Choice(ZOO_KINDS), required=True, help='Kind of the installed pack')
+@pass_context
+def zoo_uninstall(ctx: FrameworkContext, pack_id: str, kind: str):
+    """Uninstall an installed pack: the exact list first (its folder, its import notes, the excerpts only it holds),
+    to the trash or for good, "No" by default; excerpts another pack still holds stay"""
+    from orchestrator.Core.community_pack import PackError
+    from orchestrator.Core.deletion import PlanChanged, size_text
+    cm = _zoo(ctx)
+    try:
+        plan = cm.uninstall_plan(kind, pack_id)
+    except PackError as e:
+        _zoo_fail(e)
+    accepted = confirm_deletion(plan, title=f"Uninstall {kind} pack {pack_id} ({size_text(plan.total_bytes)})",
+                                again=f"llm-cli zoo uninstall {pack_id} --kind {kind}", verb="Uninstall")
+    if accepted is None:
+        sys.exit(1)
+    try:
+        result = cm.uninstall(kind, pack_id, accepted, trash=_cli_trash(ctx), audit=_cli_audit(ctx))
+    except PlanChanged as e:
+        _zoo_fail(e)
+    except (PermissionError, RuntimeError) as e:
+        _zoo_fail(e)
+    for name, reason in result.failed:
+        console.print(f"[yellow]Not removed: {escape(name)} ({escape(reason)})[/yellow]")
+    where = "moved to the trash ('llm-cli trash list' shows it)" if result.trash_ids else \
+        f"deleted for good, {size_text(result.freed_bytes)} freed"
+    console.print(f"[green]Uninstalled {kind} {escape(pack_id)}: {len(result.done)} item(s) {where}.[/green]")
+    if kind == "target" and getattr(ctx.framework_manager, "target_manager", None):
+        ctx.framework_manager.target_manager.initialize()
+    sys.exit(1 if result.failed else 0)
 
 
 @zoo.command('verify')

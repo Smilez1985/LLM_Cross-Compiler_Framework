@@ -156,6 +156,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `config output-folder` | Den Ausgabeordner zeigen oder festlegen, in dem fertige Modelle gespeichert werden |
 | `zoo list` / `zoo show` | Den Community-Zoo und die installierten Pakete auflisten / einen Eintrag zeigen |
 | `zoo install` / `zoo verify` | Ein Community-Paket nach Prüfungen und deiner Bestätigung installieren / installierte Pakete oder eine Paketdatei prüfen |
+| `zoo uninstall` | Ein installiertes Paket nach der genauen Liste und deiner Bestätigung deinstallieren („Nein“ als Vorgabe) |
 | `zoo export` / `zoo keys` | Ein signiertes Paket aus deinem Target, Build oder deiner Wissensbasis machen (und einen Pull-Request öffnen) / deine öffentlichen Schlüssel zeigen |
 | `zoo maintainer key` / `review` / `revoke` | Für den Maintainer des Community-Repositorys: den Signaturschlüssel des Index anlegen / Beiträge prüfen und veröffentlichen / ein veröffentlichtes Paket zurückziehen |
 
@@ -359,11 +360,12 @@ Urheberrechtshinweis und dem, was ein Wissenspaket von ihr enthielte, und warum:
 die Weitergabe des Textes), **link and short facts** (ein Urheberrechtshinweis ohne eine solche Lizenz, Code ohne
 Lizenz, eine unbekannte Lizenz) oder **not exported** (eine Seite eines installierten Wissenspakets, die eigenen
 Dokumente des Frameworks). Adressen, Titel und Hinweise sind Text der Website und werden als reiner Text gezeigt. Die
-Wissensbasis muss eingeschaltet sein. Die Spalte **Thema oder Target** nennt das Thema oder Target, zu dem die Auszüge
-eines Wissenspakets oder eines Target-Pakets gehören (`-` für deine eigenen Seiten, die beim Export eins bekommen);
+Wissensbasis muss eingeschaltet sein. Die dritte Spalte, **Thema oder Target**, nennt das Thema oder Target, zu dem die
+Auszüge eines Wissenspakets oder eines Target-Pakets gehören, und das Thema deines eigenen Crawls (`-` für andere
+eigene Seiten, die beim Export eins bekommen);
 `--topic NAME` listet nur die Quellen dieses Themas oder Targets (Groß- und Kleinschreibung egal).
 
-In der GUI: **Tools > Wissensquellen...** (dieselben Spalten; der Filter **Art** ist `--kind`, das Feld **Thema oder
+In der GUI: **Tools > Wissensquellen...** (dieselben Spalten in derselben Reihenfolge; der Filter **Art** ist `--kind`, das Feld **Thema oder
 Target** ist `--topic`).
 
 ```bash
@@ -2495,7 +2497,8 @@ llm-cli zoo show PACK_ID [--kind target|recipe|knowledge]
 ```
 
 Zeigt einen Eintrag: Art, ID, Version, Autor und Lizenz, Vertrauensstufe (und warum es zurückgezogen wurde), wo es
-installiert ist, die Download-Adresse mit Größe und sha256, die Beschreibung und bei einem installierten Rezept
+installiert ist, die Download-Adresse mit Größe und sha256, bei einem Wissenspaket, wohin es gehört (**Belongs to:**
+das Thema oder Target, das sein Indexeintrag nennt), die Beschreibung und bei einem installierten Rezept
 dessen `recipe.yml`. Groß- und Kleinschreibung der ID spielt keine Rolle. Der Befehl liest nur den
 zwischengespeicherten Index und die installierten Pakete; führe zuerst `zoo list --refresh` aus, um neue Einträge zu
 sehen. Eine unbekannte ID endet mit Exit-Code 1.
@@ -2590,6 +2593,29 @@ prüfen...** (`PACK_FILE`).
 ```bash
 llm-cli zoo verify
 llm-cli zoo verify community/contributions/contribution-target-my-board-1.0.0.zip
+```
+
+### zoo uninstall
+
+```
+llm-cli zoo uninstall PACK_ID --kind target|recipe|knowledge
+```
+
+Deinstalliert ein installiertes Community-Paket. Zuerst listet es genau auf, was geht: den Ordner des Pakets mit
+seiner Herkunftsangabe, seine Import-Notizen im Wissensordner und (bei einem Wissenspaket oder dem Wissens-Snapshot
+eines Target-Pakets) wie viele Auszüge nur dieses Paket hält; Auszüge, die ein anderes Paket oder dein eigener Crawl
+auch hält, bleiben. Dann fragt es, ob alles in den Papierkorb soll (wiederherstellbar mit `llm-cli trash restore`) oder
+endgültig gelöscht wird, und „Genau N Einträge (Größe) deinstallieren?“ mit „Nein“ als Vorgabe. Nur an einem Terminal;
+ohne eines wird nichts gelöscht. Ein Paket, dessen Seiten in der Wissensbasis sind, wird abgelehnt, solange die
+Wissensbasis aus ist. Um eine neuere Version eines Pakets zu installieren, deinstalliere zuerst die alte. Exit-Code 1,
+wenn nichts deinstalliert wurde oder ein Eintrag nicht entfernt werden konnte.
+
+In der GUI: **Tools > Community Hub öffnen**, das installierte Paket wählen, **Deinstallieren...**. Eine KI darf nur
+darum bitten (das optionale Tool `remove_pack`, verborgen, bis du es freigibst): Du siehst dieselbe Liste im
+eigenen Fenster des Frameworks und entscheidest, und ihre Bitte verschiebt nur in den Papierkorb.
+
+```bash
+llm-cli zoo uninstall rk3588-docs --kind knowledge
 ```
 
 ### zoo export

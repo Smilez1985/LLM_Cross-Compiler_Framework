@@ -40,6 +40,37 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   ohne Prozentwert; nach einem Abbruch wird nichts mehr geschrieben. Der Fortschrittsbalken des Builders,
   `get_build_status` und `llm-cli build start --follow` zeigen ihn; die Follow-Zeile trägt jetzt Stufe und Prozentwert
   des laufenden Builds (`BuildService.live_progress`).
+- `2026-10-30 01:02 UTC` · `v3.2.0` **Deine eigenen gecrawlten Seiten gehören von Anfang an zu einem Thema**: Das Deep-Ingest-Fenster fragt nach
+  dem Thema der Seiten des Crawls (leer: der Name der Site, etwa `docs.example.com`), und jeder Auszug des Crawls
+  trägt es, sodass `search_knowledge(topic=...)`, die Spalte „Thema“ und die Wissensexporte sie darunter finden. Ein
+  Crawl, den eine KI gestartet hat (`crawl_docs_site`), nimmt den Namen der Site; sie nennt nie selbst ein Thema.
+- `2026-10-30 01:16 UTC` · `v3.2.0` **Ein installiertes Community-Paket deinstallieren**: `llm-cli zoo uninstall PACK_ID --kind
+  target|recipe|knowledge`, **Deinstallieren...** im Community Hub und, für eine KI nur als Bitte, über die die Person
+  entscheidet, das optionale Tool `remove_pack` (verborgen, bis es freigegeben ist, immer mit Frage, nie als
+  dauerhafte Freigabe oder Delegation, nur in den Papierkorb). Alles läuft über die Löschregeln (`Core/deletion.py`):
+  zuerst die genaue Liste (der Ordner des Pakets mit seiner Herkunftsangabe, seine Import-Notizen und wie viele Auszüge
+  nur dieses Paket hält), „Nein“ als Vorgabe, dann der Papierkorb (`Core/trash.py`) oder endgültig, protokolliert, bevor
+  etwas geht (`pack_uninstalled`); Auszüge, die ein anderes Paket oder dein eigener Crawl noch hält, bleiben
+  (`CommunityManager.uninstall_plan` / `uninstall`, `RAGManager.holding`). Ein Paket, dessen Seiten in der Wissensbasis
+  sind, wird abgelehnt, solange die Wissensbasis aus ist. Ein Paket, das nach seiner Deinstallation aus dem Papierkorb
+  zurückgeholt wird, wird beim nächsten Wissensimport erneut importiert (seine Auszüge gingen mit der Deinstallation;
+  bis dahin sagt es eine Notiz `<pack>.released`).
+- `2026-10-30 01:38 UTC` · `v3.2.0` **Indexeinträge und die Prüfung des Maintainers sagen, wohin ein Wissenspaket gehört**: Ein signierter Indexeintrag
+  eines Wissenspakets trägt jetzt das Thema oder Target seines Manifests (`topic`, `target`; geschrieben beim
+  Veröffentlichen durch den Maintainer, weggelassen, wenn nicht gesetzt, sodass ältere Einträge ihre Form behalten),
+  und `llm-cli zoo show`, **Details...** im Community Hub (**Gehört zu**), das Tool `list_packs` und die Prüfzeile des
+  Maintainers (CLI und GUI) nennen es, bevor etwas heruntergeladen wird. Ein Paket muss dorthin gehören, wo sein
+  Eintrag es sagt, sonst wird es nicht installiert. Einen Index mit diesen Feldern liest erst 3.2.0 und später.
+- `2026-10-30 01:54 UTC` · `v3.2.0` **Packs, die ohne ihr Thema importiert wurden, werden gefunden und nach deinem Ja neu importiert**: Auszüge, die eine
+  frühere Version importiert hat, tragen weder den Digest ihres Pakets noch sein Thema oder Target, daher übersehen
+  `search_knowledge(topic=...)`, die Spalte Thema oder Target und die Wissensexporte sie. Ist die Wissensbasis offen,
+  nennt Mojo Oracle diese Pakete mit ihren Auszügen (`community.knowledge.untagged`;
+  `CommunityManager.untagged_imports`, `RAGManager.untagged`), und Mojo Miracle bietet an, sie neu zu importieren
+  (`knowledge.reimport`, `CommunityManager.import_again`): Es zeigt zuerst jedes Paket mit Ordner, Seiten und Größe und
+  fragt dich („Nein“ ist die Vorgabe), im Terminal oder im Mojo-Fenster; vor dem Import wird ein Snapshot angelegt. Es
+  ist die erste Reparatur der Klasse `person_yes` (Urteil `miracle_yes`): Sie läuft nur nach dem eigenen Ja der
+  Person, nie für eine KI, für die sie als Sache der Person gilt. Die Tool-Beschreibung von `search_knowledge` sagt,
+  was `topic` bis dahin übersieht.
 
 ### Geändert
 - `2026-10-29 23:31 UTC` · `v3.2.0` **Eine Install-Regel für die ganze RHEL-Familie** ([Design](docs/DESIGN_DE.md#installer-plattformen-und-abhängigkeiten)):
@@ -102,6 +133,12 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   früheren Modul-Assistenten) besteht `llm-cli targets validate` weiter: Ihre Profile im alten Format (`cmake_flags`)
   und Benchmarks als Zuordnung werden nie gelesen, keiner ihrer Werte wird verwendet oder gezeigt. Eine
   `published`-Quelle muss eine einfache https-Adresse sein (ohne Zugangsdaten, ohne Text).
+- `2026-10-30 01:26 UTC` · `v3.2.0` **Ein verlinkter Wissensordner wird übergangen, und das wird gesagt**: Ein symbolischer Link als
+  `community/knowledge` oder in dessen ersten zwei Ebenen wurde still ausgelassen, sodass die Pakete dahinter zu
+  fehlen schienen. Sie werden weiter übergangen (das Framework folgt nie einem Link aus seinen eigenen Ordnern
+  heraus: Was installiert und geprüft ist, muss dort bleiben, wo es geprüft wurde), und jetzt nennen die Paketliste
+  (`llm-cli zoo list`, der Community Hub) und Mojo Oracle (`community.knowledge.links`) jeden Link, sagen warum und
+  dass der Ordner stattdessen dorthin verschoben werden soll (`CommunityManager.ignored_links` / `links_note`).
 
 ### Behoben
 - `2026-10-29 23:36 UTC` · `v3.2.0` **Nacharbeiten an der Container-Engine: ein `DOCKER_HOST` aus Podman-Zeiten, `/dev/dri` unter rootless
@@ -159,6 +196,51 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Docker-Modus an, bevor etwas gebaut wird, und nennt das Image und was online zu tun ist, statt tief in einem Build
   zu scheitern. Ein Tag eines Basis-Images, das eine KI für ein neues Modul vorschlägt, wird offline festgelegt, wenn
   seine Registry in deinem eigenen Netz liegt.
+- `2026-10-30 00:48 UTC` · `v3.2.0` **Ein Rezept zu einem unter Linux gemachten Target-Paket besteht unter Windows**: Windows hält kein
+  Ausführungsbit, deshalb gab die installierte Kopie eines Target-Pakets mit `0o755`-Skripten dort einen anderen
+  Ordner-Digest, und die Rezeptprüfung bei der Installation sagte „deine Kopie von Target ... weicht ab“, die
+  Rezept-Tools nannten das Target anders, und ein Build hielt einen Digest fest, den kein Linux-Rezept nennt. Der
+  Builder, die Prüfung auf gleiche Builds im Build-Service, die Rezept-Tools und die Rezeptprüfung bei der Installation
+  nutzen jetzt einen Helfer (`community_manager.installed_digest` / `same_content`, über
+  `Provenance.installed_unchanged`): Ein seit der Installation unverändertes Paket gilt als der eigene Inhalt des
+  Pakets; ein bearbeitetes Target bleibt ein anderes Target.
+- `2026-10-30 00:57 UTC` · `v3.2.0` **Zwei Pakete mit derselben Seite behalten sie füreinander**: Die Id eines Auszugs ist seine Seite und sein
+  Stück, nie sein Paket, deshalb teilten sich zwei installierte Pakete (oder ein Paket und dein eigener Crawl) mit
+  derselben Seite die gespeicherten Auszüge, und der letzte Import besaß sie. Eine neuere Version dieses Pakets ohne die
+  Seite entfernte sie, obwohl das andere Paket sie noch hatte, und dessen Markierung verhinderte einen neuen Import;
+  ebenso entfernte ein neuer Crawl einer Seite die Auszüge eines Pakets davon. Jeder Auszug nennt jetzt seine Halter
+  (`holders`, mit Digest, Thema oder Target jedes Halters in `holder_info`; die Id des Auszugs bleibt gleich); eine
+  neuere Paketversion, ein neuer Crawl oder eine Deinstallation gibt nur den eigenen Halt auf, und ein Auszug geht erst,
+  wenn ihn niemand mehr hält (`RAGManager.release_holder`). Ein geteilter Auszug wird unter dem Thema oder Target jedes
+  Halters gefunden. Früher gespeicherte Auszüge haben einen Halter, den ihre Felder nennen; gibt dieses Paket eine solche
+  Seite auf (eine Deinstallation oder eine neuere Version ohne sie), speichern die anderen importierten Pakete mit der
+  Seite ihre Fassung davon erneut (`CommunityManager._reimport_shared`), sodass sie bleibt.
+- `2026-10-30 01:03 UTC` · `v3.2.0` **Ein neuer Crawl einer Site entfernt die Seiten, die es nicht mehr gibt**: Seiten, die von einer gecrawlten
+  Site verschwunden waren, behielten ihre Auszüge für immer. Ein neuer Crawl derselben Startadresse ersetzt ihre
+  Seiten, und wenn er die ganze Site gelesen hat (er war erfolgreich, kein Seitenlimit und kein Anfragebudget hat ihn
+  beendet, kein Link blieb an seiner Tiefengrenze oder hinter einer wegen ihrer Sprache ausgelassenen Seite ungelesen,
+  nichts ist fehlgeschlagen, wurde vorbehalten oder gestoppt), werden auch die Auszüge der früheren Seiten
+  entfernt, die er nicht mehr erreicht hat, nur wo dieser Crawl ihr letzter Halter war; das Ergebnis nennt sie
+  (`removed`). Ein teilweiser oder fehlgeschlagener Crawl entfernt nichts.
+- `2026-10-30 01:26 UTC` · `v3.2.0` **Ein von einem älteren Paket belegter Themenordner nennt dieses Paket und den Ausweg**: Wenn das Thema oder Target
+  eines Wissenspakets der Ordner eines Pakets ist, das installiert wurde, bevor Wissen in Themenordner sortiert wurde,
+  sagte die Ablehnung nur „wähle einen anderen Themennamen“, was die Person bei einem Paket aus dem Index nicht kann.
+  Sie nennt jetzt das ältere Paket (Art, ID, Version) und den Ausweg: dieses Paket deinstallieren oder neu
+  installieren (es zieht dann in seinen eigenen Themenordner) und danach dieses installieren; der nächste Schritt
+  zeigt auf **Deinstallieren...** (`llm-cli zoo uninstall`). Beim Einsortieren einer losen Datei, wo die Person das
+  Thema wählt, bleibt auch ein anderer Themenname ein Ausweg.
+- `2026-10-30 01:26 UTC` · `v3.2.0` **Ein bearbeitetes Target- oder Wissenspaket sagt, warum es nicht importiert wird und wie es weitergeht**: Ein
+  Paket, dessen Dateien sich seit der Installation geändert haben, wird weiter nicht importiert (die Prüfung gegen
+  den signierten Digest ist die Sicherheitsschranke), aber der Wartegrund des Wissensimports und der Befund von Mojo
+  Oracle sagen jetzt warum und was zu tun ist: Um die Änderungen rückgängig zu machen, deinstallieren und neu
+  installieren; um sie zu behalten, den Target-Ordner unter einem eigenen Namen kopieren und als neues Paket
+  exportieren (ein Wissenspaket: deine Fassung als neues Wissenspaket exportieren). Die Befunde von Mojo zu einem
+  zurückgezogenen oder geänderten Paket zeigen auf **Deinstallieren...**, statt die Person einen Ordner löschen oder
+  einen Befehl tippen zu lassen.
+- `2026-10-30 01:30 UTC` · `v3.2.0` **Tools > Wissensquellen... zeigt Thema oder Target als dritte Spalte, wie die CLI**: Das Fenster zeigte das Thema
+  oder Target als letzte Spalte, `llm-cli knowledge sources` als dritte. Beide nehmen ihre Reihenfolge jetzt aus einer
+  Liste (`knowledge_sources.COLUMNS`): Quelle, Art, Thema oder Target, Ausgelassener versteckter Text, Lizenz,
+  Urheberrechtsvermerk, Im Paket, Warum.
 
 ### Sicherheit
 - `2026-10-29 23:50 UTC` · `v3.2.0` **Die SSH-Einstellungen von llmcf: ein Sprung oder Proxy-Befehl nur mit dem festgehaltenen Ja der
