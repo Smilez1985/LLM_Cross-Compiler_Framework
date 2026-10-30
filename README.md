@@ -1,4 +1,4 @@
-Version 3.2.0 · Last updated 2026-10-30
+Version 3.3.0 · Last updated 2026-10-30
 
 **English** · [Deutsch](README_DE.md)
 
@@ -885,8 +885,8 @@ The [roadmap](docs/ROADMAP.md) lists what is planned; finished items move to the
 - **Decided, waiting for its turn:** offline builds of the build container image, delegations, an own `llmcf`
   account, board backups pulled by the PC, and the shared OpenSSH connection for a board step.
 
-After 3.2.0: the build service with one queue across all programs, LoRA and large models (3.3.0), supply-chain
-hardening (3.4.0), and Rust where the framework meets the network or a board. Builds in the cloud are not planned.
+After 3.2.0: the build service with one queue across all programs, LoRA and large models (3.4.0), supply-chain
+hardening (3.5.0), and Rust where the framework meets the network or a board. Builds in the cloud are not planned.
 
 Full list: [docs/ROADMAP.md](docs/ROADMAP.md).
 

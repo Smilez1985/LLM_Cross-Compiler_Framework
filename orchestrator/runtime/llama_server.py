@@ -816,9 +816,11 @@ class LocalLLMRuntime:
 
     def executor(self, log: Optional[Callable[[str], None]] = None, ai_started: bool = False):
         """The build executor (natively, or in the builder container through engine()); `ai_started`: its soft caps
-        stop the build (an AI started it)."""
+        stop the build (an AI started it). The idle timeout of its steps is the settings' build_idle_timeout, as for
+        the stage containers."""
         from orchestrator.runtime.build.executor import BuildExecutor
-        return self._executor or BuildExecutor(engine=self.engine(), log=log, ai_started=ai_started)
+        return self._executor or BuildExecutor(engine=self.engine(), log=log, ai_started=ai_started,
+                                               settings=self.settings)
 
     def verifier(self):
         """The verification of builds that runs their programs on this machine itself."""

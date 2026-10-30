@@ -9,6 +9,15 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 (`` `YYYY-MM-DD HH:MM UTC` · `vX.Y.Z` ``) and is written under the version it lands in. Planned work is listed in the
 [roadmap](docs/ROADMAP.md), not here; how the framework is built and why is in the [design](docs/DESIGN.md).
 
+## [3.3.0] - 2026-10-30
+
+### Fixed
+- `2026-10-30 14:15 UTC` · `v3.3.0` **The llama.cpp runtime builds read the idle timeout you set** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
+  the build of Ditto's own llama.cpp server (`llm-cli ditto runtime install`, the tool `build_local_runtime`) and the
+  build of a board's runtime (`llm-cli device runtime build`, the Boards window, the tool `deploy_device_runtime`)
+  stop a step that prints nothing after `build_idle_timeout`, as the stage containers of a model build do (before,
+  they always waited the built-in 1800 seconds, whatever the setting said).
+
 ## [3.2.0] - 2026-10-30
 
 ### Added
@@ -4362,6 +4371,7 @@ taken from source headers and the git history (2025-12-13 to 2026-01-14).
 - `2025-11-20 00:00 UTC` · `v1.0.0` Basic support for Rockchip RK3588/RK3566 cross-compilation.
 - `2025-11-20 00:00 UTC` · `v1.0.0` CLI (`llm-cli`) and GUI (`llm-gui`) entry points.
 
+[3.3.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v2.4.0...v3.0.0

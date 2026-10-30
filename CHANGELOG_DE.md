@@ -10,6 +10,16 @@ weicht bewusst ab: Es gibt keinen Abschnitt `[Unreleased]`. Jeder Eintrag beginn
 der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und warum, steht im
 [Design](docs/DESIGN_DE.md).
 
+## [3.3.0] - 2026-10-30
+
+### Behoben
+- `2026-10-30 14:15 UTC` · `v3.3.0` **Die llama.cpp-Laufzeit-Builds lesen die Grenze für Stillstand, die du eingestellt hast** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
+  Der Build von Dittos eigenem llama.cpp-Server (`llm-cli ditto runtime install`, das Tool `build_local_runtime`) und
+  der Build der Laufzeit eines Boards (`llm-cli device runtime build`, das Fenster Boards, das Tool
+  `deploy_device_runtime`) stoppen einen Schritt, der nichts ausgibt, nach `build_idle_timeout`, wie es die
+  Stufen-Container eines Modell-Builds tun (vorher warteten sie immer die eingebauten 1800 Sekunden, egal was die
+  Einstellung sagte).
+
 ## [3.2.0] - 2026-10-30
 
 ### Hinzugefügt
@@ -4945,6 +4955,7 @@ Cross-Kompilierung zu ermöglichen.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Grundlegende Unterstützung für die Cross-Kompilierung für Rockchip RK3588/RK3566.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Einstiegspunkte für CLI (`llm-cli`) und GUI (`llm-gui`).
 
+[3.3.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v2.4.0...v3.0.0
