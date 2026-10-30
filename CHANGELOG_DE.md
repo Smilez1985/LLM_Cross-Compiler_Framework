@@ -13,6 +13,21 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 ## [3.2.0] - 2026-10-30
 
 ### Geändert
+- `2026-10-30 01:29 UTC` · `v3.2.0` **Jedes Log, das ein Modell liest, wird gereinigt, geschwärzt und erst dann gekürzt, und
+  die Zusammenfassung des Gesprächs hält Fakten genau** (Konsolidierungskette ctx-slim): Die Self-Healing-Analyse,
+  der MCP-Prompt `diagnose_build_failure` (beide über `healing_parts` in `orchestrator/llm/task_prompts.py`, neu
+  `log_for_ai`) und das Tool `read_build_log` (`BuildService.log_tail`) lesen ein Build-Log in einer Reihenfolge:
+  zuerst `clean_log`, dann das Schwärzen (Secrets geschwärzt; der Home-Ordner dieses Computers als `~` im
+  Self-Healing-Prompt, die Ordner des Frameworks über ihr Label in `read_build_log` wie bisher), dann das Kürzen
+  (die letzten 6.000 Zeichen für den Self-Healing-Prompt). Vorher schickte der Self-Healing-Prompt die rohen letzten
+  6.000 Zeichen (mit Farbcodes, neu gezeichnetem Fortschritt, einem Pfad dieses Computers und einem Secret), so
+  konnten ein paar tausend wiederholte Zeilen den Fehler daraus verdrängen. `read_build_log` behält die rohen
+  Zeilennummern (`first_line`, `before_line`): Eine zusammengefasste Zeile zählt als die Zeilen, für die sie steht.
+  Die eigene Log-Ansicht der Person (das Live-Log des Builders) bleibt roh. Die Suche in der Wissensbasis bei einer
+  Self-Healing-Aufgabe liest die letzten drei gereinigten Zeilen. Der Systemtext von Dittos Gesprächszusammenfassung
+  ist nach `task_prompts.py` umgezogen (`SUMMARY_SYSTEM`, eine Quelle; der alte Name in `Core/ditto_manager.py` ist
+  dasselbe Objekt) und sagt jetzt: „Copy ids, numbers, version strings, labels and error messages exactly. Do not
+  invent paths.“
 - `2026-10-30 01:23 UTC` · `v3.2.0` **Tool-Ergebnisse gehen als kompaktes JSON an das Modell, und ein Log-Reiniger**
   (Konsolidierungskette ctx-slim; Entscheidung: kleinere Tool-Ergebnisse und sauberere Logs für jedes Modell): Die
   Ausgabe eines Tools (ein pydantic-Modell oder ein dict) erreicht das Modell als `json_dumps` aus

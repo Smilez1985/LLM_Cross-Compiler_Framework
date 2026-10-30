@@ -12,6 +12,19 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 ## [3.2.0] - 2026-10-30
 
 ### Changed
+- `2026-10-30 01:29 UTC` · `v3.2.0` **Every log a model reads is cleaned, scrubbed and then cut, and the conversation summary
+  keeps facts exact** (consolidation chain ctx-slim): the self-healing analysis, the MCP prompt
+  `diagnose_build_failure` (both through `healing_parts` in `orchestrator/llm/task_prompts.py`, new `log_for_ai`) and
+  the tool `read_build_log` (`BuildService.log_tail`) read a build log in one order: `clean_log` first, then the scrub
+  (secrets redacted; this computer's home folder as `~` in the healing prompt, the framework's folders by label in
+  `read_build_log` as before), then the cut (the last 6,000 characters for the healing prompt). Before, the healing
+  prompt sent the raw last 6,000 characters (colour codes, progress redraws, a host path and a secret included), so
+  a few thousand repeated lines could push the error out of it. `read_build_log` keeps raw line numbers
+  (`first_line`, `before_line`): a collapsed line counts as the lines it stands for. The person's own log view (the
+  Builder's live log) stays raw. The knowledge-base query of a healing task reads the last three cleaned lines.
+  The system text of Ditto's conversation summary moved to `task_prompts.py` (`SUMMARY_SYSTEM`, one source; the
+  old name in `Core/ditto_manager.py` is the same object) and now says: "Copy ids, numbers, version strings, labels
+  and error messages exactly. Do not invent paths."
 - `2026-10-30 01:23 UTC` · `v3.2.0` **Tool results go to the model as compact JSON, and one log cleaner** (consolidation
   chain ctx-slim; decision: smaller tool results and cleaner logs for every model): a tool's output (a pydantic
   model or a dict) reaches the model as `json_dumps` from `orchestrator/llm/types.py`: sorted keys, no spaces after
