@@ -119,6 +119,26 @@ def check_topic(value: str) -> str:
     return value
 
 
+def check_belongs(kind: str, topic: Optional[str], target: Optional[str]) -> None:
+    """The rule of a pack's topic or target (its manifest and its index entry): one of them at most, and only a
+    knowledge pack names one; raises ValueError otherwise."""
+    if topic is not None and target is not None:
+        raise ValueError("a knowledge pack names its topic or its target, not both")
+    if (topic is not None or target is not None) and kind != "knowledge":
+        raise ValueError(f"only a knowledge pack names a topic or target, not a {kind} pack")
+
+
+def belongs_text(kind: str, topic: Optional[str], target: Optional[str]) -> str:
+    """Where a pack's knowledge belongs, for the index entry's details and the maintainer's review: "topic X",
+    "target X", for a knowledge pack that names neither (made before topics) that it takes its id as its topic, and ""
+    for a target or recipe pack."""
+    if target:
+        return f"target {target}"
+    if topic:
+        return f"topic {topic}"
+    return "no topic or target named (made before topics: installs under its id)" if kind == "knowledge" else ""
+
+
 class PackFile(Strict):
     path: str
     sha256: str = Field(pattern=SHA256_PATTERN)
@@ -154,10 +174,7 @@ class PackManifest(Strict):
 
     @model_validator(mode="after")
     def _unique_sorted(self):
-        if self.topic is not None and self.target is not None:
-            raise ValueError("a knowledge pack names its topic or its target, not both")
-        if (self.topic is not None or self.target is not None) and self.kind != "knowledge":
-            raise ValueError(f"only a knowledge pack names a topic or target, not a {self.kind} pack")
+        check_belongs(self.kind, self.topic, self.target)
         seen, folders = set(), set()
         for f in self.files:
             # Case-insensitive: on Windows and macOS 'A.sh' and 'a.sh' are one file.

@@ -142,6 +142,8 @@ TEXTS = {
         "zoo.field.size": "Size",
         "zoo.field.sha256": "sha256",
         "zoo.field.description": "Description",
+        "zoo.field.belongs": "Belongs to",
+        "zoo.value.belongs.none": "no topic or target named (made before topics: installs under its id)",
         "zoo.field.recipe": "recipe.yml",
         "zoo.value.pack": "{kind} {id} {version} by {author}",
         "zoo.value.unknown_licence": "licence unknown",
@@ -413,6 +415,9 @@ TEXTS = {
         "zoo.field.size": "Größe",
         "zoo.field.sha256": "sha256",
         "zoo.field.description": "Beschreibung",
+        "zoo.field.belongs": "Gehört zu",
+        "zoo.value.belongs.none": "kein Thema oder Target genannt (vor den Themen erstellt: wird unter seiner ID "
+                                  "installiert)",
         "zoo.field.recipe": "recipe.yml",
         "zoo.value.pack": "{kind} {id} {version} von {author}",
         "zoo.value.unknown_licence": "Lizenz unbekannt",

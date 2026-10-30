@@ -72,7 +72,7 @@ from pydantic import Field, ValidationError, field_validator, model_validator
 from orchestrator.Core.community_pack import (ID_PATTERN, LICENSE_PATTERN, MAX_PACK_BYTES, PACK_KINDS,
                                               PROVENANCE_NAME, SHA256_PATTERN, UTC_TIME_PATTERN, VERSION_PATTERN,
                                               Kind, PackError, PackManifest, PackSignature, Strict, UserKeys,
-                                              build_manifest, check_topic, decrypt_pack, encrypt_pack,
+                                              belongs_text, build_manifest, check_belongs, check_topic, decrypt_pack, encrypt_pack,
                                               is_encrypted_pack, list_files, load_trusted_keys, local_sha256,
                                               read_manifest, read_pack, scrub, sign_manifest, tree_sha256, utc_now,
                                               verify_index, verify_manifest, write_pack)
@@ -121,6 +121,24 @@ class IndexEntry(Strict):
     url: str = Field(pattern=r"^https://\S+$", max_length=1000)
     size: int = Field(gt=0, le=MAX_PACK_BYTES)
     sha256: str = Field(pattern=SHA256_PATTERN)
+    # A knowledge pack: the topic or target of its manifest, so the listing and the details say where it belongs
+    # before it is downloaded (written by the maintainer's publish; left out when unset, as an older entry has it).
+    topic: Optional[str] = None
+    target: Optional[str] = None
+
+    @field_validator("topic", "target")
+    @classmethod
+    def _topic_name(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else check_topic(value)
+
+    @model_validator(mode="after")
+    def _belongs(self):
+        check_belongs(self.kind, self.topic, self.target)
+        return self
+
+    def belongs(self) -> str:
+        """Where its knowledge belongs (community_pack.belongs_text); "" for a target or recipe pack."""
+        return belongs_text(self.kind, self.topic, self.target)
 
 
 class Revocation(Strict):
@@ -253,6 +271,8 @@ class ZooDetails:
                  f"Installed: {i.installed_version or 'no'}" + (f" in {i.path}" if i.path else "")]
         if i.entry:
             lines += [f"Download: {i.entry.url} ({i.entry.size} bytes, sha256 {i.entry.sha256})"]
+            if i.entry.belongs():
+                lines.append(f"Belongs to: {i.entry.belongs()}")
         if i.description:
             lines.append(i.description)
         if self.recipe_text is not None:
@@ -1082,8 +1102,14 @@ class CommunityManager:
         quarantine = self._new_quarantine(kind, entry.id)
         try:
             archive = self._downloads().fetch(entry.url, quarantine / "pack.zip", entry.size, entry.sha256, progress)
-            return self._prepare(archive, quarantine, TrustLevel(entry.trust), entry.url, state.index,
-                                 expected=(kind, entry.id, entry.version))
+            prepared = self._prepare(archive, quarantine, TrustLevel(entry.trust), entry.url, state.index,
+                                     expected=(kind, entry.id, entry.version))
+            m = prepared.manifest
+            if (entry.topic or entry.target) and (entry.topic, entry.target) != (m.topic, m.target):
+                # the listing said where it belongs before the download: the pack must say the same
+                raise PackError(f"The pack does not match its index entry: the entry says it belongs to "
+                                f"{entry.belongs()}, the pack to {belongs_text(m.kind, m.topic, m.target)}.")
+            return prepared
         except BaseException as e:
             shutil.rmtree(quarantine, ignore_errors=True)
             if isinstance(e, DownloadError):   # a disk refusal keeps its numbers for the Community Hub (A4)
