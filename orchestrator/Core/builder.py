@@ -75,7 +75,9 @@ class ValidationError(Exception): pass
 
 
 class OfflineImageMissing(RuntimeError):
-    """Offline mode and no image of the target built earlier from the same inputs: nothing is pulled or built."""
+    """Offline mode, no build container image of the target built earlier from the same inputs, and a source of a new
+    one is not local (Core/build_image.offline_plan): nothing is pulled, fetched or built. (The build container image is
+    the Docker image with the target's toolchain; the target artifact, package or bundle is what goes to the board.)"""
 
 
 class BuildCancelled(Exception):
@@ -148,8 +150,9 @@ from orchestrator.Core.build_formats import ModelFormat, OptimizationLevel  # no
 
 TERMINAL_STATES = ("completed", "failed", "cancelled")
 IMAGE_LABEL = "org.llm-framework.target"
-# What a target image was built from (its target folder, Dockerfile and build arguments, as one sha256): an offline
-# build uses only an image of the target built earlier from exactly these (DECISIONS round 24 L-NET, round 25).
+# What a build container image was built from (its target folder, Dockerfile and build arguments, as one sha256): an
+# offline build uses an image of the target built earlier from exactly these first (DECISIONS round 24 L-NET, round 25),
+# else builds one from local sources only (round 36, Core/build_image.py).
 INPUTS_LABEL = "org.llm-framework.inputs"
 # The stable name of each target's newest build image (llm-framework/<target>:last-build): the next build reuses its
 # layers. The builder never deletes an image (round 7 item 12); older ones are listed for the person.
@@ -1043,7 +1046,7 @@ class BuildEngine:
 
     @staticmethod
     def _image_inputs(config: BuildConfiguration, dockerfile: Path, buildargs: Dict[str, str]) -> str:
-        """One sha256 of what the target image is built from: the target, its folder's content digest, the Dockerfile
+        """One sha256 of what the build container image is built from: the target, its folder's content digest, the Dockerfile
         and the build arguments (INPUTS_LABEL). The arguments that only say where sources come from (SOURCE_ONLY_ARGS:
         the apt and pip mirrors, the local llama.cpp copy) and the proxy settings are not part of it: an image built
         online is found offline and the other way round."""
