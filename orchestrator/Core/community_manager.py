@@ -72,7 +72,7 @@ from pydantic import Field, ValidationError, field_validator, model_validator
 from orchestrator.Core.community_pack import (ID_PATTERN, LICENSE_PATTERN, MAX_PACK_BYTES, PACK_KINDS,
                                               PROVENANCE_NAME, SHA256_PATTERN, UTC_TIME_PATTERN, VERSION_PATTERN,
                                               Kind, PackError, PackManifest, PackSignature, Strict, UserKeys,
-                                              build_manifest, check_topic, decrypt_pack, encrypt_pack,
+                                              belongs_text, build_manifest, check_belongs, check_topic, decrypt_pack, encrypt_pack,
                                               is_encrypted_pack, list_files, load_trusted_keys, local_sha256,
                                               read_manifest, read_pack, scrub, sign_manifest, tree_sha256, utc_now,
                                               verify_index, verify_manifest, write_pack)
@@ -121,6 +121,24 @@ class IndexEntry(Strict):
     url: str = Field(pattern=r"^https://\S+$", max_length=1000)
     size: int = Field(gt=0, le=MAX_PACK_BYTES)
     sha256: str = Field(pattern=SHA256_PATTERN)
+    # A knowledge pack: the topic or target of its manifest, so the listing and the details say where it belongs
+    # before it is downloaded (written by the maintainer's publish; left out when unset, as an older entry has it).
+    topic: Optional[str] = None
+    target: Optional[str] = None
+
+    @field_validator("topic", "target")
+    @classmethod
+    def _topic_name(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else check_topic(value)
+
+    @model_validator(mode="after")
+    def _belongs(self):
+        check_belongs(self.kind, self.topic, self.target)
+        return self
+
+    def belongs(self) -> str:
+        """Where its knowledge belongs (community_pack.belongs_text); "" for a target or recipe pack."""
+        return belongs_text(self.kind, self.topic, self.target)
 
 
 class Revocation(Strict):
@@ -253,6 +271,8 @@ class ZooDetails:
                  f"Installed: {i.installed_version or 'no'}" + (f" in {i.path}" if i.path else "")]
         if i.entry:
             lines += [f"Download: {i.entry.url} ({i.entry.size} bytes, sha256 {i.entry.sha256})"]
+            if i.entry.belongs():
+                lines.append(f"Belongs to: {i.entry.belongs()}")
         if i.description:
             lines.append(i.description)
         if self.recipe_text is not None:
@@ -361,6 +381,18 @@ class _KnowledgeImport:
     tags: Dict[str, str]    # {"topic": ...} or {"target": ...}
     legacy_origins: Tuple[str, ...] = ()   # the origin_pack an earlier, unsorted import of the same file used
     provenance: Optional["Provenance"] = None   # the installed pack's (installed_unchanged)
+
+
+@dataclass(frozen=True)
+class UntaggedImport:
+    """An installed pack whose excerpts were imported before excerpts carried their pack's digest and topic or target
+    (CommunityManager.untagged_imports): what importing it again means, shown before the person decides."""
+    label: str        # "knowledge pack X", "the knowledge of target pack Y"
+    folder: Path      # the installed pack folder (the person sees it; an AI reads the label)
+    excerpts: int     # its excerpts without topic or target
+    pages: int        # the pages the import reads again
+    size: int         # bytes of its pages file
+    belongs: str      # "topic X" / "target X": where they belong after the import
 
 
 @dataclass(frozen=True)
@@ -538,6 +570,31 @@ def trust_of_folder(folder: Path, index: Optional[CommunityIndex]) -> Tuple[Opti
     return TrustLevel(prov.trust), ""
 
 
+def _content_digests(folder: Path) -> Tuple[str, Optional[str]]:
+    """(tree_sha256 of the folder as this computer reads it, the installed pack's own content digest when the folder
+    is unchanged since its install, else None)."""
+    digest = tree_sha256(Path(folder))
+    prov = read_provenance(Path(folder))
+    return digest, (prov.content_sha256 if prov is not None and prov.installed_unchanged(digest) else None)
+
+
+def installed_digest(folder: Path) -> str:
+    """The content digest of a target (or another pack) folder as a build record and a recipe name it: for an
+    installed pack unchanged since its install (Provenance.installed_unchanged), the pack's own digest, also where this
+    computer's file system did not keep its modes (Windows keeps no execute bit, so a pack's 0o755 scripts read as
+    0o644 there); otherwise tree_sha256 of the folder. The one rule of the builder, the build service, the recipe tools
+    and the recipe install check (same_content). Raises PackError (a link or special file) and OSError."""
+    digest, own = _content_digests(folder)
+    return own or digest
+
+
+def same_content(folder: Path, expected: Optional[str]) -> bool:
+    """Whether `folder` holds the content `expected` names (a recipe's target.pack_sha256): the digest the folder
+    gives on this computer, or the pack's own digest of an installed pack unchanged since its install, so a recipe
+    bound to a target pack made on Linux verifies on Windows too. Raises PackError and OSError."""
+    return bool(expected) and expected in _content_digests(folder)
+
+
 def build_trust_check(target_path: Path, cache_dir: Optional[Path]) -> Optional[str]:
     """For the builder: raises PackError for a revoked target; returns a warning for a local one."""
     index = CommunityManager.read_cached_index(cache_dir, revocations=True) if cache_dir else None
@@ -563,6 +620,23 @@ def ai_generated_target(target_path: Path) -> bool:
         return False
     return isinstance(meta, dict) and isinstance(meta.get("metadata"), dict) and \
         meta["metadata"].get("provenance") == "ai-generated"
+
+
+CHANGED = "changed since it was installed"
+
+
+def changed_text(prov: Optional["Provenance"]) -> str:
+    """Why an installed pack whose files changed since its install (the problem CHANGED of verify_installed) is not
+    used as it is, and how to go on: the knowledge import's waiting reason and Mojo say it. The content check against
+    the signed digest is the security gate and stays: an edited pack is never imported or taken for the signed one."""
+    kind = prov.kind if prov is not None else "pack"
+    return ("its files are no longer the ones that were signed and checked, so "
+            + ("its knowledge snapshot is not imported and its builds are not the signed target. To undo the edits, "
+               "uninstall it and install it again; to keep them, copy the target folder under a name of your own and "
+               "export that as a new pack" if kind == "target" else
+               "its pages are not imported. To undo the edits, uninstall it and install it again; to share your "
+               "version, export it as a new knowledge pack" if kind == "knowledge" else
+               "it is not used as the signed pack. Uninstall it and install it again"))
 
 
 def _folder_key(path: Path) -> str:
@@ -785,6 +859,42 @@ class CommunityManager:
                     loose.append(second / KNOWLEDGE_FILE)
         return packs, loose
 
+    LINK_REASON = ("the framework never follows a link out of its own folders: what is installed and checked must stay "
+                   "where it was checked, and a link can point anywhere")
+
+    def ignored_links(self) -> List[str]:
+        """The links in the knowledge folder that _knowledge_layout leaves out (the folder itself, or an entry of its
+        first two levels), as labels below community/; what they hold is neither listed nor imported (LINK_REASON).
+        Reads the folder only."""
+        root = self.knowledge_dir
+        if root.is_symlink():
+            return ["knowledge"]
+        found: List[str] = []
+        if not root.is_dir():
+            return found
+        try:
+            for first in sorted(root.iterdir(), key=lambda p: p.name.casefold()):
+                if first.name.startswith("."):
+                    continue
+                if first.is_symlink():
+                    found.append(f"knowledge/{first.name}")
+                elif first.is_dir() and read_provenance(first) is None:
+                    found += [f"knowledge/{first.name}/{second.name}" for second in sorted(first.iterdir())
+                              if second.is_symlink() and not second.name.startswith(".")]
+        except OSError:
+            pass
+        return found
+
+    def links_note(self) -> str:
+        """What the listings and Mojo say about ignored links ("" when there are none)."""
+        links = self.ignored_links()
+        if not links:
+            return ""
+        what = "community/knowledge is a link" if links == ["knowledge"] else \
+            f"{len(links)} link(s) in community/knowledge ({', '.join('community/' + l for l in links[:5])})"
+        return (f"{what}: ignored, so the packs and files behind it are neither listed nor imported; "
+                f"{self.LINK_REASON}. Move the folder there instead of linking it.")
+
     def loose_knowledge(self) -> List[LooseKnowledge]:
         """Every loose knowledge file (DECISIONS round 23 item 1): not imported until the person sorts it into a topic
         or target folder (prepare_sort). Reads the folder only."""
@@ -802,16 +912,21 @@ class CommunityManager:
         return sorted({folder.parent.name for folder, _ in self._knowledge_layout()[0]
                        if folder.parent != self.knowledge_dir}, key=str.casefold)
 
-    def _knowledge_group(self, group: str) -> Path:
+    def _knowledge_group(self, group: str, chosen: bool = False) -> Path:
         """The folder of a topic or target below community/knowledge/: the one there already (ignoring case, as
-        Windows and macOS do), or the new one. PackError when that name is a pack installed before topic folders."""
+        Windows and macOS do), or the new one. PackError when that name is a pack installed before topic folders: it
+        names that pack and the way out (uninstall it or install it again, which moves it into its topic folder);
+        `chosen`: the person chose the topic here (sorting a loose file), so another name is a way out too."""
         root = self.knowledge_dir
         existing = next((p for p in (root.iterdir() if root.is_dir() else ())
                          if p.name.casefold() == group.casefold() and p.is_dir() and not p.is_symlink()), None)
-        if existing is not None and read_provenance(existing) is not None:
-            raise PackError(f"{existing} is the knowledge pack {existing.name}, installed before knowledge was sorted "
-                            f"into topic folders; it cannot also be the folder of the topic {group}. Choose another "
-                            "topic name.")
+        old = read_provenance(existing) if existing is not None else None
+        if old is not None:
+            raise PackError(f"The folder of the {'target' if old.target else 'topic'} {group} is taken by the "
+                            f"{old.kind} pack {old.id} {old.version}, installed before knowledge was sorted into topic "
+                            f"folders ({existing}). Uninstall that pack, or install it again (it then moves into its "
+                            "own topic folder), and then install this one"
+                            + ("; or choose another topic name." if chosen else ".")).with_steps("pack.remove")
         return existing or root / group
 
     def _knowledge_destination(self, pack_id: str, topic: Optional[str], target: Optional[str]) -> Path:
@@ -881,7 +996,7 @@ class CommunityManager:
         # a free name: no installed pack has it, nor anything in the folder it goes to (the file's own folder may be
         # there), so the move after the person's Yes is never refused
         taken = {folder.name.casefold() for folder, _ in self._knowledge_layout()[0]}
-        group = self._knowledge_group(target or topic)
+        group = self._knowledge_group(target or topic, chosen=True)
         if group.is_dir():
             taken |= {p.name.casefold() for p in group.iterdir()}
         pack_id, count = base, 1
@@ -922,12 +1037,13 @@ class CommunityManager:
 
     def listing(self, refresh: bool = False) -> Tuple[List[ZooItem], str]:
         """list_items() of the current index, and a note on which index was used (or why there is none)."""
+        links = self.links_note()
         try:
             state = self.load_index(refresh)
         except PackError as e:
-            return self.list_items(None), f"No community index: {e}"
-        return self.list_items(state.index), state.note or f"Signed index version {state.index.version} " \
-                                                           f"({state.source})."
+            return self.list_items(None), " ".join(filter(None, (f"No community index: {e}", links)))
+        note = state.note or f"Signed index version {state.index.version} ({state.source})."
+        return self.list_items(state.index), " ".join(filter(None, (note, links)))
 
     def list_items(self, index: Optional[CommunityIndex] = None) -> List[ZooItem]:
         """Index entries (latest version each) and installed packs, with their trust level. Installed packs are
@@ -998,8 +1114,14 @@ class CommunityManager:
         quarantine = self._new_quarantine(kind, entry.id)
         try:
             archive = self._downloads().fetch(entry.url, quarantine / "pack.zip", entry.size, entry.sha256, progress)
-            return self._prepare(archive, quarantine, TrustLevel(entry.trust), entry.url, state.index,
-                                 expected=(kind, entry.id, entry.version))
+            prepared = self._prepare(archive, quarantine, TrustLevel(entry.trust), entry.url, state.index,
+                                     expected=(kind, entry.id, entry.version))
+            m = prepared.manifest
+            if (entry.topic or entry.target) and (entry.topic, entry.target) != (m.topic, m.target):
+                # the listing said where it belongs before the download: the pack must say the same
+                raise PackError(f"The pack does not match its index entry: the entry says it belongs to "
+                                f"{entry.belongs()}, the pack to {belongs_text(m.kind, m.topic, m.target)}.")
+            return prepared
         except BaseException as e:
             shutil.rmtree(quarantine, ignore_errors=True)
             if isinstance(e, DownloadError):   # a disk refusal keeps its numbers for the Community Hub (A4)
@@ -1237,10 +1359,10 @@ class CommunityManager:
         except (OSError, yaml.YAMLError, ValidationError, AttributeError):
             notes.append(f"target {recipe.target.id} declares no valid capabilities; the recipe was not checked")
         try:
-            if tree_sha256(folder) != recipe.target.pack_sha256:
+            if not same_content(folder, recipe.target.pack_sha256):
                 notes.append(f"your copy of target {recipe.target.id} differs from the one the recipe was built "
                              "with; results may differ")
-        except PackError:
+        except (PackError, OSError):
             pass
         return problems
 
@@ -1356,6 +1478,136 @@ class CommunityManager:
     def discard(prepared: PreparedInstall) -> None:
         shutil.rmtree(prepared.quarantine, ignore_errors=True)
 
+    # --- uninstall ----------------------------------------------------------------------------------------------
+    def _installed_pack(self, kind: str, pack_id: str) -> Tuple[Path, Provenance]:
+        found = next(((folder, prov) for folder, prov in self.installed()
+                      if prov.kind == kind and prov.id.casefold() == str(pack_id).casefold()), None)
+        if found is None:
+            raise PackError(f"There is no installed {kind} pack '{pack_id}'.").with_steps("hub.open")
+        return found
+
+    def _pack_knowledge(self, folder: Path, prov: Provenance) -> Tuple[Optional[str], List[Path]]:
+        """(the holder of an installed pack's excerpts or None, its import markers that exist): a knowledge pack's,
+        or a target pack's knowledge snapshot's."""
+        from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT
+        if prov.kind == "knowledge":
+            holder, base = folder.name, self.knowledge_dir / folder.name
+        elif prov.kind == "target" and (folder / KNOWLEDGE_SNAPSHOT).is_file():
+            holder, base = f"{TARGET_ORIGIN}{folder.name}", self.knowledge_dir / TARGET_MARKERS / folder.name
+        else:
+            return None, []
+        markers = [base.with_name(base.name + suffix) for suffix in (".imported", ".snapshotted")]
+        return holder, [m for m in markers if m.is_file() and not m.is_symlink()]
+
+    def uninstall_plan(self, kind: str, pack_id: str, rag_manager=None,
+                       mode_offered: Sequence[str] = ("trash", "permanent")):
+        """What uninstalling an installed pack (knowledge, target or recipe) deletes, as the person sees it before
+        anything goes (Core/deletion.py): its folder with its provenance, its import markers, and, said with the
+        folder, the excerpts only it holds in the knowledge base (those another pack or your own crawl also holds
+        stay). A pack whose pages are in the knowledge base is refused while the knowledge base is off: its excerpts
+        must go with it. Raises PackError."""
+        from orchestrator.Core.deletion import plan_of
+        from orchestrator.Core.trash import tree_size
+        from orchestrator.tools.spec import DeletionItem
+        folder, prov = self._installed_pack(kind, pack_id)
+        holder, markers = self._pack_knowledge(folder, prov)
+        what = f"the installed {kind} pack {prov.id} {prov.version} with its files and provenance"
+        if holder is not None:
+            if rag_manager is None and hasattr(self.framework, "get_component"):
+                rag_manager = self.framework.get_component("rag_manager")
+            if rag_manager is None or not callable(getattr(rag_manager, "holding", None)):
+                raise PackError(f"The knowledge base is off, so the excerpts of {kind} pack {prov.id} could not be "
+                                "removed with it; switch the knowledge base on first.")
+            try:
+                held = rag_manager.holding(holder)
+            except Exception as e:  # noqa: BLE001 - the knowledge base's own words can name its folder
+                raise PackError(f"The knowledge base cannot be read now ({type(e).__name__}); nothing is "
+                                "uninstalled.") from None
+            what += (f"; its {held['alone']} excerpt(s) of {held['alone_pages']} page(s) that only it holds leave "
+                     f"the knowledge base, {held['shared']} excerpt(s) another pack or your own crawl also holds "
+                     "stay")
+        items = [DeletionItem(kind="pack", speaking_name=f"{kind} pack {prov.id} {prov.version}",
+                              full_path=str(folder), file_name=folder.name, size_bytes=tree_size(folder),
+                              what=what[:300])]
+        items += [DeletionItem(kind="pack", speaking_name=f"import note of {kind} pack {prov.id} ({m.suffix[1:]})",
+                               full_path=str(m), file_name=m.name, size_bytes=tree_size(m),
+                               what="the note that its pages are in the knowledge base")
+                  for m in markers]
+        return plan_of(items, tuple(mode_offered))
+
+    def uninstall(self, kind: str, pack_id: str, accepted, trash=None, audit=None, rag_manager=None):
+        """Uninstalls exactly the plan the person accepted (uninstall_plan; Core/deletion.py): the plan is built again
+        and must be the accepted one (PlanChanged otherwise: nothing is deleted), the deletion is audited before
+        anything goes, the folder and the import notes go to the trash (Core/trash.py) or for good, and the pack lets go
+        of its excerpts in the knowledge base (RAGManager.release_holder: those another pack or your crawl holds stay).
+        Only the person (PermissionError otherwise). Returns a deletion.DeletionResult."""
+        from orchestrator.Core.deletion import DeletionResult, require_person, require_same
+        accepted = require_person(accepted)
+        if rag_manager is None and hasattr(self.framework, "get_component"):
+            rag_manager = self.framework.get_component("rag_manager")
+        try:
+            current = self.uninstall_plan(kind, pack_id, rag_manager, accepted.plan.mode_offered)
+        except PackError:
+            current = None
+        require_same(accepted, current, f"the list of what uninstalling {kind} pack {pack_id} deletes")
+        if accepted.mode == "trash" and trash is None:
+            raise RuntimeError("The trash is not available; nothing was uninstalled.")
+        if audit is None or not callable(getattr(audit, "record", None)):
+            raise RuntimeError("The audit log is not available, so nothing was uninstalled.")
+        folder, prov = self._installed_pack(kind, pack_id)
+        holder, _markers = self._pack_knowledge(folder, prov)
+        try:
+            audit.record(accepted.actor, "community", "framework", "person", "pack_uninstalled", approved=True,
+                         arguments={"kind": kind, "pack_id": prov.id, "version": prov.version,
+                                    "bytes": accepted.plan.total_bytes, "mode": accepted.mode},
+                         detail=f"{kind} pack {prov.id} " + ("moved to the trash" if accepted.mode == "trash"
+                                                             else "deleted for good"),
+                         extra=accepted.audit_extra())
+        except Exception:  # noqa: BLE001 - the reason could name a host path
+            raise RuntimeError("The audit log cannot record the uninstall; nothing was uninstalled.") from None
+        result = DeletionResult()
+        root = self._install_root(kind)
+        for item in accepted.plan.items:
+            path = Path(item.full_path)
+            base = root if path == folder else self.knowledge_dir
+            try:
+                if accepted.mode == "trash":
+                    entry = trash.move("pack", path, base, "knowledge" if base == self.knowledge_dir else kind,
+                                       item.speaking_name, accepted, accepted.actor)
+                    result.trash_ids.append(entry.id)
+                else:
+                    if path.is_symlink():
+                        raise OSError("a link")
+                    shutil.rmtree(path) if path.is_dir() else path.unlink()
+                    result.freed_bytes += item.size_bytes
+            except Exception as e:  # noqa: BLE001 - that item stays and is reported
+                result.failed.append((item.speaking_name, type(e).__name__ if isinstance(e, OSError) else str(e)))
+                continue
+            result.done.append(item.speaking_name)
+        if holder is not None and not folder.exists():   # the pack is gone: its hold on its excerpts goes too
+            if not rag_manager.release_holder(holder):
+                result.failed.append((f"the excerpts of {kind} pack {prov.id}",
+                                      "not removed: the knowledge base could not be written"))
+            else:
+                # the pack's import notes may come back from the trash with it: this note makes the next import
+                # store its pages again, since they left the knowledge base now
+                note = self._released_note(holder)
+                try:
+                    ensure_directory(note.parent)
+                    note.write_text(datetime.now().isoformat(), encoding="utf-8")
+                except OSError as e:
+                    self.logger.warning(f"Could not note that {kind} pack {prov.id} left the knowledge base: {e}")
+                self._reimport_shared(rag_manager, getattr(rag_manager, "last_released", None) or (), holder)
+        return result
+
+    def _released_note(self, origin: str) -> Path:
+        """The note an uninstall leaves for a pack whose excerpts left the knowledge base (`origin`: its holder): while
+        it is there, the pack's import note does not count, so a pack restored from the trash with its notes is
+        imported again; the import removes it."""
+        if origin.startswith(TARGET_ORIGIN):
+            return self.knowledge_dir / TARGET_MARKERS / f"{origin[len(TARGET_ORIGIN):]}.released"
+        return self.knowledge_dir / f"{origin}.released"
+
     # --- verify -----------------------------------------------------------------------------------------------
     def verify_installed(self) -> List[Tuple[Path, Provenance, Optional[TrustLevel], List[str]]]:
         """Each installed pack with its trust and problems: revoked, changed since it was installed, or licence files
@@ -1367,7 +1619,7 @@ class CommunityManager:
             problems = [f"revoked: {reason}"] if trust == TrustLevel.REVOKED else []
             try:
                 if not prov.installed_unchanged(tree_sha256(folder)):
-                    problems.append("changed since it was installed")
+                    problems.append(CHANGED)
             except PackError as e:
                 problems.append(str(e))
             if prov.kind in ("knowledge", "target"):   # its licence texts and NOTICE (pack_licences.check)
@@ -1603,8 +1855,8 @@ class CommunityManager:
         # sorts them, prepare_sort); a pack whose files changed since it was installed is not imported either.
         pending = []
         for item in self._knowledge_imports():
-            if item.marker.exists():
-                continue
+            if item.marker.exists() and not self._released_note(item.origin).exists():
+                continue   # imported (a pack restored from the trash after an uninstall is imported again)
             try:
                 digest = tree_sha256(item.folder)
                 unchanged = (item.provenance.installed_unchanged(digest) if item.provenance is not None
@@ -1613,14 +1865,15 @@ class CommunityManager:
                 unchanged = False
             if not unchanged:
                 waiting[_folder_key(item.folder)] = (f"{item.label}: its files changed since it was installed, so it "
-                                                     "is not imported (the check of the installed packs shows it; "
-                                                     "install it again)")
+                                                     "is not imported (the check of the installed packs shows it): "
+                                                     f"{changed_text(item.provenance)}")
                 continue
             pending.append(item)
         # A pack that cannot be imported yet stays pending and is tried again at every start: its snapshot is taken
         # once (<pack>.snapshotted names the file it was taken for), never one per start (none is deleted by itself)
-        fresh = [(item.marker.with_suffix(".snapshotted"), _file_stamp(item.file)) for item in pending]
-        fresh = [(mark, stamp) for mark, stamp in fresh if _read_text(mark) != stamp]
+        fresh = [(item.marker.with_suffix(".snapshotted"), _file_stamp(item.file), item) for item in pending]
+        fresh = [(mark, stamp) for mark, stamp, item in fresh
+                 if _read_text(mark) != stamp or self._released_note(item.origin).exists()]
         if fresh and callable(getattr(rag_manager, "create_snapshot", None)):
             from orchestrator.Core.knowledge_snapshots import SnapshotNoRoom
             try:
@@ -1645,6 +1898,7 @@ class CommunityManager:
                     continue
                 ensure_directory(item.marker.parent)
                 item.marker.write_text(datetime.now().isoformat(), encoding="utf-8")
+                self._released_note(item.origin).unlink(missing_ok=True)
             except Exception as e:  # noqa: BLE001 - one pack never stops the others; the person reads why
                 waiting[_folder_key(item.folder)] = f"{item.label}: not imported ({redact_secrets(str(e))[:300]})"
                 self.logger.error(f"Knowledge import failed for {item.label}: {e}")
@@ -1652,6 +1906,58 @@ class CommunityManager:
             self.last_sync_problem = "; ".join(waiting.values())
             self.logger.warning(f"Knowledge packs not imported: {self.last_sync_problem}")
         return imported_count
+
+    def untagged_imports(self, rag_manager=None) -> List["UntaggedImport"]:
+        """The installed packs (imported already) whose excerpts lack their pack's digest and topic or target: imported
+        by an earlier version. search_knowledge(topic=...) and the Topic or target column miss them until they are
+        imported again (import_again). Reads the knowledge base only when it is open (`rag_manager`, or the
+        framework's): [] when it is off or not open."""
+        if rag_manager is None:
+            rag_manager = getattr(self.framework, "rag_manager", None)
+        counter = getattr(rag_manager, "untagged", None)
+        if not callable(counter):
+            return []
+        found = []
+        for item in self._knowledge_imports():
+            if not item.marker.exists():
+                continue   # not imported yet: the next import stores the fields anyway
+            try:
+                counts = counter(item.origin)
+            except Exception as e:  # noqa: BLE001 - a knowledge base that cannot be read lists nothing
+                self.logger.warning(f"Could not read the excerpts of {item.label}: {e}")
+                return []
+            if not counts.get("excerpts"):
+                continue
+            try:
+                data = json.loads(item.file.read_text(encoding="utf-8"))
+                pages, size = (len(data) if isinstance(data, list) else 0), item.file.stat().st_size
+            except (OSError, ValueError):
+                pages, size = int(counts.get("pages") or 0), 0
+            scope, name = next(iter(item.tags.items()))
+            found.append(UntaggedImport(item.label, item.folder, int(counts["excerpts"]), pages, size,
+                                        f"{scope} {name}"))
+        return found
+
+    def import_again(self, folder: Path, rag_manager=None) -> int:
+        """Imports one installed pack again (the person's yes in Mojo Miracle, knowledge.reimport): its marker goes, so
+        sync_knowledge_base takes a snapshot first and imports its pages with their digest and topic or target; the
+        excerpts it held before are replaced in place, those of pages it no longer has are released. Returns the
+        pages imported; why it did not finish is in `last_sync_problem`. PackError when it is no installed pack."""
+        if rag_manager is None:
+            rag_manager = getattr(self.framework, "rag_manager", None)
+        item = next((i for i in self._knowledge_imports() if _folder_key(i.folder) == _folder_key(Path(folder))),
+                    None)
+        if item is None:
+            raise PackError(f"{folder} is no installed pack with knowledge any more.")
+        if not rag_manager:
+            raise PackError("The knowledge base is off or not open, so nothing was imported.")
+        for mark in (item.marker, item.marker.with_suffix(".snapshotted")):
+            mark.unlink(missing_ok=True)   # the import then takes its snapshot first, as for a new pack
+        pages = self.sync_knowledge_base(rag_manager)
+        if not item.marker.exists():   # not finished: it stays pending and is tried again at the next start
+            raise PackError(self.last_sync_waiting.get(_folder_key(item.folder)) or self.last_sync_problem
+                            or f"{item.label} was not imported again")
+        return pages
 
     def _knowledge_imports(self) -> List[_KnowledgeImport]:
         """Every installed pack whose pages belong in the knowledge base: the knowledge packs (each under its topic or
@@ -1700,12 +2006,10 @@ class CommunityManager:
         for entry in data:
             if not isinstance(entry, dict):
                 continue
-            meta = entry.get("metadata")
-            meta = {k: v for k, v in (meta.items() if isinstance(meta, dict) else ()) if k not in ORIGIN_FIELDS}
-            meta.update(origin_pack=item.origin, origin_sha256=item.expected, **item.tags)
             # A page with origin_pack is outside text: the knowledge base stores it cleaned (hidden HTML, invisible
             # characters and HTML comments left out; RAGManager.ingest_document)
-            if rag_manager.ingest_document(entry.get("source", ""), entry.get("content", ""), meta):
+            if rag_manager.ingest_document(entry.get("source", ""), entry.get("content", ""),
+                                           self._page_meta(item, entry)):
                 imported += 1
             elif str(entry.get("content") or "").strip():
                 failed += 1  # refused, e.g. offline without the embedding model
@@ -1715,11 +2019,51 @@ class CommunityManager:
             return imported, (f"{item.label}: {failed} page(s) not imported yet; tried again when the knowledge base "
                               "starts next time")
         remove = getattr(rag_manager, "remove_pack_leftovers", None)
-        if callable(remove) and any(remove(origin, item.expected) is False
-                                    for origin in (item.origin, *item.legacy_origins)):
-            return imported, (f"{item.label}: the excerpts of its older version could not be removed yet; tried "
-                              "again when the knowledge base starts next time")
+        released: set = set()
+        if callable(remove):
+            for origin in (item.origin, *item.legacy_origins):
+                if remove(origin, item.expected) is False:
+                    return imported, (f"{item.label}: the excerpts of its older version could not be removed yet; "
+                                      "tried again when the knowledge base starts next time")
+                released |= set(getattr(rag_manager, "last_released", None) or ())
+        self._reimport_shared(rag_manager, released, item.origin)
         return imported, ""
+
+    @staticmethod
+    def _page_meta(item: _KnowledgeImport, entry: dict) -> dict:
+        """The metadata one page of a pack is stored with: its own (without the fields only the import sets), the
+        pack (origin_pack), its content digest (origin_sha256) and its topic or target."""
+        meta = entry.get("metadata")
+        meta = {k: v for k, v in (meta.items() if isinstance(meta, dict) else ()) if k not in ORIGIN_FIELDS}
+        meta.update(origin_pack=item.origin, origin_sha256=item.expected, **item.tags)
+        return meta
+
+    def _reimport_shared(self, rag_manager, sources: Iterable[str], released_by: str) -> int:
+        """After `released_by` let go of the excerpts of `sources` and nobody else was named as holding them: the other
+        imported packs that carry one of these pages store it again. An excerpt stored before excerpts named their
+        holders (3.1.0) names only the pack that wrote it last, so the other pack's hold was not known; its own copy of
+        the page comes back from its own pages. Returns the pages stored again; a pack that cannot be read is
+        skipped (logged)."""
+        gone = {str(s) for s in sources if s}
+        if not gone or rag_manager is None:
+            return 0
+        again = 0
+        for item in self._knowledge_imports():
+            if item.origin == released_by or not item.marker.exists():
+                continue   # a pack not imported yet stores every page at its own import
+            try:
+                data = json.loads(item.file.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as e:
+                self.logger.warning(f"Could not read {item.label} to keep its shared pages: {e}")
+                continue
+            for entry in data if isinstance(data, list) else ():
+                if isinstance(entry, dict) and str(entry.get("source") or "") in gone and \
+                        rag_manager.ingest_document(entry.get("source", ""), entry.get("content", ""),
+                                                    self._page_meta(item, entry)):
+                    again += 1
+        if again:
+            self.logger.info(f"{again} shared page(s) stored again for the packs that still carry them.")
+        return again
 
     def _knowledge_pages(self, root_urls: Optional[Iterable[str]] = None) -> Tuple[List[dict], int]:
         """knowledge_share without the list of pages."""

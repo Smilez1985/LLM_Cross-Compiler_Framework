@@ -107,12 +107,12 @@ def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_
         """Whether the installed target's files are the ones the recipe was built with (a different result is
         possible otherwise; never a refusal)."""
         try:
-            from orchestrator.Core.community_pack import tree_sha256
+            from orchestrator.Core.community_manager import same_content
             tm = getattr(service.framework, "target_manager", None)
             folder = tm.folder_of(recipe.target.id) if tm is not None and hasattr(tm, "folder_of") else None
             if folder is None:
                 return ""
-            if tree_sha256(folder) == recipe.target.pack_sha256:
+            if same_content(folder, recipe.target.pack_sha256):
                 return "the installed target is exactly the one the recipe was made with"
         except Exception:  # noqa: BLE001 - a hint only
             return ""

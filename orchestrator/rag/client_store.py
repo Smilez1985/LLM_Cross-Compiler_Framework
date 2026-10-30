@@ -161,17 +161,32 @@ class ClientKnowledgeStore(KnowledgeStore):
             if offset is None:
                 break
 
-    def source_records(self, source: str) -> Iterator[StoredRecord]:
+    def source_records(self, source: str, with_vectors: bool = False) -> Iterator[StoredRecord]:
         """The points of one source (filtered on the `source` payload field)."""
-        flt = models.Filter(must=[models.FieldCondition(key="source", match=models.MatchValue(value=source))])
+        return self.records_where("source", source, with_vectors)
+
+    def records_where(self, key: str, value: str, with_vectors: bool = False) -> Iterator[StoredRecord]:
+        """The points whose payload field `key` is `value`, or holds it (a list field such as the holders)."""
+        flt = models.Filter(must=[models.FieldCondition(key=key, match=models.MatchValue(value=value))])
         offset = None
         while True:
             batch, offset = self.client.scroll(collection_name=self.collection, scroll_filter=flt, limit=256,
-                                               offset=offset, with_payload=True, with_vectors=False)
+                                               offset=offset, with_payload=True, with_vectors=with_vectors)
             for record in batch:
                 yield _record(record)
             if offset is None:
                 break
+
+    def retrieve(self, point_ids: Sequence[str], with_vectors: bool = True) -> List[StoredRecord]:
+        return [_record(r) for r in self.client.retrieve(collection_name=self.collection,
+                                                         ids=[str(i) for i in point_ids], with_payload=True,
+                                                         with_vectors=with_vectors)]
+
+    def delete_ids(self, point_ids: Sequence[str]) -> None:
+        """Removes exactly these points."""
+        if point_ids:
+            self.client.delete(collection_name=self.collection,
+                               points_selector=models.PointIdsList(points=[str(i) for i in point_ids]), wait=True)
 
     def recreate(self) -> None:
         self._delete_collection(self.collection)

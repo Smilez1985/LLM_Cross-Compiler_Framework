@@ -178,6 +178,7 @@ KNOWN_TOOLS = frozenset({
     # optional (default deny until the person enables them)
     "delete_artifact", "restore_knowledge_snapshot", "build_local_runtime", "start_local_runtime",
     "stop_local_runtime", "run_benchmark", "deploy_device_runtime", "list_trash", "restore_from_trash",
+    "remove_pack",
     # later
     "probe_remote_device", "run_device_benchmark",
 })

@@ -335,6 +335,8 @@ TOOL_FACTS: Dict[str, ToolFacts] = {
                                  undo="set the old value back"),
     "delete_artifact": ToolFacts(_FS({"artifact_unknown", "artifact_busy"}), deletes=True, delegable="never",
                                  undo="restore from the trash"),
+    "remove_pack": ToolFacts(_FS({"pack_unknown"}), deletes=True, delegable="never",
+                                undo="restore from the trash"),
     "restore_from_trash": ToolFacts(_FS({"trash_unknown", "trash_not_yours"}), delegable="trash",
                                     undo="move it back (deletion dialog)"),
     "build_local_runtime": ToolFacts(_FS({"toolchain_missing", "offline_mode", "disk_full", "model_unpinned"}),

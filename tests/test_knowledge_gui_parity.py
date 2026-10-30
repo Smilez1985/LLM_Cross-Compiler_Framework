@@ -258,13 +258,14 @@ def test_the_sources_window_lists_by_kind_through_the_core_off_the_gui_thread(qa
         assert calls[0][0] == "any" and calls[0][1] != threading.current_thread().name
         headers = [dialog.table.horizontalHeaderItem(c).text() for c in range(dialog.table.columnCount())]
         assert headers == [ui_text(k, lang) for k in window.COLUMNS]
-        row = [dialog.table.item(0, c).text() for c in range(7)]
+        row = [dialog.table.item(0, c).text() for c in range(len(window.COLUMNS))]
         # Hidden text left out before storing (recon P1): kind by kind in a fixed order, in the window's language.
         left_out = (f"{ui_text('sources.removed.display_none', lang)} 2, "
                     f"{ui_text('sources.removed.invisible_characters', lang)} 5")
-        assert row == ["https://docs.example/a", ui_text("sources.filter.web", lang), left_out, "MIT",
+        assert row == ["https://docs.example/a", ui_text("sources.filter.web", lang), "-", left_out, "MIT",
                        "(c) 2026 A <a href=x>", ui_text("sources.carried.full_text", lang), "MIT allows it"]
-        assert [dialog.table.item(r, 2).text() for r in (1, 2)] == [ui_text("sources.removed.none", lang), "-"]
+        removed = window.COLUMNS.index("sources.col.removed")
+        assert [dialog.table.item(r, removed).text() for r in (1, 2)] == [ui_text("sources.removed.none", lang), "-"]
         assert "&lt;b&gt;A&lt;/b&gt;" in dialog.table.item(0, 0).toolTip(), "the title is plain text"
         assert dialog.summary.text() == ui_text("sources.totals", lang, n=3, full=1, facts=1)
         dialog.kind.setCurrentIndex(dialog.kind.findData("web"))

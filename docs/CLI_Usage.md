@@ -155,6 +155,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `config output-folder` | Show or set the output folder finished models are saved to |
 | `zoo list` / `zoo show` | List the community zoo and the installed packs / show one entry |
 | `zoo install` / `zoo verify` | Install a community pack after checks and your confirmation / check installed packs or a pack file |
+| `zoo uninstall` | Uninstall an installed pack after the exact list and your confirmation ("No" by default) |
 | `zoo export` / `zoo keys` | Make a signed pack of your own target, build or knowledge base (and open a pull request) / show your public keys |
 | `zoo maintainer key` / `review` / `revoke` | For the maintainer of the community repository: create the index signing key / review and publish contributions / revoke a published pack |
 
@@ -350,11 +351,11 @@ such as `CC-BY-4.0`, `other` for one the framework does not recognise, `-` for n
 knowledge pack would carry of it and why: **full text** (its licence allows passing the text on), **link and short
 facts** (a copyright notice and no such licence, code without a licence, an unknown licence) or **not exported** (a
 page of an installed knowledge pack, the framework's own documents). Addresses, titles and notices are site text and
-are shown as plain text. The knowledge base must be switched on. The column **Topic or target** names the topic or
-target the excerpts of a knowledge pack or a target pack belong to (`-` for your own pages, which get one when you
-export them); `--topic NAME` lists only the sources of that topic or target (ignoring case).
+are shown as plain text. The knowledge base must be switched on. The third column, **Topic or target**, names the topic
+or target the excerpts of a knowledge pack or a target pack belong to, and the topic of your own crawl (`-` for other
+pages of your own, which get one when you export them); `--topic NAME` lists only the sources of that topic or target (ignoring case).
 
-In the GUI: **Tools > Knowledge Sources...** (the same columns; the **Kind** filter is `--kind`, the field **Topic or
+In the GUI: **Tools > Knowledge Sources...** (the same columns in the same order; the **Kind** filter is `--kind`, the field **Topic or
 target** is `--topic`).
 
 ```bash
@@ -2385,7 +2386,8 @@ llm-cli zoo show PACK_ID [--kind target|recipe|knowledge]
 ```
 
 Shows one entry: kind, ID, version, author and licence, trust (and why it was revoked), where it is installed, the
-download address with size and sha256, the description, and for an installed recipe its `recipe.yml`. The ID is not
+download address with size and sha256, for a knowledge pack where it belongs (**Belongs to:** the topic or target
+its index entry names), the description, and for an installed recipe its `recipe.yml`. The ID is not
 case-sensitive. The command reads only the cached index and the installed packs; run `zoo list --refresh` first to
 see new entries. An unknown ID exits with code 1.
 
@@ -2475,6 +2477,28 @@ In the GUI: **Tools > Open Community Hub > Check installed packs** (no argument)
 ```bash
 llm-cli zoo verify
 llm-cli zoo verify community/contributions/contribution-target-my-board-1.0.0.zip
+```
+
+### zoo uninstall
+
+```
+llm-cli zoo uninstall PACK_ID --kind target|recipe|knowledge
+```
+
+Uninstalls an installed community pack. First it lists exactly what goes: the pack's folder with its provenance, its
+import notes in the knowledge folder, and (for a knowledge pack or a target pack's knowledge snapshot) how many
+excerpts only this pack holds; excerpts another pack or your own crawl also holds stay. Then it asks whether to move
+everything to the trash (restorable with `llm-cli trash restore`) or delete it for good, and "Uninstall exactly N items
+(size)?" with "No" as the default. Only at a terminal; without one nothing is deleted. A pack whose pages are in the
+knowledge base is refused while the knowledge base is off. To install a newer version of a pack, uninstall the old one
+first. Exit code 1 when nothing was uninstalled or an item could not be removed.
+
+In the GUI: **Tools > Open Community Hub**, select the installed pack, **Uninstall...**. An AI may only ask for it
+(the optional tool `remove_pack`, hidden until you enable it): you see the same list in the framework's own window
+and decide, and its request only moves to the trash.
+
+```bash
+llm-cli zoo uninstall rk3588-docs --kind knowledge
 ```
 
 ### zoo export

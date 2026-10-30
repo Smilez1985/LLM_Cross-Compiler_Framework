@@ -1003,6 +1003,7 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `run_benchmark` | local write | Optional, hidden until enabled: llama-bench on Ditto's catalog model (natively or in the sandbox) or a built GGUF model (always in the sandbox: a model built for a board is measured on the board) |
 | `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | external | Optional, hidden until enabled: probe a trusted board, install its self-built runtime, or check and benchmark it (always asked; jobs) |
 | `delete_artifact` | external, optional | Move one built model (its folder below the output folder and its golden ZIP) to the trash; hidden until you enable it, always asked |
+| `remove_pack` | external, optional | Ask to uninstall one installed community pack: you see its folder, its import notes and the excerpts only it holds in the framework's own window and decide; it goes to the trash; hidden until you enable it, always asked |
 | `list_trash` / `restore_from_trash` | read / local write, optional | See the trash by name, kind and size; restore what this AI asked to delete itself (always asked); hidden until you enable them. No tool empties the trash |
 | `restore_knowledge_snapshot` | external, optional | Replace the knowledge base with an earlier snapshot, after a backup of the current content (a job); hidden until you enable it, always asked |
 
@@ -2843,7 +2844,11 @@ problem by what can be done about it. At a terminal it then asks "Run Mojo Mirac
 act; on yes Mojo Miracle runs without the command typed again.
 
 **Mojo Miracle** (`llmcf mojo --miracle`) makes only harmless repairs: it narrows the state folder to your user, or
-switches Ditto's server to an intact stored llama.cpp build when the active one is missing. A repair's class comes
+switches Ditto's server to an intact stored llama.cpp build when the active one is missing. One repair needs your own
+yes: installed knowledge packs an earlier version imported without their topic or target
+(`community.knowledge.untagged`) are imported again (`knowledge.reimport`) only after Mojo Miracle showed each pack
+with its folder, pages and size and you answered yes (No is the default), at a terminal or in the Mojo window; a
+snapshot is taken first, and no AI can start it (for an AI it reads as the person's). A repair's class comes
 from its steps (a step that deletes, widens access, touches the vault, the permissions or the audit log, or needs the
 system is never harmless). Each repair is a dry-run plan bound to its sha256; right before it runs, Mojo checks again
 and changes nothing when the problem is gone or the plan changed. The audit log records it first (or nothing
@@ -3031,11 +3036,22 @@ Every piece of shared knowledge belongs to a topic (for example
 - **Excerpts:** every excerpt of a pack carries its topic or target; a pack's page cannot set it, nor the pack it
   claims to come from. `search_knowledge` and `list_knowledge_sources` take `topic` (a topic or a target),
   `llm-cli knowledge sources --topic` and the field **Topic or target** in **Tools > Knowledge Sources...** narrow the
-  list the same way.
+  list the same way. Your own crawled pages belong to a topic from the start: the Deep Ingest window asks for it (empty:
+  the site's name, such as `docs.example.com`), and a crawl an AI started takes the site's name. Excerpts an earlier
+  version imported before excerpts carried their topic or target are not found by `topic` until their pack is imported
+  again: when the knowledge base is open, Mojo Oracle names those packs (`community.knowledge.untagged`), and Mojo
+  Miracle imports them again only after your own yes, with each pack, its pages and size shown first (a snapshot is
+  taken first; an AI cannot start it).
 - **Upsert:** a newer version of a pack replaces the excerpts of the older one, per pack and page source: once every
   page of the new version is in, the excerpts the old version had and the new one does not are removed, so no stale
   excerpt stays. The snapshot of the knowledge base taken before the import stays. A page you crawl again with Deep
-  Ingest replaces its earlier excerpts too (each crawled page is stored right after it was downloaded).
+  Ingest replaces its earlier excerpts too (each crawled page is stored right after it was downloaded), and a crawl of
+  the same start address that read the whole site removes the excerpts of pages that are gone (a partial or failed
+  crawl removes nothing, nor does a crawl whose depth limit or language filter left links unread: the pages behind them
+  are not gone, only not reached).
+- **Shared pages:** two installed packs, or a pack and your own crawl, that carry the same page share its excerpts;
+  each excerpt names its holders. A newer version of one pack, a re-crawl or an uninstall lets go of only its own hold,
+  so a page another pack still holds stays (and is found under that pack's topic or target).
 - **Target knowledge:** the knowledge snapshot a target pack carries (`knowledge/initial_knowledge.json`, made by the
   module wizard) is checked like a knowledge pack at the install and imported into the recipient's knowledge base
   under that target, with a snapshot first and the same replacement by a newer version. On the computer that made the
@@ -3077,7 +3093,11 @@ target is checked as `llm-cli targets validate` does, and the result is shown.
 **Details...** (or a double click on a row) shows what `llm-cli zoo show` shows: licence, trust and revocation, the
 installed version and folder, the download address with size and sha256, the description and an installed recipe's
 `recipe.yml`. **Check installed packs**, **Check a pack file...**, **Export...** and **My public keys...** do what
-`zoo verify`, `zoo verify FILE`, `zoo export` and `zoo keys` do; each runs in the background.
+`zoo verify`, `zoo verify FILE`, `zoo export` and `zoo keys` do; each runs in the background. **Uninstall...** on an
+installed pack does what `llm-cli zoo uninstall` does: the deletion window lists its folder, its import notes and the
+excerpts only it holds, "No" is the default, and it goes to the trash or for good; excerpts another pack still holds
+stay. An AI may only ask for it (the optional tool `remove_pack`), and you decide in the same window. Restored from the
+trash, the pack's pages are imported again at the next knowledge import.
 
 ### Export for community
 
@@ -3127,7 +3147,8 @@ MCP clients and Ditto use the zoo with three tools (decisions of 2026-10-11): pa
 and leave this computer only as a local file you publish yourself.
 
 - **`list_packs`** (read): the index entries and the installed packs with kind, id, version, title, author, licence,
-  trust (`verified`, `community`, `local`, `revoked`), installed version and the revocation reason. It reads the
+  trust (`verified`, `community`, `local`, `revoked`), installed version and the revocation reason, and for a
+  knowledge pack the topic or target its index entry names (`topic`, `target`). It reads the
   cached index; `refresh` downloads the signed index anew (once an hour per client; not in offline mode).
   `pack_id` adds one pack's description, download size and sha256, and for an installed recipe its pinned values;
   `verify` adds the check of the installed packs (revoked, changed since installed). Titles, authors, descriptions
@@ -3201,7 +3222,8 @@ tool, no Ditto path and no other tool calls it (a test guards it).
    the contribution is merged (only when the check passed and its head is still the reviewed commit), the clone is
    updated, the pack moves to `packs/<kind>/`, its index entry gets the raw address
    (`https://raw.githubusercontent.com/<repo>/main/packs/<kind>/<file>`), the trust (`community`, or `verified` when
-   someone other than the author reproduced it) and the title, the index version is raised and its time set,
+   someone other than the author reproduced it), the title and, for a knowledge pack, the topic or target its
+   manifest names (the review line shows it too: "belongs to topic ..."), the index version is raised and its time set,
    `index.json` is signed with the keyring key, and that change is committed on a new branch (`lcf-publish-...`),
    pushed, opened as a pull request and merged once the required check passed. Nothing is ever pushed to `main` (it
    is protected), and each merge pins the commit that was checked.

@@ -30,7 +30,8 @@ HIDDEN = {"run_doctor"}
 # deploy_device_runtime (T14): the board's runtime as `llm-cli device runtime deploy` does it (the design expected it
 # inside the deploy package; the device runtime is deployed on its own).
 OPTIONAL = {"delete_artifact", "restore_knowledge_snapshot", "build_local_runtime", "start_local_runtime",
-            "stop_local_runtime", "run_benchmark", "deploy_device_runtime", "list_trash", "restore_from_trash"}
+            "stop_local_runtime", "run_benchmark", "deploy_device_runtime", "list_trash", "restore_from_trash",
+            "remove_pack"}   # an AI's request to uninstall a pack: the person decides in the framework's window
 LATER = {"probe_remote_device", "run_device_benchmark"}
 # The AI's hands in the open window (DECISIONS round 8, W4): one tool, the same for Ditto and every MCP caller.
 GUI = {"gui"}
@@ -41,7 +42,7 @@ BUILT = set(CORE)
 
 
 def test_the_catalogue_has_the_designed_size():
-    assert (len(CORE), len(OPTIONAL), len(LATER), len(HIDDEN)) == (40, 9, 2, 1)
+    assert (len(CORE), len(OPTIONAL), len(LATER), len(HIDDEN)) == (40, 10, 2, 1)
     assert GUI <= CORE
 
 

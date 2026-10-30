@@ -53,6 +53,7 @@ TOOL_WINDOWS: Dict[str, str] = {
     "index_framework_docs": "knowledge_sources",
     "add_pack_from_index": "community_hub",
     "export_pack": "community_hub",
+    "remove_pack": "community_hub",
     "restore_knowledge_snapshot": "knowledge_snapshots",
     # the trash
     "delete_artifact": "trash",

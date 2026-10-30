@@ -87,6 +87,8 @@ AI_NEXT = {
                "them the plan first.",
     "deletion_list": "No tool deletes: tell the person they choose what is deleted in the framework ({where}).",
     "person": "Tell the person what Mojo Oracle found and the fix hint: only they can do it.",
+    "miracle_yes": "No tool starts it: tell the person Mojo Miracle does it after their own yes, at a terminal or in "
+                   "the framework's Mojo window, with its plan and what it costs shown first.",
     "admin": "Tell the person this needs an administrator, with the fix hint.",
     "not_automatic": "Say honestly that nothing repairs it automatically, and give the person the fix hint.",
 }
@@ -104,6 +106,8 @@ def ai_next(verdict: str, code: str) -> str:
 _NOT_REPAIRED = {
     "deletion_list": (("needs your list of what to delete", "need your list of what to delete"),
                       ("needs the person's list of what to delete", "need the person's list of what to delete")),
+    "miracle_yes": (("Mojo Miracle does after your yes", "Mojo Miracle does after your yes"),
+                    ("Mojo Miracle does only after the person's yes", "Mojo Miracle does only after the person's yes")),
     "person": (("needs you", "need you"), ("needs the person", "need the person")),
     "admin": (("needs an administrator", "need an administrator"),) * 2,
     "not_automatic": (("cannot be repaired automatically", "cannot be repaired automatically"),) * 2,
@@ -127,7 +131,9 @@ def oracle_rows(framework, report: MojoReport, offered) -> List[Dict[str, Any]]:
     rows = []
     for row, finding in zip(ai_findings(framework, report), report.findings):
         offer = by_finding.get(id(finding))
-        repair = None if offer is None else {"how": offer.verdict, "summary": label(offer.summary),
+        # a repair of class person reads as the person's for an AI (repair.how): it cannot start it
+        how = "person" if offer is not None and offer.verdict == "miracle_yes" else getattr(offer, "verdict", "")
+        repair = None if offer is None else {"how": how, "summary": label(offer.summary),
                                              "next": ai_next(offer.verdict, finding.code)}
         rows.append({**row, "where": label(finding.where), "why": label(finding.why), "repair": repair,
                      "check_board": board_request(finding.board_name) if finding.board_check else None})
@@ -169,6 +175,9 @@ MIRACLE_LINES = {
     "list_elsewhere": "Mojo Miracle cannot repair it here: {reason}; {where}.",
     "other_list": "Mojo Miracle cannot repair it: {reason}; you choose what is deleted or exported: {where}.",
     "cannot": "Mojo Miracle cannot repair it: {reason}.",
+    "ask": "Mojo Miracle can do it after your yes: {summary}. It asks you first (No is the default).",
+    "ask_elsewhere": "Mojo Miracle does it only after your yes: {summary}. Run Mojo Miracle with you present to be "
+                     "asked.",
 }
 # How the person reads what became of a problem after Mojo Miracle (outcome_kind); any other outcome: "not_repaired".
 OUTCOME_KINDS = ("repaired", "already_fixed", "still_present", "declined", "not_repaired")
@@ -184,7 +193,8 @@ def opens_list(offer) -> bool:
 def miracle_acts(offered) -> List[Any]:
     """The offers Mojo Miracle acts on with the person present: its repairs and the deletion findings whose list it
     opens. Mojo Miracle is offered only when there is one."""
-    return [o for o in offered if o.verdict == "miracle" or (o.verdict == "deletion_list" and opens_list(o))]
+    return [o for o in offered if o.verdict in ("miracle", "miracle_yes")
+            or (o.verdict == "deletion_list" and opens_list(o))]
 
 
 def miracle_can(offer, at_terminal: bool) -> Tuple[str, Dict[str, str]]:
@@ -193,6 +203,8 @@ def miracle_can(offer, at_terminal: bool) -> Tuple[str, Dict[str, str]]:
     from orchestrator.Core.mojo.offers import DELETION_WHERE, OTHER_LISTS
     if offer.verdict == "miracle":
         return "repair", {"summary": offer.plan.summary}
+    if offer.verdict == "miracle_yes":
+        return ("ask" if at_terminal else "ask_elsewhere"), {"summary": offer.plan.summary}
     if offer.verdict == "deletion_list" and opens_list(offer):
         if at_terminal:
             return "list", {}
@@ -211,7 +223,7 @@ def miracle_line(offer, at_terminal: bool) -> str:
 def plan_steps(offer) -> List[Any]:
     """The steps of the plan Mojo Miracle would apply (target_label, full_path, before, after, undoable); [] when it
     does not repair the problem."""
-    if offer is None or offer.verdict != "miracle" or offer.plan is None:
+    if offer is None or offer.verdict not in ("miracle", "miracle_yes") or offer.plan is None:
         return []
     return list(offer.plan.steps)
 

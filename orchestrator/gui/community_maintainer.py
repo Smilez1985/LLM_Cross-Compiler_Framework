@@ -308,8 +308,10 @@ class MaintainerPanel(QWidget):
                 self._files.append(file)
                 self.file_list.addItem(one_line(f"{pack.file_name}: {file.path}"))
         problems = review.problems(self.lang)
+        packs = "\n".join(p.line() for p in review.packs)   # each pack, a knowledge pack with its topic or target
         if review.ok:
-            self._say(self._t("zoo.maint.reviewed.ok", item=one_line(review.item.label)))
+            self._say("\n".join(filter(None, (self._t("zoo.maint.reviewed.ok", item=one_line(review.item.label)),
+                                               packs))))
         else:
             text = self._t("zoo.maint.reviewed.bad", item=one_line(review.item.label),
                            problems="\n".join(f"- {p}" for p in problems) or "-")

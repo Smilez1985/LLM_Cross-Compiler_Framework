@@ -1100,6 +1100,7 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `run_benchmark` | lokal schreiben | Optional, verborgen bis zur Freigabe: llama-bench auf Dittos Katalogmodell (nativ oder in der Sandbox) oder einem gebauten GGUF-Modell (immer in der Sandbox: ein für ein Board gebautes Modell wird auf dem Board gemessen) |
 | `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | extern | Optional, verborgen bis zur Freigabe: ein vertrautes Board prüfen, seine selbst gebaute Laufzeit installieren oder sie prüfen und messen (immer mit Frage; Jobs) |
 | `delete_artifact` | extern, optional | Ein gebautes Modell (seinen Ordner unter dem Ausgabeordner und sein Golden-ZIP) in den Papierkorb verschieben; verborgen, bis du es freigibst, immer mit Frage |
+| `remove_pack` | extern, optional | Bitten, ein installiertes Community-Paket zu deinstallieren: Du siehst seinen Ordner, seine Import-Notizen und die Auszüge, die nur es hält, im eigenen Fenster des Frameworks und entscheidest; es geht in den Papierkorb; verborgen, bis du es freigibst, immer mit Frage |
 | `list_trash` / `restore_from_trash` | lesen / lokal schreiben, optional | Den Papierkorb mit Name, Art und Größe sehen; wiederherstellen, was diese KI selbst löschen wollte (immer mit Frage); verborgen, bis du sie freigibst. Kein Tool leert den Papierkorb |
 | `restore_knowledge_snapshot` | extern, optional | Die Wissensbasis durch einen früheren Snapshot ersetzen, nach einer Sicherung des aktuellen Inhalts (ein Job); verborgen, bis du es freigibst, immer mit Frage |
 
@@ -3152,6 +3153,11 @@ Miracle now? [y/N]“; bei Ja läuft Mojo Miracle, ohne dass der Befehl noch ein
 
 **Mojo Miracle** (`llmcf mojo --miracle`) macht nur harmlose Reparaturen: Es schränkt den Zustandsordner auf deinen
 Benutzer ein, oder es lässt Dittos Server einen intakten gespeicherten llama.cpp-Build starten, wenn der aktive fehlt.
+Eine Reparatur braucht dein eigenes Ja: Installierte Wissens-Packs, die eine frühere Version ohne ihr Thema oder Target
+importiert hat (`community.knowledge.untagged`), werden erst neu importiert (`knowledge.reimport`), nachdem Mojo
+Miracle jedes Pack mit Ordner, Seiten und Größe gezeigt und du mit Ja geantwortet hast („Nein“ ist die Vorgabe), im
+Terminal oder im Mojo-Fenster; zuerst wird ein Snapshot angelegt, und keine KI kann es starten (für eine KI gilt es
+als Sache der Person).
 Die Art einer Reparatur ergibt sich aus ihren Schritten (ein Schritt, der löscht, Zugriff erweitert, den Tresor, die
 Berechtigungen oder das Audit-Log berührt oder das System braucht, ist nie harmlos). Jede Reparatur ist ein Probelauf,
 an seinen sha256 gebunden; direkt bevor sie läuft, prüft Mojo noch einmal und ändert nichts, wenn das Problem weg ist
@@ -3360,12 +3366,24 @@ gehalten:
 - **Auszüge:** Jeder Auszug eines Packs trägt sein Thema oder Target; eine Seite des Packs kann es nicht setzen, auch
   nicht das Pack, aus dem sie angeblich stammt. `search_knowledge` und `list_knowledge_sources` nehmen `topic` (ein
   Thema oder ein Target), `llm-cli knowledge sources --topic` und das Feld **Thema oder Target** in **Tools >
-  Wissensquellen...** grenzen die Liste genauso ein.
+  Wissensquellen...** grenzen die Liste genauso ein. Deine eigenen gecrawlten Seiten gehören von Anfang an zu einem
+  Thema: Das Deep-Ingest-Fenster fragt danach (leer: der Name der Site, etwa `docs.example.com`), und ein Crawl, den
+  eine KI gestartet hat, nimmt den Namen der Site. Auszüge, die eine frühere Version importiert hat, bevor Auszüge ihr
+  Thema oder Target trugen, findet `topic` nicht, bis ihr Pack neu importiert ist: Ist die Wissensbasis offen, nennt
+  Mojo Oracle diese Packs (`community.knowledge.untagged`), und Mojo Miracle importiert sie erst nach deinem eigenen
+  Ja neu, nachdem es jedes Pack mit seinen Seiten und seiner Größe gezeigt hat (zuerst wird ein Snapshot angelegt;
+  eine KI kann es nicht starten).
 - **Ersetzen:** Eine neuere Version eines Packs ersetzt die Auszüge der älteren, je Pack und Seitenquelle: Sobald jede
   Seite der neuen Version drin ist, werden die Auszüge entfernt, die die alte Version hatte und die neue nicht, sodass
   kein veralteter Auszug bleibt. Der Snapshot der Wissensbasis vor dem Import bleibt. Eine Seite, die du mit Deep
   Ingest erneut crawlst, ersetzt ebenfalls ihre früheren Auszüge (jede gecrawlte Seite wird direkt nach dem Download
-  gespeichert).
+  gespeichert), und ein Crawl derselben Startadresse, der die ganze Site gelesen hat, entfernt die Auszüge von Seiten,
+  die es nicht mehr gibt (ein teilweiser oder fehlgeschlagener Crawl entfernt nichts, ebenso ein Crawl, dessen
+  Tiefengrenze oder Sprachfilter Links ungelesen ließ: die Seiten dahinter sind nicht weg, nur nicht erreicht).
+- **Geteilte Seiten:** Zwei installierte Packs, oder ein Pack und dein eigener Crawl, mit derselben Seite teilen sich
+  ihre Auszüge; jeder Auszug nennt seine Halter. Eine neuere Version eines Packs, ein neuer Crawl oder eine
+  Deinstallation gibt nur den eigenen Halt auf, sodass eine Seite, die ein anderes Pack noch hält, bleibt (und unter
+  dessen Thema oder Target gefunden wird).
 - **Target-Wissen:** Der Wissens-Schnappschuss, den ein Target-Pack mitbringt (`knowledge/initial_knowledge.json`, vom
   Modul-Assistenten erstellt), wird bei der Installation wie ein Wissens-Pack geprüft und unter diesem Target in die
   Wissensbasis des Empfängers importiert, mit einem Snapshot vorher und derselben Ersetzung durch eine neuere Version.
@@ -3412,6 +3430,11 @@ Zeile) zeigt, was `llm-cli zoo show` zeigt: Lizenz, Vertrauensstufe und Sperre, 
 Ordner, die Download-Adresse mit Größe und sha256, die Beschreibung und die `recipe.yml` eines installierten Rezepts.
 **Installierte Pakete prüfen**, **Paketdatei prüfen...**, **Exportieren...** und **Meine öffentlichen Schlüssel...**
 tun, was `zoo verify`, `zoo verify DATEI`, `zoo export` und `zoo keys` tun; jedes läuft im Hintergrund.
+**Deinstallieren...** bei einem installierten Pack tut, was `llm-cli zoo uninstall` tut: Das Löschfenster listet seinen
+Ordner, seine Import-Notizen und die Auszüge, die nur es hält, „Nein“ ist die Vorgabe, und es geht in den Papierkorb
+oder endgültig; Auszüge, die ein anderes Pack noch hält, bleiben. Eine KI darf nur darum bitten (das optionale Tool
+`remove_pack`), und du entscheidest im selben Fenster. Holst du es aus dem Papierkorb zurück, werden seine Seiten
+beim nächsten Wissensimport erneut importiert.
 
 ### Export für die Community
 
@@ -3466,8 +3489,9 @@ signierten Index und verlassen diesen Rechner nur als lokale Datei, die du selbs
 
 - **`list_packs`** (lesen): die Einträge des Index und die installierten Packs mit Art, ID, Version, Titel, Autor,
   Lizenz, Vertrauensstufe (`verified`, `community`, `local`, `revoked`), installierter Version und dem Grund eines
-  Rückzugs. Es liest den zwischengespeicherten Index; `refresh` lädt den signierten Index neu (einmal pro Stunde je
-  Client; nicht im Offline-Modus). `pack_id` ergänzt die Beschreibung eines Packs, Downloadgröße und sha256 und bei
+  Rückzugs, bei einem Wissens-Pack mit dem Thema oder Target, das sein Indexeintrag nennt (`topic`, `target`). Es
+  liest den zwischengespeicherten Index; `refresh` lädt den signierten Index neu (einmal pro Stunde je Client; nicht
+  im Offline-Modus). `pack_id` ergänzt die Beschreibung eines Packs, Downloadgröße und sha256 und bei
   einem installierten Rezept seine festgelegten Werte; `verify` ergänzt die Prüfung der installierten Packs
   (zurückgezogen, seit der Installation geändert). Titel, Autoren, Beschreibungen und Rezepte sind externer Text;
   Ordner erscheinen nur als Labels.
@@ -3548,9 +3572,10 @@ sichert das ab).
    gemergt (nur wenn die Prüfung bestanden ist und sein Stand noch der geprüfte Commit ist), der Klon aktualisiert,
    das Pack nach `packs/<kind>/` verschoben, sein Index-Eintrag bekommt die Raw-Adresse
    (`https://raw.githubusercontent.com/<repo>/main/packs/<kind>/<datei>`), das Vertrauen (`community`, oder
-   `verified`, wenn jemand anderes als der Autor es nachgebaut hat) und den Titel, die Version des Index wird erhöht
-   und seine Zeit gesetzt, `index.json` mit dem Schlüssel aus dem Schlüsselbund signiert, und diese Änderung auf einem
-   neuen Branch (`lcf-publish-...`) committet, gepusht, als Pull Request geöffnet und gemergt, sobald die
+   `verified`, wenn jemand anderes als der Autor es nachgebaut hat), den Titel und bei einem Wissens-Pack das Thema
+   oder Target seines Manifests (die Prüfzeile zeigt es auch: „belongs to topic ...“), die Version des Index wird
+   erhöht und seine Zeit gesetzt, `index.json` mit dem Schlüssel aus dem Schlüsselbund signiert, und diese Änderung
+   auf einem neuen Branch (`lcf-publish-...`) committet, gepusht, als Pull Request geöffnet und gemergt, sobald die
    Pflichtprüfung bestanden ist. Nichts wird je nach `main` gepusht (der Branch ist geschützt), und jeder Merge legt
    den geprüften Commit fest.
 3. **Veröffentlichtes Pack zurückziehen...** (`zoo maintainer revoke KIND ID --reason ... [--version V | --sha256

@@ -57,8 +57,8 @@ from pydantic import ValidationError
 
 from orchestrator.Core.community_manager import (KINDS, REPO_RE, CommunityIndex, CommunityManager, IndexEntry,
                                                  Revocation, tool_error_detail)
-from orchestrator.Core.community_pack import (MANIFEST_NAME, RESERVED_NAMES, SIGNATURE_NAME, PackError, key_id,
-                                              list_files, load_trusted_keys, read_pack, sign_index, utc_now,
+from orchestrator.Core.community_pack import (MANIFEST_NAME, RESERVED_NAMES, SIGNATURE_NAME, PackError, belongs_text,
+                                              key_id, list_files, load_trusted_keys, read_pack, sign_index, utc_now,
                                               verify_index)
 from orchestrator.utils import l10n_maintainer
 from orchestrator.utils.helpers import ensure_directory
@@ -235,7 +235,8 @@ def entry_for(manifest, data: bytes, url: str, *, trust: str = "community", titl
     address it is published at."""
     return IndexEntry(kind=manifest.kind, id=manifest.id, version=manifest.version, title=title or manifest.id,
                       description=description, author=manifest.author, license=manifest.license, trust=trust, url=url,
-                      size=len(data), sha256=hashlib.sha256(data).hexdigest())
+                      size=len(data), sha256=hashlib.sha256(data).hexdigest(),
+                      topic=getattr(manifest, "topic", None), target=getattr(manifest, "target", None))
 
 
 def make_entry(pack: Path, url: str, *, trust: str = "community", title: str = "",
@@ -372,7 +373,9 @@ class ReviewedPack:
         override, so every value is shown with hidden characters as escapes."""
         m = self.manifest
         what = f"{m.kind} {m.id} {m.version} by {m.author} ({m.license})" if m is not None else self.file_name
-        return one_line(f"{what}: {self.file_name}, {len(self.data)} bytes, sha256 {self.sha256}")
+        belongs = belongs_text(m.kind, m.topic, m.target) if m is not None else ""
+        return one_line(f"{what}{f', belongs to {belongs}' if belongs else ''}: {self.file_name}, "
+                        f"{len(self.data)} bytes, sha256 {self.sha256}")
 
 
 @dataclass
