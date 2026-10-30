@@ -288,7 +288,9 @@ class ParamikoTransport(Transport):
         """One `sh -c '<script>'` on the board: `stdin` is written and closed, stdout and stderr are each read up to
         `limit` bytes. A silent board raises socket.timeout after `timeout` seconds, a lost connection its OSError or
         EOFError; more output than `limit` raises TooMuchOutput."""
-        ch_in, ch_out, ch_err = self.client.exec_command(sh_command(script), timeout=timeout)
+        # B601: `script` is the framework's own command line, every value in it quoted (shlex.quote) where it is
+        # built; it goes to the board as one `sh -c '...'` word (sh_command), as in ssh_trust.install_key.
+        ch_in, ch_out, ch_err = self.client.exec_command(sh_command(script), timeout=timeout)  # nosec B601
         if stdin is not None:
             for chunk in stdin:
                 ch_in.write(chunk)

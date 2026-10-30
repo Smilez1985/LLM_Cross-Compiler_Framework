@@ -194,6 +194,62 @@ def test_an_archive_with_a_link_is_refused(tmp_path):
         deps._extract(buf.getvalue(), tmp_path / "out")
 
 
+def _evil_tar(name, kind=tarfile.REGTYPE, linkname="", payload=b"pwned"):
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        ok = tarfile.TarInfo("pkg/CMakeLists.txt")
+        ok.size = 3
+        tar.addfile(ok, io.BytesIO(b"ok\n"))
+        info = tarfile.TarInfo(name)
+        info.type, info.linkname = kind, linkname
+        if kind == tarfile.REGTYPE:
+            info.size = len(payload)
+            tar.addfile(info, io.BytesIO(payload))
+        else:
+            tar.addfile(info)
+    return buf.getvalue()
+
+
+@pytest.mark.parametrize("name, kind, linkname, why", [
+    ("/tmp/evil", tarfile.REGTYPE, "", "outside"),                    # an absolute path
+    ("pkg/../../evil", tarfile.REGTYPE, "", "outside"),               # '..' out of the folder
+    ("pkg/inner", tarfile.SYMTYPE, "../../../etc/passwd", "link"),    # a link pointing outside
+    ("pkg/inner", tarfile.SYMTYPE, "CMakeLists.txt", "link"),         # also one that stays inside: no links at all
+    ("pkg/inner", tarfile.LNKTYPE, "/etc/passwd", "link"),            # a hard link
+    ("pkg/tty", tarfile.CHRTYPE, "", "device"),                       # a device
+    ("pkg/blk", tarfile.BLKTYPE, "", "device"),
+    ("pkg/fifo", tarfile.FIFOTYPE, "", "device"),                     # a FIFO
+])
+def test_a_malicious_dependency_archive_is_refused_and_nothing_lands(tmp_path, name, kind, linkname, why):
+    # Bandit B202 (dependency pre-fetch): the archive goes through the one safe tar extraction; whatever it holds,
+    # nothing is written outside, and a refused archive leaves neither the folder nor its staging copy.
+    out = tmp_path / "deps" / "out"
+    out.parent.mkdir()
+    with pytest.raises(DependencyError, match=why):
+        deps._extract(_evil_tar(name, kind, linkname), out)
+    assert not out.exists() and list(out.parent.iterdir()) == []
+    assert not (tmp_path / "evil").exists()
+
+
+def test_the_dependency_extraction_is_the_one_safe_helper(tmp_path, monkeypatch):
+    # R0: deps._extract does not unpack on its own; utils/helpers.safe_extract_tar (links refused) does it.
+    from orchestrator.utils import helpers
+    calls = []
+    real = helpers.safe_extract_tar
+    monkeypatch.setattr(helpers, "safe_extract_tar", lambda tar, dest, **kw: (calls.append(kw), real(tar, dest, **kw)))
+    deps._extract(_tar({"CMakeLists.txt": b"project(x)\n"}), tmp_path / "out")
+    assert calls == [{"links": False}] and (tmp_path / "out" / "CMakeLists.txt").read_bytes() == b"project(x)\n"
+
+
+def test_a_special_member_the_plain_check_misses_is_still_refused(tmp_path, monkeypatch):
+    # The helper's own checks stand behind the plain reasons: a member type no reason names (here one tarfile
+    # does not know) is refused by safe_extract_tar, not written.
+    data = _evil_tar("pkg/odd", kind=b"Z")
+    with pytest.raises(DependencyError, match="not allowed"):
+        deps._extract(data, tmp_path / "out")
+    assert not (tmp_path / "out").exists()
+
+
 def test_only_https_or_a_test_s_local_source(tmp_path):
     with pytest.raises(DependencyError, match="https"):
         Fetcher().git_clone((tmp_path / "x").as_uri(), "v1", tmp_path / "dest")

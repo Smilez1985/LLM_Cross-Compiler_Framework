@@ -64,9 +64,53 @@ def execute_command(command: List[str], cwd=None, timeout=None, env=None):
         return -1, "", str(e)
     return res.returncode, res.stdout or "", res.stderr or ""
 
+class UnsafeArchive(Exception):
+    """An archive member that would land outside the destination, a link pointing out of it (or any link where
+    links are refused), a device or another special file: nothing of the archive is extracted."""
+
+
+def safe_extract_tar(tf: tarfile.TarFile, dest_dir: Path, *, links: bool = True) -> None:
+    """Extracts an open tar archive into `dest_dir` after every member was checked: no absolute path and none that
+    resolves outside `dest_dir` (".."), no symbolic or hard link pointing outside it (`links` False: no link at all),
+    no device, FIFO or other special file. Then Python's tarfile "data" filter (Python >= 3.12, 3.11.4) checks the
+    same again while it writes; without the filter a link is refused, since chained links could still escape. Raises
+    UnsafeArchive (nothing extracted) for a refused member. The one tar extraction of the framework (R0)."""
+    dest_dir = Path(dest_dir).resolve()
+
+    def inside(path: Path) -> bool:
+        # Path containment, not string prefixes ("/x/out2" starts with "/x/out").
+        return path.resolve().is_relative_to(dest_dir)
+
+    members = tf.getmembers()
+    for member in members:
+        target = dest_dir / member.name
+        if member.name.startswith(("/", "\\")) or not inside(target):
+            raise UnsafeArchive(f"Security: Tar Slip attempt detected: {member.name}")
+        if (member.issym() or member.islnk()) and not links:
+            raise UnsafeArchive(f"Security: link in archive: {member.name}")
+        if member.issym() and not inside(target.parent / member.linkname):
+            raise UnsafeArchive(f"Security: Tar Slip via symlink detected: {member.name} -> {member.linkname}")
+        if member.islnk() and not inside(dest_dir / member.linkname):
+            raise UnsafeArchive(f"Security: Tar Slip via hardlink detected: {member.name} -> {member.linkname}")
+        if member.isdev():   # character or block device, FIFO
+            raise UnsafeArchive(f"Security: Device file in archive: {member.name}")
+        if not (member.isfile() or member.isdir() or member.issym() or member.islnk()):
+            raise UnsafeArchive(f"Security: special file in archive: {member.name}")
+
+    if hasattr(tarfile, "data_filter"):
+        tf.extractall(dest_dir, members=members, filter="data")
+    else:
+        # Without extraction filters, chained links could still escape; only plain files and dirs are allowed.
+        found = [m.name for m in members if m.issym() or m.islnk()]
+        if found:
+            raise UnsafeArchive(f"Security: links in archive need Python >= 3.10.12 / 3.11.4: {found[:3]}")
+        # Every member was checked above (plain files and folders only).
+        tf.extractall(dest_dir, members=members)  # nosec B202
+
+
 def safe_extract_archive(archive_path: Path, dest_dir: Path):
     """
-    Secure extraction preventing Zip Slip/Tar Slip vulnerabilities.
+    Secure extraction preventing Zip Slip/Tar Slip vulnerabilities (tar: safe_extract_tar).
     """
     dest_dir = Path(dest_dir).resolve()
 
@@ -78,32 +122,13 @@ def safe_extract_archive(archive_path: Path, dest_dir: Path):
         with zipfile.ZipFile(archive_path, 'r') as zf:
             for member in zf.infolist():
                 if not inside(dest_dir / member.filename):
-                    raise Exception(f"Security: Zip Slip attempt detected: {member.filename}")
+                    raise UnsafeArchive(f"Security: Zip Slip attempt detected: {member.filename}")
             # Every member path was checked above.
             zf.extractall(dest_dir)  # nosec B202
 
     elif str(archive_path).endswith(('.tar.gz', '.tgz', '.tar')):
         with tarfile.open(archive_path, 'r:*') as tf:
-            members = tf.getmembers()
-            for member in members:
-                target = dest_dir / member.name
-                if not inside(target):
-                    raise Exception(f"Security: Tar Slip attempt detected: {member.name}")
-                if member.issym() and not inside(target.parent / member.linkname):
-                    raise Exception(f"Security: Tar Slip via symlink detected: {member.name} -> {member.linkname}")
-                if member.islnk() and not inside(dest_dir / member.linkname):
-                    raise Exception(f"Security: Tar Slip via hardlink detected: {member.name} -> {member.linkname}")
-                if member.isdev():
-                    raise Exception(f"Security: Device file in archive: {member.name}")
-
-            if hasattr(tarfile, "data_filter"):
-                tf.extractall(dest_dir, members=members, filter="data")
-            else:
-                # Without extraction filters, chained links could still escape; only plain files and dirs are allowed.
-                links = [m.name for m in members if m.issym() or m.islnk()]
-                if links:
-                    raise Exception(f"Security: links in archive need Python >= 3.10.12 / 3.11.4: {links[:3]}")
-                tf.extractall(dest_dir, members=members)  # nosec B202
+            safe_extract_tar(tf, dest_dir)
 
 def calculate_file_checksum(path: Path, algorithm="sha256") -> str:
     """Calculates hash of a file ('' when the file is missing). The original of the file-hash helpers below."""

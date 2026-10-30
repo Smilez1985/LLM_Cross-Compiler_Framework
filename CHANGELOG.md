@@ -22,6 +22,12 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   POSIX path.
 
 ### Security
+- `2026-10-30 14:40 UTC` · `v3.3.0` **The dependency pre-fetch unpacks through the framework's one safe extraction**
+  ([design](docs/DESIGN.md#security-model)): an archive fetched for a module's download option (BoringSSL, LibreSSL,
+  KleidiAI) went through its own copy of the checks, and on Python 3.11 before 3.11.4 it was unpacked without a member
+  filter. It now goes through `safe_extract_tar` (also behind `safe_extract_archive`, links refused here): absolute
+  paths, paths leading outside, links, devices, FIFOs and other special files are refused before anything is written,
+  and the tarfile data filter checks again; a refused archive leaves nothing behind.
 - `2026-10-30 14:07 UTC` · `v3.3.0` **Ditto's local server: the key never goes to a program that took its port, also
   without root rights** ([design](docs/DESIGN.md#security-model)): when another program took the free port between the
   choice and llama-server's bind, llama-server exits, and the start must see that it is not the port's listener. For an

@@ -187,22 +187,24 @@ class Fetcher:
 
 
 def _extract(data: bytes, dest: Path) -> None:
-    """Unpacks a .tar.gz into `dest`, without its single top-level folder; links, devices and paths outside are
-    refused (the tarfile data filter)."""
+    """Unpacks a .tar.gz into `dest`, without its single top-level folder, through the framework's one safe tar
+    extraction (utils/helpers.safe_extract_tar, links refused here): links, devices and other special files, absolute
+    paths and paths leading outside are refused before anything is written, and the tarfile data filter checks again."""
+    from orchestrator.utils.helpers import UnsafeArchive, safe_extract_tar
     staging = dest.with_name(dest.name + ".unpack")
     staging.mkdir(parents=True)
     try:
         with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as tar:
-            for member in tar.getmembers():
+            for member in tar.getmembers():   # the plain reasons; safe_extract_tar refuses these and more
                 if member.issym() or member.islnk() or member.isdev():
                     raise DependencyError(f"the archive holds a link or device ({member.name}); refusing it")
                 parts = Path(member.name).parts
                 if member.name.startswith(("/", "\\")) or ".." in parts:
                     raise DependencyError(f"the archive holds a path outside its folder ({member.name}); refusing it")
-            if hasattr(tarfile, "data_filter"):
-                tar.extractall(staging, filter="data")
-            else:  # pragma: no cover - Python 3.11 before 3.11.4: the members were checked above
-                tar.extractall(staging)
+            try:
+                safe_extract_tar(tar, staging, links=False)
+            except UnsafeArchive as e:
+                raise DependencyError(f"the archive holds a member that is not allowed ({e}); refusing it") from None
         entries = list(staging.iterdir())
         top = entries[0] if len(entries) == 1 and entries[0].is_dir() else staging
         os.replace(top, dest)
