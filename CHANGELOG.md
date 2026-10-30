@@ -49,6 +49,17 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   this update makes a new image. The build context always has an empty `sources/` folder. One `docker save` helper
   (`utils/docker_engine.save_image`) now serves the deployment manager's package export, the security scan's archive
   and the image export; `BuildEngine.image_labels` is the one computation of an image's build arguments and labels.
+  An offline build judges every source as the build uses it: a llama.cpp repository override the image build does
+  not take (only https without credentials; an http mirror, for example) is not local, because the image would fetch
+  llama.cpp from GitHub; addresses of every scheme (git, ssh, the scp-like form) count, and a package manager other
+  than apt and pip (apk, dnf, npm and the like) is named as not local. A Docker Hub base image that comes through a
+  registry mirror of the Docker daemon is pulled from the mirror's own address before the build, because the
+  daemon's mirror setting falls back to Docker Hub when the mirror fails; a mirror that does not provide it stops the
+  build. An offline build never runs on a buildx builder apart from the Docker daemon (driver docker-container,
+  remote, kubernetes), which would pull every base image itself; the daemon's own builder builds it. An import
+  hashes, checks and loads one open file, and refuses an archive that would name the image other than
+  `llm-framework/<target>:...` (a base image's name, another target's) or whose OCI `index.json` names another image
+  than its `manifest.json`.
 
 ## [3.1.0] - 2026-10-29
 

@@ -582,8 +582,12 @@ online wird keines übergeben, also baut ein Dockerfile, das sie annimmt, wie bi
 | `PIP_INDEX_URL`, `PIP_TRUSTED_HOST` | In jeder Stufe deklariert, die pip ausführt; pip liest beide aus der Umgebung. Mit einem Index fallen die eigenen `--extra-index-url`-Zeilen der Requirements weg. |
 | `LLAMA_CPP_SOURCE` | `ARG LLAMA_CPP_SOURCE=git` und `COPY sources/ /tmp/llmcf-sources/` vor dem Abruf von llama.cpp; mit `context` kopiert der Abrufschritt `/tmp/llmcf-sources/llama.cpp` (mit seinem `.git`) und prüft seinen Commit und dass nichts geändert ist, wie bei einem Abruf. Das Framework legt `sources/` in jedem Build-Kontext an. |
 
-Jede andere Adresse, von der das Dockerfile holt (eine URL in einer `RUN`- oder `ADD`-Zeile oder ein `ARG`-Vorgabewert),
-wird nach ihrem Host beurteilt; ein Offline-Build hält an, wenn sie nicht im eigenen Netz liegt. Ein `ARG`, dessen
+Jede andere Adresse, von der das Dockerfile holt (eine URL jedes Schemas, etwa `https://`, `git://` oder `ssh://`,
+oder das scp-artige `user@host:pfad`, in einer `RUN`- oder `ADD`-Zeile oder ein `ARG`-Vorgabewert), wird nach ihrem
+Host beurteilt; ein Offline-Build hält an, wenn sie nicht im eigenen Netz liegt. Pakete kommen nur über apt und pip:
+Ein Dockerfile, das einen anderen Paketmanager ausführt (`apk`, `dnf`, `yum`, `zypper`, `pacman`, `conda`, `npm`,
+`cargo`, `go install` und ähnliche), lässt sich nicht offline bauen; sein Image wird einmal online gebaut oder
+importiert. Ein `ARG`, dessen
 Name auf `_PIP_URL` endet, ist ein pip-Ort, den der pip-Index ersetzt (Rockchips `TORCH_PIP_URL` und
 `RKLLM_PIP_URL`): Nutze ihn als `${PIP_INDEX_URL:-${TORCH_PIP_URL}}` oder lade ein Wheel mit festgelegter sha256 aus
 dem Index und prüfe dieselbe sha256. Diese Argumente sind keine Eingaben des Images, also wird ein online gebautes
