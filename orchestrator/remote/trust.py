@@ -54,6 +54,19 @@ class HostKeyError(Exception):
     """Base class for host key problems; the message is meant for the user."""
 
 
+class JumpHostNotTrusted(OSError):
+    """Reading the key of a board behind a jump host stopped at the jump host: this computer's OpenSSH does not trust
+    the jump host's key yet (the jump host is checked against the person's own SSH trust, ssh_config.KNOWINGLY). The
+    message is meant for the person."""
+
+    def __init__(self, host: str):
+        super().__init__(f"The board {host} is reached through a jump host (the framework's SSH settings for it), and "
+                         "this computer's SSH does not trust that jump host yet, so the board's key could not be read "
+                         "through it. Pair the jump host first: check its fingerprint and trust it in your own SSH "
+                         "settings, then read the board's key again.")
+        self.host = host
+
+
 class UnknownHostKey(HostKeyError):
     def __init__(self, host: str, port: int, key):
         self.host, self.port, self.key = host, port, key
@@ -213,7 +226,12 @@ class TrustStore:
         return dict(entries.items()) if entries else {}
 
     def read_presented_key(self, endpoint: Endpoint) -> Any:
-        """The key the board presents now: one connection to its SSH port, no login. Network: off the GUI thread."""
+        """The key the board presents now: one connection to its SSH port, no login. A board that llmcf's own SSH
+        settings reach through a ProxyJump or ProxyCommand (ssh_config.needs_proxy) is read through that jump with
+        OpenSSH (presented_key_through_openssh); every other board directly. Network: off the GUI thread."""
+        from orchestrator.remote import ssh_config
+        if ssh_config.needs_proxy(self.state_dir, endpoint.host):
+            return presented_key_through_openssh(self.state_dir, endpoint)
         from orchestrator.utils import ssh_trust   # looked up now: tests replace fetch_host_key there
         return ssh_trust.fetch_host_key(endpoint.host, endpoint.port)
 
@@ -226,6 +244,58 @@ class TrustStore:
             key = self.read_presented_key(endpoint)
         return KeyCheck.of(endpoint, key, self.status(endpoint, key), expect_fingerprint=expect_fingerprint,
                            expect_device_id=expect_device_id)
+
+
+# The user name of the key read: OpenSSH needs one, no login is tried (PreferredAuthentications=none).
+KEY_READ_USER = "llmcf"
+KEY_READ_TIMEOUT = 60.0
+
+
+def presented_key_through_openssh(state_dir: Path, endpoint: Endpoint, *, program: str = "ssh",
+                                  timeout: float = KEY_READ_TIMEOUT) -> Any:
+    """The key a board behind a jump host presents, read through this computer's OpenSSH with llmcf's own SSH
+    settings (the one argv builder, transport.openssh_options): -F llmcf's file, a temporary known_hosts into which
+    OpenSSH writes the board's key (StrictHostKeyChecking=accept-new, into that file only), BatchMode, no login
+    (PreferredAuthentications=none) and no command (-N). The temporary file goes again; the framework's known_hosts
+    is not touched (the person says yes to the fingerprint first, as for every board). JumpHostNotTrusted when OpenSSH
+    stops at the jump host, OSError when no key could be read (the board or the jump host cannot be reached, no
+    OpenSSH client)."""
+    import shutil
+    import subprocess
+    import tempfile
+    from orchestrator.remote import transport
+    if shutil.which(program) is None:
+        raise OSError("this computer has no OpenSSH client (ssh), which a board behind a jump host needs")
+    with tempfile.TemporaryDirectory(prefix="llmcf-keyscan-") as scratch:
+        known = Path(scratch) / "known_hosts"
+        known.touch()
+        options = transport.openssh_options(state_dir, known_hosts=known, accept_new=True)
+        options += ["-o", "PreferredAuthentications=none", "-o", "HashKnownHosts=no", "-N"]
+        argv = transport.openssh_argv(program, endpoint, KEY_READ_USER, options)
+        try:
+            done = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace",
+                                  timeout=timeout, **transport._no_window())
+            said = (done.stderr or "") + (done.stdout or "")
+        except subprocess.TimeoutExpired:
+            said = ""
+        key = _first_key(known.read_text(encoding="utf-8", errors="replace"))
+    if key is not None:
+        return key
+    if "Host key verification failed" in said:
+        raise JumpHostNotTrusted(endpoint.host)
+    raise OSError(f"the key of {endpoint.host} could not be read through its jump host "
+                  "(the jump host or the board cannot be reached)")
+
+
+def _first_key(text: str) -> Any:
+    """The first key of a known_hosts text OpenSSH wrote (None when there is none or it cannot be read)."""
+    for line in text.splitlines():
+        if line.strip() and not line.startswith("#"):
+            try:
+                return parse_public_key(line)
+            except KeyTextError:
+                continue
+    return None
 
 
 def parse_public_key(text: str) -> Any:

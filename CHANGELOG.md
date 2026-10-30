@@ -28,6 +28,12 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   all of them as before, in the settings, the Prompt cache group and `llm-cli ditto cache set`.
 
 ### Fixed
+- `2026-10-30 14:39 UTC` · `v3.3.0` **Pairing a board behind a jump host reads its key through the jump** ([design](docs/DESIGN.md#ssh-host-keys-and-the-remote-package)):
+  when the framework's own SSH settings reach a board through a `ProxyJump` or `ProxyCommand`, the key the board
+  presents is now read through this computer's OpenSSH with those settings (before, a direct connection was tried,
+  which cannot reach such a board) and shown to you with its fingerprint as for every board; nothing is trusted
+  before your yes. A jump host this computer's SSH does not trust yet is named plainly: pair the jump host first. A
+  board reached directly is read as before.
 - `2026-10-30 14:34 UTC` · `v3.3.0` **The note an uninstall leaves is never cut by a crash** ([design](docs/DESIGN.md#community-recipes-and-packs)):
   when a pack's excerpts leave the knowledge base, its uninstall writes the note `<pack>.released` atomically
   (through the new `utils/atomic.write_file`: a temporary file next to it, synced, then put in its place), so a
