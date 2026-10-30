@@ -36,6 +36,7 @@ can reach imports it (tests/test_remote_trust.py follows the imports).
 import os
 import secrets
 import shutil
+from orchestrator.utils.atomic import remove_tree
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, List, Optional, Sequence
@@ -186,7 +187,7 @@ class _Folder(_Item):
             return
         parent = self.source.parent
         for stale in parent.glob(f".{self.target.name}{_MOVING}*"):   # what an interrupted move left
-            shutil.rmtree(stale, ignore_errors=True)
+            remove_tree(stale)
         temporary = parent / f".{self.target.name}{_MOVING}{secrets.token_hex(4)}"
         try:
             _link_or_copy_tree(self.source, temporary)
@@ -194,13 +195,13 @@ class _Folder(_Item):
                 raise OSError("the copy differs from the original")
             os.rename(temporary, self.target)   # one step; refused (OSError) when the target appeared meanwhile
         except BaseException:
-            shutil.rmtree(temporary, ignore_errors=True)
+            remove_tree(temporary)
             raise
         self.state = "staged"
 
     def undo(self) -> None:
         if self.state == "staged":
-            shutil.rmtree(self.target, ignore_errors=True)   # hard links: only the new names go
+            remove_tree(self.target)   # hard links: only the new names go
 
     def finish(self) -> None:
         shutil.rmtree(self.source)

@@ -41,6 +41,7 @@ from orchestrator.tools.policy import Decision, ToolTier
 from orchestrator.tools.registry import ToolContext, ToolError, ToolRegistry, ToolSpec
 from orchestrator.tools.spec import CallFacts, Fact, FieldMeta, GrantRule, Rate, ToolLimits
 from orchestrator.utils.lazy_imports import lazy_attributes
+from orchestrator.utils.atomic import remove_tree
 
 PACK_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
 # = Core/community_pack.TOPIC_PATTERN (the pack code loads on first use; tests/test_knowledge_order.py keeps them equal)
@@ -116,7 +117,7 @@ class Quarantine:
         try:
             self._community().discard(prepared)
         except Exception:  # noqa: BLE001 - the folder may be gone already
-            shutil.rmtree(getattr(prepared, "quarantine", ""), ignore_errors=True)
+            remove_tree(getattr(prepared, "quarantine", ""))
 
     def get(self, key) -> Optional[Any]:
         self.sweep()

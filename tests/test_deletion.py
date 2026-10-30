@@ -178,8 +178,10 @@ DELETION_SITES = {
     ("orchestrator/Core/community_pack.py", "read_pack"): STAGING,
     ("orchestrator/Core/module_generator.py", "ModuleGenerator.generate_module"): STAGING,
     ("orchestrator/tools/tools_community.py", "Quarantine._discard"): STAGING,
-    ("orchestrator/runtime/build/source.py", "remove_tree"): STAGING,
-    ("orchestrator/runtime/build/source.py", "remove_tree.retry"): STAGING,
+    ("orchestrator/runtime/build/source.py", "remove_tree"): STAGING,   # the old name, delegates to the helper below
+    # the one removal of the framework's own folders (chain win-hygiene); its callers are listed
+    ("orchestrator/utils/atomic.py", "remove_tree"): STAGING,
+    ("orchestrator/utils/atomic.py", "_retry_writable"): STAGING,
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime._unpack"): STAGING,
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime.install_prebuilt"): STAGING,
     # the pinned source and the build store: staging folders, and a damaged copy replaced by a complete one
@@ -223,8 +225,9 @@ DELETION_SITES = {
 
 _DELETING = {"rmtree", "unlink", "rmdir", "removedirs", "prune", "prune_builds", "prune_containers", "prune_volumes",
              "prune_networks", "prune_images"}
-# Helpers that delete a folder or a file, called by name (runtime/build/source.py remove_tree; shutil.rmtree imported
-# by name; utils/atomic.remove_file): their callers delete as much as the helper does.
+# Helpers that delete a folder or a file, called by name (utils/atomic.remove_tree and its old names in
+# runtime/build/source.py and rag/storage_lock.py; shutil.rmtree imported by name; utils/atomic.remove_file): their
+# callers delete as much as the helper does.
 _DELETING_HELPERS = {"remove_tree", "rmtree", "remove_file"}
 
 

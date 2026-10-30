@@ -1687,6 +1687,17 @@ Ein Repository mit Schichten, die ein Test durchsetzt; jede Änderung erweitert,
 | Arbeit landet auf dem Zweig `development`; er wird mit einem normalen Merge-Commit (alle Commits bleiben) in main übernommen, wenn er stabil und die CI grün ist; die CI läuft bei Pushes auf development. | Die Push-Auslöser in `.github/workflows/ci.yml`. | Main bleibt der stabile Stand; die Geschichte bleibt lesbar. |
 | Fragen kommen gebündelt, wenige auf einmal; was jetzt nicht gefragt wird, kommt als geordneter Punkt mit seinen offenen Entscheidungen in der Zeile in die Roadmap; nichts darf verwaisen. | Die Roadmap-Zeilen tragen ihre offenen Entscheidungen (etwa die Schritte des Build-Dienstes). | Die Roadmap ist eine Aufgabenliste, keine Ablage. |
 
+### Tests, CI und die Windows-Fallen
+
+Die Tests laufen unter Linux und Windows; was nur ein Windows-Runner fände (belegte Sparse-Dateien, schreibgeschützte
+Dateien, die sich nicht löschen lassen), wird auch unter Linux sichtbar.
+
+#### Entscheidungen
+
+| Was | Wie | Warum |
+|---|---|---|
+| Ein Entfernen der eigenen Ordner des Frameworks (Caches, Staging-, Arbeits- und Quarantäne-Ordner, temporäre Kopien), das meldet, was es nicht entfernen konnte; kein `shutil.rmtree(..., ignore_errors=True)` daneben. Ein Aufrufer, der den Ordner weg haben muss (ein Cache, ein Staging- oder Arbeitsordner, der in einen Hash oder einen späteren Schritt eingeht), prüft das Ergebnis und hält mit klarem Grund an; ein Aufräumen nach bestem Bemühen bleibt das und wird protokolliert. Dateien der Person werden damit nie entfernt. | `orchestrator/utils/atomic.remove_tree(path, label=...)` (Qt-frei, damit Core und Laufzeit es teilen): schreibgeschützte Einträge werden beschreibbar gemacht und noch einmal versucht, ein Link wird entfernt und nie verfolgt, ein Durchgang, der etwas übrig lässt, wird unter Windows wiederholt (3 Durchgänge, eine kurze Pause dazwischen), und die Liste dessen, was bleibt, kommt zurück, mit einer Warnung, die das Label und relative Pfade nennt, nie den Pfad des Ordners selbst. `runtime/build/source.remove_tree` und `rag/storage_lock.remove_tree` sind veraltete Namen, die daran weitergeben. Ein Build hält an, wenn der Staging-Ordner eines früheren Versuchs bleibt (er würde mit den neuen Artefakten veröffentlicht), ein Paket-Export, wenn ein alter Lizenzordner seiner Kopie bleibt, die Umwandlung der Wissensbasis, wenn eine frühere halbe Kopie bleibt, der Abhängigkeits-Vorabruf, wenn `.git` bleibt. Ein Löschen durch die Person läuft nur über `Core/deletion.py` und `Core/trash.py`. `tests/test_removal.py` (eine Nachbildung der NTFS-Schreibschutzregel auf jedem Rechner und eine AST-Sperre über `orchestrator/` und `scripts/` mit leerer Ausnahmeliste). | Unter Windows lässt sich eine schreibgeschützte Datei nicht löschen, und `rmtree(ignore_errors=True)` gab dabei wortlos auf: das `.git` eines Git-Checkouts blieb im Abhängigkeits-Cache und in seinem Hash, und entpackte Archive, Quarantäne-Kopien und Staging-Ordner blieben auf der Platte. Linux löscht solche Dateien, deshalb zeigte sich die Falle nur auf dem Windows-Runner. |
+
 ### Dokumentation und der Bauplan
 
 Jedes Dokument gibt es auf Englisch und Deutsch; der Bauplan besteht aus drei Dateien: diesem Design, der Roadmap und

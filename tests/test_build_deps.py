@@ -297,11 +297,11 @@ def test_a_git_dependency_is_cloned_at_its_tag_and_checked(tmp_path):
 def test_git_metadata_that_cannot_be_removed_is_refused_not_kept(tmp_path, monkeypatch):
     """git keeps its objects read-only: on Windows shutil.rmtree(ignore_errors=True) left .git in the cache entry and
     in its sha256 without a word. Now it is removed like every read-only tree, and if it still stands, refused."""
-    from orchestrator.runtime.build import source
+    from orchestrator.utils import atomic   # the one removal helper (chain win-hygiene; source.remove_tree delegates)
     repo = _git_repo(tmp_path)
     cache = _cache(tmp_path)
-    real = source.remove_tree
-    monkeypatch.setattr(source, "remove_tree", lambda path: None if path.name == ".git" else real(path))
+    real = atomic.remove_tree
+    monkeypatch.setattr(atomic, "remove_tree", lambda path, **kw: [path] if path.name == ".git" else real(path, **kw))
     with pytest.raises(DependencyError, match="git metadata .* could not be removed"):
         cache.ensure(_git_dep(repo), offline=False)
     assert not cache.folder(_git_dep(repo)).exists()

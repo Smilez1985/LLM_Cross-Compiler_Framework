@@ -33,7 +33,6 @@ quietly using the old folder, which lacks what was added since the conversion.
 import json
 import math
 import os
-import shutil
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -41,6 +40,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from orchestrator.rag.errors import KnowledgeBaseError
+from orchestrator.utils.atomic import remove_tree
 
 OLD_FOLDER = "qdrant"
 EDGE_FOLDER = "qdrant_edge"
@@ -397,8 +397,11 @@ def convert(state_dir: Path, log: Log = None, disk_usage: Any = None) -> Convers
     except ImportError:
         raise ConversionFailed("The Qdrant Edge engine (package qdrant-edge-py) is not installed.",
                                code="error") from None
-    if work.exists():  # the half-built copy of an attempt that was cut off (never the person's data)
-        remove_tree(work)
+    # the half-built copy of an attempt that was cut off (never the person's data); one that cannot be removed would
+    # mix into this conversion
+    if work.exists() and remove_tree(work):
+        raise ConversionFailed("The half-built copy of an earlier conversion could not be removed (a file in it is "
+                               "still open); the old store stays in use.", code="error")
     client = _open_old(old)
     storage = EdgeStorage(work)
     result = Conversion()
@@ -469,7 +472,7 @@ def _move_into_place(work: Path, final: Path, collections: str, aliases: str) ->
         for item, target in reversed(moved):  # never a half-moved storage: what was moved goes back to the copy
             os.replace(target, item)
         raise
-    shutil.rmtree(work, ignore_errors=True)
+    remove_tree(work)
 
 
 def _record(state_dir: Path, record: Dict[str, Any], log: Log) -> None:

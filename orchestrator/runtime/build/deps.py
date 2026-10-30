@@ -210,7 +210,7 @@ def _extract(data: bytes, dest: Path) -> None:
     except (tarfile.TarError, OSError) as e:
         raise DependencyError(f"the archive could not be unpacked ({type(e).__name__})") from None
     finally:
-        from orchestrator.runtime.build.source import remove_tree
+        from orchestrator.utils.atomic import remove_tree
         remove_tree(staging)  # members may be read-only: rmtree(ignore_errors=True) kept them on Windows
 
 
@@ -345,7 +345,8 @@ class DependencyCache:
         self.root.mkdir(parents=True, exist_ok=True)
         rid = self._reserve(dep, owner)
         work = Path(tempfile.mkdtemp(prefix=f".{dep.name.lower()}-", dir=str(self.root)))
-        from orchestrator.runtime.build.source import _make_read_only, remove_tree
+        from orchestrator.runtime.build.source import _make_read_only
+        from orchestrator.utils.atomic import remove_tree
         try:
             src = work / "src"
             commit, archive_sha = "", ""
@@ -428,7 +429,7 @@ class DependencyCache:
         """Deletes exactly the entries the person accepted (Core/deletion.py): into the trash or for good. Only the
         person; the list is checked again first; the deletion is audited before anything goes."""
         from orchestrator.Core.deletion import DeletionResult, require_person, require_same, same_items
-        from orchestrator.runtime.build.source import remove_tree
+        from orchestrator.utils.atomic import remove_tree
         accepted = require_person(accepted)
         if accepted.actor not in ("gui", "cli"):
             raise PermissionError("Only the person deletes build dependencies, in the GUI or at a terminal.")

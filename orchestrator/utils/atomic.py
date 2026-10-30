@@ -24,15 +24,27 @@ c5-io-stores).
   Windows, where os.chmod sets only the read-only flag, the file gets a protected ACL with one entry: full access for
   this account, nothing inherited. That is the form OpenSSH for Windows accepts for a private key ("UNPROTECTED
   PRIVATE KEY FILE" otherwise), and other accounts of this computer (Users, Authenticated Users) lose access.
+- remove_tree(path, label=...): the one removal of a folder the framework made for itself (caches, staging, work and
+  quarantine folders, temporary copies; chain win-hygiene, moved from runtime/build/source.py, which keeps the old
+  name as a delegate, as does rag/storage_lock.py). Read-only files and folders are made writable and tried once more
+  (version-control objects and unpacked archives: shutil.rmtree(ignore_errors=True) left them on Windows without a
+  word), a link is removed and never followed, and on Windows a pass that leaves something is repeated for a moment
+  (another process may still have a file open). It returns what is still there (empty when the folder is gone) and
+  logs one warning that names the label and paths relative to the folder, never the folder's own path. A person's
+  files are never removed with it: that goes through Core/deletion.py and Core/trash.py.
 """
 
+import logging
 import os
 import platform
 import secrets
+import shutil
 import stat
+import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import List
 
 REPLACE_RETRIES = 10 if os.name == "nt" else 0
 WINDOWS = os.name == "nt"   # which way owner_only narrows a file (tests set it to try the Windows way with fakes)
@@ -63,6 +75,70 @@ def remove_file(path) -> None:
             if attempt >= REPLACE_RETRIES:
                 raise
             time.sleep(0.05 * (attempt + 1))
+
+
+REMOVE_PASSES = 3 if os.name == "nt" else 1   # passes of remove_tree while something is left (Windows only)
+REMOVE_SHOWN = 3                                 # relative paths named in remove_tree's warning
+_log = logging.getLogger(__name__)
+
+
+def _retry_writable(func, p, _exc) -> None:
+    """shutil.rmtree's error handler: a read-only file or folder is made writable and tried once more; a link is
+    unlinked (os.chmod would change its target). What still fails stays; remove_tree reports it."""
+    try:
+        os.chmod(os.path.dirname(p), stat.S_IRWXU)
+        if os.path.islink(p):
+            os.unlink(p)
+            return
+        os.chmod(p, stat.S_IRWXU)
+        func(p)
+    except OSError:
+        pass
+
+
+def _left_in(path: Path) -> List[Path]:
+    """What is still at `path`: its remaining files and folders (deepest first), or the folder itself when empty."""
+    if not os.path.lexists(path):
+        return []
+    if not path.is_dir() or path.is_symlink():
+        return [path]
+    left: List[Path] = []
+    for dirpath, dirnames, filenames in os.walk(path, topdown=False):
+        left += [Path(dirpath, name) for name in sorted(filenames)]
+        left += [Path(dirpath, name) for name in sorted(dirnames)]
+    return left or [path]
+
+
+def remove_tree(path, *, label: str = "") -> List[Path]:
+    """Removes the framework's own folder at `path` with everything in it (see the module docstring) and returns
+    what is still there: an empty list when it is gone (or was never there). A link at `path` is removed, never
+    followed; a file is removed as a file. `label` names the folder in the warning (its last name by default). An
+    empty path is nothing to remove (Path("") would be the working folder)."""
+    if path is None or path == "":
+        return []
+    path = Path(path)
+    if path.is_symlink() or (os.path.lexists(path) and not path.is_dir()):
+        try:
+            remove_file(path)
+        except OSError:
+            pass
+    else:
+        for attempt in range(REMOVE_PASSES):
+            if not os.path.lexists(path):
+                break
+            if attempt:
+                time.sleep(0.1 * attempt)
+            if sys.version_info >= (3, 12):
+                shutil.rmtree(path, onexc=_retry_writable)
+            else:  # pragma: no cover - Python 3.11
+                shutil.rmtree(path, onerror=_retry_writable)
+    left = _left_in(path)
+    if left:
+        shown = ", ".join(p.relative_to(path).as_posix() if p != path else "the folder itself"
+                          for p in left[:REMOVE_SHOWN])
+        _log.warning(f"{label or path.name or 'folder'}: {len(left)} item(s) could not be removed ({shown}"
+                     f"{', ...' if len(left) > REMOVE_SHOWN else ''}); they stay until the next clean-up.")
+    return left
 
 
 def write_private(path: Path, text: str) -> None:
@@ -190,4 +266,5 @@ def _windows_owner_only(path: str) -> None:
         raise failed("SetNamedSecurityInfoW", error)
 
 
-__all__ = ["REPLACE_RETRIES", "owner_only", "remove_file", "replace_file", "write_private", "write_private_exclusive"]
+__all__ = ["REMOVE_PASSES", "REPLACE_RETRIES", "owner_only", "remove_file", "remove_tree", "replace_file",
+           "write_private", "write_private_exclusive"]

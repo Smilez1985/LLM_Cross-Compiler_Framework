@@ -8,9 +8,8 @@ filelock works on Linux and Windows. thread_local=False: the storage may be open
 idle timer's thread.
 """
 
-import shutil
-import sys
 from pathlib import Path
+from typing import List
 
 LOCK_SUFFIX = ".lock"
 
@@ -39,13 +38,10 @@ def try_lock(lock) -> bool:
         return False
 
 
-def remove_tree(path: Path) -> None:
+def remove_tree(path: Path) -> List[Path]:
     """Deletes a folder of the framework's own storage, going on past a file that cannot be deleted (on Windows: one
-    that is still open); the caller checks whether the folder is gone."""
-    def skip(*_args) -> None:
-        return None
-
-    if sys.version_info >= (3, 12):
-        shutil.rmtree(path, onexc=skip)
-    else:  # pragma: no cover - Python 3.11
-        shutil.rmtree(path, onerror=skip)
+    that is still open); the caller checks whether the folder is gone. Deprecated name of
+    orchestrator.utils.atomic.remove_tree (chain win-hygiene), which also clears read-only files and returns what
+    is left."""
+    from orchestrator.utils.atomic import remove_tree
+    return remove_tree(path)
