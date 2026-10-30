@@ -28,6 +28,10 @@ REMOVED = {"template": "template", "noscript": "noscript", "hidden_attribute": "
            "clipped": "clipped away", "same_colour": "text in its background colour",
            "invisible_characters": "invisible characters", "html_comments": "HTML comments"}
 REMOVED_NONE = "none"
+# The columns of the list, in this order on both (`llm-cli knowledge sources`, Tools > Knowledge Sources...: its
+# sources.col.* texts in English are these words): what a source is and where it belongs come first.
+COLUMNS = ("Source", "Kind", "Topic or target", "Hidden text left out", "Licence", "Copyright notice", "In a pack",
+           "Why")
 
 
 class KnowledgeOff(RuntimeError):

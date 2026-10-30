@@ -357,11 +357,12 @@ Urheberrechtshinweis und dem, was ein Wissenspaket von ihr enthielte, und warum:
 die Weitergabe des Textes), **link and short facts** (ein Urheberrechtshinweis ohne eine solche Lizenz, Code ohne
 Lizenz, eine unbekannte Lizenz) oder **not exported** (eine Seite eines installierten Wissenspakets, die eigenen
 Dokumente des Frameworks). Adressen, Titel und Hinweise sind Text der Website und werden als reiner Text gezeigt. Die
-Wissensbasis muss eingeschaltet sein. Die Spalte **Thema oder Target** nennt das Thema oder Target, zu dem die Auszüge
-eines Wissenspakets oder eines Target-Pakets gehören (`-` für deine eigenen Seiten, die beim Export eins bekommen);
+Wissensbasis muss eingeschaltet sein. Die dritte Spalte, **Thema oder Target**, nennt das Thema oder Target, zu dem die
+Auszüge eines Wissenspakets oder eines Target-Pakets gehören, und das Thema deines eigenen Crawls (`-` für andere
+eigene Seiten, die beim Export eins bekommen);
 `--topic NAME` listet nur die Quellen dieses Themas oder Targets (Groß- und Kleinschreibung egal).
 
-In der GUI: **Tools > Wissensquellen...** (dieselben Spalten; der Filter **Art** ist `--kind`, das Feld **Thema oder
+In der GUI: **Tools > Wissensquellen...** (dieselben Spalten in derselben Reihenfolge; der Filter **Art** ist `--kind`, das Feld **Thema oder
 Target** ist `--topic`).
 
 ```bash

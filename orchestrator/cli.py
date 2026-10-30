@@ -4134,8 +4134,7 @@ def knowledge_sources(ctx: FrameworkContext, kind: str, topic: Optional[str]):
         console.print(escape(ks.empty_sentence(kind, topic)))
         return
     table = Table(title="Knowledge sources, their licence and what a knowledge pack carries of them")
-    for column in ("Source", "Kind", "Topic or target", "Hidden text left out", "Licence", "Copyright notice",
-                   "In a pack", "Why"):
+    for column in ks.COLUMNS:
         table.add_column(column, overflow="fold")
     for e in entries:   # addresses, titles and notices are site text: escaped, never markup
         table.add_row(escape(e["source"]), e["kind"], escape(ks.topic_of(e)), ks.removed_text(e),

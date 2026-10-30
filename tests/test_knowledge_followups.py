@@ -190,3 +190,24 @@ def test_an_edited_target_pack_says_why_and_how(world):
         assert "not imported" in text and "install it again" in text and "export that as a new pack" in text
     assert "security gate" in finding.why and "llm-cli" not in finding.fix_hint
     assert [p for f, _, _, p in world.cm.verify_installed() if f == dest] == [["changed since it was installed"]]
+
+
+# --- (6) the Knowledge Sources window has the CLI's columns, the topic or target third ------------------------------
+
+def test_the_sources_window_has_the_cli_columns_in_the_cli_order():
+    pytest.importorskip("PySide6")
+    from orchestrator.Core import knowledge_sources
+    from orchestrator.gui import knowledge_sources_window as window
+    from orchestrator.utils.localization import ui_text
+    assert [ui_text(key, "en") for key in window.COLUMNS] == list(knowledge_sources.COLUMNS)
+    assert window.COLUMNS[2] == "sources.col.topic" and knowledge_sources.COLUMNS[2] == "Topic or target"
+
+
+def test_the_cli_lists_the_sources_with_those_columns():
+    import re
+    import orchestrator.cli as cli_module
+    from orchestrator.Core import knowledge_sources
+    source = Path(cli_module.__file__).read_text(encoding="utf-8")
+    body = source[source.index("def knowledge_sources"):source.index("@knowledge.command('loose')")]
+    assert "for column in ks.COLUMNS:" in body and not re.search(r'"Topic or target"', body)
+    assert knowledge_sources.COLUMNS.index("Topic or target") == 2

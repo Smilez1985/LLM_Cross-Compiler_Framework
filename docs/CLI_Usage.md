@@ -349,11 +349,11 @@ such as `CC-BY-4.0`, `other` for one the framework does not recognise, `-` for n
 knowledge pack would carry of it and why: **full text** (its licence allows passing the text on), **link and short
 facts** (a copyright notice and no such licence, code without a licence, an unknown licence) or **not exported** (a
 page of an installed knowledge pack, the framework's own documents). Addresses, titles and notices are site text and
-are shown as plain text. The knowledge base must be switched on. The column **Topic or target** names the topic or
-target the excerpts of a knowledge pack or a target pack belong to (`-` for your own pages, which get one when you
-export them); `--topic NAME` lists only the sources of that topic or target (ignoring case).
+are shown as plain text. The knowledge base must be switched on. The third column, **Topic or target**, names the topic
+or target the excerpts of a knowledge pack or a target pack belong to, and the topic of your own crawl (`-` for other
+pages of your own, which get one when you export them); `--topic NAME` lists only the sources of that topic or target (ignoring case).
 
-In the GUI: **Tools > Knowledge Sources...** (the same columns; the **Kind** filter is `--kind`, the field **Topic or
+In the GUI: **Tools > Knowledge Sources...** (the same columns in the same order; the **Kind** filter is `--kind`, the field **Topic or
 target** is `--topic`).
 
 ```bash
