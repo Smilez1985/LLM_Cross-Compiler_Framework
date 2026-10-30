@@ -505,6 +505,8 @@ Target ohne Capabilities-Block wird ungeprüft gebaut.
 | `--gpu / --no-gpu` | Die GPU des Hosts in den Container durchreichen (Standard aus): eine NVIDIA-GPU, wenn `nvidia-smi` gefunden wird, sonst `/dev/dri`, falls vorhanden. Rockchip-Konvertierungen brauchen das nicht. |
 | `--imatrix / --no-imatrix` | Importance Matrix für GGUF (Standard aus). Pflicht für `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ2_M`, `IQ3_XXS`, `IQ3_XS`, `Q2_K_S`. |
 | `--dataset PATH` | Deine eigene Kalibrierungsdatei (muss existieren): eine Textdatei für die GGUF-Importance-Matrix oder für RKLLM, eine Liste mit Beispieleingaben für RKNN `i8`. Ohne sie nutzt die Importance Matrix den mitgelieferten Kalibrierungstext. |
+| `--module-flags [allow\|standard]` | Deine Entscheidung zu den CMake-Optionen des Moduls, die gültig sind, aber außerhalb der erlaubten Liste liegen (`-G`, `--trace`, ...; [Modul-Entwicklerhandbuch, Abschnitt 3.5](Module_Developer_Guide_DE.md#35-cmake-flags-eines-moduls)): erlauben oder mit den Standard-Flags weitermachen (die Optionen bleiben draußen). Im Terminal ohne die Option wirst du gefragt, nach dem, was jede Option tut, und einer Empfehlung für dieses Modell und diese Quantisierung; ohne Terminal und ohne die Option startet nichts (Exit 2). Eine für diese Modulversion und diese Flags gemerkte Entscheidung gilt ohne Frage. |
+| `--remember-flags` | Diese Entscheidung für diese Modulversion und diese Flags merken (ein von einer KI gestarteter Build des Moduls nutzt sie; eine neue Version oder andere Flags fragen wieder). |
 
 Verhalten:
 

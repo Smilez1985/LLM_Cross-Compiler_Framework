@@ -12,6 +12,25 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 
 ## [3.2.0] - 2026-10-30
 
+### Hinzugefügt
+
+- `2026-10-30 04:15 UTC` · `v3.2.0` **Die Person entscheidet über CMake-Optionen eines Moduls außerhalb der Allowlist**
+  (Konsolidierungskette build-flags-time; Entscheidung zu den CMake-Flags von Modulen): Bevor ein Modul mit einer
+  gültigen CMake-Option außerhalb der Allowlist (`-G Ninja`, `--trace`, ...) gebaut wird, zeigen der Builder (eine Frage
+  mit „Diese Optionen erlauben“, „Die Standard-Flags nehmen“ (die Vorgabe) und einem Häkchen zum Merken) und `llm-cli
+  build start` (eine Abfrage im Terminal; ohne Terminal `--module-flags allow|standard` und `--remember-flags`), was
+  jede Option tut, und eine Empfehlung für das Modell und die Quantisierung, die gebaut werden, aus dem Rezept-Plan des
+  Targets für diese Hardware (`Core/module_flags.py` FlagQuestion). `BuildService.start_build(flag_decision=,
+  remember_flags=, flag_channel=)` trägt die Antwort über den Orchestrator (`BuildRequest.flag_decision`,
+  `BuildConfiguration.module_flags`) in den Build-Container (`LLMCF_ALLOWED_FLAGS`, `LLMCF_FLAG_DECISION=standard`), wo
+  die letzte Prüfung des Pakets die erlaubten Optionen behält oder die anderen weglässt. Eine gemerkte Entscheidung
+  liegt je Modulversion und Flags im Speicher der Build-Bestätigungen der Person (`Core/confirmed_builds.py`, neue Art
+  `module_flags`; nur die eigenen Kanäle der Person schreiben sie). Nur die Person: Ein KI-Aufrufer kann keine
+  Entscheidung übergeben (`permission_denied`), und sein Build ohne gemerkte Entscheidung stoppt im Build-Plan und beim
+  Start mit `needs_person` (neuer Blocker `module_flags_undecided`, Schritt `build.decide_flags`;
+  `DELEGATION_RULES_VERSION` 5, frühere Delegationen werden also neu erteilt). Tests:
+  `tests/test_module_flag_decision.py`.
+
 ### Geändert
 
 - `2026-10-30 03:55 UTC` · `v3.2.0` **Ein Urteil über die CMake-Flags eines Moduls: eine Allowlist, Ablehnungen und die

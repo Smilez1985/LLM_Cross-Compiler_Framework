@@ -35,7 +35,7 @@ from orchestrator.tools.spec import CallWarning
 # 2) and why a board cannot be reached (device_host_down, device_port_closed, device_auth_failed,
 # device_host_key_changed instead of device_unreachable and host_key_changed; N6). 4: gui_not_open (W4: the GUI tool of an
 # AI app when no framework window is open).
-DELEGATION_RULES_VERSION = 4
+DELEGATION_RULES_VERSION = 5
 
 # Starting values (design [A7]), tuned with the evals.
 GB = 1000 ** 3
@@ -83,6 +83,9 @@ BLOCKERS: Dict[str, BlockerSpec] = {
     "offline_mode": BlockerSpec("needs_person", person_action="action.offline_off", also=("not_supported",),
                                 step="settings.offline_off"),
     "sandbox_off": BlockerSpec("needs_person", person_action="action.sandbox_on", step="settings.sandbox_on"),
+    # a module's CMake options outside the allowlist: only the person decides (DECISIONS round 25 Q6)
+    "module_flags_undecided": BlockerSpec("needs_person", person_action="action.decide_module_flags",
+                                          step="build.decide_flags"),
     "knowledge_off": BlockerSpec("not_supported", person_action="action.knowledge_on", also=("needs_person",),
                                  step="settings.knowledge_on"),
     "target_revoked": BlockerSpec("not_supported", person_action="action.remove_target", step="hub.open"),
@@ -273,7 +276,7 @@ class ToolFacts:
 _FS = frozenset
 _DEVICE = _FS({"device_not_trusted", "host_key_unknown", "device_host_key_changed", "device_host_down",
                "device_port_closed", "device_auth_failed", "device_busy"})
-_BUILD_BLOCKERS = _FS({"target_revoked", "sandbox_off", "offline_mode", "gated_no_access", "unknown_repository",
+_BUILD_BLOCKERS = _FS({"target_revoked", "sandbox_off", "module_flags_undecided", "offline_mode", "gated_no_access", "unknown_repository",
                        "no_convertible_weights", "disk_full", "commit_required"})
 _BUILD_SITUATION = _FS({"disk_tight", "download_large", "host_fit_tight", "host_fit_does_not_fit", "target_fit_tight",
                         "target_fit_does_not_fit", "image_build_needed", "long_build"})

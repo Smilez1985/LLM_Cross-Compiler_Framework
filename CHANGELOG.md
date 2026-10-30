@@ -11,6 +11,24 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 
 ## [3.2.0] - 2026-10-30
 
+### Added
+
+- `2026-10-30 04:15 UTC` · `v3.2.0` **The person decides on a module's CMake options outside the allowlist**
+  (consolidation chain build-flags-time; decision on module CMake flags): before a module with a valid CMake option
+  outside the allowlist (`-G Ninja`, `--trace`, ...) is built, the Builder (a question with "Allow these options", "Use
+  the standard flags" (the default) and a check box to remember it) and `llm-cli build start` (a prompt at a terminal;
+  `--module-flags allow|standard` and `--remember-flags` without one) show what each option does and a recommendation
+  for the model and quantization being built, from the target's recipe plan for that hardware (`Core/module_flags.py`
+  FlagQuestion). `BuildService.start_build(flag_decision=, remember_flags=, flag_channel=)` carries the answer through
+  the orchestrator (`BuildRequest.flag_decision`, `BuildConfiguration.module_flags`) into the build container
+  (`LLMCF_ALLOWED_FLAGS`, `LLMCF_FLAG_DECISION=standard`), where the package's last check keeps the allowed options or
+  leaves the others out. A remembered decision is kept per module version and flag set in the store of the person's
+  build confirmations (`Core/confirmed_builds.py`, new kind `module_flags`; only the person's own channels write it).
+  Person-only: an AI caller cannot pass a decision (`permission_denied`), and its build without a remembered one stops
+  with `needs_person` in the build plan and at the start (new blocker `module_flags_undecided`, step
+  `build.decide_flags`; `DELEGATION_RULES_VERSION` 5, so earlier delegations are made again). Tests:
+  `tests/test_module_flag_decision.py`.
+
 ### Changed
 
 - `2026-10-30 03:55 UTC` · `v3.2.0` **One verdict for a module's CMake flags: an allowlist, refusals and the person's

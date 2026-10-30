@@ -27,7 +27,8 @@ SECURITY_LEGAL_V3 = frozenset({
 # The blockers by their reason code as reviewed for DELEGATION_RULES_VERSION 4: 2 removed transfer_unsupported (the
 # remote mode); 3 added snapshot_no_room (eighth round, answer 2) and named why a board cannot be reached
 # (device_host_down, device_port_closed, device_auth_failed, device_host_key_changed instead of device_unreachable and
-# host_key_changed; N6); 4 added gui_not_open (W4: the GUI tool when no framework window is open). A blocker added,
+# host_key_changed; N6); 4 added gui_not_open (W4: the GUI tool when no framework window is open); 5 added
+# module_flags_undecided (a module's CMake options outside the allowlist: only the person decides). A blocker added,
 # removed or given another reason code raises the version.
 BLOCKERS_V4 = {
     "failed": frozenset({"index_stale"}),
@@ -39,8 +40,8 @@ BLOCKERS_V4 = {
         "runtime_not_built"}),
     "needs_person": frozenset({"commit_required", "device_auth_failed", "device_host_key_changed",
         "device_model_unset", "device_not_trusted", "device_port_closed", "file_outside_folders", "gated_no_access",
-        "gui_not_open", "host_key_unknown", "ingest_notice_unread", "no_signing_key", "offline_mode", "sandbox_off",
-        "toolchain_missing", "trash_not_yours"}),
+        "gui_not_open", "host_key_unknown", "ingest_notice_unread", "module_flags_undecided", "no_signing_key",
+        "offline_mode", "sandbox_off", "toolchain_missing", "trash_not_yours"}),
     "not_supported": frozenset({"image_problem", "knowledge_off", "model_unpinned", "no_convertible_weights",
         "not_gguf", "pack_rejected", "pack_revoked", "size_unknown", "target_revoked", "unsafe_filename"}),
     "permission_denied": frozenset({"setting_loosens"}),
@@ -86,7 +87,7 @@ def test_security_legal_codes_snapshot():
     assert by_reason == BLOCKERS_V4, (
         "a blocker was added, removed or changed its reason code: review it, then update BLOCKERS_V4 and raise "
         "DELEGATION_RULES_VERSION")
-    assert catalog.DELEGATION_RULES_VERSION == 4
+    assert catalog.DELEGATION_RULES_VERSION == 5
     assert {c for c, w in catalog.WARNINGS.items() if w.kind == "legal"} == {
         "gated_model", "base_model_gated", "license_restrictive", "license_unknown", "vendor_licence"}
 

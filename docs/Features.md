@@ -2746,6 +2746,13 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   programs. It says that llama.cpp is built from source; it is a record, and the runtime is always planned again from
   the device's own probe. CPU and CMake flags from the wizard or Ditto are kept there under `advisory` and never
   applied.
+- **The module's CMake flags in the board package:** one allowlist decides them everywhere (generator, folder check,
+  build plan, the package's last check in the build container): `-DNAME=VALUE` and CMake's `-W` words; what loads
+  code or another toolchain, `-S`/`-B`, `-C`/`-P` and downloads are refused. A valid CMake option outside the list
+  (`-G Ninja`, `--trace`, ...) is your decision: the Builder (or `build start`) shows what it does and a
+  recommendation for the model and quantization you build, and you allow it or go on with the standard flags; the
+  decision can be remembered for the module version. An AI-started build with such an option waits for you
+  ([Module Developer Guide, section 3.5](Module_Developer_Guide.md#35-cmake-flags-of-a-module)).
 - **llama.cpp in new targets:** the template Dockerfile builds the conversion tools like the Rockchip image
   ([Conversion tools tuned to the build host](#conversion-tools-tuned-to-the-build-host)). The GPU template takes
   CUDA 12.9.1 from NVIDIA's redist archives (manifest pinned by sha256, every archive checked) on Ubuntu 22.04 pinned

@@ -293,6 +293,38 @@ The result is a **skeleton**, not a working target yet:
   `llama-bench` tuned to the build host, and the converter's requirements. Keep these steps when you change the
   Dockerfile.
 
+### 3.5 CMake flags of a module
+
+A module's CMake flags (`cmake_flags` of the wizard or of an AI's proposal, written as `CMAKE_OPTIONS` into
+`modules/config_module.sh`, and a Dockerfile's `LLAMA_CMAKE_ARGS`) follow one verdict, `cmake_flag_verdicts` of
+`orchestrator/runtime/build/recipe.py`. The module generator, the folder check, the build plan and the package's last
+check in the build container (`module_flag_verdicts` of `target_module.sh`) give the same verdicts
+(`tests/test_module_flags.py` runs both over `tests/data/cmake_flag_vectors.json`).
+
+- **Allowed:** `-DNAME=VALUE`, also `-D NAME=VALUE` and `-DNAME:TYPE=VALUE`, and CMake's own warning words (`-Wdev`,
+  `-Wno-dev`, `-Werror=dev`, `-Wdeprecated`, `-Wno-deprecated` and their `error=` forms).
+- **Never:** what makes CMake load code or another toolchain (`CMAKE_PROJECT_INCLUDE`, `CMAKE_PROJECT_INCLUDE_BEFORE`,
+  `CMAKE_PROJECT_<name>_INCLUDE`, `CMAKE_PROJECT_TOP_LEVEL_INCLUDES`, `CMAKE_TOOLCHAIN_FILE`, `CMAKE_MODULE_PATH`,
+  `CMAKE_USER_MAKE_RULES_OVERRIDE*`, `-C`, `-P`, `--preset`, `--toolchain`), the source and build folders (`-S`,
+  `-B`: the build plan sets them), the `FETCHCONTENT_*` variables (only the framework's dependency cache sets them),
+  a `CMAKE_PREFIX_PATH` that names anything but absolute folders inside the build container, an option that would let
+  llama.cpp download, and every word that is not a CMake option.
+- **The person decides:** a valid CMake switch outside the allowlist (`-G`, `-T`, `-A`, `-U`, `--fresh`,
+  `--log-level`, `--log-context`, `--debug-output`, `--debug-find`, `--trace`, `--trace-expand`,
+  `--warn-uninitialized`, `--no-warn-unused-cli`, `--check-system-vars`, `--compile-no-warning-as-error`,
+  `--install-prefix`) is no refusal. When the module is built, the Builder (or `llm-cli build start` at a terminal)
+  shows what each option does and a recommendation for the model and quantization being built, from the target's
+  recipe plan for that hardware; the person allows the options or goes on with the standard flags (the options are
+  left out of the package's cross build). The decision can be remembered for this module version and flag set
+  (`--remember-flags`, or the check box of the question): a new version or another flag set asks again. Only the
+  person decides: an AI-started build stops with `needs_person` (blocker `module_flags_undecided`) unless the person
+  remembered a decision. Without a terminal, `--module-flags allow` or `--module-flags standard` gives the decision.
+- **Fresh cache, no toolchain from the environment:** every cmake call of a module's own scripts (build.sh's `cmake`)
+  starts a configure run with `--fresh` (when the image's CMake knows it), so a `CMakeCache.txt` left in a build
+  folder sets nothing, and runs without a `CMAKE_TOOLCHAIN_FILE` environment variable unless the build plan set
+  exactly that file. The folder check reads the flags as written: a word the shell expands (`$X`) is a limit of that
+  check; build.sh's cmake and the package's last check see the expanded words.
+
 ## 4. target.yml and the capabilities block
 
 ### 4.1 metadata

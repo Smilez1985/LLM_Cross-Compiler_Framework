@@ -110,6 +110,9 @@ class BuildRequest:
     # The disk reservation an AI caller's accepted build took (orchestrator.Core.disk_plan.ReservationLedger): checked
     # again when the request leaves the queue, released when it ends
     disk_reservation: str = ""
+    # The person's decision on a module's CMake options outside the allowlist (Core/module_flags.FlagDecision.as_dict):
+    # handed to the build container, which leaves such options out or keeps the allowed ones
+    flag_decision: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         if not self.request_id:
@@ -540,6 +543,7 @@ class LLMOrchestrator:
             local_inputs=req.local_inputs,
             # the engine records in it what has landed on disk (the request releases it when it ends)
             disk_reservation=getattr(req, "disk_reservation", "") or "",
+            module_flags=getattr(req, "flag_decision", None),
         )
 
     async def _submit_to_engine(self, build_config: BuildConfiguration, state: Optional[WorkflowState]) -> Optional[str]:

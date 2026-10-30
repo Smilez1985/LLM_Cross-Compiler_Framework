@@ -3047,6 +3047,14 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   `armv8.2-a+dotprod+fp16`), die Backends und die Programme. Er sagt, dass llama.cpp aus dem Quelltext gebaut wird;
   er ist eine Aufzeichnung, und die Laufzeit wird immer neu aus der eigenen Probe des Geräts geplant. CPU- und
   CMake-Flags aus dem Assistenten oder von Ditto stehen dort unter `advisory` und werden nie angewendet.
+- **Die CMake-Flags des Moduls im Board-Paket:** Eine Allowlist entscheidet sie überall (Generator, Ordnerprüfung,
+  Build-Plan, die letzte Prüfung des Pakets im Build-Container): `-DNAME=WERT` und CMakes `-W`-Wörter; was Code oder
+  eine andere Toolchain lädt, `-S`/`-B`, `-C`/`-P` und Downloads werden abgelehnt. Eine gültige CMake-Option außerhalb
+  der Liste (`-G Ninja`, `--trace`, ...) entscheidest du: Der Builder (oder `build start`) zeigt, was sie tut, und eine
+  Empfehlung für das Modell und die Quantisierung, die du baust, und du erlaubst sie oder machst mit den
+  Standard-Flags weiter; die Entscheidung lässt sich für die Modulversion merken. Ein von einer KI gestarteter Build
+  mit so einer Option wartet auf dich
+  ([Modul-Entwicklerhandbuch, Abschnitt 3.5](Module_Developer_Guide_DE.md#35-cmake-flags-eines-moduls)).
 - **llama.cpp in neuen Targets:** Das Vorlagen-Dockerfile baut die Konvertierungswerkzeuge wie das Rockchip-Image
   ([Konvertierungswerkzeuge abgestimmt auf den Build-Rechner](#konvertierungswerkzeuge-abgestimmt-auf-den-build-rechner)).
   Die GPU-Vorlage nimmt CUDA 12.9.1 aus den Redist-Archiven von NVIDIA (Manifest per sha256 festgelegt, jedes Archiv

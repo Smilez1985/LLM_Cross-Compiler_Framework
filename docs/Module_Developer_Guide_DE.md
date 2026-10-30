@@ -301,6 +301,41 @@ Das Ergebnis ist ein **Gerüst**, noch kein funktionierendes Target:
   `llama-completion` und `llama-bench`, abgestimmt auf den Build-Rechner, und die Abhängigkeiten des Konverters.
   Behalte diese Schritte, wenn du das Dockerfile änderst.
 
+### 3.5 CMake-Flags eines Moduls
+
+Die CMake-Flags eines Moduls (`cmake_flags` aus dem Assistenten oder dem Vorschlag einer KI, als `CMAKE_OPTIONS` in
+`modules/config_module.sh` geschrieben, und `LLAMA_CMAKE_ARGS` eines Dockerfiles) folgen einem Urteil,
+`cmake_flag_verdicts` aus `orchestrator/runtime/build/recipe.py`. Der Modul-Generator, die Ordnerprüfung, der
+Build-Plan und die letzte Prüfung des Pakets im Build-Container (`module_flag_verdicts` in `target_module.sh`) urteilen
+gleich (`tests/test_module_flags.py` lässt beide über `tests/data/cmake_flag_vectors.json` laufen).
+
+- **Erlaubt:** `-DNAME=WERT`, auch `-D NAME=WERT` und `-DNAME:TYP=WERT`, und CMakes eigene Warnungswörter (`-Wdev`,
+  `-Wno-dev`, `-Werror=dev`, `-Wdeprecated`, `-Wno-deprecated` und ihre `error=`-Formen).
+- **Nie:** was CMake Code oder eine andere Toolchain laden lässt (`CMAKE_PROJECT_INCLUDE`,
+  `CMAKE_PROJECT_INCLUDE_BEFORE`, `CMAKE_PROJECT_<name>_INCLUDE`, `CMAKE_PROJECT_TOP_LEVEL_INCLUDES`,
+  `CMAKE_TOOLCHAIN_FILE`, `CMAKE_MODULE_PATH`, `CMAKE_USER_MAKE_RULES_OVERRIDE*`, `-C`, `-P`, `--preset`,
+  `--toolchain`), Quell- und Build-Ordner (`-S`, `-B`: die setzt der Build-Plan), die `FETCHCONTENT_*`-Variablen (die
+  setzt nur der Abhängigkeits-Cache des Frameworks), ein `CMAKE_PREFIX_PATH`, der etwas anderes nennt als absolute
+  Ordner im Build-Container, eine Option, mit der llama.cpp etwas herunterladen würde, und jedes Wort, das keine
+  CMake-Option ist.
+- **Die Person entscheidet:** Ein gültiger CMake-Schalter außerhalb der Allowlist (`-G`, `-T`, `-A`, `-U`, `--fresh`,
+  `--log-level`, `--log-context`, `--debug-output`, `--debug-find`, `--trace`, `--trace-expand`,
+  `--warn-uninitialized`, `--no-warn-unused-cli`, `--check-system-vars`, `--compile-no-warning-as-error`,
+  `--install-prefix`) ist keine Ablehnung. Wird das Modul gebaut, zeigt der Builder (oder `llm-cli build start` im
+  Terminal), was jede Option tut, und eine Empfehlung für das Modell und die Quantisierung, die gebaut werden, aus dem
+  Rezept-Plan des Targets für diese Hardware; die Person erlaubt die Optionen oder macht mit den Standard-Flags weiter
+  (die Optionen bleiben aus dem Cross-Build des Pakets draußen). Die Entscheidung lässt sich für diese Modulversion und
+  diese Flags merken (`--remember-flags` oder das Häkchen der Frage): eine neue Version oder andere Flags fragen
+  wieder. Nur die Person entscheidet: Ein von einer KI gestarteter Build stoppt mit `needs_person` (Blocker
+  `module_flags_undecided`), außer die Person hat eine Entscheidung gemerkt. Ohne Terminal gibt `--module-flags allow`
+  oder `--module-flags standard` die Entscheidung.
+- **Frischer Cache, keine Toolchain aus der Umgebung:** Jeder cmake-Aufruf der eigenen Skripte eines Moduls (das
+  `cmake` von build.sh) startet einen Configure-Lauf mit `--fresh` (wenn das CMake des Images es kennt), so dass eine
+  in einem Build-Ordner liegende `CMakeCache.txt` nichts setzt, und läuft ohne eine Umgebungsvariable
+  `CMAKE_TOOLCHAIN_FILE`, außer der Build-Plan hat genau diese Datei gesetzt. Die Ordnerprüfung liest die Flags, wie
+  sie geschrieben sind: Ein Wort, das die Shell erweitert (`$X`), ist eine Grenze dieser Prüfung; das cmake von build.sh
+  und die letzte Prüfung des Pakets sehen die erweiterten Wörter.
+
 ## 4. target.yml und der Capabilities-Block
 
 ### 4.1 metadata
