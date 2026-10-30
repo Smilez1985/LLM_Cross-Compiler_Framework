@@ -115,7 +115,9 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   paramiko reads no settings file, so a board whose block names a jump or a proxy command now goes through the
   OpenSSH transport (`RemoteSession`, the deploy), and where that cannot be (no `ssh`, a one-time password, a step
   bound to the fingerprint shown) the step is refused in plain words (`needs_openssh`) instead of connecting
-  directly past the jump.
+  directly past the jump. Such a board's SSH port is not checked directly from this computer (it answers only
+  through the jump host), neither before the deploy nor while waiting for the board to come back: the login through
+  the jump tells.
 - `2026-10-30 00:24 UTC` · `v3.2.0` **The benchmark container runs without network or capabilities** ([design](docs/DESIGN.md#installer-platforms-and-dependencies)):
   the benchmark window's llama-bench container gets `network_mode="none"`, no capabilities and no new privileges
   (it only reads a model from the cache and prints numbers). A test now pins the two places that start a container

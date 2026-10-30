@@ -514,6 +514,10 @@ class RemoteSession:
             self._sleep(min(0.25, left))
 
     def _port_open(self) -> bool:
+        from orchestrator.remote import ssh_config
+        if ssh_config.needs_proxy(self.state_dir, self.host):
+            # Behind a jump host the board's port is not reachable from here: only the login through the jump tells.
+            return True
         if self._reachable is not None:
             return bool(self._reachable(self.host, self.port))
         from orchestrator.remote import reasons
