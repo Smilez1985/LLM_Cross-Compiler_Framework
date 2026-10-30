@@ -12,6 +12,13 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 
 ## [3.2.0] - 2026-10-30
 
+### Hinzugefügt
+- `2026-10-30 00:19 UTC` · `v3.2.0` **`start_recipe_build` nimmt die Hardware-Probe des Boards** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
+  Ein KI-Client nennt die Probe (`probe`, eine ID aus `get_hardware_probe`) für einen Rezept-Build, wie er es bei
+  `start_build` schon konnte und wie der Builder-Tab und die CLI es tun: Sie wird vor der Frage geprüft (die Probe
+  eines anderen Boards wird abgelehnt), und der Build wird genau auf diese Probe abgestimmt. Ohne sie die neueste
+  gespeicherte Probe eines Boards des SoC des Rezepts, wie bisher.
+
 ### Geändert
 - `2026-10-29 23:31 UTC` · `v3.2.0` **Eine Install-Regel für die ganze RHEL-Familie** ([Design](docs/DESIGN_DE.md#installer-plattformen-und-abhängigkeiten)):
   Fedora, RHEL und CentOS Stream bekommen jetzt die Regel von Rocky Linux, AlmaLinux und Oracle Linux. `install.sh`

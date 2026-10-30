@@ -3487,7 +3487,9 @@ signierten Index und verlassen diesen Rechner nur als lokale Datei, die du selbs
   installierte Target das ist, mit dem das Rezept entstand, seine Importance-Matrix und Kontextlänge, den Commit,
   die Downloadgröße, das Laufwerk, die
   Hardware-Schätzung, Lizenz, Zugangsbeschränkung und Image-Build; dieselbe Speicherreservierung und dieselben
-  Kontingente). `dataset_path` nur, wenn das Rezept einen Kalibrierungsdatensatz nennt, und dann muss es genau diese
+  Kontingente). `probe` nennt die Hardware-Probe des Boards wie bei `start_build` (vor der Frage geprüft; ohne sie
+  die neueste gespeicherte Probe eines Boards des SoC des Rezepts). `dataset_path` nur, wenn das Rezept einen
+  Kalibrierungsdatensatz nennt, und dann muss es genau diese
   Datei sein (sha256): Der Build kopiert die Datei in seinen eigenen Ordner, während er sie hasht, und benutzt nur
   diese Kopie, sodass eine nach der Frage ausgetauschte Datei nie benutzt wird. Ein nach der Frage in irgendeinem
   Feld geändertes Rezept wird nicht gebaut. „Ja, und nicht mehr fragen“ hat den

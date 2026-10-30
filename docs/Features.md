@@ -3145,7 +3145,9 @@ and leave this computer only as a local file you publish yourself.
   same two-phase path as `start_build` (the question shows the recipe, whether the installed target is the one the
   recipe was made with, its importance matrix and context length, the commit, download size, disk, hardware
   estimate, licence, gating and image build; the
-  same disk reservation and quotas). `dataset_path` only when the recipe names a calibration dataset, and then it
+  same disk reservation and quotas). `probe` names the board's hardware probe as for `start_build` (checked before
+  the question; omitted: the newest stored probe of a board of the recipe's SoC). `dataset_path` only when the
+  recipe names a calibration dataset, and then it
   must be exactly that file (sha256): the build copies the file into its own folder while it hashes it and uses only
   that copy, so a file swapped after the question is never used. A recipe changed in any field after the question is
   not built. "Yes, and do not ask again"

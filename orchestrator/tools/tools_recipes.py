@@ -36,6 +36,10 @@ class RecipeBuildIn(BaseModel):
                                                     "<label>:<relative path> (e.g. datasets:calib/de.txt) or its file "
                                                     "id; never a path")
     use_gpu: bool = Field(default=False, description="Use the GPU of this computer for the conversion")
+    probe: Optional[str] = Field(default=None, pattern=r"^(local|[0-9a-f]{16})$",
+                                 description="The board's hardware probe by its id (get_hardware_probe), as for "
+                                             "start_build: the build is tuned to it (a recipe pins none). Omitted: "
+                                             "the newest stored probe of a board of the recipe's SoC, if there is one")
 
 
 def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_out) -> List[Any]:
@@ -54,9 +58,12 @@ def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_
     def mapped(inp: RecipeBuildIn):
         from orchestrator.Core.build_service import BuildServiceError
         try:
-            return service.recipe_request(inp.recipe_id, inp.dataset_path, inp.use_gpu)
+            request, recipe, prov = service.recipe_request(inp.recipe_id, inp.dataset_path, inp.use_gpu)
         except BuildServiceError as e:
             raise refusal(e) from None
+        if inp.probe:   # checked by the plan like start_build's (another board's probe is refused)
+            request = request.model_copy(update={"probe": inp.probe})
+        return request, recipe, prov
 
     def prepare_recipe(inp: RecipeBuildIn, ctx) -> CallFacts:
         from orchestrator.Core.build_service import BuildServiceError
@@ -125,7 +132,8 @@ def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_
         def start(reservation):
             try:
                 return service.start_recipe(bound["recipe_id"], dataset_path=inp.dataset_path, use_gpu=inp.use_gpu,
-                                            owner=ctx.owner, disk_reservation=reservation, expect=expect)
+                                            owner=ctx.owner, disk_reservation=reservation, expect=expect,
+                                            probe=inp.probe)
             except BuildServiceError as e:
                 raise refusal(e) from None
         return start_accepted(service, bound, ctx, start)
@@ -140,11 +148,13 @@ def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_
         "Builds an installed community recipe exactly as it is pinned: its Hugging Face model at the recipe's "
         "commit, target, format, board, quantization, importance matrix and context length. Same question and checks "
         "as start_build (download size, disk, hardware estimate, licence, gating, image build). dataset_path only when "
-        'the recipe names a calibration dataset. Returns a request id. Example: {"recipe_id": '
+        "the recipe names a calibration dataset; probe names the board's hardware probe (get_hardware_probe) as for "
+        'start_build. Returns a request id. Example: {"recipe_id": '
         '"qwen2.5-0.5b-instruct-rk3588-gguf-q4_k_m"}',
         ToolTier.LOCAL_WRITE, RecipeBuildIn, handle_out, start_recipe_build, takes_context=True, open_world=True,
         prepare=prepare_recipe, limits=limits,
-        fields={"recipe_id": FieldMeta(kind="id", list_tool="list_packs"), "dataset_path": fields["dataset_path"]},
+        fields={"recipe_id": FieldMeta(kind="id", list_tool="list_packs"), "dataset_path": fields["dataset_path"],
+                "probe": FieldMeta(kind="id", list_tool="get_hardware_probe")},
         examples=({"recipe_id": "qwen2.5-0.5b-instruct-rk3588-gguf-q4_k_m"},),
         grant=GrantRule(rule=BUILD_RULE, facts=build_grant_facts,
                         warning="build community recipes on shipped or verified targets (safetensors or GGUF "
