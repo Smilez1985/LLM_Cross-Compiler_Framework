@@ -79,6 +79,11 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   does), instead of filling the disk. The record of a complete Builder copy, the fetcher's last move of a file and
   the `refs/main` record are moved into place with the framework's one replace helper, which tries again for a
   moment on Windows while another program reads the file.
+- `2026-10-30 00:15 UTC` · `v3.2.0` **Ditto's Docker image follows the offline image rule** ([design](docs/DESIGN.md#ditto-the-local-runtime-and-the-llm-layer)):
+  in offline mode the runtime base of Ditto's image (its base image and the runtime libraries from the
+  distribution's mirrors) is no longer built; one that is on this computer is used, otherwise Docker mode stops
+  before anything is built, naming the image and what to do while online, instead of failing deep in a build. A tag
+  of a base image an AI proposed for a new module is pinned offline when its registry is in your own network.
 
 ### Security
 - `2026-10-29 23:50 UTC` · `v3.2.0` **llmcf's SSH settings: a jump or proxy command only with the person's kept yes, no other login
