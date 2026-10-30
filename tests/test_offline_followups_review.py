@@ -202,8 +202,16 @@ def test_the_pinned_clients_still_refuse_a_certificate_nobody_trusts(tmp_path, n
     with https_server(chain, key) as port:
         from orchestrator.llm.client import offline_http_client
         offline = offline_http_client(Settings(offline_mode=True))
-        with pytest.raises(httpx2.ConnectError, match="CERTIFICATE_VERIFY_FAILED"):
+        with pytest.raises(httpx2.ConnectError) as refused:
             offline.get(f"https://box.lan:{port}/v1/models", timeout=10)
+    # The certificate check refused it, not anything else: OpenSSL says CERTIFICATE_VERIFY_FAILED, the system's trust
+    # (truststore on Windows and macOS) its own words ("... not trusted by the trust provider"); both raise
+    # ssl.SSLCertVerificationError, which the client keeps as the cause.
+    causes, exc = [], refused.value
+    while exc is not None and len(causes) < 10:
+        causes.append(exc)
+        exc = exc.__cause__ or exc.__context__
+    assert any(isinstance(c, ssl.SSLCertVerificationError) for c in causes), [repr(c) for c in causes]
 
 
 # --- (d) a Qdrant server client opened online, then offline mode ---------------------------------------------------
