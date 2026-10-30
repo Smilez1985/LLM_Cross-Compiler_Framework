@@ -5,6 +5,16 @@
     "host": "another Windows PC",
     "kind": "native"
   },
+  "cpu_features": {
+    "unusable": [],
+    "used": [
+      "SSE42",
+      "AVX",
+      "AVX2",
+      "BMI2",
+      "AVX512"
+    ]
+  },
   "notes": [
     "CPU features the probe could not tell: all CPU variants are built and the best one is chosen at run time"
   ],

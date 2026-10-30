@@ -1,0 +1,50 @@
+# llama.cpp commit d81235049384534c167caea52b85a694f6103d14 (tag b11429), ggml/CMakeLists.txt lines 140-187
+# An unchanged excerpt (MIT licence, the ggml authors) for tests/test_cpu_feature_coverage.py; replace it at every pin bump.
+# instruction set specific
+if (GGML_NATIVE OR NOT GGML_NATIVE_DEFAULT)
+    set(INS_ENB OFF)
+else()
+    set(INS_ENB ON)
+endif()
+
+message(DEBUG "GGML_NATIVE         : ${GGML_NATIVE}")
+message(DEBUG "GGML_NATIVE_DEFAULT : ${GGML_NATIVE_DEFAULT}")
+message(DEBUG "INS_ENB             : ${INS_ENB}")
+
+option(GGML_CPU_HBM          "ggml: use memkind for CPU HBM" OFF)
+option(GGML_CPU_REPACK       "ggml: use runtime weight conversion of Q4_0 to Q4_X_X" ON)
+option(GGML_CPU_KLEIDIAI     "ggml: use KleidiAI optimized kernels if applicable" OFF)
+option(GGML_SSE42            "ggml: enable SSE 4.2"          ${INS_ENB})
+option(GGML_AVX              "ggml: enable AVX"              ${INS_ENB})
+option(GGML_AVX_VNNI         "ggml: enable AVX-VNNI"         OFF)
+option(GGML_AVX2             "ggml: enable AVX2"             ${INS_ENB})
+option(GGML_BMI2             "ggml: enable BMI2"             ${INS_ENB})
+option(GGML_AVX512           "ggml: enable AVX512F"          OFF)
+option(GGML_AVX512_VBMI      "ggml: enable AVX512-VBMI"      OFF)
+option(GGML_AVX512_VNNI      "ggml: enable AVX512-VNNI"      OFF)
+option(GGML_AVX512_BF16      "ggml: enable AVX512-BF16"      OFF)
+if (NOT MSVC)
+    # in MSVC F16C and FMA is implied with AVX2/AVX512
+    option(GGML_FMA          "ggml: enable FMA"              ${INS_ENB})
+    option(GGML_F16C         "ggml: enable F16C"             ${INS_ENB})
+    # MSVC does not seem to support AMX
+    option(GGML_AMX_TILE     "ggml: enable AMX-TILE"         OFF)
+    option(GGML_AMX_INT8     "ggml: enable AMX-INT8"         OFF)
+    option(GGML_AMX_BF16     "ggml: enable AMX-BF16"         OFF)
+endif()
+option(GGML_LASX             "ggml: enable lasx"              ON)
+option(GGML_LSX              "ggml: enable lsx"               ON)
+option(GGML_RVV              "ggml: enable rvv"               ON)
+option(GGML_RV_ZFH           "ggml: enable riscv zfh"         ON)
+option(GGML_RV_ZVFH          "ggml: enable riscv zvfh"        ON)
+option(GGML_RV_ZICBOP        "ggml: enable riscv zicbop"      ON)
+option(GGML_RV_ZIHINTPAUSE   "ggml: enable riscv zihintpause" ON)
+option(GGML_RV_ZVFBFWMA      "ggml: enable riscv zvfbfwma"    OFF)
+option(GGML_XTHEADVECTOR     "ggml: enable xtheadvector"      OFF)
+option(GGML_VXE              "ggml: enable vxe"               ${GGML_NATIVE})
+
+option(GGML_CPU_ALL_VARIANTS "ggml: build all variants of the CPU backend (requires GGML_BACKEND_DL)" OFF)
+set(GGML_CPU_ARM_ARCH        "" CACHE STRING "ggml: CPU architecture for ARM")
+set(GGML_CPU_POWERPC_CPUTYPE "" CACHE STRING "ggml: CPU type for PowerPC")
+
+# ggml core

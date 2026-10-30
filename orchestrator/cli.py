@@ -6366,6 +6366,9 @@ def device_runtime_plan(ctx: FrameworkContext, device_name: str, as_json: bool):
                   f"GCC {builder.get('gcc')}), without network")
     console.print(f"CPU: {cpu}, OpenMP {view['openmp']}, C++ runtime linked statically: "
                   f"{'yes' if view['static_libstdcxx'] else 'no'}")
+    from orchestrator.runtime.build.recipe import cpu_feature_lines
+    for line in cpu_feature_lines({"used": view["cpu_features_used"], "unusable": view["cpu_features_unusable"]}):
+        console.print(escape(line) if not line.startswith("The machine") else f"[yellow]{escape(line)}[/yellow]")
     console.print(f"Programs: {', '.join(view['programs'])}"
                   + (f"; with {', '.join(view['runtime_libs'])}" if view["runtime_libs"] else ""))
     console.print(f"Build ID: {view['build_id']}")

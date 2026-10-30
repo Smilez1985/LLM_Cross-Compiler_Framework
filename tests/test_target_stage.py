@@ -19,9 +19,15 @@ from pathlib import Path
 import pytest
 
 from conftest import posix_shell
-from test_build_stages import PROBE_FIXTURES, by_hand, image, needs_bash, plan_of, stage_lines  # noqa: F401
+from test_build_stages import PROBE_FIXTURES, Image, by_hand, needs_bash, plan_of, stage_lines
 
 STAGES = "build-cache/work/stages/build"
+
+
+@pytest.fixture
+def image(tmp_path):
+    """The build image of tests/test_build_stages.py (its own fixture here: an imported fixture is shadowed, F811)."""
+    return Image(tmp_path)
 
 
 def tools_log(image):
@@ -48,7 +54,7 @@ def test_the_planned_compilers_build_and_link_a_c_and_a_cpp_program_with_the_pla
 
     assert result.returncode == 0, result.stdout + result.stderr
     test_dir = f"<root>/{STAGES}/compiler-test"
-    flags = "-O3 -pthread -fPIC -mcpu=cortex-a55 -march=armv8-a"
+    flags = "-O3 -pthread -fPIC -march=armv8.2-a+dotprod+fp16"  # the recipe's plan (was -mcpu=cortex-a55 -march=armv8-a)
     assert tools_log(image)[:3] == [
         f"cmake -P <root>/{STAGES}/cross_compile_toolchain.cmake",
         f"aarch64-linux-gnu-gcc {flags} {test_dir}/test.c -o {test_dir}/test-c",
@@ -66,7 +72,7 @@ def test_a_compiler_that_cannot_build_with_the_flags_of_the_plan_stops_the_confi
 
     assert result.returncode == 1
     assert ("ERROR: The compiler test failed: aarch64-linux-gnu-gcc cannot build and link a small program with the "
-            "flags of the plan (-O3 -pthread -fPIC -mcpu=cortex-a55 -march=armv8-a): cc1: error: unknown value "
+            "flags of the plan (-O3 -pthread -fPIC -march=armv8.2-a+dotprod+fp16): cc1: error: unknown value "
             "'cortex-a99' for '-mcpu'") in result.stderr
     assert ("2/4", "config", "failed") in stage_lines(result)
     assert not (image.root / STAGES / "build_config.sh").exists(), "a plan that failed a check is never written"
@@ -560,7 +566,9 @@ def test_target_module_by_hand_packages_without_a_hardware_profile_with_the_plai
     assert hardware["source"] == "defaults" and hardware["arch"] == "aarch64"
     assert hardware["profile"] == "none: the plain defaults of the Rockchip target (no hardware profile was given)"
     assert "-march=armv8-a" in hardware["cflags"] and "-mcpu" not in hardware["cflags"]
-    assert "-DGGML_NEON=ON" in hardware["cmake_flags"]
+    # the plain defaults plan GGML_CPU_ARM_ARCH as the recipe does without features (GGML_NEON is no option of ggml)
+    assert "-DGGML_CPU_ARM_ARCH=armv8-a" in hardware["cmake_flags"] and "GGML_NEON" not in hardware["cmake_flags"]
+    assert hardware["cpu_features"] == {"used": [], "unusable": []}
     assert "Hardware profile:** none: the plain defaults of the Rockchip target" in (package / "README.md").read_text()
     # The plain defaults were planned by the config stage's functions in the stage folder, with the compiler test
     toolchain = (image.root / STAGES / "package_toolchain.cmake").read_text()
@@ -591,7 +599,11 @@ def test_the_manifest_holds_every_build_detail_and_the_checksums_cover_every_fil
     assert build["tools"]["python"].startswith("Python 3") and set(build["tools"]) == {"python", "cmake", "compiler"}
     assert all("/" not in value for value in build["tools"].values())
     assert manifest["hardware"]["source"] == "profile" and manifest["hardware"]["cpu"] == "Cortex-A55"
-    assert "-mcpu=cortex-a55" in manifest["hardware"]["cflags"]
+    # the board's features, as the build recipe plans them (before: -mcpu=cortex-a55 -march=armv8-a, without them)
+    assert "-march=armv8.2-a+dotprod+fp16" in manifest["hardware"]["cflags"]
+    assert "-mcpu" not in manifest["hardware"]["cflags"]
+    assert "-DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16" in manifest["hardware"]["cmake_flags"]
+    assert manifest["hardware"]["cpu_features"] == {"used": ["DOTPROD", "FP16_ARITH"], "unusable": []}
     assert manifest["tests"]["functional"] == "skipped: the image has no llama-completion or llama-cli for this machine"
     assert manifest["binaries"]["llama-cli"]["elf_machine"] == 183
     model = package / "granite-Q4_K_M.gguf"
@@ -1523,13 +1535,19 @@ def test_a_generated_x86_module_plans_another_pc_s_cpu_as_the_build_recipe(tmp_p
 
 
 @needs_bash
-def test_a_generated_arm_module_keeps_its_own_flags_and_options(tmp_path):
-    """The x86 plan is for x86_64 modules only: an aarch64 module's plan is unchanged (its flags, no x86 option)."""
+def test_a_generated_arm_module_plans_the_board_s_features_as_the_build_recipe(tmp_path):
+    """An aarch64 module of the template with a board's profile: its own flags, then -march and GGML_CPU_ARM_ARCH
+    from the probe's features as the build recipe plans them (before: the module's flags only, so a package lost
+    the board's dotprod and fp16; changed on purpose), never an x86 option."""
     result, stages, _ = generated_config(tmp_path, RK3566, STUB_CC_MACHINE="183")
 
     assert result.returncode == 0, result.stdout + result.stderr
     plan = (stages / "build_config.sh").read_text()
-    assert "CFLAGS=-mcpu=cortex-a55\n" in plan and "GGML_NATIVE" not in plan and "-march=x86-64" not in plan
+    assert "CFLAGS=-mcpu=cortex-a55\\ -march=armv8.2-a+dotprod+fp16\n" in plan, plan
+    assert "CMAKE_FLAGS=-DGGML_NATIVE=OFF\\ -DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16\n" in plan, plan
+    assert "-march=x86-64" not in plan and "GGML_NEON" not in plan and "GGML_FP16" not in plan
+    toolchain = (stages / "cross_compile_toolchain.cmake").read_text()
+    assert 'SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -march=armv8.2-a+dotprod+fp16")' in toolchain
 
 
 @needs_bash
@@ -1565,3 +1583,119 @@ def test_a_generated_module_refuses_every_profile_that_is_not_of_its_system(tmp_
     assert (f"ERROR: The hardware profile is of a {arch} system; this module builds for aarch64, so nothing was "
             "planned for it.") in result.stderr
     assert not (stages / "build_config.sh").exists()
+
+
+# --- the aarch64 CPU: the config stage mirrors the build recipe's one ARM planner ----------------------------------
+
+def _arm_block(path):
+    text = path.read_text(encoding="utf-8")
+    start = text.index("# THE CPU OF AN aarch64 PROFILE")
+    return text[start:text.index("# END OF THE aarch64 CPU", start)]
+
+
+def test_the_template_plans_an_arm_cpu_with_the_same_functions_as_the_rockchip_target():
+    """One ARM planner: the template and the Rockchip target share the very functions, and their tables are the build
+    recipe's (ARM_ARCH_TAGS, ARM_UNUSABLE, SME_COMPILER_MIN) with the probe's /proc/cpuinfo flags
+    (configs/hardware_probe_schema.yml)."""
+    from conftest import REPO_ROOT
+
+    from orchestrator.runtime.build import recipe
+    from orchestrator.runtime.profile import load_schema
+    rockchip = _arm_block(REPO_ROOT / "targets" / "Rockchip" / "modules" / "config_module.sh")
+    assert _arm_block(REPO_ROOT / "targets" / "_template" / "modules" / "config_module.sh") == rockchip
+    for name in ("arm_feature_value", "plan_c_compiler_version", "sme_problem", "plan_arm_cpu"):
+        assert f"\n{name}() {{" in rockchip
+    schema = load_schema()
+    table = re.search(r"ARM_TAG_TABLE=\((.*?)\n\)", rockchip, re.S).group(1)
+    rows = [row.split() for row in re.findall(r'"([^"]+)"', table)]
+    assert [(r[0], r[1]) for r in rows] == list(recipe.ARM_ARCH_TAGS)
+    assert {r[0]: tuple(r[2].split(",")) for r in rows} == {r[0]: schema.keys[r[0]].cpuinfo for r in rows}
+    unusable = re.search(r"ARM_UNUSABLE_TABLE=\((.*?)\n\)", rockchip, re.S).group(1)
+    rows = [row.split(" ", 2) for row in re.findall(r'"([^"]+)"', unusable)]
+    assert {r[0]: r[2] for r in rows} == dict(recipe.ARM_UNUSABLE)
+    assert {r[0]: tuple(r[1].split(",")) for r in rows} == \
+        {key: schema.keys[key].cpuinfo for key in recipe.ARM_UNUSABLE}
+    assert re.search(r"^SME_GCC_MIN=(\d+)$", rockchip, re.M).group(1) == str(recipe.SME_COMPILER_MIN["gcc"][0])
+    assert re.search(r"^SME_CLANG_MIN=(\d+)$", rockchip, re.M).group(1) == str(recipe.SME_COMPILER_MIN["clang"][0])
+
+
+def _arm_profile(text, **values):
+    """A probe file with these SUPPORTS_* keys set (each line replaced, the rest as the fixture has it)."""
+    for key, value in values.items():
+        text, count = re.subn(rf"^SUPPORTS_{key}=.*$", f"SUPPORTS_{key}={value}", text, flags=re.M)
+        assert count == 1, key
+    return text
+
+
+_ARMV9 = dict(SVE="ON", I8MM="ON", SVE2="ON", SME="ON")
+# case: (probe file, banner of the plan's C compiler or None for no compiler on PATH, its -dumpfullversion)
+ARM_PARITY = {
+    "rk3566": (RK3566, None, None),
+    "rk3588": ((PROBE_FIXTURES / "schema2_rk3588_devuan_sysvinit.txt").read_text(encoding="utf-8"), None, None),
+    "rk3566-probe-1x": ((PROBE_FIXTURES / "schema1_sh_rk3566.txt").read_text(encoding="utf-8"), None, None),
+    "no-features": (_arm_profile(RK3566, DOTPROD="OFF", FP16_ARITH="OFF"), None, None),
+    "unknown-counts-as-off": (_arm_profile(RK3566, DOTPROD="UNKNOWN", SVE="UNKNOWN"), None, None),
+    "sve-i8mm": (_arm_profile(RK3566, SVE="ON", I8MM="ON"), None, None),
+    "armv9-sme-gcc12": (_arm_profile(RK3566, **_ARMV9), "aarch64-linux-gnu-gcc (Debian 12.2.0-14) 12.2.0", "12.2.0"),
+    "armv9-sme-gcc14": (_arm_profile(RK3566, **_ARMV9), "aarch64-linux-gnu-gcc (GCC) 14.2.0", "14.2.0"),
+    "armv9-sme-clang18": (_arm_profile(RK3566, **_ARMV9), "Debian clang version 18.1.3 (1)", "18.1.3"),
+    "armv9-sme-no-compiler": (_arm_profile(RK3566, **_ARMV9), None, None),
+    "bf16": (_arm_profile(RK3566, BF16_ARM="ON"), None, None),
+}
+
+
+def _shell_arm_plan(script, profile, compiler):
+    """plan_arm_cpu of a config_module.sh for a profile file: (ARM_ARCH, CPU_FEATURES_USED, CPU_FEATURES_UNUSABLE)."""
+    run = ('source "$1"; HARDWARE_CONFIG_FILE="$2"; load_hardware_config >/dev/null 2>&1; '
+           'plan_arm_cpu "$3" >/dev/null 2>&1; '
+           'printf "@@%s\\n" "$ARM_ARCH" "$CPU_FEATURES_USED" "$CPU_FEATURES_UNUSABLE"')
+    result = subprocess.run([posix_shell("bash"), "-c", run, "_", str(script), str(profile), compiler],
+                            capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+    assert result.returncode == 0, result.stdout + result.stderr
+    return tuple(line[2:] for line in result.stdout.splitlines() if line.startswith("@@"))
+
+
+@needs_bash
+@pytest.mark.parametrize("target", ["Rockchip", "_template"])
+@pytest.mark.parametrize("case", list(ARM_PARITY))
+def test_the_config_stage_plans_every_arm_profile_as_the_build_recipe(tmp_path, target, case):
+    """The parity table: for each profile (and the plan's C compiler, which decides +sme) the -march, the features
+    used and the features named as unusable with their reasons are the build recipe's (recipe.arm_plan). Before, the
+    config stage planned -mcpu from the core's name and -march=armv8-a: the RK3566/RK3568/RK3588 packages lost
+    dotprod and fp16."""
+    from conftest import REPO_ROOT
+
+    from orchestrator.runtime.build.recipe import arm_plan
+    from orchestrator.runtime.profile import parse_profile
+    text, banner, version = ARM_PARITY[case]
+    profile = tmp_path / "target_hardware_config.txt"
+    profile.write_text(text, encoding="utf-8")
+    compiler = tmp_path / "missing-cc"
+    family = None
+    if banner is not None:
+        compiler = tmp_path / "cc"
+        compiler.write_text(f'#!/bin/sh\ncase "$1" in --version) echo "{banner}" ;; *) echo "{version}" ;; esac\n')
+        compiler.chmod(0o755)
+        family = ("clang" if "clang" in banner else "gcc", version)
+    march, used, unusable = arm_plan(parse_profile(text), family)
+
+    folder = REPO_ROOT / "targets" / "Rockchip"
+    if target == "_template":  # an aarch64 module the generator made from the template
+        from test_target_template import generate
+        folder = generate(tmp_path, cpu_flags="-mcpu=cortex-a55", architecture="aarch64")
+
+    shown = _shell_arm_plan(folder / "modules" / "config_module.sh", profile, str(compiler))
+
+    assert shown == (march, ",".join(used), ";".join(f"{u['feature']}:{u['reason']}" for u in unusable))
+
+
+@needs_bash
+def test_a_board_the_recipe_has_no_plan_for_is_refused_with_the_features_the_probe_found(image):
+    """A RISC-V board (a system ggml builds for, the build recipe not yet: recipe.unplanned_features): the config stage
+    refuses it as before and names the CPU features the probe found, so none is lost silently."""
+    result = config_with(image, "PROBE_SCHEMA=2\nARCH=riscv64\nCPU_MODEL=U74\nSUPPORTS_RVV=ON\nSUPPORTS_RV_ZFH=ON\n"
+                                "SUPPORTS_RV_ZBA=OFF\n")
+
+    assert result.returncode == 1
+    assert "The probe found these CPU features: RVV, RV_ZFH." in result.stderr, result.stderr
+    assert "RV_ZBA" not in result.stderr and tools_log(image) == [], "nothing was compiled for it"

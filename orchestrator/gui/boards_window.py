@@ -1068,6 +1068,10 @@ class BoardsWindow(QDialog):
                    blibc_version=builder.get("libc_version"), gcc=builder.get("gcc"), cpu=cpu,
                    openmp=view["openmp"], static=t("boards.yes" if view["static_libstdcxx"] else "boards.no"),
                    programs=programs, build_id=view["build_id"]),
+                 t("boards.plan.features_used", features=", ".join(view["cpu_features_used"])
+                   or t("boards.plan.features_base")),
+                 *(t("boards.plan.feature_unusable", feature=u["feature"], reason=u["reason"])
+                   for u in view["cpu_features_unusable"]),
                  *view["notes"],
                  t("boards.plan.built", path=view["built_path"]) if view["built"] else t("boards.plan.not_built")]
         self._say("\n".join(lines))

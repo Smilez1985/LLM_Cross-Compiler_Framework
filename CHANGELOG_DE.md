@@ -10,6 +10,31 @@ weicht bewusst ab: Es gibt keinen Abschnitt `[Unreleased]`. Jeder Eintrag beginn
 der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und warum, steht im
 [Design](docs/DESIGN_DE.md).
 
+## [3.3.0] - 2026-10-30
+
+### Hinzugefügt
+- `2026-10-30 13:26 UTC` · `v3.3.0` **Jede CPU-Fähigkeit, die ggml nutzen kann, findet die Probe, und das Build-Rezept plant sie** ([Design](docs/DESIGN_DE.md#targets-hardware-und-vorlagen)):
+  Die Hardware-Probe 3.2.0 (`.py`, `.sh`, `.ps1`) schreibt auch die CPU-Fähigkeiten von RISC-V (RVV, Zfh, Zvfh,
+  Zicbop, Zihintpause, Zvfbfwma, Zba, XTheadVector), LoongArch (LSX, LASX), POWER (VSX, die POWER-Generation) und
+  s390x (VXE, VXE2, NNPA), gelesen aus `/proc/cpuinfo` und den HWCAP-Bits des Kernels; eine ältere Probe-Datei
+  bekommt sie außerhalb ihres Systems als OFF und auf ihm als UNKNOWN, mit dem Hinweis, neu zu proben.
+  `orchestrator/runtime/build/ggml_cpu_options.py` führt jede CPU-Option des festgelegten llama.cpp als geplant
+  oder nicht nutzbar mit Grund, und `tests/test_cpu_feature_coverage.py` schlägt fehl, wenn eine neue Festlegung
+  eine hinzufügt. Der Build-Plan (`cpu_features`), das `MANIFEST.json` des Board-Pakets
+  (`hardware.cpu_features`), `llm-cli runtime device plan`, das Board-Fenster und die Deploy-Fakten über MCP nennen
+  die Fähigkeiten, die der Build nutzt, und die, die das Board hat, der Build aber nicht nutzen kann, jede mit Grund
+  (SME mit einem Compiler älter als GCC 14 oder Clang 18, BF16 auf ARM, für das die Festlegung keinen Kernel hat).
+  Ein Board eines Systems, das das Rezept noch nicht plant, wird mit den Fähigkeiten abgelehnt, die seine Probe
+  fand.
+
+### Behoben
+- `2026-10-30 13:26 UTC` · `v3.3.0` **Board-Pakete für RK3566, RK3568 und RK3588 werden wieder mit dotprod und fp16 gebaut** ([Design](docs/DESIGN_DE.md#targets-hardware-und-vorlagen)):
+  Die Config-Stufe des Rockchip-Targets und der Modulvorlage plante `-mcpu` aus dem Namen des Kerns und
+  `-march=armv8-a`, ein zweiter ARM-Planer neben dem Build-Rezept, sodass die Pakete dotprod und fp16 des Boards
+  verloren (und `GGML_NEON`, das keine Option von ggml ist). Jetzt plant sie `-march` und `GGML_CPU_ARM_ARCH` aus
+  den Fähigkeiten der Probe wie das Build-Rezept (`armv8.2-a+dotprod+fp16` auf diesen Boards), und ein
+  Tabellentest führt beide an denselben Profilen aus.
+
 ## [3.2.0] - 2026-10-30
 
 ### Hinzugefügt
@@ -4945,6 +4970,7 @@ Cross-Kompilierung zu ermöglichen.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Grundlegende Unterstützung für die Cross-Kompilierung für Rockchip RK3588/RK3566.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Einstiegspunkte für CLI (`llm-cli`) und GUI (`llm-gui`).
 
+[3.3.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v2.4.0...v3.0.0

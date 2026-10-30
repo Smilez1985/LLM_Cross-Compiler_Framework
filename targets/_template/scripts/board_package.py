@@ -3,9 +3,11 @@
 The manifest and the checksums of a package for the board (target_module.sh: "Complete Manifest - JSON with all
 build details"), and their check. Standard library only: it runs with the image's python3, outside the framework.
 
-    board_package.py write PACKAGE_DIR [--set KEY=VALUE]... [--int KEY=NUMBER]... [--model FILE]
-                     [--binary NAME=ELF_MACHINE]...
-        writes MANIFEST.json: the given facts (dotted keys make sections: --set build.board=rk3588), "created" (UTC),
+    board_package.py write PACKAGE_DIR [--set KEY=VALUE]... [--int KEY=NUMBER]... [--list KEY=A,B]...
+                     [--features KEY=NAME:REASON;...]... [--model FILE] [--binary NAME=ELF_MACHINE]...
+        writes MANIFEST.json: the given facts (dotted keys make sections: --set build.board=rk3588; --list makes a
+        list of the comma-separated items, --features a list of {"feature", "reason"} from "NAME:REASON" items
+        separated by ";", both empty for an empty VALUE), "created" (UTC),
         "model_file" (name, size, sha256 of FILE), "binaries" (each program's size, sha256 and ELF machine) and
         "files" (every file of the package with its size and sha256, except MANIFEST.json and SHA256SUMS); then
         SHA256SUMS over every file except itself, MANIFEST.json included, in the format of sha256sum.
@@ -81,13 +83,30 @@ def _pair(text: str):
     return key, value
 
 
-def write(folder: Path, sets, ints, model, binaries) -> dict:
+def _features(text: str) -> list:
+    """[{"feature": NAME, "reason": REASON}] of "NAME:REASON;NAME:REASON" (the reason may hold colons)."""
+    items = []
+    for item in (part for part in text.split(";") if part):
+        name, sep, reason = item.partition(":")
+        if not sep or not name:
+            raise SystemExit(f"board_package.py: expected NAME:REASON, got {item!r}")
+        items.append({"feature": name, "reason": reason})
+    return items
+
+
+def write(folder: Path, sets, ints, model, binaries, lists=(), features=()) -> dict:
     manifest: dict = {"manifest_version": 1}
     for text in sets:
         _put(manifest, *_pair(text))
     for text in ints:
         key, value = _pair(text)
         _put(manifest, key, int(value))
+    for text in lists:
+        key, value = _pair(text)
+        _put(manifest, key, [item for item in value.split(",") if item])
+    for text in features:
+        key, value = _pair(text)
+        _put(manifest, key, _features(value))
     manifest["created"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     if model:
         path = folder / model
@@ -175,6 +194,8 @@ def main(argv=None) -> int:
     w.add_argument("folder")
     w.add_argument("--set", dest="sets", action="append", default=[])
     w.add_argument("--int", dest="ints", action="append", default=[])
+    w.add_argument("--list", dest="lists", action="append", default=[])
+    w.add_argument("--features", dest="features", action="append", default=[])
     w.add_argument("--model")
     w.add_argument("--binary", dest="binaries", action="append", default=[])
     c = sub.add_parser("check")
@@ -186,7 +207,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     folder = Path(args.folder)
     if args.command == "write":
-        write(folder, args.sets, args.ints, args.model, args.binaries)
+        write(folder, args.sets, args.ints, args.model, args.binaries, args.lists, args.features)
         return 0
     if args.command == "room":
         try:
