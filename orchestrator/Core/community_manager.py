@@ -590,6 +590,23 @@ def ai_generated_target(target_path: Path) -> bool:
         meta["metadata"].get("provenance") == "ai-generated"
 
 
+CHANGED = "changed since it was installed"
+
+
+def changed_text(prov: Optional["Provenance"]) -> str:
+    """Why an installed pack whose files changed since its install (the problem CHANGED of verify_installed) is not
+    used as it is, and how to go on: the knowledge import's waiting reason and Mojo say it. The content check against
+    the signed digest is the security gate and stays: an edited pack is never imported or taken for the signed one."""
+    kind = prov.kind if prov is not None else "pack"
+    return ("its files are no longer the ones that were signed and checked, so "
+            + ("its knowledge snapshot is not imported and its builds are not the signed target. To undo the edits, "
+               "uninstall it and install it again; to keep them, copy the target folder under a name of your own and "
+               "export that as a new pack" if kind == "target" else
+               "its pages are not imported. To undo the edits, uninstall it and install it again; to share your "
+               "version, export it as a new knowledge pack" if kind == "knowledge" else
+               "it is not used as the signed pack. Uninstall it and install it again"))
+
+
 def _folder_key(path: Path) -> str:
     """An installed pack's folder as a key (sync_knowledge_base's waiting packs): the same folder gives the same key,
     also in another spelling of its case where the file system ignores case (Windows)."""
@@ -810,6 +827,42 @@ class CommunityManager:
                     loose.append(second / KNOWLEDGE_FILE)
         return packs, loose
 
+    LINK_REASON = ("the framework never follows a link out of its own folders: what is installed and checked must stay "
+                   "where it was checked, and a link can point anywhere")
+
+    def ignored_links(self) -> List[str]:
+        """The links in the knowledge folder that _knowledge_layout leaves out (the folder itself, or an entry of its
+        first two levels), as labels below community/; what they hold is neither listed nor imported (LINK_REASON).
+        Reads the folder only."""
+        root = self.knowledge_dir
+        if root.is_symlink():
+            return ["knowledge"]
+        found: List[str] = []
+        if not root.is_dir():
+            return found
+        try:
+            for first in sorted(root.iterdir(), key=lambda p: p.name.casefold()):
+                if first.name.startswith("."):
+                    continue
+                if first.is_symlink():
+                    found.append(f"knowledge/{first.name}")
+                elif first.is_dir() and read_provenance(first) is None:
+                    found += [f"knowledge/{first.name}/{second.name}" for second in sorted(first.iterdir())
+                              if second.is_symlink() and not second.name.startswith(".")]
+        except OSError:
+            pass
+        return found
+
+    def links_note(self) -> str:
+        """What the listings and Mojo say about ignored links ("" when there are none)."""
+        links = self.ignored_links()
+        if not links:
+            return ""
+        what = "community/knowledge is a link" if links == ["knowledge"] else \
+            f"{len(links)} link(s) in community/knowledge ({', '.join('community/' + l for l in links[:5])})"
+        return (f"{what}: ignored, so the packs and files behind it are neither listed nor imported; "
+                f"{self.LINK_REASON}. Move the folder there instead of linking it.")
+
     def loose_knowledge(self) -> List[LooseKnowledge]:
         """Every loose knowledge file (DECISIONS round 23 item 1): not imported until the person sorts it into a topic
         or target folder (prepare_sort). Reads the folder only."""
@@ -827,16 +880,21 @@ class CommunityManager:
         return sorted({folder.parent.name for folder, _ in self._knowledge_layout()[0]
                        if folder.parent != self.knowledge_dir}, key=str.casefold)
 
-    def _knowledge_group(self, group: str) -> Path:
+    def _knowledge_group(self, group: str, chosen: bool = False) -> Path:
         """The folder of a topic or target below community/knowledge/: the one there already (ignoring case, as
-        Windows and macOS do), or the new one. PackError when that name is a pack installed before topic folders."""
+        Windows and macOS do), or the new one. PackError when that name is a pack installed before topic folders: it
+        names that pack and the way out (uninstall it or install it again, which moves it into its topic folder);
+        `chosen`: the person chose the topic here (sorting a loose file), so another name is a way out too."""
         root = self.knowledge_dir
         existing = next((p for p in (root.iterdir() if root.is_dir() else ())
                          if p.name.casefold() == group.casefold() and p.is_dir() and not p.is_symlink()), None)
-        if existing is not None and read_provenance(existing) is not None:
-            raise PackError(f"{existing} is the knowledge pack {existing.name}, installed before knowledge was sorted "
-                            f"into topic folders; it cannot also be the folder of the topic {group}. Choose another "
-                            "topic name.")
+        old = read_provenance(existing) if existing is not None else None
+        if old is not None:
+            raise PackError(f"The folder of the {'target' if old.target else 'topic'} {group} is taken by the "
+                            f"{old.kind} pack {old.id} {old.version}, installed before knowledge was sorted into topic "
+                            f"folders ({existing}). Uninstall that pack, or install it again (it then moves into its "
+                            "own topic folder), and then install this one"
+                            + ("; or choose another topic name." if chosen else ".")).with_steps("pack.remove")
         return existing or root / group
 
     def _knowledge_destination(self, pack_id: str, topic: Optional[str], target: Optional[str]) -> Path:
@@ -906,7 +964,7 @@ class CommunityManager:
         # a free name: no installed pack has it, nor anything in the folder it goes to (the file's own folder may be
         # there), so the move after the person's Yes is never refused
         taken = {folder.name.casefold() for folder, _ in self._knowledge_layout()[0]}
-        group = self._knowledge_group(target or topic)
+        group = self._knowledge_group(target or topic, chosen=True)
         if group.is_dir():
             taken |= {p.name.casefold() for p in group.iterdir()}
         pack_id, count = base, 1
@@ -947,12 +1005,13 @@ class CommunityManager:
 
     def listing(self, refresh: bool = False) -> Tuple[List[ZooItem], str]:
         """list_items() of the current index, and a note on which index was used (or why there is none)."""
+        links = self.links_note()
         try:
             state = self.load_index(refresh)
         except PackError as e:
-            return self.list_items(None), f"No community index: {e}"
-        return self.list_items(state.index), state.note or f"Signed index version {state.index.version} " \
-                                                           f"({state.source})."
+            return self.list_items(None), " ".join(filter(None, (f"No community index: {e}", links)))
+        note = state.note or f"Signed index version {state.index.version} ({state.source})."
+        return self.list_items(state.index), " ".join(filter(None, (note, links)))
 
     def list_items(self, index: Optional[CommunityIndex] = None) -> List[ZooItem]:
         """Index entries (latest version each) and installed packs, with their trust level. Installed packs are
@@ -1504,7 +1563,7 @@ class CommunityManager:
             problems = [f"revoked: {reason}"] if trust == TrustLevel.REVOKED else []
             try:
                 if not prov.installed_unchanged(tree_sha256(folder)):
-                    problems.append("changed since it was installed")
+                    problems.append(CHANGED)
             except PackError as e:
                 problems.append(str(e))
             if prov.kind in ("knowledge", "target"):   # its licence texts and NOTICE (pack_licences.check)
@@ -1750,8 +1809,8 @@ class CommunityManager:
                 unchanged = False
             if not unchanged:
                 waiting[_folder_key(item.folder)] = (f"{item.label}: its files changed since it was installed, so it "
-                                                     "is not imported (the check of the installed packs shows it; "
-                                                     "install it again)")
+                                                     "is not imported (the check of the installed packs shows it): "
+                                                     f"{changed_text(item.provenance)}")
                 continue
             pending.append(item)
         # A pack that cannot be imported yet stays pending and is tried again at every start: its snapshot is taken

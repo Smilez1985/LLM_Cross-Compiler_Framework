@@ -100,3 +100,93 @@ class TestRecipeBindingOnWindows:
         assert read_provenance(own) is None
         assert installed_digest(own) == cp.tree_sha256(own) and same_content(own, cp.tree_sha256(own))
         assert not same_content(own, "") and not same_content(own, None)
+
+
+# --- (4) a topic folder taken by an older pack: name it and the way out --------------------------------------------
+
+PAGES = [{"source": "https://docs.example.com/npu", "content": "Run the model on the NPU.", "metadata": {}}]
+
+
+def knowledge_pack(world, name, version="1.0.0", **scope):
+    root = world.tmp / "src" / f"{name}-{version}"
+    root.mkdir(parents=True)
+    (root / "knowledge.json").write_text(json.dumps(PAGES), encoding="utf-8")
+    return pack_bytes(root, kind="knowledge", pack_id=name, version=version, **scope)
+
+
+def legacy_pack(world, name="npu"):
+    """A knowledge pack installed before topic folders: community/knowledge/<pack>/."""
+    world.add(knowledge_pack(world, name, topic="t"), kind="knowledge", pack_id=name, version="1.0.0")
+    world.publish()
+    dest = world.cm.finish_install(world.cm.prepare_install("knowledge", name))
+    legacy = world.cm.knowledge_dir / name
+    dest.rename(legacy)
+    (world.cm.knowledge_dir / "t").rmdir()
+    return legacy
+
+
+def test_an_index_pack_whose_topic_is_an_older_packs_folder_names_it_and_the_way_out(world):
+    legacy_pack(world)
+    world.add(knowledge_pack(world, "npu-guide", topic="npu"), kind="knowledge", pack_id="npu-guide",
+              version="1.0.0")
+    world.publish(version=2)
+    with pytest.raises(cp.PackError) as info:
+        world.cm.prepare_install("knowledge", "npu-guide")
+    text = str(info.value)
+    assert "knowledge pack npu 1.0.0" in text and "Uninstall that pack, or install it again" in text
+    assert "Choose another topic name" not in text and "choose another" not in text, "the person cannot choose it"
+    assert "pack.remove" in [getattr(s, "key", s) for s in getattr(info.value, "steps", ())] or info.value.steps
+
+
+def test_sorting_a_loose_file_may_also_choose_another_topic(world):
+    legacy_pack(world)
+    path = world.cm.knowledge_dir / "notes.json"
+    path.write_text(json.dumps(PAGES), encoding="utf-8")
+    with pytest.raises(cp.PackError, match="or choose another topic name"):
+        world.cm.prepare_sort("notes.json", topic="npu")
+
+
+# --- (5) a linked knowledge folder is ignored, and said so ---------------------------------------------------------
+
+@pytest.mark.skipif(not hasattr(__import__("os"), "symlink") or __import__("os").name == "nt",
+                    reason="symbolic links need privileges on Windows")
+def test_a_linked_knowledge_folder_is_ignored_and_the_listing_and_mojo_say_why(world, tmp_path):
+    from orchestrator.Core.mojo.checks.community import check_community
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / "npu" / "pack").mkdir(parents=True)
+    world.cm.knowledge_dir.parent.mkdir(parents=True, exist_ok=True)
+    world.cm.knowledge_dir.symlink_to(elsewhere, target_is_directory=True)
+    assert world.cm.ignored_links() == ["knowledge"]
+    world.publish()
+    _, note = world.cm.listing()
+    assert "community/knowledge is a link: ignored" in note and "never follows a link" in note
+    framework = SimpleNamespace(community_manager=world.cm)
+    (finding,) = [f for f in check_community(framework) if f.code == "community.knowledge.links"]
+    assert "never follows a link" in finding.message
+    world.cm.knowledge_dir.unlink()
+    world.cm.knowledge_dir.mkdir()
+    (world.cm.knowledge_dir / "topic").mkdir()
+    (world.cm.knowledge_dir / "topic" / "linked").symlink_to(elsewhere / "npu", target_is_directory=True)
+    assert world.cm.ignored_links() == ["knowledge/topic/linked"]
+    assert "1 link(s) in community/knowledge" in world.cm.links_note()
+
+
+# --- (10) an edited target pack: why it is not imported and how to go on ---------------------------------------------
+
+def test_an_edited_target_pack_says_why_and_how(world):
+    from orchestrator.Core.mojo.checks.community import check_community
+    root = make_target(world.tmp / "src" / "demo-board")
+    (root / "knowledge").mkdir()
+    (root / "knowledge" / "initial_knowledge.json").write_text(json.dumps(PAGES), encoding="utf-8")
+    world.add(pack_bytes(root, pack_id="demo-board", version="1.2.0"))
+    world.publish()
+    dest = world.cm.finish_install(world.cm.prepare_install("target", "demo-board"))
+    (dest / "modules" / "build.sh").write_text("#!/bin/bash\necho edited\n", encoding="utf-8")
+    (world.cm.knowledge_dir / ".targets" / "demo-board.imported").unlink()
+    world.cm.sync_knowledge_base()
+    framework = SimpleNamespace(community_manager=world.cm)
+    (finding,) = [f for f in check_community(framework) if f.code == "community.demo-board.changed"]
+    for text in (world.cm.last_sync_problem, finding.fix_hint):
+        assert "not imported" in text and "install it again" in text and "export that as a new pack" in text
+    assert "security gate" in finding.why and "llm-cli" not in finding.fix_hint
+    assert [p for f, _, _, p in world.cm.verify_installed() if f == dest] == [["changed since it was installed"]]

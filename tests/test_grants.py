@@ -348,7 +348,7 @@ class TestScope:
                                "run_device_benchmark", "update_settings", "crawl_docs_site",
                                "create_target_module", "export_pack", "resolve_healing", "cancel_build", "cancel_job",
                                "delete_artifact", "restore_knowledge_snapshot",
-                               "uninstall_pack"}   # an AI's uninstall request: the person decides each time
+                               "remove_pack"}   # an AI's uninstall request: the person decides each time
         for name in sorted(NEVER_GRANT):
             with pytest.raises(ValueError, match="never gets a standing approval"):
                 env.registry.register(ToolSpec(name, name, "", ToolTier.LOCAL_WRITE, PackIn, PackOut,

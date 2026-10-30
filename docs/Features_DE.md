@@ -1071,7 +1071,7 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `run_benchmark` | lokal schreiben | Optional, verborgen bis zur Freigabe: llama-bench auf Dittos Katalogmodell (nativ oder in der Sandbox) oder einem gebauten GGUF-Modell (immer in der Sandbox: ein für ein Board gebautes Modell wird auf dem Board gemessen) |
 | `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | extern | Optional, verborgen bis zur Freigabe: ein vertrautes Board prüfen, seine selbst gebaute Laufzeit installieren oder sie prüfen und messen (immer mit Frage; Jobs) |
 | `delete_artifact` | extern, optional | Ein gebautes Modell (seinen Ordner unter dem Ausgabeordner und sein Golden-ZIP) in den Papierkorb verschieben; verborgen, bis du es freigibst, immer mit Frage |
-| `uninstall_pack` | extern, optional | Bitten, ein installiertes Community-Paket zu deinstallieren: Du siehst seinen Ordner, seine Import-Notizen und die Auszüge, die nur es hält, im eigenen Fenster des Frameworks und entscheidest; es geht in den Papierkorb; verborgen, bis du es freigibst, immer mit Frage |
+| `remove_pack` | extern, optional | Bitten, ein installiertes Community-Paket zu deinstallieren: Du siehst seinen Ordner, seine Import-Notizen und die Auszüge, die nur es hält, im eigenen Fenster des Frameworks und entscheidest; es geht in den Papierkorb; verborgen, bis du es freigibst, immer mit Frage |
 | `list_trash` / `restore_from_trash` | lesen / lokal schreiben, optional | Den Papierkorb mit Name, Art und Größe sehen; wiederherstellen, was diese KI selbst löschen wollte (immer mit Frage); verborgen, bis du sie freigibst. Kein Tool leert den Papierkorb |
 | `restore_knowledge_snapshot` | extern, optional | Die Wissensbasis durch einen früheren Snapshot ersetzen, nach einer Sicherung des aktuellen Inhalts (ein Job); verborgen, bis du es freigibst, immer mit Frage |
 
@@ -3394,7 +3394,7 @@ tun, was `zoo verify`, `zoo verify DATEI`, `zoo export` und `zoo keys` tun; jede
 **Deinstallieren...** bei einem installierten Pack tut, was `llm-cli zoo uninstall` tut: Das Löschfenster listet seinen
 Ordner, seine Import-Notizen und die Auszüge, die nur es hält, „Nein“ ist die Vorgabe, und es geht in den Papierkorb
 oder endgültig; Auszüge, die ein anderes Pack noch hält, bleiben. Eine KI darf nur darum bitten (das optionale Tool
-`uninstall_pack`), und du entscheidest im selben Fenster.
+`remove_pack`), und du entscheidest im selben Fenster.
 
 ### Export für die Community
 

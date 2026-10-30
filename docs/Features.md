@@ -976,7 +976,7 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `run_benchmark` | local write | Optional, hidden until enabled: llama-bench on Ditto's catalog model (natively or in the sandbox) or a built GGUF model (always in the sandbox: a model built for a board is measured on the board) |
 | `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | external | Optional, hidden until enabled: probe a trusted board, install its self-built runtime, or check and benchmark it (always asked; jobs) |
 | `delete_artifact` | external, optional | Move one built model (its folder below the output folder and its golden ZIP) to the trash; hidden until you enable it, always asked |
-| `uninstall_pack` | external, optional | Ask to uninstall one installed community pack: you see its folder, its import notes and the excerpts only it holds in the framework's own window and decide; it goes to the trash; hidden until you enable it, always asked |
+| `remove_pack` | external, optional | Ask to uninstall one installed community pack: you see its folder, its import notes and the excerpts only it holds in the framework's own window and decide; it goes to the trash; hidden until you enable it, always asked |
 | `list_trash` / `restore_from_trash` | read / local write, optional | See the trash by name, kind and size; restore what this AI asked to delete itself (always asked); hidden until you enable them. No tool empties the trash |
 | `restore_knowledge_snapshot` | external, optional | Replace the knowledge base with an earlier snapshot, after a backup of the current content (a job); hidden until you enable it, always asked |
 
@@ -3060,7 +3060,7 @@ installed version and folder, the download address with size and sha256, the des
 `zoo verify`, `zoo verify FILE`, `zoo export` and `zoo keys` do; each runs in the background. **Uninstall...** on an
 installed pack does what `llm-cli zoo uninstall` does: the deletion window lists its folder, its import notes and the
 excerpts only it holds, "No" is the default, and it goes to the trash or for good; excerpts another pack still holds
-stay. An AI may only ask for it (the optional tool `uninstall_pack`), and you decide in the same window.
+stay. An AI may only ask for it (the optional tool `remove_pack`), and you decide in the same window.
 
 ### Export for community
 
