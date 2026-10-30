@@ -155,6 +155,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `device runtime plan/build/deploy/verify/status` | The self-built llama.cpp runtime of a board: plan it from the board's profile, cross-build it, install it over SSH and check it there |
 | `config show` / `config repos` | Show the effective settings and where each comes from / manage source repository overrides |
 | `config local-network` | What offline mode counts as local, and what you count as local yourself (a VPN, a host, an address range) |
+| `config doorbell` | Your MQTT broker for the build doorbell, and a test doorbell |
 | `config output-folder` | Show or set the output folder finished models are saved to |
 | `zoo list` / `zoo show` | List the community zoo and the installed packs / show one entry |
 | `zoo install` / `zoo verify` | Install a community pack after checks and your confirmation / check installed packs or a pack file |
@@ -2449,6 +2450,46 @@ value that is not a VPN, host name or range (an address goes under `range`), 1 w
 In the GUI: **File > Settings...**, tab **Local network**: the list with what can then leave your network, **Count as
 local...** (kind and value; asks with the explanation, "No" is the default), **Remove** (asks first), the check of
 this computer's VPN and **Check** for an address (both in the background).
+
+### config doorbell
+
+```
+llm-cli config doorbell [--broker URL] [--username NAME] [--prefix PREFIX] [--ca-file FILE] [--password] [--test]
+```
+
+The build doorbell: with a broker set, every build's end is published once to your MQTT broker, on
+`<prefix>/v1/build/<request_id>/end` and `<prefix>/v1/events` (QoS 1, not retained); `<prefix>/v1/status` says
+`online` while the framework sends and `offline` after it (retained, also as the last will). The message is JSON with
+fixed words only:
+
+```json
+{"v": 1, "event": "build_ready", "reason": "done", "name": "Build ready", "request_id": "req_1a2b3c4d", "ts": "2026-10-30T12:00:00Z"}
+```
+
+`event` is `build_ready`, `build_error` or `build_stopped`, `reason` one of `done`, `failed`, `cancelled`, `soft_cap`,
+`idle`; there is never a path, log text or a model's name in it, the details come with `build status REQUEST_ID` or
+over MCP. The framework only publishes, it never subscribes. A broker that is down never stops a build; the last
+failed send shows up in Mojo. Let the broker's ACLs allow only the framework's user to publish under the prefix.
+
+Without options the command shows the doorbell's settings. `--broker` sets the broker: `mqtt://host:port` only on this
+computer, every other broker `mqtts://host:port` with its certificate checked (against the system's CAs or
+`--ca-file`); in offline mode only a broker that counts as local ([config local-network](#config-local-network));
+`''` switches the doorbell off. `--password` asks for the broker's password and keeps it in the credential vault,
+never in `config.yml`. `--test` sends a test doorbell (request id `req_00000000`) and says whether the broker took it.
+Only you set these: the AI settings change and MCP `update_settings` refuse them. Exit code 2 for a setting that does
+not fit (the setting stays as it was), 1 when the test doorbell was not taken or `config.yml` could not be saved.
+
+| Option | Meaning |
+|---|---|
+| `--broker URL` | The broker: `mqtt://host:port` (this computer) or `mqtts://host:port`; `''` = off. |
+| `--username NAME` | The user name at the broker. |
+| `--prefix PREFIX` | The topic prefix (default `llmcf`; 1 to 32 of a-z, 0-9, `_` and `-`). |
+| `--ca-file FILE` | The CA file to check the broker's certificate (`''` = the system's CAs). |
+| `--password` | Ask for the password and keep it in the credential vault. |
+| `--test` | Send a test doorbell now. |
+
+In the GUI: **File > Settings...**, tab **Build doorbell**: the same fields, **Save** and **Send a test doorbell** (in
+the background).
 
 ---
 

@@ -233,6 +233,14 @@ class FrameworkManager:
             except Exception as e:
                 self.activity = None
                 self.logger.error(f"AI activity is not shown in the chat (it stays in the audit log): {e}")
+            # Every build end of this process to the person's MQTT broker (Core/doorbell.py); nothing is sent until
+            # the person sets one, and a broker that is down never blocks a build.
+            try:
+                from orchestrator.Core.doorbell import attach_doorbell
+                self.doorbell = attach_doorbell(self)
+            except Exception as e:
+                self.doorbell = None
+                self.logger.error(f"The MQTT doorbell is not available: {e.__class__.__name__}")
 
             # === DEPENDENCY INJECTION ===
             # Connect the Guardian (Self-Healing, which asks Ditto) to the Orchestrator

@@ -156,6 +156,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `device runtime plan/build/deploy/verify/status` | Die selbst gebaute llama.cpp-Laufzeit eines Boards: aus seinem Profil planen, cross-kompilieren, per SSH installieren und dort prüfen |
 | `config show` / `config repos` | Die wirksamen Einstellungen und ihre Herkunft zeigen / Überschreibungen für Quell-Repositorys verwalten |
 | `config local-network` | Was der Offline-Modus als lokal zählt, und was du selbst als lokal zählst (ein VPN, ein Host, ein Adressbereich) |
+| `config doorbell` | Dein MQTT-Broker für die Build-Türklingel, und eine Test-Klingel |
 | `config output-folder` | Den Ausgabeordner zeigen oder festlegen, in dem fertige Modelle gespeichert werden |
 | `zoo list` / `zoo show` | Den Community-Zoo und die installierten Pakete auflisten / einen Eintrag zeigen |
 | `zoo install` / `zoo verify` | Ein Community-Paket nach Prüfungen und deiner Bestätigung installieren / installierte Pakete oder eine Paketdatei prüfen |
@@ -2562,6 +2563,48 @@ konnte.
 In der GUI: **Datei > Einstellungen…**, Tab **Lokales Netz**: die Liste mit dem, was dann dein Netz verlassen kann,
 **Als lokal zählen…** (Art und Wert; fragt mit der Erklärung, „Nein“ ist die Vorgabe), **Entfernen** (fragt zuerst),
 die Prüfung des VPN dieses Computers und **Prüfen** für eine Adresse (beides im Hintergrund).
+
+### config doorbell
+
+```
+llm-cli config doorbell [--broker URL] [--username NAME] [--prefix PRÄFIX] [--ca-file DATEI] [--password] [--test]
+```
+
+Die Build-Türklingel: mit einem eingestellten Broker wird jedes Build-Ende einmal an deinen MQTT-Broker gesendet, an
+`<prefix>/v1/build/<request_id>/end` und `<prefix>/v1/events` (QoS 1, nicht gehalten); `<prefix>/v1/status` sagt
+`online`, während das Framework sendet, und danach `offline` (gehalten, auch als letzter Wille). Die Nachricht ist
+JSON nur mit festen Wörtern:
+
+```json
+{"v": 1, "event": "build_ready", "reason": "done", "name": "Build ready", "request_id": "req_1a2b3c4d", "ts": "2026-10-30T12:00:00Z"}
+```
+
+`event` ist `build_ready`, `build_error` oder `build_stopped`, `reason` eines von `done`, `failed`, `cancelled`,
+`soft_cap`, `idle`; nie steht ein Pfad, Log-Text oder der Name eines Modells darin, die Einzelheiten kommen mit
+`build status REQUEST_ID` oder über MCP. Das Framework sendet nur, es abonniert nie. Ein Broker, der nicht läuft,
+hält nie einen Build auf; das letzte gescheiterte Senden zeigt Mojo. Lass die ACLs des Brokers nur dem Benutzer des
+Frameworks erlauben, unter dem Präfix zu senden.
+
+Ohne Optionen zeigt der Befehl die Einstellungen der Türklingel. `--broker` stellt den Broker ein: `mqtt://host:port`
+nur auf diesem Computer, jeder andere Broker `mqtts://host:port` mit geprüftem Zertifikat (gegen die CAs des Systems
+oder `--ca-file`); im Offline-Modus nur ein Broker, der als lokal zählt ([config local-network](#config-local-network));
+`''` schaltet die Türklingel aus. `--password` fragt nach dem Passwort des Brokers und legt es in den Tresor für
+Zugangsdaten, nie in `config.yml`. `--test` sendet eine Test-Klingel (Anfrage-ID `req_00000000`) und sagt, ob der
+Broker sie angenommen hat. Nur du stellst das ein: die Änderung der KI-Einstellungen und MCP `update_settings` lehnen
+sie ab. Exit-Code 2 für eine Einstellung, die nicht passt (die Einstellung bleibt, wie sie war), 1, wenn die
+Test-Klingel nicht angenommen wurde oder `config.yml` nicht gespeichert werden konnte.
+
+| Option | Bedeutung |
+|---|---|
+| `--broker URL` | Der Broker: `mqtt://host:port` (dieser Computer) oder `mqtts://host:port`; `''` = aus. |
+| `--username NAME` | Der Benutzername beim Broker. |
+| `--prefix PRÄFIX` | Das Topic-Präfix (Standard `llmcf`; 1 bis 32 aus a-z, 0-9, `_` und `-`). |
+| `--ca-file DATEI` | Die CA-Datei, gegen die das Zertifikat des Brokers geprüft wird (`''` = die CAs des Systems). |
+| `--password` | Nach dem Passwort fragen und es in den Tresor für Zugangsdaten legen. |
+| `--test` | Jetzt eine Test-Klingel senden. |
+
+In der GUI: **Datei > Einstellungen…**, Reiter **Build-Türklingel**: dieselben Felder, **Speichern** und
+**Test-Klingel senden** (im Hintergrund).
 
 ---
 

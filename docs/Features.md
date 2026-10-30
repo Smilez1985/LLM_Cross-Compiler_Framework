@@ -188,6 +188,10 @@ Further behaviour:
   failed build. Every build has one end reason (done, failed, cancelled, soft_cap, idle), which the Builder,
   `llm-cli build status`, `get_build_status` and `build_info.json` show; the CLI's waits end on it with their own exit
   codes ([CLI](CLI_Usage.md#build-status)).
+- **A doorbell for every build's end:** with your own MQTT broker set, every build's end is published once with
+  fixed words only (event, reason, request id), for your phone, your home automation or an AI client that waits;
+  the framework never subscribes, a broker that is down never stops a build, and only you set it
+  ([CLI](CLI_Usage.md#config-doorbell)).
 - **Where a build goes:** see [Where finished models go](#where-finished-models-go) below. Every build lands in
   `<folder>/<target>/<model>/<quantization>/` with its golden ZIP next to it.
 

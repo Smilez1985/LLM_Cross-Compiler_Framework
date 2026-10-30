@@ -68,6 +68,14 @@ CLI_PATHS: Dict[str, str] = {
     "config repos --remove": "act_file_settings",
     # File > Settings... > Local network: what offline mode counts as local, and the person's opt-outs
     "config local-network": "act_file_settings",
+    # File > Settings... > Build doorbell (orchestrator/gui/doorbell_settings.py)
+    "config doorbell": "act_file_settings",
+    "config doorbell --broker": "act_file_settings",
+    "config doorbell --username": "act_file_settings",
+    "config doorbell --prefix": "act_file_settings",
+    "config doorbell --ca-file": "act_file_settings",
+    "config doorbell --password": "act_file_settings",
+    "config doorbell --test": "act_file_settings",
     "config local-network --add": "act_file_settings",
     "config local-network --remove": "act_file_settings",
     "config local-network --check": "act_file_settings",

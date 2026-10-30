@@ -198,6 +198,10 @@ Weiteres Verhalten:
   ein Container, der ohne ihn endet, ist ein fehlgeschlagener Build. Jeder Build hat einen Endgrund (done, failed,
   cancelled, soft_cap, idle), den der Builder, `llm-cli build status`, `get_build_status` und `build_info.json`
   zeigen; die Wartebefehle der CLI enden daran mit eigenen Exit-Codes ([CLI](CLI_Usage_DE.md#build-status)).
+- **Eine Türklingel für jedes Build-Ende:** mit deinem eigenen MQTT-Broker wird jedes Build-Ende einmal nur mit
+  festen Wörtern gesendet (Ereignis, Grund, Anfrage-ID), für dein Telefon, deine Hausautomation oder einen
+  KI-Client, der wartet; das Framework abonniert nie, ein Broker, der nicht läuft, hält nie einen Build auf, und
+  nur du stellst sie ein ([CLI](CLI_Usage_DE.md#config-doorbell)).
 - **Wohin ein Build kommt:** siehe [Wohin fertige Modelle kommen](#wohin-fertige-modelle-kommen) unten. Jeder Build
   landet in `<Ordner>/<Target>/<Modell>/<Quantisierung>/`, sein Golden-ZIP daneben.
 

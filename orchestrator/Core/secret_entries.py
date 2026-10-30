@@ -23,6 +23,7 @@ KNOWN_SECRETS: Dict[str, str] = {
     "qdrant_api_key": "secrets.what.qdrant_api_key",
     "community_signing_key": "secrets.what.community_signing_key",
     "community_age_identity": "secrets.what.community_age_identity",
+    "mqtt_password": "secrets.what.mqtt_password",
 }
 PROVIDER_PREFIX = "cred/"
 KIND_KNOWN, KIND_PROVIDER, KIND_OTHER = "known", "provider", "other"

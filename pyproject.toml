@@ -56,6 +56,12 @@ dependencies = [
 
     # --- 7. Deployment (SSH) ---
     "paramiko>=3.5.1,<6",
+
+    # --- 8. The build doorbell (Core/doorbell.py): every build end to the person's MQTT broker ---
+    # aiomqtt (BSD-3-Clause) over Eclipse Paho (EPL-2.0 OR BSD-3-Clause, used under BSD-3-Clause); imported only when a
+    # doorbell is sent. Exact pins: they carry a credential to the broker.
+    "aiomqtt==2.5.1",
+    "paho-mqtt==2.1.0",
 ]
 
 [project.optional-dependencies]
