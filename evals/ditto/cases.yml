@@ -217,3 +217,130 @@ cases:
     expect:
       mentions_any: ["4-bit", "4 bit", "four", "4 bits"]
       tools_not_called: [start_build, cancel_build, resolve_healing]
+
+  # --- token and cache measurement (tokens; runs only when chosen: --kind tokens or --case) ----------------------
+  # Multi-turn conversations with example data only (documentation addresses 192.0.2.0/24, 198.51.100.0/24,
+  # 203.0.113.0/24 and example.com names). Every turn records the provider's own Usage: input, output, cache read and
+  # cache write tokens; the report gives each conversation's cache-read share.
+  - id: tokens-build-talk
+    kind: tokens
+    description: "Three turns about one build, with the framework's tools"
+    turns:
+      - "Which formats can the Rockchip target build for the board rk3588?"
+      - "And which of them runs on the NPU?"
+      - "Thanks. In one sentence: which one would you pick for a chat model on that board?"
+    expect:
+      mentions_any: [rkllm, rknn, gguf]
+
+  - id: tokens-boards-on-the-network
+    kind: tokens
+    description: "Four turns that name example boards by documentation addresses"
+    use_tools: false
+    turns:
+      - "I have three boards: board-a.example.com at 192.0.2.10, board-b.example.com at 198.51.100.20 and board-c.example.com at 203.0.113.30. Just say ok."
+      - "board-a has 4 GB of RAM, board-b 8 GB and board-c 16 GB. Just say ok."
+      - "Which of my boards has the most RAM? Name it."
+      - "And which address does that board have?"
+    expect:
+      mentions_any: ["203.0.113.30"]
+
+  # Fails today: after the summary of a long conversation (compaction), the follow-up on the last answer loses it.
+  # A later context chain makes it pass; then remove expected_fail (an unexpected pass is reported).
+  - id: tokens-followup-after-compaction
+    kind: tokens
+    description: "Follow-up on the last answer right after the conversation was summarized"
+    expected_fail: true
+    use_tools: false
+    context_limit: 512
+    turns:
+      - |
+        Here is an example build log from board-a.example.com (192.0.2.10). Summarize it in two sentences.
+        [build] Configuring llama.cpp for aarch64 with GGML_NATIVE=OFF and the Cortex-A76 flags.
+        [build] Compiling ggml-base, ggml-cpu and llama: 412 objects, 3 warnings about unused variables.
+        [build] Linking llama-server and llama-bench; both binaries are stripped after the link step.
+        [build] Converting the example model to GGUF F16: 291 tensors written, vocabulary of 151936 tokens.
+        [build] Quantizing to Q4_K_M: 291 tensors, 4.85 bits per weight on average, file size 469 MB.
+        [build] Quantizing to Q8_0: 291 tensors, 8.50 bits per weight on average, file size 676 MB.
+        [build] Running the perplexity check on the example text: Q4_K_M 11.82, Q8_0 11.31, F16 11.27.
+        [build] Packaging the runtime for board-a: start script, unit file, checksums and the two models.
+        [build] Writing SHA256SUMS for 7 files; the golden artifact ZIP holds 1.2 GB.
+        [build] Uploading the package to 192.0.2.10 over SSH: 1.2 GB in 41 seconds, checksums verified.
+        [build] Starting llama-server on the board with a context of 4096 tokens and 4 threads.
+        [build] Benchmark on the board: prompt processing 38.2 tokens per second, generation 9.7 tokens per second.
+        [build] Board temperature during the benchmark: 61 degrees Celsius, no throttling reported.
+        [build] Build finished in 14 minutes 12 seconds; the package is kept in the output folder.
+        [build] A second board, board-b.example.com (198.51.100.20), is queued for the same package.
+        [build] The queue holds one more request for board-c.example.com (203.0.113.30) with Q8_0 only.
+        [build] Cleaning the build container: 2.3 GB of intermediate files removed from the work folder.
+        [build] The cache of the converter keeps the downloaded example model for the next build.
+        [build] The build log of board-a is kept for 30 days; the queue log for board-b and board-c for 7 days.
+        [build] The next build for board-b.example.com reuses the converted F16 file and the Q4_K_M quantization.
+        [build] The next build for board-c.example.com quantizes to Q8_0 only and skips the perplexity check.
+        [build] Disk after the build: 41 GB free of 120 GB; the reservation of 6 GB for the queue is released.
+        [build] The runtime package of board-a carries llama-server, the start script and two model files.
+        [build] The board answered the health check in 2.4 seconds after the start with HTTP 200.
+        [build] Done: two quantizations, one package, one board updated, two boards waiting in the queue.
+      - "Reply with exactly this line and nothing else: The code word is AMBER-7."
+      - "What was the code word in your last answer? Reply with the code word only."
+    expect:
+      mentions_any: [AMBER-7]
+
+  # Fails today on Ditto's local model with a 4096-token window: the server stops with "context shift is disabled"
+  # once the conversation outgrows the window. Runs only on a managed local model (--tier); else skipped.
+  - id: tokens-20-turns-local-4096
+    kind: tokens
+    description: "Twenty short turns on a local model with a 4096-token window"
+    expected_fail: true
+    needs_local: true
+    context_limit: 4096
+    turns:
+      - "Which targets can the framework build for?"
+      - "Which boards does the Rockchip target know?"
+      - "Which formats does it build for rk3588?"
+      - "Which quantizations does GGUF offer there?"
+      - "Which of them is the smallest?"
+      - "And which keeps the best quality?"
+      - "Which formats does it build for rk3566?"
+      - "Can rk3566 run RKLLM?"
+      - "Which quantizations does RKNN offer on rk3566?"
+      - "Are there any builds right now?"
+      - "What was the status of build req-7?"
+      - "What does its log say?"
+      - "Which Python module was missing?"
+      - "How would I fix that?"
+      - "Which artifacts are there?"
+      - "How large is the Q4_K_M artifact?"
+      - "For which board was it built?"
+      - "Which target was that?"
+      - "Summarize this conversation in one sentence."
+      - "Reply with the single word: done."
+    expect:
+      mentions_any: [done]
+
+  # --- the paid OpenAI test (openai_paid; never by default, never in CI, never by an AI) ------------------------
+  # Runs only with `llm-cli ditto eval --kind openai_paid --provider openai --i-pay` at a terminal or from
+  # Ditto > Evaluation... after its confirmation, with the person's own key. About 6 calls of about 2,000 input
+  # tokens each. The result is openai_cache_check.json: booleans and token numbers only.
+  - id: openai-cache-ttl-12h
+    kind: openai_paid
+    check: cache_ttl
+    description: "Two identical long requests with prompt_cache_options ttl 12h: accepted or refused, cached tokens"
+    prefix_repeat: 14
+    prefix: |
+      The example framework builds language models for small boards. A build starts from a model in the models
+      folder, converts it to GGUF, quantizes it, packs a runtime and copies it to a board such as
+      board-a.example.com at 192.0.2.10. Every step writes its checksums, and the package is checked again on the
+      board before the server starts. This paragraph is repeated to pass the provider's minimum cache length.
+    question: "Reply with one word: ok."
+
+  - id: openai-count-tokens
+    kind: openai_paid
+    check: count
+    description: "OpenAI's own token count of the sanitized request against the Usage of the real call"
+    prefix_repeat: 14
+    prefix: |
+      The example framework builds language models for small boards. A build starts from a model in the models
+      folder, converts it to GGUF, quantizes it, packs a runtime and copies it to a board such as
+      board-a.example.com at 192.0.2.10. Every step writes its checksums, and the package is checked again on the
+      board before the server starts. This paragraph is repeated to pass the provider's minimum cache length.
+    question: "Reply with one word: ok."

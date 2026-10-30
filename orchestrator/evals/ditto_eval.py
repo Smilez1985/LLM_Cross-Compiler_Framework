@@ -33,7 +33,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from orchestrator.Core.build_service import BuildService, BuildServiceError
-from orchestrator.Core.ditto_manager import DittoCoder, DittoError, format_notes
+from orchestrator.Core.ditto_manager import DittoCoder, DittoError, describe_llm_error, format_notes
 from orchestrator.Core.target_manager import TargetManager
 from orchestrator.rag.errors import KnowledgeBaseError
 from orchestrator.schemas.build import (ArtifactList, ArtifactOut, BuildHandle, BuildList, BuildRequestIn,
@@ -46,7 +46,13 @@ from orchestrator.tools.registry import ToolError, ToolRegistry
 if TYPE_CHECKING:
     from orchestrator.Core.rag_manager import RAGManager
 
-KINDS = ("healing", "optimizer", "module", "chat", "retrieval")
+KINDS = ("healing", "optimizer", "module", "chat", "retrieval", "tokens", "openai_paid")
+# Kinds that run only when asked for: retrieval (own cases file), tokens (multi-turn measurements, many calls) by kind
+# or case id, openai_paid only by kind, with the person's --i-pay (evals/eval_run.check_paid).
+OPT_IN_KINDS = ("tokens", "openai_paid")
+PAID_KINDS = ("openai_paid",)
+PAID_CHECKS = ("cache_ttl", "count")
+PAID_TTL = "12h"   # the cache lifetime the paid test asks OpenAI for
 DEFAULT_CASES = Path(__file__).resolve().parents[2] / "evals" / "ditto" / "cases.yml"
 RETRIEVAL_CASES = Path(__file__).resolve().parents[2] / "evals" / "retrieval" / "cases.yml"
 RETRIEVAL_DEPTH = 10  # results per search; MRR is computed over them
@@ -110,15 +116,31 @@ class Case(BaseModel):
     # retrieval
     query: str = ""
     tags: List[str] = Field(default_factory=list)  # report groups, e.g. identifier, cross-lingual, negative
+    # tokens: a conversation, one user turn each; `expect` grades the last answer
+    turns: List[str] = Field(default_factory=list, max_length=60)
+    use_tools: bool = True                       # the framework's tools, as in a chat case
+    context_limit: Optional[int] = Field(default=None, ge=512, le=1_000_000)  # Ditto's chat_context_limit here
+    needs_local: bool = False                    # only meaningful on a managed local model (--tier); else skipped
+    # A case that fails today and that a later change is to make pass: its failure is reported as expected and not
+    # counted; its pass is reported as an unexpected pass (never hidden), so the mark is removed then.
+    expected_fail: bool = False
+    # openai_paid: a long example prefix (repeated to pass the provider's cache minimum) and the question after it
+    check: str = ""                              # cache_ttl | count
+    prefix: str = ""
+    prefix_repeat: int = Field(default=1, ge=1, le=400)
     expect: Expect = Field(default_factory=Expect)
 
     def model_post_init(self, _context: Any) -> None:
         if self.kind not in KINDS:
             raise ValueError(f"case {self.id}: kind must be one of {', '.join(KINDS)}")
         needed = {"healing": "log", "optimizer": "target", "module": "probe", "chat": "question",
-                  "retrieval": "query"}[self.kind]
-        if not getattr(self, needed).strip():
+                  "retrieval": "query", "tokens": "turns", "openai_paid": "prefix"}[self.kind]
+        value = getattr(self, needed)
+        empty = (not value or not all(str(t).strip() for t in value)) if isinstance(value, list) else not value.strip()
+        if empty:
             raise ValueError(f"case {self.id}: a {self.kind} case needs '{needed}'")
+        if self.kind == "openai_paid" and self.check not in PAID_CHECKS:
+            raise ValueError(f"case {self.id}: an openai_paid case needs 'check': one of {', '.join(PAID_CHECKS)}")
         if self.kind == "retrieval" and bool(self.expect.relevant) == self.expect.none_relevant:
             raise ValueError(f"case {self.id}: a retrieval case expects either 'relevant' documents or "
                              "'none_relevant: true'")
@@ -535,6 +557,18 @@ class Attempt:
     answer: str = ""  # excerpt, for reading why a case failed
     retrieved: Optional[List[Dict[str, Any]]] = None  # retrieval: document id and score of each result
     tool_calls: Optional[List[Dict[str, Any]]] = None  # chat: every tool call the model attempted
+    # tokens: one row per turn, numbers from the provider's Usage only (input, output, cache read, cache write, the
+    # calls of the turn, Anthropic's cache miss reasons); conversation: their sums and the cache-read share
+    turns: Optional[List[Dict[str, Any]]] = None
+    conversation: Optional[Dict[str, Any]] = None
+    measurement: Optional[Dict[str, Any]] = None  # openai_paid: booleans and token numbers only (no text, no key)
+    skipped: bool = False                         # the case does not apply to this run (e.g. needs a local model)
+
+
+def _attempt_dict(attempt: Attempt) -> Dict[str, Any]:
+    """An attempt in the report: fields that are not set are left out (and `skipped` unless it is)."""
+    return {k: v for k, v in dataclasses.asdict(attempt).items()
+            if v is not None and not (k == "skipped" and v is False)}
 
 
 @dataclass
@@ -549,6 +583,29 @@ class CaseResult:
     @property
     def seconds(self) -> float:
         return sum(a.seconds for a in self.attempts) / len(self.attempts)
+
+    @property
+    def skipped(self) -> bool:
+        return all(getattr(a, "skipped", False) for a in self.attempts)
+
+    @property
+    def expected_fail(self) -> bool:
+        return bool(getattr(self.case, "expected_fail", False))
+
+    @property
+    def graded(self) -> bool:
+        """Counted in the pass rates: neither skipped nor marked as failing on purpose (expected_fail)."""
+        return not self.skipped and not self.expected_fail
+
+    @property
+    def outcome(self) -> str:
+        """pass | fail | partial; skipped; for an expected_fail case xfail, or xpass when an attempt passed (an
+        unexpected pass: the change it waited for has come, remove the mark)."""
+        if self.skipped:
+            return "skipped"
+        if self.expected_fail:
+            return "xpass" if any(a.passed for a in self.attempts if not getattr(a, "skipped", False)) else "xfail"
+        return "pass" if self.pass_rate == 1 else ("fail" if self.pass_rate == 0 else "partial")
 
     def first_problem(self) -> str:
         for a in self.attempts:
@@ -604,31 +661,61 @@ class EvalReport:
     setup: Dict[str, Any] = field(default_factory=dict)
 
     @property
+    def graded(self) -> List[CaseResult]:
+        """The results the pass rates count: without skipped cases and without expected_fail cases."""
+        return [r for r in self.results if r.graded]
+
+    @property
     def pass_rate(self) -> float:
-        return sum(r.pass_rate for r in self.results) / len(self.results) if self.results else 0.0
+        graded = self.graded
+        return sum(r.pass_rate for r in graded) / len(graded) if graded else 0.0
 
     def by_kind(self) -> Dict[str, float]:
         kinds: Dict[str, List[float]] = {}
-        for r in self.results:
+        for r in self.graded:
             kinds.setdefault(r.case.kind, []).append(r.pass_rate)
         return {k: sum(v) / len(v) for k, v in kinds.items()}
 
     def retrieval(self) -> Optional[Dict[str, Any]]:
         return retrieval_metrics(self.results) if any(r.case.kind == "retrieval" for r in self.results) else None
 
+    def expected_failures(self) -> Optional[Dict[str, List[str]]]:
+        """The expected_fail cases by outcome (an unexpected pass is listed, never hidden); None without any."""
+        marked = [r for r in self.results if r.expected_fail and not r.skipped]
+        if not marked:
+            return None
+        return {"xfail": [r.case.id for r in marked if r.outcome == "xfail"],
+                "unexpected_pass": [r.case.id for r in marked if r.outcome == "xpass"]}
+
+    def conversations(self) -> List[Dict[str, Any]]:
+        """Per tokens case and attempt: the conversation's token sums and its cache-read share."""
+        return [{"id": r.case.id, "attempt": i, **a.conversation} for r in self.results
+                for i, a in enumerate(r.attempts, 1) if getattr(a, "conversation", None)]
+
     def to_dict(self) -> Dict[str, Any]:
+        cases = []
+        for r in self.results:
+            entry = {"id": r.case.id, "kind": r.case.kind, "pass_rate": round(r.pass_rate, 4),
+                     "seconds": round(r.seconds, 2), "attempts": [_attempt_dict(a) for a in r.attempts]}
+            if not r.graded:   # only cases that are not counted say so (the format of the others is unchanged)
+                entry["outcome"] = r.outcome
+            if r.expected_fail:
+                entry["expected_fail"] = True
+            cases.append(entry)
         data = {"setup": self.setup, "pass_rate": round(self.pass_rate, 4),
-                "by_kind": {k: round(v, 4) for k, v in self.by_kind().items()},
-                "cases": [{"id": r.case.id, "kind": r.case.kind, "pass_rate": round(r.pass_rate, 4),
-                           "seconds": round(r.seconds, 2),
-                           "attempts": [{k: v for k, v in dataclasses.asdict(a).items() if v is not None}
-                                        for a in r.attempts]} for r in self.results]}
+                "by_kind": {k: round(v, 4) for k, v in self.by_kind().items()}, "cases": cases}
         retrieval = self.retrieval()
         if retrieval is not None:
             data["retrieval"] = retrieval
         tool_use = tool_use_metrics(self.results)
         if tool_use is not None:
             data["tool_use"] = tool_use
+        conversations = self.conversations()
+        if conversations:
+            data["tokens"] = conversations
+        expected = self.expected_failures()
+        if expected is not None:
+            data["expected_failures"] = expected
         return data
 
 
@@ -671,27 +758,206 @@ def run_cases(run_case: Callable[[Case], Attempt], cases: Sequence[Case], repeat
     return EvalReport(results)
 
 
+def usage_row(usage: Any) -> Dict[str, int]:
+    """The four token numbers of a provider's Usage (llm/types.Usage), as the report and the paid test record them."""
+    return {"input_tokens": int(usage.input_tokens), "output_tokens": int(usage.output_tokens),
+            "cache_read_tokens": int(usage.cache_read_tokens), "cache_write_tokens": int(usage.cache_write_tokens)}
+
+
+def conversation_summary(turns: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """The sums of a conversation's turns and its cache-read share: cache read / every prompt token (uncached input
+    + cache read + cache write), None when no prompt token was counted."""
+    sums = {k: sum(int(t.get(k) or 0) for t in turns)
+            for k in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "calls")}
+    prompt = sums["input_tokens"] + sums["cache_read_tokens"] + sums["cache_write_tokens"]
+    return {"turns": len(turns), **sums,
+            "cache_read_share": round(sums["cache_read_tokens"] / prompt, 4) if prompt else None}
+
+
+class ProbingClient:
+    """The run's LLMClient for a tokens case: every call goes through the client unchanged except for an evaluation
+    CacheProbe (Anthropic's cache diagnostics with the previous response's id; other providers ignore it), and its
+    Usage and cache-miss reason are recorded per call. Everything else is the client's own."""
+
+    def __init__(self, client: Any):
+        self._client = client
+        self.calls: List[Dict[str, Any]] = []
+        self._previous: Optional[str] = None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+    def chat(self, request):
+        from orchestrator.llm.types import CacheProbe
+        probe = CacheProbe(anthropic_diagnostics=True, previous_message_id=self._previous)
+        # fallback=False: the numbers belong to the provider being measured (an outage fails the turn instead)
+        result = self._client.chat(request.model_copy(update={"cache_probe": probe}), fallback=False)
+        self._previous = result.response_id or self._previous
+        row = usage_row(result.usage)
+        if result.cache_miss_reason is not None:
+            row["cache_miss_reason"] = result.cache_miss_reason
+            if result.cache_missed_tokens is not None:
+                row["cache_missed_tokens"] = result.cache_missed_tokens
+        self.calls.append(row)
+        return result
+
+
+def _turn_row(calls: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    row: Dict[str, Any] = {k: sum(c[k] for c in calls) for k in
+                           ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")}
+    row["calls"] = len(calls)
+    reasons = [c["cache_miss_reason"] for c in calls if "cache_miss_reason" in c]
+    if reasons:
+        row["cache_miss_reasons"] = reasons
+    return row
+
+
 class DittoEval:
-    def __init__(self, ditto: DittoCoder, targets_dir: Path):
+    def __init__(self, ditto: DittoCoder, targets_dir: Path, *, pause_minutes: Optional[float] = None,
+                 stop: Any = None, wait: Optional[Callable[[float], Any]] = None):
         self.ditto = ditto
         self.targets_dir = Path(targets_dir)
         # The real targets give the optimizer its options (the same ones the GUI offers).
         self._targets = EvalFramework(self.targets_dir).target_manager
+        # Between the turns of a tokens case and the two calls of the paid cache test (lifetime comparisons); None:
+        # no pause. The pause ends early on the stop event (Cancel).
+        self.pause_minutes = pause_minutes
+        self.stop = stop
+        self._wait = wait
 
-    def _isolated(self, registry: Optional[ToolRegistry]) -> DittoCoder:
-        """Ditto with the user's provider settings, no knowledge base (answers must come from the case) and the
-        given tool registry."""
+    def _pause(self) -> None:
+        if not self.pause_minutes:
+            return
+        seconds = float(self.pause_minutes) * 60
+        if self._wait is not None:
+            self._wait(seconds)
+        elif self.stop is not None:
+            self.stop.wait(seconds)
+        else:
+            time.sleep(seconds)
+        _check_stop(self.stop)
+
+    def _isolated(self, registry: Optional[ToolRegistry], client: Any = None,
+                  overrides: Optional[Dict[str, Any]] = None) -> DittoCoder:
+        """Ditto with the user's provider settings, no knowledge base (answers must come from the case), the given
+        tool registry, and for a tokens case its own client (ProbingClient) and settings (context limit)."""
         base = self.ditto.config
+        fixed = {"enable_rag_knowledge": False, **(overrides or {})}
 
         class Settings:
             def get(self, key, default=None):
-                return False if key == "enable_rag_knowledge" else base.get(key, default)
+                return fixed[key] if key in fixed else base.get(key, default)
 
             def set(self, key, value):
                 return base.set(key, value)
 
-        return DittoCoder(self.ditto.framework, config_manager=Settings(), client=self.ditto.client,
+        return DittoCoder(self.ditto.framework, config_manager=Settings(), client=client or self.ditto.client,
                           registry=registry)
+
+    def _runs_local(self) -> Optional[bool]:
+        try:
+            return bool(self.ditto.describe("chat").get("local"))
+        except Exception:  # noqa: BLE001 - not set up: the case reports the Ditto error itself
+            return None
+
+    def run_tokens(self, case: Case) -> Attempt:
+        """A conversation of `case.turns`, one Ditto chat turn each on one history (as in the chat panel), with
+        Ditto's real prompt and, by default, its tools over the stand-in framework. Per turn the provider's Usage of
+        every call (summaries included); the last answer is graded by `expect`; an error in any turn fails it."""
+        start = time.monotonic()
+        if case.needs_local and self._runs_local() is not True:
+            return Attempt(False, 0.0, skipped=True, error="skipped: needs a managed local model (--tier)")
+        env = EvalEnvironment(self.targets_dir) if case.use_tools else None
+        client = ProbingClient(self.ditto.client)
+        overrides = {"chat_context_limit": case.context_limit} if case.context_limit else {}
+        ditto = self._isolated(env.registry if env else None, client=client, overrides=overrides)
+        from orchestrator.Core.ditto_manager import ChatHistory
+        history, turns, text, error = ChatHistory(), [], "", ""
+        try:
+            for index, question in enumerate(case.turns):
+                if index:
+                    self._pause()
+                before = len(client.calls)
+                try:
+                    reply = ditto.chat(question, history, confirm=lambda spec, inp: case.confirm,
+                                       use_tools=case.use_tools)
+                except DittoError as e:
+                    turns.append({"turn": index + 1, **_turn_row(client.calls[before:]), "error": True})
+                    error = f"turn {index + 1}: Ditto error: {e}"[:500]
+                    break
+                history.apply(reply)
+                text = reply.text
+                turns.append({"turn": index + 1, **_turn_row(client.calls[before:]),
+                              **({"new_conversation": True} if reply.new_conversation else {})})
+        finally:
+            if env is not None:
+                env.close()
+        seconds = time.monotonic() - start
+        summary = conversation_summary(turns)
+        if error:
+            return Attempt(False, seconds, error=error, turns=turns, conversation=summary)
+        problems = grade_text(case.expect, text)
+        return Attempt(not problems, seconds, problems, answer=text[:1500], turns=turns, conversation=summary)
+
+    def run_openai_paid(self, case: Case) -> Attempt:
+        """The paid OpenAI test, started only by the person (evals/eval_run.check_paid). cache_ttl: the
+        same long request twice with prompt_cache_options.ttl "12h"; a 400 is recorded as refused (never as works)
+        and the pair is then sent without the option, so turn 2's cached tokens are measured either way. count:
+        OpenAI's own count of the sanitized request (responses.input_tokens.count) against the Usage of the real
+        call. Only booleans and token numbers are recorded; the prompt is example data and goes through the privacy
+        filter like every cloud call."""
+        from orchestrator.llm.errors import BadRequest, LLMError
+        from orchestrator.llm.types import CacheProbe, ChatRequest, Message
+        start = time.monotonic()
+        client = self.ditto.client
+        try:
+            target = client.resolve("chat")
+        except LLMError as e:
+            return Attempt(False, 0.0, error=f"Ditto error: {e}"[:500])
+        if target.preset.adapter != "openai_responses":
+            return Attempt(False, 0.0, error="The paid OpenAI test needs OpenAI's own API: --provider openai.")
+        text = ((case.prefix.strip() + "\n\n") * case.prefix_repeat) + (case.question or "Answer with one word: ok.")
+        request = ChatRequest(system="Answer in one short sentence.", messages=[Message.user(text)], max_tokens=32,
+                              task="chat", effort="low")
+        m: Dict[str, Any] = {"check": case.check}
+
+        def call(probe=None):
+            # fallback=False: the person's yes covers OpenAI only; an outage ends the check instead of sending the
+            # paid prompt to the next provider of ai_fallback_chain
+            result = client.chat(request.model_copy(update={"cache_probe": probe}) if probe else request,
+                                 fallback=False)
+            if result.provider != target.provider:   # not a measurement of OpenAI (the last guard)
+                raise LLMError("another provider answered (the fallback chain); not a measurement of OpenAI")
+            return result
+
+        try:
+            if case.check == "cache_ttl":
+                probe = CacheProbe(openai_cache_ttl=PAID_TTL)
+                try:
+                    first = call(probe)
+                    m.update(ttl_12h_accepted=True, ttl_12h_status=200, ttl_12h_invalid_request=False)
+                except BadRequest as e:   # refused: recorded as refused, never as "works"
+                    m.update(ttl_12h_accepted=False, ttl_12h_status=e.status,
+                             ttl_12h_invalid_request=e.status == 400)
+                    probe = None
+                    first = call()
+                m["pair_sent_with_ttl"] = probe is not None
+                self._pause()
+                second = call(probe)
+                m["turn1"], m["turn2"] = usage_row(first.usage), usage_row(second.usage)
+                m["turn2_cached"] = second.usage.cache_read_tokens > 0
+            else:
+                counted = client.count_input_tokens(request)
+                real = call()
+                used = real.usage.input_tokens + real.usage.cache_read_tokens
+                m.update(count_tokens=counted.input_tokens, usage_input_tokens=used,
+                         count_difference=counted.input_tokens - used, count_matches_usage=counted.input_tokens == used,
+                         count_response_has_cost_field=any(f not in ("object", "input_tokens")
+                                                           for f in counted.response_fields))
+        except LLMError as e:
+            return Attempt(False, time.monotonic() - start, error=f"Ditto error: {describe_llm_error(e)}"[:500],
+                           measurement=m)
+        return Attempt(True, time.monotonic() - start, answer="measured", measurement=m)
 
     def options_for(self, target: str, board: Optional[str]) -> Dict[str, List[str]]:
         caps = self._targets.get_capabilities(target)
@@ -705,6 +971,10 @@ class DittoEval:
         return format_notes(caps) if caps is not None else {}
 
     def run_case(self, case: Case) -> Attempt:
+        if case.kind == "tokens":
+            return self.run_tokens(case)
+        if case.kind == "openai_paid":
+            return self.run_openai_paid(case)
         start = time.monotonic()
         tool_calls = None
         try:
@@ -743,6 +1013,8 @@ class DittoEval:
 
     def run(self, cases: Sequence[Case], repeat: int = 1,
             on_result: Optional[Callable[[CaseResult], None]] = None, stop: Any = None) -> EvalReport:
+        if stop is not None:
+            self.stop = stop   # a pause ends on Cancel too
         return run_cases(self.run_case, cases, repeat, on_result, stop=stop)
 
 

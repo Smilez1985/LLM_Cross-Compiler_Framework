@@ -92,6 +92,18 @@ class ToolSpecLLM(BaseModel):
         return cls.from_model(spec.name, spec.description, spec.input_model)
 
 
+class CacheProbe(BaseModel):
+    """Evaluation only (orchestrator/evals/ditto_eval.py, the `tokens` and `openai_paid` kinds): what a measuring call
+    asks the provider for besides the answer. Product code never sets it. Anthropic: `diagnostics` with the previous
+    response's id, so the answer names why the prompt cache missed (ChatResult.cache_miss_reason). OpenAI Responses:
+    `prompt_cache_options.ttl`, sent through extra_body because the pinned SDK types only "30m"."""
+    model_config = ConfigDict(frozen=True)
+
+    anthropic_diagnostics: bool = False
+    previous_message_id: Optional[str] = Field(default=None, max_length=200)
+    openai_cache_ttl: Optional[str] = Field(default=None, pattern=r"^\d{1,3}[mh]$")
+
+
 class ChatRequest(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -105,6 +117,7 @@ class ChatRequest(BaseModel):
     cache: bool = True
     cache_ttl: Literal["5m", "1h"] = "5m"
     model: Optional[str] = None  # overrides the configured model for this one call
+    cache_probe: Optional[CacheProbe] = None  # evaluation only (CacheProbe)
 
 
 class Usage(BaseModel):
@@ -131,10 +144,23 @@ class ChatResult(BaseModel):
     new_messages: List[Message] = Field(default_factory=list)  # everything to append, in order (see repair retry)
     refusal_category: Optional[str] = None
     refusal_explanation: Optional[str] = None
+    response_id: str = ""                     # the provider's id of this answer (msg_..., resp_...), "" when none
+    # Only with a CacheProbe asking for Anthropic's diagnostics: why the prompt cache missed against the previous
+    # response ("system_changed", "tools_changed", "messages_changed", ...), "none" when it found no divergence,
+    # "pending" when the comparison was not finished; None when not asked.
+    cache_miss_reason: Optional[str] = None
+    cache_missed_tokens: Optional[int] = None  # the provider's estimate of what the miss cost, when it names one
 
     def model_post_init(self, __context: Any) -> None:
         if not self.new_messages:
             self.new_messages = [self.message]
+
+
+class TokenCount(BaseModel):
+    """A provider's own count of a request's input tokens (LLMClient.count_input_tokens). `response_fields` are the
+    names of the fields the count's answer carried (to see whether it names a charge), never their values."""
+    input_tokens: int = Field(ge=0)
+    response_fields: List[str] = Field(default_factory=list)
 
 
 class ModelInfo(BaseModel):
