@@ -919,13 +919,13 @@ Die Einstellungen zu Wissensbasis, Deep Ingest und Community erklärt [docs/Feat
 ## Wie es weitergeht
 
 Die [Roadmap](docs/ROADMAP_DE.md) führt auf, was geplant ist; Erledigtes wandert in den [CHANGELOG](CHANGELOG_DE.md).
-Version 3.2.0 ist in Arbeit. Kurz:
+Version 3.3.0 ist in Arbeit. Kurz:
 
 - **Aus 3.1.0 übernommen:** die übrigen Anmeldeverfahren je Zugangsart (Anmeldung im Browser, wo der Anbieter sie
   erlaubt, Cloud-Plattformen), der letzte Durchgang durch die deutschen Texte jedes Fensters und der veröffentlichte
   Community-Index.
-- **Dittos Kontext:** echte Token-Zahlen je Anbieter und Modell, ein Speicherbudget für Dittos lokalen Server, das
-  echte Kontextfenster je Modell mit Verdichtung, Cloud-Caching so, wie der Anbieter es vorsieht, und Dittos Archiv
+- **Dittos Kontext:** echte Token-Zahlen je Anbieter und Modell, das echte Kontextfenster je Modell mit
+  Verdichtung, Cloud-Caching so, wie der Anbieter es vorsieht, und Dittos Archiv
   dessen, was es über llmcf und das Bauen gelernt hat (nie die privaten Gespräche der Person).
 - **Das Board-Bündel:** ein vollständiges Bündel mit Hash-Liste als dritter Deploy-Weg, ein idempotenter Installer auf
   dem Board, das Token sparende Gateway `llmcf-gateway` in Rust, Sprache und Bild als Bausteine des Bündels und MCP
@@ -934,10 +934,10 @@ Version 3.2.0 ist in Arbeit. Kurz:
   Quantisierung, ein allgemeines ARM64-Target für den Raspberry Pi, Targets aus der Hardware-Probe, auf dem Board
   bewiesen, das selbst gebaute llama.cpp mit CUDA und unter Windows sowie Targets für NVIDIA-GPUs und den AMD Ryzen
   Z1 Extreme.
-- **Entschieden, wartet auf seine Reihe:** Offline-Builds des Build-Container-Images, Vollmachten, ein eigenes Konto
+- **Entschieden, wartet auf seine Reihe:** Vollmachten, ein Postfach für jeden MCP-Client, ein eigenes Konto
   `llmcf`, Board-Sicherungen, die der PC holt, und die geteilte OpenSSH-Verbindung für einen Board-Schritt.
 
-Nach 3.2.0: der Build-Dienst mit einer Warteschlange über alle Programme, LoRA und große Modelle (3.4.0), eine
+Nach 3.3.0: der Build-Dienst mit einer Warteschlange über alle Programme, LoRA und große Modelle (3.4.0), eine
 gehärtete Lieferkette (3.5.0) und Rust dort, wo das Framework auf das Netzwerk oder ein Board trifft. Builds in der
 Cloud sind nicht geplant.
 
