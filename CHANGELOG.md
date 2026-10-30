@@ -11,6 +11,13 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 
 ## [3.2.0] - 2026-10-30
 
+### Added
+- `2026-10-30 00:19 UTC` · `v3.2.0` **`start_recipe_build` takes the board's hardware probe** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
+  an AI client names the probe (`probe`, an id from `get_hardware_probe`) for a recipe build as it already could for
+  `start_build`, and as the Builder tab and the CLI do: it is checked before the question (another board's probe is
+  refused), and the build is tuned to exactly that probe. Without it, the newest stored probe of a board of the
+  recipe's SoC, as before.
+
 ### Changed
 - `2026-10-29 23:31 UTC` · `v3.2.0` **One install rule for the whole RHEL family** ([design](docs/DESIGN.md#installer-platforms-and-dependencies)):
   Fedora, RHEL and CentOS Stream now get the rule of Rocky Linux, AlmaLinux and Oracle Linux. `install.sh` installs
