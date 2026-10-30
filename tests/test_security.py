@@ -71,6 +71,79 @@ class TestArchiveExtraction:
             safe_extract_archive(archive, dest)
         assert list(dest.iterdir()) == []
 
+    @pytest.mark.parametrize("kind, link, match", [
+        (tarfile.BLKTYPE, "", "Device"),
+        (tarfile.FIFOTYPE, "", "Device"),
+        (b"Z", "", "special file"),   # a type tarfile does not know
+    ])
+    def test_special_tar_members_are_blocked(self, tmp_path, kind, link, match):
+        archive = tmp_path / "special.tar"
+        with tarfile.open(archive, "w") as tf:
+            info = tarfile.TarInfo("inner")
+            info.type = kind
+            info.linkname = link
+            tf.addfile(info)
+        dest = tmp_path / "extract"
+        dest.mkdir()
+        with pytest.raises(Exception, match=match):
+            safe_extract_archive(archive, dest)
+        assert list(dest.iterdir()) == []
+
+    def test_an_absolute_member_is_blocked(self, tmp_path):
+        archive = tmp_path / "abs.tar"
+        with tarfile.open(archive, "w") as tf:
+            info = tarfile.TarInfo(str(tmp_path / "escaped.txt"))
+            info.size = 5
+            tf.addfile(info, io.BytesIO(b"pwned"))
+        dest = tmp_path / "extract"
+        dest.mkdir()
+        with pytest.raises(Exception, match="Tar Slip"):
+            safe_extract_archive(archive, dest)
+        assert not (tmp_path / "escaped.txt").exists()
+
+    def test_links_can_be_refused_altogether(self, tmp_path):
+        from orchestrator.utils.helpers import UnsafeArchive, safe_extract_tar
+        archive = tmp_path / "inside.tar"
+        with tarfile.open(archive, "w") as tf:
+            info = tarfile.TarInfo("a")
+            info.size = 1
+            tf.addfile(info, io.BytesIO(b"x"))
+            link = tarfile.TarInfo("b")
+            link.type, link.linkname = tarfile.SYMTYPE, "a"
+            tf.addfile(link)
+        dest = tmp_path / "extract"
+        dest.mkdir()
+        with tarfile.open(archive) as tf, pytest.raises(UnsafeArchive, match="link in archive"):
+            safe_extract_tar(tf, dest, links=False)
+        assert list(dest.iterdir()) == []
+        with tarfile.open(archive) as tf:
+            safe_extract_tar(tf, dest)   # a link that stays inside is allowed by default
+        assert (dest / "b").is_symlink() or (dest / "b").read_bytes() == b"x"
+
+    def test_without_the_data_filter_links_are_refused_and_files_still_extract(self, tmp_path, monkeypatch):
+        # Python 3.11 before 3.11.4 has no extraction filter: the members checked above are extracted, links never.
+        monkeypatch.delattr(tarfile, "data_filter", raising=False)
+        link_archive = tmp_path / "link.tar"
+        with tarfile.open(link_archive, "w") as tf:
+            info = tarfile.TarInfo("a")
+            info.size = 1
+            tf.addfile(info, io.BytesIO(b"x"))
+            link = tarfile.TarInfo("b")
+            link.type, link.linkname = tarfile.SYMTYPE, "a"
+            tf.addfile(link)
+        dest = tmp_path / "extract"
+        dest.mkdir()
+        with pytest.raises(Exception, match="links in archive"):
+            safe_extract_archive(link_archive, dest)
+        assert list(dest.iterdir()) == []
+        plain = tmp_path / "plain.tar"
+        with tarfile.open(plain, "w") as tf:
+            info = tarfile.TarInfo("sub/a")
+            info.size = 1
+            tf.addfile(info, io.BytesIO(b"x"))
+        safe_extract_archive(plain, dest)
+        assert (dest / "sub" / "a").read_bytes() == b"x"
+
     def test_benign_archives_extract(self, tmp_path):
         src = tmp_path / "model.txt"
         src.write_text("weights")

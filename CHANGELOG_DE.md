@@ -24,6 +24,13 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   `Dockerfile`; `pack_base_images` sortiert jetzt nach dem relativen POSIX-Pfad.
 
 ### Sicherheit
+- `2026-10-30 14:40 UTC` · `v3.3.0` **Das Vorab-Laden der Abhängigkeiten entpackt über das eine sichere Entpacken des
+  Frameworks** ([Design](docs/DESIGN_DE.md#sicherheitsmodell)): Ein Archiv, das für die Download-Option eines Moduls
+  geladen wird (BoringSSL, LibreSSL, KleidiAI), lief durch eine eigene Kopie der Prüfungen und wurde unter Python 3.11
+  vor 3.11.4 ohne Filter der Einträge entpackt. Es läuft jetzt durch `safe_extract_tar` (auch hinter
+  `safe_extract_archive`, Links hier abgelehnt): Absolute Pfade, Pfade nach außen, Links, Geräte, FIFOs und andere
+  Sonderdateien werden abgelehnt, bevor etwas geschrieben wird, und der data-Filter von tarfile prüft noch einmal; ein
+  abgelehntes Archiv hinterlässt nichts.
 - `2026-10-30 14:07 UTC` · `v3.3.0` **Dittos lokaler Server: der Schlüssel geht nie an ein Programm, das seinen Port
   belegt hat, auch ohne Root-Rechte** ([Design](docs/DESIGN_DE.md#sicherheitsmodell)): belegt ein anderes Programm den
   freien Port zwischen der Wahl und dem Bind von llama-server, beendet sich llama-server, und der Start muss erkennen,

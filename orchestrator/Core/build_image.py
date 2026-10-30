@@ -529,14 +529,16 @@ def stage_llama_copy(copy: Path, context: Path) -> Path:
     target = Path(context) / CONTEXT_SOURCES / LLAMA_COPY
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(copy, target, symlinks=True, copy_function=shutil.copyfile)
+    # B103: folders of the public llama.cpp source in the build context, 0755 so the image build (COPY keeps the
+    # modes, another user inside) can enter them; nothing secret is in them, the files stay 0644.
     for root, dirs, files in os.walk(target):
         for name in dirs:
-            os.chmod(Path(root) / name, 0o755)
+            os.chmod(Path(root) / name, 0o755)  # nosec B103
         for name in files:
             path = Path(root) / name
             if not path.is_symlink():
                 os.chmod(path, 0o644)
-    os.chmod(target, 0o755)
+    os.chmod(target, 0o755)  # nosec B103
     return target
 
 
