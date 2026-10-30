@@ -222,7 +222,7 @@ class TestNoDownloadInAToolCall:
         pytest.importorskip("fastembed")
         import orchestrator.Core.rag_manager as rm
         from orchestrator.rag.embeddings import resolve_spec
-        monkeypatch.setattr(rm, "create_sparse_embedder", lambda cache_dir, offline: FakeSparse())
+        monkeypatch.setattr(rm, "create_sparse_embedder", lambda cache_dir, offline, **_: FakeSparse())
         config = ConfigManager(tmp_path / "configs")
         assert config.get("offline_mode", False) is False
         framework = SimpleNamespace(config=config, info=SimpleNamespace(installation_path=tmp_path))

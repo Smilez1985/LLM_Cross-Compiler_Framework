@@ -294,8 +294,8 @@ def test_cli_runs_ai_and_retrieval_cases_as_separate_runs(tmp_path, llm, monkeyp
             return SparseVec([1], [1.0])
 
     monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "state"))
-    monkeypatch.setattr(rm, "create_dense_embedder", lambda spec, cache_dir, offline: Dense())
-    monkeypatch.setattr(rm, "create_sparse_embedder", lambda cache_dir, offline: Sparse())
+    monkeypatch.setattr(rm, "create_dense_embedder", lambda spec, cache_dir, offline, **_: Dense())
+    monkeypatch.setattr(rm, "create_sparse_embedder", lambda cache_dir, offline, **_: Sparse())
     config = FakeConfig(targets_dir=str(TARGETS))
     client = LLMClient(config, SimpleNamespace(get_secret=lambda name: None), state_dir=tmp_path / "state",
                        sleep=lambda s: None)

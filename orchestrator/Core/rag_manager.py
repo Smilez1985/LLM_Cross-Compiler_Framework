@@ -228,23 +228,34 @@ class SearchResult:
     metadata: Dict[str, Any]
 
 
-def fetch_model_files(cache_dir: Path, repo: str, required, optional=(), *, offline: bool = False):
+def fetch_model_files(cache_dir: Path, repo: str, required, optional=(), *, offline: bool = False, ledger: Any = None):
     """The knowledge base's models come from Hugging Face through the framework's own fetcher into fastembed's cache
-    (DECISIONS round 25 Q2): hf_hub.fetch_snapshot, without any token; in offline mode only a copy that is there."""
+    (DECISIONS round 25 Q2): hf_hub.fetch_snapshot, without any token; in offline mode only a copy that is there.
+    With `ledger` (the per-user disk_plan.ReservationLedger) the download follows the one disk rule and holds its
+    reservation there while it runs; a refusal of the disk rule is an EmbeddingError with its text."""
+    from orchestrator.Core.disk_plan import InsufficientSpace
     from orchestrator.Core.hf_hub import fetch_snapshot
-    return fetch_snapshot(cache_dir, repo, required, optional, offline=offline)
+    try:
+        return fetch_snapshot(cache_dir, repo, required, optional, offline=offline, ledger=ledger)
+    except InsufficientSpace as e:
+        raise EmbeddingError(str(e)) from None
 
 
-def create_dense_embedder(spec: EmbeddingModelSpec, cache_dir: Path, offline: Callable[[], bool]) -> DenseEmbedder:
-    return FastEmbedDenseEmbedder(spec, cache_dir, offline, fetch=fetch_model_files)
+def _fetch_with(ledger: Any):
+    return fetch_model_files if ledger is None else functools.partial(fetch_model_files, ledger=ledger)
 
 
-def create_sparse_embedder(cache_dir: Path, offline: Callable[[], bool]) -> SparseEmbedder:
-    return FastEmbedSparseEmbedder(cache_dir, offline, fetch=fetch_model_files)
+def create_dense_embedder(spec: EmbeddingModelSpec, cache_dir: Path, offline: Callable[[], bool], *,
+                          ledger: Any = None) -> DenseEmbedder:
+    return FastEmbedDenseEmbedder(spec, cache_dir, offline, fetch=_fetch_with(ledger))
 
 
-def create_reranker(spec: RerankerSpec, cache_dir: Path, offline: Callable[[], bool]):
-    return FastEmbedReranker(spec, cache_dir, offline, fetch=fetch_model_files)
+def create_sparse_embedder(cache_dir: Path, offline: Callable[[], bool], *, ledger: Any = None) -> SparseEmbedder:
+    return FastEmbedSparseEmbedder(cache_dir, offline, fetch=_fetch_with(ledger))
+
+
+def create_reranker(spec: RerankerSpec, cache_dir: Path, offline: Callable[[], bool], *, ledger: Any = None):
+    return FastEmbedReranker(spec, cache_dir, offline, fetch=_fetch_with(ledger))
 
 
 def _clean_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -395,6 +406,14 @@ class RAGManager:
         ditto = getattr(self.framework, "ditto_manager", None)
         return (offline_mode(self.config) or getattr(ditto, "offline_mode", False) is True
                 or models_local_only())
+
+    def _disk_ledger(self):
+        """The disk reservation ledger every process of this user shares (downloads and builds), or None without a
+        per-user folder: the model downloads of the knowledge base reserve their space there (ModelManager._ledger)."""
+        from orchestrator.Core.build_plan import state_dir
+        from orchestrator.Core.disk_plan import ReservationLedger
+        folder = state_dir(self.framework)
+        return ReservationLedger(folder) if folder is not None else None
 
     def _state_dir(self) -> Path:
         try:
@@ -620,10 +639,11 @@ class RAGManager:
                 if self._embedder is None:
                     model_id, reason = self._choose_model(client)
                     self._embedder = create_dense_embedder(resolve_spec(model_id), self.models_cache_dir,
-                                                           self._offline)
+                                                           self._offline, ledger=self._disk_ledger())
                     self.model_reason = reason
                 if self._sparse is None:
-                    self._sparse = create_sparse_embedder(self.models_cache_dir, self._offline)
+                    self._sparse = create_sparse_embedder(self.models_cache_dir, self._offline,
+                                                          ledger=self._disk_ledger())
                 store = store_cls(client, COLLECTION_NAME, self._embedder.model_id, self._embedder.dim,
                                   server_mode=server)
                 store.ensure()
@@ -1247,7 +1267,8 @@ class RAGManager:
                 self._reranker_pending = False
                 try:
                     spec, self.reranker_reason = select_reranker(setting)
-                    self._reranker = create_reranker(spec, self.models_cache_dir, self._offline) if spec else None
+                    self._reranker = (create_reranker(spec, self.models_cache_dir, self._offline,
+                                                      ledger=self._disk_ledger()) if spec else None)
                 except KnowledgeBaseError as e:  # e.g. an unknown model id in rag_reranker
                     self._rerank_failed(e)
             return self._reranker

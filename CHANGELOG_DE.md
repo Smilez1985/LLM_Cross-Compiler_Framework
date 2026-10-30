@@ -82,6 +82,14 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   nicht wiederverwendet, und der Halt sagt das. Im Builder-Tab bringt ein Rezept, das Commit X nennt, während die
   Kopie auf diesem Computer Commit Y ist, die Modellauswahl nicht mehr zurück, nachdem du diese Kopie gewählt hast:
   Es fragt, ob die Kopie als dein eigener Build ohne das Rezept gebaut wird, oder ob abgebrochen wird.
+- `2026-10-30 00:10 UTC` · `v3.2.0` **Die Modell-Downloads der Wissensbasis folgen der einen Platzregel** ([Design](docs/DESIGN_DE.md#bausteine)):
+  Ein fastembed-Modell, das das Framework von Hugging Face holt, nimmt jetzt während des Downloads seine
+  Reservierung im gemeinsamen Reservierungsbuch, vermerkt nach jeder Datei die angekommenen Bytes und gibt sie frei,
+  wenn das Holen endet, scheitert oder angehalten wird; ohne Platz hält es vor der ersten Datei mit dem Text der
+  Platzregel an (wie jeder andere Download), statt die Platte zu füllen. Der Vermerk einer vollständigen
+  Builder-Kopie, der letzte Schritt des Fetchers und der Vermerk `refs/main` werden mit dem einen Ersetz-Helfer des
+  Frameworks an ihren Platz gelegt, der es unter Windows einen Moment lang erneut versucht, solange ein anderes
+  Programm die Datei liest.
 
 ### Sicherheit
 - `2026-10-29 23:50 UTC` · `v3.2.0` **Die SSH-Einstellungen von llmcf: ein Sprung oder Proxy-Befehl nur mit dem festgehaltenen Ja der
