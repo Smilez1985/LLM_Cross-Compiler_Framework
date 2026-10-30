@@ -1003,11 +1003,16 @@ class BuilderTab(QWidget):
     def _show_board_profile(self, profile, data, board) -> None:
         """The board line: the profile's recommendation and its benchmark rows with their source mark; the
         optimization level follows the profile until the person picks one."""
-        from orchestrator.Core.board_profiles import row_text, rows_for
+        from orchestrator.Core.board_profiles import optimization_for, row_text, rows_for
         if not hasattr(self, "lbl_board_profile"):
             return
         if profile is None:
             self.lbl_board_profile.setVisible(False)
+            if hasattr(self, "opt_combo") and not self._opt_user_set:
+                # no profile: the level the CLI and start_build use then (balanced), not the last profile's
+                idx = self.opt_combo.findText(optimization_for(None).upper())
+                if idx >= 0:
+                    self.opt_combo.setCurrentIndex(idx)
             return
         rows = [row_text(r) for r in rows_for(data, board)]
         self.lbl_board_profile.setText(ui_text(
