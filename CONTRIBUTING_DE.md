@@ -674,7 +674,11 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
 - Starte Unterprozesse mit Argumentlisten, nie mit Shell-Zeichenketten, die Benutzereingaben enthalten. Werte für
   Shell-Befehle auf entfernten Rechnern setzt du mit `shlex.quote` in Anführungszeichen.
 - Externer Text (Webseiten, Logs, Probe-Dateien, Wissensbasis, Tool-Ergebnisse) erreicht ein Sprachmodell nur über
-  `orchestrator/utils/untrusted.py` und nie in einem System-Prompt.
+  `orchestrator/utils/untrusted.py` und nie in einem System-Prompt. Ein Log geht zuerst durch den einen
+  Log-Reiniger, in der Reihenfolge reinigen, schwärzen, kürzen: `orchestrator/utils/logtext.clean_log` (kein
+  zweites Escape-Muster und kein zweiter Wiederholungsfilter anderswo), dann `security/paths.scrub_for_ai` (oder die
+  Pfad-Labels des Build-Service), dann das Kürzen. Tool-Ergebnisse gehen als `llm/types.tool_result_text` hinaus
+  (kompaktes JSON); serialisiere sie nie anders.
 - **Imports zeigen die Schichten hinunter.** Jedes Modul von `orchestrator/` hat eine Schicht und importiert nur seine
   eigene oder eine tiefere: (1) unten: `utils/`, `security/`, `schemas/`; (2) remote: `remote/` und
   `utils/ssh_trust.py`; (3) Kern: die Module von `tools/`, die keine Tools festlegen (Registry, Richtlinie, Audit,

@@ -103,6 +103,17 @@ class TestReadBuildLog:
         assert older.first_line == 1 and older.lines[0] == "configure"
         assert older.lines[-1] == "[40/40] Building CXX object ggml40.o"
 
+    def test_a_collapsed_run_is_never_split_by_the_size_cut(self):
+        """The whole tail is capped at 48,000 characters: a run cut in its middle would hide its first line from the
+        next page, so it is shown whole or not at all."""
+        group = [f"{i} " + "x" * 1995 for i in range(30)]                 # one run: first, count line, last
+        newest = [chr(ord("a") + k) * 2000 for k in range(22)]             # 44,000 characters, no run
+        svc = self.service_for(group + newest)
+        tail = svc.log_tail("r1", lines=1000)
+        assert tail.lines[0] == group[-1] and tail.first_line == 30 and tail.truncated
+        older = svc.log_tail("r1", lines=1000, before_line=tail.first_line)
+        assert older.lines[0] == group[0] and older.lines[-1] == group[-2] and older.first_line == 1
+
 
 def test_the_summary_prompt_has_one_source_and_keeps_facts_exact():
     from orchestrator.Core import ditto_manager

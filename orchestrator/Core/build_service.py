@@ -696,8 +696,10 @@ class BuildService:
                  for_person: bool = False) -> LogTail:
         """The last `lines` lines (at most 1,000), or those before line `before_line` (paging back). Each line is cut
         at 2,000 characters and the whole tail at 48,000; `truncated` says older lines exist or lines were cut.
-        Secrets are always redacted. A host path reaches an AI by its label or file name (_log_paths); `for_person`:
-        the Builder's live log, the person's own window, keeps the full paths (round 5 f)."""
+        Secrets are always redacted. An AI reads the lines cleaned first (utils/logtext.clean_lines: escapes, redraws
+        and repeats out; the line numbers stay those of the raw log) and a host path by its label or file name
+        (_log_paths); `for_person`: the Builder's live log, the person's own window, keeps the raw lines and the full
+        paths (round 5 f)."""
         state = self._state(request_id)
         engine = self._orchestrator.build_engine
         collected: List[str] = []
@@ -719,15 +721,22 @@ class BuildService:
         # line, so first_line and before_line stay raw line numbers. The person's window stays raw.
         window = collected[begin:end]
         numbered = list(enumerate(window)) if for_person else clean_lines(window)
-        oldest = len(window)
+        oldest, indices = len(window), []
         for index, line in reversed(numbered):  # newest first, so a cut drops the oldest lines
             text = clean(redact_secrets(line))
             if len(text) > LOG_LINE_CHARS:
                 text, cut = text[:LOG_LINE_CHARS] + " [... cut ...]", True
             if size + len(text) > LOG_TOTAL_CHARS:
                 cut = True
+                # A collapsed run is shown whole or not at all: its lines share their first raw line, which the next
+                # page (before_line) must still show.
+                while indices and indices[-1] == index:
+                    indices.pop()
+                    chosen.pop()
+                oldest = indices[-1] if indices else len(window)
                 break
             chosen.append(text)
+            indices.append(index)
             size += len(text)
             oldest = index
         chosen.reverse()

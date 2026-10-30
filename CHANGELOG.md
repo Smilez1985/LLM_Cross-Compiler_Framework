@@ -29,7 +29,8 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   `read_build_log` as before), then the cut (the last 6,000 characters for the healing prompt). Before, the healing
   prompt sent the raw last 6,000 characters (colour codes, progress redraws, a host path and a secret included), so
   a few thousand repeated lines could push the error out of it. `read_build_log` keeps raw line numbers
-  (`first_line`, `before_line`): a collapsed line counts as the lines it stands for. The person's own log view (the
+  (`first_line`, `before_line`): a collapsed line counts as the lines it stands for, and a collapsed run is shown
+  whole or not at all at the 48,000-character cap, so the next page still starts with it. The person's own log view (the
   Builder's live log) stays raw. The knowledge-base query of a healing task reads the last three cleaned lines.
   The system text of Ditto's conversation summary moved to `task_prompts.py` (`SUMMARY_SYSTEM`, one source; the
   old name in `Core/ditto_manager.py` is the same object) and now says: "Copy ids, numbers, version strings, labels
