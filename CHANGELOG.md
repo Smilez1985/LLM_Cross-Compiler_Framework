@@ -52,7 +52,10 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   boards TARGET` and **Build > Targets... > Boards...** show each board's profile and marked rows, a line under the
   Builder's board list shows them too, and `list_targets` and `get_target_capabilities` carry `board_profiles` and
   `benchmarks` (with `source_label`). The module generator writes a profile per board planned from the board's probe.
-  The template's example profiles are replaced by an empty block with the schema described.
+  The template's example profiles are replaced by an empty block with the schema described. A `target.yml` of an
+  earlier version (a community pack, a target an earlier module wizard made) still passes `llm-cli targets
+  validate`: its profiles in the old format (`cmake_flags`) and benchmarks as a mapping are never read, so none of
+  their values is used or shown. A `published` source must be a plain https address (no credential, no text).
 
 ## [3.1.0] - 2026-10-29
 
