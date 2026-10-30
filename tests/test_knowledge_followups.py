@@ -4,6 +4,7 @@ binding of a target pack on Windows, a re-crawl of a site, topics of own crawls,
 Every address and name here is a documentation one (example.com, example.org, *.test, *.invalid)."""
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -67,7 +68,8 @@ class TestRecipeBindingOnWindows:
         world.publish()
         windows_view(monkeypatch)
         dest = world.cm.finish_install(world.cm.prepare_install("target", "demo-board"))
-        assert cp.tree_sha256(dest) != digest, "the simulated file system dropped the execute bit"
+        if os.name != "nt":  # on Windows itself both digests are made without the execute bit: nothing to drop
+            assert cp.tree_sha256(dest) != digest, "the simulated file system dropped the execute bit"
         prepared = world.cm.prepare_install_file(recipe_file(tmp_path, digest))
         assert not any("differs from the one the recipe was built with" in n for n in prepared.notes), prepared.notes
         assert same_content(dest, digest) and installed_digest(dest) == digest

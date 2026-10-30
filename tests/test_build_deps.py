@@ -293,6 +293,20 @@ def test_a_git_dependency_is_cloned_at_its_tag_and_checked(tmp_path):
         cache.ensure(dep, offline=False)
 
 
+
+def test_git_metadata_that_cannot_be_removed_is_refused_not_kept(tmp_path, monkeypatch):
+    """git keeps its objects read-only: on Windows shutil.rmtree(ignore_errors=True) left .git in the cache entry and
+    in its sha256 without a word. Now it is removed like every read-only tree, and if it still stands, refused."""
+    from orchestrator.runtime.build import source
+    repo = _git_repo(tmp_path)
+    cache = _cache(tmp_path)
+    real = source.remove_tree
+    monkeypatch.setattr(source, "remove_tree", lambda path: None if path.name == ".git" else real(path))
+    with pytest.raises(DependencyError, match="git metadata .* could not be removed"):
+        cache.ensure(_git_dep(repo), offline=False)
+    assert not cache.folder(_git_dep(repo)).exists()
+    assert not [p for p in (tmp_path / "cache").iterdir() if p.name.startswith(".")], "the work folder is left behind"
+
 # --- for the build -----------------------------------------------------------------------------------------------
 
 def test_mounts_are_read_only_and_named_in_llmcf_deps(tmp_path, archive_server):
