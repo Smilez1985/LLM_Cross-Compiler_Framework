@@ -1,7 +1,8 @@
 """Assembles the Docker build context that the target Dockerfiles expect.
 
-Target Dockerfiles COPY `modules/`, `scripts/` and `docker/entrypoint.sh` relative to the
-context, so the context is staged from the target directory plus the shared entrypoint.
+Target Dockerfiles COPY `modules/`, `scripts/`, `sources/` and `docker/entrypoint.sh` relative to
+the context, so the context is staged from the target directory plus the shared entrypoint and an
+empty `sources/` folder (an offline build puts its local copy of llama.cpp there).
 Symbolic links and special files in a target are never followed into the context (a community
 target could otherwise pull any file of the user into an image).
 Standard library only, so CI can stage a context without installing the framework.
@@ -64,6 +65,11 @@ def stage_build_context(target_dir: Path, app_root: Path, context_dir: Path,
                 logger.warning(f"Not staged into the build context (link or not a folder): {source}")
             (context_dir / sub).mkdir()
 
+    # Local sources an offline build may use (Core/build_image.py: the local copy of llama.cpp lands in
+    # sources/llama.cpp); the target Dockerfiles COPY sources/, so the folder is there for every build, empty by default.
+    (context_dir / "sources").mkdir()
+    (context_dir / "sources" / ".keep").write_text("Local sources of an offline build (empty unless one is used).\n",
+                                                  encoding="utf-8")
     (context_dir / "docker").mkdir()
     shutil.copy2(Path(app_root) / "entrypoint.sh", context_dir / "docker" / "entrypoint.sh")
 

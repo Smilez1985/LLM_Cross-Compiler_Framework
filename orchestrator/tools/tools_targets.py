@@ -66,6 +66,9 @@ class TargetCheckIn(TargetIn):
     # comment, not a docstring: a docstring would become the description of the input schema an AI reads.
     check_files: bool = Field(default=False, description="Also check the target's files (target.yml, Dockerfile "
                                                          "pins, scripts) the way a module or pack is checked")
+    check_image: bool = Field(default=False, description="Also show the target's build container image: how many are "
+                                                         "on this computer and whether an offline build could make "
+                                                         "one (each source by its label)")
 
 
 class TargetSummary(TargetOut):
@@ -75,6 +78,22 @@ class TargetSummary(TargetOut):
 
 class TargetListOut(ToolOutput):
     targets: List[TargetSummary]
+
+
+class ImageSourceOut(BaseModel):
+    kind: Literal["base_image", "registry_mirror", "llama_cpp", "apt", "pip", "download"]
+    label: untrusted_text(300)
+    local: bool
+    how: untrusted_text(500) = ""
+
+
+class BuildImageOut(BaseModel):
+    # The build container image of a target as an AI may read it (Core/build_image.status): labels only, never a
+    # mirror's address, a path or a URL with credentials. Import and export are the person's (needs_person).
+    images_here: int = 0
+    ready: bool = Field(description="An offline build could make the image: every source is local")
+    sources: List[ImageSourceOut] = Field(default_factory=list)
+    transfer: str = ""
 
 
 class TargetDetailsOut(TargetCapabilitiesOut):
@@ -88,6 +107,8 @@ class TargetDetailsOut(TargetCapabilitiesOut):
     base_image_reason: Optional[untrusted_text(1000)] = None
     checked_files: bool = False
     problems: List[UntrustedText] = Field(default_factory=list, description="Problems found by check_files")
+    build_image: Optional[BuildImageOut] = Field(default=None, description="With check_image: the build container image "
+                                                                       "(the toolchain image, not the package)")
 
 
 class ProbeIn(BaseModel):
@@ -334,6 +355,12 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
             out.checked_files, out.problems = True, [p.replace(str(folder), tid) for p in problems[:50]]
             if len(problems) > 50:
                 ctx.notes.append(f"{len(problems) - 50} more problems were found; fix these first.")
+        if inp.check_image:
+            from orchestrator.Core.build_image import ImageTransferError, status
+            try:
+                out.build_image = BuildImageOut(**status(framework, tid))
+            except ImageTransferError as e:
+                ctx.notes.append(f"The build container image could not be checked: {e}")
         if m["untested"]:
             ctx.notes.append("This target was created by an AI and is untested on real hardware; its texts are AI "
                              "text.")
@@ -587,10 +614,12 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
                  summary=lambda o: count(len(o.targets), "target", "targets") + "."),
         ToolSpec("get_target_capabilities", "Target capabilities",
                  "Shows what a target can build: boards, formats, quantizations per board, calibration needs, its "
-                 "trust and, for an AI-created target, its assumptions. check_files also checks its files.",
+                 "trust and, for an AI-created target, its assumptions. check_files also checks its files; "
+                 "check_image shows its build container image and whether an offline build could make one.",
                  ToolTier.READ, TargetCheckIn, TargetDetailsOut, get_target_capabilities, idempotent=True,
                  takes_context=True, fields={"target": target_field},
-                 examples=({"target": "Rockchip"}, {"target": "Rockchip", "check_files": True}),
+                 examples=({"target": "Rockchip"}, {"target": "Rockchip", "check_files": True},
+                           {"target": "Rockchip", "check_image": True}),
                  summary=lambda o: (f"Capabilities of {fact(o.target)}: {count(len(o.boards), 'board', 'boards')}, "
                                     f"{count(len(o.formats), 'format', 'formats')}"
                                     + (f", {count(len(o.problems), 'problem', 'problems')} in its files"

@@ -1,4 +1,4 @@
-Version 3.1.0 · Stand 2026-10-29
+Version 3.2.0 · Stand 2026-10-30
 
 [English](ROADMAP.md) · **Deutsch**
 
@@ -20,14 +20,14 @@ der Entscheidungen des Maintainers, aus der sie stammt.
 
 | Version | Thema | Status |
 |---|---|---|
-| 3.2.0 | Dittos Kontext, das Board-Bündel, die Laufzeit auf dem Gerät und mehr Hardware | in Arbeit |
+| Rest von 3.2.0 | Dittos Kontext, das Board-Bündel, die Laufzeit auf dem Gerät und mehr Hardware | in Arbeit |
 | als Nächstes | Build-Dienst, Warteschlange und Modi | geplant |
 | 3.3.0 | LoRA und große Modelle | geplant |
 | 3.4.0 | Lieferkette und Community | geplant |
 | später | Rust-Teile für das Netzwerk und das Board | geplant |
 | später | Mehr Hardware und MCP-Erweiterungen | geplant |
 
-## 3.2.0 - Dittos Kontext, das Board-Bündel, die Laufzeit auf dem Gerät und mehr Hardware (in Arbeit)
+## Rest von 3.2.0 - Dittos Kontext, das Board-Bündel, die Laufzeit auf dem Gerät und mehr Hardware (in Arbeit)
 
 Diese Version kommt in dieser Reihenfolge: zuerst Dittos Kontext, daneben das Board-Bündel, dann das Gateway,
 Sprache und MCP auf dem Board. Die erste Hardware setzt die Prioritäten für die Laufzeit auf dem Gerät:
@@ -111,7 +111,6 @@ Anbieter, Prüfung, Fehler mit nächstem Schritt) und der Anmeldebereich der GUI
 |---|---|
 | **Nacharbeiten am Mojo-Kreis**: Die Notiz eines offenen Oracle-Laufs verfällt nach einer Stunde; `llmcf mojo --miracle --json` und `llm-cli doctor --fix` löschen sie ohne Logo, ebenso ein Lauf von Mojo Miracle in der GUI; die Funktionen der Notiz werfen bei keinem kaputten Zustandsordner. Runde 30. | geplant |
 | **Ditto: Sicherheit und Messbarkeit**: Eval-Urteile mit Fingerabdruck, Wiederholungen mit Seed, Intervalle, pass^k und eine Sperre bei Rückschritt, eine Regel für Runden, die Text von außen befleckt hat, die Quelle an jedem Wissensauszug, neue Gruppen von Eval-Fällen, Wiederholungsfälle und die Bewertung des ersten Tool-Aufrufs, vollständigere Zahlen zur Tool-Nutzung, das Packen von Auszügen für kleine Kontexte und Zusammenfassungen, die die Fakten behalten. Runde 13 (P2). | geplant |
-| **Offline-Builds des Build-Container-Images**: Der Offline-Modus darf das Image mit der Werkzeugkette bauen, wenn jede Quelle nach der einen Lokalitätsregel lokal ist (Basis-Images auf diesem Rechner oder in einer Registry im eigenen Netz, llama.cpp vom lokalen Spiegel oder aus einer lokalen Kopie, apt und pip nur über Spiegel oder Caches im eigenen Netz, die die Person einstellt), sonst hält er früh an und nennt die fehlende Quelle; dazu Import und Export eines Build-Container-Images als geprüfte Datei für Rechner ohne Netz. Runde 36. | geplant |
 | **Vollmachten**: Eine Freigabe, die die Person im Framework erstellt (nie über MCP), lässt eine KI ihre eigenen Routinefragen beantworten, Hinweise zur Lage eingeschlossen; Sicherheits- und Rechtshinweise, Lizenzen, das erste Vertrauen in einen Host-Schlüssel, die eigenen Rechte der KI und jedes Löschen bleiben bei der Person; Laufzeiten 8 Stunden, 24 Stunden oder 30 Tage, „bis zum Widerruf“ verfällt nach 90 Tagen ohne Nutzung. Runde 5 (a, b, f), Runde 6 (Punkt 1). | geplant |
 | **„Für diese Modellversion nicht mehr fragen“** als Kästchen in der Build-Frage, auf den festen Codes der Hinweise. Runde 5 (r, Q3). | geplant |
 | **Ein Postfach und ein Weckruf für jeden MCP-Client**: ein Hinweis bei jedem Ergebnis plus Tools zum Lesen und Antworten; ein optionaler Weckruf, den die Person einrichtet, trägt nur feste Stichwörter („Build fertig“, „Fehler beim Bauen“), die Einzelheiten kommen über MCP; der Broker ist der MQTT-Broker des Rust-Gateways (Rust-Teile). Runde 5 (o), Runde 6 (Punkte 4-7), Runde 7 (Punkt 8). | geplant |

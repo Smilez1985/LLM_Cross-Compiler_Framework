@@ -1,4 +1,4 @@
-Version 3.1.0 · Stand 2026-10-29
+Version 3.2.0 · Stand 2026-10-30
 
 [English](README.md) · **Deutsch**
 
@@ -767,6 +767,16 @@ selbst. Die KI-Einstellungen zeigen, wo der Server läuft, und können ihn umste
 
 Ollama oder ein anderer OpenAI-kompatibler Server in deinem Netz zählen im Offline-Modus ebenfalls als lokale
 Anbieter.
+
+**Bauen ohne Internet.** Offline heißt ohne Internet; dein eigenes Netz darf da sein. Ein Build braucht dann das
+Build-Container-Image des Targets (das Docker-Image mit seiner Werkzeugkette, nicht das Paket, das aufs Board geht):
+eines, das früher mit denselben Einstellungen gebaut wurde, eines von einem anderen Rechner (`llm-cli build image
+export` dort, `llm-cli build image import DATEI` hier; die Datei wird an ihrer sha256 und ihren Labels geprüft) oder
+eines, das nur aus Quellen in deinem eigenen Netz gebaut wird: Basis-Images auf diesem Computer oder in einer Registry
+deines Netzes, llama.cpp von deinem Spiegel oder aus seiner lokalen Kopie, apt und pip über den Spiegel, den apt-Cache
+oder den pip-Index, die du einstellst (`llm-cli build image sources`). `llm-cli build image plan TARGET` und
+**Build > Build-Container-Images...** zeigen, was noch fehlt; ein Build hält ebenfalls früh an und nennt es. Mehr:
+[offline bauen](docs/Features_DE.md#aufrufe-wiederholungen-und-ersatzkette) und [build image](docs/CLI_Usage_DE.md#build-image).
 
 ---
 

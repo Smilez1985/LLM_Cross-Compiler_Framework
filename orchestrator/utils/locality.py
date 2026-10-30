@@ -100,6 +100,10 @@ VPNS: Dict[str, Tuple[IPNetwork, ...]] = {"tailscale": VPN_NETWORKS}
 
 # The person's opt-outs (rule d); only Core/local_network.py writes them.
 OPT_OUT_SETTINGS = ("offline_local_vpns", "offline_local_hosts", "offline_local_ranges")
+# The mirrors and caches in the own network an offline build of the build container image may fetch apt and pip
+# packages through (DECISIONS round 36; Core/build_image.py judges them by this rule on every build). Person-only like
+# the opt-outs: AISettingsChange and MCP update_settings refuse them.
+BUILD_SOURCE_SETTINGS = ("build_apt_mirror", "build_apt_proxy", "build_pip_index")
 
 RESOLVE_TIMEOUT = 2.0    # seconds for one lookup through the system resolver
 LOOKUP_TTL = 300.0       # seconds a lookup and the VPN check are kept (5 minutes; dropped at once after a failed connect)
@@ -848,7 +852,7 @@ def _check_tailscale(run: Optional[CliRunner], resolver: Optional[Resolver],
     return VpnCheck(True, "own_headscale", control, **net)
 
 
-__all__ = ["CLI_TIMEOUT", "CRAWL_EXCLUDED_NETWORKS", "FAILURE_TTL", "HOME_SUFFIXES", "LINK_LOCAL_NETWORKS",
+__all__ = ["BUILD_SOURCE_SETTINGS", "CLI_TIMEOUT", "CRAWL_EXCLUDED_NETWORKS", "FAILURE_TTL", "HOME_SUFFIXES", "LINK_LOCAL_NETWORKS",
            "LOCAL_REASONS", "LOOKUP_TTL", "LOOPBACK_NETWORKS", "Locality", "LocalityRefused", "LookupFailed",
            "LookupOnUiThread", "METADATA_ADDRESSES", "METADATA_NAMES", "NAT64_NETWORKS", "NOT_LOCAL_REASONS",
            "OPT_OUT_SETTINGS", "OptOuts", "PRIVATE_NETWORKS", "RESOLVE_TIMEOUT", "TAILSCALE_CONTROL_HOSTS", "VPNS",

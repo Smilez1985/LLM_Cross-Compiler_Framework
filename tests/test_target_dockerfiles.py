@@ -208,10 +208,18 @@ class TestTheRockchipImageStages:
         assert re.fullmatch(r"[0-9a-f]{64}", values["RKLLM_WHEEL_SHA256"])
         assert re.fullmatch(r"\d+\.\d+\.\d+", values["RKNN_TOOLKIT2_VERSION"])
         rkllm, rknn = find_run(rockchip, "venv-rkllm/bin/pip"), find_run(rockchip, "venv-rknn/bin/pip")
-        assert "torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu" in rkllm
-        assert ("rkllm_toolkit-${RKLLM_VERSION}-cp311-cp311-linux_x86_64.whl#sha256=${RKLLM_WHEEL_SHA256}" in rkllm)
+        # Round 36 (on purpose): the PyTorch index and Rockchip's wheel location are build arguments (..._PIP_URL),
+        # which the person's pip index in the own network replaces in an offline build; the pins stay.
+        assert values["TORCH_PIP_URL"] == "https://download.pytorch.org/whl/cpu"
+        assert values["RKLLM_PIP_URL"] == "https://raw.githubusercontent.com/airockchip/rknn-llm"
+        assert 'torch==2.6.0 torchvision==0.21.0 --index-url "${PIP_INDEX_URL:-${TORCH_PIP_URL}}"' in rkllm
+        assert 'wheel="rkllm_toolkit-${RKLLM_VERSION}-cp311-cp311-linux_x86_64.whl"' in rkllm
+        assert "${RKLLM_PIP_URL}/release-v${RKLLM_VERSION}/rkllm-toolkit/packages/${wheel}#sha256=${RKLLM_WHEEL_SHA256}" \
+            in rkllm
+        assert '"${RKLLM_WHEEL_SHA256}" "/tmp/rkllm/${wheel}" | sha256sum -c -' in rkllm, \
+            "the wheel from the pip index is checked against the same sha256"
         assert 'install --upgrade pip wheel "setuptools<81"' in rknn
-        assert "torch==2.4.0 --index-url https://download.pytorch.org/whl/cpu" in rknn
+        assert 'torch==2.4.0 --index-url "${PIP_INDEX_URL:-${TORCH_PIP_URL}}"' in rknn
         assert '"rknn-toolkit2==${RKNN_TOOLKIT2_VERSION}" "onnx==1.16.2"' in rknn
 
     @needs_sh
@@ -335,6 +343,82 @@ class TestFetchStep:
         result = run(self.step(), fetch_env(tmp_path, upstream, **values))
         assert result.returncode != 0 and message in result.stderr
         assert not (tmp_path / "llama.cpp").exists() and not (tmp_path / "pwned").exists()
+
+
+@needs_sh
+@needs_git
+class TestTheLocalLlamaCppCopy:
+    """LLAMA_CPP_SOURCE=context (an offline build without a mirror in the own network, Core/build_image.py): the
+    fetch step takes the verified local copy the framework staged into sources/llama.cpp of the build context and
+    checks its commit as for a fetch; nothing is fetched."""
+
+    @pytest.mark.parametrize("dockerfile", DOCKERFILES, ids=lambda p: p.parent.name + "/" + p.name)
+    def test_the_local_copy_of_the_pinned_commit_is_used(self, tmp_path, upstream, dockerfile):
+        sources = tmp_path / "sources"
+        sources.mkdir()
+        git("clone", "-q", upstream["url"], str(sources / "llama.cpp"), cwd=tmp_path)
+        step = find_run(text(dockerfile), FETCH_MARKER).replace("/tmp/llmcf-sources", str(sources))
+        env = fetch_env(tmp_path, upstream, LLAMA_CPP_SOURCE="context", LLAMA_CPP_REPO="https://repo.invalid/none.git")
+        result = run(step, env)
+        assert result.returncode == 0, result.stderr
+        tree = tmp_path / "llama.cpp"
+        assert (tree / "README.md").read_text() == "two\n" and not (tree / ".git").exists()
+        assert (tree / ".llama_cpp_commit").read_text().strip() == upstream["second"]
+
+    def test_a_changed_copy_or_another_commit_is_refused(self, tmp_path, upstream):
+        sources = tmp_path / "sources"
+        sources.mkdir()
+        git("clone", "-q", upstream["url"], str(sources / "llama.cpp"), cwd=tmp_path)
+        step = find_run(text(ROCKCHIP), FETCH_MARKER).replace("/tmp/llmcf-sources", str(sources))
+        (sources / "llama.cpp" / "extra.c").write_text("int x;\n")
+        changed = run(step, fetch_env(tmp_path, upstream, LLAMA_CPP_SOURCE="context"))
+        assert changed.returncode != 0 and "changed or added files" in changed.stderr
+        (sources / "llama.cpp" / "extra.c").unlink()
+        import shutil as _shutil
+        _shutil.rmtree(tmp_path / "llama.cpp")
+        other = run(step, fetch_env(tmp_path, upstream, LLAMA_CPP_SOURCE="context", LLAMA_CPP_COMMIT=upstream["first"]))
+        assert other.returncode != 0 and f"the pin is {upstream['first']}" in other.stderr
+
+    def test_without_a_staged_copy_the_build_stops(self, tmp_path, upstream):
+        step = find_run(text(ROCKCHIP), FETCH_MARKER).replace("/tmp/llmcf-sources", str(tmp_path / "sources"))
+        result = run(step, fetch_env(tmp_path, upstream, LLAMA_CPP_SOURCE="context"))
+        assert result.returncode != 0 and "holds no llama.cpp copy" in result.stderr
+
+
+@needs_sh
+class TestTheAptSourcesStep:
+    """The person's apt mirror or apt cache proxy (offline build, Core/build_image.py): every stage that runs apt
+    rewrites the sources to the mirror or writes the proxy; without them nothing changes."""
+
+    def steps(self, dockerfile):
+        from dockerfile_steps import run_steps
+        return [step for step in run_steps(text(dockerfile)) if "01llmcf-proxy" in step]
+
+    @pytest.mark.parametrize("dockerfile", DOCKERFILES, ids=lambda p: p.parent.name + "/" + p.name)
+    def test_every_stage_with_apt_has_the_step(self, dockerfile):
+        stages = text(dockerfile).count("\nFROM ")  + (1 if text(dockerfile).startswith("FROM ") else 0)
+        assert len(self.steps(dockerfile)) == stages == 2
+
+    def test_the_mirror_and_the_proxy_are_written(self, tmp_path):
+        step = self.steps(ROCKCHIP)[0]
+        apt = tmp_path / "etc" / "apt"
+        (apt / "sources.list.d").mkdir(parents=True)
+        (apt / "apt.conf.d").mkdir()
+        (apt / "sources.list.d" / "debian.sources").write_text(
+            "Types: deb\nURIs: http://deb.debian.org/debian\nSuites: bookworm\n\n"
+            "Types: deb\nURIs: http://deb.debian.org/debian-security\nSuites: bookworm-security\n")
+        step = step.replace("/etc/apt", str(apt))
+        plain = run(step, {"PATH": os.environ.get("PATH", "")})
+        assert plain.returncode == 0, plain.stderr
+        assert "deb.debian.org" in (apt / "sources.list.d" / "debian.sources").read_text(), "nothing set: unchanged"
+        assert not (apt / "apt.conf.d" / "01llmcf-proxy").exists()
+        result = run(step, {"PATH": os.environ.get("PATH", ""), "APT_MIRROR": "http://192.0.2.10/",
+                            "APT_PROXY": "http://192.0.2.11:3142"})
+        assert result.returncode == 0, result.stderr
+        sources = (apt / "sources.list.d" / "debian.sources").read_text()
+        assert "URIs: http://192.0.2.10/debian\n" in sources and "http://192.0.2.10/debian-security" in sources
+        assert "deb.debian.org" not in sources
+        assert (apt / "apt.conf.d" / "01llmcf-proxy").read_text() == 'Acquire::http::Proxy "http://192.0.2.11:3142";\n'
 
 
 # --- the build step --------------------------------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-Version 3.1.0 · Last updated 2026-10-29
+Version 3.2.0 · Last updated 2026-10-30
 
 **English** · [Deutsch](Module_Developer_Guide_DE.md)
 
@@ -552,6 +552,25 @@ container image (for example NVIDIA's Jetson/L4T images on `nvcr.io`). The rules
 - **Untested is stated.** The new `target.yml` gets `metadata.provenance: ai-generated`, `metadata.untested: true`,
   the AI's `assumptions` and `base_image_reason`, and support level `community`; builds of it warn. AI-created
   modules never get a standing approval: every one is confirmed by the person.
+
+### 5.4 Sources in the own network for offline builds
+
+An offline build of the build container image (offline mode: no internet, maybe a local network) passes these build
+arguments only when the person set the source and the locality rule judged it local; online none of them is passed,
+so a Dockerfile that takes them builds as before:
+
+| Argument | What the Dockerfile does with it |
+|---|---|
+| `APT_MIRROR`, `APT_PROXY` | Declared (`ARG`, no default) in every stage that runs apt: the sources are rewritten to the mirror (`sed` over `/etc/apt/sources.list*`), the proxy goes into `/etc/apt/apt.conf.d/01llmcf-proxy`, before the first `apt-get update`. |
+| `PIP_INDEX_URL`, `PIP_TRUSTED_HOST` | Declared in every stage that runs pip; pip reads both from the environment. With an index, drop the requirements' own `--extra-index-url` lines. |
+| `LLAMA_CPP_SOURCE` | `ARG LLAMA_CPP_SOURCE=git` and `COPY sources/ /tmp/llmcf-sources/` before the llama.cpp fetch; with `context` the fetch step copies `/tmp/llmcf-sources/llama.cpp` (with its `.git`) and checks its commit and that nothing changed, as for a fetch. The framework creates `sources/` in every build context. |
+
+Every other address the Dockerfile fetches from (a URL in a `RUN` or `ADD` line or an `ARG` default) is judged by its
+host; an offline build stops when it is not in the own network. An `ARG` whose name ends in `_PIP_URL` is a pip
+location that the pip index replaces (Rockchip's `TORCH_PIP_URL` and `RKLLM_PIP_URL`): use it as
+`${PIP_INDEX_URL:-${TORCH_PIP_URL}}` or, for a wheel with a pinned sha256, download it from the index and check the
+same sha256. These arguments are no inputs of the image, so an image built online is found offline. The shipped
+Dockerfiles and the templates do all of this.
 
 ## 6. The build stages
 

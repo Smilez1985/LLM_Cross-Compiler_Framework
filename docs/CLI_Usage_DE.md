@@ -1,4 +1,4 @@
-Version 3.1.0 · Stand 2026-10-29
+Version 3.2.0 · Stand 2026-10-30
 
 [English](CLI_Usage.md) · **Deutsch**
 
@@ -131,6 +131,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `targets list` / `targets validate` | Hardware-Targets mit ihren Boards und Formaten auflisten / prüfen, ob ein Target lädt und seine Capabilities gültig sind |
 | `build start` / `build status` | Ein Modell konvertieren und quantisieren / Builds zeigen, auch solche, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat |
 | `build save` | Einen Build, der im Build-Ordner des Frameworks wartet, im Ausgabeordner oder einem anderen Ordner speichern |
+| `build image plan/sources/export/import` | Das Build-Container-Image eines Targets: Kann ein Offline-Build es bauen, die Build-Quellen in deinem Netz, auf einen anderen Offline-Rechner als geprüfte Datei bringen |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | Fertige Builds auflisten / einen Build in eine ZIP-Datei packen / sie auf ein Board laden und installieren |
 | `deploy ssh-config show/edit/import` | Die eigene OpenSSH-Einstellungsdatei des Frameworks (gelesen statt `~/.ssh/config`): zeigen, den Block eines Boards setzen, einen Block aus `~/.ssh/config` übernehmen |
 | `ditto login` / `ditto logout` | Ditto bei einem Anbieter anmelden (der Schlüssel verdeckt abgefragt, von stdin oder aus einer Umgebungsvariable, vor dem Speichern geprüft) / abmelden |
@@ -651,6 +652,48 @@ sagt eine Zeile, für wie viele gescheiterte Builds es solche Vorschläge gibt.
 In der GUI: **Build > Build-Verlauf…**: jeder Build (alle, wie `--all`); **Details anzeigen** (oder ein Doppelklick)
 zeigt einen Build wie mit `REQUEST_ID`, mit seinen Fehlern, jedem Versuch und seinem Ausgabeordner und den
 Korrekturvorschlägen der KI-Clients.
+
+### build image
+
+Das Build-Container-Image ist das Docker-Image mit der Werkzeugkette eines Targets, in dem seine Build-Stufen laufen
+(nicht das Target-Artefakt, Paket oder Bündel, das aufs Board geht). Der Offline-Modus baut es nur, wenn jede Quelle,
+die sein Dockerfile braucht, auf diesem Computer oder in deinem eigenen Netz liegt; diese Befehle zeigen das, setzen
+die Quellen und bringen ein fertiges Image auf einen anderen Offline-Rechner.
+
+```
+llm-cli build image plan TARGET [--gpu] [--json]
+llm-cli build image sources [--apt-mirror URL] [--apt-proxy URL] [--pip-index URL]
+llm-cli build image export TARGET --to DATEI [--image TAG_ODER_ID]
+llm-cli build image import DATEI [--sha256 HEX] [--target TARGET] [--yes]
+```
+
+- `plan` listet die Build-Container-Images von TARGET auf diesem Computer und jede Quelle, die ein Offline-Build
+  eines neuen braucht: die Basis-Images (auf diesem Computer, aus einer Registry in deinem Netz oder über einen
+  Registry-Spiegel des Docker-Daemons dort; jeder Spiegel des Daemons wird geprüft), llama.cpp (die
+  Repository-Überschreibung in deinem Netz oder die geprüfte lokale Kopie des festgelegten Commits, wie
+  `ditto runtime import-source` sie ablegt), apt- und pip-Pakete (nur über die Quellen unten) und jede andere Adresse,
+  von der das Dockerfile holt. Jede Zeile sagt lokal oder nicht, wie sie bereitsteht oder bereitgestellt werden kann
+  und für dich den Host und warum. Nichts wird gezogen, geholt oder gebaut. `--json` gibt nur die Labels aus, wie
+  eine KI sie liest (keine Adresse, kein Pfad).
+- `sources` zeigt oder setzt den apt-Spiegel (er bedient die Pfade der Distribution, etwa `/debian`), den
+  apt-Cache-Proxy (etwa apt-cacher-ng) und den pip-Index in deinem Netz und prüft jeden nach der Lokalitätsregel
+  (deine Ausnahmen aus `config local-network` zählen). Eine Adresse ist http oder https ohne Benutzernamen,
+  Passwort, Token oder Query; `""` löscht eine. Nur du setzt sie: Eine KI und MCP `update_settings` werden
+  abgelehnt.
+- `export` schreibt das neueste Image von TARGET (oder `--image`) mit `docker save` in eine neue DATEI und seine
+  sha256 in `DATEI.sha256` daneben; nichts wird ersetzt, und der Ziel-Datenträger muss seine Reserve frei behalten.
+- `import` prüft DATEI gegen `--sha256` oder `DATEI.sha256`, liest dann die Labels des Images: Sein Target und die
+  Eingaben, die ein Build dieses Targets hier berechnet, müssen passen (ein Image für eine andere CPU, einen anderen
+  llama.cpp-Pin oder andere Einstellungen wird abgelehnt, ohne dass etwas geladen wird), und lädt es dann
+  (`docker load`, auch unter Podman). Exit-Code 1 bei einer Ablehnung. Ohne `--yes` fragt es vor dem Laden.
+
+Ein Build im Offline-Modus nutzt zuerst ein früher mit denselben Einstellungen gebautes Image; ohne eines baut er eines
+aus den Quellen oben oder hält vor allem Langsamen an und nennt jede Quelle, die nicht lokal ist. Bekannte Grenze: Eine
+festgelegte IPv6-Adresse eines Spiegels erreicht BuildKit als `NAME=[ADRESSE]`, was ein neueres docker buildx braucht.
+
+In der GUI: **Build > Build-Container-Images...** (Target, die Images, **Offline-Quellen prüfen**, die Quellen in
+deinem Netz mit **Quellen speichern**, **In Datei exportieren...** und **Aus Datei importieren...** mit dem
+sha256-Feld).
 
 ---
 
