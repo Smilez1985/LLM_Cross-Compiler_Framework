@@ -10,6 +10,30 @@ weicht bewusst ab: Es gibt keinen Abschnitt `[Unreleased]`. Jeder Eintrag beginn
 der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und warum, steht im
 [Design](docs/DESIGN_DE.md).
 
+## [3.2.0] - 2026-10-30
+
+### Geändert
+- `2026-10-30 01:23 UTC` · `v3.2.0` **Tool-Ergebnisse gehen als kompaktes JSON an das Modell, und ein Log-Reiniger**
+  (Konsolidierungskette ctx-slim; Entscheidung: kleinere Tool-Ergebnisse und sauberere Logs für jedes Modell): Die
+  Ausgabe eines Tools (ein pydantic-Modell oder ein dict) erreicht das Modell als `json_dumps` aus
+  `orchestrator/llm/types.py`: sortierte Schlüssel, keine Leerzeichen nach `,` und `:`, Text außerhalb von ASCII so,
+  wie er ist; jedes Steuerzeichen bleibt maskiert (C0 wie JSON es tut, DEL und C1 auch, die `ensure_ascii=False`
+  allein durchließe). Vorher ging eine pydantic-Ausgabe als `model_dump_json` in Feldreihenfolge und ein dict mit
+  Leerzeichen hinter den Trennern. `json_dumps` ist dorthin aus `orchestrator/llm/providers/base.py` umgezogen, das
+  es importiert (der alte Import geht weiter); seine Ausgabe für die Argumente von Tool-Aufrufen bleibt gleich. Nur
+  neue Tool-Ergebnisse ändern sich: Ein gespeicherter Turn behält die Bytes, mit denen er gesendet wurde, so hält
+  der Präfix des Prompt-Caches eines gespeicherten Gesprächs. Das neue `orchestrator/utils/logtext.py` ist der eine
+  Log-Reiniger, `clean_log`, mit fünf Regeln in dieser Reihenfolge: Escape-Sequenzen des Terminals entfernt (CSI und
+  OSC, `ANSI_RE`; eine Sequenz reicht nie über einen Zeilenumbruch, und ein einzelnes ESC fällt allein weg, damit
+  sich kein Text dahinter versteckt), nur der Text nach dem letzten Wagenrücklauf einer Zeile behalten (ein
+  Windows-Zeilenende ist kein Neuzeichnen), eine Folge gleicher Zeilen zur Zeile plus „(repeated N times)“
+  zusammengefasst, eine Folge von drei oder mehr Zeilen, die sich nur in ihren Zahlen unterscheiden, zur ersten Zeile,
+  einer Zeile mit der Anzahl und der letzten Zeile zusammengefasst, und eine Zeile, die error, warning, fatal, failed
+  oder Traceback sagt, nie angefasst; zweimal angewandt ändert er nichts mehr. hadolints eigenes Escape-Muster ist
+  jetzt dieses (`utils/hadolint.py` importiert `ANSI_RE`). Die Testvektoren sind JSON-Dateien in
+  `tests/fixtures/context_rules/` (`clean_log.json`, `compact_json.json`), damit das Board-Gateway seine eigenen
+  Regeln an denselben Fällen prüfen kann.
+
 ## [3.1.0] - 2026-10-29
 
 ### Hinzugefügt
@@ -4466,6 +4490,7 @@ Cross-Kompilierung zu ermöglichen.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Grundlegende Unterstützung für die Cross-Kompilierung für Rockchip RK3588/RK3566.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Einstiegspunkte für CLI (`llm-cli`) und GUI (`llm-gui`).
 
+[3.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v2.4.0...v3.0.0
 [2.4.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v1.7.0...v2.4.0
