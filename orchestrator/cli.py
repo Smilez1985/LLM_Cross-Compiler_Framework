@@ -852,13 +852,17 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
             while True:
                 workflow_status = service.request_state(request_id)
                 if workflow_status:
-                    line = (workflow_status.status, workflow_status.current_stage, workflow_status.completed_builds)
+                    # the running build's own step and percent (the model download: "Fetching model 37 % (...)"),
+                    # as get_build_status and the Builder show them
+                    stage, percent = _follow_progress(service, workflow_status)
+                    line = (workflow_status.status, stage, percent, workflow_status.completed_builds)
                     if follow and line != last:
                         status_color = {OrchestrationStatus.COMPLETED: "green", OrchestrationStatus.ERROR: "red",
                                         OrchestrationStatus.HEALING: "magenta"}.get(workflow_status.status, "yellow")
                         # Stages, proposals and errors can contain model or log text: never parse it as markup.
-                        console.print(f"[{status_color}]Status: {workflow_status.status.value} - {escape(workflow_status.current_stage)} "
-                                      f"({workflow_status.completed_builds}/{workflow_status.total_builds} builds)[/{status_color}]")
+                        console.print(f"[{status_color}]Status: {workflow_status.status.value} - {escape(stage)} "
+                                      f"({percent} %, {workflow_status.completed_builds}/"
+                                      f"{workflow_status.total_builds} builds)[/{status_color}]")
                     last = line
                     if (workflow_status.status == OrchestrationStatus.AWAITING_APPROVAL
                             and workflow_status.healing_proposal is not None):
@@ -887,6 +891,19 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
 
 
 BUILD_POLL_SECONDS = 2
+
+
+def _follow_progress(service, state) -> Tuple[str, int]:
+    """(stage, percent) of the follow line: the service's live progress (the running build's step counted in), else
+    the request's own values."""
+    live = getattr(service, "live_progress", None)
+    try:
+        found = live(state) if callable(live) else None
+    except Exception:  # noqa: BLE001 - the follow line never stops the build
+        found = None
+    if isinstance(found, tuple) and len(found) == 2:
+        return str(found[0] or ""), int(found[1] or 0)
+    return str(getattr(state, "current_stage", "") or ""), int(getattr(state, "progress_percent", 0) or 0)
 KEEP_IN_BUILD_FOLDER = "-"
 
 

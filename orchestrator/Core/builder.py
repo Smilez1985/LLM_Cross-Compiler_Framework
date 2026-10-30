@@ -92,6 +92,8 @@ STAGE_LINE = re.compile(r"^=== Stage (\d{1,2})/(\d{1,2}): ([a-z][a-z0-9_-]{0,31}
                         r"(?: (resumed|done in \d+ s|failed \(exit \d+\)))? ===$")
 # The percent the stages of one container share, by its log prefix: the importance-matrix job from 50 to 60, the
 # build from 60 to 85 (Extracting).
+# The model download's share of a build's percent: after the image (40 %), before the importance matrix (50 %).
+DOWNLOAD_BAND = (40, 50)
 STAGE_BANDS = {"IMATRIX: ": ("Calculating IMatrix", 50, 60), "CONT: ": ("Running modules", 60, 85)}
 
 
@@ -1470,14 +1472,17 @@ class BuildEngine:
                                check=self._disk_check(config), name=f"staging-watch-{config.build_id}")
         self._report_landed(config, dest)  # the download counts as landed while it arrives
         fetcher = self._hub_fetcher(auth if needed else None, stop)
+        meter = self._download_meter(config, progress, dest, {name: files[name].size for name in keep})
         try:
             with StagingLock(dest.parent / f".{dest.name}.lock"):
                 watcher.start()
+                meter.start()
                 for name in keep:
                     self._check_cancelled(progress)
                     self._check_staging_space(dest, progress)
                     try:
-                        fetcher.fetch_file(source, commit, files[name], dest / name)
+                        fetcher.fetch_file(source, commit, files[name], dest / name, progress=meter.file_progress)
+                        meter.finish(name)
                     except DownloadStopped:
                         self._check_cancelled(progress)
                         if reason.get("disk"):
@@ -1494,6 +1499,39 @@ class BuildEngine:
             self.logger.debug(f"The record of the complete copy of {source} was not written: {e}")
         inner = "/build-cache/input-model"
         return inner, {str(dest): {"bind": inner, "mode": "ro"}}
+
+    def _download_meter(self, config: BuildConfiguration, progress: BuildProgress, dest: Path,
+                        sizes: Dict[str, Optional[int]]):
+        """The model download's progress (DECISIONS round 23 item 12): bytes done of the total over all files of the
+        snapshot, from the fetcher's progress callback, as the build's stage ("Fetching model 37 % (1.2 GB of
+        3.4 GB)", the bytes alone when a size is unknown) and its percent within the download's band (40-50), which
+        the build status, the Builder's progress bar, `build start --follow` and get_build_status show. At most once
+        a second (utils/download.SnapshotProgress), never for every chunk; the bytes already on disk (a complete file
+        or a .part file of an earlier attempt) count from the start; nothing changes after a cancel."""
+        from orchestrator.utils.download import SnapshotProgress, snapshot_progress_text
+        low, high = DOWNLOAD_BAND
+        already: Dict[str, int] = {}
+        for name, size in sizes.items():
+            for path in (dest / name, dest / f"{name}.part"):
+                try:
+                    have = path.stat().st_size
+                except OSError:
+                    continue
+                if path.name == name and size is not None and have != size:
+                    continue   # a file of another size is fetched again
+                already[name] = have if size is None else min(have, size)
+                break
+
+        def report(done: int, total: Optional[int]) -> None:
+            if progress.status == BuildStatus.CANCELLED:
+                return
+            progress.current_stage = f"Fetching model {snapshot_progress_text(done, total)}"
+            if total:
+                progress.progress_percent = max(progress.progress_percent,
+                                                low + (high - low) * min(done, total) // total)
+            if getattr(self, "_records", None) is not None:   # other processes see the stage too
+                self._save_record(progress.build_id)
+        return SnapshotProgress(sizes, report, already=already)
 
     def _stage_local_copy(self, config: BuildConfiguration, progress: BuildProgress,
                           source: str) -> Tuple[str, Dict[str, Dict[str, str]]]:

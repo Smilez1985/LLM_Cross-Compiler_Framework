@@ -147,7 +147,11 @@ Weiteres Verhalten:
   Builds läuft live darunter mit (Geheimnisse geschwärzt, volle Pfade, reiner Text, jede Zeile einmal; eine KI, die das
   Protokoll liest, bekommt die Ordner als Label). Schritt und Prozentwert enthalten den eigenen Fortschritt des
   laufenden Builds (Vorbereitung, Image, Modell, Module, Archiv), sodass sich der Balken während eines Builds bewegt;
-  100 % zeigt er erst, wenn die Anfrage beendet ist. Ein Suchfeld findet Zeilen; ein Filter zeigt alle Zeilen oder nur
+  100 % zeigt er erst, wenn die Anfrage beendet ist. Während das Modell von Hugging Face geladen wird, sagt der
+  Schritt, wie weit der Download über alle Dateien des Modells ist, etwa „Fetching model 37 % (1.2 GB of 3.4 GB)“ (nur
+  die Bytes, wenn eine Größe nicht bekannt ist), und der Balken bewegt sich mit; die Dateien, die von einem früheren
+  Versuch schon da sind, zählen von Anfang an mit, und die Anzeige wird etwa einmal pro Sekunde aktualisiert.
+  `llm-cli build start --follow` und `get_build_status` zeigen denselben Schritt. Ein Suchfeld findet Zeilen; ein Filter zeigt alle Zeilen oder nur
   Info, Warnungen oder Fehler. Zeilen, die der Service nicht mehr liefert, werden vermerkt statt still weggelassen, und
   die Ansicht behält die neuesten 20.000 Zeilen.
 - **Build-Status über Programme hinweg (gemeinsamer Build-Zustand):** Jedes Programm, das baut (die GUI, ein
