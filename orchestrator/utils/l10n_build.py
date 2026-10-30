@@ -51,6 +51,28 @@ TEXTS = {
         "bld.menu.targets": "Targets...",
         "bld.menu.history": "Build History...",
         "bld.menu.settings": "Settings...",
+        "bld.menu.deps": "Build Dependencies...",
+
+        # Build > Build Dependencies... (the dependency cache of module CMake options, runtime/build/deps.py)
+        "bld.deps.title": "Build dependencies",
+        "bld.deps.intro": "What a module's CMake option would download during the build is fetched before it instead: "
+                          "pinned as llama.cpp declares it, checked against the sha256 recorded on its first fetch, "
+                          "and mounted read-only into the build. In offline mode only what is in the cache is used.",
+        "bld.deps.col.name": "Name",
+        "bld.deps.col.needed": "Needed by",
+        "bld.deps.col.source": "Source",
+        "bld.deps.col.pin": "Pin",
+        "bld.deps.col.cache": "In the cache",
+        "bld.deps.col.sha": "sha256",
+        "bld.deps.fetch": "Fetch",
+        "bld.deps.delete": "Delete...",
+        "bld.deps.close": "Close",
+        "bld.deps.yes": "yes, {size}",
+        "bld.deps.no": "no",
+        "bld.deps.fetching": "Fetching {name} from {source}...",
+        "bld.deps.fetched": "{name} is in the cache (sha256 {sha}...).",
+        "bld.deps.none": "No build dependency is in the cache.",
+        "bld.deps.deleted": "Deleted: {count}.",
 
         # Build > Targets... (llm-cli targets list / targets validate)
         "bld.targets.title": "Targets",
@@ -263,6 +285,28 @@ TEXTS = {
         "bld.menu.targets": "Targets…",
         "bld.menu.history": "Build-Verlauf…",
         "bld.menu.settings": "Einstellungen…",
+        "bld.menu.deps": "Build-Abhängigkeiten…",
+
+        "bld.deps.title": "Build-Abhängigkeiten",
+        "bld.deps.intro": "Was eine CMake-Option eines Moduls während des Builds herunterladen würde, wird stattdessen "
+                          "vorher geholt: gepinnt, wie llama.cpp es angibt, gegen die sha256 vom ersten Holen geprüft "
+                          "und schreibgeschützt in den Build eingebunden. Im Offline-Modus wird nur genommen, was im "
+                          "Cache ist.",
+        "bld.deps.col.name": "Name",
+        "bld.deps.col.needed": "Gebraucht von",
+        "bld.deps.col.source": "Quelle",
+        "bld.deps.col.pin": "Pin",
+        "bld.deps.col.cache": "Im Cache",
+        "bld.deps.col.sha": "sha256",
+        "bld.deps.fetch": "Holen",
+        "bld.deps.delete": "Löschen…",
+        "bld.deps.close": "Schließen",
+        "bld.deps.yes": "ja, {size}",
+        "bld.deps.no": "nein",
+        "bld.deps.fetching": "{name} wird von {source} geholt…",
+        "bld.deps.fetched": "{name} ist im Cache (sha256 {sha}…).",
+        "bld.deps.none": "Keine Build-Abhängigkeit ist im Cache.",
+        "bld.deps.deleted": "Gelöscht: {count}.",
 
         "bld.targets.title": "Targets",
         "bld.targets.intro": "Alle Hardware-Targets dieser Installation ({n}). Die ID ist der Wert für --target. Ein "

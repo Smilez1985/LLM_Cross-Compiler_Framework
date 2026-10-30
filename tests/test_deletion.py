@@ -55,6 +55,8 @@ DELETION_SITES = {
     # build or a deployment deletes none of them any more (they were kept to a count without a list)
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime.delete_old_builds.take"): PERSON,
     ("orchestrator/runtime/build/store.py", "BuildStore.remove"): PERSON,
+    # the dependency cache of module CMake options: the person's list (`build deps delete`, Build Dependencies...)
+    ("orchestrator/runtime/build/deps.py", "DependencyCache.delete"): PERSON,
     ("orchestrator/runtime/device/package.py", "DeviceRuntimeStore.delete_packages"): PERSON,
     # every object of the old runtime mode after a switch of Ditto's server (build folders, images, containers, its
     # records and image log), deleted for good: only the list the person confirmed (runtime_mode.remove_leftovers;
@@ -173,6 +175,9 @@ DELETION_SITES = {
     ("orchestrator/runtime/build/source.py", "_install"): STAGING,
     ("orchestrator/runtime/build/source.py", "fetch_source"): STAGING,
     ("orchestrator/runtime/build/source.py", "import_source"): STAGING,
+    # a dependency's fetch: its working folder, and a cache folder without a recorded pin replaced by the checked copy
+    ("orchestrator/runtime/build/deps.py", "DependencyCache.fetch"): STAGING,
+    ("orchestrator/runtime/build/deps.py", "_extract"): STAGING,
     ("orchestrator/runtime/build/store.py", "BuildStore.build"): STAGING,
     ("orchestrator/runtime/build/store.py", "BuildStore._commit"): STAGING,
     ("orchestrator/runtime/build/store.py", "BuildStore.import_build"): STAGING,

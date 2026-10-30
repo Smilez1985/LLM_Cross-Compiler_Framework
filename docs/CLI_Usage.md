@@ -22,7 +22,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [doctor](#doctor): the old name of `mojo`
 - [knowledge](#knowledge): `snapshots` (`list`, `prune`, `delete`, `export`)
 - [targets](#targets): `list`, `validate`
-- [build](#build): `start`, `save`, `status`
+- [build](#build): `start`, `save`, `deps`, `status`
 - [deploy](#deploy): `list-artifacts`, `package`, `run`, `devices`, `ssh-config`
 - [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
@@ -130,6 +130,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `targets list` / `targets validate` | List hardware targets with their boards and formats / check that a target loads and its capabilities are valid |
 | `build start` / `build status` | Convert and quantize a model / show builds, also those the GUI, the MCP server or another CLI call started |
 | `build save` | Save a build that waits in the framework's build folder to the output folder or another folder |
+| `build deps` | List, fetch and delete the dependencies of module CMake options that are fetched before a build |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | List finished builds / pack a build into a ZIP / upload and install it on a board |
 | `deploy ssh-config show/edit/import` | The framework's own OpenSSH settings file (read instead of `~/.ssh/config`): show it, set a board's block, copy one block from `~/.ssh/config` |
 | `ditto login` / `ditto logout` | Sign Ditto in to a provider (the key from a hidden prompt, stdin or an environment variable, checked before it is stored) / sign out |
@@ -600,6 +601,32 @@ $ echo $?
 ```
 
 In the GUI: Deployment tab > **Save...**.
+
+### build deps
+
+```
+llm-cli build deps list
+llm-cli build deps fetch NAME
+llm-cli build deps delete
+```
+
+The dependency cache of module CMake options ([Module Developer Guide, section
+3.5](Module_Developer_Guide.md#35-cmake-flags-of-a-module)): what `-DLLAMA_BUILD_BORINGSSL=ON`,
+`-DLLAMA_BUILD_LIBRESSL=ON` or `-DGGML_CPU_KLEIDIAI=ON` would download while llama.cpp is built is fetched before the
+build instead, pinned as the pinned llama.cpp declares it, checked against the sha256 recorded on its first fetch,
+and mounted read-only into the build. A build fetches what its module needs by itself; these commands are for looking
+and for fetching while you are online.
+
+| Command | What it does |
+|---------|--------------|
+| `list` | Every dependency the framework can fetch (BORINGSSL, LIBRESSL, KLEIDIAI): the option that needs it, its source, its pin, whether it is in the cache (with its size) and its recorded sha256. |
+| `fetch NAME` | Fetches one now (the name is not case-sensitive), pinned and checked. In offline mode nothing is downloaded (exit code 1, with what to do); an unknown name is exit code 2. |
+| `delete` | Lists the cache's entries and deletes the ones you pick, after you confirm the full list at a terminal (the trash or for good). The recorded sha256 stays: fetching the same pin again must give the same content back. |
+
+`build start` names each dependency its module needs (`Build dependency: ...`) before it starts; in offline mode one
+that is not in the cache stops it there (exit code 2).
+
+In the GUI: Build > **Build Dependencies...** (Fetch, Delete...).
 
 ### build status
 

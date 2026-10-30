@@ -22,7 +22,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [doctor](#doctor): der alte Name von `mojo`
 - [knowledge](#knowledge): `snapshots` (`list`, `prune`, `delete`, `export`)
 - [targets](#targets): `list`, `validate`
-- [build](#build): `start`, `save`, `status`
+- [build](#build): `start`, `save`, `deps`, `status`
 - [deploy](#deploy): `list-artifacts`, `package`, `run`, `devices`, `ssh-config`
 - [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
@@ -131,6 +131,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `targets list` / `targets validate` | Hardware-Targets mit ihren Boards und Formaten auflisten / prüfen, ob ein Target lädt und seine Capabilities gültig sind |
 | `build start` / `build status` | Ein Modell konvertieren und quantisieren / Builds zeigen, auch solche, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat |
 | `build save` | Einen Build, der im Build-Ordner des Frameworks wartet, im Ausgabeordner oder einem anderen Ordner speichern |
+| `build deps` | Die Abhängigkeiten von CMake-Optionen der Module, die vor einem Build geholt werden, listen, holen und löschen |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | Fertige Builds auflisten / einen Build in eine ZIP-Datei packen / sie auf ein Board laden und installieren |
 | `deploy ssh-config show/edit/import` | Die eigene OpenSSH-Einstellungsdatei des Frameworks (gelesen statt `~/.ssh/config`): zeigen, den Block eines Boards setzen, einen Block aus `~/.ssh/config` übernehmen |
 | `ditto login` / `ditto logout` | Ditto bei einem Anbieter anmelden (der Schlüssel verdeckt abgefragt, von stdin oder aus einer Umgebungsvariable, vor dem Speichern geprüft) / abmelden |
@@ -621,6 +622,32 @@ $ echo $?
 ```
 
 In der GUI: Tab „Deployment“ > **Speichern…**.
+
+### build deps
+
+```
+llm-cli build deps list
+llm-cli build deps fetch NAME
+llm-cli build deps delete
+```
+
+Der Abhängigkeits-Cache der CMake-Optionen von Modulen ([Modul-Entwicklerhandbuch, Abschnitt
+3.5](Module_Developer_Guide_DE.md#35-cmake-flags-eines-moduls)): Was `-DLLAMA_BUILD_BORINGSSL=ON`,
+`-DLLAMA_BUILD_LIBRESSL=ON` oder `-DGGML_CPU_KLEIDIAI=ON` beim Bauen von llama.cpp herunterladen würde, wird stattdessen
+vor dem Build geholt, festgelegt, wie das festgelegte llama.cpp es angibt, gegen die sha256 vom ersten Holen geprüft und
+nur lesend in den Build eingehängt. Ein Build holt selbst, was sein Modul braucht; diese Befehle sind zum Nachsehen und
+zum Holen, solange du online bist.
+
+| Befehl | Was er tut |
+|--------|------------|
+| `list` | Jede Abhängigkeit, die das Framework holen kann (BORINGSSL, LIBRESSL, KLEIDIAI): die Option, die sie braucht, ihre Quelle, ihr Pin, ob sie im Cache ist (mit Größe) und ihre festgehaltene sha256. |
+| `fetch NAME` | Holt eine jetzt (Groß- und Kleinschreibung egal), festgelegt und geprüft. Im Offline-Modus wird nichts heruntergeladen (Exit-Code 1, mit dem, was zu tun ist); ein unbekannter Name ist Exit-Code 2. |
+| `delete` | Listet die Einträge des Caches und löscht die, die du auswählst, nachdem du die ganze Liste im Terminal bestätigt hast (Papierkorb oder endgültig). Die festgehaltene sha256 bleibt: Wird derselbe Pin wieder geholt, muss derselbe Inhalt zurückkommen. |
+
+`build start` nennt vor dem Start jede Abhängigkeit, die sein Modul braucht (`Build dependency: ...`); im Offline-Modus
+stoppt eine, die nicht im Cache ist, ihn dort (Exit-Code 2).
+
+In der GUI: Build > **Build-Abhängigkeiten…** (Holen, Löschen…).
 
 ### build status
 

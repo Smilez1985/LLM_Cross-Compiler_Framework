@@ -558,6 +558,11 @@ READ_TODAY = {
 NEW_FOR_THE_STAGE_RUNNER = {"MODEL_REVISION", "HARDWARE_CONFIG_FILE", "LLAMA_CPP_REPO_OVERRIDE"}
 # Read only by stage code started by hand with an option (source_module.sh --clone-llama-cpp), never in a build.
 ONLY_ON_REQUEST = {"LLAMA_CPP_COMMIT"}
+# Set by the BuildEngine for the module's CMake flags (DECISIONS round 25 Q6): the person's decision on options outside
+# the allowlist (LLMCF_ALLOWED_FLAGS, LLMCF_FLAG_DECISION) and the dependencies fetched before the build and mounted
+# read-only (LLMCF_DEPS); BUILD_PLAN is the calling stage's own plan path, read by build.sh's cmake shim (it runs in
+# the stage's shell) to keep only the toolchain the plan set.
+FOR_THE_MODULE_FLAGS = {"LLMCF_ALLOWED_FLAGS", "LLMCF_FLAG_DECISION", "LLMCF_DEPS", "BUILD_PLAN"}
 # What the runner hands its stages (build.sh): not read from the build container's environment. STAGE_LAST (the last
 # stage of this run), CONVERT_OUTPUT (the --output option) and PACKAGE_REQUESTED (the --package option) are set by
 # the runner itself, never from outside.
@@ -625,7 +630,7 @@ def stage_scripts(modules: Path):
 
 def test_the_build_reads_the_same_environment_variables():
     reads = environment_reads(stage_scripts(ROCKCHIP / "modules"))
-    assert reads - NEW_FOR_THE_STAGE_RUNNER - ONLY_ON_REQUEST == READ_TODAY
+    assert reads - NEW_FOR_THE_STAGE_RUNNER - ONLY_ON_REQUEST - FOR_THE_MODULE_FLAGS == READ_TODAY
 
 
 # ---------------------------------------------------------------------------------------------------------------

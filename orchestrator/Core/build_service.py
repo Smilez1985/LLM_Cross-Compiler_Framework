@@ -863,7 +863,11 @@ class BuildService:
         options outside the allowlist, what each does and the recommendation for this model and quantization. The CLI
         and the Builder ask the person with it before start_build."""
         from orchestrator.Core import module_flags
-        req = self._validated(request, local_paths)[0]
+        try:
+            req = self._validated(request, local_paths)[0]   # canonical board and quantization for the recommendation
+        except BuildServiceError:
+            # the question judges the module's options, not the request (start_build checks that): as given
+            req = request.model_copy(update={"target": self.resolve_target(request.target)})
         tm = self._targets()
         folder = tm.folder_of(req.target) if hasattr(tm, "folder_of") else None
         question = module_flags.question_for(req.target, Path(folder) if folder is not None else None,
@@ -872,6 +876,27 @@ class BuildService:
         if question is None:
             return None, None
         return question, module_flags.remembered(self._flag_store(), question)
+
+    def dependency_lines(self, request: BuildRequestIn, *, local_paths: bool = True) -> List[str]:
+        """What the build fetches before it starts (runtime/build/deps.py: the dependencies the module's CMake flags
+        switch on), one line each with its source, pin and size, for the plan the person sees and the AI's facts.
+        DependencyMissing in offline mode for one that is not in the cache."""
+        from orchestrator.Core.module_flags import module_cmake_words
+        from orchestrator.runtime.build import deps
+        from orchestrator.utils.locality import offline_mode
+        target = self.resolve_target(request.target)   # only the module's flags count: no other check of the request
+        tm = self._targets()
+        folder = tm.folder_of(target) if hasattr(tm, "folder_of") else None
+        needed = deps.needed_for(module_cmake_words(Path(folder) if folder is not None else None))
+        if not needed:
+            return []
+        cache = deps.DependencyCache.for_framework(self.framework)
+        lines = []
+        for dep in needed:
+            if cache.entry(dep) is None and offline_mode(getattr(self.framework, "config", None)):
+                raise deps.DependencyMissing(cache.missing_text(dep))
+            lines.append(cache.facts(dep))
+        return lines
 
     def _flag_decision(self, request: BuildRequestIn, local_paths: bool, flag_decision: Optional[str],
                        remember_flags: bool, channel: str) -> Optional[Dict[str, Any]]:

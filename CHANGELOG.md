@@ -13,6 +13,23 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 
 ### Added
 
+- `2026-10-30 04:30 UTC` · `v3.2.0` **Dependencies of module CMake options fetched before the build** (consolidation
+  chain build-flags-time; decision on module CMake flags, dependency addendum): what `-DLLAMA_BUILD_BORINGSSL=ON`,
+  `-DLLAMA_BUILD_LIBRESSL=ON` or `-DGGML_CPU_KLEIDIAI=ON` would make llama.cpp download while it is built is fetched
+  before the build by the new `orchestrator/runtime/build/deps.py`: outside the sandbox and never in offline mode,
+  pinned as the pinned llama.cpp declares it (BoringSSL tag `0.20260929.0` by git, LibreSSL 4.3.2 and KleidiAI v1.24.0
+  as archives, KleidiAI also against its declared MD5), the tree's sha256 recorded on the first fetch and checked at
+  every later use and fetch (a source that changed under the same pin is refused), kept read-only in a dependency cache
+  below the framework's cache folder (a fetch takes a reservation in the ReservationLedger), and bind-mounted read-only
+  into the build container (`LLMCF_DEPS`). The cross build of both target templates points
+  `FETCHCONTENT_SOURCE_DIR_<NAME>` at the mounted copy and keeps `FETCHCONTENT_FULLY_DISCONNECTED=ON`; KleidiAI is no
+  longer forced OFF once it is mounted. The module generator and the folder check allow these three options; the
+  build plan names each dependency's source, pin and size as facts of the question (an AI-started build shows the
+  download to the person), and in offline mode one that is not in the cache stops the build in plain words. New
+  `llm-cli build deps list|fetch|delete` and Build > Build Dependencies... (deletion through the list of
+  `Core/deletion.py`, new deletion kind `build_dependency`, the trash or for good). Tests: `tests/test_build_deps.py`
+  (a local git repository and a local http server, MD5 and sha256 mismatch, offline with and without the cache, the
+  read-only mount, `FULLY_DISCONNECTED` in the cross build of both templates).
 - `2026-10-30 04:15 UTC` · `v3.2.0` **The person decides on a module's CMake options outside the allowlist**
   (consolidation chain build-flags-time; decision on module CMake flags): before a module with a valid CMake option
   outside the allowlist (`-G Ninja`, `--trace`, ...) is built, the Builder (a question with "Allow these options", "Use

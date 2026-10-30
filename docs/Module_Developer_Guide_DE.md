@@ -335,6 +335,20 @@ gleich (`tests/test_module_flags.py` lässt beide über `tests/data/cmake_flag_v
   `CMAKE_TOOLCHAIN_FILE`, außer der Build-Plan hat genau diese Datei gesetzt. Die Ordnerprüfung liest die Flags, wie
   sie geschrieben sind: Ein Wort, das die Shell erweitert (`$X`), ist eine Grenze dieser Prüfung; das cmake von build.sh
   und die letzte Prüfung des Pakets sehen die erweiterten Wörter.
+- **Download-Optionen mit einer geholten Abhängigkeit:** `-DLLAMA_BUILD_BORINGSSL=ON`, `-DLLAMA_BUILD_LIBRESSL=ON` und
+  `-DGGML_CPU_KLEIDIAI=ON` würden llama.cpp beim Bauen BoringSSL, LibreSSL oder KleidiAI herunterladen lassen. In den
+  Flags eines Moduls sind sie erlaubt, weil das Framework diese Abhängigkeit vor dem Build holt
+  (`orchestrator/runtime/build/deps.py`): außerhalb der Sandbox, nie im Offline-Modus, genau so festgelegt, wie das
+  festgelegte llama.cpp sie angibt (ein Git-Tag oder ein Archiv, geprüft gegen die MD5, die llama.cpp nennt), mit der
+  sha256 seines Baums, die beim ersten Holen festgehalten und bei jeder späteren Nutzung geprüft wird. Sie liegt
+  schreibgeschützt in einem Abhängigkeits-Cache unter dem Cache-Ordner des Frameworks und wird nur lesend in den Build
+  eingehängt (`LLMCF_DEPS`); der Cross-Build lässt `FETCHCONTENT_SOURCE_DIR_<NAME>` darauf zeigen und behält
+  `FETCHCONTENT_FULLY_DISCONNECTED=ON`, der Build selbst lädt also weiter nichts herunter. Im Offline-Modus stoppt eine
+  Abhängigkeit, die nicht im Cache ist, den Build mit dem, was fehlt. Der Build-Plan nennt jede Abhängigkeit mit Quelle,
+  Pin und Größe, so zeigt ein von einer KI gestarteter Build den Download in der Frage, die die Person beantwortet.
+  `llm-cli build deps list|fetch|delete` (in der GUI Build > Build-Abhängigkeiten…) listet, holt und löscht die
+  Einträge des Caches. Andere Download-Optionen (CUDA CCCL, ZenDNN, llguidance, der Header der virtuellen GPU, OpenMP
+  unter Windows) haben keine festgelegte Quelle und bleiben abgelehnt.
 
 ## 4. target.yml und der Capabilities-Block
 

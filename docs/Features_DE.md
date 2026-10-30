@@ -3055,6 +3055,11 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   Standard-Flags weiter; die Entscheidung lässt sich für die Modulversion merken. Ein von einer KI gestarteter Build
   mit so einer Option wartet auf dich
   ([Modul-Entwicklerhandbuch, Abschnitt 3.5](Module_Developer_Guide_DE.md#35-cmake-flags-eines-moduls)).
+- **Abhängigkeiten vor dem Build geholt:** BoringSSL, LibreSSL und KleidiAI, die llama.cpp wegen einer CMake-Option
+  eines Moduls beim Bauen herunterladen würde, werden stattdessen vor dem Build geholt: festgelegt, wie llama.cpp sie
+  angibt, gegen die sha256 vom ersten Holen geprüft, schreibgeschützt in einem Abhängigkeits-Cache abgelegt und nur
+  lesend in den Build eingehängt, der Build selbst bleibt also ohne Netz. Offline wird nur genommen, was im Cache ist.
+  `build deps` und Build > Build-Abhängigkeiten… listen, holen und löschen sie.
 - **llama.cpp in neuen Targets:** Das Vorlagen-Dockerfile baut die Konvertierungswerkzeuge wie das Rockchip-Image
   ([Konvertierungswerkzeuge abgestimmt auf den Build-Rechner](#konvertierungswerkzeuge-abgestimmt-auf-den-build-rechner)).
   Die GPU-Vorlage nimmt CUDA 12.9.1 aus den Redist-Archiven von NVIDIA (Manifest per sha256 festgelegt, jedes Archiv

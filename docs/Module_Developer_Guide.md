@@ -324,6 +324,19 @@ check in the build container (`module_flag_verdicts` of `target_module.sh`) give
   folder sets nothing, and runs without a `CMAKE_TOOLCHAIN_FILE` environment variable unless the build plan set
   exactly that file. The folder check reads the flags as written: a word the shell expands (`$X`) is a limit of that
   check; build.sh's cmake and the package's last check see the expanded words.
+- **Download options with a fetched dependency:** `-DLLAMA_BUILD_BORINGSSL=ON`, `-DLLAMA_BUILD_LIBRESSL=ON` and
+  `-DGGML_CPU_KLEIDIAI=ON` would make llama.cpp download BoringSSL, LibreSSL or KleidiAI while it is built. In a
+  module's flags they are allowed, because the framework fetches that dependency before the build
+  (`orchestrator/runtime/build/deps.py`): outside the sandbox, never in offline mode, pinned exactly as the pinned
+  llama.cpp declares it (a git tag, or an archive checked against the MD5 llama.cpp names), with the sha256 of its tree
+  recorded on the first fetch and checked at every later use. It is kept read-only in a dependency cache below the
+  framework's cache folder and mounted read-only into the build (`LLMCF_DEPS`); the cross build points
+  `FETCHCONTENT_SOURCE_DIR_<NAME>` at it and keeps `FETCHCONTENT_FULLY_DISCONNECTED=ON`, so the build itself still
+  downloads nothing. In offline mode a dependency that is not in the cache stops the build with what is missing. The
+  build plan lists each dependency with its source, pin and size, so an AI-started build shows the download in the
+  question the person answers. `llm-cli build deps list|fetch|delete` (Build > Build Dependencies... in the GUI)
+  lists, fetches and deletes the cache's entries. Other download options (CUDA CCCL, ZenDNN, llguidance, the virtual
+  GPU header, OpenMP on Windows) have no pinned source and stay refused.
 
 ## 4. target.yml and the capabilities block
 
