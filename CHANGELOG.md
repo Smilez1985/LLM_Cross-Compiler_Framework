@@ -65,6 +65,10 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   uninstall it and install it again; to keep them, copy the target folder under a name of your own and export that
   as a new pack (a knowledge pack: export your version as a new knowledge pack). Mojo's findings for a revoked or
   changed pack point to **Uninstall...** instead of telling the person to delete a folder or type a command.
+- `2026-10-30 01:30 UTC` · `v3.2.0` **Tools > Knowledge Sources... shows Topic or target third, as the CLI does**: the window listed the topic or target
+  as its last column, while `llm-cli knowledge sources` shows it third. Both now take their order from one list
+  (`knowledge_sources.COLUMNS`): Source, Kind, Topic or target, Hidden text left out, Licence, Copyright notice, In a
+  pack, Why.
 
 ## [3.1.0] - 2026-10-29
 

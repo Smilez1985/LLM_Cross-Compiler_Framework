@@ -21,8 +21,9 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogBut
 from orchestrator.gui.plain import button_text, one_line, plain_label, plain_tooltip
 from orchestrator.utils.localization import current_language, ui_text
 
-COLUMNS = ("sources.col.source", "sources.col.kind", "sources.col.removed", "sources.col.licence",
-           "sources.col.copyright", "sources.col.carried", "sources.col.why", "sources.col.topic")
+# the order of knowledge_sources.COLUMNS (the CLI's list): the topic or target is the third column on both
+COLUMNS = ("sources.col.source", "sources.col.kind", "sources.col.topic", "sources.col.removed", "sources.col.licence",
+           "sources.col.copyright", "sources.col.carried", "sources.col.why")
 KIND_FILTER = ("any", "web", "pack", "docs", "other")   # knowledge_sources.KIND_CHOICES, "any" first
 
 
@@ -138,10 +139,11 @@ class KnowledgeSourcesDialog(QDialog):
             share = str(entry.get("pack_share") or "")
             removed = knowledge_sources.removed_text(entry, lambda kind: self._t(f"sources.removed.{kind}"),
                                                      self._t("sources.removed.none"))
-            values = (str(entry.get("source") or ""), self._kind_text(str(entry.get("kind") or "")), removed,
-                      str(entry.get("licence") or "-"), str(entry.get("copyright") or "-"),
+            values = (str(entry.get("source") or ""), self._kind_text(str(entry.get("kind") or "")),
+                      self._topic_text(entry), removed, str(entry.get("licence") or "-"),
+                      str(entry.get("copyright") or "-"),
                       self._t(f"sources.carried.{share}") if share in knowledge_sources.CARRIED else "-",
-                      str(entry.get("share_reason") or ""), self._topic_text(entry))
+                      str(entry.get("share_reason") or ""))
             for column, value in enumerate(values):
                 cell = QTableWidgetItem(one_line(value))   # plain text, never rich text
                 if column == 0 and entry.get("title"):

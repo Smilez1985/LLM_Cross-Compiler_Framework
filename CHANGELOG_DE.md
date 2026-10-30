@@ -74,6 +74,10 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   exportieren (ein Wissenspaket: deine Fassung als neues Wissenspaket exportieren). Die Befunde von Mojo zu einem
   zurückgezogenen oder geänderten Paket zeigen auf **Deinstallieren...**, statt die Person einen Ordner löschen oder
   einen Befehl tippen zu lassen.
+- `2026-10-30 01:30 UTC` · `v3.2.0` **Tools > Wissensquellen... zeigt Thema oder Target als dritte Spalte, wie die CLI**: Das Fenster zeigte das Thema
+  oder Target als letzte Spalte, `llm-cli knowledge sources` als dritte. Beide nehmen ihre Reihenfolge jetzt aus einer
+  Liste (`knowledge_sources.COLUMNS`): Quelle, Art, Thema oder Target, Ausgelassener versteckter Text, Lizenz,
+  Urheberrechtsvermerk, Im Paket, Warum.
 
 ## [3.1.0] - 2026-10-29
 
