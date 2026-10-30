@@ -21,7 +21,7 @@
  },
  {
   "name": "eight_bit_csi",
-  "input": "\u009b31mred\u009b0m",
+  "input": "31mred0m",
   "output": "red"
  },
  {
@@ -98,5 +98,15 @@
   "name": "empty",
   "input": "",
   "output": ""
+ },
+ {
+  "name": "linker_symbols_kept",
+  "input": "/usr/bin/ld: a.c:(.text+0x10): undefined reference to `vec_dot_q4_0'\n/usr/bin/ld: a.c:(.text+0x20): undefined reference to `vec_dot_q5_1'\n/usr/bin/ld: a.c:(.text+0x30): undefined reference to `vec_dot_q8_0'\ncollect2: error: ld returned 1 exit status",
+  "output": "/usr/bin/ld: a.c:(.text+0x10): undefined reference to `vec_dot_q4_0'\n/usr/bin/ld: a.c:(.text+0x20): undefined reference to `vec_dot_q5_1'\n/usr/bin/ld: a.c:(.text+0x30): undefined reference to `vec_dot_q8_0'\ncollect2: error: ld returned 1 exit status"
+ },
+ {
+  "name": "test_failures_kept",
+  "input": "FAIL: test_1\nFAIL: test_2\nFAIL: test_3",
+  "output": "FAIL: test_1\nFAIL: test_2\nFAIL: test_3"
  }
 ]

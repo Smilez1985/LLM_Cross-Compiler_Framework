@@ -12,8 +12,11 @@ same line hundreds of times. A model pays for every one of those characters and 
 3. collapse a run of identical lines to the line plus "(repeated N times)" (a run of empty lines to one empty line);
 4. collapse a run of three or more lines that differ only in their numbers (a progress counter, a percentage) to the
    first line, one line with the count, and the last line;
-5. never touch a line that says error, warning, fatal, failed or Traceback (case-insensitive): it is never collapsed
-   and ends any run; a redrawn line keeps each of its parts that says one of these words (as a line of its own).
+5. never touch a line that reports a problem (KEYWORDS, case-insensitive): error, warning, fatal, failed, Traceback,
+   and the other words tools say it with (fail, exception, panic, abort, denied, cannot, unable, undefined, not found,
+   no such, segmentation fault, killed, npm's "ERR!", apt's "E:"; a linker names each missing symbol on a line of
+   its own and only its last line says "error"): it is never collapsed and ends any run; a redrawn line keeps each
+   of its parts that says one of these words (as a line of its own).
 
 `clean_log(clean_log(x)) == clean_log(x)`. What this module does not do is left to the one place that does it:
 invisible and format characters and length caps (utils/untrusted.sanitize_untrusted, wrap_untrusted), secrets and host
@@ -33,7 +36,8 @@ ANSI_RE = re.compile(r"(?:\x1b\]|\x9d)[^\x07\x1b\x9c\n]*(?:\x07|\x1b\\|\x9c)"
                      r"|\x1b[()*+][0-9A-Za-z]"
                      r"|\x1b[0-9=>@-Z\\^_`a-z{|}~]")
 _LEFTOVER = re.compile(r"[\x1b\x9b\x9d\x9c]")
-KEYWORDS = re.compile(r"error|warning|fatal|failed|traceback", re.IGNORECASE)
+KEYWORDS = re.compile(r"error|warn|fatal|fail|traceback|exception|panic|abort|denied|cannot|unable|undefined"
+                      r"|not found|no such|segmentation fault|killed|\berr!|^\s*e: ", re.IGNORECASE)
 _NUMBER = re.compile(r"\d+")
 REPEATED = "{line} (repeated {count} times)"
 SIMILAR = "({count} lines like these, only their numbers differ: the first and the last are shown)"
@@ -46,7 +50,8 @@ def strip_escapes(text: str) -> str:
 
 
 def keeps(line: str) -> bool:
-    """Rule 5: a line that says error, warning, fatal, failed or Traceback is never collapsed."""
+    """Rule 5: a line that reports a problem (KEYWORDS: error, warning, fatal, failed, Traceback and the other words
+    tools say it with) is never collapsed."""
     return bool(KEYWORDS.search(line))
 
 

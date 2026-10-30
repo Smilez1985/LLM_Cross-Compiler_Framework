@@ -61,3 +61,14 @@ def test_a_stored_turn_keeps_its_bytes():
     stored = Message.tool_result("call_1", '{"a": 1, "b": [1, 2]}')
     again = Message.model_validate_json(stored.model_dump_json())
     assert again.content == '{"a": 1, "b": [1, 2]}'
+
+
+def test_a_file_name_that_is_not_utf8_never_breaks_the_request():
+    """Review (ctx-slim-v): a POSIX file name with bytes that are not UTF-8 reaches Python as a lone surrogate
+    (os.fsdecode). ensure_ascii=False wrote it raw, and the request to the provider then failed to encode
+    ("surrogates not allowed"). It is escaped like the other controls; json.loads reads the same value back."""
+    value = {"name": "model\udcff.gguf"}
+    text = tool_result_text(value)
+    text.encode("utf-8")
+    assert text == '{"name":"model\\udcff.gguf"}' and json.loads(text) == value
+    assert tool_result_text(Out(summary="a\udcffb")).encode("utf-8")

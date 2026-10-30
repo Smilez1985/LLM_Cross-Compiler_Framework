@@ -70,3 +70,28 @@ def test_hadolint_uses_the_one_escape_pattern():
     # Its own cleaning is unchanged for the CSI colours hadolint writes.
     assert hadolint._clean("\x1b[33mDockerfile:3 DL3008 warning: Pin versions\x1b[0m") == \
         "Dockerfile:3 DL3008 warning: Pin versions"
+
+
+# Review (ctx-slim-v): a failure line does not always say one of the first five words. A linker lists every missing
+# symbol on a line of its own and only the last line says "error"; symbols that differ only in digits (q4_0, q5_1,
+# q8_0) formed a number-only run, so the model saw the first and the last and never the middle one it had to fix.
+@pytest.mark.parametrize("lines", [
+    ["/usr/bin/ld: ggml-cpu.c:(.text+0x10): undefined reference to `ggml_vec_dot_q4_0'",
+     "/usr/bin/ld: ggml-cpu.c:(.text+0x20): undefined reference to `ggml_vec_dot_q5_1'",
+     "/usr/bin/ld: ggml-cpu.c:(.text+0x30): undefined reference to `ggml_vec_dot_q8_0'"],
+    ["FAIL: test_1", "FAIL: test_2", "FAIL: test_3"],
+    ["E: Unable to locate package libfoo1", "E: Unable to locate package libfoo2", "E: Unable to locate package libfoo3"],
+    ["npm ERR! code 1", "npm ERR! code 2", "npm ERR! code 3"],
+    ["Segmentation fault (core dumped) 1", "Segmentation fault (core dumped) 2", "Segmentation fault (core dumped) 3"],
+    ["ls: cannot access 'a1': No such file or directory", "ls: cannot access 'a2': No such file or directory",
+     "ls: cannot access 'a3': No such file or directory"],
+    ["Permission denied (publickey) 1", "Permission denied (publickey) 2", "Permission denied (publickey) 3"],
+    ["thread 'main' panicked at src/main.rs:1:5", "thread 'main' panicked at src/main.rs:2:5",
+     "thread 'main' panicked at src/main.rs:3:5"],
+    ["Exception in thread 1", "Exception in thread 2", "Exception in thread 3"],
+    ["Killed 1", "Killed 2", "Killed 3"],
+    ["sh: 1: foo1: not found", "sh: 1: foo2: not found", "sh: 1: foo3: not found"],
+    ["Aborted 1", "Aborted 2", "Aborted 3"],
+])
+def test_a_failure_line_without_the_word_error_is_never_collapsed(lines):
+    assert clean_log("\n".join(lines)).splitlines() == lines

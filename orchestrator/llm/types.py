@@ -152,8 +152,10 @@ def json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
 
 
-# DEL and the C1 controls: JSON escapes only C0 by itself, and ensure_ascii=False would let these through raw.
-_CONTROLS = re.compile("[\x7f-\x9f]")
+# DEL and the C1 controls: JSON escapes only C0 by itself, and ensure_ascii=False would let these through raw. A lone
+# surrogate too (a POSIX file name that is not UTF-8, as os.fsdecode gives it): written raw, the request to the provider
+# cannot be encoded; escaped, it is valid JSON that reads back as the same value.
+_CONTROLS = re.compile("[\x7f-\x9f\ud800-\udfff]")
 
 
 def tool_result_text(value: Any) -> str:
