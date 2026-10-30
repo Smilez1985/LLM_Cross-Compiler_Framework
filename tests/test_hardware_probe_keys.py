@@ -166,7 +166,7 @@ class TestCacheVulkanOpenCL:
             assert profile.get("VULKAN_INSTANCE_VERSION") == "1.3.275"   # the loader's file name (no vulkaninfo)
             assert profile.items_of("OPENCL_PLATFORMS") == ["nvidia-cuda:3.0", "intel-opencl-graphics:3.0",
                                                             "portable-computing-language:3.0"]
-            assert profile.get("PROBE_TOOL_VERSION") == "3.1.0"
+            assert profile.get("PROBE_TOOL_VERSION") == "3.2.0"
 
     @POSIX_ONLY
     @NEEDS_SHELL
@@ -259,10 +259,10 @@ class TestCacheVulkanOpenCL:
 
 class TestVersion:
 
-    def test_every_emitter_is_3_1_0(self):
-        assert probe.TOOL_VERSION == "3.1.0"
-        assert "PROBE_VERSION=3.1.0" in PROBE_SH.read_text(encoding="utf-8")
-        assert "$ProbeVersion = '3.1.0'" in PROBE_PS1.read_text(encoding="utf-8")
+    def test_every_emitter_is_3_2_0(self):
+        assert probe.TOOL_VERSION == "3.2.0"
+        assert "PROBE_VERSION=3.2.0" in PROBE_SH.read_text(encoding="utf-8")
+        assert "$ProbeVersion = '3.2.0'" in PROBE_PS1.read_text(encoding="utf-8")
 
     @pytest.mark.parametrize("name", sorted(p.name for p in FIXTURES.glob("schema2_*.txt")))
     def test_a_3_0_0_profile_stays_readable(self, tmp_path, name):
@@ -270,6 +270,9 @@ class TestVersion:
         profile = parse_profile(text)
         assert profile.get("PROBE_TOOL_VERSION") == "3.0.0"
         assert not any(k.startswith(("HAILO", "CPU_L2", "OPENCL", "VULKAN_INSTANCE")) for k in profile.values)
+        # probe 3.2.0's CPU keys of the other architectures: OFF on these x86 and ARM machines, no probe_again
+        assert profile.flag("SUPPORTS_RVV") == profile.flag("SUPPORTS_VXE2") == "OFF"
+        assert not [n for n in profile.notes if n.startswith("probe_again:")]
         store = ProfileStore(tmp_path / "state")
         store.save_device("0123456789abcdef", profile)
         assert store.load_device("0123456789abcdef") == profile.stable()

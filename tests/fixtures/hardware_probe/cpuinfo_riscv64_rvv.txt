@@ -1,0 +1,20 @@
+processor	: 0
+hart		: 0
+isa		: rv64gcv_zfh_zvfh_zicbop_zihintpause
+mmu		: sv39
+uarch		: example,rvv-core
+mvendorid	: 0x0
+marchid		: 0x0
+mimpid		: 0x0
+hart isa	: rv64gcv_zfh_zvfh_zicbop_zihintpause_zba
+
+processor	: 1
+hart		: 1
+isa		: rv64gcv_zfh_zvfh_zicbop_zihintpause
+mmu		: sv39
+uarch		: example,rvv-core
+mvendorid	: 0x0
+marchid		: 0x0
+mimpid		: 0x0
+hart isa	: rv64gcv_zfh_zvfh_zicbop_zihintpause_zba
+

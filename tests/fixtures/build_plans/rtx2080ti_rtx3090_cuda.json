@@ -4,6 +4,17 @@
   "builder": {
     "kind": "native"
   },
+  "cpu_features": {
+    "unusable": [],
+    "used": [
+      "SSE42",
+      "AVX",
+      "AVX2",
+      "BMI2",
+      "F16C",
+      "FMA"
+    ]
+  },
   "notes": [
     "backend cuda: NVIDIA GPU(s), compute 7.5, 8.6: CUDA 13.0.2",
     "real code for compute 7.5, 8.6 only: another GPU needs a rebuild",

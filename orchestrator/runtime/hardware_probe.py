@@ -45,7 +45,7 @@ import time
 from datetime import datetime, timezone
 
 TOOL = "python"
-TOOL_VERSION = "3.1.0"
+TOOL_VERSION = "3.2.0"
 SCHEMA = "2"
 FILE_NAME = "target_hardware_config.txt"
 MAX_VALUE = 4096
@@ -123,6 +123,21 @@ KEYS = {
     "SUPPORTS_SVE2": ("bool", None, 1, _ARM, ()),
     "SUPPORTS_SME": ("bool", None, 1, _ARM, ()),
     "SUPPORTS_BF16_ARM": ("bool", None, 1, _ARM, ()),
+    "SUPPORTS_RVV": ("bool", None, 1, ("riscv64",), ()),
+    "SUPPORTS_RV_ZFH": ("bool", None, 1, ("riscv64",), ()),
+    "SUPPORTS_RV_ZVFH": ("bool", None, 1, ("riscv64",), ()),
+    "SUPPORTS_RV_ZICBOP": ("bool", None, 1, ("riscv64",), ()),
+    "SUPPORTS_RV_ZIHINTPAUSE": ("bool", None, 1, ("riscv64",), ()),
+    "SUPPORTS_RV_ZVFBFWMA": ("bool", None, 1, ("riscv64",), ()),
+    "SUPPORTS_RV_ZBA": ("bool", None, 1, ("riscv64",), ()),
+    "SUPPORTS_XTHEADVECTOR": ("bool", None, 1, ("riscv64",), ()),
+    "SUPPORTS_LSX": ("bool", None, 1, ("loongarch64",), ()),
+    "SUPPORTS_LASX": ("bool", None, 1, ("loongarch64",), ()),
+    "SUPPORTS_VSX": ("bool", None, 1, ("ppc64le",), ()),
+    "POWER_CPU_TYPE": ("enum", ("power7", "power8", "power9", "power10", "power11"), 0, ("ppc64le",), ()),
+    "SUPPORTS_VXE": ("bool", None, 1, ("s390x",), ()),
+    "SUPPORTS_VXE2": ("bool", None, 1, ("s390x",), ()),
+    "SUPPORTS_NNPA": ("bool", None, 1, ("s390x",), ()),
     "RAM_TOTAL_MB": ("int", (16, 16777216), 1, (), ()),
     "SWAP_TOTAL_MB": ("int", (0, 16777216), 0, (), ()),
     "RAM_AVAILABLE_MB": ("int", (0, 16777216), 0, (), ()),
@@ -309,7 +324,31 @@ CPU_FEATURES = {
     "SUPPORTS_SVE2": (("sve2",), (), 47, 26100, "FEAT_SVE2"),
     "SUPPORTS_SME": (("sme",), (), 70, 26100, "FEAT_SME"),
     "SUPPORTS_BF16_ARM": (("bf16",), (), None, None, "FEAT_BF16"),
+    "SUPPORTS_RVV": (("v",), (), None, None, None),
+    "SUPPORTS_RV_ZFH": (("zfh",), (), None, None, None),
+    "SUPPORTS_RV_ZVFH": (("zvfh",), (), None, None, None),
+    "SUPPORTS_RV_ZICBOP": (("zicbop",), (), None, None, None),
+    "SUPPORTS_RV_ZIHINTPAUSE": (("zihintpause",), (), None, None, None),
+    "SUPPORTS_RV_ZVFBFWMA": (("zvfbfwma",), (), None, None, None),
+    "SUPPORTS_RV_ZBA": (("zba",), (), None, None, None),
+    "SUPPORTS_XTHEADVECTOR": (("xtheadvector",), (), None, None, None),
+    "SUPPORTS_LSX": (("lsx",), (), None, None, None),
+    "SUPPORTS_LASX": (("lasx",), (), None, None, None),
+    "SUPPORTS_VSX": (("vsx",), (), None, None, None),
+    "SUPPORTS_VXE": (("vxe",), (), None, None, None),
+    "SUPPORTS_VXE2": (("vxe2",), (), None, None, None),
+    "SUPPORTS_NNPA": (("nnpa",), (), None, None, None),
 }
+# Linux AT_HWCAP (1) / AT_HWCAP2 (2) bits -> the /proc/cpuinfo token they stand for, per 64-bit ARCH (the schema's
+# tables.hwcap_bits). The tokens of the set bits join the cpuinfo tokens of the CPU features.
+HWCAP_BITS = {
+    "arm64": {"asimd": (1, 1), "fphp": (1, 9), "asimdhp": (1, 10), "asimddp": (1, 20), "sve": (1, 22),
+              "sve2": (2, 1), "i8mm": (2, 13), "bf16": (2, 14), "sme": (2, 23)},
+    "ppc64le": {"vsx": (1, 7), "altivec": (1, 28)},
+}
+AT_HWCAP, AT_HWCAP2 = 16, 26
+# POWER generations POWER_CPU_TYPE names (VSX is part of the architecture from POWER7 on, ISA 2.06).
+POWER_TYPES = ("power7", "power8", "power9", "power10", "power11")
 
 # PCI device ids of AMD APU graphics (amdgpu_drv.c): their "VRAM" is a carve-out of the system RAM.
 AMD_APU_DEVICE_IDS = frozenset({
@@ -1385,6 +1424,9 @@ class Probe:
         if text is None:
             self.warn("not_determined", "CPU_FLAGS_ALL")
             return
+        if self.arch == "s390x":
+            self._cpu_s390x(text)
+            return
         processors = parse_cpuinfo(text)
         if not processors:
             return
@@ -1418,7 +1460,8 @@ class Probe:
             else:
                 self.warn("not_determined", "CPU_MODEL")
         else:
-            model = first.get("model name")
+            # x86 "model name", LoongArch "Model Name", RISC-V "uarch", POWER "cpu"
+            model = first.get("model name") or first.get("Model Name") or first.get("uarch") or first.get("cpu")
             if model:
                 self.put("CPU_MODEL", model)
             else:
@@ -1426,11 +1469,78 @@ class Probe:
         flags = first.get("flags") if not arm else first.get("Features")
         if flags is None:
             flags = first.get("flags") or first.get("Features")
+        listed = flags is not None
         tokens = [t for t in (flags or "").lower().split()]
+        if self.arch == "riscv64" and not tokens:
+            # the extensions every hart has ("isa"); a kernel without that line names each hart's ("hart isa")
+            isa = first.get("isa") or first.get("hart isa")
+            tokens, listed = riscv_isa_tokens(isa), isa is not None
         if tokens:
-            self.put("CPU_FLAGS_ALL", ",".join(tokens))
+            self.put("CPU_FLAGS_ALL", ",".join(distinct(tokens)))
+            self.put("CPU_FLAGS_SOURCE", "proc-cpuinfo")
+        if self.arch in HWCAP_BITS:
+            caps = self._hwcaps()
+            if caps is not None:
+                tokens = tokens + hwcap_tokens(self.arch, caps)
+                listed = True
+        if self.arch == "ppc64le":
+            tokens, listed = self._power_cpu(first.get("cpu"), tokens, listed)
+        self._features_from_flags(tokens if listed else None)
+
+    def _power_cpu(self, line, tokens, listed):
+        """POWER_CPU_TYPE from "cpu : POWER9 (raw), altivec supported"; altivec from that line, vsx from AT_HWCAP
+        (tokens) or from POWER7 on, where VSX is part of the architecture (ISA 2.06). Returns (tokens, listed)."""
+        tokens = list(tokens)
+        if line is None:
+            return tokens, listed
+        match = re.search(r"\bPOWER\s*(\d{1,2})\b", line, re.I)
+        power = "power" + match.group(1) if match else None
+        if power in POWER_TYPES:
+            self.put("POWER_CPU_TYPE", power)
+        else:
+            self.warn("not_determined", "POWER_CPU_TYPE")
+        if "altivec supported" in line.lower():
+            tokens.append("altivec")
+        if power in POWER_TYPES and "vsx" not in tokens:
+            tokens.append("vsx")
+        return tokens, True
+
+    def _cpu_s390x(self, text):
+        """s390x has no "processor : N" blocks: "# processors" and the "features" line of the whole file (the
+        "processor N:" lines with their identification numbers are never read)."""
+        fields = {}
+        for line in text.splitlines():
+            key, sep, value = line.partition(":")
+            if sep and key.strip() in ("# processors", "features"):
+                fields.setdefault(key.strip(), value.strip())
+        count = fields.get("# processors", "")
+        if count.isdigit():
+            self.put("CPU_CORES_LOGICAL", int(count))
+        flags = fields.get("features")
+        tokens = (flags or "").lower().split()
+        if tokens:
+            self.put("CPU_FLAGS_ALL", ",".join(distinct(tokens)))
             self.put("CPU_FLAGS_SOURCE", "proc-cpuinfo")
         self._features_from_flags(tokens if flags is not None else None)
+
+    def _hwcaps(self):
+        """(AT_HWCAP, AT_HWCAP2) of this machine, None when unknown: getauxval through ctypes, else
+        /proc/self/auxv. In sysroot mode (tests) only the sysroot's proc/self/auxv."""
+        if not self.sysroot:
+            try:
+                import ctypes
+                getauxval = ctypes.CDLL(None).getauxval
+                getauxval.restype, getauxval.argtypes = ctypes.c_ulong, [ctypes.c_ulong]
+                hwcap = getauxval(AT_HWCAP)
+                if hwcap:
+                    return hwcap, getauxval(AT_HWCAP2)
+            except (OSError, AttributeError, TypeError, ValueError):
+                pass
+        try:
+            with open(self.path("/proc/self/auxv"), "rb") as f:
+                return auxv_hwcaps(f.read(65536))
+        except OSError:
+            return None
 
     def _clusters(self, processors):
         """[(entry, core name)] per run of CPUs with the same implementer, part and maximum frequency."""
@@ -2350,6 +2460,37 @@ def parse_cpuinfo(text):
         elif current is not None and key and key not in current and key.lower() != "serial":
             current[key] = value
     return processors
+
+
+def riscv_isa_tokens(isa):
+    """A RISC-V ISA string of /proc/cpuinfo -> its extensions: rv64imafdcv_zfh_zvfh -> i m a f d c v zfh zvfh (g stands
+    for imafd with zicsr and zifencei). Not an rv32/rv64 string: []."""
+    match = re.match(r"^rv(?:32|64)([a-z]*)((?:_[a-z0-9]+)*)", (isa or "").strip().lower())
+    if not match:
+        return []
+    tokens = []
+    for letter in match.group(1):
+        tokens += ["i", "m", "a", "f", "d", "zicsr", "zifencei"] if letter == "g" else [letter]
+    tokens += [part for part in match.group(2).split("_") if part]
+    return distinct(tokens)
+
+
+def auxv_hwcaps(data):
+    """(AT_HWCAP, AT_HWCAP2) of the bytes of /proc/self/auxv (pairs of native 64-bit words), None without AT_HWCAP."""
+    values = {}
+    usable = len(data) - len(data) % 16
+    for kind, value in struct.iter_unpack("=QQ", data[:usable]):
+        if kind == 0:
+            break
+        values.setdefault(kind, value)
+    if AT_HWCAP not in values:
+        return None
+    return values[AT_HWCAP], values.get(AT_HWCAP2, 0)
+
+
+def hwcap_tokens(arch, caps):
+    """The cpuinfo tokens of the set AT_HWCAP / AT_HWCAP2 bits of `arch` (HWCAP_BITS), in table order."""
+    return [token for token, (word, bit) in HWCAP_BITS.get(arch, {}).items() if (caps[word - 1] >> bit) & 1]
 
 
 def parse_meminfo(text):

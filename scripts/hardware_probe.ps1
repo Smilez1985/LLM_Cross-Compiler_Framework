@@ -30,7 +30,7 @@ param(
     [switch]$NoToolchain
 )
 
-$ProbeVersion = '3.1.0'
+$ProbeVersion = '3.2.0'
 if ($OutputFile -eq '') { [Console]::Error.WriteLine('Usage: hardware_probe.ps1 [-OutputFile FILE|-] [-Elevate] [-NoToolchain]'); Exit 2 }
 if ($OutputFile -ne '-') {
     # Absolute, because an elevated restart starts in another folder.
@@ -180,6 +180,21 @@ $Features = [ordered]@{
     'SUPPORTS_SVE2' = @(47, 26100, 'arm')
     'SUPPORTS_SME' = @(70, 26100, 'arm')
     'SUPPORTS_BF16_ARM' = @($null, $null, 'arm')
+    # Probe 3.2.0: the CPU features of architectures Windows does not run (always OFF here).
+    'SUPPORTS_RVV' = @($null, $null, 'riscv')
+    'SUPPORTS_RV_ZFH' = @($null, $null, 'riscv')
+    'SUPPORTS_RV_ZVFH' = @($null, $null, 'riscv')
+    'SUPPORTS_RV_ZICBOP' = @($null, $null, 'riscv')
+    'SUPPORTS_RV_ZIHINTPAUSE' = @($null, $null, 'riscv')
+    'SUPPORTS_RV_ZVFBFWMA' = @($null, $null, 'riscv')
+    'SUPPORTS_RV_ZBA' = @($null, $null, 'riscv')
+    'SUPPORTS_XTHEADVECTOR' = @($null, $null, 'riscv')
+    'SUPPORTS_LSX' = @($null, $null, 'loongarch')
+    'SUPPORTS_LASX' = @($null, $null, 'loongarch')
+    'SUPPORTS_VSX' = @($null, $null, 'power')
+    'SUPPORTS_VXE' = @($null, $null, 's390x')
+    'SUPPORTS_VXE2' = @($null, $null, 's390x')
+    'SUPPORTS_NNPA' = @($null, $null, 's390x')
 }
 
 $P_Version = '^[0-9]{1,5}(\.[0-9]{1,6}){0,3}$'

@@ -29,9 +29,10 @@ of an option, and free text (CPU and GPU names) never reaches an option, a file 
 import hashlib
 import json
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from orchestrator.runtime.build import ggml_cpu_options as _cpu_options
 from orchestrator.runtime.catalog import BuildBase, CudaToolkit, RuntimeCatalog, version_tuple
 from orchestrator.runtime.profile import HardwareProfile
 
@@ -126,10 +127,26 @@ _X86_FLAGS: Mapping[str, Tuple[str, ...]] = {
     "GGML_AVX512_BF16": ("-mavx512bf16",), "GGML_AMX_TILE": ("-mamx-tile",), "GGML_AMX_INT8": ("-mamx-int8",),
     "GGML_AMX_BF16": ("-mamx-bf16",),
 }
-# The ARM features GGML_CPU_ARM_ARCH is built from, in the order of the extension suffixes.
+# The four ARM features whose UNKNOWN makes a build for another machine take all CPU variants (and that a native
+# build's identity records): a probe that cannot tell these cannot tell the board's base level.
 ARM_FEATURES: Mapping[str, str] = {
     "SUPPORTS_DOTPROD": "dotprod", "SUPPORTS_FP16_ARITH": "fp16", "SUPPORTS_I8MM": "i8mm", "SUPPORTS_SVE": "sve",
 }
+# Every -march tag GGML_CPU_ARM_ARCH is built from, in ggml's ARCH_TAGS order (ggml-cpu/CMakeLists.txt at the pin:
+# +dotprod +fp16 +sve +i8mm +sve2 +sme), from the inventory of the pin (ggml_cpu_options.py, the planned ARM tags).
+ARM_ARCH_TAGS: Tuple[Tuple[str, str], ...] = tuple(
+    (row.probe_key, row.flag.lstrip("+")) for row in _cpu_options.rows("arm64", _cpu_options.ARM_ARCH_TAG)
+    if row.state == _cpu_options.PLANNED and row.probe_key)
+# ARM features the board may have that no tag of the pin uses: probe key -> why (the plan names them as unusable).
+ARM_UNUSABLE: Mapping[str, str] = {
+    row.probe_key: row.reason for row in _cpu_options.rows("arm64", _cpu_options.ARM_ARCH_TAG)
+    if row.state == _cpu_options.NOT_USABLE and row.probe_key}
+# The tag each ARM tag builds on (probe keys, from the inventory): a tag is planned only when its base is planned, as
+# _X86_NEEDS for x86 (GCC and Clang make +sve imply +fp16 and +sve2 imply +sve, GCC 14 makes +sme imply +sve2, and
+# +i8mm without +dotprod or +fp16 would raise an armv8.0 board to armv8.2-a).
+ARM_NEEDS: Mapping[str, str] = {
+    row.probe_key: row.builds_on for row in _cpu_options.rows("arm64", _cpu_options.ARM_ARCH_TAG)
+    if row.state == _cpu_options.PLANNED and row.probe_key and row.builds_on}
 
 _SUPPORTED_ARCH = ("x86_64", "arm64")
 _SUPPORTED_OS = ("linux", "windows", "macos")
@@ -147,6 +164,8 @@ _RE_NATIVE = re.compile(r"^[A-Za-z0-9 ._=+,-]{1,512}$", re.ASCII)
 # Every option of a plan: computed from validated values only; this is the last guard before a command line.
 _RE_OPTION_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$", re.ASCII)
 _RE_OPTION_VALUE = re.compile(r"^[A-Za-z0-9 ._;:+=/$-]{0,256}$", re.ASCII)
+# A CPU feature as plans name it (DOTPROD, AVX512_VNNI, POWER_CPU_TYPE): the probe key without SUPPORTS_.
+_RE_FEATURE = re.compile(r"^[A-Z][A-Z0-9_]{0,47}$", re.ASCII)
 
 # Cross toolchains per target architecture and C library (Linux).
 _GNU_TRIPLE = {"x86_64": "x86_64-linux-gnu", "arm64": "aarch64-linux-gnu"}
@@ -274,6 +293,10 @@ class BuildPlan:
     verify: Mapping[str, Any]
     notes: Tuple[str, ...]
     build_id: str = ""
+    # The CPU features of the probe this plan uses, and those the machine has that the build cannot use (with the
+    # reason): {"used": [label, ...], "unusable": [{"feature": label, "reason": text}, ...]}. A summary of the
+    # options, so it stays out of the build ID.
+    cpu_features: Mapping[str, Any] = field(default_factory=lambda: {"used": [], "unusable": []})
 
     @property
     def targets(self) -> Tuple[str, ...]:
@@ -298,7 +321,9 @@ class BuildPlan:
                 "placement": self.placement, "backend": self.backend, "source": dict(self.source),
                 "target": dict(self.target), "builder": dict(self.builder),
                 "steps": [s.as_dict() for s in self.steps], "toolchain": dict(self.toolchain),
-                "verify": dict(self.verify), "notes": list(self.notes)}
+                "verify": dict(self.verify), "notes": list(self.notes),
+                "cpu_features": {"used": list(self.cpu_features.get("used") or []),
+                                 "unusable": [dict(u) for u in self.cpu_features.get("unusable") or []]}}
 
     def to_json(self) -> str:
         return json.dumps(self.as_dict(), indent=2, sort_keys=True) + "\n"
@@ -351,13 +376,24 @@ class BuildPlan:
         notes = data.get("notes") or []
         if not isinstance(notes, list):
             raise PlanError("notes is not a list")
+        features = mapping(data.get("cpu_features") or {}, "cpu_features")  # absent in plans before 3.3.0
+        used = features.get("used") or []
+        unusable = features.get("unusable") or []
+        if not isinstance(used, list) or not all(isinstance(u, str) and _RE_FEATURE.fullmatch(u) for u in used):
+            raise PlanError("cpu_features.used is not a list of feature names")
+        if not isinstance(unusable, list) or not all(
+                isinstance(u, Mapping) and isinstance(u.get("feature"), str) and _RE_FEATURE.fullmatch(u["feature"])
+                and isinstance(u.get("reason"), str) for u in unusable):
+            raise PlanError("cpu_features.unusable is not a list of features with their reason")
         return cls(recipe_version=recipe_version, purpose=text(data.get("purpose"), "purpose"),
                    placement=text(data.get("placement"), "placement"), backend=text(data.get("backend"), "backend"),
                    source=dict(source), target={"libc": None, **target},
                    builder=dict(mapping(data.get("builder"), "builder")), steps=tuple(steps),
                    toolchain=dict(mapping(data.get("toolchain"), "toolchain")),
                    verify=dict(mapping(data.get("verify") or {}, "verify")), notes=tuple(str(n) for n in notes),
-                   build_id=str(data.get("build_id") or ""))
+                   build_id=str(data.get("build_id") or ""),
+                   cpu_features={"used": list(used), "unusable": [{"feature": u["feature"], "reason": u["reason"]}
+                                                                 for u in unusable]})
 
 
 def build_id_of(inputs: Mapping[str, Any]) -> str:
@@ -630,13 +666,31 @@ def _flag(profile: HardwareProfile, key: str) -> str:
     return value if value in ("ON", "OFF", "UNKNOWN") else "UNKNOWN"
 
 
+def unplanned_features(profile: HardwareProfile) -> str:
+    """For a machine of an architecture the recipe does not build (riscv64, loongarch64, ppc64le, s390x): the CPU
+    features its probe found and the ggml option each would set (ggml_cpu_options.py), so the refusal loses none of
+    them; empty when the probe found none."""
+    found = []
+    for row in _cpu_options.rows(profile.arch or ""):
+        if row.probe_key is None or row.kind == _cpu_options.POWER_CPU_TYPE:
+            continue
+        value = profile.get(row.probe_key)
+        if row.probe_key == "POWER_CPU_TYPE":
+            if value:
+                found.append(f"{value} ({row.name}={value})")
+        elif _flag(profile, row.probe_key) == "ON":
+            found.append(f"{_cpu_options.feature_label(row.probe_key)} ({row.name}: {row.flag})")
+    return f"; the probe found these CPU features: {', '.join(found)}" if found else ""
+
+
 def _target_of(profile: HardwareProfile, purpose: str, placement: str, toolchain: ToolchainInfo) -> _Target:
     os_name, arch = profile.os, profile.arch
     if os_name not in _SUPPORTED_OS:
         raise PlanError(f"the recipe has no plan for OS {os_name!r} yet (supported: linux, windows, macos); "
                         "a build on the device itself is not offered for it either")
     if arch not in _SUPPORTED_ARCH:
-        raise PlanError(f"the recipe has no plan for architecture {arch!r} yet (supported: x86_64, arm64)")
+        raise PlanError(f"the recipe has no plan for architecture {arch!r} yet (supported: x86_64, arm64)"
+                        + unplanned_features(profile))
     if purpose == "host-tools" and placement == "container":
         # The tools run inside the target's toolchain image (a Linux container) on this machine's CPU.
         return _Target("linux", arch, toolchain.base_libc, None)
@@ -888,12 +942,60 @@ def _base_for(target: _Target, purpose: str, placement: str, catalog: RuntimeCat
 
 # --- options ----------------------------------------------------------------------------------------------------
 
-def arm_arch(profile: HardwareProfile) -> str:
-    """GGML_CPU_ARM_ARCH from the probe: armv8.2-a plus +dotprod / +fp16 / +i8mm / +sve for the features that are ON,
-    armv8-a when none is (RK3566/RK3568/RK3588: armv8.2-a+dotprod+fp16; RK3576/RK3562 per their probe). UNKNOWN counts
-    as OFF, so the result never asks for more than the probe confirmed."""
-    tags = [tag for key, tag in ARM_FEATURES.items() if _flag(profile, key) == "ON"]
-    return "armv8.2-a" + "".join(f"+{t}" for t in tags) if tags else "armv8-a"
+def sme_problem(compiler: Optional[Tuple[str, Optional[str]]]) -> Optional[str]:
+    """Why the compiler (family, version) cannot build +sme, None when it can (SME_COMPILER_MIN: GCC 14, Clang 18)."""
+    family, version = compiler if compiler is not None else ("", None)
+    minimum = SME_COMPILER_MIN.get(family)
+    need = (f"GCC {'.'.join(map(str, SME_COMPILER_MIN['gcc']))} or Clang "
+            f"{'.'.join(map(str, SME_COMPILER_MIN['clang']))}")
+    if minimum is None or version is None:
+        return f"compiler too old or not known: +sme needs {need}, and the build's compiler version is not known"
+    if (version_tuple(version) or (0,))[:len(minimum)] < minimum:
+        name = "GCC" if family == "gcc" else "Clang"
+        return f"compiler too old: +sme needs {need}, and the build compiles with {name} {version}"
+    return None
+
+
+def arm_plan(profile: HardwareProfile, compiler: Optional[Tuple[str, Optional[str]]] = None
+             ) -> Tuple[str, List[str], List[Dict[str, str]]]:
+    """(GGML_CPU_ARM_ARCH, the features it uses, the features the board has that the build cannot use, each with the
+    reason) from the probe. The one ARM planner; the targets' config_module.sh mirrors it (tests compare them).
+
+    armv8.2-a plus the tags of ARM_ARCH_TAGS in ggml's ARCH_TAGS order (+dotprod +fp16 +sve +i8mm +sve2 +sme) for
+    the features that are ON, armv8-a when none is (RK3566/RK3568/RK3588: armv8.2-a+dotprod+fp16). UNKNOWN counts as
+    OFF, so the plan never asks for more than the probe confirmed. +sme only with a compiler of SME_COMPILER_MIN
+    (`compiler`: (family, version); None when not known): else SME is named as unusable and the rest is built. BF16
+    has no kernel for ARM at the pin (ARM_UNUSABLE). A tag whose base (ARM_NEEDS) is not planned is named as unusable
+    too, so an inconsistent probe file cannot add +sve2 without +sve or +i8mm on an armv8.0 board."""
+    tags: List[str] = []
+    used: List[str] = []
+    planned: List[str] = []
+    unusable: List[Dict[str, str]] = []
+    for key, tag in ARM_ARCH_TAGS:
+        if _flag(profile, key) != "ON":
+            continue
+        base = ARM_NEEDS.get(key)
+        if base and base not in planned:
+            unusable.append({"feature": _cpu_options.feature_label(key),
+                             "reason": f"builds on {_cpu_options.feature_label(base)}, which the build does not use"})
+            continue
+        problem = sme_problem(compiler) if tag == "sme" else None
+        if problem:
+            unusable.append({"feature": _cpu_options.feature_label(key), "reason": problem})
+            continue
+        tags.append(tag)
+        planned.append(key)
+        used.append(_cpu_options.feature_label(key))
+    for key, reason in ARM_UNUSABLE.items():
+        if _flag(profile, key) == "ON":
+            unusable.append({"feature": _cpu_options.feature_label(key), "reason": reason})
+    march = "armv8.2-a" + "".join(f"+{t}" for t in tags) if tags else "armv8-a"
+    return march, used, unusable
+
+
+def arm_arch(profile: HardwareProfile, compiler: Optional[Tuple[str, Optional[str]]] = None) -> str:
+    """GGML_CPU_ARM_ARCH from the probe (arm_plan); without a compiler that knows +sme, SME is left out."""
+    return arm_plan(profile, compiler)[0]
 
 
 def _variants_supported(target: _Target) -> bool:
@@ -960,7 +1062,11 @@ def avx512_missing(cpu_flags: Sequence[str]) -> List[str]:
     return [part for part in AVX512_SET if part not in have]
 
 
-def _x86_options(profile: HardwareProfile, notes: List[str]) -> Tuple[Dict[str, str], List[str]]:
+def _x86_options(profile: HardwareProfile, notes: List[str],
+                 unusable: Optional[List[Dict[str, str]]] = None) -> Tuple[Dict[str, str], List[str]]:
+    """The 14 x86 options and their compiler flags for a build for another machine. A feature the probe confirms that
+    the build cannot use goes into `unusable` with the reason (and a note)."""
+    dropped: List[Dict[str, str]] = unusable if unusable is not None else []
     state = {key: _flag(profile, key) == "ON" for key in X86_FEATURES}
     missing = avx512_missing(profile.items_of("CPU_FLAGS_ALL")) if state["SUPPORTS_AVX512"] else []
     if missing:
@@ -968,16 +1074,54 @@ def _x86_options(profile: HardwareProfile, notes: List[str]) -> Tuple[Dict[str, 
         notes.append(f"SUPPORTS_AVX512 is ON, but GGML_AVX512 also compiles for {', '.join(missing)}, which the "
                      "probe's CPU flags do not name (a Xeon Phi has AVX-512 F without BW, VL and DQ; a probe without "
                      "CPU flags cannot tell): the AVX2 plan, no AVX-512")
+        dropped.append({"feature": "AVX512", "reason": f"GGML_AVX512 also compiles for {', '.join(missing)}, which "
+                                                       "the probe's CPU flags do not name"})
     for key in X86_FEATURES:  # dependents follow their base (in table order, so chains resolve)
         base = _X86_NEEDS.get(key)
         if base and state[key] and not state[base]:
             state[key] = False
             notes.append(f"{key} is ON without {base} in the probe; not used")
+            dropped.append({"feature": _cpu_options.feature_label(key),
+                            "reason": f"builds on {_cpu_options.feature_label(base)}, which the build does not use"})
     options = {X86_FEATURES[k]: ("ON" if on else "OFF") for k, on in state.items()}
     flags = [f for opt, opt_flags in _X86_FLAGS.items() if options[opt] == "ON" for f in opt_flags]  # ggml order
     if state["SUPPORTS_AVX512"]:
         notes.append("GGML_AVX512 also enables AVX-512 CD, VL, DQ and BW (every AVX-512 CPU since Skylake-X)")
     return options, flags
+
+
+def cpu_features_of(profile: HardwareProfile, arch: str, options: Mapping[str, str],
+                    unusable: Sequence[Mapping[str, str]] = ()) -> Dict[str, Any]:
+    """The plan's cpu_features: the probe's features the options use, and `unusable` (the features the machine has
+    that the build cannot use, with the reason). For GGML_NATIVE and the CPU variants every confirmed feature of the
+    architecture counts as used (the compiler or the run time picks them), except those no code of the pin uses."""
+    skip = {u["feature"] for u in unusable}
+    if arch == "x86_64":
+        keys = list(X86_FEATURES)
+        if options.get("GGML_NATIVE") == "ON" or options.get("GGML_CPU_ALL_VARIANTS") == "ON":
+            used = [k for k in keys if _flag(profile, k) == "ON"]
+        else:
+            used = [k for k, opt in X86_FEATURES.items() if options.get(opt) == "ON"]
+    elif arch == "arm64":
+        keys = [k for k, _tag in ARM_ARCH_TAGS]
+        if "GGML_CPU_ARM_ARCH" in options:
+            tags = options["GGML_CPU_ARM_ARCH"].split("+")[1:]
+            used = [k for k, tag in ARM_ARCH_TAGS if tag in tags]
+        else:
+            used = [k for k in keys if _flag(profile, k) == "ON"]
+    else:
+        used = []
+    labels = [_cpu_options.feature_label(k) for k in used]
+    return {"used": [f for f in labels if f not in skip], "unusable": [dict(u) for u in unusable]}
+
+
+def cpu_feature_lines(cpu_features: Mapping[str, Any]) -> List[str]:
+    """The plan's cpu_features as the plan views show them (CLI, GUI, MCP; labels and reasons only)."""
+    used = list(cpu_features.get("used") or [])
+    lines = [f"CPU features used: {', '.join(used) if used else 'none beyond the base level'}"]
+    lines += [f"The machine has {u['feature']}, the build cannot use it: {u['reason']}"
+              for u in cpu_features.get("unusable") or []]
+    return lines
 
 
 def _every_build(source: Any, *, shared: bool, native: bool, ccache: bool) -> Dict[str, str]:
@@ -1152,18 +1296,25 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
     cpu_opts: Dict[str, str] = {}
     compile_flags: List[str] = []
     expect_sdot = False
+    unusable: List[Dict[str, str]] = []
     if mode == "explicit":
         if target.arch == "x86_64":
-            cpu_opts, compile_flags = _x86_options(profile, notes)
+            cpu_opts, compile_flags = _x86_options(profile, notes, unusable)
         else:
-            march = arm_arch(profile)
+            march, _used, arm_unusable = arm_plan(profile, _variants_compiler(target, toolchain, base))
             cpu_opts["GGML_CPU_ARM_ARCH"] = march
             compile_flags = [f"-march={march}"]
             expect_sdot = "+dotprod" in march
-            unused = [k for k in ("SUPPORTS_SVE2", "SUPPORTS_SME", "SUPPORTS_BF16_ARM") if _flag(profile, k) == "ON"]
-            if unused:
-                notes.append(f"not used for GGML_CPU_ARM_ARCH: {', '.join(unused)}")
-    elif mode == "variants":
+            unusable.extend(arm_unusable)
+    elif target.arch == "arm64":  # GGML_NATIVE or the CPU variants: no code of the pin uses these
+        cid = toolchain.compiler_id()
+        if mode == "native" and cid is not None and cid[1] is not None and _flag(profile, "SUPPORTS_SME") == "ON":
+            problem = sme_problem((cid[0], cid[1]))  # -mcpu=native of a compiler without +sme leaves SME out
+            if problem:
+                unusable.append({"feature": _cpu_options.feature_label("SUPPORTS_SME"), "reason": problem})
+        unusable.extend({"feature": _cpu_options.feature_label(k), "reason": reason}
+                        for k, reason in ARM_UNUSABLE.items() if _flag(profile, k) == "ON")
+    if mode == "variants":
         if target.arch == "arm64":
             _check_arm_variants(_variants_compiler(target, toolchain, base), base, notes)
         cpu_opts.update({"GGML_BACKEND_DL": "ON", "GGML_CPU_ALL_VARIANTS": "ON"})
@@ -1349,7 +1500,8 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
         source={"repo": source.repo, "commit": source.commit, "tag": source.tag, "build_number": source.build_number},
         target={"os": target.os, "arch": target.arch, "libc": target.libc, "libc_version": target.libc_version,
                 "triple": triple},
-        builder=builder, steps=tuple(steps), toolchain=toolchain_ids, verify=verify, notes=tuple(notes))
+        builder=builder, steps=tuple(steps), toolchain=toolchain_ids, verify=verify, notes=tuple(notes),
+        cpu_features=cpu_features_of(profile, target.arch, dict(steps[0].options), unusable))
     return replace(plan, build_id=build_id_of(plan.id_inputs()))
 
 

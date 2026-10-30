@@ -839,6 +839,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
             return JobStartedOut(job_id=job.job_id, kind=job.kind, state=job.state)
 
         def deploy_facts(inp: DeviceIn, ctx: ToolContext) -> CallFacts:
+            from orchestrator.runtime.build.recipe import cpu_feature_lines
             from orchestrator.runtime.device import service as dev
             from orchestrator.runtime.device.package import DeviceRuntimeStore
             device = trusted(inp.device_id)
@@ -862,6 +863,9 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                                    "built first in the builder container "
                                    f"{plan.builder.get('base')} (Docker, no network during the build)"
                                    + ("" if plan.source_cached else "; fetches the pinned source (about 215 MB)"))),
+                # the board's CPU features: what the build uses and what it cannot use, with the reason
+                *(Fact("CPU features", line)
+                  for line in cpu_feature_lines(getattr(plan, "cpu_features", None) or {})),
                 Fact("Install", f"as the {DEVICE_ACCOUNT} into its llm-framework data folder"
                                 + (f", and the systemd unit with sudo -n (you confirmed it on "
                                    f"{settings.sudo_confirmed_at})" if settings.install == "systemd" else

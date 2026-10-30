@@ -1,0 +1,16 @@
+processor	: 0
+cpu		: POWER9 (raw), altivec supported
+clock		: 2300.000000MHz
+revision	: 2.2 (pvr 004e 1202)
+
+processor	: 1
+cpu		: POWER9 (raw), altivec supported
+clock		: 2300.000000MHz
+revision	: 2.2 (pvr 004e 1202)
+
+timebase	: 512000000
+platform	: PowerNV
+model		: 0000-000
+machine		: PowerNV 0000-000
+firmware	: OPAL
+MMU		: Radix
