@@ -1,4 +1,4 @@
-Version 3.2.0 · Stand 2026-10-30
+Version 3.3.0 · Stand 2026-10-30
 
 [English](Features.md) · **Deutsch**
 
@@ -570,7 +570,10 @@ entfernen...**, **Ältere Builds auf dem Board entfernen...**).
   die mit Clang und dem Sysroot des Boards gebaut werden (ungeprüft). Ein Board, das älter ist als jede Basis, oder
   ein Profil ohne `LIBC_VERSION` bekommt keinen Bauplan und eine Meldung, warum. Vorerst nur CPU-Builds: Vulkan auf
   einer Mali-GPU erst, wenn `llama-bench` zeigt, dass es den CPU-Build schlägt (Entscheidung D8). `llm-cli device
-  runtime plan` zeigt den Bauplan.
+  runtime plan` zeigt den Bauplan, mit den CPU-Merkmalen, die der Build nutzt („Genutzte CPU-Merkmale: DOTPROD,
+  FP16_ARITH“), und jedem Merkmal, das das Board hat, der Build aber nicht nutzen kann, mit dem Grund (SME mit einem
+  Compiler älter als GCC 14 oder Clang 18, BF16 auf ARM); das Board-Fenster zeigt dieselben Zeilen, und das
+  `MANIFEST.json` des Board-Pakets hält sie in `hardware.cpu_features` fest.
 - **Build:** im Builder-Container ohne Netz, die C++-Laufzeit statisch gelinkt, der Server ohne
   Subprozess-Unterstützung. Der Build wird auf deinem PC im Format geprüft (ELF-Architektur, keine neuere
   glibc-Symbolversion als auf dem Board, keine geteilte C++-Laufzeit) und wie jeder selbst gebaute Build abgelegt. Ein
@@ -3069,8 +3072,9 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   und macOS) und die Ersatzwege `scripts/hardware_probe.sh` (jede POSIX-Shell unter Linux, für Boards ohne Python)
   und `scripts/hardware_probe.ps1` (Windows). Sie hält das Betriebssystem fest (ID, Version, Familie, Variante wie
   DietPi, Kernel, Init-System), die Architektur des Userlands, die C-Bibliothek und ihre Version (glibc, musl), die
-  CPU (Modell, Kerne, ARM-Kerncluster, die x86- und ARM-Merkmale, für die ggml baut, etwa AVX-512 oder das ARM-
-  Skalarprodukt), Speicher, SoC, NPU und jede GPU (NVIDIA Compute Capability, AMD gfx-Target, Vulkan); keinen
+  CPU (Modell, Kerne, ARM-Kerncluster, jedes CPU-Merkmal, für das ggml baut: x86 und ARM, etwa AVX-512 oder das
+  ARM-Skalarprodukt, und seit Probe 3.2.0 RISC-V, LoongArch, POWER und s390x, auch aus den HWCAP-Bits des Kernels),
+  Speicher, SoC, NPU und jede GPU (NVIDIA Compute Capability, AMD gfx-Target, Vulkan); keinen
   Hostnamen, keine Seriennummer und keine MAC-Adresse. Die Probes brauchen kein Netz, fragen nie nach, installieren
   nichts und verlangen keine Administratorrechte, und externe Werkzeuge laufen mit Zeitlimit. Tests führen die `.py`
   und die `.sh` auf denselben Testrechnern aus und verlangen dasselbe Ergebnis. Das installierte Paket enthält eine

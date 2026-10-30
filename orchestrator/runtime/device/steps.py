@@ -47,6 +47,9 @@ def plan_view(plan: Any, built: Any = None) -> Dict[str, Any]:
         "builder": {k: builder.get(k) for k in ("base", "libc", "libc_version", "gcc")},
         "cpu_arm_arch": options.get("GGML_CPU_ARM_ARCH"),
         "cpu_all_variants": options.get("GGML_CPU_ALL_VARIANTS") == "ON",
+        # the probe's CPU features the build uses, and those the board has that it cannot use (with the reason)
+        "cpu_features_used": list(plan.cpu_features.get("used") or []),
+        "cpu_features_unusable": [dict(u) for u in plan.cpu_features.get("unusable") or []],
         "openmp": options.get("GGML_OPENMP"),
         "static_libstdcxx": bool(plan.verify.get("static_libstdcxx")),
         "programs": list(plan.targets),

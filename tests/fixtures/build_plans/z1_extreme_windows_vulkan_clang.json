@@ -4,6 +4,16 @@
   "builder": {
     "kind": "native"
   },
+  "cpu_features": {
+    "unusable": [],
+    "used": [
+      "SSE42",
+      "AVX",
+      "AVX2",
+      "BMI2",
+      "AVX512"
+    ]
+  },
   "notes": [
     "backend vulkan: a GPU on which the Vulkan build beats the CPU",
     "what -march/-mcpu=native expands to is recorded by the executor"

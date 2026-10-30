@@ -9,6 +9,13 @@
     "libc": "glibc",
     "libc_version": "2.36"
   },
+  "cpu_features": {
+    "unusable": [],
+    "used": [
+      "DOTPROD",
+      "FP16_ARITH"
+    ]
+  },
   "notes": [
     "backend cpu: Vulkan on Mali only after llama-bench shows it beats the CPU build (decision D8); CPU build"
   ],

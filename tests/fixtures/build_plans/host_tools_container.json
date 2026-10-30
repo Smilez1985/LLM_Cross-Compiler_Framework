@@ -7,6 +7,17 @@
     "kind": "container",
     "libc": "glibc"
   },
+  "cpu_features": {
+    "unusable": [],
+    "used": [
+      "SSE42",
+      "AVX",
+      "AVX2",
+      "BMI2",
+      "F16C",
+      "FMA"
+    ]
+  },
   "notes": [
     "backend cpu: conversion tools are CPU builds"
   ],

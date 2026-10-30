@@ -9,6 +9,29 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 (`` `YYYY-MM-DD HH:MM UTC` · `vX.Y.Z` ``) and is written under the version it lands in. Planned work is listed in the
 [roadmap](docs/ROADMAP.md), not here; how the framework is built and why is in the [design](docs/DESIGN.md).
 
+## [3.3.0] - 2026-10-30
+
+### Added
+- `2026-10-30 13:26 UTC` · `v3.3.0` **Every CPU feature ggml can use is found by the probe and planned by the build recipe** ([design](docs/DESIGN.md#targets-hardware-and-templates)):
+  the hardware probe 3.2.0 (`.py`, `.sh`, `.ps1`) also writes the CPU features of RISC-V (RVV, Zfh, Zvfh, Zicbop,
+  Zihintpause, Zvfbfwma, Zba, XTheadVector), LoongArch (LSX, LASX), POWER (VSX, the POWER generation) and s390x
+  (VXE, VXE2, NNPA), read from `/proc/cpuinfo` and the kernel's HWCAP bits; an older probe file gets them as OFF
+  outside its system and UNKNOWN on it, with a note to probe again. `orchestrator/runtime/build/ggml_cpu_options.py`
+  lists every CPU option of the pinned llama.cpp as planned or not usable with the reason, and
+  `tests/test_cpu_feature_coverage.py` fails when a new pin adds one. The build plan (`cpu_features`), the board
+  package's `MANIFEST.json` (`hardware.cpu_features`), `llm-cli runtime device plan`, the Boards window and the
+  deploy facts over MCP name the features the build uses and those the board has but the build cannot use, each
+  with its reason (SME with a compiler older than GCC 14 or Clang 18, BF16 on ARM, which the pin has no kernel
+  for). A board of a system the recipe does not plan yet is refused with the features its probe found.
+
+### Fixed
+- `2026-10-30 13:26 UTC` · `v3.3.0` **RK3566, RK3568 and RK3588 board packages are built with dotprod and fp16 again** ([design](docs/DESIGN.md#targets-hardware-and-templates)):
+  the config stage of the Rockchip target and of the module template planned `-mcpu` from the core's name and
+  `-march=armv8-a`, a second ARM planner beside the build recipe, so the packages lost the board's dotprod and fp16
+  (and `GGML_NEON`, which is no option of ggml). It now plans `-march` and `GGML_CPU_ARM_ARCH` from the probe's
+  features as the build recipe does (`armv8.2-a+dotprod+fp16` on these boards), and a table test runs both on the
+  same profiles.
+
 ## [3.2.0] - 2026-10-30
 
 ### Added
@@ -4362,6 +4385,7 @@ taken from source headers and the git history (2025-12-13 to 2026-01-14).
 - `2025-11-20 00:00 UTC` · `v1.0.0` Basic support for Rockchip RK3588/RK3566 cross-compilation.
 - `2025-11-20 00:00 UTC` · `v1.0.0` CLI (`llm-cli`) and GUI (`llm-gui`) entry points.
 
+[3.3.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v2.4.0...v3.0.0

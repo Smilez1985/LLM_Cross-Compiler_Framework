@@ -229,6 +229,8 @@ class DevicePlanFacts:
     target: Dict[str, Any]
     builder: Dict[str, Any]
     notes: List[str] = field(default_factory=list)
+    # the plan's CPU features: used, and unusable with the reason (labels only)
+    cpu_features: Dict[str, Any] = field(default_factory=lambda: {"used": [], "unusable": []})
 
 
 def device_profile(state_dir: Path, device: TrustedDevice):
@@ -279,7 +281,9 @@ def plan_facts(state_dir: Path, profile: Any) -> DevicePlanFacts:
             from None
     return DevicePlanFacts(build_id=plan.build_id, built=BuildStore(state_dir).find(plan) is not None,
                            source_cached=cached_source(pinned_source(), state_dir) is not None,
-                           target=dict(plan.target), builder=dict(plan.builder), notes=list(plan.notes))
+                           target=dict(plan.target), builder=dict(plan.builder), notes=list(plan.notes),
+                           cpu_features={"used": list(plan.cpu_features.get("used") or []),
+                                         "unusable": [dict(u) for u in plan.cpu_features.get("unusable") or []]})
 
 
 def ensure_build(state_dir: Path, device: TrustedDevice, profile: Any, expect_build_id: str, *,

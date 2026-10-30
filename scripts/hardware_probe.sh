@@ -21,7 +21,7 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-PROBE_VERSION=3.1.0
+PROBE_VERSION=3.2.0
 OUTPUT_FILE=target_hardware_config.txt
 INSTALL_TOOLS=0
 TOOLCHAIN=1
@@ -390,7 +390,15 @@ if [ "$SYSROOT" = 0 ] && [ "$(getconf LONG_BIT 2>/dev/null)" = 32 ]; then
     case "$ARCH" in x86_64) ARCH=x86 ;; arm64) ARCH=armv7 ;; esac
 fi
 put ARCH "$ARCH"
-case "$ARCH" in x86_64|x86) ARCH_CLASS=x86 ;; arm64|armv7|armv6) ARCH_CLASS=arm ;; *) ARCH_CLASS=other ;; esac
+case "$ARCH" in
+    x86_64|x86) ARCH_CLASS=x86 ;;
+    arm64|armv7|armv6) ARCH_CLASS=arm ;;
+    riscv64) ARCH_CLASS=riscv ;;
+    loongarch64) ARCH_CLASS=loongarch ;;
+    ppc64le) ARCH_CLASS=power ;;
+    s390x) ARCH_CLASS=s390x ;;
+    *) ARCH_CLASS=other ;;
+esac
 
 # /etc/os-release is parsed, never sourced.
 OSR=$(f /etc/os-release)
@@ -547,6 +555,81 @@ features() {
     feature SUPPORTS_SVE2 arm all sve2
     feature SUPPORTS_SME arm all sme
     feature SUPPORTS_BF16_ARM arm all bf16
+    feature SUPPORTS_RVV riscv all v
+    feature SUPPORTS_RV_ZFH riscv all zfh
+    feature SUPPORTS_RV_ZVFH riscv all zvfh
+    feature SUPPORTS_RV_ZICBOP riscv all zicbop
+    feature SUPPORTS_RV_ZIHINTPAUSE riscv all zihintpause
+    feature SUPPORTS_RV_ZVFBFWMA riscv all zvfbfwma
+    feature SUPPORTS_RV_ZBA riscv all zba
+    feature SUPPORTS_XTHEADVECTOR riscv all xtheadvector
+    feature SUPPORTS_LSX loongarch all lsx
+    feature SUPPORTS_LASX loongarch all lasx
+    feature SUPPORTS_VSX power all vsx
+    feature SUPPORTS_VXE s390x all vxe
+    feature SUPPORTS_VXE2 s390x all vxe2
+    feature SUPPORTS_NNPA s390x all nnpa
+}
+
+riscv_tokens() {  # ISA string -> its extensions, space-separated (g = imafd with zicsr and zifencei), as the .py
+    printf '%s\n' "$(lower "$(trim "$1")")" | grep -E '^rv(32|64)' |
+        sed -n 's/^rv[0-9][0-9]\([a-z]*\)\(\(_[a-z0-9][a-z0-9]*\)*\).*/\1|\2/p' | awk -F'|' '{
+            base = $1; rest = $2; n = 0
+            for (i = 1; i <= length(base); i++) {
+                c = substr(base, i, 1)
+                if (c == "g") { split("i m a f d zicsr zifencei", g, " "); for (j = 1; j <= 7; j++) out[++n] = g[j] }
+                else out[++n] = c
+            }
+            m = split(rest, parts, "_")
+            for (j = 1; j <= m; j++) if (parts[j] != "") out[++n] = parts[j]
+            s = ""
+            for (j = 1; j <= n; j++) if (!(out[j] in seen)) { seen[out[j]] = 1; s = s (s == "" ? "" : " ") out[j] }
+            printf "%s", s
+        }'
+}
+
+# Linux AT_HWCAP (1) / AT_HWCAP2 (2) bits -> the /proc/cpuinfo token they stand for (the schema's tables.hwcap_bits).
+hwcap_bits() {
+    case "$1" in
+        arm64) echo "asimd:1:1 fphp:1:9 asimdhp:1:10 asimddp:1:20 sve:1:22 sve2:2:1 i8mm:2:13 bf16:2:14 sme:2:23" ;;
+        ppc64le) echo "vsx:1:7 altivec:1:28" ;;
+    esac
+}
+
+hwcaps() {  # "HWCAP HWCAP2" of /proc/self/auxv (the sysroot's in tests; od's own, the same machine, otherwise)
+    have od || return 1
+    words=$(od -An -v -t u8 "$(f /proc/self/auxv)" 2>/dev/null) || return 1
+    # shellcheck disable=SC2086
+    printf '%s\n' $words | awk '
+        NR % 2 == 1 { k = $1; next }
+        { if (k == 0) exit; if (!(k in v)) v[k] = $1 }
+        END { if (!(16 in v)) exit 1; printf "%s %s", v[16], ((26 in v) ? v[26] : 0) }'
+}
+
+hwcap_tokens() {  # ARCH HWCAP HWCAP2: the tokens of the set bits, in table order
+    out=""
+    for row in $(hwcap_bits "$1"); do
+        token=${row%%:*}; rest=${row#*:}; word=${rest%%:*}; bit=${rest#*:}
+        if [ "$word" = 1 ]; then cap=$2; else cap=$3; fi
+        [ $(( (cap >> bit) & 1 )) = 1 ] && out="$out $token"
+    done
+    printf '%s' "$out"
+}
+
+power_cpu() {  # POWER_CPU_TYPE, altivec and vsx from the cpu line (POWER7 and later have VSX), as the .py
+    line=$(cpu_field PCPU)
+    n=$(printf '%s\n' "$line" | grep -oiE '(^|[^A-Za-z0-9_])POWER[[:space:]]*[0-9]{1,2}([^A-Za-z0-9_]|$)' | head -n1 |
+        tr -cd '0-9')
+    power=""
+    case "power$n" in
+        power7|power8|power9|power10|power11) power="power$n"; put POWER_CPU_TYPE "$power" ;;
+        *) warn "not_determined:POWER_CPU_TYPE" ;;
+    esac
+    case "$(lower "$line")" in *"altivec supported"*) TOKENS="$TOKENS altivec" ;; esac
+    if [ -n "$power" ]; then
+        case " $TOKENS " in *" vsx "*) ;; *) TOKENS="$TOKENS vsx" ;; esac
+    fi
+    HAVE_FLAGS=1
 }
 
 CPUINFO=$(f /proc/cpuinfo)
@@ -577,7 +660,14 @@ if [ -f "$CPUINFO" ]; then
                 }
             }
             print "PAIRS=" np + 0
-            if ((1 SUBSEP "model name") in f) print "MODEL=" f[1 SUBSEP "model name"]
+            # x86 "model name", LoongArch "Model Name", RISC-V "uarch", POWER "cpu" (the first one that is set)
+            m = ""; split("model name|Model Name|uarch|cpu", mk, "|")
+            for (j = 1; j <= 4 && m == ""; j++) if ((1 SUBSEP mk[j]) in f) m = f[1 SUBSEP mk[j]]
+            if (m != "") print "MODEL=" m
+            if ((1 SUBSEP "cpu") in f) print "PCPU=" f[1 SUBSEP "cpu"]
+            if (((1 SUBSEP "isa") in f) && f[1 SUBSEP "isa"] != "") print "ISA=" f[1 SUBSEP "isa"]
+            else if ((1 SUBSEP "hart isa") in f) print "ISA=" f[1 SUBSEP "hart isa"]
+            else if ((1 SUBSEP "isa") in f) print "ISA="
             if ((1 SUBSEP "vendor_id") in f) print "VENDOR=" f[1 SUBSEP "vendor_id"]
             if ((1 SUBSEP "flags") in f) print "FLAGS=" f[1 SUBSEP "flags"]
             if ((1 SUBSEP "Features") in f) print "FEATURES=" f[1 SUBSEP "Features"]
@@ -667,7 +757,54 @@ if [ -f "$CPUINFO" ]; then
         else FLAGS="" HAVE_FLAGS=0
         fi
         TOKENS=$(lower "$FLAGS" | tr -s ' \t' '  ')
+        if [ "$ARCH" = riscv64 ] && [ -z "$(trim "$TOKENS")" ] && cpu_has ISA; then
+            # the extensions every hart has ("isa"); a kernel without that line names each hart's ("hart isa")
+            TOKENS=$(riscv_tokens "$(cpu_field ISA)") HAVE_FLAGS=1
+        fi
         set -f
+        # shellcheck disable=SC2086
+        LIST=$(printf '%s\n' $TOKENS | awk '
+            length($0) <= 48 && $0 ~ /^[a-z0-9_.]+$/ && !seen[$0]++ {
+                if (n >= 1024 || length(out) + (n ? 1 : 0) + length($0) > 4096) exit
+                out = out (n ? "," : "") $0; n++
+            }
+            END { printf "%s", out }')
+        set +f
+        if [ -n "$(trim "$TOKENS")" ]; then
+            if [ -n "$LIST" ]; then put CPU_FLAGS_ALL "$LIST"; else warn "not_determined:CPU_FLAGS_ALL"; fi
+            put CPU_FLAGS_SOURCE proc-cpuinfo
+        fi
+        case "$ARCH" in
+            arm64|ppc64le)
+                if CAPS=$(hwcaps); then
+                    # shellcheck disable=SC2086
+                    TOKENS="$TOKENS $(hwcap_tokens "$ARCH" $CAPS)" HAVE_FLAGS=1
+                fi ;;
+        esac
+        if [ "$ARCH" = ppc64le ] && cpu_has PCPU; then power_cpu; fi
+        features
+    elif [ "$ARCH" = s390x ]; then
+        # s390x has no "processor : N" blocks: "# processors" and the "features" line of the whole file (the
+        # "processor N:" lines with their identification numbers are never read).
+        S390=$(awk '
+            function trim(s) { gsub(/^[ \t\r]+|[ \t\r]+$/, "", s); return s }
+            {
+                i = index($0, ":"); if (i == 0) next
+                key = trim(substr($0, 1, i - 1))
+                if ((key == "# processors" || key == "features") && !(key in f)) f[key] = trim(substr($0, i + 1))
+            }
+            END {
+                if ("# processors" in f) print "COUNT=" f["# processors"]
+                if ("features" in f) print "FEATURES=" f["features"]
+            }' "$CPUINFO" 2>/dev/null)
+        s390_field() { printf '%s\n' "$S390" | sed -n "s/^$1=//p" | head -n1; }
+        put_int CPU_CORES_LOGICAL "$(s390_field COUNT)" 1 4096
+        HAVE_FLAGS=0 TOKENS=""
+        if printf '%s\n' "$S390" | grep -q '^FEATURES='; then
+            HAVE_FLAGS=1 TOKENS=$(lower "$(s390_field FEATURES)" | tr -s ' \t' '  ')
+        fi
+        set -f
+        # shellcheck disable=SC2086
         LIST=$(printf '%s\n' $TOKENS | awk '
             length($0) <= 48 && $0 ~ /^[a-z0-9_.]+$/ && !seen[$0]++ {
                 if (n >= 1024 || length(out) + (n ? 1 : 0) + length($0) > 4096) exit

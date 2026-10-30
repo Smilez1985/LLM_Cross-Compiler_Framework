@@ -714,6 +714,8 @@ create_package_manifest() {
         --set "hardware.arch=${PROFILE_ARCH:-}" \
         --set "hardware.cpu=${TARGET_CPU:-generic}" \
         --set "hardware.cflags=${CFLAGS:-}" \
+        --list "hardware.cpu_features.used=${CPU_FEATURES_USED:-}" \
+        --features "hardware.cpu_features.unusable=${CPU_FEATURES_UNUSABLE:-}" \
         --set "hardware.cxxflags=${CXXFLAGS:-}" \
         --set "hardware.cmake_flags=${CMAKE_FLAGS:-}" \
         --set "hardware.neon=${HW_SUPPORTS_NEON:-unknown}" \
