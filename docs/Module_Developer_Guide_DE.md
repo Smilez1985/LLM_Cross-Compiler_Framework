@@ -277,7 +277,7 @@ Auf deinem Computer wird der Schnappschuss nicht importiert: seine Seiten sind s
 Exportierst du das Target als Paket, reist der Schnappschuss mit, und das Framework des Empfängers prüft ihn bei der
 Installation wie ein Wissenspaket (eine Liste von Seiten, jede mit ihrer Quelle, und seine Lizenzdateien) und
 importiert ihn unter diesem Target in dessen Wissensbasis, mit einem Snapshot dieser Wissensbasis vorher; eine neuere
-Version deines Target-Pakets ersetzt dort die Auszüge der älteren (DECISIONS Runde 23 Punkt 8).
+Version deines Target-Pakets ersetzt dort die Auszüge der älteren.
 
 Das Ergebnis ist ein **Gerüst**, noch kein funktionierendes Target:
 
@@ -1157,7 +1157,7 @@ beschrieben.
 
 ### 11.6 Die Schlüssel der Probe 3.1.0 und wie ein Modul sie nutzt
 
-Probe 3.1.0 (`PROBE_TOOL_VERSION=3.1.0`; Entscheidungen des Maintainers, Runde 23: Punkt 11, O-PREP und O-HAILO) hat
+Probe 3.1.0 (`PROBE_TOOL_VERSION=3.1.0`) hat
 die Schlüssel unten hinzugefügt. Jeder wird so gelesen wie die älteren Schlüssel: aus einer Datei, einem
 sysfs-Eintrag oder einem Hersteller-Werkzeug, das schon auf dem Rechner ist, mit fester Argumentliste, leerer
 Standardeingabe und Zeitlimit; nichts wird installiert, nichts läuft mit sudo. Ein Schlüssel, dessen Hardware oder

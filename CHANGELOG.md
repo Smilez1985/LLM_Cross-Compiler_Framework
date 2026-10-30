@@ -42,6 +42,12 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   it. The note's functions moved to `orchestrator/Core/mojo/oracle_note.py` (still importable from `banner.py`) and
   never raise for any bad state folder (a folder in place of the file, bad JSON, a non-dict, a read-only folder, any
   other error); only the error's type name is logged.
+- `2026-10-30 00:30 UTC` · `v3.2.0` **The public documents name decisions by what they decide** ([design](docs/DESIGN.md#components-and-decisions)):
+  the changelog, the design, the roadmap, the contributing guide and the module developer's guide no longer point
+  to the maintainer's working log or its round numbers; a decision is named by its content or its row in the
+  design, and a replaced decision's history line by its date. `tests/test_docs.py` checks every Markdown file for
+  it, and the two messages that still named a round (a Mojo finding about loose knowledge files and a tool
+  registration error) say only the rule.
 
 ### Fixed
 - `2026-10-29 23:36 UTC` · `v3.2.0` **Container engine follow-ups: a `DOCKER_HOST` left from Podman, `/dev/dri` under rootless Podman,
@@ -116,7 +122,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 ## [3.1.0] - 2026-10-29
 
 ### Added
-- `2026-10-24 00:06 UTC` · `v3.1.0` **Mojo closes the circle: the crystal ball after Mojo Miracle** (DECISIONS round 27 and its addendum): when Mojo
+- `2026-10-24 00:06 UTC` · `v3.1.0` **Mojo closes the circle: the crystal ball after Mojo Miracle** (decision and its addendum): when Mojo
   Miracle ends after Mojo Oracle at a terminal (the answer `y` to "Run Mojo Miracle now?", or `llmcf mojo --miracle`
   while an earlier Oracle run at the terminal is still open), `llmcf mojo` shows a large ASCII crystal ball, in colour
   where the console can show colour (rich's console decides: no colour without a terminal, with `NO_COLOR` or on a
@@ -129,7 +135,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   `run_mojo_miracle` or in the GUI: nothing AI-facing changes. The drawing (pure ASCII, 60 columns) and its colour mask
   live in `orchestrator/Core/mojo/banner.py`, one place to swap them; a test checks that they have the same shape.
 - `2026-10-23 17:39 UTC` · `v3.1.0` **Hardware probe 3.1.0: L2 cache, Vulkan instance version, OpenCL platforms, the Hailo keys and the vendor
-  runtimes** (consolidation chain probe-keys; decisions round 23 item 11, O-PREP and O-HAILO, HAILO_PLAN.md section 2):
+  runtimes** (consolidation chain probe-keys, O-PREP and O-HAILO, HAILO_PLAN.md section 2):
   `scripts/hardware_probe.py` (and its package copy), `hardware_probe.sh` and `hardware_probe.ps1` write, validated by
   `configs/hardware_probe_schema.yml`, `CPU_L2_CACHE_KB` (the largest level-2 cache), `VULKAN_INSTANCE_VERSION`
   (vulkaninfo, else the loader's file name or `vulkan-1.dll`) and `OPENCL_PLATFORMS` (`<name>:<OpenCL version>` of
@@ -161,7 +167,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   "Nothing was taken over: ..." with the reason, as the window shows it, never with a traceback. The GUI parity test
   names its mouse path (`orchestrator/gui/menus/existing.py`: `btn_hf_take_over` in the browser). Tests:
   `tests/test_hf_takeover.py` `TestTheCommandLinesTakeOver`.
-- `2026-10-22 14:37 UTC` · `v3.1.0` **A trusted board's address and host key are editable by you** (DECISIONS round 10 Q5): `llm-cli deploy devices
+- `2026-10-22 14:37 UTC` · `v3.1.0` **A trusted board's address and host key are editable by you**: `llm-cli deploy devices
   edit DEVICE [--host] [--port] [--key "KEY LINE" | --read-key]` and **Edit address or key...** in **Boards > Boards
   and Devices...** change the board's host name or IP address, its SSH port or its host key in the framework's
   `known_hosts`, for example after its address changed or it was reinstalled. Nobody types a key: it is pasted (the
@@ -172,7 +178,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   anything changes and refused when `known_hosts` changed meanwhile. A new key gives the board a new device ID: its
   record moves there with its name and user, and whether the framework's key logs in is tested once; the key of
   another trusted board is refused, naming that board, so its record is never overwritten. The board's data moves
-  with its new key (DECISIONS round 22, P6; `orchestrator/runtime/device/board_move.py`): its stored probe, deploy
+  with its new key (P6; `orchestrator/runtime/device/board_move.py`): its stored probe, deploy
   settings, deployed runtime (the record of the last deployment with its checks and benchmark, and its runtime
   packages), deploy record and its benchmark results with the builds ("tested on"). Every part is copied to the new
   device ID and checked (read back, the runtime packages as hard links or as copies with the same sha256) before
@@ -187,7 +193,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   in the background; the texts are English and German. No tool, the MCP server, Ditto or the device runtime steps can
   reach it (`orchestrator/remote/pairing.py` `replace_key`, an import-graph test).
 - `2026-10-17 12:38 UTC` · `v3.1.0` **Next steps instead of commands, allow-to-run proposals and translated, regrouped menus** (wave 6, chain a0;
-  DECISIONS round 10 V1, V2, Q2, Q7): the Qt-free catalogue `orchestrator/utils/next_steps/` holds every next step
+  decision V1, V2, Q2, Q7): the Qt-free catalogue `orchestrator/utils/next_steps/` holds every next step
   the wave-6 audit names (104 steps in nine area modules found by themselves, English and German texts), and one
   renderer turns a step into the command for the command line (`Next: ... llmcf ...`), the menu path in the person's
   language for the window (`StepsRow` with Open, Copy for a board's, an administrator's or another program's command,
@@ -207,7 +213,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   guards the texts, their "Sie" forms included, and counts the rest against a baseline that only goes down. The
   catalogue's German texts follow the chosen form of address: a module's `FORMAL` table holds the "Sie" form of each
   text that differs.
-- `2026-10-17 06:42 UTC` · `v3.1.0` **What Ditto and AI apps do becomes entries of the chat feed, in every process** (wave 6, DECISIONS round 9 U1,
+- `2026-10-17 06:42 UTC` · `v3.1.0` **What Ditto and AI apps do becomes entries of the chat feed, in every process** (wave 6, decision U1,
   consequence b): `orchestrator/Core/activity.py` writes one signed entry per event, from the process that did the work
   (the GUI, `llm-cli`, every stdio MCP server and the HTTP child): a call that changed something (the new registry event
   `call_done`, entry kind `ai_action`), the end of every job kind (a finish listener of the job service), the end of a
@@ -220,8 +226,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   the same refusal is written once in 30 seconds. `ActivityProducer.add_listener` hands the GUI its own process's
   entries at once, and `ConfigManager.reload_user_config` takes settings another process saved, except values this
   process holds itself (reported as conflicts).
-- `2026-10-17 11:20 UTC` · `v3.1.0` **Technical terms explained on mouse-over, a plain error box, and "du" or "Sie" in German** (wave 6, DECISIONS
-  round 10, V6, Q1, Q7): a glossary of 74 technical terms (`orchestrator/utils/l10n_glossary.py`, for example GGUF,
+- `2026-10-17 11:20 UTC` · `v3.1.0` **Technical terms explained on mouse-over, a plain error box, and "du" or "Sie" in German** (wave 6): a glossary of 74 technical terms (`orchestrator/utils/l10n_glossary.py`, for example GGUF,
   quantization and its types, importance matrix, KV cache, RKLLM, RKNN, Qdrant, MCP, SSH host key, fingerprint,
   digest, keyring), each with a short explanation in English and German and a link to the page that explains it best
   (Wikipedia, the term's own documentation such as qdrant.tech or the llama.cpp docs, or this manual). Resting the
@@ -261,8 +266,8 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   messages name a framework step as its command at a terminal and as its place in the window (the next-step
   catalogue's `hub.refresh`, `maint.review` and `audit.verify`, and the settings by their menu path), never a command
   in the window; the Community Hub's **Refresh** button is now translated.
-- `2026-10-17 02:35 UTC` · `v3.1.0` **`tests/test_cli_gui_parity.py`: every person-facing CLI command and option has a mouse path** (W1', round 9
-  U2): the test walks the whole command tree of `llm-cli` (294 paths: commands, subcommands and options) and reads
+- `2026-10-17 02:35 UTC` · `v3.1.0` **`tests/test_cli_gui_parity.py`: every person-facing CLI command and option has a mouse path**:
+  the test walks the whole command tree of `llm-cli` (294 paths: commands, subcommands and options) and reads
   `CLI_PATHS`, `MACHINE_ONLY` and the window and tab tables of every module in `orchestrator/gui/menus/`. It fails
   when a command or option has neither a mouse path nor a machine-only reason, when a table names a command that does
   not exist or that two modules claim, and, in an offscreen main window, when a named object is missing or a menu
@@ -272,7 +277,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   `ditto setup`, `--version` in Help > About) are named in `orchestrator/gui/menus/existing.py`; the menus of every
   area are found by their object names through one helper (`orchestrator/gui/menus/place.py`), so a translated menu
   title never adds a second menu. CONTRIBUTING names the rule.
-- `2026-10-16 20:14 UTC` · `v3.1.0` **Tools > Mojo Health Check... in the GUI** (DECISIONS W1': every action of the command line also by mouse): the
+- `2026-10-16 20:14 UTC` · `v3.1.0` **Tools > Mojo Health Check... in the GUI** (every action of the command line also by mouse): the
   Mojo window runs Mojo Oracle when it opens, off the GUI thread, and shows every finding as `llmcf mojo` prints it
   (the severity as text with its mark and icon, never colour alone; where with the full path, why it matters, the
   next step, what Mojo Miracle can do with the steps of its plan; the summary sentence and an overall line with the
@@ -284,7 +289,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   connection to its SSH port, no login). The command and the window share the same
   core functions (`Core/mojo/boards.py`, the person's view in `Core/mojo/views.py`, `docker_objects.offer_image_list`),
   so the output of `llmcf mojo` stays as it was.
-- `2026-10-16 20:14 UTC` · `v3.1.0` **Check this board in the Deployment tab** (group "Benchmark on a board", DECISIONS W1'): checks the chosen board
+- `2026-10-16 20:14 UTC` · `v3.1.0` **Check this board in the Deployment tab** (group "Benchmark on a board"): checks the chosen board
   as `llmcf mojo --oracle --board` does, in the background (one connection to its SSH port, no login), and shows its
   finding with the next step under the row; a problem is also said in a message.
 - `2026-10-16 20:23 UTC` · `v3.1.0` **Boards > Boards and Devices...: every `deploy devices` and `device` command by mouse** (W1'): a new Boards
@@ -472,7 +477,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   next question only. The saved AI settings stay unchanged (the question goes to a Ditto with these values over the
   settings, `orchestrator/Core/ai_override.py`, which also checks the provider like the CLI), the panel says what the
   question used, and the options are reset after it is sent; feed, questions and approvals work as before.
-- `2026-10-16 15:23 UTC` · `v3.1.0` **`llm-cli knowledge storage` and the old knowledge base storage in the deletion list** (DECISIONS RG5): `llm-cli
+- `2026-10-16 15:23 UTC` · `v3.1.0` **`llm-cli knowledge storage` and the old knowledge base storage in the deletion list**: `llm-cli
   knowledge storage` shows where the knowledge base is stored, when an older one was converted (how many excerpts,
   what was checked) or why its conversion failed, and the old folder with its full path and size; it reads the record
   only, and its first line names the storage really in use. `convert`, and **Tools > Knowledge Snapshots... > Try the
@@ -522,7 +527,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   ever written over. Mojo Oracle's knowledge line (with where, why and that only your list frees the room) and
   `llm-cli knowledge snapshots` show what the snapshots use against the free space. Mojo also checks the free space
   of the framework's build folder. Nothing is deleted by itself.
-- `2026-10-15 21:27 UTC` · `v3.1.0` **Deleting with the full list, and the trash** (delegation design 3.10, round 5 f; round 6 10.4): every deletion of
+- `2026-10-15 21:27 UTC` · `v3.1.0` **Deleting with the full list, and the trash** (delegation design 3.10): every deletion of
   something you can see asks first in the framework's own window (the GUI's deletion dialog, or a table and a question
   at a terminal) and lists each item with its name, full path or Docker id, file name, size and what it is; "No" is
   the default. Where you pick from a list, nothing is ticked, the list is built again from exactly what you ticked
@@ -605,7 +610,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 - `2026-10-16 00:39 UTC` · `v3.1.0` **The MCP server inside a container you built** (`llm-cli mcp serve --transport http --container`): binds the
   container's interfaces, and only inside a container; the named token, Host and Origin checks stay the same. Publish
   the port to the host's loopback only (`-p 127.0.0.1:8765:8765`).
-- `2026-10-12 14:23 UTC` · `v3.1.0` **The framework in a container, built on your own computer** (round 5 h): no framework image is published or
+- `2026-10-12 14:23 UTC` · `v3.1.0` **The framework in a container, built on your own computer**: no framework image is published or
   pulled. `scripts/build_container_image.sh` (`make build`) checks Docker, BuildKit and the checkout, stages exactly
   the files the repository ships and builds `Docker Setup/Dockerfile` with a local tag (`lcf-framework:local`; a
   name with a registry is refused), then prints how to run it. The Dockerfile runs the same installation as on bare
@@ -648,7 +653,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   Before every ingest, every restore and every knowledge pack import it saves a snapshot in `knowledge_snapshots/`
   of the per-user folder; a snapshot that does not fit on the disk stops the change (see "Disk check before every
   knowledge snapshot"). There
-  is no limit: it keeps as many as the disk holds, deletes none by itself, on any channel (round 5 f), and no number
+  is no limit: it keeps as many as the disk holds, deletes none by itself, on any channel, and no number
   of them brings a reminder or a warning. `llm-cli knowledge snapshots` (in the GUI: Tools > Knowledge Snapshots...)
   lists each one with its full path, name, size and what it is, so you delete (to the trash first) or export (copy
   elsewhere, checked by sha256) the ones you tick.
@@ -740,7 +745,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   the one Ditto uses; the runtime also takes it when it is given no folder), checked by size and sha256. Model
   tiers go down to 2-bit models for weak hardware (3 GB RAM). The "local" provider follows the running server
   without configuration.
-- `2026-10-15 22:54 UTC` · `v3.1.0` **Ditto's local server bare metal or in Docker** (DECISIONS round 7 D): `llm-cli ditto runtime ensure [--mode
+- `2026-10-15 22:54 UTC` · `v3.1.0` **Ditto's local server bare metal or in Docker**: `llm-cli ditto runtime ensure [--mode
   auto|bare-metal|docker] [--force]` installs it when it is not there and does nothing when it is (in either mode).
   With nothing installed it chooses bare metal (no Docker overhead), or Docker when bare metal is not possible here,
   and says why. While Docker cannot be asked, Docker mode stays as you chose it; when the recorded mode is gone, the
@@ -1319,7 +1324,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   `run_mojo_oracle` contacts no board; a finding of a board a recorded fact points to names the request that checks it
   (`check_board`), and `{"board": "<label>"}` checks that one trusted board now. An AI names a board by its label or
   device ID, never by an address (a board without a name of its own, whose label is its address, by its device ID).
-- `2026-10-16 00:39 UTC` · `v3.1.0` **The framework's own documents in the knowledge base** (DECISIONS round 8, N12): **Tools > Index the Framework's
+- `2026-10-16 00:39 UTC` · `v3.1.0` **The framework's own documents in the knowledge base**: **Tools > Index the Framework's
   Documentation...**, `llm-cli knowledge index-docs [--with-code]` and the MCP tool `index_framework_docs` (asked
   every time, runs as a job) add the framework's documentation (README, CONTRIBUTING, the `docs` folder) and, on
   request, its code and configuration (only what it ships: never your settings, your own targets or installed packs)
@@ -1423,8 +1428,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   site text and never reaches an AI).
 
 ### Changed
-- `2026-10-29 21:26 UTC` · `v3.1.0` **The blueprint is three files: the design, the roadmap and the changelog, and every decision is in the design**
-  (DECISIONS rounds 34 and 35): `docs/BLUEPRINT.md` held the design and the roadmap in one document; it is split word
+- `2026-10-29 21:26 UTC` · `v3.1.0` **The blueprint is three files: the design, the roadmap and the changelog, and every decision is in the design**: `docs/BLUEPRINT.md` held the design and the roadmap in one document; it is split word
   for word into `docs/DESIGN.md` (what the framework is, every component, and every decision with what it says, how the
   code does it and why) and `docs/ROADMAP.md` (what comes, only "in progress" and "planned"), each with its German twin,
   and `docs/BLUEPRINT.md` stays as a short index whose table sends every old anchor to its new place. The changelog has
@@ -1442,7 +1446,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   link and anchor, a scrub of the three files (no address outside the documentation ranges, no e-mail address, no home
   folder, no token-like string) and a "Decisions" block in every component of the design.
 - `2026-10-23 22:37 UTC` · `v3.1.0` **Offline mode: your opt-outs count only for what it may reach, a name with local and public addresses counts by
-  its local ones, and your own crawl reads your own network** (DECISIONS round 26 Q3, Q4, Q5): the locality rule now
+  its local ones, and your own crawl reads your own network**: the locality rule now
   answers two questions with one API, `check_reach` (may offline mode reach this: your opt-outs count) and
   `check_location` (where does this server stand: they never count). The privacy filter and a provider's local/cloud
   label ask the second, so a public host you count as local keeps the privacy filter on, online and offline, and
@@ -1457,7 +1461,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   subnet route counts like a VPN address. A lookup and the VPN check are kept 5 minutes and dropped after a failed
   connection, instead of for the whole run.
 - `2026-10-23 23:28 UTC` · `v3.1.0` **Offline mode: a build uses a model already on this computer, and Docker images come only from this computer or
-  your own network** (consolidation chain hf-local; decisions round 25 Q1 and round 24 L-NET). A build you start in
+  your own network** (consolidation chain hf-local). A build you start in
   offline mode no longer downloads its model from Hugging Face (`BuildEngine._stage_model` did not read offline mode;
   only AI builds and the GUI's commit check refused): a model named by its Hugging Face id is used from its complete
   copy on this computer without any connection (`orchestrator/Core/local_models.py` `local_copy`: the Builder's own
@@ -1479,8 +1483,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   `--offline-scan`); its image is pulled only from a registry in your own network, otherwise the scan is skipped
   with a warning (before, the scan pulled `aquasec/trivy` from Docker Hub and Trivy downloaded its database).
   Tests: `tests/test_offline_models.py`, `tests/test_offline_images.py`, `tests/test_review_build_engine.py`.
-- `2026-10-23 23:48 UTC` · `v3.1.0` **The framework's own OpenSSH settings file; OpenSSH reads neither `~/.ssh/config` nor `/etc/ssh/ssh_config`**
-  (DECISIONS round 25 Q4 and Q5): every call of this computer's OpenSSH client (the fallback without paramiko) gets
+- `2026-10-23 23:48 UTC` · `v3.1.0` **The framework's own OpenSSH settings file; OpenSSH reads neither `~/.ssh/config` nor `/etc/ssh/ssh_config`**: every call of this computer's OpenSSH client (the fallback without paramiko) gets
   `-F` with `ssh_config` in the framework's state folder from the one command-line builder
   (`orchestrator/remote/transport.py` `openssh_options`), created owner-only on first use and holding only what you
   add: `llm-cli deploy ssh-config show|edit HOST --line ...|import HOST` and **Boards > Boards and Devices... > SSH
@@ -1496,7 +1499,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   OpenSSH expands tokens, so a state folder with `%` in its name works (a real `sshd` test); on Windows the `-F` path
   is given with forward slashes. Connection sharing (`ControlMaster`) stays off; it is on the roadmap as an option.
   Tests: `tests/test_ssh_config.py`, `tests/test_remote_system_ssh.py` (the pinned command lines now start with `-F`).
-- `2026-10-23 23:48 UTC` · `v3.1.0` **The board's temperature during the checks on it, with a warning when it is hot** (DECISIONS round 23 item 16): a
+- `2026-10-23 23:48 UTC` · `v3.1.0` **The board's temperature during the checks on it, with a warning when it is hot**: a
   runtime deploy's checks, `llm-cli device runtime verify` and the benchmark (CLI, Boards window, Deployment tab, the
   AI's tools) read the board's thermal zones (temperature, type, trip points) and, on a Raspberry Pi, `vcgencmd` with
   one read-only command over the session they already have, before the short `llama-bench` run and after it; nothing
@@ -1515,7 +1518,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   Cancel closed the connection, one new login with the same host-key check stops it (`RemoteSession.for_cleanup`).
   Where the board has a working `timeout`, the board's own limit (900 s) wraps the run too, and the check names it
   when it ended the run. The clean-up of the run's folder stays as before. Tests: `tests/test_bench_stop.py`.
-- `2026-10-23 23:48 UTC` · `v3.1.0` **One audit sink for the person's board rows** (DECISIONS round 25 Q3): the CLI, the GUI (the Deployment tab, its
+- `2026-10-23 23:48 UTC` · `v3.1.0` **One audit sink for the person's board rows**: the CLI, the GUI (the Deployment tab, its
   hardware scan, the Boards window) and the person's consents behind the service's steps write their device, trust
   and consent rows through `person_steps.device_audit` (the tool registry's log, else the per-user `audit.db`); the
   Boards window's `audit` and the CLI's consent row no longer open their own. A test pins that each surface writes
@@ -1529,8 +1532,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   as the native branch does (into `$MODEL_DIR`, by default `~/models`) and starts the container with that folder
   mounted read-only at `/models` and `MODEL_FILE` naming the model there; before, the container started without the
   model. The generated script is run in a test with a stand-in `docker` (`tests/test_deploy_docker_model.py`).
-- `2026-10-29 15:08 UTC` · `v3.1.0` **The board's hardware probe drives every build; NPU formats only with its NPU** (DECISIONS round 23 items 5 and
-  15): a build request names the board's probe by its id (`llm-cli build start --probe ID`, `BuildRequestIn.probe`;
+- `2026-10-29 15:08 UTC` · `v3.1.0` **The board's hardware probe drives every build; NPU formats only with its NPU**: a build request names the board's probe by its id (`llm-cli build start --probe ID`, `BuildRequestIn.probe`;
   the Builder tab the probe it imported or scanned last, also for a recipe it builds as pinned,
   `BuildService.start_recipe(probe=...)`); without one the newest stored probe of a board of the
   request's SoC is used, and a probe of another board is refused: another board of the target, a board of another
@@ -1543,7 +1545,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   on an x86_64 build computer (RKLLM-Toolkit 1.3.1 ships Linux x86_64 wheels only); GGUF and RKNN (rknn-toolkit2
   2.3.2 has aarch64 wheels) also natively on an ARM build computer. The build service refuses with the reason after
   the target's own refusal; the Builder tab offers only the formats left.
-- `2026-10-29 15:08 UTC` · `v3.1.0` **`GGML_AVX512` only with the whole AVX-512 set; the template plans x86 like the build recipe** (round 25 Q7):
+- `2026-10-29 15:08 UTC` · `v3.1.0` **`GGML_AVX512` only with the whole AVX-512 set; the template plans x86 like the build recipe**:
   `GGML_AVX512` compiles for AVX-512 F, CD, VL, DQ and BW, but the probe's `SUPPORTS_AVX512` is AVX-512 F alone, so a
   Xeon Phi (Knights Landing) got `-mavx512bw` and illegal instructions. The build recipe and both config stages now
   use it only when the probe's CPU flags name every part, else the AVX2 plan (`recipe.AVX512_SET`,
@@ -1557,7 +1559,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   downloads. The verdicts stay in that one function. A project include (`CMAKE_PROJECT_INCLUDE`,
   `CMAKE_PROJECT_INCLUDE_BEFORE`, `CMAKE_PROJECT_<name>_INCLUDE`, `CMAKE_PROJECT_TOP_LEVEL_INCLUDES`) runs a script
   that can switch any option back on, so it is refused like `-C` and `-P` (`recipe.refused_option`, both verdicts).
-- `2026-10-29 15:08 UTC` · `v3.1.0` **Rockchip image in two stages; the template's format helpers are real** (round 23 item 14): the `builder` stage
+- `2026-10-29 15:08 UTC` · `v3.1.0` **Rockchip image in two stages; the template's format helpers are real**: the `builder` stage
   builds llama.cpp's tools and the three venvs with every pin; the image gets the venvs and the source tree with its
   tools at the same paths and only what the build stages run (no `build-essential`, `python3-dev`, `python3-venv` or
   `curl`), keeping the `llmbuilder` user and the entrypoint; hadolint has one warning fewer. On an arm64 build computer
@@ -1565,7 +1567,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   entrypoint's test report. The template's `rknn_module.sh` and `rkllm_module.sh` cloned toolkits at their newest
   commit and installed wheels during the build (which has no network) and converted nothing: they are now Rockchip's
   helpers, using the image's venv and refusing plainly without it.
-- `2026-10-23 17:16 UTC` · `v3.1.0` **`install.sh` on every Linux family, through the family's own package manager** (DECISIONS round 24 PKG): the
+- `2026-10-23 17:16 UTC` · `v3.1.0` **`install.sh` on every Linux family, through the family's own package manager** (decision PKG): the
   installer finds the family from `ID` and `ID_LIKE` in `/etc/os-release` with the hardware probe's table and installs
   what it needs (Python 3.11 to 3.14, `rsync`, Docker) with `apt`, `dnf`, `zypper`, `pacman` or `apk`, under the
   distribution's real package names; before, it knew only `apt` (Python and `rsync` too: `rsync` was installed with
@@ -1578,7 +1580,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   the distribution's own package (`moby-engine` on other Fedora-based systems, `docker` on Amazon Linux, openSUSE and
   SLES, where the Containers Module is switched on with `SUSEConnect`, and on Arch, Manjaro and EndeavourOS with
   `docker-buildx`; `docker` from Alpine's community repository). Rocky Linux, AlmaLinux, Oracle Linux and the other
-  RHEL rebuilds get Docker CE from Docker's RHEL repository (DECISIONS round 26 Q1: the framework needs BuildKit, for
+  RHEL rebuilds get Docker CE from Docker's RHEL repository (decision: the framework needs BuildKit, for
   example for Hailo), with the same key check and the RHEL version from `PLATFORM_ID` or `VERSION_ID`; Podman
   (`podman-docker` from the distribution, the person's `podman.socket` switched on) is only the fallback, when Docker
   publishes nothing for the architecture, the repository cannot be reached, the key does not match, dnf finds no
@@ -1587,8 +1589,8 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   without changing anything: the installer names exactly these packages and asks the person on the terminal, and
   only a yes uses `--allowerasing`; a no (or no terminal) removes nothing, takes back the repository file and key it
   wrote, and gives the Podman fallback. Fedora, RHEL and CentOS Stream keep their way exactly (no trial run, no
-  question, `dnf install -y` without `--allowerasing`; a conflict stops with the reason): round 26 decided the
-  question and the fallback for the rebuilds only (consolidation review install-followups-v). The
+  question, `dnf install -y` without `--allowerasing`; a conflict stops with the reason): the question and the fallback
+  were decided for the rebuilds only (consolidation review install-followups-v). The
   dry run names both ways and why; a second run where `docker` is Podman says how to switch. Checked for real in
   Rocky Linux 9.8 containers (Docker CE fresh; with `podman-docker` and a no; with `podman-docker` and a yes). SLES:
   when no Python 3.11 to 3.14 is there, the installer offers to switch on SUSE's Python 3 Module
@@ -1607,7 +1609,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   (family, package manager, packages, repositories, key fingerprints) without changing, downloading or calling
   anything and without root, exit code 0 or 1 as the installation would end. Tests run the installer against the
   `/etc/os-release` files of real distributions with fake package managers (`tests/test_install_distros.py`).
-- `2026-10-23 22:32 UTC` · `v3.1.0` **Podman instead of Docker: the framework finds it and refuses what it cannot do** (DECISIONS round 26 Q1): when
+- `2026-10-23 22:32 UTC` · `v3.1.0` **Podman instead of Docker: the framework finds it and refuses what it cannot do**: when
   `DOCKER_HOST` is not set and no Docker daemon answers, the framework sets `DOCKER_HOST` to the person's Podman socket
   for itself and the programs it starts (`orchestrator/utils/docker_engine.py`, one helper for the build engine, the
   builder image, Ditto's container, the one Docker check and `scripts/build_container_image.sh`; a `DOCKER_HOST` the
@@ -1622,7 +1624,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   person's folders as root's and every build stopped with "Permission denied" (found and checked against Podman
   5.8.9 rootless in the consolidation review install-followups-v).
 - `2026-10-23 17:39 UTC` · `v3.1.0` **Hardware probe: version 3.1.0, wider Hailo detection** (consolidation chain probe-keys): `PROBE_TOOL_VERSION` is
-  3.1.0 in all three probes (new keys are a schema change; HAILO_PLAN question 5, default recorded in round 23). The
+  3.1.0 in all three probes (new keys are a schema change; the Hailo plan's default). The
   new keys are never required or `ON`/`OFF` keys, so a profile of probe 3.0.0 is read and stored as before (tested on
   every schema 2 fixture). `NPU_DEVICE` also accepts the Hailo master driver's nodes `/dev/h1x-<N>` and `/dev/h1x`,
   `NPU_MODEL` is filled for a Hailo (`hailo-8l`, `hailo-10h`), and `SUPPORTS_HAILO` is also `ON` for the USB
@@ -1633,13 +1635,12 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   whole seconds since boot from `/proc/uptime` are the clock. `hardware_probe.ps1` no longer names its Hailo loop
   variable `$arch`: PowerShell names ignore case, so it overwrote the script's `ARCH` value. `hardware_probe.sh` no longer uses
   `ls | grep` for the DRM nodes (ShellCheck clean at warning level).
-- `2026-10-23 17:59 UTC` · `v3.1.0` **Offline mode reaches only this computer and your own network, and you decide what that includes** (DECISIONS
-  round 24, L-NET and "L-NET final"): one network-locality rule (`orchestrator/utils/locality.py`) decides every
+- `2026-10-23 17:59 UTC` · `v3.1.0` **Offline mode reaches only this computer and your own network, and you decide what that includes**: one network-locality rule (`orchestrator/utils/locality.py`) decides every
   reach-out of offline mode. A server name counts by every address it resolves to: loopback, private (RFC 1918,
   `fc00::/7`) and link-local addresses are local, a `.local`, `.lan`, `.fritz.box` or single-label name only when it
   resolves to such an address (it counted by its ending before, also with a public address; the privacy filter's
-  local label follows the same rule), and a name with local and public addresses counts by its local ones (round 26,
-  entry below). A Tailscale address
+  local label follows the same rule), and a name with local and public addresses counts by its local ones (entry
+  below). A Tailscale address
   (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) counts as local only when the VPN is Headscale in your own network with
   only own DERP relays, read with the `tailscale` command (`debug prefs`, `debug derp-map`); a public name such as a
   reverse proxy's is not local. You can count a VPN, a host or an address range as local in **File > Settings... >
@@ -1656,13 +1657,13 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   network is now refused in offline mode (its preset counted as local whatever its address), and the runtime's
   downloads and the pinned source come in offline mode only from your own network (a local mirror): `device runtime
   build`, `ditto runtime install` and `export-source`, the Boards window and Ditto > Local Runtime fetched from
-  GitHub or Hugging Face before. The person's Deep Ingest reads only the own network in offline mode (round 26,
-  entry below), and an AI's crawl reads nothing then.
+  GitHub or Hugging Face before. The person's Deep Ingest reads only the own network in offline mode (entry
+  below), and an AI's crawl reads nothing then.
   `build_local_runtime`, `deploy_device_runtime` and `add_pack_from_index` look at offline mode again after the
   person's answer, as `download_hf_file` does. Refusals name the host, why it is not local and the opt-out. The
   local/cloud labels of the bundled providers do not change. Every reader of the setting now asks the one offline
   check, `locality.offline_mode` (`hf_hub.offline` and the other getters delegate; behaviour and texts unchanged).
-- `2026-10-23 17:18 UTC` · `v3.1.0` **`llm-cli build start --format` offers what the installed targets build** (DECISIONS round 23 item 7): instead of
+- `2026-10-23 17:18 UTC` · `v3.1.0` **`llm-cli build start --format` offers what the installed targets build**: instead of
   every format of the engine (`tensorrt`, `coreml`, ... that no target builds), `--format` takes a format the target
   builds, as its `target.yml` capabilities declare it, the list the Builder tab's format box offers
   (`build_formats.offered_formats`, one list for both; a target without capabilities takes every format but `hf`,
@@ -1671,8 +1672,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   each installed target builds (`build_formats.format_problem`). The format is no longer case-sensitive, and the
   start panel names it as the target spells it, the format the build runs with (`-f RKLLM` shows `rkllm`), never
   read as markup.
-- `2026-10-23 17:18 UTC` · `v3.1.0` **"Use the existing build" copies it into the chosen folder, and `llm-cli build start` asks too** (DECISIONS round
-  23 item 9): `build start` checks for a finished build with 100 % the same options before anything runs, as the
+- `2026-10-23 17:18 UTC` · `v3.1.0` **"Use the existing build" copies it into the chosen folder, and `llm-cli build start` asks too**: `build start` checks for a finished build with 100 % the same options before anything runs, as the
   Builder tab does (`BuildService.earlier_builds`, the commit looked up once when it could be identical), and asks the
   same question at a terminal (use it, build it again, cancel; without a terminal it builds as given). "Use" now copies
   the earlier build with its golden ZIP into the folder the build would have gone to (`--output`, the prompt's answer
@@ -1683,7 +1683,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   deleted or changed, is replaced only after you accepted the full list of what is replaced ("No" is the default; to
   the trash or for good; written to the audit log first) and only by a complete copy (one that left a link out keeps
   a name of its own).
-- `2026-10-23 17:05 UTC` · `v3.1.0` **The Deployment tab's Docker table decides what the package carries** (DECISIONS round 23 item 6): the table in
+- `2026-10-23 17:05 UTC` · `v3.1.0` **The Deployment tab's Docker table decides what the package carries**: the table in
   **Use Docker Containerization?** no longer shows mock-up choices that did nothing (Llama.cpp (CPU), RKLLM (NPU),
   TensorRT (GPU)); it lists the containers a package with Docker images carries for the chosen profile, from the one
   list `llm-cli deploy package --docker` packs (`deployment_manager.package_containers`): the inference engine with its
@@ -1695,7 +1695,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   commented out) gives no device access, as no block does, instead of keeping the tab from opening; the Builder tab's
   probe import reads such a block (and an empty `cpu:` block) the same way when it suggests a target, instead of
   stopping there.
-- `2026-10-23 09:33 UTC` · `v3.1.0` **Knowledge always belongs to a topic or a target** (DECISIONS round 23 items 1 and 8): an installed knowledge pack
+- `2026-10-23 09:33 UTC` · `v3.1.0` **Knowledge always belongs to a topic or a target**: an installed knowledge pack
   lives in `community/knowledge/<topic or target>/<pack>/` (packs installed earlier stay where they are), and every
   excerpt it brings carries its topic or target. A knowledge pack names its topic or target in its manifest:
   `llm-cli zoo export knowledge` needs `--topic` or `--target` (a target of this computer), as do the export window
@@ -1831,7 +1831,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   modules legacy files) and the guides name the stage each part belongs to; the roadmap item to remove the
   four-module scripts is done differently (they are the build).
 - `2026-10-23 02:26 UTC` · `v3.1.0` **The config stage checks its plan, and the target stage makes the deploy-ready package of version 1.x again**
-  (U9 addendum, DECISIONS round 16; Rockchip and the template). With a board's hardware profile the config stage
+  (U9 addendum; Rockchip and the template). With a board's hardware profile the config stage
   finds the planned compilers in the image (nothing is planned when one is missing), builds and links a small C and
   C++ program with the planned flags (and runs them when they are for this machine), checks with the ELF header that
   they are for the board's system, lets `cmake -P` read the generated toolchain file and checks the plan
@@ -1981,7 +1981,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   the checks only read and run again; a step that must not run twice ends with a clear sentence once the board answers
   again, and the staging folder is still removed; a board that does not answer again ends every later step at once
   with its reason code. The short llama-bench run starts on the board on its own (`run_detached`) and is followed again
-  after a drop, never started twice (round 16 G4: work keeps running while nobody watches; a board without nohup runs
+  after a drop, never started twice (work keeps running while nobody watches; a board without nohup runs
   it attached as before); `RemoteSession.follow` follows a job started before. Its private folder
   (`<install folder>/.bench.XXXXXXXX`) goes afterwards, also after a failure or a Ctrl+C at the terminal; one that a
   Cancel in the Boards window or an AI's `cancel_job` left (the Cancel closes the connection, so the board cannot be
@@ -2069,8 +2069,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   manager's older build path, which nothing called any more; they are now sampled by the one build path (the build
   engine, `BuildService.live_resources`, read from the orchestrator the build service works on, like the build's
   status), and the rest of that older path (start, monitor, stop, a healing trigger
-  and six Qt signals nothing listened to) was removed because the one build path does all of it (decision round 12,
-  item 6). The AI's build status is unchanged.
+  and six Qt signals nothing listened to) was removed because the one build path does all of it. The AI's build status is unchanged.
 - `2026-10-17 16:17 UTC` · `v3.1.0` **One AI-settings change service for every channel** (`orchestrator/llm/settings_change.py`,
   `AISettingsChange`): the rules the AI settings dialog kept to itself (known providers in the fallback chain, no
   cloud provider in offline mode, a key required and not an admin key, the workspace ID's form, the server address,
@@ -2096,7 +2095,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   never refused by the queue limit for AI callers. The CLI's follow loop reads the build through the same service.
   The Builder's check for an earlier build with the same options now also covers a target without capabilities
   (before, the service refused to compare such a request and the Builder only logged that).
-- `2026-10-17 18:03 UTC` · `v3.1.0` **One implementation per job, the older one where it is adequate (round 12 of the decisions).** Every item of the
+- `2026-10-17 18:03 UTC` · `v3.1.0` **One implementation per job, the older one where it is adequate.** Every item of the
   unwired audit was checked against its history (`git log -S`) and is wired or removed with proof: the chat's link
   question is `bubbles.confirm_open_link` (the panel's unused copy is gone); the zero-cost credential check is
   `SignIn.check` (`LLMClient.check_credentials` is gone, its test runs through `SignIn.check`). Mojo's Python and Docker
@@ -2173,7 +2172,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   knowledge base's storage and the private bridge to the open window are not loaded and that no licence text of the
   knowledge packs is read; the MCP server loads the bridge with the first call of its `gui` tool, and the GUI starts it
   with its window.
-- `2026-10-16 15:23 UTC` · `v3.1.0` **The local knowledge base is stored in Qdrant Edge** (DECISIONS RG5): the Rust engine of Qdrant runs in the
+- `2026-10-16 15:23 UTC` · `v3.1.0` **The local knowledge base is stored in Qdrant Edge**: the Rust engine of Qdrant runs in the
   framework process (new dependency `qdrant-edge-py` 0.8.0, Apache-2.0, exact pin; wheels for Linux x86_64 and
   aarch64, Windows x86_64 and macOS, one wheel for every Python from 3.10) instead of qdrant-client's local mode, a
   Python re-implementation meant for development. The data moves to `~/.llm-framework/qdrant_edge`. Collections per
@@ -2213,10 +2212,10 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   ruled out. An MCP prompt with knowledge excerpts never starts the download: like `search_knowledge` it reads with the
   models on this computer only and says when they are missing. Ditto's automatic diagnosis of a failed build, which
   nobody is asked about, reads the same way.
-- `2026-10-16 09:39 UTC` · `v3.1.0` **Repair hints for AI callers name Mojo** (round 7 item 11'): refusals and errors that AI callers read sent them to
+- `2026-10-16 09:39 UTC` · `v3.1.0` **Repair hints for AI callers name Mojo**: refusals and errors that AI callers read sent them to
   `llm-cli doctor`. They now name the tool `run_mojo_oracle` (or `llmcf mojo` in a terminal). The note about missing
   builder images keeps `llm-cli doctor --fix --tier 2`, which builds them.
-- `2026-10-16 15:09 UTC` · `v3.1.0` **Ditto's old runtime mode goes completely** (W2 of 2026-10-16, round 7 D): after a switch between bare metal and
+- `2026-10-16 15:09 UTC` · `v3.1.0` **Ditto's old runtime mode goes completely** (W2 of 2026-10-16): after a switch between bare metal and
   Docker, only the old mode's build folders, images and containers were listed, and the build folders went to the trash.
   Now every object of the old mode is listed, also its entries in `mode.json` and `active.json` and the log of the image
   builds, and the list is deleted for good, not into the trash, so nothing of the old mode stays. It is offered only
@@ -2230,7 +2229,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   `~/.llm-framework` to mode 0700 without a word, so Mojo's `state.permissions` finding almost never showed. Now the
   folder gets 0700 when the framework creates it; an existing folder keeps its mode, Mojo Oracle reports one that
   others can read, and Mojo Miracle repairs it after your yes.
-- `2026-10-16 08:50 UTC` · `v3.1.0` **A board deployment keeps every older runtime build** (round 5 f): `llm-cli device runtime deploy` and the AI
+- `2026-10-16 08:50 UTC` · `v3.1.0` **A board deployment keeps every older runtime build**: `llm-cli device runtime deploy` and the AI
   tool `deploy_device_runtime` removed all older runtime builds on the board except the previous one, without a
   question. Now every older build stays. The result says how many stayed and their size, and
   `llm-cli device runtime prune DEVICE --on-device` lists them for you: full path on the board, folder name, size and
@@ -2244,13 +2243,13 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   builds wait there until they are saved, and every earlier build stays there and stays listed. CLI builds without
   `--output` no longer add a `build_<date>_<time>` folder (a later build goes next to an earlier one instead). The
   container image sets `LLM_FRAMEWORK_BUILD_DIR=/data/builds`.
-- `2026-10-15 21:27 UTC` · `v3.1.0` **The builder no longer deletes images** (released in 3.0.0; round 7 item 12): every build ended by removing its
+- `2026-10-15 21:27 UTC` · `v3.1.0` **The builder no longer deletes images** (released in 3.0.0): every build ended by removing its
   image and pruning the framework's dangling images. Now the build's image is named
   `llm-framework/<target>:last-build` (the next build of that target reuses it) and only its per-build name is
   dropped, after the new name is seen on the image. The image that had that name before stays without a name and is
   listed for you to delete (Tools > Framework Build Images..., `llm-cli doctor --fix --tier 2`). Nothing in the
   framework prunes Docker objects; Docker images are deleted only when you tick them.
-- `2026-10-15 21:06 UTC` · `v3.1.0` **No default names a registry image any more** (round 5 h, sixth round): no framework image is published, so the
+- `2026-10-15 21:06 UTC` · `v3.1.0` **No default names a registry image any more** (sixth round): no framework image is published, so the
   defaults name local images. `image_inference_runtime` is `llm-framework/inference:local`; a deployment package
   takes it only once you built it on this computer, as for every image without a digest. `docker_registry` is empty
   (nothing reads it). The experimental benchmark window uses `llm-framework/builder:local` and stops with a message
@@ -2284,7 +2283,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   `CrawlNotice.acknowledge` refuses any other channel.
 - `2026-10-12 06:09 UTC` · `v3.1.0` **A target pack never takes another target's name**: installing a target pack whose id (or declared target id)
   equals an existing target's ignoring case and separators is refused, in the Community Hub, the CLI and over MCP.
-- `2026-10-12 07:38 UTC` · `v3.1.0` **Builds and downloads share one disk reservation; staging through the framework's fetcher** (MCP phase T round 1
+- `2026-10-12 07:38 UTC` · `v3.1.0` **Builds and downloads share one disk reservation; staging through the framework's fetcher** (MCP phase T
   leftovers): `download_hf_file` reserves its disk space in the cross-process ledger builds use. A build stages its
   Hugging Face model through the framework's fetcher (resumable `.part` files, each file checked against the Hub's
   size and sha256, stopped within seconds by a cancel) instead of `hf_hub_download`, and refuses when the commit
@@ -2435,7 +2434,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   seconds. `llm-cli module generate-ai` pins the base image to its digest before it asks; it and the wizard record the
   saved module in the audit log (`module_saved`), and the wizard passes on every field of Ditto's proposal.
 
-- `2026-10-12 03:20 UTC` · `v3.1.0` **MCP: builds are asked about with what the framework looked up** (design T1, DECISIONS round 2 item 8):
+- `2026-10-12 03:20 UTC` · `v3.1.0` **MCP: builds are asked about with what the framework looked up** (design T1):
   `start_build` shows the Hugging Face commit it will build (and builds exactly that commit), the download size,
   weights type, licence, gating and the stored token's access, the space on each disk with the conversion margin and
   the output counted three times, an estimate whether this computer and the board can take it, mounts, target trust
@@ -2454,7 +2453,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   a cancel stops the download before the next file, and the download stops when the cache disk falls below half
   its reserve. A full disk is reported as `insufficient_resources` with the free space.
 
-- `2026-10-12 03:34 UTC` · `v3.1.0` **MCP: framework status and settings** (design T2, DECISIONS round 1 item 4): `get_status` shows the sections
+- `2026-10-12 03:34 UTC` · `v3.1.0` **MCP: framework status and settings** (design T2): `get_status` shows the sections
   framework, host, local runtime (a prebuilt archive labelled "not self-built"), knowledge base, AI access (states
   only, never a key fragment, account or endpoint), permissions and this caller's audit entries; new `get_settings`
   (an explicit read list, addresses as scheme and host, folders as labels) and `update_settings` (ordinary settings
@@ -2464,7 +2463,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   such as spoken announcements, read-only for every AI, and `update_settings` is not registered if it could reach
   one; permissions, secrets, vault, AI provider settings, addresses and folders refused before the
   question; no value is read as "default").
-- `2026-10-12 03:34 UTC` · `v3.1.0` **MCP: honest "cannot" checked by the framework** (DECISIONS round 3): new `report_cannot_do` takes a reason code
+- `2026-10-12 03:34 UTC` · `v3.1.0` **MCP: honest "cannot" checked by the framework**: new `report_cannot_do` takes a reason code
   (no "untested") and what is missing, checks it against the caller's permissions, this session's audit entries and
   limits, the disk and the actions no tool does, and answers confirmed, contradicted, premature (with the tools to
   try first) or unchecked, with a sentence built only from framework facts (a tool only by its registered name); "the hardware is not available" is
@@ -2529,7 +2528,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   list. Use the hidden prompt or `--with-token`.
 - `2026-10-11 13:50 UTC` · `v3.1.0` `llm-cli build start --parallel`: it never had an effect (one call runs one build). It is hidden from the help
   and prints a warning. `--optimization` stays; its help now says that the Rockchip target ignores it.
-- `2026-10-23 09:38 UTC` · `v3.1.0` `DeploymentManager.trust_host` (DECISIONS round 22, P5): the old writer of a confirmed host key, without an audit
+- `2026-10-23 09:38 UTC` · `v3.1.0` `DeploymentManager.trust_host`: the old writer of a confirmed host key, without an audit
   row, that nothing in the framework calls. It is now a thin delegate to `orchestrator/remote/pairing.py`
   `trust_presented_key`, the one writer, which stores the key under its lock and writes the trust's audit row in the
   same step. Only the person can use it: it takes the channel's `pairing.PersonChannel` (`cli` or `gui`, with the
@@ -2598,7 +2597,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   know, and the deletion of old downloads (Take over, `hf_takeover.delete_old_copies`) recorded
   `old_downloads_deleted`, which it did not know, so the deletion stopped with "The audit log cannot record the
   deletion" (the tests used a stand-in log). It is a known outcome now, as is `earlier_build_replaced` of "Use".
-- `2026-10-23 09:15 UTC` · `v3.1.0` **hadolint findings at build time are shown, not thrown away** (DECISIONS round 23, item 4): the build reported
+- `2026-10-23 09:15 UTC` · `v3.1.0` **hadolint findings at build time are shown, not thrown away**: the build reported
   every outcome of its Dockerfile check as "Hadolint check skipped (tool not found or failed)" and dropped what
   hadolint found. `BuildEngine._validate_dockerfile_hadolint` now runs hadolint through the new
   `orchestrator/utils/hadolint.py` (in the Dockerfile's folder on its file name, without colours, at most 60 s) and
@@ -2608,7 +2607,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   and a run without a result (a crash, a time-out: one warning with what hadolint wrote). The check stays advisory:
   the build always goes on. CONTRIBUTING's local hadolint command pins the image by digest
   (`hadolint/hadolint:v2.15.1@sha256:32dac941...`, FRESHNESS_PLAN F-5) and lists all five Dockerfiles CI lints.
-- `2026-10-23 09:33 UTC` · `v3.1.0` **A newer version of a knowledge pack left the old version's excerpts behind** (DECISIONS round 23 item 2): pack
+- `2026-10-23 09:33 UTC` · `v3.1.0` **A newer version of a knowledge pack left the old version's excerpts behind**: pack
   pages are stored piece by piece without replacing, so a changed or dropped page kept its old excerpts. Every excerpt
   now carries the installed pack's content digest; once every page of the new version is in, the excerpts of the
   older one are removed (`RAGManager.remove_pack_leftovers`), per pack and page source, never those of other packs or
@@ -2842,13 +2841,13 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   the folder `<target>/<model>/<quantization>` and replaced the files of an earlier build there (for example one for
   another board), so a finished golden artifact was lost without being asked. A later build now goes next to it
   (`Q4_K_M-2`, with its own ZIP); the earlier build stays whole.
-- `2026-10-15 17:14 UTC` · `v3.1.0` **The self-healing "Docker cleanup" deletes nothing any more** (released in 3.0.0; round 5 f): approving the
+- `2026-10-15 17:14 UTC` · `v3.1.0` **The self-healing "Docker cleanup" deletes nothing any more** (released in 3.0.0): approving the
   proposal for a full Docker disk (`docker_prune`, in the GUI dialog, at the CLI prompt or through `resolve_healing`)
   removed the framework's dangling images without showing them and cleared the whole build cache of the Docker
   daemon, other projects' too. It is now a manual step: the proposal points to the framework's list of its build
   images (the dialog's **Free Docker space...**, **Tools > Framework Build Images...**, `llm-cli doctor --fix --tier
   2`), which deletes only the images you tick and confirm, and an approval is refused before anything is asked. No code of the framework clears Docker's build cache any more.
-- `2026-10-12 18:37 UTC` · `v3.1.0` **`llm-cli doctor --fix --tier 2` no longer deletes without a list** (released in 3.0.0; round 5 f): it cleared the
+- `2026-10-12 18:37 UTC` · `v3.1.0` **`llm-cli doctor --fix --tier 2` no longer deletes without a list** (released in 3.0.0): it cleared the
   whole build cache of the Docker daemon, other projects' too, and deleted the framework's dangling images without
   showing them. The build cache is no longer touched (it cannot be limited to the framework). Tier 2 now lists every
   build image of the framework (without a name, named `llm-framework/<target>:last-build`, runtime builders), each with
@@ -3155,7 +3154,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   100 %.
 
 ### Security
-- `2026-10-23 22:37 UTC` · `v3.1.0` **Every reach-out of offline mode now goes through the locality rule** (DECISIONS round 24 L-NET, round 26 d-g):
+- `2026-10-23 22:37 UTC` · `v3.1.0` **Every reach-out of offline mode now goes through the locality rule**:
   a Qdrant server (`qdrant_url`) is judged by it, a cloud Qdrant is refused in plain words, and qdrant-client
   connects only to the checked addresses without a proxy and without its own version request; the sign-in
   **Check**, `ditto login --check` and the AI settings' sign-in panel refuse a provider offline mode may not reach
@@ -3173,7 +3172,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   opened again under the rule once offline mode is switched on (a cloud Qdrant is refused then), and a crawl that
   started online reads nothing more once offline mode is switched on.
 - `2026-10-23 23:28 UTC` · `v3.1.0` **Hugging Face tokens leave this computer only where Hugging Face needs one, and no library sends one by itself**
-  (consolidation chain hf-local; decision round 25 Q2). Every look-up, file list and file of a public repository used
+  (consolidation chain hf-local). Every look-up, file list and file of a public repository used
   to carry the token stored in the framework (or typed in the browser) to huggingface.co; now none of them does, also
   with a token stored. The token goes only to a gated or private repository, only to huggingface.co: from its
   repository information (`hf_hub.needs_token`: gated or private) or after the Hub answered 401/403 to a request
@@ -3191,7 +3190,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   that is there. Regression tests: `tests/test_hf_tokens.py` (`HF_ENDPOINT` on another host with `HF_TOKEN` set: no
   request carries a token anywhere but huggingface.co; a public file without an Authorization header; the fastembed
   path without a token; offline mode without a socket; the agent-harnesses request), `tests/test_hf_online.py`.
-- `2026-10-23 09:15 UTC` · `v3.1.0` **`install.sh` installs Docker only with a checksum** (DECISIONS round 23, item 3): when Docker was missing, the
+- `2026-10-23 09:15 UTC` · `v3.1.0` **`install.sh` installs Docker only with a checksum**: when Docker was missing, the
   installer downloaded `get.docker.com` and ran it as root without any check. Now Docker comes only from Docker's
   official apt repository on Debian, Ubuntu and Raspberry Pi OS (32-bit gets Debian's armhf packages, as Docker's guide
   says from Engine 29 on). Systems built on Ubuntu or Debian (`ID_LIKE`: Linux Mint, Pop!_OS, LMDE and the like), which
@@ -3212,7 +3211,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   unchecked (on Windows as Administrator). The virtual environment now keeps the pip that comes with Python, which
   is enough for `--require-hashes --no-deps`; the installer test holds every pip call to the hash-pinned export.
   `install.bat` downloads nothing else unchecked (winget checks the Python installer against its manifest's SHA256).
-- `2026-10-23 09:33 UTC` · `v3.1.0` **Loose knowledge files are no longer imported without the pack checks** (DECISIONS round 23 item 1): every `.json`
+- `2026-10-23 09:33 UTC` · `v3.1.0` **Loose knowledge files are no longer imported without the pack checks**: every `.json`
   file in `community/knowledge/` and every `knowledge.json` in a folder without the pack's provenance was imported
   into the knowledge base at each start, with no manifest, signature, quarantine or validator. Only installed packs
   are imported now, and only while their files match what was installed; a loose file waits until the person sorts it
@@ -3451,7 +3450,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   `saved:`, a file name elsewhere), and a log line with a path on this computer names the framework's folders by
   label and any other path by its file name (also below `/home/`, `/media/`, `/Users/` and `C:\Users\`, for example a
   local model on a USB disk); your own windows keep the full path.
-- `2026-10-15 21:27 UTC` · `v3.1.0` **No deletion without your confirmation in the framework** (round 5 f; WP7): every code path that deletes a built
+- `2026-10-15 21:27 UTC` · `v3.1.0` **No deletion without your confirmation in the framework** (WP7): every code path that deletes a built
   model, a knowledge snapshot, a trash entry, a framework image, an old llama.cpp runtime build or a board's runtime
   package takes only the plan you accepted in the GUI or at a terminal, builds it again from what is on disk right before, and deletes nothing when it changed or when the audit
   log cannot record it first. An AI's `delete_artifact` only moves to the trash; emptying the trash and deleting for

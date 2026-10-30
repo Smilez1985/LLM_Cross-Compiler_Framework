@@ -203,7 +203,7 @@ der SSRF-sichere HTTP-Adapter in `security/http.py`, der Audit-Schlüssel in `Co
 | LLMOrchestrator | `orchestrator/Core/orchestrator.py` | Warteschlange und Pipeline: bereitet Kalibriertext vor, zerlegt einen Auftrag in Jobs (Modell x Target x Format x Quantisierung), führt sie auf der Build-Engine aus, behandelt Abbrüche und die Freigabeschleife des Self-Healing. |
 | BuildEngine | `orchestrator/Core/builder.py`, `orchestrator/utils/build_context.py`, `orchestrator/utils/hadolint.py` | Stellt den Docker-Build-Kontext zusammen, prüft sein Dockerfile mit hadolint, wenn es installiert ist (ein Hinweis: Funde gehen ins Build-Log und in die Fortschrittswarnungen, der Build läuft weiter), baut das Image (mit BuildKit, wenn vorhanden), lädt oder bindet das Modell ein, führt den optionalen Trivy-Scan, die Importance-Matrix-Stufe und die Build-Stufe in abgeschotteten Containern aus, schreibt Manifest, Model Card und ZIP in einen versteckten Zwischenordner, verschiebt sie in den Ausgabeordner, sobald der Build nicht mehr abgebrochen werden kann, und räumt auf. |
 | DockerManager | `orchestrator/Core/docker_manager.py` | Erzeugt die eine Build-Engine des Frameworks (mit ihrem Docker-Client) und prüft, ob der Docker-Daemon antwortet; ohne Qt. `container_resources()` macht aus einer `docker stats`-Messung eines laufenden Build-Containers CPU- und Speicherwerte (Dockers eigene Formeln, Speicher ohne den inaktiven Seiten-Cache); die Build-Engine misst sie in den Fortschritt des Builds, `BuildService.live_resources` gibt sie an den Builder (unter dem Fortschrittsbalken), und das Build-Protokoll warnt einmal nahe der Speichergrenze. |
-| Container-Engine | `orchestrator/utils/docker_engine.py` | Mit welcher Engine das Framework spricht (DECISIONS Runde 26 Q1): Standard ist Docker CE; ohne Docker-Dienst und mit dem Podman-Socket der Person (der Ersatzweg von install.sh unter Rocky Linux, AlmaLinux und Oracle Linux) setzt `ensure_docker_host()` `DOCKER_HOST` für den Prozess und die Programme, die er startet, auf ihn (ein `DOCKER_HOST`, das die Person setzt, gilt immer). Jede Stelle, die einen Docker-Client anlegt, ruft ihn zuerst auf (die Build-Engine, `DockerEngine` des Builder-Images, Dittos `DittoDocker`, die eine Docker-Prüfung `check_docker_environment`, `scripts/build_container_image.sh` über `python3 -I ... --docker-host`). `engine_name()` unterscheidet Docker und Podman an `/version`; `podman_refusal()` lehnt früh ab, was Podman nicht bietet (Dockers GPU-Anfrage, BuildKit): `BuildService`, bevor ein GPU-Build in die Warteschlange kommt, der Builder, Dittos GPU-Weitergabe. `create_container()` legt jeden Container des Frameworks an (die Build-Stufen, den llama.cpp-Builder, Dittos Prüf- und Server-Container); unter rootless Podman bekommt einer, der als die Person läuft, Podmans `keep-id`, damit er in die Ordner der Person schreiben kann. Mojo nennt die Engine. Nur Standardbibliothek (auch das Python 3.9 des Systems). |
+| Container-Engine | `orchestrator/utils/docker_engine.py` | Mit welcher Engine das Framework spricht: Standard ist Docker CE; ohne Docker-Dienst und mit dem Podman-Socket der Person (der Ersatzweg von install.sh unter Rocky Linux, AlmaLinux und Oracle Linux) setzt `ensure_docker_host()` `DOCKER_HOST` für den Prozess und die Programme, die er startet, auf ihn (ein `DOCKER_HOST`, das die Person setzt, gilt immer). Jede Stelle, die einen Docker-Client anlegt, ruft ihn zuerst auf (die Build-Engine, `DockerEngine` des Builder-Images, Dittos `DittoDocker`, die eine Docker-Prüfung `check_docker_environment`, `scripts/build_container_image.sh` über `python3 -I ... --docker-host`). `engine_name()` unterscheidet Docker und Podman an `/version`; `podman_refusal()` lehnt früh ab, was Podman nicht bietet (Dockers GPU-Anfrage, BuildKit): `BuildService`, bevor ein GPU-Build in die Warteschlange kommt, der Builder, Dittos GPU-Weitergabe. `create_container()` legt jeden Container des Frameworks an (die Build-Stufen, den llama.cpp-Builder, Dittos Prüf- und Server-Container); unter rootless Podman bekommt einer, der als die Person läuft, Podmans `keep-id`, damit er in die Ordner der Person schreiben kann. Mojo nennt die Engine. Nur Standardbibliothek (auch das Python 3.9 des Systems). |
 | Rockchip-Referenz-Target | `targets/Rockchip/` | `dockerfile` (Debian bookworm-slim; llama.cpp-Werkzeuge v0.6.0; drei Python-venvs), `modules/build.sh` (der Stage-Runner) mit den vier Stufenmodulen `source_module.sh`, `config_module.sh`, `convert_module.sh` und `target_module.sh` (`gguf`, `rkllm`, `rknn` und der Job `imatrix`), `modules/rkllm_module.sh` und `modules/rknn_module.sh` (Format-Helfer der Stufe convert), `scripts/export_rkllm.py`, `scripts/rknn_converter.py`, `scripts/model_check.py` (die Prüfungen der Stufe convert; die Vorlage bringt dieselbe Datei mit), `target.yml`. `targets/_template/` ist der Ausgangspunkt für neue Targets ([Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md)). |
 | DeploymentManager und SSH-Vertrauen | `orchestrator/Core/deployment_manager.py`, `orchestrator/utils/ssh_trust.py` | Baut das Deployment-Paket, prüft den Host-Schlüssel des Geräts, hinterlegt den SSH-Schlüssel des Frameworks, lädt hoch und startet die Installation. |
 | Deploy-Schritte | `orchestrator/runtime/device/person_steps.py`, `orchestrator/runtime/device/steps.py`, `orchestrator/runtime/device/service.py` | Ein Deployment je Anwendungsfall. `deploy_build` (nur für die Person) bringt einen Build für `llm-cli deploy run` und den Deployment-Tab auf ein Board: das Paket (`make_package`, sein Grund kommt mit dem Ergebnis zurück; mit Docker-Images genau die Container von `deployment_manager.package_containers`, die die Tabelle des Deployment-Tabs angehakt hat, für `--docker` alle), das Deployment, dann der vertraute Eintrag des Boards mit der Audit-Zeile der CLI. `deploy_runtime_flow` bringt die selbst gebaute Runtime eines Boards für `llm-cli device runtime deploy`, das Boards-Fenster und das `deploy_device_runtime` der KI auf das Board: Anmeldung, vertrauter Eintrag, Ablehnung von root, Frage zum Benchmark mit der Zustimmung, Installation, Eintrag „getestet auf“. Jeder Aufrufer übergibt seine Anmeldung und seine Worte als Hooks; nur die Kanäle der Person geben den vertrauten Eintrag und die Frage mit. |
@@ -223,8 +223,8 @@ der SSRF-sichere HTTP-Adapter in `security/http.py`, der Audit-Schlüssel in `Co
 | Löschen und Papierkorb | `orchestrator/Core/deletion.py`, `orchestrator/Core/trash.py`, `orchestrator/gui/deletion_dialog.py`, `orchestrator/gui/trash_window.py` | Jedes Löschen von Objekten der Person nimmt eine `AcceptedDeletion`: den Plan, den die Person in der GUI oder im Terminal bestätigt hat (die Mehrfachauswahl baut ihn aus genau den angehakten Teilen neu), seinen Modus (Papierkorb oder endgültig) und den Kanal. Der löschende Code baut den Plan erneut und lehnt einen geänderten ab (`PlanChanged`). Der Papierkorb verschiebt Teile mit einem Umbenennen nach `.trash/<ID>/` ihres Datenordners (nie über Platten hinweg); sein Index `tool_trash.json` ist signiert; nichts verlässt ihn von selbst; nur die Person leert ihn; eine KI stellt nur wieder her, was sie selbst löschen wollte. `tests/test_deletion.py` listet jede Stelle im Code, die löscht, mit ihrer Absicherung. |
 | Datei-Hashes | `orchestrator/utils/helpers.py` | Die eine Implementierung jedes sha256 einer Datei (ganze Dateien, offene Handles und ihre ersten Bytes für das Fortsetzen, Deskriptoren, Kopien, die beim Schreiben gehasht werden, damit die geprüften Bytes die benutzten sind, ein Cache mit Lock, `SHA256SUMS`-Zeilen und `.sha256`-Begleitdateien, der Vergleich in konstanter Zeit). Die alten Helfernamen im Build-, Deploy-, Laufzeit-, Papierkorb- und Download-Code sind Delegates; `tests/test_hashing.py` lehnt eine neue Hash-Schleife daneben ab. Die Hardware-Probe hat keine Kopie, und die `sha256sum`-Aufrufe auf einem Board bleiben auf dem Board. |
 | Platzregel und Watchdog | `orchestrator/Core/disk_plan.py` | Was ein Build wo ablegt, die Reserve (2 GiB oder 2 %, 20 GiB oder 10 % unter einer dauerhaften Freigabe), das prozessübergreifende Reservierungsbuch und der Watchdog: Unter der halben Reserve wird ein laufender Build-Container gestoppt und das Staging beendet (`DiskWatchdog`, `low_disk_text`), eine volle Platte wird beim Label mit `insufficient_resources` gemeldet (`disk_full_text`, `is_disk_full`), und der Trivy-Scan wird übersprungen (`low_disk_floor`). Die BuildEngine ruft sie nur auf. Die eine Platzregel für jede Prüfung des freien Platzes (Entscheidung A4): `room` (eine Platte) und `check_disk` lassen die Reserve frei, neben dem, was angenommene Aufrufe irgendeines Prozesses im Reservierungsbuch reserviert haben, für Builds, Downloads (`download_rule`, das `space` des Downloaders), das Deployment-Paket, die Benchmark-Kopie, die Umstellung der Wissensbasis, den Snapshot-Export, Mojos Platzprüfung und die Platzangabe für eine KI; `refusal` und `person_text` sagen, was nicht passt, und den nächsten Schritt, auf Englisch oder Deutsch. Das Board-Paket einer Stufe target entsteht im Build-Container, der kein Framework hat: `scripts/board_package.py room` wendet dort dieselbe Reserve mit denselben Worten an (ein Test vergleicht sie), ohne das Reservierungsbuch des Benutzerordners. Während ein Build läuft, trägt die Engine ein, was von seiner Reservierung schon auf der Platte liegt (`LandedMeter`, `ReservationLedger.landed`), damit diese Bytes nicht doppelt zählen. |
-| Hugging-Face-Downloads | `orchestrator/Core/hf_hub.py`, `orchestrator/Core/hf_takeover.py`, `orchestrator/gui/huggingface_window.py` | Ein geprüfter Fetcher (`HubFetcher`: der Commit festgelegt, eine fortsetzbare `.part`-Datei, Größe und sha256 des Hubs geprüft, bevor die Datei ihren Namen bekommt, das Token nur an huggingface.co) für `download_hf_file` einer KI, den Hugging-Face-Browser der GUI (`download_for_person`, Entscheidung A6) und den Modell-Download des Builders, eine Hub-API (`hub_api`: nur huggingface.co, nie der Host in `HF_ENDPOINT`, nie ein implizites Token) für jede Suche, Abfrage und Dateiliste des Frameworks, die des Browsers und des Builders eingeschlossen, und eine Token-Regel (Entscheidung Runde 25 Q2): Listen, Abfragen und Dateien eines öffentlichen Repositorys gehen ohne Token, auch wenn eines gespeichert ist; das Token geht nur an ein gated oder privates Repository (`needs_token` aus den Feldern gated und private der Repository-Infos, oder die Antwort 401/403 des Hubs auf eine Anfrage ohne Token, dann eine Anfrage mit ihm: `tokenless_first`, `HubFetcher(token_needed=...)`). Der Prozess läuft mit `HF_HUB_DISABLE_IMPLICIT_TOKEN` und `HF_HUB_DISABLE_TELEMETRY` von huggingface_hub (`orchestrator/utils/hf_env.py`, gesetzt beim Import des Pakets `orchestrator`; in huggingface_hub 1.33 stoppt der Telemetrie-Schalter auch dessen Abfrage der Agent-Harness-Liste), und die fastembed-Modelle der Wissensbasis kommen über `fetch_snapshot` ohne Token in den Cache von fastembed, der sie dann lädt, ohne jemanden zu fragen; und ein Ablageschema für einzelne Dateien, `download_path`: `<models_dir>/hf/<owner>--<name>/<commit[:12]>/<Datei>` (der Builder legt ganze Modelle in `cache/models/hf/` ab). Der Download des Browsers folgt der einen Platzregel und hält während er läuft eine eigene Reservierung im Reservierungsbuch; ebenso ein Modell der Wissensbasis, das über `fetch_snapshot` geholt wird (die Wissensbasis gibt den Fabriken ihr Reservierungsbuch: die Ablehnung der Platzregel vor jeder Datei, die angekommenen Bytes je Datei vermerkt, die Reservierung freigegeben, wenn das Holen endet). Jede Datei und jeder Vermerk eines Downloads wird mit `utils/atomic.replace_file` an seinen Platz gelegt (unter Windows einen Moment lang erneut versucht, solange ein Leser das Ziel offen hat): der letzte Schritt des Fetchers, `refs/main` und der Vermerk einer vollständigen Builder-Kopie (`local_models.write_complete`). `hf_takeover` listet, was frühere Versionen im Cache von huggingface_hub im Modellordner gespeichert haben (weiter aufgeführt und nutzbar), kopiert es auf Wunsch der Person, jede Datei gegen die Prüfsumme geprüft, mit der sie geladen wurde, und bietet das Entfernen der alten Kopien nur als angenommenen Löschplan mit der genauen Liste an (**Alte Downloads übernehmen…** im Browser und `llm-cli models take-over` rufen dasselbe auf). Im Offline-Modus lehnen die Hugging-Face-Aufrufe des Browsers, der Übernahme und jeder KI und die Commit-Prüfung der GUI vor jeder Anfrage mit einer Ablehnung ab (`hf_hub.offline`, `offline_refusal`; die Person liest `person_text`); ein Build im Offline-Modus lädt sein Modell nie (siehe die nächste Zeile). |
-| Modelle auf diesem Computer | `orchestrator/Core/local_models.py`, `orchestrator/gui/offline_model.py` | Was ein Build im Offline-Modus nutzen kann (Entscheidung Runde 25 Q1): `local_copy` findet eine vollständige Kopie eines Hugging-Face-Modells (die eigene Kopie des Builders in `cache/models/hf/`, als vollständig vermerkt, wenn ihr Bereitstellen endet; einen Modellordner, den der Hugging-Face-Browser geladen hat; den alten Cache von huggingface_hub), die `BuildEngine` im Offline-Modus statt eines Downloads einhängt. `models_here` listet die Modelle, die schon hier sind, jedes mit seinem Label: eine Referenz auf eine lokale Datei für den Modellordner und die mit der KI geteilten Ordner (`LocalFiles.list`), die Repository-ID für die Kopien des Builders, der Pfad für die Eingaben früherer Builds (aus ihren Build-Einträgen; nur für die Person). Ohne Kopie wirft `BuildService.check_model_here` `ModelNotHere` mit dieser Liste: `build start` gibt sie aus und nimmt mit `--model` ein Label aus der Liste oder einen lokalen Pfad (am Terminal wird gefragt), der Builder-Tab öffnet eine Auswahl mit einem Öffnen-Dialog für eine Modelldatei oder einen Modellordner (nennt ein Rezept einen anderen Commit als die hier gewählte Kopie, fragt der Tab, statt die Auswahl erneut zu öffnen: Nein bricht ab, Ja baut die Kopie als eigenen Build der Person ohne das Rezept, `bld.offline.pinned`), und der Build-Plan einer KI nennt nur die Labels. `ditto models download` lehnt im Offline-Modus ab und nennt die Ditto-Modelle, die schon hier sind (`runtime/ditto_models.offline_refusal`). |
+| Hugging-Face-Downloads | `orchestrator/Core/hf_hub.py`, `orchestrator/Core/hf_takeover.py`, `orchestrator/gui/huggingface_window.py` | Ein geprüfter Fetcher (`HubFetcher`: der Commit festgelegt, eine fortsetzbare `.part`-Datei, Größe und sha256 des Hubs geprüft, bevor die Datei ihren Namen bekommt, das Token nur an huggingface.co) für `download_hf_file` einer KI, den Hugging-Face-Browser der GUI (`download_for_person`, Entscheidung A6) und den Modell-Download des Builders, eine Hub-API (`hub_api`: nur huggingface.co, nie der Host in `HF_ENDPOINT`, nie ein implizites Token) für jede Suche, Abfrage und Dateiliste des Frameworks, die des Browsers und des Builders eingeschlossen, und eine Token-Regel: Listen, Abfragen und Dateien eines öffentlichen Repositorys gehen ohne Token, auch wenn eines gespeichert ist; das Token geht nur an ein gated oder privates Repository (`needs_token` aus den Feldern gated und private der Repository-Infos, oder die Antwort 401/403 des Hubs auf eine Anfrage ohne Token, dann eine Anfrage mit ihm: `tokenless_first`, `HubFetcher(token_needed=...)`). Der Prozess läuft mit `HF_HUB_DISABLE_IMPLICIT_TOKEN` und `HF_HUB_DISABLE_TELEMETRY` von huggingface_hub (`orchestrator/utils/hf_env.py`, gesetzt beim Import des Pakets `orchestrator`; in huggingface_hub 1.33 stoppt der Telemetrie-Schalter auch dessen Abfrage der Agent-Harness-Liste), und die fastembed-Modelle der Wissensbasis kommen über `fetch_snapshot` ohne Token in den Cache von fastembed, der sie dann lädt, ohne jemanden zu fragen; und ein Ablageschema für einzelne Dateien, `download_path`: `<models_dir>/hf/<owner>--<name>/<commit[:12]>/<Datei>` (der Builder legt ganze Modelle in `cache/models/hf/` ab). Der Download des Browsers folgt der einen Platzregel und hält während er läuft eine eigene Reservierung im Reservierungsbuch; ebenso ein Modell der Wissensbasis, das über `fetch_snapshot` geholt wird (die Wissensbasis gibt den Fabriken ihr Reservierungsbuch: die Ablehnung der Platzregel vor jeder Datei, die angekommenen Bytes je Datei vermerkt, die Reservierung freigegeben, wenn das Holen endet). Jede Datei und jeder Vermerk eines Downloads wird mit `utils/atomic.replace_file` an seinen Platz gelegt (unter Windows einen Moment lang erneut versucht, solange ein Leser das Ziel offen hat): der letzte Schritt des Fetchers, `refs/main` und der Vermerk einer vollständigen Builder-Kopie (`local_models.write_complete`). `hf_takeover` listet, was frühere Versionen im Cache von huggingface_hub im Modellordner gespeichert haben (weiter aufgeführt und nutzbar), kopiert es auf Wunsch der Person, jede Datei gegen die Prüfsumme geprüft, mit der sie geladen wurde, und bietet das Entfernen der alten Kopien nur als angenommenen Löschplan mit der genauen Liste an (**Alte Downloads übernehmen…** im Browser und `llm-cli models take-over` rufen dasselbe auf). Im Offline-Modus lehnen die Hugging-Face-Aufrufe des Browsers, der Übernahme und jeder KI und die Commit-Prüfung der GUI vor jeder Anfrage mit einer Ablehnung ab (`hf_hub.offline`, `offline_refusal`; die Person liest `person_text`); ein Build im Offline-Modus lädt sein Modell nie (siehe die nächste Zeile). |
+| Modelle auf diesem Computer | `orchestrator/Core/local_models.py`, `orchestrator/gui/offline_model.py` | Was ein Build im Offline-Modus nutzen kann: `local_copy` findet eine vollständige Kopie eines Hugging-Face-Modells (die eigene Kopie des Builders in `cache/models/hf/`, als vollständig vermerkt, wenn ihr Bereitstellen endet; einen Modellordner, den der Hugging-Face-Browser geladen hat; den alten Cache von huggingface_hub), die `BuildEngine` im Offline-Modus statt eines Downloads einhängt. `models_here` listet die Modelle, die schon hier sind, jedes mit seinem Label: eine Referenz auf eine lokale Datei für den Modellordner und die mit der KI geteilten Ordner (`LocalFiles.list`), die Repository-ID für die Kopien des Builders, der Pfad für die Eingaben früherer Builds (aus ihren Build-Einträgen; nur für die Person). Ohne Kopie wirft `BuildService.check_model_here` `ModelNotHere` mit dieser Liste: `build start` gibt sie aus und nimmt mit `--model` ein Label aus der Liste oder einen lokalen Pfad (am Terminal wird gefragt), der Builder-Tab öffnet eine Auswahl mit einem Öffnen-Dialog für eine Modelldatei oder einen Modellordner (nennt ein Rezept einen anderen Commit als die hier gewählte Kopie, fragt der Tab, statt die Auswahl erneut zu öffnen: Nein bricht ab, Ja baut die Kopie als eigenen Build der Person ohne das Rezept, `bld.offline.pinned`), und der Build-Plan einer KI nennt nur die Labels. `ditto models download` lehnt im Offline-Modus ab und nennt die Ditto-Modelle, die schon hier sind (`runtime/ditto_models.offline_refusal`). |
 | Texte (Lokalisierung) | `orchestrator/utils/localization.py`, `orchestrator/utils/l10n_*.py`, `orchestrator/gui/localization.py` | Die eine Texttabelle (`TRANSLATIONS`, aus den `l10n_*`-Modulen zusammengeführt) und `ui_text`, `tr` und `current_language`, ohne Qt, für jeden Prozess. Das Sprachobjekt des Fensters (`LocalizationManager` mit dem Signal `language_changed`, auf das die Fenster neu übersetzen, `get_instance`) und Qts eigene Übersetzung seiner Standard-Schaltflächen (`qtbase_<lang>`) liegen in der GUI; der alte Importpfad führt beim ersten Gebrauch dorthin. Nur `orchestrator/gui/` importiert Qt (`tests/test_qt_free_core.py`). |
 | Kalibrierdaten | `data/calibration/`, `orchestrator/utils/calibration.py` | Kuratierter deutscher, englischer und Tool-Nutzungs-Text (MIT-Lizenz) mit SHA256-Prüfung, für Importance-Matrizen. |
 | Umgang mit nicht vertrauenswürdigem Text | `orchestrator/utils/untrusted.py` | Bereinigt und verpackt externen Text, bevor er ein Sprachmodell erreicht. |
@@ -652,7 +652,7 @@ Adressbereich als lokal zählen.
      Änderung der KI-Einstellungen und MCP `update_settings` lehnen diese Einstellungen ab, eine KI kann sie weder
      lesen noch setzen, und kein KI-Tool und kein GUI-Tool-Feld erreicht sie (`orchestrator/Core/local_network.py`
      schreibt sie, und kein Modul, das eine KI erreichen kann, importiert es). Die Ausnahmen zählen nur dafür, was
-     der Offline-Modus erreichen darf (`check_reach`, Entscheidung Runde 26 Q3): Der Datenschutzfilter und die
+     der Offline-Modus erreichen darf (`check_reach`): Der Datenschutzfilter und die
      Kennzeichnung lokal/Cloud eines Anbieters fragen ohne sie, wo der Server steht (`check_location`); ein
      öffentlicher Host, den du als lokal zählst, behält also den Datenschutzfilter, online wie offline, und seine
      Kennzeichnung.
@@ -684,7 +684,7 @@ Adressbereich als lokal zählen.
   llama.cpp-Überschreibung eines Image-Builds (`LLAMA_CPP_REPO_OVERRIDE`): dieselbe Regel; das Image selbst wird im
   Offline-Modus nicht gebaut (siehe **Builds** unten), also kommt das früher mit derselben Überschreibung gebaute Image. Die
   Downloads der Laufzeit (ein Modell von einem lokalen Modell-Spiegel, das vorgebaute Archiv) und die KI-Tools
-  `build_local_runtime` und `deploy_device_runtime`: ebenso. Deep Ingest (Entscheidung Runde 26 Q5): Ein Crawl, den
+  `build_local_runtime` und `deploy_device_runtime`: ebenso. Deep Ingest: Ein Crawl, den
   **du** startest, liest nur Seiten auf diesem Computer oder in deinem eigenen Netz, über eine festgelegte Verbindung
   ohne Proxy, und jede Weiterleitung und jeder gefolgte Link wird neu nach derselben Regel beurteilt;
   IPv4-Link-Local-Adressen (`169.254.0.0/16`) und die Metadatendienste der Cloud-Anbieter (`METADATA_ADDRESSES`,
@@ -1242,9 +1242,9 @@ Container ohne Netz aus; `build.sh` ist ein Stage-Runner über die vier Module s
 
 **Geschichte**
 
-- Runde 14 (2026-10-22) plante einen eigenen Ausführer über SSH und SCP für Builds; Runde 15 (2026-10-22) ersetzte das:
+- Die Entscheidung vom 2026-10-22 plante einen eigenen Ausführer über SSH und SCP für Builds; eine spätere Entscheidung am selben Tag ersetzte das:
   SSH und SCP dienen nur dem Deployment, Build-Hosts entfielen.
-- Runde 10c (2026-10-17) behielt die Vier-Module-Skripte, solange ihre Rolle offen war; Runde 11 (2026-10-17) machte sie
+- Die Entscheidung vom 2026-10-17 behielt die Vier-Module-Skripte, solange ihre Rolle offen war; eine spätere Entscheidung am selben Tag machte sie
   zum maßgeblichen Build.
 
 ### Targets, Hardware und Vorlagen
@@ -1272,10 +1272,10 @@ beweist.
 
 **Geschichte**
 
-- Runde 23 (2026-10-23) nahm zuerst die Vorgabe „x86-Toolkits auf einem ARM-Build-Rechner ablehnen“; der Maintainer
+- Die Entscheidung vom 2026-10-23 nahm zuerst die Vorgabe „x86-Toolkits auf einem ARM-Build-Rechner ablehnen“; der Maintainer
   ersetzte sie am selben Tag: RKNN läuft dort nativ, nur RKLLM wird abgelehnt.
-- Runde 23 (2026-10-23) plante den Dataflow Compiler als Herstellerdatei, die die Person bereitstellt; Runde 24
-  (2026-10-23) ersetzte das: llmcf findet und nutzt nur einen installierten Compiler.
+- Die Entscheidung vom 2026-10-23 plante den Dataflow Compiler als Herstellerdatei, die die Person bereitstellt; die Entscheidung
+  vom 2026-10-23 ersetzte das: llmcf findet und nutzt nur einen installierten Compiler.
 
 ### Deployment auf Boards
 
@@ -1300,9 +1300,9 @@ Wege 1 und 2 wiederverwendet.
 
 **Geschichte**
 
-- Runde 33 (2026-10-29) machte das Bündel zum einen Deploy-Weg; Runde 35 (2026-10-29) ersetzte das durch drei Wege: Die
+- Die Entscheidung vom 2026-10-29 machte das Bündel zum einen Deploy-Weg; eine spätere Entscheidung am selben Tag ersetzte das durch drei Wege: Die
   beiden vorhandenen bleiben, und das Bündel ist der dritte. Das geplante „deploy run lehnt root ab“ entfiel.
-- Runde 7 (2026-10-15) behielt native Benchmarks von Modellen auf dem Host als Vorgabe; ihre zweite Nachricht am selben
+- Die Entscheidung vom 2026-10-15 behielt native Benchmarks von Modellen auf dem Host als Vorgabe; ihre zweite Nachricht am selben
   Tag ersetzte das für Target-Modelle: Benchmarks laufen auf dem Target.
 
 ### SSH, Host-Schlüssel und das Paket remote
@@ -1351,15 +1351,15 @@ Freigaben und ein HMAC-verkettetes Audit-Log.
 
 **Geschichte**
 
-- Runde 2 (2026-10-11) nahm die Vorgabe „Builds einer Sitzung bei Verbindungsende abbrechen“; Runde 16 (2026-10-22)
+- Die Entscheidung vom 2026-10-11 nahm die Vorgabe „Builds einer Sitzung bei Verbindungsende abbrechen“; die Entscheidung vom 2026-10-22
   ersetzte sie: Builds laufen weiter und lassen sich wieder verfolgen.
-- Runde 5 (2026-10-12) schlug das Verfallen nach der doppelten Laufzeit ohne Nutzung vor; Runde 6 (2026-10-12) ersetzte
+- Die Entscheidung vom 2026-10-12 schlug das Verfallen nach der doppelten Laufzeit ohne Nutzung vor; eine spätere Entscheidung am selben Tag ersetzte
   das: feste Laufzeiten, nur „bis zum Widerruf“ verfällt nach 90 Tagen.
-- Runde 5 (2026-10-12) plante einen von der Person betriebenen Broker und dann einen asyncio-Broker im Prozess des
-  Frameworks; Runde 8 (2026-10-16) ersetzte beides: Der MQTT-Broker sitzt im Rust-Netzwerk-Gateway.
-- Runde 5 (2026-10-12) nannte ein vorhandenes Wake-on-Agent-Projekt desselben Autors als Vorbild; Runde 6 (2026-10-12):
+- Die Entscheidung vom 2026-10-12 plante einen von der Person betriebenen Broker und dann einen asyncio-Broker im Prozess des
+  Frameworks; die Entscheidung vom 2026-10-16 ersetzte beides: Der MQTT-Broker sitzt im Rust-Netzwerk-Gateway.
+- Die Entscheidung vom 2026-10-12 nannte ein vorhandenes Wake-on-Agent-Projekt desselben Autors als Vorbild; eine spätere Entscheidung am selben Tag:
   Dieses Projekt kommt nicht ins Framework, nur seine nützlichen Ideen.
-- Runde 8 (2026-10-15) baute die GUI-Tools zuerst für Ditto und ließ externe Apps offen; ihre Antworten vom 2026-10-16
+- Die Entscheidung vom 2026-10-15 baute die GUI-Tools zuerst für Ditto und ließ externe Apps offen; ihre Antworten vom 2026-10-16
   gaben sie auch externen Apps.
 
 ### Ditto, die lokale Laufzeit und die LLM-Schicht
@@ -1386,8 +1386,8 @@ Hände sind die eigenen Tools des Frameworks; sein lokales Modell läuft auf ein
 
 **Geschichte**
 
-- Runde 2 (2026-10-11) las „hybrid“ so, dass Ditto auch als MCP-Client eines Frameworks auf einem anderen Rechner
-  arbeitet; Runde 5 (2026-10-12) behielt immer die lokale Registry; Runde 8 (2026-10-15) klärte „hybrid“ als die Tools,
+- Die Entscheidung vom 2026-10-11 las „hybrid“ so, dass Ditto auch als MCP-Client eines Frameworks auf einem anderen Rechner
+  arbeitet; die Entscheidung vom 2026-10-12 behielt immer die lokale Registry; die Entscheidung vom 2026-10-15 klärte „hybrid“ als die Tools,
   die Dittos Hände sind, und entfernte den Fernmodus.
 
 ### Auf dem Board: Gateway, Sprache und MCP (geplant)
@@ -1443,7 +1443,7 @@ signierten Index und installiert über eine Quarantäne.
 
 **Geschichte**
 
-- Runde 14 (2026-10-22) sagte „wir veröffentlichen keine Images“ ohne Umfang; Runde 15 (2026-10-22) grenzte das ein: Nur
+- Die Entscheidung vom 2026-10-22 sagte „wir veröffentlichen keine Images“ ohne Umfang; eine spätere Entscheidung am selben Tag grenzte das ein: Nur
   Vorlagen kommen in den gemeinsamen Hub, eigene Images sind frei.
 
 ### Offline-Modus und das eigene Netz
@@ -1462,7 +1462,7 @@ außen.
 
 **Geschichte**
 
-- Runde 24 (2026-10-23) fragte zuerst, ob ein VPN-Steuerserver auch öffentliche Relays meiden muss; ihre endgültige
+- Die Entscheidung vom 2026-10-23 fragte zuerst, ob ein VPN-Steuerserver auch öffentliche Relays meiden muss; ihre endgültige
   Antwort am selben Tag klärte das und ergänzte die Abwahlen der Person.
 
 ### Hugging Face
@@ -1527,7 +1527,7 @@ was es repariert hat, was nicht und warum.
 
 **Geschichte**
 
-- Runde 7 (2026-10-15) nannte die Befehle; ihre zweite Nachricht am selben Tag ergänzte, dass Oracle Miracle sofort
+- Die Entscheidung vom 2026-10-15 nannte die Befehle; ihre zweite Nachricht am selben Tag ergänzte, dass Oracle Miracle sofort
   vorschlägt.
 
 ### Löschen und der Papierkorb
@@ -1543,7 +1543,7 @@ Nichts wird ohne die Person gelöscht: Jedes Löschen zeigt die genaue Liste und
 
 **Geschichte**
 
-- Runde 5 (2026-10-12) machte das Löschen in den Papierkorb zuerst übertragbar; ihre dritte Nachricht am selben Tag
+- Die Entscheidung vom 2026-10-12 machte das Löschen in den Papierkorb zuerst übertragbar; ihre dritte Nachricht am selben Tag
   ersetzte das: kein Löschen ohne Frage, nie übertragbar.
 
 ### Installer, Plattformen und Abhängigkeiten
@@ -1586,12 +1586,12 @@ der PC macht die schwere Arbeit, das Board liest und streamt nur.
 
 **Geschichte**
 
-- Runde 18 (2026-10-22) plante, den Orchestrator nach einer Prüfung seiner Geschichte unter MIT zu veröffentlichen und
-  sein neuestes Release-Tag zu holen; Runde 19 (2026-10-22) ersetzte das: Er wird nativ übernommen und mit llmcf
+- Die Entscheidung vom 2026-10-22 plante, den Orchestrator nach einer Prüfung seiner Geschichte unter MIT zu veröffentlichen und
+  sein neuestes Release-Tag zu holen; eine spätere Entscheidung am selben Tag ersetzte das: Er wird nativ übernommen und mit llmcf
   ausgeliefert.
-- Runde 19 (2026-10-22) sagte, PiShrink laufe nie auf einem Board und bleibe draußen; Runde 20 (2026-10-22) übernahm es
-  ins Framework; Runde 22 (2026-10-23) grenzte es auf Images von außen ein.
-- Runde 20 (2026-10-22) schickte Images über das NAS; Runde 21 (2026-10-22) ersetzte das: Der PC holt jede Sicherung,
+- Die Entscheidung vom 2026-10-22 sagte, PiShrink laufe nie auf einem Board und bleibe draußen; eine spätere Entscheidung am selben Tag übernahm es
+  ins Framework; die Entscheidung vom 2026-10-23 grenzte es auf Images von außen ein.
+- Die Entscheidung vom 2026-10-22 schickte Images über das NAS; eine spätere Entscheidung am selben Tag ersetzte das: Der PC holt jede Sicherung,
   jedes Exportziel außer der eigenen Karte des Boards.
 
 ### Build-Dienst, Warteschlange und Modi (geplant)
@@ -1637,8 +1637,8 @@ dem Changelog.
 
 **Geschichte**
 
-- Runde 34 (2026-10-29) schlug zuerst einen Abschnitt [Unreleased] mit der Version 3.1.0-dev vor; ihre Korrektur am
-  selben Tag strich ihn: kein Unreleased, Geplantes nur in der Roadmap; Runde 35 (2026-10-29) legte die Version fest:
+- Die Entscheidung vom 2026-10-29 schlug zuerst einen Abschnitt [Unreleased] mit der Version 3.1.0-dev vor; ihre Korrektur am
+  selben Tag strich ihn: kein Unreleased, Geplantes nur in der Roadmap; eine spätere Entscheidung am selben Tag legte die Version fest:
   [3.1.0] mit der Versionsanhebung im selben Commit.
 
 ## Sicherheitsmodell

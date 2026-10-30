@@ -41,7 +41,7 @@ def check_community(framework) -> List[Finding]:
     return findings + check_loose_knowledge(cm)
 
 
-LOOSE_WHY = ("Knowledge always belongs to a topic or a target (DECISIONS round 23 item 1). A loose file was never checked "
+LOOSE_WHY = ("Knowledge always belongs to a topic or a target. A loose file was never checked "
              "like a knowledge pack (its pages, their sources, the licence files), so it is not imported into the "
              "knowledge base until it is sorted into a topic or target folder.")
 

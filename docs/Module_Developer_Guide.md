@@ -269,7 +269,7 @@ On your computer the snapshot is not imported: its pages are in your knowledge b
 target as a pack, the snapshot travels with it, and the recipient's framework checks it at the install like a
 knowledge pack (a list of pages, each with its source, and its licence files) and imports it into their knowledge base
 under this target, with a snapshot of their knowledge base first; a newer version of your target pack replaces the
-excerpts of the older one there (DECISIONS round 23 item 8).
+excerpts of the older one there.
 
 The result is a **skeleton**, not a working target yet:
 
@@ -1112,7 +1112,7 @@ still write the probe file as described in [section 3.1](#31-probe-the-board).
 
 ### 11.6 The keys of probe 3.1.0 and how a module uses them
 
-Probe 3.1.0 (`PROBE_TOOL_VERSION=3.1.0`; maintainer decisions round 23: item 11, O-PREP and O-HAILO) added the keys
+Probe 3.1.0 (`PROBE_TOOL_VERSION=3.1.0`) added the keys
 below. Each is read the way the older keys are read: from a file, a sysfs entry or a vendor tool that is already on
 the machine, with a fixed argument list, an empty stdin and a time limit; nothing is installed, nothing runs with
 sudo. A key whose hardware or software is not there is left out without a warning; a value that is there but cannot
