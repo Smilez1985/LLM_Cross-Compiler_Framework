@@ -235,7 +235,7 @@ class DependencyCache:
 
     @classmethod
     def for_framework(cls, framework: Any) -> "DependencyCache":
-        from orchestrator.Core.build_plan import folder, state_dir
+        from orchestrator.Core.disk_plan import folder, state_dir
         ledger = None
         state = state_dir(framework)
         if state is not None:

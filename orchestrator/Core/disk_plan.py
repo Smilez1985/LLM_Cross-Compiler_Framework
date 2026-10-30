@@ -77,6 +77,24 @@ def state_dir(framework) -> Optional[Path]:
     return Path(value) if isinstance(value, (str, Path)) else None
 
 
+
+def config_value(framework, key: str, default=None):
+    """A setting of `framework` (its config's get(), else the attribute); `default` when it cannot be read."""
+    config = getattr(framework, "config", None)
+    get = getattr(config, "get", None)
+    try:
+        return get(key, default) if callable(get) else getattr(config, key, default)
+    except Exception:
+        return default
+
+
+def folder(framework, key: str, default: str) -> Path:
+    """The folder setting `key` of `framework`, resolved like the framework resolves its paths (build_plan re-exports
+    it)."""
+    resolve = getattr(framework, "resolve_path", None)
+    value = config_value(framework, key, default) or default
+    return Path(resolve(value)) if callable(resolve) else Path(str(value)).expanduser()
+
 def gb(value: float) -> str:
     """Bytes in decimal gigabytes, as people and Hugging Face show sizes."""
     if value < GB:
