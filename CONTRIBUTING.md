@@ -715,7 +715,7 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   `orchestrator/Core/hf_takeover.py`; its old copies go only as an accepted deletion plan (`delete_old_copies`).
   Every Hub API call (search, model info, file list, access check) uses the `HfApi` that `hf_hub.hub_api(token)`
   makes (huggingface.co only, never the host in `HF_ENDPOINT`; never an implicit token), and a file list is read
-  by `hf_hub.hub_file`. The token goes only where Hugging Face needs one (decision round 25 Q2): ask without it
+  by `hf_hub.hub_file`. The token goes only where Hugging Face needs one: ask without it
   first and wrap the call in `hf_hub.tokenless_first(call, token)` (the token follows once, only after a
   401/403); a search or listing never carries it; give `HubFetcher` `token_needed=hf_hub.needs_token(info)` (a
   gated or private repository). A library that downloads from the Hub by itself (fastembed) gets its files
@@ -860,7 +860,7 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
 
 ### Next steps instead of commands
 
-The window never tells a person to type a command (DECISIONS round 9 U2). A message says what is wrong; what to do is
+The window never tells a person to type a command. A message says what is wrong; what to do is
 a **next step** of the catalogue in `orchestrator/utils/next_steps/`, never a command or a hand-written menu path in a
 text:
 

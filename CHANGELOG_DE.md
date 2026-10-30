@@ -46,6 +46,12 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Die Funktionen der Notiz liegen jetzt in `orchestrator/Core/mojo/oracle_note.py` (weiter aus `banner.py`
   importierbar) und werfen bei keinem kaputten Zustandsordner (ein Ordner an Stelle der Datei, kaputtes JSON, kein
   Wörterbuch, ein schreibgeschützter Ordner, jeder andere Fehler); protokolliert wird nur die Art des Fehlers.
+- `2026-10-30 00:30 UTC` · `v3.2.0` **Die öffentlichen Dokumente nennen Entscheidungen nach dem, was sie entscheiden** ([Design](docs/DESIGN_DE.md#bausteine-und-entscheidungen)):
+  Changelog, Design, Roadmap, der Leitfaden für Beiträge und der Leitfaden für Modulentwickler verweisen nicht mehr
+  auf das Arbeitsprotokoll des Maintainers oder seine Rundennummern; eine Entscheidung wird nach ihrem Inhalt oder
+  ihrer Zeile im Design genannt, die History-Zeile einer ersetzten Entscheidung nach ihrem Datum.
+  `tests/test_docs.py` prüft das in jeder Markdown-Datei, und die zwei Meldungen, die noch eine Runde nannten (ein
+  Mojo-Befund zu losen Wissensdateien und ein Fehler beim Registrieren eines Tools), sagen nur die Regel.
 
 ### Behoben
 - `2026-10-29 23:36 UTC` · `v3.2.0` **Nacharbeiten an der Container-Engine: ein `DOCKER_HOST` aus Podman-Zeiten, `/dev/dri` unter rootless
@@ -130,7 +136,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 ## [3.1.0] - 2026-10-29
 
 ### Hinzugefügt
-- `2026-10-24 00:06 UTC` · `v3.1.0` **Mojo schließt den Kreis: die Kristallkugel nach Mojo Miracle** (DECISIONS Runde 27 und ihr Nachtrag): Endet Mojo
+- `2026-10-24 00:06 UTC` · `v3.1.0` **Mojo schließt den Kreis: die Kristallkugel nach Mojo Miracle**: Endet Mojo
   Miracle nach Mojo Oracle im Terminal (die Antwort `y` auf „Run Mojo Miracle now?“, oder `llmcf mojo --miracle`,
   während ein früherer Oracle-Lauf im Terminal noch offen ist), zeigt `llmcf mojo` eine große ASCII-Kristallkugel,
   farbig, wo die Konsole Farben zeigen kann (die Konsole von rich entscheidet: keine Farbe ohne Terminal, mit
@@ -144,7 +150,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   nichts. Die Zeichnung (reines ASCII, 60 Spalten) und ihre Farbmaske stehen in `orchestrator/Core/mojo/banner.py`, an
   einer Stelle zum Austauschen; ein Test prüft, dass beide dieselbe Form haben.
 - `2026-10-23 17:39 UTC` · `v3.1.0` **Hardware-Probe 3.1.0: L2-Cache, Version der Vulkan-Instanz, OpenCL-Plattformen, die Hailo-Schlüssel und die
-  Hersteller-Laufzeiten** (Konsolidierungskette probe-keys; Entscheidungen Runde 23 Punkt 11, O-PREP und O-HAILO,
+  Hersteller-Laufzeiten** (Konsolidierungskette probe-keys; Entscheidung, O-PREP und O-HAILO,
   HAILO_PLAN.md Abschnitt 2): `scripts/hardware_probe.py` (und seine Kopie im Paket), `hardware_probe.sh` und
   `hardware_probe.ps1` schreiben, geprüft durch `configs/hardware_probe_schema.yml`, `CPU_L2_CACHE_KB` (der größte
   Level-2-Cache), `VULKAN_INSTANCE_VERSION` (vulkaninfo, sonst der Dateiname des Loaders oder `vulkan-1.dll`) und
@@ -178,7 +184,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   klaren Zeile „Es wurde nichts übernommen: ...“ mit dem Grund, wie das Fenster sie zeigt, nie mit einem Traceback.
   Der GUI-Paritätstest nennt seinen Weg mit der Maus (`orchestrator/gui/menus/existing.py`: `btn_hf_take_over` im
   Browser). Tests: `tests/test_hf_takeover.py` `TestTheCommandLinesTakeOver`.
-- `2026-10-22 14:37 UTC` · `v3.1.0` **Adresse und Host-Schlüssel eines vertrauten Boards kannst du ändern** (DECISIONS Runde 10 Q5): `llm-cli deploy
+- `2026-10-22 14:37 UTC` · `v3.1.0` **Adresse und Host-Schlüssel eines vertrauten Boards kannst du ändern**: `llm-cli deploy
   devices edit GERÄT [--host] [--port] [--key "SCHLÜSSELZEILE" | --read-key]` und **Adresse oder Schlüssel ändern...**
   in **Boards > Boards und Geräte...** ändern Hostname oder IP-Adresse, SSH-Port oder Host-Schlüssel des Boards in der
   `known_hosts` des Frameworks, zum Beispiel nachdem sich seine Adresse geändert hat oder es neu installiert wurde.
@@ -190,7 +196,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   wenn sich die `known_hosts` inzwischen geändert hat. Ein neuer Schlüssel gibt dem Board eine neue Geräte-ID: Sein
   Eintrag zieht mit Name und Benutzer dorthin, und ob sich der Schlüssel des Frameworks anmeldet, wird einmal
   getestet; der Schlüssel eines anderen vertrauten Boards wird abgelehnt und dieses Board genannt, sodass sein Eintrag
-  nie überschrieben wird. Die Daten des Boards ziehen mit seinem neuen Schlüssel um (DECISIONS Runde 22, P6;
+  nie überschrieben wird. Die Daten des Boards ziehen mit seinem neuen Schlüssel um (Entscheidung, P6;
   `orchestrator/runtime/device/board_move.py`): seine gespeicherte Prüfung, die Deploy-Einstellungen, die deployte
   Laufzeit (der Eintrag des letzten Deployments mit seinen Prüfungen und seinem Benchmark und seine Laufzeit-Pakete),
   der Deploy-Eintrag und seine Benchmark-Ergebnisse bei den Builds ("getestet auf"). Jeder Teil wird zur neuen
@@ -208,7 +214,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Ditto oder die Laufzeit-Schritte für Geräte erreichen sie (`orchestrator/remote/pairing.py` `replace_key`, ein
   Test über den Importgraphen).
 - `2026-10-17 12:38 UTC` · `v3.1.0` **Nächste Schritte statt Befehlen, Befehle zum Zulassen und übersetzte, neu geordnete Menüs** (Welle 6, Kette
-  a0; DECISIONS Runde 10 V1, V2, Q2, Q7): Der Qt-freie Katalog `orchestrator/utils/next_steps/` enthält jeden nächsten
+  a0; Entscheidung V1, V2, Q2, Q7): Der Qt-freie Katalog `orchestrator/utils/next_steps/` enthält jeden nächsten
   Schritt, den das Audit der Welle 6 nennt (104 Schritte in neun Bereichsmodulen, die von selbst gefunden werden,
   Texte auf Englisch und Deutsch), und ein Renderer macht aus einem Schritt den Befehl für die Kommandozeile
   (`Next: ... llmcf ...`), den Menüpfad in der Sprache der Person für das Fenster (`StepsRow` mit Öffnen, Kopieren für
@@ -231,7 +237,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   bewacht die Texte samt ihrer Sie-Form und zählt den Rest gegen eine Ausgangslage, die nur sinken darf. Die
   deutschen Texte des Katalogs folgen der gewählten Anrede: Die Tabelle `FORMAL` eines Moduls hält die Sie-Form jedes
   Textes, der anders lautet.
-- `2026-10-17 06:42 UTC` · `v3.1.0` **Was Ditto und KI-Apps tun, wird zu Einträgen des Chat-Verlaufs, in jedem Prozess** (Welle 6, DECISIONS Runde 9 U1,
+- `2026-10-17 06:42 UTC` · `v3.1.0` **Was Ditto und KI-Apps tun, wird zu Einträgen des Chat-Verlaufs, in jedem Prozess** (Welle 6, Entscheidung U1,
   Folge b): `orchestrator/Core/activity.py` schreibt einen signierten Eintrag je Ereignis, aus dem Prozess, der die
   Arbeit getan hat (der GUI, `llm-cli`, jedem stdio-MCP-Server und dem HTTP-Kindprozess): ein Aufruf, der etwas geändert
   hat (das neue Registry-Ereignis `call_done`, Eintragsart `ai_action`), das Ende jeder Job-Art (ein Ende-Listener des
@@ -247,7 +253,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   `ConfigManager.reload_user_config` übernimmt Einstellungen, die ein anderer Prozess gespeichert hat, außer Werten, die
   dieser Prozess selbst hält (als Konflikte gemeldet).
 - `2026-10-17 11:20 UTC` · `v3.1.0` **Fachbegriffe beim Überfahren mit der Maus erklärt, ein verständliches Fehlerfenster und „du“ oder „Sie“ auf
-  Deutsch** (Welle 6, DECISIONS Runde 10, V6, Q1, Q7): ein Glossar mit 74 Fachbegriffen
+  Deutsch** (Welle 6): ein Glossar mit 74 Fachbegriffen
   (`orchestrator/utils/l10n_glossary.py`, zum Beispiel GGUF, Quantization und ihre Typen, Importance Matrix, KV Cache,
   RKLLM, RKNN, Qdrant, MCP, SSH Host Key, Fingerprint, Digest, Keyring), jeder mit einer kurzen Erklärung auf Englisch
   und Deutsch und einem Link auf die Seite, die ihn am besten erklärt (Wikipedia, die eigene Dokumentation des Begriffs
@@ -295,7 +301,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Einstellungen mit ihrem Menüpfad), im Fenster nie einen Befehl; der Knopf **Aktualisieren** des Community Hubs ist
   jetzt übersetzt.
 - `2026-10-17 02:35 UTC` · `v3.1.0` **`tests/test_cli_gui_parity.py`: Jeder Befehl und jede Option der CLI für Personen hat einen Weg mit der Maus**
-  (W1', Runde 9 U2): Der Test geht den ganzen Befehlsbaum von `llm-cli` durch (294 Pfade: Befehle, Unterbefehle und
+  (W1'): Der Test geht den ganzen Befehlsbaum von `llm-cli` durch (294 Pfade: Befehle, Unterbefehle und
   Optionen) und liest `CLI_PATHS`, `MACHINE_ONLY` und die Fenster- und Reitertabellen jedes Moduls in
   `orchestrator/gui/menus/`. Er schlägt fehl, wenn ein Befehl oder eine Option weder einen Weg mit der Maus noch einen
   Grund als reine Maschinenausgabe hat, wenn eine Tabelle einen Befehl nennt, den es nicht gibt oder den zwei Module
@@ -307,7 +313,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Menüs aller Bereiche werden über ihre Objektnamen mit einer Hilfsfunktion gefunden
   (`orchestrator/gui/menus/place.py`), deshalb fügt ein übersetzter Menütitel nie ein zweites Menü hinzu.
   CONTRIBUTING nennt die Regel.
-- `2026-10-16 20:14 UTC` · `v3.1.0` **Tools > Mojo-Gesundheitscheck... in der GUI** (DECISIONS W1': jede Aktion der Kommandozeile auch mit der Maus):
+- `2026-10-16 20:14 UTC` · `v3.1.0` **Tools > Mojo-Gesundheitscheck... in der GUI** (jede Aktion der Kommandozeile auch mit der Maus):
   Das Mojo-Fenster startet Mojo Oracle beim Öffnen, außerhalb des GUI-Threads, und zeigt jeden Befund so, wie
   `llmcf mojo` ihn ausgibt (die Schwere als Text mit Zeichen und Symbol, nie nur als Farbe; wo mit dem vollen Pfad,
   warum es wichtig ist, den nächsten Schritt, was Mojo Miracle tun kann, mit den Schritten seines Plans; den
@@ -319,7 +325,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   prüfen...** prüft ein beliebiges vertrautes Board, das du auswählst (an Bezeichnung und Adresse, und auch an der
   Geräte-ID, wo zwei Boards gleich aussehen; eine Verbindung zu seinem SSH-Port, keine Anmeldung). Befehl und Fenster teilen dieselben Kernfunktionen (`Core/mojo/boards.py`, die Sicht der Person in
   `Core/mojo/views.py`, `docker_objects.offer_image_list`), die Ausgabe von `llmcf mojo` bleibt also, wie sie war.
-- `2026-10-16 20:14 UTC` · `v3.1.0` **Dieses Board prüfen im Deployment-Tab** (Gruppe „Benchmark auf einem Board“, DECISIONS W1'): prüft das gewählte
+- `2026-10-16 20:14 UTC` · `v3.1.0` **Dieses Board prüfen im Deployment-Tab** (Gruppe „Benchmark auf einem Board“): prüft das gewählte
   Board so, wie es `llmcf mojo --oracle --board` tut, im Hintergrund (eine Verbindung zu seinem SSH-Port, keine
   Anmeldung), und zeigt seinen Befund mit dem nächsten Schritt unter der Zeile; ein Problem wird auch in einer Meldung
   genannt.
@@ -532,7 +538,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Ditto mit diesen Werten über den Einstellungen, `orchestrator/Core/ai_override.py`, das den Anbieter auch wie die CLI
   prüft), der Bereich sagt, was die Frage verwendet hat, und die Optionen werden nach dem Senden zurückgesetzt; Feed,
   Fragen und Freigaben arbeiten wie bisher.
-- `2026-10-16 15:23 UTC` · `v3.1.0` **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste** (DECISIONS RG5): `llm-cli
+- `2026-10-16 15:23 UTC` · `v3.1.0` **`llm-cli knowledge storage` und der alte Speicher der Wissensbasis in der Löschliste**: `llm-cli
   knowledge storage` zeigt, wo die Wissensbasis liegt, wann eine ältere umgewandelt wurde (wie viele Auszüge, was
   geprüft wurde) oder warum ihre Umwandlung fehlschlug, und den alten Ordner mit vollem Pfad und Größe; es liest nur den
   Eintrag, und seine erste Zeile nennt den Speicher, der wirklich genutzt wird. `convert` und **Tools > Knowledge
@@ -587,7 +593,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   wird nie ein Snapshot überschrieben. Die Wissenszeile von Mojo Oracle (mit Ort, Grund und dem Hinweis, dass nur deine
   Liste Platz schafft) und `llm-cli knowledge snapshots` zeigen, was die Snapshots im Vergleich zum freien Platz
   belegen. Mojo prüft auch den freien Platz des Build-Ordners des Frameworks. Nichts wird von selbst gelöscht.
-- `2026-10-15 21:27 UTC` · `v3.1.0` **Löschen mit der vollen Liste, und der Papierkorb** (Delegationsentwurf 3.10, Runde 5 f; Runde 6 10.4): Jedes
+- `2026-10-15 21:27 UTC` · `v3.1.0` **Löschen mit der vollen Liste, und der Papierkorb** (Delegationsentwurf 3.10): Jedes
   Löschen von etwas, das du sehen kannst, fragt zuerst im eigenen Fenster des Frameworks (der Lösch-Dialog der GUI oder
   eine Tabelle und eine Frage im Terminal) und nennt jedes Teil mit Namen, vollem Pfad oder Docker-ID, Dateinamen,
   Größe und was es ist; „Nein“ ist die Vorgabe. Wo du aus einer Liste wählst, ist nichts angehakt, die Liste wird aus
@@ -683,7 +689,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 - `2026-10-16 00:39 UTC` · `v3.1.0` **Der MCP-Server in einem Container, den du gebaut hast** (`llm-cli mcp serve --transport http --container`):
   bindet die Schnittstellen des Containers, und nur innerhalb eines Containers; benanntes Token, Host- und
   Origin-Prüfung bleiben gleich. Veröffentliche den Port nur auf dem Loopback des Hosts (`-p 127.0.0.1:8765:8765`).
-- `2026-10-12 14:23 UTC` · `v3.1.0` **Das Framework in einem Container, auf deinem eigenen Computer gebaut** (Runde 5 h): Kein Framework-Image wird
+- `2026-10-12 14:23 UTC` · `v3.1.0` **Das Framework in einem Container, auf deinem eigenen Computer gebaut**: Kein Framework-Image wird
   veröffentlicht oder geladen. `scripts/build_container_image.sh` (`make build`) prüft Docker, BuildKit und den
   Klon, stellt genau die Dateien bereit, die das Repository ausliefert, und baut `Docker Setup/Dockerfile` mit einem
   lokalen Tag (`lcf-framework:local`; ein Name mit Registry wird abgelehnt); danach zeigt es, wie du es startest. Das
@@ -735,7 +741,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Wissens-Packs sichert sie einen Snapshot in `knowledge_snapshots/` des persönlichen Ordners; passt ein Snapshot nicht
   auf die Platte, läuft die Änderung nicht (siehe „Platzprüfung vor jedem
   Wissens-Snapshot“). Es gibt keine Grenze: Sie behält so viele, wie die
-  Platte fasst, löscht keinen von selbst, auf keinem Weg (Runde 5 f), und keine Anzahl bringt eine Erinnerung oder
+  Platte fasst, löscht keinen von selbst, auf keinem Weg, und keine Anzahl bringt eine Erinnerung oder
   eine Warnung. `llm-cli knowledge snapshots` (in der GUI: Tools > Knowledge Snapshots...) listet jeden mit vollem
   Pfad, Namen, Größe und was er ist, damit du die, die du anhakst, löschst (zuerst in den Papierkorb) oder
   exportierst (woandershin kopierst, per sha256 geprüft).
@@ -837,7 +843,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   (`models_dir`, den Ditto nutzt; die Laufzeit nimmt ihn auch, wenn sie keinen Ordner bekommt) und prüft sie
   anhand von Größe und sha256. Die Modellstufen reichen bis zu 2-Bit-Modellen für schwache Hardware (3 GB RAM).
   Der Anbieter „local“ folgt dem laufenden Server ohne Konfiguration.
-- `2026-10-15 22:54 UTC` · `v3.1.0` **Dittos lokaler Server direkt oder in Docker** (DECISIONS Runde 7 D): `llm-cli ditto runtime ensure [--mode
+- `2026-10-15 22:54 UTC` · `v3.1.0` **Dittos lokaler Server direkt oder in Docker**: `llm-cli ditto runtime ensure [--mode
   auto|bare-metal|docker] [--force]` installiert ihn, wenn er fehlt, und tut nichts, wenn er da ist (in einer der
   beiden Arten). Ist nichts installiert, wählt er direkt (ohne den Aufwand von Docker), oder Docker, wenn direkt hier
   nicht geht, und sagt warum. Solange Docker nicht erreichbar ist, bleibt der Docker-Modus, wie du ihn gewählt hast;
@@ -1502,7 +1508,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   aufgezeichneter Fakt zeigt, nennt die Anfrage, die es prüft (`check_board`), und `{"board": "<Bezeichnung>"}` prüft
   dieses eine vertraute Board sofort. Eine KI nennt ein Board mit seiner Bezeichnung oder Geräte-ID, nie mit einer
   Adresse (ein Board ohne eigenen Namen, dessen Bezeichnung seine Adresse ist, mit seiner Geräte-ID).
-- `2026-10-16 00:39 UTC` · `v3.1.0` **Die eigenen Dokumente des Frameworks in der Wissensbasis** (ENTSCHEIDUNGEN Runde 8, N12): **Tools > Index the
+- `2026-10-16 00:39 UTC` · `v3.1.0` **Die eigenen Dokumente des Frameworks in der Wissensbasis** (N12): **Tools > Index the
   Framework's Documentation...**, `llm-cli knowledge index-docs [--with-code]` und das MCP-Tool `index_framework_docs`
   (jedes Mal gefragt, läuft als Job) nehmen die Dokumentation des Frameworks (README, CONTRIBUTING, den Ordner `docs`)
   und auf Wunsch seinen Code und seine Konfiguration (nur was es mitliefert: nie deine Einstellungen, eigene Targets
@@ -1618,7 +1624,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 
 ### Geändert
 - `2026-10-29 21:26 UTC` · `v3.1.0` **Der Bauplan besteht aus drei Dateien: dem Design, der Roadmap und dem Changelog, und jede Entscheidung steht im
-  Design** (DECISIONS Runden 34 und 35): `docs/BLUEPRINT_DE.md` enthielt Design und Roadmap in einem Dokument; es ist
+  Design**: `docs/BLUEPRINT_DE.md` enthielt Design und Roadmap in einem Dokument; es ist
   Wort für Wort aufgeteilt in `docs/DESIGN_DE.md` (was das Framework ist, jeder Baustein und jede Entscheidung mit dem,
   was sie sagt, wie der Code sie umsetzt und warum) und `docs/ROADMAP_DE.md` (was kommt, nur „in Arbeit“ und „geplant“),
   jedes mit seinem englischen Zwilling, und `docs/BLUEPRINT_DE.md` bleibt als kurzes Verzeichnis, dessen Tabelle jeden
@@ -1639,8 +1645,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Dokumentationsbereiche, keine E-Mail-Adresse, kein Home-Ordner, keine tokenähnliche Zeichenkette) und einen Block
   „Entscheidungen“ in jedem Baustein des Designs.
 - `2026-10-23 22:37 UTC` · `v3.1.0` **Offline-Modus: Deine Ausnahmen zählen nur dafür, was er erreichen darf, ein Name mit lokalen und öffentlichen
-  Adressen zählt nach seinen lokalen, und dein eigener Crawl liest dein eigenes Netz** (DECISIONS Runde 26 Q3, Q4,
-  Q5): Die Regel des eigenen Netzes beantwortet jetzt zwei Fragen mit einer API, `check_reach` (darf der Offline-Modus
+  Adressen zählt nach seinen lokalen, und dein eigener Crawl liest dein eigenes Netz**: Die Regel des eigenen Netzes beantwortet jetzt zwei Fragen mit einer API, `check_reach` (darf der Offline-Modus
   das erreichen: deine Ausnahmen zählen) und `check_location` (wo steht dieser Server: sie zählen nie). Der
   Datenschutzfilter und die Kennzeichnung lokal/Cloud eines Anbieters fragen die zweite; ein öffentlicher Host, den du
   als lokal zählst, behält also den Datenschutzfilter, online wie offline, und seine Kennzeichnung
@@ -1655,8 +1660,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   eine private Adresse hinter der Subnet-Route eines Geräts zählt wie eine VPN-Adresse. Eine Auflösung und die
   VPN-Prüfung gelten 5 Minuten und werden nach einer gescheiterten Verbindung verworfen, statt für den ganzen Lauf.
 - `2026-10-23 23:28 UTC` · `v3.1.0` **Offline-Modus: Ein Build nutzt ein Modell, das schon auf diesem Computer ist, und Docker-Images kommen nur von
-  diesem Computer oder aus deinem eigenen Netz** (Konsolidierungskette hf-local; Entscheidungen Runde 25 Q1 und
-  Runde 24 L-NET). Ein Build, den du im Offline-Modus startest, lädt sein Modell nicht mehr von Hugging Face
+  diesem Computer oder aus deinem eigenen Netz** (Konsolidierungskette hf-local). Ein Build, den du im Offline-Modus startest, lädt sein Modell nicht mehr von Hugging Face
   (`BuildEngine._stage_model` las den Offline-Modus nicht; nur Builds einer KI und die Commit-Prüfung der GUI lehnten
   ab): Ein Modell, das du mit seiner Hugging-Face-ID nennst, kommt ohne jede Verbindung aus seiner vollständigen Kopie
   auf diesem Computer (`orchestrator/Core/local_models.py` `local_copy`: die eigene Kopie des Builders, die sein
@@ -1681,7 +1685,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   `aquasec/trivy` von Docker Hub, und Trivy lud seine Datenbank). Tests: `tests/test_offline_models.py`,
   `tests/test_offline_images.py`, `tests/test_review_build_engine.py`.
 - `2026-10-23 23:48 UTC` · `v3.1.0` **Die eigene OpenSSH-Einstellungsdatei des Frameworks; OpenSSH liest weder `~/.ssh/config` noch
-  `/etc/ssh/ssh_config`** (DECISIONS Runde 25 Q4 und Q5): Jeder Aufruf des OpenSSH-Clients dieses Computers (der
+  `/etc/ssh/ssh_config`**: Jeder Aufruf des OpenSSH-Clients dieses Computers (der
   Rückfallweg ohne paramiko) bekommt vom einen Bauer der Befehlszeile (`orchestrator/remote/transport.py`
   `openssh_options`) `-F` mit `ssh_config` im Zustandsordner des Frameworks, bei der ersten Nutzung nur für den
   Besitzer lesbar angelegt und nur mit dem, was du hinzufügst: `llm-cli deploy ssh-config show|edit HOST --line
@@ -1700,8 +1704,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   (ein Test mit echtem `sshd`); unter Windows wird der Pfad für `-F` mit Schrägstrichen übergeben. Geteilte
   Verbindungen (`ControlMaster`) bleiben aus; sie stehen als Option in der Roadmap. Tests: `tests/test_ssh_config.py`,
   `tests/test_remote_system_ssh.py` (die festgehaltenen Befehlszeilen beginnen jetzt mit `-F`).
-- `2026-10-23 23:48 UTC` · `v3.1.0` **Die Temperatur des Boards während der Prüfungen darauf, mit einer Warnung, wenn es heiß ist** (DECISIONS Runde 23
-  Punkt 16): Die Prüfungen eines Laufzeit-Deployments, `llm-cli device runtime verify` und der Benchmark (CLI,
+- `2026-10-23 23:48 UTC` · `v3.1.0` **Die Temperatur des Boards während der Prüfungen darauf, mit einer Warnung, wenn es heiß ist**: Die Prüfungen eines Laufzeit-Deployments, `llm-cli device runtime verify` und der Benchmark (CLI,
   Fenster Boards und Geräte, Deployment-Tab, die Tools der KI) lesen die Thermalzonen des Boards (Temperatur, Typ,
   Trip-Points) und auf einem Raspberry Pi `vcgencmd` mit einem nur lesenden Befehl über die Sitzung, die sie schon
   haben, vor dem kurzen `llama-bench`-Lauf und danach; nichts wird installiert. Die Grenze ist der eigene
@@ -1723,7 +1726,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   (`RemoteSession.for_cleanup`). Wo das Board ein funktionierendes `timeout` hat, umschließt auch das Board selbst den
   Lauf mit seiner Grenze (900 s), und die Prüfung nennt sie, wenn sie den Lauf beendet hat. Das Aufräumen des Ordners
   des Laufs bleibt wie bisher. Tests: `tests/test_bench_stop.py`.
-- `2026-10-23 23:48 UTC` · `v3.1.0` **Ein Ziel für die Audit-Einträge der Person zu Boards** (DECISIONS Runde 25 Q3): Die CLI, die GUI (der
+- `2026-10-23 23:48 UTC` · `v3.1.0` **Ein Ziel für die Audit-Einträge der Person zu Boards**: Die CLI, die GUI (der
   Deployment-Tab, seine Hardware-Untersuchung, das Fenster Boards und Geräte) und die Zustimmungen der Person hinter
   den Schritten des Dienstes schreiben ihre Einträge zu Geräten, Vertrauen und Zustimmungen über
   `person_steps.device_audit` (das Log der Tool-Registry, sonst die `audit.db` je Benutzer); `audit` des Fensters
@@ -1739,8 +1742,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Ordner nur lesbar unter `/models` eingebunden und `MODEL_FILE`, das das Modell dort nennt; vorher startete der
   Container ohne das Modell. Das erzeugte Skript läuft in einem Test mit einem Ersatz für `docker`
   (`tests/test_deploy_docker_model.py`).
-- `2026-10-29 15:08 UTC` · `v3.1.0` **Die Hardware-Probe des Boards steuert jeden Build; NPU-Formate nur mit seiner NPU** (DECISIONS Runde 23 Punkte 5
-  und 15): Ein Build-Auftrag nennt die Probe des Boards mit ihrer ID (`llm-cli build start --probe ID`,
+- `2026-10-29 15:08 UTC` · `v3.1.0` **Die Hardware-Probe des Boards steuert jeden Build; NPU-Formate nur mit seiner NPU**: Ein Build-Auftrag nennt die Probe des Boards mit ihrer ID (`llm-cli build start --probe ID`,
   `BuildRequestIn.probe`; der Builder-Tab die Probe, die er zuletzt importiert oder erfasst hat, auch für ein Rezept,
   das er wie festgelegt baut, `BuildService.start_recipe(probe=...)`); ohne sie gilt die
   neueste gespeicherte Probe eines Boards des SoC des Auftrags, und eine Probe eines anderen Boards wird abgelehnt: ein
@@ -1754,7 +1756,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   (RKLLM-Toolkit 1.3.1 liefert nur Wheels für Linux x86_64); GGUF und RKNN (rknn-toolkit2 2.3.2 hat aarch64-Wheels)
   auch nativ auf einem ARM-Build-Rechner. Der Build-Dienst lehnt nach der eigenen Ablehnung des Targets mit dem Grund
   ab; der Builder-Tab bietet nur die übrigen Formate an.
-- `2026-10-29 15:08 UTC` · `v3.1.0` **`GGML_AVX512` nur mit dem ganzen AVX-512-Satz; die Vorlage plant x86 wie das Build-Rezept** (Runde 25 Q7):
+- `2026-10-29 15:08 UTC` · `v3.1.0` **`GGML_AVX512` nur mit dem ganzen AVX-512-Satz; die Vorlage plant x86 wie das Build-Rezept**:
   `GGML_AVX512` kompiliert für AVX-512 F, CD, VL, DQ und BW, aber `SUPPORTS_AVX512` der Probe ist nur AVX-512 F, also
   bekam ein Xeon Phi (Knights Landing) `-mavx512bw` und ungültige Befehle. Das Build-Rezept und beide Stufen config
   nutzen es jetzt nur, wenn die CPU-Flags der Probe jeden Teil nennen, sonst den AVX2-Plan (`recipe.AVX512_SET`,
@@ -1769,7 +1771,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Project-Include (`CMAKE_PROJECT_INCLUDE`, `CMAKE_PROJECT_INCLUDE_BEFORE`, `CMAKE_PROJECT_<name>_INCLUDE`,
   `CMAKE_PROJECT_TOP_LEVEL_INCLUDES`) führt ein Skript aus, das jede Option wieder einschalten kann, und wird deshalb
   wie `-C` und `-P` abgelehnt (`recipe.refused_option`, beide Urteile).
-- `2026-10-29 15:08 UTC` · `v3.1.0` **Rockchip-Image in zwei Stufen; die Format-Helfer der Vorlage sind echt** (Runde 23 Punkt 14): Die Stufe `builder`
+- `2026-10-29 15:08 UTC` · `v3.1.0` **Rockchip-Image in zwei Stufen; die Format-Helfer der Vorlage sind echt**: Die Stufe `builder`
   baut die Werkzeuge von llama.cpp und die drei venvs mit jeder Festlegung; das Image bekommt die venvs und den
   Quellbaum mit seinen Werkzeugen an denselben Pfaden und nur, was die Build-Stufen ausführen (kein `build-essential`,
   `python3-dev`, `python3-venv` oder `curl`), und behält den Benutzer `llmbuilder` und den Entrypoint; hadolint hat
@@ -1778,7 +1780,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   `rkllm_module.sh` der Vorlage klonten die Toolkits auf ihrem neuesten Commit und installierten Wheels während des
   Builds (der kein Netzwerk hat) und wandelten nichts um: Jetzt sind sie die Helfer von Rockchip, nutzen das venv des
   Images und lehnen ohne es schlicht ab.
-- `2026-10-23 17:16 UTC` · `v3.1.0` **`install.sh` auf jeder Linux-Familie, über die Paketverwaltung der Familie** (DECISIONS Runde 24 PKG): Der Installer
+- `2026-10-23 17:16 UTC` · `v3.1.0` **`install.sh` auf jeder Linux-Familie, über die Paketverwaltung der Familie**: Der Installer
   erkennt die Familie aus `ID` und `ID_LIKE` in `/etc/os-release` mit der Tabelle der Hardware-Untersuchung und
   installiert, was er braucht (Python 3.11 bis 3.14, `rsync`, Docker), mit `apt`, `dnf`, `zypper`, `pacman` oder `apk`,
   unter den echten Paketnamen der Distribution; vorher kannte er nur `apt` (auch für Python und `rsync`: `rsync` wurde
@@ -1792,7 +1794,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Systemen, die auf Fedora aufbauen, `docker` unter Amazon Linux, openSUSE und SLES, wo das Containers Module mit
   `SUSEConnect` eingeschaltet wird, und unter Arch, Manjaro und EndeavourOS mit `docker-buildx`; `docker` aus Alpines
   Repository community). Rocky Linux, AlmaLinux, Oracle Linux und die übrigen RHEL-Nachbauten bekommen Docker CE aus
-  Dockers RHEL-Repository (DECISIONS Runde 26 Q1: Das Framework braucht BuildKit, etwa für Hailo), mit derselben
+  Dockers RHEL-Repository (Das Framework braucht BuildKit, etwa für Hailo), mit derselben
   Schlüsselprüfung und der RHEL-Version aus `PLATFORM_ID` oder `VERSION_ID`; Podman (`podman-docker` aus der
   Distribution, das `podman.socket` der Person eingeschaltet) ist nur der Ersatzweg, wenn Docker für die Architektur
   nichts veröffentlicht, das Repository nicht erreichbar ist, der Schlüssel nicht passt, dnf kein Paket findet oder die
@@ -1802,7 +1804,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   und nur ein Ja nutzt `--allowerasing`; ein Nein (oder kein Terminal) entfernt nichts, nimmt die Repository-Datei und
   den Schlüssel zurück, die er geschrieben hat, und führt zum Ersatzweg Podman. Fedora, RHEL und CentOS Stream gehen
   ihren Weg genau wie bisher (kein Probedurchlauf von dnf, keine Frage, `dnf install -y` ohne `--allowerasing`; ein
-  Konflikt hält mit dem Grund an): Runde 26 hat die Frage und den Ersatzweg nur für die Nachbauten entschieden
+  Konflikt hält mit dem Grund an): Die Frage und der Ersatzweg wurden nur für die Nachbauten entschieden
   (Konsolidierungsprüfung install-followups-v). Der Probelauf nennt beide Wege und warum; ein zweiter Lauf, bei dem
   `docker` Podman ist, sagt, wie man wechselt. Echt geprüft in Containern mit Rocky Linux 9.8 (Docker CE frisch; mit
   `podman-docker` und einem Nein; mit `podman-docker` und einem Ja). SLES: Gibt es kein Python 3.11 bis 3.14, bietet
@@ -1823,7 +1825,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Fingerabdrücke der Schlüssel), ohne etwas zu verändern, zu laden oder aufzurufen und ohne Root-Rechte, mit Exit-Code
   0 oder 1, wie die Installation enden würde. Tests führen den Installer gegen die `/etc/os-release`-Dateien echter
   Distributionen mit nachgebauten Paketverwaltungen aus (`tests/test_install_distros.py`).
-- `2026-10-23 22:32 UTC` · `v3.1.0` **Podman statt Docker: Das Framework findet es und lehnt ab, was es nicht kann** (DECISIONS Runde 26 Q1): Ist
+- `2026-10-23 22:32 UTC` · `v3.1.0` **Podman statt Docker: Das Framework findet es und lehnt ab, was es nicht kann**: Ist
   `DOCKER_HOST` nicht gesetzt und antwortet kein Docker-Dienst, setzt das Framework `DOCKER_HOST` für sich und die
   Programme, die es startet, auf den Podman-Socket der Person (`orchestrator/utils/docker_engine.py`, ein Helfer für
   die Build-Engine, das Builder-Image, Dittos Container, die eine Docker-Prüfung und
@@ -1840,7 +1842,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   install-followups-v).
 - `2026-10-23 17:39 UTC` · `v3.1.0` **Hardware-Probe: Version 3.1.0, breitere Hailo-Erkennung** (Konsolidierungskette probe-keys):
   `PROBE_TOOL_VERSION` ist in allen drei Probes 3.1.0 (neue Schlüssel sind eine Änderung des Schemas; HAILO_PLAN
-  Frage 5, Vorgabe in Runde 23 festgehalten). Die neuen Schlüssel sind nie Pflicht und nie `ON`/`OFF`-Schlüssel, darum
+  Frage 5, Vorgabe festgehalten). Die neuen Schlüssel sind nie Pflicht und nie `ON`/`OFF`-Schlüssel, darum
   wird ein Profil der Probe 3.0.0 gelesen und gespeichert wie bisher (getestet mit jedem Testprofil in Schema 2).
   `NPU_DEVICE` nimmt auch die Knoten `/dev/h1x-<N>` und `/dev/h1x` des Hailo-master-Treibers an, `NPU_MODEL` wird für
   einen Hailo gefüllt (`hailo-8l`, `hailo-10h`), und `SUPPORTS_HAILO` ist auch `ON` für den USB-Hailo-10H, einen
@@ -1853,12 +1855,12 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   und Kleinschreibung, darum überschrieb sie den Wert `ARCH` des Skripts. `hardware_probe.sh`
   nutzt für die DRM-Knoten kein `ls | grep` mehr (ShellCheck auf Warnungsstufe sauber).
 - `2026-10-23 17:59 UTC` · `v3.1.0` **Der Offline-Modus erreicht nur diesen Computer und dein eigenes Netz, und was dazugehört, entscheidest du**
-  (DECISIONS Runde 24, L-NET und „L-NET final“): Eine Regel des eigenen Netzes (`orchestrator/utils/locality.py`)
+  (L-NET und „L-NET final“): Eine Regel des eigenen Netzes (`orchestrator/utils/locality.py`)
   entscheidet jede Verbindung des Offline-Modus nach außen. Ein Servername zählt nach jeder Adresse, zu der er
   auflöst: Loopback, private (RFC 1918, `fc00::/7`) und Link-Local-Adressen sind lokal, ein `.local`-, `.lan`-,
   `.fritz.box`- oder einteiliger Name nur, wenn er zu einer solchen Adresse auflöst (früher zählte die Endung, auch
   mit einer öffentlichen Adresse; die Kennzeichnung „lokal“ des Datenschutzfilters folgt derselben Regel), und ein
-  Name mit lokalen und öffentlichen Adressen zählt nach seinen lokalen (Runde 26, Eintrag unten). Eine
+  Name mit lokalen und öffentlichen Adressen zählt nach seinen lokalen (Eintrag unten). Eine
   Tailscale-Adresse (`100.64.0.0/10`,
   `fd7a:115c:a1e0::/48`) zählt nur als lokal, wenn das VPN ein Headscale in deinem eigenen Netz mit nur eigenen
   DERP-Relays ist, gelesen mit dem Befehl `tailscale` (`debug prefs`, `debug derp-map`); ein öffentlicher Name wie
@@ -1877,14 +1879,14 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Offline-Modus jetzt abgelehnt (seine Vorlage zählte unter jeder Adresse als lokal), und die Downloads der Laufzeit
   und die festgelegte Quelle kommen im Offline-Modus nur aus deinem eigenen Netz (ein lokaler Spiegel): `device
   runtime build`, `ditto runtime install` und `export-source`, das Boards-Fenster und Ditto > Lokale Laufzeit holten
-  vorher von GitHub oder Hugging Face. Deep Ingest der Person liest im Offline-Modus nur das eigene Netz (Runde 26,
-  Eintrag unten), und der Crawl einer KI liest dann nichts.
+  vorher von GitHub oder Hugging Face. Deep Ingest der Person liest im Offline-Modus nur das eigene Netz (Eintrag
+  unten), und der Crawl einer KI liest dann nichts.
   `build_local_runtime`, `deploy_device_runtime` und `add_pack_from_index` sehen nach der Antwort der Person noch
   einmal auf den Offline-Modus, wie `download_hf_file`. Ablehnungen nennen den Host, warum er nicht lokal ist, und
   die Ausnahme. Die Kennzeichnungen lokal/Cloud der mitgelieferten Anbieter ändern sich nicht. Jede Stelle, die die
   Einstellung liest, fragt jetzt die eine Prüfung `locality.offline_mode` (`hf_hub.offline` und die übrigen Abfragen
   geben weiter; Verhalten und Texte unverändert).
-- `2026-10-23 17:18 UTC` · `v3.1.0` **`llm-cli build start --format` bietet, was die installierten Targets bauen** (DECISIONS Runde 23 Punkt 7): statt
+- `2026-10-23 17:18 UTC` · `v3.1.0` **`llm-cli build start --format` bietet, was die installierten Targets bauen**: statt
   jedes Formats der Engine (`tensorrt`, `coreml`, ..., die kein Target baut) nimmt `--format` ein Format, das das
   Target baut, wie seine Capabilities in `target.yml` es angeben, die Liste, die die Formatauswahl des Builder-Tabs
   anbietet (`build_formats.offered_formats`, eine Liste für beide; ein Target ohne Capabilities nimmt wie bisher jedes
@@ -1893,8 +1895,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   klaren Worten, die nennen, was jedes installierte Target baut (`build_formats.format_problem`). Groß- und
   Kleinschreibung des Formats spielt keine Rolle mehr, und die Startübersicht nennt es so, wie das Target es
   schreibt, das Format, mit dem der Build läuft (`-f RKLLM` zeigt `rkllm`), nie als Markup gelesen.
-- `2026-10-23 17:18 UTC` · `v3.1.0` **„Den vorhandenen Build nehmen“ kopiert ihn in den gewählten Ordner, und `llm-cli build start` fragt auch**
-  (DECISIONS Runde 23 Punkt 9): `build start` prüft vor allem anderen auf einen fertigen Build mit zu 100 % denselben
+- `2026-10-23 17:18 UTC` · `v3.1.0` **„Den vorhandenen Build nehmen“ kopiert ihn in den gewählten Ordner, und `llm-cli build start` fragt auch**: `build start` prüft vor allem anderen auf einen fertigen Build mit zu 100 % denselben
   Optionen, wie der Builder-Tab (`BuildService.earlier_builds`, der Commit einmal nachgeschlagen, wenn er gleich sein
   könnte), und stellt am Terminal dieselbe Frage (nehmen, noch einmal bauen, abbrechen; ohne Terminal baut er wie
   angegeben). „Nehmen“ kopiert den früheren Build jetzt samt Golden-ZIP in den Ordner, in den der Build gegangen wäre
@@ -1906,7 +1907,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   ersetzt, wenn du die vollständige Liste dessen angenommen hast, was ersetzt wird („Nein“ ist die Vorgabe; in den
   Papierkorb oder endgültig; vorher ins Audit-Log geschrieben), und nur durch eine vollständige Kopie (eine, die einen
   Link ausgelassen hat, behält einen eigenen Namen).
-- `2026-10-23 17:05 UTC` · `v3.1.0` **Die Docker-Tabelle im Deployment-Tab entscheidet, was das Paket enthält** (DECISIONS Runde 23 Punkt 6): Die
+- `2026-10-23 17:05 UTC` · `v3.1.0` **Die Docker-Tabelle im Deployment-Tab entscheidet, was das Paket enthält**: Die
   Tabelle in **Use Docker Containerization?** zeigt keine Attrappen-Auswahl mehr, die nichts bewirkte (Llama.cpp
   (CPU), RKLLM (NPU), TensorRT (GPU)); sie listet die Container, die ein Paket mit Docker-Images für das gewählte Profil
   enthält, aus der einen Liste, die `llm-cli deploy package --docker` verpackt
@@ -1919,7 +1920,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   auskommentierten Zeilen) gibt keinen Gerätezugriff, wie gar kein Block, statt den Tab nicht mehr öffnen zu lassen;
   der Probe-Import des Builder-Tabs liest einen solchen Block (und einen leeren `cpu:`-Block) genauso, wenn er ein
   Target vorschlägt, statt dort anzuhalten.
-- `2026-10-23 09:33 UTC` · `v3.1.0` **Wissen gehört immer zu einem Thema oder einem Target** (DECISIONS Runde 23 Punkte 1 und 8): Ein installiertes
+- `2026-10-23 09:33 UTC` · `v3.1.0` **Wissen gehört immer zu einem Thema oder einem Target**: Ein installiertes
   Wissenspaket liegt in `community/knowledge/<Thema oder Target>/<Paket>/` (früher installierte Pakete bleiben, wo sie
   sind), und jeder Auszug, den es bringt, trägt sein Thema oder Target. Ein Wissenspaket nennt sein Thema oder Target
   im Manifest: `llm-cli zoo export knowledge` braucht `--topic` oder `--target` (ein Target dieses Computers), ebenso
@@ -2067,7 +2068,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   die Stufe, zu der jeder Teil gehört; der Roadmap-Punkt, die Vier-Module-Skripte zu entfernen, ist anders erledigt
   (sie sind der Build).
 - `2026-10-23 02:26 UTC` · `v3.1.0` **Die Stufe config prüft ihren Plan, und die Stufe target macht wieder das einsatzfertige Paket der Version 1.x**
-  (Nachtrag zu U9, DECISIONS Runde 16; Rockchip und die Vorlage). Mit dem Hardware-Profil eines Boards sucht die Stufe
+  (Nachtrag zu U9; Rockchip und die Vorlage). Mit dem Hardware-Profil eines Boards sucht die Stufe
   config die geplanten Compiler im Image (fehlt einer, wird nichts geplant), baut und linkt ein kleines C- und
   C++-Programm mit den geplanten Flags (und führt sie aus, wenn sie für diesen Rechner sind), prüft am ELF-Kopf, dass
   sie für das System des Boards sind, lässt `cmake -P` die erzeugte Toolchain-Datei lesen und prüft den Plan
@@ -2237,7 +2238,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   erneut; ein Schritt, der nicht zweimal laufen darf, endet mit einem klaren Satz, sobald das Board wieder antwortet,
   und der Staging-Ordner wird trotzdem entfernt; ein Board, das nicht wieder antwortet, beendet jeden späteren Schritt
   sofort mit seinem Grundcode. Der kurze llama-bench-Lauf startet auf dem Board für sich (`run_detached`) und wird nach
-  einem Abbruch wieder verfolgt, nie zweimal gestartet (Runde 16 G4: Arbeit läuft weiter, während niemand zusieht; ein
+  einem Abbruch wieder verfolgt, nie zweimal gestartet (Arbeit läuft weiter, während niemand zusieht; ein
   Board ohne nohup führt ihn wie bisher angehängt aus); `RemoteSession.follow` verfolgt einen schon gestarteten Job.
   Sein privater Ordner (`<Installationsordner>/.bench.XXXXXXXX`) wird danach entfernt, auch nach einem Fehler oder
   einem Strg+C im Terminal; einer, den ein Abbrechen im Fenster Boards oder ein `cancel_job` einer KI hinterließ (das
@@ -2335,7 +2336,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   aufrief; sie misst jetzt der eine Build-Weg (die Build-Engine, `BuildService.live_resources`, gelesen vom
   Orchestrator, mit dem der Build-Dienst arbeitet, wie der Status des Builds), und der Rest des
   älteren Wegs (Start, Überwachung, Stopp, ein Self-Healing-Auslöser und sechs Qt-Signale, auf die niemand hörte) wurde
-  entfernt, weil der eine Build-Weg all das tut (Entscheidung Runde 12, Punkt 6). Der Build-Status für die KI bleibt
+  entfernt, weil der eine Build-Weg all das tut. Der Build-Status für die KI bleibt
   gleich.
 - `2026-10-17 16:17 UTC` · `v3.1.0` **Ein Dienst für Änderungen der KI-Einstellungen, für jeden Kanal** (`orchestrator/llm/settings_change.py`,
   `AISettingsChange`): Die Regeln, die nur der Dialog der KI-Einstellungen kannte (bekannte Provider in der
@@ -2366,7 +2367,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   den Build über denselben Dienst. Die Prüfung des Builders auf einen früheren Build mit denselben Optionen erfasst
   jetzt auch ein Target ohne Capabilities (vorher lehnte der Dienst den Vergleich eines solchen Auftrags ab, und der
   Builder vermerkte das nur im Log).
-- `2026-10-17 18:03 UTC` · `v3.1.0` **Eine Umsetzung je Aufgabe, die ältere, wo sie genügt (Runde 12 der Entscheidungen).** Jeder Punkt der Liste
+- `2026-10-17 18:03 UTC` · `v3.1.0` **Eine Umsetzung je Aufgabe, die ältere, wo sie genügt.** Jeder Punkt der Liste
   unverdrahteter Teile wurde an seiner Geschichte geprüft (`git log -S`) und ist verdrahtet oder mit Nachweis entfernt:
   Die Frage vor dem Öffnen eines Links im Chat ist `bubbles.confirm_open_link` (die ungenutzte Kopie des Panels ist
   weg); die kostenlose Prüfung der Zugangsdaten ist `SignIn.check` (`LLMClient.check_credentials` ist weg, sein Test
@@ -2452,7 +2453,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   die Prüfungen von Mojo (auch seine Prüfung der Boards), der Speicher der Wissensbasis und die private Brücke zum
   offenen Fenster nicht geladen werden und kein Lizenztext der Wissenspakete gelesen wird; der MCP-Server lädt die
   Brücke beim ersten Aufruf seines Werkzeugs `gui`, die GUI startet sie mit ihrem Fenster.
-- `2026-10-16 15:23 UTC` · `v3.1.0` **Die lokale Wissensbasis liegt in Qdrant Edge** (DECISIONS RG5): Die Rust-Engine von Qdrant läuft im
+- `2026-10-16 15:23 UTC` · `v3.1.0` **Die lokale Wissensbasis liegt in Qdrant Edge**: Die Rust-Engine von Qdrant läuft im
   Framework-Prozess (neue Abhängigkeit `qdrant-edge-py` 0.8.0, Apache-2.0, exakt gepinnt; Wheels für Linux x86_64 und
   aarch64, Windows x86_64 und macOS, ein Wheel für jedes Python ab 3.10) statt des lokalen Modus von qdrant-client,
   einer Python-Nachbildung für die Entwicklung. Die Daten liegen jetzt in `~/.llm-framework/qdrant_edge`. Collections
@@ -2495,10 +2496,10 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Download nötig ist oder sich nicht ausschließen lässt. Ein MCP-Prompt mit Auszügen aus der Wissensbasis startet den
   Download nie: Wie `search_knowledge` liest er nur mit den Modellen auf diesem Rechner und sagt, wenn sie fehlen.
   Dittos automatische Diagnose eines gescheiterten Builds, nach der niemand gefragt wird, liest genauso.
-- `2026-10-16 09:39 UTC` · `v3.1.0` **Reparaturhinweise für KI-Aufrufer nennen Mojo** (Runde 7 Punkt 11'): Ablehnungen und Fehler, die KI-Aufrufer lesen,
+- `2026-10-16 09:39 UTC` · `v3.1.0` **Reparaturhinweise für KI-Aufrufer nennen Mojo**: Ablehnungen und Fehler, die KI-Aufrufer lesen,
   schickten sie zu `llm-cli doctor`. Jetzt nennen sie das Tool `run_mojo_oracle` (oder `llmcf mojo` im Terminal). Der
   Hinweis auf fehlende Builder-Images behält `llm-cli doctor --fix --tier 2`, das sie baut.
-- `2026-10-16 15:09 UTC` · `v3.1.0` **Dittos alte Laufzeit-Art verschwindet ganz** (W2 vom 2026-10-16, Runde 7 D): Nach einem Wechsel zwischen direkt und
+- `2026-10-16 15:09 UTC` · `v3.1.0` **Dittos alte Laufzeit-Art verschwindet ganz** (W2 vom 2026-10-16): Nach einem Wechsel zwischen direkt und
   Docker standen nur die Build-Ordner, Images und Container der alten Art in der Liste, und die Build-Ordner kamen in
   den Papierkorb. Jetzt steht jedes Objekt der alten Art in der Liste, auch ihre Einträge in `mode.json` und
   `active.json` und das Log der Image-Builds, und die Liste wird endgültig gelöscht, nicht in den Papierkorb, sodass von
@@ -2512,7 +2513,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   `~/.llm-framework` wortlos auf Modus 0700, daher erschien Mojos Befund `state.permissions` fast nie. Jetzt bekommt der
   Ordner 0700, wenn das Framework ihn anlegt; ein vorhandener Ordner behält seinen Modus, Mojo Oracle meldet einen, den
   andere lesen können, und Mojo Miracle repariert ihn nach deinem Ja.
-- `2026-10-16 08:50 UTC` · `v3.1.0` **Ein Deployment auf ein Board behält jeden älteren Laufzeit-Build** (Runde 5 f): `llm-cli device runtime deploy`
+- `2026-10-16 08:50 UTC` · `v3.1.0` **Ein Deployment auf ein Board behält jeden älteren Laufzeit-Build**: `llm-cli device runtime deploy`
   und das KI-Tool `deploy_device_runtime` entfernten alle älteren Laufzeit-Builds auf dem Board außer dem vorigen, ohne
   Frage. Jetzt bleibt jeder ältere Build. Das Ergebnis sagt, wie viele geblieben sind und wie groß sie sind, und
   `llm-cli device runtime prune GERÄT --on-device` listet sie für dich: voller Pfad auf dem Board, Ordnername, Größe
@@ -2528,13 +2529,13 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   dort und wird weiter aufgelistet. CLI-Builds ohne `--output` legen keinen Ordner `build_<Datum>_<Uhrzeit>` mehr an
   (ein späterer Build kommt stattdessen neben einen früheren). Das Container-Image setzt
   `LLM_FRAMEWORK_BUILD_DIR=/data/builds`.
-- `2026-10-15 21:27 UTC` · `v3.1.0` **Der Builder löscht keine Images mehr** (veröffentlicht in 3.0.0; Runde 7 Punkt 12): Jeder Build endete damit, sein
+- `2026-10-15 21:27 UTC` · `v3.1.0` **Der Builder löscht keine Images mehr** (veröffentlicht in 3.0.0): Jeder Build endete damit, sein
   Image zu entfernen und die verwaisten Images des Frameworks zu prunen. Jetzt heißt das Image des Builds
   `llm-framework/<Target>:last-build` (der nächste Build dieses Targets nutzt es wieder), und nur sein Name für den
   einzelnen Build wird entfernt, nachdem der neue Name am Image zu sehen ist. Das Image, das diesen Namen vorher hatte,
   bleibt ohne Namen und wird dir zum Löschen gelistet (Tools > Framework Build Images..., `llm-cli doctor --fix --tier
   2`). Nichts im Framework prunt Docker-Objekte; Docker-Images werden nur gelöscht, wenn du sie anhakst.
-- `2026-10-15 21:06 UTC` · `v3.1.0` **Keine Vorgabe nennt mehr ein Image aus einer Registry** (Runde 5 h, sechste Runde): Das Framework veröffentlicht
+- `2026-10-15 21:06 UTC` · `v3.1.0` **Keine Vorgabe nennt mehr ein Image aus einer Registry** (sechste Runde): Das Framework veröffentlicht
   keine Images, daher nennen die Vorgaben lokale Images. `image_inference_runtime` ist `llm-framework/inference:local`;
   ein Deployment-Paket nimmt es erst, wenn du es auf diesem Rechner gebaut hast, wie jedes Image ohne Digest.
   `docker_registry` ist leer (nichts liest es). Das experimentelle Benchmark-Fenster nutzt
@@ -2574,7 +2575,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Target-ID) ohne Rücksicht auf Groß- und Kleinschreibung und Trennzeichen der eines vorhandenen Targets gleicht, wird
   abgelehnt, im Community Hub, in der CLI und über MCP.
 - `2026-10-12 07:38 UTC` · `v3.1.0` **Builds und Downloads teilen eine Speicherplatz-Reservierung; Bereitstellung über den Abrufer des Frameworks**
-  (Reste von MCP-Phase T, Runde 1): `download_hf_file` reserviert seinen Speicherplatz in dem prozessübergreifenden
+  (Reste von MCP-Phase T): `download_hf_file` reserviert seinen Speicherplatz in dem prozessübergreifenden
   Verzeichnis, das Builds nutzen. Ein Build stellt sein Hugging-Face-Modell über den Abrufer des Frameworks bereit
   (fortsetzbare `.part`-Dateien, jede Datei gegen Größe und sha256 des Hubs geprüft, durch einen Abbruch binnen
   Sekunden gestoppt) statt über `hf_hub_download` und lehnt ab, wenn sich der Commit nicht ermitteln lässt. Ein
@@ -2743,7 +2744,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Assistent halten das gespeicherte Modul im Audit-Log fest (`module_saved`), und der Assistent gibt jedes Feld von
   Dittos Vorschlag weiter.
 
-- `2026-10-12 03:20 UTC` · `v3.1.0` **MCP: Builds werden mit dem gefragt, was das Framework nachgeschlagen hat** (Design T1, DECISIONS Runde 2 Punkt
+- `2026-10-12 03:20 UTC` · `v3.1.0` **MCP: Builds werden mit dem gefragt, was das Framework nachgeschlagen hat** (Design T1, Entscheidung Punkt
   8): `start_build` zeigt den Hugging-Face-Commit, den es baut (und baut genau diesen), Downloadgröße, Art der
   Gewichte, Lizenz, Zugangsbeschränkung und den Zugriff des gespeicherten Tokens, den Platz auf jedem Laufwerk mit
   Konvertierungsreserve und dreifach gezählter Ausgabe, eine Schätzung, ob dieser Rechner und das Board es tragen,
@@ -2764,7 +2765,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Datei, und der Download stoppt, wenn das Cache-Laufwerk unter die Hälfte seiner Reserve fällt. Ein volles Laufwerk
   wird als `insufficient_resources` mit dem freien Platz gemeldet.
 
-- `2026-10-12 03:34 UTC` · `v3.1.0` **MCP: Status und Einstellungen des Frameworks** (Design T2, DECISIONS Runde 1 Punkt 4): `get_status` zeigt die
+- `2026-10-12 03:34 UTC` · `v3.1.0` **MCP: Status und Einstellungen des Frameworks** (Design T2): `get_status` zeigt die
   Abschnitte Framework, Rechner, lokale Laufzeit (ein vorgebautes Archiv als „nicht selbst gebaut“ gekennzeichnet),
   Wissensbasis, KI-Zugang (nur Zustände, nie ein Schlüsselteil, Konto oder Endpunkt), Berechtigungen und die
   Audit-Einträge dieses Aufrufers; neu sind `get_settings` (eine feste Leseliste, Adressen als Schema und Host, Ordner
@@ -2775,7 +2776,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Ansagen, kann keine KI ändern, und `update_settings` wird nicht registriert, wenn es eine davon erreichen könnte;
   Berechtigungen, Geheimnisse, Tresor, Einstellungen des KI-Anbieters, Adressen und Ordner vor der Frage abgelehnt;
   kein Wert wird als „Standard“ gelesen).
-- `2026-10-12 03:34 UTC` · `v3.1.0` **MCP: ehrliches „kann nicht“, vom Framework geprüft** (DECISIONS Runde 3): Das neue `report_cannot_do` nimmt einen
+- `2026-10-12 03:34 UTC` · `v3.1.0` **MCP: ehrliches „kann nicht“, vom Framework geprüft**: Das neue `report_cannot_do` nimmt einen
   Grundcode (kein „ungetestet“) und was fehlt, prüft ihn an den Berechtigungen des Aufrufers, den Audit-Einträgen und
   Grenzen dieser Sitzung, dem Laufwerk und den Aktionen, die kein Tool tut, und antwortet confirmed, contradicted,
   premature (mit den Tools, die zuerst zu versuchen sind) oder unchecked, mit einem Satz nur aus Fakten des
@@ -2846,7 +2847,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 - `2026-10-11 13:50 UTC` · `v3.1.0` `llm-cli build start --parallel`: Die Option hatte nie eine Wirkung (ein Aufruf startet einen Build). Sie ist in
   der Hilfe ausgeblendet und gibt eine Warnung aus. `--optimization` bleibt; seine Hilfe sagt jetzt, dass das
   Rockchip-Target die Option nicht auswertet.
-- `2026-10-23 09:38 UTC` · `v3.1.0` `DeploymentManager.trust_host` (DECISIONS Runde 22, P5): der alte Schreiber eines bestätigten Host-Schlüssels, ohne
+- `2026-10-23 09:38 UTC` · `v3.1.0` `DeploymentManager.trust_host`: der alte Schreiber eines bestätigten Host-Schlüssels, ohne
   Audit-Zeile, den nichts im Framework aufruft. Er ist jetzt ein schlanker Delegate an `orchestrator/remote/pairing.py`
   `trust_presented_key`, den einen Schreiber, der den Schlüssel unter seiner Sperre speichert und im selben Schritt die
   Audit-Zeile des Vertrauens schreibt. Nur die Person kann ihn nutzen: Er nimmt den `pairing.PersonChannel` des Kanals
@@ -2924,7 +2925,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   `old_downloads_deleted`, das es nicht kannte; das Löschen stoppte also mit „The audit log cannot record the
   deletion“ (die Tests nutzten ein Ersatz-Log). Es ist jetzt ein bekanntes Ergebnis, ebenso `earlier_build_replaced`
   von „Nehmen“.
-- `2026-10-23 09:15 UTC` · `v3.1.0` **hadolint-Funde beim Build werden gezeigt statt weggeworfen** (DECISIONS Runde 23, Punkt 4): Der Build meldete
+- `2026-10-23 09:15 UTC` · `v3.1.0` **hadolint-Funde beim Build werden gezeigt statt weggeworfen**: Der Build meldete
   jedes Ergebnis seiner Dockerfile-Prüfung als „Hadolint check skipped (tool not found or failed)“ und verwarf, was
   hadolint fand. `BuildEngine._validate_dockerfile_hadolint` führt hadolint jetzt über das neue
   `orchestrator/utils/hadolint.py` aus (im Ordner des Dockerfiles mit seinem Dateinamen, ohne Farben, höchstens 60 s)
@@ -2935,7 +2936,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Hinweis: Der Build läuft immer weiter. Der lokale hadolint-Befehl in CONTRIBUTING legt das Image per Digest fest
   (`hadolint/hadolint:v2.15.1@sha256:32dac941...`, FRESHNESS_PLAN F-5) und nennt alle fünf Dockerfiles, die die CI
   prüft.
-- `2026-10-23 09:33 UTC` · `v3.1.0` **Eine neuere Version eines Wissenspakets ließ die Auszüge der alten Version zurück** (DECISIONS Runde 23 Punkt 2):
+- `2026-10-23 09:33 UTC` · `v3.1.0` **Eine neuere Version eines Wissenspakets ließ die Auszüge der alten Version zurück**:
   Paketseiten werden Stück für Stück ohne Ersetzen gespeichert, also behielt eine geänderte oder weggefallene Seite
   ihre alten Auszüge. Jeder Auszug trägt jetzt den Inhalts-Digest des installierten Pakets; sobald jede Seite der neuen
   Version drin ist, werden die Auszüge der älteren entfernt (`RAGManager.remove_pack_leftovers`), je Paket und
@@ -3199,7 +3200,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   seine Dateien in den Ordner `<Target>/<Modell>/<Quantisierung>` und ersetzte dort die Dateien eines früheren Builds
   (zum Beispiel eines für ein anderes Board), so dass ein fertiges Golden-Artefakt ohne Frage verloren ging. Ein
   späterer Build kommt jetzt daneben (`Q4_K_M-2`, mit eigenem ZIP); der frühere Build bleibt ganz.
-- `2026-10-15 17:14 UTC` · `v3.1.0` **Das „Docker-Aufräumen“ der Selbstheilung löscht nichts mehr** (veröffentlicht in 3.0.0; Runde 5 f): Wer den
+- `2026-10-15 17:14 UTC` · `v3.1.0` **Das „Docker-Aufräumen“ der Selbstheilung löscht nichts mehr** (veröffentlicht in 3.0.0): Wer den
   Vorschlag für eine volle Docker-Platte freigab (`docker_prune`, im GUI-Dialog, an der CLI-Abfrage oder über
   `resolve_healing`), ließ die verwaisten Images des Frameworks löschen, ohne dass sie gezeigt wurden, und den ganzen
   Build-Cache des Docker-Daemons leeren, auch den anderer Projekte. Jetzt ist es ein manueller Schritt: Der Vorschlag
@@ -3207,7 +3208,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Images...**, `llm-cli doctor --fix --tier 2`), die nur die Images löscht, die du anhakst und bestätigst, und eine
   Freigabe wird abgelehnt, bevor etwas gefragt wird. Kein Code des Frameworks
   leert den Docker-Build-Cache mehr.
-- `2026-10-12 18:37 UTC` · `v3.1.0` **`llm-cli doctor --fix --tier 2` löscht nicht mehr ohne Liste** (veröffentlicht in 3.0.0; Runde 5 f): es leerte den
+- `2026-10-12 18:37 UTC` · `v3.1.0` **`llm-cli doctor --fix --tier 2` löscht nicht mehr ohne Liste** (veröffentlicht in 3.0.0): es leerte den
   ganzen Build-Cache des Docker-Daemons, auch den anderer Projekte, und löschte die verwaisten Images des Frameworks,
   ohne sie zu zeigen. Der Build-Cache wird nicht mehr angerührt (er lässt sich nicht auf das Framework beschränken).
   Stufe 2 listet jetzt jedes Build-Image des Frameworks (ohne Namen, benannt `llm-framework/<Target>:last-build`,
@@ -3547,8 +3548,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Anfrage, die noch läuft, sagt nie 100 %.
 
 ### Sicherheit
-- `2026-10-23 22:37 UTC` · `v3.1.0` **Jede Verbindung des Offline-Modus nach außen geht jetzt über die Regel des eigenen Netzes** (DECISIONS Runde 24
-  L-NET, Runde 26 d-g): Ein Qdrant-Server (`qdrant_url`) wird nach ihr beurteilt, ein Qdrant in der Cloud wird in
+- `2026-10-23 22:37 UTC` · `v3.1.0` **Jede Verbindung des Offline-Modus nach außen geht jetzt über die Regel des eigenen Netzes**: Ein Qdrant-Server (`qdrant_url`) wird nach ihr beurteilt, ein Qdrant in der Cloud wird in
   einfachen Worten abgelehnt, und qdrant-client verbindet sich nur mit den geprüften Adressen, ohne Proxy und ohne
   seine eigene Versionsanfrage; das **Prüfen** der Anmeldung, `ditto login --check` und der Anmeldebereich der
   KI-Einstellungen lehnen einen Anbieter, den der Offline-Modus nicht erreichen darf, ab, bevor ein Socket aufgeht; die
@@ -3568,7 +3568,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   geöffnet, sobald der Offline-Modus eingeschaltet wird (ein Qdrant in der Cloud wird dann abgelehnt), und ein
   online begonnener Crawl liest nichts mehr, sobald der Offline-Modus eingeschaltet wird.
 - `2026-10-23 23:28 UTC` · `v3.1.0` **Hugging-Face-Tokens verlassen diesen Computer nur dort, wo Hugging Face eines braucht, und keine Bibliothek
-  schickt selbst eines** (Konsolidierungskette hf-local; Entscheidung Runde 25 Q2). Jede Abfrage, Dateiliste und
+  schickt selbst eines** (Konsolidierungskette hf-local). Jede Abfrage, Dateiliste und
   Datei eines öffentlichen Repositorys trug bisher das im Framework gespeicherte (oder im Browser eingegebene) Token
   zu huggingface.co; jetzt keine mehr, auch wenn ein Token gespeichert ist. Das Token geht nur an ein gated oder
   privates Repository, nur an huggingface.co: nach seinen Repository-Infos (`hf_hub.needs_token`: gated oder privat)
@@ -3588,7 +3588,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   `tests/test_hf_tokens.py` (`HF_ENDPOINT` auf einem anderen Host mit gesetztem `HF_TOKEN`: keine Anfrage trägt ein
   Token irgendwohin außer zu huggingface.co; eine öffentliche Datei ohne Authorization-Header; der Weg von fastembed
   ohne Token; der Offline-Modus ohne Socket; die Abfrage der Agent-Harness-Liste), `tests/test_hf_online.py`.
-- `2026-10-23 09:15 UTC` · `v3.1.0` **`install.sh` installiert Docker nur mit Prüfsumme** (DECISIONS Runde 23, Punkt 3): Fehlte Docker, lud der Installer
+- `2026-10-23 09:15 UTC` · `v3.1.0` **`install.sh` installiert Docker nur mit Prüfsumme**: Fehlte Docker, lud der Installer
   `get.docker.com` herunter und führte es ungeprüft als root aus. Jetzt kommt Docker nur aus Dockers offiziellem
   apt-Repository unter Debian, Ubuntu und Raspberry Pi OS (32 Bit bekommt die armhf-Pakete von Debian, wie Dockers
   Anleitung es ab Engine 29 sagt). Systeme, die auf Ubuntu oder Debian aufbauen (`ID_LIKE`: Linux Mint, Pop!_OS, LMDE
@@ -3611,7 +3611,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Windows als Administrator). Die virtuelle Umgebung behält jetzt das pip, das mit Python kommt; es genügt für
   `--require-hashes --no-deps`, und der Installer-Test hält jeden pip-Aufruf am Export mit Hashes fest.
   `install.bat` lädt sonst nichts ungeprüft (winget prüft den Python-Installer gegen den SHA256 seines Manifests).
-- `2026-10-23 09:33 UTC` · `v3.1.0` **Lose Wissensdateien werden nicht mehr ohne die Paketprüfungen importiert** (DECISIONS Runde 23 Punkt 1): Jede
+- `2026-10-23 09:33 UTC` · `v3.1.0` **Lose Wissensdateien werden nicht mehr ohne die Paketprüfungen importiert**: Jede
   `.json`-Datei in `community/knowledge/` und jede `knowledge.json` in einem Ordner ohne die Herkunftsdatei des Pakets
   wurde bei jedem Start in die Wissensbasis importiert, ohne Manifest, Signatur, Quarantäne oder Prüfung. Jetzt werden
   nur installierte Pakete importiert, und nur solange ihre Dateien dem Installierten entsprechen; eine lose Datei
@@ -3878,7 +3878,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Ordner des Frameworks über ihre Bezeichnung und jeden anderen Pfad über seinen Dateinamen (auch unter `/home/`,
   `/media/`, `/Users/` und `C:\Users\`, zum Beispiel ein lokales Modell auf einem USB-Stick); deine eigenen Fenster
   behalten den vollen Pfad.
-- `2026-10-15 21:27 UTC` · `v3.1.0` **Kein Löschen ohne deine Bestätigung im Framework** (Runde 5 f; WP7): Jeder Codepfad, der ein gebautes Modell, einen
+- `2026-10-15 21:27 UTC` · `v3.1.0` **Kein Löschen ohne deine Bestätigung im Framework** (WP7): Jeder Codepfad, der ein gebautes Modell, einen
   Wissens-Snapshot, einen Papierkorb-Eintrag, ein Image des Frameworks, einen alten llama.cpp-Laufzeit-Build oder ein
   Laufzeit-Paket eines Boards löscht, nimmt nur den Plan, den du in der GUI oder im Terminal bestätigt hast, baut ihn unmittelbar vorher aus dem neu, was auf der Platte liegt, und löscht nichts,
   wenn er sich geändert hat oder das Audit-Log ihn nicht vorher festhalten kann. `delete_artifact` einer KI verschiebt

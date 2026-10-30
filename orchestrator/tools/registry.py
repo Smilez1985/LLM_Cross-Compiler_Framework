@@ -716,7 +716,7 @@ class ToolRegistry:
         if spec.deletes:
             problems = deletion_rule_problems(spec)
             if problems:
-                raise ValueError(f"Tool '{spec.name}' deletes something, so the person alone decides it (round 5 f): "
+                raise ValueError(f"Tool '{spec.name}' deletes something, so the person alone decides it: "
                                  + "; ".join(problems) + ".")
         if spec.callers is not None and (not spec.callers or not all(isinstance(c, str) and c for c in spec.callers)):
             raise ValueError(f"Tool '{spec.name}': callers must name at least one caller (None: every caller).")

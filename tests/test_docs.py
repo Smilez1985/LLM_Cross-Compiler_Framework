@@ -1029,3 +1029,33 @@ def test_the_rename_section_names_the_mcp_window_by_its_mouse_path(rel, lang):
     start = text.index("AI apps connected over MCP" if lang == "en" else "Über MCP verbundene KI-Apps")
     item = text[start:text.index(" - **", start)]   # the list item, up to the next one
     assert f"**{mouse_path('act_tools_mcp_connections', lang)}**" in item, item
+
+
+# --- public Markdown never names the working log or its round numbers ---------------------------------------------
+
+# The maintainer's working log is not public: a document names a decision by what it decides, or points to its row in
+# docs/DESIGN.md ("Components and decisions"), never by the log or a round number of it.
+WORKING_LOG = re.compile(r"DECISIONS|ENTSCHEIDUNGEN|\b[Dd]ecisions?\s+(?:round|Runde)\b|\b[Rr]ounds?\s+[0-9]|"
+                         r"\bRunden?\s+[0-9]|\bEntscheidung(?:en)?(?:\s+des\s+Maintainers,?)?\s+Runde\b")
+
+
+def working_log_mentions(rel: str, text: str) -> List[str]:
+    return [f"{rel}:{n}: {line.strip()[:120]}" for n, line in enumerate(text.split("\n"), 1)
+            if WORKING_LOG.search(line)]
+
+
+def test_no_public_document_names_the_working_log():
+    found = []
+    for rel in ALL_MARKDOWN:
+        found += working_log_mentions(rel, _read(rel))
+    assert not found, "public Markdown names the working log or a round of it:\n  " + "\n  ".join(found[:40])
+
+
+def test_the_working_log_check_finds_every_form():
+    for line in ("(DECISIONS round 25 Q1)", "(DECISIONS Runde 9 U2)", "decision round 25 Q2", "Round 29 (Q1).",
+                 "round 5 (2026-10-12)", "Runde 24 (2026-10-23)", "Runden 18, 19 und 22", "Entscheidung Runde 25 Q2",
+                 "### Ditto's context (DECISIONS rounds 29, 32 and 33)"):
+        assert working_log_mentions("x.md", line), line
+    for line in ("the decision of 2026-10-22 replaced it", "a round trip", "one more round of checks",
+                 "Key decisions", "eine Runde später"):
+        assert not working_log_mentions("x.md", line), line
