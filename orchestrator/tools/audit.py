@@ -74,6 +74,8 @@ OUTCOMES = frozenset({
     # the person's deletions outside the tool registry: old Hugging Face downloads (hf_takeover) and what the copy of
     # an identical earlier build replaced ("Use", artifact_output.copy_artifact)
     "old_downloads_deleted", "earlier_build_replaced",
+    # an installed community pack the person uninstalled (CommunityManager.uninstall)
+    "pack_uninstalled",
 })
 # How a person answered (or did not answer) a question; `escalated` and `withdrawn` are an AI's answers to its own
 # question ("ask the person", "no").

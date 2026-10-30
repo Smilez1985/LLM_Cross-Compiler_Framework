@@ -897,13 +897,7 @@ class RAGManager:
         try:
             def remove(store: "KnowledgeStore"):
                 self._sources = None
-                found = {r.id: r for r in store.records_where(HOLDERS, holder, with_vectors=True)}
-                legacy = "root_url" if holder.startswith(CRAWL_HOLDER) else "origin_pack"   # stored before holders
-                value = holder[len(CRAWL_HOLDER):] if holder.startswith(CRAWL_HOLDER) else holder
-                if holder != OWN_HOLDER:
-                    found.update({r.id: r for r in store.records_where(legacy, value, with_vectors=True)
-                                  if r.id not in found and holder in holder_info(r.payload)})
-                records = [r for r in found.values()
+                records = [r for r in self._held(store, holder, with_vectors=True)
                            if (sources is None or sources(str(r.payload.get("source") or "")))
                            and not (keep and keep(holder_info(r.payload).get(holder, {})))]
                 self.last_released = self._release(store, records, holder)
@@ -912,6 +906,29 @@ class RAGManager:
         except KnowledgeBaseError as e:
             self._fail(e)
             return False
+
+    def holding(self, holder: str) -> Dict[str, int]:
+        """What `holder` holds in the knowledge base, as an uninstall lists it before the person decides: "alone" (the
+        excerpts only it holds, which go with it), "alone_pages" (their pages) and "shared" (excerpts another pack or
+        your own crawl also holds, which stay). Raises KnowledgeBaseError."""
+        def count(store: "KnowledgeStore") -> Dict[str, int]:
+            records = self._held(store, holder, with_vectors=False)
+            alone = [r for r in records if set(holder_info(r.payload)) == {holder}]
+            return {"alone": len(alone), "alone_pages": len({str(r.payload.get("source") or "") for r in alone}),
+                    "shared": len(records) - len(alone)}
+        return self._with_store(count) if holder else {"alone": 0, "alone_pages": 0, "shared": 0}
+
+    @staticmethod
+    def _held(store: "KnowledgeStore", holder: str, with_vectors: bool) -> List[Any]:
+        """Every stored point `holder` holds: by the holders, and an excerpt stored before holders by the field its
+        holder came from (origin_pack, or root_url for your own crawl)."""
+        found = {r.id: r for r in store.records_where(HOLDERS, holder, with_vectors=with_vectors)}
+        legacy = "root_url" if holder.startswith(CRAWL_HOLDER) else "origin_pack"
+        value = holder[len(CRAWL_HOLDER):] if holder.startswith(CRAWL_HOLDER) else holder
+        if holder != OWN_HOLDER:
+            found.update({r.id: r for r in store.records_where(legacy, value, with_vectors=with_vectors)
+                          if r.id not in found and holder in holder_info(r.payload)})
+        return list(found.values())
 
     @staticmethod
     def _release(store: "KnowledgeStore", records, holder: str) -> List[str]:

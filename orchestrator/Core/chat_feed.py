@@ -144,6 +144,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "activity.tool.restore_knowledge": "Started restoring a knowledge snapshot; the current state is "
                                                     "saved first.",
         "activity.tool.delete_artifact": "Moved a finished model to the trash.",
+        "activity.tool.uninstall_pack": "Moved an installed community pack to the trash.",
         "activity.tool.restore_from_trash": "Put something back from the trash.",
         "activity.tool.build_local_runtime": "Started building Ditto's local model program.",
         "activity.tool.start_local_runtime": "Started Ditto's local model program.",
@@ -262,6 +263,7 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "activity.tool.restore_knowledge": "Hat begonnen, einen Wissens-Snapshot wiederherzustellen; der "
                                                     "aktuelle Stand wird vorher gesichert.",
         "activity.tool.delete_artifact": "Hat ein fertiges Modell in den Papierkorb verschoben.",
+        "activity.tool.uninstall_pack": "Hat ein installiertes Community-Paket in den Papierkorb verschoben.",
         "activity.tool.restore_from_trash": "Hat etwas aus dem Papierkorb zurückgeholt.",
         "activity.tool.build_local_runtime": "Hat begonnen, Dittos lokales Modellprogramm zu bauen.",
         "activity.tool.start_local_runtime": "Hat Dittos lokales Modellprogramm gestartet.",

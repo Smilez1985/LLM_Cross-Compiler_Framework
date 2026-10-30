@@ -153,6 +153,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `config output-folder` | Show or set the output folder finished models are saved to |
 | `zoo list` / `zoo show` | List the community zoo and the installed packs / show one entry |
 | `zoo install` / `zoo verify` | Install a community pack after checks and your confirmation / check installed packs or a pack file |
+| `zoo uninstall` | Uninstall an installed pack after the exact list and your confirmation ("No" by default) |
 | `zoo export` / `zoo keys` | Make a signed pack of your own target, build or knowledge base (and open a pull request) / show your public keys |
 | `zoo maintainer key` / `review` / `revoke` | For the maintainer of the community repository: create the index signing key / review and publish contributions / revoke a published pack |
 
@@ -2452,6 +2453,28 @@ In the GUI: **Tools > Open Community Hub > Check installed packs** (no argument)
 ```bash
 llm-cli zoo verify
 llm-cli zoo verify community/contributions/contribution-target-my-board-1.0.0.zip
+```
+
+### zoo uninstall
+
+```
+llm-cli zoo uninstall PACK_ID --kind target|recipe|knowledge
+```
+
+Uninstalls an installed community pack. First it lists exactly what goes: the pack's folder with its provenance, its
+import notes in the knowledge folder, and (for a knowledge pack or a target pack's knowledge snapshot) how many
+excerpts only this pack holds; excerpts another pack or your own crawl also holds stay. Then it asks whether to move
+everything to the trash (restorable with `llm-cli trash restore`) or delete it for good, and "Uninstall exactly N items
+(size)?" with "No" as the default. Only at a terminal; without one nothing is deleted. A pack whose pages are in the
+knowledge base is refused while the knowledge base is off. To install a newer version of a pack, uninstall the old one
+first. Exit code 1 when nothing was uninstalled or an item could not be removed.
+
+In the GUI: **Tools > Open Community Hub**, select the installed pack, **Uninstall...**. An AI may only ask for it
+(the optional tool `uninstall_pack`, hidden until you enable it): you see the same list in the framework's own window
+and decide, and its request only moves to the trash.
+
+```bash
+llm-cli zoo uninstall rk3588-docs --kind knowledge
 ```
 
 ### zoo export

@@ -16,6 +16,14 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   crawl's pages (empty: the site's name, such as `docs.example.com`), and every excerpt of the crawl carries it, so
   `search_knowledge(topic=...)`, the Topic column and the knowledge exports find them under it. A crawl an AI started
   (`crawl_docs_site`) takes the site's name; it never names a topic itself.
+- `2026-10-30 01:16 UTC` · `v3.2.0` **Uninstall an installed community pack**: `llm-cli zoo uninstall PACK_ID --kind target|recipe|knowledge`, the
+  Community Hub's **Uninstall...** and, for an AI only as a request the person decides, the optional tool
+  `uninstall_pack` (hidden until enabled, always asked, never granted or delegated, trash only). Everything goes
+  through the deletion rules (`Core/deletion.py`): the exact list first (the pack's folder with its provenance, its
+  import notes, and how many excerpts only this pack holds), "No" by default, then the trash (`Core/trash.py`) or for
+  good, audited before anything goes (`pack_uninstalled`); excerpts another pack or your own crawl still holds stay
+  (`CommunityManager.uninstall_plan` / `uninstall`, `RAGManager.holding`). A pack whose pages are in the knowledge base
+  is refused while the knowledge base is off.
 
 ### Fixed
 - `2026-10-30 00:48 UTC` · `v3.2.0` **A recipe bound to a target pack made on Linux verifies on Windows**: Windows keeps no execute bit, so the
