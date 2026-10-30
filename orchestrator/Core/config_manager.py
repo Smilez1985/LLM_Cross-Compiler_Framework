@@ -501,6 +501,18 @@ class ConfigManager:
             ConfigSchema("offline_local_ranges", list, False, [],
                          "Address ranges counted as local in offline mode (e.g. 203.0.113.0/24); set only by you, never "
                          "by an AI"),
+            # Where an offline build of the build container image fetches apt and pip packages in the own network
+            # (DECISIONS round 36; Core/build_image.py judges each by the locality rule on every build): person-only
+            # like the opt-outs (AISettingsChange and MCP update_settings refuse them).
+            ConfigSchema("build_apt_mirror", str, False, "",
+                         "apt mirror in your own network for offline builds of the build container image (http or "
+                         "https, no credentials), e.g. http://192.0.2.10/; set only by you, never by an AI"),
+            ConfigSchema("build_apt_proxy", str, False, "",
+                         "apt cache proxy in your own network (such as apt-cacher-ng) for offline builds of the build "
+                         "container image, e.g. http://192.0.2.10:3142; set only by you, never by an AI"),
+            ConfigSchema("build_pip_index", str, False, "",
+                         "pip index in your own network (a PyPI mirror) for offline builds of the build container "
+                         "image, e.g. http://192.0.2.10:3141/simple; set only by you, never by an AI"),
 
             # Community zoo (3.1): the signed index (verified with configs/community_keys.yml) and the repository
             # that receives contributions as pull requests. The repository is decided (maintainer, 2026-10-22);
@@ -736,6 +748,7 @@ class ConfigManager:
                 # v2.0
                 "chat_context_limit", "enable_telemetry", "offline_mode",
                 "offline_local_vpns", "offline_local_hosts", "offline_local_ranges",
+                "build_apt_mirror", "build_apt_proxy", "build_pip_index",
                 # v2.3
                 "image_trivy", "image_base_debian", "image_inference_runtime",
                 "enable_security_scan", "llama_cpp_version", "build_jobs", "healing_approval_timeout",

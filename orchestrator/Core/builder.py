@@ -42,7 +42,8 @@ from orchestrator.Core import build_identity, build_records
 from orchestrator.tools import local_files
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.build_context import stage_build_context
-from orchestrator.utils.docker_engine import create_container, engine_name, ensure_docker_host, podman_refusal
+from orchestrator.utils.docker_engine import (create_container, engine_name, ensure_docker_host, podman_refusal,
+                                             save_image)
 from orchestrator.utils.download import FileLock as DownloadLock
 from orchestrator.utils.helpers import copy_hashed, digest_matches, sha256_file
 from orchestrator.utils.llama_pin import pinned_source
@@ -135,6 +136,12 @@ class BuildStatus(Enum):
 # build arguments) are emptied, and nothing goes through a proxy (it would resolve the mirror's name itself).
 OFFLINE_NO_PROXY_ARGS = {"HTTP_PROXY": "", "HTTPS_PROXY": "", "ALL_PROXY": "", "http_proxy": "", "https_proxy": "",
                          "all_proxy": "", "NO_PROXY": "*", "no_proxy": "*"}
+
+# The build arguments that only say where the build container image's sources come from (Core/build_image.SOURCE_ARGS:
+# the person's apt and pip mirrors in the own network, the local llama.cpp copy) and the proxy settings: not inputs of
+# the image (INPUTS_LABEL).
+SOURCE_ONLY_ARGS = frozenset(("APT_MIRROR", "APT_PROXY", "PIP_INDEX_URL", "PIP_TRUSTED_HOST", "LLAMA_CPP_SOURCE")) \
+    | frozenset(OFFLINE_NO_PROXY_ARGS)
 
 # ModelFormat and OptimizationLevel live in build_formats (the CLI imports them without this module).
 from orchestrator.Core.build_formats import ModelFormat, OptimizationLevel  # noqa: E402,F401 - re-exported
@@ -937,33 +944,24 @@ class BuildEngine:
         progress.add_log(f"Building Docker Image: {tag}")
         
         try:
-            from orchestrator.runtime.build.host_tools import PINNED_BUILD_ARGS
-            buildargs: Dict[str, str] = {}
-            build_jobs = int(self._get_conf("build_jobs", 0) or 0)
-            if build_jobs > 0:
-                buildargs["BUILD_JOBS"] = str(build_jobs)  # lowered by self-healing after an OOM
-            given = dict(getattr(config, "build_args", None) or {})
-            pinned = sorted(set(given) & set(PINNED_BUILD_ARGS))
-            if pinned:
-                progress.add_warning(f"Build arguments {', '.join(pinned)} come only from the llama.cpp pin and the "
-                                     "build recipe; the values given for this build are not used.")
-            buildargs.update({k: v for k, v in given.items() if k not in PINNED_BUILD_ARGS})
-            buildargs.update(self._llama_cpp_args(config, progress, path))
-            # uid/gid 0 already exist in the image (root); the entrypoint maps the user at runtime anyway.
-            if sys.platform != "win32" and os.getuid() != 0:
-                buildargs["USER_ID"] = str(os.getuid())
-                buildargs["GROUP_ID"] = str(os.getgid())
-
-            labels = {IMAGE_LABEL: config.target_arch, INPUTS_LABEL: self._image_inputs(config, path, buildargs)}
+            buildargs, labels = self.image_labels(config, progress, path)
             self._build_images[config.build_id] = tag
-            # The override's check pinned these in offline mode. Offline mode builds no image (below); they still
-            # hold when offline mode was switched off since that check: no proxy, only the checked local addresses.
+            # The override's check pinned these in offline mode; they still hold when offline mode was switched off
+            # since that check: no proxy, only the checked local addresses.
             hosts = self._repo_hosts.pop(config.build_id, None)
             if hosts is not None:   # offline mode with the override: no proxy, which would resolve the name itself
                 buildargs.update(OFFLINE_NO_PROXY_ARGS)
             from orchestrator.utils.locality import offline_mode
-            if offline_mode(self.config):   # no pull and no build-time download: an image already on this computer
-                return self._offline_image(config, progress, tag, labels[INPUTS_LABEL], path)
+            if offline_mode(self.config):
+                # The image built earlier from the same settings, else a build from local sources only (round 36):
+                # the plan judges every source before anything slow and stops naming the ones that are not local.
+                earlier = self._earlier_image(config, progress, tag, labels[INPUTS_LABEL])
+                if earlier is not None:
+                    return earlier
+                plan = self._offline_build_plan(config, progress, path)
+                buildargs.update(plan.build_args)
+                buildargs.update(OFFLINE_NO_PROXY_ARGS)
+                hosts = list(dict.fromkeys((hosts or []) + plan.hosts)) or None
             if engine_name(self.docker_client) == "podman":
                 progress.add_log("Podman builds the image (its builder buildah, through its Docker-compatible "
                                  "interface); BuildKit is not used.")
@@ -986,47 +984,86 @@ class BuildEngine:
                         if line: progress.add_log(f"BUILD: {line}")
                     if 'error' in chunk:
                         raise RuntimeError(chunk['error'])
-            
+
             return self.docker_client.images.get(tag)
-            
+
         except OfflineImageMissing:
             raise
         except Exception as e:
             raise RuntimeError(f"Image build failed: {e}\n{self._log_tail(progress, 'BUILD: ')}")
 
+    def image_labels(self, config: BuildConfiguration, progress: BuildProgress,
+                     path: Path) -> Tuple[Dict[str, str], Dict[str, str]]:
+        """(build arguments, labels) of the build container image of `config` from the Dockerfile `path`: the build
+        jobs, the build's own arguments (never the pinned ones), the llama.cpp pin and recipe plan, the user ids, and the
+        labels IMAGE_LABEL and INPUTS_LABEL. The image build uses them, and an import checks a file against them
+        (Core/build_image.expected_labels): the one computation of what a build here looks for."""
+        from orchestrator.runtime.build.host_tools import PINNED_BUILD_ARGS
+        buildargs: Dict[str, str] = {}
+        build_jobs = int(self._get_conf("build_jobs", 0) or 0)
+        if build_jobs > 0:
+            buildargs["BUILD_JOBS"] = str(build_jobs)  # lowered by self-healing after an OOM
+        given = dict(getattr(config, "build_args", None) or {})
+        pinned = sorted(set(given) & set(PINNED_BUILD_ARGS))
+        if pinned:
+            progress.add_warning(f"Build arguments {', '.join(pinned)} come only from the llama.cpp pin and the "
+                                 "build recipe; the values given for this build are not used.")
+        buildargs.update({k: v for k, v in given.items() if k not in PINNED_BUILD_ARGS})
+        buildargs.update(self._llama_cpp_args(config, progress, path))
+        # uid/gid 0 already exist in the image (root); the entrypoint maps the user at runtime anyway.
+        if sys.platform != "win32" and os.getuid() != 0:
+            buildargs["USER_ID"] = str(os.getuid())
+            buildargs["GROUP_ID"] = str(os.getgid())
+        labels = {IMAGE_LABEL: config.target_arch, INPUTS_LABEL: self._image_inputs(config, path, buildargs)}
+        return buildargs, labels
+
+    def _offline_build_plan(self, config: BuildConfiguration, progress: BuildProgress, dockerfile: Path):
+        """Offline mode without an image of the same settings: the plan of a build from local sources only
+        (Core/build_image.offline_plan). A source that is not local stops the build here, before anything is pulled,
+        fetched or built (OfflineImageMissing naming each one and how to provide it); otherwise the local copy of
+        llama.cpp is staged into the build context when the plan uses it, and the plan is returned."""
+        from orchestrator.Core.build_image import offline_plan, stage_llama_copy, stop_text
+        try:
+            text = dockerfile.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        overrides = self._repo_overrides()
+        plan = offline_plan(text, self.config, self.docker_client,
+                            state_dir=getattr(self.config, "user_state_dir", None),
+                            llama_repo=overrides.get("LLAMA_CPP_REPO_OVERRIDE") or None)
+        for line in plan.lines(person=False):
+            progress.add_log(f"Offline image plan: {line}")
+        if not plan.ready:
+            raise OfflineImageMissing(stop_text(config.target_arch, plan))
+        if plan.llama_copy is not None:
+            stage_llama_copy(plan.llama_copy, dockerfile.parent)
+        progress.add_log(f"Offline mode: building the image of {config.target_arch} from local sources only (every "
+                         "source is on this computer or in your own network; no proxy).")
+        return plan
+
     @staticmethod
     def _image_inputs(config: BuildConfiguration, dockerfile: Path, buildargs: Dict[str, str]) -> str:
         """One sha256 of what the target image is built from: the target, its folder's content digest, the Dockerfile
-        and the build arguments (INPUTS_LABEL)."""
+        and the build arguments (INPUTS_LABEL). The arguments that only say where sources come from (SOURCE_ONLY_ARGS:
+        the apt and pip mirrors, the local llama.cpp copy) and the proxy settings are not part of it: an image built
+        online is found offline and the other way round."""
         try:
             text = dockerfile.read_text(encoding="utf-8", errors="replace")
         except OSError:
             text = ""
         data = {"target": getattr(config, "target_arch", ""), "pack": getattr(config, "target_pack_sha256", "") or "",
                 "dockerfile": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-                "args": sorted((str(k), str(v)) for k, v in buildargs.items())}
+                "args": sorted((str(k), str(v)) for k, v in buildargs.items() if k not in SOURCE_ONLY_ARGS)}
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode("utf-8")).hexdigest()
 
-    def _offline_image(self, config: BuildConfiguration, progress: BuildProgress, tag: str, inputs: str,
-                       dockerfile: Path) -> Image:
-        """Offline mode: building the target image would pull its base images and download what its Dockerfile
-        fetches, so nothing is built. The image of this target built earlier from exactly the same inputs (its
-        INPUTS_LABEL) is used, named for this build like a built one; without one the build stops naming the images
-        and the step to take while online (OfflineImageMissing)."""
+    def _earlier_image(self, config: BuildConfiguration, progress: BuildProgress, tag: str,
+                       inputs: str) -> Optional[Image]:
+        """The image of this target built earlier from exactly the same inputs (its INPUTS_LABEL), named for this
+        build like a built one; None when there is none."""
         found = list(self.docker_client.images.list(
             filters={"label": [f"{IMAGE_LABEL}={config.target_arch}", f"{INPUTS_LABEL}={inputs}"]}) or [])
         if not found:
-            from orchestrator.Core.community_pack import dockerfile_bases
-            try:
-                bases = dockerfile_bases(dockerfile.read_text(encoding="utf-8", errors="replace"))
-            except OSError:
-                bases = []
-            shown = ", ".join(dict.fromkeys(bases)) or "its base image"
-            raise OfflineImageMissing(
-                f"Offline mode is on, and the image of the target {config.target_arch} for these settings is not on "
-                f"this computer. Building it pulls {shown} and downloads what its Dockerfile fetches, which offline "
-                "mode does not allow. Start this build once with offline mode off; later builds with the same "
-                "settings use that image offline.")
+            return None
         image = max(found, key=lambda i: str((getattr(i, "attrs", None) or {}).get("Created") or ""))
         repository, name = tag.rsplit(":", 1)
         image.tag(repository, name)
@@ -1034,6 +1071,18 @@ class BuildEngine:
                          f"({getattr(image, 'short_id', '') or 'an image on this computer'}); nothing is pulled or "
                          "downloaded.")
         return self.docker_client.images.get(tag)
+
+    def _offline_image(self, config: BuildConfiguration, progress: BuildProgress, tag: str, inputs: str,
+                       dockerfile: Path) -> Image:
+        """Deprecated (round 36): the image build asks _earlier_image and, without one, the offline plan
+        (_offline_build_plan). Kept for callers of the 3.1.0 name: the image built earlier from the same inputs, else
+        OfflineImageMissing (with the plan's stop text when a source is not local)."""
+        earlier = self._earlier_image(config, progress, tag, inputs)
+        if earlier is not None:
+            return earlier
+        self._offline_build_plan(config, progress, dockerfile)
+        raise OfflineImageMissing(f"Offline mode is on, and the image of the target {config.target_arch} for these "
+                                  "settings is not on this computer; its sources are local, so a build can make it.")
 
     def _llama_cpp_args(self, config: BuildConfiguration, progress: BuildProgress, dockerfile: Path) -> Dict[str, str]:
         """LLAMA_CPP_TAG and LLAMA_CPP_COMMIT from the pin, and LLAMA_CMAKE_ARGS from the build recipe's plan for the
@@ -1132,14 +1181,9 @@ class BuildEngine:
             pin = offline_reach(url, self.config, "the llama.cpp repository override (LLAMA_CPP_REPO_OVERRIDE)")
         except SourceError as e:
             raise RuntimeError(str(e)) from None
-        hosts: List[str] = []
-        if pin:   # "HOST:PORT:ADDRESS[,ADDRESS...]", a name (an address needs no pin)
-            host, _port, addresses = pin.split(":", 2)
-            for name in dict.fromkeys((host, host.rstrip("."))):
-                for address in addresses.split(","):
-                    address = address.strip("[]")
-                    hosts.append(f"{name}=[{address}]" if ":" in address else f"{name}:{address}")
-        self._repo_hosts[progress.build_id] = hosts
+        from orchestrator.Core.build_image import add_host_entries
+        # "HOST:PORT:ADDRESS[,ADDRESS...]" for a name (an address needs no pin), as --add-host entries
+        self._repo_hosts[progress.build_id] = add_host_entries(pin)
         progress.add_log("Offline mode: the image fetches the pinned llama.cpp commit only from the checked local "
                          "addresses of the repository override, through no proxy.")
 
@@ -1367,11 +1411,8 @@ class BuildEngine:
             return None, None
         folder = Path(tempfile.mkdtemp(prefix="trivy-", dir=parent))  # mode 0700
         archive = folder / "image.tar"
-        try:
-            with open(archive, "wb") as f:
-                for chunk in image.save(named=True):
-                    self._check_cancelled(progress)
-                    f.write(chunk)
+        try:   # docker save, the one helper (utils/docker_engine.save_image); a cancel is noticed between two chunks
+            save_image(image, archive, cancelled=lambda: self._check_cancelled(progress))
         except BaseException:  # cancelled or the disk ran full: no half archive stays behind
             shutil.rmtree(folder, ignore_errors=True)
             raise

@@ -510,9 +510,8 @@ class DeploymentManager:
                     repo, tag = name.rsplit(":", 1)
                     img.tag(repo, tag=tag)
                     img.reload()
-                with open(tar_path, "wb") as f:
-                    for chunk in img.save(named=name):
-                        f.write(chunk)
+                from orchestrator.utils.docker_engine import save_image
+                save_image(img, tar_path, named=name)   # the one docker save of the framework
                 names[img_name] = name
             except DeployError:
                 raise

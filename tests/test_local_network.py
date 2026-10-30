@@ -158,7 +158,9 @@ def test_cli_refuses_what_is_no_opt_out_and_two_actions(config):
 
 def test_ai_settings_change_refuses_the_opt_outs():
     from orchestrator.llm.settings_change import PERSON_ONLY_SETTINGS, AISettingsChange
-    assert set(PERSON_ONLY_SETTINGS) == set(OPT_OUT_SETTINGS)
+    from orchestrator.utils.locality import BUILD_SOURCE_SETTINGS
+    # Round 36 (on purpose): the build sources in the own network are the person's too.
+    assert set(PERSON_ONLY_SETTINGS) == set(OPT_OUT_SETTINGS) | set(BUILD_SOURCE_SETTINGS)
     for key in OPT_OUT_SETTINGS:
         problems = AISettingsChange.problems_of_settings({}, None, {key: ["anything"]})
         assert [p.code for p in problems] == ["person_only"] and "Only the person" in problems[0].message
@@ -169,8 +171,10 @@ def test_ai_settings_change_refuses_the_opt_outs():
 
 def test_mcp_update_settings_can_neither_write_nor_read_them():
     from orchestrator.tools import tools_status
-    assert not set(OPT_OUT_SETTINGS) & set(tools_status.WRITABLE)
-    assert not set(OPT_OUT_SETTINGS) & set(tools_status.READABLE), "an AI does not even read the person's hosts"
+    from orchestrator.utils.locality import BUILD_SOURCE_SETTINGS
+    person = set(OPT_OUT_SETTINGS) | set(BUILD_SOURCE_SETTINGS)
+    assert not person & set(tools_status.WRITABLE)
+    assert not person & set(tools_status.READABLE), "an AI does not even read the person's hosts or mirrors"
     assert tools_status.oversight_problems() == []
     assert tools_status.oversight_problems(tools_status.WRITABLE + ("offline_local_hosts",)) == ["offline_local_hosts"]
     from pydantic import ValidationError

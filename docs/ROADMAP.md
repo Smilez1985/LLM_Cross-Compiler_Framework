@@ -1,4 +1,4 @@
-Version 3.1.0 · Last updated 2026-10-29
+Version 3.2.0 · Last updated 2026-10-30
 
 **English** · [Deutsch](ROADMAP_DE.md)
 
@@ -20,14 +20,14 @@ decisions it comes from.
 
 | Version | Theme | Status |
 |---|---|---|
-| 3.2.0 | Ditto's context, the board bundle, the device runtime and more hardware | in progress |
+| rest of 3.2.0 | Ditto's context, the board bundle, the device runtime and more hardware | in progress |
 | next | Build service, queue and modes | planned |
 | 3.3.0 | LoRA and large models | planned |
 | 3.4.0 | Supply chain and community | planned |
 | later | Rust parts for the network and the board | planned |
 | later | More hardware and MCP extensions | planned |
 
-## 3.2.0 - Ditto's context, the board bundle, the device runtime and more hardware (in progress)
+## Rest of 3.2.0 - Ditto's context, the board bundle, the device runtime and more hardware (in progress)
 
 This version comes in this order: Ditto's context first, the board bundle next to it, then the gateway, voice and MCP
 on the board. The first hardware sets the priorities for the device runtime: RK3566 boards, NVIDIA RTX GPUs and the
@@ -110,7 +110,6 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 |---|---|
 | **Mojo circle follow-ups**: the note of an open Oracle run expires after one hour; `llmcf mojo --miracle --json` and `llm-cli doctor --fix` clear it without a logo, and so does a Mojo Miracle run in the GUI; the note's functions never raise for a bad state folder. Round 30. | planned |
 | **Ditto: security and measurability**: eval verdicts with a fingerprint, seeded repeats, intervals, pass^k and a pass-to-fail gate, a rule for turns tainted by outside text, the source on every knowledge excerpt, new groups of eval cases, replay cases and grading of the first tool call, fuller tool-use numbers, packing excerpts for small contexts and summaries that keep the facts. Round 13 (P2). | planned |
-| **Offline builds of the build container image**: offline mode may build the image with the toolchain when every source is local by the one locality rule (base images on this computer or in a registry of the own network, llama.cpp from the local mirror or a local copy, apt and pip only through mirrors or caches the person sets in the own network), otherwise it stops early and names the missing source; plus importing and exporting a build container image as a checked file for air-gapped computers. Round 36. | planned |
 | **Delegations**: a release the person creates in the framework (never over MCP) lets an AI answer its own routine questions, situation warnings included; security and legal warnings, licences, first trust of a host key, the AI's own permissions and every deletion stay with the person; lifetimes 8 hours, 24 hours or 30 days, "until revoked" lapses after 90 days without use. Round 5 (a, b, f), round 6 (item 1). | planned |
 | **"Do not ask again for this model version"** as a tick box in the build question, on the stable warning codes. Round 5 (r, Q3). | planned |
 | **A message box and a wake-up for every MCP client**: a note on every result plus read and reply tools; an optional wake-up the person sets up carries only fixed keywords ("Build ready", "Error while building"), the details come over MCP; the broker is the MQTT broker of the Rust gateway (Rust parts). Round 5 (o), round 6 (items 4-7), round 7 (item 8). | planned |

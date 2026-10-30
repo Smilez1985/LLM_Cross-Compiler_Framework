@@ -1,4 +1,4 @@
-Version 3.1.0 · Stand 2026-10-29
+Version 3.2.0 · Stand 2026-10-30
 
 [English](Module_Developer_Guide.md) · **Deutsch**
 
@@ -569,6 +569,25 @@ Container-Image ausliefern (zum Beispiel die Jetson/L4T-Images von NVIDIA auf `n
 - **Ungetestet wird gesagt.** Die neue `target.yml` bekommt `metadata.provenance: ai-generated`,
   `metadata.untested: true`, die `assumptions` und den `base_image_reason` der KI und die Support-Stufe `community`;
   Builds davon warnen. KI-erstellte Module bekommen nie eine dauerhafte Freigabe: Jedes bestätigt die Person.
+
+### 5.4 Quellen im eigenen Netz für Offline-Builds
+
+Ein Offline-Build des Build-Container-Images (Offline-Modus: kein Internet, vielleicht ein lokales Netz) übergibt diese
+Build-Argumente nur, wenn die Person die Quelle eingestellt hat und die Lokalitätsregel sie als lokal beurteilt hat;
+online wird keines übergeben, also baut ein Dockerfile, das sie annimmt, wie bisher:
+
+| Argument | Was das Dockerfile damit macht |
+|---|---|
+| `APT_MIRROR`, `APT_PROXY` | In jeder Stufe deklariert (`ARG`, ohne Vorgabe), die apt ausführt: Die Quellen werden auf den Spiegel umgeschrieben (`sed` über `/etc/apt/sources.list*`), der Proxy kommt nach `/etc/apt/apt.conf.d/01llmcf-proxy`, vor dem ersten `apt-get update`. |
+| `PIP_INDEX_URL`, `PIP_TRUSTED_HOST` | In jeder Stufe deklariert, die pip ausführt; pip liest beide aus der Umgebung. Mit einem Index fallen die eigenen `--extra-index-url`-Zeilen der Requirements weg. |
+| `LLAMA_CPP_SOURCE` | `ARG LLAMA_CPP_SOURCE=git` und `COPY sources/ /tmp/llmcf-sources/` vor dem Abruf von llama.cpp; mit `context` kopiert der Abrufschritt `/tmp/llmcf-sources/llama.cpp` (mit seinem `.git`) und prüft seinen Commit und dass nichts geändert ist, wie bei einem Abruf. Das Framework legt `sources/` in jedem Build-Kontext an. |
+
+Jede andere Adresse, von der das Dockerfile holt (eine URL in einer `RUN`- oder `ADD`-Zeile oder ein `ARG`-Vorgabewert),
+wird nach ihrem Host beurteilt; ein Offline-Build hält an, wenn sie nicht im eigenen Netz liegt. Ein `ARG`, dessen
+Name auf `_PIP_URL` endet, ist ein pip-Ort, den der pip-Index ersetzt (Rockchips `TORCH_PIP_URL` und
+`RKLLM_PIP_URL`): Nutze ihn als `${PIP_INDEX_URL:-${TORCH_PIP_URL}}` oder lade ein Wheel mit festgelegter sha256 aus
+dem Index und prüfe dieselbe sha256. Diese Argumente sind keine Eingaben des Images, also wird ein online gebautes
+Image offline gefunden. Die mitgelieferten Dockerfiles und die Vorlagen tun all das.
 
 ## 6. Die Stufen des Builds
 

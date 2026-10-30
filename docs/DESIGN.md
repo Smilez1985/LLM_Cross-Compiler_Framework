@@ -1,4 +1,4 @@
-Version 3.1.0 · Last updated 2026-10-29
+Version 3.2.0 · Last updated 2026-10-30
 
 **English** · [Deutsch](DESIGN_DE.md)
 
@@ -643,8 +643,8 @@ its ending, and you can count a VPN, a host such as your reverse proxy or an add
   connects to the checked local addresses (`http.curloptResolve`), through no proxy (an empty `http.proxy`, no proxy
   variables) and following no redirect (`http.followRedirects=false`); an international host name is refused until
   you write it in its `xn--` form (Python and git's curl convert a few characters differently). The llama.cpp
-  repository override of an image build (`LLAMA_CPP_REPO_OVERRIDE`): the same rule; the image itself is not built in
-  offline mode (see **Builds** below), so the image built earlier with the same override is used. The runtime's downloads (a model
+  repository override of an image build (`LLAMA_CPP_REPO_OVERRIDE`): the same rule; an offline build of the build container image
+  fetches the pinned commit only from the mirror's checked local addresses (see **Builds** below). The runtime's downloads (a model
   from a local model mirror, the prebuilt archive) and the AI tools `build_local_runtime` and `deploy_device_runtime`:
   the same. Deep Ingest (decision round 26 Q5): a crawl **you** start reads only sites on this computer or in your
   own network, over a pinned connection without a proxy, and every redirect and every followed link is judged again
@@ -656,9 +656,16 @@ its ending, and you can count a VPN, a host such as your reverse proxy or an add
 - **Builds.** A build you start in offline mode never downloads its model: a model named by its Hugging Face id is
   used from its copy on this computer, without any connection. Without one nothing starts; you choose a model already
   here or a model file or folder of your own (`build start --model`, the Builder tab's choice; see the row "Models
-  on this computer" above). An AI picks only among the models already here, by label. The target's image is neither
-  pulled nor built: the image of the target built earlier from the same settings is used (label
-  `org.llm-framework.inputs`), and without one the build stops and names the base images. The security scan runs
+  on this computer" above). An AI picks only among the models already here, by label. The target's build container image
+  (the Docker image with its toolchain; not the package that goes to the board) is used when one built earlier from
+  the same settings is on this computer (label `org.llm-framework.inputs`). Without one it is built only when every
+  source its Dockerfile needs is local by the same rule (`Core/build_image.offline_plan`): its base images on this
+  computer, in a registry of your network or behind a registry mirror of the Docker daemon there; llama.cpp from the
+  repository override in your network or the verified local copy of the pinned commit; apt and pip only through the
+  mirror, apt cache or pip index you set in your network (`build image sources`); every other address it fetches
+  from in your network. Otherwise the build stops before anything is pulled or fetched and names each source that is
+  not local and how to provide it. A finished image moves to another offline computer as a file with its sha256
+  (`build image export` / `build image import`). The security scan runs
   Trivy without any network and with the vulnerability database it already has; its image comes from this computer
   or a registry the rule counts as local (`utils/image_ref.offline_pull_refusal`), otherwise the scan is skipped
   with a warning.
@@ -1148,7 +1155,7 @@ the host, builds the target's toolchain image and runs the target's `build.sh` i
 | hadolint runs at build time with its findings shown ("tool missing" and "lint failed" told apart); ruff style and ShellCheck at warning level cover the repository, the template and generated modules. | The builder runs hadolint before an image build; CI runs ruff and ShellCheck. | Mistakes in Dockerfiles and scripts are found before a long build. |
 | The Rockchip image is a multi-stage build. | `targets/Rockchip/dockerfile` builds the tools in one stage and copies the results into the final one. | Smaller images and no build tools left in the final image. |
 | Unused data is made usable instead of removed: optimization profiles corrected and wired, performance benchmarks given a source, the model list of the source catalogue feeds the Builder suggestions; unmeasured values are marked as such. | `configs/project_sources.yml` and the optimization profiles are read by the Builder; values carry a measured flag. | Data that exists should serve the person; a value that was never measured must say so. |
-| Offline mode may build the build container image (the toolchain image) when every source is local by the one locality rule; otherwise it stops early and names the missing source; images can be imported and exported as checked files. Terms: "build container image" is the toolchain image, "target artifact, package or bundle" is what goes to the board. | Today the cross-compile runs offline when the image exists (`_offline_image`, `INPUTS_LABEL` in `Core/builder.py`) and building it offline is refused (`OfflineImageMissing`); the rest is planned: ROADMAP row "Offline builds of the build container image". | Air-gapped computers must be able to cross-compile when everything is there; the result is saved and deployed later or over the local network. |
+| Offline mode may build the build container image (the toolchain image) when every source is local by the one locality rule; otherwise it stops early and names the missing source; images can be imported and exported as checked files. Terms: "build container image" is the toolchain image, "target artifact, package or bundle" is what goes to the board. | `Core/build_image.py` is the one plan (`offline_plan`): base images (`community_pack.dockerfile_bases`) on this computer, from a registry in the own network or through a Docker daemon registry mirror there (every mirror judged); llama.cpp from `LLAMA_CPP_REPO_OVERRIDE` (pinned to its checked local addresses, `source.offline_reach`) or the verified local copy of the pin (`source.cached_source`, staged into the build context's `sources/`, `LLAMA_CPP_SOURCE=context`); apt and pip through the person-only settings `build_apt_mirror`, `build_apt_proxy`, `build_pip_index`, passed as the build arguments `APT_MIRROR`, `APT_PROXY`, `PIP_INDEX_URL` (and `PIP_TRUSTED_HOST` for an http index) that the target Dockerfiles take; every other fetched address (a URL in a RUN or ADD line or an ARG default; an ARG named `..._PIP_URL` is a pip location the index replaces) judged by its host. `BuildEngine._build_docker_image` uses an image built earlier with the same `INPUTS_LABEL` first, else asks the plan and stops with `OfflineImageMissing` naming each missing source by label, else builds with no proxy and `--add-host` pins. The source arguments are no inputs of the image (`SOURCE_ONLY_ARGS`). `export_image` writes `docker save` (the one helper `utils/docker_engine.save_image`, also used by the package export and the scan) with a `.sha256` sidecar; `import_image` checks the sha256 and the labels (`IMAGE_LABEL`, the `INPUTS_LABEL` a build here computes, `BuildEngine.image_labels`) before `docker load`; both follow the disk rule and are person-only (an AI gets `needs_person`). CLI `build image plan / sources / export / import`, Build > Build Container Images..., MCP `get_target_capabilities` with `check_image` (labels only). | Air-gapped computers must be able to cross-compile when everything is there; the result is saved and deployed later or over the local network. A local network is not the internet: a mirror there is as safe as this computer once the locality rule judged it. The INPUTS_LABEL check on import keeps an image tuned to another CPU or another pin from being used. | Air-gapped computers must be able to cross-compile when everything is there; the result is saved and deployed later or over the local network. |
 | Docker images are never deleted without the person; the person may choose where images are stored. | No cleanup path removes an image by itself; image removals go through the deletion list (`Core/deletion.py`). | Images take long to build and may belong to other projects. |
 | Builds run locally in Docker that emulates the target hardware; SSH and SCP are for deploying the finished artifact to the board, never for build hosts. | `BuildEngine` runs local containers; `orchestrator/remote/` serves deployment only. | The framework builds itself; there are no remote build hosts to trust. |
 
@@ -1156,6 +1163,8 @@ the host, builds the target's toolchain image and runs the target's `build.sh` i
 
 - Round 14 (2026-10-22) planned an own executor over SSH and SCP for builds; round 15 (2026-10-22) replaced it: SSH and
   SCP are for deployment only, build hosts were dropped.
+- Until 3.1.0 offline mode never built the build container image (only an image built earlier from the same settings
+  was used, and every other offline build stopped); since 3.2.0 it builds it when every source is local.
 - Round 10c (2026-10-17) kept the four-module scripts while their role was open; round 11 (2026-10-17) made them the
   canonical build.
 
@@ -1364,6 +1373,7 @@ Offline mode means no internet; a local network may be there. One locality rule 
 | Host names are judged by their addresses (private, loopback and link-local count as local); a VPN address counts as local only with the person's own control server and no public relays (a relay in the own network is fine); a public name, also of a reverse proxy, is not local unless the person opts in; every default has a person-only opt-out with a plain explanation. | `orchestrator/utils/locality.py`, `Core/local_network.py`; `config local-network`. | The person decides what their own network allows; llmcf must not patronize. |
 | The person's opt-outs count only for what offline mode may reach, never for the privacy filter; a name with local and public addresses counts as local and is reached only through its checked local addresses. | `check_reach` versus the location API in `utils/locality.py`; `pinned_transport`. | A host counted as local for convenience must still not see unfiltered data; pinning makes mixed answers safe. |
 | A build started in offline mode never downloads: it offers a local file or folder (a preloaded model or one already on this computer); an AI picks only among local models by label, a file pick is the person's. | The offline choice in the Builder and `build start`; the AI label list of local models. | Offline means nobody can load from the internet. |
+| The apt mirror, the apt cache proxy and the pip index an offline image build may fetch through are the person's settings, judged by the locality rule on every build; an address must be plain http or https without a user, password, token or query. | `utils/locality.BUILD_SOURCE_SETTINGS` (`build_apt_mirror`, `build_apt_proxy`, `build_pip_index`) in `llm/settings_change.PERSON_ONLY_SETTINGS`; set only through `Core/local_network.set_build_source` (`build image sources`, Build > Build Container Images...); the MCP status shows them as labels. | Where packages come from is the person's decision about their own network; a build argument shows in the image's history, so it carries no credential. |
 
 **History**
 
@@ -1722,6 +1732,8 @@ What each released version contains is recorded in the [changelog](../CHANGELOG.
 | NPU | Neural processing unit, a chip block for AI workloads, for example in the RK3588. |
 | RKLLM / RKNN | Rockchip's model formats for its NPU: RKLLM for language models, RKNN for other (ONNX) models. |
 | Target / board | A target is a hardware family with its own toolbox image (here: Rockchip); a board is one chip within it (for example RK3566). |
+| Build container image | The Docker image with a target's toolchain (compilers, converters, llama.cpp tools) that the build stages run in on the build computer; built from the target's Dockerfile, labelled with its target and its inputs. It never goes to the board. |
+| Target artifact / package / bundle | What a build makes for the board and what is deployed: the model files with their manifest (target artifact), the golden ZIP or runtime package (package) and the bundle that combines several components. |
 | Capabilities | The `capabilities:` block of a target's `target.yml`: what the target can build, for which board, with which quantization. |
 | MCP | Model Context Protocol, a standard that lets AI clients use tools of other programs. |
 | Elicitation | An MCP feature: the server asks the user a question through the client. |

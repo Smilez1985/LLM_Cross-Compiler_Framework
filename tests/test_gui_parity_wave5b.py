@@ -133,7 +133,8 @@ def test_every_menu_of_the_design_once_in_its_order_with_every_entry_once(window
     assert "act_file_output_folder" in entries["File"]
     file_texts = [a.text() for a in dict(menus)["File"].actions() if not a.isSeparator()]
     assert file_texts[-2:] == ["Settings...", "Exit"]
-    assert entries["Build"] == ["act_build_targets", "act_build_history"]
+    # Round 36 (on purpose): Build > Build Container Images... follows Build History...
+    assert entries["Build"] == ["act_build_targets", "act_build_history", "act_build_images"]
     assert entries["Ditto"][-3:] == ["act_ditto_runtime_open", "act_ditto_models_open", "act_ditto_eval_open"]
     tools = entries["Tools"]
     assert tools.index("act_knowledge_sources") == tools.index("act_knowledge_snapshots") + 1
@@ -146,9 +147,9 @@ def test_every_menu_of_the_design_once_in_its_order_with_every_entry_once(window
 def test_every_command_of_these_areas_has_a_mouse_path_or_a_reason():
     import click
     from orchestrator import cli
-    from orchestrator.gui.menus import build, ditto_models, ditto_runtime, knowledge
+    from orchestrator.gui.menus import build, build_image, ditto_models, ditto_runtime, knowledge
     known = set()
-    for module in (build, ditto_runtime, ditto_models, knowledge):
+    for module in (build, build_image, ditto_runtime, ditto_models, knowledge):   # build_image: `build image ...`
         for table in ("CLI_PATHS", "MACHINE_ONLY", "ARGUMENT_PATHS"):
             known.update(getattr(module, table, {}) or {})
     missing = []

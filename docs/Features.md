@@ -1,4 +1,4 @@
-Version 3.1.0 · Last updated 2026-10-29
+Version 3.2.0 · Last updated 2026-10-30
 
 **English** · [Deutsch](Features_DE.md)
 
@@ -755,6 +755,17 @@ its support level is community.
   image build in offline mode reach only your own network, and an AI's runtime tools and pack installs look at
   offline mode again after your answer. A Deep Ingest you start in offline mode reads only sites in your own
   network (never a cloud metadata service); an AI's crawl reads nothing then.
+- **Building offline** (air-gapped: no internet, maybe a local network): the cross-compile and the target artifacts
+  need the target's build container image, the Docker image with its toolchain. An image built earlier with the same
+  settings is used; without one, offline mode builds it when every source is local: the base images on this computer
+  or in a registry (or Docker registry mirror) of your network, llama.cpp from your mirror or the local copy of the
+  pinned commit, apt and pip only through the apt mirror, apt cache or pip index you set in your network
+  (`llm-cli build image sources`, **Build > Build Container Images...**), every other download in your network.
+  Otherwise the build stops before anything slow and names each missing source and how to provide it
+  (`llm-cli build image plan TARGET` shows the same plan beforehand; an AI sees it as labels through
+  `get_target_capabilities` with `check_image`). A finished image moves to another offline computer as a file with
+  its sha256 (`llm-cli build image export` / `import`); the import refuses a file whose sha256 or whose labels do not
+  match a build there. Only you set the sources and move images; an AI gets `needs_person`.
 - Requests to servers on 127.0.0.1 never go through an HTTP(S) proxy from the environment, so the proxy never sees
   prompts or the local server's key.
 - Errors are explained in plain words, for example that a Claude API key needs a workspace ID, that the key was

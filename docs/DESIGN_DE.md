@@ -1,4 +1,4 @@
-Version 3.1.0 · Stand 2026-10-29
+Version 3.2.0 · Stand 2026-10-30
 
 [English](DESIGN.md) · **Deutsch**
 
@@ -681,8 +681,9 @@ Adressbereich als lokal zählen.
   (`http.curloptResolve`), über keinen Proxy (leeres `http.proxy`, keine Proxy-Variablen) und ohne einer
   Weiterleitung zu folgen (`http.followRedirects=false`); ein internationaler Hostname wird abgelehnt, bis du ihn in
   seiner `xn--`-Form schreibst (Python und das curl von git wandeln einige Zeichen verschieden um). Die
-  llama.cpp-Überschreibung eines Image-Builds (`LLAMA_CPP_REPO_OVERRIDE`): dieselbe Regel; das Image selbst wird im
-  Offline-Modus nicht gebaut (siehe **Builds** unten), also kommt das früher mit derselben Überschreibung gebaute Image. Die
+  llama.cpp-Überschreibung eines Image-Builds (`LLAMA_CPP_REPO_OVERRIDE`): dieselbe Regel; ein Offline-Build des
+  Build-Container-Images holt den festgelegten Commit nur von den geprüften lokalen Adressen des Spiegels (siehe
+  **Builds** unten). Die
   Downloads der Laufzeit (ein Modell von einem lokalen Modell-Spiegel, das vorgebaute Archiv) und die KI-Tools
   `build_local_runtime` und `deploy_device_runtime`: ebenso. Deep Ingest (Entscheidung Runde 26 Q5): Ein Crawl, den
   **du** startest, liest nur Seiten auf diesem Computer oder in deinem eigenen Netz, über eine festgelegte Verbindung
@@ -697,9 +698,17 @@ Adressbereich als lokal zählen.
   Hugging-Face-ID nennst, kommt aus seiner Kopie auf diesem Computer, ohne jede Verbindung. Ohne Kopie startet
   nichts; du wählst ein Modell, das schon hier ist, oder eine eigene Modelldatei oder einen Modellordner
   (`build start --model`, die Auswahl im Builder-Tab; siehe die Zeile „Modelle auf diesem Computer“ oben). Eine KI
-  wählt nur unter den Modellen, die schon hier sind, nach Label. Das Image des Targets wird weder gezogen noch
-  gebaut: Es kommt das Image des Targets, das früher mit denselben Einstellungen gebaut wurde (Label
-  `org.llm-framework.inputs`), und ohne eines hält der Build an und nennt die Basis-Images. Der Security-Scan läuft
+  wählt nur unter den Modellen, die schon hier sind, nach Label. Das Build-Container-Image des Targets
+  (das Docker-Image mit seiner Werkzeugkette; nicht das Paket, das aufs Board geht) wird genutzt, wenn eines, das
+  früher mit denselben Einstellungen gebaut wurde, auf diesem Computer liegt (Label `org.llm-framework.inputs`).
+  Ohne eines wird es nur gebaut, wenn jede Quelle, die sein Dockerfile braucht, nach derselben Regel lokal ist
+  (`Core/build_image.offline_plan`): seine Basis-Images auf diesem Computer, in einer Registry deines Netzes oder
+  hinter einem Registry-Spiegel des Docker-Daemons dort; llama.cpp von der Repository-Überschreibung in deinem Netz
+  oder aus der geprüften lokalen Kopie des festgelegten Commits; apt und pip nur über den Spiegel, den apt-Cache oder
+  den pip-Index, die du in deinem Netz einstellst (`build image sources`); jede andere Adresse, von der es holt, in
+  deinem Netz. Sonst hält der Build an, bevor etwas gezogen oder geholt wird, und nennt jede Quelle, die nicht lokal
+  ist, und wie man sie bereitstellt. Ein fertiges Image kommt als Datei mit seiner sha256 auf einen anderen
+  Offline-Rechner (`build image export` / `build image import`). Der Security-Scan läuft
   mit Trivy ohne jedes Netz und mit der Schwachstellen-Datenbank, die er schon hat; sein Image kommt von diesem
   Computer oder aus einer Registry, die die Regel als lokal zählt (`utils/image_ref.offline_pull_refusal`), sonst
   entfällt der Scan mit einer Warnung.
@@ -1236,7 +1245,7 @@ Container ohne Netz aus; `build.sh` ist ein Stage-Runner über die vier Module s
 | hadolint läuft beim Build mit gezeigten Funden („Werkzeug fehlt“ und „Prüfung fehlgeschlagen“ unterschieden); ruff-Stil und ShellCheck auf Warnstufe gelten für das Repository, die Vorlage und erzeugte Module. | Der Builder führt hadolint vor einem Image-Build aus; die CI führt ruff und ShellCheck aus. | Fehler in Dockerfiles und Skripten fallen vor einem langen Build auf. |
 | Das Rockchip-Image ist ein mehrstufiger Build. | `targets/Rockchip/dockerfile` baut die Werkzeuge in einer Stufe und kopiert die Ergebnisse in die letzte. | Kleinere Images und keine Bauwerkzeuge im fertigen Image. |
 | Ungenutzte Daten werden nutzbar gemacht statt entfernt: Optimierungsprofile korrigiert und verdrahtet, Leistungswerte mit Quelle, die Modellliste des Quellenkatalogs speist die Vorschläge im Builder; nicht gemessene Werte sind als solche markiert. | `configs/project_sources.yml` und die Optimierungsprofile liest der Builder; Werte tragen eine Markierung, ob sie gemessen sind. | Vorhandene Daten sollen der Person dienen; ein nie gemessener Wert muss das sagen. |
-| Der Offline-Modus darf das Build-Container-Image (das Werkzeug-Image) bauen, wenn nach der einen Lokalitätsregel jede Quelle lokal ist; sonst hält er früh an und nennt die fehlende Quelle; Images lassen sich als geprüfte Dateien importieren und exportieren. Begriffe: „Build-Container-Image“ ist das Werkzeug-Image, „Target-Artefakt, Paket oder Bündel“ ist das, was aufs Board geht. | Heute läuft das Cross-Kompilieren offline, wenn das Image da ist (`_offline_image`, `INPUTS_LABEL` in `Core/builder.py`), und es offline zu bauen wird abgelehnt (`OfflineImageMissing`); der Rest ist geplant: ROADMAP-Zeile „Offline-Builds des Build-Container-Images“. | Rechner ohne Netz müssen cross-kompilieren können, wenn alles da ist; das Ergebnis wird gespeichert und später oder über das lokale Netz deployt. |
+| Der Offline-Modus darf das Build-Container-Image (das Werkzeug-Image) bauen, wenn nach der einen Lokalitätsregel jede Quelle lokal ist; sonst hält er früh an und nennt die fehlende Quelle; Images lassen sich als geprüfte Dateien importieren und exportieren. Begriffe: „Build-Container-Image“ ist das Werkzeug-Image, „Target-Artefakt, Paket oder Bündel“ ist das, was aufs Board geht. | `Core/build_image.py` ist der eine Plan (`offline_plan`): Basis-Images (`community_pack.dockerfile_bases`) auf diesem Computer, aus einer Registry im eigenen Netz oder über einen Registry-Spiegel des Docker-Daemons dort (jeder Spiegel geprüft); llama.cpp von `LLAMA_CPP_REPO_OVERRIDE` (auf seine geprüften lokalen Adressen festgelegt, `source.offline_reach`) oder aus der geprüften lokalen Kopie des Pins (`source.cached_source`, in `sources/` des Build-Kontexts gelegt, `LLAMA_CPP_SOURCE=context`); apt und pip über die nur von der Person gesetzten Einstellungen `build_apt_mirror`, `build_apt_proxy`, `build_pip_index`, übergeben als Build-Argumente `APT_MIRROR`, `APT_PROXY`, `PIP_INDEX_URL` (und `PIP_TRUSTED_HOST` für einen http-Index), die die Target-Dockerfiles annehmen; jede andere geholte Adresse (eine URL in einer RUN- oder ADD-Zeile oder ein ARG-Vorgabewert; ein ARG namens `..._PIP_URL` ist ein pip-Ort, den der Index ersetzt) nach ihrem Host geprüft. `BuildEngine._build_docker_image` nutzt zuerst ein früher mit demselben `INPUTS_LABEL` gebautes Image, fragt sonst den Plan und hält mit `OfflineImageMissing` an, das jede fehlende Quelle mit ihrem Label nennt, und baut sonst ohne Proxy und mit `--add-host`-Festlegungen. Die Quellen-Argumente sind keine Eingaben des Images (`SOURCE_ONLY_ARGS`). `export_image` schreibt `docker save` (der eine Helfer `utils/docker_engine.save_image`, den auch der Paket-Export und der Scan nutzen) mit einer `.sha256`-Begleitdatei; `import_image` prüft sha256 und Labels (`IMAGE_LABEL`, das `INPUTS_LABEL`, das ein Build hier berechnet, `BuildEngine.image_labels`) vor `docker load`; beide folgen der Platzregel und sind der Person vorbehalten (eine KI bekommt `needs_person`). CLI `build image plan / sources / export / import`, Build > Build-Container-Images..., MCP `get_target_capabilities` mit `check_image` (nur Labels). | Rechner ohne Netz müssen cross-kompilieren können, wenn alles da ist; das Ergebnis wird gespeichert und später oder über das lokale Netz deployt. Ein lokales Netz ist nicht das Internet: Ein Spiegel dort ist so sicher wie dieser Computer, sobald die Lokalitätsregel ihn geprüft hat. Die Prüfung des INPUTS_LABEL beim Import verhindert, dass ein Image genutzt wird, das auf eine andere CPU oder einen anderen Pin abgestimmt ist. | Rechner ohne Netz müssen cross-kompilieren können, wenn alles da ist; das Ergebnis wird gespeichert und später oder über das lokale Netz deployt. |
 | Docker-Images werden nie ohne die Person gelöscht; die Person darf wählen, wo Images liegen. | Kein Aufräumweg entfernt ein Image von selbst; das Entfernen von Images läuft über die Löschliste (`Core/deletion.py`). | Images brauchen lange zum Bauen und gehören vielleicht anderen Projekten. |
 | Builds laufen lokal in Docker, das die Zielhardware nachbildet; SSH und SCP dienen dem Deployment des fertigen Artefakts auf das Board, nie Build-Hosts. | `BuildEngine` startet lokale Container; `orchestrator/remote/` dient nur dem Deployment. | Das Framework baut selbst; es gibt keine entfernten Build-Hosts, denen man trauen müsste. |
 
@@ -1244,6 +1253,8 @@ Container ohne Netz aus; `build.sh` ist ein Stage-Runner über die vier Module s
 
 - Runde 14 (2026-10-22) plante einen eigenen Ausführer über SSH und SCP für Builds; Runde 15 (2026-10-22) ersetzte das:
   SSH und SCP dienen nur dem Deployment, Build-Hosts entfielen.
+- Bis 3.1.0 baute der Offline-Modus das Build-Container-Image nie (nur ein früher mit denselben Einstellungen gebautes
+  Image kam in Frage, jeder andere Offline-Build hielt an); seit 3.2.0 baut er es, wenn jede Quelle lokal ist.
 - Runde 10c (2026-10-17) behielt die Vier-Module-Skripte, solange ihre Rolle offen war; Runde 11 (2026-10-17) machte sie
   zum maßgeblichen Build.
 
@@ -1456,6 +1467,7 @@ außen.
 | Hostnamen werden nach ihren Adressen beurteilt (privat, Loopback und Link-local zählen als lokal); eine VPN-Adresse zählt nur mit dem eigenen Steuerserver der Person und ohne öffentliche Relays als lokal (ein Relay im eigenen Netz ist in Ordnung); ein öffentlicher Name, auch eines Reverse Proxys, ist nicht lokal, außer die Person wählt es; jede Vorgabe hat eine Abwahl nur für die Person mit klarer Erklärung. | `orchestrator/utils/locality.py`, `Core/local_network.py`; `config local-network`. | Die Person entscheidet, was ihr eigenes Netz erlaubt; llmcf darf nicht bevormunden. |
 | Die Abwahlen der Person zählen nur dafür, was der Offline-Modus erreichen darf, nie für den Datenschutzfilter; ein Name mit lokalen und öffentlichen Adressen zählt als lokal und wird nur über seine geprüften lokalen Adressen erreicht. | `check_reach` gegenüber der Orts-API in `utils/locality.py`; `pinned_transport`. | Ein der Bequemlichkeit halber lokal gezählter Host darf trotzdem keine ungefilterten Daten sehen; das Festlegen macht gemischte Antworten sicher. |
 | Ein im Offline-Modus gestarteter Build lädt nie herunter: Er bietet eine lokale Datei oder einen Ordner an (ein vorab geladenes Modell oder eines, das schon auf diesem Rechner liegt); eine KI wählt nur unter lokalen Modellen nach Bezeichnung, eine Dateiwahl ist Sache der Person. | Die Offline-Auswahl im Builder und bei `build start`; die Liste der lokalen Modelle für die KI. | Offline heißt, niemand kann aus dem Internet laden. |
+| Der apt-Spiegel, der apt-Cache-Proxy und der pip-Index, über die ein Offline-Image-Build holen darf, sind Einstellungen der Person, bei jedem Build nach der Lokalitätsregel geprüft; eine Adresse muss schlichtes http oder https ohne Benutzer, Passwort, Token oder Query sein. | `utils/locality.BUILD_SOURCE_SETTINGS` (`build_apt_mirror`, `build_apt_proxy`, `build_pip_index`) in `llm/settings_change.PERSON_ONLY_SETTINGS`; gesetzt nur über `Core/local_network.set_build_source` (`build image sources`, Build > Build-Container-Images...); der MCP-Status zeigt sie als Labels. | Woher Pakete kommen, entscheidet die Person über ihr eigenes Netz; ein Build-Argument steht in der Geschichte des Images, also trägt es keine Zugangsdaten. |
 
 **Geschichte**
 
@@ -1823,6 +1835,8 @@ Was jede veröffentlichte Version enthält, steht im [Changelog](../CHANGELOG_DE
 | NPU | Neural Processing Unit, ein Chipteil für KI-Aufgaben, etwa im RK3588. |
 | RKLLM / RKNN | Die Modellformate von Rockchip für seine NPU: RKLLM für Sprachmodelle, RKNN für andere (ONNX-)Modelle. |
 | Target / Board | Ein Target ist eine Hardware-Familie mit eigenem Werkzeug-Image (hier: Rockchip); ein Board ist ein Chip darin (etwa RK3566). |
+| Build-Container-Image | Das Docker-Image mit der Werkzeugkette eines Targets (Compiler, Konverter, llama.cpp-Werkzeuge), in dem seine Build-Stufen auf dem Build-Rechner laufen; gebaut aus dem Dockerfile des Targets, mit seinem Target und seinen Eingaben gelabelt. Es geht nie aufs Board. |
+| Target-Artefakt / Paket / Bündel | Was ein Build für das Board erzeugt und was deployt wird: die Modelldateien mit ihrem Manifest (Target-Artefakt), das Golden-ZIP oder Laufzeitpaket (Paket) und das Bündel, das mehrere Komponenten zusammenfasst. |
 | Capabilities | Der Block `capabilities:` in der `target.yml` eines Targets: was das Target bauen kann, für welches Board, mit welcher Quantisierung. |
 | MCP | Model Context Protocol, ein Standard, über den KI-Clients Tools anderer Programme nutzen. |
 | Elicitation | Eine MCP-Funktion: Der Server stellt dem Benutzer über den Client eine Frage. |

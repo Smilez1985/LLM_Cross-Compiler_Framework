@@ -9,6 +9,47 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 (`` `YYYY-MM-DD HH:MM UTC` · `vX.Y.Z` ``) and is written under the version it lands in. Planned work is listed in the
 [roadmap](docs/ROADMAP.md), not here; how the framework is built and why is in the [design](docs/DESIGN.md).
 
+## [3.2.0] - 2026-10-30
+
+### Added
+- `2026-10-30 04:20 UTC` · `v3.2.0` **Offline builds of the build container image, and its air-gapped transfer** (offline mode means no
+  internet; the own network may be there): offline mode now builds a target's build container image (the Docker
+  image with its toolchain; not the target artifact, package or bundle that goes to the board) when every source its
+  Dockerfile needs is on this computer or in your own network by the one locality rule, with your opt-outs:
+  its base images on this computer, in a registry of your network or behind a registry mirror of the Docker daemon
+  there (every mirror of the daemon is judged); llama.cpp from the repository override in your network (pinned to
+  its checked local addresses) or the verified local copy of the pinned commit (the local runtime's source store,
+  copied into the build context); apt and pip only through the apt mirror, apt cache proxy or pip index you set in
+  your network (`build_apt_mirror`, `build_apt_proxy`, `build_pip_index`: only you set them, with
+  `llm-cli build image sources` or in Build > Build Container Images...; an AI and MCP `update_settings` are refused);
+  every other address the Dockerfile fetches from, by its host. One plan (`orchestrator/Core/build_image.py`,
+  `offline_plan`) serves the build, `llm-cli build image plan TARGET` (`--json` with labels only), the window and the
+  MCP status (`get_target_capabilities` with `check_image`: how many images are here, whether an offline build could
+  make one, each source by its label, never an address or a path). When a source is not local the build stops
+  before anything is pulled or fetched and names each one and how to provide it. A finished image moves to another
+  offline computer as a file: `llm-cli build image export TARGET --to FILE` writes `docker save` and `FILE.sha256`;
+  `llm-cli build image import FILE [--sha256 HEX] [--target T]` checks the sha256 and the image's labels (its target
+  and the inputs a build here computes, so an image tuned to another CPU or another llama.cpp pin is refused) before
+  `docker load` or `podman load` loads anything. Both follow the disk rule and are the person's (an AI gets
+  `needs_person`). Known limit: an `--add-host` entry with an IPv6 address uses buildx's `NAME=[ADDRESS]` form, which
+  needs a recent docker buildx.
+
+### Changed
+- `2026-10-30 04:20 UTC` · `v3.2.0` **The target Dockerfiles take sources in the own network, and an offline build no longer stops when every
+  source is local** (before, offline mode never built the build container image): `targets/Rockchip/dockerfile`,
+  `targets/_template/Dockerfile` and `Dockerfile.gpu` take `APT_MIRROR` and `APT_PROXY` in every stage that runs apt
+  (the sources are rewritten to the mirror, the proxy goes into apt's configuration), `PIP_INDEX_URL` and
+  `PIP_TRUSTED_HOST` in the builder stage (with a pip index the requirements' own `--extra-index-url` is left out),
+  and `LLAMA_CPP_SOURCE=context` with `COPY sources/` for the local llama.cpp copy, checked by its commit as a fetch
+  is; Rockchip's PyTorch index and RKLLM wheel location became the build arguments `TORCH_PIP_URL` and
+  `RKLLM_PIP_URL` (an ARG named `..._PIP_URL` is a pip location the index replaces; the wheel from an index is checked
+  against the same sha256). Online nothing changes: none of these arguments is passed. The arguments that only say
+  where sources come from are no inputs of the image (its `org.llm-framework.inputs` label), so an image built online
+  is used offline and the other way round; because the Dockerfiles changed, the first build of each target after
+  this update makes a new image. The build context always has an empty `sources/` folder. One `docker save` helper
+  (`utils/docker_engine.save_image`) now serves the deployment manager's package export, the security scan's archive
+  and the image export; `BuildEngine.image_labels` is the one computation of an image's build arguments and labels.
+
 ## [3.1.0] - 2026-10-29
 
 ### Added
@@ -3933,6 +3974,7 @@ taken from source headers and the git history (2025-12-13 to 2026-01-14).
 - `2025-11-20 00:00 UTC` · `v1.0.0` Basic support for Rockchip RK3588/RK3566 cross-compilation.
 - `2025-11-20 00:00 UTC` · `v1.0.0` CLI (`llm-cli`) and GUI (`llm-gui`) entry points.
 
+[3.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v2.4.0...v3.0.0
 [2.4.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v1.7.0...v2.4.0
