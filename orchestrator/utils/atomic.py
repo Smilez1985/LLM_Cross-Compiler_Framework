@@ -82,18 +82,45 @@ REMOVE_SHOWN = 3                                 # relative paths named in remov
 _log = logging.getLogger(__name__)
 
 
-def _retry_writable(func, p, _exc) -> None:
-    """shutil.rmtree's error handler: a read-only file or folder is made writable and tried once more; a link is
-    unlinked (os.chmod would change its target). What still fails stays; remove_tree reports it."""
-    try:
-        os.chmod(os.path.dirname(p), stat.S_IRWXU)
-        if os.path.islink(p):
-            os.unlink(p)
-            return
-        os.chmod(p, stat.S_IRWXU)
-        func(p)
-    except OSError:
-        pass
+def _retry_writable(root, *, again: bool = True):
+    """shutil.rmtree's error handler for the tree at `root`: a read-only file or folder is made writable and tried
+    once more; a link is unlinked (os.chmod would change its target); a folder that could not be opened or listed is
+    made accessible and removed with one more pass. Only what is inside the tree is changed: the folder around it
+    (often a person's folder) keeps its mode, also when the tree itself stays or vanished meanwhile. What still fails
+    stays; remove_tree reports it."""
+    top = os.path.abspath(root)
+
+    def retry(func, p, _exc) -> None:
+        try:
+            inside = os.path.abspath(p) != top
+            if inside:
+                os.chmod(os.path.dirname(p), stat.S_IRWXU)
+            if os.path.islink(p):
+                os.unlink(p)
+                return
+            if not os.path.lexists(p):
+                return
+            if func in (os.open, os.scandir, os.lstat):   # the folder could not be opened: one more pass inside it
+                # (a pass of its own is never repeated for its own folder, so this ends with the tree's depth)
+                if not (inside or again) or not os.path.isdir(p):
+                    return
+                os.chmod(p, stat.S_IRWXU)
+                _one_pass(p, _retry_writable(p, again=False))
+                return
+            os.chmod(p, stat.S_IRWXU)
+            func(p)
+        except OSError:
+            pass
+    return retry
+
+
+def _one_pass(path, handler) -> None:
+    """One shutil.rmtree pass over `path` with remove_tree's error handler (the only rmtree with a handler: the
+    ratchet in tests/test_removal.py allows no other)."""
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=handler)
+    else:  # pragma: no cover - Python 3.11
+        shutil.rmtree(path, onerror=handler)
 
 
 def _left_in(path: Path) -> List[Path]:
@@ -128,10 +155,7 @@ def remove_tree(path, *, label: str = "") -> List[Path]:
                 break
             if attempt:
                 time.sleep(0.1 * attempt)
-            if sys.version_info >= (3, 12):
-                shutil.rmtree(path, onexc=_retry_writable)
-            else:  # pragma: no cover - Python 3.11
-                shutil.rmtree(path, onerror=_retry_writable)
+            _one_pass(path, _retry_writable(path))
     left = _left_in(path)
     if left:
         shown = ", ".join(p.relative_to(path).as_posix() if p != path else "the folder itself"

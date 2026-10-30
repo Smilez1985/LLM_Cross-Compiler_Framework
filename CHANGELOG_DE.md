@@ -28,7 +28,9 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Umwandlungskopie der Wissensbasis und ein halb geschriebenes Target-Modul laufen jetzt über den einen
   Entfernen-Helfer (`orchestrator/utils/atomic.remove_tree`): Schreibgeschützte Dateien werden beschreibbar gemacht und
   entfernt, ein Durchgang wird unter Windows wiederholt, und was sich weiter nicht entfernen lässt, wird mit Namen
-  protokolliert.
+  protokolliert. Geändert wird nur, was im entfernten Ordner liegt: Der Ordner darum (ein Modellordner, der
+  Hugging-Face-Cache) behält seine Rechte, und ein Ordner, der sich nicht öffnen lässt, wird zugänglich gemacht und
+  entfernt (oder landet in dieser Liste), statt das Aufräumen mit einem Fehler abzubrechen.
 - `2026-10-30 16:38 UTC` · `v3.3.0` **Eine Git-Abhängigkeit wird auch unter Windows ohne ihre Git-Daten
   behalten** ([Design](docs/DESIGN_DE.md#sicherheitsmodell)): Git legt seine Objekte schreibgeschützt ab, und der
   Abhängigkeits-Vorabruf entfernte `.git` mit `shutil.rmtree(ignore_errors=True)`, was unter Windows wortlos

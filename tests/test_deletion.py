@@ -181,7 +181,8 @@ DELETION_SITES = {
     ("orchestrator/runtime/build/source.py", "remove_tree"): STAGING,   # the old name, delegates to the helper below
     # the one removal of the framework's own folders (chain win-hygiene); its callers are listed
     ("orchestrator/utils/atomic.py", "remove_tree"): STAGING,
-    ("orchestrator/utils/atomic.py", "_retry_writable"): STAGING,
+    ("orchestrator/utils/atomic.py", "_retry_writable.retry"): STAGING,
+    ("orchestrator/utils/atomic.py", "_one_pass"): STAGING,
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime._unpack"): STAGING,
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime.install_prebuilt"): STAGING,
     # the pinned source and the build store: staging folders, and a damaged copy replaced by a complete one
