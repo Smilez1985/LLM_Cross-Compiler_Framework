@@ -12,6 +12,14 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 ## [3.3.0] - 2026-10-30
 
 ### Added
+- `2026-10-30 12:55 UTC` · `v3.3.0` **Every waiter ends on the build's end reason** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
+  `llm-cli build status REQUEST_ID --wait SECONDS` waits for a build of any program (the shared build state) and
+  ends on its end reason; `build start --follow` too. Both say it in plain words ("Build ready", "Error while
+  building: ...", "Build stopped: ...") and exit with 0 (done), 1 (failed, soft_cap, idle), 2 (cancelled) or, for
+  `--wait`, 3 (still running). The Builder's progress line says how the build ended. `get_build_status` has the new
+  field `end_reason` (None while the build runs) and its long poll, like Ditto's waits, returns at once when it is
+  set; `get_job_status` gives a runtime build job (`build_local_runtime`) the same `end_reason`. Build history (CLI
+  and GUI) shows it as the field "End".
 - `2026-10-30 12:45 UTC` · `v3.3.0` **A build ends on its done marker** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
   the stage runner (`build.sh` of every target, and the runner the module generator writes) writes ONE end record as
   its very last step, `stages/<job>/build.end` in the work folder (`status done|failed`, `exit`, `stage`, `job`, the
@@ -22,6 +30,11 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   exits 0 without the record is a failed build ("the build ended without its end record"), never a silent success.
   Every build has one end reason from a fixed vocabulary (done, failed, cancelled, soft_cap, idle), kept in its build
   record and, for a finished build, as `end` (reason, exit, stage) in `build_info.json`.
+
+### Changed
+- `2026-10-30 12:55 UTC` · `v3.3.0` **`build start --follow` exits with 2 for a cancelled build** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
+  a build cancelled elsewhere (the GUI, an AI) ended the follow with exit code 1 like a failure; it now ends with 2,
+  the exit code of the end reason cancelled. Ctrl+C in the command itself stays 130.
 
 ### Fixed
 - `2026-10-30 12:45 UTC` · `v3.3.0` **A person's Cancel no longer counts as a restart of the loop protection** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):

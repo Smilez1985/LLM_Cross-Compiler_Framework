@@ -132,5 +132,16 @@ class StepClock:
         return None
 
 
-__all__ = ["DEFAULT_IDLE", "DEFAULT_SOFT_CAP", "IDLE_SETTING", "POLL", "SOFT_CAP_SETTING", "StepClock", "StepLimits",
+def stop_kind(text: str) -> Optional[str]:
+    """soft_cap or idle when `text` holds the sentence StepClock.check() raises for that stop (a step runner that
+    catches StepTimedOut and reports it in its log, runtime/build/executor.py, hands only the text on), else None.
+    The sentences are the ones above, so the match stays with them."""
+    if f"and was stopped (setting {IDLE_SETTING}): it no longer worked." in text:
+        return "idle"
+    if f"and was stopped (setting {SOFT_CAP_SETTING}): an AI started this build" in text:
+        return "soft_cap"
+    return None
+
+
+__all__ = ["stop_kind", "DEFAULT_IDLE", "DEFAULT_SOFT_CAP", "IDLE_SETTING", "POLL", "SOFT_CAP_SETTING", "StepClock", "StepLimits",
            "StepTimedOut", "seconds"]

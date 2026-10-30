@@ -13,6 +13,14 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 ## [3.3.0] - 2026-10-30
 
 ### Hinzugefügt
+- `2026-10-30 12:55 UTC` · `v3.3.0` **Jedes Warten endet am Endgrund des Builds** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
+  `llm-cli build status REQUEST_ID --wait SEKUNDEN` wartet auf einen Build jedes Programms (der geteilte Build-Stand)
+  und endet an seinem Endgrund; `build start --follow` ebenso. Beide sagen ihn in klaren Worten („Build ready“, „Error
+  while building: …“, „Build stopped: …“) und enden mit 0 (done), 1 (failed, soft_cap, idle), 2 (cancelled) oder, bei
+  `--wait`, 3 (läuft noch). Die Fortschrittszeile des Builders sagt, wie der Build endete. `get_build_status` hat das
+  neue Feld `end_reason` (None, solange der Build läuft), und sein Long-Poll kehrt, wie Dittos Warten, sofort zurück,
+  sobald es gesetzt ist; `get_job_status` gibt einem Laufzeit-Build-Job (`build_local_runtime`) denselben
+  `end_reason`. Der Build-Verlauf (CLI und GUI) zeigt ihn als Feld „Ende“.
 - `2026-10-30 12:45 UTC` · `v3.3.0` **Ein Build endet an seiner Fertig-Marke** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
   der Stufen-Runner (`build.sh` jedes Targets und der Runner, den der Modulgenerator schreibt) schreibt als
   allerletzten Schritt EINEN Abschluss-Eintrag, `stages/<Job>/build.end` im Arbeitsordner (`status done|failed`,
@@ -25,6 +33,11 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   stiller Erfolg. Jeder Build hat einen Endgrund aus einem festen Vokabular (done, failed, cancelled, soft_cap, idle),
   gespeichert in seinem Build-Eintrag und bei einem fertigen Build als `end` (reason, exit, stage) in
   `build_info.json`.
+
+### Geändert
+- `2026-10-30 12:55 UTC` · `v3.3.0` **`build start --follow` endet bei einem abgebrochenen Build mit 2** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
+  ein anderswo abgebrochener Build (in der GUI, von einer KI) beendete das Folgen mit Exit-Code 1 wie ein Fehler; jetzt
+  endet es mit 2, dem Exit-Code des Endgrunds cancelled. Strg+C im Befehl selbst bleibt 130.
 
 ### Behoben
 - `2026-10-30 12:45 UTC` · `v3.3.0` **Ein Abbrechen der Person zählt nicht mehr als Neustart für den Schleifenschutz** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):

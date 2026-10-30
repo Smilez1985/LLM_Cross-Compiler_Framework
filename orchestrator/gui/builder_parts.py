@@ -286,6 +286,14 @@ class BuildProgressPanel(QWidget):
         self.bar.setValue(percent)
         stage = one_line(getattr(status, "stage", "") or "")
         state = str(getattr(status, "status", "") or "")
+        reason = getattr(status, "end_reason", None)
+        if reason:
+            # The build ended: how, in plain words (Core/build_end.py), never only the old status word
+            from orchestrator.Core.build_end import reason_text
+            self.lbl_stage.setText(ui_text("gui.progress.ended_reason", self.lang,
+                                           reason=reason_text(reason, "de" if self.lang == "de" else "en"),
+                                           stage=stage or "-", percent=percent))
+            return
         key = "gui.progress.ended" if state in ("completed", "error", "cancelled") else "gui.progress.stage"
         self.lbl_stage.setText(ui_text(key, self.lang, stage=stage or "-", percent=percent,
                                        status=ui_text(f"gui.progress.status.{state}", self.lang)

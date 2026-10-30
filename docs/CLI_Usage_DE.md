@@ -681,7 +681,7 @@ In der GUI: Build > **Build-Abhängigkeiten…** (Holen, Löschen…).
 ### build status
 
 ```
-llm-cli build status [REQUEST_ID] [-a|--all]
+llm-cli build status [REQUEST_ID] [-a|--all] [--wait SEKUNDEN]
 ```
 
 Zeigt Builds aus dem gemeinsamen Build-Zustand: Jedes Programm, das baut (CLI, GUI, MCP-Server), schreibt eine
@@ -701,6 +701,21 @@ jeder Benutzer seine eigenen Builds sieht.
 | Option | Bedeutung |
 |---|---|
 | `-a, --all` | Jeden aufbewahrten Build statt der 20 neuesten zeigen (aufbewahrt werden die 200 neuesten fertigen oder unterbrochenen Builds). |
+| `--wait SEKUNDEN` | Mit `REQUEST_ID`: höchstens SEKUNDEN warten, bis der Build zu Ende ist (auch einer, den die GUI oder ein MCP-Client gestartet hat), dann ihn zeigen und sagen, wie er endete. |
+
+Wie ein Build endete, ist sein Endgrund (Feld `End`): `done` (sein Abschluss-Eintrag sagt fertig; der einzige Erfolg),
+`failed`, `cancelled`, `soft_cap` (ein von einer KI gestarteter Build lief über seine weiche Grenze) oder `idle` (ein
+Schritt hat so lange nichts ausgegeben wie die Leerlauf-Grenze). Ein Build endet, weil sein Stufen-Runner seinen
+Abschluss-Eintrag geschrieben hat, nie weil danach eine Uhr abläuft. `build status REQUEST_ID --wait SEKUNDEN` und
+`build start --follow` enden daran und sagen es in klaren Worten („Build ready“, „Error while building: …“, „Build
+stopped: …“), mit diesen Exit-Codes:
+
+| Exit-Code | Endgrund |
+|---|---|
+| 0 | done |
+| 1 | failed, soft_cap, idle |
+| 2 | cancelled (Strg+C in `build start` bleibt 130) |
+| 3 | nur `--wait`: läuft noch, als das Warten endete |
 
 Ein Request, der auf eine Self-Healing-Entscheidung wartet, zeigt seinen gescheiterten ersten Versuch; entscheide in
 dem Programm, das ihn ausführt. Mit einer Request-ID folgen die Korrekturvorschläge, die KI-Clients dafür gemacht

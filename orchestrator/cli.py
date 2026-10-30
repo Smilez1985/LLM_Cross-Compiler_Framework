@@ -906,6 +906,12 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
                 console.print(f"[yellow]{escape(str(warning))}[/yellow]")
             for error in workflow_status.errors:
                 console.print(f"[red]{escape(str(error))}[/red]")
+            # How it ended, in plain words, and the exit code of that end (0 done, 1 failed/soft_cap/idle, 2 cancelled)
+            reason = _end_reason(service, workflow_status)
+            _say_end(reason)
+            from orchestrator.Core.build_end import exit_code
+            if reason is not None and exit_code(reason):
+                sys.exit(exit_code(reason))
             if workflow_status.status != OrchestrationStatus.COMPLETED or workflow_status.failed_builds:
                 sys.exit(1)
 
@@ -915,6 +921,24 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
 
 
 BUILD_POLL_SECONDS = 2
+
+
+def _end_reason(service, state) -> Optional[str]:
+    """The request's end reason by the orchestrator's one rule (Core/build_end.py), None while it runs."""
+    rule = getattr(getattr(service, "_orchestrator", None), "end_reason_of", None)
+    try:
+        return rule(state) if callable(rule) else getattr(state, "end_reason", None)
+    except Exception:  # noqa: BLE001 - a stand-in orchestrator: the state's own value
+        return getattr(state, "end_reason", None)
+
+
+def _say_end(reason: Optional[str]) -> None:
+    """The end of a build in plain words (Build ready / Error while building / Build stopped and why)."""
+    from orchestrator.Core.build_end import reason_text
+    if not reason:
+        return
+    color = {"done": "green", "cancelled": "yellow"}.get(reason, "red")
+    console.print(f"[bold {color}]{escape(reason_text(reason))}[/bold {color}]")
 
 
 def _follow_progress(service, state) -> Tuple[str, int]:
@@ -1313,15 +1337,36 @@ def build_save(ctx: FrameworkContext, artifact: str, destination: Optional[str])
 @build.command('status')
 @click.argument('request_id', required=False)
 @click.option('--all', '-a', is_flag=True, help=f'Show every kept build (default: the {STATUS_ROWS} newest)')
+@click.option('--wait', 'wait', type=click.FloatRange(min=0), default=None, metavar='SECONDS',
+              help='With REQUEST_ID: wait at most SECONDS until the build has ended, then say how it ended. Exit code '
+                   '0 done, 1 failed (also stopped at the soft cap or the idle timeout), 2 cancelled, 3 still running '
+                   'when the wait ended')
 @pass_context
-def build_status(ctx: FrameworkContext, request_id: Optional[str], all: bool):
+def build_status(ctx: FrameworkContext, request_id: Optional[str], all: bool, wait: Optional[float] = None):
     """Status of builds, including those the GUI, the MCP server or another CLI call started (the shared build state
     in the per-user folder, and the build records in the cache folder). REQUEST_ID: a request id (req_...) or a
-    build id."""
+    build id. With --wait the command ends on the build's end record (its end reason), never on a guess."""
     from orchestrator.Core.build_history import client_proposals, read_history
     config, resolve = _settings(ctx)
     history = read_history(config, resolve)  # the one query (the GUI's Build History reads it too)
     folder = history.folder
+    if request_id and wait is not None:
+        from orchestrator.Core.build_end import EXIT_STILL_RUNNING, exit_code
+        reason = _wait_for_end(config, resolve, request_id, wait)
+        history = read_history(config, resolve)
+        details = history.details(request_id)
+        if details is None:
+            console.print(f"[red]Build '{escape(request_id)}' not found in {escape(str(history.folder))}.[/red]")
+            sys.exit(1)
+        if details.request is not None:
+            _print_request_summary(details.request)
+        for record in details.attempts:
+            _print_build_record(record)
+        if reason is None:
+            console.print(f"[yellow]Build {escape(request_id)} is still running after {wait:g} s.[/yellow]")
+            sys.exit(EXIT_STILL_RUNNING)
+        _say_end(reason)
+        sys.exit(exit_code(reason))
     if request_id:
         details = history.details(request_id)
         if details is None:
@@ -1357,8 +1402,26 @@ def build_status(ctx: FrameworkContext, request_id: Optional[str], all: bool):
                       f"llm-cli build status {escape(proposed[-1])}[/magenta]")
 
 
+def _wait_for_end(config, resolve, request_id: str, seconds: float, poll: float = 1.0) -> Optional[str]:
+    """Waits at most `seconds` for the request's end reason in the shared build state (any process's build: the
+    summary, else its newest build record), and returns it; None while it still runs."""
+    from orchestrator.Core.build_history import end_of, read_history
+    deadline = time.monotonic() + seconds
+    while True:
+        details = read_history(config, resolve).details(request_id)
+        if details is not None:
+            found = end_of(details.request) if details.request is not None else None
+            if found is None and details.attempts and details.request is None:
+                found = end_of(details.attempts[-1])
+            if found is not None:
+                return found
+        if time.monotonic() >= deadline:
+            return None
+        _pause(min(poll, max(0.0, deadline - time.monotonic())))
+
+
 # The CLI's labels of the fields build_history lists (the GUI labels them in the person's language).
-_BUILD_FIELD_LABELS = {"request": "Request", "build": "Build", "status": "Status", "stage": "Stage",
+_BUILD_FIELD_LABELS = {"request": "Request", "build": "Build", "status": "Status", "end": "End", "stage": "Stage",
                        "progress": "Progress", "model": "Model", "target": "Target", "board": "Board",
                        "format": "Format", "quantization": "Quantization", "optimization": "Optimization",
                        "owner": "Started by", "where": "Where", "started": "Started", "ended": "Ended",

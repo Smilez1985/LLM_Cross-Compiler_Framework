@@ -66,6 +66,9 @@ class JobStatusOut(BaseModel):
     created: str
     updated: str
     note: str = ""
+    end_reason: Optional[Literal["done", "failed", "cancelled", "soft_cap", "idle"]] = Field(
+        default=None, description="For a build job (runtime_build): how it ended, None while it runs (the same "
+                                  "vocabulary as a model build's end_reason)")
 
 
 class CancelJobOut(BaseModel):

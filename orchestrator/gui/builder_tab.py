@@ -1574,7 +1574,12 @@ class BuilderTab(QWidget):
             self._active_request = None
             self.btn_cancel.setEnabled(False)
             if status:
-                self._log(f"Build {rid} ended: {status}.")
+                from orchestrator.Core.build_end import reason_text
+                try:
+                    reason = service.get_status(rid).end_reason
+                except Exception:  # noqa: BLE001 - the status word then
+                    reason = None
+                self._log(f"Build {rid} ended: {reason_text(reason) or status}")
             if status == "completed":
                 self._offer_save(rid)
 

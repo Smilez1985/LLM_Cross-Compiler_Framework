@@ -306,7 +306,8 @@ class TestBuildEnds:
                     break
                 await asyncio.sleep(0.01)
         asyncio.run(scenario())
-        assert ended == [{"request_id": "req_0000aaaa", "status": "completed", "owner": "mcp", "cancelled_by": "",
+        assert ended == [{"request_id": "req_0000aaaa", "status": "completed", "end_reason": "done", "owner": "mcp",
+                          "cancelled_by": "",
                           "saved": "output:Rockchip/SmolLM2-135M-Instruct/Q4_K_M", "artifacts": 1, "completed": 1,
                           "failed": 0}]
         assert str(tmp_path) not in str(ended) and "9f3c2a1b" not in str(ended)

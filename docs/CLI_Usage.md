@@ -657,7 +657,7 @@ In the GUI: Build > **Build Dependencies...** (Fetch, Delete...).
 ### build status
 
 ```
-llm-cli build status [REQUEST_ID] [-a|--all]
+llm-cli build status [REQUEST_ID] [-a|--all] [--wait SECONDS]
 ```
 
 Shows builds from the shared build state: every program that builds (CLI, GUI, MCP server) writes a summary of each
@@ -675,6 +675,20 @@ installation each user sees their own builds.
 | Option | Meaning |
 |---|---|
 | `-a, --all` | Show every kept build instead of the 20 newest (the 200 newest finished or interrupted builds are kept). |
+| `--wait SECONDS` | With `REQUEST_ID`: wait at most SECONDS until the build has ended (also one the GUI or an MCP client started), then show it and say how it ended. |
+
+How a build ended is its end reason (field `End`): `done` (its end record says done; the only success), `failed`,
+`cancelled`, `soft_cap` (an AI-started build ran past its soft cap) or `idle` (a step printed nothing for the idle
+timeout). A build ends because its stage runner wrote its end record, never because a clock ran out after that.
+`build status REQUEST_ID --wait SECONDS` and `build start --follow` end on it and say it in plain words ("Build
+ready", "Error while building: ...", "Build stopped: ..."), with these exit codes:
+
+| Exit code | End reason |
+|---|---|
+| 0 | done |
+| 1 | failed, soft_cap, idle |
+| 2 | cancelled (Ctrl+C in `build start` stays 130) |
+| 3 | `--wait` only: still running when the wait ended |
 
 A request that waits for a self-healing decision shows its failed first attempt; decide in the program that runs it.
 With a request ID, the fix proposals AI clients made for it (`propose_healing_fix`) follow, each marked as
