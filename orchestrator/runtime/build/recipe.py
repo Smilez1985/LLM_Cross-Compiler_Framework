@@ -391,7 +391,7 @@ def refused_option(name: str, value: Optional[str]) -> Optional[str]:
 def check_download_options(options: Mapping[str, str], prefetched: Sequence[str] = ()) -> None:
     """Refuses options that would let configure or build download anything (and a server with subprocesses): every
     option of NEVER_SET that is set, and every option a build must set to its value (refused_option). An option whose
-    dependency llmcf fetched before the build and mounts read-only (`prefetched`: the dependency names of
+    dependency the framework fetched before the build and mounts read-only (`prefetched`: the dependency names of
     orchestrator/runtime/build/deps.py, DEPENDENCY_OF_OPTION) is no download: the build reads the mounted copy."""
     for name in NEVER_SET:
         if name in options and DEPENDENCY_OF_OPTION.get(name) not in prefetched:
@@ -560,7 +560,7 @@ def cmake_flag_verdicts(words: Sequence[str], *, context: str = "module",
     an option every build keeps OFF must be OFF there), "package" (the same flags in the package's cross build, where
     the options of every build come after them and win), "call" (a cmake call of a module's own scripts, build.sh's
     cmake: only what lets llama.cpp download or runs a script is refused, as before). `prefetched`: the dependencies
-    llmcf fetched for this build and mounts read-only (deps.py); their options are allowed."""
+    the framework fetched for this build and mounts read-only (deps.py); their options are allowed."""
     if context not in FLAG_CONTEXTS:
         raise ValueError(f"unknown context {context!r}")
     out: List[FlagVerdict] = []
@@ -591,7 +591,7 @@ def cmake_flag_verdicts(words: Sequence[str], *, context: str = "module",
         elif key in DECISION_SWITCHES or (short and short in DECISION_SWITCHES):
             out.append(FlagVerdict(shown, pair, "decision", DECISION_SWITCHES.get(key) or DECISION_SWITCHES[short]))
         else:
-            out.append(FlagVerdict(shown, pair, "refused", "not a CMake option llmcf knows", "rule"))
+            out.append(FlagVerdict(shown, pair, "refused", "not a CMake option the framework knows", "rule"))
     return out
 
 

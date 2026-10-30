@@ -850,6 +850,60 @@ class BuildService:
             self.logger.warning(f"Could not record the confirmed build: {redact_secrets(str(e))}")
             return False
 
+    # --- the person's decision on a module's CMake flags (DECISIONS round 25 Q6) ---------------------------------
+
+    def _flag_store(self):
+        from orchestrator.Core.build_plan import state_dir
+        from orchestrator.Core.confirmed_builds import ConfirmedBuilds
+        state = state_dir(self.framework)
+        return ConfirmedBuilds.for_framework(self.framework, state) if state is not None else None
+
+    def flag_question(self, request: BuildRequestIn, *, local_paths: bool = True):
+        """(Core/module_flags.FlagQuestion or None, the remembered FlagDecision or None) of a request: the module's CMake
+        options outside the allowlist, what each does and the recommendation for this model and quantization. The CLI
+        and the Builder ask the person with it before start_build."""
+        from orchestrator.Core import module_flags
+        req = self._validated(request, local_paths)[0]
+        tm = self._targets()
+        folder = tm.folder_of(req.target) if hasattr(tm, "folder_of") else None
+        question = module_flags.question_for(req.target, Path(folder) if folder is not None else None,
+                                             model=self._shown_model(req.model) or "", quantization=req.quantization,
+                                             board=req.board)
+        if question is None:
+            return None, None
+        return question, module_flags.remembered(self._flag_store(), question)
+
+    def _flag_decision(self, request: BuildRequestIn, local_paths: bool, flag_decision: Optional[str],
+                       remember_flags: bool, channel: str) -> Optional[Dict[str, Any]]:
+        """The decision a build carries (FlagDecision.as_dict), or None when the module needs none. Person-only: only
+        the person's own callers (`local_paths`) pass a decision; an AI caller's build uses a decision the person
+        remembered for exactly this module version and flag set, or stops with needs_person."""
+        from orchestrator.Core import module_flags
+        question, kept = self.flag_question(request, local_paths=local_paths)
+        if question is None:
+            return None
+        if flag_decision is not None:
+            if not local_paths:
+                raise BuildServiceError("Only the person decides on a module's CMake flags.", code="permission_denied",
+                                        next="Ask the person to start the build in the GUI or CLI.")
+            if flag_decision not in module_flags.DECISIONS:
+                raise BuildServiceError(f"Unknown flag decision {flag_decision!r}.", code="invalid_value",
+                                        next="Use allow or standard.", field="flag_decision")
+            decision = module_flags.decide(question, flag_decision)
+            if remember_flags:
+                module_flags.remember(self._flag_store(), question, decision, channel or "framework-cli")
+            return decision.as_dict()
+        if kept is not None:
+            return kept.as_dict()
+        error = BuildServiceError(question.text() if local_paths else question.ai_text(), code="needs_person",
+                                  next=("Answer the question about the module's CMake options (allow them or the "
+                                        "standard flags)." if local_paths else
+                                        "Ask the person to start this build in the GUI or CLI, where they decide on "
+                                        "the module's CMake options, or to remember a decision for this module "
+                                        "version."))
+        error.flag_question = question
+        raise error
+
     # --- recipes (community zoo) ----------------------------------------------------------------------------
 
     def installed_recipe(self, recipe_id: str):
@@ -1212,7 +1266,8 @@ class BuildService:
                     optimization: str = "balanced", disk_reservation: str = "",
                     dataset_sha256: Optional[str] = None, priority: Any = "normal",
                     output_dir: Optional[str] = None, parallel_builds: bool = False,
-                    description: str = "Build service request") -> BuildHandle:
+                    description: str = "Build service request", flag_decision: Optional[str] = None,
+                    remember_flags: bool = False, flag_channel: str = "") -> BuildHandle:
         """Validates and queues a build: the one build-submission path of the CLI, the GUI and AI callers. `owner` is
         the tool caller that starts it (ToolContext.owner; empty for the person's own CLI and GUI, whose builds the
         queue limit for tool callers never refuses); `disk_reservation` the reservation an AI caller's accepted build
@@ -1220,7 +1275,9 @@ class BuildService:
         recipe's pin), checked by the build engine on the copy it uses. Only the person's own callers (`local_paths`)
         set `output_dir`, the folder the finished build is saved to (default: the output folder), and a `priority`
         other than normal (a PriorityLevel or its name); `parallel_builds` and `description` as their windows set
-        them."""
+        them. `flag_decision` ("allow" or "standard", the person's own callers only) answers the question about a
+        module's CMake options outside the allowlist (flag_question); `remember_flags` keeps it for this module version
+        and flag set, recorded with `flag_channel` (framework-cli or framework-gui)."""
         try:
             level = OptimizationLevel(str(optimization or "balanced").lower())
         except ValueError:
@@ -1234,6 +1291,7 @@ class BuildService:
                                     next="Leave them out; the build goes to the output folder.",
                                     field="output_dir" if output_dir is not None else "priority")
         req, inputs = self._validated(request, local_paths)
+        flags = self._flag_decision(request, local_paths, flag_decision, remember_flags, flag_channel)
         build_request = BuildRequest(
             request_id="",
             workflow_type=WorkflowType.SIMPLE_CONVERSION,
@@ -1257,6 +1315,7 @@ class BuildService:
             local_inputs=inputs,
             owner=owner,
             disk_reservation=disk_reservation,
+            flag_decision=flags,
         )
         if disk_reservation:
             self._orchestrator.disk_ledger = self.disk_ledger()

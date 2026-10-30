@@ -234,6 +234,9 @@ class BuildConfiguration:
     # The disk reservation of the request (BuildRequest.disk_reservation; an AI caller's accepted build): the engine
     # records in it what has landed on disk (_report_landed), so a running build is not counted twice
     disk_reservation: str = ""
+    # The person's decision on the module's CMake options outside the allowlist (Core/module_flags.FlagDecision
+    # .as_dict): its variables go into the build container (_execute_build_modules)
+    module_flags: Optional[Dict[str, Any]] = None
 
 @dataclass
 class BuildProgress:
@@ -1949,6 +1952,10 @@ class BuildEngine:
             progress.add_log("Using generated IMatrix for Quantization.")
         
         env.update(self._repo_overrides())  # SSOT repository overrides
+        if config.module_flags:   # the person's decision on the module's CMake options outside the allowlist
+            from orchestrator.Core.module_flags import FlagDecision
+            env.update(FlagDecision(config.module_flags.get("decision", ""),
+                                    tuple(config.module_flags.get("allowed") or ())).environment())
 
         # Calibration dataset (RKLLM calibration text, RKNN INT8 sample list; GGUF uses it via the imatrix)
         self._verify_local_inputs(config)

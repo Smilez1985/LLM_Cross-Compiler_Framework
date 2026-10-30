@@ -713,11 +713,17 @@ class _FormatOption(click.Option):
 # --- NEU v2.4.0: IMatrix Flags ---
 @click.option('--imatrix/--no-imatrix', default=False, help='Enable Smart Calibration (IMatrix) for quantization')
 @click.option('--dataset', type=click.Path(exists=True), help='Custom calibration dataset path (txt)')
+@click.option('--module-flags', 'module_flags', type=click.Choice(['allow', 'standard']), default=None,
+              help="Your decision on the module's CMake options outside llmcf's allowed list: allow them, or go on "
+                   "with the standard flags (they are left out). At a terminal without it you are asked")
+@click.option('--remember-flags', is_flag=True, default=False,
+              help='Remember this decision for this module version and flag set')
 @pass_context
 def start_build(ctx: FrameworkContext, model: str, target: str, format: str, board: Optional[str],
                 probe: Optional[str], quantization: Optional[str], output_dir: Optional[str], 
                 optimization: str, priority: str, parallel: bool, follow: bool, gpu: bool,
-                imatrix: bool, dataset: Optional[str]):
+                imatrix: bool, dataset: Optional[str], module_flags: Optional[str] = None,
+                remember_flags: bool = False):
     """Start a new build job. Ctrl+C cancels it (its container is stopped) and exits with code 130.
 
     When a finished build with exactly the same options exists, you are asked first, as in the Builder tab: use it
@@ -795,10 +801,18 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
             _use_earlier(ctx, found[0], output_dir)
             return
 
+        # A module's CMake options outside the allowlist (DECISIONS round 25 Q6): you decide, after what each one
+        # does and the recommendation for this model and quantization (a decision remembered before is used).
+        module_flags, remember_flags = _ask_module_flags(service, request, module_flags, remember_flags)
+        if module_flags == "cancel":
+            console.print("Nothing was started.")
+            return
+
         # The orchestrator runs on the framework's background loop (as for the GUI and the build service), so the
         # build service can cancel the build from here on Ctrl+C.
         request_id = service.start_build(request, local_paths=True, optimization=optimization, priority=priority,
-                                         output_dir=output_dir,
+                                         output_dir=output_dir, flag_decision=module_flags,
+                                         remember_flags=remember_flags, flag_channel="framework-cli",
                                          description=f"CLI build: {model} -> {target} ({format})").request_id
 
         # The CLI stays until the build has ended; from here on Ctrl+C cancels it.
@@ -943,6 +957,33 @@ def _offline_model_choice(ctx: FrameworkContext, service, error) -> Optional[str
             return chosen
         console.print(f"[red]{escape(ui_text('bld.offline.not_a_choice', lang))}[/red]")
     sys.exit(2)
+
+
+def _ask_module_flags(service, request, decision: Optional[str], remember: bool):
+    """The question about the module's CMake options outside the allowlist, at the terminal (the Builder tab asks the
+    same): what each option does, the recommendation, then allow them, the standard flags or cancel. A decision given
+    with --module-flags or remembered for this module version and flag set is used without a question; without a
+    terminal and without a decision nothing is started. Returns (decision or None, remember)."""
+    question, kept = service.flag_question(request)
+    if question is None:
+        return None, False
+    if decision is not None:
+        return decision, remember
+    if kept is not None:
+        console.print(escape(f"The module's CMake options outside the allowed list: your remembered decision "
+                             f"({kept.decision}) is used."))
+        return None, False
+    console.print(f"[bold yellow]{escape(question.text())}[/bold yellow]")
+    if not _interactive():
+        console.print("Without a terminal nothing is asked and nothing was started: give --module-flags allow or "
+                      "--module-flags standard.")
+        sys.exit(2)
+    answer = click.prompt("a = allow these options, s = the standard flags, c = Cancel",
+                          type=click.Choice(["a", "s", "c"]), default="s")
+    if answer == "c":
+        return "cancel", False
+    keep = click.confirm("Remember this decision for this module version?", default=False)
+    return {"a": "allow", "s": "standard"}[answer], keep
 
 
 def _ask_earlier(ctx: FrameworkContext, found) -> str:

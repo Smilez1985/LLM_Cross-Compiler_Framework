@@ -666,6 +666,18 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
         # every image, not only the first FROM: a later stage can pull a vendor image too (DECISIONS round 3)
         plan.base_images = pairs
 
+    # the module's CMake options outside the allowlist (DECISIONS round 25 Q6): only the person decides; an AI-started
+    # build goes on only with the decision the person remembered for this module version and flag set
+    try:
+        question, kept = service.flag_question(BuildRequestIn(**base), local_paths=False)
+    except Exception:  # noqa: BLE001 - a target whose flags cannot be read is checked again by start_build
+        question, kept = None, None
+    if question is not None and kept is None:
+        plan.problems.append(Problem("needs_person", question.ai_text(),
+                                     "Ask the person to start this build in the GUI or CLI, where they decide on the "
+                                     "module's CMake options, or to remember a decision for this module version.",
+                                     "module_flags_undecided"))
+
     # sandbox
     plan.sandbox = bool(_config(framework, "build_sandbox", True))
     if not plan.sandbox:

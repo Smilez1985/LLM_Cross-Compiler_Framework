@@ -47,6 +47,9 @@ CLI_PATHS: Dict[str, str] = {
     "build start --gpu": "chk_builder_gpu",
     "build start --imatrix": "chk_builder_imatrix",
     "build start --dataset": "combo_builder_dataset",
+    # the question about the module's CMake options outside the allowlist opens when Start Build is pressed
+    "build start --module-flags": "btn_builder_start",
+    "build start --remember-flags": "btn_builder_start",
     "build save": "btn_deploy_save",                          # Deployment tab > Save...
     "build save --to": "btn_deploy_save",                     # its folder dialog chooses the folder
     "build status": "act_build_history",

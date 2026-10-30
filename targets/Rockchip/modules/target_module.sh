@@ -318,7 +318,7 @@ module_flag_verdicts() {  # [--package|--alone|--module] WORD...
                 || { [ -n "$short" ] && [[ " ${DECISION_SWITCH_NAMES[*]} " == *" $short "* ]]; }; then
             printf 'decision\037%s\037%s\037\037%s\n' "$word" "a valid CMake option outside llmcf's list" "$words"
         else
-            printf 'refused\037%s\037%s\037rule\037%s\n' "$word" "not a CMake option llmcf knows" "$words"
+            printf 'refused\037%s\037%s\037rule\037%s\n' "$word" "not a CMake option the framework knows" "$words"
         fi
     done
 }

@@ -492,6 +492,8 @@ target's defaults. A target without a capabilities block is built unchecked.
 | `--gpu / --no-gpu` | Pass the host's GPU into the container (default off): an NVIDIA GPU when `nvidia-smi` is found, otherwise `/dev/dri` if it exists. Rockchip conversions do not need it. |
 | `--imatrix / --no-imatrix` | Importance matrix for GGUF (default off). Required for `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ2_M`, `IQ3_XXS`, `IQ3_XS`, `Q2_K_S`. |
 | `--dataset PATH` | Your own calibration file (must exist): a text file for the GGUF importance matrix or for RKLLM, a list of sample inputs for RKNN `i8`. Without it, the importance matrix uses the shipped calibration text. |
+| `--module-flags [allow\|standard]` | Your decision on the module's CMake options that are valid but outside the allowed list (`-G`, `--trace`, ...; [Module Developer Guide, section 3.5](Module_Developer_Guide.md#35-cmake-flags-of-a-module)): allow them, or go on with the standard flags (they are left out). At a terminal without it you are asked, after what each option does and a recommendation for this model and quantization; without a terminal and without it nothing is started (exit 2). A decision remembered for this module version and flag set is used without a question. |
+| `--remember-flags` | Remember this decision for this module version and flag set (an AI-started build of the module uses it; a new version or other flags ask again). |
 
 Behaviour:
 
