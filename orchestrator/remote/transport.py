@@ -601,8 +601,15 @@ class SystemSshTransport(Transport):
         with self._lock:
             if self._closed:
                 raise SshFailed("the session with the board was closed")
-        process = subprocess.Popen(argv, stdin=subprocess.PIPE if stdin else subprocess.DEVNULL,
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, **_no_window())
+        try:
+            process = subprocess.Popen(argv, stdin=subprocess.PIPE if stdin else subprocess.DEVNULL,
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, **_no_window())
+        except OSError as e:
+            if getattr(e, "filename", None) is not None:
+                raise
+            # Windows' CreateProcess names no file when OpenSSH is missing (POSIX names argv[0]): without one the
+            # error read as the board being down (reasons.is_local); it is this computer's program that is missing.
+            raise type(e)(e.errno, e.strerror or str(e), argv[0]) from e
         with self._lock:
             self._running.append(process)
             closed = self._closed

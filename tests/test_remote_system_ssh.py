@@ -905,7 +905,8 @@ class TestTheFrameworkKeyIsOwnerOnly:
         monkeypatch.setattr(atomic, "owner_only", refuse)
         private, _ = ssh_trust.client_key(tmp_path)
         assert readable_key(private)
-        assert transport.key_file_of(transport.openssh_options(tmp_path)) == str(private)
+        # As OpenSSH names it: on Windows with forward slashes (transport.openssh_file).
+        assert transport.key_file_of(transport.openssh_options(tmp_path)) == private.as_posix()
         assert "could not be made private" in caplog.text and str(tmp_path) not in caplog.text
 
     def test_windows_gets_a_protected_acl_with_this_account_alone(self, tmp_path, monkeypatch):
@@ -1093,6 +1094,27 @@ class TestTheSessionOverOpenSsh:
         from orchestrator.remote.session import RemoteSession, SessionFailure
         from orchestrator.remote.transport import SystemSshTransport
         missing = str(tmp_path / "no-openssh" / "ssh")
+
+        def openssh(endpoint, user, state_dir):
+            return SystemSshTransport(endpoint, user, state_dir, program=missing)
+        session = RemoteSession(Endpoint(HOST), USER, tmp_path, openssh=openssh)
+        with pytest.raises(SessionFailure) as e:
+            session.open()
+        assert e.value.kind == "login" and e.value.reason == reasons.LOCAL_PROBLEM
+        assert str(tmp_path) not in str(e.value)
+
+    def test_no_openssh_is_a_local_problem_also_as_windows_says_it(self, tmp_path, monkeypatch):
+        # Windows' CreateProcess raises FileNotFoundError(2, ...) without a file name (POSIX names argv[0]); that
+        # error read as the board being down (device_host_down) on the Windows CI job.
+        from orchestrator.remote import transport
+        from orchestrator.remote.address import Endpoint
+        from orchestrator.remote.session import RemoteSession, SessionFailure
+        from orchestrator.remote.transport import SystemSshTransport
+        missing = str(tmp_path / "no-openssh" / "ssh")
+
+        def like_windows(argv, **kwargs):
+            raise FileNotFoundError(2, "The system cannot find the file specified")
+        monkeypatch.setattr(transport.subprocess, "Popen", like_windows)
 
         def openssh(endpoint, user, state_dir):
             return SystemSshTransport(endpoint, user, state_dir, program=missing)

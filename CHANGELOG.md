@@ -11,6 +11,16 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 
 ## [3.3.0] - 2026-10-30
 
+### Fixed
+- `2026-10-30 14:19 UTC` · `v3.3.0` **A missing OpenSSH on Windows is a problem on this computer, not a board that is
+  down** ([design](docs/DESIGN.md#ssh-host-keys-and-the-remote-package)): Windows' process start names no file when the
+  program is missing (POSIX names it), so the error read as `device_host_down` and the person was sent to the board.
+  `SystemSshTransport` now names the program, and the contact fails with `local_problem` as on Linux.
+- `2026-10-30 14:19 UTC` · `v3.3.0` **The base images of a pack are listed in the same order on every system**
+  ([design](docs/DESIGN.md#community-packs-format-trust-and-exchange)): Windows sorts its paths without case and with
+  backslashes, so `docker/arm.dockerfile` came before `Dockerfile` there; `pack_base_images` now sorts by the relative
+  POSIX path.
+
 ### Security
 - `2026-10-30 14:07 UTC` · `v3.3.0` **Ditto's local server: the key never goes to a program that took its port, also
   without root rights** ([design](docs/DESIGN.md#security-model)): when another program took the free port between the
