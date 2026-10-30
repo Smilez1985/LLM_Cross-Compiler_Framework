@@ -104,7 +104,9 @@ def test_the_build_menu_follows_file_and_settings_sits_above_exit(window):
     from orchestrator.gui.menus.build import CLI_PATHS
     titles = [a.text().replace("&", "") for a in window.menuBar().actions()]   # wave 6: titles with mnemonics
     assert titles[:2] == ["File", "Build"], titles
-    assert [a.text() for a in window.menu_build.actions()] == ["Targets...", "Build History..."]
+    # Round 36 (on purpose): Build Container Images... follows Build History...
+    assert [a.text() for a in window.menu_build.actions()] == ["Targets...", "Build History...",
+                                                               "Build Container Images..."]
     file_menu = window.menuBar().actions()[0].menu()
     assert [a.text() for a in file_menu.actions() if not a.isSeparator()][-2:] == ["Settings...", "Exit"]
     assert (window.act_build_targets.objectName(), window.act_build_history.objectName(),

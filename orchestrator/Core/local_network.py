@@ -112,7 +112,7 @@ def opt_outs(config: Any) -> List[OptOut]:
     return list(dict.fromkeys(found))
 
 
-def _save(config: Any, key: str, values: List[str], before: Any, lang: Optional[str]) -> None:
+def _save(config: Any, key: str, values: Any, before: Any, lang: Optional[str]) -> None:
     from orchestrator.utils.locality import clear_cache
     save = getattr(config, "save_user_config", None)
     if not (config.set(key, values) and (save() if callable(save) else True)):
@@ -152,6 +152,33 @@ def remove_opt_out(config: Any, kind: str, value: str, lang: Optional[str] = Non
     return True
 
 
+def build_sources(config: Any) -> dict:
+    """The person's build sources in the own network (locality.BUILD_SOURCE_SETTINGS: apt mirror, apt cache proxy,
+    pip index), each as stored ("" when not set)."""
+    from orchestrator.utils.locality import BUILD_SOURCE_SETTINGS
+    return {key: str((config.get(key, "") if hasattr(config, "get") else "") or "").strip()
+            for key in BUILD_SOURCE_SETTINGS}
+
+
+def set_build_source(config: Any, key: str, url: str, lang: Optional[str] = None) -> str:
+    """Sets one build source (a key of locality.BUILD_SOURCE_SETTINGS) to `url`, or clears it with "", and saves
+    config.yml. Person-only (this module): an offline build of the build container image then fetches apt or pip
+    packages through it, after the locality rule judged it on that build (Core/build_image.py). LocalNetworkError when
+    the key is not one, the address is not a plain http(s) address without credentials, or nothing could be saved."""
+    from orchestrator.Core.build_image import mirror_problem
+    from orchestrator.utils.locality import BUILD_SOURCE_SETTINGS
+    if key not in BUILD_SOURCE_SETTINGS:
+        raise LocalNetworkError(ui_text("bimg.error.key", lang, setting=key, keys=", ".join(BUILD_SOURCE_SETTINGS)), "kind")
+    value = str(url or "").strip()
+    if value:
+        problem = mirror_problem(value)
+        if problem:
+            raise LocalNetworkError(ui_text("bimg.error.url", lang, setting=key, problem=problem), "host")
+    before = config.get(key, "") if hasattr(config, "get") else ""
+    _save(config, key, value, before, lang)
+    return value
+
+
 def check(config: Any, target: str) -> Locality:
     """The rule for an address, host or URL the person typed, with their opt-outs: what offline mode may reach
     (locality.check_reach; a lookup: never on the GUI thread)."""
@@ -178,5 +205,5 @@ def vpn_text(check_result: VpnCheck, lang: Optional[str] = None) -> str:
     return ui_text("net.vpn.state", lang, state=state)
 
 
-__all__ = ["KINDS", "LocalNetworkError", "OptOut", "SETTINGS", "add_opt_out", "check", "check_text", "explain",
-           "normalize", "opt_outs", "remove_opt_out", "vpn_status", "vpn_text"]
+__all__ = ["KINDS", "LocalNetworkError", "OptOut", "SETTINGS", "add_opt_out", "build_sources", "check", "check_text",
+           "explain", "normalize", "opt_outs", "remove_opt_out", "set_build_source", "vpn_status", "vpn_text"]

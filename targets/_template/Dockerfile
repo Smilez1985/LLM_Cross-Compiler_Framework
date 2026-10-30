@@ -29,6 +29,27 @@ ENV PATH="/root/.local/bin:$PATH"
 # checked against its fingerprint before the source is added (empty when the module has none).
 # [VENDOR_SOURCES]
 
+# Sources in your own network for an offline build (orchestrator/Core/build_image.py): the person's apt mirror (it
+# serves the distribution's paths, such as /debian and /debian-security) or apt cache proxy. The framework passes them
+# only in offline mode, after the locality rule judged them; empty (the default) keeps the distribution's own sources.
+# No credentials: a build argument shows in the image's history.
+ARG APT_MIRROR
+ARG APT_PROXY
+RUN set -eu; \
+    if [ -n "${APT_MIRROR:-}" ]; then \
+        for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do \
+            if [ -f "${f}" ]; then sed -Ei "s#https?://[^/[:space:]]+#${APT_MIRROR%/}#g" "${f}"; fi; \
+        done; \
+    fi; \
+    if [ -n "${APT_PROXY:-}" ]; then \
+        printf 'Acquire::http::Proxy "%s";\n' "${APT_PROXY}" > /etc/apt/apt.conf.d/01llmcf-proxy; \
+    fi
+
+# The person's pip index in the own network for an offline build (pip reads both from the environment; PIP_TRUSTED_HOST
+# only for an http index). Not set: PyPI and the Dockerfile's own addresses.
+ARG PIP_INDEX_URL
+ARG PIP_TRUSTED_HOST
+
 # System Dependencies
 # The wizard automatically injects cross-compilers here if needed
 RUN apt-get update && \
@@ -47,6 +68,11 @@ RUN apt-get update && \
 # CPU features of the build host's hardware probe, because the tools run on the machine that builds this image. The
 # defaults are for builds outside the framework (CI): the pin, and the fixed x86-64 baseline (AVX2, no AVX-512) these
 # tools always had, written out.
+# LLAMA_CPP_SOURCE=context (an offline build without a mirror in the own network): the verified local copy of the
+# pinned commit that the framework staged into sources/llama.cpp of the build context, checked here by its commit too;
+# git (the default) fetches the commit from LLAMA_CPP_REPO.
+ARG LLAMA_CPP_SOURCE=git
+COPY sources/ /tmp/llmcf-sources/
 ARG LLAMA_CPP_REPO=https://github.com/ggml-org/llama.cpp.git
 ARG LLAMA_CPP_TAG=b11429
 ARG LLAMA_CPP_COMMIT=d81235049384534c167caea52b85a694f6103d14
@@ -55,13 +81,21 @@ RUN set -eu; \
         || { echo "LLAMA_CPP_COMMIT must be a full commit id (40 hex characters)" >&2; exit 1; }; \
     printf '%s\n' "${LLAMA_CPP_TAG}" | grep -Eqx 'b[0-9]{1,7}' \
         || { echo "LLAMA_CPP_TAG must be a build tag such as b11429" >&2; exit 1; }; \
-    git init -q "${LLAMA_CPP_PATH}"; \
-    git -C "${LLAMA_CPP_PATH}" remote add origin "${LLAMA_CPP_REPO}"; \
-    if ! git -C "${LLAMA_CPP_PATH}" fetch -q --depth 1 origin "${LLAMA_CPP_COMMIT}"; then \
-        echo "fetching the commit failed; fetching tag ${LLAMA_CPP_TAG}, which must be that commit" >&2; \
-        git -C "${LLAMA_CPP_PATH}" fetch -q --depth 1 origin "refs/tags/${LLAMA_CPP_TAG}"; \
+    if [ "${LLAMA_CPP_SOURCE:-git}" = context ]; then \
+        [ -d /tmp/llmcf-sources/llama.cpp/.git ] \
+            || { echo "LLAMA_CPP_SOURCE=context, but the build context holds no llama.cpp copy" >&2; exit 1; }; \
+        cp -a /tmp/llmcf-sources/llama.cpp "${LLAMA_CPP_PATH}"; \
+        [ -z "$(git -C "${LLAMA_CPP_PATH}" status --porcelain=v1 --untracked-files=normal --ignored=traditional)" ] \
+            || { echo "llama.cpp: the local copy has changed or added files" >&2; exit 1; }; \
+    else \
+        git init -q "${LLAMA_CPP_PATH}"; \
+        git -C "${LLAMA_CPP_PATH}" remote add origin "${LLAMA_CPP_REPO}"; \
+        if ! git -C "${LLAMA_CPP_PATH}" fetch -q --depth 1 origin "${LLAMA_CPP_COMMIT}"; then \
+            echo "fetching the commit failed; fetching tag ${LLAMA_CPP_TAG}, which must be that commit" >&2; \
+            git -C "${LLAMA_CPP_PATH}" fetch -q --depth 1 origin "refs/tags/${LLAMA_CPP_TAG}"; \
+        fi; \
+        git -C "${LLAMA_CPP_PATH}" -c advice.detachedHead=false checkout -q FETCH_HEAD; \
     fi; \
-    git -C "${LLAMA_CPP_PATH}" -c advice.detachedHead=false checkout -q FETCH_HEAD; \
     head="$(git -C "${LLAMA_CPP_PATH}" rev-parse HEAD)"; \
     [ "${head}" = "${LLAMA_CPP_COMMIT}" ] \
         || { echo "llama.cpp: got commit ${head}, the pin is ${LLAMA_CPP_COMMIT}" >&2; exit 1; }; \
@@ -77,8 +111,10 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # llama.cpp's converter (convert_hf_to_gguf.py) with the requirements of the pinned commit (CPU-only PyTorch from
-# the PyTorch index) and its gguf package
-RUN python3 -m pip install --no-cache-dir -r "${LLAMA_CPP_PATH}/requirements/requirements-convert_hf_to_gguf.txt" \
+# the PyTorch index; with a pip index of the own network that index serves them and the requirements' own
+# --extra-index-url is left out) and its gguf package
+RUN if [ -n "${PIP_INDEX_URL:-}" ]; then sed -i '/^[[:space:]]*--extra-index-url/d' "${LLAMA_CPP_PATH}"/requirements/*.txt; fi \
+    && python3 -m pip install --no-cache-dir -r "${LLAMA_CPP_PATH}/requirements/requirements-convert_hf_to_gguf.txt" \
     && python3 -m pip install --no-cache-dir "${LLAMA_CPP_PATH}/gguf-py"
 
 # Install Framework Dependencies
@@ -151,6 +187,22 @@ ARG GROUP_ID=1000
 ENV BUILD_CACHE_DIR=/build-cache
 ENV LLAMA_CPP_PATH=/usr/src/llama.cpp
 ENV PATH="/app/modules:/app/scripts:${PATH}"
+
+# Sources in your own network for an offline build (orchestrator/Core/build_image.py): the person's apt mirror (it
+# serves the distribution's paths, such as /debian and /debian-security) or apt cache proxy. The framework passes them
+# only in offline mode, after the locality rule judged them; empty (the default) keeps the distribution's own sources.
+# No credentials: a build argument shows in the image's history.
+ARG APT_MIRROR
+ARG APT_PROXY
+RUN set -eu; \
+    if [ -n "${APT_MIRROR:-}" ]; then \
+        for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do \
+            if [ -f "${f}" ]; then sed -Ei "s#https?://[^/[:space:]]+#${APT_MIRROR%/}#g" "${f}"; fi; \
+        done; \
+    fi; \
+    if [ -n "${APT_PROXY:-}" ]; then \
+        printf 'Acquire::http::Proxy "%s";\n' "${APT_PROXY}" > /etc/apt/apt.conf.d/01llmcf-proxy; \
+    fi
 
 # Runtime Dependencies (libgomp1: the OpenMP runtime of the llama.cpp tools)
 RUN apt-get update && \
