@@ -135,7 +135,7 @@ def in_ci(environ: Optional[Dict[str, str]] = None) -> bool:
 
 def check_paid(framework: Any, cases: Sequence[Any], *, provider: Optional[str], tiers: Sequence[str] = (),
                i_pay: bool = False) -> None:
-    """The gate of the paid OpenAI test (round 33 Q2): it runs only when the person said yes (`--i-pay` at a
+    """The gate of the paid OpenAI test: it runs only when the person said yes (`--i-pay` at a
     terminal, the confirmation of Ditto > Evaluation...), with `--provider openai`, never in CI, never in offline
     mode. EvalRunError (exit code 2) otherwise; nothing when no paid case is among `cases`."""
     if not any(c.kind in de.PAID_KINDS for c in cases):

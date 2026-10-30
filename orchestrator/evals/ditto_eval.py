@@ -52,7 +52,7 @@ KINDS = ("healing", "optimizer", "module", "chat", "retrieval", "tokens", "opena
 OPT_IN_KINDS = ("tokens", "openai_paid")
 PAID_KINDS = ("openai_paid",)
 PAID_CHECKS = ("cache_ttl", "count")
-PAID_TTL = "12h"   # the cache lifetime the paid test asks OpenAI for (round 33 Q2)
+PAID_TTL = "12h"   # the cache lifetime the paid test asks OpenAI for
 DEFAULT_CASES = Path(__file__).resolve().parents[2] / "evals" / "ditto" / "cases.yml"
 RETRIEVAL_CASES = Path(__file__).resolve().parents[2] / "evals" / "retrieval" / "cases.yml"
 RETRIEVAL_DEPTH = 10  # results per search; MRR is computed over them
@@ -899,7 +899,7 @@ class DittoEval:
         return Attempt(not problems, seconds, problems, answer=text[:1500], turns=turns, conversation=summary)
 
     def run_openai_paid(self, case: Case) -> Attempt:
-        """The paid OpenAI test (round 33 Q2), started only by the person (evals/eval_run.check_paid). cache_ttl: the
+        """The paid OpenAI test, started only by the person (evals/eval_run.check_paid). cache_ttl: the
         same long request twice with prompt_cache_options.ttl "12h"; a 400 is recorded as refused (never as works)
         and the pair is then sent without the option, so turn 2's cached tokens are measured either way. count:
         OpenAI's own count of the sanitized request (responses.input_tokens.count) against the Usage of the real
