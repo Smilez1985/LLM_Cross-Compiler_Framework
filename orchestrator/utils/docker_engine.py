@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
 LLM Cross-Compiler Framework - the container engine the framework talks to: Docker, or Podman's Docker-compatible
-interface (DECISIONS round 26 Q1)
+interface (the install rule of the RHEL family)
 
-Docker CE is the standard. On Rocky Linux, AlmaLinux and Oracle Linux install.sh falls back to Podman (podman-docker
+Docker CE is the standard. In the RHEL family (Fedora, RHEL, CentOS Stream, Rocky Linux, AlmaLinux, Oracle Linux)
+install.sh falls back to Podman (podman-docker
 and the person's rootless podman.socket) when Docker CE cannot be installed there or the person keeps the packages dnf
 would have to remove for it. The framework then finds that socket by itself: `ensure_docker_host()` sets DOCKER_HOST
 to it in this process when DOCKER_HOST is not set and no Docker daemon is there. Every place that connects to Docker

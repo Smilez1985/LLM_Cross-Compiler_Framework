@@ -26,7 +26,7 @@ def check_docker(framework) -> List[Finding]:
                           "features are refused.", cannot="person")]
              if stale_podman_host() else [])
     if docker.engine == "podman":
-        # The fallback of Rocky Linux, AlmaLinux and Oracle Linux (DECISIONS round 26 Q1): it builds, with limits.
+        # The fallback of the RHEL family (Fedora, RHEL, CentOS Stream and the RHEL rebuilds): it builds, with limits.
         from orchestrator.utils.docker_engine import DOCKER_CE_WAY, PODMAN_LIMITS
         return [_ok("docker", "docker.daemon", "Container engine reachable: Podman, through its Docker-compatible "
                                                "interface (builds run there)"),

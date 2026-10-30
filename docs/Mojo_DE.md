@@ -85,8 +85,8 @@ Eine Informationszeile (ℹ) zeigt ihren Hinweis ebenfalls. Am Ende zählt ein S
 lässt, zum Beispiel: „Mojo Oracle found 3 problems (1 error, 2 warnings): Mojo Miracle can repair 1; 1 needs your list
 of what to delete; 1 needs you.“ Nichts wird ausgelassen. Mojo Oracle ändert nichts.
 
-Es prüft Python, Docker und buildx (und nennt die Container-Engine: Unter Podman, dem Ersatzweg unter Rocky Linux,
-AlmaLinux und Oracle Linux, nennt `docker.engine`, was Podman nicht kann, und den Weg zu Docker CE; siehe
+Es prüft Python, Docker und buildx (und nennt die Container-Engine: Unter Podman, dem Ersatzweg in der RHEL-Familie
+(Fedora, RHEL, CentOS Stream, Rocky Linux, AlmaLinux, Oracle Linux), nennt `docker.engine`, was Podman nicht kann, und den Weg zu Docker CE; siehe
 [Funktionen](Features_DE.md#podman-statt-docker)), wo Docker seine Images ablegt, den freien Speicher für die Ordner
 cache, output und den Build-Ordner, die Targets, den Zustandsordner, den Secrets-Speicher und den Schlüsselbund, die
 Tool-Berechtigungen, die MCP-Token und das Audit-Log, den Chat-Feed, die Kalibrierdaten, die Community-Pakete, die
