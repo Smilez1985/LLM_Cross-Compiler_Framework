@@ -89,14 +89,19 @@ class BenchmarkWorker(QThread):
             # Annahme: Framework Cache ist lokal vorhanden
             cache_host = self.config.get("cache_dir", "./cache")
             
+            # llama-bench needs no network and no capabilities: the container gets neither (the image was checked
+            # above, so containers.run pulls nothing).
             container = client.containers.run(
-                img, 
+                img,
                 command=cmd,
                 volumes={
                     str(cache_host): {'bind': '/build-cache', 'mode': 'rw'}
                 },
+                network_mode="none",
+                cap_drop=["ALL"],
+                security_opt=["no-new-privileges:true"],
                 remove=True,
-                detach=False, # Wait for finish
+                detach=False,  # wait for the end
                 stdout=True,
                 stderr=True
             )

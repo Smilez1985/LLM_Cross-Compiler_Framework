@@ -1,4 +1,4 @@
-Version 3.1.0 · Stand 2026-10-29
+Version 3.2.0 · Stand 2026-10-30
 
 [English](Mojo.md) · **Deutsch**
 
@@ -59,7 +59,10 @@ The oracle is pleased.“, wenn es mindestens ein Problem repariert hat, keines 
 „[Mojo] 404 - miracle not found“, wenn es nichts zu reparieren gab. Jedes andere Ergebnis zeigt kein Logo, ebenso
 wenig `--json`, ein Lauf ohne Terminal, die KI-Tools oder die GUI. Der offene Oracle-Lauf ist eine kleine private
 Notiz neben der Sperre von Mojo Miracle in deinem persönlichen Ordner (`mojo/oracle_open.json`, ohne Pfad und ohne
-Kontonamen darin); jeder Lauf von Mojo Miracle im Terminal entfernt sie an seinem Ende.
+Kontonamen darin). Sie verfällt nach einer Stunde (eine ältere Notiz oder eine, die sich nicht lesen lässt, zählt
+als nicht offen und wird entfernt), und jeder deiner Läufe von Mojo Miracle entfernt sie an seinem Ende: im Terminal,
+und ohne Logo auch `llmcf mojo --miracle --json`, `llm-cli doctor --fix` (mit oder ohne `--json`) und ein Lauf von
+Mojo Miracle in der GUI. Ein Lauf von Mojo Miracle durch eine KI lässt sie stehen.
 
 In der GUI: **Tools > Mojo-Gesundheitscheck...** startet Mojo Oracle beim Öffnen des Fensters und
 zeigt dieselben Befunde mit einer Gesamtzeile für den Exit-Code; **Mojo Miracle ausführen...** stellt dieselbe Frage
@@ -82,8 +85,8 @@ Eine Informationszeile (ℹ) zeigt ihren Hinweis ebenfalls. Am Ende zählt ein S
 lässt, zum Beispiel: „Mojo Oracle found 3 problems (1 error, 2 warnings): Mojo Miracle can repair 1; 1 needs your list
 of what to delete; 1 needs you.“ Nichts wird ausgelassen. Mojo Oracle ändert nichts.
 
-Es prüft Python, Docker und buildx (und nennt die Container-Engine: Unter Podman, dem Ersatzweg unter Rocky Linux,
-AlmaLinux und Oracle Linux, nennt `docker.engine`, was Podman nicht kann, und den Weg zu Docker CE; siehe
+Es prüft Python, Docker und buildx (und nennt die Container-Engine: Unter Podman, dem Ersatzweg in der RHEL-Familie
+(Fedora, RHEL, CentOS Stream, Rocky Linux, AlmaLinux, Oracle Linux), nennt `docker.engine`, was Podman nicht kann, und den Weg zu Docker CE; siehe
 [Funktionen](Features_DE.md#podman-statt-docker)), wo Docker seine Images ablegt, den freien Speicher für die Ordner
 cache, output und den Build-Ordner, die Targets, den Zustandsordner, den Secrets-Speicher und den Schlüsselbund, die
 Tool-Berechtigungen, die MCP-Token und das Audit-Log, den Chat-Feed, die Kalibrierdaten, die Community-Pakete, die

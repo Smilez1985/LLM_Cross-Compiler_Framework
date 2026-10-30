@@ -877,7 +877,7 @@ class BoardsWindow(QDialog):
                                  for p in plan.refused)
             self._info(t("boards.ssh.refused", problems=problems), "warning")
             return False
-        if plan.unchanged:
+        if plan.unchanged and not plan.pending_yes:
             self._info(t("boards.ssh.unchanged"))
             return False
         if plan.knowingly:

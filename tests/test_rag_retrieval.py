@@ -345,7 +345,7 @@ def test_a_failing_reranker_keeps_the_fused_order_until_the_setting_changes(know
 
     failing = FakeReranker(LICENSE_FIRST, fail=EmbeddingModelNotCached("The reranking model x is not in /cache"))
     rerankers = iter([failing, FakeReranker(LICENSE_FIRST)])
-    monkeypatch.setattr(rm, "create_reranker", lambda spec, cache_dir, offline: next(rerankers))
+    monkeypatch.setattr(rm, "create_reranker", lambda spec, cache_dir, offline, **_: next(rerankers))
     rag = knowledge(rag_reranker=DEFAULT_CPU_RERANKER)
     ingest_all(rag)
     fused = [h.source for h in rag.search("model memory", limit=3, rerank=False)]
@@ -363,7 +363,7 @@ def test_switching_the_reranker_away_and_back_tries_again(knowledge, monkeypatch
 
     created = []
 
-    def create(spec, cache_dir, offline):
+    def create(spec, cache_dir, offline, **_):
         created.append(spec.model_id)
         if len(created) == 1:
             return FakeReranker(LICENSE_FIRST, fail=EmbeddingModelNotCached("The reranking model is not in /cache"))
@@ -385,7 +385,7 @@ def test_a_settings_object_without_revisions_retries_after_a_search_saw_the_chan
 
     failures = iter([EmbeddingModelNotCached("not in /cache"), None])
     monkeypatch.setattr(rm, "create_reranker",
-                        lambda spec, cache_dir, offline: FakeReranker(LICENSE_FIRST, fail=next(failures)))
+                        lambda spec, cache_dir, offline, **_: FakeReranker(LICENSE_FIRST, fail=next(failures)))
     rag = knowledge()
     ingest_all(rag)
     values = {"rag_reranker": DEFAULT_CPU_RERANKER, "rag_model_idle_minutes": 0}
@@ -445,7 +445,7 @@ def test_the_configured_reranker_is_created_from_the_registry(knowledge, monkeyp
 
     created = []
 
-    def create(spec, cache_dir, offline):
+    def create(spec, cache_dir, offline, **_):
         created.append((spec.model_id, cache_dir, offline()))
         return FakeReranker(LICENSE_FIRST)
 

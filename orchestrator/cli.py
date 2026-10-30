@@ -596,7 +596,8 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
     from orchestrator.utils.image_registry import ImageLookupError
     try:
         from orchestrator.utils.locality import offline_mode
-        definition = pin_base_image(definition, offline=offline_mode(ctx.framework_manager.config))
+        config = ctx.framework_manager.config
+        definition = pin_base_image(definition, offline=offline_mode(config), config=config)
     except ImageLookupError as e:   # the base image is the AI's value, and the message may quote it
         console.print(f"[red]The base image {escape(_printable(definition.base_os))} cannot be pinned: "
                       f"{escape(_printable(e))}[/red]")
@@ -1200,13 +1201,14 @@ def _print_request_summary(r: dict) -> None:
         if name == "owner":
             value = value or "the person"
         if value not in (None, ""):
-            console.print(f"[bold]{_BUILD_FIELD_LABELS[name]}:[/bold] {escape(str(value))}")
+            console.print(f"[bold]{_BUILD_FIELD_LABELS[name]}:[/bold] {escape(_printable(str(value)))}")
     for error in r.get("errors") or []:
-        console.print(f"[bold]Error:[/bold] {escape(str(error))}")
+        console.print(f"[bold]Error:[/bold] {escape(_printable(str(error)))}")
     if r.get("status") == "interrupted":
         console.print("[yellow]The process that ran this request has ended before it finished.[/yellow]")
     elif r.get("awaiting_decision"):
-        console.print(f"[yellow]Waits for a decision on a self-healing proposal in the {escape(str(r.get('program')))}"
+        program = escape(_printable(str(r.get('program'))))
+        console.print(f"[yellow]Waits for a decision on a self-healing proposal in the {program}"
                       " that started it.[/yellow]")
     console.print("")
 
@@ -1235,7 +1237,7 @@ def _print_build_record(r: dict) -> None:
     from orchestrator.Core.build_history import record_rows
     for name, value in record_rows(r):
         if value not in (None, ""):
-            console.print(f"[bold]{_BUILD_FIELD_LABELS[name]}:[/bold] {escape(str(value))}")
+            console.print(f"[bold]{_BUILD_FIELD_LABELS[name]}:[/bold] {escape(_printable(str(value)))}")
     if r.get("status") == "interrupted":
         console.print("[yellow]The process that ran this build has ended before the build finished.[/yellow]")
     console.print("")
@@ -3398,7 +3400,8 @@ def _doctor_fix(doc):
     did: `fixed` and `still_present`, plus why each one still present was not repaired (for the person's output)."""
     terminal = _interactive()
     asked = {"decision": "person", "answered_by": "person", "confirm_channel": "framework-cli"} if terminal else {}
-    result = doc.miracle(actor="cli", at_terminal=False, **asked)
+    # A Miracle run of the person: it closes an open Oracle run, without the logo.
+    result = doc.miracle(actor="cli", at_terminal=False, closes_circle=True, **asked)
     report = result.after
     report.fixed, report.still_present, why_not = _miracle_fixed(result)
     return report, why_not
@@ -3510,7 +3513,8 @@ def mojo(ctx: FrameworkContext, mode: str, as_json: bool, board: Optional[str]):
     if as_json:
         if mode == "miracle":
             # Without a person at a terminal: only the harmless repairs (round 6 Q11); nothing is deleted.
-            result = engine.miracle(actor="cli", at_terminal=False, before=report)
+            # A Miracle run of the person: it closes an open Oracle run, without the logo (--json shows none).
+            result = engine.miracle(actor="cli", at_terminal=False, before=report, closes_circle=True)
             data = {"mode": mode, **_mojo_dict(result.after, offers(framework, result.after)),
                     **_mojo_miracle_dict(result)}
         else:
@@ -5301,9 +5305,13 @@ def _ssh_block_change(ctx: FrameworkContext, host: str, lines) -> None:
         console.print("[red]Nothing was changed: the framework never uses these lines (its own trust settings stay "
                       "on OpenSSH's command line).[/red]")
         sys.exit(1)
-    if plan.unchanged:
+    if plan.unchanged and not plan.pending_yes:
         console.print("These are the settings already; nothing was changed.")
         return
+    if plan.pending_yes:
+        console.print("These are the settings already, but you have not said yes to their ProxyJump or ProxyCommand "
+                      "(changed by hand, or written before the framework kept your yes): the framework does not use "
+                      "them until you do.")
     if not _interactive():
         console.print("[red]'deploy ssh-config' needs a terminal: you read and confirm the settings yourself.[/red]")
         sys.exit(1)

@@ -372,3 +372,20 @@ def test_the_benchmark_window_never_pulls_its_image():
     worker.run()
     assert calls == [("get", BENCHMARK_IMAGE)] and not registry_of(BENCHMARK_IMAGE)
     assert errors and "not on this computer" in errors[0]
+
+
+def test_the_benchmark_container_runs_without_network_or_capabilities():
+    """llama-bench reads a model from the cache and prints numbers: its container gets no network
+    (network_mode='none'), no capabilities and no new privileges."""
+    pytest.importorskip("PySide6")
+    from orchestrator.gui.benchmark_window import BENCHMARK_IMAGE, BenchmarkWorker
+    runs, done = [], []
+    client = SimpleNamespace(images=SimpleNamespace(get=lambda name: name),
+                             containers=SimpleNamespace(run=lambda *a, **k: runs.append((a, k)) or b"done"))
+    worker = BenchmarkWorker(SimpleNamespace(client=client), {"cache_dir": "/build-cache-test"})
+    worker.finished.connect(done.append)
+    worker.run()
+    (args, kwargs), = runs
+    assert args == (BENCHMARK_IMAGE,) and kwargs["network_mode"] == "none"
+    assert kwargs["cap_drop"] == ["ALL"] and kwargs["security_opt"] == ["no-new-privileges:true"]
+    assert done and done[0]["raw"] == "done"

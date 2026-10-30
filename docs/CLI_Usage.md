@@ -1,4 +1,4 @@
-Version 3.1.0 · Last updated 2026-10-29
+Version 3.2.0 · Last updated 2026-10-30
 
 **English** · [Deutsch](CLI_Usage_DE.md)
 
@@ -202,8 +202,8 @@ When Mojo Miracle ends after Mojo Oracle at a terminal (you answered `y` to "Run
 ball, in colour where the console can show colour, and under it "[Mojo] Miracle managed. The oracle is pleased." when
 it repaired at least one problem, none is left and nothing new turned up, or "[Mojo] 404 - miracle not found" when
 there was nothing to repair. It never shows with `--json`, without a terminal, through the AI tools or in the GUI;
-the open Oracle run is a small private note in your personal folder that every Mojo Miracle run at a terminal
-removes when it ends.
+the open Oracle run is a small private note in your personal folder; it expires after one hour, and every Mojo
+Miracle run of yours removes it when it ends (also `--miracle --json` and `llm-cli doctor --fix`, which show no logo).
 
 | Option | Meaning |
 |---|---|
@@ -789,7 +789,7 @@ paramiko reads no settings file.
 | Command | Meaning |
 |---|---|
 | `show` (also without a subcommand) | Prints the file's path and what it holds. |
-| `edit HOST --line ...` | Sets the block `Host HOST` (the board's address or host name as the framework names it) to the given lines, one `--line` per option line, for example `--line "ProxyJump jump.example"` or `--line "User radxa"`; without `--line` the block goes. It shows the block now and after the change. A line that would change how a host key is trusted, run a command, include another file or share connections is refused with the reason and nothing is written (`StrictHostKeyChecking`, `UserKnownHostsFile`, `GlobalKnownHostsFile`, `KnownHostsCommand`, `HostKeyAlias`, `HostName`, `LocalCommand`, `RemoteCommand`, `Include`, `Match`, `ControlMaster`, forwardings, ...; exit code 1). A `ProxyJump` or `ProxyCommand` is explained and asked separately before the question to write; "No" is the default for both. Needs a terminal; the change is written to the audit log. |
+| `edit HOST --line ...` | Sets the block `Host HOST` (the board's address or host name as the framework names it) to the given lines, one `--line` per option line, for example `--line "ProxyJump jump.example"` or `--line "User radxa"`; without `--line` the block goes. It shows the block now and after the change. A line that would change how a host key is trusted, run a command, include another file or share connections is refused with the reason and nothing is written (`StrictHostKeyChecking`, `UserKnownHostsFile`, `GlobalKnownHostsFile`, `KnownHostsCommand`, `HostKeyAlias`, `HostName`, `LocalCommand`, `RemoteCommand`, `Include`, `Match`, `ControlMaster`, forwardings, ...; exit code 1). A `ProxyJump` or `ProxyCommand` is explained and asked separately before the question to write; "No" is the default for both. Your yes to exactly these lines is kept, and a `ProxyJump` or `ProxyCommand` changed by hand afterwards is not used until you enter the same lines here again and say yes. `IdentityFile`, `CertificateFile`, `IdentityAgent`, `AddKeysToAgent`, `SetEnv` and `SendEnv` are refused too; `LogLevel` is allowed. Needs a terminal; the change is written to the audit log. |
 | `import HOST` | Reads `HOST`'s own block from your `~/.ssh/config` (only read, never changed: the first `Host` block that names `HOST` itself; patterns such as `Host *` are not matched, `Include` and `Match` not followed), shows it and then goes on as `edit` with its lines: the same checks and questions. |
 
 The trust settings stay on OpenSSH's command line, where the first value wins: `StrictHostKeyChecking=yes`, the

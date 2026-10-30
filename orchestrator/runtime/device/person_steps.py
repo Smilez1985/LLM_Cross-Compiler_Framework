@@ -707,6 +707,9 @@ class SshBlockPlan:
     refused: Tuple[Any, ...]
     knowingly: Tuple[Any, ...]
     text: str
+    # The block is already these lines, with a ProxyJump or ProxyCommand no yes of the person covers yet (a hand edit,
+    # or a file from before the yes was kept): the person's knowing yes accepts them as they are.
+    pending_yes: bool = False
 
     @property
     def unchanged(self) -> bool:
@@ -735,7 +738,9 @@ def plan_ssh_block(state_dir: Path, host: str, lines: Sequence[str]) -> SshBlock
     new = tuple(line.strip() for line in lines if line and line.strip() and not line.strip().startswith("#"))
     check = ssh_config.check_lines(new, jump_path=ssh_config.argument(path))
     old = tuple(ssh_config.block_lines(text, host) or ())
-    return SshBlockPlan(host, old, new, tuple(check.refused), tuple(check.knowingly), text)
+    pending = bool(check.knowingly) and old == new and \
+        ssh_config.block_digest(host, new) not in ssh_config.accepted_digests(Path(state_dir))
+    return SshBlockPlan(host, old, new, tuple(check.refused), tuple(check.knowingly), text, pending)
 
 
 def ssh_block_lines(plan: SshBlockPlan) -> List[str]:
@@ -769,15 +774,21 @@ def save_ssh_block(state_dir: Path, plan: SshBlockPlan, *, via: str, knowingly: 
     if plan.knowingly and not knowingly:
         raise BoardStepError("A ProxyJump or ProxyCommand is added only with your yes after reading what it does.",
                              "ssh_knowingly")
-    if plan.unchanged:
-        raise BoardStepError(f"The settings of {plan.host} are already these; nothing was changed.", "ssh_unchanged")
     state_dir = Path(state_dir)
+    # The same lines again, with a ProxyJump or ProxyCommand the person has not said yes to yet (a hand edit, or a
+    # file from before the framework kept the yes): the person's knowing yes accepts them as they are.
+    accepting = plan.pending_yes
+    if plan.unchanged and not accepting:
+        raise BoardStepError(f"The settings of {plan.host} are already these; nothing was changed.", "ssh_unchanged")
     path = ssh_config.ensure(state_dir)
     with file_lock(state_dir / ".ssh_config.lock"):
         if ssh_config.read(state_dir) != plan.text:
             raise BoardStepError("The framework's SSH settings file changed since these settings were read; read them "
                                  "again.", "ssh_stale")
-        write_private(path, ssh_config.with_block(plan.text, plan.host, plan.new))
+        if not accepting:
+            write_private(path, ssh_config.with_block(plan.text, plan.host, plan.new))
+        if plan.knowingly:   # the person's knowing yes to exactly these lines (prepare() refuses any other)
+            ssh_config.record_accepted(state_dir, plan.host, plan.new)
     ssh_config.ensure(state_dir)   # private to this account (an ACL on Windows), as the framework key
     from orchestrator.remote.pairing import _open_audit
     log = _open_audit(audit)
@@ -785,7 +796,7 @@ def save_ssh_block(state_dir: Path, plan: SshBlockPlan, *, via: str, knowingly: 
         try:
             log.record(actor or via, "ssh_config_changed", "framework", "ask", "ok",
                        arguments={"lines": len(plan.new), "removed": not plan.new,
-                                  "jump_or_command": bool(plan.knowingly)},
+                                  "jump_or_command": bool(plan.knowingly), "accepted_as_is": accepting},
                        approved=True, extra={"confirm_channel": f"framework-{via}", "answer": "accepted"})
         except Exception:  # noqa: BLE001 - the file holds the person's change; the log reports its own failure
             pass

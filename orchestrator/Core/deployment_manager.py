@@ -708,15 +708,27 @@ class DeploymentManager:
         if not Path(package).is_file():
             return DeployResult(False, reason=f"The package {Path(package).name} does not exist.")
 
-        if not self._check_conn(host, port):
+        from orchestrator.remote.ssh_config import needs_proxy
+        # A board reached through a ProxyJump or ProxyCommand of the framework's own settings answers only through the
+        # jump host, so its SSH port is not checked from here: OpenSSH's login through the jump tells.
+        proxied = needs_proxy(self._state_dir(), host)
+        if not proxied and not self._check_conn(host, port):
             from orchestrator.runtime.device import reasons
             down = reasons.check_port(host, port) or reasons.HOST_DOWN
             return DeployResult(False, code=down, reason=f"Target {host} not reachable on port {port} ({down}).")
 
         self.logger.info(f"Deploying to {host}...")
-        if PARAMIKO_AVAILABLE:
+        # paramiko reads no SSH settings file: a board reached through a ProxyJump or ProxyCommand of the framework's
+        # own settings goes through OpenSSH (the session refuses plainly what OpenSSH cannot do there).
+        if PARAMIKO_AVAILABLE and not proxied:
             return self._deploy_paramiko(Path(package), host, user, password, port, pair, expect_fingerprint,
                                          expect_sha256, on_client, stop, wait_seconds, on_event)
+        if expect_fingerprint and proxied:
+            return DeployResult(False, reason=f"The framework's SSH settings reach {host} through a jump host or a "
+                                              "proxy command, which only the OpenSSH client can do, and OpenSSH "
+                                              "checks the host key against the framework's known_hosts only, so a "
+                                              "deploy bound to the fingerprint shown cannot go through it; nothing "
+                                              "was deployed.")
         if expect_fingerprint:
             # OpenSSH checks the key against known_hosts only; the fingerprint shown cannot be compared without
             # paramiko, so a deploy bound to one is refused rather than sent unchecked.

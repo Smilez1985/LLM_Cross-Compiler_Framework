@@ -19,8 +19,14 @@ def check_docker(framework) -> List[Finding]:
                         "sure your user may use it (docker group or rootless Docker).",
                         where="the Docker daemon", why="Builds cross-compile inside Docker, so no build can run "
                                                        "without it.", cannot="admin")]
+    from orchestrator.utils.docker_engine import STALE_PODMAN_HOST, STALE_PODMAN_WAY, stale_podman_host
+    stale = ([Finding("docker", "docker.host_stale", Severity.WARN, STALE_PODMAN_HOST, STALE_PODMAN_WAY,
+                      where="the DOCKER_HOST setting of your shell",
+                      why="With it the framework uses Podman although Docker runs here, so GPU builds and BuildKit "
+                          "features are refused.", cannot="person")]
+             if stale_podman_host() else [])
     if docker.engine == "podman":
-        # The fallback of Rocky Linux, AlmaLinux and Oracle Linux (DECISIONS round 26 Q1): it builds, with limits.
+        # The fallback of the RHEL family (Fedora, RHEL, CentOS Stream and the RHEL rebuilds): it builds, with limits.
         from orchestrator.utils.docker_engine import DOCKER_CE_WAY, PODMAN_LIMITS
         return [_ok("docker", "docker.daemon", "Container engine reachable: Podman, through its Docker-compatible "
                                                "interface (builds run there)"),
@@ -29,8 +35,8 @@ def check_docker(framework) -> List[Finding]:
                         + PODMAN_LIMITS["buildkit"] + ". The framework refuses these with the reason.",
                         DOCKER_CE_WAY, where="the container engine",
                         why="Docker CE is the framework's standard engine; under Podman, GPU builds and BuildKit "
-                            "features are not available.", cannot="admin")] + _storage_findings(framework)
-    findings = [_ok("docker", "docker.daemon", "Docker daemon reachable (container engine: Docker)")]
+                            "features are not available.", cannot="admin")] + stale + _storage_findings(framework)
+    findings = [_ok("docker", "docker.daemon", "Docker daemon reachable (container engine: Docker)")] + stale
     if docker.buildx is True:
         findings.append(_ok("docker", "docker.buildx", "BuildKit (buildx) available"))
     elif docker.buildx is False:

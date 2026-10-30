@@ -335,6 +335,29 @@ def test_a_recipe_is_built_exactly_as_pinned_through_start_builds_question(recip
     assert recipes.service.lookups[-1] == ("Qwen/Qwen3.5-2B", COMMIT), "the recipe's commit, never the branch"
 
 
+def test_a_recipe_build_takes_the_boards_probe_as_start_build_does(recipes, monkeypatch):
+    """start_recipe_build names the board's hardware probe like start_build: checked before the question (an unknown
+    probe is refused there), and the build runs with exactly that probe."""
+    from orchestrator.Core.build_service import BuildService
+    install_recipe(recipes)
+    with pytest.raises(ToolError) as refused:
+        recipes.registry.call("start_recipe_build", {"recipe_id": "demo-recipe", "probe": "0123456789abcdef"},
+                              ToolContext("ditto", confirm=lambda s, i: pytest.fail("no question")))
+    assert "probe" in str(refused.value).lower() and recipes.orch.requests == [], str(refused.value)
+    monkeypatch.setattr(BuildService, "_board_probe",
+                        lambda self, probe_id, board, caps, target=None: (probe_id, None) if probe_id else (None, None))
+    started = []
+    real = type(recipes.service).start_recipe
+
+    def recorded(self, recipe_id, **kwargs):
+        started.append(kwargs.get("probe"))
+        return real(self, recipe_id, **kwargs)
+    monkeypatch.setattr(type(recipes.service), "start_recipe", recorded)
+    ask(recipes, "start_recipe_build", {"recipe_id": "demo-recipe", "probe": "0123456789abcdef"})
+    assert started == ["0123456789abcdef"]
+    assert recipes.orch.requests[-1].hardware_probe == "0123456789abcdef"
+
+
 def test_an_unknown_recipe_and_a_dataset_the_recipe_does_not_name_are_refused_before_the_question(recipes):
     install_recipe(recipes)
     for arguments, code in (({"recipe_id": "nope"}, "unknown_id"),

@@ -1117,7 +1117,7 @@ Setup commands:
             definition = ditto.generate_module(path)
             if isinstance(definition, ModuleDefinition):
                 try:
-                    definition = pin_base_image(definition, offline=offline)
+                    definition = pin_base_image(definition, offline=offline, config=getattr(ditto, "config", None))
                 except ImageLookupError as e:
                     relay.done.emit(token, ("error", ui_text("bld.wizard.pin_failed", image=definition.base_os,
                                                              reason=str(e), next=e.next)))
@@ -1254,6 +1254,7 @@ Setup commands:
         _on_pin_relay, which asks the person before anything is saved."""
         token = self._pin_request = object()
         relay, offline = worker_relay(), self._offline()
+        config = getattr(self.framework_manager, "config", None)
         finish = self.button(QWizard.FinishButton)
         if finish is not None:
             finish.setEnabled(False)   # one lookup at a time; Finish comes back with the answer
@@ -1261,7 +1262,7 @@ Setup commands:
         def work() -> None:
             from orchestrator.Core.ditto_manager import pin_reference
             try:
-                result = ("pinned", image, pin_reference(image, offline=offline), "")
+                result = ("pinned", image, pin_reference(image, offline=offline, config=config), "")
             except Exception as e:  # noqa: BLE001 - ImageLookupError (offline, no registry, unknown tag) and others
                 result = ("failed", image, str(e), str(getattr(e, "next", "") or ""))
             relay.done.emit(token, result)

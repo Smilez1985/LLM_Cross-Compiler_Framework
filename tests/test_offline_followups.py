@@ -250,7 +250,8 @@ def test_online_a_name_that_turned_public_is_refused_without_naming_an_opt_out(n
 
 # --- (h) the tailnet's devices and subnet routes -----------------------------------------------------------------
 
-PREFS = {"ControlURL": "https://headscale.lan:8080"}
+# RouteAll: this node accepts its peers' subnet routes (ipn.Prefs; without it the routes are not in use here).
+PREFS = {"ControlURL": "https://headscale.lan:8080", "RouteAll": True}
 DERP = {"Regions": {"900": {"Nodes": [{"HostName": "derp.lan", "IPv4": "192.168.1.3", "IPv6": "none"}]}}}
 STATUS = {"BackendState": "Running", "TailscaleIPs": ["100.64.0.1", "fd7a:115c:a1e0::1"],
           "Self": {"TailscaleIPs": ["100.64.0.1", "fd7a:115c:a1e0::1"]},
@@ -304,7 +305,7 @@ def test_with_the_own_headscale_only_a_device_of_the_tailnet_counts_as_local():
 def test_a_private_address_behind_a_peers_subnet_route_is_judged_like_a_vpn_address():
     own = vpn_check()
     assert check_host("10.20.3.4", vpn=lambda: own).reason == "own_vpn", "own Headscale, own relays: local"
-    cloud = vpn_check(prefs={"ControlURL": ""})                # Tailscale's own control server
+    cloud = vpn_check(prefs={"ControlURL": "", "RouteAll": True})   # Tailscale's own control server
     assert cloud.reason == "tailscale_control" and [str(r) for r in cloud.routes] == ["10.20.0.0/16"]
     routed = check_host("10.20.3.4", vpn=lambda: cloud)
     assert not routed.local and routed.reason == "vpn" and "Tailscale's own servers" in routed.why()
