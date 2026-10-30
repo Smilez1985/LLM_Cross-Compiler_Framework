@@ -11,6 +11,12 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 
 ## [3.2.0] - 2026-10-30
 
+### Added
+- `2026-10-30 01:02 UTC` · `v3.2.0` **Your own crawled pages belong to a topic from the start**: the Deep Ingest window asks for the topic of the
+  crawl's pages (empty: the site's name, such as `docs.example.com`), and every excerpt of the crawl carries it, so
+  `search_knowledge(topic=...)`, the Topic column and the knowledge exports find them under it. A crawl an AI started
+  (`crawl_docs_site`) takes the site's name; it never names a topic itself.
+
 ### Fixed
 - `2026-10-30 00:48 UTC` · `v3.2.0` **A recipe bound to a target pack made on Linux verifies on Windows**: Windows keeps no execute bit, so the
   installed copy of a target pack with `0o755` scripts gave another folder digest there, and the recipe install check
@@ -27,6 +33,11 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   `holder_info`; the excerpt id is unchanged); a newer pack version, a re-crawl or an uninstall lets go of only its
   own hold, and an excerpt goes when nobody holds it any more (`RAGManager.release_holder`). A shared excerpt is found
   under the topic or target of every holder. Excerpts stored before this name one holder, the one their fields name.
+- `2026-10-30 01:03 UTC` · `v3.2.0` **A re-crawl of a site removes the pages that are gone**: pages that vanished from a crawled site kept their
+  excerpts for ever. A crawl of the same start address again replaces its pages, and when it read the whole site
+  (it succeeded, no page limit or request budget ended it, nothing failed, was reserved or stopped) the excerpts of the
+  earlier pages it no longer reached are removed too, only where this crawl was their last holder; the result names
+  them (`removed`). A partial or failed crawl removes nothing.
 
 ## [3.1.0] - 2026-10-29
 

@@ -490,6 +490,7 @@ class CrawlerManager:
         self.logger.info(f"Starting Deep Ingest for: {root_url}")
         self.visited.clear()
         self.skipped, self.failed, self.stopped = [], [], False
+        self.complete = False   # set below: every page of the site was reached (a re-crawl may then drop gone pages)
         stop = self._stop = stop or threading.Event()
         collected = 0
 
@@ -631,6 +632,7 @@ class CrawlerManager:
             except Exception as e:
                 self._fail(url, _remote_text(e), level=logging.ERROR)
 
+        self.complete = not self.stopped and not any(item[0] not in self.visited for item in queue)
         if self.stopped:
             self.logger.info(f"Crawl stopped on request after {collected} documents.")
         self.logger.info(f"Crawl finished. Collected {collected} documents, skipped {len(self.skipped)} pages, "
