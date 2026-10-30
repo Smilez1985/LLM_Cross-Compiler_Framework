@@ -2584,7 +2584,7 @@ Wissensbasis aus ist. Um eine neuere Version eines Pakets zu installieren, deins
 wenn nichts deinstalliert wurde oder ein Eintrag nicht entfernt werden konnte.
 
 In der GUI: **Tools > Community Hub öffnen**, das installierte Paket wählen, **Deinstallieren...**. Eine KI darf nur
-darum bitten (das optionale Tool `uninstall_pack`, verborgen, bis du es freigibst): Du siehst dieselbe Liste im
+darum bitten (das optionale Tool `remove_pack`, verborgen, bis du es freigibst): Du siehst dieselbe Liste im
 eigenen Fenster des Frameworks und entscheidest, und ihre Bitte verschiebt nur in den Papierkorb.
 
 ```bash

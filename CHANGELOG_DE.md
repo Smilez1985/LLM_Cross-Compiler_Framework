@@ -19,13 +19,21 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Crawl, den eine KI gestartet hat (`crawl_docs_site`), nimmt den Namen der Site; sie nennt nie selbst ein Thema.
 - `2026-10-30 01:16 UTC` · `v3.2.0` **Ein installiertes Community-Paket deinstallieren**: `llm-cli zoo uninstall PACK_ID --kind
   target|recipe|knowledge`, **Deinstallieren...** im Community Hub und, für eine KI nur als Bitte, über die die Person
-  entscheidet, das optionale Tool `uninstall_pack` (verborgen, bis es freigegeben ist, immer mit Frage, nie als
+  entscheidet, das optionale Tool `remove_pack` (verborgen, bis es freigegeben ist, immer mit Frage, nie als
   dauerhafte Freigabe oder Delegation, nur in den Papierkorb). Alles läuft über die Löschregeln (`Core/deletion.py`):
   zuerst die genaue Liste (der Ordner des Pakets mit seiner Herkunftsangabe, seine Import-Notizen und wie viele Auszüge
   nur dieses Paket hält), „Nein“ als Vorgabe, dann der Papierkorb (`Core/trash.py`) oder endgültig, protokolliert, bevor
   etwas geht (`pack_uninstalled`); Auszüge, die ein anderes Paket oder dein eigener Crawl noch hält, bleiben
   (`CommunityManager.uninstall_plan` / `uninstall`, `RAGManager.holding`). Ein Paket, dessen Seiten in der Wissensbasis
   sind, wird abgelehnt, solange die Wissensbasis aus ist.
+
+### Geändert
+- `2026-10-30 01:26 UTC` · `v3.2.0` **Ein verlinkter Wissensordner wird übergangen, und das wird gesagt**: Ein symbolischer Link als
+  `community/knowledge` oder in dessen ersten zwei Ebenen wurde still ausgelassen, sodass die Pakete dahinter zu
+  fehlen schienen. Sie werden weiter übergangen (das Framework folgt nie einem Link aus seinen eigenen Ordnern
+  heraus: Was installiert und geprüft ist, muss dort bleiben, wo es geprüft wurde), und jetzt nennen die Paketliste
+  (`llm-cli zoo list`, der Community Hub) und Mojo Oracle (`community.knowledge.links`) jeden Link, sagen warum und
+  dass der Ordner stattdessen dorthin verschoben werden soll (`CommunityManager.ignored_links` / `links_note`).
 
 ### Behoben
 - `2026-10-30 00:48 UTC` · `v3.2.0` **Ein Rezept zu einem unter Linux gemachten Target-Paket besteht unter Windows**: Windows hält kein
@@ -51,6 +59,21 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   beendet, nichts ist fehlgeschlagen, wurde vorbehalten oder gestoppt), werden auch die Auszüge der früheren Seiten
   entfernt, die er nicht mehr erreicht hat, nur wo dieser Crawl ihr letzter Halter war; das Ergebnis nennt sie
   (`removed`). Ein teilweiser oder fehlgeschlagener Crawl entfernt nichts.
+- `2026-10-30 01:26 UTC` · `v3.2.0` **Ein von einem älteren Paket belegter Themenordner nennt dieses Paket und den Ausweg**: Wenn das Thema oder Target
+  eines Wissenspakets der Ordner eines Pakets ist, das installiert wurde, bevor Wissen in Themenordner sortiert wurde,
+  sagte die Ablehnung nur „wähle einen anderen Themennamen“, was die Person bei einem Paket aus dem Index nicht kann.
+  Sie nennt jetzt das ältere Paket (Art, ID, Version) und den Ausweg: dieses Paket deinstallieren oder neu
+  installieren (es zieht dann in seinen eigenen Themenordner) und danach dieses installieren; der nächste Schritt
+  zeigt auf **Deinstallieren...** (`llm-cli zoo uninstall`). Beim Einsortieren einer losen Datei, wo die Person das
+  Thema wählt, bleibt auch ein anderer Themenname ein Ausweg.
+- `2026-10-30 01:26 UTC` · `v3.2.0` **Ein bearbeitetes Target- oder Wissenspaket sagt, warum es nicht importiert wird und wie es weitergeht**: Ein
+  Paket, dessen Dateien sich seit der Installation geändert haben, wird weiter nicht importiert (die Prüfung gegen
+  den signierten Digest ist die Sicherheitsschranke), aber der Wartegrund des Wissensimports und der Befund von Mojo
+  Oracle sagen jetzt warum und was zu tun ist: Um die Änderungen rückgängig zu machen, deinstallieren und neu
+  installieren; um sie zu behalten, den Target-Ordner unter einem eigenen Namen kopieren und als neues Paket
+  exportieren (ein Wissenspaket: deine Fassung als neues Wissenspaket exportieren). Die Befunde von Mojo zu einem
+  zurückgezogenen oder geänderten Paket zeigen auf **Deinstallieren...**, statt die Person einen Ordner löschen oder
+  einen Befehl tippen zu lassen.
 
 ## [3.1.0] - 2026-10-29
 

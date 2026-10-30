@@ -118,7 +118,7 @@ def test_cli_zoo_uninstall_asks_with_no_as_the_default(two_packs, monkeypatch):
 
 
 def test_an_ai_only_asks_and_the_person_decides_in_the_framework_window(two_packs):
-    """uninstall_pack is optional (hidden until the person enables it), capped at ask, never granted or delegated; the
+    """remove_pack is optional (hidden until the person enables it), capped at ask, never granted or delegated; the
     person's window shows the exact list; an AI's request goes to the trash only and the answer holds no host path."""
     pytest.importorskip("mcp")
     from test_optional_tools import ask, enable
@@ -126,12 +126,12 @@ def test_an_ai_only_asks_and_the_person_decides_in_the_framework_window(two_pack
     from orchestrator.tools.grants import NEVER_GRANT
     from orchestrator.tools.policy import Decision
     env = _tool_env(two_packs)
-    spec = env.registry.get("uninstall_pack")
-    assert spec.destructive and "uninstall_pack" in NEVER_GRANT and "uninstall_pack" in NEVER_DELEGATE
-    assert "uninstall_pack" not in {s.name for s in env.registry.visible("mcp")}, "hidden until enabled"
-    enable(env, "uninstall_pack")
+    spec = env.registry.get("remove_pack")
+    assert spec.destructive and "remove_pack" in NEVER_GRANT and "remove_pack" in NEVER_DELEGATE
+    assert "remove_pack" not in {s.name for s in env.registry.visible("mcp")}, "hidden until enabled"
+    enable(env, "remove_pack")
     assert env.registry.decide(spec, caller="ditto") == Decision.ASK
-    out, shown = ask(env, "uninstall_pack", {"kind": "knowledge", "pack_id": "pack-a"})
+    out, shown = ask(env, "remove_pack", {"kind": "knowledge", "pack_id": "pack-a"})
     assert out.uninstalled and out.trash_ids and "pack-a" in shown[0]
     assert str(two_packs.tmp) not in out.model_dump_json(), "no host path in what an AI reads"
     assert not any(prov.id == "pack-a" for _, prov in two_packs.cm.installed())

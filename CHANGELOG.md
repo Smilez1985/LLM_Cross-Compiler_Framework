@@ -18,12 +18,19 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   (`crawl_docs_site`) takes the site's name; it never names a topic itself.
 - `2026-10-30 01:16 UTC` · `v3.2.0` **Uninstall an installed community pack**: `llm-cli zoo uninstall PACK_ID --kind target|recipe|knowledge`, the
   Community Hub's **Uninstall...** and, for an AI only as a request the person decides, the optional tool
-  `uninstall_pack` (hidden until enabled, always asked, never granted or delegated, trash only). Everything goes
+  `remove_pack` (hidden until enabled, always asked, never granted or delegated, trash only). Everything goes
   through the deletion rules (`Core/deletion.py`): the exact list first (the pack's folder with its provenance, its
   import notes, and how many excerpts only this pack holds), "No" by default, then the trash (`Core/trash.py`) or for
   good, audited before anything goes (`pack_uninstalled`); excerpts another pack or your own crawl still holds stay
   (`CommunityManager.uninstall_plan` / `uninstall`, `RAGManager.holding`). A pack whose pages are in the knowledge base
   is refused while the knowledge base is off.
+
+### Changed
+- `2026-10-30 01:26 UTC` · `v3.2.0` **A linked knowledge folder is ignored, and said so**: a symbolic link as `community/knowledge` or in its first two
+  levels was silently left out, so the packs behind it seemed missing. They are still ignored (the framework never
+  follows a link out of its own folders: what is installed and checked must stay where it was checked), and now the
+  pack listing (`llm-cli zoo list`, the Community Hub) and Mojo Oracle (`community.knowledge.links`) name each link,
+  say why, and say to move the folder there instead (`CommunityManager.ignored_links` / `links_note`).
 
 ### Fixed
 - `2026-10-30 00:48 UTC` · `v3.2.0` **A recipe bound to a target pack made on Linux verifies on Windows**: Windows keeps no execute bit, so the
@@ -46,6 +53,18 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   (it succeeded, no page limit or request budget ended it, nothing failed, was reserved or stopped) the excerpts of the
   earlier pages it no longer reached are removed too, only where this crawl was their last holder; the result names
   them (`removed`). A partial or failed crawl removes nothing.
+- `2026-10-30 01:26 UTC` · `v3.2.0` **A topic folder taken by an older pack names that pack and the way out**: when a knowledge pack's topic or target
+  is the folder of a pack installed before knowledge was sorted into topic folders, the refusal said only "choose
+  another topic name", which the person cannot do for a pack from the index. It now names the older pack (kind, id,
+  version) and the way out: uninstall that pack, or install it again (it then moves into its own topic folder), and
+  then install this one; the next step points to **Uninstall...** (`llm-cli zoo uninstall`). Sorting a loose file,
+  where the person chooses the topic, also offers another topic name.
+- `2026-10-30 01:26 UTC` · `v3.2.0` **An edited target or knowledge pack says why it is not imported and how to go on**: a pack whose files changed
+  since its install is still not imported (the check against the signed digest is the security gate), but the
+  waiting reason of the knowledge import and Mojo Oracle's finding now say why and what to do: to undo the edits,
+  uninstall it and install it again; to keep them, copy the target folder under a name of your own and export that
+  as a new pack (a knowledge pack: export your version as a new knowledge pack). Mojo's findings for a revoked or
+  changed pack point to **Uninstall...** instead of telling the person to delete a folder or type a command.
 
 ## [3.1.0] - 2026-10-29
 

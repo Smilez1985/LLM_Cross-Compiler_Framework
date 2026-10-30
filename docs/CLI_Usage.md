@@ -2470,7 +2470,7 @@ knowledge base is refused while the knowledge base is off. To install a newer ve
 first. Exit code 1 when nothing was uninstalled or an item could not be removed.
 
 In the GUI: **Tools > Open Community Hub**, select the installed pack, **Uninstall...**. An AI may only ask for it
-(the optional tool `uninstall_pack`, hidden until you enable it): you see the same list in the framework's own window
+(the optional tool `remove_pack`, hidden until you enable it): you see the same list in the framework's own window
 and decide, and its request only moves to the trash.
 
 ```bash

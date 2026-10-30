@@ -120,6 +120,7 @@ WINDOW_OBJECTS: Dict[str, str] = {
     "tbl_zoo_packs": ACT_HUB,
     "btn_zoo_import": ACT_HUB,
     "btn_zoo_verify_installed": ACT_HUB,
+    "btn_zoo_uninstall": ACT_HUB,
     "btn_zoo_verify_file": ACT_HUB,
     "btn_zoo_export": ACT_HUB,
     "btn_zoo_keys": ACT_HUB,

@@ -19,6 +19,7 @@ MOUSE_LABELS = {
     "btn_zoo_export": (_HUB, "zoo.export"),
     "btn_zoo_sort": (_HUB, "zoo.sort"),
     "btn_zoo_keys": (_HUB, "zoo.keys"),
+    "btn_zoo_uninstall": (_HUB, "zoo.uninstall"),
     "tbl_zoo_packs": (_HUB, "main.hub.install"),   # the Install button in the pack's row
     "btn_zoo_refresh": (_HUB, "zoo.refresh"),
     # the Maintainer tab of the Community Hub (orchestrator/gui/community_maintainer.py, the maintainer's own actions)
@@ -66,7 +67,10 @@ STEPS = (
     Step("pack.export_to", cli="zoo export --to", cli_args=("{kind}", "{source}", "--to", "{key_file}"),
          params={**_EXPORT, "key_file": Param("path")}, tool="export_pack", window="community_hub",
          target="btn_zoo_export"),
-    Step("pack.remove", person_only="deletion", window="community_hub", target="btn_zoo_remove", planned=True),
+    # uninstall an installed pack: the exact list, "No" by default (Core/deletion.py); an AI only asks (remove_pack)
+    Step("pack.remove", cli="zoo uninstall", cli_args=("{pack}", "--kind", "{kind}"),
+         params={"pack": Param("id"), "kind": Param("choice", ("target", "recipe", "knowledge"))},
+         person_only="deletion", window="community_hub", target="btn_zoo_uninstall"),
     Step("keys.show", cli="zoo keys", person_only="secret", window="community_hub", target="btn_zoo_keys"),
     Step("keys.new", person_only="secret", window="community_hub", target="btn_zoo_keys_new", planned=True),
 )

@@ -212,13 +212,13 @@ class ListPacksOut(ToolOutput):
     verification: Optional[List[VerificationOut]] = None
 
 
-class UninstallPackIn(BaseModel):
+class RemovePackIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Kind = Field(description="Kind of the installed pack: target, recipe or knowledge")
     pack_id: str = Field(pattern=PACK_ID_PATTERN, description="Id of the installed pack, as list_packs shows it")
 
 
-class UninstallPackOut(ToolOutput):
+class RemovePackOut(ToolOutput):
     kind: str
     pack_id: untrusted_text(64)
     uninstalled: bool
@@ -867,9 +867,9 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                              pack_notes=data["pack_notes"],
                              licence_texts=[LicenceTextOut(**t) for t in data["licence_texts"]])
 
-    # -- uninstall_pack ----------------------------------------------------------------------------------------------
+    # -- remove_pack ----------------------------------------------------------------------------------------------
 
-    def uninstall_plan(inp: UninstallPackIn):
+    def uninstall_plan(inp: RemovePackIn):
         try:
             return community().uninstall_plan(inp.kind, inp.pack_id, mode_offered=("trash",))
         except PackError as e:
@@ -878,7 +878,7 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                               "Call list_packs with installed_only true for the installed packs.") from None
             raise pack_error(e, "failed", "Tell the person; nothing was deleted.") from None
 
-    def prepare_uninstall(inp: UninstallPackIn, ctx: ToolContext) -> CallFacts:
+    def prepare_uninstall(inp: RemovePackIn, ctx: ToolContext) -> CallFacts:
         """An AI's request to uninstall: the person sees the exact list in the framework's own window (the folder, its
         import notes, the excerpts only this pack holds) and decides; an AI's request only moves to the trash."""
         plan = uninstall_plan(inp)
@@ -890,14 +890,14 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                          bound={"kind": inp.kind, "pack_id": inp.pack_id, "plan_sha256": plan.sha256()},
                          deletion=plan)
 
-    def uninstall_pack(inp: UninstallPackIn, ctx: ToolContext) -> UninstallPackOut:
+    def remove_pack(inp: RemovePackIn, ctx: ToolContext) -> RemovePackOut:
         from orchestrator.Core.deletion import PlanChanged, accepted_through_registry
         from orchestrator.Core.trash import Trash
         bound = dict(ctx.facts.bound) if ctx.facts is not None else {}
         plan = getattr(ctx.facts, "deletion", None)
         if (bound.get("kind"), bound.get("pack_id")) != (inp.kind, inp.pack_id) or plan is None:
             raise ToolError("The uninstall is not bound to what the person was shown; nothing was deleted.",
-                            code="failed", next="Call uninstall_pack again through the framework's tool registry.")
+                            code="failed", next="Call remove_pack again through the framework's tool registry.")
         try:
             accepted = accepted_through_registry(plan, ctx, "trash")
         except (PermissionError, ValueError):
@@ -913,7 +913,7 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                             next="Call list_packs again; the person is asked again.") from None
         except (PermissionError, RuntimeError) as e:
             raise ToolError(_no_paths(str(e)), code="failed", next="Tell the person; nothing was deleted.") from None
-        return UninstallPackOut(kind=inp.kind, pack_id=inp.pack_id, uninstalled=bool(result.done) and not
+        return RemovePackOut(kind=inp.kind, pack_id=inp.pack_id, uninstalled=bool(result.done) and not
                                 result.failed, trash_ids=result.trash_ids,
                                 kept=[_no_paths(f"{name}: {reason}") for name, reason in result.failed],
                                 note="Moved to the trash: the person can restore it. Excerpts another pack or the "
@@ -964,13 +964,13 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                            {"kind": "knowledge", "topic": "llama.cpp", "author": "pat"}),
                  limits=ToolLimits(per_day=20, what="exports"),
                  summary=lambda o: f"Exported {fact(o.kind)} pack, signed with key {fact(o.signer_key_id)}."),
-        ToolSpec("uninstall_pack", "Ask to uninstall a community pack",
+        ToolSpec("remove_pack", "Ask to uninstall a community pack",
                  "Asks the person to uninstall one installed pack (knowledge, target or recipe): the framework's own "
                  "window shows the exact list (its folder, its import notes, the excerpts only it holds) and the person "
                  "decides; it goes to the trash, never for good. Excerpts another pack or the person's crawl still "
                  "holds stay. Optional and destructive: hidden until the person enables it, and every call is asked. "
                  'Example: {"kind": "knowledge", "pack_id": "rk3588-docs"}',
-                 ToolTier.EXTERNAL, UninstallPackIn, UninstallPackOut, uninstall_pack, takes_context=True,
+                 ToolTier.EXTERNAL, RemovePackIn, RemovePackOut, remove_pack, takes_context=True,
                  destructive=True, default_decision=Decision.DENY, max_decision=Decision.ASK,
                  prepare=prepare_uninstall, deletes=True, channels=("framework",),
                  fields={"kind": kind_field, "pack_id": FieldMeta(kind="id", list_tool="list_packs")},

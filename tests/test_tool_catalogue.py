@@ -31,7 +31,7 @@ HIDDEN = {"run_doctor"}
 # inside the deploy package; the device runtime is deployed on its own).
 OPTIONAL = {"delete_artifact", "restore_knowledge_snapshot", "build_local_runtime", "start_local_runtime",
             "stop_local_runtime", "run_benchmark", "deploy_device_runtime", "list_trash", "restore_from_trash",
-            "uninstall_pack"}   # an AI's request to uninstall a pack: the person decides in the framework's window
+            "remove_pack"}   # an AI's request to uninstall a pack: the person decides in the framework's window
 LATER = {"probe_remote_device", "run_device_benchmark"}
 # The AI's hands in the open window (DECISIONS round 8, W4): one tool, the same for Ditto and every MCP caller.
 GUI = {"gui"}
