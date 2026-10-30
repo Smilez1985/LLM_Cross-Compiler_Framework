@@ -99,7 +99,10 @@ class TestUpdateSettings:
         spec = fw.tool_registry.get("update_settings")
         schema = json.dumps(spec.input_model.model_json_schema())
         listed = set(json.loads(schema)["$defs"]["SettingChange"]["properties"]["key"]["enum"])
-        assert listed == set(tools_status.WRITABLE)
+        # The settings only the person decides (PERSON_DECIDES) are named too, on purpose: a change of one is refused
+        # with its own plain text (settings_facts) instead of a schema error.
+        assert listed == set(tools_status.WRITABLE) | set(tools_status.PERSON_DECIDES)
+        assert not set(tools_status.PERSON_DECIDES) & set(tools_status.WRITABLE)
         assert not listed & {"secret_storage", "secret_helper", "ai_provider", "ai_base_url", "qdrant_url",
                              "api_enabled", "models_dir", "image_trivy", "llama_cpp_version", "source_repositories"}
 

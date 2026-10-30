@@ -95,6 +95,26 @@ def _cache_budget(framework) -> List[Finding]:
     return findings
 
 
+def _kv_fallback(root: Path) -> List[Finding]:
+    """The running server got the f16 KV cache instead of the automatic quantised one because its llama.cpp build has
+    no flash attention (server.json kv_fallback, llama_server.needs_flash_attention). Reads one file; nothing else."""
+    try:
+        state = json.loads((Path(root) / "server.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    wanted = state.get("kv_fallback") if isinstance(state, dict) else None
+    if wanted not in ("q8_0", "q4_0"):
+        return []
+    return [Finding("runtime", "runtime.kv_cache.fallback", Severity.WARN,
+                    f"Ditto's server runs with the f16 KV cache instead of the automatic {wanted}: its llama.cpp "
+                    "build has no flash attention, which a quantised cache needs, so the same memory holds a shorter "
+                    "context.",
+                    "Use a llama.cpp build with flash attention, or set the setting local_kv_cache to f16 to make "
+                    "it your choice.", where="local_kv_cache",
+                    why="A quantised KV cache lets the server keep a longer context in the same memory.",
+                    cannot="person")]
+
+
 def check_runtime(framework) -> List[Finding]:
     """The local llama.cpp runtime: the self-built build in use (intact, of the pinned commit), a prebuilt download
     in use (not self-built), and whether this machine has the toolchain for a native build. Reads files and asks the
@@ -139,6 +159,7 @@ def check_runtime(framework) -> List[Finding]:
                                 (f" ({len(stored)} stored, none active)." if stored else ".")))
     findings += _docker_mode(store.root, pin)
     findings += _cache_budget(framework)
+    findings += _kv_fallback(store.root)
     prebuilt = sorted(p.parent.name for p in store.root.glob("b*-*/runtime.json"))
     if prebuilt:
         try:

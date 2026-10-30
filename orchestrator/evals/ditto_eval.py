@@ -122,8 +122,10 @@ class Case(BaseModel):
     context_limit: Optional[int] = Field(default=None, ge=512, le=1_000_000)  # Ditto's chat_context_limit here
     needs_local: bool = False                    # only meaningful on a managed local model (--tier); else skipped
     # A case that fails today and that a later change is to make pass: its failure is reported as expected and not
-    # counted; its pass is reported as an unexpected pass (never hidden), so the mark is removed then.
+    # counted; its pass is reported as an unexpected pass (never hidden), so the mark is removed then. The reason it
+    # fails today is pinned (a code of EXPECTED_FAIL_REASONS): a failure for another reason is an ordinary failure.
     expected_fail: bool = False
+    expected_fail_reason: str = ""
     # openai_paid: a long example prefix (repeated to pass the provider's cache minimum) and the question after it
     check: str = ""                              # cache_ttl | count
     prefix: str = ""
@@ -141,9 +143,32 @@ class Case(BaseModel):
             raise ValueError(f"case {self.id}: a {self.kind} case needs '{needed}'")
         if self.kind == "openai_paid" and self.check not in PAID_CHECKS:
             raise ValueError(f"case {self.id}: an openai_paid case needs 'check': one of {', '.join(PAID_CHECKS)}")
+        if self.expected_fail and self.expected_fail_reason not in EXPECTED_FAIL_REASONS:
+            raise ValueError(f"case {self.id}: an expected_fail case needs 'expected_fail_reason': one of "
+                             f"{', '.join(EXPECTED_FAIL_REASONS)}")
+        if self.expected_fail_reason and not self.expected_fail:
+            raise ValueError(f"case {self.id}: 'expected_fail_reason' belongs to an expected_fail case")
         if self.kind == "retrieval" and bool(self.expect.relevant) == self.expect.none_relevant:
             raise ValueError(f"case {self.id}: a retrieval case expects either 'relevant' documents or "
                              "'none_relevant: true'")
+
+
+def _lost_after_summary(attempt: Any) -> bool:
+    """The conversation ran through, and the graded last answer misses what it should name."""
+    return not getattr(attempt, "error", "")
+
+
+def _context_shift_disabled(attempt: Any) -> bool:
+    """A turn failed because the local server cannot shift its context window."""
+    return "context shift is disabled" in (getattr(attempt, "error", "") or "")
+
+
+# The closed list of reasons an expected_fail case may fail for today, each with how a failed attempt is recognised
+# as failing for exactly that reason.
+EXPECTED_FAIL_REASONS: Dict[str, Callable[[Any], bool]] = {
+    "answer_lost_after_summary": _lost_after_summary,
+    "context_shift_disabled": _context_shift_disabled,
+}
 
 
 def load_cases(path: Optional[Path] = None) -> List[Case]:
@@ -593,18 +618,32 @@ class CaseResult:
         return bool(getattr(self.case, "expected_fail", False))
 
     @property
+    def failed_as_expected(self) -> bool:
+        """An expected_fail case whose every failed attempt failed for its pinned reason (expected_fail_reason)."""
+        if not self.expected_fail:
+            return False
+        matches = EXPECTED_FAIL_REASONS.get(getattr(self.case, "expected_fail_reason", ""), lambda _a: False)
+        failed = [a for a in self.attempts if not a.passed and not getattr(a, "skipped", False)]
+        return all(matches(a) for a in failed)
+
+    @property
     def graded(self) -> bool:
-        """Counted in the pass rates: neither skipped nor marked as failing on purpose (expected_fail)."""
-        return not self.skipped and not self.expected_fail
+        """Counted in the pass rates: neither skipped nor an expected failure (or its unexpected pass). An
+        expected_fail case that fails for another reason than its pinned one is counted like any failure."""
+        return not self.skipped and self.outcome not in ("xfail", "xpass")
 
     @property
     def outcome(self) -> str:
         """pass | fail | partial; skipped; for an expected_fail case xfail, or xpass when an attempt passed (an
-        unexpected pass: the change it waited for has come, remove the mark)."""
+        unexpected pass: the change it waited for has come, remove the mark), and an ordinary fail or partial when
+        it failed for another reason than its pinned one."""
         if self.skipped:
             return "skipped"
         if self.expected_fail:
-            return "xpass" if any(a.passed for a in self.attempts if not getattr(a, "skipped", False)) else "xfail"
+            if any(a.passed for a in self.attempts if not getattr(a, "skipped", False)):
+                return "xpass"
+            if self.failed_as_expected:
+                return "xfail"
         return "pass" if self.pass_rate == 1 else ("fail" if self.pass_rate == 0 else "partial")
 
     def first_problem(self) -> str:
@@ -684,8 +723,12 @@ class EvalReport:
         marked = [r for r in self.results if r.expected_fail and not r.skipped]
         if not marked:
             return None
-        return {"xfail": [r.case.id for r in marked if r.outcome == "xfail"],
-                "unexpected_pass": [r.case.id for r in marked if r.outcome == "xpass"]}
+        out = {"xfail": [r.case.id for r in marked if r.outcome == "xfail"],
+               "unexpected_pass": [r.case.id for r in marked if r.outcome == "xpass"]}
+        otherwise = [r.case.id for r in marked if r.outcome not in ("xfail", "xpass")]
+        if otherwise:   # failed, but not for the reason it is marked with: counted, and named here
+            out["failed_otherwise"] = otherwise
+        return out
 
     def conversations(self) -> List[Dict[str, Any]]:
         """Per tokens case and attempt: the conversation's token sums and its cache-read share."""
@@ -701,6 +744,7 @@ class EvalReport:
                 entry["outcome"] = r.outcome
             if r.expected_fail:
                 entry["expected_fail"] = True
+                entry["expected_fail_reason"] = r.case.expected_fail_reason
             cases.append(entry)
         data = {"setup": self.setup, "pass_rate": round(self.pass_rate, 4),
                 "by_kind": {k: round(v, 4) for k, v in self.by_kind().items()}, "cases": cases}
@@ -788,11 +832,16 @@ class ProbingClient:
         return getattr(self._client, name)
 
     def chat(self, request):
+        from orchestrator.llm.task_prompts import SUMMARY_SYSTEM
         from orchestrator.llm.types import CacheProbe
-        probe = CacheProbe(anthropic_diagnostics=True, previous_message_id=self._previous)
+        # Ditto's conversation summary (compaction) is a request of its own: it neither takes the chain nor moves it,
+        # so the next real turn is compared with the last real turn.
+        summary = getattr(request, "system", None) == SUMMARY_SYSTEM
+        probe = CacheProbe(anthropic_diagnostics=True, previous_message_id=None if summary else self._previous)
         # fallback=False: the numbers belong to the provider being measured (an outage fails the turn instead)
         result = self._client.chat(request.model_copy(update={"cache_probe": probe}), fallback=False)
-        self._previous = result.response_id or self._previous
+        if not summary:
+            self._previous = result.response_id or self._previous
         row = usage_row(result.usage)
         if result.cache_miss_reason is not None:
             row["cache_miss_reason"] = result.cache_miss_reason

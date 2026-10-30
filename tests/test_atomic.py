@@ -206,3 +206,94 @@ def test_the_old_names_are_the_one_implementation():
     assert vault_key.write_private is atomic.write_private and vault_key.replace_file is atomic.replace_file
     assert vault_key.REPLACE_RETRIES == atomic.REPLACE_RETRIES
     assert llama_server._write_private is atomic.write_private_exclusive
+
+
+# --- write_file: an atomic plain write (no mode or folder change) -------------------------------------------------
+
+class TestWriteFile:
+    """utils/atomic.write_file(path, text): a temporary file in the same folder, flushed and synced, then replaced
+    over the target; the mode of an existing file and of the folder stay as they are, the temporary file goes on
+    every error."""
+
+    def test_writes_the_text_through_a_synced_temporary_file_in_the_same_folder(self, tmp_path, monkeypatch):
+        from orchestrator.utils import atomic
+        replaced, synced = [], []
+        real_replace, real_fsync = os.replace, os.fsync
+        monkeypatch.setattr(os, "replace", lambda s, d: replaced.append((Path(s), Path(d))) or real_replace(s, d))
+        monkeypatch.setattr(os, "fsync", lambda fd: synced.append(fd) or real_fsync(fd))
+        (tmp_path / "k").mkdir()
+        target = tmp_path / "k" / "pack-a.released"
+        atomic.write_file(target, "2026-10-30T12:00:00")
+        assert target.read_text(encoding="utf-8") == "2026-10-30T12:00:00"
+        (src, dst), = replaced
+        assert dst == target and src.parent == target.parent and src.name.startswith(".pack-a.released.")
+        assert synced, "the text is on disk before the replace"
+        assert sorted(p.name for p in target.parent.iterdir()) == ["pack-a.released"]
+
+    @pytest.mark.skipif(not POSIX, reason="POSIX modes")
+    def test_the_modes_of_the_file_and_its_folder_stay(self, tmp_path):
+        from orchestrator.utils import atomic
+        folder = tmp_path / "knowledge"
+        folder.mkdir(mode=0o755)
+        os.chmod(folder, 0o755)
+        target = folder / "pack-a.released"
+        target.write_text("old", encoding="utf-8")
+        os.chmod(target, 0o644)
+        atomic.write_file(target, "new")
+        assert target.read_text(encoding="utf-8") == "new"
+        assert oct(os.stat(target).st_mode & 0o777) == oct(0o644) and oct(os.stat(folder).st_mode & 0o777) == oct(0o755)
+        fresh = folder / "pack-b.released"
+        atomic.write_file(fresh, "x")
+        umask = os.umask(0)
+        os.umask(umask)
+        assert os.stat(fresh).st_mode & 0o777 == 0o666 & ~umask, "a new file gets the usual mode, not 0600"
+
+    def test_a_crash_between_the_write_and_the_replace_keeps_the_old_file(self, tmp_path, monkeypatch):
+        from orchestrator.utils import atomic
+        (tmp_path / "k").mkdir()
+        target = tmp_path / "k" / "pack-a.released"
+        target.write_text("old", encoding="utf-8")
+
+        def crash(src, dst):
+            raise OSError("the computer went off")
+        monkeypatch.setattr(atomic, "replace_file", crash)
+        with pytest.raises(OSError):
+            atomic.write_file(target, "new")
+        assert target.read_text(encoding="utf-8") == "old"
+        assert sorted(p.name for p in target.parent.iterdir()) == ["pack-a.released"], "no temporary file is left"
+
+    def test_a_missing_folder_is_an_error_not_created(self, tmp_path):
+        from orchestrator.utils import atomic
+        with pytest.raises(OSError):
+            atomic.write_file(tmp_path / "no-such-folder" / "x", "text")
+        assert not (tmp_path / "no-such-folder").exists()
+
+
+def test_the_released_note_of_an_uninstall_is_written_atomically(tmp_path, monkeypatch):
+    """Core/community_manager writes '<pack>.released' with utils/atomic.write_file (before: Path.write_text, which
+    leaves an empty or cut note when the computer stops between opening and writing)."""
+    import inspect
+    from orchestrator.Core import community_manager
+    source = inspect.getsource(community_manager.CommunityManager.uninstall)
+    assert "write_file(note" in source and "note.write_text" not in source
+
+
+def test_write_file_opens_its_temporary_file_in_binary_mode_where_the_system_has_one(tmp_path, monkeypatch):
+    """Windows: os.open without O_BINARY gives a text-mode descriptor whose C runtime turns every LF into CR LF, on top
+    of the text layer's own newline translation (CR CR LF). write_file opens the temporary file with O_BINARY where
+    the system has it, like tempfile.mkstemp does for write_private, so the text layer alone decides the line ends
+    (Path.write_text semantics)."""
+    from orchestrator.utils import atomic
+    real_binary = getattr(os, "O_BINARY", 0)   # Windows: the real flag; elsewhere none
+    fake_binary = 0x40000000   # a stand-in flag the spy swaps back for the real one (or nothing) below
+    monkeypatch.setattr(os, "O_BINARY", fake_binary, raising=False)
+    real_open, flags_seen = os.open, []
+
+    def spy(path, flags, mode=0o777, **kwargs):
+        flags_seen.append(flags)
+        return real_open(path, (flags & ~fake_binary) | (real_binary if flags & fake_binary else 0), mode, **kwargs)
+    monkeypatch.setattr(os, "open", spy)
+    target = tmp_path / "pack-a.released"
+    atomic.write_file(target, "a\nb\n")
+    assert flags_seen and all(f & fake_binary for f in flags_seen), "the temporary file is opened with O_BINARY"
+    assert target.read_text(encoding="utf-8") == "a\nb\n"

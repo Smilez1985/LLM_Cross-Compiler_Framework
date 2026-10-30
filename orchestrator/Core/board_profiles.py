@@ -237,6 +237,39 @@ def measured_row(entry: Mapping[str, Any], *, model: str, board: str, quantizati
                           source=BenchmarkSource(kind="measured", board_label=str(label)[:64], date=at))
 
 
+def newest_measured(records: Iterable[Tuple[Mapping[str, Any], Mapping[str, Any]]],
+                    target_id: str) -> List[BenchmarkEntry]:
+    """The measured rows of board tests: `records` are (a build's manifest, one of its board test records:
+    runtime/device/tested.py) pairs; of target `target_id`'s builds, the newest passed test per board, model and
+    quantization, as measured_row makes it (the board's label and the date only, never a path, an address or a
+    device id), newest first. A build without board, model or quantization or a model id a benchmark row cannot
+    carry gives none."""
+    newest: Dict[Tuple[str, str, str], Tuple[str, BenchmarkEntry]] = {}
+    wanted = str(target_id or "").casefold()
+    for info, entry in records:
+        board, model, quant = info.get("board"), info.get("model_source"), info.get("quantization")
+        if str(info.get("target") or "").casefold() != wanted or not (board and model and quant):
+            continue
+        if not (entry.get("smoke_passed") and entry.get("checks_passed")):
+            continue
+        try:
+            row = measured_row(entry, model=str(model), board=str(board), quantization=str(quant))
+        except ValueError:   # a model id or label a benchmark row cannot carry
+            continue
+        at = str(entry.get("at") or "")
+        key = (row.board.casefold(), row.model, row.quantization.casefold()) if row else None
+        if key is not None and (key not in newest or at > newest[key][0]):
+            newest[key] = (at, row)
+    return [row for _, row in sorted(newest.values(), key=lambda pair: pair[0], reverse=True)]
+
+
+def old_format_note(names: Sequence[str]) -> str:
+    """The plain note for the entries in the format before 3.2.0 that were ignored (old_format_entries): "" for
+    none."""
+    names = list(names)
+    return f"{len(names)} entries in the old format were ignored: {', '.join(names)}" if names else ""
+
+
 def row_text(row: BenchmarkEntry) -> str:
     """One benchmark row as plain text, its source mark at the end (an unmeasured value never reads as measured)."""
     values = ", ".join(_VALUE_LABELS[k].format(_number(v)) for k, v in row.values().items())
@@ -282,5 +315,5 @@ def benchmark_fields_text() -> str:
 
 
 __all__ = ["DEFAULT_OPTIMIZATION", "benchmark_fields_text", "board_data", "board_lines", "check_board_data",
-           "measured_row", "old_format_entries", "optimization_for", "ordered_quantizations", "plan_problems", "planned_profile_values",
+           "measured_row", "newest_measured", "old_format_entries", "old_format_note", "optimization_for", "ordered_quantizations", "plan_problems", "planned_profile_values",
            "profile_for", "profile_text", "recipe_plan", "reference_probe", "row_text", "rows_for"]

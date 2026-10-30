@@ -107,8 +107,9 @@ def register_framework_resources(registry: ToolRegistry, framework) -> ToolRegis
                      arguments=lambda params: {"request_id": params.get("request_id", ""), "wait_seconds": 0},
                      completions=builds),
         ResourceSpec(BUILD_LOG_URI, "build-log", "Build log",
-                     f"The last {LOG_LINES} lines of a build request's log, secrets redacted, wrapped as untrusted "
-                     "data (as read_build_log).", "text/plain", tool="read_build_log",
+                     f"The last {LOG_LINES} lines of a build request's log, secrets redacted, cleaned for the AI "
+                     "(colour codes and redraws removed, repeated lines collapsed, failure lines kept; the person "
+                     "sees the raw log), wrapped as untrusted data (as read_build_log).", "text/plain", tool="read_build_log",
                      arguments=lambda params: {"request_id": params.get("request_id", ""), "lines": LOG_LINES},
                      completions=builds),
         ResourceSpec("lcf://permissions", "permissions", "Tool permissions",

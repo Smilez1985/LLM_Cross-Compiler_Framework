@@ -11,7 +11,71 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 
 ## [3.3.0] - 2026-10-30
 
+### Changed
+- `2026-10-30 14:55 UTC` · `v3.3.0` **Your board tests show up in the target's benchmarks, and ignored old entries are named** ([design](docs/DESIGN.md#targets-hardware-and-templates)):
+  the newest passed board test of a build per board, model and quantization now joins the target's benchmark rows
+  in `list_targets`, `get_target_capabilities`, `llm-cli targets boards` and **Build > Targets... > Boards...**, marked
+  `measured by llmcf (board <your label>, <date>)` (labels only, never a path, an address or a device id). Entries in
+  the format before 3.2.0 are still not refused, but `llm-cli targets validate`, `llm-cli targets boards` and the
+  GUI's target check (also after the module wizard and a Community Hub install) now say so in one line: `N entries
+  in the old format were ignored: <names>`.
+- `2026-10-30 14:32 UTC` · `v3.3.0` **A build container image exported on one computer is accepted on another** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
+  the image's inputs label no longer holds anything of the computer that built it (your user and group id, the
+  number of build jobs, the address llama.cpp was fetched from), and the image is no longer built with your user id:
+  the build runs as your user when the container starts, as before. An image exported with `llm-cli build image
+  export` on one computer is now taken by `import` on another one with the same target version and settings; an
+  image that holds something else (another target folder, Dockerfile, llama.cpp pin or CPU tuning) is still
+  refused. Images built before 3.3.0 carry the old label: each target's image is built once more.
+- `2026-10-30 14:28 UTC` · `v3.3.0` **The idle timeout, the prompt cache size and the KV-cache type are yours alone** ([design](docs/DESIGN.md#ditto-the-local-runtime-and-the-llm-layer)):
+  an AI can no longer change `build_idle_timeout`, `local_cache_ram_mib` or `local_kv_cache`, in either direction
+  (before, it could lower them over MCP). A lower idle timeout can stop your own long builds, and a number in place
+  of "auto" freezes a value that may no longer fit this computer later. Every AI channel (MCP `update_settings`,
+  Ditto, the GUI tools) refuses them with a plain text that says why; `get_settings` still shows them, marked
+  read-only. `build_timeout` and `local_cache_keep_minutes` stay as they were: an AI may only lower them. You change
+  all of them as before, in the settings, the Prompt cache group and `llm-cli ditto cache set`.
+
 ### Fixed
+- `2026-10-30 15:11 UTC` · `v3.3.0` **`llm-cli ditto cache`, `ditto cache set` and `ditto models list` say plainly when they cannot work it
+  out**: when the memory budget or the model choice for this computer cannot be computed (a probe that fails, a model
+  the catalogue lacks, a damaged file), they print one red line with the reason (secrets redacted) and exit with 1,
+  instead of a Python traceback.
+- `2026-10-30 15:08 UTC` · `v3.3.0` **Uninstalling a pack in the Community Hub no longer freezes the window**: **Uninstall...** removes the pack's
+  excerpts from the knowledge base and moves its folders in a worker thread, as the hub's other actions do; the hub's
+  buttons and the pack list are off while it runs, and the result box comes when it is done (before, the window did
+  not answer until the knowledge base was rewritten).
+- `2026-10-30 15:05 UTC` · `v3.3.0` **Ditto's server starts on a llama.cpp build without flash attention** ([design](docs/DESIGN.md#ditto-the-local-runtime-and-the-llm-layer)):
+  a quantised KV cache (q8_0, q4_0) needs flash attention, and a build or backend without it made the server exit
+  during startup whenever `local_kv_cache` was auto and the boards' rule chose a quantised cache. The start now tries
+  once more with f16, plans the context for it, and that server goes straight to f16 from then on; `llm-cli ditto
+  runtime start`, `llm-cli ditto cache`, the Prompt cache group of the GUI and Mojo (`runtime.kv_cache.fallback`) say
+  so. A q8_0 or q4_0 you set yourself is never replaced: the start fails with a text that names `local_kv_cache` and
+  f16.
+- `2026-10-30 15:02 UTC` · `v3.3.0` **Ditto's healing prompt names the framework's folders by label** ([design](docs/DESIGN.md#self-healing-approval)):
+  a path in the framework's output, build or installation folder now reaches the AI as `output:<path inside>`,
+  `builds:...` or `framework:...`, and any other path on this computer by its file name, as `read_build_log` already
+  had it (before, the healing prompt only shortened the home folder, so an output folder elsewhere was named whole).
+- `2026-10-30 14:58 UTC` · `v3.3.0` **An AI client is told that it reads the build log cleaned**: the description of the tool `read_build_log` and of
+  the build-log resource now say that the log an AI reads has its colour codes and progress redraws removed and its
+  repeated lines collapsed, with every failure line kept, and that you see the raw log (before, an AI could take the
+  cleaned lines for the whole log).
+- `2026-10-30 14:47 UTC` · `v3.3.0` **The token measurement of the Ditto evaluation counts what it should** ([design](docs/DESIGN.md#ditto-the-local-runtime-and-the-llm-layer)):
+  Ditto's summary of a long conversation (compaction) is a request of its own, so it no longer takes or moves the
+  chain of Anthropic's cache diagnostics: the next real turn is compared with the last real turn. A case marked
+  `expected_fail` now names the reason it fails for today (`expected_fail_reason`, one of a fixed list); a failure for
+  another reason is an ordinary failure, counted in the pass rates and listed as `failed_otherwise`, never hidden as
+  expected. `openai_cache_check.json` is merged per check: a run that measured one check keeps the other check's
+  earlier result instead of dropping it.
+- `2026-10-30 14:39 UTC` · `v3.3.0` **Pairing a board behind a jump host reads its key through the jump** ([design](docs/DESIGN.md#ssh-host-keys-and-the-remote-package)):
+  when the framework's own SSH settings reach a board through a `ProxyJump` or `ProxyCommand`, the key the board
+  presents is now read through this computer's OpenSSH with those settings (before, a direct connection was tried,
+  which cannot reach such a board) and shown to you with its fingerprint as for every board; nothing is trusted
+  before your yes. A jump host this computer's SSH does not trust yet is named plainly: pair the jump host first. A
+  board reached directly is read as before.
+- `2026-10-30 14:34 UTC` · `v3.3.0` **The note an uninstall leaves is never cut by a crash** ([design](docs/DESIGN.md#community-recipes-and-packs)):
+  when a pack's excerpts leave the knowledge base, its uninstall writes the note `<pack>.released` atomically
+  (through the new `utils/atomic.write_file`: a temporary file next to it, synced, then put in its place), so a
+  computer that stops during the write leaves the note whole or not at all. The modes of the file and its folder
+  stay as they were, and on Windows the line ends are written once (the temporary file is opened in binary mode).
 - `2026-10-30 14:19 UTC` · `v3.3.0` **A missing OpenSSH on Windows is a problem on this computer, not a board that is
   down** ([design](docs/DESIGN.md#ssh-host-keys-and-the-remote-package)): Windows' process start names no file when the
   program is missing (POSIX names it), so the error read as `device_host_down` and the person was sent to the board.
@@ -20,6 +84,11 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   ([design](docs/DESIGN.md#community-packs-format-trust-and-exchange)): Windows sorts its paths without case and with
   backslashes, so `docker/arm.dockerfile` came before `Dockerfile` there; `pack_base_images` now sorts by the relative
   POSIX path.
+- `2026-10-30 14:15 UTC` · `v3.3.0` **The llama.cpp runtime builds read the idle timeout you set** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
+  the build of Ditto's own llama.cpp server (`llm-cli ditto runtime install`, the tool `build_local_runtime`) and the
+  build of a board's runtime (`llm-cli device runtime build`, the Boards window, the tool `deploy_device_runtime`)
+  stop a step that prints nothing after `build_idle_timeout`, as the stage containers of a model build do (before,
+  they always waited the built-in 1800 seconds, whatever the setting said).
 
 ### Security
 - `2026-10-30 14:40 UTC` · `v3.3.0` **The dependency pre-fetch unpacks through the framework's one safe extraction**

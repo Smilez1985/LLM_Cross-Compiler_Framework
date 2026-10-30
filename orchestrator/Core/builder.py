@@ -147,6 +147,12 @@ OFFLINE_NO_PROXY_ARGS = {"HTTP_PROXY": "", "HTTPS_PROXY": "", "ALL_PROXY": "", "
 # the image (INPUTS_LABEL).
 SOURCE_ONLY_ARGS = frozenset(("APT_MIRROR", "APT_PROXY", "PIP_INDEX_URL", "PIP_TRUSTED_HOST", "LLAMA_CPP_SOURCE")) \
     | frozenset(OFFLINE_NO_PROXY_ARGS)
+# The build arguments that only say how this computer builds the image, never what it holds: the user and group id
+# (the stage containers run as the host user: the sandbox's --user, or the entrypoint maps PUID/PGID; the image is no
+# longer built with them), the number of parallel compile jobs, and the address llama.cpp is fetched from (the commit is
+# pinned and checked by the Dockerfile). Not inputs of the image either, so an image exported on one computer is found
+# on another.
+MACHINE_ONLY_ARGS = frozenset(("USER_ID", "GROUP_ID", "BUILD_JOBS", "LLAMA_CPP_REPO"))
 
 # ModelFormat and OptimizationLevel live in build_formats (the CLI imports them without this module).
 from orchestrator.Core.build_formats import ModelFormat, OptimizationLevel  # noqa: E402,F401 - re-exported
@@ -1050,8 +1056,9 @@ class BuildEngine:
     def image_labels(self, config: BuildConfiguration, progress: BuildProgress,
                      path: Path) -> Tuple[Dict[str, str], Dict[str, str]]:
         """(build arguments, labels) of the build container image of `config` from the Dockerfile `path`: the build
-        jobs, the build's own arguments (never the pinned ones), the llama.cpp pin and recipe plan, the user ids, and the
-        labels IMAGE_LABEL and INPUTS_LABEL. The image build uses them, and an import checks a file against them
+        jobs, the build's own arguments (never the pinned ones), the llama.cpp pin and recipe plan, and the labels
+        IMAGE_LABEL and INPUTS_LABEL. The user id is not one of them: the stage containers run as the host user (the
+        sandbox's --user, or the entrypoint's PUID/PGID mapping), so the image holds no host user id. The image build uses them, and an import checks a file against them
         (Core/build_image.expected_labels): the one computation of what a build here looks for."""
         from orchestrator.runtime.build.host_tools import PINNED_BUILD_ARGS
         buildargs: Dict[str, str] = {}
@@ -1065,10 +1072,6 @@ class BuildEngine:
                                  "build recipe; the values given for this build are not used.")
         buildargs.update({k: v for k, v in given.items() if k not in PINNED_BUILD_ARGS})
         buildargs.update(self._llama_cpp_args(config, progress, path))
-        # uid/gid 0 already exist in the image (root); the entrypoint maps the user at runtime anyway.
-        if sys.platform != "win32" and os.getuid() != 0:
-            buildargs["USER_ID"] = str(os.getuid())
-            buildargs["GROUP_ID"] = str(os.getgid())
         labels = {IMAGE_LABEL: config.target_arch, INPUTS_LABEL: self._image_inputs(config, path, buildargs)}
         return buildargs, labels
 
@@ -1142,7 +1145,9 @@ class BuildEngine:
         (CONTEXT_COPIES, by its path in the context and its content), so an offline build never takes an image built
         from older copies of those files. The arguments that only say where sources come from (SOURCE_ONLY_ARGS: the
         apt and pip mirrors, the local llama.cpp copy) and the proxy settings are not part of it: an image built online
-        is found offline and the other way round."""
+        is found offline and the other way round; nor are the ones that only say how this computer builds
+        (MACHINE_ONLY_ARGS: user and group id, build jobs, the llama.cpp fetch address), so an image exported on one
+        computer is found on another."""
         from orchestrator.utils.helpers import sha256_file
         try:
             text = dockerfile.read_text(encoding="utf-8", errors="replace")
@@ -1161,7 +1166,8 @@ class BuildEngine:
                     files.append((path.relative_to(context).as_posix(), "unreadable"))
         data = {"target": getattr(config, "target_arch", ""), "pack": getattr(config, "target_pack_sha256", "") or "",
                 "dockerfile": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-                "args": sorted((str(k), str(v)) for k, v in buildargs.items() if k not in SOURCE_ONLY_ARGS),
+                "args": sorted((str(k), str(v)) for k, v in buildargs.items()
+                               if k not in SOURCE_ONLY_ARGS and k not in MACHINE_ONLY_ARGS),
                 "context": files}
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode("utf-8")).hexdigest()
 

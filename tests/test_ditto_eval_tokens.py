@@ -553,6 +553,83 @@ def test_the_sampler_reads_only_its_own_server_child(monkeypatch):
                                            "conversations": []}
 
 
+# --- ctx-measure follow-ups: the summary call, the reason of an expected failure, the merged check file -------------
+
+def test_the_summary_request_neither_takes_nor_moves_the_chain():
+    """Regression: Ditto's compaction summary is a separate request; it was chained to the last turn's response and
+    moved the chain, so the next real turn was compared with the summary instead of the turn before it."""
+    from orchestrator.llm.task_prompts import SUMMARY_SYSTEM
+    seen = []
+
+    class Client:
+        def chat(self, request, *, fallback=True):
+            seen.append(request.cache_probe)
+            return reply("ok", Usage(input_tokens=3), response_id=f"msg_{len(seen)}")
+
+    probing = ditto_eval.ProbingClient(Client())
+    probing.chat(ChatRequest(messages=[Message.user("turn 1")]))
+    probing.chat(ChatRequest(system=SUMMARY_SYSTEM, messages=[Message.user("Summarize this conversation:")]))
+    probing.chat(ChatRequest(messages=[Message.user("turn 2")]))
+    assert [p.previous_message_id for p in seen] == [None, None, "msg_1"]
+    assert len(probing.calls) == 3, "the summary's tokens are still counted"
+
+
+def test_every_expected_failure_names_its_reason():
+    ValidationError = ValueError   # pydantic's ValidationError is one; model_post_init raises a plain one
+    reasons = {c.id: c.expected_fail_reason for c in load_cases() if c.expected_fail}
+    assert reasons == {"tokens-followup-after-compaction": "answer_lost_after_summary",
+                       "tokens-20-turns-local-4096": "context_shift_disabled"}
+    assert set(reasons.values()) <= set(ditto_eval.EXPECTED_FAIL_REASONS)
+    base = dict(id="x", kind="tokens", turns=["hi"])
+    with pytest.raises(ValidationError):
+        ditto_eval.Case(**base, expected_fail=True)
+    with pytest.raises(ValidationError):
+        ditto_eval.Case(**base, expected_fail=True, expected_fail_reason="something_else")
+    with pytest.raises(ValidationError):
+        ditto_eval.Case(**base, expected_fail_reason="context_shift_disabled")
+
+
+def test_a_case_that_fails_for_another_reason_is_a_failure_not_xfail():
+    """Regression: any failure of an expected_fail case counted as the expected one, so a new breakage hid behind it."""
+    compaction, window = case("tokens-followup-after-compaction"), case("tokens-20-turns-local-4096")
+    lost = ditto_eval.Attempt(False, 1.0, ["the answer mentions none of: AMBER-7"])
+    down = ditto_eval.Attempt(False, 1.0, error="turn 1: Ditto error: the provider cannot be reached")
+    shift = ditto_eval.Attempt(False, 1.0, error="turn 9: Ditto error: the request exceeds the available context "
+                                                 "size, context shift is disabled")
+    assert ditto_eval.CaseResult(compaction, [lost]).outcome == "xfail"
+    other = ditto_eval.CaseResult(compaction, [down])
+    assert other.outcome == "fail" and other.graded
+    assert ditto_eval.CaseResult(window, [shift]).outcome == "xfail"
+    assert ditto_eval.CaseResult(window, [lost]).outcome == "fail"
+    report = ditto_eval.EvalReport([other, _result("tokens-build-talk", True)])
+    assert report.pass_rate == 0.5, "counted like any other failure"
+    data = report.to_dict()
+    assert data["expected_failures"]["failed_otherwise"] == ["tokens-followup-after-compaction"]
+    assert data["cases"][0]["expected_fail_reason"] == "answer_lost_after_summary"
+
+
+def _paid_report(**measurements):
+    results = []
+    for c in PAID:
+        m = measurements.get(c.check)
+        attempt = ditto_eval.Attempt(m is not None, 1.0, measurement={"check": c.check, **m} if m else None)
+        results.append(ditto_eval.CaseResult(c, [attempt]))
+    return ditto_eval.EvalReport(results)
+
+
+def test_the_check_file_is_merged_per_check(tmp_path):
+    """Regression: a run that measured one check rewrote the file and dropped the other check's earlier result."""
+    path = tmp_path / "evals" / eval_run.OPENAI_CHECK_FILE
+    eval_run.save_openai_check(path, [_paid_report(cache_ttl={"ttl_12h_accepted": True}, count={"count_tokens": 10})])
+    eval_run.save_openai_check(path, [_paid_report(count={"count_tokens": 12})])
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["cache_ttl"] == {"ttl_12h_accepted": True}, "the complete earlier result stays"
+    assert data["count"] == {"count_tokens": 12}, "the new measurement of that check replaces its old one"
+    before = path.read_text(encoding="utf-8")
+    assert eval_run.save_openai_check(path, [_paid_report()]) is None
+    assert path.read_text(encoding="utf-8") == before, "a run without a finished measurement changes nothing"
+
+
 def test_the_script_is_a_development_tool_only():
     text = (REPO_ROOT / "scripts" / "measure_cache_ram.py").read_text(encoding="utf-8")
     assert "run_evaluation" in text and "psutil" in text

@@ -625,3 +625,73 @@ class TestReviewImport:
         docker = Docker()
         build_image.import_image(None, file, actor="cli", sha256=hashlib.sha256(checked).hexdigest(), client=docker)
         assert swapped and docker.images.loaded == [checked]
+
+
+# --- a portable image: nothing machine-specific in INPUTS_LABEL -------------------------------------------------------
+
+def _on_machine(engine, monkeypatch, tmp_path, *, uid, gid, jobs, text=DOCKERFILE, build_args=None):
+    """(build arguments, labels) of the image on a computer with this user id and build_jobs setting."""
+    import os
+    import sys
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(os, "getuid", lambda: uid, raising=False)
+    monkeypatch.setattr(os, "getgid", lambda: gid, raising=False)
+    engine.config.set("build_jobs", jobs)
+    progress = BuildProgress("b1", BuildStatus.QUEUED, "")
+    return engine.image_labels(config(build_args=dict(build_args or {})), progress, dockerfile(tmp_path, text))
+
+
+class TestThePortableImage:
+    """An image exported on one computer is found on another: the user id, the group id and the number of build jobs
+    say how this computer runs the build, not what the image holds; the container user is mapped when it runs."""
+
+    def test_the_container_runs_as_the_host_user_whatever_image_it_uses(self, engine, monkeypatch, tmp_path):
+        """Characterization (unchanged): the sandbox runs the stage containers as the host user, the legacy mode hands
+        PUID/PGID to the entrypoint, which maps the image's build user to them."""
+        import os
+        import sys
+        from orchestrator.utils import sandbox
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr(os, "getuid", lambda: 1001, raising=False)
+        monkeypatch.setattr(os, "getgid", lambda: 1001, raising=False)
+        monkeypatch.setattr(sandbox, "hand_over", lambda path, user: None)
+        monkeypatch.setattr("orchestrator.Core.builder.hand_over", lambda path, user: None, raising=False)
+        kwargs, _env, _volumes = engine._sandbox(config(), tmp_path / "b1")
+        assert kwargs["user"] == "1001:1001"
+        env = engine._container_env(config(), "/build-cache/models/m")
+        assert (env["PUID"], env["PGID"]) == ("1001", "1001")
+
+    def test_an_image_from_uid_1000_with_8_jobs_matches_on_uid_1001_with_2_jobs(self, engine, monkeypatch, tmp_path):
+        """Regression: INPUTS_LABEL held USER_ID, GROUP_ID and BUILD_JOBS, so an image exported on one computer was
+        refused on the next one although it holds the same build."""
+        args_a, labels_a = _on_machine(engine, monkeypatch, tmp_path, uid=1000, gid=1000, jobs=8)
+        args_b, labels_b = _on_machine(engine, monkeypatch, tmp_path, uid=1001, gid=1001, jobs=2)
+        assert labels_a[INPUTS_LABEL] == labels_b[INPUTS_LABEL]
+        assert args_a["BUILD_JOBS"] == "8" and args_b["BUILD_JOBS"] == "2", "the jobs still reach the image build"
+        assert "USER_ID" not in args_a and "GROUP_ID" not in args_b, \
+            "the user id is mapped when the container runs, never baked into the image"
+        file = archive(tmp_path / "rk.tar", labels_a)
+        digest = hashlib.sha256(file.read_bytes()).hexdigest()
+        docker = Docker()
+        result = build_image.import_image(None, file, actor="cli", sha256=digest, client=docker, expected=labels_b)
+        assert result.inputs == labels_a[INPUTS_LABEL] and docker.images.loaded == [file.read_bytes()]
+
+    def test_a_user_id_given_as_build_argument_is_no_input_either(self, engine, monkeypatch, tmp_path):
+        _, plain = _on_machine(engine, monkeypatch, tmp_path, uid=1000, gid=1000, jobs=0)
+        _, given = _on_machine(engine, monkeypatch, tmp_path, uid=1000, gid=1000, jobs=0,
+                               build_args={"USER_ID": "4242", "GROUP_ID": "4242", "BUILD_JOBS": "3"})
+        assert plain[INPUTS_LABEL] == given[INPUTS_LABEL]
+
+    def test_a_change_of_what_the_image_holds_still_refuses(self, engine, monkeypatch, tmp_path):
+        _, here = _on_machine(engine, monkeypatch, tmp_path, uid=1001, gid=1001, jobs=2)
+        _, other_file = _on_machine(engine, monkeypatch, tmp_path, uid=1000, gid=1000, jobs=8,
+                                    text=DOCKERFILE + "RUN echo another step\n")
+        _, other_arg = _on_machine(engine, monkeypatch, tmp_path, uid=1000, gid=1000, jobs=8,
+                                   build_args={"TORCH_PIP_URL": "https://download.example.org/whl/cpu"})
+        assert len({here[INPUTS_LABEL], other_file[INPUTS_LABEL], other_arg[INPUTS_LABEL]}) == 3
+        for n, labels in enumerate((other_file, other_arg)):
+            file = archive(tmp_path / f"other{n}.tar", labels)
+            digest = hashlib.sha256(file.read_bytes()).hexdigest()
+            with pytest.raises(build_image.ImageTransferError) as refused:
+                build_image.import_image(None, file, actor="cli", sha256=digest, client=Docker(), expected=here)
+            assert refused.value.code == "mismatch"

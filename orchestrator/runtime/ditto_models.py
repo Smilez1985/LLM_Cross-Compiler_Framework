@@ -160,7 +160,7 @@ def cache_overview(rt: Any) -> CacheView:
     running = {}
     if status.running:
         running = {"cache_ram_mib": status.cache_ram_mib, "kv_cache": status.kv_cache, "n_ctx_slot": status.n_ctx_slot,
-                   "ctx": status.ctx}
+                   "ctx": status.ctx, "kv_fallback": status.kv_fallback}
     return CacheView(rows=rows, over_cap_ok=bool(get("local_cache_over_cap_ok", False)) if callable(get) else False,
                      budget=budget, running=running)
 

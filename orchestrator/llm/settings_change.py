@@ -43,12 +43,13 @@ TIGHTEN_ONLY: Dict[str, Any] = {
     "enable_rag_knowledge": False, "crawler_max_pages": "lower", "crawler_max_depth": "lower",
     "crawler_rate_limit": "higher", "build_memory_limit": "lower", "build_pids_limit": "lower",
     "crawler_download_pdfs": False,
-    # the soft cap and the idle timeout of a build step (utils/step_limits.py): an AI may only shorten them
-    "build_timeout": "lower", "build_idle_timeout": "lower",
-    # The memory budget of Ditto's local server (runtime/hardware.local_budget): an AI may only make it smaller
-    # (fewer MiB of prompt cache, a shorter keep time, a smaller KV-cache type); "auto" counts as this computer's
-    # probe value, and 0 minutes (never unload) is the person's alone.
-    "local_cache_ram_mib": "lower", "local_cache_keep_minutes": "lower", "local_kv_cache": "lower"}
+    # the soft cap of a build step (utils/step_limits.py): an AI may only shorten it (the idle timeout is the
+    # person's alone: PERSON_DECIDES below)
+    "build_timeout": "lower",
+    # The keep time of Ditto's local server (runtime/hardware.local_budget): an AI may only shorten it; "auto" counts
+    # as this computer's probe value, and 0 minutes (never unload) is the person's alone. The size of the prompt
+    # cache and the KV-cache type are the person's alone (PERSON_DECIDES).
+    "local_cache_keep_minutes": "lower"}
 MIN_MEMORY_LIMIT = 6 * 1024 ** 2  # Docker refuses a smaller container memory limit
 # The settings of the memory budget of Ditto's local server, and the person's acceptance of values above the soft cap.
 LOCAL_CACHE_SETTINGS = ("local_cache_ram_mib", "local_cache_keep_minutes", "local_kv_cache")
@@ -58,7 +59,12 @@ _KV_ORDER = {"q4_0": 0, "q8_0": 1, "f16": 2}   # memory of the KV-cache type, sm
 # Settings only the person sets, in the window or the command line, never through a change of this module or an AI.
 # The build sources in the own network (BUILD_SOURCE_SETTINGS: apt mirror, apt cache, pip index) are the person's too:
 # they say where an offline build may fetch from; and so is the acceptance of memory values above the soft cap.
-PERSON_ONLY_SETTINGS = tuple(OPT_OUT_SETTINGS) + tuple(BUILD_SOURCE_SETTINGS) + (CACHE_OVER_CAP_OK,)
+# Settings an AI may read but never change, in either direction (not even downwards): lowering the idle timeout can
+# stop the person's own long builds, and pinning "auto" of the prompt cache or the KV-cache type to a value freezes
+# a value that may no longer fit this computer later.
+PERSON_DECIDES = ("build_idle_timeout", "local_cache_ram_mib", "local_kv_cache")
+PERSON_ONLY_SETTINGS = (tuple(OPT_OUT_SETTINGS) + tuple(BUILD_SOURCE_SETTINGS) + (CACHE_OVER_CAP_OK,)
+                        + PERSON_DECIDES)
 PERSON_ONLY_TEXT = ("{key} says what offline mode counts as local besides this computer and the own network. Only the "
                     "person sets it, in the framework's settings; no AI and no settings change of an AI can.")
 BUILD_SOURCE_TEXT = ("{key} says where an offline build of the build container image fetches packages from in the own "
@@ -66,13 +72,32 @@ BUILD_SOURCE_TEXT = ("{key} says where an offline build of the build container i
                      "an AI can.")
 CACHE_PERSON_ONLY_TEXT = ("{key} accepts memory values above this computer's soft cap without a warning. Only the "
                           "person sets it, in the Prompt cache group or on the command line; no AI can.")
+IDLE_PERSON_ONLY_TEXT = ("{key} stops a build step that prints nothing for that long. Only the person sets it, in the "
+                         "framework's settings: a lower value can stop the person's own long builds, so no AI changes "
+                         "it, in either direction.")
+CACHE_SIZE_PERSON_ONLY_TEXT = ("{key} is auto by default, the value measured on this computer. Only the person sets "
+                               "it, in the Prompt cache group or on the command line: a number set now freezes a "
+                               "value that may no longer fit this computer later, so no AI changes it, in either "
+                               "direction.")
 
 
 def person_only_text(key: str) -> str:
     """Why `key` (one of PERSON_ONLY_SETTINGS) is refused for every change but the person's."""
     if key == CACHE_OVER_CAP_OK:
         return CACHE_PERSON_ONLY_TEXT.format(key=key)
+    if key == "build_idle_timeout":
+        return IDLE_PERSON_ONLY_TEXT.format(key=key)
+    if key in PERSON_DECIDES:
+        return CACHE_SIZE_PERSON_ONLY_TEXT.format(key=key)
     return (BUILD_SOURCE_TEXT if key in BUILD_SOURCE_SETTINGS else PERSON_ONLY_TEXT).format(key=key)
+
+
+def _person_only_title(key: str) -> str:
+    if key == "build_idle_timeout":
+        return "Build"
+    if key == CACHE_OVER_CAP_OK or key in LOCAL_CACHE_SETTINGS:
+        return "Prompt cache"
+    return "Offline Mode"
 
 
 def cache_value(key: str, value: Any) -> str:
@@ -145,7 +170,10 @@ def memory_bytes(value: Any) -> Optional[int]:
 def direction_problem(key: str, old: Any, new: Any, auto: Optional[Dict[str, Any]] = None) -> Optional[str]:
     """Why a change of a tighten-only setting would widen what an AI may do (None when it tightens or keeps it).
     `auto` holds this computer's probe values of the memory-budget settings (CacheBudget.auto): "auto" counts as them,
-    and without them a change from or to "auto" is refused."""
+    and without them a change from or to "auto" is refused. A setting only the person decides (PERSON_DECIDES) is
+    refused in either direction."""
+    if key in PERSON_DECIDES:
+        return person_only_text(key)
     if key not in TIGHTEN_ONLY:
         return None
     if key in LOCAL_CACHE_SETTINGS:
@@ -469,12 +497,14 @@ class AISettingsChange:
     def cache_change(cls, values: Dict[str, Any], budget: Any = None, by_ai: bool = False) -> "AISettingsChange":
         """A change of memory-budget settings only ({setting name: value}; the CLI's `ditto cache set`, the GUI's
         Prompt cache fields), checked against `budget`. ValueError for a value a setting cannot take, KeyError for
-        another setting, PermissionError for local_cache_over_cap_ok from an AI."""
+        another setting, PermissionError from an AI for local_cache_over_cap_ok, local_cache_ram_mib and
+        local_kv_cache (the person's alone)."""
         change = cls(preset=None, cache_budget=budget, by_ai=by_ai)
         for key, value in values.items():
-            if key == CACHE_OVER_CAP_OK:
+            if key == CACHE_OVER_CAP_OK or key in PERSON_DECIDES:
                 if by_ai:
                     raise PermissionError(person_only_text(key))
+            if key == CACHE_OVER_CAP_OK:
                 change = replace(change, cache_over_cap_ok=bool(value))
             elif key in _CACHE_FIELDS:
                 change = replace(change, **{_CACHE_FIELDS[key]: cache_value(key, value)})
@@ -618,8 +648,7 @@ class AISettingsChange:
         as "person_only"."""
         person = [key for key in values if key in PERSON_ONLY_SETTINGS]
         if person:
-            return [SettingsProblem("person_only", "Prompt cache" if key == CACHE_OVER_CAP_OK else "Offline Mode",
-                                    person_only_text(key)) for key in person]
+            return [SettingsProblem("person_only", _person_only_title(key), person_only_text(key)) for key in person]
         names = [key for key in values if key in AI_SETTINGS]
         if not names:
             return []
@@ -674,7 +703,7 @@ class AISettingsChange:
 
 
 __all__ = ["AI_SETTINGS", "AISettingsChange", "AppliedChange", "CACHE_OVER_CAP_OK", "KV_CACHE_KINDS",
-           "LOCAL_CACHE_SETTINGS", "MIN_MEMORY_LIMIT", "PERSON_ONLY_SETTINGS", "SettingsChangeError",
+           "LOCAL_CACHE_SETTINGS", "MIN_MEMORY_LIMIT", "PERSON_DECIDES", "PERSON_ONLY_SETTINGS", "SettingsChangeError",
            "SettingsOverlay", "SettingsProblem", "TIGHTEN_ONLY", "cache_value", "check_base_url", "direction_problem",
            "key_method", "memory_bytes", "parse_fallback", "person_only_text", "plain_http_to_remote",
            "takes_workspace", "user_value"]

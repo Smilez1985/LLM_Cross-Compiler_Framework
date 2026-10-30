@@ -129,6 +129,8 @@ class PromptCacheBox(QGroupBox):
             lines.append(self._t("prompt_cache.running", ram=running.get("cache_ram_mib", "-"),
                                  kv=running.get("kv_cache") or "-", ctx=running.get("n_ctx_slot") or
                                  running.get("ctx") or "-"))
+            if running.get("kv_fallback"):
+                lines.append(self._t("prompt_cache.kv_fallback", kind=running["kv_fallback"]))
         self.lbl_info.setText("\n".join(lines))
 
     def _on_relay(self, token: object, result: Any) -> None:

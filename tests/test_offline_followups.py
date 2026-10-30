@@ -736,7 +736,10 @@ def test_the_repository_override_is_a_pinned_mirror_in_offline_mode(tmp_path, na
     label = [f for f in seen["listed"][0]["label"] if f.startswith("org.llm-framework.inputs=")]
     assert label, "the image of the same settings is looked for"
     other, _ = image_build(tmp_path, monkeypatch, {}, images=[image])
-    assert other["listed"][0]["label"] != seen["listed"][0]["label"], "the override is one of the settings"
+    # Changed on purpose (chain followups-3, Core/builder.MACHINE_ONLY_ARGS): the mirror serves the same pinned and
+    # checked commit, so the fetch address is not part of what the image holds; the image built from the mirror is the
+    # image of the upstream address and stays usable on a computer without that mirror.
+    assert other["listed"][0]["label"] == seen["listed"][0]["label"], "the fetch address is not an input"
     online, _ = image_build(tmp_path, monkeypatch, repos, offline=False)
     assert online["args"]["LLAMA_CPP_REPO"] == "https://mirror.lan/llama.cpp.git"
     assert "hosts" not in online and "HTTPS_PROXY" not in online["args"], "online: as before"

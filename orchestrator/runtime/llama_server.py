@@ -172,6 +172,7 @@ class RuntimeStatus(BaseModel):
     ctx: Optional[int] = None
     n_ctx_slot: Optional[int] = None                     # the slot's context as /props reported it (-np 1: all of it)
     kv_cache: Optional[str] = None                       # the KV-cache type the server got (f16, q8_0, q4_0)
+    kv_fallback: Optional[str] = None                    # the automatic type it could not get (no flash attention)
     cache_ram_mib: Optional[int] = None                  # its prompt cache (--cache-ram)
     build_info: Optional[str] = None                     # the build /props reported
     base_url: Optional[str] = None
@@ -274,6 +275,35 @@ def build_server_command(server: Path, model: Path, port: int, key_file: Path, c
         return server_command(server, model, port=port, key_file=key_file, alias=alias, extra=extra)
     except PolicyError as e:
         raise LocalRuntimeError(str(e)) from None
+
+
+# --- a quantised V cache needs flash attention ---------------------------------------------------------------------
+# llama.cpp refuses a q8_0 or q4_0 V cache when flash attention is off (the build or its backend has none, or "-fa auto"
+# switched it off) and exits during startup with one of these lines ("V cache quantization requires flash_attn",
+# "quantized V cache was requested, but this requires Flash Attention").
+_RE_NEEDS_FA = re.compile(r"(?:V cache quantization|quantized V cache)[^\n]{0,80}?requires?[^\n]{0,20}?flash[ _]?att",
+                          re.IGNORECASE)
+QUANTISED_KV = ("q8_0", "q4_0")
+KV_FALLBACK_FILE = "kv_fallback.json"   # the servers that needed the f16 cache (runtime root)
+
+
+def needs_flash_attention(log_text: str) -> bool:
+    """Whether llama-server's output says it refused a quantised V cache for want of flash attention."""
+    return bool(_RE_NEEDS_FA.search(log_text or ""))
+
+
+def kv_fallback_text(wanted: str) -> str:
+    """What the person reads when the server runs with f16 instead of the automatic quantised cache."""
+    return (f"Ditto's server runs with the f16 KV cache instead of {wanted}: this llama.cpp build has no flash "
+            "attention, which a quantised cache needs, so the same memory holds a shorter context. Use a build with "
+            "flash attention, or set the setting local_kv_cache to f16 to make it your choice.")
+
+
+def kv_needs_flash_attention_text(kind: str) -> str:
+    """The refusal when the person set a quantised cache and the build has no flash attention."""
+    return (f"Ditto's server could not start: your setting local_kv_cache = {kind} quantises the KV cache, and this "
+            "llama.cpp build has no flash attention, which a quantised cache needs. Set the setting local_kv_cache to f16 "
+            "or auto, or use a build with flash attention.")
 
 
 _RE_BUILD_INFO = re.compile(r"[^A-Za-z0-9 ._:/()+-]")
@@ -826,9 +856,11 @@ class LocalLLMRuntime:
 
     def executor(self, log: Optional[Callable[[str], None]] = None, ai_started: bool = False):
         """The build executor (natively, or in the builder container through engine()); `ai_started`: its soft caps
-        stop the build (an AI started it)."""
+        stop the build (an AI started it). The idle timeout of its steps is the settings' build_idle_timeout, as for
+        the stage containers."""
         from orchestrator.runtime.build.executor import BuildExecutor
-        return self._executor or BuildExecutor(engine=self.engine(), log=log, ai_started=ai_started)
+        return self._executor or BuildExecutor(engine=self.engine(), log=log, ai_started=ai_started,
+                                               settings=self.settings)
 
     def verifier(self):
         """The verification of builds that runs their programs on this machine itself."""
@@ -1385,6 +1417,8 @@ class LocalLLMRuntime:
                 setattr(status, name, value if isinstance(value, int) and not isinstance(value, bool) else None)
             kind = state.get("kv_cache")
             status.kv_cache = kind if kind in ("f16", "q8_0", "q4_0") else None
+            wanted = state.get("kv_fallback")
+            status.kv_fallback = wanted if wanted in QUANTISED_KV else None
             info = state.get("build_info")
             status.build_info = _RE_BUILD_INFO.sub("", info)[:80] if isinstance(info, str) and info else None
             status.base_url = f"http://{LOOPBACK}:{state.get('port')}/v1"
@@ -1491,14 +1525,19 @@ class LocalLLMRuntime:
                             choice=choice, keep_minutes_default=idle // 60 if idle else 0)
 
     def _memory_plan(self, model: ModelEntry, model_path: Path, hw: HardwareInfo, choice: Optional[BackendChoice],
-                     ctx: Optional[int]) -> Tuple[int, str, CacheBudget]:
+                     ctx: Optional[int], kv_kind: Optional[str] = None) -> Tuple[int, str, CacheBudget]:
         """(context, why, budget) of a start, for both launchers: the budget first (KV-cache type and prompt cache,
         with the minimum context or the one asked for kept free), then the context in what is left (the prompt cache
-        as reserve_bytes), so the same RAM is counted once."""
+        as reserve_bytes), so the same RAM is counted once. `kv_kind` replaces the automatic KV-cache type (f16 when
+        the build has no flash attention for a quantised one)."""
         model_bytes = model_path.stat().st_size
         wanted = None if ctx is None else max(256, min(int(ctx), model.native_context))
         floor = wanted if wanted is not None else min(self.catalog.server.ctx_min, model.native_context)
         budget = self._budget(hw, choice, model, model_bytes, floor)
+        if kv_kind is not None and kv_kind != budget.kv_cache:
+            reasons = {**budget.reasons, "local_kv_cache": f"{kv_kind} (automatic: {budget.kv_cache} needs flash "
+                                                           "attention, which this build has not)"}
+            budget = budget.model_copy(update={"kv_cache": kv_kind, "reasons": reasons})
         if wanted is None:
             ctx, why = compute_context(model, hw, choice, self.catalog.server, model_bytes=model_bytes,
                                        kv_kind=budget.kv_cache, reserve_bytes=budget.ram_mib * MIB)
@@ -1506,6 +1545,46 @@ class LocalLLMRuntime:
             ctx, why = wanted, "set explicitly"
         why += f"; KV cache {budget.kv_cache}, prompt cache {budget.ram_mib} MiB"
         return ctx, why, budget
+
+    # --- a quantised V cache without flash attention (needs_flash_attention) ---
+    def _auto_kv(self) -> bool:
+        return self.cache_settings().get("local_kv_cache", "auto") == "auto"
+
+    def _needs_f16(self, key: str) -> bool:
+        """Whether this server (`key`: its build, or the image in Docker mode) refused a quantised cache before."""
+        try:
+            known = json.loads((self.root / KV_FALLBACK_FILE).read_text(encoding="utf-8")).get("servers", [])
+        except (OSError, ValueError, AttributeError):
+            return False
+        return isinstance(known, list) and key in known
+
+    def _remember_f16(self, key: str) -> None:
+        path = self.root / KV_FALLBACK_FILE
+        try:
+            known = json.loads(path.read_text(encoding="utf-8")).get("servers", [])
+            known = [k for k in known if isinstance(k, str)] if isinstance(known, list) else []
+        except (OSError, ValueError, AttributeError):
+            known = []
+        try:
+            _write_private(path, json.dumps({"servers": (known + [key])[-20:]}))
+        except OSError as e:
+            self.logger.warning(f"Could not record that the server needs the f16 cache ({e.__class__.__name__})")
+
+    def _retry_with_f16(self, budget: CacheBudget, tail: str) -> bool:
+        """After a start that failed with `tail`: True when the server refused the automatic quantised cache for want
+        of flash attention (start once more with f16). A quantised cache the person set is never replaced: that start
+        fails with the plain reason (LocalRuntimeError naming local_kv_cache and f16)."""
+        if budget.kv_cache not in QUANTISED_KV or not needs_flash_attention(tail):
+            return False
+        if not self._auto_kv():
+            raise LocalRuntimeError(kv_needs_flash_attention_text(budget.kv_cache), log_tail=tail)
+        return True
+
+    def _start_f16_first(self, budget: CacheBudget, key: str) -> Optional[str]:
+        """The automatic quantised type this start skips because the server refused it before, else None."""
+        if budget.kv_cache in QUANTISED_KV and self._auto_kv() and self._needs_f16(key):
+            return budget.kv_cache
+        return None
 
     def _record_props(self, state: Dict[str, Any], endpoint: LocalEndpoint) -> LocalEndpoint:
         """After the health check: the slot's context and the build from /props into server.json and the endpoint
@@ -1534,13 +1613,20 @@ class LocalLLMRuntime:
             choice = select_backend(hw, self.catalog, installed.backend)
         else:
             choice = backend_choice(hw, installed.backend)
-        ctx, why, budget = self._memory_plan(model, model_path, hw, choice, ctx)
+        asked = ctx
+        ctx, why, budget = self._memory_plan(model, model_path, hw, choice, asked)
+        server_key = f"{installed.origin}:{installed.build_id or installed.server}"
+        fallback = self._start_f16_first(budget, server_key)
+        if fallback:
+            ctx, why, budget = self._memory_plan(model, model_path, hw, choice, asked, kv_kind="f16")
         sleep_idle_seconds = self._idle_seconds(sleep_idle_seconds)
         timeout = timeout or self.catalog.server.health_timeout_seconds
 
         again = ("llm-cli ditto runtime install --prebuilt --force" if installed.origin == "prebuilt"
                  else "llm-cli ditto runtime install")
-        for _ in range(3):  # a free port can be taken between choosing and binding it
+        tries = 0
+        while tries < 3:  # a free port can be taken between choosing and binding it
+            tries += 1
             key_file, key = write_key_file(self.root)
             port = _free_port()
             cmd = build_server_command(installed.server, model_path, port, key_file, ctx, model.alias,
@@ -1573,7 +1659,8 @@ class LocalLLMRuntime:
                 "variant": installed.variant, "origin": installed.origin, "build_id": installed.build_id,
                 "tier": model.tier, "alias": model.alias, "ctx": ctx, "sleep_idle_seconds": sleep_idle_seconds,
                 "cache_ram": budget.ram_mib, "kv_cache": budget.kv_cache, "cache_settings": self.cache_settings(),
-                "key_file": str(key_file), "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+                "key_file": str(key_file), "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                **({"kv_fallback": fallback} if fallback else {})}
             # Written at once (a crash still leaves the server recorded), but marked: LLMClient in every other process
             # reads server.json, and until llama-server is known to listen on the port, another program may answer
             # there; read_endpoint hands out nothing for a marked record.
@@ -1600,6 +1687,13 @@ class LocalLLMRuntime:
             self._stop_locked()
             if outcome == "foreign" or (outcome == "exited" and "couldn't bind" in tail):
                 continue  # another program took the port between our choice and the bind: try another one
+            if outcome == "exited" and not fallback and self._retry_with_f16(budget, tail):
+                fallback = budget.kv_cache  # once more with f16, and that server goes straight to it from now on
+                self._remember_f16(server_key)
+                self.logger.warning(kv_fallback_text(fallback))
+                ctx, why, budget = self._memory_plan(model, model_path, hw, choice, asked, kv_kind="f16")
+                tries -= 1
+                continue
             what = "did not become ready in time" if outcome == "timeout" else "exited during startup"
             raise LocalRuntimeError(f"llama-server {what} (log: {self.log_file}).", log_tail=tail)
         raise LocalRuntimeError("Could not find a free local port for llama-server.")
@@ -1649,7 +1743,8 @@ class LocalLLMRuntime:
         return endpoint
 
     def _launch_container(self, image, model: ModelEntry, model_path: Path, ctx: Optional[int],
-                          sleep_idle_seconds: Optional[int], timeout: Optional[float]) -> LocalEndpoint:
+                          sleep_idle_seconds: Optional[int], timeout: Optional[float],
+                          fallback: Optional[str] = None) -> LocalEndpoint:
         from orchestrator.runtime import container_server as cs
         from orchestrator.runtime.server_policy import container_server_command
         from orchestrator.utils.sandbox import hand_over, sandbox_user
@@ -1658,7 +1753,12 @@ class LocalLLMRuntime:
         backend = str(image.labels.get(cs.LABEL_BACKEND, "cpu"))
         gpu = cs.gpu_passthrough(docker, hw, backend)
         choice = backend_choice(hw, backend if gpu.used else "cpu")
-        ctx, why, budget = self._memory_plan(model, model_path, hw, choice, ctx)
+        asked, server_key = ctx, f"docker:{image.image_id}"
+        ctx, why, budget = self._memory_plan(model, model_path, hw, choice, asked)
+        fallback = fallback or self._start_f16_first(budget, server_key)
+        if fallback:
+            ctx, why, budget = self._memory_plan(model, model_path, hw, choice, asked, kv_kind="f16")
+        requested_idle = sleep_idle_seconds
         sleep_idle_seconds = self._idle_seconds(sleep_idle_seconds)
         try:
             extra = server_extra_args(ctx, gpu=gpu.used, cache_ram_mib=budget.ram_mib, kv_cache=budget.kv_cache,
@@ -1703,7 +1803,8 @@ class LocalLLMRuntime:
             "build_id": image.labels.get(cs.LABEL_BUILD), "port": port, "variant": backend, "origin": "docker",
             "tier": model.tier, "alias": model.alias, "ctx": ctx, "sleep_idle_seconds": sleep_idle_seconds,
             "cache_ram": budget.ram_mib, "kv_cache": budget.kv_cache, "cache_settings": self.cache_settings(),
-            "key_file": str(key_file), "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+            "key_file": str(key_file), "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            **({"kv_fallback": fallback} if fallback else {})}
         _write_private(self.state_file, json.dumps(state))
         outcome = self._wait_container_healthy(container_id, port, timeout)
         if outcome == "ok":
@@ -1716,6 +1817,11 @@ class LocalLLMRuntime:
                                                            model=model.alias, port=port, pid=0))
         tail = self._log_tail()
         self._stop_locked()
+        if outcome == "exited" and not fallback and self._retry_with_f16(budget, tail):
+            self._remember_f16(server_key)
+            self.logger.warning(kv_fallback_text(budget.kv_cache))
+            return self._launch_container(image, model, model_path, asked, requested_idle, timeout,
+                                          fallback=budget.kv_cache)
         what = "did not become ready in time" if outcome == "timeout" else "ended during startup"
         raise LocalRuntimeError(f"Ditto's container {what} (log: {self.log_file}).", log_tail=tail)
 

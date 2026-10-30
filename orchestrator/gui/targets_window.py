@@ -51,14 +51,17 @@ def target_check_text(check: Any, lang: Optional[str] = None) -> str:
     if not check.found:
         return ui_text("bld.check.not_found", lang, name=one_line(check.name))
     tid = one_line(check.target_id)
+    old = list(getattr(check, "old_format", ()) or ())
+    note = ("\n" + ui_text("bld.check.old_format", lang, count=len(old), names=one_line(", ".join(old)))) if old else ""
     if check.no_capabilities:
-        return ui_text("bld.check.no_caps", lang, id=tid)
+        return ui_text("bld.check.no_caps", lang, id=tid) + note
     if check.errors:
         lines = [ui_text("bld.check.invalid", lang, id=tid)]
         lines += ["  " + ui_text("bld.check.error_line", lang, field=one_line(f), message=one_line(m))
                   for f, m in check.errors]
-        return "\n".join(lines)
-    return ui_text("bld.check.valid", lang, id=tid, boards=check.boards, formats=one_line(", ".join(check.formats)))
+        return "\n".join(lines) + note
+    return ui_text("bld.check.valid", lang, id=tid, boards=check.boards,
+                   formats=one_line(", ".join(check.formats))) + note
 
 
 def check_target(framework: Any, name: str) -> Optional[Any]:
@@ -181,14 +184,24 @@ class TargetsDialog(QDialog):
     def boards_text(self, name: str) -> Optional[str]:
         """The boards of target `name` as `llm-cli targets boards` prints them (board_profiles.board_lines), or None
         when its profiles or benchmarks are not valid."""
-        from orchestrator.Core.board_profiles import board_lines
+        from orchestrator.Core.board_profiles import board_lines, old_format_entries, old_format_note
         tm = _target_manager(self.framework)
         data = tm.get_board_data(name) if tm is not None and hasattr(tm, "get_board_data") else None
         if data is None:
             return None
         caps = tm.get_capabilities(name) if hasattr(tm, "get_capabilities") else None
-        return "\n".join(one_line(line) if not line.startswith("  ") else "  " + one_line(line)
-                         for line in board_lines(caps, data))
+        service = getattr(self.framework, "build_service", None)
+        try:   # the measured rows of this computer's board tests first, as `llm-cli targets boards` shows them
+            measured = service.measured_benchmarks(name) if service is not None else []
+        except Exception:  # noqa: BLE001 - no measured rows: target.yml's rows alone
+            measured = []
+        if measured:
+            data = data.model_copy(update={"performance_benchmarks": list(measured) + list(data.performance_benchmarks)})
+        lines = list(board_lines(caps, data))
+        note = old_format_note(old_format_entries(tm.get_target(name) or {})) if hasattr(tm, "get_target") else ""
+        if note:
+            lines.append(note)
+        return "\n".join(one_line(line) if not line.startswith("  ") else "  " + one_line(line) for line in lines)
 
     def _boards(self) -> None:
         name = self.selected()

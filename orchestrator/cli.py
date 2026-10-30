@@ -327,8 +327,9 @@ def list_targets(ctx: FrameworkContext, format: str):
 def target_boards(ctx: FrameworkContext, target_name: str):
     """Each board of a target with its optimization profile (the llama.cpp options the build recipe plans for it,
     the recommended quantizations, memory profile and optimization level) and its benchmark rows, each marked
-    measured, published or unmeasured. The same as Build > Targets... > Boards..."""
-    from orchestrator.Core.board_profiles import board_lines
+    measured, published or unmeasured (the board tests of this computer's builds included). The same as Build >
+    Targets... > Boards..."""
+    from orchestrator.Core.board_profiles import board_lines, old_format_entries, old_format_note
     ctx.require_framework()
     tm = ctx.framework_manager.get_component("target_manager")
     tid = tm.resolve(target_name) if tm else None
@@ -340,8 +341,26 @@ def target_boards(ctx: FrameworkContext, target_name: str):
         console.print(f"[red]The optimization profiles or benchmarks of '{escape(tid)}' are not valid; "
                       f"'llm-cli targets validate {escape(tid)}' names why.[/red]")
         sys.exit(1)
+    data = _with_measured_rows(ctx, tid, data)
     for line in board_lines(tm.get_capabilities(tid), data):
         console.print(escape(line))
+    note = old_format_note(old_format_entries(tm.get_target(tid) or {}))
+    if note:
+        console.print(f"[yellow]{escape(note)}[/yellow]")
+
+
+def _with_measured_rows(ctx: FrameworkContext, tid: str, data):
+    """`data` with the measured rows of the board tests of this computer's builds before target.yml's rows."""
+    try:
+        from orchestrator.Core.build_service import BuildService
+        framework = getattr(ctx, "framework_manager", None)
+        service = getattr(framework, "build_service", None) or BuildService(framework) if framework else None
+        measured = service.measured_benchmarks(tid) if service is not None else []
+    except Exception:  # noqa: BLE001 - no measured rows: target.yml's rows alone
+        measured = []
+    if not measured:
+        return data
+    return data.model_copy(update={"performance_benchmarks": list(measured) + list(data.performance_benchmarks)})
 
 
 @targets.command('validate')
@@ -372,6 +391,15 @@ def validate_target(ctx: FrameworkContext, target_name: str):
         sys.exit(1)
     console.print(f"[green]✅ Target '{escape(tid)}' is valid ({check.boards} boards, formats: "
                   f"{escape(', '.join(check.formats))})[/green]")
+    _old_format_line(check)
+
+
+def _old_format_line(check) -> None:
+    """The plain note about entries in the format before 3.2.0 the check ignored (board_profiles.old_format_note)."""
+    from orchestrator.Core.board_profiles import old_format_note
+    note = old_format_note(getattr(check, "old_format", ()))
+    if note:
+        console.print(f"[yellow]{escape(note)}[/yellow]")
 
 
 # ============================================================================
@@ -2754,6 +2782,9 @@ def runtime_start(ctx: FrameworkContext, tier: Optional[str], ctx_len: Optional[
     where = f"container {status.container}" if status.container else f"pid {ep.pid}"
     console.print(f"[green]Running:[/green] {escape(ep.base_url)} model {escape(ep.model)} ({escape(where)}, "
                   f"ctx {status.ctx})")
+    if status.kv_fallback:
+        from orchestrator.runtime.llama_server import kv_fallback_text
+        console.print(f"[yellow]{escape(kv_fallback_text(status.kv_fallback))}[/yellow]")
     console.print("Ditto uses it as the 'local' AI provider; the API key changes with every start and is readable "
                   "only by you.")
 
@@ -2836,7 +2867,8 @@ def ditto_models():
 def models_list(ctx: FrameworkContext):
     """Pinned models, their size and whether they are downloaded"""
     from orchestrator.runtime.ditto_models import models_overview
-    view = models_overview(_local_runtime(ctx))  # the GUI's Ditto > Local Models... shows the same
+    # the GUI's Ditto > Local Models... shows the same
+    view = _plain_runtime_call("The model choice for this computer", models_overview, _local_runtime(ctx))
     table = Table(title="Ditto models")
     for column in ("Tier", "File", "Size", "License", "Status", "Note"):
         table.add_column(column)
@@ -2887,6 +2919,18 @@ CACHE_NAMES = {"ram": "local_cache_ram_mib", "keep": "local_cache_keep_minutes",
                "over-cap-ok": "local_cache_over_cap_ok"}
 
 
+def _plain_runtime_call(what: str, fn, *args, **kwargs):
+    """`fn(*args)` for `ditto cache`, `cache set` and `models list`: the budget and the model choice probe this
+    computer and read the catalogue, and when that fails the person reads one plain line (redacted), never a
+    traceback; exit code 1."""
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:  # noqa: BLE001 - shown to the person as one line
+        reason = redact_secrets(str(e)).strip() or type(e).__name__
+        console.print(f"[red]{escape(what)} could not be worked out: {escape(reason)}[/red]")
+        sys.exit(1)
+
+
 @ditto.group('cache', invoke_without_command=True)
 @click.option('--json', 'as_json', is_flag=True, help='Print the budget as JSON')
 @click.pass_context
@@ -2902,7 +2946,8 @@ def ditto_cache(click_ctx, as_json: bool):
 def ditto_cache_show(ctx: FrameworkContext, as_json: bool = False):
     """The saved values, what auto stands for on this computer, the soft caps and hard limits, the running server"""
     from orchestrator.runtime.ditto_models import cache_overview
-    view = cache_overview(_local_runtime(ctx))  # the AI settings' Prompt cache group shows the same
+    # the AI settings' Prompt cache group shows the same
+    view = _plain_runtime_call("The memory budget of Ditto's local server", cache_overview, _local_runtime(ctx))
     if as_json:
         click.echo(json.dumps(view.to_dict(), indent=2, sort_keys=True))
         return
@@ -2918,8 +2963,11 @@ def ditto_cache_show(ctx: FrameworkContext, as_json: bool = False):
     for row in view.rows:
         console.print(f"{escape(row.key)}: {escape(row.reason)}")
     if view.running:
+        from orchestrator.runtime.llama_server import kv_fallback_text
         console.print("Running server: " + ", ".join(f"{k} {escape(str(v))}" for k, v in view.running.items()
-                                                       if v is not None))
+                                                       if v is not None and k != "kv_fallback"))
+        if view.running.get("kv_fallback"):
+            console.print(f"[yellow]{escape(kv_fallback_text(view.running['kv_fallback']))}[/yellow]")
     console.print("Change a value: llm-cli ditto cache set NAME VALUE (auto, or a number; kv: f16, q8_0, q4_0)")
 
 
@@ -2943,7 +2991,8 @@ def ditto_cache_set(ctx: FrameworkContext, name: str, value: str, yes_over_cap: 
             sys.exit(2)
         value = word in ("1", "true", "yes", "on")
     try:
-        change = AISettingsChange.cache_change({key: value}, rt.cache_budget())
+        change = AISettingsChange.cache_change(
+            {key: value}, _plain_runtime_call("The memory budget of Ditto's local server", rt.cache_budget))
     except (KeyError, ValueError) as e:
         console.print(f"[red]{escape(str(e.args[0] if isinstance(e, KeyError) else e))}[/red]")
         sys.exit(2)
@@ -3269,7 +3318,6 @@ def _auth_catalog(ctx: FrameworkContext):
 
 
 def _auth_preset(catalog, name: str):
-    from orchestrator.utils.helpers import redact_secrets
     preset = catalog.get(name)
     if preset is not None:
         return preset
@@ -3293,7 +3341,6 @@ def _method_tags(info) -> str:
 
 def _named_method(service, preset, method_id: str):
     """--method: a method of the provider, else a usage error (the value redacted like a provider name)."""
-    from orchestrator.utils.helpers import redact_secrets
     spec = service.method(preset, method_id)
     if spec is None:
         _usage(f"{preset.label} has no sign-in method '{redact_secrets(str(method_id))}'. Methods: "

@@ -1593,8 +1593,9 @@ class CommunityManager:
                 # store its pages again, since they left the knowledge base now
                 note = self._released_note(holder)
                 try:
+                    from orchestrator.utils.atomic import write_file
                     ensure_directory(note.parent)
-                    note.write_text(datetime.now().isoformat(), encoding="utf-8")
+                    write_file(note, datetime.now().isoformat())   # never a cut note after a crash
                 except OSError as e:
                     self.logger.warning(f"Could not note that {kind} pack {prov.id} left the knowledge base: {e}")
                 self._reimport_shared(rag_manager, getattr(rag_manager, "last_released", None) or (), holder)

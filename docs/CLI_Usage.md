@@ -459,8 +459,11 @@ Prints each board of the target with its optimization profile: the recommended q
 Builder), the memory profile, the optimization level a build starts from when `--optimization` is not given, the
 llama.cpp options and compiler flags the build recipe plans for the board's SoC, and the board's CPU. Under it come the
 board's benchmark rows (model, quantization, values) with their source at the end: `measured by llmcf (board <label>, <date>)`,
-`published: <address>` or `unmeasured` (an estimate; never shown as a measurement). Exit code 2 for an unknown target,
-1 when its profiles or benchmarks are not valid (`targets validate` names why).
+`published: <address>` or `unmeasured` (an estimate; never shown as a measurement). The board tests of this
+computer's builds come first: the newest passed test per board, model and quantization, measured on the board you
+named. A last line names entries in the format before 3.2.0 that were ignored (`N entries in the old format were
+ignored: <names>`). Exit code 2 for an unknown target, 1 when its profiles or benchmarks are not valid
+(`targets validate` names why).
 
 ```bash
 llm-cli targets boards Rockchip
@@ -478,7 +481,9 @@ Checks that the target loads (by id or folder name) and that its `capabilities:`
 the GUI, the CLI, the build service and the tools use; every schema error is printed. Its `optimization_profiles:` and
 `performance_benchmarks:` are checked too: their schema, their boards and quantizations, no option that downloads, and
 every profile against the build recipe's plan for its SoC (a value that differs is named). Exit code 1 if the target is
-not found or its capabilities are invalid. A target without capabilities is reported but counts as valid.
+not found or its capabilities are invalid. A target without capabilities is reported but counts as valid. Entries in
+the format before 3.2.0 are not refused; a last line names them: `N entries in the old format were ignored: <names>`
+(the GUI's target check says the same).
 
 ```bash
 llm-cli targets validate Rockchip
@@ -1179,8 +1184,9 @@ file you choose. `--min-pass` only sets the exit code for scripts.
 `llm-cli ditto eval --kind tokens` runs multi-turn conversations with example data and records, per turn, the
 provider's own input, output, cache-read and cache-write tokens (from its usage answer, never an estimate), and per
 conversation the cache-read share; with Claude it also records why the prompt cache missed against the previous
-answer (Anthropic's cache diagnostics). Two cases that fail today are marked `expected_fail`: their failure is not
-counted, and a pass is printed as `UNEXPECTED PASS`. The extra table is **Tokens**.
+answer (Anthropic's cache diagnostics). Two cases that fail today are marked `expected_fail` with the reason they
+fail for (`expected_fail_reason`): that failure is not counted, a failure for another reason is counted like any
+other, and a pass is printed as `UNEXPECTED PASS`. The extra table is **Tokens**.
 
 ```bash
 # The token cases against the configured provider, with the report
@@ -1194,8 +1200,8 @@ llm-cli ditto eval --kind openai_paid --provider openai --i-pay
 ```
 
 The paid test asks once more before it starts ("No" is the default) and names the most it can cost. It writes
-`openai_cache_check.json` into `evals/` of your per-user state folder (booleans and token numbers only) and prints
-where. In the GUI: tick the kind in **Ditto > Evaluation...**, the pause is **Pause between turns**, and
+`openai_cache_check.json` into `evals/` of your per-user state folder (booleans and token numbers only; a check this
+run did not measure keeps its earlier result) and prints where. In the GUI: tick the kind in **Ditto > Evaluation...**, the pause is **Pause between turns**, and
 **Run evaluation...** asks the paid test's question with its cost. Details: [Features.md](Features.md#token-and-cache-measurement).
 
 #### Retrieval evaluation
@@ -1579,7 +1585,9 @@ The memory budget of Ditto's local server, from the measured hardware of this co
 (`local_cache_ram_mib`, `--cache-ram`), the time the model stays loaded without requests (`local_cache_keep_minutes`)
 and the KV-cache type (`local_kv_cache`) it shows your saved value (auto or a value), what auto stands for here, what
 the next start uses, the soft cap and the hard limit, and why; then what the running server got. `--json` prints the
-same as JSON.
+same as JSON. When the llama.cpp build has no flash attention, which a quantised KV cache needs, an automatic q8_0 or
+q4_0 becomes f16 at the start, and both `ditto runtime start` and `ditto cache` say so in a yellow line; a q8_0 or q4_0
+you set yourself is kept, and the start fails with a text that names `local_kv_cache` and f16.
 
 #### ditto cache set
 
@@ -1597,8 +1605,9 @@ A value above the hard limit (more memory than this computer has next to the mod
 is a value that is no number (there is no `-1` for "no limit"). Above the soft cap you get one warning and the
 question "Set it anyway?" ("No" is the default), unless you passed `--yes-over-cap` or set `local_cache_over_cap_ok`.
 Only the setting you name is saved; a running server takes it at its next start (it restarts once). An AI client may
-only lower these values over MCP and never above the soft cap; `local_cache_over_cap_ok` and 0 minutes are yours
-alone.
+only shorten `local_cache_keep_minutes` over MCP and never above the soft cap; `local_cache_ram_mib`,
+`local_kv_cache`, `local_cache_over_cap_ok` and 0 minutes are yours alone (a number set by an AI would freeze a value
+that may no longer fit this computer).
 
 ```bash
 llm-cli ditto cache
