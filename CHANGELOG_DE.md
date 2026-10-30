@@ -12,6 +12,22 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 
 ## [3.3.0] - 2026-10-30
 
+### Hinzugefügt
+- `2026-10-30 13:26 UTC` · `v3.3.0` **Jede CPU-Fähigkeit, die ggml nutzen kann, findet die Probe, und das Build-Rezept plant sie** ([Design](docs/DESIGN_DE.md#targets-hardware-und-vorlagen)):
+  Die Hardware-Probe 3.2.0 (`.py`, `.sh`, `.ps1`) schreibt auch die CPU-Fähigkeiten von RISC-V (RVV, Zfh, Zvfh,
+  Zicbop, Zihintpause, Zvfbfwma, Zba, XTheadVector), LoongArch (LSX, LASX), POWER (VSX, die POWER-Generation) und
+  s390x (VXE, VXE2, NNPA), gelesen aus `/proc/cpuinfo` und den HWCAP-Bits des Kernels; eine ältere Probe-Datei
+  bekommt sie außerhalb ihres Systems als OFF und auf ihm als UNKNOWN, mit dem Hinweis, neu zu proben.
+  `orchestrator/runtime/build/ggml_cpu_options.py` führt jede CPU-Option des festgelegten llama.cpp als geplant
+  oder nicht nutzbar mit Grund, und `tests/test_cpu_feature_coverage.py` schlägt fehl, wenn eine neue Festlegung
+  eine hinzufügt. Der Build-Plan (`cpu_features`), das `MANIFEST.json` des Board-Pakets
+  (`hardware.cpu_features`), `llm-cli runtime device plan`, das Board-Fenster und die Deploy-Fakten über MCP nennen
+  die Fähigkeiten, die der Build nutzt, und die, die das Board hat, der Build aber nicht nutzen kann, jede mit Grund
+  (SME mit einem Compiler älter als GCC 14 oder Clang 18, BF16 auf ARM, für das die Festlegung keinen Kernel hat,
+  und ein Tag ohne den, auf dem er aufbaut, etwa `+sve2` ohne `+sve` oder `+i8mm` auf einem armv8.0-Board).
+  Ein Board eines Systems, das das Rezept noch nicht plant, wird mit den Fähigkeiten abgelehnt, die seine Probe
+  fand.
+
 ### Geändert
 - `2026-10-30 14:55 UTC` · `v3.3.0` **Deine Board-Tests erscheinen in den Benchmarks des Targets, und übergangene alte Einträge werden genannt** ([Design](docs/DESIGN_DE.md#targets-hardware-und-vorlagen)):
   Der neueste bestandene Board-Test eines Builds je Board, Modell und Quantisierung kommt jetzt zu den
@@ -99,6 +115,12 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   `deploy_device_runtime`) stoppen einen Schritt, der nichts ausgibt, nach `build_idle_timeout`, wie es die
   Stufen-Container eines Modell-Builds tun (vorher warteten sie immer die eingebauten 1800 Sekunden, egal was die
   Einstellung sagte).
+- `2026-10-30 13:26 UTC` · `v3.3.0` **Board-Pakete für RK3566, RK3568 und RK3588 werden wieder mit dotprod und fp16 gebaut** ([Design](docs/DESIGN_DE.md#targets-hardware-und-vorlagen)):
+  Die Config-Stufe des Rockchip-Targets und der Modulvorlage plante `-mcpu` aus dem Namen des Kerns und
+  `-march=armv8-a`, ein zweiter ARM-Planer neben dem Build-Rezept, sodass die Pakete dotprod und fp16 des Boards
+  verloren (und `GGML_NEON`, das keine Option von ggml ist). Jetzt plant sie `-march` und `GGML_CPU_ARM_ARCH` aus
+  den Fähigkeiten der Probe wie das Build-Rezept (`armv8.2-a+dotprod+fp16` auf diesen Boards), und ein
+  Tabellentest führt beide an denselben Profilen aus.
 
 ### Sicherheit
 - `2026-10-30 14:40 UTC` · `v3.3.0` **Das Vorab-Laden der Abhängigkeiten entpackt über das eine sichere Entpacken des

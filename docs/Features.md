@@ -525,7 +525,10 @@ board...**).
   for 2.41), or Alpine for musl boards, which build with Clang and the board's sysroot (unverified). A board older
   than every base, or a profile without `LIBC_VERSION`, gets no plan and a message saying why. Only CPU builds for
   now: Vulkan on a Mali GPU only after `llama-bench` shows it beats the CPU build (decision D8). `llm-cli device
-  runtime plan` shows the plan.
+  runtime plan` shows the plan, with the CPU features the build uses ("CPU features used: DOTPROD, FP16_ARITH")
+  and each feature the board has that the build cannot use, with the reason (SME with a compiler older than
+  GCC 14 or Clang 18, BF16 on ARM); the Boards window shows the same lines, and the board package's
+  `MANIFEST.json` records them in `hardware.cpu_features`.
 - **Build:** in the builder container without network, the C++ runtime linked statically, the server without
   subprocess support. The build is format-checked on your PC (ELF architecture, no newer glibc symbol version than
   the board, no shared C++ runtime) and stored like every self-built build. An OpenMP build also gets the board's
@@ -2769,8 +2772,8 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   and macOS) and the fallbacks `scripts/hardware_probe.sh` (any POSIX shell on Linux, for boards without Python) and
   `scripts/hardware_probe.ps1` (Windows). It records the operating system (ID, version, family, variant such as
   DietPi, kernel, init system), the architecture of the userland, the C library and its version (glibc, musl), the
-  CPU (model, cores, ARM core clusters, the x86 and ARM features ggml builds for, such as AVX-512 or the ARM dot
-  product), memory, SoC, NPU and every GPU (NVIDIA compute capability, AMD gfx target, Vulkan); no host name, serial
+  CPU (model, cores, ARM core clusters, every CPU feature ggml builds for: x86 and ARM, such as AVX-512 or the ARM
+  dot product, and since probe 3.2.0 RISC-V, LoongArch, POWER and s390x, also from the kernel's HWCAP bits), memory, SoC, NPU and every GPU (NVIDIA compute capability, AMD gfx target, Vulkan); no host name, serial
   number or MAC address. The probes need no network, never prompt, install or ask for administrator rights, and run
   external tools with a time limit. Tests run the `.py` and the `.sh` on the same fixture machines and require the
   same result. The installed package carries a byte-identical copy of `hardware_probe.py`

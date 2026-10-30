@@ -94,6 +94,14 @@ tables:
     arm64: armv7
   x86_arches: [x86_64, x86]
   arm_arches: [arm64, armv7, armv6]
+  # Linux AT_HWCAP / AT_HWCAP2 bits (the kernel's uapi asm/hwcap.h) -> the /proc/cpuinfo token they stand for, per
+  # 64-bit ARCH: "<1 for AT_HWCAP or 2 for AT_HWCAP2>:<bit>". The probes read the two words from getauxval (Python,
+  # through ctypes) or /proc/self/auxv and add the tokens of the set bits to the cpuinfo tokens of the CPU features,
+  # so a feature the Features line does not list (a restricted /proc, an older kernel's line) is still found.
+  hwcap_bits:
+    arm64: {asimd: "1:1", fphp: "1:9", asimdhp: "1:10", asimddp: "1:20", sve: "1:22", sve2: "2:1", i8mm: "2:13",
+            bf16: "2:14", sme: "2:23"}
+    ppc64le: {vsx: "1:7", altivec: "1:28"}
   # OS_FAMILY on Linux: OS_ID, then each OS_ID_LIKE entry in order, is looked up here; the first hit wins, else
   # "other". Other OS values have a fixed family (os_family_fixed).
   os_families:
@@ -306,8 +314,10 @@ keys:
     platforms: [linux, windows, macos, freebsd, android]
     sources: {any: "constant of the emitter"}
     normalise: >-
-      none. A new key is a schema change and raises the version (3.0.0 -> 3.1.0); new keys are never required and
-      never ON/OFF keys, so a file of an older version, which lacks them, is read as it is
+      none. A new key is a schema change and raises the version (3.0.0 -> 3.1.0 -> 3.2.0); a new key is never
+      required, and a new ON/OFF key carries `since` (the version that added it), so a file of an older version,
+      which lacks them, is read as it is: a missing `since` key is UNKNOWN in its ARCH (with the parser note
+      probe_again:<KEY>) and OFF elsewhere
     consumers: [gui, mcp]
   PROBE_CONVERTED_FROM:
     group: meta
@@ -1023,6 +1033,206 @@ keys:
       windows: "no verified constant: UNKNOWN"
       macos: "hw.optional.arm.FEAT_BF16"
     normalise: "see the rule above"
+    consumers: [recipe]
+
+  # --- the CPU features of the other architectures ggml's CPU backend has options for (probe 3.2.0) -----------
+  # orchestrator/runtime/build/ggml_cpu_options.py lists every CPU option of the pinned llama.cpp and the key that
+  # decides it. The build recipe has no plan for these architectures yet (it refuses them and names what the probe
+  # found); the keys are read so that a later target pack plans them from the probe, as recipe.py plans x86 and ARM.
+  # Linux: ON if every token of cpuinfo is in the CPU's extension list, else OFF; UNKNOWN when /proc/cpuinfo has no
+  # such list. RISC-V: the "isa" line (the extensions every hart has; "hart isa" when there is none), split into its
+  # single-letter extensions (g = imafd plus zicsr and zifencei) and its "_" separated ones. LoongArch: "Features".
+  # POWER: "altivec" from "cpu : POWERn ..., altivec supported", "vsx" from AT_HWCAP (PPC_FEATURE_HAS_VSX, bit 7 in
+  # /proc/self/auxv), or from POWER7 on, where VSX is part of the architecture (ISA 2.06). s390x: "features".
+  # Windows and macOS never run these architectures: OFF. Another ARCH: OFF.
+  # since: the probe version that added the key. A profile of an older probe lacks it and is read with UNKNOWN in its
+  # ARCH (OFF elsewhere) and a probe_again:<KEY> note, never refused. perf none: no build is planned for these
+  # architectures yet, so the benchmark key of every existing profile stays the same.
+  SUPPORTS_RVV:
+    group: riscv
+    type: bool
+    cpuinfo: [v]
+    since: 3.2.0
+    only_arch: [riscv64]
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources: {linux: "/proc/cpuinfo isa: the V extension (rv64imafdcv...)", windows: "OFF", macos: "OFF"}
+    normalise: "see the rule above; ggml option GGML_RVV"
+    consumers: [recipe]
+  SUPPORTS_RV_ZFH:
+    group: riscv
+    type: bool
+    cpuinfo: [zfh]
+    since: 3.2.0
+    only_arch: [riscv64]
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources: {linux: "/proc/cpuinfo isa: _zfh", windows: "OFF", macos: "OFF"}
+    normalise: "see the rule above; ggml option GGML_RV_ZFH"
+    consumers: [recipe]
+  SUPPORTS_RV_ZVFH:
+    group: riscv
+    type: bool
+    cpuinfo: [zvfh]
+    since: 3.2.0
+    only_arch: [riscv64]
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources: {linux: "/proc/cpuinfo isa: _zvfh", windows: "OFF", macos: "OFF"}
+    normalise: "see the rule above; ggml option GGML_RV_ZVFH (with GGML_RVV)"
+    consumers: [recipe]
+  SUPPORTS_RV_ZICBOP:
+    group: riscv
+    type: bool
+    cpuinfo: [zicbop]
+    since: 3.2.0
+    only_arch: [riscv64]
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources: {linux: "/proc/cpuinfo isa: _zicbop", windows: "OFF", macos: "OFF"}
+    normalise: "see the rule above; ggml option GGML_RV_ZICBOP"
+    consumers: [recipe]
+  SUPPORTS_RV_ZIHINTPAUSE:
+    group: riscv
+    type: bool
+    cpuinfo: [zihintpause]
+    since: 3.2.0
+    only_arch: [riscv64]
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources: {linux: "/proc/cpuinfo isa: _zihintpause", windows: "OFF", macos: "OFF"}
+    normalise: "see the rule above; ggml option GGML_RV_ZIHINTPAUSE"
+    consumers: [recipe]
+  SUPPORTS_RV_ZVFBFWMA:
+    group: riscv
+    type: bool
+    cpuinfo: [zvfbfwma]
+    since: 3.2.0
+    only_arch: [riscv64]
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources: {linux: "/proc/cpuinfo isa: _zvfbfwma", windows: "OFF", macos: "OFF"}
+    normalise: "see the rule above; ggml option GGML_RV_ZVFBFWMA (with GGML_RVV; OFF upstream)"
+    consumers: [recipe]
+  SUPPORTS_RV_ZBA:
+    group: riscv
+    type: bool
+    cpuinfo: [zba]
+    since: 3.2.0
+    only_arch: [riscv64]
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources: {linux: "/proc/cpuinfo isa: _zba", windows: "OFF", macos: "OFF"}
+    normalise: "see the rule above; GGML_RV_ZBA, which ggml-cpu reads without declaring it as an option"
+    consumers: [recipe]
+  SUPPORTS_XTHEADVECTOR:
+    group: riscv
+    type: bool
+    cpuinfo: [xtheadvector]
+    since: 3.2.0
+    only_arch: [riscv64]
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources: {linux: "/proc/cpuinfo isa: _xtheadvector (T-Head cores only)", windows: "OFF", macos: "OFF"}
+    normalise: "see the rule above; ggml option GGML_XTHEADVECTOR"
+    consumers: [recipe]
+  SUPPORTS_LSX:
+    group: loongarch
+    type: bool
+    cpuinfo: [lsx]
+    since: 3.2.0
+    only_arch: [loongarch64]
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources: {linux: "/proc/cpuinfo Features lsx", windows: "OFF", macos: "OFF"}
+    normalise: "see the rule above; ggml option GGML_LSX"
+    consumers: [recipe]
+  SUPPORTS_LASX:
+    group: loongarch
+    type: bool
+    cpuinfo: [lasx]
+    since: 3.2.0
+    only_arch: [loongarch64]
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources: {linux: "/proc/cpuinfo Features lasx", windows: "OFF", macos: "OFF"}
+    normalise: "see the rule above; ggml option GGML_LASX"
+    consumers: [recipe]
+  SUPPORTS_VSX:
+    group: power
+    type: bool
+    cpuinfo: [vsx]
+    since: 3.2.0
+    only_arch: [ppc64le]
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources:
+      linux: "AT_HWCAP PPC_FEATURE_HAS_VSX (/proc/self/auxv), or POWER_CPU_TYPE power7 and later"
+      windows: "OFF"
+      macos: "OFF"
+    normalise: "see the rule above; the VSX of ggml's PowerPC CPU variants"
+    consumers: [recipe]
+  POWER_CPU_TYPE:
+    group: power
+    type: enum
+    values: [power7, power8, power9, power10, power11]
+    required: false
+    since: 3.2.0
+    only_arch: [ppc64le]
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources: {linux: "/proc/cpuinfo cpu (\"POWER9 (raw), altivec supported\")"}
+    normalise: >-
+      POWER<n> of the first cpu line in lower case (power9); another generation is left out with
+      not_determined:POWER_CPU_TYPE. The value of GGML_CPU_POWERPC_CPUTYPE (-mcpu=power9)
+    consumers: [recipe]
+  SUPPORTS_VXE:
+    group: s390x
+    type: bool
+    cpuinfo: [vxe]
+    since: 3.2.0
+    only_arch: [s390x]
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources: {linux: "/proc/cpuinfo features vxe", windows: "OFF", macos: "OFF"}
+    normalise: "see the rule above; the vector enhancements facility 1 (z14), which GGML_VXE builds on"
+    consumers: [recipe]
+  SUPPORTS_VXE2:
+    group: s390x
+    type: bool
+    cpuinfo: [vxe2]
+    since: 3.2.0
+    only_arch: [s390x]
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources: {linux: "/proc/cpuinfo features vxe2", windows: "OFF", macos: "OFF"}
+    normalise: "see the rule above; ggml option GGML_VXE (it compiles ggml's VXE2 code, z15 and later)"
+    consumers: [recipe]
+  SUPPORTS_NNPA:
+    group: s390x
+    type: bool
+    cpuinfo: [nnpa]
+    since: 3.2.0
+    only_arch: [s390x]
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources: {linux: "/proc/cpuinfo features nnpa", windows: "OFF", macos: "OFF"}
+    normalise: "see the rule above; the NNPA of ggml's s390x CPU variants (z16)"
     consumers: [recipe]
 
   # --- memory and disk ---------------------------------------------------------------------------------------

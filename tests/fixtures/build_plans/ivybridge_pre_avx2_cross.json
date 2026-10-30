@@ -9,6 +9,14 @@
     "libc": "glibc",
     "libc_version": "2.31"
   },
+  "cpu_features": {
+    "unusable": [],
+    "used": [
+      "SSE42",
+      "AVX",
+      "F16C"
+    ]
+  },
   "notes": [
     "backend cpu: CPU build",
     "debian-11 has GCC 10.2, below upstream's oldest tested compiler (GCC 11); whether the pin builds with it is unverified"

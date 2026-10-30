@@ -266,7 +266,7 @@ profile_is_this_machine() {
 # compiler flags of the options that are ON on the x86-64 baseline, whatever the image's compiler would choose by
 # default.
 explicit_x86_flags() {
-    local row key option needs token value cpu_flags missing options=() unknown=()
+    local row key option needs token value cpu_flags missing options=() unknown=() used=() unusable=()
     declare -A use
     cpu_flags="$(profile_cpu_flags | cpu_flag_list)"
     for row in "${X86_FEATURE_TABLE[@]}"; do
@@ -287,20 +287,27 @@ explicit_x86_flags() {
             missing="$(avx512_missing "$cpu_flags")"
             if [ -n "$missing" ]; then
                 log_warn "SUPPORTS_AVX512 is ON, but GGML_AVX512 also compiles for ${missing// /, }, which the probe's CPU flags do not name: the AVX2 plan, no AVX-512"
+                unusable+=("AVX512:GGML_AVX512 also compiles for ${missing// /, }, which the probe's CPU flags do not name")
                 value=OFF
             fi
         fi
         if [ "$value" = ON ] && [ "$needs" != - ] && [ "${use[$needs]:-OFF}" != ON ]; then
             log_warn "$key is ON without $needs in the hardware profile; not used"
+            unusable+=("${key#SUPPORTS_}:builds on ${needs#SUPPORTS_}, which the build does not use")
             value=OFF
         fi
         use[$key]="$value"
+        if [ "$value" = ON ]; then
+            used+=("${key#SUPPORTS_}")
+        fi
         options+=("-D$option=$value")
     done
     if [ ${#unknown[@]} -gt 0 ]; then
         log_warn "The hardware profile does not say whether the CPU has ${unknown[*]}: left out (only what the probe confirmed is used)"
     fi
     X86_CMAKE_FLAGS="${options[*]}"
+    CPU_FEATURES_USED="$(IFS=,; echo "${used[*]}")"
+    CPU_FEATURES_UNUSABLE="$(IFS=';'; echo "${unusable[*]}")"
     local cflags="-march=x86-64"
     for row in "${X86_FLAG_TABLE[@]}"; do
         option="${row%% *}"
@@ -317,7 +324,15 @@ explicit_x86_flags() {
 plan_x86_cpu() {
     if profile_is_this_machine; then
         log_info "The hardware profile is of this build machine: -march=native"
-        local native=()
+        local native=() row key used=()
+        for row in "${X86_FEATURE_TABLE[@]}"; do  # -march=native takes every feature this CPU has
+            key="${row%% *}"
+            if [ "${HW_CONFIG[$key]:-}" = ON ]; then
+                used+=("${key#SUPPORTS_}")
+            fi
+        done
+        CPU_FEATURES_USED="$(IFS=,; echo "${used[*]}")"
+        CPU_FEATURES_UNUSABLE=""
         X86_CFLAGS="-march=native"
         if [[ "${HW_CONFIG[SUPPORTS_AVX2]:-OFF}" == "ON" ]]; then
             native+=(-DGGML_AVX2=ON)
@@ -340,6 +355,142 @@ plan_x86_cpu() {
 # END OF THE x86_64 CPU
 # ============================================================================
 
+# ============================================================================
+# THE CPU OF AN aarch64 PROFILE: -march and GGML_CPU_ARM_ARCH from the probe's features
+# The same functions in targets/Rockchip and targets/_template (tests/test_target_stage.py compares them, and runs them
+# against the build recipe on the same profiles). They read the profile from HW_CONFIG (the SUPPORTS_* keys) and its
+# file (HARDWARE_CONFIG_FILE, for CPU_FLAGS_ALL as written), and set ARM_ARCH, ARM_CFLAGS, ARM_CMAKE_FLAGS,
+# CPU_FEATURES_USED and CPU_FEATURES_UNUSABLE.
+# ============================================================================
+
+# The tags of GGML_CPU_ARM_ARCH as the build recipe plans them (orchestrator/runtime/build/recipe.py: ARM_ARCH_TAGS,
+# in ggml's ARCH_TAGS order; the one planner): the probe's key, the -march tag and its /proc/cpuinfo flags
+# (configs/hardware_probe_schema.yml), which a probe file of version 1.x without the key still names in CPU_FLAGS_ALL,
+# and the key of the tag it builds on (recipe.ARM_NEEDS, - for none): a tag is planned only when its base is.
+ARM_TAG_TABLE=(
+    "SUPPORTS_DOTPROD dotprod asimddp -"
+    "SUPPORTS_FP16_ARITH fp16 fphp,asimdhp -"
+    "SUPPORTS_SVE sve sve SUPPORTS_FP16_ARITH"
+    "SUPPORTS_I8MM i8mm i8mm SUPPORTS_DOTPROD"
+    "SUPPORTS_SVE2 sve2 sve2 SUPPORTS_SVE"
+    "SUPPORTS_SME sme sme SUPPORTS_SVE2"
+)
+# ARM features the board may have that no code of the pinned llama.cpp uses (recipe.ARM_UNUSABLE, from
+# ggml_cpu_options.py): the probe's key, its flags, and why.
+ARM_UNUSABLE_TABLE=(
+    "SUPPORTS_BF16_ARM bf16 the pin has no BF16 kernel for ARM: its ggml-cpu build files neither check nor tag BF16 on ARM"
+)
+# The oldest compilers that know +sme (recipe.SME_COMPILER_MIN).
+SME_GCC_MIN=14
+SME_CLANG_MIN=18
+
+arm_feature_value() {  # KEY FLAGS CPU_FLAGS: ON or OFF; UNKNOWN counts as OFF, a 1.x file without the key has its flags
+    local value="${HW_CONFIG[$1]:-}" flag
+    if [ "$value" = ON ] || [ "$value" = OFF ]; then
+        echo "$value"
+        return
+    fi
+    if [ -n "$value" ] || [ -z "$3" ]; then
+        echo OFF
+        return
+    fi
+    for flag in ${2//,/ }; do
+        if [[ ",$3," != *",$flag,"* ]]; then
+            echo OFF
+            return
+        fi
+    done
+    echo ON
+}
+
+# The C compiler of the plan as "family version" (gcc 12.2.0, clang 18.1.3), empty when this script cannot tell.
+plan_c_compiler_version() {  # COMPILER
+    local banner version
+    command -v "$1" >/dev/null 2>&1 || return 0
+    banner="$("$1" --version 2>/dev/null | head -n 1)"
+    if [[ "$banner" =~ clang\ version\ ([0-9]+(\.[0-9]+)*) ]]; then
+        echo "clang ${BASH_REMATCH[1]}"
+        return
+    fi
+    version="$("$1" -dumpfullversion -dumpversion 2>/dev/null | head -n 1)"
+    if [[ "$version" =~ ^[0-9]+(\.[0-9]+)*$ ]] && [[ "$banner" == *gcc* || "$banner" == *GCC* \
+            || "$banner" == *"Free Software Foundation"* ]]; then
+        echo "gcc $version"
+    fi
+}
+
+sme_problem() {  # "family version" of the compiler: why it cannot build +sme, empty when it can (recipe.sme_problem)
+    local family="${1%% *}" version="${1#* }" major need="GCC $SME_GCC_MIN or Clang $SME_CLANG_MIN" name=GCC minimum
+    if [ -z "$1" ] || { [ "$family" != gcc ] && [ "$family" != clang ]; }; then
+        echo "compiler too old or not known: +sme needs $need, and the build's compiler version is not known"
+        return
+    fi
+    minimum=$SME_GCC_MIN
+    if [ "$family" = clang ]; then
+        name=Clang
+        minimum=$SME_CLANG_MIN
+    fi
+    major="${version%%.*}"
+    if [ "$major" -lt "$minimum" ]; then
+        echo "compiler too old: +sme needs $need, and the build compiles with $name $version"
+    fi
+}
+
+# GGML_CPU_ARM_ARCH as the build recipe plans it for another machine (recipe.arm_plan): armv8.2-a with the tags of
+# the features the profile confirms, armv8-a without any (also for a profile without the keys, the plain defaults);
+# +sme only with a compiler that knows it (COMMAND: the plan's C compiler), else SME is named as unusable and the rest is
+# built. Never -mcpu: the cores of a board say nothing the probe's features do not (a second planner drifted before).
+plan_arm_cpu() {  # [C COMPILER COMMAND]
+    local row key tag flags base value cpu_flags problem reason tags="" planned=" " used=() unusable=()
+    cpu_flags=""
+    if [ "${PROFILE_SOURCE:-}" = profile ]; then
+        cpu_flags="$(profile_cpu_flags | cpu_flag_list)"
+    fi
+    for row in "${ARM_TAG_TABLE[@]}"; do
+        read -r key tag flags base <<< "$row"
+        value="$(arm_feature_value "$key" "$flags" "$cpu_flags")"
+        [ "$value" = ON ] || continue
+        if [ "$base" != - ] && [[ "$planned" != *" $base "* ]]; then
+            reason="builds on ${base#SUPPORTS_}, which the build does not use"
+            unusable+=("${key#SUPPORTS_}:$reason")
+            log_warn "The board has ${key#SUPPORTS_}, the build cannot use it: $reason"
+            continue
+        fi
+        if [ "$tag" = sme ]; then
+            problem="$(sme_problem "$(plan_c_compiler_version "${1:-}")")"  # asked only for a board with SME
+            if [ -n "$problem" ]; then
+                unusable+=("${key#SUPPORTS_}:$problem")
+                log_warn "The board has SME, the build cannot use it: $problem"
+                continue
+            fi
+        fi
+        tags="$tags+$tag"
+        planned="$planned$key "
+        used+=("${key#SUPPORTS_}")
+    done
+    for row in "${ARM_UNUSABLE_TABLE[@]}"; do
+        read -r key flags reason <<< "$row"
+        if [ "$(arm_feature_value "$key" "$flags" "$cpu_flags")" = ON ]; then
+            unusable+=("${key#SUPPORTS_}:$reason")
+            log_warn "The board has ${key#SUPPORTS_}, the build cannot use it: $reason"
+        fi
+    done
+    if [ -n "$tags" ]; then
+        ARM_ARCH="armv8.2-a$tags"
+    else
+        ARM_ARCH="armv8-a"
+    fi
+    ARM_CFLAGS="-march=$ARM_ARCH"
+    ARM_CMAKE_FLAGS="-DGGML_CPU_ARM_ARCH=$ARM_ARCH"
+    CPU_FEATURES_USED="$(IFS=,; echo "${used[*]}")"
+    CPU_FEATURES_UNUSABLE="$(IFS=';'; echo "${unusable[*]}")"
+    log_info "The CPU of the hardware profile: $ARM_CFLAGS (GGML_CPU_ARM_ARCH, as the build recipe plans it)"
+}
+
+# ============================================================================
+# END OF THE aarch64 CPU
+# ============================================================================
+
 # The module's compiler flags and the build jobs; the compilers CC and CXX of the image.
 generate_compiler_flags() {
     local build_jobs name path key
@@ -349,10 +500,21 @@ generate_compiler_flags() {
     # only for this build machine itself, else the probe's own features), after the module's flags, so its -march wins.
     X86_CFLAGS=""
     X86_CMAKE_FLAGS=""
+    ARM_CFLAGS=""
+    ARM_CMAKE_FLAGS=""
+    CPU_FEATURES_USED=""
+    CPU_FEATURES_UNUSABLE=""
     if [ "$PROFILE_SOURCE" = profile ] && [ "$(elf_machine_of "${HW_CONFIG[ARCHITECTURE_FULL]}")" = 62 ]; then
         plan_x86_cpu
         COMPILER_CONFIG[CFLAGS]="${COMPILER_CONFIG[CFLAGS]} $X86_CFLAGS"
         COMPILER_CONFIG[CXXFLAGS]="${COMPILER_CONFIG[CXXFLAGS]} $X86_CFLAGS"
+    fi
+    # An aarch64 board with its hardware profile: -march and GGML_CPU_ARM_ARCH as the build recipe plans them
+    # (plan_arm_cpu, from the probe's features, never from a core name), after the module's flags, so its -march wins.
+    if [ "$PROFILE_SOURCE" = profile ] && [ "$(elf_machine_of "${HW_CONFIG[ARCHITECTURE_FULL]}")" = 183 ]; then
+        plan_arm_cpu "${CC:-cc}"
+        COMPILER_CONFIG[CFLAGS]="${COMPILER_CONFIG[CFLAGS]} $ARM_CFLAGS"
+        COMPILER_CONFIG[CXXFLAGS]="${COMPILER_CONFIG[CXXFLAGS]} $ARM_CFLAGS"
     fi
     build_jobs="$(nproc)"
     if [[ "${HW_CONFIG[CPU_CORES]:-}" =~ ^[1-9][0-9]*$ ]] && [[ "${HW_CONFIG[CPU_CORES]}" -lt "$build_jobs" ]]; then
@@ -393,24 +555,33 @@ EOF
         printf '\n# --- THE x86 CPU OF THE PROFILE (as the build recipe plans it) ---\nSET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} %s")\nSET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} %s")\n' \
             "$X86_CFLAGS" "$X86_CFLAGS" >> "$CMAKE_TOOLCHAIN"
     fi
+    # The ARM CPU of the plan (plan_arm_cpu: computed words of plain characters, never the module's text)
+    if [ -n "$ARM_CFLAGS" ]; then
+        printf '\n# --- THE ARM CPU OF THE PROFILE (as the build recipe plans it) ---\nSET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} %s")\nSET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} %s")\n' \
+            "$ARM_CFLAGS" "$ARM_CFLAGS" >> "$CMAKE_TOOLCHAIN"
+    fi
 
     # Dynamic Feature Flags (Based on Probe SUPPORTS_*): CMake options on the cmake command line of the target stage.
-    # An x86 profile's options come from the plan (GGML_NATIVE=OFF and the x86 options, after the module's flags).
+    # The CPU options of an x86 or aarch64 profile come from the plan (GGML_NATIVE=OFF and the x86 options or
+    # GGML_CPU_ARM_ARCH, after the module's flags).
     CMAKE_OPTIONS='[CMAKE_FLAGS]'
-    if [ -n "$X86_CFLAGS" ]; then
+    if [ -n "$X86_CFLAGS" ] || [ -n "$ARM_CFLAGS" ]; then
         if [ -n "$CMAKE_OPTIONS" ]; then
             CMAKE_OPTIONS="$CMAKE_OPTIONS -DGGML_NATIVE=OFF"
         else
             CMAKE_OPTIONS="-DGGML_NATIVE=OFF"
         fi
-        if [ -n "$X86_CMAKE_FLAGS" ]; then
-            CMAKE_OPTIONS="$CMAKE_OPTIONS $X86_CMAKE_FLAGS"
+        if [ -n "$X86_CMAKE_FLAGS$ARM_CMAKE_FLAGS" ]; then
+            CMAKE_OPTIONS="$CMAKE_OPTIONS ${X86_CMAKE_FLAGS}${ARM_CMAKE_FLAGS}"
         fi
     fi
     local feature
     for feature in NEON FP16 AVX2 AVX512 CUDA; do
         if [ -n "$X86_CFLAGS" ] && { [ "$feature" = AVX2 ] || [ "$feature" = AVX512 ]; }; then
             continue  # in the x86 plan above
+        fi
+        if [ -n "$ARM_CFLAGS" ] && { [ "$feature" = NEON ] || [ "$feature" = FP16 ]; }; then
+            continue  # NEON is the ARMv8-A baseline, FP16 a tag of GGML_CPU_ARM_ARCH above
         fi
         if [ "${HW_CONFIG[SUPPORTS_$feature]:-OFF}" == "ON" ]; then
             CMAKE_OPTIONS="$CMAKE_OPTIONS -DGGML_$feature=ON"
@@ -569,6 +740,9 @@ board_plan_lines() {
     plan_line CMAKE_TOOLCHAIN_FILE "$CMAKE_TOOLCHAIN"
     plan_line CMAKE_FLAGS "$CMAKE_OPTIONS"
     plan_line BUILD_JOBS "${COMPILER_CONFIG[BUILD_JOBS]}"
+    # the probe's CPU features the plan uses, and those the board has that it cannot use ("FEATURE:reason;...")
+    plan_line CPU_FEATURES_USED "${CPU_FEATURES_USED:-}"
+    plan_line CPU_FEATURES_UNUSABLE "${CPU_FEATURES_UNUSABLE:-}"
 }
 
 generate_build_config() {

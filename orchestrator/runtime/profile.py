@@ -49,6 +49,7 @@ _STABILITY = {"stable", "volatile"}
 _PERF = {"key", "recorded", "none"}
 _GPU_KEY = re.compile(r"^GPU(\d{1,3})_([A-Z][A-Z0-9_]*)$", re.ASCII)
 _INT = re.compile(r"^(0|[1-9][0-9]{0,11})$", re.ASCII)
+_SINCE = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}$", re.ASCII)
 _TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", re.ASCII)
 _HEX4 = re.compile(r"^0x[0-9a-f]{4}$", re.ASCII)
 _DOTTED = re.compile(r"(\d{1,5}(?:\.\d{1,6}){0,3})", re.ASCII)
@@ -104,6 +105,7 @@ class KeySpec:
     os_values: Mapping[str, Tuple[str, ...]] = field(default_factory=dict)
     cpuinfo: Tuple[str, ...] = ()
     cpuinfo_any: Tuple[str, ...] = ()
+    since: Optional[str] = None  # the probe version that added the key (a file of an older probe lacks it)
 
 
 class ProbeSchema:
@@ -128,6 +130,8 @@ class ProbeSchema:
             self.arch_32bit = {str(k): str(v) for k, v in t["arch_32bit_userland"].items()}
             self.x86_arches = tuple(t["x86_arches"])
             self.arm_arches = tuple(t["arm_arches"])
+            self.hwcap_bits = {str(arch): {str(token): str(bit) for token, bit in bits.items()}
+                               for arch, bits in (t.get("hwcap_bits") or {}).items()}
             self.os_families = {str(fam): tuple(ids) for fam, ids in t["os_families"].items()}
             self.os_family_fixed = {str(k): str(v) for k, v in t["os_family_fixed"].items()}
             self.x86_vendors = {str(k).strip(): str(v) for k, v in t["x86_vendors"].items()}
@@ -176,6 +180,11 @@ class ProbeSchema:
             required = bool(raw["required"])
         else:
             raise SchemaError(f"{where}: field 'required' missing")
+        if raw.get("since") is not None:
+            if not _SINCE.fullmatch(str(raw["since"])):
+                raise SchemaError(f"{where}: since must be a version like 3.2.0")
+            if kind != "bool" and required:
+                raise SchemaError(f"{where}: a key added in a later probe version cannot be required")
         values = tuple(raw.get("values") or ())
         if kind == "enum" and (not values or not all(isinstance(v, str) for v in values)):
             raise SchemaError(f"{where}: enum values must be quoted strings")
@@ -201,7 +210,8 @@ class ProbeSchema:
             max_length=raw.get("max_length"), max_items=raw.get("max_items"),
             only_arch=tuple(raw.get("only_arch") or ()), only_os=tuple(raw.get("only_os") or ()),
             only_gpu_vendor=tuple(raw.get("only_gpu_vendor") or ()), os_values=os_values,
-            cpuinfo=tuple(raw.get("cpuinfo") or ()), cpuinfo_any=tuple(raw.get("cpuinfo_any") or ()))
+            cpuinfo=tuple(raw.get("cpuinfo") or ()), cpuinfo_any=tuple(raw.get("cpuinfo_any") or ()),
+            since=str(raw["since"]) if raw.get("since") is not None else None)
 
     # --- keys and values ---
 
@@ -714,14 +724,38 @@ def _from_schema2(pairs: Sequence[_Pair], schema: ProbeSchema, where: str = "lin
             values[key] = schema.check_value(found[0], value)
         except ValueError as e:
             raise ProfileError(f"{at}: {key}: {e}") from None
+    added = _fill_later_booleans(values, schema)
     problems = _violations(values, schema, require=values.get("PROBE_CONVERTED_FROM") is None)
     if problems:
         shown = "; ".join(f"{key}: {reason}" for key, reason, _kind in problems[:8])
         more = f" (and {len(problems) - 8} more)" if len(problems) > 8 else ""
         raise ProfileError(shown + more)
-    notes = [f"unknown_key:{k}" for k in unknown]
+    notes = [f"unknown_key:{k}" for k in unknown] + [f"probe_again:{k}" for k in added]
     source = 1 if values.get("PROBE_CONVERTED_FROM") else 2
     return HardwareProfile(values, schema=schema, source_schema=source, notes=notes)
+
+
+def _version_tuple(text: Optional[str]) -> Tuple[int, ...]:
+    return tuple(int(part) for part in text.split(".")) if text and _SINCE.fullmatch(text) else ()
+
+
+def _fill_later_booleans(values: Dict[str, str], schema: ProbeSchema) -> List[str]:
+    """A file of an older probe lacks the ON/OFF keys a later version added (`since` in the schema): each one is
+    filled in, OFF outside its ARCH or OS (nothing to learn there), else UNKNOWN (never guessed). Returns the keys
+    filled with UNKNOWN: probing the machine again tells them. A file of that version or newer must have them."""
+    written = _version_tuple(values.get("PROBE_TOOL_VERSION"))
+    os_name, arch = values.get("OS"), values.get("ARCH")
+    unknown: List[str] = []
+    for key, spec in schema.keys.items():
+        if spec.type != "bool" or spec.since is None or key in values:
+            continue
+        if written and written >= _version_tuple(spec.since):
+            continue  # reported as missing by _violations
+        outside = (spec.only_arch and arch not in spec.only_arch) or (spec.only_os and os_name not in spec.only_os)
+        values[key] = "OFF" if outside else "UNKNOWN"
+        if not outside:
+            unknown.append(key)
+    return unknown
 
 
 def _violations(values: Mapping[str, str], schema: ProbeSchema, *, require: bool) -> List[Tuple[str, str, str]]:

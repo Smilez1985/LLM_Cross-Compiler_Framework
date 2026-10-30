@@ -11,6 +11,20 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 
 ## [3.3.0] - 2026-10-30
 
+### Added
+- `2026-10-30 13:26 UTC` · `v3.3.0` **Every CPU feature ggml can use is found by the probe and planned by the build recipe** ([design](docs/DESIGN.md#targets-hardware-and-templates)):
+  the hardware probe 3.2.0 (`.py`, `.sh`, `.ps1`) also writes the CPU features of RISC-V (RVV, Zfh, Zvfh, Zicbop,
+  Zihintpause, Zvfbfwma, Zba, XTheadVector), LoongArch (LSX, LASX), POWER (VSX, the POWER generation) and s390x
+  (VXE, VXE2, NNPA), read from `/proc/cpuinfo` and the kernel's HWCAP bits; an older probe file gets them as OFF
+  outside its system and UNKNOWN on it, with a note to probe again. `orchestrator/runtime/build/ggml_cpu_options.py`
+  lists every CPU option of the pinned llama.cpp as planned or not usable with the reason, and
+  `tests/test_cpu_feature_coverage.py` fails when a new pin adds one. The build plan (`cpu_features`), the board
+  package's `MANIFEST.json` (`hardware.cpu_features`), `llm-cli runtime device plan`, the Boards window and the
+  deploy facts over MCP name the features the build uses and those the board has but the build cannot use, each
+  with its reason (SME with a compiler older than GCC 14 or Clang 18, BF16 on ARM, which the pin has no kernel
+  for, and a tag without the one it builds on, such as `+sve2` without `+sve` or `+i8mm` on an armv8.0 board).
+  A board of a system the recipe does not plan yet is refused with the features its probe found.
+
 ### Changed
 - `2026-10-30 14:55 UTC` · `v3.3.0` **Your board tests show up in the target's benchmarks, and ignored old entries are named** ([design](docs/DESIGN.md#targets-hardware-and-templates)):
   the newest passed board test of a build per board, model and quantization now joins the target's benchmark rows
@@ -89,6 +103,12 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   build of a board's runtime (`llm-cli device runtime build`, the Boards window, the tool `deploy_device_runtime`)
   stop a step that prints nothing after `build_idle_timeout`, as the stage containers of a model build do (before,
   they always waited the built-in 1800 seconds, whatever the setting said).
+- `2026-10-30 13:26 UTC` · `v3.3.0` **RK3566, RK3568 and RK3588 board packages are built with dotprod and fp16 again** ([design](docs/DESIGN.md#targets-hardware-and-templates)):
+  the config stage of the Rockchip target and of the module template planned `-mcpu` from the core's name and
+  `-march=armv8-a`, a second ARM planner beside the build recipe, so the packages lost the board's dotprod and fp16
+  (and `GGML_NEON`, which is no option of ggml). It now plans `-march` and `GGML_CPU_ARM_ARCH` from the probe's
+  features as the build recipe does (`armv8.2-a+dotprod+fp16` on these boards), and a table test runs both on the
+  same profiles.
 
 ### Security
 - `2026-10-30 14:40 UTC` · `v3.3.0` **The dependency pre-fetch unpacks through the framework's one safe extraction**

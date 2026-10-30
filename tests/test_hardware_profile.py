@@ -103,8 +103,12 @@ class TestSchemaFile:
     def test_perf_roles_follow_the_design(self):
         keyed = {k for k, s in SCHEMA.keys.items() if s.perf == "key"}
         assert {"ARCH", "LIBC", "CPU_VENDOR", "CPU_MODEL", "CPU_CLUSTERS", "SOC_MODEL", "NPU_MODEL"} <= keyed
-        assert {k for k in SCHEMA.keys if k.startswith("SUPPORTS_")} <= keyed
-        recorded = {k for k, s in SCHEMA.keys.items() if s.perf == "recorded"}
+        # The CPU features of the architectures no build is planned for yet (probe 3.2.0, `since`) stay out of the
+        # benchmark key, so the key of no existing profile changes (on purpose).
+        later = {k for k in SCHEMA.keys if k.startswith("SUPPORTS_") and SCHEMA.keys[k].since}
+        assert {k for k in SCHEMA.keys if k.startswith("SUPPORTS_")} - later <= keyed
+        assert later and all(SCHEMA.keys[k].perf == "none" for k in later)
+        recorded ={k for k, s in SCHEMA.keys.items() if s.perf == "recorded"}
         assert {"OS_ID", "OS_VERSION_ID", "LIBC_VERSION", "RAM_TOTAL_MB", "NVIDIA_DRIVER_CUDA_MAX"} <= recorded
         never = {"GENERATED_AT", "PROBE_WARNINGS", "PROBE_TOOL", "PROBE_TOOL_VERSION", "KERNEL"}
         never |= {k for k in SCHEMA.keys if k.startswith("TOOL_")}
@@ -373,8 +377,14 @@ class TestSchema2Rejections:
 
     def test_booleans_always_present(self):
         for key in SCHEMA.bool_keys:
+            text = fixture("schema2_pc_two_nvidia.txt")
+            if SCHEMA.keys[key].since:  # a key of a later probe is missing only from a file of that version on
+                text = edit(text, "PROBE_TOOL_VERSION", SCHEMA.keys[key].since)
+                for later in SCHEMA.bool_keys:
+                    if SCHEMA.keys[later].since and later != key:
+                        text = edit(text, later, "OFF")
             with pytest.raises(ProfileError, match=f"{key}: missing"):
-                parse_profile(edit(fixture("schema2_pc_two_nvidia.txt"), key, None))
+                parse_profile(edit(text, key, None))
         for key in ("GPU1_DISCRETE", "GPU1_UNIFIED", "GPU1_VENDOR"):
             with pytest.raises(ProfileError, match=f"{key}: missing"):
                 parse_profile(edit(fixture("schema2_pc_two_nvidia.txt"), key, None))

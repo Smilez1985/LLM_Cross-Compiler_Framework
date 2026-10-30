@@ -1199,6 +1199,7 @@ PROBE_WARNINGS=needs_root:RKNPU_DRIVER_VERSION
 | CPU | `CPU_MODEL`, `CPU_VENDOR`, `CPU_CORES_LOGICAL`, `CPU_CORES_PHYSICAL`, `CPU_CLUSTERS` (nur ARM: CPUs, Implementer, Part und höchste MHz je Cluster), `CPU_FLAGS_ALL`, `CPU_FLAGS_SOURCE`, `CPU_L2_CACHE_KB` |
 | x86-Merkmale | die 14 x86-Optionen von ggml: `SUPPORTS_SSE42`, `SUPPORTS_AVX`, `SUPPORTS_AVX2`, `SUPPORTS_BMI2`, `SUPPORTS_F16C`, `SUPPORTS_FMA`, `SUPPORTS_AVX512` (AVX-512 F), `SUPPORTS_AVX512_VBMI`, `SUPPORTS_AVX512_VNNI`, `SUPPORTS_AVX512_BF16`, `SUPPORTS_AVX_VNNI`, `SUPPORTS_AMX_TILE`, `SUPPORTS_AMX_INT8`, `SUPPORTS_AMX_BF16` |
 | ARM-Merkmale | `SUPPORTS_NEON`, `SUPPORTS_DOTPROD`, `SUPPORTS_FP16_ARITH`, `SUPPORTS_I8MM`, `SUPPORTS_SVE`, `SUPPORTS_SVE2`, `SUPPORTS_SME`, `SUPPORTS_BF16_ARM` |
+| Merkmale von RISC-V, LoongArch, POWER, s390x | Probe 3.2.0 ([Abschnitt 11.7](#117-die-cpu-fähigkeiten-der-probe-320-und-der-eine-planer)): `SUPPORTS_RVV`, `SUPPORTS_RV_ZFH`, `SUPPORTS_RV_ZVFH`, `SUPPORTS_RV_ZICBOP`, `SUPPORTS_RV_ZIHINTPAUSE`, `SUPPORTS_RV_ZVFBFWMA`, `SUPPORTS_RV_ZBA`, `SUPPORTS_XTHEADVECTOR`; `SUPPORTS_LSX`, `SUPPORTS_LASX`; `SUPPORTS_VSX`, `POWER_CPU_TYPE` (`power7` bis `power11`); `SUPPORTS_VXE`, `SUPPORTS_VXE2`, `SUPPORTS_NNPA` |
 | Speicher, Platte | `RAM_TOTAL_MB` (nutzbarer Speicher, nie die Summe der Speicherplätze), `SWAP_TOTAL_MB`, `RAM_AVAILABLE_MB`, `DISK_FREE_MB`, `RAM_TYPE`, `RAM_SPEED_MTS` |
 | SoC, NPU | `SOC_VENDOR`, `SOC_MODEL` (`rk3566`, ...), `BOARD_MODEL`, `JETSON_L4T_VERSION`, `JETSON_JETPACK_VERSION`, `NPU_VENDOR`, `NPU_MODEL`, `NPU_DEVICE`, `RKNPU_DRIVER_VERSION`, `RKLLM_RUNTIME_VERSION`, `RKNN_RUNTIME_VERSION`, `USB_ROCKCHIP_PID`, `USB_ROCKCHIP_MODE` (ein per USB angeschlossenes Board), `SUPPORTS_RKNN`, `SUPPORTS_HAILO`, `SUPPORTS_METIS`, `SUPPORTS_MX3`, `SUPPORTS_CORAL`, `SUPPORTS_INTEL_NPU`, `INTEL_NPU_DEVICE` |
 | Hailo | `HAILO_FAMILY` (`hailo8`, `hailo1x`), `HAILO_ARCH` (`hailo8`, `hailo8l`, `hailo10h`, ...), `HAILO_DEVICES`, `HAILO_INTERFACE`, `HAILO_DRIVER`, `HAILO_DRIVER_VERSION`, `HAILO_FW_VERSION`, `HAILORT_VERSION`, `HAILO_PYHAILORT_VERSION` ([Abschnitt 11.6](#116-die-schlüssel-der-probe-310-und-wie-ein-modul-sie-nutzt)) |
@@ -1340,3 +1341,37 @@ Die Hailo-Fakten kommen als ein typisierter Wert: `profile.hailo()` liefert ein 
 `pyhailort_version`, `version_mismatch` und den abgeleiteten `model` (`hailo-8l`) und `hailort_line` (`4` oder `5`);
 ein Profil ohne Hailo-Schlüssel liefert `present=False` und überall sonst `None`. `llm-cli scan` zeigt diese Fakten
 in einer Zeile „Hailo:“.
+
+### 11.7 Die CPU-Fähigkeiten der Probe 3.2.0 und der eine Planer
+
+Die Probe 3.2.0 (`PROBE_TOOL_VERSION=3.2.0`) schreibt für jede CPU-Fähigkeit, die das festgelegte llama.cpp nutzen
+kann, einen Schlüssel, auch auf den Systemen, die das Build-Rezept noch nicht plant: RISC-V (die `isa`-Zeile von
+`/proc/cpuinfo`: `SUPPORTS_RVV`, `SUPPORTS_RV_ZFH`, `SUPPORTS_RV_ZVFH`, `SUPPORTS_RV_ZICBOP`,
+`SUPPORTS_RV_ZIHINTPAUSE`, `SUPPORTS_RV_ZVFBFWMA`, `SUPPORTS_RV_ZBA`, `SUPPORTS_XTHEADVECTOR`), LoongArch
+(`SUPPORTS_LSX`, `SUPPORTS_LASX`), POWER (`SUPPORTS_VSX`, `POWER_CPU_TYPE` aus der `cpu`-Zeile) und s390x
+(`SUPPORTS_VXE`, `SUPPORTS_VXE2`, `SUPPORTS_NNPA`). Unter Linux ergänzen die HWCAP-Bits des Kernels
+(`/proc/self/auxv`), was `/proc/cpuinfo` nicht nennt; die Bits stehen in `tables.hwcap_bits` des Schemas. Jeder
+Schlüssel ist `ON`/`OFF`/`UNKNOWN` wie die x86- und ARM-Schlüssel, `OFF` auf einem anderen System. Einer Datei einer
+älteren Probe fehlen sie: Sie wird mit ihnen als `OFF` außerhalb ihres Systems und `UNKNOWN` auf ihm gelesen, und die
+Hinweise des Profils sagen `probe_again:<SCHLÜSSEL>`; eine Datei, die 3.2.0 sagt und einen nicht hat, wird abgelehnt.
+
+**Der eine Planer.** Nur das Build-Rezept (`orchestrator/runtime/build/recipe.py`) macht aus diesen Schlüsseln
+GGML-Optionen und Compiler-Flags: `arm_plan` für aarch64 (`armv8.2-a` plus `+dotprod +fp16 +sve +i8mm +sve2 +sme` in
+der Reihenfolge von ggml für die Fähigkeiten, die `ON` sind, `armv8-a` ohne eine; ein Tag nur mit dem, auf dem er
+aufbaut: `+fp16` für `+sve`, `+dotprod` für `+i8mm`, `+sve` für `+sve2`, `+sve2` für `+sme`; `+sme` nur mit
+GCC 14 oder Clang 18), `_x86_options` für x86_64. `orchestrator/runtime/build/ggml_cpu_options.py` führt jede CPU-Option des
+festgelegten llama.cpp mit dem Probe-Schlüssel, den sie braucht, und ob das Rezept sie plant oder warum es das nicht
+kann (zum Beispiel `+bf16` auf ARM, für das die Festlegung keinen Kernel hat). Der Plan hält `cpu_features` fest
+(`used`, und `unusable` mit dem Grund), und `llm-cli runtime device plan`, das Board-Fenster und das `MANIFEST.json`
+des Board-Pakets (`hardware.cpu_features`) zeigen sie.
+
+**In einem Target-Paket.** Eine Config-Stufe plant nie eigene CPU-Flags und leitet nie `-mcpu` aus dem Namen des
+Kerns ab; sie bildet das Rezept nach. Das Rockchip-Target und die Vorlage tragen dieselben Funktionen
+(`plan_arm_cpu`, `plan_x86_cpu` in `modules/config_module.sh`), die `ARM_CFLAGS`, `ARM_CMAKE_FLAGS`
+(`-DGGML_CPU_ARM_ARCH=...`), `CPU_FEATURES_USED` und `CPU_FEATURES_UNUSABLE` setzen; lass sie, wie sie sind, und
+`tests/test_target_stage.py` führt sie an denselben Profilen gegen das Rezept aus. Ein Board eines Systems, das das
+Rezept noch nicht plant (riscv64, loongarch64, ppc64le, s390x), wird abgelehnt, und die Ablehnung nennt die
+Fähigkeiten, die seine Probe fand. Wenn sich die Festlegung von llama.cpp bewegt, vergleicht
+`tests/test_cpu_feature_coverage.py` das Verzeichnis mit Auszügen ihrer CMake-Dateien
+(`tests/fixtures/llama_cpp/<Tag>/`): Ersetze die Auszüge und trage jede neue Option ins Verzeichnis ein, geplant oder
+mit dem Grund, warum sie nicht nutzbar ist.

@@ -39,6 +39,8 @@ SCHEMA = load_schema()
 RAW_SCHEMA = yaml.safe_load(SCHEMA_PATH.read_text(encoding="utf-8"))
 probe = hardware.load_probe()
 
+# The groups of the CPU feature keys (probe 3.2.0 added riscv, loongarch, power and s390x to x86 and arm).
+CPU_FEATURE_GROUPS = ("x86", "arm", "riscv", "loongarch", "power", "s390x")
 POSIX_ONLY = pytest.mark.skipif(os.name != "posix", reason="the shell probe and sysroots are POSIX")
 GIB = 1024 ** 3
 MADE_UP_SERIAL = "c0ffee00deadbeef"
@@ -46,7 +48,7 @@ MADE_UP_HOST = "probe-fixture-host"
 
 # Tools the .sh needs; the test PATH holds links to them and to fake vendor tools only.
 SHELL_TOOLS = ("cat", "grep", "sed", "awk", "tr", "cut", "head", "tail", "sort", "uname", "date", "df", "ls",
-               "readlink", "wc", "id", "timeout")
+               "readlink", "wc", "id", "timeout", "od")
 
 
 def no_tools(cmd, timeout):
@@ -605,7 +607,7 @@ class TestKeyTable:
             SCHEMA.keys["CPU_VENDOR"].values)
 
     def test_cpu_feature_table_is_the_schema(self):
-        features = {k: v for k, v in RAW_SCHEMA["keys"].items() if v["group"] in ("x86", "arm")}
+        features = {k: v for k, v in RAW_SCHEMA["keys"].items() if v["group"] in CPU_FEATURE_GROUPS and v["type"] == "bool"}
         assert set(probe.CPU_FEATURES) == set(features)
         for key, (tokens, any_of, constant, min_build, mac) in probe.CPU_FEATURES.items():
             raw = features[key]
@@ -725,9 +727,10 @@ class TestScripts:
         """The old .ps1 asked for constant 40 as AVX-512 (40 is AVX2) and 37 as NEON (SSE4.1): nearly every PC
         claimed AVX-512 and NEON."""
         text = PROBE_PS1.read_text(encoding="utf-8")
-        rows = re.findall(r"^\s+'(SUPPORTS_[A-Z0-9_]+)'\s*=\s*@\((\d+|\$null),\s*(\d+|\$null),\s*'(x86|arm)'\)",
+        rows = re.findall(r"^\s+'(SUPPORTS_[A-Z0-9_]+)'\s*=\s*@\((\d+|\$null),\s*(\d+|\$null),\s*"
+                          r"'(x86|arm|riscv|loongarch|power|s390x)'\)",
                           text, re.M)
-        features = {k: v for k, v in RAW_SCHEMA["keys"].items() if v["group"] in ("x86", "arm")}
+        features = {k: v for k, v in RAW_SCHEMA["keys"].items() if v["group"] in CPU_FEATURE_GROUPS and v["type"] == "bool"}
         assert {k for k, _c, _b, _g in rows} == set(features)
         for key, constant, build, group in rows:
             assert (None if constant == "$null" else int(constant)) == features[key].get("windows_feature"), key

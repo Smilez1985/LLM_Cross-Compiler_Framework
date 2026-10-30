@@ -996,17 +996,21 @@ def plan_of(image) -> dict:
 
 
 @needs_bash
-@pytest.mark.parametrize("fixture, text, arch, cpu, flag", [
-    ("schema2_rk3566_dietpi.txt", None, "aarch64", "Cortex-A55", "-mcpu=cortex-a55"),
-    ("schema2_rk3588_devuan_sysvinit.txt", None, "aarch64", "Cortex-A76", "-mcpu=cortex-a76"),
-    # RK3576 (target.yml: 4x Cortex-A72 + 4x Cortex-A53): the probe names both core types
+# The -march of each board is the build recipe's plan of the probe's features (recipe.arm_arch). Before, the config
+# stage planned -mcpu from the core's name and -march=armv8-a, so the RK3566/RK3588 packages lost dotprod and fp16:
+# these pins changed on purpose.
+@pytest.mark.parametrize("fixture, text, arch, cpu, march", [
+    ("schema2_rk3566_dietpi.txt", None, "aarch64", "Cortex-A55", "armv8.2-a+dotprod+fp16"),
+    ("schema2_rk3588_devuan_sysvinit.txt", None, "aarch64", "Cortex-A76", "armv8.2-a+dotprod+fp16"),
+    # RK3576 (target.yml: 4x Cortex-A72 + 4x Cortex-A53): the probe names both core types, no feature beyond NEON
     (None, "PROBE_SCHEMA=2\nARCH=arm64\nCPU_MODEL=Cortex-A53+Cortex-A72\nSUPPORTS_NEON=ON\n", "aarch64",
-     "Cortex-A53+Cortex-A72", "-mcpu=cortex-a72"),
-    ("schema1_sh_rk3566.txt", None, "aarch64", "", "-march=armv8-a"),   # an older probe file: no core named
+     "Cortex-A53+Cortex-A72", "armv8-a"),
+    ("schema1_sh_rk3566.txt", None, "aarch64", "", "armv8.2-a+dotprod+fp16"),   # an older probe file: no core named
 ])
-def test_config_module_plans_the_board_from_the_file_the_probe_writes(image, fixture, text, arch, cpu, flag):
+def test_config_module_plans_the_board_from_the_file_the_probe_writes(image, fixture, text, arch, cpu, march):
     """HOW2_ORIGINAL (DECISIONS round 16, U9 addendum): hardware_probe.sh on the board writes target_hardware_config.txt,
-    and `config_module.sh --hardware-config` plans the board from it: the CPU-specific flags of Cortex-A55/A72/A76.
+    and `config_module.sh --hardware-config` plans the board from it: -march and GGML_CPU_ARM_ARCH of the features
+    the probe found, as the build recipe plans them (no -mcpu from the core's name).
     The probe writes ARCH and CPU_MODEL (configs/hardware_probe_schema.yml); version 1.x's own names
     (ARCHITECTURE_FULL, CPU_MODEL_NAME) are read as before."""
     profile = image.root / "target_hardware_config.txt"
@@ -1017,7 +1021,9 @@ def test_config_module_plans_the_board_from_the_file_the_probe_writes(image, fix
     assert result.returncode == 0, result.stdout + result.stderr
     plan = plan_of(image)
     assert (plan["BOARD_PACKAGE"], plan["PROFILE_ARCH"], plan["TARGET_CPU"]) == ("1", arch, cpu)
-    assert flag in plan["CFLAGS"] and "-DGGML_NEON=ON" in plan["CMAKE_FLAGS"]
+    flag = f"-march={march}"
+    assert flag in plan["CFLAGS"].split() and "-mcpu" not in plan["CFLAGS"], plan
+    assert f"-DGGML_CPU_ARM_ARCH={march}" in plan["CMAKE_FLAGS"].split() and "GGML_NEON" not in plan["CMAKE_FLAGS"]
     toolchain = (image.work / "stages" / "build" / "cross_compile_toolchain.cmake").read_text()
     assert f"SET(CMAKE_C_COMPILER   {image.toolchain}/aarch64-linux-gnu-gcc)" in toolchain and flag in toolchain
 
@@ -1323,12 +1329,15 @@ def test_a_hardware_profile_also_packages_the_model_for_the_board(image):
 
     assert result.returncode == 0, result.stdout + result.stderr
     toolchain = (image.work / "stages" / "build" / "cross_compile_toolchain.cmake").read_text()
-    assert f"SET(CMAKE_C_COMPILER   {image.toolchain}/aarch64-linux-gnu-gcc)" in toolchain and "-mcpu=cortex-a55" in toolchain
+    # a profile without the probe's feature keys: the base level, as the build recipe plans it (before: -mcpu from the
+    # core's name and GGML_NEON, which is no option of ggml; changed on purpose)
+    assert f"SET(CMAKE_C_COMPILER   {image.toolchain}/aarch64-linux-gnu-gcc)" in toolchain and "-march=armv8-a" in toolchain
+    assert "-mcpu" not in toolchain
     # The config stage had CMake read the toolchain file first (its syntax check), then the target stage configured
     assert image.calls()[0] == "cmake -P <root>/build-cache/work/stages/build/cross_compile_toolchain.cmake"
     cmake = next(c for c in image.calls() if c.startswith("cmake ") and "-DCMAKE_TOOLCHAIN_FILE=" in c)
     assert cmake.startswith("cmake <root>/llama.cpp ")
-    assert "-DGGML_NEON=ON" in cmake and "-DFETCHCONTENT_FULLY_DISCONNECTED=ON" in cmake
+    assert "-DGGML_CPU_ARM_ARCH=armv8-a" in cmake and "-DFETCHCONTENT_FULLY_DISCONNECTED=ON" in cmake
     assert "make -j4 llama-cli llama-server" in image.calls()
     packages = image.output / "packages"
     (package,) = [p for p in packages.iterdir() if not p.is_symlink()]
