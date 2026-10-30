@@ -109,7 +109,8 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   `llm-cli targets validate` (and a test for every shipped board) plans the build from a reference probe of the SoC and
   names every value that differs, and refuses `-mfpu`, `GGML_NATIVE` ON, `native` flags and download options. The
   target side (recommended quantizations, memory profile, optimization level) feeds the build: the Builder lists the
-  recommended quantizations first and starts **Optimization** at the profile's level until the person picks one;
+  recommended quantizations first and starts **Optimization** at the profile's level until the person picks one
+  (a board without a profile at balanced, as the CLI);
   `llm-cli build start --optimization` and `start_build`/`check_build_request` default to the profile's level (else
   balanced; before, always balanced). Every benchmark row now names its source (`measured` by llmcf on a board with its
   label and date, `published` with address and date, or `unmeasured`); the shipped rows are estimates of version 1.x and

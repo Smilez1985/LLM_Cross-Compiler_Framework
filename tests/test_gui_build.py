@@ -1006,3 +1006,22 @@ def test_the_builder_offers_the_board_profile_first_and_its_level(builder):
     builder._mark_opt_user_set()
     select(builder.board_combo, "rk3566")
     assert builder.opt_combo.currentText() == "SPEED"            # the person's choice is kept
+
+
+def test_a_board_without_a_profile_goes_back_to_balanced_as_the_cli_does(builder):
+    """Integration review: the level a profile set (not the person) does not outlive the profile. Without a profile
+    `build start` and start_build use balanced (board_profiles.optimization_for); the Builder must start the same."""
+    from orchestrator.Core.board_profiles import optimization_for
+    from test_review_capabilities_paths import select
+    select(builder.target_combo, "Rockchip")
+    select(builder.board_combo, "rk3566")
+    assert builder.opt_combo.currentText() == "SIZE"
+    select(builder.target_combo, "MyJetson")                     # a target without capabilities or profiles
+    assert builder.lbl_board_profile.isHidden()
+    assert builder.opt_combo.currentText() == optimization_for(None).upper() == "BALANCED"
+    select(builder.target_combo, "Rockchip")
+    select(builder.board_combo, "rk3566")
+    builder.opt_combo.setCurrentIndex(builder.opt_combo.findText("SPEED"))
+    builder._mark_opt_user_set()
+    select(builder.target_combo, "MyJetson")
+    assert builder.opt_combo.currentText() == "SPEED"            # the person's own pick stays

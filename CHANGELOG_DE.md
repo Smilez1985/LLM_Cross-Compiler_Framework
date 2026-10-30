@@ -120,7 +120,8 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   einer Referenz-Probe des SoC und nennt jeden abweichenden Wert, und lehnt `-mfpu`, `GGML_NATIVE` ON, `native`-Flags
   und Download-Optionen ab. Die Zielseite (empfohlene Quantisierungen, Speicherprofil, Optimierungsstufe) speist den
   Build: Der Builder listet die empfohlenen Quantisierungen zuerst und stellt **Optimization** auf die Stufe des
-  Profils, bis die Person selbst eine wählt; `llm-cli build start --optimization` und
+  Profils, bis die Person selbst eine wählt (ein Board ohne Profil auf balanced, wie die CLI); `llm-cli build start
+  --optimization` und
   `start_build`/`check_build_request` nehmen ohne Angabe die Stufe des Profils (sonst balanced; vorher immer balanced).
   Jede Benchmark-Zeile nennt jetzt ihre Quelle (`measured`, von llmcf auf einem Board gemessen, mit seinem Namen und dem
   Datum, `published` mit Adresse und Datum, oder `unmeasured`); die mitgelieferten Zeilen sind Schätzungen aus Version
