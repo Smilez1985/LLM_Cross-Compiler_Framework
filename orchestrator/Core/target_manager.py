@@ -92,6 +92,7 @@ class TargetCheck:
     errors: Tuple[Tuple[str, str], ...] = ()
     boards: int = 0                        # boards of a valid capabilities block
     formats: Tuple[str, ...] = ()          # formats of a valid capabilities block
+    old_format: Tuple[str, ...] = ()       # entries in the format before 3.2.0 that were ignored (old_format_entries)
 
     @property
     def found(self) -> bool:
@@ -110,8 +111,10 @@ class TargetCheck:
 def check_capabilities(name: str, target_id: str, data: Dict[str, Any]) -> TargetCheck:
     """Checks the capabilities block of a target's data (target.yml) against the schema."""
     from pydantic import ValidationError
+    from orchestrator.Core.board_profiles import old_format_entries
+    old = tuple(old_format_entries(data))
     if "capabilities" not in data:
-        return TargetCheck(name, target_id)
+        return TargetCheck(name, target_id, old_format=old)
     try:
         caps = TargetCapabilities.model_validate(data["capabilities"])
     except ValidationError as e:
@@ -125,8 +128,9 @@ def check_capabilities(name: str, target_id: str, data: Dict[str, Any]) -> Targe
     from orchestrator.Core.board_profiles import check_board_data
     errors = check_board_data(data, caps)
     if errors:
-        return TargetCheck(name, target_id, declared=True, errors=tuple(errors))
-    return TargetCheck(name, target_id, declared=True, boards=len(caps.boards), formats=tuple(caps.formats))
+        return TargetCheck(name, target_id, declared=True, errors=tuple(errors), old_format=old)
+    return TargetCheck(name, target_id, declared=True, boards=len(caps.boards), formats=tuple(caps.formats),
+                       old_format=old)
 
 
 class TargetManager:

@@ -13,6 +13,14 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 ## [3.3.0] - 2026-10-30
 
 ### Geändert
+- `2026-10-30 14:55 UTC` · `v3.3.0` **Deine Board-Tests erscheinen in den Benchmarks des Targets, und übergangene alte Einträge werden genannt** ([Design](docs/DESIGN_DE.md#targets-hardware-und-vorlagen)):
+  Der neueste bestandene Board-Test eines Builds je Board, Modell und Quantisierung kommt jetzt zu den
+  Benchmark-Zeilen des Targets in `list_targets`, `get_target_capabilities`, `llm-cli targets boards` und **Build >
+  Targets… > Boards…**, markiert als `measured by llmcf (board <dein Name>, <Datum>)` (nur Namen, nie ein Pfad, eine
+  Adresse oder eine Geräte-ID). Einträge im Format vor 3.2.0 werden weiterhin nicht abgelehnt, aber
+  `llm-cli targets validate`, `llm-cli targets boards` und die Target-Prüfung der GUI (auch nach dem Modul-Assistenten
+  und einer Installation aus dem Community Hub) sagen es jetzt in einer Zeile: `N entries in the old format were
+  ignored: <Namen>`.
 - `2026-10-30 14:32 UTC` · `v3.3.0` **Ein auf einem Computer exportiertes Build-Container-Image wird auf einem anderen angenommen** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
   Das Eingaben-Label des Images enthält nichts mehr vom Computer, der es gebaut hat (deine Benutzer- und Gruppen-ID,
   die Zahl der Build-Jobs, die Adresse, von der llama.cpp geholt wurde), und das Image wird nicht mehr mit deiner

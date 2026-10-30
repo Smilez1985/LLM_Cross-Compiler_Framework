@@ -459,8 +459,11 @@ Prints each board of the target with its optimization profile: the recommended q
 Builder), the memory profile, the optimization level a build starts from when `--optimization` is not given, the
 llama.cpp options and compiler flags the build recipe plans for the board's SoC, and the board's CPU. Under it come the
 board's benchmark rows (model, quantization, values) with their source at the end: `measured by llmcf (board <label>, <date>)`,
-`published: <address>` or `unmeasured` (an estimate; never shown as a measurement). Exit code 2 for an unknown target,
-1 when its profiles or benchmarks are not valid (`targets validate` names why).
+`published: <address>` or `unmeasured` (an estimate; never shown as a measurement). The board tests of this
+computer's builds come first: the newest passed test per board, model and quantization, measured on the board you
+named. A last line names entries in the format before 3.2.0 that were ignored (`N entries in the old format were
+ignored: <names>`). Exit code 2 for an unknown target, 1 when its profiles or benchmarks are not valid
+(`targets validate` names why).
 
 ```bash
 llm-cli targets boards Rockchip
@@ -478,7 +481,9 @@ Checks that the target loads (by id or folder name) and that its `capabilities:`
 the GUI, the CLI, the build service and the tools use; every schema error is printed. Its `optimization_profiles:` and
 `performance_benchmarks:` are checked too: their schema, their boards and quantizations, no option that downloads, and
 every profile against the build recipe's plan for its SoC (a value that differs is named). Exit code 1 if the target is
-not found or its capabilities are invalid. A target without capabilities is reported but counts as valid.
+not found or its capabilities are invalid. A target without capabilities is reported but counts as valid. Entries in
+the format before 3.2.0 are not refused; a last line names them: `N entries in the old format were ignored: <names>`
+(the GUI's target check says the same).
 
 ```bash
 llm-cli targets validate Rockchip
