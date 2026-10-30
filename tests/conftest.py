@@ -273,8 +273,16 @@ def hermetic_locality(monkeypatch):
 def hermetic_docker_engine(monkeypatch):
     """The container engine choice (utils/docker_engine.py) never reads this computer's Docker or Podman sockets in a
     test and never sets DOCKER_HOST for the test process: the process's choice is "nothing to change" and no client's
-    engine is remembered from another test. Tests of the choice pass their own environment and sockets."""
+    engine is remembered from another test. Tests of the choice pass their own environment and sockets.
+    DOCKER_HOST comes back as it was after each test, also when a test of the process's own choice set it
+    (monkeypatch.delenv of an unset variable records nothing, so that value used to stay for every later test: on a
+    computer where a Docker daemon runs, Mojo then reported the left Podman socket as a stale DOCKER_HOST)."""
     from orchestrator.utils import docker_engine
+    if os.environ.get("DOCKER_HOST") is None:
+        monkeypatch.setenv("DOCKER_HOST", "")
+        monkeypatch.delenv("DOCKER_HOST")
+    else:
+        monkeypatch.setenv("DOCKER_HOST", os.environ["DOCKER_HOST"])
     monkeypatch.setattr(docker_engine, "_CHOICE", docker_engine.EngineChoice("", False, "tests"))
     docker_engine._ENGINES.clear()
     docker_engine._ROOTLESS.clear()
