@@ -52,6 +52,10 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   ihrer Zeile im Design genannt, die History-Zeile einer ersetzten Entscheidung nach ihrem Datum.
   `tests/test_docs.py` prüft das in jeder Markdown-Datei, und die zwei Meldungen, die noch eine Runde nannten (ein
   Mojo-Befund zu losen Wissensdateien und ein Fehler beim Registrieren eines Tools), sagen nur die Regel.
+- `2026-10-30 00:33 UTC` · `v3.2.0` **„Wie es weitergeht“ in der README fasst die Roadmap von 3.2.0 zusammen** ([Roadmap](docs/ROADMAP_DE.md)):
+  eine kurze Liste der Version in Arbeit (übernommene Punkte, Dittos Kontext, das Board-Bündel, Laufzeit auf dem
+  Gerät und mehr Hardware, Entschiedenes, das auf seine Reihe wartet) und dessen, was danach kommt, mit Verweis auf
+  die vollständige Roadmap.
 
 ### Behoben
 - `2026-10-29 23:36 UTC` · `v3.2.0` **Nacharbeiten an der Container-Engine: ein `DOCKER_HOST` aus Podman-Zeiten, `/dev/dri` unter rootless
