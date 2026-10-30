@@ -3020,7 +3020,8 @@ Every piece of shared knowledge belongs to a topic (for example
   excerpt stays. The snapshot of the knowledge base taken before the import stays. A page you crawl again with Deep
   Ingest replaces its earlier excerpts too (each crawled page is stored right after it was downloaded), and a crawl of
   the same start address that read the whole site removes the excerpts of pages that are gone (a partial or failed
-  crawl removes nothing).
+  crawl removes nothing, nor does a crawl whose depth limit or language filter left links unread: the pages behind them
+  are not gone, only not reached).
 - **Shared pages:** two installed packs, or a pack and your own crawl, that carry the same page share its excerpts;
   each excerpt names its holders. A newer version of one pack, a re-crawl or an uninstall lets go of only its own hold,
   so a page another pack still holds stays (and is found under that pack's topic or target).

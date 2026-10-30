@@ -3349,7 +3349,8 @@ gehalten:
   kein veralteter Auszug bleibt. Der Snapshot der Wissensbasis vor dem Import bleibt. Eine Seite, die du mit Deep
   Ingest erneut crawlst, ersetzt ebenfalls ihre früheren Auszüge (jede gecrawlte Seite wird direkt nach dem Download
   gespeichert), und ein Crawl derselben Startadresse, der die ganze Site gelesen hat, entfernt die Auszüge von Seiten,
-  die es nicht mehr gibt (ein teilweiser oder fehlgeschlagener Crawl entfernt nichts).
+  die es nicht mehr gibt (ein teilweiser oder fehlgeschlagener Crawl entfernt nichts, ebenso ein Crawl, dessen
+  Tiefengrenze oder Sprachfilter Links ungelesen ließ: die Seiten dahinter sind nicht weg, nur nicht erreicht).
 - **Geteilte Seiten:** Zwei installierte Packs, oder ein Pack und dein eigener Crawl, mit derselben Seite teilen sich
   ihre Auszüge; jeder Auszug nennt seine Halter. Eine neuere Version eines Packs, ein neuer Crawl oder eine
   Deinstallation gibt nur den eigenen Halt auf, sodass eine Seite, die ein anderes Pack noch hält, bleibt (und unter

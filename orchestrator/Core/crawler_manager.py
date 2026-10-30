@@ -387,6 +387,8 @@ class CrawlerManager:
         self.skipped: List[SkippedPage] = []
         self.failed: List[SkippedPage] = []
         self.stopped = False
+        self.complete = False
+        self._links_left = False
         self._stop = threading.Event()  # iter_crawl's stop event; a running request ends when it is set
         self.robot_rules: Dict[str, List[Tuple[bool, str]]] = {}   # per origin, from robots.txt
         self.tdm_rules: Dict[str, List[TdmRule]] = {}   # per origin, from /.well-known/tdmrep.json
@@ -491,6 +493,9 @@ class CrawlerManager:
         self.visited.clear()
         self.skipped, self.failed, self.stopped = [], [], False
         self.complete = False   # set below: every page of the site was reached (a re-crawl may then drop gone pages)
+        # links a limit of this crawl left unread (its depth, or a page left out for its language with its links): the
+        # pages behind them are not gone, only not reached, so the crawl is not complete
+        self._links_left = False
         stop = self._stop = stop or threading.Event()
         collected = 0
 
@@ -620,6 +625,8 @@ class CrawlerManager:
                     for link in new_links:
                         if link not in self.visited:
                             queue.append((link, depth + 1, 0))
+                elif any(link not in self.visited for link in new_links):
+                    self._links_left = True
 
             except _CrawlStopped:
                 self.stopped = True
@@ -632,7 +639,8 @@ class CrawlerManager:
             except Exception as e:
                 self._fail(url, _remote_text(e), level=logging.ERROR)
 
-        self.complete = not self.stopped and not any(item[0] not in self.visited for item in queue)
+        self.complete = not self.stopped and not self._links_left \
+            and not any(item[0] not in self.visited for item in queue)
         if self.stopped:
             self.logger.info(f"Crawl stopped on request after {collected} documents.")
         self.logger.info(f"Crawl finished. Collected {collected} documents, skipped {len(self.skipped)} pages, "
@@ -814,6 +822,8 @@ class CrawlerManager:
         lang = self._detect_language(text)
         if lang and self.languages and lang not in self.languages:
             self._skip(url, f"language '{lang}' is not one of {', '.join(sorted(self.languages))}")
+            if any(link not in self.visited for link in links):
+                self._links_left = True   # its links are not followed: what lies behind them was not read
             return None, []
         if not text.strip():
             self._skip(url, "no text")

@@ -1072,7 +1072,8 @@ class RAGManager:
 
         Every page carries `topic` (the person's choice, or site_topic(url): an AI's crawl takes the derived one). A
         crawl of the same start address again replaces its pages; when it succeeded and read the whole site (no page
-        limit or request budget reached, nothing failed, reserved or stopped), the excerpts of its earlier pages it no
+        limit or request budget reached, no link left unread at its depth limit or behind a page left out for its
+        language, nothing failed, reserved or stopped: crawler.complete), the excerpts of its earlier pages it no
         longer reached are let go of too ("removed": their addresses), only where this crawl was their last holder
         (release_holder). A partial or failed crawl removes nothing.
         """
