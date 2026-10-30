@@ -314,7 +314,10 @@ gleich (`tests/test_module_flags.py` lässt beide über `tests/data/cmake_flag_v
 - **Nie:** was CMake Code oder eine andere Toolchain laden lässt (`CMAKE_PROJECT_INCLUDE`,
   `CMAKE_PROJECT_INCLUDE_BEFORE`, `CMAKE_PROJECT_<name>_INCLUDE`, `CMAKE_PROJECT_TOP_LEVEL_INCLUDES`,
   `CMAKE_TOOLCHAIN_FILE`, `CMAKE_MODULE_PATH`, `CMAKE_USER_MAKE_RULES_OVERRIDE*`, `-C`, `-P`, `--preset`,
-  `--toolchain`), Quell- und Build-Ordner (`-S`, `-B`: die setzt der Build-Plan), die `FETCHCONTENT_*`-Variablen (die
+  `--toolchain`), was CMake oder den Build ein anderes Programm ausführen lässt (`CMAKE_<LANG>_COMPILER_LAUNCHER`,
+  `CMAKE_<LANG>_LINKER_LAUNCHER`, `CMAKE_<LANG>_CLANG_TIDY`, `_CPPCHECK`, `_CPPLINT`, `_INCLUDE_WHAT_YOU_USE`,
+  `_ICSTAT`, `CMAKE_LINK_WHAT_YOU_USE_CHECK`, `CMAKE_CROSSCOMPILING_EMULATOR`, `CMAKE_MAKE_PROGRAM`; für ccache
+  `GGML_CCACHE`), Quell- und Build-Ordner (`-S`, `-B`: die setzt der Build-Plan), die `FETCHCONTENT_*`-Variablen (die
   setzt nur der Abhängigkeits-Cache des Frameworks), ein `CMAKE_PREFIX_PATH`, der etwas anderes nennt als absolute
   Ordner im Build-Container, eine Option, mit der llama.cpp etwas herunterladen würde, und jedes Wort, das keine
   CMake-Option ist.

@@ -197,3 +197,19 @@ def test_the_toolchain_the_build_plan_set_stays(tmp_path):
     run = _shim(tmp_path, "-S", "src", env={"CMAKE_TOOLCHAIN_FILE": "/build-cache/plan/toolchain.cmake",
                                             "BUILD_PLAN": str(plan)})
     assert "toolchain env: /build-cache/plan/toolchain.cmake" in run.stdout, run.stdout + run.stderr
+
+
+def test_the_shell_s_program_variables_are_the_recipe_s():
+    """A variable that makes CMake or the build run another program (a launcher, a code checker, the cross emulator,
+    the build tool) is refused in a module's flags; the shell's pattern names the same variables as the recipe's."""
+    names = ["CMAKE_C_COMPILER_LAUNCHER", "CMAKE_CXX_COMPILER_LAUNCHER", "CMAKE_CUDA_COMPILER_LAUNCHER",
+             "CMAKE_C_LINKER_LAUNCHER", "CMAKE_CXX_CLANG_TIDY", "CMAKE_C_CPPCHECK", "CMAKE_CXX_CPPLINT",
+             "CMAKE_CXX_INCLUDE_WHAT_YOU_USE", "CMAKE_C_ICSTAT", "CMAKE_LINK_WHAT_YOU_USE_CHECK",
+             "CMAKE_CROSSCOMPILING_EMULATOR", "CMAKE_MAKE_PROGRAM", "CMAKE_C_COMPILER", "CMAKE_C_FLAGS",
+             "CMAKE_BUILD_TYPE", "GGML_CCACHE"]
+    refused = [n for n in names if recipe.PROGRAM_VARIABLE_RE.match(n)]
+    assert refused == names[:12]
+    for target in ("Rockchip", "_template"):
+        text = (REPO_ROOT / "targets" / target / "modules" / "target_module.sh").read_text(encoding="utf-8")
+        shell = re.compile(re.search(r"^PROGRAM_VARIABLE_PATTERN='([^']*)'$", text, re.M).group(1))
+        assert [n for n in names if shell.search(n)] == refused, target

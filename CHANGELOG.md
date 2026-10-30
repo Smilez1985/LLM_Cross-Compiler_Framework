@@ -82,7 +82,8 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   (`orchestrator/runtime/build/recipe.py`) judges every word of a module's CMake flags: `-DNAME=VALUE` (also `-D
   NAME=VALUE` and `-DNAME:TYPE=VALUE`) and CMake's own `-W` words are allowed; what loads code or another toolchain (a
   project include, `CMAKE_TOOLCHAIN_FILE`, `CMAKE_MODULE_PATH`, `CMAKE_USER_MAKE_RULES_OVERRIDE*`, `-C`, `-P`,
-  `--preset`, `--toolchain`), the source and build folders (`-S`, `-B`), the `FETCHCONTENT_*` variables only llmcf's
+  `--preset`, `--toolchain`), a variable that runs another program (a compiler or linker launcher, a code checker,
+  `CMAKE_CROSSCOMPILING_EMULATOR`, `CMAKE_MAKE_PROGRAM`), the source and build folders (`-S`, `-B`), the `FETCHCONTENT_*` variables only llmcf's
   dependency cache sets, a `CMAKE_PREFIX_PATH` outside the build container, a download option and anything that is not a
   CMake option are refused with the reason; a valid CMake option outside the allowlist (`-G`, `-U`, `--log-level`,
   `--trace` and the other switches of `DECISION_SWITCHES`) gets the verdict "decision" with what it does, for the person

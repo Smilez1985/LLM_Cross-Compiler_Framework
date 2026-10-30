@@ -434,6 +434,12 @@ CODE_VARIABLES: Mapping[str, str] = {
     "CMAKE_USER_MAKE_RULES_OVERRIDE": "makes CMake run a CMake file, which can set any option",
 }
 _RULES_OVERRIDE_RE = re.compile(r"^CMAKE_USER_MAKE_RULES_OVERRIDE(?:_[A-Za-z]+)?$")
+# Variables that make CMake or the build run another program: a compiler or linker launcher, a code checker run with
+# every compile, the emulator of a cross build (try_run, custom commands) and the build tool configure runs for its
+# checks (cmake-variables(7)). Like a script, such a program can change what is built.
+PROGRAM_VARIABLE_RE = re.compile(r"^CMAKE_(?:[A-Za-z0-9]+_)?(?:COMPILER_LAUNCHER|LINKER_LAUNCHER|CLANG_TIDY|CPPCHECK|"
+                                 r"CPPLINT|INCLUDE_WHAT_YOU_USE|ICSTAT)$|^CMAKE_LINK_WHAT_YOU_USE_CHECK$|"
+                                 r"^CMAKE_CROSSCOMPILING_EMULATOR$|^CMAKE_MAKE_PROGRAM$")
 # CMake's own warning switches (cmake(1) -W...): the only -W words; a compiler warning belongs in the C flags.
 CMAKE_WARNING_RE = re.compile(r"^-W(?:no-)?(?:error=)?(?:dev|deprecated)$")
 # Switches that take the next word as their value when it is not attached (-G Ninja, -GNinja).
@@ -537,10 +543,13 @@ def _d_verdict(words: Tuple[str, ...], context: str, prefetched: Sequence[str]) 
     if name in CODE_VARIABLES or _RULES_OVERRIDE_RE.match(name):
         reason = CODE_VARIABLES.get(name) or CODE_VARIABLES["CMAKE_USER_MAKE_RULES_OVERRIDE"]
         return FlagVerdict(word, words, "refused", f"{name} {reason}", "rule", name)
+    if PROGRAM_VARIABLE_RE.match(name):
+        return FlagVerdict(word, words, "refused", f"{name} makes CMake or the build run another program, which can "
+                           "change what is built", "rule", name)
     if name.startswith("FETCHCONTENT_") and name != "FETCHCONTENT_FULLY_DISCONNECTED":
         return FlagVerdict(word, words, "refused", f"{name} is set only by llmcf's dependency cache", "rule", name)
     if name == "CMAKE_PREFIX_PATH":
-        parts = [p for p in value.strip("\"'").split(";") if p]
+        parts = [p for p in value.split(";") if p]   # as the shell's last check reads it: a quote is no path
         if not parts or not all(_RE_CONTAINER_PATHS.fullmatch(p) and ".." not in p.split("/") for p in parts):
             return FlagVerdict(word, words, "refused", "CMAKE_PREFIX_PATH names only folders inside the build "
                                "container (absolute paths)", "rule", name)

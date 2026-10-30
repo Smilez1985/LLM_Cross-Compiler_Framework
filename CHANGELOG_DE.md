@@ -87,7 +87,9 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   `recipe.cmake_flag_verdicts` (`orchestrator/runtime/build/recipe.py`) beurteilt jedes Wort der CMake-Flags eines
   Moduls: `-DNAME=VALUE` (auch `-D NAME=VALUE` und `-DNAME:TYPE=VALUE`) und CMakes eigene `-W`-Wörter sind erlaubt; was
   Code oder eine andere Toolchain lädt (ein Project-Include, `CMAKE_TOOLCHAIN_FILE`, `CMAKE_MODULE_PATH`,
-  `CMAKE_USER_MAKE_RULES_OVERRIDE*`, `-C`, `-P`, `--preset`, `--toolchain`), Quell- und Build-Ordner (`-S`, `-B`), die
+  `CMAKE_USER_MAKE_RULES_OVERRIDE*`, `-C`, `-P`, `--preset`, `--toolchain`), eine Variable, die ein anderes Programm
+  ausführt (ein Compiler- oder Linker-Launcher, ein Code-Prüfer, `CMAKE_CROSSCOMPILING_EMULATOR`,
+  `CMAKE_MAKE_PROGRAM`), Quell- und Build-Ordner (`-S`, `-B`), die
   `FETCHCONTENT_*`-Variablen, die nur llmcfs Abhängigkeits-Cache setzt, ein `CMAKE_PREFIX_PATH` außerhalb des
   Build-Containers, eine Download-Option und alles, was keine CMake-Option ist, wird mit Grund abgelehnt; eine gültige
   CMake-Option außerhalb der Allowlist (`-G`, `-U`, `--log-level`, `--trace` und die übrigen Schalter von

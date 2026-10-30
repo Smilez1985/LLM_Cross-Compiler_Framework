@@ -305,7 +305,10 @@ check in the build container (`module_flag_verdicts` of `target_module.sh`) give
   `-Wno-dev`, `-Werror=dev`, `-Wdeprecated`, `-Wno-deprecated` and their `error=` forms).
 - **Never:** what makes CMake load code or another toolchain (`CMAKE_PROJECT_INCLUDE`, `CMAKE_PROJECT_INCLUDE_BEFORE`,
   `CMAKE_PROJECT_<name>_INCLUDE`, `CMAKE_PROJECT_TOP_LEVEL_INCLUDES`, `CMAKE_TOOLCHAIN_FILE`, `CMAKE_MODULE_PATH`,
-  `CMAKE_USER_MAKE_RULES_OVERRIDE*`, `-C`, `-P`, `--preset`, `--toolchain`), the source and build folders (`-S`,
+  `CMAKE_USER_MAKE_RULES_OVERRIDE*`, `-C`, `-P`, `--preset`, `--toolchain`), what makes CMake or the build run
+  another program (`CMAKE_<LANG>_COMPILER_LAUNCHER`, `CMAKE_<LANG>_LINKER_LAUNCHER`, `CMAKE_<LANG>_CLANG_TIDY`,
+  `_CPPCHECK`, `_CPPLINT`, `_INCLUDE_WHAT_YOU_USE`, `_ICSTAT`, `CMAKE_LINK_WHAT_YOU_USE_CHECK`,
+  `CMAKE_CROSSCOMPILING_EMULATOR`, `CMAKE_MAKE_PROGRAM`; for ccache use `GGML_CCACHE`), the source and build folders (`-S`,
   `-B`: the build plan sets them), the `FETCHCONTENT_*` variables (only the framework's dependency cache sets them),
   a `CMAKE_PREFIX_PATH` that names anything but absolute folders inside the build container, an option that would let
   llama.cpp download, and every word that is not a CMake option.
