@@ -109,8 +109,8 @@ def _kv_fallback(root: Path) -> List[Finding]:
                     f"Ditto's server runs with the f16 KV cache instead of the automatic {wanted}: its llama.cpp "
                     "build has no flash attention, which a quantised cache needs, so the same memory holds a shorter "
                     "context.",
-                    "Use a llama.cpp build with flash attention, or set local_kv_cache to f16 to make it your choice "
-                    "(llm-cli ditto cache set kv f16).", where="local_kv_cache",
+                    "Use a llama.cpp build with flash attention, or set the setting local_kv_cache to f16 to make "
+                    "it your choice.", where="local_kv_cache",
                     why="A quantised KV cache lets the server keep a longer context in the same memory.",
                     cannot="person")]
 
