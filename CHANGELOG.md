@@ -13,6 +13,15 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 
 ### Added
 
+- `2026-10-30 05:33 UTC` · `v3.2.0` **The build's statistics in the package manifest and the build record**
+  (consolidation chain build-flags-time; decision on time limits, manifest part): the package's `MANIFEST.json`
+  (`create_package_manifest` of both target templates) adds only what it did not have yet: `build.convert_seconds`,
+  `build.quantize_seconds`, `build.input_bytes` and `build.converted_bytes` of the conversion, and `build.tools` with the
+  first line of `--version` of `python3`, `cmake` and the cross compiler the build plan's toolchain file names (a line
+  that names a path is left out). `build_info.json` records `quantize_seconds`. `llm-cli build status REQUEST_ID` and
+  Build > Build History... show a finished build's "Statistics" (`build_history.statistics_text`: convert seconds,
+  size before and after, quantize seconds). Tests: `tests/test_build_statistics.py`, the manifest test of
+  `tests/test_target_stage.py`.
 - `2026-10-30 04:30 UTC` · `v3.2.0` **Dependencies of module CMake options fetched before the build** (consolidation
   chain build-flags-time; decision on module CMake flags, dependency addendum): what `-DLLAMA_BUILD_BORINGSSL=ON`,
   `-DLLAMA_BUILD_LIBRESSL=ON` or `-DGGML_CPU_KLEIDIAI=ON` would make llama.cpp download while it is built is fetched
@@ -48,7 +57,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 
 ### Changed
 
-- `2026-10-30 05:20 UTC` · `v3.2.0` **No hard time limit for a build step** (consolidation chain build-flags-time;
+- `2026-10-30 05:19 UTC` · `v3.2.0` **No hard time limit for a build step** (consolidation chain build-flags-time;
   decision on time limits): a step takes as long as it takes. The new `orchestrator/utils/step_limits.py` (StepLimits,
   StepClock, StepTimedOut, a TimeoutError) is the one rule for the build's stage containers (`BuildEngine._run_container`
   now waits in short rounds) and the runtime build's configure and build steps (`runtime/build/executor.py`,

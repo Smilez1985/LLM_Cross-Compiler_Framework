@@ -1316,7 +1316,7 @@ _BUILD_FIELD_LABELS = {"request": "Request", "build": "Build", "status": "Status
                        "progress": "Progress", "model": "Model", "target": "Target", "board": "Board",
                        "format": "Format", "quantization": "Quantization", "optimization": "Optimization",
                        "owner": "Started by", "where": "Where", "started": "Started", "ended": "Ended",
-                       "output": "Output", "process": "Process", "error": "Error"}
+                       "output": "Output", "statistics": "Statistics", "process": "Process", "error": "Error"}
 
 
 def _print_request_summary(r: dict) -> None:

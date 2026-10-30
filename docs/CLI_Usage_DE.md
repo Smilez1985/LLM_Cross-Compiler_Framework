@@ -661,7 +661,9 @@ Cache-Ordner (`<cache_dir>/build_records/`) mit Request, Modell, Target, Format,
 Fortschritt, deshalb erscheinen auch Builds, die ein anderer Prozess gestartet hat, einschließlich Anfragen, die
 noch in seiner Warteschlange warten (Spalte `Where`: das Programm, das sie ausführt). Ohne ID: eine Tabelle
 der 20 neuesten Builds; mit einer Request-ID (`req_...`) oder einer Build-ID: die Einzelheiten jedes Versuchs,
-einschließlich des Fehlers eines gescheiterten Builds (Zugangsdaten geschwärzt). Ein Build, dessen Prozess endete,
+einschließlich des Fehlers eines gescheiterten Builds (Zugangsdaten geschwärzt) und bei einem fertigen Build seiner
+Statistik (wie lange Konvertierung und Quantisierung liefen, die Größe davor und danach, aus seiner
+`build_info.json`). Ein Build, dessen Prozess endete,
 bevor der Build fertig war, erscheint als `interrupted`. Exit-Code 1, wenn die ID nicht gefunden wird. Der Befehl
 braucht weder den Tresor für Zugangsdaten noch Docker. Unter Linux und macOS sind der Ordner der Einträge und die
 Einträge nur für den Benutzer lesbar, der gebaut hat (Modi 0700 und 0600), sodass in einer gemeinsamen Installation
