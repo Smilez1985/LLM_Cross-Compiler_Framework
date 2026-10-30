@@ -15,6 +15,7 @@ Every address here is a documentation address (192.0.2.0/24, 198.51.100.0/24, 20
 import hashlib
 import io
 import json
+import os
 import tarfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -619,7 +620,12 @@ class TestReviewImport:
         def swap(*a, **k):
             if not swapped:
                 swapped.append(True)
-                other.replace(file)   # another file under the checked name, after the check
+                try:
+                    other.replace(file)   # another file under the checked name, after the check
+                except PermissionError:
+                    # Windows refuses to replace a file that is open: the import holds the checked file open
+                    if os.name != "nt":
+                        raise
             return GOOD
         monkeypatch.setattr(build_image, "expected_labels", swap)
         docker = Docker()
