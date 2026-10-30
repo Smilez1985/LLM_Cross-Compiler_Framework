@@ -21,8 +21,8 @@ def check_community(framework) -> List[Finding]:
         if trust is not None and trust.value == "revoked":
             findings.append(Finding("community", f"community.{prov.id}.revoked", Severity.ERROR,
                                     f"Community {name} was revoked: {'; '.join(problems)}",
-                                    "Uninstall it (it lists what goes, \"No\" by default); it is not built any "
-                                    "more.", where=str(folder),
+                                    f"Uninstall {folder} (it lists what goes, \"No\" by default); it is not "
+                                    "built any more.", where=str(folder),
                                     why="Its publisher or the signed index withdrew it, for example because of a "
                                         "security problem.",
                                     # the person uninstalls it (Core/deletion.py), never Mojo Miracle
@@ -42,7 +42,30 @@ def check_community(framework) -> List[Finding]:
                                     f"Community {name} was imported from a file without a signed index entry."))
         else:
             findings.append(_ok("community", f"community.{prov.id}", f"Community {name} ({trust.value if trust else '?'})"))
-    return findings + check_loose_knowledge(cm) + check_knowledge_links(cm)
+    return (findings + check_loose_knowledge(cm) + check_knowledge_links(cm)
+            + check_untagged_knowledge(cm, getattr(framework, "rag_manager", None)))
+
+
+UNTAGGED_WHY = ("An earlier version imported these packs before every excerpt carried its pack's digest and topic or "
+                "target: search_knowledge(topic=...), the Topic or target column and the knowledge exports do not find "
+                "them under their topic or target, and a newer version or an uninstall of the pack cannot always tell "
+                "them apart. Importing them again stores both; a snapshot is taken first, so it can be undone.")
+
+
+def check_untagged_knowledge(cm, rag_manager) -> List[Finding]:
+    """The installed packs whose excerpts were imported before they carried their topic or target
+    (CommunityManager.untagged_imports), when the knowledge base is open (Mojo never opens it): a warning with each
+    pack and its excerpts; Mojo Miracle imports them again after the person's yes (knowledge.reimport)."""
+    lister = getattr(cm, "untagged_imports", None)
+    found = lister(rag_manager) if callable(lister) and rag_manager is not None else []
+    if not found:
+        return []
+    names = ", ".join(f"{item.label} ({item.excerpts} excerpt(s))" for item in found[:10]) + \
+        (f" and {len(found) - 10} more" if len(found) > 10 else "")
+    return [Finding("community", "community.knowledge.untagged", Severity.WARN,
+                    f"{len(found)} installed pack(s) were imported without their topic or target: {names}",
+                    "Import them again: Mojo Miracle shows the packs, their pages and size first and asks you (No is "
+                    "the default).", where=str(cm.knowledge_dir), why=UNTAGGED_WHY, repair_id="knowledge.reimport")]
 
 
 def check_knowledge_links(cm) -> List[Finding]:

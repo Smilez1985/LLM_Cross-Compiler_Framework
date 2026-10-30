@@ -30,6 +30,15 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   (**Belongs to**), the tool `list_packs` and the maintainer's review line (CLI and GUI) name it before anything is
   downloaded. A pack must belong where its entry says, or it is not installed. An index with these fields is read
   only by 3.2.0 and later.
+- `2026-10-30 01:54 UTC` · `v3.2.0` **Packs imported without their topic are found and imported again after your yes**: excerpts an earlier version
+  imported carry neither their pack's digest nor its topic or target, so `search_knowledge(topic=...)`, the Topic or
+  target column and the knowledge exports miss them. When the knowledge base is open, Mojo Oracle names those packs
+  with their excerpts (`community.knowledge.untagged`; `CommunityManager.untagged_imports`, `RAGManager.untagged`), and
+  Mojo Miracle offers to import them again (`knowledge.reimport`, `CommunityManager.import_again`): it shows each pack
+  with its folder, pages and size first and asks you (No is the default), at a terminal or in the Mojo window; a
+  snapshot is taken before the import. It is the first repair of class `person_yes` (verdict `miracle_yes`): it runs
+  only after the person's own yes, never for an AI, which reads it as the person's. The tool description of
+  `search_knowledge` says what `topic` misses until then.
 
 ### Changed
 - `2026-10-30 01:26 UTC` · `v3.2.0` **A linked knowledge folder is ignored, and said so**: a symbolic link as `community/knowledge` or in its first two

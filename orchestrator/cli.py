@@ -3543,7 +3543,8 @@ def mojo(ctx: FrameworkContext, mode: str, as_json: bool, board: Optional[str]):
     try:
         # The plans printed above bind the repairs: a problem that changed since then is not repaired (plan_changed).
         result = engine.miracle(actor="cli", at_terminal=terminal, before=report, offered=offered,
-                                free_space=(lambda: _mojo_free_space(framework)) if terminal else None, **asked)
+                                free_space=(lambda: _mojo_free_space(framework)) if terminal else None,
+                                confirm=_mojo_confirm if terminal else None, **asked)
         _mojo_print_miracle(result)
         if circle:
             _mojo_print_circle(result)
@@ -3631,6 +3632,17 @@ def _mojo_print_oracle(report, offered, terminal: bool) -> None:
             console.print(f"      Plan: {escape(step.target_label)}{escape(where)}: {escape(step.before)} → "
                           f"{escape(step.after)}" + (", can be undone" if step.undoable else ""))
     console.print(escape(oracle_summary(offered, person=True)))
+
+
+def _mojo_confirm(offer) -> bool:
+    """The person's own yes to one repair of class person (its plan with what it costs, printed again), "No" the
+    default; Mojo Miracle asks it only at a terminal."""
+    from orchestrator.Core.mojo.views import plan_steps
+    console.print(f"\n{escape(offer.plan.summary)}.")
+    for step in plan_steps(offer):
+        where = f" ({step.full_path})" if step.full_path else ""
+        console.print(f"  {escape(step.target_label)}{escape(where)}: {escape(step.before)} → {escape(step.after)}")
+    return click.confirm("Do it now?", default=False)
 
 
 def _mojo_print_miracle(result) -> None:

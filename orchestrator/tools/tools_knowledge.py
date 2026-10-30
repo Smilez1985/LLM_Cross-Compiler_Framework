@@ -108,7 +108,9 @@ class SearchKnowledgeIn(BaseModel):
                                                              "irrelevant ones; null: the person's setting")
     topic: Optional[str] = Field(default=None, pattern=TOPIC_PATTERN,
                                  description="Only excerpts that belong to this topic or target (a knowledge pack's "
-                                             "topic, or a target id such as Rockchip); null: all")
+                                             "topic, or a target id such as Rockchip); null: all. Excerpts an "
+                                             "earlier version imported without their topic are not found by it "
+                                             "until their pack is imported again (Mojo Oracle names those packs)")
 
 
 class KnowledgeHit(BaseModel):

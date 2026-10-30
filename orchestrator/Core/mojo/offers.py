@@ -5,6 +5,8 @@ LLM Cross-Compiler Framework - What Mojo Miracle can do about each finding (roun
 Every warning and error gets exactly one verdict, so no report skips a finding:
 
 - miracle: Mojo Miracle repairs it (a harmless plan: it only narrows access or switches to an intact build).
+- miracle_yes: Mojo Miracle does it only after the person's own yes to its plan (shown with what it costs), at a
+  terminal or in the framework's Mojo window; an AI cannot start it (a repair of class person_yes).
 - deletion_list: freeing it means deleting: the framework deletes only what the person ticks and confirms in its own
   window (WP7); Mojo Miracle at a terminal opens that list when one exists for the finding.
 - person: only the person does it, in the framework or at a terminal (keys, tool permissions, the audit log, the
@@ -22,9 +24,11 @@ from orchestrator.Core.mojo.findings import Finding, MojoReport, Severity
 from orchestrator.Core.mojo.repairs import REPAIRS
 from orchestrator.Core.mojo.repairs.model import RepairPlan
 
-VERDICTS = ("miracle", "deletion_list", "person", "admin", "not_automatic")
+VERDICTS = ("miracle", "miracle_yes", "deletion_list", "person", "admin", "not_automatic")
 # Why Mojo Miracle does not repair something, in the words the person and an AI read.
 REASONS = {
+    "miracle_yes": "needs your yes: Mojo Miracle does it only after you agreed to its plan, at a terminal or in the "
+                   "framework's Mojo window",
     "deletion_list": "deleting needs your list: the framework deletes only what you tick and confirm in its own window",
     "person": "needs you: only you can do this, in the framework or at a terminal (your keys, tool permissions, the "
               "audit log, your settings and files)",
@@ -44,7 +48,8 @@ OTHER_LISTS = {"knowledge.storage": "Tools > Knowledge Snapshots... > Delete the
                                     "'llm-cli knowledge storage delete-old' in a terminal",
                "knowledge.snapshots": "Tools > Knowledge Snapshots... in the GUI, or 'llm-cli knowledge snapshots "
                                       "prune' or 'llm-cli knowledge snapshots export NAME --to FOLDER' in a terminal"}
-_CLASS_VERDICT = {"delegable": "miracle", "person_deletion": "deletion_list", "manual": "admin"}
+_CLASS_VERDICT = {"delegable": "miracle", "person_yes": "miracle_yes", "person_deletion": "deletion_list",
+                  "manual": "admin"}
 
 
 @dataclass
@@ -57,7 +62,8 @@ class Offer:
     @property
     def summary(self) -> str:
         """What Miracle would do, or why it does not."""
-        return self.plan.summary if self.plan is not None and self.verdict == "miracle" else self.reason
+        return (self.plan.summary if self.plan is not None and self.verdict in ("miracle", "miracle_yes")
+                else self.reason)
 
 
 def offer_for(framework, finding: Finding) -> Offer:

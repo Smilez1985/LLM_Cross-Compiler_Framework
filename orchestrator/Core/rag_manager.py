@@ -128,6 +128,12 @@ def holder_of(payload: Dict[str, Any]) -> str:
     return f"{CRAWL_HOLDER}{root}" if root else OWN_HOLDER
 
 
+def untagged_fields_ok(fields: Dict[str, Any]) -> bool:
+    """Whether a pack's hold on an excerpt carries what an import stores today: the pack's content digest
+    (origin_sha256) and its topic or target. An excerpt imported before that lacks them."""
+    return bool(fields.get("origin_sha256")) and bool(fields.get("topic") or fields.get("target"))
+
+
 def holder_info(payload: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     """{holder: its own fields} of a stored excerpt; an excerpt stored before holders has one, the one its fields
     name."""
@@ -917,6 +923,17 @@ class RAGManager:
             return {"alone": len(alone), "alone_pages": len({str(r.payload.get("source") or "") for r in alone}),
                     "shared": len(records) - len(alone)}
         return self._with_store(count) if holder else {"alone": 0, "alone_pages": 0, "shared": 0}
+
+    def untagged(self, holder: str) -> Dict[str, int]:
+        """How many excerpts `holder` (an installed pack's origin_pack) holds that were stored before excerpts carried
+        their pack's digest and topic or target: "excerpts" and their "pages". search_knowledge(topic=...) and the
+        Topic or target column miss them until the pack is imported again (CommunityManager.import_again). Raises
+        KnowledgeBaseError."""
+        def count(store: "KnowledgeStore") -> Dict[str, int]:
+            old = [r for r in self._held(store, holder, with_vectors=False)
+                   if not untagged_fields_ok(holder_info(r.payload).get(holder, {}))]
+            return {"excerpts": len(old), "pages": len({str(r.payload.get("source") or "") for r in old})}
+        return self._with_store(count) if holder else {"excerpts": 0, "pages": 0}
 
     @staticmethod
     def _held(store: "KnowledgeStore", holder: str, with_vectors: bool) -> List[Any]:

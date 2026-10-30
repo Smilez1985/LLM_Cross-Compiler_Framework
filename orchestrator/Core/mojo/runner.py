@@ -107,13 +107,16 @@ class Mojo:
     def miracle(self, *, actor: str, at_terminal: bool, before: Optional[MojoReport] = None,
                 free_space: Optional[Callable[[], Tuple[int, str]]] = None, decision: str = "allow",
                 answered_by: str = "", confirm_channel: str = "",
-                offered: Optional[List["Offer"]] = None) -> MiracleReport:
+                offered: Optional[List["Offer"]] = None,
+                confirm: Optional[Callable[["Offer"], bool]] = None) -> MiracleReport:
         """Mojo Miracle on the problems of `before` (a fresh Oracle run when None). `offered`: the offers the person
         was shown (offers.offers of `before`); each repair applies exactly the plan shown, or nothing when the problem
         changed meanwhile (plan_changed). `actor`, `decision`, `answered_by` and `confirm_channel` go into the audit
         entries of each repair (decision "allow": harmless, without a question, e.g. the CLI without a terminal).
         `free_space`: the person's list of what to delete (at a terminal only; returns how many items were deleted
-        and, when none was, why: "" when the person chose none), opened once for every finding that shares it."""
+        and, when none was, why: "" when the person chose none), opened once for every finding that shares it.
+        `confirm`: the person's own yes to one repair of class person (verdict miracle_yes; its plan with what it costs
+        is shown first, "No" the default), asked only with the person present; without it nothing of the kind runs."""
         from orchestrator.Core.mojo.offers import DELETION_LISTS, DELETION_WHERE, OTHER_LISTS, offers
         from orchestrator.Core.mojo.repairs.engine import apply_repair
         before = before if before is not None else self.run()
@@ -128,6 +131,19 @@ class Mojo:
                 outcome = "not_done" if result.outcome == "refused" else result.outcome
                 entries.append(MiracleEntry(finding, offer.verdict, outcome, result.summary or offer.summary,
                                             result.reason))
+            elif offer.verdict == "miracle_yes":
+                if not (at_terminal and confirm is not None and decision == "person"):
+                    entries.append(MiracleEntry(finding, offer.verdict, "not_done", "", offer.reason))
+                elif not confirm(offer):
+                    entries.append(MiracleEntry(finding, offer.verdict, "declined", "",
+                                                "you said no, so nothing was changed"))
+                else:
+                    result = apply_repair(self.framework, finding.code, actor=actor, decision=decision,
+                                          answered_by=answered_by, confirm_channel=confirm_channel,
+                                          expect_sha256=offer.plan.sha256())
+                    outcome = "not_done" if result.outcome == "refused" else result.outcome
+                    entries.append(MiracleEntry(finding, offer.verdict, outcome, result.summary or offer.summary,
+                                                result.reason))
             elif offer.verdict == "deletion_list" and finding.code in DELETION_LISTS and at_terminal \
                     and free_space is not None:
                 listing = DELETION_LISTS[finding.code]

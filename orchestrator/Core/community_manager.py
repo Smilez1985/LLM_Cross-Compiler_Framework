@@ -384,6 +384,18 @@ class _KnowledgeImport:
 
 
 @dataclass(frozen=True)
+class UntaggedImport:
+    """An installed pack whose excerpts were imported before excerpts carried their pack's digest and topic or target
+    (CommunityManager.untagged_imports): what importing it again means, shown before the person decides."""
+    label: str        # "knowledge pack X", "the knowledge of target pack Y"
+    folder: Path      # the installed pack folder (the person sees it; an AI reads the label)
+    excerpts: int     # its excerpts without topic or target
+    pages: int        # the pages the import reads again
+    size: int         # bytes of its pages file
+    belongs: str      # "topic X" / "target X": where they belong after the import
+
+
+@dataclass(frozen=True)
 class PageShare:
     """One page of a knowledge export: its (scrubbed) address and title, and how it is shared and why."""
     source: str
@@ -1874,6 +1886,58 @@ class CommunityManager:
             self.last_sync_problem = "; ".join(waiting.values())
             self.logger.warning(f"Knowledge packs not imported: {self.last_sync_problem}")
         return imported_count
+
+    def untagged_imports(self, rag_manager=None) -> List["UntaggedImport"]:
+        """The installed packs (imported already) whose excerpts lack their pack's digest and topic or target: imported
+        by an earlier version. search_knowledge(topic=...) and the Topic or target column miss them until they are
+        imported again (import_again). Reads the knowledge base only when it is open (`rag_manager`, or the
+        framework's): [] when it is off or not open."""
+        if rag_manager is None:
+            rag_manager = getattr(self.framework, "rag_manager", None)
+        counter = getattr(rag_manager, "untagged", None)
+        if not callable(counter):
+            return []
+        found = []
+        for item in self._knowledge_imports():
+            if not item.marker.exists():
+                continue   # not imported yet: the next import stores the fields anyway
+            try:
+                counts = counter(item.origin)
+            except Exception as e:  # noqa: BLE001 - a knowledge base that cannot be read lists nothing
+                self.logger.warning(f"Could not read the excerpts of {item.label}: {e}")
+                return []
+            if not counts.get("excerpts"):
+                continue
+            try:
+                data = json.loads(item.file.read_text(encoding="utf-8"))
+                pages, size = (len(data) if isinstance(data, list) else 0), item.file.stat().st_size
+            except (OSError, ValueError):
+                pages, size = int(counts.get("pages") or 0), 0
+            scope, name = next(iter(item.tags.items()))
+            found.append(UntaggedImport(item.label, item.folder, int(counts["excerpts"]), pages, size,
+                                        f"{scope} {name}"))
+        return found
+
+    def import_again(self, folder: Path, rag_manager=None) -> int:
+        """Imports one installed pack again (the person's yes in Mojo Miracle, knowledge.reimport): its marker goes, so
+        sync_knowledge_base takes a snapshot first and imports its pages with their digest and topic or target; the
+        excerpts it held before are replaced in place, those of pages it no longer has are released. Returns the
+        pages imported; why it did not finish is in `last_sync_problem`. PackError when it is no installed pack."""
+        if rag_manager is None:
+            rag_manager = getattr(self.framework, "rag_manager", None)
+        item = next((i for i in self._knowledge_imports() if _folder_key(i.folder) == _folder_key(Path(folder))),
+                    None)
+        if item is None:
+            raise PackError(f"{folder} is no installed pack with knowledge any more.")
+        if not rag_manager:
+            raise PackError("The knowledge base is off or not open, so nothing was imported.")
+        for mark in (item.marker, item.marker.with_suffix(".snapshotted")):
+            mark.unlink(missing_ok=True)   # the import then takes its snapshot first, as for a new pack
+        pages = self.sync_knowledge_base(rag_manager)
+        if not item.marker.exists():   # not finished: it stays pending and is tried again at the next start
+            raise PackError(self.last_sync_waiting.get(_folder_key(item.folder)) or self.last_sync_problem
+                            or f"{item.label} was not imported again")
+        return pages
 
     def _knowledge_imports(self) -> List[_KnowledgeImport]:
         """Every installed pack whose pages belong in the knowledge base: the knowledge packs (each under its topic or
