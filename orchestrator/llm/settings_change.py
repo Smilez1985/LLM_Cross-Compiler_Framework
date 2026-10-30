@@ -44,22 +44,85 @@ TIGHTEN_ONLY: Dict[str, Any] = {
     "crawler_rate_limit": "higher", "build_memory_limit": "lower", "build_pids_limit": "lower",
     "crawler_download_pdfs": False,
     # the soft cap and the idle timeout of a build step (utils/step_limits.py): an AI may only shorten them
-    "build_timeout": "lower", "build_idle_timeout": "lower"}
+    "build_timeout": "lower", "build_idle_timeout": "lower",
+    # The memory budget of Ditto's local server (runtime/hardware.local_budget): an AI may only make it smaller
+    # (fewer MiB of prompt cache, a shorter keep time, a smaller KV-cache type); "auto" counts as this computer's
+    # probe value, and 0 minutes (never unload) is the person's alone.
+    "local_cache_ram_mib": "lower", "local_cache_keep_minutes": "lower", "local_kv_cache": "lower"}
 MIN_MEMORY_LIMIT = 6 * 1024 ** 2  # Docker refuses a smaller container memory limit
+# The settings of the memory budget of Ditto's local server, and the person's acceptance of values above the soft cap.
+LOCAL_CACHE_SETTINGS = ("local_cache_ram_mib", "local_cache_keep_minutes", "local_kv_cache")
+CACHE_OVER_CAP_OK = "local_cache_over_cap_ok"
+KV_CACHE_KINDS = ("f16", "q8_0", "q4_0")
+_KV_ORDER = {"q4_0": 0, "q8_0": 1, "f16": 2}   # memory of the KV-cache type, smallest first
 # Settings only the person sets, in the window or the command line, never through a change of this module or an AI.
 # The build sources in the own network (BUILD_SOURCE_SETTINGS: apt mirror, apt cache, pip index) are the person's too:
-# they say where an offline build may fetch from.
-PERSON_ONLY_SETTINGS = tuple(OPT_OUT_SETTINGS) + tuple(BUILD_SOURCE_SETTINGS)
+# they say where an offline build may fetch from; and so is the acceptance of memory values above the soft cap.
+PERSON_ONLY_SETTINGS = tuple(OPT_OUT_SETTINGS) + tuple(BUILD_SOURCE_SETTINGS) + (CACHE_OVER_CAP_OK,)
 PERSON_ONLY_TEXT = ("{key} says what offline mode counts as local besides this computer and the own network. Only the "
                     "person sets it, in the framework's settings; no AI and no settings change of an AI can.")
 BUILD_SOURCE_TEXT = ("{key} says where an offline build of the build container image fetches packages from in the own "
                      "network. Only the person sets it, in the framework's settings; no AI and no settings change of "
                      "an AI can.")
+CACHE_PERSON_ONLY_TEXT = ("{key} accepts memory values above this computer's soft cap without a warning. Only the "
+                          "person sets it, in the Prompt cache group or on the command line; no AI can.")
 
 
 def person_only_text(key: str) -> str:
     """Why `key` (one of PERSON_ONLY_SETTINGS) is refused for every change but the person's."""
+    if key == CACHE_OVER_CAP_OK:
+        return CACHE_PERSON_ONLY_TEXT.format(key=key)
     return (BUILD_SOURCE_TEXT if key in BUILD_SOURCE_SETTINGS else PERSON_ONLY_TEXT).format(key=key)
+
+
+def cache_value(key: str, value: Any) -> str:
+    """A memory-budget setting's value as it is stored: "auto", a whole number (MiB or minutes, 0 or more; never
+    llama.cpp's -1 = no limit) or a KV-cache type. ValueError for anything else."""
+    text = str(value if value is not None else "auto").strip().lower() or "auto"
+    if text == "auto":
+        return text
+    if key == "local_kv_cache":
+        if text not in KV_CACHE_KINDS:
+            raise ValueError(f"{key} is auto, {', '.join(KV_CACHE_KINDS)}, not '{value}'.")
+        return text
+    if not re.fullmatch(r"\d{1,7}", text):
+        unit = "MiB" if key.endswith("_mib") else "minutes"
+        raise ValueError(f"{key} is auto or a whole number of {unit} (0 or more), not '{value}'.")
+    return str(int(text))
+
+
+def _cache_rank(key: str, value: Any, auto: Optional[Dict[str, Any]]) -> Optional[float]:
+    """The size a memory-budget value stands for (auto: this computer's probe value; None when that is unknown)."""
+    text = cache_value(key, value)
+    if text == "auto":
+        probe = (auto or {}).get(key)
+        if probe is None:
+            return None
+        text = cache_value(key, probe)
+        if text == "auto":
+            return None
+    if key == "local_kv_cache":
+        return float(_KV_ORDER[text])
+    number = float(int(text))
+    return float("inf") if key == "local_cache_keep_minutes" and number == 0 else number
+
+
+def _cache_direction_problem(key: str, old: Any, new: Any, auto: Optional[Dict[str, Any]]) -> Optional[str]:
+    if key == "local_cache_keep_minutes" and cache_value(key, new) == "0":
+        return ("local_cache_keep_minutes 0 keeps the model loaded for ever; only the person sets it, in the Prompt "
+                "cache group or on the command line")
+    new_rank = _cache_rank(key, new, auto)
+    try:
+        old_rank = _cache_rank(key, old, auto)
+    except ValueError:
+        old_rank = None
+    if new_rank is None or old_rank is None:
+        return (f"{key} cannot be checked against this computer's measured value now, so an AI cannot change it; the "
+                "person can")
+    if new_rank > old_rank:
+        now = f"{old}" + (f" = {(auto or {}).get(key)}" if cache_value(key, old) == "auto" else "")
+        return f"{key} may only be lowered over MCP (now {now}); raising it stays with the person"
+    return None
 
 
 def memory_bytes(value: Any) -> Optional[int]:
@@ -79,10 +142,14 @@ def memory_bytes(value: Any) -> Optional[int]:
     return value
 
 
-def direction_problem(key: str, old: Any, new: Any) -> Optional[str]:
-    """Why a change of a tighten-only setting would widen what an AI may do (None when it tightens or keeps it)."""
+def direction_problem(key: str, old: Any, new: Any, auto: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Why a change of a tighten-only setting would widen what an AI may do (None when it tightens or keeps it).
+    `auto` holds this computer's probe values of the memory-budget settings (CacheBudget.auto): "auto" counts as them,
+    and without them a change from or to "auto" is refused."""
     if key not in TIGHTEN_ONLY:
         return None
+    if key in LOCAL_CACHE_SETTINGS:
+        return _cache_direction_problem(key, old, new, auto)
     rule = TIGHTEN_ONLY[key]
     if isinstance(rule, bool):
         return None if new is rule else (f"{key} may only be set to {str(rule).lower()} over MCP; the other "
@@ -194,7 +261,12 @@ def takes_workspace(preset: Any) -> bool:
 AI_SETTINGS = {"ai_provider": "provider", "ai_model": "model", "ai_base_url": "base_url",
                "ai_anthropic_workspace_id": "workspace_id", "ai_effort": "effort",
                "ai_security_level": "security_level", "ai_fallback_chain": "fallback_chain",
-               "offline_mode": "offline_mode", "enable_rag_knowledge": "enable_rag"}
+               "offline_mode": "offline_mode", "enable_rag_knowledge": "enable_rag",
+               # The local server's memory budget (checked against this computer's CacheBudget, cache_problems).
+               "local_cache_ram_mib": "cache_ram_mib", "local_cache_keep_minutes": "cache_keep_minutes",
+               "local_kv_cache": "kv_cache", CACHE_OVER_CAP_OK: "cache_over_cap_ok"}
+_CACHE_FIELDS = {"local_cache_ram_mib": "cache_ram_mib", "local_cache_keep_minutes": "cache_keep_minutes",
+                 "local_kv_cache": "kv_cache"}
 BASE_URL_SCHEME = "The Base URL must start with http:// or https://."
 
 
@@ -238,6 +310,15 @@ class AISettingsChange:
     fallback_chain: Sequence[str] = field(default_factory=list)
     offline_mode: bool = False
     enable_rag: bool = False
+    # The local server's memory budget: None leaves a setting out of this change (apply() does not write it).
+    cache_ram_mib: Optional[str] = None
+    cache_keep_minutes: Optional[str] = None
+    kv_cache: Optional[str] = None
+    cache_over_cap_ok: Optional[bool] = None
+    # This computer's budget (runtime/hardware.CacheBudget: probe values, soft caps, hard limits), given by the
+    # channel; by_ai: the change comes from an AI (MCP), which may never go above a soft cap.
+    cache_budget: Any = None
+    by_ai: bool = False
 
     # --- values as they are used ---
     @property
@@ -336,7 +417,101 @@ class AISettingsChange:
                     found.append(SettingsProblem("base_url_invalid", "Invalid Base URL", str(e)))
         if not str(self.model or "").strip() and not preset.runtime_endpoint:
             found.append(SettingsProblem("model_missing", "Missing Model", "Please select or enter a model."))
+        return found + self.cache_problems()
+
+    # --- the local server's memory budget ---
+    def cache_values(self) -> Dict[str, Any]:
+        """The memory-budget settings this change holds ({setting name: value}; the ones left out are missing)."""
+        out = {key: getattr(self, field) for key, field in _CACHE_FIELDS.items() if getattr(self, field) is not None}
+        if self.cache_over_cap_ok is not None:
+            out[CACHE_OVER_CAP_OK] = bool(self.cache_over_cap_ok)
+        return out
+
+    def cache_problems(self) -> List[SettingsProblem]:
+        """The refusals of the memory-budget values: above this computer's hard limit for everyone; for an AI also
+        above the soft cap, 0 minutes (never unload) and any value when the budget is unknown. The person gets
+        cache_warnings() instead of a refusal for the soft cap."""
+        found: List[SettingsProblem] = []
+        budget = self.cache_budget
+        for key, field_name in _CACHE_FIELDS.items():
+            value = getattr(self, field_name)
+            if value is None:
+                continue
+            try:
+                value = cache_value(key, value)
+            except ValueError as e:
+                found.append(SettingsProblem(f"cache_invalid:{key}", "Prompt cache", str(e)))
+                continue
+            if self.by_ai and key == "local_cache_keep_minutes" and value == "0":
+                found.append(SettingsProblem(f"cache_person_only:{key}", "Prompt cache",
+                                             _cache_direction_problem(key, "auto", value, None) or ""))
+                continue
+            if budget is None:
+                if self.by_ai and value != "auto":
+                    found.append(SettingsProblem(f"cache_unchecked:{key}", "Prompt cache",
+                                                 f"{key} cannot be checked against this computer's limits now, so an "
+                                                 "AI cannot set it; the person can."))
+                continue
+            over = budget.over_cap(key, value)
+            hard = budget.hard_limits.get(key)
+            soft = budget.soft_caps.get(key)
+            if over == "hard":
+                found.append(SettingsProblem(f"cache_hard_limit:{key}", "Prompt cache",
+                                             f"{key} = {value} is above this computer's hard limit of {hard}: the "
+                                             "memory is not there next to the model. Choose at most that, or auto."))
+            elif over == "soft" and self.by_ai:
+                found.append(SettingsProblem(f"cache_soft_cap:{key}", "Prompt cache",
+                                             f"{key} = {value} is above this computer's soft cap of {soft}; only the "
+                                             "person may go above it."))
         return found
+
+    @classmethod
+    def cache_change(cls, values: Dict[str, Any], budget: Any = None, by_ai: bool = False) -> "AISettingsChange":
+        """A change of memory-budget settings only ({setting name: value}; the CLI's `ditto cache set`, the GUI's
+        Prompt cache fields), checked against `budget`. ValueError for a value a setting cannot take, KeyError for
+        another setting, PermissionError for local_cache_over_cap_ok from an AI."""
+        change = cls(preset=None, cache_budget=budget, by_ai=by_ai)
+        for key, value in values.items():
+            if key == CACHE_OVER_CAP_OK:
+                if by_ai:
+                    raise PermissionError(person_only_text(key))
+                change = replace(change, cache_over_cap_ok=bool(value))
+            elif key in _CACHE_FIELDS:
+                change = replace(change, **{_CACHE_FIELDS[key]: cache_value(key, value)})
+            else:
+                raise KeyError(f"{key} is not a setting of the local server's memory budget "
+                               f"({', '.join(LOCAL_CACHE_SETTINGS + (CACHE_OVER_CAP_OK,))}).")
+        return change
+
+    def cache_warnings(self, accepted: Optional[bool] = None) -> List[str]:
+        """The one warning per value the person sets above this computer's soft cap (none when the person accepted
+        such values, local_cache_over_cap_ok in this change or `accepted` as saved, or without a budget)."""
+        budget = self.cache_budget
+        if budget is None or self.cache_over_cap_ok or (self.cache_over_cap_ok is None and accepted):
+            return []
+        out = []
+        for key, field_name in _CACHE_FIELDS.items():
+            value = getattr(self, field_name)
+            try:
+                if value is None or budget.over_cap(key, cache_value(key, value)) != "soft":
+                    continue
+            except ValueError:
+                continue
+            soft = budget.soft_caps.get(key)
+            what = "never unloading the model" if key == "local_cache_keep_minutes" and value == "0" else f"{value}"
+            out.append(f"{key} = {what} is above this computer's soft cap of {soft}: the server then holds more "
+                       "memory than this computer has to spare, and other programs may get slow.")
+        return out
+
+    def apply_cache(self, config: Any) -> Optional[bool]:
+        """Writes only the memory-budget settings of this change and saves them (the CLI's `ditto cache set`); check
+        cache_problems() and show cache_warnings() first. Returns whether config.yml was written (None when the
+        settings cannot be saved)."""
+        if config is None or not hasattr(config, "set"):
+            return None
+        for key, value in self.cache_values().items():
+            config.set(key, value if key == CACHE_OVER_CAP_OK else cache_value(key, value))
+        return bool(config.save_user_config()) if hasattr(config, "save_user_config") else None
 
     def plain_http_url(self) -> Optional[str]:
         """The address a typed key would travel to unencrypted (plain http:// to another computer); the channel asks
@@ -382,6 +557,8 @@ class AISettingsChange:
             config.set("ai_fallback_chain", fallback)
             config.set("offline_mode", bool(self.offline_mode))
             config.set("enable_rag_knowledge", bool(self.enable_rag))
+            for name, value in self.cache_values().items():   # only the memory-budget values this change holds
+                config.set(name, value if name == CACHE_OVER_CAP_OK else cache_value(name, value))
             if hasattr(config, "save_user_config"):
                 saved = bool(config.save_user_config())
         if self.enable_rag and hasattr(framework, "ensure_rag_manager"):
@@ -389,10 +566,13 @@ class AISettingsChange:
         ditto = getattr(framework, "ditto_manager", None)
         if ditto is not None and hasattr(ditto, "reload"):
             ditto.reload()  # a new key or catalog takes effect on the next question
-        return AppliedChange(result={
+        result = {
             "provider": preset.id, "provider_label": preset.label, "model": self.model, "base_url": address or None,
             "effort": effort or None, "security_level": security, "fallback_chain": fallback,
-            "offline_mode": bool(self.offline_mode), "enable_rag": bool(self.enable_rag)}, saved=saved)
+            "offline_mode": bool(self.offline_mode), "enable_rag": bool(self.enable_rag)}
+        if self.cache_values():
+            result["local_cache"] = self.cache_values()
+        return AppliedChange(result=result, saved=saved)
 
     # --- a change of one setting (the coming `llmcf config set`) ---
     @classmethod
@@ -420,11 +600,15 @@ class AISettingsChange:
                    effort=user_value(config, "ai_effort") or "", security_level=security,
                    fallback_chain=list(chain) if isinstance(chain, (list, tuple)) else parse_fallback(chain),
                    offline_mode=offline_mode(config),
-                   enable_rag=bool(get("enable_rag_knowledge", False)) if callable(get) else False)
+                   enable_rag=bool(get("enable_rag_knowledge", False)) if callable(get) else False,
+                   **{field_name: str((get(key, "auto") if callable(get) else None) or "auto").strip().lower()
+                      for key, field_name in _CACHE_FIELDS.items()},
+                   cache_over_cap_ok=bool(get(CACHE_OVER_CAP_OK, False)) if callable(get) else False)
 
     @classmethod
     def problems_of_settings(cls, config: Any, secrets: Any, values: Dict[str, Any],
-                             catalog: Any = None) -> List[SettingsProblem]:
+                             catalog: Any = None, *, cache_budget: Any = None,
+                             by_ai: bool = False) -> List[SettingsProblem]:
         """The refusals (problems(), the dialog's rules) that setting `values` ({setting name: new value}) one by one
         would bring: the saved AI settings (current) with each AI setting among `values` replaced (with_setting);
         names that are not AI settings are ignored. A problem the saved settings already have is not counted, so a
@@ -434,14 +618,15 @@ class AISettingsChange:
         as "person_only"."""
         person = [key for key in values if key in PERSON_ONLY_SETTINGS]
         if person:
-            return [SettingsProblem("person_only", "Offline Mode", person_only_text(key)) for key in person]
+            return [SettingsProblem("person_only", "Prompt cache" if key == CACHE_OVER_CAP_OK else "Offline Mode",
+                                    person_only_text(key)) for key in person]
         names = [key for key in values if key in AI_SETTINGS]
         if not names:
             return []
         if catalog is None:
             from orchestrator.llm.catalog import load_catalog
             catalog = load_catalog(user_dir=getattr(config, "config_dir", None))
-        saved = cls.current(config, catalog)
+        saved = replace(cls.current(config, catalog), cache_budget=cache_budget, by_ai=by_ai)
         changed = saved
         for key in names:
             changed = changed.with_setting(key, values[key], config)
@@ -457,6 +642,8 @@ class AISettingsChange:
         name = AI_SETTINGS.get(key)
         if name is None:
             raise KeyError(f"{key} is not an AI setting (AI settings: {', '.join(AI_SETTINGS)}).")
+        if key in _CACHE_FIELDS:
+            return replace(self, **{name: cache_value(key, value)})
         if name == "provider":
             pid = self.catalog.resolve_id(str(value or "")) if self.catalog is not None else None
             if pid is None:
@@ -486,6 +673,8 @@ class AISettingsChange:
         return replace(self, **{name: value})
 
 
-__all__ = ["AI_SETTINGS", "AISettingsChange", "AppliedChange", "MIN_MEMORY_LIMIT", "SettingsChangeError",
-           "SettingsOverlay", "SettingsProblem", "TIGHTEN_ONLY", "check_base_url", "direction_problem", "key_method",
-           "memory_bytes", "parse_fallback", "plain_http_to_remote", "takes_workspace", "user_value"]
+__all__ = ["AI_SETTINGS", "AISettingsChange", "AppliedChange", "CACHE_OVER_CAP_OK", "KV_CACHE_KINDS",
+           "LOCAL_CACHE_SETTINGS", "MIN_MEMORY_LIMIT", "PERSON_ONLY_SETTINGS", "SettingsChangeError",
+           "SettingsOverlay", "SettingsProblem", "TIGHTEN_ONLY", "cache_value", "check_base_url", "direction_problem",
+           "key_method", "memory_bytes", "parse_fallback", "person_only_text", "plain_http_to_remote",
+           "takes_workspace", "user_value"]

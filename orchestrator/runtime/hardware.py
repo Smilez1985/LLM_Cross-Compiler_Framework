@@ -24,7 +24,7 @@ import os
 import platform
 import threading
 from pathlib import Path
-from typing import Callable, Dict, List, Literal, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Tuple
 
 from pydantic import BaseModel
 
@@ -38,6 +38,13 @@ SYSTEM_RESERVE = int(1.5 * GIB)  # RAM left to the OS, the GUI and the knowledge
 # Less RAM than this left next to a board's model and the system reserve: its server gets a quantized KV cache unless
 # the person chose otherwise (eighth round N7).
 KV_LITTLE_RAM = 2 * GIB
+# RAM left to the operating system and the framework next to the model, its KV cache and the prompt cache when the
+# context is computed (compute_context, local_budget): the one OS margin. A dedicated GPU keeps half of it free of its
+# own memory (driver and compute buffers); a partly offloaded model needs both.
+OS_MARGIN = GIB
+# The memory of a KV-cache type against f16, from ggml's block sizes (ggml-common.h): q8_0 stores 32 values in 34 bytes
+# (1.0625 bytes each instead of 2), q4_0 in 18 bytes (0.5625 bytes each).
+KV_TYPE_FACTORS = {"f16": 1.0, "q8_0": 1.0625 / 2, "q4_0": 0.5625 / 2}
 # The package copy of scripts/hardware_probe.py (byte-identical, tests/test_hardware_probe.py compares them): a wheel
 # install has no scripts/ folder.
 PROBE_PATH = Path(__file__).resolve().with_name("hardware_probe.py")
@@ -493,29 +500,216 @@ def kv_cache_default(ram_total: int, model_bytes: Optional[int] = None) -> Tuple
     return ("q8_0" if left < KV_LITTLE_RAM else "f16"), round(left / GIB, 1)
 
 
-def compute_context(model: ModelEntry, hw: HardwareInfo, choice: Optional[BackendChoice],
-                    defaults: ServerDefaults, cap: Optional[int] = None,
-                    model_bytes: Optional[int] = None) -> Tuple[int, str]:
-    """Context length (-c) that fits next to the model: never the native context, never above the cap."""
-    cap = min(cap or defaults.ctx_cap, model.native_context)
-    floor = min(defaults.ctx_min, cap)
-    weights = int((model_bytes or model.size or 0) * 1.05)
+def kv_bytes_for(model: Any, kind: Optional[str] = "f16") -> int:
+    """KV-cache bytes per token of `model` (a catalog ModelEntry, or its f16 bytes per token as a number) with the
+    KV-cache type `kind` (KV_TYPE_FACTORS; None is f16), rounded up. ValueError for another type."""
+    base = int(model if isinstance(model, (int, float)) else model.kv_bytes_per_token)
+    factor = KV_TYPE_FACTORS.get(kind or "f16")
+    if factor is None:
+        raise ValueError(f"the KV-cache type is one of {', '.join(KV_TYPE_FACTORS)}, not '{kind}'")
+    return max(1, -(-int(base * factor * 1024) // 1024))
+
+
+# --- one memory budget for Ditto's server (chain ctx-local-mem) ----------------------------------------------------
+# The prompt cache (--cache-ram): RAM outside the KV cache where llama-server keeps the states of earlier prompts. Its
+# automatic size is the rule of 3.1.0 (an eighth of the RAM, 256 to 8192 MiB), but never more than half of the free RAM
+# left next to the model, the KV cache of the context that must keep fitting and OS_MARGIN; below CACHE_RAM_MIN_MIB it
+# is off (0). The person may set more, up to the hard limit (the RAM physically there next to the model, that context
+# and SYSTEM_RESERVE); above the soft cap (the automatic value) an AI is refused and the person is warned once.
+CACHE_RAM_RULE_MIB = (256, 8192)
+CACHE_RAM_MIN_MIB = 64
+# How long the server keeps the model loaded without requests (--sleep-idle-seconds, in minutes): above the soft cap
+# the model holds its RAM for long; the hard limit is one day. 0 = never unload (only the person sets it).
+KEEP_MINUTES_SOFT_CAP = 60
+KEEP_MINUTES_HARD_LIMIT = 1440
+CACHE_SETTINGS = ("local_cache_ram_mib", "local_cache_keep_minutes", "local_kv_cache")
+NEVER = float("inf")
+
+
+class CacheBudget(BaseModel):
+    """What Ditto's server may hold on this computer (local_budget): the values the launcher uses (ram_mib,
+    keep_minutes, disk_mib, kv_cache), the probe's automatic values (auto, by setting name), the soft caps and hard
+    limits by setting name, a reason per setting, and the saved settings above their soft cap (over_soft_cap)."""
+    ram_mib: int
+    keep_minutes: int
+    disk_mib: int = 0                   # slot files on disk: not used (ctx-slot-cache, if the measurement asks)
+    kv_cache: str = "f16"
+    auto: Dict[str, Any] = {}
+    soft_caps: Dict[str, int] = {}
+    hard_limits: Dict[str, int] = {}
+    reasons: Dict[str, str] = {}
+    over_soft_cap: List[str] = []
+
+    def over_cap(self, key: str, value: Any) -> Optional[str]:
+        return over_cap(self, key, value)
+
+    def settings_view(self) -> Dict[str, Dict[str, Any]]:
+        """Per setting: the automatic value, the soft cap, the hard limit and the reason (numbers and words only)."""
+        return {key: {"auto": self.auto.get(key), "soft_cap": self.soft_caps.get(key),
+                      "hard_limit": self.hard_limits.get(key), "reason": self.reasons.get(key, "")}
+                for key in CACHE_SETTINGS}
+
+
+def cache_number(key: str, value: Any) -> Optional[float]:
+    """A cache setting's value as a number to compare: MiB, minutes (0 = never unload counts as endless, NEVER) or the
+    KV-cache type's memory share (KV_TYPE_FACTORS); None for "auto" or nothing. ValueError for a value the setting
+    cannot take: never a negative number, so llama.cpp's "-1 = no limit" cannot be reached."""
+    text = str(value).strip().lower() if value is not None else "auto"
+    if text in ("", "auto"):
+        return None
+    if key == "local_kv_cache":
+        if text not in KV_TYPE_FACTORS:
+            raise ValueError(f"{key} is auto, {', '.join(KV_TYPE_FACTORS)}, not '{value}'")
+        return KV_TYPE_FACTORS[text]
+    if not text.isdigit() or len(text) > 7:
+        unit = "MiB" if key.endswith("_mib") else "minutes"
+        raise ValueError(f"{key} is auto or a whole number of {unit} (0 or more), not '{value}'")
+    number = int(text)
+    if key == "local_cache_keep_minutes" and number == 0:
+        return NEVER
+    return float(number)
+
+
+def over_cap(budget: CacheBudget, key: str, value: Any) -> Optional[str]:
+    """"hard" when `value` of setting `key` is above this computer's hard limit, "soft" when above the soft cap (0 =
+    never unload counts as above it), None otherwise ("auto" never is). ValueError for a value the setting cannot
+    take."""
+    number = cache_number(key, value)
+    if number is None or key == "local_kv_cache":
+        return None
+    hard, soft = budget.hard_limits.get(key), budget.soft_caps.get(key)
+    if hard is not None and number != NEVER and number > hard:
+        return "hard"
+    if soft is not None and number > soft:
+        return "soft"
+    return None
+
+
+def _ram_in_use(hw: HardwareInfo, weights: int, kv: int, choice: Optional[BackendChoice]) -> int:
+    """The part of the weights and the KV cache that lives in RAM: none when a dedicated GPU holds both (the rule of
+    compute_context), else all of it."""
     gpu = choice.gpu if choice and choice.backend in ("cuda", "vulkan", "rocm") else None
     if gpu and gpu.vram_mib and not gpu.unified:
         vram = (gpu.vram_free_mib if gpu.vram_free_mib is not None else gpu.vram_mib * 0.9) * MIB
-        if weights + 512 * MIB <= vram:
-            budget, where = vram - weights - 512 * MIB, f"{vram / GIB:.1f} GiB free GPU memory"
+        if weights + kv + OS_MARGIN // 2 <= vram:
+            return 0
+    return weights + kv
+
+
+def _saved_number(key: str, saved: Dict[str, Any]) -> Optional[float]:
+    try:
+        return cache_number(key, saved.get(key))
+    except ValueError:
+        return None  # a damaged saved value counts as auto (the settings schema refuses it when it is set)
+
+
+def local_budget(hw: HardwareInfo, model_bytes: int, kv_bytes_per_token: int, ctx: int,
+                 disk_free: Optional[int] = None, disk_total: Optional[int] = None,
+                 saved: Optional[Dict[str, Any]] = None, *, choice: Optional[BackendChoice] = None,
+                 keep_minutes_default: int = 10) -> CacheBudget:
+    """The one memory budget of Ditto's server on this computer, from the measured RAM (HardwareInfo of the probe; never
+    a guess): the KV-cache type (local_kv_cache; auto is the boards' rule, kv_cache_default), the prompt cache in RAM
+    (local_cache_ram_mib) and how long the model stays loaded (local_cache_keep_minutes). `kv_bytes_per_token` is the
+    model's f16 KV cache per token (the catalog's value), `ctx` the context that must keep fitting next to the prompt
+    cache (the minimum context, or the one asked for), `choice` the GPU build (a model held by a dedicated GPU does not
+    count in RAM). `saved` holds the person's settings (auto or a value). The launcher then computes the context with
+    the prompt cache as reserve_bytes (compute_context), so the same RAM is counted once. Slot files on disk
+    (disk_free, disk_total) are not used yet: disk_mib is 0."""
+    saved = dict(saved or {})
+    reasons: Dict[str, str] = {}
+    weights = int((model_bytes or 0) * 1.05)
+    floor_ctx = max(int(ctx or 0), 0)
+    if _ram_in_use(hw, weights, kv_bytes_for(kv_bytes_per_token, "f16") * floor_ctx, choice) == 0:
+        # A dedicated GPU holds the weights and the f16 KV cache: the boards' RAM rule does not apply (nothing of
+        # the model is in RAM), so the cache keeps llama.cpp's f16.
+        auto_kind, auto_why = "f16", "f16 (automatic: the GPU holds the model and its KV cache)"
+    else:
+        auto_kind, left_gib = kv_cache_default(hw.ram_total, model_bytes or None)
+        auto_why = (f"{auto_kind} (automatic, the boards' rule: {left_gib:g} GiB RAM left next to the model and the "
+                    "system reserve)")
+    chosen_kind = str(saved.get("local_kv_cache") or "auto").strip().lower()
+    if chosen_kind in KV_TYPE_FACTORS:
+        kind = chosen_kind
+        reasons["local_kv_cache"] = f"{kind} (your setting)"
+    else:
+        kind = auto_kind
+        reasons["local_kv_cache"] = auto_why
+    kv = kv_bytes_for(kv_bytes_per_token, kind) * floor_ctx
+    in_ram = _ram_in_use(hw, weights, kv, choice)
+    low, high = CACHE_RAM_RULE_MIB
+    rule = max(low, min(high, hw.ram_total // (8 * MIB)))
+    room = max(0, hw.ram_available - in_ram - OS_MARGIN) // MIB
+    auto_ram = min(rule, room // 2)
+    if auto_ram < CACHE_RAM_MIN_MIB:
+        auto_ram = 0
+    hard_ram = max(auto_ram, max(0, hw.ram_total - SYSTEM_RESERVE - in_ram) // MIB)
+    chosen = _saved_number("local_cache_ram_mib", saved)
+    if chosen is None:
+        ram = auto_ram
+        reasons["local_cache_ram_mib"] = (
+            f"{ram} MiB (automatic: an eighth of the RAM, {low} to {high} MiB, and at most half of the {room} MiB free "
+            "RAM left next to the model, its context and the system's margin"
+            + ("; too little is left, so the prompt cache is off)" if ram == 0 else ")"))
+    elif chosen > hard_ram:
+        ram = int(hard_ram)
+        reasons["local_cache_ram_mib"] = (f"{ram} MiB (your {int(chosen)} MiB is above this computer's hard limit of "
+                                          f"{hard_ram} MiB)")
+    else:
+        ram = int(chosen)
+        reasons["local_cache_ram_mib"] = f"{ram} MiB (your setting)"
+    keep_n = _saved_number("local_cache_keep_minutes", saved)
+    if keep_n is None:
+        keep = int(keep_minutes_default)
+        reasons["local_cache_keep_minutes"] = (f"{keep} minutes (automatic)" if keep
+                                               else "never unloaded (automatic)")
+    elif keep_n == NEVER:
+        keep = 0
+        reasons["local_cache_keep_minutes"] = "never unloaded (your setting)"
+    else:
+        keep = int(min(keep_n, KEEP_MINUTES_HARD_LIMIT))
+        reasons["local_cache_keep_minutes"] = f"{keep} minutes (your setting)"
+    budget = CacheBudget(
+        ram_mib=ram, keep_minutes=keep, kv_cache=kind,
+        auto={"local_cache_ram_mib": auto_ram, "local_cache_keep_minutes": int(keep_minutes_default),
+              "local_kv_cache": auto_kind},
+        soft_caps={"local_cache_ram_mib": auto_ram,
+                   "local_cache_keep_minutes": max(KEEP_MINUTES_SOFT_CAP, int(keep_minutes_default))},
+        hard_limits={"local_cache_ram_mib": int(hard_ram), "local_cache_keep_minutes": KEEP_MINUTES_HARD_LIMIT},
+        reasons=reasons)
+    budget.over_soft_cap = [key for key in ("local_cache_ram_mib", "local_cache_keep_minutes")
+                            if _saved_number(key, saved) is not None and over_cap(budget, key, saved.get(key))]
+    return budget
+
+
+def compute_context(model: ModelEntry, hw: HardwareInfo, choice: Optional[BackendChoice],
+                    defaults: ServerDefaults, cap: Optional[int] = None,
+                    model_bytes: Optional[int] = None, kv_kind: str = "f16",
+                    reserve_bytes: int = 0) -> Tuple[int, str]:
+    """Context length (-c) that fits next to the model: never the native context, never above the cap. `kv_kind` is the
+    KV-cache type the server gets (kv_bytes_for), `reserve_bytes` RAM kept free for something beside it (the prompt
+    cache of local_budget). With the defaults the result is the one of 3.1.0."""
+    cap = min(cap or defaults.ctx_cap, model.native_context)
+    floor = min(defaults.ctx_min, cap)
+    weights = int((model_bytes or model.size or 0) * 1.05)
+    per_token = kv_bytes_for(model, kv_kind)
+    reserve = max(0, int(reserve_bytes or 0))
+    gpu = choice.gpu if choice and choice.backend in ("cuda", "vulkan", "rocm") else None
+    if gpu and gpu.vram_mib and not gpu.unified:
+        vram = (gpu.vram_free_mib if gpu.vram_free_mib is not None else gpu.vram_mib * 0.9) * MIB
+        if weights + OS_MARGIN // 2 <= vram:
+            budget, where = vram - weights - OS_MARGIN // 2, f"{vram / GIB:.1f} GiB free GPU memory"
         else:
-            # Partial offload: layers that do not fit stay in RAM.
-            budget = vram + hw.ram_available - weights - 1536 * MIB
+            # Partial offload: layers that do not fit stay in RAM (the GPU's half margin and the OS margin).
+            budget = vram + hw.ram_available - weights - OS_MARGIN - OS_MARGIN // 2 - reserve
             where = f"{vram / GIB:.1f} GiB GPU + {hw.ram_available / GIB:.1f} GiB free RAM"
     else:
         # CPU, Apple Silicon and integrated GPUs: weights and KV cache live in the (shared) RAM.
-        budget = hw.ram_available - weights - GIB  # leaves room for the OS and the framework
+        budget = hw.ram_available - weights - OS_MARGIN - reserve  # leaves room for the OS and the framework
         where = f"{hw.ram_available / GIB:.1f} GiB free RAM"
-    fits = max(int(budget), 0) // model.kv_bytes_per_token
+    fits = max(int(budget), 0) // per_token
     ctx = min(fits, cap) // 256 * 256
     if ctx < floor:
         return floor, f"{floor} tokens (minimum; only ~{fits} fit in {where} next to the model)"
     limit = "cap" if ctx == cap else "memory"
-    return ctx, f"{ctx} tokens ({limit}; {where}, {model.kv_bytes_per_token // 1024} KiB KV cache per token)"
+    kind = "" if kv_kind in (None, "f16") else f" {kv_kind}"
+    return ctx, f"{ctx} tokens ({limit}; {where}, {per_token // 1024} KiB{kind} KV cache per token)"

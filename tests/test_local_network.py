@@ -159,8 +159,9 @@ def test_cli_refuses_what_is_no_opt_out_and_two_actions(config):
 def test_ai_settings_change_refuses_the_opt_outs():
     from orchestrator.llm.settings_change import PERSON_ONLY_SETTINGS, AISettingsChange
     from orchestrator.utils.locality import BUILD_SOURCE_SETTINGS
-    # Round 36 (on purpose): the build sources in the own network are the person's too.
-    assert set(PERSON_ONLY_SETTINGS) == set(OPT_OUT_SETTINGS) | set(BUILD_SOURCE_SETTINGS)
+    # Round 36 (on purpose): the build sources in the own network are the person's too; and, since the local server's
+    # memory budget (chain ctx-local-mem), the person's acceptance of values above the soft cap.
+    assert set(PERSON_ONLY_SETTINGS) == set(OPT_OUT_SETTINGS) | set(BUILD_SOURCE_SETTINGS) | {"local_cache_over_cap_ok"}
     for key in OPT_OUT_SETTINGS:
         problems = AISettingsChange.problems_of_settings({}, None, {key: ["anything"]})
         assert [p.code for p in problems] == ["person_only"] and "Only the person" in problems[0].message

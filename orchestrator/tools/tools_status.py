@@ -207,6 +207,10 @@ class SettingOut(BaseModel):
     writable: Literal["ordinary", "tighten_only", "read_only"]
     allowed: str = Field(default="", description="What a change over MCP may do")
     persisted: bool = Field(default=False, description="A change is saved in the user's config.yml")
+    probe_default: SettingValue = Field(default=None, description="The memory budget of Ditto's local server: what "
+                                        "'auto' stands for on this computer (from its measured hardware)")
+    soft_cap: Optional[int] = Field(default=None, description="An AI may not set more than this")
+    hard_limit: Optional[int] = Field(default=None, description="Nobody may set more than this on this computer")
 
 
 class AiSummary(BaseModel):
@@ -723,6 +727,25 @@ def settings_schema(framework, key: str):
     return schemas.get(key) if isinstance(schemas, dict) else None
 
 
+def cache_budget(framework) -> Any:
+    """This computer's memory budget of Ditto's local server (runtime/hardware.CacheBudget: probe values, soft caps and
+    hard limits; numbers and words only), None when it cannot be worked out (then an AI cannot change those
+    settings)."""
+    try:
+        from orchestrator.runtime.llama_server import LocalLLMRuntime
+        return LocalLLMRuntime.from_framework(framework).cache_budget()
+    except Exception:  # noqa: BLE001 - no probe, no catalog: the AI's change is refused, never guessed
+        return None
+
+
+def _cache_auto(framework, keys) -> Optional[Dict[str, Any]]:
+    from orchestrator.llm.settings_change import LOCAL_CACHE_SETTINGS
+    if not any(key in LOCAL_CACHE_SETTINGS for key in keys):
+        return None
+    budget = cache_budget(framework)
+    return dict(budget.auto) if budget is not None else None
+
+
 def ai_settings_problem(framework, values: Dict[str, Any]) -> Optional[str]:
     """The first refusal of the AI settings' rules (AISettingsChange, the rules of the AI settings dialog and the
     sign-in) that these new values would bring, as "title: text"; None when there is none or no AI setting
@@ -737,9 +760,13 @@ def ai_settings_problem(framework, values: Dict[str, Any]) -> Optional[str]:
     ai = {key: value for key, value in values.items() if key in AI_SETTINGS or key in PERSON_ONLY_SETTINGS}
     if not ai:
         return None
+    from orchestrator.llm.settings_change import LOCAL_CACHE_SETTINGS
+    # The memory-budget settings are checked against this computer's budget, as an AI's change (soft cap).
+    cache = ({"cache_budget": cache_budget(framework), "by_ai": True}
+             if any(key in LOCAL_CACHE_SETTINGS for key in ai) else {})
     try:
         found = AISettingsChange.problems_of_settings(framework.config, getattr(framework, "secrets_manager", None),
-                                                      ai)
+                                                      ai, **cache)
     except (ValueError, OSError, yaml.YAMLError) as e:
         raise ValueError(scrub_for_ai(str(e), ai_folder_labels(framework))) from None
     return scrub_for_ai(f"{found[0].title}: {found[0].message}", ai_folder_labels(framework)) if found else None
@@ -747,6 +774,8 @@ def ai_settings_problem(framework, values: Dict[str, Any]) -> Optional[str]:
 
 AI_SETTINGS_NEXT = ("Tell the person: the AI settings decide this together with the AI provider, so they change the "
                     "provider in the AI settings first (only the person changes the provider).")
+CACHE_SETTINGS_NEXT = ("Call get_settings for this computer's soft cap and hard limit of the setting; a value above "
+                       "the soft cap stays with the person.")
 
 
 def settings_facts(framework, inp: UpdateSettingsIn):
@@ -756,6 +785,7 @@ def settings_facts(framework, inp: UpdateSettingsIn):
     from orchestrator.tools.facts_catalog import blocked
     from orchestrator.tools.spec import CallFacts, Fact
     seen, changes, facts, problems = set(), [], [], []
+    auto = _cache_auto(framework, [c.key for c in inp.changes])
     for change in inp.changes:
         key = change.key
         if key in seen:
@@ -771,7 +801,7 @@ def settings_facts(framework, inp: UpdateSettingsIn):
         except (ValueError, TypeError) as e:
             problems.append(f"{key}: {e}")
             continue
-        loosens = direction_problem(key, old, new)
+        loosens = direction_problem(key, old, new, auto)
         if loosens:
             raise blocked("setting_loosens", f"Refused: {loosens}.",
                           "Tell the person; only they can change it in that direction, in the GUI or CLI.",
@@ -790,8 +820,9 @@ def settings_facts(framework, inp: UpdateSettingsIn):
         raise blocked("setting_invalid", f"Invalid settings: {e}", "Call get_settings for what each setting takes.",
                       field="changes") from None
     if ai_problem:
-        raise blocked("setting_invalid", f"Refused by the AI settings: {ai_problem}", AI_SETTINGS_NEXT,
-                      field="changes")
+        cache = ai_problem.startswith("Prompt cache:")
+        raise blocked("setting_invalid", f"Refused by the AI settings: {ai_problem}",
+                      CACHE_SETTINGS_NEXT if cache else AI_SETTINGS_NEXT, field="changes")
     keys = ", ".join(c["key"] for c in changes)
     consequence = (f"Changes {len(changes)} framework setting{'s' if len(changes) != 1 else ''} ({keys}) for every "
                    "AI and for your own builds, and saves them in your config.yml.")
@@ -825,10 +856,17 @@ def status_tool_specs(registry, framework, no_tool_actions: List[Tuple[str, str]
         keys = list(dict.fromkeys(inp.keys)) or [k for k in READABLE if k not in OVERSIGHT
                                                   or _cfg(framework, k, missing) is not missing]
         rows = []
+        from orchestrator.llm.settings_change import LOCAL_CACHE_SETTINGS
+        budget = cache_budget(framework) if any(k in LOCAL_CACHE_SETTINGS for k in keys) else None
         for key in keys:
             writable = "ordinary" if key in ORDINARY else "tighten_only" if key in TIGHTEN_ONLY else "read_only"
-            rows.append(SettingOut(key=key, value=setting_value(framework, key), writable=writable,
-                                   allowed=allowed_text(key), persisted=key in WRITABLE))
+            row = SettingOut(key=key, value=setting_value(framework, key), writable=writable,
+                             allowed=allowed_text(key), persisted=key in WRITABLE)
+            if budget is not None and key in LOCAL_CACHE_SETTINGS:   # numbers and type names only, never a path
+                probe = budget.auto.get(key)
+                row.probe_default = probe if isinstance(probe, (int, str)) else None
+                row.soft_cap, row.hard_limit = budget.soft_caps.get(key), budget.hard_limits.get(key)
+            rows.append(row)
         ai = AiSummary(provider=str(_cfg(framework, "ai_provider", "") or "") or None,
                        model=str(_cfg(framework, "ai_model", "") or "") or None,
                        effort=str(_cfg(framework, "ai_effort", "") or "") or None,
@@ -850,13 +888,14 @@ def status_tool_specs(registry, framework, no_tool_actions: List[Tuple[str, str]
         except ValueError as e:
             ai_problem = str(e)
         from orchestrator.llm.settings_change import AI_SETTINGS, PERSON_ONLY_SETTINGS
+        auto = _cache_auto(framework, [c["key"] for c in bound])
         for change in bound:
             key, new = change["key"], change["new"]
             if key in PERSON_ONLY_SETTINGS:   # never an AI's (the input model has no such key; checked all the same)
                 out.rejected.append(RejectedOut(key=key, reason="only the person sets it"))
                 continue
             # Checked again right before it is set: the person may have changed it while the question was open.
-            loosens = direction_problem(key, _cfg(framework, key), new)
+            loosens = direction_problem(key, _cfg(framework, key), new, auto)
             if loosens:
                 out.rejected.append(RejectedOut(key=key, reason=loosens))
                 continue

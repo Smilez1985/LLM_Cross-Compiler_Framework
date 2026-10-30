@@ -12,6 +12,18 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 ## [3.2.0] - 2026-10-30
 
 ### Added
+- `2026-10-30 07:39 UTC` · `v3.2.0` **The memory budget of Ditto's local server as settings, on every surface** ([design](docs/DESIGN.md#ditto-the-local-runtime-and-the-llm-layer)):
+  `local_cache_ram_mib` (the prompt cache in RAM), `local_cache_keep_minutes` (how long the model stays loaded; 0 =
+  always), `local_kv_cache` (auto, f16, q8_0, q4_0) and `local_cache_over_cap_ok`, each "auto" by default, which means
+  the value measured on this computer. `llm-cli ditto cache` (and `cache show`, `--json`) lists the saved values, what
+  auto stands for here, the soft cap and the hard limit and the running server's values; `llm-cli ditto cache set NAME
+  VALUE [--yes-over-cap]` changes one of them. The GUI has the same as the **Prompt cache** group in Ditto > Local
+  Models... (with the KV-cache choice) and in the AI settings. Above the hard limit a value is refused for everyone;
+  above the soft cap the person gets one warning (No by default) unless `local_cache_over_cap_ok`, which only the
+  person sets; an AI client may only lower the three values over MCP (`update_settings`, auto counts as this
+  computer's value, never 0 minutes), and `get_settings` shows the values with their automatic values and caps.
+  Mojo names a saved value that is above the current soft cap. After the start the framework reads the server's
+  `/props` (on 127.0.0.1, with its key; it does not wake a sleeping model) and records the slot's real context.
 - `2026-10-30 00:19 UTC` · `v3.2.0` **`start_recipe_build` takes the board's hardware probe** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
   an AI client names the probe (`probe`, an id from `get_hardware_probe`) for a recipe build as it already could for
   `start_build`, and as the Builder tab and the CLI do: it is checked before the question (another board's probe is
@@ -129,6 +141,19 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   `tests/test_module_flag_decision.py`.
 
 ### Changed
+- `2026-10-30 07:39 UTC` · `v3.2.0` **One memory budget for Ditto's local server** ([design](docs/DESIGN.md#ditto-the-local-runtime-and-the-llm-layer)):
+  the server's memory is planned once from the measured hardware (`runtime/hardware.py local_budget`), and the context
+  is computed in what is left, so nothing is counted twice or not at all. The KV cache follows the same automatic rule
+  as on boards (`q8_0` when less than 2 GiB of RAM is left next to the model, else `f16`; `f16` when a dedicated GPU
+  holds the model and its KV cache), with flash attention on
+  auto for a quantised cache; the server gets one slot (`-np 1`), so Ditto's conversation has the whole context. The
+  prompt cache (`--cache-ram`) keeps the 3.1.0 rule (an eighth of the RAM, 256 to 8192 MiB) but never takes more than
+  half of the free RAM left next to the model, its minimum context and a 1 GiB margin for the system, and is off
+  below 64 MiB: it gets lower on computers with little free RAM, for example about 370 MiB instead of 512 MiB on a
+  4 GiB computer without a GPU, and off instead of 256 MiB on a 2 GiB board-like computer; computers with 16 GiB or
+  more keep their value. The three separate memory margins of the context rule are one named margin, the native and
+  the Docker launcher take their options from one function, and a changed setting restarts a running server once
+  (the same settings never).
 - `2026-10-29 23:31 UTC` · `v3.2.0` **One install rule for the whole RHEL family** ([design](docs/DESIGN.md#installer-platforms-and-dependencies)):
   Fedora, RHEL and CentOS Stream now get the rule of Rocky Linux, AlmaLinux and Oracle Linux. `install.sh` installs
   Docker CE from Docker's repository for the system, its key checked against the published fingerprint, through the
