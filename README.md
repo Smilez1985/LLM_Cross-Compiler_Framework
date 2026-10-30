@@ -869,12 +869,12 @@ The knowledge-base, Deep Ingest and community settings are explained in [docs/Fe
 ## What comes next
 
 The [roadmap](docs/ROADMAP.md) lists what is planned; finished items move to the [CHANGELOG](CHANGELOG.md). Version
-3.2.0 is in progress. In short:
+3.3.0 is in progress. In short:
 
 - **Carried over from 3.1.0:** the remaining sign-in methods per access type (browser sign-in where the vendor allows
   it, cloud platforms), the last pass over the German texts of every window, and the published community index.
-- **Ditto's context:** real token numbers per provider and model, one memory budget for Ditto's local server, the
-  real context window per model with compaction, cloud caching the provider's way, and Ditto's archive of what it
+- **Ditto's context:** real token numbers per provider and model, the real context window per model with
+  compaction, cloud caching the provider's way, and Ditto's archive of what it
   learned about llmcf and building (never the person's private talk).
 - **The board bundle:** a complete, hash-listed bundle as a third deploy way, an idempotent installer on the board,
   the token-saving gateway `llmcf-gateway` in Rust, voice and vision as bundle components, and MCP on the board
@@ -882,10 +882,10 @@ The [roadmap](docs/ROADMAP.md) lists what is planned; finished items move to the
 - **Device runtime and more hardware:** recipes as target templates, a rotation stage before quantization, a generic
   ARM64 target for the Raspberry Pi, targets from the hardware probe proven on the board, the self-built llama.cpp
   with CUDA and on Windows, and targets for NVIDIA GPUs and the AMD Ryzen Z1 Extreme.
-- **Decided, waiting for its turn:** offline builds of the build container image, delegations, an own `llmcf`
-  account, board backups pulled by the PC, and the shared OpenSSH connection for a board step.
+- **Decided, waiting for its turn:** delegations, a message box for every MCP client, an own `llmcf` account,
+  board backups pulled by the PC, and the shared OpenSSH connection for a board step.
 
-After 3.2.0: the build service with one queue across all programs, LoRA and large models (3.4.0), supply-chain
+After 3.3.0: the build service with one queue across all programs, LoRA and large models (3.4.0), supply-chain
 hardening (3.5.0), and Rust where the framework meets the network or a board. Builds in the cloud are not planned.
 
 Full list: [docs/ROADMAP.md](docs/ROADMAP.md).
