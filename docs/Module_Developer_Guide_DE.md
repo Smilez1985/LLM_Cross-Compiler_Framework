@@ -1,4 +1,4 @@
-Version 3.2.0 · Stand 2026-10-30
+Version 3.3.0 · Stand 2026-10-30
 
 [English](Module_Developer_Guide.md) · **Deutsch**
 
@@ -720,7 +720,21 @@ späteren erneut. Eine Stufe, die scheitert, schreibt keine Marke. `build.sh --f
 fertig war (ihr Container gestoppt, der Build fortgesetzt, immer wieder), ist eine Schleife, kein langer Build. Der
 Runner zählt diese Starts in `<Stufe>.starts` und startet die Stufe kein viertes Mal (`STAGE_RESTART_LIMIT`, Vorgabe 3):
 Sie scheitert mit Exit-Code 75 und sagt das. Eine Stufe, die mit ihrem eigenen Fehler endet (Exit-Code unter 128),
-und eine fertige Stufe setzen die Zählung zurück; `--fresh` vergisst sie.
+und eine fertige Stufe setzen die Zählung zurück; `--fresh` vergisst sie. Ein Abbrechen der Person oder einer KI
+zählt nicht: Bevor es den Container stoppt, schreibt das Framework die Notiz `stages/<Job>/cancelled`, und der Runner
+gibt den Start der Stufe zurück, die gerade lief (seine eigene Notiz `stages/<Job>/running`). Ein Stopp von außen ohne
+die Notiz zählt weiter.
+
+**Abschluss-Eintrag.** Als allerletztes schreibt der Runner einen Abschluss-Eintrag, `stages/<Job>/build.end` (in eine
+temporäre Datei, dann an seinen Platz verschoben), je Zeile `Schlüssel Wert`: `status done` oder `status failed`,
+`exit N`, `stage NAME` (die fehlgeschlagene Stufe; bei done die letzte), `job build|imatrix`, `inputs DIGEST` und
+`time` (UTC). `done` wird erst nach der Marke der letzten Stufe und „Done.“ geschrieben; eine fehlgeschlagene Stufe,
+eine abgelehnte Schleife und jedes andere Ende (`set -e`, ein Signal) schreiben `failed` über denselben Schreiber
+(ein EXIT-Trap). Ein Eintrag eines früheren Laufs wird beim Start entfernt. Die Build-Engine liest ihn aus dem
+eingehängten Arbeitsordner: Ein Build endet, weil sein Eintrag fertig sagt, nie weil danach eine Uhr abläuft, und ein
+Container, der ohne den Eintrag mit 0 endet, ist ein fehlgeschlagener Build. Ein Paket, das das `build.sh` der Vorlage
+(oder das vom Modulgenerator geschriebene) behält, hat das umsonst; ein Paket mit eigenem Runner muss als letzten
+Schritt denselben Eintrag schreiben.
 
 **Fortschritt.** Der Runner schreibt eine Zeile, wenn eine Stufe beginnt, endet, fortgesetzt wird oder scheitert:
 `=== Stage 3/4: convert ===`, `=== Stage 3/4: convert done in 41 s ===`, `=== Stage 1/4: source resumed ===`,

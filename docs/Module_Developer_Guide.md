@@ -1,4 +1,4 @@
-Version 3.2.0 · Last updated 2026-10-30
+Version 3.3.0 · Last updated 2026-10-30
 
 **English** · [Deutsch](Module_Developer_Guide_DE.md)
 
@@ -695,7 +695,19 @@ markers.
 (its container stopped, the build resumed, again and again) is a loop, not a long build. The runner counts these
 starts in `<stage>.starts` and does not start the stage a fourth time (`STAGE_RESTART_LIMIT`, default 3): it fails
 with exit code 75 and says so. A stage that ends with its own error (exit code below 128) and a finished stage reset
-the count; `--fresh` forgets it.
+the count; `--fresh` forgets it. A Cancel of the person or an AI does not count: before it stops the container the
+framework writes the note `stages/<job>/cancelled`, and the runner gives back the start of the stage that was running
+(its own note `stages/<job>/running`). A stop from outside without the note still counts.
+
+**End record.** The very last thing the runner does is to write one end record, `stages/<job>/build.end` (to a
+temporary file, then moved into place), with one `key value` line each: `status done` or `status failed`, `exit N`,
+`stage NAME` (the stage that failed; for done the last one), `job build|imatrix`, `inputs DIGEST` and `time` (UTC).
+`done` is written only after the last stage's marker and "Done."; a failing stage, a refused loop and every other
+end (`set -e`, a signal) write `failed` through the same writer (an EXIT trap). A record left by an earlier run is
+removed when the runner starts. The build engine reads it from the mounted work folder: a build ends because its
+record says done, never because a clock ran out after it, and a container that exits 0 without the record is a failed
+build. A pack that keeps the template's `build.sh` (or the one the module generator writes) gets this for free; a pack
+with a runner of its own must write the same record as its last step.
 
 **Progress.** The runner prints one line when a stage starts, ends, is resumed or fails:
 `=== Stage 3/4: convert ===`, `=== Stage 3/4: convert done in 41 s ===`, `=== Stage 1/4: source resumed ===`,

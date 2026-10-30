@@ -10,6 +10,29 @@ weicht bewusst ab: Es gibt keinen Abschnitt `[Unreleased]`. Jeder Eintrag beginn
 der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und warum, steht im
 [Design](docs/DESIGN_DE.md).
 
+## [3.3.0] - 2026-10-30
+
+### Hinzugefügt
+- `2026-10-30 12:45 UTC` · `v3.3.0` **Ein Build endet an seiner Fertig-Marke** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
+  der Stufen-Runner (`build.sh` jedes Targets und der Runner, den der Modulgenerator schreibt) schreibt als
+  allerletzten Schritt EINEN Abschluss-Eintrag, `stages/<Job>/build.end` im Arbeitsordner (`status done|failed`,
+  `exit`, `stage`, `job`, den Digest der Eingaben und eine UTC-Zeit), "done" erst nach der Marke der letzten Stufe;
+  eine fehlgeschlagene Stufe, eine abgelehnte Schleife und jedes andere Ende schreiben "failed" über denselben
+  Schreiber. Die Build-Engine liest ihn: Sobald er fertig sagt, ist die Uhr des Schritts aus, weder die
+  Leerlauf-Grenze noch die weiche Grenze eines KI-Builds kann den Build nach der Marke stoppen; der Container hat 30 s,
+  um sich selbst zu beenden, dann stoppt ihn das Framework, und der Build ist trotzdem fertig. Ein Container, der ohne
+  den Eintrag mit 0 endet, ist ein fehlgeschlagener Build („der Build endete ohne seinen Abschluss-Eintrag“), nie ein
+  stiller Erfolg. Jeder Build hat einen Endgrund aus einem festen Vokabular (done, failed, cancelled, soft_cap, idle),
+  gespeichert in seinem Build-Eintrag und bei einem fertigen Build als `end` (reason, exit, stage) in
+  `build_info.json`.
+
+### Behoben
+- `2026-10-30 12:45 UTC` · `v3.3.0` **Ein Abbrechen der Person zählt nicht mehr als Neustart für den Schleifenschutz** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
+  eine von außen gestoppte Stufe zählte für `STAGE_RESTART_LIMIT`, auch wenn die Person (oder eine KI) den Build
+  abgebrochen hatte, so dass drei Abbrüche den nächsten Build als Schleife ablehnten. Das Abbrechen des Frameworks
+  schreibt jetzt eine Notiz in den Stufenordner, bevor es den Container stoppt, und der Stufen-Runner gibt den Start
+  der laufenden Stufe zurück; ein Stopp von außen ohne die Notiz zählt weiter.
+
 ## [3.2.0] - 2026-10-30
 
 ### Hinzugefügt
@@ -4945,6 +4968,7 @@ Cross-Kompilierung zu ermöglichen.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Grundlegende Unterstützung für die Cross-Kompilierung für Rockchip RK3588/RK3566.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Einstiegspunkte für CLI (`llm-cli`) und GUI (`llm-gui`).
 
+[3.3.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v2.4.0...v3.0.0

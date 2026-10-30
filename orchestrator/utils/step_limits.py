@@ -15,6 +15,9 @@ it is a step that has stopped working, not the clock.
 One StepClock per running step: the caller tells it about every line of output (output()), waits at most next_wait()
 seconds at a time, and asks check() after each wait. check() raises StepTimedOut (a TimeoutError) when the step must
 stop and returns the soft-cap warning once for a person's step. The texts name the setting, never a path.
+
+A step that has said it is done (the stage runner's end record "status done", Core/build_end.py) is never stopped by
+a clock: finish() switches the clock off, check() returns None from then on (DECISIONS round 40).
 """
 
 import time
@@ -79,6 +82,11 @@ class StepClock:
         self.clock = clock
         self.started = self.last_output = clock()
         self.warned = False
+        self.finished = False
+
+    def finish(self) -> None:
+        """The step is done (its end record says so): no soft cap and no idle timeout can stop it any more."""
+        self.finished = True
 
     def output(self) -> None:
         """The step printed something: it is not idle."""
@@ -91,6 +99,8 @@ class StepClock:
         """How long the caller may wait before it asks check() again."""
         now = self.clock()
         waits = [poll]
+        if self.finished:
+            return max(MIN_WAIT, poll)
         if self.limits.idle:
             waits.append(self.limits.idle - (now - self.last_output))
         if self.limits.soft_cap and (self.limits.ai_started or not self.warned):
@@ -98,7 +108,10 @@ class StepClock:
         return max(MIN_WAIT, min(waits))
 
     def check(self) -> Optional[str]:
-        """Raises StepTimedOut when the step must stop; returns the soft-cap warning once for a person's step."""
+        """Raises StepTimedOut when the step must stop; returns the soft-cap warning once for a person's step. Never
+        after finish()."""
+        if self.finished:
+            return None
         now = self.clock()
         idle, cap = self.limits.idle, self.limits.soft_cap
         if idle and now - self.last_output >= idle:
