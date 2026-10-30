@@ -534,3 +534,47 @@ class TestOnePlace:
         out = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True, text=True,
                              timeout=120, check=True).stdout.strip()
         assert out == "[]"
+
+
+class TestPersonOnlySettings:
+    """build_idle_timeout, local_cache_ram_mib and local_kv_cache are the person's alone: lowering the idle timeout can
+    stop the person's own long builds, and pinning "auto" to a number freezes a value that may no longer fit this
+    computer. Every AI channel refuses them with its own plain text; build_timeout and local_cache_keep_minutes stay
+    tighten-only."""
+
+    PERSON = ("build_idle_timeout", "local_cache_ram_mib", "local_kv_cache")
+
+    def test_they_left_the_tighten_only_table(self):
+        from orchestrator.llm.settings_change import PERSON_ONLY_SETTINGS, TIGHTEN_ONLY
+        for key in self.PERSON:
+            assert key in PERSON_ONLY_SETTINGS and key not in TIGHTEN_ONLY
+        assert TIGHTEN_ONLY["build_timeout"] == "lower" and TIGHTEN_ONLY["local_cache_keep_minutes"] == "lower"
+        assert "build_timeout" not in PERSON_ONLY_SETTINGS
+
+    def test_each_has_its_own_plain_refusal(self):
+        from orchestrator.llm.settings_change import person_only_text
+        idle = person_only_text("build_idle_timeout")
+        assert "build_idle_timeout" in idle and "long builds" in idle and "only the person" in idle.lower()
+        for key in ("local_cache_ram_mib", "local_kv_cache"):
+            text = person_only_text(key)
+            assert key in text and "auto" in text and "no longer fit" in text
+        assert "offline mode" not in idle and "offline mode" not in person_only_text("local_kv_cache")
+
+    @pytest.mark.parametrize("key, old, new", [("build_idle_timeout", 1800, 600), ("local_cache_ram_mib", "auto", "256"),
+                                               ("local_kv_cache", "auto", "q4_0"), ("local_kv_cache", "f16", "q8_0")])
+    def test_an_ai_cannot_change_them_even_downwards(self, key, old, new):
+        from orchestrator.llm.settings_change import AISettingsChange, direction_problem
+        auto = {"local_cache_ram_mib": 1024, "local_kv_cache": "f16"}
+        assert "only the person" in (direction_problem(key, old, new, auto) or "").lower()
+        found = AISettingsChange.problems_of_settings(SimpleNamespace(get=lambda k, d=None: d), None, {key: new})
+        assert [p.code for p in found] == ["person_only"] and key in found[0].message
+
+    def test_an_ai_cache_change_is_refused_and_the_persons_is_not(self):
+        from orchestrator.llm.settings_change import AISettingsChange
+        for key in ("local_cache_ram_mib", "local_kv_cache"):
+            with pytest.raises(PermissionError, match=key):
+                AISettingsChange.cache_change({key: "auto"}, None, by_ai=True)
+        person = AISettingsChange.cache_change({"local_cache_ram_mib": "512", "local_kv_cache": "q8_0"}, None)
+        assert (person.cache_ram_mib, person.kv_cache) == ("512", "q8_0")
+        kept = AISettingsChange.cache_change({"local_cache_keep_minutes": "5"}, None, by_ai=True)
+        assert kept.cache_keep_minutes == "5"

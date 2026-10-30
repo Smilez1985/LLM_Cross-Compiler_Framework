@@ -182,7 +182,8 @@ Further behaviour:
   you started goes on past it with one warning (Cancel stops it), one an AI started stops there and is never
   extended. `build_idle_timeout` (default 1800 s) stops a step that prints nothing for that long. A stage that keeps
   restarting without finishing and a model that repeats itself in the functional test are stopped as loops. An AI
-  may only lower both settings.
+  may only lower `build_timeout`; `build_idle_timeout` is yours alone (a lower value could stop your own long
+  builds).
 - **Where a build goes:** see [Where finished models go](#where-finished-models-go) below. Every build lands in
   `<folder>/<target>/<model>/<quantization>/` with its golden ZIP next to it.
 

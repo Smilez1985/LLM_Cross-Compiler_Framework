@@ -1666,8 +1666,9 @@ Ein Wert über der harten Grenze (mehr Speicher, als dieser Computer neben dem M
 abgelehnt, ebenso ein Wert, der keine Zahl ist (es gibt kein `-1` für „ohne Grenze“). Über der weichen Grenze bekommst
 du eine Warnung und die Frage „Set it anyway?“ („Nein“ ist die Vorgabe), außer du hast `--yes-over-cap` angegeben oder
 `local_cache_over_cap_ok` gesetzt. Gespeichert wird nur die genannte Einstellung; ein laufender Server übernimmt sie bei
-seinem nächsten Start (er startet einmal neu). Ein KI-Client darf diese Werte über MCP nur senken und nie über die
-weiche Grenze; `local_cache_over_cap_ok` und 0 Minuten setzt nur du.
+seinem nächsten Start (er startet einmal neu). Ein KI-Client darf über MCP nur `local_cache_keep_minutes` kürzen und
+nie über die weiche Grenze; `local_cache_ram_mib`, `local_kv_cache`, `local_cache_over_cap_ok` und 0 Minuten setzt nur
+du (eine Zahl von einer KI würde einen Wert einfrieren, der zu diesem Computer bald nicht mehr passt).
 
 ```bash
 llm-cli ditto cache

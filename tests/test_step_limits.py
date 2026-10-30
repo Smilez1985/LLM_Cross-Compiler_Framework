@@ -75,13 +75,18 @@ def test_the_limits_from_the_settings():
     assert not StepLimits.from_settings(lambda key, default: default).ai_started
 
 
-def test_an_ai_may_only_shorten_the_soft_cap_and_the_idle_timeout():
-    from orchestrator.llm.settings_change import TIGHTEN_ONLY, direction_problem
+def test_an_ai_may_only_shorten_the_soft_cap_and_never_touches_the_idle_timeout():
+    """Changed on purpose: build_idle_timeout is the person's alone (a lower idle timeout can stop the person's own
+    long builds); the soft cap stays tighten-only."""
+    from orchestrator.llm.settings_change import PERSON_ONLY_SETTINGS, TIGHTEN_ONLY, direction_problem
     from orchestrator.tools.tools_status import READ_ONLY, WRITABLE
-    for key in ("build_timeout", "build_idle_timeout"):
-        assert TIGHTEN_ONLY[key] == "lower" and key in WRITABLE and key not in READ_ONLY
-        assert direction_problem(key, 3600, 600) is None
-        assert "may only be lowered" in direction_problem(key, 3600, 7200)
+    assert TIGHTEN_ONLY["build_timeout"] == "lower" and "build_timeout" in WRITABLE
+    assert "build_timeout" not in READ_ONLY
+    assert direction_problem("build_timeout", 3600, 600) is None
+    assert "may only be lowered" in direction_problem("build_timeout", 3600, 7200)
+    assert "build_idle_timeout" in PERSON_ONLY_SETTINGS and "build_idle_timeout" not in WRITABLE
+    for new in (600, 7200):
+        assert "long builds" in direction_problem("build_idle_timeout", 1800, new)
 
 
 def test_both_settings_are_in_the_schema_the_settings_views_show(tmp_path):

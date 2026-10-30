@@ -1597,8 +1597,9 @@ A value above the hard limit (more memory than this computer has next to the mod
 is a value that is no number (there is no `-1` for "no limit"). Above the soft cap you get one warning and the
 question "Set it anyway?" ("No" is the default), unless you passed `--yes-over-cap` or set `local_cache_over_cap_ok`.
 Only the setting you name is saved; a running server takes it at its next start (it restarts once). An AI client may
-only lower these values over MCP and never above the soft cap; `local_cache_over_cap_ok` and 0 minutes are yours
-alone.
+only shorten `local_cache_keep_minutes` over MCP and never above the soft cap; `local_cache_ram_mib`,
+`local_kv_cache`, `local_cache_over_cap_ok` and 0 minutes are yours alone (a number set by an AI would freeze a value
+that may no longer fit this computer).
 
 ```bash
 llm-cli ditto cache

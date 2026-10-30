@@ -191,8 +191,9 @@ Weiteres Verhalten:
   eine weiche Obergrenze: Ein Build, den du gestartet hast, läuft mit einer Warnung darüber hinaus (Abbrechen stoppt
   ihn), einer, den eine KI gestartet hat, stoppt dort und wird nie verlängert. `build_idle_timeout` (Standard
   1800 s) stoppt einen Schritt, der so lange nichts ausgibt. Eine Stufe, die immer neu startet, ohne fertig zu werden,
-  und ein Modell, das sich im Funktionstest wiederholt, werden als Schleife gestoppt. Eine KI darf beide
-  Einstellungen nur senken.
+  und ein Modell, das sich im Funktionstest wiederholt, werden als Schleife gestoppt. Eine KI darf nur
+  `build_timeout` senken; `build_idle_timeout` setzt nur du (ein kleinerer Wert könnte deine eigenen langen Builds
+  stoppen).
 - **Wohin ein Build kommt:** siehe [Wohin fertige Modelle kommen](#wohin-fertige-modelle-kommen) unten. Jeder Build
   landet in `<Ordner>/<Target>/<Modell>/<Quantisierung>/`, sein Golden-ZIP daneben.
 

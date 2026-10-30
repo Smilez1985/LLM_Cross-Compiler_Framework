@@ -11,6 +11,15 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 
 ## [3.3.0] - 2026-10-30
 
+### Changed
+- `2026-10-30 14:28 UTC` · `v3.3.0` **The idle timeout, the prompt cache size and the KV-cache type are yours alone** ([design](docs/DESIGN.md#ditto-the-local-runtime-and-the-llm-layer)):
+  an AI can no longer change `build_idle_timeout`, `local_cache_ram_mib` or `local_kv_cache`, in either direction
+  (before, it could lower them over MCP). A lower idle timeout can stop your own long builds, and a number in place
+  of "auto" freezes a value that may no longer fit this computer later. Every AI channel (MCP `update_settings`,
+  Ditto, the GUI tools) refuses them with a plain text that says why; `get_settings` still shows them, marked
+  read-only. `build_timeout` and `local_cache_keep_minutes` stay as they were: an AI may only lower them. You change
+  all of them as before, in the settings, the Prompt cache group and `llm-cli ditto cache set`.
+
 ### Fixed
 - `2026-10-30 14:15 UTC` · `v3.3.0` **The llama.cpp runtime builds read the idle timeout you set** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
   the build of Ditto's own llama.cpp server (`llm-cli ditto runtime install`, the tool `build_local_runtime`) and the

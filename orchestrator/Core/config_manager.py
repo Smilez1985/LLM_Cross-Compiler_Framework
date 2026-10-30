@@ -519,8 +519,9 @@ class ConfigManager:
                          "pip index in your own network (a PyPI mirror) for offline builds of the build container "
                          "image, e.g. http://192.0.2.10:3141/simple; set only by you, never by an AI"),
             # The memory budget of Ditto's local server (runtime/hardware.local_budget): auto = from the measured
-            # hardware of this computer. An AI may only lower the numbers (llm/settings_change.TIGHTEN_ONLY);
-            # local_cache_over_cap_ok and keep minutes 0 (never unload) are the person's alone.
+            # hardware of this computer. An AI may only shorten the keep time (llm/settings_change.TIGHTEN_ONLY);
+            # the size, the KV-cache type, local_cache_over_cap_ok and keep minutes 0 (never unload) are the
+            # person's alone (PERSON_ONLY_SETTINGS).
             ConfigSchema("local_cache_ram_mib", str, False, "auto",
                          "Prompt cache of Ditto's local server in RAM (--cache-ram): auto or MiB (0 = off)",
                          ["regex:^(auto|[0-9]{1,7})$"]),
