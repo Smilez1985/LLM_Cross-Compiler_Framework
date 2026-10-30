@@ -84,6 +84,19 @@ def test_above_the_soft_cap_asks_once_with_no_as_default(fake_runtime, monkeypat
     assert out.exit_code == 0 and "soft cap" not in out.output and rt.settings.values["local_cache_keep_minutes"] == "0"
 
 
+def test_set_over_cap_ok_refuses_a_word_it_does_not_know(fake_runtime, monkeypatch):  # noqa: F811
+    """Review ctx-local-mem-v: 'tru' or 'auto' silently saved false before; only true/false words are taken."""
+    rt = fake_runtime()
+    rt.settings = Config(local_cache_over_cap_ok=True)
+    for value in ("tru", "auto", "maybe"):
+        out = _cli(rt, monkeypatch, "set", "over-cap-ok", value)
+        assert out.exit_code == 2, (value, out.output)
+    assert rt.settings.values == {"local_cache_over_cap_ok": True}
+    out = _cli(rt, monkeypatch, "set", "over-cap-ok", "no")
+    assert out.exit_code == 0, out.output
+    assert rt.settings.values == {"local_cache_over_cap_ok": False}
+
+
 # --- Mojo -----------------------------------------------------------------------------------------------------------
 
 def test_mojo_names_a_saved_value_above_the_soft_cap(monkeypatch):

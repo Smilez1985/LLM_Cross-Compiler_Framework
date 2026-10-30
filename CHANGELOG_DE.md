@@ -90,7 +90,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   der Speicher des Servers wird einmal aus der gemessenen Hardware geplant (`runtime/hardware.py local_budget`), und
   der Kontext wird in dem berechnet, was übrig ist, so wird nichts doppelt oder gar nicht gezählt. Der KV-Cache folgt
   derselben automatischen Regel wie auf Boards (`q8_0`, wenn neben dem Modell weniger als 2 GiB RAM übrig sind, sonst
-  `f16`), mit Flash Attention auf auto für einen quantisierten Cache; der Server bekommt einen Slot (`-np 1`), damit
+  `f16`; `f16`, wenn eine eigene GPU das Modell und seinen KV-Cache hält), mit Flash Attention auf auto für einen quantisierten Cache; der Server bekommt einen Slot (`-np 1`), damit
   Dittos Unterhaltung den ganzen Kontext hat. Der Prompt-Cache (`--cache-ram`) behält die Regel aus 3.1.0 (ein Achtel
   des RAMs, 256 bis 8192 MiB), nimmt aber nie mehr als die Hälfte des freien RAMs, der neben dem Modell, seinem
   Mindestkontext und 1 GiB Abstand für das System übrig ist, und ist unter 64 MiB aus: er wird auf Computern mit wenig
