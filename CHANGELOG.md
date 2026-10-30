@@ -9,7 +9,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 (`` `YYYY-MM-DD HH:MM UTC` · `vX.Y.Z` ``) and is written under the version it lands in. Planned work is listed in the
 [roadmap](docs/ROADMAP.md), not here; how the framework is built and why is in the [design](docs/DESIGN.md).
 
-## [3.2.0] - 2026-10-29
+## [3.2.0] - 2026-10-30
 
 ### Added
 - `2026-10-29 23:59 UTC` · `v3.2.0` **Model suggestions from the source catalogue** (consolidation chain models-data; the model list of the decision to
@@ -23,6 +23,15 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   the resource `lcf://models/suggestions`. `scripts/validate_ssot.py` reads `configs/project_sources.yml` (before, a
   `project_sources.yml` in the current folder) and checks the section: exact ids, sizes, quantization types, gating,
   dates, no id twice. The catalogue's header says who reads it now.
+- `2026-10-30 00:05 UTC` · `v3.2.0` **The build's model download shows a percentage** (consolidation chain models-data; decision item 12): while a build
+  fetches its model from Hugging Face, its stage says how far the download is over all files of the model's snapshot,
+  "Fetching model 37 % (1.2 GB of 3.4 GB)", and its percent moves from 40 to 50 with it (before, one "Downloading ..."
+  log line and a percent that stood still). The bytes come from the Hugging Face fetcher's progress callback through
+  the new `orchestrator/utils/download.SnapshotProgress` (at most one update a second, never one per chunk); the
+  files and `.part` files already there from an earlier attempt count from the start; with a size the Hub does not
+  list, the stage shows the bytes without a percent; after a cancel nothing is written any more. The Builder's
+  progress bar, `get_build_status` and `llm-cli build start --follow` show it; the follow line now carries the live
+  stage and percent of the running build (`BuildService.live_progress`).
 
 ### Changed
 - `2026-10-29 23:54 UTC` · `v3.2.0` **The optimization profiles and benchmark rows of `target.yml` are corrected and used** (consolidation chain

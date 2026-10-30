@@ -141,7 +141,11 @@ Further behaviour:
   the step and the percent from the build service, and the build's log follows live below it (secrets redacted, full
   paths, plain text, each line once; an AI that reads the log gets the folders by label). The step and the percent
   include the running build's own progress (preparing, image, model, modules, archive), so the bar moves during a build;
-  it says 100 % only when the request has ended. A search box finds lines; a filter shows all lines or only Info,
+  it says 100 % only when the request has ended. While the model downloads from Hugging Face, the step says how far
+  the download is over all files of the model, for example "Fetching model 37 % (1.2 GB of 3.4 GB)" (the bytes alone
+  when a size is not known), and the bar moves with it; the files already there from an earlier attempt count from the
+  start, and it is updated about once a second. `llm-cli build start --follow` and `get_build_status` show the same
+  step. A search box finds lines; a filter shows all lines or only Info,
   Warnings or Errors. Lines the service no longer returns are noted instead of left out silently, and the view keeps the
   newest 20,000 lines.
 - **Build status across programs (shared build state):** every program that builds (the GUI, a CLI call, each MCP

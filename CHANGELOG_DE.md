@@ -10,7 +10,7 @@ weicht bewusst ab: Es gibt keinen Abschnitt `[Unreleased]`. Jeder Eintrag beginn
 der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und warum, steht im
 [Design](docs/DESIGN_DE.md).
 
-## [3.2.0] - 2026-10-29
+## [3.2.0] - 2026-10-30
 
 ### Hinzugefügt
 - `2026-10-29 23:59 UTC` · `v3.2.0` **Modellvorschläge aus dem Quellenkatalog** (Konsolidierungskette models-data; die Modellliste der Entscheidung, die
@@ -25,6 +25,16 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   `lcf://models/suggestions`. `scripts/validate_ssot.py` liest `configs/project_sources.yml` (vorher eine
   `project_sources.yml` im aktuellen Ordner) und prüft den Abschnitt: genaue IDs, Größen, Quantisierungstypen, Gating,
   Daten, keine ID doppelt. Der Kopf des Katalogs sagt jetzt, wer ihn liest.
+- `2026-10-30 00:05 UTC` · `v3.2.0` **Der Modell-Download eines Builds zeigt einen Prozentwert** (Konsolidierungskette models-data; Entscheidungspunkt
+  12): Während ein Build sein Modell von Hugging Face lädt, sagt seine Stufe, wie weit der Download über alle Dateien
+  des Snapshots ist, „Fetching model 37 % (1.2 GB of 3.4 GB)“, und sein Prozentwert läuft dabei von 40 bis 50 (vorher
+  eine Protokollzeile „Downloading ...“ und ein Prozentwert, der stillstand). Die Bytes kommen aus dem
+  Fortschritts-Callback des Hugging-Face-Fetchers über das neue `orchestrator/utils/download.SnapshotProgress`
+  (höchstens eine Aktualisierung pro Sekunde, nie eine pro Block); Dateien und `.part`-Dateien, die von einem früheren
+  Versuch schon da sind, zählen von Anfang an mit; bei einer Größe, die der Hub nicht nennt, zeigt die Stufe die Bytes
+  ohne Prozentwert; nach einem Abbruch wird nichts mehr geschrieben. Der Fortschrittsbalken des Builders,
+  `get_build_status` und `llm-cli build start --follow` zeigen ihn; die Follow-Zeile trägt jetzt Stufe und Prozentwert
+  des laufenden Builds (`BuildService.live_progress`).
 
 ### Geändert
 - `2026-10-29 23:54 UTC` · `v3.2.0` **Die Optimierungsprofile und Benchmark-Zeilen der `target.yml` sind korrigiert und werden genutzt**

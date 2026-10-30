@@ -296,6 +296,11 @@ class BuildService:
 
     _RUNNING = (OrchestrationStatus.PREPARING, OrchestrationStatus.BUILDING, OrchestrationStatus.HEALING)
 
+    def live_progress(self, state: WorkflowState) -> Tuple[str, int]:
+        """(stage, percent) of a request with its running build counted in, as get_status shows them: for the CLI's
+        follow line, which reads the request's own state (request_state)."""
+        return self._live_progress(state)
+
     def _live_progress(self, state: WorkflowState) -> Tuple[str, int]:
         """The request's stage and percent with its running build counted in: the build engine's own step and percent
         (builder.py BuildProgress), so one build of one request moves 10, 20, 40 ... instead of 0 % until it ends.
