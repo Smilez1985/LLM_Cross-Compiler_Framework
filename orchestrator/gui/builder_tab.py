@@ -26,7 +26,7 @@ from orchestrator.gui.builder_parts import (BoardAdvice, BuildProgressPanel, aft
                                             bind_builder_form, board_confirmed, person_target, read_probe)
 from orchestrator.gui.dialogs import confirm_host_key, fill_recent, select_recent
 from orchestrator.gui.explain import term_label
-from orchestrator.gui.plain import button_text, plain_label, plain_tooltip
+from orchestrator.gui.plain import ask, button_text, plain_label, plain_tooltip
 from orchestrator.utils import input_history
 from orchestrator.utils.localization import ui_text
 
@@ -1243,6 +1243,20 @@ class BuilderTab(QWidget):
         if not chosen:
             self._log(ui_text("bld.offline.not_here", repo=values["model"]))
             return False
+        pinned = recipe.model.revision if recipe is not None and chosen == recipe.model.repo else None
+        if pinned and service.local_copy(chosen, pinned) is None:
+            # The recipe pins another commit than the copy here: the recipe itself cannot be built offline (it would
+            # come back to this choice). Only what is honest: cancel, or the copy built without the recipe.
+            copy = service.local_copy(chosen)
+            here = (copy.commit[:12] if copy is not None else "") or "?"
+            if not ask(self, ui_text("bld.offline.pinned.title"),
+                       ui_text("bld.offline.pinned.question", repo=chosen, pinned=pinned[:12], here=here)):
+                self._log(ui_text("bld.offline.not_here", repo=values["model"]))
+                return False
+            self.model_input.setEditText(chosen)
+            self.gui_form.person_edited("model")
+            values["model"], values["recipe"] = chosen, None   # the person's own build of the copy, no recipe
+            return True
         self.model_input.setEditText(chosen)
         self.gui_form.person_edited("model")  # the person's pick: never overwritten by an AI
         values["model"], values["recipe"] = chosen, (recipe if recipe and chosen == recipe.model.repo else None)

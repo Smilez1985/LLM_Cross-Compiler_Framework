@@ -994,17 +994,35 @@ class BuildEngine:
         except Exception as e:
             raise RuntimeError(f"Image build failed: {e}\n{self._log_tail(progress, 'BUILD: ')}")
 
-    @staticmethod
-    def _image_inputs(config: BuildConfiguration, dockerfile: Path, buildargs: Dict[str, str]) -> str:
-        """One sha256 of what the target image is built from: the target, its folder's content digest, the Dockerfile
-        and the build arguments (INPUTS_LABEL)."""
+    # The folders of the build context the Dockerfile copies into the image (utils/build_context.stage_build_context:
+    # the target's modules/ and scripts/ and the framework's docker/entrypoint.sh).
+    CONTEXT_COPIES = ("modules", "scripts", "docker")
+
+    @classmethod
+    def _image_inputs(cls, config: BuildConfiguration, dockerfile: Path, buildargs: Dict[str, str]) -> str:
+        """One sha256 of what the target image is built from (INPUTS_LABEL): the target, its folder's content digest,
+        the Dockerfile, the build arguments and every file the build context copies into the image (CONTEXT_COPIES,
+        by its path in the context and its content), so an offline build never takes an image built from older
+        copies of those files."""
+        from orchestrator.utils.helpers import sha256_file
         try:
             text = dockerfile.read_text(encoding="utf-8", errors="replace")
         except OSError:
             text = ""
+        context = dockerfile.parent
+        files = []
+        for sub in cls.CONTEXT_COPIES:
+            root = context / sub
+            if not root.is_dir():
+                continue
+            for path in sorted(p for p in root.rglob("*") if p.is_file() and not p.is_symlink()):
+                try:
+                    files.append((path.relative_to(context).as_posix(), sha256_file(path)))
+                except OSError:
+                    files.append((path.relative_to(context).as_posix(), "unreadable"))
         data = {"target": getattr(config, "target_arch", ""), "pack": getattr(config, "target_pack_sha256", "") or "",
                 "dockerfile": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-                "args": sorted((str(k), str(v)) for k, v in buildargs.items())}
+                "args": sorted((str(k), str(v)) for k, v in buildargs.items()), "context": files}
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode("utf-8")).hexdigest()
 
     def _offline_image(self, config: BuildConfiguration, progress: BuildProgress, tag: str, inputs: str,
@@ -1026,7 +1044,8 @@ class BuildEngine:
                 f"Offline mode is on, and the image of the target {config.target_arch} for these settings is not on "
                 f"this computer. Building it pulls {shown} and downloads what its Dockerfile fetches, which offline "
                 "mode does not allow. Start this build once with offline mode off; later builds with the same "
-                "settings use that image offline.")
+                "settings use that image offline. An image built before the framework also recorded the modules and "
+                "scripts copied into it is not reused (it may hold older copies of them).")
         image = max(found, key=lambda i: str((getattr(i, "attrs", None) or {}).get("Created") or ""))
         repository, name = tag.rsplit(":", 1)
         image.tag(repository, name)

@@ -10,7 +10,7 @@ weicht bewusst ab: Es gibt keinen Abschnitt `[Unreleased]`. Jeder Eintrag beginn
 der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und warum, steht im
 [Design](docs/DESIGN_DE.md).
 
-## [3.2.0] - 2026-10-29
+## [3.2.0] - 2026-10-30
 
 ### Geändert
 - `2026-10-29 23:31 UTC` · `v3.2.0` **Eine Install-Regel für die ganze RHEL-Familie** ([Design](docs/DESIGN_DE.md#installer-plattformen-und-abhängigkeiten)):
@@ -74,6 +74,14 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   im Offline-Modus startete, liest das eigene Netz nicht mehr, wenn der Offline-Modus während des Crawls
   ausgeschaltet wird, und geht mit der Sperre für nur öffentliche Seiten weiter, wie beim Wechsel in die andere
   Richtung.
+- `2026-10-30 00:04 UTC` · `v3.2.0` **Offline-Builds nehmen nie ein Image aus älteren Modulkopien, und ein Rezept mit einem
+  anderen Commit dreht sich nicht mehr im Kreis** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)): Das
+  Eingabe-Label des Build-Container-Images (`INPUTS_LABEL`) umfasst jetzt auch jede Datei, die der Build-Kontext ins
+  Image kopiert (`modules/` und `scripts/` des Targets und `docker/` des Frameworks, nach Pfad und Inhalt); ein
+  geändertes Stufenskript ist also ein neues Image. Ein Image, das vor dieser Version beschriftet wurde, wird offline
+  nicht wiederverwendet, und der Halt sagt das. Im Builder-Tab bringt ein Rezept, das Commit X nennt, während die
+  Kopie auf diesem Computer Commit Y ist, die Modellauswahl nicht mehr zurück, nachdem du diese Kopie gewählt hast:
+  Es fragt, ob die Kopie als dein eigener Build ohne das Rezept gebaut wird, oder ob abgebrochen wird.
 
 ### Sicherheit
 - `2026-10-29 23:50 UTC` · `v3.2.0` **Die SSH-Einstellungen von llmcf: ein Sprung oder Proxy-Befehl nur mit dem festgehaltenen Ja der
