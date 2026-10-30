@@ -190,6 +190,10 @@ DECISION_SWITCH_NAMES=(-G -T -A -U --fresh --log-level --log-context --debug-out
 REFUSED_SWITCH_NAMES=(-C -P -S -B --preset --toolchain --build --install --open -E -N --graphviz --trace-redirect
                       --profiling-output --profiling-format --debugger --debugger-pipe)
 
+# The CMake variables that make CMake or the build run another program (PROGRAM_VARIABLE_RE of recipe.py;
+# tests/test_module_flags.py compares): a launcher, a code checker, the cross emulator, the build tool.
+PROGRAM_VARIABLE_PATTERN='^CMAKE_([A-Za-z0-9]+_)?(COMPILER_LAUNCHER|LINKER_LAUNCHER|CLANG_TIDY|CPPCHECK|CPPLINT|INCLUDE_WHAT_YOU_USE|ICSTAT)$|^CMAKE_LINK_WHAT_YOU_USE_CHECK$|^CMAKE_CROSSCOMPILING_EMULATOR$|^CMAKE_MAKE_PROGRAM$'
+
 prefetched_dependency() {  # NAME: the framework mounted its fetched copy for this build
     local entry
     for entry in ${LLMCF_DEPS:-}; do
@@ -268,6 +272,9 @@ module_flag_verdicts() {  # [--package|--alone|--module] WORD...
                 elif [ "$context" != call ] && { [ "$name" = CMAKE_TOOLCHAIN_FILE ] || [ "$name" = CMAKE_MODULE_PATH ] \
                         || [[ "$name" =~ ^CMAKE_USER_MAKE_RULES_OVERRIDE(_[A-Za-z]+)?$ ]]; }; then
                     printf 'refused\037%s\037%s\037rule\037%s\n' "$word" "$name loads code or another toolchain" "$words"
+                elif [ "$context" != call ] && [[ "$name" =~ $PROGRAM_VARIABLE_PATTERN ]]; then
+                    printf 'refused\037%s\037%s\037rule\037%s\n' "$word" \
+                        "$name makes CMake or the build run another program, which can change what is built" "$words"
                 elif [ "$context" != call ] && [[ "$name" == FETCHCONTENT_* ]] \
                         && [ "$name" != FETCHCONTENT_FULLY_DISCONNECTED ]; then
                     printf 'refused\037%s\037%s\037rule\037%s\n' "$word" "$name is set only by llmcf's dependency cache" \
