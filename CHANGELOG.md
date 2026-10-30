@@ -12,6 +12,12 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 ## [3.3.0] - 2026-10-30
 
 ### Added
+- `2026-10-30 12:56 UTC` · `v3.3.0` **Every build's end in the chat, once** ([design](docs/DESIGN.md#mcp-server-tools-and-permissions)):
+  when a build ends, the chat feed gets exactly one row for it (deduplicated by its request id), for every build, also
+  the person's own (from the framework; an AI's build in the AI's name as before): "Build ready.", "Error while
+  building: ..." with the reason as a fixed word (a stage failed, the soft cap, the idle timeout) or "Build stopped.".
+  The row holds only the end reason, the AI that cancelled it and the request id, never log text, a model's name or a
+  path; the details come over MCP (`get_build_status`, `read_build_log`).
 - `2026-10-30 12:55 UTC` · `v3.3.0` **Every waiter ends on the build's end reason** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
   `llm-cli build status REQUEST_ID --wait SECONDS` waits for a build of any program (the shared build state) and
   ends on its end reason; `build start --follow` too. Both say it in plain words ("Build ready", "Error while
@@ -32,6 +38,10 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   record and, for a finished build, as `end` (reason, exit, stage) in `build_info.json`.
 
 ### Changed
+- `2026-10-30 12:56 UTC` · `v3.3.0` **A build's chat row names how it ended, not its folder** ([design](docs/DESIGN.md#mcp-server-tools-and-permissions)):
+  the row of an AI's build said "finished and was saved as <folder label>" or "finished with errors: N done, M failed";
+  it now says "Build ready.", "Error while building: ..." or "Build stopped." with the end reason as its only value
+  (the folder label could carry a model's name).
 - `2026-10-30 12:55 UTC` · `v3.3.0` **`build start --follow` exits with 2 for a cancelled build** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
   a build cancelled elsewhere (the GUI, an AI) ended the follow with exit code 1 like a failure; it now ends with 2,
   the exit code of the end reason cancelled. Ctrl+C in the command itself stays 130.

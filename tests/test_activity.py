@@ -397,7 +397,9 @@ class TestRows:
         for kind in ("grant_used", "approval", "approval_end", "refused_before_question"):
             assert row_for_event(kind, data) is None
         assert row_for_job({"job_id": JOB, "kind": "crawl", "owner": actor, "state": "done"}) is None
-        assert row_for_build({"request_id": REQ, "status": "completed", "owner": actor or ""}) is None
+        # A build's end is the exception (DECISIONS round 40): every build gets its row, the person's from the framework
+        own = row_for_build({"request_id": REQ, "status": "completed", "owner": actor or ""})
+        assert (own.caller, own.text_key) == ("", "activity.build.ready")
 
     def test_job_ends_become_job_results_in_their_window(self, tmp_path):
         prod, store = producer(tmp_path)
@@ -432,21 +434,24 @@ class TestRows:
         assert rows(store)[0].refs.window == "knowledge_snapshots"
 
     def test_build_ends(self):
-        saved = row_for_build({"request_id": REQ, "status": "completed", "owner": "mcp",
+        """Every build's end, with the fixed vocabulary only (DECISIONS round 40): the folder, the counts and any
+        other fact stay out of the row; the details come over MCP."""
+        ready = row_for_build({"request_id": REQ, "status": "completed", "end_reason": "done", "owner": "mcp",
                                "saved": "output:Rockchip/m/Q4", "completed": 1, "failed": 0})
-        assert (saved.kind, saved.caller, saved.text_key) == ("job_result", "mcp", "activity.build.saved")
-        assert saved.params["saved"] == "output:Rockchip/m/Q4" and saved.refs == {"request_id": REQ,
-                                                                                  "window": "builder"}
-        partial = row_for_build({"request_id": REQ, "status": "completed", "owner": "ditto", "completed": 1,
-                                 "failed": 2})
-        assert (partial.text_key, partial.level) == ("activity.build.partial", "warning")
+        assert (ready.kind, ready.caller, ready.text_key, ready.level) == ("job_result", "mcp",
+                                                                           "activity.build.ready", "info")
+        assert ready.params == {"reason": "done"} and ready.refs == {"request_id": REQ, "window": "builder"}
+        partial = row_for_build({"request_id": REQ, "status": "completed", "end_reason": "failed", "owner": "ditto",
+                                 "completed": 1, "failed": 2})
+        assert (partial.text_key, partial.level) == ("activity.build.error.failed", "warning")
         cancelled = row_for_build({"request_id": REQ, "status": "cancelled", "owner": "", "cancelled_by": "mcp:ci"})
-        assert (cancelled.caller, cancelled.text_key, cancelled.params["by"]) == ("mcp:ci", "activity.build.cancelled",
-                                                                                  "mcp:ci")
-        assert row_for_build({"request_id": REQ, "status": "error", "owner": ""}) is None, "the person's own build"
-        hostpath = row_for_build({"request_id": REQ, "status": "completed", "owner": "mcp",
-                                  "saved": "/srv/llmcf/output/m"})
-        assert "saved" not in hostpath.params and hostpath.text_key == "activity.build.completed"
+        assert (cancelled.caller, cancelled.text_key, cancelled.params) == (
+            "mcp:ci", "activity.build.stopped", {"reason": "cancelled", "by": "mcp:ci"})
+        idle = row_for_build({"request_id": REQ, "status": "error", "end_reason": "idle", "owner": ""})
+        assert (idle.caller, idle.text_key, idle.params) == ("", "activity.build.error.idle", {"reason": "idle"})
+        old = row_for_build({"request_id": REQ, "status": "error", "owner": ""})   # facts without an end reason
+        assert old.text_key == "activity.build.error.failed"
+        assert row_for_build({"request_id": REQ, "status": "running", "owner": ""}) is None
 
     def test_registry_events_become_their_rows(self, tmp_path):
         prod, store = producer(tmp_path, program="gui")
@@ -576,7 +581,7 @@ class TestRows:
                       "build-dir:/srv/alice/m", "x y:~/m"):
             assert not PARAM_RULES["saved"](saved), saved
             row = row_for_build({"request_id": REQ, "status": "completed", "owner": "mcp", "saved": saved})
-            assert "saved" not in row.params and row.text_key == "activity.build.completed", saved
+            assert "saved" not in row.params, saved
         for saved in ("output:Rockchip/SmolLM2/Q4_K_M", "builds:Rockchip/m", "Q4_K_M", "my build 2026"):
             assert PARAM_RULES["saved"](saved), saved
 
