@@ -122,7 +122,9 @@ class TestArchiveExtraction:
 
     def test_without_the_data_filter_links_are_refused_and_files_still_extract(self, tmp_path, monkeypatch):
         # Python 3.11 before 3.11.4 has no extraction filter: the members checked above are extracted, links never.
-        monkeypatch.delattr(tarfile, "data_filter", raising=False)
+        # an older Python without extraction filters; tarfile itself keeps its own (3.14 looks its default up)
+        from orchestrator.utils import helpers
+        monkeypatch.setattr(helpers, "_tar_filters_available", lambda: False)
         link_archive = tmp_path / "link.tar"
         with tarfile.open(link_archive, "w") as tf:
             info = tarfile.TarInfo("a")
