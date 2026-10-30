@@ -30,7 +30,6 @@ import io
 import json
 import os
 import re
-import shutil
 import stat
 import tarfile
 import tempfile
@@ -211,7 +210,8 @@ def _extract(data: bytes, dest: Path) -> None:
     except (tarfile.TarError, OSError) as e:
         raise DependencyError(f"the archive could not be unpacked ({type(e).__name__})") from None
     finally:
-        shutil.rmtree(staging, ignore_errors=True)
+        from orchestrator.utils.atomic import remove_tree
+        remove_tree(staging)  # members may be read-only: rmtree(ignore_errors=True) kept them on Windows
 
 
 @dataclass(frozen=True)
@@ -345,6 +345,8 @@ class DependencyCache:
         self.root.mkdir(parents=True, exist_ok=True)
         rid = self._reserve(dep, owner)
         work = Path(tempfile.mkdtemp(prefix=f".{dep.name.lower()}-", dir=str(self.root)))
+        from orchestrator.runtime.build.source import _make_read_only
+        from orchestrator.utils.atomic import remove_tree
         try:
             src = work / "src"
             commit, archive_sha = "", ""
@@ -352,7 +354,11 @@ class DependencyCache:
                 progress(f"Fetching {dep.what} ({dep.source}, {dep.ref}) before the build...")
             if dep.kind == "git":
                 commit = self.fetcher.git_clone(dep.source, dep.ref, src)
-                shutil.rmtree(src / ".git", ignore_errors=True)
+                # git keeps its objects read-only: on Windows shutil.rmtree(ignore_errors=True) left .git in place
+                # without a word, and its files went into the sha256 and the cache
+                remove_tree(src / ".git")
+                if (src / ".git").exists():
+                    raise DependencyError(f"the git metadata of {dep.what} could not be removed; it was not kept.")
             elif dep.kind == "archive":
                 data = self.fetcher.download(dep.source, MAX_ARCHIVE_BYTES)
                 algo, _, want = dep.declared_hash.partition(":")
@@ -370,7 +376,6 @@ class DependencyCache:
                 raise DependencyError(f"{dep.what} ({dep.ref}) is not what was fetched before: its sha256 differs from "
                                       "the one recorded on the first fetch, so the source changed under the same pin. "
                                       "It was not kept.")
-            from orchestrator.runtime.build.source import _make_read_only, remove_tree
             if target.exists():
                 remove_tree(target)
             target.mkdir(parents=True)
@@ -385,7 +390,7 @@ class DependencyCache:
                 rid = ""
             return self.entry(dep)
         finally:
-            shutil.rmtree(work, ignore_errors=True)
+            remove_tree(work)
             if rid and self.ledger is not None:
                 self.ledger.release(rid)
 
@@ -424,7 +429,7 @@ class DependencyCache:
         """Deletes exactly the entries the person accepted (Core/deletion.py): into the trash or for good. Only the
         person; the list is checked again first; the deletion is audited before anything goes."""
         from orchestrator.Core.deletion import DeletionResult, require_person, require_same, same_items
-        from orchestrator.runtime.build.source import remove_tree
+        from orchestrator.utils.atomic import remove_tree
         accepted = require_person(accepted)
         if accepted.actor not in ("gui", "cli"):
             raise PermissionError("Only the person deletes build dependencies, in the GUI or at a terminal.")

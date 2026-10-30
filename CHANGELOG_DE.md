@@ -87,6 +87,11 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Container schreibt den Arbeitsordner) zählt nie, und ein alter wird nie über so einen Link entfernt.
 
 ### Geändert
+- `2026-10-30 18:21 UTC` · `v3.3.0` **Ein übrig gebliebener Ordner, der sich nicht entfernen lässt, hält den Schritt an, der
+  ihn nutzen würde** ([Design](docs/DESIGN_DE.md#tests-ci-und-die-windows-fallen)): Ein Build, dessen Staging-Ordner
+  aus einem früheren Versuch bleibt (seine Dateien würden mit den neuen Artefakten veröffentlicht), ein Paket-Export,
+  dessen Kopie einen alten Lizenzordner behält, und eine Umwandlung der Wissensbasis, deren halbe Kopie aus einem
+  früheren Versuch bleibt, halten jetzt mit klarem Grund an, statt mit dem Übriggebliebenen weiterzumachen.
 - `2026-10-30 14:55 UTC` · `v3.3.0` **Deine Board-Tests erscheinen in den Benchmarks des Targets, und übergangene alte Einträge werden genannt** ([Design](docs/DESIGN_DE.md#targets-hardware-und-vorlagen)):
   Der neueste bestandene Board-Test eines Builds je Board, Modell und Quantisierung kommt jetzt zu den
   Benchmark-Zeilen des Targets in `list_targets`, `get_target_capabilities`, `llm-cli targets boards` und **Build >
@@ -120,6 +125,23 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   endet es mit 2, dem Exit-Code des Endgrunds cancelled. Strg+C im Befehl selbst bleibt 130.
 
 ### Behoben
+- `2026-10-30 18:21 UTC` · `v3.3.0` **Die eigenen Ordner des Frameworks bleiben unter Windows nicht mehr liegen**
+  ([Design](docs/DESIGN_DE.md#tests-ci-und-die-windows-fallen)): Sie wurden mit `shutil.rmtree(ignore_errors=True)`
+  entfernt, das unter Windows bei einer schreibgeschützten Datei wortlos aufgibt. Die Staging- und Vorgängerordner der
+  llama.cpp-Laufzeit, der Staging-Ordner eines Builds und das temporäre Image-Archiv des Sicherheitsscans, die
+  Quarantäne-, Export- und Prüfordner des Community Hubs, die private Modellkopie des Benchmarks, die halbe
+  Umwandlungskopie der Wissensbasis und ein halb geschriebenes Target-Modul laufen jetzt über den einen
+  Entfernen-Helfer (`orchestrator/utils/atomic.remove_tree`): Schreibgeschützte Dateien werden beschreibbar gemacht und
+  entfernt, ein Durchgang wird unter Windows wiederholt, und was sich weiter nicht entfernen lässt, wird mit Namen
+  protokolliert. Geändert wird nur, was im entfernten Ordner liegt: Der Ordner darum (ein Modellordner, der
+  Hugging-Face-Cache) behält seine Rechte, und ein Ordner, der sich nicht öffnen lässt, wird zugänglich gemacht und
+  entfernt (oder landet in dieser Liste), statt das Aufräumen mit einem Fehler abzubrechen.
+- `2026-10-30 16:38 UTC` · `v3.3.0` **Eine Git-Abhängigkeit wird auch unter Windows ohne ihre Git-Daten
+  behalten** ([Design](docs/DESIGN_DE.md#sicherheitsmodell)): Git legt seine Objekte schreibgeschützt ab, und der
+  Abhängigkeits-Vorabruf entfernte `.git` mit `shutil.rmtree(ignore_errors=True)`, was unter Windows wortlos
+  scheiterte: `.git` blieb in der zwischengespeicherten Kopie und in ihrer SHA-256, und Arbeits- und Entpackordner
+  blieben auf der Platte. Sie werden jetzt wie jeder schreibgeschützte Baum entfernt (`remove_tree`), und eine
+  Abhängigkeit, deren `.git` danach noch steht, wird abgelehnt statt behalten.
 - `2026-10-30 15:11 UTC` · `v3.3.0` **`llm-cli ditto cache`, `ditto cache set` und `ditto models list` sagen klar, wenn sie es nicht
   ermitteln können**: Lässt sich das Speicherbudget oder die Modellwahl für diesen Computer nicht berechnen (eine
   Messung, die scheitert, ein Modell, das der Katalog nicht kennt, eine beschädigte Datei), geben sie eine rote Zeile

@@ -153,6 +153,15 @@ python -m pytest
   Variable, die ein Verfahren in `configs/llm_providers.yml` unter `env` nennt). Tests dürfen nicht
   von deinem echten `~/.llm-framework`, deinem Schlüsselbund, echten API-Schlüsseln oder dem Netzwerk abhängen;
   nutze die Fixture `memory_keyring` und nachgebaute Server.
+- `tests/conftest.py` wacht auch über den Platz, in scheinbaren Größen (was NTFS belegt; die dünn besetzten Dateien
+  eines Qdrant-Edge-Speichers brauchen unter Linux keinen Platz, unter Windows aber etwa 160 MB): Ein Test, dessen
+  eigene temporäre Ordner (`tmp_path` und die `tmp_path_factory`-Ordner, die er angelegt hat) an seinem Ende mehr als
+  512 MiB halten, schlägt mit seinen fünf größten Dateien fehl, und ein Lauf, der mehr als 1 GiB behält (Ordner
+  fehlgeschlagener Tests, Modul- und Sitzungsordner, was er im temporären Ordner des Systems gelassen hat), schlägt
+  an seinem Ende fehl. Schließe Speicher, nutze `tmp_path` statt `tempfile.mkdtemp()` und entferne, was ein Test
+  angelegt hat; ein Test, der wirklich mehr braucht, bekommt `@pytest.mark.temp_budget(megabytes, reason="...")`.
+  Hebe die Budgets nie an, damit ein Test besteht. `LCF_TEST_DISK_LOG=<Datei>` schreibt für einen Messlauf die Summe
+  jedes Tests.
 - `tests/test_versioning.py` prüft, dass `orchestrator/__init__.py`, `pyproject.toml` und der neueste
   veröffentlichte Changelog-Eintrag dieselbe Version tragen.
 - `tests/test_foundation.py` und `tests/test_review_capabilities_paths.py` prüfen, dass die Rockchip-Capabilities
@@ -732,6 +741,15 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   geschickt und von Hand ausgeführt wird; `orchestrator/runtime/hardware_probe.py` ist ihre byte-gleiche Kopie im
   Paket. Ändere das Skript und kopiere es dann (`cp scripts/hardware_probe.py orchestrator/runtime/hardware_probe.py`);
   ein Test schlägt fehl, solange die beiden sich unterscheiden.
+- **Ein Entfernen der eigenen Ordner des Frameworks.** Ein Cache-, Staging-, Arbeits- oder Quarantäne-Ordner oder
+  eine temporäre Kopie wird mit `orchestrator/utils/atomic.remove_tree(path, label=...)` entfernt: Schreibgeschützte
+  Dateien werden beschreibbar gemacht und noch einmal versucht (Windows verweigert ihr Löschen), Links werden entfernt
+  und nie verfolgt, und es gibt zurück, was es nicht entfernen konnte. Prüfe diese Liste, wo der Ordner weg sein muss
+  (ein Cache, ein Staging-Ordner, der in einen Hash oder einen späteren Schritt eingeht), und halte mit klarem Grund
+  an; ein Aufräumen nach bestem Bemühen ruft es nur auf (es protokolliert, was bleibt). Nie
+  `shutil.rmtree(..., ignore_errors=True)` oder ein Fehler-Handler, der schluckt: `tests/test_removal.py` schlägt bei
+  einem in `orchestrator/` oder `scripts/` fehl, und seine Fixture `windows_read_only` zeigt die Windows-Regel auf
+  jedem Rechner. Dateien der Person werden damit nie entfernt, nur über `Core/deletion.py` und `Core/trash.py`.
 - **Ein Datei-Hash, ein Disk-Watchdog.** Jeder sha256 einer Datei läuft über `orchestrator/utils/helpers.py`, wo der
   erste (`calculate_file_checksum`) schon war: `sha256_file` (optionale Callbacks für Abbruch und Fortschritt, Links
   auf Wunsch abgelehnt), `try_sha256_file` (None für einen Link, einen Ordner oder eine unlesbare Datei),
@@ -977,6 +995,15 @@ Befehl oder ein von Hand geschriebener Menüpfad in einem Text:
   `development` per Pull-Request, sobald es stabil ist (CI grün unter Linux und Windows, geprüft). Zweige von
   `development` ab und richte deinen Pull-Request darauf; ein Thema je Pull-Request. Die CI läuft bei jedem Push
   auf `main` und `development` und bei jedem Pull-Request.
+- Die CI ist ein Tor: Bevor du um ein Zusammenführen nach `development` bittest, lass die CI auf deinem Zweig selbst
+  laufen und warte, bis sie grün ist. Pushe den Zweig und starte dann beide Workflows von Hand (sie haben den
+  Auslöser `workflow_dispatch`): `gh workflow run ci.yml --ref <dein-zweig>` und
+  `gh workflow run security.yml --ref <dein-zweig>`, oder auf GitHub Actions > CI (und Security) > Run workflow mit
+  deinem Zweig. Verfolge sie mit `gh run watch` (oder `gh run list --branch <dein-zweig>`). Beide müssen grün sein,
+  Linux und Windows: Der Windows-Job findet, was Linux verbirgt (Dateien, die sich schreibgeschützt nicht löschen
+  lassen, dünn besetzte Dateien, die echten Platz brauchen). Ein roter Lauf sperrt das Zusammenführen; lies sein Log,
+  behebe den Fehler und starte neu. Bündle zusammengehörige Arbeit auf einem Zweig und lass die CI einmal dafür
+  laufen, nicht für jeden Commit: Die Actions-Minuten werden geteilt.
 - Commit-Nachrichten: eine Zusammenfassungszeile auf Englisch, im Imperativ, nur der erste Buchstabe groß, ohne
   Typ-Präfix, möglichst nicht länger als etwa 72 Zeichen. Beispiele aus der Historie: `Add a secret scan:
   pre-commit and pre-push hooks and a CI job` und `Pin the provider SDKs and local embeddings, drop LiteLLM and

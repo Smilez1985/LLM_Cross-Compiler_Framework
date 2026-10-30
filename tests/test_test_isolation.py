@@ -189,9 +189,11 @@ class TestGuard:
 
         def refuse(*args, **kwargs):
             raise AssertionError("the guard opened a file")
-        monkeypatch.setattr(builtins, "open", refuse)
-        monkeypatch.setattr(os, "open", refuse)
-        found = home_snapshot(home)
+        # undone inside the test: pytest's own clean-up of tmp_path opens folders after the test
+        with monkeypatch.context() as m:
+            m.setattr(builtins, "open", refuse)
+            m.setattr(os, "open", refuse)
+            found = home_snapshot(home)
         assert found[".ssh/id_ed25519"][0] == "file" and found[".ssh/link"][0] == "link"
         assert not any("deep" in p for p in found)
 

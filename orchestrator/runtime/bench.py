@@ -32,7 +32,7 @@ import contextlib
 import json
 import os
 import secrets
-import shutil
+import shutil  # noqa: F401 - tests reach shutil.disk_usage through this module
 import subprocess
 import tempfile
 import threading
@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from orchestrator.utils.helpers import copy_hashed, digest_matches, sha256_fd, sha256_file
+from orchestrator.utils.atomic import remove_tree
 
 BENCH = "llama-bench"
 SCHEMA = "llm-framework.bench/1"
@@ -416,7 +417,7 @@ class BenchRunner:
             try:
                 if entry.name.startswith(PIN_PREFIX) and entry.is_dir() and not entry.is_symlink() \
                         and entry.lstat().st_mtime < cutoff:
-                    shutil.rmtree(entry, ignore_errors=True)
+                    remove_tree(entry)
             except OSError:
                 continue
 
@@ -453,7 +454,7 @@ class BenchRunner:
                 source = self._pinned_link(fd, made, model)
                 if source is not None:
                     break
-                shutil.rmtree(made, ignore_errors=True)
+                remove_tree(made)
                 made = None
             # 3: a copy, hashed again, in one of the framework's own folders with room for it (the model's own
             # folder last, as before: a system without descriptor links, e.g. macOS)
@@ -481,7 +482,7 @@ class BenchRunner:
                     except OSError as e:
                         import errno
                         no_room = no_room or e.errno in (errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC))
-                        shutil.rmtree(made, ignore_errors=True)
+                        remove_tree(made)
                         made = None
             if source is None:
                 if no_room:
@@ -505,7 +506,7 @@ class BenchRunner:
             yield source
         finally:
             if made is not None:
-                shutil.rmtree(made, ignore_errors=True)
+                remove_tree(made)
 
     def _run_sandbox(self, build: Any, model: Path, fd: Optional[int] = None, sha256: str = "",
                      label: str = "the model", stop: Optional[threading.Event] = None) -> str:

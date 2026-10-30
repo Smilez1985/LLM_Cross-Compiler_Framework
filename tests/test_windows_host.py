@@ -184,7 +184,7 @@ def test_an_approval_is_stored_while_a_reader_holds_the_file(tmp_path, monkeypat
 def windows_deletes(monkeypatch):
     """Qdrant Edge's storage with Windows' rule: a folder that still holds an open (mapped) shard file cannot be
     deleted; rmtree with an error handler (or ignore_errors) then leaves it silently."""
-    from orchestrator.rag import storage_lock
+    from orchestrator.utils import atomic as storage_lock   # the one removal helper (rag/storage_lock delegates)
     from orchestrator.rag.edge_store import EdgeStorage
     open_shards = set()
     real_shard, real_create, real_close = EdgeStorage.shard, EdgeStorage.create, EdgeStorage.close_shard

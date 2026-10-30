@@ -93,6 +93,17 @@ dev = [
 requires = ["uv_build>=0.11.32,<0.14"]
 build-backend = "uv_build"
 
+[tool.pytest.ini_options]
+# The folder of a passed test is removed when it ends. A Qdrant Edge store sets up some 160 MB of files (write-ahead
+# log, segments) that stay empty and sparse on Linux but take real room on NTFS: keeping every test's folder to the end
+# of the run filled the Windows runner's disk.
+tmp_path_retention_policy = "failed"
+# The disk guard in tests/conftest.py counts apparent sizes (what NTFS allocates): a test that needs more temporary room
+# than the per-test budget says so with this marker and its reason.
+markers = [
+    "temp_budget(megabytes, reason): this test may leave up to `megabytes` in its temporary folders (reason required)",
+]
+
 [tool.uv]
 # fastembed (every release up to 0.9.0) declares Pillow < 13, but Pillow 13.0.0 fixes 35 advisories of 12.3.0. The
 # framework uses only fastembed's text models and never decodes an image with Pillow (pypdf extracts text only), so

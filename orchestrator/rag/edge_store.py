@@ -19,7 +19,6 @@ then gets a clear "in use by another framework process" error instead of a broke
 
 import json
 import os
-import shutil
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence
 
@@ -149,7 +148,7 @@ class EdgeStorage:
                 shard.update(qe.UpdateOperation.create_field_index(field, qe.PayloadSchemaType.Keyword))
             shard.flush()
         except Exception:
-            shutil.rmtree(path, ignore_errors=True)
+            remove_tree(path)
             raise
         self._shards[name] = shard
         _write_json(self._meta_path(name), {"embedding_model": model_id, "dim": int(dim), "schema": SCHEMA_VERSION,

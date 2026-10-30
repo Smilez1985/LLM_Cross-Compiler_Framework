@@ -48,6 +48,7 @@ from orchestrator.utils.download import FileLock as DownloadLock
 from orchestrator.utils.helpers import copy_hashed, digest_matches, sha256_file
 from orchestrator.utils.llama_pin import pinned_source
 from orchestrator.utils.sandbox import FALLBACK_USER, container_sandbox, hand_over, sandbox_user
+from orchestrator.utils.atomic import remove_tree
 
 class StagingLock(DownloadLock):
     """The lock of one staging folder (a Hugging Face model's commit); its message names no path."""
@@ -1557,7 +1558,7 @@ class BuildEngine:
                     pass
             if folder is not None:
                 # The framework's own temporary copy of the image, made for this scan only (the image itself stays).
-                shutil.rmtree(folder, ignore_errors=True)
+                remove_tree(folder)
                 progress.add_log("Removed the temporary image archive of the scan.")
 
     def _image_here(self, reference: str) -> bool:
@@ -1592,7 +1593,7 @@ class BuildEngine:
         try:   # docker save, the one helper (utils/docker_engine.save_image); a cancel is noticed between two chunks
             save_image(image, archive, cancelled=lambda: self._check_cancelled(progress))
         except BaseException:  # cancelled or the disk ran full: no half archive stays behind
-            shutil.rmtree(folder, ignore_errors=True)
+            remove_tree(folder)
             raise
         # Readable for the scanner, which runs without capabilities; the folder around it stays private (0700).
         os.chmod(archive, 0o644)
@@ -2323,7 +2324,7 @@ class BuildEngine:
 
     def _discard_staged(self, config: BuildConfiguration, progress: BuildProgress):
         """Drops what a build that did not complete has staged; its output folder was never touched."""
-        shutil.rmtree(self._staging_root(config), ignore_errors=True)
+        remove_tree(self._staging_root(config))
         progress.artifacts.clear()
 
     @staticmethod
@@ -2384,7 +2385,7 @@ class BuildEngine:
             if info is not None:
                 info["output_dir"] = str(dst)
         progress.published = str(dst)
-        shutil.rmtree(root, ignore_errors=True)
+        remove_tree(root)
 
     def _copy_file(self, src: Path, dst: Path, progress: BuildProgress):
         """shutil.copy2 that stops after a cancel and never follows a link."""
@@ -2405,7 +2406,10 @@ class BuildEngine:
         staged = self._staged_output(config)
         
         progress.add_log(f"Copying artifacts to {dst}...")
-        shutil.rmtree(self._staging_root(config), ignore_errors=True)  # left over by an interrupted run
+        if remove_tree(self._staging_root(config), label="build staging"):  # left over by an interrupted run
+            # what stays would be published with this build's artifacts
+            raise RuntimeError("The staging folder of an earlier attempt could not be removed (a file in it is "
+                               "still open or cannot be deleted); close what uses it and start the build again.")
         ensure_directory(staged)
         
         if src.exists():
