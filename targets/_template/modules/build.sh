@@ -150,7 +150,27 @@ cmake() {
         echo "ERROR: A cmake call of this build would let llama.cpp download while it is built: $problem; builds have no network: leave it out. cmake was not started." >&2
         return 1
     fi
-    command cmake "$@"
+    # Nothing sets an option without a word on the command line: a configure run starts from a fresh cache (a
+    # CMakeCache.txt left in the build folder could hold any option), and a CMAKE_TOOLCHAIN_FILE in the environment
+    # (CMake reads it when the command line names none) is cleared unless the build plan set exactly that file.
+    local fresh=() keep=() planned=""
+    case "${1:-}" in
+        --build|--install|--open|-E|-P|-N|-L*|--help*|--version|--system-information|--find-package|--workflow) ;;
+        *)
+            if command cmake --help 2>/dev/null | grep -q -- '--fresh'; then
+                fresh=(--fresh)
+            fi ;;
+    esac
+    if [ -n "${CMAKE_TOOLCHAIN_FILE+set}" ]; then
+        if [ -f "${BUILD_PLAN:-}" ]; then
+            # shellcheck source=/dev/null
+            planned="$(unset CMAKE_TOOLCHAIN_FILE; source "$BUILD_PLAN" >/dev/null 2>&1; printf '%s' "${CMAKE_TOOLCHAIN_FILE:-}")"
+        fi
+        if [ -z "$planned" ] || [ "$planned" != "$CMAKE_TOOLCHAIN_FILE" ]; then
+            keep=(-u CMAKE_TOOLCHAIN_FILE)
+        fi
+    fi
+    env "${keep[@]}" cmake "${fresh[@]}" "$@"
 }
 export -f cmake
 

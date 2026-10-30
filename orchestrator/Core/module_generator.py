@@ -138,6 +138,50 @@ def download_flag_problems(text: str) -> List[str]:
     return problems
 
 
+# A word of a module's CMake flags: no quote, no $, no shell character (the flags are written into config_module.sh
+# between single quotes and split into words by the shell).
+CMAKE_WORD_RE = re.compile(r"^[A-Za-z0-9_.=+,:;/-]{1,512}$")
+
+
+def cmake_flag_problems(words, prefetched=()) -> List[str]:
+    """Why the module's CMake flags `words` are refused (the build recipe's one verdict, recipe.cmake_flag_verdicts in
+    the module context); empty when none is. A download option keeps its sentence (builds have no network)."""
+    from orchestrator.runtime.build.recipe import cmake_flag_verdicts, refused_option
+    out = []
+    for v in cmake_flag_verdicts(list(words), context="module", prefetched=prefetched):
+        if v.verdict != "refused":
+            continue
+        if v.words[0].startswith(CMAKE_SCRIPT_FLAGS):
+            out.append(f"{v.words[0]} makes CMake run a CMake script (-C, -P), which can switch on any llama.cpp "
+                       "option; leave it out")
+        elif v.kind == "download":
+            value = v.word.partition("=")[2]
+            out.append(f"{v.word} would let llama.cpp download while it is built "
+                       f"({refused_option(v.name, value) or v.reason}); builds have no network: leave it out")
+        else:
+            out.append(f"{v.word} is not allowed in a module's CMake flags ({v.reason}); leave it out")
+    return out
+
+
+# Where a target folder names a module's CMake flags as words: config_module.sh's CMAKE_OPTIONS (what the generator
+# writes) and a Dockerfile's LLAMA_CMAKE_ARGS (ARG or ENV). The folder check gives these words the module verdict.
+_FLAG_LINE_RE = re.compile(r"^\s*(?:CMAKE_OPTIONS=|(?:ARG|ENV)\s+LLAMA_CMAKE_ARGS[= ])\s*([\"']?)(.*?)\1\s*(?:\\)?\s*$",
+                           re.IGNORECASE)
+
+
+def flag_line_problems(line: str) -> List[str]:
+    """The module verdict's refusals (other than downloads, which download_flag_problems names) for the CMake flags a
+    line of a target folder sets (_FLAG_LINE_RE); empty for any other line. A word the shell expands ($X, ${X}) is a
+    documented limit of this check: build.sh's cmake and the package's last check see the expanded words."""
+    m = _FLAG_LINE_RE.match(line or "")
+    if not m:
+        return []
+    words = [w for w in m.group(2).split() if "$" not in w and "`" not in w]
+    from orchestrator.runtime.build.recipe import cmake_flag_verdicts
+    return [f"{v.word} is not allowed in a module's CMake flags ({v.reason}); leave it out"
+            for v in cmake_flag_verdicts(words, context="module") if v.verdict == "refused" and v.kind != "download"]
+
+
 def module_slug(module_name: str) -> str:
     slug = re.sub(r"[^a-z0-9_-]", "_", module_name.strip().lower().replace(" ", "_")).strip("_-")
     return slug
@@ -426,13 +470,20 @@ def validate_module_data(data: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(value, (list, tuple)):
             value = " ".join(str(v) for v in value)
         tokens = str(value).split()
-        bad = [t for t in tokens if not FLAG_RE.fullmatch(t)]
-        if bad:
-            problems.append(f"{key}: only plain compiler/CMake options like -mcpu=cortex-a76 or -DGGML_CUDA=ON: {', '.join(bad[:5])}")
-        elif key == "cmake_flags":
-            problems += [f"cmake_flags: {problem}" for problem in download_flag_problems(" ".join(tokens))]
-            problems += [f"cmake_flags: {t} makes CMake run a CMake script (-C, -P), which can switch on any llama.cpp "
-                         "option; leave it out" for t in tokens if t.startswith(CMAKE_SCRIPT_FLAGS)]
+        if key == "cmake_flags":
+            # The build recipe's one verdict (recipe.cmake_flag_verdicts, DECISIONS round 25 Q6): -DNAME=VALUE and
+            # CMake's -W words are allowed; what loads code, another toolchain, -S/-B, -C/-P or a download is
+            # refused; a valid CMake option outside the allowlist stays in the module and is the person's decision
+            # when it is built (Core/module_flags.py).
+            bad = [t for t in tokens if not CMAKE_WORD_RE.fullmatch(t)]
+            if bad:
+                problems.append(f"cmake_flags: only plain CMake options like -DGGML_CUDA=ON: {', '.join(bad[:5])}")
+            else:
+                problems += [f"cmake_flags: {problem}" for problem in cmake_flag_problems(tokens)]
+        else:
+            bad = [t for t in tokens if not FLAG_RE.fullmatch(t)]
+            if bad:
+                problems.append(f"{key}: only plain compiler/CMake options like -mcpu=cortex-a76 or -DGGML_CUDA=ON: {', '.join(bad[:5])}")
         out[key] = " ".join(tokens)
 
     boards = data.get("supported_boards") or []
@@ -612,6 +663,7 @@ def validate_target_folder(root: Path, template_dir: Path = SHIPPED_TEMPLATE) ->
                 if line in known or line.lstrip().startswith("#"):
                     continue
                 problems += [f"{rel}:{number}: not allowed, {problem}" for problem in download_flag_problems(line)]
+                problems += [f"{rel}:{number}: not allowed, {problem}" for problem in flag_line_problems(line)]
         elif path.suffix == ".sh":
             template = template_dir / rel
             known = set(template.read_text(encoding="utf-8", errors="replace").splitlines()) if template.is_file() else set()
@@ -622,6 +674,7 @@ def validate_target_folder(root: Path, template_dir: Path = SHIPPED_TEMPLATE) ->
                              if pattern.search(line)]
                 # the module's CMake flags (CMAKE_OPTIONS of config_module.sh) and any cmake call of its scripts
                 problems += [f"{rel}:{number}: not allowed, {problem}" for problem in download_flag_problems(line)]
+                problems += [f"{rel}:{number}: not allowed, {problem}" for problem in flag_line_problems(line)]
     problems += scan_target_folder(root, skip=(KNOWLEDGE_SNAPSHOT,))
     problems += [f"template placeholder left: {p}" for p in _leftover_placeholders(root)]
     return problems + check_shell_syntax(root)
