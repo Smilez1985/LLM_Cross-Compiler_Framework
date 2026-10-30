@@ -361,7 +361,12 @@ class ConfigManager:
             
             # Build Settings
             ConfigSchema("max_concurrent_builds", int, False, 2, "Maximum concurrent builds", ["min:1", "max:10"]),
-            ConfigSchema("build_timeout", int, False, 3600, "Build timeout in seconds", ["min:60"]),
+            ConfigSchema("build_timeout", int, False, 3600,
+                         "Soft cap of one build step in seconds: a build you started goes on past it with a warning "
+                         "(Cancel stops it); one an AI started stops there", ["min:60"]),
+            ConfigSchema("build_idle_timeout", int, False, 1800,
+                         "Seconds a build step may print nothing before it is stopped (a hang, not a long build)",
+                         ["min:60"]),
             ConfigSchema("auto_cleanup", bool, False, True, "Enable automatic cleanup"),
             ConfigSchema("docker_registry", str, False, "",
                          "Docker registry (empty: none; read by nothing: the framework publishes and pulls no "

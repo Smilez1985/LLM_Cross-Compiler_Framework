@@ -540,6 +540,9 @@ class LLMOrchestrator:
                           else req.dataset_path),
             dataset_sha256=None if req.dataset_generated else req.dataset_sha256,
             build_timeout=int(self.config.get("build_timeout", 3600)) if hasattr(self.config, "get") else 3600,
+            build_idle_timeout=(int(self.config.get("build_idle_timeout", 1800) or 0) or None)
+            if hasattr(self.config, "get") else 1800,
+            owner=getattr(req, "owner", "") or "",
             local_inputs=req.local_inputs,
             # the engine records in it what has landed on disk (the request releases it when it ends)
             disk_reservation=getattr(req, "disk_reservation", "") or "",

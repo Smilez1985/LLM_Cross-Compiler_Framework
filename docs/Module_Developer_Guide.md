@@ -631,6 +631,12 @@ folder, the runner skips every stage whose marker has the same digest and whose 
 runs again makes every later stage run again. A stage that fails writes no marker. `build.sh --fresh` ignores the
 markers.
 
+**Loop protection.** A stage that was started with the same inputs and was stopped from outside before it finished
+(its container stopped, the build resumed, again and again) is a loop, not a long build. The runner counts these
+starts in `<stage>.starts` and does not start the stage a fourth time (`STAGE_RESTART_LIMIT`, default 3): it fails
+with exit code 75 and says so. A stage that ends with its own error (exit code below 128) and a finished stage reset
+the count; `--fresh` forgets it.
+
 **Progress.** The runner prints one line when a stage starts, ends, is resumed or fails:
 `=== Stage 3/4: convert ===`, `=== Stage 3/4: convert done in 41 s ===`, `=== Stage 1/4: source resumed ===`,
 `=== Stage 3/4: convert failed (exit 1) ===`. The build engine reads these lines from the container log: the build
@@ -778,7 +784,7 @@ it there). What it does is what the convert module of version 1.x promised in th
 | `input PATH --format FORMAT --stats FILE` | before converting | Detects the input: a Hugging Face folder with SafeTensors or PyTorch weights, a GGUF file (nothing to convert), an ONNX model, a single weights file, a folder of GGUF files. Refuses what the format cannot use with the reason (`--onnx-next TEXT` adds where an ONNX model goes on this target), checks the input's integrity (its JSON files, SafeTensors headers against the file sizes, the shards an index lists, PyTorch archives, a GGUF header) and starts the statistics. |
 | `begin FILE --state FILE [--scratch DIR]` | before a converter writes FILE | Keeps an existing FILE as `FILE.convert-backup` until the new one passed its checks (an intermediate `tmp-*` of the work folder is simply replaced). |
 | `watch DIR --state FILE` | before a format helper runs | Notes the files of DIR with their sizes and times, so that `output --watched` finds the model the helper wrote (a new file, or one it wrote over) and a failure removes it. |
-| `output FILE --format gguf --type TYPE --seconds N --stats FILE --tools DIR` | after the converter | Checks the GGUF (every tensor's data inside the file), runs the functional test with `llama-completion` (or `llama-cli`) from DIR: 8 tokens, at most `--test-seconds` (120), offline. `--test-skip REASON` skips the test with a note. Completes the statistics. |
+| `output FILE --format gguf --type TYPE --seconds N --stats FILE --tools DIR` | after the converter | Checks the GGUF (every tensor's data inside the file), runs the functional test with `llama-completion` (or `llama-cli`) from DIR: 8 tokens, offline; it is stopped when it prints nothing for `--test-seconds` (120, `FUNCTIONAL_TEST_SECONDS`) or the model repeats itself, never by the clock alone. `--test-skip REASON` skips the test with a note. Completes the statistics. |
 | `test FILE --tools DIR --result FILE` | in the target stage, before the package is kept | The same functional test of another GGUF (the quantized model; an embedding model is not run): `--what TEXT` names it in a failure, `--stage NAME` its log lines. Writes the result, the tool and the manifest's line to `--result`. |
 | `keep --state FILE` | when the stage succeeded | Removes the backups. |
 | `restore --state FILE --failed` or `--stopped` | when the stage fails; at its next start | Removes what the run wrote and puts the backups back (`--stopped`: what a killed run left). A file whose backup is no longer there stays as it is: the earlier file was put back by hand. |
@@ -789,8 +795,9 @@ The statistics (`convert_stats.json` in the stage folder) go into `build_info.js
 `output_type`, `output_bytes`, `ratio` (input / output),
 `seconds`, `functional_test` (`passed`, `skipped`, `timed out` or `stopped`) and `functional_test_tool`; numbers and
 words only, no paths. A functional test that ends with an error or crashes (a signal such as llama.cpp's abort on a
-tensor it cannot use) fails the stage with the tool's last lines: the GGUF does not work. A timeout or a run stopped
-from outside (SIGKILL of the out-of-memory killer, SIGTERM) is a note. It is skipped with a note when the image has neither tool or the tool does not start there, for an embedding model, for the NPU formats
+tensor it cannot use) fails the stage with the tool's last lines: the GGUF does not work. A run that prints nothing
+for `FUNCTIONAL_TEST_SECONDS` (`timed out`), a model that repeats itself (`stopped`) and a run stopped from outside
+(SIGKILL of the out-of-memory killer, SIGTERM) are a note. It is skipped with a note when the image has neither tool or the tool does not start there, for an embedding model, for the NPU formats
 (the model runs on the board) and in the `imatrix` job (`llama-imatrix` runs the model there).
 
 ## 7. Sandbox rules

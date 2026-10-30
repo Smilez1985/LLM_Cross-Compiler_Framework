@@ -45,8 +45,9 @@ from orchestrator.utils.sandbox import container_sandbox, hand_over, sandbox_use
 
 BUILDER_DOCKERFILE = Path(__file__).resolve().with_name("builder.Dockerfile")
 BUILDER_LABEL = "org.llm-framework.builder"
-CONFIGURE_TIMEOUT = 1800
+CONFIGURE_TIMEOUT = 1800     # soft caps (utils/step_limits.py): they stop only an AI-started build
 BUILD_TIMEOUT = 6 * 3600
+DEFAULT_IDLE = 1800          # a step whose log stops growing this long is stopped
 
 # Lines upstream's CMake prints when it fetches or downloads (design 3.2). Any of them in a configure log fails the
 # build, even when the download failed (it was attempted).
@@ -62,7 +63,9 @@ _RE_IMAGE = re.compile(r"^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9._-]{1,128})?@sha256:
 RUNTIME_LIBS = frozenset({"libgomp.so.1"})
 _RE_CONTAINER_PATH = re.compile(r"^/[A-Za-z0-9._+/-]{1,512}$", re.ASCII)
 
-# (argv, cwd, env, log file, timeout) -> exit code; -1 when it could not start or was stopped at the time limit.
+# (argv, cwd, env, log file, limits) -> exit code; -1 when it could not start or was stopped by its time limits.
+# `limits`: a StepLimits (utils/step_limits.py: soft cap, idle timeout, who started it) or a number of seconds (a plain
+# time limit that always stops).
 ProcessRunner = Callable[[Sequence[str], Path, Mapping[str, str], Path, float], int]
 
 
@@ -105,10 +108,26 @@ def _tail(path: Path, limit: int = 1200) -> str:
     return clean[-limit:]
 
 
+def _step_clock(timeout: Any, log: Path):
+    from orchestrator.utils.step_limits import StepClock, StepLimits
+    limits = timeout if isinstance(timeout, StepLimits) else StepLimits.hard(float(timeout))
+    return StepClock(limits, Path(log).stem)
+
+
+def _log_size(log: Path) -> int:
+    try:
+        return os.path.getsize(log)
+    except OSError:
+        return -1
+
+
 def default_process_runner(argv: Sequence[str], cwd: Path, env: Mapping[str, str], log: Path,
-                           timeout: float) -> int:
-    """Runs a build step; its output (stdout and stderr) goes to `log`. At the time limit the whole process group is
-    stopped."""
+                           timeout: Any) -> int:
+    """Runs a build step; its output (stdout and stderr) goes to `log`. Its time limits (utils/step_limits.py): a step
+    whose log stops growing for the idle timeout is stopped, the soft cap stops only an AI-started build (a person's
+    gets one note in the log); a number is a plain time limit. When it is stopped, the whole process group goes."""
+    from orchestrator.utils.step_limits import StepTimedOut
+    clock = _step_clock(timeout, log)
     with open(log, "ab") as out:
         try:
             proc = subprocess.Popen(list(argv), cwd=str(cwd), env=dict(env), stdin=subprocess.DEVNULL, stdout=out,
@@ -116,19 +135,34 @@ def default_process_runner(argv: Sequence[str], cwd: Path, env: Mapping[str, str
         except OSError as e:
             out.write(f"\n[executor] could not start {argv[0]}: {e}\n".encode())
             return -1
-        try:
-            return proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            out.write(f"\n[executor] stopped after {timeout:.0f} s\n".encode())
+        size = _log_size(log)
+        while True:
             try:
-                if os.name == "posix":
-                    os.killpg(proc.pid, signal.SIGKILL)
-                else:  # pragma: no cover - Windows
-                    proc.kill()
-            except OSError:
+                return proc.wait(timeout=clock.next_wait())
+            except subprocess.TimeoutExpired:
                 pass
-            proc.wait()
-            return -1
+            now = _log_size(log)
+            if now != size:
+                size = now
+                clock.output()
+            try:
+                note = clock.check()
+            except StepTimedOut as stop:
+                out.write(f"\n[executor] {stop}\n".encode())
+                out.flush()
+                try:
+                    if os.name == "posix":
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    else:  # pragma: no cover - Windows
+                        proc.kill()
+                except OSError:
+                    pass
+                proc.wait()
+                return -1
+            if note:
+                out.write(f"\n[executor] {note}\n".encode())
+                out.flush()
+                size = _log_size(log)
 
 
 # --- containers ---------------------------------------------------------------------------------------------------
@@ -210,32 +244,46 @@ class DockerEngine(ContainerEngine):
                     raise BuildError(f"the builder image could not be built: {str(chunk['error'])[:300]}", log)
 
     def run(self, image: str, command: Sequence[str], *, mounts: Sequence[Mount], env: Mapping[str, str],
-            options: Mapping[str, Any], log: Path, timeout: float, stop: Optional[threading.Event] = None) -> int:
+            options: Mapping[str, Any], log: Path, timeout: Any, stop: Optional[threading.Event] = None) -> int:
+        """`timeout`: the step's StepLimits (utils/step_limits.py) or a number of seconds (a plain time limit)."""
         from orchestrator.utils.docker_engine import create_container   # rootless Podman: keep-id
+        from orchestrator.utils.step_limits import StepTimedOut
         volumes = {str(m.source): {"bind": m.target, "mode": "ro" if m.read_only else "rw"} for m in mounts}
         container = create_container(self.client(), image=image, command=list(command), volumes=volumes,
                                      environment=dict(env), **dict(options))
-        timer = threading.Timer(timeout, lambda: _quiet(container.kill))
+        clock = _step_clock(timeout, log)
         ended = threading.Event()
+        notes: List[str] = []
 
-        def watch() -> None:  # a stop (cancel) kills the container at once
-            while not ended.wait(0.5):
+        def watch() -> None:  # a stop (cancel) kills the container at once; the time limits are checked meanwhile
+            while not ended.wait(min(0.5, clock.next_wait())):
                 if stop is not None and stop.is_set():
                     _quiet(container.kill)
                     return
+                try:
+                    note = clock.check()
+                except StepTimedOut as reason:
+                    notes.append(f"\n[executor] {reason}\n")
+                    _quiet(container.kill)
+                    return
+                if note:
+                    notes.append(f"\n[executor] {note}\n")
         try:
             container.start()
-            timer.start()
-            if stop is not None:
-                threading.Thread(target=watch, name="container-stop", daemon=True).start()
+            threading.Thread(target=watch, name="container-limits", daemon=True).start()
             with open(log, "ab") as out:
                 for chunk in container.logs(stream=True, follow=True):
+                    clock.output()
                     out.write(chunk)
+                    while notes:
+                        out.write(notes.pop(0).encode())
             result = container.wait(timeout=60)
+            with open(log, "ab") as out:
+                for note in notes:
+                    out.write(note.encode())
             return int(result.get("StatusCode", -1))
         finally:
             ended.set()
-            timer.cancel()
             _quiet(lambda: container.remove(force=True))
 
 
@@ -269,14 +317,19 @@ class BuildExecutor:
 
     def __init__(self, runner: Optional[ProcessRunner] = None, engine: Optional[ContainerEngine] = None, *,
                  configure_timeout: float = CONFIGURE_TIMEOUT, build_timeout: float = BUILD_TIMEOUT,
+                 idle_timeout: Optional[float] = None, ai_started: bool = False,
                  pids_limit: int = 4096, mem_limit: Optional[str] = None,
                  log: Optional[Callable[[str], None]] = None, dockerfile: Path = BUILDER_DOCKERFILE,
                  per_job_mib: Optional[Callable[[str], int]] = None):
         self.per_job_mib = per_job_mib or _catalog_per_job_mib
         self.runner = runner or default_process_runner
         self.engine = engine
+        # The time limits of configure and build (DECISIONS round 25 Q8, utils/step_limits.py): soft caps that stop
+        # only an AI-started build, and the idle timeout for a step whose log stops growing
         self.configure_timeout = configure_timeout
         self.build_timeout = build_timeout
+        self.idle_timeout = DEFAULT_IDLE if idle_timeout is None else idle_timeout
+        self.ai_started = ai_started
         self.pids_limit = pids_limit
         self.mem_limit = mem_limit
         self.say = log or (lambda _msg: None)
@@ -413,13 +466,17 @@ class BuildExecutor:
             env["CCACHE_DIR"] = str(ccache_dir)
         cmake = toolchain.tool("cmake")
         configure = [cmake, "-S", str(source), "-B", str(dirs["build"]), "-G", step.generator, *step.cmake_args()]
-        self._step("configure", configure, dirs, env, self.configure_timeout)
+        self._step("configure", configure, dirs, env, self._limits(self.configure_timeout))
         self._finish_configure(dirs["logs"] / "configure.log", plan, dirs["build"])
         build = [cmake, "--build", str(dirs["build"]), "--parallel", str(jobs), "--target", *step.targets]
-        self._step("build", build, dirs, env, self.build_timeout)
+        self._step("build", build, dirs, env, self._limits(self.build_timeout))
+
+    def _limits(self, soft_cap: float):
+        from orchestrator.utils.step_limits import StepLimits
+        return StepLimits(soft_cap=soft_cap, idle=self.idle_timeout or None, ai_started=self.ai_started)
 
     def _step(self, name: str, argv: Sequence[str], dirs: Dict[str, Path], env: Mapping[str, str],
-              timeout: float) -> None:
+              timeout: Any) -> None:
         log = dirs["logs"] / f"{name}.log"
         self.say(f"{name}: {' '.join(Path(argv[0]).name if i == 0 else a for i, a in enumerate(argv[:6]))} ...")
         rc = self.runner(list(argv), dirs["build"], env, log, timeout)
@@ -465,10 +522,11 @@ class BuildExecutor:
         configure = ["cmake", "-S", "/src", "-B", "/work/build", "-G", step.generator, *step.cmake_args()]
         if step.toolchain_file:
             configure.append("-DCMAKE_TOOLCHAIN_FILE=/work/config/toolchain.cmake")
-        self._container_step("configure", engine, tag, configure, mounts, env, options, dirs, self.configure_timeout)
+        self._container_step("configure", engine, tag, configure, mounts, env, options, dirs,
+                             self._limits(self.configure_timeout))
         self._finish_configure(dirs["logs"] / "configure.log", plan, dirs["build"])
         build = ["cmake", "--build", "/work/build", "--parallel", str(jobs), "--target", *step.targets]
-        self._container_step("build", engine, tag, build, mounts, env, options, dirs, self.build_timeout)
+        self._container_step("build", engine, tag, build, mounts, env, options, dirs, self._limits(self.build_timeout))
         libs = list((plan.verify or {}).get("runtime_libs") or [])
         if libs:
             self._copy_runtime_libs(plan, engine, tag, libs, mounts, env, options, dirs)
@@ -507,7 +565,7 @@ class BuildExecutor:
 
     def _container_step(self, name: str, engine: ContainerEngine, image: str, command: Sequence[str],
                         mounts: Sequence[Mount], env: Mapping[str, str], options: Mapping[str, Any],
-                        dirs: Dict[str, Path], timeout: float) -> None:
+                        dirs: Dict[str, Path], timeout: Any) -> None:
         log = dirs["logs"] / f"{name}.log"
         self.say(f"{name} in the builder container (no network) ...")
         rc = engine.run(image, command, mounts=mounts, env=env, options=options, log=log, timeout=timeout)

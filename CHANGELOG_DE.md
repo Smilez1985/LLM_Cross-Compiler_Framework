@@ -51,6 +51,25 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 
 ### Geändert
 
+- `2026-10-30 05:20 UTC` · `v3.2.0` **Keine harte Zeitgrenze für einen Build-Schritt** (Konsolidierungskette
+  build-flags-time; Entscheidung zu den Zeitgrenzen): Ein Schritt dauert so lange, wie er dauert. Das neue
+  `orchestrator/utils/step_limits.py` (StepLimits, StepClock, StepTimedOut, ein TimeoutError) ist die eine Regel für
+  die Stufen-Container des Builds (`BuildEngine._run_container` wartet jetzt in kurzen Runden) und die Schritte
+  configure und build des Laufzeit-Builds (`runtime/build/executor.py`, `default_process_runner` und
+  `DockerEngine.run`; eine einfache Sekundenzahl bleibt eine einfache Grenze): Die Einstellung `build_timeout`
+  (Deprecate-and-delegate: Ihre Bedeutung wechselt von einer harten Grenze zu einer weichen Obergrenze) stoppt einen
+  von einer KI gestarteten Build (der Owner der Anfrage, jetzt in `BuildConfiguration.owner`) und wird für ihn nie
+  verlängert; ein Build, den die Person gestartet hat, läuft mit einer Warnung darüber hinaus, dass Abbrechen ihn
+  stoppt. Die neue Einstellung `build_idle_timeout` (Vorgabe 1800 s) stoppt einen Schritt, der so lange nichts
+  ausgibt, für alle. Eine KI darf beide nur senken (`TIGHTEN_ONLY`; `build_timeout` ist für eine KI nicht mehr nur
+  lesbar); beide stehen in den Einstellungen, die `config show` der CLI und Datei > Einstellungen… zeigen. Schutz vor
+  Schleifen: Der Stage-Runner (`build.sh` beider Targets) zählt die Starts einer Stufe mit denselben Eingaben, die von
+  außen angehalten wurden, und startet sie kein viertes Mal (`STAGE_RESTART_LIMIT`, Exit-Code 75); der Funktionstest
+  (`model_check.py` beider Targets) liest die Ausgabe des Modells mit, stoppt ein Modell, das sich wiederholt
+  (`stopped`, kein Fehler) und nimmt `FUNCTIONAL_TEST_SECONDS` als die Zeit, die er nichts ausgeben darf (`timed out`,
+  kein Fehler), nie als harte Grenze. Tests: `tests/test_step_limits.py`, die Warte-Tests in
+  `tests/test_review_build_engine.py` (ein von einer KI gestarteter Build stoppt, der einer Person läuft weiter, die
+  Grenze für Stillstand), die Schleifen-Tests in `tests/test_build_stages.py` und `tests/test_convert_stage.py`.
 - `2026-10-30 03:55 UTC` · `v3.2.0` **Ein Urteil über die CMake-Flags eines Moduls: eine Allowlist, Ablehnungen und die
   Entscheidung der Person** (Konsolidierungskette build-flags-time; Entscheidung zu den CMake-Flags von Modulen):
   `recipe.cmake_flag_verdicts` (`orchestrator/runtime/build/recipe.py`) beurteilt jedes Wort der CMake-Flags eines
