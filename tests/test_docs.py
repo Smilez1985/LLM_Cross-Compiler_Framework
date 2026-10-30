@@ -497,14 +497,18 @@ def roadmap_versions(rel: str) -> List[str]:
 
 
 def test_roadmap_lists_only_what_comes():
-    """Finished versions leave the roadmap at release; it names only versions newer than the newest release."""
+    """Finished versions leave the roadmap at release; it names only versions newer than the newest release.
+
+    The newest changelog section is the version being built (there is no [Unreleased]: finished work goes under the
+    version it lands in, tests/test_versioning.py), so the roadmap may still name that one version for what of it is
+    not done yet; every older version is released and must be gone from it."""
     newest = changelog_entries("CHANGELOG.md")[0][0]
     found = {}
     for target in ROADMAP_LINKS.values():
         rel = target.partition("#")[0]
         assert (REPO_ROOT / rel).is_file(), f"{rel}, the roadmap, is missing"
         found[rel] = roadmap_versions(rel)
-        released = [v for v in found[rel] if _semver(v) <= _semver(newest)]
+        released = [v for v in found[rel] if _semver(v) < _semver(newest)]
         assert not released, (f"{rel}: the roadmap still lists released version(s) {sorted(set(released))}; "
                               f"they belong in the changelog (newest release: {newest})")
     english, german = found.values()

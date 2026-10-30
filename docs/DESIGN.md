@@ -1,4 +1,4 @@
-Version 3.1.0 · Last updated 2026-10-29
+Version 3.2.0 · Last updated 2026-10-30
 
 **English** · [Deutsch](DESIGN_DE.md)
 
@@ -1346,6 +1346,7 @@ signed index and installs through a quarantine.
 | What people share are target templates through the public community repository (pull request hand-off); nothing image-like goes into the hub, never models to Hugging Face; a person's own images are free; the framework pulls the list of ready templates automatically; companies build cluster images themselves from the Dockerfiles into their own registry. | `Core/community_manager.py` (`submit_contribution`, the index), the Community Hub. | Templates are small and checkable; images would need a rebuild for every update. |
 | The community repository is the project's knowledge-base repository (default of `community_repo`); the index address follows once the first signed index exists; workflows of fork pull requests need approval for all outside contributors. | `community_repo` default; publishing the index is planned: ROADMAP row "Community repository and index published". | A pull request from outside must not run the repository's checks unreviewed. |
 | Board knowledge in a target pack is imported at the recipient. | The pack installer imports a target's `knowledge/` into the knowledge base. | The template's documentation belongs with it. |
+| A recipe names its target by the target pack's own content digest, and an installed target pack counts as that target as long as it is unchanged since its install, also where the file system keeps no execute bit (Windows); an edited target is another target. | One helper in `Core/community_manager.py`: `installed_digest` (what a build records) and `same_content` (what a recipe check compares), over `Provenance.installed_unchanged`; the builder, the build service's identical-build check, the recipe tools and the recipe install check all use it. | A recipe made on Linux must verify on Windows, and the other way round; the content check itself stays the security gate. |
 | A bot may propose new models with a compatibility test as a tested pull request; it never takes anything over by itself. | Roadmap Later. | New models appear faster than releases; a person still decides. |
 
 **History**
