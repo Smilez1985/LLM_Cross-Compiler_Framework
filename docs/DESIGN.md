@@ -1587,6 +1587,17 @@ One repository with layers enforced by a test; every change extends what exists.
 | Work lands on the branch `development`; it is merged into main with a normal merge commit (all commits kept) when it is stable and CI is green; CI runs on pushes to development. | The push triggers of `.github/workflows/ci.yml`. | Main stays the stable state; the history stays readable. |
 | Questions come grouped, a few at a time; what is not asked now goes onto the roadmap as an ordered item with its open decisions in the row; nothing may be orphaned. | The roadmap rows carry their open decisions (for example the build-service steps). | The roadmap is a to-do list, not a dump. |
 
+### Tests, CI and the Windows hazards
+
+The suite runs on Linux and Windows; what only a Windows runner would find (allocated sparse files, read-only files
+that cannot be deleted) is made visible on Linux too.
+
+#### Decisions
+
+| What | How | Why |
+|---|---|---|
+| One removal of the framework's own folders (caches, staging, work and quarantine folders, temporary copies), which reports what it could not remove; no `shutil.rmtree(..., ignore_errors=True)` beside it. A caller that needs the folder gone (a cache, a staging or work folder that feeds a hash or a later step) checks the result and stops with a plain reason; a best-effort clean-up stays best effort and is logged. A person's files are never removed with it. | `orchestrator/utils/atomic.remove_tree(path, label=...)` (Qt-free, so the Core and the runtime share it): read-only entries are made writable and tried once more, a link is removed and never followed, a pass that leaves something is repeated on Windows (3 passes, a short pause between them), and the list of what stays comes back with one warning that names the label and relative paths, never the folder's own path. `runtime/build/source.remove_tree` and `rag/storage_lock.remove_tree` are deprecated names that delegate to it. A build stops when an earlier attempt's staging folder stays (it would be published with the new artifacts), a pack export when a stale licence folder of its copy stays, the knowledge-base conversion when an earlier half-built copy stays, the dependency pre-fetch when `.git` stays. A person's deletion goes only through `Core/deletion.py` and `Core/trash.py`. `tests/test_removal.py` (an emulation of the NTFS read-only rule on any host, and an AST ratchet over `orchestrator/` and `scripts/` with an empty allowlist). | On Windows a read-only file cannot be deleted, and `rmtree(ignore_errors=True)` gave up on it without a word: a git checkout's `.git` stayed in the dependency cache and its hash, and unpacked archives, quarantine copies and staging folders stayed on the disk. Linux deletes such files, so the hazard never showed outside the Windows runner. |
+
 ### Documentation and the blueprint
 
 Every document exists in English and German; the blueprint is three files: this design, the roadmap and the changelog.

@@ -54,6 +54,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 from orchestrator.utils.file_lock import file_lock
 from orchestrator.utils.helpers import copy_hashed
 from orchestrator.utils.helpers import sha256_file as _sha256
+from orchestrator.utils.atomic import remove_tree
 
 BUILDS, OUTPUT, SAVED = "builds", "output", "saved"
 INDEX_FILE = "saved_artifacts.json"
@@ -543,7 +544,7 @@ def _copy_verified(folder: Path, zip_file: Optional[Path], target: Path,
         return files, size, skipped
     finally:
         if partial.exists():
-            shutil.rmtree(partial, ignore_errors=True)
+            remove_tree(partial)
         if os.path.lexists(partial_zip):
             try:
                 partial_zip.unlink()

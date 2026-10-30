@@ -29,7 +29,6 @@ import io
 import json
 import os
 import re
-import shutil
 import stat
 import zipfile
 from dataclasses import dataclass
@@ -47,6 +46,7 @@ from orchestrator import __version__
 from orchestrator.security.paths import ACCOUNT_NAME, HOME_ROOT
 from orchestrator.utils.helpers import calculate_file_checksum
 from orchestrator.utils.next_steps import WithSteps
+from orchestrator.utils.atomic import remove_tree
 
 MANIFEST_NAME = "pack.json"
 SIGNATURE_NAME = "pack.sig"
@@ -581,11 +581,11 @@ def read_pack(source: Union[Path, bytes], dest: Path, *,
         except BaseException as e:
             # dest was new or empty: nothing of the pack stays behind.
             if created:
-                shutil.rmtree(dest, ignore_errors=True)
+                remove_tree(dest)
             else:
                 for child in dest.iterdir():
                     if child.is_dir() and not child.is_symlink():
-                        shutil.rmtree(child, ignore_errors=True)
+                        remove_tree(child)
                     else:
                         child.unlink()
             if isinstance(e, Exception) and not isinstance(e, PackError):  # damaged zip, disk full, ...

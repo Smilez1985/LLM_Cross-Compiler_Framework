@@ -732,6 +732,15 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   geschickt und von Hand ausgeführt wird; `orchestrator/runtime/hardware_probe.py` ist ihre byte-gleiche Kopie im
   Paket. Ändere das Skript und kopiere es dann (`cp scripts/hardware_probe.py orchestrator/runtime/hardware_probe.py`);
   ein Test schlägt fehl, solange die beiden sich unterscheiden.
+- **Ein Entfernen der eigenen Ordner des Frameworks.** Ein Cache-, Staging-, Arbeits- oder Quarantäne-Ordner oder
+  eine temporäre Kopie wird mit `orchestrator/utils/atomic.remove_tree(path, label=...)` entfernt: Schreibgeschützte
+  Dateien werden beschreibbar gemacht und noch einmal versucht (Windows verweigert ihr Löschen), Links werden entfernt
+  und nie verfolgt, und es gibt zurück, was es nicht entfernen konnte. Prüfe diese Liste, wo der Ordner weg sein muss
+  (ein Cache, ein Staging-Ordner, der in einen Hash oder einen späteren Schritt eingeht), und halte mit klarem Grund
+  an; ein Aufräumen nach bestem Bemühen ruft es nur auf (es protokolliert, was bleibt). Nie
+  `shutil.rmtree(..., ignore_errors=True)` oder ein Fehler-Handler, der schluckt: `tests/test_removal.py` schlägt bei
+  einem in `orchestrator/` oder `scripts/` fehl, und seine Fixture `windows_read_only` zeigt die Windows-Regel auf
+  jedem Rechner. Dateien der Person werden damit nie entfernt, nur über `Core/deletion.py` und `Core/trash.py`.
 - **Ein Datei-Hash, ein Disk-Watchdog.** Jeder sha256 einer Datei läuft über `orchestrator/utils/helpers.py`, wo der
   erste (`calculate_file_checksum`) schon war: `sha256_file` (optionale Callbacks für Abbruch und Fortschritt, Links
   auf Wunsch abgelehnt), `try_sha256_file` (None für einen Link, einen Ordner oder eine unlesbare Datei),

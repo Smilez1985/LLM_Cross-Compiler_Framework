@@ -12,7 +12,23 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 
 ## [3.3.0] - 2026-10-30
 
+### Geändert
+- `2026-10-30 18:21 UTC` · `v3.3.0` **Ein übrig gebliebener Ordner, der sich nicht entfernen lässt, hält den Schritt an, der
+  ihn nutzen würde** ([Design](docs/DESIGN_DE.md#tests-ci-und-die-windows-fallen)): Ein Build, dessen Staging-Ordner
+  aus einem früheren Versuch bleibt (seine Dateien würden mit den neuen Artefakten veröffentlicht), ein Paket-Export,
+  dessen Kopie einen alten Lizenzordner behält, und eine Umwandlung der Wissensbasis, deren halbe Kopie aus einem
+  früheren Versuch bleibt, halten jetzt mit klarem Grund an, statt mit dem Übriggebliebenen weiterzumachen.
+
 ### Behoben
+- `2026-10-30 18:21 UTC` · `v3.3.0` **Die eigenen Ordner des Frameworks bleiben unter Windows nicht mehr liegen**
+  ([Design](docs/DESIGN_DE.md#tests-ci-und-die-windows-fallen)): Sie wurden mit `shutil.rmtree(ignore_errors=True)`
+  entfernt, das unter Windows bei einer schreibgeschützten Datei wortlos aufgibt. Die Staging- und Vorgängerordner der
+  llama.cpp-Laufzeit, der Staging-Ordner eines Builds und das temporäre Image-Archiv des Sicherheitsscans, die
+  Quarantäne-, Export- und Prüfordner des Community Hubs, die private Modellkopie des Benchmarks, die halbe
+  Umwandlungskopie der Wissensbasis und ein halb geschriebenes Target-Modul laufen jetzt über den einen
+  Entfernen-Helfer (`orchestrator/utils/atomic.remove_tree`): Schreibgeschützte Dateien werden beschreibbar gemacht und
+  entfernt, ein Durchgang wird unter Windows wiederholt, und was sich weiter nicht entfernen lässt, wird mit Namen
+  protokolliert.
 - `2026-10-30 16:38 UTC` · `v3.3.0` **Eine Git-Abhängigkeit wird auch unter Windows ohne ihre Git-Daten
   behalten** ([Design](docs/DESIGN_DE.md#sicherheitsmodell)): Git legt seine Objekte schreibgeschützt ab, und der
   Abhängigkeits-Vorabruf entfernte `.git` mit `shutil.rmtree(ignore_errors=True)`, was unter Windows wortlos

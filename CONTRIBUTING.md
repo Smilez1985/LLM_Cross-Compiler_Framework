@@ -690,6 +690,14 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   and run by hand; `orchestrator/runtime/hardware_probe.py` is its byte-identical copy inside the package. Edit the
   script, then copy it (`cp scripts/hardware_probe.py orchestrator/runtime/hardware_probe.py`); a test fails while
   the two differ.
+- **One removal of the framework's own folders.** A cache, staging, work or quarantine folder or a temporary copy is
+  removed with `orchestrator/utils/atomic.remove_tree(path, label=...)`: read-only files are made writable and tried
+  again (Windows refuses to delete them), links are removed and never followed, and it returns what it could not
+  remove. Check that list where the folder must be gone (a cache, a staging folder that feeds a hash or a later step)
+  and stop with a plain reason; a best-effort clean-up just calls it (it logs what stays). Never
+  `shutil.rmtree(..., ignore_errors=True)` or an error handler that swallows: `tests/test_removal.py` fails on one in
+  `orchestrator/` or `scripts/`, and its `windows_read_only` fixture shows the Windows rule on any host. A person's
+  files are never removed with it, only through `Core/deletion.py` and `Core/trash.py`.
 - **One file hash, one disk watchdog.** Every sha256 of a file goes through `orchestrator/utils/helpers.py`, where
   the first one (`calculate_file_checksum`) was: `sha256_file` (optional cancel and progress callbacks, links refused
   on request), `try_sha256_file` (None for a link, a folder or an unreadable file), `sha256_fileobj` (an open handle,

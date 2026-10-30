@@ -32,6 +32,7 @@ import yaml
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.helpers import ensure_directory
 from orchestrator.utils.prebuilt_llama import is_prebuilt_llama_image, scan_target_folder
+from orchestrator.utils.atomic import remove_tree
 
 # --- Validation of module data (wizard input, AI output, community input) ---------------------------
 # Every value below ends up in Dockerfiles, YAML or shell scripts, so it is checked before any
@@ -818,7 +819,7 @@ class ModuleGenerator:
             self.logger.error(f"Failed to generate module: {e}")
             # The folder did not exist before (checked above): remove the half-written target so it
             # neither shows up as a buildable target nor blocks a corrected retry.
-            shutil.rmtree(target_dir, ignore_errors=True)
+            remove_tree(target_dir)
             raise e
 
     @staticmethod
