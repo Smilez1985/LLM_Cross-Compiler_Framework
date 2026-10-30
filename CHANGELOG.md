@@ -28,6 +28,11 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   all of them as before, in the settings, the Prompt cache group and `llm-cli ditto cache set`.
 
 ### Fixed
+- `2026-10-30 14:34 UTC` · `v3.3.0` **The note an uninstall leaves is never cut by a crash** ([design](docs/DESIGN.md#community-recipes-and-packs)):
+  when a pack's excerpts leave the knowledge base, its uninstall writes the note `<pack>.released` atomically
+  (through the new `utils/atomic.write_file`: a temporary file next to it, synced, then put in its place), so a
+  computer that stops during the write leaves the note whole or not at all. The modes of the file and its folder
+  stay as they were.
 - `2026-10-30 14:15 UTC` · `v3.3.0` **The llama.cpp runtime builds read the idle timeout you set** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
   the build of Ditto's own llama.cpp server (`llm-cli ditto runtime install`, the tool `build_local_runtime`) and the
   build of a board's runtime (`llm-cli device runtime build`, the Boards window, the tool `deploy_device_runtime`)

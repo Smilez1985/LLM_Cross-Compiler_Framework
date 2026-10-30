@@ -16,7 +16,12 @@ runtime/llama_server.py, which keep the old names, so the utils and the kernel n
   mode): a ".<name>.<8 hex>.tmp" file created with O_EXCL and 0600, LF line ends on every system, no fsync, no link
   resolution (a link is replaced by the file), replace_file (a plain os.replace until chain port-runtime: Windows
   refused it while the GUI's LLMClient read server.json).
-Neither leaves its temporary file behind. The other writers (JSON and signed stores) are unified later (chain
+- write_file(path, text): a plain file (not private) replaced atomically: a ".<name>.<8 hex>.tmp" file in the same
+  folder, created with O_EXCL and the usual mode (0666 less the umask), given the mode of the file it replaces,
+  flushed and synced, then replace_file. The folder is neither created nor changed, a link is replaced by the file
+  (Path.write_text semantics otherwise). For markers whose half-written state would mean something else (the
+  community manager's "<pack>.released" note).
+None leaves its temporary file behind. The other writers (JSON and signed stores) are unified later (chain
 c5-io-stores).
 - owner_only(path): an existing file private to this account (the framework's SSH key before OpenSSH uses it, chain
   c2-remote-system; the one helper for every file that must be "only you", such as Mojo's narrowing of a token file).
@@ -94,6 +99,28 @@ def write_private_exclusive(path: Path, text: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
+        replace_file(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def write_file(path, text: str) -> None:
+    """Writes `text` to `path` atomically: a crash leaves the old file or the new one, never a cut one. No mode or
+    folder change (see the module docstring); OSError when the folder is missing or the write fails."""
+    path = Path(path)
+    try:
+        mode = stat.S_IMODE(os.stat(path).st_mode)
+    except FileNotFoundError:
+        mode = None
+    tmp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        if mode is not None and not WINDOWS:
+            os.chmod(tmp, mode)
         replace_file(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
