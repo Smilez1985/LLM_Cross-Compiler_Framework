@@ -143,6 +143,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `ditto runtime ensure` | Install Ditto's local model server when it is not there, bare metal or in Docker; `--force` switches the mode |
 | `ditto runtime export-source/import-source` | Carry the pinned llama.cpp source to an air-gapped machine as a git bundle (checked by its commit) |
 | `ditto models list/download` | The model tiers for offline mode |
+| `ditto cache` / `ditto cache set` | The memory budget of Ditto's local server: prompt cache, keep time, KV cache |
 | `tools list` / `tools permissions` / `tools audit` | The framework tools, their permissions and the audit log |
 | `mcp serve` / `mcp config` | Run the MCP server / show how to connect AI clients |
 | `secrets set` / `secrets list` | Store a token (Hugging Face, GitHub) / list the stored names |
@@ -1468,6 +1469,49 @@ In the GUI: **Ditto > Local Models...** > **Download the recommended model...** 
 shows; the button is on once the list is read; **Download the chosen model...** when a tier was chosen earlier for the
 local server), or select a tier and **Download selected...**; the question shows repo, file, licence, size and folder ("No" is the default), the download runs in the
 background with progress and **Cancel** (the part downloaded so far is kept for a resume).
+
+### ditto cache
+
+#### ditto cache show
+
+```
+llm-cli ditto cache [--json]
+llm-cli ditto cache show [--json]
+```
+
+The memory budget of Ditto's local server, from the measured hardware of this computer: for the prompt cache in RAM
+(`local_cache_ram_mib`, `--cache-ram`), the time the model stays loaded without requests (`local_cache_keep_minutes`)
+and the KV-cache type (`local_kv_cache`) it shows your saved value (auto or a value), what auto stands for here, what
+the next start uses, the soft cap and the hard limit, and why; then what the running server got. `--json` prints the
+same as JSON.
+
+#### ditto cache set
+
+```
+llm-cli ditto cache set NAME VALUE [--yes-over-cap]
+```
+
+| Argument / option | Meaning |
+|---|---|
+| `NAME` | `local_cache_ram_mib` (or `ram`), `local_cache_keep_minutes` (`keep`), `local_kv_cache` (`kv`), `local_cache_over_cap_ok` (`over-cap-ok`). |
+| `VALUE` | `auto` or a whole number (MiB, minutes; `0` minutes keeps the model loaded); for the KV cache `auto`, `f16`, `q8_0` or `q4_0`; for `over-cap-ok` `true` or `false`. |
+| `--yes-over-cap` | Set a value above this computer's soft cap without the question. |
+
+A value above the hard limit (more memory than this computer has next to the model) is refused with exit code 2, as
+is a value that is no number (there is no `-1` for "no limit"). Above the soft cap you get one warning and the
+question "Set it anyway?" ("No" is the default), unless you passed `--yes-over-cap` or set `local_cache_over_cap_ok`.
+Only the setting you name is saved; a running server takes it at its next start (it restarts once). An AI client may
+only lower these values over MCP and never above the soft cap; `local_cache_over_cap_ok` and 0 minutes are yours
+alone.
+
+```bash
+llm-cli ditto cache
+llm-cli ditto cache set kv q8_0
+llm-cli ditto cache set ram auto
+```
+
+In the GUI: the **Prompt cache** group in **Ditto > Local Models...** and in the AI settings (fields, the KV-cache
+choice and **Apply**; above the soft cap the same question).
 
 ---
 

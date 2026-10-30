@@ -1247,6 +1247,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(401, {"error": {"message": "Invalid API Key", "code": 401}})
         if self.path == "/v1/models":
             return self.reply(200, {"object": "list", "data": [{"id": alias, "object": "model"}]})
+        if self.path == "/props" and mode != "noprops":
+            (here / "props_seen").write_text("GET")
+            return self.reply(200, {"default_generation_settings": {"n_ctx": int(opt("-c") or 0)},
+                                    "total_slots": int(opt("-np") or 4), "build_info": "b1-fake\x1b[31m",
+                                    "is_sleeping": False})
         self.reply(404, {})
 
     def do_POST(self):

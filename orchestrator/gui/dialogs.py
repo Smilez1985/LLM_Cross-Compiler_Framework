@@ -344,6 +344,7 @@ class AIConfigurationDialog(QDialog):
 
         layout.addLayout(form)
         layout.addWidget(self._runtime_mode_section())
+        layout.addWidget(self._prompt_cache_section())
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._save_config)
@@ -358,6 +359,13 @@ class AIConfigurationDialog(QDialog):
         from orchestrator.gui.runtime_mode_box import RuntimeModeBox
         self.runtime_mode_box = RuntimeModeBox(self.framework, self)
         return self.runtime_mode_box
+
+    def _prompt_cache_section(self) -> QGroupBox:
+        """The local part of the prompt cache: the memory budget of Ditto's local server (gui/prompt_cache_box.py,
+        saved with its own Apply, checked by AISettingsChange.cache_change)."""
+        from orchestrator.gui.prompt_cache_box import PromptCacheBox
+        self.prompt_cache_box = PromptCacheBox(self.framework, self)
+        return self.prompt_cache_box
 
     # --- helpers ---
     def _config(self):
