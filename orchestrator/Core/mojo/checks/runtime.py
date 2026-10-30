@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List
 
 from orchestrator.Core.mojo.findings import Finding, Severity, _ok
+from orchestrator.utils.next_steps import NextStep
 
 
 RUNTIME_WHY = "Ditto's local model server cannot start without an intact build."
@@ -62,6 +63,38 @@ def _docker_mode(root: Path, pin) -> List[Finding]:
                 f"({saved.get('verified_at') or 'time not recorded'}); never pulled from a registry.")]
 
 
+def _cache_budget(framework) -> List[Finding]:
+    """A saved value of the local server's memory budget above this computer's soft cap (runtime/hardware.local_budget,
+    measured now: free RAM changes, so a value that was fine may no longer be), unless the person accepted such values
+    (local_cache_over_cap_ok). Nothing when every value is auto or within the cap; reads only."""
+    config = getattr(framework, "config", None)
+    get = getattr(config, "get", None)
+    if not callable(get) or bool(get("local_cache_over_cap_ok", False)):
+        return []
+    from orchestrator.runtime.hardware import CACHE_SETTINGS
+    saved = {key: str(get(key, "auto") or "auto").strip().lower() for key in CACHE_SETTINGS}
+    if all(value == "auto" for key, value in saved.items() if key != "local_kv_cache"):
+        return []
+    try:
+        from orchestrator.runtime.llama_server import LocalLLMRuntime
+        budget = LocalLLMRuntime.from_framework(framework).cache_budget()
+    except Exception:  # noqa: BLE001 - no catalog or probe: nothing to compare against
+        return []
+    findings = []
+    for key in budget.over_soft_cap:
+        value = saved.get(key, "auto")
+        cap = budget.soft_caps.get(key)
+        what = "0 (never unload the model)" if key == "local_cache_keep_minutes" and value == "0" else value
+        findings.append(Finding(
+            "runtime", "runtime.cache.over_cap", Severity.WARN,
+            f"The saved {key} = {what} is above this computer's soft cap of {cap} (measured now): Ditto's local "
+            "server may hold more memory than this computer has to spare.",
+            "Set it back to auto (the measured value), or accept such values with local_cache_over_cap_ok.",
+            where=key, why="Too much memory for the server makes other programs and the system slow.",
+            cannot="person", steps=(NextStep("cache.auto", {"name": key}),)))
+    return findings
+
+
 def check_runtime(framework) -> List[Finding]:
     """The local llama.cpp runtime: the self-built build in use (intact, of the pinned commit), a prebuilt download
     in use (not self-built), and whether this machine has the toolchain for a native build. Reads files and asks the
@@ -105,6 +138,7 @@ def check_runtime(framework) -> List[Finding]:
                                 "No self-built llama.cpp runtime is in use" +
                                 (f" ({len(stored)} stored, none active)." if stored else ".")))
     findings += _docker_mode(store.root, pin)
+    findings += _cache_budget(framework)
     prebuilt = sorted(p.parent.name for p in store.root.glob("b*-*/runtime.json"))
     if prebuilt:
         try:

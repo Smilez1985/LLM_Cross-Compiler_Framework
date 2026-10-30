@@ -144,6 +144,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `ditto runtime ensure` | Dittos lokalen Modellserver installieren, wenn er fehlt, direkt oder in Docker; `--force` wechselt die Art |
 | `ditto runtime export-source/import-source` | Den festgelegten llama.cpp-Quelltext als Git-Bundle auf einen Rechner ohne Netz tragen (am Commit geprüft) |
 | `ditto models list/download` | Die Modellstufen für den Offline-Modus |
+| `ditto cache` / `ditto cache set` | Das Speicherbudget von Dittos lokalem Server: Prompt-Cache, Haltezeit, KV-Cache |
 | `tools list` / `tools permissions` / `tools audit` | Die Tools des Frameworks, ihre Berechtigungen und das Audit-Log |
 | `mcp serve` / `mcp config` | Den MCP-Server betreiben / zeigen, wie man KI-Clients verbindet |
 | `secrets set` / `secrets list` | Ein Token speichern (Hugging Face, GitHub) / die gespeicherten Namen auflisten |
@@ -1531,6 +1532,49 @@ den lokalen Server gewählt wurde), oder eine Stufe auswählen und **Ausgewählt
 herunterladen...**; die Frage zeigt Repository, Datei, Lizenz, Größe und Ordner („Nein“ ist die
 Vorgabe), der Download läuft im Hintergrund mit Fortschritt und **Abbrechen** (was schon heruntergeladen ist, bleibt
 für die Fortsetzung).
+
+### ditto cache
+
+#### ditto cache show
+
+```
+llm-cli ditto cache [--json]
+llm-cli ditto cache show [--json]
+```
+
+Das Speicherbudget von Dittos lokalem Server, aus der gemessenen Hardware dieses Computers: für den Prompt-Cache im
+RAM (`local_cache_ram_mib`, `--cache-ram`), die Zeit, die das Modell ohne Anfragen geladen bleibt
+(`local_cache_keep_minutes`), und den KV-Cache-Typ (`local_kv_cache`) zeigt es deinen gespeicherten Wert (auto oder
+einen Wert), wofür auto hier steht, was der nächste Start nimmt, die weiche und die harte Grenze und warum; danach, was
+der laufende Server bekommen hat. `--json` gibt dasselbe als JSON aus.
+
+#### ditto cache set
+
+```
+llm-cli ditto cache set NAME WERT [--yes-over-cap]
+```
+
+| Argument / Option | Bedeutung |
+|---|---|
+| `NAME` | `local_cache_ram_mib` (oder `ram`), `local_cache_keep_minutes` (`keep`), `local_kv_cache` (`kv`), `local_cache_over_cap_ok` (`over-cap-ok`). |
+| `WERT` | `auto` oder eine ganze Zahl (MiB, Minuten; `0` Minuten hält das Modell geladen); für den KV-Cache `auto`, `f16`, `q8_0` oder `q4_0`; für `over-cap-ok` `true` oder `false`. |
+| `--yes-over-cap` | Einen Wert über der weichen Grenze dieses Computers ohne die Frage setzen. |
+
+Ein Wert über der harten Grenze (mehr Speicher, als dieser Computer neben dem Modell hat) wird mit Exit-Code 2
+abgelehnt, ebenso ein Wert, der keine Zahl ist (es gibt kein `-1` für „ohne Grenze“). Über der weichen Grenze bekommst
+du eine Warnung und die Frage „Set it anyway?“ („Nein“ ist die Vorgabe), außer du hast `--yes-over-cap` angegeben oder
+`local_cache_over_cap_ok` gesetzt. Gespeichert wird nur die genannte Einstellung; ein laufender Server übernimmt sie bei
+seinem nächsten Start (er startet einmal neu). Ein KI-Client darf diese Werte über MCP nur senken und nie über die
+weiche Grenze; `local_cache_over_cap_ok` und 0 Minuten setzt nur du.
+
+```bash
+llm-cli ditto cache
+llm-cli ditto cache set kv q8_0
+llm-cli ditto cache set ram auto
+```
+
+In der GUI: die Gruppe **Prompt-Cache** in **Ditto > Lokale Modelle...** und in den KI-Einstellungen (Felder, die Wahl
+des KV-Caches und **Übernehmen**; über der weichen Grenze dieselbe Frage).
 
 ---
 

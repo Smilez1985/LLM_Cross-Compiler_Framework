@@ -29,6 +29,10 @@ CLI_PATHS: Dict[str, str] = {
     "ditto models": MODELS_ACTION,
     "ditto models list": MODELS_ACTION,                       # the table: tier, file, size, licence, status, note
     "ditto models download": "btn_ditto_models_download",     # the selected tier (the recommended one is preselected)
+    # the local server's memory budget: the Prompt cache group (also in the AI settings)
+    "ditto cache": "grp_prompt_cache",
+    "ditto cache show": "grp_prompt_cache",                   # values, automatic values, caps, the running server
+    "ditto cache set": "btn_prompt_cache_apply",              # the fields, the KV-cache choice and the checkbox
     "ditto ask": "btn_chat_send",                             # the chat panel's Send
     "ditto ask --no-tools": "chk_chat_no_tools",
     "ditto ask --provider": "cb_chat_provider",
@@ -51,6 +55,8 @@ WINDOW_OBJECTS: Dict[str, str] = {
     "btn_ditto_models_download": MODELS_ACTION,
     "btn_ditto_models_download_recommended": MODELS_ACTION,   # `ditto models download` without a tier
     "btn_ditto_models_cancel": MODELS_ACTION,
+    "grp_prompt_cache": MODELS_ACTION,
+    "btn_prompt_cache_apply": MODELS_ACTION,
     **{name: EVAL_ACTION for name in CLI_PATHS.values() if name.startswith(("btn_ditto_eval", "cb_ditto_eval",
                                                                             "lst_ditto_eval", "grp_ditto_eval",
                                                                             "sp_ditto_eval"))},
@@ -58,6 +64,10 @@ WINDOW_OBJECTS: Dict[str, str] = {
 WINDOW_OBJECTS["btn_ditto_eval_cancel"] = EVAL_ACTION
 MACHINE_ONLY: Dict[str, str] = {
     "ditto models download --yes": "skips the question; the GUI always asks (No by default)",
+    "ditto cache --json": "machine output for scripts; the Prompt cache group shows the same values",
+    "ditto cache show --json": "machine output for scripts; the Prompt cache group shows the same values",
+    "ditto cache set --yes-over-cap": "skips the question above the soft cap; the GUI asks (No by default) or takes "
+                                      "the checkbox 'Accept values above the soft cap without a warning'",
     "ditto eval --min-pass": "sets the exit code for scripts and CI; the window shows each run's pass rate",
 }
 

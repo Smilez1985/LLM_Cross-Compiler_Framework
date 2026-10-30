@@ -501,6 +501,21 @@ class ConfigManager:
             ConfigSchema("offline_local_ranges", list, False, [],
                          "Address ranges counted as local in offline mode (e.g. 203.0.113.0/24); set only by you, never "
                          "by an AI"),
+            # The memory budget of Ditto's local server (runtime/hardware.local_budget): auto = from the measured
+            # hardware of this computer. An AI may only lower the numbers (llm/settings_change.TIGHTEN_ONLY);
+            # local_cache_over_cap_ok and keep minutes 0 (never unload) are the person's alone.
+            ConfigSchema("local_cache_ram_mib", str, False, "auto",
+                         "Prompt cache of Ditto's local server in RAM (--cache-ram): auto or MiB (0 = off)",
+                         ["regex:^(auto|[0-9]{1,7})$"]),
+            ConfigSchema("local_cache_keep_minutes", str, False, "auto",
+                         "Minutes Ditto's local server keeps its model loaded without requests: auto or minutes "
+                         "(0 = never unload, set only by you)", ["regex:^(auto|[0-9]{1,5})$"]),
+            ConfigSchema("local_kv_cache", str, False, "auto",
+                         "KV-cache type of Ditto's local server: auto (the same rule as on boards), f16, q8_0, q4_0",
+                         ["regex:^(auto|f16|q8_0|q4_0)$"]),
+            ConfigSchema("local_cache_over_cap_ok", bool, False, False,
+                         "You accept prompt-cache values above this computer's soft cap without a warning; set only "
+                         "by you, never by an AI"),
 
             # Community zoo (3.1): the signed index (verified with configs/community_keys.yml) and the repository
             # that receives contributions as pull requests. The repository is decided (maintainer, 2026-10-22);
@@ -736,6 +751,7 @@ class ConfigManager:
                 # v2.0
                 "chat_context_limit", "enable_telemetry", "offline_mode",
                 "offline_local_vpns", "offline_local_hosts", "offline_local_ranges",
+                "local_cache_ram_mib", "local_cache_keep_minutes", "local_kv_cache", "local_cache_over_cap_ok",
                 # v2.3
                 "image_trivy", "image_base_debian", "image_inference_runtime",
                 "enable_security_scan", "llama_cpp_version", "build_jobs", "healing_approval_timeout",

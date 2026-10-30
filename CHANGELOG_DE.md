@@ -13,6 +13,19 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 ## [3.2.0] - 2026-10-30
 
 ### Hinzugefügt
+- `2026-10-30 07:39 UTC` · `v3.2.0` **Das Speicherbudget von Dittos lokalem Server als Einstellungen, auf jeder Oberfläche** ([Design](docs/DESIGN_DE.md#ditto-die-lokale-laufzeit-und-die-llm-schicht)):
+  `local_cache_ram_mib` (der Prompt-Cache im RAM), `local_cache_keep_minutes` (wie lange das Modell geladen bleibt;
+  0 = immer), `local_kv_cache` (auto, f16, q8_0, q4_0) und `local_cache_over_cap_ok`, jeweils standardmäßig „auto“,
+  also der Wert, der auf diesem Computer gemessen wird. `llm-cli ditto cache` (und `cache show`, `--json`) zeigt die
+  gespeicherten Werte, wofür auto hier steht, die weiche und die harte Grenze und die Werte des laufenden Servers;
+  `llm-cli ditto cache set NAME WERT [--yes-over-cap]` ändert einen davon. Die GUI hat dasselbe als Gruppe
+  **Prompt-Cache** in Ditto > Lokale Modelle... (mit der Wahl des KV-Caches) und in den KI-Einstellungen. Über der
+  harten Grenze wird ein Wert für jeden abgelehnt; über der weichen Grenze bekommt die Person eine Warnung („Nein“ als
+  Vorgabe), außer bei `local_cache_over_cap_ok`, das nur die Person setzt; ein KI-Client darf die drei Werte über MCP
+  nur senken (`update_settings`, auto zählt als Wert dieses Computers, nie 0 Minuten), und `get_settings` zeigt die
+  Werte mit ihren automatischen Werten und Grenzen. Mojo nennt einen gespeicherten Wert über der aktuellen weichen
+  Grenze. Nach dem Start liest das Framework das `/props` des Servers (auf 127.0.0.1, mit seinem Schlüssel; es weckt
+  kein schlafendes Modell) und hält den wirklichen Kontext des Slots fest.
 - `2026-10-30 00:19 UTC` · `v3.2.0` **`start_recipe_build` nimmt die Hardware-Probe des Boards** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
   Ein KI-Client nennt die Probe (`probe`, eine ID aus `get_hardware_probe`) für einen Rezept-Build, wie er es bei
   `start_build` schon konnte und wie der Builder-Tab und die CLI es tun: Sie wird vor der Frage geprüft (die Probe
@@ -73,6 +86,19 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   was `topic` bis dahin übersieht.
 
 ### Geändert
+- `2026-10-30 07:39 UTC` · `v3.2.0` **Ein Speicherbudget für Dittos lokalen Server** ([Design](docs/DESIGN_DE.md#ditto-die-lokale-laufzeit-und-die-llm-schicht)):
+  der Speicher des Servers wird einmal aus der gemessenen Hardware geplant (`runtime/hardware.py local_budget`), und
+  der Kontext wird in dem berechnet, was übrig ist, so wird nichts doppelt oder gar nicht gezählt. Der KV-Cache folgt
+  derselben automatischen Regel wie auf Boards (`q8_0`, wenn neben dem Modell weniger als 2 GiB RAM übrig sind, sonst
+  `f16`), mit Flash Attention auf auto für einen quantisierten Cache; der Server bekommt einen Slot (`-np 1`), damit
+  Dittos Unterhaltung den ganzen Kontext hat. Der Prompt-Cache (`--cache-ram`) behält die Regel aus 3.1.0 (ein Achtel
+  des RAMs, 256 bis 8192 MiB), nimmt aber nie mehr als die Hälfte des freien RAMs, der neben dem Modell, seinem
+  Mindestkontext und 1 GiB Abstand für das System übrig ist, und ist unter 64 MiB aus: er wird auf Computern mit wenig
+  freiem RAM kleiner, zum Beispiel etwa 370 MiB statt 512 MiB auf einem Computer mit 4 GiB ohne GPU und aus statt
+  256 MiB auf einem boardartigen Computer mit 2 GiB; Computer mit 16 GiB oder mehr behalten ihren Wert. Die drei
+  getrennten Speicherabstände der Kontextregel sind ein benannter Abstand, der native und der Docker-Starter nehmen
+  ihre Optionen aus einer Funktion, und eine geänderte Einstellung startet einen laufenden Server einmal neu
+  (dieselben Einstellungen nie).
 - `2026-10-29 23:31 UTC` · `v3.2.0` **Eine Install-Regel für die ganze RHEL-Familie** ([Design](docs/DESIGN_DE.md#installer-plattformen-und-abhängigkeiten)):
   Fedora, RHEL und CentOS Stream bekommen jetzt die Regel von Rocky Linux, AlmaLinux und Oracle Linux. `install.sh`
   installiert Docker CE aus Dockers Repository für das System, dessen Schlüssel gegen den veröffentlichten

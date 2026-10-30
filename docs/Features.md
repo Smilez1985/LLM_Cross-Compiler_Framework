@@ -1319,8 +1319,19 @@ download is a task of Ditto's local runtime: it waits while a build, a server st
   the build verification, the perplexity check, and on a board the start script, the systemd unit and the checks
   there. The start script's server line is held to the same check as Ditto's command line, and the server's
   `--tools` check is the same command here and on a board.
-- **Context length:** computed from the free memory next to the model (free GPU memory, or free RAM on CPUs, Apple
-  Silicon and integrated GPUs), rounded to 256 tokens, at least 4096 and at most 32768 (`--ctx` sets it).
+- **One memory budget:** before the context, the server's memory is planned once from this computer's measured
+  hardware (`runtime/hardware.py local_budget`): the KV-cache type (`f16`, or `q8_0` when less than 2 GiB of RAM is
+  left next to the model, the same rule as on boards; a quantised cache gets flash attention on `auto`), the prompt
+  cache in RAM (`--cache-ram`: an eighth of the RAM, 256 to 8192 MiB as before, but never more than half of the free
+  RAM left next to the model, its minimum context and a 1 GiB margin for the system; below 64 MiB it is off) and how
+  long the model stays loaded. The server gets one slot (`-np 1`), so Ditto's one conversation has the whole context.
+  `llm-cli ditto cache` shows the values with their soft cap and hard limit; `ditto cache set` and the **Prompt cache**
+  group (AI settings, Ditto > Local Models...) change them. On computers with little RAM the prompt cache is now
+  smaller than in 3.1.0 (4 GiB without a GPU: about 370 MiB instead of 512; 2 GiB boards: off instead of 256 MiB).
+- **Context length:** computed from the free memory next to the model and the prompt cache (free GPU memory, or free
+  RAM on CPUs, Apple Silicon and integrated GPUs) with the KV cache of the chosen type, rounded to 256 tokens, at least
+  4096 and at most 32768 (`--ctx` sets it). After the start the framework reads the server's own `/props` (on
+  127.0.0.1, with the key; it does not wake a sleeping model) and records the slot's real context.
 - **Isolation:** `llama-server` listens on 127.0.0.1 only, on a free port. A new random API key per start reaches it
   only through a key file readable by you, and the framework checks that the server refuses requests without the
   key. An answer on the port counts only while `llama-server` itself listens there: a program that took the free port
@@ -1335,7 +1346,9 @@ download is a task of Ditto's local runtime: it waits while a build, a server st
   `LD_LIBRARY_PATH` and a few more), so no `LLAMA_*` option, no `GGML_BACKEND_PATH` library, no proxy and no key
   reaches it.
 - **GPU offload:** with a GPU build, as many layers as fit go to the GPU.
-- **Idle:** the model is unloaded after 600 idle seconds and reloaded on the next request (`--sleep-idle`).
+- **Idle:** the model is unloaded after 600 idle seconds and reloaded on the next request (`--sleep-idle`, or the
+  setting `local_cache_keep_minutes`; 0 keeps it loaded). A changed budget setting restarts the running server once at
+  the next start; the same settings never restart it.
 - **State and log:** `~/.llm-framework/runtime/llama.cpp/` holds the builds and the server state, which is trusted
   only while that exact process (process ID, start time, program) is alive. The key file is deleted on stop. The
   log `~/.llm-framework/logs/llama-server.log` is rotated at 5 MiB, keeping 3 old logs.

@@ -51,6 +51,7 @@ import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import psutil
@@ -58,11 +59,13 @@ import requests
 from pydantic import BaseModel, Field
 
 from orchestrator.runtime.catalog import GPU_BACKENDS, ModelEntry, RuntimeAsset, RuntimeCatalog, load_catalog
-from orchestrator.runtime.hardware import (BackendChoice, HardwareInfo, Runner, backend_choice, choose_model_tier,
-                                           compute_context, detect_hardware, normalize_platform, select_backend)
+from orchestrator.runtime.hardware import (BackendChoice, CacheBudget, HardwareInfo, Runner,
+                                           CACHE_SETTINGS, KEEP_MINUTES_HARD_LIMIT, backend_choice, cache_number,
+                                           choose_model_tier, compute_context, detect_hardware, local_budget,
+                                           normalize_platform, select_backend)
 from orchestrator.runtime.server_policy import FORBIDDEN_FLAGS, forbidden_in, server_env  # noqa: F401 (re-export)
-from orchestrator.runtime.server_policy import (LOOPBACK, PolicyError, check_server_command, server_command,
-                                                write_key_file)
+from orchestrator.runtime.server_policy import (LOOPBACK, PolicyError, check_server_command, kv_cache_args,
+                                                server_command, write_key_file)
 from orchestrator.utils.download import DownloadError, FileLock, PinnedDownloader
 from orchestrator.utils.download import IntegrityError as DownloadIntegrityError
 from orchestrator.utils.atomic import remove_file, write_private_exclusive
@@ -140,6 +143,16 @@ class LocalEndpoint(BaseModel):
     model: str
     port: int
     pid: int
+    n_ctx: Optional[int] = None   # the context of the server's one slot, as its /props reported it after the start
+
+
+class Props(BaseModel):
+    """What llama-server's GET /props reports (read_props): the context of a slot, the number of slots, its build and
+    whether it sleeps (the model unloaded after the idle time; /props does not wake it)."""
+    n_ctx: Optional[int] = None
+    total_slots: Optional[int] = None
+    build_info: str = ""
+    is_sleeping: Optional[bool] = None
 
 
 class RuntimeStatus(BaseModel):
@@ -157,6 +170,10 @@ class RuntimeStatus(BaseModel):
     model: Optional[str] = None
     tier: Optional[str] = None
     ctx: Optional[int] = None
+    n_ctx_slot: Optional[int] = None                     # the slot's context as /props reported it (-np 1: all of it)
+    kv_cache: Optional[str] = None                       # the KV-cache type the server got (f16, q8_0, q4_0)
+    cache_ram_mib: Optional[int] = None                  # its prompt cache (--cache-ram)
+    build_info: Optional[str] = None                     # the build /props reported
     base_url: Optional[str] = None
     started_at: Optional[str] = None
     log_file: Path
@@ -228,19 +245,71 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def build_server_command(server: Path, model: Path, port: int, key_file: Path, ctx: int, alias: str,
-                         gpu: bool, cache_ram_mib: int, sleep_idle_seconds: Optional[int] = None) -> List[str]:
-    """The complete llama-server command line, from the shared policy (server_policy.server_command): only loopback,
-    only the key file, no web UI, no /slots, offline, and none of the forbidden options (no tools, agent, MCP)."""
-    extra = ["-c", str(ctx), "--cache-ram", str(cache_ram_mib)]
+def server_extra_args(ctx: int, *, gpu: bool, cache_ram_mib: int, kv_cache: Optional[str] = None,
+                      sleep_idle_seconds: Optional[int] = None) -> List[str]:
+    """The options after the fixed ones that both launchers (bare metal and Docker) give Ditto's server, from the one
+    memory budget (hardware.local_budget): the context, one slot (-np 1: the whole context for Ditto's one
+    conversation), the prompt cache in RAM (never negative: -1 would mean no limit), the KV-cache type
+    (server_policy.kv_cache_args) with flash attention on auto (a quantised V cache needs it; llama.cpp switches it on
+    where the backend has it, otherwise the server does not start and says so), the GPU layers and the idle time."""
+    extra = ["-c", str(int(ctx)), "-np", "1", "--cache-ram", str(max(0, int(cache_ram_mib)))]
+    kv = kv_cache_args(kv_cache)
+    if kv:
+        extra += kv + ["-fa", "auto"]
     if gpu:
         extra += ["-ngl", "auto"]  # offload as many layers as fit (llama.cpp's --fit is on by default)
     if sleep_idle_seconds:
         extra += ["--sleep-idle-seconds", str(sleep_idle_seconds)]
+    return extra
+
+
+def build_server_command(server: Path, model: Path, port: int, key_file: Path, ctx: int, alias: str,
+                         gpu: bool, cache_ram_mib: int, sleep_idle_seconds: Optional[int] = None,
+                         kv_cache: Optional[str] = None) -> List[str]:
+    """The complete llama-server command line, from the shared policy (server_policy.server_command): only loopback,
+    only the key file, no web UI, no /slots, offline, and none of the forbidden options (no tools, agent, MCP)."""
     try:
+        extra = server_extra_args(ctx, gpu=gpu, cache_ram_mib=cache_ram_mib, kv_cache=kv_cache,
+                                  sleep_idle_seconds=sleep_idle_seconds)
         return server_command(server, model, port=port, key_file=key_file, alias=alias, extra=extra)
     except PolicyError as e:
         raise LocalRuntimeError(str(e)) from None
+
+
+_RE_BUILD_INFO = re.compile(r"[^A-Za-z0-9 ._:/()+-]")
+
+
+def read_props(endpoint: "LocalEndpoint", session: Optional[requests.Session] = None,
+               timeout: float = 5) -> Optional[Props]:
+    """GET /props of the managed server, on the loopback address only and with its key (the endpoint's key, read from
+    the key file): the slot's context, the number of slots, the build and whether it sleeps. A GET of /props does not
+    wake a sleeping server (llama.cpp, "Sleeping on Idle"), and nothing is ever posted to it (--props stays forbidden).
+    None when the server does not answer or the endpoint is not on this computer."""
+    parts = urlsplit(str(endpoint.base_url))
+    if parts.hostname != LOOPBACK or not endpoint.port:
+        return None
+    local = session
+    if local is None:
+        local = requests.Session()
+        local.trust_env = False  # never through a proxy of the environment
+    try:
+        reply = local.get(f"http://{LOOPBACK}:{int(endpoint.port)}/props", timeout=timeout,
+                          headers={"Authorization": f"Bearer {endpoint.api_key}"})
+        if reply.status_code != 200:
+            return None
+        data = reply.json()
+    except (requests.RequestException, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    settings = data.get("default_generation_settings")
+    n_ctx = settings.get("n_ctx") if isinstance(settings, dict) else None
+    n_ctx = n_ctx if isinstance(n_ctx, int) and not isinstance(n_ctx, bool) and n_ctx > 0 else None
+    slots = data.get("total_slots")
+    sleeping = data.get("is_sleeping")
+    build = _RE_BUILD_INFO.sub("", str(data.get("build_info") or ""))[:80]  # the server's text: short and plain
+    return Props(n_ctx=n_ctx, total_slots=slots if isinstance(slots, int) and not isinstance(slots, bool) else None,
+                 build_info=build, is_sleeping=sleeping if isinstance(sleeping, bool) else None)
 
 
 def popen_options(os_name: str = os.name) -> Dict[str, Any]:
@@ -315,8 +384,10 @@ def read_endpoint(root: Path, docker: Any = None) -> Optional[LocalEndpoint]:
         if not 0 < port < 65536:
             return None
         key = key_file.read_text(encoding="utf-8").strip()
+        n_ctx = state.get("n_ctx_slot")
         return LocalEndpoint(base_url=f"http://{LOOPBACK}:{port}/v1", api_key=key, model=str(state["alias"]),
-                             port=port, pid=int(state.get("pid") or 0))
+                             port=port, pid=int(state.get("pid") or 0),
+                             n_ctx=n_ctx if isinstance(n_ctx, int) and not isinstance(n_ctx, bool) else None)
     except (OSError, KeyError, TypeError, ValueError):
         return None
 
@@ -1296,6 +1367,13 @@ class LocalLLMRuntime:
             status.container = state.get("container_name") if state.get("mode") == "docker" else None
             status.model, status.tier, status.ctx = state.get("alias"), state.get("tier"), state.get("ctx")
             status.started_at = state.get("started_at")
+            for name, key in (("n_ctx_slot", "n_ctx_slot"), ("cache_ram_mib", "cache_ram")):
+                value = state.get(key)
+                setattr(status, name, value if isinstance(value, int) and not isinstance(value, bool) else None)
+            kind = state.get("kv_cache")
+            status.kv_cache = kind if kind in ("f16", "q8_0", "q4_0") else None
+            info = state.get("build_info")
+            status.build_info = _RE_BUILD_INFO.sub("", info)[:80] if isinstance(info, str) and info else None
             status.base_url = f"http://{LOOPBACK}:{state.get('port')}/v1"
             status.healthy = self._health(int(state.get("port") or 0)) == 200
         return status
@@ -1329,7 +1407,8 @@ class LocalLLMRuntime:
             if running:
                 same = (state.get("alias") == model.alias and state.get("server") == str(installed.server)
                         and (ctx is None or state.get("ctx") == ctx)
-                        and (sleep_idle_seconds is None or state.get("sleep_idle_seconds") == idle))
+                        and (sleep_idle_seconds is None or state.get("sleep_idle_seconds") == idle)
+                        and state.get("cache_settings") == self.cache_settings())
                 if same and self._health(running.port) == 200:
                     self._remember_tier(tier, model, remember)
                     return running
@@ -1346,8 +1425,87 @@ class LocalLLMRuntime:
         """The idle time a server gets (--sleep-idle-seconds, 0 = never): the request, else the catalog's; 0 when the
         pinned build has no such option. Recorded in server.json and compared the same way, so a build without the
         option is not restarted on every start that asks for one."""
-        idle = self.catalog.server.sleep_idle_seconds if requested is None else int(requested)
+        if requested is None:
+            keep = self.cache_settings().get("local_cache_keep_minutes", "auto")
+            try:
+                minutes = cache_number("local_cache_keep_minutes", keep)
+            except ValueError:
+                minutes = None
+            if minutes is None:
+                idle = self.catalog.server.sleep_idle_seconds
+            else:
+                idle = 0 if minutes == float("inf") else int(min(minutes, KEEP_MINUTES_HARD_LIMIT)) * 60
+        else:
+            idle = int(requested)
         return idle if self.catalog.llama_cpp.supports("sleep_idle_seconds") else 0
+
+    # --- the one memory budget (hardware.local_budget) ---
+    def cache_settings(self) -> Dict[str, str]:
+        """The person's settings of the server's memory budget (local_cache_ram_mib, local_cache_keep_minutes,
+        local_kv_cache), each "auto" or its value as text; all "auto" without settings. Recorded in server.json, so a
+        change restarts the running server once (and an unchanged one never)."""
+        get = getattr(self.settings, "get", None)
+        out = {}
+        for key in CACHE_SETTINGS:
+            try:
+                value = get(key, "auto") if callable(get) else "auto"
+            except Exception:  # noqa: BLE001 - unreadable settings: the automatic values
+                value = "auto"
+            out[key] = str(value if value not in (None, "") else "auto").strip().lower()
+        return out
+
+    def cache_budget(self, tier: Optional[str] = None, *, refresh: bool = False) -> CacheBudget:
+        """The memory budget of the server this runtime would start now (the model of `tier` or the chosen one, the
+        installed build's GPU, this computer's measured RAM): automatic values, soft caps and hard limits of the
+        settings, and what the launcher would use. For the CLI, the AI settings and MCP get_settings."""
+        hw = self.hardware(refresh=refresh and not self._hardware_given)
+        model, _ = self.resolve_model(tier)
+        installed = None
+        try:
+            installed, _ = self.resolve_installed()
+        except Exception:  # noqa: BLE001 - no build: the CPU's rule (weights and KV cache in RAM)
+            installed = None
+        choice = backend_choice(hw, installed.backend) if installed is not None else None
+        path = self.model_path(model)
+        model_bytes = path.stat().st_size if path.is_file() else (model.size or 0)
+        floor = min(self.catalog.server.ctx_min, model.native_context)
+        return self._budget(hw, choice, model, model_bytes, floor)
+
+    def _budget(self, hw: HardwareInfo, choice: Optional[BackendChoice], model: ModelEntry, model_bytes: int,
+                ctx: int) -> CacheBudget:
+        idle = self.catalog.server.sleep_idle_seconds
+        return local_budget(hw, model_bytes, model.kv_bytes_per_token, ctx, saved=self.cache_settings(),
+                            choice=choice, keep_minutes_default=idle // 60 if idle else 0)
+
+    def _memory_plan(self, model: ModelEntry, model_path: Path, hw: HardwareInfo, choice: Optional[BackendChoice],
+                     ctx: Optional[int]) -> Tuple[int, str, CacheBudget]:
+        """(context, why, budget) of a start, for both launchers: the budget first (KV-cache type and prompt cache,
+        with the minimum context or the one asked for kept free), then the context in what is left (the prompt cache
+        as reserve_bytes), so the same RAM is counted once."""
+        model_bytes = model_path.stat().st_size
+        wanted = None if ctx is None else max(256, min(int(ctx), model.native_context))
+        floor = wanted if wanted is not None else min(self.catalog.server.ctx_min, model.native_context)
+        budget = self._budget(hw, choice, model, model_bytes, floor)
+        if wanted is None:
+            ctx, why = compute_context(model, hw, choice, self.catalog.server, model_bytes=model_bytes,
+                                       kv_kind=budget.kv_cache, reserve_bytes=budget.ram_mib * MIB)
+        else:
+            ctx, why = wanted, "set explicitly"
+        why += f"; KV cache {budget.kv_cache}, prompt cache {budget.ram_mib} MiB"
+        return ctx, why, budget
+
+    def _record_props(self, state: Dict[str, Any], endpoint: LocalEndpoint) -> LocalEndpoint:
+        """After the health check: the slot's context and the build from /props into server.json and the endpoint
+        (a server that does not answer /props keeps both unknown)."""
+        props = read_props(endpoint, self._local)
+        if props is None:
+            return endpoint
+        state.update({"n_ctx_slot": props.n_ctx, "build_info": props.build_info})
+        try:
+            _write_private(self.state_file, json.dumps(state))
+        except OSError as e:
+            self.logger.warning(f"Could not record the server's context ({e.__class__.__name__})")
+        return endpoint.model_copy(update={"n_ctx": props.n_ctx})
 
     def _remember_tier(self, tier: Optional[str], model: ModelEntry, remember: bool) -> None:
         """Records the tier chosen with `start --model` (under the runtime lock, which install() also takes to write
@@ -1363,12 +1521,8 @@ class LocalLLMRuntime:
             choice = select_backend(hw, self.catalog, installed.backend)
         else:
             choice = backend_choice(hw, installed.backend)
-        if ctx is None:
-            ctx, why = compute_context(model, hw, choice, self.catalog.server, model_bytes=model_path.stat().st_size)
-        else:
-            ctx, why = max(256, min(int(ctx), model.native_context)), "set explicitly"
+        ctx, why, budget = self._memory_plan(model, model_path, hw, choice, ctx)
         sleep_idle_seconds = self._idle_seconds(sleep_idle_seconds)
-        cache_ram = max(256, min(8192, hw.ram_total // (8 * MIB)))
         timeout = timeout or self.catalog.server.health_timeout_seconds
 
         again = ("llm-cli ditto runtime install --prebuilt --force" if installed.origin == "prebuilt"
@@ -1377,8 +1531,8 @@ class LocalLLMRuntime:
             key_file, key = write_key_file(self.root)
             port = _free_port()
             cmd = build_server_command(installed.server, model_path, port, key_file, ctx, model.alias,
-                                       gpu=installed.backend in GPU_BACKENDS, cache_ram_mib=cache_ram,
-                                       sleep_idle_seconds=sleep_idle_seconds or None)
+                                       gpu=installed.backend in GPU_BACKENDS, cache_ram_mib=budget.ram_mib,
+                                       sleep_idle_seconds=sleep_idle_seconds or None, kv_cache=budget.kv_cache)
             env = server_env()
             try:
                 check_server_command(cmd)  # the shared policy, once more right before the start (decision D22)
@@ -1405,6 +1559,7 @@ class LocalLLMRuntime:
                 "pid": proc.pid, "create_time": created, "port": port, "server": str(installed.server),
                 "variant": installed.variant, "origin": installed.origin, "build_id": installed.build_id,
                 "tier": model.tier, "alias": model.alias, "ctx": ctx, "sleep_idle_seconds": sleep_idle_seconds,
+                "cache_ram": budget.ram_mib, "kv_cache": budget.kv_cache, "cache_settings": self.cache_settings(),
                 "key_file": str(key_file), "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
             # Written at once (a crash still leaves the server recorded), but marked: LLMClient in every other process
             # reads server.json, and until llama-server is known to listen on the port, another program may answer
@@ -1426,8 +1581,8 @@ class LocalLLMRuntime:
                     self._stop_locked()
                     raise LocalRuntimeError(str(e)) from e
                 confirm()  # where the connection table cannot be read: the checks above stand in for it
-                return LocalEndpoint(base_url=f"http://{LOOPBACK}:{port}/v1", api_key=key, model=model.alias,
-                                     port=port, pid=proc.pid)
+                return self._record_props(state, LocalEndpoint(base_url=f"http://{LOOPBACK}:{port}/v1", api_key=key,
+                                                               model=model.alias, port=port, pid=proc.pid))
             tail = self._log_tail()
             self._stop_locked()
             if outcome == "foreign" or (outcome == "exited" and "couldn't bind" in tail):
@@ -1468,7 +1623,8 @@ class LocalLLMRuntime:
             if running:
                 same = (state.get("mode") == "docker" and state.get("alias") == model.alias
                         and state.get("image_id") == image.image_id and (ctx is None or state.get("ctx") == ctx)
-                        and (sleep_idle_seconds is None or state.get("sleep_idle_seconds") == idle))
+                        and (sleep_idle_seconds is None or state.get("sleep_idle_seconds") == idle)
+                        and state.get("cache_settings") == self.cache_settings())
                 if same and self._health(running.port) == 200:
                     self._remember_tier(tier, model, remember)
                     return running
@@ -1489,16 +1645,13 @@ class LocalLLMRuntime:
         backend = str(image.labels.get(cs.LABEL_BACKEND, "cpu"))
         gpu = cs.gpu_passthrough(docker, hw, backend)
         choice = backend_choice(hw, backend if gpu.used else "cpu")
-        if ctx is None:
-            ctx, why = compute_context(model, hw, choice, self.catalog.server, model_bytes=model_path.stat().st_size)
-        else:
-            ctx, why = max(256, min(int(ctx), model.native_context)), "set explicitly"
+        ctx, why, budget = self._memory_plan(model, model_path, hw, choice, ctx)
         sleep_idle_seconds = self._idle_seconds(sleep_idle_seconds)
-        extra = ["-c", str(ctx), "--cache-ram", str(max(256, min(8192, hw.ram_total // (8 * MIB))))]
-        if gpu.used:
-            extra += ["-ngl", "auto"]
-        if sleep_idle_seconds:
-            extra += ["--sleep-idle-seconds", str(sleep_idle_seconds)]
+        try:
+            extra = server_extra_args(ctx, gpu=gpu.used, cache_ram_mib=budget.ram_mib, kv_cache=budget.kv_cache,
+                                      sleep_idle_seconds=sleep_idle_seconds or None)
+        except PolicyError as e:
+            raise LocalRuntimeError(str(e)) from None
         timeout = timeout or self.catalog.server.health_timeout_seconds
         name = cs.container_name()
         for other in docker.containers():  # a server container of an earlier start that nobody recorded
@@ -1532,11 +1685,13 @@ class LocalLLMRuntime:
             except (OSError, ValueError):
                 pass
         docker.follow_logs(container_id, write)
-        _write_private(self.state_file, json.dumps({
+        state = {
             "mode": "docker", "container_id": container_id, "container_name": name, "image_id": image.image_id,
             "build_id": image.labels.get(cs.LABEL_BUILD), "port": port, "variant": backend, "origin": "docker",
             "tier": model.tier, "alias": model.alias, "ctx": ctx, "sleep_idle_seconds": sleep_idle_seconds,
-            "key_file": str(key_file), "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}))
+            "cache_ram": budget.ram_mib, "kv_cache": budget.kv_cache, "cache_settings": self.cache_settings(),
+            "key_file": str(key_file), "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        _write_private(self.state_file, json.dumps(state))
         outcome = self._wait_container_healthy(container_id, port, timeout)
         if outcome == "ok":
             try:
@@ -1544,8 +1699,8 @@ class LocalLLMRuntime:
             except (LocalRuntimeError, requests.RequestException) as e:
                 self._stop_locked()
                 raise LocalRuntimeError(str(e)) from e
-            return LocalEndpoint(base_url=f"http://{LOOPBACK}:{port}/v1", api_key=key, model=model.alias, port=port,
-                                 pid=0)
+            return self._record_props(state, LocalEndpoint(base_url=f"http://{LOOPBACK}:{port}/v1", api_key=key,
+                                                           model=model.alias, port=port, pid=0))
         tail = self._log_tail()
         self._stop_locked()
         what = "did not become ready in time" if outcome == "timeout" else "ended during startup"

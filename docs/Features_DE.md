@@ -1451,9 +1451,21 @@ warten auf ihn.
   Server, die Prüfung nach dem Build, die Perplexity-Prüfung und auf einem Board das Startskript, die systemd-Unit und
   die Prüfungen dort. Die Server-Zeile des Startskripts wird mit derselben Prüfung gehalten wie Dittos Befehlszeile,
   und die `--tools`-Prüfung des Servers ist hier und auf einem Board derselbe Befehl.
-- **Kontextlänge:** aus dem freien Speicher neben dem Modell berechnet (freier GPU-Speicher, oder freier RAM bei
-  CPUs, Apple Silicon und integrierten GPUs), auf 256 Tokens gerundet, mindestens 4096 und höchstens 32768 (`--ctx`
-  legt sie fest).
+- **Ein Speicherbudget:** Vor dem Kontext wird der Speicher des Servers einmal aus der gemessenen Hardware dieses
+  Computers geplant (`runtime/hardware.py local_budget`): der KV-Cache-Typ (`f16`, oder `q8_0`, wenn neben dem Modell
+  weniger als 2 GiB RAM übrig sind, dieselbe Regel wie auf Boards; ein quantisierter Cache bekommt Flash Attention auf
+  `auto`), der Prompt-Cache im RAM (`--cache-ram`: ein Achtel des RAMs, 256 bis 8192 MiB wie bisher, aber nie mehr als
+  die Hälfte des freien RAMs, der neben dem Modell, seinem Mindestkontext und 1 GiB Abstand für das System übrig ist;
+  unter 64 MiB ist er aus) und wie lange das Modell geladen bleibt. Der Server bekommt einen Slot (`-np 1`), damit
+  Dittos eine Unterhaltung den ganzen Kontext hat. `llm-cli ditto cache` zeigt die Werte mit weicher und harter Grenze;
+  `ditto cache set` und die Gruppe **Prompt-Cache** (KI-Einstellungen, Ditto > Lokale Modelle...) ändern sie. Auf
+  Computern mit wenig RAM ist der Prompt-Cache jetzt kleiner als in 3.1.0 (4 GiB ohne GPU: etwa 370 MiB statt 512;
+  Boards mit 2 GiB: aus statt 256 MiB).
+- **Kontextlänge:** aus dem freien Speicher neben dem Modell und dem Prompt-Cache berechnet (freier GPU-Speicher, oder
+  freier RAM bei CPUs, Apple Silicon und integrierten GPUs) mit dem KV-Cache des gewählten Typs, auf 256 Tokens
+  gerundet, mindestens 4096 und höchstens 32768 (`--ctx` legt sie fest). Nach dem Start liest das Framework das
+  eigene `/props` des Servers (auf 127.0.0.1, mit dem Schlüssel; es weckt kein schlafendes Modell) und hält den
+  wirklichen Kontext des Slots fest.
 - **Abschottung:** `llama-server` lauscht nur auf 127.0.0.1, auf einem freien Port. Ein neuer, zufälliger
   API-Schlüssel pro Start erreicht ihn nur über eine Schlüsseldatei, die nur du lesen kannst, und das Framework
   prüft, dass der Server Anfragen ohne Schlüssel ablehnt. Eine Antwort auf dem Port zählt nur, solange `llama-server`
@@ -1472,7 +1484,8 @@ warten auf ihn.
   Schlüssel.
 - **GPU-Auslagerung:** Mit einem GPU-Build kommen so viele Schichten auf die GPU, wie hineinpassen.
 - **Leerlauf:** Das Modell wird nach 600 Sekunden ohne Anfrage entladen und bei der nächsten Anfrage wieder geladen
-  (`--sleep-idle`).
+  (`--sleep-idle`, oder die Einstellung `local_cache_keep_minutes`; 0 hält es geladen). Eine geänderte
+  Budget-Einstellung startet den laufenden Server beim nächsten Start einmal neu; dieselben Einstellungen nie.
 - **Zustand und Log:** `~/.llm-framework/runtime/llama.cpp/` enthält die Builds und den Serverzustand, dem nur
   vertraut wird, solange genau dieser Prozess (Prozess-ID, Startzeit, Programm) lebt. Die Schlüsseldatei wird beim
   Stoppen gelöscht. Das Log `~/.llm-framework/logs/llama-server.log` wird bei 5 MiB rotiert; 3 alte Logs bleiben.

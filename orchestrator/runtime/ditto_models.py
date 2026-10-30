@@ -115,5 +115,55 @@ def offline_refusal(rt: Any, model: Any, lang: Optional[str] = None) -> Optional
                          ui_text("ditto_models.offline.none", lang))
 
 
-__all__ = ["NOTES", "STATES", "ModelRow", "ModelsOverview", "gib", "model_to_download", "models_overview",
-           "offline_refusal"]
+@dataclass
+class CacheRow:
+    """One setting of the server's memory budget as `ditto cache` shows it."""
+    key: str
+    saved: str                 # auto or the person's value
+    auto: Any                  # what auto stands for on this computer
+    used: Any                  # what the next start uses
+    soft_cap: Optional[int]
+    hard_limit: Optional[int]
+    reason: str
+    over_soft_cap: bool
+
+
+@dataclass
+class CacheView:
+    """The memory budget of Ditto's server (hardware.local_budget) for `ditto cache`, the AI settings' Prompt cache
+    group and Ditto > Local Models: one row per setting, whether values above the soft cap were accepted, and what the
+    running server got (from server.json; empty when none runs)."""
+    rows: List[CacheRow]
+    over_cap_ok: bool
+    budget: Any
+    running: dict
+
+    def to_dict(self) -> dict:
+        return {"settings": [vars(row) for row in self.rows], "over_cap_ok": self.over_cap_ok,
+                "running": self.running}
+
+
+def cache_overview(rt: Any) -> CacheView:
+    """The memory budget of the server `rt` (a LocalLLMRuntime) would start now: the person's settings, their
+    automatic values for this computer, the soft caps and hard limits, and the running server's values. Probes the
+    hardware (seconds); numbers and words only, no folder."""
+    budget = rt.cache_budget()
+    saved = rt.cache_settings()
+    used = {"local_cache_ram_mib": budget.ram_mib, "local_cache_keep_minutes": budget.keep_minutes,
+            "local_kv_cache": budget.kv_cache}
+    rows = [CacheRow(key=key, saved=saved.get(key, "auto"), auto=budget.auto.get(key), used=used[key],
+                     soft_cap=budget.soft_caps.get(key), hard_limit=budget.hard_limits.get(key),
+                     reason=budget.reasons.get(key, ""), over_soft_cap=key in budget.over_soft_cap)
+            for key in used]
+    get = getattr(getattr(rt, "settings", None), "get", None)
+    status = rt.status()
+    running = {}
+    if status.running:
+        running = {"cache_ram_mib": status.cache_ram_mib, "kv_cache": status.kv_cache, "n_ctx_slot": status.n_ctx_slot,
+                   "ctx": status.ctx}
+    return CacheView(rows=rows, over_cap_ok=bool(get("local_cache_over_cap_ok", False)) if callable(get) else False,
+                     budget=budget, running=running)
+
+
+__all__ = ["NOTES", "STATES", "CacheRow", "CacheView", "ModelRow", "ModelsOverview", "cache_overview", "gib",
+           "model_to_download", "models_overview", "offline_refusal"]

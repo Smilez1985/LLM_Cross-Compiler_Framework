@@ -2628,6 +2628,81 @@ def models_download(ctx: FrameworkContext, tier: Optional[str], yes: bool):
     console.print(f"[green]Verified and saved: {escape(str(path))}[/green]")
 
 
+CACHE_NAMES = {"ram": "local_cache_ram_mib", "keep": "local_cache_keep_minutes", "kv": "local_kv_cache",
+               "over-cap-ok": "local_cache_over_cap_ok"}
+
+
+@ditto.group('cache', invoke_without_command=True)
+@click.option('--json', 'as_json', is_flag=True, help='Print the budget as JSON')
+@click.pass_context
+def ditto_cache(click_ctx, as_json: bool):
+    """The memory budget of Ditto's local server: prompt cache, keep time, KV cache (same as 'cache show')"""
+    if click_ctx.invoked_subcommand is None:
+        click_ctx.invoke(ditto_cache_show, as_json=as_json)
+
+
+@ditto_cache.command('show')
+@click.option('--json', 'as_json', is_flag=True, help='Print the budget as JSON')
+@pass_context
+def ditto_cache_show(ctx: FrameworkContext, as_json: bool = False):
+    """The saved values, what auto stands for on this computer, the soft caps and hard limits, the running server"""
+    from orchestrator.runtime.ditto_models import cache_overview
+    view = cache_overview(_local_runtime(ctx))  # the AI settings' Prompt cache group shows the same
+    if as_json:
+        click.echo(json.dumps(view.to_dict(), indent=2, sort_keys=True))
+        return
+    table = Table(title="Ditto's local server: memory budget")
+    for column in ("Setting", "Saved", "Automatic here", "Used at the next start", "Soft cap", "Hard limit"):
+        table.add_column(column)
+    for row in view.rows:
+        saved = escape(row.saved) + (" [yellow](above the soft cap)[/yellow]" if row.over_soft_cap else "")
+        table.add_row(escape(row.key), saved, escape(str(row.auto)), escape(str(row.used)),
+                      "-" if row.soft_cap is None else str(row.soft_cap),
+                      "-" if row.hard_limit is None else str(row.hard_limit))
+    console.print(table)
+    for row in view.rows:
+        console.print(f"{escape(row.key)}: {escape(row.reason)}")
+    if view.running:
+        console.print("Running server: " + ", ".join(f"{k} {escape(str(v))}" for k, v in view.running.items()
+                                                       if v is not None))
+    console.print("Change a value: llm-cli ditto cache set NAME VALUE (auto, or a number; kv: f16, q8_0, q4_0)")
+
+
+@ditto_cache.command('set')
+@click.argument('name')
+@click.argument('value')
+@click.option('--yes-over-cap', is_flag=True, help='Accept a value above this computer\'s soft cap without asking')
+@pass_context
+def ditto_cache_set(ctx: FrameworkContext, name: str, value: str, yes_over_cap: bool):
+    """Set a value of the memory budget (NAME: local_cache_ram_mib, local_cache_keep_minutes, local_kv_cache,
+    local_cache_over_cap_ok, or ram, keep, kv, over-cap-ok; VALUE: auto or the value)"""
+    from orchestrator.llm.settings_change import CACHE_OVER_CAP_OK, AISettingsChange
+    key = CACHE_NAMES.get(name, name)
+    rt = _local_runtime(ctx)
+    config = rt.settings
+    if key == CACHE_OVER_CAP_OK:
+        value = str(value).strip().lower() in ("1", "true", "yes", "on")
+    try:
+        change = AISettingsChange.cache_change({key: value}, rt.cache_budget())
+    except (KeyError, ValueError) as e:
+        console.print(f"[red]{escape(str(e.args[0] if isinstance(e, KeyError) else e))}[/red]")
+        sys.exit(2)
+    problems = change.cache_problems()
+    if problems:
+        console.print(f"[red]{escape(problems[0].message)}[/red]")
+        sys.exit(2)
+    for warning in change.cache_warnings(accepted=bool(config.get(CACHE_OVER_CAP_OK, False))):
+        console.print(f"[yellow]{escape(warning)}[/yellow]")
+        if not yes_over_cap and not click.confirm("Set it anyway?", default=False):
+            console.print("Nothing was changed.")
+            return
+    saved = change.apply_cache(config)
+    shown = str(value).lower() if isinstance(value, bool) else value
+    console.print(f"[green]{escape(key)} = {escape(str(shown))}[/green]"
+                  + ("" if saved else " (for this run only: the settings could not be saved)"))
+    console.print("A running server takes it at its next start (llm-cli ditto runtime start restarts it once).")
+
+
 @ditto.command('setup')
 @pass_context
 def ditto_setup(ctx: FrameworkContext):

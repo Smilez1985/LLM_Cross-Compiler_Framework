@@ -551,6 +551,7 @@ TEXT_MODULES += ("orchestrator.utils.l10n_deploy",)   # Deployment tab and hardw
 TEXT_MODULES += ("orchestrator.utils.l10n_build",)   # Build menu, File > Settings..., the Builder, the module wizard
 TEXT_MODULES += ("orchestrator.utils.l10n_ditto_runtime",)   # Ditto > Local Runtime...
 TEXT_MODULES += ("orchestrator.utils.l10n_ditto_models",)   # Ditto > Local Models..., Evaluation..., chat options
+TEXT_MODULES += ("orchestrator.utils.l10n_prompt_cache",)   # the Prompt cache group (local server's memory budget)
 # Wave 6 (chain a0 pre-registers every planned module; one that does not exist yet is skipped): the menu bar and tabs,
 # the application shell, the AI activity, the Hugging Face browser, the Ditto setup guide and the glossary (chain
 # f-words: glossary, hover card, error box, sizes, du/Sie).
