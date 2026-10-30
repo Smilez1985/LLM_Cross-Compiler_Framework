@@ -22,7 +22,8 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   package's `MANIFEST.json` (`hardware.cpu_features`), `llm-cli runtime device plan`, the Boards window and the
   deploy facts over MCP name the features the build uses and those the board has but the build cannot use, each
   with its reason (SME with a compiler older than GCC 14 or Clang 18, BF16 on ARM, which the pin has no kernel
-  for). A board of a system the recipe does not plan yet is refused with the features its probe found.
+  for, and a tag without the one it builds on, such as `+sve2` without `+sve` or `+i8mm` on an armv8.0 board).
+  A board of a system the recipe does not plan yet is refused with the features its probe found.
 
 ### Fixed
 - `2026-10-30 13:26 UTC` · `v3.3.0` **RK3566, RK3568 and RK3588 board packages are built with dotprod and fp16 again** ([design](docs/DESIGN.md#targets-hardware-and-templates)):
