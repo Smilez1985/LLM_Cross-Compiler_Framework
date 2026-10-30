@@ -420,10 +420,13 @@ class TestOlderCopiesAndRemovedFiles:
     @pytest.mark.skipif(not hasattr(os, "link"), reason="no hard links on this system")
     def test_on_windows_the_ntfs_change_time_tells_the_very_file_put_back(self, tmp_path, monkeypatch):
         """Windows gives the creation time as st_ctime, which a hard link keeps; there the identity carries NTFS's
-        own change time (windows_change_time). Here it is stood in for by this system's change time, which a rename
-        moves as NTFS's does: the hard-link restore is refused through the Windows way too."""
+        own change time (windows_change_time). On Windows the real one is read; elsewhere it is stood in for by this
+        system's change time, which a rename moves as NTFS's does: the hard-link restore is refused through the Windows
+        way too. (Windows' st_ctime is the creation time, which the hard link keeps: as the stand-in there it let the
+        restore through, so the Windows job never checked the real change time.)"""
         monkeypatch.setattr(signing, "_POSIX", False)
-        monkeypatch.setattr(signing, "windows_change_time", lambda path: os.stat(path).st_ctime_ns)
+        if os.name != "nt":
+            monkeypatch.setattr(signing, "windows_change_time", lambda path: os.stat(path).st_ctime_ns)
         slots, anchor = memory_anchor()
         server = TokenStore(tmp_path, key=KEY, anchor=anchor)
         token = server.add("laptop")

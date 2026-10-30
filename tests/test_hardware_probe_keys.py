@@ -807,6 +807,9 @@ class TestHailoTables:
 
 class TestHailoAccess:
 
+    # A sysroot of a Linux board: its PCI folders are named by the device's address (0000:01:00.0), which NTFS
+    # cannot hold (WinError 123), so it is built on POSIX only, as every other sysroot test here.
+    @POSIX_ONLY
     def test_needs_root_when_the_node_cannot_be_opened(self, tmp_path, monkeypatch):
         """The same rule as TestHailoMachines.test_node_this_user_cannot_open, also where the tests run as root."""
         root = board(tmp_path)
@@ -957,6 +960,7 @@ class TestVendorRuntimes:
         assert profile.items_of("ROCM_GFX_TARGETS") == ["gfx1103", "gfx942"]
         assert [g.get("GFX_TARGET") for g in profile.gpus()] == ["gfx1103"]
 
+    @POSIX_ONLY  # the sysroot's PCI folders (0000:00:02.0) cannot exist on NTFS, as above
     def test_nothing_is_written_without_the_files(self, tmp_path):
         values = py_probe(make_sysroot(tmp_path, "intel"))
         for key in ("JETSON_L4T_VERSION", "JETSON_JETPACK_VERSION", "CUDA_TOOLKIT_VERSION", "TENSORRT_VERSION",

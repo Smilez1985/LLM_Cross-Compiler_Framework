@@ -67,7 +67,8 @@ def test_the_trust_options_stay_on_the_command_line(tmp_path):
         assert pinned in values, pinned
     assert f"UserKnownHostsFile={transport.openssh_file(ssh_trust.known_hosts_path(state))}" in values
     private, _ = ssh_trust.client_key(state)
-    assert transport.key_file_of(options) == str(private) and "-i" not in options
+    # As OpenSSH names it: a Windows path with forward slashes (transport.openssh_file), here and on POSIX the same.
+    assert transport.key_file_of(options) == private.as_posix() and "-i" not in options
 
 
 def test_a_percent_in_the_framework_s_folder_is_written_twice_where_openssh_expands_tokens(tmp_path):
@@ -80,9 +81,9 @@ def test_a_percent_in_the_framework_s_folder_is_written_twice_where_openssh_expa
     known = next(v for v in pairs(options) if v.startswith("UserKnownHostsFile="))
     key = next(v for v in pairs(options) if v.startswith("IdentityFile="))
     assert "a%%u b" in known and "a%%u b" in key and "a%u b" not in known.replace("%%", "")
-    assert options[1] == str(ssh_config.config_path(state)) and "%%" not in options[1]
+    assert options[1] == ssh_config.config_path(state).as_posix() and "%%" not in options[1]   # forward slashes
     private, _ = ssh_trust.client_key(state)
-    assert transport.key_file_of(options) == str(private), "OpenSSH names the real file in what it prints"
+    assert transport.key_file_of(options) == private.as_posix(), "OpenSSH names the real file in what it prints"
     assert ssh_config.tokens("50%") == "50%%" and ssh_config.tokens("plain") == "plain"
 
 

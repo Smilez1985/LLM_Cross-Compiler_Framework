@@ -300,9 +300,12 @@ class TestProbes:
         assert [g.name for g in info.gpus] == ["AMD Radeon RX 7900 XTX"]
         assert info.gpus[0].vram_mib == 25753026560 // MIB and info.vulkan and info.arch == "x86_64"
 
-    def test_vulkaninfo_with_only_a_software_renderer_means_no_gpu_driver(self, tmp_path):
+    def test_vulkaninfo_with_only_a_software_renderer_means_no_gpu_driver(self, tmp_path, monkeypatch):
         # The loader is installed (vulkaninfo runs), but no GPU has a Vulkan driver: the Vulkan build would only find
         # llvmpipe, so the CPU build is the honest choice. Without vulkaninfo the loader still counts (next test).
+        # This simulated Linux machine has glibc 2.39 whatever the test runs on (as in the test of the glibc archive
+        # below): on Windows (no os.confstr) the C library read as unknown and no prebuilt archive was offered.
+        monkeypatch.setattr(os, "confstr", lambda name: "glibc 2.39", raising=False)
         root = amd_sysfs(tmp_path, card="card0", device="0x744c", vram=24 * GIB, gfx_version=110000)
         info = detect_hardware(FakeRunner(vulkaninfo=(0, VULKAN_SOFTWARE_ONLY, "")), system="Linux",
                                machine="x86_64", memory=(32 * GIB, 24 * GIB), sysfs_root=root, rocm_globs=(),
