@@ -1,4 +1,4 @@
-Version 3.1.0 · Stand 2026-10-29
+Version 3.2.0 · Stand 2026-10-29
 
 [English](BLUEPRINT.md) · **Deutsch**
 
@@ -50,7 +50,7 @@ Jeder alte Anker steht hier mit seinem neuen Ort.
 | <a id="roadmap"></a>`#roadmap` | [ROADMAP_DE](ROADMAP_DE.md) |
 | <a id="310---ditto-neubau-anmeldung-und-lokale-ki-in-arbeit"></a>`#310---ditto-neubau-anmeldung-und-lokale-ki-in-arbeit` | [ROADMAP_DE](ROADMAP_DE.md) |
 | <a id="als-nächstes---build-dienst-warteschlange-und-modi-geplant-beginnt-direkt-nach-der-architektur-konsolidierung"></a>`#als-nächstes---build-dienst-warteschlange-und-modi-geplant-beginnt-direkt-nach-der-architektur-konsolidierung` | [ROADMAP_DE: Als Nächstes - Build-Dienst, Warteschlange und Modi (geplant; beginnt direkt nach der Architektur-Konsolidierung)](ROADMAP_DE.md#als-nächstes---build-dienst-warteschlange-und-modi-geplant-beginnt-direkt-nach-der-architektur-konsolidierung) |
-| <a id="320---laufzeit-auf-dem-gerät-und-die-hardware-des-maintainers-geplant"></a>`#320---laufzeit-auf-dem-gerät-und-die-hardware-des-maintainers-geplant` | [ROADMAP_DE: 3.2.0 - Dittos Kontext, das Board-Bündel, die Laufzeit auf dem Gerät und mehr Hardware (in Arbeit)](ROADMAP_DE.md#320---dittos-kontext-das-board-bündel-die-laufzeit-auf-dem-gerät-und-mehr-hardware-in-arbeit) |
+| <a id="320---laufzeit-auf-dem-gerät-und-die-hardware-des-maintainers-geplant"></a>`#320---laufzeit-auf-dem-gerät-und-die-hardware-des-maintainers-geplant` | [ROADMAP_DE: 3.2.x - Dittos Kontext, das Board-Bündel, die Laufzeit auf dem Gerät und mehr Hardware (in Arbeit)](ROADMAP_DE.md#32x---dittos-kontext-das-board-bündel-die-laufzeit-auf-dem-gerät-und-mehr-hardware-in-arbeit) |
 | <a id="330---lora-und-große-modelle-geplant"></a>`#330---lora-und-große-modelle-geplant` | [ROADMAP_DE: 3.3.0 - LoRA und große Modelle (geplant)](ROADMAP_DE.md#330---lora-und-große-modelle-geplant) |
 | <a id="340---lieferkette-und-community-geplant"></a>`#340---lieferkette-und-community-geplant` | [ROADMAP_DE: 3.4.0 - Lieferkette und Community (geplant)](ROADMAP_DE.md#340---lieferkette-und-community-geplant) |
 | <a id="rust-teile-geplant"></a>`#rust-teile-geplant` | [ROADMAP_DE: Rust-Teile (geplant)](ROADMAP_DE.md#rust-teile-geplant) |

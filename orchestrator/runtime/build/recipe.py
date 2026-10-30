@@ -388,16 +388,222 @@ def refused_option(name: str, value: Optional[str]) -> Optional[str]:
     return None
 
 
-def check_download_options(options: Mapping[str, str]) -> None:
+def check_download_options(options: Mapping[str, str], prefetched: Sequence[str] = ()) -> None:
     """Refuses options that would let configure or build download anything (and a server with subprocesses): every
-    option of NEVER_SET that is set, and every option a build must set to its value (refused_option)."""
+    option of NEVER_SET that is set, and every option a build must set to its value (refused_option). An option whose
+    dependency llmcf fetched before the build and mounts read-only (`prefetched`: the dependency names of
+    orchestrator/runtime/build/deps.py, DEPENDENCY_OF_OPTION) is no download: the build reads the mounted copy."""
     for name in NEVER_SET:
-        if name in options:
+        if name in options and DEPENDENCY_OF_OPTION.get(name) not in prefetched:
             raise PlanError(refused_option(name, options[name]))
     for name in (*DOWNLOAD_OPTIONS_OFF, "FETCHCONTENT_FULLY_DISCONNECTED", "LLAMA_SUBPROCESS"):
+        if DEPENDENCY_OF_OPTION.get(name) in prefetched and name in options:
+            continue
         problem = refused_option(name, options.get(name))
         if problem:
             raise PlanError(problem)
+
+
+# --- the CMake flags of a target module (DECISIONS round 25 Q6) ---------------------------------------------------
+# One verdict for every place that judges a module's CMake flags: the module generator (validate_module_data), the
+# folder check of a target others build (module_generator.validate_target_folder: config_module.sh and a Dockerfile's
+# LLAMA_CMAKE_ARGS), the build plan and the AI's facts (Core/build_plan.py, Core/module_flags.py). The shell's
+# module_flag_verdicts of targets/*/modules/target_module.sh is the last check inside the build container and gives
+# the same verdicts (tests/test_module_flags.py runs both over one list, tests/data/cmake_flag_vectors.json).
+#
+# Allowed: -DNAME=VALUE (also -D NAME=VALUE and -DNAME:TYPE=VALUE) and CMake's own -W words. Never: what makes CMake
+# load code or another toolchain (a project include, a toolchain file, CMAKE_MODULE_PATH, a rules override, -C, -P,
+# a preset), the source and build folders (-S, -B: the plan's), what only llmcf's dependency cache sets
+# (FETCHCONTENT_*), and CMAKE_PREFIX_PATH outside the build container. A valid CMake option that is not on the
+# allowlist is no refusal: it is the person's decision (verdict "decision", with what it does), made per module
+# version and flag set (Core/module_flags.py) - an AI-started build stops with needs_person.
+
+# Each dependency of the pinned llama.cpp that llmcf can fetch before the build, by the option that needs it
+# (orchestrator/runtime/build/deps.py DEPENDENCIES holds the pins; tests/test_build_deps.py keeps the two equal).
+DEPENDENCY_OF_OPTION: Mapping[str, str] = {
+    "LLAMA_BUILD_BORINGSSL": "BORINGSSL",
+    "LLAMA_BUILD_LIBRESSL": "LIBRESSL",
+    "GGML_CPU_KLEIDIAI": "KLEIDIAI",
+}
+
+# Variables that make CMake load code or pick another toolchain, beside SCRIPT_VARIABLE_RE (cmake-variables(7)).
+CODE_VARIABLES: Mapping[str, str] = {
+    "CMAKE_TOOLCHAIN_FILE": "names a module toolchain file; the build plan's toolchain file for the board is the one "
+                            "the build uses",
+    "CMAKE_MODULE_PATH": "makes CMake load CMake modules from other folders, which can set any option",
+    "CMAKE_USER_MAKE_RULES_OVERRIDE": "makes CMake run a CMake file, which can set any option",
+}
+_RULES_OVERRIDE_RE = re.compile(r"^CMAKE_USER_MAKE_RULES_OVERRIDE(?:_[A-Za-z]+)?$")
+# CMake's own warning switches (cmake(1) -W...): the only -W words; a compiler warning belongs in the C flags.
+CMAKE_WARNING_RE = re.compile(r"^-W(?:no-)?(?:error=)?(?:dev|deprecated)$")
+# Switches that take the next word as their value when it is not attached (-G Ninja, -GNinja).
+_PAIRED = ("-D", "-U", "-G", "-T", "-A", "-C", "-P", "-S", "-B")
+# Valid CMake switches outside the allowlist: what each does, in the person's words (the warning explains it).
+DECISION_SWITCHES: Mapping[str, str] = {
+    "-G": "chooses another build tool (generator) instead of the plan's; the programs are the same, only the way "
+          "they are built changes, and the image must have that tool",
+    "-T": "chooses a toolset of the generator (Visual Studio, Xcode); on Linux builds it has no use",
+    "-A": "chooses a platform of the generator (Visual Studio); on Linux builds it has no use",
+    "-U": "removes entries from the CMake cache; the build starts from a fresh cache anyway",
+    "--fresh": "starts from a fresh CMake cache; the build does that anyway",
+    "--log-level": "changes how much CMake prints while it configures; the programs stay the same",
+    "--log-context": "adds context to CMake's messages; the programs stay the same",
+    "--debug-output": "makes CMake print debug output; the programs stay the same",
+    "--debug-find": "makes CMake print how it looks for packages; the programs stay the same",
+    "--trace": "makes CMake print every line it runs (a very long log); the programs stay the same",
+    "--trace-expand": "makes CMake print every line it runs with its variables expanded (a very long log)",
+    "--warn-uninitialized": "warns about variables used before they are set; the programs stay the same",
+    "--no-warn-unused-cli": "hides the warning about command-line variables nobody reads",
+    "--check-system-vars": "also warns about problems in the system's CMake files",
+    "--compile-no-warning-as-error": "ignores COMPILE_WARNING_AS_ERROR of the project",
+    "--install-prefix": "changes the install folder; the package takes the programs from the build folder, so it has "
+                        "no effect on the package",
+}
+# Valid CMake switches that are never allowed in a module's flags.
+REFUSED_SWITCHES: Mapping[str, str] = {
+    "-C": "CMake runs a script with -C or -P, and a script can set any option",
+    "-P": "CMake runs a script with -C or -P, and a script can set any option",
+    "-S": "-S and -B choose the source and build folders, which the build plan sets",
+    "-B": "-S and -B choose the source and build folders, which the build plan sets",
+    "--preset": "a preset file can set any option and a toolchain",
+    "--toolchain": "names a module toolchain file; the build plan's toolchain file for the board is the one the build "
+                   "uses",
+    "--build": "runs another CMake mode, not a configure option",
+    "--install": "runs another CMake mode, not a configure option",
+    "--open": "runs another CMake mode, not a configure option",
+    "-E": "runs another CMake mode, not a configure option",
+    "-N": "configures nothing (view mode)",
+    "--graphviz": "writes files outside the build folder",
+    "--trace-redirect": "writes files outside the build folder",
+    "--profiling-output": "writes files outside the build folder",
+    "--profiling-format": "writes files outside the build folder",
+    "--debugger": "waits for a debugger",
+    "--debugger-pipe": "waits for a debugger",
+}
+FLAG_CONTEXTS = ("module", "package", "call")
+_RE_CONTAINER_PATHS = re.compile(r"^/[A-Za-z0-9._+/-]{0,255}$", re.ASCII)
+
+
+@dataclass(frozen=True)
+class FlagVerdict:
+    """One CMake option of a module's flags as cmake reads it. `word`: the option as it is shown (-D NAME=V joined to
+    -DNAME=V, -G Ninja with its value), `words`: the words it came from, `verdict`: allowed, refused or decision
+    (valid, outside the allowlist: the person decides), `reason`: why (refused) or what it does (decision), `kind`:
+    download (it would let llama.cpp download, or run a script that can), rule (another refusal), or ""."""
+    word: str
+    words: Tuple[str, ...]
+    verdict: str
+    reason: str = ""
+    kind: str = ""
+    name: str = ""
+
+
+def _pairs(words: Sequence[str]) -> List[Tuple[str, ...]]:
+    out: List[Tuple[str, ...]] = []
+    items = [str(w) for w in words]
+    i = 0
+    while i < len(items):
+        word = items[i]
+        if word in _PAIRED and i + 1 < len(items):
+            out.append((word, items[i + 1]))
+            i += 2
+            continue
+        out.append((word,))
+        i += 1
+    return out
+
+
+def _d_verdict(words: Tuple[str, ...], context: str, prefetched: Sequence[str]) -> FlagVerdict:
+    word = "-D" + words[1] if len(words) == 2 else words[0]
+    body = word[2:]
+    if "=" not in body:
+        return FlagVerdict(word, words, "refused", "not -DNAME=VALUE", "rule")
+    name_type, _, value = body.partition("=")
+    name = name_type.split(":", 1)[0]
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.+-]*", name):
+        return FlagVerdict(word, words, "refused", "not -DNAME=VALUE", "rule", name)
+    dependency = DEPENDENCY_OF_OPTION.get(name)
+    if name in NEVER_SET and not (dependency and dependency in prefetched):
+        return FlagVerdict(word, words, "refused", f"{name} downloads at configure time and is never set",
+                           "download", name)
+    if SCRIPT_VARIABLE_RE.match(name):
+        return FlagVerdict(word, words, "refused", f"{name} makes CMake run a CMake script, which can set any option",
+                           "download", name)
+    if context == "call":
+        problem = None if (dependency and dependency in prefetched) else refused_option(name, value)
+        if problem:
+            return FlagVerdict(word, words, "refused", problem, "download", name)
+        return FlagVerdict(word, words, "allowed", name=name)
+    if name in CODE_VARIABLES or _RULES_OVERRIDE_RE.match(name):
+        reason = CODE_VARIABLES.get(name) or CODE_VARIABLES["CMAKE_USER_MAKE_RULES_OVERRIDE"]
+        return FlagVerdict(word, words, "refused", f"{name} {reason}", "rule", name)
+    if name.startswith("FETCHCONTENT_") and name != "FETCHCONTENT_FULLY_DISCONNECTED":
+        return FlagVerdict(word, words, "refused", f"{name} is set only by llmcf's dependency cache", "rule", name)
+    if name == "CMAKE_PREFIX_PATH":
+        parts = [p for p in value.strip("\"'").split(";") if p]
+        if not parts or not all(_RE_CONTAINER_PATHS.fullmatch(p) and ".." not in p.split("/") for p in parts):
+            return FlagVerdict(word, words, "refused", "CMAKE_PREFIX_PATH names only folders inside the build "
+                               "container (absolute paths)", "rule", name)
+        return FlagVerdict(word, words, "allowed", name=name)
+    if dependency and dependency in prefetched:
+        return FlagVerdict(word, words, "allowed", name=name)
+    problem = refused_option(name, value)
+    if problem and context == "module":
+        return FlagVerdict(word, words, "refused", problem, "download", name)
+    return FlagVerdict(word, words, "allowed", name=name)
+
+
+def cmake_flag_verdicts(words: Sequence[str], *, context: str = "module",
+                        prefetched: Sequence[str] = ()) -> List[FlagVerdict]:
+    """The verdict of each CMake option in `words` (a module's CMake flags, split as the shell splits them).
+    `context`: "module" (the flags as the generator, the folder check, the build plan and the AI's facts judge them:
+    an option every build keeps OFF must be OFF there), "package" (the same flags in the package's cross build, where
+    the options of every build come after them and win), "call" (a cmake call of a module's own scripts, build.sh's
+    cmake: only what lets llama.cpp download or runs a script is refused, as before). `prefetched`: the dependencies
+    llmcf fetched for this build and mounts read-only (deps.py); their options are allowed."""
+    if context not in FLAG_CONTEXTS:
+        raise ValueError(f"unknown context {context!r}")
+    out: List[FlagVerdict] = []
+    for pair in _pairs(words):
+        first = pair[0]
+        if first.startswith("-D"):
+            out.append(_d_verdict(pair, context, prefetched))
+            continue
+        if first.startswith(("-C", "-P")):
+            out.append(FlagVerdict(first, pair, "refused", REFUSED_SWITCHES["-C"], "download"))
+            continue
+        if context == "call":
+            out.append(FlagVerdict(" ".join(pair), pair, "allowed"))
+            continue
+        shown = " ".join(pair)
+        if first.startswith("-W"):
+            if CMAKE_WARNING_RE.fullmatch(first) and len(pair) == 1:
+                out.append(FlagVerdict(first, pair, "allowed"))
+            else:
+                out.append(FlagVerdict(shown, pair, "refused", "not a CMake warning option (a compiler warning "
+                                       "belongs in the C flags)", "rule"))
+            continue
+        key = first.split("=", 1)[0]
+        short = first[:2] if len(first) > 2 and first[:2] in _PAIRED and not first.startswith("--") else None
+        if key in REFUSED_SWITCHES or (short and short in REFUSED_SWITCHES):
+            out.append(FlagVerdict(shown, pair, "refused", REFUSED_SWITCHES.get(key) or REFUSED_SWITCHES[short],
+                                   "rule"))
+        elif key in DECISION_SWITCHES or (short and short in DECISION_SWITCHES):
+            out.append(FlagVerdict(shown, pair, "decision", DECISION_SWITCHES.get(key) or DECISION_SWITCHES[short]))
+        else:
+            out.append(FlagVerdict(shown, pair, "refused", "not a CMake option llmcf knows", "rule"))
+    return out
+
+
+def module_flag_refusals(words: Sequence[str], *, context: str = "module", prefetched: Sequence[str] = ()) -> List[str]:
+    """`word (reason)` for each refused option of `words` (cmake_flag_verdicts), empty when none is refused."""
+    return [f"{v.word} ({v.reason})" for v in cmake_flag_verdicts(words, context=context, prefetched=prefetched)
+            if v.verdict == "refused"]
+
+
+def module_flag_decisions(words: Sequence[str], *, prefetched: Sequence[str] = ()) -> List[FlagVerdict]:
+    """The options of `words` that are valid but outside the allowlist: the person's decision."""
+    return [v for v in cmake_flag_verdicts(words, prefetched=prefetched) if v.verdict == "decision"]
 
 
 # --- profile facts ----------------------------------------------------------------------------------------------

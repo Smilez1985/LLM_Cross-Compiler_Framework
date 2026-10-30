@@ -10,6 +10,40 @@ weicht bewusst ab: Es gibt keinen Abschnitt `[Unreleased]`. Jeder Eintrag beginn
 der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und warum, steht im
 [Design](docs/DESIGN_DE.md).
 
+## [3.2.0] - 2026-10-30
+
+### Geändert
+
+- `2026-10-30 03:55 UTC` · `v3.2.0` **Ein Urteil über die CMake-Flags eines Moduls: eine Allowlist, Ablehnungen und die
+  Entscheidung der Person** (Konsolidierungskette build-flags-time; Entscheidung zu den CMake-Flags von Modulen):
+  `recipe.cmake_flag_verdicts` (`orchestrator/runtime/build/recipe.py`) beurteilt jedes Wort der CMake-Flags eines
+  Moduls: `-DNAME=VALUE` (auch `-D NAME=VALUE` und `-DNAME:TYPE=VALUE`) und CMakes eigene `-W`-Wörter sind erlaubt; was
+  Code oder eine andere Toolchain lädt (ein Project-Include, `CMAKE_TOOLCHAIN_FILE`, `CMAKE_MODULE_PATH`,
+  `CMAKE_USER_MAKE_RULES_OVERRIDE*`, `-C`, `-P`, `--preset`, `--toolchain`), Quell- und Build-Ordner (`-S`, `-B`), die
+  `FETCHCONTENT_*`-Variablen, die nur llmcfs Abhängigkeits-Cache setzt, ein `CMAKE_PREFIX_PATH` außerhalb des
+  Build-Containers, eine Download-Option und alles, was keine CMake-Option ist, wird mit Grund abgelehnt; eine gültige
+  CMake-Option außerhalb der Allowlist (`-G`, `-U`, `--log-level`, `--trace` und die übrigen Schalter von
+  `DECISION_SWITCHES`) bekommt das Urteil "decision" mit dem, was sie tut, und die Person entscheidet. Der
+  Modul-Generator (`module_generator.cmake_flag_problems`, von `validate_module_data` genutzt), die Ordnerprüfung
+  (`validate_target_folder`, jetzt auch für `CMAKE_OPTIONS` von `config_module.sh` und `LLAMA_CMAKE_ARGS` eines
+  Dockerfiles) und die letzte Prüfung des Board-Pakets im Build-Container (`module_flag_verdicts` und
+  `module_flag_problem` von `targets/*/modules/target_module.sh`) urteilen gleich: `tests/test_module_flags.py` lässt
+  das Python- und das Shell-Urteil über eine gemeinsame Liste laufen (`tests/data/cmake_flag_vectors.json`), in den drei
+  Kontexten Modul, Paket und eigener cmake-Aufruf eines Moduls. Ein Wort, das die Shell erweitert (`$X`), bleibt eine
+  dokumentierte Grenze der Ordnerprüfung; das cmake von build.sh und die Paketprüfung sehen die erweiterten Wörter.
+  Bewusst geändert: `-S` und `-B` in den Flags eines Moduls stoppen jetzt das Paket (`tests/test_target_stage.py`, Fall
+  "fine").
+
+### Sicherheit
+
+- `2026-10-30 03:55 UTC` · `v3.2.0` **Ein cmake-Aufruf eines Moduls startet mit frischem Cache und ignoriert eine
+  Toolchain aus der Umgebung** (Konsolidierungskette build-flags-time; Rest aus build-safety): Das cmake von build.sh
+  (die Prüfung jedes cmake-Aufrufs der eigenen Skripte eines Moduls) hängt an einen Configure-Lauf `--fresh` an, wenn
+  das CMake des Images es kennt, damit eine im Build-Ordner des Moduls liegende `CMakeCache.txt` keine Option ohne ein
+  Wort auf der Kommandozeile setzen kann, und entfernt eine Umgebungsvariable `CMAKE_TOOLCHAIN_FILE`, außer der
+  Build-Plan hat genau diese Datei gesetzt. Tests: `tests/test_module_flags.py` (frischer Cache, Toolchain aus der
+  Umgebung entfernt, die Toolchain des Plans bleibt).
+
 ## [3.1.0] - 2026-10-29
 
 ### Hinzugefügt
@@ -4466,6 +4500,7 @@ Cross-Kompilierung zu ermöglichen.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Grundlegende Unterstützung für die Cross-Kompilierung für Rockchip RK3588/RK3566.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Einstiegspunkte für CLI (`llm-cli`) und GUI (`llm-gui`).
 
+[3.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v2.4.0...v3.0.0
 [2.4.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v1.7.0...v2.4.0

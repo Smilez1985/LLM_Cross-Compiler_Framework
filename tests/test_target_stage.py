@@ -946,7 +946,10 @@ def _verdict(*words):
     (["-DLLAMA_BUILD_BORINGSSL=OFF"], "-DLLAMA_BUILD_BORINGSSL=OFF (LLAMA_BUILD_BORINGSSL downloads at configure time "
                                       "and is never set)", "same"),
     (["-P", "x.cmake"], "-P (CMake runs a script with -C or -P, and a script can set any option)", "same"),
-    (["-DLLAMA_BUILD_TESTS=OFF", "-DGGML_NATIVE=OFF", "-S", "src", "--build", "b"], "", ""),
+    # A module's own cmake call may name its folders; the module's flags may not (DECISIONS round 25 Q6: -S and -B
+    # are the plan's), so the package refuses them there.
+    (["-DLLAMA_BUILD_TESTS=OFF", "-DGGML_NATIVE=OFF", "-S", "src", "--build", "b"], "",
+     "-S src (a switch llmcf never allows in a module's flags)"),
 ], ids=["tests-on", "curl-two-words", "fetchcontent", "subprocess-typed", "never-set", "script", "fine"])
 def test_one_verdict_for_the_package_s_flags_and_a_module_s_own_cmake_call(words, alone, package):
     """The package's cross build sets every build's options after the module's flags, so only what no later option
