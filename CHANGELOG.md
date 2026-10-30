@@ -9,7 +9,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 (`` `YYYY-MM-DD HH:MM UTC` · `vX.Y.Z` ``) and is written under the version it lands in. Planned work is listed in the
 [roadmap](docs/ROADMAP.md), not here; how the framework is built and why is in the [design](docs/DESIGN.md).
 
-## [3.2.0] - 2026-10-29
+## [3.2.0] - 2026-10-30
 
 ### Changed
 - `2026-10-29 23:31 UTC` · `v3.2.0` **One install rule for the whole RHEL family** ([design](docs/DESIGN.md#installer-platforms-and-dependencies)):
@@ -65,6 +65,13 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   result error with the person's way out, never a traceback or the raw exception. A person's crawl started in
   offline mode drops its own-network reading when offline mode is switched off during the crawl and goes on with
   the public-only guard, like the switch the other way.
+- `2026-10-30 00:04 UTC` · `v3.2.0` **Offline builds never reuse an image built from older module copies, and a recipe pinning
+  another commit no longer loops** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)): the inputs label of
+  the build container image (`INPUTS_LABEL`) now also covers every file the build context copies into the image (the
+  target's `modules/` and `scripts/` and the framework's `docker/`, by path and content), so changing a stage script
+  is a new image; an image labelled before this version is not reused offline, and the stop says so. In the Builder
+  tab a recipe that pins commit X while the copy on this computer is commit Y no longer brings the model choice back
+  after you pick that copy: it asks whether to build the copy as your own build without the recipe, or cancel.
 
 ### Security
 - `2026-10-29 23:50 UTC` · `v3.2.0` **llmcf's SSH settings: a jump or proxy command only with the person's kept yes, no other login

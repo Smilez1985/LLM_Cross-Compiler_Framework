@@ -16,6 +16,10 @@ TEXTS = {
         # offline mode: a model that is not on this computer (DECISIONS round 25 Q1; Core/local_models.py)
         "bld.offline.not_here": "Offline mode is on, so {repo} is not downloaded from Hugging Face, and it is not on "
                                 "this computer.",
+        "bld.offline.pinned.title": "The recipe pins another commit",
+        "bld.offline.pinned.question": "The recipe builds {repo} at commit {pinned}, but the copy on this computer is "
+                                       "commit {here}. Offline the recipe itself cannot be built. Build the copy here "
+                                       "with these settings instead, as your own build without the recipe?",
         "bld.offline.none.person": "No model is on this computer yet: choose a model file or folder of your own, or "
                                    "switch offline mode off to download it.",
         "bld.offline.none.ai": "No model is on this computer yet: the person adds a model file or folder (or "
@@ -220,6 +224,11 @@ TEXTS = {
         # Offline-Modus: ein Modell, das nicht auf diesem Computer ist
         "bld.offline.not_here": "Der Offline-Modus ist an, deshalb wird {repo} nicht von Hugging Face geladen, und "
                                 "es ist nicht auf diesem Computer.",
+        "bld.offline.pinned.title": "Das Rezept nennt einen anderen Commit",
+        "bld.offline.pinned.question": "Das Rezept baut {repo} mit Commit {pinned}, die Kopie auf diesem Computer ist "
+                                       "aber Commit {here}. Offline lässt sich das Rezept selbst nicht bauen. Soll "
+                                       "stattdessen die Kopie hier mit diesen Einstellungen gebaut werden, als dein "
+                                       "eigener Build ohne das Rezept?",
         "bld.offline.none.person": "Auf diesem Computer ist noch kein Modell: Wähle eine eigene Modelldatei oder "
                                    "einen Modellordner, oder schalte den Offline-Modus aus, um es zu laden.",
         "bld.offline.none.ai": "Auf diesem Computer ist noch kein Modell: Die Person fügt eine Modelldatei oder einen "
