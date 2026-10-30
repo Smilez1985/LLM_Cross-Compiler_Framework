@@ -314,19 +314,10 @@ def _pinned_image(image: str) -> bool:
 
 # --- helpers -------------------------------------------------------------------------------------------------------
 
-def _config(framework, key: str, default=None):
-    config = getattr(framework, "config", None)
-    get = getattr(config, "get", None)
-    try:
-        return get(key, default) if callable(get) else getattr(config, key, default)
-    except Exception:
-        return default
-
-
-def folder(framework, key: str, default: str) -> Path:
-    resolve = getattr(framework, "resolve_path", None)
-    value = _config(framework, key, default) or default
-    return Path(resolve(value)) if callable(resolve) else Path(str(value)).expanduser()
+# A setting of the framework and a folder setting resolved like the framework does: in disk_plan beside state_dir, so a
+# lower module (runtime/build/deps.py) finds them without importing the build planner; re-exported here.
+_config = disk_plan.config_value
+folder = disk_plan.folder
 
 
 def host_hardware(framework) -> Optional[Any]:
