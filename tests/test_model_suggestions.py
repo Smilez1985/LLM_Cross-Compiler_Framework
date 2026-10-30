@@ -5,6 +5,7 @@ and the MCP resource lcf://models/suggestions (DECISIONS round 23 item 10)."""
 import subprocess
 import sys
 
+import pytest
 import yaml
 
 from conftest import REPO_ROOT
@@ -63,6 +64,7 @@ def test_a_broken_entry_is_never_suggested_and_a_missing_gated_counts_as_gated(t
 
 
 def test_the_builder_offers_the_catalogue_suggestions():
+    pytest.importorskip("PySide6")
     from orchestrator.gui import builder_tab
     assert builder_tab.MODEL_SUGGESTIONS == [m.repo_id for m in doc_sources.model_suggestions()]
 
