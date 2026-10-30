@@ -518,6 +518,19 @@ class ConfigManager:
             ConfigSchema("build_pip_index", str, False, "",
                          "pip index in your own network (a PyPI mirror) for offline builds of the build container "
                          "image, e.g. http://192.0.2.10:3141/simple; set only by you, never by an AI"),
+            # The MQTT doorbell (Core/doorbell.py, DECISIONS round 40): every build end to the person's broker.
+            # Person-only (llm/settings_change.PERSON_ONLY_SETTINGS): an AI may not redirect or silence it. The
+            # password is never here: the credential vault holds it (secret mqtt_password).
+            ConfigSchema("mqtt_broker_url", str, False, "",
+                         "MQTT broker for the build doorbell, mqtt://host:port (this computer only) or "
+                         "mqtts://host:port (TLS, the certificate checked); empty: no doorbell; set only by you"),
+            ConfigSchema("mqtt_username", str, False, "", "User name at the MQTT broker (the password is kept in the "
+                         "credential vault as mqtt_password); set only by you"),
+            ConfigSchema("mqtt_topic_prefix", str, False, "llmcf",
+                         "Topic prefix of the build doorbell (<prefix>/v1/...); set only by you",
+                         ["regex:^[a-z0-9_-]{1,32}$"]),
+            ConfigSchema("mqtt_ca_file", str, False, "",
+                         "CA file to check the MQTT broker's certificate (empty: the system's CAs); set only by you"),
             # The memory budget of Ditto's local server (runtime/hardware.local_budget): auto = from the measured
             # hardware of this computer. An AI may only lower the numbers (llm/settings_change.TIGHTEN_ONLY);
             # local_cache_over_cap_ok and keep minutes 0 (never unload) are the person's alone.
@@ -769,6 +782,7 @@ class ConfigManager:
                 "chat_context_limit", "enable_telemetry", "offline_mode",
                 "offline_local_vpns", "offline_local_hosts", "offline_local_ranges",
                 "build_apt_mirror", "build_apt_proxy", "build_pip_index",
+                "mqtt_broker_url", "mqtt_username", "mqtt_topic_prefix", "mqtt_ca_file",
                 "local_cache_ram_mib", "local_cache_keep_minutes", "local_kv_cache", "local_cache_over_cap_ok",
                 # v2.3
                 "image_trivy", "image_base_debian", "image_inference_runtime",

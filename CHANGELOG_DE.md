@@ -13,6 +13,21 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 ## [3.3.0] - 2026-10-30
 
 ### Hinzugefügt
+- `2026-10-30 13:17 UTC` · `v3.3.0` **Eine Türklingel auf deinem eigenen MQTT-Broker für jedes Build-Ende** ([Design](docs/DESIGN_DE.md#mcp-server-tools-und-berechtigungen)):
+  wenn du einen Broker einstellst (`llm-cli config doorbell --broker mqtts://HOST:PORT` oder Datei > Einstellungen... >
+  Build-Türklingel), wird jedes Build-Ende einmal an `<prefix>/v1/build/<request_id>/end` und `<prefix>/v1/events`
+  gesendet (QoS 1, nicht gehalten), und `<prefix>/v1/status` sagt online oder offline (gehalten, auch als letzter
+  Wille). Die Nutzlast ist `{v, event, reason, name, request_id, ts}` nur mit festen Wörtern (build_ready,
+  build_error, build_stopped; done, failed, cancelled, soft_cap, idle), nie ein Pfad, Log-Text oder der Name eines
+  Modells; das Framework sendet nur und abonniert nie. Ein Broker, der nicht läuft, hält nie einen Build auf und lässt
+  keinen scheitern: die Türklingel hat einen eigenen Thread, eine begrenzte Warteschlange und Zeitlimits, schreibt ohne
+  das Passwort ins Protokoll, was schiefging, und Mojo zeigt das letzte gescheiterte Senden. **Test-Klingel senden**
+  (`config doorbell --test` und der Knopf in den Einstellungen) sendet eine über denselben Code. Die Einstellungen
+  (`mqtt_broker_url`, `mqtt_username`, `mqtt_topic_prefix`, Standard `llmcf`, und `mqtt_ca_file`) gehören nur dir,
+  das Passwort liegt nur im Tresor für Zugangsdaten (`mqtt_password`), einfaches `mqtt://` geht nur auf diesem
+  Computer, jeder andere Broker braucht `mqtts://` mit geprüftem Zertifikat; im Offline-Modus nur ein lokaler Broker.
+  Neue Abhängigkeiten, mit Hashes festgelegt: aiomqtt 2.5.1 (BSD-3-Clause) und paho-mqtt 2.1.0 (EPL-2.0 oder
+  EDL-1.0), geladen nur, wenn eine Türklingel gesendet wird.
 - `2026-10-30 12:56 UTC` · `v3.3.0` **Das Ende jedes Builds im Chat, einmal** ([Design](docs/DESIGN_DE.md#mcp-server-tools-und-berechtigungen)):
   wenn ein Build endet, bekommt der Chat-Verlauf genau eine Zeile dafür (entdoppelt über seine Anfrage-ID), für jeden
   Build, auch den eigenen der Person (vom Framework; der Build einer KI wie bisher in deren Namen): „Build fertig.“,

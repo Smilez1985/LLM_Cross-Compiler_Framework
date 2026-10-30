@@ -12,6 +12,20 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 ## [3.3.0] - 2026-10-30
 
 ### Added
+- `2026-10-30 13:17 UTC` · `v3.3.0` **A doorbell on your own MQTT broker for every build's end** ([design](docs/DESIGN.md#mcp-server-tools-and-permissions)):
+  when you set a broker (`llm-cli config doorbell --broker mqtts://HOST:PORT`, or File > Settings... > Build
+  doorbell), every build's end is published once to `<prefix>/v1/build/<request_id>/end` and `<prefix>/v1/events`
+  (QoS 1, not retained), and `<prefix>/v1/status` says online or offline (retained, also as the last will). The
+  payload is `{v, event, reason, name, request_id, ts}` with fixed words only (build_ready, build_error,
+  build_stopped; done, failed, cancelled, soft_cap, idle), never a path, log text or a model's name; the framework
+  only publishes and never subscribes. A broker that is down never blocks or fails a build: the doorbell has its own
+  thread, a bounded queue and timeouts, logs what went wrong without the password, and Mojo shows the last failed
+  send. **Send a test doorbell** (`config doorbell --test` and the button in the settings) sends one through the same
+  code. The settings (`mqtt_broker_url`, `mqtt_username`, `mqtt_topic_prefix`, default `llmcf`, and `mqtt_ca_file`)
+  are yours alone, the password is kept only in the credential vault (`mqtt_password`), plain `mqtt://` works only on
+  this computer and every other broker needs `mqtts://` with its certificate checked; in offline mode only a local
+  broker. New dependencies, pinned with hashes: aiomqtt 2.5.1 (BSD-3-Clause) and paho-mqtt 2.1.0 (EPL-2.0 or
+  EDL-1.0), loaded only when a doorbell is sent.
 - `2026-10-30 12:56 UTC` · `v3.3.0` **Every build's end in the chat, once** ([design](docs/DESIGN.md#mcp-server-tools-and-permissions)):
   when a build ends, the chat feed gets exactly one row for it (deduplicated by its request id), for every build, also
   the person's own (from the framework; an AI's build in the AI's name as before): "Build ready.", "Error while

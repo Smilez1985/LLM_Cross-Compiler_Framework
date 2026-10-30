@@ -59,6 +59,12 @@ _KV_ORDER = {"q4_0": 0, "q8_0": 1, "f16": 2}   # memory of the KV-cache type, sm
 # The build sources in the own network (BUILD_SOURCE_SETTINGS: apt mirror, apt cache, pip index) are the person's too:
 # they say where an offline build may fetch from; and so is the acceptance of memory values above the soft cap.
 PERSON_ONLY_SETTINGS = tuple(OPT_OUT_SETTINGS) + tuple(BUILD_SOURCE_SETTINGS) + (CACHE_OVER_CAP_OK,)
+# The MQTT doorbell's broker, user name, topic prefix and CA file (Core/doorbell.py): an AI may not redirect or
+# silence the person's notifications.
+MQTT_SETTINGS = ("mqtt_broker_url", "mqtt_username", "mqtt_topic_prefix", "mqtt_ca_file")
+PERSON_ONLY_SETTINGS = PERSON_ONLY_SETTINGS + MQTT_SETTINGS
+MQTT_PERSON_ONLY_TEXT = ("{key} says where the build doorbell rings. Only the person sets it, in the framework's "
+                         "settings; no AI can redirect or silence it.")
 PERSON_ONLY_TEXT = ("{key} says what offline mode counts as local besides this computer and the own network. Only the "
                     "person sets it, in the framework's settings; no AI and no settings change of an AI can.")
 BUILD_SOURCE_TEXT = ("{key} says where an offline build of the build container image fetches packages from in the own "
@@ -72,6 +78,8 @@ def person_only_text(key: str) -> str:
     """Why `key` (one of PERSON_ONLY_SETTINGS) is refused for every change but the person's."""
     if key == CACHE_OVER_CAP_OK:
         return CACHE_PERSON_ONLY_TEXT.format(key=key)
+    if key in MQTT_SETTINGS:
+        return MQTT_PERSON_ONLY_TEXT.format(key=key)
     return (BUILD_SOURCE_TEXT if key in BUILD_SOURCE_SETTINGS else PERSON_ONLY_TEXT).format(key=key)
 
 

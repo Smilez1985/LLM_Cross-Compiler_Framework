@@ -6959,6 +6959,64 @@ def config_local_network(ctx: FrameworkContext, add, remove, target: Optional[st
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1 if e.code == "not_saved" else 2)
 
+@config.command('doorbell')
+@click.option('--broker', 'broker', metavar='URL',
+              help="Your MQTT broker: mqtt://host:port (this computer only) or mqtts://host:port (TLS, the "
+                   "certificate checked); '' switches the doorbell off")
+@click.option('--username', metavar='NAME', help='User name at the broker')
+@click.option('--prefix', metavar='PREFIX', help="Topic prefix (default llmcf; a-z, 0-9, _ and -)")
+@click.option('--ca-file', 'ca_file', metavar='FILE', help="CA file to check the broker's certificate ('' = the "
+                                                             "system's CAs)")
+@click.option('--password', 'set_password', is_flag=True,
+              help='Ask for the broker password and keep it in the credential vault (never in the settings file)')
+@click.option('--test', 'test', is_flag=True, help='Send a test doorbell now and say whether the broker took it')
+@pass_context
+def config_doorbell(ctx: FrameworkContext, broker: Optional[str], username: Optional[str], prefix: Optional[str],
+                    ca_file: Optional[str], set_password: bool, test: bool):
+    """The build doorbell: every build end is published to your MQTT broker (topics <prefix>/v1/events and
+    <prefix>/v1/build/<request>/end, fixed fields only). Only you set it, never an AI. Exit code 1 when the test
+    doorbell was not taken, 2 for a setting that does not fit."""
+    from orchestrator.Core.doorbell import (PASSWORD_SECRET, DoorbellRefused, apply_settings, broker_of,
+                                            send_test_doorbell)
+    ctx.require_framework()
+    fm = ctx.framework_manager
+    cm = fm.config
+    changes = {key: value for key, value in (("mqtt_broker_url", broker), ("mqtt_username", username),
+                                             ("mqtt_topic_prefix", prefix), ("mqtt_ca_file", ca_file))
+               if value is not None}
+    if changes:
+        try:
+            apply_settings(cm, changes)
+        except DoorbellRefused as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(2)
+        except OSError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(1)
+    if set_password:
+        from orchestrator.Core.secret_entries import store_secret
+        value = click.prompt("MQTT broker password", hide_input=True, default="", show_default=False)
+        if value:
+            stored = store_secret(fm.secrets_manager, PASSWORD_SECRET, value)
+            console.print("[yellow]The password is kept for this run only (no vault).[/yellow]" if stored.memory_only
+                          else "[green]The password is stored in the credential vault.[/green]")
+    try:
+        found = broker_of(cm)
+    except DoorbellRefused as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
+    if found is None:
+        console.print("No MQTT broker is set: there is no doorbell (set one with --broker).")
+    else:
+        console.print(f"Broker: {escape(found.label())}  Topic prefix: {escape(found.prefix)}  "
+                      f"User: {escape(found.username or '-')}  CA file: {escape(found.ca_file or 'system CAs')}")
+    if test:
+        ok, text = send_test_doorbell(fm)
+        console.print(f"[{'green' if ok else 'red'}]{escape(text)}[/{'green' if ok else 'red'}]")
+        if not ok:
+            sys.exit(1)
+
+
 # ============================================================================
 # COMMUNITY ZOO (signed community packs: targets, recipes, knowledge)
 # ============================================================================

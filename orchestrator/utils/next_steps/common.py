@@ -113,6 +113,9 @@ STEPS = (
     # the person's opt-out of offline mode's locality rule (DECISIONS round 24, "L-NET final"): never an AI
     Step("settings.local_network", cli="config local-network", person_only="permission", window="settings",
          target="act_file_settings"),
+    # the person's MQTT broker for the build doorbell (Core/doorbell.py): never an AI
+    Step("settings.doorbell", cli="config doorbell", person_only="permission", window="settings",
+         target="act_file_settings"),
     Step("settings.show", cli="config show", person_only="permission", window="settings", target="act_file_settings",
          runnable=True),
     Step("output.folder", cli="config output-folder", cli_args=("{folder}",), params={"folder": Param("path")},
@@ -150,6 +153,8 @@ TEXTS = {
         "step.settings.local_network.what": "Lists what counts as local in offline mode; a VPN, a host or an address "
                                             "range can be counted as local, each with what can then leave your "
                                             "network.",
+        "step.settings.doorbell": "Check the build doorbell in the settings and send a test doorbell (only you "
+                                  "can)",
         "step.output.folder": "Choose the folder for finished models",
         "step.docker.start": "Start Docker (Docker Desktop on Windows and macOS)",
         "step.docker.group": "Allow your user account to use Docker, then log in again",
@@ -184,6 +189,8 @@ TEXTS = {
         "step.settings.local_network.what": "Listet, was im Offline-Modus als lokal gilt; ein VPN, ein Host oder ein "
                                             "Adressbereich kann als lokal gezählt werden, jeweils mit dem, was dann "
                                             "dein Netz verlassen kann.",
+        "step.settings.doorbell": "Die Build-Türklingel in den Einstellungen prüfen und eine Test-Klingel senden "
+                                  "(nur du kannst das)",
         "step.output.folder": "Den Ordner für fertige Modelle wählen",
         "step.docker.start": "Docker starten (Docker Desktop unter Windows und macOS)",
         "step.docker.group": "Deinem Benutzerkonto Docker erlauben, dann neu anmelden",
@@ -208,5 +215,7 @@ FORMAL = {
         "step.settings.local_network.what": "Listet, was im Offline-Modus als lokal gilt; ein VPN, ein Host oder ein "
                                             "Adressbereich kann als lokal gezählt werden, jeweils mit dem, was dann "
                                             "Ihr Netz verlassen kann.",
+        "step.settings.doorbell": "Die Build-Türklingel in den Einstellungen prüfen und eine Test-Klingel senden "
+                                  "(nur Sie können das)",
     },
 }
