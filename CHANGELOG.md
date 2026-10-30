@@ -75,7 +75,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   when a pack's excerpts leave the knowledge base, its uninstall writes the note `<pack>.released` atomically
   (through the new `utils/atomic.write_file`: a temporary file next to it, synced, then put in its place), so a
   computer that stops during the write leaves the note whole or not at all. The modes of the file and its folder
-  stay as they were.
+  stay as they were, and on Windows the line ends are written once (the temporary file is opened in binary mode).
 - `2026-10-30 14:15 UTC` · `v3.3.0` **The llama.cpp runtime builds read the idle timeout you set** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
   the build of Ditto's own llama.cpp server (`llm-cli ditto runtime install`, the tool `build_local_runtime`) and the
   build of a board's runtime (`llm-cli device runtime build`, the Boards window, the tool `deploy_device_runtime`)

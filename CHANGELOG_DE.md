@@ -82,7 +82,8 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Verlassen die Auszüge eines Pakets die Wissensbasis, schreibt seine Deinstallation die Notiz `<pack>.released`
   atomar (über das neue `utils/atomic.write_file`: eine temporäre Datei daneben, synchronisiert, dann an ihren Platz
   gesetzt), so hinterlässt ein Computer, der beim Schreiben stehen bleibt, die Notiz ganz oder gar nicht. Die Modi
-  der Datei und ihres Ordners bleiben, wie sie waren.
+  der Datei und ihres Ordners bleiben, wie sie waren, und unter Windows werden die Zeilenenden einmal geschrieben (die
+  temporäre Datei wird im Binärmodus geöffnet).
 - `2026-10-30 14:15 UTC` · `v3.3.0` **Die llama.cpp-Laufzeit-Builds lesen die Grenze für Stillstand, die du eingestellt hast** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
   Der Build von Dittos eigenem llama.cpp-Server (`llm-cli ditto runtime install`, das Tool `build_local_runtime`) und
   der Build der Laufzeit eines Boards (`llm-cli device runtime build`, das Fenster Boards, das Tool
