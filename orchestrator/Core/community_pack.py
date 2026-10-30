@@ -892,9 +892,11 @@ def dockerfile_bases(text: str) -> List[str]:
 
 def pack_base_images(folder: Path) -> List[Tuple[str, str]]:
     """(file, image) for every base image of every Dockerfile in a pack folder (Dockerfile, *.dockerfile,
-    Dockerfile.*, Containerfile), never following a link."""
+    Dockerfile.*, Containerfile), never following a link. In the order of the relative POSIX paths, the same on every
+    system (a Windows path sorts without case and with backslashes, so its own order put docker/ before Dockerfile)."""
     found = []
-    for path in sorted(Path(folder).rglob("*")):
+    folder = Path(folder)
+    for path in sorted(folder.rglob("*"), key=lambda p: p.relative_to(folder).as_posix()):
         name = path.name.lower()
         if path.is_symlink() or not path.is_file():
             continue

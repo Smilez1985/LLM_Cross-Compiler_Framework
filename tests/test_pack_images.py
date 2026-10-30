@@ -42,6 +42,20 @@ def test_pack_base_images_reads_every_dockerfile_of_a_pack(tmp_path):
     ]
 
 
+def test_the_order_is_the_same_on_windows(tmp_path, monkeypatch):
+    # A WindowsPath compares without case and with backslashes ("docker\\arm.dockerfile" < "dockerfile"): sorting the
+    # Path objects put docker/ before Dockerfile on the Windows CI job only. Here the POSIX paths compare that way.
+    _write(tmp_path, "Dockerfile", "FROM debian:bookworm-slim\n")
+    _write(tmp_path, "docker/arm.dockerfile", "FROM alpine:3.20\n")
+
+    def like_windows(a, b):
+        return str(a).lower().replace("/", "\\") < str(b).lower().replace("/", "\\")
+    monkeypatch.setattr(type(tmp_path), "__lt__", like_windows)
+    assert sorted([tmp_path / "Dockerfile", tmp_path / "docker" / "arm.dockerfile"])[0].name == "arm.dockerfile"
+    assert pack_base_images(tmp_path) == [("Dockerfile", "debian:bookworm-slim"),
+                                          ("docker/arm.dockerfile", "alpine:3.20")]
+
+
 def test_an_empty_or_missing_pack_has_no_images(tmp_path):
     assert pack_base_images(tmp_path) == [] and pack_base_images(tmp_path / "missing") == []
 

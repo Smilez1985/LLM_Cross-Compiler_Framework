@@ -12,6 +12,17 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 
 ## [3.3.0] - 2026-10-30
 
+### Behoben
+- `2026-10-30 14:19 UTC` · `v3.3.0` **Ein fehlendes OpenSSH unter Windows ist ein Problem auf diesem Rechner, kein
+  Board, das nicht antwortet** ([Design](docs/DESIGN_DE.md#ssh-host-schlüssel-und-das-paket-remote)): Der
+  Prozessstart von Windows nennt keine Datei, wenn das Programm fehlt (POSIX nennt sie), deshalb las sich der Fehler
+  als `device_host_down`, und die Person wurde zum Board geschickt. `SystemSshTransport` nennt jetzt das Programm, und
+  der Kontakt scheitert mit `local_problem` wie unter Linux.
+- `2026-10-30 14:19 UTC` · `v3.3.0` **Die Basis-Images eines Pakets stehen auf jedem System in derselben
+  Reihenfolge** ([Design](docs/DESIGN_DE.md#community-pakete-format-vertrauen-und-austausch)): Windows sortiert seine
+  Pfade ohne Groß- und Kleinschreibung und mit Backslashes, deshalb stand `docker/arm.dockerfile` dort vor
+  `Dockerfile`; `pack_base_images` sortiert jetzt nach dem relativen POSIX-Pfad.
+
 ### Sicherheit
 - `2026-10-30 14:07 UTC` · `v3.3.0` **Dittos lokaler Server: der Schlüssel geht nie an ein Programm, das seinen Port
   belegt hat, auch ohne Root-Rechte** ([Design](docs/DESIGN_DE.md#sicherheitsmodell)): belegt ein anderes Programm den
