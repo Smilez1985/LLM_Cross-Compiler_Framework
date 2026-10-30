@@ -636,6 +636,19 @@ def test_the_functional_test_runs_the_model_on_the_build_machine(image, fail, ou
 
 
 @needs_bash
+def test_the_warning_of_a_silent_functional_test_names_the_idle_limit(image):
+    """FUNCTIONAL_TEST_SECONDS is the time the test may print nothing (DECISIONS round 25 Q8), not a time to finish:
+    the package stage's warning says so."""
+    _script(image.llama / "build" / "bin" / "llama-completion", COMPLETION_STUB)
+    short_functional_test(image)
+    result = target_by_hand(image, "--model-name", "granite", STUB_FAIL="completion-hang")
+    assert result.returncode == 0, result.stdout + result.stderr
+    out = result.stdout + result.stderr
+    assert "The functional test printed nothing for 1 s; the package is made anyway." in out
+    assert "did not finish within" not in out
+
+
+@needs_bash
 @pytest.mark.parametrize("fail, how", [("completion", "could not run granite-Q4_K_M.gguf (exit 1)"),
                                        ("completion-abort", "crashed running granite-Q4_K_M.gguf (signal 6)")])
 def test_a_model_the_functional_test_cannot_run_gets_no_package(image, fail, how):

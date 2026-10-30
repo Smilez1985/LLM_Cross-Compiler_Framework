@@ -76,7 +76,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   außen angehalten wurden, und startet sie kein viertes Mal (`STAGE_RESTART_LIMIT`, Exit-Code 75); der Funktionstest
   (`model_check.py` beider Targets) liest die Ausgabe des Modells mit, stoppt ein Modell, das sich wiederholt
   (`stopped`, kein Fehler) und nimmt `FUNCTIONAL_TEST_SECONDS` als die Zeit, die er nichts ausgeben darf (`timed out`,
-  kein Fehler), nie als harte Grenze. Die llama.cpp-Laufzeit-Builds, die eine KI startet (die Tools
+  kein Fehler), nie als harte Grenze (die Warnung der Paket-Stufe nennt sie so). Die llama.cpp-Laufzeit-Builds, die eine KI startet (die Tools
   `build_local_runtime` und `deploy_device_runtime`), geben das an ihren Executor weiter (`LocalLLMRuntime.install`,
   `steps.build_runtime`, `service.ensure_build` und `service.deploy` nehmen `ai_started`), also stoppt sie ihre weiche
   Obergrenze ebenso. Tests: `tests/test_step_limits.py`, die Warte-Tests in
