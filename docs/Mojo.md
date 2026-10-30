@@ -82,8 +82,8 @@ An information line (ℹ) shows its hint too. At the end one sentence counts eve
 it, for example: "Mojo Oracle found 3 problems (1 error, 2 warnings): Mojo Miracle can repair 1; 1 needs your list of
 what to delete; 1 needs you." Nothing is skipped. Mojo Oracle changes nothing.
 
-It checks Python, Docker and buildx (and names the container engine: under Podman, the fallback on Rocky Linux,
-AlmaLinux and Oracle Linux, `docker.engine` lists what Podman cannot do and the way to Docker CE; see
+It checks Python, Docker and buildx (and names the container engine: under Podman, the fallback in the RHEL family
+(Fedora, RHEL, CentOS Stream, Rocky Linux, AlmaLinux, Oracle Linux), `docker.engine` lists what Podman cannot do and the way to Docker CE; see
 [Features](Features.md#podman-instead-of-docker)), where Docker keeps its images, free disk space for the cache,
 output and build folders, the targets, the state folder, the secrets store and the keyring, the tool permissions, the MCP tokens and
 the audit log, the chat feed, the calibration data, the community packs, the knowledge snapshots against the free
