@@ -63,6 +63,14 @@ class TestHealingPrompt:
         body = text.split(">\n", 1)[1].rsplit("\n</untrusted_data", 1)[0]
         assert len(body) <= LOG_CHARS
 
+    @pytest.mark.parametrize("before", ["Downloading weights…", "fetching ﬁles", "password=pw"])
+    def test_the_scrub_never_cuts_the_end(self, fake_home, before):
+        """Review (ctx-slim-v): log_for_ai let scrub_for_ai cap the text at its own length, but the scrub normalizes
+        (NFKC: one '…' becomes three characters) and redacts (a short secret becomes the longer 'REDACTED'), so the
+        text grew past that cap and its end, the error, became '[... truncated ...]'."""
+        text = task_prompts.log_for_ai(before + "\ncompile step\nmake: *** [all] Error 2")
+        assert text.endswith("make: *** [all] Error 2") and "truncated" not in text
+
     def test_the_knowledge_query_reads_the_cleaned_end(self):
         assert task_prompts.healing_query("a\n\x1b[31merror: x\x1b[0m\nb\nb\nb") == "a\nerror: x\nb (repeated 3 times)"
 

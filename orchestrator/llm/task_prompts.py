@@ -13,6 +13,7 @@ hardware, a reached limit); "untested" is never a reason. Not being able to test
 to state, not a reason to refuse.
 """
 
+import sys
 from typing import Any, Dict, List, Optional, Sequence
 
 from orchestrator.security.paths import scrub_for_ai
@@ -148,7 +149,10 @@ def log_for_ai(log_content: str, limit: int = LOG_CHARS) -> str:
         raw = raw[-RAW_LOG_CHARS:]
         raw = raw.split("\n", 1)[1] if "\n" in raw else raw   # from a line start
     text = clean_log(raw)
-    text = scrub_for_ai(text, limit=max(len(text), 1))
+    # No cap of its own here: the scrub can make the text longer (NFKC turns one '…' into three characters, a short
+    # secret becomes 'REDACTED'), and a cap at the old length would cut off the end, the error. The raw part is
+    # bounded above; the one cut is the next line.
+    text = scrub_for_ai(text, limit=sys.maxsize)
     return text[-limit:]
 
 

@@ -26,8 +26,9 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   `diagnose_build_failure` (both through `healing_parts` in `orchestrator/llm/task_prompts.py`, new `log_for_ai`) and
   the tool `read_build_log` (`BuildService.log_tail`) read a build log in one order: `clean_log` first, then the scrub
   (secrets redacted; this computer's home folder as `~` in the healing prompt, the framework's folders by label in
-  `read_build_log` as before), then the cut (the last 6,000 characters for the healing prompt). Before, the healing
-  prompt sent the raw last 6,000 characters (colour codes, progress redraws, a host path and a secret included), so
+  `read_build_log` as before), then the cut (the last 6,000 characters for the healing prompt; the scrub has no cap
+  of its own there, since it can make the text longer and a cap would cut off the error at its end). Before, the
+  healing prompt sent the raw last 6,000 characters (colour codes, progress redraws, a host path and a secret included), so
   a few thousand repeated lines could push the error out of it. `read_build_log` keeps raw line numbers
   (`first_line`, `before_line`): a collapsed line counts as the lines it stands for, and a collapsed run is shown
   whole or not at all at the 48,000-character cap, so the next page still starts with it. The person's own log view (the
@@ -39,7 +40,8 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   chain ctx-slim; decision: smaller tool results and cleaner logs for every model): a tool's output (a pydantic
   model or a dict) reaches the model as `json_dumps` from `orchestrator/llm/types.py`: sorted keys, no spaces after
   `,` and `:`, non-ASCII text as it is; every control character stays escaped (C0 as JSON does, DEL and C1 too,
-  which `ensure_ascii=False` alone would let through). Before, a pydantic output went as `model_dump_json` in field
+  which `ensure_ascii=False` alone would let through, and a lone surrogate, a file name that is not UTF-8, which
+  would make the request fail to encode). Before, a pydantic output went as `model_dump_json` in field
   order and a dict with spaced separators. `json_dumps` moved there from `orchestrator/llm/providers/base.py`,
   which imports it (the old import keeps working); its output for tool call arguments is unchanged. Only new tool
   results change: a stored turn keeps the bytes it was sent with, so the prompt cache prefix of a saved
@@ -48,8 +50,11 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   break, and a lone ESC goes by itself so no text hides behind it), only the text after the last carriage return
   of a line kept (a Windows line end is not a redraw), a run of identical lines collapsed to the line plus
   "(repeated N times)", a run of three or more lines that differ only in their numbers collapsed to the first line,
-  a count line and the last line, and a line that says error, warning, fatal, failed or Traceback never touched; it
-  is idempotent. hadolint's own escape pattern is now this one (`utils/hadolint.py` imports `ANSI_RE`). The test
+  a count line and the last line, and a line that reports a problem never touched (error, warning, fatal, failed,
+  Traceback, and the other words tools say it with: fail, exception, panic, abort, denied, cannot, unable,
+  undefined, not found, no such, segmentation fault, killed, npm's `ERR!`, apt's `E:`; a linker names each missing
+  symbol on a line of its own, and symbols that differ only in digits would otherwise lose the middle ones); it is
+  idempotent. hadolint's own escape pattern is now this one (`utils/hadolint.py` imports `ANSI_RE`). The test
   vectors are JSON files in `tests/fixtures/context_rules/` (`clean_log.json`, `compact_json.json`), so the board
   gateway can check its own rules against the same cases.
 
