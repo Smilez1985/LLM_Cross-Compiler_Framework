@@ -269,12 +269,18 @@ def test_the_cross_build_takes_the_mounted_copy_fully_disconnected(tmp_path, tar
             [posix_shell("bash"), "-c", 'source "$1" && cross_compile_target', "_", str(modules / "target_module.sh")],
             capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL,
             env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "MODULES_DIR": str(modules),
-                 "SCRATCH_DIR": str(tmp_path / "scratch"), "LLAMA_BASE": str(tmp_path / "src"),
+                 # config_module.sh takes its folders from these (the image's LLAMA_CPP_PATH, the mounted cache and
+                 # work folder); without them the build folder is /build-cache/build_target, which only root can make
+                 # (the sandbox runs as root, a CI runner does not: cmake was never reached there).
+                 "BUILD_CACHE_DIR": str(tmp_path / "cache"), "BUILD_SCRATCH_DIR": str(tmp_path / "scratch"),
+                 "LLAMA_CPP_PATH": str(tmp_path / "src"),
                  "CMAKE_TOOLCHAIN_FILE": str(tmp_path / "tc.cmake"), "CMAKE_FLAGS": "-DGGML_CPU_KLEIDIAI=ON",
                  "LLMCF_DEPS": llmcf_deps})
+        assert (tmp_path / "scratch" / "build_target").is_dir()   # the build ran in this test's own folder
         return record.read_text().splitlines()
 
     args = run(f"KLEIDIAI={mounted}")
+    assert args[0] == str(tmp_path / "src")
     assert f"-DFETCHCONTENT_SOURCE_DIR_KLEIDIAI={mounted}" in args
     assert "-DFETCHCONTENT_FULLY_DISCONNECTED=ON" in args
     assert "-DGGML_CPU_KLEIDIAI=OFF" not in args
