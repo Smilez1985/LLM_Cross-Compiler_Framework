@@ -39,6 +39,10 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Prompt-Cache und mit `llm-cli ditto cache set`.
 
 ### Behoben
+- `2026-10-30 14:58 UTC` · `v3.3.0` **Ein KI-Client erfährt, dass er das Build-Log bereinigt liest**: Die Beschreibung des Tools `read_build_log`
+  und der Build-Log-Ressource sagt jetzt, dass im Log, das eine KI liest, Farbcodes und Fortschritts-Neuzeichnungen
+  entfernt und wiederholte Zeilen zusammengefasst sind, jede Fehlerzeile bleibt, und dass du das rohe Log siehst
+  (vorher konnte eine KI die bereinigten Zeilen für das ganze Log halten).
 - `2026-10-30 14:47 UTC` · `v3.3.0` **Die Token-Messung der Ditto-Bewertung zählt, was sie soll** ([Design](docs/DESIGN_DE.md#ditto-die-lokale-laufzeit-und-die-llm-schicht)):
   Dittos Zusammenfassung eines langen Gesprächs (Verdichtung) ist eine eigene Anfrage, sie nimmt und verschiebt die
   Kette der Cache-Diagnose von Anthropic also nicht mehr: Die nächste echte Runde wird mit der letzten echten Runde
