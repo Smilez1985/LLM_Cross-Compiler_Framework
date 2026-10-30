@@ -292,3 +292,65 @@ def test_one_real_doorbell_over_loopback(tmp_path):
     connect = server.connects[0]
     assert b"MQTT" in connect and b"home/v1/status" in connect and b"offline" in connect, "the last will"
     assert b"builder" in connect and SECRET.encode() in connect   # the password goes only to this computer
+
+
+# --- the connection goes only to the checked addresses (the locality rule's pinned connection) ---------------------
+
+@pytest.fixture
+def dialled(monkeypatch):
+    """Every address the real MQTT client opens a TCP connection to; the connection itself fails (no network)."""
+    from orchestrator.utils import locality
+    calls = []
+
+    def create_connection(address, *a, **kw):
+        calls.append(tuple(address[:2]))
+        raise ConnectionRefusedError("no network in tests")
+    monkeypatch.setattr(socket, "create_connection", create_connection)
+    locality.clear_cache()
+    yield calls
+    locality.clear_cache()
+
+
+def test_offline_mode_connects_only_to_the_checked_local_addresses(monkeypatch, dialled):
+    """A broker name with a local and a public address counts as local by its local address only (the one locality
+    rule): the connection goes to that address, never to the name (the system resolver could answer with the public
+    one) and never to the public address. The certificate is still checked against the name."""
+    pytest.importorskip("aiomqtt")
+    from orchestrator.utils import locality
+    monkeypatch.setattr(locality, "_system_lookup", lambda host: {
+        "broker.lan": ["192.168.1.20", "203.0.113.9"]}[host])
+    config = Config(mqtt_broker_url="mqtts://broker.lan:8883", offline_mode=True)
+    b = Doorbell(config, lambda: SECRET)
+    assert not b.ring(payload({"request_id": REQ, "end_reason": "done"}))
+    assert dialled and set(dialled) == {("192.168.1.20", 8883)}, dialled
+    assert b.last_problem and SECRET not in b.last_problem
+
+
+def test_a_localhost_name_goes_to_the_loopback_addresses(dialled):
+    """Plain mqtt to the name localhost (the password without TLS): the connection goes to the loopback addresses,
+    so no resolver decides where the password goes."""
+    pytest.importorskip("aiomqtt")
+    config = Config(mqtt_broker_url="mqtt://localhost:1883")
+    b = Doorbell(config, lambda: SECRET)
+    assert not b.ring(payload({"request_id": REQ, "end_reason": "done"}))
+    assert dialled and set(dialled) <= {("127.0.0.1", 1883), ("::1", 1883)}, dialled
+
+
+def test_a_real_doorbell_to_the_name_localhost_arrives_over_the_pinned_connection(tmp_path):
+    pytest.importorskip("aiomqtt")
+    server = MiniBroker()
+    server.start()
+    config = Config(mqtt_broker_url=f"mqtt://localhost:{server.port}", mqtt_topic_prefix="home")
+    b = Doorbell(config, lambda: None, state_dir=tmp_path)
+    assert b.ring(payload({"request_id": REQ, "end_reason": "failed"})), b.last_problem
+    server.join(10)
+    assert [p[0] for p in server.publishes][1:3] == [f"home/v1/build/{REQ}/end", "home/v1/events"]
+
+
+def test_online_a_tls_broker_name_is_left_to_the_system(dialled):
+    """Online, a TLS broker outside this computer is reached by its name as before (no locality rule applies)."""
+    pytest.importorskip("aiomqtt")
+    config = Config(mqtt_broker_url="mqtts://broker.example.org:8883")
+    b = Doorbell(config, lambda: None)
+    assert not b.ring(payload({"request_id": REQ, "end_reason": "done"}))
+    assert dialled == [("broker.example.org", 8883)]

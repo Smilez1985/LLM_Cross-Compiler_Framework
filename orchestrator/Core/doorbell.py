@@ -22,7 +22,11 @@ mqtt_broker_url (empty: no doorbell; mqtt://host:port or mqtts://host:port), mqt
 
 Locality (utils/locality, the one rule): in offline mode only a broker that counts as local; TLS (mqtts, the
 certificate checked) for every broker that is not this computer (loopback); plain mqtt only on loopback, so a
-password never leaves this computer without TLS.
+password never leaves this computer without TLS. The connection goes only to the addresses the rule checked
+(pinned_addresses, as every other connection of offline mode: utils/locality.connect_addresses): in offline mode the
+local addresses of the broker's name (never a public one of a name with both), and the loopback addresses for the
+name localhost, so no resolver decides where the doorbell and the password go; the certificate is still checked
+against the broker's name.
 
 The publisher runs on its own thread with a bounded queue and timeouts: a broker that is down never blocks or fails
 a build; a failure is logged without the password and kept for Mojo's check line (doorbell_status.json in the per-user
@@ -35,11 +39,12 @@ import json
 import os
 import queue
 import re
+import socket
 import ssl
 import threading
 import time
 import weakref
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
@@ -85,6 +90,9 @@ class Broker:
     username: str = ""
     prefix: str = DEFAULT_PREFIX
     ca_file: str = ""
+    # The checked addresses the connection goes to (pinned_addresses); empty: the host itself (an address, or a name
+    # online, which the system resolves)
+    addresses: Tuple[str, ...] = ()
 
     @property
     def tls(self) -> bool:
@@ -162,6 +170,46 @@ def check_broker(broker: Broker, config: Any, *, password: bool = False,
     del password   # with TLS beyond loopback, a password is sent only over TLS (or never leaves this computer)
 
 
+def pinned_addresses(broker: Broker, config: Any) -> Tuple[str, ...]:
+    """The addresses a connection to `broker` may go to, in turn (utils/locality.connect_addresses, from the check's
+    cache): the loopback addresses of the name localhost; in offline mode the checked local addresses of a name
+    (never its public ones); () for an address (it is its own) and for a name online (the system resolves it).
+    DoorbellRefused "offline" when the name no longer counts as local."""
+    from orchestrator.utils.locality import LocalityRefused, connect_addresses, offline_mode, parse_address
+    if parse_address(broker.host) is not None:
+        return ()
+    if _is_loopback(broker, config):
+        return connect_addresses(broker.host, None, "the MQTT doorbell")
+    if not offline_mode(config):
+        return ()
+    try:
+        return connect_addresses(broker.host, config, "the MQTT doorbell")
+    except LocalityRefused as e:
+        raise DoorbellRefused(str(e), "offline") from None
+
+
+def _pin(paho_client: Any, broker: Broker) -> None:
+    """The paho client opens its TCP connection only to broker.addresses, tried in turn (the TLS layer still checks
+    the certificate against the broker's name); every one failed: the lookup is dropped (locality.forget)."""
+    from orchestrator.utils.locality import forget
+    if not callable(getattr(paho_client, "_create_socket_connection", None)):
+        raise RuntimeError("the MQTT client cannot be held to the checked addresses")
+
+    def connect() -> socket.socket:
+        failed: Optional[OSError] = None
+        source = (getattr(paho_client, "_bind_address", ""), getattr(paho_client, "_bind_port", 0))
+        for address in broker.addresses:
+            try:
+                return socket.create_connection((address, broker.port),
+                                                timeout=getattr(paho_client, "_connect_timeout", CONNECT_TIMEOUT),
+                                                source_address=source)
+            except OSError as e:   # the next checked address
+                failed = e
+        forget(broker.host)
+        raise failed or OSError("no checked address")
+    paho_client._create_socket_connection = connect
+
+
 def topics(prefix: str, request_id: str) -> Tuple[str, str]:
     """(the build's topic, the feed topic); ValueError for a prefix or request id outside their patterns."""
     if not PREFIX_RE.fullmatch(prefix or "") or not REQUEST_ID_RE.fullmatch(request_id or ""):
@@ -204,10 +252,13 @@ def aiomqtt_client(broker: Broker, password: Optional[str]):
     """The real client: aiomqtt.Client with the last will "offline" (retained) on the status topic."""
     import aiomqtt
     will = aiomqtt.Will(status_topic(broker.prefix), payload="offline", qos=QOS, retain=True)
-    return aiomqtt.Client(hostname=broker.host, port=broker.port, username=broker.username or None,
-                          password=password or None, tls_context=tls_context(broker) if broker.tls else None,
-                          will=will, timeout=CONNECT_TIMEOUT, identifier=f"llmcf-{os.getpid()}",
-                          protocol=aiomqtt.ProtocolVersion.V311)
+    client = aiomqtt.Client(hostname=broker.host, port=broker.port, username=broker.username or None,
+                            password=password or None, tls_context=tls_context(broker) if broker.tls else None,
+                            will=will, timeout=CONNECT_TIMEOUT, identifier=f"llmcf-{os.getpid()}",
+                            protocol=aiomqtt.ProtocolVersion.V311)
+    if broker.addresses:
+        _pin(getattr(client, "_client", None), broker)
+    return client
 
 
 ClientFactory = Callable[[Broker, Optional[str]], Any]
@@ -326,6 +377,7 @@ class Doorbell:
                 return False
             password = self._password()
             check_broker(broker, self.config, password=bool(password))
+            broker = replace(broker, addresses=pinned_addresses(broker, self.config))
             send_now(broker, password, body, self._factory)
         except DoorbellRefused as e:
             self._record(False, str(e), e.code)
@@ -460,5 +512,5 @@ def attach_doorbell(framework: Any) -> Optional[Doorbell]:
 
 
 __all__ = ["SETTINGS", "PASSWORD_SECRET", "DEFAULT_PREFIX", "Broker", "Doorbell", "DoorbellRefused", "broker_of",
-           "check_broker", "apply_settings", "topics", "status_topic", "payload", "send_now", "send_test_doorbell",
-           "attach_doorbell", "read_status", "password_of", "TEST_REQUEST_ID"]
+           "check_broker", "pinned_addresses", "apply_settings", "topics", "status_topic", "payload", "send_now",
+           "send_test_doorbell", "attach_doorbell", "read_status", "password_of", "TEST_REQUEST_ID"]

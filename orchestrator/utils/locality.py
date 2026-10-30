@@ -6,7 +6,8 @@ what their own network allows (no patronizing). Every offline decision that reac
 provider's address (llm/client.py, llm/settings_change.py), Ollama's or a custom server's address, the pinned
 llama.cpp source from a mirror and LLAMA_CPP_REPO_OVERRIDE (runtime/build/source.py, Core/builder.py), the runtime's
 downloads (security/http.LocalOnlyAdapter), a Qdrant server (Core/rag_manager.py), the sign-in check
-(llm/auth/signin.py) and a crawl the person starts (Core/crawler_manager.py).
+(llm/auth/signin.py), the build doorbell's MQTT broker (Core/doorbell.py) and a crawl the person starts
+(Core/crawler_manager.py).
 
 Two questions, one rule (round 26 Q3):
 - check_reach(url, config): may offline mode reach this? The person's opt-outs (rule d) count.

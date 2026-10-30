@@ -45,7 +45,9 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   are yours alone, the password is kept only in the credential vault (`mqtt_password`), plain `mqtt://` works only on
   this computer (the name `localhost` or a loopback address; a name under `.localhost` goes to the system resolver
   and needs `mqtts://` like every other broker) and every other broker needs `mqtts://` with its certificate checked;
-  in offline mode only a local broker. A program that ends right after a build (every `llm-cli build start`) still
+  in offline mode only a local broker, and the connection goes only to the addresses the locality rule checked (the
+  local ones of a name with local and public addresses; the loopback addresses for `localhost`), never to whatever
+  the system resolver answers later; the certificate is still checked against the broker's name. A program that ends right after a build (every `llm-cli build start`) still
   sends its doorbell and writes its chat row first, at most 15 s more. New dependencies, pinned with hashes: aiomqtt 2.5.1 (BSD-3-Clause) and paho-mqtt 2.1.0 (EPL-2.0 or
   EDL-1.0), loaded only when a doorbell is sent.
 - `2026-10-30 12:56 UTC` · `v3.3.0` **Every build's end in the chat, once** ([design](docs/DESIGN.md#mcp-server-tools-and-permissions)):

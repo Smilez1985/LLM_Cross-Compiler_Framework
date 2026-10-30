@@ -50,7 +50,10 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   das Passwort liegt nur im Tresor für Zugangsdaten (`mqtt_password`), einfaches `mqtt://` geht nur auf diesem
   Computer (der Name `localhost` oder eine Loopback-Adresse; ein Name unter `.localhost` geht an den Resolver des
   Systems und braucht `mqtts://` wie jeder andere Broker), jeder andere Broker braucht `mqtts://` mit geprüftem
-  Zertifikat; im Offline-Modus nur ein lokaler Broker. Ein Programm, das gleich nach einem Build endet (jedes
+  Zertifikat; im Offline-Modus nur ein lokaler Broker, und die Verbindung geht nur an die Adressen, die die
+  Lokalitätsregel geprüft hat (die lokalen eines Namens mit lokalen und öffentlichen Adressen; die Loopback-Adressen
+  für `localhost`), nie an das, was der Resolver des Systems später antwortet; das Zertifikat wird weiter gegen den
+  Namen des Brokers geprüft. Ein Programm, das gleich nach einem Build endet (jedes
   `llm-cli build start`), sendet seine Türklingel und schreibt seine Chat-Zeile vorher noch, höchstens 15 s länger.
   Neue Abhängigkeiten, mit Hashes festgelegt: aiomqtt 2.5.1 (BSD-3-Clause) und paho-mqtt 2.1.0 (EPL-2.0 oder
   EDL-1.0), geladen nur, wenn eine Türklingel gesendet wird.
