@@ -242,3 +242,19 @@ def test_waiting_for_a_board_behind_a_jump_does_not_ask_its_port_directly(tmp_pa
     (tmp_path / "other").mkdir()
     plain = _session(state(tmp_path / "other"), reachable=lambda host, port: False)
     assert plain._port_open() is False
+
+
+def test_a_deploy_bound_to_a_fingerprint_behind_a_jump_names_the_jump_not_paramiko(tmp_path, monkeypatch):
+    """paramiko is installed here: the reason is the jump, which only OpenSSH can take and which checks known_hosts
+    only, never a missing package."""
+    from orchestrator.Core import deployment_manager as dmod
+    folder = state(tmp_path)
+    write_block(folder, [f"ProxyJump {JUMP}"])
+    package = tmp_path / "deploy_model_1.zip"
+    package.write_bytes(b"PK")
+    manager = dmod.DeploymentManager(_Framework(folder))
+    monkeypatch.setattr(dmod, "PARAMIKO_AVAILABLE", True)
+    monkeypatch.setattr(manager, "_deploy_system", lambda *a, **k: pytest.fail("bound to a fingerprint: no deploy"))
+    result = manager._deploy_package(package, BOARD, "pi", expect_fingerprint="SHA256:" + "A" * 43)
+    assert not result.success and "jump host or a proxy command" in result.reason
+    assert "'paramiko' package" not in result.reason
