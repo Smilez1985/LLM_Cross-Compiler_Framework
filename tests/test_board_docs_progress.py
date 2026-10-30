@@ -359,6 +359,7 @@ def test_dittos_recommended_settings_keep_the_persons_choice_and_are_marked(buil
     mark. It fills through the build form now: the person's values stay, Ditto's are marked and undoable."""
     from orchestrator.gui.form_surface import is_marked
     builder.format_combo.setCurrentIndex(builder.format_combo.findData("gguf"))
+    before = builder.opt_combo.currentText()   # the board profile's level (round 23 item 10), BALANCED before it
     builder.quant_combo.setCurrentText("Q5_K_M")
     builder.gui_form.person_edited("quantization")
     builder._on_ai_finished(True, {"format": "gguf", "quantization": "Q4_0", "optimization": "SPEED"}, "ok")
@@ -366,7 +367,7 @@ def test_dittos_recommended_settings_keep_the_persons_choice_and_are_marked(buil
     assert builder.opt_combo.currentText() == "SPEED" and is_marked(builder.opt_combo)
     assert "Q4_0" in builder.log_area.toPlainText() and "Your choice stays" in builder.log_area.toPlainText()
     builder.fill_banner.btn_undo.click()
-    assert builder.opt_combo.currentText() == "BALANCED"
+    assert builder.opt_combo.currentText() == before
 
 
 def test_the_log_view_keeps_at_most_its_limit(qapp, monkeypatch):

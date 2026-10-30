@@ -68,8 +68,12 @@ QUANT_SUGGESTIONS = {
     "rkllm": ["w4a16", "w4a16_g128", "w8a8", "w8a8_g256"],
     "rknn": ["fp16", "i8"],
 }
-# Ungated models that build without a Hugging Face token (offered after the user's recent models)
-MODEL_SUGGESTIONS = ["Qwen/Qwen3.5-0.8B", "Qwen/Qwen3.5-2B", "Qwen/Qwen3.5-4B", "HuggingFaceTB/SmolLM2-135M-Instruct"]
+# Ungated models that build without a Hugging Face token, offered after the user's recent models: the model
+# suggestions of the source catalogue (configs/project_sources.yml, sections tiny_models and models; small ones first),
+# as `llm-cli models suggestions` lists them. The field stays editable: any Hugging Face id or local path works.
+from orchestrator.Core.doc_sources import model_suggestions  # noqa: E402
+
+MODEL_SUGGESTIONS = [m.repo_id for m in model_suggestions()]
 
 class SSHConnectDialog(QDialog):
     """Simple Dialog to get SSH Credentials. recent: devices used before (newest first)."""
@@ -525,6 +529,15 @@ class BuilderTab(QWidget):
         self.opt_combo = QComboBox()
         self.opt_combo.setObjectName("combo_builder_optimization")
         self.opt_combo.addItems(["BALANCED", "SPEED", "SIZE", "AGGRESSIVE", "FAST"])  # every --optimization level
+        # The board profile's level until the person picks one (board_profiles.optimization_for)
+        self._opt_user_set = False
+        self.opt_combo.activated.connect(self._mark_opt_user_set)
+        # The board's optimization profile and benchmark rows, each marked measured or unmeasured
+        self.lbl_board_profile = plain_label("", self)
+        self.lbl_board_profile.setObjectName("lbl_builder_board_profile")
+        self.lbl_board_profile.setWordWrap(True)
+        self.lbl_board_profile.setVisible(False)
+        self._update_quant_options()
         # The queue orders by it; a failed critical build stops the pipeline (`build start --priority`)
         self.priority_combo = QComboBox()
         self.priority_combo.setObjectName("combo_builder_priority")
@@ -566,6 +579,7 @@ class BuilderTab(QWidget):
         self.lbl_quant.setObjectName("lbl_builder_quantization")
         build_layout.addRow(self.lbl_format, self.format_combo)
         build_layout.addRow("Board:", self.board_combo)
+        build_layout.addRow("", self.lbl_board_profile)
         build_layout.addRow(self.lbl_quant, self.quant_combo)
         build_layout.addRow("Optimization:", self.opt_combo)
         build_layout.addRow(ui_text("bld.builder.priority"), self.priority_combo)
@@ -973,15 +987,52 @@ class BuilderTab(QWidget):
     def _mark_quant_user_set(self, *_):
         self._quant_user_set = True
 
+    def _mark_opt_user_set(self, *_):
+        self._opt_user_set = True
+
+    def _board_data(self):
+        """The selected target's optimization profiles and benchmark rows (TargetManager.get_board_data), or None."""
+        tm = self.framework.get_component("target_manager") if self.framework and hasattr(self.framework,
+                                                                                        "get_component") else None
+        target = self.target_combo.currentData() if hasattr(self, "target_combo") else None
+        try:
+            return tm.get_board_data(target) if tm and target and hasattr(tm, "get_board_data") else None
+        except Exception:  # noqa: BLE001 - no profile: the plain lists
+            return None
+
+    def _show_board_profile(self, profile, data, board) -> None:
+        """The board line: the profile's recommendation and its benchmark rows with their source mark; the
+        optimization level follows the profile until the person picks one."""
+        from orchestrator.Core.board_profiles import row_text, rows_for
+        if not hasattr(self, "lbl_board_profile"):
+            return
+        if profile is None:
+            self.lbl_board_profile.setVisible(False)
+            return
+        rows = [row_text(r) for r in rows_for(data, board)]
+        self.lbl_board_profile.setText(ui_text(
+            "bld.board.profile", quants=", ".join(profile.recommended_quantization),
+            memory=profile.memory_profile.replace("_", " "), level=profile.optimization,
+            bench="; ".join(rows) if rows else ui_text("bld.board.no_bench")))
+        self.lbl_board_profile.setVisible(True)
+        if hasattr(self, "opt_combo") and not self._opt_user_set:
+            idx = self.opt_combo.findText(profile.optimization.upper())
+            if idx >= 0:
+                self.opt_combo.setCurrentIndex(idx)
+
     def _update_quant_options(self):
         current = self.quant_combo.currentText().strip()
         caps = self._capabilities()
         cap = caps.formats.get(self.format_combo.currentData()) if caps else None
         board = self._selected_board()
+        from orchestrator.Core.board_profiles import ordered_quantizations, profile_for
+        data = self._board_data() if cap else None
+        profile = profile_for(data, board)
         self.quant_combo.blockSignals(True)
         self.quant_combo.clear()
         if cap:
-            self.quant_combo.addItems(cap.quantizations_for(board))
+            # the board profile's recommended types first (round 23 item 10), then the rest the board accepts
+            self.quant_combo.addItems(ordered_quantizations(cap.quantizations_for(board), profile))
             default = cap.default_for(board)
         else:
             self.quant_combo.addItems(QUANT_SUGGESTIONS.get(self.format_combo.currentData(), []))
@@ -999,6 +1050,7 @@ class BuilderTab(QWidget):
             self._quant_user_set = False
         self.quant_combo.blockSignals(False)
         self._last_default_quant = default
+        self._show_board_profile(profile, data, board)
 
     DATASET_HINTS = {
         "gguf": "Plain text; used to compute the importance matrix.",

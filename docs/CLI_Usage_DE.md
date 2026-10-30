@@ -127,8 +127,10 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `knowledge storage` | Wo die Wissensbasis liegt (Qdrant Edge), die Umwandlung einer älteren und ihr alter Ordner: `convert`, `delete-old` |
 | `knowledge loose` / `knowledge sort` | Die losen Wissensdateien auflisten / eine nach den Paketprüfungen und deiner Bestätigung in einen Themen- oder Target-Ordner einsortieren und importieren |
 | `trash list` / `restore` / `empty` | Was Löschungen in den Papierkorb verschoben haben; Einträge zurücklegen; die ausgewählten endgültig löschen |
+| `models suggestions` | Die Modellvorschläge des Quellenkatalogs: genaue Hugging-Face-IDs, die kein Token brauchen, kleine Modelle zuerst |
 | `models take-over` | Was frühere Versionen des Hugging-Face-Browsers im Hugging-Face-Cache gespeichert haben, in den Modellordner kopieren, jede Datei geprüft, und danach das Entfernen der alten Kopien anbieten |
 | `targets list` / `targets validate` | Hardware-Targets mit ihren Boards und Formaten auflisten / prüfen, ob ein Target lädt und seine Capabilities gültig sind |
+| `targets boards` | Jedes Board eines Targets mit seinem Optimierungsprofil und seinen Benchmark-Zeilen (gemessen, veröffentlicht oder ungemessen) |
 | `build start` / `build status` | Ein Modell konvertieren und quantisieren / Builds zeigen, auch solche, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat |
 | `build save` | Einen Build, der im Build-Ordner des Frameworks wartet, im Ausgabeordner oder einem anderen Ordner speichern |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | Fertige Builds auflisten / einen Build in eine ZIP-Datei packen / sie auf ein Board laden und installieren |
@@ -455,6 +457,26 @@ den Quantisierungen je Format.
 In der GUI: **Build > Targets…** (dieselbe Liste, mit dem Unterstützungsgrad jedes Targets) oder **Targets…** neben
 der Target-Liste des Builders.
 
+### targets boards
+
+```
+llm-cli targets boards TARGET_NAME
+```
+
+Gibt jedes Board des Targets mit seinem Optimierungsprofil aus: die empfohlenen Quantisierungen (der Builder bietet
+sie zuerst an), das Speicherprofil, die Optimierungsstufe, mit der ein Build ohne `--optimization` beginnt, die
+llama.cpp-Optionen und Compiler-Flags, die das Build-Rezept für den SoC des Boards plant, und die CPU des Boards.
+Darunter stehen die Benchmark-Zeilen des Boards (Modell, Quantisierung, Werte) mit ihrer Quelle am Ende:
+`measured by llmcf (board <Name>, <Datum>)`, `published: <Adresse>` oder `unmeasured` (eine Schätzung; nie als Messung gezeigt).
+Exit-Code 2 für ein unbekanntes Target, 1, wenn seine Profile oder Benchmarks ungültig sind (`targets validate` nennt
+den Grund).
+
+```bash
+llm-cli targets boards Rockchip
+```
+
+In der GUI: **Build > Targets… > Boards…** (derselbe Text) und die Zeile unter der Board-Liste des Builders.
+
 ### targets validate
 
 ```
@@ -462,7 +484,9 @@ llm-cli targets validate TARGET_NAME
 ```
 
 Prüft, ob das Target lädt (per ID oder Ordnername) und ob sein Block `capabilities:` das Schema besteht, das GUI,
-CLI, Build-Service und Werkzeuge verwenden; jeder Schemafehler wird ausgegeben. Exit-Code 1, wenn das Target nicht
+CLI, Build-Service und Werkzeuge verwenden; jeder Schemafehler wird ausgegeben. Auch `optimization_profiles:` und
+`performance_benchmarks:` werden geprüft: ihr Schema, ihre Boards und Quantisierungen, keine Option, die etwas
+herunterlädt, und jedes Profil gegen den Plan des Build-Rezepts für seinen SoC (ein abweichender Wert wird genannt). Exit-Code 1, wenn das Target nicht
 gefunden wird oder seine Capabilities ungültig sind. Ein Target ohne Capabilities wird gemeldet, gilt aber als
 gültig.
 
@@ -499,10 +523,10 @@ Target ohne Capabilities-Block wird ungeprüft gebaut.
 | `-b, --board TEXT` | Board der Target-Familie, z. B. `rk3588`, `rk3576`, `rk3566`. Standard: das Standard-Board des Targets (Rockchip: `rk3588`). Groß- und Kleinschreibung spielt keine Rolle. |
 | `-q, --quantization TEXT` | Quantisierung, z. B. `Q4_K_M`, `IQ4_XS`, `F16` (GGUF), `w8a8`, `w4a16` (RKLLM), `fp16`, `i8` (RKNN). Standard: der Standard des Formats für das Board. Gängige Schreibweisen wie `INT8` werden übersetzt. |
 | `-o, --output TEXT` | Ordner, in dem das fertige Modell (Golden-Artefakt) gespeichert wird, relativ zum aktuellen Ordner; er wird angelegt, wenn es ihn noch nicht gibt. Standard: der Ausgabeordner ([`config output-folder`](#config-output-folder), `~/llmcf/output`). An einem Terminal ohne diese Angabe wirst du gefragt, mit dem Ausgabeordner als Vorgabe; `-` lässt den Build im Build-Ordner des Frameworks ([`build save`](#build-save) speichert ihn später). Ein Systemordner oder der Programmordner des Frameworks wird abgelehnt (Exit-Code 2). `--output-dir` ist der alte Name und geht weiter. |
-| `--optimization [fast\|balanced\|size\|speed\|aggressive]` | Optimierungsstufe (Standard `balanced`), wird den Build-Skripten als `OPTIMIZATION_LEVEL` übergeben. Die Rockchip-Skripte werten sie nicht aus. |
+| `--optimization [fast\|balanced\|size\|speed\|aggressive]` | Optimierungsstufe, wird den Build-Skripten als `OPTIMIZATION_LEVEL` übergeben. Standard: die Stufe des Optimierungsprofils des Boards (`targets boards`; etwa `size` bei einem RK3566), sonst `balanced`. Die Rockchip-Skripte werten sie nicht aus. |
 | `--priority [low\|normal\|high\|urgent\|critical]` | Position in der Build-Warteschlange dieses Prozesses (Standard `normal`). |
 | `--parallel` | Veraltet und in `--help` ausgeblendet: Hat keine Wirkung (ein Aufruf startet einen Build) und gibt eine Warnung aus. |
-| `-F, --follow` | Jede Stufe ausgeben, während der Build läuft. |
+| `-F, --follow` | Jede Stufe mit ihrem Prozentwert ausgeben, während der Build läuft (der Modell-Download: `Fetching model 37 % (1.2 GB of 3.4 GB)`). |
 | `--gpu / --no-gpu` | Die GPU des Hosts in den Container durchreichen (Standard aus): eine NVIDIA-GPU, wenn `nvidia-smi` gefunden wird, sonst `/dev/dri`, falls vorhanden. Rockchip-Konvertierungen brauchen das nicht. |
 | `--imatrix / --no-imatrix` | Importance Matrix für GGUF (Standard aus). Pflicht für `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ2_M`, `IQ3_XXS`, `IQ3_XS`, `Q2_K_S`. |
 | `--dataset PATH` | Deine eigene Kalibrierungsdatei (muss existieren): eine Textdatei für die GGUF-Importance-Matrix oder für RKLLM, eine Liste mit Beispieleingaben für RKNN `i8`. Ohne sie nutzt die Importance Matrix den mitgelieferten Kalibrierungstext. |
@@ -2792,6 +2816,17 @@ llm-cli trash empty --due
 ---
 
 ## models
+
+```
+llm-cli models suggestions [--json]
+```
+
+Listet die Modellvorschläge des Quellenkatalogs (`configs/project_sources.yml`, Abschnitte `tiny_models` und
+`models`): genaue Hugging-Face-IDs, die kein Token brauchen, kleine Modelle zuerst, jeweils mit der Größe der Gewichte,
+der empfohlenen Quantisierung, der Lizenz und dem Tag, an dem sie am Hub geprüft wurden. Ein gated Modell ist nie ein
+Vorschlag. Die Modell-Liste des Builders bietet dieselben nach deinen zuletzt verwendeten Modellen an; `--model` von
+`build start` nimmt auch jede andere Hugging-Face-ID oder ein lokales Modell. `--json` gibt die Liste für Skripte aus.
+KI-Clients lesen sie als Ressource `lcf://models/suggestions`.
 
 ```
 llm-cli models take-over

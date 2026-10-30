@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from orchestrator.Core import job_service
 from orchestrator.Core.builder import HF_REPO_ID, MODEL_FILE_SUFFIXES, ModelFormat, OptimizationLevel
+from orchestrator.schemas.targets import OPTIMIZATION_LEVELS as OPTIMIZATION_LEVEL_NAMES
 from orchestrator.Core.job_service import owner_actor
 from orchestrator.Core.orchestrator import (BuildQueueFull, BuildRequest, OrchestrationStatus, PriorityLevel,
                                             WorkflowState, WorkflowType)
@@ -260,10 +261,12 @@ class BuildService:
                     formats.append(FormatSummary(id=fid, label=cap.label, boards=caps.boards_for(fid),
                                                  default_quantization=cap.default_quantization,
                                                  quantizations=list(cap.quantizations)))
+            profiles, rows = self.board_data_out(tid)
             targets.append(TargetOut(id=tid, name=meta.get("name", tid),
                                      architecture=meta.get("architecture_family") or meta.get("architecture"),
                                      support_level=caps.support_level if caps else None,
-                                     boards=list(caps.boards) if caps else [], formats=formats))
+                                     boards=list(caps.boards) if caps else [], formats=formats,
+                                     board_profiles=profiles, benchmarks=rows))
         return TargetList(targets=targets)
 
     def _status_of(self, state: WorkflowState) -> BuildStatusOut:
@@ -292,6 +295,11 @@ class BuildService:
             request=RequestSummary(**getattr(state, "summary", {})) if getattr(state, "summary", None) else None)
 
     _RUNNING = (OrchestrationStatus.PREPARING, OrchestrationStatus.BUILDING, OrchestrationStatus.HEALING)
+
+    def live_progress(self, state: WorkflowState) -> Tuple[str, int]:
+        """(stage, percent) of a request with its running build counted in, as get_status shows them: for the CLI's
+        follow line, which reads the request's own state (request_state)."""
+        return self._live_progress(state)
 
     def _live_progress(self, state: WorkflowState) -> Tuple[str, int]:
         """The request's stage and percent with its running build counted in: the build engine's own step and percent
@@ -964,10 +972,54 @@ class BuildService:
         return self.start_build(request, local_paths=local_paths, owner=owner, disk_reservation=disk_reservation,
                                 dataset_sha256=named.sha256 if named is not None else None, **build_options)
 
+    # --- the board's optimization profile (Core/board_profiles.py) ----------------------------------------------
+
+    def board_data_out(self, target_id: str):
+        """(board -> OptimizationProfile, benchmark rows with their source label) of a target for list_targets and
+        get_target_capabilities; empty when it has none or they are invalid."""
+        from orchestrator.schemas.build import BenchmarkRowOut
+        try:
+            tm = self._targets()
+            data = tm.get_board_data(target_id) if hasattr(tm, "get_board_data") else None
+        except Exception:  # noqa: BLE001 - no profiles: the target is listed without them
+            data = None
+        if data is None:
+            return {}, []
+        rows = [BenchmarkRowOut(**r.model_dump(), source_label=r.source.label()) for r in data.performance_benchmarks]
+        return dict(data.optimization_profiles), rows
+
+    def board_profile(self, target: Optional[str], board: Optional[str]):
+        """The optimization profile of `board` of `target` (target.yml optimization_profiles), or None."""
+        from orchestrator.Core.board_profiles import profile_for
+        try:
+            tm = self._targets()
+            tid = tm.resolve(target) if hasattr(tm, "resolve") else target
+            data = tm.get_board_data(tid) if tid and hasattr(tm, "get_board_data") else None
+        except Exception:  # noqa: BLE001 - no profile: the plain defaults
+            return None
+        return profile_for(data, board)
+
+    def optimization_for(self, request: Any, optimization: Optional[str] = None) -> str:
+        """The optimization level of a build: the one given, else the board profile's level for the request's
+        target and board (the board the scripts fall back to when none is named), else balanced."""
+        from orchestrator.Core.board_profiles import optimization_for
+        if optimization:
+            return optimization_for(None, optimization) if str(optimization).strip().lower() in \
+                OPTIMIZATION_LEVEL_NAMES else str(optimization)
+        board = getattr(request, "board", None)
+        target = getattr(request, "target", None)
+        if not board and target:
+            try:
+                caps = self._targets().get_capabilities(self.resolve_target(target))
+                board = caps.normalize(str(getattr(request, "format", "") or ""), None, None)[1] if caps else None
+            except Exception:  # noqa: BLE001
+                board = None
+        return optimization_for(self.board_profile(target, board))
+
     # --- identical builds (DECISIONS, eighth round, N11) -------------------------------------------------------
 
     def request_options(self, req: BuildRequestIn, inputs: Optional[LocalInputs] = None, *,
-                        revision: Optional[str] = None, optimization: str = "balanced",
+                        revision: Optional[str] = None, optimization: Optional[str] = None,
                         model_task: str = "LLM") -> Dict[str, Any]:
         """The chosen options of a validated request (build_identity), as the build engine will record them: the
         model by its repo id and `revision` (the commit the build would fetch; None when not known yet), a local
@@ -998,12 +1050,12 @@ class BuildService:
             weights=build_identity.local_weights(local) if local is not None else None,
             target=req.target, target_sha256=target_sha, board=req.board, fmt=req.format,
             quantization=req.quantization, imatrix=imatrix, dataset_sha256=dataset,
-            optimization=str(optimization or "balanced").lower(), max_context_length=req.max_context_length,
+            optimization=self.optimization_for(req, optimization).lower(), max_context_length=req.max_context_length,
             use_gpu=req.use_gpu, model_task=model_task,
             hardware_sha256=build_identity.text_sha256(self.probe_text(req.probe)))
 
     def earlier_builds(self, request: BuildRequestIn, *, revision: Optional[str] = None,
-                       optimization: str = "balanced", local_paths: bool = False, model_task: str = "LLM"):
+                       optimization: Optional[str] = None, local_paths: bool = False, model_task: str = "LLM"):
         """Finished builds whose recorded options are 100 % those of this request (build_identity.EarlierBuild,
         identical ones first). `revision`: the commit the build would fetch (looked up by check_build_request); without
         it a build with the same options is "commit_unchecked", never identical. Nothing is skipped here: the caller
@@ -1209,7 +1261,7 @@ class BuildService:
                                     next="Use one of: low, normal, high, urgent, critical.") from None
 
     def start_build(self, request: BuildRequestIn, *, local_paths: bool = False, owner: str = "",
-                    optimization: str = "balanced", disk_reservation: str = "",
+                    optimization: Optional[str] = None, disk_reservation: str = "",
                     dataset_sha256: Optional[str] = None, priority: Any = "normal",
                     output_dir: Optional[str] = None, parallel_builds: bool = False,
                     description: str = "Build service request") -> BuildHandle:
@@ -1220,9 +1272,9 @@ class BuildService:
         recipe's pin), checked by the build engine on the copy it uses. Only the person's own callers (`local_paths`)
         set `output_dir`, the folder the finished build is saved to (default: the output folder), and a `priority`
         other than normal (a PriorityLevel or its name); `parallel_builds` and `description` as their windows set
-        them."""
+        them. `optimization`: the level; without one the board profile's (optimization_for), else balanced."""
         try:
-            level = OptimizationLevel(str(optimization or "balanced").lower())
+            level = OptimizationLevel(str(optimization).lower()) if optimization else None
         except ValueError:
             raise BuildServiceError(f"Unknown optimization level '{optimization}'.", code="invalid_value",
                                     next="Use one of: fast, balanced, size, speed, aggressive.",
@@ -1234,6 +1286,8 @@ class BuildService:
                                     next="Leave them out; the build goes to the output folder.",
                                     field="output_dir" if output_dir is not None else "priority")
         req, inputs = self._validated(request, local_paths)
+        if level is None:
+            level = OptimizationLevel(self.optimization_for(req))
         build_request = BuildRequest(
             request_id="",
             workflow_type=WorkflowType.SIMPLE_CONVERSION,

@@ -35,9 +35,9 @@ from orchestrator.Core.module_generator import (ARCHITECTURES, DEFAULT_BASE, INP
 from orchestrator.Core.module_generator import record_module_saved  # noqa: F401
 from orchestrator.runtime.probe_service import (IMPORT_NEXT, LIST_LIMIT, LOCAL_ID, PROBE_TIMEOUT, HardwareProbes,
                                                 ProbeError, match_target)
-from orchestrator.schemas.build import TargetOut
+from orchestrator.schemas.build import BenchmarkRowOut, TargetOut
 from orchestrator.schemas.modules import PackageSourceIn, PinnedDownloadIn
-from orchestrator.schemas.targets import TargetCapabilities, TargetIn
+from orchestrator.schemas.targets import OptimizationProfile, TargetCapabilities, TargetIn
 from orchestrator.tools.facts_catalog import warn
 from orchestrator.tools.grants import tool_rule
 from orchestrator.tools.output import ToolOutput, UntrustedText, count, fact, untrusted_text
@@ -88,6 +88,12 @@ class TargetDetailsOut(TargetCapabilitiesOut):
     base_image_reason: Optional[untrusted_text(1000)] = None
     checked_files: bool = False
     problems: List[UntrustedText] = Field(default_factory=list, description="Problems found by check_files")
+    board_profiles: Dict[str, OptimizationProfile] = Field(
+        default_factory=dict, description="Per board: the llama.cpp options the build recipe plans for it, and the "
+                                          "recommended quantizations, memory profile and optimization level")
+    benchmarks: List[BenchmarkRowOut] = Field(default_factory=list,
+                                              description="Benchmark rows of target.yml, each with its source "
+                                                          "(measured, published or unmeasured)")
 
 
 class ProbeIn(BaseModel):
@@ -323,6 +329,7 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
                                base_image=str(meta["base_image"]) if meta.get("base_image") else None,
                                base_image_reason=(str(meta["base_image_reason"]) if meta.get("base_image_reason")
                                                   else None))
+        out.board_profiles, out.benchmarks = service.board_data_out(tid)
         if inp.check_files:
             folder = m.get("folder")
             if folder is None:

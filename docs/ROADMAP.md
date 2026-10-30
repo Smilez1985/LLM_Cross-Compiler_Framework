@@ -20,14 +20,14 @@ decisions it comes from.
 
 | Version | Theme | Status |
 |---|---|---|
-| 3.2.0 | Ditto's context, the board bundle, the device runtime and more hardware | in progress |
+| Rest of 3.2.0 | Ditto's context, the board bundle, the device runtime and more hardware | in progress |
 | next | Build service, queue and modes | planned |
 | 3.3.0 | LoRA and large models | planned |
 | 3.4.0 | Supply chain and community | planned |
 | later | Rust parts for the network and the board | planned |
 | later | More hardware and MCP extensions | planned |
 
-## 3.2.0 - Ditto's context, the board bundle, the device runtime and more hardware (in progress)
+## Rest of 3.2.0 - Ditto's context, the board bundle, the device runtime and more hardware (in progress)
 
 This version comes in this order: Ditto's context first, the board bundle next to it, then the gateway, voice and MCP
 on the board. The first hardware sets the priorities for the device runtime: RK3566 boards, NVIDIA RTX GPUs and the

@@ -25,6 +25,7 @@ from orchestrator.utils.localization import current_language, ui_text
 CLI_PATHS: Dict[str, str] = {
     "targets list": "act_build_targets",
     "targets validate": "btn_builder_check_target",           # also Build > Targets... > Check target
+    "targets boards": "act_build_targets",                    # Build > Targets... > Boards...
     "module create": "act_tools_module_wizard",               # Tools > Create Hardware Module...
     "module create --name": "act_tools_module_wizard",
     "module create --arch": "act_tools_module_wizard",

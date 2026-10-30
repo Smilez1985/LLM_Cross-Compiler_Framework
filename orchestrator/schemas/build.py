@@ -5,7 +5,8 @@ from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from orchestrator.schemas.targets import SupportLevel
+from orchestrator.schemas.targets import (OPTIMIZATION_LEVELS, BenchmarkEntry, OptimizationProfile,  # noqa: F401
+                                          SupportLevel)  # OPTIMIZATION_LEVELS: its old place
 from orchestrator.tools.output import Untrusted, UntrustedText, untrusted_text
 
 # Fields with external text are marked (UntrustedText): build logs and stage names come from the build container,
@@ -42,15 +43,13 @@ class BuildRequestIn(BaseModel):
                                              "stored probe of a board of this SoC, if there is one")
 
 
-OPTIMIZATION_LEVELS = ("fast", "balanced", "size", "speed", "aggressive")
-
-
 class StartBuildIn(BuildRequestIn):
     """start_build and check_build_request: a build request plus the optimization level (the GUI and the CLI offer
-    the same five; the default is balanced)."""
-    optimization: Literal["fast", "balanced", "size", "speed", "aggressive"] = Field(
-        default="balanced", description="Optimization level of the conversion: fast, balanced, size, speed or "
-                                        "aggressive (default balanced)")
+    the same five; without one the board's optimization profile decides, else balanced)."""
+    optimization: Optional[Literal["fast", "balanced", "size", "speed", "aggressive"]] = Field(
+        default=None, description="Optimization level of the conversion: fast, balanced, size, speed or aggressive; "
+                                  "omitted: the level of the board's optimization profile "
+                                  "(get_target_capabilities), else balanced")
 
 
 class CheckBuildIn(StartBuildIn):
@@ -178,6 +177,12 @@ class FormatSummary(BaseModel):
     quantizations: List[str]
 
 
+class BenchmarkRowOut(BenchmarkEntry):
+    source_label: untrusted_text(600) = Field(default="", description="Where the numbers come from: measured on a board "
+                                                                       "by the framework, published, or unmeasured (an "
+                                                                       "estimate, never a measurement)")
+
+
 class TargetOut(BaseModel):
     id: str
     name: untrusted_text(200)  # from target.yml (a community target pack can install one)
@@ -185,6 +190,11 @@ class TargetOut(BaseModel):
     support_level: Optional[SupportLevel] = None
     boards: List[str] = Field(default_factory=list)
     formats: List[FormatSummary] = Field(default_factory=list)
+    board_profiles: Dict[str, OptimizationProfile] = Field(
+        default_factory=dict, description="Per board: the llama.cpp options the build recipe plans for it, and the "
+                                          "recommended quantizations, memory profile and optimization level")
+    benchmarks: List[BenchmarkRowOut] = Field(default_factory=list,
+                                              description="Benchmark rows of target.yml, each with its source")
 
 
 class TargetList(BaseModel):

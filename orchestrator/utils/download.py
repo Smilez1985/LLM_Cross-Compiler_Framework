@@ -326,3 +326,65 @@ class PinnedDownloader:
                 return bytes(data)
         except (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError) as e:
             raise self.error(f"Download of {name} failed: {e.__class__.__name__}") from e
+
+
+class SnapshotProgress:
+    """The progress of a download of several files (a model snapshot): bytes done of the total over all files, from
+    the per-file progress callback of PinnedDownloader / HubFetcher (`file_progress(name, have, size)`, where `have`
+    counts the bytes of a resumed .part file too). `already`: the bytes of each file already on disk before the
+    download starts (a complete file or a .part file), so a resumed download starts at its real share. `report(done,
+    total)` is called at most every `every` seconds (and once the percent changed), never for every chunk; `total` is
+    None when a size is unknown (then bytes only, no percent). `finish(name)` counts a file as complete."""
+
+    def __init__(self, sizes: Dict[str, Optional[int]], report: Callable[[int, Optional[int]], None], *,
+                 already: Optional[Dict[str, int]] = None, every: float = 1.0,
+                 clock: Callable[[], float] = time.monotonic):
+        self._sizes = dict(sizes)
+        known = all(isinstance(s, int) and s >= 0 for s in self._sizes.values())
+        self.total: Optional[int] = sum(self._sizes.values()) if known else None
+        self._done: Dict[str, int] = {name: max(0, int(n)) for name, n in (already or {}).items() if name in sizes}
+        self._report, self._every, self._clock = report, every, clock
+        self._last_time: Optional[float] = None
+        self._last_percent: Optional[int] = None
+        self._finished: set = set()
+
+    @property
+    def done(self) -> int:
+        return sum(self._done.values())
+
+    def percent(self) -> Optional[int]:
+        if self.total is None:
+            return None
+        return 100 if self.total == 0 else min(100, self.done * 100 // self.total)
+
+    def _maybe_report(self, force: bool = False) -> None:
+        now = self._clock()
+        percent = self.percent()
+        due = self._last_time is None or now - self._last_time >= self._every
+        if force or (due and (percent is None or percent != self._last_percent)):
+            self._last_time, self._last_percent = now, percent
+            self._report(self.done, self.total)
+
+    def start(self) -> None:
+        """The first report (the bytes already there)."""
+        self._maybe_report(force=True)
+
+    def file_progress(self, name: str, have: int, size: Optional[int] = None) -> None:
+        self._done[name] = max(self._done.get(name, 0), int(have or 0))
+        self._maybe_report()
+
+    def finish(self, name: str) -> None:
+        size = self._sizes.get(name)
+        if isinstance(size, int):
+            self._done[name] = size
+        self._finished.add(name)
+        self._maybe_report(force=len(self._finished) >= len(self._sizes))   # the last file: always the final report
+
+
+def snapshot_progress_text(done: int, total: Optional[int]) -> str:
+    """'37 % (1.2 GB of 3.4 GB)', or the bytes alone when the total is not known."""
+    from orchestrator.utils.sizes import format_size
+    if total is None:
+        return format_size(done, "en")
+    percent = 100 if total == 0 else min(100, done * 100 // total)
+    return f"{percent} % ({format_size(done, 'en')} of {format_size(total, 'en')})"

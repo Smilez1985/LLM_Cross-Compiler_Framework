@@ -18,6 +18,28 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   `start_build` schon konnte und wie der Builder-Tab und die CLI es tun: Sie wird vor der Frage geprüft (die Probe
   eines anderen Boards wird abgelehnt), und der Build wird genau auf diese Probe abgestimmt. Ohne sie die neueste
   gespeicherte Probe eines Boards des SoC des Rezepts, wie bisher.
+- `2026-10-29 23:59 UTC` · `v3.2.0` **Modellvorschläge aus dem Quellenkatalog** (Konsolidierungskette models-data; die Modellliste der Entscheidung, die
+  ungenutzten Daten nutzbar zu machen, Punkt 10): Die Abschnitte `models` und `tiny_models` der
+  `configs/project_sources.yml` sind durch aktuelle Hugging-Face-Repositorys mit genauen IDs ersetzt, jedes über die
+  Hub-API geprüft (ID, Größe der Gewichtsdateien, Lizenz, Gating, Prüfdatum), mit einer empfohlenen Quantisierung; die
+  veralteten Einträge aus 2024 und 2025 (TinyLlama 1.1B, Qwen1.5 0.5B, h2o-danube 1.8B, Phi-3-mini) sind entfernt, und
+  das eine gated Modell (Llama 3.2 3B) steht in der Liste, wird aber nie vorgeschlagen.
+  `orchestrator/Core/doc_sources.py`, der Leser des Katalogs, liefert sie als `model_suggestions()` (kleine Modelle
+  zuerst): Die Modell-Liste des Builders bietet sie nach den zuletzt verwendeten Modellen an (das Feld bleibt
+  editierbar), das neue `llm-cli models suggestions [--json]` listet sie, und KI-Clients lesen sie als Ressource
+  `lcf://models/suggestions`. `scripts/validate_ssot.py` liest `configs/project_sources.yml` (vorher eine
+  `project_sources.yml` im aktuellen Ordner) und prüft den Abschnitt: genaue IDs, Größen, Quantisierungstypen, Gating,
+  Daten, keine ID doppelt. Der Kopf des Katalogs sagt jetzt, wer ihn liest.
+- `2026-10-30 00:05 UTC` · `v3.2.0` **Der Modell-Download eines Builds zeigt einen Prozentwert** (Konsolidierungskette models-data; Entscheidungspunkt
+  12): Während ein Build sein Modell von Hugging Face lädt, sagt seine Stufe, wie weit der Download über alle Dateien
+  des Snapshots ist, „Fetching model 37 % (1.2 GB of 3.4 GB)“, und sein Prozentwert läuft dabei von 40 bis 50 (vorher
+  eine Protokollzeile „Downloading ...“ und ein Prozentwert, der stillstand). Die Bytes kommen aus dem
+  Fortschritts-Callback des Hugging-Face-Fetchers über das neue `orchestrator/utils/download.SnapshotProgress`
+  (höchstens eine Aktualisierung pro Sekunde, nie eine pro Block); Dateien und `.part`-Dateien, die von einem früheren
+  Versuch schon da sind, zählen von Anfang an mit; bei einer Größe, die der Hub nicht nennt, zeigt die Stufe die Bytes
+  ohne Prozentwert; nach einem Abbruch wird nichts mehr geschrieben. Der Fortschrittsbalken des Builders,
+  `get_build_status` und `llm-cli build start --follow` zeigen ihn; die Follow-Zeile trägt jetzt Stufe und Prozentwert
+  des laufenden Builds (`BuildService.live_progress`).
 
 ### Geändert
 - `2026-10-29 23:31 UTC` · `v3.2.0` **Eine Install-Regel für die ganze RHEL-Familie** ([Design](docs/DESIGN_DE.md#installer-plattformen-und-abhängigkeiten)):
@@ -56,6 +78,30 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   eine kurze Liste der Version in Arbeit (übernommene Punkte, Dittos Kontext, das Board-Bündel, Laufzeit auf dem
   Gerät und mehr Hardware, Entschiedenes, das auf seine Reihe wartet) und dessen, was danach kommt, mit Verweis auf
   die vollständige Roadmap.
+- `2026-10-29 23:54 UTC` · `v3.2.0` **Die Optimierungsprofile und Benchmark-Zeilen der `target.yml` sind korrigiert und werden genutzt**
+  (Konsolidierungskette models-data; die Entscheidung, die ungenutzten Daten nutzbar zu machen, Punkt 10): Jedes Board
+  des Rockchip-Targets hat ein Optimierungsprofil (Schema `OptimizationProfile` in `orchestrator/schemas/targets.py`,
+  gelesen vom neuen `orchestrator/Core/board_profiles.py`), dessen Quellseite das ist, was das Build-Rezept für einen
+  Cross-Build seines SoC plant: `GGML_NATIVE` OFF, `GGML_CPU_ARM_ARCH` und `-march=armv8.2-a+dotprod+fp16` für RK3566,
+  RK3568 und RK3588, `armv8-a` für den RK3576 (Cortex-A72 und A53); die alten Werte waren für aarch64 falsch
+  (`-mfpu=neon-fp-armv8` ist eine AArch32-Option, `-DGGML_NATIVE=ON` nimmt die CPU des Build-Rechners). Das Rezept
+  bleibt der eine Planer: `llm-cli targets validate` (und ein Test für jedes mitgelieferte Board) plant den Build aus
+  einer Referenz-Probe des SoC und nennt jeden abweichenden Wert, und lehnt `-mfpu`, `GGML_NATIVE` ON, `native`-Flags
+  und Download-Optionen ab. Die Zielseite (empfohlene Quantisierungen, Speicherprofil, Optimierungsstufe) speist den
+  Build: Der Builder listet die empfohlenen Quantisierungen zuerst und stellt **Optimization** auf die Stufe des
+  Profils, bis die Person selbst eine wählt; `llm-cli build start --optimization` und
+  `start_build`/`check_build_request` nehmen ohne Angabe die Stufe des Profils (sonst balanced; vorher immer balanced).
+  Jede Benchmark-Zeile nennt jetzt ihre Quelle (`measured`, von llmcf auf einem Board gemessen, mit seinem Namen und dem
+  Datum, `published` mit Adresse und Datum, oder `unmeasured`); die mitgelieferten Zeilen sind Schätzungen aus Version
+  1.x und werden als ungemessen gezeigt; ein Board-Test-Eintrag wird zu einer gemessenen Zeile (`gen_ts`,
+  `prompt_ts`). Neu: `llm-cli targets boards TARGET` und **Build > Targets… > Boards…** zeigen das Profil jedes Boards
+  und die gekennzeichneten Zeilen, eine Zeile unter der Board-Liste des Builders zeigt sie auch, und `list_targets` und
+  `get_target_capabilities` liefern `board_profiles` und `benchmarks` (mit `source_label`). Der Modulgenerator schreibt
+  je Board ein Profil, geplant aus der Probe des Boards. Die Beispielprofile der Vorlage sind durch einen leeren Block
+  mit beschriebenem Schema ersetzt. Eine `target.yml` einer früheren Version (ein Community-Pack, ein Target eines
+  früheren Modul-Assistenten) besteht `llm-cli targets validate` weiter: Ihre Profile im alten Format (`cmake_flags`)
+  und Benchmarks als Zuordnung werden nie gelesen, keiner ihrer Werte wird verwendet oder gezeigt. Eine
+  `published`-Quelle muss eine einfache https-Adresse sein (ohne Zugangsdaten, ohne Text).
 
 ### Behoben
 - `2026-10-29 23:36 UTC` · `v3.2.0` **Nacharbeiten an der Container-Engine: ein `DOCKER_HOST` aus Podman-Zeiten, `/dev/dri` unter rootless

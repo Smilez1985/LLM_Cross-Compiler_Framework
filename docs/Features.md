@@ -141,7 +141,11 @@ Further behaviour:
   the step and the percent from the build service, and the build's log follows live below it (secrets redacted, full
   paths, plain text, each line once; an AI that reads the log gets the folders by label). The step and the percent
   include the running build's own progress (preparing, image, model, modules, archive), so the bar moves during a build;
-  it says 100 % only when the request has ended. A search box finds lines; a filter shows all lines or only Info,
+  it says 100 % only when the request has ended. While the model downloads from Hugging Face, the step says how far
+  the download is over all files of the model, for example "Fetching model 37 % (1.2 GB of 3.4 GB)" (the bytes alone
+  when a size is not known), and the bar moves with it; the files already there from an earlier attempt count from the
+  start, and it is updated about once a second. `llm-cli build start --follow` and `get_build_status` show the same
+  step. A search box finds lines; a filter shows all lines or only Info,
   Warnings or Errors. Lines the service no longer returns are noted instead of left out silently, and the view keeps the
   newest 20,000 lines.
 - **Build status across programs (shared build state):** every program that builds (the GUI, a CLI call, each MCP
@@ -158,6 +162,16 @@ Further behaviour:
 - **Optimization and priority (GUI):** the Builder's **Optimization** list offers every level of `--optimization`
   (also `FAST`), and **Priority** sets the build priority of `--priority` (default normal; a failed critical build
   stops the pipeline).
+- **The board's optimization profile:** every board of a target has a profile in its `target.yml`
+  (`optimization_profiles`): the llama.cpp options and compiler flags the build recipe plans for its SoC (checked
+  against the recipe by `llm-cli targets validate`), the recommended quantizations, the memory profile and the
+  optimization level. The Builder lists the recommended quantizations first and starts the **Optimization** list at
+  the profile's level until you pick one; a line under the board list shows the profile and the board's benchmark
+  rows, each marked `measured by llmcf (board <label>, <date>)`, `published` or `unmeasured` (the shipped rows are estimates
+  without a measurement and say so). `llm-cli build start` and AI callers (`start_build`, `check_build_request`)
+  take the same level when none is given; `llm-cli targets boards`, **Build > Targets... > Boards...** and the MCP
+  tools `list_targets` and `get_target_capabilities` show the profiles and the marked rows. A board test fills the
+  measured values later (`gen_ts`, `prompt_ts`).
 - **Build slots:** at most `max_concurrent_builds` builds (setting, 1 to 10, default 2) run at the same time in one
   program; a further build waits for a free slot (its stage shows "Waiting for a free build slot") instead of
   failing. A cancelled build keeps its slot until its container has stopped.
@@ -2587,7 +2601,7 @@ The GUI's input fields offer what you used recently, newest first.
 
 | Field | Where | Filled in | Remembered when |
 |---|---|---|---|
-| Model | Builder, **Source Model** | the most recent one | a build is submitted |
+| Model | Builder, **Source Model** (after your recent models: the model suggestions of the source catalogue, `llm-cli models suggestions`; any other id or path can be typed) | the most recent one | a build is submitted |
 | Calibration dataset | Builder, **Calibration** | no, only offered | a build with a dataset is submitted |
 | Target and board | Builder | the most recently built target and board that the target definitions still offer; a target without declared boards offers recent boards as suggestions | a build is submitted |
 | Profile | Deployment | the profile chosen before, else the most recent one | a deployment is started |
