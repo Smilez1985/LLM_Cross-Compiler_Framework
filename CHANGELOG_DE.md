@@ -12,6 +12,16 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 
 ## [3.3.0] - 2026-10-30
 
+### Geändert
+- `2026-10-30 14:28 UTC` · `v3.3.0` **Die Grenze für Stillstand, die Größe des Prompt-Caches und der KV-Cache-Typ gehören nur dir** ([Design](docs/DESIGN_DE.md#ditto-die-lokale-laufzeit-und-die-llm-schicht)):
+  Eine KI kann `build_idle_timeout`, `local_cache_ram_mib` und `local_kv_cache` nicht mehr ändern, in keine Richtung
+  (vorher durfte sie sie über MCP senken). Eine kleinere Grenze für Stillstand kann deine eigenen langen Builds
+  stoppen, und eine Zahl statt „auto“ friert einen Wert ein, der zu diesem Computer später nicht mehr passen kann.
+  Jeder KI-Weg (MCP `update_settings`, Ditto, die GUI-Tools) lehnt sie mit einem klaren Text ab, der sagt warum;
+  `get_settings` zeigt sie weiter, als nur lesbar markiert. `build_timeout` und `local_cache_keep_minutes` bleiben,
+  wie sie waren: Eine KI darf sie nur senken. Du änderst alle wie bisher in den Einstellungen, in der Gruppe
+  Prompt-Cache und mit `llm-cli ditto cache set`.
+
 ### Behoben
 - `2026-10-30 14:15 UTC` · `v3.3.0` **Die llama.cpp-Laufzeit-Builds lesen die Grenze für Stillstand, die du eingestellt hast** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
   Der Build von Dittos eigenem llama.cpp-Server (`llm-cli ditto runtime install`, das Tool `build_local_runtime`) und

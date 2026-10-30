@@ -25,8 +25,8 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from orchestrator.llm.settings_change import (MIN_MEMORY_LIMIT, TIGHTEN_ONLY, direction_problem,  # noqa: F401
-                                              memory_bytes)
+from orchestrator.llm.settings_change import (MIN_MEMORY_LIMIT, PERSON_DECIDES, TIGHTEN_ONLY,  # noqa: F401
+                                              direction_problem, memory_bytes)
 from orchestrator.tools.output import ToolOutput, untrusted_text
 from orchestrator.utils.locality import offline_mode
 from orchestrator.utils.any_path import last_part
@@ -58,12 +58,14 @@ READ_ONLY = ("max_concurrent_builds", "auto_cleanup", "log_level", "rag_embeddin
 URL_KEYS = ("qdrant_url", "community_index_url", "community_repo", "docker_registry", "source_repositories")
 FOLDER_KEYS = {"targets_dir": "targets", "models_dir": "models", "datasets_dir": "datasets", "output_dir": "output",
                "build_dir": "builds", "cache_dir": "cache", "logs_dir": "logs", "default_calibration_dataset": "datasets"}
-READABLE = WRITABLE + READ_ONLY + URL_KEYS + tuple(FOLDER_KEYS)
+# Settings only the person changes (llm/settings_change.PERSON_DECIDES): an AI reads them, and a change is refused
+# with its own plain text before any question (settings_facts).
+READABLE = WRITABLE + READ_ONLY + URL_KEYS + tuple(FOLDER_KEYS) + tuple(PERSON_DECIDES)
 NOT_A_VALUE = ("", "default", "null", "none", "reset", "unset")
 SETTINGS_PER_HOUR = 10
 
 ReadableKey = Literal[READABLE]  # type: ignore[valid-type]
-WritableKey = Literal[WRITABLE]  # type: ignore[valid-type]
+WritableKey = Literal[WRITABLE + tuple(PERSON_DECIDES)]  # type: ignore[valid-type]  (refused in settings_facts)
 
 # --- report_cannot_do --------------------------------------------------------------------------------------------
 
@@ -345,13 +347,16 @@ def oversight_problems(writable: Any = None) -> List[str]:
     refuses that)."""
     from orchestrator.llm.settings_change import PERSON_ONLY_SETTINGS
     keys = set(WRITABLE if writable is None else writable)
-    readable = set(READABLE) if writable is None else keys
+    readable = (set(READABLE) if writable is None else keys) - set(PERSON_DECIDES)   # these an AI may read
     return sorted({k for k in OVERSIGHT if k in keys} | {k for k in PERSON_ONLY_SETTINGS if k in keys | readable})
 
 
 def allowed_text(key: str) -> str:
     if key in OVERSIGHT:
         return "read-only over MCP: it keeps you informed of what AIs do; only you change it, in the GUI or CLI"
+    if key in PERSON_DECIDES:
+        from orchestrator.llm.settings_change import person_only_text
+        return "read-only over MCP: " + person_only_text(key)
     if key in ORDINARY:
         return "may be changed over MCP; the person is asked"
     if key in TIGHTEN_ONLY:
@@ -792,6 +797,10 @@ def settings_facts(framework, inp: UpdateSettingsIn):
             problems.append(f"{key} is named twice")
             continue
         seen.add(key)
+        if key in PERSON_DECIDES:   # the person's alone, in either direction: refused before any question
+            from orchestrator.llm.settings_change import person_only_text
+            raise blocked("setting_loosens", f"Refused: {person_only_text(key)}",
+                          "Tell the person; only they change it, in the GUI or CLI.", field="changes")
         schema = settings_schema(framework, key)
         old = _cfg(framework, key)
         try:
