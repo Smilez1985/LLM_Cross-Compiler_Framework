@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -662,11 +663,25 @@ class TestHailoTimeCap:
         fake_tool(bindir, "date", f'#!/bin/sh\nif [ "$1" = "+%s" ]; then {answer}; fi\nexec "{real_date}" "$@"\n')
         return root, bindir, log
 
+    @staticmethod
+    def emitter(shell, bindir):
+        """The .sh under `shell` with this machine's clock. A busybox built with FEATURE_SH_STANDALONE (busybox-static,
+        /usr/bin/busybox on GitHub's Ubuntu runners) runs its own date applet before any date on PATH, so the fake
+        clock never ran there and the real one never moves 61 s. For such a shell the fake date comes first as a shell
+        function (every shell looks functions up before applets and PATH) and the .sh is read with '.'."""
+        cmd = shell.split()
+        fake = bindir / "date"
+        found = subprocess.run(cmd + ["-c", "command -v date"], env={"PATH": str(bindir)}, capture_output=True,
+                               text=True, timeout=30, stdin=subprocess.DEVNULL).stdout.strip()
+        if found == str(fake):
+            return cmd + [str(PROBE_SH)]
+        return cmd + ["-c", f'date() {{ "{fake}" "$@"; }}; . "$0" "$@"', str(PROBE_SH)]
+
     @pytest.mark.parametrize("date_seconds", [True, False], ids=["date", "proc-uptime"])
     @pytest.mark.parametrize("shell", SHELLS)
     def test_no_device_is_asked_after_60_seconds(self, tmp_path, shell, date_seconds):
         root, bindir, log = self.machine(tmp_path, date_seconds)
-        text = run_emitter(shell.split() + [str(PROBE_SH)], root, bindir, tmp_path)
+        text = run_emitter(self.emitter(shell, bindir), root, bindir, tmp_path)
         assert log.read_text().split() == ["0000:01:00.0"], "the second device comes after 61 s"
         assert parse_profile(text).get("HAILO_DEVICES") == "2"
 
@@ -674,7 +689,7 @@ class TestHailoTimeCap:
     def test_without_any_clock_both_devices_are_asked(self, tmp_path, shell):
         root, bindir, log = self.machine(tmp_path, date_seconds=False)
         (root / "proc/uptime").unlink()
-        text = run_emitter(shell.split() + [str(PROBE_SH)], root, bindir, tmp_path)
+        text = run_emitter(self.emitter(shell, bindir), root, bindir, tmp_path)
         assert log.read_text().split() == ["0000:01:00.0", "0000:03:00.0"]
         assert parse_profile(text).get("HAILO_ARCH") == "hailo8"
 
