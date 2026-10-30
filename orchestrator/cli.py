@@ -2782,6 +2782,9 @@ def runtime_start(ctx: FrameworkContext, tier: Optional[str], ctx_len: Optional[
     where = f"container {status.container}" if status.container else f"pid {ep.pid}"
     console.print(f"[green]Running:[/green] {escape(ep.base_url)} model {escape(ep.model)} ({escape(where)}, "
                   f"ctx {status.ctx})")
+    if status.kv_fallback:
+        from orchestrator.runtime.llama_server import kv_fallback_text
+        console.print(f"[yellow]{escape(kv_fallback_text(status.kv_fallback))}[/yellow]")
     console.print("Ditto uses it as the 'local' AI provider; the API key changes with every start and is readable "
                   "only by you.")
 
@@ -2946,8 +2949,11 @@ def ditto_cache_show(ctx: FrameworkContext, as_json: bool = False):
     for row in view.rows:
         console.print(f"{escape(row.key)}: {escape(row.reason)}")
     if view.running:
+        from orchestrator.runtime.llama_server import kv_fallback_text
         console.print("Running server: " + ", ".join(f"{k} {escape(str(v))}" for k, v in view.running.items()
-                                                       if v is not None))
+                                                       if v is not None and k != "kv_fallback"))
+        if view.running.get("kv_fallback"):
+            console.print(f"[yellow]{escape(kv_fallback_text(view.running['kv_fallback']))}[/yellow]")
     console.print("Change a value: llm-cli ditto cache set NAME VALUE (auto, or a number; kv: f16, q8_0, q4_0)")
 
 

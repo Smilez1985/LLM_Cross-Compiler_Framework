@@ -39,6 +39,13 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Prompt-Cache und mit `llm-cli ditto cache set`.
 
 ### Behoben
+- `2026-10-30 15:05 UTC` · `v3.3.0` **Dittos Server startet auf einem llama.cpp-Build ohne Flash Attention** ([Design](docs/DESIGN_DE.md#ditto-die-lokale-laufzeit-und-die-llm-schicht)):
+  Ein quantisierter KV-Cache (q8_0, q4_0) braucht Flash Attention, und ein Build oder Backend ohne sie ließ den Server
+  beim Start enden, sobald `local_kv_cache` auf auto stand und die Regel der Boards einen quantisierten Cache wählte.
+  Der Start versucht es jetzt einmal mit f16, plant den Kontext dafür, und dieser Server geht von da an gleich zu f16;
+  `llm-cli ditto runtime start`, `llm-cli ditto cache`, die Gruppe Prompt-Cache der GUI und Mojo
+  (`runtime.kv_cache.fallback`) sagen es. Ein q8_0 oder q4_0, das du selbst gesetzt hast, wird nie ersetzt: Der Start
+  scheitert mit einem Text, der `local_kv_cache` und f16 nennt.
 - `2026-10-30 15:02 UTC` · `v3.3.0` **Dittos Self-Healing-Prompt nennt die Ordner des Frameworks mit ihrem Namen** ([Design](docs/DESIGN_DE.md#freigabe-beim-self-healing)):
   Ein Pfad im Ausgabe-, Build- oder Installationsordner des Frameworks erreicht die KI jetzt als
   `output:<Pfad darin>`, `builds:...` oder `framework:...`, jeder andere Pfad auf diesem Computer mit seinem

@@ -1585,7 +1585,9 @@ The memory budget of Ditto's local server, from the measured hardware of this co
 (`local_cache_ram_mib`, `--cache-ram`), the time the model stays loaded without requests (`local_cache_keep_minutes`)
 and the KV-cache type (`local_kv_cache`) it shows your saved value (auto or a value), what auto stands for here, what
 the next start uses, the soft cap and the hard limit, and why; then what the running server got. `--json` prints the
-same as JSON.
+same as JSON. When the llama.cpp build has no flash attention, which a quantised KV cache needs, an automatic q8_0 or
+q4_0 becomes f16 at the start, and both `ditto runtime start` and `ditto cache` say so in a yellow line; a q8_0 or q4_0
+you set yourself is kept, and the start fails with a text that names `local_kv_cache` and f16.
 
 #### ditto cache set
 

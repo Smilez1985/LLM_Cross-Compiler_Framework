@@ -1654,7 +1654,10 @@ Das Speicherbudget von Dittos lokalem Server, aus der gemessenen Hardware dieses
 RAM (`local_cache_ram_mib`, `--cache-ram`), die Zeit, die das Modell ohne Anfragen geladen bleibt
 (`local_cache_keep_minutes`), und den KV-Cache-Typ (`local_kv_cache`) zeigt es deinen gespeicherten Wert (auto oder
 einen Wert), wofür auto hier steht, was der nächste Start nimmt, die weiche und die harte Grenze und warum; danach, was
-der laufende Server bekommen hat. `--json` gibt dasselbe als JSON aus.
+der laufende Server bekommen hat. `--json` gibt dasselbe als JSON aus. Hat der llama.cpp-Build keine Flash Attention,
+die ein quantisierter KV-Cache braucht, wird ein automatisches q8_0 oder q4_0 beim Start zu f16, und `ditto runtime
+start` und `ditto cache` sagen es in einer gelben Zeile; ein q8_0 oder q4_0, das du selbst gesetzt hast, bleibt, und
+der Start scheitert mit einem Text, der `local_kv_cache` und f16 nennt.
 
 #### ditto cache set
 
