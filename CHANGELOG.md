@@ -12,6 +12,13 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 ## [3.3.0] - 2026-10-30
 
 ### Changed
+- `2026-10-30 14:55 UTC` · `v3.3.0` **Your board tests show up in the target's benchmarks, and ignored old entries are named** ([design](docs/DESIGN.md#targets-hardware-and-templates)):
+  the newest passed board test of a build per board, model and quantization now joins the target's benchmark rows
+  in `list_targets`, `get_target_capabilities`, `llm-cli targets boards` and **Build > Targets... > Boards...**, marked
+  `measured by llmcf (board <your label>, <date>)` (labels only, never a path, an address or a device id). Entries in
+  the format before 3.2.0 are still not refused, but `llm-cli targets validate`, `llm-cli targets boards` and the
+  GUI's target check (also after the module wizard and a Community Hub install) now say so in one line: `N entries
+  in the old format were ignored: <names>`.
 - `2026-10-30 14:32 UTC` · `v3.3.0` **A build container image exported on one computer is accepted on another** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
   the image's inputs label no longer holds anything of the computer that built it (your user and group id, the
   number of build jobs, the address llama.cpp was fetched from), and the image is no longer built with your user id:

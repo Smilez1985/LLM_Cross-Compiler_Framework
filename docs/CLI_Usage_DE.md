@@ -473,8 +473,10 @@ sie zuerst an), das Speicherprofil, die Optimierungsstufe, mit der ein Build ohn
 llama.cpp-Optionen und Compiler-Flags, die das Build-Rezept für den SoC des Boards plant, und die CPU des Boards.
 Darunter stehen die Benchmark-Zeilen des Boards (Modell, Quantisierung, Werte) mit ihrer Quelle am Ende:
 `measured by llmcf (board <Name>, <Datum>)`, `published: <Adresse>` oder `unmeasured` (eine Schätzung; nie als Messung gezeigt).
-Exit-Code 2 für ein unbekanntes Target, 1, wenn seine Profile oder Benchmarks ungültig sind (`targets validate` nennt
-den Grund).
+Die Board-Tests der Builds dieses Computers stehen vorn: der neueste bestandene Test je Board, Modell und
+Quantisierung, gemessen auf dem Board, das du benannt hast. Eine letzte Zeile nennt Einträge im Format vor 3.2.0, die
+übergangen wurden (`N entries in the old format were ignored: <Namen>`). Exit-Code 2 für ein unbekanntes Target, 1,
+wenn seine Profile oder Benchmarks ungültig sind (`targets validate` nennt den Grund).
 
 ```bash
 llm-cli targets boards Rockchip
@@ -493,7 +495,8 @@ CLI, Build-Service und Werkzeuge verwenden; jeder Schemafehler wird ausgegeben. 
 `performance_benchmarks:` werden geprüft: ihr Schema, ihre Boards und Quantisierungen, keine Option, die etwas
 herunterlädt, und jedes Profil gegen den Plan des Build-Rezepts für seinen SoC (ein abweichender Wert wird genannt). Exit-Code 1, wenn das Target nicht
 gefunden wird oder seine Capabilities ungültig sind. Ein Target ohne Capabilities wird gemeldet, gilt aber als
-gültig.
+gültig. Einträge im Format vor 3.2.0 werden nicht abgelehnt; eine letzte Zeile nennt sie: `N entries in the old format
+were ignored: <Namen>` (die Target-Prüfung der GUI sagt dasselbe).
 
 ```bash
 llm-cli targets validate Rockchip

@@ -327,8 +327,9 @@ def list_targets(ctx: FrameworkContext, format: str):
 def target_boards(ctx: FrameworkContext, target_name: str):
     """Each board of a target with its optimization profile (the llama.cpp options the build recipe plans for it,
     the recommended quantizations, memory profile and optimization level) and its benchmark rows, each marked
-    measured, published or unmeasured. The same as Build > Targets... > Boards..."""
-    from orchestrator.Core.board_profiles import board_lines
+    measured, published or unmeasured (the board tests of this computer's builds included). The same as Build >
+    Targets... > Boards..."""
+    from orchestrator.Core.board_profiles import board_lines, old_format_entries, old_format_note
     ctx.require_framework()
     tm = ctx.framework_manager.get_component("target_manager")
     tid = tm.resolve(target_name) if tm else None
@@ -340,8 +341,26 @@ def target_boards(ctx: FrameworkContext, target_name: str):
         console.print(f"[red]The optimization profiles or benchmarks of '{escape(tid)}' are not valid; "
                       f"'llm-cli targets validate {escape(tid)}' names why.[/red]")
         sys.exit(1)
+    data = _with_measured_rows(ctx, tid, data)
     for line in board_lines(tm.get_capabilities(tid), data):
         console.print(escape(line))
+    note = old_format_note(old_format_entries(tm.get_target(tid) or {}))
+    if note:
+        console.print(f"[yellow]{escape(note)}[/yellow]")
+
+
+def _with_measured_rows(ctx: FrameworkContext, tid: str, data):
+    """`data` with the measured rows of the board tests of this computer's builds before target.yml's rows."""
+    try:
+        from orchestrator.Core.build_service import BuildService
+        framework = getattr(ctx, "framework_manager", None)
+        service = getattr(framework, "build_service", None) or BuildService(framework) if framework else None
+        measured = service.measured_benchmarks(tid) if service is not None else []
+    except Exception:  # noqa: BLE001 - no measured rows: target.yml's rows alone
+        measured = []
+    if not measured:
+        return data
+    return data.model_copy(update={"performance_benchmarks": list(measured) + list(data.performance_benchmarks)})
 
 
 @targets.command('validate')
@@ -372,6 +391,15 @@ def validate_target(ctx: FrameworkContext, target_name: str):
         sys.exit(1)
     console.print(f"[green]✅ Target '{escape(tid)}' is valid ({check.boards} boards, formats: "
                   f"{escape(', '.join(check.formats))})[/green]")
+    _old_format_line(check)
+
+
+def _old_format_line(check) -> None:
+    """The plain note about entries in the format before 3.2.0 the check ignored (board_profiles.old_format_note)."""
+    from orchestrator.Core.board_profiles import old_format_note
+    note = old_format_note(getattr(check, "old_format", ()))
+    if note:
+        console.print(f"[yellow]{escape(note)}[/yellow]")
 
 
 # ============================================================================
