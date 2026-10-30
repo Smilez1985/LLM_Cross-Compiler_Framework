@@ -1,0 +1,64 @@
+[
+ {
+  "name": "same_tool_same_arguments_same_bytes",
+  "present": [{"id": "c1", "name": "get_build_status", "arguments": {"request_id": "r1"}, "result": "{\"status\":\"building\"}"}],
+  "new": [{"id": "c2", "name": "get_build_status", "arguments": {"request_id": "r1"}, "result": "{\"status\":\"building\"}"}],
+  "sent": ["same result as tool call #c1"]
+ },
+ {
+  "name": "argument_order_does_not_matter",
+  "present": [{"id": "c1", "name": "list_artifacts", "arguments": {"format": "gguf", "target": "Rockchip"}, "result": "[]"}],
+  "new": [{"id": "c2", "name": "list_artifacts", "arguments": {"target": "Rockchip", "format": "gguf"}, "result": "[]"}],
+  "sent": ["same result as tool call #c1"]
+ },
+ {
+  "name": "other_bytes_are_sent",
+  "present": [{"id": "c1", "name": "get_build_status", "arguments": {"request_id": "r1"}, "result": "{\"status\":\"building\"}"}],
+  "new": [{"id": "c2", "name": "get_build_status", "arguments": {"request_id": "r1"}, "result": "{\"status\":\"completed\"}"}],
+  "sent": ["{\"status\":\"completed\"}"]
+ },
+ {
+  "name": "other_arguments_are_sent",
+  "present": [{"id": "c1", "name": "get_build_status", "arguments": {"request_id": "r1"}, "result": "{\"status\":\"building\"}"}],
+  "new": [{"id": "c2", "name": "get_build_status", "arguments": {"request_id": "r2"}, "result": "{\"status\":\"building\"}"}],
+  "sent": ["{\"status\":\"building\"}"]
+ },
+ {
+  "name": "other_tool_is_sent",
+  "present": [{"id": "c1", "name": "list_targets", "arguments": {}, "result": "[]"}],
+  "new": [{"id": "c2", "name": "list_artifacts", "arguments": {}, "result": "[]"}],
+  "sent": ["[]"]
+ },
+ {
+  "name": "an_error_result_is_never_pointed_at",
+  "present": [{"id": "c1", "name": "get_build_status", "arguments": {"request_id": "r1"}, "result": "{\"status\":\"building\"}", "is_error": true}],
+  "new": [{"id": "c2", "name": "get_build_status", "arguments": {"request_id": "r1"}, "result": "{\"status\":\"building\"}"}],
+  "sent": ["{\"status\":\"building\"}"]
+ },
+ {
+  "name": "a_result_compacted_away_is_never_pointed_at",
+  "present": [],
+  "new": [{"id": "c2", "name": "get_build_status", "arguments": {"request_id": "r1"}, "result": "{\"status\":\"building\"}"}],
+  "sent": ["{\"status\":\"building\"}"]
+ },
+ {
+  "name": "the_pointer_names_the_original_not_another_pointer",
+  "present": [{"id": "c1", "name": "get_build_status", "arguments": {"request_id": "r1"}, "result": "{\"status\":\"building\"}"}],
+  "new": [{"id": "c2", "name": "get_build_status", "arguments": {"request_id": "r1"}, "result": "{\"status\":\"building\"}"},
+          {"id": "c3", "name": "get_build_status", "arguments": {"request_id": "r1"}, "result": "{\"status\":\"building\"}"}],
+  "sent": ["same result as tool call #c1", "same result as tool call #c1"]
+ },
+ {
+  "name": "a_new_result_is_pointed_at_later",
+  "present": [],
+  "new": [{"id": "c1", "name": "list_targets", "arguments": {}, "result": "[\"Rockchip\"]"},
+          {"id": "c2", "name": "list_targets", "arguments": {}, "result": "[\"Rockchip\"]"}],
+  "sent": ["[\"Rockchip\"]", "same result as tool call #c1"]
+ },
+ {
+  "name": "untrusted_block_ids_are_not_part_of_the_bytes",
+  "present": [{"id": "c1", "name": "read_build_log", "arguments": {"request_id": "r1"}, "result": "<untrusted_data id=\"0123456789ab\" source=\"tool:read_build_log\">\nline\n</untrusted_data id=\"0123456789ab\">"}],
+  "new": [{"id": "c2", "name": "read_build_log", "arguments": {"request_id": "r1"}, "result": "<untrusted_data id=\"ba9876543210\" source=\"tool:read_build_log\">\nline\n</untrusted_data id=\"ba9876543210\">"}],
+  "sent": ["same result as tool call #c1"]
+ }
+]
