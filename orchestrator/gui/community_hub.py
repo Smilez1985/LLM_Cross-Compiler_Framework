@@ -263,13 +263,19 @@ class CommunityHubWindow(QMainWindow):
         self.status_label.setText(ui_text("zoo.details.loading", self.lang, kind=item.kind, id=item.id))
         self._run(self.comm_manager.details, self._show_details, item.id, item.kind)
 
+    def _set_actions_enabled(self, enabled: bool) -> None:
+        """The hub's buttons and the pack table, off while an uninstall runs (no second action on the same packs)."""
+        for widget in (self.details_btn, self.verify_btn, self.verify_file_btn, self.export_btn, self.sort_btn,
+                       self.keys_btn, self.uninstall_btn, self.refresh_btn, self.import_btn, self.table):
+            widget.setEnabled(enabled)
+
     def uninstall_selected(self):
         """Uninstall...: the selected installed pack's exact list (CommunityManager.uninstall_plan: its folder, its
         import notes, the excerpts only it holds) in the deletion dialog, "No" by default, to the trash or for good;
-        then CommunityManager.uninstall, the same as `llm-cli zoo uninstall ID --kind KIND`."""
+        then CommunityManager.uninstall, the same as `llm-cli zoo uninstall ID --kind KIND`, in a worker thread (it
+        removes excerpts from the knowledge base and moves folders: seconds), with the hub's buttons off until the
+        result is back on the GUI thread."""
         from orchestrator.Core.community_pack import PackError
-        from orchestrator.Core.deletion import PlanChanged
-        from orchestrator.Core.trash import Trash
         from orchestrator.gui.deletion_dialog import ask_deletion
         item = self.selected_item()
         if item is None:
@@ -291,16 +297,45 @@ class CommunityHubWindow(QMainWindow):
         if accepted is None:
             return
         audit = getattr(getattr(self.framework_manager, "tool_registry", None), "audit", None)
+        self._set_actions_enabled(False)
+        self.status_label.setText(ui_text("zoo.uninstall.running", self.lang, kind=item.kind, id=item.id))
+        self._tasks = {t for t in self._tasks if not t.isFinished()}
+        task = _Task(self._uninstall, item, accepted, audit)
+        task.done.connect(lambda outcome, it=item, acc=accepted: self._uninstalled(it, acc, outcome))
+        task.failed.connect(self._uninstall_failed)
+        self._tasks.add(task)
+        task.start()
+
+    def _uninstall(self, item, accepted, audit):
+        """The worker's part of Uninstall...: ("done", result), ("changed", None) when the list no longer matches
+        what is on disk, or ("failed", reason)."""
+        from orchestrator.Core.deletion import PlanChanged
+        from orchestrator.Core.trash import Trash
         try:
             trash = Trash.for_framework(self.framework_manager) if accepted.mode == "trash" else None
-            result = self.comm_manager.uninstall(item.kind, item.id, accepted, trash=trash, audit=audit)
+            return "done", self.comm_manager.uninstall(item.kind, item.id, accepted, trash=trash, audit=audit)
         except PlanChanged:
+            return "changed", None
+        except (PermissionError, RuntimeError) as e:
+            return "failed", str(e)
+
+    def _uninstall_failed(self, error: str) -> None:
+        self._set_actions_enabled(True)
+        self.on_error(ui_text("deletion.failed", self.lang, reason=one_line(error)))
+
+    def _uninstalled(self, item, accepted, outcome) -> None:
+        """On the GUI thread: the buttons on again, then what became of each entry."""
+        self._set_actions_enabled(True)
+        state, value = outcome
+        if state == "changed":
             self.on_error(ui_text("deletion.changed", self.lang))
             self.refresh_list()
             return
-        except (PermissionError, RuntimeError) as e:
-            self.on_error(ui_text("deletion.failed", self.lang, reason=one_line(str(e))))
+        if state == "failed":
+            self.on_error(ui_text("deletion.failed", self.lang, reason=one_line(value)))
             return
+        result = value
+        self.status_label.setText(tr("status.ready", "Ready."))
         done = "deletion.done.trash" if accepted.mode == "trash" else "deletion.done.permanent"
         lines = [ui_text(done, self.lang, name=one_line(n)) for n in result.done]
         lines += [ui_text("deletion.kept", self.lang, name=one_line(n), reason=one_line(r)) for n, r in result.failed]

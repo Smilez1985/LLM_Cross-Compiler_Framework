@@ -59,6 +59,23 @@ NOT_READY_NEXT = ("Tell the person the framework is not ready; run_mojo_oracle (
                   "why.")
 
 
+def measured_records(output_dirs) -> List[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    """(build manifest, board test record) of every build below `output_dirs` that holds board tests
+    (runtime/device/tested.py device_tests.json), for board_profiles.newest_measured; a folder that cannot be read
+    gives none."""
+    from orchestrator.Core.deployment_manager import list_builds
+    from orchestrator.runtime.device.tested import device_tests
+    records: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+    for folder in output_dirs:
+        try:
+            builds = list_builds(Path(folder)) if Path(folder).is_dir() else []
+        except OSError:
+            continue
+        for info in builds:
+            records += [(info, entry) for entry in device_tests(Path(info["path"]))]
+    return records
+
+
 def artifact_id(relative: str) -> str:
     """A built model's id: stable for its folder under the output folder, never the folder's path."""
     return "a_" + hashlib.sha256(relative.encode("utf-8", "surrogatepass")).hexdigest()[:16]
@@ -1085,8 +1102,24 @@ class BuildService:
             data = None
         if data is None:
             return {}, []
-        rows = [BenchmarkRowOut(**r.model_dump(), source_label=r.source.label()) for r in data.performance_benchmarks]
+        rows = [BenchmarkRowOut(**r.model_dump(), source_label=r.source.label())
+                for r in self.measured_benchmarks(target_id) + list(data.performance_benchmarks)]
         return dict(data.optimization_profiles), rows
+
+    def measured_benchmarks(self, target_id: str) -> list:
+        """The newest measured row per board, model and quantization from the board tests of this target's builds
+        (board_profiles.newest_measured over every folder that holds builds); [] when none can be read."""
+        from orchestrator.Core.board_profiles import newest_measured
+        try:
+            from orchestrator.Core.artifact_output import artifact_folders
+            folders = artifact_folders(self.framework)
+        except Exception:  # noqa: BLE001 - a framework without the saved-artifact index: the output folder alone
+            folders = []
+        try:
+            folders = list(folders) or [self._output_dir()]
+            return newest_measured(measured_records(folders), target_id)
+        except Exception:  # noqa: BLE001 - no measured rows: the target.yml rows alone
+            return []
 
     def board_profile(self, target: Optional[str], board: Optional[str]):
         """The optimization profile of `board` of `target` (target.yml optimization_profiles), or None."""

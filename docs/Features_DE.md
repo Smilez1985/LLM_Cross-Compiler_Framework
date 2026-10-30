@@ -191,8 +191,9 @@ Weiteres Verhalten:
   eine weiche Obergrenze: Ein Build, den du gestartet hast, läuft mit einer Warnung darüber hinaus (Abbrechen stoppt
   ihn), einer, den eine KI gestartet hat, stoppt dort und wird nie verlängert. `build_idle_timeout` (Standard
   1800 s) stoppt einen Schritt, der so lange nichts ausgibt. Eine Stufe, die immer neu startet, ohne fertig zu werden,
-  und ein Modell, das sich im Funktionstest wiederholt, werden als Schleife gestoppt. Eine KI darf beide
-  Einstellungen nur senken.
+  und ein Modell, das sich im Funktionstest wiederholt, werden als Schleife gestoppt. Eine KI darf nur
+  `build_timeout` senken; `build_idle_timeout` setzt nur du (ein kleinerer Wert könnte deine eigenen langen Builds
+  stoppen).
 - **Wohin ein Build kommt:** siehe [Wohin fertige Modelle kommen](#wohin-fertige-modelle-kommen) unten. Jeder Build
   landet in `<Ordner>/<Target>/<Modell>/<Quantisierung>/`, sein Golden-ZIP daneben.
 
@@ -1309,8 +1310,9 @@ Nichts wird geschätzt. Die Fälle nutzen nur Beispieldaten (Dokumentationsadres
   `tools_changed`, `messages_changed`, ...) wird je Runde festgehalten. Dittos normaler Chat schickt das nie.
 - **Fälle, die heute scheitern**, tragen `expected_fail`: „Nachfrage zur letzten Antwort nach der Verdichtung“ und
   „20 Runden auf einem lokalen Fenster mit 4096 Tokens“ (der zweite läuft nur auf einem verwalteten lokalen Modell,
-  `--tier`, und wird sonst übersprungen). Ihr Scheitern wird als erwartet gemeldet und nicht in den Bestehensquoten
-  gezählt; ein Bestehen wird als **UNERWARTET BESTANDEN** gemeldet, damit die Markierung entfernt wird, sobald die
+  `--tier`, und wird sonst übersprungen). Jeder nennt den Grund, aus dem er heute scheitert (`expected_fail_reason`);
+  nur dieses Scheitern wird als erwartet gemeldet und nicht in den Bestehensquoten gezählt, ein Scheitern aus einem
+  anderen Grund zählt wie jedes andere; ein Bestehen wird als **UNERWARTET BESTANDEN** gemeldet, damit die Markierung entfernt wird, sobald die
   Arbeit am Kontext sie bestehen lässt.
 - **`--pause-minutes N`** wartet N Minuten zwischen den Runden, um eine Cache-Lebensdauer von 5 Minuten mit einer von
   1 Stunde zu vergleichen. Ohne Angabe gibt es keine Pause, und in CI wird eine Pause abgelehnt.
@@ -1326,7 +1328,7 @@ kommt aus deinem eigenen Secrets-Speicher und bleibt auf deinem Computer. Eine a
 (HTTP 400) wird als abgelehnt festgehalten, nie als funktionierend, und die beiden Anfragen gehen dann ohne sie
 hinaus, sodass die gecachten Tokens der zweiten in jedem Fall gemessen werden. Das Ergebnis ist
 `openai_cache_check.json` in `evals/` des Zustandsordners des Benutzers: nur Wahrheitswerte und Token-Zahlen, kein
-Prompt-Text und kein Key.
+Prompt-Text und kein Key; eine Prüfung, die ein Lauf nicht gemessen hat, behält ihr früheres Ergebnis.
 
 **Speicher des lokalen Servers** (Entwicklung): `python scripts/measure_cache_ram.py --tier small` lässt die
 `tokens`-Fälle auf einer lokalen Stufe laufen, misst den Speicher des llama-server, den dieser Lauf gestartet hat (nur

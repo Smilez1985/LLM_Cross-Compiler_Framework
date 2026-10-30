@@ -118,6 +118,7 @@ DELETION_SITES = {
     ("orchestrator/llm/auth/store.py", "CredentialStore._write"): TEMP,
     ("orchestrator/mcp_server.py", "_write_private"): TEMP,
     ("orchestrator/utils/atomic.py", "write_private_exclusive"): TEMP,
+    ("orchestrator/utils/atomic.py", "write_file"): TEMP,   # its own temporary file only (chain followups-3)
     ("orchestrator/runtime/build/source.py", "export_source"): TEMP,
     ("orchestrator/runtime/build/store.py", "BuildStore.export_build"): TEMP,
     ("orchestrator/runtime/device/package.py", "package_runtime"): TEMP,

@@ -12,7 +12,78 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 
 ## [3.3.0] - 2026-10-30
 
+### Geändert
+- `2026-10-30 14:55 UTC` · `v3.3.0` **Deine Board-Tests erscheinen in den Benchmarks des Targets, und übergangene alte Einträge werden genannt** ([Design](docs/DESIGN_DE.md#targets-hardware-und-vorlagen)):
+  Der neueste bestandene Board-Test eines Builds je Board, Modell und Quantisierung kommt jetzt zu den
+  Benchmark-Zeilen des Targets in `list_targets`, `get_target_capabilities`, `llm-cli targets boards` und **Build >
+  Targets… > Boards…**, markiert als `measured by llmcf (board <dein Name>, <Datum>)` (nur Namen, nie ein Pfad, eine
+  Adresse oder eine Geräte-ID). Einträge im Format vor 3.2.0 werden weiterhin nicht abgelehnt, aber
+  `llm-cli targets validate`, `llm-cli targets boards` und die Target-Prüfung der GUI (auch nach dem Modul-Assistenten
+  und einer Installation aus dem Community Hub) sagen es jetzt in einer Zeile: `N entries in the old format were
+  ignored: <Namen>`.
+- `2026-10-30 14:32 UTC` · `v3.3.0` **Ein auf einem Computer exportiertes Build-Container-Image wird auf einem anderen angenommen** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
+  Das Eingaben-Label des Images enthält nichts mehr vom Computer, der es gebaut hat (deine Benutzer- und Gruppen-ID,
+  die Zahl der Build-Jobs, die Adresse, von der llama.cpp geholt wurde), und das Image wird nicht mehr mit deiner
+  Benutzer-ID gebaut: Der Build läuft wie bisher beim Start des Containers als dein Benutzer. Ein mit `llm-cli build
+  image export` auf einem Computer exportiertes Image nimmt `import` jetzt auf einem anderen mit derselben
+  Target-Version und denselben Einstellungen an; ein Image mit anderem Inhalt (anderer Target-Ordner, anderes
+  Dockerfile, anderer llama.cpp-Pin oder andere CPU-Abstimmung) wird weiter abgelehnt. Images von vor 3.3.0 tragen
+  das alte Label: Das Image jedes Targets wird einmal neu gebaut.
+- `2026-10-30 14:28 UTC` · `v3.3.0` **Die Grenze für Stillstand, die Größe des Prompt-Caches und der KV-Cache-Typ gehören nur dir** ([Design](docs/DESIGN_DE.md#ditto-die-lokale-laufzeit-und-die-llm-schicht)):
+  Eine KI kann `build_idle_timeout`, `local_cache_ram_mib` und `local_kv_cache` nicht mehr ändern, in keine Richtung
+  (vorher durfte sie sie über MCP senken). Eine kleinere Grenze für Stillstand kann deine eigenen langen Builds
+  stoppen, und eine Zahl statt „auto“ friert einen Wert ein, der zu diesem Computer später nicht mehr passen kann.
+  Jeder KI-Weg (MCP `update_settings`, Ditto, die GUI-Tools) lehnt sie mit einem klaren Text ab, der sagt warum;
+  `get_settings` zeigt sie weiter, als nur lesbar markiert. `build_timeout` und `local_cache_keep_minutes` bleiben,
+  wie sie waren: Eine KI darf sie nur senken. Du änderst alle wie bisher in den Einstellungen, in der Gruppe
+  Prompt-Cache und mit `llm-cli ditto cache set`.
+
 ### Behoben
+- `2026-10-30 15:11 UTC` · `v3.3.0` **`llm-cli ditto cache`, `ditto cache set` und `ditto models list` sagen klar, wenn sie es nicht
+  ermitteln können**: Lässt sich das Speicherbudget oder die Modellwahl für diesen Computer nicht berechnen (eine
+  Messung, die scheitert, ein Modell, das der Katalog nicht kennt, eine beschädigte Datei), geben sie eine rote Zeile
+  mit dem Grund aus (Secrets geschwärzt) und enden mit 1, statt mit einem Python-Traceback.
+- `2026-10-30 15:08 UTC` · `v3.3.0` **Ein Paket im Community Hub zu deinstallieren friert das Fenster nicht mehr ein**: **Deinstallieren...**
+  entfernt die Auszüge des Pakets aus der Wissensbasis und verschiebt seine Ordner in einem Hintergrund-Thread, wie
+  die anderen Aktionen des Hubs; die Schaltflächen des Hubs und die Paketliste sind währenddessen aus, und das
+  Ergebnisfenster kommt, wenn es fertig ist (vorher reagierte das Fenster nicht, bis die Wissensbasis neu geschrieben
+  war).
+- `2026-10-30 15:05 UTC` · `v3.3.0` **Dittos Server startet auf einem llama.cpp-Build ohne Flash Attention** ([Design](docs/DESIGN_DE.md#ditto-die-lokale-laufzeit-und-die-llm-schicht)):
+  Ein quantisierter KV-Cache (q8_0, q4_0) braucht Flash Attention, und ein Build oder Backend ohne sie ließ den Server
+  beim Start enden, sobald `local_kv_cache` auf auto stand und die Regel der Boards einen quantisierten Cache wählte.
+  Der Start versucht es jetzt einmal mit f16, plant den Kontext dafür, und dieser Server geht von da an gleich zu f16;
+  `llm-cli ditto runtime start`, `llm-cli ditto cache`, die Gruppe Prompt-Cache der GUI und Mojo
+  (`runtime.kv_cache.fallback`) sagen es. Ein q8_0 oder q4_0, das du selbst gesetzt hast, wird nie ersetzt: Der Start
+  scheitert mit einem Text, der `local_kv_cache` und f16 nennt.
+- `2026-10-30 15:02 UTC` · `v3.3.0` **Dittos Self-Healing-Prompt nennt die Ordner des Frameworks mit ihrem Namen** ([Design](docs/DESIGN_DE.md#freigabe-beim-self-healing)):
+  Ein Pfad im Ausgabe-, Build- oder Installationsordner des Frameworks erreicht die KI jetzt als
+  `output:<Pfad darin>`, `builds:...` oder `framework:...`, jeder andere Pfad auf diesem Computer mit seinem
+  Dateinamen, wie es `read_build_log` schon hatte (vorher kürzte der Self-Healing-Prompt nur den Home-Ordner, so
+  wurde ein Ausgabeordner anderswo ganz genannt).
+- `2026-10-30 14:58 UTC` · `v3.3.0` **Ein KI-Client erfährt, dass er das Build-Log bereinigt liest**: Die Beschreibung des Tools `read_build_log`
+  und der Build-Log-Ressource sagt jetzt, dass im Log, das eine KI liest, Farbcodes und Fortschritts-Neuzeichnungen
+  entfernt und wiederholte Zeilen zusammengefasst sind, jede Fehlerzeile bleibt, und dass du das rohe Log siehst
+  (vorher konnte eine KI die bereinigten Zeilen für das ganze Log halten).
+- `2026-10-30 14:47 UTC` · `v3.3.0` **Die Token-Messung der Ditto-Bewertung zählt, was sie soll** ([Design](docs/DESIGN_DE.md#ditto-die-lokale-laufzeit-und-die-llm-schicht)):
+  Dittos Zusammenfassung eines langen Gesprächs (Verdichtung) ist eine eigene Anfrage, sie nimmt und verschiebt die
+  Kette der Cache-Diagnose von Anthropic also nicht mehr: Die nächste echte Runde wird mit der letzten echten Runde
+  verglichen. Ein mit `expected_fail` markierter Fall nennt jetzt den Grund, aus dem er heute scheitert
+  (`expected_fail_reason`, einer aus einer festen Liste); ein Scheitern aus einem anderen Grund ist ein gewöhnliches
+  Scheitern, zählt in den Bestehensquoten und steht unter `failed_otherwise`, nie als erwartet versteckt.
+  `openai_cache_check.json` wird je Prüfung zusammengeführt: Ein Lauf, der eine Prüfung gemessen hat, behält das
+  frühere Ergebnis der anderen, statt es zu verwerfen.
+- `2026-10-30 14:39 UTC` · `v3.3.0` **Das Koppeln eines Boards hinter einem Jump-Host liest seinen Schlüssel durch den Jump** ([Design](docs/DESIGN_DE.md#ssh-host-schlüssel-und-das-paket-remote)):
+  Erreichen die eigenen SSH-Einstellungen des Frameworks ein Board über ein `ProxyJump` oder `ProxyCommand`, wird
+  der Schlüssel, den das Board zeigt, jetzt über das OpenSSH dieses Computers mit diesen Einstellungen gelesen
+  (vorher wurde eine direkte Verbindung versucht, die so ein Board nicht erreicht) und dir wie bei jedem Board mit
+  seinem Fingerabdruck gezeigt; vor deinem Ja wird nichts vertraut. Ein Jump-Host, dem das SSH dieses Computers noch
+  nicht vertraut, wird klar benannt: Kopple zuerst den Jump-Host. Ein direkt erreichtes Board wird wie bisher gelesen.
+- `2026-10-30 14:34 UTC` · `v3.3.0` **Die Notiz einer Deinstallation wird von einem Absturz nie abgeschnitten** ([Design](docs/DESIGN_DE.md#community-rezepte-und-pakete)):
+  Verlassen die Auszüge eines Pakets die Wissensbasis, schreibt seine Deinstallation die Notiz `<pack>.released`
+  atomar (über das neue `utils/atomic.write_file`: eine temporäre Datei daneben, synchronisiert, dann an ihren Platz
+  gesetzt), so hinterlässt ein Computer, der beim Schreiben stehen bleibt, die Notiz ganz oder gar nicht. Die Modi
+  der Datei und ihres Ordners bleiben, wie sie waren, und unter Windows werden die Zeilenenden einmal geschrieben (die
+  temporäre Datei wird im Binärmodus geöffnet).
 - `2026-10-30 14:19 UTC` · `v3.3.0` **Ein fehlendes OpenSSH unter Windows ist ein Problem auf diesem Rechner, kein
   Board, das nicht antwortet** ([Design](docs/DESIGN_DE.md#ssh-host-schlüssel-und-das-paket-remote)): Der
   Prozessstart von Windows nennt keine Datei, wenn das Programm fehlt (POSIX nennt sie), deshalb las sich der Fehler
@@ -22,6 +93,12 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Reihenfolge** ([Design](docs/DESIGN_DE.md#community-pakete-format-vertrauen-und-austausch)): Windows sortiert seine
   Pfade ohne Groß- und Kleinschreibung und mit Backslashes, deshalb stand `docker/arm.dockerfile` dort vor
   `Dockerfile`; `pack_base_images` sortiert jetzt nach dem relativen POSIX-Pfad.
+- `2026-10-30 14:15 UTC` · `v3.3.0` **Die llama.cpp-Laufzeit-Builds lesen die Grenze für Stillstand, die du eingestellt hast** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
+  Der Build von Dittos eigenem llama.cpp-Server (`llm-cli ditto runtime install`, das Tool `build_local_runtime`) und
+  der Build der Laufzeit eines Boards (`llm-cli device runtime build`, das Fenster Boards, das Tool
+  `deploy_device_runtime`) stoppen einen Schritt, der nichts ausgibt, nach `build_idle_timeout`, wie es die
+  Stufen-Container eines Modell-Builds tun (vorher warteten sie immer die eingebauten 1800 Sekunden, egal was die
+  Einstellung sagte).
 
 ### Sicherheit
 - `2026-10-30 14:40 UTC` · `v3.3.0` **Das Vorab-Laden der Abhängigkeiten entpackt über das eine sichere Entpacken des

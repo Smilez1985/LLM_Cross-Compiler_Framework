@@ -937,8 +937,8 @@ Version 3.2.0 ist in Arbeit. Kurz:
 - **Entschieden, wartet auf seine Reihe:** Offline-Builds des Build-Container-Images, Vollmachten, ein eigenes Konto
   `llmcf`, Board-Sicherungen, die der PC holt, und die geteilte OpenSSH-Verbindung für einen Board-Schritt.
 
-Nach 3.2.0: der Build-Dienst mit einer Warteschlange über alle Programme, LoRA und große Modelle (3.3.0), eine
-gehärtete Lieferkette (3.4.0) und Rust dort, wo das Framework auf das Netzwerk oder ein Board trifft. Builds in der
+Nach 3.2.0: der Build-Dienst mit einer Warteschlange über alle Programme, LoRA und große Modelle (3.4.0), eine
+gehärtete Lieferkette (3.5.0) und Rust dort, wo das Framework auf das Netzwerk oder ein Board trifft. Builds in der
 Cloud sind nicht geplant.
 
 Vollständige Liste: [docs/ROADMAP_DE.md](docs/ROADMAP_DE.md).

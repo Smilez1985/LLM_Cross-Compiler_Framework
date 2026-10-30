@@ -867,8 +867,8 @@ def import_image(framework: Any, file: Path, *, actor: str, sha256: Optional[str
         if want.get(INPUTS_LABEL) != inputs or str(want.get(IMAGE_LABEL, found_target)).lower() != found_target.lower():
             raise ImageTransferError(
                 f"The image of {found_target} was built from other settings than a build here uses (another target "
-                "folder, Dockerfile, llama.cpp pin, build host CPU features or user id), so a build here would not use "
-                "it; nothing was loaded.", "mismatch",
+                "folder, Dockerfile, llama.cpp pin or build host CPU features), so a build here would not use it; "
+                "nothing was loaded.", "mismatch",
                 "Export it again from a computer with the same target version and settings, or build it here.")
         client = client or docker_client(framework, getattr(getattr(framework, "orchestrator", None), "build_engine",
                                                             None))

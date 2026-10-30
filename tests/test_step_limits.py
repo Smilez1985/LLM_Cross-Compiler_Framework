@@ -75,13 +75,18 @@ def test_the_limits_from_the_settings():
     assert not StepLimits.from_settings(lambda key, default: default).ai_started
 
 
-def test_an_ai_may_only_shorten_the_soft_cap_and_the_idle_timeout():
-    from orchestrator.llm.settings_change import TIGHTEN_ONLY, direction_problem
+def test_an_ai_may_only_shorten_the_soft_cap_and_never_touches_the_idle_timeout():
+    """Changed on purpose: build_idle_timeout is the person's alone (a lower idle timeout can stop the person's own
+    long builds); the soft cap stays tighten-only."""
+    from orchestrator.llm.settings_change import PERSON_ONLY_SETTINGS, TIGHTEN_ONLY, direction_problem
     from orchestrator.tools.tools_status import READ_ONLY, WRITABLE
-    for key in ("build_timeout", "build_idle_timeout"):
-        assert TIGHTEN_ONLY[key] == "lower" and key in WRITABLE and key not in READ_ONLY
-        assert direction_problem(key, 3600, 600) is None
-        assert "may only be lowered" in direction_problem(key, 3600, 7200)
+    assert TIGHTEN_ONLY["build_timeout"] == "lower" and "build_timeout" in WRITABLE
+    assert "build_timeout" not in READ_ONLY
+    assert direction_problem("build_timeout", 3600, 600) is None
+    assert "may only be lowered" in direction_problem("build_timeout", 3600, 7200)
+    assert "build_idle_timeout" in PERSON_ONLY_SETTINGS and "build_idle_timeout" not in WRITABLE
+    for new in (600, 7200):
+        assert "long builds" in direction_problem("build_idle_timeout", 1800, new)
 
 
 def test_both_settings_are_in_the_schema_the_settings_views_show(tmp_path):
@@ -168,3 +173,65 @@ def test_the_device_runtime_build_of_an_ai_stops_at_its_soft_cap(tmp_path, monke
             steps.build_runtime(tmp_path, "0123456789abcdef", SimpleNamespace(perf_key=lambda: "k"), object(),
                                 object(), ai_started=ai)
     assert seen == [True, False]
+
+
+# --- one setting, one meaning: the runtime builds read build_idle_timeout like the stage containers ----------------
+
+class _Settings:
+    """A stand-in for the framework's settings (ConfigManager.get)."""
+
+    def __init__(self, **values):
+        self.values = values
+
+    def get(self, key, default=None):
+        return self.values.get(key, default)
+
+
+def _idle_of(executor):
+    """The idle timeout the executor's StepClock gets for its build step."""
+    return StepClock(executor._limits(executor.build_timeout), "build").limits.idle
+
+
+def test_the_executor_s_default_idle_timeout_is_the_one_of_the_step_limits():
+    from orchestrator.runtime.build import executor
+    from orchestrator.utils import step_limits
+    assert executor.DEFAULT_IDLE == step_limits.DEFAULT_IDLE
+    assert _idle_of(executor.BuildExecutor()) == step_limits.DEFAULT_IDLE
+    assert _idle_of(executor.BuildExecutor(settings=_Settings(build_idle_timeout=777))) == 777
+    # a number the caller passes wins over the setting (tests and the framework's own short steps)
+    assert _idle_of(executor.BuildExecutor(idle_timeout=60, settings=_Settings(build_idle_timeout=777))) == 60
+
+
+def test_the_local_runtime_build_reads_the_configured_idle_timeout(tmp_path):
+    """LocalLLMRuntime.executor(): the configured build_idle_timeout reaches the build's StepClock."""
+    from orchestrator.runtime.llama_server import LocalLLMRuntime
+    rt = LocalLLMRuntime(data_dir=tmp_path / "state", models_dir=tmp_path / "models",
+                         settings=_Settings(build_idle_timeout=4321))
+    assert _idle_of(rt.executor()) == 4321
+    assert _idle_of(rt.executor(ai_started=True)) == 4321
+    assert _idle_of(LocalLLMRuntime(data_dir=tmp_path / "s2", models_dir=tmp_path / "m2").executor()) == 1800
+
+
+def test_the_device_runtime_build_reads_the_configured_idle_timeout(tmp_path, monkeypatch):
+    """steps.build_runtime(settings=...): the configured build_idle_timeout reaches the build's StepClock."""
+    from orchestrator.runtime.build.executor import BuildExecutor
+    from orchestrator.runtime.device import steps
+    seen = []
+
+    class Stop(Exception):
+        pass
+
+    def build(self, plan, **kw):
+        seen.append(_idle_of(self))
+        raise Stop()
+    monkeypatch.setattr(BuildExecutor, "build", build)
+    monkeypatch.setattr("orchestrator.runtime.build.executor.DockerEngine", lambda: None)
+    monkeypatch.setattr("orchestrator.runtime.build.source.cached_source", lambda pin, state: tmp_path)
+    monkeypatch.setattr("orchestrator.runtime.build.store.BuildStore.find", lambda self, plan: None)
+    monkeypatch.setattr("orchestrator.runtime.build.store.BuildStore.build",
+                        lambda self, plan, executor=None, **kw: executor.build(plan))
+    for settings in (_Settings(build_idle_timeout=2468), None):
+        with pytest.raises(Stop):
+            steps.build_runtime(tmp_path, "0123456789abcdef", SimpleNamespace(perf_key=lambda: "k"), object(),
+                                object(), settings=settings)
+    assert seen == [2468, 1800]

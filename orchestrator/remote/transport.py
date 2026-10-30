@@ -394,7 +394,7 @@ def key_file_of(options: Sequence[str]) -> str:
 NULL_DEVICE = "NUL" if os.name == "nt" else "/dev/null"
 
 
-def openssh_options(state_dir: Path) -> List[str]:
+def openssh_options(state_dir: Path, *, known_hosts: Optional[Path] = None, accept_new: bool = False) -> List[str]:
     """The options of every OpenSSH call of the framework, all on the command line, which OpenSSH reads first (the
     first value it obtains for an option wins):
 
@@ -414,7 +414,12 @@ def openssh_options(state_dir: Path) -> List[str]:
     The framework's own paths in options that expand %-tokens are written with '%%' for a '%' (Q5, openssh_file); -F's
     path is read literally. The key file is made private to this account first (OpenSSH refuses a key others can read:
     utils/atomic.py owner_only, an ACL on Windows). The framework key and known_hosts are read through
-    orchestrator/utils/ssh_trust at call time (ssh_trust.system_ssh_options is this function's old name)."""
+    orchestrator/utils/ssh_trust at call time (ssh_trust.system_ssh_options is this function's old name).
+
+    `known_hosts` and `accept_new` serve one call only: reading the key a board behind a jump host presents
+    (remote/trust.presented_key_through_openssh): a temporary known_hosts instead of the framework's, into which
+    OpenSSH may write the board's new key (StrictHostKeyChecking=accept-new); the framework's own known_hosts is never
+    written that way, the person still says yes to the fingerprint first."""
     from orchestrator.remote import ssh_config
     from orchestrator.utils import ssh_trust
     from orchestrator.utils.atomic import owner_only
@@ -425,8 +430,8 @@ def openssh_options(state_dir: Path) -> List[str]:
     except OSError as e:   # OpenSSH then says what it refuses; the login fails with local_problem
         _log.warning(f"The framework's SSH key could not be made private to this account ({e.strerror or e}).")
     return ["-F", ssh_config.argument(config),
-            "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
-            "-o", f"UserKnownHostsFile={openssh_file(ssh_trust.known_hosts_path(state_dir))}",
+            "-o", "BatchMode=yes", "-o", f"StrictHostKeyChecking={'accept-new' if accept_new else 'yes'}",
+            "-o", f"UserKnownHostsFile={openssh_file(known_hosts or ssh_trust.known_hosts_path(state_dir))}",
             "-o", f"GlobalKnownHostsFile={NULL_DEVICE}",
             "-o", "CheckHostIP=no", "-o", "UpdateHostKeys=no", "-o", "VerifyHostKeyDNS=no",
             "-o", "IdentitiesOnly=yes", "-o", f"ConnectTimeout={int(LOGIN_TIMEOUT)}",

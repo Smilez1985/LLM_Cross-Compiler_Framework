@@ -130,6 +130,7 @@ TEXTS = {
                              "still holds stay",
         "zoo.uninstall.title": "Uninstall {kind} pack {id}",
         "zoo.uninstall.not_installed": "{id} is not installed; there is nothing to uninstall.",
+        "zoo.uninstall.running": "Uninstalling {kind} {id}...",
         "zoo.details.loading": "Reading the details of {kind} {id}...",
         "zoo.details.title": "Pack details",
         "zoo.details.none": "{id} is neither in the cached index nor installed; Refresh downloads the index again.",
@@ -402,6 +403,7 @@ TEXTS = {
                              "Auszüge, die ein anderes Paket noch hält, bleiben",
         "zoo.uninstall.title": "{kind}-Paket {id} deinstallieren",
         "zoo.uninstall.not_installed": "{id} ist nicht installiert; es gibt nichts zu deinstallieren.",
+        "zoo.uninstall.running": "{kind} {id} wird deinstalliert...",
         "zoo.details.loading": "Die Details von {kind} {id} werden gelesen...",
         "zoo.details.title": "Paket-Details",
         "zoo.details.none": "{id} ist weder im zwischengespeicherten Index noch installiert; Refresh lädt den Index "

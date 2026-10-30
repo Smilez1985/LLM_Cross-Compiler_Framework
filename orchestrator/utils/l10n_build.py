@@ -106,6 +106,7 @@ TEXTS = {
         # the check of one target (targets validate), also after the module wizard and a Community Hub install
         "bld.check.title": "Check target",
         "bld.check.valid": "Target '{id}' is valid ({boards} boards, formats: {formats}).",
+        "bld.check.old_format": "{count} entries in the old format were ignored: {names}",
         "bld.check.invalid": "Target '{id}': its capabilities block is invalid:",
         "bld.check.error_line": "{field}: {message}",
         "bld.check.no_caps": "Target '{id}' loads but declares no capabilities: boards, formats and quantizations are "
@@ -350,6 +351,7 @@ TEXTS = {
 
         "bld.check.title": "Target prüfen",
         "bld.check.valid": "Target „{id}“ ist gültig ({boards} Boards, Formate: {formats}).",
+        "bld.check.old_format": "{count} Einträge im alten Format wurden übergangen: {names}",
         "bld.check.invalid": "Target „{id}“: sein Fähigkeiten-Block ist ungültig:",
         "bld.check.error_line": "{field}: {message}",
         "bld.check.no_caps": "Target „{id}“ lädt, gibt aber keine Fähigkeiten an: Boards, Formate und "

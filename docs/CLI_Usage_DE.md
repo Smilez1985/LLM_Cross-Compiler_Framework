@@ -473,8 +473,10 @@ sie zuerst an), das Speicherprofil, die Optimierungsstufe, mit der ein Build ohn
 llama.cpp-Optionen und Compiler-Flags, die das Build-Rezept für den SoC des Boards plant, und die CPU des Boards.
 Darunter stehen die Benchmark-Zeilen des Boards (Modell, Quantisierung, Werte) mit ihrer Quelle am Ende:
 `measured by llmcf (board <Name>, <Datum>)`, `published: <Adresse>` oder `unmeasured` (eine Schätzung; nie als Messung gezeigt).
-Exit-Code 2 für ein unbekanntes Target, 1, wenn seine Profile oder Benchmarks ungültig sind (`targets validate` nennt
-den Grund).
+Die Board-Tests der Builds dieses Computers stehen vorn: der neueste bestandene Test je Board, Modell und
+Quantisierung, gemessen auf dem Board, das du benannt hast. Eine letzte Zeile nennt Einträge im Format vor 3.2.0, die
+übergangen wurden (`N entries in the old format were ignored: <Namen>`). Exit-Code 2 für ein unbekanntes Target, 1,
+wenn seine Profile oder Benchmarks ungültig sind (`targets validate` nennt den Grund).
 
 ```bash
 llm-cli targets boards Rockchip
@@ -493,7 +495,8 @@ CLI, Build-Service und Werkzeuge verwenden; jeder Schemafehler wird ausgegeben. 
 `performance_benchmarks:` werden geprüft: ihr Schema, ihre Boards und Quantisierungen, keine Option, die etwas
 herunterlädt, und jedes Profil gegen den Plan des Build-Rezepts für seinen SoC (ein abweichender Wert wird genannt). Exit-Code 1, wenn das Target nicht
 gefunden wird oder seine Capabilities ungültig sind. Ein Target ohne Capabilities wird gemeldet, gilt aber als
-gültig.
+gültig. Einträge im Format vor 3.2.0 werden nicht abgelehnt; eine letzte Zeile nennt sie: `N entries in the old format
+were ignored: <Namen>` (die Target-Prüfung der GUI sagt dasselbe).
 
 ```bash
 llm-cli targets validate Rockchip
@@ -1227,7 +1230,9 @@ nur den Exit-Code für Skripte.
 eigenen Eingabe-, Ausgabe-, Cache-Lese- und Cache-Schreib-Tokens des Anbieters fest (aus seiner Usage-Antwort, nie
 geschätzt) und je Gespräch den Anteil aus dem Cache; mit Claude hält sie auch fest, warum der Prompt-Cache gegenüber
 der vorigen Antwort nicht getroffen hat (Anthropics Cache-Diagnose). Zwei Fälle, die heute scheitern, sind mit
-`expected_fail` markiert: Ihr Scheitern wird nicht gezählt, und ein Bestehen wird als `UNEXPECTED PASS` ausgegeben.
+`expected_fail` und dem Grund markiert, aus dem sie scheitern (`expected_fail_reason`): Dieses Scheitern wird nicht
+gezählt, ein Scheitern aus einem anderen Grund zählt wie jedes andere, und ein Bestehen wird als `UNEXPECTED PASS`
+ausgegeben.
 Die zusätzliche Tabelle heißt **Tokens**.
 
 ```bash
@@ -1242,7 +1247,8 @@ llm-cli ditto eval --kind openai_paid --provider openai --i-pay
 ```
 
 Der bezahlte Test fragt vor dem Start noch einmal („Nein“ ist die Vorgabe) und nennt, was er höchstens kostet. Er
-schreibt `openai_cache_check.json` nach `evals/` in deinem Zustandsordner (nur Wahrheitswerte und Token-Zahlen) und
+schreibt `openai_cache_check.json` nach `evals/` in deinem Zustandsordner (nur Wahrheitswerte und Token-Zahlen;
+eine Prüfung, die dieser Lauf nicht gemessen hat, behält ihr früheres Ergebnis) und
 gibt aus, wohin. In der GUI: die Art in **Ditto > Bewertung...** anhaken, die Pause ist **Pause zwischen den
 Runden**, und **Bewertung starten...** stellt die Frage des bezahlten Tests mit seinen Kosten. Einzelheiten:
 [Features_DE.md](Features_DE.md#token--und-cache-messung).
@@ -1648,7 +1654,10 @@ Das Speicherbudget von Dittos lokalem Server, aus der gemessenen Hardware dieses
 RAM (`local_cache_ram_mib`, `--cache-ram`), die Zeit, die das Modell ohne Anfragen geladen bleibt
 (`local_cache_keep_minutes`), und den KV-Cache-Typ (`local_kv_cache`) zeigt es deinen gespeicherten Wert (auto oder
 einen Wert), wofür auto hier steht, was der nächste Start nimmt, die weiche und die harte Grenze und warum; danach, was
-der laufende Server bekommen hat. `--json` gibt dasselbe als JSON aus.
+der laufende Server bekommen hat. `--json` gibt dasselbe als JSON aus. Hat der llama.cpp-Build keine Flash Attention,
+die ein quantisierter KV-Cache braucht, wird ein automatisches q8_0 oder q4_0 beim Start zu f16, und `ditto runtime
+start` und `ditto cache` sagen es in einer gelben Zeile; ein q8_0 oder q4_0, das du selbst gesetzt hast, bleibt, und
+der Start scheitert mit einem Text, der `local_kv_cache` und f16 nennt.
 
 #### ditto cache set
 
@@ -1666,8 +1675,9 @@ Ein Wert über der harten Grenze (mehr Speicher, als dieser Computer neben dem M
 abgelehnt, ebenso ein Wert, der keine Zahl ist (es gibt kein `-1` für „ohne Grenze“). Über der weichen Grenze bekommst
 du eine Warnung und die Frage „Set it anyway?“ („Nein“ ist die Vorgabe), außer du hast `--yes-over-cap` angegeben oder
 `local_cache_over_cap_ok` gesetzt. Gespeichert wird nur die genannte Einstellung; ein laufender Server übernimmt sie bei
-seinem nächsten Start (er startet einmal neu). Ein KI-Client darf diese Werte über MCP nur senken und nie über die
-weiche Grenze; `local_cache_over_cap_ok` und 0 Minuten setzt nur du.
+seinem nächsten Start (er startet einmal neu). Ein KI-Client darf über MCP nur `local_cache_keep_minutes` kürzen und
+nie über die weiche Grenze; `local_cache_ram_mib`, `local_kv_cache`, `local_cache_over_cap_ok` und 0 Minuten setzt nur
+du (eine Zahl von einer KI würde einen Wert einfrieren, der zu diesem Computer bald nicht mehr passt).
 
 ```bash
 llm-cli ditto cache

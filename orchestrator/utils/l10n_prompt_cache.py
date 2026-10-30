@@ -22,6 +22,9 @@ TEXTS = {
         "prompt_cache.load_failed": "The memory budget could not be read: {reason}",
         "prompt_cache.row": "{name}: automatic here {auto}, soft cap {soft}, hard limit {hard}. {reason}",
         "prompt_cache.running": "The running server has: prompt cache {ram} MiB, KV cache {kv}, context {ctx} tokens.",
+        "prompt_cache.kv_fallback": "It runs with the f16 KV cache instead of the automatic {kind}: this llama.cpp "
+                                    "build has no flash attention, which a quantised cache needs, so the same memory "
+                                    "holds a shorter context. Use a build with flash attention, or choose f16 above.",
         "prompt_cache.not_loaded": "The memory budget is still being measured; try again in a moment.",
         "prompt_cache.refused": "Not saved: {reason}",
         "prompt_cache.warning": "{warning}\n\nSet it anyway?",
@@ -43,6 +46,10 @@ TEXTS = {
         "prompt_cache.load_failed": "Das Speicherbudget konnte nicht gelesen werden: {reason}",
         "prompt_cache.row": "{name}: automatisch hier {auto}, weiche Grenze {soft}, harte Grenze {hard}. {reason}",
         "prompt_cache.running": "Der laufende Server hat: Prompt-Cache {ram} MiB, KV-Cache {kv}, Kontext {ctx} Tokens.",
+        "prompt_cache.kv_fallback": "Er läuft mit dem KV-Cache f16 statt des automatischen {kind}: Dieser "
+                                    "llama.cpp-Build hat keine Flash Attention, die ein quantisierter Cache braucht, so "
+                                    "fasst derselbe Speicher einen kürzeren Kontext. Nimm einen Build mit Flash "
+                                    "Attention, oder wähle oben f16.",
         "prompt_cache.not_loaded": "Das Speicherbudget wird noch gemessen; versuch es gleich noch einmal.",
         "prompt_cache.refused": "Nicht gespeichert: {reason}",
         "prompt_cache.warning": "{warning}\n\nTrotzdem setzen?",

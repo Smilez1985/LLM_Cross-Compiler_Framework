@@ -250,6 +250,7 @@ cases:
     kind: tokens
     description: "Follow-up on the last answer right after the conversation was summarized"
     expected_fail: true
+    expected_fail_reason: answer_lost_after_summary
     use_tools: false
     context_limit: 512
     turns:
@@ -291,6 +292,7 @@ cases:
     kind: tokens
     description: "Twenty short turns on a local model with a 4096-token window"
     expected_fail: true
+    expected_fail_reason: context_shift_disabled
     needs_local: true
     context_limit: 4096
     turns:
