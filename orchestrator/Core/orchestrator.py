@@ -14,6 +14,7 @@ Updates v2.4.0:
 
 import asyncio
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Any
@@ -423,6 +424,19 @@ class LLMOrchestrator:
                     break
         state.end_reason = reason
         return reason
+
+    def wait_end_announced(self, request_id: str, timeout: float = 5.0, poll: float = 0.05) -> bool:
+        """Waits until the request's end was told to the end listeners (the chat feed's row, the doorbell), at most
+        `timeout` seconds; True when it was. For a process that ends right after a build (llm-cli): its status is
+        final a moment before the end is announced."""
+        deadline = time.monotonic() + max(0.0, timeout)
+        while True:
+            with self._end_lock:
+                if request_id in self._ended:
+                    return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(min(poll, max(0.0, deadline - time.monotonic())))
 
     def _announce_end(self, state: "WorkflowState") -> None:
         """Tells the end listeners once that a request ended (completed, error, cancelled): framework facts only."""

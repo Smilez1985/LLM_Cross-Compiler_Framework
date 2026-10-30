@@ -77,6 +77,15 @@ def end_of_row(entry: Any) -> Optional[tuple]:
     return request_id, reason, caller
 
 
+def _cancelled_by(entry: Any) -> str:
+    """The caller id of the AI that cancelled the build of a build end's row ("" for none)."""
+    entry = getattr(entry, "entry", entry)
+    try:
+        return str((entry.params or {}).get("by") or "")
+    except AttributeError:
+        return ""
+
+
 class BuildTurns:
     """The turns one chat panel gives Ditto for build ends: offer(row) -> note or None, queued notes, the limit of
     turns in a row. Not thread-safe by itself: the panel calls it on the GUI thread."""
@@ -98,6 +107,10 @@ class BuildTurns:
         if request_id in self._seen:
             return None
         if caller != DITTO and not waited_for(request_id):
+            return None
+        if reason == "cancelled" and _cancelled_by(row) == DITTO and not waited_for(request_id):
+            # Ditto cancelled it itself (the row's caller is then Ditto also for the person's own build, which Ditto
+            # neither started nor waited for): nothing new for Ditto to look at
             return None
         self._seen[request_id] = None
         while len(self._seen) > MAX_REMEMBERED:

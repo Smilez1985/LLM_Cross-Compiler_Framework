@@ -19,8 +19,9 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   geendet hat“, und Ditto prüft das Ergebnis mit `get_build_status` und `read_build_log` und schlägt den nächsten
   Schritt vor oder führt ihn im Rahmen seiner Berechtigungen und Freigaben aus. Die Eingabe des Zugs ist ein fester
   Hinweis des Frameworks nur mit den festen Wörtern des Endes und der Anfrage-ID. Während dein eigener Zug läuft,
-  wartet der Zug des Builds und folgt ihm; andere Builds geben keinen Zug; höchstens drei solche Züge hintereinander
-  ohne eine Nachricht von dir, damit eine Kette von Builds nie in eine Schleife gerät.
+  wartet der Zug des Builds und folgt ihm; andere Builds geben keinen Zug, auch keiner, den Ditto nur abgebrochen hat
+  (dein eigener Build, den Ditto gestoppt hat); höchstens drei solche Züge hintereinander ohne eine Nachricht von dir,
+  damit eine Kette von Builds nie in eine Schleife gerät.
 - `2026-10-30 13:17 UTC` · `v3.3.0` **Eine Türklingel auf deinem eigenen MQTT-Broker für jedes Build-Ende** ([Design](docs/DESIGN_DE.md#mcp-server-tools-und-berechtigungen)):
   wenn du einen Broker einstellst (`llm-cli config doorbell --broker mqtts://HOST:PORT` oder Datei > Einstellungen... >
   Build-Türklingel), wird jedes Build-Ende einmal an `<prefix>/v1/build/<request_id>/end` und `<prefix>/v1/events`
@@ -33,7 +34,10 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   (`config doorbell --test` und der Knopf in den Einstellungen) sendet eine über denselben Code. Die Einstellungen
   (`mqtt_broker_url`, `mqtt_username`, `mqtt_topic_prefix`, Standard `llmcf`, und `mqtt_ca_file`) gehören nur dir,
   das Passwort liegt nur im Tresor für Zugangsdaten (`mqtt_password`), einfaches `mqtt://` geht nur auf diesem
-  Computer, jeder andere Broker braucht `mqtts://` mit geprüftem Zertifikat; im Offline-Modus nur ein lokaler Broker.
+  Computer (der Name `localhost` oder eine Loopback-Adresse; ein Name unter `.localhost` geht an den Resolver des
+  Systems und braucht `mqtts://` wie jeder andere Broker), jeder andere Broker braucht `mqtts://` mit geprüftem
+  Zertifikat; im Offline-Modus nur ein lokaler Broker. Ein Programm, das gleich nach einem Build endet (jedes
+  `llm-cli build start`), sendet seine Türklingel und schreibt seine Chat-Zeile vorher noch, höchstens 15 s länger.
   Neue Abhängigkeiten, mit Hashes festgelegt: aiomqtt 2.5.1 (BSD-3-Clause) und paho-mqtt 2.1.0 (EPL-2.0 oder
   EDL-1.0), geladen nur, wenn eine Türklingel gesendet wird.
 - `2026-10-30 12:56 UTC` · `v3.3.0` **Das Ende jedes Builds im Chat, einmal** ([Design](docs/DESIGN_DE.md#mcp-server-tools-und-berechtigungen)):
@@ -62,7 +66,8 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   den Eintrag mit 0 endet, ist ein fehlgeschlagener Build („der Build endete ohne seinen Abschluss-Eintrag“), nie ein
   stiller Erfolg. Jeder Build hat einen Endgrund aus einem festen Vokabular (done, failed, cancelled, soft_cap, idle),
   gespeichert in seinem Build-Eintrag und bei einem fertigen Build als `end` (reason, exit, stage) in
-  `build_info.json`.
+  `build_info.json`. Ein Eintrag hinter einem Link (der Eintrag, sein Job-Ordner oder der Ordner stages: der
+  Container schreibt den Arbeitsordner) zählt nie, und ein alter wird nie über so einen Link entfernt.
 
 ### Geändert
 - `2026-10-30 12:56 UTC` · `v3.3.0` **Die Chat-Zeile eines Builds nennt, wie er endete, nicht seinen Ordner** ([Design](docs/DESIGN_DE.md#mcp-server-tools-und-berechtigungen)):

@@ -30,6 +30,7 @@ folder). The MQTT client (aiomqtt over paho-mqtt) is imported only when a doorbe
 """
 
 import asyncio
+import atexit
 import json
 import os
 import queue
@@ -37,6 +38,7 @@ import re
 import ssl
 import threading
 import time
+import weakref
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,6 +63,9 @@ QUEUE_SIZE = 100
 CONNECT_TIMEOUT = 10.0
 PUBLISH_TIMEOUT = 10.0
 STATUS_FILE = "doorbell_status.json"
+# A process that ends with doorbells still queued (every `llm-cli build start`: the publisher thread is a daemon) sends
+# them first, at most this many seconds in all (a broker that is down then costs the process this long, never more)
+EXIT_FLUSH = 15.0
 
 
 class DoorbellRefused(ValueError):
@@ -129,13 +134,13 @@ def broker_of(config: Any) -> Optional[Broker]:
 
 
 def _is_loopback(broker: Broker, config: Any, resolver: Optional[Callable[[str], Any]] = None) -> bool:
-    """Whether the broker is this computer: localhost, or a name or address that is only loopback addresses."""
-    from orchestrator.utils.locality import address_kind, is_localhost_name, parse_address
-    if is_localhost_name(broker.host):
-        return True
+    """Whether the broker is surely this computer: the name localhost, or a loopback address. Any other name needs
+    TLS (its addresses may change), whatever it resolves to now; so does a name under .localhost: it counts as local
+    for the locality rule, but the MQTT client asks the system resolver for it, which may answer with any address."""
+    from orchestrator.utils.locality import LOCALHOST_NAMES, address_kind, normal_host, parse_address
     if parse_address(broker.host) is not None:
         return address_kind(broker.host) == "loopback"
-    return False   # a name: TLS is required (its addresses may change), whatever it resolves to now
+    return normal_host(broker.host) in LOCALHOST_NAMES
 
 
 def check_broker(broker: Broker, config: Any, *, password: bool = False,
@@ -272,6 +277,7 @@ class Doorbell:
         self.sent = 0
         self.dropped = 0
         self.last_problem: Optional[str] = None
+        _LIVE.add(self)
 
     def on_build_end(self, facts: Dict[str, Any]) -> None:
         """The orchestrator's end listener: one doorbell per request id; nothing when no broker is set."""
@@ -360,6 +366,20 @@ class Doorbell:
                            encoding="utf-8")
             os.replace(tmp, path)
         except OSError:
+            pass
+
+
+_LIVE: "weakref.WeakSet[Doorbell]" = weakref.WeakSet()
+
+
+@atexit.register
+def _flush_at_exit() -> None:
+    """The doorbells this process still has queued are sent before it ends (at most EXIT_FLUSH seconds in all)."""
+    deadline = time.monotonic() + EXIT_FLUSH
+    for bell in list(_LIVE):
+        try:
+            bell.flush(max(0.0, deadline - time.monotonic()))
+        except Exception:  # noqa: BLE001 - the process ends anyway
             pass
 
 

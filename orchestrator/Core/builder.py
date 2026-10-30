@@ -568,10 +568,7 @@ class BuildEngine:
         clock = StepClock(self._step_limits(config), prefix.strip(': ').lower() or 'build')
         if end_record is not None:
             progress.end_record = None
-            try:
-                Path(end_record).unlink(missing_ok=True)   # a record of an earlier run never ends this one
-            except OSError:
-                pass
+            self._forget_end_record(Path(end_record))   # a record of an earlier run never ends this one
         grace_until: Optional[float] = None
         with self._lock:
             self._active_containers[config.build_id] = container
@@ -2252,6 +2249,17 @@ class BuildEngine:
         exit_code = self._ended_by_record(progress, exit_code, "CONT: ")
         if exit_code != 0:
             raise RuntimeError(f"Build script failed with exit code {exit_code}\n{self._log_tail(progress, 'CONT: ')}")
+
+    @staticmethod
+    def _forget_end_record(path: Path) -> None:
+        """Removes an end record left by an earlier run, never through a link (the container writes the work folder:
+        a linked job folder may point anywhere on this computer; the record behind it does not count either)."""
+        try:
+            if path.parent.is_symlink() or path.parent.parent.is_symlink():
+                return
+            path.unlink(missing_ok=True)   # a link in its place is removed itself, never what it points to
+        except OSError:
+            pass
 
     def _ended_by_record(self, progress: "BuildProgress", exit_code: int, prefix: str) -> int:
         """The stage container's end by its end record (Core/build_end.py): "status done" is done (0), also when the
