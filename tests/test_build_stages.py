@@ -220,7 +220,9 @@ def image(tmp_path):
 # What the target stage adds to build_info.json from the convert stage (its statistics: input, output, ratio, duration,
 # functional test). The characterization tests here compare build_info.json as it was before; the statistics are
 # pinned in tests/test_convert_stage.py.
-_CONVERSION = re.compile(rb', "conversion": \{[^{}]*\}(?=\}\s*$)')
+# The build's statistics in build_info.json: the convert stage's ("conversion") and the target stage's
+# ("quantize_seconds", DECISIONS round 25 Q8); they vary from run to run and are checked on their own
+_CONVERSION = re.compile(rb'(?:, "conversion": \{[^{}]*\})?(?:, "quantize_seconds": \d+)?(?=\}\s*$)')
 
 
 def _without_conversion(path: Path) -> bytes:
@@ -558,6 +560,14 @@ READ_TODAY = {
 NEW_FOR_THE_STAGE_RUNNER = {"MODEL_REVISION", "HARDWARE_CONFIG_FILE", "LLAMA_CPP_REPO_OVERRIDE"}
 # Read only by stage code started by hand with an option (source_module.sh --clone-llama-cpp), never in a build.
 ONLY_ON_REQUEST = {"LLAMA_CPP_COMMIT"}
+# Set by the BuildEngine for the module's CMake flags (DECISIONS round 25 Q6): the person's decision on options outside
+# the allowlist (LLMCF_ALLOWED_FLAGS, LLMCF_FLAG_DECISION) and the dependencies fetched before the build and mounted
+# read-only (LLMCF_DEPS); BUILD_PLAN is the calling stage's own plan path, read by build.sh's cmake shim (it runs in
+# the stage's shell) to keep only the toolchain the plan set.
+FOR_THE_MODULE_FLAGS = {"LLMCF_ALLOWED_FLAGS", "LLMCF_FLAG_DECISION", "LLMCF_DEPS", "BUILD_PLAN"}
+# The loop protection of the stage runner (DECISIONS round 25 Q8): how often a stage may start with the same inputs
+# without finishing (default 3; tests and a person's own run may change it).
+FOR_THE_TIME_RULE = {"STAGE_RESTART_LIMIT"}
 # What the runner hands its stages (build.sh): not read from the build container's environment. STAGE_LAST (the last
 # stage of this run), CONVERT_OUTPUT (the --output option) and PACKAGE_REQUESTED (the --package option) are set by
 # the runner itself, never from outside.
@@ -625,7 +635,7 @@ def stage_scripts(modules: Path):
 
 def test_the_build_reads_the_same_environment_variables():
     reads = environment_reads(stage_scripts(ROCKCHIP / "modules"))
-    assert reads - NEW_FOR_THE_STAGE_RUNNER - ONLY_ON_REQUEST == READ_TODAY
+    assert reads - NEW_FOR_THE_STAGE_RUNNER - ONLY_ON_REQUEST - FOR_THE_MODULE_FLAGS - FOR_THE_TIME_RULE == READ_TODAY
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -746,6 +756,45 @@ def test_fresh_runs_every_stage(image):
     result = image.run("--fresh")
     assert result.returncode == 0
     assert stage_lines(result) == ran("source", "config", "convert", "target")
+
+
+def _stopped_starts(image, stage, count):
+    """What a stage that was started `count` times and stopped from outside each time leaves: its .starts file with
+    the inputs of this run (the ones the finished convert stage recorded)."""
+    stages = image.work / "stages" / "build"
+    inputs = next(line.split(" ", 1)[1] for line in (stages / "convert.done").read_text().splitlines()
+                  if line.startswith("inputs "))
+    (stages / f"{stage}.starts").write_text(f"inputs {inputs}\ncount {count}\n")
+
+
+@needs_bash
+def test_a_stage_that_keeps_restarting_is_not_started_again(image):
+    """Loop protection (DECISIONS round 25 Q8): a stage started STAGE_RESTART_LIMIT times with the same inputs that
+    never finished is a loop; the runner stops before starting it again, --fresh forgets the count."""
+    assert image.run("--to", "convert").returncode == 0
+    _stopped_starts(image, "target", 3)
+
+    looped = image.run()
+
+    assert looped.returncode == 75
+    assert "The stage target started 3 times with the same inputs and never finished" in looped.stderr
+    assert stage_lines(looped)[-1] == ("4/4", "target", "failed")
+    assert [c.split()[0] for c in image.calls()] == ["convert"], "the target stage did not run"
+
+    again = image.run("--fresh")
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert not list((image.work / "stages" / "build").glob("*.starts")), "a finished stage forgets its count"
+
+
+@needs_bash
+def test_a_stage_stopped_fewer_times_runs_and_its_own_failure_is_no_restart(image):
+    assert image.run("--to", "convert").returncode == 0
+    _stopped_starts(image, "target", 2)
+    assert image.run().returncode == 0
+    starts = image.work / "stages" / "build" / "target.starts"
+    assert not starts.exists()
+    failed = image.run("--fresh", STUB_FAIL="quantize")
+    assert failed.returncode == 4 and not starts.exists(), "an ordinary failure is not a loop"
 
 
 @needs_bash

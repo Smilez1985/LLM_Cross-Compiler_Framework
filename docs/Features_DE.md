@@ -187,8 +187,12 @@ Weiteres Verhalten:
 - **Unbekanntes Target:** CLI, Ditto und MCP-Clients lehnen ein unbekanntes Target ab, bevor etwas läuft (die CLI
   mit Exit-Code 2). Eine Anfrage, bei der trotzdem nichts zu bauen bleibt, scheitert mit „Nothing to build“, statt
   Erfolg zu melden.
-- **Zeitlimits:** Jeder Container-Schritt hat ein Zeitlimit (Einstellung `build_timeout`, Standard 3600 s); nur
-  ein echtes Überschreiten zählt als Zeitüberschreitung.
+- **Keine harte Zeitgrenze:** Ein Schritt dauert so lange, wie er dauert. `build_timeout` (Standard 3600 s) ist
+  eine weiche Obergrenze: Ein Build, den du gestartet hast, läuft mit einer Warnung darüber hinaus (Abbrechen stoppt
+  ihn), einer, den eine KI gestartet hat, stoppt dort und wird nie verlängert. `build_idle_timeout` (Standard
+  1800 s) stoppt einen Schritt, der so lange nichts ausgibt. Eine Stufe, die immer neu startet, ohne fertig zu werden,
+  und ein Modell, das sich im Funktionstest wiederholt, werden als Schleife gestoppt. Eine KI darf beide
+  Einstellungen nur senken.
 - **Wohin ein Build kommt:** siehe [Wohin fertige Modelle kommen](#wohin-fertige-modelle-kommen) unten. Jeder Build
   landet in `<Ordner>/<Target>/<Modell>/<Quantisierung>/`, sein Golden-ZIP daneben.
 
@@ -3090,6 +3094,19 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   `armv8.2-a+dotprod+fp16`), die Backends und die Programme. Er sagt, dass llama.cpp aus dem Quelltext gebaut wird;
   er ist eine Aufzeichnung, und die Laufzeit wird immer neu aus der eigenen Probe des Geräts geplant. CPU- und
   CMake-Flags aus dem Assistenten oder von Ditto stehen dort unter `advisory` und werden nie angewendet.
+- **Die CMake-Flags des Moduls im Board-Paket:** Eine Allowlist entscheidet sie überall (Generator, Ordnerprüfung,
+  Build-Plan, die letzte Prüfung des Pakets im Build-Container): `-DNAME=WERT` und CMakes `-W`-Wörter; was Code oder
+  eine andere Toolchain lädt, `-S`/`-B`, `-C`/`-P` und Downloads werden abgelehnt. Eine gültige CMake-Option außerhalb
+  der Liste (`-G Ninja`, `--trace`, ...) entscheidest du: Der Builder (oder `build start`) zeigt, was sie tut, und eine
+  Empfehlung für das Modell und die Quantisierung, die du baust, und du erlaubst sie oder machst mit den
+  Standard-Flags weiter; die Entscheidung lässt sich für die Modulversion merken. Ein von einer KI gestarteter Build
+  mit so einer Option wartet auf dich
+  ([Modul-Entwicklerhandbuch, Abschnitt 3.5](Module_Developer_Guide_DE.md#35-cmake-flags-eines-moduls)).
+- **Abhängigkeiten vor dem Build geholt:** BoringSSL, LibreSSL und KleidiAI, die llama.cpp wegen einer CMake-Option
+  eines Moduls beim Bauen herunterladen würde, werden stattdessen vor dem Build geholt: festgelegt, wie llama.cpp sie
+  angibt, gegen die sha256 vom ersten Holen geprüft, schreibgeschützt in einem Abhängigkeits-Cache abgelegt und nur
+  lesend in den Build eingehängt, der Build selbst bleibt also ohne Netz. Offline wird nur genommen, was im Cache ist.
+  `build deps` und Build > Build-Abhängigkeiten… listen, holen und löschen sie.
 - **llama.cpp in neuen Targets:** Das Vorlagen-Dockerfile baut die Konvertierungswerkzeuge wie das Rockchip-Image
   ([Konvertierungswerkzeuge abgestimmt auf den Build-Rechner](#konvertierungswerkzeuge-abgestimmt-auf-den-build-rechner)).
   Die GPU-Vorlage nimmt CUDA 12.9.1 aus den Redist-Archiven von NVIDIA (Manifest per sha256 festgelegt, jedes Archiv

@@ -48,8 +48,15 @@ CLI_PATHS: Dict[str, str] = {
     "build start --gpu": "chk_builder_gpu",
     "build start --imatrix": "chk_builder_imatrix",
     "build start --dataset": "combo_builder_dataset",
+    # the question about the module's CMake options outside the allowlist opens when Start Build is pressed
+    "build start --module-flags": "btn_builder_start",
+    "build start --remember-flags": "btn_builder_start",
     "build save": "btn_deploy_save",                          # Deployment tab > Save...
     "build save --to": "btn_deploy_save",                     # its folder dialog chooses the folder
+    # Build > Build Dependencies...: the dependency cache of module CMake options (runtime/build/deps.py)
+    "build deps list": "act_build_deps",
+    "build deps fetch": "btn_build_deps_fetch",
+    "build deps delete": "btn_build_deps_delete",
     "build status": "act_build_history",
     "build status --all": "act_build_history",
     "config show": "act_file_settings",
@@ -63,6 +70,8 @@ CLI_PATHS: Dict[str, str] = {
     "config local-network --remove": "act_file_settings",
     "config local-network --check": "act_file_settings",
 }
+# The objects of this area that live in a window, with the menu action that opens it (the parity test opens it).
+WINDOW_OBJECTS: Dict[str, str] = {"btn_build_deps_fetch": "act_build_deps", "btn_build_deps_delete": "act_build_deps"}
 # The switches of this area that are for scripts only, with the reason (as the other menu modules list theirs; the
 # hidden, deprecated build start --parallel is not offered at all).
 MACHINE_ONLY: Dict[str, str] = {
@@ -85,8 +94,11 @@ def install(window, menubar) -> None:
                                                 lambda: open_targets(window))
     window.act_build_history = place.new_action(window, "act_build_history", ui_text("bld.menu.history", lang),
                                                 lambda: open_build_history(window))
+    window.act_build_deps = place.new_action(window, "act_build_deps", ui_text("bld.menu.deps", lang),
+                                             lambda: open_build_deps(window))
     build_menu.addAction(window.act_build_targets)
     build_menu.addAction(window.act_build_history)
+    build_menu.addAction(window.act_build_deps)
 
     window.act_file_settings = place.new_action(window, "act_file_settings", ui_text("bld.menu.settings", lang),
                                                 lambda: open_settings(window))
@@ -131,6 +143,18 @@ def open_build_history(window):
     return dialog
 
 
+def open_build_deps(window):
+    """Build > Build Dependencies...: the dependency cache (runtime/build/deps.py), as `build deps list|fetch|delete`."""
+    from orchestrator.gui.build_deps_window import BuildDependenciesDialog
+    try:
+        dialog = BuildDependenciesDialog(window.framework, window)
+    except Exception as e:  # noqa: BLE001 - e.g. no cache folder; plain text (SEC-M2)
+        plain_box(window, "critical", ui_text("bld.deps.title"), one_line(str(e)))
+        return None
+    dialog.exec()
+    return dialog
+
+
 def open_settings(window):
     """File > Settings...: the effective settings and the source repository overrides (settings_view)."""
     from orchestrator.gui.settings_window import SettingsDialog
@@ -144,4 +168,5 @@ def open_settings(window):
     return dialog
 
 
-__all__ = ["CLI_PATHS", "MACHINE_ONLY", "install", "open_build_history", "open_settings", "open_targets"]
+__all__ = ["CLI_PATHS", "MACHINE_ONLY", "WINDOW_OBJECTS", "install", "open_build_deps", "open_build_history", "open_settings",
+           "open_targets"]

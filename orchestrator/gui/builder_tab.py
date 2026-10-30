@@ -595,7 +595,7 @@ class BuilderTab(QWidget):
         self._select_recent_target()
         
         # START BUTTON
-        self.btn_start = QPushButton("🚀 Start Build Pipeline")
+        self.btn_start = QPushButton(ui_text("bld.builder.start"))
         self.btn_start.setObjectName("btn_builder_start")
         self.btn_start.setMinimumHeight(50)
         self.btn_start.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; font-size: 14px;")
@@ -1330,18 +1330,20 @@ class BuilderTab(QWidget):
                        priority=values.get("priority", PriorityLevel.NORMAL), output_dir=values["output_dir"],
                        parallel_builds=True, description="Builder Tab Job")
         try:
-            # The one build path (BuildService), as for the CLI and AI callers: the service checks the request again
-            # and queues it; the build keeps running on the framework's background loop after this slot returns.
-            if recipe is not None and self._recipe_as_pinned(values):
-                # Exactly the recipe: the recipe as installed now (refused when the community index revoked it or it
-                # changed since it filled the form), with its calibration dataset checked against its pin.
-                rid = service.start_recipe(recipe.id, dataset_path=values["dataset"], use_gpu=values["use_gpu"],
-                                           expect=self._recipe_expect(values), probe=values.get("probe"),
-                                           **options).request_id
-            else:
-                if recipe is not None:  # the person's own values at the recipe's commit: still never a revoked one
-                    service.installed_recipe(recipe.id)
-                rid = service.start_build(self._service_request(values), **options).request_id
+            try:
+                rid = self._submit(service, values, recipe, options)
+            except BuildServiceError as e:
+                # A module's CMake options outside the allowlist (DECISIONS round 25 Q6): the person decides here,
+                # after what each one does and the recommendation; then the same request is submitted once more.
+                question = getattr(e, "flag_question", None)
+                if question is None:
+                    raise
+                answer = self._ask_module_flags(question)
+                if answer is None:
+                    self._log(ui_text("bld.flags.cancelled"))
+                    return
+                options.update(flag_decision=answer[0], remember_flags=answer[1], flag_channel="framework-gui")
+                rid = self._submit(service, values, recipe, options)
             self._set_state("success")
             self._log(f"Job Submitted! ID: {rid}")
             self._track_build(rid)
@@ -1354,6 +1356,44 @@ class BuilderTab(QWidget):
         except Exception as e:
             self._set_state("fail")
             self._log(f"Submission Error: {e}")
+
+    def _ask_module_flags(self, question):
+        """The question about the module's CMake options outside the allowlist: (decision, remember) or None
+        (cancelled). "Use the standard flags" is the default button."""
+        from PySide6.QtWidgets import QCheckBox
+        box = QMessageBox(self)
+        box.setWindowTitle(ui_text("bld.flags.title"))
+        box.setIcon(QMessageBox.Warning)
+        box.setText(question.text())
+        allow = box.addButton(ui_text("bld.flags.allow"), QMessageBox.AcceptRole)
+        standard = box.addButton(ui_text("bld.flags.standard"), QMessageBox.AcceptRole)
+        box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(standard)
+        remember = QCheckBox(ui_text("bld.flags.remember"))
+        box.setCheckBox(remember)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is allow:
+            return "allow", remember.isChecked()
+        if clicked is standard:
+            return "standard", remember.isChecked()
+        return None
+
+    def _submit(self, service, values, recipe, options):
+        """Submits exactly `values` (the recipe as pinned, or the person's own values) and returns the request id."""
+        # The one build path (BuildService), as for the CLI and AI callers: the service checks the request again
+        # and queues it; the build keeps running on the framework's background loop after this slot returns.
+        if recipe is not None and self._recipe_as_pinned(values):
+            # Exactly the recipe: the recipe as installed now (refused when the community index revoked it or it
+            # changed since it filled the form), with its calibration dataset checked against its pin.
+            rid = service.start_recipe(recipe.id, dataset_path=values["dataset"], use_gpu=values["use_gpu"],
+                                       expect=self._recipe_expect(values), probe=values.get("probe"),
+                                       **options).request_id
+        else:
+            if recipe is not None:  # the person's own values at the recipe's commit: still never a revoked one
+                service.installed_recipe(recipe.id)
+            rid = service.start_build(self._service_request(values), **options).request_id
+        return rid
 
     def _recipe_pins(self, recipe):
         """(format, board, quantization) a recipe builds with, normalized like the form (the board's default type)."""

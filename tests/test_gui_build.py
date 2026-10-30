@@ -101,17 +101,18 @@ def window(qapp, tmp_path, monkeypatch, memory_keyring):
 
 def test_the_build_menu_follows_file_and_settings_sits_above_exit(window):
     from PySide6.QtCore import QObject
-    from orchestrator.gui.menus.build import CLI_PATHS
+    from orchestrator.gui.menus.build import CLI_PATHS, WINDOW_OBJECTS
     titles = [a.text().replace("&", "") for a in window.menuBar().actions()]   # wave 6: titles with mnemonics
     assert titles[:2] == ["File", "Build"], titles
-    # Round 36 (on purpose): Build Container Images... follows Build History...
+    # Round 36 (on purpose): Build Container Images... follows Build History...; Build Dependencies... comes last
     assert [a.text() for a in window.menu_build.actions()] == ["Targets...", "Build History...",
-                                                               "Build Container Images..."]
+                                                               "Build Container Images...", "Build Dependencies..."]
     file_menu = window.menuBar().actions()[0].menu()
     assert [a.text() for a in file_menu.actions() if not a.isSeparator()][-2:] == ["Settings...", "Exit"]
     assert (window.act_build_targets.objectName(), window.act_build_history.objectName(),
             window.act_file_settings.objectName()) == ("act_build_targets", "act_build_history", "act_file_settings")
-    missing = [name for name in set(CLI_PATHS.values()) if window.findChild(QObject, name) is None]
+    missing = [name for name in set(CLI_PATHS.values()) - set(WINDOW_OBJECTS)
+               if window.findChild(QObject, name) is None]
     assert missing == [], "every mouse path of CLI_PATHS exists in the main window"
     for command in ("targets list", "targets validate", "module create", "module generate-ai --provider",
                     "module generate-ai --model", "build start --format", "build start --optimization",
@@ -149,7 +150,7 @@ def test_the_menu_labels_follow_the_language(qapp, monkeypatch):
     win.menuBar().addMenu("Help")
     menu_build.install(win, win.menuBar())
     assert [a.text() for a in win.menuBar().actions()] == ["File", "Build", "Help"]
-    assert [a.text() for a in win.menu_build.actions()] == ["Targets…", "Build-Verlauf…"]
+    assert [a.text() for a in win.menu_build.actions()] == ["Targets…", "Build-Verlauf…", "Build-Abhängigkeiten…"]
     assert [a.text() for a in file_menu.actions()] == ["Output Folder...", "Einstellungen…", "Exit"]
     assert win.act_output_folder.objectName() == "act_file_output_folder"
     win.close()

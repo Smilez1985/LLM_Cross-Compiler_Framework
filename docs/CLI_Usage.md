@@ -22,7 +22,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [doctor](#doctor): the old name of `mojo`
 - [knowledge](#knowledge): `snapshots` (`list`, `prune`, `delete`, `export`)
 - [targets](#targets): `list`, `validate`
-- [build](#build): `start`, `save`, `status`
+- [build](#build): `start`, `save`, `deps`, `status`
 - [deploy](#deploy): `list-artifacts`, `package`, `run`, `devices`, `ssh-config`
 - [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
@@ -133,6 +133,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `build start` / `build status` | Convert and quantize a model / show builds, also those the GUI, the MCP server or another CLI call started |
 | `build save` | Save a build that waits in the framework's build folder to the output folder or another folder |
 | `build image plan/sources/export/import` | The build container image of a target: can an offline build make it, the build sources in your network, move it to another offline computer as a checked file |
+| `build deps` | List, fetch and delete the dependencies of module CMake options that are fetched before a build |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | List finished builds / pack a build into a ZIP / upload and install it on a board |
 | `deploy ssh-config show/edit/import` | The framework's own OpenSSH settings file (read instead of `~/.ssh/config`): show it, set a board's block, copy one block from `~/.ssh/config` |
 | `ditto login` / `ditto logout` | Sign Ditto in to a provider (the key from a hidden prompt, stdin or an environment variable, checked before it is stored) / sign out |
@@ -517,6 +518,8 @@ target's defaults. A target without a capabilities block is built unchecked.
 | `--gpu / --no-gpu` | Pass the host's GPU into the container (default off): an NVIDIA GPU when `nvidia-smi` is found, otherwise `/dev/dri` if it exists. Rockchip conversions do not need it. |
 | `--imatrix / --no-imatrix` | Importance matrix for GGUF (default off). Required for `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ2_M`, `IQ3_XXS`, `IQ3_XS`, `Q2_K_S`. |
 | `--dataset PATH` | Your own calibration file (must exist): a text file for the GGUF importance matrix or for RKLLM, a list of sample inputs for RKNN `i8`. Without it, the importance matrix uses the shipped calibration text. |
+| `--module-flags [allow\|standard]` | Your decision on the module's CMake options that are valid but outside the allowed list (`-G`, `--trace`, ...; [Module Developer Guide, section 3.5](Module_Developer_Guide.md#35-cmake-flags-of-a-module)): allow them, or go on with the standard flags (they are left out). At a terminal without it you are asked, after what each option does and a recommendation for this model and quantization; without a terminal and without it nothing is started (exit 2). A decision remembered for this module version and flag set is used without a question. |
+| `--remember-flags` | Remember this decision for this module version and flag set (an AI-started build of the module uses it; a new version or other flags ask again). |
 
 Behaviour:
 
@@ -624,6 +627,32 @@ $ echo $?
 
 In the GUI: Deployment tab > **Save...**.
 
+### build deps
+
+```
+llm-cli build deps list
+llm-cli build deps fetch NAME
+llm-cli build deps delete
+```
+
+The dependency cache of module CMake options ([Module Developer Guide, section
+3.5](Module_Developer_Guide.md#35-cmake-flags-of-a-module)): what `-DLLAMA_BUILD_BORINGSSL=ON`,
+`-DLLAMA_BUILD_LIBRESSL=ON` or `-DGGML_CPU_KLEIDIAI=ON` would download while llama.cpp is built is fetched before the
+build instead, pinned as the pinned llama.cpp declares it, checked against the sha256 recorded on its first fetch,
+and mounted read-only into the build. A build fetches what its module needs by itself; these commands are for looking
+and for fetching while you are online.
+
+| Command | What it does |
+|---------|--------------|
+| `list` | Every dependency the framework can fetch (BORINGSSL, LIBRESSL, KLEIDIAI): the option that needs it, its source, its pin, whether it is in the cache (with its size) and its recorded sha256. |
+| `fetch NAME` | Fetches one now (the name is not case-sensitive), pinned and checked. In offline mode nothing is downloaded (exit code 1, with what to do); an unknown name is exit code 2. |
+| `delete` | Lists the cache's entries and deletes the ones you pick, after you confirm the full list at a terminal (the trash or for good). The recorded sha256 stays: fetching the same pin again must give the same content back. |
+
+`build start` names each dependency its module needs (`Build dependency: ...`) before it starts; in offline mode one
+that is not in the cache stops it there (exit code 2).
+
+In the GUI: Build > **Build Dependencies...** (Fetch, Delete...).
+
 ### build status
 
 ```
@@ -636,7 +665,8 @@ build request into the per-user folder (`build_requests/`) and one record per bu
 so builds that another process started are listed too, including requests still waiting in its queue (column
 `Where`: the program that runs it). Without an ID: a table of the 20 newest
 builds; with a request ID (`req_...`) or a build ID: the details of each attempt, including the error of a failed
-build (credentials redacted). A build whose process has ended before the build finished is shown as `interrupted`.
+build (credentials redacted) and, for a finished build, its statistics (how long the conversion and the quantization
+ran, the size before and after, from its `build_info.json`). A build whose process has ended before the build finished is shown as `interrupted`.
 Exit code 1 if the ID is not found. The command needs neither the credential vault nor Docker. On Linux and macOS
 the records folder and its records are readable only by the user who built (modes 0700 and 0600), so in a shared
 installation each user sees their own builds.

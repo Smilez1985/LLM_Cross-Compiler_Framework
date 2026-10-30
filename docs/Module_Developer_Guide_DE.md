@@ -301,6 +301,58 @@ Das Ergebnis ist ein **Gerüst**, noch kein funktionierendes Target:
   `llama-completion` und `llama-bench`, abgestimmt auf den Build-Rechner, und die Abhängigkeiten des Konverters.
   Behalte diese Schritte, wenn du das Dockerfile änderst.
 
+### 3.5 CMake-Flags eines Moduls
+
+Die CMake-Flags eines Moduls (`cmake_flags` aus dem Assistenten oder dem Vorschlag einer KI, als `CMAKE_OPTIONS` in
+`modules/config_module.sh` geschrieben, und `LLAMA_CMAKE_ARGS` eines Dockerfiles) folgen einem Urteil,
+`cmake_flag_verdicts` aus `orchestrator/runtime/build/recipe.py`. Der Modul-Generator, die Ordnerprüfung, der
+Build-Plan und die letzte Prüfung des Pakets im Build-Container (`module_flag_verdicts` in `target_module.sh`) urteilen
+gleich (`tests/test_module_flags.py` lässt beide über `tests/data/cmake_flag_vectors.json` laufen).
+
+- **Erlaubt:** `-DNAME=WERT`, auch `-D NAME=WERT` und `-DNAME:TYP=WERT`, und CMakes eigene Warnungswörter (`-Wdev`,
+  `-Wno-dev`, `-Werror=dev`, `-Wdeprecated`, `-Wno-deprecated` und ihre `error=`-Formen).
+- **Nie:** was CMake Code oder eine andere Toolchain laden lässt (`CMAKE_PROJECT_INCLUDE`,
+  `CMAKE_PROJECT_INCLUDE_BEFORE`, `CMAKE_PROJECT_<name>_INCLUDE`, `CMAKE_PROJECT_TOP_LEVEL_INCLUDES`,
+  `CMAKE_TOOLCHAIN_FILE`, `CMAKE_MODULE_PATH`, `CMAKE_USER_MAKE_RULES_OVERRIDE*`, `-C`, `-P`, `--preset`,
+  `--toolchain`), was CMake oder den Build ein anderes Programm ausführen lässt (`CMAKE_<LANG>_COMPILER_LAUNCHER`,
+  `CMAKE_<LANG>_LINKER_LAUNCHER`, `CMAKE_<LANG>_CLANG_TIDY`, `_CPPCHECK`, `_CPPLINT`, `_INCLUDE_WHAT_YOU_USE`,
+  `_ICSTAT`, `CMAKE_LINK_WHAT_YOU_USE_CHECK`, `CMAKE_CROSSCOMPILING_EMULATOR`, `CMAKE_MAKE_PROGRAM`; für ccache
+  `GGML_CCACHE`), Quell- und Build-Ordner (`-S`, `-B`: die setzt der Build-Plan), die `FETCHCONTENT_*`-Variablen (die
+  setzt nur der Abhängigkeits-Cache des Frameworks), ein `CMAKE_PREFIX_PATH`, der etwas anderes nennt als absolute
+  Ordner im Build-Container, eine Option, mit der llama.cpp etwas herunterladen würde, und jedes Wort, das keine
+  CMake-Option ist.
+- **Die Person entscheidet:** Ein gültiger CMake-Schalter außerhalb der Allowlist (`-G`, `-T`, `-A`, `-U`, `--fresh`,
+  `--log-level`, `--log-context`, `--debug-output`, `--debug-find`, `--trace`, `--trace-expand`,
+  `--warn-uninitialized`, `--no-warn-unused-cli`, `--check-system-vars`, `--compile-no-warning-as-error`,
+  `--install-prefix`) ist keine Ablehnung. Wird das Modul gebaut, zeigt der Builder (oder `llm-cli build start` im
+  Terminal), was jede Option tut, und eine Empfehlung für das Modell und die Quantisierung, die gebaut werden, aus dem
+  Rezept-Plan des Targets für diese Hardware; die Person erlaubt die Optionen oder macht mit den Standard-Flags weiter
+  (die Optionen bleiben aus dem Cross-Build des Pakets draußen). Die Entscheidung lässt sich für diese Modulversion und
+  diese Flags merken (`--remember-flags` oder das Häkchen der Frage): eine neue Version oder andere Flags fragen
+  wieder. Nur die Person entscheidet: Ein von einer KI gestarteter Build stoppt mit `needs_person` (Blocker
+  `module_flags_undecided`), außer die Person hat eine Entscheidung gemerkt. Ohne Terminal gibt `--module-flags allow`
+  oder `--module-flags standard` die Entscheidung.
+- **Frischer Cache, keine Toolchain aus der Umgebung:** Jeder cmake-Aufruf der eigenen Skripte eines Moduls (das
+  `cmake` von build.sh) startet einen Configure-Lauf mit `--fresh` (wenn das CMake des Images es kennt), so dass eine
+  in einem Build-Ordner liegende `CMakeCache.txt` nichts setzt, und läuft ohne eine Umgebungsvariable
+  `CMAKE_TOOLCHAIN_FILE`, außer der Build-Plan hat genau diese Datei gesetzt. Die Ordnerprüfung liest die Flags, wie
+  sie geschrieben sind: Ein Wort, das die Shell erweitert (`$X`), ist eine Grenze dieser Prüfung; das cmake von build.sh
+  und die letzte Prüfung des Pakets sehen die erweiterten Wörter.
+- **Download-Optionen mit einer geholten Abhängigkeit:** `-DLLAMA_BUILD_BORINGSSL=ON`, `-DLLAMA_BUILD_LIBRESSL=ON` und
+  `-DGGML_CPU_KLEIDIAI=ON` würden llama.cpp beim Bauen BoringSSL, LibreSSL oder KleidiAI herunterladen lassen. In den
+  Flags eines Moduls sind sie erlaubt, weil das Framework diese Abhängigkeit vor dem Build holt
+  (`orchestrator/runtime/build/deps.py`): außerhalb der Sandbox, nie im Offline-Modus, genau so festgelegt, wie das
+  festgelegte llama.cpp sie angibt (ein Git-Tag oder ein Archiv, geprüft gegen die MD5, die llama.cpp nennt), mit der
+  sha256 seines Baums, die beim ersten Holen festgehalten und bei jeder späteren Nutzung geprüft wird. Sie liegt
+  schreibgeschützt in einem Abhängigkeits-Cache unter dem Cache-Ordner des Frameworks und wird nur lesend in den Build
+  eingehängt (`LLMCF_DEPS`); der Cross-Build lässt `FETCHCONTENT_SOURCE_DIR_<NAME>` darauf zeigen und behält
+  `FETCHCONTENT_FULLY_DISCONNECTED=ON`, der Build selbst lädt also weiter nichts herunter. Im Offline-Modus stoppt eine
+  Abhängigkeit, die nicht im Cache ist, den Build mit dem, was fehlt. Der Build-Plan nennt jede Abhängigkeit mit Quelle,
+  Pin und Größe, so zeigt ein von einer KI gestarteter Build den Download in der Frage, die die Person beantwortet.
+  `llm-cli build deps list|fetch|delete` (in der GUI Build > Build-Abhängigkeiten…) listet, holt und löscht die
+  Einträge des Caches. Andere Download-Optionen (CUDA CCCL, ZenDNN, llguidance, der Header der virtuellen GPU, OpenMP
+  unter Windows) haben keine festgelegte Quelle und bleiben abgelehnt.
+
 ## 4. target.yml und der Capabilities-Block
 
 ### 4.1 metadata
@@ -664,6 +716,12 @@ jeder Datei in `modules/` und `scripts/`. Erneut auf demselben Arbeitsordner ges
 Stufe, deren Marke dieselbe Prüfsumme hat und deren Dateien noch da sind; läuft eine Stufe erneut, laufen auch alle
 späteren erneut. Eine Stufe, die scheitert, schreibt keine Marke. `build.sh --fresh` übergeht die Marken.
 
+**Schutz vor Schleifen.** Eine Stufe, die mit denselben Eingaben gestartet und von außen angehalten wurde, bevor sie
+fertig war (ihr Container gestoppt, der Build fortgesetzt, immer wieder), ist eine Schleife, kein langer Build. Der
+Runner zählt diese Starts in `<Stufe>.starts` und startet die Stufe kein viertes Mal (`STAGE_RESTART_LIMIT`, Vorgabe 3):
+Sie scheitert mit Exit-Code 75 und sagt das. Eine Stufe, die mit ihrem eigenen Fehler endet (Exit-Code unter 128),
+und eine fertige Stufe setzen die Zählung zurück; `--fresh` vergisst sie.
+
 **Fortschritt.** Der Runner schreibt eine Zeile, wenn eine Stufe beginnt, endet, fortgesetzt wird oder scheitert:
 `=== Stage 3/4: convert ===`, `=== Stage 3/4: convert done in 41 s ===`, `=== Stage 1/4: source resumed ===`,
 `=== Stage 3/4: convert failed (exit 1) ===`. Die Build-Engine liest diese Zeilen aus dem Container-Log: Build-Status,
@@ -814,7 +872,7 @@ versprochen hat:
 | `input PFAD --format FORMAT --stats DATEI` | vor dem Umwandeln | Erkennt die Eingabe: einen Hugging-Face-Ordner mit SafeTensors- oder PyTorch-Gewichten, eine GGUF-Datei (nichts umzuwandeln), ein ONNX-Modell, eine einzelne Gewichtsdatei, einen Ordner mit GGUF-Dateien. Lehnt mit dem Grund ab, was das Format nicht verwenden kann (`--onnx-next TEXT` ergänzt, wohin ein ONNX-Modell auf diesem Target gehört), prüft die Integrität der Eingabe (ihre JSON-Dateien, die SafeTensors-Header gegen die Dateigrößen, die Teildateien, die ein Index nennt, PyTorch-Archive, einen GGUF-Header) und beginnt die Statistik. |
 | `begin DATEI --state DATEI [--scratch ORDNER]` | bevor ein Konverter DATEI schreibt | Behält eine vorhandene DATEI als `DATEI.convert-backup`, bis die neue ihre Prüfungen bestanden hat (eine Zwischendatei `tmp-*` des Arbeitsordners wird einfach ersetzt). |
 | `watch ORDNER --state DATEI` | bevor ein Format-Helfer läuft | Merkt sich die Dateien von ORDNER mit Größe und Zeit, damit `output --watched` das Modell findet, das der Helfer geschrieben hat (eine neue Datei oder eine, die er überschrieben hat), und ein Fehler es entfernt. |
-| `output DATEI --format gguf --type TYP --seconds N --stats DATEI --tools ORDNER` | nach dem Konverter | Prüft das GGUF (die Daten jedes Tensors liegen in der Datei), führt den Funktionstest mit `llama-completion` (oder `llama-cli`) aus ORDNER aus: 8 Tokens, höchstens `--test-seconds` (120), offline. `--test-skip GRUND` überspringt den Test mit einem Hinweis. Vervollständigt die Statistik. |
+| `output DATEI --format gguf --type TYP --seconds N --stats DATEI --tools ORDNER` | nach dem Konverter | Prüft das GGUF (die Daten jedes Tensors liegen in der Datei), führt den Funktionstest mit `llama-completion` (oder `llama-cli`) aus ORDNER aus: 8 Tokens, offline; er wird gestoppt, wenn er `--test-seconds` (120, `FUNCTIONAL_TEST_SECONDS`) lang nichts ausgibt oder sich das Modell wiederholt, nie allein nach der Uhr. `--test-skip GRUND` überspringt den Test mit einem Hinweis. Vervollständigt die Statistik. |
 | `test DATEI --tools ORDNER --result DATEI` | in der Stufe target, bevor das Paket bleibt | Derselbe Funktionstest eines anderen GGUF (des quantisierten Modells; ein Embedding-Modell läuft nicht): `--what TEXT` nennt es bei einem Fehler, `--stage NAME` seine Logzeilen. Schreibt das Ergebnis, das Werkzeug und die Zeile des Manifests nach `--result`. |
 | `keep --state DATEI` | wenn die Stufe gelungen ist | Entfernt die Sicherungen. |
 | `restore --state DATEI --failed` oder `--stopped` | wenn die Stufe scheitert; bei ihrem nächsten Start | Entfernt, was der Lauf geschrieben hat, und legt die Sicherungen zurück (`--stopped`: was ein abgebrochener Lauf hinterlassen hat). Eine Datei, deren Sicherung nicht mehr da ist, bleibt, wie sie ist: Die frühere Datei wurde von Hand zurückgelegt. |
@@ -826,8 +884,9 @@ Die Statistik (`convert_stats.json` im Stufenordner) kommt als `conversion` in `
 `seconds`, `functional_test` (`passed`, `skipped`, `timed out` oder `stopped`) und `functional_test_tool`; nur Zahlen
 und Wörter, keine Pfade. Ein Funktionstest, der mit einem Fehler endet oder abstürzt (ein Signal wie der Abbruch von
 llama.cpp bei einem Tensor, den es nicht verwenden kann), lässt die Stufe mit den letzten Zeilen des Werkzeugs
-scheitern: Das GGUF funktioniert nicht. Eine Zeitüberschreitung oder ein von außen angehaltener Lauf (SIGKILL des
-Out-of-Memory-Killers, SIGTERM) ist ein Hinweis. Übersprungen wird er mit einem Hinweis, wenn das Image keines der beiden Werkzeuge hat oder es dort nicht startet, bei einem Embedding-Modell, bei den NPU-Formaten (das Modell läuft auf dem Board) und im
+scheitern: Das GGUF funktioniert nicht. Ein Lauf, der `FUNCTIONAL_TEST_SECONDS` lang nichts ausgibt (`timed out`),
+ein Modell, das sich wiederholt (`stopped`), und ein von außen angehaltener Lauf (SIGKILL des Out-of-Memory-Killers,
+SIGTERM) sind ein Hinweis. Übersprungen wird er mit einem Hinweis, wenn das Image keines der beiden Werkzeuge hat oder es dort nicht startet, bei einem Embedding-Modell, bei den NPU-Formaten (das Modell läuft auf dem Board) und im
 Auftrag `imatrix` (dort führt `llama-imatrix` das Modell aus).
 
 ## 7. Regeln der Sandbox
@@ -1018,7 +1077,10 @@ Funktionen aus 1.x sind geblieben:
   `llm/<Paket>` im Home-Ordner des Benutzers auf dem Board, und prüft die Kopie dort; `./deploy.sh [ZIEL]` auf dem
   Board selbst kopiert es nach ZIEL, Vorgabe `/opt/llm`), `MANIFEST.json` mit
   jedem Detail des Builds (Modell, Quantisierung, llama.cpp, Board, Profil, Flags, Tests, jede Datei mit Größe und
-  SHA-256) und `SHA256SUMS`. Die Helfer kommen aus `scripts/package_test_model.sh`, `scripts/package_deploy.sh` und
+  SHA-256; die Statistik des Builds unter `build`: `convert_seconds`, `quantize_seconds`, `cross_compile_seconds`,
+  `input_bytes` und `converted_bytes` der Konvertierung, und `tools` mit der ersten Zeile von `--version` von
+  `python3`, `cmake` und dem Cross-Compiler, nie ein Pfad) und `SHA256SUMS`. `build_info.json` hält
+  `quantize_seconds` neben der `conversion` der Convert-Stufe fest. Die Helfer kommen aus `scripts/package_test_model.sh`, `scripts/package_deploy.sh` und
   `scripts/board_package.py` des Targets. Bevor das Paket bleibt, läuft das Modell einmal auf diesem Rechner
   (`llama-completion` des Images, wenn es eins hat), mit dem Funktionstest der Stufe convert
   (`scripts/model_check.py test`, [Abschnitt 6.5](#65-die-prüfungen-der-stufe-convert)): Ein Lauf, der mit einem

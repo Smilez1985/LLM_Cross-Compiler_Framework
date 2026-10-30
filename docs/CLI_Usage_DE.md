@@ -22,7 +22,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [doctor](#doctor): der alte Name von `mojo`
 - [knowledge](#knowledge): `snapshots` (`list`, `prune`, `delete`, `export`)
 - [targets](#targets): `list`, `validate`
-- [build](#build): `start`, `save`, `status`
+- [build](#build): `start`, `save`, `deps`, `status`
 - [deploy](#deploy): `list-artifacts`, `package`, `run`, `devices`, `ssh-config`
 - [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
@@ -134,6 +134,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `build start` / `build status` | Ein Modell konvertieren und quantisieren / Builds zeigen, auch solche, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat |
 | `build save` | Einen Build, der im Build-Ordner des Frameworks wartet, im Ausgabeordner oder einem anderen Ordner speichern |
 | `build image plan/sources/export/import` | Das Build-Container-Image eines Targets: Kann ein Offline-Build es bauen, die Build-Quellen in deinem Netz, auf einen anderen Offline-Rechner als geprüfte Datei bringen |
+| `build deps` | Die Abhängigkeiten von CMake-Optionen der Module, die vor einem Build geholt werden, listen, holen und löschen |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | Fertige Builds auflisten / einen Build in eine ZIP-Datei packen / sie auf ein Board laden und installieren |
 | `deploy ssh-config show/edit/import` | Die eigene OpenSSH-Einstellungsdatei des Frameworks (gelesen statt `~/.ssh/config`): zeigen, den Block eines Boards setzen, einen Block aus `~/.ssh/config` übernehmen |
 | `ditto login` / `ditto logout` | Ditto bei einem Anbieter anmelden (der Schlüssel verdeckt abgefragt, von stdin oder aus einer Umgebungsvariable, vor dem Speichern geprüft) / abmelden |
@@ -533,6 +534,8 @@ Target ohne Capabilities-Block wird ungeprüft gebaut.
 | `--gpu / --no-gpu` | Die GPU des Hosts in den Container durchreichen (Standard aus): eine NVIDIA-GPU, wenn `nvidia-smi` gefunden wird, sonst `/dev/dri`, falls vorhanden. Rockchip-Konvertierungen brauchen das nicht. |
 | `--imatrix / --no-imatrix` | Importance Matrix für GGUF (Standard aus). Pflicht für `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ2_M`, `IQ3_XXS`, `IQ3_XS`, `Q2_K_S`. |
 | `--dataset PATH` | Deine eigene Kalibrierungsdatei (muss existieren): eine Textdatei für die GGUF-Importance-Matrix oder für RKLLM, eine Liste mit Beispieleingaben für RKNN `i8`. Ohne sie nutzt die Importance Matrix den mitgelieferten Kalibrierungstext. |
+| `--module-flags [allow\|standard]` | Deine Entscheidung zu den CMake-Optionen des Moduls, die gültig sind, aber außerhalb der erlaubten Liste liegen (`-G`, `--trace`, ...; [Modul-Entwicklerhandbuch, Abschnitt 3.5](Module_Developer_Guide_DE.md#35-cmake-flags-eines-moduls)): erlauben oder mit den Standard-Flags weitermachen (die Optionen bleiben draußen). Im Terminal ohne die Option wirst du gefragt, nach dem, was jede Option tut, und einer Empfehlung für dieses Modell und diese Quantisierung; ohne Terminal und ohne die Option startet nichts (Exit 2). Eine für diese Modulversion und diese Flags gemerkte Entscheidung gilt ohne Frage. |
+| `--remember-flags` | Diese Entscheidung für diese Modulversion und diese Flags merken (ein von einer KI gestarteter Build des Moduls nutzt sie; eine neue Version oder andere Flags fragen wieder). |
 
 Verhalten:
 
@@ -648,6 +651,32 @@ $ echo $?
 
 In der GUI: Tab „Deployment“ > **Speichern…**.
 
+### build deps
+
+```
+llm-cli build deps list
+llm-cli build deps fetch NAME
+llm-cli build deps delete
+```
+
+Der Abhängigkeits-Cache der CMake-Optionen von Modulen ([Modul-Entwicklerhandbuch, Abschnitt
+3.5](Module_Developer_Guide_DE.md#35-cmake-flags-eines-moduls)): Was `-DLLAMA_BUILD_BORINGSSL=ON`,
+`-DLLAMA_BUILD_LIBRESSL=ON` oder `-DGGML_CPU_KLEIDIAI=ON` beim Bauen von llama.cpp herunterladen würde, wird stattdessen
+vor dem Build geholt, festgelegt, wie das festgelegte llama.cpp es angibt, gegen die sha256 vom ersten Holen geprüft und
+nur lesend in den Build eingehängt. Ein Build holt selbst, was sein Modul braucht; diese Befehle sind zum Nachsehen und
+zum Holen, solange du online bist.
+
+| Befehl | Was er tut |
+|--------|------------|
+| `list` | Jede Abhängigkeit, die das Framework holen kann (BORINGSSL, LIBRESSL, KLEIDIAI): die Option, die sie braucht, ihre Quelle, ihr Pin, ob sie im Cache ist (mit Größe) und ihre festgehaltene sha256. |
+| `fetch NAME` | Holt eine jetzt (Groß- und Kleinschreibung egal), festgelegt und geprüft. Im Offline-Modus wird nichts heruntergeladen (Exit-Code 1, mit dem, was zu tun ist); ein unbekannter Name ist Exit-Code 2. |
+| `delete` | Listet die Einträge des Caches und löscht die, die du auswählst, nachdem du die ganze Liste im Terminal bestätigt hast (Papierkorb oder endgültig). Die festgehaltene sha256 bleibt: Wird derselbe Pin wieder geholt, muss derselbe Inhalt zurückkommen. |
+
+`build start` nennt vor dem Start jede Abhängigkeit, die sein Modul braucht (`Build dependency: ...`); im Offline-Modus
+stoppt eine, die nicht im Cache ist, ihn dort (Exit-Code 2).
+
+In der GUI: Build > **Build-Abhängigkeiten…** (Holen, Löschen…).
+
 ### build status
 
 ```
@@ -660,7 +689,9 @@ Cache-Ordner (`<cache_dir>/build_records/`) mit Request, Modell, Target, Format,
 Fortschritt, deshalb erscheinen auch Builds, die ein anderer Prozess gestartet hat, einschließlich Anfragen, die
 noch in seiner Warteschlange warten (Spalte `Where`: das Programm, das sie ausführt). Ohne ID: eine Tabelle
 der 20 neuesten Builds; mit einer Request-ID (`req_...`) oder einer Build-ID: die Einzelheiten jedes Versuchs,
-einschließlich des Fehlers eines gescheiterten Builds (Zugangsdaten geschwärzt). Ein Build, dessen Prozess endete,
+einschließlich des Fehlers eines gescheiterten Builds (Zugangsdaten geschwärzt) und bei einem fertigen Build seiner
+Statistik (wie lange Konvertierung und Quantisierung liefen, die Größe davor und danach, aus seiner
+`build_info.json`). Ein Build, dessen Prozess endete,
 bevor der Build fertig war, erscheint als `interrupted`. Exit-Code 1, wenn die ID nicht gefunden wird. Der Befehl
 braucht weder den Tresor für Zugangsdaten noch Docker. Unter Linux und macOS sind der Ordner der Einträge und die
 Einträge nur für den Benutzer lesbar, der gebaut hat (Modi 0700 und 0600), sodass in einer gemeinsamen Installation

@@ -62,8 +62,10 @@ quantize_kept_gguf() {
     local q="$1" f16_file="$2" out_file="$3"
     shift 3
     echo ">> Quantizing -> $q"
+    local started=$SECONDS
     "$QUANTIZE_BIN" "$@" "$f16_file" "$out_file" "$q"
     [ -s "$out_file" ] || die "llama-quantize ended without writing the $q model."
+    TARGET_CONFIG[QUANTIZE_SECONDS]=$(( ${TARGET_CONFIG[QUANTIZE_SECONDS]:-0} + SECONDS - started ))
     TARGET_CONFIG[QUANTIZED_GGUF]="$out_file"
     TARGET_CONFIG[QUANT_METHOD]="$q"
 }
@@ -87,6 +89,9 @@ write_build_info() {
     local conversion=""
     if [ -s "$CONVERT_STATS" ]; then
         conversion=", \"conversion\": $(cat "$CONVERT_STATS")"
+    fi
+    if [ -n "${TARGET_CONFIG[QUANTIZE_SECONDS]:-}" ]; then   # how long llama-quantize ran (the convert statistics
+        conversion="$conversion, \"quantize_seconds\": ${TARGET_CONFIG[QUANTIZE_SECONDS]}"   # have the rest)
     fi
     cat > "$OUTPUT_DIR/build_info.json" <<EOF
 {"model": "$MODEL_NAME", "format": "$FORMAT", "board": "$BOARD", "quantization": "${QUANT:-default}", "llama_cpp": "$(cat "$LLAMA_BASE/.llama_cpp_tag" 2>/dev/null || echo unknown)"$conversion}
@@ -173,6 +178,187 @@ package_room() {  # FILE...: stops the stage with the rule's plain reason when t
         || die "${problem:-The free space for the package could not be checked.} No package was made."
 }
 
+# The dependencies of the pinned llama.cpp that llmcf can fetch before the build, by the option that needs them
+# (DEPENDENCY_OF_OPTION of recipe.py; tests/test_module_flags.py compares). The framework mounts a fetched copy
+# read-only and names it in LLMCF_DEPS ("NAME=/mount ..."); only then is its option allowed.
+DEPENDENCY_OPTIONS=(LLAMA_BUILD_BORINGSSL:BORINGSSL LLAMA_BUILD_LIBRESSL:LIBRESSL GGML_CPU_KLEIDIAI:KLEIDIAI)
+# Valid CMake switches outside the allowlist (DECISION_SWITCHES of recipe.py; the person decides) and the ones never
+# allowed in a module's flags (REFUSED_SWITCHES). tests/test_module_flags.py compares both lists.
+DECISION_SWITCH_NAMES=(-G -T -A -U --fresh --log-level --log-context --debug-output --debug-find --trace
+                       --trace-expand --warn-uninitialized --no-warn-unused-cli --check-system-vars
+                       --compile-no-warning-as-error --install-prefix)
+REFUSED_SWITCH_NAMES=(-C -P -S -B --preset --toolchain --build --install --open -E -N --graphviz --trace-redirect
+                      --profiling-output --profiling-format --debugger --debugger-pipe)
+
+# The CMake variables that make CMake or the build run another program (PROGRAM_VARIABLE_RE of recipe.py;
+# tests/test_module_flags.py compares): a launcher, a code checker, the cross emulator, the build tool.
+PROGRAM_VARIABLE_PATTERN='^CMAKE_([A-Za-z0-9]+_)?(COMPILER_LAUNCHER|LINKER_LAUNCHER|CLANG_TIDY|CPPCHECK|CPPLINT|INCLUDE_WHAT_YOU_USE|ICSTAT)$|^CMAKE_LINK_WHAT_YOU_USE_CHECK$|^CMAKE_CROSSCOMPILING_EMULATOR$|^CMAKE_MAKE_PROGRAM$'
+
+prefetched_dependency() {  # NAME: the framework mounted its fetched copy for this build
+    local entry
+    for entry in ${LLMCF_DEPS:-}; do
+        if [ "${entry%%=*}" = "$1" ] && [ -d "${entry#*=}" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+dependency_of_option() {  # OPTION: the dependency it needs, nothing when it needs none
+    local entry
+    for entry in "${DEPENDENCY_OPTIONS[@]}"; do
+        if [ "${entry%%:*}" = "$1" ]; then
+            echo "${entry#*:}"
+            return
+        fi
+    done
+}
+
+# The verdict of each CMake option of WORD... (the plan's CMAKE_FLAGS, or the words of a cmake call), one line each:
+# VERDICT, OPTION, REASON, KIND and WORDS, separated by the unit separator (octal 037, so empty fields stay fields):
+# allowed, refused or decision; the option as cmake reads it ("-D NAME=VALUE" is -DNAME=VALUE, -G Ninja keeps its
+# value); why it is refused or what it does; download or rule; the words it came from. The one verdict of recipe.py (cmake_flag_verdicts) in the build container: the same
+# verdicts for the same words (tests/test_module_flags.py runs both over tests/data/cmake_flag_vectors.json).
+# Contexts: --package (the default: the module's flags in the package's cross build, where the options of every
+# build come after them and win), --alone (a cmake call of a module's own scripts: nothing comes after its words, and
+# only what downloads or runs a script is refused) and --module (the strict check of the module's flags).
+module_flag_verdicts() {  # [--package|--alone|--module] WORD...
+    local context=package word words name value dependency key short reason
+    case "${1:-}" in
+        --alone) context=call; shift ;;
+        --package) shift ;;
+        --module) context=module; shift ;;
+    esac
+    while [ $# -gt 0 ]; do
+        word="$1"
+        words="$1"
+        shift
+        case "$word" in
+            -D|-U|-G|-T|-A|-C|-P|-S|-B)
+                if [ $# -gt 0 ]; then
+                    words="$word $1"
+                    if [ "$word" = -D ]; then
+                        word="-D$1"
+                    else
+                        word="$word $1"
+                    fi
+                    shift
+                fi ;;
+        esac
+        case "$word" in
+            -D*)
+                if [[ "$word" != *=* ]]; then
+                    printf 'refused\037%s\037%s\037rule\037%s\n' "$word" "not -DNAME=VALUE" "$words"
+                    continue
+                fi
+                name="${word#-D}"
+                name="${name%%=*}"
+                name="${name%%:*}"
+                value="${word#*=}"
+                dependency="$(dependency_of_option "$name")"
+                if [ -n "$dependency" ] && prefetched_dependency "$dependency"; then
+                    dependency=mounted
+                fi
+                if [[ ! "$name" =~ ^[A-Za-z_][A-Za-z0-9_.+-]*$ ]]; then
+                    printf 'refused\037%s\037%s\037rule\037%s\n' "$word" "not -DNAME=VALUE" "$words"
+                elif [[ " ${NEVER_SET_OPTIONS[*]} " == *" $name "* ]] && [ "$dependency" != mounted ]; then
+                    printf 'refused\037%s\037%s\037download\037%s\n' "$word" \
+                        "$name downloads at configure time and is never set" "$words"
+                elif [[ "$name" =~ $SCRIPT_VARIABLE_PATTERN ]]; then
+                    printf 'refused\037%s\037%s\037download\037%s\n' "$word" \
+                        "$name makes CMake run a CMake script, which can set any option" "$words"
+                elif [ "$dependency" = mounted ]; then
+                    printf 'allowed\037%s\037\037\037%s\n' "$word" "$words"
+                elif [ "$context" != call ] && { [ "$name" = CMAKE_TOOLCHAIN_FILE ] || [ "$name" = CMAKE_MODULE_PATH ] \
+                        || [[ "$name" =~ ^CMAKE_USER_MAKE_RULES_OVERRIDE(_[A-Za-z]+)?$ ]]; }; then
+                    printf 'refused\037%s\037%s\037rule\037%s\n' "$word" "$name loads code or another toolchain" "$words"
+                elif [ "$context" != call ] && [[ "$name" =~ $PROGRAM_VARIABLE_PATTERN ]]; then
+                    printf 'refused\037%s\037%s\037rule\037%s\n' "$word" \
+                        "$name makes CMake or the build run another program, which can change what is built" "$words"
+                elif [ "$context" != call ] && [[ "$name" == FETCHCONTENT_* ]] \
+                        && [ "$name" != FETCHCONTENT_FULLY_DISCONNECTED ]; then
+                    printf 'refused\037%s\037%s\037rule\037%s\n' "$word" "$name is set only by llmcf's dependency cache" \
+                        "$words"
+                elif [ "$context" != call ] && [ "$name" = CMAKE_PREFIX_PATH ]; then
+                    if container_paths "$value"; then
+                        printf 'allowed\037%s\037\037\037%s\n' "$word" "$words"
+                    else
+                        printf 'refused\037%s\037%s\037rule\037%s\n' "$word" \
+                            "CMAKE_PREFIX_PATH names only folders inside the build container (absolute paths)" "$words"
+                    fi
+                elif [ "$context" != package ] && [[ " ${DOWNLOAD_OFF_OPTIONS[*]} " == *" $name "* ]] \
+                        && [ "$value" != OFF ]; then
+                    printf 'refused\037%s\037%s\037download\037%s\n' "$word" \
+                        "$name must be OFF on every build: it lets llama.cpp download" "$words"
+                elif [ "$context" != package ] && { { [ "$name" = FETCHCONTENT_FULLY_DISCONNECTED ] \
+                        && [ "$value" != ON ]; } || { [ "$name" = LLAMA_SUBPROCESS ] && [ "$value" != OFF ]; }; }; then
+                    printf 'refused\037%s\037%s\037download\037%s\n' "$word" \
+                        "$name must be $([ "$name" = LLAMA_SUBPROCESS ] && echo OFF || echo ON) on every build" "$words"
+                else
+                    printf 'allowed\037%s\037\037\037%s\n' "$word" "$words"
+                fi
+                continue ;;
+            -C*|-P*)
+                printf 'refused\037%s\037%s\037download\037%s\n' "${words%% *}" \
+                    "CMake runs a script with -C or -P, and a script can set any option" "$words"
+                continue ;;
+        esac
+        if [ "$context" = call ]; then
+            printf 'allowed\037%s\037\037\037%s\n' "$word" "$words"
+            continue
+        fi
+        if [[ "$word" == -W* ]]; then
+            if [[ "$word" =~ ^-W(no-)?(error=)?(dev|deprecated)$ ]]; then
+                printf 'allowed\037%s\037\037\037%s\n' "$word" "$words"
+            else
+                printf 'refused\037%s\037%s\037rule\037%s\n' "$word" \
+                    "not a CMake warning option (a compiler warning belongs in the C flags)" "$words"
+            fi
+            continue
+        fi
+        key="${words%% *}"
+        key="${key%%=*}"
+        short=""
+        if [[ "$key" != --* ]] && [ "${#key}" -gt 2 ]; then
+            short="${key:0:2}"
+        fi
+        if [[ " ${REFUSED_SWITCH_NAMES[*]} " == *" $key "* ]] \
+                || { [ -n "$short" ] && [[ " ${REFUSED_SWITCH_NAMES[*]} " == *" $short "* ]]; }; then
+            reason="a switch llmcf never allows in a module's flags"
+            printf 'refused\037%s\037%s\037rule\037%s\n' "$word" "$reason" "$words"
+        elif [[ " ${DECISION_SWITCH_NAMES[*]} " == *" $key "* ]] \
+                || { [ -n "$short" ] && [[ " ${DECISION_SWITCH_NAMES[*]} " == *" $short "* ]]; }; then
+            printf 'decision\037%s\037%s\037\037%s\n' "$word" "a valid CMake option outside llmcf's list" "$words"
+        else
+            printf 'refused\037%s\037%s\037rule\037%s\n' "$word" "not a CMake option the framework knows" "$words"
+        fi
+    done
+}
+
+container_paths() {  # VALUE: every ';' part is an absolute folder inside the container
+    local part found=0
+    local IFS=';'
+    for part in $1; do
+        [ -n "$part" ] || continue
+        found=1
+        [[ "$part" =~ ^/[A-Za-z0-9._+/-]{0,255}$ ]] || return 1
+        [[ "/$part/" != */../* ]] || return 1
+    done
+    [ "$found" = 1 ]
+}
+
+# The person's decision on a valid option outside the allowlist (DECISIONS round 25 Q6), as the framework hands it to
+# the build: LLMCF_ALLOWED_FLAGS (the options the person allowed, as cmake reads them, separated by the unit separator) and
+# LLMCF_FLAG_DECISION=standard (go on with the standard flags: such options are left out).
+flag_allowed_by_person() {  # OPTION
+    local allowed
+    local IFS=$'\037'
+    for allowed in ${LLMCF_ALLOWED_FLAGS:-}; do
+        [ "$allowed" = "$1" ] && return 0
+    done
+    return 1
+}
+
 # The first of the module's CMake flags (FLAG...: the plan's CMAKE_FLAGS, word by word as the cross build passes them)
 # that the cross build refuses, with the reason; nothing when there is none. The options of every build come after
 # the module's flags and win (cross_compile_target), except an option of NEVER_SET_OPTIONS, which downloads whenever it
@@ -180,52 +366,57 @@ package_room() {  # FILE...: stops the stage with the rule's plain reason when t
 # any option. cmake reads "-D NAME=VALUE" as one option, and -DNAME:TYPE=VALUE names NAME.
 # With --alone (every cmake call of a module's own scripts, build.sh's cmake): no option of every build comes after the
 # words, so an option every build keeps OFF must be OFF there too, FETCHCONTENT_FULLY_DISCONNECTED ON and
-# LLAMA_SUBPROCESS OFF (refused_option of recipe.py: the one rule). The verdicts of the CMake flags are all here.
+# LLAMA_SUBPROCESS OFF (refused_option of recipe.py: the one rule). A valid option outside the allowlist that the person
+# has not allowed (and not left out: LLMCF_FLAG_DECISION=standard) stops the package too. The verdicts of the CMake
+# flags are all in module_flag_verdicts.
 module_flag_problem() {  # [--alone] FLAG...
-    local word name value alone=0
-    if [ "${1:-}" = --alone ]; then
-        alone=1
-        shift
-    fi
-    while [ $# -gt 0 ]; do
-        word="$1"
-        shift
-        if [ "$word" = -D ] && [ $# -gt 0 ]; then
-            word="-D$1"
-            shift
-        fi
-        case "$word" in
-            -C*|-P*)
-                echo "$word (CMake runs a script with -C or -P, and a script can set any option)"
+    local verdict option reason kind words
+    while IFS=$'\037' read -r verdict option reason kind words; do
+        case "$verdict" in
+            refused)
+                echo "$option ($reason)"
                 return ;;
-            -D*)
-                name="${word#-D}"
-                name="${name%%=*}"
-                name="${name%%:*}"
-                if [[ " ${NEVER_SET_OPTIONS[*]} " == *" $name "* ]]; then
-                    echo "$word ($name downloads at configure time and is never set)"
-                    return
-                fi
-                if [[ "$name" =~ $SCRIPT_VARIABLE_PATTERN ]]; then
-                    echo "$word ($name makes CMake run a CMake script, which can set any option)"
-                    return
-                fi
-                [ "$alone" = 1 ] || continue
-                value=""
-                if [[ "$word" == *=* ]]; then
-                    value="${word#*=}"
-                fi
-                if [[ " ${DOWNLOAD_OFF_OPTIONS[*]} " == *" $name "* ]] && [ "$value" != OFF ]; then
-                    echo "$word ($name must be OFF on every build: it lets llama.cpp download)"
-                    return
-                fi
-                if { [ "$name" = FETCHCONTENT_FULLY_DISCONNECTED ] && [ "$value" != ON ]; } \
-                        || { [ "$name" = LLAMA_SUBPROCESS ] && [ "$value" != OFF ]; }; then
-                    echo "$word ($name must be $([ "$name" = LLAMA_SUBPROCESS ] && echo OFF || echo ON) on every build)"
+            decision)
+                if ! flag_allowed_by_person "$option" && [ "${LLMCF_FLAG_DECISION:-}" != standard ]; then
+                    echo "$option ($reason: the person decides in llmcf whether to allow it or to go on with the standard flags)"
                     return
                 fi ;;
         esac
-    done
+    done < <(module_flag_verdicts "$@")
+}
+
+# The kind of the first problem module_flag_problem names: download (it would let llama.cpp download or run a
+# script) or rule (any other).
+module_flag_problem_kind() {  # [--alone] FLAG...
+    local verdict option reason kind words
+    while IFS=$'\037' read -r verdict option reason kind words; do
+        if [ "$verdict" = refused ]; then
+            echo "$kind"
+            return
+        fi
+        if [ "$verdict" = decision ] && ! flag_allowed_by_person "$option" \
+                && [ "${LLMCF_FLAG_DECISION:-}" != standard ]; then
+            echo rule
+            return
+        fi
+    done < <(module_flag_verdicts "$@")
+    echo rule
+}
+
+# The module's flags with the options the person left out (LLMCF_FLAG_DECISION=standard): every word of an option of
+# the verdict "decision" that the person did not allow is dropped; the rest stays in its order.
+module_flags_kept() {  # FLAG...
+    local verdict option reason kind words kept=()
+    while IFS=$'\037' read -r verdict option reason kind words; do
+        if [ "$verdict" = decision ] && ! flag_allowed_by_person "$option" \
+                && [ "${LLMCF_FLAG_DECISION:-}" = standard ]; then
+            log_info "Left out $option (the standard flags, as the person decided)." >&2
+            continue
+        fi
+        # shellcheck disable=SC2206 # the words of one option, split as the plan's words were
+        kept+=($words)
+    done < <(module_flag_verdicts "$@")
+    echo "${kept[*]}"
 }
 
 check_module_flags() {  # before anything slow: the module's CMake flags in the plan, as the cross build passes them
@@ -233,12 +424,19 @@ check_module_flags() {  # before anything slow: the module's CMake flags in the 
     read -r -a flags <<< "${CMAKE_FLAGS:-}"
     [ ${#flags[@]} -gt 0 ] || return 0
     problem="$(module_flag_problem "${flags[@]}")"
-    [ -z "$problem" ] || die "The CMake flags of the build plan would let llama.cpp download while it is built: $problem; builds have no network: leave it out. No package was made."
+    if [ -n "$problem" ]; then
+        if [ "$(module_flag_problem_kind "${flags[@]}")" = download ]; then
+            die "The CMake flags of the build plan would let llama.cpp download while it is built: $problem; builds have no network: leave it out. No package was made."
+        fi
+        die "The CMake flags of the build plan are not allowed: $problem. No package was made."
+    fi
+    CMAKE_FLAGS="$(module_flags_kept "${flags[@]}")"
 }
 
 # A short run of the quantized model on this build machine: the convert stage's functional test (scripts/model_check.py
 # test, the one implementation), with the image's own llama-completion (llama-cli when the image has only that): 8
-# tokens, at most FUNCTIONAL_TEST_SECONDS, offline, the options this tool has. A run that ends with an error or
+# tokens, stopped when it prints nothing for FUNCTIONAL_TEST_SECONDS or the model repeats itself,
+# offline, the options this tool has. A run that ends with an error or
 # crashes on the model stops the package. A timeout, a stop from outside (the out-of-memory killer), a tool this
 # machine cannot run or start, no tool in the image and an embedding model are notes, and the manifest says which.
 # The package's test_model.sh runs the same kind of test on the board.
@@ -255,8 +453,8 @@ functional_test() {
     TARGET_CONFIG[FUNCTIONAL_TEST]="$summary"
     case "$result" in
         "timed out")
-            log_warn "The functional test did not finish within ${FUNCTIONAL_TEST_SECONDS} s; the package is made anyway." ;;
-        stopped) log_warn "The functional test was stopped from outside (${tool:-the tool}); the package is made anyway." ;;
+            log_warn "The functional test printed nothing for ${FUNCTIONAL_TEST_SECONDS} s; the package is made anyway." ;;
+        stopped) log_warn "The functional test was stopped (${summary:-${tool:-the tool}}); the package is made anyway." ;;
     esac
     log_success "Functional test: $summary"
 }
@@ -291,7 +489,19 @@ cross_compile_target() {
     # refuses such flags in a module (module_generator.download_flag_problems).
     cmake_args+=("-DLLAMA_CURL=OFF" "-DFETCHCONTENT_FULLY_DISCONNECTED=ON" "-DLLAMA_SUBPROCESS=OFF" "-DLLAMA_BUILD_TESTS=OFF")
     cmake_args+=("-DLLAMA_BUILD_EXAMPLES=OFF" "-DLLAMA_BUILD_APP=OFF" "-DLLAMA_USE_PREBUILT_UI=OFF" "-DLLAMA_BUILD_UI=OFF"
-                 "-DLLAMA_LLGUIDANCE=OFF" "-DGGML_CPU_KLEIDIAI=OFF" "-DGGML_OPENMP_FETCH=OFF")
+                 "-DLLAMA_LLGUIDANCE=OFF" "-DGGML_OPENMP_FETCH=OFF")
+    if ! prefetched_dependency KLEIDIAI; then
+        cmake_args+=("-DGGML_CPU_KLEIDIAI=OFF")
+    fi
+    # The dependencies llmcf fetched before the build, pinned and checked, outside the sandbox (DECISIONS round 25
+    # Q6 addendum, orchestrator/runtime/build/deps.py): mounted read-only and named in LLMCF_DEPS. CMake takes each
+    # from its folder (FETCHCONTENT_SOURCE_DIR_<NAME>) and, FETCHCONTENT_FULLY_DISCONNECTED=ON, fetches nothing.
+    local entry
+    for entry in ${LLMCF_DEPS:-}; do
+        if prefetched_dependency "${entry%%=*}"; then
+            cmake_args+=("-DFETCHCONTENT_SOURCE_DIR_${entry%%=*}=${entry#*=}")
+        fi
+    done
 
     log_info "Configuring target build..."
     # command cmake: the framework's own call (check_module_flags checked the module's flags of it before)
@@ -443,6 +653,40 @@ create_helper_scripts() {
     done
 }
 
+# One number of the convert stage's statistics (convert_stats.json: seconds, input_bytes, output_bytes), 0 without them
+conversion_stat() {
+    python3 - "$CONVERT_STATS" "$1" <<'PY' 2>/dev/null || echo 0
+import json, sys
+try:
+    value = json.load(open(sys.argv[1], encoding="utf-8")).get(sys.argv[2])
+except (OSError, ValueError):
+    value = None
+print(int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0)
+PY
+}
+
+# The first line of a program's --version (never a function of this script), "unknown" without the program; a
+# line that names a path is not kept (the manifest holds no path of the build machine)
+tool_version() {
+    local line=""
+    if command -v "$1" >/dev/null 2>&1; then
+        line="$(command "$1" --version 2>/dev/null | head -n 1 | tr -d '\r' | cut -c1-120)" || true
+    fi
+    case "$line" in
+        ''|*/*) printf 'unknown' ;;
+        *) printf '%s' "$line" ;;
+    esac
+}
+
+# The C compiler of the board's cross build: the one the toolchain file of the build plan names, else cc
+plan_compiler() {
+    local compiler=""
+    if [ -f "${CMAKE_TOOLCHAIN_FILE:-}" ]; then
+        compiler="$(sed -n 's/^[Ss][Ee][Tt](CMAKE_C_COMPILER[[:space:]]\{1,\}\([^[:space:])]*\).*/\1/p' "$CMAKE_TOOLCHAIN_FILE" | head -n 1)"
+    fi
+    printf '%s' "${compiler:-cc}"
+}
+
 create_package_manifest() {
     local package_dir="$1" model_file imatrix="no"
     model_file="$(basename "${TARGET_CONFIG[INPUT_GGUF]}")"
@@ -462,6 +706,13 @@ create_package_manifest() {
         --set "build.llama_cpp.tag=$(cat "$LLAMA_BASE/.llama_cpp_tag" 2>/dev/null || echo unknown)" \
         --set "build.llama_cpp.commit=$(cat "$LLAMA_BASE/.llama_cpp_commit" 2>/dev/null || echo unknown)" \
         --int "build.cross_compile_seconds=${BUILD_STATS[BUILD_TIME]:-0}" \
+        --int "build.convert_seconds=$(conversion_stat seconds)" \
+        --int "build.quantize_seconds=${TARGET_CONFIG[QUANTIZE_SECONDS]:-0}" \
+        --int "build.input_bytes=$(conversion_stat input_bytes)" \
+        --int "build.converted_bytes=$(conversion_stat output_bytes)" \
+        --set "build.tools.python=$(tool_version python3)" \
+        --set "build.tools.cmake=$(tool_version cmake)" \
+        --set "build.tools.compiler=$(tool_version "$(plan_compiler)")" \
         --int "build.jobs=${BUILD_JOBS:-4}" \
         --set "build.framework=LLM Cross-Compiler Framework" \
         --set "hardware.profile=$(profile_text)" \
