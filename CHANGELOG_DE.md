@@ -72,7 +72,8 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 - `2026-10-30 01:03 UTC` · `v3.2.0` **Ein neuer Crawl einer Site entfernt die Seiten, die es nicht mehr gibt**: Seiten, die von einer gecrawlten
   Site verschwunden waren, behielten ihre Auszüge für immer. Ein neuer Crawl derselben Startadresse ersetzt ihre
   Seiten, und wenn er die ganze Site gelesen hat (er war erfolgreich, kein Seitenlimit und kein Anfragebudget hat ihn
-  beendet, nichts ist fehlgeschlagen, wurde vorbehalten oder gestoppt), werden auch die Auszüge der früheren Seiten
+  beendet, kein Link blieb an seiner Tiefengrenze oder hinter einer wegen ihrer Sprache ausgelassenen Seite ungelesen,
+  nichts ist fehlgeschlagen, wurde vorbehalten oder gestoppt), werden auch die Auszüge der früheren Seiten
   entfernt, die er nicht mehr erreicht hat, nur wo dieser Crawl ihr letzter Halter war; das Ergebnis nennt sie
   (`removed`). Ein teilweiser oder fehlgeschlagener Crawl entfernt nichts.
 - `2026-10-30 01:26 UTC` · `v3.2.0` **Ein von einem älteren Paket belegter Themenordner nennt dieses Paket und den Ausweg**: Wenn das Thema oder Target

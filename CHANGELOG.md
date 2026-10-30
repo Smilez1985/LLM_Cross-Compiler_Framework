@@ -65,7 +65,8 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   under the topic or target of every holder. Excerpts stored before this name one holder, the one their fields name.
 - `2026-10-30 01:03 UTC` · `v3.2.0` **A re-crawl of a site removes the pages that are gone**: pages that vanished from a crawled site kept their
   excerpts for ever. A crawl of the same start address again replaces its pages, and when it read the whole site
-  (it succeeded, no page limit or request budget ended it, nothing failed, was reserved or stopped) the excerpts of the
+  (it succeeded, no page limit or request budget ended it, no link was left unread at its depth limit or behind a page
+  left out for its language, nothing failed, was reserved or stopped) the excerpts of the
   earlier pages it no longer reached are removed too, only where this crawl was their last holder; the result names
   them (`removed`). A partial or failed crawl removes nothing.
 - `2026-10-30 01:26 UTC` · `v3.2.0` **A topic folder taken by an older pack names that pack and the way out**: when a knowledge pack's topic or target
