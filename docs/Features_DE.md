@@ -3449,8 +3449,9 @@ signierten Index und verlassen diesen Rechner nur als lokale Datei, die du selbs
 
 - **`list_packs`** (lesen): die Einträge des Index und die installierten Packs mit Art, ID, Version, Titel, Autor,
   Lizenz, Vertrauensstufe (`verified`, `community`, `local`, `revoked`), installierter Version und dem Grund eines
-  Rückzugs. Es liest den zwischengespeicherten Index; `refresh` lädt den signierten Index neu (einmal pro Stunde je
-  Client; nicht im Offline-Modus). `pack_id` ergänzt die Beschreibung eines Packs, Downloadgröße und sha256 und bei
+  Rückzugs, bei einem Wissens-Pack mit dem Thema oder Target, das sein Indexeintrag nennt (`topic`, `target`). Es
+  liest den zwischengespeicherten Index; `refresh` lädt den signierten Index neu (einmal pro Stunde je Client; nicht
+  im Offline-Modus). `pack_id` ergänzt die Beschreibung eines Packs, Downloadgröße und sha256 und bei
   einem installierten Rezept seine festgelegten Werte; `verify` ergänzt die Prüfung der installierten Packs
   (zurückgezogen, seit der Installation geändert). Titel, Autoren, Beschreibungen und Rezepte sind externer Text;
   Ordner erscheinen nur als Labels.
@@ -3529,9 +3530,10 @@ sichert das ab).
    gemergt (nur wenn die Prüfung bestanden ist und sein Stand noch der geprüfte Commit ist), der Klon aktualisiert,
    das Pack nach `packs/<kind>/` verschoben, sein Index-Eintrag bekommt die Raw-Adresse
    (`https://raw.githubusercontent.com/<repo>/main/packs/<kind>/<datei>`), das Vertrauen (`community`, oder
-   `verified`, wenn jemand anderes als der Autor es nachgebaut hat) und den Titel, die Version des Index wird erhöht
-   und seine Zeit gesetzt, `index.json` mit dem Schlüssel aus dem Schlüsselbund signiert, und diese Änderung auf einem
-   neuen Branch (`lcf-publish-...`) committet, gepusht, als Pull Request geöffnet und gemergt, sobald die
+   `verified`, wenn jemand anderes als der Autor es nachgebaut hat), den Titel und bei einem Wissens-Pack das Thema
+   oder Target seines Manifests (die Prüfzeile zeigt es auch: „belongs to topic ...“), die Version des Index wird
+   erhöht und seine Zeit gesetzt, `index.json` mit dem Schlüssel aus dem Schlüsselbund signiert, und diese Änderung
+   auf einem neuen Branch (`lcf-publish-...`) committet, gepusht, als Pull Request geöffnet und gemergt, sobald die
    Pflichtprüfung bestanden ist. Nichts wird je nach `main` gepusht (der Branch ist geschützt), und jeder Merge legt
    den geprüften Commit fest.
 3. **Veröffentlichtes Pack zurückziehen...** (`zoo maintainer revoke KIND ID --reason ... [--version V | --sha256

@@ -1011,7 +1011,8 @@ expired, so a revocation never stops applying because the framework was not upda
    never missed. A revoked pack is refused.
 2. The pack is downloaded, pinned by the size and sha256 from the index, into a `.quarantine/` folder inside the
    install folder.
-3. It is read as described above and must match its index entry (kind, id and version).
+3. It is read as described above and must match its index entry (kind, id and version, and for a knowledge pack the
+   topic or target the entry names, when it names one).
 4. Validators: a target must pass the same checks as a generated module (capabilities, every image a Dockerfile
    pulls pinned by digest unless it is an official base image, no prebuilt llama.cpp, the shell deny-list, `bash -n`,
    no template placeholders, no binary files); a recipe must match its schema and the capabilities of its target if that is
@@ -1353,6 +1354,7 @@ signed index and installs through a quarantine.
 | A link in the knowledge folder (the folder itself or an entry of its first two levels) stays ignored, and the pack listing and Mojo Oracle name it with the reason. | `CommunityManager.ignored_links` / `links_note` / `LINK_REASON`; the listing's note; the Mojo finding `community.knowledge.links`. | The framework never follows a link out of its own folders: what is installed and checked must stay where it was checked, and a link can point anywhere; saying it keeps the packs behind it from seeming lost. |
 | An installed pack whose files changed since its install stays out of the import and is not the signed pack; the refusal and Mojo say why and how to go on (uninstall and install again, or keep the edits as a pack of your own). A topic folder taken by a pack installed before topic folders names that pack and points to its uninstall. | `community_manager.CHANGED` (the stable problem of `verify_installed`) and `changed_text`; the knowledge import's waiting reason; `_knowledge_group` with the step `pack.remove`. | The check against the signed digest is the security gate and stays; a refusal names the way out the person can take, never one only a pack author has. |
 | The list of knowledge sources has one column order in the CLI and the GUI, with Topic or target third. | `knowledge_sources.COLUMNS`; `llm-cli knowledge sources` adds its columns from it, the Knowledge Sources window's `sources.col.*` texts are those words in English and in the same order. | One list keeps the two views from drifting apart; where a source belongs is read right after what it is. |
+| A signed index entry of a knowledge pack names the topic or target of its manifest; an installed pack must belong where its entry says. | `IndexEntry.topic` / `target` / `belongs()` (left out when unset), written by `community_maintainer.entry_for`; one rule for manifest and entry (`community_pack.check_belongs`) and one text (`belongs_text`); `prepare_install` refuses a mismatch. | The person sees where knowledge goes before the download; the signed entry and the pack cannot disagree. A 3.1.0 client rejects an index with the new fields, so entries with them are published once 3.2.0 is out. |
 | A bot may propose new models with a compatibility test as a tested pull request; it never takes anything over by itself. | Roadmap Later. | New models appear faster than releases; a person still decides. |
 
 **History**

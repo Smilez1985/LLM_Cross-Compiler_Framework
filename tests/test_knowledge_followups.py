@@ -211,3 +211,77 @@ def test_the_cli_lists_the_sources_with_those_columns():
     body = source[source.index("def knowledge_sources"):source.index("@knowledge.command('loose')")]
     assert "for column in ks.COLUMNS:" in body and not re.search(r'"Topic or target"', body)
     assert knowledge_sources.COLUMNS.index("Topic or target") == 2
+
+
+# --- (9) index entries and the maintainer's review say where a knowledge pack belongs -----------------------------
+
+def entry_of(world, name="npu-guide", **scope):
+    from orchestrator.Core.community_maintainer import entry_for
+    root = world.tmp / "src" / f"entry-{name}"
+    root.mkdir(parents=True)
+    (root / "knowledge.json").write_text(json.dumps(PAGES), encoding="utf-8")
+    manifest = build_manifest(root, kind="knowledge", id=name, version="1.0.0", author="alice", license="MIT",
+                              **scope)
+    return entry_for(manifest, b"pack bytes", "https://packs.example.org/x.zip"), manifest
+
+
+def zoo_item(entry):
+    from orchestrator.Core.community_manager import TrustLevel, ZooItem
+    return ZooItem(kind="knowledge", id=entry.id, version=entry.version, title=entry.title, author=entry.author,
+                   license=entry.license, trust=TrustLevel.COMMUNITY, entry=entry)
+
+
+def test_an_index_entry_names_the_topic_or_target_of_a_knowledge_pack(world):
+    from orchestrator.Core.community_maintainer import index_bytes
+    from orchestrator.Core.community_manager import CommunityIndex, IndexEntry, ZooDetails
+    entry, _ = entry_of(world, topic="npu")
+    assert (entry.topic, entry.target, entry.belongs()) == ("npu", None, "topic npu")
+    board, _ = entry_of(world, "board-notes", target="demo-board")
+    assert board.belongs() == "target demo-board"
+    old, _ = entry_of(world, "old-notes")
+    assert old.topic is None and "made before topics" in old.belongs()
+    data = index_bytes(CommunityIndex(version=1, generated="2026-10-30T00:00:00Z", entries=[entry, old]))
+    text = data.decode("utf-8")
+    assert '"topic": "npu"' in text and text.count('"topic"') == 1, "an entry without one keeps its old form"
+    assert CommunityIndex.model_validate_json(data).entries[0].topic == "npu"
+    for wrong in ({"kind": "target"}, {"target": "demo-board"}, {"topic": "../up"}):
+        with pytest.raises(ValueError):
+            IndexEntry(**{**entry.model_dump(), **wrong})
+    assert "Belongs to: topic npu" in ZooDetails(zoo_item(entry)).lines()
+
+
+def test_the_maintainers_review_line_says_where_the_pack_belongs(world):
+    from orchestrator.Core.community_maintainer import ReviewedPack
+    _, manifest = entry_of(world, topic="npu")
+    pack = ReviewedPack(path="contributions/knowledge/npu-guide.zip", kind="knowledge", file_name="npu-guide.zip",
+                        data=b"x", sha256="0" * 64, manifest=manifest, problems=[])
+    assert "knowledge npu-guide 1.0.0 by alice (MIT), belongs to topic npu: npu-guide.zip" in pack.line()
+    _, pack.manifest = entry_of(world, "old-notes")
+    assert "belongs to no topic or target named" in pack.line()
+
+
+def test_a_pack_must_belong_where_its_index_entry_says(world):
+    world.add(knowledge_pack(world, "npu-guide", topic="npu"), kind="knowledge", pack_id="npu-guide",
+              version="1.0.0")
+    world.entries[-1]["topic"] = "gpu"
+    world.publish()
+    assert world.cm.list_items(world.cm.load_index(True).index)[0].entry.topic == "gpu"
+    with pytest.raises(cp.PackError, match="belongs to topic gpu, the pack to topic npu"):
+        world.cm.prepare_install("knowledge", "npu-guide")
+    assert not (world.cm.knowledge_dir / "npu").exists() and not (world.cm.knowledge_dir / "gpu").exists()
+    world.entries[-1]["topic"] = "npu"
+    world.publish(version=2)
+    prepared = world.cm.prepare_install("knowledge", "npu-guide")
+    assert prepared.topic == "npu"
+    world.cm.discard(prepared)
+
+
+@pytest.mark.parametrize("lang", ["en", "de"])
+def test_the_hub_details_say_where_a_knowledge_pack_belongs(world, lang):
+    pytest.importorskip("PySide6")
+    from orchestrator.Core.community_manager import ZooDetails
+    from orchestrator.gui.community_dialogs import detail_fields
+    from orchestrator.utils.localization import ui_text
+    entry, _ = entry_of(world, target="demo-board")
+    fields = dict(detail_fields(ZooDetails(zoo_item(entry)), lang))
+    assert fields[ui_text("zoo.field.belongs", lang)] == ui_text("sources.topic.target", lang, name="demo-board")

@@ -24,6 +24,12 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   good, audited before anything goes (`pack_uninstalled`); excerpts another pack or your own crawl still holds stay
   (`CommunityManager.uninstall_plan` / `uninstall`, `RAGManager.holding`). A pack whose pages are in the knowledge base
   is refused while the knowledge base is off.
+- `2026-10-30 01:38 UTC` · `v3.2.0` **Index entries and the maintainer's review say where a knowledge pack belongs**: a signed index entry of a knowledge
+  pack now carries the topic or target of its manifest (`topic`, `target`; written by the maintainer's publish, left
+  out when unset, so older entries keep their form), and `llm-cli zoo show`, the Community Hub's **Details...**
+  (**Belongs to**), the tool `list_packs` and the maintainer's review line (CLI and GUI) name it before anything is
+  downloaded. A pack must belong where its entry says, or it is not installed. An index with these fields is read
+  only by 3.2.0 and later.
 
 ### Changed
 - `2026-10-30 01:26 UTC` · `v3.2.0` **A linked knowledge folder is ignored, and said so**: a symbolic link as `community/knowledge` or in its first two

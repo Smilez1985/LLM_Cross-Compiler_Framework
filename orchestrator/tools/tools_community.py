@@ -193,6 +193,8 @@ class PackOut(BaseModel):
     installed_via: Optional[str] = Field(default=None, description="grant:<id> or delegation:<id> when an AI "
                                                                    "installed it under a standing approval or a "
                                                                    "delegation")
+    topic: Optional[str] = Field(default=None, description="A knowledge pack: the topic its index entry names")
+    target: Optional[str] = Field(default=None, description="A knowledge pack: the target its index entry names")
 
 
 class VerificationOut(BaseModel):
@@ -419,7 +421,8 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
             row = PackOut(kind=item.kind, pack_id=item.id, version=item.version, title=item.title or "",
                           author=item.author or "", license=item.license or "",
                           trust=trust if trust in ("verified", "community", "local", "revoked") else "unknown",
-                          installed_version=item.installed_version, revoked=item.revoked)
+                          installed_version=item.installed_version, revoked=item.revoked,
+                          topic=getattr(item.entry, "topic", None), target=getattr(item.entry, "target", None))
             if item.path is not None:
                 prov = read_provenance(item.path)
                 row.installed_via = getattr(prov, "installed_via", None) if prov is not None else None

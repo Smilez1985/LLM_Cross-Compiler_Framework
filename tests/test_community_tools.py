@@ -494,3 +494,12 @@ def test_a_knowledge_pack_says_when_its_import_downloads_the_search_model_first(
     found = facts()
     assert "embedding_model_download" not in {w.code for w in found.warnings}
     assert any(f.label == "Embedding model" and "nothing is downloaded" in f.value for f in found.facts)
+
+
+def test_list_packs_names_the_topic_or_target_of_a_knowledge_pack(env):
+    """Where a knowledge pack belongs, from its signed index entry, before anything is downloaded."""
+    env.world.add(knowledge_pack(env.world), kind="knowledge", pack_id="rk-docs", version="1.0.0")
+    env.world.entries[-1]["topic"] = "rk3588"
+    env.world.publish()
+    out = call(env, "list_packs", {"pack_id": "rk-docs", "refresh": True})
+    assert (out.items[0].topic, out.items[0].target) == ("rk3588", None)

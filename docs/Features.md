@@ -3110,7 +3110,8 @@ MCP clients and Ditto use the zoo with three tools (decisions of 2026-10-11): pa
 and leave this computer only as a local file you publish yourself.
 
 - **`list_packs`** (read): the index entries and the installed packs with kind, id, version, title, author, licence,
-  trust (`verified`, `community`, `local`, `revoked`), installed version and the revocation reason. It reads the
+  trust (`verified`, `community`, `local`, `revoked`), installed version and the revocation reason, and for a
+  knowledge pack the topic or target its index entry names (`topic`, `target`). It reads the
   cached index; `refresh` downloads the signed index anew (once an hour per client; not in offline mode).
   `pack_id` adds one pack's description, download size and sha256, and for an installed recipe its pinned values;
   `verify` adds the check of the installed packs (revoked, changed since installed). Titles, authors, descriptions
@@ -3182,7 +3183,8 @@ tool, no Ditto path and no other tool calls it (a test guards it).
    the contribution is merged (only when the check passed and its head is still the reviewed commit), the clone is
    updated, the pack moves to `packs/<kind>/`, its index entry gets the raw address
    (`https://raw.githubusercontent.com/<repo>/main/packs/<kind>/<file>`), the trust (`community`, or `verified` when
-   someone other than the author reproduced it) and the title, the index version is raised and its time set,
+   someone other than the author reproduced it), the title and, for a knowledge pack, the topic or target its
+   manifest names (the review line shows it too: "belongs to topic ..."), the index version is raised and its time set,
    `index.json` is signed with the keyring key, and that change is committed on a new branch (`lcf-publish-...`),
    pushed, opened as a pull request and merged once the required check passed. Nothing is ever pushed to `main` (it
    is protected), and each merge pins the commit that was checked.

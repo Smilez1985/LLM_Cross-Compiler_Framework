@@ -26,6 +26,12 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   etwas geht (`pack_uninstalled`); Auszüge, die ein anderes Paket oder dein eigener Crawl noch hält, bleiben
   (`CommunityManager.uninstall_plan` / `uninstall`, `RAGManager.holding`). Ein Paket, dessen Seiten in der Wissensbasis
   sind, wird abgelehnt, solange die Wissensbasis aus ist.
+- `2026-10-30 01:38 UTC` · `v3.2.0` **Indexeinträge und die Prüfung des Maintainers sagen, wohin ein Wissenspaket gehört**: Ein signierter Indexeintrag
+  eines Wissenspakets trägt jetzt das Thema oder Target seines Manifests (`topic`, `target`; geschrieben beim
+  Veröffentlichen durch den Maintainer, weggelassen, wenn nicht gesetzt, sodass ältere Einträge ihre Form behalten),
+  und `llm-cli zoo show`, **Details...** im Community Hub (**Gehört zu**), das Tool `list_packs` und die Prüfzeile des
+  Maintainers (CLI und GUI) nennen es, bevor etwas heruntergeladen wird. Ein Paket muss dorthin gehören, wo sein
+  Eintrag es sagt, sonst wird es nicht installiert. Einen Index mit diesen Feldern liest erst 3.2.0 und später.
 
 ### Geändert
 - `2026-10-30 01:26 UTC` · `v3.2.0` **Ein verlinkter Wissensordner wird übergangen, und das wird gesagt**: Ein symbolischer Link als

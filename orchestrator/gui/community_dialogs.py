@@ -78,6 +78,10 @@ def detail_fields(details: Any, lang: str) -> List[Tuple[str, str]]:
         fields += [(t("zoo.field.download"), str(i.entry.url)),
                    (t("zoo.field.size"), t("zoo.value.bytes", size=i.entry.size)),
                    (t("zoo.field.sha256"), str(i.entry.sha256))]
+        if i.entry.kind == "knowledge":   # where it belongs, as `llm-cli zoo show` says it (IndexEntry.belongs)
+            belongs = (t("sources.topic.target", name=i.entry.target) if i.entry.target else
+                       t("sources.topic.topic", name=i.entry.topic) if i.entry.topic else t("zoo.value.belongs.none"))
+            fields.append((t("zoo.field.belongs"), belongs))
     if i.description:
         fields.append((t("zoo.field.description"), i.description))
     return fields

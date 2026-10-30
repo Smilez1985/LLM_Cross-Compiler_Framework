@@ -2363,7 +2363,8 @@ llm-cli zoo show PACK_ID [--kind target|recipe|knowledge]
 ```
 
 Shows one entry: kind, ID, version, author and licence, trust (and why it was revoked), where it is installed, the
-download address with size and sha256, the description, and for an installed recipe its `recipe.yml`. The ID is not
+download address with size and sha256, for a knowledge pack where it belongs (**Belongs to:** the topic or target
+its index entry names), the description, and for an installed recipe its `recipe.yml`. The ID is not
 case-sensitive. The command reads only the cached index and the installed packs; run `zoo list --refresh` first to
 see new entries. An unknown ID exits with code 1.
 

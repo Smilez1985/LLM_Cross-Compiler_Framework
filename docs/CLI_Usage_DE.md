@@ -2472,7 +2472,8 @@ llm-cli zoo show PACK_ID [--kind target|recipe|knowledge]
 ```
 
 Zeigt einen Eintrag: Art, ID, Version, Autor und Lizenz, Vertrauensstufe (und warum es zurückgezogen wurde), wo es
-installiert ist, die Download-Adresse mit Größe und sha256, die Beschreibung und bei einem installierten Rezept
+installiert ist, die Download-Adresse mit Größe und sha256, bei einem Wissenspaket, wohin es gehört (**Belongs to:**
+das Thema oder Target, das sein Indexeintrag nennt), die Beschreibung und bei einem installierten Rezept
 dessen `recipe.yml`. Groß- und Kleinschreibung der ID spielt keine Rolle. Der Befehl liest nur den
 zwischengespeicherten Index und die installierten Pakete; führe zuerst `zoo list --refresh` aus, um neue Einträge zu
 sehen. Eine unbekannte ID endet mit Exit-Code 1.
