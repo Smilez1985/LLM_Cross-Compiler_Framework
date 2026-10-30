@@ -40,7 +40,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Set, 
 from orchestrator import __version__
 from orchestrator.runtime.build.executor import BuildError, BuildExecutor, BuildResult
 from orchestrator.runtime.build.recipe import BuildPlan, PlanError, build_id_of, check_download_options
-from orchestrator.runtime.build.source import remove_tree
+from orchestrator.utils.atomic import remove_tree
 from orchestrator.runtime.build.toolchain import DetectedToolchain
 from orchestrator.runtime.build.verify import SmokeModelFile, Verifier, VerifyReport, binary_path, sha256_file
 from orchestrator.runtime.catalog import LlamaCppSource

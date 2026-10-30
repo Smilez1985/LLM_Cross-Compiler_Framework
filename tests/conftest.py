@@ -214,6 +214,179 @@ def _catalog_key_variables():
 CATALOG_KEY_VARIABLES = _catalog_key_variables()
 
 
+# --- Disk guard: what a test leaves and what the run keeps, in apparent sizes ---------------------------------------
+# A Qdrant Edge store sets up some 160 MB of files (write-ahead log, segments) that are sparse on Linux (no real
+# blocks) but allocated in full on NTFS, so the Windows runner ran out of disk while this sandbox showed nothing. The
+# guard therefore counts APPARENT sizes (st_size, what NTFS allocates), never the blocks `du` reports.
+#
+# Per test (disk_budget_guard): the test's own temporary folders (tmp_path and the tmp_path_factory folders it made)
+# may hold at most TEST_TEMP_BUDGET when the test ends, measured in teardown before pytest removes tmp_path. The
+# number comes from a measured run: the largest legitimate totals are the Qdrant Edge tests at about 375 MB apparent
+# (two shards, or a store plus its conversion copy); 512 MiB is well above them and still fails a test that writes
+# gigabytes. A test that truly needs more says so with @pytest.mark.temp_budget(megabytes, reason="..."), never a
+# silent skip.
+#
+# Per run (pytest_sessionfinish): what the run KEPT may hold at most RUN_TEMP_BUDGET: the pytest base folder after the
+# per-test removal (failed tests' folders, module and session folders), the session's home folder, and the entries
+# this process created directly in the system temporary folder (tempfile.mkdtemp/mkstemp and os.mkdir there, seen
+# through an audit hook, so another program's files never count) that are still there. Leftovers of a child process
+# are not attributed. 1 GiB: a measured run keeps about 1 MB (the session folders), and a Windows runner has some 14
+# GB of room for the whole job.
+#
+# Both budgets can be lowered (never raised) for the guard's own tests through the ini options temp_test_budget_mb and
+# temp_run_budget_mb.
+MIB = 1024 * 1024
+TEST_TEMP_BUDGET = 512 * MIB
+RUN_TEMP_BUDGET = 1024 * MIB
+DISK_LARGEST_SHOWN = 5
+SESSION_START_TEMP = os.path.realpath(tempfile.gettempdir())
+_TEMP_CREATED = set()   # entries this process made directly in the system temporary folder
+
+
+def _record_temp_entry(event, args):
+    if event not in ("tempfile.mkdtemp", "tempfile.mkstemp", "os.mkdir"):
+        return
+    try:
+        path = os.fsdecode(args[0])
+        if os.path.dirname(os.path.realpath(path)) == SESSION_START_TEMP:
+            _TEMP_CREATED.add(os.path.realpath(path))
+    except Exception:  # an audit hook must never break the call it watches
+        pass
+
+
+sys.addaudithook(_record_temp_entry)
+
+
+def apparent_usage(folders):
+    """(total apparent bytes, [(bytes, relative path)] of every file) below `folders`; links count with their own
+    size and are never followed. Relative paths start at each folder's own name and use '/'."""
+    total, files = 0, []
+    for folder in folders:
+        folder = Path(folder)
+        try:
+            top = os.lstat(folder)
+        except OSError:
+            continue
+        if not os.path.isdir(folder) or os.path.islink(folder):
+            total += top.st_size
+            files.append((top.st_size, folder.name))
+            continue
+        pending = [(str(folder), folder.name)]
+        while pending:
+            path, relative = pending.pop()
+            try:
+                with os.scandir(path) as entries:
+                    listing = list(entries)
+            except OSError:
+                continue
+            for entry in listing:
+                rel = f"{relative}/{entry.name}"
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        pending.append((entry.path, rel))
+                        continue
+                    size = entry.stat(follow_symlinks=False).st_size
+                except OSError:
+                    continue
+                total += size
+                files.append((size, rel))
+    return total, files
+
+
+def _megabytes(size) -> str:
+    return f"{size / MIB:.1f} MB"
+
+
+def disk_report(total, files, budget, what) -> str:
+    """The guard's message: the total against the budget and the largest files by relative path."""
+    largest = sorted(files, reverse=True)[:DISK_LARGEST_SHOWN]
+    lines = [f"{what} hold {_megabytes(total)} (apparent sizes, what NTFS allocates), more than the budget of "
+             f"{_megabytes(budget)}. Close stores, remove what the test made, or give the test "
+             "@pytest.mark.temp_budget(megabytes, reason=...). Largest files:"]
+    lines += [f"  {_megabytes(size):>10}  {relative}" for size, relative in largest]
+    return "\n".join(lines)
+
+
+def _ini_budget(config, name, default):
+    """A budget from the ini file, only ever lower than the default."""
+    try:
+        value = config.getini(name)
+    except (ValueError, KeyError, AttributeError):   # a stand-in config without the ini
+        return default
+    return min(default, int(float(value) * MIB)) if value not in (None, "") else default
+
+
+def temp_budget_of(item):
+    """The bytes `item` may leave in its own temporary folders: the marker's when it has one (with a reason)."""
+    marker = item.get_closest_marker("temp_budget")
+    if marker is None:
+        return _ini_budget(item.config, "temp_test_budget_mb", TEST_TEMP_BUDGET)
+    reason = marker.kwargs.get("reason", "")
+    if not marker.args or not str(reason).strip():
+        pytest.fail("@pytest.mark.temp_budget needs the megabytes and a reason", pytrace=False)
+    return int(float(marker.args[0]) * MIB)
+
+
+
+
+def pytest_addoption(parser):
+    parser.addini("temp_test_budget_mb", "lowers the per-test temporary folder budget (tests of the guard)", default="")
+    parser.addini("temp_run_budget_mb", "lowers the budget of what the run keeps (tests of the guard)", default="")
+
+
+def _children(folder):
+    try:
+        return set(os.listdir(folder))
+    except OSError:
+        return set()
+
+
+@pytest.fixture(autouse=True)
+def disk_budget_guard(request, tmp_path, tmp_path_factory):
+    """Fails a test whose own temporary folders end larger than its budget (see above). Its name sorts first among
+    the autouse fixtures, so it is set up first and torn down last, after every fixture that closes or removes what
+    the test made, and before pytest removes tmp_path."""
+    base = tmp_path_factory.getbasetemp()
+    before = _children(base)
+    yield
+    folders = [tmp_path] + [base / name for name in sorted(_children(base) - before) if name != tmp_path.name]
+    total, files = apparent_usage(folders)
+    log = os.environ.get("LCF_TEST_DISK_LOG")   # a measuring run: one line per test
+    if log:
+        with open(log, "a", encoding="utf-8") as f:
+            f.write(f"{total}\t{request.node.nodeid}\n")
+    budget = temp_budget_of(request.node)
+    if total > budget:
+        pytest.fail(disk_report(total, files, budget, "This test's temporary folders"), pytrace=False)
+
+
+def run_leftovers(basetemp, created=None, extra=()):
+    """The folders and files the run kept: the pytest base folder, `extra` (the session home) and the entries this
+    process created in the system temporary folder that are still there (not those inside the base folder)."""
+    roots = [Path(p) for p in (basetemp, *extra) if p]
+    created = _TEMP_CREATED if created is None else created
+    for path in sorted(created):
+        if os.path.lexists(path) and not any(is_inside(path, root) or is_inside(root, path) for root in roots):
+            roots.append(Path(path))
+    return roots
+
+
+def run_disk_problem(session):
+    """The message when what the run kept is larger than its budget, else ''."""
+    factory = getattr(session.config, "_tmp_path_factory", None)
+    basetemp = getattr(factory, "_basetemp", None)
+    roots = run_leftovers(basetemp, extra=(SESSION_HOME,))
+    total, files = apparent_usage(roots)
+    log = os.environ.get("LCF_TEST_DISK_LOG")   # a measuring run: what the run kept, last line
+    if log:
+        with open(log, "a", encoding="utf-8") as f:
+            f.write(f"{total}\t(the run kept)\n")
+    budget = _ini_budget(session.config, "temp_run_budget_mb", RUN_TEMP_BUDGET)
+    if total <= budget:
+        return ""
+    return disk_report(total, files, budget, "The temporary folders and files this run kept")
+
+
 @pytest.fixture(autouse=True)
 def isolated_environment(tmp_path, monkeypatch):
     """Keeps tests away from the developer's real ~/.llm-framework, API keys and LLM_* settings."""
@@ -563,7 +736,17 @@ def real_home_changes():
 
 def pytest_sessionfinish(session, exitstatus):
     """Fails the session when the real home folder changed while the tests ran (by a test or, rarely, by another
-    program at the same time: the list says what changed, never what a file holds)."""
+    program at the same time: the list says what changed, never what a file holds), and when what the run kept in
+    temporary folders is larger than its budget (the disk guard above)."""
+    problem = run_disk_problem(session)
+    if problem:
+        reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+        if reporter is not None:
+            reporter.write_sep("=", "temporary folders over budget", red=True)
+            reporter.write_line(problem)
+        else:
+            print(problem, file=sys.stderr)
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
     changes = real_home_changes()
     if not changes:
         return

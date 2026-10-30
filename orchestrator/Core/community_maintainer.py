@@ -62,6 +62,7 @@ from orchestrator.Core.community_pack import (MANIFEST_NAME, RESERVED_NAMES, SIG
                                               verify_index)
 from orchestrator.utils import l10n_maintainer
 from orchestrator.utils.helpers import ensure_directory
+from orchestrator.utils.atomic import remove_tree
 
 SERVICE = "lcf-community-index"   # the keyring service of the index signing key (the script's since its first version)
 REQUIRED_CHECK = "validate"       # the job of the community repository's check workflow; main requires it
@@ -401,7 +402,7 @@ class Review:
     def discard(self) -> None:
         """Removes the framework's own review folder (never a folder the person named)."""
         if self.temporary:
-            shutil.rmtree(self.folder, ignore_errors=True)
+            remove_tree(self.folder)
 
 
 @dataclass

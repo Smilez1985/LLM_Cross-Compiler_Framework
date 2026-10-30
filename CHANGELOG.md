@@ -78,6 +78,11 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   is never removed through such a link.
 
 ### Changed
+- `2026-10-30 18:21 UTC` · `v3.3.0` **A leftover folder that cannot be removed stops the step that would use it**
+  ([design](docs/DESIGN.md#tests-ci-and-the-windows-hazards)): a build whose staging folder from an earlier attempt
+  stays (its files would be published with the new artifacts), a pack export whose copy keeps a stale licence folder,
+  and a knowledge-base conversion whose half-built copy from an earlier attempt stays now stop with a plain reason
+  instead of going on with what was left.
 - `2026-10-30 14:55 UTC` · `v3.3.0` **Your board tests show up in the target's benchmarks, and ignored old entries are named** ([design](docs/DESIGN.md#targets-hardware-and-templates)):
   the newest passed board test of a build per board, model and quantization now joins the target's benchmark rows
   in `list_targets`, `get_target_capabilities`, `llm-cli targets boards` and **Build > Targets... > Boards...**, marked
@@ -108,6 +113,21 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   the exit code of the end reason cancelled. Ctrl+C in the command itself stays 130.
 
 ### Fixed
+- `2026-10-30 18:21 UTC` · `v3.3.0` **The framework's own folders no longer stay behind on Windows**
+  ([design](docs/DESIGN.md#tests-ci-and-the-windows-hazards)): they were removed with
+  `shutil.rmtree(ignore_errors=True)`, which on Windows gives up on a read-only file without a word. The llama.cpp
+  runtime's staging and previous-version folders, a build's staging folder and the security scan's temporary image
+  archive, the Community Hub's quarantine, export and review folders, the bench's private model copy, the knowledge
+  base's half-built conversion copy and a half-written target module now go through the one removal helper
+  (`orchestrator/utils/atomic.remove_tree`): read-only files are made writable and removed, a pass is repeated on
+  Windows, and what still cannot be removed is logged by name. Only what is inside the removed folder is changed: the
+  folder around it (a model folder, the Hugging Face cache) keeps its permissions, and a folder that cannot be opened
+  is made accessible and removed (or ends in that list) instead of stopping the clean-up with an error.
+- `2026-10-30 16:38 UTC` · `v3.3.0` **A git dependency is kept without its git metadata on Windows too**
+  ([design](docs/DESIGN.md#security-model)): git keeps its objects read-only, and the dependency pre-fetch removed
+  `.git` with `shutil.rmtree(ignore_errors=True)`, which on Windows failed without a word: `.git` stayed in the cached
+  copy and in its sha256, and the work and staging folders stayed on the disk. They are now removed like every
+  read-only tree (`remove_tree`), and a dependency whose `.git` still stands is refused instead of kept.
 - `2026-10-30 15:11 UTC` · `v3.3.0` **`llm-cli ditto cache`, `ditto cache set` and `ditto models list` say plainly when they cannot work it
   out**: when the memory budget or the model choice for this computer cannot be computed (a probe that fails, a model
   the catalogue lacks, a damaged file), they print one red line with the reason (secrets redacted) and exit with 1,

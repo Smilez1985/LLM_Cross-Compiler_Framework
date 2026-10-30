@@ -68,7 +68,7 @@ from orchestrator.runtime.server_policy import (LOOPBACK, PolicyError, check_ser
                                                 server_command, write_key_file)
 from orchestrator.utils.download import DownloadError, FileLock, PinnedDownloader
 from orchestrator.utils.download import IntegrityError as DownloadIntegrityError
-from orchestrator.utils.atomic import remove_file, write_private_exclusive
+from orchestrator.utils.atomic import remove_file, remove_tree, write_private_exclusive
 from orchestrator.utils.helpers import redact_secrets, safe_extract_archive, safe_json_load
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.next_steps import WithSteps
@@ -1137,7 +1137,7 @@ class LocalLLMRuntime:
             if leftovers():  # an interrupted install's folders: removed (under the lock) before space is counted
                 with self._lock():
                     for leftover in leftovers():
-                        shutil.rmtree(leftover, ignore_errors=True)
+                        remove_tree(leftover)
             self._ensure_space(self.root, 2 * asset.download_size, what="unpacking")
             archives = fetch_all()
         with self._lock():
@@ -1149,7 +1149,7 @@ class LocalLLMRuntime:
                 return current
             refuse_if_running()
             for leftover in leftovers():
-                shutil.rmtree(leftover, ignore_errors=True)  # from an interrupted install; the lock is ours
+                remove_tree(leftover)  # from an interrupted install; the lock is ours
             if not archives or not all(a.is_file() for a in archives):
                 archives = fetch_all()  # removed by a concurrent install of the same build
             staging = self.root / f".staging-{asset.variant}-{secrets.token_hex(4)}"
@@ -1172,9 +1172,9 @@ class LocalLLMRuntime:
                         old = None
                     raise
             finally:
-                shutil.rmtree(staging, ignore_errors=True)
+                remove_tree(staging)
                 if old is not None:
-                    shutil.rmtree(old, ignore_errors=True)
+                    remove_tree(old)
             for archive in archives:
                 discard(archive)
             self._update_active(variant=asset.variant, asset_id=asset.id, use="prebuilt")
@@ -1213,7 +1213,7 @@ class LocalLLMRuntime:
                     raise IntegrityError(f"{path.name} from a runtime library archive would replace a file of the "
                                          "llama.cpp build.")
                 os.replace(path, target)
-            shutil.rmtree(lib_dir, ignore_errors=True)
+            remove_tree(lib_dir)
         self._make_executable(server.parent)
         return server
 

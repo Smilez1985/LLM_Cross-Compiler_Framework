@@ -146,6 +146,13 @@ python -m pytest
   (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` and every other variable a method in
   `configs/llm_providers.yml` lists under `env`). Tests must not depend on your real `~/.llm-framework`, your
   keyring, real API keys or the network; use the `memory_keyring` fixture and fake servers.
+- `tests/conftest.py` also guards the disk, in apparent sizes (what NTFS allocates; a Qdrant Edge store's sparse
+  files take no room on Linux but about 160 MB on Windows): a test whose own temporary folders (`tmp_path` and the
+  `tmp_path_factory` folders it made) hold more than 512 MiB at its end fails with its five largest files, and a run
+  that keeps more than 1 GiB (failed tests' folders, module and session folders, what it left in the system
+  temporary folder) fails at its end. Close stores, use `tmp_path` instead of `tempfile.mkdtemp()` and remove what a
+  test made; a test that truly needs more gets `@pytest.mark.temp_budget(megabytes, reason="...")`. Never raise the
+  budgets to make a test pass. `LCF_TEST_DISK_LOG=<file>` writes each test's total for a measuring run.
 - `tests/test_versioning.py` checks that `orchestrator/__init__.py`, `pyproject.toml` and the newest released
   changelog entry carry the same version.
 - `tests/test_foundation.py` and `tests/test_review_capabilities_paths.py` check that the Rockchip capabilities in
@@ -690,6 +697,14 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   and run by hand; `orchestrator/runtime/hardware_probe.py` is its byte-identical copy inside the package. Edit the
   script, then copy it (`cp scripts/hardware_probe.py orchestrator/runtime/hardware_probe.py`); a test fails while
   the two differ.
+- **One removal of the framework's own folders.** A cache, staging, work or quarantine folder or a temporary copy is
+  removed with `orchestrator/utils/atomic.remove_tree(path, label=...)`: read-only files are made writable and tried
+  again (Windows refuses to delete them), links are removed and never followed, and it returns what it could not
+  remove. Check that list where the folder must be gone (a cache, a staging folder that feeds a hash or a later step)
+  and stop with a plain reason; a best-effort clean-up just calls it (it logs what stays). Never
+  `shutil.rmtree(..., ignore_errors=True)` or an error handler that swallows: `tests/test_removal.py` fails on one in
+  `orchestrator/` or `scripts/`, and its `windows_read_only` fixture shows the Windows rule on any host. A person's
+  files are never removed with it, only through `Core/deletion.py` and `Core/trash.py`.
 - **One file hash, one disk watchdog.** Every sha256 of a file goes through `orchestrator/utils/helpers.py`, where
   the first one (`calculate_file_checksum`) was: `sha256_file` (optional cancel and progress callbacks, links refused
   on request), `try_sha256_file` (None for a link, a folder or an unreadable file), `sha256_fileobj` (an open handle,
@@ -913,6 +928,14 @@ text:
   pull request once that is stable (CI green on Linux and Windows, reviewed). Branch from `development` and aim
   your pull request at it; one topic per pull request. CI runs on every push to `main` and `development` and on
   every pull request.
+- CI is a gate: before you ask for a merge onto `development`, run the CI on your branch itself and wait until it
+  is green. Push the branch, then start both workflows by hand (they have the `workflow_dispatch` trigger):
+  `gh workflow run ci.yml --ref <your-branch>` and `gh workflow run security.yml --ref <your-branch>`, or on GitHub
+  Actions > CI (and Security) > Run workflow with your branch chosen. Follow them with `gh run watch` (or
+  `gh run list --branch <your-branch>`). Both must be green, Linux and Windows: the Windows job finds what Linux hides
+  (files that cannot be deleted while read-only, sparse files that take real room). A red run blocks the merge;
+  read its log, fix and run again. Bundle related work on one branch and run the CI once for it, not once per
+  commit: the Actions minutes are shared.
 - Commit messages: a summary line in English, in the imperative, sentence case, no type prefix, ideally no longer
   than about 72 characters. Examples from the history: `Add a secret scan: pre-commit and pre-push hooks and a CI
   job` and `Pin the provider SDKs and local embeddings, drop LiteLLM and tiktoken`. The body explains why.

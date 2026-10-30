@@ -82,6 +82,7 @@ from orchestrator.utils.download import DownloadError, PinnedDownloader, sha256_
 from orchestrator.utils.file_lock import file_lock
 from orchestrator.utils.helpers import ensure_directory, redact_secrets
 from orchestrator.utils.logging import get_logger
+from orchestrator.utils.atomic import remove_tree
 
 KINDS = PACK_KINDS
 REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$")
@@ -1032,7 +1033,7 @@ class CommunityManager:
                                    topic=topic, target=target, loose_file=loose.path, loose_label=loose.label,
                                    knowledge_pages=pages)
         except BaseException:
-            shutil.rmtree(quarantine, ignore_errors=True)
+            remove_tree(quarantine)
             raise
 
     def listing(self, refresh: bool = False) -> Tuple[List[ZooItem], str]:
@@ -1123,7 +1124,7 @@ class CommunityManager:
                                 f"{entry.belongs()}, the pack to {belongs_text(m.kind, m.topic, m.target)}.")
             return prepared
         except BaseException as e:
-            shutil.rmtree(quarantine, ignore_errors=True)
+            remove_tree(quarantine)
             if isinstance(e, DownloadError):   # a disk refusal keeps its numbers for the Community Hub (A4)
                 raise with_reason(PackError(str(e)), e) from None
             raise
@@ -1165,7 +1166,7 @@ class CommunityManager:
             return self._prepare(archive, quarantine, trust, path.name, index if entry else None, sender=sender,
                                  expected=(entry.kind, entry.id, entry.version) if entry else None)
         except BaseException:
-            shutil.rmtree(quarantine, ignore_errors=True)
+            remove_tree(quarantine)
             raise
 
     def _prepare(self, archive: Path, quarantine: Path, trust: TrustLevel, source: str,
@@ -1409,7 +1410,7 @@ class CommunityManager:
                 raise PackError(f"{dest} already exists.")
             os.rename(pack, dest)  # never merges into an existing folder
         finally:
-            shutil.rmtree(prepared.quarantine, ignore_errors=True)
+            remove_tree(prepared.quarantine)
         if prepared.author_key:
             self._pin_author(prepared.manifest.author, prepared.author_key)
         if prepared.loose_file is not None:
@@ -1476,7 +1477,7 @@ class CommunityManager:
 
     @staticmethod
     def discard(prepared: PreparedInstall) -> None:
-        shutil.rmtree(prepared.quarantine, ignore_errors=True)
+        remove_tree(prepared.quarantine)
 
     # --- uninstall ----------------------------------------------------------------------------------------------
     def _installed_pack(self, kind: str, pack_id: str) -> Tuple[Path, Provenance]:
@@ -1646,7 +1647,7 @@ class CommunityManager:
                     problems.append(f"{rel}: contains personal data the privacy scrub would remove")
             return contents.manifest, problems
         finally:
-            shutil.rmtree(work, ignore_errors=True)
+            remove_tree(work)
 
     # --- export -----------------------------------------------------------------------------------------------
     def _secrets(self):
@@ -1718,7 +1719,7 @@ class CommunityManager:
             os.replace(tmp, out)
             return ExportResult(out, manifest, signature.key_id, changes, notes, encrypted, shares, texts)
         finally:
-            shutil.rmtree(staging, ignore_errors=True)
+            remove_tree(staging)
 
     def _stage_target(self, target_id: str, root: Path, notes: List[str], shares: List[PageShare],
                       texts: List[pack_licences.IncludedText]) -> Tuple[str, str]:
@@ -1761,7 +1762,9 @@ class CommunityManager:
             # stay out of the pack (only the export's temporary copy is changed, never the target folder).
             stale = [f"{folder.relative_to(root).as_posix()}/{name}" for name in
                      (licence_texts.NOTICE_NAME, licence_texts.LICENSES_DIR) if (folder / name).exists()]
-            shutil.rmtree(folder / licence_texts.LICENSES_DIR, ignore_errors=True)
+            if remove_tree(folder / licence_texts.LICENSES_DIR):
+                raise PackError(f"{folder.relative_to(root).as_posix()}/{licence_texts.LICENSES_DIR} could not be "
+                                "removed from the export's copy; the export stops so no stale licence file goes out.")
             (folder / licence_texts.NOTICE_NAME).unlink(missing_ok=True)
             if stale:
                 notes.append(f"{' and '.join(stale)} left out: there is no knowledge snapshot ({KNOWLEDGE_SNAPSHOT}) "
@@ -1779,7 +1782,9 @@ class CommunityManager:
             snapshot.write_text(text, encoding="utf-8")
         # The staged copy's licence files are made anew (the folder's own copy of them may be older than the rule);
         # only the export's temporary copy is changed, never the target folder.
-        shutil.rmtree(folder / licence_texts.LICENSES_DIR, ignore_errors=True)
+        if remove_tree(folder / licence_texts.LICENSES_DIR):
+            raise PackError(f"{folder.relative_to(root).as_posix()}/{licence_texts.LICENSES_DIR} could not be "
+                            "removed from the export's copy; the export stops so no stale licence file goes out.")
         (folder / licence_texts.NOTICE_NAME).unlink(missing_ok=True)
         files = pack_licences.write(folder, pages, prefix=f"{folder.relative_to(root).as_posix()}/")
         notes.append(f"{KNOWLEDGE_SNAPSHOT}: {share_counts(shares)}")
@@ -2181,4 +2186,4 @@ def _submit_with_gh(path: Path, repo: str, kind: str, gh: str, git: str, runner:
                   f"Add {kind} pack {path.stem}", "--body", body], cwd=clone)
         return f"Pull request opened: {pr.stdout.strip()}"
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        remove_tree(work)
