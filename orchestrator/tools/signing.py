@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -271,15 +272,64 @@ class RevisionAnchor:
                 with self._lock:
                     self._known = max(self._known, int(text))
             return
-        if self._identity(path) != accepted:  # replaced meanwhile: that save anchors its own revision
-            return
-        self.saved(path, revision)
+        # The last look at the file and the write happen under the lock every process takes for this file's anchor
+        # (saved() too): a process that replaced the file meanwhile either did so before this look (then nothing is
+        # written here) or writes its anchor after this write, as the higher of the two. The anchor never goes down.
+        with self._process_lock(path):
+            if self._identity(path) != accepted:  # replaced meanwhile: that save anchors its own revision
+                return
+            try:
+                raw = self._read_value()
+            except Exception:  # unreachable for now: anchored at the next save, as before
+                return
+            text = str(raw or "").strip()
+            if text:   # another process anchored meanwhile: its value is taken
+                if text.isdigit() and len(text) <= 18:
+                    with self._lock:
+                        self._known = max(self._known, int(text))
+                return
+            self._save_locked(path, revision)
+
+    @staticmethod
+    @contextmanager
+    def _process_lock(path: Any):
+        """The lock all processes take around the compare-and-write of this file's anchor: a lock file next to the
+        file (`<name>.anchor.lock`). Where it cannot be taken (no filelock, a read-only folder, a timeout) the step goes
+        on without it, as before."""
+        lock = None
+        try:
+            from filelock import FileLock
+            lock = FileLock(str(path) + ".anchor.lock", timeout=10)
+            lock.acquire()
+        except Exception as e:  # noqa: BLE001 - the anchor is a protection on top; never stop a save for it
+            logging.getLogger("SignedFiles").debug(f"No lock for the revision anchor ({type(e).__name__})")
+            lock = None
+        try:
+            yield
+        finally:
+            if lock is not None:
+                try:
+                    lock.release()
+                except Exception:  # noqa: BLE001
+                    pass
 
     def saved(self, path: Any, revision: int) -> None:
         """Records the revision just written to `path` (the file is replaced before the anchor moves, so another
-        process that reads in between sees a file newer than the anchor, never an older one)."""
+        process that reads in between sees a file newer than the anchor, never an older one). Under the anchor's
+        process lock the stored value is read first and the higher one written: the anchor never goes down."""
+        with self._process_lock(path):
+            self._save_locked(path, revision)
+
+    def _save_locked(self, path: Any, revision: int) -> None:
+        stored = 0
+        try:
+            text = str(self._read_value() or "").strip()
+            if text.isdigit() and len(text) <= 18:
+                stored = int(text)
+        except Exception:  # noqa: BLE001 - unreadable for now: what this process knows is written
+            pass
         with self._lock:
-            self._known = max(self._known, int(revision))
+            self._known = max(self._known, int(revision), stored)
             self._seen = self._identity(path)
             value = self._known
         try:

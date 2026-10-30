@@ -1,4 +1,4 @@
-Version 3.1.0 · Stand 2026-10-29
+Version 3.2.0 · Stand 2026-10-30
 
 [English](CONTRIBUTING.md) · **Deutsch**
 
@@ -758,7 +758,7 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   gelesen; seine alten Kopien gehen nur als angenommener Löschplan (`delete_old_copies`). Jeder Hub-API-Aufruf
   (Suche, Modellinfo, Dateiliste, Zugriffsprüfung) nutzt das `HfApi`, das `hf_hub.hub_api(token)` anlegt (nur
   huggingface.co, nie der Host in `HF_ENDPOINT`; nie ein implizites Token), und eine Dateiliste liest
-  `hf_hub.hub_file`. Das Token geht nur dorthin, wo Hugging Face eines braucht (Entscheidung Runde 25 Q2): frag
+  `hf_hub.hub_file`. Das Token geht nur dorthin, wo Hugging Face eines braucht: frag
   zuerst ohne und leg den Aufruf in `hf_hub.tokenless_first(call, token)` (das Token folgt einmal, nur nach einem
   401/403); eine Suche oder Liste trägt es nie; gib `HubFetcher` `token_needed=hf_hub.needs_token(info)` (ein
   gated oder privates Repository). Eine Bibliothek, die selbst vom Hub lädt (fastembed), bekommt ihre Dateien über
@@ -918,7 +918,7 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
 
 ### Nächste Schritte statt Befehlen
 
-Das Fenster sagt einer Person nie, dass sie einen Befehl tippen soll (DECISIONS Runde 9 U2). Eine Meldung sagt, was
+Das Fenster sagt einer Person nie, dass sie einen Befehl tippen soll. Eine Meldung sagt, was
 nicht stimmt; was zu tun ist, ist ein **nächster Schritt** des Katalogs in `orchestrator/utils/next_steps/`, nie ein
 Befehl oder ein von Hand geschriebener Menüpfad in einem Text:
 

@@ -1,4 +1,4 @@
-Version 3.1.0 · Last updated 2026-10-29
+Version 3.2.0 · Last updated 2026-10-30
 
 **English** · [Deutsch](README_DE.md)
 
@@ -143,27 +143,29 @@ The installer:
      must hold exactly that one key with the fingerprint Docker's install guide publishes
      (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`); apt then checks every package against the signed package
      lists.
-   - **Fedora, RHEL and CentOS Stream:** Docker's rpm repository, its key trusted only with the fingerprint Docker's
-     guide publishes (`060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35`); dnf checks the signature of every package.
-   - **Rocky Linux, AlmaLinux, Oracle Linux** and the other RHEL rebuilds: Docker CE as well, from Docker's RHEL
-     repository (`download.docker.com/linux/rhel/<RHEL version>`, the same key check), because the framework needs
-     BuildKit (for example for Hailo). Podman is only the fallback: when Docker publishes nothing for this
-     architecture or release, the repository cannot be reached or the key does not match, `podman-docker` (Podman
+   - **The RHEL family, one rule:** Fedora, RHEL and CentOS Stream get Docker CE from Docker's rpm repository for
+     their own system, Rocky Linux, AlmaLinux, Oracle Linux and the other RHEL rebuilds from Docker's RHEL repository
+     (`download.docker.com/linux/rhel/<RHEL version>`); the key is trusted only with the fingerprint Docker's guide
+     publishes (`060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35`) and dnf checks the signature of every package.
+     Docker CE is the standard because the framework needs BuildKit (for example for Hailo). Podman is only the
+     fallback: when Docker publishes nothing for this architecture or release, the repository cannot be reached, the
+     key does not match or you say no to what dnf would remove, `podman-docker` (Podman
      with the `docker` command) comes from the distribution's own sources. There is no `docker` group then; the
      installer switches on Podman's Docker-compatible socket for your user (`systemctl --user enable --now
      podman.socket`), and the framework finds it by itself (it sets `DOCKER_HOST` when no Docker daemon is there).
      What Podman cannot do is listed in [Features](docs/Features.md#podman-instead-of-docker); to switch later:
      `sudo dnf remove podman-docker`, then `sudo ./install.sh` again.
-   - **Packages dnf would remove (the rebuilds):** before it installs Docker CE on Rocky Linux, AlmaLinux, Oracle
-     Linux or another rebuild, dnf works out what it would have to remove or replace for it (`podman-docker`, and on
-     RHEL 8 rebuilds also `runc`, `podman`, `buildah`, ...) without changing anything. The installer names exactly
-     these packages and asks you; only a yes removes them (`dnf --allowerasing`, never without asking). A no, or no
-     terminal to answer on, removes nothing, and Podman comes as the fallback. Fedora, RHEL and CentOS Stream keep
-     their way: `dnf install -y` without `--allowerasing`; if dnf reports a conflict (for example with
-     `podman-docker`), the installer stops with the reason.
+   - **Packages dnf would remove (the whole RHEL family):** before it installs Docker CE, dnf works out what it would
+     have to remove or replace for it (`podman-docker`, and on RHEL 8 systems also `runc`, `podman`, `buildah`,
+     `containers-common`, ...) in a trial run that changes nothing. The installer names exactly these packages and
+     asks you; only a yes removes them (`dnf --allowerasing`, never without asking, and never a silent replacement
+     through a package's obsoletes). A no, or no terminal to answer on, removes nothing, and Podman comes as the
+     fallback. `./install.sh --dry-run` says which way it would take and why. Amazon Linux and the other systems
+     built on Fedora keep the distribution's own package (below).
    - Where Docker publishes no repository, the distribution's own package: `moby-engine` on other systems built on
-     Fedora; `docker` on Amazon Linux, on openSUSE and SLES (on SLES from the Containers Module, which the installer
-     switches on with `SUSEConnect`) and on Arch, Manjaro and EndeavourOS (with `docker-buildx`; the installer never
+     Fedora; `docker` on Amazon Linux, on openSUSE and SLES (on SLES from the Containers Module: when the package is
+     missing, the installer asks you before it switches the module on with `SUSEConnect`, as for the Python 3
+     Module; a no or an unregistered system stops with the step to take) and on Arch, Manjaro and EndeavourOS (with `docker-buildx`; the installer never
      runs `pacman -Sy`, a partial upgrade: if pacman cannot find a package, update the system with `sudo pacman -Syu`
      first).
    - **Alpine:** `docker` from Alpine's community repository (switched on in `/etc/apk/repositories` if needed). The
@@ -855,22 +857,25 @@ The knowledge-base, Deep Ingest and community settings are explained in [docs/Fe
 
 ## What comes next
 
-The roadmap lists what is planned; finished items move to the [CHANGELOG](CHANGELOG.md) at release. In short:
+The [roadmap](docs/ROADMAP.md) lists what is planned; finished items move to the [CHANGELOG](CHANGELOG.md). Version
+3.2.0 is in progress. In short:
 
-- **In progress:** the remaining sign-in methods per access type, browser sign-in and cloud platforms (API keys,
-  local engines and the `ant` profile work in the GUI and with `llm-cli ditto login`; the Claude-subscription
-  provider is removed, and Claude subscribers use MCP or an API key); a new
-  Ditto evaluation run with the improved prompts; the self-built llama.cpp runtime on the board (the command line
-  works; the GUI, the MCP tools and a run on a real board follow).
-- **Planned:** recipes as target templates, then right after them a rotation stage before quantization (SpinQuant,
-  QuaRot; only where the format supports it) and a generic ARM64 target for the Raspberry Pi; targets for NVIDIA GPUs
-  and AMD (Ryzen Z1 Extreme); later Llama-family models in every format, ONNX, Hailo, Intel and Qualcomm; LoRA and
-  large models, and supply-chain hardening. New targets start from the hardware probe, and a benchmark on the board
-  is the proof ("tested on <board>"). Builds in the cloud are not planned.
-- **Rust where the framework meets the network or a board:** the network MCP gateway with the MQTT broker rumqttd
-  inside it, and the board's root helper as a static binary; shipped prebuilt and signed (Sigstore, checksums in the
-  repository), building them yourself stays an opt-in. No prebuilt Docker images for targets, no Go, the GUI stays
-  Qt.
+- **Carried over from 3.1.0:** the remaining sign-in methods per access type (browser sign-in where the vendor allows
+  it, cloud platforms), the last pass over the German texts of every window, and the published community index.
+- **Ditto's context:** real token numbers per provider and model, one memory budget for Ditto's local server, the
+  real context window per model with compaction, cloud caching the provider's way, and Ditto's archive of what it
+  learned about llmcf and building (never the person's private talk).
+- **The board bundle:** a complete, hash-listed bundle as a third deploy way, an idempotent installer on the board,
+  the token-saving gateway `llmcf-gateway` in Rust, voice and vision as bundle components, and MCP on the board
+  (loopback first, the network only with TLS).
+- **Device runtime and more hardware:** recipes as target templates, a rotation stage before quantization, a generic
+  ARM64 target for the Raspberry Pi, targets from the hardware probe proven on the board, the self-built llama.cpp
+  with CUDA and on Windows, and targets for NVIDIA GPUs and the AMD Ryzen Z1 Extreme.
+- **Decided, waiting for its turn:** offline builds of the build container image, delegations, an own `llmcf`
+  account, board backups pulled by the PC, and the shared OpenSSH connection for a board step.
+
+After 3.2.0: the build service with one queue across all programs, LoRA and large models (3.3.0), supply-chain
+hardening (3.4.0), and Rust where the framework meets the network or a board. Builds in the cloud are not planned.
 
 Full list: [docs/ROADMAP.md](docs/ROADMAP.md).
 

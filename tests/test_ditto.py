@@ -943,7 +943,7 @@ class TestConfirmations:
 
         monkeypatch.setattr(cli.FrameworkContext, "require_framework", require)
         monkeypatch.setattr(cli, "_ditto_notice_once", lambda: None)
-        monkeypatch.setattr("orchestrator.Core.ditto_manager.pin_base_image", lambda definition, offline=False:
+        monkeypatch.setattr("orchestrator.Core.ditto_manager.pin_base_image", lambda definition, offline=False, **_:
                             definition)
 
         def run(generate, save=None, answer="n"):
@@ -967,7 +967,7 @@ class TestConfirmations:
         """The base image is the AI's value too: when it cannot be pinned (here in offline mode, whose message quotes
         it), the error line reaches the terminal without its control characters."""
         from orchestrator.Core import ditto_manager
-        monkeypatch.setattr("orchestrator.Core.ditto_manager.pin_base_image", lambda definition, offline=False:
+        monkeypatch.setattr("orchestrator.Core.ditto_manager.pin_base_image", lambda definition, offline=False, **_:
                             definition.model_copy(update={"base_os": ditto_manager.pin_reference(definition.base_os,
                                                                                                  offline=True)}))
         definition = ModuleDefinition(**{**MODULE,

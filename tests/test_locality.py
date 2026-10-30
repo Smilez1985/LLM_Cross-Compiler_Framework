@@ -289,10 +289,11 @@ def test_a_failed_lookup_is_asked_again_only_after_a_while(monkeypatch):
 
 def test_no_lookup_and_no_vpn_command_on_the_gui_thread(monkeypatch):
     locality.mark_ui_thread()
-    # the tailscale command never on the GUI thread; a worker may run it (round 26 h: a private address is checked
-    # against the tailnet's subnet routes there), here without the command installed
-    monkeypatch.setattr(locality.shutil, "which",
-                        lambda name: pytest.fail("tailscale on the GUI thread") if locality.on_ui_thread() else None)
+    # the tailscale command never runs on the GUI thread; a worker may run it (a private address is checked against
+    # the tailnet's subnet routes there), here without the command installed. Only the PATH is looked at there: with
+    # no tailscale CLI a private address is the own network at once.
+    monkeypatch.setattr(locality, "_run_cli", lambda argv: pytest.fail("tailscale ran on the GUI thread"))
+    monkeypatch.setattr(locality.shutil, "which", lambda name: None)
     verdict = check_host("nas.lan")
     assert not verdict.local and verdict.reason == "not_checked" and "not checked yet" in verdict.why()
     assert check_host("100.64.0.1").reason == "vpn"

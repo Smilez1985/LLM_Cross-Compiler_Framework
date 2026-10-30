@@ -1,4 +1,4 @@
-Version 3.1.0 · Stand 2026-10-29
+Version 3.2.0 · Stand 2026-10-30
 
 [English](README.md) · **Deutsch**
 
@@ -146,29 +146,30 @@ Der Installer:
      aufbaut). Die geladene Schlüsseldatei muss genau diesen einen Schlüssel mit dem Fingerabdruck aus Dockers
      Installationsanleitung enthalten (`9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88`); apt prüft danach jedes
      Paket gegen die signierten Paketlisten.
-   - **Fedora, RHEL und CentOS Stream:** Dockers rpm-Repository, dessen Schlüssel nur mit dem Fingerabdruck aus
-     Dockers Anleitung vertraut wird (`060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35`); dnf prüft die Signatur
-     jedes Pakets.
-   - **Rocky Linux, AlmaLinux, Oracle Linux** und die übrigen RHEL-Nachbauten: ebenfalls Docker CE, aus Dockers
-     RHEL-Repository (`download.docker.com/linux/rhel/<RHEL-Version>`, dieselbe Schlüsselprüfung), denn das
-     Framework braucht BuildKit (etwa für Hailo). Podman ist nur der Ersatzweg: Veröffentlicht Docker für diese
-     Architektur oder Version nichts, ist das Repository nicht erreichbar oder passt der Schlüssel nicht, kommt
+   - **Die RHEL-Familie, eine Regel:** Fedora, RHEL und CentOS Stream bekommen Docker CE aus Dockers
+     rpm-Repository für ihr eigenes System, Rocky Linux, AlmaLinux, Oracle Linux und die übrigen RHEL-Nachbauten aus
+     Dockers RHEL-Repository (`download.docker.com/linux/rhel/<RHEL-Version>`); dem Schlüssel wird nur mit dem
+     Fingerabdruck aus Dockers Anleitung vertraut (`060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35`), und dnf
+     prüft die Signatur jedes Pakets. Docker CE ist der Standard, denn das Framework braucht BuildKit (etwa für
+     Hailo). Podman ist nur der Ersatzweg: Veröffentlicht Docker für diese Architektur oder Version nichts, ist das
+     Repository nicht erreichbar, passt der Schlüssel nicht oder sagst du Nein zu dem, was dnf entfernen würde, kommt
      `podman-docker` (Podman mit dem Befehl `docker`) aus den Paketquellen der Distribution. Dann gibt es keine
      Gruppe `docker`; der Installer schaltet Podmans Docker-kompatible Schnittstelle für deinen Benutzer ein
      (`systemctl --user enable --now podman.socket`), und das Framework findet sie selbst (es setzt `DOCKER_HOST`,
      wenn kein Docker-Dienst da ist). Was unter Podman nicht geht, steht in
      [Funktionen](docs/Features_DE.md#podman-statt-docker); später wechseln: `sudo dnf remove podman-docker`, dann
      `sudo ./install.sh` erneut.
-   - **Pakete, die dnf entfernen würde (die Nachbauten):** Bevor er Docker CE unter Rocky Linux, AlmaLinux, Oracle
-     Linux oder einem anderen Nachbau installiert, lässt der Installer dnf ausrechnen, was es dafür entfernen oder
-     ersetzen müsste (`podman-docker`, unter Nachbauten von RHEL 8 auch `runc`, `podman`, `buildah`, ...), ohne etwas
-     zu verändern. Er nennt genau diese Pakete und fragt dich; nur ein Ja entfernt sie (`dnf --allowerasing`, nie
-     ungefragt). Ein Nein, oder kein Terminal für die Antwort, entfernt nichts, und Podman kommt als Ersatzweg.
-     Fedora, RHEL und CentOS Stream gehen ihren Weg wie bisher: `dnf install -y` ohne `--allowerasing`; meldet dnf
-     einen Konflikt (etwa mit `podman-docker`), hält der Installer mit dem Grund an.
+   - **Pakete, die dnf entfernen würde (die ganze RHEL-Familie):** Bevor er Docker CE installiert, lässt der
+     Installer dnf in einem Probelauf, der nichts verändert, ausrechnen, was es dafür entfernen oder ersetzen müsste
+     (`podman-docker`, unter RHEL 8 auch `runc`, `podman`, `buildah`, `containers-common`, ...). Er nennt genau diese
+     Pakete und fragt dich; nur ein Ja entfernt sie (`dnf --allowerasing`, nie ungefragt und nie ein stiller Ersatz
+     über die obsoletes eines Pakets). Ein Nein, oder kein Terminal für die Antwort, entfernt nichts, und Podman kommt
+     als Ersatzweg. `./install.sh --dry-run` sagt, welchen Weg er nähme und warum. Amazon Linux und die übrigen
+     Systeme, die auf Fedora aufbauen, behalten das Paket der Distribution (unten).
    - Wo Docker kein Repository veröffentlicht, das Paket der Distribution: `moby-engine` auf anderen Systemen, die
-     auf Fedora aufbauen; `docker` unter Amazon Linux, unter openSUSE und SLES (unter SLES aus dem Containers Module,
-     das der Installer mit `SUSEConnect` einschaltet) und unter Arch, Manjaro und EndeavourOS (mit `docker-buildx`;
+     auf Fedora aufbauen; `docker` unter Amazon Linux, unter openSUSE und SLES (unter SLES aus dem Containers Module:
+     Fehlt das Paket, fragt der Installer dich, bevor er das Modul mit `SUSEConnect` einschaltet, wie beim Python 3
+     Module; ein Nein oder ein nicht registriertes System hält mit dem Schritt an, den du selbst tun kannst) und unter Arch, Manjaro und EndeavourOS (mit `docker-buildx`;
      der Installer ruft nie `pacman -Sy` auf, ein Teil-Upgrade: Findet pacman ein Paket nicht, aktualisiere zuerst
      das System mit `sudo pacman -Syu`).
    - **Alpine:** `docker` aus Alpines Repository community (falls nötig in `/etc/apk/repositories` eingeschaltet).
@@ -906,21 +907,28 @@ Die Einstellungen zu Wissensbasis, Deep Ingest und Community erklärt [docs/Feat
 
 ## Wie es weitergeht
 
-Die Roadmap führt auf, was geplant ist; Erledigtes wandert beim Release in den [CHANGELOG](CHANGELOG_DE.md). Kurz:
+Die [Roadmap](docs/ROADMAP_DE.md) führt auf, was geplant ist; Erledigtes wandert in den [CHANGELOG](CHANGELOG_DE.md).
+Version 3.2.0 ist in Arbeit. Kurz:
 
-- **In Arbeit:** die übrigen Anmeldeverfahren je Zugangsart, Anmeldung im Browser und Cloud-Plattformen
-  (API-Schlüssel, lokale Engines und das `ant`-Profil funktionieren in der GUI und mit `llm-cli ditto login`; der
-  Claude-Abo-Anbieter ist entfernt, und Claude-Abonnenten nutzen MCP oder einen API-Schlüssel); eine neue Ditto-Evaluation mit den verbesserten Prompts; die selbst gebaute llama.cpp-Laufzeit auf dem
-  Board (die Kommandozeile funktioniert; die GUI, die MCP-Werkzeuge und ein Lauf auf einem echten Board folgen).
-- **Geplant:** Rezepte als Target-Vorlagen, direkt danach eine Rotationsstufe vor der Quantisierung (SpinQuant,
-  QuaRot; nur wo das Format sie unterstützt) und ein allgemeines ARM64-Target für den Raspberry Pi; Targets für
-  NVIDIA-GPUs und AMD (Ryzen Z1 Extreme); später Modelle der Llama-Familie in jedem Format, ONNX, Hailo, Intel und
-  Qualcomm; LoRA und große Modelle sowie eine gehärtete Lieferkette. Neue Targets beginnen mit der Hardware-Probe, und
-  ein Benchmark auf dem Board ist der Beweis („getestet auf <Board>“). Builds in der Cloud sind nicht geplant.
-- **Rust dort, wo das Framework auf das Netzwerk oder ein Board trifft:** das Netzwerk-Gateway für MCP mit dem
-  MQTT-Broker rumqttd darin und der Root-Helfer auf dem Board als statisches Programm; fertig gebaut und signiert
-  ausgeliefert (Sigstore, Prüfsummen im Repository), selbst bauen bleibt ein Opt-in. Keine fertigen Docker-Images für
-  Targets, kein Go, die GUI bleibt Qt.
+- **Aus 3.1.0 übernommen:** die übrigen Anmeldeverfahren je Zugangsart (Anmeldung im Browser, wo der Anbieter sie
+  erlaubt, Cloud-Plattformen), der letzte Durchgang durch die deutschen Texte jedes Fensters und der veröffentlichte
+  Community-Index.
+- **Dittos Kontext:** echte Token-Zahlen je Anbieter und Modell, ein Speicherbudget für Dittos lokalen Server, das
+  echte Kontextfenster je Modell mit Verdichtung, Cloud-Caching so, wie der Anbieter es vorsieht, und Dittos Archiv
+  dessen, was es über llmcf und das Bauen gelernt hat (nie die privaten Gespräche der Person).
+- **Das Board-Bündel:** ein vollständiges Bündel mit Hash-Liste als dritter Deploy-Weg, ein idempotenter Installer auf
+  dem Board, das Token sparende Gateway `llmcf-gateway` in Rust, Sprache und Bild als Bausteine des Bündels und MCP
+  auf dem Board (zuerst nur Loopback, ins Netz nur mit TLS).
+- **Laufzeit auf dem Gerät und mehr Hardware:** Rezepte als Target-Vorlagen, eine Rotationsstufe vor der
+  Quantisierung, ein allgemeines ARM64-Target für den Raspberry Pi, Targets aus der Hardware-Probe, auf dem Board
+  bewiesen, das selbst gebaute llama.cpp mit CUDA und unter Windows sowie Targets für NVIDIA-GPUs und den AMD Ryzen
+  Z1 Extreme.
+- **Entschieden, wartet auf seine Reihe:** Offline-Builds des Build-Container-Images, Vollmachten, ein eigenes Konto
+  `llmcf`, Board-Sicherungen, die der PC holt, und die geteilte OpenSSH-Verbindung für einen Board-Schritt.
+
+Nach 3.2.0: der Build-Dienst mit einer Warteschlange über alle Programme, LoRA und große Modelle (3.3.0), eine
+gehärtete Lieferkette (3.4.0) und Rust dort, wo das Framework auf das Netzwerk oder ein Board trifft. Builds in der
+Cloud sind nicht geplant.
 
 Vollständige Liste: [docs/ROADMAP_DE.md](docs/ROADMAP_DE.md).
 

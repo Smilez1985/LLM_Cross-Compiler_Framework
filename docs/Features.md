@@ -1,4 +1,4 @@
-Version 3.1.0 · Last updated 2026-10-29
+Version 3.2.0 · Last updated 2026-10-30
 
 **English** · [Deutsch](Features_DE.md)
 
@@ -286,15 +286,19 @@ the toolkits (in the image build).
 
 ### Podman instead of Docker
 
-Docker CE is the framework's container engine. On Rocky Linux, AlmaLinux and Oracle Linux `install.sh` falls back to
-Podman (`podman-docker` and your rootless `podman.socket`) only when Docker CE cannot be installed there or you keep
+Docker CE is the framework's container engine. In the whole RHEL family (Fedora, RHEL, CentOS Stream, Rocky Linux,
+AlmaLinux, Oracle Linux and the other rebuilds) `install.sh` falls back to Podman (`podman-docker` and your rootless `podman.socket`) only when Docker CE cannot be installed there or you keep
 the packages dnf would have to remove for it (see [Installation](../README.md#installation)). The framework then
 finds Podman by itself: when `DOCKER_HOST` is not set and no Docker daemon answers (neither the system's nor a
 rootless Docker's socket), it sets `DOCKER_HOST` to your Podman socket for its own process and the programs it starts
 (`orchestrator/utils/docker_engine.py`, one helper for the build engine, the builder image, Ditto's container, the
 Docker check and `scripts/build_container_image.sh`). A `DOCKER_HOST` you set always wins. `podman-docker` links
 Docker's socket names (`/run/docker.sock`, `$XDG_RUNTIME_DIR/docker.sock`) to Podman's sockets; such a name, or a
-socket where Podman answers, counts as Podman, not as a Docker daemon. `llm-cli mojo` names the engine in use.
+socket where Podman answers, counts as Podman, not as a Docker daemon. `llm-cli mojo` names the engine in use, and
+it warns, with the way out, when `DOCKER_HOST` still points at a Podman socket while a Docker daemon runs (a setting
+left from an earlier Podman session; your `DOCKER_HOST` still wins). Under rootless Docker (`docker info` lists
+`name=rootless`) uid 0 inside a container is you outside, so the framework's containers that would run as your uid
+run as `0:0` there; the sandbox's other limits stay.
 
 Checked with Podman 5.8.2 and buildah 1.43.1 on Rocky Linux 9.8 and against Podman's sources:
 
@@ -303,10 +307,10 @@ Checked with Podman 5.8.2 and buildah 1.43.1 on Rocky Linux 9.8 and against Podm
 | Works | The Docker API the framework uses (containers, images, logs, `docker save` for the security scan); image builds through Podman's builder (buildah) with build arguments, labels and target stages; `RUN --mount=type=bind` (read-only by default, as with BuildKit), multi-stage builds and heredocs (buildah 1.35 and later; Debian's and Ubuntu's buildah leave heredocs out); `scripts/build_container_image.sh` (it builds with `DOCKER_BUILDKIT=0`, so Docker's CLI never asks Podman for BuildKit); the framework's sandboxed containers, which run as your user: under rootless Podman they get Podman's user namespace mode `keep-id`, so your uid is the same inside as outside, they can write your folders, and what they write belongs to you (without it a container with your uid sees your folders as root's and stops with "Permission denied"; checked with Podman 5.8.9 rootless). |
 | Refused before it starts | A GPU build with an NVIDIA GPU: Podman's Docker-compatible interface takes only CDI device requests and drops Docker's GPU request (`--gpus`) without a word, so the build would run without the GPU. The build is refused with the reason; Ditto's container runs on the CPU and says why. |
 | Not there | BuildKit itself: Podman's `docker buildx` is buildah, without BuildKit's frontends (`# syntax=`), cache export or drivers. Images are built through Podman's API instead. Features that need BuildKit, such as the planned Hailo images, are refused under Podman with the reason (`podman_refusal`). |
-| Not tested | A complete target build and a Ditto container run under Podman end to end (the builder container's and the build stage's container settings were run against Podman 5.8.9 rootless); an AMD or Intel GPU passed through as `/dev/dri` under rootless Podman (the render group of the host is not mapped into the container). |
+| Not tested | A complete target build and a Ditto container run under Podman end to end (the builder container's and the build stage's container settings were run against Podman 5.8.9 rootless); an AMD or Intel GPU passed through as `/dev/dri` under rootless Podman on real hardware: the host's render group is not mapped into a rootless container, so such a container gets Podman's `--group-add keep-groups` (your own groups, as Podman documents it; it needs crun) instead of the numeric group. |
 
 To switch to Docker CE later: `sudo dnf remove podman-docker`, then `sudo ./install.sh` again; it installs Docker
-CE from Docker's RHEL repository and asks before dnf removes anything.
+CE from Docker's repository for your system and asks before dnf removes or replaces anything.
 
 ---
 
@@ -474,7 +478,16 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   `Include`, `Match` (also `Match exec`), forwardings and connection sharing, among others. A `ProxyJump` or a
   `ProxyCommand` is added only after you read what it does (it decides through which computer, or with which
   program, the connection runs) and say yes; "No" is the default for every question, and the change is written to
-  the audit log. A file edited by hand with a refused line stops every OpenSSH call with the reason (`local_problem`).
+  the audit log. Your yes is kept (the sha256 of the exact block, in `ssh_config.accepted.json` next to the file):
+  a `ProxyJump` or `ProxyCommand` changed by hand afterwards, or written before the framework kept the yes, is not
+  used; every OpenSSH call stops with what the line does and your way to accept it (enter the same lines again in
+  SSH settings... or with `deploy ssh-config edit` and say yes). Lines that would choose, load or hand out other
+  login keys (`IdentityFile`, `CertificateFile`, `IdentityAgent`, `AddKeysToAgent`) or pass an environment to the
+  board (`SetEnv`, `SendEnv`) are refused too; `LogLevel` stays allowed (it only changes what OpenSSH reports). A
+  board reached through a `ProxyJump` or `ProxyCommand` here always goes through OpenSSH, never paramiko (which
+  reads no settings file); where OpenSSH cannot do the step (no `ssh`, a one-time password, a step bound to the
+  fingerprint shown) it is refused in plain words. A file edited by hand with a refused line stops every OpenSSH call
+  with the reason (`local_problem`).
   No AI tool writes this file; paramiko reads no SSH settings file at all. A `%` in the framework's own paths (its
   key, its `known_hosts`) is written `%%` where OpenSSH expands tokens, so a state folder with `%` in its name works;
   on Windows the path is given with forward slashes (a space in it is quoted). Connection sharing (`ControlMaster`) stays off.
@@ -3132,7 +3145,9 @@ and leave this computer only as a local file you publish yourself.
   same two-phase path as `start_build` (the question shows the recipe, whether the installed target is the one the
   recipe was made with, its importance matrix and context length, the commit, download size, disk, hardware
   estimate, licence, gating and image build; the
-  same disk reservation and quotas). `dataset_path` only when the recipe names a calibration dataset, and then it
+  same disk reservation and quotas). `probe` names the board's hardware probe as for `start_build` (checked before
+  the question; omitted: the newest stored probe of a board of the recipe's SoC). `dataset_path` only when the
+  recipe names a calibration dataset, and then it
   must be exactly that file (sha256): the build copies the file into its own folder while it hashes it and uses only
   that copy, so a file swapped after the question is never used. A recipe changed in any field after the question is
   not built. "Yes, and do not ask again"

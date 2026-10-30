@@ -342,12 +342,12 @@ def fake_models(monkeypatch):
     import orchestrator.Core.rag_manager as rm
     seen = {}
 
-    def dense(spec, cache_dir, offline):
+    def dense(spec, cache_dir, offline, **_):
         seen.update(spec=spec.model_id, cache_dir=cache_dir, offline=offline())
         return HashedEmbedder()
 
     monkeypatch.setattr(rm, "create_dense_embedder", dense)
-    monkeypatch.setattr(rm, "create_sparse_embedder", lambda cache_dir, offline: TermSparse())
+    monkeypatch.setattr(rm, "create_sparse_embedder", lambda cache_dir, offline, **_: TermSparse())
     return seen
 
 
@@ -472,7 +472,7 @@ def test_cli_rerank_variant_reports_the_reranker(tmp_path, monkeypatch, fake_mod
     import orchestrator.Core.rag_manager as rm
 
     created = []
-    monkeypatch.setattr(rm, "create_reranker", lambda spec, cache_dir, offline: created.append(spec.model_id)
+    monkeypatch.setattr(rm, "create_reranker", lambda spec, cache_dir, offline, **_: created.append(spec.model_id)
                         or WordReranker())
     monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "state"))
     out = tmp_path / "report.json"

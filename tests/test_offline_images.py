@@ -217,3 +217,55 @@ class TestTheTargetImage:
         other = online_labels(engine, monkeypatch, tmp_path, config(build_id="b8", target_pack_sha256="e" * 64))
         assert first == again, "the build id is no input of the image"
         assert other[INPUTS_LABEL] != first, "another target folder: another image"
+
+
+class TestTheCopiedFilesAreInputs:
+    """The image inputs label also covers every file the build context copies into the image (modules/, scripts/,
+    docker/), by path and content: an offline build never reuses an image built from older copies."""
+
+    def _labels(self, engine, monkeypatch, tmp_path, files):
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        path = dockerfile(tmp_path)
+        for rel, text in files.items():
+            target = path.parent / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text)
+        return online_labels_at(engine, monkeypatch, path)[INPUTS_LABEL]
+
+    def test_a_changed_module_is_another_image(self, engine, monkeypatch, tmp_path):
+        base = {"modules/convert_module.sh": "echo v1\n", "scripts/model_check.py": "x = 1\n",
+                "docker/entrypoint.sh": "exec \"$@\"\n"}
+        first = self._labels(engine, monkeypatch, tmp_path / "a", base)
+        same = self._labels(engine, monkeypatch, tmp_path / "b", base)
+        changed = self._labels(engine, monkeypatch, tmp_path / "c", dict(base, **{"modules/convert_module.sh": "v2"}))
+        script = self._labels(engine, monkeypatch, tmp_path / "d", dict(base, **{"scripts/model_check.py": "x=2"}))
+        moved = self._labels(engine, monkeypatch, tmp_path / "e",
+                             {("modules/other.sh" if k.startswith("modules") else k): v for k, v in base.items()})
+        entry = self._labels(engine, monkeypatch, tmp_path / "f", dict(base, **{"docker/entrypoint.sh": "x"}))
+        assert first == same, "the same copies: the same image"
+        assert len({first, changed, script, moved, entry}) == 5, "every copied file counts by path and content"
+
+    def test_an_image_without_the_new_label_is_not_reused_and_the_stop_says_so(self, engine, tmp_path, monkeypatch):
+        engine.config.set("offline_mode", True)
+        docker = Docker()
+        old = config()   # the label as the earlier version computed it: no copied files in it
+        import hashlib
+        import json
+        data = {"target": "Rockchip", "pack": old.target_pack_sha256,
+                "dockerfile": hashlib.sha256(dockerfile(tmp_path).read_text().encode()).hexdigest(), "args": []}
+        docker.image({IMAGE_LABEL: "Rockchip",
+                      INPUTS_LABEL: hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()})
+        monkeypatch.setattr(engine, "docker_client", docker)
+        with pytest.raises(OfflineImageMissing) as stopped:
+            engine._build_docker_image(config(), BuildProgress("b1", BuildStatus.QUEUED, ""), dockerfile(tmp_path))
+        assert "is not reused" in str(stopped.value) and "modules and scripts" in str(stopped.value)
+
+
+def online_labels_at(engine, monkeypatch, path):
+    seen = {}
+    monkeypatch.setattr(engine, "_buildkit_available", lambda: True)
+    monkeypatch.setattr(engine, "_build_with_buildkit",
+                        lambda tag, p, args, progress, labels=None: seen.update(labels or {}))
+    monkeypatch.setattr(engine, "docker_client", SimpleNamespace(images=SimpleNamespace(get=lambda t: t)))
+    engine._build_docker_image(config(build_id="b0"), BuildProgress("b0", BuildStatus.QUEUED, ""), path)
+    return seen

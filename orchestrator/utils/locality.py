@@ -506,7 +506,7 @@ def _judge(host: str, addresses: Sequence[str], optouts: OptOuts, vpn: Callable[
             asked.append(vpn())
         return asked[0]
 
-    found, public, vpn_outside, vpn_check = set(), [], [], None
+    found, public, vpn_outside, vpn_check, undecided = set(), [], [], None, []
     for text in addresses:
         ip = parse_address(text)
         kind = address_kind(ip) if ip is not None else "invalid"
@@ -514,7 +514,10 @@ def _judge(host: str, addresses: Sequence[str], optouts: OptOuts, vpn: Callable[
             found.add("this_computer")
         elif ip is not None and optouts.covers_address(ip):
             found.add("opt_out_range")
-        elif kind == "vpn" or (kind in ("private", "link_local") and _in_networks(ip, tailnet().routes)):
+        elif kind in ("private", "link_local") and tailnet().pending:
+            undecided.append(text)   # the VPN check has not run yet: a peer's subnet route may cover it
+        elif kind == "vpn" or (kind in ("private", "link_local") and _in_networks(ip, tailnet().routes)) or \
+                (kind == "private" and tailnet().lan_via_exit):
             routed = kind != "vpn"          # (h) a private address reached through a peer's subnet route
             if any(routed or _in_networks(ip, VPNS.get(vid, ())) for vid in optouts.vpns):
                 found.add("opt_out_vpn")
@@ -530,6 +533,8 @@ def _judge(host: str, addresses: Sequence[str], optouts: OptOuts, vpn: Callable[
         else:
             public.append(text)
     outside = tuple(public + vpn_outside)
+    if undecided and not found & {"this_computer", "opt_out_range"}:
+        return Locality(host, False, "not_checked", addresses)
     if found:   # (round 26 Q4) local by its local addresses: the reason that needed the most; `outside` never used
         reason = next(r for r in ("opt_out_vpn", "opt_out_range", "own_vpn", "own_network", "this_computer")
                       if r in found)
@@ -594,7 +599,8 @@ def label(url: Any, config: Any = None) -> Optional[bool]:
         return False
     if needs_lookup(host):
         return None
-    return check_host(host, config, resolver=lambda name: cached(name) or ()).local
+    found = check_host(host, config, resolver=lambda name: cached(name) or ())
+    return None if found.reason == "not_checked" else found.local
 
 
 def needs_lookup(url: Any) -> bool:
@@ -702,6 +708,12 @@ class VpnCheck:
     detail: str = ""
     members: FrozenSet[str] = field(default=frozenset(), compare=False)
     routes: Tuple[IPNetwork, ...] = field(default=(), compare=False)
+    # This node uses an exit node without LAN access (prefs ExitNodeID/ExitNodeIP set, ExitNodeAllowLANAccess
+    # false): private addresses of the local network go through the tailnet too, so they follow the VPN rule.
+    lan_via_exit: bool = field(default=False, compare=False)
+    # The check could not run yet (the GUI thread never runs the CLI, and none is cached): a private address that
+    # may lie in a peer's subnet route is not decided until it ran ("not checked yet", never "own network").
+    pending: bool = field(default=False, compare=False)
 
     def why(self, lang: str = "en") -> str:
         from orchestrator.utils.localization import ui_text
@@ -792,7 +804,10 @@ def tailscale_vpn(run: Optional[CliRunner] = None, resolver: Optional[Resolver] 
         if known is not None:
             return known
         if on_ui_thread():
-            return VpnCheck(False, "not_checked")
+            # Without the tailscale CLI there is nothing to wait for; with it the answer is not known yet.
+            if not shutil.which("tailscale"):
+                return VpnCheck(False, "no_cli")
+            return VpnCheck(False, "not_checked", pending=True)
     result = _check_tailscale(run, resolver, which or shutil.which)
     if use_cache:
         with _lock:
@@ -819,7 +834,15 @@ def _check_tailscale(run: Optional[CliRunner], resolver: Optional[Resolver],
     running, members, routes = tailnet
     if not running:     # not connected: no peer is reached through it, and its routes are not in use
         return VpnCheck(False, "not_running")
-    net = {"members": members, "routes": routes}
+    # ipn.Prefs (tailscale debug prefs; the Go field names are its JSON keys): RouteAll, whether this node accepts the
+    # subnet routes its peers advertise (without it they are not in use here); ExitNodeID / ExitNodeIP, the exit node
+    # in use; ExitNodeAllowLANAccess, whether the local network is still reached directly while one is in use.
+    if prefs.get("RouteAll") is not True:
+        routes = ()
+    exit_node = bool(str(prefs.get("ExitNodeID") or "").strip()) or \
+        str(prefs.get("ExitNodeIP") or "").strip() not in ("", "invalid IP")
+    net = {"members": members, "routes": routes,
+           "lan_via_exit": exit_node and prefs.get("ExitNodeAllowLANAccess") is not True}
     control = url_host(control_url)[0] if control_url else TAILSCALE_CONTROL_HOSTS[0]
     if control in TAILSCALE_CONTROL_HOSTS or control.endswith(TAILSCALE_DOMAIN):
         return VpnCheck(False, "tailscale_control", control, **net)

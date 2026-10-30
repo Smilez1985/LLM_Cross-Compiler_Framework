@@ -598,7 +598,7 @@ def _make_docker(rt: Any, det: Detection, placement: str, backend: str, jobs: Op
                                    "auto")
         if build is not None:
             say(f"Repackaging the bare-metal build {build.build_id[:16]} ({build.backend}) on {base.id}: {why} ...")
-            image = cs.build_runtime_image(docker, build, base, "repackaged", log_file)
+            image = cs.build_runtime_image(docker, build, base, "repackaged", log_file, offline=_offline(rt))
             gpu = cs.gpu_passthrough(docker, hardware, build.backend)
             report = cs.verify_image(docker, image, pin, gpu)
             if report.ok:
@@ -612,6 +612,12 @@ def _make_docker(rt: Any, det: Detection, placement: str, backend: str, jobs: Op
         else:
             lines.append(f"Repackaging is not possible ({why}), so llama-server is built in the builder container.")
     return _rebuild_for_docker(rt, backend, jobs, lines, say, fetch_source, cancelled, docker, hardware, log_file)
+
+
+def _offline(rt: Any) -> bool:
+    """The runtime's offline mode by the framework's one offline check (utils/locality.offline_mode)."""
+    from orchestrator.utils.locality import offline_mode
+    return offline_mode(getattr(rt, "settings", None))
 
 
 def container_verifier(runner: Any) -> Any:
@@ -654,7 +660,7 @@ def _rebuild_for_docker(rt: Any, backend: str, jobs: Optional[int], lines: List[
         raise RuntimeModeError("cancelled; nothing was built")
     gpu = cs.gpu_passthrough(docker, hardware, chosen.backend)
     say(f"Building the runtime base of Ditto's image on {base.id} ...")
-    runtime_base = cs.build_runtime_base(docker, base, chosen.backend, log_file)
+    runtime_base = cs.build_runtime_base(docker, base, chosen.backend, log_file, offline=_offline(rt))
     # A build of this plan that is stored already (also one checked only in the container) is reused: no source.
     source = rt.pinned_source(rt.store.find(chosen.plan) is None, fetch_source=fetch_source, log=say)
     say(f"Building the {chosen.backend} build {chosen.plan.build_id[:16]} in the builder container ...")
@@ -670,7 +676,7 @@ def _rebuild_for_docker(rt: Any, backend: str, jobs: Optional[int], lines: List[
     if cancelled is not None and cancelled():
         raise RuntimeModeError("cancelled; the build is kept in the build store, no image was made")
     say(f"Putting the build into Ditto's image on {base.id} ...")
-    image = cs.build_runtime_image(docker, stored, base, "rebuilt", log_file)
+    image = cs.build_runtime_image(docker, stored, base, "rebuilt", log_file, offline=_offline(rt))
     report = cs.verify_image(docker, image, pin, gpu)
     if not report.ok:
         raise RuntimeModeError(f"Ditto's image {image.name} did not pass its check in a container: {report.summary()}. "

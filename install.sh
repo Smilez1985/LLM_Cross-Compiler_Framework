@@ -73,8 +73,8 @@ DEBIAN_VERSION_FILE="/etc/debian_version"
 # 2026-10-23 nachgeprüft: download.docker.com/linux/{fedora,rhel,centos}/gpg ist genau dieser eine Schlüssel
 # (Docker Release (CE rpm), rsa4096, 2017-02-22). Rocky Linux, AlmaLinux, Oracle Linux und die übrigen
 # RHEL-Abkömmlinge bekommen Docker CE aus Dockers RHEL-Repository mit demselben Schlüssel (das Framework braucht
-# BuildKit, etwa für Hailo); Podman ist dort nur der Ersatzweg (docker_rhel_rebuild_plan). Amazon Linux bringt ein
-# eigenes Docker-Paket.
+# BuildKit, etwa für Hailo). In der ganzen RHEL-Familie ist Podman nur der Ersatzweg (rhel_family). Amazon Linux bringt
+# ein eigenes Docker-Paket.
 DOCKER_RPM_KEY_FINGERPRINT="060A61C51B558A7F742B77AAC52FEB6B621E9F35"
 # Die Architekturen, für die Docker in seinem RHEL-Repository Pakete veröffentlicht (download.docker.com/linux/rhel/8,
 # 9 und 10, am 2026-10-23 nachgesehen: je x86_64, aarch64 und s390x). Auf einer anderen gibt es dort nichts zu laden.
@@ -620,7 +620,8 @@ check_docker_key() {
 #   distro    das Docker-Paket der Distribution: Fedora-Abkömmlinge moby-engine, Amazon Linux docker, openSUSE und
 #             SLES docker (SLES: aus dem Containers Module), Arch und Abkömmlinge docker, Alpine docker (community)
 #   podman    Podman mit dem Befehl docker (podman-docker) aus den Paketquellen der Distribution: nur der Ersatzweg der
-#             RHEL-Abkömmlinge, wenn Docker CE dort nicht geht (DOCKER_PODMAN_WHY sagt, warum)
+#             RHEL-Familie (Fedora, RHEL, CentOS Stream und die RHEL-Abkömmlinge), wenn Docker CE dort nicht geht
+#             (DOCKER_PODMAN_WHY sagt, warum)
 # dazu DOCKER_REPO (Name in Dockers URL), DOCKER_RPM_RELEASE (die RHEL-Version in Dockers URL; leer: $releasever des
 # Systems), DOCKER_PACKAGES, DOCKER_OPTIONAL (darf fehlen; ohne buildx baut das Framework mit dem älteren Builder),
 # DOCKER_SERVICE (der Dienst, den der Installer startet) und DOCKER_FALLBACK (podman: geht Docker CE nicht, kommt
@@ -641,7 +642,10 @@ docker_plan() {
             DOCKER_SERVICE=docker
             case "$OS_ID" in
                 fedora|rhel|centos)
-                    DOCKER_ROUTE=rpm-repo DOCKER_REPO="$OS_ID"
+                    # Dieselbe Regel wie für die RHEL-Abkömmlinge (eine Regel für die ganze RHEL-Familie): Docker CE
+                    # aus Dockers Repository für dieses System, die Frage nach dem, was dnf dafür entfernen müsste, und
+                    # Podman als Ersatzweg.
+                    DOCKER_ROUTE=rpm-repo DOCKER_REPO="$OS_ID" DOCKER_FALLBACK=podman
                     DOCKER_PACKAGES=("${DOCKER_CE_PACKAGES[@]}") ;;
                 amzn) DOCKER_ROUTE=distro DOCKER_PACKAGES=(docker) ;;
                 *)
@@ -659,12 +663,20 @@ docker_plan() {
 }
 
 # Ein Abkömmling von RHEL (Rocky Linux, AlmaLinux, Oracle Linux, ...): dnf, weder Fedora, RHEL, CentOS Stream noch
-# Amazon Linux und kein System, das auf Fedora aufbaut. Nur für sie gilt DECISIONS Runde 26 Q1 (Docker CE aus Dockers
-# RHEL-Repository, die Frage nach dem, was dnf dafür entfernen müsste, und Podman als Ersatzweg).
+# Amazon Linux und kein System, das auf Fedora aufbaut. Sie bekommen Docker CE aus Dockers RHEL-Repository.
 rhel_rebuild() {
     [ "$PKG" = "dnf" ] || return 1
     case "$OS_ID" in fedora|rhel|centos|amzn) return 1 ;; esac
     [ "$OS_FAMILY" != "fedora" ]
+}
+
+# Die RHEL-Familie mit einer Install-Regel: Fedora, RHEL, CentOS Stream und die RHEL-Abkömmlinge. Docker CE aus Dockers
+# Repository mit dem geprüften Schlüssel, die genaue Liste dessen, was dnf dafür entfernen oder ersetzen müsste, vor
+# einer Frage, und Podman als Ersatzweg. Amazon Linux und die Systeme, die auf Fedora aufbauen, gehen ihren eigenen Weg.
+rhel_family() {
+    [ "$PKG" = "dnf" ] || return 1
+    case "$OS_ID" in fedora|rhel|centos) return 0 ;; esac
+    rhel_rebuild
 }
 
 # Die Hauptversion von RHEL, auf der dieses System aufbaut: aus PLATFORM_ID ("platform:el9"), sonst aus VERSION_ID
@@ -681,7 +693,7 @@ podman_route() {
     DOCKER_ROUTE=podman DOCKER_PACKAGES=(podman-docker) DOCKER_OPTIONAL=() DOCKER_SERVICE="" DOCKER_PODMAN_WHY="$1"
 }
 
-# Rocky Linux, AlmaLinux, Oracle Linux und die übrigen RHEL-Abkömmlinge (DECISIONS Runde 26 Q1): Standard ist Docker CE
+# Rocky Linux, AlmaLinux, Oracle Linux und die übrigen RHEL-Abkömmlinge (die Regel der RHEL-Familie): Standard ist Docker CE
 # aus Dockers RHEL-Repository (download.docker.com/linux/rhel/<RHEL-Version>), sein Schlüssel geprüft wie unter Fedora,
 # RHEL und CentOS, denn das Framework braucht BuildKit (etwa für Hailo). Podman ist der Ersatzweg: gleich hier, wenn
 # Docker für diese Architektur nichts veröffentlicht oder die RHEL-Version nicht feststeht; sonst während der
@@ -846,17 +858,14 @@ docker_rpm_write_repo() {
 # Docker Engine aus Dockers rpm-Repository (Fedora, RHEL, CentOS Stream je aus ihrem eigenen, die übrigen
 # RHEL-Abkömmlinge aus dem für RHEL), wie Dockers Anleitung, aber ohne fremden Schlüssel: Der Signaturschlüssel wird
 # gegen DOCKER_RPM_KEY_FINGERPRINT geprüft und erst dann mit rpm übernommen; das Repository nennt nur diese geprüfte
-# Datei (gpgkey=file://), und dnf prüft die Signatur jedes Pakets (gpgcheck=1). Die RHEL-Abkömmlinge fragen vorher, was
-# dnf dafür entfernen müsste (docker_rpm_asked); geht Docker CE dort nicht, gibt die Funktion 1 zurück (Ersatzweg
-# Podman). Fedora, RHEL und CentOS Stream gehen ihren Weg wie bisher (docker_rpm_as_before) und halten sonst an.
+# Datei (gpgkey=file://), und dnf prüft die Signatur jedes Pakets (gpgcheck=1). Die ganze RHEL-Familie fragt vorher, was
+# dnf dafür entfernen müsste (docker_rpm_asked); geht Docker CE nicht, gibt die Funktion 1 zurück (Ersatzweg Podman).
 install_docker_rpm() {
     local tools=()
     if ! command -v dnf &> /dev/null; then docker_stop "dnf fehlt auf diesem System."; fi
     docker_rpm_repo_check
     log_info "Quelle: $DOCKER_DOWNLOAD_URL/$DOCKER_REPO. Ihr Schlüssel muss den Fingerabdruck $DOCKER_RPM_KEY_FINGERPRINT haben (Dockers Installationsanleitung)."
-    if [ "$DOCKER_FALLBACK" = "podman" ]; then
-        log_info "Docker CE ist hier der Standard: Das Framework braucht BuildKit (etwa für Hailo). Geht es nicht, kommt Podman als Ersatzweg."
-    fi
+    log_info "Docker CE ist hier der Standard: Das Framework braucht BuildKit (etwa für Hailo). Geht es nicht, kommt Podman als Ersatzweg."
     # Nur, was fehlt: Fedora und RHEL bringen oft curl-minimal mit, das mit dem Paket curl streitet.
     command -v curl &> /dev/null || tools+=(curl)
     command -v gpg &> /dev/null || tools+=(gnupg2)
@@ -864,42 +873,16 @@ install_docker_rpm() {
         docker_ce_fail "Die Werkzeuge für die Schlüsselprüfung (${tools[*]}) ließen sich nicht installieren (Meldungen oben)."
         return 1
     fi
-    if [ "$DOCKER_FALLBACK" = "podman" ]; then
-        docker_rpm_asked || return 1
-    else
-        docker_rpm_as_before
-    fi
+    docker_rpm_asked || return 1
     docker_service_start
     if ! command -v docker &> /dev/null; then docker_stop "Nach der Installation gibt es den Befehl docker nicht."; fi
     log_success "Docker ist installiert (aus $DOCKER_DOWNLOAD_URL/$DOCKER_REPO, Schlüssel und Pakete geprüft)."
 }
 
-# Fedora, RHEL und CentOS Stream, genau wie vor DECISIONS Runde 26 (die Frage nach dem, was dnf entfernen müsste, und
-# der Ersatzweg Podman sind nur für die RHEL-Abkömmlinge entschieden): Schlüssel prüfen, rpm vertraut ihm, das
-# Repository, dann 'dnf install -y' ohne --allowerasing. Einen Konflikt meldet dnf selbst, und der Installer hält an.
-docker_rpm_as_before() {
-    local created=0 undone=""
-    check_docker_key "$DOCKER_REPO" "$DOCKER_RPM_KEYRING" "$DOCKER_RPM_KEY_FINGERPRINT"
-    # rpm vertraut dem geprüften Schlüssel, bevor dnf ein Paket lädt: dnf holt dann keinen Schlüssel selbst.
-    if ! rpm --import "$DOCKER_RPM_KEYRING"; then
-        docker_stop "rpm konnte den geprüften Schlüssel $DOCKER_RPM_KEYRING nicht übernehmen (Meldungen oben)."
-    fi
-    if docker_rpm_repo_exists; then
-        log_info "Ein dnf-Repository für download.docker.com gibt es schon in $(dirname "$DOCKER_RPM_REPO"); es bleibt, wie es ist."
-    else
-        if ! docker_rpm_write_repo; then docker_stop "$DOCKER_RPM_REPO ließ sich nicht schreiben."; fi
-        created=1
-    fi
-    if ! dnf install -y "${DOCKER_PACKAGES[@]}"; then
-        # Das eben angelegte Repository wieder entfernen: Ein unerreichbares hielte sonst jeden dnf-Aufruf an.
-        if [ "$created" = "1" ]; then rm -f -- "$DOCKER_RPM_REPO"; undone="; $DOCKER_RPM_REPO ist wieder entfernt"; fi
-        docker_stop "$DOCKER_RPM_INSTALL_FAILED$undone."
-    fi
-}
-
-# Die RHEL-Abkömmlinge (DECISIONS Runde 26 Q1). Bevor rpm dem Schlüssel vertraut, rechnet dnf aus, was es für Docker CE
-# entfernen müsste (docker_rpm_transaction): Das nennt der Installer genau und fragt die Person; nie --allowerasing
-# ungefragt. Geht Docker CE nicht (kein Paket, Repository nicht erreichbar, Schlüssel passt nicht, ein Nein, dnf
+# Die RHEL-Familie (Fedora, RHEL, CentOS Stream und die RHEL-Abkömmlinge). Bevor rpm dem Schlüssel vertraut, rechnet
+# dnf aus, was es für Docker CE entfernen oder ersetzen müsste (docker_rpm_transaction, der einzige Aufruf mit
+# --allowerasing, und nur als Probelauf mit --assumeno): Das nennt der Installer genau und fragt die Person; nie
+# --allowerasing ungefragt, nie ein stiller Ersatz über obsoletes. Geht Docker CE nicht (kein Paket, Repository nicht erreichbar, Schlüssel passt nicht, ein Nein, dnf
 # scheitert), nimmt sie zurück, was sie angelegt hat, merkt sich den Grund (docker_ce_fail) und gibt 1 zurück.
 docker_rpm_asked() {
     local rc=0 allow=() repo_created=0 key_created=0
@@ -984,16 +967,35 @@ apk_enable_community() {
     return 1
 }
 
-# SLES 15: Docker kommt aus dem Containers Module, SUSEs eigener Quelle (mit SUSEs Schlüssel signiert). Schaltet es
-# ein, wenn das System dafür registriert ist; 1, wenn das hier nicht geht.
+# SLES 15: Docker kommt aus dem Containers Module, SUSEs eigener Quelle (mit SUSEs Schlüssel signiert). Wie beim Python
+# 3 Module (sles_python_module) fragt der Installer die Person, bevor er es einschaltet: 0, wenn es eben eingeschaltet
+# wurde (ein zweiter Versuch lohnt), 1, wenn es hier nicht passt (kein SLES, kein SUSEConnect, das Modul ist schon
+# eingeschaltet). Ein nicht registriertes System, ein Nein oder ein Fehler von SUSEConnect hält mit dem Schritt an, den
+# die Person selbst tun kann. Die Ausgabe von 'SUSEConnect --status' (mit dem Registrierungscode) wird nur gelesen.
+sles_containers_module_product() {
+    echo "sle-module-containers/${OS_VERSION_ID:-15}/$(uname -m)"
+}
+
 sles_containers_module() {
-    local product
-    case "$OS_ID" in sles|sled) ;; *) return 1 ;; esac
-    case "$OS_VERSION_ID" in 15|15.*) ;; *) return 1 ;; esac
+    local product status
+    sles_system || return 1
     command -v SUSEConnect &> /dev/null || return 1
-    product="sle-module-containers/$OS_VERSION_ID/$(uname -m)"
-    log_info "Docker kommt unter SLES aus dem Containers Module; der Installer schaltet es ein: SUSEConnect -p $product"
-    SUSEConnect -p "$product"
+    product="$(sles_containers_module_product)"
+    status="$(SUSEConnect --status 2> /dev/null)" || status=""
+    status="${status//[[:space:]]/}"
+    if grep -q -E '"identifier":"sle-module-containers"[^}]*"status":"Registered"' <<< "$status"; then return 1; fi
+    if ! grep -q -E '"identifier":"(SLES|SLED)"[^}]*"status":"Registered"' <<< "$status"; then
+        docker_stop "Docker kommt unter SLES aus SUSEs Containers Module ($product), und ein Modul lässt sich nur auf einem registrierten System einschalten; dieses SLES ist nicht registriert. Registriere es (sudo SUSEConnect -r <dein Registrierungscode>), schalte das Modul ein (sudo SUSEConnect -p $product) und starte danach 'sudo ./install.sh' erneut."
+    fi
+    log_warn "Docker kommt unter SLES aus SUSEs Containers Module, das hier nicht eingeschaltet ist."
+    if ! ask_person "SUSEs Containers Module einschalten (SUSEConnect -p $product)?"; then
+        docker_stop "Ohne SUSEs Containers Module gibt es hier kein Docker-Paket; nichts wurde verändert. Selbst einschalten: sudo SUSEConnect -p $product, danach 'sudo ./install.sh' erneut."
+    fi
+    log_info "Schalte SUSEs Containers Module ein: SUSEConnect -p $product"
+    if ! SUSEConnect -p "$product"; then
+        docker_stop "SUSEConnect konnte das Containers Module ($product) nicht einschalten (Meldungen oben). Selbst: sudo SUSEConnect -p $product, danach 'sudo ./install.sh' erneut."
+    fi
+    return 0
 }
 
 # Startet DOCKER_SERVICE und schaltet ihn für jeden Start ein (systemd, unter Alpine OpenRC). Gelingt das nicht (etwa
@@ -1039,8 +1041,8 @@ install_docker_distro() {
     fi
 }
 
-# Docker über die Paketverwaltung dieses Systems (docker_plan), nie mit einem heruntergeladenen Skript. Unter den
-# RHEL-Abkömmlingen kommt Podman, wenn Docker CE nicht geht (install_podman_fallback).
+# Docker über die Paketverwaltung dieses Systems (docker_plan), nie mit einem heruntergeladenen Skript. In der
+# RHEL-Familie kommt Podman, wenn Docker CE nicht geht (install_podman_fallback).
 install_docker() {
     detect_system
     docker_plan
@@ -1052,7 +1054,7 @@ install_docker() {
     esac
 }
 
-# Der Ersatzweg der RHEL-Abkömmlinge: Podman aus den Paketquellen der Distribution (podman-docker: der Befehl docker ruft
+# Der Ersatzweg der RHEL-Familie: Podman aus den Paketquellen der Distribution (podman-docker: der Befehl docker ruft
 # Podman auf), mit dem Grund, warum Docker CE nicht installiert wurde, was unter Podman nicht geht und dem Weg zu
 # Docker CE.
 install_podman_fallback() {
@@ -1132,8 +1134,8 @@ docker_group() {
     # hat) und ist es Podman: derselbe Weg wie nach der Installation von podman-docker, ohne Gruppe docker.
     if [ -z "$DOCKER_ROUTE" ] && docker_is_podman; then
         DOCKER_ROUTE=podman
-        # Unter den RHEL-Abkömmlingen, wo Podman nur der Ersatzweg für Docker CE ist, sagt der Installer, wie man wechselt.
-        if rhel_rebuild; then
+        # In der RHEL-Familie, wo Podman nur der Ersatzweg für Docker CE ist, sagt der Installer, wie man wechselt.
+        if rhel_family; then
             log_info "Der Befehl docker ist hier Podman. Standard ist Docker CE: Das Framework braucht BuildKit (etwa für Hailo) und lehnt unter Podman ab, was das braucht. Wechseln: 'sudo dnf remove podman-docker', dann 'sudo ./install.sh' erneut (der Installer nennt, was dnf dafür sonst noch entfernen müsste, und fragt dich)."
         fi
     fi
@@ -1532,7 +1534,10 @@ plan_docker() {
             echo "   Docker: fehlt -> Podman (der Ersatzweg), denn Docker CE geht hier nicht: $DOCKER_PODMAN_WHY Stattdessen: ${PKG_ARGV[*]} ${DOCKER_PACKAGES[*]} (Podman mit dem Befehl docker); Podmans Docker-kompatible Schnittstelle für deinen Benutzer (systemctl --user enable --now podman.socket)" ;;
         *)
             echo "   Docker: fehlt -> aus den Paketquellen der Distribution: ${PKG_ARGV[*]} ${DOCKER_PACKAGES[*]}$optional$service"
-            if [ "$PKG" = "apk" ]; then echo "     aus Alpines Repository community (wird in $APK_REPOSITORIES eingeschaltet, falls nötig)"; fi ;;
+            if [ "$PKG" = "apk" ]; then echo "     aus Alpines Repository community (wird in $APK_REPOSITORIES eingeschaltet, falls nötig)"; fi
+            if sles_system; then
+                echo "     unter SLES liegt Docker in SUSEs Containers Module: Gibt es das Paket nicht, fragt der Installer, ob er das Modul einschaltet (SUSEConnect -p $(sles_containers_module_product); nur auf einem registrierten System)"
+            fi ;;
     esac
 }
 

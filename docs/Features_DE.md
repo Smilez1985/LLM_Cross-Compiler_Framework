@@ -1,4 +1,4 @@
-Version 3.1.0 · Stand 2026-10-29
+Version 3.2.0 · Stand 2026-10-30
 
 [English](Features.md) · **Deutsch**
 
@@ -305,8 +305,8 @@ die Toolkits (beim Image-Build).
 
 ### Podman statt Docker
 
-Die Container-Engine des Frameworks ist Docker CE. Unter Rocky Linux, AlmaLinux und Oracle Linux greift `install.sh`
-nur dann auf Podman zurück (`podman-docker` und dein rootless `podman.socket`), wenn Docker CE dort nicht geht oder
+Die Container-Engine des Frameworks ist Docker CE. In der ganzen RHEL-Familie (Fedora, RHEL, CentOS Stream, Rocky
+Linux, AlmaLinux, Oracle Linux und die übrigen Nachbauten) greift `install.sh` nur dann auf Podman zurück (`podman-docker` und dein rootless `podman.socket`), wenn Docker CE dort nicht geht oder
 du die Pakete behältst, die dnf dafür entfernen müsste (siehe [Installation](../README_DE.md#installation)). Das
 Framework findet Podman dann selbst: Ist `DOCKER_HOST` nicht gesetzt und antwortet kein Docker-Dienst (weder der
 des Systems noch ein rootless Docker), setzt es `DOCKER_HOST` für den eigenen Prozess und die Programme, die es
@@ -314,7 +314,11 @@ startet, auf deinen Podman-Socket (`orchestrator/utils/docker_engine.py`, ein He
 Builder-Image, Dittos Container, die Docker-Prüfung und `scripts/build_container_image.sh`). Ein `DOCKER_HOST`, das
 du setzt, gilt immer. `podman-docker` verlinkt Dockers Socket-Namen (`/run/docker.sock`,
 `$XDG_RUNTIME_DIR/docker.sock`) auf Podmans Sockets; ein solcher Name oder ein Socket, an dem Podman antwortet, zählt
-als Podman, nicht als Docker-Dienst. `llm-cli mojo` nennt die Engine, die gerade läuft.
+als Podman, nicht als Docker-Dienst. `llm-cli mojo` nennt die Engine, die gerade läuft, und warnt mit dem Ausweg,
+wenn `DOCKER_HOST` noch auf einen Podman-Socket zeigt, während ein Docker-Dienst läuft (eine Einstellung aus einer
+früheren Podman-Sitzung; dein `DOCKER_HOST` gilt trotzdem). Unter rootless Docker (`docker info` nennt
+`name=rootless`) ist uid 0 im Container draußen du, deshalb laufen die Container des Frameworks, die als deine uid
+liefen, dort als `0:0`; die übrigen Grenzen der Sandbox bleiben.
 
 Geprüft mit Podman 5.8.2 und buildah 1.43.1 unter Rocky Linux 9.8 und an den Quellen von Podman:
 
@@ -323,10 +327,10 @@ Geprüft mit Podman 5.8.2 und buildah 1.43.1 unter Rocky Linux 9.8 und an den Qu
 | Geht | Die Docker-API, die das Framework nutzt (Container, Images, Logs, `docker save` für den Sicherheitsscan); Image-Builds über Podmans Builder (buildah) mit Build-Argumenten, Labels und Zielstufen; `RUN --mount=type=bind` (wie bei BuildKit standardmäßig nur lesend), mehrstufige Builds und Heredocs (buildah ab 1.35; das buildah von Debian und Ubuntu lässt Heredocs weg); `scripts/build_container_image.sh` (es baut mit `DOCKER_BUILDKIT=0`, damit Dockers CLI Podman nie nach BuildKit fragt); die abgeschotteten Container des Frameworks, die als dein Benutzer laufen: Unter rootless Podman bekommen sie Podmans User-Namespace-Modus `keep-id`, deine uid ist also drinnen dieselbe wie draußen, sie können in deine Ordner schreiben, und was sie schreiben, gehört dir (ohne ihn sieht ein Container mit deiner uid deine Ordner als die von root und hält mit "Permission denied" an; geprüft mit Podman 5.8.9 rootless). |
 | Vor dem Start abgelehnt | Ein GPU-Build mit einer NVIDIA-GPU: Podmans Docker-kompatible Schnittstelle nimmt nur CDI-Geräteanfragen und übergeht Dockers GPU-Anfrage (`--gpus`) ohne ein Wort, der Build liefe also ohne die GPU. Er wird mit dem Grund abgelehnt; Dittos Container rechnet auf der CPU und sagt warum. |
 | Gibt es nicht | BuildKit selbst: Podmans `docker buildx` ist buildah, ohne die Frontends von BuildKit (`# syntax=`), seinen Cache-Export und seine Treiber. Images entstehen stattdessen über Podmans API. Was BuildKit braucht, etwa die geplanten Hailo-Images, wird unter Podman mit dem Grund abgelehnt (`podman_refusal`). |
-| Nicht getestet | Ein vollständiger Target-Build und ein Lauf von Dittos Container unter Podman von Anfang bis Ende (die Container-Einstellungen des Builder-Containers und der Build-Stufe liefen gegen Podman 5.8.9 rootless); eine AMD- oder Intel-GPU, die unter rootless Podman als `/dev/dri` weitergegeben wird (die render-Gruppe des Rechners ist im Container nicht abgebildet). |
+| Nicht getestet | Ein vollständiger Target-Build und ein Lauf von Dittos Container unter Podman von Anfang bis Ende (die Container-Einstellungen des Builder-Containers und der Build-Stufe liefen gegen Podman 5.8.9 rootless); eine AMD- oder Intel-GPU, die unter rootless Podman als `/dev/dri` weitergegeben wird, auf echter Hardware: Die render-Gruppe des Rechners ist in einem rootless Container nicht abgebildet, deshalb bekommt so ein Container statt der Gruppennummer Podmans `--group-add keep-groups` (deine eigenen Gruppen, wie Podman es beschreibt; es braucht crun). |
 
 Später zu Docker CE wechseln: `sudo dnf remove podman-docker`, dann `sudo ./install.sh` erneut; es installiert
-Docker CE aus Dockers RHEL-Repository und fragt, bevor dnf etwas entfernt.
+Docker CE aus Dockers Repository für dein System und fragt, bevor dnf etwas entfernt oder ersetzt.
 
 ---
 
@@ -515,7 +519,17 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   Verbindungen, unter anderem. Ein `ProxyJump` oder ein `ProxyCommand` kommt erst hinzu, nachdem du gelesen hast, was
   er tut (er entscheidet, über welchen Computer oder mit welchem Programm die Verbindung läuft), und Ja gesagt hast;
   „Nein“ ist bei jeder Frage die Vorgabe, und die Änderung wird ins Audit-Log geschrieben. Eine von Hand bearbeitete
-  Datei mit einer abgelehnten Zeile stoppt jeden OpenSSH-Aufruf mit Grund (`local_problem`). Kein KI-Tool schreibt
+  Datei mit einer abgelehnten Zeile stoppt jeden OpenSSH-Aufruf mit Grund (`local_problem`). Dein Ja wird
+  festgehalten (der sha256 des genauen Blocks, in `ssh_config.accepted.json` neben der Datei): Ein `ProxyJump` oder
+  `ProxyCommand`, der danach von Hand geändert oder geschrieben wurde, bevor das Framework das Ja festhielt, wird nicht
+  benutzt; jeder OpenSSH-Aufruf hält an mit dem, was die Zeile tut, und deinem Weg, sie anzunehmen (dieselben Zeilen
+  noch einmal in SSH-Einstellungen... oder mit `deploy ssh-config edit` eingeben und Ja sagen). Zeilen, die andere
+  Anmeldeschlüssel wählen, laden oder weitergeben würden (`IdentityFile`, `CertificateFile`, `IdentityAgent`,
+  `AddKeysToAgent`) oder dem Board eine Umgebung mitgeben (`SetEnv`, `SendEnv`), werden ebenfalls abgelehnt;
+  `LogLevel` bleibt erlaubt (es ändert nur, was OpenSSH meldet). Ein Board, das hier über einen `ProxyJump` oder ein
+  `ProxyCommand` erreicht wird, geht immer über OpenSSH, nie über paramiko (das keine Einstellungsdatei liest); wo
+  OpenSSH den Schritt nicht kann (kein `ssh`, ein Einmal-Passwort, ein an den gezeigten Fingerabdruck gebundener
+  Schritt), wird er in klaren Worten abgelehnt. Kein KI-Tool schreibt
   diese Datei; paramiko liest überhaupt keine SSH-Einstellungsdatei. Ein `%` in den eigenen Pfaden des Frameworks
   (sein Schlüssel, seine `known_hosts`) wird dort, wo OpenSSH Tokens ersetzt, als `%%` geschrieben, so dass ein
   Zustandsordner mit `%` im Namen funktioniert; unter Windows wird der Pfad mit Schrägstrichen übergeben (ein
@@ -3473,7 +3487,9 @@ signierten Index und verlassen diesen Rechner nur als lokale Datei, die du selbs
   installierte Target das ist, mit dem das Rezept entstand, seine Importance-Matrix und Kontextlänge, den Commit,
   die Downloadgröße, das Laufwerk, die
   Hardware-Schätzung, Lizenz, Zugangsbeschränkung und Image-Build; dieselbe Speicherreservierung und dieselben
-  Kontingente). `dataset_path` nur, wenn das Rezept einen Kalibrierungsdatensatz nennt, und dann muss es genau diese
+  Kontingente). `probe` nennt die Hardware-Probe des Boards wie bei `start_build` (vor der Frage geprüft; ohne sie
+  die neueste gespeicherte Probe eines Boards des SoC des Rezepts). `dataset_path` nur, wenn das Rezept einen
+  Kalibrierungsdatensatz nennt, und dann muss es genau diese
   Datei sein (sha256): Der Build kopiert die Datei in seinen eigenen Ordner, während er sie hasht, und benutzt nur
   diese Kopie, sodass eine nach der Frage ausgetauschte Datei nie benutzt wird. Ein nach der Frage in irgendeinem
   Feld geändertes Rezept wird nicht gebaut. „Ja, und nicht mehr fragen“ hat den

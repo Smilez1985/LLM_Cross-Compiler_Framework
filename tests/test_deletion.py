@@ -29,8 +29,8 @@ CONTAINERS = "bookkeeping: the containers the framework started for one build, r
 OWN_SERVER = "bookkeeping: state, key and log files of the framework's own local model server"
 OWN_BRIDGE = ("bookkeeping: the endpoint and key file of the framework's own GUI bridge (W4): only a socket of this "
               "account in the bridge's own folders, its own temporary folder, or the key file it wrote itself")
-OWN_NOTE = ("bookkeeping: the note of an open Mojo Oracle run that the CLI wrote itself next to Mojo Miracle's lock "
-            "(round 27), removed when a Miracle run at a terminal ends")
+OWN_NOTE = ("bookkeeping: the note of an open Mojo Oracle run that the framework wrote itself next to Mojo Miracle's "
+            "lock, removed when a person's Miracle run ends or after an hour")
 NAME_ONLY = "never deletes an image: drops the per-build name once the image carries its last-build name"
 MOVED = ("a move the person chose (save dialog, Save..., llm-cli build save): the build folder's copy goes only after "
          "every file arrived and matched its original by sha256; the artifact itself is kept (eighth round, answer 3)")
@@ -195,7 +195,7 @@ DELETION_SITES = {
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime._stop_locked"): OWN_SERVER,
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime._cleanup_stale_locked"): OWN_SERVER,
     # the CLI's note of an open Mojo Oracle run (Mojo closes the circle)
-    ("orchestrator/Core/mojo/banner.py", "close_oracle"): OWN_NOTE,
+    ("orchestrator/Core/mojo/oracle_note.py", "close_oracle"): OWN_NOTE,
     # the framework's own GUI bridge for AI apps
     ("orchestrator/tools/gui_bridge.py", "_clear_socket_path"): OWN_BRIDGE,
     ("orchestrator/tools/gui_bridge.py", "_remove_stale_endpoint"): OWN_BRIDGE,

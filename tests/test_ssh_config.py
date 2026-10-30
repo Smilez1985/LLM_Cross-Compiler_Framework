@@ -128,7 +128,7 @@ def test_a_line_that_would_change_trust_or_run_a_command_is_refused_with_its_rea
 
 
 @pytest.mark.parametrize("line", ["User admin", "Port 2222", "ConnectionAttempts 3", "Compression yes",
-                                  "IdentityFile ~/.ssh/jump_key", "ServerAliveInterval 5", "AddressFamily inet"])
+                                  "LogLevel VERBOSE", "ServerAliveInterval 5", "AddressFamily inet"])
 def test_a_harmless_line_passes(line):
     from orchestrator.remote import ssh_config
     check = ssh_config.check_lines([line])

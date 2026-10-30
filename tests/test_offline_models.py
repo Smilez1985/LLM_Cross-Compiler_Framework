@@ -352,6 +352,31 @@ class TestTheBuilderChoice:
         assert tab._model_on_this_computer({"model": REPO, "recipe": None}) is False, "cancelled: nothing starts"
         assert tab._model_on_this_computer({"model": str(own), "recipe": None}) is True, "a path: as it is"
 
+    def test_a_recipe_pinning_another_commit_than_the_copy_asks_instead_of_looping(self, qapp, booted_framework,
+                                                                                  monkeypatch):
+        """The recipe pins commit X, the copy here is commit Y: choosing the copy must not bring the same choice back
+        (the recipe at X is still not here). The person cancels, or builds the copy as their own build without it."""
+        pytest.importorskip("PySide6")
+        from types import SimpleNamespace
+        from orchestrator.Core.build_service import BuildService
+        from orchestrator.gui import builder_tab, offline_model
+        booted_framework.config.set("offline_mode", True)
+        cache, _models = BuildService(booted_framework).model_folders()
+        staged(cache, REPO, COMMIT)
+        pinned = "c" * 40
+        recipe = SimpleNamespace(id="acme-recipe", model=SimpleNamespace(repo=REPO, revision=pinned))
+        monkeypatch.setattr(offline_model.OfflineModelDialog, "choose", classmethod(lambda cls, p, e: REPO))
+        asked = []
+        monkeypatch.setattr(builder_tab, "ask", lambda parent, title, text: asked.append(text) or False)
+        tab = builder_tab.BuilderTab(booted_framework)
+        values = {"model": REPO, "recipe": recipe}
+        assert tab._model_on_this_computer(values) is False, "No: nothing starts"
+        assert asked and pinned[:12] in asked[0] and COMMIT[:12] in asked[0]
+        assert values["recipe"] is recipe
+        monkeypatch.setattr(builder_tab, "ask", lambda parent, title, text: True)
+        assert tab._model_on_this_computer(values) is True
+        assert values["model"] == REPO and values["recipe"] is None, "the copy, as the person's own build"
+
 
 # --- ditto models download --------------------------------------------------------------------------------------------
 

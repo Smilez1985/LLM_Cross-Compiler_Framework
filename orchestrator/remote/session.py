@@ -208,7 +208,7 @@ class Stopped(RemoteFailure):
 
 
 class SessionFailure(RemoteFailure):
-    """A step on the board that cannot be done. `kind`: key_read, not_trusted, key_changed, other_key, needs_paramiko,
+    """A step on the board that cannot be done. `kind`: key_read, not_trusted, key_changed, other_key, needs_paramiko, needs_openssh,
     login (the login), wait (the board did not come back), private_dir, upload_failed, upload_damaged, rename,
     folder_gone (the upload), not_started, cannot_follow, job_gone, job_timeout, job_lost (a detached job).
     `reason`: the SSH reason code; `output`: the board's words (over OpenSSH also what OpenSSH printed), kept apart;
@@ -314,6 +314,8 @@ class RemoteSession:
         dropped off the network before (wait_for_host), so a connection that drops again means it is not back yet."""
         if not waiting:
             self.ended = False   # the owner opens it (again)
+        if self.openssh is None:
+            self._proxy_through_openssh()
         if self.openssh is not None:
             self._open_openssh(waiting)
             return
@@ -358,6 +360,29 @@ class RemoteSession:
         self.transport = self._factory(self.client)
         if self.on_client is not None:
             self.on_client(self.client)
+
+    def _proxy_through_openssh(self) -> None:
+        """paramiko reads no configuration file: a board the framework's own SSH settings reach through a ProxyJump or
+        ProxyCommand (ssh_config.needs_proxy) goes through this computer's OpenSSH client, which reads that file. A
+        plain refusal where that cannot be: no OpenSSH client here, a one-time password, or a fingerprint or board the
+        caller binds the login to (OpenSSH checks the host key against known_hosts only)."""
+        import shutil
+        from orchestrator.remote import ssh_config
+        if not ssh_config.needs_proxy(self.state_dir, self.host):
+            return
+        why = ""
+        if shutil.which("ssh") is None:
+            why = "this computer has no OpenSSH client (ssh), and paramiko reads no SSH settings file"
+        elif isinstance(self.credentials, OneTimePassword):
+            why = "OpenSSH never asks for a password: log in with the framework key (pair the board first)"
+        elif self.expect_fingerprint or self.expect_device_id is not None:
+            why = ("OpenSSH checks the host key against the framework's known_hosts only, so this step, which is "
+                   "bound to the fingerprint or the board shown, cannot go through it")
+        if why:
+            raise SessionFailure(f"The framework's SSH settings reach {self.host} through a jump host or a proxy "
+                                 f"command, which only the OpenSSH client can do, and {why}.", "needs_openssh")
+        from orchestrator.remote.transport import SystemSshTransport
+        self.openssh = SystemSshTransport
 
     def _open_openssh(self, waiting: bool) -> None:
         """open() over OpenSSH: one `true` on the board (SystemSshTransport.login), in which OpenSSH checks the host key
@@ -489,6 +514,10 @@ class RemoteSession:
             self._sleep(min(0.25, left))
 
     def _port_open(self) -> bool:
+        from orchestrator.remote import ssh_config
+        if ssh_config.needs_proxy(self.state_dir, self.host):
+            # Behind a jump host the board's port is not reachable from here: only the login through the jump tells.
+            return True
         if self._reachable is not None:
             return bool(self._reachable(self.host, self.port))
         from orchestrator.remote import reasons

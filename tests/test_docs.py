@@ -497,14 +497,18 @@ def roadmap_versions(rel: str) -> List[str]:
 
 
 def test_roadmap_lists_only_what_comes():
-    """Finished versions leave the roadmap at release; it names only versions newer than the newest release."""
+    """Finished versions leave the roadmap at release; it names only versions newer than the newest release.
+
+    The newest changelog section is the version being built (there is no [Unreleased]: finished work goes under the
+    version it lands in, tests/test_versioning.py), so the roadmap may still name that one version for what of it is
+    not done yet; every older version is released and must be gone from it."""
     newest = changelog_entries("CHANGELOG.md")[0][0]
     found = {}
     for target in ROADMAP_LINKS.values():
         rel = target.partition("#")[0]
         assert (REPO_ROOT / rel).is_file(), f"{rel}, the roadmap, is missing"
         found[rel] = roadmap_versions(rel)
-        released = [v for v in found[rel] if _semver(v) <= _semver(newest)]
+        released = [v for v in found[rel] if _semver(v) < _semver(newest)]
         assert not released, (f"{rel}: the roadmap still lists released version(s) {sorted(set(released))}; "
                               f"they belong in the changelog (newest release: {newest})")
     english, german = found.values()
@@ -1025,3 +1029,33 @@ def test_the_rename_section_names_the_mcp_window_by_its_mouse_path(rel, lang):
     start = text.index("AI apps connected over MCP" if lang == "en" else "Über MCP verbundene KI-Apps")
     item = text[start:text.index(" - **", start)]   # the list item, up to the next one
     assert f"**{mouse_path('act_tools_mcp_connections', lang)}**" in item, item
+
+
+# --- public Markdown never names the working log or its round numbers ---------------------------------------------
+
+# The maintainer's working log is not public: a document names a decision by what it decides, or points to its row in
+# docs/DESIGN.md ("Components and decisions"), never by the log or a round number of it.
+WORKING_LOG = re.compile(r"DECISIONS|ENTSCHEIDUNGEN|\b[Dd]ecisions?\s+(?:round|Runde)\b|\b[Rr]ounds?\s+[0-9]|"
+                         r"\bRunden?\s+[0-9]|\bEntscheidung(?:en)?(?:\s+des\s+Maintainers,?)?\s+Runde\b")
+
+
+def working_log_mentions(rel: str, text: str) -> List[str]:
+    return [f"{rel}:{n}: {line.strip()[:120]}" for n, line in enumerate(text.split("\n"), 1)
+            if WORKING_LOG.search(line)]
+
+
+def test_no_public_document_names_the_working_log():
+    found = []
+    for rel in ALL_MARKDOWN:
+        found += working_log_mentions(rel, _read(rel))
+    assert not found, "public Markdown names the working log or a round of it:\n  " + "\n  ".join(found[:40])
+
+
+def test_the_working_log_check_finds_every_form():
+    for line in ("(DECISIONS round 25 Q1)", "(DECISIONS Runde 9 U2)", "decision round 25 Q2", "Round 29 (Q1).",
+                 "round 5 (2026-10-12)", "Runde 24 (2026-10-23)", "Runden 18, 19 und 22", "Entscheidung Runde 25 Q2",
+                 "### Ditto's context (DECISIONS rounds 29, 32 and 33)"):
+        assert working_log_mentions("x.md", line), line
+    for line in ("the decision of 2026-10-22 replaced it", "a round trip", "one more round of checks",
+                 "Key decisions", "eine Runde später"):
+        assert not working_log_mentions("x.md", line), line
