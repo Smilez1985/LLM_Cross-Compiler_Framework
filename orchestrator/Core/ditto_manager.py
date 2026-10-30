@@ -398,22 +398,30 @@ def ai_module_description(name: str, assumptions: Sequence[Any], lead: str = "")
 # the same words and read the chosen values over the saved settings the same way.
 
 
-def pin_base_image(definition: "ModuleDefinition", offline: bool = False, client: Any = None) -> "ModuleDefinition":
+def pin_base_image(definition: "ModuleDefinition", offline: bool = False, client: Any = None,
+                   config: Any = None) -> "ModuleDefinition":
     """The proposal with its base image pinned to the digest its tag points at now (DECISIONS round 3), before the
     person is asked: the module is written with exactly the digest shown (`llm-cli module generate-ai` and the
     module wizard's AI import alike). A reference with a digest stays as it is. Raises ImageLookupError (with
-    .next) when the tag cannot be resolved (offline mode, the registry cannot be reached)."""
+    .next) when the tag cannot be resolved (offline mode, the registry cannot be reached). `config`: the settings
+    for the offline image rule (pin_reference)."""
     if "@sha256:" in definition.base_os:
         return definition
-    return definition.model_copy(update={"base_os": pin_reference(definition.base_os, offline=offline, client=client)})
+    return definition.model_copy(update={"base_os": pin_reference(definition.base_os, offline=offline, client=client,
+                                                                  config=config)})
 
 
-def pin_reference(reference: str, offline: bool = False, client: Any = None) -> str:
+def pin_reference(reference: str, offline: bool = False, client: Any = None, config: Any = None) -> str:
     """The image reference pinned to the digest its tag points at now (one that has a digest stays as it is): what an
     AI-made module is written with, also for a base image an AI filled into the module wizard through the GUI tools.
-    Network: call it off the GUI thread. Raises ImageLookupError (with .next) when the tag cannot be resolved."""
+    Network: call it off the GUI thread. Raises ImageLookupError (with .next) when the tag cannot be resolved. In
+    offline mode the offline image rule decides (utils/image_ref.offline_pull_refusal with `config`): a registry the
+    one locality rule counts as local (this computer, the own network) is still asked; any other is not."""
     if "@sha256:" in reference:
         return reference
+    if offline and config is not None:
+        from orchestrator.utils.image_ref import offline_pull_refusal
+        offline = bool(offline_pull_refusal(reference, config))
     from orchestrator.utils.image_registry import inspect_image
     return inspect_image(reference, offline=offline, client=client).pinned
 
@@ -760,7 +768,7 @@ class DittoCoder:
 
     def pin_base_image(self, definition: "ModuleDefinition") -> "ModuleDefinition":
         """pin_base_image() in this Ditto's offline mode (the settings' offline_mode)."""
-        return pin_base_image(definition, offline=self.offline_mode)
+        return pin_base_image(definition, offline=self.offline_mode, config=self.config)
 
     def describe(self, task: str = "chat") -> Dict[str, Any]:
         """Provider and model a call would use (no secrets); raises DittoError when not set up."""

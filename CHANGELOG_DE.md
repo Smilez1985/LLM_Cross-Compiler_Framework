@@ -90,6 +90,12 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Builder-Kopie, der letzte Schritt des Fetchers und der Vermerk `refs/main` werden mit dem einen Ersetz-Helfer des
   Frameworks an ihren Platz gelegt, der es unter Windows einen Moment lang erneut versucht, solange ein anderes
   Programm die Datei liest.
+- `2026-10-30 00:15 UTC` · `v3.2.0` **Dittos Docker-Image folgt der Offline-Regel für Images** ([Design](docs/DESIGN_DE.md#ditto-die-lokale-laufzeit-und-die-llm-schicht)):
+  Im Offline-Modus wird die Laufzeit-Basis von Dittos Image (sein Basis-Image und die Laufzeitbibliotheken aus den
+  Spiegeln der Distribution) nicht mehr gebaut; eine, die auf diesem Computer ist, wird genutzt, sonst hält der
+  Docker-Modus an, bevor etwas gebaut wird, und nennt das Image und was online zu tun ist, statt tief in einem Build
+  zu scheitern. Ein Tag eines Basis-Images, das eine KI für ein neues Modul vorschlägt, wird offline festgelegt, wenn
+  seine Registry in deinem eigenen Netz liegt.
 
 ### Sicherheit
 - `2026-10-29 23:50 UTC` · `v3.2.0` **Die SSH-Einstellungen von llmcf: ein Sprung oder Proxy-Befehl nur mit dem festgehaltenen Ja der

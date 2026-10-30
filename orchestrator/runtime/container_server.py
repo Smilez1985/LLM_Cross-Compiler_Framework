@@ -374,14 +374,28 @@ def _check_base(base: Any, backend: str) -> None:
         raise ContainerError(f"{backend} builds do not run in Ditto's container yet (CPU and Vulkan do)")
 
 
+def offline_base_refusal(base: Any, tag: str) -> str:
+    """The plain stop of offline mode when the runtime-base stage is not on this computer: building it pulls the base
+    image and installs the runtime libraries from the distribution's package mirrors, which offline mode does not
+    allow (the offline image rule of the target images, Core/builder._offline_image)."""
+    return (f"Offline mode is on, and the runtime base of Ditto's image ({tag}) is not on this computer. Building it "
+            f"pulls {getattr(base, 'image', 'its base image')} and installs its runtime libraries from the "
+            "distribution's package mirrors, which offline mode does not allow. Set up Docker mode once with offline "
+            "mode off; later images on the same base are made offline from that runtime base.")
+
+
 def build_runtime_base(docker: DittoDocker, base: Any, backend: str, log: Path,
-                       dockerfile: Path = RUNTIME_DOCKERFILE) -> ImageInfo:
-    """The runtime-base stage for `base` and `backend` (reused when it is there): the base and the runtime libraries."""
+                       dockerfile: Path = RUNTIME_DOCKERFILE, *, offline: bool = False) -> ImageInfo:
+    """The runtime-base stage for `base` and `backend` (reused when it is there): the base and the runtime libraries.
+    In offline mode only a runtime base that is there is used; without one ContainerError stops before anything is
+    built (offline_base_refusal)."""
     _check_base(base, backend)
     tag = base_tag(base, backend, dockerfile)
     existing = docker.image(tag)
     if existing is not None and existing.role == "base" and not existing.pulled:
         return existing
+    if offline:
+        raise ContainerError(offline_base_refusal(base, tag))
     with tempfile.TemporaryDirectory(prefix="ditto-runtime-ctx-") as ctx:
         shutil.copyfile(dockerfile, Path(ctx) / "Dockerfile")
         (Path(ctx) / "bin").mkdir()
@@ -404,13 +418,15 @@ def _readable(folder: Path) -> None:
 
 
 def build_runtime_image(docker: DittoDocker, build: Any, base: Any, made_by: str, log: Path,
-                        dockerfile: Path = RUNTIME_DOCKERFILE) -> ImageInfo:
+                        dockerfile: Path = RUNTIME_DOCKERFILE, *, offline: bool = False) -> ImageInfo:
     """Ditto's image with the programs of the stored `build` on `base`. The programs are copied from the build store
-    into the build context and checked against the build's manifest before the image is built."""
+    into the build context and checked against the build's manifest before the image is built. In offline mode it is
+    made only on a runtime base that is there (this stage copies files only, nothing is fetched); without one the
+    early stop of build_runtime_base."""
     if made_by not in MADE_BY:
         raise ContainerError("made_by must be repackaged or rebuilt")
     backend = build.backend
-    build_runtime_base(docker, base, backend, log, dockerfile)
+    build_runtime_base(docker, base, backend, log, dockerfile, offline=offline)
     tag = image_tag(build.build_id, base)
     files: Mapping[str, str] = build.manifest.get("files") or {}
     with tempfile.TemporaryDirectory(prefix="ditto-runtime-ctx-") as ctx:
@@ -644,5 +660,6 @@ def container_alive(state: Mapping[str, Any], docker: Optional[DittoDocker] = No
 
 __all__ = ["BACKENDS", "ContainerError", "ContainerInfo", "ContainerRunner", "DittoDocker", "GpuPassthrough",
            "ImageInfo", "LABEL", "build_runtime_base", "build_runtime_image", "check_server_options",
+           "offline_base_refusal",
            "container_alive", "container_name", "gpu_passthrough", "is_official_image", "server_options",
            "start_server", "verify_image"]
