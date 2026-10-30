@@ -71,7 +71,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   the same inputs that were stopped from outside and does not start it a fourth time (`STAGE_RESTART_LIMIT`, exit code
   75); the functional test (`model_check.py` of both targets) streams the model's output, stops a model that repeats
   itself (`stopped`, no failure) and treats `FUNCTIONAL_TEST_SECONDS` as the time it may print nothing (`timed out`,
-  no failure), never as a hard limit. The llama.cpp runtime builds an AI starts (the tools `build_local_runtime` and
+  no failure), never as a hard limit (the package stage's warning names it so). The llama.cpp runtime builds an AI starts (the tools `build_local_runtime` and
   `deploy_device_runtime`) carry that into their executor (`LocalLLMRuntime.install`, `steps.build_runtime`,
   `service.ensure_build` and `service.deploy` take `ai_started`), so their soft caps stop them too. Tests:
   `tests/test_step_limits.py`, the wait tests of

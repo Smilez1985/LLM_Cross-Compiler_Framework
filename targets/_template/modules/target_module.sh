@@ -429,7 +429,8 @@ check_module_flags() {  # before anything slow: the module's CMake flags in the 
 
 # A short run of the quantized model on this build machine: the convert stage's functional test (scripts/model_check.py
 # test, the one implementation), with the image's own llama-completion (llama-cli when the image has only that): 8
-# tokens, at most FUNCTIONAL_TEST_SECONDS, offline, the options this tool has. A run that ends with an error or
+# tokens, stopped when it prints nothing for FUNCTIONAL_TEST_SECONDS or the model repeats itself,
+# offline, the options this tool has. A run that ends with an error or
 # crashes on the model stops the package. A timeout, a stop from outside (the out-of-memory killer), a tool this
 # machine cannot run or start, no tool in the image and an embedding model are notes, and the manifest says which.
 # The package's test_model.sh runs the same kind of test on the board.
@@ -446,8 +447,8 @@ functional_test() {
     TARGET_CONFIG[FUNCTIONAL_TEST]="$summary"
     case "$result" in
         "timed out")
-            log_warn "The functional test did not finish within ${FUNCTIONAL_TEST_SECONDS} s; the package is made anyway." ;;
-        stopped) log_warn "The functional test was stopped from outside (${tool:-the tool}); the package is made anyway." ;;
+            log_warn "The functional test printed nothing for ${FUNCTIONAL_TEST_SECONDS} s; the package is made anyway." ;;
+        stopped) log_warn "The functional test was stopped (${summary:-${tool:-the tool}}); the package is made anyway." ;;
     esac
     log_success "Functional test: $summary"
 }
