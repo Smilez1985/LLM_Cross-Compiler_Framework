@@ -14,6 +14,7 @@ import json
 import os
 import signal
 import stat
+import subprocess
 import sys
 import tarfile
 import threading
@@ -1352,6 +1353,21 @@ def impostor_on_the_first_port(monkeypatch):
         impostor.server_close()
 
 
+@pytest.fixture(params=["root", "account"])
+def connection_table(request, monkeypatch):
+    """The connection table as root reads it, and as an account without root rights does (a GitHub runner, most
+    desktops): psutil then says AccessDenied for the sockets of a process that has exited but is not yet reaped."""
+    if request.param == "account":
+        listed = psutil.Process.net_connections
+
+        def as_an_account(self, kind="inet"):
+            if self.status() == psutil.STATUS_ZOMBIE:
+                raise psutil.AccessDenied(self.pid)
+            return listed(self, kind)
+        monkeypatch.setattr(psutil.Process, "net_connections", as_an_account)
+    return request.param
+
+
 @POSIX_ONLY
 class TestServerProcess:
 
@@ -1472,9 +1488,11 @@ class TestServerProcess:
         handlers[-1]()
         assert gone(third.pid) and rt.endpoint() is None and gone(first.pid)
 
-    def test_a_program_answering_on_the_chosen_port_never_gets_the_key(self, fake_runtime, monkeypatch):
+    def test_a_program_answering_on_the_chosen_port_never_gets_the_key(self, fake_runtime, monkeypatch, connection_table):
         # Port race: another program takes the free port first and answers /health (and accepts any key). It used to
-        # be taken for our server, and _check_auth sent it the new key; the endpoint then pointed at it.
+        # be taken for our server, and _check_auth sent it the new key; the endpoint then pointed at it. Without root
+        # rights (connection_table "account") the exited stand-in's sockets read as AccessDenied, which listens_on
+        # took for "cannot be checked": the impostor got the key again (CI runners, most desktops).
         with impostor_on_the_first_port(monkeypatch) as (taken, seen):
             rt = fake_runtime()
             ep = rt.start()
@@ -1482,7 +1500,7 @@ class TestServerProcess:
             assert seen and not any(ep.api_key in s for s in seen) and all(not s for s in seen)
             assert (rt.root / "b1-cpu" / "starts").read_text() == "2", "the second port was tried"
 
-    def test_other_processes_get_no_endpoint_before_the_port_is_confirmed(self, fake_runtime, monkeypatch):
+    def test_other_processes_get_no_endpoint_before_the_port_is_confirmed(self, fake_runtime, monkeypatch, connection_table):
         # Review of port-runtime: server.json is written right after the launch, and LLMClient in every other process
         # (the GUI, the MCP server) reads it. While the port check still ran it named the impostor's port with the new
         # key, so a chat sent at that moment gave the impostor the key and the prompt. Here the stand-in binds after
@@ -1520,6 +1538,17 @@ class TestServerProcess:
         assert rt.endpoint() is None and rt.status().running
         second = rt.start()
         assert second.pid != first.pid and gone(first.pid) and rt.endpoint().pid == second.pid
+
+    def test_an_exited_process_listens_on_no_port(self, connection_table):
+        # Exited but not yet reaped (a zombie): root reads an empty socket list, an account AccessDenied; both are
+        # "listens on nothing", never "cannot be checked". A process that is gone entirely listens on nothing too.
+        proc = subprocess.Popen([sys.executable, "-c", "pass"])
+        deadline = time.monotonic() + 10
+        while psutil.Process(proc.pid).status() != psutil.STATUS_ZOMBIE and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert ls.listens_on(proc.pid, 1) is False
+        proc.wait()
+        assert ls.listens_on(proc.pid, 1) is False
 
     def test_an_unreliable_connection_table_does_not_block_the_start(self, fake_runtime, monkeypatch):
         # Where psutil cannot list the server's sockets, a server that keeps running after the grace period has bound

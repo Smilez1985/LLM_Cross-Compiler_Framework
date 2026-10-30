@@ -10,6 +10,18 @@ weicht bewusst ab: Es gibt keinen Abschnitt `[Unreleased]`. Jeder Eintrag beginn
 der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und warum, steht im
 [Design](docs/DESIGN_DE.md).
 
+## [3.3.0] - 2026-10-30
+
+### Sicherheit
+- `2026-10-30 14:07 UTC` · `v3.3.0` **Dittos lokaler Server: der Schlüssel geht nie an ein Programm, das seinen Port
+  belegt hat, auch ohne Root-Rechte** ([Design](docs/DESIGN_DE.md#sicherheitsmodell)): belegt ein anderes Programm den
+  freien Port zwischen der Wahl und dem Bind von llama-server, beendet sich llama-server, und der Start muss erkennen,
+  dass es nicht der Listener des Ports ist. Für ein Konto ohne Root-Rechte (die meisten Desktops, CI-Runner) liest
+  psutil die Sockets eines solchen beendeten, noch nicht abgeholten Prozesses als "Zugriff verweigert"; `listens_on`
+  hielt das für "nicht prüfbar", der Start hielt dann das andere Programm für den Server und schickte ihm bei der
+  Schlüsselprüfung den neuen Schlüssel. Ein beendeter oder verschwundener Prozess lauscht jetzt nirgends, und der Start
+  nimmt den nächsten freien Port, wie er es für root schon tat.
+
 ## [3.2.0] - 2026-10-30
 
 ### Hinzugefügt
@@ -4945,6 +4957,7 @@ Cross-Kompilierung zu ermöglichen.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Grundlegende Unterstützung für die Cross-Kompilierung für Rockchip RK3588/RK3566.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Einstiegspunkte für CLI (`llm-cli`) und GUI (`llm-gui`).
 
+[3.3.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v2.4.0...v3.0.0

@@ -9,6 +9,17 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 (`` `YYYY-MM-DD HH:MM UTC` · `vX.Y.Z` ``) and is written under the version it lands in. Planned work is listed in the
 [roadmap](docs/ROADMAP.md), not here; how the framework is built and why is in the [design](docs/DESIGN.md).
 
+## [3.3.0] - 2026-10-30
+
+### Security
+- `2026-10-30 14:07 UTC` · `v3.3.0` **Ditto's local server: the key never goes to a program that took its port, also
+  without root rights** ([design](docs/DESIGN.md#security-model)): when another program took the free port between the
+  choice and llama-server's bind, llama-server exits, and the start must see that it is not the port's listener. For an
+  account without root rights (most desktops, CI runners) psutil reads the sockets of such an exited, not yet reaped
+  process as "access denied"; `listens_on` took that for "cannot be checked", the start then counted the other program
+  as the server and sent it the new key in the auth check. An exited or vanished process now listens nowhere, and the
+  start takes the next free port as it already did for root.
+
 ## [3.2.0] - 2026-10-30
 
 ### Added
@@ -4362,6 +4373,7 @@ taken from source headers and the git history (2025-12-13 to 2026-01-14).
 - `2025-11-20 00:00 UTC` · `v1.0.0` Basic support for Rockchip RK3588/RK3566 cross-compilation.
 - `2025-11-20 00:00 UTC` · `v1.0.0` CLI (`llm-cli`) and GUI (`llm-gui`) entry points.
 
+[3.3.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v2.4.0...v3.0.0
