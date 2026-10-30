@@ -154,6 +154,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `config output-folder` | Den Ausgabeordner zeigen oder festlegen, in dem fertige Modelle gespeichert werden |
 | `zoo list` / `zoo show` | Den Community-Zoo und die installierten Pakete auflisten / einen Eintrag zeigen |
 | `zoo install` / `zoo verify` | Ein Community-Paket nach Prüfungen und deiner Bestätigung installieren / installierte Pakete oder eine Paketdatei prüfen |
+| `zoo uninstall` | Ein installiertes Paket nach der genauen Liste und deiner Bestätigung deinstallieren („Nein“ als Vorgabe) |
 | `zoo export` / `zoo keys` | Ein signiertes Paket aus deinem Target, Build oder deiner Wissensbasis machen (und einen Pull-Request öffnen) / deine öffentlichen Schlüssel zeigen |
 | `zoo maintainer key` / `review` / `revoke` | Für den Maintainer des Community-Repositorys: den Signaturschlüssel des Index anlegen / Beiträge prüfen und veröffentlichen / ein veröffentlichtes Paket zurückziehen |
 
@@ -2565,6 +2566,29 @@ prüfen...** (`PACK_FILE`).
 ```bash
 llm-cli zoo verify
 llm-cli zoo verify community/contributions/contribution-target-my-board-1.0.0.zip
+```
+
+### zoo uninstall
+
+```
+llm-cli zoo uninstall PACK_ID --kind target|recipe|knowledge
+```
+
+Deinstalliert ein installiertes Community-Paket. Zuerst listet es genau auf, was geht: den Ordner des Pakets mit
+seiner Herkunftsangabe, seine Import-Notizen im Wissensordner und (bei einem Wissenspaket oder dem Wissens-Snapshot
+eines Target-Pakets) wie viele Auszüge nur dieses Paket hält; Auszüge, die ein anderes Paket oder dein eigener Crawl
+auch hält, bleiben. Dann fragt es, ob alles in den Papierkorb soll (wiederherstellbar mit `llm-cli trash restore`) oder
+endgültig gelöscht wird, und „Genau N Einträge (Größe) deinstallieren?“ mit „Nein“ als Vorgabe. Nur an einem Terminal;
+ohne eines wird nichts gelöscht. Ein Paket, dessen Seiten in der Wissensbasis sind, wird abgelehnt, solange die
+Wissensbasis aus ist. Um eine neuere Version eines Pakets zu installieren, deinstalliere zuerst die alte. Exit-Code 1,
+wenn nichts deinstalliert wurde oder ein Eintrag nicht entfernt werden konnte.
+
+In der GUI: **Tools > Community Hub öffnen**, das installierte Paket wählen, **Deinstallieren...**. Eine KI darf nur
+darum bitten (das optionale Tool `uninstall_pack`, verborgen, bis du es freigibst): Du siehst dieselbe Liste im
+eigenen Fenster des Frameworks und entscheidest, und ihre Bitte verschiebt nur in den Papierkorb.
+
+```bash
+llm-cli zoo uninstall rk3588-docs --kind knowledge
 ```
 
 ### zoo export

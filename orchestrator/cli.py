@@ -6574,6 +6574,40 @@ def _say_knowledge_import(cm) -> None:
                       "('llm-cli knowledge snapshots' lists it).")
 
 
+@zoo.command('uninstall')
+@click.argument('pack_id')
+@click.option('--kind', type=click.Choice(ZOO_KINDS), required=True, help='Kind of the installed pack')
+@pass_context
+def zoo_uninstall(ctx: FrameworkContext, pack_id: str, kind: str):
+    """Uninstall an installed pack: the exact list first (its folder, its import notes, the excerpts only it holds),
+    to the trash or for good, "No" by default; excerpts another pack still holds stay"""
+    from orchestrator.Core.community_pack import PackError
+    from orchestrator.Core.deletion import PlanChanged, size_text
+    cm = _zoo(ctx)
+    try:
+        plan = cm.uninstall_plan(kind, pack_id)
+    except PackError as e:
+        _zoo_fail(e)
+    accepted = confirm_deletion(plan, title=f"Uninstall {kind} pack {pack_id} ({size_text(plan.total_bytes)})",
+                                again=f"llm-cli zoo uninstall {pack_id} --kind {kind}", verb="Uninstall")
+    if accepted is None:
+        sys.exit(1)
+    try:
+        result = cm.uninstall(kind, pack_id, accepted, trash=_cli_trash(ctx), audit=_cli_audit(ctx))
+    except PlanChanged as e:
+        _zoo_fail(e)
+    except (PermissionError, RuntimeError) as e:
+        _zoo_fail(e)
+    for name, reason in result.failed:
+        console.print(f"[yellow]Not removed: {escape(name)} ({escape(reason)})[/yellow]")
+    where = "moved to the trash ('llm-cli trash list' shows it)" if result.trash_ids else \
+        f"deleted for good, {size_text(result.freed_bytes)} freed"
+    console.print(f"[green]Uninstalled {kind} {escape(pack_id)}: {len(result.done)} item(s) {where}.[/green]")
+    if kind == "target" and getattr(ctx.framework_manager, "target_manager", None):
+        ctx.framework_manager.target_manager.initialize()
+    sys.exit(1 if result.failed else 0)
+
+
 @zoo.command('verify')
 @click.argument('pack_file', required=False, type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @pass_context

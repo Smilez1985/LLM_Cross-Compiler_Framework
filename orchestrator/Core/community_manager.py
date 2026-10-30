@@ -1381,6 +1381,118 @@ class CommunityManager:
     def discard(prepared: PreparedInstall) -> None:
         shutil.rmtree(prepared.quarantine, ignore_errors=True)
 
+    # --- uninstall ----------------------------------------------------------------------------------------------
+    def _installed_pack(self, kind: str, pack_id: str) -> Tuple[Path, Provenance]:
+        found = next(((folder, prov) for folder, prov in self.installed()
+                      if prov.kind == kind and prov.id.casefold() == str(pack_id).casefold()), None)
+        if found is None:
+            raise PackError(f"There is no installed {kind} pack '{pack_id}'.").with_steps("hub.open")
+        return found
+
+    def _pack_knowledge(self, folder: Path, prov: Provenance) -> Tuple[Optional[str], List[Path]]:
+        """(the holder of an installed pack's excerpts or None, its import markers that exist): a knowledge pack's,
+        or a target pack's knowledge snapshot's."""
+        from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT
+        if prov.kind == "knowledge":
+            holder, base = folder.name, self.knowledge_dir / folder.name
+        elif prov.kind == "target" and (folder / KNOWLEDGE_SNAPSHOT).is_file():
+            holder, base = f"{TARGET_ORIGIN}{folder.name}", self.knowledge_dir / TARGET_MARKERS / folder.name
+        else:
+            return None, []
+        markers = [base.with_name(base.name + suffix) for suffix in (".imported", ".snapshotted")]
+        return holder, [m for m in markers if m.is_file() and not m.is_symlink()]
+
+    def uninstall_plan(self, kind: str, pack_id: str, rag_manager=None,
+                       mode_offered: Sequence[str] = ("trash", "permanent")):
+        """What uninstalling an installed pack (knowledge, target or recipe) deletes, as the person sees it before
+        anything goes (Core/deletion.py): its folder with its provenance, its import markers, and, said with the
+        folder, the excerpts only it holds in the knowledge base (those another pack or your own crawl also holds
+        stay). A pack whose pages are in the knowledge base is refused while the knowledge base is off: its excerpts
+        must go with it. Raises PackError."""
+        from orchestrator.Core.deletion import plan_of
+        from orchestrator.Core.trash import tree_size
+        from orchestrator.tools.spec import DeletionItem
+        folder, prov = self._installed_pack(kind, pack_id)
+        holder, markers = self._pack_knowledge(folder, prov)
+        what = f"the installed {kind} pack {prov.id} {prov.version} with its files and provenance"
+        if holder is not None:
+            if rag_manager is None and hasattr(self.framework, "get_component"):
+                rag_manager = self.framework.get_component("rag_manager")
+            if rag_manager is None or not callable(getattr(rag_manager, "holding", None)):
+                raise PackError(f"The knowledge base is off, so the excerpts of {kind} pack {prov.id} could not be "
+                                "removed with it; switch the knowledge base on first.")
+            try:
+                held = rag_manager.holding(holder)
+            except Exception as e:  # noqa: BLE001 - the knowledge base's own words can name its folder
+                raise PackError(f"The knowledge base cannot be read now ({type(e).__name__}); nothing is "
+                                "uninstalled.") from None
+            what += (f"; its {held['alone']} excerpt(s) of {held['alone_pages']} page(s) that only it holds leave "
+                     f"the knowledge base, {held['shared']} excerpt(s) another pack or your own crawl also holds "
+                     "stay")
+        items = [DeletionItem(kind="pack", speaking_name=f"{kind} pack {prov.id} {prov.version}",
+                              full_path=str(folder), file_name=folder.name, size_bytes=tree_size(folder),
+                              what=what[:300])]
+        items += [DeletionItem(kind="pack", speaking_name=f"import note of {kind} pack {prov.id} ({m.suffix[1:]})",
+                               full_path=str(m), file_name=m.name, size_bytes=tree_size(m),
+                               what="the note that its pages are in the knowledge base")
+                  for m in markers]
+        return plan_of(items, tuple(mode_offered))
+
+    def uninstall(self, kind: str, pack_id: str, accepted, trash=None, audit=None, rag_manager=None):
+        """Uninstalls exactly the plan the person accepted (uninstall_plan; Core/deletion.py): the plan is built again
+        and must be the accepted one (PlanChanged otherwise: nothing is deleted), the deletion is audited before
+        anything goes, the folder and the import notes go to the trash (Core/trash.py) or for good, and the pack lets go
+        of its excerpts in the knowledge base (RAGManager.release_holder: those another pack or your crawl holds stay).
+        Only the person (PermissionError otherwise). Returns a deletion.DeletionResult."""
+        from orchestrator.Core.deletion import DeletionResult, require_person, require_same
+        accepted = require_person(accepted)
+        if rag_manager is None and hasattr(self.framework, "get_component"):
+            rag_manager = self.framework.get_component("rag_manager")
+        try:
+            current = self.uninstall_plan(kind, pack_id, rag_manager, accepted.plan.mode_offered)
+        except PackError:
+            current = None
+        require_same(accepted, current, f"the list of what uninstalling {kind} pack {pack_id} deletes")
+        if accepted.mode == "trash" and trash is None:
+            raise RuntimeError("The trash is not available; nothing was uninstalled.")
+        if audit is None or not callable(getattr(audit, "record", None)):
+            raise RuntimeError("The audit log is not available, so nothing was uninstalled.")
+        folder, prov = self._installed_pack(kind, pack_id)
+        holder, _markers = self._pack_knowledge(folder, prov)
+        try:
+            audit.record(accepted.actor, "community", "framework", "person", "pack_uninstalled", approved=True,
+                         arguments={"kind": kind, "pack_id": prov.id, "version": prov.version,
+                                    "bytes": accepted.plan.total_bytes, "mode": accepted.mode},
+                         detail=f"{kind} pack {prov.id} " + ("moved to the trash" if accepted.mode == "trash"
+                                                             else "deleted for good"),
+                         extra=accepted.audit_extra())
+        except Exception:  # noqa: BLE001 - the reason could name a host path
+            raise RuntimeError("The audit log cannot record the uninstall; nothing was uninstalled.") from None
+        result = DeletionResult()
+        root = self._install_root(kind)
+        for item in accepted.plan.items:
+            path = Path(item.full_path)
+            base = root if path == folder else self.knowledge_dir
+            try:
+                if accepted.mode == "trash":
+                    entry = trash.move("pack", path, base, "knowledge" if base == self.knowledge_dir else kind,
+                                       item.speaking_name, accepted, accepted.actor)
+                    result.trash_ids.append(entry.id)
+                else:
+                    if path.is_symlink():
+                        raise OSError("a link")
+                    shutil.rmtree(path) if path.is_dir() else path.unlink()
+                    result.freed_bytes += item.size_bytes
+            except Exception as e:  # noqa: BLE001 - that item stays and is reported
+                result.failed.append((item.speaking_name, type(e).__name__ if isinstance(e, OSError) else str(e)))
+                continue
+            result.done.append(item.speaking_name)
+        if holder is not None and not folder.exists():   # the pack is gone: its hold on its excerpts goes too
+            if not rag_manager.release_holder(holder):
+                result.failed.append((f"the excerpts of {kind} pack {prov.id}",
+                                      "not removed: the knowledge base could not be written"))
+        return result
+
     # --- verify -----------------------------------------------------------------------------------------------
     def verify_installed(self) -> List[Tuple[Path, Provenance, Optional[TrustLevel], List[str]]]:
         """Each installed pack with its trust and problems: revoked, changed since it was installed, or licence files

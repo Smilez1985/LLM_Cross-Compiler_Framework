@@ -17,6 +17,15 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   dem Thema der Seiten des Crawls (leer: der Name der Site, etwa `docs.example.com`), und jeder Auszug des Crawls
   trägt es, sodass `search_knowledge(topic=...)`, die Spalte „Thema“ und die Wissensexporte sie darunter finden. Ein
   Crawl, den eine KI gestartet hat (`crawl_docs_site`), nimmt den Namen der Site; sie nennt nie selbst ein Thema.
+- `2026-10-30 01:16 UTC` · `v3.2.0` **Ein installiertes Community-Paket deinstallieren**: `llm-cli zoo uninstall PACK_ID --kind
+  target|recipe|knowledge`, **Deinstallieren...** im Community Hub und, für eine KI nur als Bitte, über die die Person
+  entscheidet, das optionale Tool `uninstall_pack` (verborgen, bis es freigegeben ist, immer mit Frage, nie als
+  dauerhafte Freigabe oder Delegation, nur in den Papierkorb). Alles läuft über die Löschregeln (`Core/deletion.py`):
+  zuerst die genaue Liste (der Ordner des Pakets mit seiner Herkunftsangabe, seine Import-Notizen und wie viele Auszüge
+  nur dieses Paket hält), „Nein“ als Vorgabe, dann der Papierkorb (`Core/trash.py`) oder endgültig, protokolliert, bevor
+  etwas geht (`pack_uninstalled`); Auszüge, die ein anderes Paket oder dein eigener Crawl noch hält, bleiben
+  (`CommunityManager.uninstall_plan` / `uninstall`, `RAGManager.holding`). Ein Paket, dessen Seiten in der Wissensbasis
+  sind, wird abgelehnt, solange die Wissensbasis aus ist.
 
 ### Behoben
 - `2026-10-30 00:48 UTC` · `v3.2.0` **Ein Rezept zu einem unter Linux gemachten Target-Paket besteht unter Windows**: Windows hält kein

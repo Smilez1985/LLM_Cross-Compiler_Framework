@@ -66,6 +66,8 @@ CLI_PATHS: Dict[str, str] = {
     "zoo install --from": "btn_zoo_import",          # Only accept these senders: key files
     "zoo install --passphrase": "btn_zoo_import",    # the passphrase field (never stored or shown)
     "zoo verify": "btn_zoo_verify_installed",
+    "zoo uninstall": "btn_zoo_uninstall",            # the selected installed pack: the deletion dialog ("No" default)
+    "zoo uninstall --kind": "btn_zoo_uninstall",     # the selected row names its kind
     "zoo export": "btn_zoo_export",                  # a target, a finished build (recipe) or the knowledge base
     "zoo export --author": "btn_zoo_export",
     "zoo export --license": "btn_zoo_export",

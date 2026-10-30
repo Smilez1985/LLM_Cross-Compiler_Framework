@@ -976,6 +976,7 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `run_benchmark` | local write | Optional, hidden until enabled: llama-bench on Ditto's catalog model (natively or in the sandbox) or a built GGUF model (always in the sandbox: a model built for a board is measured on the board) |
 | `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | external | Optional, hidden until enabled: probe a trusted board, install its self-built runtime, or check and benchmark it (always asked; jobs) |
 | `delete_artifact` | external, optional | Move one built model (its folder below the output folder and its golden ZIP) to the trash; hidden until you enable it, always asked |
+| `uninstall_pack` | external, optional | Ask to uninstall one installed community pack: you see its folder, its import notes and the excerpts only it holds in the framework's own window and decide; it goes to the trash; hidden until you enable it, always asked |
 | `list_trash` / `restore_from_trash` | read / local write, optional | See the trash by name, kind and size; restore what this AI asked to delete itself (always asked); hidden until you enable them. No tool empties the trash |
 | `restore_knowledge_snapshot` | external, optional | Replace the knowledge base with an earlier snapshot, after a backup of the current content (a job); hidden until you enable it, always asked |
 
@@ -3004,11 +3005,17 @@ Every piece of shared knowledge belongs to a topic (for example
 - **Excerpts:** every excerpt of a pack carries its topic or target; a pack's page cannot set it, nor the pack it
   claims to come from. `search_knowledge` and `list_knowledge_sources` take `topic` (a topic or a target),
   `llm-cli knowledge sources --topic` and the field **Topic or target** in **Tools > Knowledge Sources...** narrow the
-  list the same way.
+  list the same way. Your own crawled pages belong to a topic from the start: the Deep Ingest window asks for it (empty:
+  the site's name, such as `docs.example.com`), and a crawl an AI started takes the site's name.
 - **Upsert:** a newer version of a pack replaces the excerpts of the older one, per pack and page source: once every
   page of the new version is in, the excerpts the old version had and the new one does not are removed, so no stale
   excerpt stays. The snapshot of the knowledge base taken before the import stays. A page you crawl again with Deep
-  Ingest replaces its earlier excerpts too (each crawled page is stored right after it was downloaded).
+  Ingest replaces its earlier excerpts too (each crawled page is stored right after it was downloaded), and a crawl of
+  the same start address that read the whole site removes the excerpts of pages that are gone (a partial or failed
+  crawl removes nothing).
+- **Shared pages:** two installed packs, or a pack and your own crawl, that carry the same page share its excerpts;
+  each excerpt names its holders. A newer version of one pack, a re-crawl or an uninstall lets go of only its own hold,
+  so a page another pack still holds stays (and is found under that pack's topic or target).
 - **Target knowledge:** the knowledge snapshot a target pack carries (`knowledge/initial_knowledge.json`, made by the
   module wizard) is checked like a knowledge pack at the install and imported into the recipient's knowledge base
   under that target, with a snapshot first and the same replacement by a newer version. On the computer that made the
@@ -3050,7 +3057,10 @@ target is checked as `llm-cli targets validate` does, and the result is shown.
 **Details...** (or a double click on a row) shows what `llm-cli zoo show` shows: licence, trust and revocation, the
 installed version and folder, the download address with size and sha256, the description and an installed recipe's
 `recipe.yml`. **Check installed packs**, **Check a pack file...**, **Export...** and **My public keys...** do what
-`zoo verify`, `zoo verify FILE`, `zoo export` and `zoo keys` do; each runs in the background.
+`zoo verify`, `zoo verify FILE`, `zoo export` and `zoo keys` do; each runs in the background. **Uninstall...** on an
+installed pack does what `llm-cli zoo uninstall` does: the deletion window lists its folder, its import notes and the
+excerpts only it holds, "No" is the default, and it goes to the trash or for good; excerpts another pack still holds
+stay. An AI may only ask for it (the optional tool `uninstall_pack`), and you decide in the same window.
 
 ### Export for community
 
