@@ -33,6 +33,7 @@ TEXTS = {
         "secrets.not_stored": "not stored",
         "secrets.what.hf_token": "Hugging Face token: gated models in builds and the Hugging Face tools of AI clients "
                                  "(read inside the framework only, never passed to an AI)",
+        "secrets.what.mqtt_password": "Password at the MQTT broker of the build doorbell (setting mqtt_broker_url)",
         "secrets.what.qdrant_api_key": "API key of a remote Qdrant server for the knowledge base (setting "
                                        "qdrant_url)",
         "secrets.what.community_signing_key": "Your signing key for community packs (created on first use; set it "
@@ -179,6 +180,7 @@ TEXTS = {
         "secrets.not_stored": "nicht gespeichert",
         "secrets.what.hf_token": "Hugging-Face-Token: zugangsbeschränkte Modelle in Builds und die Hugging-Face-"
                                  "Werkzeuge der KI-Clients (nur im Framework gelesen, nie an eine KI gegeben)",
+        "secrets.what.mqtt_password": "Passwort am MQTT-Broker der Build-Türklingel (Einstellung mqtt_broker_url)",
         "secrets.what.qdrant_api_key": "API-Schlüssel eines entfernten Qdrant-Servers für die Wissensbasis "
                                        "(Einstellung qdrant_url)",
         "secrets.what.community_signing_key": "Dein Signaturschlüssel für Community-Pakete (beim ersten Gebrauch "

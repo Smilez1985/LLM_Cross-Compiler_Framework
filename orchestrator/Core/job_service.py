@@ -29,6 +29,23 @@ JOB_KINDS = ("crawl", "deploy", "package", "probe", "pack_import", "pack_export"
              "runtime_build", "runtime_start", "benchmark", "approval", "docs_index")
 JOB_STATES = ("queued", "running", "waiting_for_approval", "done", "failed", "cancelled", "expired")
 TERMINAL_STATES = frozenset({"done", "failed", "cancelled", "expired"})
+# Job kinds that are builds: they end with an end reason of the build vocabulary (Core/build_end.py), like a model build
+BUILD_JOB_KINDS = ("runtime_build",)
+
+
+def job_end_reason(state: str, error: Optional[BaseException] = None) -> Optional[str]:
+    """A build job's end reason: done, cancelled, or for a failure the time limit that stopped it (soft_cap, idle: a
+    StepTimedOut in the error's chain, or the limit's own sentence in its text, utils/step_limits.stop_kind), else
+    failed. None for a state that is no end (expired is an approval's)."""
+    if state == "done":
+        return "done"
+    if state == "cancelled":
+        return "cancelled"
+    if state != "failed":
+        return None
+    from orchestrator.Core.build_end import reason_of_timeout
+    from orchestrator.utils.step_limits import stop_kind
+    return (reason_of_timeout(error) if error is not None else None) or stop_kind(str(error or "")) or "failed"
 JOB_ID_RE = re.compile(r"^job_[a-z0-9]{16}$")
 MAX_WAIT_SECONDS = 50       # below Codex's 60 s default per tool call
 PROGRESS_EVERY = 5.0        # seconds between progress notifications while a client waits
@@ -75,6 +92,8 @@ class Job:
     result: Optional[Dict[str, Any]] = None
     error: Optional[Dict[str, Any]] = None   # code, message, next; notes (a list) for an approved call
     note: str = ""
+    # How a build job ended (Core/build_end.py END_REASONS; for the kinds in BUILD_JOB_KINDS), None while it runs
+    end_reason: Optional[str] = None
     version: int = 0
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
     on_cancel: Optional[Callable[[], None]] = field(default=None, repr=False)
@@ -85,10 +104,13 @@ class Job:
         return self.state in TERMINAL_STATES
 
     def summary(self) -> Dict[str, Any]:
-        """What is persisted and shown in lists: no result, no session id."""
-        return {"job_id": self.job_id, "kind": self.kind, "owner": owner_actor(self.owner), "state": self.state,
-                "created": self.created, "updated": self.updated,
-                "error": (self.error or {}).get("code")}
+        """What is persisted and shown in lists: no result, no session id; a build job's end reason."""
+        summary = {"job_id": self.job_id, "kind": self.kind, "owner": owner_actor(self.owner), "state": self.state,
+                   "created": self.created, "updated": self.updated,
+                   "error": (self.error or {}).get("code")}
+        if self.kind in BUILD_JOB_KINDS and self.end_reason:
+            summary["end_reason"] = self.end_reason
+        return summary
 
 
 class JobHandle:
@@ -169,28 +191,42 @@ class JobService:
             try:
                 result = work(handle)
             except JobCancelled:
+                if kind in BUILD_JOB_KINDS:
+                    job.end_reason = "cancelled"
                 self._finish(job.job_id, "cancelled")
                 return
-            except ValueError as e:
-                # Text from outside the framework that explains a failure (a device's or a program's own words,
-                # `external_text` on the error) never goes into the message: get_job_status returns it marked.
-                external = getattr(e, "external_text", None)
-                extra = ({"result": {EXTERNAL_KEY: [redact_secrets(str(line)) for line in external][-100:]}}
-                         if isinstance(external, (list, tuple)) and external else {})
-                self._finish(job.job_id, "failed", error={"code": getattr(e, "code", "failed"),
-                                                          "message": redact_secrets(str(e))}, **extra)
-                return
-            except Exception as e:  # never hand an unexpected exception's text to an AI client
-                logger.error(f"Job {job.job_id} ({kind}) failed: {e!r}", exc_info=True)
-                self._finish(job.job_id, "failed", error={"code": "failed",
-                                                          "message": f"The {kind} job failed (details in the log)."})
+            except BaseException as e:
+                if kind in BUILD_JOB_KINDS:   # the end reason before the end is announced (the finish listeners)
+                    job.end_reason = job_end_reason("failed", e)
+                if not isinstance(e, Exception):
+                    raise
+                self._fail(job, kind, e)
                 return
             if handle.cancelled:
                 return  # cancelled while the last step ran: its result is not used
+            if kind in BUILD_JOB_KINDS:
+                job.end_reason = "done"
             self._finish(job.job_id, "done", result=result or {})
 
         threading.Thread(target=run, name=f"job-{job.job_id}", daemon=True).start()
         return job
+
+    def _fail(self, job: Job, kind: str, e: Exception) -> None:
+        """How a job's work that raised ends: a ValueError (a refusal meant for the user) keeps its message; anything
+        else is reported without details."""
+        if isinstance(e, ValueError):
+            # Text from outside the framework that explains a failure (a device's or a program's own words,
+            # `external_text` on the error) never goes into the message: get_job_status returns it marked.
+            external = getattr(e, "external_text", None)
+            extra = ({"result": {EXTERNAL_KEY: [redact_secrets(str(line)) for line in external][-100:]}}
+                     if isinstance(external, (list, tuple)) and external else {})
+            self._finish(job.job_id, "failed", error={"code": getattr(e, "code", "failed"),
+                                                      "message": redact_secrets(str(e))}, **extra)
+            return
+        # never hand an unexpected exception's text to an AI client
+        logger.error(f"Job {job.job_id} ({kind}) failed: {e!r}", exc_info=e)
+        self._finish(job.job_id, "failed", error={"code": "failed",
+                                                  "message": f"The {kind} job failed (details in the log)."})
 
     def update(self, job_id: str, *, state: Optional[str] = None, progress=None,
                result: Optional[Dict[str, Any]] = None, error: Optional[Dict[str, Any]] = None,
@@ -247,6 +283,8 @@ class JobService:
                 return job
             job.cancel_event.set()
             hook = job.on_cancel
+            if job.kind in BUILD_JOB_KINDS:
+                job.end_reason = "cancelled"
         if hook is not None:
             try:
                 hook()

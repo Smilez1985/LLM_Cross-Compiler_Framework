@@ -156,6 +156,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `device runtime plan/build/deploy/verify/status` | Die selbst gebaute llama.cpp-Laufzeit eines Boards: aus seinem Profil planen, cross-kompilieren, per SSH installieren und dort prüfen |
 | `config show` / `config repos` | Die wirksamen Einstellungen und ihre Herkunft zeigen / Überschreibungen für Quell-Repositorys verwalten |
 | `config local-network` | Was der Offline-Modus als lokal zählt, und was du selbst als lokal zählst (ein VPN, ein Host, ein Adressbereich) |
+| `config doorbell` | Dein MQTT-Broker für die Build-Türklingel, und eine Test-Klingel |
 | `config output-folder` | Den Ausgabeordner zeigen oder festlegen, in dem fertige Modelle gespeichert werden |
 | `zoo list` / `zoo show` | Den Community-Zoo und die installierten Pakete auflisten / einen Eintrag zeigen |
 | `zoo install` / `zoo verify` | Ein Community-Paket nach Prüfungen und deiner Bestätigung installieren / installierte Pakete oder eine Paketdatei prüfen |
@@ -684,7 +685,7 @@ In der GUI: Build > **Build-Abhängigkeiten…** (Holen, Löschen…).
 ### build status
 
 ```
-llm-cli build status [REQUEST_ID] [-a|--all]
+llm-cli build status [REQUEST_ID] [-a|--all] [--wait SEKUNDEN]
 ```
 
 Zeigt Builds aus dem gemeinsamen Build-Zustand: Jedes Programm, das baut (CLI, GUI, MCP-Server), schreibt eine
@@ -704,6 +705,21 @@ jeder Benutzer seine eigenen Builds sieht.
 | Option | Bedeutung |
 |---|---|
 | `-a, --all` | Jeden aufbewahrten Build statt der 20 neuesten zeigen (aufbewahrt werden die 200 neuesten fertigen oder unterbrochenen Builds). |
+| `--wait SEKUNDEN` | Mit `REQUEST_ID`: höchstens SEKUNDEN warten, bis der Build zu Ende ist (auch einer, den die GUI oder ein MCP-Client gestartet hat), dann ihn zeigen und sagen, wie er endete. |
+
+Wie ein Build endete, ist sein Endgrund (Feld `End`): `done` (sein Abschluss-Eintrag sagt fertig; der einzige Erfolg),
+`failed`, `cancelled`, `soft_cap` (ein von einer KI gestarteter Build lief über seine weiche Grenze) oder `idle` (ein
+Schritt hat so lange nichts ausgegeben wie die Leerlauf-Grenze). Ein Build endet, weil sein Stufen-Runner seinen
+Abschluss-Eintrag geschrieben hat, nie weil danach eine Uhr abläuft. `build status REQUEST_ID --wait SEKUNDEN` und
+`build start --follow` enden daran und sagen es in klaren Worten („Build ready“, „Error while building: …“, „Build
+stopped: …“), mit diesen Exit-Codes:
+
+| Exit-Code | Endgrund |
+|---|---|
+| 0 | done |
+| 1 | failed, soft_cap, idle |
+| 2 | cancelled (Strg+C in `build start` bleibt 130) |
+| 3 | nur `--wait`: läuft noch, als das Warten endete |
 
 Ein Request, der auf eine Self-Healing-Entscheidung wartet, zeigt seinen gescheiterten ersten Versuch; entscheide in
 dem Programm, das ihn ausführt. Mit einer Request-ID folgen die Korrekturvorschläge, die KI-Clients dafür gemacht
@@ -2557,6 +2573,48 @@ konnte.
 In der GUI: **Datei > Einstellungen…**, Tab **Lokales Netz**: die Liste mit dem, was dann dein Netz verlassen kann,
 **Als lokal zählen…** (Art und Wert; fragt mit der Erklärung, „Nein“ ist die Vorgabe), **Entfernen** (fragt zuerst),
 die Prüfung des VPN dieses Computers und **Prüfen** für eine Adresse (beides im Hintergrund).
+
+### config doorbell
+
+```
+llm-cli config doorbell [--broker URL] [--username NAME] [--prefix PRÄFIX] [--ca-file DATEI] [--password] [--test]
+```
+
+Die Build-Türklingel: mit einem eingestellten Broker wird jedes Build-Ende einmal an deinen MQTT-Broker gesendet, an
+`<prefix>/v1/build/<request_id>/end` und `<prefix>/v1/events` (QoS 1, nicht gehalten); `<prefix>/v1/status` sagt
+`online`, während das Framework sendet, und danach `offline` (gehalten, auch als letzter Wille). Die Nachricht ist
+JSON nur mit festen Wörtern:
+
+```json
+{"v": 1, "event": "build_ready", "reason": "done", "name": "Build ready", "request_id": "req_1a2b3c4d", "ts": "2026-10-30T12:00:00Z"}
+```
+
+`event` ist `build_ready`, `build_error` oder `build_stopped`, `reason` eines von `done`, `failed`, `cancelled`,
+`soft_cap`, `idle`; nie steht ein Pfad, Log-Text oder der Name eines Modells darin, die Einzelheiten kommen mit
+`build status REQUEST_ID` oder über MCP. Das Framework sendet nur, es abonniert nie. Ein Broker, der nicht läuft,
+hält nie einen Build auf; das letzte gescheiterte Senden zeigt Mojo. Lass die ACLs des Brokers nur dem Benutzer des
+Frameworks erlauben, unter dem Präfix zu senden.
+
+Ohne Optionen zeigt der Befehl die Einstellungen der Türklingel. `--broker` stellt den Broker ein: `mqtt://host:port`
+nur auf diesem Computer, jeder andere Broker `mqtts://host:port` mit geprüftem Zertifikat (gegen die CAs des Systems
+oder `--ca-file`); im Offline-Modus nur ein Broker, der als lokal zählt ([config local-network](#config-local-network));
+`''` schaltet die Türklingel aus. `--password` fragt nach dem Passwort des Brokers und legt es in den Tresor für
+Zugangsdaten, nie in `config.yml`. `--test` sendet eine Test-Klingel (Anfrage-ID `req_00000000`) und sagt, ob der
+Broker sie angenommen hat. Nur du stellst das ein: die Änderung der KI-Einstellungen und MCP `update_settings` lehnen
+sie ab. Exit-Code 2 für eine Einstellung, die nicht passt (die Einstellung bleibt, wie sie war), 1, wenn die
+Test-Klingel nicht angenommen wurde oder `config.yml` nicht gespeichert werden konnte.
+
+| Option | Bedeutung |
+|---|---|
+| `--broker URL` | Der Broker: `mqtt://host:port` (dieser Computer) oder `mqtts://host:port`; `''` = aus. |
+| `--username NAME` | Der Benutzername beim Broker. |
+| `--prefix PRÄFIX` | Das Topic-Präfix (Standard `llmcf`; 1 bis 32 aus a-z, 0-9, `_` und `-`). |
+| `--ca-file DATEI` | Die CA-Datei, gegen die das Zertifikat des Brokers geprüft wird (`''` = die CAs des Systems). |
+| `--password` | Nach dem Passwort fragen und es in den Tresor für Zugangsdaten legen. |
+| `--test` | Jetzt eine Test-Klingel senden. |
+
+In der GUI: **Datei > Einstellungen…**, Reiter **Build-Türklingel**: dieselben Felder, **Speichern** und
+**Test-Klingel senden** (im Hintergrund).
 
 ---
 

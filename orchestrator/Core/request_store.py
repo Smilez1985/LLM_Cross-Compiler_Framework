@@ -72,6 +72,8 @@ def snapshot(state: Any) -> Dict[str, Any]:
         "errors": [_text(e) for e in list(getattr(state, "errors", []) or [])[-MAX_MESSAGES:]],
         "warnings": [_text(w) for w in list(getattr(state, "warnings", []) or [])[-MAX_MESSAGES:]],
         "awaiting_decision": status == "awaiting_approval",
+        # how it ended (Core/build_end.py END_REASONS), None while it runs
+        "end_reason": getattr(state, "end_reason", None),
         "owner": owner_actor(getattr(state, "owner", "") or ""),
         "label": _text(getattr(state, "label", "") or ""),
         "summary": {k: (None if summary.get(k) is None else str(summary.get(k))) for k in SUMMARY_KEYS},

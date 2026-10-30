@@ -926,6 +926,9 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
             _cancel_interrupted_build(ctx, request_id)
 
         if workflow_status:
+            if workflow_status.status in (OrchestrationStatus.COMPLETED, OrchestrationStatus.ERROR,
+                                          OrchestrationStatus.CANCELLED):
+                _deliver_end_notices(ctx, request_id)   # the chat row and the doorbell before this process ends
             for artifact in workflow_status.artifacts:
                 console.print(f"[green]Artifacts: {escape(str(artifact))}[/green]")
                 if chosen:  # outside the output folder: the listings keep showing it
@@ -934,6 +937,12 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
                 console.print(f"[yellow]{escape(str(warning))}[/yellow]")
             for error in workflow_status.errors:
                 console.print(f"[red]{escape(str(error))}[/red]")
+            # How it ended, in plain words, and the exit code of that end (0 done, 1 failed/soft_cap/idle, 2 cancelled)
+            reason = _end_reason(service, workflow_status)
+            _say_end(reason)
+            from orchestrator.Core.build_end import exit_code
+            if reason is not None and exit_code(reason):
+                sys.exit(exit_code(reason))
             if workflow_status.status != OrchestrationStatus.COMPLETED or workflow_status.failed_builds:
                 sys.exit(1)
 
@@ -943,6 +952,48 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
 
 
 BUILD_POLL_SECONDS = 2
+
+
+def _end_reason(service, state) -> Optional[str]:
+    """The request's end reason by the orchestrator's one rule (Core/build_end.py), None while it runs."""
+    rule = getattr(getattr(service, "_orchestrator", None), "end_reason_of", None)
+    try:
+        return rule(state) if callable(rule) else getattr(state, "end_reason", None)
+    except Exception:  # noqa: BLE001 - a stand-in orchestrator: the state's own value
+        return getattr(state, "end_reason", None)
+
+
+END_NOTICE_WAIT = 5.0      # seconds the CLI waits for the orchestrator to announce a build's end it just saw
+END_NOTICE_FLUSH = 15.0    # seconds it then gives the chat row and the doorbell to go out (doorbell.EXIT_FLUSH)
+
+
+def _deliver_end_notices(ctx, request_id: str) -> None:
+    """A build this process ran has ended: wait until the orchestrator told its end listeners (its status is final a
+    moment before), then until the chat feed's row and the MQTT doorbell are out; this process ends right after, and
+    their writers are daemon threads. Bounded; nothing to wait for on a stand-in context."""
+    wait = getattr(getattr(ctx, "orchestrator", None), "wait_end_announced", None)
+    if callable(wait):
+        try:
+            wait(request_id, timeout=END_NOTICE_WAIT)
+        except Exception:  # noqa: BLE001 - the notices never change the build's result
+            pass
+    framework = getattr(ctx, "framework_manager", None)
+    for part in ("activity", "doorbell"):
+        flush = getattr(getattr(framework, part, None), "flush", None)
+        if callable(flush):
+            try:
+                flush(timeout=END_NOTICE_FLUSH)
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def _say_end(reason: Optional[str]) -> None:
+    """The end of a build in plain words (Build ready / Error while building / Build stopped and why)."""
+    from orchestrator.Core.build_end import reason_text
+    if not reason:
+        return
+    color = {"done": "green", "cancelled": "yellow"}.get(reason, "red")
+    console.print(f"[bold {color}]{escape(reason_text(reason))}[/bold {color}]")
 
 
 def _follow_progress(service, state) -> Tuple[str, int]:
@@ -1341,15 +1392,36 @@ def build_save(ctx: FrameworkContext, artifact: str, destination: Optional[str])
 @build.command('status')
 @click.argument('request_id', required=False)
 @click.option('--all', '-a', is_flag=True, help=f'Show every kept build (default: the {STATUS_ROWS} newest)')
+@click.option('--wait', 'wait', type=click.FloatRange(min=0), default=None, metavar='SECONDS',
+              help='With REQUEST_ID: wait at most SECONDS until the build has ended, then say how it ended. Exit code '
+                   '0 done, 1 failed (also stopped at the soft cap or the idle timeout), 2 cancelled, 3 still running '
+                   'when the wait ended')
 @pass_context
-def build_status(ctx: FrameworkContext, request_id: Optional[str], all: bool):
+def build_status(ctx: FrameworkContext, request_id: Optional[str], all: bool, wait: Optional[float] = None):
     """Status of builds, including those the GUI, the MCP server or another CLI call started (the shared build state
     in the per-user folder, and the build records in the cache folder). REQUEST_ID: a request id (req_...) or a
-    build id."""
+    build id. With --wait the command ends on the build's end record (its end reason), never on a guess."""
     from orchestrator.Core.build_history import client_proposals, read_history
     config, resolve = _settings(ctx)
     history = read_history(config, resolve)  # the one query (the GUI's Build History reads it too)
     folder = history.folder
+    if request_id and wait is not None:
+        from orchestrator.Core.build_end import EXIT_STILL_RUNNING, exit_code
+        reason = _wait_for_end(config, resolve, request_id, wait)
+        history = read_history(config, resolve)
+        details = history.details(request_id)
+        if details is None:
+            console.print(f"[red]Build '{escape(request_id)}' not found in {escape(str(history.folder))}.[/red]")
+            sys.exit(1)
+        if details.request is not None:
+            _print_request_summary(details.request)
+        for record in details.attempts:
+            _print_build_record(record)
+        if reason is None:
+            console.print(f"[yellow]Build {escape(request_id)} is still running after {wait:g} s.[/yellow]")
+            sys.exit(EXIT_STILL_RUNNING)
+        _say_end(reason)
+        sys.exit(exit_code(reason))
     if request_id:
         details = history.details(request_id)
         if details is None:
@@ -1385,8 +1457,26 @@ def build_status(ctx: FrameworkContext, request_id: Optional[str], all: bool):
                       f"llm-cli build status {escape(proposed[-1])}[/magenta]")
 
 
+def _wait_for_end(config, resolve, request_id: str, seconds: float, poll: float = 1.0) -> Optional[str]:
+    """Waits at most `seconds` for the request's end reason in the shared build state (any process's build: the
+    summary, else its newest build record), and returns it; None while it still runs."""
+    from orchestrator.Core.build_history import end_of, read_history
+    deadline = time.monotonic() + seconds
+    while True:
+        details = read_history(config, resolve).details(request_id)
+        if details is not None:
+            found = end_of(details.request) if details.request is not None else None
+            if found is None and details.attempts and details.request is None:
+                found = end_of(details.attempts[-1])
+            if found is not None:
+                return found
+        if time.monotonic() >= deadline:
+            return None
+        _pause(min(poll, max(0.0, deadline - time.monotonic())))
+
+
 # The CLI's labels of the fields build_history lists (the GUI labels them in the person's language).
-_BUILD_FIELD_LABELS = {"request": "Request", "build": "Build", "status": "Status", "stage": "Stage",
+_BUILD_FIELD_LABELS = {"request": "Request", "build": "Build", "status": "Status", "end": "End", "stage": "Stage",
                        "progress": "Progress", "model": "Model", "target": "Target", "board": "Board",
                        "format": "Format", "quantization": "Quantization", "optimization": "Optimization",
                        "owner": "Started by", "where": "Where", "started": "Started", "ended": "Ended",
@@ -6945,6 +7035,64 @@ def config_local_network(ctx: FrameworkContext, add, remove, target: Optional[st
     except LocalNetworkError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1 if e.code == "not_saved" else 2)
+
+@config.command('doorbell')
+@click.option('--broker', 'broker', metavar='URL',
+              help="Your MQTT broker: mqtt://host:port (this computer only) or mqtts://host:port (TLS, the "
+                   "certificate checked); '' switches the doorbell off")
+@click.option('--username', metavar='NAME', help='User name at the broker')
+@click.option('--prefix', metavar='PREFIX', help="Topic prefix (default llmcf; a-z, 0-9, _ and -)")
+@click.option('--ca-file', 'ca_file', metavar='FILE', help="CA file to check the broker's certificate ('' = the "
+                                                             "system's CAs)")
+@click.option('--password', 'set_password', is_flag=True,
+              help='Ask for the broker password and keep it in the credential vault (never in the settings file)')
+@click.option('--test', 'test', is_flag=True, help='Send a test doorbell now and say whether the broker took it')
+@pass_context
+def config_doorbell(ctx: FrameworkContext, broker: Optional[str], username: Optional[str], prefix: Optional[str],
+                    ca_file: Optional[str], set_password: bool, test: bool):
+    """The build doorbell: every build end is published to your MQTT broker (topics <prefix>/v1/events and
+    <prefix>/v1/build/<request>/end, fixed fields only). Only you set it, never an AI. Exit code 1 when the test
+    doorbell was not taken, 2 for a setting that does not fit."""
+    from orchestrator.Core.doorbell import (PASSWORD_SECRET, DoorbellRefused, apply_settings, broker_of,
+                                            send_test_doorbell)
+    ctx.require_framework()
+    fm = ctx.framework_manager
+    cm = fm.config
+    changes = {key: value for key, value in (("mqtt_broker_url", broker), ("mqtt_username", username),
+                                             ("mqtt_topic_prefix", prefix), ("mqtt_ca_file", ca_file))
+               if value is not None}
+    if changes:
+        try:
+            apply_settings(cm, changes)
+        except DoorbellRefused as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(2)
+        except OSError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(1)
+    if set_password:
+        from orchestrator.Core.secret_entries import store_secret
+        value = click.prompt("MQTT broker password", hide_input=True, default="", show_default=False)
+        if value:
+            stored = store_secret(fm.secrets_manager, PASSWORD_SECRET, value)
+            console.print("[yellow]The password is kept for this run only (no vault).[/yellow]" if stored.memory_only
+                          else "[green]The password is stored in the credential vault.[/green]")
+    try:
+        found = broker_of(cm)
+    except DoorbellRefused as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
+    if found is None:
+        console.print("No MQTT broker is set: there is no doorbell (set one with --broker).")
+    else:
+        console.print(f"Broker: {escape(found.label())}  Topic prefix: {escape(found.prefix)}  "
+                      f"User: {escape(found.username or '-')}  CA file: {escape(found.ca_file or 'system CAs')}")
+    if test:
+        ok, text = send_test_doorbell(fm)
+        console.print(f"[{'green' if ok else 'red'}]{escape(text)}[/{'green' if ok else 'red'}]")
+        if not ok:
+            sys.exit(1)
+
 
 # ============================================================================
 # COMMUNITY ZOO (signed community packs: targets, recipes, knowledge)

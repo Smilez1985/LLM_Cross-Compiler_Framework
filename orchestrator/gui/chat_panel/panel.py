@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (QComboBox, QDialog, QFrame, QHBoxLayout, QMenu, Q
 
 from orchestrator.Core.chat_feed import (ClearPlan, ClearPlanChanged, FeedRefs, FeedSender, FeedWriteError,
                                          FeedWriter, StoredEntry, import_chat_history)
+from orchestrator.Core.ditto_build_turns import BuildTurns
 from orchestrator.Core.ditto_manager import ChatHistory
 from orchestrator.Core.speaking_names import SpeakingNames
 from orchestrator.gui.chat_panel.bubbles import make_button, text, text_label
@@ -51,6 +52,7 @@ logger = get_logger("ChatPanel")
 GUI_WRITE_TIMEOUT = 0.5    # seconds a write from the GUI waits for another process's lock
 GUI_READ_TIMEOUT = 0.5     # the first page; later reads (the watcher) wait 0.2 s
 LOAD_TRIES = 5             # a busy feed at start is read again once a second, this many times
+BUILD_TURN_RETRY_MS = 500  # a build end's turn for Ditto waits this long while another turn still runs
 FILTERS = ("all", "needs_you", "decisions", "ditto")
 
 
@@ -370,6 +372,8 @@ class ChatPanel(QWidget):
         self._load_tries = 0
         self._approvals_store: Any = None
         self._pending_records: List[Any] = []
+        # Ditto's turn when a build it started or waited for ends (Core/ditto_build_turns.py)
+        self.build_turns = BuildTurns()
 
         self._access_request = object()  # token of the header text that may still change the header
         worker_relay().done.connect(self._on_access, Qt.QueuedConnection)
@@ -503,6 +507,33 @@ class ChatPanel(QWidget):
     def _on_new_entries(self, entries: List[StoredEntry]) -> None:
         self.feed_view.append_entries(entries)
         self._after_new_rows()
+        if self.ditto is not None:
+            for stored in entries:
+                self.build_turns.offer(stored)
+            self._next_build_turn()
+
+    def _next_build_turn(self) -> None:
+        """Ditto's turn for a build end it is waiting for (one per build): only when no turn runs, so a turn of the
+        person goes first and the end's turn follows it; the input is the framework's fixed note."""
+        if self.ditto is None or not self.build_turns.pending():
+            return
+        if self.worker is not None and self.worker.isRunning():
+            # a turn runs (the person's, or the last one still winding down): this end's turn follows it
+            QTimer.singleShot(BUILD_TURN_RETRY_MS, self._next_build_turn)
+            return
+        turn = self.build_turns.take()
+        if turn is None:
+            return
+        request_id, note = turn
+        self.post_notice("chat.notice.build_turn", {"request_id": request_id})
+        self._choice = QuestionChoice()   # the default: Ditto's own provider, with its tools
+        self._pending_question = note
+        self._set_thinking(True)
+        self.worker = self._new_worker(note)
+        self.worker.answered.connect(self._on_ai_response)
+        self.worker.failed.connect(self._on_ai_error)
+        self.worker.tool_used.connect(self._on_tool_used)
+        self.worker.start()
 
     def _after_new_rows(self) -> None:
         self._maybe_mark_seen()
@@ -712,6 +743,7 @@ class ChatPanel(QWidget):
         if choice is None:
             return
         self.txt_input.clear()
+        self.build_turns.person_spoke()
         reply_to = self.composer.reply_to
         self.composer.clear_reply()
         self._post("person_message", FeedSender(role="person"), person_text=question,
@@ -762,6 +794,7 @@ class ChatPanel(QWidget):
                        announce_row=True)
         self.history.apply(reply)
         self.history.save()
+        QTimer.singleShot(0, self._next_build_turn)   # a build end that came in during this turn
 
     def _on_ai_error(self, error_msg: str) -> None:
         self._set_thinking(False)
@@ -770,6 +803,7 @@ class ChatPanel(QWidget):
         entry = self.writer.entry("notice", FeedSender(role="framework"), text_key="chat.notice.error",
                                   params={"error": error_msg}, external=["error"], level="warning")
         self.feed_view.append_entries([StoredEntry(-1 if self.feed is not None else 0, entry)])
+        QTimer.singleShot(0, self._next_build_turn)
 
     def _set_thinking(self, active: bool) -> None:
         self.composer.set_busy(active)

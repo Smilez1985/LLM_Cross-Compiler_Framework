@@ -13,6 +13,15 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 ## [3.3.0] - 2026-10-30
 
 ### Hinzugefügt
+- `2026-10-30 13:28 UTC` · `v3.3.0` **Ditto kümmert sich um seine eigenen Builds** ([Design](docs/DESIGN_DE.md#ditto-die-lokale-laufzeit-und-die-llm-schicht)):
+  im Framework-Fenster bekommt Ditto, wenn ein Build endet, den Ditto gestartet oder auf den es gewartet hat
+  (`get_build_status` mit `wait_seconds`), einen eigenen Zug dafür: der Chat sagt „Ditto schaut, wie sein Build ...
+  geendet hat“, und Ditto prüft das Ergebnis mit `get_build_status` und `read_build_log` und schlägt den nächsten
+  Schritt vor oder führt ihn im Rahmen seiner Berechtigungen und Freigaben aus. Die Eingabe des Zugs ist ein fester
+  Hinweis des Frameworks nur mit den festen Wörtern des Endes und der Anfrage-ID. Während dein eigener Zug läuft,
+  wartet der Zug des Builds und folgt ihm; andere Builds geben keinen Zug, auch keiner, den Ditto nur abgebrochen hat
+  (dein eigener Build, den Ditto gestoppt hat); höchstens drei solche Züge hintereinander ohne eine Nachricht von dir,
+  damit eine Kette von Builds nie in eine Schleife gerät.
 - `2026-10-30 13:26 UTC` · `v3.3.0` **Jede CPU-Fähigkeit, die ggml nutzen kann, findet die Probe, und das Build-Rezept plant sie** ([Design](docs/DESIGN_DE.md#targets-hardware-und-vorlagen)):
   Die Hardware-Probe 3.2.0 (`.py`, `.sh`, `.ps1`) schreibt auch die CPU-Fähigkeiten von RISC-V (RVV, Zfh, Zvfh,
   Zicbop, Zihintpause, Zvfbfwma, Zba, XTheadVector), LoongArch (LSX, LASX), POWER (VSX, die POWER-Generation) und
@@ -27,6 +36,52 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   und ein Tag ohne den, auf dem er aufbaut, etwa `+sve2` ohne `+sve` oder `+i8mm` auf einem armv8.0-Board).
   Ein Board eines Systems, das das Rezept noch nicht plant, wird mit den Fähigkeiten abgelehnt, die seine Probe
   fand.
+- `2026-10-30 13:17 UTC` · `v3.3.0` **Eine Türklingel auf deinem eigenen MQTT-Broker für jedes Build-Ende** ([Design](docs/DESIGN_DE.md#mcp-server-tools-und-berechtigungen)):
+  wenn du einen Broker einstellst (`llm-cli config doorbell --broker mqtts://HOST:PORT` oder Datei > Einstellungen... >
+  Build-Türklingel), wird jedes Build-Ende einmal an `<prefix>/v1/build/<request_id>/end` und `<prefix>/v1/events`
+  gesendet (QoS 1, nicht gehalten), und `<prefix>/v1/status` sagt online oder offline (gehalten, auch als letzter
+  Wille). Die Nutzlast ist `{v, event, reason, name, request_id, ts}` nur mit festen Wörtern (build_ready,
+  build_error, build_stopped; done, failed, cancelled, soft_cap, idle), nie ein Pfad, Log-Text oder der Name eines
+  Modells; das Framework sendet nur und abonniert nie. Ein Broker, der nicht läuft, hält nie einen Build auf und lässt
+  keinen scheitern: die Türklingel hat einen eigenen Thread, eine begrenzte Warteschlange und Zeitlimits, schreibt ohne
+  das Passwort ins Protokoll, was schiefging, und Mojo zeigt das letzte gescheiterte Senden. **Test-Klingel senden**
+  (`config doorbell --test` und der Knopf in den Einstellungen) sendet eine über denselben Code. Die Einstellungen
+  (`mqtt_broker_url`, `mqtt_username`, `mqtt_topic_prefix`, Standard `llmcf`, und `mqtt_ca_file`) gehören nur dir,
+  das Passwort liegt nur im Tresor für Zugangsdaten (`mqtt_password`), einfaches `mqtt://` geht nur auf diesem
+  Computer (der Name `localhost` oder eine Loopback-Adresse; ein Name unter `.localhost` geht an den Resolver des
+  Systems und braucht `mqtts://` wie jeder andere Broker), jeder andere Broker braucht `mqtts://` mit geprüftem
+  Zertifikat; im Offline-Modus nur ein lokaler Broker. Ein Programm, das gleich nach einem Build endet (jedes
+  `llm-cli build start`), sendet seine Türklingel und schreibt seine Chat-Zeile vorher noch, höchstens 15 s länger.
+  Neue Abhängigkeiten, mit Hashes festgelegt: aiomqtt 2.5.1 (BSD-3-Clause) und paho-mqtt 2.1.0 (EPL-2.0 oder
+  EDL-1.0), geladen nur, wenn eine Türklingel gesendet wird.
+- `2026-10-30 12:56 UTC` · `v3.3.0` **Das Ende jedes Builds im Chat, einmal** ([Design](docs/DESIGN_DE.md#mcp-server-tools-und-berechtigungen)):
+  wenn ein Build endet, bekommt der Chat-Verlauf genau eine Zeile dafür (entdoppelt über seine Anfrage-ID), für jeden
+  Build, auch den eigenen der Person (vom Framework; der Build einer KI wie bisher in deren Namen): „Build fertig.“,
+  „Fehler beim Bauen: …“ mit dem Grund als festem Wort (eine Stufe ist fehlgeschlagen, die weiche Grenze, die
+  Leerlauf-Grenze) oder „Build gestoppt.“. Die Zeile enthält nur den Endgrund, die KI, die ihn abgebrochen hat, und
+  die Anfrage-ID, nie Log-Text, den Namen eines Modells oder einen Pfad; die Einzelheiten kommen über MCP
+  (`get_build_status`, `read_build_log`).
+- `2026-10-30 12:55 UTC` · `v3.3.0` **Jedes Warten endet am Endgrund des Builds** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
+  `llm-cli build status REQUEST_ID --wait SEKUNDEN` wartet auf einen Build jedes Programms (der geteilte Build-Stand)
+  und endet an seinem Endgrund; `build start --follow` ebenso. Beide sagen ihn in klaren Worten („Build ready“, „Error
+  while building: …“, „Build stopped: …“) und enden mit 0 (done), 1 (failed, soft_cap, idle), 2 (cancelled) oder, bei
+  `--wait`, 3 (läuft noch). Die Fortschrittszeile des Builders sagt, wie der Build endete. `get_build_status` hat das
+  neue Feld `end_reason` (None, solange der Build läuft), und sein Long-Poll kehrt, wie Dittos Warten, sofort zurück,
+  sobald es gesetzt ist; `get_job_status` gibt einem Laufzeit-Build-Job (`build_local_runtime`) denselben
+  `end_reason`. Der Build-Verlauf (CLI und GUI) zeigt ihn als Feld „Ende“.
+- `2026-10-30 12:45 UTC` · `v3.3.0` **Ein Build endet an seiner Fertig-Marke** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
+  der Stufen-Runner (`build.sh` jedes Targets und der Runner, den der Modulgenerator schreibt) schreibt als
+  allerletzten Schritt EINEN Abschluss-Eintrag, `stages/<Job>/build.end` im Arbeitsordner (`status done|failed`,
+  `exit`, `stage`, `job`, den Digest der Eingaben und eine UTC-Zeit), "done" erst nach der Marke der letzten Stufe;
+  eine fehlgeschlagene Stufe, eine abgelehnte Schleife und jedes andere Ende schreiben "failed" über denselben
+  Schreiber. Die Build-Engine liest ihn: Sobald er fertig sagt, ist die Uhr des Schritts aus, weder die
+  Leerlauf-Grenze noch die weiche Grenze eines KI-Builds kann den Build nach der Marke stoppen; der Container hat 30 s,
+  um sich selbst zu beenden, dann stoppt ihn das Framework, und der Build ist trotzdem fertig. Ein Container, der ohne
+  den Eintrag mit 0 endet, ist ein fehlgeschlagener Build („der Build endete ohne seinen Abschluss-Eintrag“), nie ein
+  stiller Erfolg. Jeder Build hat einen Endgrund aus einem festen Vokabular (done, failed, cancelled, soft_cap, idle),
+  gespeichert in seinem Build-Eintrag und bei einem fertigen Build als `end` (reason, exit, stage) in
+  `build_info.json`. Ein Eintrag hinter einem Link (der Eintrag, sein Job-Ordner oder der Ordner stages: der
+  Container schreibt den Arbeitsordner) zählt nie, und ein alter wird nie über so einen Link entfernt.
 
 ### Geändert
 - `2026-10-30 14:55 UTC` · `v3.3.0` **Deine Board-Tests erscheinen in den Benchmarks des Targets, und übergangene alte Einträge werden genannt** ([Design](docs/DESIGN_DE.md#targets-hardware-und-vorlagen)):
@@ -53,6 +108,13 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   `get_settings` zeigt sie weiter, als nur lesbar markiert. `build_timeout` und `local_cache_keep_minutes` bleiben,
   wie sie waren: Eine KI darf sie nur senken. Du änderst alle wie bisher in den Einstellungen, in der Gruppe
   Prompt-Cache und mit `llm-cli ditto cache set`.
+- `2026-10-30 12:56 UTC` · `v3.3.0` **Die Chat-Zeile eines Builds nennt, wie er endete, nicht seinen Ordner** ([Design](docs/DESIGN_DE.md#mcp-server-tools-und-berechtigungen)):
+  die Zeile eines KI-Builds sagte „fertig und als <Ordner-Label> gespeichert“ oder „mit Fehlern fertig: N geschafft, M
+  fehlgeschlagen“; jetzt sagt sie „Build fertig.“, „Fehler beim Bauen: …“ oder „Build gestoppt.“ mit dem Endgrund als
+  einzigem Wert (das Ordner-Label konnte den Namen eines Modells tragen).
+- `2026-10-30 12:55 UTC` · `v3.3.0` **`build start --follow` endet bei einem abgebrochenen Build mit 2** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
+  ein anderswo abgebrochener Build (in der GUI, von einer KI) beendete das Folgen mit Exit-Code 1 wie ein Fehler; jetzt
+  endet es mit 2, dem Exit-Code des Endgrunds cancelled. Strg+C im Befehl selbst bleibt 130.
 
 ### Behoben
 - `2026-10-30 15:11 UTC` · `v3.3.0` **`llm-cli ditto cache`, `ditto cache set` und `ditto models list` sagen klar, wenn sie es nicht
@@ -121,6 +183,11 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   verloren (und `GGML_NEON`, das keine Option von ggml ist). Jetzt plant sie `-march` und `GGML_CPU_ARM_ARCH` aus
   den Fähigkeiten der Probe wie das Build-Rezept (`armv8.2-a+dotprod+fp16` auf diesen Boards), und ein
   Tabellentest führt beide an denselben Profilen aus.
+- `2026-10-30 12:45 UTC` · `v3.3.0` **Ein Abbrechen der Person zählt nicht mehr als Neustart für den Schleifenschutz** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
+  eine von außen gestoppte Stufe zählte für `STAGE_RESTART_LIMIT`, auch wenn die Person (oder eine KI) den Build
+  abgebrochen hatte, so dass drei Abbrüche den nächsten Build als Schleife ablehnten. Das Abbrechen des Frameworks
+  schreibt jetzt eine Notiz in den Stufenordner, bevor es den Container stoppt, und der Stufen-Runner gibt den Start
+  der laufenden Stufe zurück; ein Stopp von außen ohne die Notiz zählt weiter.
 
 ### Sicherheit
 - `2026-10-30 14:40 UTC` · `v3.3.0` **Das Vorab-Laden der Abhängigkeiten entpackt über das eine sichere Entpacken des

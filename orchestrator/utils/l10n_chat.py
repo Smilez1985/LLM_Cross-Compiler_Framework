@@ -111,6 +111,7 @@ TEXTS = {
         "chat.notice.new_conversation_no_tools": "Answered without tools: Ditto summarized the conversation, which "
                                                  "used tools, and continues in a new conversation.",
         "chat.notice.source_local": "Ditto now uses its own tools: a new conversation.",
+        "chat.notice.build_turn": "Ditto looks at how its build {request_id} ended.",
         # LEGACY: the removed remote mode wrote these keys into feed rows; they stay so stored rows still render.
         # Nothing writes them any more.
         "chat.notice.source_remote": "Ditto now uses the tools of the framework at {name}: a new conversation.",
@@ -304,6 +305,7 @@ TEXTS = {
         "chat.notice.new_conversation_no_tools": "Ohne Werkzeuge beantwortet: Ditto hat das Gespräch, in dem Werkzeuge "
                                                  "liefen, zusammengefasst und macht in einem neuen Gespräch weiter.",
         "chat.notice.source_local": "Ditto nutzt jetzt seine eigenen Werkzeuge: ein neues Gespräch.",
+        "chat.notice.build_turn": "Ditto schaut, wie sein Build {request_id} geendet hat.",
         # LEGACY (see the English block): stored rows of the removed remote mode still render.
         "chat.notice.source_remote": "Ditto nutzt jetzt die Werkzeuge des Frameworks auf {name}: ein neues Gespräch.",
         "chat.tool.used_on": "Benutzt auf {place}: {title}",

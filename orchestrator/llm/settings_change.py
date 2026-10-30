@@ -63,8 +63,13 @@ _KV_ORDER = {"q4_0": 0, "q8_0": 1, "f16": 2}   # memory of the KV-cache type, sm
 # stop the person's own long builds, and pinning "auto" of the prompt cache or the KV-cache type to a value freezes
 # a value that may no longer fit this computer later.
 PERSON_DECIDES = ("build_idle_timeout", "local_cache_ram_mib", "local_kv_cache")
+# The MQTT doorbell's broker, user name, topic prefix and CA file (Core/doorbell.py): an AI may not redirect or
+# silence the person's notifications.
+MQTT_SETTINGS = ("mqtt_broker_url", "mqtt_username", "mqtt_topic_prefix", "mqtt_ca_file")
 PERSON_ONLY_SETTINGS = (tuple(OPT_OUT_SETTINGS) + tuple(BUILD_SOURCE_SETTINGS) + (CACHE_OVER_CAP_OK,)
-                        + PERSON_DECIDES)
+                        + PERSON_DECIDES + MQTT_SETTINGS)
+MQTT_PERSON_ONLY_TEXT = ("{key} says where the build doorbell rings. Only the person sets it, in the framework's "
+                         "settings; no AI can redirect or silence it.")
 PERSON_ONLY_TEXT = ("{key} says what offline mode counts as local besides this computer and the own network. Only the "
                     "person sets it, in the framework's settings; no AI and no settings change of an AI can.")
 BUILD_SOURCE_TEXT = ("{key} says where an offline build of the build container image fetches packages from in the own "
@@ -89,6 +94,8 @@ def person_only_text(key: str) -> str:
         return IDLE_PERSON_ONLY_TEXT.format(key=key)
     if key in PERSON_DECIDES:
         return CACHE_SIZE_PERSON_ONLY_TEXT.format(key=key)
+    if key in MQTT_SETTINGS:
+        return MQTT_PERSON_ONLY_TEXT.format(key=key)
     return (BUILD_SOURCE_TEXT if key in BUILD_SOURCE_SETTINGS else PERSON_ONLY_TEXT).format(key=key)
 
 

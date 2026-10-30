@@ -59,6 +59,8 @@ CLI_PATHS: Dict[str, str] = {
     "build deps delete": "btn_build_deps_delete",
     "build status": "act_build_history",
     "build status --all": "act_build_history",
+    # the Builder's progress panel follows a build until its end record and says how it ended
+    "build status --wait": "panel_builder_progress",
     "config show": "act_file_settings",
     "config output-folder": "act_file_output_folder",
     "config repos": "act_file_settings",
@@ -66,6 +68,14 @@ CLI_PATHS: Dict[str, str] = {
     "config repos --remove": "act_file_settings",
     # File > Settings... > Local network: what offline mode counts as local, and the person's opt-outs
     "config local-network": "act_file_settings",
+    # File > Settings... > Build doorbell (orchestrator/gui/doorbell_settings.py)
+    "config doorbell": "act_file_settings",
+    "config doorbell --broker": "act_file_settings",
+    "config doorbell --username": "act_file_settings",
+    "config doorbell --prefix": "act_file_settings",
+    "config doorbell --ca-file": "act_file_settings",
+    "config doorbell --password": "act_file_settings",
+    "config doorbell --test": "act_file_settings",
     "config local-network --add": "act_file_settings",
     "config local-network --remove": "act_file_settings",
     "config local-network --check": "act_file_settings",

@@ -119,6 +119,10 @@ class BuildStatusOut(BaseModel):
                                                                           "read-only")
     started_in: Optional[Literal["GUI", "CLI", "MCP server", "API server", "framework process"]] = Field(
         default=None, description="For process 'other': the program that runs it, where the person can stop it")
+    end_reason: Optional[Literal["done", "failed", "cancelled", "soft_cap", "idle"]] = Field(
+        default=None, description="How the build ended, None while it runs: done (its end record says done; the only "
+                                  "success), failed, cancelled, soft_cap (an AI-started build ran past its soft cap) or "
+                                  "idle (a step printed nothing for the idle timeout)")
 
 
 class BuildList(BaseModel):

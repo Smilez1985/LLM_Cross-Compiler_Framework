@@ -16,7 +16,9 @@ Rules:
 - One signed row per event, written through `FeedWriter`: ai_action, job_result, grant_used, approval, approval_end
   or blocked (refused_before_question, and report_cannot_do). Rows of the same refusal within BLOCKED_QUIET seconds
   are written once, so an AI that tries a refused tool in a loop cannot flood the chat; the audit log keeps every one.
-- The person's own calls (actor gui or cli) produce nothing; neither does a caller without a trusted caller id.
+- The person's own calls (actor gui or cli) produce nothing; neither does a caller without a trusted caller id. A
+  build's end is the one exception (DECISIONS round 40): every build gets exactly one row, the person's own from the
+  framework, with the fixed vocabulary of Core/build_end.py only.
 - The sender is the trusted caller id (ditto, mcp, mcp:<token>). An app's own name appears only as its claim.
 - A row holds closed values only: tool, job kind, state and reason codes, setting keys (never their values), ids
   the framework issued, a window from tool_windows.WINDOW_IDS, step ids of the next-step catalogue
@@ -105,7 +107,7 @@ PARAM_RULES: Dict[str, Callable[[str], bool]] = {
     "state": lambda v: _NAME.fullmatch(v) is not None and len(v) <= 24,
     "status": lambda v: v in BUILD_STATES,
     "code": lambda v: _NAME.fullmatch(v) is not None,
-    "reason": lambda v: _NAME.fullmatch(v) is not None,
+    "reason": lambda v: _NAME.fullmatch(v) is not None,   # a refusal's code, or a build's end reason
     "action": lambda v: _NAME.fullmatch(v) is not None,
     "stage": lambda v: _NAME.fullmatch(v) is not None,
     "blocker": lambda v: _NAME.fullmatch(v) is not None,
@@ -263,29 +265,33 @@ def row_for_job(summary: Mapping[str, Any], *, window: Optional[str] = None) -> 
                 level="info" if outcome == "done" else "warning")
 
 
+def build_end_reason(data: Mapping[str, Any]) -> Optional[str]:
+    """The end reason of a build end's facts (Core/build_end.py END_REASONS), from the facts' own end_reason, else
+    from the old status (completed is done, error is failed, cancelled is cancelled); None for anything else."""
+    from orchestrator.Core.build_end import END_REASONS
+    reason = data.get("end_reason")
+    if reason in END_REASONS:
+        return str(reason)
+    return {"completed": "done", "error": "failed", "cancelled": "cancelled"}.get(str(data.get("status") or ""))
+
+
 def row_for_build(data: Mapping[str, Any]) -> Optional[Row]:
-    """The row of a build's end (job_result): a build an AI started, or one an AI cancelled. None for the person's
-    own build that no AI touched."""
+    """The row of a build's end (job_result), for EVERY build (DECISIONS round 40): "Build ready" (done), "Error while
+    building" with the reason as a fixed word (failed, soft_cap, idle), "Build stopped" (cancelled). The caller is the
+    AI that started it or cancelled it (its trusted caller id), else the framework ("" for the person's own build).
+    Params only from the closed vocabulary (reason, the cancelling AI's caller id) and the framework's request id;
+    never log text, a model's name or a path: the details come over MCP (get_build_status, read_build_log)."""
     owner, by = trusted_caller(data.get("owner")), trusted_caller(data.get("cancelled_by"))
-    caller = owner or by
-    status = str(data.get("status") or "")
-    if caller is None or status not in BUILD_STATES:
+    caller = owner or by or ""
+    reason = build_end_reason(data)
+    if reason is None:
         return None
-    params = {"status": status, "saved": data.get("saved"), "completed": data.get("completed"),
-              "failed": data.get("failed"), "by": by or ""}
+    params = {"reason": reason, "by": by or ""}
     refs = {"request_id": data.get("request_id"), "window": "builder"}
-    if status == "completed":
-        try:
-            partial = int(data.get("failed") or 0) > 0
-        except (TypeError, ValueError):
-            partial = False
-        if partial:
-            return _row("job_result", caller, "activity.build.partial", "activity.build.completed", params, refs,
-                        level="warning", needs=("completed", "failed"))
-        return _row("job_result", caller, "activity.build.saved", "activity.build.completed", params, refs,
-                    needs=("saved",))
-    return _row("job_result", caller, f"activity.build.{status}", "activity.build.error", params, refs,
-                level="info" if status == "cancelled" else "warning")
+    key = {"done": "activity.build.ready", "cancelled": "activity.build.stopped"}.get(
+        reason, f"activity.build.error.{reason}")
+    return _row("job_result", caller, key, "activity.build.error", params, refs,
+                level="warning" if reason in ("failed", "soft_cap", "idle") else "info")
 
 
 Listener = Callable[[StoredEntry], None]
@@ -313,6 +319,7 @@ class ActivityProducer:
         self._listeners: List[Listener] = []
         self._unsubscribe: List[Callable[[], None]] = []
         self._job_windows: "OrderedDict[str, str]" = OrderedDict()
+        self._ended_builds: "OrderedDict[str, bool]" = OrderedDict()   # request ids whose end row was written
         self._quiet: Dict[Tuple[str, str, str], float] = {}
         self._dropped = 0
         self.job_service: Any = None
@@ -375,7 +382,17 @@ class ActivityProducer:
             logger.warning(f"No chat row for a job's end: {e.__class__.__name__}")
 
     def on_build_end(self, data: Dict[str, Any]) -> None:
+        """One row per build end, edge-triggered: a request id whose end was written already is not written again
+        (an end listener that fires twice, a second producer on the same orchestrator)."""
         try:
+            rid = str(data.get("request_id") or "")
+            with self._cv:
+                if rid in self._ended_builds:
+                    return
+                if rid:
+                    self._ended_builds[rid] = True
+                    while len(self._ended_builds) > REMEMBERED_JOBS:
+                        self._ended_builds.popitem(last=False)
             self._put(row_for_build(data))
         except Exception as e:  # noqa: BLE001
             logger.warning(f"No chat row for a build's end: {e.__class__.__name__}")
@@ -456,7 +473,8 @@ class ActivityProducer:
 
     def _write(self, row: Row) -> StoredEntry:
         writer = FeedWriter(self.feed, self.program())   # type: ignore[arg-type] - entry() needs no store
-        role = "ditto" if row.caller == "ditto" else "client"
+        # no caller: the framework's own row (the end of the person's own build)
+        role = "ditto" if row.caller == "ditto" else "client" if row.caller else "framework"
         sender = writer.sender(role, row.caller, client=row.client if role == "client" else "")
         asked_in = row.asked_in if writer.program == "gui" and row.caller == "ditto" else ""
         entry = writer.activity_entry(row.kind, sender, text_key=row.text_key, params=row.params,

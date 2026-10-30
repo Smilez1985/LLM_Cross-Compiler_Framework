@@ -22,6 +22,8 @@ from orchestrator.Core import job_service
 from orchestrator.Core.builder import HF_REPO_ID, MODEL_FILE_SUFFIXES, ModelFormat, OptimizationLevel
 from orchestrator.schemas.targets import OPTIMIZATION_LEVELS as OPTIMIZATION_LEVEL_NAMES
 from orchestrator.Core.job_service import owner_actor
+from orchestrator.Core.build_end import END_REASONS
+from orchestrator.Core.build_history import end_of
 from orchestrator.Core.orchestrator import (BuildQueueFull, BuildRequest, OrchestrationStatus, PriorityLevel,
                                             WorkflowState, WorkflowType)
 from orchestrator.schemas.build import (ArtifactDetails, ArtifactFile, ArtifactList, ArtifactOut, BuildHandle,
@@ -310,7 +312,22 @@ class BuildService:
                 confidence=p.confidence, where=p.where, proposed_by=p.proposed_by, client=p.client,
                 created=p.created) for p in getattr(state, "client_proposals", [])],
             owner=owner_actor(getattr(state, "owner", "")) or None,
-            request=RequestSummary(**getattr(state, "summary", {})) if getattr(state, "summary", None) else None)
+            request=RequestSummary(**getattr(state, "summary", {})) if getattr(state, "summary", None) else None,
+            end_reason=self._end_reason(state))
+
+    def _end_reason(self, state: WorkflowState) -> Optional[str]:
+        """The request's end reason (the orchestrator's one rule, Core/build_end.py), None while it runs."""
+        try:   # the rule of the orchestrator, when there is one (a status read needs none)
+            rule = getattr(self._orchestrator, "end_reason_of", None)
+        except BuildServiceError:
+            rule = None
+        if callable(rule):
+            try:
+                return rule(state)
+            except Exception:  # noqa: BLE001 - a stand-in orchestrator: the state's own value
+                pass
+        value = getattr(state, "end_reason", None)
+        return value if value in END_REASONS else None
 
     _RUNNING = (OrchestrationStatus.PREPARING, OrchestrationStatus.BUILDING, OrchestrationStatus.HEALING)
 
@@ -424,6 +441,7 @@ class BuildService:
             except (TypeError, ValueError):
                 progress = 0
             found[rid] = BuildStatusOut(
+                end_reason=end_of(record),
                 request_id=rid, status=status, stage=str(record.get("stage") or ""), progress_percent=progress,
                 total_builds=1, completed_builds=1 if status == "completed" else 0,
                 failed_builds=1 if status in ("error", "interrupted") else 0,
@@ -455,6 +473,7 @@ class BuildService:
         summary = record.get("summary") if isinstance(record.get("summary"), dict) else {}
         owner = str(record.get("owner") or "")
         return BuildStatusOut(
+            end_reason=end_of(record),
             request_id=rid, status=status, stage=str(record.get("stage") or ""),
             progress_percent=min(100, number("progress")), total_builds=number("total_builds"),
             completed_builds=number("completed_builds"), failed_builds=number("failed_builds"),
@@ -520,13 +539,13 @@ class BuildService:
     def _change_key(self, request_id: str):
         s = self.get_status(request_id)
         return (s.status, s.stage, s.progress_percent, s.completed_builds, s.failed_builds, len(s.errors),
-                len(s.warnings), s.pending_healing is not None)
+                len(s.warnings), s.pending_healing is not None, s.end_reason)
 
     def wait_for_change(self, request_id: str, timeout: float, poll: float = 0.25) -> bool:
         """Blocks until the build's status, stage, progress or healing proposal changes, or it has ended, at most
         `timeout` seconds (capped at 50). For a caller in its own thread (Ditto). True when something changed."""
         start = self._change_key(request_id)
-        if str(start[0]).lower() in BUILD_FINISHED:
+        if str(start[0]).lower() in BUILD_FINISHED or start[-1]:
             return False
         deadline = time.monotonic() + max(0.0, min(float(timeout), job_service.MAX_WAIT_SECONDS))
         while time.monotonic() < deadline:
@@ -541,7 +560,7 @@ class BuildService:
         Cancelling the wait never touches the build."""
         import anyio
         start = self._change_key(request_id)
-        if str(start[0]).lower() in BUILD_FINISHED:
+        if str(start[0]).lower() in BUILD_FINISHED or start[-1]:
             return False
         now = time.monotonic()
         deadline = now + max(0.0, min(float(timeout), job_service.MAX_WAIT_SECONDS))
