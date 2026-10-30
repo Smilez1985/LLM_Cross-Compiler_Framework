@@ -97,7 +97,7 @@ def safe_extract_tar(tf: tarfile.TarFile, dest_dir: Path, *, links: bool = True)
         if not (member.isfile() or member.isdir() or member.issym() or member.islnk()):
             raise UnsafeArchive(f"Security: special file in archive: {member.name}")
 
-    if hasattr(tarfile, "data_filter"):
+    if _tar_filters_available():
         tf.extractall(dest_dir, members=members, filter="data")
     else:
         # Without extraction filters, chained links could still escape; only plain files and dirs are allowed.
@@ -106,6 +106,11 @@ def safe_extract_tar(tf: tarfile.TarFile, dest_dir: Path, *, links: bool = True)
             raise UnsafeArchive(f"Security: links in archive need Python >= 3.10.12 / 3.11.4: {found[:3]}")
         # Every member was checked above (plain files and folders only).
         tf.extractall(dest_dir, members=members)  # nosec B202
+
+
+def _tar_filters_available() -> bool:
+    """Whether this Python's tarfile has extraction filters (3.10.12 / 3.11.4 and later)."""
+    return hasattr(tarfile, "data_filter")
 
 
 def safe_extract_archive(archive_path: Path, dest_dir: Path):

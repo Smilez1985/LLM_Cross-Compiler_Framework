@@ -376,15 +376,17 @@ class TestAroundTheTree:
         tree.mkdir(parents=True)
         (tree / "open.log").write_text("busy")
         os.chmod(around, 0o755)
+        before = stat.S_IMODE(os.stat(around).st_mode)   # 0o755 on POSIX; Windows reports its own mode bits
         left = atomic.remove_tree(tree)
         assert [p.name for p in left] == ["open.log"]
-        assert stat.S_IMODE(os.stat(around).st_mode) == 0o755
+        assert stat.S_IMODE(os.stat(around).st_mode) == before
 
     def test_a_folder_that_vanished_meanwhile_leaves_the_folder_around_alone(self, tmp_path, monkeypatch):
         around = tmp_path / "models"
         tree = around / ".bench-copy"
         tree.mkdir(parents=True)
         os.chmod(around, 0o755)
+        before = stat.S_IMODE(os.stat(around).st_mode)   # 0o755 on POSIX; Windows reports its own mode bits
         real = atomic.shutil.rmtree
 
         def gone_first(path, **kw):   # another clean-up removed it between the check and the removal
@@ -392,7 +394,7 @@ class TestAroundTheTree:
             real(path, **kw)
         monkeypatch.setattr(atomic.shutil, "rmtree", gone_first)
         assert atomic.remove_tree(tree) == []
-        assert stat.S_IMODE(os.stat(around).st_mode) == 0o755
+        assert stat.S_IMODE(os.stat(around).st_mode) == before
 
     def test_a_folder_that_cannot_be_opened_is_made_accessible_and_removed(self, tmp_path, unreadable_folders):
         """rmtree's error handler got os.open for such a folder; calling os.open(path) again raised TypeError (a
