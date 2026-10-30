@@ -640,7 +640,8 @@ build request into the per-user folder (`build_requests/`) and one record per bu
 so builds that another process started are listed too, including requests still waiting in its queue (column
 `Where`: the program that runs it). Without an ID: a table of the 20 newest
 builds; with a request ID (`req_...`) or a build ID: the details of each attempt, including the error of a failed
-build (credentials redacted). A build whose process has ended before the build finished is shown as `interrupted`.
+build (credentials redacted) and, for a finished build, its statistics (how long the conversion and the quantization
+ran, the size before and after, from its `build_info.json`). A build whose process has ended before the build finished is shown as `interrupted`.
 Exit code 1 if the ID is not found. The command needs neither the credential vault nor Docker. On Linux and macOS
 the records folder and its records are readable only by the user who built (modes 0700 and 0600), so in a shared
 installation each user sees their own builds.

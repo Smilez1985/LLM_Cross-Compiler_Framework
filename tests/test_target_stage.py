@@ -583,6 +583,13 @@ def test_the_manifest_holds_every_build_detail_and_the_checksums_cover_every_fil
         "board": "rk3588"}
     assert manifest["build"]["llama_cpp"]["tag"] == "b11429" and manifest["build"]["source_model"] == "granite.fp16.gguf"
     assert manifest["build"]["input_format"] == "gguf" and isinstance(manifest["build"]["jobs"], int)
+    # the convert statistics (DECISIONS round 25 Q8): durations, sizes and tool versions, numbers and words only; a
+    # GGUF input still has the convert stage's numbers of its check
+    build = manifest["build"]
+    assert all(isinstance(build[k], int) and build[k] >= 0 for k in ("convert_seconds", "quantize_seconds",
+                                                                       "input_bytes", "converted_bytes"))
+    assert build["tools"]["python"].startswith("Python 3") and set(build["tools"]) == {"python", "cmake", "compiler"}
+    assert all("/" not in value for value in build["tools"].values())
     assert manifest["hardware"]["source"] == "profile" and manifest["hardware"]["cpu"] == "Cortex-A55"
     assert "-mcpu=cortex-a55" in manifest["hardware"]["cflags"]
     assert manifest["tests"]["functional"] == "skipped: the image has no llama-completion or llama-cli for this machine"
@@ -610,8 +617,8 @@ def short_functional_test(image, seconds=1):
 
 @needs_bash
 @pytest.mark.parametrize("fail, outcome", [(None, "passed (llama-completion, 8 tokens on the build machine)"),
-                                           ("completion-hang", "timed out after 1 s (llama-completion on the build "
-                                                               "machine); not a failure")])
+                                           ("completion-hang", "timed out after 1 s without output (llama-completion "
+                                                               "on the build machine); not a failure")])
 def test_the_functional_test_runs_the_model_on_the_build_machine(image, fail, outcome):
     """The package's functional test is the convert stage's (scripts/model_check.py test, one implementation): 8
     tokens of the quantized model, bounded, offline, with the options this llama-completion has."""

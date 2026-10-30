@@ -14,6 +14,15 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 
 ### Hinzugefügt
 
+- `2026-10-30 05:33 UTC` · `v3.2.0` **Die Statistik des Builds im Paket-Manifest und im Build-Eintrag**
+  (Konsolidierungskette build-flags-time; Entscheidung zu den Zeitgrenzen, Teil Manifest): Das `MANIFEST.json` des
+  Pakets (`create_package_manifest` beider Target-Vorlagen) ergänzt nur, was es noch nicht hatte:
+  `build.convert_seconds`, `build.quantize_seconds`, `build.input_bytes` und `build.converted_bytes` der Konvertierung,
+  und `build.tools` mit der ersten Zeile von `--version` von `python3`, `cmake` und dem Cross-Compiler, den die
+  Toolchain-Datei des Build-Plans nennt (eine Zeile mit einem Pfad bleibt draußen). `build_info.json` hält
+  `quantize_seconds` fest. `llm-cli build status REQUEST_ID` und Build > Build-Verlauf… zeigen die „Statistik“ eines
+  fertigen Builds (`build_history.statistics_text`: Sekunden der Konvertierung, Größe davor und danach, Sekunden der
+  Quantisierung). Tests: `tests/test_build_statistics.py`, der Manifest-Test in `tests/test_target_stage.py`.
 - `2026-10-30 04:30 UTC` · `v3.2.0` **Abhängigkeiten von CMake-Optionen eines Moduls vor dem Build geholt**
   (Konsolidierungskette build-flags-time; Entscheidung zu den CMake-Flags von Modulen, Nachtrag zu den Abhängigkeiten):
   Was `-DLLAMA_BUILD_BORINGSSL=ON`, `-DLLAMA_BUILD_LIBRESSL=ON` oder `-DGGML_CPU_KLEIDIAI=ON` llama.cpp beim Bauen
@@ -51,7 +60,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
 
 ### Geändert
 
-- `2026-10-30 05:20 UTC` · `v3.2.0` **Keine harte Zeitgrenze für einen Build-Schritt** (Konsolidierungskette
+- `2026-10-30 05:19 UTC` · `v3.2.0` **Keine harte Zeitgrenze für einen Build-Schritt** (Konsolidierungskette
   build-flags-time; Entscheidung zu den Zeitgrenzen): Ein Schritt dauert so lange, wie er dauert. Das neue
   `orchestrator/utils/step_limits.py` (StepLimits, StepClock, StepTimedOut, ein TimeoutError) ist die eine Regel für
   die Stufen-Container des Builds (`BuildEngine._run_container` wartet jetzt in kurzen Runden) und die Schritte

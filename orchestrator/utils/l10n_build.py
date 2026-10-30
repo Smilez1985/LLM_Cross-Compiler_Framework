@@ -178,6 +178,7 @@ TEXTS = {
         "bld.field.started": "Started",
         "bld.field.ended": "Ended",
         "bld.field.output": "Output folder",
+        "bld.field.statistics": "Statistics",
         "bld.field.process": "Process",
         "bld.field.error": "Error",
 
@@ -413,6 +414,7 @@ TEXTS = {
         "bld.field.started": "Gestartet",
         "bld.field.ended": "Beendet",
         "bld.field.output": "Ausgabeordner",
+        "bld.field.statistics": "Statistik",
         "bld.field.process": "Prozess",
         "bld.field.error": "Fehler",
 

@@ -220,7 +220,9 @@ def image(tmp_path):
 # What the target stage adds to build_info.json from the convert stage (its statistics: input, output, ratio, duration,
 # functional test). The characterization tests here compare build_info.json as it was before; the statistics are
 # pinned in tests/test_convert_stage.py.
-_CONVERSION = re.compile(rb', "conversion": \{[^{}]*\}(?=\}\s*$)')
+# The build's statistics in build_info.json: the convert stage's ("conversion") and the target stage's
+# ("quantize_seconds", DECISIONS round 25 Q8); they vary from run to run and are checked on their own
+_CONVERSION = re.compile(rb'(?:, "conversion": \{[^{}]*\})?(?:, "quantize_seconds": \d+)?(?=\}\s*$)')
 
 
 def _without_conversion(path: Path) -> bytes:

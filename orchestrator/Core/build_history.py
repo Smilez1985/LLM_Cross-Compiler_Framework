@@ -20,7 +20,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 REQUEST_FIELDS = ("request", "status", "stage", "progress", "model", "target", "board", "format", "quantization",
                   "optimization", "owner", "where", "started", "ended")
 RECORD_FIELDS = ("build", "request", "status", "stage", "progress", "model", "target", "board", "format",
-                 "quantization", "output", "started", "ended", "process", "error")
+                 "quantization", "output", "statistics", "started", "ended", "process", "error")
 
 
 def shared_requests(config: Any) -> List[Dict[str, Any]]:
@@ -57,13 +57,42 @@ def request_rows(request: Dict[str, Any]) -> List[Tuple[str, Any]]:
     return [(name, values[name]) for name in REQUEST_FIELDS]
 
 
+def statistics_text(output_dir: Any) -> str:
+    """The convert statistics of a finished build in one line (its build_info.json: how long the conversion and the
+    quantization ran, the size before and after; DECISIONS round 25 Q8), "" when the build wrote none."""
+    import json
+    from orchestrator.Core.deletion import size_text
+    if not output_dir:
+        return ""
+    try:
+        info = json.loads((Path(str(output_dir)) / "build_info.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    conversion = info.get("conversion") if isinstance(info, dict) else None
+    conversion = conversion if isinstance(conversion, dict) else {}
+
+    def number(value: Any) -> Optional[int]:
+        return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0 else None
+    parts = []
+    seconds, before, after = (number(conversion.get(k)) for k in ("seconds", "input_bytes", "output_bytes"))
+    if seconds is not None:
+        parts.append(f"convert {seconds} s")
+    if before and after:
+        parts.append(f"{size_text(before)} to {size_text(after)}")
+    quantize = number(info.get("quantize_seconds")) if isinstance(info, dict) else None
+    if quantize is not None:
+        parts.append(f"quantize {quantize} s")
+    return ", ".join(parts)
+
+
 def record_rows(record: Dict[str, Any]) -> List[Tuple[str, Any]]:
     """(field, value) of one build attempt (a build record) in RECORD_FIELDS order; empty values included."""
     values = {"build": record.get("build_id"), "request": record.get("request_id"), "status": record.get("status"),
               "stage": record.get("stage"), "progress": f"{record.get('progress') or 0}%",
               "model": record.get("model"), "target": record.get("target"), "board": record.get("board"),
               "format": record.get("format"), "quantization": record.get("quantization"),
-              "output": record.get("output_dir"), "started": record.get("started"), "ended": record.get("ended"),
+              "output": record.get("output_dir"), "statistics": statistics_text(record.get("output_dir")),
+              "started": record.get("started"), "ended": record.get("ended"),
               "process": record.get("pid"), "error": record.get("error")}
     return [(name, values[name]) for name in RECORD_FIELDS]
 
@@ -161,4 +190,5 @@ def read_history(config: Any, resolve: Callable[[Any], Any]) -> BuildHistory:
 
 
 __all__ = ["BuildDetails", "BuildHistory", "BuildRow", "RECORD_FIELDS", "REQUEST_FIELDS", "client_proposals",
+           "statistics_text",
            "read_history", "record_rows", "request_rows", "shared_requests"]

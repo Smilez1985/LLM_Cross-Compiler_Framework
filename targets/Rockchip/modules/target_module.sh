@@ -62,8 +62,10 @@ quantize_kept_gguf() {
     local q="$1" f16_file="$2" out_file="$3"
     shift 3
     echo ">> Quantizing -> $q"
+    local started=$SECONDS
     "$QUANTIZE_BIN" "$@" "$f16_file" "$out_file" "$q"
     [ -s "$out_file" ] || die "llama-quantize ended without writing the $q model."
+    TARGET_CONFIG[QUANTIZE_SECONDS]=$(( ${TARGET_CONFIG[QUANTIZE_SECONDS]:-0} + SECONDS - started ))
     TARGET_CONFIG[QUANTIZED_GGUF]="$out_file"
     TARGET_CONFIG[QUANT_METHOD]="$q"
 }
@@ -87,6 +89,9 @@ write_build_info() {
     local conversion=""
     if [ -s "$CONVERT_STATS" ]; then
         conversion=", \"conversion\": $(cat "$CONVERT_STATS")"
+    fi
+    if [ -n "${TARGET_CONFIG[QUANTIZE_SECONDS]:-}" ]; then   # how long llama-quantize ran (the convert statistics
+        conversion="$conversion, \"quantize_seconds\": ${TARGET_CONFIG[QUANTIZE_SECONDS]}"   # have the rest)
     fi
     cat > "$OUTPUT_DIR/build_info.json" <<EOF
 {"model": "$MODEL_NAME", "format": "$FORMAT", "board": "$BOARD", "quantization": "${QUANT:-default}", "llama_cpp": "$(cat "$LLAMA_BASE/.llama_cpp_tag" 2>/dev/null || echo unknown)"$conversion}
@@ -640,6 +645,40 @@ create_helper_scripts() {
     done
 }
 
+# One number of the convert stage's statistics (convert_stats.json: seconds, input_bytes, output_bytes), 0 without them
+conversion_stat() {
+    python3 - "$CONVERT_STATS" "$1" <<'PY' 2>/dev/null || echo 0
+import json, sys
+try:
+    value = json.load(open(sys.argv[1], encoding="utf-8")).get(sys.argv[2])
+except (OSError, ValueError):
+    value = None
+print(int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0)
+PY
+}
+
+# The first line of a program's --version (never a function of this script), "unknown" without the program; a
+# line that names a path is not kept (the manifest holds no path of the build machine)
+tool_version() {
+    local line=""
+    if command -v "$1" >/dev/null 2>&1; then
+        line="$(command "$1" --version 2>/dev/null | head -n 1 | tr -d '\r' | cut -c1-120)" || true
+    fi
+    case "$line" in
+        ''|*/*) printf 'unknown' ;;
+        *) printf '%s' "$line" ;;
+    esac
+}
+
+# The C compiler of the board's cross build: the one the toolchain file of the build plan names, else cc
+plan_compiler() {
+    local compiler=""
+    if [ -f "${CMAKE_TOOLCHAIN_FILE:-}" ]; then
+        compiler="$(sed -n 's/^[Ss][Ee][Tt](CMAKE_C_COMPILER[[:space:]]\{1,\}\([^[:space:])]*\).*/\1/p' "$CMAKE_TOOLCHAIN_FILE" | head -n 1)"
+    fi
+    printf '%s' "${compiler:-cc}"
+}
+
 create_package_manifest() {
     local package_dir="$1" model_file imatrix="no"
     model_file="$(basename "${TARGET_CONFIG[INPUT_GGUF]}")"
@@ -659,6 +698,13 @@ create_package_manifest() {
         --set "build.llama_cpp.tag=$(cat "$LLAMA_BASE/.llama_cpp_tag" 2>/dev/null || echo unknown)" \
         --set "build.llama_cpp.commit=$(cat "$LLAMA_BASE/.llama_cpp_commit" 2>/dev/null || echo unknown)" \
         --int "build.cross_compile_seconds=${BUILD_STATS[BUILD_TIME]:-0}" \
+        --int "build.convert_seconds=$(conversion_stat seconds)" \
+        --int "build.quantize_seconds=${TARGET_CONFIG[QUANTIZE_SECONDS]:-0}" \
+        --int "build.input_bytes=$(conversion_stat input_bytes)" \
+        --int "build.converted_bytes=$(conversion_stat output_bytes)" \
+        --set "build.tools.python=$(tool_version python3)" \
+        --set "build.tools.cmake=$(tool_version cmake)" \
+        --set "build.tools.compiler=$(tool_version "$(plan_compiler)")" \
         --int "build.jobs=${BUILD_JOBS:-4}" \
         --set "build.framework=LLM Cross-Compiler Framework" \
         --set "hardware.profile=$(profile_text)" \

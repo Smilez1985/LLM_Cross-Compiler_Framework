@@ -1015,7 +1015,10 @@ Funktionen aus 1.x sind geblieben:
   `llm/<Paket>` im Home-Ordner des Benutzers auf dem Board, und prüft die Kopie dort; `./deploy.sh [ZIEL]` auf dem
   Board selbst kopiert es nach ZIEL, Vorgabe `/opt/llm`), `MANIFEST.json` mit
   jedem Detail des Builds (Modell, Quantisierung, llama.cpp, Board, Profil, Flags, Tests, jede Datei mit Größe und
-  SHA-256) und `SHA256SUMS`. Die Helfer kommen aus `scripts/package_test_model.sh`, `scripts/package_deploy.sh` und
+  SHA-256; die Statistik des Builds unter `build`: `convert_seconds`, `quantize_seconds`, `cross_compile_seconds`,
+  `input_bytes` und `converted_bytes` der Konvertierung, und `tools` mit der ersten Zeile von `--version` von
+  `python3`, `cmake` und dem Cross-Compiler, nie ein Pfad) und `SHA256SUMS`. `build_info.json` hält
+  `quantize_seconds` neben der `conversion` der Convert-Stufe fest. Die Helfer kommen aus `scripts/package_test_model.sh`, `scripts/package_deploy.sh` und
   `scripts/board_package.py` des Targets. Bevor das Paket bleibt, läuft das Modell einmal auf diesem Rechner
   (`llama-completion` des Images, wenn es eins hat), mit dem Funktionstest der Stufe convert
   (`scripts/model_check.py test`, [Abschnitt 6.5](#65-die-prüfungen-der-stufe-convert)): Ein Lauf, der mit einem

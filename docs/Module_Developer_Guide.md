@@ -977,8 +977,11 @@ are the build again, with the dispatcher's work moved into the stage it belongs 
   `deploy.sh` (`./deploy.sh USER@HOST [DEST]` copies the package over `ssh` and `scp` with
   `StrictHostKeyChecking=yes`, so the board's host key must already be known, to DEST, default `llm/<package>` in the
   user's home on the board, and checks the copy there; `./deploy.sh [DEST]` on the board itself copies it to DEST, default `/opt/llm`), `MANIFEST.json` with every build
-  detail (model, quantization, llama.cpp, board, profile, flags, tests, each file with its size and SHA-256) and
-  `SHA256SUMS`. The helpers come from the target's `scripts/package_test_model.sh`, `scripts/package_deploy.sh` and
+  detail (model, quantization, llama.cpp, board, profile, flags, tests, each file with its size and SHA-256; the
+  build's statistics in `build`: `convert_seconds`, `quantize_seconds`, `cross_compile_seconds`, `input_bytes` and
+  `converted_bytes` of the conversion, and `tools` with the first line of `python3`, `cmake` and the cross compiler's
+  `--version`, never a path) and `SHA256SUMS`. `build_info.json` records `quantize_seconds` next to the convert
+  stage's `conversion`. The helpers come from the target's `scripts/package_test_model.sh`, `scripts/package_deploy.sh` and
   `scripts/board_package.py`. Before the package is kept, the model is run once on this machine (`llama-completion`
   of the image, when it has one) with the convert stage's functional test (`scripts/model_check.py test`,
   [section 6.5](#65-the-checks-of-the-convert-stage)): a run that ends with an error or crashes stops the package,
