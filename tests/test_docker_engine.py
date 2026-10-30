@@ -466,6 +466,29 @@ def test_every_framework_container_is_created_through_the_one_helper():
     assert sites == ["orchestrator/utils/docker_engine.py"], sites
 
 
+# containers.run creates and starts a container in one call and pulls a missing image by itself. The two sites that
+# use it check their image first (the builder's Trivy scan by the offline image rule, the benchmark window by
+# images.get) and run as root inside the container, so rootless Podman's keep-id does not apply to them.
+CONTAINERS_RUN_SITES = {
+    "orchestrator/Core/builder.py": 1,            # the Trivy scan (BuildEngine._scan_image_security)
+    "orchestrator/gui/benchmark_window.py": 1,    # llama-bench (BenchmarkWorker.run)
+}
+
+
+def test_containers_run_is_used_only_at_the_two_known_sites():
+    """A new container of the framework is created through docker_engine.create_container; containers.run stays at
+    the two known sites (CONTAINERS_RUN_SITES), and a new one fails here."""
+    sites = {}
+    for path in sorted((REPO_ROOT / "orchestrator").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "run"
+                    and isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "containers"):
+                rel = path.relative_to(REPO_ROOT).as_posix()
+                sites[rel] = sites.get(rel, 0) + 1
+    assert sites == CONTAINERS_RUN_SITES, sites
+
+
 # --- every place that connects to Docker ---------------------------------------------------------------------------
 
 def test_every_docker_client_is_made_after_the_one_helper():
