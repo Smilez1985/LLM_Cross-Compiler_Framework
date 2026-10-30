@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 from orchestrator.runtime.build.recipe import DEPENDENCY_OF_OPTION
-from orchestrator.utils.helpers import sha256_file
+from orchestrator.utils.helpers import hash_stream, sha256_file
 
 CACHE_FOLDER = "build-deps"          # below the framework's cache folder
 PINS_FILE = "pins.json"
@@ -118,19 +118,20 @@ def needed_for(words: Sequence[str]) -> List[Dependency]:
 def tree_sha256(root: Path) -> str:
     """sha256 over every file of a tree (sorted relative paths, the executable bit, each file's sha256; a link's
     target): the content llmcf records on the first fetch and checks after."""
-    h = hashlib.sha256()
     root = Path(root)
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames.sort()
-        for name in sorted(filenames):
-            path = Path(dirpath) / name
-            rel = path.relative_to(root).as_posix()
-            if path.is_symlink():
-                h.update(f"L {rel} {os.readlink(path)}\n".encode("utf-8", "replace"))
-                continue
-            executable = "x" if os.stat(path).st_mode & stat.S_IXUSR else "-"
-            h.update(f"F {rel} {executable} {sha256_file(path)}\n".encode("utf-8", "replace"))
-    return h.hexdigest()
+
+    def lines():
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames.sort()
+            for name in sorted(filenames):
+                path = Path(dirpath) / name
+                rel = path.relative_to(root).as_posix()
+                if path.is_symlink():
+                    yield f"L {rel} {os.readlink(path)}\n".encode("utf-8", "replace")
+                    continue
+                executable = "x" if os.stat(path).st_mode & stat.S_IXUSR else "-"
+                yield f"F {rel} {executable} {sha256_file(path)}\n".encode("utf-8", "replace")
+    return hash_stream(lines())   # the one hashing implementation (utils/helpers.py)
 
 
 def tree_bytes(root: Path) -> int:
