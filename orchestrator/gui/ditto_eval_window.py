@@ -23,13 +23,13 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QGroupBox,
-                               QHBoxLayout, QHeaderView, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit,
-                               QProgressBar, QPushButton, QScrollArea, QSpinBox, QTableWidget, QTableWidgetItem,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
+                               QFormLayout, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLineEdit, QListWidget,
+                               QListWidgetItem, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSpinBox,
+                               QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from orchestrator.evals import eval_run
-from orchestrator.evals.ditto_eval import KINDS, RAG_VARIANTS
+from orchestrator.evals.ditto_eval import KINDS, PAID_KINDS, RAG_VARIANTS
 from orchestrator.gui.ai_choice import catalog_of, chosen, fill_models, fill_providers, is_local
 from orchestrator.gui.plain import ask, button_text, one_line, plain_box, plain_label, plain_tooltip
 from orchestrator.gui.runtime_mode_box import job_begins, job_ends, job_running
@@ -39,6 +39,7 @@ from orchestrator.utils.localization import current_language, ui_text
 
 EFFORTS = ("low", "medium", "high")   # `ditto eval --effort`
 REPEAT_MAX = 20                       # click.IntRange(1, 20)
+PAUSE_MAX = 180                       # `--pause-minutes`: click.FloatRange(0.1, 180)
 
 
 def _save_file(parent: QWidget, title: str, name: str, filters: str) -> str:
@@ -70,7 +71,7 @@ class _RelayEvents(eval_run.EvalEvents):
 
     def result(self, result):
         self._emit("result", result.case.id, result.pass_rate, result.seconds,
-                   result.first_problem() if result.pass_rate < 1 else "")
+                   result.first_problem() if result.pass_rate < 1 else "", getattr(result, "outcome", ""))
 
     def server_replaced(self, model):
         self._emit("replaced", model)
@@ -98,6 +99,7 @@ class EvaluationWindow(QDialog):
         self._events: Optional[object] = None
         self._stop = threading.Event()
         self._done_cases = 0
+        self._paid = False                          # the running evaluation is the paid OpenAI test
         self.setWindowTitle(self._t("ditto_eval.title"))
         self.resize(980, 860)
 
@@ -180,12 +182,12 @@ class EvaluationWindow(QDialog):
 
         self.grp_kinds = QGroupBox(self._t("ditto_eval.kinds"), group)
         self.grp_kinds.setObjectName("grp_ditto_eval_kinds")
-        kinds = QHBoxLayout(self.grp_kinds)
+        kinds = QGridLayout(self.grp_kinds)
         self.chk_kinds: Dict[str, QCheckBox] = {}
-        for kind in KINDS:
+        for index, kind in enumerate(KINDS):
             check = QCheckBox(button_text(self._t(f"ditto_eval.kind.{kind}")), self.grp_kinds)
             check.setObjectName(f"chk_ditto_eval_kind_{kind}")
-            kinds.addWidget(check)
+            kinds.addWidget(check, index // 2, index % 2)
             self.chk_kinds[kind] = check
         box.addWidget(self.grp_kinds)
 
@@ -214,6 +216,14 @@ class EvaluationWindow(QDialog):
         self.sp_repeat.setRange(1, REPEAT_MAX)
         self.sp_repeat.setValue(1)
         form.addRow(plain_label(self._t("ditto_eval.repeat"), group, wrap=False), self.sp_repeat)
+        self.sp_pause = QDoubleSpinBox(group)   # `ditto eval --pause-minutes`; 0: no pause (the default)
+        self.sp_pause.setObjectName("sp_ditto_eval_pause")
+        self.sp_pause.setRange(0, PAUSE_MAX)
+        self.sp_pause.setDecimals(1)
+        self.sp_pause.setValue(0)
+        self.sp_pause.setSpecialValueText(self._t("ditto_eval.pause.none"))
+        self.sp_pause.setSuffix(self._t("ditto_eval.pause.suffix"))
+        form.addRow(plain_label(self._t("ditto_eval.pause"), group, wrap=False), self.sp_pause)
         box.addLayout(form)
         return group
 
@@ -267,6 +277,12 @@ class EvaluationWindow(QDialog):
         self.tbl_retrieval = self._table(group, "tbl_ditto_eval_retrieval")
         self.tbl_retrieval.setVisible(False)
         box.addWidget(self.tbl_retrieval)
+        self.lbl_tokens = plain_label(self._t("ditto_eval.tokens"), group)
+        self.lbl_tokens.setVisible(False)
+        box.addWidget(self.lbl_tokens)
+        self.tbl_tokens = self._table(group, "tbl_ditto_eval_tokens")
+        self.tbl_tokens.setVisible(False)
+        box.addWidget(self.tbl_tokens)
         return group
 
     @staticmethod
@@ -358,7 +374,8 @@ class EvaluationWindow(QDialog):
                 "rag_variants": tuple(v for v, c in self.chk_variants.items() if c.isChecked()),
                 "case_ids": tuple(self._checked(self.lst_cases)), "repeat": self.sp_repeat.value(),
                 "tiers": tuple(self.tiers()), "provider": provider, "model": model,
-                "effort": self.cb_effort.currentData() or None}
+                "effort": self.cb_effort.currentData() or None,
+                "pause_minutes": round(self.sp_pause.value(), 1) if self.sp_pause.value() >= 0.1 else None}
 
     # --- the question before a run ----------------------------------------------------------------------------------
 
@@ -469,7 +486,25 @@ class EvaluationWindow(QDialog):
         if problem:
             self._tell("warning", self._t("ditto_eval.failed", reason=one_line(problem)))
             return False
-        if not ask(self, self._t("ditto_eval.title"), self.question(choice, cases)):
+        paid = any(c.kind in PAID_KINDS for c in cases)
+        if paid:
+            # the paid OpenAI test: OpenAI only, never in CI or offline (eval_run.check_paid, the CLI's gate); the
+            # confirmation below is the person's yes (`--i-pay`), with the most it can cost
+            if (choice["provider"] or "").lower() != "openai" or choice["tiers"]:
+                self._tell("warning", self._t("ditto_eval.paid.provider"))
+                return False
+            try:
+                eval_run.check_paid(self.framework, cases, provider=choice["provider"], tiers=choice["tiers"],
+                                    i_pay=True)
+            except eval_run.EvalRunError as e:
+                self._tell("warning", self._t("ditto_eval.failed", reason=one_line(e)))
+                return False
+            cost = eval_run.paid_estimate(cases, choice["repeat"])
+            question = self._t("ditto_eval.paid.question", calls=cost["calls"], tokens=cost["input_tokens"],
+                               path=str(self._check_path()))
+        else:
+            question = self.question(choice, cases)
+        if not ask(self, self._t("ditto_eval.title"), question):
             return False
         guard = object() if local_runs else None
         if guard is not None and not job_begins(guard):   # another runtime task began while the question was open
@@ -494,13 +529,15 @@ class EvaluationWindow(QDialog):
         total = ai_runs * sum(c.kind != "retrieval" for c in cases) + len(variants) * sum(
             c.kind == "retrieval" for c in cases)
         self.kinds_shown = sorted({c.kind for c in cases})
+        self._paid = paid
 
         def work():
             return eval_run.run_evaluation(framework, cases, make_ditto=make_ditto, make_runtime=factory,
                                            tiers=choice["tiers"], provider=choice["provider"], model=choice["model"],
                                            effort=choice["effort"], cases_file=choice["cases_file"],
                                            rag_variants=choice["rag_variants"], repeat=choice["repeat"],
-                                           events=events, stop=stop)
+                                           events=events, stop=stop, pause_minutes=choice["pause_minutes"],
+                                           i_pay=paid)
 
         self.log.clear()
         self._done_cases = 0
@@ -522,6 +559,10 @@ class EvaluationWindow(QDialog):
 
         threading.Thread(target=run, name="ditto-eval", daemon=True).start()
         return True
+
+    def _check_path(self) -> Path:
+        """Where the paid test's openai_cache_check.json goes (eval_run.openai_check_path, as the CLI writes it)."""
+        return eval_run.openai_check_path(getattr(self.framework, "config", None))
 
     def cancel(self) -> None:
         if self._job is not None:
@@ -560,8 +601,10 @@ class EvaluationWindow(QDialog):
                                              repeat=repeat))
             self.lbl_busy.setText(self._t("ditto_eval.working"))
         elif kind == "result":
-            _, case_id, rate, seconds, problem = payload
+            _, case_id, rate, seconds, problem, outcome = payload
             key = "pass" if rate == 1 else ("fail" if rate == 0 else "partial")
+            if outcome in ("xfail", "xpass", "skipped"):   # not counted: said so, an unexpected pass loudly
+                key = outcome
             self.log.appendPlainText(self._t(f"ditto_eval.log.{key}", id=one_line(case_id), seconds=f"{seconds:.1f}",
                                              rate=f"{rate:.0%}", problem=one_line(problem[:160])))
             self._done_cases += 1
@@ -577,6 +620,14 @@ class EvaluationWindow(QDialog):
         if ok:
             self.runs = list(value)
             text = self._t("ditto_eval.done", runs=len(self.runs))
+            if self._paid:   # the paid test's result file, as the CLI writes it
+                try:
+                    saved = eval_run.save_openai_check(self._check_path(), self.runs)
+                except OSError as e:
+                    saved = None
+                    self.log.appendPlainText(self._t("ditto_eval.save_failed", reason=one_line(e)))
+                if saved is not None:
+                    self.log.appendPlainText(self._t("ditto_eval.paid.saved", path=str(saved)))
         elif isinstance(value, EvalCancelled):
             self.runs = list(value.runs)
             text = self._t("ditto_eval.cancelled")
@@ -604,6 +655,13 @@ class EvaluationWindow(QDialog):
             header = [self._t("ditto_eval.col.run"), *columns[1:5], self._t("ditto_eval.col.unrelated"),
                       self._t("ditto_eval.col.p50")]
             self._fill(self.tbl_retrieval, header, rows)
+        tokens = eval_run.tokens_table(runs)   # the CLI's "Tokens" table, numbers from the provider's usage
+        self.lbl_tokens.setVisible(tokens is not None)
+        self.tbl_tokens.setVisible(tokens is not None)
+        if tokens is not None:
+            header = [self._t(f"ditto_eval.col.{key}") for key in
+                      ("run", "case", "turns", "input", "output", "cache_read", "cache_write", "cache_share")]
+            self._fill(self.tbl_tokens, header, tokens[1])
 
     @staticmethod
     def _fill(table: QTableWidget, header: List[str], rows: List[List[str]]) -> None:

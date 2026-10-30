@@ -1,4 +1,4 @@
-Version 3.1.0 · Last updated 2026-10-29
+Version 3.2.0 · Last updated 2026-10-30
 
 **English** · [Deutsch](ROADMAP_DE.md)
 
@@ -68,7 +68,7 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 
 | Item | Status |
 |---|---|
-| **Real token numbers first.** Count the tokens of every request per provider and model and the cache hits, and settle the 12-hour cache lifetime and the token count of OpenAI with one paid test call that the person starts in their own llmcf with their own key (never from a sandbox or CI; the key never leaves the computer). Round 29 (Q1), round 33 (item 2). | planned |
+| **Real token numbers: the person's paid run.** The measurement is built (the evaluation's `tokens` cases and the paid test `openai_paid`); what is left is the run itself: the person starts the paid OpenAI test once in their own llmcf with their own key (never from a sandbox or CI; the key never leaves the computer), and its `openai_cache_check.json` settles the 12-hour cache lifetime and the token count of OpenAI. Round 29 (Q1), round 33 (item 2). | planned |
 | **Smaller tool results and cleaner logs** for every model: what a tool returns and what a log line carries shrinks to what the model needs. Round 29 (Q1). | planned |
 | **One memory budget for Ditto's local server**: the KV cache quantised by the same automatic rule as on boards (`local_kv_cache = auto`), the RAM budget from the measured hardware, one margin for the operating system. Round 29 (Q1, Q4), round 32 (context 4). | planned |
 | **The real context window per model**, with counting, a budget and compaction: Ditto's local model from the measured hardware limits, API models per model, asked from the provider's server where it tells. Round 29 (Q3), round 32 (context 4). | planned |

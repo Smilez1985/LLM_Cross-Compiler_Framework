@@ -165,6 +165,11 @@ class AnthropicAdapter(ProviderAdapter):
             params["output_config"] = output_config
         if cache_control:
             params["cache_control"] = cache_control  # automatic caching of the growing conversation
+        probe = request.cache_probe
+        if probe is not None and probe.anthropic_diagnostics:
+            # Evaluation only: the answer names why the prompt cache missed against the previous response (the API
+            # keeps hashes and token estimates of the prompt, not its text). None on a conversation's first call.
+            params["diagnostics"] = {"previous_message_id": probe.previous_message_id}
         return params
 
     def _complete(self, request: ChatRequest, model: str) -> ChatResult:
@@ -178,7 +183,10 @@ class AnthropicAdapter(ProviderAdapter):
                 response = client.messages.create(**params)
         except Exception as e:
             raise self._map_error(e) from None
-        return self.to_result(response, model)
+        result = self.to_result(response, model)
+        if "diagnostics" in params:
+            result.cache_miss_reason, result.cache_missed_tokens = cache_miss(response)
+        return result
 
     def to_result(self, response: Any, requested_model: str) -> ChatResult:
         blocks = [b.to_dict() for b in response.content]  # exactly as returned: thinking blocks, signatures
@@ -194,6 +202,7 @@ class AnthropicAdapter(ProviderAdapter):
                         cache_write_tokens=getattr(usage, "cache_creation_input_tokens", None) or 0),
             message=Message(role="assistant", content=text, tool_calls=calls,
                             native=NativeMessage(family=self.family, payload={"role": "assistant", "content": blocks})),
+            response_id=str(getattr(response, "id", "") or ""),
         )
         if stop == "refusal":
             details = getattr(response, "stop_details", None)
@@ -216,6 +225,20 @@ class AnthropicAdapter(ProviderAdapter):
             return models
         except Exception as e:
             raise self._map_error(e) from None
+
+
+def cache_miss(response: Any):
+    """(reason, missed tokens) of a response to a request that asked for `diagnostics` (only an evaluation asks, see
+    types.CacheProbe): the reason's type, "none" when the response names no divergence, "pending" when the comparison
+    was not finished."""
+    diagnostics = getattr(response, "diagnostics", None)
+    if diagnostics is None:
+        return "none", None
+    reason = getattr(diagnostics, "cache_miss_reason", None)
+    if reason is None:
+        return "pending", None
+    missed = getattr(reason, "cache_missed_input_tokens", None)
+    return str(getattr(reason, "type", "") or "unknown")[:40], missed if isinstance(missed, int) else None
 
 
 def render_tool(tool: ToolSpecLLM) -> Dict[str, Any]:

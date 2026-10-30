@@ -496,15 +496,27 @@ def roadmap_versions(rel: str) -> List[str]:
     return versions
 
 
+def roadmap_version_in_progress(rel: str, version: str) -> bool:
+    """Whether the roadmap's overview table gives `version` the status "in progress" ("in Arbeit")."""
+    for line in section_lines(rel):
+        cells = [c.strip() for c in line.strip().strip("|").split("|")] if line.lstrip().startswith("|") else []
+        if cells and cells[0] == version and cells[-1] in ("in progress", "in Arbeit"):
+            return True
+    return False
+
+
 def test_roadmap_lists_only_what_comes():
-    """Finished versions leave the roadmap at release; it names only versions newer than the newest release."""
+    """Finished versions leave the roadmap at release; it names only versions newer than the newest release. The
+    newest changelog section may still be open while its roadmap rows are in progress (the version rule: the first
+    chain of a batch opens the next version's section, the integrator dates it at the merge)."""
     newest = changelog_entries("CHANGELOG.md")[0][0]
     found = {}
     for target in ROADMAP_LINKS.values():
         rel = target.partition("#")[0]
         assert (REPO_ROOT / rel).is_file(), f"{rel}, the roadmap, is missing"
         found[rel] = roadmap_versions(rel)
-        released = [v for v in found[rel] if _semver(v) <= _semver(newest)]
+        released = [v for v in found[rel] if _semver(v) < _semver(newest)
+                    or (v == newest and not roadmap_version_in_progress(rel, v))]
         assert not released, (f"{rel}: the roadmap still lists released version(s) {sorted(set(released))}; "
                               f"they belong in the changelog (newest release: {newest})")
     english, german = found.values()

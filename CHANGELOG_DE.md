@@ -10,6 +10,12 @@ weicht bewusst ab: Es gibt keinen Abschnitt `[Unreleased]`. Jeder Eintrag beginn
 der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und warum, steht im
 [Design](docs/DESIGN_DE.md).
 
+## [3.2.0] - 2026-10-30
+
+### Hinzugefügt
+- `2026-10-30 05:30 UTC` · `v3.2.0` **Token- und Cache-Messung in der Ditto-Evaluation**: Die Fallgruppe `tokens` (`llm-cli ditto eval --kind tokens`, Ditto > Bewertung...) führt Gespräche über mehrere Runden nur mit Beispieldaten (Dokumentationsadressen, Namen unter `example.com`) auf Dittos echtem Prompt und seinen Tools und hält je Runde die eigenen Eingabe-, Ausgabe-, Cache-Lese- und Cache-Schreib-Tokens des Anbieters aus seiner Usage-Antwort fest (nie geschätzt) und je Gespräch den Anteil aus dem Cache (Berichtsteil `tokens`, die Tabelle **Tokens** in der CLI und im Fenster). Mit Claude fragt jeder Aufruf eines `tokens`-Falls nach der Cache-Diagnose (`diagnostics.previous_message_id`, nur in der Evaluation) und hält den Grund eines Cache-Fehlschlags je Runde fest. Zwei Fälle, die heute scheitern, sind mit `expected_fail` markiert (die Nachfrage zur letzten Antwort nach der Verdichtung; 20 Runden auf einem lokalen Fenster mit 4096 Tokens, das nur auf einem verwalteten lokalen Modell läuft): Sie zählen nicht in den Bestehensquoten, und ein Bestehen wird als unerwartetes Bestehen gemeldet. `--pause-minutes N` (im Fenster **Pause zwischen den Runden**) wartet zwischen den Runden, um Cache-Lebensdauern zu vergleichen; ohne Angabe keine Pause, in CI abgelehnt. Die Fälle laufen nur, wenn sie gewählt sind (`--kind tokens` oder `--case`), nie von selbst. `scripts/measure_cache_ram.py` (nur für die Entwicklung) lässt sie auf einer lokalen Stufe laufen und gibt den höchsten RSS-Wert des llama-server, den dieser Lauf gestartet hat, und sein `--cache-ram` aus, nur Zahlen.
+- `2026-10-30 05:30 UTC` · `v3.2.0` **Der bezahlte OpenAI-Test (`openai_paid`)**: `llm-cli ditto eval --kind openai_paid --provider openai --i-pay` (an einem Terminal, nach einer weiteren Frage mit „Nein“ als Vorgabe, die höchstens 6 Anfragen und ihre Eingabe-Tokens nennt) oder Ditto > Bewertung... nach derselben Bestätigung schickt zwei gleiche lange Anfragen mit `prompt_cache_options.ttl` „12h“ (über `extra_body`; eine Ablehnung mit HTTP 400 wird als abgelehnt festgehalten, und das Paar geht noch einmal ohne sie hinaus) und vergleicht OpenAIs eigene Zählung (`responses.input_tokens.count`, die bereinigte Anfrage über denselben SDK-Client: `LLMClient.count_input_tokens`) mit der Usage des echten Aufrufs. Er läuft nie von selbst, nie in CI, nie im Offline-Modus, nie mit einem anderen Anbieter, und kein MCP- oder Ditto-Tool erreicht die Evaluation; der Key kommt aus deinem eigenen Secrets-Speicher. Das Ergebnis ist `openai_cache_check.json` in `evals/` des Zustandsordners des Benutzers, nur Wahrheitswerte und Token-Zahlen (kein Prompt-Text, kein Key).
+
 ## [3.1.0] - 2026-10-29
 
 ### Hinzugefügt
@@ -4466,6 +4472,7 @@ Cross-Kompilierung zu ermöglichen.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Grundlegende Unterstützung für die Cross-Kompilierung für Rockchip RK3588/RK3566.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Einstiegspunkte für CLI (`llm-cli`) und GUI (`llm-gui`).
 
+[3.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v2.4.0...v3.0.0
 [2.4.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v1.7.0...v2.4.0
