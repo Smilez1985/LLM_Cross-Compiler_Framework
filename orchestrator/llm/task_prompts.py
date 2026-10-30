@@ -139,11 +139,14 @@ def knowledge_excerpts(rag: Any, query: str, limit: int = 5, rerank: Optional[bo
     return wrap_untrusted(text, "knowledge base") if text else ""
 
 
-def log_for_ai(log_content: str, limit: int = LOG_CHARS) -> str:
+def log_for_ai(log_content: str, limit: int = LOG_CHARS, roots: Optional[Dict[str, str]] = None) -> str:
     """The end of a build log as a model reads it, in the one order: clean_log (escapes, redraws and repeats out,
     utils/logtext.py), then scrub_for_ai (this computer's home folder as '~', secrets redacted), then the cut to the last
     `limit` characters. Cleaning comes first so a colour code cannot hide a path from the scrubber and repeated lines
-    do not push the error out of the part that is kept. Only the last RAW_LOG_CHARS of the raw log are read."""
+    do not push the error out of the part that is kept. Only the last RAW_LOG_CHARS of the raw log are read.
+    `roots` maps the framework's own folders to their labels (the caller's, e.g. Core/folder_labels.ai_folder_labels;
+    llm/ never imports the Core): with it a path in one of them reaches the model as '<label>:<relative path>' and any
+    other path by its file name (security/paths.label_paths)."""
     raw = log_content or ""
     if len(raw) > RAW_LOG_CHARS:
         raw = raw[-RAW_LOG_CHARS:]
@@ -152,7 +155,7 @@ def log_for_ai(log_content: str, limit: int = LOG_CHARS) -> str:
     # No cap of its own here: the scrub can make the text longer (NFKC turns one '…' into three characters, a short
     # secret becomes 'REDACTED'), and a cap at the old length would cut off the end, the error. The raw part is
     # bounded above; the one cut is the next line.
-    text = scrub_for_ai(text, limit=sys.maxsize)
+    text = scrub_for_ai(text, roots=roots, limit=sys.maxsize)
     return text[-limit:]
 
 
@@ -174,9 +177,11 @@ SDK_HINTS = (("nvidia", "nvidia"), ("tegra", "nvidia"), ("rockchip", "rockchip")
 
 # --- the user turns of each task (Ditto and the MCP prompts) -------------------------------------------------------
 
-def healing_parts(log_content: str, context_info: str = "", knowledge: str = "") -> List[str]:
+def healing_parts(log_content: str, context_info: str = "", knowledge: str = "",
+                  roots: Optional[Dict[str, str]] = None) -> List[str]:
+    """The user turns of a healing task; `roots`: the framework's folder labels for the log (log_for_ai)."""
     parts = ["Build context:\n" + wrap_untrusted(context_info or "(none)", "build context", max_len=CONTEXT_CHARS),
-             "Build log (last part):\n" + wrap_untrusted(log_for_ai(log_content), "build log")]
+             "Build log (last part):\n" + wrap_untrusted(log_for_ai(log_content, roots=roots), "build log")]
     if knowledge:
         parts.append("Possibly related knowledge-base excerpts:\n" + knowledge)
     return parts

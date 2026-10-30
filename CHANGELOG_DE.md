@@ -39,6 +39,11 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Prompt-Cache und mit `llm-cli ditto cache set`.
 
 ### Behoben
+- `2026-10-30 15:02 UTC` · `v3.3.0` **Dittos Self-Healing-Prompt nennt die Ordner des Frameworks mit ihrem Namen** ([Design](docs/DESIGN_DE.md#freigabe-beim-self-healing)):
+  Ein Pfad im Ausgabe-, Build- oder Installationsordner des Frameworks erreicht die KI jetzt als
+  `output:<Pfad darin>`, `builds:...` oder `framework:...`, jeder andere Pfad auf diesem Computer mit seinem
+  Dateinamen, wie es `read_build_log` schon hatte (vorher kürzte der Self-Healing-Prompt nur den Home-Ordner, so
+  wurde ein Ausgabeordner anderswo ganz genannt).
 - `2026-10-30 14:58 UTC` · `v3.3.0` **Ein KI-Client erfährt, dass er das Build-Log bereinigt liest**: Die Beschreibung des Tools `read_build_log`
   und der Build-Log-Ressource sagt jetzt, dass im Log, das eine KI liest, Farbcodes und Fortschritts-Neuzeichnungen
   entfernt und wiederholte Zeilen zusammengefasst sind, jede Fehlerzeile bleibt, und dass du das rohe Log siehst
