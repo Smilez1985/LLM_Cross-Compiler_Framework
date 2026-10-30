@@ -3124,6 +3124,11 @@ Miracle now? [y/N]“; bei Ja läuft Mojo Miracle, ohne dass der Befehl noch ein
 
 **Mojo Miracle** (`llmcf mojo --miracle`) macht nur harmlose Reparaturen: Es schränkt den Zustandsordner auf deinen
 Benutzer ein, oder es lässt Dittos Server einen intakten gespeicherten llama.cpp-Build starten, wenn der aktive fehlt.
+Eine Reparatur braucht dein eigenes Ja: Installierte Wissens-Packs, die eine frühere Version ohne ihr Thema oder Target
+importiert hat (`community.knowledge.untagged`), werden erst neu importiert (`knowledge.reimport`), nachdem Mojo
+Miracle jedes Pack mit Ordner, Seiten und Größe gezeigt und du mit Ja geantwortet hast („Nein“ ist die Vorgabe), im
+Terminal oder im Mojo-Fenster; zuerst wird ein Snapshot angelegt, und keine KI kann es starten (für eine KI gilt es
+als Sache der Person).
 Die Art einer Reparatur ergibt sich aus ihren Schritten (ein Schritt, der löscht, Zugriff erweitert, den Tresor, die
 Berechtigungen oder das Audit-Log berührt oder das System braucht, ist nie harmlos). Jede Reparatur ist ein Probelauf,
 an seinen sha256 gebunden; direkt bevor sie läuft, prüft Mojo noch einmal und ändert nichts, wenn das Problem weg ist
@@ -3334,7 +3339,11 @@ gehalten:
   Thema oder ein Target), `llm-cli knowledge sources --topic` und das Feld **Thema oder Target** in **Tools >
   Wissensquellen...** grenzen die Liste genauso ein. Deine eigenen gecrawlten Seiten gehören von Anfang an zu einem
   Thema: Das Deep-Ingest-Fenster fragt danach (leer: der Name der Site, etwa `docs.example.com`), und ein Crawl, den
-  eine KI gestartet hat, nimmt den Namen der Site.
+  eine KI gestartet hat, nimmt den Namen der Site. Auszüge, die eine frühere Version importiert hat, bevor Auszüge ihr
+  Thema oder Target trugen, findet `topic` nicht, bis ihr Pack neu importiert ist: Ist die Wissensbasis offen, nennt
+  Mojo Oracle diese Packs (`community.knowledge.untagged`), und Mojo Miracle importiert sie erst nach deinem eigenen
+  Ja neu, nachdem es jedes Pack mit seinen Seiten und seiner Größe gezeigt hat (zuerst wird ein Snapshot angelegt;
+  eine KI kann es nicht starten).
 - **Ersetzen:** Eine neuere Version eines Packs ersetzt die Auszüge der älteren, je Pack und Seitenquelle: Sobald jede
   Seite der neuen Version drin ist, werden die Auszüge entfernt, die die alte Version hatte und die neue nicht, sodass
   kein veralteter Auszug bleibt. Der Snapshot der Wissensbasis vor dem Import bleibt. Eine Seite, die du mit Deep

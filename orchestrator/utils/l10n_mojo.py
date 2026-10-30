@@ -46,6 +46,12 @@ TEXTS = {
         "mojo.can.other_list": "Mojo Miracle cannot repair it: {reason}; you choose what is deleted or exported: "
                                "{where}.",
         "mojo.can.cannot": "Mojo Miracle cannot repair it: {reason}.",
+        "mojo.can.ask": "Mojo Miracle can do it after your yes: {summary}. It asks you first (No is the default).",
+        "mojo.can.ask_elsewhere": "Mojo Miracle does it only after your yes: {summary}. Run Mojo Miracle with you "
+                                  "present to be asked.",
+        # Mojo Miracle asks for a repair that needs the person's yes (class person: its plan, what it costs)
+        "mojo.yes.title": "Mojo Miracle: your yes",
+        "mojo.yes.text": "{summary}.\n\n{steps}\n\nDo it now?",
         # the overall line (the exit code of `llmcf mojo`)
         "mojo.overall.0": "Overall: no problems (exit code 0).",
         "mojo.overall.1": "Overall: warnings, no errors (exit code 1).",
@@ -133,6 +139,13 @@ TEXTS = {
         "mojo.can.other_list": "Mojo Miracle kann es nicht reparieren: {reason}; du wählst, was gelöscht oder "
                                "exportiert wird: {where}.",
         "mojo.can.cannot": "Mojo Miracle kann es nicht reparieren: {reason}.",
+        "mojo.can.ask": "Mojo Miracle kann es nach deinem Ja tun: {summary}. Es fragt dich zuerst („Nein“ ist die "
+                        "Vorgabe).",
+        "mojo.can.ask_elsewhere": "Mojo Miracle tut es nur nach deinem Ja: {summary}. Führe Mojo Miracle aus, während "
+                                  "du dabei bist, um gefragt zu werden.",
+        # Mojo Miracle fragt bei einer Reparatur, die dein Ja braucht (Klasse person: ihr Plan, was sie kostet)
+        "mojo.yes.title": "Mojo Miracle: dein Ja",
+        "mojo.yes.text": "{summary}.\n\n{steps}\n\nJetzt tun?",
         # die Gesamtzeile (der Exit-Code von `llmcf mojo`)
         "mojo.overall.0": "Gesamt: keine Probleme (Exit-Code 0).",
         "mojo.overall.1": "Gesamt: Warnungen, keine Fehler (Exit-Code 1).",

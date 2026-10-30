@@ -82,8 +82,11 @@ def _apply(framework, repair, code: str, *, actor: str, decision: str, answered_
         return RepairResult("plan_changed", code, plan.summary, plan_sha256=sha,
                             reason="nothing was changed: the problem changed since the plan was shown (look at the new "
                                    "plan)")
-    if plan.repair_class() != "delegable":
-        # The person's repairs (person, person_here) come with M2; a deletion is never a repair (WP7's list).
+    person_yes = plan.repair_class() == "person_yes" and decision == "person" and answered_by == "person"
+    if plan.repair_class() != "delegable" and not person_yes:
+        # A repair of class person_yes runs only after the person's own yes to this plan (decision and answer
+        # "person": a terminal or the framework's Mojo window), never for an AI; person and person_here come with M2;
+        # a deletion is never a repair (WP7's list).
         return RepairResult("refused", code, plan.summary, plan_sha256=sha,
                             reason=f"this repair is not harmless (class {plan.repair_class()}): it needs you in the "
                                    "framework")

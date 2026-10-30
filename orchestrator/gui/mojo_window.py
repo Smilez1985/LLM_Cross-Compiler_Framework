@@ -94,6 +94,16 @@ class DeletionRequest:
         self.answered = threading.Event()
 
 
+class YesRequest:
+    """Mojo Miracle's worker asks the person's own yes to one repair of class person (its plan with what it costs):
+    the GUI thread asks with "No" as the default and answers here."""
+
+    def __init__(self, offer):
+        self.offer = offer
+        self.accepted = False
+        self.answered = threading.Event()
+
+
 class BoardCheck(QObject):
     """The check of one trusted board for a window, off the GUI thread (boards.check_board: one connection to its SSH
     port, no login). `on_done(device_id, label, text, finding)` runs in the GUI thread with the person's text."""
@@ -283,6 +293,14 @@ class MojoWindow(QDialog):
                         return None
                 return request.accepted
 
+            def confirm(offer) -> bool:
+                request = YesRequest(offer)
+                relay.done.emit(token, ("ask", request, ""))
+                while not request.answered.wait(WAIT_STEP):
+                    if closed.is_set():   # the window was closed before the person answered: nothing is changed
+                        return False
+                return request.accepted
+
             def free_space() -> Tuple[int, str]:
                 outcome = offer_image_list(framework, ask_person, actor="gui")
                 images.append(outcome)
@@ -291,7 +309,7 @@ class MojoWindow(QDialog):
             # The plans shown bind the repairs: a problem that changed since then is not repaired (plan_changed).
             result = Mojo(framework).miracle(actor="gui", at_terminal=True, before=report, offered=offered,
                                              decision="person", answered_by="person", confirm_channel="framework-gui",
-                                             free_space=free_space)
+                                             free_space=free_space, confirm=confirm)
             return (result, offers(framework, result.after), boards_to_offer(framework, result.after),
                     images[-1] if images else None)
 
@@ -303,7 +321,7 @@ class MojoWindow(QDialog):
             return
         kind, value, problem = payload
         if kind == "ask":
-            self._answer(value)
+            (self._answer_yes if isinstance(value, YesRequest) else self._answer)(value)
             return
         self._token = None
         self.busy.setVisible(False)
@@ -331,6 +349,24 @@ class MojoWindow(QDialog):
                                             intro=intro, lang=self.lang)
         except Exception as e:  # noqa: BLE001 - nothing is deleted without the person's yes
             request.accepted = None
+            self.status.setText(self._t("mojo.failed", reason=one_line(str(e))))
+        finally:
+            request.answered.set()
+
+    def _answer_yes(self, request: YesRequest) -> None:
+        """The person's own yes to one repair of class person, for Mojo Miracle's worker: its plan (each step with its
+        full path and what it costs), "No" the default."""
+        if self._closed.is_set():   # the window was closed meanwhile: nothing is asked, nothing is changed
+            request.answered.set()
+            return
+        try:
+            from orchestrator.Core.mojo.views import plan_steps
+            steps = "\n".join(self._plan_step(step) for step in plan_steps(request.offer))
+            request.accepted = ask(self, self._t("mojo.yes.title"),
+                                   self._t("mojo.yes.text", summary=one_line(request.offer.plan.summary),
+                                           steps=display_text(steps)))
+        except Exception as e:  # noqa: BLE001 - nothing is changed without the person's yes
+            request.accepted = False
             self.status.setText(self._t("mojo.failed", reason=one_line(str(e))))
         finally:
             request.answered.set()

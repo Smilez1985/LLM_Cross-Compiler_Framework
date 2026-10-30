@@ -2817,7 +2817,11 @@ problem by what can be done about it. At a terminal it then asks "Run Mojo Mirac
 act; on yes Mojo Miracle runs without the command typed again.
 
 **Mojo Miracle** (`llmcf mojo --miracle`) makes only harmless repairs: it narrows the state folder to your user, or
-switches Ditto's server to an intact stored llama.cpp build when the active one is missing. A repair's class comes
+switches Ditto's server to an intact stored llama.cpp build when the active one is missing. One repair needs your own
+yes: installed knowledge packs an earlier version imported without their topic or target
+(`community.knowledge.untagged`) are imported again (`knowledge.reimport`) only after Mojo Miracle showed each pack
+with its folder, pages and size and you answered yes (No is the default), at a terminal or in the Mojo window; a
+snapshot is taken first, and no AI can start it (for an AI it reads as the person's). A repair's class comes
 from its steps (a step that deletes, widens access, touches the vault, the permissions or the audit log, or needs the
 system is never harmless). Each repair is a dry-run plan bound to its sha256; right before it runs, Mojo checks again
 and changes nothing when the problem is gone or the plan changed. The audit log records it first (or nothing
@@ -3006,7 +3010,11 @@ Every piece of shared knowledge belongs to a topic (for example
   claims to come from. `search_knowledge` and `list_knowledge_sources` take `topic` (a topic or a target),
   `llm-cli knowledge sources --topic` and the field **Topic or target** in **Tools > Knowledge Sources...** narrow the
   list the same way. Your own crawled pages belong to a topic from the start: the Deep Ingest window asks for it (empty:
-  the site's name, such as `docs.example.com`), and a crawl an AI started takes the site's name.
+  the site's name, such as `docs.example.com`), and a crawl an AI started takes the site's name. Excerpts an earlier
+  version imported before excerpts carried their topic or target are not found by `topic` until their pack is imported
+  again: when the knowledge base is open, Mojo Oracle names those packs (`community.knowledge.untagged`), and Mojo
+  Miracle imports them again only after your own yes, with each pack, its pages and size shown first (a snapshot is
+  taken first; an AI cannot start it).
 - **Upsert:** a newer version of a pack replaces the excerpts of the older one, per pack and page source: once every
   page of the new version is in, the excerpts the old version had and the new one does not are removed, so no stale
   excerpt stays. The snapshot of the knowledge base taken before the import stays. A page you crawl again with Deep

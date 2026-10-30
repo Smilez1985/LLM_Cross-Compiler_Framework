@@ -32,6 +32,16 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   und `llm-cli zoo show`, **Details...** im Community Hub (**Gehört zu**), das Tool `list_packs` und die Prüfzeile des
   Maintainers (CLI und GUI) nennen es, bevor etwas heruntergeladen wird. Ein Paket muss dorthin gehören, wo sein
   Eintrag es sagt, sonst wird es nicht installiert. Einen Index mit diesen Feldern liest erst 3.2.0 und später.
+- `2026-10-30 01:54 UTC` · `v3.2.0` **Packs, die ohne ihr Thema importiert wurden, werden gefunden und nach deinem Ja neu importiert**: Auszüge, die eine
+  frühere Version importiert hat, tragen weder den Digest ihres Pakets noch sein Thema oder Target, daher übersehen
+  `search_knowledge(topic=...)`, die Spalte Thema oder Target und die Wissensexporte sie. Ist die Wissensbasis offen,
+  nennt Mojo Oracle diese Pakete mit ihren Auszügen (`community.knowledge.untagged`;
+  `CommunityManager.untagged_imports`, `RAGManager.untagged`), und Mojo Miracle bietet an, sie neu zu importieren
+  (`knowledge.reimport`, `CommunityManager.import_again`): Es zeigt zuerst jedes Paket mit Ordner, Seiten und Größe und
+  fragt dich („Nein“ ist die Vorgabe), im Terminal oder im Mojo-Fenster; vor dem Import wird ein Snapshot angelegt. Es
+  ist die erste Reparatur der Klasse `person_yes` (Urteil `miracle_yes`): Sie läuft nur nach dem eigenen Ja der
+  Person, nie für eine KI, für die sie als Sache der Person gilt. Die Tool-Beschreibung von `search_knowledge` sagt,
+  was `topic` bis dahin übersieht.
 
 ### Geändert
 - `2026-10-30 01:26 UTC` · `v3.2.0` **Ein verlinkter Wissensordner wird übergangen, und das wird gesagt**: Ein symbolischer Link als
