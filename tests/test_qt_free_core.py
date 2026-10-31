@@ -276,7 +276,7 @@ def test_the_missing_extra_is_added_only_from_the_hash_pinned_list(tmp_path):
     message = run.stderr
     assert "llm-cross-compiler-framework" not in message and "[gui]" not in message, message
     installs = [message[m.end():] for m in re.finditer(r"pip install", message)]
-    # --no-deps: the export is complete, and pip resolving it again would trip over pyproject.toml's Pillow override
+    # --no-deps: the export is complete and hash-pinned, and pip resolving it again could pick other versions
     assert installs and all(i.startswith(" --require-hashes --no-deps -r requirements-gui.txt") for i in installs), \
         installs
     assert "--headless" in message, "or the installer again, without --headless"

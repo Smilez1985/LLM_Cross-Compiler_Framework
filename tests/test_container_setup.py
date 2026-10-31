@@ -875,7 +875,7 @@ class TestInstallShInAContainer:
         if failing is None:
             assert run.returncode == 0 and "AFTER setup_venv" in run.stdout, run.stdout + run.stderr
             installs = [line for line in (install_dir / "pip.log").read_text().splitlines() if "--upgrade" not in line]
-            # --no-deps: the complete export as it is, never resolved again (pyproject.toml's Pillow override)
+            # --no-deps: the complete export as it is, never resolved again (the hashes pin every package)
             assert installs == [f"install --require-hashes --no-deps -r {wanted}"]
             return
         assert run.returncode != 0, run.stdout + run.stderr

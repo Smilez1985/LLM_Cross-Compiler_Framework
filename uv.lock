@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.11, <3.15"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -8,9 +8,6 @@ resolution-markers = [
     "python_full_version >= '3.11.5' and python_full_version < '3.12'",
     "python_full_version < '3.11.5'",
 ]
-
-[manifest]
-overrides = [{ name = "pillow", specifier = ">=13.0.0" }]
 
 [[package]]
 name = "actionlint-py"

@@ -152,26 +152,22 @@ def test_installers_install_only_the_hash_pinned_requirements_of_this_checkout()
         "install.sh --headless installs the base export"
 
 
-def test_the_pillow_override_lasts_only_while_fastembed_caps_pillow():
-    """pyproject.toml overrides fastembed's Pillow < 13 cap so the advisories fixed in Pillow 13 are gone. That is
-    safe only while the framework decodes no image with Pillow; and once fastembed allows the locked Pillow itself,
-    the override must go (this test then says so)."""
+def test_pillow_needs_no_override_since_fastembed_allows_pillow_13():
+    """fastembed up to 0.9.0 capped Pillow below 13, and pyproject.toml overrode that cap so the advisories fixed in
+    Pillow 13 were gone. fastembed 0.9.1 allows Pillow 13 itself, so the override went: the lock keeps Pillow 13 or
+    newer on fastembed's own requirement, and no [tool.uv] override-dependencies come back without a reason here."""
     import importlib.metadata as metadata
 
-    overrides = pyproject()["tool"]["uv"]["override-dependencies"]
-    assert overrides == ["pillow>=13.0.0"], "a new override needs its own reason and check here"
+    assert "override-dependencies" not in pyproject().get("tool", {}).get("uv", {}), \
+        "a new override needs its own reason and check here"
     locked = {norm(p["name"]): p["version"] for p in lock()["package"] if p.get("source", {}).get("registry")}
     assert int(locked["pillow"].split(".")[0]) >= 13
-    offenders = [str(path.relative_to(REPO_ROOT)) for path in (REPO_ROOT / "orchestrator").rglob("*.py")
-                 if re.search(r"^\s*(from|import)\s+PIL\b", path.read_text(encoding="utf-8"), re.M)]
-    assert offenders == [], "framework code decodes images with Pillow: check it against fastembed's cap first"
     try:
         requires = metadata.requires("fastembed") or []
     except metadata.PackageNotFoundError:
         return
     caps = [Requirement(r) for r in requires if norm(Requirement(r).name) == "pillow"]
-    assert caps and any(locked["pillow"] not in c.specifier for c in caps), \
-        "fastembed allows the locked Pillow now: remove [tool.uv] override-dependencies from pyproject.toml"
+    assert all(locked["pillow"] in c.specifier for c in caps), "fastembed caps the locked Pillow again"
 
 
 def test_the_installers_and_workflows_install_the_export_without_resolving_again():
