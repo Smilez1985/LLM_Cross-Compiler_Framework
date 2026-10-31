@@ -334,10 +334,7 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
     result.notes.extend(board_ops.restrict_key(shell, sudo_user=(settings.ssh_user or "") if systemd and facts.sudo
                                                and not facts.helper else ""))
     if systemd and not facts.helper and shell.session.gated:
-        raise RemoteError("the deploy settings choose the systemd unit, but llmcf's root helper and its exact sudo "
-                          "rules are not on the board, and the framework's key runs only llmcf's operations. Pair "
-                          "the board again with its password so the framework installs them, or switch the deploy "
-                          "settings to the start script (--install user). Nothing was changed")
+        raise RemoteError(board_ops.NO_ROOT_HELPER)
     if systemd and not facts.helper and any("root helper and its exact sudo rules are installed" in n
                                             for n in result.notes):
         facts = replace(facts, helper=True)

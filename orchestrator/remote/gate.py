@@ -426,7 +426,7 @@ GATE_INSTALL = "\n".join([
     '[ -x /bin/sh ] || { echo "gate=unavailable reason=no-sh"; exit 0; }',
     'case $HOME in /*) ;; *) echo "gate=unavailable reason=home"; exit 0 ;; esac',
     'case $HOME in *[!A-Za-z0-9._/-]*) echo "gate=unavailable reason=home"; exit 0 ;; esac',
-    f'cfg="$HOME/{GATE_REL.rsplit('/', 1)[0]}"; g="$HOME/{GATE_REL}"; keys="$HOME/.ssh/authorized_keys"',
+    f'cfg="$HOME/{GATE_REL.rsplit("/", 1)[0]}"; g="$HOME/{GATE_REL}"; keys="$HOME/.ssh/authorized_keys"',
     'if ! { mkdir -p "$cfg" "$HOME/.ssh" && printf "%s" "$llmcf_text" > "$g.new" && chmod 0500 "$g.new" && '
     'mv -f "$g.new" "$g"; } 2>/dev/null; then rm -f "$g.new" 2>/dev/null; '
     'echo "gate=unavailable reason=read-only"; exit 0; fi',
@@ -460,17 +460,23 @@ ROOT_SETUP = "\n".join([
     'exit 0; }',
     'llmcf_visudo=$(command -v visudo 2>/dev/null || echo /usr/sbin/visudo)',
     '"$llmcf_visudo" -cf "$llmcf_d/sudoers" >/dev/null 2>&1 || { echo "root=unavailable reason=sudoers"; exit 0; }',
-    f'asroot install -d -m 0755 -o root -g root {ROOT_HELPER.rsplit('/', 1)[0]} >/dev/null 2>&1 || '
+    f'asroot install -d -m 0755 -o root -g root {ROOT_HELPER.rsplit("/", 1)[0]} >/dev/null 2>&1 || '
     '{ echo "root=unavailable reason=sudo"; exit 0; }',
     f'asroot install -m 0755 -o root -g root "$llmcf_d/helper" {ROOT_HELPER} >/dev/null 2>&1 || '
     '{ echo "root=unavailable reason=sudo"; exit 0; }',
-    f'asroot install -m 0440 -o root -g root "$llmcf_d/sudoers" {SUDOERS_DIR}/llmcf-@USER@ >/dev/null 2>&1 || '
+    f'asroot install -m 0440 -o root -g root "$llmcf_d/sudoers" {SUDOERS_DIR}/@FILE@ >/dev/null 2>&1 || '
     '{ echo "root=unavailable reason=sudo"; exit 0; }',
     'echo "root=installed"',
 ])
 
 
-define("root-setup", ("word",), lambda user, rest="": ROOT_SETUP.replace("@USER@", user), gate=False,
+def sudoers_name(user: str) -> str:
+    """The name of llmcf's sudoers file for the board account `user` in SUDOERS_DIR: sudo's #includedir skips a
+    file whose name holds a '.', so the '.' of an account such as first.last becomes '_'."""
+    return "llmcf-" + user.replace(".", "_")
+
+
+define("root-setup", ("word",), lambda user, rest="": ROOT_SETUP.replace("@FILE@", sudoers_name(user)), gate=False,
        doc="llmcf's root helper and its exact sudo rules (sudo -n, or the person's one-time password for sudo -S)")
 
 
@@ -497,6 +503,7 @@ SETUP_REASONS = {
     "no-visudo": "the board has no visudo to check the sudo rules",
     "sudoers": "visudo did not accept the sudo rules",
     "sudo": "sudo refused (it needs a password the framework was not given, or the account may not use it)",
+    "gated": "the framework's key on this board already runs only llmcf's gate, which never runs a setup step",
     "unknown": "the board gave no answer the framework knows",
 }
 
@@ -504,12 +511,23 @@ SETUP_REASONS = {
 def install_gate(run: Callable[..., object], public_line: str, gate_text: str) -> Tuple[bool, str]:
     """Pairing's setup step gate-install over `run` (a session's or a transport's run(script, stdin=...)): the gate
     program and the framework key's restricted authorized_keys line. (True, "") when installed, else (False, the
-    reason word of SETUP_REASONS); the person's other lines in authorized_keys stay as they were."""
+    reason word of SETUP_REASONS; "gated": the login was with the framework key, which already runs only the gate);
+    the person's other lines in authorized_keys stay as they were."""
     parts = (public_line or "").split(" ")
     if len(parts) not in (2, 3):
         raise GateRefused("the framework's public key line is not a plain SSH public key")
     call = script("gate-install", parts[0], parts[1], parts[2] if len(parts) == 3 else GATE_NAME)
-    result = run(call, stdin=[gate_text.encode("utf-8")])
+    try:
+        result = run(call, stdin=[gate_text.encode("utf-8")])
+    except (OSError, EOFError):
+        # a gate that refused the line closes the channel without reading the program on stdin: the login was with
+        # the framework key, which already runs only the gate (paramiko tries it before a one-time password)
+        check = run(script("status"))
+        if is_refusal(getattr(check, "status", 0), getattr(check, "err", "")):
+            return False, "gated"
+        raise
+    if is_refusal(getattr(result, "status", 0), getattr(result, "err", "")):
+        return False, "gated"
     return _answer(getattr(result, "out", ""), "gate")
 
 
@@ -531,4 +549,4 @@ __all__ = ["GATE_NAME", "GATE_REL", "GateBundle", "GateCall", "GateRefused", "Ga
            "PLACE_TMP_PREFIX", "REFUSAL_PREFIX", "REFUSED_STATUS", "ROOT_HELPER", "SETUP_REASONS", "SUDOERS_DIR",
            "define", "detached_command", "gate_call", "gate_operations", "gate_version", "install_gate",
            "install_root", "is_refusal", "is_restricted_line", "job", "key_options", "operation", "poll_command",
-           "refusal_text", "render_gate", "restricted_line", "script"]
+           "refusal_text", "render_gate", "restricted_line", "script", "sudoers_name"]

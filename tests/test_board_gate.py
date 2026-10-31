@@ -267,3 +267,124 @@ def test_a_session_learns_from_the_refusal_that_the_board_is_gated(board):
     with pytest.raises(Exception) as not_an_op:
         session.run("rm -rf ~")
     assert getattr(not_an_op.value, "kind", "") == "not_an_operation"
+
+
+class _LoginPerCommand:
+    """A board reached as over the system OpenSSH transport: every command is a login of its own, so once the
+    framework key's line in authorized_keys is the restricted one, the very next command already runs in the gate."""
+
+    def __init__(self, home, bin_dir, gate_file):
+        self.home, self.bin, self.gate_file, self.sent = home, bin_dir, gate_file, []
+
+    def run(self, script, *, stdin=None, timeout=0, limit=0):
+        from orchestrator.remote.transport import sh_command
+        keys = self.home / ".ssh" / "authorized_keys"
+        gated = keys.exists() and any(gate.is_restricted_line(line, self.gate_file.as_posix())
+                                      for line in keys.read_text(encoding="utf-8").splitlines())
+        env = {"PATH": f"{self.bin}{os.pathsep}{os.environ.get('PATH', '')}", "HOME": str(self.home)}
+        argv = ["sh", "-c", str(script)]
+        if gated:
+            env["SSH_ORIGINAL_COMMAND"] = sh_command(script)
+            argv = ["sh", str(self.gate_file)]
+        self.sent.append(("gate" if gated else "shell", getattr(script, "verb", "")))
+        done = subprocess.run(argv, input=b"".join(stdin or []), env=env, capture_output=True, timeout=60)
+        return Result(done.returncode, done.stdout.decode(), done.stderr.decode())
+
+    def alive(self):
+        return True
+
+
+def _upgrade_board(tmp_path, monkeypatch, sudo_status):
+    from orchestrator.remote.session import RemoteSession
+    from orchestrator.utils import ssh_trust
+    home = tmp_path / "home"
+    (home / ".ssh").mkdir(parents=True)
+    (home / ".ssh" / "authorized_keys").write_text(PUBLIC + "\n", encoding="utf-8")   # unrestricted, from before
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "sudo.log"
+    for name, body in (("sudo", f'echo "$*" >> "{log}"; cat >/dev/null; exit {sudo_status}'), ("visudo", "exit 0")):
+        (bin_dir / name).write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
+        (bin_dir / name).chmod(0o755)
+    monkeypatch.setattr(ssh_trust, "client_key", lambda _state: (None, PUBLIC))
+    transport = _LoginPerCommand(home, bin_dir, home / gate.GATE_REL)
+    session = RemoteSession.attached(object(), transport_factory=lambda _c: transport)
+    session.can_relogin, session.state_dir = True, tmp_path
+    return session, home, log
+
+
+@POSIX
+def test_the_upgrade_installs_the_root_helper_also_when_every_command_is_a_login_of_its_own(tmp_path, monkeypatch):
+    """Over the system OpenSSH transport the gate is active from the command after gate-install on: the root helper
+    and its sudo rules (a setup step the gate never runs) must be installed before the key is restricted."""
+    session, home, log = _upgrade_board(tmp_path, monkeypatch, 0)
+    notes = board_ops.restrict_key(session, sudo_user="radxa")
+    assert any("root helper and its exact sudo rules are installed" in n for n in notes), notes
+    assert any("now runs only llmcf's operations" in n for n in notes), notes
+    assert board_ops.ROOT_HELPER in log.read_text(encoding="utf-8")
+    lines = (home / ".ssh" / "authorized_keys").read_text(encoding="utf-8").splitlines()
+    assert lines == [gate.restricted_line(PUBLIC, (home / gate.GATE_REL).as_posix())]
+
+
+@POSIX
+def test_a_key_the_systemd_setting_needs_unrestricted_stays_so_when_the_root_helper_cannot_be_installed(
+        tmp_path, monkeypatch):
+    """The systemd setting over a key without llmcf's root helper: when the helper cannot be installed (sudo
+    refuses), restricting the key would leave the next deploy unable to write the unit (a restricted key never runs
+    the earlier sudo commands and cannot install the helper). The key stays as it was, with the plain reason."""
+    session, home, _log = _upgrade_board(tmp_path, monkeypatch, 1)
+    notes = board_ops.restrict_key(session, sudo_user="radxa")
+    assert (home / ".ssh" / "authorized_keys").read_text(encoding="utf-8") == PUBLIC + "\n"
+    assert any("NOT restricted" in n and "sudo refused" in n for n in notes), notes
+    assert not session.gated
+
+
+class _GatedClient(_Client):
+    """A paramiko stand-in logged in with the framework key that already runs only the gate: every `sh -c` line is
+    the gate's refusal (paramiko tries the framework key before the one-time password)."""
+
+    def exec_command(self, command, timeout=None):
+        self.commands.append(command)
+        out = io.BytesIO(b"")
+
+        class Channel:
+            def recv_exit_status(self):
+                return gate.REFUSED_STATUS
+
+            def shutdown_write(self):
+                pass
+        out.channel = Channel()
+        stdin = io.BytesIO()
+        stdin.channel = out.channel
+        err = io.BytesIO((gate.REFUSAL_PREFIX + "the line holds characters none of llmcf's operations takes\n").encode())
+        return stdin, out, err
+
+
+def test_pairing_a_board_whose_key_already_runs_the_gate_is_no_failure():
+    """Pairing (or a deploy with the password) again over a board paired with the gate logs in with the framework
+    key, whose gate refuses the setup step: the key is there and restricted, not "a board that cannot take the
+    gate"."""
+    from orchestrator.utils import ssh_trust
+    client = _GatedClient("")
+    assert ssh_trust.install_public_key(client, PUBLIC, board_ops.bundle()) == "restricted"
+    assert len(client.commands) <= 2   # no plain unrestricted line after the refusal
+
+
+def test_the_note_on_an_older_gate_names_a_way_that_works():
+    """A restricted key cannot rewrite its own gate, and pairing again logs in with that key: the way to update it
+    goes through the account's own login (its authorized_keys line), never only "pair again"."""
+    class Shell:
+        session = type("S", (), {"can_relogin": True, "state_dir": Path("."), "gated": True})()
+
+        def run(self, script, **_k):
+            return Result(0, "restricted=yes gate=0123456789abcdef\n", "")
+    notes = board_ops.restrict_key(Shell())
+    assert len(notes) == 1 and "authorized_keys" in notes[0] and "older" in notes[0]
+
+
+def test_the_sudoers_file_name_has_no_dot_sudo_would_skip():
+    """sudo's #includedir skips a file whose name holds a '.', so a board account such as first.last would get
+    rules that never apply."""
+    path = board_ops.sudoers_path("first.last")
+    assert "." not in path.rsplit("/", 1)[1]
+    assert path in gate.script("root-setup", "first.last")
