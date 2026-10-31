@@ -338,7 +338,8 @@ class CommunityHubWindow(QMainWindow):
         self.status_label.setText(tr("status.ready", "Ready."))
         done = "deletion.done.trash" if accepted.mode == "trash" else "deletion.done.permanent"
         lines = [ui_text(done, self.lang, name=one_line(n)) for n in result.done]
-        lines += [ui_text("deletion.kept", self.lang, name=one_line(n), reason=one_line(r)) for n, r in result.failed]
+        from orchestrator.Core.deletion import kept_lines
+        lines += [one_line(line) for line in kept_lines(result, self.lang)]   # with every path that stayed
         self.refresh_list()
         plain_box(self, "warning" if result.failed else "information",
                   ui_text("zoo.uninstall.title", self.lang, kind=item.kind, id=item.id), "\n".join(lines))

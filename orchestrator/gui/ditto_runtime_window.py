@@ -674,8 +674,8 @@ class LocalRuntimeWindow(QDialog):
                 return
             done = "deletion.done.trash" if accepted.mode == "trash" else "deletion.done.permanent"
             lines = [self._t(done, name=one_line(name)) for name in value.done]
-            lines += [self._t("deletion.kept", name=one_line(name), reason=one_line(why))
-                      for name, why in value.failed]
+            from orchestrator.Core.deletion import kept_lines
+            lines += [one_line(line) for line in kept_lines(value, self.lang)]   # with every path that stayed
             self._box("information", "\n".join(lines) or self._t("ditto_runtime.prune.nothing"))
         self._run("prune", lambda say, cancel, ask_from_worker: factory().delete_old_builds(
             accepted, trash=trash, audit=audit), deleted, busy_key="ditto_runtime.prune.deleting")

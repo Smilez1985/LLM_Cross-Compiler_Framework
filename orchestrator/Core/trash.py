@@ -30,7 +30,6 @@ import json
 import os
 import re
 import secrets
-import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -38,10 +37,11 @@ from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from orchestrator.Core.deletion import (AcceptedDeletion, PlanChanged, plan_of, require_person, require_same,
-                                        size_text)
+from orchestrator.Core.deletion import (AcceptedDeletion, PlanChanged, note_kept, plan_of, require_person,
+                                        require_same, size_text)
 from orchestrator.tools.signing import SignatureError, sign, verify
 from orchestrator.tools.spec import DeletionItem, DeletionPlan
+from orchestrator.utils.atomic import remove_tree
 from orchestrator.utils.file_lock import file_lock
 from orchestrator.utils.helpers import try_sha256_file as file_sha256  # None for a link, a non-file, OSError
 from orchestrator.utils.next_steps import WithSteps
@@ -123,6 +123,8 @@ class EmptyResult:
     deleted: List[str] = field(default_factory=list)
     freed_bytes: int = 0
     failed: List[Tuple[str, str]] = field(default_factory=list)
+    # speaking name -> the full paths that stayed (Core/deletion.note_kept), for the person's own text only
+    remaining: Dict[str, List[str]] = field(default_factory=dict)
 
 
 def _now() -> datetime:
@@ -492,10 +494,12 @@ class Trash:
                 try:
                     if folder.is_symlink():
                         raise OSError("the entry's folder is a link")
-                    shutil.rmtree(folder)   # never follows a link inside the folder
+                    left = remove_tree(folder)   # never follows a link inside the folder
                 except OSError as e:
                     result.failed.append((item.speaking_name, type(e).__name__))
                     continue
+                if note_kept(result, item.speaking_name, folder, left):
+                    continue   # the entry stays listed while its files are there
                 entries.pop(entry_id, None)
                 result.deleted.append(entry.label if entry else item.speaking_name)
                 result.freed_bytes += item.size_bytes

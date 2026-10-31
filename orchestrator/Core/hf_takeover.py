@@ -372,7 +372,7 @@ def delete_old_copies(models_dir: Path, accepted: Any, trash: Any = None, audit:
     accepted plan in the GUI or at a terminal, built again from the disk first (PlanChanged when it is not the accepted
     one), audited before anything goes, into the trash (restorable) or for good. Returns a DeletionResult; an item
     that cannot go is kept and reported."""
-    from orchestrator.Core.deletion import DeletionResult, require_person, require_same
+    from orchestrator.Core.deletion import DeletionResult, note_kept, require_person, require_same
     from orchestrator.rag.storage_lock import remove_tree
     accepted = require_person(accepted)
     if accepted.actor not in ("gui", "cli"):
@@ -403,12 +403,8 @@ def delete_old_copies(models_dir: Path, accepted: Any, trash: Any = None, audit:
             else:
                 if path.is_symlink():
                     raise OSError("a link")
-                if path.is_dir():
-                    remove_tree(path)
-                elif path.is_file():
-                    path.unlink()
-                if os.path.lexists(path):
-                    raise OSError("a file in it could not be deleted")
+                if note_kept(result, item.speaking_name, path, remove_tree(path)):
+                    continue   # something stays: kept, with its paths for the person
                 result.freed_bytes += item.size_bytes
             result.done.append(item.speaking_name)
         except Exception as e:  # noqa: BLE001 - a TrashError or an OSError: the folder stays and is reported

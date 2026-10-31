@@ -16,9 +16,16 @@ it is not exactly the accepted one, so a list that changed while the person read
 
 Multiple choice (round 6 10.4): the person ticks a subset of a listed plan; `choose()` rebuilds the plan from exactly
 the ticked items, so its sha256 covers them and nothing else. Nothing is ticked by default.
+
+Honest results: a deletion says "done" only when it is true. When anything of an item stays (a file open elsewhere,
+on Windows; a read-only file or mount), `note_kept` records it as kept with a plain reason ("kept: could not remove
+N items", the remaining names relative to the item: `kept_reason`, safe for an AI) and keeps the full paths in the
+result's `remaining` for the person's own text only (`kept_lines`, shown by the GUI and the CLI), so the person can
+delete them by hand. Full paths never go into `failed`, which any caller may pass on.
 """
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from orchestrator.tools.spec import DeletionItem, DeletionPlan
@@ -82,6 +89,56 @@ class DeletionResult:
     freed_bytes: int = 0
     trash_ids: List[str] = field(default_factory=list)
     failed: List[Tuple[str, str]] = field(default_factory=list)
+    # speaking name -> the full paths that stayed (note_kept): for the person's own text only, never for an AI
+    remaining: Dict[str, List[str]] = field(default_factory=dict)
+
+
+KEPT_SHOWN = 5   # remaining names a kept reason lists
+
+
+def kept_reason(root: Any, left: Sequence[Any]) -> str:
+    """The plain reason of an item of which `left` stayed: "kept: could not remove N items (a, b, ...)", each name
+    relative to the item's own path `root` (the item itself when that stayed whole). No host path: it may reach an
+    AI."""
+    root = Path(root)
+    names = []
+    for p in left:
+        p = Path(p)
+        try:
+            names.append(p.relative_to(root).as_posix() if p != root else "the item itself")
+        except ValueError:
+            names.append(p.name or "the item itself")
+    n = len(names)
+    shown = ", ".join(names[:KEPT_SHOWN]) + (", ..." if n > KEPT_SHOWN else "")
+    return f"kept: could not remove {n} item{'' if n == 1 else 's'} ({shown})"
+
+
+def note_kept(result: Any, name: str, root: Any, left: Sequence[Any]) -> bool:
+    """Records that `left` of the item `name` (at `root`) stayed: a kept entry with kept_reason in result.failed and
+    the full paths in result.remaining (the person's text). False, recording nothing, when nothing stayed."""
+    if not left:
+        return False
+    result.failed.append((name, kept_reason(root, left)))
+    remaining = getattr(result, "remaining", None)
+    if remaining is None:
+        remaining = {}
+        try:
+            result.remaining = remaining
+        except AttributeError:
+            return True
+    remaining.setdefault(name, []).extend(str(Path(p)) for p in left)
+    return True
+
+
+
+def kept_lines(result: Any, lang: Optional[str] = None) -> List[str]:
+    """The person's lines of what a deletion kept (GUI result boxes and the CLI alike): each kept item with its
+    reason, then every path that stayed, to delete by hand. Only for the person: the paths are full host paths."""
+    from orchestrator.utils.localization import ui_text
+    lines = [ui_text("deletion.kept", lang, name=name, reason=reason) for name, reason in getattr(result, "failed", [])]
+    for name, paths in (getattr(result, "remaining", None) or {}).items():
+        lines += [ui_text("deletion.remaining", lang, name=name, path=path) for path in paths]
+    return lines
 
 
 def accept(plan: DeletionPlan, actor: str, mode: Optional[str] = None) -> AcceptedDeletion:

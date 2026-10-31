@@ -2744,6 +2744,9 @@ exactly what goes: for each item its name, the full path (or the Docker id of an
 what it is. "No" is the default. An AI app or Ditto never sees the paths, only names, kinds and sizes, and never
 decides a deletion: not through its own form, a standing approval or a delegation.
 
+- **"Deleted" only when it is true.** When something of an item stays (a file another program holds open on Windows,
+  a read-only file), the item is reported as kept ("kept: could not remove N items"), and the result window or the
+  command line names every path that stayed, so you can delete it by hand. An AI sees only the relative names.
 - **Multiple choice.** Where you pick from a list (knowledge snapshots, the trash, the framework's build images),
   nothing is ticked. The framework builds the list again from exactly the items you ticked; the button says how many
   and how much. If any of them changed while you read the list, nothing is deleted and you see the new list.

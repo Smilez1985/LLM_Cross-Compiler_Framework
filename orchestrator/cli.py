@@ -2639,8 +2639,7 @@ def _runtime_removed(removal) -> None:
     from orchestrator.Core.knowledge_snapshots import size_text
     for name in removal.deleted:
         console.print(f"[green]Deleted: {escape(name)}[/green]")
-    for name, reason in removal.failed:
-        console.print(f"[yellow]Kept: {escape(name)} ({escape(reason)})[/yellow]")
+    _print_kept(removal)
     console.print(f"{len(removal.deleted)} deleted for good, about {size_text(removal.freed_bytes)}.")
 
 
@@ -4034,8 +4033,7 @@ def _doctor_free_space(framework, heading: str = "Tier 2: the framework's build 
         return 0, ""
     for name in result.deleted:
         console.print(f"[green]Deleted: {escape(name)}[/green]")
-    for name, reason in result.failed:
-        console.print(f"[yellow]Kept: {escape(name)} ({escape(reason)})[/yellow]")
+    _print_kept(result)
     console.print(f"{len(result.deleted)} images deleted, about {size_text(result.freed_bytes)}.")
     return outcome.count, outcome.why
 
@@ -4394,14 +4392,21 @@ def _person_trash(ctx: FrameworkContext, state_dir: Path):
     return Trash(state_dir, key=key, refuse_unkeyed=refuse, audit=audit, retention_days=days), audit
 
 
+def _print_kept(result, lang=None) -> None:
+    """What a deletion kept, for the person (Core/deletion.kept_lines, the same lines as the GUI's result boxes):
+    each kept item with its reason, then every path that stayed, to delete by hand."""
+    from orchestrator.Core.deletion import kept_lines
+    for line in kept_lines(result, lang):
+        console.print(f"[yellow]{escape(line)}[/yellow]")
+
+
 def _print_deletion_result(result, accepted) -> None:
     """What a deletion did (deletion.DeletionResult): every item moved or deleted, every item kept and why."""
     from orchestrator.Core.deletion import size_text
     for name in result.done:
         console.print(f"[green]{'Moved to the trash' if accepted.mode == 'trash' else 'Deleted'}: "
                       f"{escape(name)}[/green]")
-    for name, reason in result.failed:
-        console.print(f"[yellow]Kept: {escape(name)} ({escape(reason)})[/yellow]")
+    _print_kept(result)
     if accepted.mode == "trash" and result.done:
         console.print("They can be restored with 'llm-cli trash restore ID' ('llm-cli trash' lists them); their space "
                       "stays used until you empty the trash.")
@@ -4490,8 +4495,7 @@ def _delete_snapshots_cli(ctx: FrameworkContext, names: Optional[Tuple[str, ...]
     for name in result.done:
         console.print(f"[green]{'Moved to the trash' if accepted.mode == 'trash' else 'Deleted'}: "
                       f"{escape(name)}[/green]")
-    for name, reason in result.failed:
-        console.print(f"[yellow]Kept: {escape(name)} ({escape(reason)})[/yellow]")
+    _print_kept(result)
     if accepted.mode == "trash" and result.done:
         console.print("They can be restored with 'llm-cli trash restore ID' ('llm-cli trash' lists them); their space "
                       "stays used until you empty the trash.")
@@ -4633,6 +4637,10 @@ def knowledge_storage_delete_old(ctx: FrameworkContext):
         return
     if not result.done:
         console.print(f"[yellow]Kept: the old knowledge base storage ({escape(result.problem)})[/yellow]")
+        from orchestrator.utils.localization import ui_text
+        for path in result.remaining:   # what stayed, to delete by hand (the person's own text only)
+            line = ui_text("deletion.remaining", name="the old knowledge base storage", path=path)
+            console.print(f"[yellow]{escape(line)}[/yellow]")
         return
     if accepted.mode == "trash":
         console.print("[green]Moved to the trash: the old knowledge base storage[/green] (restore it with 'llm-cli "
@@ -4881,8 +4889,7 @@ def trash_empty(ctx: FrameworkContext, ids: Tuple[str, ...], everything: bool, d
         return
     for name in result.deleted:
         console.print(f"[green]Deleted for good: {escape(name)}[/green]")
-    for name, reason in result.failed:
-        console.print(f"[yellow]Kept: {escape(name)} ({escape(reason)})[/yellow]")
+    _print_kept(result)
     console.print(f"{len(result.deleted)} entries deleted, {size_text(result.freed_bytes)} freed.")
 
 
@@ -4996,8 +5003,7 @@ def _remove_old_hf_copies(ctx: FrameworkContext, manager, plan, lang: Optional[s
     key = "deletion.done.trash" if accepted.mode == "trash" else "deletion.done.permanent"
     for name in result.done:
         console.print(f"[green]{escape(ui_text(key, lang, name=name))}[/green]")
-    for name, reason in result.failed:
-        console.print(f"[yellow]{escape(ui_text('deletion.kept', lang, name=name, reason=reason))}[/yellow]")
+    _print_kept(result, lang)
 
 
 # ============================================================================
@@ -7256,8 +7262,7 @@ def zoo_uninstall(ctx: FrameworkContext, pack_id: str, kind: str):
         _zoo_fail(e)
     except (PermissionError, RuntimeError) as e:
         _zoo_fail(e)
-    for name, reason in result.failed:
-        console.print(f"[yellow]Not removed: {escape(name)} ({escape(reason)})[/yellow]")
+    _print_kept(result)
     where = "moved to the trash ('llm-cli trash list' shows it)" if result.trash_ids else \
         f"deleted for good, {size_text(result.freed_bytes)} freed"
     console.print(f"[green]Uninstalled {kind} {escape(pack_id)}: {len(result.done)} item(s) {where}.[/green]")

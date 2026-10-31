@@ -280,7 +280,10 @@ class DeviceRuntimeStore:
                 else:
                     if path.is_symlink() or not path.is_file():
                         raise OSError("not a plain file")
-                    path.unlink()
+                    from orchestrator.Core.deletion import note_kept
+                    from orchestrator.utils.atomic import remove_tree
+                    if note_kept(result, item.speaking_name, path, remove_tree(path)):
+                        continue   # it stays: kept, with its path for the person
                     result.freed_bytes += item.size_bytes
             except Exception as e:  # noqa: BLE001 - a TrashError or an OSError: that file stays and is reported
                 result.failed.append((item.speaking_name, type(e).__name__ if isinstance(e, OSError) else str(e)))

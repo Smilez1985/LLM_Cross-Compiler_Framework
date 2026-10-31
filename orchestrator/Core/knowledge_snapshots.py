@@ -36,7 +36,7 @@ import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from orchestrator.rag.errors import KnowledgeBaseError
 from orchestrator.utils.helpers import sha256_file as _sha256
@@ -287,6 +287,8 @@ class SnapshotDeletion:
     freed_bytes: int = 0
     trash_ids: List[str] = field(default_factory=list)
     failed: List[Tuple[str, str]] = field(default_factory=list)
+    # speaking name -> the full paths that stayed (Core/deletion.note_kept), for the person's own text only
+    remaining: Dict[str, List[str]] = field(default_factory=dict)
 
 
 def delete_snapshots(folder: Path, accepted: Any, trash: Any = None, audit: Any = None) -> SnapshotDeletion:
@@ -329,7 +331,10 @@ def delete_snapshots(folder: Path, accepted: Any, trash: Any = None, audit: Any 
             else:
                 if path.is_symlink() or not path.is_file():
                     raise OSError("not a plain file")
-                path.unlink()
+                from orchestrator.Core.deletion import note_kept
+                from orchestrator.utils.atomic import remove_tree
+                if note_kept(result, item.speaking_name, path, remove_tree(path)):
+                    continue   # it stays: kept, with its path for the person
                 result.freed_bytes += item.size_bytes
         except Exception as e:  # noqa: BLE001 - a TrashError or an OSError: that snapshot stays and is reported
             result.failed.append((item.speaking_name, type(e).__name__ if isinstance(e, OSError) else str(e)))

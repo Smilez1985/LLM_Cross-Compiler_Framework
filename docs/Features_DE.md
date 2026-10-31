@@ -3044,6 +3044,10 @@ auf, was weggeht: zu jedem Teil den Namen, den vollen Pfad (bei einem Image die 
 und was es ist. „Nein“ ist die Vorgabe. Eine KI-App oder Ditto sieht nie die Pfade, nur Namen, Arten und Größen, und
 entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauerfreigabe oder eine Vollmacht.
 
+- **„Gelöscht“ nur, wenn es stimmt.** Bleibt etwas von einem Teil (eine Datei, die unter Windows ein anderes Programm
+  offen hält, eine schreibgeschützte Datei), wird der Teil als behalten gemeldet („kept: could not remove N items“),
+  und das Ergebnisfenster oder die Kommandozeile nennt jeden Pfad, der blieb, damit du ihn von Hand löschen kannst.
+  Eine KI sieht nur die relativen Namen.
 - **Mehrfachauswahl.** Wo du aus einer Liste wählst (Wissens-Snapshots, Papierkorb, Build-Images des Frameworks), ist
   nichts angehakt. Das Framework baut die Liste aus genau den angehakten Teilen neu; die Schaltfläche nennt Anzahl und
   Größe. Hat sich eines davon geändert, während du die Liste gelesen hast, wird nichts gelöscht, und du siehst die

@@ -1542,7 +1542,7 @@ class CommunityManager:
         anything goes, the folder and the import notes go to the trash (Core/trash.py) or for good, and the pack lets go
         of its excerpts in the knowledge base (RAGManager.release_holder: those another pack or your crawl holds stay).
         Only the person (PermissionError otherwise). Returns a deletion.DeletionResult."""
-        from orchestrator.Core.deletion import DeletionResult, require_person, require_same
+        from orchestrator.Core.deletion import DeletionResult, note_kept, require_person, require_same
         accepted = require_person(accepted)
         if rag_manager is None and hasattr(self.framework, "get_component"):
             rag_manager = self.framework.get_component("rag_manager")
@@ -1579,7 +1579,8 @@ class CommunityManager:
                 else:
                     if path.is_symlink():
                         raise OSError("a link")
-                    shutil.rmtree(path) if path.is_dir() else path.unlink()
+                    if note_kept(result, item.speaking_name, path, remove_tree(path)):
+                        continue   # something stays: kept, with its paths for the person
                     result.freed_bytes += item.size_bytes
             except Exception as e:  # noqa: BLE001 - that item stays and is reported
                 result.failed.append((item.speaking_name, type(e).__name__ if isinstance(e, OSError) else str(e)))

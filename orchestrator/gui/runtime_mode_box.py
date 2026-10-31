@@ -493,7 +493,8 @@ class RuntimeModeBox(QGroupBox):
 
     def _removed_text(self, removal: Any) -> str:
         lines = [ui_text("runtime.mode.removed", n=len(removal.deleted), size=_size(removal.freed_bytes))]
-        lines += [ui_text("runtime.mode.kept", name=name, reason=reason) for name, reason in removal.failed]
+        from orchestrator.Core.deletion import kept_lines
+        lines += kept_lines(removal)   # each kept object with its reason and every path that stayed (Core/deletion)
         return "\n".join(lines)
 
     def _offer_removal(self, plan: Any) -> None:

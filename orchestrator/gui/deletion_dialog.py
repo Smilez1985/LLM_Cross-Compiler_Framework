@@ -220,7 +220,8 @@ def free_framework_images(parent: Optional[QWidget], framework, lang: Optional[s
         plain_box(parent, "warning", title, ui_text("deletion.failed", lang, reason=one_line(str(e))))
         return None
     lines = [ui_text("deletion.done.permanent", lang, name=one_line(n)) for n in result.deleted]
-    lines += [ui_text("deletion.kept", lang, name=one_line(n), reason=one_line(r)) for n, r in result.failed]
+    from orchestrator.Core.deletion import kept_lines
+    lines += [one_line(line) for line in kept_lines(result, lang)]   # with every path that stayed
     lines.append(ui_text("images.done", lang, n=len(result.deleted), size=size_text(result.freed_bytes, lang)))
     plain_box(parent, "information", title, "\n".join(lines))
     return result

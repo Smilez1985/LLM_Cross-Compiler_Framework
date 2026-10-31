@@ -601,6 +601,7 @@ class HuggingFaceWindow(QMainWindow):
         from orchestrator.gui.plain import one_line
         key = "deletion.done.trash" if mode == "trash" else "deletion.done.permanent"
         lines = [self._t(key, name=one_line(n)) for n in result.done]
-        lines += [self._t("deletion.kept", name=one_line(n), reason=one_line(r)) for n, r in result.failed]
+        from orchestrator.Core.deletion import kept_lines
+        lines += [one_line(line) for line in kept_lines(result, self.lang)]   # with every path that stayed
         self.status_label.setText(tr("status.ready", "Ready."))
         self._box("information", "\n".join(lines))

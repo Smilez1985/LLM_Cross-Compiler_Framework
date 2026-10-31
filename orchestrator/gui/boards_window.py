@@ -1253,7 +1253,8 @@ class BoardsWindow(QDialog):
         from orchestrator.Core.deletion import size_text
         key = "deletion.done.trash" if mode == "trash" else "deletion.done.permanent"
         lines = [self._t(key, name=one_line(n)) for n in result.done]
-        lines += [self._t("deletion.kept", name=one_line(n), reason=one_line(r)) for n, r in result.failed]
+        from orchestrator.Core.deletion import kept_lines
+        lines += [one_line(line) for line in kept_lines(result, self.lang)]   # with every path that stayed
         if mode != "trash" and result.done:
             lines.append(self._t("boards.prune_board.freed", size=size_text(result.freed_bytes)))
         text = "\n".join(lines)

@@ -428,7 +428,7 @@ class DependencyCache:
     def delete(self, accepted: Any, trash: Any = None, audit: Any = None):
         """Deletes exactly the entries the person accepted (Core/deletion.py): into the trash or for good. Only the
         person; the list is checked again first; the deletion is audited before anything goes."""
-        from orchestrator.Core.deletion import DeletionResult, require_person, require_same, same_items
+        from orchestrator.Core.deletion import DeletionResult, note_kept, require_person, require_same, same_items
         from orchestrator.utils.atomic import remove_tree
         accepted = require_person(accepted)
         if accepted.actor not in ("gui", "cli"):
@@ -459,7 +459,8 @@ class DependencyCache:
                                        accepted.actor)
                     result.trash_ids.append(entry.id)
                 else:
-                    remove_tree(path)
+                    if note_kept(result, item.speaking_name, path, remove_tree(path)):
+                        continue   # something stays: kept, with its paths for the person
                     result.freed_bytes += item.size_bytes
             except Exception as e:  # noqa: BLE001 - kept and reported
                 result.failed.append((item.speaking_name, type(e).__name__ if isinstance(e, OSError) else str(e)))

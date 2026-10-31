@@ -130,6 +130,15 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   endet es mit 2, dem Exit-Code des Endgrunds cancelled. Strg+C im Befehl selbst bleibt 130.
 
 ### Behoben
+- `2026-10-31 02:14 UTC` · `v3.3.0` **Ein Löschen, das du angenommen hast, sagt nur „gelöscht“, wenn es stimmt**
+  ([Design](docs/DESIGN_DE.md#löschen-und-der-papierkorb)): Der Moduswechsel von Ditto überging, was das Entfernen
+  eines Build-Ordners zurückließ, meldete ihn als gelöscht (und vergaß den Build); das Leeren des Papierkorbs, die
+  Build-Abhängigkeiten und Dittos alte Laufzeit-Builds taten dasselbe oder sagten nur „OSError“, und die alten
+  Hugging-Face-Downloads und der alte Speicher der Wissensbasis sagten „eine Datei darin ließ sich nicht löschen“, ohne
+  sie zu nennen. Jetzt wird ein Eintrag, von dem etwas bleibt, mit einem klaren Grund behalten („kept: could not remove
+  N items“, die Namen relativ zum Eintrag), und das Ergebnisfenster der GUI und die CLI nennen jeden Pfad, der blieb,
+  damit du ihn von Hand löschen kannst. Wissens-Snapshots, Deploy-Pakete und das Deinstallieren von Paketen melden es
+  genauso. Was eine KI liest, behält nur relative Namen, nie einen Host-Pfad.
 - `2026-10-31 01:58 UTC` · `v3.3.0` **Der letzte Sendefehler der Türklingel behält nie den Benutzernamen des Brokers**
   ([Design](docs/DESIGN_DE.md#mcp-server-tools-und-berechtigungen)): Mojos Zeile zur Türklingel behält die Adresse des
   Brokers (`scheme://host:port`) und den letzten Sendefehler, auch dort, wo eine KI sie liest, damit die Person sieht,

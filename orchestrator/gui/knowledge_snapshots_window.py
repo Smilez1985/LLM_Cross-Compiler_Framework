@@ -292,7 +292,8 @@ class KnowledgeSnapshotsDialog(QDialog):
             return
         done = "deletion.done.trash" if accepted.mode == "trash" else "deletion.done.permanent"
         lines = [self._t(done, name=one_line(n)) for n in result.done]
-        lines += [self._t("deletion.kept", name=one_line(n), reason=one_line(r)) for n, r in result.failed]
+        from orchestrator.Core.deletion import kept_lines
+        lines += [one_line(line) for line in kept_lines(result, self.lang)]   # with every path that stayed
         self._box("information", "\n".join(lines))
         self.reload()
 
@@ -330,7 +331,10 @@ class KnowledgeSnapshotsDialog(QDialog):
             key = "storage.old.done.trash" if accepted.mode == "trash" else "storage.old.done.permanent"
             self._box("information", self._t(key))
         else:
-            self._box("warning", self._t("storage.old.kept", reason=one_line(result.problem)))
+            lines = [self._t("storage.old.kept", reason=one_line(result.problem))]
+            lines += [self._t("deletion.remaining", name=self._t("storage.old.title"), path=path)
+                      for path in result.remaining]   # what stayed, to delete by hand
+            self._box("warning", "\n".join(lines))
         self.reload()
 
     def _export(self) -> None:
