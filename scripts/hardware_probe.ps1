@@ -30,7 +30,7 @@ param(
     [switch]$NoToolchain
 )
 
-$ProbeVersion = '3.2.0'
+$ProbeVersion = '3.3.0'
 if ($OutputFile -eq '') { [Console]::Error.WriteLine('Usage: hardware_probe.ps1 [-OutputFile FILE|-] [-Elevate] [-NoToolchain]'); Exit 2 }
 if ($OutputFile -ne '-') {
     # Absolute, because an elevated restart starts in another folder.
@@ -834,6 +834,32 @@ if (-not $NoToolchain) {
     $text = Tool-Text (Invoke-Tool 'python' @('--version'))
     if ($text -match '(?m)^Python (\d+(\.\d+){1,3})') { Put 'TOOL_PYTHON' $Matches[1] $P_Version -Quiet }
 }
+
+# --- access: SSH server, sudo, ssh-keygen, package manager (probe 3.3.0; the rules of hardware_probe.py) ------
+# Fixed words only: no path, host name or user name reaches the result. Windows elevates through UAC: SUDO=other.
+$sshdService = Get-Service -Name 'sshd' -ErrorAction SilentlyContinue
+$sshdExe = Join-Path $env:SystemRoot 'System32\OpenSSH\sshd.exe'
+if ($sshdService) {
+    Put 'SSH_SERVER' 'openssh'
+    if ([string]$sshdService.Status -eq 'Running') { Put 'SSH_SERVER_SOURCE' 'process' } else { Put 'SSH_SERVER_SOURCE' 'service' }
+    Put 'SSH_SERVERS_INSTALLED' 'openssh'
+} elseif (Test-Path -LiteralPath $sshdExe) {
+    Put 'SSH_SERVER' 'openssh'
+    Put 'SSH_SERVER_SOURCE' 'binary'
+    Put 'SSH_SERVERS_INSTALLED' 'openssh'
+} else {
+    Put 'SSH_SERVER' 'none'
+}
+Put 'SUDO' 'other'
+if (Get-Command 'ssh-keygen' -CommandType Application -ErrorAction SilentlyContinue) {
+    Put 'SSH_KEYGEN' 'openssh'
+    $text = Tool-Text (Invoke-Tool 'ssh' @('-V'))
+    if ($text -match 'OpenSSH_(?:for_Windows_)?([0-9]{1,2}\.[0-9]{1,2})') { Put 'SSH_KEYGEN_VERSION' $Matches[1] $P_Version }
+    else { Add-Warning 'not_determined:SSH_KEYGEN_VERSION' }
+} else {
+    Put 'SSH_KEYGEN' 'none'
+}
+Put 'PACKAGE_MANAGER' 'other'
 
 # --- the result ----------------------------------------------------------------------------------------------------
 if ($script:Warnings.Count -gt 0) { Put 'PROBE_WARNINGS' ($script:Warnings -join ',') }
