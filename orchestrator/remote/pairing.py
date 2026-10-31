@@ -264,7 +264,7 @@ def _switch_to_openssh(client: Any, state_dir: Path, bundle: Any, line: str, off
         plan = openssh_switch.plan(offer.facts)
     except openssh_switch.SwitchUnavailable as e:
         _step(audit, via, "board_openssh_plan", {"facts": offer.facts.as_dict()}, "error", e.reason)
-        raise ssh_trust.GateUnavailable(e.reason, offer) from None
+        raise ssh_trust.GateUnavailable(e.reason, offer, switch=True) from None
     if not valid_host(host) or not user:
         raise ssh_trust.GateUnavailable("unknown", offer)
     if not chooser.confirm("switch", plan.lines):
@@ -274,11 +274,11 @@ def _switch_to_openssh(client: Any, state_dir: Path, bundle: Any, line: str, off
     ok, reason, state = openssh_switch.install(transport.ParamikoTransport(client).run, plan, password)
     _step(audit, via, "board_openssh_installed", {**plan.as_dict(), "state": state}, "ok" if ok else "error", reason)
     if not ok:
-        raise ssh_trust.GateUnavailable(reason, offer)
+        raise ssh_trust.GateUnavailable(reason, offer, switch=True)
     # the current session (`client`) stays open until the new sshd answers on its port
     if not openssh_switch.wait_until_answers(host, plan.port):
         _step(audit, via, "board_openssh_answers", {"port": plan.port}, "error", "no-answer")
-        raise ssh_trust.GateUnavailable("no-answer", offer)
+        raise ssh_trust.GateUnavailable("no-answer", offer, switch=True)
     endpoint = Endpoint(host, plan.port)
     store = TrustStore(Path(state_dir))
     key = ssh_trust.fetch_host_key(host, plan.port)
@@ -287,10 +287,14 @@ def _switch_to_openssh(client: Any, state_dir: Path, bundle: Any, line: str, off
     _step(audit, via, "board_openssh_host_key", {"port": plan.port, "verdict": outcome.verdict},
           "ok" if outcome.trusted else "error")
     if not outcome.trusted:
-        raise ssh_trust.GateUnavailable("declined", offer)
+        raise ssh_trust.GateUnavailable("host-key", offer, switch=True)
     fresh = ssh_trust.connect(host, user, Path(state_dir), port=plan.port, password=password)
     try:
-        got = ssh_trust.install_public_key(fresh, line, bundle, password=password, mode=mode)
+        try:
+            got = ssh_trust.install_public_key(fresh, line, bundle, password=password, mode=mode)
+        except ssh_trust.GateUnavailable as failed:   # OpenSSH runs already: the person reads the switch's text
+            _step(audit, via, "board_key_tier_installed", {"tier": "root", "port": plan.port}, "error", failed.reason)
+            raise ssh_trust.GateUnavailable(failed.reason, offer, switch=True) from None
         _step(audit, via, "board_key_tier_installed", {"tier": "root", "port": plan.port})
         report = [f"OpenSSH answers on port {plan.port} and the framework's key is paired there with the root-owned "
                   "key line."]

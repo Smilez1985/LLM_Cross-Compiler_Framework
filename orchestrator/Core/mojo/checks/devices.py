@@ -93,20 +93,27 @@ def _hot_boards(store, boards) -> List[Finding]:
     return findings
 
 
-def _weaker_keys(store, boards) -> List[Finding]:
+def _weaker_keys(store, boards, mode: str = "private") -> List[Finding]:
     """Boards whose framework key sits on a weaker tier than the root-owned key line (the Dropbear tier, the home gate,
     an unrestricted key from an earlier pairing, or no key at all), from the tier recorded at their pairing or last
-    verify: named with what it means and the way up. Mojo reads only the record."""
-    from orchestrator.remote.key_tiers import TIER_PASSWORD, TIER_TEXTS, TIER_UNRESTRICTED, UPGRADE_TEXT, is_weaker
+    verify: named with what it means and the way up. Mojo reads only the record. In enterprise `mode` a tier that mode
+    refuses (a board paired in private mode before the person switched) is a warning that says so."""
+    from orchestrator.remote.key_tiers import (TIER_PASSWORD, TIER_TEXTS, TIER_UNRESTRICTED, UPGRADE_TEXT, allowed,
+                                               is_weaker)
     findings = []
     for device in boards:
         tier = store.key_tier(device.device_id)
         if not (is_weaker(tier) or tier == TIER_PASSWORD):
             continue
+        refused = not allowed(tier, mode)
+        message = f"Board {device.label}: {TIER_TEXTS[tier]}."
+        if refused:
+            message += (" The framework runs in enterprise mode now, which refuses this tier as too insecure: pair the "
+                        "board again (the switch to OpenSSH) or remove it from the trusted boards.")
         findings.append(Finding(
             "devices", f"devices.{device.device_id}.key_tier",
-            Severity.WARN if tier == TIER_UNRESTRICTED else Severity.INFO,
-            f"Board {device.label}: {TIER_TEXTS[tier]}. {NO_CONTACT}", UPGRADE_TEXT, where=device.address,
+            Severity.WARN if tier == TIER_UNRESTRICTED or refused else Severity.INFO,
+            f"{message} {NO_CONTACT}", UPGRADE_TEXT, where=device.address,
             why="The root-owned key line keeps the framework's key, its gate and its signing key out of the board "
                 "account's reach; a weaker tier protects against a stolen key, not against the account itself.",
             cannot="person"))
@@ -218,4 +225,6 @@ def check_devices(framework, contact: Sequence[str] = ()) -> List[Finding]:
                             "the one you trusted, and no deploy, verify or benchmark failed to reach "
                             f"{'it' if quiet == 1 else 'them'}). Mojo contacts a board only when you ask it to "
                             "check that one."))
-    return findings + _old_sidecars(store, boards) + _hot_boards(store, boards) + _weaker_keys(store, boards)
+    from orchestrator.Core.config_manager import framework_mode
+    return (findings + _old_sidecars(store, boards) + _hot_boards(store, boards)
+            + _weaker_keys(store, boards, framework_mode(getattr(framework, "config", None))))
