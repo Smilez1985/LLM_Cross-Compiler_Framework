@@ -172,6 +172,8 @@ class Removal:
     deleted: List[str] = field(default_factory=list)       # deleted for good (every object of the old mode)
     freed_bytes: int = 0
     failed: List[Tuple[str, str]] = field(default_factory=list)
+    # speaking name -> the full paths that stayed (Core/deletion.note_kept), for the person's own text only
+    remaining: Dict[str, List[str]] = field(default_factory=dict)
     stopped: bool = False                                   # Ditto's server was stopped first (the old mode removed
                                                             # before the new one was built)
 
@@ -1179,7 +1181,7 @@ def remove_leftovers(rt: Any, plan: Any, *, actor: str, audit: Any, before_switc
     items = sorted(plan.items, key=lambda i: (order.get(i.kind, 4), cs.BASE_REPO in i.speaking_name))
     for item in items:
         try:
-            kept = _remove_item(rt, item, removes)
+            kept = _remove_item(rt, item, removes, result.remaining)
         except Exception as e:  # noqa: BLE001 - e.g. Docker refused: kept and reported
             from orchestrator.utils.helpers import redact_secrets
             kept = redact_secrets(str(getattr(e, "explanation", "") or e))[:300]
@@ -1208,8 +1210,12 @@ def _forget_keys(rt: Any, path: Path, keys: Tuple[str, ...]) -> None:
             _write_private(path, json.dumps(kept, sort_keys=True))
 
 
-def _remove_item(rt: Any, item: Any, removes: str) -> Optional[str]:
-    """Deletes one listed object for good; returns why it was kept, or None."""
+def _remove_item(rt: Any, item: Any, removes: str,
+                 remaining: Optional[Dict[str, List[str]]] = None) -> Optional[str]:
+    """Deletes one listed object for good; returns why it was kept, or None only when it is really gone. A build folder
+    of which anything stays is kept ("kept: could not remove N items", relative names: Core/deletion.kept_reason), and
+    its remaining full paths go into `remaining` for the person's own text."""
+    from orchestrator.Core.deletion import kept_reason
     from orchestrator.runtime.build.source import remove_tree
     root = Path(rt.root).resolve()
     if item.kind == "runtime_build":
@@ -1219,14 +1225,22 @@ def _remove_item(rt: Any, item: Any, removes: str) -> Optional[str]:
         store = rt.store
         if path.parent.resolve() == (root / "builds") and path.name in {b[:16] for b in store.running_build_ids()}:
             return "kept: a running server uses it"
-        remove_tree(path)
+        left = remove_tree(path)
+        if left:
+            if remaining is not None:
+                remaining.setdefault(item.speaking_name, []).extend(str(p) for p in left)
+            return kept_reason(path, left)
         if path.parent.resolve() == (root / "builds"):
             store.forget(path.name)
         return None
     if item.kind == "runtime_record":
         path = Path(item.full_path)
         if path.name == IMAGE_LOG and path.parent.resolve() == (Path(rt.data_dir) / "logs").resolve():
-            path.unlink(missing_ok=True)
+            left = remove_tree(path)
+            if left:
+                if remaining is not None:
+                    remaining.setdefault(item.speaking_name, []).extend(str(p) for p in left)
+                return kept_reason(path, left)
             return None
         if path.resolve().parent != root or path.name not in ("active.json", "mode.json"):
             return "kept: it is not one of Ditto's records"

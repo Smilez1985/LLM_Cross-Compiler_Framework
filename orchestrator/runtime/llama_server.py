@@ -1002,7 +1002,7 @@ class LocalLLMRuntime:
         nothing deleted, without the audit log); each item is checked again under its lock, so a build that became
         active or that a server started from meanwhile is kept. Only the person (PermissionError otherwise). Returns
         a deletion.DeletionResult."""
-        from orchestrator.Core.deletion import DeletionResult, require_person, require_same, same_items
+        from orchestrator.Core.deletion import DeletionResult, kept_reason, require_person, require_same, same_items
         from orchestrator.runtime.build.host import PURPOSE
         from orchestrator.runtime.build.store import StoreError
         accepted = require_person(accepted)
@@ -1030,7 +1030,11 @@ class LocalLLMRuntime:
                                    accepted.actor)
                 result.trash_ids.append(entry.id)
             else:
-                shutil.rmtree(path)
+                from orchestrator.utils.atomic import remove_tree
+                left = remove_tree(path)
+                if left:   # something stays: kept, with its paths for the person (Core/deletion.note_kept)
+                    result.remaining.setdefault(item.speaking_name, []).extend(str(p) for p in left)
+                    raise OSError(kept_reason(path, left))
                 result.freed_bytes += item.size_bytes
 
         stored = {str(b.path): b.build_id for b in self.store.list_builds()}
@@ -1054,8 +1058,9 @@ class LocalLLMRuntime:
                     try:
                         take(Path(item.full_path), item)
                     except Exception as e:  # noqa: BLE001 - a TrashError or an OSError: kept and reported
+                        kept = str(e) if str(e).startswith("kept: ") else None
                         result.failed.append((item.speaking_name,
-                                              type(e).__name__ if isinstance(e, OSError) else str(e)))
+                                              kept or (type(e).__name__ if isinstance(e, OSError) else str(e))))
                         continue
                     result.done.append(item.speaking_name)
         return result

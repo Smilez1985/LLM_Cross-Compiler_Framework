@@ -117,6 +117,14 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   the exit code of the end reason cancelled. Ctrl+C in the command itself stays 130.
 
 ### Fixed
+- `2026-10-31 02:14 UTC` · `v3.3.0` **A deletion you accepted says "deleted" only when it is true** ([design](docs/DESIGN.md#deletion-and-the-trash)):
+  Ditto's mode switch ignored what the removal of a build folder left behind and reported it as deleted (and forgot
+  the build); emptying the trash, the build dependencies and Ditto's old runtime builds did the same or only said
+  "OSError", and the old Hugging Face downloads and the old knowledge base storage said "a file in it could not be
+  deleted" without naming it. Now an item of which anything stays is kept with a plain reason ("kept: could not
+  remove N items", the names relative to the item), and the GUI's result box and the CLI name every path that stayed,
+  so you can delete it by hand. Knowledge snapshots, deploy packages and pack uninstalls report the same way. What an
+  AI reads keeps relative names only, never a host path.
 - `2026-10-31 01:58 UTC` · `v3.3.0` **The doorbell's last send error never keeps the broker's user name**
   ([design](docs/DESIGN.md#mcp-server-tools-and-permissions)): Mojo's doorbell line keeps the broker's address
   (`scheme://host:port`) and the last send error, also where an AI reads it, so the person can see which broker failed

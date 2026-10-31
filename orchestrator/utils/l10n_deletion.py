@@ -35,6 +35,7 @@ TEXTS = {
                             "list.",
         "deletion.failed": "Nothing was deleted: {reason}",
         "deletion.kept": "Kept: {name} ({reason})",
+        "deletion.remaining": "Still there ({name}), delete it by hand: {path}",
         "deletion.done.trash": "Moved to the trash: {name}",
         "deletion.done.permanent": "Deleted for good: {name}",
 
@@ -124,6 +125,7 @@ TEXTS = {
                             "sie noch einmal, um die neue Liste zu sehen.",
         "deletion.failed": "Nichts wurde gelöscht: {reason}",
         "deletion.kept": "Behalten: {name} ({reason})",
+        "deletion.remaining": "Noch da ({name}), lösche es von Hand: {path}",
         "deletion.done.trash": "In den Papierkorb verschoben: {name}",
         "deletion.done.permanent": "Endgültig gelöscht: {name}",
 

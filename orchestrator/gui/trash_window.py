@@ -144,7 +144,8 @@ class TrashDialog(QDialog):
             plain_box(self, "warning", self._t("trash.title"), self._t("deletion.failed", reason=one_line(str(e))))
             return
         lines = [self._t("deletion.done.permanent", name=one_line(n)) for n in result.deleted]
-        lines += [self._t("deletion.kept", name=one_line(n), reason=one_line(r)) for n, r in result.failed]
+        from orchestrator.Core.deletion import kept_lines
+        lines += [one_line(line) for line in kept_lines(result, self.lang)]   # with every path that stayed
         plain_box(self, "information", self._t("trash.title"), "\n".join(lines))
         self.reload()
 

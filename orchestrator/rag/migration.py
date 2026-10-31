@@ -584,6 +584,8 @@ class OldStoreDeletion:
     freed_bytes: int = 0
     trash_id: str = ""
     problem: str = ""
+    # the full paths that stayed (Core/deletion.kept_reason is the problem), for the person's own text only
+    remaining: List[str] = field(default_factory=list)
 
 
 def delete_old_store(state_dir: Path, accepted: Any, trash: Any = None, audit: Any = None,
@@ -630,10 +632,13 @@ def delete_old_store(state_dir: Path, accepted: Any, trash: Any = None, audit: A
             else:
                 if folder.is_symlink() or not folder.is_dir():
                     raise OSError("not a plain folder")
+                from orchestrator.Core.deletion import kept_reason
                 from orchestrator.rag.storage_lock import remove_tree
-                remove_tree(folder)
-                if folder.exists():
-                    raise OSError("a file in it could not be deleted")
+                left = remove_tree(folder)
+                if left:
+                    result.remaining = [str(p) for p in left]
+                    result.problem = kept_reason(folder, left)
+                    return result
                 result.freed_bytes = item.size_bytes
         except Exception as e:  # noqa: BLE001 - a TrashError or an OSError: the folder stays and is reported
             result.problem = type(e).__name__ if isinstance(e, OSError) else str(e)
