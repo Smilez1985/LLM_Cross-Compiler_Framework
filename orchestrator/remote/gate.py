@@ -52,6 +52,10 @@ KEY_OPTIONS = ("no-pty", "no-port-forwarding", "no-agent-forwarding", "no-X11-fo
 PLACE_HOME_REL = ".local/share/llm-framework"
 PLACE_TMP_PREFIX = "/tmp/llm_deploy."   # nosec B108 - a folder on the board, made by mktemp with a random name
 PATH_MAX = 1536
+# llmcf's root helper and its sudo rules on a board (the deploy setting "systemd"; runtime/device/board_ops.py writes
+# the helper's program).
+ROOT_HELPER = "/usr/local/libexec/llmcf/llmcf-root"
+SUDOERS_DIR = "/etc/sudoers.d"
 REST_MAX = 64
 
 
@@ -411,8 +415,120 @@ define("status", (), 'echo "restricted=no gate=none"',
        doc="whether the framework's key on the board runs only the gate, and its version")
 
 
+# --- pairing: the gate and the restricted key line --------------------------------------------------------------------
+
+GATE_INSTALL = "\n".join([
+    # stdin: the gate program. Answers gate=installed, or gate=unavailable reason=WORD (nothing of the person's
+    # authorized_keys changed then).
+    "set -u",
+    "umask 077",
+    'llmcf_text=$(cat; echo x); llmcf_text=${llmcf_text%x}',
+    '[ -x /bin/sh ] || { echo "gate=unavailable reason=no-sh"; exit 0; }',
+    'case $HOME in /*) ;; *) echo "gate=unavailable reason=home"; exit 0 ;; esac',
+    'case $HOME in *[!A-Za-z0-9._/-]*) echo "gate=unavailable reason=home"; exit 0 ;; esac',
+    f'cfg="$HOME/{GATE_REL.rsplit('/', 1)[0]}"; g="$HOME/{GATE_REL}"; keys="$HOME/.ssh/authorized_keys"',
+    'if ! { mkdir -p "$cfg" "$HOME/.ssh" && printf "%s" "$llmcf_text" > "$g.new" && chmod 0500 "$g.new" && '
+    'mv -f "$g.new" "$g"; } 2>/dev/null; then rm -f "$g.new" 2>/dev/null; '
+    'echo "gate=unavailable reason=read-only"; exit 0; fi',
+    '/bin/sh -n "$g" 2>/dev/null || { echo "gate=unavailable reason=sh"; exit 0; }',
+    'line="command=\\"/bin/sh $g\\",' + ",".join(KEY_OPTIONS) + ' @TYPE@ @BLOB@ @COMMENT@"',
+    'new="$keys.llmcf.$$"',
+    'if ! { touch "$keys" && cp -p "$keys" "$new" && '
+    "awk -v blob=@BLOB@ -v line=\"$line\" 'BEGIN { done = 0 } { hit = 0; n = split($0, f, \" \"); "
+    "for (i = 1; i <= n; i++) if (f[i] == blob) hit = 1; if (hit) { if (!done) print line; done = 1; next } print } "
+    "END { if (!done) print line }' \"$keys\" > \"$new\" && mv -f \"$new\" \"$keys\"; } 2>/dev/null; then "
+    'rm -f "$new" 2>/dev/null; echo "gate=unavailable reason=read-only"; exit 0; fi',
+    'echo "gate=installed"',
+])
+define("gate-install", ("word", "b64", "comment"),
+       lambda t, b, c, rest="": GATE_INSTALL.replace("@TYPE@", t).replace("@BLOB@", b).replace("@COMMENT@", c),
+       gate=False, doc="pairing: the gate program and the framework key's restricted authorized_keys line")
+
+ROOT_SETUP = "\n".join([
+    # stdin: a line with the person's one-time password (empty: sudo -n), then the root helper program.
+    "set -u",
+    "umask 077",
+    'IFS= read -r llmcf_pw || llmcf_pw=""',
+    'llmcf_d=$(mktemp -d "${TMPDIR:-/tmp}/llmcf-root.XXXXXXXX") || { echo "root=unavailable reason=tmp"; exit 0; }',
+    "trap 'rm -rf \"$llmcf_d\"' EXIT",
+    'cat > "$llmcf_d/helper"',
+    'printf "%s" "$LLMCF_SUDOERS" > "$llmcf_d/sudoers"',
+    'asroot() { if [ -n "$llmcf_pw" ]; then printf "%s\\n" "$llmcf_pw" | sudo -S -p "" "$@"; '
+    'else sudo -n "$@"; fi; }',
+    'command -v sudo >/dev/null 2>&1 || { echo "root=unavailable reason=no-sudo"; exit 0; }',
+    'command -v visudo >/dev/null 2>&1 || [ -x /usr/sbin/visudo ] || { echo "root=unavailable reason=no-visudo"; '
+    'exit 0; }',
+    'llmcf_visudo=$(command -v visudo 2>/dev/null || echo /usr/sbin/visudo)',
+    '"$llmcf_visudo" -cf "$llmcf_d/sudoers" >/dev/null 2>&1 || { echo "root=unavailable reason=sudoers"; exit 0; }',
+    f'asroot install -d -m 0755 -o root -g root {ROOT_HELPER.rsplit('/', 1)[0]} >/dev/null 2>&1 || '
+    '{ echo "root=unavailable reason=sudo"; exit 0; }',
+    f'asroot install -m 0755 -o root -g root "$llmcf_d/helper" {ROOT_HELPER} >/dev/null 2>&1 || '
+    '{ echo "root=unavailable reason=sudo"; exit 0; }',
+    f'asroot install -m 0440 -o root -g root "$llmcf_d/sudoers" {SUDOERS_DIR}/llmcf-@USER@ >/dev/null 2>&1 || '
+    '{ echo "root=unavailable reason=sudo"; exit 0; }',
+    'echo "root=installed"',
+])
+
+
+define("root-setup", ("word",), lambda user, rest="": ROOT_SETUP.replace("@USER@", user), gate=False,
+       doc="llmcf's root helper and its exact sudo rules (sudo -n, or the person's one-time password for sudo -S)")
+
+
+def _answer(text: str, key: str) -> Tuple[bool, str]:
+    """(True, "") for `key=installed` in a setup step's answer, else (False, its reason word)."""
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if line == f"{key}=installed":
+            return True, ""
+        if line.startswith(f"{key}=unavailable"):
+            reason = line.partition("reason=")[2].strip()
+            return False, reason if re.fullmatch(r"[a-z-]{1,24}", reason or "") else "unknown"
+    return False, "unknown"
+
+
+# What a reason word of the setup steps means, in the person's words.
+SETUP_REASONS = {
+    "no-sh": "the board has no /bin/sh",
+    "home": "the account's home folder is not a plain path",
+    "read-only": "the account's home folder or its ~/.ssh cannot be written (a read-only system)",
+    "sh": "the board's /bin/sh cannot read the gate",
+    "tmp": "the board cannot make a private temporary folder",
+    "no-sudo": "the board has no sudo",
+    "no-visudo": "the board has no visudo to check the sudo rules",
+    "sudoers": "visudo did not accept the sudo rules",
+    "sudo": "sudo refused (it needs a password the framework was not given, or the account may not use it)",
+    "unknown": "the board gave no answer the framework knows",
+}
+
+
+def install_gate(run: Callable[..., object], public_line: str, gate_text: str) -> Tuple[bool, str]:
+    """Pairing's setup step gate-install over `run` (a session's or a transport's run(script, stdin=...)): the gate
+    program and the framework key's restricted authorized_keys line. (True, "") when installed, else (False, the
+    reason word of SETUP_REASONS); the person's other lines in authorized_keys stay as they were."""
+    parts = (public_line or "").split(" ")
+    if len(parts) not in (2, 3):
+        raise GateRefused("the framework's public key line is not a plain SSH public key")
+    call = script("gate-install", parts[0], parts[1], parts[2] if len(parts) == 3 else GATE_NAME)
+    result = run(call, stdin=[gate_text.encode("utf-8")])
+    return _answer(getattr(result, "out", ""), "gate")
+
+
+def install_root(run: Callable[..., object], user: str, helper_text: str, sudoers_text: str,
+                 password: str = "") -> Tuple[bool, str]:
+    """The setup step root-setup: llmcf's root helper at ROOT_HELPER and its sudoers file (checked with visudo -cf
+    first) for `user`, with `sudo -n`, or with the person's one-time `password` for `sudo -S` (sent on stdin, never on
+    a command line). (True, "") when installed, else (False, the reason word)."""
+    if "\n" in password or "\r" in password:
+        return False, "sudo"
+    text = f"LLMCF_SUDOERS={shlex.quote(sudoers_text)}\n" + str(script("root-setup", user))
+    call = GateScript(text, "root-setup", (user,))
+    result = run(call, stdin=[(password + "\n").encode("utf-8"), helper_text.encode("utf-8")])
+    return _answer(getattr(result, "out", ""), "root")
+
+
 __all__ = ["GATE_NAME", "GATE_REL", "GateBundle", "GateCall", "GateRefused", "GateScript", "JOB_LOG", "JOB_STARTED",
-           "JOB_STATUS", "KEY_OPTIONS", "KINDS",
-           "Kind", "OPERATIONS", "Operation", "PLACE_HOME_REL", "PLACE_TMP_PREFIX", "REFUSAL_PREFIX", "REFUSED_STATUS",
-           "define", "detached_command", "gate_call", "gate_operations", "gate_version", "is_refusal", "is_restricted_line", "job",
-           "key_options", "operation", "poll_command", "refusal_text", "render_gate", "restricted_line", "script"]
+           "JOB_STATUS", "KEY_OPTIONS", "KINDS", "Kind", "OPERATIONS", "Operation", "PLACE_HOME_REL",
+           "PLACE_TMP_PREFIX", "REFUSAL_PREFIX", "REFUSED_STATUS", "ROOT_HELPER", "SETUP_REASONS", "SUDOERS_DIR",
+           "define", "detached_command", "gate_call", "gate_operations", "gate_version", "install_gate",
+           "install_root", "is_refusal", "is_restricted_line", "job", "key_options", "operation", "poll_command",
+           "refusal_text", "render_gate", "restricted_line", "script"]

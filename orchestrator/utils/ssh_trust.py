@@ -172,12 +172,43 @@ def connect(host: str, user: str, state_dir: Path, port: int = 22, password: Opt
     return transport.open_client(host, user, state_dir, port=port, password=password, timeout=timeout)
 
 
-def install_public_key(client, public_line: str) -> None:
-    """Adds the framework key to the device user's authorized_keys (idempotent). The command is fixed; its only value
-    is the framework's own public key line (client_key), checked against PUBLIC_LINE and shell-quoted, so nothing from
-    a file or a device reaches the device's shell as code."""
+class GateUnavailable(HostKeyError):
+    """The board cannot take llmcf's command gate (`reason`, a word of gate.SETUP_REASONS): the framework's key was
+    not installed, nothing of the board's authorized_keys changed."""
+
+    def __init__(self, reason: str):
+        from orchestrator.remote.gate import SETUP_REASONS
+        self.reason = reason
+        super().__init__(f"This board cannot take llmcf's command gate ({SETUP_REASONS.get(reason, reason)}), so the "
+                         "framework's key was not installed and nothing on the board changed. The framework never "
+                         "installs an unrestricted key on its own: fix that on the board and pair again, or allow an "
+                         "unrestricted key for this board when you are asked.")
+
+
+def install_public_key(client, public_line: str, bundle=None, *, allow_unrestricted: bool = False) -> str:
+    """Installs the framework key on the board over `client` (a session the person logged in to with a one-time
+    password). With `bundle` (orchestrator/remote/gate.py GateBundle, from runtime/device/board_ops.bundle()): llmcf's
+    command gate and the key's restricted line (command= the gate, no-pty, no-port-forwarding, no-agent-forwarding,
+    no-X11-forwarding), the person's other lines unchanged; "restricted". A board that cannot take the gate raises
+    GateUnavailable, unless the person allowed an unrestricted key (`allow_unrestricted`): then the plain line as
+    before; "unrestricted". Without a bundle the plain line (the earlier behaviour, for a caller that gives none).
+    The command is fixed; its only values are the framework's own public key line (checked against PUBLIC_LINE) and
+    the gate program on stdin, so nothing from a file or a device reaches the device's shell as code."""
     if not isinstance(public_line, str) or not PUBLIC_LINE.fullmatch(public_line):
         raise HostKeyError("The framework's public key line is not a plain SSH public key; nothing was installed.")
+    if bundle is not None:
+        from orchestrator.remote import gate
+        ok, reason = gate.install_gate(transport.ParamikoTransport(client).run, public_line, bundle.gate)
+        if ok:
+            return "restricted"
+        if not allow_unrestricted:
+            raise GateUnavailable(reason)
+    _install_plain(client, public_line)
+    return "unrestricted"
+
+
+def _install_plain(client, public_line: str) -> None:
+    """The framework key's plain line in authorized_keys (idempotent): the earlier pairing."""
     q = shlex.quote(public_line)
     command = (f"umask 077 && mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && "
                f"(grep -qxF {q} ~/.ssh/authorized_keys || printf '%s\\n' {q} >> ~/.ssh/authorized_keys)")

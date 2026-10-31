@@ -489,7 +489,7 @@ class TestThePersonsLoginOnTheSession:
         monkeypatch.setattr(ssh_trust, "check_host_key", lambda state, host, port, key: "known")
         monkeypatch.setattr(ssh_trust, "fingerprint", lambda key: fp)
         monkeypatch.setattr(ssh_trust, "connect", lambda *a, **k: SimpleNamespace(close=lambda: None))
-        monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, line: None)
+        monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, line, *_a, **_k: None)
         monkeypatch.setattr(ssh_trust, "client_key", lambda state: (None, "ssh-ed25519 AAAA framework"))
         return device_id_for_host_key(fp)
 

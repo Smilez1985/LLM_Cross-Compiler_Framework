@@ -40,7 +40,7 @@ import re
 import secrets
 import shlex
 import socket
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -330,6 +330,17 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
                               "the deploy settings to the start script (--install user). Nothing was changed")
     root = facts.root
     result = DeployResult(build_id=build_id, home=facts.home, root=root, previous=None, install=settings.install)
+    # an unrestricted framework key is restricted now (llmcf's command gate; with systemd also its exact sudo rules)
+    result.notes.extend(board_ops.restrict_key(shell, sudo_user=(settings.ssh_user or "") if systemd and facts.sudo
+                                               and not facts.helper else ""))
+    if systemd and not facts.helper and shell.session.gated:
+        raise RemoteError("the deploy settings choose the systemd unit, but llmcf's root helper and its exact sudo "
+                          "rules are not on the board, and the framework's key runs only llmcf's operations. Pair "
+                          "the board again with its password so the framework installs them, or switch the deploy "
+                          "settings to the start script (--install user). Nothing was changed")
+    if systemd and not facts.helper and any("root helper and its exact sudo rules are installed" in n
+                                            for n in result.notes):
+        facts = replace(facts, helper=True)
 
     say("creating a private staging folder on the device ...")
     res = shell.run(gate.script("staging-create", root))
@@ -702,6 +713,11 @@ def verify_on_device(shell: RemoteShell, *, home: str, plan_verify: Mapping[str,
         report.checks.append(Check("binaries", False, "missing on the device: " + (", ".join(missing) or "?")))
         return report
     report.checks.append(Check("binaries", True, ", ".join(names)))
+    restricted, version = board_ops.key_state(shell)
+    report.checks.append(Check("board-key", True if restricted else None,
+                               f"the framework's key runs only llmcf's operations (gate {version})" if restricted else
+                               "the framework's key on this board is not restricted (it runs anything the account "
+                               "may run): pair the board again or deploy to restrict it", {"restricted": restricted}))
     report.ran_binaries = True
 
     # Version

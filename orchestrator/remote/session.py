@@ -442,13 +442,17 @@ class RemoteSession:
             if self.expect_fingerprint is None:
                 self.expect_fingerprint = self.fingerprint
 
-    def pair(self) -> bool:
+    def pair(self, bundle: Any = None) -> bool:
         """Installs the framework's key on the board (its authorized_keys), only with OneTimePassword credentials
         that ask for it; True when it was installed. KeyOnly credentials never reach the key installation."""
         if not isinstance(self.credentials, OneTimePassword) or not self.credentials.install_key:
             return False
         from orchestrator.utils import ssh_trust
-        ssh_trust.install_public_key(self.client, ssh_trust.client_key(self.state_dir)[1])
+        line = ssh_trust.client_key(self.state_dir)[1]
+        if bundle is None:
+            ssh_trust.install_public_key(self.client, line)
+        else:   # llmcf's command gate and the key's restricted line (orchestrator/remote/gate.py)
+            ssh_trust.install_public_key(self.client, line, bundle)
         return True
 
     def for_cleanup(self) -> Optional["RemoteSession"]:
