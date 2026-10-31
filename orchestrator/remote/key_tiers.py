@@ -23,7 +23,7 @@ tier; an AI only reads the tier word of a board. TierFacts holds the fixed words
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 TIER_ROOT = "root"
 TIER_DROPBEAR = "dropbear"
@@ -192,6 +192,8 @@ class TierOffer:
     choices: Tuple[str, ...]
     mode: str = MODE_PRIVATE
     refused: Tuple[str, ...] = ()
+    proposed: str = ""   # the choice the board's stored probe proposes, when the board's own facts allow it now
+    note: str = ""       # why the stored probe's proposal is not offered (the board says otherwise now)
 
     def lines(self) -> Tuple[str, ...]:
         """The offer as the CLI shows it (English; the GUI asks the same choices in its own texts)."""
@@ -199,9 +201,19 @@ class TierOffer:
         if self.refused:
             out.append("Enterprise mode refuses " + " and ".join(TIER_TEXTS[t].split(":")[0] for t in self.refused)
                        + ": they count as too insecure there; enterprise mode needs OpenSSH with sudo.")
+        if self.note:
+            out.append(self.note)
         for n, choice in enumerate(self.choices, 1):
-            out.append(f"{n}. {CHOICE_TEXTS[choice]}")
+            mark = " (proposed from the board's probe)" if choice == self.proposed else ""
+            out.append(f"{n}. {CHOICE_TEXTS[choice]}{mark}")
         return tuple(out)
+
+    def in_order(self) -> Tuple[str, ...]:
+        """The choices with the proposed one first (the GUI asks them one by one in this order); "password" stays
+        last."""
+        if not self.proposed or self.proposed == TIER_PASSWORD:
+            return self.choices
+        return (self.proposed,) + tuple(c for c in self.choices if c != self.proposed)
 
 
 def offer(reason: str, facts: TierFacts, mode: str = MODE_PRIVATE) -> TierOffer:
@@ -227,6 +239,43 @@ def offer(reason: str, facts: TierFacts, mode: str = MODE_PRIVATE) -> TierOffer:
     return TierOffer(reason=reason, facts=facts, choices=tuple(choices), mode=mode, refused=tuple(refused))
 
 
+_NAMES = {TIER_ROOT: "root-owned key line", TIER_DROPBEAR: "Dropbear tier", TIER_HOME: "home gate",
+          TIER_PASSWORD: "password login", CHOICE_OPENSSH: "switch to OpenSSH"}
+_PROBE_SUDO = ("root", "nopasswd", "password")   # AccessFacts.sudo words with which sudo can be used once
+
+
+def proposal(access: Any, mode: str = MODE_PRIVATE) -> str:
+    """The tier the board's stored probe proposes (runtime/profile.py HardwareProfile.access(), the probe's access
+    facts), "" without them: OpenSSH with sudo and an ssh-keygen that checks signatures, the root-owned key line;
+    Dropbear with sudo, the Dropbear tier (enterprise mode: the switch to OpenSSH); no sudo, the home gate (enterprise
+    mode: password login). Only a proposal: the pairing tries the root step on the board itself first and reads the
+    board's facts again (tier-facts), and only what the board says now is offered (with_proposal)."""
+    if access is None:
+        return ""
+    server, sudo = getattr(access, "ssh_server", None), getattr(access, "sudo", None)
+    if server == "openssh" and sudo in _PROBE_SUDO and getattr(access, "keygen_signatures", None) is not False:
+        return TIER_ROOT
+    if server == "dropbear" and sudo in _PROBE_SUDO:
+        return TIER_DROPBEAR if allowed(TIER_DROPBEAR, mode) else CHOICE_OPENSSH
+    if sudo == "absent":
+        return TIER_HOME if allowed(TIER_HOME, mode) else TIER_PASSWORD
+    return ""
+
+
+def with_proposal(the_offer: TierOffer, access: Any) -> TierOffer:
+    """`the_offer` (built from what the board says now) with the stored probe's proposal marked when the board offers
+    it now (`proposed`), or with a `note` when the probe proposed something the board no longer offers: the probe
+    facts never decide alone."""
+    from dataclasses import replace
+    wanted = proposal(access, the_offer.mode)
+    if not wanted:
+        return the_offer
+    if wanted in the_offer.choices:
+        return replace(the_offer, proposed=wanted)
+    return replace(the_offer, note=f"The board's stored probe proposed the {_NAMES.get(wanted, wanted)}, but the "
+                                   "board says otherwise now; the choices follow what the board says now.")
+
+
 def choice_problem(choice: str, the_offer: Optional[TierOffer], mode: str) -> str:
     """Why `choice` cannot be taken ("" when it can): not a choice, not offered for this board, or refused in this
     mode (the person is told why)."""
@@ -243,4 +292,5 @@ def choice_problem(choice: str, the_offer: Optional[TierOffer], mode: str) -> st
 __all__ = ["CHOICES", "CHOICE_OPENSSH", "CHOICE_TEXTS", "MANAGERS", "MODES", "MODE_ENTERPRISE", "MODE_PRIVATE",
            "TIERS", "TIER_DROPBEAR", "TIER_HOME", "TIER_PASSWORD", "TIER_ROOT", "TIER_TEXTS", "TIER_UNRESTRICTED",
            "TierFacts", "TierOffer", "UPGRADE_TEXT", "USE_WAYS", "WEAKER", "allowed", "choice_problem", "is_weaker",
-           "normal_mode", "offer", "server_of_banner", "tier_of_status", "use_problem"]
+           "normal_mode", "offer", "proposal", "server_of_banner", "tier_of_status", "use_problem",
+           "with_proposal"]

@@ -191,7 +191,8 @@ def _step(audit: Any, via: str, tool: str, arguments: Dict[str, Any], status: st
 
 def pair(client: Any, state_dir: Path, bundle: Any = None, *, allow_unrestricted: bool = False,
          password: str = "", chooser: Optional[TierChooser] = None, mode: str = "private", audit: Any = None,
-         via: str = "", host: str = "", port: int = 22, user: str = "", switch: bool = True) -> str:
+         via: str = "", host: str = "", port: int = 22, user: str = "", switch: bool = True,
+         access: Any = None) -> str:
     """Installs the framework's own SSH key on the board over `client`, a session the person logged in to with a
     one-time password (used for that connection only, never stored): ssh_trust.install_public_key, with `bundle`
     (runtime/device/board_ops.bundle()) as llmcf's command gate and the key's restricted line. `password`: the person's
@@ -204,7 +205,10 @@ def pair(client: Any, state_dir: Path, bundle: Any = None, *, allow_unrestricted
     needs the board's `host`, SSH `port` and `user` (the new sshd is reached on its own port). Without a chooser, or
     when the board offers nothing but the password, GateUnavailable (a HostKeyError) with the choices in its text.
     `switch` False leaves the switch out of the choices (a stored board keeps its address and host key there).
-    Returns a PairOutcome (a str: "restricted", "dropbear", "home", "unrestricted" or "password")."""
+    `access` is the board's stored probe's access facts (runtime/profile.py HardwareProfile.access(), None without a
+    stored probe): its proposal (key_tiers.proposal) is marked among the choices only when what the board says now
+    offers it (key_tiers.with_proposal); the root step on the board and its facts read now decide, never the probe
+    alone. Returns a PairOutcome (a str: "restricted", "dropbear", "home", "unrestricted" or "password")."""
     from orchestrator.remote import key_tiers
     from orchestrator.utils import ssh_trust   # looked up now: tests replace install_public_key and client_key there
     line = ssh_trust.client_key(Path(state_dir))[1]
@@ -222,11 +226,15 @@ def pair(client: Any, state_dir: Path, bundle: Any = None, *, allow_unrestricted
     if not switch and key_tiers.CHOICE_OPENSSH in offer.choices:
         from dataclasses import replace
         offer = replace(offer, choices=tuple(c for c in offer.choices if c != key_tiers.CHOICE_OPENSSH))
+    offer = key_tiers.with_proposal(offer, access)   # the stored probe proposes; the board's facts now decide
     facts = offer.facts.as_dict()
     _step(audit, via, "board_key_tier_offered", {"reason": offer.reason, "mode": mode, "choices": list(offer.choices),
-                                                 "refused": list(offer.refused), **facts})
+                                                 "refused": list(offer.refused), "proposed": offer.proposed,
+                                                 "probe_disagrees": bool(offer.note), **facts})
     if offer.refused:
         chooser.tell([_reason_text("enterprise")])
+    if offer.note:
+        chooser.tell([offer.note])
     choice = chooser.choose(offer)
     problem = key_tiers.choice_problem(choice, offer, mode)
     _step(audit, via, "board_key_tier_chosen", {"choice": choice, "mode": mode}, "error" if problem else "ok",

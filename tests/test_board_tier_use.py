@@ -18,6 +18,8 @@ from orchestrator.runtime.profile import device_id_for_host_key
 FP = "SHA256:" + "A" * 43
 DEVICE = device_id_for_host_key(FP)
 HOST = "192.0.2.10"
+PUBLIC_LINE = ("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExample0 "
+               "llm-cross-compiler-framework")
 
 
 class _Session:
@@ -154,3 +156,82 @@ def test_the_device_listings_carry_the_key_tier_and_mark_the_refused_ones(tmp_pa
     assert cli._tier_cell("dropbear") == "[yellow]dropbear (weaker)[/yellow]"
     assert "refused in enterprise mode" in cli._tier_cell("dropbear", "enterprise")
     assert cli._tier_cell("root", "enterprise") == "root" and cli._tier_cell("") == "-"
+
+
+# --- the pairing takes its proposal from the stored probe; the board's facts decide ----------------------------------
+
+def _access(**values):
+    from orchestrator.runtime.profile import AccessFacts
+    return AccessFacts(**values)
+
+
+def test_the_stored_probe_proposes_a_tier_by_the_boards_access_facts():
+    dropbear = _access(ssh_server="dropbear", sudo="nopasswd", ssh_keygen="none")
+    assert key_tiers.proposal(dropbear, "private") == "dropbear"
+    assert key_tiers.proposal(dropbear, "enterprise") == "openssh"
+    assert key_tiers.proposal(_access(ssh_server="openssh", sudo="password", ssh_keygen="openssh",
+                                      ssh_keygen_version="9.2"), "private") == "root"
+    assert key_tiers.proposal(_access(ssh_server="openssh", sudo="password", ssh_keygen="openssh",
+                                      ssh_keygen_version="7.9"), "private") == ""   # no -Y: the board decides
+    assert key_tiers.proposal(_access(ssh_server="dropbear", sudo="absent"), "private") == "home"
+    assert key_tiers.proposal(_access(ssh_server="dropbear", sudo="absent"), "enterprise") == "password"
+    assert key_tiers.proposal(None) == "" and key_tiers.proposal(_access()) == ""
+
+
+def test_pairing_marks_the_probes_proposal_only_when_the_board_offers_it_now(tmp_path, monkeypatch):
+    """Regression (failed before: pairing never read the stored probe's access facts)."""
+    from test_board_tiers import _Audit, _Board, _Chooser, _answers, _signer
+
+    from orchestrator.remote import pairing
+    from orchestrator.runtime.device import board_ops
+    from orchestrator.utils import ssh_trust
+    monkeypatch.setattr(ssh_trust, "client_key", lambda state_dir: (tmp_path / "key", PUBLIC_LINE))
+    audit, chooser = _Audit(), _Chooser("dropbear")
+    got = pairing.pair(_Board(_answers()), tmp_path, board_ops.bundle(_signer()), password="pw", chooser=chooser,
+                       audit=audit, via="cli", access=_access(ssh_server="dropbear", sudo="nopasswd"))
+    offer = chooser.offers[0]
+    assert got.tier == "dropbear" and offer.proposed == "dropbear" and not offer.note
+    assert any("(proposed from the board's probe)" in line and "Dropbear tier" in line for line in offer.lines())
+    assert offer.in_order()[0] == "dropbear" and offer.in_order()[-1] == "password"
+    row = next(r for r in audit.rows if r[1] == "board_key_tier_offered")
+    assert row[3]["proposed"] == "dropbear" and row[3]["probe_disagrees"] is False
+    # the probe said OpenSSH with sudo, but the board's root step fails now: the board's facts decide
+    chooser = _Chooser("password")
+    pairing.pair(_Board(_answers()), tmp_path, board_ops.bundle(_signer()), password="pw", chooser=chooser,
+                 audit=_Audit(), via="cli", access=_access(ssh_server="openssh", sudo="nopasswd"))
+    assert chooser.offers[0].proposed == "" and "says otherwise now" in chooser.offers[0].note
+    assert any("says otherwise now" in line for line in chooser.told)
+
+
+def test_the_probe_alone_never_sets_up_a_weaker_tier(tmp_path, monkeypatch):
+    from test_board_tiers import _Board, _answers, _signer
+
+    from orchestrator.remote import pairing
+    from orchestrator.runtime.device import board_ops
+    from orchestrator.utils import ssh_trust
+    monkeypatch.setattr(ssh_trust, "client_key", lambda state_dir: (tmp_path / "key", PUBLIC_LINE))
+    board = _Board(_answers())
+    with pytest.raises(ssh_trust.GateUnavailable):   # nobody to ask: the proposal installs nothing
+        pairing.pair(board, tmp_path, board_ops.bundle(_signer()), password="pw",
+                     access=_access(ssh_server="dropbear", sudo="nopasswd"))
+    assert "dropbear-board=installed" not in board.verbs
+
+
+def test_the_stored_access_facts_come_from_the_boards_probe_file(tmp_path):
+    from orchestrator.runtime.profile import stored_access
+    assert stored_access(tmp_path, DEVICE) is None   # no stored probe: no proposal
+
+
+def test_the_gui_asks_the_proposed_choice_first(monkeypatch):
+    pytest.importorskip("PySide6")
+    from orchestrator.gui import key_tier_ask
+    asked = []
+    chooser = key_tier_ask.GuiTierChooser(object())
+    monkeypatch.setattr(chooser, "_ask", lambda key, **values: asked.append(key) or False)
+    facts = key_tiers.TierFacts(server="dropbear", sudo="nopass", verifier="yes", managers=("apt-get",),
+                                family="debian")
+    offer = key_tiers.with_proposal(key_tiers.offer("no-sshd", facts, "private"),
+                                    _access(ssh_server="dropbear", sudo="nopasswd"))
+    assert offer.choices == ("openssh", "dropbear", "password")
+    assert chooser.choose(offer) == "password"   # every answer "No"
+    assert asked == ["deploy.tier.ask.dropbear", "deploy.tier.ask.openssh"]
