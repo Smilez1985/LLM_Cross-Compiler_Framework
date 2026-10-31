@@ -6,8 +6,8 @@ service, the job service, the chat feed's producer, the MQTT doorbell, the CLI a
 
 End reasons (END_REASONS):
 - done      the stage runner wrote its end record "status done" (after the last stage's marker and "Done."), the
-            container's real exit status is 0, the record is sealed with this run's key and names the job's last
-            stage (end_problem), and the framework finished the build (artifacts, manifest). The only reason that
+            container's real exit status is 0, the record is the runner's own (its end folder) and names the job's
+            last stage (end_problem), and the framework finished the build (artifacts, manifest). The only reason that
             counts as success.
 - failed    a stage failed, the end record says failed, the container exited 0 WITHOUT an end record ("the build
             ended without its end record": never a silent success), the record is not the stage runner's (a module
@@ -20,24 +20,24 @@ End reasons (END_REASONS):
 The old request statuses stay for old readers (STATUS_OF): done -> completed; failed, soft_cap, idle -> error;
 cancelled -> cancelled.
 
-The end record (targets/*/modules/build.sh): `$BUILD_SCRATCH_DIR/stages/<job>/build.end`, written to a temporary
-file and moved into place, one "key value" line each: status (done|failed), exit, stage, job, inputs, time and seal.
-A record that cannot be read, or that does not fit, counts as no record.
+The end record (the runtime layer's runner, orchestrator/runtime_layer/runner.sh): build.end in the job's end folder
+(Core/runtime_layer.py end_folder, mounted at /llmcf-end), written to a temporary file and moved into place, one
+"key value" line each: status (done|failed), exit, stage, job, inputs, time and end (protected|unprotected). A record
+that cannot be read, or that does not fit, counts as no record.
 
-Only the stage runner writes it (a forged early done record). The module scripts share the work folder (in the build
-sandbox under their own user, the stage account, so they cannot read the runner's memory: STAGE_USER_EXIT is the
-runner's check of that), so the BuildEngine hands the runner a one-run key (END_KEY, `stages/<job>/end.key`, new_end_key) before
-the container starts; the runner reads it into a variable it never exports and removes the file before its first
-stage, and seals its record with it (seal_of: SHA-256 over key, record lines, key). A record without that seal was
-not written by the runner. The real exit status of the container (the runner is its first process) is the second
-check: a module cannot make the runner exit 0 before the last stage returned.
+Only the stage runner writes it (a forged early done record). No key exists in the container: only the runner's uid
+may write the end folder, and every stage module runs as the stage account without any capability (STAGE_USER_EXIT is
+the runner's check of that), so the host trusts "done" only from that folder when it and the record belong to the
+runner alone (read_runner_record, end_folder_state), together with the container's real exit status (the runner is
+its first process: a module cannot make it exit 0 before the last stage returned) and the inspect check
+(utils/sandbox.sandbox_problem). A host whose mounts keep no owner or mode (Docker Desktop on Windows and macOS) runs
+the build, marked "end folder unprotected". The old one-run key (END_KEY, new_end_key, seal_of) is deprecated.
 """
 
 import hashlib
 import hmac
 import os
 import re
-import secrets
 import stat
 import sys
 from dataclasses import dataclass
@@ -55,8 +55,9 @@ NAME_OF_EVENT = {"build_ready": "Build ready", "build_error": "Error while build
 NAME_OF_EVENT_DE = {"build_ready": "Build fertig", "build_error": "Fehler beim Bauen", "build_stopped": "Build gestoppt"}
 
 END_RECORD = "build.end"
-END_KEY = "end.key"             # the BuildEngine's one-run key for the stage runner's seal (taken before any stage)
-# The last stage of each job: a done record must name it (build.sh's STAGES; rotate runs before target)
+END_KEY = "end.key"             # deprecated: the old one-run key file (the runtime layer keeps no key in a container)
+# The last of the four stages of each job: a done record must name the job's last stage (this one, or the last module
+# of target.yml's slot after_target, which the builder hands to end_problem)
 LAST_STAGE = {"build": "target", "imatrix": "convert"}
 CANCEL_NOTE = "cancelled"       # the framework's note to the stage runner: the running stage was a Cancel
 RUNNING_NOTE = "running"        # the stage runner's own note: the stage that runs now
@@ -148,38 +149,26 @@ def _linked(path: Path) -> bool:
 
 
 def record_body(status: str, code: int, stage: str, job: str, inputs: str, when: str) -> str:
-    """The sealed part of a record: its six lines in their order, without the last newline (build.sh writes it so)."""
+    """The sealed part of a record: its six lines in their order, without the last newline (the old runner wrote it so)."""
     return f"status {status}\nexit {code}\nstage {stage}\njob {job}\ninputs {inputs}\ntime {when}"
 
 
 def seal_of(body: str, key: str) -> str:
-    """The stage runner's seal of a record body: SHA-256 over key, newline, body, newline, key (build.sh computes
-    the same with sha256sum). Without the key nobody can make a seal for another body."""
+    """Deprecated (no key exists in a build container any more: the runtime layer's end folder, which only the stage
+    runner may write, is the record's trust; read_runner_record). The old seal of a record body: SHA-256 over key,
+    newline, body, newline, key; kept so that a record of an older build can still be checked with its key."""
     return hashlib.sha256(f"{key}\n{body}\n{key}".encode("ascii")).hexdigest()
 
 
 def new_end_key(work: Path, job: str = "build") -> Optional[str]:
-    """Writes a fresh one-run key into the job folder of the work folder (END_KEY), for the stage runner to take
-    before its first stage, and returns it; None when the folder is a link or cannot be written (the run then has no
-    sealed record and does not count as done)."""
-    stages = Path(work) / "stages"
-    folder = stages / job
-    try:
-        if stages.is_symlink() or folder.is_symlink():
-            return None
-        folder.mkdir(parents=True, exist_ok=True)
-        path = folder / END_KEY
-        if path.is_symlink() or path.is_dir():
-            return None
-        path.unlink(missing_ok=True)
-        key = secrets.token_hex(16)
-        # owner-only (0600): the stage account shares the runner's group in the build sandbox, never this file
-        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
-        with os.fdopen(fd, "w", encoding="ascii") as handle:
-            handle.write(key + "\n")
-        return key
-    except OSError:
-        return None
+    """Deprecated: always None, and no key file is written. It wrote a one-run key (END_KEY) into the job folder for
+    the stage runner to seal its record with. The runtime layer keeps no key in the container: the end record lives in
+    the runner's own end folder (Core/runtime_layer.py end_folder), and the host trusts it by the folder's owner and
+    mode, the container's real exit status and its inspect check (read_runner_record)."""
+    import warnings
+    warnings.warn("build_end.new_end_key is deprecated: the end record lives in the runtime layer's end folder "
+                  "(read_runner_record); no key exists", DeprecationWarning, stacklevel=2)
+    return None
 
 
 def read_end_record(path: Path, key: Optional[str] = None) -> Optional[EndRecord]:
@@ -266,10 +255,11 @@ def read_runner_record(end_dir: Path, owner_uid: Optional[int], *, platform_name
     return replace(record, sealed=True), protected, None
 
 
-def end_problem(record: Optional[EndRecord], exit_code: int, job: str = "build") -> Optional[str]:
+def end_problem(record: Optional[EndRecord], exit_code: int, job: str = "build",
+                last: Optional[str] = None) -> Optional[str]:
     """None when a stage container ended as done, else the plain reason it did not: done needs the container's real
-    exit status 0, a record sealed by the stage runner (read with this run's key), status done, this job and its
-    last stage (LAST_STAGE). For an exit status other than 0 with a record that does not claim done (or none) it is
+    exit status 0, a record of the stage runner (`sealed`: read from its own end folder, read_runner_record), status
+    done, this job and its last stage (`last`: the last module of the job's stage order, else LAST_STAGE). For an exit status other than 0 with a record that does not claim done (or none) it is
     None as well: the caller reports that exit code."""
     if record is None:
         return NO_RECORD_TEXT if exit_code == 0 else None
@@ -281,7 +271,7 @@ def end_problem(record: Optional[EndRecord], exit_code: int, job: str = "build")
         return FOREIGN_RECORD_TEXT
     if not record.done:
         return FAILED_RECORD_TEXT.format(stage=record.stage, exit=record.exit)
-    last = LAST_STAGE.get(job, "target")
+    last = last or LAST_STAGE.get(job, "target")
     if record.stage != last:
         return EARLY_RECORD_TEXT.format(stage=record.stage, last=last)
     return None

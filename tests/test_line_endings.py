@@ -62,7 +62,7 @@ def test_a_generated_target_module_is_lf_on_every_host(tmp_path):
         folder = Path(generator.generate_module(data))
         mark_created_under(folder, "grant:g_" + "1" * 16, "a" * 64)
     written = {p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file()}
-    assert {"modules/build.sh", "Dockerfile", "target.yml"} <= written
+    assert {"modules/source_module.sh", "Dockerfile", "target.yml"} <= written
     assert crlf_files(folder) == []
     assert yaml.safe_load((folder / "target.yml").read_text(encoding="utf-8"))["metadata"]["created_under"]
 

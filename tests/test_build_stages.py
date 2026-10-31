@@ -28,6 +28,7 @@ from conftest import NO_POSIX_BASH, REPO_ROOT, posix_shell
 from model_files import GGUF_HEAD, gguf_text, write_gguf, write_safetensors
 
 ROCKCHIP = REPO_ROOT / "targets" / "Rockchip"
+LAYER = REPO_ROOT / "orchestrator" / "runtime_layer"   # the framework's runtime layer (its stage runner runner.sh)
 # The stubs are Python scripts started through their #! line; Git for Windows' bash cannot run those reliably.
 needs_bash = pytest.mark.skipif(os.name == "nt" or posix_shell("bash") is None, reason=NO_POSIX_BASH)
 
@@ -133,6 +134,10 @@ class Image:
                 script.write_text(text.replace("/app/modules/", f"{self.app}/modules/")
                                   .replace("/app/scripts/", f"{self.app}/scripts/"), encoding="utf-8")
                 script.chmod(0o755)
+        # The framework's runtime layer, as the host mounts it at /llmcf (its scripts; no bin/ here, so the runner
+        # uses this computer's tools, as a run by hand does)
+        self.layer = root / "llmcf"
+        shutil.copytree(LAYER, self.layer, ignore=shutil.ignore_patterns("toolbox", "MANIFEST.sha256"))
         self.llama = root / "llama.cpp"
         _script(self.llama / "convert_hf_to_gguf.py", CONVERT_STUB)
         _script(self.llama / "build" / "bin" / "llama-quantize", QUANTIZE_STUB)
@@ -173,6 +178,8 @@ class Image:
             "TARGET_ARCH": "rockchip", "TARGET_BOARD": "rk3588", "TARGET_FORMAT": "gguf",
             "OPTIMIZATION_LEVEL": "balanced", "QUANTIZATION": "Q4_K_M", "JOB_TYPE": "build",
             "STUB_LOG": str(self.log), "STUB_PKG": str(self.pkg),
+            "LLMCF_LAYER": str(self.layer), "LLMCF_MODULES_DIR": str(self.app / "modules"),
+            "LLMCF_TARGET_LABEL": "Rockchip",   # the host hands the runner the target's label (builder.py _sandbox)
         }
         env.update({k: str(v) for k, v in values.items() if v is not None})
         for key in [k for k, v in values.items() if v is None]:
@@ -182,8 +189,8 @@ class Image:
     def run(self, *args: str, tool: str = "rkllm", **values) -> subprocess.CompletedProcess:
         env = self.env(**values)
         env["STUB_TOOL"] = tool
-        return subprocess.run([posix_shell("bash"), str(self.app / "modules" / "build.sh"), *args], env=env,
-                              capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
+        return subprocess.run([posix_shell("sh") or posix_shell("bash"), str(self.layer / "runner.sh"), *args],
+                              env=env, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
 
     def calls(self) -> list:
         if not self.log.exists():
@@ -568,12 +575,20 @@ FOR_THE_MODULE_FLAGS = {"LLMCF_ALLOWED_FLAGS", "LLMCF_FLAG_DECISION", "LLMCF_DEP
 # The loop protection of the stage runner (DECISIONS round 25 Q8): how often a stage may start with the same inputs
 # without finishing (default 3; tests and a person's own run may change it).
 FOR_THE_TIME_RULE = {"STAGE_RESTART_LIMIT"}
-# What the runner hands its stages (build.sh): not read from the build container's environment. STAGE_LAST (the last
+# What the host hands the runtime layer's runner (builder.py _sandbox: the stage order from target.yml, the end folder,
+# the image's modules folder, the target's label, the build sandbox's mode) and what the layer's entrypoint hands it
+# (the image's PATH, kept for the stage modules only); LLMCF_LAYER is read only by a module started by hand, to find
+# the runner; STAGES is the runner's own list, which it extends in a run by hand (the rotate slot).
+FOR_THE_RUNTIME_LAYER = {"LLMCF_END_DIR", "LLMCF_MODULES_DIR", "LLMCF_STAGES", "LLMCF_TARGET_LABEL", "STAGE_ISOLATION",
+                         "LLMCF_IMAGE_PATH", "LLMCF_LAYER", "STAGES"}
+# What the runner hands its stages (the runtime layer's runner.sh): not read from the build container's environment. STAGE_LAST (the last
 # stage of this run), CONVERT_OUTPUT (the --output option) and PACKAGE_REQUESTED (the --package option) are set by
 # the runner itself, never from outside.
 RUNNER_API = {"STAGE_DIR", "STAGE_NAME", "STAGE_RUNNER", "MODULES_DIR", "STAGE_LAST", "CONVERT_OUTPUT",
               "PACKAGE_REQUESTED"}
 BASH_VARIABLES = {"BASH_SOURCE", "SECONDS", "RANDOM", "LINENO", "FUNCNAME", "PIPESTATUS", "BASH_REMATCH", "PWD", "IFS"}
+# The runtime layer's scripts a build runs (the stage runner and what it sources; entrypoint.sh switches users only)
+LAYER_SCRIPTS = ("runner.sh", "tools.sh", "stage_user.sh", "stage_env.sh")
 BUILD_SCRIPTS = ("build.sh", "source_module.sh", "config_module.sh", "convert_module.sh", "rotate_module.sh",
                  "target_module.sh", "rkllm_module.sh", "rknn_module.sh")
 
@@ -597,7 +612,11 @@ def environment_reads(scripts) -> set:
     A script that sources a module of the set has that module's names, and one that sources the build plan the plan's
     (plan_line NAME in config_module.sh); the runner's hand-over to its stages and bash's own variables are no input
     from outside either."""
-    texts = {script.name: _code(script) for script in scripts}
+    texts = {script.name: _code(script) for script in scripts if script.parent != LAYER}
+    # The runtime layer's runner and the files it sources (tools.sh, stage_user.sh, stage_env.sh): one shell
+    layer_files = [script for script in scripts if script.parent == LAYER]
+    if layer_files:
+        texts["runner.sh"] = "\n".join(_code(script) for script in layer_files)
     plan = {name for text in texts.values() for name in re.findall(r"\bplan_line\s+([A-Z][A-Z0-9_]*)\b", text)}
 
     def provided(name, seen=()):
@@ -618,24 +637,27 @@ def environment_reads(scripts) -> set:
 
 
 def stage_scripts(modules: Path):
-    """build.sh and every script a build runs from it: the modules of its stages (STAGES=(...)) and the scripts they
-    name, transitively."""
-    found, todo = [], ["build.sh"]
+    """The framework's stage runner (the runtime layer's runner.sh and what it sources) and every script a build runs
+    from it: the target's stage modules in the order of its target.yml (runtime_layer.stage_order) and the scripts
+    they name, transitively."""
+    from orchestrator.Core.runtime_layer import stage_order
+    stages, problems = stage_order(modules.parent)
+    assert not problems, problems
+    found, todo = [], [f"{stage}_module.sh" for stage in stages]
     while todo:
         name = todo.pop(0)
         if name in found or not (modules / name).is_file():
             continue
         found.append(name)
-        text = _code(modules / name)
-        stages = [s for group in re.findall(r"\bSTAGES\+?=\(([^)]*)\)", text) for s in group.split()]
-        todo += [f"{stage}_module.sh" for stage in stages] + re.findall(r"\b(\w+_module\.sh)\b", text)
+        todo += re.findall(r"\b(\w+_module\.sh)\b", _code(modules / name))
     assert set(found) <= set(BUILD_SCRIPTS), found
-    return [modules / name for name in found]
+    return [LAYER / name for name in LAYER_SCRIPTS] + [modules / name for name in found]
 
 
 def test_the_build_reads_the_same_environment_variables():
     reads = environment_reads(stage_scripts(ROCKCHIP / "modules"))
-    assert reads - NEW_FOR_THE_STAGE_RUNNER - ONLY_ON_REQUEST - FOR_THE_MODULE_FLAGS - FOR_THE_TIME_RULE == READ_TODAY
+    assert reads - NEW_FOR_THE_STAGE_RUNNER - ONLY_ON_REQUEST - FOR_THE_MODULE_FLAGS - FOR_THE_TIME_RULE \
+        - FOR_THE_RUNTIME_LAYER == READ_TODAY
 
 
 # ---------------------------------------------------------------------------------------------------------------

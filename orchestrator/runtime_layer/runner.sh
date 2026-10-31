@@ -1,3 +1,4 @@
+# shellcheck shell=sh
 # runner.sh - the framework's stage runner (part of the runtime layer; tools.sh says what that is)
 #
 # The host starts it in every build container through the layer's entrypoint.sh, as the stage runner's user with only
@@ -51,7 +52,7 @@
 # POSIX sh (busybox sh in the container; any POSIX sh by hand).
 
 set -eu
-# shellcheck disable=SC3040 - pipefail where the shell has it (busybox sh, bash)
+# shellcheck disable=SC3040 # pipefail where the shell has it (busybox sh, bash)
 (set -o pipefail) 2>/dev/null && set -o pipefail
 unset IFS   # the default field splitting (space, tab, newline), whatever the environment said
 
@@ -143,6 +144,7 @@ fi
 TOTAL=0
 for name in $STAGES; do
     valid_stage_name "$name" || die "'$name' is not a valid stage module name."
+    [ "$name" != benchmark ] || die "benchmark_module.sh never runs in a build (it would measure this build computer)."
     [ -f "$MODULES_DIR/${name}_module.sh" ] || die "The stage module ${name}_module.sh is missing in $MODULES_DIR."
     TOTAL=$((TOTAL + 1))
 done
@@ -358,13 +360,16 @@ forget_cancelled_start() {
     rm -f "$STAGE_DIR/cancelled" "$STAGE_DIR/running"
 }
 
-# run_module NAME: one stage module as the stage account, with the image's PATH and the layer's stage_env.sh
+# run_module NAME: one stage module as the stage account, with the image's PATH and the layer's stage_env.sh; what the
+# host handed the runner alone (its ids, the end folder, the stage order, the target's label) does not reach a module
+HOST_ONLY="-u STAGE_RUNNER_IDS -u LLMCF_END_DIR -u LLMCF_STAGES -u LLMCF_TARGET_LABEL"
 run_module() {
+    # shellcheck disable=SC2086 # HOST_ONLY is a list of options
     if layer_has_tools; then
-        run_as_stage "$BB" env PATH="$LLMCF_IMAGE_PATH" BASH_ENV="$LLMCF_LAYER/stage_env.sh" \
+        run_as_stage "$BB" env $HOST_ONLY PATH="$LLMCF_IMAGE_PATH" BASH_ENV="$LLMCF_LAYER/stage_env.sh" \
             bash "$MODULES_DIR/${1}_module.sh"
     else
-        run_as_stage env PATH="$LLMCF_IMAGE_PATH" BASH_ENV="$LLMCF_LAYER/stage_env.sh" \
+        run_as_stage env $HOST_ONLY PATH="$LLMCF_IMAGE_PATH" BASH_ENV="$LLMCF_LAYER/stage_env.sh" \
             bash "$MODULES_DIR/${1}_module.sh"
     fi
 }

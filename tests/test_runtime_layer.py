@@ -22,6 +22,9 @@ import pytest
 from orchestrator.Core import build_end
 from orchestrator.Core import runtime_layer as layer
 
+# These tests make and check the toolbox themselves: the real ensure_toolbox, never the test toolbox of conftest
+pytestmark = pytest.mark.real_toolbox
+
 RUNNER = 64020
 STAGE = 64010
 STAND_IN_BUSYBOX = """#!/bin/sh
@@ -464,3 +467,67 @@ def test_the_runners_path_leads_into_the_read_only_layer(tmp_path):
 def test_a_cut_off_program_is_not_static_and_raises_nothing():
     for data in (b"\x7fELF", b"\x7fELF\x02\x01\x01" + b"\0" * 20, b""):
         assert layer.is_static_elf(data) is False
+
+
+# --- the runtime layer wired into every build (chain runtime-layer3) ---------------------------------------------
+
+def test_benchmark_is_refused_as_a_slot_module(tmp_path):
+    """Regression: benchmark_module.sh measures the build computer and never runs in a build; a target.yml that put it
+    into a slot would have run it."""
+    target = _target(tmp_path, "stages:\n  after_target: [benchmark]\n", files=("benchmark",))
+    _stages, problems = layer.stage_order(target)
+    assert problems and "benchmark" in problems[0] and "never runs in a build" in problems[0]
+
+
+def test_a_done_record_must_name_the_last_slot_module():
+    """Regression: with a module in the slot after_target the runner's last stage is that module; its done record was
+    refused as "before the last stage" (the job's last of the four stages was the only one accepted)."""
+    record = build_end.EndRecord("done", 0, "after", sealed=True)
+    assert build_end.end_problem(record, 0, "build", last="after") is None
+    early = build_end.EndRecord("done", 0, "target", sealed=True)
+    assert "before the last stage after" in build_end.end_problem(early, 0, "build", last="after")
+    assert build_end.end_problem(early, 0, "build") is None   # without slots: target, as before
+
+
+@needs_root
+def test_what_the_host_hands_the_runner_never_reaches_a_module(box):
+    """Regression: the host's values for the runner alone (its ids, the end folder, the stage order, the target's
+    label) reached every stage module's environment; a module now finds none of them."""
+    box.module("source", "#!/bin/bash\nenv > \"$BUILD_SCRATCH_DIR/module-env\"\n")
+    result = box.run("--job", "build", "--to", "source", LLMCF_STAGES="source config convert target",
+                     LLMCF_TARGET_LABEL="label-only-for-the-runner")
+    assert result.returncode == 0, result.stdout + result.stderr
+    seen = (box.work / "module-env").read_text(encoding="utf-8")
+    for name in ("STAGE_RUNNER_IDS=", "LLMCF_END_DIR=", "LLMCF_STAGES=", "LLMCF_TARGET_LABEL="):
+        assert f"\n{name}" not in "\n" + seen, name
+    assert "label-only-for-the-runner" in result.stdout   # the runner itself still has it
+
+
+@needs_root
+def test_the_preflight_reads_the_inputs_whatever_the_runners_working_folder(box, tmp_path):
+    """Regression: the stage account's test child ran find in the runner's working folder; one the stage account
+    cannot enter (a closed folder) made find print nothing, and an unreadable input passed the check."""
+    model = box.root / "input-model"
+    model.mkdir()
+    (model / "weights.bin").write_bytes(b"0")
+    for path in (model, model / "weights.bin"):
+        os.chown(path, RUNNER, RUNNER)
+    os.chmod(model / "weights.bin", 0o600)
+    closed = tmp_path / "closed"
+    closed.mkdir()
+    os.chmod(closed, 0o700)
+    bounding = "-all,+setuid,+setgid"
+    result = subprocess.run([HOST_SETPRIV, f"--bounding-set={bounding}", f"--inh-caps={bounding}", "--no-new-privs",
+                             "--", str(box.layer / "bin" / "busybox"), "sh", str(box.layer / "entrypoint.sh"),
+                             "--job", "build", "--to", "source"],
+                            env=box.env(MODEL_SOURCE=str(model)), capture_output=True, text=True, timeout=120,
+                            stdin=subprocess.DEVNULL, cwd=closed)
+    assert result.returncode == build_end.STAGE_USER_EXIT["inputs"], result.stdout + result.stderr
+
+
+def test_the_builder_hands_the_end_record_check_the_last_stage_of_the_order():
+    from orchestrator.Core.builder import BuildEngine, BuildProgress, BuildStatus
+    progress = BuildProgress("b1", BuildStatus.BUILDING, "")
+    assert BuildEngine._last_stage(progress) is None
+    progress.runtime_layer = {"stages": ["source", "config", "convert", "target", "after"]}
+    assert BuildEngine._last_stage(progress) == "after"

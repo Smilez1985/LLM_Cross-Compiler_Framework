@@ -254,7 +254,9 @@ class TestModuleGenerator:
     def test_valid_module_is_generated_and_parses(self, generator):
         target = generator.generate_module(self.data())
         assert target.name == "my_board"
-        assert (target / "modules" / "build.sh").is_file()
+        # the four stage modules and no runner of its own (the framework's runtime layer runs every build)
+        assert all((target / "modules" / f"{s}_module.sh").is_file() for s in ("source", "config", "convert", "target"))
+        assert not (target / "modules" / "build.sh").exists()
 
     @pytest.mark.parametrize("overrides, problem", [
         ({"module_name": "../../etc"}, "module_name"),
