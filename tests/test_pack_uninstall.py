@@ -166,3 +166,29 @@ def test_a_knowledge_pack_is_not_uninstalled_while_the_knowledge_base_is_off(two
     with pytest.raises(PackError, match="knowledge base is off"):
         two_packs.cm.uninstall_plan("knowledge", "pack-a")
     shutil.rmtree(two_packs.tmp / "src", ignore_errors=True)
+
+
+def test_cli_zoo_uninstall_keeps_its_not_removed_line_and_names_what_stayed(two_packs, monkeypatch, tmp_path):
+    """An item the uninstall kept is said as before ("Not removed: NAME (REASON)"), and every path that stayed follows
+    for the person (Core/deletion.kept_lines' deletion.remaining line)."""
+    from orchestrator import cli as cli_module
+    from orchestrator.Core.deletion import DeletionResult, note_kept
+    from test_zoo import invoke
+    world = two_packs
+    monkeypatch.setattr(cli_module, "_cli_audit", lambda ctx: Audit())
+    monkeypatch.setattr(cli_module, "_interactive", lambda: True)
+    folder = tmp_path / "pack-a-folder"
+    stayed = folder / "open.bin"
+
+    def uninstall(kind, pack_id, accepted, trash=None, audit=None):
+        result = DeletionResult()
+        note_kept(result, "the pack folder", folder, [stayed])
+        return result
+
+    monkeypatch.setattr(world.cm, "uninstall", uninstall)
+    result = invoke(world, "uninstall", "pack-a", "--kind", "knowledge", input="permanent\ny\n")
+    out = " ".join(result.output.split())
+    assert result.exit_code == 1, result.output
+    assert "Not removed: the pack folder (kept: could not remove 1 item (open.bin))" in out, result.output
+    assert "Kept: the pack folder" not in out
+    assert "Still there (the pack folder), delete it by hand:" in out and "open.bin" in out

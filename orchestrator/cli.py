@@ -4392,11 +4392,16 @@ def _person_trash(ctx: FrameworkContext, state_dir: Path):
     return Trash(state_dir, key=key, refuse_unkeyed=refuse, audit=audit, retention_days=days), audit
 
 
-def _print_kept(result, lang=None) -> None:
+def _print_kept(result, lang=None, kept_word: str = "") -> None:
     """What a deletion kept, for the person (Core/deletion.kept_lines, the same lines as the GUI's result boxes):
-    each kept item with its reason, then every path that stayed, to delete by hand."""
+    each kept item with its reason, then every path that stayed, to delete by hand. `kept_word` keeps a command's
+    own word for a kept item ("Not removed" of 'zoo uninstall'); the paths follow the same way."""
     from orchestrator.Core.deletion import kept_lines
-    for line in kept_lines(result, lang):
+    lines = kept_lines(result, lang)
+    if kept_word:
+        failed = list(getattr(result, "failed", []))
+        lines = [f"{kept_word}: {name} ({reason})" for name, reason in failed] + lines[len(failed):]
+    for line in lines:
         console.print(f"[yellow]{escape(line)}[/yellow]")
 
 
@@ -7262,7 +7267,7 @@ def zoo_uninstall(ctx: FrameworkContext, pack_id: str, kind: str):
         _zoo_fail(e)
     except (PermissionError, RuntimeError) as e:
         _zoo_fail(e)
-    _print_kept(result)
+    _print_kept(result, kept_word="Not removed")
     where = "moved to the trash ('llm-cli trash list' shows it)" if result.trash_ids else \
         f"deleted for good, {size_text(result.freed_bytes)} freed"
     console.print(f"[green]Uninstalled {kind} {escape(pack_id)}: {len(result.done)} item(s) {where}.[/green]")
