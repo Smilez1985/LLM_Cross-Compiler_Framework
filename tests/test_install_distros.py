@@ -20,7 +20,9 @@ import getpass
 import os
 import re
 import shutil
+import socket
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -1466,3 +1468,68 @@ class TestRootlessByDefault:
         run, calls = box.run("setup_system")
         assert run.returncode == 0 and calls == [], said(run)
         assert "nicht für root" in said(run)
+
+
+@needs_bash_and_gpg
+class TestRootlessReview:
+    """Review of the rootless default: what counts as the person's rootless Docker and as the group docker."""
+
+    @staticmethod
+    def _runtime(box):
+        """A short runtime root (/run/user) for uid 1000 (Unix socket paths have a 108-byte limit)."""
+        root = Path(tempfile.mkdtemp(prefix="rl-run-", dir="/tmp"))
+        (root / "1000" / "podman").mkdir(parents=True)
+        return root
+
+    @staticmethod
+    def _body(root, body):
+        return f'USER_RUNTIME_ROOT="{root}"; id() {{ echo 1000; }}; {body}'
+
+    def test_podman_dockers_link_is_not_the_persons_rootless_docker(self, tmp_path):
+        """podman-docker links $XDG_RUNTIME_DIR/docker.sock to the person's Podman socket: that is Podman, so the
+        installer sets up Podman's service and does not say 'rootless Docker is already there'."""
+        box = Box(tmp_path, "fedora", present=("python3=3.13", "rsync", "podman"), rootful=False)
+        root = self._runtime(box)
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            server.bind(str(root / "1000" / "podman" / "podman.sock"))
+            (root / "1000" / "docker.sock").symlink_to(root / "1000" / "podman" / "podman.sock")
+            run, calls = box.run(self._body(root, "setup_system; finish"))
+            text = said(run)
+            assert run.returncode == 0, text
+            assert "Rootless Docker von 'lcf' ist schon da" not in text
+            assert SOCKET_STEP in calls and "Engine: rootless Podman" in text
+            plan, _ = box.run(self._body(root, "main --dry-run"))
+            assert "rootless Docker von 'lcf', vorhanden" not in said(plan), "the dry run decides the same"
+        finally:
+            server.close()
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_a_real_rootless_docker_socket_is_taken(self, tmp_path):
+        box = Box(tmp_path, "fedora", present=("python3=3.13", "rsync", "podman"), rootful=False)
+        root = self._runtime(box)
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            server.bind(str(root / "1000" / "docker.sock"))
+            run, calls = box.run(self._body(root, "setup_system"))
+            assert run.returncode == 0 and "Rootless Docker von 'lcf' ist schon da" in said(run), said(run)
+            plan, _ = box.run(self._body(root, "main --dry-run"))
+            assert "rootless Docker von 'lcf', vorhanden" in said(plan)
+        finally:
+            server.close()
+            shutil.rmtree(root, ignore_errors=True)
+
+    @pytest.mark.parametrize("groups, named", [
+        ("lcf : lcf wheel docker", True),
+        ("lcf : lcf docker-users", False),
+        ("docker-dev : docker-dev wheel", False),
+    ])
+    def test_only_the_group_docker_itself_is_named(self, tmp_path, groups, named):
+        box = Box(tmp_path, "fedora", present=("python3=3.13", "rsync", "podman"), rootful=False)
+        box.env["SUDO_USER"] = box.env["USER"] = groups.split(" ", 1)[0]
+        box.write(box.bin / "groups", f"#!/bin/sh\necho '{groups}'\n")
+        run, _ = box.run("setup_system")
+        assert run.returncode == 0, said(run)
+        assert ("in der Gruppe docker:" in said(run)) is named, said(run)
+        plan, _ = box.run("main --dry-run")
+        assert ("ist in der Gruppe docker (dauerhaft" in said(plan)) is named, said(plan)
