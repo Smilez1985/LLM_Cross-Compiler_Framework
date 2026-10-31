@@ -904,10 +904,20 @@ What a stage module may write: `$BUILD_SCRATCH_DIR` (with `tmp`, `home` and `cac
 `/build-cache/imatrix`. It may add files there, but not change, move or remove the runner's (the resume markers, the
 loop counts, the end record). What it reads (the model, the dataset, the importance matrix, the hardware profile)
 must be readable for the person's group. The runner checks all of this before the first module and refuses the
-build with a plain reason (for example `inputs` for a model file only its owner may read). Keep
-`modules/stage_user.sh` as the template has it, and start a stage only through the template's `build.sh`. A target
-made from the template before 3.3.0 has a `build.sh` without the stage account: the build sandbox refuses it before
-its container starts; copy `modules/build.sh` and `modules/stage_user.sh` from `targets/_template`.
+build with a plain reason (for example `inputs` for a model file only its owner may read). Start a stage only
+through the template's `build.sh`. A target made from the template before 3.3.0 has a `build.sh` without the stage
+account: the build sandbox refuses it before its container starts; copy `modules/build.sh` from `targets/_template`.
+
+`modules/stage_user.sh` (`run_as_stage`, `stage_preflight`) is the framework's, not your target's: every build context
+gets the framework's own copy, whatever your target has under that name (a changed or missing copy is replaced, so
+a build never runs with another one). Keep the template's copy in your folder only for runs by hand.
+
+Files your modules write are group-shared: the runner and the stage account share one group, the runner's (your own
+group on the host), and after each module returns, also with an error, the stage account gives what it wrote in the
+folders above to that group, readable and writable for it, and its folders setgid. A tool that writes a 0600 file or
+a 0555 folder therefore leaves nothing you cannot read or remove after the build; nothing is chowned, and no account
+gets a right for it. Do not rely on a file staying private to the stage account: the person can read every file a
+build writes.
 
 What this means for your target: install everything in the Dockerfile and keep the template's `llmstage` account
 and `setpriv` (util-linux) in the image; do not write into the image; do not rely on
