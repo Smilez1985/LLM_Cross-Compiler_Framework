@@ -421,7 +421,7 @@ def test_verify_reports_where_the_key_lives():
         def run(self, script, **_k):
             return Result(0, self.out, "")
     assert board_ops.key_facts(Shell("restricted=yes gate=0123456789abcdef keys=root signing=yes\n")) == {
-        "restricted": True, "gate": "0123456789abcdef", "keys": "root", "signing": True}
+        "restricted": True, "gate": "0123456789abcdef", "keys": "root", "signing": True, "tier": "root"}
     assert board_ops.key_facts(Shell("restricted=no gate=none\n"))["keys"] == "home"
 
 

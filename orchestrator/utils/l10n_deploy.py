@@ -115,6 +115,26 @@ TEXTS = {
         "deploy.remote.cancelled": "The scan of {address} was cancelled; nothing was stored.",
         "deploy.remote.tool.python": "Python probe",
         "deploy.remote.tool.sh": "shell probe",
+        "deploy.tier.title": "How the framework reaches this board",
+        "deploy.tier.enterprise": "Enterprise mode refuses the weaker Dropbear tier and the home gate as too "
+                                  "insecure; it needs OpenSSH with sudo (the root-owned key line).",
+        "deploy.tier.ask.openssh": "This board cannot take the framework's key with the root-owned key line "
+                                   "({reason}).\n\nSwitch it to OpenSSH? The plan is shown first; OpenSSH is "
+                                   "installed with sudo if it is not there, and Dropbear stays until you say so "
+                                   "separately.",
+        "deploy.tier.ask.dropbear": "This board cannot take the root-owned key line ({reason}).\n\nUse the Dropbear "
+                                    "tier instead? It is one step weaker: the gate and the signing key are "
+                                    "root-owned, but the key line is in the account's own authorized_keys, so the "
+                                    "account itself could edit it (a stolen key cannot).",
+        "deploy.tier.ask.home": "This board cannot take the root-owned key line ({reason}).\n\nUse the home gate "
+                                "instead? Weaker protection: without sudo the gate and the signing key live in the "
+                                "account's home; a stolen key still runs only llmcf's operations, but anything "
+                                "running as the account could change them.",
+        "deploy.tier.ask.plan": "The switch to OpenSSH:\n\n{plan}\n\nGo ahead?",
+        "deploy.tier.ask.dropbear_off": "{plan}",
+        "deploy.tier.ask.host_key": "The new SSH server presents the host key {key_type} {fingerprint}. Compare it "
+                                    "with 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on the board.\n\n"
+                                    "Trust this key?",
         "deploy.remote.done": "Remote scan successful from {address} ({tool}; stored as device {device_id}).",
         "deploy.remote.login_failed": "SSH login failed: {reason}",
         "deploy.remote.probe_failed": "The probe on {address} failed: {reason}",
@@ -232,6 +252,27 @@ TEXTS = {
         "deploy.remote.cancelled": "Der Scan von {address} wurde abgebrochen; nichts wurde gespeichert.",
         "deploy.remote.tool.python": "Python-Probe",
         "deploy.remote.tool.sh": "Shell-Probe",
+        "deploy.tier.title": "Wie das Framework dieses Board erreicht",
+        "deploy.tier.enterprise": "Der Enterprise-Modus lehnt die schwächere Dropbear-Stufe und das Home-Gate als zu "
+                                  "unsicher ab; er braucht OpenSSH mit sudo (die root-eigene Schlüsselzeile).",
+        "deploy.tier.ask.openssh": "Dieses Board kann den Schlüssel des Frameworks nicht mit der root-eigenen "
+                                   "Schlüsselzeile aufnehmen ({reason}).\n\nAuf OpenSSH umstellen? Der Plan wird "
+                                   "zuerst gezeigt; OpenSSH wird mit sudo installiert, falls es fehlt, und Dropbear "
+                                   "bleibt, bis du es getrennt sagst.",
+        "deploy.tier.ask.dropbear": "Dieses Board kann die root-eigene Schlüsselzeile nicht aufnehmen ({reason})."
+                                    "\n\nStattdessen die Dropbear-Stufe nehmen? Sie ist eine Stufe schwächer: Gate "
+                                    "und Signierschlüssel gehören root, aber die Schlüsselzeile steht in der eigenen "
+                                    "authorized_keys des Kontos, das Konto selbst könnte sie also ändern (ein "
+                                    "gestohlener Schlüssel nicht).",
+        "deploy.tier.ask.home": "Dieses Board kann die root-eigene Schlüsselzeile nicht aufnehmen ({reason}).\n\n"
+                                "Stattdessen das Home-Gate nehmen? Schwächerer Schutz: ohne sudo liegen Gate und "
+                                "Signierschlüssel im Home des Kontos; ein gestohlener Schlüssel führt weiter nur "
+                                "llmcfs Operationen aus, aber alles, was als das Konto läuft, könnte sie ändern.",
+        "deploy.tier.ask.plan": "Die Umstellung auf OpenSSH:\n\n{plan}\n\nWeitermachen?",
+        "deploy.tier.ask.dropbear_off": "{plan}",
+        "deploy.tier.ask.host_key": "Der neue SSH-Server zeigt den Host-Schlüssel {key_type} {fingerprint}. "
+                                    "Vergleiche ihn auf dem Board mit 'ssh-keygen -lf "
+                                    "/etc/ssh/ssh_host_ed25519_key.pub'.\n\nDiesem Schlüssel vertrauen?",
         "deploy.remote.done": "Scan von {address} erfolgreich ({tool}; als Gerät {device_id} gespeichert).",
         "deploy.remote.login_failed": "SSH-Anmeldung fehlgeschlagen: {reason}",
         "deploy.remote.probe_failed": "Die Probe auf {address} ist fehlgeschlagen: {reason}",

@@ -742,7 +742,8 @@ def verify_on_device(shell: RemoteShell, *, home: str, plan_verify: Mapping[str,
         text = ("the framework's key on this board is not restricted (it runs anything the account may run): pair "
                 "the board again or deploy to restrict it")
     report.checks.append(Check("board-key", True if guarded else None, text,
-                               {"restricted": restricted, "keys": key["keys"], "signing": key["signing"]}))
+                               {"restricted": restricted, "keys": key["keys"], "signing": key["signing"],
+                                "tier": key.get("tier", "")}))
     report.ran_binaries = True
 
     # Version

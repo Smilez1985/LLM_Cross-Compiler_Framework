@@ -90,7 +90,7 @@ def trusted_rows(state_dir: Path) -> List[Dict[str, Any]]:
     return [{"device_id": d.device_id, "label": d.label, "address": d.address, "user": d.user,
              "key_type": d.key_type, "fingerprint": d.fingerprint, "paired": d.paired,
              "host_key": store.key_status(d), "trusted": f"{d.trusted_at} ({d.trusted_via})",
-             "last_deploy": last.get(d.device_id)} for d in store.list()]
+             "last_deploy": last.get(d.device_id), "key_tier": store.key_tier(d.device_id)} for d in store.list()]
 
 
 def remove_trust(state_dir: Path, device_id: str, *, audit: Any, actor: str, channel: str) -> bool:
@@ -458,7 +458,8 @@ def board_address(store: Any, device_id: str) -> Tuple[str, int]:
 def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: str,
                    password: Optional[str] = None, *, step: str = "",
                    on_client: Optional[Callable[[Any], None]] = None, cancel: Any = None,
-                   on_event: Optional[Callable[[Any], None]] = None, signer: Any = None) -> Tuple[Any, Any]:
+                   on_event: Optional[Callable[[Any], None]] = None, signer: Any = None, chooser: Any = None,
+                   mode: str = "private", audit: Any = None, via: str = "") -> Tuple[Any, Any]:
     """(board session, host key) of the stored board `device_id` at host:port as `user`: the logged-in RemoteSession
     (orchestrator/remote/session.py; RemoteShell runs the steps over it). Its host key must be the trusted one the
     board was probed with (the device ID derives from it), at this login and at every login after a network drop, so a
@@ -468,7 +469,9 @@ def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: 
     installs the framework's key once, with `signer`, the caller's framework signer (board_ops.resolve_signer: a
     BoardSigner, or `lambda: board_ops.framework_signer(framework)`, looked up only when a password pairs the board;
     None only for a caller without any framework). `step` names the contact for Mojo's record of the board (W1). The
-    caller closes the session (`on_client` gets it at once, so a Cancel can close it)."""
+    caller closes the session (`on_client` gets it at once, so a Cancel can close it). `chooser`, `mode`, `audit` and
+    `via`: the person's choice of a key tier for a board that cannot take the root-owned key line (remote/pairing.py
+    pair; the switch to OpenSSH changes the board's port and host key, so it is offered by the scan, not here)."""
     from orchestrator.remote.address import Endpoint
     from orchestrator.remote.session import KeyOnly, OneTimePassword, RemoteSession, SessionFailure, Stopped
     from orchestrator.runtime.device import reasons
@@ -514,7 +517,10 @@ def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: 
             from orchestrator.runtime.device import board_ops
             # the person's writer: the framework's key, installed once, with llmcf's command gate (board_ops.py)
             # the caller's framework signer (board_ops.resolve_signer; None only for a caller without a framework)
-            pairing.pair(session.client, state_dir, board_ops.pairing_bundle(signer, state_dir), password=password)
+            paired = pairing.pair(session.client, state_dir, board_ops.pairing_bundle(signer, state_dir),
+                                  password=password, chooser=chooser, mode=mode, audit=audit, via=via, switch=False)
+            from orchestrator.runtime.device.trusted import record_key_tier
+            record_key_tier(state_dir, device_id, getattr(paired, "tier", ""))
         except ssh_trust.HostKeyError as e:
             session.close()
             raise BoardStepError(str(e), "key_install", error=e) from None

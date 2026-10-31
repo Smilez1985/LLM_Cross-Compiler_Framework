@@ -494,6 +494,12 @@ class ConfigManager:
             ConfigSchema("chat_context_limit", int, False, 4096, "Max tokens for chat context history"),
             ConfigSchema("enable_telemetry", bool, False, False, "Allow anonymous error reporting (GitHub Issues)"),
             ConfigSchema("offline_mode", bool, False, False, "Force offline mode (no external APIs)"),
+            # Private mode is the default, enterprise mode optional (the person's choice; an AI reads it, never
+            # changes it): enterprise mode refuses the weaker board key tiers (framework_mode below)
+            ConfigSchema("framework_mode", str, False, "private",
+                         "private (default) or enterprise: enterprise mode takes only OpenSSH with sudo on a "
+                         "board (the root-owned key line) and refuses the weaker Dropbear tier and home gate",
+                         ["regex:^(private|enterprise)$"], enterprise_only=False),
             # What offline mode counts as local besides this computer and the own network (DECISIONS round 24,
             # "L-NET final"): the person's opt-outs, written only by Core/local_network.py (GUI and CLI), never by an
             # AI (AISettingsChange and MCP update_settings refuse them).
@@ -924,6 +930,22 @@ class ConfigManager:
                 else:
                     result[key] = val.value
         return result
+
+FRAMEWORK_MODES = ("private", "enterprise")
+
+
+def framework_mode(config: Any) -> str:
+    """The framework mode (the setting framework_mode) of `config`: a ConfigManager, a dict or a stand-in with get().
+    "enterprise" only when it says exactly that; private (the default) otherwise, also when it cannot be read. The one
+    reader of the mode (ROADMAP "Step 3 - Private and enterprise mode" builds on it); an AI may read the setting, only
+    the person changes it (llm/settings_change.py PERSON_DECIDES)."""
+    try:
+        get = getattr(config, "get", None)
+        value = get("framework_mode", "private") if callable(get) else getattr(config, "framework_mode", "private")
+    except Exception:  # noqa: BLE001 - an unreadable setting is the default
+        value = "private"
+    return "enterprise" if str(value or "").strip().lower() == "enterprise" else "private"
+
 
 if __name__ == "__main__":
     print("ConfigManager module loaded.")
