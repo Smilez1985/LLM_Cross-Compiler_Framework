@@ -430,6 +430,27 @@ def record_key_tier(state_dir: Path, device_id: str, tier: str) -> None:
         pass
 
 
+def tier_refusal(state_dir: Path, device_id: str, mode: str, shell: Any = None) -> str:
+    """Why the framework may not use the board `device_id` in the framework `mode` ("" when it may: always in
+    private mode): enterprise mode refuses a board whose framework key sits on the Dropbear tier or the home gate
+    (remote/key_tiers.py use_problem) at every use, not only at its pairing. The tier is the one recorded at the
+    board's pairing or last verify; a board with none recorded is asked through `shell` (a logged-in session: the gate's
+    status operation, board_ops.key_facts), and its answer is recorded. Without a record and without a shell nothing
+    is refused (nothing says the key is weaker)."""
+    from orchestrator.remote.key_tiers import MODE_ENTERPRISE, normal_mode, use_problem
+    if normal_mode(mode) != MODE_ENTERPRISE or not DEVICE_ID_RE.fullmatch(device_id or ""):
+        return ""
+    try:
+        tier = TrustedDevices(Path(state_dir)).key_tier(device_id)
+    except Exception:  # noqa: BLE001 - an unreadable record: the board itself is asked below
+        tier = ""
+    if not tier and shell is not None:
+        from orchestrator.runtime.device.board_ops import key_facts
+        tier = key_facts(shell).get("tier", "") or ""
+        record_key_tier(state_dir, device_id, tier)
+    return use_problem(tier, mode) if tier else ""
+
+
 def record_heat(state_dir: Path, device_id: str, heat: Any) -> None:
     """The one recorder of the board's temperature at the checks on it, for Mojo (W1: Mojo reads it instead of
     contacting the board); nothing without a reading, and it never fails the caller's work."""
@@ -495,4 +516,5 @@ def board_name(store: "TrustedDevices", device: TrustedDevice) -> str:
 
 
 __all__ = ["DEVICE_ID_RE", "DeviceStoreError", "REACH_STEPS", "TrustedDevice", "TrustedDevices", "board_name",
-           "clean_label", "find_boards", "label_is_address", "record_trusted_device"]
+           "clean_label", "find_boards", "label_is_address", "record_key_tier", "record_trusted_device",
+           "tier_refusal"]

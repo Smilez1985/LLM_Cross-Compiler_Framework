@@ -343,11 +343,14 @@ SYSTEM_KEYS = ("OS", "OS_ID", "OS_VERSION_ID", "ARCH", "LIBC", "LIBC_VERSION", "
 
 def device_rows(state_dir: Path) -> List[Dict[str, Any]]:
     """The stored (probed) boards as `llmcf device list` shows them: label, address, system facts of the probe, deploy
-    settings (or the note that they are damaged) and the deployed runtime build."""
+    settings (or the note that they are damaged), the deployed runtime build and the recorded tier of the framework's
+    key on the board ("key_tier", remote/key_tiers.py; "" when none was recorded)."""
     from orchestrator.runtime.device.package import DeviceRuntimeStore
     from orchestrator.runtime.device.settings import DeploySettings, SettingsError
+    from orchestrator.runtime.device.trusted import TrustedDevices
     from orchestrator.runtime.profile import ProfileError, ProfileStore
     store = ProfileStore(Path(state_dir))
+    trusted = TrustedDevices(Path(state_dir))
     rows = []
     for device_id in store.list_devices():
         info = store.device_info(device_id)
@@ -364,7 +367,7 @@ def device_rows(state_dir: Path) -> List[Dict[str, Any]]:
         rows.append({"device_id": device_id, "label": info.get("label"), "address": info.get("address"),
                      "system": system, "deploy": settings,
                      "deployed": {k: record.get(k) for k in ("build_id", "deployed_at", "install")} if record
-                     else None})
+                     else None, "key_tier": trusted.key_tier(device_id)})
     return rows
 
 
@@ -471,7 +474,10 @@ def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: 
     None only for a caller without any framework). `step` names the contact for Mojo's record of the board (W1). The
     caller closes the session (`on_client` gets it at once, so a Cancel can close it). `chooser`, `mode`, `audit` and
     `via`: the person's choice of a key tier for a board that cannot take the root-owned key line (remote/pairing.py
-    pair; the switch to OpenSSH changes the board's port and host key, so it is offered by the scan, not here)."""
+    pair; the switch to OpenSSH changes the board's port and host key, so it is offered by the scan, not here).
+    `mode` is the framework mode of the caller's framework (Core/config_manager.py framework_mode; every caller with a
+    framework passes it): in enterprise mode a board whose key sits on the Dropbear tier or the home gate is refused
+    after the login (BoardStepError "weaker_tier", its text names the ways on), nothing runs there."""
     from orchestrator.remote.address import Endpoint
     from orchestrator.remote.session import KeyOnly, OneTimePassword, RemoteSession, SessionFailure, Stopped
     from orchestrator.runtime.device import reasons
@@ -524,6 +530,12 @@ def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: 
         except ssh_trust.HostKeyError as e:
             session.close()
             raise BoardStepError(str(e), "key_install", error=e) from None
+    # enterprise mode refuses a board whose framework key sits on a weaker tier at every use (trusted.tier_refusal)
+    from orchestrator.runtime.device.trusted import tier_refusal
+    refusal = tier_refusal(state_dir, device_id, mode, session)
+    if refusal:
+        session.close()
+        raise BoardStepError(refusal, "weaker_tier")
     _note(state_dir, device_id, step, "")   # reached and logged in: a recorded problem ends
     return session, session.key
 

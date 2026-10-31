@@ -337,8 +337,10 @@ class BoardBenchWorker(QThread):
             profile = dev.device_profile(state, device)
             settings = dev.deploy_settings(state, device, profile).changed(model=check_model_path(self.model))
             fp = dev.read_key(device, state, step="benchmark")   # a failure is recorded for Mojo (W1)
+            from orchestrator.Core.config_manager import framework_mode
             out = dev.benchmark(state, device, profile, settings, fp, allow_untrusted=self.allow_untrusted,
-                                consent=self._consent, output_dirs=artifact_folders(self.framework))
+                                consent=self._consent, output_dirs=artifact_folders(self.framework),
+                                mode=framework_mode(config))
         except SettingsError as e:
             self.finished.emit(False, str(e))
             return

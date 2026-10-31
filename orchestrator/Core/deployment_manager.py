@@ -683,7 +683,8 @@ class DeploymentManager:
                         pair: bool = True, expect_fingerprint: Optional[str] = None,
                         expect_sha256: Optional[str] = None, on_client: Optional[Callable[[Any], None]] = None,
                         cancelled: Optional[Callable[[], bool]] = None, wait_seconds: float = DEPLOY_WAIT_SECONDS,
-                        on_event: Optional[Callable[[DeployEvent], None]] = None) -> DeployResult:
+                        on_event: Optional[Callable[[DeployEvent], None]] = None,
+                        pairer: Optional[Callable[..., Any]] = None) -> DeployResult:
         """
         Uploads the package and runs its deploy.sh on the device; returns what happened with the reason instead of a
         bare bool. `host` is the board's address or host name. The device's host key must be trusted already. With
@@ -698,6 +699,12 @@ class DeploymentManager:
         to answer on its SSH port again (`on_event` gets a "waiting" event about every WAIT_INTERVAL seconds), logs in
         again with the same host key check and continues: the upload resumes where it stopped once the sha256 of what
         arrived matches, and deploy.sh, which runs on the board on its own, is started once and never again.
+
+        The framework mode of this manager's framework (Core/config_manager.py framework_mode) holds for the deploy:
+        in enterprise mode a board whose framework key sits on the Dropbear tier or the home gate is refused after the
+        login, before anything is uploaded (runtime/device/trusted.py tier_refusal). `pairer` is the person's pairing
+        for a one-time password (RemoteSession.pair: the person's choice of a key tier, given only by the person's
+        channels through person_steps.deploy_build); without it the root-owned key line or a plain refusal.
         """
         stop = cancelled or (lambda: False)
         # A leading '-' would be parsed by ssh/scp as an option (e.g. -oProxyCommand=...).
@@ -724,7 +731,7 @@ class DeploymentManager:
         # own settings goes through OpenSSH (the session refuses plainly what OpenSSH cannot do there).
         if PARAMIKO_AVAILABLE and not proxied:
             return self._deploy_paramiko(Path(package), host, user, password, port, pair, expect_fingerprint,
-                                         expect_sha256, on_client, stop, wait_seconds, on_event)
+                                         expect_sha256, on_client, stop, wait_seconds, on_event, pairer=pairer)
         if expect_fingerprint and proxied:
             return DeployResult(False, reason=f"The framework's SSH settings reach {host} through a jump host or a "
                                               "proxy command, which only the OpenSSH client can do, and OpenSSH "
@@ -808,7 +815,8 @@ class DeploymentManager:
                          expect_fingerprint: Optional[str] = None, expect_sha256: Optional[str] = None,
                          on_client: Optional[Callable[[Any], None]] = None,
                          stop: Callable[[], bool] = lambda: False, wait_seconds: float = DEPLOY_WAIT_SECONDS,
-                         on_event: Optional[Callable[[DeployEvent], None]] = None) -> DeployResult:
+                         on_event: Optional[Callable[[DeployEvent], None]] = None,
+                         pairer: Optional[Callable[..., Any]] = None) -> DeployResult:
         # The package is opened once: the bytes hashed are the bytes uploaded, and a changed package is refused before
         # anything reaches the device.
         with open(artifact, "rb") as fh:
@@ -819,7 +827,7 @@ class DeploymentManager:
             size = fh.tell()
             fh.seek(0)
             session = _BoardSession(self, ip, user, pw, port, expect_fingerprint, on_client, stop, wait_seconds,
-                                    on_event)
+                                    on_event, pairer=pairer)
             return session.deploy(fh, artifact.name, size, digest, pair)
 
     def _deploy_system(self, artifact: Path, ip: str, user: str, port: int = 22,
@@ -860,6 +868,13 @@ class DeploymentManager:
         return SystemSshTransport(endpoint, user, state_dir)
 
 
+# A password deploy whose pairing switched the board to OpenSSH (remote/openssh_switch.py): the session ran over
+# Dropbear, the board is reached at its new sshd from now on, so the person deploys again there.
+SWITCHED_TEXT = ("The board now runs OpenSSH on port {port} with the root-owned key line, and the framework reaches it "
+                 "there from now on; nothing was deployed in this session (it ran over Dropbear). Deploy again to "
+                 "port {port}.")
+
+
 class _BoardSession:
     """One deploy (DeploymentManager.deploy_package): the package and deploy.sh's job on a board session
     (orchestrator/remote/session.py RemoteSession), which logs in (every login checks the host key as the first one
@@ -871,8 +886,9 @@ class _BoardSession:
     def __init__(self, manager: DeploymentManager, host: str, user: str, password: Optional[str], port: int,
                  expect_fingerprint: Optional[str], on_client: Optional[Callable[[Any], None]],
                  stop: Callable[[], bool], wait_seconds: float, on_event: Optional[Callable[[DeployEvent], None]],
-                 openssh: Optional[Callable[..., Any]] = None):
+                 openssh: Optional[Callable[..., Any]] = None, pairer: Optional[Callable[..., Any]] = None):
         self.manager, self.logger = manager, manager.logger
+        self.pairer = pairer     # the person's pairing with their choice of a key tier (RemoteSession.pair)
         self.openssh = openssh   # the OpenSSH transport's factory (the fallback without paramiko), else paramiko
         self.host, self.user, self.password, self.port = host, user, password, port
         self.expect_fingerprint, self.on_client, self.wait_seconds = expect_fingerprint, on_client, wait_seconds
@@ -978,8 +994,24 @@ class _BoardSession:
         if missing == board_ops.NO_FRAMEWORK_STORE:
             from orchestrator.remote.gate import SETUP_REASONS
             self.logger.warning(f"The package cannot be signed: {SETUP_REASONS[missing]}.")
-        if session.pair(board_ops.bundle(signer, missing=missing)):
-            self.logger.info("Framework SSH key installed; later deployments need no password.")
+        from orchestrator.Core.config_manager import framework_mode
+        from orchestrator.runtime.device.trusted import record_key_tier, tier_refusal
+        from orchestrator.runtime.profile import device_id_for_host_key
+        mode = framework_mode(getattr(framework, "config", None))
+        device_id = device_id_for_host_key(session.fingerprint) if session.fingerprint else ""
+        paired = session.pair(board_ops.bundle(signer, missing=missing), mode=mode, pairer=self.pairer)
+        if paired:
+            record_key_tier(self.manager._state_dir(), device_id, getattr(paired, "tier", "") or
+                            {"restricted": "root"}.get(str(paired), str(paired)))
+            if str(paired) != "password":
+                self.logger.info("Framework SSH key installed; later deployments need no password.")
+            moved = getattr(paired, "endpoint", None)
+            if moved is not None:   # the switch to OpenSSH: the board answers on its new sshd from now on
+                return self.result(False, device_state="ok", reason=SWITCHED_TEXT.format(port=moved.port))
+        # enterprise mode refuses a board whose framework key sits on a weaker tier, at every use
+        refusal = tier_refusal(self.manager._state_dir(), device_id, mode, session)
+        if refusal:
+            return self.result(False, device_state="ok", reason=refusal)
         target_dir = session.private_dir()
         if self.cancel.cancelled:
             raise remote_session.Stopped()
