@@ -721,8 +721,18 @@ def test_the_commands_do_their_job_under_any_login_shell(login_shell, manager, b
         done = on_board(install)
         assert done.returncode == 0 and "gate=installed" in done.stdout, done.stdout + done.stderr
     keys = (home / ".ssh" / "authorized_keys").read_text().splitlines()
-    gate_file = (home / gate.GATE_REL).as_posix()
-    assert keys == [gate.restricted_line(ssh_trust.client_key(manager._state_dir())[1], gate_file)]
+    public = ssh_trust.client_key(manager._state_dir())[1]
+    if os.name == "nt":
+        # A Windows test folder (C:/...) is no POSIX path, which the key line refuses on purpose (a board is POSIX):
+        # check the line's form with the gate path the shell wrote, and that the path is the home's gate file.
+        (line,) = keys
+        found = re.match(r'command="/bin/sh ([^"]+)",', line)
+        assert found and found.group(1).endswith("/" + gate.GATE_REL), line
+        options = f'command="/bin/sh {found.group(1)}",' + ",".join(gate.KEY_OPTIONS)
+        assert line == f"{options} {public}"
+    else:
+        gate_file = (home / gate.GATE_REL).as_posix()
+        assert keys == [gate.restricted_line(public, gate_file)]
     # the resume's check of what arrived, and the check of the whole upload
     (prefix,) = by_tool["head"]
     assert on_board(prefix).stdout.split()[0] == hashlib.sha256(data[:1_300_000]).hexdigest()
