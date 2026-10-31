@@ -325,8 +325,10 @@ class TestWindows:
         access = profile.access()
         assert access.sudo_present is None and access.keygen_signatures is True
 
-    def test_mostly_other_without_the_openssh_features(self):
-        values = probe.collect(system="Windows", windows_api=FakeWindows(), env={}, root=os.sep,
+    def test_mostly_other_without_the_openssh_features(self, tmp_path):
+        # A Windows folder of its own: a Windows runner of the CI has OpenSSH's sshd.exe in its real System32
+        values = probe.collect(system="Windows", windows_api=FakeWindows(), env={"SystemRoot": str(tmp_path)},
+                               root=os.sep,
                                run=windows_access_runner(None, keygen=False))
         profile = parse_profile(probe.render_text(values))
         assert access_values(profile) == {"SSH_SERVER": "none", "SUDO": "other", "SSH_KEYGEN": "none",
