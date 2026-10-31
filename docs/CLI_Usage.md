@@ -157,6 +157,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `config local-network` | What offline mode counts as local, and what you count as local yourself (a VPN, a host, an address range) |
 | `config doorbell` | Your MQTT broker for the build doorbell, and a test doorbell |
 | `config output-folder` | Show or set the output folder finished models are saved to |
+| `config set framework_mode` | Your framework mode: private (the default) or enterprise (only OpenSSH with sudo on a board) |
 | `zoo list` / `zoo show` | List the community zoo and the installed packs / show one entry |
 | `zoo install` / `zoo verify` | Install a community pack after checks and your confirmation / check installed packs or a pack file |
 | `zoo uninstall` | Uninstall an installed pack after the exact list and your confirmation ("No" by default) |
@@ -2427,6 +2428,17 @@ no network.
 
 In the GUI: **File > Settings...**, tab **Source repositories**: the list, **Add** (name and URL) and **Remove
 selected...** (asks first; "No" is the default).
+
+### config set
+
+```bash
+llmcf config set framework_mode enterprise
+llmcf config set framework_mode private
+```
+
+Sets one of your own settings in config.yml. `framework_mode` is private (the default) or enterprise: enterprise mode takes only OpenSSH with sudo on a board (the root-owned key line) and refuses the weaker Dropbear tier and the home gate, at pairing and at every use of a board paired before. Exit code 2 for a value that is neither. Only you set it; an AI may read it (`get_settings`), never change it. The installers ask the same (`install.sh --mode=private|enterprise`, `install.bat --mode=...`, or `LCF_MODE` for an unattended run).
+
+In the GUI: **File > Settings...**, tab **General**, **Framework mode**.
 
 ### config local-network
 

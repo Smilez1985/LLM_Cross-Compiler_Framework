@@ -448,3 +448,118 @@ def test_dropbear_goes_through_dietpi_software_or_else_the_init_system(tmp_path,
     fallback = "disable --now dropbear" in calls or "rc-service dropbear stop" in calls
     assert fallback is (not dietpi_ok), calls
     assert b"dropbear=disabled" in done.stdout
+
+
+# --- the mode choice: installers, File > Settings..., `llmcf config set framework_mode` -----------------------------
+
+from conftest import REPO_ROOT as REPO  # noqa: E402 - the repository root
+
+
+def _config(tmp_path):
+    from orchestrator.Core.config_manager import ConfigManager
+    (tmp_path / "cfg").mkdir(exist_ok=True)
+    return ConfigManager(config_dir=tmp_path / "cfg")
+
+
+def test_the_person_sets_the_mode_and_it_is_saved_to_config_yml(tmp_path, monkeypatch):
+    """Regression (failed before: framework_mode was not among the settings save_user_config writes, so a mode set at
+    runtime was lost at the next start, and nothing but a hand-edited config.yml could set it)."""
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "home"))
+    import yaml
+
+    from orchestrator.Core.config_manager import framework_mode, set_framework_mode
+    config = _config(tmp_path)
+    assert set_framework_mode(config, " Enterprise ") == "enterprise"
+    saved = yaml.safe_load((tmp_path / "cfg" / "config.yml").read_text(encoding="utf-8"))
+    assert saved["framework_mode"] == "enterprise"
+    assert framework_mode(_config(tmp_path)) == "enterprise"   # read again at the next start
+    with pytest.raises(ValueError):
+        set_framework_mode(config, "corporate")
+    assert framework_mode(config) == "enterprise"
+
+
+def test_an_ai_reads_the_mode_but_never_changes_it():
+    from orchestrator.llm.settings_change import PERSON_ONLY_SETTINGS, person_only_text
+    from orchestrator.tools.tools_status import READABLE
+    assert "framework_mode" in READABLE and "framework_mode" in PERSON_ONLY_SETTINGS
+    assert "never change" in person_only_text("framework_mode")
+
+
+def test_the_cli_sets_the_mode_with_config_set(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+
+    from orchestrator import cli
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("LLM_FRAMEWORK_CONFIG_DIR", str(tmp_path / "cfg"))
+    (tmp_path / "cfg").mkdir()
+    done = CliRunner().invoke(cli.cli, ["config", "set", "framework_mode", "enterprise"])
+    assert done.exit_code == 0, done.output
+    assert "framework_mode: enterprise" in done.output
+    assert "framework_mode: enterprise" in (tmp_path / "cfg" / "config.yml").read_text(encoding="utf-8")
+    refused = CliRunner().invoke(cli.cli, ["config", "set", "framework_mode", "corporate"])
+    assert refused.exit_code == 2 and "private or enterprise" in refused.output
+    assert CliRunner().invoke(cli.cli, ["config", "set", "offline_mode", "true"]).exit_code == 2   # not a key here
+
+
+def test_file_settings_shows_the_mode_and_the_person_changes_it(qapp, tmp_path, monkeypatch):
+    pytest.importorskip("PySide6")
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "home"))
+    from orchestrator.Core.config_manager import framework_mode
+    from orchestrator.gui.settings_window import SettingsDialog
+    config = _config(tmp_path)
+    dialog = SettingsDialog(SimpleNamespace(config=config), lang="en")
+    try:
+        assert dialog.cmb_mode.currentData() == "private"
+        dialog.cmb_mode.setCurrentIndex(dialog.cmb_mode.findData("enterprise"))
+        assert framework_mode(config) == "enterprise" and "Saved" in dialog.lbl_mode_result.text()
+        assert "framework_mode: enterprise" in (tmp_path / "cfg" / "config.yml").read_text(encoding="utf-8")
+    finally:
+        dialog.deleteLater()
+
+
+BASH = pytest.mark.skipif(os.name == "nt" or not shutil.which("bash"), reason="install.sh is a bash program")
+
+
+def _install_sh(tmp_path, body, *args):
+    script = f'source "$1"; shift; {body}'
+    return subprocess.run(["bash", "-c", script, "test", str(REPO / "install.sh"), *args], capture_output=True,
+                          text=True, timeout=60, env={"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path)})
+
+
+@BASH
+def test_install_sh_asks_the_mode_with_private_as_the_default_and_takes_a_flag(tmp_path):
+    answer = tmp_path / "tty"
+    for typed, expected in (("e\n", "enterprise"), ("\n", "private"), ("enterprise\n", "enterprise")):
+        answer.write_text(typed, encoding="utf-8")
+        done = _install_sh(tmp_path, f'ASK_TTY="{answer}"; ask_mode; echo "MODE=$MODE_CHOICE"')
+        assert f"MODE={expected}" in done.stdout, done.stdout + done.stderr
+    # no terminal to ask (an unattended run): the mode stays as it is
+    done = _install_sh(tmp_path, f'ASK_TTY="{tmp_path}/none"; ask_mode; echo "MODE=[$MODE_CHOICE]"')
+    assert "MODE=[]" in done.stdout
+    # the flag for unattended runs, and an unknown value stops before anything is installed
+    done = _install_sh(tmp_path, 'ditto_option "$@"; ask_mode; echo "MODE=$MODE_CHOICE"', "--mode=enterprise")
+    assert "MODE=enterprise" in done.stdout
+    done = _install_sh(tmp_path, 'ditto_option "$@"', "--mode=corporate")
+    assert done.returncode == 1 and "--mode" in done.stdout
+
+
+@BASH
+def test_install_sh_sets_the_chosen_mode_through_the_cli(tmp_path):
+    venv = tmp_path / "inst" / ".venv" / "bin"
+    venv.mkdir(parents=True)
+    log = tmp_path / "calls"
+    (venv / "python").write_text(f'#!/bin/sh\necho "$*" >> "{log}"\n', encoding="utf-8")
+    (venv / "python").chmod(0o755)
+    done = _install_sh(tmp_path, f'INSTALL_DIR="{tmp_path}/inst"; CONTAINER_BUILD=1; MODE_CHOICE=enterprise; '
+                                 'setup_mode')
+    assert "-m orchestrator.cli config set framework_mode enterprise" in log.read_text(encoding="utf-8"), done.stdout
+    log.unlink()
+    _install_sh(tmp_path, f'INSTALL_DIR="{tmp_path}/inst"; CONTAINER_BUILD=1; MODE_CHOICE=""; setup_mode')
+    assert not log.exists()   # nothing chosen: nothing set
+
+
+def test_the_windows_installer_takes_the_mode_flag_asks_and_sets_it_through_the_cli():
+    text = (REPO / "install.bat").read_text(encoding="utf-8")
+    assert '--mode=*' in text and "LCF_MODE" in text and "Read-Host" in text
+    assert "config set framework_mode $ModeChoice" in text
+    assert '@("", "private", "enterprise")' in text

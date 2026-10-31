@@ -40,6 +40,10 @@ HEADLESS="${LCF_HEADLESS:-0}"
 # Dittos lokale Laufzeit (selbst gebauter llama-server und sein Modell): --ditto=auto|bare-metal|docker|skip, für
 # unbeaufsichtigte Läufe auch LCF_DITTO=... (ohne Rückfragen; Größe und Lizenz des Modells werden trotzdem gezeigt).
 DITTO_CHOICE="${LCF_DITTO:-auto}"
+# Der Framework-Modus: private (Standard) oder enterprise (nimmt auf Boards nur OpenSSH mit sudo, die Schlüsselzeile in
+# Root-Besitz). --mode=private|enterprise, für unbeaufsichtigte Läufe auch LCF_MODE=...; ohne Angabe fragt der
+# Installer am Terminal (Enter: privat). Ohne Angabe und ohne Terminal bleibt der Modus, wie er ist (neu: privat).
+MODE_CHOICE="${LCF_MODE:-}"
 
 # Die Container-Engine läuft standardmäßig ohne Root-Rechte (rootless Podman; --engine=docker: rootless Docker);
 # --rootful: Docker als root mit der Gruppe docker, nur auf den ausdrücklichen Wunsch der Person und nach einer Warnung
@@ -1737,8 +1741,13 @@ ditto_option() {
             --dry-run) DRY_RUN=1 ;;
             --rootful) ROOTFUL=1 ;;
             --engine=*) ENGINE_CHOICE="${arg#--engine=}" ;;
+            --mode=*) MODE_CHOICE="${arg#--mode=}" ;;
         esac
     done
+    case "$MODE_CHOICE" in
+        ""|private|enterprise) ;;
+        *) log_error "Unbekannter Wert für --mode: '$MODE_CHOICE' (private oder enterprise)." ;;
+    esac
     case "$ENGINE_CHOICE" in
         podman|docker) ;;
         *) log_error "Unbekannter Wert für --engine: '$ENGINE_CHOICE' (podman oder docker; beide ohne Root-Rechte, Docker als root nur mit --rootful)." ;;
@@ -1747,6 +1756,44 @@ ditto_option() {
         auto|bare-metal|docker|skip) ;;
         *) log_error "Unbekannter Wert für --ditto: '$DITTO_CHOICE' (auto, bare-metal, docker oder skip)." ;;
     esac
+}
+
+# Fragt den Framework-Modus, wenn weder --mode noch LCF_MODE ihn nennen: am Terminal (ASK_TTY, nie aus stdin), Enter
+# heißt privat. Ohne Terminal (ein unbeaufsichtigter Lauf) bleibt der Modus, wie er ist (MODE_CHOICE leer).
+ask_mode() {
+    local answer=""
+    if [ -n "$MODE_CHOICE" ]; then return 0; fi
+    printf '%s [P/e] ' "Framework-Modus: privat (Standard) oder enterprise? Enterprise nimmt auf Boards nur OpenSSH mit sudo (die Schlüsselzeile in Root-Besitz) und lehnt die schwächere Dropbear-Stufe und das Home-Tor ab."
+    if ! { IFS= read -r answer < "$ASK_TTY"; } 2> /dev/null; then
+        echo ""
+        log_info "Kein Terminal für die Antwort (ein unbeaufsichtigter Lauf): Der Framework-Modus bleibt, wie er ist (neu: privat; --mode=enterprise wählt ihn)."
+        return 0
+    fi
+    case "${answer,,}" in e|enterprise) MODE_CHOICE="enterprise" ;; *) MODE_CHOICE="private" ;; esac
+}
+
+# Setzt den gewählten Framework-Modus mit 'llm-cli config set framework_mode' als die Person, die installiert (ihre
+# config.yml; in einem Container-Build die des Images). Ohne Wahl tut der Schritt nichts. Er lässt die Installation nie
+# scheitern: Ein Fehler wird gemeldet (später: llm-cli config set framework_mode WERT oder Datei > Einstellungen...).
+setup_mode() {
+    if [ -z "$MODE_CHOICE" ]; then return 0; fi
+    log_info "[Modus] Framework-Modus: $MODE_CHOICE..."
+    local run=()
+    if [ "$CONTAINER_BUILD" != "1" ]; then
+        local real_user="${SUDO_USER:-${USER:-}}"
+        if [ "$real_user" = "root" ] || [ -z "$real_user" ]; then
+            log_warn "Der Framework-Modus wird für deinen Benutzer gesetzt, nicht für root: Später als dein Benutzer: llm-cli config set framework_mode $MODE_CHOICE"
+            return 0
+        fi
+        run=(sudo -H -u "$real_user")
+        if ! command -v sudo &> /dev/null; then run=(runuser -u "$real_user" --); fi
+    fi
+    if (cd "$INSTALL_DIR" && "${run[@]}" "$INSTALL_DIR/.venv/bin/python" -m orchestrator.cli config set framework_mode "$MODE_CHOICE"); then
+        log_success "Framework-Modus: $MODE_CHOICE."
+    else
+        log_warn "Der Framework-Modus ließ sich nicht setzen (Meldungen oben); die Installation geht weiter. Später: llm-cli config set framework_mode $MODE_CHOICE"
+    fi
+    return 0
 }
 
 # Richtet Dittos lokale Laufzeit ein: 'llm-cli ditto runtime ensure' als die Person, die installiert (nie als root).
@@ -1912,6 +1959,7 @@ plan_installation() {
         echo "   rsync: fehlt -> ${PKG_ARGV[*]} rsync"
     fi
     echo "   Danach: Programmdateien nach $INSTALL_DIR, .venv mit $requirements (${PYTHON:-dem eben installierten Python}), Starter /usr/local/bin/llm-framework, Ditto ($DITTO_CHOICE)"
+    echo "   Framework-Modus: ${MODE_CHOICE:-wird gefragt (ohne Terminal: bleibt, wie er ist; neu: privat)}"
     log_success "Probelauf fertig: Die Installation liefe hier durch."
 }
 
@@ -1920,11 +1968,13 @@ main() {
     ditto_option "$@"
     if [ "$DRY_RUN" = "1" ]; then plan_installation; return 0; fi
     check_root
+    ask_mode
     setup_system
     deploy_files
     adopt_old_settings
     setup_venv
     configure
+    setup_mode
     setup_ditto
     finish
 }

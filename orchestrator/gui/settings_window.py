@@ -105,11 +105,42 @@ class SettingsDialog(QDialog):
                                                  self.lang)
         self.chooser_form.changed.connect(self._form_changed)
         layout.addWidget(self.chooser_form)
+        # the framework mode (llmcf config set framework_mode): the person's alone; an AI may read it, never change it
+        from PySide6.QtWidgets import QComboBox
+        from orchestrator.Core.config_manager import FRAMEWORK_MODES, framework_mode
+        layout.addWidget(plain_label(self._t("deploy.mode.title"), page))
+        self.cmb_mode = QComboBox(page)
+        self.cmb_mode.setObjectName("cmb_settings_framework_mode")
+        for mode in FRAMEWORK_MODES:
+            self.cmb_mode.addItem(self._t(f"deploy.mode.{mode}"), mode)
+        self.cmb_mode.setCurrentIndex(FRAMEWORK_MODES.index(framework_mode(self.config)))
+        self.cmb_mode.currentIndexChanged.connect(self._mode_changed)
+        layout.addWidget(self.cmb_mode)
+        explain = plain_label(self._t("deploy.mode.explain"), page)
+        explain.setWordWrap(True)
+        layout.addWidget(explain)
+        self.lbl_mode_result = plain_label("", page)
+        self.lbl_mode_result.setObjectName("lbl_settings_mode_result")
+        layout.addWidget(self.lbl_mode_result)
         self.lbl_general_result = plain_label("", page)
         self.lbl_general_result.setObjectName("lbl_settings_general_result")
         layout.addWidget(self.lbl_general_result)
         layout.addStretch(1)
         return page
+
+    def _mode_changed(self, _index: int) -> None:
+        """The person picked private or enterprise mode: saved to config.yml (Core/config_manager.py
+        set_framework_mode, also `llmcf config set framework_mode`); a failed save keeps the mode as it was."""
+        from orchestrator.Core.config_manager import FRAMEWORK_MODES, framework_mode, set_framework_mode
+        try:
+            now = set_framework_mode(self.config, self.cmb_mode.currentData())
+            self.lbl_mode_result.setText(self._t("deploy.mode.saved", mode=self._t(f"deploy.mode.{now}")))
+        except (ValueError, OSError):
+            self.cmb_mode.blockSignals(True)
+            self.cmb_mode.setCurrentIndex(FRAMEWORK_MODES.index(framework_mode(self.config)))
+            self.cmb_mode.blockSignals(False)
+            self.lbl_mode_result.setText(self._t("deploy.mode.not_saved"))
+        self.refresh_effective()
 
     def _form_changed(self, form: str) -> None:
         """The person picked du or Sie: saved in config.yml and used at once (windows that retranslate follow)."""

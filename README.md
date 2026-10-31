@@ -219,6 +219,8 @@ Choose the Ditto step with `sudo ./install.sh --ditto=auto|bare-metal|docker|ski
 run set `LCF_DITTO` instead (for example `sudo LCF_DITTO=auto ./install.sh`): then nothing is asked, and a model under
 a permissive licence (such as Apache 2.0) is downloaded after its size and licence are shown.
 
+The installer also asks for the framework mode: private (the default, Enter) or enterprise, which takes only OpenSSH with sudo on a board; `--mode=private|enterprise` (or `LCF_MODE`) answers it for an unattended run, and you change it later in File > Settings... or with `llmcf config set framework_mode`.
+
 To see what the installer would do on this computer without changing anything, run `./install.sh --dry-run` (no
 `sudo` needed): it names the family, the package manager, the packages, the repositories and the key
 fingerprints, calls no package manager and downloads nothing. It ends with exit code 0 when the installation
