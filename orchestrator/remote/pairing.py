@@ -136,21 +136,185 @@ def first_use(store: TrustStore, check: KeyCheck, *, ask: Optional[Callable[[Key
 
 # --- pairing ----------------------------------------------------------------------------------------------------
 
+class PairOutcome(str):
+    """What pair() did: the word install_public_key answers ("restricted", "dropbear", "home", "unrestricted") or
+    "password" (no key, the person declined every key tier), with `tier` (remote/key_tiers.py) and, after the switch
+    to OpenSSH, the board's new `endpoint` and host `key` (its sshd answers on another port with keys of its own)."""
+    tier: str
+    endpoint: Any
+    key: Any
+
+    def __new__(cls, word: str, tier: str = "", endpoint: Any = None, key: Any = None):
+        obj = super().__new__(cls, word)
+        obj.tier = tier or {"restricted": "root"}.get(word, word)
+        obj.endpoint, obj.key = endpoint, key
+        return obj
+
+
+class TierChooser:
+    """The person's channel for a board that cannot take the root-owned key line (the CLI's prompts, the GUI's
+    questions; never an AI: no module an AI can reach imports this one). Every answer defaults to "No"."""
+
+    def choose(self, offer: Any) -> str:
+        """One of offer.choices (key_tiers.CHOICES); "password" when the person takes none."""
+        return "password"
+
+    def confirm(self, title: str, lines: Any) -> bool:
+        """The person's yes to the plan in `lines` (the switch to OpenSSH, the removal of Dropbear)."""
+        return False
+
+    def trust_key(self, check: Any) -> bool:
+        """The person's yes to the new sshd's host key (trust on first use, as for a new board)."""
+        return False
+
+    def tell(self, lines: Any) -> None:
+        """A plain report for the person."""
+
+
+def _reason_text(word: str) -> str:
+    from orchestrator.remote.gate import SETUP_REASONS
+    text = SETUP_REASONS.get(word, word)
+    return text[:1].upper() + text[1:] + "."
+
+
+def _step(audit: Any, via: str, tool: str, arguments: Dict[str, Any], status: str = "ok", detail: str = "") -> None:
+    """One step of the key tiers in the audit log (actor `via`, fixed words only: no host, no account, no path)."""
+    log = _open_audit(audit)
+    if log is None or not callable(getattr(log, "record", None)):
+        return
+    try:
+        log.record(via or "user", tool, "external", "ask", status, arguments=arguments, approved=status == "ok",
+                   detail=detail, extra={"confirm_channel": f"framework-{via or 'user'}"})
+    except Exception:  # noqa: BLE001 - logged by the audit log itself
+        pass
+
+
 def pair(client: Any, state_dir: Path, bundle: Any = None, *, allow_unrestricted: bool = False,
-         password: str = "") -> str:
+         password: str = "", chooser: Optional[TierChooser] = None, mode: str = "private", audit: Any = None,
+         via: str = "", host: str = "", port: int = 22, user: str = "", switch: bool = True) -> str:
     """Installs the framework's own SSH key on the board over `client`, a session the person logged in to with a
     one-time password (used for that connection only, never stored): ssh_trust.install_public_key, with `bundle`
-    (runtime/device/board_ops.bundle()) as llmcf's command gate and the key's restricted line. Returns "restricted" or
-    "unrestricted"; GateUnavailable (a HostKeyError) when the board cannot take the gate and the person did not allow
-    an unrestricted key, HostKeyError when the key cannot be installed. `password`: the person's one-time password,
-    which the root step gives to sudo -S once (never stored); without it the account's sudo -n."""
+    (runtime/device/board_ops.bundle()) as llmcf's command gate and the key's restricted line. `password`: the person's
+    one-time password, which a root step gives to sudo -S once (never stored); without it the account's sudo -n.
+
+    A board that cannot take the root-owned key line (Dropbear, no sudo, an old ssh-keygen without openssl) gets the
+    person's choice through `chooser` (key_tiers.offer: the switch to OpenSSH, the Dropbear tier, the home gate, or
+    password login; the weaker tiers only in private `mode`): each answer is written to `audit` (the log or a function
+    that opens it) as the person's (`via`), and the framework never takes a weaker tier without that yes. The switch
+    needs the board's `host`, SSH `port` and `user` (the new sshd is reached on its own port). Without a chooser, or
+    when the board offers nothing but the password, GateUnavailable (a HostKeyError) with the choices in its text.
+    `switch` False leaves the switch out of the choices (a stored board keeps its address and host key there).
+    Returns a PairOutcome (a str: "restricted", "dropbear", "home", "unrestricted" or "password")."""
+    from orchestrator.remote import key_tiers
     from orchestrator.utils import ssh_trust   # looked up now: tests replace install_public_key and client_key there
     line = ssh_trust.client_key(Path(state_dir))[1]
     if bundle is None:
         ssh_trust.install_public_key(client, line)
-        return "unrestricted"
-    return ssh_trust.install_public_key(client, line, bundle, allow_unrestricted=allow_unrestricted,
-                                        password=password)
+        return PairOutcome("unrestricted")
+    mode = key_tiers.normal_mode(mode)
+    try:
+        return PairOutcome(ssh_trust.install_public_key(client, line, bundle, allow_unrestricted=allow_unrestricted,
+                                                        password=password, mode=mode))
+    except ssh_trust.GateUnavailable as e:
+        offer = e.offer
+        if chooser is None or offer is None:
+            raise
+    if not switch and key_tiers.CHOICE_OPENSSH in offer.choices:
+        from dataclasses import replace
+        offer = replace(offer, choices=tuple(c for c in offer.choices if c != key_tiers.CHOICE_OPENSSH))
+    facts = offer.facts.as_dict()
+    _step(audit, via, "board_key_tier_offered", {"reason": offer.reason, "mode": mode, "choices": list(offer.choices),
+                                                 "refused": list(offer.refused), **facts})
+    if offer.refused:
+        chooser.tell([_reason_text("enterprise")])
+    choice = chooser.choose(offer)
+    problem = key_tiers.choice_problem(choice, offer, mode)
+    _step(audit, via, "board_key_tier_chosen", {"choice": choice, "mode": mode}, "error" if problem else "ok",
+          problem)
+    if problem:
+        raise ssh_trust.GateUnavailable("enterprise" if not key_tiers.allowed(choice, mode) else "declined", offer)
+    if choice == key_tiers.TIER_PASSWORD:
+        chooser.tell([_reason_text("declined")])
+        return PairOutcome("password")
+    if choice in (key_tiers.TIER_DROPBEAR, key_tiers.TIER_HOME):
+        try:
+            got = ssh_trust.install_public_key(client, line, bundle, password=password, tier=choice, mode=mode)
+        except ssh_trust.GateUnavailable as failed:
+            _step(audit, via, "board_key_tier_installed", {"tier": choice}, "error", failed.reason)
+            raise
+        _step(audit, via, "board_key_tier_installed", {"tier": choice})
+        chooser.tell([key_tiers.TIER_TEXTS[choice] + ".", key_tiers.UPGRADE_TEXT])
+        return PairOutcome(got, tier=choice)
+    return _switch_to_openssh(client, state_dir, bundle, line, offer, chooser, password=password, mode=mode,
+                              audit=audit, via=via, host=host, port=port, user=user)
+
+
+def _switch_to_openssh(client: Any, state_dir: Path, bundle: Any, line: str, offer: Any, chooser: TierChooser, *,
+                       password: str, mode: str, audit: Any, via: str, host: str, port: int, user: str) -> str:
+    """The switch to OpenSSH the person chose (remote/openssh_switch.py): its plan first and the person's yes to it,
+    then OpenSSH installed if it is not there (sudo once), sshd checked and started on its own port, the current
+    session kept until the new sshd answers, its host key trusted by the person, the root-owned key line over a new
+    login there, and only after a separate yes Dropbear off. Every step in the audit log; GateUnavailable when a step
+    fails (nothing of Dropbear changed then)."""
+    from orchestrator.remote import openssh_switch, transport
+    from orchestrator.remote.address import Endpoint, valid_host
+    from orchestrator.remote.trust import TrustStore
+    from orchestrator.utils import ssh_trust
+    try:
+        plan = openssh_switch.plan(offer.facts)
+    except openssh_switch.SwitchUnavailable as e:
+        _step(audit, via, "board_openssh_plan", {"facts": offer.facts.as_dict()}, "error", e.reason)
+        raise ssh_trust.GateUnavailable(e.reason, offer, switch=True) from None
+    if not valid_host(host) or not user:
+        raise ssh_trust.GateUnavailable("unknown", offer)
+    if not chooser.confirm("switch", plan.lines):
+        _step(audit, via, "board_openssh_plan", plan.as_dict(), "error", "declined")
+        raise ssh_trust.GateUnavailable("declined", offer)
+    _step(audit, via, "board_openssh_plan", plan.as_dict())
+    ok, reason, state = openssh_switch.install(transport.ParamikoTransport(client).run, plan, password)
+    _step(audit, via, "board_openssh_installed", {**plan.as_dict(), "state": state}, "ok" if ok else "error", reason)
+    if not ok:
+        raise ssh_trust.GateUnavailable(reason, offer, switch=True)
+    # the current session (`client`) stays open until the new sshd answers on its port
+    if not openssh_switch.wait_until_answers(host, plan.port):
+        _step(audit, via, "board_openssh_answers", {"port": plan.port}, "error", "no-answer")
+        raise ssh_trust.GateUnavailable("no-answer", offer, switch=True)
+    endpoint = Endpoint(host, plan.port)
+    store = TrustStore(Path(state_dir))
+    key = ssh_trust.fetch_host_key(host, plan.port)
+    outcome = first_use(store, store.check(endpoint, key), ask=chooser.trust_key, via=via or "cli", audit=audit,
+                        actor=via)
+    _step(audit, via, "board_openssh_host_key", {"port": plan.port, "verdict": outcome.verdict},
+          "ok" if outcome.trusted else "error")
+    if not outcome.trusted:
+        raise ssh_trust.GateUnavailable("host-key", offer, switch=True)
+    fresh = ssh_trust.connect(host, user, Path(state_dir), port=plan.port, password=password)
+    try:
+        try:
+            got = ssh_trust.install_public_key(fresh, line, bundle, password=password, mode=mode)
+        except ssh_trust.GateUnavailable as failed:   # OpenSSH runs already: the person reads the switch's text
+            _step(audit, via, "board_key_tier_installed", {"tier": "root", "port": plan.port}, "error", failed.reason)
+            raise ssh_trust.GateUnavailable(failed.reason, offer, switch=True) from None
+        _step(audit, via, "board_key_tier_installed", {"tier": "root", "port": plan.port})
+        report = [f"OpenSSH answers on port {plan.port} and the framework's key is paired there with the root-owned "
+                  "key line."]
+        if chooser.confirm("dropbear", ["Remove Dropbear now? The board is then reached only through OpenSSH on port "
+                                        f"{plan.port}; your current session ends when Dropbear stops."]):
+            done, why = openssh_switch.disable_dropbear(transport.ParamikoTransport(fresh).run, password)
+            _step(audit, via, "board_dropbear_disabled", {"dietpi": plan.dietpi}, "ok" if done else "error", why)
+            report.append("Dropbear is off." if done else
+                          f"Dropbear could not be turned off ({openssh_switch.SWITCH_REASONS.get(why, why)}); it "
+                          "keeps running next to OpenSSH.")
+        else:
+            _step(audit, via, "board_dropbear_disabled", {"dietpi": plan.dietpi}, "error", "declined")
+            report.append("Dropbear keeps running next to OpenSSH; you can remove it later.")
+        chooser.tell(report)
+    finally:
+        try:
+            fresh.close()
+        except Exception:  # noqa: BLE001 - the pairing is done
+            pass
+    return PairOutcome(got, tier="root", endpoint=endpoint, key=key)
 
 
 # --- Q5: the person's change of a board's address and host key -------------------------------------------------
@@ -303,5 +467,6 @@ def record_consent(audit: Any, tool: str, arguments: Dict[str, Any], detail: str
                  extra={"answer": "accepted", "confirm_channel": channel})
 
 
-__all__ = ["FirstUse", "KeyReplaceError", "KeyReplacement", "PERSON_CHANNELS", "PersonChannel", "first_use", "pair",
+__all__ = ["PairOutcome", "TierChooser", "FirstUse", "KeyReplaceError", "KeyReplacement", "PERSON_CHANNELS",
+           "PersonChannel", "first_use", "pair",
            "plan_replacement", "record_consent", "replace_key", "trust_presented_key"]

@@ -46,7 +46,9 @@ _STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", re.ASCII)
 # What a deploy saw on the board, kept with its last deploy (note_board) until the next deploy looks again, what the
 # last contact found (note_reach), kept until a contact reaches the board again, and the board's temperature at the last
 # checks on it (note_heat), kept until the next reading.
-BOARD_FACTS = ("old_sidecar", "board_checked_at", "reach", "heat")
+# The tier of the framework's key on the board (note_key_tier: remote/key_tiers.py), kept until a pairing or a
+# verify reads it again.
+BOARD_FACTS = ("old_sidecar", "board_checked_at", "reach", "heat", "key_tier")
 # The framework's contacts with a board whose failure is recorded for Mojo (note_reach), in plain words.
 REACH_STEPS = {"deploy": "deploy", "runtime_deploy": "runtime deploy", "verify": "verify", "benchmark": "benchmark",
                "probe": "probe"}
@@ -316,6 +318,30 @@ class TrustedDevices:
         except (OSError, TimeoutError, DeviceStoreError, AttributeError, TypeError):
             pass  # bookkeeping never fails a deploy, a verify or a benchmark
 
+    def note_key_tier(self, device_id: str, tier: str) -> None:
+        """The tier of the framework's key on the board (remote/key_tiers.py TIERS: root, dropbear, home, password,
+        unrestricted), from its pairing or the last verify, for the listings and Mojo (it never logs in to a board
+        itself). Never fails the caller's work."""
+        from orchestrator.remote.key_tiers import TIERS
+        if tier not in TIERS or not DEVICE_ID_RE.fullmatch(device_id or ""):
+            return
+        try:
+            with file_lock(self.state_dir / ".devices.lock"):
+                rows = self.last_deploys()
+                row = dict(rows.get(device_id) or {})
+                row["key_tier"] = {"tier": tier, "at": _now()}
+                rows[device_id] = row
+                self._write(self.deploys_path, rows)
+        except (OSError, TimeoutError, DeviceStoreError):
+            pass  # bookkeeping never fails a pairing or a verify
+
+    def key_tier(self, device_id: str) -> str:
+        """The recorded tier of the framework's key on the board ("" when none was recorded). Reads only the file."""
+        from orchestrator.remote.key_tiers import TIERS
+        row = (self.last_deploys().get(device_id) or {}).get("key_tier")
+        tier = row.get("tier") if isinstance(row, dict) else ""
+        return tier if tier in TIERS else ""
+
     def last_heat(self, device: TrustedDevice) -> Optional[Dict[str, Any]]:
         """The board's recorded temperature ({"at", "heat": BoardHeat}) or None; a record written before the person's
         last trust of the board (they trusted or paired it again since) is no longer the board's. Reads only the
@@ -389,6 +415,17 @@ def record_reach(state_dir: Path, step: str, code: str, *, device_id: str = "",
             store.note_reach(device_id, step, code)
         elif endpoint is not None:
             store.note_reach_at(endpoint.host, endpoint.port, step, code)
+    except Exception:  # noqa: BLE001 - bookkeeping never changes what the step does
+        pass
+
+
+def record_key_tier(state_dir: Path, device_id: str, tier: str) -> None:
+    """The one recorder of the tier of the framework's key on a board (its pairing, a verify); it never fails the
+    caller's work."""
+    if not tier:
+        return
+    try:
+        TrustedDevices(Path(state_dir)).note_key_tier(device_id, tier)
     except Exception:  # noqa: BLE001 - bookkeeping never changes what the step does
         pass
 

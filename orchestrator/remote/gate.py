@@ -74,6 +74,12 @@ SUDOERS_DIR = "/etc/sudoers.d"
 KEYS_DIR = "/etc/ssh/llmcf_keys"
 SIGNERS_DIR = "/etc/llmcf"
 SIGNERS = SIGNERS_DIR + "/allowed_signers"
+# The same key as a PEM public key, for a board whose ssh-keygen cannot check it (older than OpenSSH 8.1, or none, as
+# on many Dropbear boards): the gate then checks the very same SSHSIG signature with openssl (1.1.1 or later).
+SIGNERS_PEM = SIGNERS_DIR + "/signing_key.pem"
+# The signing folder of a board without sudo (the home gate, a weaker tier the person agreed to): owned by the account,
+# never written by a gate operation (they write only into llmcf's upload places).
+HOME_SIGNING_REL = ".config/llm-framework/signing"
 SSHD_CONFIG = "/etc/ssh/sshd_config"
 # The namespace and the principal of the framework's board signatures (orchestrator/Core/community_pack.py
 # BOARD_NAMESPACE and BOARD_SIGNER; tests/test_board_signing.py checks they are the same).
@@ -386,41 +392,121 @@ def gate_version(text: str) -> str:
 
 # --- the framework's signature on the board ---------------------------------------------------------------------------
 
+def _octal(data: bytes) -> str:
+    """`data` as a printf format of plain letters and octal escapes (POSIX printf \\ddd), for sh."""
+    return "".join(chr(b) if chr(b).isascii() and (chr(b).isalnum() or chr(b) in "-_") else "\\%03o" % b
+                   for b in data)
+
+
+def _ssh_string(data: bytes) -> bytes:
+    return len(data).to_bytes(4, "big") + data
+
+
+def sshsig_prefix() -> bytes:
+    """What the framework's SSHSIG signature signs before the sha512 of the file (PROTOCOL.sshsig): the magic, the
+    namespace, an empty reserved string, the hash name and the length of the 64-byte digest."""
+    return (b"SSHSIG" + _ssh_string(SIGN_NAMESPACE.encode("ascii")) + _ssh_string(b"") + _ssh_string(b"sha512")
+            + (64).to_bytes(4, "big"))
+
+
+# The size of a decoded SSHSIG blob of an Ed25519 key in the framework's namespace (the only form the openssl check
+# takes: its last 64 bytes are the raw signature).
+SSHSIG_ED25519_SIZE = (6 + 4 + 4 + (4 + 11 + 4 + 32) + 4 + len(SIGN_NAMESPACE) + 4 + 4 + 6
+                       + 4 + (4 + 11 + 4 + 64))
+
+
+def verify_sh() -> str:
+    """The sh function llmcf_verify FILE SIG SIGNERS PEM: true when FILE carries the framework's SSHSIG signature SIG,
+    checked with `ssh-keygen -Y verify` against the allowed_signers file SIGNERS (OpenSSH 8.1 or later) or, where
+    ssh-keygen cannot check it (older, or none, as on many Dropbear boards), with openssl 1.1.1 or later against PEM
+    (the same Ed25519 key): the signed message is rebuilt from sshsig_prefix() and the file's sha512, and the raw
+    signature is the last 64 bytes of the decoded blob. Otherwise llmcf_why says why: old-ssh (ssh-keygen could not
+    check it and openssl did not either) or no-verifier (neither tool is on the board)."""
+    return "\n".join([
+        "llmcf_verify() {",
+        "  llmcf_why=no-verifier",
+        "  if command -v ssh-keygen >/dev/null 2>&1; then",
+        f'    ssh-keygen -Y verify -f "$3" -I {SIGN_PRINCIPAL} -n {SIGN_NAMESPACE} -s "$2" < "$1" >/dev/null 2>&1 '
+        "&& return 0",
+        # an ssh-keygen that knows -Y and still says no: the signature is not the framework's (openssl would agree)
+        "    if ssh-keygen -Y verify </dev/null 2>&1 | grep -qi 'unknown option\\|illegal option\\|invalid option'; "
+        "then llmcf_why=old-ssh; else llmcf_why=bad; return 1; fi",
+        "  fi",
+        '  [ -s "$4" ] || return 1',
+        "  command -v openssl >/dev/null 2>&1 || return 1",
+        # openssl older than 1.1.1 has no -rawin (it cannot check an Ed25519 signature of a message)
+        "  openssl pkeyutl -help 2>&1 | grep -q rawin || return 1",
+        "  llmcf_why=bad",
+        # the scratch folder lies next to the file (a private folder of the caller), never in /tmp
+        '  case $1 in */*) llmcf_t=${1%/*} ;; *) llmcf_t=. ;; esac',
+        '  llmcf_t=$(mktemp -d "$llmcf_t/.llmcf-sig.XXXXXXXX") || return 1',
+        "  llmcf_ok=1",
+        "  if sed '1d;$d' \"$2\" | tr -d '\\n\\r' | openssl base64 -d -A > \"$llmcf_t/blob\" 2>/dev/null &&",
+        f'    [ "$(wc -c < "$llmcf_t/blob" | tr -d " ")" -eq {SSHSIG_ED25519_SIZE} ] &&',
+        '    tail -c 64 "$llmcf_t/blob" > "$llmcf_t/raw" &&',
+        f"    {{ printf '{_octal(sshsig_prefix())}' && openssl dgst -sha512 -binary < \"$1\"; }} > \"$llmcf_t/msg\" &&",
+        '    openssl pkeyutl -verify -pubin -inkey "$4" -rawin -in "$llmcf_t/msg" -sigfile "$llmcf_t/raw" '
+        ">/dev/null 2>&1; then llmcf_ok=0; fi",
+        '  rm -rf "$llmcf_t"',
+        '  return "$llmcf_ok"',
+        "}",
+    ])
+
+
 def signed_sh(signers: str = SIGNERS, root_uid: int = ROOT_UID) -> str:
     """The sh functions that check a file against the framework's signature on the board (DECISIONS 2026-10-31: a
     board runs only runtime tarballs and packages signed with the framework's key). Part of the gate's head and put in
     front of every script-form body that checks a signature (runtime-check, the package's install job):
 
-    - llmcf_rootowned PATH: PATH is a plain file or folder (no link) of `root_uid` that no group and nobody else may
-      write;
-    - llmcf_trusted_signers: the allowed_signers file `signers`, its folder and the folder above are root-owned;
+    - llmcf_owned UID PATH, llmcf_rootowned PATH: PATH is a plain file or folder (no link) of that owner (`root_uid`)
+      that no group and nobody else may write;
+    - llmcf_trusted_signers: the allowed_signers file `signers`, its folder and the folder above are root-owned; or,
+      only in a home gate (LLMCF_HOME_GATE: a board without sudo whose gate is not root-owned, the weaker tier the
+      person agreed to), the account's own signing folder HOME_SIGNING_REL and every folder up to its home, owned by
+      the account. It sets llmcf_sf (the signers file), llmcf_pf (its PEM twin, signing_key.pem next to it) and
+      llmcf_po (their owner);
     - llmcf_must_sign: a signature is needed: always in the gate, and in an unrestricted login once the board holds
       the signers file (before its root step an unrestricted login runs anything anyway);
-    - llmcf_signed FILE SIG: `ssh-keygen -Y verify` of FILE against SIG with only the framework's key, only in its
-      namespace; one plain line on stderr and status 1 otherwise.
+    - llmcf_signed FILE SIG: llmcf_verify (verify_sh: ssh-keygen, else openssl) of FILE against SIG with only the
+      framework's key, only in its namespace; one plain line on stderr and status 1 otherwise.
 
     `signers` and `root_uid` are parameters for the tests only (a temporary folder, the test's own user)."""
     folder = signers.rsplit("/", 1)[0]
     parent = folder.rsplit("/", 1)[0] or "/"
+    home = f'"$HOME"/{HOME_SIGNING_REL}'
     return "\n".join([
-        "llmcf_rootowned() {",
-        '  ls -ldn "$1" 2>/dev/null | (read -r llmcf_m llmcf_n llmcf_u llmcf_rest || exit 1',
-        f'    [ "$llmcf_u" = {int(root_uid)} ] || exit 1',
+        "llmcf_owned() {",
+        '  ls -ldn "$2" 2>/dev/null | (read -r llmcf_m llmcf_n llmcf_u llmcf_rest || exit 1',
+        '    [ "$llmcf_u" = "$1" ] || exit 1',
         "    case $llmcf_m in -*|d*) ;; *) exit 1 ;; esac",
         "    case $llmcf_m in ?????w*|????????w*) exit 1 ;; esac)",
         "}",
-        f"llmcf_trusted_signers() {{ llmcf_rootowned {signers} && llmcf_rootowned {folder} && "
-        f"llmcf_rootowned {parent}; }}",
+        f'llmcf_rootowned() {{ llmcf_owned {int(root_uid)} "$1"; }}',
+        "llmcf_trusted_signers() {",
+        f"  llmcf_sf={signers}; llmcf_pf={folder}/signing_key.pem; llmcf_po={int(root_uid)}",
+        f"  llmcf_rootowned {signers} && llmcf_rootowned {folder} && llmcf_rootowned {parent} && return 0",
+        '  [ "${LLMCF_HOME_GATE-}" = 1 ] || return 1',
+        "  llmcf_po=$(id -u 2>/dev/null) || return 1",
+        f"  llmcf_sf={home}/allowed_signers; llmcf_pf={home}/signing_key.pem",
+        f'  llmcf_owned "$llmcf_po" "$llmcf_sf" && llmcf_owned "$llmcf_po" {home} && '
+        f'llmcf_owned "$llmcf_po" "$HOME"/{HOME_SIGNING_REL.rsplit("/", 1)[0]} && '
+        'llmcf_owned "$llmcf_po" "$HOME"/.config && llmcf_owned "$llmcf_po" "$HOME"',
+        "}",
         f'llmcf_must_sign() {{ [ "${{LLMCF_GATE-}}" = 1 ] || [ -e {signers} ]; }}',
+        verify_sh(),
         "llmcf_signed() {",
         '  [ -f "$2" ] || { echo "it carries no signature of the framework\'s signing key" >&2; return 1; }',
         "  llmcf_trusted_signers || { echo \"this board holds no root-owned signing key of the framework (pair it "
         "again with the board's password)\" >&2; return 1; }",
-        "  command -v ssh-keygen >/dev/null 2>&1 || { echo \"this board has no ssh-keygen to check the framework's "
-        "signature\" >&2; return 1; }",
-        f'  ssh-keygen -Y verify -f {signers} -I {SIGN_PRINCIPAL} -n {SIGN_NAMESPACE} -s "$2" < "$1" >/dev/null 2>&1 '
-        "|| { echo \"its signature is not one of the framework's signing key (changed, or signed with another "
-        "key)\" >&2; return 1; }",
+        '  llmcf_owned "$llmcf_po" "$llmcf_pf" || llmcf_pf=/nonexistent',
+        '  llmcf_verify "$1" "$2" "$llmcf_sf" "$llmcf_pf" && return 0',
+        '  if [ "$llmcf_why" != bad ]; then',
+        "    echo \"this board can check the framework's signature neither with ssh-keygen (OpenSSH 8.1 or later) nor "
+        "with openssl (1.1.1 or later)\" >&2",
+        "  else",
+        "    echo \"its signature is not one of the framework's signing key (changed, or signed with another key)\" >&2",
+        "  fi",
+        "  return 1",
         "}",
     ])
 
@@ -435,6 +521,9 @@ LC_ALL=C; export LC_ALL
 set -f
 llmcf_refuse() { printf 'llmcf-gate: refused: %s\\n' "$1" >&2; exit 126; }
 @SIGNED@
+# A gate that is not root-owned is the home gate of a board without sudo (the weaker tier the person agreed to): its
+# signing key is the account's own (llmcf_trusted_signers). Set here, whatever the login's environment said.
+LLMCF_HOME_GATE=; llmcf_rootowned "$0" || LLMCF_HOME_GATE=1; export LLMCF_HOME_GATE
 llmcf_line=${SSH_ORIGINAL_COMMAND-}
 [ -n "$llmcf_line" ] || llmcf_refuse "no operation given: the framework's key opens no login shell"
 case $llmcf_line in
@@ -478,13 +567,15 @@ class GateBundle:
     """What pairing installs on a board: the gate program (render_gate, with every operation of the framework
     defined), llmcf's root helper (None: no root actions) and its version; `signers`, the board's allowed_signers line
     of the framework's signing key ("" when the framework has none), and `selftest`, that key's signature of
-    SELFTEST_DATA, which the root step checks with the board's own ssh-keygen before it installs anything."""
+    SELFTEST_DATA, which the root step checks with the board's own tools (ssh-keygen, else openssl against `pem`, the
+    same key as a PEM public key) before it installs anything."""
     gate: str
     root_helper: Optional[str] = None
     notes: Tuple[str, ...] = field(default_factory=tuple)
     signers: str = ""
     selftest: str = ""
     missing: str = "no-signer"   # the reason word of the root step when there is no signer (board_ops.resolve_signer)
+    pem: str = ""
 
     @property
     def version(self) -> str:
@@ -537,7 +628,11 @@ _STATUS_GATE = "\n".join([
     f'[ -n "$llmcf_me" ] && llmcf_rootowned "$0" && llmcf_rootowned {KEYS_DIR}/"$llmcf_me" && '
     f'llmcf_rootowned {KEYS_DIR} && llmcf_keys=root',
     "llmcf_sig=no; llmcf_trusted_signers && llmcf_sig=yes",
-    'echo "restricted=yes gate=$LLMCF_GATE_VERSION keys=$llmcf_keys signing=$llmcf_sig"',
+    # the board's key tier (remote/key_tiers.py): root-owned key line (root), root-owned gate with the line in the
+    # account's own authorized_keys (dropbear), or the home gate of a board without sudo (home)
+    'llmcf_tier=home; if [ "$llmcf_keys" = root ]; then llmcf_tier=root; elif [ -z "$LLMCF_HOME_GATE" ]; then '
+    "llmcf_tier=dropbear; fi",
+    'echo "restricted=yes gate=$LLMCF_GATE_VERSION keys=$llmcf_keys signing=$llmcf_sig tier=$llmcf_tier"',
 ])
 define("status", (), 'echo "restricted=no gate=none"', gate_render=lambda *v, rest="": _STATUS_GATE,
        doc="whether the framework's key on the board runs only the gate, its version, whether its key line and the "
@@ -546,27 +641,68 @@ define("status", (), 'echo "restricted=no gate=none"', gate_render=lambda *v, re
 
 # --- pairing: the gate and the restricted key line --------------------------------------------------------------------
 
+def _home_key_line_sh(key: str) -> list:
+    """sh lines that put the framework key's restricted line ($line, the key's blob @BLOB@) into the account's own
+    ~/.ssh/authorized_keys in place of an earlier line of that key, every other line as it was; on failure they answer
+    `<key>=unavailable reason=read-only` and end (nothing of the file changed)."""
+    return [
+        'keys="$HOME/.ssh/authorized_keys"; new="$keys.llmcf.$$"',
+        f'mkdir -p "$HOME/.ssh" 2>/dev/null || {{ echo "{key}=unavailable reason=read-only"; exit 0; }}',
+        'if ! { touch "$keys" && cp -p "$keys" "$new" && '
+        "awk -v blob=@BLOB@ -v line=\"$line\" 'BEGIN { done = 0 } { hit = 0; n = split($0, f, \" \"); "
+        "for (i = 1; i <= n; i++) if (f[i] == blob) hit = 1; if (hit) { if (!done) print line; done = 1; next } print } "
+        "END { if (!done) print line }' \"$keys\" > \"$new\" && mv -f \"$new\" \"$keys\"; } 2>/dev/null; then "
+        f'rm -f "$new" 2>/dev/null; echo "{key}=unavailable reason=read-only"; exit 0; fi',
+    ]
+
+
+def _selftest_sh(key: str) -> list:
+    """sh lines that write the framework's signing key ($LLMCF_SIGNERS, $LLMCF_PEM) and its self-test signature
+    ($LLMCF_SELFTEST of SELFTEST_DATA) into the private folder $llmcf_d and check it with the board's own tools
+    (llmcf_verify: ssh-keygen, else openssl), before anything is installed; `<key>=unavailable reason=old-ssh` or
+    `no-verifier` when this board can check the framework's signature with neither."""
+    return [
+        'printf "%s\\n" "$LLMCF_SIGNERS" > "$llmcf_d/signers"',
+        'printf "%s" "${LLMCF_PEM-}" > "$llmcf_d/pem"',
+        'printf "llmcf-board-selftest\\n" > "$llmcf_d/selftest"',
+        'printf "%s" "$LLMCF_SELFTEST" > "$llmcf_d/selftest.sig"',
+        'llmcf_verify "$llmcf_d/selftest" "$llmcf_d/selftest.sig" "$llmcf_d/signers" "$llmcf_d/pem" || '
+        f'{{ [ "$llmcf_why" != bad ] || llmcf_why=old-ssh; echo "{key}=unavailable reason=$llmcf_why"; exit 0; }}',
+    ]
+
+
 GATE_INSTALL = "\n".join([
-    # stdin: the gate program. Answers gate=installed, or gate=unavailable reason=WORD (nothing of the person's
-    # authorized_keys changed then).
+    # stdin: the gate program; LLMCF_SIGNERS, LLMCF_PEM, LLMCF_SELFTEST before it (a pairing that gives the
+    # framework's signing key: the home gate of a board without sudo, the weaker tier the person agreed to). Answers
+    # gate=installed, or gate=unavailable reason=WORD (nothing of the person's authorized_keys changed then).
     "set -u",
     "umask 077",
+    signed_sh(),
     'llmcf_text=$(cat; echo x); llmcf_text=${llmcf_text%x}',
     '[ -x /bin/sh ] || { echo "gate=unavailable reason=no-sh"; exit 0; }',
     'case $HOME in /*) ;; *) echo "gate=unavailable reason=home"; exit 0 ;; esac',
     'case $HOME in *[!A-Za-z0-9._/-]*) echo "gate=unavailable reason=home"; exit 0 ;; esac',
-    f'cfg="$HOME/{GATE_REL.rsplit("/", 1)[0]}"; g="$HOME/{GATE_REL}"; keys="$HOME/.ssh/authorized_keys"',
+    'llmcf_d=$(mktemp -d "${TMPDIR:-/tmp}/llmcf-home.XXXXXXXX") || { echo "gate=unavailable reason=tmp"; exit 0; }',
+    "trap 'rm -rf \"$llmcf_d\"' EXIT",
+    'if [ -n "${LLMCF_SIGNERS-}" ]; then',
+    *("  " + line for line in _selftest_sh("gate")),
+    "fi",
+    f'cfg="$HOME/{GATE_REL.rsplit("/", 1)[0]}"; g="$HOME/{GATE_REL}"',
     'if ! { mkdir -p "$cfg" "$HOME/.ssh" && printf "%s" "$llmcf_text" > "$g.new" && chmod 0500 "$g.new" && '
     'mv -f "$g.new" "$g"; } 2>/dev/null; then rm -f "$g.new" 2>/dev/null; '
     'echo "gate=unavailable reason=read-only"; exit 0; fi',
     '/bin/sh -n "$g" 2>/dev/null || { echo "gate=unavailable reason=sh"; exit 0; }',
+    'if [ -n "${LLMCF_SIGNERS-}" ]; then',
+    f'  s="$HOME/{HOME_SIGNING_REL}"',
+    '  if ! { mkdir -p "$s" && cp "$llmcf_d/signers" "$s/allowed_signers.new" && cp "$llmcf_d/pem" '
+    '"$s/signing_key.pem.new" && chmod 0644 "$s/allowed_signers.new" "$s/signing_key.pem.new" && '
+    'mv -f "$s/allowed_signers.new" "$s/allowed_signers" && mv -f "$s/signing_key.pem.new" "$s/signing_key.pem"; } '
+    '2>/dev/null; then echo "gate=unavailable reason=read-only"; exit 0; fi',
+    # the gate trusts this signing key only while nobody but the account can change it, up to its home folder
+    '  LLMCF_HOME_GATE=1 llmcf_trusted_signers || { echo "gate=unavailable reason=home-writable"; exit 0; }',
+    "fi",
     'line="command=\\"/bin/sh $g\\",' + ",".join(KEY_OPTIONS) + ' @TYPE@ @BLOB@ @COMMENT@"',
-    'new="$keys.llmcf.$$"',
-    'if ! { touch "$keys" && cp -p "$keys" "$new" && '
-    "awk -v blob=@BLOB@ -v line=\"$line\" 'BEGIN { done = 0 } { hit = 0; n = split($0, f, \" \"); "
-    "for (i = 1; i <= n; i++) if (f[i] == blob) hit = 1; if (hit) { if (!done) print line; done = 1; next } print } "
-    "END { if (!done) print line }' \"$keys\" > \"$new\" && mv -f \"$new\" \"$keys\"; } 2>/dev/null; then "
-    'rm -f "$new" 2>/dev/null; echo "gate=unavailable reason=read-only"; exit 0; fi',
+    *_home_key_line_sh("gate"),
     'echo "gate=installed"',
 ])
 define("gate-install", ("word", "b64", "comment"),
@@ -631,7 +767,17 @@ SETUP_REASONS = {
                        "helper) cannot be opened there",
     "no-sshd": "the board's SSH server is not OpenSSH (sshd), which a root-owned key line needs (Match User)",
     "no-keygen": "the board has no ssh-keygen to check the framework's signature",
-    "old-ssh": "the board's ssh-keygen cannot check the framework's signature (OpenSSH 8.1 or later needed)",
+    "old-ssh": "the board's ssh-keygen cannot check the framework's signature (OpenSSH 8.1 or later needed) and "
+               "openssl (1.1.1 or later) could not check it either",
+    "no-verifier": "the board can check the framework's signature neither with ssh-keygen (OpenSSH 8.1 or later) nor "
+                   "with openssl (1.1.1 or later); install one of them on the board, or switch it to OpenSSH",
+    "home-writable": "the account's home folder or its .config folder can be written by others, so a signing key "
+                     "kept there could be changed",
+    "not-root-owned": "llmcf's files were installed, but a folder on their way is not root-owned or can be written "
+                      "by others; the framework's key was not installed",
+    "enterprise": "this framework runs in enterprise mode, which takes only OpenSSH with sudo (the root-owned key "
+                  "line): the weaker Dropbear tier and the home gate are refused as too insecure there",
+    "declined": "you declined every way of putting the framework's key on this board; it keeps using your password",
     "sshd-config": "sshd did not accept its configuration with llmcf's Match block (sshd -t); nothing was changed",
     "sshd-match": "sshd's configuration already names another key file for this account; nothing was changed",
     "reload": "sshd could not be reloaded; its earlier configuration was put back",
@@ -649,15 +795,29 @@ SETUP_REASONS = {
 }
 
 
-def install_gate(run: Callable[..., object], public_line: str, gate_text: str) -> Tuple[bool, str]:
+def _assignments(bundle: "GateBundle", **more: str) -> str:
+    """The plain assignments of the framework's signing key in front of a setup step (shlex-quoted values)."""
+    values = {**more, "LLMCF_SIGNERS": bundle.signers, "LLMCF_PEM": bundle.pem, "LLMCF_SELFTEST": bundle.selftest}
+    return "".join(f"{k}={shlex.quote(v)}\n" for k, v in values.items())
+
+
+def install_gate(run: Callable[..., object], public_line: str, gate_text: str,
+                 bundle: Optional["GateBundle"] = None) -> Tuple[bool, str]:
     """Pairing's setup step gate-install over `run` (a session's or a transport's run(script, stdin=...)): the gate
-    program and the framework key's restricted authorized_keys line. (True, "") when installed, else (False, the
-    reason word of SETUP_REASONS; "gated": the login was with the framework key, which already runs only the gate);
-    the person's other lines in authorized_keys stay as they were."""
+    program and the framework key's restricted authorized_keys line in the account's own home. With `bundle` (the
+    home gate of a board without sudo, the weaker tier the person agreed to: key_tiers.TIER_HOME) also the framework's
+    signing key in HOME_SIGNING_REL, checked first with the board's own tools (ssh-keygen, else openssl), so the gate
+    runs only what the framework signed. (True, "") when installed, else (False, the reason word of SETUP_REASONS;
+    "gated": the login was with the framework key, which already runs only the gate); the person's other lines in
+    authorized_keys stay as they were."""
     parts = (public_line or "").split(" ")
     if len(parts) not in (2, 3):
         raise GateRefused("the framework's public key line is not a plain SSH public key")
     call = script("gate-install", parts[0], parts[1], parts[2] if len(parts) == 3 else GATE_NAME)
+    if bundle is not None:   # the home gate of a board without sudo: the gate checks the framework's signature too
+        if not bundle.signers or not bundle.selftest:
+            return False, bundle.missing or "no-signer"
+        call = GateScript(_assignments(bundle) + str(call), call.verb, call.args)
     try:
         result = run(call, stdin=[gate_text.encode("utf-8")])
     except (OSError, EOFError):
@@ -702,6 +862,11 @@ class BoardPaths:
     signers_dir: str = SIGNERS_DIR
     signers: str = SIGNERS
     sshd_config: str = SSHD_CONFIG
+    root_uid: int = ROOT_UID   # the owner the Dropbear step checks its files for (the tests' own user)
+
+    @property
+    def signers_pem(self) -> str:
+        return self.signers.rsplit("/", 1)[0] + "/signing_key.pem"
 
 
 def match_block(user: str, keys_dir: str = KEYS_DIR) -> str:
@@ -738,17 +903,13 @@ def root_board_script(paths: BoardPaths = BoardPaths()) -> str:
         "trap 'rm -rf \"$llmcf_d\"' EXIT",
         'cat > "$llmcf_d/gate"',
         'printf "%s\\n" "$LLMCF_KEYLINE" > "$llmcf_d/key"',
-        'printf "%s\\n" "$LLMCF_SIGNERS" > "$llmcf_d/signers"',
-        'printf "llmcf-board-selftest\\n" > "$llmcf_d/selftest"',
-        'printf "%s" "$LLMCF_SELFTEST" > "$llmcf_d/selftest.sig"',
         'asroot() { if [ -n "$llmcf_pw" ]; then printf "%s\\n" "$llmcf_pw" | sudo -S -p "" "$@"; '
         'else sudo -n "$@"; fi; }',
         "command -v sudo >/dev/null 2>&1 || no no-sudo",
         'llmcf_sshd=$(command -v sshd 2>/dev/null) || llmcf_sshd=/usr/sbin/sshd',
         '[ -x "$llmcf_sshd" ] || no no-sshd',
-        "command -v ssh-keygen >/dev/null 2>&1 || no no-keygen",
-        f'ssh-keygen -Y verify -f "$llmcf_d/signers" -I {SIGN_PRINCIPAL} -n {SIGN_NAMESPACE} -s "$llmcf_d/selftest.sig" '
-        '< "$llmcf_d/selftest" >/dev/null 2>&1 || no old-ssh',
+        verify_sh(),
+        *_selftest_sh("root-board"),
         '/bin/sh -n "$llmcf_d/gate" 2>/dev/null || no sh',
         f'asroot cat {q.sshd_config} > "$llmcf_d/sshd_config" 2>/dev/null || no sudo',
         f"awk -v b=\"{MATCH_BEGIN} $llmcf_u \" -v e=\"{MATCH_END} $llmcf_u\" "
@@ -764,6 +925,7 @@ def root_board_script(paths: BoardPaths = BoardPaths()) -> str:
         "|| no sudo",
         f'asroot install -m 0755 -o root -g root "$llmcf_d/gate" {q.gate} >/dev/null 2>&1 || no sudo',
         f'asroot install -m 0644 -o root -g root "$llmcf_d/signers" {q.signers} >/dev/null 2>&1 || no sudo',
+        f'asroot install -m 0644 -o root -g root "$llmcf_d/pem" {q.signers_pem} >/dev/null 2>&1 || no sudo',
         f'asroot install -m 0644 -o root -g root "$llmcf_d/key" {q.keys_dir}/"$llmcf_u" >/dev/null 2>&1 || no sudo',
         f"asroot cp -p {q.sshd_config} {q.sshd_config}.llmcf-backup >/dev/null 2>&1 || no sudo",
         f'asroot install -m 0644 -o root -g root "$llmcf_d/sshd_config.new" {q.sshd_config} >/dev/null 2>&1 || no sudo',
@@ -803,8 +965,7 @@ def install_root_board(run: Callable[..., object], public_line: str, bundle: "Ga
         return False, bundle.missing or "no-signer", ""
     line = root_key_line(" ".join(parts), (paths or BoardPaths()).gate)
     body = root_board_script(paths).replace("@BLOB@", parts[1]) if paths else str(script("root-board", parts[1]))
-    text = "".join(f"{k}={shlex.quote(v)}\n" for k, v in (("LLMCF_KEYLINE", line), ("LLMCF_SIGNERS", bundle.signers),
-                                                          ("LLMCF_SELFTEST", bundle.selftest))) + body
+    text = _assignments(bundle, LLMCF_KEYLINE=line) + body
     call = GateScript(text, "root-board", (parts[1],))
     try:
         result = run(call, stdin=[(password + "\n").encode("utf-8"), bundle.gate.encode("utf-8")])
@@ -825,7 +986,187 @@ def install_root_board(run: Callable[..., object], public_line: str, bundle: "Ga
     return True, "", home if home in ("removed", "kept", "none") else "none"
 
 
-__all__ = ["BoardPaths", "INSTALL_ROOT_REL", "KEYS_DIR", "LIBEXEC_DIR", "ROOT_GATE", "SELFTEST_DATA", "SIGNERS",
+# --- the Dropbear tier: root-owned gate and signing key, the key line in the account's own authorized_keys -----------
+
+# The key-line options of Dropbear's authorized_keys as its manual (dropbear(8), "Authorized Keys") lists them. Dropbear
+# refuses a line that holds an option it does not know, so the line in the account's own authorized_keys keeps to the
+# ones every Dropbear release since its first key-option support knows (command= and the four no-* options);
+# permitopen=, restrict and no-touch-required came in later releases only. OpenSSH's no-user-rc is not one of them.
+DROPBEAR_OPTIONS = ("command", "no-port-forwarding", "no-agent-forwarding", "no-X11-forwarding", "no-pty")
+DROPBEAR_LATER_OPTIONS = ("permitopen", "restrict", "no-touch-required")
+
+
+def dropbear_board_script(paths: BoardPaths = BoardPaths()) -> str:
+    """The Dropbear tier's setup step (dropbear-board, run once by an unrestricted login of the board account with
+    sudo; DECISIONS 2026-10-31, Dropbear tiers): stdin is a line with the person's one-time password (empty: sudo -n),
+    then the gate program; LLMCF_SIGNERS, LLMCF_PEM and LLMCF_SELFTEST come before it as plain assignments. It checks
+    first (the account, sudo, the board's own tools check the self-test signature: ssh-keygen, else openssl; the gate
+    reads), then installs root:root the gate (0755) at the root-owned place of the OpenSSH tier and the signing key
+    (0644, folders 0755), checks them as the gate will (owner root, no group or other write, up the folder chain) and
+    only then writes the framework key's line, with the gate as forced command and only options Dropbear knows, into
+    the account's own ~/.ssh/authorized_keys (as the account; Dropbear reads no other file). One step weaker than the
+    OpenSSH tier: the account itself could edit that line; a stolen key cannot, because no gate operation writes to
+    ~/.ssh. Answers dropbear-board=installed, or dropbear-board=unavailable reason=WORD."""
+    q = paths
+    lib_parent = q.libexec.rsplit("/", 1)[0] or "/"
+    sig_parent = q.signers_dir.rsplit("/", 1)[0] or "/"
+    return "\n".join([
+        "set -u",
+        "umask 077",
+        'IFS= read -r llmcf_pw || llmcf_pw=""',
+        'no() { echo "dropbear-board=unavailable reason=$1"; exit 0; }',
+        'llmcf_u=$(id -un 2>/dev/null) || no account',
+        'case $llmcf_u in ""|root|-*|*[!A-Za-z0-9._-]*) no account ;; esac',
+        '[ "$(id -u)" != 0 ] || no account',
+        'case $HOME in /*) ;; *) no home ;; esac',
+        'case $HOME in *[!A-Za-z0-9._/-]*) no home ;; esac',
+        '[ -n "${LLMCF_SIGNERS-}" ] || no no-signer',
+        'llmcf_d=$(mktemp -d "${TMPDIR:-/tmp}/llmcf-root.XXXXXXXX") || no tmp',
+        "trap 'rm -rf \"$llmcf_d\"' EXIT",
+        'cat > "$llmcf_d/gate"',
+        'asroot() { if [ -n "$llmcf_pw" ]; then printf "%s\\n" "$llmcf_pw" | sudo -S -p "" "$@"; '
+        'else sudo -n "$@"; fi; }',
+        "command -v sudo >/dev/null 2>&1 || no no-sudo",
+        signed_sh(q.signers, q.root_uid),
+        *_selftest_sh("dropbear-board"),
+        '/bin/sh -n "$llmcf_d/gate" 2>/dev/null || no sh',
+        f"asroot install -d -m 0755 -o root -g root {q.libexec} {q.signers_dir} >/dev/null 2>&1 || no sudo",
+        f'asroot install -m 0755 -o root -g root "$llmcf_d/gate" {q.gate} >/dev/null 2>&1 || no sudo',
+        f'asroot install -m 0644 -o root -g root "$llmcf_d/signers" {q.signers} >/dev/null 2>&1 || no sudo',
+        f'asroot install -m 0644 -o root -g root "$llmcf_d/pem" {q.signers_pem} >/dev/null 2>&1 || no sudo',
+        f"for p in {q.gate} {q.libexec} {lib_parent} {q.signers} {q.signers_pem} {q.signers_dir} {sig_parent}; do",
+        '  llmcf_rootowned "$p" || no not-root-owned',
+        "done",
+        'line="command=\\"/bin/sh ' + q.gate + '\\",' + ",".join(KEY_OPTIONS) + ' @TYPE@ @BLOB@ @COMMENT@"',
+        *_home_key_line_sh("dropbear-board"),
+        'echo "dropbear-board=installed"',
+    ])
+
+
+def _dropbear_render(t: str, b: str, c: str, rest: str = "", paths: Optional[BoardPaths] = None) -> str:
+    return dropbear_board_script(paths or BoardPaths()).replace("@TYPE@", t).replace("@BLOB@", b).replace(
+        "@COMMENT@", c)
+
+
+define("dropbear-board", ("word", "b64", "comment"), _dropbear_render, gate=False,
+       doc="pairing's Dropbear tier: the gate and the framework's signing key root-owned (sudo once), the key line "
+           "with Dropbear's options in the account's own authorized_keys")
+
+
+def install_dropbear_board(run: Callable[..., object], public_line: str, bundle: "GateBundle", password: str = "", *,
+                           paths: Optional[BoardPaths] = None) -> Tuple[bool, str]:
+    """The Dropbear tier's setup step over `run` (an unrestricted login of the board account) with `sudo -n`, or with
+    the person's one-time `password` for `sudo -S` (on stdin, never on a command line). (True, "") when installed,
+    else (False, the reason word of SETUP_REASONS)."""
+    parts = (public_line or "").split(" ")
+    if len(parts) not in (2, 3) or not KINDS["b64"].check(parts[1]):
+        raise GateRefused("the framework's public key line is not a plain SSH public key")
+    if "\n" in password or "\r" in password:
+        return False, "sudo"
+    if not bundle.signers or not bundle.selftest:
+        return False, bundle.missing or "no-signer"
+    comment = parts[2] if len(parts) == 3 else GATE_NAME
+    body = (_dropbear_render(parts[0], parts[1], comment, paths=paths) if paths
+            else str(script("dropbear-board", parts[0], parts[1], comment)))
+    call = GateScript(_assignments(bundle) + body, "dropbear-board", (parts[0], parts[1], comment))
+    try:
+        result = run(call, stdin=[(password + "\n").encode("utf-8"), bundle.gate.encode("utf-8")])
+    except (OSError, EOFError):
+        check = run(script("status"))
+        if is_refusal(getattr(check, "status", 0), getattr(check, "err", "")):
+            return False, "gated"
+        raise
+    if is_refusal(getattr(result, "status", 0), getattr(result, "err", "")):
+        return False, "gated"
+    return _answer(getattr(result, "out", ""), "dropbear-board")
+
+
+# --- the facts a pairing reads to offer the key tiers (remote/key_tiers.py) -----------------------------------------
+
+TIER_FACTS = "\n".join([
+    # stdin: a line with the person's one-time password (empty: sudo -n only). LLMCF_SIGNERS, LLMCF_PEM and
+    # LLMCF_SELFTEST may come before it (then the board's own tools check the framework's self-test signature).
+    # Answers fixed words only (key=value), nothing of the board's own text.
+    "set -u",
+    "umask 077",
+    'IFS= read -r llmcf_pw || llmcf_pw=""',
+    "llmcf_o=no; llmcf_db=no",
+    "for llmcf_p in /proc/[0-9]*; do",
+    '  read -r llmcf_c < "$llmcf_p/comm" 2>/dev/null || continue',
+    "  case $llmcf_c in sshd) llmcf_o=yes ;; dropbear) llmcf_db=yes ;; esac",
+    "done",
+    'case $llmcf_o$llmcf_db in yesyes) echo running=both ;; yesno) echo running=openssh ;; '
+    "noyes) echo running=dropbear ;; *) echo running=none ;; esac",
+    "if command -v sshd >/dev/null 2>&1 || [ -x /usr/sbin/sshd ]; then echo openssh=yes; else echo openssh=no; fi",
+    "if command -v dropbear >/dev/null 2>&1 || [ -x /usr/sbin/dropbear ]; then echo dropbear=yes; else echo dropbear=no; fi",
+    "if ! command -v sudo >/dev/null 2>&1; then echo sudo=none",
+    "elif sudo -n true >/dev/null 2>&1; then echo sudo=nopass",
+    'elif [ -n "$llmcf_pw" ] && printf "%s\\n" "$llmcf_pw" | sudo -S -p "" true >/dev/null 2>&1; then echo sudo=password',
+    "else echo sudo=refused; fi",
+    "if command -v ssh-keygen >/dev/null 2>&1; then echo keygen=yes; else echo keygen=none; fi",
+    "if command -v openssl >/dev/null 2>&1; then echo openssl=yes; else echo openssl=none; fi",
+    verify_sh(),
+    'if [ -n "${LLMCF_SIGNERS-}" ] && llmcf_d=$(mktemp -d "${TMPDIR:-/tmp}/llmcf-tier.XXXXXXXX"); then',
+    '  printf "%s\\n" "$LLMCF_SIGNERS" > "$llmcf_d/signers"; printf "%s" "${LLMCF_PEM-}" > "$llmcf_d/pem"',
+    '  printf "llmcf-board-selftest\\n" > "$llmcf_d/selftest"; printf "%s" "$LLMCF_SELFTEST" > "$llmcf_d/selftest.sig"',
+    '  if llmcf_verify "$llmcf_d/selftest" "$llmcf_d/selftest.sig" "$llmcf_d/signers" "$llmcf_d/pem"; then '
+    'echo verifier=yes; elif [ "$llmcf_why" = no-verifier ]; then echo verifier=no-verifier; '
+    "else echo verifier=old-ssh; fi",
+    '  rm -rf "$llmcf_d"',
+    "fi",
+    # the system family as install.sh reads it (ID, then ID_LIKE), and DietPi on its own
+    "llmcf_id=; llmcf_like=",
+    "if [ -r /etc/os-release ]; then",
+    "  llmcf_id=$(sed -n 's/^ID=//p' /etc/os-release | tr -d '\"' | tr 'A-Z' 'a-z')",
+    "  llmcf_like=$(sed -n 's/^ID_LIKE=//p' /etc/os-release | tr -d '\"' | tr 'A-Z' 'a-z')",
+    "fi",
+    "llmcf_f=unknown",
+    "for llmcf_w in $llmcf_id $llmcf_like; do",
+    "  case $llmcf_w in",
+    "    debian|ubuntu|raspbian|dietpi|armbian|linuxmint|pop) llmcf_f=debian ;;",
+    "    fedora|rhel|centos|rocky|almalinux|amzn|ol) llmcf_f=fedora ;;",
+    "    opensuse*|sles|suse) llmcf_f=suse ;;",
+    "    arch|manjaro|endeavouros) llmcf_f=arch ;;",
+    "    alpine|postmarketos) llmcf_f=alpine ;;",
+    "    *) continue ;;",
+    "  esac",
+    "  break",
+    "done",
+    'echo "family=$llmcf_f"',
+    "if [ -d /boot/dietpi ] || [ -f /boot/dietpi/.version ]; then echo dietpi=yes; else echo dietpi=no; fi",
+    "for llmcf_m in apt-get dnf zypper pacman apk dietpi-software; do",
+    '  if command -v "$llmcf_m" >/dev/null 2>&1 || [ -x "/boot/dietpi/$llmcf_m" ]; then echo "manager=$llmcf_m"; fi',
+    "done",
+    "if [ -d /run/systemd/system ]; then echo init=systemd; elif command -v rc-service >/dev/null 2>&1; then "
+    "echo init=openrc; else echo init=other; fi",
+    'llmcf_port=${SSH_CONNECTION##* }',
+    'case $llmcf_port in ""|*[!0-9]*) ;; *) echo "port=$llmcf_port" ;; esac',
+])
+define("tier-facts", (), lambda rest="": TIER_FACTS, gate=False,
+       doc="pairing: which SSH server runs, sudo, the board's tools for the framework's signature, the system family")
+
+
+def read_tier_facts(run: Callable[..., object], bundle: Optional["GateBundle"] = None,
+                    password: str = "") -> str:
+    """The answer of tier-facts over `run` (an unrestricted login; the person's one-time `password` only tests
+    `sudo -S true`, on stdin): fixed key=value words, read by key_tiers.TierFacts.parse. "" when it could not run."""
+    if "\n" in password or "\r" in password:
+        password = ""
+    call = script("tier-facts")
+    if bundle is not None and bundle.signers and bundle.selftest:
+        call = GateScript(_assignments(bundle) + str(call), call.verb, call.args)
+    try:
+        result = run(call, stdin=[(password + "\n").encode("utf-8")])
+    except Exception:  # noqa: BLE001 - no facts: the offer names only what is always possible
+        return ""
+    if is_refusal(getattr(result, "status", 0), getattr(result, "err", "")):
+        return ""
+    return getattr(result, "out", "") or ""
+
+
+__all__ = ["DROPBEAR_OPTIONS", "DROPBEAR_LATER_OPTIONS", "HOME_SIGNING_REL", "SIGNERS_PEM", "SSHSIG_ED25519_SIZE",
+           "dropbear_board_script", "install_dropbear_board", "read_tier_facts", "sshsig_prefix", "verify_sh"]
+__all__ += ["BoardPaths", "INSTALL_ROOT_REL", "KEYS_DIR", "LIBEXEC_DIR", "ROOT_GATE", "SELFTEST_DATA", "SIGNERS",
            "SIGN_NAMESPACE", "SIGN_PRINCIPAL", "install_root_board", "match_block", "root_board_script", "signed_sh",
            "GATE_NAME", "GATE_REL", "GateBundle", "GateCall", "GateRefused", "GateScript", "JOB_LOG", "JOB_STARTED",
            "JOB_STATUS", "KEY_OPTIONS", "KINDS", "Kind", "OPERATIONS", "Operation", "PLACE_HOME_REL",

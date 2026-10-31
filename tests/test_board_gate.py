@@ -118,7 +118,11 @@ def test_the_gate_refuses_with_one_plain_line(board, line, why):
 def test_the_gate_runs_an_operation_with_its_checked_arguments(board):
     root = f"{board.home}/{gate.PLACE_HOME_REL}/llama.cpp"
     assert board("llmcf-gate status").out.strip() == (f"restricted=yes gate={gate.gate_version(gate.render_gate())} "
-                                                      "keys=home signing=no")
+                                                      "keys=home signing=no tier="
+                                                      # a gate that is not root-owned is the home gate (the test's
+                                                      # gate is root-owned only when the suite runs as root)
+                                                      + ("dropbear" if getattr(os, "getuid", lambda: 1)() == 0
+                                                         else "home"))
     made = board("llmcf-gate mkprivate " + root + " .bench")
     assert made.status == 0 and made.out.startswith(root + "/.bench.")
     folder = made.out.strip()

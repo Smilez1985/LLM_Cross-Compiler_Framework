@@ -604,6 +604,14 @@ class BoardSigner:
     def allowed_signers(self) -> str:
         return f'{BOARD_SIGNER} namespaces="{BOARD_NAMESPACE}" {ssh_public_line(self.public_key, "")}'
 
+    @property
+    def public_pem(self) -> str:
+        """The same public key as a PEM SubjectPublicKeyInfo: what a board whose ssh-keygen cannot check SSHSIG
+        signatures checks them with, through openssl (orchestrator/remote/gate.py verify_sh)."""
+        from cryptography.hazmat.primitives import serialization
+        return self.public_key.public_bytes(serialization.Encoding.PEM,
+                                            serialization.PublicFormat.SubjectPublicKeyInfo).decode("ascii")
+
     def sign_bytes(self, data: bytes) -> str:
         return sshsig_sign(data, self.private_key)
 

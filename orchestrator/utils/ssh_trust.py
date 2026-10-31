@@ -174,29 +174,77 @@ def connect(host: str, user: str, state_dir: Path, port: int = 22, password: Opt
 
 class GateUnavailable(HostKeyError):
     """The board cannot take llmcf's command gate (`reason`, a word of gate.SETUP_REASONS): the framework's key was
-    not installed, nothing of the board's authorized_keys changed."""
+    not installed, nothing of the board's authorized_keys changed. `switch`: the reason is one of the switch to OpenSSH
+    (remote/openssh_switch.py SWITCH_REASONS), which stopped after the person's yes to its plan: its own text then, and
+    no claim that nothing on the board changed (the switch may have installed packages or written its port file)."""
 
-    def __init__(self, reason: str):
+    def __init__(self, reason: str, offer=None, *, switch: bool = False):
         from orchestrator.remote.gate import SETUP_REASONS
         self.reason = reason
-        super().__init__(f"This board cannot take llmcf's command gate ({SETUP_REASONS.get(reason, reason)}), so the "
-                         "framework's key was not installed and nothing on the board changed. The framework never "
-                         "installs an unrestricted key on its own: fix that on the board and pair again, or allow an "
-                         "unrestricted key for this board when you are asked.")
+        self.offer = offer   # remote/key_tiers.py TierOffer: the ways the person may choose instead (None: none read)
+        ways = ""
+        if offer is not None and len(offer.choices) > 1:
+            ways = (" You can choose another way when you pair the board again with its password: "
+                    + "; ".join(line.split(". ", 1)[1] for line in offer.lines() if line[:1].isdigit()) + ".")
+        if switch:
+            from orchestrator.remote.openssh_switch import SWITCH_REASONS
+            why = SWITCH_REASONS.get(reason) or SETUP_REASONS.get(reason, reason)
+            super().__init__(f"The switch of this board to OpenSSH stopped ({why}), so the framework's key was not "
+                             "installed. Dropbear and your current way in stay as they were; what the switch had "
+                             "installed already stays on the board." + ways)
+            return
+        super().__init__(f"This board cannot take llmcf's command gate with the root-owned key line "
+                         f"({SETUP_REASONS.get(reason, reason)}), so the framework's key was not installed and nothing "
+                         "on the board changed. The framework never installs a weaker key on its own: fix that on the "
+                         "board and pair again, or choose another way when you are asked." + ways)
+
+
+def _tier_offer(client, bundle, password: str, reason: str, mode: str):
+    """The person's choices for a board whose root step failed with `reason` (remote/key_tiers.py offer), read with
+    the gate's tier-facts over the pairing's login; None when nothing could be read."""
+    from orchestrator.remote import gate, key_tiers
+    try:
+        text = gate.read_tier_facts(transport.ParamikoTransport(client).run, bundle, password)
+        banner = getattr(client.get_transport(), "remote_version", "") if hasattr(client, "get_transport") else ""
+    except Exception:  # noqa: BLE001 - no facts: the person reads the plain reason
+        return None
+    return key_tiers.offer(reason, key_tiers.TierFacts.parse(text, banner if isinstance(banner, str) else ""), mode)
 
 
 def install_public_key(client, public_line: str, bundle=None, *, allow_unrestricted: bool = False,
-                       password: str = "") -> str:
+                       password: str = "", tier: str = "", mode: str = "private") -> str:
     """Installs the framework key on the board over `client` (a session the person logged in to with a one-time
     password). With `bundle` (orchestrator/remote/gate.py GateBundle, from runtime/device/board_ops.bundle()): llmcf's
     command gate and the key's restricted line (command= the gate, no-pty, no-port-forwarding, no-agent-forwarding,
-    no-X11-forwarding), the person's other lines unchanged; "restricted". A board that cannot take the gate raises
-    GateUnavailable, unless the person allowed an unrestricted key (`allow_unrestricted`): then the plain line as
-    before; "unrestricted". Without a bundle the plain line (the earlier behaviour, for a caller that gives none).
-    The command is fixed; its only values are the framework's own public key line (checked against PUBLIC_LINE) and
-    the gate program on stdin, so nothing from a file or a device reaches the device's shell as code."""
+    no-X11-forwarding), the person's other lines unchanged.
+
+    `tier` is the person's choice (remote/key_tiers.py): "" or "root" the root step (root-owned key line;
+    "restricted"); "dropbear" the Dropbear tier (gate.install_dropbear_board; "dropbear"); "home" the home gate of a
+    board without sudo (gate.install_gate with the signing key; "home"). The weaker two are refused in enterprise
+    `mode` (GateUnavailable "enterprise"). A board whose root step fails raises GateUnavailable with the person's
+    choices (its `offer`); the framework never picks a weaker tier itself. `allow_unrestricted` (deprecated: nothing in
+    the framework passes it, the tier choice replaced it) still installs the plain line instead; "unrestricted".
+    Without a bundle the plain line (the earlier behaviour, for a caller that gives none). The command is fixed; its
+    only values are the framework's own public key line (checked against PUBLIC_LINE), the signing key and the gate
+    program on stdin, so nothing from a file or a device reaches the device's shell as code."""
     if not isinstance(public_line, str) or not PUBLIC_LINE.fullmatch(public_line):
         raise HostKeyError("The framework's public key line is not a plain SSH public key; nothing was installed.")
+    if bundle is not None and tier in ("dropbear", "home"):
+        from orchestrator.remote import gate, key_tiers
+        if not key_tiers.allowed(tier, mode):
+            raise GateUnavailable("enterprise")
+        run = transport.ParamikoTransport(client).run
+        if tier == "dropbear":
+            ok, reason = gate.install_dropbear_board(run, public_line, bundle, password)
+        else:
+            ok, reason = gate.install_gate(run, public_line, bundle.gate, bundle)
+        if ok:
+            return tier
+        if reason == "gated":
+            return "restricted"
+        raise GateUnavailable(reason)
+    if tier not in ("", "root"):
+        raise HostKeyError(f"{tier!r} is not a tier the framework installs; nothing was installed.")
     if bundle is not None:
         # the root step (DECISIONS 2026-10-31): the gate, the key's restricted line and the framework's signing key in
         # root-owned places the board account cannot change, with the person's one-time `password` for sudo -S (or
@@ -208,7 +256,8 @@ def install_public_key(client, public_line: str, bundle=None, *, allow_unrestric
         if ok or reason == "gated":   # "gated": the login was with the framework key, which runs only the gate
             return "restricted"
         if not allow_unrestricted:
-            raise GateUnavailable(reason)
+            raise GateUnavailable(reason, _tier_offer(client, bundle, password, reason, mode)
+                                  if reason not in ("no-signer", "no-signer-store", "account") else None)
     _install_plain(client, public_line)
     return "unrestricted"
 

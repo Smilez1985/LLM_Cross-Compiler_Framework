@@ -148,7 +148,8 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
                 store: Any = None, record: bool = True, via: str = "cli", actor: str = "", audit: Any = None,
                 audit_factory: Optional[Callable[[], Any]] = None,
                 on_client: Optional[Callable[[Any], None]] = None, cancel: Any = None,
-                on_event: Optional[Callable[[Any], None]] = None, signer: Any = None) -> DeviceScan:
+                on_event: Optional[Callable[[Any], None]] = None, signer: Any = None, chooser: Any = None,
+                mode: str = "private") -> DeviceScan:
     """Probes a board whose host key the person trusted (the caller asked; `key` is that key, or None to take the key
     of the session itself): logs in (a password only the first time, to install the framework's SSH key; never
     stored), runs the hardware probe there (the Python probe with python3 -I, else the shell probe; nothing is
@@ -163,7 +164,10 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
     DeviceScanError "cancelled". `signer`: the caller's framework signer for the pairing (runtime/device/board_ops.py
     resolve_signer: a BoardSigner, or `lambda: board_ops.framework_signer(framework)`, looked up only when a password
     pairs the board); None only for a caller without any framework (then the state folder's store, and the pairing
-    says plainly when that cannot give the signing key)."""
+    says plainly when that cannot give the signing key). `chooser` (remote/pairing.py TierChooser, the person's
+    channel) and `mode` (Core/config_manager.py framework_mode): a board that cannot take the root-owned key line
+    offers the person the switch to OpenSSH, the weaker tiers (private mode only) or password login; after the switch
+    the board is recorded at its new sshd's port and host key."""
     from orchestrator.remote.address import Endpoint, valid_user
     from orchestrator.remote.session import KeyOnly, OneTimePassword, RemoteSession, SessionFailure, Stopped
     from orchestrator.runtime.device.settings import remember_ssh_user
@@ -193,6 +197,7 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
     session = RemoteSession(Endpoint(host, port), user, state_dir,
                             credentials=OneTimePassword(password) if password else KeyOnly(), cancel=cancel,
                             on_event=on_event)
+    paired = None
     try:
         if cancel is not None:
             cancel.hold(session)   # a Cancel closes the session: a running probe and a wait for the board end
@@ -205,7 +210,9 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
             from orchestrator.remote import pairing
             from orchestrator.runtime.device import board_ops
             # the framework's key, over the one-time password session, with llmcf's command gate (board_ops.py)
-            pairing.pair(client, state_dir, board_ops.pairing_bundle(signer, state_dir), password=password)
+            paired = pairing.pair(client, state_dir, board_ops.pairing_bundle(signer, state_dir), password=password,
+                                  chooser=chooser, mode=mode, audit=audit if audit is not None else audit_factory,
+                                  via=via, host=host, port=port, user=user)
         result = probe_over_ssh(session)
     except (RemoteProbeError, ssh_trust.HostKeyError) as e:
         if session.cancel.cancelled:   # the Cancel closed the session under the running probe
@@ -225,6 +232,9 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
             session.close()   # the client of its current login
         else:
             client.close()
+    if getattr(paired, "endpoint", None) is not None and getattr(paired, "key", None) is not None:
+        # the switch to OpenSSH: the board is reached at its new sshd from now on (its own port and host key)
+        port, key = paired.endpoint.port, paired.key
     device_id = device_id_for_host_key(ssh_trust.fingerprint(key))
     try:
         if output_file is not None:
@@ -237,8 +247,12 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
     if record:
         if audit is None and audit_factory is not None:
             audit = audit_factory()
-        trusted = record_trusted_device(state_dir, host, port, user, key, via=via, paired=True, label=label,
-                                        audit=audit, actor=actor or via)
+        trusted = record_trusted_device(state_dir, host, port, user, key, via=via,
+                                        paired=str(paired or "") != "password", label=label, audit=audit,
+                                        actor=actor or via)
+    if paired is not None:
+        from orchestrator.runtime.device.trusted import record_key_tier
+        record_key_tier(state_dir, device_id, getattr(paired, "tier", ""))
     return DeviceScan(device_id=device_id, profile=result.profile, tool=result.tool, notes=list(result.notes),
                       stored=Path(stored) if stored is not None else None,
                       output_file=Path(output_file) if output_file is not None else None, trusted=trusted)
