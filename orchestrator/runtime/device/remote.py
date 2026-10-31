@@ -296,14 +296,18 @@ def _hex16_glob() -> str:
 
 def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, build_id: str, arch: str,
                    settings: DeploySettings, check: CheckNewBuild,
-                   say: Callable[[str], None] = lambda _m: None, kv_cache: Optional[str] = None) -> DeployResult:
+                   say: Callable[[str], None] = lambda _m: None, kv_cache: Optional[str] = None,
+                   signer: Any = None) -> DeployResult:
     """Installs the tarball on the device behind `shell` (see the module docstring). The caller has checked the
     settings against the device's profile (DeploySettings.problems) before; this function checks the device itself
     again (user, architecture, tools, systemd, sudo) before it changes anything. `check` runs the checks of the new
     build in its own folder (verify_on_device with `folder`); only when they pass does the build become `current`
     and, with the systemd setting, the unit's build (result.activated). `kv_cache`: the KV-cache type the caller
     resolved from the deploy settings (DeploySettings.kv_choice): the unit starts the server with it, and the notes
-    name the start command with it."""
+    name the start command with it. `signer` (board_ops.framework_signer): the tarball is signed with the framework's
+    key right before it is sent (runtime.tar.gz.sig next to it); a board whose root step installed that key refuses an
+    unsigned or otherwise signed tarball before anything is unpacked. Without a signer nothing is signed (a board
+    without the root step, reached with an unrestricted key, still takes it; every other board refuses it)."""
     if not _RE_ID.fullmatch(build_id or "") or not _RE_SHA.fullmatch(tarball_sha256 or ""):
         raise RemoteError("the build ID or the tarball's sha256 is missing")
     if not callable(check):
@@ -332,7 +336,7 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
     result = DeployResult(build_id=build_id, home=facts.home, root=root, previous=None, install=settings.install)
     # an unrestricted framework key is restricted now (llmcf's command gate; with systemd also its exact sudo rules)
     result.notes.extend(board_ops.restrict_key(shell, sudo_user=(settings.ssh_user or "") if systemd and facts.sudo
-                                               and not facts.helper else ""))
+                                               and not facts.helper else "", signer=signer))
     if systemd and not facts.helper and shell.session.gated:
         raise RemoteError(board_ops.NO_ROOT_HELPER)
     if systemd and not facts.helper and any("root helper and its exact sudo rules are installed" in n
@@ -350,12 +354,24 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
         # over SFTP, checked on the board and resumed after a network drop (the session's upload); on a board
         # without SFTP on the command's stdin as before
         shell.upload(Path(tarball), staging + "/runtime.tar.gz", tarball_sha256)
-        say("checking the tarball and every file on the device ...")
+        if signer is not None:   # the framework's signature of exactly the bytes that were hashed and sent
+            res = shell.run(gate.script("file-write-private", staging + "/runtime.tar.gz.sig"),
+                            stdin=[signer.sign_file(Path(tarball)).encode("ascii")], again=True)
+            if res.status != 0:
+                raise RemoteError(f"the signature could not be sent (exit {res.status}): {_tail(res.err or res.out)}")
+        say("checking the tarball's signature and every file on the device ...")
         res = shell.run(gate.script("runtime-check", staging, tarball_sha256, id16), timeout=HASH_TIMEOUT)
         if res.status != 0:
-            raise RemoteError(f"the check on the device failed (exit {res.status}): {_tail(res.err or res.out)}")
+            hint = "" if signer is not None else (" (the framework could not sign it: its secrets store, which holds "
+                                                  "the signing key, is not available)")
+            raise RemoteError(f"the check on the device failed (exit {res.status}): {_tail(res.err or res.out)}"
+                              + hint)
+        verified = next((ln.split("=", 1)[1].strip() for ln in res.out.splitlines() if ln.startswith("verified=")),
+                        "")
+        if not re.fullmatch(re.escape(root + "/" + gate.VERIFY_PREFIX) + r"[A-Za-z0-9]{8}", verified, re.ASCII):
+            raise RemoteError("the check on the device gave no checked folder")
         say("installing next to the active build ...")
-        res = shell.run(gate.script("runtime-install", root, id16, staging))
+        res = shell.run(gate.script("runtime-install", root, id16, verified))
         if res.status != 0:
             raise RemoteError(f"installing on the device failed (exit {res.status}): {_tail(res.err or res.out)}")
         active = next((ln.split("=", 1)[1].strip() for ln in res.out.splitlines() if ln.startswith("current=")), "")
@@ -581,7 +597,8 @@ def _run_program(shell: RemoteShell, home: str, argv: Sequence[str], timeout: fl
     environment (the shared policy: HOME, a fixed PATH, the C locale), an empty stdin and a time limit. The checks it
     runs only read, so after a network drop they run once more."""
     if checked:
-        check_command(argv)  # the shared forbidden-option list (D22); only the --tools check passes checked=False
+        check_command(argv)  # the shared forbidden-option list (D22); the operation refuses it too, here and on the
+        # board (run-program's own check): `checked` is kept for its callers, the --tools check has its own operation
     return shell.run(gate.script("run-program" if merge else "run-program-split", home, *argv), timeout=timeout,
                      again=True)
 
@@ -710,11 +727,22 @@ def verify_on_device(shell: RemoteShell, *, home: str, plan_verify: Mapping[str,
         report.checks.append(Check("binaries", False, "missing on the device: " + (", ".join(missing) or "?")))
         return report
     report.checks.append(Check("binaries", True, ", ".join(names)))
-    restricted, version = board_ops.key_state(shell)
-    report.checks.append(Check("board-key", True if restricted else None,
-                               f"the framework's key runs only llmcf's operations (gate {version})" if restricted else
-                               "the framework's key on this board is not restricted (it runs anything the account "
-                               "may run): pair the board again or deploy to restrict it", {"restricted": restricted}))
+    key = board_ops.key_facts(shell)
+    restricted, version = key["restricted"], key["gate"]
+    guarded = restricted and key["keys"] == "root" and key["signing"]
+    if guarded:
+        text = (f"the framework's key runs only llmcf's operations (gate {version}); its line lives in a root-owned "
+                "file the account cannot change, and the board runs only what the framework's key signed")
+    elif restricted:
+        text = (f"the framework's key runs only llmcf's operations (gate {version}), but "
+                + ("its line lives in the account's own authorized_keys" if key["keys"] != "root" else
+                   "the board holds no root-owned signing key of the framework")
+                + ": pair the board again with its password")
+    else:
+        text = ("the framework's key on this board is not restricted (it runs anything the account may run): pair "
+                "the board again or deploy to restrict it")
+    report.checks.append(Check("board-key", True if guarded else None, text,
+                               {"restricted": restricted, "keys": key["keys"], "signing": key["signing"]}))
     report.ran_binaries = True
 
     # Version
@@ -755,8 +783,9 @@ def verify_on_device(shell: RemoteShell, *, home: str, plan_verify: Mapping[str,
     # The server refuses --tools (built without subprocess support): the one deliberate use of a forbidden option,
     # with a model path that does not exist, loopback and the key file.
     missing_model = f"{root}/.no-model-{secrets.token_hex(4)}.gguf"
-    argv = tools_check_args(_program(folder, "llama-server"), missing_model, port, f"{home}/{KEY_REL}")
-    r = _run_program(shell, home, argv, VERSION_TIMEOUT, checked=False)
+    tools_check_args(_program(folder, "llama-server"), missing_model, port, f"{home}/{KEY_REL}")   # the rules hold
+    r = shell.run(gate.script("server-tools-check", home, _program(folder, "llama-server"), missing_model,
+                              str(int(port)), f"{home}/{KEY_REL}"), timeout=VERSION_TIMEOUT, again=True)
     if r.status != 0 and SERVER_TOOLS_REFUSAL in r.out:
         report.checks.append(Check("server-tools", True, "llama-server refuses --tools (built without subprocess "
                                    "support)"))

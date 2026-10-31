@@ -285,10 +285,11 @@ def copy_hashed(source: Union[int, str, Path], target: Union[str, Path], *, canc
 
 
 def hash_stream(chunks, *, sink: Optional[Callable[[bytes], Any]] = None,
-                cancel: Optional[Callable[[], Any]] = None) -> str:
-    """sha256 of an iterable of byte chunks (a download), each chunk passed on to `sink` (empty chunks are skipped)."""
+                cancel: Optional[Callable[[], Any]] = None, algorithm: str = "sha256") -> str:
+    """sha256 (or `algorithm`: sha512 for a board signature) of an iterable of byte chunks (a download), each chunk
+    passed on to `sink` (empty chunks are skipped)."""
     it = (c for c in chunks if c)
-    return _digest(lambda: next(it, b""), hashlib.sha256(), sink=sink, cancel=cancel)
+    return _digest(lambda: next(it, b""), hashlib.new(algorithm), sink=sink, cancel=cancel)
 
 
 def sha256_bytes(data: bytes) -> str:

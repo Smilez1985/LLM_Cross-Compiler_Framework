@@ -189,6 +189,16 @@ class BoardsWindow(QDialog):
         from orchestrator.runtime.device.person_steps import device_audit
         return device_audit(self.framework, self.state_dir)
 
+    def _signer(self):
+        """The framework's board signer for a board step (runtime/device/board_ops.py resolve_signer): looked up in
+        this window's framework (its secret_storage: keyring, passphrase or helper) only when a step needs it; None
+        only without a framework (the step then says plainly what it cannot open)."""
+        framework = self.framework
+        if framework is None:
+            return None
+        from orchestrator.runtime.device import board_ops
+        return lambda: board_ops.framework_signer(framework)
+
     def _info(self, text: str, kind: str = "information") -> None:
         plain_box(self, kind, self._t("boards.title"), text)
 
@@ -1292,7 +1302,7 @@ class BoardsWindow(QDialog):
         def read():
             client, _key = person_steps.connect_stored(state, device_id, host, port, user, None,
                                                        on_client=self._keep_client, cancel=self._cancel,
-                                                       on_event=self._board_lines(host))
+                                                       on_event=self._board_lines(host), signer=self._signer())
             try:
                 self._check_cancel()
                 return person_steps.list_board_builds(RemoteShell(client), state, device_id)
@@ -1324,7 +1334,7 @@ class BoardsWindow(QDialog):
         def remove():
             client, _key = person_steps.connect_stored(state, device_id, host, port, user, None,
                                                        on_client=self._keep_client, cancel=self._cancel,
-                                                       on_event=self._board_lines(host))
+                                                       on_event=self._board_lines(host), signer=self._signer())
             try:
                 self._check_cancel()
                 return person_steps.remove_board_builds(RemoteShell(client), accepted, prune, device_id, audit)
@@ -1432,11 +1442,12 @@ class BoardsWindow(QDialog):
             # the one flow of the device runtime's deploy (steps.deploy_runtime_flow, also the CLI's and the AI's),
             # with this window's login, the board's trust record, the CLI's question about an untrusted benchmark
             # model (asked before anything changes on the board, decision D23) and its Cancel
+            signer = self._signer()
             hooks = steps.DeployHooks(
                 open_board=lambda: person_steps.connect_stored(state, device_id, host, port, settings.ssh_user,
                                                                password, step="runtime_deploy",
                                                                on_client=self._keep_client, cancel=self._cancel,
-                                                               on_event=self._board_lines(host)),
+                                                               on_event=self._board_lines(host), signer=signer),
                 remember=lambda key: person_steps.remember_board(state, host, port, settings.ssh_user, key, via="gui",
                                                                  audit=audit, actor="gui"),
                 choose_bench=lambda shell, home: steps.choose_bench_model(
@@ -1445,7 +1456,8 @@ class BoardsWindow(QDialog):
                         audit, tool, {"device": device_id, "model_sha256": digest}, detail, channel="framework-gui")),
                 tested_on=lambda report, digest, build_id, kind: self._record_tested_on(entry, profile, report, digest,
                                                                                         build_id, source, kind),
-                progress=self._progress, check_cancel=self._check_cancel)
+                progress=self._progress, check_cancel=self._check_cancel,
+                signer=signer)
             try:
                 flow = steps.deploy_runtime_flow(state, device_id, profile, settings, hooks=hooks, build=found.build,
                                                  packaged=found.packaged, source=source,
@@ -1546,7 +1558,7 @@ class BoardsWindow(QDialog):
             plan_verify = steps.deployed_verify_plan(state, record, lambda: steps.plan_runtime(profile))
             client, _key = person_steps.connect_stored(state, device_id, host, port, user, None, step="verify",
                                                        on_client=self._keep_client, cancel=self._cancel,
-                                                       on_event=self._board_lines(host))
+                                                       on_event=self._board_lines(host), signer=self._signer())
             try:   # a verify only checks: it never rewrites the board's trust record
                 from orchestrator.runtime.device.remote import RemoteShell, read_facts
                 shell = RemoteShell(client)

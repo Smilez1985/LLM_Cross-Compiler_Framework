@@ -968,12 +968,28 @@ class _BoardSession:
     def _deploy(self, fh, name: str, size: int, sha256: str) -> DeployResult:
         session = self.session
         session.open()
-        if session.pair(board_ops.bundle()):
+        # the framework's board signer: the package is signed with it, and the root step of pairing installs its
+        # public key on the board, which then runs only packages it signed. Its framework's store only; the state
+        # folder's store only for a DeploymentManager without a framework, which says plainly when that cannot give it
+        framework = self.manager.framework
+        signer, missing = board_ops.resolve_signer(
+            (lambda: board_ops.framework_signer(framework)) if framework is not None else None,
+            self.manager._state_dir())
+        if missing == board_ops.NO_FRAMEWORK_STORE:
+            from orchestrator.remote.gate import SETUP_REASONS
+            self.logger.warning(f"The package cannot be signed: {SETUP_REASONS[missing]}.")
+        if session.pair(board_ops.bundle(signer, missing=missing)):
             self.logger.info("Framework SSH key installed; later deployments need no password.")
         target_dir = session.private_dir()
         if self.cancel.cancelled:
             raise remote_session.Stopped()
+        signature = signer.sign_stream(fh) if signer is not None else ""
         session.upload(fh, f"{target_dir}/{name}", size, sha256)
+        if signature:   # next to the package: the board's install job checks it before anything is unpacked
+            import hashlib
+            import io
+            data = signature.encode("ascii")
+            session.upload(io.BytesIO(data), f"{target_dir}/{name}.sig", len(data), hashlib.sha256(data).hexdigest())
         if self.cancel.cancelled:
             return self.result(False, reason="The deploy was cancelled after the upload; deploy.sh did not run.",
                                device_state="ok")

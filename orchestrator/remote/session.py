@@ -452,7 +452,7 @@ class RemoteSession:
         if bundle is None:
             ssh_trust.install_public_key(self.client, line)
         else:   # llmcf's command gate and the key's restricted line (orchestrator/remote/gate.py)
-            ssh_trust.install_public_key(self.client, line, bundle)
+            ssh_trust.install_public_key(self.client, line, bundle, password=self.credentials.password)
         return True
 
     def for_cleanup(self) -> Optional["RemoteSession"]:

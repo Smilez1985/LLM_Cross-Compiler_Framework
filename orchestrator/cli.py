@@ -6049,7 +6049,7 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
                                output_file=output_file, as_json=as_json, store=store, record=ctx is not None,
                                via="cli", actor="cli",   # the audit log is opened only for the record, as before
                                audit_factory=(lambda: _device_audit(ctx, state_dir)) if ctx is not None else None,
-                               on_event=lines)
+                               on_event=lines, signer=_board_signer(ctx))
     except DeviceScanError as e:
         if e.kind == "login":   # recorded for Mojo by the core step already
             _unreachable(ctx, host, port, e.error, doing=f"log in to {user}@", state_dir=state_dir)
@@ -6264,6 +6264,17 @@ def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user:
     return client
 
 
+def _board_signer(ctx: Optional[FrameworkContext]):
+    """The framework's board signer for a pairing or deploy step (runtime/device/board_ops.py resolve_signer): looked
+    up in this command's framework (its secret_storage: keyring, passphrase or helper) only when it is needed; None
+    only when the command runs without a framework (the step then says plainly what it cannot open)."""
+    framework = getattr(ctx, "framework_manager", None)
+    if framework is None:
+        return None
+    from orchestrator.runtime.device import board_ops
+    return lambda: board_ops.framework_signer(framework)
+
+
 def _open_device(state_dir: Path, device_id: str, host: str, port: int, user: str, password: Optional[str],
                  ctx: Optional[FrameworkContext] = None, step: str = ""):
     """(board session, host key) of the stored device, as _connect_device logs in (it exits with the reason when the
@@ -6274,7 +6285,7 @@ def _open_device(state_dir: Path, device_id: str, host: str, port: int, user: st
     lines = wait_lines(lambda text: console.print(escape(text)), host, _config_language(ctx), hint=" (Ctrl+C)")
     try:   # the shared step records the board's contacts for Mojo in `state_dir`
         client, key = person_steps.connect_stored(state_dir, device_id, host, port, user, password, step=step,
-                                                  on_event=lines)
+                                                  on_event=lines, signer=_board_signer(ctx))
     except person_steps.BoardStepError as e:
         if e.kind in ("unreachable", "host_key_changed") and e.reason:
             _print_reason(ctx, e.reason, host, port)
@@ -6779,7 +6790,8 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
                                                              device_id, user),
         tested_on=lambda report, digest, build_id, kind: _board_test_builds(ctx, store, device_id, profile, report,
                                                                             digest, build_id, source, kind),
-        progress=lambda msg: console.print(escape(msg)))
+        progress=lambda msg: console.print(escape(msg)),
+        signer=_board_signer(ctx))
     try:
         flow = steps.deploy_runtime_flow(state_dir, device_id, profile, settings, hooks=hooks, build=build,
                                          packaged=stored.packaged, source=source, arch=str(stored.plan.target["arch"]))

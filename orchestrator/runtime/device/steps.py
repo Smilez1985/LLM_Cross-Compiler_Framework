@@ -229,7 +229,8 @@ class InstallOutcome:
 
 def install_runtime(shell: Any, *, state_dir: Path, device_id: str, profile: Any, settings: Any, build: Any,
                     packaged: Any, source: Any, arch: str, kv_cache: Optional[str],
-                    bench: Optional[BenchChoice] = None, say: Say = lambda _m: None) -> InstallOutcome:
+                    bench: Optional[BenchChoice] = None, say: Say = lambda _m: None,
+                    signer: Any = None) -> InstallOutcome:
     """Installs the packaged runtime on the board behind `shell` as the deploy settings say, checks the new build in
     its own folder (with the short llama-bench run when `bench` allows it) and activates it only when it passes
     (design 3.8, P6); then the deployment's record is saved. Every older build stays on the board (round 5 f)."""
@@ -243,7 +244,8 @@ def install_runtime(shell: Any, *, state_dir: Path, device_id: str, profile: Any
                                 bench_model=bench.path, bench_allowed=bench.allowed)
 
     result = deploy_runtime(shell, tarball=packaged.path, tarball_sha256=packaged.sha256, build_id=build.build_id,
-                            arch=arch, settings=settings, check=check_new_build, say=say, kv_cache=kv_cache)
+                            arch=arch, settings=settings, check=check_new_build, say=say, kv_cache=kv_cache,
+                            signer=signer)
     report = result.report
     record_heat(state_dir, device_id, getattr(report, "heat", None))   # for Mojo, also when the checks failed
     if not result.activated or report is None or not report.ok:
@@ -309,7 +311,12 @@ class DeployHooks:
       install starts.
     - `refuse_root`: the board's facts are read first and an SSH user that is root ends the flow with RootUser before
       any question (the person's channels; the AI's deploy leaves that refusal to deploy_runtime, whose words reach the
-      AI as the device's text, as before)."""
+      AI as the device's text, as before).
+    - `signer`: the caller's framework signer (board_ops.resolve_signer: a BoardSigner, or
+      `lambda: board_ops.framework_signer(framework)`, looked up once when the flow starts); None only for a caller
+      without any framework: the flow then takes it from the secrets store in the state folder and says plainly
+      through `progress` when that store cannot give it. The tarball is signed with it right before it is sent, and
+      the root step of an unrestricted key installs its public key on the board."""
     open_board: Callable[[], Any]
     remember: Optional[Callable[[Any], Any]] = None
     choose_bench: Optional[Callable[[Any, str], "BenchChoice"]] = None
@@ -317,6 +324,7 @@ class DeployHooks:
     progress: Say = lambda _m: None
     check_cancel: Callable[[], None] = lambda: None
     refuse_root: bool = True
+    signer: Any = None
 
 
 @dataclass
@@ -344,6 +352,11 @@ def deploy_runtime_flow(state_dir: Path, device_id: str, profile: Any, settings:
     kv = settings.kv_choice(profile)
     if arch is None:
         arch = str((build.plan.get("target") or {}).get("arch") or profile.arch)
+    from orchestrator.runtime.device import board_ops
+    signer, missing = board_ops.resolve_signer(hooks.signer, state_dir)
+    if missing == board_ops.NO_FRAMEWORK_STORE:   # said plainly, never a silent unsigned tarball
+        from orchestrator.remote.gate import SETUP_REASONS
+        hooks.progress(f"The runtime is sent unsigned: {SETUP_REASONS[missing]}.")
     session, key = hooks.open_board()
     try:
         if hooks.remember is not None:
@@ -359,7 +372,7 @@ def deploy_runtime_flow(state_dir: Path, device_id: str, profile: Any, settings:
         hooks.check_cancel()
         outcome = install_runtime(shell, state_dir=state_dir, device_id=device_id, profile=profile, settings=settings,
                                   build=build, packaged=packaged, source=source, arch=arch, kv_cache=kv.kind,
-                                  bench=bench, say=hooks.progress)
+                                  bench=bench, say=hooks.progress, signer=signer)
     finally:
         session.close()
     tested = None
