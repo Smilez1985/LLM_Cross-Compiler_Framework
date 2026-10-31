@@ -5463,7 +5463,9 @@ def run_deploy(ctx: FrameworkContext, package_path, host, user, port, password, 
                             credentials=OneTimePassword(password) if password else KeyOnly(), label=label,
                             wait=wait_seconds, on_event=lambda event: shown.update(_deploy_event_text(ctx, event, host)),
                             cancel=CancelToken(check=stop.is_set), key=key, bind_key=False, via="cli", actor="cli",
-                            state_dir=lambda: _state_dir(ctx), audit=lambda: _device_audit(ctx, _state_dir(ctx)))
+                            state_dir=lambda: _state_dir(ctx), audit=lambda: _device_audit(ctx, _state_dir(ctx)),
+                            # a password deploy offers the key tiers as a scan does (the terminal's questions)
+                            chooser=_tier_chooser() if password else None, mode=_framework_mode(ctx))
     result = done.result
 
     if result.success:
@@ -6377,9 +6379,19 @@ def _open_device(state_dir: Path, device_id: str, host: str, port: int, user: st
         # when a password pairs the board
         tiers = _tier_kwargs(ctx, audit=lambda: _device_audit(ctx, state_dir)) if password else {}
         tiers["mode"] = _framework_mode(ctx)
+        if tiers.get("chooser") is not None:   # the switch to OpenSSH moves the builds' "tested on" records too
+            from orchestrator.Core.artifact_output import artifact_folders
+            try:
+                tiers["output_dirs"] = artifact_folders(ctx.framework_manager) if ctx is not None and \
+                    ctx.framework_manager is not None else ()
+            except Exception:  # noqa: BLE001 - the "tested on" records stay; everything else moves
+                tiers["output_dirs"] = ()
         client, key = person_steps.connect_stored(state_dir, device_id, host, port, user, password, step=step,
                                                   on_event=lines, signer=_board_signer(ctx), **tiers)
     except person_steps.BoardStepError as e:
+        if e.kind == "switched":   # the switch to OpenSSH ended the step: the person runs it again
+            console.print(f"[yellow]{escape(str(e))}[/yellow]")
+            sys.exit(1)
         if e.kind in ("unreachable", "host_key_changed") and e.reason:
             _print_reason(ctx, e.reason, host, port)
             if e.kind == "host_key_changed":
