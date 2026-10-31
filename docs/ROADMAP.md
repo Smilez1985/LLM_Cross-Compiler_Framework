@@ -1,4 +1,4 @@
-Version 3.3.0 · Last updated 2026-10-30
+Version 3.3.0 · Last updated 2026-10-31
 
 **English** · [Deutsch](ROADMAP_DE.md)
 
@@ -157,6 +157,7 @@ step starts.
 | **Optional LoRA training** with a lean trainer of our own: ideas from Unsloth, but no Unsloth code and no Unsloth installation. | planned |
 | **Large models**: a check of disk space and RAM before a build, reuse of F16 intermediates, GGUF as input (passthrough and requantization), per-tensor quantization recipes checked by KL divergence, an importance matrix computed, taken from Hugging Face or loaded from a file, and tokenizer and chat-template checks after each build. | planned |
 | **Defaults for the importance matrix and calibration** (settings `default_enable_imatrix` and `default_calibration_dataset`, in development): used as the defaults of the Builder, the CLI and the AI tools. | planned |
+| **Bring the pip cache back in CI once the quota allows**: `cache: pip` in the setup-python steps of `ci.yml`, `security.yml` and `retrieval-eval.yml` is switched off for now, because the account's cache and egress quota ran out and a job hung at the cache restore ([design](DESIGN.md#tests-ci-and-the-windows-hazards)). | planned |
 
 Not planned: airllm. It is a runtime, not a converter, and does not belong in the pipeline.
 
