@@ -68,21 +68,23 @@ def stage_build_context(target_dir: Path, app_root: Path, context_dir: Path,
     for sub in ("modules", "scripts"):
         source = target_dir / sub
         if source.is_dir() and not _is_link(source):
-            shutil.copytree(source, context_dir / sub, symlinks=True, ignore=_skip_links)
+            ignore = _skip_links
+            if sub == "modules":   # never the target's own stage account helper: the framework's comes below
+                def ignore(directory, names, top=str(source)):
+                    skipped = _skip_links(directory, names)
+                    if os.path.samefile(directory, top) and STAGE_HELPER_NAME in names:
+                        skipped.append(STAGE_HELPER_NAME)
+                    return skipped
+            shutil.copytree(source, context_dir / sub, symlinks=True, ignore=ignore)
         else:
             if source.exists():
                 logger.warning(f"Not staged into the build context (link or not a folder): {source}")
             (context_dir / sub).mkdir()
 
-    # The framework's stage account helper replaces whatever the target has under that name (a file, a folder or
-    # nothing): the stage runner sources modules/stage_user.sh, and only the framework's run_as_stage and
-    # stage_preflight may switch the stage modules to the stage account and check the runner's rights.
-    helper = context_dir / "modules" / STAGE_HELPER_NAME
-    if helper.is_dir() and not helper.is_symlink():
-        shutil.rmtree(helper)
-    elif os.path.lexists(helper):
-        helper.unlink()
-    shutil.copy2(FRAMEWORK_STAGE_HELPER, helper)
+    # The framework's stage account helper in place of whatever the target has under that name (a file, a folder or
+    # nothing; the target's is never copied): the stage runner sources modules/stage_user.sh, and only the framework's
+    # run_as_stage and stage_preflight may switch the stage modules to the stage account and check the runner's rights.
+    shutil.copy2(FRAMEWORK_STAGE_HELPER, context_dir / "modules" / STAGE_HELPER_NAME)
 
     # Local sources an offline build may use (Core/build_image.py: the local copy of llama.cpp lands in
     # sources/llama.cpp); the target Dockerfiles COPY sources/, so the folder is there for every build, empty by default.
