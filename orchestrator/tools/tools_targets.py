@@ -152,8 +152,8 @@ class AccessOut(BaseModel):
         default=None, description="socket: listens on port 22; process: runs; service: enabled; binary: installed only")
     ssh_servers_installed: List[Literal["openssh", "dropbear"]] = Field(default_factory=list)
     sudo: Optional[Literal["root", "nopasswd", "password", "absent", "other"]] = Field(
-        default=None, description="root: the probe ran as root; nopasswd: sudo -n true worked; password: sudo wants a "
-                                  "password or refuses the account; other: Windows")
+        default=None, description="root: the probe ran as root; nopasswd: sudo -k -n true worked; password: sudo "
+                                  "wants a password or refuses the account; other: Windows")
     sudo_present: Optional[bool] = None
     sudo_without_password: Optional[bool] = None
     ssh_keygen: Optional[Literal["openssh", "none"]] = None

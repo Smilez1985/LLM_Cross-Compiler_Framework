@@ -645,7 +645,9 @@ keys:
         first match: the program that owns the listening socket of TCP port 22 (/proc/net/tcp and tcp6, state 0A,
         the socket inode found in /proc/<pid>/fd: readable for the probe's own processes, all of them as root); else
         the running processes (/proc/<pid>/comm); else an enabled service entry (tables.ssh_server_services); else an
-        installed program (tables.ssh_server_binaries); else none. Names via tables.ssh_server_names
+        installed program (tables.ssh_server_binaries); else none. Names via tables.ssh_server_names; a program
+        of tables.ssh_server_binaries that is a link counts by the name it points to (followed inside the machine),
+        and a process named like such a program counts as that program (a Dropbear behind /usr/sbin/sshd is dropbear)
       windows: >-
         the sshd service (sc.exe query sshd; Get-Service in the .ps1) -> openssh; else
         %SystemRoot%\System32\OpenSSH\sshd.exe -> openssh; else none
@@ -708,8 +710,9 @@ keys:
     sources:
       linux: >-
         root when the probe runs as user id 0 (sudo is not needed); else absent when no program of
-        tables.sudo_paths exists; else `sudo -n true` with an empty stdin and a time limit: exit 0 -> nopasswd, any
-        other exit -> password. -n never prompts and never reads a password; the probe asks sudo nothing else
+        tables.sudo_paths exists; else `sudo -k -n true` with an empty stdin and a time limit: exit 0 -> nopasswd, any
+        other exit -> password. -n never prompts and never reads a password; -k ignores credentials cached in this
+        terminal (a password typed a minute ago is no NOPASSWD rule); the probe asks sudo nothing else
       windows: "constant other (Windows elevates through UAC)"
     normalise: >-
       password means sudo wants a password or does not allow the account (sudo -n cannot tell them apart without

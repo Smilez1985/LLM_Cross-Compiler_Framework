@@ -13,8 +13,8 @@ Python is not available; the three are kept in step by the framework's tests.
 
 Rules:
 - Standard library only, Python 3.8 syntax. Linux, Windows and macOS; FreeBSD and Android on a best-effort basis.
-- No network, no prompts, no stdin, no elevation, no package installs. sudo is only asked `sudo -n true` (the
-  access facts: -n never prompts and never reads a password). External tools (nvidia-smi,
+- No network, no prompts, no stdin, no elevation, no package installs. sudo is only asked `sudo -k -n true` (the
+  access facts: -n never prompts and never reads a password, -k ignores cached credentials). External tools (nvidia-smi,
   vulkaninfo, compilers, PowerShell on Windows) run with a time limit and an empty stdin; a missing tool contributes
   nothing.
 - Every value is checked against KEYS / GPU_KEYS below (the validation of the schema; a test compares them) before it
@@ -2334,8 +2334,8 @@ class Probe:
     def _access_unix(self):
         installed = []
         for path, kind in SSH_SERVER_BINARIES.items():
-            if self.exists(path) and kind not in installed:
-                installed.append(kind)
+            if self.exists(path) and self._binary_kind(path, kind) not in installed:
+                installed.append(self._binary_kind(path, kind))
         services = [kind for pattern, kind in SSH_SERVER_SERVICES.items() if glob.glob(self._glob(pattern))]
         server, source = "none", None
         for step, kinds in (("socket", self._ssh_listeners), ("process", self._ssh_processes),
@@ -2350,7 +2350,8 @@ class Probe:
         if installed:
             self.put("SSH_SERVERS_INSTALLED", ",".join(k for k in ("openssh", "dropbear") if k in installed))
         if server in ("openssh", "dropbear"):
-            binary = next((p for p, k in SSH_SERVER_BINARIES.items() if k == server and self.exists(p)), None)
+            binary = next((p for p, k in SSH_SERVER_BINARIES.items()
+                           if self.exists(p) and self._binary_kind(p, k) == server), None)
             if binary:
                 out = self.tool_output([self.path(binary), "-V"], 10)
                 self.put("SSH_SERVER_VERSION", ssh_server_version(server, out), warn_invalid=False)
@@ -2372,9 +2373,29 @@ class Probe:
         except OSError:
             return []
 
+    def _binary_kind(self, path, kind):
+        """The SSH server a program of tables.ssh_server_binaries is: by the name its link points to, followed inside
+        the machine (a Dropbear behind /usr/sbin/sshd is Dropbear), else the table's word."""
+        full = self.path(path)
+        for _hop in range(8):
+            try:
+                target = os.readlink(full)
+            except (OSError, ValueError, NotImplementedError):
+                break
+            full = self.path(target) if target.startswith("/") else os.path.join(os.path.dirname(full), target)
+        return SSH_SERVER_NAMES.get(os.path.basename(full), kind)
+
     def _proc_server(self, pid):
-        """The SSH server a process is, by its /proc/<pid>/comm name (tables.ssh_server_names), else None."""
-        return SSH_SERVER_NAMES.get((self.read("/proc/{}/comm".format(pid), 256) or "").strip())
+        """The SSH server a process is, by its /proc/<pid>/comm name (tables.ssh_server_names), else None. A name that
+        is also a program of tables.ssh_server_binaries counts as what that program is (an sshd that is a link to
+        Dropbear is Dropbear; several: SSH_SERVER_ORDER)."""
+        name = (self.read("/proc/{}/comm".format(pid), 256) or "").strip()
+        kind = SSH_SERVER_NAMES.get(name)
+        if kind is None:
+            return None
+        kinds = [self._binary_kind(p, k) for p, k in SSH_SERVER_BINARIES.items()
+                 if p.rsplit("/", 1)[-1] == name and self.exists(p)]
+        return next((k for k in SSH_SERVER_ORDER if k in kinds), kind)
 
     def _ssh_processes(self):
         """The SSH servers among the running processes."""
@@ -2425,13 +2446,14 @@ class Probe:
         return int(text) if rc == 0 and text.isdigit() else None
 
     def _sudo(self):
-        """root, absent, nopasswd or password: `sudo -n true` never prompts and never reads a password."""
+        """root, absent, nopasswd or password: `sudo -k -n true` never prompts and never reads a password (-n), and
+        ignores credentials cached in this terminal (-k: a password typed a minute ago is no NOPASSWD rule)."""
         if self._uid() == 0:
             return "root"
         sudo = next((p for p in SUDO_PATHS if self.exists(p)), None)
         if sudo is None:
             return "absent"
-        rc, _out, _err = self.run([self.path(sudo), "-n", "true"], 10)
+        rc, _out, _err = self.run([self.path(sudo), "-k", "-n", "true"], 10)
         if rc == -1:
             self.warn("not_determined", "SUDO")
             return None
