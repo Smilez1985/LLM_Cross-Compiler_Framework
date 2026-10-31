@@ -373,9 +373,9 @@ docstring-parser==0.18.0 \
     --hash=sha256:292510982205c12b1248696f44959db3cdd1740237a968ea1e2e7a900eeb2015 \
     --hash=sha256:b3fcbed555c47d8479be0796ef7e19c2670d428d72e96da63f3a40122860374b
     # via anthropic
-fastembed==0.9.0 \
-    --hash=sha256:273d408edec8c0f161711d8f6e44e4a5b559d18e8edf6bf805415d55dc772846 \
-    --hash=sha256:bc3beadb46ecb3580ab832d12670be7ecb937f80adfcb7b77b03f7eef76c394a
+fastembed==0.9.1 \
+    --hash=sha256:8b4b2881ea85a4d36e8f284466671437b3fed869c33cdc71d6f6c48ddff115c7 \
+    --hash=sha256:95042ac7f685bda6697861066d49f8b119fbde8b75ed5162bbb7e84e2dad0e1d
     # via llm-cross-compiler-framework
 filelock==4.2.4 \
     --hash=sha256:301241438c57936ef93f4243a94f2559022268bfcf9b375a9a72eb0f8db8358e \
@@ -916,9 +916,9 @@ onnxruntime==1.31.0 \
     --hash=sha256:e85c1632c0a8cf488bd8f1039f5320877b864c8f9ebd4122fb8bb909f83b7096 \
     --hash=sha256:e93d7c5fad20afa697ac16f376fd0306ed180f9a376e86106cc0b7d84f53ef87
     # via fastembed
-openai==3.35.1 \
-    --hash=sha256:264fd0fafc889021f526b7c1e5a2df5ca3e8dea874738ecd31da666434f25967 \
-    --hash=sha256:b33e6561b90586e450def8a388e7d364755325da6884fc71348be5542e043bd0
+openai==3.40.0 \
+    --hash=sha256:df309d434130e89a23e9c687fc4bcd3df0df705a33d3872503c87448df69f56f \
+    --hash=sha256:dfcfd4f65ee5a8bb824da90c9ad7fa0dda7f3bd472a7c564dffc6183f0a0b55c
     # via llm-cross-compiler-framework
 opentelemetry-api==1.45.1 \
     --hash=sha256:aa38ed19bcc084ba42782a73255b3582283eced7ad6dddbd6695189e69adfb75 \
@@ -1328,21 +1328,23 @@ qdrant-client==1.20.0 \
     --hash=sha256:0ab261197a497d16f3bf8a663c22e994f485c9fd7212d3c8b07c1a9de32fc152 \
     --hash=sha256:58ff8aec0c56d2dd4d9f0cae1940c280b364bfde18715d4ccc10c3e118bcd053
     # via llm-cross-compiler-framework
-qdrant-edge-py==0.8.0 ; platform_machine != 'ARM64' or sys_platform != 'win32' \
-    --hash=sha256:0a980c65a83b1b97277cc3d70175244fd8bbe508624098d9f8f87a5ec1ef6fd9 \
-    --hash=sha256:33cd1dac150d11ea1d14d3b186c9df75817a3399000c900105b22c8976bd7433 \
-    --hash=sha256:4e2caeba4db207c6eec6d41ce2f760c32dae36c78761c3640a0e45eadc6d1ec1 \
-    --hash=sha256:652d754cebd12597a4e1f1fa5305e77e6ba7e056153409a2006f82cbb600b056 \
-    --hash=sha256:65bae2a2f028d536706d9e2c24037344154864f84e22aba244f12648b072fb83 \
-    --hash=sha256:87a0b5b9ced10ca7cfde38f1580d4d062ec562f5a140808cb84f89687e80df6d \
-    --hash=sha256:8fd85325c350723c6f0fed4a0a6f6dc02488a64cbad4abce554da916a84382dd \
-    --hash=sha256:91b647b128bc79a6c679e7ce8d10a5efdd9dc57268a4ab4eeeb03d84146e71a9 \
-    --hash=sha256:987c6b5d854f5c83f744573264afe5160054ce4249e1b95115e18e57b6310a2b \
-    --hash=sha256:aa0f47c58cf3dd2b8643b01ffc7240904644bb00b894530ca87ae71300d653bf \
-    --hash=sha256:cceeada8e740796ce07e9239ee5ffe34d6fd0d5a6bad0c0b4a834b93d4abc696 \
-    --hash=sha256:d84d0702a31b6560c84f4d28b3272f94f1df354c04b80167e73acc08cc134642 \
-    --hash=sha256:e4933ab2008cedf0409855367971fd8387d0e7e471a03394fc0de23a48d9a4cb \
-    --hash=sha256:e6a712253c5056ffb0c8f59bd0cde686bbe9dffe697b6ca881a51c21ff8626d0
+qdrant-edge-py==0.9.0 ; platform_machine != 'ARM64' or sys_platform != 'win32' \
+    --hash=sha256:0a3e8785acf3b274f18aaff9b1b7579abe923bf407a05e4f20887ca8565d9ed1 \
+    --hash=sha256:39124d67144922ca6ed5389d58148ad40632e5f50a8bd1e5eec6771f7a9c7cad \
+    --hash=sha256:57ce4bc706975181e308be8460bc4e2943398b7c4d75fa73d2dcea503dc927b2 \
+    --hash=sha256:5ca5b0b3c0118610b8ac86b6cc962bb39fa220cc0487853a68664add7ba57c7e \
+    --hash=sha256:6ddc132da36342702541e1631133db601ca898332f37964e41b6bf644398b2d1 \
+    --hash=sha256:7500651fa855462c96149a501dac4187ad9e73a91a9306ef20f827969f34ea8e \
+    --hash=sha256:78bafbe31a7f24a6e8428626b37408b4bbdf4c8a1e1044b102ace6a14d6b4d8c \
+    --hash=sha256:7bc734ea493d1f92e6b8af74bc68c4f903b2ca90593f899cd1b998cd12744da4 \
+    --hash=sha256:a285d655ee065d4bba81c638977098a137a3c614cdfffc4cc3974f485f72b1f2 \
+    --hash=sha256:b4757eaad2ec37f42fa3626881f66d13551b2dc20fee0cd9bc032b8abd54a900 \
+    --hash=sha256:bfc3ae15fdf47abff461344e4068ad8ad0be8cb52834038023acab67d5c4436c \
+    --hash=sha256:c705f647925e541e43d7bac3ae06d8984c2b57036c0d08aff90fe748cbcdf26c \
+    --hash=sha256:cd2539f37ddeddf002b241bccbc110296d7fc07aee0640daebbae48bd9195d46 \
+    --hash=sha256:cddb6866fee5ebe9f63ab61d6feef3e40615fa255b7225c8ba43f13c29c170d0 \
+    --hash=sha256:d1ec708b3806fcd18b664e6262422e8ef216ce16e76105075ae8e921671459c7 \
+    --hash=sha256:d6b11f36455450a4215d7b528cce44be8cd19bf9f974738c864632967b536f51
     # via llm-cross-compiler-framework
 referencing==0.37.0 \
     --hash=sha256:381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231 \
