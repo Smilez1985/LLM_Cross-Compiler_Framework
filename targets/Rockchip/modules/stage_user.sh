@@ -64,6 +64,7 @@ declare -A STAGE_REFUSAL_EXIT=(
     [reads_runner]=87
     [folders]=88
     [inputs]=89
+    [no_layer]=90
 )
 
 stage_isolated() { [ "${STAGE_ISOLATION:-}" = "user" ]; }
