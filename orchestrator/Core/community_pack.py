@@ -542,13 +542,10 @@ def _sshsig_signed_data(digest: bytes, namespace: str) -> bytes:
 
 
 def _sha512(data: Union[bytes, Iterable[bytes]]) -> bytes:
-    h = hashlib.sha512()
-    if isinstance(data, (bytes, bytearray)):
-        h.update(data)
-    else:
-        for chunk in data:
-            h.update(chunk)
-    return h.digest()
+    """SSHSIG's sha512 of the signed data, through the one hashing loop (utils/helpers.py)."""
+    from orchestrator.utils.helpers import hash_stream
+    return bytes.fromhex(hash_stream([bytes(data)] if isinstance(data, (bytes, bytearray)) else data,
+                                     algorithm="sha512"))
 
 
 def sshsig_sign(data: Union[bytes, Iterable[bytes]], private_key: Ed25519PrivateKey,
