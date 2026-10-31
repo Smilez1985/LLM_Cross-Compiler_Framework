@@ -662,8 +662,10 @@ class TestThePortableImage:
         monkeypatch.setattr(os, "getgid", lambda: 1001, raising=False)
         monkeypatch.setattr(sandbox, "hand_over", lambda path, user: None)
         monkeypatch.setattr("orchestrator.Core.builder.hand_over", lambda path, user: None, raising=False)
-        kwargs, _env, _volumes = engine._sandbox(config(), tmp_path / "b1")
-        assert kwargs["user"] == "1001:1001"
+        kwargs, sandbox_env, _volumes = engine._sandbox(config(), tmp_path / "b1")
+        # since 3.3.0 the stage runner takes the host user inside the container, which starts as root with only the
+        # two rights of the switch to the stage account
+        assert kwargs["user"] == "0:0" and sandbox_env["STAGE_RUNNER_IDS"] == "1001:1001"
         env = engine._container_env(config(), "/build-cache/models/m")
         assert (env["PUID"], env["PGID"]) == ("1001", "1001")
 

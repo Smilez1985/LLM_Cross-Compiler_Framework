@@ -47,7 +47,8 @@ from orchestrator.utils.docker_engine import (create_container, engine_name, ens
 from orchestrator.utils.download import FileLock as DownloadLock
 from orchestrator.utils.helpers import copy_hashed, digest_matches, sha256_file
 from orchestrator.utils.llama_pin import pinned_source
-from orchestrator.utils.sandbox import FALLBACK_USER, container_sandbox, hand_over, sandbox_user
+from orchestrator.utils.sandbox import (FALLBACK_USER, container_sandbox, hand_over,  # noqa: F401 - re-exported
+                                        runner_ids, sandbox_user, stage_user_sandbox, stage_user_support)
 from orchestrator.utils.atomic import remove_tree
 
 class StagingLock(DownloadLock):
@@ -287,6 +288,9 @@ class BuildProgress:
     end_reason: Optional[str] = None
     # The stage runner's end record of the last stage container (build_end.EndRecord), when it wrote one
     end_record: Optional[Any] = None
+    # How the stage modules ran: "stage_user" in the build sandbox (their own user, the runner's memory out of their
+    # reach), "same_user" in the legacy mode (the runner's own user); None before a stage container started
+    isolation: Optional[str] = None
 
     def end_facts(self) -> Optional[Dict[str, Any]]:
         """{'reason', 'exit', 'stage'} of an ended build (build_info.json's "end", the build record), else None."""
@@ -294,8 +298,11 @@ class BuildProgress:
             return None
         record = self.end_record
         stage = getattr(record, "stage", None)
-        return {"reason": self.end_reason, "exit": getattr(record, "exit", None),
-                "stage": stage if stage and stage != "-" else None}
+        facts = {"reason": self.end_reason, "exit": getattr(record, "exit", None),
+                 "stage": stage if stage and stage != "-" else None}
+        if self.isolation:
+            facts["isolation"] = self.isolation
+        return facts
 
     def add_log(self, message: str, level: str = "INFO"):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -561,7 +568,9 @@ class BuildEngine:
             self._settled.add(progress.build_id)
 
     def _run_container(self, config: "BuildConfiguration", progress: "BuildProgress", container: Container,
-                       prefix: str, end_record: Optional[Path] = None) -> int:
+                       prefix: str, end_record: Optional[Path] = None,
+                       decided: Optional[Tuple[Dict[str, Any], Dict[str, Dict[str, str]], Dict[str, str]]] = None
+                       ) -> int:
         """Runs a stage container: streams its log into the progress, applies the step's time limits
         (utils/step_limits.py: a soft cap that stops only an AI-started build, an idle timeout for a step that prints
         nothing), honours cancellation and always removes the container. Returns the exit code.
@@ -572,7 +581,12 @@ class BuildEngine:
         done" for the job's last stage, the step's clock is switched off (no soft cap or idle stop after the done
         marker) and the container gets END_GRACE seconds to exit by itself; then the framework stops it, and the
         build is NOT done (its exit status is not 0: _ended_by_record). A record a module script wrote never switches
-        the clock off. The record that was read with the key is kept in progress.end_record."""
+        the clock off. The record that was read with the key is kept in progress.end_record.
+
+        `decided`: the sandbox options, volumes and environment the container was created with (_sandbox). The log
+        says how the stage modules run; with the stage account (the build sandbox) the container's inspect must show
+        exactly the decided options before it starts (_verify_sandbox), else it never starts and the build fails with
+        the reason."""
         from orchestrator.Core import build_end
         from orchestrator.Core.build_end import read_end_record
         from orchestrator.utils.step_limits import StepClock, StepTimedOut
@@ -586,12 +600,14 @@ class BuildEngine:
             self._forget_end_record(end_record)   # a record of an earlier run never ends this one
             key = build_end.new_end_key(end_record.parent.parent.parent, job)
             if key is not None and self._get_conf("build_sandbox", True):
-                hand_over(end_record.parent, sandbox_user())   # a root host's key file: the container user takes it
+                hand_over(end_record.parent, runner_ids(self.docker_client))   # a root host's key: the runner's
         grace_until: Optional[float] = None
         with self._lock:
             self._active_containers[config.build_id] = container
         try:
             self._check_cancelled(progress)
+            if decided is not None:
+                self._verify_sandbox(container, progress, prefix, *decided)
             container.start()
             if progress.status == BuildStatus.CANCELLED:
                 # cancel_build may have tried to stop the container before it was running
@@ -1947,7 +1963,7 @@ class BuildEngine:
         source = Path(config.dataset_path)
         folder = self.cache_dir / "builds" / config.build_id / "dataset"
         folder.mkdir(parents=True, exist_ok=True)
-        folder.chmod(0o700)
+        folder.chmod(0o750)   # the person and their group only: the stage account reads it through the group
         target = folder / (source.name or "dataset.txt")
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
         try:
@@ -2092,13 +2108,22 @@ class BuildEngine:
         if not self._get_conf("build_sandbox", True):
             return {"user": "0:0"}, env, volumes  # legacy mode: the entrypoint maps PUID/PGID and drops root
 
-        # The same sandbox as the llama.cpp builder container (orchestrator/utils/sandbox.py).
-        user = sandbox_user()
-        hand_over(build_temp, user)  # a root host owns the per-build folders; hand them to the container user
+        # The sandbox of the llama.cpp builder container (orchestrator/utils/sandbox.py) with the stage account: the
+        # container starts as root with only CAP_SETUID and CAP_SETGID, the stage runner becomes the person (the
+        # runner's ids) and starts every stage module under the image's stage account
+        # (targets/*/modules/stage_user.sh). A rootless engine whose sub-ids do not reach that account cannot run it:
+        # refused here, before anything is built.
+        supported, why = stage_user_support(self.docker_client)
+        if supported is False:
+            from orchestrator.utils.sandbox import STAGE_USER_NO_SUBIDS_WAY
+            raise RuntimeError(f"{why} {STAGE_USER_NO_SUBIDS_WAY}")
+        user = runner_ids(self.docker_client)
+        hand_over(build_temp, user)  # a root host owns the per-build folders; hand them to the stage runner
         memory = str(self._get_conf("build_memory_limit", "") or "").strip()
-        kwargs: Dict[str, Any] = container_sandbox(
+        kwargs, isolation_env = stage_user_sandbox(
             user, working_dir="/build-cache/work", mem_limit=memory or None,
             pids_limit=int(self._get_conf("build_pids_limit", 4096) or 4096))
+        env.update(isolation_env)
         env.update({
             "HOME": "/build-cache/work/home",
             "XDG_CACHE_HOME": "/build-cache/work/cache",
@@ -2173,7 +2198,8 @@ class BuildEngine:
         # A requested importance matrix that fails stops the build (low-bit types would be unusable).
         from orchestrator.Core.build_end import end_record_path
         exit_code = self._run_container(config, progress, container, "IMATRIX: ",
-                                        end_record=end_record_path(build_temp / "work", "imatrix"))
+                                        end_record=end_record_path(build_temp / "work", "imatrix"),
+                                        decided=(sandbox, vols, env))
         exit_code = self._ended_by_record(progress, exit_code, "IMATRIX: ", job="imatrix")
         if exit_code != 0:
             raise RuntimeError(f"IMatrix calculation failed (exit code {exit_code})\n{self._log_tail(progress, 'IMATRIX: ')}")
@@ -2265,7 +2291,8 @@ class BuildEngine:
         
         from orchestrator.Core.build_end import end_record_path
         exit_code = self._run_container(config, progress, container, "CONT: ",
-                                        end_record=end_record_path(build_temp / "work", "build"))
+                                        end_record=end_record_path(build_temp / "work", "build"),
+                                        decided=(sandbox, vols, env))
         exit_code = self._ended_by_record(progress, exit_code, "CONT: ")
         if exit_code != 0:
             raise RuntimeError(f"Build script failed with exit code {exit_code}\n{self._log_tail(progress, 'CONT: ')}")
@@ -2281,13 +2308,47 @@ class BuildEngine:
         except OSError:
             pass
 
+    ISOLATION_LOG = {
+        "stage_user": "Build sandbox: the stage modules run under their own user (the stage account, no "
+                      "capabilities); the stage runner's memory and the end record's key are out of their reach.",
+        "same_user": "Legacy mode (setting build_sandbox off): the stage modules run as the stage runner's own user; "
+                     "the end record is sealed and checked against the exit status, but on a host that lets a process "
+                     "read the memory of another of the same user, a module could read the key.",
+    }
+
+    def _verify_sandbox(self, container: Container, progress: "BuildProgress", prefix: str, options: Dict[str, Any],
+                        volumes: Dict[str, Dict[str, str]], environment: Dict[str, str]) -> None:
+        """Before a stage container starts: which mode its modules run in (progress.isolation, the log), and in the
+        build sandbox the host's check that the engine created the container exactly as decided (utils/sandbox.py
+        sandbox_problem over its inspect, Docker or Podman); a container that differs never starts."""
+        from orchestrator.utils.sandbox import STAGE_ISOLATION_ENV, sandbox_problem
+        isolated = (environment or {}).get(STAGE_ISOLATION_ENV) == "user"
+        progress.isolation = "stage_user" if isolated else "same_user"
+        progress.add_log(f"{prefix}{self.ISOLATION_LOG[progress.isolation]}")
+        if not isolated:
+            return
+        reload = getattr(container, "reload", None)
+        if callable(reload):
+            try:
+                reload()
+            except Exception as e:  # noqa: BLE001 - no description: sandbox_problem refuses it
+                self.logger.debug(f"Inspect of the stage container failed: {e}")
+        from orchestrator.utils.docker_engine import engine_name
+        problem = sandbox_problem(getattr(container, "attrs", None), options, volumes,
+                                  engine=engine_name(self.docker_client) or "docker")
+        if problem:
+            raise RuntimeError(problem)
+
     def _ended_by_record(self, progress: "BuildProgress", exit_code: int, prefix: str, job: str = "build") -> int:
         """The stage container's end by its end record AND its real exit status (Core/build_end.py end_problem):
         done (0) only for an exit status 0 with the stage runner's sealed done record of the job's last stage. Every
         other end with a plain text: an exit 0 without a record (never a silent success), a record a module script
         wrote, a done record with an exit status other than 0 (also after the framework stopped it past the grace)
         or before the last stage. A failed run keeps its exit code."""
-        from orchestrator.Core.build_end import end_problem
+        from orchestrator.Core.build_end import end_problem, stage_user_problem
+        refused = stage_user_problem(progress.end_record, exit_code)
+        if refused is not None:   # the stage runner's check of the stage account refused the build
+            raise RuntimeError(f"{refused}\n{self._log_tail(progress, prefix)}")
         problem = end_problem(progress.end_record, exit_code, job)
         if problem is not None:
             raise RuntimeError(f"{problem}\n{self._log_tail(progress, prefix)}")
@@ -2484,6 +2545,8 @@ class BuildEngine:
             # How the build ended (Core/build_end.py): only a build whose end record says done gets here
             stage = record.stage if record.stage != "-" else None
             info["end"] = {"reason": "done", "exit": record.exit, "stage": stage}
+            if getattr(progress, "isolation", None):
+                info["end"]["isolation"] = progress.isolation   # how the stage modules ran (stage_user, same_user)
         info.update({
             "build_id": config.build_id,
             # A local model an AI caller pinned is recorded by its label, never its host path (it reaches AI callers)

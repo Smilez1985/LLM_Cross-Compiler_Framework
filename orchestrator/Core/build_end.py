@@ -24,8 +24,9 @@ The end record (targets/*/modules/build.sh): `$BUILD_SCRATCH_DIR/stages/<job>/bu
 file and moved into place, one "key value" line each: status (done|failed), exit, stage, job, inputs, time and seal.
 A record that cannot be read, or that does not fit, counts as no record.
 
-Only the stage runner writes it (a forged early done record). The module scripts run as the same user in the same
-work folder, so the BuildEngine hands the runner a one-run key (END_KEY, `stages/<job>/end.key`, new_end_key) before
+Only the stage runner writes it (a forged early done record). The module scripts share the work folder (in the build
+sandbox under their own user, the stage account, so they cannot read the runner's memory: STAGE_USER_EXIT is the
+runner's check of that), so the BuildEngine hands the runner a one-run key (END_KEY, `stages/<job>/end.key`, new_end_key) before
 the container starts; the runner reads it into a variable it never exports and removes the file before its first
 stage, and seals its record with it (seal_of: SHA-256 over key, record lines, key). A record without that seal was
 not written by the runner. The real exit status of the container (the runner is its first process) is the second
@@ -34,6 +35,7 @@ check: a module cannot make the runner exit 0 before the last stage returned.
 
 import hashlib
 import hmac
+import os
 import re
 import secrets
 from dataclasses import dataclass
@@ -67,6 +69,41 @@ EXIT_MISMATCH_TEXT = ("The end record says done, but the container exited with {
 EARLY_RECORD_TEXT = ("The end record says done after the stage {stage}, before the last stage {last}, so the build is "
                      "not counted as finished.")
 FAILED_RECORD_TEXT = "The end record says the build failed (stage {stage}, exit {exit})."
+
+# The stage runner's check of the stage account (targets/*/modules/stage_user.sh stage_preflight): before its first
+# stage, in the build sandbox, it refuses the build with one of these reasons as its exit code and an end record
+# "failed" at the stage "preflight" (PREFLIGHT_STAGE). The fixed vocabulary, with the plain text the waiters show.
+PREFLIGHT_STAGE = "preflight"
+STAGE_USER_EXIT = {"rights_missing": 80, "rights_extra": 81, "no_new_privileges": 82, "same_account": 83,
+                   "no_setpriv": 84, "switch_failed": 85, "stage_has_rights": 86, "reads_runner": 87, "folders": 88,
+                   "inputs": 89}
+STAGE_USER_TEXT = {
+    "rights_missing": "The stage runner lacked the rights to switch to the stage account (CAP_SETUID, CAP_SETGID).",
+    "rights_extra": "The stage runner had rights beyond the switch to the stage account.",
+    "no_new_privileges": "The stage runner ran without no-new-privileges.",
+    "same_account": "The stage runner ran with the stage account's ids.",
+    "no_setpriv": "The build image has no setpriv, so the stage runner cannot switch to the stage account.",
+    "switch_failed": "The test switch to the stage account did not work.",
+    "stage_has_rights": "The stage account still had capabilities after the switch.",
+    "reads_runner": "A test child under the stage account could open the stage runner's memory or environment.",
+    "folders": "The stage account cannot write a folder the stage modules write.",
+    "inputs": "The stage account cannot read an input of the build (the model, the dataset, the importance matrix or "
+              "the hardware profile); its files must be readable for your group.",
+}
+STAGE_USER_REFUSED = ("The build sandbox refused the build before its first stage: {text} No stage module ran; the "
+                      "modules never run as the stage runner itself.")
+
+
+def stage_user_problem(record: Optional["EndRecord"], exit_code: int) -> Optional[str]:
+    """The plain reason of a build the stage runner refused in its check of the stage account (STAGE_USER_EXIT), from
+    its end record (failed, stage preflight) and the container's exit status; None for any other end."""
+    if record is None or record.done or record.stage != PREFLIGHT_STAGE:
+        return None
+    reason = next((name for name, code in STAGE_USER_EXIT.items() if code == exit_code), None)
+    if reason is None:
+        return None
+    return STAGE_USER_REFUSED.format(text=STAGE_USER_TEXT[reason])
+
 
 _STATUS = ("done", "failed")
 _STAGE = re.compile(r"^(?:[a-z][a-z0-9_-]{0,31}|-)$")
@@ -129,7 +166,10 @@ def new_end_key(work: Path, job: str = "build") -> Optional[str]:
             return None
         path.unlink(missing_ok=True)
         key = secrets.token_hex(16)
-        path.write_text(key + "\n", encoding="ascii")
+        # owner-only (0600): the stage account shares the runner's group in the build sandbox, never this file
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        with os.fdopen(fd, "w", encoding="ascii") as handle:
+            handle.write(key + "\n")
         return key
     except OSError:
         return None
@@ -277,7 +317,8 @@ def exit_code(reason: Optional[str]) -> int:
 
 __all__ = ["END_REASONS", "STATUS_OF", "EVENT_OF", "EVENTS", "NAME_OF_EVENT", "END_RECORD", "CANCEL_NOTE",
            "RUNNING_NOTE", "END_GRACE", "NO_RECORD_TEXT", "FOREIGN_RECORD_TEXT", "EXIT_MISMATCH_TEXT",
-           "EARLY_RECORD_TEXT", "FAILED_RECORD_TEXT", "END_KEY", "LAST_STAGE", "EndRecord", "read_end_record",
+           "EARLY_RECORD_TEXT", "FAILED_RECORD_TEXT", "END_KEY", "LAST_STAGE", "PREFLIGHT_STAGE", "STAGE_USER_EXIT",
+           "STAGE_USER_TEXT", "STAGE_USER_REFUSED", "stage_user_problem", "EndRecord", "read_end_record",
            "record_body", "seal_of", "new_end_key", "end_problem", "end_record_path",
            "write_cancel_note", "reason_of_timeout", "status_of", "event_of", "speaking_name", "reason_text",
            "EXIT_CODES", "EXIT_STILL_RUNNING", "exit_code"]

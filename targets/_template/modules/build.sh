@@ -43,7 +43,9 @@
 # at the start.
 # Only this runner writes the record. The BuildEngine leaves a one-run key in stages/<job>/end.key; the runner reads it
 # into a variable it never exports and removes the file before the first stage, so no stage module finds it in its
-# environment or a file (the limit, a host that lets a process read the memory of its parent: docs/DESIGN.md).
+# environment or a file. In the build sandbox (STAGE_ISOLATION=user) every stage module runs under the image's stage
+# account through run_as_stage (stage_user.sh), so the kernel also refuses a module the runner's memory; the runner
+# checks its own rights and a test switch first (stage_preflight) and refuses the build otherwise.
 # The BuildEngine counts a build as done only with the container's exit status 0 and a record sealed with that key
 # that names the job's last stage (orchestrator/Core/build_end.py end_problem). A run started by hand has no key and
 # writes "seal -".
@@ -78,6 +80,9 @@ set -euo pipefail
 TARGET_LABEL="[MODULE_NAME]"
 MODULES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$(dirname "$MODULES_DIR")/scripts"
+# The stage account of the build sandbox: run_as_stage, stage_preflight (see stage_user.sh)
+# shellcheck source=stage_user.sh
+source "$MODULES_DIR/stage_user.sh"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -155,6 +160,15 @@ END_WRITTEN=0
 DIGEST=""
 rm -f "$END_RECORD" "$END_RECORD.tmp"   # a record of an earlier run never ends this one
 
+runner_write() {  # FILE: stdin into FILE, through a new temporary file of the runner's own (never through a stage's)
+    local tmp
+    tmp="$(mktemp "$1.XXXXXX")" || return 1
+    if ! cat > "$tmp" || ! mv -f "$tmp" "$1"; then
+        rm -f "$tmp"
+        return 1
+    fi
+}
+
 write_end() {  # STATUS EXIT: the one writer of the end record; fails when the record could not be put in place
     local body seal="-"
     body="$(printf 'status %s\nexit %s\nstage %s\njob %s\ninputs %s\ntime %s' "$1" "$2" "${END_STAGE:--}" "$JOB" \
@@ -165,7 +179,7 @@ write_end() {  # STATUS EXIT: the one writer of the end record; fails when the r
     END_WRITTEN=1
     # whatever a stage left in the record's places (a folder, a link, a forged record) never stays
     rm -rf -- "$END_RECORD.tmp" "$END_RECORD" 2>/dev/null || true
-    if ! printf '%s\nseal %s\n' "$body" "$seal" > "$END_RECORD.tmp" || ! mv -f "$END_RECORD.tmp" "$END_RECORD"; then
+    if ! printf '%s\nseal %s\n' "$body" "$seal" | runner_write "$END_RECORD"; then
         echo "ERROR: The end record could not be written ($END_RECORD); the build is not counted as finished." >&2
         return 1
     fi
@@ -331,8 +345,7 @@ write_marker() {  # STAGE: written only after the stage exited 0
                 fi
             done
         fi
-    } > "$STAGE_DIR/$stage.done.tmp"
-    mv -f "$STAGE_DIR/$stage.done.tmp" "$STAGE_DIR/$stage.done"
+    } | runner_write "$STAGE_DIR/$stage.done"
 }
 
 # --- Loop protection (DECISIONS round 25 Q8) -----------------------------------------------------------------------
@@ -353,8 +366,7 @@ count_start() {  # STAGE: records one more start; fails when the stage already s
         echo "ERROR: The stage $stage started $count times with the same inputs and never finished; it is not started again (a loop, not a long build). Look at its log for the cause, then start the build again with --fresh." >&2
         return 1
     fi
-    printf 'inputs %s\ncount %s\n' "$inputs" "$((count + 1))" > "$file.tmp"
-    mv -f "$file.tmp" "$file"
+    printf 'inputs %s\ncount %s\n' "$inputs" "$((count + 1))" | runner_write "$file"
 }
 
 # A person's or an AI's Cancel is not a restart: the stage that was running when the framework wrote the cancel note
@@ -372,8 +384,8 @@ forget_cancelled_start() {
                 if [ "$count" -le 1 ]; then
                     rm -f "$file"
                 else
-                    printf 'inputs %s\ncount %s\n' "$(sed -n 's/^inputs //p' "$file")" "$((count - 1))" > "$file.tmp"
-                    mv -f "$file.tmp" "$file"
+                    printf 'inputs %s\ncount %s\n' "$(sed -n 's/^inputs //p' "$file")" "$((count - 1))" \
+                        | runner_write "$file"
                 fi
             fi ;;
     esac
@@ -386,6 +398,13 @@ echo "=== Build Started: $TARGET_LABEL (stages: ${STAGES[*]}) ==="
 
 forget_cancelled_start
 rm -f "$STAGE_DIR/running"
+# The build sandbox's stage account: the runner's rights, a test switch, the folders the modules write (stage_user.sh)
+END_STAGE="preflight"
+stage_preflight "$WORK_DIR" "$STAGE_DIR" "${BUILD_CACHE_DIR:-/build-cache}/output" "${BUILD_CACHE_DIR:-/build-cache}/imatrix"
+if ! stage_isolated; then
+    echo "=== Isolation: stage modules run as the stage runner's own user (outside the build sandbox) ==="
+fi
+END_STAGE=""
 DIGEST="$(inputs_digest)"
 # The first stage to run: the first one without a matching marker, moved back over every finished stage whose files
 # are gone (the stage after it needs them). With every marker matching, the last stage's files decide.
@@ -424,14 +443,17 @@ for i in "${!STAGES[@]}"; do
     echo "=== Stage $number: $name ==="
     started=$SECONDS
     rm -f "$STAGE_DIR/$name.outputs"
+    : | runner_write "$STAGE_DIR/$name.outputs"   # the stage's list of its files (stage_output): it may add to it
+    chmod 0664 "$STAGE_DIR/$name.outputs"
     END_STAGE="$name"
     if ! count_start "$name"; then
         echo "=== Stage $number: $name failed (exit 75) ===" >&2
         exit 75
     fi
-    printf '%s\n' "$name" > "$STAGE_DIR/running"
+    printf '%s\n' "$name" | runner_write "$STAGE_DIR/running"
     rc=0
-    STAGE_NAME="$name" bash "$MODULES_DIR/${name}_module.sh" || rc=$?
+    export STAGE_NAME="$name"
+    run_as_stage bash "$MODULES_DIR/${name}_module.sh" || rc=$?
     if [ "$rc" -ne 0 ]; then
         if [ "$rc" -lt 128 ]; then
             rm -f "$STAGE_DIR/$name.starts"   # it ended with its own error; only a stage stopped from outside counts

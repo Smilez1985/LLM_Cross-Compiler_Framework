@@ -189,13 +189,16 @@ def test_a_forged_done_record_while_running_does_not_switch_the_clock_off(engine
     assert not any("The build is done." in line for line in progress.logs)
 
 
-@pytest.mark.parametrize("name", ["docs/DESIGN.md", "docs/DESIGN_DE.md"])
-def test_the_design_names_the_limit_of_the_seal(name):
-    """The seal keeps the key out of a module's environment and files, not out of the runner's memory: a module runs as
-    the same user, and dropped capabilities with no-new-privileges do not stop a same-user process from reading
-    /proc/<pid>/mem where the host kernel allows it (Yama ptrace_scope 0, or no Yama). The design says so instead of
-    claiming the sandbox stops it."""
+@pytest.mark.parametrize("name, account, limit", [
+    ("docs/DESIGN.md", "the stage account", "Limit: a module runs as the same user as the runner"),
+    ("docs/DESIGN_DE.md", "dem Stufen-Konto", "Grenze: Ein Modul läuft als derselbe Benutzer wie der Runner")])
+def test_the_design_names_the_guarantee_of_the_stage_account_and_where_it_does_not_hold(name, account, limit):
+    """Since 3.3.0 (the stage account) the stage modules run under their own user, so the kernel refuses them the
+    runner's memory whatever Yama ptrace_scope says; the design says so, names the legacy mode and the run by hand
+    where it does not hold, and keeps the old limit as a history line only (this test pinned the old limit text until
+    then; it changed with the behaviour)."""
     text = (REPO_ROOT / name).read_text(encoding="utf-8")
     assert "no capabilities to read another process's memory" not in text
     assert "keine Capabilities, um den Speicher eines anderen Prozesses zu lesen" not in text
-    assert "ptrace_scope" in text
+    assert account in text and "ptrace_scope" in text and "build_sandbox: false" in text
+    assert limit not in text

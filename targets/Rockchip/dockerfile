@@ -269,6 +269,13 @@ RUN groupadd -g "${GROUP_ID}" llmbuilder \
     && mkdir -p "${BUILD_CACHE_DIR}" \
     && chown -R llmbuilder:llmbuilder /app "${BUILD_CACHE_DIR}"
 
+# The stage account of the build sandbox (modules/stage_user.sh STAGE_UID/STAGE_GID): the stage modules run under it,
+# with other ids than the stage runner and no capabilities, so they cannot read the runner's memory. No home, no login
+# shell. setpriv (util-linux) is the switch; the build fails here when the base image lacks it.
+RUN groupadd -g 64010 llmstage \
+    && useradd -l -M -u 64010 -g llmstage -d /nonexistent -s /usr/sbin/nologin llmstage \
+    && command -v setpriv
+
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

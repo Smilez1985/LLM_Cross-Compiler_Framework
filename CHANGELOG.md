@@ -213,6 +213,22 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   stop from outside without the note still counts.
 
 ### Security
+- `2026-10-31 07:47 UTC` · `v3.3.0` **The stage modules run under their own user, so they cannot read the key of the end record**
+  ([design](docs/DESIGN.md#build-pipeline-and-target-modules)): a stage module ran as the stage runner's own user and
+  could read the one-run key that seals the end record from the runner's memory (`/proc/<runner>/mem`) on a host
+  without Yama or with `ptrace_scope` 0; seccomp and the dropped capabilities did not stop it. Now the stage
+  container starts as root with only CAP_SETUID and CAP_SETGID, the entrypoint makes the runner the person with
+  exactly those two rights, and the runner starts every module under the image's new stage account (`llmstage`,
+  uid and gid 64010) without any capability, so the kernel refuses the read. Before the first module the runner
+  checks its own capability sets, no-new-privileges and ids and a test switch (the child must have the stage ids,
+  no rights, no access to the runner's memory and environment, and write and read what a module needs), and the
+  framework checks the created container's inspect (user, exactly the two capabilities with everything else
+  dropped, no-new-privileges, read-only image and mounts, no network; Docker and Podman) before it starts. Each
+  refuses the build with a plain reason from a fixed vocabulary instead of running a module as the runner. A rootless
+  engine whose sub-ids do not reach the stage account is refused before the build and named by the doctor
+  (`docker.stage_user`). The log and `build_info.json` (`end.isolation`) say which mode a build ran in; the legacy
+  mode (`build_sandbox: false`) keeps the modules on the runner's user and says so. The key file is the owner's only
+  (0600), and a recipe's dataset folder is readable for the person's group.
 - `2026-10-31 04:21 UTC` · `v3.3.0` **pypdf 6.21.4: seven crafted-PDF denials of service closed**
   ([design](docs/DESIGN.md#security-model)): pypdf 6.21.2 could be made to loop forever or use large amounts of memory
   and time by a crafted PDF (encrypted files with a wrong page count, page labels, cross-reference streams, invalid

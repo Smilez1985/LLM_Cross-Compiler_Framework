@@ -782,8 +782,9 @@ class ModuleGenerator:
             for stage in STAGE_MODULES:
                 self._process_template(f"modules/{stage}_module.sh", target_dir, data)
 
-            # The stage runner that runs them
+            # The stage runner that runs them, and its stage account of the build sandbox (sourced by build.sh)
             self._write_build_script(target_dir, data)
+            self._process_template("modules/stage_user.sh", target_dir, data)
             
             # Specialized Modules (Optional copy if template exists): the convert stage's format helpers, and the
             # host benchmark that no build runs (models for a board are measured on the board)
@@ -1046,6 +1047,12 @@ set -euo pipefail
 WORK_DIR="${{BUILD_CACHE_DIR:-/build-cache}}"
 OUTPUT_DIR="${{WORK_DIR}}/output"
 mkdir -p "$OUTPUT_DIR"
+# This runner has no stage account (modules/stage_user.sh of the template): it runs its logic itself, so the build
+# sandbox, which runs every module under the stage account, refuses it (the same reason as the template's check)
+if [ "${{STAGE_ISOLATION:-}}" = "user" ]; then
+    echo "ERROR: Stage user check failed (no_setpriv): this generated runner cannot switch to the stage account; generate the target again from the template." >&2
+    exit 84
+fi
 
 # The end record the framework reads (the same as targets/_template/modules/build.sh): written as the very last step,
 # sealed with the one-run key the framework leaves in the job folder (taken and removed before anything else runs)

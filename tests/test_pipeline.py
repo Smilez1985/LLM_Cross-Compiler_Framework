@@ -549,7 +549,10 @@ class TestBuildSandbox:
             expected = "1234:1234"
         build_temp = tmp_path / "builds" / "b1"
         kwargs, env, vols = engine._sandbox(make_config(), build_temp)
-        assert kwargs["user"] == expected
+        # The stage account (since 3.3.0): the container starts as root with only the two rights of the switch, the
+        # stage runner becomes the host user (STAGE_RUNNER_IDS) and every stage module the image's stage account
+        assert kwargs["user"] == "0:0" and env["STAGE_RUNNER_IDS"] == expected and env["STAGE_ISOLATION"] == "user"
+        assert kwargs["cap_add"] == ["SETUID", "SETGID"]
         assert kwargs["network_mode"] == "none" and kwargs["cap_drop"] == ["ALL"]
         assert kwargs["read_only"] is True and "no-new-privileges:true" in kwargs["security_opt"]
         assert env["HF_HUB_OFFLINE"] == "1" and env["BUILD_SCRATCH_DIR"] == "/build-cache/work"
@@ -561,8 +564,8 @@ class TestBuildSandbox:
         owned = []
         monkeypatch.setattr("orchestrator.Core.builder.os.getuid", lambda: 0)
         monkeypatch.setattr("orchestrator.Core.builder.os.chown", lambda path, uid, gid: owned.append((Path(path), uid)))
-        kwargs, _, _ = engine._sandbox(make_config(), tmp_path / "builds" / "b1")
-        assert kwargs["user"] == "1000:1000"
+        kwargs, env, _ = engine._sandbox(make_config(), tmp_path / "builds" / "b1")
+        assert kwargs["user"] == "0:0" and env["STAGE_RUNNER_IDS"] == "1000:1000"
         assert (tmp_path / "builds" / "b1" / "work", 1000) in owned
 
     def test_sandbox_can_be_disabled(self, engine, tmp_path):

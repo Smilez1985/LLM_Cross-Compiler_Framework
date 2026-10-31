@@ -58,6 +58,21 @@ TERMINAL = (BuildStatus.COMPLETED, BuildStatus.FAILED, BuildStatus.CANCELLED)
 # Fakes
 # ---------------------------------------------------------------------------------------------------
 
+def inspect_of(volumes, kwargs):
+    """What `docker inspect` says of a container created with these docker-py create() arguments (the parts the
+    build engine checks before a stage container starts: utils/sandbox.py sandbox_problem)."""
+    return {
+        "Config": {"User": kwargs.get("user") or ""},
+        "HostConfig": {"CapAdd": list(kwargs.get("cap_add") or []) or None,
+                       "CapDrop": list(kwargs.get("cap_drop") or []) or None,
+                       "SecurityOpt": list(kwargs.get("security_opt") or []) or None,
+                       "ReadonlyRootfs": bool(kwargs.get("read_only")), "Privileged": bool(kwargs.get("privileged")),
+                       "NetworkMode": kwargs.get("network_mode") or "default"},
+        "Mounts": [{"Type": "bind", "Source": host, "Destination": bind.get("bind"), "RW": bind.get("mode") != "ro"}
+                   for host, bind in (volumes or {}).items()],
+    }
+
+
 def write_end_record(volumes, name, exit_code):
     """What the stage runner (targets/*/modules/build.sh) writes as its very last step into the mounted work folder
     (Core/build_end.py): a fake stage container that exits by itself writes it too. Like the runner it takes the
@@ -310,6 +325,7 @@ class FakeDockerClient:
         if name.startswith("llm-build-"):
             options.setdefault("outputs", {self.MODEL_FILE: b"gguf-weights"})
         container = FakeContainer(self, name, volumes=volumes, **options)
+        container.attrs = inspect_of(volumes, kwargs)
         self.everything.append(container)
         self.events.append((name, "create"))
         return container

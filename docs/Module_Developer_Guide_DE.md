@@ -918,7 +918,10 @@ Auftrag `imatrix` (dort führt `llama-imatrix` das Modell aus).
 Umwandlungsstufen führen Modellwerkzeuge und den Build-Code des Targets aus, der von einer KI erzeugt sein kann. Mit
 der Vorgabe `build_sandbox: true` läuft jeder Stufen-Container:
 
-- als Host-Benutzer, nicht als root (1000:1000, wenn der Host-Benutzer root ist oder unter Windows);
+- unter dem **Stufen-Konto** `llmstage` des Images (uid und gid 64010), nicht als root und nicht als Stufen-Runner:
+  Der Runner (`build.sh`, der Host-Benutzer, 1000:1000, wenn der Host-Benutzer root ist oder unter Windows) startet
+  jedes Modul über `run_as_stage` (`modules/stage_user.sh`) ohne jede Capability, mit den Gruppen des Runners und
+  umask 0002;
 - **ohne Netzwerk** (`network_mode: none`); Modell und Datensatz wurden auf dem Host bereitgestellt;
 - ohne Linux-Capabilities und mit `no-new-privileges`;
 - mit **schreibgeschütztem Image-Dateisystem**; `/tmp` ist ein 1-GB-tmpfs;
@@ -930,7 +933,17 @@ der Vorgabe `build_sandbox: true` läuft jeder Stufen-Container:
 Mit `--gpu` werden NVIDIA-GPUs durchgereicht, wenn auf dem Host `nvidia-smi` vorhanden ist; sonst wird `/dev/dri`
 durchgereicht, und der Container-Benutzer tritt den Gruppen bei, denen die Render-Geräte gehören.
 
-Was das für dein Target heißt: Installiere alles im Dockerfile; schreib nicht ins Image; verlass dich nicht auf root,
+Was ein Stufen-Modul schreiben darf: `$BUILD_SCRATCH_DIR` (mit `tmp`, `home` und `cache`), den Stufen-Ordner des
+Jobs (`$STAGE_DIR`, für den Build-Plan und die Dateien deiner Stufe), `$BUILD_CACHE_DIR/output` und im Job der
+Importance-Matrix `/build-cache/imatrix`. Es darf dort Dateien anlegen, aber die des Runners (die Resume-Marker,
+die Startzähler, den Abschluss-Eintrag) weder ändern noch verschieben oder entfernen. Was es liest (das Modell, den
+Datensatz, die Importance-Matrix, das Hardware-Profil), muss für die Gruppe der Person lesbar sein. Der Runner
+prüft das alles vor dem ersten Modul und verweigert den Build mit einem klaren Grund (etwa `inputs` für eine
+Modelldatei, die nur ihr Besitzer lesen darf). Lass `modules/stage_user.sh` so, wie die Vorlage es hat, und starte
+eine Stufe nur über das `build.sh` der Vorlage.
+
+Was das für dein Target heißt: Installiere alles im Dockerfile und behalte das Konto `llmstage` der Vorlage und
+`setpriv` (util-linux) im Image; schreib nicht ins Image; verlass dich nicht auf root,
 `sudo` oder eine feste Benutzer-ID; leg große Dateien in `$BUILD_SCRATCH_DIR` ab; lies Modell und Datensatz nur über
 die übergebenen Pfade. `build_sandbox: false` schaltet auf den alten Modus (root plus Entrypoint) zurück; nutze das
 nur, um herauszufinden, ob ein Fehler an der Sandbox liegt.
