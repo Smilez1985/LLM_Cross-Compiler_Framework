@@ -1,0 +1,22 @@
+{
+  "_about": "The one pinned table of the runtime layer's way 'fetch' (orchestrator/Core/runtime_layer.py PREBUILT): per tool and architecture the URL and the sha256 of every prebuilt static program it may fetch. kind 'deb': a Debian package (archive_sha256 of the package, member and sha256 of the program in it); kind 'file': the program itself (sha256). busybox comes from Debian's busybox-static on snapshot.debian.org. Debian ships no static setpriv; its proposed source is a release asset of this project, built by the project's own CI (job 'Runtime layer tools' in .github/workflows/ci.yml, which uploads the programs with their SHA256SUMS as workflow artifacts). Until the maintainer publishes such a release and its URL and sha256 are entered here, setpriv has no entry and the way 'fetch' refuses, naming the way 'build'.",
+  "busybox": {
+    "amd64": {
+      "kind": "deb",
+      "url": "https://snapshot.debian.org/file/e12379ea301a52991b9868159ba3395c59acebc6",
+      "archive_sha256": "03195b820588781f616f25e34e7636649d2eb7e9454fb02847a7c3110cfb8da1",
+      "member": "./usr/bin/busybox",
+      "sha256": "3b163626a2bbe6435cd8b45cb4ac73e5678d18565671618cfb078d2d7773c035",
+      "name": "busybox-static_1.37.0-6_amd64.deb"
+    },
+    "arm64": {
+      "kind": "deb",
+      "url": "https://snapshot.debian.org/file/5704024ea566a592797ec4de84f23cd5189cf607",
+      "archive_sha256": "a86ffdf53b586bec93b8e15aaa5a4813b80297f71819a44288db408758214792",
+      "member": "./usr/bin/busybox",
+      "sha256": "a2be2ab83013d0a762bef43ec387f33e8765172f87aa9d3dde5c355ee3e1ca0e",
+      "name": "busybox-static_1.37.0-6_arm64.deb"
+    }
+  },
+  "setpriv": {}
+}

@@ -109,6 +109,22 @@ class BuildImageDialog(QDialog):
         form.addRow(self.btn_save_sources)
         layout.addWidget(group)
 
+        group_layer = QGroupBox(self._t("bimg.layer"), self)
+        form_layer = QFormLayout(group_layer)
+        self.lbl_layer = plain_label("", group_layer)
+        self.lbl_layer.setObjectName("lbl_bimg_layer")
+        form_layer.addRow(self.lbl_layer)
+        self.combo_toolbox = QComboBox(group_layer)
+        self.combo_toolbox.setObjectName("combo_bimg_toolbox")
+        for way in ("build", "fetch"):
+            self.combo_toolbox.addItem(self._t(f"bimg.layer.way.{way}"), way)
+        form_layer.addRow(plain_label(self._t("bimg.layer.toolbox"), group_layer, wrap=False), self.combo_toolbox)
+        self.btn_save_toolbox = QPushButton(button_text(self._t("bimg.layer.save")), group_layer)
+        self.btn_save_toolbox.setObjectName("btn_bimg_save_toolbox")
+        self.btn_save_toolbox.clicked.connect(self.save_toolbox)
+        form_layer.addRow(self.btn_save_toolbox)
+        layout.addWidget(group_layer)
+
         self.txt_result = QPlainTextEdit(self)
         self.txt_result.setObjectName("txt_bimg_result")
         self.txt_result.setReadOnly(True)
@@ -117,6 +133,7 @@ class BuildImageDialog(QDialog):
         close.rejected.connect(self.reject)
         layout.addWidget(close)
         self.refresh_images()
+        self.refresh_layer()
 
     # --- helpers ---
 
@@ -201,6 +218,32 @@ class BuildImageDialog(QDialog):
             self.txt_result.setPlainText(str(e))
             return
         self.txt_result.setPlainText(self._t("bimg.sources.saved"))
+
+    def refresh_layer(self) -> None:
+        """The runtime layer's verdict, the toolbox way and the end folder's protection on this computer."""
+        from orchestrator.Core import runtime_layer
+        if self.config is None:
+            return
+        status = runtime_layer.layer_status(runtime_layer.cache_dir_of(self.config), self.config)
+        index = self.combo_toolbox.findData(status["toolbox_way"])
+        if index >= 0:
+            self.combo_toolbox.setCurrentIndex(index)
+        lines = [status["text"], self._t("bimg.layer.made", way=status["toolbox_made"] or "-"),
+                 runtime_layer.END_PROTECTED if status["end_folder"] == "protected" else runtime_layer.END_UNPROTECTED]
+        if status["toolbox_way"] == "fetch" and not status["fetch_ready"]:
+            lines.append(runtime_layer.PREBUILT_MISSING)
+        self.lbl_layer.setText("\n".join(lines))
+
+    def save_toolbox(self) -> None:
+        """The person's choice of how the runtime layer's tools are made (person-only: runtime_layer_toolbox)."""
+        from orchestrator.Core import runtime_layer
+        try:
+            way = runtime_layer.set_toolbox_way(self.config, str(self.combo_toolbox.currentData() or "build"))
+        except runtime_layer.ToolboxWayError as e:
+            self.txt_result.setPlainText(str(e))
+            return
+        self.txt_result.setPlainText(self._t("bimg.layer.saved", way=way))
+        self.refresh_layer()
 
     def export_image(self, path: Optional[str] = None) -> None:
         from orchestrator.Core.build_image import export_image
