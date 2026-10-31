@@ -2798,7 +2798,7 @@ decides a deletion: not through its own form, a standing approval or a delegatio
   CPU (model, cores, ARM core clusters, every CPU feature ggml builds for: x86 and ARM, such as AVX-512 or the ARM
   dot product, and since probe 3.2.0 RISC-V, LoongArch, POWER and s390x, also from the kernel's HWCAP bits), memory, SoC, NPU and every GPU (NVIDIA compute capability, AMD gfx target, Vulkan), and since probe 3.3.0 how the machine is
   reached and installed on (the SSH server, OpenSSH or Dropbear, and its version; sudo and whether it needs a password,
-  asked only with `sudo -n true`; the ssh-keygen version; the package manager and DietPi's dietpi-software: the
+  asked only with `sudo -k -n true`; the ssh-keygen version; the package manager and DietPi's dietpi-software: the
   `Access:` line of `llm-cli scan`); no host name, serial
   number or MAC address. The probes need no network, never prompt, install or ask for administrator rights, and run
   external tools with a time limit. Tests run the `.py` and the `.sh` on the same fixture machines and require the

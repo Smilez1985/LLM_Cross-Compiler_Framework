@@ -90,7 +90,7 @@ def board(tmp_path: Path, kind: str) -> Path:
         program(root, "/usr/sbin/dropbear", 'echo "Dropbear v2022.83" >&2; exit 0')
         dangling(root, "/etc/systemd/system/multi-user.target.wants/dropbear.service",
                  "/lib/systemd/system/dropbear.service")
-        program(root, "/usr/bin/sudo", '[ "$1 $2" = "-n true" ] && exit 0; exit 1')
+        program(root, "/usr/bin/sudo", '[ "$*" = "-k -n true" ] && exit 0; exit 1')
         write(root, f"/etc/sudoers.d/{MADE_UP_USER}", f"{MADE_UP_USER} ALL=(ALL:ALL) NOPASSWD: ALL\n")
         program(root, "/usr/bin/apt-get", "exit 0")
         program(root, "/boot/dietpi/dietpi-software", "exit 0")
@@ -243,7 +243,44 @@ class TestBoards:
         py_run(root, bindir, tmp_path)
         if SHELLS:
             run_emitter(SHELLS[0].split() + [str(PROBE_SH), "--no-toolchain"], root, bindir, tmp_path)
-        assert set(log.read_text().splitlines()) == {"-n true"}
+        assert set(log.read_text().splitlines()) == {"-k -n true"}
+
+    def test_cached_sudo_credentials_do_not_count_as_nopasswd(self, tmp_path):
+        # A person who just typed their password in this terminal has a sudo timestamp: `sudo -n true` would work
+        # for a few minutes, the installer's later non-interactive sudo would not. -k ignores the cache.
+        root = board(tmp_path, "dietpi-dropbear")
+        program(root, "/usr/bin/sudo", 'case " $* " in *" -k "*) echo "sudo: a password is required" >&2; exit 1 ;; '
+                                        'esac; exit 0')
+        bindir = tool_dir(tmp_path)
+        fake_id(bindir, 1000)
+        assert parse_profile(py_run(root, bindir, tmp_path)).get("SUDO") == "password"
+        for shell in SHELLS:
+            sh_text = run_emitter(shell.split() + [str(PROBE_SH), "--no-toolchain"], root, bindir, tmp_path)
+            assert parse_profile(sh_text).get("SUDO") == "password", shell
+
+    @pytest.mark.parametrize("listening", [False, True])
+    def test_dropbear_behind_an_sshd_link_is_dropbear(self, tmp_path, listening):
+        # A board image that links /usr/sbin/sshd to Dropbear: the process is called sshd, but OpenSSH key options
+        # would break it. The program the link points to decides.
+        root = make_sysroot(tmp_path, "rk3566")
+        process(root, 1, "systemd")
+        program(root, "/usr/sbin/dropbearmulti", 'echo "Dropbear v2022.83" >&2; exit 0')
+        dangling(root, "/usr/sbin/dropbear", "dropbearmulti")
+        dangling(root, "/usr/sbin/sshd", "dropbear")   # relative: the version is asked through the link
+        if listening:
+            write(root, "/proc/net/tcp", TCP_HEADER +
+                  "   0: 00000000:0016 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 777 1\n")
+        process(root, 300, "sshd", sockets=(777,) if listening else ())
+        bindir = tool_dir(tmp_path)
+        fake_id(bindir, 1000)
+        want = {"SSH_SERVER": "dropbear", "SSH_SERVER_VERSION": "2022.83",
+                "SSH_SERVER_SOURCE": "socket" if listening else "process", "SSH_SERVERS_INSTALLED": "dropbear"}
+        py_text = py_run(root, bindir, tmp_path)
+        assert {k: parse_profile(py_text).get(k) for k in want} == want
+        for shell in SHELLS:
+            sh_text = run_emitter(shell.split() + [str(PROBE_SH), "--no-toolchain"], root, bindir, tmp_path)
+            assert {k: parse_profile(sh_text).get(k) for k in want} == want, shell
+            assert comparable(sh_text) == comparable(py_text), shell
 
     def test_no_account_host_or_path_comes_out(self, tmp_path):
         for kind in EXPECTED:

@@ -13,7 +13,8 @@
 #                    terminal and uses sudo. Without it the probe never prompts, installs or asks for a password.
 #
 # POSIX sh (dash, busybox ash, bash), LC_ALL=C. No network, no stdin (tools get /dev/null), no sudo prompt: sudo is
-# only asked `sudo -n true` (the access facts; -n never prompts or reads a password). No host name,
+# only asked `sudo -k -n true` (the access facts; -n never prompts or reads a password, -k ignores cached
+# credentials). No host name,
 # user name, path, serial number or MAC address is read into the result; free text is printable ASCII.
 # HW_PROBE_SYSROOT (for tests): a folder that stands in for / when files are read; the kernel release and machine
 # then come from <sysroot>/proc/sys/kernel/osrelease and .../arch, and the host's getconf/ldconfig are not asked.
@@ -1730,10 +1731,30 @@ pick_server() {  # KINDS: dropbear before openssh before other (see SSH_SERVER i
 openssh_version() { printf '%s\n' "$1" | sed -n 's/.*OpenSSH_\(for_Windows_\)\{0,1\}\([0-9]\{1,2\}\.[0-9]\{1,2\}\).*/\2/p' | head -n1; }
 dropbear_version() { printf '%s\n' "$1" | grep Dropbear | grep -oE 'v[0-9]{4}\.[0-9]{1,3}' | head -n1 | cut -c2-; }
 
+binary_kind() {  # PATH KIND: the server a program of the table is, by the name its link points to (followed inside
+    # the machine: a Dropbear behind /usr/sbin/sshd is Dropbear), else KIND
+    t=$(f "$1") n=0
+    while [ -L "$t" ] && [ "$n" -lt 8 ]; do
+        l=$(readlink "$t" 2>/dev/null) || break
+        case "$l" in /*) t=$(f "$l") ;; *) t="${t%/*}/$l" ;; esac
+        n=$((n + 1))
+    done
+    ssh_server_name "${t##*/}" || echo "$2"
+}
+proc_kind() {  # COMM: the server a process name is; a name that is also a program of the table counts as that program
+    ssh_server_name "$1" >/dev/null || return 1
+    found=""
+    for spec in $SSH_SERVER_BINARIES; do
+        p=${spec%%:*}
+        [ "${p##*/}" = "$1" ] && exists "$p" && found=$(kind_add "$found" "$(binary_kind "$p" "${spec#*:}")")
+    done
+    pick_server "$found" || ssh_server_name "$1"
+}
+
 access_facts() {
     INSTALLED=""
     for spec in $SSH_SERVER_BINARIES; do
-        exists "${spec%%:*}" && INSTALLED=$(kind_add "$INSTALLED" "${spec#*:}")
+        exists "${spec%%:*}" && INSTALLED=$(kind_add "$INSTALLED" "$(binary_kind "${spec%%:*}" "${spec#*:}")")
     done
     # The listener of TCP port 22 (state 0A), by its socket inode in /proc/<pid>/fd where readable.
     LISTENERS=""
@@ -1747,14 +1768,14 @@ access_facts() {
             # The link targets are matched (socket:[inode]), not file names; one ls per process, not one readlink per fd.
             # shellcheck disable=SC2010
             ls -l "$d" 2>/dev/null | grep -Eq -- "$WANT" || continue   # another account's process: not readable
-            k=$(ssh_server_name "$(trim "$(head -n1 "${d%/fd}/comm" 2>/dev/null)")") &&
+            k=$(proc_kind "$(trim "$(head -n1 "${d%/fd}/comm" 2>/dev/null)")") &&
                 LISTENERS=$(kind_add "$LISTENERS" "$k")
         done
     fi
     PROCESSES=""
     for c in "$(f /proc)"/[0-9]*/comm; do
         [ -f "$c" ] || continue
-        k=$(ssh_server_name "$(trim "$(head -n1 "$c" 2>/dev/null)")") && PROCESSES=$(kind_add "$PROCESSES" "$k")
+        k=$(proc_kind "$(trim "$(head -n1 "$c" 2>/dev/null)")") && PROCESSES=$(kind_add "$PROCESSES" "$k")
     done
     SERVICES=""
     for spec in $SSH_SERVER_SERVICES; do
@@ -1778,19 +1799,19 @@ access_facts() {
     case "$SERVER" in
         openssh|dropbear)
             for spec in $SSH_SERVER_BINARIES; do
-                [ "${spec#*:}" = "$SERVER" ] && exists "${spec%%:*}" || continue
+                exists "${spec%%:*}" && [ "$(binary_kind "${spec%%:*}" "${spec#*:}")" = "$SERVER" ] || continue
                 out=$(tool_all "$(f "${spec%%:*}")" -V)
                 if [ "$SERVER" = openssh ]; then v=$(openssh_version "$out"); else v=$(dropbear_version "$out"); fi
                 put SSH_SERVER_VERSION "$v" "$P_VERSION" quiet
                 break
             done ;;
     esac
-    # sudo: root needs none; else `sudo -n true` only (never prompts, never reads a password).
+    # sudo: root needs none; else `sudo -k -n true` only (never prompts, never reads a password).
     UID_NOW=$(tool id -u)
     if [ "$UID_NOW" = 0 ]; then put SUDO root
     elif ! s=$(first_path $SUDO_PATHS); then put SUDO absent
     else
-        $TIMEOUT "$(f "$s")" -n true </dev/null >/dev/null 2>&1
+        $TIMEOUT "$(f "$s")" -k -n true </dev/null >/dev/null 2>&1
         rc=$?
         if [ "$rc" = 0 ]; then put SUDO nopasswd
         elif [ "$rc" = 126 ] || [ "$rc" = 127 ] || [ "$rc" = 124 ]; then warn "not_determined:SUDO"

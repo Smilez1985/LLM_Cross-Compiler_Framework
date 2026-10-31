@@ -416,7 +416,7 @@ class AccessFacts:
 
     ssh_server: openssh, dropbear, other or none; ssh_server_version (OpenSSH 9.2, Dropbear 2022.83); ssh_server_source:
     socket (listens on port 22), process (runs), service (enabled), binary (installed only); ssh_servers_installed: the
-    servers with a program on the machine. sudo: root (the probe ran as root), nopasswd (`sudo -n true` worked),
+    servers with a program on the machine. sudo: root (the probe ran as root), nopasswd (`sudo -k -n true` worked),
     password (sudo wants a password or refuses the account), absent, other (Windows). ssh_keygen: openssh or none, with
     ssh_keygen_version. init_system: INIT_SYSTEM. package_manager: apt, dnf, zypper, pacman, apk or other.
     dietpi_software: DietPi's dietpi-software is there (the way DietPi installs OpenSSH)."""

@@ -1373,10 +1373,10 @@ sudo, so the pairing takes its protection tier from these facts and a board inst
 
 | Key | Values and how they are read |
 |---|---|
-| `SSH_SERVER` | `openssh`, `dropbear`, `other`, `none`. First match: the program that owns the listening socket of TCP port 22 (readable for the probe's own processes, all of them as root), the running processes, an enabled service entry (systemd, OpenRC, sysvinit), an installed program. Several at one step: `dropbear` before `openssh` (OpenSSH key options would break a Dropbear board; the other way round only costs protection) |
+| `SSH_SERVER` | `openssh`, `dropbear`, `other`, `none`. First match: the program that owns the listening socket of TCP port 22 (readable for the probe's own processes, all of them as root), the running processes, an enabled service entry (systemd, OpenRC, sysvinit), an installed program. A program that is a link counts by the program it points to, and a process named like it counts as that program (a Dropbear behind `/usr/sbin/sshd` is `dropbear`). Several at one step: `dropbear` before `openssh` (OpenSSH key options would break a Dropbear board; the other way round only costs protection) |
 | `SSH_SERVER_SOURCE` | the step that found it: `socket`, `process`, `service`, `binary` |
 | `SSH_SERVER_VERSION`, `SSH_SERVERS_INSTALLED` | the version the server prints with `-V` (OpenSSH `9.2`, Dropbear `2022.83`); the servers with a program on the machine |
-| `SUDO` | `root` (the probe ran as root), `absent`, `nopasswd` (`sudo -n true` succeeded), `password` (sudo wants a password or refuses the account), `other` (Windows). `-n` never prompts and never reads a password; the probe asks sudo nothing else. The check can leave one line in the board's authentication log |
+| `SUDO` | `root` (the probe ran as root), `absent`, `nopasswd` (`sudo -k -n true` succeeded), `password` (sudo wants a password or refuses the account), `other` (Windows). `-n` never prompts and never reads a password, and `-k` ignores credentials cached in the terminal (a password typed a minute ago is no NOPASSWD rule); the probe asks sudo nothing else. The check can leave one line in the board's authentication log |
 | `SSH_KEYGEN`, `SSH_KEYGEN_VERSION` | `openssh` or `none`, and the version of the OpenSSH client next to it (`ssh -V`); signatures (`ssh-keygen -Y sign`/`-Y verify`) need 8.1 or later |
 | `PACKAGE_MANAGER`, `DIETPI_SOFTWARE` | `apt`, `dnf`, `zypper`, `pacman`, `apk` or `other` (left out when none is found); `present` when DietPi's `dietpi-software` exists |
 
