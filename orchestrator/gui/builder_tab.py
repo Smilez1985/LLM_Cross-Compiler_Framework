@@ -13,6 +13,7 @@ Updates v2.4.0:
 
 import platform
 from pathlib import Path
+from typing import Any
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QComboBox, QPushButton, QGroupBox, QCheckBox, 
@@ -222,6 +223,8 @@ class SSHProbeWorker(QThread):
         self.result_dir = Path(result_dir)
         self.cancel = CancelToken()
         self.signer = signer
+        self.chooser = None   # gui/key_tier_ask.py GuiTierChooser: the person's questions for a weaker board
+        self.mode = "private"   # Core/config_manager.py framework_mode of the window's framework
 
     def run(self):
         password, self.password = self.password, None   # used once for this scan, never kept
@@ -242,7 +245,8 @@ class SSHProbeWorker(QThread):
             scan = scan_device(self.state_dir, self.ip, int(self.port), self.user, None, password=password,
                                label=self.label, output_file=local_output, via="gui", actor="gui", audit=self.audit,
                                audit_factory=self.audit_factory, cancel=self.cancel,
-                               on_event=wait_lines(self.line.emit, self.ip), signer=self.signer)
+                               on_event=wait_lines(self.line.emit, self.ip), signer=self.signer,
+                               chooser=self.chooser, mode=self.mode)
         except DeviceScanError as e:
             if e.kind == "cancelled":
                 text = ui_text("deploy.remote.cancelled", address=self.ip)
@@ -789,6 +793,16 @@ class BuilderTab(QWidget):
             self.probe_worker = SSHProbeWorker(ip, user, password or None, state_dir, result_dir, port=port,
                                                label=label, audit_factory=audit,
                                                signer=lambda: board_ops.framework_signer(framework))
+            from orchestrator.Core.config_manager import framework_mode
+            from orchestrator.gui.key_tier_ask import GuiTierChooser
+            from orchestrator.gui.worker_relay import worker_relay
+            # a board that cannot take the root-owned key line: the person's questions, asked in the GUI thread
+            self._tier_token = object()
+            if not getattr(self, "_tier_relay", False):
+                worker_relay().done.connect(self._on_tier_question, Qt.QueuedConnection)
+                self._tier_relay = True
+            self.probe_worker.chooser = GuiTierChooser(self._tier_token, tell=self.probe_worker.line.emit)
+            self.probe_worker.mode = framework_mode(getattr(framework, "config", None))
             self.probe_worker.line.connect(self._log)   # the wait for the board (N5) and its answer
             self.probe_worker.finished.connect(self._on_probe_finished)
             self.scan_cancel_btn.setEnabled(True)
@@ -796,6 +810,13 @@ class BuilderTab(QWidget):
             self.probe_worker.start()
 
         self.host_keys.start(ip, port, trusted, step="probe")
+
+    def _on_tier_question(self, token: object, result: Any) -> None:
+        """A key-tier question of the running scan (gui/key_tier_ask.py), asked here with "No" as the default."""
+        from orchestrator.gui.plain import ask
+        from orchestrator.gui.worker_relay import WorkerQuestion
+        if token is getattr(self, "_tier_token", None) and isinstance(result, WorkerQuestion):
+            result.reply(lambda: ask(self, result.title, result.text))
 
     def _run_local_probe(self):
         """Option 3: Local Scan: the Python probe, as `llmcf scan` runs it by default."""

@@ -28,6 +28,7 @@ import hashlib
 from pathlib import Path
 
 from orchestrator.remote import gate
+from orchestrator.remote import openssh_switch  # noqa: F401 - defines the setup steps of the switch to OpenSSH
 from orchestrator.remote.gate import define
 from orchestrator.runtime.device import thermal
 from orchestrator.runtime.device.launcher import (INSTALL_REL, KEY_REL, START_SCRIPT, UNIT_NAME, UNIT_PATH,
@@ -545,8 +546,9 @@ def bundle(signer=None, *, missing: str = "no-signer") -> gate.GateBundle:
     `missing`: the reason word the root step gives when there is no signer (resolve_signer's)."""
     signers = getattr(signer, "allowed_signers", "") if signer is not None else ""
     selftest = signer.sign_bytes(gate.SELFTEST_DATA) if signers else ""
+    pem = (getattr(signer, "public_pem", "") or "") if signers else ""
     return gate.GateBundle(gate=gate.render_gate(), root_helper=render_root_helper(), signers=signers,
-                           selftest=selftest, missing=missing or "no-signer")
+                           selftest=selftest, missing=missing or "no-signer", pem=pem)
 
 
 def pairing_bundle(signer=None, state_dir=None) -> gate.GateBundle:
@@ -565,12 +567,13 @@ def key_facts(shell) -> dict:
         result = shell.run(gate.script("status"), again=True) if hasattr(shell, "lost") else \
             shell.run(gate.script("status"))
     except Exception:  # noqa: BLE001 - the key's state is a report; the step's own commands say what is wrong
-        return {"restricted": False, "gate": "", "keys": "home", "signing": False}
+        return {"restricted": False, "gate": "", "keys": "home", "signing": False, "tier": ""}
+    from orchestrator.remote.key_tiers import tier_of_status
     words = dict(w.split("=", 1) for w in (getattr(result, "out", "") or "").split() if "=" in w)
     restricted = words.get("restricted") == "yes"
     return {"restricted": restricted, "gate": words.get("gate", "") if words.get("gate") != "none" else "",
             "keys": "root" if restricted and words.get("keys") == "root" else "home",
-            "signing": restricted and words.get("signing") == "yes"}
+            "signing": restricted and words.get("signing") == "yes", "tier": tier_of_status(words)}
 
 
 def key_state(shell) -> tuple:
