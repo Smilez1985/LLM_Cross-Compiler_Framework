@@ -1,14 +1,18 @@
 version: 2
 updates:
-  # pyproject.toml and uv.lock. Dependabot changes the lock only: export requirements.txt and requirements-dev.txt
-  # again on its branch (CONTRIBUTING.md, section 2); the CI job "Lock files" fails until they match uv.lock.
+  # pyproject.toml and uv.lock. Dependabot changes the lock only: export requirements.txt, requirements-gui.txt and
+  # requirements-dev.txt again on its branch (CONTRIBUTING.md, section 2); the CI job "Lock files" fails until they
+  # match uv.lock.
   - package-ecosystem: uv
     directory: "/"
     # The hash-pinned exports are made by `uv export` from uv.lock, not edited by Dependabot (its pip-compile updater
     # fails on them: "unknown url type: '/pypi/<package>/json'").
     exclude-paths:
       - "requirements.txt"
+      - "requirements-gui.txt"
       - "requirements-dev.txt"
+    # Pull requests go to development, where the work lands; main only receives development as a whole.
+    target-branch: development
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
@@ -18,6 +22,8 @@ updates:
 
   - package-ecosystem: github-actions
     directory: "/"
+    # Pull requests go to development, where the work lands; main only receives development as a whole.
+    target-branch: development
     schedule:
       interval: weekly
     groups:
@@ -29,6 +35,8 @@ updates:
       - "/targets/Rockchip"
       - "/targets/_template"
       - "/Docker Setup"   # the base image of the framework container you build locally
+    # Pull requests go to development, where the work lands; main only receives development as a whole.
+    target-branch: development
     schedule:
       interval: weekly
     ignore:
