@@ -3,6 +3,9 @@
 Target Dockerfiles COPY `modules/`, `scripts/`, `sources/` and `docker/entrypoint.sh` relative to
 the context, so the context is staged from the target directory plus the shared entrypoint and an
 empty `sources/` folder (an offline build puts its local copy of llama.cpp there).
+`modules/stage_user.sh` (run_as_stage, stage_preflight: the stage account of the build sandbox) is
+always the framework's own (FRAMEWORK_STAGE_HELPER), whatever the target ships under that name, so a
+target can never carry a hollow helper into a sandboxed build.
 Symbolic links and special files in a target are never followed into the context (a community
 target could otherwise pull any file of the user into an image).
 Standard library only, so CI can stage a context without installing the framework.
@@ -16,6 +19,12 @@ import sys
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# The one source of the stage account's helper (sourced by every stage runner build.sh): the framework's template copy.
+# targets/Rockchip/modules/stage_user.sh is the same file byte for byte (tests/test_stage_user.py pins it) so that a
+# stage runner started by hand from the repository finds it too; a build context always gets this one.
+STAGE_HELPER_NAME = "stage_user.sh"
+FRAMEWORK_STAGE_HELPER = Path(__file__).resolve().parents[2] / "targets" / "_template" / "modules" / STAGE_HELPER_NAME
 
 
 def _is_link(path: Path) -> bool:
@@ -59,11 +68,23 @@ def stage_build_context(target_dir: Path, app_root: Path, context_dir: Path,
     for sub in ("modules", "scripts"):
         source = target_dir / sub
         if source.is_dir() and not _is_link(source):
-            shutil.copytree(source, context_dir / sub, symlinks=True, ignore=_skip_links)
+            ignore = _skip_links
+            if sub == "modules":   # never the target's own stage account helper: the framework's comes below
+                def ignore(directory, names, top=str(source)):
+                    skipped = _skip_links(directory, names)
+                    if os.path.samefile(directory, top) and STAGE_HELPER_NAME in names:
+                        skipped.append(STAGE_HELPER_NAME)
+                    return skipped
+            shutil.copytree(source, context_dir / sub, symlinks=True, ignore=ignore)
         else:
             if source.exists():
                 logger.warning(f"Not staged into the build context (link or not a folder): {source}")
             (context_dir / sub).mkdir()
+
+    # The framework's stage account helper in place of whatever the target has under that name (a file, a folder or
+    # nothing; the target's is never copied): the stage runner sources modules/stage_user.sh, and only the framework's
+    # run_as_stage and stage_preflight may switch the stage modules to the stage account and check the runner's rights.
+    shutil.copy2(FRAMEWORK_STAGE_HELPER, context_dir / "modules" / STAGE_HELPER_NAME)
 
     # Local sources an offline build may use (Core/build_image.py: the local copy of llama.cpp lands in
     # sources/llama.cpp); the target Dockerfiles COPY sources/, so the folder is there for every build, empty by default.

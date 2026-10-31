@@ -13,6 +13,7 @@ entrypoint does in the container); they need root on Linux to hand out those two
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -109,11 +110,11 @@ class RunnerBox:
     """A stage runner of a target (its real build.sh and stage_user.sh) with stub stage modules, in folders the
     unprivileged runner account owns, and the run's key in the job folder."""
 
-    def __init__(self, target: str):
+    def __init__(self, target: str, modules: Path = None):
         self.root = Path(tempfile.mkdtemp(prefix="llmcf-stage-user-", dir="/tmp"))  # nosec B108 - test folder
         os.chmod(self.root, 0o755)
         self.app = self.root / "app"
-        shutil.copytree(REPO_ROOT / "targets" / target / "modules", self.app / "modules")
+        shutil.copytree(modules or REPO_ROOT / "targets" / target / "modules", self.app / "modules")
         shutil.copytree(REPO_ROOT / "targets" / target / "scripts", self.app / "scripts")
         self.cache = self.root / "build-cache"
         self.work = self.cache / "work"
@@ -593,3 +594,259 @@ def test_both_conversion_containers_check_the_targets_runner():
     from orchestrator.Core.builder import BuildEngine
     for stage in (BuildEngine._generate_imatrix, BuildEngine._execute_build_modules):
         assert "self._sandbox(config, build_temp, target_path=target_path)" in _inspect.getsource(stage)
+
+
+# --- the framework's own helper in every build context (round 44 item 1) -------------------------------------------
+#
+# Before, the build context carried the target's modules/stage_user.sh: a target whose stage runner was the template's
+# but whose helper was hollow (run_as_stage running the module as it is, a preflight that checks nothing) passed
+# stage_runner_problem, and its modules ran as the runner with the runner's two ambient rights. Now every build context
+# carries the framework's helper (utils/build_context.FRAMEWORK_STAGE_HELPER), whatever the target ships.
+
+HOLLOW_HELPER = '''#!/bin/bash
+stage_isolated() { [ "${STAGE_ISOLATION:-}" = "user" ]; }
+run_as_stage() { "$@"; }
+stage_preflight() { :; }
+'''
+
+
+def _app_folder(root: Path) -> Path:
+    app = root / "app"
+    app.mkdir(exist_ok=True)
+    (app / "entrypoint.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    return app
+
+
+def _target_with_hollow_helper(root: Path, helper=HOLLOW_HELPER) -> Path:
+    target = root / "targets" / "Hollow"
+    shutil.copytree(REPO_ROOT / "targets" / "_template" / "modules", target / "modules")
+    shutil.copytree(REPO_ROOT / "targets" / "_template" / "scripts", target / "scripts")
+    shutil.copy2(REPO_ROOT / "targets" / "_template" / "Dockerfile", target / "Dockerfile")
+    helper_path = target / "modules" / "stage_user.sh"
+    helper_path.unlink()
+    if helper == "folder":
+        helper_path.mkdir()
+        (helper_path / "run_as_stage").write_text("hollow\n", encoding="utf-8")
+    elif helper is not None:
+        helper_path.write_text(helper, encoding="utf-8")
+    return target
+
+
+@pytest.mark.parametrize("helper", [HOLLOW_HELPER, None, "folder"], ids=["hollow", "missing", "folder"])
+def test_every_build_context_carries_the_frameworks_stage_helper(tmp_path, helper):
+    from orchestrator.utils.build_context import FRAMEWORK_STAGE_HELPER, stage_build_context
+    from orchestrator.utils.sandbox import stage_runner_problem
+    target = _target_with_hollow_helper(tmp_path, helper)
+
+    dockerfile = stage_build_context(target, _app_folder(tmp_path), tmp_path / "ctx")
+
+    staged = dockerfile.parent / "modules" / "stage_user.sh"
+    assert staged.is_file()
+    assert staged.read_bytes() == FRAMEWORK_STAGE_HELPER.read_bytes(), "the target's helper reached the build"
+    # the target's runner is the template's, which calls the helper: not refused, and the helper it gets is real
+    assert stage_runner_problem(target / "modules") is None
+
+
+def test_the_framework_helper_is_the_templates_and_both_shipped_targets_carry_it():
+    from orchestrator.utils.build_context import FRAMEWORK_STAGE_HELPER
+    assert FRAMEWORK_STAGE_HELPER == REPO_ROOT / "targets" / "_template" / "modules" / "stage_user.sh"
+    for target in TARGETS:
+        assert (REPO_ROOT / "targets" / target / "modules" / "stage_user.sh").read_bytes() == \
+            FRAMEWORK_STAGE_HELPER.read_bytes()
+
+
+def test_the_image_inputs_follow_the_frameworks_helper_not_the_targets(tmp_path):
+    """The build container image's inputs label covers the staged context: a target's own helper never changes it."""
+    from types import SimpleNamespace
+    from orchestrator.Core.builder import BuildEngine
+    from orchestrator.utils.build_context import stage_build_context
+    app = _app_folder(tmp_path)
+    config = SimpleNamespace(target_arch="Hollow", target_pack_sha256="")
+    labels = []
+    for n, helper in enumerate((HOLLOW_HELPER, None)):
+        target = _target_with_hollow_helper(tmp_path / str(n), helper)
+        dockerfile = stage_build_context(target, app, tmp_path / f"ctx{n}")
+        labels.append(BuildEngine._image_inputs(config, dockerfile, {}))
+    assert labels[0] == labels[1]
+
+
+@needs_rights
+def test_a_target_with_a_hollow_helper_still_runs_its_modules_as_the_stage_account(tmp_path):
+    from orchestrator.utils.build_context import stage_build_context
+    target = _target_with_hollow_helper(tmp_path)
+    context = stage_build_context(target, _app_folder(tmp_path), tmp_path / "ctx").parent
+    built = RunnerBox("_template", modules=context / "modules")
+    try:
+        built.module("source", WHOAMI)
+        result = built.run("--to", "source")
+        assert result.returncode == 0, result.stdout + result.stderr
+        uid, gid, caps = (built.work / "whoami").read_text().splitlines()[:3]
+        assert (int(uid), int(gid)) == (STAGE, STAGE), "the target's hollow helper ran the module as the runner"
+        assert caps.split() == ["0000000000000000"] * 3
+        assert "stage modules run under their own user" in result.stdout
+    finally:
+        built.remove()
+
+
+def test_the_runner_check_judges_the_runner_not_the_targets_helper(tmp_path):
+    """stage_runner_problem judges only the target's runner: the template's runner without a helper of its own passes
+    (the build context brings the framework's), a runner that starts its modules another way stays refused."""
+    from orchestrator.utils.sandbox import STAGE_RUNNER_OLD, stage_runner_problem
+    runner = (REPO_ROOT / "targets" / "_template" / "modules" / "build.sh").read_text(encoding="utf-8")
+    assert stage_runner_problem(_target_with_runner(tmp_path / "new", runner, helper=False) / "modules") is None
+    assert stage_runner_problem(_target_with_runner(tmp_path / "old", OLD_RUNNER, helper=False) / "modules") == \
+        STAGE_RUNNER_OLD
+
+
+# --- one shared group for the runner and the stage account (round 44 item 2) ---------------------------------------
+#
+# Before, what the stage account wrote kept the mode its tools chose: a tool that writes a 0600 file or a 0555 folder
+# left files the runner and the person (another uid) could not read and folders they could not clear. Now the stage
+# account gives its own files in the folders the modules write to the runner's group (the person's outside the
+# container), readable and writable for it and its folders setgid, after every module, also a failed one.
+
+TIGHT = r'''#!/bin/bash
+out="$BUILD_CACHE_DIR/output"
+umask 077
+printf 'weights' > "$out/model.bin"
+mkdir -p "$out/locked/inner"
+printf 'x' > "$out/locked/inner/part.bin"
+chmod 0600 "$out/locked/inner/part.bin"
+chmod 0555 "$out/locked/inner" "$out/locked"
+mkdir -p "$BUILD_SCRATCH_DIR/cache/closed"
+printf 'c' > "$BUILD_SCRATCH_DIR/cache/closed/entry"
+chmod 0000 "$BUILD_SCRATCH_DIR/cache/closed"
+mkdir "$out/plain"
+chmod 0755 "$out/plain"
+ln -s "$BUILD_SCRATCH_DIR/stages/build/KEYNAME" "$out/key-link"
+exit "${TIGHT_EXIT:-0}"
+'''.replace("KEYNAME", build_end.END_KEY)
+
+PERSON_CHECK = r'''
+import os, sys
+sys.path.insert(0, sys.argv[1])
+from orchestrator.utils.atomic import remove_tree
+out, cache = sys.argv[2], sys.argv[3]
+with open(os.path.join(out, "model.bin")) as f:
+    assert f.read() == "weights"
+with open(os.path.join(out, "locked", "inner", "part.bin")) as f:
+    assert f.read() == "x"
+left = remove_tree(os.path.join(out, "locked")) + remove_tree(os.path.join(cache, "closed"))
+print("left", len(left))
+'''
+
+
+@needs_rights
+@pytest.mark.parametrize("exit_code", [0, 3])
+def test_what_a_module_writes_the_person_can_read_and_remove(box, exit_code):
+    box.module("source", TIGHT)
+    key = box.stages / build_end.END_KEY
+
+    result = box.run("--to", "source", TIGHT_EXIT=str(exit_code))
+
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    out = box.output
+    for path in (out / "model.bin", out / "locked", out / "locked" / "inner", out / "locked" / "inner" / "part.bin",
+                 out / "plain", box.work / "cache" / "closed"):
+        st = os.lstat(path)
+        assert st.st_uid == STAGE, path.name
+        assert st.st_gid == RUNNER, f"{path.name} is not in the shared group"
+        assert st.st_mode & 0o060 == 0o060, f"{path.name} is not readable and writable for the shared group"
+        if path.is_dir():
+            assert st.st_mode & 0o2000, f"{path.name} is not setgid"
+    # the share step runs as the stage account and never follows a link: the runner's key stays the runner's, 0600
+    assert os.path.islink(out / "key-link")
+    if key.exists():
+        assert os.stat(key).st_uid == RUNNER and os.stat(key).st_mode & 0o777 == 0o600
+    for marker in box.stages.iterdir():
+        if not marker.name.endswith(".outputs"):
+            assert os.stat(marker).st_uid == RUNNER, marker.name
+    # the person: another uid than the stage account, with the shared group only
+    person = subprocess.run(["setpriv", "--reuid", str(RUNNER), "--regid", str(RUNNER), "--clear-groups", "--",
+                             sys.executable, "-I", "-c", PERSON_CHECK, str(REPO_ROOT), str(out),
+                             str(box.work / "cache")], capture_output=True, text=True, timeout=120)
+    assert person.returncode == 0, person.stdout + person.stderr
+    assert person.stdout.strip() == "left 0"
+    assert not (out / "locked").exists() and not (box.work / "cache" / "closed").exists()
+
+
+# --- review: a runner that replaces the helper's parts, a sticky folder a module made ------------------------------
+#
+# The framework's helper in the context is worth nothing when the target's runner sources it and then defines its own
+# run_as_stage (or setpriv, or as_stage), or switches the sandbox off for its modules (STAGE_ISOLATION): its modules ran
+# as the runner with the runner's two ambient rights, and the build still counted as one in the sandbox.
+
+_TEMPLATE_SOURCE_LINE = 'source "$MODULES_DIR/stage_user.sh"\n'
+
+
+@pytest.mark.parametrize("override", [
+    'run_as_stage() { "$@"; }',
+    'function as_stage { "$@"; }',
+    'stage_preflight () { :; }',
+    'setpriv() { shift 6; "$@"; }',
+    'STAGE_ISOLATION=',
+    'export STAGE_ISOLATION=legacy',
+    'unset STAGE_ISOLATION',
+    'STAGE_UID=64020',
+    'STAGE_SHARED_FOLDERS=()',
+], ids=["run_as_stage", "as_stage", "preflight", "setpriv", "isolation", "export", "unset", "uid", "share"])
+def test_a_runner_that_replaces_a_part_of_the_helper_is_refused(tmp_path, override):
+    from orchestrator.utils.sandbox import STAGE_RUNNER_REPLACES_HELPER, stage_runner_problem
+    runner = (REPO_ROOT / "targets" / "_template" / "modules" / "build.sh").read_text(encoding="utf-8")
+    assert _TEMPLATE_SOURCE_LINE in runner
+    changed = runner.replace(_TEMPLATE_SOURCE_LINE, f"{_TEMPLATE_SOURCE_LINE}{override}\n", 1)
+    name = re.search(r"[A-Za-z_]{4,}", override.replace("function ", "").replace("export ", "")
+                     .replace("unset ", "")).group(0)
+    assert stage_runner_problem(_target_with_runner(tmp_path / "t", changed, helper=False) / "modules") == \
+        STAGE_RUNNER_REPLACES_HELPER.format(name=name)
+
+
+def test_the_runner_check_knows_every_part_of_the_helper():
+    from orchestrator.utils import sandbox
+    helper = (REPO_ROOT / "targets" / "_template" / "modules" / "stage_user.sh").read_text(encoding="utf-8")
+    functions = set(re.findall(r"(?m)^([a-z_]+)\(\)", helper))
+    variables = set(re.findall(r"(?m)^(?:declare -A )?([A-Z_]+)=", helper)) | {"STAGE_ISOLATION"}
+    assert functions and variables
+    assert functions | {"setpriv"} == set(sandbox._HELPER_FUNCTIONS)
+    assert variables == set(sandbox._HELPER_VARIABLES)
+    # a comment that names a part is no change of it
+    assert sandbox._helper_part_replaced("# STAGE_ISOLATION=user\n  # run_as_stage() is the helper's\n") is None
+
+
+@pytest.mark.parametrize("target", TARGETS)
+def test_the_shipped_runners_replace_no_part_of_the_helper(tmp_path, target):
+    from orchestrator.utils.sandbox import stage_runner_problem
+    assert stage_runner_problem(REPO_ROOT / "targets" / target / "modules") is None
+
+
+STICKY = r'''#!/bin/bash
+out="$BUILD_CACHE_DIR/output"
+mkdir "$out/spool" "$BUILD_SCRATCH_DIR/tmp/spool"
+printf 'p' > "$out/spool/part"
+printf 't' > "$BUILD_SCRATCH_DIR/tmp/spool/part"
+chmod 1777 "$out/spool" "$BUILD_SCRATCH_DIR/tmp/spool"
+'''
+
+STICKY_CHECK = r'''
+import sys
+sys.path.insert(0, sys.argv[1])
+from orchestrator.utils.atomic import remove_tree
+print("left", sum(len(remove_tree(p)) for p in sys.argv[2:]))
+'''
+
+
+@needs_rights
+def test_a_sticky_folder_a_module_made_the_person_can_still_clear(box):
+    box.module("source", STICKY)
+    result = box.run("--to", "source")
+    assert result.returncode == 0, result.stdout + result.stderr
+    spools = [box.output / "spool", box.work / "tmp" / "spool"]
+    for spool in spools:
+        assert not os.lstat(spool).st_mode & 0o1000, f"{spool} kept its sticky bit"
+    # the runner's own folders keep theirs: the stage account can change nothing of the runner's
+    assert os.lstat(box.work).st_mode & 0o1000
+    person = subprocess.run(["setpriv", "--reuid", str(RUNNER), "--regid", str(RUNNER), "--clear-groups", "--",
+                             sys.executable, "-I", "-c", STICKY_CHECK, str(REPO_ROOT), *map(str, spools)],
+                            capture_output=True, text=True, timeout=120)
+    assert person.returncode == 0, person.stdout + person.stderr
+    assert person.stdout.strip() == "left 0"

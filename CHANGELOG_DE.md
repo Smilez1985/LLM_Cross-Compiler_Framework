@@ -130,6 +130,13 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   endet es mit 2, dem Exit-Code des Endgrunds cancelled. Strg+C im Befehl selbst bleibt 130.
 
 ### Behoben
+- `2026-10-31 11:07 UTC` · `v3.3.0` **Was ein Build geschrieben hat, kannst du immer lesen und entfernen** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
+  Ein Werkzeug in einem Stufen-Modul, das (als Stufen-Konto) eine Datei mit 0600 oder einen Ordner mit 0555 schrieb,
+  hinterließ Dateien, die du nicht lesen konntest, und Ordner, die das Aufräumen nicht entfernen konnte. Stufen-Runner
+  und Stufen-Konto teilen sich jetzt eine Gruppe, die des Runners (auf dem Host deine): Nach jedem Modul, auch nach
+  einem gescheiterten, gibt das Stufen-Konto, was es in den Ordnern des Builds geschrieben hat, dieser Gruppe, lesbar
+  und schreibbar, mit seinen Ordnern setgid und nie mit Sticky-Bit (ein Sticky-Ordner eines Werkzeugs hinderte dich
+  daran, zu entfernen, was darin lag). Nichts wird per chown umgeschrieben, und kein Konto bekommt ein neues Recht.
 - `2026-10-31 02:14 UTC` · `v3.3.0` **Ein Löschen, das du angenommen hast, sagt nur „gelöscht“, wenn es stimmt**
   ([Design](docs/DESIGN_DE.md#löschen-und-der-papierkorb)): Der Moduswechsel von Ditto überging, was das Entfernen
   eines Build-Ordners zurückließ, meldete ihn als gelöscht (und vergaß den Build); das Leeren des Papierkorbs, die
@@ -235,6 +242,13 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   der laufenden Stufe zurück; ein Stopp von außen ohne die Notiz zählt weiter.
 
 ### Sicherheit
+- `2026-10-31 11:07 UTC` · `v3.3.0` **Ein Target kann keinen eigenen Helfer des Stufen-Kontos mehr mitbringen** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
+  Der Build-Kontext trug das `modules/stage_user.sh` des Targets, so dass ein Target mit dem Stufen-Runner der Vorlage,
+  aber einem hohlen Helfer (der das Modul einfach ausführt und nichts prüft), seine Module als Stufen-Runner mit dessen
+  zwei Rechten laufen ließ. Jeder Build-Kontext trägt jetzt den eigenen Helfer des Frameworks anstelle dessen, was das
+  Target unter diesem Namen hat, so wie beim Entrypoint; die Prüfung des `modules/build.sh` des Targets bleibt, und
+  sie verweigert jetzt auch einen Runner, der eine Funktion des Helfers (oder `setpriv`) neu definiert oder eine seiner
+  Variablen ändert (`STAGE_ISOLATION`, `STAGE_UID`, ...), mit dem Namen dieses Teils.
 - `2026-10-31 07:47 UTC` · `v3.3.0` **Die Stufen-Module laufen unter einem eigenen Benutzer und können den Schlüssel des Abschluss-Eintrags nicht lesen**
   ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)): Ein Stufen-Modul lief als eigener Benutzer des
   Stufen-Runners und konnte den Schlüssel, der den Abschluss-Eintrag versiegelt, aus dem Speicher des Runners lesen
@@ -254,7 +268,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   gehört nur ihrem Besitzer (0600), und der Datensatz-Ordner eines Rezepts ist für die Gruppe der Person lesbar. Ein
   Target, dessen Stufen-Runner seine Module nicht unter dem Stufen-Konto startet (vor dieser Version aus der Vorlage
   entstanden), wird in der Build-Sandbox verweigert, bevor sein Container angelegt wird, weil seine Module sonst die
-  zwei Rechte des Runners erben; nimm `modules/build.sh` und `modules/stage_user.sh` aus `targets/_template`, oder
+  zwei Rechte des Runners erben; nimm `modules/build.sh` aus `targets/_template`, oder
   schalte `build_sandbox` aus.
 - `2026-10-31 04:21 UTC` · `v3.3.0` **pypdf 6.21.4: sieben Dienstverweigerungen durch präparierte PDFs geschlossen**
   ([Design](docs/DESIGN_DE.md#sicherheitsmodell)): pypdf 6.21.2 ließ sich durch ein präpariertes PDF in eine

@@ -117,6 +117,12 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   the exit code of the end reason cancelled. Ctrl+C in the command itself stays 130.
 
 ### Fixed
+- `2026-10-31 11:07 UTC` · `v3.3.0` **You can always read and remove what a build wrote** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
+  a tool in a stage module that wrote a 0600 file or a 0555 folder (as the stage account) left files you could not
+  read and folders the clean-up could not remove. The stage runner and the stage account now share one group, the
+  runner's (yours on the host): after every module, also a failed one, the stage account gives what it wrote in the
+  build's folders to that group, readable and writable, with its folders setgid and never sticky (a sticky folder a
+  tool made kept you from removing what was in it). Nothing is chowned, and no account gets a new right.
 - `2026-10-31 02:14 UTC` · `v3.3.0` **A deletion you accepted says "deleted" only when it is true** ([design](docs/DESIGN.md#deletion-and-the-trash)):
   Ditto's mode switch ignored what the removal of a build folder left behind and reported it as deleted (and forgot
   the build); emptying the trash, the build dependencies and Ditto's old runtime builds did the same or only said
@@ -213,6 +219,13 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   stop from outside without the note still counts.
 
 ### Security
+- `2026-10-31 11:07 UTC` · `v3.3.0` **A target can no longer ship its own stage account helper** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
+  the build context carried the target's `modules/stage_user.sh`, so a target with the template's stage runner but a
+  hollow helper (one that runs the module as it is and checks nothing) ran its modules as the stage runner with the
+  runner's two rights. Every build context now carries the framework's own helper in place of whatever the target has
+  under that name, as it does with the entrypoint; the check of the target's `modules/build.sh` stays, and it now
+  also refuses a runner that defines one of the helper's functions (or `setpriv`) again or changes one of its
+  variables (`STAGE_ISOLATION`, `STAGE_UID`, ...), naming that part.
 - `2026-10-31 07:47 UTC` · `v3.3.0` **The stage modules run under their own user, so they cannot read the key of the end record**
   ([design](docs/DESIGN.md#build-pipeline-and-target-modules)): a stage module ran as the stage runner's own user and
   could read the one-run key that seals the end record from the runner's memory (`/proc/<runner>/mem`) on a host
@@ -231,7 +244,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   (0600), and a recipe's dataset folder is readable for the person's group. A target whose stage runner does not
   start its modules under the stage account (made from the template before this version) is refused in the build
   sandbox before its container is made, since its modules would otherwise inherit the runner's two rights; take
-  `modules/build.sh` and `modules/stage_user.sh` from `targets/_template`, or switch `build_sandbox` off.
+  `modules/build.sh` from `targets/_template`, or switch `build_sandbox` off.
 - `2026-10-31 04:21 UTC` · `v3.3.0` **pypdf 6.21.4: seven crafted-PDF denials of service closed**
   ([design](docs/DESIGN.md#security-model)): pypdf 6.21.2 could be made to loop forever or use large amounts of memory
   and time by a crafted PDF (encrypted files with a wrong page count, page labels, cross-reference streams, invalid

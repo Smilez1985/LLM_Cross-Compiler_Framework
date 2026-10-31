@@ -26,11 +26,23 @@
 # where they are writable. They are made group-writable for the runner's group, which the stage account gets as its
 # supplementary group, with setgid (new files keep the group) and the sticky bit on the work and stage folders, so a
 # module can add files there but never change, rename or remove the runner's own (the resume markers, the loop counts,
-# the end record); the stages folder itself stays the runner's. The stage modules run with umask 0002, so the runner
-# and the person can read and remove what they wrote. What they read (the model, the calibration dataset, the
-# importance matrix, the hardware profile) must be readable for the runner's group. The test child checks both: it
+# the end record); the stages folder itself stays the runner's. What they read (the model, the calibration dataset,
+# the importance matrix, the hardware profile) must be readable for the runner's group. The test child checks both: it
 # writes and removes a file in every one of these folders and reads every input; a folder it cannot write or an input
 # it cannot read refuses the build (folders, inputs) before the first stage.
+#
+# One shared group for both ids (stage_share): the runner's own group (its gid from STAGE_RUNNER_IDS; outside the
+# container the person's group, also under a rootless engine, where the runner's group 0 is the person's) is the
+# group of everything a build writes. The stage modules run with umask 0002, and after each module returns the stage
+# account itself (it owns what it wrote, so no capability is needed by anyone) gives its own files and folders in the
+# folders the modules write to that group, readable and writable for it, and its folders setgid: a tool that writes a
+# 0600 file, a 0555 folder or a sticky folder leaves nothing the runner or the person cannot read or remove. Nothing
+# is chowned.
+#
+# The helper is the framework's (every build context carries this file, whatever the target ships under its name), and
+# the runner that sources it must not replace any part of it: a build.sh that defines one of its functions (or
+# setpriv) again or changes one of its variables (STAGE_ISOLATION, STAGE_UID, ...) is refused before its container is
+# made (orchestrator/utils/sandbox.stage_runner_problem).
 
 STAGE_UID=64010
 STAGE_GID=64010
@@ -124,18 +136,52 @@ stage_groups() {  # the stage account's supplementary groups: the runner's own (
     id -G | tr ' ' ','
 }
 
-# run_as_stage COMMAND...: the one way a stage module starts in the build sandbox: as the stage account, without any
-# capability, with umask 0002. Outside the sandbox (a run by hand, the legacy mode) it runs COMMAND as it is.
-run_as_stage() {
-    if ! stage_isolated; then
-        "$@"
-        return
-    fi
+# The folders the stage modules write (stage_folders, named by stage_preflight) and the shared group of both ids
+STAGE_SHARED_FOLDERS=()
+stage_shared_gid() { id -g; }
+
+# as_stage COMMAND...: COMMAND as the stage account, without any capability, with umask 0002
+as_stage() {
     (
         umask 0002
         exec setpriv --reuid="$STAGE_UID" --regid="$STAGE_GID" --groups="$(stage_groups)" \
             --inh-caps=-all --ambient-caps=-all --no-new-privs -- "$@"
     )
+}
+
+# What stage_share runs as the stage account (arguments: the shared gid, then the folders): its own files and
+# folders there go to the shared group, readable and writable for it (u+rwX too, so a folder it made 0000 or 0555 can
+# be walked), its folders setgid and never sticky (a sticky folder of the stage account would keep the runner and the
+# person from removing what is in it). Links are never followed (find -P; chmod -R and chgrp -h do not follow them
+# either); whatever is not its own it cannot change, and that stays as it is (the runner's sticky folders stay sticky).
+STAGE_SHARE='gid="$1"; shift
+[ $# -gt 0 ] || exit 0
+chmod -R u+rwX,g+rwX,-t -- "$@" 2>/dev/null
+find -P "$@" -user "$(id -u)" ! -type l ! -group "$gid" -exec chgrp -h -- "$gid" {} + 2>/dev/null
+find -P "$@" -user "$(id -u)" -type d ! -perm -2000 -exec chmod g+s -- {} + 2>/dev/null
+exit 0'
+
+# stage_share: after a stage module returned, the stage account gives what it wrote to the shared group (see the
+# header). Nothing outside the sandbox, and nothing before the preflight named the folders.
+stage_share() {
+    stage_isolated || return 0
+    [ "${#STAGE_SHARED_FOLDERS[@]}" -gt 0 ] || return 0
+    as_stage bash -c "$STAGE_SHARE" _ "$(stage_shared_gid)" "${STAGE_SHARED_FOLDERS[@]}" >/dev/null 2>&1 || true
+}
+
+# run_as_stage COMMAND...: the one way a stage module starts in the build sandbox: as the stage account, without any
+# capability, with umask 0002; when it returns (also with an error) what it wrote goes to the shared group
+# (stage_share), and its exit status is returned. Outside the sandbox (a run by hand, the legacy mode) it runs COMMAND
+# as it is.
+run_as_stage() {
+    if ! stage_isolated; then
+        "$@"
+        return
+    fi
+    local rc=0
+    as_stage "$@" || rc=$?
+    stage_share
+    return "$rc"
 }
 
 # The test child of the preflight (run as the stage account): its ids, capability sets, whether it could open the
@@ -230,9 +276,10 @@ stage_preflight() {
         stage_refuse "no_setpriv The build image has no setpriv (util-linux), so the stage runner cannot switch to the stage account."
     fi
     while IFS= read -r folder; do folders+=("$folder"); done < <(stage_folders "$@")
-    probe="$(run_as_stage bash -c "$STAGE_PROBE" _ "$$" "${folders[@]}" -- "${MODEL_SOURCE:-}" "${DATASET_PATH:-}" \
+    probe="$(as_stage bash -c "$STAGE_PROBE" _ "$$" "${folders[@]}" -- "${MODEL_SOURCE:-}" "${DATASET_PATH:-}" \
         "${IMATRIX_PATH:-}" "${HARDWARE_CONFIG_FILE:-}" 2>/dev/null || true)"
     problem="$(stage_switch_problem "$probe")"
     [ -z "$problem" ] || stage_refuse "$problem"
+    STAGE_SHARED_FOLDERS=("${folders[@]}")
     echo "=== Isolation: stage modules run under their own user (stage account $STAGE_UID:$STAGE_GID, no capabilities) ==="
 }
