@@ -185,7 +185,8 @@ class GateUnavailable(HostKeyError):
                          "unrestricted key for this board when you are asked.")
 
 
-def install_public_key(client, public_line: str, bundle=None, *, allow_unrestricted: bool = False) -> str:
+def install_public_key(client, public_line: str, bundle=None, *, allow_unrestricted: bool = False,
+                       password: str = "") -> str:
     """Installs the framework key on the board over `client` (a session the person logged in to with a one-time
     password). With `bundle` (orchestrator/remote/gate.py GateBundle, from runtime/device/board_ops.bundle()): llmcf's
     command gate and the key's restricted line (command= the gate, no-pty, no-port-forwarding, no-agent-forwarding,
@@ -197,8 +198,13 @@ def install_public_key(client, public_line: str, bundle=None, *, allow_unrestric
     if not isinstance(public_line, str) or not PUBLIC_LINE.fullmatch(public_line):
         raise HostKeyError("The framework's public key line is not a plain SSH public key; nothing was installed.")
     if bundle is not None:
+        # the root step (DECISIONS 2026-10-31): the gate, the key's restricted line and the framework's signing key in
+        # root-owned places the board account cannot change, with the person's one-time `password` for sudo -S (or
+        # sudo -n); a board that cannot take it gets no key (GateUnavailable says why), unless the person allowed an
+        # unrestricted one
         from orchestrator.remote import gate
-        ok, reason = gate.install_gate(transport.ParamikoTransport(client).run, public_line, bundle.gate)
+        ok, reason, _home = gate.install_root_board(transport.ParamikoTransport(client).run, public_line, bundle,
+                                                     password)
         if ok or reason == "gated":   # "gated": the login was with the framework key, which runs only the gate
             return "restricted"
         if not allow_unrestricted:

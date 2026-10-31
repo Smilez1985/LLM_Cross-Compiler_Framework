@@ -425,6 +425,24 @@ class TestConnect:
         assert seen == [("192.0.2.10", "dietpi", 22, "secret"), "key installed"]
         assert noted == [(device_id, "runtime_deploy", "")], "a recorded problem of the board ends"
 
+    def test_the_pairing_of_a_stored_board_takes_the_callers_framework_signer(self, tmp_path, monkeypatch):
+        """Regression (failed before: connect_stored had no signer of its own and paired with the state folder's
+        store opened as a keyring store, so a passphrase or helper store gave the board no signing key)."""
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+        from orchestrator.Core.community_pack import BoardSigner
+        from orchestrator.runtime.device import board_ops
+        from orchestrator.utils import ssh_trust
+        self.fake(monkeypatch)
+        self.notes(monkeypatch)
+        bundles = []
+        monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, public, bundle=None, **_k: bundles.append(bundle))
+        monkeypatch.setattr(board_ops, "framework_signer", lambda *a, **k: pytest.fail("the state folder's store"))
+        signer = BoardSigner(Ed25519PrivateKey.generate())
+        person_steps.connect_stored(tmp_path, device_id_of(FakeHostKey()), "192.0.2.10", 22, "dietpi", "secret",
+                                    step="runtime_deploy", signer=lambda: signer)
+        assert [b.signers for b in bundles] == [signer.allowed_signers]
+
     @pytest.mark.parametrize("status, kind", [("changed", "host_key_changed"), ("unknown", "not_trusted")])
     def test_a_key_that_is_not_the_trusted_one_is_refused_before_any_login(self, tmp_path, monkeypatch, status,
                                                                            kind):
