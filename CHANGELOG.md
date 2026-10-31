@@ -213,6 +213,12 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   stop from outside without the note still counts.
 
 ### Security
+- `2026-10-31 04:21 UTC` · `v3.3.0` **pypdf 6.21.4: seven crafted-PDF denials of service closed**
+  ([design](docs/DESIGN.md#security-model)): pypdf 6.21.2 could be made to loop forever or use large amounts of memory
+  and time by a crafted PDF (encrypted files with a wrong page count, page labels, cross-reference streams, invalid
+  dictionaries, files without a trailer, cloned dictionaries, page trees with many shared resources). The lock and
+  the requirements exports pin 6.21.4, and pyproject.toml asks for at least 6.21.4, so a fresh install cannot pick
+  the affected versions.
 - `2026-10-31 01:50 UTC` · `v3.3.0` **A module script can no longer end a build early as done (the forged end record)**
   ([design](docs/DESIGN.md#build-pipeline-and-target-modules)): the stage modules run as the same user in the same work
   folder as the stage runner, so a module could write `status done` into `build.end` and then hang: the framework
