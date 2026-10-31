@@ -5666,7 +5666,7 @@ def deploy_devices_list(ctx: FrameworkContext, as_json: bool):
                       "you trusted before.")
         return
     table = Table(title="Trusted devices")
-    for column in ("Device", "Label", "Address", "User", "Host key", "Paired", "Last deploy"):
+    for column in ("Device", "Label", "Address", "User", "Host key", "Paired", "Key tier", "Last deploy"):
         table.add_column(column)
     for r in rows:
         state = {"known": "trusted", "changed": "[red]CHANGED in known_hosts[/red]",
@@ -5674,9 +5674,18 @@ def deploy_devices_list(ctx: FrameworkContext, as_json: bool):
         last_deploy = r["last_deploy"] or {}   # may hold only a recorded contact for Mojo: then no deploy is shown
         table.add_row(r["device_id"], escape(r["label"]), escape(r["address"]), escape(r["user"]),
                       f"{escape(r['key_type'])} {r['fingerprint']} ({state})", "yes" if r["paired"] else "no",
+                      _tier_cell(r.get("key_tier", "")),
                       escape(f"{last_deploy.get('at')} ({'ok' if last_deploy.get('ok') else 'failed'})")
                       if last_deploy.get("at") else "-")
     console.print(table)
+
+
+def _tier_cell(tier: str) -> str:
+    """The key tier of a board for the device list: the weaker ones marked (remote/key_tiers.py)."""
+    from orchestrator.remote.key_tiers import is_weaker
+    if not tier:
+        return "-"
+    return f"[yellow]{tier} (weaker)[/yellow]" if is_weaker(tier) else tier
 
 
 @deploy_devices.command('remove')
@@ -6049,7 +6058,8 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
                                output_file=output_file, as_json=as_json, store=store, record=ctx is not None,
                                via="cli", actor="cli",   # the audit log is opened only for the record, as before
                                audit_factory=(lambda: _device_audit(ctx, state_dir)) if ctx is not None else None,
-                               on_event=lines, signer=_board_signer(ctx))
+                               on_event=lines, signer=_board_signer(ctx), chooser=_tier_chooser(),
+                               mode=_framework_mode(ctx))
     except DeviceScanError as e:
         if e.kind == "login":   # recorded for Mojo by the core step already
             _unreachable(ctx, host, port, e.error, doing=f"log in to {user}@", state_dir=state_dir)
@@ -6275,6 +6285,62 @@ def _board_signer(ctx: Optional[FrameworkContext]):
     return lambda: board_ops.framework_signer(framework)
 
 
+def _framework_mode(ctx: Optional[FrameworkContext]) -> str:
+    """The framework mode of this CLI's settings (Core/config_manager.py framework_mode: private by default)."""
+    from orchestrator.Core.config_manager import framework_mode
+    try:
+        return framework_mode(ctx.settings) if ctx is not None and getattr(ctx, "settings", None) is not None \
+            else "private"
+    except Exception:  # noqa: BLE001 - unreadable settings: the default
+        return "private"
+
+
+def _tier_chooser():
+    """The person's questions at the terminal for a board that cannot take the root-owned key line
+    (remote/pairing.py TierChooser): the choices with numbers, "password" (no key) the default; the plan of the switch
+    to OpenSSH and the removal of Dropbear each with "No" as the default. None without a terminal (nobody to ask: the
+    pairing then says which ways there are)."""
+    if not sys.stdin.isatty():
+        return None
+    from orchestrator.remote import key_tiers, pairing
+
+    class CliTierChooser(pairing.TierChooser):
+        def choose(self, offer):
+            console.print("[yellow]This board cannot take the framework's key with the root-owned key line "
+                          f"({escape(_setup_reason(offer.reason))}). Choose how the framework reaches it:[/yellow]")
+            for line in offer.lines():
+                console.print(escape(line))
+            number = click.prompt("Your choice", type=click.IntRange(1, len(offer.choices)),
+                                  default=len(offer.choices))
+            choice = offer.choices[number - 1]
+            if key_tiers.is_weaker(choice):
+                console.print(f"[yellow]Weaker protection: {escape(key_tiers.TIER_TEXTS[choice])}.[/yellow]")
+                if not click.confirm("Use it anyway?", default=False):
+                    return key_tiers.TIER_PASSWORD
+            return choice
+
+        def confirm(self, title, lines):
+            for line in lines:
+                console.print(escape(line))
+            return click.confirm("Remove Dropbear now?" if title == "dropbear" else "Go ahead with this plan?",
+                                 default=False)
+
+        def trust_key(self, check):
+            console.print(f"The new SSH server presents the host key {escape(check.key_type)} {check.fingerprint}. "
+                          "Compare it with 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on the board.")
+            return click.confirm("Trust this key?", default=False)
+
+        def tell(self, lines):
+            for line in lines:
+                console.print(escape(line))
+    return CliTierChooser()
+
+
+def _setup_reason(word: str) -> str:
+    from orchestrator.remote.gate import SETUP_REASONS
+    return SETUP_REASONS.get(word, word)
+
+
 def _open_device(state_dir: Path, device_id: str, host: str, port: int, user: str, password: Optional[str],
                  ctx: Optional[FrameworkContext] = None, step: str = ""):
     """(board session, host key) of the stored device, as _connect_device logs in (it exits with the reason when the
@@ -6285,7 +6351,11 @@ def _open_device(state_dir: Path, device_id: str, host: str, port: int, user: st
     lines = wait_lines(lambda text: console.print(escape(text)), host, _config_language(ctx), hint=" (Ctrl+C)")
     try:   # the shared step records the board's contacts for Mojo in `state_dir`
         client, key = person_steps.connect_stored(state_dir, device_id, host, port, user, password, step=step,
-                                                  on_event=lines, signer=_board_signer(ctx))
+                                                  on_event=lines, signer=_board_signer(ctx),
+                                                  chooser=_tier_chooser() if password else None,
+                                                  mode=_framework_mode(ctx),
+                                                  audit=(lambda: _device_audit(ctx, state_dir)) if password else None,
+                                                  via="cli")
     except person_steps.BoardStepError as e:
         if e.kind in ("unreachable", "host_key_changed") and e.reason:
             _print_reason(ctx, e.reason, host, port)
