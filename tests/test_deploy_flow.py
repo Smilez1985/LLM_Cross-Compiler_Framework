@@ -313,7 +313,7 @@ def runtime_stand_ins(monkeypatch, order, *, uid=1000, ok=True):
             order.append("closed")
 
     def connect(state, device_id, host, port, user, password=None, *, step="", on_client=None, cancel=None,
-                on_event=None, signer=None, mode="private"):
+                on_event=None, signer=None, mode="private", **tiers):   # tiers: the person's tier questions
         order.append(("connect", user, password, step))
         session = Session()
         if on_client is not None:

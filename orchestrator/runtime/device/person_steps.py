@@ -45,7 +45,9 @@ class BoardStepError(WithSteps, RemoteFailure):
     not_saved, damaged, no_user, no_address; for a change of a board's address or key: no_board, address, key_text
     with facts["detail"] empty, several, not_a_key or no_paramiko, unchanged, no_key, stale, audit, other_board with
     facts["label"] and facts["device_id"] of the trusted board the new key belongs to, not_moved with facts["what"]
-    the kind of the board's data that could not be copied to its new device ID); `reason` is the
+    the kind of the board's data that could not be copied to its new device ID; weaker_tier: enterprise mode refuses
+    the board's key tier; switched: the board was switched to OpenSSH and is reached there from now on, with
+    facts["device_id"] and facts["port"]); `reason` is the
     SSH reason code when the board could not be reached or logged in to; `error` the exception behind it."""
 
     def __init__(self, message: str, kind: str, reason: str = "", error: Optional[BaseException] = None,
@@ -462,7 +464,8 @@ def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: 
                    password: Optional[str] = None, *, step: str = "",
                    on_client: Optional[Callable[[Any], None]] = None, cancel: Any = None,
                    on_event: Optional[Callable[[Any], None]] = None, signer: Any = None, chooser: Any = None,
-                   mode: str = "private", audit: Any = None, via: str = "") -> Tuple[Any, Any]:
+                   mode: str = "private", audit: Any = None, via: str = "",
+                   output_dirs: Sequence[Path] = ()) -> Tuple[Any, Any]:
     """(board session, host key) of the stored board `device_id` at host:port as `user`: the logged-in RemoteSession
     (orchestrator/remote/session.py; RemoteShell runs the steps over it). Its host key must be the trusted one the
     board was probed with (the device ID derives from it), at this login and at every login after a network drop, so a
@@ -474,7 +477,10 @@ def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: 
     None only for a caller without any framework). `step` names the contact for Mojo's record of the board (W1). The
     caller closes the session (`on_client` gets it at once, so a Cancel can close it). `chooser`, `mode`, `audit` and
     `via`: the person's choice of a key tier for a board that cannot take the root-owned key line (remote/pairing.py
-    pair; the switch to OpenSSH changes the board's port and host key, so it is offered by the scan, not here).
+    pair), the switch to OpenSSH included: it changes the board's port and host key, so after it the board's data
+    moves to its new device ID (adopt_switched_board, the "tested on" records in the builds below `output_dirs`), its
+    record follows, and the step stops with BoardStepError "switched" (it ran over Dropbear): the person runs it
+    again.
     `mode` is the framework mode of the caller's framework (Core/config_manager.py framework_mode; every caller with a
     framework passes it): in enterprise mode a board whose key sits on the Dropbear tier or the home gate is refused
     after the login (BoardStepError "weaker_tier", its text names the ways on), nothing runs there."""
@@ -526,13 +532,19 @@ def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: 
             from orchestrator.runtime.profile import stored_access
             # the board's stored probe proposes a tier; the board's facts read now decide (pairing.pair)
             paired = pairing.pair(session.client, state_dir, board_ops.pairing_bundle(signer, state_dir),
-                                  password=password, chooser=chooser, mode=mode, audit=audit, via=via, switch=False,
+                                  password=password, chooser=chooser, mode=mode, audit=audit, via=via,
+                                  switch=chooser is not None, host=host, port=port, user=user,
                                   access=stored_access(state_dir, device_id))
             from orchestrator.runtime.device.trusted import record_key_tier
             record_key_tier(state_dir, device_id, getattr(paired, "tier", ""))
         except ssh_trust.HostKeyError as e:
             session.close()
             raise BoardStepError(str(e), "key_install", error=e) from None
+        if getattr(paired, "endpoint", None) is not None:   # the switch to OpenSSH: reached at the new sshd now
+            session.close()
+            switch = adopt_switched_board(state_dir, device_id, host, user, paired, via=via or "cli", audit=audit,
+                                          actor=via, output_dirs=output_dirs)
+            raise BoardStepError(switched_text(switch), "switched", device_id=switch.new_id, port=switch.port)
     # enterprise mode refuses a board whose framework key sits on a weaker tier at every use (trusted.tier_refusal)
     from orchestrator.runtime.device.trusted import tier_refusal
     refusal = tier_refusal(state_dir, device_id, mode, session)
@@ -597,6 +609,101 @@ def remember_deployed(state_dir: Path, host: str, port: int, user: str, key: Any
     return remember_board(state_dir, host, int(port), user, key, via=via, audit=audit, actor=actor, label=label)
 
 
+# --- the switch to OpenSSH of a board the person reaches with its password -------------------------------------------
+
+@dataclass
+class BoardSwitch:
+    """What adopt_switched_board did after the switch to OpenSSH: the board's trusted record at its new sshd
+    (`device`, None when it could not be written), its device IDs before and after (the ID derives from the host key,
+    which the new sshd has its own of) and where its data went (`data`: board_move.MovedData, None when the ID stays
+    or there was nothing to move)."""
+    device: Any
+    old_id: str
+    new_id: str
+    port: int
+    data: Any = None
+
+
+def adopt_switched_board(state_dir: Path, old_device_id: str, host: str, user: str, outcome: Any, *, via: str,
+                         audit: Any = None, actor: str = "", label: Optional[str] = None,
+                         output_dirs: Sequence[Path] = ()) -> BoardSwitch:
+    """After the person's switch of the board to OpenSSH (remote/pairing.py pair: a PairOutcome with the new sshd's
+    `endpoint` and host `key`, which the person trusted in the switch): the board is reached there from now on. Its
+    data moves from `old_device_id` to the new device ID (P6, board_move.py: stored probe, deploy settings, deployed
+    runtime, deploy record, "tested on" in the builds below `output_dirs`; copied and checked first, the old copies go
+    after the record changed), its trusted record follows (the old board's label and user, the new port and key,
+    paired with the root-owned key line), and its key tier is recorded as root. The person's step only."""
+    from orchestrator.runtime.device.trusted import TrustedDevices, record_key_tier, record_trusted_device
+    from orchestrator.runtime.profile import ProfileStore, device_id_for_host_key
+    from orchestrator.utils import ssh_trust
+    state_dir = Path(state_dir)
+    endpoint, key = outcome.endpoint, outcome.key
+    new_id = device_id_for_host_key(ssh_trust.fingerprint(key))
+    store = TrustedDevices(state_dir)
+    old = store.get(old_device_id) if old_device_id else None
+    move = None
+    if old_device_id and old_device_id != new_id:
+        from orchestrator.runtime.device.board_move import BoardDataMove, BoardMoveError
+        move = BoardDataMove(state_dir, old_device_id, new_id, output_dirs=output_dirs)
+        try:
+            move.stage()
+        except BoardMoveError as e:
+            raise BoardStepError(str(e), "not_moved", what=e.what) from None
+    switch = BoardSwitch(device=None, old_id=old_device_id, new_id=new_id, port=int(endpoint.port))
+    try:
+        if old is not None:
+            try:
+                switch.device = store.replace(old.device_id, endpoint.host, endpoint.port, old.user or user, key,
+                                              via=via, paired=True, label=old.label)
+            except Exception:  # noqa: BLE001 - known_hosts holds the new key; the record is added again below
+                switch.device = None
+        if switch.device is None:
+            switch.device = record_trusted_device(state_dir, endpoint.host, endpoint.port, user, key, via=via,
+                                                  paired=True, label=label, audit=audit, actor=actor or via)
+    finally:
+        if move is not None:
+            switch.data = move.finish()   # the record holds the new key: only now the old ID's copies go
+    record_key_tier(state_dir, new_id, "root")
+    try:
+        ProfileStore(state_dir).set_address(new_id, endpoint.store_form)
+    except (OSError, ValueError):
+        pass  # the probe's address is set again by the next probe
+    return switch
+
+
+SWITCHED_STEP = ("The board now runs OpenSSH on port {port} with the root-owned key line; the framework reaches it "
+                 "there from now on, as device {device_id}{moved}. This step ran over Dropbear and stopped there: run "
+                 "it again.")
+
+
+def switched_text(switch: BoardSwitch) -> str:
+    """The person's line after a switch that ended a step (connect_stored, a deploy)."""
+    moved = f" (its data moved there from {switch.old_id})" if switch.data is not None and switch.data.moved else ""
+    return SWITCHED_STEP.format(port=switch.port, device_id=switch.new_id, moved=moved)
+
+
+class PersonPairer:
+    """The person's pairing for a deploy over a one-time password (DeploymentManager deploy_package's `pairer`,
+    RemoteSession.pair): remote/pairing.py pair with the person's TierChooser, the framework `mode`, the board's
+    stored probe as proposal and the switch to OpenSSH, its outcome kept in `outcome`. Only the person's channels make
+    one (deploy_build); no module an AI can reach imports this one."""
+
+    def __init__(self, state_dir: Path, host: str, port: int, user: str, *, chooser: Any, mode: str, audit: Any,
+                 via: str, device_id: str = ""):
+        self.state_dir, self.host, self.port, self.user = Path(state_dir), host, int(port), user
+        self.chooser, self.mode, self.audit, self.via, self.device_id = chooser, mode, audit, via, device_id
+        self.outcome: Any = None
+
+    def __call__(self, client: Any, bundle: Any, password: str) -> Any:
+        from orchestrator.remote import pairing
+        from orchestrator.runtime.profile import stored_access
+        self.outcome = pairing.pair(client, self.state_dir, bundle, password=password, chooser=self.chooser,
+                                    mode=self.mode, audit=self.audit, via=self.via, host=self.host, port=self.port,
+                                    user=self.user, switch=True,
+                                    access=stored_access(self.state_dir, self.device_id))
+        return self.outcome
+
+
 # --- the deploy of a build (deploy run, the Deployment tab's Deploy) -----------------------------------------------
 
 @dataclass
@@ -618,7 +725,8 @@ def deploy_build(framework: Any, manager: Any, endpoint: Any, user: str, *, sour
                  bind_key: bool = True, via: str, actor: str, state_dir: Any = None,
                  output_dir: Optional[Path] = None, audit: Any = None,
                  remember: Optional[Callable[[Any], Any]] = None,
-                 on_step: Callable[[str], None] = lambda _kind: None) -> BuildDeploy:
+                 on_step: Callable[[str], None] = lambda _kind: None, chooser: Any = None,
+                 mode: Optional[str] = None) -> BuildDeploy:
     """The deploy of a build to a board, one core step for `llmcf deploy run` and the Deployment tab's Deploy and
     Deploy existing package... (the questions, the trust of a new host key, the password and the rendering stay with
     each). The person's step only: no AI-reachable module imports this one (the AI deploys with deploy_to_device).
@@ -638,7 +746,13 @@ def deploy_build(framework: Any, manager: Any, endpoint: Any, user: str, *, sour
     3. After a successful deploy, the board's trusted record: `remember(key)` when the caller writes it, else
        remember_deployed (`state_dir` the per-user folder or a function that names it, asked only then; None: the
        framework's; `label` None keeps the board's name; `audit` an audit log or a function that opens it, None: the
-       CLI's audit log)."""
+       CLI's audit log).
+
+    A one-time password with `chooser` (remote/pairing.py TierChooser: the CLI's prompt, the GUI's questions) pairs a
+    board that cannot take the root-owned key line with the person's choice of a key tier, as a scan does
+    (PersonPairer; `mode` None: the framework's own mode). After the switch to OpenSSH the deploy stops (it ran over
+    Dropbear), the board's data and record move to its new sshd (adopt_switched_board) and `device` is that record;
+    the result's reason says to deploy again there."""
     from orchestrator.Core.deployment_manager import DeployError, make_package, package_folder
     done = BuildDeploy(package=Path(package) if package is not None else None)
     stop = getattr(cancel, "is_set", None)
@@ -662,7 +776,32 @@ def deploy_build(framework: Any, manager: Any, endpoint: Any, user: str, *, sour
     if bind_key and key is not None:
         from orchestrator.utils import ssh_trust
         options["expect_fingerprint"] = ssh_trust.fingerprint(key)
+    pairer = None
+    if chooser is not None and getattr(credentials, "password", None):
+        if mode is None:
+            from orchestrator.Core.config_manager import framework_mode
+            mode = framework_mode(getattr(framework, "config", None))
+        folder = state_dir() if callable(state_dir) else state_dir
+        folder = folder or getattr(getattr(framework, "config", None), "user_state_dir", None) or "."
+        from orchestrator.runtime.profile import device_id_for_host_key
+        from orchestrator.utils import ssh_trust
+        old_id = device_id_for_host_key(ssh_trust.fingerprint(key)) if key is not None else ""
+        pairer = PersonPairer(Path(folder), endpoint.host, int(endpoint.port), user, chooser=chooser, mode=mode,
+                              audit=audit, via=via, device_id=old_id)
+        options["pairer"] = pairer
     done.result = manager.deploy_package(done.package, endpoint.host, user, **options)
+    if pairer is not None and getattr(pairer.outcome, "endpoint", None) is not None:
+        # the switch to OpenSSH: the board's data and record move to its new sshd; deploy again there
+        try:
+            from orchestrator.Core.artifact_output import artifact_folders
+            dirs = artifact_folders(framework) if framework is not None else ()
+        except Exception:  # noqa: BLE001 - the "tested on" records stay; everything else moves
+            dirs = ()
+        switch = adopt_switched_board(pairer.state_dir, pairer.device_id, endpoint.host, user, pairer.outcome,
+                                      via=via, audit=audit, actor=actor, label=label, output_dirs=dirs)
+        done.device = switch.device
+        done.result.reason = switched_text(switch)
+        return done
     if done.result.success:
         if remember is not None:
             done.device = remember(key)
@@ -855,6 +994,7 @@ __all__ = ["BoardPrune", "BoardStepError", "DAMAGED_QUESTION", "SUDO_QUESTION", 
            "load_settings", "not_known_error", "previous_build", "read_host_key", "record_consent", "remember_board",
            "remove_board_builds", "remove_trust", "settings_to_change", "trusted_rows", "unreachable_error",
            "BoardChange", "CHANGE_QUESTION", "change_board", "change_lines", "framework_key_logs_in",
-           "moved_lines", "plan_board_change", "BuildDeploy", "deploy_build", "device_audit", "remember_deployed",
+           "moved_lines", "plan_board_change", "BuildDeploy", "BoardSwitch", "PersonPairer", "SWITCHED_STEP",
+           "adopt_switched_board", "switched_text", "deploy_build", "device_audit", "remember_deployed",
            "SSH_BLOCK_QUESTION", "SSH_KNOWINGLY_QUESTION", "SshBlockPlan", "import_ssh_block", "plan_ssh_block",
            "save_ssh_block", "ssh_block_lines", "ssh_settings"]

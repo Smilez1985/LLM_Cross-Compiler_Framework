@@ -90,6 +90,9 @@ TEXTS = {
         "boards.err.pair": "Pair the board once with its password (Deploy runtime... asks for it) or with "
                            "{path:act_deploy_scan_remote}",
         "boards.err.key_install": "The framework's key could not be installed on the board: {reason}",
+        "boards.err.switched": "The board now runs OpenSSH on port {port} with the root-owned key line, and the "
+                               "framework reaches it there from now on, as device {device_id} (its data moved "
+                               "there). This step ran over Dropbear and stopped: run it again.",
         "boards.err.weaker_tier": "Enterprise mode refuses to use this board: the framework's key there sits on a "
                                   "weaker tier (the Dropbear tier or the home gate), which enterprise mode counts as "
                                   "too insecure. Nothing was done on the board.\n\nWays on: scan the board again "
@@ -492,6 +495,10 @@ TEXTS = {
                            "mit {path:act_deploy_scan_remote}",
         "boards.err.key_install": "Der Schlüssel des Frameworks konnte nicht auf dem Board eingerichtet werden: "
                                   "{reason}",
+        "boards.err.switched": "Das Board läuft jetzt mit OpenSSH auf Port {port} und der Schlüsselzeile in "
+                               "Root-Besitz, und das Framework erreicht es ab jetzt dort, als Gerät {device_id} "
+                               "(seine Daten sind dorthin umgezogen). Dieser Schritt lief über Dropbear und hat "
+                               "angehalten: Starte ihn erneut.",
         "boards.err.weaker_tier": "Der Enterprise-Modus lehnt es ab, dieses Board zu benutzen: Der Schlüssel des "
                                   "Frameworks liegt dort auf einer schwächeren Stufe (der Dropbear-Stufe oder dem "
                                   "Home-Gate), die der Enterprise-Modus als zu unsicher wertet. Auf dem Board ist "

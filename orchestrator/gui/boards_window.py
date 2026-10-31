@@ -199,6 +199,23 @@ class BoardsWindow(QDialog):
         from orchestrator.runtime.device import board_ops
         return lambda: board_ops.framework_signer(framework)
 
+    def _tier_kwargs(self, password: Optional[str]) -> Dict[str, Any]:
+        """The person's key-tier questions for a step whose one-time password pairs the board (connect_stored: the
+        Dropbear tier, the home gate, password login or the switch to OpenSSH; asked from the worker thread in the GUI
+        thread, "No" as the default), with the audit log and the builds' folders for the switch's data move. Called in
+        the worker thread, while the step's token is set."""
+        if not password:
+            return {}
+        from orchestrator.gui.key_tier_ask import GuiTierChooser
+        token = self._progress_token
+        try:
+            from orchestrator.Core.artifact_output import artifact_folders
+            dirs = artifact_folders(self.framework) if self.framework is not None else ()
+        except Exception:  # noqa: BLE001 - the "tested on" records stay; everything else moves
+            dirs = ()
+        return {"chooser": GuiTierChooser(token, stop=self._check_cancel, tell=self._progress), "audit": self.audit,
+                "via": "gui", "output_dirs": dirs}
+
     def _mode(self) -> str:
         """The framework mode of this window's framework (Core/config_manager.py framework_mode): in enterprise mode
         a board whose key sits on a weaker tier is refused at every use (person_steps.connect_stored)."""
@@ -431,6 +448,9 @@ class BoardsWindow(QDialog):
                 return simple[error.kind]
             if error.kind == "weaker_tier":   # enterprise mode refuses the board's weaker key tier at every use
                 return t("boards.err.weaker_tier")
+            if error.kind == "switched":   # the switch to OpenSSH: the step ran over Dropbear and stopped
+                return t("boards.err.switched", port=error.facts.get("port", ""),
+                         device_id=error.facts.get("device_id", ""))
             if error.kind == "unreachable":
                 return t("boards.err.unreachable", address=address, reason=str(error.error or error))
             if error.kind == "login_failed":
@@ -1471,7 +1491,7 @@ class BoardsWindow(QDialog):
                                                                password, step="runtime_deploy",
                                                                on_client=self._keep_client, cancel=self._cancel,
                                                                on_event=self._board_lines(host), signer=signer,
-                                                               mode=self._mode()),
+                                                               mode=self._mode(), **self._tier_kwargs(password)),
                 remember=lambda key: person_steps.remember_board(state, host, port, settings.ssh_user, key, via="gui",
                                                                  audit=audit, actor="gui"),
                 choose_bench=lambda shell, home: steps.choose_bench_model(

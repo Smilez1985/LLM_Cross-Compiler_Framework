@@ -235,10 +235,23 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
             session.close()   # the client of its current login
         else:
             client.close()
-    if getattr(paired, "endpoint", None) is not None and getattr(paired, "key", None) is not None:
+    switched = getattr(paired, "endpoint", None) is not None and getattr(paired, "key", None) is not None
+    old_id = device_id_for_host_key(ssh_trust.fingerprint(key))
+    if switched:
         # the switch to OpenSSH: the board is reached at its new sshd from now on (its own port and host key)
         port, key = paired.endpoint.port, paired.key
     device_id = device_id_for_host_key(ssh_trust.fingerprint(key))
+    trusted = None
+    if switched and record:
+        # the board's earlier data (a probe, deploy settings, a runtime) moves to its new device ID, its record follows
+        from orchestrator.runtime.device.person_steps import BoardStepError, adopt_switched_board
+        if audit is None and audit_factory is not None:
+            audit = audit_factory()
+        try:
+            trusted = adopt_switched_board(state_dir, old_id, host, user, paired, via=via, audit=audit,
+                                           actor=actor or via, label=label).device
+        except BoardStepError as e:
+            raise DeviceScanError(str(e), "save", error=e) from None
     try:
         if output_file is not None:
             write_profile_file(result.profile, Path(output_file), as_json)
@@ -246,8 +259,7 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
     except (OSError, ValueError) as e:
         raise DeviceScanError(f"Could not save the profile: {e}", "save", error=e) from None
     remember_ssh_user(store, device_id, user)  # the deploy user for `device runtime deploy` (never root)
-    trusted = None
-    if record:
+    if record and not switched:
         if audit is None and audit_factory is not None:
             audit = audit_factory()
         trusted = record_trusted_device(state_dir, host, port, user, key, via=via,
