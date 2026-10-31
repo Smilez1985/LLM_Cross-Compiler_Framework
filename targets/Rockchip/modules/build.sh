@@ -40,7 +40,8 @@
 # run killed with SIGKILL leaves no record, which reads as "not finished". A record left by an earlier run is removed
 # at the start.
 # Only this runner writes the record. The BuildEngine leaves a one-run key in stages/<job>/end.key; the runner reads it
-# into a variable it never exports and removes the file before the first stage, so no stage module can seal a record.
+# into a variable it never exports and removes the file before the first stage, so no stage module finds it in its
+# environment or a file (the limit, a host that lets a process read the memory of its parent: docs/DESIGN.md).
 # The BuildEngine counts a build as done only with the container's exit status 0 and a record sealed with that key
 # that names the job's last stage (orchestrator/Core/build_end.py end_problem). A run started by hand has no key and
 # writes "seal -".

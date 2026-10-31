@@ -187,3 +187,15 @@ def test_a_forged_done_record_while_running_does_not_switch_the_clock_off(engine
         engine._run_container(cfg, progress, container, "CONT: ", end_record=record)
     assert stopped.value.kind == "idle"
     assert not any("The build is done." in line for line in progress.logs)
+
+
+@pytest.mark.parametrize("name", ["docs/DESIGN.md", "docs/DESIGN_DE.md"])
+def test_the_design_names_the_limit_of_the_seal(name):
+    """The seal keeps the key out of a module's environment and files, not out of the runner's memory: a module runs as
+    the same user, and dropped capabilities with no-new-privileges do not stop a same-user process from reading
+    /proc/<pid>/mem where the host kernel allows it (Yama ptrace_scope 0, or no Yama). The design says so instead of
+    claiming the sandbox stops it."""
+    text = (REPO_ROOT / name).read_text(encoding="utf-8")
+    assert "no capabilities to read another process's memory" not in text
+    assert "keine Capabilities, um den Speicher eines anderen Prozesses zu lesen" not in text
+    assert "ptrace_scope" in text
