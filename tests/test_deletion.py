@@ -166,6 +166,11 @@ DELETION_SITES = {
     ("orchestrator/Core/builder.py", "BuildEngine._save_image_for_scan"): STAGING,   # the scan's temporary archive
     ("orchestrator/Core/builder.py", "BuildEngine._stage_dataset"): STAGING,
     ("orchestrator/Core/builder.py", "BuildEngine.cleanup_build"): STAGING,
+    # the runtime layer's own folders: its read-only assembled copy (made anew from the shipped copy), the end folder
+    # of one stage container, the toolbox's working folder of downloaded tarballs
+    ("orchestrator/Core/runtime_layer.py", "_remove_layer_folder"): STAGING,
+    ("orchestrator/Core/runtime_layer.py", "prepare_end_folder"): STAGING,
+    ("orchestrator/Core/runtime_layer.py", "_remove_work"): STAGING,
     ("orchestrator/Core/community_manager.py", "CommunityManager.discard"): STAGING,
     ("orchestrator/Core/community_manager.py", "CommunityManager.export_pack"): STAGING,
     # the export's staged copy of a target: its licence files are made anew there, the target folder is never touched
@@ -208,6 +213,7 @@ DELETION_SITES = {
     # containers the framework started
     ("orchestrator/Core/builder.py", "BuildEngine._run_container"): CONTAINERS,
     ("orchestrator/Core/builder.py", "BuildEngine._scan_image_security"): CONTAINERS,
+    ("orchestrator/Core/runtime_layer.py", "engine_builder.build"): CONTAINERS,   # the toolbox builder, never started
     ("orchestrator/runtime/build/executor.py", "DockerEngine.run"): CONTAINERS,
     ("orchestrator/runtime/container_server.py", "DittoDocker.run_check"): CONTAINERS,   # checks of Ditto's image
     # the framework's own local model server
