@@ -339,18 +339,22 @@ die Toolkits (beim Image-Build).
 
 ### Podman statt Docker
 
-Die Container-Engine des Frameworks ist Docker CE. In der ganzen RHEL-Familie (Fedora, RHEL, CentOS Stream, Rocky
-Linux, AlmaLinux, Oracle Linux und die übrigen Nachbauten) greift `install.sh` nur dann auf Podman zurück (`podman-docker` und dein rootless `podman.socket`), wenn Docker CE dort nicht geht oder
-du die Pakete behältst, die dnf dafür entfernen müsste (siehe [Installation](../README_DE.md#installation)). Das
-Framework findet Podman dann selbst: Ist `DOCKER_HOST` nicht gesetzt und antwortet kein Docker-Dienst (weder der
-des Systems noch ein rootless Docker), setzt es `DOCKER_HOST` für den eigenen Prozess und die Programme, die es
-startet, auf deinen Podman-Socket (`orchestrator/utils/docker_engine.py`, ein Helfer für die Build-Engine, das
+Rootless Podman ist die Container-Engine, die `install.sh` standardmäßig einrichtet (`podman`, `podman-docker`, wo
+es passt, einen Sub-ID-Bereich für dein Konto und deinen `podman.socket`); rootless Docker kommt mit
+`--engine=docker` oder wo sich Podman nicht installieren lässt, und Docker als root mit der Gruppe `docker` nur mit
+`--rootful` (siehe [Installation](../README_DE.md#installation)). Keine dauerhaften Rechte, die mehr können als
+nötig: Eine Engine ohne Root-Rechte baut dieselben Container mit deinen eigenen Rechten. Das Framework findet die
+Engine selbst: Ist `DOCKER_HOST` nicht gesetzt, nimmt es dein rootless Docker (`$XDG_RUNTIME_DIR/docker.sock`), dann
+deinen Podman-Socket, vor einem Docker-Dienst, der als root läuft, und setzt `DOCKER_HOST` für den eigenen Prozess
+und die Programme, die es startet (`orchestrator/utils/docker_engine.py`, ein Helfer für die Build-Engine, das
 Builder-Image, Dittos Container, die Docker-Prüfung und `scripts/build_container_image.sh`). Ein `DOCKER_HOST`, das
 du setzt, gilt immer. `podman-docker` verlinkt Dockers Socket-Namen (`/run/docker.sock`,
 `$XDG_RUNTIME_DIR/docker.sock`) auf Podmans Sockets; ein solcher Name oder ein Socket, an dem Podman antwortet, zählt
-als Podman, nicht als Docker-Dienst. `llm-cli mojo` nennt die Engine, die gerade läuft, und warnt mit dem Ausweg,
-wenn `DOCKER_HOST` noch auf einen Podman-Socket zeigt, während ein Docker-Dienst läuft (eine Einstellung aus einer
-früheren Podman-Sitzung; dein `DOCKER_HOST` gilt trotzdem). Unter rootless Docker (`docker info` nennt
+als Podman, nicht als Docker-Dienst. `llm-cli mojo` nennt die Engine, die gerade läuft, sagt, ob sie rootless läuft,
+warnt, wenn dein Konto in einer Gruppe mit Root-Wirkung ist (`docker` unter Linux, `docker-users` unter Windows), mit
+dem, was das heißt, und dem Weg zu einer Engine ohne Root-Rechte, und warnt mit dem Ausweg, wenn `DOCKER_HOST` noch
+auf einen Podman-Socket zeigt, während dein rootless Docker läuft (eine Einstellung aus einer früheren
+Podman-Sitzung; dein `DOCKER_HOST` gilt trotzdem). Unter rootless Docker (`docker info` nennt
 `name=rootless`) ist uid 0 im Container draußen du, deshalb laufen die Container des Frameworks, die als deine uid
 liefen, dort als `0:0`; die übrigen Grenzen der Sandbox bleiben.
 
@@ -363,8 +367,10 @@ Geprüft mit Podman 5.8.2 und buildah 1.43.1 unter Rocky Linux 9.8 und an den Qu
 | Gibt es nicht | BuildKit selbst: Podmans `docker buildx` ist buildah, ohne die Frontends von BuildKit (`# syntax=`), seinen Cache-Export und seine Treiber. Images entstehen stattdessen über Podmans API. Was BuildKit braucht, etwa die geplanten Hailo-Images, wird unter Podman mit dem Grund abgelehnt (`podman_refusal`). |
 | Nicht getestet | Ein vollständiger Target-Build und ein Lauf von Dittos Container unter Podman von Anfang bis Ende (die Container-Einstellungen des Builder-Containers und der Build-Stufe liefen gegen Podman 5.8.9 rootless); eine AMD- oder Intel-GPU, die unter rootless Podman als `/dev/dri` weitergegeben wird, auf echter Hardware: Die render-Gruppe des Rechners ist in einem rootless Container nicht abgebildet, deshalb bekommt so ein Container statt der Gruppennummer Podmans `--group-add keep-groups` (deine eigenen Gruppen, wie Podman es beschreibt; es braucht crun). |
 
-Später zu Docker CE wechseln: `sudo dnf remove podman-docker`, dann `sudo ./install.sh` erneut; es installiert
-Docker CE aus Dockers Repository für dein System und fragt, bevor dnf etwas entfernt oder ersetzt.
+Für einen GPU-Build oder BuildKit zu rootless Docker wechseln: `podman-docker` entfernen (`sudo dnf remove
+podman-docker`, `sudo apt remove podman-docker`, ...), dann `sudo ./install.sh --engine=docker`; es installiert
+Docker CE aus Dockers Repository für dein System mit geprüftem Schlüssel, rootless für dein Konto, und fragt, bevor
+dnf etwas entfernt oder ersetzt.
 
 ---
 

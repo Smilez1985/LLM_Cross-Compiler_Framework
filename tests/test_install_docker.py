@@ -403,12 +403,14 @@ class TestItStopsInPlainWords:
 
 @needs_bash_and_gpg
 def test_setup_system_installs_a_missing_docker_this_way(tmp_path, keys):
-    """The wiring: setup_system without docker on the PATH goes through install_docker, never get.docker.com."""
+    """The wiring: setup_system without docker on the PATH goes through install_docker, never get.docker.com (Docker
+    as root is the person's explicit choice, --rootful; the default is a rootless engine, tests/test_install_distros.py
+    TestRootlessByDefault)."""
     box = Sandbox(tmp_path, "debian", keys["docker.asc"], pinned=keys["pinned"])
     for name in ("usermod", "groups"):
         box.fake(name, 'echo "$(basename "$0") $*" >> "' + str(box.calls) + '"\n')
     (box.bin / "python3").symlink_to(shutil.which("python3"))
-    run, calls = box.run('wait_for_internet() { :; }; SUDO_USER=lcf; setup_system')
+    run, calls = box.run('wait_for_internet() { :; }; SUDO_USER=lcf; ROOTFUL=1; setup_system')
     assert run.returncode == 0, run.stdout + run.stderr
     assert "https://download.docker.com/linux/debian/gpg" in calls and "get.docker.com" not in calls
     assert "apt-get install -y docker-ce" in calls and "usermod -aG docker lcf" in calls

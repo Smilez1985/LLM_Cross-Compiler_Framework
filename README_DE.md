@@ -137,9 +137,27 @@ Der Installer:
    (`SUSEConnect -p sle-module-python3/<Version>/<Architektur>`, etwa `sle-module-python3/15.6/x86_64`), und
    versucht es noch einmal; ein nicht registriertes System hält mit dem Schritt der Registrierung an
    (`sudo SUSEConnect -r <Code>`),
-2. installiert Docker, falls es fehlt, über die Paketverwaltung des Systems und nie mit einem heruntergeladenen
-   Skript. Jede Paketverwaltung prüft die Signaturen auf ihre Weise, und einem fremden Repository wird erst
-   vertraut, wenn sein Schlüssel zu einem in `install.sh` festgelegten Fingerabdruck passt:
+2. richtet eine Container-Engine ein, die mit deinen eigenen Rechten läuft (der Standard: keine dauerhaften Rechte,
+   die mehr können als nötig): **rootless Podman** aus den Paketquellen der Distribution (`podman`, dazu
+   `podman-docker` für den Befehl `docker`, wo es das gibt und kein Docker installiert ist; unter Debian und Ubuntu
+   auch `uidmap`, `slirp4netns` und `dbus-user-session`, unter Alpine `shadow-uidmap`), einen Sub-ID-Bereich für dein
+   Konto (je 65536 IDs in `/etc/subuid` und `/etc/subgid`, nur wo du noch keinen hast; ein vorhandener Bereich
+   bleibt) und Podmans Docker-kompatible Schnittstelle für deinen Benutzer (`systemctl --user enable --now
+   podman.socket`). Mit `--engine=docker`, oder wo sich Podman nicht installieren lässt, stattdessen **rootless
+   Docker**: Docker CE aus Dockers Repository mit dem geprüften Schlüssel (unten) samt `docker-ce-rootless-extras`,
+   der Docker-Dienst mit Root-Rechten ausgeschaltet, und `dockerd-rootless-setuptool.sh install` als du; wo Docker
+   dafür kein Repository veröffentlicht, kommt Podman. Eine Gruppe `docker` gibt es nicht: Das Framework findet die
+   Engine ohne Root-Rechte selbst und nimmt sie lieber als einen Docker-Dienst, der als root läuft. Ist dein Konto
+   schon in der Gruppe `docker`, sagt der Installer, was das heißt und wie du herauskommst (`sudo gpasswd -d BENUTZER
+   docker`); er nimmt dich nie selbst heraus. Unter Podman gibt es Dockers GPU-Anfrage und BuildKit nicht
+   ([Funktionen](docs/Features_DE.md#podman-statt-docker)); rootless Docker hat beides.
+
+   **Docker als root nur, wenn du es willst:** `sudo ./install.sh --rootful` installiert Docker, falls es fehlt (die
+   Wege unten), und nimmt deinen Benutzer in die Gruppe `docker` auf, nach einer Warnung: Dein Konto hat dann
+   dauerhaft Rechte wie root auf diesem Rechner, auch wenn das Framework nicht läuft. Docker kommt immer über die
+   Paketverwaltung des Systems und nie mit einem heruntergeladenen Skript. Jede Paketverwaltung prüft die Signaturen
+   auf ihre Weise, und einem fremden Repository wird erst vertraut, wenn sein Schlüssel zu einem in `install.sh`
+   festgelegten Fingerabdruck passt (ebenso für rootless Docker):
    - **Debian, Ubuntu, Raspberry Pi OS** und Systeme, die auf Ubuntu oder Debian aufbauen, etwa Linux Mint, Pop!_OS
      oder LMDE: Dockers offizielles apt-Repository (32-Bit-Raspberry-Pi-OS bekommt die armhf-Pakete von Debian, wie
      Dockers Anleitung es sagt; ein System, das auf Ubuntu oder Debian aufbaut, die Pakete der Version, auf der es
@@ -150,8 +168,8 @@ Der Installer:
      rpm-Repository für ihr eigenes System, Rocky Linux, AlmaLinux, Oracle Linux und die übrigen RHEL-Nachbauten aus
      Dockers RHEL-Repository (`download.docker.com/linux/rhel/<RHEL-Version>`); dem Schlüssel wird nur mit dem
      Fingerabdruck aus Dockers Anleitung vertraut (`060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35`), und dnf
-     prüft die Signatur jedes Pakets. Docker CE ist der Standard, denn das Framework braucht BuildKit (etwa für
-     Hailo). Podman ist nur der Ersatzweg: Veröffentlicht Docker für diese Architektur oder Version nichts, ist das
+     prüft die Signatur jedes Pakets. Mit `--rootful` oder `--engine=docker` kommt hier zuerst Docker CE (BuildKit, etwa für
+     Hailo). Podman ist der Ersatzweg: Veröffentlicht Docker für diese Architektur oder Version nichts, ist das
      Repository nicht erreichbar, passt der Schlüssel nicht oder sagst du Nein zu dem, was dnf entfernen würde, kommt
      `podman-docker` (Podman mit dem Befehl `docker`) aus den Paketquellen der Distribution. Dann gibt es keine
      Gruppe `docker`; der Installer schaltet Podmans Docker-kompatible Schnittstelle für deinen Benutzer ein
@@ -184,10 +202,9 @@ Der Installer:
      starte `install.sh` erneut. Auf einem solchen System installiert er auch sonst nichts: Was es braucht (siehe
      [Voraussetzungen](#voraussetzungen)), liegt bei dir.
 
-   Danach nimmt er deinen Benutzer in die Gruppe `docker` auf und sagt, was das heißt: Wer in der Gruppe ist,
-   steuert den Docker-Dienst, und der läuft als root; jedes Programm, das als dein Benutzer läuft, kann damit
-   Root-Rechte auf diesem Rechner bekommen (`sudo gpasswd -d BENUTZER docker` macht es rückgängig; danach kann das
-   Framework ohne sudo nicht bauen),
+   Mit `--rootful` nimmt er deinen Benutzer danach in die Gruppe `docker` auf und sagt, was das heißt: Wer in der
+   Gruppe ist, steuert den Docker-Dienst, und der läuft als root; jedes Programm, das als dein Benutzer läuft, kann
+   damit Root-Rechte auf diesem Rechner bekommen (`sudo gpasswd -d BENUTZER docker` macht es rückgängig),
 3. kopiert die Dateien, die das Repository ausliefert, nach `/opt/llm-cross-compiler-framework` (Eigentümer ist dein
    Benutzer; fehlt `rsync`, kommt es aus der Paketverwaltung) und führt sie in `.lcf-installed-files` auf. Ein erneuter
    Aufruf aktualisiert diese Dateien und entfernt nur Dateien, die ein früherer Aufruf kopiert hat und die das
@@ -217,12 +234,16 @@ samt Grund, wenn sie anhielte.
 Auf einem Server ohne Bildschirm lässt `sudo ./install.sh --headless` (unbeaufsichtigt: `LCF_HEADLESS=1`) die GUI
 weg: Kommandozeile und MCP-Server brauchen kein Qt. `llm-framework` sagt dann, wie du die GUI später ergänzt.
 
-Melde dich einmal ab und wieder an, damit die Gruppe `docker` wirkt. Danach startest du die GUI mit
-`llm-framework`.
+Nach `--rootful` meldest du dich einmal ab und wieder an, damit die Gruppe `docker` wirkt. Danach startest du die GUI mit
+`llm-framework`. `llm-cli mojo` sagt, ob die Engine rootless läuft, und nennt eine Gruppe mit Root-Wirkung, in der dein Konto ist.
 
 ### Windows
 
-1. Docker Desktop (WSL-2-Backend) installieren und starten.
+1. Vorher nichts installieren: Der Installer richtet Podman ein (`winget install RedHat.Podman`) mit einer
+   Podman-Maschine, standardmäßig ohne Root-Rechte (`podman machine init`, `podman machine start`, für die
+   angemeldete Person). Docker Desktop nur mit `install.bat --rootful`, nach einer Warnung: Seine Gruppe
+   `docker-users` gibt dem Konto dauerhaft Rechte wie ein Administrator. Ist dein Konto in `docker-users`, sagt der
+   Installer das.
 2. Rechtsklick auf `install.bat` und **Als Administrator ausführen** wählen.
 
 Der Installer sucht Python (installiert Python 3.13 mit `winget`, wenn keines gefunden wird, und verlangt dann

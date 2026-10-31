@@ -105,6 +105,8 @@ def _mojo_docker(monkeypatch, client):
     from orchestrator.Core.mojo.checks import docker as docker_check
     monkeypatch.setattr(docker_check, "_storage_findings", lambda framework: [])
     monkeypatch.setattr(docker_check, "_stage_user_findings", lambda framework, client: [])   # own tests
+    # rootless and the group with root effect: own tests (tests/test_rootless_default.py)
+    monkeypatch.setattr(docker_check, "_privilege_findings", lambda client, platform=None: [])
     return [(f.code, f.severity.value) for f in docker_check.check_docker(_Framework(client))]
 
 
