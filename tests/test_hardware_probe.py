@@ -551,7 +551,13 @@ class TestShellEquivalence:
         assert re.search(r'\[ "\$INSTALL_TOOLS" = 1 \] && install_tools', text)
         body = text.split("install_tools() {", 1)[1].split("\n}\n", 1)[0]
         code = [ln for ln in text.splitlines() if "sudo" in ln and not ln.lstrip().startswith("#")]
-        assert code and all(ln in body for ln in code), "sudo only inside the opt-in install helper"
+        # Probe 3.3.0 asks sudo one thing outside the opt-in helper: `sudo -n true` (the access facts; -n never
+        # prompts and never reads a password). Outside the helper, sudo is named only in the table of its paths.
+        outside = [ln for ln in code if ln not in body]
+        assert outside == ['SUDO_PATHS="/usr/bin/sudo /bin/sudo /usr/local/bin/sudo /usr/sbin/sudo"'], outside
+        sudo_runs = [ln.strip() for ln in text.splitlines() if '"$(f "$s")"' in ln]
+        assert sudo_runs == ['$TIMEOUT "$(f "$s")" -n true </dev/null >/dev/null 2>&1'], sudo_runs
+        assert code and all(ln in body for ln in code if ln not in outside), "sudo only inside the opt-in install helper"
         reads = [ln for ln in text.replace(body, "").splitlines()
                  if not ln.lstrip().startswith("#") and re.search(r"(^|[;&|]\s*)read\s", ln.strip())]
         assert not reads, "the only read is the opt-in prompt"

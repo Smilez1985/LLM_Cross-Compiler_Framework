@@ -405,6 +405,95 @@ class HailoFacts:
         return "hailo-" + self.arch[len("hailo"):] if self.arch else None
 
 
+ACCESS_SINCE = "3.3.0"  # the probe version that added the access keys (group access of the schema)
+KEYGEN_SIGNATURES_SINCE = (8, 1)  # ssh-keygen -Y sign / -Y verify exist from OpenSSH 8.1 on
+
+
+@dataclass(frozen=True)
+class AccessFacts:
+    """HardwareProfile.access(): how the framework reaches the machine and installs on it (probe 3.3.0, group access
+    of the schema). Every value is a fixed word of the schema or a version; None where the probe could not tell.
+
+    ssh_server: openssh, dropbear, other or none; ssh_server_version (OpenSSH 9.2, Dropbear 2022.83); ssh_server_source:
+    socket (listens on port 22), process (runs), service (enabled), binary (installed only); ssh_servers_installed: the
+    servers with a program on the machine. sudo: root (the probe ran as root), nopasswd (`sudo -n true` worked),
+    password (sudo wants a password or refuses the account), absent, other (Windows). ssh_keygen: openssh or none, with
+    ssh_keygen_version. init_system: INIT_SYSTEM. package_manager: apt, dnf, zypper, pacman, apk or other.
+    dietpi_software: DietPi's dietpi-software is there (the way DietPi installs OpenSSH)."""
+    ssh_server: Optional[str] = None
+    ssh_server_version: Optional[str] = None
+    ssh_server_source: Optional[str] = None
+    ssh_servers_installed: Tuple[str, ...] = ()
+    sudo: Optional[str] = None
+    ssh_keygen: Optional[str] = None
+    ssh_keygen_version: Optional[str] = None
+    init_system: Optional[str] = None
+    package_manager: Optional[str] = None
+    dietpi_software: bool = False
+
+    @property
+    def sudo_present(self) -> Optional[bool]:
+        """sudo is installed (None: not determined; root and Windows: None, sudo is beside the point there)."""
+        return {"nopasswd": True, "password": True, "absent": False}.get(self.sudo or "")
+
+    @property
+    def sudo_without_password(self) -> Optional[bool]:
+        """The account may run sudo without a password prompt (root: True, it needs none; None: not determined)."""
+        return {"root": True, "nopasswd": True, "password": False, "absent": False}.get(self.sudo or "")
+
+    @property
+    def keygen_signatures(self) -> Optional[bool]:
+        """ssh-keygen can sign and check signatures (-Y sign, -Y verify: OpenSSH 8.1 and later); None: unknown."""
+        if self.ssh_keygen == "none":
+            return False
+        if self.ssh_keygen != "openssh" or not self.ssh_keygen_version:
+            return None
+        parts = tuple(int(p) for p in self.ssh_keygen_version.split(".")[:2])
+        return parts >= KEYGEN_SIGNATURES_SINCE
+
+    def parts(self) -> List[Tuple[str, Dict[str, str]]]:
+        """The facts as (text key, values) pairs for one summary line, in a fixed order; the texts are
+        deploy.access.* of orchestrator/utils/l10n_deploy.py (the CLI, the GUI and the MCP summary use them)."""
+        out: List[Tuple[str, Dict[str, str]]] = []
+        if self.ssh_server:
+            version = " " + self.ssh_server_version if self.ssh_server_version else ""
+            out.append(("deploy.access.ssh." + self.ssh_server, {"version": version}))
+            if self.ssh_server_source:
+                out.append(("deploy.access.source." + self.ssh_server_source, {}))
+            for other in self.ssh_servers_installed:
+                if other != self.ssh_server:
+                    out.append(("deploy.access.also." + other, {}))
+        if self.sudo:
+            out.append(("deploy.access.sudo." + self.sudo, {}))
+        if self.ssh_keygen == "none":
+            out.append(("deploy.access.keygen.none", {}))
+        elif self.ssh_keygen == "openssh":
+            signs = self.keygen_signatures
+            out.append(("deploy.access.keygen." + ("unknown" if signs is None else "yes" if signs else "no"),
+                        {"version": self.ssh_keygen_version or "?"}))
+        if self.init_system:
+            out.append(("deploy.access.init", {"init": self.init_system}))
+        if self.package_manager:
+            out.append(("deploy.access.packages", {"manager": self.package_manager}))
+        if self.dietpi_software:
+            out.append(("deploy.access.dietpi", {}))
+        return out
+
+    def summary(self, text) -> str:
+        """One line of the facts; `text(key, **values)` gives a text (ui_text, or the English texts for the CLI)."""
+        return ", ".join(text(key, **values) for key, values in self.parts())
+
+    def as_dict(self) -> Dict[str, Any]:
+        """The facts with the derived answers, for the MCP probe tool (fixed words, versions and booleans only)."""
+        return {"ssh_server": self.ssh_server, "ssh_server_version": self.ssh_server_version,
+                "ssh_server_source": self.ssh_server_source, "ssh_servers_installed": list(self.ssh_servers_installed),
+                "sudo": self.sudo, "sudo_present": self.sudo_present,
+                "sudo_without_password": self.sudo_without_password, "ssh_keygen": self.ssh_keygen,
+                "ssh_keygen_version": self.ssh_keygen_version, "keygen_signatures": self.keygen_signatures,
+                "init_system": self.init_system, "package_manager": self.package_manager,
+                "dietpi_software": self.dietpi_software}
+
+
 class HardwareProfile:
     """A validated hardware profile. Only keys of the schema with validated, normalised values are kept; every bool
     key is present (ON, OFF or UNKNOWN), also for each GPU."""
@@ -501,6 +590,21 @@ class HardwareProfile:
             firmware_version=self.get("HAILO_FW_VERSION"), hailort_version=self.get("HAILORT_VERSION"),
             pyhailort_version=self.get("HAILO_PYHAILORT_VERSION"),
             version_mismatch="version_mismatch:HAILORT_VERSION" in self.warnings)
+
+    def access(self) -> Optional[AccessFacts]:
+        """The access facts of the probe (SSH server, sudo, ssh-keygen, init system, package manager) as one typed
+        record for the pairing and the board installer; None for a profile of a probe older than 3.3.0, which never
+        looked (its INIT_SYSTEM alone is no answer to the rest)."""
+        written = _version_tuple(self.get("PROBE_TOOL_VERSION"))
+        if not written or written < _version_tuple(ACCESS_SINCE):
+            return None
+        return AccessFacts(
+            ssh_server=self.get("SSH_SERVER"), ssh_server_version=self.get("SSH_SERVER_VERSION"),
+            ssh_server_source=self.get("SSH_SERVER_SOURCE"),
+            ssh_servers_installed=tuple(self.items_of("SSH_SERVERS_INSTALLED")), sudo=self.get("SUDO"),
+            ssh_keygen=self.get("SSH_KEYGEN"), ssh_keygen_version=self.get("SSH_KEYGEN_VERSION"),
+            init_system=self.get("INIT_SYSTEM"), package_manager=self.get("PACKAGE_MANAGER"),
+            dietpi_software=self.get("DIETPI_SOFTWARE") == "present")
 
     def gpus(self) -> List[Dict[str, str]]:
         """Per GPU (GPU0, GPU1, ...) its keys without the GPU<n>_ prefix."""

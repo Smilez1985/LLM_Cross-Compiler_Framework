@@ -166,7 +166,7 @@ class TestCacheVulkanOpenCL:
             assert profile.get("VULKAN_INSTANCE_VERSION") == "1.3.275"   # the loader's file name (no vulkaninfo)
             assert profile.items_of("OPENCL_PLATFORMS") == ["nvidia-cuda:3.0", "intel-opencl-graphics:3.0",
                                                             "portable-computing-language:3.0"]
-            assert profile.get("PROBE_TOOL_VERSION") == "3.2.0"
+            assert profile.get("PROBE_TOOL_VERSION") == "3.3.0"
 
     @POSIX_ONLY
     @NEEDS_SHELL
@@ -259,10 +259,11 @@ class TestCacheVulkanOpenCL:
 
 class TestVersion:
 
-    def test_every_emitter_is_3_2_0(self):
-        assert probe.TOOL_VERSION == "3.2.0"
-        assert "PROBE_VERSION=3.2.0" in PROBE_SH.read_text(encoding="utf-8")
-        assert "$ProbeVersion = '3.2.0'" in PROBE_PS1.read_text(encoding="utf-8")
+    def test_every_emitter_is_3_3_0(self):
+        # 3.3.0 (the access keys: SSH server, sudo, ssh-keygen, package manager) follows 3.2.0's CPU keys
+        assert probe.TOOL_VERSION == "3.3.0"
+        assert "PROBE_VERSION=3.3.0" in PROBE_SH.read_text(encoding="utf-8")
+        assert "$ProbeVersion = '3.3.0'" in PROBE_PS1.read_text(encoding="utf-8")
 
     @pytest.mark.parametrize("name", sorted(p.name for p in FIXTURES.glob("schema2_*.txt")))
     def test_a_3_0_0_profile_stays_readable(self, tmp_path, name):
