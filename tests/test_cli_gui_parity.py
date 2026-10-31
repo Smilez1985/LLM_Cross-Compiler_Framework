@@ -208,6 +208,8 @@ def test_the_check_bites():
 # The lines `llm-cli scan` printed before probe 3.1.0 (stage C wave 3c); a line added since needs its GUI line or a
 # CLI_ONLY_LINES reason.
 SCAN_LINES_BEFORE_3_1 = ("System:", "CPU:", "GPU:", "NPU:", "Notes:")
+# Lines the Builder tab's scan logs as well (probe 3.3.0's access facts: probe_service.access_line for both).
+SCAN_LINES_IN_GUI = ("Access:",)
 
 
 def scan_summary_labels() -> List[str]:
@@ -220,7 +222,12 @@ def scan_summary_labels() -> List[str]:
     assert "SUPPORTS_HAILO=OFF\n" in text
     text = text.replace("SUPPORTS_HAILO=OFF\n", "SUPPORTS_HAILO=ON\nHAILO_FAMILY=hailo8\nHAILO_ARCH=hailo8l\n"
                                                 "HAILO_DEVICES=1\nHAILO_INTERFACE=pcie\n")
-    return [line.split(" ", 1)[0] for line in cli_module._profile_summary(parse_profile(text))]
+    from orchestrator.runtime.profile import HardwareProfile
+    profile = parse_profile(text)
+    values = dict(profile.values, PROBE_TOOL_VERSION="3.3.0", SSH_SERVER="dropbear", SUDO="nopasswd",
+                  SSH_KEYGEN="none", PACKAGE_MANAGER="apt")   # probe 3.3.0's access facts
+    profile = HardwareProfile(values, schema=profile.schema)
+    return [line.split(" ", 1)[0] for line in cli_module._profile_summary(profile)]
 
 
 def test_every_new_line_of_scan_has_a_gui_line_or_a_reason():
@@ -228,13 +235,21 @@ def test_every_new_line_of_scan_has_a_gui_line_or_a_reason():
     CLI-only with its reason (gui/menus/deploy.py CLI_ONLY_LINES) until the Hailo wave brings the GUI line."""
     tables = collect(area_modules())
     labels = scan_summary_labels()
-    assert "Hailo:" in labels and "NPU:" in labels, labels
-    unlisted = [label for label in labels
-                if label not in SCAN_LINES_BEFORE_3_1 and f"scan {label}" not in tables.cli_only_lines]
+    assert "Hailo:" in labels and "NPU:" in labels and "Access:" in labels, labels
+    unlisted = [label for label in labels if label not in SCAN_LINES_BEFORE_3_1 + SCAN_LINES_IN_GUI
+                and f"scan {label}" not in tables.cli_only_lines]
     assert unlisted == [], "a new line of `llm-cli scan` without a GUI line or a CLI_ONLY_LINES reason"
     assert tables.cli_only_lines["scan Hailo:"] == "GUI line comes with the Hailo wave"
     stale = [key for key in tables.cli_only_lines if key.startswith("scan ") and key[len("scan "):] not in labels]
     assert stale == [], "CLI_ONLY_LINES names a line `llm-cli scan` does not print"
+
+
+def test_the_gui_lines_are_logged_by_the_builder_tab():
+    """Every line of SCAN_LINES_IN_GUI comes from one helper that the Builder tab's scan logs too."""
+    source = (REPO_ROOT / "orchestrator" / "gui" / "builder_tab.py").read_text(encoding="utf-8")
+    assert "probe_service import access_line" in source and "self._log(access_line)" in source
+    cli_source = (REPO_ROOT / "orchestrator" / "cli.py").read_text(encoding="utf-8")
+    assert "access_line(profile, \"en\")" in cli_source
 
 
 def test_the_line_check_bites():

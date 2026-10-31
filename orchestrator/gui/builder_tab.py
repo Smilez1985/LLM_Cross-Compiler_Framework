@@ -894,7 +894,11 @@ class BuilderTab(QWidget):
             
             cpu_model = data.get('CPU_MODEL', 'Unknown')
             self._log(f"Detected Hardware: {cpu_model}")
-            
+            from orchestrator.runtime.probe_service import access_line as probe_access_line
+            access_line = probe_access_line(profile)   # SSH server, sudo, ssh-keygen, init, packages (probe 3.3.0)
+            if access_line:
+                self._log(access_line)
+
             if match:
                 idx = self.target_combo.findData(match)
                 if idx >= 0 and person_target(self) not in (None, match):  # N9'': after_probe offers it

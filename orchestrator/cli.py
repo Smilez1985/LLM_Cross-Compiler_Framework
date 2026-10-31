@@ -6000,6 +6000,10 @@ def _profile_summary(profile) -> list:
         if hailo.hailort_version:
             facts.append(f"HailoRT {hailo.hailort_version} installed")
         lines.append("Hailo: " + escape(", ".join(facts)))
+    from orchestrator.runtime.probe_service import access_line
+    access = access_line(profile, "en")   # probe 3.3.0: SSH server, sudo, ssh-keygen, init, package manager
+    if access:
+        lines.append(escape(access))
     if profile.warnings:
         lines.append("Notes: " + escape(", ".join(profile.warnings)))
     return lines

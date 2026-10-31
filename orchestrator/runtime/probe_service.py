@@ -102,6 +102,20 @@ def soc_fits(soc: Optional[str], board: Optional[str]) -> bool:
     return bool(rest) and rest.isalpha() and len(rest) <= 2 and want[-1:].isdigit()
 
 
+def access_line(profile: Optional[HardwareProfile], lang: Optional[str] = None) -> Optional[str]:
+    """The probe's access facts (HardwareProfile.access(): SSH server, sudo, ssh-keygen, init, package manager) as
+    the one "Access: ..." line of `llm-cli scan` (lang "en") and the Builder tab's scan (the UI language); None for a
+    profile of a probe older than 3.3.0. Fixed words and versions only, never a path or an account."""
+    access = profile.access() if profile is not None else None
+    if access is None:
+        return None
+    from orchestrator.utils.localization import ui_text
+
+    def text(key: str, **values: str) -> str:
+        return ui_text(key, lang, **values)
+    return text("deploy.access.line", facts=access.summary(text))
+
+
 def match_target(profile: HardwareProfile, target_manager: Any) -> Optional[TargetMatch]:
     """The target that fits a probe best, from validated probe values only (SOC_MODEL, SOC_VENDOR, NPU_VENDOR, ARCH)
     against each target's boards, vendor and architecture family: a board named like the probe's SoC is the strongest

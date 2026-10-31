@@ -268,6 +268,60 @@ tables:
   # USB vendor:product -> HAILO_ARCH (HailoRT's install_usb.sh: the ASUS UGen300 USB AI Accelerator, a Hailo-10H)
   hailo_usb_devices:
     "0x0b05:0x1d6f": hailo10h
+  # --- access facts (probe 3.3.0, group access): how the framework reaches the machine and installs on it ---------
+  # Fixed paths only; the probe never walks a folder for them, never writes a path and never reads a user name.
+  # Process names (/proc/<pid>/comm) -> SSH server. The listener of TCP port 22 and the running processes are named
+  # by these words only.
+  ssh_server_names:
+    sshd: openssh
+    sshd-session: openssh
+    dropbear: dropbear
+    dropbearmulti: dropbear
+    tinysshd: other
+  # Installed server programs, looked for in this order (a link counts) -> SSH server. The version comes from
+  # running the first one of the chosen server with -V.
+  ssh_server_binaries:
+    /usr/sbin/sshd: openssh
+    /usr/bin/sshd: openssh
+    /sbin/sshd: openssh
+    /usr/local/sbin/sshd: openssh
+    /usr/sbin/dropbear: dropbear
+    /usr/bin/dropbear: dropbear
+    /sbin/dropbear: dropbear
+    /usr/local/sbin/dropbear: dropbear
+  # Enabled service entries (systemd wants links, OpenRC default runlevel, sysvinit rc2.d start links; a glob of
+  # one fixed folder) -> SSH server.
+  ssh_server_services:
+    /etc/systemd/system/multi-user.target.wants/ssh.service: openssh
+    /etc/systemd/system/multi-user.target.wants/sshd.service: openssh
+    /etc/systemd/system/sockets.target.wants/ssh.socket: openssh
+    /etc/systemd/system/multi-user.target.wants/dropbear.service: dropbear
+    /etc/runlevels/default/sshd: openssh
+    /etc/runlevels/default/dropbear: dropbear
+    /etc/rc2.d/S[0-9][0-9]ssh: openssh
+    /etc/rc2.d/S[0-9][0-9]dropbear: dropbear
+  # sudo, ssh-keygen and the OpenSSH client (whose -V names the version of ssh-keygen: one package), in this order.
+  sudo_paths: [/usr/bin/sudo, /bin/sudo, /usr/local/bin/sudo, /usr/sbin/sudo]
+  ssh_keygen_paths: [/usr/bin/ssh-keygen, /bin/ssh-keygen, /usr/local/bin/ssh-keygen]
+  ssh_client_paths: [/usr/bin/ssh, /bin/ssh, /usr/local/bin/ssh]
+  # Package manager programs, the first one found wins -> PACKAGE_MANAGER.
+  package_managers:
+    /usr/bin/apt-get: apt
+    /usr/bin/dnf: dnf
+    /usr/bin/zypper: zypper
+    /usr/bin/pacman: pacman
+    /sbin/apk: apk
+    /usr/bin/apk: apk
+    /usr/bin/yum: other
+    /bin/opkg: other
+    /usr/bin/opkg: other
+    /usr/bin/xbps-install: other
+    /usr/bin/emerge: other
+    /usr/sbin/pkg: other
+    /usr/local/bin/brew: other
+    /opt/homebrew/bin/brew: other
+  # DietPi's software installer (DIETPI_SOFTWARE=present when the file exists)
+  dietpi_software_path: /boot/dietpi/dietpi-software
   # Codes in PROBE_WARNINGS: "<code>" or "<code>:<KEY>". Unknown codes are accepted (display only) if they match
   # the item pattern of PROBE_WARNINGS.
   warning_codes:
@@ -570,6 +624,157 @@ keys:
       freebsd: "constant bsdinit"
     normalise: "first matching rule"
     consumers: [deploy]
+
+  # --- access (probe 3.3.0): the SSH server, sudo, ssh-keygen and the package manager -----------------------------
+  # Read without network, without root and without a prompt; fixed words only (no path, host name or user name).
+  # HardwareProfile.access() returns them as one typed record (None for a profile of a probe before 3.3.0). The
+  # pairing takes its protection tier from them (OpenSSH with sudo: the root-owned key line; Dropbear or no sudo:
+  # the weaker tiers), and a board installer derives its plan from them (OpenSSH as a dependency, the package
+  # manager, DietPi's dietpi-software). INIT_SYSTEM above is the init system of these facts.
+  SSH_SERVER:
+    group: access
+    type: enum
+    values: [openssh, dropbear, other, none]
+    since: 3.3.0
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos, freebsd]
+    sources:
+      linux: >-
+        first match: the program that owns the listening socket of TCP port 22 (/proc/net/tcp and tcp6, state 0A,
+        the socket inode found in /proc/<pid>/fd: readable for the probe's own processes, all of them as root); else
+        the running processes (/proc/<pid>/comm); else an enabled service entry (tables.ssh_server_services); else an
+        installed program (tables.ssh_server_binaries); else none. Names via tables.ssh_server_names; a program
+        of tables.ssh_server_binaries that is a link counts by the name it points to (followed inside the machine),
+        and a process named like such a program counts as that program (a Dropbear behind /usr/sbin/sshd is dropbear)
+      windows: >-
+        the sshd service (sc.exe query sshd; Get-Service in the .ps1) -> openssh; else
+        %SystemRoot%\System32\OpenSSH\sshd.exe -> openssh; else none
+      macos: "the installed programs (/usr/sbin/sshd: Remote Login)"
+    normalise: >-
+      several servers at one step: dropbear before openssh before other (claiming OpenSSH for a Dropbear board
+      would give the pairing key options Dropbear does not know; the other way round only costs protection)
+    consumers: [deploy, gui, mcp]
+  SSH_SERVER_VERSION:
+    group: access
+    type: version
+    since: 3.3.0
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, macos]
+    sources:
+      any: >-
+        the first program of tables.ssh_server_binaries of the chosen server, run with -V (it prints its version and
+        exits, also an older sshd that does not know -V): "OpenSSH_9.2p1" -> 9.2, "Dropbear v2022.83" -> 2022.83
+    normalise: "major.minor of OpenSSH (the portable p-release left out), year.release of Dropbear"
+    consumers: [deploy, gui, mcp]
+  SSH_SERVER_SOURCE:
+    group: access
+    type: enum
+    values: [socket, process, service, binary]
+    since: 3.3.0
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos, freebsd]
+    sources:
+      any: "the step of SSH_SERVER that found it (written with every SSH_SERVER but none)"
+    normalise: "socket: listens on port 22; process: runs; service: enabled, not seen running; binary: installed only"
+    consumers: [deploy, gui, mcp]
+  SSH_SERVERS_INSTALLED:
+    group: access
+    type: list
+    item_pattern: '^(openssh|dropbear)$'
+    max_items: 2
+    since: 3.3.0
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos, freebsd]
+    sources:
+      linux: "the servers with a program of tables.ssh_server_binaries"
+      windows: "openssh when the sshd service or sshd.exe exists"
+    normalise: "table order; left out when none is installed"
+    consumers: [deploy, gui, mcp]
+  SUDO:
+    group: access
+    type: enum
+    values: [root, nopasswd, password, absent, other]
+    since: 3.3.0
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos, freebsd]
+    sources:
+      linux: >-
+        root when the probe runs as user id 0 (sudo is not needed); else absent when no program of
+        tables.sudo_paths exists; else `sudo -k -n true` with an empty stdin and a time limit: exit 0 -> nopasswd, any
+        other exit -> password. -n never prompts and never reads a password; -k ignores credentials cached in this
+        terminal (a password typed a minute ago is no NOPASSWD rule); the probe asks sudo nothing else
+      windows: "constant other (Windows elevates through UAC)"
+    normalise: >-
+      password means sudo wants a password or does not allow the account (sudo -n cannot tell them apart without
+      asking); sudo that could not be run: left out with not_determined:SUDO
+    consumers: [deploy, gui, mcp]
+  SSH_KEYGEN:
+    group: access
+    type: enum
+    values: [openssh, none]
+    since: 3.3.0
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos, freebsd]
+    sources:
+      linux: "openssh when a program of tables.ssh_keygen_paths exists, else none"
+      windows: "openssh when ssh-keygen runs (on PATH: the OpenSSH client feature), else none"
+    normalise: "the fixed word"
+    consumers: [deploy, gui, mcp]
+  SSH_KEYGEN_VERSION:
+    group: access
+    type: version
+    since: 3.3.0
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos, freebsd]
+    sources:
+      any: >-
+        `ssh -V` of the OpenSSH client next to it (tables.ssh_client_paths; ssh on PATH on Windows):
+        "OpenSSH_9.2p1 ..." or "OpenSSH_for_Windows_9.5p1 ..." -> 9.2 / 9.5. ssh-keygen signs and checks signatures
+        (-Y sign, -Y verify) from OpenSSH 8.1 on
+    normalise: "major.minor; with SSH_KEYGEN=openssh and no version: not_determined:SSH_KEYGEN_VERSION"
+    consumers: [deploy, gui, mcp]
+  PACKAGE_MANAGER:
+    group: access
+    type: enum
+    values: [apt, dnf, zypper, pacman, apk, other]
+    since: 3.3.0
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos, freebsd]
+    sources:
+      linux: "the first program of tables.package_managers that exists"
+      windows: "constant other"
+    normalise: "left out when none is found"
+    consumers: [deploy, gui, mcp]
+  DIETPI_SOFTWARE:
+    group: access
+    type: enum
+    values: [present]
+    only_os: [linux]
+    since: 3.3.0
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources:
+      linux: "tables.dietpi_software_path exists (DietPi's dietpi-software, the way DietPi installs OpenSSH)"
+    normalise: "present, else left out"
+    consumers: [deploy, gui, mcp]
 
   # --- CPU identity -------------------------------------------------------------------------------------------
   CPU_MODEL:

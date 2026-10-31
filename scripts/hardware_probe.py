@@ -13,7 +13,8 @@ Python is not available; the three are kept in step by the framework's tests.
 
 Rules:
 - Standard library only, Python 3.8 syntax. Linux, Windows and macOS; FreeBSD and Android on a best-effort basis.
-- No network, no prompts, no stdin, no sudo, no elevation, no package installs. External tools (nvidia-smi,
+- No network, no prompts, no stdin, no elevation, no package installs. sudo is only asked `sudo -k -n true` (the
+  access facts: -n never prompts and never reads a password, -k ignores cached credentials). External tools (nvidia-smi,
   vulkaninfo, compilers, PowerShell on Windows) run with a time limit and an empty stdin; a missing tool contributes
   nothing.
 - Every value is checked against KEYS / GPU_KEYS below (the validation of the schema; a test compares them) before it
@@ -45,7 +46,7 @@ import time
 from datetime import datetime, timezone
 
 TOOL = "python"
-TOOL_VERSION = "3.2.0"
+TOOL_VERSION = "3.3.0"
 SCHEMA = "2"
 FILE_NAME = "target_hardware_config.txt"
 MAX_VALUE = 4096
@@ -57,7 +58,8 @@ GIB = 1024 * MIB
 # version, CUDA, TensorRT, OpenVINO, the ROCm gfx targets, the Intel GPU node). The full probe reads them; the quick
 # probe of orchestrator/runtime/hardware.py detect_hardware() (sections memory and gpu: free RAM and the GPUs at every
 # start of the local runtime) leaves them out, so it runs no tool it did not run before.
-SECTIONS = ("cpu", "memory", "soc", "npu", "gpu", "runtimes", "toolchain")
+# "access" (probe 3.3.0): the SSH server, sudo, ssh-keygen and the package manager; the quick probe leaves it out.
+SECTIONS = ("cpu", "memory", "soc", "npu", "gpu", "runtimes", "access", "toolchain")
 
 # --- key table: type, rule, required, only_arch, only_os (a copy of the schema's validation) -----------------------
 
@@ -91,6 +93,15 @@ KEYS = {
     "LIBC_VERSION": ("version", r"^\d{1,3}(\.\d{1,5}){1,3}$", 0, (), ()),
     "INIT_SYSTEM": ("enum", ("systemd", "openrc", "sysvinit", "busybox", "runit", "s6", "procd", "launchd", "scm",
                              "bsdinit", "other"), 0, (), ()),
+    "SSH_SERVER": ("enum", ("openssh", "dropbear", "other", "none"), 0, (), ()),
+    "SSH_SERVER_VERSION": ("version", _VERSION, 0, (), ()),
+    "SSH_SERVER_SOURCE": ("enum", ("socket", "process", "service", "binary"), 0, (), ()),
+    "SSH_SERVERS_INSTALLED": ("list", ("^(openssh|dropbear)$", 2), 0, (), ()),
+    "SUDO": ("enum", ("root", "nopasswd", "password", "absent", "other"), 0, (), ()),
+    "SSH_KEYGEN": ("enum", ("openssh", "none"), 0, (), ()),
+    "SSH_KEYGEN_VERSION": ("version", _VERSION, 0, (), ()),
+    "PACKAGE_MANAGER": ("enum", ("apt", "dnf", "zypper", "pacman", "apk", "other"), 0, (), ()),
+    "DIETPI_SOFTWARE": ("enum", ("present",), 0, (), ("linux",)),
     "CPU_MODEL": ("text", 128, 0, (), ()),
     "CPU_VENDOR": ("enum", ("intel", "amd", "hygon", "centaur", "zhaoxin", "arm", "broadcom", "cavium", "fujitsu",
                             "hisilicon", "nvidia", "apm", "qualcomm", "samsung", "marvell", "apple", "faraday",
@@ -295,6 +306,32 @@ HAILO_SYSFS_CLASSES = {"hailo_chardev": "hailo8", "hailo1x": "hailo1x", "hailo1x
 HAILO_PCI_DEVICES = {"0x1e60:0x2864": "hailo8", "0x1e60:0x45c4": "hailo1x", "0x1e60:0x43a2": "hailo1x",
                      "0x1e60:0x26a2": "hailo1x"}
 HAILO_USB_DEVICES = {"0x0b05:0x1d6f": "hailo10h"}
+# Access facts (probe 3.3.0): fixed paths and words only, never a path, host name or user name in the result.
+SSH_SERVER_NAMES = {"sshd": "openssh", "sshd-session": "openssh", "dropbear": "dropbear", "dropbearmulti": "dropbear",
+                    "tinysshd": "other"}
+SSH_SERVER_BINARIES = {"/usr/sbin/sshd": "openssh", "/usr/bin/sshd": "openssh", "/sbin/sshd": "openssh",
+                       "/usr/local/sbin/sshd": "openssh", "/usr/sbin/dropbear": "dropbear",
+                       "/usr/bin/dropbear": "dropbear", "/sbin/dropbear": "dropbear",
+                       "/usr/local/sbin/dropbear": "dropbear"}
+SSH_SERVER_SERVICES = {
+    "/etc/systemd/system/multi-user.target.wants/ssh.service": "openssh",
+    "/etc/systemd/system/multi-user.target.wants/sshd.service": "openssh",
+    "/etc/systemd/system/sockets.target.wants/ssh.socket": "openssh",
+    "/etc/systemd/system/multi-user.target.wants/dropbear.service": "dropbear",
+    "/etc/runlevels/default/sshd": "openssh", "/etc/runlevels/default/dropbear": "dropbear",
+    "/etc/rc2.d/S[0-9][0-9]ssh": "openssh", "/etc/rc2.d/S[0-9][0-9]dropbear": "dropbear"}
+SUDO_PATHS = ("/usr/bin/sudo", "/bin/sudo", "/usr/local/bin/sudo", "/usr/sbin/sudo")
+SSH_KEYGEN_PATHS = ("/usr/bin/ssh-keygen", "/bin/ssh-keygen", "/usr/local/bin/ssh-keygen")
+SSH_CLIENT_PATHS = ("/usr/bin/ssh", "/bin/ssh", "/usr/local/bin/ssh")
+PACKAGE_MANAGERS = {"/usr/bin/apt-get": "apt", "/usr/bin/dnf": "dnf", "/usr/bin/zypper": "zypper",
+                    "/usr/bin/pacman": "pacman", "/sbin/apk": "apk", "/usr/bin/apk": "apk", "/usr/bin/yum": "other",
+                    "/bin/opkg": "other", "/usr/bin/opkg": "other", "/usr/bin/xbps-install": "other",
+                    "/usr/bin/emerge": "other", "/usr/sbin/pkg": "other", "/usr/local/bin/brew": "other",
+                    "/opt/homebrew/bin/brew": "other"}
+DIETPI_SOFTWARE_PATH = "/boot/dietpi/dietpi-software"
+# Several SSH servers found at one step: the first of these (claiming OpenSSH for a Dropbear board would give the
+# pairing key options Dropbear does not know; the other way round only costs protection).
+SSH_SERVER_ORDER = ("dropbear", "openssh", "other")
 
 # CPU features: key -> (/proc/cpuinfo tokens, any-of tokens, Windows IsProcessorFeaturePresent constant, lowest
 # Windows build that knows the constant, macOS sysctl name). Linux: ON when every token (or one any-of token) is in
@@ -449,6 +486,24 @@ def default_runner(cmd, timeout):
     except (OSError, subprocess.SubprocessError, ValueError) as e:
         return -1, "", str(e)
     return res.returncode, res.stdout or "", res.stderr or ""
+
+
+def openssh_version(text):
+    """major.minor of an OpenSSH banner ("OpenSSH_9.2p1 Debian-2", "OpenSSH_for_Windows_9.5p1"), else None."""
+    match = re.search(r"OpenSSH_(?:for_Windows_)?(\d{1,2}\.\d{1,2})", text or "")
+    return match.group(1) if match else None
+
+
+def ssh_server_version(server, text):
+    """The version an SSH server's -V prints: OpenSSH major.minor, Dropbear year.release ("Dropbear v2022.83")."""
+    if server == "openssh":
+        return openssh_version(text)
+    for line in (text or "").splitlines():
+        if "Dropbear" in line:
+            match = re.search(r"v(\d{4}\.\d{1,3})", line)
+            if match:
+                return match.group(1)
+    return None
 
 
 def default_find_library(name):
@@ -1198,6 +1253,8 @@ class Probe:
             self._npu(windows_info)
         if "gpu" in self.sections:
             self._gpu()
+        if "access" in self.sections:
+            self._access()
         if "toolchain" in self.sections:
             self._toolchain()
         if "CPU_CORES_LOGICAL" not in self.values and not self.sysroot:
@@ -2265,6 +2322,163 @@ class Probe:
         return gpus
 
     # --- toolchain ---
+
+    # --- access: SSH server, sudo, ssh-keygen, package manager (probe 3.3.0) ---
+
+    def _access(self):
+        if self.os == "windows":
+            self._access_windows()
+        elif self.os in ("linux", "android", "freebsd", "macos"):
+            self._access_unix()
+
+    def _access_unix(self):
+        installed = []
+        for path, kind in SSH_SERVER_BINARIES.items():
+            if self.exists(path) and self._binary_kind(path, kind) not in installed:
+                installed.append(self._binary_kind(path, kind))
+        services = [kind for pattern, kind in SSH_SERVER_SERVICES.items() if glob.glob(self._glob(pattern))]
+        server, source = "none", None
+        for step, kinds in (("socket", self._ssh_listeners), ("process", self._ssh_processes),
+                            ("service", lambda: services), ("binary", lambda: installed)):
+            found = kinds()
+            chosen = next((k for k in SSH_SERVER_ORDER if k in found), None)
+            if chosen:
+                server, source = chosen, step
+                break
+        self.put("SSH_SERVER", server)
+        self.put("SSH_SERVER_SOURCE", source)
+        if installed:
+            self.put("SSH_SERVERS_INSTALLED", ",".join(k for k in ("openssh", "dropbear") if k in installed))
+        if server in ("openssh", "dropbear"):
+            binary = next((p for p, k in SSH_SERVER_BINARIES.items()
+                           if self.exists(p) and self._binary_kind(p, k) == server), None)
+            if binary:
+                out = self.tool_output([self.path(binary), "-V"], 10)
+                self.put("SSH_SERVER_VERSION", ssh_server_version(server, out), warn_invalid=False)
+        self.put("SUDO", self._sudo())
+        keygen = any(self.exists(p) for p in SSH_KEYGEN_PATHS)
+        self.put("SSH_KEYGEN", "openssh" if keygen else "none")
+        if keygen:
+            client = next((p for p in SSH_CLIENT_PATHS if self.exists(p)), None)
+            version = openssh_version(self.tool_output([self.path(client), "-V"], 10)) if client else None
+            if not self.put("SSH_KEYGEN_VERSION", version, warn_invalid=False):
+                self.warn("not_determined", "SSH_KEYGEN_VERSION")
+        self.put("PACKAGE_MANAGER", next((v for p, v in PACKAGE_MANAGERS.items() if self.exists(p)), None))
+        if self.os == "linux" and self.exists(DIETPI_SOFTWARE_PATH):
+            self.put("DIETPI_SOFTWARE", "present")
+
+    def _proc_pids(self):
+        try:
+            return sorted((e for e in os.listdir(self.path("/proc")) if e.isdigit()), key=int)
+        except OSError:
+            return []
+
+    def _binary_kind(self, path, kind):
+        """The SSH server a program of tables.ssh_server_binaries is: by the name its link points to, followed inside
+        the machine (a Dropbear behind /usr/sbin/sshd is Dropbear), else the table's word."""
+        full = self.path(path)
+        for _hop in range(8):
+            try:
+                target = os.readlink(full)
+            except (OSError, ValueError, NotImplementedError):
+                break
+            full = self.path(target) if target.startswith("/") else os.path.join(os.path.dirname(full), target)
+        return SSH_SERVER_NAMES.get(os.path.basename(full), kind)
+
+    def _proc_server(self, pid):
+        """The SSH server a process is, by its /proc/<pid>/comm name (tables.ssh_server_names), else None. A name that
+        is also a program of tables.ssh_server_binaries counts as what that program is (an sshd that is a link to
+        Dropbear is Dropbear; several: SSH_SERVER_ORDER)."""
+        name = (self.read("/proc/{}/comm".format(pid), 256) or "").strip()
+        kind = SSH_SERVER_NAMES.get(name)
+        if kind is None:
+            return None
+        kinds = [self._binary_kind(p, k) for p, k in SSH_SERVER_BINARIES.items()
+                 if p.rsplit("/", 1)[-1] == name and self.exists(p)]
+        return next((k for k in SSH_SERVER_ORDER if k in kinds), kind)
+
+    def _ssh_processes(self):
+        """The SSH servers among the running processes."""
+        kinds = []
+        for pid in self._proc_pids():
+            kind = self._proc_server(pid)
+            if kind and kind not in kinds:
+                kinds.append(kind)
+        return kinds
+
+    def _ssh_listeners(self):
+        """The SSH servers that own a listening socket of TCP port 22, where their /proc/<pid>/fd can be read (the
+        probe's own processes; all of them as root)."""
+        inodes = set()
+        for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+            for line in (self.read(table) or "").splitlines()[1:]:
+                fields = line.split()
+                if len(fields) >= 10 and fields[3] == "0A" and fields[1].upper().endswith(":0016") and \
+                        fields[9].isdigit() and fields[9] != "0":
+                    inodes.add("socket:[{}]".format(fields[9]))
+        kinds = []
+        if not inodes:
+            return kinds
+        for pid in self._proc_pids():
+            folder = self.path("/proc/{}/fd".format(pid))
+            try:
+                entries = os.listdir(folder)
+            except OSError:
+                continue  # another account's process (not root): not readable
+            for entry in entries:
+                try:
+                    target = os.readlink(os.path.join(folder, entry))
+                except OSError:
+                    continue
+                if target in inodes:
+                    kind = self._proc_server(pid)
+                    if kind and kind not in kinds:
+                        kinds.append(kind)
+                    break
+        return kinds
+
+    def _uid(self):
+        """The probe's user id: the process's own, or `id -u` in sysroot mode (the tests' fake tools)."""
+        if not self.sysroot and hasattr(os, "geteuid"):
+            return os.geteuid()
+        rc, out, _err = self.run(["id", "-u"], 5)
+        text = (out or "").strip()
+        return int(text) if rc == 0 and text.isdigit() else None
+
+    def _sudo(self):
+        """root, absent, nopasswd or password: `sudo -k -n true` never prompts and never reads a password (-n), and
+        ignores credentials cached in this terminal (-k: a password typed a minute ago is no NOPASSWD rule)."""
+        if self._uid() == 0:
+            return "root"
+        sudo = next((p for p in SUDO_PATHS if self.exists(p)), None)
+        if sudo is None:
+            return "absent"
+        rc, _out, _err = self.run([self.path(sudo), "-k", "-n", "true"], 10)
+        if rc == -1:
+            self.warn("not_determined", "SUDO")
+            return None
+        return "nopasswd" if rc == 0 else "password"
+
+    def _access_windows(self):
+        rc, out, _err = self.run(["sc.exe", "query", "sshd"], 10)
+        root = self.env.get("SystemRoot") or self.env.get("SYSTEMROOT") or r"C:\Windows"
+        if rc == 0:
+            server, source = "openssh", "process" if "RUNNING" in (out or "") else "service"
+        elif os.path.exists(os.path.join(root, "System32", "OpenSSH", "sshd.exe")):
+            server, source = "openssh", "binary"
+        else:
+            server, source = "none", None
+        self.put("SSH_SERVER", server)
+        self.put("SSH_SERVER_SOURCE", source)
+        if server == "openssh":
+            self.put("SSH_SERVERS_INSTALLED", "openssh")
+        self.put("SUDO", "other")
+        keygen = self.run(["ssh-keygen", "-?"], 10)[0] != -1
+        self.put("SSH_KEYGEN", "openssh" if keygen else "none")
+        if keygen and not self.put("SSH_KEYGEN_VERSION", openssh_version(self.tool_output(["ssh", "-V"], 10)),
+                                   warn_invalid=False):
+            self.warn("not_determined", "SSH_KEYGEN_VERSION")
+        self.put("PACKAGE_MANAGER", "other")
 
     def _toolchain(self):
         tools = (("TOOL_CMAKE", ["cmake", "--version"]), ("TOOL_NINJA", ["ninja", "--version"]),
