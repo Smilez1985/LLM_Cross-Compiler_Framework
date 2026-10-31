@@ -530,7 +530,8 @@ The full guide is the [Module Developer Guide](docs/Module_Developer_Guide.md). 
    `orchestrator/schemas/targets.py`; the Rockchip block is the reference).
    GUI, CLI, Ditto and the MCP server offer and validate exactly what is declared there.
 4. **Dockerfile and build script:** pin every version (tags, commits, hashes, like `RKLLM_WHEEL_SHA256` in the
-   Rockchip Dockerfile). The conversion has to work in the sandbox: as a non-root user, without network, with a
+   Rockchip Dockerfile). The conversion has to work in the sandbox: under the stage account `llmstage` (neither root
+   nor the stage runner: keep the account, `setpriv` and `modules/stage_user.sh` of the template), without network, with a
    read-only image filesystem and only the build's own folders writable. The template's convert stage already
    detects the input's format, checks the input and the written GGUF, runs a short functional test and records
    statistics; keep its `scripts/model_check.py` in your target (the target stage's package runs the same

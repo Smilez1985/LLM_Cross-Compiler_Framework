@@ -559,7 +559,8 @@ Der vollständige Leitfaden ist der [Leitfaden für Modulentwickler](docs/Module
    `targets/<Name>/target.yml` (Schema in `orchestrator/schemas/targets.py`; der Rockchip-Block ist das Vorbild). GUI, CLI, Ditto und der MCP-Server bieten genau das an und prüfen genau das, was
    dort steht.
 4. **Dockerfile und Build-Skript:** Lege jede Version fest (Tags, Commits, Hashes, wie `RKLLM_WHEEL_SHA256` im
-   Rockchip-Dockerfile). Die Umwandlung muss in der Sandbox funktionieren: als Benutzer ohne root-Rechte, ohne
+   Rockchip-Dockerfile). Die Umwandlung muss in der Sandbox funktionieren: unter dem Stufen-Konto `llmstage` (weder
+   root noch der Stufen-Runner: behalte das Konto, `setpriv` und `modules/stage_user.sh` der Vorlage), ohne
    Netzwerk, mit schreibgeschütztem Image-Dateisystem und nur den eigenen Ordnern des Builds beschreibbar. Die Stufe
    convert der Vorlage erkennt bereits das Format der Eingabe, prüft die Eingabe und das geschriebene GGUF, führt
    einen kurzen Funktionstest aus und hält eine Statistik fest; behalte ihr `scripts/model_check.py` in deinem
