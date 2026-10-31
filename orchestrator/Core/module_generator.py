@@ -1047,24 +1047,39 @@ WORK_DIR="${{BUILD_CACHE_DIR:-/build-cache}}"
 OUTPUT_DIR="${{WORK_DIR}}/output"
 mkdir -p "$OUTPUT_DIR"
 
-# The end record the framework reads (the same as targets/_template/modules/build.sh): written as the very last step
+# The end record the framework reads (the same as targets/_template/modules/build.sh): written as the very last step,
+# sealed with the one-run key the framework leaves in the job folder (taken and removed before anything else runs)
 JOB="build"
-[ "${{JOB_TYPE:-build}}" = "imatrix" ] && JOB="imatrix"
+LAST_STAGE="target"
+[ "${{JOB_TYPE:-build}}" = "imatrix" ] && JOB="imatrix" && LAST_STAGE="convert"
 STAGE_DIR="${{BUILD_SCRATCH_DIR:-$WORK_DIR}}/stages/$JOB"
 mkdir -p "$STAGE_DIR"
 END_RECORD="$STAGE_DIR/build.end"
 END_WRITTEN=0
 rm -f "$END_RECORD" "$END_RECORD.tmp"
+END_KEY="-"
+if [ -f "$STAGE_DIR/end.key" ] && [ ! -L "$STAGE_DIR/end.key" ]; then
+    END_KEY="$(head -c 128 "$STAGE_DIR/end.key" | tr -dc '0-9a-f')"
+    [ -n "$END_KEY" ] || END_KEY="-"
+fi
+rm -f "$STAGE_DIR/end.key"
+[ ! -e "$STAGE_DIR/end.key" ] || {{ echo "ERROR: the key file could not be removed." >&2; exit 1; }}
 write_end() {{
-    printf 'status %s\\nexit %s\\nstage %s\\njob %s\\ninputs -\\ntime %s\\n' "$1" "$2" "${{3:--}}" "$JOB" \\
-        "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$END_RECORD.tmp" && mv -f "$END_RECORD.tmp" "$END_RECORD"
+    local body seal="-"
+    body="$(printf 'status %s\\nexit %s\\nstage %s\\njob %s\\ninputs -\\ntime %s' "$1" "$2" "${{3:--}}" "$JOB" \\
+        "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")"
+    if [ "$END_KEY" != "-" ]; then
+        seal="$(printf '%s\\n%s\\n%s' "$END_KEY" "$body" "$END_KEY" | sha256sum | cut -d' ' -f1)"
+    fi
     END_WRITTEN=1
+    rm -rf -- "$END_RECORD.tmp" "$END_RECORD" 2>/dev/null || true
+    printf '%s\\nseal %s\\n' "$body" "$seal" > "$END_RECORD.tmp" && mv -f "$END_RECORD.tmp" "$END_RECORD"
 }}
 on_exit() {{
     local rc=$?
     if [ "$END_WRITTEN" = 0 ]; then
         [ "$rc" -ne 0 ] || rc=1
-        write_end failed "$rc" build || true
+        write_end failed "$rc" "$LAST_STAGE" || true
     fi
     exit "$rc"
 }}
@@ -1083,7 +1098,7 @@ case "$QUANT_TYPE" in
 esac
 
 echo "=== Build Completed ==="
-write_end "done" 0 build
+write_end "done" 0 "$LAST_STAGE"
 '''
         dst = target_dir / "modules" / "build.sh"
         self._write_file(dst, content)

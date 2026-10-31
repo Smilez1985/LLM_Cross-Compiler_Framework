@@ -10,7 +10,7 @@ weicht bewusst ab: Es gibt keinen Abschnitt `[Unreleased]`. Jeder Eintrag beginn
 der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und warum, steht im
 [Design](docs/DESIGN_DE.md).
 
-## [3.3.0] - 2026-10-30
+## [3.3.0] - 2026-10-31
 
 ### Hinzugefügt
 - `2026-10-30 13:28 UTC` · `v3.3.0` **Ditto kümmert sich um seine eigenen Builds** ([Design](docs/DESIGN_DE.md#ditto-die-lokale-laufzeit-und-die-llm-schicht)):
@@ -215,6 +215,19 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   der laufenden Stufe zurück; ein Stopp von außen ohne die Notiz zählt weiter.
 
 ### Sicherheit
+- `2026-10-31 01:50 UTC` · `v3.3.0` **Ein Modul-Skript kann einen Build nicht mehr vorzeitig als fertig beenden (der gefälschte Abschluss-Eintrag)**
+  ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)): Die Stufen-Module laufen als derselbe Benutzer im
+  selben Arbeitsordner wie der Stufen-Runner, ein Modul konnte also `status done` in `build.end` schreiben und dann
+  hängen: Das Framework schaltete die Uhr des Schritts ab (auch die weiche Grenze eines von einer KI gestarteten Builds)
+  und zählte den Build nach der Gnadenfrist als fertig, und ein Eintrag „fertig“ zählte auch, wenn der Container mit
+  einem Fehler endete. Jetzt schreibt nur der Stufen-Runner den Eintrag, nachdem seine letzte Stufe zurückkam,
+  versiegelt mit einem Schlüssel für diesen einen Lauf, den das Framework in den Job-Ordner legt (`end.key`, vom Runner
+  vor der ersten Stufe genommen und entfernt, nie an ein Modul exportiert), und das Framework zählt einen Build nur bei
+  echtem Exit-Status 0 des Containers mit diesem versiegelten Eintrag der letzten Stufe des Jobs als fertig. Ein
+  Eintrag, den ein Modul schrieb, ein Eintrag „fertig“ mit anderem Exit-Status, ein Eintrag „fertig“ vor der letzten
+  Stufe und ein nach der Gnadenfrist gestoppter Container sind failed mit einem klaren Grund. Ein gefälschter Eintrag an
+  den Stellen des Runners wird entfernt, bevor der Runner seinen eigenen schreibt, und ein Eintrag, den er nicht
+  schreiben kann, lässt den Lauf fehlschlagen. Endgründe, Türklingel und Chat-Feed bleiben gleich.
 - `2026-10-30 14:40 UTC` · `v3.3.0` **Das Vorab-Laden der Abhängigkeiten entpackt über das eine sichere Entpacken des
   Frameworks** ([Design](docs/DESIGN_DE.md#sicherheitsmodell)): Ein Archiv, das für die Download-Option eines Moduls
   geladen wird (BoringSSL, LibreSSL, KleidiAI), lief durch eine eigene Kopie der Prüfungen und wurde unter Python 3.11

@@ -1,4 +1,4 @@
-Version 3.3.0 · Last updated 2026-10-30
+Version 3.3.0 · Last updated 2026-10-31
 
 **English** · [Deutsch](Module_Developer_Guide_DE.md)
 
@@ -707,8 +707,15 @@ temporary file, then moved into place), with one `key value` line each: `status 
 end (`set -e`, a signal) write `failed` through the same writer (an EXIT trap). A record left by an earlier run is
 removed when the runner starts. The build engine reads it from the mounted work folder: a build ends because its
 record says done, never because a clock ran out after it, and a container that exits 0 without the record is a failed
-build. A pack that keeps the template's `build.sh` (or the one the module generator writes) gets this for free; a pack
-with a runner of its own must write the same record as its last step.
+build. Only the runner writes the record, never a stage module: before the container starts the build engine leaves a
+one-run key in `stages/<job>/end.key`; the runner reads it into a variable it never exports, removes the file before
+the first stage and seals its record with it (a last line `seal SHA256`: SHA-256 over the key, the six lines above and
+the key again; `seal -` for a run started by hand). The build is done only when the container's exit status is 0, the
+record carries the seal of that run's key, says done and names the job's last stage (`target`, for the importance
+matrix `convert`); a record a module wrote, a done record with another exit status, or one before the last stage is a
+failed build with a plain reason. So a module script never touches `build.end` or `end.key`. A pack that keeps the
+template's `build.sh` (or the one the module generator writes) gets this for free; a pack with a runner of its own
+must write the same sealed record as its last step.
 
 **Progress.** The runner prints one line when a stage starts, ends, is resumed or fails:
 `=== Stage 3/4: convert ===`, `=== Stage 3/4: convert done in 41 s ===`, `=== Stage 1/4: source resumed ===`,

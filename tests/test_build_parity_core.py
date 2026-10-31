@@ -397,6 +397,37 @@ class TestCliSubmission:
         assert decided == [(orch, rid, proposal)]
         assert "Status: awaiting_approval" in printed.getvalue() and "Status: completed" in printed.getvalue()
 
+    def test_the_follow_loop_exits_2_for_a_build_cancelled_elsewhere(self, booted_framework, tmp_path,
+                                                                     monkeypatch):
+        """Decided and confirmed: `build start --follow` ends with exit code 2 for a build that the person (GUI),
+        another CLI or an AI client cancelled while it followed, as `build status --wait` does."""
+        from orchestrator import cli as cli_module
+        from orchestrator.Core.orchestrator import OrchestrationStatus
+        from test_cli_builds import invoke_plain, quiet_console
+        from test_review_capabilities_paths import CliOrchestrator, make_cli
+        make_cli(booted_framework, tmp_path, monkeypatch)
+
+        class CancelledElsewhere(CliOrchestrator):
+            async def get_workflow_status(self, request_id):
+                state = self._workflows.get(request_id)
+                state.status, state.end_reason = OrchestrationStatus.CANCELLED, "cancelled"
+                return state
+
+        orch = CancelledElsewhere()
+        monkeypatch.setattr(cli_module, "_pause", lambda seconds: None)
+
+        class Ctx(cli_module.FrameworkContext):
+            def require_framework(self):
+                self.framework_manager = booted_framework
+                self.orchestrator = orch
+                return self
+
+        printed = quiet_console(monkeypatch)
+        result = invoke_plain("build", "start", "-m", HF_MODEL, "-t", "Rockchip", "--follow", ctx=Ctx())
+        out = printed.getvalue() + result.out
+        assert result.code == 2, out
+        assert "Build stopped" in out
+
 
 @pytest.mark.usefixtures("qapp", "gui_messages")
 class TestGuiSubmission:

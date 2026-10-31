@@ -1,4 +1,4 @@
-Version 3.3.0 · Last updated 2026-10-30
+Version 3.3.0 · Last updated 2026-10-31
 
 **English** · [Deutsch](Features_DE.md)
 
@@ -186,7 +186,8 @@ Further behaviour:
   builds).
 - **A build ends on its done marker:** the stage runner writes one end record as its very last step; a build is
   done only when that record says so, no clock can stop it after it, and a container that ends without it is a
-  failed build. Every build has one end reason (done, failed, cancelled, soft_cap, idle), which the Builder,
+  failed build. Only the stage runner's own record counts (sealed with a key of that run that no module script
+  sees), and only with the container's real exit status 0: a module script cannot end a build early as done. Every build has one end reason (done, failed, cancelled, soft_cap, idle), which the Builder,
   `llm-cli build status`, `get_build_status` and `build_info.json` show; the CLI's waits end on it with their own exit
   codes ([CLI](CLI_Usage.md#build-status)).
 - **A doorbell for every build's end:** with your own MQTT broker set, every build's end is published once with

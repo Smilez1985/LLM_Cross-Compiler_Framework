@@ -1,4 +1,4 @@
-Version 3.3.0 · Stand 2026-10-30
+Version 3.3.0 · Stand 2026-10-31
 
 [English](Features.md) · **Deutsch**
 
@@ -196,7 +196,9 @@ Weiteres Verhalten:
   stoppen).
 - **Ein Build endet an seiner Fertig-Marke:** Der Stufen-Runner schreibt als allerletzten Schritt einen
   Abschluss-Eintrag; ein Build ist erst fertig, wenn dieser Eintrag das sagt, keine Uhr kann ihn danach stoppen, und
-  ein Container, der ohne ihn endet, ist ein fehlgeschlagener Build. Jeder Build hat einen Endgrund (done, failed,
+  ein Container, der ohne ihn endet, ist ein fehlgeschlagener Build. Nur der eigene Eintrag des Stufen-Runners zählt
+  (versiegelt mit einem Schlüssel dieses Laufs, den kein Modul-Skript sieht), und nur mit dem echten Exit-Status 0 des
+  Containers: Ein Modul-Skript kann einen Build nicht vorzeitig als fertig beenden. Jeder Build hat einen Endgrund (done, failed,
   cancelled, soft_cap, idle), den der Builder, `llm-cli build status`, `get_build_status` und `build_info.json`
   zeigen; die Wartebefehle der CLI enden daran mit eigenen Exit-Codes ([CLI](CLI_Usage_DE.md#build-status)).
 - **Eine Türklingel für jedes Build-Ende:** mit deinem eigenen MQTT-Broker wird jedes Build-Ende einmal nur mit
