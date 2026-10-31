@@ -38,9 +38,11 @@ import hmac
 import os
 import re
 import secrets
+import stat
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 END_REASONS = ("done", "failed", "cancelled", "soft_cap", "idle")
 # The request status an old reader sees for each end reason (OrchestrationStatus values)
@@ -214,15 +216,45 @@ def read_end_record(path: Path, key: Optional[str] = None) -> Optional[EndRecord
     return EndRecord(status, int(code), stage, job, inputs, when, seal, sealed, end)
 
 
+def mounts_keep_owners(platform_name: Optional[str] = None) -> bool:
+    """Whether this host's bind mounts keep owner and mode for the container (Linux); Docker Desktop on Windows and
+    macOS shares folders without them."""
+    return (platform_name or sys.platform).startswith("linux")
+
+
+def end_folder_state(path: Path, owner_uid: Optional[int], *, platform_name: Optional[str] = None
+                     ) -> Tuple[bool, Optional[str]]:
+    """(protected, problem) of an end folder after its container: protected when the host keeps owners and the folder
+    and its record belong to the runner (owner_uid), are no links and nobody else may write them; problem is a plain
+    reason when the folder or the record is not the runner's (then nothing in it counts)."""
+    path = Path(path)
+    record = path / END_RECORD
+    if not mounts_keep_owners(platform_name) or owner_uid is None or os.name != "posix":
+        return False, None
+    try:
+        st_dir = os.lstat(path)
+        if stat.S_ISLNK(st_dir.st_mode) or not stat.S_ISDIR(st_dir.st_mode):
+            return False, "The end folder was replaced, so its record does not count."
+        if st_dir.st_uid != owner_uid or stat.S_IMODE(st_dir.st_mode) & 0o022:
+            return False, "The end folder is not the stage runner's alone, so its record does not count."
+        if not os.path.lexists(record):
+            return True, None
+        st = os.lstat(record)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_uid != owner_uid:
+            return False, "The end record was not written by the stage runner, so it does not count."
+    except OSError:
+        return False, "The end folder could not be read, so its record does not count."
+    return True, None
+
+
 def read_runner_record(end_dir: Path, owner_uid: Optional[int], *, platform_name: Optional[str] = None
                        ) -> "tuple[Optional[EndRecord], bool, Optional[str]]":
     """The stage runner's end record from the runtime layer's end folder (no key in the container): (record,
     protected, problem). The record counts as the runner's (`sealed`) when the end folder and the record belong to
-    the runner alone (runtime_layer.end_folder_state) or, on a host whose mounts keep no owner or mode, as an
+    the runner alone (end_folder_state) or, on a host whose mounts keep no owner or mode, as an
     unprotected end (protected False: the exit status and the inspect check decide). A folder or record that is not
     the runner's gives `problem` and no trusted record."""
     from dataclasses import replace
-    from orchestrator.Core.runtime_layer import end_folder_state
     protected, problem = end_folder_state(Path(end_dir), owner_uid, platform_name=platform_name)
     record = read_end_record(Path(end_dir) / END_RECORD)
     if record is None:
@@ -347,6 +379,7 @@ __all__ = ["END_REASONS", "STATUS_OF", "EVENT_OF", "EVENTS", "NAME_OF_EVENT", "E
            "RUNNING_NOTE", "END_GRACE", "NO_RECORD_TEXT", "FOREIGN_RECORD_TEXT", "EXIT_MISMATCH_TEXT",
            "EARLY_RECORD_TEXT", "FAILED_RECORD_TEXT", "END_KEY", "LAST_STAGE", "PREFLIGHT_STAGE", "STAGE_USER_EXIT",
            "STAGE_USER_TEXT", "STAGE_USER_REFUSED", "stage_user_problem", "EndRecord", "read_end_record",
-           "record_body", "seal_of", "new_end_key", "read_runner_record", "end_problem", "end_record_path",
+           "record_body", "seal_of", "new_end_key", "read_runner_record", "end_folder_state", "mounts_keep_owners",
+           "end_problem", "end_record_path",
            "write_cancel_note", "reason_of_timeout", "status_of", "event_of", "speaking_name", "reason_text",
            "EXIT_CODES", "EXIT_STILL_RUNNING", "exit_code"]

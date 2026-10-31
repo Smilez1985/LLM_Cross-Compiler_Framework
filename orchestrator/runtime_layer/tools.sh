@@ -18,13 +18,16 @@ SETPRIV="$LLMCF_LAYER/bin/setpriv"
 LAYER_APPLETS="basename cat chgrp chmod cut date dirname env find head id mkdir mktemp mv paste rm sed sha256sum sleep
 sort stat tr wc"
 
-# layer_tools: every applet as a function over the layer's busybox, and a PATH into nothing
+# layer_tools: every applet as a function over the layer's busybox, and a PATH into nothing. The PATH names a folder
+# inside the read-only layer that does not exist: a folder elsewhere (/llmcf-runner-has-no-path) is one any image can
+# create and fill; nothing can appear inside the layer (layer_check refuses any extra file, the host's inspect check any
+# mount inside it).
 layer_tools() {
     for _applet in $LAYER_APPLETS; do
         eval "$_applet() { \"\$BB\" $_applet \"\$@\"; }"
     done
     unset _applet
-    PATH=/llmcf-runner-has-no-path
+    PATH="$LLMCF_LAYER/no-path"
     export PATH
 }
 

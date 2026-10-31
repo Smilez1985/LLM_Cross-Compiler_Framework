@@ -42,11 +42,14 @@ import platform
 import re
 import shutil
 import stat
-import sys
 import tarfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+# The end folder's trust lives with the end record (Core/build_end.py imports nothing of the framework, so the
+# end record never pulls this module in): re-exported here, where the host side of the layer is read
+from orchestrator.Core.build_end import end_folder_state, mounts_keep_owners
 
 SHIPPED_DIR = Path(__file__).resolve().parents[1] / "runtime_layer"
 SCRIPTS = ("tools.sh", "entrypoint.sh", "runner.sh", "stage_user.sh", "stage_env.sh", "cleanup.sh")
@@ -269,12 +272,17 @@ def _ar_members(data: bytes):
 def is_static_elf(data: bytes) -> bool:
     """Whether `data` is an ELF executable without a program interpreter (statically linked)."""
     import struct
-    if data[:4] != b"\x7fELF" or data[4] != 2:   # 64-bit only (amd64, arm64)
+    if len(data) < 0x40 or data[:4] != b"\x7fELF" or data[4] != 2:   # 64-bit only (amd64, arm64)
         return False
     endian = "<" if data[5] == 1 else ">"
-    phoff = struct.unpack_from(endian + "Q", data, 0x20)[0]
-    phentsize, phnum = struct.unpack_from(endian + "HH", data, 0x36)
-    return not any(struct.unpack_from(endian + "I", data, phoff + k * phentsize)[0] == 3 for k in range(phnum))
+    try:
+        phoff = struct.unpack_from(endian + "Q", data, 0x20)[0]
+        phentsize, phnum = struct.unpack_from(endian + "HH", data, 0x36)
+        if phnum == 0 or phentsize < 4:
+            return False
+        return not any(struct.unpack_from(endian + "I", data, phoff + k * phentsize)[0] == 3 for k in range(phnum))
+    except struct.error:   # a cut-off file: its program headers are not all there
+        return False
 
 
 def extract_prebuilt(archive: bytes, pin: Dict[str, str]) -> bytes:
@@ -561,37 +569,6 @@ def prepare_end_folder(path: Path, owner: Optional[Tuple[int, int]]) -> None:
         os.chmod(path, 0o755)
 
 
-def mounts_keep_owners(platform_name: Optional[str] = None) -> bool:
-    """Whether this host's bind mounts keep owner and mode for the container (Linux); Docker Desktop on Windows and
-    macOS shares folders without them."""
-    return (platform_name or sys.platform).startswith("linux")
-
-
-def end_folder_state(path: Path, owner_uid: Optional[int], *, platform_name: Optional[str] = None
-                     ) -> Tuple[bool, Optional[str]]:
-    """(protected, problem) of an end folder after its container: protected when the host keeps owners and the folder
-    and its record belong to the runner (owner_uid), are no links and nobody else may write them; problem is a plain
-    reason when the folder or the record is not the runner's (then nothing in it counts)."""
-    path = Path(path)
-    record = path / "build.end"
-    if not mounts_keep_owners(platform_name) or owner_uid is None or os.name != "posix":
-        return False, None
-    try:
-        st_dir = os.lstat(path)
-        if stat.S_ISLNK(st_dir.st_mode) or not stat.S_ISDIR(st_dir.st_mode):
-            return False, "The end folder was replaced, so its record does not count."
-        if st_dir.st_uid != owner_uid or stat.S_IMODE(st_dir.st_mode) & 0o022:
-            return False, "The end folder is not the stage runner's alone, so its record does not count."
-        if not os.path.lexists(record):
-            return True, None
-        st = os.lstat(record)
-        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_uid != owner_uid:
-            return False, "The end record was not written by the stage runner, so it does not count."
-    except OSError:
-        return False, "The end folder could not be read, so its record does not count."
-    return True, None
-
-
 def runner_owner_on_host(runner: Tuple[int, int], rootless: bool) -> Optional[int]:
     """The host uid that owns what the runner writes: the person under a rootless engine (container root is the
     person), the runner's uid itself under a rootful one; None on a host without POSIX ids."""
@@ -650,10 +627,14 @@ def own_runner_note(target_dir: Path) -> Optional[str]:
     """OWN_RUNNER_NOTE when the target (or the pack it came from) ships its own runner files, else None."""
     target_dir = Path(target_dir)
     try:
-        shipped = target_dir.resolve().parent == SHIPPED_DIR.parents[1].resolve() / "targets"
+        in_framework = target_dir.resolve().parent == SHIPPED_DIR.parents[1].resolve() / "targets"
     except OSError:
-        shipped = False
-    if shipped:
+        in_framework = False
+    # The targets folder also holds installed packs and the person's (or an AI's) own targets: only a target the
+    # framework ships there counts (rag_manager.shipped_target: the template, or an official target without a pack's
+    # provenance file that no AI made)
+    from orchestrator.Core.rag_manager import shipped_target
+    if in_framework and shipped_target(target_dir):
         # the framework's own targets keep their old runner files for runs by hand only (the runner of every build
         # is the runtime layer's): no note for them
         return None
