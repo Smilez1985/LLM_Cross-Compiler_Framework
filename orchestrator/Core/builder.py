@@ -567,15 +567,26 @@ class BuildEngine:
         nothing), honours cancellation and always removes the container. Returns the exit code.
 
         `end_record`: where the stage runner writes its end record (Core/build_end.py, in the mounted work folder).
-        Once it says "status done" the step's clock is switched off (no soft cap or idle stop after the done marker)
-        and the container gets END_GRACE seconds to exit by itself; then the framework stops it, and the build is
-        still done (exit 0). The record that was seen is kept in progress.end_record."""
-        from orchestrator.Core.build_end import END_GRACE, read_end_record
+        Before the container starts, the job folder gets this run's key (build_end.new_end_key), which the runner
+        takes before its first stage and seals its record with. Once a record sealed with that key says "status
+        done" for the job's last stage, the step's clock is switched off (no soft cap or idle stop after the done
+        marker) and the container gets END_GRACE seconds to exit by itself; then the framework stops it, and the
+        build is NOT done (its exit status is not 0: _ended_by_record). A record a module script wrote never switches
+        the clock off. The record that was read with the key is kept in progress.end_record."""
+        from orchestrator.Core import build_end
+        from orchestrator.Core.build_end import read_end_record
         from orchestrator.utils.step_limits import StepClock, StepTimedOut
         clock = StepClock(self._step_limits(config), prefix.strip(': ').lower() or 'build')
+        key: Optional[str] = None
+        job = "build"
         if end_record is not None:
             progress.end_record = None
-            self._forget_end_record(Path(end_record))   # a record of an earlier run never ends this one
+            end_record = Path(end_record)
+            job = end_record.parent.name
+            self._forget_end_record(end_record)   # a record of an earlier run never ends this one
+            key = build_end.new_end_key(end_record.parent.parent.parent, job)
+            if key is not None and self._get_conf("build_sandbox", True):
+                hand_over(end_record.parent, sandbox_user())   # a root host's key file: the container user takes it
         grace_until: Optional[float] = None
         with self._lock:
             self._active_containers[config.build_id] = container
@@ -633,20 +644,22 @@ class BuildEngine:
                     if expired and end_record is not None:
                         # The done marker first: once it is there, no clock may stop the step.
                         if grace_until is None:
-                            record = read_end_record(end_record)
-                            if record is not None and record.done:
+                            record = read_end_record(end_record, key=key)
+                            # only the stage runner's own record (sealed, done, the job's last stage) counts here
+                            if record is not None and build_end.end_problem(record, 0, job) is None:
                                 clock.finish()
-                                grace_until = time.monotonic() + END_GRACE
+                                grace_until = time.monotonic() + build_end.END_GRACE
                                 progress.add_log(f"{prefix}The build wrote its end record (done); the container has "
-                                                 f"{int(END_GRACE)} s to exit by itself.")
+                                                 f"{int(build_end.END_GRACE)} s to exit by itself.")
                         elif time.monotonic() >= grace_until:
-                            progress.add_log(f"{prefix}The container had not exited {int(END_GRACE)} s after its end "
-                                             "record (done); the framework stopped it. The build is done.")
+                            progress.add_log(f"{prefix}The container had not exited {int(build_end.END_GRACE)} s "
+                                             "after its end record (done); the framework stopped it, so the build "
+                                             "is not counted as finished.")
                             try:
                                 container.kill()
                             except Exception:
                                 pass
-                            result = {"StatusCode": 0}
+                            result = {"StatusCode": 137}
                             break
                     if expired:
                         # one wait ended: the step goes on unless its limits stop it
@@ -680,7 +693,7 @@ class BuildEngine:
                 from orchestrator.Core.disk_plan import InsufficientSpace
                 raise InsufficientSpace(full["text"])
             if end_record is not None:
-                progress.end_record = read_end_record(end_record)
+                progress.end_record = read_end_record(end_record, key=key)
             return int(result.get("StatusCode", 1))
         finally:
             if "watched" in locals():
@@ -2161,7 +2174,7 @@ class BuildEngine:
         from orchestrator.Core.build_end import end_record_path
         exit_code = self._run_container(config, progress, container, "IMATRIX: ",
                                         end_record=end_record_path(build_temp / "work", "imatrix"))
-        exit_code = self._ended_by_record(progress, exit_code, "IMATRIX: ")
+        exit_code = self._ended_by_record(progress, exit_code, "IMATRIX: ", job="imatrix")
         if exit_code != 0:
             raise RuntimeError(f"IMatrix calculation failed (exit code {exit_code})\n{self._log_tail(progress, 'IMATRIX: ')}")
         if (imatrix_dir / "imatrix.dat").exists():
@@ -2268,16 +2281,16 @@ class BuildEngine:
         except OSError:
             pass
 
-    def _ended_by_record(self, progress: "BuildProgress", exit_code: int, prefix: str) -> int:
-        """The stage container's end by its end record (Core/build_end.py): "status done" is done (0), also when the
-        framework stopped the container after the grace; an exit 0 WITHOUT a record is a failure with a plain text
-        (never a silent success); otherwise the container's exit code."""
-        from orchestrator.Core.build_end import NO_RECORD_TEXT
-        record = progress.end_record
-        if record is not None and record.done:
-            return 0
-        if exit_code == 0:
-            raise RuntimeError(f"{NO_RECORD_TEXT}\n{self._log_tail(progress, prefix)}")
+    def _ended_by_record(self, progress: "BuildProgress", exit_code: int, prefix: str, job: str = "build") -> int:
+        """The stage container's end by its end record AND its real exit status (Core/build_end.py end_problem):
+        done (0) only for an exit status 0 with the stage runner's sealed done record of the job's last stage. Every
+        other end with a plain text: an exit 0 without a record (never a silent success), a record a module script
+        wrote, a done record with an exit status other than 0 (also after the framework stopped it past the grace)
+        or before the last stage. A failed run keeps its exit code."""
+        from orchestrator.Core.build_end import end_problem
+        problem = end_problem(progress.end_record, exit_code, job)
+        if problem is not None:
+            raise RuntimeError(f"{problem}\n{self._log_tail(progress, prefix)}")
         return exit_code
 
     def _build_dependencies(self, config: BuildConfiguration, progress: BuildProgress,

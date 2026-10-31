@@ -37,9 +37,15 @@
 #   exit N               the run's exit code
 #   stage NAME           the stage that failed (for done: the last stage)
 #   job build|imatrix    inputs DIGEST    time (UTC, ISO 8601 with a trailing Z)
+#   seal SHA256          sha256 over the run's key, the six lines above and the key again ("-" without a key)
 # A failing stage, a refused loop and every `set -e` path write "failed" through the same writer (an EXIT trap); a
 # run killed with SIGKILL leaves no record, which reads as "not finished". A record left by an earlier run is removed
 # at the start.
+# Only this runner writes the record. The BuildEngine leaves a one-run key in stages/<job>/end.key; the runner reads it
+# into a variable it never exports and removes the file before the first stage, so no stage module can seal a record.
+# The BuildEngine counts a build as done only with the container's exit status 0 and a record sealed with that key
+# that names the job's last stage (orchestrator/Core/build_end.py end_problem). A run started by hand has no key and
+# writes "seal -".
 #
 # Cancel. A person's or an AI's Cancel writes the note stages/<job>/cancelled before the framework stops the
 # container (Core/builder.py cancel_build): the stage that was running then does not count as a restart of the loop
@@ -148,16 +154,20 @@ END_WRITTEN=0
 DIGEST=""
 rm -f "$END_RECORD" "$END_RECORD.tmp"   # a record of an earlier run never ends this one
 
-write_end() {  # STATUS EXIT: the one writer of the end record
-    {
-        echo "status $1"
-        echo "exit $2"
-        echo "stage ${END_STAGE:--}"
-        echo "job $JOB"
-        echo "inputs ${DIGEST:--}"
-        echo "time $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-    } > "$END_RECORD.tmp" && mv -f "$END_RECORD.tmp" "$END_RECORD"
+write_end() {  # STATUS EXIT: the one writer of the end record; fails when the record could not be put in place
+    local body seal="-"
+    body="$(printf 'status %s\nexit %s\nstage %s\njob %s\ninputs %s\ntime %s' "$1" "$2" "${END_STAGE:--}" "$JOB" \
+        "${DIGEST:--}" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")"
+    if [ "$END_KEY" != "-" ]; then
+        seal="$(printf '%s\n%s\n%s' "$END_KEY" "$body" "$END_KEY" | sha256sum | cut -d' ' -f1)"
+    fi
     END_WRITTEN=1
+    # whatever a stage left in the record's places (a folder, a link, a forged record) never stays
+    rm -rf -- "$END_RECORD.tmp" "$END_RECORD" 2>/dev/null || true
+    if ! printf '%s\nseal %s\n' "$body" "$seal" > "$END_RECORD.tmp" || ! mv -f "$END_RECORD.tmp" "$END_RECORD"; then
+        echo "ERROR: The end record could not be written ($END_RECORD); the build is not counted as finished." >&2
+        return 1
+    fi
 }
 
 on_exit() {  # every way the run ends that did not write its record: a failure (set -e, a refusal, a signal)
@@ -171,6 +181,19 @@ on_exit() {  # every way the run ends that did not write its record: a failure (
 trap on_exit EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
+# The BuildEngine's one-run key for the seal (see the header): taken before any stage, never exported
+END_KEY="-"
+if [ -e "$STAGE_DIR/end.key" ] || [ -L "$STAGE_DIR/end.key" ]; then
+    if [ -f "$STAGE_DIR/end.key" ] && [ ! -L "$STAGE_DIR/end.key" ]; then
+        END_KEY="$(head -c 128 "$STAGE_DIR/end.key" | tr -dc '0-9a-f')"
+        [ -n "$END_KEY" ] || END_KEY="-"
+    fi
+    rm -f "$STAGE_DIR/end.key"
+    if [ -e "$STAGE_DIR/end.key" ] || [ -L "$STAGE_DIR/end.key" ]; then
+        END_KEY="-"
+        die "The key file $STAGE_DIR/end.key could not be removed, so a stage could read it; nothing was run."
+    fi
+fi
 STAGE_RUNNER=1
 STAGE_LAST="${STAGES[$((LAST - 1))]}"
 export STAGE_RUNNER STAGE_DIR MODULES_DIR STAGE_LAST CONVERT_OUTPUT PACKAGE_REQUESTED

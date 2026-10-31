@@ -71,7 +71,9 @@ def _idle_after_its_record(client, tmp_path, status="done", code=0):
 
 @pytest.mark.parametrize("owner", ["", "mcp#s1"], ids=["person", "ai"])
 def test_idle_and_soft_cap_never_fire_after_the_done_marker(engine, client, tmp_path, monkeypatch, owner):
-    """Regression: a container that idles after its done record ended as an idle (or soft cap) stop before."""
+    """Regression: a container that idles after its done record ended as an idle (or soft cap) stop before.
+    Changed on purpose (the done record is checked against the container's real exit status): after the grace the
+    framework stops it, and a stopped container is not done."""
     monkeypatch.setattr(builder_module, "END_RECORD_POLL", 0.05)
     monkeypatch.setattr(build_end, "END_GRACE", 0.6)
     container, work = _idle_after_its_record(client, tmp_path)
@@ -82,11 +84,13 @@ def test_idle_and_soft_cap_never_fire_after_the_done_marker(engine, client, tmp_
     code = engine._run_container(cfg, progress, container, "CONT: ",
                                  end_record=build_end.end_record_path(work, "build"))
 
-    assert code == 0
-    assert progress.end_record is not None and progress.end_record.done
-    assert any("the framework stopped it. The build is done." in line for line in progress.logs)
+    assert code == 137
+    assert progress.end_record is not None and progress.end_record.done and progress.end_record.sealed
+    assert any("the framework stopped it, so the build is not counted as finished." in line
+               for line in progress.logs)
     assert not [w for w in progress.warnings if "printed nothing" in w]
-    assert engine._ended_by_record(progress, 137, "CONT: ") == 0
+    with pytest.raises(RuntimeError, match="says done, but the container exited with 137"):
+        engine._ended_by_record(progress, code, "CONT: ")
 
 
 def test_an_exit_0_without_the_end_record_is_a_failure(engine, client, tmp_path):
@@ -100,6 +104,48 @@ def test_a_failed_record_keeps_the_exit_code(engine):
     progress = BuildProgress("b1", BuildStatus.BUILDING, "")
     progress.end_record = build_end.EndRecord("failed", 4, "target")
     assert engine._ended_by_record(progress, 4, "CONT: ") == 4
+
+
+def test_only_the_runners_done_record_with_exit_0_is_done(engine):
+    progress = BuildProgress("b1", BuildStatus.BUILDING, "")
+    progress.end_record = build_end.EndRecord("done", 0, "target", sealed=True)
+    assert engine._ended_by_record(progress, 0, "CONT: ") == 0
+    progress.end_record = build_end.EndRecord("done", 0, "convert", job="imatrix", sealed=True)
+    assert engine._ended_by_record(progress, 0, "IMATRIX: ", job="imatrix") == 0
+    progress.end_record = build_end.EndRecord("done", 0, "target", sealed=False)
+    with pytest.raises(RuntimeError, match="not written by the stage runner"):
+        engine._ended_by_record(progress, 0, "CONT: ")
+
+
+def test_a_seal_fits_only_its_own_key_and_body(tmp_path):
+    key = "ab" * 16
+    body = build_end.record_body("done", 0, "target", "build", "-", "2026-10-31T12:00:00Z")
+    path = tmp_path / "build.end"
+    path.write_text(f"{body}\nseal {build_end.seal_of(body, key)}\n", encoding="ascii")
+    assert build_end.read_end_record(path, key=key).sealed
+    assert not build_end.read_end_record(path, key="cd" * 16).sealed
+    assert not build_end.read_end_record(path).sealed
+    forged = body.replace("status done", "status done").replace("exit 0", "exit 0").replace("target", "convert")
+    path.write_text(f"{forged}\nseal {build_end.seal_of(body, key)}\n", encoding="ascii")
+    assert not build_end.read_end_record(path, key=key).sealed
+
+
+def test_the_key_is_new_for_each_run_and_never_through_a_link(tmp_path):
+    work = tmp_path / "work"
+    first = build_end.new_end_key(work)
+    second = build_end.new_end_key(work)
+    assert first and second and first != second
+    assert (work / "stages" / "build" / build_end.END_KEY).read_text(encoding="ascii").strip() == second
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    linked = tmp_path / "linked"
+    (linked / "stages").mkdir(parents=True)
+    try:
+        (linked / "stages" / "build").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("this system cannot make a folder link")
+    assert build_end.new_end_key(linked) is None
+    assert not list(outside.iterdir())
 
 
 def test_a_stale_record_is_removed_before_the_container_starts(engine, client, tmp_path, monkeypatch):

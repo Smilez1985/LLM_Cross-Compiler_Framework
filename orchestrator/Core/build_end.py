@@ -5,10 +5,14 @@ stage runner writes as its very last step. Qt-free and import-light: the build e
 service, the job service, the chat feed's producer, the MQTT doorbell, the CLI and the GUI all read it from here.
 
 End reasons (END_REASONS):
-- done      the stage runner wrote its end record "status done" (after the last stage's marker and "Done."), and
-            the framework finished the build (artifacts, manifest). The only reason that counts as success.
+- done      the stage runner wrote its end record "status done" (after the last stage's marker and "Done."), the
+            container's real exit status is 0, the record is sealed with this run's key and names the job's last
+            stage (end_problem), and the framework finished the build (artifacts, manifest). The only reason that
+            counts as success.
 - failed    a stage failed, the end record says failed, the container exited 0 WITHOUT an end record ("the build
-            ended without its end record": never a silent success), or anything else went wrong.
+            ended without its end record": never a silent success), the record is not the stage runner's (a module
+            script wrote it), it says done with an exit status other than 0 or before the last stage, or anything
+            else went wrong.
 - cancelled a person's or an AI's Cancel.
 - soft_cap  an AI-started build ran past its soft cap (utils/step_limits.StepTimedOut kind "soft_cap").
 - idle      a step printed nothing for the idle timeout (StepTimedOut kind "idle").
@@ -17,11 +21,21 @@ The old request statuses stay for old readers (STATUS_OF): done -> completed; fa
 cancelled -> cancelled.
 
 The end record (targets/*/modules/build.sh): `$BUILD_SCRATCH_DIR/stages/<job>/build.end`, written to a temporary
-file and moved into place, one "key value" line each: status (done|failed), exit, stage, job, inputs, time. A
-record that cannot be read, or that does not fit, counts as no record.
+file and moved into place, one "key value" line each: status (done|failed), exit, stage, job, inputs, time and seal.
+A record that cannot be read, or that does not fit, counts as no record.
+
+Only the stage runner writes it (a forged early done record). The module scripts run as the same user in the same
+work folder, so the BuildEngine hands the runner a one-run key (END_KEY, `stages/<job>/end.key`, new_end_key) before
+the container starts; the runner reads it into a variable it never exports and removes the file before its first
+stage, and seals its record with it (seal_of: SHA-256 over key, record lines, key). A record without that seal was
+not written by the runner. The real exit status of the container (the runner is its first process) is the second
+check: a module cannot make the runner exit 0 before the last stage returned.
 """
 
+import hashlib
+import hmac
 import re
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -37,31 +51,46 @@ NAME_OF_EVENT = {"build_ready": "Build ready", "build_error": "Error while build
 NAME_OF_EVENT_DE = {"build_ready": "Build fertig", "build_error": "Fehler beim Bauen", "build_stopped": "Build gestoppt"}
 
 END_RECORD = "build.end"
+END_KEY = "end.key"             # the BuildEngine's one-run key for the stage runner's seal (taken before any stage)
+# The last stage of each job: a done record must name it (build.sh's STAGES; rotate runs before target)
+LAST_STAGE = {"build": "target", "imatrix": "convert"}
 CANCEL_NOTE = "cancelled"       # the framework's note to the stage runner: the running stage was a Cancel
 RUNNING_NOTE = "running"        # the stage runner's own note: the stage that runs now
 # A container that wrote "status done" exits by itself within this many seconds; then the framework stops it, and
 # the build is still done (DECISIONS round 40: 30 s)
 END_GRACE = 30.0
 NO_RECORD_TEXT = "The build ended without its end record (build.end), so it is not counted as finished."
+FOREIGN_RECORD_TEXT = ("The end record (build.end) was not written by the stage runner (a module script may have "
+                       "written it), so the build is not counted as finished.")
+EXIT_MISMATCH_TEXT = ("The end record says done, but the container exited with {code}, so the build is not counted "
+                      "as finished.")
+EARLY_RECORD_TEXT = ("The end record says done after the stage {stage}, before the last stage {last}, so the build is "
+                     "not counted as finished.")
+FAILED_RECORD_TEXT = "The end record says the build failed (stage {stage}, exit {exit})."
 
 _STATUS = ("done", "failed")
 _STAGE = re.compile(r"^(?:[a-z][a-z0-9_-]{0,31}|-)$")
 _JOB = re.compile(r"^(?:build|imatrix)$")
 _INPUTS = re.compile(r"^(?:[0-9a-f]{64}|-)$")
 _TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+_SEAL = re.compile(r"^(?:[0-9a-f]{64}|-)$")
+_KEY = re.compile(r"^[0-9a-f]{32,64}$")
 MAX_RECORD_BYTES = 4096
 
 
 @dataclass(frozen=True)
 class EndRecord:
     """The stage runner's end record: status done|failed, its exit code, the stage (the failed one; for done the
-    last one), the job, the inputs digest and the UTC time."""
+    last one), the job, the inputs digest and the UTC time; `seal` as written, `sealed` whether it fits the key
+    read_end_record was given (False without a key)."""
     status: str
     exit: int
     stage: str = "-"
     job: str = "build"
     inputs: str = "-"
     time: str = ""
+    seal: str = "-"
+    sealed: bool = False
 
     @property
     def done(self) -> bool:
@@ -74,9 +103,42 @@ def _linked(path: Path) -> bool:
     return any(p.is_symlink() for p in (path, path.parent, path.parent.parent))
 
 
-def read_end_record(path: Path) -> Optional[EndRecord]:
+def record_body(status: str, code: int, stage: str, job: str, inputs: str, when: str) -> str:
+    """The sealed part of a record: its six lines in their order, without the last newline (build.sh writes it so)."""
+    return f"status {status}\nexit {code}\nstage {stage}\njob {job}\ninputs {inputs}\ntime {when}"
+
+
+def seal_of(body: str, key: str) -> str:
+    """The stage runner's seal of a record body: SHA-256 over key, newline, body, newline, key (build.sh computes
+    the same with sha256sum). Without the key nobody can make a seal for another body."""
+    return hashlib.sha256(f"{key}\n{body}\n{key}".encode("ascii")).hexdigest()
+
+
+def new_end_key(work: Path, job: str = "build") -> Optional[str]:
+    """Writes a fresh one-run key into the job folder of the work folder (END_KEY), for the stage runner to take
+    before its first stage, and returns it; None when the folder is a link or cannot be written (the run then has no
+    sealed record and does not count as done)."""
+    stages = Path(work) / "stages"
+    folder = stages / job
+    try:
+        if stages.is_symlink() or folder.is_symlink():
+            return None
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / END_KEY
+        if path.is_symlink() or path.is_dir():
+            return None
+        path.unlink(missing_ok=True)
+        key = secrets.token_hex(16)
+        path.write_text(key + "\n", encoding="ascii")
+        return key
+    except OSError:
+        return None
+
+
+def read_end_record(path: Path, key: Optional[str] = None) -> Optional[EndRecord]:
     """The end record at `path`, or None when there is none or it does not fit (a half-written or foreign file is no
-    record). Never follows a link (the record, its job folder or the stages folder): the container writes them."""
+    record). Never follows a link (the record, its job folder or the stages folder): the container writes them.
+    With `key` (this run's, new_end_key) the record's `sealed` says whether the stage runner wrote it."""
     try:
         path = Path(path)
         if _linked(path) or not path.is_file() or path.stat().st_size > MAX_RECORD_BYTES:
@@ -86,16 +148,43 @@ def read_end_record(path: Path) -> Optional[EndRecord]:
         return None
     values = {}
     for line in text.splitlines():
-        key, _, value = line.partition(" ")
-        values[key] = value.strip()
+        name, _, value = line.partition(" ")
+        values[name] = value.strip()
     status, code = values.get("status", ""), values.get("exit", "")
     if status not in _STATUS or not re.fullmatch(r"\d{1,3}", code):
         return None
     stage, job = values.get("stage", "-") or "-", values.get("job", "build") or "build"
     inputs, when = values.get("inputs", "-") or "-", values.get("time", "")
+    seal = values.get("seal", "-") or "-"
     if not _STAGE.match(stage) or not _JOB.match(job) or not _INPUTS.match(inputs) or (when and not _TIME.match(when)):
         return None
-    return EndRecord(status, int(code), stage, job, inputs, when)
+    if not _SEAL.match(seal):
+        return None
+    sealed = bool(key and _KEY.match(key) and seal != "-"
+                  and hmac.compare_digest(seal, seal_of(record_body(status, int(code), stage, job, inputs, when),
+                                                        key)))
+    return EndRecord(status, int(code), stage, job, inputs, when, seal, sealed)
+
+
+def end_problem(record: Optional[EndRecord], exit_code: int, job: str = "build") -> Optional[str]:
+    """None when a stage container ended as done, else the plain reason it did not: done needs the container's real
+    exit status 0, a record sealed by the stage runner (read with this run's key), status done, this job and its
+    last stage (LAST_STAGE). For an exit status other than 0 with a record that does not claim done (or none) it is
+    None as well: the caller reports that exit code."""
+    if record is None:
+        return NO_RECORD_TEXT if exit_code == 0 else None
+    if record.done and exit_code != 0:
+        return EXIT_MISMATCH_TEXT.format(code=exit_code)
+    if exit_code != 0:
+        return None
+    if not record.sealed or record.job != job:
+        return FOREIGN_RECORD_TEXT
+    if not record.done:
+        return FAILED_RECORD_TEXT.format(stage=record.stage, exit=record.exit)
+    last = LAST_STAGE.get(job, "target")
+    if record.stage != last:
+        return EARLY_RECORD_TEXT.format(stage=record.stage, last=last)
+    return None
 
 
 def end_record_path(work: Path, job: str = "build") -> Path:
@@ -187,6 +276,8 @@ def exit_code(reason: Optional[str]) -> int:
 
 
 __all__ = ["END_REASONS", "STATUS_OF", "EVENT_OF", "EVENTS", "NAME_OF_EVENT", "END_RECORD", "CANCEL_NOTE",
-           "RUNNING_NOTE", "END_GRACE", "NO_RECORD_TEXT", "EndRecord", "read_end_record", "end_record_path",
+           "RUNNING_NOTE", "END_GRACE", "NO_RECORD_TEXT", "FOREIGN_RECORD_TEXT", "EXIT_MISMATCH_TEXT",
+           "EARLY_RECORD_TEXT", "FAILED_RECORD_TEXT", "END_KEY", "LAST_STAGE", "EndRecord", "read_end_record",
+           "record_body", "seal_of", "new_end_key", "end_problem", "end_record_path",
            "write_cancel_note", "reason_of_timeout", "status_of", "event_of", "speaking_name", "reason_text",
            "EXIT_CODES", "EXIT_STILL_RUNNING", "exit_code"]

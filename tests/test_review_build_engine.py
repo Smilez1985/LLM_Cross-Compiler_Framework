@@ -60,15 +60,22 @@ TERMINAL = (BuildStatus.COMPLETED, BuildStatus.FAILED, BuildStatus.CANCELLED)
 
 def write_end_record(volumes, name, exit_code):
     """What the stage runner (targets/*/modules/build.sh) writes as its very last step into the mounted work folder
-    (Core/build_end.py, DECISIONS round 40): a fake stage container that exits by itself writes it too."""
+    (Core/build_end.py): a fake stage container that exits by itself writes it too. Like the runner it takes the
+    run's key from the job folder (build_end.END_KEY) and seals its record with it, naming the job's last stage."""
+    from orchestrator.Core import build_end
     for host, bind in (volumes or {}).items():
         if bind.get("bind") == "/build-cache/work":
             job = "imatrix" if "imatrix" in str(name) else "build"
             folder = Path(host) / "stages" / job
             folder.mkdir(parents=True, exist_ok=True)
+            key_file = folder / build_end.END_KEY
+            key = key_file.read_text(encoding="ascii").strip() if key_file.is_file() else ""
+            key_file.unlink(missing_ok=True)
             status = "done" if exit_code == 0 else "failed"
-            (folder / "build.end").write_text(f"status {status}\nexit {exit_code}\nstage target\njob {job}\n"
-                                              "inputs -\ntime 2026-10-30T12:00:00Z\n")
+            body = build_end.record_body(status, exit_code, build_end.LAST_STAGE[job], job, "-",
+                                         "2026-10-30T12:00:00Z")
+            seal = build_end.seal_of(body, key) if key else "-"
+            (folder / "build.end").write_text(f"{body}\nseal {seal}\n", encoding="ascii")
 
 
 class FakeContainer:

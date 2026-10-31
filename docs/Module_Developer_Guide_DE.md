@@ -1,4 +1,4 @@
-Version 3.3.0 · Stand 2026-10-30
+Version 3.3.0 · Stand 2026-10-31
 
 [English](Module_Developer_Guide.md) · **Deutsch**
 
@@ -734,9 +734,17 @@ temporäre Datei, dann an seinen Platz verschoben), je Zeile `Schlüssel Wert`: 
 eine abgelehnte Schleife und jedes andere Ende (`set -e`, ein Signal) schreiben `failed` über denselben Schreiber
 (ein EXIT-Trap). Ein Eintrag eines früheren Laufs wird beim Start entfernt. Die Build-Engine liest ihn aus dem
 eingehängten Arbeitsordner: Ein Build endet, weil sein Eintrag fertig sagt, nie weil danach eine Uhr abläuft, und ein
-Container, der ohne den Eintrag mit 0 endet, ist ein fehlgeschlagener Build. Ein Paket, das das `build.sh` der Vorlage
-(oder das vom Modulgenerator geschriebene) behält, hat das umsonst; ein Paket mit eigenem Runner muss als letzten
-Schritt denselben Eintrag schreiben.
+Container, der ohne den Eintrag mit 0 endet, ist ein fehlgeschlagener Build. Nur der Runner schreibt den Eintrag, nie
+ein Stufen-Modul: Bevor der Container startet, legt die Build-Engine einen Schlüssel für diesen einen Lauf in
+`stages/<Job>/end.key`; der Runner liest ihn in eine Variable, die er nie exportiert, entfernt die Datei vor der ersten
+Stufe und versiegelt seinen Eintrag damit (eine letzte Zeile `seal SHA256`: SHA-256 über den Schlüssel, die sechs
+Zeilen darüber und wieder den Schlüssel; `seal -` für einen von Hand gestarteten Lauf). Der Build ist nur fertig, wenn
+der Exit-Status des Containers 0 ist, der Eintrag das Siegel des Schlüssels dieses Laufs trägt, fertig sagt und die
+letzte Stufe des Jobs nennt (`target`, für die Importance-Matrix `convert`); ein Eintrag, den ein Modul schrieb, ein
+Eintrag „fertig“ mit einem anderen Exit-Status oder einer vor der letzten Stufe ist ein fehlgeschlagener Build mit
+einem klaren Grund. Ein Modul-Skript fasst `build.end` und `end.key` also nie an. Ein Paket, das das `build.sh` der
+Vorlage (oder das vom Modulgenerator geschriebene) behält, hat das umsonst; ein Paket mit eigenem Runner muss als
+letzten Schritt denselben versiegelten Eintrag schreiben.
 
 **Fortschritt.** Der Runner schreibt eine Zeile, wenn eine Stufe beginnt, endet, fortgesetzt wird oder scheitert:
 `=== Stage 3/4: convert ===`, `=== Stage 3/4: convert done in 41 s ===`, `=== Stage 1/4: source resumed ===`,

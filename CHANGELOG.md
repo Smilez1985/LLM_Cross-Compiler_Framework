@@ -9,7 +9,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 (`` `YYYY-MM-DD HH:MM UTC` · `vX.Y.Z` ``) and is written under the version it lands in. Planned work is listed in the
 [roadmap](docs/ROADMAP.md), not here; how the framework is built and why is in the [design](docs/DESIGN.md).
 
-## [3.3.0] - 2026-10-30
+## [3.3.0] - 2026-10-31
 
 ### Added
 - `2026-10-30 13:28 UTC` · `v3.3.0` **Ditto follows up on its own builds** ([design](docs/DESIGN.md#ditto-the-local-runtime-and-the-llm-layer)):
@@ -195,6 +195,17 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   stop from outside without the note still counts.
 
 ### Security
+- `2026-10-31 01:50 UTC` · `v3.3.0` **A module script can no longer end a build early as done (the forged end record)**
+  ([design](docs/DESIGN.md#build-pipeline-and-target-modules)): the stage modules run as the same user in the same work
+  folder as the stage runner, so a module could write `status done` into `build.end` and then hang: the framework
+  switched the step's clock off (also an AI-started build's soft cap) and counted the build as done after the grace,
+  and a done record also counted when the container exited with an error. Now only the stage runner writes the record,
+  after its last stage returned, sealed with a one-run key the framework leaves in the job folder (`end.key`, taken and
+  removed by the runner before the first stage, never exported to a module), and the framework counts a build as done
+  only for the container's real exit status 0 with that sealed record of the job's last stage. A record a module wrote,
+  a done record with another exit status, a done record before the last stage, and a container stopped after the grace
+  are failed with a plain reason. A forged record in the runner's places is removed before the runner writes its own,
+  and a record it cannot write fails the run. The end reasons, the doorbell and the chat feed stay the same.
 - `2026-10-30 14:40 UTC` · `v3.3.0` **The dependency pre-fetch unpacks through the framework's one safe extraction**
   ([design](docs/DESIGN.md#security-model)): an archive fetched for a module's download option (BoringSSL, LibreSSL,
   KleidiAI) went through its own copy of the checks, and on Python 3.11 before 3.11.4 it was unpacked without a member
