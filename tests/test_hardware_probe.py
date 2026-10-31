@@ -1067,7 +1067,7 @@ class TestScanDevice:
         monkeypatch.setattr(ssh_trust, "trust_host_key", lambda state, host, port, key: trusted.append((host, port)))
         monkeypatch.setattr(ssh_trust, "connect", lambda host, user, state, port=22, password=None: (
             connected.append((host, user, port, password)) or Client()))
-        monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, line: connected.append("paired"))
+        monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, line, *_a, **_k: connected.append("paired"))
         return trusted, connected
 
     def test_scan_device_stores_the_profile_by_host_key(self, tmp_path, monkeypatch):

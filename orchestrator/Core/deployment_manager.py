@@ -26,6 +26,8 @@ from typing import Any, Callable, Optional, List, Dict
 from orchestrator.remote.transport import PARAMIKO_AVAILABLE   # true while paramiko imports (tested on first use)
 from orchestrator.remote import session as remote_session
 from orchestrator.remote.transport import ParamikoTransport
+from orchestrator.remote import gate
+from orchestrator.runtime.device import board_ops
 from orchestrator.utils.logging import get_logger
 
 from orchestrator.Core.builder import BUILD_MANIFEST, MODEL_FILE_SUFFIXES, is_staging_folder
@@ -64,18 +66,10 @@ INSTALL_LOG = remote_session.JOB_LOG
 # Packages with Docker images from earlier versions started a Qdrant sidecar on the board (`docker run --name
 # qdrant-sidecar --restart unless-stopped`). Nothing uses it any more; after a deploy the framework looks whether it is
 # still there and tells the person, and never removes it (round 5 f: the person removes what they can see).
-OLD_SIDECAR = "qdrant-sidecar"
-OLD_SIDECAR_SECONDS = 20   # the look comes after a finished deploy: a Docker that does not answer never holds it
-
-
-def old_sidecar_check(seconds: int = OLD_SIDECAR_SECONDS) -> str:
-    """The board command that looks for the old sidecar: `docker ps`, bounded with `timeout SECONDS` where the board's
-    `timeout` takes that form (coreutils, BusyBox 1.30 and later), as before where it does not (no `timeout`, or an
-    older BusyBox one that wants `-t SECONDS`)."""
-    look = f"docker ps -a --filter name={OLD_SIDECAR} --format '{{{{.Names}}}}|{{{{.Status}}}}' 2>/dev/null"
-    return f"if timeout 5 true >/dev/null 2>&1; then timeout {int(seconds)} {look}; else {look}; fi"
-
-
+# The look and its names are llmcf's board operation old-sidecar (runtime/device/board_ops.py, every board command).
+OLD_SIDECAR = board_ops.OLD_SIDECAR
+OLD_SIDECAR_SECONDS = board_ops.OLD_SIDECAR_SECONDS   # a Docker that does not answer never holds the look
+old_sidecar_check = board_ops.old_sidecar_check
 OLD_SIDECAR_CHECK = old_sidecar_check()
 # What the OpenSSH fallback (no paramiko) says when it was given a password: it logs in with the framework key only.
 NO_PASSWORD_NOTE = ("The password was not used: OpenSSH runs in BatchMode and never asks for one, and logging in "
@@ -85,6 +79,15 @@ OLD_SIDECAR_NOTE = ("The board still has the container {name} ({state}) from an 
                     "Nothing uses it any more: the knowledge base stays on this computer. The framework does not "
                     "remove it. To remove it, run on the board: docker rm -f {name} (the data folder data/qdrant of "
                     "that old package stays until you delete it).")
+
+
+def _op(verb: str, plain: str, *args: str) -> str:
+    """llmcf's board operation `verb` with `args`, or `plain` (the same command as a script) for a value that is none
+    of llmcf's places (a stand-in's folder)."""
+    try:
+        return gate.script(verb, *args)
+    except gate.GateRefused:
+        return plain
 
 
 def old_sidecar_state(answer: str) -> str:
@@ -752,8 +755,11 @@ class DeploymentManager:
     def _install_job(package_name: str) -> str:
         """The installation as a job on the board: unzip and deploy.sh (read by sh, as in _remote_install_cmd) write
         into INSTALL_LOG."""
-        pkg = shlex.quote(package_name)
-        return f"unzip -o {pkg} > {INSTALL_LOG} 2>&1 && sh deploy.sh >> {INSTALL_LOG} 2>&1"
+        try:   # llmcf's job `install` (runtime/device/board_ops.py): a gated board starts it as start-install
+            return gate.job("install", package_name)
+        except gate.GateRefused:   # a package name that is no plain word: the same command as a script
+            pkg = shlex.quote(package_name)
+            return f"unzip -o {pkg} > {INSTALL_LOG} 2>&1 && sh deploy.sh >> {INSTALL_LOG} 2>&1"
 
     @staticmethod
     def _remote_start_cmd(target_dir: str, package_name: str) -> str:
@@ -962,7 +968,7 @@ class _BoardSession:
     def _deploy(self, fh, name: str, size: int, sha256: str) -> DeployResult:
         session = self.session
         session.open()
-        if session.pair():
+        if session.pair(board_ops.bundle()):
             self.logger.info("Framework SSH key installed; later deployments need no password.")
         target_dir = session.private_dir()
         if self.cancel.cancelled:
@@ -984,15 +990,16 @@ class _BoardSession:
         d = shlex.quote(target_dir)
         code = session.run_detached(target_dir, DeploymentManager._install_job(name), timeout=INSTALL_TIMEOUT,
                                     poll=INSTALL_POLL)
-        log = session.run(f"tail -n {REMOTE_OUTPUT_LINES} {d}/{INSTALL_LOG}").out
+        log = session.run(_op("install-log", f"tail -n {REMOTE_OUTPUT_LINES} {d}/{INSTALL_LOG}", target_dir,
+                              str(REMOTE_OUTPUT_LINES))).out
         for line in log.splitlines():
             self.logger.info(f"[REMOTE] {line.strip()}")
             DeploymentManager._keep(self.lines, line)
-        session.run(f"rm -rf {d}")
+        session.run(_op("dir-remove", f"rm -rf {d}", target_dir))
         if code == 0:
             self.logger.info("Remote deployment successful.")
             try:
-                answer = session.run(OLD_SIDECAR_CHECK).out
+                answer = session.run(gate.script("old-sidecar")).out
             except Exception:  # noqa: BLE001 - only a look; the deploy itself succeeded
                 answer = ""
             return self.result(True, exit_status=0, device_state="ok",

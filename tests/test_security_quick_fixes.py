@@ -63,7 +63,7 @@ def scanned(monkeypatch, tmp_path, keep_logger_levels):
     monkeypatch.setattr(ssh_trust, "check_host_key", lambda state, host, port, key: "known")
     monkeypatch.setattr(ssh_trust, "connect", lambda host, user, state, port=22, password=None: (
         logins.append(password) or Client()))
-    monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, line: None)
+    monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, line, *_a, **_k: None)
     board = parse_profile((FIXTURES / "schema2_rk3566_dietpi.txt").read_text())
     monkeypatch.setattr(rp, "probe_over_ssh", lambda client: rp.RemoteProbeResult(board, "sh", []))
     monkeypatch.chdir(tmp_path)

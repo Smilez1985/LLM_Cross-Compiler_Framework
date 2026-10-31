@@ -761,7 +761,7 @@ class TestFirstUse:
 def test_pair_installs_the_framework_s_own_key_line(tmp_path, monkeypatch):
     from orchestrator.remote import pairing
     seen = []
-    monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, line: seen.append((client, line)))
+    monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, line, *_a, **_k: seen.append((client, line)))
     pairing.pair("session", tmp_path / "state")
     ((client, line),) = seen
     assert client == "session" and line == ssh_trust.client_key(tmp_path / "state")[1]

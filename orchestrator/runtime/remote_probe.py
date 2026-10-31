@@ -21,7 +21,9 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from orchestrator.remote.address import Endpoint, valid_host  # noqa: F401 - valid_host keeps its old import path
+from orchestrator.remote import gate
 from orchestrator.remote.transport import read_limited as _read_limited, sh_command
+from orchestrator.runtime.device import board_ops  # noqa: F401 - defines the probe's operations
 from orchestrator.runtime.profile import HardwareProfile, ProfileError, load_schema, parse_profile
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
@@ -31,10 +33,13 @@ MIN_PYTHON = (3, 8)
 # sshd runs every command through the device user's login shell. Each one is a single `sh -c '...'`, so the
 # redirections and && are parsed by sh and a login shell such as csh or fish (where `2>/dev/null` means something
 # else or nothing) does not matter. stdin, which carries the script, passes through to the probe.
-PYTHON_CHECK = sh_command(
-    "command -v python3 >/dev/null 2>&1 && python3 -I -c 'import sys; print(\"%d.%d\" % sys.version_info[:2])'")
-PYTHON_COMMAND = sh_command("exec python3 -I - --output - 2>/dev/null")
-SHELL_COMMAND = sh_command("exec sh -s -- --output - 2>/dev/null")
+# The three are llmcf's board operations probe-python-check, probe-python and probe-shell
+# (orchestrator/runtime/device/board_ops.py): on a board whose key runs only llmcf's gate, the gate runs the probe
+# script it is sent only when it is one of the framework's own probe scripts.
+PYTHON_CHECK = sh_command(gate.script("probe-python-check"))
+PYTHON_COMMAND = sh_command(gate.script("probe-python"))
+SHELL_COMMAND = sh_command(gate.script("probe-shell"))
+_OPS = {PYTHON_CHECK: "probe-python-check", PYTHON_COMMAND: "probe-python", SHELL_COMMAND: "probe-shell"}
 
 
 class RemoteProbeError(RuntimeError):
@@ -60,17 +65,33 @@ def _session(target):
     return target if isinstance(target, RemoteSession) else RemoteSession.attached(target)
 
 
-def _exec_once(client, command: str, stdin_data: Optional[bytes], timeout: float, limit: int) -> Tuple[int, bytes]:
-    stdin, stdout, _stderr = client.exec_command(command, timeout=timeout)
+def _exec_once(client, command: str, stdin_data: Optional[bytes], timeout: float, limit: int,
+               session=None) -> Tuple[int, bytes]:
+    """One command; with `session`, a command of _OPS goes in the session's form (its gate call on a gated board), and
+    the gate's refusal of the script form makes the session gated and sends it again as a gate call."""
+    verb = _OPS.get(command) if session is not None else None
+    sent = sh_command(session.wire(gate.script(verb))) if verb else command
+    stdin, stdout, stderr = client.exec_command(sent, timeout=timeout)
     if stdin_data is not None:
-        stdin.write(stdin_data)
-        stdin.flush()
+        try:
+            stdin.write(stdin_data)
+            stdin.flush()
+        except OSError:   # the board's gate refused the line and closed the channel; its status says so
+            pass
     stdin.channel.shutdown_write()
     data = _read_limited(stdout, limit)
     if len(data) > limit:
         stdout.channel.close()
         raise RemoteProbeError(f"the device sent more than {limit} bytes")
-    return stdout.channel.recv_exit_status(), data
+    status = stdout.channel.recv_exit_status()
+    if verb and status == gate.REFUSED_STATUS and stderr is not None:
+        try:
+            err = _read_limited(stderr, 4096).decode("utf-8", "replace")
+        except Exception:  # noqa: BLE001 - a stand-in without stderr: no refusal to read
+            err = ""
+        if session.refused(gate.script(verb), status, err):
+            return _exec_once(client, command, stdin_data, timeout, limit, session)
+    return status, data
 
 
 def _exec(target, command: str, stdin_data: Optional[bytes], timeout: float, limit: int) -> Tuple[int, bytes]:
@@ -81,7 +102,7 @@ def _exec(target, command: str, stdin_data: Optional[bytes], timeout: float, lim
     session = _session(target)
     try:
         # the client of the session's current login, looked up at each try
-        return session.resumable(lambda: _exec_once(session.client, command, stdin_data, timeout, limit))
+        return session.resumable(lambda: _exec_once(session.client, command, stdin_data, timeout, limit, session))
     except (socket.timeout, TimeoutError):
         raise RemoteProbeError(f"no answer within {timeout:.0f} s") from None
     except (OSError, EOFError) as e:

@@ -136,13 +136,18 @@ def first_use(store: TrustStore, check: KeyCheck, *, ask: Optional[Callable[[Key
 
 # --- pairing ----------------------------------------------------------------------------------------------------
 
-def pair(client: Any, state_dir: Path) -> None:
+def pair(client: Any, state_dir: Path, bundle: Any = None, *, allow_unrestricted: bool = False) -> str:
     """Installs the framework's own SSH key on the board over `client`, a session the person logged in to with a
-    one-time password (used for that connection only, never stored): the fixed command of
-    ssh_trust.install_public_key, whose one value is the framework's own public key line. HostKeyError when it cannot
-    be installed."""
+    one-time password (used for that connection only, never stored): ssh_trust.install_public_key, with `bundle`
+    (runtime/device/board_ops.bundle()) as llmcf's command gate and the key's restricted line. Returns "restricted" or
+    "unrestricted"; GateUnavailable (a HostKeyError) when the board cannot take the gate and the person did not allow
+    an unrestricted key, HostKeyError when the key cannot be installed."""
     from orchestrator.utils import ssh_trust   # looked up now: tests replace install_public_key and client_key there
-    ssh_trust.install_public_key(client, ssh_trust.client_key(Path(state_dir))[1])
+    line = ssh_trust.client_key(Path(state_dir))[1]
+    if bundle is None:
+        ssh_trust.install_public_key(client, line)
+        return "unrestricted"
+    return ssh_trust.install_public_key(client, line, bundle, allow_unrestricted=allow_unrestricted)
 
 
 # --- Q5: the person's change of a board's address and host key -------------------------------------------------

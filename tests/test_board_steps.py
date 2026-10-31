@@ -405,7 +405,7 @@ class TestConnect:
         monkeypatch.setattr(ssh_trust, "fetch_host_key", lambda host, port: key or FakeHostKey())
         monkeypatch.setattr(ssh_trust, "check_host_key", lambda state, host, port, k: status)
         monkeypatch.setattr(ssh_trust, "connect", connect)
-        monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, public: seen.append("key installed"))
+        monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, public, *_a, **_k: seen.append("key installed"))
         monkeypatch.setattr(ssh_trust, "client_key", lambda state: (None, "ssh-ed25519 AAAA framework"))
         return seen
 

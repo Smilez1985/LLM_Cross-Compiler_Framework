@@ -163,7 +163,7 @@ class TestScanDevice:
             return rp.RemoteProbeResult(board(), "sh", ["no python3 on the device; used hardware_probe.sh"])
 
         monkeypatch.setattr(ssh_trust, "connect", connect)
-        monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, line: seen["paired"].append(line))
+        monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, line, *_a, **_k: seen["paired"].append(line))
         monkeypatch.setattr(rp, "probe_over_ssh", probe)
         return seen
 

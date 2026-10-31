@@ -273,7 +273,7 @@ class TestPersonLogin:
         from orchestrator.runtime.device import person_steps
         from orchestrator.utils import ssh_trust
         seen, device_id = board
-        monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, line: seen.append("installed"))
+        monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, line, *_a, **_k: seen.append("installed"))
         person_steps.connect_stored(tmp_path, device_id, "192.0.2.10", 22, "dietpi")
         assert seen == [("login", None)]
 
@@ -283,7 +283,7 @@ class TestPersonLogin:
         from orchestrator.utils import ssh_trust
         seen, device_id = board
 
-        def refuse(client, line):
+        def refuse(client, line, *_a, **_k):
             raise ssh_trust.HostKeyError("Could not install the framework key: read-only")
 
         monkeypatch.setattr(ssh_trust, "install_public_key", refuse)
