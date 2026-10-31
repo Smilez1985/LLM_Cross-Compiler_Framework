@@ -195,6 +195,24 @@ class TestScanDevice:
         (args, kwargs), = audited
         assert args[:2] == ("gui", "device_trusted") and kwargs["extra"]["confirm_channel"] == "framework-gui"
 
+    @pytest.mark.parametrize("given", ["signer", "lookup"])
+    def test_the_pairing_takes_the_callers_framework_signer(self, tmp_path, ssh, monkeypatch, given):
+        """Regression (failed before: scan_device had no signer of its own and paired with the state folder's store
+        opened as a keyring store, so a passphrase or helper store gave the board no signing key)."""
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+        from orchestrator.Core.community_pack import BoardSigner
+        from orchestrator.runtime.device import board_ops
+        from orchestrator.runtime.scan_steps import scan_device
+        from orchestrator.utils import ssh_trust
+        bundles = []
+        monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, line, bundle=None, **_k: bundles.append(bundle))
+        monkeypatch.setattr(board_ops, "framework_signer", lambda *a, **k: pytest.fail("the state folder's store"))
+        signer = BoardSigner(Ed25519PrivateKey.generate())
+        scan_device(tmp_path / "state", "192.0.2.10", 22, "dietpi", FakeHostKey(), password="pw-made-up",
+                    record=False, signer=signer if given == "signer" else (lambda: signer))
+        assert [b.signers for b in bundles] == [signer.allowed_signers]
+
     def test_without_a_key_the_session_s_key_names_the_board_and_record_can_be_left_out(self, tmp_path, ssh):
         from orchestrator.runtime.device.trusted import TrustedDevices
         from orchestrator.runtime.profile import device_id_for_host_key

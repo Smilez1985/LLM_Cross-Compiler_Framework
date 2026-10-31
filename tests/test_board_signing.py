@@ -350,7 +350,9 @@ def test_the_root_step_puts_the_key_line_and_the_signing_key_in_root_owned_place
         assert (ok, reason) == (True, ""), reason
     user = "radxa"
     key_file = Path(paths.keys_dir) / user
-    assert key_file.read_text().strip() == gate.restricted_line(PUBLIC, paths.gate)
+    # the root-owned line: the gate as forced command, and sshd runs no ~/.ssh/rc of the account before it
+    assert key_file.read_text().strip() == gate.root_key_line(PUBLIC, paths.gate)
+    assert key_file.read_text().strip()[:-len(PUBLIC) - 1].endswith(",no-user-rc")
     assert oct(key_file.stat().st_mode & 0o777) == "0o644" and oct(Path(paths.keys_dir).stat().st_mode & 0o777) == "0o755"
     assert Path(paths.signers).read_text().strip() == signer.allowed_signers
     assert Path(paths.gate).read_text() == package.gate
@@ -421,3 +423,143 @@ def test_verify_reports_where_the_key_lives():
     assert board_ops.key_facts(Shell("restricted=yes gate=0123456789abcdef keys=root signing=yes\n")) == {
         "restricted": True, "gate": "0123456789abcdef", "keys": "root", "signing": True}
     assert board_ops.key_facts(Shell("restricted=no gate=none\n"))["keys"] == "home"
+
+
+# --- review of the board-signing chain: the signer of every pairing path, no ~/.ssh/rc, runtime-check's folder -------
+
+def test_a_framework_without_a_store_never_falls_back_to_the_state_folder(tmp_path, monkeypatch):
+    """Regression (failed before: a framework whose secrets store was not there had the keyring store of the state
+    folder opened in its place, whatever its secret_storage said)."""
+    from types import SimpleNamespace
+
+    from orchestrator.Core import secrets_manager
+    opened = []
+    monkeypatch.setattr(secrets_manager, "SecretsManager", lambda *a, **k: opened.append(a) or pytest.fail("opened"))
+    assert board_ops.framework_signer(SimpleNamespace(secrets_manager=None), tmp_path) is None
+    assert opened == []
+
+
+def test_pairing_takes_the_callers_signer_and_says_plainly_what_a_path_without_a_framework_cannot_open(
+        tmp_path, monkeypatch):
+    """Regression (failed before: the pairing paths had no signer of their own and opened the state folder's store
+    as a keyring store; for a person whose secret_storage is passphrase or helper that gave a silent no-signer)."""
+    from orchestrator.utils import ssh_trust
+    signer = _signer()
+    looked_up = []
+    monkeypatch.setattr(board_ops, "framework_signer", lambda *a, **k: looked_up.append((a, k)))
+    # the caller's framework signer: given as it is, or looked up only when a board is paired
+    assert board_ops.pairing_bundle(signer, tmp_path).signers == signer.allowed_signers
+    assert board_ops.pairing_bundle(lambda: signer, tmp_path).signers == signer.allowed_signers
+    assert looked_up == [], "a caller's signer never opens the state folder's store"
+    # the framework's own store had none: the plain no-signer, and still no fallback to the state folder
+    assert board_ops.pairing_bundle(lambda: None, tmp_path).missing == "no-signer" and looked_up == []
+    # no framework at all: only the state folder's store, and the reason says which stores cannot open there
+    package = board_ops.pairing_bundle(None, tmp_path)
+    assert looked_up == [((), {"state_dir": tmp_path})] and package.missing == board_ops.NO_FRAMEWORK_STORE
+    sent = []
+    assert gate.install_root_board(lambda s, stdin=None: sent.append(s), PUBLIC, package) == (
+        False, board_ops.NO_FRAMEWORK_STORE, "")
+    assert sent == []
+    text = str(ssh_trust.GateUnavailable(board_ops.NO_FRAMEWORK_STORE))
+    assert "passphrase" in text and "helper" in text and "secret_storage" in text
+
+
+def _calls(name):
+    """Every call of `name` (a function or a class) in the framework's code: (file, line, keyword names)."""
+    import ast
+
+    from conftest import REPO_ROOT
+    found = []
+    for path in sorted((REPO_ROOT / "orchestrator").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                called = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+                if called == name:
+                    found.append((path.relative_to(REPO_ROOT).as_posix(), node.lineno,
+                                  {k.arg for k in node.keywords}))
+    return found
+
+
+@pytest.mark.parametrize("name", ["scan_device", "connect_stored", "DeployHooks"])
+def test_every_pairing_path_of_the_framework_gives_its_signer(name):
+    """Regression (failed before: the CLI's and the GUI's scans, board logins and deploy logins gave no signer, so
+    pairing opened the state folder's store instead of the framework's)."""
+    calls = _calls(name)
+    assert calls, name
+    missing = [(f, line) for f, line, keywords in calls if "signer" not in keywords]
+    assert missing == [], f"{name} without signer=: {missing}"
+
+
+def test_the_root_owned_key_line_runs_no_user_rc_and_the_home_line_stays_dropbears():
+    """Regression (failed before: sshd ran the account's ~/.ssh/rc, which the account may write, before the gate):
+    the root-owned line (OpenSSH only) has no-user-rc; the home line, which Dropbear may read, keeps the options
+    Dropbear knows (Dropbear refuses a line with an option it does not know, and runs no ~/.ssh/rc)."""
+    root_line = gate.root_key_line(PUBLIC, gate.ROOT_GATE)
+    options = root_line[:-len(PUBLIC) - 1].split('",', 1)[1].split(",")
+    assert options == list(gate.KEY_OPTIONS) + ["no-user-rc"] and root_line.endswith(" " + PUBLIC)
+    assert "no-user-rc" not in gate.restricted_line(PUBLIC, "/home/radxa/" + gate.GATE_REL)
+    assert "no-user-rc" not in gate.OPERATIONS["gate-install"].render("ssh-ed25519", "A" * 68, "llmcf")
+
+
+@POSIX
+@KEYGEN
+@pytest.mark.parametrize("where", ["inside", "bench", "tmp", "slash", "install"])
+def test_runtime_check_takes_only_the_staging_folder_the_framework_made(board, where):
+    """Regression (failed before: runtime-check took any upload place, so its checked folder could land inside an
+    upload folder, where upload operations write): only <install folder>/.staging-XXXXXXXX, nothing below it."""
+    tarball = _tarball()
+    sig = board.signer.sign_bytes(tarball)
+    staging = _staged(board, tarball, sig)
+    place = {"inside": f"{staging}/inner", "bench": f"{board.root}/.bench.abcdEFGH",
+             "tmp": "/tmp/llm_deploy.abcdEFGH", "slash": f"{board.root}/.staging-ab/cdefg",
+             "install": f"{board.root}"}[where]
+    if where in ("inside", "bench", "slash"):   # a stolen key can put a tarball there with the upload operations
+        folder = Path(place)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "runtime.tar.gz").write_bytes(tarball)
+        (folder / "runtime.tar.gz.sig").write_text(sig, encoding="ascii")
+    sha = hashlib.sha256(tarball).hexdigest()
+    checked = board(f"llmcf-gate runtime-check {place} {sha} {ID16}")
+    assert gate.is_refusal(checked.status, checked.err), checked
+    assert not list(board.root.rglob(gate.VERIFY_PREFIX + "*"))
+    with pytest.raises(gate.GateRefused):   # an unrestricted login gets no such call either
+        gate.script("runtime-check", place, sha, ID16)
+    # the folder the framework made is still taken
+    assert board(f"llmcf-gate runtime-check {staging} {sha} {ID16}").status == 0
+
+
+class _Stop(Exception):
+    pass
+
+
+def _deploy_flow_signer(tmp_path, monkeypatch, signer_hook):
+    """The signer deploy_runtime_flow hands install_runtime for `signer_hook` (DeployHooks.signer), and what it said."""
+    from types import SimpleNamespace
+
+    from orchestrator.runtime.device import remote, steps
+    got, said = [], []
+
+    def install(shell, **kw):
+        got.append(kw["signer"])
+        raise _Stop()
+    monkeypatch.setattr(steps, "install_runtime", install)
+    monkeypatch.setattr(remote, "RemoteShell", lambda session: session)
+    hooks = steps.DeployHooks(open_board=lambda: (SimpleNamespace(close=lambda: None), None), progress=said.append,
+                              refuse_root=False, signer=signer_hook)
+    with pytest.raises(_Stop):
+        steps.deploy_runtime_flow(tmp_path, ID16, SimpleNamespace(arch="arm64"),
+                                  SimpleNamespace(kv_choice=lambda _p: SimpleNamespace(kind="f16")), hooks=hooks,
+                                  build=SimpleNamespace(plan={}), packaged=None, source=None, arch="arm64")
+    return got, said
+
+
+def test_the_deploy_flow_signs_with_the_callers_signer_and_says_plainly_without_a_framework(tmp_path, monkeypatch):
+    """Regression (failed before: a caller's framework signer that was looked up lazily was not taken, and a flow
+    without a framework fell back to the state folder's store in silence)."""
+    signer = _signer()
+    monkeypatch.setattr(board_ops, "framework_signer", lambda *a, **k: None)
+    assert _deploy_flow_signer(tmp_path, monkeypatch, lambda: signer) == ([signer], [])
+    got, said = _deploy_flow_signer(tmp_path, monkeypatch, None)
+    assert got == [None] and len(said) == 1 and "passphrase" in said[0] and "helper" in said[0]

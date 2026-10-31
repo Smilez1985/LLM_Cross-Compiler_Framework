@@ -148,7 +148,7 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
                 store: Any = None, record: bool = True, via: str = "cli", actor: str = "", audit: Any = None,
                 audit_factory: Optional[Callable[[], Any]] = None,
                 on_client: Optional[Callable[[Any], None]] = None, cancel: Any = None,
-                on_event: Optional[Callable[[Any], None]] = None) -> DeviceScan:
+                on_event: Optional[Callable[[Any], None]] = None, signer: Any = None) -> DeviceScan:
     """Probes a board whose host key the person trusted (the caller asked; `key` is that key, or None to take the key
     of the session itself): logs in (a password only the first time, to install the framework's SSH key; never
     stored), runs the hardware probe there (the Python probe with python3 -I, else the shell probe; nothing is
@@ -160,7 +160,10 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
     SSH session so a Cancel can close it. While the board's network is gone the probe's session waits for it (N5):
     `on_event` gets its events (remote/text.py wait_lines makes the person's lines of them), and `cancel`, a
     session.CancelToken, ends the wait and the probe at once (it holds the session); a scan it ended raises
-    DeviceScanError "cancelled"."""
+    DeviceScanError "cancelled". `signer`: the caller's framework signer for the pairing (runtime/device/board_ops.py
+    resolve_signer: a BoardSigner, or `lambda: board_ops.framework_signer(framework)`, looked up only when a password
+    pairs the board); None only for a caller without any framework (then the state folder's store, and the pairing
+    says plainly when that cannot give the signing key)."""
     from orchestrator.remote.address import Endpoint, valid_user
     from orchestrator.remote.session import KeyOnly, OneTimePassword, RemoteSession, SessionFailure, Stopped
     from orchestrator.runtime.device.settings import remember_ssh_user
@@ -202,8 +205,7 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
             from orchestrator.remote import pairing
             from orchestrator.runtime.device import board_ops
             # the framework's key, over the one-time password session, with llmcf's command gate (board_ops.py)
-            pairing.pair(client, state_dir, board_ops.bundle(board_ops.framework_signer(state_dir=state_dir)),
-                         password=password)
+            pairing.pair(client, state_dir, board_ops.pairing_bundle(signer, state_dir), password=password)
         result = probe_over_ssh(session)
     except (RemoteProbeError, ssh_trust.HostKeyError) as e:
         if session.cancel.cancelled:   # the Cancel closed the session under the running probe

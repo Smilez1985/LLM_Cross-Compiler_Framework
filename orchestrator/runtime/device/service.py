@@ -355,7 +355,8 @@ def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, 
             raise Stopped("The deploy")
 
     # the AI's hooks: its own login only; the root refusal stays deploy_runtime's (the device's words, as before)
-    # signer: the framework's board signer (board_ops.framework_signer), the tarball is signed with it
+    # signer: the framework's board signer (board_ops.resolve_signer: a BoardSigner or a callable that looks it up),
+    # the tarball is signed with it
     hooks = steps.DeployHooks(open_board=open_board, progress=say, check_cancel=check_cancel, refuse_root=False,
                               signer=signer)
     try:

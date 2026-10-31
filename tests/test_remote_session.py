@@ -348,6 +348,25 @@ def test_the_key_is_installed_once_with_a_password_and_never_without(manager, bo
         assert manager.deploy_package(package, HOST, "radxa", **kw).success and installed == []
 
 
+def test_the_deploy_signs_with_its_frameworks_store_only_and_says_what_a_deploy_without_one_cannot_open(
+        manager, board, package, monkeypatch):
+    """Regression (failed before: a DeploymentManager whose framework had no signer fell back to the state folder's
+    store, and one without a framework paired with a silent no-signer although a passphrase or helper store was the
+    reason)."""
+    from orchestrator.runtime.device import board_ops
+    looked_up = []
+    monkeypatch.setattr(board_ops, "framework_signer", lambda *a, **k: looked_up.append((a, k)))
+    framework, state = manager.framework, manager._state_dir()
+    assert not manager.deploy_package(package, HOST, "radxa", password="one-time", pair=True).success
+    assert looked_up == [((framework,), {})], "the framework's own store only"
+    looked_up.clear()
+    manager.framework = None   # a DeploymentManager without a framework (its state folder kept for the test)
+    monkeypatch.setattr(manager, "_state_dir", lambda: state)
+    result = manager.deploy_package(package, HOST, "radxa", password="one-time", pair=True)
+    assert not result.success and "passphrase" in result.reason and "helper" in result.reason, result.reason
+    assert looked_up == [((), {"state_dir": state})]
+
+
 # --- cancel ---------------------------------------------------------------------------------------------------------
 
 def test_a_cancel_ends_the_wait_for_the_board_at_once(manager, board, package):

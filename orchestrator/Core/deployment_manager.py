@@ -969,9 +969,16 @@ class _BoardSession:
         session = self.session
         session.open()
         # the framework's board signer: the package is signed with it, and the root step of pairing installs its
-        # public key on the board, which then runs only packages it signed
-        signer = board_ops.framework_signer(self.manager.framework, self.manager._state_dir())
-        if session.pair(board_ops.bundle(signer)):
+        # public key on the board, which then runs only packages it signed. Its framework's store only; the state
+        # folder's store only for a DeploymentManager without a framework, which says plainly when that cannot give it
+        framework = self.manager.framework
+        signer, missing = board_ops.resolve_signer(
+            (lambda: board_ops.framework_signer(framework)) if framework is not None else None,
+            self.manager._state_dir())
+        if missing == board_ops.NO_FRAMEWORK_STORE:
+            from orchestrator.remote.gate import SETUP_REASONS
+            self.logger.warning(f"The package cannot be signed: {SETUP_REASONS[missing]}.")
+        if session.pair(board_ops.bundle(signer, missing=missing)):
             self.logger.info("Framework SSH key installed; later deployments need no password.")
         target_dir = session.private_dir()
         if self.cancel.cancelled:
