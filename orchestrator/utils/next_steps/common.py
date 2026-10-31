@@ -123,6 +123,8 @@ STEPS = (
     # Docker and the computer itself: an administrator's work, shown with its command, never run by the framework
     Step("docker.start", person_only="admin", literal="sudo systemctl start docker"),
     Step("docker.group", person_only="admin", literal="sudo usermod -aG docker $USER"),
+    # the way to a rootless container engine (no standing rights that can do more than needed): install.sh sets it up
+    Step("docker.rootless", person_only="admin", literal="sudo ./install.sh"),
     Step("docker.login", person_only="third_party", program="Docker", literal="docker login"),
     Step("hf.access", person_only="third_party", program="Hugging Face", url="https://huggingface.co/settings/tokens"),
     Step("window.open", person_only="permission"),
@@ -158,6 +160,9 @@ TEXTS = {
         "step.output.folder": "Choose the folder for finished models",
         "step.docker.start": "Start Docker (Docker Desktop on Windows and macOS)",
         "step.docker.group": "Allow your user account to use Docker, then log in again",
+        "step.docker.rootless": "Set up a rootless container engine with the installer (an administrator's step)",
+        "step.docker.rootless.what": "The installer sets up rootless Podman for your account by default; the "
+                                     "framework then uses it instead of an engine that runs as root.",
         "step.docker.login": "Log in to the image registry",
         "step.hf.access": "Sign in to Hugging Face and accept the model's conditions on its page",
         "step.window.open": "Open the framework window",
@@ -194,6 +199,10 @@ TEXTS = {
         "step.output.folder": "Den Ordner für fertige Modelle wählen",
         "step.docker.start": "Docker starten (Docker Desktop unter Windows und macOS)",
         "step.docker.group": "Deinem Benutzerkonto Docker erlauben, dann neu anmelden",
+        "step.docker.rootless": "Mit dem Installer eine Container-Engine ohne Root-Rechte einrichten (ein Schritt "
+                                "für Administratoren)",
+        "step.docker.rootless.what": "Der Installer richtet standardmäßig rootless Podman für dein Konto ein; das "
+                                     "Framework nimmt dann sie statt einer Engine, die als root läuft.",
         "step.docker.login": "Bei der Image-Registry anmelden",
         "step.hf.access": "Bei Hugging Face anmelden und auf der Seite des Modells seine Bedingungen akzeptieren",
         "step.window.open": "Das Framework-Fenster öffnen",
@@ -205,6 +214,8 @@ TEXTS = {
 FORMAL = {
     "de": {
         "step.docker.group": "Ihrem Benutzerkonto Docker erlauben, dann neu anmelden",
+        "step.docker.rootless.what": "Der Installer richtet standardmäßig rootless Podman für Ihr Konto ein; das "
+                                     "Framework nimmt dann sie statt einer Engine, die als root läuft.",
         "step.images.free": "Speicherplatz freigeben, indem Sie Build-Images des Frameworks löschen, die Sie nicht "
                             "mehr brauchen",
         "step.images.free.what": "Listet die Docker-Build-Images des Frameworks mit ihrer Größe; Sie haken an, was "

@@ -87,6 +87,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Container schreibt den Arbeitsordner) zählt nie, und ein alter wird nie über so einen Link entfernt.
 
 ### Geändert
+- `2026-10-31 11:09 UTC` · `v3.3.0` **Das Framework nimmt lieber eine Container-Engine ohne Root-Rechte** ([Design](docs/DESIGN_DE.md#installer-plattformen-und-abhängigkeiten)): Sind mehrere Engines da, spricht es jetzt mit deinem rootless Docker, dann mit deinem rootless Podman, vor einem Docker-Dienst, der als root läuft (vorher kam jeder Docker-Dienst zuerst); ein `DOCKER_HOST`, den du gesetzt hast, gilt weiter. Dein rootless Docker wird jetzt von selbst gefunden (sein Socket wurde vorher nicht als `DOCKER_HOST` gesetzt, also schaute das Framework auf den Socket des Systems). Mojos Zeile zu den Grenzen von Podman (keine Anfrage nach der NVIDIA-GPU, kein BuildKit) ist jetzt eine Info, mit dem Weg zu rootless Docker (`sudo ./install.sh --engine=docker`) statt zu Docker als root, und ein `DOCKER_HOST` auf Podman gilt nur noch als übrig geblieben, solange dein rootless Docker läuft.
 - `2026-10-31 01:59 UTC` · `v3.3.0` **Der pip-Cache ist in der CI vorerst abgeschaltet** ([Design](docs/DESIGN_DE.md#tests-ci-und-die-windows-fallen)):
   Die setup-python-Schritte von `ci.yml`, `security.yml` und `retrieval-eval.yml` nutzen `cache: pip` nicht mehr (jeder
   sagt in einem Kommentar, warum), weil das Cache- und Egress-Kontingent des Kontos aufgebraucht war und ein Job beim
@@ -235,6 +236,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   der laufenden Stufe zurück; ein Stopp von außen ohne die Notiz zählt weiter.
 
 ### Sicherheit
+- `2026-10-31 11:09 UTC` · `v3.3.0` **Mojo nennt eine Gruppe mit Root-Wirkung** ([Design](docs/DESIGN_DE.md#mojo-der-gesundheitscheck)): Ist dein Konto in der Gruppe `docker` (Linux) oder `docker-users` (Windows), sagen `llmcf mojo`, das Mojo-Fenster und die Mojo-Tools einer KI das jetzt als Warnung: Wer darin ist, steuert eine Container-Engine, die mit den Rechten von root läuft, also kann jedes Programm, das du startest, diese Rechte bekommen, dauerhaft, auch wenn das Framework nicht läuft; mit dem Weg zu einer Engine ohne Root-Rechte. Mojo sagt auch, ob die Engine rootless läuft. Die Texte nennen kein Konto und keinen Pfad.
 - `2026-10-31 07:47 UTC` · `v3.3.0` **Die Stufen-Module laufen unter einem eigenen Benutzer und können den Schlüssel des Abschluss-Eintrags nicht lesen**
   ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)): Ein Stufen-Modul lief als eigener Benutzer des
   Stufen-Runners und konnte den Schlüssel, der den Abschluss-Eintrag versiegelt, aus dem Speicher des Runners lesen
