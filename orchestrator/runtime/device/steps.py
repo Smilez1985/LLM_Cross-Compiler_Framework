@@ -248,6 +248,7 @@ def install_runtime(shell: Any, *, state_dir: Path, device_id: str, profile: Any
                             signer=signer)
     report = result.report
     record_heat(state_dir, device_id, getattr(report, "heat", None))   # for Mojo, also when the checks failed
+    record_key_tier(state_dir, device_id, report)
     if not result.activated or report is None or not report.ok:
         return InstallOutcome(result, report, False)
     now = utc_stamp()
@@ -405,6 +406,7 @@ def check_runtime(shell: Any, *, state_dir: Path, device_id: str, home: str, rec
     record.pop("format", None)
     DeviceRuntimeStore(state_dir, device_id).save_record(record)
     record_heat(state_dir, device_id, report.heat)
+    record_key_tier(state_dir, device_id, report)
     return report
 
 
@@ -412,6 +414,16 @@ def record_heat(state_dir: Path, device_id: str, heat: Any) -> None:
     """The board's temperature at these checks, kept for Mojo Oracle until the next reading (trusted.record_heat)."""
     from orchestrator.runtime.device.trusted import record_heat as record
     record(state_dir, device_id, heat)
+
+
+def record_key_tier(state_dir: Path, device_id: str, report: Any) -> None:
+    """The tier of the framework's key the board-key check of `report` read (remote/key_tiers.py), kept for the
+    listings and Mojo Oracle until the next pairing or verify (trusted.record_key_tier); nothing without the check."""
+    from orchestrator.runtime.device.trusted import record_key_tier as record
+    check = next((c for c in getattr(report, "checks", None) or () if getattr(c, "name", "") == "board-key"), None)
+    data = getattr(check, "data", None) if check is not None else None
+    if isinstance(data, dict) and data.get("tier"):
+        record(state_dir, device_id, data["tier"])
 
 
 def heat_lines(report: Any, lang: Optional[str] = None) -> List[str]:

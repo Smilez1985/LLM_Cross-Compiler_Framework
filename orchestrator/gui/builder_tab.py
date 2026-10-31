@@ -801,7 +801,8 @@ class BuilderTab(QWidget):
             if not getattr(self, "_tier_relay", False):
                 worker_relay().done.connect(self._on_tier_question, Qt.QueuedConnection)
                 self._tier_relay = True
-            self.probe_worker.chooser = GuiTierChooser(self._tier_token, tell=self.probe_worker.line.emit)
+            worker = self.probe_worker
+            worker.chooser = GuiTierChooser(self._tier_token, tell=lambda text: worker.line.emit(text))
             self.probe_worker.mode = framework_mode(getattr(framework, "config", None))
             self.probe_worker.line.connect(self._log)   # the wait for the board (N5) and its answer
             self.probe_worker.finished.connect(self._on_probe_finished)

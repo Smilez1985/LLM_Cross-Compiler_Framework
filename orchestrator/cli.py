@@ -6058,8 +6058,7 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
                                output_file=output_file, as_json=as_json, store=store, record=ctx is not None,
                                via="cli", actor="cli",   # the audit log is opened only for the record, as before
                                audit_factory=(lambda: _device_audit(ctx, state_dir)) if ctx is not None else None,
-                               on_event=lines, signer=_board_signer(ctx), chooser=_tier_chooser(),
-                               mode=_framework_mode(ctx))
+                               on_event=lines, signer=_board_signer(ctx), **_tier_kwargs(ctx))
     except DeviceScanError as e:
         if e.kind == "login":   # recorded for Mojo by the core step already
             _unreachable(ctx, host, port, e.error, doing=f"log in to {user}@", state_dir=state_dir)
@@ -6295,6 +6294,22 @@ def _framework_mode(ctx: Optional[FrameworkContext]) -> str:
         return "private"
 
 
+def _tier_kwargs(ctx: Optional[FrameworkContext], **extra) -> dict:
+    """The key-tier arguments of a pairing step (scan_steps.scan_device, person_steps.connect_stored): the person's
+    terminal chooser and the framework mode, given only when they differ from the defaults (no terminal, private
+    mode), so a pairing without a person to ask stays exactly as before."""
+    kwargs = {}
+    chooser = _tier_chooser()
+    if chooser is not None:
+        kwargs.update(chooser=chooser, via="cli", **extra)
+    mode = _framework_mode(ctx)
+    if mode != "private":
+        kwargs["mode"] = mode
+    if "via" in kwargs and "audit" not in kwargs:
+        kwargs.pop("via")   # scan_device takes its own via= and audit_factory=
+    return kwargs
+
+
 def _tier_chooser():
     """The person's questions at the terminal for a board that cannot take the root-owned key line
     (remote/pairing.py TierChooser): the choices with numbers, "password" (no key) the default; the plan of the switch
@@ -6352,10 +6367,8 @@ def _open_device(state_dir: Path, device_id: str, host: str, port: int, user: st
     try:   # the shared step records the board's contacts for Mojo in `state_dir`
         client, key = person_steps.connect_stored(state_dir, device_id, host, port, user, password, step=step,
                                                   on_event=lines, signer=_board_signer(ctx),
-                                                  chooser=_tier_chooser() if password else None,
-                                                  mode=_framework_mode(ctx),
-                                                  audit=(lambda: _device_audit(ctx, state_dir)) if password else None,
-                                                  via="cli")
+                                                  **(_tier_kwargs(ctx, audit=lambda: _device_audit(ctx, state_dir))
+                                                     if password else {}))
     except person_steps.BoardStepError as e:
         if e.kind in ("unreachable", "host_key_changed") and e.reason:
             _print_reason(ctx, e.reason, host, port)
