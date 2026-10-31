@@ -227,8 +227,10 @@ parts move only when a measurement shows a gain (maintainer decision of 2026-10-
     many windows are still English only.
   - **A QEMU smoke test of cross builds in CI**, never on your computer. Why: a broken cross build is found before it
     reaches a board.
-  - **An "edit all files" step in the module wizard**, with a diff and the checks run again. Why: vendor paths and
-    flags can be finished before the module is saved.
+  - **An "edit all files" step in the module wizard**, with a diff and the checks run again: the stage modules,
+    `target.yml` (with its `stages:` slots) and the Dockerfile. The stage runner is never among them: it is the
+    framework's runtime layer, the same for every target. Why: vendor paths and flags can be finished before the
+    module is saved.
   - **A history of healing fixes** with their success rate in Mojo; a fix is never applied by itself. Why: it shows
     which fixes really work.
   - **A purpose field** (chat, code, summaries, embeddings) for the quantization recommendation. Why: the best type

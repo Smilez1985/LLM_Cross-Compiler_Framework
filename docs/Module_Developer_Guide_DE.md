@@ -41,11 +41,11 @@ Hardware (oder ihre technischen Daten).
 3. **Image-Build.** Für jeden Build stellt die `BuildEngine` einen Build-Kontext zusammen (`modules/` und
    `scripts/` des Targets, das gemeinsame `entrypoint.sh` als `docker/entrypoint.sh` und das Dockerfile) und baut
    das Image `llm-framework/<Target>:<Build-ID>`. Dieser Schritt hat Netzwerk.
-4. **Stufen.** Zuerst wird das Modell auf dem Host bereitgestellt. Dann läuft `modules/build.sh`, der Stage-Runner,
-   in abgeschotteten Containern ohne Netzwerk: einmal mit `JOB_TYPE=imatrix`, wenn für GGUF eine Importance-Matrix
+4. **Stufen.** Zuerst wird das Modell auf dem Host bereitgestellt. Dann läuft der Stage-Runner des Frameworks (die
+   Laufzeit-Schicht, schreibgeschützt unter `/llmcf` eingehängt) in abgeschotteten Containern ohne Netzwerk: einmal mit `JOB_TYPE=imatrix`, wenn für GGUF eine Importance-Matrix
    gewünscht ist, dann mit `JOB_TYPE=build`. Er führt die vier Stufenmodule des Targets in dieser Reihenfolge aus:
-   `source`, `config`, `convert` und `target` ([Abschnitt 6](#6-die-stufen-des-builds)); der imatrix-Auftrag endet
-   nach `convert`.
+   `source`, `config`, `convert` und `target`, mit den Modulen, die `target.yml` in ihren `stages:`-Plätzen nennt
+   ([Abschnitt 6](#6-die-stufen-des-builds)); der imatrix-Auftrag endet nach `convert`.
 5. **Ergebnisse.** Dateien, die die Stufen in den Ausgabeordner schreiben, werden nach `output/` kopiert. Die Engine
    ergänzt `build_info.json` um Größe und SHA256-Hash jeder Modelldatei und schreibt `Model_Card.md` und ein ZIP.
    Das Deployment findet Builds über dieses Manifest.
@@ -57,7 +57,6 @@ targets/Rockchip/
 ├── target.yml           Metadaten und Capabilities
 ├── dockerfile           Build-Umgebung („Dockerfile“ geht ebenso)
 ├── modules/
-│   ├── build.sh           der Stage-Runner: der Einstieg jedes Stufen-Containers
 │   ├── source_module.sh   1. source: die Quellen der Werkzeuge im Image
 │   ├── config_module.sh   2. config: Prüfung des Auftrags und der Build-Plan
 │   ├── convert_module.sh  3. convert: die Umwandlung des Modells
@@ -75,9 +74,10 @@ targets/Rockchip/
 | Block `capabilities:` in `target.yml` | dringend empfohlen; Pflicht, um das Target zu teilen | Ohne ihn können GUI und CLI keine Einstellungen prüfen, die MCP-Tools und Ditto keine Builds für das Target starten, `llm-cli mojo` warnt, und das Target lässt sich nicht als Community-Paket exportieren oder installieren. |
 | `Dockerfile` oder `dockerfile` | ja | Das Image, in dem alle Stufen laufen. |
 | `Dockerfile.gpu` | optional | Für Builds mit durchgereichter GPU (`llm-cli build start --gpu` oder „Use Host GPU for Build Process“ in der GUI, unter Linux standardmäßig angehakt); ohne diese Datei wird das normale Dockerfile genutzt. |
-| `modules/build.sh` | ja | Der Stage-Runner; läuft in jedem Stufen-Container als `/app/modules/build.sh`. Übernimm ihn unverändert aus der Vorlage. |
+| Block `stages:` in `target.yml` | optional | Weitere Stufenmodule in drei festen Plätzen: vor convert, zwischen convert und target, nach target ([Abschnitt 6](#6-die-stufen-des-builds)). |
+| `modules/build.sh`, `modules/stage_user.sh` | nein | Nicht benutzt: Der Stage-Runner und der Helfer des Stufen-Kontos sind die Laufzeit-Schicht des Frameworks, für jedes Target dieselbe. Ein Target oder Paket, das sie mitbringt, bekommt einen klaren Hinweis, und sie werden übergangen. |
 | `modules/source_module.sh`, `config_module.sh`, `convert_module.sh`, `target_module.sh` | ja | Die vier Stufen des Builds ([Abschnitt 6](#6-die-stufen-des-builds)). |
-| `modules/rotate_module.sh` | optional | Ein Rotationsschritt zwischen convert und target (Roadmap); läuft nur, wenn die Datei da ist. |
+| `modules/rotate_module.sh` | optional | Ein Rotationsschritt zwischen convert und target (Roadmap); läuft, wenn der Block `stages:` `rotate` in `between_convert_and_target` nennt (ein Target ohne den Block: wenn die Datei da ist). |
 | `modules/benchmark_module.sh` | optional | Läuft in keinem Build: Es misst den Build-Rechner, und ein Modell für ein Board wird auf dem Board gemessen. |
 | `scripts/` | optional | Hilfsskripte; werden neben `modules/` ins Image kopiert. |
 
@@ -172,7 +172,7 @@ Vorlage ausgefüllt wird:
 
 Der Generator schreibt `target.yml` (Metadaten, `supported_boards`, `docker`, `modules`, `optimization_profiles`,
 `requirements`, einen Block `capabilities:` und einen Block `runtime:`), ein `Dockerfile` (aus dem `Dockerfile.gpu` der Vorlage, wenn das
-SDK „cuda“ oder das Basis-Image „nvidia“ enthält), den Stage-Runner `modules/build.sh`, die vier Stufenmodule
+SDK „cuda“ oder das Basis-Image „nvidia“ enthält), einen leeren Block `stages:` (keinen Stage-Runner: der ist der des Frameworks), die vier Stufenmodule
 `modules/source_module.sh`, `config_module.sh`, `convert_module.sh` und `target_module.sh` (mit dem Namen des Moduls,
 seiner Architektur und seinem Basis-Image in ihren Köpfen), `modules/rkllm_module.sh`, `modules/rknn_module.sh`,
 `modules/benchmark_module.sh`, `generate_profile.sh` und die `scripts/` der Vorlage. Die Felder des Assistenten
@@ -284,8 +284,8 @@ Das Ergebnis ist ein **Gerüst**, noch kein funktionierendes Target:
 - **Der Capabilities-Block ist ein Ausgangspunkt.** Ergänze deine echten Boards, weitere Formate, Quantisierungen je
   Board und den Bedarf an Kalibrierdaten ([Abschnitt 4](#4-targetyml-und-der-capabilities-block)), und halte den
   Block im Einklang mit `config_module.sh` (Namen von Format, Board und Typ).
-- **Die Stufen der Vorlage folgen den Rockchip-Stufen** (`targets/Rockchip/modules/`), und ihr `build.sh` ist
-  derselbe Stage-Runner: `convert_hf_to_gguf.py` und `build/bin/llama-quantize` / `llama-imatrix` von llama.cpp unter
+- **Die Stufen der Vorlage folgen den Rockchip-Stufen** (`targets/Rockchip/modules/`):
+  `convert_hf_to_gguf.py` und `build/bin/llama-quantize` / `llama-imatrix` von llama.cpp unter
   `LLAMA_CPP_PATH` (`/usr/src/llama.cpp`), die F16-Zwischendatei im Arbeitsordner (`BUILD_SCRATCH_DIR`, nie `/tmp`),
   dieselben GGUF-Typlisten und Regeln für die Importance-Matrix sowie der Auftrag `imatrix`. Die Zweige deines
   Quantisierungsblocks laufen zuerst, in der Stufe convert; ein Zweig kann `build_gguf <TYP>` oder
@@ -333,10 +333,10 @@ gleich (`tests/test_module_flags.py` lässt beide über `tests/data/cmake_flag_v
   `module_flags_undecided`), außer die Person hat eine Entscheidung gemerkt. Ohne Terminal gibt `--module-flags allow`
   oder `--module-flags standard` die Entscheidung.
 - **Frischer Cache, keine Toolchain aus der Umgebung:** Jeder cmake-Aufruf der eigenen Skripte eines Moduls (das
-  `cmake` von build.sh) startet einen Configure-Lauf mit `--fresh` (wenn das CMake des Images es kennt), so dass eine
+  `cmake`, das `stage_env.sh` der Laufzeit-Schicht prüft) startet einen Configure-Lauf mit `--fresh` (wenn das CMake des Images es kennt), so dass eine
   in einem Build-Ordner liegende `CMakeCache.txt` nichts setzt, und läuft ohne eine Umgebungsvariable
   `CMAKE_TOOLCHAIN_FILE`, außer der Build-Plan hat genau diese Datei gesetzt. Die Ordnerprüfung liest die Flags, wie
-  sie geschrieben sind: Ein Wort, das die Shell erweitert (`$X`), ist eine Grenze dieser Prüfung; das cmake von build.sh
+  sie geschrieben sind: Ein Wort, das die Shell erweitert (`$X`), ist eine Grenze dieser Prüfung; das geprüfte cmake
   und die letzte Prüfung des Pakets sehen die erweiterten Wörter.
 - **Download-Optionen mit einer geholten Abhängigkeit:** `-DLLAMA_BUILD_BORINGSSL=ON`, `-DLLAMA_BUILD_LIBRESSL=ON` und
   `-DGGML_CPU_KLEIDIAI=ON` würden llama.cpp beim Bauen BoringSSL, LibreSSL oder KleidiAI herunterladen lassen. In den
@@ -474,7 +474,7 @@ Probe-Datei im Build-Reiter ein passendes Target vorzuschlagen, und für Geräte
 Deployment-Pakets mit Docker-Images. Der Block `runtime:` erzeugter Module
 ([Abschnitt 3.4](#34-was-der-generator-schreibt-und-was-du-ergänzt)) zeichnet den Plan des Rezepts auf und wird gegen
 sein Schema geprüft, aber kein Build liest ihn. Die übrigen Blöcke in der Rockchip-`target.yml` (`supported_boards`,
-`docker`, `modules`, `requirements` usw.) sind beschreibend: `modules` führt den Stage-Runner, die vier Stufenmodule
+`docker`, `modules`, `requirements` usw.) sind beschreibend: `modules` führt die vier Stufenmodule
 und die Format-Helfer auf, und `docker.build_args` wiederholt nur den Pin für Builds außerhalb des Frameworks.
 
 **`optimization_profiles`** (Schema `OptimizationProfile` in `orchestrator/schemas/targets.py`, gelesen von
@@ -548,7 +548,9 @@ einem anderen Computer.
 
 Was das Image bieten muss (siehe `targets/Rockchip/dockerfile`):
 
-- `/app/modules/build.sh` und die Stufenmodule daneben, ausführbar (`COPY modules/ ./modules/` und `chmod +x`).
+- Die Stufenmodule in `/app/modules`, ausführbar (`COPY modules/ ./modules/` und `chmod +x`). Das Image braucht
+  keinen Stage-Runner: Das Framework hängt seine Laufzeit-Schicht (Runner, Helfer des Stufen-Kontos, eine statische
+  busybox und setpriv) schreibgeschützt unter `/llmcf` ein und startet jeden Stufen-Container damit.
 - Den gemeinsamen Entrypoint als `ENTRYPOINT ["/entrypoint.sh"]` und einen Benutzer `llmbuilder`; startet ein
   Container als root (alter Modus ohne Sandbox), bildet der Entrypoint ihn auf den Host-Benutzer ab und wechselt zu
   `llmbuilder`.
@@ -685,9 +687,14 @@ Image offline gefunden. Die mitgelieferten Dockerfiles und die Vorlagen tun all 
 
 ## 6. Die Stufen des Builds
 
-Ein Build besteht aus vier Stufenmodulen in `modules/`. `modules/build.sh`, der **Stage-Runner**, ist der Einstieg
-jedes Stufen-Containers (`/app/modules/build.sh`, in der Sandbox aus [Abschnitt 7](#7-regeln-der-sandbox)); er
-führt die Stufen in dieser Reihenfolge aus und tut sonst nichts (Entscheidung U9 des Maintainers). Der Kopf jedes
+Ein Build besteht aus vier Stufenmodulen in `modules/` und den Modulen, die `target.yml` in ihren `stages:`-Plätzen
+nennt. Der **Stage-Runner** gehört dem Framework, nicht deinem Target: Die Laufzeit-Schicht
+(`orchestrator/runtime_layer/`, schreibgeschützt unter `/llmcf` in jedem Stufen-Container eingehängt, in der Sandbox
+aus [Abschnitt 7](#7-regeln-der-sandbox)) führt die Stufen in dieser Reihenfolge aus und tut sonst nichts
+(Entscheidung U9 des Maintainers). Sie läuft auf der eigenen statischen busybox der Schicht und braucht also keine
+Shell und kein Werkzeug deines Images. Ein `modules/build.sh` oder `modules/stage_user.sh`, das ein Target oder Paket
+mitbringt, wird mit einem klaren Hinweis übergangen: Deine Arbeit sind die Stufenmodule, `target.yml` und das
+Dockerfile. Der Kopf jedes
 Moduls sagt, in welchem Image es läuft, für welches System sein Ergebnis ist und was seine Stufe tut; halte diese
 Köpfe wahr, wenn du eine Stufe änderst.
 
@@ -697,16 +704,32 @@ Köpfe wahr, wenn du eine Stufe änderst.
 | 2. config | `config_module.sh` | Liest den Auftrag aus der Umgebung, vereinheitlicht die Namen von Format, Board und Typ, lehnt ab, was das Target nicht bauen kann, und schreibt den Build-Plan `build_config.sh` in den Stufenordner. Mit einem Hardware-Profil plant sie außerdem das Board (Toolchain und Flags) und prüft diesen Plan, bevor sie ihn behält ([Abschnitt 10](#10-was-die-stufenmodule-aus-version-1x-behalten-haben)). |
 | 3. convert | `convert_module.sh` | Wandelt das Modell um: GGUF-Typen, die der Konverter selbst schreibt, landen direkt im Ausgabeordner; jeder andere Typ wird zu einer F16-Zwischendatei im Arbeitsordner für die Stufe target. RKLLM und RKNN führen ihre Format-Helfer `rkllm_module.sh` und `rknn_module.sh` aus. Im Auftrag `imatrix` berechnet sie die Importance-Matrix. Um jede Umwandlung herum erkennt sie das Format der Eingabe, prüft die Eingabe und was der Konverter geschrieben hat, führt einen kurzen Funktionstest aus und hält eine Statistik fest ([Abschnitt 6.5](#65-die-prüfungen-der-stufe-convert)). |
 | (rotate) | `rotate_module.sh` | Optionaler Haken zwischen convert und target für eine Rotation wie SpinQuant oder QuaRot (Roadmap): läuft nur, wenn das Target diese Datei hat; mitgeliefert wird keine. Sie darf die Zwischendatei in voller Genauigkeit ändern, bevor sie quantisiert wird. |
-| 4. target | `target_module.sh` | Quantisiert, was die Stufe convert für sie hinterlassen hat (`quantize_jobs.sh`), entfernt die Zwischendatei, schreibt `build_info.json` und listet die Ergebnisse auf. Für einen GGUF-Build mit Hardware-Profil und mit `build.sh --package` macht sie außerdem das Paket für das Board ([Abschnitt 10](#10-was-die-stufenmodule-aus-version-1x-behalten-haben)). |
+| 4. target | `target_module.sh` | Quantisiert, was die Stufe convert für sie hinterlassen hat (`quantize_jobs.sh`), entfernt die Zwischendatei, schreibt `build_info.json` und listet die Ergebnisse auf. Für einen GGUF-Build mit Hardware-Profil und mit `--package` macht sie außerdem das Paket für das Board ([Abschnitt 10](#10-was-die-stufenmodule-aus-version-1x-behalten-haben)). |
 
-Der Auftrag `imatrix` führt source, config und convert aus; der Auftrag `build` alle Stufen. Ein von Hand
-gestartetes Stufenmodul (`bash modules/convert_module.sh`) führt über den Runner den Build bis zu seiner Stufe aus;
-`build.sh --to STUFE` tut dasselbe (ein von Hand gestartetes `target_module.sh` fragt außerdem nach dem Paket:
-`build.sh --to target --package`). Eine spätere Stufe darf die Funktionen einer früheren nutzen, indem sie deren
+Der Auftrag `imatrix` führt source, config, den Platz `before_convert` und convert aus; der Auftrag `build` alle
+Stufen. Ein von Hand gestartetes Stufenmodul (`bash modules/convert_module.sh`) führt über den Stage-Runner des
+Frameworks (`/llmcf/runner.sh` in einem Container, `orchestrator/runtime_layer/runner.sh` in einem Checkout) den
+Build bis zu seiner Stufe aus; dessen `--to STUFE` tut dasselbe (ein von Hand gestartetes `target_module.sh` fragt
+außerdem nach dem Paket: `runner.sh --to target --package`). Eine spätere Stufe darf die Funktionen einer früheren nutzen, indem sie deren
 Modul einliest (`config_module.sh` und `source_module.sh` führen ihr `main` nur in ihrer eigenen Stufe aus).
 `benchmark_module.sh` ist keine Stufe: Es würde die CPU des Build-Rechners messen, und ein Modell für ein Board wird
 auf dem Board gemessen (`llm-cli device runtime verify --bench-model` oder **Boards > Boards and Devices... >
 Verify...**).
+
+**Plätze.** `target.yml` darf weitere Stufenmodule in drei festen Plätzen nennen:
+
+```yaml
+stages:
+  before_convert: []
+  between_convert_and_target: [rotate]
+  after_target: []
+```
+
+Jeder Name ist ein Modul `modules/<name>_module.sh`: Kleinbuchstaben, Ziffern und `_`, höchstens 32 Zeichen, keine
+der vier Stufen, nur in einem Platz; `benchmark` wird abgelehnt. Ein Target ohne den Block behält den Platz rotate
+(`rotate_module.sh`, wenn die Datei da ist). Die Ordnerprüfung (`validate_target_folder`, auch die des Wizards und
+eines Pakets) nennt einen falschen Platz, einen falschen Namen und eine fehlende Datei, und die Build-Engine gibt
+die Reihenfolge an den Runner.
 
 **Fortsetzen.** Wenn eine Stufe fertig ist (Exit-Code 0), schreibt der Runner eine Marke nach
 `$BUILD_SCRATCH_DIR/stages/<Auftrag>/` mit einer Prüfsumme der Eingaben der Stufe und der Größe jeder Datei, die die
@@ -716,7 +739,7 @@ Kalibrierdatensatz, Hardware-Profil, auch das, das die Stufe config liest, wenn 
 die Werkzeuge (der llama.cpp-Pin des Images, die SDK-Pfade) und der SHA-256
 jeder Datei in `modules/` und `scripts/`. Erneut auf demselben Arbeitsordner gestartet, überspringt der Runner jede
 Stufe, deren Marke dieselbe Prüfsumme hat und deren Dateien noch da sind; läuft eine Stufe erneut, laufen auch alle
-späteren erneut. Eine Stufe, die scheitert, schreibt keine Marke. `build.sh --fresh` übergeht die Marken.
+späteren erneut. Eine Stufe, die scheitert, schreibt keine Marke. `--fresh` übergeht die Marken.
 
 **Schutz vor Schleifen.** Eine Stufe, die mit denselben Eingaben gestartet und von außen angehalten wurde, bevor sie
 fertig war (ihr Container gestoppt, der Build fortgesetzt, immer wieder), ist eine Schleife, kein langer Build. Der
@@ -727,24 +750,23 @@ zählt nicht: Bevor es den Container stoppt, schreibt das Framework die Notiz `s
 gibt den Start der Stufe zurück, die gerade lief (seine eigene Notiz `stages/<Job>/running`). Ein Stopp von außen ohne
 die Notiz zählt weiter.
 
-**Abschluss-Eintrag.** Als allerletztes schreibt der Runner einen Abschluss-Eintrag, `stages/<Job>/build.end` (in eine
-temporäre Datei, dann an seinen Platz verschoben), je Zeile `Schlüssel Wert`: `status done` oder `status failed`,
-`exit N`, `stage NAME` (die fehlgeschlagene Stufe; bei done die letzte), `job build|imatrix`, `inputs DIGEST` und
-`time` (UTC). `done` wird erst nach der Marke der letzten Stufe und „Done.“ geschrieben; eine fehlgeschlagene Stufe,
-eine abgelehnte Schleife und jedes andere Ende (`set -e`, ein Signal) schreiben `failed` über denselben Schreiber
-(ein EXIT-Trap). Ein Eintrag eines früheren Laufs wird beim Start entfernt. Die Build-Engine liest ihn aus dem
-eingehängten Arbeitsordner: Ein Build endet, weil sein Eintrag fertig sagt, nie weil danach eine Uhr abläuft, und ein
-Container, der ohne den Eintrag mit 0 endet, ist ein fehlgeschlagener Build. Nur der Runner schreibt den Eintrag, nie
-ein Stufen-Modul: Bevor der Container startet, legt die Build-Engine einen Schlüssel für diesen einen Lauf in
-`stages/<Job>/end.key`; der Runner liest ihn in eine Variable, die er nie exportiert, entfernt die Datei vor der ersten
-Stufe und versiegelt seinen Eintrag damit (eine letzte Zeile `seal SHA256`: SHA-256 über den Schlüssel, die sechs
-Zeilen darüber und wieder den Schlüssel; `seal -` für einen von Hand gestarteten Lauf). Der Build ist nur fertig, wenn
-der Exit-Status des Containers 0 ist, der Eintrag das Siegel des Schlüssels dieses Laufs trägt, fertig sagt und die
-letzte Stufe des Jobs nennt (`target`, für die Importance-Matrix `convert`); ein Eintrag, den ein Modul schrieb, ein
-Eintrag „fertig“ mit einem anderen Exit-Status oder einer vor der letzten Stufe ist ein fehlgeschlagener Build mit
-einem klaren Grund. Ein Modul-Skript fasst `build.end` und `end.key` also nie an. Ein Paket, das das `build.sh` der
-Vorlage (oder das vom Modulgenerator geschriebene) behält, hat das umsonst; ein Paket mit eigenem Runner muss als
-letzten Schritt denselben versiegelten Eintrag schreiben.
+**Abschluss-Eintrag.** Als allerletztes schreibt der Runner einen Abschluss-Eintrag, `build.end` (in eine temporäre
+Datei, dann an seinen Platz verschoben), je Zeile `Schlüssel Wert`: `status done` oder `status failed`, `exit N`,
+`stage NAME` (die fehlgeschlagene Stufe; bei done die letzte), `job build|imatrix`, `inputs DIGEST`, `time` (UTC) und
+`end protected|unprotected`. `done` wird erst nach der Marke der letzten Stufe und „Done.“ geschrieben; eine
+fehlgeschlagene Stufe, eine abgelehnte Schleife und jedes andere Ende (`set -e`, ein Signal) schreiben `failed` über
+denselben Schreiber (ein EXIT-Trap). Der Eintrag kommt in den **Abschluss-Ordner** des Builds, den die Build-Engine
+unter `/llmcf-end` einhängt: ein eigener Ordner, der dem Konto des Runners gehört und dem Stufen-Konto verschlossen
+ist (die Vorprüfung des Runners prüft das), so dass kein Stufenmodul dort schreiben kann. Einen Schlüssel gibt es
+nicht. Ein Build endet, weil sein Eintrag fertig sagt, nie weil danach eine Uhr abläuft. Er ist nur fertig, wenn der
+Exit-Status des Containers 0 ist, seine Inspect-Prüfung besteht und der Eintrag im Abschluss-Ordner, der dem Runner
+gehört, fertig sagt und die letzte Stufe des Jobs nennt (für die Importance-Matrix `convert`); ein Eintrag an einem
+anderen Ort, ein Eintrag „fertig“ mit einem anderen Exit-Status oder einer vor der letzten Stufe ist ein
+fehlgeschlagener Build mit einem klaren Grund. Auf einem Host, dessen Mounts weder Besitzer noch Rechte behalten
+(Docker Desktop unter Windows oder macOS, oder mit ausgeschalteter Build-Sandbox), wird der Build als
+„Abschluss-Ordner ungeschützt“ markiert und zählt nur nach seinem Exit-Status und seiner Inspect-Prüfung als fertig.
+Ein von Hand gestarteter Lauf schreibt `stages/<Job>/build.end` in den Arbeitsordner, dem ein Build nie traut. Ein
+Modul-Skript fasst `build.end` also nie an, und ein Target braucht dafür nichts.
 
 **Fortschritt.** Der Runner schreibt eine Zeile, wenn eine Stufe beginnt, endet, fortgesetzt wird oder scheitert:
 `=== Stage 3/4: convert ===`, `=== Stage 3/4: convert done in 41 s ===`, `=== Stage 1/4: source resumed ===`,
@@ -782,7 +804,7 @@ Was der Stage-Runner jeder Stufe mitgibt:
 | `STAGE_DIR` | der Stufenordner `$BUILD_SCRATCH_DIR/stages/<Auftrag>/`: die Marken, der Build-Plan `build_config.sh` und was eine Stufe der nächsten übergibt (`quantize_jobs.sh`, `sdk_environment.sh`) |
 | `MODULES_DIR` | der Ordner der Stufenmodule (`/app/modules` im Image) |
 | `STAGE_RUNNER`, `STAGE_NAME` | gesetzt, solange der Runner eine Stufe ausführt; ein Modul, das ohne `STAGE_RUNNER` startet, übergibt an den Runner |
-| `PACKAGE_REQUESTED` | `1`, wenn `build.sh --package` die Stufe target um das Paket für das Board gebeten hat (auch ohne Hardware-Profil), sonst `0`; eine Eingabe nur der Stufe target |
+| `PACKAGE_REQUESTED` | `1`, wenn `--package` die Stufe target um das Paket für das Board gebeten hat (auch ohne Hardware-Profil), sonst `0`; eine Eingabe nur der Stufe target |
 | `stage_output DATEI` | eine Shell-Funktion: nennt eine Datei, die die Stufe geschrieben hat und die das Fortsetzen prüft |
 
 Einbindungen:
@@ -817,7 +839,8 @@ Einbindungen:
 - Beginne jedes Modul mit `set -euo pipefail` und lege seine Arbeit in `main`, das das Modul nur aufruft, wenn es
   selbst gestartet wurde (`if [[ "${BASH_SOURCE[0]}" == "${0}" ]]`): Dann kann eine spätere Stufe es für seine
   Funktionen einlesen.
-- Lass `build.sh` so, wie die Vorlage es hat; leg die Arbeit in die Stufe, zu der sie gehört, und halte den Kopf
+- Schreib keinen eigenen Stage-Runner (der des Frameworks führt jeden Build aus); leg die Arbeit in die Stufe, zu
+  der sie gehört, oder in ein Modul in einem `stages:`-Platz, und halte den Kopf
   jedes Moduls (Image, Zielsystem, was die Stufe tut) wahr.
 - In der Stufe config: Schreib Format und Board klein, vereinheitliche die Quantisierung und nimm genau die Aliasse
   an, die du in den Capabilities angegeben hast. Lehne nicht unterstützte Werte mit einer Meldung ab, die das
@@ -833,7 +856,7 @@ Einbindungen:
 ### 6.4 Beispiel
 
 Die Stufen convert und target eines minimalen GGUF-Targets für die Capabilities aus
-[Abschnitt 4.2](#42-capabilities); `build.sh` und die Stufen source und config kommen unverändert aus der Vorlage
+[Abschnitt 4.2](#42-capabilities); die Stufen source und config kommen unverändert aus der Vorlage
 (die Stufe config schreibt `QUANT_TYPE` und die Pfade in den Build-Plan). Sie setzen voraus, dass das Image llama.cpp
 in `/usr/src/llama.cpp` mit den Werkzeugen in `build/bin` enthält, wie das Rockchip-Image. Beide bestehen `bash -n`
 und ShellCheck; für F16/BF16-Ausgabe, die Importance-Matrix, Aliasse und weitere Prüfungen siehe
@@ -855,8 +878,12 @@ main() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    # Started by hand: the build up to this stage, through the stage runner.
-    [ -n "${STAGE_RUNNER:-}" ] || exec bash "$(dirname "${BASH_SOURCE[0]}")/build.sh" --to convert "$@"
+    # Started by hand: the build up to this stage, through the framework's stage runner.
+    if [ -z "${STAGE_RUNNER:-}" ]; then
+        layer="${LLMCF_LAYER:-/llmcf}"
+        [ -f "$layer/runner.sh" ] || layer="$(dirname "${BASH_SOURCE[0]}")/../../../orchestrator/runtime_layer"
+        LLMCF_MODULES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" exec sh "$layer/runner.sh" --to convert "$@"
+    fi
     main "$@"
 fi
 ```
@@ -879,7 +906,11 @@ main() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    [ -n "${STAGE_RUNNER:-}" ] || exec bash "$(dirname "${BASH_SOURCE[0]}")/build.sh" --to target "$@"
+    if [ -z "${STAGE_RUNNER:-}" ]; then
+        layer="${LLMCF_LAYER:-/llmcf}"
+        [ -f "$layer/runner.sh" ] || layer="$(dirname "${BASH_SOURCE[0]}")/../../../orchestrator/runtime_layer"
+        LLMCF_MODULES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" exec sh "$layer/runner.sh" --to target "$@"
+    fi
     main "$@"
 fi
 ```
@@ -919,8 +950,9 @@ Umwandlungsstufen führen Modellwerkzeuge und den Build-Code des Targets aus, de
 der Vorgabe `build_sandbox: true` läuft jeder Stufen-Container:
 
 - unter dem **Stufen-Konto** `llmstage` des Images (uid und gid 64010), nicht als root und nicht als Stufen-Runner:
-  Der Runner (`build.sh`, der Host-Benutzer, 1000:1000, wenn der Host-Benutzer root ist oder unter Windows) startet
-  jedes Modul über `run_as_stage` (`modules/stage_user.sh`) ohne jede Capability, mit den Gruppen des Runners und
+  Der Runner (`runner.sh` der Laufzeit-Schicht, als Host-Benutzer, 1000:1000, wenn der Host-Benutzer root ist oder
+  unter Windows, nur mit CAP_SETUID und CAP_SETGID) startet jedes Modul über `run_as_stage` (`stage_user.sh` der
+  Schicht) ohne jede Capability, mit den Gruppen des Runners und
   umask 0002;
 - **ohne Netzwerk** (`network_mode: none`); Modell und Datensatz wurden auf dem Host bereitgestellt;
 - ohne Linux-Capabilities und mit `no-new-privileges`;
@@ -939,16 +971,12 @@ Importance-Matrix `/build-cache/imatrix`. Es darf dort Dateien anlegen, aber die
 die Startzähler, den Abschluss-Eintrag) weder ändern noch verschieben oder entfernen. Was es liest (das Modell, den
 Datensatz, die Importance-Matrix, das Hardware-Profil), muss für die Gruppe der Person lesbar sein. Der Runner
 prüft das alles vor dem ersten Modul und verweigert den Build mit einem klaren Grund (etwa `inputs` für eine
-Modelldatei, die nur ihr Besitzer lesen darf). Starte eine Stufe nur über das `build.sh` der Vorlage. Ein Target,
-das vor 3.3.0 aus der Vorlage entstand, hat ein `build.sh` ohne Stufen-Konto: Die Build-Sandbox verweigert es, bevor
-sein Container startet; kopiere `modules/build.sh` aus `targets/_template`.
+Modelldatei, die nur ihr Besitzer lesen darf). Jeder Build startet seine
+Stufen über die Laufzeit-Schicht; ein `build.sh` eines Targets von vor 3.3.0 läuft nicht (ein klarer Hinweis sagt es).
 
-`modules/stage_user.sh` (`run_as_stage`, `stage_preflight`) gehört dem Framework, nicht deinem Target: Jeder
-Build-Kontext bekommt die eigene Kopie des Frameworks, egal was dein Target unter diesem Namen hat (eine geänderte oder
-fehlende Kopie wird ersetzt, so dass ein Build nie mit einer anderen läuft). Behalte die Kopie der Vorlage in deinem
-Ordner nur für Läufe von Hand. Dein `build.sh` muss jeden Teil davon lassen, wie er ist: Ein Runner, der eine seiner
-Funktionen (oder `setpriv`) neu definiert oder eine seiner Variablen ändert (`STAGE_ISOLATION`, `STAGE_UID`, ...), wird
-in der Build-Sandbox verweigert, mit dem Namen dieses Teils.
+Der Helfer des Stufen-Kontos (`run_as_stage`, `stage_preflight`) ist `stage_user.sh` der Laufzeit-Schicht,
+schreibgeschützt unter `/llmcf` mit dem Runner eingehängt: Ein Target hat keine eigene Kopie, und ein
+`modules/stage_user.sh`, das ein Target noch hat (die Kopie früherer Versionen), läuft in keinem Build.
 
 Die Dateien deiner Module teilen sich eine Gruppe: Runner und Stufen-Konto teilen sich die Gruppe des Runners (auf dem
 Host deine eigene), und nach jedem Modul, auch nach einem Fehler, gibt das Stufen-Konto, was es in den Ordnern oben
@@ -1035,7 +1063,7 @@ seiner Datei und bei Skripten mit seiner Zeile gemeldet.
 | Festgelegte Images | In jeder Datei, deren Name in beliebiger Schreibweise mit `dockerfile` beginnt (`Dockerfile`, `dockerfile`, `Dockerfile.gpu`), muss jedes Image, das `FROM`, `COPY --from=` oder `RUN --mount=...,from=` verwendet, per Digest festgelegt sein (`name@sha256:` und 64 Hex-Ziffern). Ausgenommen sind offizielle Basis-Images mit Tag (Namen, die mit `debian:`, `ubuntu:`, `rocm/dev-ubuntu-`, `rocm/rocm-terminal:` oder `python:` beginnen), eine frühere Build-Stufe (`FROM ... AS builder`, danach `COPY --from=builder`) und eine Stufennummer (`--from=0`). Die `nvidia/cuda`-Images von NVIDIA brauchen einen Digest. Kommentarzeilen werden übersprungen. Eine Variable wie `FROM ${BASE_IMAGE}` wird abgelehnt, weil sie keine Image-Angabe ist. |
 | Kein vorgebautes llama.cpp | Das Framework teilt Rezepte, keine Binärdateien ([Abschnitt 5.1](#51-llamacpp-im-image-rezepte-keine-binärdateien)). In Dockerfiles: kein Image, dessen Name `llama.cpp`, `llama-cpp`, `llamacpp` oder `llama-server` enthält, und keines der früheren Laufzeit-Images des Frameworks (`ghcr.io/smilez1985/llm-runtime`, `ghcr.io/llm-framework/builder`, `ghcr.io/llm-framework/inference-node`), auch nicht per Digest festgelegt; kein `COPY --from=` (oder `RUN --mount=...,from=`) von llama.cpp-Programmen aus einem anderen Image, auch nicht über eine Build-Stufe, die nur dieses Image nennt (`FROM acme/tools@sha256:... AS tools`, dann `COPY --from=tools /usr/bin/llama-server ...`). Eine Stufe, deren `RUN`-Schritt mit CMake kompiliert oder die die Programme aus einer solchen Stufe kopiert hat, baut sie aus dem Quelltext. In Dockerfiles, Skripten (`.sh`, `.py`, `.ps1`, `.bat`, `.cmd` und jede Datei, deren erste Zeile mit `#!` beginnt) und YAML-Dateien: kein Download eines llama.cpp-Releases (`.../llama.cpp/releases/download/...`, Namen von Release-Archiven wie `llama-b11429-bin-...`), kein Download eines llama.cpp-Programms (`curl`, `wget`, `ADD` und Ähnliches mit `llama-server`, `llama-quantize`, `libllama` und den anderen Werkzeugnamen im selben Befehl; eine Pipeline wie `curl ... \| tar -x ... llama-server` ist ein Befehl), keine Paketquelle mit vorgebauten `llama-cpp-python`-Wheels und keine Installation eines llama.cpp-Pakets (`apt-get install llama.cpp`, `apk add`, `conda install` und andere). Kommentarzeilen werden übersprungen; der Wissens-Schnappschuss wird nicht geprüft. |
 | Shell-Sperrliste | Jede Zeile jeder `*.sh`-Datei, Kommentare eingeschlossen, außer die gleiche Zeile steht in der Datei der Vorlage mit demselben Pfad (für `modules/build.sh`: `targets/_template/modules/build.sh`). Abgelehnt werden: Downloads (`curl`, `wget`, `aria2c` und `fetch` als Wort, also auch `git fetch`), das Löschen von `/` (`rm -rf /`), `chmod 777`, `sudo`, `mkfs` und `dd if=`, der Docker-Socket oder `docker run`, `eval`, `source` oder `.` mit dem Ergebnis von `$(...)`, `sh -c "$(...)"` und Prozess-Substitution `<(...)`, außer als reine Eingabe (`done < <(grep ...)`). Downloads gehören festgelegt ins Dockerfile. |
-| Keine Download-Option von llama.cpp | Dieselben Skriptzeilen (jede Zeile, die nicht die der Vorlage ist): keine CMake-Option `-DNAME=WERT`, mit der llama.cpp beim Bauen etwas herunterladen oder `llama-server` Unterprozesse bekommen würde, nach der Regel des Build-Rezepts (`refused_option`): eine Option aus `NEVER_SET` mit beliebigem Wert, eine aus `DOWNLOAD_OPTIONS_OFF` oder `LLAMA_CURL` mit einem anderen Wert als `OFF`, `FETCHCONTENT_FULLY_DISCONNECTED` anders als `ON`, `LLAMA_SUBPROCESS` anders als `OFF`. Jede Schreibweise zählt, die die Shell cmake als solche Option übergibt: `-DNAME:TYP=WERT`, `-D NAME=WERT` (cmake liest `-D` und das nächste Wort als eine Option) und Anführungszeichen um das Wort, den Namen oder den Wert. Das deckt die CMake-Flags eines Moduls ab (`CMAKE_OPTIONS` in `modules/config_module.sh`), jeden `cmake`-Aufruf seiner Skripte und die Zeilen des Dockerfiles des Targets, die die Dockerfiles der Vorlage nicht haben. Beim Build prüft `build.sh` jeden `cmake`-Aufruf der Module noch einmal, mit den Wörtern, wie die Shell sie erweitert hat (`module_flag_problem --alone` in `target_module.sh`), und ein abgelehnter Aufruf startet cmake nicht. |
+| Keine Download-Option von llama.cpp | Dieselben Skriptzeilen (jede Zeile, die nicht die der Vorlage ist): keine CMake-Option `-DNAME=WERT`, mit der llama.cpp beim Bauen etwas herunterladen oder `llama-server` Unterprozesse bekommen würde, nach der Regel des Build-Rezepts (`refused_option`): eine Option aus `NEVER_SET` mit beliebigem Wert, eine aus `DOWNLOAD_OPTIONS_OFF` oder `LLAMA_CURL` mit einem anderen Wert als `OFF`, `FETCHCONTENT_FULLY_DISCONNECTED` anders als `ON`, `LLAMA_SUBPROCESS` anders als `OFF`. Jede Schreibweise zählt, die die Shell cmake als solche Option übergibt: `-DNAME:TYP=WERT`, `-D NAME=WERT` (cmake liest `-D` und das nächste Wort als eine Option) und Anführungszeichen um das Wort, den Namen oder den Wert. Das deckt die CMake-Flags eines Moduls ab (`CMAKE_OPTIONS` in `modules/config_module.sh`), jeden `cmake`-Aufruf seiner Skripte und die Zeilen des Dockerfiles des Targets, die die Dockerfiles der Vorlage nicht haben. Beim Build prüft die Laufzeit-Schicht (`stage_env.sh`) jeden `cmake`-Aufruf der Module noch einmal, mit den Wörtern, wie die Shell sie erweitert hat (`module_flag_problem --alone` in `target_module.sh`), und ein abgelehnter Aufruf startet cmake nicht. |
 | Shell-Syntax | Jede `*.sh`-Datei besteht `bash -n` (entfällt, wo bash nicht installiert ist). |
 | Nur Text | Keine Datei enthält ein NUL-Byte: Binärdateien werden abgelehnt. Beim Export muss außerdem jede Datei UTF-8-Text sein. |
 | Platzhalter | Keine Datei außer dem Wissens-Schnappschuss `knowledge/initial_knowledge.json` (gecrawlte Seiten) und seinen Lizenzdateien `knowledge/NOTICE` und `knowledge/LICENSES/` enthält einen Platzhalter der Vorlage (`[MODULE_NAME]`, `[Hardware-Familie]`, `[IHRE_ARCHITEKTUR]`, `[Hersteller]`, `[QUANTIZATION_LOGIC]`, `[CPU_FLAGS]`, `[CMAKE_FLAGS]`, `[SDK_SETUP_COMMANDS]`, `[PACKAGING_COMMANDS]`, `[ihr-target-name]`, `{packages_str}` oder `YYYY-MM-DD`), und kein Wert in `target.yml` enthält Text in eckigen Klammern wie `[Board Name 1]`. |
@@ -1090,7 +1118,7 @@ der Build nur einen einzelnen Verteiler `build.sh` auf, und die Skripte lagen be
 Maintainers sind sie wieder der Build, und die Arbeit des Verteilers liegt in der Stufe, zu der sie gehört. Ihre
 Funktionen aus 1.x sind geblieben:
 
-- **Hardware-Profil.** Mit einem Profil des Boards (`build.sh --hardware-config DATEI` oder das vierte Argument des
+- **Hardware-Profil.** Mit einem Profil des Boards (`--hardware-config DATEI` des Runners oder das vierte Argument des
   Entrypoint-Modus `pipeline`) erzeugt die Stufe config daraus die CMake-Toolchain und die Compiler-Flags für dieses
   Board (die der Vorlage mit den CPU- und CMake-Flags des Wizards), und die Stufe target eines GGUF-Builds
   cross-kompiliert außerdem `llama-cli` und `llama-server` aus den llama.cpp-Quellen des Images und packt sie mit dem
@@ -1149,7 +1177,7 @@ Funktionen aus 1.x sind geblieben:
   `output/packages/` muss fassen, was das Paket kopiert, und 2 GiB oder 2 % von ihr frei lassen): für das Modell vor
   dem Funktionstest und dem Cross-Build und für jede Datei direkt vor dem Kopieren; eine Platte, die es nicht fasst,
   stoppt die Stufe mit den Worten der Regel und ohne Paket. Der Build-Container sieht die Reservierungen des
-  Benutzerordners nicht. `build.sh --package` (auch ein von Hand gestartetes `target_module.sh` und die
+  Benutzerordners nicht. `--package` des Runners (auch ein von Hand gestartetes `target_module.sh` und die
   Entrypoint-Modi `target` und `pipeline`) macht das Paket auch ohne Profil, mit den schlichten Vorgaben des Targets
   (aarch64 bei Rockchip), und das Manifest sagt es (`hardware.source: defaults`). Das eigene Deployment des
   Frameworks bleibt `llm-cli deploy` und der Tab **Deployment**, über seine SSH-Sitzung mit dem Schlüssel und den Known
@@ -1162,7 +1190,7 @@ Funktionen aus 1.x sind geblieben:
   Build tut das nie: Sein Image bringt das gepinnte llama.cpp mit, beim Bau des Images durch das Framework aus der
   Repository-Überschreibung geholt.
 - **Die Moduloptionen.** `--input`, `--output`, `--model-name`, `--quantization` und `--hardware-config`
-  funktionieren bei `build.sh`, bei jedem von Hand gestarteten Stufenmodul und bei jedem Stufenmodus des
+  funktionieren beim Stage-Runner, bei jedem von Hand gestarteten Stufenmodul und bei jedem Stufenmodus des
   Entrypoints, wie im Entwurf des Maintainers für 1.x: `convert_module.sh --input ORDNER --output DATEI --model-name
   NAME` schreibt das F16-GGUF nach DATEI (es bleibt); `target_module.sh --input DATEI.gguf --quantization TYP
   --model-name NAME` quantisiert ein GGUF, ohne es erneut zu konvertieren, und behält es (ohne `--quantization`
@@ -1170,7 +1198,8 @@ Funktionen aus 1.x sind geblieben:
   braucht kein Modell und schreibt Toolchain und Plan in den Stufenordner. Ein Pfad als Option wird vom aktuellen
   Ordner aus absolut gemacht.
 
-Ein Target, das vor dieser Änderung erzeugt wurde, behält sein eigenes `build.sh`, das weiter wie bisher läuft.
+Ein Target, das vor dieser Änderung erzeugt wurde, behält sein eigenes `build.sh` in seinem Ordner; seit 3.3.0
+führt kein Build es aus, das tut der Runner der Laufzeit-Schicht.
 
 ## 11. Die Datei der Hardware-Probe
 

@@ -1819,3 +1819,32 @@ def test_a_contribution_adds_a_pack_only_by_its_exact_path(tmp_path):
         path = (change.get("remove") or [*change["files"]])[0]
         unescaped = named.group(1).replace("%3A", ":").replace("%2C", ",").replace("%0A", "\n").replace("%25", "%")
         assert unescaped == path, errors[0]
+
+
+# --- a target's own stage runner (runtime layer) -------------------------------------------------------------
+
+class TestOwnRunnerNote:
+    """A target pack that ships modules/build.sh (or stage_user.sh): no build runs it, the framework's runtime layer
+    does. Import and export say so in the person's summary (runtime_layer.own_runner_note)."""
+
+    def test_import_names_the_ignored_runner(self, world, tmp_path):
+        from orchestrator.Core.runtime_layer import OWN_RUNNER_NOTE
+        (tmp_path / "pack.zip").write_bytes(world.target_pack())
+        prepared = world.cm.prepare_install_file(tmp_path / "pack.zip")
+        assert OWN_RUNNER_NOTE.format(names="modules/build.sh") in prepared.notes
+
+    def test_import_without_a_runner_has_no_such_note(self, world, tmp_path):
+        root = make_target(world.tmp / "src" / "plain-board")
+        (root / "modules" / "build.sh").unlink()
+        (root / "modules" / "source_module.sh").write_text("#!/bin/sh\necho source\n", encoding="utf-8")
+        (tmp_path / "pack.zip").write_bytes(pack_bytes(root, pack_id="plain-board"))
+        prepared = world.cm.prepare_install_file(tmp_path / "pack.zip")
+        assert not [n for n in prepared.notes if "stage runner" in n]
+
+    def test_export_names_the_ignored_runner_once(self, world):
+        from orchestrator.Core.runtime_layer import OWN_RUNNER_NOTE
+        folder = make_target(world.root / "targets" / "run-board")
+        (folder / "modules" / "stage_user.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        result = world.cm.export_pack("target", "run-board", author="a")
+        note = OWN_RUNNER_NOTE.format(names="modules/build.sh, modules/stage_user.sh")
+        assert result.notes.count(note) == 1

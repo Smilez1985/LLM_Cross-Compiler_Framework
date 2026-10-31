@@ -9,7 +9,8 @@ Wird sowohl von der GUI (Wizard) als auch der CLI (Command) genutzt.
 Enthält Templates für Dockerfile, target.yml und die vier Stufen-Module.
 
 The build of a generated target is the template's four stage modules (source, config, convert, target), which
-modules/build.sh, the stage runner, runs in this order (DECISIONS U9); the generator fills in the wizard's setup
+the framework's stage runner (the runtime layer, orchestrator/runtime_layer/runner.sh) runs in this order, with the
+modules of target.yml's stages: slots (DECISIONS U9); the generator fills in the wizard's setup
 commands (source), quantization logic (convert) and packaging commands (target).
 The generated target.yml carries a capabilities block (support level community) and no template placeholder.
 A knowledge snapshot is attached only on request and holds only the pages crawled for this target, as the licences
@@ -85,7 +86,7 @@ TEMPLATE_PLACEHOLDERS = re.compile(  # not after a name: COMPILER_CONFIG[CMAKE_F
     r"|SDK_SETUP_COMMANDS|PACKAGING_COMMANDS|ihr-target-name|VENDOR_SOURCES|PIP_PACKAGES|PINNED_DOWNLOADS"
     r"|PINNED_DOWNLOADS_COPY)\]|\{packages_str\}|YYYY-MM-DD")
 GGUF_DEFAULT_QUANTS = ["Q4_K_M", "Q4_0", "Q5_K_M", "Q6_K", "Q8_0", "F16"]
-# The stages of a target's build, in the order modules/build.sh (the stage runner) runs them (DECISIONS U9).
+# The four stages of a target's build, in the order the runtime layer's stage runner runs them (DECISIONS U9).
 STAGE_MODULES = ("source", "config", "convert", "target")
 STAGE_FALLBACK = ('#!/bin/bash\n# {stage}_module.sh - the {stage} stage (no template for it was found when this target '
                   'was generated)\necho "ERROR: the {stage} stage of this target has no script yet: write '
@@ -180,7 +181,8 @@ def _FETCHED_DEPENDENCIES() -> tuple:
 def flag_line_problems(line: str) -> List[str]:
     """The module verdict's refusals (other than downloads, which download_flag_problems names) for the CMake flags a
     line of a target folder sets (_FLAG_LINE_RE); empty for any other line. A word the shell expands ($X, ${X}) is a
-    documented limit of this check: build.sh's cmake and the package's last check see the expanded words."""
+    documented limit of this check: the cmake the runtime layer checks (stage_env.sh) and the package's last check see
+    the expanded words."""
     m = _FLAG_LINE_RE.match(line or "")
     if not m:
         return []
