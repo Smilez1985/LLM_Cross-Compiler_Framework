@@ -145,6 +145,10 @@ def without_secret(text: str, secret: Optional[str]) -> str:
 def _detail(err: Any, secret: Optional[str] = None) -> str:
     """The provider's own error message (redacted, shortened)."""
     body = getattr(err, "body", None)
+    if isinstance(body, list) and body and isinstance(body[0], dict):
+        # Gemini's OpenAI-compatible endpoint wraps its error in a list; openai 3.40 and later no longer put such a
+        # body into the exception's message ("Error code: 400" only), so the text is taken from the body itself.
+        body = body[0]
     message = None
     if isinstance(body, dict):
         inner = body.get("error", body)
