@@ -437,7 +437,9 @@ def verify_sh() -> str:
         # openssl older than 1.1.1 has no -rawin (it cannot check an Ed25519 signature of a message)
         "  openssl pkeyutl -help 2>&1 | grep -q rawin || return 1",
         "  llmcf_why=bad",
-        '  llmcf_t=$(mktemp -d "${TMPDIR:-/tmp}/llmcf-sig.XXXXXXXX") || return 1',
+        # the scratch folder lies next to the file (a private folder of the caller), never in /tmp
+        '  case $1 in */*) llmcf_t=${1%/*} ;; *) llmcf_t=. ;; esac',
+        '  llmcf_t=$(mktemp -d "$llmcf_t/.llmcf-sig.XXXXXXXX") || return 1',
         "  llmcf_ok=1",
         "  if sed '1d;$d' \"$2\" | tr -d '\\n\\r' | openssl base64 -d -A > \"$llmcf_t/blob\" 2>/dev/null &&",
         f'    [ "$(wc -c < "$llmcf_t/blob" | tr -d " ")" -eq {SSHSIG_ED25519_SIZE} ] &&',
@@ -795,7 +797,7 @@ SETUP_REASONS = {
 
 def _assignments(bundle: "GateBundle", **more: str) -> str:
     """The plain assignments of the framework's signing key in front of a setup step (shlex-quoted values)."""
-    values = {"LLMCF_SIGNERS": bundle.signers, "LLMCF_PEM": bundle.pem, "LLMCF_SELFTEST": bundle.selftest, **more}
+    values = {**more, "LLMCF_SIGNERS": bundle.signers, "LLMCF_PEM": bundle.pem, "LLMCF_SELFTEST": bundle.selftest}
     return "".join(f"{k}={shlex.quote(v)}\n" for k, v in values.items())
 
 
