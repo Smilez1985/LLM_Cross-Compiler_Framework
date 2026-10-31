@@ -178,12 +178,22 @@ def judge(zones: List[Zone], vc_temp: Optional[float], throttled: Optional[int],
     return best
 
 
+def _command() -> str:
+    """THERMAL_COMMAND as llmcf's board operation `thermal` (runtime/device/board_ops.py defines it; a gated board runs
+    only operations), or as the script itself where that module is not loaded."""
+    from orchestrator.remote import gate
+    try:
+        return gate.script("thermal")
+    except gate.GateRefused:
+        return THERMAL_COMMAND
+
+
 def read_heat(shell: Any) -> Optional[BoardHeat]:
     """The board's temperature over `shell` (runtime/device/remote.py RemoteShell): one read-only command that may run
     twice after a network drop; None when the board shows none or the command fails (the step goes on). A Cancel
     (RemoteError of kind "stopped") is passed on."""
     try:
-        result = shell.run(THERMAL_COMMAND, again=True, timeout=THERMAL_TIMEOUT)
+        result = shell.run(_command(), again=True, timeout=THERMAL_TIMEOUT)
     except Exception as e:  # noqa: BLE001 - the temperature is a bonus: the step's own command says what is wrong
         if getattr(e, "kind", "") == "stopped":
             raise
