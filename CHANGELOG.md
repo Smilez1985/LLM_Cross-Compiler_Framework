@@ -78,6 +78,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   is never removed through such a link.
 
 ### Changed
+- `2026-10-31 11:09 UTC` · `v3.3.0` **The framework prefers a rootless container engine** ([design](docs/DESIGN.md#installer-platforms-and-dependencies)): when several engines are there, it now talks to your rootless Docker, then to your rootless Podman, before a Docker daemon that runs as root (before, any Docker daemon came first); a `DOCKER_HOST` you set still wins. Your rootless Docker is now found by itself (its socket was not set as `DOCKER_HOST` before, so the framework looked at the system's socket). Mojo's line about Podman's limits (no NVIDIA GPU request, no BuildKit) is an info now, with the way to rootless Docker (`sudo ./install.sh --engine=docker`) instead of Docker as root, and a Podman `DOCKER_HOST` counts as left over only while your rootless Docker runs.
 - `2026-10-31 01:59 UTC` · `v3.3.0` **The pip cache is switched off in CI for now** ([design](docs/DESIGN.md#tests-ci-and-the-windows-hazards)): the
   setup-python steps of `ci.yml`, `security.yml` and `retrieval-eval.yml` no longer use `cache: pip` (each says why in a
   comment), because the account's cache and egress quota ran out and a job hung at the cache restore. The ROADMAP row
@@ -213,6 +214,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   stop from outside without the note still counts.
 
 ### Security
+- `2026-10-31 11:09 UTC` · `v3.3.0` **Mojo names a group with root effect** ([design](docs/DESIGN.md#mojo-the-health-check)): when your account is in the group `docker` (Linux) or `docker-users` (Windows), `llmcf mojo`, the Mojo window and an AI's Mojo tools now say so as a warning: whoever is in it controls a container engine that runs with root's rights, so every program you run can gain those rights, permanently, also while the framework is not running; with the way to a rootless engine. Mojo also says whether the engine runs rootless. The texts name no account and no path.
 - `2026-10-31 07:47 UTC` · `v3.3.0` **The stage modules run under their own user, so they cannot read the key of the end record**
   ([design](docs/DESIGN.md#build-pipeline-and-target-modules)): a stage module ran as the stage runner's own user and
   could read the one-run key that seals the end record from the runner's memory (`/proc/<runner>/mem`) on a host
