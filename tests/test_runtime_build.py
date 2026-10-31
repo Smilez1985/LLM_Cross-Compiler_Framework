@@ -1125,7 +1125,11 @@ def test_container_sandbox_is_shared_with_the_conversion_stages():
                        "tmpfs": {"/tmp": "rw,nosuid,nodev,size=1g"}, "pids_limit": 4096, "working_dir": "/work",
                        "mem_limit": "8g"}
     builder = (ROOT / "orchestrator" / "Core" / "builder.py").read_text()
-    assert "container_sandbox(" in builder, "the conversion stages use the same sandbox"
+    # since the stage account (3.3.0) the conversion stages use it through stage_user_sandbox, which is this sandbox
+    # with the container started as root and only the two rights of the switch added
+    assert "stage_user_sandbox(" in builder, "the conversion stages use the same sandbox"
+    staged, _env = sandbox.stage_user_sandbox((1234, 1234), working_dir="/work", mem_limit="8g")
+    assert staged == dict(options, user="0:0", cap_add=["SETUID", "SETGID"])
 
 
 def test_probe_profile_reaches_toolchain_info():
