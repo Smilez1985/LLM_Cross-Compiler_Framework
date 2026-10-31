@@ -523,8 +523,11 @@ def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: 
             from orchestrator.runtime.device import board_ops
             # the person's writer: the framework's key, installed once, with llmcf's command gate (board_ops.py)
             # the caller's framework signer (board_ops.resolve_signer; None only for a caller without a framework)
+            from orchestrator.runtime.profile import stored_access
+            # the board's stored probe proposes a tier; the board's facts read now decide (pairing.pair)
             paired = pairing.pair(session.client, state_dir, board_ops.pairing_bundle(signer, state_dir),
-                                  password=password, chooser=chooser, mode=mode, audit=audit, via=via, switch=False)
+                                  password=password, chooser=chooser, mode=mode, audit=audit, via=via, switch=False,
+                                  access=stored_access(state_dir, device_id))
             from orchestrator.runtime.device.trusted import record_key_tier
             record_key_tier(state_dir, device_id, getattr(paired, "tier", ""))
         except ssh_trust.HostKeyError as e:

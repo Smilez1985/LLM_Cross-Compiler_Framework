@@ -1144,6 +1144,17 @@ _ADDRESS = re.compile(r"^(?:\[[0-9A-Fa-f:.]{2,45}\](?::\d{1,5})?|[0-9A-Fa-f:]{2,
 _META_MAX_BYTES = 16384
 
 
+def stored_access(state_dir: Union[str, Path], device_id: str) -> Optional[AccessFacts]:
+    """The access facts of the board's stored probe (HardwareProfile.access() of ProfileStore.load_device), None when
+    there is no stored probe, it cannot be read, or it is older than probe 3.3.0. What a pairing takes its tier
+    proposal from (remote/key_tiers.py proposal); reads only the file."""
+    try:
+        profile = ProfileStore(Path(state_dir)).load_device(str(device_id or ""))
+    except Exception:  # noqa: BLE001 - no proposal; the board's own facts decide anyway
+        return None
+    return profile.access() if profile is not None else None
+
+
 def default_state_dir() -> Path:
     """The per-user framework folder (LLM_FRAMEWORK_HOME, default ~/.llm-framework), as ConfigManager uses it."""
     return Path(os.environ.get("LLM_FRAMEWORK_HOME") or Path.home() / ".llm-framework")

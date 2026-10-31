@@ -154,6 +154,8 @@ TEXTS = {
                                 "instead? Weaker protection: without sudo the gate and the signing key live in the "
                                 "account's home; a stolen key still runs only llmcf's operations, but anything "
                                 "running as the account could change them.",
+        "deploy.tier.probe_disagrees": "The board's stored probe proposed another way than the board offers now; "
+                                       "the questions follow what the board says now.",
         "deploy.tier.ask.plan": "The switch to OpenSSH:\n\n{plan}\n\nGo ahead?",
         "deploy.tier.ask.dropbear_off": "{plan}",
         "deploy.tier.ask.host_key": "The new SSH server presents the host key {key_type} {fingerprint}. Compare it "
@@ -316,6 +318,8 @@ TEXTS = {
                                 "Stattdessen das Home-Gate nehmen? Schwächerer Schutz: ohne sudo liegen Gate und "
                                 "Signierschlüssel im Home des Kontos; ein gestohlener Schlüssel führt weiter nur "
                                 "llmcfs Operationen aus, aber alles, was als das Konto läuft, könnte sie ändern.",
+        "deploy.tier.probe_disagrees": "Die gespeicherte Probe des Boards schlug einen anderen Weg vor, als das "
+                                       "Board jetzt anbietet; die Fragen folgen dem, was das Board jetzt sagt.",
         "deploy.tier.ask.plan": "Die Umstellung auf OpenSSH:\n\n{plan}\n\nWeitermachen?",
         "deploy.tier.ask.dropbear_off": "{plan}",
         "deploy.tier.ask.host_key": "Der neue SSH-Server zeigt den Host-Schlüssel {key_type} {fingerprint}. "

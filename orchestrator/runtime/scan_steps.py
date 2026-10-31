@@ -210,9 +210,12 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
             from orchestrator.remote import pairing
             from orchestrator.runtime.device import board_ops
             # the framework's key, over the one-time password session, with llmcf's command gate (board_ops.py)
+            from orchestrator.runtime.profile import stored_access
+            # the board's stored probe (an earlier scan) proposes a tier; the board's facts read now decide
+            access = stored_access(state_dir, device_id_for_host_key(ssh_trust.fingerprint(key)))
             paired = pairing.pair(client, state_dir, board_ops.pairing_bundle(signer, state_dir), password=password,
                                   chooser=chooser, mode=mode, audit=audit if audit is not None else audit_factory,
-                                  via=via, host=host, port=port, user=user)
+                                  via=via, host=host, port=port, user=user, access=access)
         result = probe_over_ssh(session)
     except (RemoteProbeError, ssh_trust.HostKeyError) as e:
         if session.cancel.cancelled:   # the Cancel closed the session under the running probe
