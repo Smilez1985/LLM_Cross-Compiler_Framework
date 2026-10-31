@@ -50,6 +50,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 # The end folder's trust lives with the end record (Core/build_end.py imports nothing of the framework, so the
 # end record never pulls this module in): re-exported here, where the host side of the layer is read
 from orchestrator.Core.build_end import end_folder_state, mounts_keep_owners
+from orchestrator.utils.next_steps import WithSteps
 
 SHIPPED_DIR = Path(__file__).resolve().parents[1] / "runtime_layer"
 SCRIPTS = ("tools.sh", "entrypoint.sh", "runner.sh", "stage_user.sh", "stage_env.sh", "cleanup.sh")
@@ -111,7 +112,9 @@ VERDICT_TEXT = {
     "toolbox_changed": "The runtime layer's tools changed since they were made ({names}); builds are refused until "
                        "they are made again.",
 }
-RESTORE_WAY = "Mojo Miracle restores it from the shipped copy (Mojo > Repair, or llm-cli doctor --fix)."
+RESTORE_WAY = "Mojo Miracle restores it from the shipped copy."
+# The next step of a changed layer (orchestrator/utils/next_steps): Mojo Miracle, in the CLI, the GUI and for an AI
+RESTORE_STEP = "mojo.miracle"
 TOOLBOX_WAY_TEXT = ("Two ways: the framework builds them itself from pinned sources (setting runtime_layer_toolbox "
                     "'build', the default; needs the network once), or it fetches pinned prebuilt files from "
                     "snapshot.debian.org (setting runtime_layer_toolbox 'fetch'). Then they are kept and used offline.")
@@ -135,8 +138,9 @@ class ToolboxMissing(RuntimeError):
     """The toolbox is not here and cannot be made now (offline, or the chosen way failed): the plain reason."""
 
 
-class LayerRefused(RuntimeError):
-    """The runtime layer cannot be used for a build: `verdict` from VERDICTS, the plain text as the message."""
+class LayerRefused(WithSteps, RuntimeError):
+    """The runtime layer cannot be used for a build: `verdict` from VERDICTS, the plain text as the message; a
+    changed layer carries the next step RESTORE_STEP (`steps`)."""
 
     def __init__(self, verdict: str, text: str):
         super().__init__(text)
@@ -333,8 +337,7 @@ def ensure_toolbox(cache_dir: Path, way: str, *, offline: bool,
     if way not in TOOLBOX_WAYS:
         way = DEFAULT_TOOLBOX_WAY
     work = Path(cache_dir) / "runtime-layer" / "work"
-    if work.exists():
-        shutil.rmtree(work, ignore_errors=True)
+    _remove_work(work)
     work.mkdir(parents=True, exist_ok=True)
     try:
         files: Dict[str, Path] = {}
@@ -381,7 +384,14 @@ def ensure_toolbox(cache_dir: Path, way: str, *, offline: bool,
     except ValueError as e:
         raise ToolboxMissing(f"The runtime layer's tools could not be made: {e}. " + TOOLBOX_WAY_TEXT) from e
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        _remove_work(work)
+
+
+def _remove_work(work: Path) -> None:
+    """The toolbox's own working folder (downloaded tarballs, the copied tools): removed through the one removal
+    helper, which says what it could not remove."""
+    from orchestrator.utils.atomic import remove_tree
+    remove_tree(work, label="the runtime layer's working folder")
 
 
 def builder_context(work: Path, fetch: Callable[[str], bytes]) -> Path:
@@ -406,7 +416,8 @@ def engine_builder(client: Any, fetch: Callable[[str], bytes],
         context = builder_context(work, fetch)
         log("Runtime layer: building the builder image (pinned base, pinned sources) ...")
         image, _logs = client.images.build(path=str(context), tag=BUILDER_TAG, rm=True, pull=False)
-        container = client.containers.create(image.id, command=["true"], network_disabled=True)
+        from orchestrator.utils.docker_engine import create_container
+        container = create_container(client, image=image.id, command=["true"], network_disabled=True)
         try:
             files: Dict[str, Path] = {}
             for tool in TOOLS:
@@ -534,8 +545,9 @@ def ready_layer(cache_dir: Path) -> LayerCheck:
     if check.verdict == "missing":
         check = assemble(cache_dir)
     if not check.ok:
-        text = check.text + (" " + RESTORE_WAY if check.verdict == "changed" else "")
-        raise LayerRefused(check.verdict, text)
+        if check.verdict == "changed":
+            raise LayerRefused(check.verdict, check.text + " " + RESTORE_WAY).with_steps(RESTORE_STEP)
+        raise LayerRefused(check.verdict, check.text)
     return check
 
 
@@ -644,7 +656,7 @@ def own_runner_note(target_dir: Path) -> Optional[str]:
 
 __all__ = ["BUILD_SOURCES", "BUILDER_BASE", "CLEANUP_ENTRYPOINT", "DEFAULT_TOOLBOX_WAY", "END_MOUNT",
            "END_PROTECTED", "END_UNPROTECTED", "ENTRYPOINT", "FOUR_STAGES", "LAYER_MOUNT", "LayerCheck",
-           "LayerRefused", "MODULES_IN_IMAGE", "OFFLINE_REFUSAL", "OWN_RUNNER_NOTE", "PREBUILT", "RESTORE_WAY",
+           "LayerRefused", "MODULES_IN_IMAGE", "OFFLINE_REFUSAL", "OWN_RUNNER_NOTE", "PREBUILT", "RESTORE_STEP", "RESTORE_WAY",
            "SCRIPTS", "SHIPPED_DIR", "SLOTS", "TOOLBOX_WAYS", "TOOLS", "ToolboxMissing", "VERDICTS", "VERDICT_TEXT",
            "assemble", "builder_context", "end_folder", "end_folder_state", "ensure_toolbox", "extract_prebuilt",
            "is_static_elf", "layer_check", "layer_dir", "layer_volumes", "manifest_text", "mounts_keep_owners",

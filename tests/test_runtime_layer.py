@@ -319,6 +319,9 @@ def test_the_layer_is_assembled_checked_and_a_change_refuses_the_build(tmp_path)
     with pytest.raises(layer.LayerRefused) as refused:
         layer.ready_layer(tmp_path)
     assert "Mojo Miracle" in str(refused.value) and str(tmp_path) not in str(refused.value)
+    # the way back is a next step (CLI, GUI and AI each get theirs), not a command written into the text
+    from orchestrator.utils.next_steps import steps_of
+    assert [s.id for s in steps_of(refused.value)] == [layer.RESTORE_STEP] and "llm-cli" not in str(refused.value)
     assert layer.assemble(tmp_path).ok
 
 
