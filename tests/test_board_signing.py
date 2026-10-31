@@ -226,6 +226,61 @@ def test_the_gate_itself_refuses_a_forbidden_option_of_run_program(board, option
         gate.script("run-program", str(board.home), program, option, "x")
 
 
+def _stub_program(board, tmp_path):
+    """A stand-in llama-server in the current build that records its arguments (it never runs when refused)."""
+    marker = tmp_path / "ran"
+    bindir = board.root / ID16 / "bin"
+    bindir.mkdir(parents=True)
+    program = bindir / "llama-server"
+    program.write_text(f'#!/bin/sh\necho "$@" > {marker.as_posix()}\n', encoding="utf-8")
+    program.chmod(0o755)
+    (board.root / "current").symlink_to(ID16)
+    return f"{board.home}/{gate.INSTALL_ROOT_REL}/current/bin/llama-server", marker
+
+
+@POSIX
+@pytest.mark.parametrize("option", ["--log-file", "--log_file=x"])
+def test_the_gate_refuses_a_log_file_of_a_runtime_program(board, tmp_path, option):
+    """Regression (passed the gate on cs-board-signing): llama-server's --log-file writes its log, with text from the
+    model's metadata and the requests, to any file the account may write, such as a build's start script the gate runs
+    with sh (keygen, start-status) or ~/.ssh/rc; the gate and the Python check refuse it."""
+    program, marker = _stub_program(board, tmp_path)
+    target = f"{board.root}/current/llama-server.sh"
+    args = f"{option} {target}" if "=" not in option else f"--log_file={target}"
+    refused = board(f"llmcf-gate run-program {board.home} {program} {args}")
+    assert gate.is_refusal(refused.status, refused.err) and "never given to a runtime program" in refused.err, refused
+    assert not marker.exists()
+    with pytest.raises(gate.GateRefused):
+        gate.script("run-program", str(board.home), program, *args.split())
+
+
+@POSIX
+@pytest.mark.parametrize("option", ["--tools", "--log-file"])
+def test_the_gate_refuses_a_forbidden_option_of_a_bench_job_before_it_starts(board, tmp_path, option):
+    """Regression (on cs-board-signing the started job ran in a new sh where the gate's llmcf_refuse is not defined,
+    so the check said "not found" and the program ran with the option): start-bench-job is refused by the gate itself
+    and nothing is started."""
+    program, marker = _stub_program(board, tmp_path)
+    made = board(f"llmcf-gate mkprivate {board.root} .bench")
+    folder = made.out.strip()
+    assert made.status == 0 and folder.startswith(f"{board.root}/.bench."), made
+    started = board(f"llmcf-gate start-bench-job {folder} {board.home} {program} {option} x")
+    assert gate.is_refusal(started.status, started.err) and "never given to a runtime program" in started.err, started
+    for _ in range(40):
+        if marker.exists():
+            break
+        subprocess.run(["sleep", "0.05"])
+    assert not marker.exists() and not (Path(folder) / gate.JOB_STARTED).exists()
+    # a bench without a forbidden option still starts and runs
+    ok = board(f"llmcf-gate start-bench-job {folder} {board.home} {program} -p 16")
+    assert ok.status == 0 and "started=now" in ok.out, ok
+    for _ in range(200):
+        if (Path(folder) / gate.JOB_STATUS).exists():
+            break
+        subprocess.run(["sleep", "0.05"])
+    assert marker.read_text().strip() == "-p 16"
+
+
 @POSIX
 def test_the_key_line_and_the_gate_are_out_of_the_accounts_reach(board):
     """No gate operation writes to the account's own authorized_keys, to llmcf's root-owned key file or to the gate;
