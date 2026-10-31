@@ -87,6 +87,11 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Container schreibt den Arbeitsordner) zählt nie, und ein alter wird nie über so einen Link entfernt.
 
 ### Geändert
+- `2026-10-31 01:59 UTC` · `v3.3.0` **Der pip-Cache ist in der CI vorerst abgeschaltet** ([Design](docs/DESIGN_DE.md#tests-ci-und-die-windows-fallen)):
+  Die setup-python-Schritte von `ci.yml`, `security.yml` und `retrieval-eval.yml` nutzen `cache: pip` nicht mehr (jeder
+  sagt in einem Kommentar, warum), weil das Cache- und Egress-Kontingent des Kontos aufgebraucht war und ein Job beim
+  Wiederherstellen des Caches hing. Die ROADMAP-Zeile „Den pip-Cache in der CI zurückbringen, sobald das Kontingent es
+  erlaubt“ bringt ihn zurück.
 - `2026-10-30 18:21 UTC` · `v3.3.0` **Ein übrig gebliebener Ordner, der sich nicht entfernen lässt, hält den Schritt an, der
   ihn nutzen würde** ([Design](docs/DESIGN_DE.md#tests-ci-und-die-windows-fallen)): Ein Build, dessen Staging-Ordner
   aus einem früheren Versuch bleibt (seine Dateien würden mit den neuen Artefakten veröffentlicht), ein Paket-Export,

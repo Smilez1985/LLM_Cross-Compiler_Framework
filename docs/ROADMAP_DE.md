@@ -1,4 +1,4 @@
-Version 3.3.0 · Stand 2026-10-30
+Version 3.3.0 · Stand 2026-10-31
 
 [English](ROADMAP.md) · **Deutsch**
 
@@ -158,6 +158,7 @@ gefragt, wenn der Schritt beginnt.
 | **Optionales LoRA-Training** mit einem eigenen, schlanken Trainer: Ideen von Unsloth, aber kein Unsloth-Code und keine Unsloth-Installation. | geplant |
 | **Große Modelle**: eine Prüfung von Speicherplatz und RAM vor dem Build, Wiederverwendung von F16-Zwischenständen, GGUF als Eingabe (Durchreichen und Neu-Quantisieren), Quantisierungsrezepte je Tensor, per KL-Divergenz geprüft, eine Importance-Matrix berechnet, von Hugging Face übernommen oder aus einer Datei geladen, und Prüfungen von Tokenizer und Chat-Vorlage nach jedem Build. | geplant |
 | **Vorgaben für Importance-Matrix und Kalibrierung** (Einstellungen `default_enable_imatrix` und `default_calibration_dataset`, in Entwicklung): als Vorgaben in Builder, CLI und den KI-Tools genutzt. | geplant |
+| **Den pip-Cache in der CI zurückbringen, sobald das Kontingent es erlaubt**: `cache: pip` in den setup-python-Schritten von `ci.yml`, `security.yml` und `retrieval-eval.yml` ist vorerst abgeschaltet, weil das Cache- und Egress-Kontingent des Kontos aufgebraucht war und ein Job beim Wiederherstellen des Caches hing ([Design](DESIGN_DE.md#tests-ci-und-die-windows-fallen)). | geplant |
 
 Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht in die Pipeline.
 

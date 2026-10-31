@@ -78,6 +78,10 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   is never removed through such a link.
 
 ### Changed
+- `2026-10-31 01:59 UTC` · `v3.3.0` **The pip cache is switched off in CI for now** ([design](docs/DESIGN.md#tests-ci-and-the-windows-hazards)): the
+  setup-python steps of `ci.yml`, `security.yml` and `retrieval-eval.yml` no longer use `cache: pip` (each says why in a
+  comment), because the account's cache and egress quota ran out and a job hung at the cache restore. The ROADMAP row
+  "Bring the pip cache back in CI once the quota allows" brings it back.
 - `2026-10-30 18:21 UTC` · `v3.3.0` **A leftover folder that cannot be removed stops the step that would use it**
   ([design](docs/DESIGN.md#tests-ci-and-the-windows-hazards)): a build whose staging folder from an earlier attempt
   stays (its files would be published with the new artifacts), a pack export whose copy keeps a stale licence folder,
