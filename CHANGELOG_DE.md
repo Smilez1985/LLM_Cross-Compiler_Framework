@@ -135,7 +135,8 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   hinterließ Dateien, die du nicht lesen konntest, und Ordner, die das Aufräumen nicht entfernen konnte. Stufen-Runner
   und Stufen-Konto teilen sich jetzt eine Gruppe, die des Runners (auf dem Host deine): Nach jedem Modul, auch nach
   einem gescheiterten, gibt das Stufen-Konto, was es in den Ordnern des Builds geschrieben hat, dieser Gruppe, lesbar
-  und schreibbar, mit seinen Ordnern setgid. Nichts wird per chown umgeschrieben, und kein Konto bekommt ein neues Recht.
+  und schreibbar, mit seinen Ordnern setgid und nie mit Sticky-Bit (ein Sticky-Ordner eines Werkzeugs hinderte dich
+  daran, zu entfernen, was darin lag). Nichts wird per chown umgeschrieben, und kein Konto bekommt ein neues Recht.
 - `2026-10-31 02:14 UTC` · `v3.3.0` **Ein Löschen, das du angenommen hast, sagt nur „gelöscht“, wenn es stimmt**
   ([Design](docs/DESIGN_DE.md#löschen-und-der-papierkorb)): Der Moduswechsel von Ditto überging, was das Entfernen
   eines Build-Ordners zurückließ, meldete ihn als gelöscht (und vergaß den Build); das Leeren des Papierkorbs, die
@@ -245,7 +246,9 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Der Build-Kontext trug das `modules/stage_user.sh` des Targets, so dass ein Target mit dem Stufen-Runner der Vorlage,
   aber einem hohlen Helfer (der das Modul einfach ausführt und nichts prüft), seine Module als Stufen-Runner mit dessen
   zwei Rechten laufen ließ. Jeder Build-Kontext trägt jetzt den eigenen Helfer des Frameworks anstelle dessen, was das
-  Target unter diesem Namen hat, so wie beim Entrypoint; die Prüfung des `modules/build.sh` des Targets bleibt.
+  Target unter diesem Namen hat, so wie beim Entrypoint; die Prüfung des `modules/build.sh` des Targets bleibt, und
+  sie verweigert jetzt auch einen Runner, der eine Funktion des Helfers (oder `setpriv`) neu definiert oder eine seiner
+  Variablen ändert (`STAGE_ISOLATION`, `STAGE_UID`, ...), mit dem Namen dieses Teils.
 - `2026-10-31 07:47 UTC` · `v3.3.0` **Die Stufen-Module laufen unter einem eigenen Benutzer und können den Schlüssel des Abschluss-Eintrags nicht lesen**
   ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)): Ein Stufen-Modul lief als eigener Benutzer des
   Stufen-Runners und konnte den Schlüssel, der den Abschluss-Eintrag versiegelt, aus dem Speicher des Runners lesen

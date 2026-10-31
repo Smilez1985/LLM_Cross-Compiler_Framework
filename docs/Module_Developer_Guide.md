@@ -910,12 +910,15 @@ account: the build sandbox refuses it before its container starts; copy `modules
 
 `modules/stage_user.sh` (`run_as_stage`, `stage_preflight`) is the framework's, not your target's: every build context
 gets the framework's own copy, whatever your target has under that name (a changed or missing copy is replaced, so
-a build never runs with another one). Keep the template's copy in your folder only for runs by hand.
+a build never runs with another one). Keep the template's copy in your folder only for runs by hand. Your
+`build.sh` must leave every part of it as it is: a runner that defines one of its functions (or `setpriv`) again or
+changes one of its variables (`STAGE_ISOLATION`, `STAGE_UID`, ...) is refused in the build sandbox, with the name of
+that part.
 
 Files your modules write are group-shared: the runner and the stage account share one group, the runner's (your own
 group on the host), and after each module returns, also with an error, the stage account gives what it wrote in the
-folders above to that group, readable and writable for it, and its folders setgid. A tool that writes a 0600 file or
-a 0555 folder therefore leaves nothing you cannot read or remove after the build; nothing is chowned, and no account
+folders above to that group, readable and writable for it, and its folders setgid and not sticky. A tool that writes
+a 0600 file, a 0555 folder or a sticky folder therefore leaves nothing you cannot read or remove after the build; nothing is chowned, and no account
 gets a right for it. Do not rely on a file staying private to the stage account: the person can read every file a
 build writes.
 

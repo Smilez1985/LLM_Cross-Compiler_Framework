@@ -13,6 +13,7 @@ entrypoint does in the container); they need root on Linux to hand out those two
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -767,3 +768,85 @@ def test_what_a_module_writes_the_person_can_read_and_remove(box, exit_code):
     assert person.returncode == 0, person.stdout + person.stderr
     assert person.stdout.strip() == "left 0"
     assert not (out / "locked").exists() and not (box.work / "cache" / "closed").exists()
+
+
+# --- review: a runner that replaces the helper's parts, a sticky folder a module made ------------------------------
+#
+# The framework's helper in the context is worth nothing when the target's runner sources it and then defines its own
+# run_as_stage (or setpriv, or as_stage), or switches the sandbox off for its modules (STAGE_ISOLATION): its modules ran
+# as the runner with the runner's two ambient rights, and the build still counted as one in the sandbox.
+
+_TEMPLATE_SOURCE_LINE = 'source "$MODULES_DIR/stage_user.sh"\n'
+
+
+@pytest.mark.parametrize("override", [
+    'run_as_stage() { "$@"; }',
+    'function as_stage { "$@"; }',
+    'stage_preflight () { :; }',
+    'setpriv() { shift 6; "$@"; }',
+    'STAGE_ISOLATION=',
+    'export STAGE_ISOLATION=legacy',
+    'unset STAGE_ISOLATION',
+    'STAGE_UID=64020',
+    'STAGE_SHARED_FOLDERS=()',
+], ids=["run_as_stage", "as_stage", "preflight", "setpriv", "isolation", "export", "unset", "uid", "share"])
+def test_a_runner_that_replaces_a_part_of_the_helper_is_refused(tmp_path, override):
+    from orchestrator.utils.sandbox import STAGE_RUNNER_REPLACES_HELPER, stage_runner_problem
+    runner = (REPO_ROOT / "targets" / "_template" / "modules" / "build.sh").read_text(encoding="utf-8")
+    assert _TEMPLATE_SOURCE_LINE in runner
+    changed = runner.replace(_TEMPLATE_SOURCE_LINE, f"{_TEMPLATE_SOURCE_LINE}{override}\n", 1)
+    name = re.search(r"[A-Za-z_]{4,}", override.replace("function ", "").replace("export ", "")
+                     .replace("unset ", "")).group(0)
+    assert stage_runner_problem(_target_with_runner(tmp_path / "t", changed, helper=False) / "modules") == \
+        STAGE_RUNNER_REPLACES_HELPER.format(name=name)
+
+
+def test_the_runner_check_knows_every_part_of_the_helper():
+    from orchestrator.utils import sandbox
+    helper = (REPO_ROOT / "targets" / "_template" / "modules" / "stage_user.sh").read_text(encoding="utf-8")
+    functions = set(re.findall(r"(?m)^([a-z_]+)\(\)", helper))
+    variables = set(re.findall(r"(?m)^(?:declare -A )?([A-Z_]+)=", helper)) | {"STAGE_ISOLATION"}
+    assert functions and variables
+    assert functions | {"setpriv"} == set(sandbox._HELPER_FUNCTIONS)
+    assert variables == set(sandbox._HELPER_VARIABLES)
+    # a comment that names a part is no change of it
+    assert sandbox._helper_part_replaced("# STAGE_ISOLATION=user\n  # run_as_stage() is the helper's\n") is None
+
+
+@pytest.mark.parametrize("target", TARGETS)
+def test_the_shipped_runners_replace_no_part_of_the_helper(tmp_path, target):
+    from orchestrator.utils.sandbox import stage_runner_problem
+    assert stage_runner_problem(REPO_ROOT / "targets" / target / "modules") is None
+
+
+STICKY = r'''#!/bin/bash
+out="$BUILD_CACHE_DIR/output"
+mkdir "$out/spool" "$BUILD_SCRATCH_DIR/tmp/spool"
+printf 'p' > "$out/spool/part"
+printf 't' > "$BUILD_SCRATCH_DIR/tmp/spool/part"
+chmod 1777 "$out/spool" "$BUILD_SCRATCH_DIR/tmp/spool"
+'''
+
+STICKY_CHECK = r'''
+import sys
+sys.path.insert(0, sys.argv[1])
+from orchestrator.utils.atomic import remove_tree
+print("left", sum(len(remove_tree(p)) for p in sys.argv[2:]))
+'''
+
+
+@needs_rights
+def test_a_sticky_folder_a_module_made_the_person_can_still_clear(box):
+    box.module("source", STICKY)
+    result = box.run("--to", "source")
+    assert result.returncode == 0, result.stdout + result.stderr
+    spools = [box.output / "spool", box.work / "tmp" / "spool"]
+    for spool in spools:
+        assert not os.lstat(spool).st_mode & 0o1000, f"{spool} kept its sticky bit"
+    # the runner's own folders keep theirs: the stage account can change nothing of the runner's
+    assert os.lstat(box.work).st_mode & 0o1000
+    person = subprocess.run(["setpriv", "--reuid", str(RUNNER), "--regid", str(RUNNER), "--clear-groups", "--",
+                             sys.executable, "-I", "-c", STICKY_CHECK, str(REPO_ROOT), *map(str, spools)],
+                            capture_output=True, text=True, timeout=120)
+    assert person.returncode == 0, person.stdout + person.stderr
+    assert person.stdout.strip() == "left 0"

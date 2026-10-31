@@ -946,12 +946,14 @@ sein Container startet; kopiere `modules/build.sh` aus `targets/_template`.
 `modules/stage_user.sh` (`run_as_stage`, `stage_preflight`) gehört dem Framework, nicht deinem Target: Jeder
 Build-Kontext bekommt die eigene Kopie des Frameworks, egal was dein Target unter diesem Namen hat (eine geänderte oder
 fehlende Kopie wird ersetzt, so dass ein Build nie mit einer anderen läuft). Behalte die Kopie der Vorlage in deinem
-Ordner nur für Läufe von Hand.
+Ordner nur für Läufe von Hand. Dein `build.sh` muss jeden Teil davon lassen, wie er ist: Ein Runner, der eine seiner
+Funktionen (oder `setpriv`) neu definiert oder eine seiner Variablen ändert (`STAGE_ISOLATION`, `STAGE_UID`, ...), wird
+in der Build-Sandbox verweigert, mit dem Namen dieses Teils.
 
 Die Dateien deiner Module teilen sich eine Gruppe: Runner und Stufen-Konto teilen sich die Gruppe des Runners (auf dem
 Host deine eigene), und nach jedem Modul, auch nach einem Fehler, gibt das Stufen-Konto, was es in den Ordnern oben
-geschrieben hat, dieser Gruppe, lesbar und schreibbar für sie, und seine Ordner setgid. Ein Werkzeug, das eine Datei
-mit 0600 oder einen Ordner mit 0555 schreibt, hinterlässt so nach dem Build nichts, was du nicht lesen oder entfernen
+geschrieben hat, dieser Gruppe, lesbar und schreibbar für sie, und seine Ordner setgid und ohne Sticky-Bit. Ein
+Werkzeug, das eine Datei mit 0600, einen Ordner mit 0555 oder einen Sticky-Ordner schreibt, hinterlässt so nach dem Build nichts, was du nicht lesen oder entfernen
 kannst; nichts wird per chown umgeschrieben, und kein Konto bekommt dafür ein Recht. Verlass dich nicht darauf, dass
 eine Datei nur für das Stufen-Konto lesbar bleibt: Die Person kann jede Datei lesen, die ein Build schreibt.
 
