@@ -270,6 +270,13 @@ def sandbox_problem(attrs: Any, options: Dict[str, Any], volumes: Dict[str, Dict
         wrong.append("capabilities " + "; ".join(parts))
     elif engine != "podman" and "ALL" not in drop and not isinstance(effective, list):
         wrong.append("capabilities not dropped (CapDrop ALL)")
+    # The framework's runtime layer: the host sets the container's entrypoint and command itself
+    # (Core/runtime_layer.py ENTRYPOINT); an image cannot have them replaced
+    if options.get("entrypoint") is not None and list(config.get("Entrypoint") or []) != list(options["entrypoint"]):
+        wrong.append("the entrypoint is not the framework's runtime layer")
+    if options.get("entrypoint") is not None and options.get("command") is not None and \
+            list(config.get("Cmd") or []) != list(options["command"]):
+        wrong.append("the command is not the framework's")
     if host.get("Privileged"):
         wrong.append("privileged mode")
     security = [str(s).replace("=", ":").lower() for s in host.get("SecurityOpt") or []]
