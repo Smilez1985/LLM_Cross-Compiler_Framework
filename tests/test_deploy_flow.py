@@ -313,7 +313,7 @@ def runtime_stand_ins(monkeypatch, order, *, uid=1000, ok=True):
             order.append("closed")
 
     def connect(state, device_id, host, port, user, password=None, *, step="", on_client=None, cancel=None,
-                on_event=None, signer=None):
+                on_event=None, signer=None, mode="private"):
         order.append(("connect", user, password, step))
         session = Session()
         if on_client is not None:
@@ -503,7 +503,8 @@ def ai_board(tmp_path, monkeypatch):
         def close(self):
             order.append("closed")
 
-    def connect(d, state_dir, user, fp, on_client=None, step="", *, cancel=None, on_event=None, wait_seconds=None):
+    def connect(d, state_dir, user, fp, on_client=None, step="", *, cancel=None, on_event=None, wait_seconds=None,
+                mode="private"):
         order.append(("connect", user, fp, step))
         session = Session()
         if on_client is not None:

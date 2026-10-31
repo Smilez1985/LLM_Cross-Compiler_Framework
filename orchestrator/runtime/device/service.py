@@ -130,14 +130,17 @@ def _not_trusted(device: TrustedDevice, fp: str) -> DeviceRuntimeError:
 
 def connect(device: TrustedDevice, state_dir: Path, user: str, expect_fingerprint: str,
             on_client: Optional[Callable[[Any], None]] = None, step: str = "", *, cancel: Any = None,
-            on_event: Optional[Callable[[Any], None]] = None, wait_seconds: Optional[float] = None):
+            on_event: Optional[Callable[[Any], None]] = None, wait_seconds: Optional[float] = None,
+            mode: str = "private"):
     """The board session (orchestrator/remote/session.py RemoteSession, logged in) with the trusted device, as `user`,
     with the framework's key only (KeyOnly: never a password, so this path can never pair; decision 2), after the key
     it presents was compared with the trusted one and with `expect_fingerprint` (the one the person was shown). Every
     login after a network drop checks it again, and while the board's network is gone the session waits for it (N5;
     `on_event` gets its events, `wait_seconds` is how long it waits, the session's default 300 s when None). `step`
     names the contact (probe, runtime_deploy, benchmark) for Mojo's record of the board. `on_client` gets the session
-    once (closing it closes its connection); `cancel` (a session.CancelToken) ends any wait at once."""
+    once (closing it closes its connection); `cancel` (a session.CancelToken) ends any wait at once. `mode`: the
+    framework mode of the caller's framework (Core/config_manager.py framework_mode): in enterprise mode a board whose
+    key sits on the Dropbear tier or the home gate is refused after the login (trusted.tier_refusal), nothing runs."""
     from orchestrator.remote import reasons
     from orchestrator.remote.address import Endpoint
     from orchestrator.remote.session import KeyOnly, RemoteSession, SessionFailure, Stopped as SessionStopped
@@ -175,6 +178,14 @@ def connect(device: TrustedDevice, state_dir: Path, user: str, expect_fingerprin
                                  next="Ask the person to pair the device once with 'llm-cli deploy run' or "
                                       "'llm-cli scan --device' (they enter the password there).") from None
     note_reach(state_dir, device, step, "")   # reached and logged in: a recorded problem ends
+    from orchestrator.runtime.device.trusted import tier_refusal
+    refusal = tier_refusal(Path(state_dir), device.device_id, mode, session)
+    if refusal:
+        session.close()
+        raise DeviceRuntimeError(by_label(refusal, device), code="needs_person",
+                                 next="Tell the person: enterprise mode refuses this board's weaker key tier. Only "
+                                      "the person pairs it again (the switch to OpenSSH or password login) or "
+                                      "changes the framework mode; no tool can.")
     if on_client is not None:
         on_client(session)
     return session
@@ -196,7 +207,7 @@ def _session_failed(device: TrustedDevice, error: Exception, state_dir: Path, st
 
 def probe(device: TrustedDevice, state_dir: Path, expect_fingerprint: str, *,
           on_client: Optional[Callable[[Any], None]] = None, cancel: Any = None,
-          on_event: Optional[Callable[[Any], None]] = None) -> Dict[str, Any]:
+          on_event: Optional[Callable[[Any], None]] = None, mode: str = "private") -> Dict[str, Any]:
     """Runs the read-only hardware probe on the device (as `llm-cli scan --device`) and stores its profile under the
     device id (the label and address the person gave are kept). Returns what was stored, without device text. A
     network drop makes the session wait for the board and run the probe's command again (N5)."""
@@ -204,7 +215,7 @@ def probe(device: TrustedDevice, state_dir: Path, expect_fingerprint: str, *,
     from orchestrator.runtime.profile import ProfileStore
     from orchestrator.runtime.remote_probe import RemoteProbeError, probe_over_ssh
     session = connect(device, state_dir, device.user, expect_fingerprint, on_client, step="probe", cancel=cancel,
-                      on_event=on_event)
+                      on_event=on_event, mode=mode)
     try:
         try:
             result = probe_over_ssh(session)
@@ -329,7 +340,7 @@ def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, 
            expect_build_id: str, *, on_client: Optional[Callable[[Any], None]] = None,
            cancelled: Callable[[], bool] = lambda: False, say: Say = lambda _m: None, cancel: Any = None,
            on_event: Optional[Callable[[Any], None]] = None, config: Any = None,
-           ai_started: bool = False, signer: Any = None) -> Dict[str, Any]:
+           ai_started: bool = False, signer: Any = None, mode: Optional[str] = None) -> Dict[str, Any]:
     """Builds (when needed) and installs the device runtime as the deploy settings say, checks the new build on the
     device and activates it only when it passes: the one flow of `llm-cli device runtime deploy` and the Boards window
     (steps.deploy_runtime_flow; steps.install_runtime saves the deployment's record), with this path's login only: the
@@ -340,6 +351,9 @@ def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, 
     from orchestrator.runtime.device import steps
     from orchestrator.runtime.device.remote import RemoteError
     cancel = cancel if cancel is not None else CancelToken(check=cancelled)
+    if mode is None:   # the framework mode of the framework's settings (`config`) unless the caller names it
+        from orchestrator.Core.config_manager import framework_mode
+        mode = framework_mode(config)
     # config: the framework's settings (offline mode: the source only from the own network, utils/locality.py)
     builds, build, packaged = ensure_build(state_dir, device, profile, expect_build_id, cancelled=cancelled, say=say,
                                            config=config, ai_started=ai_started)
@@ -347,7 +361,7 @@ def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, 
 
     def open_board():
         session = connect(device, state_dir, settings.ssh_user, expect_fingerprint, on_client, step="runtime_deploy",
-                          cancel=cancel, on_event=on_event)
+                          cancel=cancel, on_event=on_event, mode=mode)
         return session, getattr(session, "key", None)
 
     def check_cancel() -> None:
@@ -378,7 +392,7 @@ def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: An
               allow_untrusted: bool, on_client: Optional[Callable[[Any], None]] = None,
               consent: Optional[Callable[[str], None]] = None,
               output_dirs: Sequence[Path] = (), cancel: Any = None,
-              on_event: Optional[Callable[[Any], None]] = None) -> Dict[str, Any]:
+              on_event: Optional[Callable[[Any], None]] = None, mode: str = "private") -> Dict[str, Any]:
     """The checks of the deployed runtime on the device with a short llama-bench run on the model the deploy settings
     name (as `llm-cli device runtime verify --bench-model`). A model that is not a catalog model runs only when
     `allow_untrusted` (the person approved exactly that); `consent(sha256)` writes that consent to the audit log before
@@ -403,7 +417,7 @@ def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: An
     plan_verify = (stored.plan.get("verify") if stored else None) or {}
     source = pinned_source()
     client = connect(device, state_dir, settings.ssh_user, expect_fingerprint, on_client, step="benchmark",
-                     cancel=cancel, on_event=on_event)
+                     cancel=cancel, on_event=on_event, mode=mode)
     try:
         shell = RemoteShell(client)
         try:

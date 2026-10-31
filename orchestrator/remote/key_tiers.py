@@ -78,6 +78,26 @@ def is_weaker(tier: str) -> bool:
     return tier in WEAKER
 
 
+# The ways on for a board enterprise mode refuses to use (the person's channels and the AI's next step read it; the
+# GUI shows its own words, deploy.tier.refused_use of utils/l10n_deploy.py).
+USE_WAYS = ("pair the board again with its password and choose the switch to OpenSSH (the board account needs sudo), "
+            "which gives it the root-owned key line; or choose password login at that pairing; or switch the "
+            "framework to private mode in its settings (only you can)")
+
+
+def use_problem(tier: str, mode: str) -> str:
+    """Why a board whose framework key sits on `tier` may not be used in `mode` ("" when it may): enterprise mode
+    refuses the Dropbear tier and the home gate whenever a step uses the board (a deploy, a verify, a probe, a
+    benchmark), not only when it is paired, and names the ways on (USE_WAYS). An unrestricted key from before the
+    gate is not refused here: a deploy restricts it, and Mojo warns about it."""
+    if allowed(tier, mode):
+        return ""
+    name = TIER_TEXTS[tier].split(":")[0]
+    return (f"Enterprise mode refuses to use this board: the framework's key there is the {name}, which enterprise "
+            f"mode counts as too insecure (it needs OpenSSH with sudo and the root-owned key line). Nothing was done "
+            f"on the board. Ways on: {USE_WAYS}.")
+
+
 def tier_of_status(words: Dict[str, str]) -> str:
     """The tier of a board from the words of the gate's status operation (restricted, keys, tier)."""
     if words.get("restricted") != "yes":
@@ -222,5 +242,5 @@ def choice_problem(choice: str, the_offer: Optional[TierOffer], mode: str) -> st
 
 __all__ = ["CHOICES", "CHOICE_OPENSSH", "CHOICE_TEXTS", "MANAGERS", "MODES", "MODE_ENTERPRISE", "MODE_PRIVATE",
            "TIERS", "TIER_DROPBEAR", "TIER_HOME", "TIER_PASSWORD", "TIER_ROOT", "TIER_TEXTS", "TIER_UNRESTRICTED",
-           "TierFacts", "TierOffer", "UPGRADE_TEXT", "WEAKER", "allowed", "choice_problem", "is_weaker",
-           "normal_mode", "offer", "server_of_banner", "tier_of_status"]
+           "TierFacts", "TierOffer", "UPGRADE_TEXT", "USE_WAYS", "WEAKER", "allowed", "choice_problem", "is_weaker",
+           "normal_mode", "offer", "server_of_banner", "tier_of_status", "use_problem"]

@@ -442,18 +442,29 @@ class RemoteSession:
             if self.expect_fingerprint is None:
                 self.expect_fingerprint = self.fingerprint
 
-    def pair(self, bundle: Any = None) -> bool:
+    def pair(self, bundle: Any = None, *, mode: str = "private", pairer: Any = None) -> Any:
         """Installs the framework's key on the board (its authorized_keys), only with OneTimePassword credentials
-        that ask for it; True when it was installed. KeyOnly credentials never reach the key installation."""
+        that ask for it; KeyOnly credentials never reach the key installation (False). Returns what was installed: the
+        word of ssh_trust.install_public_key ("restricted", "unrestricted"), or with `pairer` its answer.
+
+        `pairer(client, bundle, password)` is the person's pairing (remote/pairing.py pair with the person's
+        TierChooser, given by the person's own channels only; no module an AI can reach makes one): a board that
+        cannot take the root-owned key line then gets the person's choice of a key tier (a PairOutcome; "password"
+        when the person took none). Without it a board that cannot take the root-owned key line raises
+        ssh_trust.GateUnavailable with the ways in its text. `mode` (key_tiers.MODES) is the framework mode the
+        root step follows."""
         if not isinstance(self.credentials, OneTimePassword) or not self.credentials.install_key:
             return False
+        if pairer is not None and bundle is not None:
+            return pairer(self.client, bundle, self.credentials.password)
         from orchestrator.utils import ssh_trust
         line = ssh_trust.client_key(self.state_dir)[1]
         if bundle is None:
             ssh_trust.install_public_key(self.client, line)
-        else:   # llmcf's command gate and the key's restricted line (orchestrator/remote/gate.py)
-            ssh_trust.install_public_key(self.client, line, bundle, password=self.credentials.password)
-        return True
+            return "unrestricted"
+        # llmcf's command gate and the key's restricted line (orchestrator/remote/gate.py)
+        return ssh_trust.install_public_key(self.client, line, bundle, password=self.credentials.password,
+                                            mode=mode)
 
     def for_cleanup(self) -> Optional["RemoteSession"]:
         """A new, logged-in session to this session's board for one clean-up command after a Cancel closed this one

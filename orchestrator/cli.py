@@ -5668,23 +5668,27 @@ def deploy_devices_list(ctx: FrameworkContext, as_json: bool):
     table = Table(title="Trusted devices")
     for column in ("Device", "Label", "Address", "User", "Host key", "Paired", "Key tier", "Last deploy"):
         table.add_column(column)
+    mode = _framework_mode(ctx)
     for r in rows:
         state = {"known": "trusted", "changed": "[red]CHANGED in known_hosts[/red]",
                  "unknown": "[yellow]not in known_hosts[/yellow]"}[r["host_key"]]
         last_deploy = r["last_deploy"] or {}   # may hold only a recorded contact for Mojo: then no deploy is shown
         table.add_row(r["device_id"], escape(r["label"]), escape(r["address"]), escape(r["user"]),
                       f"{escape(r['key_type'])} {r['fingerprint']} ({state})", "yes" if r["paired"] else "no",
-                      _tier_cell(r.get("key_tier", "")),
+                      _tier_cell(r.get("key_tier", ""), mode),
                       escape(f"{last_deploy.get('at')} ({'ok' if last_deploy.get('ok') else 'failed'})")
                       if last_deploy.get("at") else "-")
     console.print(table)
 
 
-def _tier_cell(tier: str) -> str:
-    """The key tier of a board for the device list: the weaker ones marked (remote/key_tiers.py)."""
-    from orchestrator.remote.key_tiers import is_weaker
+def _tier_cell(tier: str, mode: str = "private") -> str:
+    """The key tier of a board for the device lists (`deploy devices list`, `device list`): the weaker ones marked,
+    and in enterprise `mode` the ones it refuses to use (remote/key_tiers.py)."""
+    from orchestrator.remote.key_tiers import allowed, is_weaker
     if not tier:
         return "-"
+    if not allowed(tier, mode):
+        return f"[red]{tier} (refused in enterprise mode)[/red]"
     return f"[yellow]{tier} (weaker)[/yellow]" if is_weaker(tier) else tier
 
 
@@ -6369,10 +6373,12 @@ def _open_device(state_dir: Path, device_id: str, host: str, port: int, user: st
     # the key that ends a wait, as `deploy run` names it (Ctrl+C ends the command; a wait never runs on to 300 s)
     lines = wait_lines(lambda text: console.print(escape(text)), host, _config_language(ctx), hint=" (Ctrl+C)")
     try:   # the shared step records the board's contacts for Mojo in `state_dir`
+        # the framework mode always (enterprise mode refuses a weaker-tier board at every use); the chooser only
+        # when a password pairs the board
+        tiers = _tier_kwargs(ctx, audit=lambda: _device_audit(ctx, state_dir)) if password else {}
+        tiers["mode"] = _framework_mode(ctx)
         client, key = person_steps.connect_stored(state_dir, device_id, host, port, user, password, step=step,
-                                                  on_event=lines, signer=_board_signer(ctx),
-                                                  **(_tier_kwargs(ctx, audit=lambda: _device_audit(ctx, state_dir))
-                                                     if password else {}))
+                                                  on_event=lines, signer=_board_signer(ctx), **tiers)
     except person_steps.BoardStepError as e:
         if e.kind in ("unreachable", "host_key_changed") and e.reason:
             _print_reason(ctx, e.reason, host, port)
@@ -6506,8 +6512,9 @@ def device_list(ctx: FrameworkContext, as_json: bool):
         console.print("No device is stored yet: probe one with llm-cli scan --device HOST --user USER.")
         return
     table = Table(title="Devices")
-    for column in ("Device", "Label", "Address", "System", "Deploy", "Deployed runtime"):
+    for column in ("Device", "Label", "Address", "System", "Deploy", "Deployed runtime", "Key tier"):
         table.add_column(column)
+    mode = _framework_mode(ctx)
     for row in rows:
         s = row["system"] or {}
         system = (f"{s.get('OS_ID') or s.get('OS') or '?'} {s.get('OS_VERSION_ID') or ''} {s.get('ARCH') or ''}, "
@@ -6518,7 +6525,7 @@ def device_list(ctx: FrameworkContext, as_json: bool):
         deployed = row["deployed"]
         table.add_row(row["device_id"], escape(row["label"] or "-"), escape(row["address"] or "-"), escape(system),
                       escape(deploy_text), escape(f"{deployed['build_id'][:16]} ({deployed.get('install')})")
-                      if deployed else "-")
+                      if deployed else "-", _tier_cell(row.get("key_tier", ""), mode))
     console.print(table)
 
 

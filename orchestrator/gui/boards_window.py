@@ -47,7 +47,7 @@ from orchestrator.utils.localization import current_language, ui_text
 
 COLUMNS = ("boards.col.board", "boards.col.id", "boards.col.address", "boards.col.user", "boards.col.key",
            "boards.col.paired", "boards.col.trusted", "boards.col.last", "boards.col.system", "boards.col.settings",
-           "boards.col.runtime")
+           "boards.col.runtime", "boards.col.tier")
 KV_CHOICES = ("auto", "f16", "q8_0", "q4_0")
 # object name -> (text key, slot name, what the selected board needs: "" nothing, "trusted", "stored")
 BUTTONS = (
@@ -199,6 +199,12 @@ class BoardsWindow(QDialog):
         from orchestrator.runtime.device import board_ops
         return lambda: board_ops.framework_signer(framework)
 
+    def _mode(self) -> str:
+        """The framework mode of this window's framework (Core/config_manager.py framework_mode): in enterprise mode
+        a board whose key sits on a weaker tier is refused at every use (person_steps.connect_stored)."""
+        from orchestrator.Core.config_manager import framework_mode
+        return framework_mode(getattr(self.framework, "config", None))
+
     def _info(self, text: str, kind: str = "information") -> None:
         plain_box(self, kind, self._t("boards.title"), text)
 
@@ -256,7 +262,20 @@ class BoardsWindow(QDialog):
             probe = [system, settings, runtime]
         else:
             probe = [t("boards.not_probed"), dash, dash]
-        return [entry["label"], entry["device_id"], address, *trust, *probe]
+        return [entry["label"], entry["device_id"], address, *trust, *probe, self._tier_cell(trusted)]
+
+    def _tier_cell(self, trusted: Optional[Dict[str, Any]]) -> str:
+        """The tier of the framework's key on the board as its pairing or last verify recorded it
+        (remote/key_tiers.py; person_steps.trusted_rows "key_tier"), the weaker ones marked, and in enterprise mode
+        the ones it refuses to use."""
+        from orchestrator.remote.key_tiers import TIERS, allowed, is_weaker
+        tier = (trusted or {}).get("key_tier") or ""
+        if tier not in TIERS:
+            return self._t("boards.dash")
+        text = self._t(f"boards.tier.{tier}")
+        if not allowed(tier, self._mode()):
+            return self._t("boards.tier.refused", tier=text)
+        return self._t("boards.tier.weaker", tier=text) if is_weaker(tier) else text
 
     def select(self, device_id: str) -> bool:
         for row, entry in enumerate(self.entries):
@@ -410,6 +429,8 @@ class BoardsWindow(QDialog):
                       "key_install": t("boards.err.key_install", reason=str(error.error or error))}
             if error.kind in simple:
                 return simple[error.kind]
+            if error.kind == "weaker_tier":   # enterprise mode refuses the board's weaker key tier at every use
+                return t("boards.err.weaker_tier")
             if error.kind == "unreachable":
                 return t("boards.err.unreachable", address=address, reason=str(error.error or error))
             if error.kind == "login_failed":
@@ -1302,7 +1323,8 @@ class BoardsWindow(QDialog):
         def read():
             client, _key = person_steps.connect_stored(state, device_id, host, port, user, None,
                                                        on_client=self._keep_client, cancel=self._cancel,
-                                                       on_event=self._board_lines(host), signer=self._signer())
+                                                       on_event=self._board_lines(host), signer=self._signer(),
+                                                       mode=self._mode())
             try:
                 self._check_cancel()
                 return person_steps.list_board_builds(RemoteShell(client), state, device_id)
@@ -1334,7 +1356,8 @@ class BoardsWindow(QDialog):
         def remove():
             client, _key = person_steps.connect_stored(state, device_id, host, port, user, None,
                                                        on_client=self._keep_client, cancel=self._cancel,
-                                                       on_event=self._board_lines(host), signer=self._signer())
+                                                       on_event=self._board_lines(host), signer=self._signer(),
+                                                       mode=self._mode())
             try:
                 self._check_cancel()
                 return person_steps.remove_board_builds(RemoteShell(client), accepted, prune, device_id, audit)
@@ -1447,7 +1470,8 @@ class BoardsWindow(QDialog):
                 open_board=lambda: person_steps.connect_stored(state, device_id, host, port, settings.ssh_user,
                                                                password, step="runtime_deploy",
                                                                on_client=self._keep_client, cancel=self._cancel,
-                                                               on_event=self._board_lines(host), signer=signer),
+                                                               on_event=self._board_lines(host), signer=signer,
+                                                               mode=self._mode()),
                 remember=lambda key: person_steps.remember_board(state, host, port, settings.ssh_user, key, via="gui",
                                                                  audit=audit, actor="gui"),
                 choose_bench=lambda shell, home: steps.choose_bench_model(
@@ -1558,7 +1582,8 @@ class BoardsWindow(QDialog):
             plan_verify = steps.deployed_verify_plan(state, record, lambda: steps.plan_runtime(profile))
             client, _key = person_steps.connect_stored(state, device_id, host, port, user, None, step="verify",
                                                        on_client=self._keep_client, cancel=self._cancel,
-                                                       on_event=self._board_lines(host), signer=self._signer())
+                                                       on_event=self._board_lines(host), signer=self._signer(),
+                                                       mode=self._mode())
             try:   # a verify only checks: it never rewrites the board's trust record
                 from orchestrator.runtime.device.remote import RemoteShell, read_facts
                 shell = RemoteShell(client)

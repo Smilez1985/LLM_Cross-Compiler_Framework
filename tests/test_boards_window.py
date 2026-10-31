@@ -535,7 +535,7 @@ def test_older_builds_on_the_board_are_listed_off_the_gui_thread_and_removed_onl
             connected.append("closed")
 
     def connect(state, device_id, host, port, user, password=None, *, step="", on_client=None,
-                cancel=None, on_event=None, signer=None):
+                cancel=None, on_event=None, signer=None, mode="private"):
         threads(ran)()
         connected.append((device_id, host, port, user, password, step))
         on_client(Client())
@@ -590,7 +590,7 @@ def runtime_fakes(monkeypatch, record):
             record.append("closed")
 
     def connect(state, device_id, host, port, user, password=None, *, step="", on_client=None,
-                cancel=None, on_event=None, signer=None):
+                cancel=None, on_event=None, signer=None, mode="private"):
         record.append(("connect", user, password, step, threading.current_thread() is threading.main_thread()))
         return Client(), FakeHostKey()
 
@@ -1317,3 +1317,28 @@ def test_the_key_of_another_trusted_board_is_refused_with_its_name(qapp, window,
     assert window._t("boards.edit.err.other_board", label="Garage", device_id=garage.device_id) in [
         a.text for a in boxes.asked]
     assert (state / "devices.json").read_bytes() == before
+
+
+# --- the key tier ---------------------------------------------------------------------------------------------------
+
+def test_the_key_tier_column_shows_each_boards_tier_and_marks_what_enterprise_mode_refuses(qapp, window):
+    """Regression (failed before: the Boards window had no Key tier column; only `deploy devices list` showed it)."""
+    from orchestrator.gui.boards_window import COLUMNS
+    from orchestrator.runtime.device.person_steps import BoardStepError
+    from orchestrator.runtime.device.trusted import record_key_tier
+    state = state_of(window)
+    device = trusted_board(state)
+    record_key_tier(state, device.device_id, "dropbear")
+    window.reload()
+    column = COLUMNS.index("boards.col.tier")
+    assert window.table.horizontalHeaderItem(column).text() == "Key tier"
+    assert window.table.item(0, column).text() == "Dropbear tier (weaker)"
+    window.framework.config.get = lambda key, default=None: {"framework_mode": "enterprise"}.get(key, default)
+    window.reload()
+    assert window.table.item(0, column).text() == "Dropbear tier (refused in enterprise mode)"
+    text = window._error_text(BoardStepError("refused", "weaker_tier"))
+    assert "Enterprise mode refuses to use this board" in text and "OpenSSH" in text
+    assert "llmcf" not in text and "llm-cli" not in text   # the GUI names the window, never a command
+    record_key_tier(state, device.device_id, "root")
+    window.reload()
+    assert window.table.item(0, column).text() == "root-owned key line"
