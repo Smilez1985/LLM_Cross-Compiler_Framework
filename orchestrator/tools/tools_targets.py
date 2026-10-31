@@ -34,7 +34,7 @@ from orchestrator.Core.module_generator import (ARCHITECTURES, DEFAULT_BASE, INP
 # The audit row of a module the person saved lives in Core/module_generator.py (chain c1-imports); the old name stays.
 from orchestrator.Core.module_generator import record_module_saved  # noqa: F401
 from orchestrator.runtime.probe_service import (IMPORT_NEXT, LIST_LIMIT, LOCAL_ID, PROBE_TIMEOUT, HardwareProbes,
-                                                ProbeError, match_target)
+                                                ProbeError, access_line, match_target)
 from orchestrator.schemas.build import BenchmarkRowOut, TargetOut
 from orchestrator.schemas.modules import PackageSourceIn, PinnedDownloadIn
 from orchestrator.schemas.targets import OptimizationProfile, TargetCapabilities, TargetIn
@@ -143,11 +143,36 @@ class ProbeSummary(BaseModel):
     matched_target: Optional[str] = None
 
 
+class AccessOut(BaseModel):
+    """HardwareProfile.access() of one probe (probe 3.3.0): fixed words, versions and yes/no only, never a path or an
+    account. None in a field: the probe could not tell."""
+    ssh_server: Optional[Literal["openssh", "dropbear", "other", "none"]] = None
+    ssh_server_version: Optional[untrusted_text(32)] = None
+    ssh_server_source: Optional[Literal["socket", "process", "service", "binary"]] = Field(
+        default=None, description="socket: listens on port 22; process: runs; service: enabled; binary: installed only")
+    ssh_servers_installed: List[Literal["openssh", "dropbear"]] = Field(default_factory=list)
+    sudo: Optional[Literal["root", "nopasswd", "password", "absent", "other"]] = Field(
+        default=None, description="root: the probe ran as root; nopasswd: sudo -k -n true worked; password: sudo "
+                                  "wants a password or refuses the account; other: Windows")
+    sudo_present: Optional[bool] = None
+    sudo_without_password: Optional[bool] = None
+    ssh_keygen: Optional[Literal["openssh", "none"]] = None
+    ssh_keygen_version: Optional[untrusted_text(32)] = None
+    keygen_signatures: Optional[bool] = Field(default=None, description="ssh-keygen -Y sign/verify (OpenSSH 8.1+)")
+    init_system: Optional[untrusted_text(16)] = None
+    package_manager: Optional[Literal["apt", "dnf", "zypper", "pacman", "apk", "other"]] = None
+    dietpi_software: bool = False
+    summary: untrusted_text(600) = Field(default="", description="The same facts as one line of text")
+
+
 class HardwareProbeOut(ToolOutput):
     probes: List[ProbeSummary] = Field(default_factory=list)
     probe: Optional[ProbeSummary] = None
     values: Dict[str, UntrustedText] = Field(default_factory=dict, description="The probe's validated values")
     matched_target: Optional[MatchOut] = None
+    access: Optional[AccessOut] = Field(default=None, description="How the board is reached and installed on (SSH "
+                                                                  "server, sudo, ssh-keygen, init, package manager); "
+                                                                  "None for a probe older than 3.3.0")
 
 
 class NoInput(BaseModel):
@@ -403,8 +428,12 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
         if found is None:
             ctx.notes.append("No target matches this probe: create_target_module can add one (the add_board prompt "
                              "guides through it).")
+        facts = profile.access()
+        access = None
+        if facts is not None:
+            access = AccessOut(**facts.as_dict(), summary=access_line(profile, "en") or "")
         return HardwareProbeOut(probe=summary_of(info, found.target if found else None),
-                                values=dict(profile.values),
+                                values=dict(profile.values), access=access,
                                 matched_target=MatchOut(target=found.target, board=found.board, reason=found.reason)
                                 if found else None)
 

@@ -12,7 +12,9 @@
 #   --install-tools  opt-in: offer to install vulkan-tools (vulkaninfo) with the package manager first; asks on the
 #                    terminal and uses sudo. Without it the probe never prompts, installs or asks for a password.
 #
-# POSIX sh (dash, busybox ash, bash), LC_ALL=C. No network, no stdin (tools get /dev/null), no sudo. No host name,
+# POSIX sh (dash, busybox ash, bash), LC_ALL=C. No network, no stdin (tools get /dev/null), no sudo prompt: sudo is
+# only asked `sudo -k -n true` (the access facts; -n never prompts or reads a password, -k ignores cached
+# credentials). No host name,
 # user name, path, serial number or MAC address is read into the result; free text is printable ASCII.
 # HW_PROBE_SYSROOT (for tests): a folder that stands in for / when files are read; the kernel release and machine
 # then come from <sysroot>/proc/sys/kernel/osrelease and .../arch, and the host's getconf/ldconfig are not asked.
@@ -21,7 +23,7 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-PROBE_VERSION=3.2.0
+PROBE_VERSION=3.3.0
 OUTPUT_FILE=target_hardware_config.txt
 INSTALL_TOOLS=0
 TOOLCHAIN=1
@@ -1679,6 +1681,158 @@ else
     emit HIP_RUNTIME OFF
 fi
 emit METAL OFF
+
+# --- access: SSH server, sudo, ssh-keygen, package manager (probe 3.3.0; the same rules as hardware_probe.py) ----
+
+# Copies of configs/hardware_probe_schema.yml tables.ssh_server_*, sudo_paths, ssh_keygen_paths, ssh_client_paths,
+# package_managers and dietpi_software_path (tests compare them). Fixed paths and words only: no path, host name or
+# user name reaches the result.
+ssh_server_name() {  # /proc/<pid>/comm -> SSH server (tables.ssh_server_names)
+    case "$1" in
+        sshd) echo openssh ;;
+        sshd-session) echo openssh ;;
+        dropbear) echo dropbear ;;
+        dropbearmulti) echo dropbear ;;
+        tinysshd) echo other ;;
+        *) return 1 ;;
+    esac
+}
+SSH_SERVER_BINARIES="/usr/sbin/sshd:openssh /usr/bin/sshd:openssh /sbin/sshd:openssh /usr/local/sbin/sshd:openssh"
+SSH_SERVER_BINARIES="$SSH_SERVER_BINARIES /usr/sbin/dropbear:dropbear /usr/bin/dropbear:dropbear"
+SSH_SERVER_BINARIES="$SSH_SERVER_BINARIES /sbin/dropbear:dropbear /usr/local/sbin/dropbear:dropbear"
+SSH_SERVER_SERVICES="/etc/systemd/system/multi-user.target.wants/ssh.service:openssh"
+SSH_SERVER_SERVICES="$SSH_SERVER_SERVICES /etc/systemd/system/multi-user.target.wants/sshd.service:openssh"
+SSH_SERVER_SERVICES="$SSH_SERVER_SERVICES /etc/systemd/system/sockets.target.wants/ssh.socket:openssh"
+SSH_SERVER_SERVICES="$SSH_SERVER_SERVICES /etc/systemd/system/multi-user.target.wants/dropbear.service:dropbear"
+SSH_SERVER_SERVICES="$SSH_SERVER_SERVICES /etc/runlevels/default/sshd:openssh /etc/runlevels/default/dropbear:dropbear"
+SSH_SERVER_SERVICES="$SSH_SERVER_SERVICES /etc/rc2.d/S[0-9][0-9]ssh:openssh /etc/rc2.d/S[0-9][0-9]dropbear:dropbear"
+SUDO_PATHS="/usr/bin/sudo /bin/sudo /usr/local/bin/sudo /usr/sbin/sudo"
+SSH_KEYGEN_PATHS="/usr/bin/ssh-keygen /bin/ssh-keygen /usr/local/bin/ssh-keygen"
+SSH_CLIENT_PATHS="/usr/bin/ssh /bin/ssh /usr/local/bin/ssh"
+PACKAGE_MANAGERS="/usr/bin/apt-get:apt /usr/bin/dnf:dnf /usr/bin/zypper:zypper /usr/bin/pacman:pacman /sbin/apk:apk"
+PACKAGE_MANAGERS="$PACKAGE_MANAGERS /usr/bin/apk:apk /usr/bin/yum:other /bin/opkg:other /usr/bin/opkg:other"
+PACKAGE_MANAGERS="$PACKAGE_MANAGERS /usr/bin/xbps-install:other /usr/bin/emerge:other /usr/sbin/pkg:other"
+PACKAGE_MANAGERS="$PACKAGE_MANAGERS /usr/local/bin/brew:other /opt/homebrew/bin/brew:other"
+DIETPI_SOFTWARE_PATH=/boot/dietpi/dietpi-software
+
+first_path() {  # PATH...: the first one that exists (a link counts)
+    for p in "$@"; do exists "$p" && { printf '%s' "$p"; return 0; }; done
+    return 1
+}
+kind_add() {  # LIST KIND: LIST with KIND once (space-separated)
+    case " $1 " in *" $2 "*) printf '%s' "$1" ;; *) printf '%s' "${1:+$1 }$2" ;; esac
+}
+pick_server() {  # KINDS: dropbear before openssh before other (see SSH_SERVER in the schema)
+    for k in dropbear openssh other; do
+        case " $1 " in *" $k "*) echo "$k"; return 0 ;; esac
+    done
+    return 1
+}
+openssh_version() { printf '%s\n' "$1" | sed -n 's/.*OpenSSH_\(for_Windows_\)\{0,1\}\([0-9]\{1,2\}\.[0-9]\{1,2\}\).*/\2/p' | head -n1; }
+dropbear_version() { printf '%s\n' "$1" | grep Dropbear | grep -oE 'v[0-9]{4}\.[0-9]{1,3}' | head -n1 | cut -c2-; }
+
+binary_kind() {  # PATH KIND: the server a program of the table is, by the name its link points to (followed inside
+    # the machine: a Dropbear behind /usr/sbin/sshd is Dropbear), else KIND
+    t=$(f "$1") n=0
+    while [ -L "$t" ] && [ "$n" -lt 8 ]; do
+        l=$(readlink "$t" 2>/dev/null) || break
+        case "$l" in /*) t=$(f "$l") ;; *) t="${t%/*}/$l" ;; esac
+        n=$((n + 1))
+    done
+    ssh_server_name "${t##*/}" || echo "$2"
+}
+proc_kind() {  # COMM: the server a process name is; a name that is also a program of the table counts as that program
+    ssh_server_name "$1" >/dev/null || return 1
+    found=""
+    for spec in $SSH_SERVER_BINARIES; do
+        p=${spec%%:*}
+        [ "${p##*/}" = "$1" ] && exists "$p" && found=$(kind_add "$found" "$(binary_kind "$p" "${spec#*:}")")
+    done
+    pick_server "$found" || ssh_server_name "$1"
+}
+
+access_facts() {
+    INSTALLED=""
+    for spec in $SSH_SERVER_BINARIES; do
+        exists "${spec%%:*}" && INSTALLED=$(kind_add "$INSTALLED" "$(binary_kind "${spec%%:*}" "${spec#*:}")")
+    done
+    # The listener of TCP port 22 (state 0A), by its socket inode in /proc/<pid>/fd where readable.
+    LISTENERS=""
+    INODES=$( { rd /proc/net/tcp; rd /proc/net/tcp6; } | tr -d '\r' |
+              awk 'NR > 0 && $4 == "0A" && toupper($2) ~ /:0016$/ && $10 ~ /^[0-9]+$/ && $10 != "0" { print $10 }' |
+              sort -u)
+    if [ -n "$INODES" ]; then
+        WANT="socket:\[($(printf '%s\n' "$INODES" | tr '\n' '|' | sed 's/|$//'))\]\$"
+        for d in "$(f /proc)"/[0-9]*/fd; do
+            [ -d "$d" ] || continue
+            # The link targets are matched (socket:[inode]), not file names; one ls per process, not one readlink per fd.
+            # shellcheck disable=SC2010
+            ls -l "$d" 2>/dev/null | grep -Eq -- "$WANT" || continue   # another account's process: not readable
+            k=$(proc_kind "$(trim "$(head -n1 "${d%/fd}/comm" 2>/dev/null)")") &&
+                LISTENERS=$(kind_add "$LISTENERS" "$k")
+        done
+    fi
+    PROCESSES=""
+    for c in "$(f /proc)"/[0-9]*/comm; do
+        [ -f "$c" ] || continue
+        k=$(proc_kind "$(trim "$(head -n1 "$c" 2>/dev/null)")") && PROCESSES=$(kind_add "$PROCESSES" "$k")
+    done
+    SERVICES=""
+    for spec in $SSH_SERVER_SERVICES; do
+        for m in $(f "${spec%%:*}"); do
+            if [ -e "$m" ] || [ -L "$m" ]; then SERVICES=$(kind_add "$SERVICES" "${spec#*:}"); break; fi
+        done
+    done
+    SERVER=none SOURCE=""
+    if s=$(pick_server "$LISTENERS"); then SERVER=$s SOURCE=socket
+    elif s=$(pick_server "$PROCESSES"); then SERVER=$s SOURCE=process
+    elif s=$(pick_server "$SERVICES"); then SERVER=$s SOURCE=service
+    elif s=$(pick_server "$INSTALLED"); then SERVER=$s SOURCE=binary
+    fi
+    put SSH_SERVER "$SERVER"
+    [ -n "$SOURCE" ] && put SSH_SERVER_SOURCE "$SOURCE"
+    LIST=""
+    for k in openssh dropbear; do
+        case " $INSTALLED " in *" $k "*) LIST="${LIST:+$LIST,}$k" ;; esac
+    done
+    [ -n "$LIST" ] && put SSH_SERVERS_INSTALLED "$LIST"
+    case "$SERVER" in
+        openssh|dropbear)
+            for spec in $SSH_SERVER_BINARIES; do
+                exists "${spec%%:*}" && [ "$(binary_kind "${spec%%:*}" "${spec#*:}")" = "$SERVER" ] || continue
+                out=$(tool_all "$(f "${spec%%:*}")" -V)
+                if [ "$SERVER" = openssh ]; then v=$(openssh_version "$out"); else v=$(dropbear_version "$out"); fi
+                put SSH_SERVER_VERSION "$v" "$P_VERSION" quiet
+                break
+            done ;;
+    esac
+    # sudo: root needs none; else `sudo -k -n true` only (never prompts, never reads a password).
+    UID_NOW=$(tool id -u)
+    if [ "$UID_NOW" = 0 ]; then put SUDO root
+    elif ! s=$(first_path $SUDO_PATHS); then put SUDO absent
+    else
+        $TIMEOUT "$(f "$s")" -k -n true </dev/null >/dev/null 2>&1
+        rc=$?
+        if [ "$rc" = 0 ]; then put SUDO nopasswd
+        elif [ "$rc" = 126 ] || [ "$rc" = 127 ] || [ "$rc" = 124 ]; then warn "not_determined:SUDO"
+        else put SUDO password
+        fi
+    fi
+    if first_path $SSH_KEYGEN_PATHS >/dev/null; then
+        put SSH_KEYGEN openssh
+        v=""
+        if c=$(first_path $SSH_CLIENT_PATHS); then v=$(openssh_version "$(tool_all "$(f "$c")" -V)"); fi
+        put SSH_KEYGEN_VERSION "$v" "$P_VERSION" quiet || warn "not_determined:SSH_KEYGEN_VERSION"
+    else
+        put SSH_KEYGEN none
+    fi
+    for spec in $PACKAGE_MANAGERS; do
+        if exists "${spec%%:*}"; then put PACKAGE_MANAGER "${spec#*:}"; break; fi
+    done
+    [ "$OS" = linux ] && exists "$DIETPI_SOFTWARE_PATH" && put DIETPI_SOFTWARE present
+    return 0
+}
+access_facts
 
 # --- toolchain: versions only, never paths ------------------------------------------------------------------------
 

@@ -3102,7 +3102,10 @@ entscheidet nie über ein Löschen: nicht über ihr eigenes Formular, eine Dauer
   DietPi, Kernel, Init-System), die Architektur des Userlands, die C-Bibliothek und ihre Version (glibc, musl), die
   CPU (Modell, Kerne, ARM-Kerncluster, jedes CPU-Merkmal, für das ggml baut: x86 und ARM, etwa AVX-512 oder das
   ARM-Skalarprodukt, und seit Probe 3.2.0 RISC-V, LoongArch, POWER und s390x, auch aus den HWCAP-Bits des Kernels),
-  Speicher, SoC, NPU und jede GPU (NVIDIA Compute Capability, AMD gfx-Target, Vulkan); keinen
+  Speicher, SoC, NPU und jede GPU (NVIDIA Compute Capability, AMD gfx-Target, Vulkan), und seit Probe 3.3.0, wie die
+  Maschine erreicht und auf ihr installiert wird (der SSH-Server, OpenSSH oder Dropbear, und seine Version; sudo und ob
+  es ein Passwort braucht, gefragt nur mit `sudo -k -n true`; die Version von ssh-keygen; die Paketverwaltung und DietPis
+  dietpi-software: die Zeile `Access:` von `llm-cli scan`); keinen
   Hostnamen, keine Seriennummer und keine MAC-Adresse. Die Probes brauchen kein Netz, fragen nie nach, installieren
   nichts und verlangen keine Administratorrechte, und externe Werkzeuge laufen mit Zeitlimit. Tests führen die `.py`
   und die `.sh` auf denselben Testrechnern aus und verlangen dasselbe Ergebnis. Das installierte Paket enthält eine
