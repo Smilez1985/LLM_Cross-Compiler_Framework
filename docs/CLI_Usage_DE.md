@@ -157,6 +157,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `config show` / `config repos` | Die wirksamen Einstellungen und ihre Herkunft zeigen / Überschreibungen für Quell-Repositorys verwalten |
 | `config local-network` | Was der Offline-Modus als lokal zählt, und was du selbst als lokal zählst (ein VPN, ein Host, ein Adressbereich) |
 | `config doorbell` | Dein MQTT-Broker für die Build-Türklingel, und eine Test-Klingel |
+| `config set framework_mode` | Dein Framework-Modus: privat (Standard) oder enterprise (auf einem Board nur OpenSSH mit sudo) |
 | `config output-folder` | Den Ausgabeordner zeigen oder festlegen, in dem fertige Modelle gespeichert werden |
 | `zoo list` / `zoo show` | Den Community-Zoo und die installierten Pakete auflisten / einen Eintrag zeigen |
 | `zoo install` / `zoo verify` | Ein Community-Paket nach Prüfungen und deiner Bestätigung installieren / installierte Pakete oder eine Paketdatei prüfen |
@@ -2539,6 +2540,17 @@ daraus. Die übrigen Überschreibungen ändern in einem Build nichts: Seine Stuf
 
 In der GUI: **Datei > Einstellungen…**, Tab **Quell-Repositorys**: die Liste, **Hinzufügen** (Name und URL) und
 **Ausgewählte entfernen…** (fragt zuerst; „Nein“ ist die Vorgabe).
+
+### config set
+
+```bash
+llmcf config set framework_mode enterprise
+llmcf config set framework_mode private
+```
+
+Setzt eine deiner eigenen Einstellungen in config.yml. `framework_mode` ist private (Standard) oder enterprise: Der Enterprise-Modus nimmt auf einem Board nur OpenSSH mit sudo (die Schlüsselzeile in Root-Besitz) und lehnt die schwächere Dropbear-Stufe und das Home-Tor ab, beim Koppeln und bei jeder Benutzung eines früher gekoppelten Boards. Exit-Code 2 für einen Wert, der keins von beiden ist. Nur du setzt ihn; eine KI darf ihn lesen (`get_settings`), nie ändern. Die Installer fragen dasselbe (`install.sh --mode=private|enterprise`, `install.bat --mode=...` oder `LCF_MODE` für einen unbeaufsichtigten Lauf).
+
+In der GUI: **Datei > Einstellungen…**, Tab **Allgemein**, **Framework-Modus**.
 
 ### config local-network
 

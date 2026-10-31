@@ -7045,6 +7045,37 @@ def show_config(ctx: FrameworkContext):
     click.echo(json.dumps(effective_settings(config), indent=2, default=str, ensure_ascii=False))
 
 
+# The settings `config set` takes: the person's own settings without a command of their own (an AI may read them with
+# get_settings, never change them).
+CONFIG_SET_KEYS = ("framework_mode",)
+
+
+@config.command('set')
+@click.argument('key', type=click.Choice(CONFIG_SET_KEYS))
+@click.argument('value')
+@pass_context
+def config_set(ctx: FrameworkContext, key: str, value: str):
+    """Set one of your own settings in config.yml. framework_mode: private (the default) or enterprise; enterprise
+    mode takes only OpenSSH with sudo on a board (the root-owned key line) and refuses the weaker Dropbear tier and
+    home gate, also for boards paired before. Only you set it, here or in File > Settings...; an AI may read it, never
+    change it"""
+    from orchestrator.Core.config_manager import framework_mode, set_framework_mode
+    config, _ = _settings(ctx)
+    before = framework_mode(config)
+    try:
+        now = set_framework_mode(config, value)
+    except ValueError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
+    except OSError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]framework_mode: {now}[/green]" + ("" if now != before else " (unchanged)"))
+    if now == "enterprise":
+        console.print("Enterprise mode refuses boards whose framework key sits on the Dropbear tier or the home "
+                      "gate; 'llm-cli deploy devices list' shows each board's key tier.")
+
+
 @config.command('output-folder')
 @click.argument('folder', required=False)
 @pass_context

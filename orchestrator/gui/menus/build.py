@@ -62,6 +62,8 @@ CLI_PATHS: Dict[str, str] = {
     # the Builder's progress panel follows a build until its end record and says how it ended
     "build status --wait": "panel_builder_progress",
     "config show": "act_file_settings",
+    # File > Settings... > General: the framework mode (private or enterprise), the person's alone
+    "config set": "act_file_settings",
     "config output-folder": "act_file_output_folder",
     "config repos": "act_file_settings",
     "config repos --add": "act_file_settings",
