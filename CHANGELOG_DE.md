@@ -235,6 +235,12 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   der laufenden Stufe zurück; ein Stopp von außen ohne die Notiz zählt weiter.
 
 ### Sicherheit
+- `2026-10-31 04:21 UTC` · `v3.3.0` **pypdf 6.21.4: sieben Dienstverweigerungen durch präparierte PDFs geschlossen**
+  ([Design](docs/DESIGN_DE.md#sicherheitsmodell)): pypdf 6.21.2 ließ sich durch ein präpariertes PDF in eine
+  Endlosschleife oder zu großem Speicher- und Zeitbedarf bringen (verschlüsselte Dateien mit falscher Seitenzahl,
+  Seitenbeschriftungen, Querverweis-Streams, ungültige Wörterbücher, Dateien ohne Trailer, geklonte Wörterbücher,
+  Seitenbäume mit vielen geteilten Ressourcen). Lock-Datei und Requirements-Exporte setzen 6.21.4 fest, und
+  pyproject.toml verlangt mindestens 6.21.4, damit eine neue Installation die betroffenen Versionen nicht wählen kann.
 - `2026-10-31 01:50 UTC` · `v3.3.0` **Ein Modul-Skript kann einen Build nicht mehr vorzeitig als fertig beenden (der gefälschte Abschluss-Eintrag)**
   ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)): Die Stufen-Module laufen als derselbe Benutzer im
   selben Arbeitsordner wie der Stufen-Runner, ein Modul konnte also `status done` in `build.end` schreiben und dann
