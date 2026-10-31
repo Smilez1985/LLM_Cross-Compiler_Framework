@@ -341,6 +341,7 @@ class TestTheDockerCheck:
     def _mojo(self, client, monkeypatch):
         from orchestrator.Core.mojo.checks import docker as docker_check
         monkeypatch.setattr(docker_check, "_storage_findings", lambda framework: [])
+        monkeypatch.setattr(docker_check, "_stage_user_findings", lambda framework, client: [])   # own tests
         monkeypatch.delenv("DOCKER_HOST", raising=False)   # no stale Podman DOCKER_HOST (its own test: below)
         monkeypatch.setattr(shutil, "which", lambda name, *a, **k: "/usr/bin/docker")
         monkeypatch.setattr(subprocess, "run", lambda args, *a, **k: subprocess.CompletedProcess(args, 0, "", ""))

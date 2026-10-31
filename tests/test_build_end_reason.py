@@ -189,7 +189,7 @@ def test_a_completed_build_is_done_with_its_end_in_build_info(engine, client, tm
     progress = _finish(engine, "b1")
     assert progress.status == BuildStatus.COMPLETED and progress.end_reason == "done"
     info = json.loads((tmp_path / "out" / "b1" / "build_info.json").read_text())
-    assert info["end"] == {"reason": "done", "exit": 0, "stage": "target"}
+    assert info["end"] == {"reason": "done", "exit": 0, "stage": "target", "isolation": "stage_user"}
 
 
 def test_a_failed_build_is_failed(engine, client, tmp_path):
@@ -197,7 +197,7 @@ def test_a_failed_build_is_failed(engine, client, tmp_path):
     engine.build_model(config_for(tmp_path))
     progress = _finish(engine, "b1")
     assert progress.status == BuildStatus.FAILED and progress.end_reason == "failed"
-    assert progress.end_facts() == {"reason": "failed", "exit": 4, "stage": "target"}
+    assert progress.end_facts() == {"reason": "failed", "exit": 4, "stage": "target", "isolation": "stage_user"}
 
 
 def test_a_cancel_is_cancelled_and_leaves_the_note_for_the_stage_runner(engine, client, tmp_path):

@@ -173,8 +173,10 @@ class BuildPlan:
             facts.append(Fact("Base image", f"{self.base_image} ({self.base_image_class})", TARGET_TEXT))
         for line in self.dependencies:
             facts.append(Fact("Build dependency", line, TARGET_TEXT))
-        facts.append(Fact("Sandbox", "the conversion runs without network, capabilities or root (build_sandbox)"
-                          if self.sandbox else "build_sandbox is off"))
+        facts.append(Fact("Sandbox", "the conversion runs without network, capabilities or root, its stage modules "
+                                     "under their own user (build_sandbox)"
+                          if self.sandbox else "build_sandbox is off: the stage modules run as the stage runner's "
+                                               "own user (legacy mode)"))
         return tuple(facts)
 
     def bound(self) -> Dict[str, Any]:

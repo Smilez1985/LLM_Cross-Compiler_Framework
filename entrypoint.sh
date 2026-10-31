@@ -149,6 +149,38 @@ initialize_container() {
     log_success "Ready."
 }
 
+# The build sandbox (the BuildEngine sets STAGE_ISOLATION=user): the container starts as root with only CAP_SETUID and
+# CAP_SETGID, a read-only image and no-new-privileges, so nothing here may change users, ownership or files. The stage
+# runner becomes the user STAGE_RUNNER_IDS names (the person's uid:gid; 0:0 under a rootless engine, where root in the
+# container is the person) and keeps exactly those two rights as ambient capabilities, which it needs to start each
+# stage module under the stage account (modules/stage_user.sh). Its supplementary groups are the container's own
+# (a GPU's render group), without root's group. It checks its rights itself before the first stage and refuses the
+# build when they are not exactly these.
+enter_stage_runner() {
+    local ids="${STAGE_RUNNER_IDS:-}" uid gid groups
+    if [[ ! "$ids" =~ ^[0-9]{1,10}:[0-9]{1,10}$ ]]; then
+        log_error "The build sandbox gave no valid runner ids (STAGE_RUNNER_IDS uid:gid); nothing was run."
+        exit 85
+    fi
+    uid="${ids%%:*}"
+    gid="${ids##*:}"
+    export LLM_ENTRYPOINT_INITIALIZED=1
+    if [ "$uid" = "0" ]; then
+        exec "$0" "$@"
+    fi
+    if ! command -v setpriv >/dev/null 2>&1; then
+        log_error "The build image has no setpriv (util-linux), so the stage runner cannot be started; nothing was run."
+        exit 84
+    fi
+    groups="$(id -G | tr ' ' '\n' | grep -vx 0 | paste -sd, - || true)"
+    local group_args=(--clear-groups)
+    if [ -n "$groups" ]; then
+        group_args=(--groups "$groups")
+    fi
+    exec setpriv --reuid="$uid" --regid="$gid" "${group_args[@]}" \
+        --inh-caps=-all,+setuid,+setgid --ambient-caps=-all,+setuid,+setgid -- "$0" "$@"
+}
+
 verify_environment() {
     if ! python3 --version >/dev/null 2>&1; then
         log_error "Python3 not available"
@@ -284,6 +316,9 @@ run_system_tests() {
 
 main() {
     # Check for root -> Initialize & Switch User
+    if [ "$(id -u)" = "0" ] && [ -z "${LLM_ENTRYPOINT_INITIALIZED:-}" ] && [ "${STAGE_ISOLATION:-}" = "user" ]; then
+        enter_stage_runner "$@"   # the build sandbox: exec, never returns
+    fi
     if [ "$(id -u)" = "0" ] && [ -z "${LLM_ENTRYPOINT_INITIALIZED:-}" ]; then
         initialize_container "$@"
         # initialize_container uses exec, so this code is unreachable

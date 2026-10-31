@@ -235,6 +235,23 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   der laufenden Stufe zurück; ein Stopp von außen ohne die Notiz zählt weiter.
 
 ### Sicherheit
+- `2026-10-31 07:47 UTC` · `v3.3.0` **Die Stufen-Module laufen unter einem eigenen Benutzer und können den Schlüssel des Abschluss-Eintrags nicht lesen**
+  ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)): Ein Stufen-Modul lief als eigener Benutzer des
+  Stufen-Runners und konnte den Schlüssel, der den Abschluss-Eintrag versiegelt, aus dem Speicher des Runners lesen
+  (`/proc/<Runner>/mem`), auf einem Host ohne Yama oder mit `ptrace_scope` 0; seccomp und die abgegebenen
+  Capabilities hielten das nicht auf. Jetzt startet der Stufen-Container als root mit nur CAP_SETUID und CAP_SETGID,
+  der Entrypoint macht den Runner zur Person mit genau diesen zwei Rechten, und der Runner startet jedes Modul unter
+  dem neuen Stufen-Konto des Images (`llmstage`, uid und gid 64010) ohne jede Capability, so verweigert der Kernel
+  das Lesen. Vor dem ersten Modul prüft der Runner seine eigenen Capability-Mengen, no-new-privileges und IDs und
+  einen Test-Wechsel (das Kind muss die Stufen-IDs haben, keine Rechte, keinen Zugriff auf Speicher und Umgebung des
+  Runners, und schreiben und lesen können, was ein Modul braucht), und das Framework prüft das Inspect des angelegten
+  Containers (Benutzer, genau die zwei Capabilities bei allem anderen abgegeben, no-new-privileges, schreibgeschütztes
+  Image und Einbindungen, kein Netzwerk; Docker und Podman), bevor er startet. Beide verweigern den Build mit einem
+  klaren Grund aus einem festen Vokabular, statt ein Modul als Runner auszuführen. Eine rootless Engine, deren
+  Sub-IDs nicht bis zum Stufen-Konto reichen, wird vor dem Build verweigert und vom Doctor genannt
+  (`docker.stage_user`). Das Log und `build_info.json` (`end.isolation`) sagen, in welchem Modus ein Build lief; der
+  alte Modus (`build_sandbox: false`) lässt die Module beim Benutzer des Runners und sagt das. Die Schlüsseldatei
+  gehört nur ihrem Besitzer (0600), und der Datensatz-Ordner eines Rezepts ist für die Gruppe der Person lesbar.
 - `2026-10-31 04:21 UTC` · `v3.3.0` **pypdf 6.21.4: sieben Dienstverweigerungen durch präparierte PDFs geschlossen**
   ([Design](docs/DESIGN_DE.md#sicherheitsmodell)): pypdf 6.21.2 ließ sich durch ein präpariertes PDF in eine
   Endlosschleife oder zu großem Speicher- und Zeitbedarf bringen (verschlüsselte Dateien mit falscher Seitenzahl,

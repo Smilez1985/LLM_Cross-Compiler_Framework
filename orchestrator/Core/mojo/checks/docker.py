@@ -35,8 +35,10 @@ def check_docker(framework) -> List[Finding]:
                         + PODMAN_LIMITS["buildkit"] + ". The framework refuses these with the reason.",
                         DOCKER_CE_WAY, where="the container engine",
                         why="Docker CE is the framework's standard engine; under Podman, GPU builds and BuildKit "
-                            "features are not available.", cannot="admin")] + stale + _storage_findings(framework)
+                            "features are not available.", cannot="admin")] + stale \
+            + _stage_user_findings(framework, client) + _storage_findings(framework)
     findings = [_ok("docker", "docker.daemon", "Docker daemon reachable (container engine: Docker)")] + stale
+    findings.extend(_stage_user_findings(framework, client))
     if docker.buildx is True:
         findings.append(_ok("docker", "docker.buildx", "BuildKit (buildx) available"))
     elif docker.buildx is False:
@@ -47,6 +49,33 @@ def check_docker(framework) -> List[Finding]:
                                 cannot="admin"))
     findings.extend(_storage_findings(framework))
     return findings
+
+
+def _stage_user_findings(framework, client) -> List[Finding]:
+    """Whether the build sandbox can run the stage modules under their own user on this computer (utils/sandbox.py
+    stage_user_support, the builder's own rule): plain words, no path and no account name."""
+    from orchestrator.utils.sandbox import STAGE_USER_NO_SUBIDS_WAY, stage_user_support
+    config = getattr(framework, "config", None)
+    getter = getattr(config, "get", None)
+    try:
+        sandbox_on = bool(getter("build_sandbox", True)) if callable(getter) else True
+    except Exception:  # noqa: BLE001 - an unreadable setting counts as the default (on)
+        sandbox_on = True
+    supported, text = stage_user_support(client, sandbox_on=sandbox_on)
+    if supported:
+        return [_ok("docker", "docker.stage_user", text)]
+    if supported is False:
+        return [Finding("docker", "docker.stage_user", Severity.ERROR, text, STAGE_USER_NO_SUBIDS_WAY,
+                        where="the rootless container engine", cannot="admin",
+                        why="The stage modules must run under their own user so that they cannot read the stage "
+                            "runner's key; without it every build is refused.")]
+    if not sandbox_on:
+        return [Finding("docker", "docker.stage_user", Severity.WARN, text,
+                        "Switch the setting build_sandbox on.",
+                        where="the setting build_sandbox", cannot="person",
+                        why="Without the build sandbox the end record of a build is guarded by its seal and the exit "
+                            "status only.")]
+    return [Finding("docker", "docker.stage_user", Severity.INFO, text)]
 
 
 def _storage_findings(framework) -> List[Finding]:
