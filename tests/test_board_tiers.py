@@ -525,6 +525,65 @@ def test_the_switch_does_nothing_without_the_yes_to_its_plan(framework_key, monk
     assert refused.value.reason == "declined"
 
 
+@pytest.mark.parametrize("manager, prepare", [("apt-get", "apt-get update"), ("apk", "apk update")])
+def test_the_switch_reads_the_package_lists_first_like_the_installer(manager, prepare):
+    """Regression (failed before: apt-get install ran on a board without package lists, as a fresh DietPi image ships,
+    and found no openssh-server; install.sh's pkg_install reads them first, the switch did not)."""
+    family = {"apt-get": "debian", "apk": "alpine"}[manager]
+    the_plan = openssh_switch.plan(key_tiers.TierFacts(sudo="nopass", family=family, managers=(manager,)))
+    body = str(gate.script("openssh-install", manager, str(the_plan.port)))
+    assert f"asroot sh -c '{prepare}'" in body and "|| no lists" in body
+    assert body.index(prepare) < body.index(openssh_switch.INSTALL_COMMANDS[manager])
+    assert any(prepare in line for line in the_plan.lines)
+
+
+def test_the_switch_never_runs_pacman_sy_and_says_when_the_database_is_missing():
+    """Regression (failed before: pacman -S on a board without its package database failed as a plain 'install')."""
+    body = str(gate.script("openssh-install", "pacman", "2222"))
+    assert "pacman -Sy" not in body and "no no-package-db" in body
+    assert body.index("no-package-db") < body.index(openssh_switch.INSTALL_COMMANDS["pacman"])
+    assert "pacman -Syu" in openssh_switch.SWITCH_REASONS["no-package-db"]
+
+
+def test_the_install_may_run_long_and_a_silent_board_is_told_plainly():
+    """Regression (failed before: the install ran with the transport's 120-second silence limit, so a slow board's
+    package manager was cut off halfway and the raw socket.timeout ended the pairing)."""
+    import socket
+    the_plan = openssh_switch.plan(key_tiers.TierFacts(sudo="nopass", family="debian", managers=("apt-get",)))
+    seen = {}
+
+    def run(call, stdin=None, timeout=120):
+        seen["timeout"] = timeout
+        return Result(0, "openssh=installed port=2222\n", "")
+    assert openssh_switch.install(run, the_plan) == (True, "", "installed")
+    assert seen["timeout"] >= 1800
+
+    def silent(call, stdin=None, timeout=120):
+        raise socket.timeout("timed out")
+    assert openssh_switch.install(silent, the_plan) == (False, "install-timeout", "")
+
+
+def test_a_failed_switch_names_its_own_reason_and_does_not_claim_nothing_changed(framework_key, monkeypatch):
+    """Regression (failed before: GateUnavailable read the switch's reason in gate.SETUP_REASONS, so 'install' showed
+    as a bare word and 'sshd-config' as the root step's Match-block text, both saying nothing on the board changed)."""
+    from orchestrator.utils import ssh_trust
+    for reason in ("install", "sshd-config", "no-answer"):
+        if reason == "no-answer":
+            monkeypatch.setattr(openssh_switch, "install", lambda *a: (True, "", "installed"))
+            monkeypatch.setattr(openssh_switch, "wait_until_answers", lambda host, port: "")
+        else:
+            monkeypatch.setattr(openssh_switch, "install", lambda *a, r=reason: (False, r, ""))
+        with pytest.raises(ssh_trust.GateUnavailable) as failed:
+            pairing.pair(_Board(_answers()), framework_key, board_ops.bundle(_signer()), password="pw",
+                         chooser=_Chooser("openssh", yes=("switch",)), audit=_Audit(), via="cli",
+                         host="board.example.com", user="dietpi")
+        text = str(failed.value)
+        assert failed.value.reason == reason
+        assert openssh_switch.SWITCH_REASONS[reason] in text, text
+        assert "Match block" not in text and "nothing on the board changed" not in text
+        assert "Dropbear" in text
+
+
 # --- the mode setting, and (6) the tier of a paired board ---------------------------------------------------------
 
 def test_the_mode_is_private_by_default_and_only_the_person_changes_it():
@@ -569,3 +628,14 @@ def test_the_tier_of_a_board_shows_in_its_listing_and_mojo_names_the_way_up(tmp_
     assert "switch to OpenSSH" in findings[0].fix_hint
     record_key_tier(tmp_path, device.device_id, "root")
     assert devices._weaker_keys(TrustedDevices(tmp_path), [device]) == []
+    # Regression (failed before: a board paired with a weaker tier in private mode stayed a plain INFO line after
+    # the person switched the framework to enterprise mode, which refuses that tier)
+    record_key_tier(tmp_path, device.device_id, "home")
+    framework = SimpleNamespace(config=SimpleNamespace(
+        user_state_dir=str(tmp_path), get=lambda key, default=None: {"framework_mode": "enterprise"}.get(key, default)))
+    found = [f for f in devices.check_devices(framework) if f.code.endswith(".key_tier")]
+    assert len(found) == 1 and found[0].severity == devices.Severity.WARN
+    assert "enterprise mode" in found[0].message and "pair" in found[0].fix_hint.lower()
+    framework.config.get = lambda key, default=None: default
+    found = [f for f in devices.check_devices(framework) if f.code.endswith(".key_tier")]
+    assert len(found) == 1 and found[0].severity == devices.Severity.INFO

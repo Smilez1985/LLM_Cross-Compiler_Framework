@@ -51,6 +51,16 @@ INSTALL_COMMANDS = {
     "pacman": "pacman -S --noconfirm --needed",
     "apk": "apk add --no-cache",
 }
+# What runs before the first install, as install.sh's pkg_install does it: apt and apk read their package lists anew
+# (a fresh image, DietPi's among them, often ships without them, and then no package is found); dnf and zypper do it
+# themselves; pacman never (pacman -Sy alone is a partial upgrade, which Arch does not support), so a board without
+# pacman's package database is told to update its system first (PACMAN_SYNC_DIR, as install.sh checks it).
+PREPARE_COMMANDS = {"apt-get": "apt-get update", "apk": "apk update"}
+PACMAN_SYNC_DIR = "/var/lib/pacman/sync"
+# How long the install may stay silent (its output stays on the board): reading the package lists and installing
+# OpenSSH on a small board with a slow card or mirror takes minutes, and a cut connection must never stop the package
+# manager halfway (the transport's default is 120 seconds).
+INSTALL_TIMEOUT = 1800.0
 DROPIN = "/etc/ssh/sshd_config.d/llmcf-port.conf"
 
 
@@ -65,6 +75,16 @@ class SwitchUnavailable(ValueError):
 SWITCH_REASONS = {
     "no-manager": "the board has no package manager the switch knows (apt, dnf, zypper, pacman, apk)",
     "install": "the package manager could not install OpenSSH (its output stays on the board)",
+    "lists": "the package manager could not read its package lists (apt-get update or apk update failed; its output "
+             "stays on the board)",
+    "no-package-db": "pacman has no package database yet: update the board's system first (sudo pacman -Syu), then "
+                     "pair again; the framework never runs pacman -Sy itself (a partial upgrade, which Arch does not "
+                     "support)",
+    "install-timeout": "the installation of OpenSSH gave no answer in time; it may still be running on the board, so "
+                       "wait for it to end, then pair the board again",
+    "host-key": "you did not trust the new sshd's host key; it keeps running on its port next to Dropbear",
+    "selinux": "SELinux keeps sshd from the switch's port, and semanage (package policycoreutils-python-utils) could "
+               "not allow it",
     "no-sshd": "OpenSSH's sshd is not there after the installation",
     "sshd-config": "sshd did not accept its configuration (sshd -t); it was not started",
     "start": "sshd could not be started",
@@ -108,7 +128,9 @@ def plan(facts: Any, port: int = SWITCH_PORT) -> SwitchPlan:
     dietpi = getattr(facts, "dietpi", "") == "yes"
     lines = []
     if packages:
-        lines.append(f"Install OpenSSH with the board's package manager, once with sudo: {INSTALL_COMMANDS[manager]} "
+        prepare = PREPARE_COMMANDS.get(manager, "")
+        lines.append("Install OpenSSH with the board's package manager, once with sudo: "
+                     + (f"{prepare}, then " if prepare else "") + f"{INSTALL_COMMANDS[manager]} "
                      + " ".join(packages) + ".")
     else:
         lines.append("OpenSSH's sshd is installed on the board already: nothing is installed.")
@@ -127,6 +149,7 @@ def plan(facts: Any, port: int = SWITCH_PORT) -> SwitchPlan:
 
 def _install_script(manager: str, port: str) -> str:
     install = INSTALL_COMMANDS[manager] + " " + " ".join(PACKAGES[manager])
+    prepare = PREPARE_COMMANDS.get(manager, "")
     return "\n".join([
         "set -u",
         "umask 022",
@@ -142,6 +165,8 @@ def _install_script(manager: str, port: str) -> str:
         f"printf 'Port {port}\\n' | asroot tee {DROPIN} >/dev/null 2>&1 || no sudo",
         "llmcf_sshd() { command -v sshd 2>/dev/null || { [ -x /usr/sbin/sshd ] && echo /usr/sbin/sshd; }; }",
         'if [ -z "$(llmcf_sshd)" ]; then',
+        *([f"  ls {PACMAN_SYNC_DIR}/*.db >/dev/null 2>&1 || no no-package-db"] if manager == "pacman" else []),
+        *([f"  asroot sh -c '{prepare}' >/dev/null 2>&1 || no lists"] if prepare else []),
         f"  asroot sh -c '{install}' >/dev/null 2>&1 || no install",
         "  llmcf_was=installed",
         "fi",
@@ -155,6 +180,12 @@ def _install_script(manager: str, port: str) -> str:
         "fi",
         "asroot ssh-keygen -A >/dev/null 2>&1 || true",
         'asroot "$llmcf_s" -t >/dev/null 2>&1 || no sshd-config',
+        # SELinux (Fedora, RHEL) lets sshd bind only ports labelled for it: the switch's port gets the ssh label
+        'if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" = Enforcing ]; then',
+        "  command -v semanage >/dev/null 2>&1 || no selinux",
+        f"  {{ asroot semanage port -a -t ssh_port_t -p tcp {port} || asroot semanage port -m -t ssh_port_t -p tcp "
+        f"{port}; }} >/dev/null 2>&1 || no selinux",
+        "fi",
         "if [ -d /run/systemd/system ]; then",
         "  { asroot systemctl enable ssh || asroot systemctl enable sshd; } >/dev/null 2>&1",
         "  { asroot systemctl restart ssh || asroot systemctl restart sshd; } >/dev/null 2>&1 || no start",
@@ -211,8 +242,11 @@ def install(run: Callable[..., object], the_plan: SwitchPlan, password: str = ""
     (on stdin). (ok, reason, "installed"|"present")."""
     if "\n" in password or "\r" in password:
         return False, "sudo", ""
-    result = run(gate.script("openssh-install", the_plan.manager, str(the_plan.port)),
-                 stdin=[(password + "\n").encode("utf-8")])
+    try:
+        result = run(gate.script("openssh-install", the_plan.manager, str(the_plan.port)),
+                     stdin=[(password + "\n").encode("utf-8")], timeout=INSTALL_TIMEOUT)
+    except (socket.timeout, TimeoutError):
+        return False, "install-timeout", ""
     return _answer(getattr(result, "out", ""), "openssh")
 
 
@@ -252,6 +286,7 @@ def wait_until_answers(host: str, port: int, *, seconds: float = WAIT_SECONDS, b
         sleep(1.0)
 
 
-__all__ = ["DROPIN", "FAMILY_MANAGER", "INSTALL_COMMANDS", "PACKAGES", "SWITCH_PORT", "SWITCH_REASONS", "SwitchPlan",
+__all__ = ["DROPIN", "FAMILY_MANAGER", "INSTALL_COMMANDS", "INSTALL_TIMEOUT", "PACKAGES", "PACMAN_SYNC_DIR",
+           "PREPARE_COMMANDS", "SWITCH_PORT", "SWITCH_REASONS", "SwitchPlan",
            "SwitchUnavailable", "banner_of", "disable_dropbear", "install", "manager_for", "plan",
            "wait_until_answers"]

@@ -174,9 +174,11 @@ def connect(host: str, user: str, state_dir: Path, port: int = 22, password: Opt
 
 class GateUnavailable(HostKeyError):
     """The board cannot take llmcf's command gate (`reason`, a word of gate.SETUP_REASONS): the framework's key was
-    not installed, nothing of the board's authorized_keys changed."""
+    not installed, nothing of the board's authorized_keys changed. `switch`: the reason is one of the switch to OpenSSH
+    (remote/openssh_switch.py SWITCH_REASONS), which stopped after the person's yes to its plan: its own text then, and
+    no claim that nothing on the board changed (the switch may have installed packages or written its port file)."""
 
-    def __init__(self, reason: str, offer=None):
+    def __init__(self, reason: str, offer=None, *, switch: bool = False):
         from orchestrator.remote.gate import SETUP_REASONS
         self.reason = reason
         self.offer = offer   # remote/key_tiers.py TierOffer: the ways the person may choose instead (None: none read)
@@ -184,6 +186,13 @@ class GateUnavailable(HostKeyError):
         if offer is not None and len(offer.choices) > 1:
             ways = (" You can choose another way when you pair the board again with its password: "
                     + "; ".join(line.split(". ", 1)[1] for line in offer.lines() if line[:1].isdigit()) + ".")
+        if switch:
+            from orchestrator.remote.openssh_switch import SWITCH_REASONS
+            why = SWITCH_REASONS.get(reason) or SETUP_REASONS.get(reason, reason)
+            super().__init__(f"The switch of this board to OpenSSH stopped ({why}), so the framework's key was not "
+                             "installed. Dropbear and your current way in stay as they were; what the switch had "
+                             "installed already stays on the board." + ways)
+            return
         super().__init__(f"This board cannot take llmcf's command gate with the root-owned key line "
                          f"({SETUP_REASONS.get(reason, reason)}), so the framework's key was not installed and nothing "
                          "on the board changed. The framework never installs a weaker key on its own: fix that on the "
