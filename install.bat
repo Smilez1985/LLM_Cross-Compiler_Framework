@@ -60,6 +60,17 @@ foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
 if ($DittoChoice -notin @("auto", "bare-metal", "docker", "skip")) {
     Write-Error "Unbekannter Wert fuer --ditto: '$DittoChoice' (auto, bare-metal, docker oder skip)."
 }
+# The container engine (step [Engine] below): Podman without administrator rights by default, Docker Desktop only
+# with --rootful. An unknown --engine value stops here too, before anything is installed.
+$Rootful = $false
+$EngineChoice = "podman"
+foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
+    if ($InstallArg -eq "--rootful") { $Rootful = $true }
+    if ($InstallArg -like "--engine=*") { $EngineChoice = $InstallArg.Substring(9) }
+}
+if ($EngineChoice -notin @("podman")) {
+    Write-Error "Unbekannter Wert fuer --engine: '$EngineChoice' (unter Windows: podman; Docker Desktop nur mit --rootful)."
+}
 
 Write-Host "===================================================" -ForegroundColor Cyan
 Write-Host "      LLM Framework - Enterprise Installer"
@@ -188,15 +199,6 @@ try {
 # only with --rootful, after a warning: its group docker-users controls a service with administrator rights, so the
 # account has administrator-equivalent rights on this computer, permanently. The installer never changes a group
 # membership; it names docker-users when the account is in it. A step that fails never stops the installation.
-$Rootful = $false
-$EngineChoice = "podman"
-foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
-    if ($InstallArg -eq "--rootful") { $Rootful = $true }
-    if ($InstallArg -like "--engine=*") { $EngineChoice = $InstallArg.Substring(9) }
-}
-if ($EngineChoice -notin @("podman")) {
-    Write-Error "Unbekannter Wert fuer --engine: '$EngineChoice' (unter Windows: podman; Docker Desktop nur mit --rootful)."
-}
 Write-Host "[Engine] Container-Engine (ohne Administratorrechte, ausser mit --rootful)..." -ForegroundColor Yellow
 $SignedIn = $null
 $Elevated = $null

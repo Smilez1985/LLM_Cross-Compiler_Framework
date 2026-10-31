@@ -127,6 +127,11 @@ def _docker_daemon_at(path: Path, timeout: float = 0.5) -> bool:
     return engine_at("unix://" + str(path), timeout=1.0) != "podman"
 
 
+# Where systemd keeps each user's runtime folder (/run/user/<uid>, $XDG_RUNTIME_DIR of a login): the person's Podman
+# socket (podman/podman.sock) and rootless Docker's socket (docker.sock) live there.
+USER_RUNTIME_ROOT = "/run/user"
+
+
 def podman_socket(environ: Mapping[str, str], uid: Optional[int] = None) -> Optional[Path]:
     """The Podman socket of this user: $XDG_RUNTIME_DIR/podman/podman.sock or /run/user/<uid>/podman/podman.sock
     (systemctl --user enable --now podman.socket, as install.sh sets it up), for root also /run/podman/podman.sock.
@@ -136,7 +141,7 @@ def podman_socket(environ: Mapping[str, str], uid: Optional[int] = None) -> Opti
     if runtime_dir:
         candidates.append(Path(runtime_dir) / "podman" / "podman.sock")
     if uid is not None:
-        candidates.append(Path(f"/run/user/{uid}/podman/podman.sock"))
+        candidates.append(Path(USER_RUNTIME_ROOT) / str(uid) / "podman" / "podman.sock")
         if uid == 0:
             candidates.append(Path("/run/podman/podman.sock"))
     for path in candidates:
@@ -162,7 +167,7 @@ def _decide(environ: MutableMapping[str, str], uid: Optional[int], docker_socket
     if not sys.platform.startswith("linux"):
         return EngineChoice("", False, "Docker's default address on this system")
     if uid not in (None, 0):
-        rootless = rootless_docker_socket(environ)
+        rootless = rootless_docker_socket(environ, uid)
         if rootless is not None:
             host = "unix://" + str(rootless)
             environ["DOCKER_HOST"] = host
@@ -191,14 +196,20 @@ ROOTLESS_PODMAN_CHOSEN = ("the person's rootless Podman socket is there (a rootl
                           "daemon that runs as root)")
 
 
-def rootless_docker_socket(environ: Mapping[str, str]) -> Optional[Path]:
+def rootless_docker_socket(environ: Mapping[str, str], uid: Optional[int] = None) -> Optional[Path]:
     """The socket of the person's rootless Docker ($XDG_RUNTIME_DIR/docker.sock, as dockerd-rootless-setuptool.sh sets
-    it up) when a Docker daemon answers there (not podman-docker's link to Podman's socket); None otherwise."""
+    it up; without XDG_RUNTIME_DIR /run/user/<uid>/docker.sock, as podman_socket looks for Podman's) when a Docker
+    daemon answers there (not podman-docker's link to Podman's socket); None otherwise."""
+    candidates = []
     runtime_dir = str(environ.get("XDG_RUNTIME_DIR") or "")
-    if not runtime_dir:
-        return None
-    path = Path(runtime_dir) / "docker.sock"
-    return path if _docker_daemon_at(path) else None
+    if runtime_dir:
+        candidates.append(Path(runtime_dir) / "docker.sock")
+    if uid not in (None, 0):
+        candidates.append(Path(USER_RUNTIME_ROOT) / str(uid) / "docker.sock")
+    for path in candidates:
+        if _docker_daemon_at(path):
+            return path
+    return None
 
 
 def _docker_daemon_running(environ: Mapping[str, str], docker_sockets: Sequence[str]) -> bool:
