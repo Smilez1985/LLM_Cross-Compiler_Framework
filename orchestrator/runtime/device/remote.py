@@ -40,12 +40,18 @@ import re
 import secrets
 import shlex
 import socket
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from orchestrator.remote import gate
 from orchestrator.remote.errors import RemoteFailure
-from orchestrator.remote.session import JOB_STATUS   # the detached job's exit status file (RemoteSession.run_detached)
+# Every command below is one of llmcf's board operations (board_ops.py, orchestrator/remote/gate.py): a board whose
+# key runs only llmcf's gate runs exactly these. The names stay here (their old import path).
+from orchestrator.runtime.device import board_ops
+from orchestrator.runtime.device.board_ops import (BENCH_PID, BENCH_PREFIX, BENCH_STALE_MINUTES,  # noqa: F401
+                                                   BENCH_STOP_GRACE, BENCH_TIMEOUT, FACTS_SCRIPT, REQUIRED_TOOLS,
+                                                   SUDO_SCRIPT)
 from orchestrator.remote.text import one_line as _tail   # a board's answer as one plain line
 from orchestrator.remote.transport import COMMAND_TIMEOUT, HASH_TIMEOUT, MAX_OUTPUT  # the one board session's limits
 from orchestrator.remote.transport import ParamikoTransport  # noqa: F401 - its old import path here
@@ -57,19 +63,13 @@ from orchestrator.runtime.device.launcher import (DEVICE_FOLDER_MAX, DEVICE_PATH
                                                   UNIT_NAME, UNIT_PATH, install_root,
                                                   render_systemd_unit)
 from orchestrator.runtime.device.settings import DeploySettings
-from orchestrator.runtime.server_policy import (DEVICE_DEFAULT_PORT, POSIX_CLEARED_PATH, SERVER_TOOLS_REFUSAL,
-                                                check_command, kv_cache_args, posix_cleared_env, tools_check_args)
+from orchestrator.runtime.server_policy import (DEVICE_DEFAULT_PORT, SERVER_TOOLS_REFUSAL,
+                                                check_command, kv_cache_args, tools_check_args)
 
 UPLOAD_TIMEOUT = 1800
 VERSION_TIMEOUT = 60
 DEVICES_TIMEOUT = 180
-BENCH_TIMEOUT = 900
 BENCH_POLL = 2.0           # seconds between two looks whether the benchmark on the board has finished
-BENCH_PREFIX = ".bench"    # its private folder in the install folder: <root>/.bench.XXXXXXXX (no build folder name)
-# A benchmark folder unchanged this long belongs to no run that can still follow its job (each gives up after
-# BENCH_TIMEOUT from its start): the next run on the board removes it (sweep_bench_folders).
-BENCH_STALE_MINUTES = BENCH_TIMEOUT // 60 + 1
-REQUIRED_TOOLS = ("tar", "gzip", "sha256sum", "od", "dd", "tr", "readlink", "awk", "mktemp")
 MACHINES = {"aarch64": "arm64", "arm64": "arm64", "x86_64": "x86_64", "amd64": "x86_64"}
 
 _RE_HOME = re.compile(r"^/[A-Za-z0-9._/-]{1,%d}$" % DEVICE_FOLDER_MAX, re.ASCII)   # bounds: launcher.py
@@ -161,8 +161,8 @@ class RemoteShell:
         old `umask 077 && cat >` made it (an SFTP server creates a file with its own umask; writing into the empty file
         keeps its mode), also the copy sent again after a damaged arrival. A board without SFTP (or a stand-in without
         it) gets the file on a command's stdin under umask 077 as before (no resume)."""
-        if not self._has_sftp(posixpath.dirname(remote_path)):
-            res = self.run(f"umask 077 && cat > {_q(remote_path)}", stdin=_chunks(Path(path)),
+        if not self.session.gated and not self._has_sftp(posixpath.dirname(remote_path)):
+            res = self.run(gate.script("file-write-private", remote_path), stdin=_chunks(Path(path)),
                            timeout=UPLOAD_TIMEOUT)
             if res.status != 0:
                 raise RemoteError(f"the upload failed (exit {res.status}): {_tail(res.err or res.out)}")
@@ -213,6 +213,7 @@ class DeviceFacts:
     missing: Tuple[str, ...]
     unit_installed: bool
     sudo: Optional[bool] = None   # `sudo -n true` worked (only asked when the settings choose systemd)
+    helper: Optional[bool] = None  # llmcf's root helper is installed (board_ops.ROOT_HELPER; asked with sudo)
 
     @property
     def root(self) -> str:
@@ -223,21 +224,9 @@ class DeviceFacts:
         return f"{self.home}/{KEY_REL}"
 
 
-FACTS_SCRIPT = "\n".join([
-    'printf "uid=%s\\n" "$(id -u)"',
-    'printf "home=%s\\n" "$HOME"',
-    'printf "machine=%s\\n" "$(uname -m)"',
-    'if [ -d /run/systemd/system ]; then echo init=systemd; else echo init=other; fi',
-    f'if [ -f {UNIT_PATH} ]; then echo unit=yes; else echo unit=no; fi',
-    "for t in " + " ".join(REQUIRED_TOOLS) + '; do command -v "$t" >/dev/null 2>&1 || printf "missing=%s\\n" "$t"; '
-    "done",
-])
-SUDO_SCRIPT = "sudo -n true >/dev/null 2>&1 && echo sudo=yes || echo sudo=no"
-
-
 def read_facts(shell: RemoteShell, *, want_sudo: bool = False) -> DeviceFacts:
     """User ID, home folder, architecture, init system and missing tools of the device, each value validated."""
-    res = shell.run(FACTS_SCRIPT + ("\n" + SUDO_SCRIPT if want_sudo else ""), again=True)
+    res = shell.run(gate.script("facts-sudo" if want_sudo else "facts"), again=True)
     if res.status != 0:
         raise RemoteError(f"the device could not be inspected (exit {res.status}): {_tail(res.err or res.out)}")
     values: Dict[str, List[str]] = {}
@@ -262,7 +251,8 @@ def read_facts(shell: RemoteShell, *, want_sudo: bool = False) -> DeviceFacts:
     missing = tuple(t for t in values.get("missing", []) if _RE_TOOL.fullmatch(t))
     sudo = None if not want_sudo else one("sudo") == "yes"
     return DeviceFacts(uid=int(uid), home=home.rstrip("/"), arch=arch, init="systemd" if one("init") == "systemd"
-                       else "other", missing=missing, unit_installed=one("unit") == "yes", sudo=sudo)
+                       else "other", missing=missing, unit_installed=one("unit") == "yes", sudo=sudo,
+                       helper=None if not want_sudo else one("helper") == "yes")
 
 
 # --- deployment ---------------------------------------------------------------------------------------------------
@@ -340,9 +330,17 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
                               "the deploy settings to the start script (--install user). Nothing was changed")
     root = facts.root
     result = DeployResult(build_id=build_id, home=facts.home, root=root, previous=None, install=settings.install)
+    # an unrestricted framework key is restricted now (llmcf's command gate; with systemd also its exact sudo rules)
+    result.notes.extend(board_ops.restrict_key(shell, sudo_user=(settings.ssh_user or "") if systemd and facts.sudo
+                                               and not facts.helper else ""))
+    if systemd and not facts.helper and shell.session.gated:
+        raise RemoteError(board_ops.NO_ROOT_HELPER)
+    if systemd and not facts.helper and any("root helper and its exact sudo rules are installed" in n
+                                            for n in result.notes):
+        facts = replace(facts, helper=True)
 
     say("creating a private staging folder on the device ...")
-    res = shell.run(f"umask 077 && mkdir -p {_q(root)} && mktemp -d {_q(root + '/.staging-XXXXXXXX')}")
+    res = shell.run(gate.script("staging-create", root))
     staging = res.out.strip()
     if res.status != 0 or not staging.startswith(root + "/.staging-") or not _RE_HOME.fullmatch(staging):
         raise RemoteError(f"could not create a staging folder in {root} (exit {res.status}): "
@@ -353,37 +351,11 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
         # without SFTP on the command's stdin as before
         shell.upload(Path(tarball), staging + "/runtime.tar.gz", tarball_sha256)
         say("checking the tarball and every file on the device ...")
-        sums_check = "\n".join([
-            "set -eu",
-            "umask 077",
-            f"cd {_q(staging)}",
-            'got=$(sha256sum runtime.tar.gz | cut -d " " -f 1)',
-            f'[ "$got" = {_q(tarball_sha256)} ] || {{ echo "the tarball arrived damaged" >&2; exit 3; }}',
-            "tar -xzf runtime.tar.gz",
-            "rm -f runtime.tar.gz",
-            f'[ "$(ls -A)" = {_q(id16)} ] || {{ echo "the tarball holds more than the build folder" >&2; exit 3; }}',
-            # Only the user may read the runtime, whatever modes tar applied (umask, or the archive's own as root).
-            f"chmod -R go-rwx {_q(id16)}",
-            f"cd {_q(id16)}",
-            "sha256sum -c SHA256SUMS >/dev/null || { echo 'a file does not match SHA256SUMS' >&2; exit 3; }",
-        ])
-        res = shell.run(sums_check, timeout=HASH_TIMEOUT)
+        res = shell.run(gate.script("runtime-check", staging, tarball_sha256, id16), timeout=HASH_TIMEOUT)
         if res.status != 0:
             raise RemoteError(f"the check on the device failed (exit {res.status}): {_tail(res.err or res.out)}")
         say("installing next to the active build ...")
-        install = "\n".join([
-            "set -eu",
-            "umask 077",
-            f"cd {_q(root)}",
-            "old=$(readlink current 2>/dev/null || true)",
-            # the same build already on the device (an older one the person kept): its files are replaced by the
-            # same, checked files, and the folder is theirs, so a failed check never removes it (round 5 f)
-            f"if [ -d {_q(id16)} ] && [ ! -L {_q(id16)} ]; then echo existed=1; fi",
-            f"rm -rf {_q(id16)}",
-            f"mv {_q(staging + '/' + id16)} {_q(id16)}",
-            'printf "current=%s\\n" "$old"',
-        ])
-        res = shell.run(install)
+        res = shell.run(gate.script("runtime-install", root, id16, staging))
         if res.status != 0:
             raise RemoteError(f"installing on the device failed (exit {res.status}): {_tail(res.err or res.out)}")
         active = next((ln.split("=", 1)[1].strip() for ln in res.out.splitlines() if ln.startswith("current=")), "")
@@ -391,21 +363,15 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
         existed = "existed=1" in res.out.splitlines()
     except BaseException:
         try:
-            shell.run(f"rm -rf {_q(staging)}", again=True)
+            shell.run(gate.script("dir-remove", staging), again=True)
         except RemoteError:
             pass   # the step's own failure (or a Ctrl+C during a wait for the board) is what the person reads
         raise
-    shell.run(f"rm -rf {_q(staging)}", again=True)
+    shell.run(gate.script("dir-remove", staging), again=True)
     folder = f"{root}/{id16}"
 
     say("creating the API key on the device (umask 077) ...")
-    key_check = "\n".join([
-        "set -eu",
-        f"sh {_q(folder + '/' + START_SCRIPT)} keygen >/dev/null",
-        f'mode=$(ls -ln {_q(facts.key)} | cut -c1-10)',
-        '[ "$mode" = "-rw-------" ] || { echo "the key file is readable by others ($mode)" >&2; exit 3; }',
-    ])
-    res = shell.run(key_check, again=True)   # keygen makes the key only when it is missing
+    res = shell.run(gate.script("keygen", folder, facts.key), again=True)   # keygen makes the key only when it is missing
     if res.status != 0:
         _discard(shell, root, id16, active, existed)
         raise RemoteError(f"the key could not be created on the device (exit {res.status}): "
@@ -431,7 +397,7 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
                                 + "; the new build failed its checks and was removed from the device")
         return result
 
-    res = shell.run("\n".join(["set -eu", f"cd {_q(root)}", f"ln -sfn {_q(id16)} current"]), again=True)
+    res = shell.run(gate.script("runtime-activate", root, id16), again=True)
     if res.status != 0:
         _discard(shell, root, id16, active, existed)
         raise RemoteError(f"switching to the new build failed (exit {res.status}): {_tail(res.err or res.out)}")
@@ -461,22 +427,11 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
         result.notes.append(f"a systemd unit of an earlier deployment is still installed ({UNIT_PATH}); it starts "
                             "the new build after its next restart. To remove it: sudo systemctl disable --now "
                             f"{UNIT_NAME} && sudo rm {UNIT_PATH}")
-    res = shell.run(f"sh {_q(root + '/current/' + START_SCRIPT)} status", again=True)
+    res = shell.run(gate.script("start-status", root), again=True)
     if res.status == 0 and "running" in res.out:
         result.notes.append("a server started with the start script is still running the previous build; restart "
                             f"it to use the new one ({root}/current/{START_SCRIPT} stop, then start)")
     return result
-
-
-def _inuse_function(root: str) -> List[str]:
-    """The shell function `inuse NAME`: true while a running program's executable lies in the build folder NAME."""
-    return ["inuse() {",
-            "  for p in /proc/[0-9]*; do",
-            '    e=$(readlink "$p/exe" 2>/dev/null) || continue',
-            f'    case $e in {_q(root)}/"$1"/*) return 0 ;; esac',
-            "  done",
-            "  return 1",
-            "}"]
 
 
 def older_builds(shell: RemoteShell, root: str) -> List[BoardBuild]:
@@ -484,19 +439,7 @@ def older_builds(shell: RemoteShell, root: str) -> List[BoardBuild]:
     program uses it. Reads only: the framework removes no build from a device by itself (round 5 f)."""
     if not _RE_HOME.fullmatch(root or ""):
         raise RemoteError("the install folder is not a plain absolute path")
-    script = "\n".join([
-        f"cd {_q(root)} 2>/dev/null || exit 0",
-        "cur=$(readlink current 2>/dev/null || true)",
-        *_inuse_function(root),
-        f"for d in {_hex16_glob()}; do",
-        '  [ -d "$d" ] && [ ! -L "$d" ] || continue',
-        '  [ "$d" = "$cur" ] && continue',
-        "  k=$(du -sk \"$d\" 2>/dev/null | awk '{print $1}')",
-        '  if inuse "$d"; then u=1; else u=0; fi',
-        '  echo "build=$d ${k:-0} $u"',
-        "done",
-    ])
-    res = shell.run(script, again=True)
+    res = shell.run(gate.script("builds-list", root), again=True)
     if res.status != 0:
         raise RemoteError(f"the runtime builds on the device could not be listed (exit {res.status}): "
                           f"{_tail(res.err or res.out)}")
@@ -561,16 +504,8 @@ def remove_older_builds(shell: RemoteShell, accepted: Any, *, root: str, device_
         if not _RE_ID16.fullmatch(id16) or item.full_path != f"{root}/{id16}":
             result.failed.append((item.speaking_name, "not a build folder of the install folder"))
             continue
-        script = "\n".join([
-            f"cd {_q(root)} || exit 3",
-            *_inuse_function(root),
-            f'[ "$(readlink current 2>/dev/null || true)" = {_q(id16)} ] && {{ echo active; exit 3; }}',
-            f"[ -d {_q(id16)} ] && [ ! -L {_q(id16)} ] || {{ echo gone; exit 3; }}",
-            f"inuse {_q(id16)} && {{ echo inuse; exit 3; }}",
-            f"rm -rf -- {_q(id16)} && echo removed",
-        ])
         try:
-            res = shell.run(script)
+            res = shell.run(gate.script("build-remove", root, id16))
         except RemoteError as e:
             result.failed.append((item.speaking_name, str(e)))
             continue
@@ -598,7 +533,7 @@ def _discard(shell: RemoteShell, root: str, id16: str, active: str, existed: boo
     only the person removes it (llm-cli device runtime prune DEVICE --on-device)."""
     if id16 != active and not existed:
         try:
-            shell.run(f"rm -rf {_q(root + '/' + id16)}", again=True)
+            shell.run(gate.script("dir-remove", f"{root}/{id16}"), again=True)
         except RemoteError:
             pass
 
@@ -610,16 +545,22 @@ def _install_unit(shell: RemoteShell, facts: DeviceFacts, settings: DeploySettin
     if user is None or model is None:
         raise RemoteError("the systemd unit needs the SSH user and the model path in the deploy settings")
     unit = render_systemd_unit(user=user, home=facts.home, model=model, port=settings.port, kv_cache=kv_cache)
-    say(f"installing the systemd unit {UNIT_NAME} (sudo -n) ...")
-    res = shell.run(f"sudo -n tee {UNIT_PATH} >/dev/null", stdin=[unit.encode("utf-8")], again=True)
+    # llmcf's root helper (its exact sudo rules) when the board has it; else, over an unrestricted key with the
+    # person's own `sudo -n`, the commands of before (a gated key never runs those: board_ops.py)
+    helper = bool(facts.helper)
+    say(f"installing the systemd unit {UNIT_NAME} (sudo -n" + (", llmcf's root helper" if helper else "") + ") ...")
+    if helper:
+        res = shell.run(gate.script("root-unit-install", model, str(int(settings.port)), kv_cache or "f16"),
+                        again=True)
+    else:
+        res = shell.run(gate.script("unit-write-legacy"), stdin=[unit.encode("utf-8")], again=True)
     if res.status != 0:
         raise RemoteError(f"sudo could not write {UNIT_PATH} (exit {res.status}); the runtime is installed for the "
                           f"start script: {_tail(res.err or res.out)}")
-    res = shell.run(f"sudo -n systemctl daemon-reload && sudo -n systemctl enable {UNIT_NAME}", again=True)
+    res = shell.run(gate.script("root-unit-enable" if helper else "unit-enable-legacy"), again=True)
     if res.status != 0:
         raise RemoteError(f"systemctl could not enable {UNIT_NAME} (exit {res.status}): {_tail(res.err or res.out)}")
-    res = shell.run(f"if [ -f {_q(model)} ]; then sudo -n systemctl restart {UNIT_NAME} && echo started=yes; "
-                    "else echo started=no; fi", again=True)
+    res = shell.run(gate.script("root-unit-start" if helper else "unit-start-legacy", model), again=True)
     if res.status != 0:
         raise RemoteError(f"systemctl could not start {UNIT_NAME} (exit {res.status}): {_tail(res.err or res.out)}")
     result.unit_started = "started=yes" in res.out
@@ -641,34 +582,22 @@ def _run_program(shell: RemoteShell, home: str, argv: Sequence[str], timeout: fl
     runs only read, so after a network drop they run once more."""
     if checked:
         check_command(argv)  # the shared forbidden-option list (D22); only the --tools check passes checked=False
-    env = " ".join(f"{k}={_q(v)}" for k, v in posix_cleared_env(home).items())
-    script = (f"cd {_q(home)} && exec env -i {env} " + " ".join(_q(a) for a in argv) + " </dev/null"
-              + (" 2>&1" if merge else ""))
-    return shell.run(f"PATH={POSIX_CLEARED_PATH}; export PATH; {script}", timeout=timeout, again=True)
+    return shell.run(gate.script("run-program" if merge else "run-program-split", home, *argv), timeout=timeout,
+                     again=True)
 
 
-# What the board offers for the detached benchmark (one look, read only): nohup (else it runs attached), setsid (its
-# own process group, so a stop reaches the program and every child it starts) and a `timeout SECS PROG` that works
-# (GNU coreutils, BusyBox 1.30 and later: the board stops the benchmark by itself when nobody follows it any more).
-_BENCH_TOOLS = ("command -v nohup >/dev/null 2>&1 && echo nohup=yes || echo nohup=no; "
-                "command -v setsid >/dev/null 2>&1 && echo setsid=yes; "
-                "timeout 5 true >/dev/null 2>&1 && echo timeout=yes; true")
-BENCH_PID = ".lcf-bench.pid"   # the PID (with setsid also the process group) the framework started in the folder
-BENCH_STOP_GRACE = 10          # seconds between the stop's TERM and its KILL
 TIMED_OUT = 124                # timeout's exit status when it stopped the program
 
 
 def bench_stop_command(folder: str, group: bool) -> str:
     """The command that stops the benchmark the framework started in `folder` on the board: the PID recorded in
     BENCH_PID (with `group`: its whole process group, which setsid made it lead), only while its job has no exit
-    status yet, never anything found by name; TERM first, KILL after BENCH_STOP_GRACE seconds."""
-    d = _q(folder)
-    target = '-"$p"' if group else '"$p"'
-    return (f'p=$(cat {d}/{BENCH_PID} 2>/dev/null); case "$p" in ""|*[!0-9]*) exit 0;; esac; '
-            f"[ -e {d}/{JOB_STATUS} ] && exit 0; "
-            f"kill -TERM {target} 2>/dev/null || exit 0; i=0; "
-            f"while [ $i -lt {BENCH_STOP_GRACE} ] && kill -0 {target} 2>/dev/null; do sleep 1; i=$((i+1)); done; "
-            f"kill -KILL {target} 2>/dev/null; true")
+    status yet, never anything found by name; TERM first, KILL after BENCH_STOP_GRACE seconds. The operation
+    bench-stop (bench-stop-group) of board_ops.py."""
+    try:
+        return gate.script("bench-stop-group" if group else "bench-stop", folder)
+    except gate.GateRefused:   # a folder that is none of llmcf's places (a stand-in's): the same command
+        return board_ops.bench_stop_command(_q(folder), group)
 
 
 def _stop_bench(shell: RemoteShell, folder: str, group: bool) -> bool:
@@ -708,14 +637,13 @@ def _run_on_its_own(shell: RemoteShell, home: str, root: str, argv: Sequence[str
     `timeout` the board stops it by itself after `timeout` seconds (exit status TIMED_OUT). A Cancel, a Ctrl+C or the
     follower's own time limit stops exactly that PID or group (_stop_bench; never a program found by name)."""
     check_command(argv)   # the shared forbidden-option list (D22)
-    tools = set(shell.run(_BENCH_TOOLS, again=True).out.split())
+    tools = set(shell.run(gate.script("bench-tools"), again=True).out.split())
     if "nohup=yes" not in tools:
         return _run_program(shell, home, argv, timeout, merge=False)
     group = "setsid=yes" in tools
-    wrap = ("setsid " if group else "") + (f"timeout {int(timeout)} " if "timeout=yes" in tools else "")
-    env = " ".join(f"{k}={_q(v)}" for k, v in posix_cleared_env(home).items())
-    job = (f"(PATH={POSIX_CLEARED_PATH}; export PATH; cd {_q(home)} && exec {wrap}env -i {env} "
-           + " ".join(_q(a) for a in argv) + f" </dev/null) >out 2>err & echo $! > {BENCH_PID}; wait $!")
+    timed = "timeout=yes" in tools
+    verb = "bench-job" + ("-setsid" if group else "") + ("-timeout" if timed else "")
+    job = gate.job(verb, home, argv[0], *([str(int(timeout))] if timed else []), *argv[1:])
     sweep_bench_folders(shell, root)
     folder = shell.private_dir(root, BENCH_PREFIX)
     try:
@@ -728,14 +656,14 @@ def _run_on_its_own(shell: RemoteShell, home: str, root: str, argv: Sequence[str
         except KeyboardInterrupt:
             _stop_bench(shell, folder, group)
             raise
-        out = shell.run(f"cat {_q(folder + '/out')}", again=True).out
-        err = shell.run(f"cat {_q(folder + '/err')}", again=True).out
+        out = shell.run(gate.script("file-read", folder + "/out"), again=True).out
+        err = shell.run(gate.script("file-read", folder + "/err"), again=True).out
     finally:
         # also on a failure and on a cancel that leaves the connection standing (a Ctrl+C at the terminal); a cancel
         # that closed the connection (the Boards window, an AI's cancel_job) cannot reach the board any more: the
         # next run's sweep_bench_folders removes the folder then
         try:
-            shell.run(f"rm -rf {_q(folder)}", again=True)
+            shell.run(gate.script("dir-remove", folder), again=True)
         except RemoteError:
             pass   # a folder that stays is no build folder: older_builds and the prune never list it
     return Result(status, out, err)
@@ -747,12 +675,8 @@ def sweep_bench_folders(shell: RemoteShell, root: str) -> None:
     exactly <root>/.bench.XXXXXXXX (mktemp's), it is a folder and no link, and nothing in it changed for longer than
     any run can take (BENCH_STALE_MINUTES: no session follows its job any more), as the local benchmark removes the
     sandbox folders a crash left behind (runtime/bench.py BenchRunner._sweep). Never fails the benchmark."""
-    script = (f"for d in {_q(root)}/{BENCH_PREFIX}.????????; do "
-              '[ -d "$d" ] && [ ! -L "$d" ] || continue; '
-              f'[ -n "$(find "$d" -maxdepth 0 -mmin +{BENCH_STALE_MINUTES} 2>/dev/null)" ] && rm -rf -- "$d"; '
-              "done; true")
     try:
-        shell.run(script, again=True)
+        shell.run(gate.script("bench-sweep", root), again=True)
     except RemoteError:
         pass   # the benchmark itself says what is wrong with the board
 
@@ -761,8 +685,7 @@ def model_sha256(shell: RemoteShell, path: str) -> Optional[str]:
     """sha256 of a file on the device (None when it is missing or unreadable)."""
     if not _RE_MODEL.fullmatch(path or "") or ".." in path.split("/"):
         raise RemoteError("the model path on the device is not a plain absolute path")
-    res = shell.run(f"[ -f {_q(path)} ] && sha256sum {_q(path)} | cut -d ' ' -f 1", timeout=HASH_TIMEOUT,
-                    again=True)
+    res = shell.run(gate.script("model-sha256", path), timeout=HASH_TIMEOUT, again=True)
     digest = res.out.strip()
     return digest if res.status == 0 and _RE_SHA.fullmatch(digest) else None
 
@@ -781,13 +704,17 @@ def verify_on_device(shell: RemoteShell, *, home: str, plan_verify: Mapping[str,
     elif not (folder.startswith(root + "/") and _RE_ID16.fullmatch(folder[len(root) + 1:])):
         raise RemoteError("the folder to check is not a build folder of the install folder")
     names = list(dict.fromkeys(list(plan_verify.get("binaries") or []) + list(_PROGRAMS)))
-    res = shell.run("; ".join(f"[ -f {_q(_program(folder, n))} ] && [ -x {_q(_program(folder, n))} ] "
-                              f"|| echo missing={n}" for n in names), again=True)
+    res = shell.run(gate.script("programs-check", folder, *names), again=True)
     missing = [ln.split("=", 1)[1] for ln in res.out.splitlines() if ln.startswith("missing=")]
     if res.status != 0 or missing:
         report.checks.append(Check("binaries", False, "missing on the device: " + (", ".join(missing) or "?")))
         return report
     report.checks.append(Check("binaries", True, ", ".join(names)))
+    restricted, version = board_ops.key_state(shell)
+    report.checks.append(Check("board-key", True if restricted else None,
+                               f"the framework's key runs only llmcf's operations (gate {version})" if restricted else
+                               "the framework's key on this board is not restricted (it runs anything the account "
+                               "may run): pair the board again or deploy to restrict it", {"restricted": restricted}))
     report.ran_binaries = True
 
     # Version

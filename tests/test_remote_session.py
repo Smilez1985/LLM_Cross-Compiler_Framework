@@ -334,7 +334,7 @@ def test_the_key_is_installed_once_with_a_password_and_never_without(manager, bo
         passwords.append(password)
         return real_connect(host, user, state_dir, port=port, password=password, timeout=timeout)
     monkeypatch.setattr(ssh_trust, "connect", connect)
-    monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, line: installed.append(line))
+    monkeypatch.setattr(ssh_trust, "install_public_key", lambda client, line, *_a, **_k: installed.append(line))
     board.drop_after = 1_300_000
     board.back_at = 20.0
     result = manager.deploy_package(package, HOST, "radxa", password="one-time", pair=True)
@@ -656,7 +656,7 @@ def deploy_wire(manager, board, package):
 
     def on_board(script):
         if "authorized_keys" in script:
-            return 0, ""
+            return 0, "gate=installed\n"   # the pairing installs llmcf's gate (remote/gate.py)
         return real_run(script)
     board.run = on_board
     board.drop_after = 1_300_000
@@ -671,8 +671,9 @@ def test_every_command_reaches_the_login_shell_as_one_sh_c(manager, board, packa
         words = shlex.split(command)
         assert len(words) == 3 and words[:2] == ["sh", "-c"] and command == "sh -c " + shlex.quote(words[2]), command
     scripts = [shlex.split(c)[2] for c in wire]
-    assert scripts[0].startswith("umask 077 && mkdir -p ~/.ssh"), "the key installation too"
-    assert {s.split()[0] for s in scripts} >= {"umask", "mktemp", "head", "sha256sum", "mv", "[", "cd", "cat", "tail",
+    # the pairing is llmcf's setup step gate-install (orchestrator/remote/gate.py): the gate and the restricted line
+    assert scripts[0].startswith("set -u\numask 077") and "authorized_keys" in scripts[0], "the key installation too"
+    assert {s.split()[0] for s in scripts} >= {"set", "mktemp", "head", "sha256sum", "mv", "[", "cd", "cat", "tail",
                                                "rm", "if"}
 
 
@@ -712,11 +713,16 @@ def test_the_commands_do_their_job_under_any_login_shell(login_shell, manager, b
     by_tool = {}
     for command in wire:
         by_tool.setdefault(shlex.split(command)[2].split()[0], []).append(command)
-    # the key installation: the line is added once, also when it runs twice
+    # the key installation (llmcf's gate and the key's restricted line): the line is there once, also when it runs
+    # twice; the gate program itself goes on stdin (none here: an empty gate still is one plain file)
+    from orchestrator.remote import gate
+    install = next(c for c in wire if "authorized_keys" in c)
     for _ in range(2):
-        assert on_board(by_tool["umask"][0]).returncode == 0
+        done = on_board(install)
+        assert done.returncode == 0 and "gate=installed" in done.stdout, done.stdout + done.stderr
     keys = (home / ".ssh" / "authorized_keys").read_text().splitlines()
-    assert keys == [ssh_trust.client_key(manager._state_dir())[1]]
+    gate_file = (home / gate.GATE_REL).as_posix()
+    assert keys == [gate.restricted_line(ssh_trust.client_key(manager._state_dir())[1], gate_file)]
     # the resume's check of what arrived, and the check of the whole upload
     (prefix,) = by_tool["head"]
     assert on_board(prefix).stdout.split()[0] == hashlib.sha256(data[:1_300_000]).hexdigest()

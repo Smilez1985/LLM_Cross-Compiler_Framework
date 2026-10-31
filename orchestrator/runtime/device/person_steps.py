@@ -509,7 +509,9 @@ def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: 
     if password:
         from orchestrator.remote import pairing
         try:
-            pairing.pair(session.client, state_dir)   # the person's writer: the framework's key, installed once
+            from orchestrator.runtime.device import board_ops
+            # the person's writer: the framework's key, installed once, with llmcf's command gate (board_ops.py)
+            pairing.pair(session.client, state_dir, board_ops.bundle())
         except ssh_trust.HostKeyError as e:
             session.close()
             raise BoardStepError(str(e), "key_install", error=e) from None

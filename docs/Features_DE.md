@@ -583,6 +583,8 @@ installierst du selbst. GUI: **Boards > Boards und Geräte...** (**Laufzeit-Plan
 **Laufzeit installieren...**, **Prüfen...**, **Status**, **Einstellungen...**, **Ältere Laufzeit-Pakete
 entfernen...**, **Ältere Builds auf dem Board entfernen...**).
 
+**Der Schlüssel des Frameworks auf einem Board führt nur llmcfs Operationen aus.** Das Koppeln installiert llmcfs Befehlstor und macht es zum erzwungenen Befehl des Schlüssels (kein Terminal, keine Weiterleitung); das Tor führt nur die eigenen Operationen des Frameworks mit geprüften Argumenten aus und lehnt alles andere mit einer klaren Zeile ab, ein gestohlener Schlüssel öffnet also keine Shell, keine Weiterleitung und kein SFTP auf dem Board. Grenze, klar gesagt: Ein Laufzeit-Paket installieren und ausführen gehört zu diesen Operationen, wer den Schlüssel hat, kann also weiter die Programme eines Pakets als das Board-Konto ausführen; llmcfs eigenes Board-Konto (geplant) fasst das ein. Mit der Einstellung systemd schreiben und starten llmcfs Root-Helfer und seine genauen sudo-Regeln die Unit. Ein Schlüssel von vorher wird beim nächsten Koppeln oder Deployment eingeschränkt (mit der Einstellung systemd, sobald der Root-Helfer installiert ist); `verify` zeigt `board-key`.
+
 - **Bauplan aus der eigenen Probe des Boards** (Entscheidung D14): `llm-cli scan --device` legt das Profil des
   Boards unter seiner ID ab (aus seinem SSH-Host-Schlüssel). Der Bauplan ist ein Cross-Build für dieses Profil:
   `GGML_CPU_ARM_ARCH` aus den CPU-Merkmalen des Boards (RK3566: `armv8.2-a+dotprod+fp16`) und eine Builder-Basis,
