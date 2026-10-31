@@ -40,3 +40,34 @@ def test_no_setup_python_step_uses_the_pip_cache(name):
 def test_the_roadmap_brings_the_pip_cache_back():
     assert "pip cache back in CI" in (REPO_ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")
     assert "pip-Cache" in (REPO_ROOT / "docs/ROADMAP_DE.md").read_text(encoding="utf-8")
+
+
+def _all_workflow_files():
+    return sorted((REPO_ROOT / ".github" / "workflows").glob("*.y*ml")) + \
+        sorted((REPO_ROOT / "scripts" / "community_repo").glob("*.y*ml"))
+
+
+def _cache_steps(data):
+    """Every setup-python step of a parsed workflow that asks for a cache, however the step is written."""
+    found = []
+    for job in (data.get("jobs") or {}).values():
+        for step in (job or {}).get("steps") or []:
+            if isinstance(step, dict) and "actions/setup-python@" in str(step.get("uses", "")):
+                given = step.get("with") or {}
+                if "cache" in given or "cache-dependency-path" in given:
+                    found.append(step)
+    return found
+
+
+@pytest.mark.parametrize("path", _all_workflow_files(), ids=lambda p: p.name)
+def test_no_workflow_restores_the_pip_cache(path):
+    """Every workflow, also one added later and a step written with a name first: no setup-python cache."""
+    yaml = pytest.importorskip("yaml")
+    assert _cache_steps(yaml.safe_load(path.read_text(encoding="utf-8")) or {}) == []
+
+
+def test_the_scan_sees_a_named_setup_python_step():
+    yaml = pytest.importorskip("yaml")
+    data = yaml.safe_load("jobs:\n  a:\n    steps:\n      - name: Python\n        uses: actions/setup-python@x\n"
+                          "        with:\n          cache: pip\n")
+    assert len(_cache_steps(data)) == 1
