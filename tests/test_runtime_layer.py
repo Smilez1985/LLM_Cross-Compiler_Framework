@@ -47,6 +47,9 @@ def _why_not() -> str:
 
 
 WHY_NOT = _why_not()
+# The real static busybox and setpriv the CI job "Runtime layer tools" made (scripts/runtime_toolbox.py OUT); without
+# it the box uses this computer's setpriv and a busybox stand-in
+REAL_TOOLBOX = Path(os.environ["LLMCF_TEST_TOOLBOX"]) if os.environ.get("LLMCF_TEST_TOOLBOX") else None
 HOST_SETPRIV = shutil.which("setpriv") or "setpriv"
 needs_root = pytest.mark.skipif(bool(WHY_NOT), reason=WHY_NOT or "-")
 needs_posix = pytest.mark.skipif(os.name == "nt" or shutil.which("sh") is None,
@@ -64,8 +67,12 @@ class Box:
         shutil.copytree(layer.SHIPPED_DIR, self.layer, ignore=shutil.ignore_patterns("toolbox", "MANIFEST.sha256"))
         if tools:
             (self.layer / "bin").mkdir()
-            (self.layer / "bin" / "busybox").write_text(STAND_IN_BUSYBOX, encoding="utf-8")
-            shutil.copy2(shutil.which("setpriv"), self.layer / "bin" / "setpriv")
+            if REAL_TOOLBOX:   # the real static tools of the way "build" (CI job "Runtime layer tools")
+                for tool in layer.TOOLS:
+                    shutil.copy2(REAL_TOOLBOX / f"{tool}-{layer.machine()}", self.layer / "bin" / tool)
+            else:
+                (self.layer / "bin" / "busybox").write_text(STAND_IN_BUSYBOX, encoding="utf-8")
+                shutil.copy2(shutil.which("setpriv"), self.layer / "bin" / "setpriv")
         for path in [self.layer, *self.layer.rglob("*")]:
             os.chmod(path, 0o755)
         self.image = self.root / "image"
@@ -531,3 +538,86 @@ def test_the_builder_hands_the_end_record_check_the_last_stage_of_the_order():
     assert BuildEngine._last_stage(progress) is None
     progress.runtime_layer = {"stages": ["source", "config", "convert", "target", "after"]}
     assert BuildEngine._last_stage(progress) == "after"
+
+
+# --- the toolbox: the person's way, the one pinned table of the way "fetch" ---------------------------------------
+
+def test_the_fetch_way_refuses_plainly_while_setpriv_has_no_pinned_entry(tmp_path):
+    """Regression: the way "fetch" took busybox from the table and silently built setpriv the other way; while the
+    table has no setpriv entry it now refuses, names the way "build" and fetches nothing."""
+    fetched = []
+    with pytest.raises(layer.ToolboxMissing) as refused:
+        layer.ensure_toolbox(tmp_path, "fetch", offline=False, fetch=lambda url: fetched.append(url) or b"",
+                             build=lambda work: pytest.fail("the way fetch must not build"))
+    assert fetched == [] and "'build'" in str(refused.value) and "setpriv" in str(refused.value)
+
+
+def test_the_one_pinned_table_is_read_and_a_pin_without_its_sha256_is_left_out(tmp_path):
+    table = layer.read_prebuilt()
+    assert set(table["busybox"]) == {"amd64", "arm64"} and table["setpriv"] == {}
+    assert table == layer.PREBUILT
+    bad = tmp_path / "prebuilt.json"
+    bad.write_text('{"setpriv": {"amd64": {"kind": "file", "url": "http://example.com/setpriv", "sha256": "'
+                   + "a" * 64 + '", "name": "setpriv"}, "arm64": {"kind": "file", "url": "https://example.com/s", '
+                   '"name": "setpriv"}}}', encoding="utf-8")
+    assert layer.read_prebuilt(bad)["setpriv"] == {}   # not https, and no sha256
+
+
+def test_a_pinned_program_file_is_checked_by_its_sha256_and_must_be_static():
+    from orchestrator.utils.helpers import sha256_bytes
+    data = b"\x7fELF\x02\x01" + b"\0" * 58
+    pin = {"kind": "file", "name": "setpriv-amd64", "sha256": sha256_bytes(data), "url": "https://example.com/x"}
+    with pytest.raises(ValueError, match="pinned sha256"):
+        layer.extract_prebuilt(data + b"x", pin)
+    with pytest.raises(ValueError, match="statically linked"):   # no program headers: not a whole static program
+        layer.extract_prebuilt(data, pin)
+
+
+def test_only_the_person_chooses_the_toolbox_way(tmp_path):
+    from orchestrator.Core.config_manager import ConfigManager
+    from orchestrator.llm.settings_change import PERSON_ONLY_SETTINGS, AISettingsChange, person_only_text
+    assert "runtime_layer_toolbox" in PERSON_ONLY_SETTINGS
+    assert "never change" in person_only_text("runtime_layer_toolbox")
+    problems = AISettingsChange.problems_of_settings(None, None, {"runtime_layer_toolbox": "fetch"}, by_ai=True)
+    assert [p.code for p in problems] == ["person_only"]
+    config = ConfigManager(tmp_path / "configs")
+    assert layer.toolbox_way(config) == "build"
+    assert layer.set_toolbox_way(config, "fetch") == "fetch" and layer.toolbox_way(config) == "fetch"
+    assert ConfigManager(tmp_path / "configs").get("runtime_layer_toolbox") == "fetch"   # saved
+    with pytest.raises(layer.ToolboxWayError):
+        layer.set_toolbox_way(config, "download")
+
+
+def test_the_layer_status_names_labels_only(tmp_path):
+    import json
+    status = layer.layer_status(tmp_path, {"runtime_layer_toolbox": "fetch"}, platform_name="win32")
+    assert status["verdict"] == "no_toolbox" and status["toolbox_way"] == "fetch" and status["fetch_ready"] is False
+    assert status["end_folder"] == "unprotected" and str(tmp_path) not in json.dumps(status)
+    assert layer.layer_status(tmp_path, platform_name="linux")["end_folder"] == "protected"
+
+
+def test_the_cli_shows_the_layer_and_sets_the_way(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+    from orchestrator import cli as cli_module
+    from orchestrator.Core.config_manager import ConfigManager
+    config = ConfigManager(tmp_path / "configs")
+    config.set("cache_dir", str(tmp_path / "cache"))
+    monkeypatch.setattr(cli_module, "_settings", lambda ctx: (config, lambda v: Path(v)))
+    result = CliRunner().invoke(cli_module.cli, ["build", "image", "layer", "--toolbox", "fetch"])
+    assert result.exit_code == 0, result.output
+    text = " ".join(result.output.split())
+    assert "runtime_layer_toolbox set to fetch" in text and "not on this computer yet" in text
+    assert "Use the way 'build'" in text
+    assert config.get("runtime_layer_toolbox") == "fetch"
+
+
+@pytest.mark.skipif(REAL_TOOLBOX is None, reason="the real tools come from the CI job 'Runtime layer tools'")
+def test_the_real_tools_are_static_and_run():
+    """The tools the way "build" made: static programs (nothing loads from an image), and they run."""
+    for tool in layer.TOOLS:
+        path = REAL_TOOLBOX / f"{tool}-{layer.machine()}"
+        assert layer.is_static_elf(path.read_bytes()), tool
+    assert subprocess.run([str(REAL_TOOLBOX / f"busybox-{layer.machine()}"), "true"], timeout=30).returncode == 0
+    version = subprocess.run([str(REAL_TOOLBOX / f"setpriv-{layer.machine()}"), "--version"], capture_output=True,
+                             text=True, timeout=30)
+    assert version.returncode == 0 and "util-linux" in version.stdout

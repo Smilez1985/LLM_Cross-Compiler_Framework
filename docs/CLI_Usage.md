@@ -715,6 +715,7 @@ to another offline computer.
 ```
 llm-cli build image plan TARGET [--gpu] [--json]
 llm-cli build image sources [--apt-mirror URL] [--apt-proxy URL] [--pip-index URL]
+llm-cli build image layer [--toolbox build|fetch]
 llm-cli build image export TARGET --to FILE [--image TAG_OR_ID]
 llm-cli build image import FILE [--sha256 HEX] [--target TARGET] [--yes]
 ```
@@ -730,6 +731,13 @@ llm-cli build image import FILE [--sha256 HEX] [--target TARGET] [--yes]
   (such as apt-cacher-ng) and the pip index in your network, and judges each by the locality rule (your opt-outs of
   `config local-network` count). An address is http or https without a user name, password, token or query; `""`
   clears one. Only you set them: an AI and MCP `update_settings` are refused.
+- `layer` shows the framework's runtime layer that every build container runs (its stage runner, the stage
+  account's helper and a static busybox and setpriv): whether it matches the shipped copy, how its tools were made,
+  and whether this computer protects a build's end folder (Docker Desktop on Windows and macOS does not: such a build
+  is marked "end folder unprotected"). `--toolbox` chooses how the tools are made once: `build` (the default, from
+  pinned sources in the framework's builder image) or `fetch` (pinned prebuilt files from the table in the
+  repository; while it has no static setpriv, `fetch` refuses and names `build`). Only you set it: an AI and MCP
+  `update_settings` are refused. The same is in **Build > Build Container Images...**.
 - `export` writes the newest image of TARGET (or `--image`) with `docker save` into a new FILE and its sha256 into
   `FILE.sha256` next to it; nothing is replaced, and the destination disk must keep its reserve free.
 - `import` checks FILE against `--sha256` or `FILE.sha256`, then reads the image's labels: its target and the inputs

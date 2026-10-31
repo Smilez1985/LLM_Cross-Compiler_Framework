@@ -20,6 +20,8 @@ CLI_PATHS: Dict[str, str] = {
     "build image sources --apt-mirror": "txt_bimg_apt_mirror",
     "build image sources --apt-proxy": "txt_bimg_apt_proxy",
     "build image sources --pip-index": "txt_bimg_pip_index",
+    "build image layer": "act_build_images",             # the window shows the runtime layer
+    "build image layer --toolbox": "combo_bimg_toolbox",
     "build image export": "btn_bimg_export",
     "build image export --to": "btn_bimg_export",         # its file dialog chooses the file
     "build image export --image": "list_bimg_images",
@@ -29,7 +31,8 @@ CLI_PATHS: Dict[str, str] = {
 }
 WINDOW_OBJECTS: Dict[str, str] = {name: "act_build_images" for name in (
     "btn_bimg_plan", "chk_bimg_gpu", "txt_bimg_apt_mirror", "txt_bimg_apt_proxy", "txt_bimg_pip_index",
-    "btn_bimg_export", "list_bimg_images", "btn_bimg_import", "txt_bimg_sha256", "combo_bimg_target")}
+    "btn_bimg_export", "list_bimg_images", "btn_bimg_import", "txt_bimg_sha256", "combo_bimg_target",
+    "combo_bimg_toolbox")}
 MACHINE_ONLY: Dict[str, str] = {
     "build image plan --json": "machine-readable output for scripts; the window shows the same plan",
     "build image import --yes": "skips the question before the image is loaded, for scripts; the window always asks",
