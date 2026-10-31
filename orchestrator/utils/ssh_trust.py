@@ -199,7 +199,7 @@ def install_public_key(client, public_line: str, bundle=None, *, allow_unrestric
     if bundle is not None:
         from orchestrator.remote import gate
         ok, reason = gate.install_gate(transport.ParamikoTransport(client).run, public_line, bundle.gate)
-        if ok:
+        if ok or reason == "gated":   # "gated": the login was with the framework key, which runs only the gate
             return "restricted"
         if not allow_unrestricted:
             raise GateUnavailable(reason)

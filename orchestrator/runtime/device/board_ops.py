@@ -367,7 +367,7 @@ def sudoers_text(user: str) -> str:
 
 
 def sudoers_path(user: str) -> str:
-    return f"{SUDOERS_DIR}/llmcf-{user}"
+    return f"{SUDOERS_DIR}/{gate.sudoers_name(user)}"
 
 
 def bundle() -> gate.GateBundle:
@@ -402,14 +402,30 @@ def restrict_key(shell, *, sudo_user: str = "") -> list:
     if getattr(session, "gated", False):
         _restricted, version = key_state(shell)
         if version and version != package.version:
-            return ["llmcf's command gate on this board is older than this framework's: pair the board again "
-                    "(with its password) to update it; operations the old gate does not know are refused there."]
+            return [OLDER_GATE_NOTE]
         return []
     notes = []
     run = shell.run if hasattr(shell, "lost") else session.run
 
     def call(script, stdin=None):
         return run(script, stdin=stdin, again=False) if hasattr(shell, "lost") else run(script, stdin=stdin)
+    if sudo_user:
+        # the root helper first: root-setup is a setup step, which the gate never runs, and once the key's line is
+        # the restricted one every new login (each command over the system OpenSSH) already runs in the gate
+        try:
+            root_ok, why = gate.install_root(call, sudo_user, package.root_helper or "", sudoers_text(sudo_user))
+        except Exception:  # noqa: BLE001 - the deploy goes on with the earlier sudo commands; the note says why
+            root_ok, why = False, "unknown"
+        if not root_ok:
+            # a restricted key without the helper could never write the unit again (it never runs the earlier sudo
+            # commands, and cannot install the helper): the key stays as it was, and the person reads why
+            return ["The framework's key on this board is NOT restricted yet: the deploy setting systemd needs "
+                    "llmcf's root helper and its exact sudo rules first, and they could not be installed ("
+                    + gate.SETUP_REASONS.get(why, why) + "). The key still runs anything this account may run; fix "
+                    "that on the board and deploy again, or switch the deploy settings to the start script "
+                    "(--install user) and deploy again to restrict it."]
+        notes.append("llmcf's root helper and its exact sudo rules are installed on the board (the systemd unit "
+                     "needs no other sudo rights).")
     try:
         ok, reason = gate.install_gate(call, ssh_trust.client_key(state_dir)[1], package.gate)
     except Exception as e:  # noqa: BLE001 - the deploy goes on; the note says what happened
@@ -417,20 +433,24 @@ def restrict_key(shell, *, sudo_user: str = "") -> list:
     if ok:
         notes.append("The framework's key on this board now runs only llmcf's operations (its command gate); the "
                      "account's own login and its other keys stay as they were.")
-    else:
+    elif reason != "gated":   # "gated": the key already runs only the gate (nothing to say beyond verify's line)
         notes.append("The framework's key on this board is NOT restricted: it could not take llmcf's command gate ("
                      + gate.SETUP_REASONS.get(reason, reason) + "). It still runs anything this account may run; fix "
                      "that on the board and deploy or pair again.")
-    if ok and sudo_user:
-        try:
-            root_ok, why = gate.install_root(call, sudo_user, package.root_helper or "", sudoers_text(sudo_user))
-        except Exception:  # noqa: BLE001 - the unit then needs the old sudo commands, which a gated key never runs
-            root_ok, why = False, "unknown"
-        notes.append("llmcf's root helper and its exact sudo rules are installed on the board (the systemd unit "
-                     "needs no other sudo rights)." if root_ok else
-                     "llmcf's exact sudo rules could not be installed (" + gate.SETUP_REASONS.get(why, why) + "); "
-                     "the systemd unit then needs pairing again with the board's password.")
     return notes
+
+
+# A restricted key cannot rewrite its own gate, and pairing again logs in with that very key (paramiko tries it before
+# a one-time password): the way that works goes through the account's own login.
+_OWN_LOGIN = ("remove the framework key's line (it ends in llm-cross-compiler-framework) from ~/.ssh/authorized_keys on "
+              "the board with your own login, then deploy once with the board's password")
+OLDER_GATE_NOTE = ("llmcf's command gate on this board is older than this framework's; operations the old gate does "
+                   "not know are refused there. A restricted key cannot update its own gate: to update it, "
+                   + _OWN_LOGIN + ".")
+NO_ROOT_HELPER = ("the deploy settings choose the systemd unit, but llmcf's root helper and its exact sudo rules are "
+                  "not on the board, and the framework's key runs only llmcf's operations, which cannot install them. "
+                  "Switch the deploy settings to the start script (--install user), or " + _OWN_LOGIN
+                  + " (the account's sudo -n must work then). Nothing was changed")
 
 
 def gate_path(home: str) -> str:
