@@ -125,6 +125,12 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   endet es mit 2, dem Exit-Code des Endgrunds cancelled. Strg+C im Befehl selbst bleibt 130.
 
 ### Behoben
+- `2026-10-31 01:58 UTC` · `v3.3.0` **Der letzte Sendefehler der Türklingel behält nie den Benutzernamen des Brokers**
+  ([Design](docs/DESIGN_DE.md#mcp-server-tools-und-berechtigungen)): Mojos Zeile zur Türklingel behält die Adresse des
+  Brokers (`scheme://host:port`) und den letzten Sendefehler, auch dort, wo eine KI sie liest, damit die Person sieht,
+  welcher Broker scheiterte und warum (entschieden für Transparenz). Der festgehaltene Fehler ersetzte nur das
+  Passwort; ein Fehler, der den Benutzernamen nannte (etwa ein MQTT-Text „not authorised“), behielt ihn in
+  `doorbell_status.json`, in Mojos Zeile und im Log. Der Benutzername wird jetzt wie das Passwort durch `***` ersetzt.
 - `2026-10-30 18:21 UTC` · `v3.3.0` **Die eigenen Ordner des Frameworks bleiben unter Windows nicht mehr liegen**
   ([Design](docs/DESIGN_DE.md#tests-ci-und-die-windows-fallen)): Sie wurden mit `shutil.rmtree(ignore_errors=True)`
   entfernt, das unter Windows bei einer schreibgeschützten Datei wortlos aufgibt. Die Staging- und Vorgängerordner der

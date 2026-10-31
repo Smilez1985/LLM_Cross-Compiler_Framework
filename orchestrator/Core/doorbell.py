@@ -303,10 +303,13 @@ def password_of(framework: Any) -> Optional[str]:
         return None
 
 
-def _error_text(error: BaseException, password: Optional[str]) -> str:
+def _error_text(error: BaseException, password: Optional[str], username: str = "") -> str:
+    """The send error as kept for Mojo's line and the log: the broker's address and the error stay (decided for
+    transparency), the password and the user name never (both replaced by ***)."""
     text = redact_secrets(f"{error.__class__.__name__}: {error}")
-    if password:
-        text = text.replace(password, "***")
+    for secret in (password, username):
+        if secret:
+            text = text.replace(secret, "***")
     return text[:300]
 
 
@@ -370,11 +373,12 @@ class Doorbell:
 
     def ring(self, body: Dict[str, Any]) -> bool:
         """Sends one doorbell now (also the test doorbell); True when the broker took it. Never raises."""
-        password = None
+        password, username = None, ""
         try:
             broker = broker_of(self.config)
             if broker is None:
                 return False
+            username = broker.username
             password = self._password()
             check_broker(broker, self.config, password=bool(password))
             broker = replace(broker, addresses=pinned_addresses(broker, self.config))
@@ -384,7 +388,7 @@ class Doorbell:
             logger.warning(f"The MQTT doorbell was not sent: {e}")
             return False
         except Exception as e:  # noqa: BLE001 - a broker that is down never fails anything
-            text = _error_text(e, password)
+            text = _error_text(e, password, username)
             self._record(False, f"The MQTT broker could not be reached or refused the doorbell ({text}).",
                          "unreachable")
             logger.warning(f"The MQTT doorbell was not sent: {text}")

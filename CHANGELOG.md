@@ -113,6 +113,12 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   the exit code of the end reason cancelled. Ctrl+C in the command itself stays 130.
 
 ### Fixed
+- `2026-10-31 01:58 UTC` · `v3.3.0` **The doorbell's last send error never keeps the broker's user name**
+  ([design](docs/DESIGN.md#mcp-server-tools-and-permissions)): Mojo's doorbell line keeps the broker's address
+  (`scheme://host:port`) and the last send error, also where an AI reads it, so the person can see which broker failed
+  and why (decided for transparency). The kept error replaced only the password; an error that named the user name
+  (an MQTT "not authorised" text, for example) kept it in `doorbell_status.json`, Mojo's line and the log. The user
+  name is now replaced by `***` like the password.
 - `2026-10-30 18:21 UTC` · `v3.3.0` **The framework's own folders no longer stay behind on Windows**
   ([design](docs/DESIGN.md#tests-ci-and-the-windows-hazards)): they were removed with
   `shutil.rmtree(ignore_errors=True)`, which on Windows gives up on a read-only file without a word. The llama.cpp
