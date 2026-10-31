@@ -33,11 +33,19 @@ EXPECTED_GATE_OPS = {
     "file-remove", "file-sha256", "file-size", "file-write", "file-write-private", "install-log", "job-poll", "keygen",
     "login-check", "mkprivate", "model-sha256", "old-sidecar", "ping", "probe-python", "probe-python-check",
     "probe-shell", "programs-check", "root-unit-enable", "root-unit-install", "root-unit-start", "run-program",
-    "run-program-split", "runtime-activate", "runtime-check", "runtime-install", "staging-create", "start-bench-job",
+    "run-program-split", "runtime-activate", "runtime-check", "runtime-install", "server-tools-check",
+    "staging-create", "start-bench-job",
     "start-bench-job-setsid", "start-bench-job-setsid-timeout", "start-bench-job-timeout", "start-install",
     "start-status", "status", "thermal",
 }
-SETUP_ONLY = {"gate-install", "root-setup", "unit-write-legacy", "unit-enable-legacy", "unit-start-legacy"}
+def _signer():
+    """A signing key of this test only (the framework's board signer shape)."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from orchestrator.Core.community_pack import BoardSigner
+    return BoardSigner(Ed25519PrivateKey.generate())
+
+
+SETUP_ONLY = {"gate-install", "root-board", "root-setup", "unit-write-legacy", "unit-enable-legacy", "unit-start-legacy"}
 
 
 @pytest.fixture
@@ -109,7 +117,8 @@ def test_the_gate_refuses_with_one_plain_line(board, line, why):
 @POSIX
 def test_the_gate_runs_an_operation_with_its_checked_arguments(board):
     root = f"{board.home}/{gate.PLACE_HOME_REL}/llama.cpp"
-    assert board("llmcf-gate status").out.strip() == f"restricted=yes gate={gate.gate_version(gate.render_gate())}"
+    assert board("llmcf-gate status").out.strip() == (f"restricted=yes gate={gate.gate_version(gate.render_gate())} "
+                                                      "keys=home signing=no")
     made = board("llmcf-gate mkprivate " + root + " .bench")
     assert made.status == 0 and made.out.startswith(root + "/.bench.")
     folder = made.out.strip()
@@ -193,12 +202,15 @@ class _Client:
 
 def test_pairing_without_the_gate_is_refused_unless_the_person_allows_it():
     from orchestrator.utils import ssh_trust
-    bundle = board_ops.bundle()
+    bundle = board_ops.bundle(_signer())
     with pytest.raises(ssh_trust.GateUnavailable) as refused:
-        ssh_trust.install_public_key(_Client("gate=unavailable reason=read-only\n"), PUBLIC, bundle)
-    assert "read-only" in str(refused.value) and refused.value.reason == "read-only"
-    assert ssh_trust.install_public_key(_Client("gate=installed\n"), PUBLIC, bundle) == "restricted"
-    plain = _Client("gate=unavailable reason=no-sh\n")
+        ssh_trust.install_public_key(_Client("root-board=unavailable reason=no-sshd\n"), PUBLIC, bundle)
+    assert "OpenSSH" in str(refused.value) and refused.value.reason == "no-sshd"
+    assert ssh_trust.install_public_key(_Client("root-board=installed home=removed\n"), PUBLIC, bundle) == "restricted"
+    with pytest.raises(ssh_trust.GateUnavailable) as no_signer:   # nothing to give the board: no key at all
+        ssh_trust.install_public_key(_Client("root-board=installed home=none\n"), PUBLIC, board_ops.bundle())
+    assert no_signer.value.reason == "no-signer"
+    plain = _Client("root-board=unavailable reason=no-sudo\n")
     plain.answer = ""
     assert ssh_trust.install_public_key(plain, PUBLIC, bundle, allow_unrestricted=True) == "unrestricted"
 
@@ -318,12 +330,16 @@ def test_the_upgrade_installs_the_root_helper_also_when_every_command_is_a_login
     """Over the system OpenSSH transport the gate is active from the command after gate-install on: the root helper
     and its sudo rules (a setup step the gate never runs) must be installed before the key is restricted."""
     session, home, log = _upgrade_board(tmp_path, monkeypatch, 0)
-    notes = board_ops.restrict_key(session, sudo_user="radxa")
+    order = []
+
+    def root_board(run, line, package, password=""):   # the root step itself: tests/test_board_signing.py
+        order.append(("root-board", board_ops.ROOT_HELPER in log.read_text(encoding="utf-8"), bool(package.signers)))
+        return True, "", "removed"
+    monkeypatch.setattr(gate, "install_root_board", root_board)
+    notes = board_ops.restrict_key(session, sudo_user="radxa", signer=_signer())
     assert any("root helper and its exact sudo rules are installed" in n for n in notes), notes
-    assert any("now runs only llmcf's operations" in n for n in notes), notes
-    assert board_ops.ROOT_HELPER in log.read_text(encoding="utf-8")
-    lines = (home / ".ssh" / "authorized_keys").read_text(encoding="utf-8").splitlines()
-    assert lines == [gate.restricted_line(PUBLIC, (home / gate.GATE_REL).as_posix())]
+    assert board_ops.KEY_ROOT_NOTE in notes, notes
+    assert order == [("root-board", True, True)]   # the helper first, then the key's line in its root-owned place
 
 
 @POSIX
@@ -366,7 +382,7 @@ def test_pairing_a_board_whose_key_already_runs_the_gate_is_no_failure():
     gate"."""
     from orchestrator.utils import ssh_trust
     client = _GatedClient("")
-    assert ssh_trust.install_public_key(client, PUBLIC, board_ops.bundle()) == "restricted"
+    assert ssh_trust.install_public_key(client, PUBLIC, board_ops.bundle(_signer())) == "restricted"
     assert len(client.commands) <= 2   # no plain unrestricted line after the refusal
 
 

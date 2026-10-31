@@ -1432,6 +1432,7 @@ class BoardsWindow(QDialog):
             # the one flow of the device runtime's deploy (steps.deploy_runtime_flow, also the CLI's and the AI's),
             # with this window's login, the board's trust record, the CLI's question about an untrusted benchmark
             # model (asked before anything changes on the board, decision D23) and its Cancel
+            from orchestrator.runtime.device import board_ops
             hooks = steps.DeployHooks(
                 open_board=lambda: person_steps.connect_stored(state, device_id, host, port, settings.ssh_user,
                                                                password, step="runtime_deploy",
@@ -1445,7 +1446,8 @@ class BoardsWindow(QDialog):
                         audit, tool, {"device": device_id, "model_sha256": digest}, detail, channel="framework-gui")),
                 tested_on=lambda report, digest, build_id, kind: self._record_tested_on(entry, profile, report, digest,
                                                                                         build_id, source, kind),
-                progress=self._progress, check_cancel=self._check_cancel)
+                progress=self._progress, check_cancel=self._check_cancel,
+                signer=board_ops.framework_signer(self.framework, state))
             try:
                 flow = steps.deploy_runtime_flow(state, device_id, profile, settings, hooks=hooks, build=found.build,
                                                  packaged=found.packaged, source=source,

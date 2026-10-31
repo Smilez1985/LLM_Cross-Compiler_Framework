@@ -166,6 +166,11 @@ def _file_name(path: Optional[str]) -> str:
 # --- registration ---------------------------------------------------------------------------------------------------
 
 def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: Any, jobs: Any) -> ToolRegistry:
+    def _board_signer():
+        """The framework's board signer: the tarball of an AI's deploy is signed like the person's (board_ops)."""
+        from orchestrator.runtime.device import board_ops
+        return board_ops.framework_signer(framework)
+
     """Registers the local runtime, benchmark and device runtime tools whose packages exist."""
 
     def runtime():
@@ -922,7 +927,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                                      say=lambda msg: handle.progress(None, None, device_text(msg, users,
                                                                                              folder_labels())[:200]),
                                      on_event=board_events(handle, device), config=getattr(framework, "config", None),
-                                     ai_started=True)   # its build stops at the soft caps (DECISIONS round 25 Q8)
+                                     ai_started=True, signer=_board_signer())   # its build stops at the soft caps (DECISIONS round 25 Q8)
                 except dev.DeviceRuntimeError as e:
                     if stop.is_set() or handle.cancelled:
                         raise JobCancelled() from None
