@@ -530,6 +530,8 @@ GUI: **Boards > Boards and Devices...** (**Runtime plan**, **Build runtime...**,
 **Verify...**, **Status**, **Settings...**, **Remove older runtime packages...**, **Remove older builds on the
 board...**).
 
+**The framework's key on a board runs only llmcf's operations.** Pairing installs llmcf's command gate and makes it the key's forced command (no terminal, no forwarding); the gate runs only the framework's own operations with checked arguments and refuses everything else with one plain line, so a stolen key cannot open a shell on the board. With the systemd setting, llmcf's root helper and its exact sudo rules write and start the unit. A key from before is restricted on the next pairing or deploy; `verify` shows `board-key`.
+
 - **Plan from the board's own probe** (decision D14): `llm-cli scan --device` stores the board's profile under its ID
   (from its SSH host key). The plan is a cross build for that profile: `GGML_CPU_ARM_ARCH` from the board's CPU
   features (RK3566: `armv8.2-a+dotprod+fp16`), and a builder base whose C library is not newer than the board's:

@@ -968,7 +968,7 @@ class _BoardSession:
     def _deploy(self, fh, name: str, size: int, sha256: str) -> DeployResult:
         session = self.session
         session.open()
-        if session.pair():
+        if session.pair(board_ops.bundle()):
             self.logger.info("Framework SSH key installed; later deployments need no password.")
         target_dir = session.private_dir()
         if self.cancel.cancelled:

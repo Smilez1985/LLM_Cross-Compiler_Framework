@@ -33,8 +33,8 @@ from orchestrator.runtime.device.launcher import (INSTALL_REL, KEY_REL, START_SC
                                                   render_systemd_unit)
 from orchestrator.runtime.server_policy import KV_CACHE_TYPES, POSIX_CLEARED_PATH, posix_cleared_env
 
-ROOT_HELPER = "/usr/local/libexec/llmcf/llmcf-root"
-SUDOERS_DIR = "/etc/sudoers.d"
+ROOT_HELPER = gate.ROOT_HELPER
+SUDOERS_DIR = gate.SUDOERS_DIR
 REQUIRED_TOOLS = ("tar", "gzip", "sha256sum", "od", "dd", "tr", "readlink", "awk", "mktemp")
 BENCH_PID = ".lcf-bench.pid"
 BENCH_STOP_GRACE = 10
@@ -370,76 +370,67 @@ def sudoers_path(user: str) -> str:
     return f"{SUDOERS_DIR}/llmcf-{user}"
 
 
-# --- pairing: the gate and the restricted key line --------------------------------------------------------------------
-
-GATE_INSTALL = "\n".join([
-    # stdin: the gate program. Answers gate=installed, or gate=unavailable reason=WORD (nothing of the person's
-    # authorized_keys changed then).
-    "set -u",
-    "umask 077",
-    'llmcf_text=$(cat; echo x); llmcf_text=${llmcf_text%x}',
-    '[ -x /bin/sh ] || { echo "gate=unavailable reason=no-sh"; exit 0; }',
-    'case $HOME in /*) ;; *) echo "gate=unavailable reason=home"; exit 0 ;; esac',
-    'case $HOME in *[!A-Za-z0-9._/-]*) echo "gate=unavailable reason=home"; exit 0 ;; esac',
-    f'cfg="$HOME/{Path(gate.GATE_REL).parent.as_posix()}"; g="$HOME/{gate.GATE_REL}"; keys="$HOME/.ssh/authorized_keys"',
-    'if ! { mkdir -p "$cfg" "$HOME/.ssh" && printf "%s" "$llmcf_text" > "$g.new" && chmod 0500 "$g.new" && '
-    'mv -f "$g.new" "$g"; } 2>/dev/null; then rm -f "$g.new" 2>/dev/null; '
-    'echo "gate=unavailable reason=read-only"; exit 0; fi',
-    '/bin/sh -n "$g" 2>/dev/null || { echo "gate=unavailable reason=sh"; exit 0; }',
-    'line="command=\\"/bin/sh $g\\",' + ",".join(gate.KEY_OPTIONS) + ' @TYPE@ @BLOB@ @COMMENT@"',
-    'new="$keys.llmcf.$$"',
-    'if ! { touch "$keys" && cp -p "$keys" "$new" && '
-    "awk -v blob=@BLOB@ -v line=\"$line\" 'BEGIN { done = 0 } { hit = 0; n = split($0, f, \" \"); "
-    "for (i = 1; i <= n; i++) if (f[i] == blob) hit = 1; if (hit) { if (!done) print line; done = 1; next } print } "
-    "END { if (!done) print line }' \"$keys\" > \"$new\" && mv -f \"$new\" \"$keys\"; } 2>/dev/null; then "
-    'rm -f "$new" 2>/dev/null; echo "gate=unavailable reason=read-only"; exit 0; fi',
-    'echo "gate=installed"',
-])
-define("gate-install", ("word", "b64", "comment"),
-       lambda t, b, c, rest="": GATE_INSTALL.replace("@TYPE@", t).replace("@BLOB@", b).replace("@COMMENT@", c),
-       gate=False, doc="pairing: the gate program and the framework key's restricted authorized_keys line")
-
-ROOT_SETUP = "\n".join([
-    # stdin: a line with the person's one-time password (empty: sudo -n), then the root helper program.
-    "set -u",
-    "umask 077",
-    'IFS= read -r llmcf_pw || llmcf_pw=""',
-    'llmcf_d=$(mktemp -d "${TMPDIR:-/tmp}/llmcf-root.XXXXXXXX") || { echo "root=unavailable reason=tmp"; exit 0; }',
-    "trap 'rm -rf \"$llmcf_d\"' EXIT",
-    'cat > "$llmcf_d/helper"',
-    'printf "%s" "$LLMCF_SUDOERS" > "$llmcf_d/sudoers"',
-    'asroot() { if [ -n "$llmcf_pw" ]; then printf "%s\\n" "$llmcf_pw" | sudo -S -p "" "$@"; '
-    'else sudo -n "$@"; fi; }',
-    'command -v sudo >/dev/null 2>&1 || { echo "root=unavailable reason=no-sudo"; exit 0; }',
-    'command -v visudo >/dev/null 2>&1 || [ -x /usr/sbin/visudo ] || { echo "root=unavailable reason=no-visudo"; '
-    'exit 0; }',
-    'llmcf_visudo=$(command -v visudo 2>/dev/null || echo /usr/sbin/visudo)',
-    '"$llmcf_visudo" -cf "$llmcf_d/sudoers" >/dev/null 2>&1 || { echo "root=unavailable reason=sudoers"; exit 0; }',
-    f'asroot install -d -m 0755 -o root -g root {Path(ROOT_HELPER).parent.as_posix()} >/dev/null 2>&1 || '
-    '{ echo "root=unavailable reason=sudo"; exit 0; }',
-    f'asroot install -m 0755 -o root -g root "$llmcf_d/helper" {ROOT_HELPER} >/dev/null 2>&1 || '
-    '{ echo "root=unavailable reason=sudo"; exit 0; }',
-    f'asroot install -m 0440 -o root -g root "$llmcf_d/sudoers" {SUDOERS_DIR}/llmcf-@USER@ >/dev/null 2>&1 || '
-    '{ echo "root=unavailable reason=sudo"; exit 0; }',
-    'echo "root=installed"',
-])
-
-
-def root_setup_script(user: str) -> gate.GateScript:
-    """root-setup for the board account `user`, its sudoers text set in front (a checked value of ours)."""
-    import shlex
-    call = gate.script("root-setup", user)
-    text = f"LLMCF_SUDOERS={shlex.quote(sudoers_text(user))}\n" + str(call)
-    return gate.GateScript(text, call.verb, call.args)
-
-
-define("root-setup", ("word",), lambda user, rest="": ROOT_SETUP.replace("@USER@", user), gate=False,
-       doc="llmcf's root helper and its exact sudo rules (sudo -n, or the person's one-time password for sudo -S)")
-
-
 def bundle() -> gate.GateBundle:
     """What pairing installs: the gate with every operation of the framework, and llmcf's root helper."""
     return gate.GateBundle(gate=gate.render_gate(), root_helper=render_root_helper())
+
+
+def key_state(shell) -> tuple:
+    """(restricted, gate version) of the framework's key on the board behind `shell` (a RemoteShell or a session):
+    llmcf's operation status. (False, "") for a key that runs anything (or a board that does not answer)."""
+    try:
+        result = shell.run(gate.script("status"), again=True) if hasattr(shell, "lost") else \
+            shell.run(gate.script("status"))
+    except Exception:  # noqa: BLE001 - the key's state is a report; the step's own commands say what is wrong
+        return False, ""
+    words = dict(w.split("=", 1) for w in (getattr(result, "out", "") or "").split() if "=" in w)
+    return words.get("restricted") == "yes", words.get("gate", "") if words.get("gate") != "none" else ""
+
+
+def restrict_key(shell, *, sudo_user: str = "") -> list:
+    """The upgrade of an unrestricted framework key on the next deploy (the person's deploy over the key): llmcf's
+    command gate and the key's restricted line, and with `sudo_user` (the deploy setting systemd, while `sudo -n`
+    works) llmcf's root helper with its exact sudo rules. Returns the notes for the person: what changed, or plainly
+    why the key stays unrestricted (the board cannot take the gate). A gated board whose gate is older than this
+    framework's gets a note to pair again. Never fails the deploy."""
+    from orchestrator.utils import ssh_trust
+    session = getattr(shell, "session", shell)
+    state_dir = getattr(session, "state_dir", None)
+    if not getattr(session, "can_relogin", False) or state_dir is None:
+        return []   # a stand-in's attached session: no framework key of ours to change
+    package = bundle()
+    if getattr(session, "gated", False):
+        _restricted, version = key_state(shell)
+        if version and version != package.version:
+            return ["llmcf's command gate on this board is older than this framework's: pair the board again "
+                    "(with its password) to update it; operations the old gate does not know are refused there."]
+        return []
+    notes = []
+    run = shell.run if hasattr(shell, "lost") else session.run
+
+    def call(script, stdin=None):
+        return run(script, stdin=stdin, again=False) if hasattr(shell, "lost") else run(script, stdin=stdin)
+    try:
+        ok, reason = gate.install_gate(call, ssh_trust.client_key(state_dir)[1], package.gate)
+    except Exception as e:  # noqa: BLE001 - the deploy goes on; the note says what happened
+        ok, reason = False, getattr(e, "kind", "") or "unknown"
+    if ok:
+        notes.append("The framework's key on this board now runs only llmcf's operations (its command gate); the "
+                     "account's own login and its other keys stay as they were.")
+    else:
+        notes.append("The framework's key on this board is NOT restricted: it could not take llmcf's command gate ("
+                     + gate.SETUP_REASONS.get(reason, reason) + "). It still runs anything this account may run; fix "
+                     "that on the board and deploy or pair again.")
+    if ok and sudo_user:
+        try:
+            root_ok, why = gate.install_root(call, sudo_user, package.root_helper or "", sudoers_text(sudo_user))
+        except Exception:  # noqa: BLE001 - the unit then needs the old sudo commands, which a gated key never runs
+            root_ok, why = False, "unknown"
+        notes.append("llmcf's root helper and its exact sudo rules are installed on the board (the systemd unit "
+                     "needs no other sudo rights)." if root_ok else
+                     "llmcf's exact sudo rules could not be installed (" + gate.SETUP_REASONS.get(why, why) + "); "
+                     "the systemd unit then needs pairing again with the board's password.")
+    return notes
 
 
 def gate_path(home: str) -> str:
@@ -448,7 +439,7 @@ def gate_path(home: str) -> str:
 
 __all__ = ["BENCH_PID", "FACTS_SCRIPT", "INSTALL_LOG", "OLD_SIDECAR", "REQUIRED_TOOLS", "ROOT_HELPER", "SUDO_SCRIPT",
            "bench_stop_command", "bundle", "gate_path", "old_sidecar_check", "render_root_helper",
-           "root_setup_script", "sudoers_path", "sudoers_text"]
+           "key_state", "restrict_key", "sudoers_path", "sudoers_text"]
 
 # The install folder lies in llmcf's place of the gate (tests/test_board_gate.py checks it with KEY_REL's folder).
 PLACES_FOLLOW_LAUNCHER = INSTALL_REL.startswith(gate.PLACE_HOME_REL + "/") and KEY_REL.startswith(".config/")
