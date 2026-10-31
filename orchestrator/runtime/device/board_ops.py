@@ -23,6 +23,7 @@ every other line stays as it was) and root-setup (the root helper and the sudoer
 one-time password on stdin for `sudo -S`).
 """
 
+import dataclasses
 import hashlib
 from pathlib import Path
 
@@ -207,29 +208,52 @@ def _env(home: str) -> str:
     return text.replace(_HOME, home)
 
 
+# What a runtime program on a board is never given over the framework's key besides server_policy's shared
+# forbidden list: llama-server's --log-file, which writes its log (text from the model's metadata and the requests) to
+# any file the account may write, such as a build's start script the gate runs with sh (keygen, start-status) or
+# ~/.ssh/rc. No launcher of the framework passes it to a board's programs.
+BOARD_FORBIDDEN_FLAGS = frozenset({"--log-file"})
+
+
+def _run_forbidden() -> frozenset:
+    from orchestrator.runtime.server_policy import FORBIDDEN_FLAGS
+    return FORBIDDEN_FLAGS | BOARD_FORBIDDEN_FLAGS
+
+
 def forbidden_refusal(args) -> str:
     """Why the rest arguments of a runtime program are refused (server_policy.check_command's forbidden list: a tool,
-    file or shell access, a download, an MCP client, ...); "" when none is in them. `args` start with the home folder
-    and the program, as the operation's arguments do."""
-    from orchestrator.runtime.server_policy import forbidden_in
-    bad = forbidden_in(list(args)[1:])
+    file or shell access, a download, an MCP client, ..., and BOARD_FORBIDDEN_FLAGS); "" when none is in them. `args`
+    start with the home folder and the program, as the operation's arguments do."""
+    from orchestrator.runtime.server_policy import option_name
+    forbidden = _run_forbidden()
+    bad = sorted({option_name(a) for a in list(args)[2:] if option_name(a) in forbidden})
     return f"the options {', '.join(bad)} are never given to a runtime program" if bad else ""
 
 
 def _forbidden_sh() -> str:
     """The gate's own copy of forbidden_refusal: every rest argument by its option name (`--a_b` is `--a-b`, a
-    `--name=value` counts by its name), refused when it is one of server_policy.FORBIDDEN_FLAGS."""
-    from orchestrator.runtime.server_policy import FORBIDDEN_FLAGS
-    names = "|".join(sorted(FORBIDDEN_FLAGS))
+    `--name=value` counts by its name), refused when it is one of server_policy.FORBIDDEN_FLAGS or
+    BOARD_FORBIDDEN_FLAGS. Self-contained (its own refusal line and status, not the gate's llmcf_refuse): it also
+    stands inside a started job's body, which runs in a new sh."""
+    names = "|".join(sorted(_run_forbidden()))
     return ("for llmcf_a in $LLMCF_REST; do llmcf_n=${llmcf_a%%=*}; "
             "case $llmcf_n in --*) llmcf_n=$(printf '%s' \"$llmcf_n\" | tr _ -) ;; esac; "
-            f"case $llmcf_n in {names}) llmcf_refuse \"the option $llmcf_n is never given to a runtime program\" ;; "
-            "esac; done")
+            f"case $llmcf_n in {names}) printf 'llmcf-gate: refused: the option %s is never given to a runtime "
+            "program\\n' \"$llmcf_n\" >&2; exit 126 ;; esac; done")
 
 
 def _gated(render):
     """`render` with the gate's forbidden-option check in front (the gate form of run-program and the bench jobs)."""
     return lambda *v, rest="": _forbidden_sh() + "\n" + render(*v, rest=rest)
+
+
+def _gated_start(verb: str) -> None:
+    """The gate form of start-<verb> checks the forbidden options in the gate's own shell before the job is started
+    (the refusal is the start's answer and nothing is started); the job's own body checks them once more."""
+    start = gate.OPERATIONS["start-" + verb]
+    inner = start.gate_render or start.render
+    gate.OPERATIONS[start.verb] = dataclasses.replace(
+        start, gate_render=lambda *v, rest="", _inner=inner: _forbidden_sh() + "\n" + _inner(*v, rest=rest))
 
 
 def _run_program(merge: bool):
@@ -291,6 +315,7 @@ for _setsid in (False, True):
                ("home", "program") + (("uint",) if _timed else ()), _bench_job(_setsid, _timed), rest="arg",
                job=True, refuse=forbidden_refusal, gate_render=_gated(_bench_job(_setsid, _timed)),
                doc="the benchmark on its own, its PID recorded")
+        _gated_start("bench-job" + ("-setsid" if _setsid else "") + ("-timeout" if _timed else ""))
 
 
 def bench_stop_command(folder: str, group: bool) -> str:
