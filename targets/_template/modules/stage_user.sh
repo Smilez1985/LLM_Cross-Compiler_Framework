@@ -36,7 +36,13 @@
 # group of everything a build writes. The stage modules run with umask 0002, and after each module returns the stage
 # account itself (it owns what it wrote, so no capability is needed by anyone) gives its own files and folders in the
 # folders the modules write to that group, readable and writable for it, and its folders setgid: a tool that writes a
-# 0600 file or a 0555 folder leaves nothing the runner or the person cannot read or remove. Nothing is chowned.
+# 0600 file, a 0555 folder or a sticky folder leaves nothing the runner or the person cannot read or remove. Nothing
+# is chowned.
+#
+# The helper is the framework's (every build context carries this file, whatever the target ships under its name), and
+# the runner that sources it must not replace any part of it: a build.sh that defines one of its functions (or
+# setpriv) again or changes one of its variables (STAGE_ISOLATION, STAGE_UID, ...) is refused before its container is
+# made (orchestrator/utils/sandbox.stage_runner_problem).
 
 STAGE_UID=64010
 STAGE_GID=64010
@@ -145,11 +151,12 @@ as_stage() {
 
 # What stage_share runs as the stage account (arguments: the shared gid, then the folders): its own files and
 # folders there go to the shared group, readable and writable for it (u+rwX too, so a folder it made 0000 or 0555 can
-# be walked), its folders setgid. Links are never followed (find -P; chmod -R and chgrp -h do not follow them either);
-# whatever is not its own it cannot change, and that stays as it is.
+# be walked), its folders setgid and never sticky (a sticky folder of the stage account would keep the runner and the
+# person from removing what is in it). Links are never followed (find -P; chmod -R and chgrp -h do not follow them
+# either); whatever is not its own it cannot change, and that stays as it is (the runner's sticky folders stay sticky).
 STAGE_SHARE='gid="$1"; shift
 [ $# -gt 0 ] || exit 0
-chmod -R u+rwX,g+rwX -- "$@" 2>/dev/null
+chmod -R u+rwX,g+rwX,-t -- "$@" 2>/dev/null
 find -P "$@" -user "$(id -u)" ! -type l ! -group "$gid" -exec chgrp -h -- "$gid" {} + 2>/dev/null
 find -P "$@" -user "$(id -u)" -type d ! -perm -2000 -exec chmod g+s -- {} + 2>/dev/null
 exit 0'

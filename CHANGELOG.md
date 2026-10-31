@@ -121,8 +121,8 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   a tool in a stage module that wrote a 0600 file or a 0555 folder (as the stage account) left files you could not
   read and folders the clean-up could not remove. The stage runner and the stage account now share one group, the
   runner's (yours on the host): after every module, also a failed one, the stage account gives what it wrote in the
-  build's folders to that group, readable and writable, with its folders setgid. Nothing is chowned, and no account
-  gets a new right.
+  build's folders to that group, readable and writable, with its folders setgid and never sticky (a sticky folder a
+  tool made kept you from removing what was in it). Nothing is chowned, and no account gets a new right.
 - `2026-10-31 02:14 UTC` · `v3.3.0` **A deletion you accepted says "deleted" only when it is true** ([design](docs/DESIGN.md#deletion-and-the-trash)):
   Ditto's mode switch ignored what the removal of a build folder left behind and reported it as deleted (and forgot
   the build); emptying the trash, the build dependencies and Ditto's old runtime builds did the same or only said
@@ -223,7 +223,9 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   the build context carried the target's `modules/stage_user.sh`, so a target with the template's stage runner but a
   hollow helper (one that runs the module as it is and checks nothing) ran its modules as the stage runner with the
   runner's two rights. Every build context now carries the framework's own helper in place of whatever the target has
-  under that name, as it does with the entrypoint; the check of the target's `modules/build.sh` stays.
+  under that name, as it does with the entrypoint; the check of the target's `modules/build.sh` stays, and it now
+  also refuses a runner that defines one of the helper's functions (or `setpriv`) again or changes one of its
+  variables (`STAGE_ISOLATION`, `STAGE_UID`, ...), naming that part.
 - `2026-10-31 07:47 UTC` · `v3.3.0` **The stage modules run under their own user, so they cannot read the key of the end record**
   ([design](docs/DESIGN.md#build-pipeline-and-target-modules)): a stage module ran as the stage runner's own user and
   could read the one-run key that seals the end record from the runner's memory (`/proc/<runner>/mem`) on a host
