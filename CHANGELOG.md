@@ -228,7 +228,10 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   engine whose sub-ids do not reach the stage account is refused before the build and named by the doctor
   (`docker.stage_user`). The log and `build_info.json` (`end.isolation`) say which mode a build ran in; the legacy
   mode (`build_sandbox: false`) keeps the modules on the runner's user and says so. The key file is the owner's only
-  (0600), and a recipe's dataset folder is readable for the person's group.
+  (0600), and a recipe's dataset folder is readable for the person's group. A target whose stage runner does not
+  start its modules under the stage account (made from the template before this version) is refused in the build
+  sandbox before its container is made, since its modules would otherwise inherit the runner's two rights; take
+  `modules/build.sh` and `modules/stage_user.sh` from `targets/_template`, or switch `build_sandbox` off.
 - `2026-10-31 04:21 UTC` · `v3.3.0` **pypdf 6.21.4: seven crafted-PDF denials of service closed**
   ([design](docs/DESIGN.md#security-model)): pypdf 6.21.2 could be made to loop forever or use large amounts of memory
   and time by a crafted PDF (encrypted files with a wrong page count, page labels, cross-reference streams, invalid

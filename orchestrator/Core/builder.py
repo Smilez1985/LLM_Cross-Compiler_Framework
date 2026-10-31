@@ -2095,7 +2095,8 @@ class BuildEngine:
 
     SANDBOX_FALLBACK_USER = FALLBACK_USER  # the image's build user, used when the host user is root or on Windows
 
-    def _sandbox(self, config: BuildConfiguration, build_temp: Path) -> Tuple[Dict[str, Any], Dict[str, str], Dict[str, Dict[str, str]]]:
+    def _sandbox(self, config: BuildConfiguration, build_temp: Path, target_path: Optional[Path] = None
+                 ) -> Tuple[Dict[str, Any], Dict[str, str], Dict[str, Dict[str, str]]]:
         """Container options for the conversion stages (imatrix, build). They run model tooling and the
         target's build code - possibly AI-generated - so: no network (the model was staged on the host),
         no capabilities, no privilege escalation, a read-only root filesystem, the host user instead of
@@ -2117,6 +2118,13 @@ class BuildEngine:
         if supported is False:
             from orchestrator.utils.sandbox import STAGE_USER_NO_SUBIDS_WAY
             raise RuntimeError(f"{why} {STAGE_USER_NO_SUBIDS_WAY}")
+        # A target's runner that starts its modules without the stage account (made before it) would hand them the
+        # runner's two rights (the entrypoint gives them as ambient capabilities): refused, never run that way
+        if target_path is not None:
+            from orchestrator.utils.sandbox import stage_runner_problem
+            old = stage_runner_problem(Path(target_path) / "modules")
+            if old:
+                raise RuntimeError(old)
         user = runner_ids(self.docker_client)
         hand_over(build_temp, user)  # a root host owns the per-build folders; hand them to the stage runner
         memory = str(self._get_conf("build_memory_limit", "") or "").strip()
@@ -2158,7 +2166,7 @@ class BuildEngine:
 
         # Volumes for IMatrix run (the board's probe too: the config stage plans with it in this job as well)
         probe_vols, probe_env = self._hardware_probe_mount(config, progress, build_temp)
-        sandbox, sandbox_env, sandbox_vols = self._sandbox(config, build_temp)
+        sandbox, sandbox_env, sandbox_vols = self._sandbox(config, build_temp, target_path=target_path)
         vols = {
             str(imatrix_dir): {"bind": "/build-cache/imatrix", "mode": "rw"},
             # the model arrives through staged[1]: only its own folder (one commit of a Hugging Face model) or file
@@ -2218,7 +2226,7 @@ class BuildEngine:
         build_temp = self.cache_dir / "builds" / config.build_id
         # The board's hardware probe, read-only (DECISIONS round 23 item 5): the config stage plans the build for it
         probe_vols, probe_env = self._hardware_probe_mount(config, progress, build_temp)
-        sandbox, sandbox_env, sandbox_vols = self._sandbox(config, build_temp)
+        sandbox, sandbox_env, sandbox_vols = self._sandbox(config, build_temp, target_path=target_path)
 
         # 1. Volume Setup
         vols = {

@@ -251,7 +251,11 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   Sub-IDs nicht bis zum Stufen-Konto reichen, wird vor dem Build verweigert und vom Doctor genannt
   (`docker.stage_user`). Das Log und `build_info.json` (`end.isolation`) sagen, in welchem Modus ein Build lief; der
   alte Modus (`build_sandbox: false`) lässt die Module beim Benutzer des Runners und sagt das. Die Schlüsseldatei
-  gehört nur ihrem Besitzer (0600), und der Datensatz-Ordner eines Rezepts ist für die Gruppe der Person lesbar.
+  gehört nur ihrem Besitzer (0600), und der Datensatz-Ordner eines Rezepts ist für die Gruppe der Person lesbar. Ein
+  Target, dessen Stufen-Runner seine Module nicht unter dem Stufen-Konto startet (vor dieser Version aus der Vorlage
+  entstanden), wird in der Build-Sandbox verweigert, bevor sein Container angelegt wird, weil seine Module sonst die
+  zwei Rechte des Runners erben; nimm `modules/build.sh` und `modules/stage_user.sh` aus `targets/_template`, oder
+  schalte `build_sandbox` aus.
 - `2026-10-31 04:21 UTC` · `v3.3.0` **pypdf 6.21.4: sieben Dienstverweigerungen durch präparierte PDFs geschlossen**
   ([Design](docs/DESIGN_DE.md#sicherheitsmodell)): pypdf 6.21.2 ließ sich durch ein präpariertes PDF in eine
   Endlosschleife oder zu großem Speicher- und Zeitbedarf bringen (verschlüsselte Dateien mit falscher Seitenzahl,

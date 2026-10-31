@@ -164,6 +164,38 @@ def stage_user_support(client: Any, *, sandbox_on: bool = True, platform: Option
     return True, STAGE_USER_OK
 
 
+STAGE_RUNNER_OLD = ("This target's stage runner (modules/build.sh) does not start its stage modules under the stage "
+                    "account: it was made before the build sandbox had one, so its modules would run as the runner "
+                    "itself, with the runner's rights. The build sandbox refuses it. Take modules/build.sh and "
+                    "modules/stage_user.sh from targets/_template (or generate the target again), or switch the "
+                    "setting build_sandbox off.")
+# What a stage runner that carries the stage account has (targets/*/modules/build.sh): it sources the helper, runs its
+# preflight and starts every module through run_as_stage
+_RUNNER_MARKS = ('source "$MODULES_DIR/stage_user.sh"', "stage_preflight ",
+                 'run_as_stage bash "$MODULES_DIR/${name}_module.sh"')
+
+
+def stage_runner_problem(modules: Path) -> Optional[str]:
+    """STAGE_RUNNER_OLD when the target's stage runner (`modules`/build.sh) does not start its modules under the stage
+    account (no modules/stage_user.sh with run_as_stage, or a runner that never calls it), else None; None too when
+    the target has no runner of its own. In the build sandbox the entrypoint hands the runner CAP_SETUID and
+    CAP_SETGID as ambient capabilities, which every program it starts keeps: such a runner's modules would run as the
+    runner WITH those rights and without the preflight."""
+    runner, helper = Path(modules) / "build.sh", Path(modules) / "stage_user.sh"
+    if not runner.is_file():
+        return None
+    try:
+        text = runner.read_text(encoding="utf-8", errors="replace")
+        helper_text = helper.read_text(encoding="utf-8", errors="replace") if helper.is_file() else ""
+    except OSError:
+        return STAGE_RUNNER_OLD
+    if "run_as_stage()" not in helper_text or "stage_preflight()" not in helper_text:
+        return STAGE_RUNNER_OLD
+    if not all(mark in text for mark in _RUNNER_MARKS):
+        return STAGE_RUNNER_OLD
+    return None
+
+
 def _cap_set(values: Any) -> set:
     return {str(v).strip().upper().replace("CAP_", "", 1) for v in values or [] if str(v).strip()}
 

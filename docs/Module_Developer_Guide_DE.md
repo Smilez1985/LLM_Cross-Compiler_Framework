@@ -940,7 +940,9 @@ die Startzähler, den Abschluss-Eintrag) weder ändern noch verschieben oder ent
 Datensatz, die Importance-Matrix, das Hardware-Profil), muss für die Gruppe der Person lesbar sein. Der Runner
 prüft das alles vor dem ersten Modul und verweigert den Build mit einem klaren Grund (etwa `inputs` für eine
 Modelldatei, die nur ihr Besitzer lesen darf). Lass `modules/stage_user.sh` so, wie die Vorlage es hat, und starte
-eine Stufe nur über das `build.sh` der Vorlage.
+eine Stufe nur über das `build.sh` der Vorlage. Ein Target, das vor 3.3.0 aus der Vorlage entstand, hat ein
+`build.sh` ohne Stufen-Konto: Die Build-Sandbox verweigert es, bevor sein Container startet; kopiere `modules/build.sh`
+und `modules/stage_user.sh` aus `targets/_template`.
 
 Was das für dein Target heißt: Installiere alles im Dockerfile und behalte das Konto `llmstage` der Vorlage und
 `setpriv` (util-linux) im Image; schreib nicht ins Image; verlass dich nicht auf root,
