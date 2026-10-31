@@ -281,3 +281,31 @@ def test_the_stage_account_needs_the_persons_sub_ids_on_a_rootless_engine(versio
     subgid.write_text("example:100000:1000\n")
     supported, text = sandbox.stage_user_support(client, platform="linux", subuid=subuid, subgid=subgid)
     assert supported is False and "example" not in text and str(tmp_path) not in text
+
+
+# --- the Windows installer ----------------------------------------------------------------------------------------
+
+def _windows_engine_step() -> str:
+    from conftest import REPO_ROOT
+    text = (REPO_ROOT / "install.bat").read_text(encoding="utf-8")
+    return text[text.index("# CONTAINER ENGINE:"):text.index("# DITTO: lokale Laufzeit")]
+
+
+def test_the_windows_installer_sets_up_podman_and_docker_desktop_only_with_rootful():
+    """install.bat has no rootful default either: Podman (winget RedHat.Podman) with its machine for the signed-in
+    person; Docker Desktop only after --rootful, behind the warning; docker-users is named, never changed."""
+    step = _windows_engine_step()
+    assert "RedHat.Podman" in step and "podman machine init" in step and "podman machine start" in step
+    rootful = step[step.index("if ($Rootful) {"):step.index("} else {", step.index("if ($Rootful) {"))]
+    assert "Docker.DockerDesktop" in rootful and "dauerhaft Rechte wie ein Administrator" in rootful
+    assert step.count("Docker.DockerDesktop") == 1, "Docker Desktop only on the --rootful path"
+    assert "docker-users" in step and "net localgroup docker-users <dein Konto> /delete" in step
+    code = "\n".join(line for line in step.splitlines() if not line.lstrip().startswith("#"))
+    assert "Add-LocalGroupMember" not in code and "localgroup docker-users /add" not in code
+
+
+def test_the_windows_installer_passes_its_flags_and_stops_on_an_unknown_engine():
+    step = _windows_engine_step()
+    assert '$InstallArg -eq "--rootful"' in step and '$InstallArg -like "--engine=*"' in step
+    assert "Unbekannter Wert fuer --engine" in step
+    assert all(ord(c) < 128 for c in step), "the PowerShell part stays ASCII like the rest of install.bat"

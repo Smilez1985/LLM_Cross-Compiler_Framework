@@ -788,7 +788,7 @@ def _stub(folder: Path, name: str, exit_code: int = 0) -> None:
 @needs_bash
 class TestInstallShInAContainer:
 
-    def _setup_system(self, tmp_path, container: bool):
+    def _setup_system(self, tmp_path, container: bool, rootful: bool = False):
         stubs = tmp_path / "bin"
         for name in ("curl", "usermod", "sh", "groups", "apt-get", "dpkg"):
             _stub(stubs, name)
@@ -802,7 +802,8 @@ class TestInstallShInAContainer:
         (tmp_path / "os-release").write_text("ID=debian\nVERSION_CODENAME=bookworm\n")
         script = ('source "$1"; command() { if [ "$2" = docker ]; then return 1; fi; builtin command "$@"; }; '
                   'OS_RELEASE_FILE="$2/os-release"; DOCKER_KEYRING="$2/keyrings/docker.asc"; '
-                  'DOCKER_SOURCES="$2/sources.list.d/docker.sources"; wait_for_internet() { :; }; setup_system')
+                  'DOCKER_SOURCES="$2/sources.list.d/docker.sources"; wait_for_internet() { :; }; '
+                  + ('ROOTFUL=1; ' if rootful else '') + 'setup_system')
         run = subprocess.run(["/bin/bash", "-c", script, "test", str(INSTALL_SH), str(tmp_path)], env=env,
                              capture_output=True, text=True, timeout=60, cwd=tmp_path)
         calls = (stubs / "calls.log").read_text() if (stubs / "calls.log").exists() else ""
@@ -815,8 +816,9 @@ class TestInstallShInAContainer:
 
     def test_outside_a_container_build_the_engine_is_still_installed(self, tmp_path):
         """Round 23, item 3: from Docker's apt repository with the checked key, no longer with get.docker.com. The
-        fake curl here delivers no key, so the installer stops before it trusts or installs anything."""
-        run, calls = self._setup_system(tmp_path, container=False)
+        fake curl here delivers no key, so the installer stops before it trusts or installs anything. Docker from its
+        repository is the --rootful route; the default rootless route has its own tests (test_install_distros)."""
+        run, calls = self._setup_system(tmp_path, container=False, rootful=True)
         assert "https://download.docker.com/linux/debian/gpg" in calls, run.stdout + run.stderr
         assert "get.docker.com" not in calls and "docker-ce" not in calls
         assert run.returncode == 1 and "Docker wurde nicht installiert" in run.stdout + run.stderr

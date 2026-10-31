@@ -134,9 +134,26 @@ The installer:
    is there, the installer asks whether to switch it on (`SUSEConnect -p sle-module-python3/<version>/<arch>`, e.g.
    `sle-module-python3/15.6/x86_64`) and tries again; a system that is not registered stops with the registration
    step (`sudo SUSEConnect -r <code>`),
-2. installs Docker if it is missing, through the package manager of the system and never with a downloaded script.
-   Every package manager checks signatures its own way, and a third-party repository is trusted only after its key
-   matches a fingerprint pinned in `install.sh`:
+2. sets up a container engine that runs with your own rights (the default: no standing rights that can do more than
+   needed): **rootless Podman** from the distribution's own sources (`podman`, plus `podman-docker` for the `docker`
+   command where it exists and no Docker is installed; on Debian and Ubuntu also `uidmap`, `slirp4netns` and
+   `dbus-user-session`, on Alpine `shadow-uidmap`), a sub-id range for your account (65536 ids each in `/etc/subuid`
+   and `/etc/subgid`, only where you have none; an existing range stays) and Podman's Docker-compatible socket for
+   your user (`systemctl --user enable --now podman.socket`). With `--engine=docker`, or where Podman cannot be
+   installed, **rootless Docker** instead: Docker CE from Docker's repository with the checked key (below) plus
+   `docker-ce-rootless-extras`, the Docker service that runs as root switched off, and `dockerd-rootless-setuptool.sh
+   install` run as you; where Docker publishes no repository for it, Podman comes instead. There is no `docker` group:
+   the framework finds the rootless engine by itself and prefers it to a Docker daemon that runs as root. If your
+   account is already in the group `docker`, the installer says what that means and how to leave it (`sudo gpasswd -d
+   USER docker`); it never takes you out itself. Under Podman, Docker's GPU request and BuildKit are not available
+   ([Features](docs/Features.md#podman-instead-of-docker)); rootless Docker has both.
+
+   **Docker as root only when you ask for it:** `sudo ./install.sh --rootful` installs Docker if it is missing (the
+   ways below) and adds your user to the group `docker`, after a warning: your account then has root-equivalent
+   rights on this computer, permanently, also while the framework is not running. Docker always comes through the
+   package manager of the system and never with a downloaded script. Every package manager checks signatures its own
+   way, and a third-party repository is trusted only after its key matches a fingerprint pinned in `install.sh`
+   (the same for rootless Docker):
    - **Debian, Ubuntu, Raspberry Pi OS** and systems built on Ubuntu or Debian such as Linux Mint, Pop!_OS or LMDE:
      Docker's official apt repository (32-bit Raspberry Pi OS gets Debian's armhf packages, as Docker's guide says;
      a system built on Ubuntu or Debian gets the packages of the release it is built on). The downloaded key file
@@ -179,9 +196,9 @@ The installer:
      install Docker yourself and start `install.sh` again. On such a system it installs nothing else either: what it
      needs (see [Requirements](#requirements)) is up to you.
 
-   It then adds your user to the `docker` group and says what that means: members of the group control the Docker
-   service, which runs as root, so every program that runs as your user can get root rights on this computer
-   (`sudo gpasswd -d USER docker` undoes it; the framework then cannot build without sudo),
+   With `--rootful` it then adds your user to the `docker` group and says what that means: members of the group
+   control the Docker service, which runs as root, so every program that runs as your user can get root rights on
+   this computer (`sudo gpasswd -d USER docker` undoes it),
 3. copies the files the repository ships to `/opt/llm-cross-compiler-framework` (owned by your user; `rsync` comes from
    the package manager if it is missing) and lists them in `.lcf-installed-files`. Running it again updates those files
    and removes only files that an earlier run copied and the repository no longer ships; everything else there stays:
@@ -210,11 +227,14 @@ would go through and 1, with the reason, when it would stop.
 On a server without a display, `sudo ./install.sh --headless` (unattended: `LCF_HEADLESS=1`) leaves the GUI out:
 the command line and the MCP server need no Qt. `llm-framework` then says how to add the GUI later.
 
-Log out and back in once so the `docker` group takes effect. Then start the GUI with `llm-framework`.
+After `--rootful`, log out and back in once so the `docker` group takes effect. Then start the GUI with `llm-framework`. `llm-cli mojo` says whether the engine runs rootless and names a group with root effect your account is in.
 
 ### Windows
 
-1. Install and start Docker Desktop (WSL 2 backend).
+1. Nothing to install beforehand: the installer sets up Podman (`winget install RedHat.Podman`) with a Podman
+   machine, rootless by default (`podman machine init`, `podman machine start`, for the person who is signed in).
+   Docker Desktop only with `install.bat --rootful`, after a warning: its group `docker-users` gives the account
+   administrator-equivalent rights, permanently. If your account is in `docker-users`, the installer says so.
 2. Right-click `install.bat` and choose **Run as administrator**.
 
 The installer checks for Python (installs Python 3.13 with `winget` if none is found, then requires 3.11 to
