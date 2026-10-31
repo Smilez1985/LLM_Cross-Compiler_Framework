@@ -136,6 +136,7 @@ der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und 
   endet es mit 2, dem Exit-Code des Endgrunds cancelled. Strg+C im Befehl selbst bleibt 130.
 
 ### Behoben
+- `2026-10-31 23:16 UTC` · `v3.3.0` **Die Umstellung auf OpenSSH klappt bei socket-aktiviertem sshd, und Dropbears Entfernung auf DietPi hat einen Ausweg** ([Design](docs/DESIGN_DE.md#bausteine-und-entscheidungen)): Auf Systemen, auf denen `ssh.socket` den sshd startet (Ubuntu 22.10 und neuer), lädt die Umstellung systemd nach ihrer Port-Datei neu und startet `ssh.socket` neu, sodass der neue sshd auf seinem Port antwortet, statt dass die Umstellung vergeblich wartet; Dropbear wird mit dietpi-software entfernt (seine ID an einer Stelle, auf einem echten Board noch zu bestätigen), und fehlt das Werkzeug oder lehnt es ab, wird stattdessen sein Dienst angehalten und deaktiviert.
 - `2026-10-31 11:07 UTC` · `v3.3.0` **Was ein Build geschrieben hat, kannst du immer lesen und entfernen** ([Design](docs/DESIGN_DE.md#build-pipeline-und-target-module)):
   Ein Werkzeug in einem Stufen-Modul, das (als Stufen-Konto) eine Datei mit 0600 oder einen Ordner mit 0555 schrieb,
   hinterließ Dateien, die du nicht lesen konntest, und Ordner, die das Aufräumen nicht entfernen konnte. Stufen-Runner
