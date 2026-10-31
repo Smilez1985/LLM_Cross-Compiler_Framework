@@ -8,6 +8,9 @@ list`, the Boards window's Key tier column).
 Every board here is a stand-in (no network, no SSH server); documentation names and addresses only.
 """
 
+import os
+import shutil
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -392,3 +395,56 @@ def test_the_deployment_tab_hands_its_tier_questions_to_a_password_deploy(qapp, 
         worker._failure_text = lambda result: "failed"
         worker.run()
         assert seen[-1]["chooser"] == expected
+
+
+# --- the switch on ssh.socket systems, and Dropbear's removal on DietPi ----------------------------------------------
+
+POSIX = pytest.mark.skipif(os.name == "nt" or shutil.which("sh") is None,
+                           reason="the board's setup steps are POSIX sh programs; Windows has no /bin/sh to run them")
+
+
+def test_a_socket_activated_sshd_is_reloaded_and_its_socket_restarted_after_the_port_file():
+    """Regression (failed before: on ssh.socket systems, Ubuntu 22.10 and later, the switch restarted ssh.service only;
+    ssh.socket kept listening on port 22 and the new sshd never answered on the switch's port)."""
+    from orchestrator.remote import gate, openssh_switch
+    body = str(gate.script("openssh-install", "apt-get", "2222"))
+    tee = body.index(f"tee {openssh_switch.DROPIN}")
+    reload_at = body.index("systemctl daemon-reload")
+    socket_at = body.index(f"systemctl restart {openssh_switch.SSH_SOCKET}")
+    assert tee < reload_at < socket_at
+    assert f"is-enabled --quiet {openssh_switch.SSH_SOCKET}" in body and "systemctl restart ssh " in body
+    if shutil.which("sh"):
+        subprocess.run(["sh", "-n", "-c", body], check=True, timeout=60)
+
+
+def test_dropbears_dietpi_id_is_one_named_constant_with_a_fallback_to_the_init_system():
+    from orchestrator.remote import gate, openssh_switch
+    body = str(gate.script("dropbear-disable"))
+    assert f"uninstall {openssh_switch.DIETPI_DROPBEAR_ID}" in body and "104" not in body.replace(
+        f"uninstall {openssh_switch.DIETPI_DROPBEAR_ID}", "")
+    assert body.index("dietpi-software") < body.index("systemctl disable --now dropbear")
+    assert "confirmed on a real DietPi board" in open(openssh_switch.__file__, encoding="utf-8").read()
+
+
+@POSIX
+@pytest.mark.parametrize("dietpi_ok", [True, False])
+def test_dropbear_goes_through_dietpi_software_or_else_the_init_system(tmp_path, dietpi_ok):
+    """A stand-in board: sudo writes down what it was asked (nothing runs as root), dietpi-software succeeds or
+    refuses; when it refuses (or is absent), the dropbear service is stopped and disabled by the init system."""
+    from orchestrator.remote import gate, openssh_switch
+    log = tmp_path / "sudo.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stubs = {"sudo": f'echo "$*" >> "{log}"; cat >/dev/null; case "$*" in *dietpi-software*) exit {0 if dietpi_ok else 1};; '
+                     "esac; exit 0",
+             "dietpi-software": "exit 0", "rc-service": "exit 0", "rc-update": "exit 0"}
+    for name, body in stubs.items():
+        (bin_dir / name).write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
+        (bin_dir / name).chmod(0o755)
+    done = subprocess.run(["sh", "-c", str(gate.script("dropbear-disable"))], input=b"pw\n", capture_output=True,
+                          timeout=60, env={"PATH": f"{bin_dir}{os.pathsep}/usr/bin:/bin", "HOME": str(tmp_path)})
+    calls = log.read_text(encoding="utf-8")
+    assert f"uninstall {openssh_switch.DIETPI_DROPBEAR_ID}" in calls
+    fallback = "disable --now dropbear" in calls or "rc-service dropbear stop" in calls
+    assert fallback is (not dietpi_ok), calls
+    assert b"dropbear=disabled" in done.stdout

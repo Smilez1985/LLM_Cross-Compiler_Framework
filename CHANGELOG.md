@@ -123,6 +123,7 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
   the exit code of the end reason cancelled. Ctrl+C in the command itself stays 130.
 
 ### Fixed
+- `2026-10-31 23:16 UTC` · `v3.3.0` **The switch to OpenSSH works on socket-activated sshd, and Dropbear's removal on DietPi has a fallback** ([design](docs/DESIGN.md#components-and-decisions)): on systems where `ssh.socket` starts sshd (Ubuntu 22.10 and later) the switch now reloads systemd after its port file and restarts `ssh.socket`, so the new sshd answers on its port instead of the switch waiting in vain; Dropbear is removed with dietpi-software (its ID in one place, to be confirmed on a real board) and, when that tool is missing or refuses, its service is stopped and disabled instead.
 - `2026-10-31 11:07 UTC` · `v3.3.0` **You can always read and remove what a build wrote** ([design](docs/DESIGN.md#build-pipeline-and-target-modules)):
   a tool in a stage module that wrote a 0600 file or a 0555 folder (as the stage account) left files you could not
   read and folders the clean-up could not remove. The stage runner and the stage account now share one group, the
