@@ -374,3 +374,90 @@ def test_static_elf_check():
     if sys.platform.startswith("linux") and Path("/bin/ls").is_file():
         assert not layer.is_static_elf(Path("/bin/ls").read_bytes())   # a dynamic program has an interpreter
     assert stat.S_IMODE(0o755)
+
+
+# --- review regressions (cs-runtime-layer2-v) -----------------------------------------------------------------------
+
+def _layer_attrs(**config):
+    return {"Config": {"User": "0:0", "Entrypoint": list(layer.ENTRYPOINT), "Cmd": ["--job", "build"], **config},
+            "HostConfig": {"CapDrop": ["ALL"], "CapAdd": ["SETUID", "SETGID"], "SecurityOpt": ["no-new-privileges"],
+                           "ReadonlyRootfs": True, "NetworkMode": "none"},
+            "Mounts": [{"Type": "bind", "Source": "/cache/runtime-layer/current", "Destination": layer.LAYER_MOUNT,
+                        "RW": False}]}
+
+
+def _layer_options():
+    from orchestrator.utils.sandbox import stage_user_sandbox
+    options, _env = stage_user_sandbox((1000, 1000), working_dir="/build-cache/work")
+    options["entrypoint"] = list(layer.ENTRYPOINT)
+    options["command"] = ["--job", "build"]
+    return options
+
+
+def test_an_image_volume_over_the_runtime_layer_refuses_the_build():
+    """An image's `VOLUME /llmcf/bin` makes the engine mount an anonymous volume, filled from the image's own
+    /llmcf/bin, over the read-only layer (seen with Podman 4.9: the entrypoint then ran the image's busybox as root with
+    CAP_SETUID and CAP_SETGID). The inspect check refuses any mount the host did not decide inside a read-only one."""
+    from orchestrator.utils.sandbox import sandbox_problem
+    volumes = layer.layer_volumes(Path("/cache"), None)
+    attrs = _layer_attrs()
+    assert sandbox_problem(attrs, _layer_options(), volumes) is None
+    attrs["Mounts"].insert(0, {"Type": "volume", "Name": "f00", "Source": "/var/lib/volumes/f00/_data",
+                               "Destination": f"{layer.LAYER_MOUNT}/bin", "RW": True})
+    problem = sandbox_problem(attrs, _layer_options(), volumes) or ""
+    assert f"{layer.LAYER_MOUNT}/bin" in problem and "/var/lib" not in problem
+    attrs["Mounts"][0]["Destination"] = "/llmcf-elsewhere"   # a name that only starts the same is no mount inside it
+    assert sandbox_problem(attrs, _layer_options(), volumes) is None
+
+
+def test_podmans_entrypoint_as_one_string_is_the_frameworks():
+    """Podman 4 reports Config.Entrypoint as one string ("/llmcf/bin/busybox sh /llmcf/entrypoint.sh"): the check
+    compared it letter by letter with the list and refused every Podman build."""
+    from orchestrator.utils.sandbox import sandbox_problem
+    volumes = layer.layer_volumes(Path("/cache"), None)
+    attrs = _layer_attrs(Entrypoint=" ".join(layer.ENTRYPOINT))
+    assert sandbox_problem(attrs, _layer_options(), volumes, "podman") is None
+    attrs["Config"]["Entrypoint"] = "/app/entrypoint.sh"
+    assert "entrypoint" in (sandbox_problem(attrs, _layer_options(), volumes, "podman") or "")
+
+
+def test_an_installed_pack_in_the_targets_folder_gets_the_note(tmp_path, monkeypatch):
+    """Packs and the wizard's targets live in the same targets/ folder as the framework's own: the folder alone made
+    every one of them 'shipped', so a pack's own build.sh was ignored without the decided note."""
+    from orchestrator.Core.community_pack import PROVENANCE_NAME
+    monkeypatch.setattr(layer, "SHIPPED_DIR", tmp_path / "orchestrator" / "runtime_layer")
+    pack = tmp_path / "targets" / "Pack"
+    (pack / "modules").mkdir(parents=True)
+    (pack / "modules" / "build.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    (pack / "target.yml").write_text("capabilities:\n  support_level: official\n", encoding="utf-8")
+    (pack / PROVENANCE_NAME).write_text("{}", encoding="utf-8")
+    note = layer.own_runner_note(pack)
+    assert note and "modules/build.sh" in note
+    (pack / PROVENANCE_NAME).unlink()
+    (pack / "target.yml").write_text("capabilities:\n  support_level: community\n", encoding="utf-8")
+    assert layer.own_runner_note(pack)          # the person's own target (wizard): not the framework's either
+    template = tmp_path / "targets" / "_template"
+    (template / "modules").mkdir(parents=True)
+    (template / "modules" / "build.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    assert layer.own_runner_note(template) is None
+
+
+@needs_posix
+def test_the_runners_path_leads_into_the_read_only_layer(tmp_path):
+    """The runner's PATH must name a place the image cannot fill: /llmcf-runner-has-no-path is a folder any image can
+    create. A path inside the layer mount is covered by it (layer_check refuses any extra file there, the inspect
+    check any mount inside it)."""
+    lay = tmp_path / "llmcf"
+    shutil.copytree(layer.SHIPPED_DIR, lay, ignore=shutil.ignore_patterns("toolbox", "MANIFEST.sha256"))
+    (lay / "bin").mkdir()
+    (lay / "bin" / "busybox").write_text(STAND_IN_BUSYBOX, encoding="utf-8")
+    os.chmod(lay / "bin" / "busybox", 0o755)
+    result = subprocess.run(["sh", "-c", 'LLMCF_LAYER="$1"; . "$1/tools.sh"; printf %s "$PATH"', "_", str(lay)],
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith(str(lay) + "/"), result.stdout
+
+
+def test_a_cut_off_program_is_not_static_and_raises_nothing():
+    for data in (b"\x7fELF", b"\x7fELF\x02\x01\x01" + b"\0" * 20, b""):
+        assert layer.is_static_elf(data) is False
