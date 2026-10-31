@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - the container engine the framework talks to: Docker, or Podman's Docker-compatible
-interface (the install rule of the RHEL family)
+LLM Cross-Compiler Framework - the container engine the framework talks to: a rootless engine by default (rootless
+Podman through its Docker-compatible interface, or rootless Docker), a Docker daemon that runs as root only when the
+person chose it
 
-Docker CE is the standard. In the RHEL family (Fedora, RHEL, CentOS Stream, Rocky Linux, AlmaLinux, Oracle Linux)
-install.sh falls back to Podman (podman-docker
-and the person's rootless podman.socket) when Docker CE cannot be installed there or the person keeps the packages dnf
-would have to remove for it. The framework then finds that socket by itself: `ensure_docker_host()` sets DOCKER_HOST
-to it in this process when DOCKER_HOST is not set and no Docker daemon is there. Every place that connects to Docker
-calls it first (the build engine's client, the container engine of the builder image and of Ditto's container, the
-one Docker check of the build engine and Mojo), and the processes the framework starts (docker buildx, child llm-cli
-runs) inherit the variable. scripts/build_container_image.sh asks the same function: `python3 -I
-orchestrator/utils/docker_engine.py --docker-host` (and `--engine`), so this file uses the standard library only and
-runs under the system's Python 3.9 as well.
+No standing rights that can do more than needed (docs/DESIGN.md): install.sh sets up rootless Podman (podman-docker
+and the person's podman.socket, with sub-id ranges) by default, rootless Docker with --engine=docker or where Podman
+cannot be installed, and Docker as root with the group docker only with --rootful and a warning. The framework then
+finds the engine by itself: `ensure_docker_host()` sets DOCKER_HOST in this process when DOCKER_HOST is not set,
+preferring the person's rootless Docker, then the person's Podman socket, over a Docker daemon that runs as root.
+Every place that connects to Docker calls it first (the build engine's client, the container engine of the builder
+image and of Ditto's container, the one Docker check of the build engine and Mojo), and the processes the framework
+starts (docker buildx, child llm-cli runs) inherit the variable. scripts/build_container_image.sh asks the same
+function: `python3 -I orchestrator/utils/docker_engine.py --docker-host` (and `--engine`), so this file uses the
+standard library only and runs under the system's Python 3.9 as well. `root_effect_group()` names a group of the
+person's account that has root effect (Linux 'docker', Windows 'docker-users'); Mojo says it plainly.
 
-What Podman does not provide is refused early, in plain words, with the way to Docker CE (`podman_refusal`). Checked
-on Rocky Linux 9.8 with Podman 5.8.2 and buildah 1.43.1 (2026-10-23) and against Podman's sources:
+What Podman does not provide is refused early, in plain words, with the way to rootless Docker (`podman_refusal`).
+Checked on Rocky Linux 9.8 with Podman 5.8.2 and buildah 1.43.1 (2026-10-23) and against Podman's sources:
 - works under Podman: docker-py over the socket (ping, version, info, images, containers, df); image builds through
   the API with a target stage, build arguments and labels; Podman's `docker buildx build --load --progress=plain`
   (an alias of `podman build`); RUN --mount=type=bind (read-only by default, as in BuildKit), multi-stage builds and
@@ -52,10 +54,31 @@ PODMAN_LIMITS = {
     "buildkit": ("this needs BuildKit, Docker's builder behind docker buildx: under Podman 'docker buildx' is "
                  "Podman's own builder (buildah), without BuildKit's frontends, cache export or drivers"),
 }
-DOCKER_CE_WAY = ("Docker CE is the standard for the framework. On Fedora, RHEL, CentOS Stream, Rocky Linux, AlmaLinux "
-                 "or Oracle Linux: 'sudo dnf remove podman-docker', then 'sudo ./install.sh' again (it installs Docker "
-                 "CE from Docker's repository for the system and asks before dnf removes or replaces anything); "
-                 "elsewhere: " + DOCKER_CE_URL)
+DOCKER_CE_WAY = ("For these, use rootless Docker (BuildKit, and the GPU through the NVIDIA Container Toolkit): remove "
+                 "the package podman-docker with your package manager (for example 'sudo dnf remove podman-docker'), "
+                 "then run 'sudo ./install.sh --engine=docker' again; it sets up Docker CE from Docker's repository "
+                 "for the system, with its key checked, rootless for your account. Manual: " + DOCKER_CE_URL)
+ROOTLESS_DOCKER_URL = "https://docs.docker.com/engine/security/rootless/"
+
+# The groups whose members control a container engine that runs with root's rights: on Linux the group docker (the
+# Docker daemon runs as root), on Windows Docker Desktop's docker-users (it controls Docker Desktop's privileged
+# service and its Linux machine). A member has root-equivalent rights on this computer, permanently.
+ROOT_EFFECT_GROUPS = {"linux": "docker", "win32": "docker-users"}
+ROOT_GROUP_TEXT = ("Your account is in the group '{group}', and that group has root effect: whoever is in it controls "
+                   "a container engine that runs with administrator (root) rights, so every program you run can gain "
+                   "those rights on this computer, permanently, also while the framework is not running.")
+ROOT_GROUP_WHY = ("No standing rights that can do more than needed: a rootless engine builds the same containers with "
+                  "only your own rights.")
+ROOT_GROUP_WAY = {
+    "linux": ("Switch to a rootless engine: run 'sudo ./install.sh' again (it sets up rootless Podman by default, or "
+              "rootless Docker with --engine=docker; the framework prefers a rootless engine as soon as it is there), "
+              "then an administrator takes your account out of the group: 'sudo gpasswd -d $USER docker', and you "
+              "log in again. Rootless Docker by hand: " + ROOTLESS_DOCKER_URL),
+    "win32": ("Switch to a rootless engine: install Podman Desktop (or run install.bat again; it sets up Podman with a "
+              "rootless machine by default), then an administrator takes your account out of the group: "
+              "'net localgroup docker-users <your account> /delete' in an administrator's terminal, and you sign in "
+              "again. Keep Docker Desktop only if you need it, knowing what the group means."),
+}
 
 
 @dataclass(frozen=True)
@@ -104,6 +127,11 @@ def _docker_daemon_at(path: Path, timeout: float = 0.5) -> bool:
     return engine_at("unix://" + str(path), timeout=1.0) != "podman"
 
 
+# Where systemd keeps each user's runtime folder (/run/user/<uid>, $XDG_RUNTIME_DIR of a login): the person's Podman
+# socket (podman/podman.sock) and rootless Docker's socket (docker.sock) live there.
+USER_RUNTIME_ROOT = "/run/user"
+
+
 def podman_socket(environ: Mapping[str, str], uid: Optional[int] = None) -> Optional[Path]:
     """The Podman socket of this user: $XDG_RUNTIME_DIR/podman/podman.sock or /run/user/<uid>/podman/podman.sock
     (systemctl --user enable --now podman.socket, as install.sh sets it up), for root also /run/podman/podman.sock.
@@ -113,7 +141,7 @@ def podman_socket(environ: Mapping[str, str], uid: Optional[int] = None) -> Opti
     if runtime_dir:
         candidates.append(Path(runtime_dir) / "podman" / "podman.sock")
     if uid is not None:
-        candidates.append(Path(f"/run/user/{uid}/podman/podman.sock"))
+        candidates.append(Path(USER_RUNTIME_ROOT) / str(uid) / "podman" / "podman.sock")
         if uid == 0:
             candidates.append(Path("/run/podman/podman.sock"))
     for path in candidates:
@@ -129,11 +157,29 @@ _ENGINES: "weakref.WeakKeyDictionary[Any, str]" = weakref.WeakKeyDictionary()
 
 
 def _decide(environ: MutableMapping[str, str], uid: Optional[int], docker_sockets: Sequence[str]) -> EngineChoice:
+    """The engine of this process: a DOCKER_HOST the person set always wins; otherwise a rootless engine before one
+    that runs as root (no standing rights that can do more than needed, docs/DESIGN.md): the person's rootless Docker,
+    then the person's rootless Podman, then the system's Docker daemon. Root itself keeps the old order (Docker's
+    daemon, then root's Podman socket): nothing it runs is rootless."""
     given = str(environ.get("DOCKER_HOST") or "").strip()
     if given:
         return EngineChoice(given, False, "DOCKER_HOST is set")
     if not sys.platform.startswith("linux"):
         return EngineChoice("", False, "Docker's default address on this system")
+    if uid not in (None, 0):
+        rootless = rootless_docker_socket(environ, uid)
+        if rootless is not None:
+            host = "unix://" + str(rootless)
+            environ["DOCKER_HOST"] = host
+            return EngineChoice(host, True, ROOTLESS_DOCKER_CHOSEN)
+        found = podman_socket(environ, uid)
+        if found is not None:
+            host = "unix://" + str(found)
+            environ["DOCKER_HOST"] = host
+            return EngineChoice(host, True, ROOTLESS_PODMAN_CHOSEN)
+        if _docker_daemon_running(environ, docker_sockets):
+            return EngineChoice("", False, "a Docker daemon is there")
+        return EngineChoice("", False, "neither a Docker daemon nor a Podman socket is there")
     if _docker_daemon_running(environ, docker_sockets):
         return EngineChoice("", False, "a Docker daemon is there")
     found = podman_socket(environ, uid)
@@ -144,25 +190,50 @@ def _decide(environ: MutableMapping[str, str], uid: Optional[int], docker_socket
     return EngineChoice(host, True, "no Docker daemon is there, the person's Podman socket is")
 
 
+# Why ensure_docker_host chose a rootless engine (plain words, no path)
+ROOTLESS_DOCKER_CHOSEN = "the person's rootless Docker is there (a rootless engine is preferred)"
+ROOTLESS_PODMAN_CHOSEN = ("the person's rootless Podman socket is there (a rootless engine is preferred over a Docker "
+                          "daemon that runs as root)")
+
+
+def rootless_docker_socket(environ: Mapping[str, str], uid: Optional[int] = None) -> Optional[Path]:
+    """The socket of the person's rootless Docker ($XDG_RUNTIME_DIR/docker.sock, as dockerd-rootless-setuptool.sh sets
+    it up; without XDG_RUNTIME_DIR /run/user/<uid>/docker.sock, as podman_socket looks for Podman's) when a Docker
+    daemon answers there (not podman-docker's link to Podman's socket); None otherwise."""
+    candidates = []
+    runtime_dir = str(environ.get("XDG_RUNTIME_DIR") or "")
+    if runtime_dir:
+        candidates.append(Path(runtime_dir) / "docker.sock")
+    if uid not in (None, 0):
+        candidates.append(Path(USER_RUNTIME_ROOT) / str(uid) / "docker.sock")
+    for path in candidates:
+        if _docker_daemon_at(path):
+            return path
+    return None
+
+
 def _docker_daemon_running(environ: Mapping[str, str], docker_sockets: Sequence[str]) -> bool:
     rootless = [str(Path(environ["XDG_RUNTIME_DIR"]) / "docker.sock")] if environ.get("XDG_RUNTIME_DIR") else []
     return any(_docker_daemon_at(Path(p)) for p in list(docker_sockets) + rootless)
 
 
-# What Mojo says when DOCKER_HOST still points at a Podman socket while a Docker daemon runs (no path in it).
-STALE_PODMAN_HOST = ("DOCKER_HOST still points at a Podman socket (probably left from an earlier Podman session), while a "
-                     "Docker daemon runs on this computer. Your DOCKER_HOST always wins, so the framework talks to "
-                     "Podman, with Podman's limits (no NVIDIA GPU in a container, no BuildKit).")
-STALE_PODMAN_WAY = ("To use Docker: remove the DOCKER_HOST line from your shell's start file (for example the line "
-                    "'export DOCKER_HOST=...podman.sock' in ~/.bashrc), open a new terminal and start the framework "
-                    "again. To keep Podman on purpose, leave it as it is.")
+# What Mojo says when DOCKER_HOST still points at a Podman socket while the person's rootless Docker runs (no path in
+# it). A Docker daemon that runs as root does not count: the framework prefers a rootless engine itself.
+STALE_PODMAN_HOST = ("DOCKER_HOST still points at a Podman socket (probably left from an earlier Podman session), "
+                     "while your rootless Docker runs on this computer. Your DOCKER_HOST always wins, so the framework "
+                     "talks to Podman, with Podman's limits (no NVIDIA GPU in a container, no BuildKit).")
+STALE_PODMAN_WAY = ("To use your rootless Docker: remove the DOCKER_HOST line from your shell's start file (for "
+                    "example the line 'export DOCKER_HOST=...podman.sock' in ~/.bashrc), open a new terminal and start "
+                    "the framework again. To keep Podman on purpose, leave it as it is.")
 
 
 def stale_podman_host(environ: Optional[Mapping[str, str]] = None, *,
                       docker_sockets: Sequence[str] = DOCKER_SOCKETS) -> bool:
-    """Whether DOCKER_HOST points at a Podman socket (a podman path, or Podman answers there) while a Docker daemon
-    answers on Docker's sockets: a DOCKER_HOST left from an earlier Podman session. The person's DOCKER_HOST still wins
-    (_decide); Mojo names it (STALE_PODMAN_HOST, STALE_PODMAN_WAY). Linux only; never raises."""
+    """Whether DOCKER_HOST points at a Podman socket (a podman path, or Podman answers there) while the person's
+    rootless Docker answers ($XDG_RUNTIME_DIR/docker.sock): a DOCKER_HOST left from an earlier Podman session. A
+    Docker daemon that runs as root does not make it stale (a rootless engine is preferred, _decide). The person's
+    DOCKER_HOST still wins; Mojo names it (STALE_PODMAN_HOST, STALE_PODMAN_WAY). `docker_sockets` stays for the
+    callers that pass it. Linux only; never raises."""
     env = os.environ if environ is None else environ
     try:
         given = str(env.get("DOCKER_HOST") or "").strip()
@@ -170,16 +241,17 @@ def stale_podman_host(environ: Optional[Mapping[str, str]] = None, *,
             return False
         path = Path(given[len("unix://"):])
         podman = "podman" in path.parts or _points_to_podman(path) or engine_at(given, timeout=1.0) == "podman"
-        return bool(podman) and _docker_daemon_running(env, docker_sockets)
+        return bool(podman) and rootless_docker_socket(env) is not None
     except Exception:  # noqa: BLE001 - a health hint must never stop a check
         return False
 
 
 def ensure_docker_host(environ: Optional[MutableMapping[str, str]] = None, *, uid: Optional[int] = None,
                        docker_sockets: Sequence[str] = DOCKER_SOCKETS, refresh: bool = False) -> EngineChoice:
-    """Sets DOCKER_HOST to the person's Podman socket when DOCKER_HOST is not set, no Docker daemon answers on Docker's
-    sockets (the system's or a rootless Docker's) and Podman's socket is there (Linux only). Changes nothing otherwise:
-    a DOCKER_HOST the person set always wins. For this process (os.environ, decided once; `refresh` decides again) or
+    """Sets DOCKER_HOST to the person's rootless engine when DOCKER_HOST is not set (Linux only): the person's rootless
+    Docker, else the person's Podman socket, both before a Docker daemon that runs as root (_decide); for root, Podman's
+    socket only when no Docker daemon answers. Changes nothing otherwise: a DOCKER_HOST the person set always wins.
+    For this process (os.environ, decided once; `refresh` decides again) or
     for the mapping `environ` (tests, child environments). Never raises."""
     own = environ is None
     env = os.environ if own else environ
@@ -339,6 +411,46 @@ def create_container(client: Any, **kwargs: Any) -> Any:
     request = _create_container_args(args)
     request["host_config"]["UsernsMode"] = USERNS_KEEP_ID
     return client.containers.get(client.api.create_container(**request)["Id"])
+
+
+def root_effect_group(platform: Optional[str] = None, *, groups: Optional[Sequence[str]] = None) -> str:
+    """The group with root effect (ROOT_EFFECT_GROUPS) the person's account is in: 'docker' on Linux, 'docker-users'
+    on Windows; '' when it is in none of them or that cannot be read. `groups`: the account's group names (tests);
+    otherwise read here (Linux: the process's groups and the group's member list, so a membership that a new login
+    would bring counts too; Windows: 'whoami /groups'). Only the group's name leaves this function, never an account
+    name. Never raises."""
+    platform = platform or sys.platform
+    key = "win32" if platform.startswith("win") else "linux" if platform.startswith("linux") else ""
+    group = ROOT_EFFECT_GROUPS.get(key, "")
+    if not group:
+        return ""
+    try:
+        names = [str(g) for g in groups] if groups is not None else _own_groups(key, group)
+    except Exception:  # noqa: BLE001 - a health hint must never stop a check
+        return ""
+    wanted = group.lower()
+    return group if any(n.strip().lower().rsplit("\\", 1)[-1] == wanted for n in names) else ""
+
+
+def _own_groups(key: str, group: str) -> list:
+    """The account's group names that matter for `group` (read locally, never shown)."""
+    if key == "linux":
+        import grp
+        try:
+            entry = grp.getgrnam(group)
+        except KeyError:
+            return []
+        own = set(os.getgroups()) | {os.getgid()}
+        try:
+            import pwd
+            me = pwd.getpwuid(os.getuid()).pw_name
+        except (ImportError, KeyError):
+            me = ""
+        return [group] if entry.gr_gid in own or (me and me in entry.gr_mem) else []
+    import subprocess
+    out = subprocess.run(["whoami", "/groups", "/fo", "csv", "/nh"], capture_output=True, text=True,  # nosec B603 B607
+                         timeout=10, check=False).stdout or ""
+    return [line.split(",", 1)[0].strip().strip('"') for line in out.splitlines() if line.strip()]
 
 
 def save_image(image: Any, path: Any, *, named: Any = True, cancelled: Optional[Any] = None) -> str:

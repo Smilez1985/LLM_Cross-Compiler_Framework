@@ -111,8 +111,10 @@ class SelfHealingManager:
             (
                 r"permission denied.*docker\.sock|Got permission denied while trying to connect to the Docker daemon", 
                 "Your user may not access the Docker daemon.",
-                "Add your user to the 'docker' group (sudo usermod -aG docker $USER, then log in again) "
-                "or use rootless Docker. Never make /var/run/docker.sock world-writable.",
+                "Use a rootless engine: 'sudo ./install.sh' sets up rootless Podman for your account (the framework "
+                "prefers it). The group 'docker' would give your account root-equivalent rights permanently; only "
+                "with that knowingly: sudo usermod -aG docker $USER, then log in again. Never make "
+                "/var/run/docker.sock world-writable.",
                 HealingStrategy.MANUAL_INTERVENTION,
                 "HOST"
             ),

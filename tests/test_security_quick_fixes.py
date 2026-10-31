@@ -305,12 +305,13 @@ def _stub(folder: Path, name: str) -> None:
 
 @pytest.mark.skipif(not shutil.which("bash") or os.name != "posix", reason="install.sh needs bash")
 def test_installer_says_what_the_docker_group_means(tmp_path):
-    """Seventh round, item 6: no question about the docker group, but the installer says what membership means."""
+    """No question about the docker group, but the installer says what membership means; the group comes only with
+    --rootful (the default is a rootless engine without the group)."""
     stubs = tmp_path / "bin"
     for name in ("curl", "usermod", "sh", "groups", "docker"):
         _stub(stubs, name)
     (stubs / "python3").symlink_to(shutil.which("python3") or sys.executable)
-    script = 'source "$1"; wait_for_internet() { :; }; setup_system'
+    script = 'source "$1"; wait_for_internet() { :; }; ROOTFUL=1; setup_system'
     run = subprocess.run(["/bin/bash", "-c", script, "test", str(INSTALL_SH)], capture_output=True, text=True,
                          env={"PATH": f"{stubs}:/usr/bin:/bin", "HOME": str(tmp_path), "SUDO_USER": "lcf"},
                          timeout=60, cwd=tmp_path)

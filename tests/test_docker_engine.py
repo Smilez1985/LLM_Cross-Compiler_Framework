@@ -95,16 +95,18 @@ class TestTheChoice:
         assert str(short_dir) not in choice.reason, "the reason names no path"
         podman.close()
 
-    def test_a_running_docker_daemon_keeps_docker(self, short_dir):
+    def test_a_running_docker_daemon_keeps_docker_for_root(self, short_dir):
+        """Root keeps the old order (a Docker daemon before root's Podman socket); a person's account prefers its
+        rootless engine (test_rootless_default)."""
         podman = listening(short_dir / "run" / "podman" / "podman.sock")
         docker = listening(short_dir / "docker.sock")
         env = {"XDG_RUNTIME_DIR": str(short_dir / "run")}
-        choice = ensure_docker_host(env, docker_sockets=[str(short_dir / "docker.sock")])
+        choice = ensure_docker_host(env, uid=0, docker_sockets=[str(short_dir / "docker.sock")])
         assert not choice.set_here and "DOCKER_HOST" not in env
         podman.close(), docker.close()
 
     def test_a_docker_daemon_that_refuses_this_user_still_counts(self, short_dir, monkeypatch):
-        """Not in the group docker yet (a new login fixes it): Docker is there, and Podman is not chosen."""
+        """Not in the group docker yet (a new login fixes it): Docker is there, and root's Podman is not chosen."""
         podman = listening(short_dir / "run" / "podman" / "podman.sock")
         docker = listening(short_dir / "docker.sock")
         real_connect = socket.socket.connect
@@ -115,14 +117,17 @@ class TestTheChoice:
             return real_connect(self, address)
         monkeypatch.setattr(socket.socket, "connect", connect)
         env = {"XDG_RUNTIME_DIR": str(short_dir / "run")}
-        assert not ensure_docker_host(env, docker_sockets=[str(short_dir / "docker.sock")]).set_here
+        assert not ensure_docker_host(env, uid=0, docker_sockets=[str(short_dir / "docker.sock")]).set_here
         podman.close(), docker.close()
 
-    def test_a_rootless_docker_keeps_docker(self, short_dir):
+    def test_a_rootless_docker_is_chosen_and_set(self, short_dir):
+        """The person's rootless Docker: DOCKER_HOST is set to its socket (before, it was only 'kept', and docker-py
+        looked at the system socket); it comes before the person's Podman."""
         podman = listening(short_dir / "run" / "podman" / "podman.sock")
         rootless = listening(short_dir / "run" / "docker.sock")
         env = {"XDG_RUNTIME_DIR": str(short_dir / "run")}
-        assert not ensure_docker_host(env, docker_sockets=[str(short_dir / "none.sock")]).set_here
+        choice = ensure_docker_host(env, uid=1000, docker_sockets=[str(short_dir / "none.sock")])
+        assert choice.set_here and env["DOCKER_HOST"] == f"unix://{short_dir}/run/docker.sock"
         podman.close(), rootless.close()
 
     def test_podman_dockers_socket_links_are_podman_not_docker(self, short_dir):
@@ -152,7 +157,7 @@ class TestTheChoice:
         worker = threading.Thread(target=answer, daemon=True)
         worker.start()
         env = {"XDG_RUNTIME_DIR": str(short_dir / "run")}
-        assert ensure_docker_host(env, docker_sockets=[str(short_dir / "docker.sock")]).set_here
+        assert ensure_docker_host(env, uid=0, docker_sockets=[str(short_dir / "docker.sock")]).set_here
         worker.join(5)
         podman.close(), impostor.close()
 
@@ -258,10 +263,13 @@ class TestRefusals:
         assert docker_engine.podman_refusal("buildkit", "") is None
 
     @pytest.mark.parametrize("feature, words", [("gpu", "GPU"), ("buildkit", "BuildKit")])
-    def test_podman_refuses_with_the_reason_and_the_way_to_docker_ce(self, feature, words):
+    def test_podman_refuses_with_the_reason_and_the_way_to_rootless_docker(self, feature, words):
+        """The way out of Podman's limits is rootless Docker (install.sh --engine=docker), not Docker as root:
+        rootless is the default (DESIGN, no standing rights that can do more than needed)."""
         text = docker_engine.podman_refusal(feature, "podman")
         assert text.startswith("Under Podman this does not work: ") and words in text
-        assert "Docker CE is the standard" in text and "sudo dnf remove podman-docker" in text
+        assert "rootless Docker" in text and "sudo ./install.sh --engine=docker" in text
+        assert "sudo dnf remove podman-docker" in text
         assert "https://docs.docker.com/engine/install/" in text
 
     def _service(self, client, monkeypatch, nvidia=True):
@@ -343,21 +351,25 @@ class TestTheDockerCheck:
         monkeypatch.setattr(docker_check, "_storage_findings", lambda framework: [])
         monkeypatch.setattr(docker_check, "_stage_user_findings", lambda framework, client: [])   # own tests
         monkeypatch.delenv("DOCKER_HOST", raising=False)   # no stale Podman DOCKER_HOST (its own test: below)
+        monkeypatch.setattr(docker_engine, "root_effect_group", lambda *a, **k: "")   # own tests: test_rootless_default
         monkeypatch.setattr(shutil, "which", lambda name, *a, **k: "/usr/bin/docker")
         monkeypatch.setattr(subprocess, "run", lambda args, *a, **k: subprocess.CompletedProcess(args, 0, "", ""))
         return docker_check.check_docker(types.SimpleNamespace(get_component=lambda name: client))
 
     def test_the_doctor_names_podman_and_its_limits(self, monkeypatch):
-        daemon, engine = self._mojo(FakeClient(PODMAN_VERSION), monkeypatch)
+        """Rootless Podman is the installer's default now: its limits are an info, no longer a warning."""
+        findings = self._mojo(FakeClient(PODMAN_VERSION), monkeypatch)
+        daemon, engine = findings[0], [f for f in findings if f.code == "docker.engine"][0]
         assert (daemon.code, daemon.severity.value) == ("docker.daemon", "ok") and "Podman" in daemon.message
-        assert (engine.code, engine.severity.value) == ("docker.engine", "warn")
+        assert engine.severity.value == "info"
         assert "GPU" in engine.message and "BuildKit" in engine.message
         assert "sudo dnf remove podman-docker" in engine.fix_hint and engine.where and engine.why
         assert engine.cannot == "admin"
 
     def test_the_doctor_names_docker(self, monkeypatch):
         findings = self._mojo(FakeClient(DOCKER_VERSION), monkeypatch)
-        assert [f.code for f in findings] == ["docker.daemon", "docker.buildx"]
+        # docker.rootless: whether the engine runs rootless (Linux; its own tests in test_rootless_default)
+        assert [f.code for f in findings if f.code != "docker.rootless"] == ["docker.daemon", "docker.buildx"]
         assert "container engine: Docker" in findings[0].message
 
 
@@ -608,12 +620,13 @@ class TestTheImageScript:
 
 @POSIX_SOCKETS
 class TestADockerHostLeftFromPodman:
-    """DOCKER_HOST still points at a Podman socket while a Docker daemon runs (an earlier Podman session): the person's
-    DOCKER_HOST still wins (_decide), and Mojo names it with the way out."""
+    """DOCKER_HOST still points at a Podman socket while the person's rootless Docker runs (an earlier Podman
+    session): the person's DOCKER_HOST still wins (_decide), and Mojo names it with the way out. A Docker daemon that
+    runs as root does not make it stale (test_rootless_default: a rootless engine is preferred)."""
 
     def test_it_is_seen_when_docker_runs(self, short_dir):
         podman = listening(short_dir / "run" / "podman" / "podman.sock")
-        docker = listening(short_dir / "docker.sock")
+        docker = listening(short_dir / "run" / "docker.sock")
         env = {"DOCKER_HOST": f"unix://{short_dir}/run/podman/podman.sock", "XDG_RUNTIME_DIR": str(short_dir / "run")}
         assert docker_engine.stale_podman_host(env, docker_sockets=[str(short_dir / "docker.sock")])
         choice = ensure_docker_host(env, docker_sockets=[str(short_dir / "docker.sock")])

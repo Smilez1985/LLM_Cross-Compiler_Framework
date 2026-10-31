@@ -41,6 +41,10 @@ HEADLESS="${LCF_HEADLESS:-0}"
 # unbeaufsichtigte Läufe auch LCF_DITTO=... (ohne Rückfragen; Größe und Lizenz des Modells werden trotzdem gezeigt).
 DITTO_CHOICE="${LCF_DITTO:-auto}"
 
+# Die Container-Engine läuft standardmäßig ohne Root-Rechte (rootless Podman; --engine=docker: rootless Docker);
+# --rootful: Docker als root mit der Gruppe docker, nur auf den ausdrücklichen Wunsch der Person und nach einer Warnung
+# (setup_engine, weiter unten).
+
 # --dry-run: ein Probelauf. Er erkennt das System und zeigt, was die Installation hier täte (Paketverwaltung, Pakete,
 # Quellen und Schlüssel), ohne etwas zu verändern oder zu laden; er braucht keine Root-Rechte. Exit-Code 0: die
 # Installation liefe durch; 1: sie hielte an (der Grund steht dabei).
@@ -1077,7 +1081,323 @@ podman_for_user() {
     if ! systemctl --user --machine="$REAL_USER@" enable --now podman.socket; then
         log_warn "Podmans Docker-kompatible Schnittstelle ließ sich für '$REAL_USER' nicht einschalten (Meldungen oben). Als '$REAL_USER' selbst: systemctl --user enable --now podman.socket"
     fi
-    log_info "Podman braucht keine Gruppe docker und keinen Dienst mit Root-Rechten. Das Framework findet Podmans Schnittstelle selbst, wenn kein Docker-Dienst läuft (unix:///run/user/${uid:-UID}/podman/podman.sock); andere Programme, die Docker ansprechen, brauchen DOCKER_HOST=unix:///run/user/${uid:-UID}/podman/podman.sock (etwa in ~/.bashrc)."
+    log_info "Podman braucht keine Gruppe docker und keinen Dienst mit Root-Rechten. Das Framework findet Podmans Schnittstelle selbst und nimmt sie auch vor einem Docker-Dienst mit Root-Rechten (unix:///run/user/${uid:-UID}/podman/podman.sock); andere Programme, die Docker ansprechen, brauchen DOCKER_HOST=unix:///run/user/${uid:-UID}/podman/podman.sock (etwa in ~/.bashrc)."
+}
+
+# --- CONTAINER-ENGINE OHNE ROOT-RECHTE (STANDARD) ---
+# Keine dauerhaften Rechte, die mehr können als nötig (docs/DESIGN_DE.md): Standard ist eine Container-Engine, die mit
+# den Rechten der Person läuft. rootless Podman (podman, dazu podman-docker für den Befehl docker, wo es das gibt) mit
+# Sub-ID-Bereichen für die Person und ihrem Dienst podman.socket (systemd des Benutzers); mit --engine=docker oder wo
+# Podman sich nicht installieren lässt rootless Docker (Docker CE aus Dockers Repository mit geprüftem Schlüssel, dazu
+# docker-ce-rootless-extras; dockerd-rootless-setuptool.sh richtet den Dienst des Benutzers ein). Docker als root mit
+# der Gruppe docker nur mit --rootful und einer klaren Warnung (rootful_warning). Das Framework nimmt eine Engine ohne
+# Root-Rechte, sobald es eine gibt (orchestrator/utils/docker_engine.py).
+ROOTFUL=0
+ENGINE_CHOICE="podman"
+# Die Sub-ID-Bereiche für Benutzer und Gruppen. Ein Bereich von 65536 IDs je Konto ist der übliche (useradd, Podman,
+# Docker); er reicht bis zum Stufen-Konto des Build-Containers (uid und gid 64010).
+SUBUID_FILE="/etc/subuid"
+SUBGID_FILE="/etc/subgid"
+SUBID_COUNT=65536
+SUBID_FIRST=100000
+# Wo systemd die Laufzeitordner der Benutzer anlegt (/run/user/<uid>: rootless Docker legt dort docker.sock an, Podman
+# podman/podman.sock).
+USER_RUNTIME_ROOT="/run/user"
+# Was setup_rootless eingerichtet hat (podman, docker; leer: nichts), für finish.
+ROOTLESS_ENGINE=""
+
+# Die Pakete für rootless Podman je Paketverwaltung (PODMAN_PACKAGES) und was dazu darf, aber fehlen kann
+# (PODMAN_OPTIONAL: podman-docker gibt den Befehl docker; neben einem echten Docker bleibt es weg, denn beide liefern
+# /usr/bin/docker). apt braucht newuidmap und newgidmap (uidmap), slirp4netns und den D-Bus des Benutzers für den
+# Dienst; dnf, zypper und pacman bringen das mit podman; Alpine hat newuidmap in shadow-uidmap.
+PODMAN_PACKAGES=() PODMAN_OPTIONAL=()
+podman_plan() {
+    [ "$SYSTEM_DETECTED" = "1" ] || detect_system
+    PODMAN_OPTIONAL=(podman-docker)
+    case "$PKG" in
+        apt) PODMAN_PACKAGES=(podman uidmap slirp4netns dbus-user-session) ;;
+        dnf|zypper|pacman) PODMAN_PACKAGES=(podman) ;;
+        apk) PODMAN_PACKAGES=(podman shadow-uidmap) ;;
+        *) PODMAN_PACKAGES=() PODMAN_OPTIONAL=() ;;
+    esac
+    if docker_is_real_docker; then PODMAN_OPTIONAL=(); fi
+}
+
+# Ist der Befehl docker ein echtes Docker (nicht podman-docker)?
+docker_is_real_docker() {
+    command -v docker &> /dev/null && ! docker_is_podman
+}
+
+# Rootless Docker geht hier: aus Dockers apt- oder rpm-Repository (docker-ce-rootless-extras, unter apt mit uidmap)
+# oder unter openSUSE aus dem Paket docker-rootless-extras. Setzt DOCKER_PACKAGES dafür; 1, wenn es hier keins gibt
+# (ROOTLESS_DOCKER_WHY sagt, warum).
+ROOTLESS_DOCKER_WHY=""
+rootless_docker_plan() {
+    ROOTLESS_DOCKER_WHY=""
+    docker_plan
+    case "$DOCKER_ROUTE" in
+        apt-repo) DOCKER_PACKAGES+=(docker-ce-rootless-extras uidmap) ;;
+        rpm-repo) DOCKER_PACKAGES+=(docker-ce-rootless-extras) ;;
+        distro)
+            if [ "$PKG" = "zypper" ]; then
+                DOCKER_PACKAGES+=(docker-rootless-extras)
+            else
+                ROOTLESS_DOCKER_WHY="Rootless Docker kommt nur aus Dockers Repository (apt, dnf) oder unter openSUSE aus docker-rootless-extras; $(system_label) hat dafür kein Paket."
+                return 1
+            fi ;;
+        *) ROOTLESS_DOCKER_WHY="Docker CE geht hier nicht: $DOCKER_PODMAN_WHY"; return 1 ;;
+    esac
+    # Der Dienst mit Root-Rechten wird nicht gestartet: rootless Docker läuft als Dienst des Benutzers.
+    DOCKER_SERVICE=""
+}
+
+# Der Benutzer, für den die Engine eingerichtet wird (wer sudo aufgerufen hat), seine uid und sein Laufzeitordner.
+engine_user() {
+    REAL_USER="${SUDO_USER:-${USER:-}}"
+    REAL_UID="$(id -u "$REAL_USER" 2> /dev/null)" || REAL_UID=""
+}
+
+# Befehl als die Person, mit ihrem systemd des Benutzers (XDG_RUNTIME_DIR, D-Bus), nie mit der Umgebung von root.
+as_engine_user() {
+    local runtime="${USER_RUNTIME_ROOT}/${REAL_UID:-0}"
+    if command -v sudo &> /dev/null; then
+        sudo -H -u "$REAL_USER" env XDG_RUNTIME_DIR="$runtime" DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" "$@"
+    else
+        runuser -u "$REAL_USER" -- env XDG_RUNTIME_DIR="$runtime" DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" "$@"
+    fi
+}
+
+# Hat $1 (subuid- oder subgid-Datei) für die Person (Name oder uid) einen Bereich von mindestens SUBID_COUNT IDs?
+subids_present() {
+    [ -f "$1" ] || return 1
+    awk -F: -v name="$REAL_USER" -v uid="$REAL_UID" -v need="$SUBID_COUNT" \
+        '($1 == name || (uid != "" && $1 == uid)) && $3 + 0 >= need { found = 1 } END { exit !found }' "$1"
+}
+
+# Der erste Anfang eines freien Bereichs hinter allen Bereichen beider Dateien (mindestens SUBID_FIRST).
+subids_next_start() {
+    cat "$SUBUID_FILE" "$SUBGID_FILE" 2> /dev/null | awk -F: -v first="$SUBID_FIRST" \
+        'NF == 3 && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ { end = $2 + $3; if (end > max) max = end }
+         END { print (max > first ? max : first) }'
+}
+
+# Gibt der Person Sub-ID-Bereiche für Benutzer und Gruppen, wo sie noch keinen ausreichenden hat (rootless Podman
+# und rootless Docker bilden die IDs eines Containers darauf ab). Ein vorhandener Bereich bleibt, wie er ist.
+# Rückgabe 0: alles da (SUBIDS_ADDED nennt, was neu ist), 1: nicht schreibbar.
+SUBIDS_ADDED=""
+ensure_subids() {
+    local start file
+    SUBIDS_ADDED=""
+    start="$(subids_next_start)"
+    for file in "$SUBUID_FILE" "$SUBGID_FILE"; do
+        subids_present "$file" && continue
+        if ! printf '%s:%s:%s\n' "$REAL_USER" "$start" "$SUBID_COUNT" >> "$file"; then
+            log_warn "$file ließ sich nicht schreiben; ohne Sub-IDs läuft die Engine ohne Root-Rechte nicht. Selbst: sudo usermod --add-subuids $start-$((start + SUBID_COUNT - 1)) --add-subgids $start-$((start + SUBID_COUNT - 1)) $REAL_USER"
+            return 1
+        fi
+        SUBIDS_ADDED="${SUBIDS_ADDED:+$SUBIDS_ADDED, }$file"
+    done
+    if [ -n "$SUBIDS_ADDED" ]; then
+        log_info "Sub-IDs für '$REAL_USER': $SUBID_COUNT IDs ab $start ($SUBIDS_ADDED)."
+    fi
+}
+
+# Ist $1 in der Gruppe docker selbst? 'groups NAME' sagt "NAME : g1 g2"; gezählt wird nur ein Gruppenname, der genau
+# docker ist (nicht docker-users, nicht ein Benutzername, der docker enthält).
+in_docker_group() {
+    groups "$1" 2> /dev/null | awk -F: '{ n = split($NF, g, /[ \t]+/); for (i = 1; i <= n; i++) if (g[i] == "docker") f = 1 } END { exit !f }'
+}
+
+# Ist das ein Socket von rootless Docker der Person? podman-docker legt dort einen Link auf Podmans Socket an (Podman,
+# kein Docker); nur ein echter Socket zählt.
+rootless_docker_there() {
+    local sock="${USER_RUNTIME_ROOT}/${REAL_UID:-x}/docker.sock"
+    [ -S "$sock" ] && [ ! -L "$sock" ]
+}
+
+# Sagt klar, wenn die Person in einer Gruppe mit Root-Wirkung ist (docker); nimmt sie nie selbst heraus.
+root_group_note() {
+    if in_docker_group "$REAL_USER"; then
+        log_warn "'$REAL_USER' ist in der Gruppe docker: Wer darin ist, steuert den Docker-Dienst, der als root läuft, und hat damit dauerhaft Rechte wie root auf diesem Rechner, auch wenn das Framework nicht läuft. Das Framework braucht die Gruppe nicht mehr (es nimmt die Engine ohne Root-Rechte). Herausnehmen, wenn nichts anderes sie braucht: sudo gpasswd -d $REAL_USER docker (danach ab- und wieder anmelden)."
+    fi
+}
+
+# Rootless Podman: die Pakete, die Sub-IDs, der Dienst des Benutzers. 1, wenn sich Podman nicht installieren ließ
+# (ROOTLESS_PODMAN_WHY sagt, warum).
+ROOTLESS_PODMAN_WHY=""
+setup_rootless_podman() {
+    local tool package
+    ROOTLESS_PODMAN_WHY=""
+    if ! command -v podman &> /dev/null; then
+        podman_plan
+        tool="$(pkg_tool)"
+        if [ "${#PODMAN_PACKAGES[@]}" -eq 0 ] || ! command -v "$tool" &> /dev/null; then
+            ROOTLESS_PODMAN_WHY="Für $(system_label) kennt der Installer keine Paketverwaltung für Podman."
+            return 1
+        fi
+        if ! pacman_database_ready; then ROOTLESS_PODMAN_WHY="$(pacman_database_text)"; return 1; fi
+        log_info "Quelle: die Paketquellen von $(system_label): ${PODMAN_PACKAGES[*]} (mit $tool; die Signaturen prüft $tool mit den Schlüsseln der Distribution)."
+        if [ "$PKG" = "apk" ] && ! apk_enable_community; then
+            ROOTLESS_PODMAN_WHY="Alpines Repository community ließ sich in $APK_REPOSITORIES nicht einschalten."
+            return 1
+        fi
+        if ! pkg_install "${PODMAN_PACKAGES[@]}"; then
+            ROOTLESS_PODMAN_WHY="Die Pakete ${PODMAN_PACKAGES[*]} ließen sich mit $tool nicht installieren (Meldungen oben).$(pkg_failure_hint)"
+            return 1
+        fi
+        for package in ${PODMAN_OPTIONAL[@]+"${PODMAN_OPTIONAL[@]}"}; do
+            if ! pkg_install "$package"; then
+                log_warn "$package ließ sich nicht installieren: Ohne es gibt es den Befehl docker nicht; das Framework spricht Podman über seinen Socket an."
+            fi
+        done
+    fi
+    ensure_subids || true
+    ROOTLESS_ENGINE=podman
+    DOCKER_ROUTE=podman
+    if command -v systemctl &> /dev/null && [ "$PKG" != "apk" ]; then
+        podman_for_user
+        # Podman übernimmt neue Sub-IDs erst nach 'podman system migrate'.
+        if [ -n "$SUBIDS_ADDED" ]; then as_engine_user podman system migrate &> /dev/null || true; fi
+    else
+        log_info "Ohne systemd gibt es keinen Dienst podman.socket; der Befehl docker (podman-docker) ruft Podman direkt auf. Für das Framework selbst als '$REAL_USER': podman system service --time=0 &"
+    fi
+    log_success "Rootless Podman ist eingerichtet: Es läuft mit den Rechten von '$REAL_USER', ohne Dienst mit Root-Rechten und ohne Gruppe docker."
+}
+
+# Rootless Docker: Docker CE aus Dockers Repository (geprüfter Schlüssel) mit docker-ce-rootless-extras, der Dienst
+# mit Root-Rechten aus, die Sub-IDs, dann dockerd-rootless-setuptool.sh als die Person. 1, wenn es hier nicht geht
+# (ROOTLESS_DOCKER_WHY sagt, warum).
+setup_rootless_docker() {
+    if ! rootless_docker_plan; then return 1; fi
+    case "$DOCKER_ROUTE" in
+        apt-repo) install_docker_apt ;;
+        rpm-repo) if ! install_docker_rpm; then ROOTLESS_DOCKER_WHY="$DOCKER_PODMAN_WHY"; return 1; fi ;;
+        *) install_docker_distro ;;
+    esac
+    # Dockers Anleitung für rootless: der Dienst mit Root-Rechten aus (apt startet ihn bei der Installation).
+    if command -v systemctl &> /dev/null; then systemctl disable --now docker.service docker.socket &> /dev/null || true; fi
+    ensure_subids || true
+    if ! as_engine_user dockerd-rootless-setuptool.sh install; then
+        log_warn "dockerd-rootless-setuptool.sh ließ sich für '$REAL_USER' nicht ausführen (Meldungen oben; es braucht eine Anmeldung von '$REAL_USER'). Als '$REAL_USER' selbst: dockerd-rootless-setuptool.sh install"
+    fi
+    ROOTLESS_ENGINE=docker
+    log_success "Rootless Docker ist eingerichtet: Es läuft als Dienst von '$REAL_USER' mit dessen Rechten, ohne Gruppe docker. Das Framework findet seinen Socket selbst (unix://${USER_RUNTIME_ROOT}/${REAL_UID:-UID}/docker.sock)."
+}
+
+# Der Standard: eine Engine ohne Root-Rechte für die Person. Gibt es schon eine (podman, oder rootless Docker der
+# Person), richtet der Installer nur Sub-IDs und Dienst ein; sonst kommt Podman (mit --engine=docker rootless Docker;
+# geht das eine nicht, das andere, mit dem Grund).
+setup_rootless() {
+    engine_user
+    if [ -z "$REAL_USER" ] || [ "$REAL_USER" = "root" ]; then
+        log_warn "Die Container-Engine ohne Root-Rechte wird für deinen Benutzer eingerichtet, nicht für root: Starte den Installer mit sudo als dein Benutzer (sudo ./install.sh)."
+        return 0
+    fi
+    log_info "Container-Engine: ohne Root-Rechte (Standard). Sie läuft mit den Rechten von '$REAL_USER'; nichts bekommt dauerhaft Rechte wie root. Docker als root nur mit --rootful."
+    if rootless_docker_there; then
+        ensure_subids || true
+        ROOTLESS_ENGINE=docker
+        log_success "Rootless Docker von '$REAL_USER' ist schon da; das Framework nimmt es."
+    elif [ "$ENGINE_CHOICE" = "docker" ]; then
+        if ! setup_rootless_docker; then
+            log_warn "Rootless Docker geht hier nicht: $ROOTLESS_DOCKER_WHY Stattdessen: rootless Podman."
+            setup_rootless_podman || engine_stop "Weder rootless Docker noch rootless Podman ließen sich einrichten: $ROOTLESS_PODMAN_WHY"
+        fi
+    elif ! setup_rootless_podman; then
+        log_warn "Podman ließ sich nicht einrichten: $ROOTLESS_PODMAN_WHY Stattdessen: rootless Docker."
+        setup_rootless_docker || engine_stop "Weder rootless Podman noch rootless Docker ließen sich einrichten: $ROOTLESS_PODMAN_WHY $ROOTLESS_DOCKER_WHY"
+    fi
+    root_group_note
+}
+
+# Docker als root mit der Gruppe docker, nur auf den ausdrücklichen Wunsch der Person (--rootful): die Warnung vorab.
+rootful_warning() {
+    engine_user
+    log_warn "--rootful: Docker läuft als root, und '${REAL_USER:-dein Benutzer}' kommt in die Gruppe docker. Damit hat das Konto dauerhaft Rechte wie root auf diesem Rechner, auch wenn das Framework nicht läuft: Jedes Programm, das als dieses Konto läuft, kann sie nutzen. Ohne --rootful richtet der Installer eine Engine ohne Root-Rechte ein (rootless Podman), mit der das Framework genauso baut."
+}
+
+# Hält an, ohne eine Container-Engine einzurichten: der Grund und die Anleitungen für eine Einrichtung von Hand.
+PODMAN_MANUAL_URL="https://podman.io/docs/installation"
+ROOTLESS_DOCKER_MANUAL_URL="https://docs.docker.com/engine/security/rootless/"
+engine_stop() {
+    log_error "Die Container-Engine wurde nicht eingerichtet: $1 Richte rootless Podman ($PODMAN_MANUAL_URL) oder rootless Docker ($ROOTLESS_DOCKER_MANUAL_URL) selbst ein und starte danach 'sudo ./install.sh' erneut; Docker als root nur, wenn du das willst: 'sudo ./install.sh --rootful'."
+}
+
+# Der Probelauf der Engine ohne Root-Rechte (plan_installation): dieselben Entscheidungen wie setup_rootless, ohne
+# etwas aufzurufen.
+plan_subids() {
+    local start
+    if subids_present "$SUBUID_FILE" && subids_present "$SUBGID_FILE"; then
+        echo "     Sub-IDs für '$REAL_USER': vorhanden ($SUBUID_FILE, $SUBGID_FILE)"
+    else
+        start="$(subids_next_start)"
+        echo "     Sub-IDs für '$REAL_USER', wo noch keine sind: $SUBID_COUNT IDs ab $start in $SUBUID_FILE und $SUBGID_FILE"
+    fi
+}
+
+plan_rootless_podman() {
+    local optional=""
+    if command -v podman &> /dev/null; then
+        echo "   Container-Engine: rootless Podman (Standard), vorhanden ($(command -v podman))"
+    else
+        podman_plan
+        pkg_argv
+        if [ "${#PODMAN_PACKAGES[@]}" -eq 0 ] || ! command -v "$(pkg_tool)" &> /dev/null; then return 1; fi
+        if ! pacman_database_ready; then engine_stop "$(pacman_database_text)"; fi
+        if [ "${#PODMAN_OPTIONAL[@]}" -gt 0 ]; then optional=" (dazu, wenn es das gibt: ${PODMAN_OPTIONAL[*]})"; fi
+        echo "   Container-Engine: rootless Podman (Standard) -> ${PKG_ARGV[*]} ${PODMAN_PACKAGES[*]}$optional"
+        if [ "$PKG" = "apk" ]; then echo "     aus Alpines Repository community (wird in $APK_REPOSITORIES eingeschaltet, falls nötig)"; fi
+    fi
+    plan_subids
+    if [ "$PKG" = "apk" ]; then
+        echo "     ohne systemd kein Dienst podman.socket: der Befehl docker (podman-docker) ruft Podman direkt auf"
+    else
+        echo "     Dienst des Benutzers: systemctl --user --machine=$REAL_USER@ enable --now podman.socket (unix://${USER_RUNTIME_ROOT}/${REAL_UID:-UID}/podman/podman.sock)"
+    fi
+}
+
+plan_rootless_docker() {
+    rootless_docker_plan || return 1
+    pkg_argv
+    case "$DOCKER_ROUTE" in
+        apt-repo) echo "   Container-Engine: rootless Docker (--engine=docker) -> Dockers apt-Repository $DOCKER_DOWNLOAD_URL/$DOCKER_REPO ($DOCKER_SUITE), sein Schlüssel nur mit dem Fingerabdruck $DOCKER_KEY_FINGERPRINT; apt-get install -y ${DOCKER_PACKAGES[*]}" ;;
+        rpm-repo)
+            docker_rpm_repo_check
+            echo "   Container-Engine: rootless Docker (--engine=docker) -> Dockers dnf-Repository $DOCKER_DOWNLOAD_URL/$DOCKER_REPO${DOCKER_RPM_RELEASE:+ ($DOCKER_RPM_RELEASE, $(uname -m))}, sein Schlüssel nur mit dem Fingerabdruck $DOCKER_RPM_KEY_FINGERPRINT; dnf install -y ${DOCKER_PACKAGES[*]}"
+            echo "     Müsste dnf dafür Pakete entfernen (etwa podman-docker), nennt der Installer sie genau und fragt dich." ;;
+        *) echo "   Container-Engine: rootless Docker (--engine=docker) -> aus den Paketquellen der Distribution: ${PKG_ARGV[*]} ${DOCKER_PACKAGES[*]}" ;;
+    esac
+    echo "     der Docker-Dienst mit Root-Rechten bleibt aus (systemctl disable --now docker.service docker.socket)"
+    plan_subids
+    echo "     Dienst des Benutzers: dockerd-rootless-setuptool.sh install (als '$REAL_USER'; Socket unix://${USER_RUNTIME_ROOT}/${REAL_UID:-UID}/docker.sock)"
+}
+
+plan_engine() {
+    if [ "$ROOTFUL" = "1" ]; then
+        rootful_warning
+        plan_docker
+        return 0
+    fi
+    engine_user
+    if [ -z "$REAL_USER" ] || [ "$REAL_USER" = "root" ]; then
+        echo "   Container-Engine: ohne Root-Rechte für deinen Benutzer; als root ohne sudo richtet der Installer keine ein (sudo ./install.sh als dein Benutzer)"
+        return 0
+    fi
+    if rootless_docker_there; then
+        echo "   Container-Engine: rootless Docker von '$REAL_USER', vorhanden"
+        plan_subids
+    elif [ "$ENGINE_CHOICE" = "docker" ]; then
+        if ! plan_rootless_docker; then
+            echo "   Container-Engine: rootless Docker geht hier nicht: $ROOTLESS_DOCKER_WHY Stattdessen rootless Podman:"
+            plan_rootless_podman || engine_stop "Für $(system_label) kennt der Installer keine Paketverwaltung für Podman, und rootless Docker geht hier nicht: $ROOTLESS_DOCKER_WHY"
+        fi
+    elif ! plan_rootless_podman; then
+        echo "   Container-Engine: Podman geht hier nicht (für $(system_label) keine Paketverwaltung dafür); stattdessen rootless Docker:"
+        plan_rootless_docker || engine_stop "Für $(system_label) kennt der Installer keine Paketverwaltung für Podman, und rootless Docker geht hier nicht: $ROOTLESS_DOCKER_WHY"
+    fi
+    if in_docker_group "$REAL_USER"; then
+        echo "     '$REAL_USER' ist in der Gruppe docker (dauerhaft Rechte wie root): Der Installer sagt es und nimmt dich nicht selbst heraus (sudo gpasswd -d $REAL_USER docker)"
+    fi
 }
 
 # --- SCHRITT 1: PREREQUISITES (Docker & Python) ---
@@ -1089,12 +1409,8 @@ setup_system() {
 
     # Alpine (musl): nur Docker und die Werkzeuge für das Framework-Image, dann der Weg, der hier geht (alpine_stop).
     if [ "$OS_FAMILY" = "alpine" ]; then
-        if [ "$CONTAINER_BUILD" != "1" ] && ! command -v docker &> /dev/null; then
-            log_warn "Docker fehlt. Installiere es über $(pkg_tool) (Signaturen geprüft)..."
-            install_docker
-        fi
         if [ "$CONTAINER_BUILD" != "1" ]; then
-            docker_group
+            setup_engine
             alpine_image_tools
         fi
         alpine_stop
@@ -1109,12 +1425,21 @@ setup_system() {
         return 0
     fi
 
-    # Docker Check (Übernommen aus setup_linux.sh)
+    setup_engine
+}
+
+# Die Container-Engine: standardmäßig ohne Root-Rechte (setup_rootless); Docker als root mit der Gruppe docker nur mit
+# --rootful, nach der Warnung.
+setup_engine() {
+    if [ "$ROOTFUL" != "1" ]; then
+        setup_rootless
+        return 0
+    fi
+    rootful_warning
     if ! command -v docker &> /dev/null; then
         log_warn "Docker fehlt. Installiere es über die Paketverwaltung dieses Systems (Schlüssel und Signaturen geprüft)..."
         install_docker
     fi
-
     docker_group
 }
 
@@ -1157,12 +1482,14 @@ docker_group() {
 # richtet beide mit apk ein (alpine_image_tools). ALPINE_TOOLS sagt, wie das ausging (ok, failed; im Probelauf planned).
 ALPINE_TOOLS=""
 alpine_stop() {
+    local group="" engine="Die Container-Engine ohne Root-Rechte ist eingerichtet"
+    if [ "$ROOTFUL" = "1" ]; then group=" Für die Gruppe docker einmal ab- und wieder anmelden." engine="Docker ist eingerichtet"; fi
     local image_tools="Das Skript braucht dafür auch git und GNU tar (busybox' tar genügt nicht): sudo apk add git tar."
     case "$ALPINE_TOOLS" in
         ok) image_tools="git und GNU tar, die das Skript braucht (busybox' tar genügt nicht), sind installiert." ;;
         planned) image_tools="git und GNU tar, die das Skript braucht (busybox' tar genügt nicht), richtet der Installer vorher ein (apk add git tar)." ;;
     esac
-    log_error "Das Framework selbst wurde auf $(system_label) nicht installiert: Seine festgelegten Python-Pakete gibt es nicht für musl (onnxruntime, das die lokale Wissensbasis braucht, nur für glibc). Docker ist eingerichtet; baue auf diesem Rechner das Framework-Image (Debian) und nutze das Framework darin: scripts/build_container_image.sh (Anleitung: docs/Container_Setup_DE.md). $image_tools Für die Gruppe docker einmal ab- und wieder anmelden."
+    log_error "Das Framework selbst wurde auf $(system_label) nicht installiert: Seine festgelegten Python-Pakete gibt es nicht für musl (onnxruntime, das die lokale Wissensbasis braucht, nur für glibc). $engine; baue auf diesem Rechner das Framework-Image (Debian) und nutze das Framework darin: scripts/build_container_image.sh (Anleitung: docs/Container_Setup_DE.md). $image_tools$group"
 }
 
 # Fehlen git oder GNU tar (busybox' tar meldet sich nicht als "GNU tar"), die Pakete, die apk dafür hat: 'git tar'.
@@ -1408,8 +1735,14 @@ ditto_option() {
             --ditto=*) DITTO_CHOICE="${arg#--ditto=}" ;;
             --headless) HEADLESS=1 ;;
             --dry-run) DRY_RUN=1 ;;
+            --rootful) ROOTFUL=1 ;;
+            --engine=*) ENGINE_CHOICE="${arg#--engine=}" ;;
         esac
     done
+    case "$ENGINE_CHOICE" in
+        podman|docker) ;;
+        *) log_error "Unbekannter Wert für --engine: '$ENGINE_CHOICE' (podman oder docker; beide ohne Root-Rechte, Docker als root nur mit --rootful)." ;;
+    esac
     case "$DITTO_CHOICE" in
         auto|bare-metal|docker|skip) ;;
         *) log_error "Unbekannter Wert für --ditto: '$DITTO_CHOICE' (auto, bare-metal, docker oder skip)." ;;
@@ -1463,12 +1796,16 @@ finish() {
     else
         echo "🚀 Start:  Tippe einfach 'llm-framework'"
     fi
+    case "$ROOTLESS_ENGINE" in
+        podman) echo "🐳 Engine: rootless Podman (mit deinen Rechten, ohne Gruppe docker)" ;;
+        docker) echo "🐳 Engine: rootless Docker (mit deinen Rechten, ohne Gruppe docker)" ;;
+    esac
     echo "-----------------------------------------------------"
     old_installation_note
     
     # Hinweis zum Docker Group Refresh
     REAL_USER="${SUDO_USER:-$USER}"
-    if [ "$CONTAINER_BUILD" != "1" ] && [ "$DOCKER_ROUTE" != "podman" ] \
+    if [ "$CONTAINER_BUILD" != "1" ] && [ "$ROOTFUL" = "1" ] && [ "$DOCKER_ROUTE" != "podman" ] \
         && ! groups "$REAL_USER" | grep &>/dev/null "\bdocker\b"; then
         log_warn "Du wurdest zur Docker-Gruppe hinzugefügt."
         log_warn "Bitte einmal aus- und einloggen (oder 'newgrp docker' nutzen)."
@@ -1549,7 +1886,7 @@ plan_installation() {
     echo "   System: $(system_label); Paketverwaltung: ${PKG:-keine, die der Installer kennt}"
     if [ "$OS_FAMILY" = "alpine" ]; then
         if [ "$CONTAINER_BUILD" != "1" ]; then
-            plan_docker
+            plan_engine
             if [ -n "$(alpine_missing_tools)" ]; then
                 pkg_argv
                 echo "   git, GNU tar (für scripts/build_container_image.sh): fehlen -> ${PKG_ARGV[*]} $(alpine_missing_tools)"
@@ -1565,7 +1902,7 @@ plan_installation() {
     if [ "$CONTAINER_BUILD" = "1" ]; then
         echo "   Docker: im Container-Build nicht"
     else
-        plan_docker
+        plan_engine
     fi
     if command -v rsync &> /dev/null; then
         echo "   rsync: vorhanden"

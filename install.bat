@@ -60,6 +60,17 @@ foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
 if ($DittoChoice -notin @("auto", "bare-metal", "docker", "skip")) {
     Write-Error "Unbekannter Wert fuer --ditto: '$DittoChoice' (auto, bare-metal, docker oder skip)."
 }
+# The container engine (step [Engine] below): Podman without administrator rights by default, Docker Desktop only
+# with --rootful. An unknown --engine value stops here too, before anything is installed.
+$Rootful = $false
+$EngineChoice = "podman"
+foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
+    if ($InstallArg -eq "--rootful") { $Rootful = $true }
+    if ($InstallArg -like "--engine=*") { $EngineChoice = $InstallArg.Substring(9) }
+}
+if ($EngineChoice -notin @("podman")) {
+    Write-Error "Unbekannter Wert fuer --engine: '$EngineChoice' (unter Windows: podman; Docker Desktop nur mit --rootful)."
+}
 
 Write-Host "===================================================" -ForegroundColor Cyan
 Write-Host "      LLM Framework - Enterprise Installer"
@@ -181,6 +192,52 @@ try {
     if ($OtherInstalls.Count -gt 0) { Add-Content -Path $MarkerFile -Value $OtherInstalls -Encoding ASCII }
 } catch {
     Write-Warning "Marker fuer den Uninstaller nicht geschrieben ($_); er findet die Installation dann nicht."
+}
+
+# CONTAINER ENGINE: without administrator rights by default (docs/DESIGN.md, no standing rights that can do more than
+# needed). Podman with its machine (a WSL 2 machine, rootless by default) for the signed-in person; Docker Desktop
+# only with --rootful, after a warning: its group docker-users controls a service with administrator rights, so the
+# account has administrator-equivalent rights on this computer, permanently. The installer never changes a group
+# membership; it names docker-users when the account is in it. A step that fails never stops the installation.
+Write-Host "[Engine] Container-Engine (ohne Administratorrechte, ausser mit --rootful)..." -ForegroundColor Yellow
+$SignedIn = $null
+$Elevated = $null
+try {
+    $SignedIn = (Get-CimInstance Win32_ComputerSystem).UserName
+    $Elevated = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+} catch {
+    $SignedIn = $null
+}
+try {
+    if ($Rootful) {
+        Write-Warning "--rootful: Docker Desktop laeuft mit einem Dienst mit Administratorrechten, und wer in der Gruppe docker-users ist, steuert ihn. Damit hat das Konto dauerhaft Rechte wie ein Administrator auf diesem Rechner, auch wenn das Framework nicht laeuft. Ohne --rootful richtet der Installer Podman ohne Administratorrechte ein, mit dem das Framework genauso baut."
+        if (-not (Get-Command "docker" -ErrorAction SilentlyContinue)) {
+            winget install -e --id Docker.DockerDesktop --accept-source-agreements --accept-package-agreements
+            if ($LASTEXITCODE -ne 0) { Write-Warning "Docker Desktop liess sich nicht mit winget installieren; selbst: https://docs.docker.com/desktop/setup/install/windows-install/" }
+        }
+    } else {
+        if (-not (Get-Command "podman" -ErrorAction SilentlyContinue)) {
+            Write-Host "Podman fehlt. Installiere es ueber winget (RedHat.Podman)..."
+            winget install -e --id RedHat.Podman --accept-source-agreements --accept-package-agreements
+            $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+        }
+        if (-not (Get-Command "podman" -ErrorAction SilentlyContinue)) {
+            Write-Warning "Podman liess sich nicht einrichten (Meldungen oben). Selbst: Podman Desktop installieren (https://podman-desktop.io), dort eine Podman-Maschine anlegen (ohne Administratorrechte, rootful aus) und starten."
+        } elseif ($SignedIn -and ($SignedIn -ne $Elevated)) {
+            Write-Warning "Die Podman-Maschine wird fuer $SignedIn angelegt, nicht fuer das Administratorkonto. Spaeter als du selbst (normales Terminal): podman machine init; podman machine start"
+        } else {
+            & podman machine inspect *> $null
+            if ($LASTEXITCODE -ne 0) { & podman machine init }
+            & podman machine start
+            if ($LASTEXITCODE -ne 0) { Write-Warning "Die Podman-Maschine liess sich nicht starten (Meldungen oben). Spaeter: podman machine start" }
+        }
+    }
+    $Groups = (& whoami /groups /fo csv /nh) -join "`n"
+    if ($Groups -match '(^|\\|")docker-users"') {
+        Write-Warning "Dein Konto ist in der Gruppe docker-users: Wer darin ist, steuert Docker Desktops Dienst mit Administratorrechten und hat damit dauerhaft Rechte wie ein Administrator auf diesem Rechner. Das Framework braucht die Gruppe nicht (es nimmt Podman ohne Administratorrechte). Herausnehmen, wenn nichts anderes sie braucht: in einem Terminal als Administrator 'net localgroup docker-users <dein Konto> /delete', danach neu anmelden."
+    }
+} catch {
+    Write-Warning "Container-Engine: $_ - die Installation geht weiter. Mojo (llm-cli mojo) nennt spaeter, was fehlt."
 }
 
 # DITTO: lokale Laufzeit (llm-cli ditto runtime ensure). Idempotent, und sie laesst die Installation nie scheitern:

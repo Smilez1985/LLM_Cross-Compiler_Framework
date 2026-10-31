@@ -20,7 +20,9 @@ import getpass
 import os
 import re
 import shutil
+import socket
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -101,6 +103,7 @@ for arg in "$@"; do
         python3.1[0-9]) "$LCF_MAKE" "$arg" "3.${arg#python3.}" ;;
         python31[0-9]) v="${arg#python3}"; "$LCF_MAKE" "python3.$v" "3.$v" ;;
         docker-ce|moby-engine|docker|podman-docker) "$LCF_MAKE" docker ;;
+        podman) "$LCF_MAKE" podman ;;
         rsync|curl) "$LCF_MAKE" "$arg" ;;
     esac
 done
@@ -304,7 +307,7 @@ class Box:
 
     def __init__(self, tmp_path, system, key_file=None, present=("curl",), fails=(), failing_until_suseconnect=None,
                  py_base="3.13", pinned=None, machine="x86_64", tools=(), dnf_plan=DNF_PLAN_CLEAN, answer=None,
-                 fail_output=None, suse_status=None):
+                 fail_output=None, suse_status=None, rootful=True):
         self.root = tmp_path / "sandbox"
         self.bin = self.root / "bin"
         self.etc = self.root / "etc"
@@ -319,6 +322,9 @@ class Box:
         (self.etc / "pacman-sync").mkdir()
         (self.etc / "pacman-sync" / "core.db").write_text("")
         self.pinned = pinned
+        # True: the tests of Docker's own routes run as 'install.sh --rootful' (Docker as root with the group docker,
+        # the person's explicit choice); False: the default, a container engine without root rights (rootless)
+        self.rootful = rootful
         for tool in REAL_TOOLS:
             if shutil.which(tool):
                 (self.bin / tool).symlink_to(shutil.which(tool))
@@ -335,7 +341,7 @@ class Box:
         for name in ("apt-get", "dnf", "zypper", "pacman", "apk"):
             if name in tools or not tools:
                 self.write(self.bin / name, PACKAGE_MANAGER)
-        for name in ("rpm", "systemctl", "rc-update", "rc-service", "usermod", "addgroup"):
+        for name in ("rpm", "systemctl", "rc-update", "rc-service", "usermod", "addgroup", "sudo"):
             self.write(self.bin / name, RECORDER)
         self.write(self.bin / "SUSEConnect", SUSECONNECT)
         self.write(self.bin / "groups", "#!/bin/sh\nexit 0\n")
@@ -378,7 +384,9 @@ class Box:
                   'DOCKER_KEYRING="$2/apt/keyrings/docker.asc"; DOCKER_SOURCES="$2/apt/sources.list.d/docker.sources"; '
                   'DOCKER_RPM_KEYRING="$2/pki/rpm-gpg/docker-ce.asc"; DOCKER_RPM_REPO="$2/yum.repos.d/docker-ce.repo"; '
                   'APK_REPOSITORIES="$2/apk/repositories"; PACMAN_SYNC_DIR="$2/pacman-sync"; ASK_TTY="$2/answer"; '
-                  'wait_for_internet() { :; }; ')
+                  'SUBUID_FILE="$2/subuid"; SUBGID_FILE="$2/subgid"; wait_for_internet() { :; }; ')
+        if self.rootful:
+            script += "ROOTFUL=1; "
         if self.pinned:
             script += 'DOCKER_KEY_FINGERPRINT="$3"; DOCKER_RPM_KEY_FINGERPRINT="$3"; '
         run = subprocess.run([str(self.bin / "bash"), "-c", script + body, "test", str(INSTALL_SH), str(self.etc),
@@ -1324,3 +1332,204 @@ def test_rsync_comes_from_the_family_too(tmp_path, system, expected):
         assert (install / ".lcf-installed-files").exists()
     else:
         assert run.returncode == 1 and "rsync fehlt" in said(run) and MANUAL in said(run)
+
+
+# --- rootless by default (DESIGN: no standing rights that can do more than needed) ---------------------------------
+
+PODMAN_PLAN = {
+    "debian": "apt-get install -y podman uidmap slirp4netns dbus-user-session (dazu, wenn es das gibt: podman-docker)",
+    "ubuntu": "apt-get install -y podman uidmap slirp4netns dbus-user-session (dazu, wenn es das gibt: podman-docker)",
+    "fedora": "dnf install -y podman (dazu, wenn es das gibt: podman-docker)",
+    "rocky": "dnf install -y podman (dazu, wenn es das gibt: podman-docker)",
+    "amzn": "dnf install -y podman (dazu, wenn es das gibt: podman-docker)",
+    "opensuse-tumbleweed": "zypper --non-interactive install podman (dazu, wenn es das gibt: podman-docker)",
+    "sles": "zypper --non-interactive install podman (dazu, wenn es das gibt: podman-docker)",
+    "arch": "pacman -S --needed --noconfirm podman (dazu, wenn es das gibt: podman-docker)",
+    "manjaro": "pacman -S --needed --noconfirm podman (dazu, wenn es das gibt: podman-docker)",
+}
+SOCKET_STEP = "systemctl --user --machine=lcf@ enable --now podman.socket"
+
+
+@needs_bash_and_gpg
+class TestRootlessByDefault:
+    """The installer sets up a container engine that runs with the person's own rights: rootless Podman with sub-id
+    ranges and the person's podman.socket; rootless Docker with --engine=docker or where Podman cannot be installed;
+    Docker as root with the group docker only with --rootful, after a warning. The dry run shows the plan per
+    distribution and calls nothing."""
+
+    @pytest.mark.parametrize("system", sorted(PODMAN_PLAN))
+    def test_the_dry_run_shows_the_rootless_plan_of_each_distribution(self, tmp_path, system):
+        box = Box(tmp_path, system, rootful=False)
+        run, calls = box.run("main --dry-run")
+        text = said(run)
+        assert run.returncode == 0 and calls == [], text
+        assert f"Container-Engine: rootless Podman (Standard) -> {PODMAN_PLAN[system]}" in text
+        assert f"Sub-IDs für 'lcf', wo noch keine sind: 65536 IDs ab 100000 in {box.etc}/subuid und " in text
+        assert f"Dienst des Benutzers: {SOCKET_STEP}" in text
+        assert "Gruppe docker" not in text and "usermod" not in text and "Docker: fehlt" not in text
+        assert not (box.etc / "subuid").exists(), "the dry run writes nothing"
+
+    def test_alpine_plans_rootless_podman_and_stops_with_the_way_that_works(self, tmp_path):
+        box = Box(tmp_path, "alpine", rootful=False)
+        run, calls = box.run("main --dry-run")
+        text = said(run)
+        assert run.returncode == 1 and calls == [], text
+        assert ("rootless Podman (Standard) -> apk add podman shadow-uidmap (dazu, wenn es das gibt: podman-docker)"
+                in text)
+        assert "ohne systemd kein Dienst podman.socket" in text
+        assert "Container-Engine ohne Root-Rechte ist eingerichtet" in text and "Gruppe docker" not in text
+
+    def test_the_installation_sets_up_podman_sub_ids_and_the_service(self, tmp_path):
+        box = Box(tmp_path, "debian", present=("python3=3.13", "rsync"), rootful=False)
+        run, calls = box.run("setup_system; finish")
+        text = said(run)
+        assert run.returncode == 0, text
+        assert calls[:4] == ["apt-get update", "apt-get install -y podman uidmap slirp4netns dbus-user-session",
+                             "apt-get install -y podman-docker", SOCKET_STEP], calls
+        assert not any(c.startswith(("usermod", "addgroup")) for c in calls), "no group docker"
+        assert any("podman system migrate" in c for c in calls), "Podman takes the new sub-ids"
+        for name in ("subuid", "subgid"):
+            assert (box.etc / name).read_text() == "lcf:100000:65536\n"
+        assert "Rootless Podman ist eingerichtet" in text and "Engine: rootless Podman" in text
+        assert "Docker-Gruppe hinzugefügt" not in text
+
+    def test_existing_sub_ids_stay_and_new_ones_follow_the_others(self, tmp_path):
+        box = Box(tmp_path, "fedora", present=("python3=3.13", "rsync", "podman"), rootful=False)
+        (box.etc / "subuid").write_text("lcf:300000:65536\n")
+        (box.etc / "subgid").write_text("other:100000:65536\nsmall:165536:1000\n")
+        run, calls = box.run("setup_system")
+        assert run.returncode == 0, said(run)
+        assert calls[0] == SOCKET_STEP, "podman is there: nothing is installed"
+        assert (box.etc / "subuid").read_text() == "lcf:300000:65536\n"
+        assert (box.etc / "subgid").read_text() == "other:100000:65536\nsmall:165536:1000\nlcf:365536:65536\n"
+
+    def test_without_podman_rootless_docker_comes_from_dockers_repository(self, tmp_path, keys):
+        """Podman cannot be installed (here: apt fails on its packages): rootless Docker from Docker's repository
+        with the checked key, docker-ce-rootless-extras, the service with root rights switched off and the person's
+        own service through dockerd-rootless-setuptool.sh; no group docker."""
+        box = Box(tmp_path, "debian", keys["docker.asc"], present=("python3=3.13", "rsync", "curl"),
+                  pinned=keys["pinned"], fails=("install -y podman uidmap",), rootful=False)
+        run, calls = box.run("setup_system")
+        text = said(run)
+        assert run.returncode == 0, text
+        assert "Podman ließ sich nicht einrichten" in text and "Stattdessen: rootless Docker" in text
+        assert f"apt-get install -y {DOCKER_CE} docker-ce-rootless-extras uidmap" in calls
+        assert "systemctl disable --now docker.service docker.socket" in calls
+        assert any(c.startswith("sudo ") and "dockerd-rootless-setuptool.sh install" in c for c in calls), calls
+        assert not any(c.startswith(("usermod", "addgroup")) for c in calls)
+        assert (box.etc / "subuid").read_text() == "lcf:100000:65536\n"
+        assert keys_in(box.etc / "apt" / "keyrings" / "docker.asc", tmp_path) == [keys["pinned"]]
+
+    def test_engine_docker_plans_rootless_docker(self, tmp_path):
+        box = Box(tmp_path, "ubuntu", rootful=False)
+        run, calls = box.run("main --dry-run --engine=docker")
+        text = said(run)
+        assert run.returncode == 0 and calls == [], text
+        assert ("Container-Engine: rootless Docker (--engine=docker) -> Dockers apt-Repository "
+                "https://download.docker.com/linux/ubuntu (noble)") in text
+        assert f"apt-get install -y {DOCKER_CE} docker-ce-rootless-extras uidmap" in text
+        assert "dockerd-rootless-setuptool.sh install" in text and "docker.service docker.socket" in text
+
+    def test_where_docker_publishes_nothing_engine_docker_falls_back_to_podman(self, tmp_path):
+        box = Box(tmp_path, "rocky", machine="ppc64le", rootful=False)
+        run, calls = box.run("main --dry-run --engine=docker")
+        text = said(run)
+        assert run.returncode == 0 and calls == [], text
+        assert "rootless Docker geht hier nicht" in text and "ppc64le" in text
+        assert "rootless Podman (Standard) -> dnf install -y podman" in text
+
+    def test_rootful_only_on_request_and_with_the_warning(self, tmp_path):
+        box = Box(tmp_path, "debian", rootful=False)
+        run, calls = box.run("main --dry-run --rootful")
+        text = said(run)
+        assert run.returncode == 0 and calls == [], text
+        assert "--rootful: Docker läuft als root" in text and "dauerhaft Rechte wie root" in text
+        assert "Docker: fehlt -> Dockers apt-Repository" in text and "rootless Podman" in text
+
+    def test_a_membership_of_the_group_docker_is_named_and_left_to_the_person(self, tmp_path):
+        box = Box(tmp_path, "fedora", present=("python3=3.13", "rsync", "podman"), rootful=False)
+        box.write(box.bin / "groups", "#!/bin/sh\necho 'lcf : lcf wheel docker'\n")
+        run, calls = box.run("setup_system")
+        text = said(run)
+        assert run.returncode == 0, text
+        assert "in der Gruppe docker" in text and "dauerhaft Rechte wie root" in text
+        assert "sudo gpasswd -d lcf docker" in text
+        assert not any("gpasswd" in c for c in calls), "the installer never takes the person out by itself"
+
+    def test_an_unknown_engine_stops_before_anything(self, tmp_path):
+        box = Box(tmp_path, "debian", rootful=False)
+        run, calls = box.run("main --dry-run --engine=lxc")
+        assert run.returncode == 1 and calls == []
+        assert "Unbekannter Wert für --engine: 'lxc'" in said(run)
+
+    def test_root_without_sudo_gets_no_engine_of_its_own(self, tmp_path):
+        box = Box(tmp_path, "debian", present=("python3=3.13", "rsync"), rootful=False)
+        box.env["SUDO_USER"] = "root"
+        run, calls = box.run("setup_system")
+        assert run.returncode == 0 and calls == [], said(run)
+        assert "nicht für root" in said(run)
+
+
+@needs_bash_and_gpg
+class TestRootlessReview:
+    """Review of the rootless default: what counts as the person's rootless Docker and as the group docker."""
+
+    @staticmethod
+    def _runtime(box):
+        """A short runtime root (/run/user) for uid 1000 (Unix socket paths have a 108-byte limit)."""
+        root = Path(tempfile.mkdtemp(prefix="rl-run-", dir="/tmp"))
+        (root / "1000" / "podman").mkdir(parents=True)
+        return root
+
+    @staticmethod
+    def _body(root, body):
+        return f'USER_RUNTIME_ROOT="{root}"; id() {{ echo 1000; }}; {body}'
+
+    def test_podman_dockers_link_is_not_the_persons_rootless_docker(self, tmp_path):
+        """podman-docker links $XDG_RUNTIME_DIR/docker.sock to the person's Podman socket: that is Podman, so the
+        installer sets up Podman's service and does not say 'rootless Docker is already there'."""
+        box = Box(tmp_path, "fedora", present=("python3=3.13", "rsync", "podman"), rootful=False)
+        root = self._runtime(box)
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            server.bind(str(root / "1000" / "podman" / "podman.sock"))
+            (root / "1000" / "docker.sock").symlink_to(root / "1000" / "podman" / "podman.sock")
+            run, calls = box.run(self._body(root, "setup_system; finish"))
+            text = said(run)
+            assert run.returncode == 0, text
+            assert "Rootless Docker von 'lcf' ist schon da" not in text
+            assert SOCKET_STEP in calls and "Engine: rootless Podman" in text
+            plan, _ = box.run(self._body(root, "main --dry-run"))
+            assert "rootless Docker von 'lcf', vorhanden" not in said(plan), "the dry run decides the same"
+        finally:
+            server.close()
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_a_real_rootless_docker_socket_is_taken(self, tmp_path):
+        box = Box(tmp_path, "fedora", present=("python3=3.13", "rsync", "podman"), rootful=False)
+        root = self._runtime(box)
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            server.bind(str(root / "1000" / "docker.sock"))
+            run, calls = box.run(self._body(root, "setup_system"))
+            assert run.returncode == 0 and "Rootless Docker von 'lcf' ist schon da" in said(run), said(run)
+            plan, _ = box.run(self._body(root, "main --dry-run"))
+            assert "rootless Docker von 'lcf', vorhanden" in said(plan)
+        finally:
+            server.close()
+            shutil.rmtree(root, ignore_errors=True)
+
+    @pytest.mark.parametrize("groups, named", [
+        ("lcf : lcf wheel docker", True),
+        ("lcf : lcf docker-users", False),
+        ("docker-dev : docker-dev wheel", False),
+    ])
+    def test_only_the_group_docker_itself_is_named(self, tmp_path, groups, named):
+        box = Box(tmp_path, "fedora", present=("python3=3.13", "rsync", "podman"), rootful=False)
+        box.env["SUDO_USER"] = box.env["USER"] = groups.split(" ", 1)[0]
+        box.write(box.bin / "groups", f"#!/bin/sh\necho '{groups}'\n")
+        run, _ = box.run("setup_system")
+        assert run.returncode == 0, said(run)
+        assert ("in der Gruppe docker:" in said(run)) is named, said(run)
+        plan, _ = box.run("main --dry-run")
+        assert ("ist in der Gruppe docker (dauerhaft" in said(plan)) is named, said(plan)
