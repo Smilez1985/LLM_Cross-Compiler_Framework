@@ -73,6 +73,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, List, Optional
 
+from orchestrator.remote import gate
 from orchestrator.remote.address import Endpoint
 from orchestrator.remote.errors import RemoteFailure
 from orchestrator.remote.text import OUTPUT_LINES
@@ -90,10 +91,10 @@ HASH_RATE = 2_000_000          # bytes per second a slow board's sha256sum reads
 JOB_TIMEOUT = 1800             # seconds a detached job may run on the board
 JOB_POLL = 2.0
 # Files of a job that runs on the board on its own, in the session's private folder there (the names the deploy has
-# used since N5: a folder on a board may hold them from a run before).
-JOB_STARTED = ".lcf-install.started"
-JOB_STATUS = ".lcf-install.status"
-JOB_LOG = ".lcf-install.log"
+# used since N5; defined with the job's operations in orchestrator/remote/gate.py).
+JOB_STARTED = gate.JOB_STARTED
+JOB_STATUS = gate.JOB_STATUS
+JOB_LOG = gate.JOB_LOG
 PRIVATE_PARENT = "/tmp"        # nosec B108 - a folder on the board, made by mktemp with a random name
 PRIVATE_PREFIX = "llm_deploy"
 # How often a command that stays silent while its connection stands is tried again (resumable): once, then the board
@@ -282,6 +283,10 @@ class RemoteSession:
         self.key: Any = None         # the host key that passed the check at the last login
         self.can_relogin = True      # False for attached(): a drop is the end
         self.ended = False           # close() ended it: a step that runs or waits never logs in again
+        # the framework's key on this board runs only llmcf's gate (orchestrator/remote/gate.py): every command goes as
+        # `llmcf-gate VERB ARG...`, uploads through the gate's file operations. Learnt from the gate's refusal of the
+        # first command in script form (run()), kept across the logins of this session.
+        self.gated = False
 
     @classmethod
     def attached(cls, client: Any, *, host: str = "the device", cancel: Optional[CancelToken] = None,
@@ -459,6 +464,7 @@ class RemoteSession:
                               expect_device_id=self.expect_device_id, cancel=CancelToken(), clock=self._clock,
                               sleep=self._sleep, reachable=self._reachable, wait_seconds=0.0,
                               transport_factory=self._factory, logger=self.logger, openssh=self.openssh)
+        fresh.gated = self.gated   # the same board's key: only the gate, as for this session
         try:
             fresh.open()
         except Exception:  # noqa: BLE001 - unreachable now: the board's own time limit ends the job
@@ -484,17 +490,47 @@ class RemoteSession:
 
     # --- commands ---
 
+    def wire(self, script: str) -> str:
+        """What goes to the board for `script`: the script itself (the transport sends it as one `sh -c`), or on a
+        board whose key runs only llmcf's gate the operation's gate call. A script that is no operation cannot run
+        there (SessionFailure "not_an_operation", nothing is sent)."""
+        if not self.gated:
+            return script
+        try:
+            return gate.gate_call(script)
+        except gate.GateRefused as e:
+            raise SessionFailure(f"The framework's key on this board runs only llmcf's operations; {e}.",
+                                 "not_an_operation") from None
+
+    def refused(self, script: str, status: int, err: str) -> bool:
+        """Whether the board's gate refused `script` in script form (nothing ran): the session is gated from now on
+        and the caller sends the same operation again as a gate call. A refusal of a gate call is the board's answer
+        and stays one (an older gate, an argument the board's folders do not allow)."""
+        if self.gated or not isinstance(script, gate.GateScript) or not gate.is_refusal(status, err):
+            return False
+        self.gated = True
+        self.logger.info("The framework's key on this board runs only llmcf's operations (its command gate).")
+        return True
+
     def run(self, script: str, *, timeout: float = COMMAND_TIMEOUT, limit: int = MAX_OUTPUT,
             stdin: Any = None) -> Result:
-        """One `sh -c` on the board (the connection's own errors are raised as they are)."""
-        return self.transport.run(script, stdin=stdin, timeout=timeout, limit=limit)
+        """One command on the board: `sh -c '<script>'`, or on a gated board the operation's gate call (wire). The
+        first refusal by the board's gate makes the session gated and sends the operation again as a gate call; a
+        one-time stdin iterator cannot be sent again, so that step fails plainly instead (the gate read none of it).
+        The connection's own errors are raised as they are."""
+        result = self.transport.run(self.wire(script), stdin=stdin, timeout=timeout, limit=limit)
+        if self.refused(script, result.status, result.err):
+            if stdin is not None and not isinstance(stdin, (list, tuple)):
+                raise SessionFailure("The framework's key on this board runs only llmcf's operations; this step "
+                                     "could not be sent again. Try it once more.", "gated_retry")
+            result = self.transport.run(self.wire(script), stdin=stdin, timeout=timeout, limit=limit)
+        return result
 
     def private_dir(self, parent: str = PRIVATE_PARENT, prefix: str = PRIVATE_PREFIX) -> str:
         """A private folder on the board, made by `mktemp -d <parent>/<prefix>.XXXXXXXX` (a fixed path could be made by
         another user first); its answer must be exactly such a folder, else SessionFailure with the board's words in
         `output`."""
-        pattern = shlex.quote(f"{parent}/{prefix}.XXXXXXXX")
-        result = self.run(f"mktemp -d {pattern}")
+        result = self.run(gate.script("mkprivate", parent, prefix))
         folder = result.out.strip()
         exact = re.compile(re.escape(f"{parent}/{prefix}.") + r"[A-Za-z0-9]{8}", re.ASCII)
         if result.status != 0 or not exact.fullmatch(folder):
@@ -615,7 +651,7 @@ class RemoteSession:
         if self.transport is None:
             return False
         try:
-            self.transport.run(ANSWER_COMMAND, timeout=ANSWER_TIMEOUT, limit=64)
+            self.transport.run(self.wire(gate.script("ping")), timeout=ANSWER_TIMEOUT, limit=64)
         except Exception:  # noqa: BLE001 - no answer either: the network is gone
             return False
         return True
@@ -643,9 +679,9 @@ class RemoteSession:
                 # the deploy's words since N5 (they reach the console of `llmcf deploy run`)
                 self.logger.info("Uploading package..." if not offset else f"Resuming the upload at {offset} bytes...")
                 self._send(fh, part, offset, size, private)
-                result = self.run(f"sha256sum {shlex.quote(part)}", timeout=hash_timeout(size))
+                result = self.run(gate.script("file-sha256", part), timeout=hash_timeout(size))
                 if result.status == 0 and result.out.split()[:1] == [sha256]:
-                    result = self.run(f"mv -f {shlex.quote(part)} {shlex.quote(remote_path)}")
+                    result = self.run(gate.script("file-move", part, remote_path))
                     if result.status == 0:
                         return
                     raise SessionFailure("The file arrived, but could not be renamed on the device.", "rename")
@@ -653,7 +689,7 @@ class RemoteSession:
                     raise SessionFailure("The file arrived damaged twice (its sha256 on the device differs).",
                                          "upload_damaged")
                 restarted = True
-                self.run(f"rm -f {shlex.quote(part)}")
+                self.run(gate.script("file-remove", part))
             except (Stopped, SessionFailure):
                 raise
             except Exception as e:  # noqa: BLE001 - a network drop, or a failure on the board (disk full, ...)
@@ -664,17 +700,17 @@ class RemoteSession:
                 self._say_dropped("upload")
                 self.wait_for_host("upload")
                 self.resumed += 1
-                if self.run(f"[ -d {shlex.quote(folder)} ]").status != 0:
+                if self.run(gate.script("dir-exists", folder)).status != 0:
                     # the board restarted and its /tmp is empty: nothing of the file is left there
                     raise SessionFailure("The board answers again, but the upload folder is gone (the board "
                                          "restarted).", "folder_gone")
 
     def _resume_offset(self, fh: Any, part: str, size: int) -> int:
         """How many bytes of the file are on the board and match it (0: start from the beginning)."""
-        offset = self.transport.stat_size(part) or 0
+        offset = self._stat_size(part) or 0
         if offset <= 0 or offset > size:
             return 0
-        result = self.run(f"head -c {offset} {shlex.quote(part)} | sha256sum", timeout=hash_timeout(offset))
+        result = self.run(gate.script("file-prefix-sha256", str(offset), part), timeout=hash_timeout(offset))
         fh.seek(0)
         prefix = sha256_fileobj(fh, limit=offset, chunk=UPLOAD_CHUNK)  # the first `offset` bytes of the file
         if result.status != 0 or result.out.split()[:1] != [prefix]:
@@ -683,12 +719,28 @@ class RemoteSession:
         self.on_event(RemoteEvent("back", done=offset, total=size))
         return offset
 
+    def _stat_size(self, part: str) -> Optional[int]:
+        """The size of `part` on the board (None: none there): over SFTP, or on a gated board (which refuses SFTP)
+        with the gate's file-size."""
+        if not self.gated:
+            return self.transport.stat_size(part)
+        result = self.run(gate.script("file-size", part))
+        answer = result.out.strip()
+        if result.status == 0 and answer == "none":
+            return None
+        if result.status == 0 and answer.isdigit():
+            return int(answer)
+        raise OSError(f"the device did not say the size of the file (exit {result.status})")
+
     def _send(self, fh: Any, part: str, offset: int, size: int, private: bool = False) -> None:
         if private and not offset:
             # a new copy: made empty by the user's shell under umask 077 first (writing into it keeps its mode); when
             # that fails, the SFTP open below says why
-            self.run(f"umask 077 && : > {shlex.quote(part)}")
+            self.run(gate.script("file-create", part))
         fh.seek(offset)
+        if self.gated:
+            self._send_through_gate(fh, part, offset, size)
+            return
         with self.transport.open_write(part, offset) as remote:
             done = offset
             self.on_event(RemoteEvent("uploading", done=done, total=size))
@@ -699,6 +751,26 @@ class RemoteSession:
                 done += len(chunk)
                 self.on_event(RemoteEvent("uploading", done=done, total=size))
 
+    def _send_through_gate(self, fh: Any, part: str, offset: int, size: int) -> None:
+        """The upload on a gated board: the file's bytes from `offset` on the stdin of the gate's file-write (a new
+        copy) or file-append (after what arrived), with the same events as over SFTP. A drop raises the connection's
+        error; upload() then waits for the board and continues at what arrived, as over SFTP."""
+        done = [offset]
+
+        def chunks():
+            self.on_event(RemoteEvent("uploading", done=done[0], total=size))
+            for chunk in iter(lambda: fh.read(UPLOAD_CHUNK), b""):
+                if self.cancel.cancelled or self.ended:
+                    raise Stopped()
+                yield chunk
+                done[0] += len(chunk)
+                self.on_event(RemoteEvent("uploading", done=done[0], total=size))
+        verb = "file-append" if offset else "file-write"
+        result = self.transport.run(self.wire(gate.script(verb, part)), stdin=chunks(),
+                                    timeout=max(COMMAND_TIMEOUT, hash_timeout(size - offset)))
+        if result.status != 0:
+            raise OSError(f"the device could not write the file (exit {result.status})")
+
     # --- a job that runs on the board on its own ---
 
     @staticmethod
@@ -706,15 +778,11 @@ class RemoteSession:
         """The command that starts `job` in `folder` on the board on its own (nohup, nothing attached to the SSH
         session): its exit status goes into JOB_STATUS. The marker JOB_STARTED is made first, and a folder that has it
         is never started again, also when this command reaches the board twice."""
-        d = shlex.quote(folder)
-        job = f"{job}; echo $? > {JOB_STATUS}"
-        return (f"cd {d} && if [ -e {JOB_STARTED} ]; then echo started=already; else : > {JOB_STARTED} && "
-                f"(nohup sh -c {shlex.quote(job)} </dev/null >/dev/null 2>&1 &) && echo started=now; fi")
+        return gate.detached_command(shlex.quote(folder), job)
 
     @staticmethod
     def poll_command(folder: str) -> str:
-        d = shlex.quote(folder)
-        return f"cat {d}/{JOB_STATUS} 2>/dev/null || {{ [ -d {d} ] && echo running || echo gone; }}"
+        return gate.poll_command(shlex.quote(folder))
 
     def run_detached(self, folder: str, job: str, *, timeout: float = JOB_TIMEOUT, poll: float = JOB_POLL,
                      step: str = "install") -> int:
@@ -722,13 +790,26 @@ class RemoteSession:
         board, logs in again and keeps following the same job. Once the start command is on its way, the job may run
         on the board even when its answer is lost (detached_sent): from then on a failure says the state is unknown.
         `step` names the job in the wait's events ("install": deploy.sh; "bench": the benchmark on the board)."""
-        return self._follow(folder, self.detached_command(folder, job), timeout, poll, step)
+        if isinstance(job, gate.GateScript):   # one of llmcf's jobs: its start is an operation of its own
+            start = gate.script("start-" + job.verb, folder, *job.args)
+        else:
+            start = self.detached_command(folder, job)
+        return self._follow(folder, start, timeout, poll, step)
 
     def follow(self, folder: str, *, timeout: float = JOB_TIMEOUT, poll: float = JOB_POLL,
                step: str = "install") -> int:
         """Follows a job that run_detached started in `folder` before (maybe in another session: the job ran on while
         nobody watched) to its exit status, again after a network drop; it is never started here."""
         return self._follow(folder, None, timeout, poll, step)
+
+    @classmethod
+    def _poll(cls, folder: str) -> str:
+        """The job's poll as llmcf's operation (job-poll), or for a folder that is none of llmcf's places (a
+        stand-in's) the same command as a script."""
+        try:
+            return gate.script("job-poll", folder)
+        except gate.GateRefused:
+            return cls.poll_command(folder)
 
     def _follow(self, folder: str, start: Optional[str], timeout: float, poll: float, step: str) -> int:
         started_at = self._clock()
@@ -749,7 +830,7 @@ class RemoteSession:
                         raise SessionFailure("The board answers again, but the job cannot be followed (its answer is "
                                              "in the device output).", "cannot_follow", output=output, state="unknown")
                     sent = True
-                result = self.run(self.poll_command(folder))
+                result = self.run(self._poll(folder))
                 answer = result.out.strip()
                 if result.status == 0 and answer.isdigit():
                     return int(answer)

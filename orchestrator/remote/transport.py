@@ -132,7 +132,11 @@ PARAMIKO_AVAILABLE = _Availability()
 def sh_command(script: str) -> str:
     """`script` as the one command sent to the board: `sh -c '<script>'`. sshd hands every command to the account's
     login shell; as one quoted word for sh, the redirections, && and $? are read by sh, so a login shell such as fish
-    or csh (where `2>/dev/null` means something else or nothing) does not matter."""
+    or csh (where `2>/dev/null` means something else or nothing) does not matter. A gate call (`llmcf-gate VERB
+    ARG...`, orchestrator/remote/gate.py GateCall) goes as it is: the board's gate splits that line itself."""
+    from orchestrator.remote.gate import GateCall
+    if isinstance(script, GateCall):
+        return str(script)
     return "sh -c " + shlex.quote(script)
 
 
@@ -575,6 +579,15 @@ class _PipeWriter:
             raise OSError(f"the device could not write the file (exit {status})")
 
 
+def _file_op(gate: Any, verb: str, path: str, plain: str) -> str:
+    """llmcf's file operation `verb` on `path` (orchestrator/remote/gate.py), or the same command as a script for a
+    path that is none of llmcf's places (a stand-in's)."""
+    try:
+        return gate.script(verb, path)
+    except gate.GateRefused:
+        return plain
+
+
 class SystemSshTransport(Transport):
     """The Transport over this computer's OpenSSH client, for an installation without paramiko (decision A5). There
     is no standing connection: every run() is one `ssh ... sh -c '<script>'` with openssh_options and a time limit,
@@ -745,8 +758,9 @@ class SystemSshTransport(Transport):
         return Result(status, _text(readers.out), _text(readers.err))
 
     def stat_size(self, path: str) -> Optional[int]:
-        q = shlex.quote(path)
-        result = self.run(f"if [ -f {q} ]; then wc -c < {q}; else echo none; fi")
+        from orchestrator.remote import gate   # llmcf's operations: the same commands a gated board runs
+        result = self.run(_file_op(gate, "file-size", path, f"if [ -f {shlex.quote(path)} ]; then wc -c < "
+                                                            f"{shlex.quote(path)}; else echo none; fi"))
         answer = result.out.strip()
         if result.status == 0 and answer == "none":
             return None
@@ -758,8 +772,11 @@ class SystemSshTransport(Transport):
     def open_write(self, path: str, offset: int = 0) -> Iterator[Any]:
         """The file at `path` on the board, written through `cat` from a pipe: created anew, or continued after its
         first `offset` bytes, which RemoteSession has just found on the board and checked (`cat >>`)."""
+        from orchestrator.remote import gate
         q = shlex.quote(path)
-        process = self._start(self.argv(f"cat > {q}" if not offset else f"cat >> {q}"), True)
+        command = (_file_op(gate, "file-write", path, f"cat > {q}") if not offset else
+                   _file_op(gate, "file-append", path, f"cat >> {q}"))
+        process = self._start(self.argv(command), True)
         readers = None
         try:
             readers = _Readers(process, MAX_OUTPUT)
