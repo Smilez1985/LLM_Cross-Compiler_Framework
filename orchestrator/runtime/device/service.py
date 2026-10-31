@@ -329,7 +329,7 @@ def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, 
            expect_build_id: str, *, on_client: Optional[Callable[[Any], None]] = None,
            cancelled: Callable[[], bool] = lambda: False, say: Say = lambda _m: None, cancel: Any = None,
            on_event: Optional[Callable[[Any], None]] = None, config: Any = None,
-           ai_started: bool = False) -> Dict[str, Any]:
+           ai_started: bool = False, signer: Any = None) -> Dict[str, Any]:
     """Builds (when needed) and installs the device runtime as the deploy settings say, checks the new build on the
     device and activates it only when it passes: the one flow of `llm-cli device runtime deploy` and the Boards window
     (steps.deploy_runtime_flow; steps.install_runtime saves the deployment's record), with this path's login only: the
@@ -355,7 +355,9 @@ def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, 
             raise Stopped("The deploy")
 
     # the AI's hooks: its own login only; the root refusal stays deploy_runtime's (the device's words, as before)
-    hooks = steps.DeployHooks(open_board=open_board, progress=say, check_cancel=check_cancel, refuse_root=False)
+    # signer: the framework's board signer (board_ops.framework_signer), the tarball is signed with it
+    hooks = steps.DeployHooks(open_board=open_board, progress=say, check_cancel=check_cancel, refuse_root=False,
+                              signer=signer)
     try:
         flow = steps.deploy_runtime_flow(state_dir, device.device_id, profile, settings, hooks=hooks, build=build,
                                          packaged=packaged, source=source,

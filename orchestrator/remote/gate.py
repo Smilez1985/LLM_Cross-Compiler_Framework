@@ -47,15 +47,36 @@ REFUSED_STATUS = 126
 # The options of the framework key's authorized_keys line besides command= (OpenSSH and Dropbear both read them; none
 # of llmcf's operations needs a terminal or a forwarding).
 KEY_OPTIONS = ("no-pty", "no-port-forwarding", "no-agent-forwarding", "no-X11-forwarding")
-# llmcf's own folders on a board, the only places the gate lets an operation write to or remove: the runtime's install
-# folder in the account's home and the private upload folders of a package deploy (mktemp's /tmp/llm_deploy.XXXXXXXX).
+# llmcf's own folders on a board. Uploads and scratch work may only write into the upload folders ("place": the
+# staging and benchmark folders of the install folder, mktemp's .staging-XXXXXXXX and .bench.XXXXXXXX, and the private
+# upload folders of a package deploy, /tmp/llm_deploy.XXXXXXXX); nothing the gate runs as a program ever lies there.
+# A runtime build reaches the install folder only through runtime-check (a copy of the uploaded tarball in a folder of
+# its own, .verify-XXXXXXXX, checked against the framework's signature, then unpacked) and runtime-install.
 PLACE_HOME_REL = ".local/share/llm-framework"
+INSTALL_ROOT_REL = PLACE_HOME_REL + "/llama.cpp"
 PLACE_TMP_PREFIX = "/tmp/llm_deploy."   # nosec B108 - a folder on the board, made by mktemp with a random name
+STAGING_PREFIX = ".staging-"
+BENCH_PREFIX = ".bench."
+VERIFY_PREFIX = ".verify-"
 PATH_MAX = 1536
-# llmcf's root helper and its sudo rules on a board (the deploy setting "systemd"; runtime/device/board_ops.py writes
-# the helper's program).
-ROOT_HELPER = "/usr/local/libexec/llmcf/llmcf-root"
+# llmcf's root-owned files on a board: the root helper and its sudo rules (the deploy setting "systemd";
+# runtime/device/board_ops.py writes the helper's program), the gate itself, the framework key's authorized_keys line
+# (sshd: Match User <account> / AuthorizedKeysFile KEYS_DIR/%u, so the account cannot change it) and the public key the
+# board checks every runtime tarball and package against (SIGNERS, an OpenSSH allowed_signers file).
+LIBEXEC_DIR = "/usr/local/libexec/llmcf"
+ROOT_HELPER = LIBEXEC_DIR + "/llmcf-root"
+ROOT_GATE = LIBEXEC_DIR + "/llmcf-gate"
 SUDOERS_DIR = "/etc/sudoers.d"
+KEYS_DIR = "/etc/ssh/llmcf_keys"
+SIGNERS_DIR = "/etc/llmcf"
+SIGNERS = SIGNERS_DIR + "/allowed_signers"
+SSHD_CONFIG = "/etc/ssh/sshd_config"
+# The namespace and the principal of the framework's board signatures (orchestrator/Core/community_pack.py
+# BOARD_NAMESPACE and BOARD_SIGNER; tests/test_board_signing.py checks they are the same).
+SIGN_NAMESPACE = "llmcf-board"
+SIGN_PRINCIPAL = "llmcf"
+# The owner of llmcf's root-owned files; the gate trusts no signer file another user could change.
+ROOT_UID = 0
 REST_MAX = 64
 
 
@@ -91,16 +112,33 @@ class Kind:
 _SH_PATH = ('case $1 in /*) ;; *) return 1 ;; esac; '
             'case $1 in *[!A-Za-z0-9._+/-]*|*//*|*/|*/./*|*/.|*/../*|*/..) return 1 ;; esac; '
             f'[ ${{#1}} -le {PATH_MAX} ]')
+_ROOT = f'"$HOME"/{INSTALL_ROOT_REL}'
+_RND = "????????"
 _SH_PLACE = ('llmcf_k_path "$1" || return 1; '
-             f'case $1 in "$HOME"/{PLACE_HOME_REL}|"$HOME"/{PLACE_HOME_REL}/*) return 0 ;; esac; '
-             f'case $1 in {PLACE_TMP_PREFIX}????????|{PLACE_TMP_PREFIX}????????/*) return 0 ;; esac; return 1')
+             f'case $1 in {_ROOT}/{STAGING_PREFIX}{_RND}|{_ROOT}/{STAGING_PREFIX}{_RND}/*) return 0 ;; esac; '
+             f'case $1 in {_ROOT}/{BENCH_PREFIX}{_RND}|{_ROOT}/{BENCH_PREFIX}{_RND}/*) return 0 ;; esac; '
+             f'case $1 in {PLACE_TMP_PREFIX}{_RND}|{PLACE_TMP_PREFIX}{_RND}/*) return 0 ;; esac; return 1')
+_SH_BUILD = ('llmcf_k_path "$1" || return 1; '
+             f'case $1 in {_ROOT}/current|{_ROOT}/{"[0-9a-f]" * 16}) return 0 ;; esac; return 1')
+_SH_VERIFIED = (f'llmcf_k_path "$1" || return 1; case $1 in {_ROOT}/{VERIFY_PREFIX}{_RND}) return 0 ;; esac; '
+                'return 1')
 KINDS: Dict[str, Kind] = {k.name: k for k in (
     # an absolute path without `.` or `..` parts and without characters that would need quoting (read-only operations)
     Kind("path", _plain_path, _SH_PATH),
-    # a path inside llmcf's own folders on the board (the gate checks where; here only that it is a plain path)
+    # a path inside llmcf's upload folders on the board, the only places an upload or a scratch file is written to
+    # (the gate checks where; here only that it is a plain path)
     Kind("place", _plain_path, _SH_PLACE),
-    # the parent of a private folder: /tmp or one of llmcf's places
-    Kind("parent", _plain_path, '[ "$1" = /tmp ] || llmcf_k_place "$1"'),
+    # the runtime's install folder itself (<home>/.local/share/llm-framework/llama.cpp)
+    Kind("root", _plain_path, f'llmcf_k_path "$1" && [ "$1" = {_ROOT} ]'),
+    # a runtime build of the install folder (current, or a build folder named by 16 hex digits): only runtime-install
+    # puts one there, from the folder runtime-check checked
+    Kind("build", _plain_path, _SH_BUILD),
+    # the folder runtime-check unpacked a checked tarball into (<install folder>/.verify-XXXXXXXX)
+    Kind("verified", _plain_path, _SH_VERIFIED),
+    # what a clean-up may remove: an upload folder, a checked folder or a build (a removal runs nothing)
+    Kind("removable", _plain_path, 'llmcf_k_place "$1" || llmcf_k_verified "$1" || llmcf_k_build "$1"'),
+    # the parent of a private folder: /tmp or the install folder
+    Kind("parent", _plain_path, '[ "$1" = /tmp ] || llmcf_k_root "$1"'),
     # the account's own home folder (the gate compares it with $HOME)
     Kind("home", _plain_path, 'llmcf_k_path "$1" && [ "$1" = "$HOME" ]'),
     # a program of a runtime build in llmcf's install folder: <home>/.local/share/llm-framework/llama.cpp/<build>/bin/...
@@ -140,7 +178,9 @@ class Operation:
     form gets the checked values themselves, the gate gets "$LLMCF_A1", ... and $LLMCF_REST. `gate_render`, when given,
     is the gate's own body (the probe: the gate checks the script it is sent before it runs it). `gate=False`: a setup
     step of an unrestricted login only, never run by the gate. `job`: the body of a job that only runs detached
-    (start-<verb>, RemoteSession.run_detached)."""
+    (start-<verb>, RemoteSession.run_detached). `refuse(args)`, when given, says why checked arguments are still not
+    ones the operation takes ("" when they are), here before a command is made; the gate makes the same check on the
+    board in its `gate_render` (run-program: no option of the shared forbidden list, server_policy.check_command)."""
     verb: str
     kinds: Tuple[str, ...]
     render: Callable[..., str]
@@ -150,6 +190,7 @@ class Operation:
     gate_render: Optional[Callable[..., str]] = None
     job: bool = False
     doc: str = ""
+    refuse: Optional[Callable[[Tuple[str, ...]], str]] = None
 
     def check(self, args: Sequence[str]) -> Tuple[str, ...]:
         args = tuple(args)
@@ -161,6 +202,9 @@ class Operation:
             kind = KINDS[self.kinds[i] if i < n else self.rest]
             if not isinstance(value, str) or not kind.check(value):
                 raise GateRefused(f"argument {i + 1} of {self.verb} is not a {kind.name}")
+        why = self.refuse(args) if self.refuse is not None else ""
+        if why:
+            raise GateRefused(f"{self.verb}: {why}")
         return args
 
 
@@ -169,7 +213,7 @@ OPERATIONS: Dict[str, Operation] = {}
 
 def define(verb: str, kinds: Sequence[str] = (), render: "str | Callable[..., str]" = "", *, rest: Optional[str] = None,
            rest_max: int = REST_MAX, gate: bool = True, gate_render: Optional[Callable[..., str]] = None,
-           job: bool = False, doc: str = "") -> Operation:
+           job: bool = False, doc: str = "", refuse: Optional[Callable[[Tuple[str, ...]], str]] = None) -> Operation:
     """Defines (or redefines, for a module loaded again) one operation. A str `render` is a format template: {0}, {1},
     ... are the arguments, {rest} the rest of them (sh braces are written twice, as in an f-string)."""
     if not re.fullmatch(r"[a-z][a-z0-9-]{0,40}", verb, re.ASCII):
@@ -178,13 +222,20 @@ def define(verb: str, kinds: Sequence[str] = (), render: "str | Callable[..., st
         if kind not in KINDS:
             raise ValueError(f"unknown argument kind {kind!r}")
     fn = (lambda *v, rest="", _t=render: _t.format(*v, rest=rest)) if isinstance(render, str) else render
-    op = Operation(verb, tuple(kinds), fn, rest, rest_max, gate, gate_render, job, doc)
+    op = Operation(verb, tuple(kinds), fn, rest, rest_max, gate, gate_render, job, doc, refuse)
     OPERATIONS[verb] = op
     if job:   # its start: the detached wrapper around the job's body, a gate operation of its own
         def start(folder: str, *values: str, rest: str = "", _op=op) -> str:
             return detached_command(folder, _op.render(*values, rest=rest))
+
+        def gate_start(folder: str, *values: str, rest: str = "", _op=op) -> str:
+            return detached_command(folder, (_op.gate_render or _op.render)(*values, rest=rest))
+
+        def refuse_start(args: Tuple[str, ...], _op=op) -> str:
+            return _op.refuse(args[1:]) if _op.refuse is not None else ""
         OPERATIONS["start-" + verb] = Operation("start-" + verb, ("place",) + op.kinds, start, rest, rest_max,
-                                                gate, None, False, f"starts the job {verb} on its own")
+                                                gate, gate_start if gate_render else None, False,
+                                                f"starts the job {verb} on its own", refuse_start)
     return op
 
 
@@ -304,7 +355,7 @@ def render_gate() -> str:
     out.append('  *) llmcf_refuse "unknown operation (the framework'"'"'s key runs only llmcf'"'"'s operations)" ;;')
     out.append('esac')
     body = "\n".join(out) + "\n"
-    head = _GATE_HEAD
+    head = _GATE_HEAD.replace("@SIGNED@", signed_sh())
     version = hashlib.sha256((head + body).encode("utf-8")).hexdigest()[:16]
     return head.replace("@VERSION@", version) + body
 
@@ -313,6 +364,47 @@ def gate_version(text: str) -> str:
     """The version a gate program carries ("" when it carries none)."""
     m = re.search(r"^LLMCF_GATE_VERSION=([0-9a-f]{16})$", text or "", re.M | re.ASCII)
     return m.group(1) if m else ""
+
+
+# --- the framework's signature on the board ---------------------------------------------------------------------------
+
+def signed_sh(signers: str = SIGNERS, root_uid: int = ROOT_UID) -> str:
+    """The sh functions that check a file against the framework's signature on the board (DECISIONS 2026-10-31: a
+    board runs only runtime tarballs and packages signed with the framework's key). Part of the gate's head and put in
+    front of every script-form body that checks a signature (runtime-check, the package's install job):
+
+    - llmcf_rootowned PATH: PATH is a plain file or folder (no link) of `root_uid` that no group and nobody else may
+      write;
+    - llmcf_trusted_signers: the allowed_signers file `signers`, its folder and the folder above are root-owned;
+    - llmcf_must_sign: a signature is needed: always in the gate, and in an unrestricted login once the board holds
+      the signers file (before its root step an unrestricted login runs anything anyway);
+    - llmcf_signed FILE SIG: `ssh-keygen -Y verify` of FILE against SIG with only the framework's key, only in its
+      namespace; one plain line on stderr and status 1 otherwise.
+
+    `signers` and `root_uid` are parameters for the tests only (a temporary folder, the test's own user)."""
+    folder = signers.rsplit("/", 1)[0]
+    parent = folder.rsplit("/", 1)[0] or "/"
+    return "\n".join([
+        "llmcf_rootowned() {",
+        '  ls -ldn "$1" 2>/dev/null | (read -r llmcf_m llmcf_n llmcf_u llmcf_rest || exit 1',
+        f'    [ "$llmcf_u" = {int(root_uid)} ] || exit 1',
+        "    case $llmcf_m in -*|d*) ;; *) exit 1 ;; esac",
+        "    case $llmcf_m in ?????w*|????????w*) exit 1 ;; esac)",
+        "}",
+        f"llmcf_trusted_signers() {{ llmcf_rootowned {signers} && llmcf_rootowned {folder} && "
+        f"llmcf_rootowned {parent}; }}",
+        f'llmcf_must_sign() {{ [ "${{LLMCF_GATE-}}" = 1 ] || [ -e {signers} ]; }}',
+        "llmcf_signed() {",
+        '  [ -f "$2" ] || { echo "it carries no signature of the framework\'s signing key" >&2; return 1; }',
+        "  llmcf_trusted_signers || { echo \"this board holds no root-owned signing key of the framework (pair it "
+        "again with the board's password)\" >&2; return 1; }",
+        "  command -v ssh-keygen >/dev/null 2>&1 || { echo \"this board has no ssh-keygen to check the framework's "
+        "signature\" >&2; return 1; }",
+        f'  ssh-keygen -Y verify -f {signers} -I {SIGN_PRINCIPAL} -n {SIGN_NAMESPACE} -s "$2" < "$1" >/dev/null 2>&1 '
+        "|| { echo \"its signature is not one of the framework's signing key (changed, or signed with another "
+        "key)\" >&2; return 1; }",
+        "}",
+    ])
 
 
 _GATE_HEAD = """#!/bin/sh
@@ -324,6 +416,7 @@ LLMCF_GATE=1; export LLMCF_GATE LLMCF_GATE_VERSION
 LC_ALL=C; export LC_ALL
 set -f
 llmcf_refuse() { printf 'llmcf-gate: refused: %s\\n' "$1" >&2; exit 126; }
+@SIGNED@
 llmcf_line=${SSH_ORIGINAL_COMMAND-}
 [ -n "$llmcf_line" ] || llmcf_refuse "no operation given: the framework's key opens no login shell"
 case $llmcf_line in
@@ -359,10 +452,14 @@ def is_restricted_line(line: str, gate_path: str) -> bool:
 @dataclass(frozen=True)
 class GateBundle:
     """What pairing installs on a board: the gate program (render_gate, with every operation of the framework
-    defined), llmcf's root helper (None: no root actions) and its version."""
+    defined), llmcf's root helper (None: no root actions) and its version; `signers`, the board's allowed_signers line
+    of the framework's signing key ("" when the framework has none), and `selftest`, that key's signature of
+    SELFTEST_DATA, which the root step checks with the board's own ssh-keygen before it installs anything."""
     gate: str
     root_helper: Optional[str] = None
     notes: Tuple[str, ...] = field(default_factory=tuple)
+    signers: str = ""
+    selftest: str = ""
 
     @property
     def version(self) -> str:
@@ -410,9 +507,16 @@ define("file-size", ("place",), "if [ -f {0} ]; then wc -c < {0}; else echo none
 define("file-write", ("place",), "cat > {0}", doc="an upload on stdin")
 define("file-append", ("place",), "cat >> {0}", doc="an upload continued on stdin")
 define("job-poll", ("place",), lambda folder, rest="": poll_command(folder), doc="the exit status of a job on its own")
-define("status", (), 'echo "restricted=no gate=none"',
-       gate_render=lambda *v, rest="": 'echo "restricted=yes gate=$LLMCF_GATE_VERSION"',
-       doc="whether the framework's key on the board runs only the gate, and its version")
+_STATUS_GATE = "\n".join([
+    'llmcf_keys=home; llmcf_me=$(id -un 2>/dev/null) || llmcf_me=""',
+    f'[ -n "$llmcf_me" ] && llmcf_rootowned "$0" && llmcf_rootowned {KEYS_DIR}/"$llmcf_me" && '
+    f'llmcf_rootowned {KEYS_DIR} && llmcf_keys=root',
+    "llmcf_sig=no; llmcf_trusted_signers && llmcf_sig=yes",
+    'echo "restricted=yes gate=$LLMCF_GATE_VERSION keys=$llmcf_keys signing=$llmcf_sig"',
+])
+define("status", (), 'echo "restricted=no gate=none"', gate_render=lambda *v, rest="": _STATUS_GATE,
+       doc="whether the framework's key on the board runs only the gate, its version, whether its key line and the "
+           "gate are root-owned (keys=root) and whether the board checks the framework's signature (signing=yes)")
 
 
 # --- pairing: the gate and the restricted key line --------------------------------------------------------------------
@@ -484,7 +588,7 @@ def _answer(text: str, key: str) -> Tuple[bool, str]:
     """(True, "") for `key=installed` in a setup step's answer, else (False, its reason word)."""
     for line in (text or "").splitlines():
         line = line.strip()
-        if line == f"{key}=installed":
+        if line == f"{key}=installed" or line.startswith(f"{key}=installed "):
             return True, ""
         if line.startswith(f"{key}=unavailable"):
             reason = line.partition("reason=")[2].strip()
@@ -494,6 +598,14 @@ def _answer(text: str, key: str) -> Tuple[bool, str]:
 
 # What a reason word of the setup steps means, in the person's words.
 SETUP_REASONS = {
+    "account": "the board account is root or its name is not a plain account name",
+    "no-signer": "the framework has no signing key to give the board (its secrets store is not available)",
+    "no-sshd": "the board's SSH server is not OpenSSH (sshd), which a root-owned key line needs (Match User)",
+    "no-keygen": "the board has no ssh-keygen to check the framework's signature",
+    "old-ssh": "the board's ssh-keygen cannot check the framework's signature (OpenSSH 8.1 or later needed)",
+    "sshd-config": "sshd did not accept its configuration with llmcf's Match block (sshd -t); nothing was changed",
+    "sshd-match": "sshd's configuration already names another key file for this account; nothing was changed",
+    "reload": "sshd could not be reloaded; its earlier configuration was put back",
     "no-sh": "the board has no /bin/sh",
     "home": "the account's home folder is not a plain path",
     "read-only": "the account's home folder or its ~/.ssh cannot be written (a read-only system)",
@@ -544,7 +656,149 @@ def install_root(run: Callable[..., object], user: str, helper_text: str, sudoer
     return _answer(getattr(result, "out", ""), "root")
 
 
-__all__ = ["GATE_NAME", "GATE_REL", "GateBundle", "GateCall", "GateRefused", "GateScript", "JOB_LOG", "JOB_STARTED",
+# --- the root step of a board: llmcf's key line and signing key in root-owned places (DECISIONS 2026-10-31) -----------
+
+SELFTEST_DATA = b"llmcf-board-selftest\n"
+MATCH_BEGIN = "# llmcf-begin board account"
+MATCH_END = "# llmcf-end board account"
+
+
+@dataclass(frozen=True)
+class BoardPaths:
+    """Where the root step puts llmcf's root-owned files (the defaults are the board's; the tests give a temporary
+    folder)."""
+    libexec: str = LIBEXEC_DIR
+    gate: str = ROOT_GATE
+    keys_dir: str = KEYS_DIR
+    signers_dir: str = SIGNERS_DIR
+    signers: str = SIGNERS
+    sshd_config: str = SSHD_CONFIG
+
+
+def match_block(user: str, keys_dir: str = KEYS_DIR) -> str:
+    """llmcf's block at the end of sshd_config for the board account `user`: its key line comes from the root-owned
+    KEYS_DIR/<account> first; the account's own ~/.ssh/authorized_keys stays readable after it (the person's own keys
+    for this account keep working, and llmcf's line is found first, in the file the account cannot change)."""
+    return (f"{MATCH_BEGIN} {user} (generated by llmcf's pairing)\nMatch User {user}\n"
+            f"\tAuthorizedKeysFile {keys_dir}/%u .ssh/authorized_keys\n{MATCH_END} {user}\n")
+
+
+def root_board_script(paths: BoardPaths = BoardPaths()) -> str:
+    """The root step's script (the setup operation root-board, run by an unrestricted login of the board account):
+    stdin is a line with the person's one-time password (empty: sudo -n), then the gate program; LLMCF_KEYLINE (the
+    framework key's restricted line), LLMCF_SIGNERS (the allowed_signers line) and LLMCF_SELFTEST (the framework key's
+    signature of SELFTEST_DATA) come before it as plain assignments. It checks first (sudo, OpenSSH's sshd, ssh-keygen
+    checks the self-test signature with exactly that signers line, the gate reads, sshd -t accepts the configuration
+    with llmcf's Match block and sshd -T shows the root-owned key file for this account), then installs root:root the
+    gate (0755), the signers file and the key line (0644, folders 0755) and the configuration (the earlier one kept as
+    sshd_config.llmcf-backup), reloads sshd (the earlier configuration put back when that fails) and only then removes
+    the framework key's line from the account's own ~/.ssh/authorized_keys (as the account, never as root). Answers
+    root-board=installed home=removed|kept|none, or root-board=unavailable reason=WORD (nothing changed then)."""
+    q = paths
+    block = match_block("@USER@", q.keys_dir).replace("@USER@", "$llmcf_u")
+    return "\n".join([
+        "set -u",
+        "umask 077",
+        'IFS= read -r llmcf_pw || llmcf_pw=""',
+        'no() { echo "root-board=unavailable reason=$1"; exit 0; }',
+        'llmcf_u=$(id -un 2>/dev/null) || no account',
+        'case $llmcf_u in ""|root|-*|*[!A-Za-z0-9._-]*) no account ;; esac',
+        '[ "$(id -u)" != 0 ] || no account',
+        '[ -n "${LLMCF_SIGNERS-}" ] || no no-signer',
+        'llmcf_d=$(mktemp -d "${TMPDIR:-/tmp}/llmcf-root.XXXXXXXX") || no tmp',
+        "trap 'rm -rf \"$llmcf_d\"' EXIT",
+        'cat > "$llmcf_d/gate"',
+        'printf "%s\\n" "$LLMCF_KEYLINE" > "$llmcf_d/key"',
+        'printf "%s\\n" "$LLMCF_SIGNERS" > "$llmcf_d/signers"',
+        'printf "llmcf-board-selftest\\n" > "$llmcf_d/selftest"',
+        'printf "%s" "$LLMCF_SELFTEST" > "$llmcf_d/selftest.sig"',
+        'asroot() { if [ -n "$llmcf_pw" ]; then printf "%s\\n" "$llmcf_pw" | sudo -S -p "" "$@"; '
+        'else sudo -n "$@"; fi; }',
+        "command -v sudo >/dev/null 2>&1 || no no-sudo",
+        'llmcf_sshd=$(command -v sshd 2>/dev/null) || llmcf_sshd=/usr/sbin/sshd',
+        '[ -x "$llmcf_sshd" ] || no no-sshd',
+        "command -v ssh-keygen >/dev/null 2>&1 || no no-keygen",
+        f'ssh-keygen -Y verify -f "$llmcf_d/signers" -I {SIGN_PRINCIPAL} -n {SIGN_NAMESPACE} -s "$llmcf_d/selftest.sig" '
+        '< "$llmcf_d/selftest" >/dev/null 2>&1 || no old-ssh',
+        '/bin/sh -n "$llmcf_d/gate" 2>/dev/null || no sh',
+        f'asroot cat {q.sshd_config} > "$llmcf_d/sshd_config" 2>/dev/null || no sudo',
+        f"awk -v b=\"{MATCH_BEGIN} $llmcf_u \" -v e=\"{MATCH_END} $llmcf_u\" "
+        "'index($0, b) == 1 { skip = 1; next } skip && $0 == e { skip = 0; next } !skip { print }' "
+        '"$llmcf_d/sshd_config" > "$llmcf_d/sshd_config.new" || no sshd-config',
+        f'printf "%s" "{block}" >> "$llmcf_d/sshd_config.new"',
+        'asroot "$llmcf_sshd" -t -f "$llmcf_d/sshd_config.new" >/dev/null 2>&1 || no sshd-config',
+        'llmcf_akf=$(asroot "$llmcf_sshd" -T -f "$llmcf_d/sshd_config.new" -C "user=$llmcf_u,host=localhost,'
+        "addr=127.0.0.1\" 2>/dev/null | awk 'tolower($1) == \"authorizedkeysfile\" { $1 = \"\"; sub(/^ +/, \"\"); "
+        "print; exit }')",
+        f'[ "$llmcf_akf" = "{q.keys_dir}/%u .ssh/authorized_keys" ] || no sshd-match',
+        f"asroot install -d -m 0755 -o root -g root {q.libexec} {q.keys_dir} {q.signers_dir} >/dev/null 2>&1 "
+        "|| no sudo",
+        f'asroot install -m 0755 -o root -g root "$llmcf_d/gate" {q.gate} >/dev/null 2>&1 || no sudo',
+        f'asroot install -m 0644 -o root -g root "$llmcf_d/signers" {q.signers} >/dev/null 2>&1 || no sudo',
+        f'asroot install -m 0644 -o root -g root "$llmcf_d/key" {q.keys_dir}/"$llmcf_u" >/dev/null 2>&1 || no sudo',
+        f"asroot cp -p {q.sshd_config} {q.sshd_config}.llmcf-backup >/dev/null 2>&1 || no sudo",
+        f'asroot install -m 0644 -o root -g root "$llmcf_d/sshd_config.new" {q.sshd_config} >/dev/null 2>&1 || no sudo',
+        "if ! { asroot systemctl reload ssh || asroot systemctl reload sshd || "
+        "asroot kill -HUP \"$(asroot cat /run/sshd.pid)\"; } >/dev/null 2>&1; then",
+        f"  asroot cp -p {q.sshd_config}.llmcf-backup {q.sshd_config} >/dev/null 2>&1",
+        "  no reload",
+        "fi",
+        'llmcf_keys="$HOME/.ssh/authorized_keys"; llmcf_home=none',
+        'if [ -f "$llmcf_keys" ] && grep -qF "@BLOB@" "$llmcf_keys" 2>/dev/null; then',
+        '  llmcf_new="$llmcf_keys.llmcf.$$"; llmcf_home=kept',
+        "  if cp -p \"$llmcf_keys\" \"$llmcf_new\" 2>/dev/null && awk -v blob=@BLOB@ '{ hit = 0; "
+        "n = split($0, f, \" \"); for (i = 1; i <= n; i++) if (f[i] == blob) hit = 1 } !hit' \"$llmcf_keys\" "
+        '> "$llmcf_new" && mv -f "$llmcf_new" "$llmcf_keys"; then llmcf_home=removed; else rm -f "$llmcf_new"; fi',
+        "fi",
+        'echo "root-board=installed home=$llmcf_home"',
+    ])
+
+
+define("root-board", ("b64",), lambda blob, rest="": root_board_script().replace("@BLOB@", blob), gate=False,
+       doc="pairing's root step: the gate, the framework key's line and its signing key in root-owned places, sshd's "
+           "Match block for the account (checked with sshd -t), the account's own line of the key removed")
+
+
+def install_root_board(run: Callable[..., object], public_line: str, bundle: "GateBundle", password: str = "", *,
+                       paths: Optional[BoardPaths] = None) -> Tuple[bool, str, str]:
+    """The root step root-board over `run` (an unrestricted login of the board account) with `sudo -n`, or with the
+    person's one-time `password` for `sudo -S` (on stdin, never on a command line). (True, "", home) when installed
+    (home: removed, kept or none, the framework key's earlier line in ~/.ssh/authorized_keys), else (False, the reason
+    word of SETUP_REASONS, ""); "gated": the login was with a framework key that already runs only the gate."""
+    parts = (public_line or "").split(" ")
+    if len(parts) not in (2, 3) or not KINDS["b64"].check(parts[1]):
+        raise GateRefused("the framework's public key line is not a plain SSH public key")
+    if "\n" in password or "\r" in password:
+        return False, "sudo", ""
+    if not bundle.signers or not bundle.selftest:
+        return False, "no-signer", ""
+    line = restricted_line(" ".join(parts), (paths or BoardPaths()).gate)
+    body = root_board_script(paths).replace("@BLOB@", parts[1]) if paths else str(script("root-board", parts[1]))
+    text = "".join(f"{k}={shlex.quote(v)}\n" for k, v in (("LLMCF_KEYLINE", line), ("LLMCF_SIGNERS", bundle.signers),
+                                                          ("LLMCF_SELFTEST", bundle.selftest))) + body
+    call = GateScript(text, "root-board", (parts[1],))
+    try:
+        result = run(call, stdin=[(password + "\n").encode("utf-8"), bundle.gate.encode("utf-8")])
+    except (OSError, EOFError):
+        # a gate that refused the line closes the channel without reading stdin: the login ran in the gate
+        check = run(script("status"))
+        if is_refusal(getattr(check, "status", 0), getattr(check, "err", "")):
+            return False, "gated", ""
+        raise
+    if is_refusal(getattr(result, "status", 0), getattr(result, "err", "")):
+        return False, "gated", ""
+    out = getattr(result, "out", "") or ""
+    ok, reason = _answer(out, "root-board")
+    if not ok:
+        return False, reason, ""
+    home = next((w.split("=", 1)[1] for ln in out.splitlines() if ln.startswith("root-board=installed")
+                 for w in ln.split() if w.startswith("home=")), "none")
+    return True, "", home if home in ("removed", "kept", "none") else "none"
+
+
+__all__ = ["BoardPaths", "INSTALL_ROOT_REL", "KEYS_DIR", "LIBEXEC_DIR", "ROOT_GATE", "SELFTEST_DATA", "SIGNERS",
+           "SIGN_NAMESPACE", "SIGN_PRINCIPAL", "install_root_board", "match_block", "root_board_script", "signed_sh",
+           "GATE_NAME", "GATE_REL", "GateBundle", "GateCall", "GateRefused", "GateScript", "JOB_LOG", "JOB_STARTED",
            "JOB_STATUS", "KEY_OPTIONS", "KINDS", "Kind", "OPERATIONS", "Operation", "PLACE_HOME_REL",
            "PLACE_TMP_PREFIX", "REFUSAL_PREFIX", "REFUSED_STATUS", "ROOT_HELPER", "SETUP_REASONS", "SUDOERS_DIR",
            "define", "detached_command", "gate_call", "gate_operations", "gate_version", "install_gate",

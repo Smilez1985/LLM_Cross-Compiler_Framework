@@ -6771,6 +6771,7 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
     # framework's key now), the question about an untrusted benchmark model, asked before anything changes on the
     # device (decision D23: only after consent), and the "tested on" record. Design 3.8 and P6: the new build is
     # checked in its own folder and becomes current only if it passes; only then is its record saved.
+    from orchestrator.runtime.device import board_ops as device_board_ops
     hooks = steps.DeployHooks(
         open_board=lambda: _open_device(state_dir, device_id, host, port, user, password, ctx=ctx,
                                         step="runtime_deploy"),
@@ -6779,7 +6780,8 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
                                                              device_id, user),
         tested_on=lambda report, digest, build_id, kind: _board_test_builds(ctx, store, device_id, profile, report,
                                                                             digest, build_id, source, kind),
-        progress=lambda msg: console.print(escape(msg)))
+        progress=lambda msg: console.print(escape(msg)),
+        signer=device_board_ops.framework_signer(ctx.framework_manager, state_dir))
     try:
         flow = steps.deploy_runtime_flow(state_dir, device_id, profile, settings, hooks=hooks, build=build,
                                          packaged=stored.packaged, source=source, arch=str(stored.plan.target["arch"]))

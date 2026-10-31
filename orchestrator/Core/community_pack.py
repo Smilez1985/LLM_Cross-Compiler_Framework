@@ -34,7 +34,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Literal, Optional, Sequence, Tuple, Union, get_args
+from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Sequence, Tuple, Union, get_args
 
 import pyrage
 import yaml
@@ -492,6 +492,143 @@ def sign_index(index_bytes: bytes, private_key: Ed25519PrivateKey) -> PackSignat
 def verify_index(index_bytes: bytes, signature: PackSignature,
                  keys: Iterable[Union[TrustedKey, Ed25519PublicKey]], *, now: Optional[datetime] = None) -> str:
     return _verify(_INDEX_CONTEXT + index_bytes, signature, keys, now, "community index")
+
+
+# --- Board signatures (DECISIONS 2026-10-31: a board runs only what the framework's key signed) --------------------
+# The same Ed25519 key that signs the person's packs (UserKeys.signing_key) signs every runtime tarball and package
+# the framework sends to a board. A board checks it with its own OpenSSH tool (`ssh-keygen -Y verify`, OpenSSH 8.1 and
+# later) against the public key in a root-owned allowed_signers file, so the envelope is OpenSSH's SSHSIG format
+# (PROTOCOL.sshsig): the signature covers "SSHSIG", the namespace, the hash name and the sha512 of the file. The
+# namespace is the domain separation: a board signature never verifies as a pack, index or encrypted-pack signature
+# (their payloads start with their own context, never with the SSHSIG preamble) and the other way round.
+
+BOARD_NAMESPACE = "llmcf-board"
+BOARD_SIGNER = "llmcf"   # the principal of the board's allowed_signers line
+_SSHSIG_MAGIC = b"SSHSIG"
+_SSHSIG_HASH = "sha512"
+_SSH_ED25519 = b"ssh-ed25519"
+
+
+def _ssh_string(data: bytes) -> bytes:
+    return len(data).to_bytes(4, "big") + data
+
+
+def _ssh_strings(blob: bytes) -> List[bytes]:
+    out, i = [], 0
+    while i < len(blob):
+        if i + 4 > len(blob):
+            raise ValueError("a truncated SSH string")
+        n = int.from_bytes(blob[i:i + 4], "big")
+        if i + 4 + n > len(blob):
+            raise ValueError("a truncated SSH string")
+        out.append(blob[i + 4:i + 4 + n])
+        i += 4 + n
+    return out
+
+
+def ssh_public_blob(key: Ed25519PublicKey) -> bytes:
+    """The key as OpenSSH writes it in a public key line (string "ssh-ed25519", string the 32 raw bytes)."""
+    return _ssh_string(_SSH_ED25519) + _ssh_string(key.public_bytes_raw())
+
+
+def ssh_public_line(key: Ed25519PublicKey, comment: str = BOARD_SIGNER) -> str:
+    """`ssh-ed25519 AAAA... comment`: the key as an OpenSSH public key line."""
+    return f"ssh-ed25519 {_b64e(ssh_public_blob(key))} {comment}".rstrip()
+
+
+def _sshsig_signed_data(digest: bytes, namespace: str) -> bytes:
+    return (_SSHSIG_MAGIC + _ssh_string(namespace.encode("ascii")) + _ssh_string(b"")
+            + _ssh_string(_SSHSIG_HASH.encode("ascii")) + _ssh_string(digest))
+
+
+def _sha512(data: Union[bytes, Iterable[bytes]]) -> bytes:
+    h = hashlib.sha512()
+    if isinstance(data, (bytes, bytearray)):
+        h.update(data)
+    else:
+        for chunk in data:
+            h.update(chunk)
+    return h.digest()
+
+
+def sshsig_sign(data: Union[bytes, Iterable[bytes]], private_key: Ed25519PrivateKey,
+                namespace: str = BOARD_NAMESPACE) -> str:
+    """The armored SSHSIG signature (`-----BEGIN SSH SIGNATURE-----`) of `data` (bytes or chunks) in `namespace`,
+    as `ssh-keygen -Y sign -n NAMESPACE` writes it."""
+    digest = _sha512(data)
+    raw = private_key.sign(_sshsig_signed_data(digest, namespace))
+    blob = (_SSHSIG_MAGIC + (1).to_bytes(4, "big") + _ssh_string(ssh_public_blob(private_key.public_key()))
+            + _ssh_string(namespace.encode("ascii")) + _ssh_string(b"") + _ssh_string(_SSHSIG_HASH.encode("ascii"))
+            + _ssh_string(_ssh_string(_SSH_ED25519) + _ssh_string(raw)))
+    text = _b64e(blob)
+    lines = [text[i:i + 70] for i in range(0, len(text), 70)]
+    return "-----BEGIN SSH SIGNATURE-----\n" + "\n".join(lines) + "\n-----END SSH SIGNATURE-----\n"
+
+
+def sshsig_verify(data: Union[bytes, Iterable[bytes]], armored: str, key: Ed25519PublicKey,
+                  namespace: str = BOARD_NAMESPACE) -> None:
+    """Raises PackError unless `armored` is an SSHSIG signature of `data` by `key` in `namespace` (the check
+    `ssh-keygen -Y verify` makes on a board, here for the framework's own self-check and its tests)."""
+    try:
+        body = "".join(line.strip() for line in str(armored).strip().splitlines()[1:-1])
+        blob = base64.b64decode(body, validate=True)
+        if not blob.startswith(_SSHSIG_MAGIC) or blob[6:10] != (1).to_bytes(4, "big"):
+            raise ValueError("not an SSHSIG signature")
+        public, ns, _reserved, hash_name, signature = _ssh_strings(blob[10:])
+        sig_type, raw = _ssh_strings(signature)
+    except (ValueError, binascii.Error):
+        raise PackError("The board signature is damaged.") from None
+    if public != ssh_public_blob(key) or sig_type != _SSH_ED25519:
+        raise PackError("The board signature was made with another key.")
+    if ns != namespace.encode("ascii") or hash_name != _SSHSIG_HASH.encode("ascii"):
+        raise PackError("The board signature was made for another purpose.")
+    try:
+        key.verify(raw, _sshsig_signed_data(_sha512(data), namespace))
+    except InvalidSignature:
+        raise PackError("The board signature does not match: the file was changed.") from None
+
+
+@dataclass(frozen=True)
+class BoardSigner:
+    """The framework's signing key as boards know it: `sign_file` signs a runtime tarball or a package right before
+    it is sent, `allowed_signers` is the one line of the board's root-owned allowed_signers file (only this key, only
+    for BOARD_NAMESPACE), `key_id` names the key (never the key itself)."""
+    private_key: Ed25519PrivateKey
+
+    @property
+    def public_key(self) -> Ed25519PublicKey:
+        return self.private_key.public_key()
+
+    @property
+    def key_id(self) -> str:
+        return key_id(self.public_key)
+
+    @property
+    def allowed_signers(self) -> str:
+        return f'{BOARD_SIGNER} namespaces="{BOARD_NAMESPACE}" {ssh_public_line(self.public_key, "")}'
+
+    def sign_bytes(self, data: bytes) -> str:
+        return sshsig_sign(data, self.private_key)
+
+    def sign_file(self, path: Union[str, Path]) -> str:
+        """The signature of the file at `path`, read in chunks (a tarball of many megabytes)."""
+        with open(path, "rb") as fh:
+            return self.sign_stream(fh)
+
+    def sign_stream(self, fh: Any) -> str:
+        """The signature of what an open file holds from its start; the file is put back at its start, so the bytes
+        signed are the bytes then sent."""
+        fh.seek(0)
+        try:
+            return sshsig_sign(iter(lambda: fh.read(1 << 20), b""), self.private_key)
+        finally:
+            fh.seek(0)
+
+
+def board_signer(secrets_manager: Any) -> BoardSigner:
+    """The framework's board signer: the person's Ed25519 signing key from the encrypted secrets store (UserKeys,
+    created on first use as for packs). PackError with the reason when the store is not available."""
+    return BoardSigner(UserKeys(secrets_manager).signing_key())
 
 
 # --- Zip files -------------------------------------------------------------------------------------------

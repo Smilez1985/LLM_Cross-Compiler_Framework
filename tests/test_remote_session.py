@@ -393,8 +393,9 @@ def test_the_start_command_is_behind_a_marker_under_nohup(manager, board, packag
     run(manager, package)
     (start,) = [c for c in commands if "nohup" in c]
     d = shlex.quote(TARGET)
-    job = (f"unzip -o {package.name} > {dmod.INSTALL_LOG} 2>&1 && sh deploy.sh >> {dmod.INSTALL_LOG} 2>&1; "
-           f"echo $? > {dmod.INSTALL_STATUS}")
+    # the package's install job checks the framework's signature in a folder of its own first (board_ops.py)
+    from orchestrator.remote import gate
+    job = f"{gate.job('install', package.name)}; echo $? > {dmod.INSTALL_STATUS}"
     assert start == (f"cd {d} && if [ -e {dmod.INSTALL_STARTED} ]; then echo started=already; else : > "
                      f"{dmod.INSTALL_STARTED} && (nohup sh -c {shlex.quote(job)} </dev/null >/dev/null 2>&1 &) && "
                      f"echo started=now; fi")
@@ -655,13 +656,24 @@ def deploy_wire(manager, board, package):
     real_run = board.run
 
     def on_board(script):
+        if "root-board=" in script:   # pairing's root step (remote/gate.py root-board; tests/test_board_signing.py)
+            return 0, "root-board=installed home=removed\n"
         if "authorized_keys" in script:
             return 0, "gate=installed\n"   # the pairing installs llmcf's gate (remote/gate.py)
         return real_run(script)
     board.run = on_board
     board.drop_after = 1_300_000
     board.back_at = 20.0
-    assert manager.deploy_package(package, HOST, "radxa", password="one-time", pair=True).success
+    # the framework's board signer (its secrets store has none in a test): a key of this test only
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from orchestrator.Core.community_pack import BoardSigner
+    from orchestrator.runtime.device import board_ops
+    signer, real_signer = BoardSigner(Ed25519PrivateKey.generate()), board_ops.framework_signer
+    board_ops.framework_signer = lambda *_a, **_k: signer
+    try:
+        assert manager.deploy_package(package, HOST, "radxa", password="one-time", pair=True).success
+    finally:
+        board_ops.framework_signer = real_signer
     return list(board.wire)
 
 
@@ -671,9 +683,10 @@ def test_every_command_reaches_the_login_shell_as_one_sh_c(manager, board, packa
         words = shlex.split(command)
         assert len(words) == 3 and words[:2] == ["sh", "-c"] and command == "sh -c " + shlex.quote(words[2]), command
     scripts = [shlex.split(c)[2] for c in wire]
-    # the pairing is llmcf's setup step gate-install (orchestrator/remote/gate.py): the gate and the restricted line
-    assert scripts[0].startswith("set -u\numask 077") and "authorized_keys" in scripts[0], "the key installation too"
-    assert {s.split()[0] for s in scripts} >= {"set", "mktemp", "head", "sha256sum", "mv", "[", "cd", "cat", "tail",
+    # the pairing is llmcf's root step root-board (orchestrator/remote/gate.py): the gate, the restricted line and the
+    # signing key in root-owned places
+    assert scripts[0].startswith("LLMCF_KEYLINE=") and "root-board=" in scripts[0], "the key installation too"
+    assert {s.split()[0] for s in scripts} >= {"mktemp", "head", "sha256sum", "mv", "[", "cd", "cat", "tail",
                                                "rm", "if"}
 
 
@@ -713,35 +726,21 @@ def test_the_commands_do_their_job_under_any_login_shell(login_shell, manager, b
     by_tool = {}
     for command in wire:
         by_tool.setdefault(shlex.split(command)[2].split()[0], []).append(command)
-    # the key installation (llmcf's gate and the key's restricted line): the line is there once, also when it runs
-    # twice; the gate program itself goes on stdin (none here: an empty gate still is one plain file)
-    from orchestrator.remote import gate
-    install = next(c for c in wire if "authorized_keys" in c)
-    for _ in range(2):
-        done = on_board(install)
-        assert done.returncode == 0 and "gate=installed" in done.stdout, done.stdout + done.stderr
-    keys = (home / ".ssh" / "authorized_keys").read_text().splitlines()
-    public = ssh_trust.client_key(manager._state_dir())[1]
-    if os.name == "nt":
-        # A Windows test folder (C:/...) is no POSIX path, which the key line refuses on purpose (a board is POSIX):
-        # check the line's form with the gate path the shell wrote, and that the path is the home's gate file.
-        (line,) = keys
-        found = re.match(r'command="/bin/sh ([^"]+)",', line)
-        assert found and found.group(1).endswith("/" + gate.GATE_REL), line
-        options = f'command="/bin/sh {found.group(1)}",' + ",".join(gate.KEY_OPTIONS)
-        assert line == f"{options} {public}"
-    else:
-        gate_file = (home / gate.GATE_REL).as_posix()
-        assert keys == [gate.restricted_line(public, gate_file)]
+    # the key installation is pairing's root step (root-board): it changes root-owned files (sshd's configuration,
+    # /etc/ssh/llmcf_keys) with sudo, so it never runs on this computer; tests/test_board_signing.py runs it against a
+    # test folder with stand-ins for sudo and sshd
+    install = next(c for c in wire if "root-board=" in c)
+    assert "authorized_keys" in install and "sudo -n" in install
     # the resume's check of what arrived, and the check of the whole upload
     (prefix,) = by_tool["head"]
     assert on_board(prefix).stdout.split()[0] == hashlib.sha256(data[:1_300_000]).hexdigest()
-    assert on_board(by_tool["sha256sum"][-1]).stdout.split()[0] == hashlib.sha256(data).hexdigest()
+    whole = [c for c in by_tool["sha256sum"] if ".sig" not in c]   # the package's own check (not its signature's)
+    assert on_board(whole[-1]).stdout.split()[0] == hashlib.sha256(data).hexdigest()
     assert on_board(by_tool["["][0]).returncode == 0
     assert on_board(by_tool["mv"][0]).returncode == 0 and (folder / "deploy_model_1.zip").read_bytes() == data
     # the installation that runs on its own: started once, followed to its end
     with zipfile.ZipFile(folder / "deploy_model_1.zip", "w") as z:
-        z.writestr("deploy.sh", "echo run >> ../runs\necho installed-on-the-board\n")
+        z.writestr("deploy.sh", 'echo run >> "$LLMCF_UPLOAD_DIR/../runs"\necho installed-on-the-board\n')
     (start,) = by_tool["cd"]
     if login_shell == "not-posix":
         refused = subprocess.run(shell(shlex.split(start)[2].replace(TARGET, local)), capture_output=True, text=True,
