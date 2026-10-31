@@ -231,8 +231,10 @@ Rust geschrieben; andere Teile wechseln nur, wenn eine Messung einen Gewinn zeig
     Warum: Viele Fenster sind noch nur englisch.
   - **Ein QEMU-Smoke-Test von Cross-Builds in der CI**, nie auf deinem Rechner. Warum: Ein kaputter Cross-Build fällt
     auf, bevor er ein Board erreicht.
-  - **Ein Schritt „alle Dateien bearbeiten“ im Modul-Assistenten**, mit Diff und erneuten Prüfungen. Warum:
-    Herstellerpfade und Flags lassen sich fertigstellen, bevor das Modul gespeichert wird.
+  - **Ein Schritt „alle Dateien bearbeiten“ im Modul-Assistenten**, mit Diff und erneuten Prüfungen: die
+    Stufen-Module, `target.yml` (mit ihren `stages:`-Plätzen) und das Dockerfile. Der Stufen-Runner ist nie dabei: Er
+    ist die Laufzeit-Schicht des Frameworks, für jedes Target dieselbe. Warum: Herstellerpfade und Flags lassen sich
+    fertigstellen, bevor das Modul gespeichert wird.
   - **Ein Verlauf der Heilungs-Korrekturen** mit ihrer Erfolgsquote in Mojo; eine Korrektur wird nie von selbst
     angewendet. Warum: Er zeigt, welche Korrekturen wirklich helfen.
   - **Ein Feld für den Zweck** (Chat, Code, Zusammenfassungen, Embeddings) für die Quantisierungsempfehlung. Warum:
