@@ -305,7 +305,45 @@ def test_the_windows_installer_sets_up_podman_and_docker_desktop_only_with_rootf
 
 
 def test_the_windows_installer_passes_its_flags_and_stops_on_an_unknown_engine():
+    """The flags are read with the other flags (--ditto) and an unknown --engine stops before anything is installed,
+    as in install.sh (review: it stopped only at the engine step, after Python, the files and the start menu)."""
+    from conftest import REPO_ROOT
+    text = (REPO_ROOT / "install.bat").read_text(encoding="utf-8")
+    before = text[:text.index('Write-Host "[1/5]')]
+    assert '$InstallArg -eq "--rootful"' in before and '$InstallArg -like "--engine=*"' in before
+    assert "Unbekannter Wert fuer --engine" in before
     step = _windows_engine_step()
-    assert '$InstallArg -eq "--rootful"' in step and '$InstallArg -like "--engine=*"' in step
-    assert "Unbekannter Wert fuer --engine" in step
+    assert "Unbekannter Wert fuer --engine" not in step and "$Rootful" in step
     assert all(ord(c) < 128 for c in step), "the PowerShell part stays ASCII like the rest of install.bat"
+
+
+@POSIX_SOCKETS
+class TestRootlessDockerWithoutARuntimeVariable:
+    """Review: without XDG_RUNTIME_DIR (a start through sudo -u, cron or a service) the person's Podman socket was
+    still found under /run/user/<uid>, but the person's rootless Docker was not, so a Docker daemon that runs as root
+    won although a rootless Docker ran."""
+
+    def test_the_persons_rootless_docker_is_found_under_the_runtime_root(self, short_dir, monkeypatch):
+        monkeypatch.setattr(docker_engine, "USER_RUNTIME_ROOT", str(short_dir / "users"))
+        rootless = listening(short_dir / "users" / "1000" / "docker.sock")
+        rootful = listening(short_dir / "docker.sock")
+        env = {}
+        choice = ensure_docker_host(env, uid=1000, docker_sockets=[str(short_dir / "docker.sock")])
+        assert choice.set_here and env["DOCKER_HOST"] == f"unix://{short_dir}/users/1000/docker.sock"
+        assert choice.reason == docker_engine.ROOTLESS_DOCKER_CHOSEN
+        rootless.close(), rootful.close()
+
+    def test_xdg_runtime_dir_still_comes_first(self, short_dir, monkeypatch):
+        monkeypatch.setattr(docker_engine, "USER_RUNTIME_ROOT", str(short_dir / "users"))
+        mine = listening(short_dir / "run" / "docker.sock")
+        other = listening(short_dir / "users" / "1000" / "docker.sock")
+        env = {"XDG_RUNTIME_DIR": str(short_dir / "run")}
+        ensure_docker_host(env, uid=1000, docker_sockets=[str(short_dir / "none.sock")])
+        assert env["DOCKER_HOST"] == f"unix://{short_dir}/run/docker.sock"
+        mine.close(), other.close()
+
+    def test_the_podman_socket_follows_the_same_root(self, short_dir, monkeypatch):
+        monkeypatch.setattr(docker_engine, "USER_RUNTIME_ROOT", str(short_dir / "users"))
+        podman = listening(short_dir / "users" / "1000" / "podman" / "podman.sock")
+        assert docker_engine.podman_socket({}, 1000) == short_dir / "users" / "1000" / "podman" / "podman.sock"
+        podman.close()
