@@ -164,7 +164,7 @@ The installer:
      their own system, Rocky Linux, AlmaLinux, Oracle Linux and the other RHEL rebuilds from Docker's RHEL repository
      (`download.docker.com/linux/rhel/<RHEL version>`); the key is trusted only with the fingerprint Docker's guide
      publishes (`060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35`) and dnf checks the signature of every package.
-     Docker CE is the standard because the framework needs BuildKit (for example for Hailo). Podman is only the
+     With `--rootful` or `--engine=docker`, Docker CE comes first here (BuildKit, for example for Hailo). Podman is the
      fallback: when Docker publishes nothing for this architecture or release, the repository cannot be reached, the
      key does not match or you say no to what dnf would remove, `podman-docker` (Podman
      with the `docker` command) comes from the distribution's own sources. There is no `docker` group then; the

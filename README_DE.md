@@ -168,8 +168,8 @@ Der Installer:
      rpm-Repository für ihr eigenes System, Rocky Linux, AlmaLinux, Oracle Linux und die übrigen RHEL-Nachbauten aus
      Dockers RHEL-Repository (`download.docker.com/linux/rhel/<RHEL-Version>`); dem Schlüssel wird nur mit dem
      Fingerabdruck aus Dockers Anleitung vertraut (`060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35`), und dnf
-     prüft die Signatur jedes Pakets. Docker CE ist der Standard, denn das Framework braucht BuildKit (etwa für
-     Hailo). Podman ist nur der Ersatzweg: Veröffentlicht Docker für diese Architektur oder Version nichts, ist das
+     prüft die Signatur jedes Pakets. Mit `--rootful` oder `--engine=docker` kommt hier zuerst Docker CE (BuildKit, etwa für
+     Hailo). Podman ist der Ersatzweg: Veröffentlicht Docker für diese Architektur oder Version nichts, ist das
      Repository nicht erreichbar, passt der Schlüssel nicht oder sagst du Nein zu dem, was dnf entfernen würde, kommt
      `podman-docker` (Podman mit dem Befehl `docker`) aus den Paketquellen der Distribution. Dann gibt es keine
      Gruppe `docker`; der Installer schaltet Podmans Docker-kompatible Schnittstelle für deinen Benutzer ein
