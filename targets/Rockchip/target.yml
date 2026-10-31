@@ -99,17 +99,25 @@ docker:
     disk_gb: 20
     cpu_cores: 4
 
-# The build (DECISIONS U9): modules/build.sh, the stage runner, runs the four stage modules in this order inside the
-# image, for every build; each module's header says which image it runs in, which system the result is for and what
-# its stage does. This block describes the folder; nothing reads it.
+# The stage order of every build (the framework's stage runner, orchestrator/Core/runtime_layer.py stage_order): the
+# four stages source -> config -> convert -> target, plus the target's own modules in three fixed slots. A name N in a
+# slot runs modules/N_module.sh (lower case letters, digits and _; not one of the four stages, not benchmark). A
+# target's own modules/build.sh is never run: the framework's runner is the runner of every build.
+stages:
+  before_convert: []
+  between_convert_and_target: []
+  after_target: []
+
+# The build (DECISIONS U9): the framework's stage runner runs the four stage modules in this order inside the image,
+# for every build (the stages: block above); each module's header says which image it runs in, which system the
+# result is for and what its stage does. This block describes the folder; nothing reads it.
 modules:
-  runner: "modules/build.sh"
   source: "modules/source_module.sh"
   config: "modules/config_module.sh"
   convert: "modules/convert_module.sh"
   target: "modules/target_module.sh"
-  # Optional hook between convert and target (roadmap: rotation such as SpinQuant or QuaRot): runs only when the
-  # target has this file; none is shipped.
+  # Optional hook between convert and target (roadmap: rotation such as SpinQuant or QuaRot): runs when the
+  # stages: block names rotate; none is shipped.
   rotate: "modules/rotate_module.sh"
   # The convert stage's format helpers
   helpers: ["modules/rkllm_module.sh", "modules/rknn_module.sh"]

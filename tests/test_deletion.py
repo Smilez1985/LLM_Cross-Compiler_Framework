@@ -161,7 +161,6 @@ DELETION_SITES = {
     ("orchestrator/Core/builder.py", "BuildEngine._discard_staged"): STAGING,
     ("orchestrator/Core/builder.py", "BuildEngine._extract_artifacts"): STAGING,
     ("orchestrator/Core/builder.py", "BuildEngine._forget_end_record"): STAGING,   # a stale build.end in its work folder
-    ("orchestrator/Core/build_end.py", "new_end_key"): STAGING,   # the stale one-run key of an earlier run
     ("orchestrator/Core/builder.py", "BuildEngine._publish_artifacts"): STAGING,
     ("orchestrator/Core/builder.py", "BuildEngine._save_image_for_scan"): STAGING,   # the scan's temporary archive
     ("orchestrator/Core/builder.py", "BuildEngine._stage_dataset"): STAGING,

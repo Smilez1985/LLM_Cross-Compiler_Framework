@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import posix_shell
+from conftest import REPO_ROOT, posix_shell
 from test_build_stages import PROBE_FIXTURES, Image, by_hand, needs_bash, plan_of, stage_lines
 
 STAGES = "build-cache/work/stages/build"
@@ -1490,7 +1490,9 @@ def generated_config(tmp_path, profile_text, architecture="aarch64", cpu_flags="
     profile.write_text(profile_text)
     env = {"PATH": os.pathsep.join([str(toolchain), str(buildtools), "/usr/bin", "/bin"]), "HOME": str(tmp_path),
            "BUILD_CACHE_DIR": str(tmp_path / "work"), "LLAMA_CPP_PATH": str(llama), "TARGET_FORMAT": "gguf",
-           "JOB_TYPE": "build", "STUB_TOOLS_LOG": str(tmp_path / "tools.log"), **env_values}
+           "JOB_TYPE": "build", "STUB_TOOLS_LOG": str(tmp_path / "tools.log"),
+           # a module started by hand finds the framework's runner (in an image: /llmcf)
+           "LLMCF_LAYER": str(REPO_ROOT / "orchestrator" / "runtime_layer"), **env_values}
     result = subprocess.run([posix_shell("bash"), str(target / "modules" / "config_module.sh"), "--hardware-config",
                              str(profile)], env=env, capture_output=True, text=True, timeout=60,
                             stdin=subprocess.DEVNULL)

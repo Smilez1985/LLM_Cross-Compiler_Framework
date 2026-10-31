@@ -556,7 +556,13 @@ class TestBuildSandbox:
         assert kwargs["network_mode"] == "none" and kwargs["cap_drop"] == ["ALL"]
         assert kwargs["read_only"] is True and "no-new-privileges:true" in kwargs["security_opt"]
         assert env["HF_HUB_OFFLINE"] == "1" and env["BUILD_SCRATCH_DIR"] == "/build-cache/work"
-        assert vols == {str(build_temp / "work"): {"bind": "/build-cache/work", "mode": "rw"}}
+        # the work folder, and (since the runtime layer is wired into every build) the framework's layer read-only at
+        # /llmcf and the job's end folder, which only the runner may write; the host sets entrypoint and command
+        from orchestrator.Core import runtime_layer
+        assert vols == {str(build_temp / "work"): {"bind": "/build-cache/work", "mode": "rw"},
+                        str(runtime_layer.layer_dir(engine.cache_dir)): {"bind": "/llmcf", "mode": "ro"},
+                        str(build_temp / "end-build"): {"bind": "/llmcf-end", "mode": "rw"}}
+        assert kwargs["entrypoint"] == runtime_layer.ENTRYPOINT and kwargs["command"] == ["--job", "build"]
         assert (build_temp / "work" / "tmp").is_dir()
 
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX ownership")
@@ -571,7 +577,10 @@ class TestBuildSandbox:
     def test_sandbox_can_be_disabled(self, engine, tmp_path):
         engine.config.set("build_sandbox", False)
         kwargs, env, _ = engine._sandbox(make_config(), tmp_path / "builds" / "b1")
-        assert kwargs == {"user": "0:0"} and "HF_HUB_OFFLINE" not in env
+        # the legacy mode keeps the image's entrypoint (it maps PUID/PGID and drops root), and the framework's runner on
+        # the layer's own sh still runs the stages (a target's own build.sh never runs)
+        assert kwargs == {"user": "0:0", "command": ["/llmcf/bin/busybox", "sh", "/llmcf/runner.sh", "--job", "build"]}
+        assert "HF_HUB_OFFLINE" not in env
 
     def test_memory_limit_is_optional(self, engine, tmp_path):
         assert "mem_limit" not in engine._sandbox(make_config(), tmp_path / "a")[0]

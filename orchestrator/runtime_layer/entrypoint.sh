@@ -1,3 +1,4 @@
+# shellcheck shell=sh
 # entrypoint.sh - the entrypoint of every build container (part of the runtime layer; tools.sh says what that is)
 #
 # The host sets it as the container's entrypoint itself (/llmcf/bin/busybox sh /llmcf/entrypoint.sh) and starts the

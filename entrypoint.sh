@@ -149,36 +149,18 @@ initialize_container() {
     log_success "Ready."
 }
 
-# The build sandbox (the BuildEngine sets STAGE_ISOLATION=user): the container starts as root with only CAP_SETUID and
-# CAP_SETGID, a read-only image and no-new-privileges, so nothing here may change users, ownership or files. The stage
-# runner becomes the user STAGE_RUNNER_IDS names (the person's uid:gid; 0:0 under a rootless engine, where root in the
-# container is the person) and keeps exactly those two rights as ambient capabilities, which it needs to start each
-# stage module under the stage account (modules/stage_user.sh). Its supplementary groups are the container's own
-# (a GPU's render group), without root's group. It checks its rights itself before the first stage and refuses the
-# build when they are not exactly these.
+# The build sandbox (the BuildEngine sets STAGE_ISOLATION=user). The host no longer starts a build through this file:
+# it mounts the framework's runtime layer read-only at /llmcf and sets the container's entrypoint to the layer's own
+# (/llmcf/bin/busybox sh /llmcf/entrypoint.sh), which makes the stage runner the person's user with only CAP_SETUID
+# and CAP_SETGID through the layer's own static setpriv and runs the layer's runner.sh. A container that still reaches
+# this image entrypoint with STAGE_ISOLATION=user (started by hand, or an older framework) is handed to the layer's
+# entrypoint when the layer is mounted, and refused otherwise: the image's own setpriv and bash are never the switch.
 enter_stage_runner() {
-    local ids="${STAGE_RUNNER_IDS:-}" uid gid groups
-    if [[ ! "$ids" =~ ^[0-9]{1,10}:[0-9]{1,10}$ ]]; then
-        log_error "The build sandbox gave no valid runner ids (STAGE_RUNNER_IDS uid:gid); nothing was run."
-        exit 85
+    if [ -f /llmcf/entrypoint.sh ] && [ -x /llmcf/bin/busybox ]; then
+        exec /llmcf/bin/busybox sh /llmcf/entrypoint.sh "$@"
     fi
-    uid="${ids%%:*}"
-    gid="${ids##*:}"
-    export LLM_ENTRYPOINT_INITIALIZED=1
-    if [ "$uid" = "0" ]; then
-        exec "$0" "$@"
-    fi
-    if ! command -v setpriv >/dev/null 2>&1; then
-        log_error "The build image has no setpriv (util-linux), so the stage runner cannot be started; nothing was run."
-        exit 84
-    fi
-    groups="$(id -G | tr ' ' '\n' | grep -vx 0 | paste -sd, - || true)"
-    local group_args=(--clear-groups)
-    if [ -n "$groups" ]; then
-        group_args=(--groups "$groups")
-    fi
-    exec setpriv --reuid="$uid" --regid="$gid" "${group_args[@]}" \
-        --inh-caps=-all,+setuid,+setgid --ambient-caps=-all,+setuid,+setgid -- "$0" "$@"
+    log_error "The build sandbox needs the framework's runtime layer (mounted at /llmcf by the host); nothing was run."
+    exit 90
 }
 
 verify_environment() {
@@ -197,10 +179,20 @@ verify_environment() {
 # RUNTIME MODES
 # ============================================================================
 
-# Both modes run the canonical build structure (DECISIONS U9): /app/modules/build.sh, the stage runner, runs the
-# stages source -> config -> convert -> target of the target's modules; a stage that finished before with the same
-# inputs is resumed, not run again (markers in $BUILD_SCRATCH_DIR/stages, see build.sh).
+# Both modes run the canonical build structure (DECISIONS U9): the framework's stage runner (the runtime layer's
+# runner.sh at /llmcf when the host mounted it, else the target's deprecated modules/build.sh, which hands over to the
+# same runner) runs the stages source -> config -> convert -> target of the target's modules in the order of its
+# target.yml; a stage that finished before with the same inputs is resumed, not run again (markers in
+# $BUILD_SCRATCH_DIR/stages, see the header of runner.sh).
+if [ -z "${STAGE_RUNNER_SCRIPT:-}" ] && [ -f /llmcf/runner.sh ]; then
+    STAGE_RUNNER_SCRIPT=/llmcf/runner.sh
+fi
 readonly STAGE_RUNNER_SCRIPT="${STAGE_RUNNER_SCRIPT:-/app/modules/build.sh}"
+case "$STAGE_RUNNER_SCRIPT" in
+    */modules/build.sh) LLMCF_MODULES_DIR="${LLMCF_MODULES_DIR:-$(dirname "$STAGE_RUNNER_SCRIPT")}" ;;
+    *) LLMCF_MODULES_DIR="${LLMCF_MODULES_DIR:-/app/modules}" ;;
+esac
+export LLMCF_MODULES_DIR
 
 run_pipeline() {
     local input_path="${1:-}"
@@ -240,7 +232,7 @@ run_module() {
     local module_name="$1"
     shift
     local module_path
-    module_path="$(dirname "$STAGE_RUNNER_SCRIPT")/${module_name}_module.sh"
+    module_path="$LLMCF_MODULES_DIR/${module_name}_module.sh"
     if [[ ! -f "$module_path" ]]; then
         log_error "Module not found: $module_name"
         exit 1

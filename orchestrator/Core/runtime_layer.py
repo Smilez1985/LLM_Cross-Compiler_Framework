@@ -132,6 +132,9 @@ FOUR_STAGES = ("source", "config", "convert", "target")
 SLOTS = ("before_convert", "between_convert_and_target", "after_target")
 MODULE_NAME = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 OWN_RUNNER_FILES = ("build.sh", "stage_user.sh")
+# Module names a slot may never take: benchmark_module.sh measures the build host's CPU, never a build's step (a model
+# for a board is measured on the board), and the runner's own words
+RESERVED_MODULES = ("benchmark",)
 
 
 class ToolboxMissing(RuntimeError):
@@ -622,6 +625,10 @@ def stage_order(target_dir: Path, job: str = "build") -> Tuple[List[str], List[s
                 if not MODULE_NAME.fullmatch(name) or name in FOUR_STAGES:
                     problems.append(f"target.yml: '{name}' in the slot {key} is not a valid module name (lower case "
                                     "letters, digits and _, not one of the four stages).")
+                elif name in RESERVED_MODULES:
+                    problems.append(f"target.yml: '{name}' in the slot {key} is not allowed: benchmark_module.sh never "
+                                    "runs in a build (it would measure this build computer; a model for a board is "
+                                    "measured on the board).")
                 elif not (modules / f"{name}_module.sh").is_file():
                     problems.append(f"target.yml: the slot {key} names {name}, but modules/{name}_module.sh is "
                                     "missing.")
@@ -656,7 +663,7 @@ def own_runner_note(target_dir: Path) -> Optional[str]:
 
 __all__ = ["BUILD_SOURCES", "BUILDER_BASE", "CLEANUP_ENTRYPOINT", "DEFAULT_TOOLBOX_WAY", "END_MOUNT",
            "END_PROTECTED", "END_UNPROTECTED", "ENTRYPOINT", "FOUR_STAGES", "LAYER_MOUNT", "LayerCheck",
-           "LayerRefused", "MODULES_IN_IMAGE", "OFFLINE_REFUSAL", "OWN_RUNNER_NOTE", "PREBUILT", "RESTORE_STEP", "RESTORE_WAY",
+           "LayerRefused", "MODULES_IN_IMAGE", "OFFLINE_REFUSAL", "OWN_RUNNER_NOTE", "PREBUILT", "RESERVED_MODULES", "RESTORE_STEP", "RESTORE_WAY",
            "SCRIPTS", "SHIPPED_DIR", "SLOTS", "TOOLBOX_WAYS", "TOOLS", "ToolboxMissing", "VERDICTS", "VERDICT_TEXT",
            "assemble", "builder_context", "end_folder", "end_folder_state", "ensure_toolbox", "extract_prebuilt",
            "is_static_elf", "layer_check", "layer_dir", "layer_volumes", "manifest_text", "mounts_keep_owners",

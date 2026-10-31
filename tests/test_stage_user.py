@@ -1,15 +1,21 @@
 """The stage modules run under their own user (the stage account), and the stage runner keeps only the rights that
-switch needs (targets/*/modules/build.sh with modules/stage_user.sh, entrypoint.sh, utils/sandbox.py).
+switch needs (the framework's runtime layer: orchestrator/runtime_layer/runner.sh with its stage_user.sh, entrypoint.sh,
+utils/sandbox.py).
 
-The end record is sealed with a one-run key that only the stage runner holds. A module that ran as the same user as
-the runner could read that key from the runner's memory (/proc/<runner>/mem) wherever the host kernel allows it (Yama
-ptrace_scope 0, or no Yama); dropped capabilities and seccomp do not stop it. Now every stage module is started through
-one helper that switches to the stage account (another uid and gid, no capabilities), so the kernel refuses that read
-whatever Yama says; the runner checks at its start that it has exactly the rights the switch needs and that a test
-child cannot read it, and refuses the build otherwise.
+A module that ran as the same user as the runner could read the runner's memory (/proc/<runner>/mem) wherever the host
+kernel allows it (Yama ptrace_scope 0, or no Yama); dropped capabilities and seccomp do not stop it. Every stage module
+is started through one helper that switches to the stage account (another uid and gid, no capabilities), so the kernel
+refuses that read whatever Yama says; the runner checks at its start that it has exactly the rights the switch needs
+and that a test child cannot read it, and refuses the build otherwise.
+
+Changed on purpose with the runtime layer: the runner and its helper are the framework's own (a target's build.sh and
+stage_user.sh are never run), and no key exists in the container (the end record lives in the runner's own end
+folder). The tests below run the layer's runner; those that pinned the target's runner and its key now pin that the
+target's runner is ignored and that the end folder stays the runner's.
 
 The real tests run the stage runner as an unprivileged user with exactly CAP_SETUID and CAP_SETGID (setpriv, as the
-entrypoint does in the container); they need root on Linux to hand out those two rights and are skipped elsewhere.
+layer's entrypoint does in the container); they need root on Linux to hand out those two rights and are skipped
+elsewhere.
 """
 
 import os
@@ -28,7 +34,8 @@ from test_review_build_engine import client, engine, make_engine  # noqa: F401 -
 
 from orchestrator.Core import build_end
 
-KEY = "0123456789abcdef0123456789abcdef"
+KEY = "0123456789abcdef0123456789abcdef"   # a marker the runner holds in its memory (its environment)
+LAYER = REPO_ROOT / "orchestrator" / "runtime_layer"
 RUNNER = 64020          # a made-up runner account for the tests (the container's runner is the person)
 STAGE = 64010           # the image's stage account (modules/stage_user.sh STAGE_UID/STAGE_GID)
 TARGETS = ("Rockchip", "_template")
@@ -56,7 +63,7 @@ def _can_hand_out_rights() -> str:
 WHY_NOT = _can_hand_out_rights()
 needs_rights = pytest.mark.skipif(bool(WHY_NOT), reason=WHY_NOT or "-")
 
-# A stage module that walks up its parents (the stage runner among them) and looks for the run's key in their
+# A stage module that walks up its parents (the stage runner among them) and looks for a marker the runner holds in its
 # memory. It writes "seen" or "refused" into the work folder.
 ATTACK = r'''#!/bin/bash
 /usr/bin/python3 - "$BUILD_SCRATCH_DIR/attack" <<'PY'
@@ -106,13 +113,28 @@ tamper() {  # every way a module could change, move or remove the runner's own f
 '''
 
 
+STAND_IN_BUSYBOX = """#!/bin/sh
+a="$1"; shift
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+case "$a" in sh) exec /bin/sh "$@" ;; *) exec "$a" "$@" ;; esac
+"""
+
+
 class RunnerBox:
-    """A stage runner of a target (its real build.sh and stage_user.sh) with stub stage modules, in folders the
-    unprivileged runner account owns, and the run's key in the job folder."""
+    """The framework's stage runner (the runtime layer's runner.sh with its stage_user.sh, bin/ with this computer's
+    setpriv and a busybox stand-in) over a target's stage modules with stub modules, in folders the unprivileged runner
+    account owns, and the runner's own end folder."""
 
     def __init__(self, target: str, modules: Path = None):
         self.root = Path(tempfile.mkdtemp(prefix="llmcf-stage-user-", dir="/tmp"))  # nosec B108 - test folder
         os.chmod(self.root, 0o755)
+        self.layer = self.root / "llmcf"
+        shutil.copytree(LAYER, self.layer, ignore=shutil.ignore_patterns("toolbox", "MANIFEST.sha256"))
+        (self.layer / "bin").mkdir()
+        (self.layer / "bin" / "busybox").write_text(STAND_IN_BUSYBOX, encoding="utf-8")
+        shutil.copy2(shutil.which("setpriv") or "/usr/bin/setpriv", self.layer / "bin" / "setpriv")
+        for path in [self.layer, *self.layer.rglob("*")]:
+            os.chmod(path, 0o755)
         self.app = self.root / "app"
         shutil.copytree(modules or REPO_ROOT / "targets" / target / "modules", self.app / "modules")
         shutil.copytree(REPO_ROOT / "targets" / target / "scripts", self.app / "scripts")
@@ -123,11 +145,11 @@ class RunnerBox:
             folder.mkdir(parents=True)
         self.stages = self.work / "stages" / "build"
         self.stages.mkdir(parents=True)
-        key = self.stages / build_end.END_KEY
-        key.write_text(KEY + "\n", encoding="ascii")
-        for path in [self.cache, *self.cache.rglob("*")]:
+        self.end = self.root / "end-build"
+        self.end.mkdir()
+        for path in [self.cache, *self.cache.rglob("*"), self.end]:
             os.chown(path, RUNNER, RUNNER)
-        os.chmod(key, 0o600)
+        os.chmod(self.end, 0o755)
         for path in self.app.rglob("*"):
             os.chmod(path, 0o755)
 
@@ -138,17 +160,22 @@ class RunnerBox:
 
     def run(self, *args: str, caps: str = "+setuid,+setgid", isolation: str = "user",
             **extra: str) -> subprocess.CompletedProcess:
+        """The runner as the layer's entrypoint leaves it: the runner account with exactly `caps` (ambient) and
+        no-new-privileges, on the layer's sh."""
         env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "BUILD_CACHE_DIR": str(self.cache),
                "BUILD_SCRATCH_DIR": str(self.work), "TMPDIR": str(self.work / "tmp"),
-               "HOME": str(self.work / "home"), "JOB_TYPE": "build", "STAGE_ISOLATION": isolation, **extra}
+               "HOME": str(self.work / "home"), "JOB_TYPE": "build", "STAGE_ISOLATION": isolation,
+               "LLMCF_MODULES_DIR": str(self.app / "modules"), "LLMCF_END_DIR": str(self.end),
+               "LLMCF_TARGET_LABEL": KEY, **extra}
         bounding = "-all," + caps if caps else "-all"
         return subprocess.run(["setpriv", f"--bounding-set={bounding}", "--reuid", str(RUNNER), "--regid",
                                str(RUNNER), "--clear-groups", f"--inh-caps={bounding}", f"--ambient-caps={bounding}",
-                               "--no-new-privs", "--", "bash", str(self.app / "modules" / "build.sh"), *args],
+                               "--no-new-privs", "--", str(self.layer / "bin" / "busybox"), "sh",
+                               str(self.layer / "runner.sh"), *args],
                               env=env, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
 
     def record(self):
-        return build_end.read_end_record(self.stages / build_end.END_RECORD, key=KEY)
+        return build_end.read_end_record(self.end / build_end.END_RECORD)
 
     def remove(self) -> None:
         shutil.rmtree(self.root, ignore_errors=True)
@@ -161,20 +188,21 @@ def box(request):
     built.remove()
 
 
-# --- the regression: a module cannot read the runner's key ---------------------------------------------------------
+# --- the regression: a module cannot read the runner's memory ------------------------------------------------------
 
 @needs_rights
-def test_a_stage_module_cannot_read_the_runners_key_from_its_memory(box):
-    """Before, the module ran as the runner's own user and found the key in the runner's memory (/proc/<pid>/mem)
-    on a host without Yama; now it runs as the stage account and the kernel refuses the read."""
+def test_a_stage_module_cannot_read_the_runners_memory(box):
+    """Before, the module ran as the runner's own user and found the runner's secret (then: the end record's key) in
+    the runner's memory (/proc/<pid>/mem) on a host without Yama; now it runs as the stage account and the kernel
+    refuses the read. The runner's record lands in its own end folder, protected."""
     box.module("source", ATTACK)
 
     result = box.run("--to", "source")
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (box.work / "attack").read_text().strip() == "refused", "a stage module read the runner's key"
+    assert (box.work / "attack").read_text().strip() == "refused", "a stage module read the runner's memory"
     record = box.record()
-    assert record is not None and record.done and record.sealed
+    assert record is not None and record.done and record.end == "protected"
 
 
 @needs_rights
@@ -240,13 +268,14 @@ def _status(eff="00000000000000c0", prm="00000000000000c0", bnd="00000000000000c
 def _rights_problem(tmp_path, text: str, target: str = "Rockchip") -> str:
     status = tmp_path / "status"
     status.write_text(text, encoding="ascii")
-    helper = REPO_ROOT / "targets" / target / "modules" / "stage_user.sh"
+    # the framework's helper (the runtime layer's), which the target's deprecated stage_user.sh only sources
+    helper = LAYER / "stage_user.sh" if target == "layer" else REPO_ROOT / "targets" / target / "modules" / "stage_user.sh"
     return subprocess.run([posix_shell("bash"), "-c", 'source "$1"; stage_rights_problem "$2"', "_", str(helper),
                            str(status)], capture_output=True, text=True, timeout=60, check=True).stdout.strip()
 
 
 @needs_bash
-@pytest.mark.parametrize("target", TARGETS)
+@pytest.mark.parametrize("target", TARGETS + ("layer",))
 def test_exactly_the_two_rights_pass_the_preflight(tmp_path, target):
     assert _rights_problem(tmp_path, _status(), target) == ""
     # a runner that stays root (a rootless engine): no ambient or inheritable set, the same two rights
@@ -271,36 +300,42 @@ def test_missing_or_extra_rights_refuse_the_build(tmp_path, fields, reason, name
 
 @needs_bash
 def test_the_test_child_must_be_the_stage_account_without_rights_and_blind_to_the_runner():
-    helper = REPO_ROOT / "targets" / "Rockchip" / "modules" / "stage_user.sh"
+    helper = LAYER / "stage_user.sh"
 
     def verdict(lines):
         return subprocess.run([posix_shell("bash"), "-c", 'source "$1"; stage_switch_problem "$2"', "_", str(helper),
                                "\n".join(lines)], capture_output=True, text=True, timeout=60).stdout.split(" ", 1)[0]
-    good = ["64010", "64010", "0" * 16, "0" * 16, "0" * 16, "0" * 16, "mem-refused", "environ-refused"]
+    # the layer's test child also answers whether it could write the end folder (end-refused: protected)
+    good = ["64010", "64010", "0" * 16, "0" * 16, "0" * 16, "0" * 16, "mem-refused", "environ-refused", "end-refused"]
     assert verdict(good) == ""
     assert verdict(["1000"] + good[1:]) == "switch_failed"
     assert verdict([]) == "switch_failed"
     assert verdict(good[:2] + ["00000000000000c0"] + good[3:]) == "stage_has_rights"
-    assert verdict(good[:6] + ["mem-open", "environ-refused"]) == "reads_runner"
-    assert verdict(good[:7] + ["environ-open"]) == "reads_runner"
+    assert verdict(good[:6] + ["mem-open", "environ-refused", "end-refused"]) == "reads_runner"
+    assert verdict(good[:7] + ["environ-open", "end-refused"]) == "reads_runner"
+    assert verdict(good + ["read-fail input-model"]) == "inputs"
+    assert verdict(good + ["write-fail home"]) == "folders"
 
 
 def test_both_targets_carry_the_same_stage_account_helper_and_the_images_create_its_account():
+    """Changed on purpose (the runtime layer): the helper is the framework's (orchestrator/runtime_layer/
+    stage_user.sh); both targets keep only the same deprecated stage_user.sh that sources it. Its account, its fixed
+    vocabulary of refusals and the one way a module starts are the layer's; the images still create the account."""
     rockchip = (REPO_ROOT / "targets" / "Rockchip" / "modules" / "stage_user.sh").read_text(encoding="utf-8")
     template = (REPO_ROOT / "targets" / "_template" / "modules" / "stage_user.sh").read_text(encoding="utf-8")
-    assert rockchip == template
+    assert rockchip == template and "DEPRECATED" in rockchip and "run_as_stage()" not in rockchip
+    helper = (LAYER / "stage_user.sh").read_text(encoding="utf-8")
     from orchestrator.utils.sandbox import STAGE_ACCOUNT
-    assert f"STAGE_UID={STAGE_ACCOUNT[0]}" in rockchip and f"STAGE_GID={STAGE_ACCOUNT[1]}" in rockchip
+    assert f"STAGE_UID={STAGE_ACCOUNT[0]}" in helper and f"STAGE_GID={STAGE_ACCOUNT[1]}" in helper
     for name, code in build_end.STAGE_USER_EXIT.items():
-        assert f"    [{name}]={code}\n" in rockchip
+        assert f"        {name}) echo {code} ;;\n" in helper
     for dockerfile in ("targets/Rockchip/dockerfile", "targets/_template/Dockerfile", "targets/_template/Dockerfile.gpu"):
         text = (REPO_ROOT / dockerfile).read_text(encoding="utf-8")
         assert f"groupadd -g {STAGE_ACCOUNT[1]} llmstage" in text and f"-u {STAGE_ACCOUNT[0]} -g llmstage" in text
         assert "command -v setpriv" in text
-    for runner in ("targets/Rockchip/modules/build.sh", "targets/_template/modules/build.sh"):
-        text = (REPO_ROOT / runner).read_text(encoding="utf-8")
-        assert 'run_as_stage bash "$MODULES_DIR/${name}_module.sh"' in text   # the one way a module starts
-        assert text.count('_module.sh" ||') == 1
+    runner = (LAYER / "runner.sh").read_text(encoding="utf-8")
+    assert "run_as_stage " in runner and runner.count("_module.sh\"") >= 1
+    assert "run_module \"$name\" || rc=$?" in runner   # the one way a module starts
 
 
 # --- the host's check of the created container (docker / podman inspect) -------------------------------------------
@@ -406,12 +441,17 @@ def test_a_refusal_of_the_preflight_reads_as_its_plain_reason():
     assert build_end.stage_user_problem(build_end.EndRecord("failed", 81, "convert"), 81) is None
 
 
-def test_the_key_file_is_the_owners_only(tmp_path):
-    key = build_end.new_end_key(tmp_path / "work")
-    path = tmp_path / "work" / "stages" / "build" / build_end.END_KEY
-    assert key and path.read_text(encoding="ascii").strip() == key
+def test_the_end_folder_is_the_runners_only(tmp_path):
+    """Changed on purpose (the runtime layer): there is no key file any more; what the key protected, the end record,
+    lives in the runner's own end folder, which nobody else may write (the stage account shares the runner's group, so
+    the group gets no write either)."""
+    from orchestrator.Core import runtime_layer
+    folder = runtime_layer.end_folder(tmp_path / "builds" / "b1", "build")
+    runtime_layer.prepare_end_folder(folder, None)
+    assert folder.is_dir() and not list(folder.iterdir())
     if os.name != "nt":
-        assert path.stat().st_mode & 0o777 == 0o600
+        assert folder.stat().st_mode & 0o777 == 0o755
+    assert not (tmp_path / "builds" / "b1" / "work" / "stages" / "build" / build_end.END_KEY).exists()
 
 
 # --- rootless engines and the doctor -------------------------------------------------------------------------------
@@ -467,21 +507,36 @@ def test_the_doctor_tells_whether_the_stage_account_can_run_here(monkeypatch):
 
 @needs_rights
 def test_the_entrypoint_makes_the_runner_the_person_with_only_the_two_rights():
-    env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "STAGE_ISOLATION": "user",
-           "STAGE_RUNNER_IDS": f"{RUNNER}:{RUNNER}", "LLAMA_CPP_PATH": "/nonexistent"}
-    result = subprocess.run(["setpriv", "--bounding-set=-all,+setuid,+setgid", "--inh-caps=-all", "--no-new-privs",
-                             "--", "bash", str(REPO_ROOT / "entrypoint.sh"), "grep", "-E",
-                             "^(Uid|Gid|CapEff|CapPrm|CapAmb|NoNewPrivs):", "/proc/self/status"],
-                            env=env, capture_output=True, text=True, timeout=60, cwd="/")
-    assert result.returncode == 0, result.stdout + result.stderr
-    status = dict(line.split(":", 1) for line in result.stdout.splitlines() if ":" in line and line[0].isupper())
-    assert status["Uid"].split()[0] == str(RUNNER) and status["Gid"].split()[0] == str(RUNNER)
-    assert {status[k].strip() for k in ("CapEff", "CapPrm", "CapAmb")} == {"00000000000000c0"}
-    assert status["NoNewPrivs"].strip() == "1"
+    """The runtime layer's entrypoint (the host sets it as the container's entrypoint): started as root with only the
+    two rights and no-new-privileges, it starts the runner as STAGE_RUNNER_IDS with exactly those two rights. Changed
+    on purpose: before, the image's entrypoint.sh did this with the image's setpriv; now it only hands over to the
+    layer's entrypoint and refuses without the layer."""
+    built = RunnerBox("Rockchip")
+    try:
+        runner = built.layer / "runner.sh"
+        os.chmod(runner, 0o644)
+        runner.write_text('grep -E "^(Uid|Gid|CapEff|CapPrm|CapAmb|NoNewPrivs):" /proc/self/status\n', encoding="utf-8")
+        env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "STAGE_ISOLATION": "user",
+               "STAGE_RUNNER_IDS": f"{RUNNER}:{RUNNER}"}
+        start = ["setpriv", "--bounding-set=-all,+setuid,+setgid", "--inh-caps=-all", "--no-new-privs", "--",
+                 str(built.layer / "bin" / "busybox"), "sh", str(built.layer / "entrypoint.sh")]
+        result = subprocess.run(start, env=env, capture_output=True, text=True, timeout=60, cwd="/")
+        assert result.returncode == 0, result.stdout + result.stderr
+        status = dict(line.split(":", 1) for line in result.stdout.splitlines() if ":" in line and line[0].isupper())
+        assert status["Uid"].split()[0] == str(RUNNER) and status["Gid"].split()[0] == str(RUNNER)
+        assert {status[k].strip() for k in ("CapEff", "CapPrm", "CapAmb")} == {"00000000000000c0"}
+        assert status["NoNewPrivs"].strip() == "1"
 
-    bad = subprocess.run(["bash", str(REPO_ROOT / "entrypoint.sh"), "true"], capture_output=True, text=True,
-                         timeout=60, cwd="/", env=dict(env, STAGE_RUNNER_IDS="nobody"))
-    assert bad.returncode == build_end.STAGE_USER_EXIT["switch_failed"]
+        bad = subprocess.run(start, capture_output=True, text=True, timeout=60, cwd="/",
+                             env=dict(env, STAGE_RUNNER_IDS="nobody"))
+        assert bad.returncode == build_end.STAGE_USER_EXIT["switch_failed"]
+    finally:
+        built.remove()
+    # the image's own entrypoint never switches users itself any more: without the layer it refuses
+    alone = subprocess.run(["bash", str(REPO_ROOT / "entrypoint.sh"), "true"], capture_output=True, text=True,
+                           timeout=60, cwd="/", env=dict(env, LLAMA_CPP_PATH="/nonexistent"))
+    if not os.path.exists("/llmcf/entrypoint.sh"):
+        assert alone.returncode == build_end.STAGE_USER_EXIT["no_layer"], alone.stdout + alone.stderr
 
 
 @needs_rights
@@ -528,19 +583,30 @@ def test_a_folder_the_stage_account_cannot_write_refuses_the_build(box):
     assert "cannot write the folder home" in refused.stderr
 
 
-# --- a target whose stage runner predates the stage account (review cs-stage-user-v) -------------------------------
+# --- a target's own stage runner (review cs-stage-user-v, then the runtime layer) -----------------------------------
 #
-# The entrypoint hands the stage runner CAP_SETUID and CAP_SETGID as AMBIENT capabilities, which every program it
-# starts keeps. A runner that starts its modules without run_as_stage (a person's target made from the template before
-# 3.3.0, or a hand-written one) would therefore run them as itself WITH those two rights (a module could become any
-# uid in the container) and without the preflight, while the framework logged "stage_user". Such a runner is refused
-# before its container is made.
+# Before the runtime layer, the host ran the target's modules/build.sh as the runner, with CAP_SETUID and CAP_SETGID as
+# AMBIENT capabilities: a runner that started its modules without run_as_stage ran them as itself WITH those rights,
+# so such a runner was refused before its container was made. Changed on purpose: a target's own runner is never run
+# at all (the layer's runner is the runner of every build); the build goes on with a plain note, shown and audited
+# (runtime_layer.own_runner_note), and the old check of a runner's text stays as a description (runner_text_problem).
 
 OLD_RUNNER = '''#!/bin/bash
 set -euo pipefail
 MODULES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for name in source config convert target; do
     STAGE_NAME="$name" bash "$MODULES_DIR/${name}_module.sh"
+done
+'''
+# A runner of the shape the targets shipped before the runtime layer: it sources the helper, runs its preflight and
+# starts every module through run_as_stage
+MARKED_RUNNER = '''#!/bin/bash
+set -euo pipefail
+MODULES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$MODULES_DIR/stage_user.sh"
+stage_preflight "$BUILD_SCRATCH_DIR"
+for name in source config convert target; do
+    run_as_stage bash "$MODULES_DIR/${name}_module.sh" || exit $?
 done
 '''
 
@@ -555,45 +621,55 @@ def _target_with_runner(root: Path, runner: str, helper: bool = True) -> Path:
 
 
 @pytest.mark.parametrize("helper", [True, False])
-def test_a_runner_that_starts_its_modules_without_the_stage_account_is_refused(engine, tmp_path, helper):
+def test_a_targets_own_runner_is_ignored_with_a_note_and_never_run(engine, tmp_path, helper):
     from test_pipeline import make_config
-    from orchestrator.utils.sandbox import STAGE_RUNNER_OLD, stage_runner_problem
+    from orchestrator.Core import runtime_layer
+    from orchestrator.Core.builder import BuildProgress, BuildStatus
+    from orchestrator.utils.sandbox import STAGE_RUNNER_OLD, runner_text_problem, stage_runner_problem
     target = _target_with_runner(tmp_path / "old", OLD_RUNNER, helper)
-    assert stage_runner_problem(target / "modules") == STAGE_RUNNER_OLD
-    with pytest.raises(RuntimeError) as refused:
-        engine._sandbox(make_config(), tmp_path / "builds" / "b1", target_path=target)
-    assert str(refused.value) == STAGE_RUNNER_OLD
-    assert str(tmp_path) not in str(refused.value)   # no host path
-    # the legacy mode keeps such a target buildable: its modules run as the runner, which has no rights there
+    assert runner_text_problem(target / "modules") == STAGE_RUNNER_OLD   # the old verdict, a description only
+    with pytest.warns(DeprecationWarning):
+        assert stage_runner_problem(target / "modules") is None
+    progress = BuildProgress("b1", BuildStatus.BUILDING, "")
+    kwargs, env, _ = engine._sandbox(make_config(), tmp_path / "builds" / "b1", target_path=target, job="build",
+                                     progress=progress)
+    assert kwargs["entrypoint"] == runtime_layer.ENTRYPOINT and kwargs["command"] == ["--job", "build"]
+    assert env["LLMCF_STAGES"] == "source config convert target"
+    note = runtime_layer.OWN_RUNNER_NOTE.format(names="modules/build.sh" + (", modules/stage_user.sh" if helper
+                                                                             else ""))
+    assert note in progress.warnings and str(tmp_path) not in note   # no host path
+    # the legacy mode: the framework's runner too, on the layer's own sh
     engine.config.set("build_sandbox", False)
-    assert engine._sandbox(make_config(), tmp_path / "builds" / "b2", target_path=target)[0] == {"user": "0:0"}
+    assert engine._sandbox(make_config(), tmp_path / "builds" / "b2", target_path=target)[0]["command"][:3] == \
+        ["/llmcf/bin/busybox", "sh", "/llmcf/runner.sh"]
 
 
-def test_the_shipped_runners_start_every_module_under_the_stage_account(engine, tmp_path):
+def test_the_shipped_targets_get_no_note_and_the_layer_runs_them(engine, tmp_path):
     from test_pipeline import make_config
-    from orchestrator.utils.sandbox import stage_runner_problem
+    from orchestrator.Core import runtime_layer
     for target in TARGETS:
-        assert stage_runner_problem(REPO_ROOT / "targets" / target / "modules") is None
+        assert runtime_layer.own_runner_note(REPO_ROOT / "targets" / target) is None
         kwargs, env, _ = engine._sandbox(make_config(), tmp_path / "builds" / target,
                                          target_path=REPO_ROOT / "targets" / target)
         assert kwargs["user"] == "0:0" and env["STAGE_ISOLATION"] == "user"
-    # a target without a runner of its own is no verdict here (the build fails on the missing runner elsewhere)
-    assert stage_runner_problem(tmp_path / "none") is None
-    # a target the module generator makes from the template carries the stage account too
+        assert kwargs["entrypoint"] == runtime_layer.ENTRYPOINT
+    # a target the module generator makes from the template carries no runner of its own at all
     from orchestrator.Core.module_generator import ModuleGenerator
     from test_ai_safety import TestModuleGenerator
     (tmp_path / "gen" / "Rockchip").mkdir(parents=True)
     generator = ModuleGenerator(tmp_path / "gen")
     generator.template_dir = REPO_ROOT / "targets" / "_template"
     generated = generator.generate_module(TestModuleGenerator().data())
-    assert stage_runner_problem(generated / "modules") is None
+    assert not (generated / "modules" / "build.sh").exists() and runtime_layer.own_runner_note(generated) is None
 
 
-def test_both_conversion_containers_check_the_targets_runner():
+def test_both_conversion_containers_get_the_runtime_layer():
     import inspect as _inspect
     from orchestrator.Core.builder import BuildEngine
-    for stage in (BuildEngine._generate_imatrix, BuildEngine._execute_build_modules):
-        assert "self._sandbox(config, build_temp, target_path=target_path)" in _inspect.getsource(stage)
+    for stage, job in ((BuildEngine._generate_imatrix, "imatrix"), (BuildEngine._execute_build_modules, "build")):
+        source = _inspect.getsource(stage)
+        assert f'self._sandbox(config, build_temp, target_path=target_path, job="{job}"' in source
+        assert f'end_record=end_folder(build_temp, "{job}") / END_RECORD' in source
 
 
 # --- the framework's own helper in every build context (round 44 item 1) -------------------------------------------
@@ -643,16 +719,20 @@ def test_every_build_context_carries_the_frameworks_stage_helper(tmp_path, helpe
     staged = dockerfile.parent / "modules" / "stage_user.sh"
     assert staged.is_file()
     assert staged.read_bytes() == FRAMEWORK_STAGE_HELPER.read_bytes(), "the target's helper reached the build"
-    # the target's runner is the template's, which calls the helper: not refused, and the helper it gets is real
-    assert stage_runner_problem(target / "modules") is None
+    # and no build reads it anyway: the layer's runner sources the layer's own helper (the target's runner files only
+    # earn the plain note)
+    with pytest.warns(DeprecationWarning):
+        assert stage_runner_problem(target / "modules") is None
 
 
-def test_the_framework_helper_is_the_templates_and_both_shipped_targets_carry_it():
+def test_the_framework_helper_is_the_layers_and_both_shipped_targets_only_source_it():
+    """Changed on purpose (the runtime layer): the one helper is the layer's; the targets keep a deprecated file that
+    sources it."""
     from orchestrator.utils.build_context import FRAMEWORK_STAGE_HELPER
-    assert FRAMEWORK_STAGE_HELPER == REPO_ROOT / "targets" / "_template" / "modules" / "stage_user.sh"
+    assert FRAMEWORK_STAGE_HELPER == LAYER / "stage_user.sh"
     for target in TARGETS:
-        assert (REPO_ROOT / "targets" / target / "modules" / "stage_user.sh").read_bytes() == \
-            FRAMEWORK_STAGE_HELPER.read_bytes()
+        text = (REPO_ROOT / "targets" / target / "modules" / "stage_user.sh").read_text(encoding="utf-8")
+        assert "DEPRECATED" in text and '/stage_user.sh"' in text
 
 
 def test_the_image_inputs_follow_the_frameworks_helper_not_the_targets(tmp_path):
@@ -689,12 +769,12 @@ def test_a_target_with_a_hollow_helper_still_runs_its_modules_as_the_stage_accou
 
 
 def test_the_runner_check_judges_the_runner_not_the_targets_helper(tmp_path):
-    """stage_runner_problem judges only the target's runner: the template's runner without a helper of its own passes
-    (the build context brings the framework's), a runner that starts its modules another way stays refused."""
-    from orchestrator.utils.sandbox import STAGE_RUNNER_OLD, stage_runner_problem
-    runner = (REPO_ROOT / "targets" / "_template" / "modules" / "build.sh").read_text(encoding="utf-8")
-    assert stage_runner_problem(_target_with_runner(tmp_path / "new", runner, helper=False) / "modules") is None
-    assert stage_runner_problem(_target_with_runner(tmp_path / "old", OLD_RUNNER, helper=False) / "modules") == \
+    """runner_text_problem (the description of a runner, formerly stage_runner_problem) judges only the target's
+    runner: a runner of the old shape without a helper of its own passes, one that starts its modules another way
+    does not."""
+    from orchestrator.utils.sandbox import STAGE_RUNNER_OLD, runner_text_problem
+    assert runner_text_problem(_target_with_runner(tmp_path / "new", MARKED_RUNNER, helper=False) / "modules") is None
+    assert runner_text_problem(_target_with_runner(tmp_path / "old", OLD_RUNNER, helper=False) / "modules") == \
         STAGE_RUNNER_OLD
 
 
@@ -718,9 +798,9 @@ printf 'c' > "$BUILD_SCRATCH_DIR/cache/closed/entry"
 chmod 0000 "$BUILD_SCRATCH_DIR/cache/closed"
 mkdir "$out/plain"
 chmod 0755 "$out/plain"
-ln -s "$BUILD_SCRATCH_DIR/stages/build/KEYNAME" "$out/key-link"
+ln -s "$LLMCF_END_DIR/build.end" "$out/key-link"
 exit "${TIGHT_EXIT:-0}"
-'''.replace("KEYNAME", build_end.END_KEY)
+'''
 
 PERSON_CHECK = r'''
 import os, sys
@@ -740,7 +820,7 @@ print("left", len(left))
 @pytest.mark.parametrize("exit_code", [0, 3])
 def test_what_a_module_writes_the_person_can_read_and_remove(box, exit_code):
     box.module("source", TIGHT)
-    key = box.stages / build_end.END_KEY
+    key = box.end / build_end.END_RECORD
 
     result = box.run("--to", "source", TIGHT_EXIT=str(exit_code))
 
@@ -754,10 +834,10 @@ def test_what_a_module_writes_the_person_can_read_and_remove(box, exit_code):
         assert st.st_mode & 0o060 == 0o060, f"{path.name} is not readable and writable for the shared group"
         if path.is_dir():
             assert st.st_mode & 0o2000, f"{path.name} is not setgid"
-    # the share step runs as the stage account and never follows a link: the runner's key stays the runner's, 0600
+    # the share step runs as the stage account and never follows a link: the runner's end record stays the runner's
     assert os.path.islink(out / "key-link")
     if key.exists():
-        assert os.stat(key).st_uid == RUNNER and os.stat(key).st_mode & 0o777 == 0o600
+        assert os.stat(key).st_uid == RUNNER and not os.stat(key).st_mode & 0o022
     for marker in box.stages.iterdir():
         if not marker.name.endswith(".outputs"):
             assert os.stat(marker).st_uid == RUNNER, marker.name
@@ -776,7 +856,7 @@ def test_what_a_module_writes_the_person_can_read_and_remove(box, exit_code):
 # run_as_stage (or setpriv, or as_stage), or switches the sandbox off for its modules (STAGE_ISOLATION): its modules ran
 # as the runner with the runner's two ambient rights, and the build still counted as one in the sandbox.
 
-_TEMPLATE_SOURCE_LINE = 'source "$MODULES_DIR/stage_user.sh"\n'
+_TEMPLATE_SOURCE_LINE = 'source "$MODULES_DIR/stage_user.sh"\n'   # in a runner of the old shape (MARKED_RUNNER)
 
 
 @pytest.mark.parametrize("override", [
@@ -791,32 +871,36 @@ _TEMPLATE_SOURCE_LINE = 'source "$MODULES_DIR/stage_user.sh"\n'
     'STAGE_SHARED_FOLDERS=()',
 ], ids=["run_as_stage", "as_stage", "preflight", "setpriv", "isolation", "export", "unset", "uid", "share"])
 def test_a_runner_that_replaces_a_part_of_the_helper_is_refused(tmp_path, override):
-    from orchestrator.utils.sandbox import STAGE_RUNNER_REPLACES_HELPER, stage_runner_problem
-    runner = (REPO_ROOT / "targets" / "_template" / "modules" / "build.sh").read_text(encoding="utf-8")
+    from orchestrator.utils.sandbox import STAGE_RUNNER_REPLACES_HELPER, runner_text_problem
+    runner = MARKED_RUNNER
     assert _TEMPLATE_SOURCE_LINE in runner
     changed = runner.replace(_TEMPLATE_SOURCE_LINE, f"{_TEMPLATE_SOURCE_LINE}{override}\n", 1)
     name = re.search(r"[A-Za-z_]{4,}", override.replace("function ", "").replace("export ", "")
                      .replace("unset ", "")).group(0)
-    assert stage_runner_problem(_target_with_runner(tmp_path / "t", changed, helper=False) / "modules") == \
+    assert runner_text_problem(_target_with_runner(tmp_path / "t", changed, helper=False) / "modules") == \
         STAGE_RUNNER_REPLACES_HELPER.format(name=name)
 
 
 def test_the_runner_check_knows_every_part_of_the_helper():
     from orchestrator.utils import sandbox
-    helper = (REPO_ROOT / "targets" / "_template" / "modules" / "stage_user.sh").read_text(encoding="utf-8")
+    helper = (LAYER / "stage_user.sh").read_text(encoding="utf-8")   # the one helper: the runtime layer's
     functions = set(re.findall(r"(?m)^([a-z_]+)\(\)", helper))
     variables = set(re.findall(r"(?m)^(?:declare -A )?([A-Z_]+)=", helper)) | {"STAGE_ISOLATION"}
     assert functions and variables
-    assert functions | {"setpriv"} == set(sandbox._HELPER_FUNCTIONS)
-    assert variables == set(sandbox._HELPER_VARIABLES)
+    assert functions | {"setpriv"} <= set(sandbox._HELPER_FUNCTIONS)
+    assert variables <= set(sandbox._HELPER_VARIABLES)
     # a comment that names a part is no change of it
     assert sandbox._helper_part_replaced("# STAGE_ISOLATION=user\n  # run_as_stage() is the helper's\n") is None
 
 
 @pytest.mark.parametrize("target", TARGETS)
 def test_the_shipped_runners_replace_no_part_of_the_helper(tmp_path, target):
-    from orchestrator.utils.sandbox import stage_runner_problem
-    assert stage_runner_problem(REPO_ROOT / "targets" / target / "modules") is None
+    """The shipped build.sh is only the deprecated hand-over to the framework's runner: it defines no part of the
+    helper, and no build runs it."""
+    from orchestrator.Core.runtime_layer import own_runner_note
+    from orchestrator.utils.sandbox import _helper_part_replaced
+    text = (REPO_ROOT / "targets" / target / "modules" / "build.sh").read_text(encoding="utf-8")
+    assert _helper_part_replaced(text) is None and own_runner_note(REPO_ROOT / "targets" / target) is None
 
 
 STICKY = r'''#!/bin/bash

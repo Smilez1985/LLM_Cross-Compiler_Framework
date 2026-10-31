@@ -524,6 +524,44 @@ def roomy_disk_usage(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def runtime_layer_test_toolbox(request, monkeypatch):
+    """Every build container gets the framework's runtime layer (Core/runtime_layer.py), whose two tools (a static
+    busybox and a static setpriv) are made once per computer, the person's way (built in the builder image or
+    fetched). A test's fake container engine can do neither, so when a test's cache holds no toolbox yet,
+    ensure_toolbox puts a test toolbox there (way "test": two small files, recorded with their sha256) instead of
+    making one; everything after it (assembling the layer, the check against the shipped copy, the mounts, the end
+    folder) is the real code. Tests of the toolbox itself (marker real_toolbox) get the real ensure_toolbox."""
+    if request.node.get_closest_marker("real_toolbox"):
+        return
+    from orchestrator.Core import runtime_layer
+    real = runtime_layer.ensure_toolbox
+
+    def test_toolbox(cache_dir, way, **kwargs):
+        folder = runtime_layer.toolbox_dir(cache_dir)
+        if runtime_layer.read_toolbox(folder) is None:
+            give_test_toolbox(cache_dir)
+        return real(cache_dir, way, **kwargs)
+
+    monkeypatch.setattr(runtime_layer, "ensure_toolbox", test_toolbox)
+
+
+def give_test_toolbox(cache_dir):
+    """A test toolbox in `cache_dir` (way "test"): stand-ins for bin/busybox and bin/setpriv, never run. Returns the
+    toolbox record."""
+    from orchestrator.Core import runtime_layer
+    folder = runtime_layer.toolbox_dir(cache_dir)
+    stand_ins = Path(cache_dir) / "runtime-layer" / "test-stand-ins"
+    stand_ins.mkdir(parents=True, exist_ok=True)
+    files = {}
+    for tool in runtime_layer.TOOLS:
+        files[tool] = stand_ins / tool
+        files[tool].write_bytes(f"#!/bin/sh\n# test stand-in for the runtime layer's {tool}\n".encode("ascii"))
+    record = runtime_layer.write_toolbox(folder, "test", files, {"test": True})
+    shutil.rmtree(stand_ins, ignore_errors=True)
+    return record
+
+
+@pytest.fixture(autouse=True)
 def logger_levels_restored():
     """A CLI test with -q (or --log-level) sets the framework's loggers to ERROR process-wide (setup_logging keeps
     the last level), so a later test's caplog saw no warning, depending only on the order the files ran in. Every

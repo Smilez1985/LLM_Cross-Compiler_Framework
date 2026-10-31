@@ -179,14 +179,17 @@ STAGE_RUNNER_REPLACES_HELPER = ("This target's stage runner (modules/build.sh) r
                                 "so its modules could run as the runner itself, with the runner's rights. The build "
                                 "sandbox refuses it. Take modules/build.sh from targets/_template (or generate the "
                                 "target again), or switch the setting build_sandbox off.")
-# The parts of the helper (targets/_template/modules/stage_user.sh) a runner must leave as they are: every function it
-# defines, setpriv (the switch itself), and every variable it sets or reads to decide the switch (tests/
-# test_stage_user.py pins that these cover the helper's functions and variables)
+# The parts of the helper a runner must leave as they are (the old bash helper of the targets and the runtime layer's
+# orchestrator/runtime_layer/stage_user.sh): every function it defines, setpriv (the switch itself), and every
+# variable it sets or reads to decide the switch (tests/test_stage_user.py pins that these cover the layer helper's
+# functions and variables)
 _HELPER_FUNCTIONS = ("stage_isolated", "cap_list", "status_value", "hex_mask", "stage_rights_problem", "stage_groups",
                      "stage_shared_gid", "as_stage", "stage_share", "run_as_stage", "stage_switch_problem",
-                     "stage_folders", "stage_refuse", "stage_preflight", "setpriv")
+                     "stage_folders", "stage_refuse", "stage_preflight", "setpriv", "layer_sh", "refusal_exit", "run",
+                     "stage_sh")
 _HELPER_VARIABLES = ("STAGE_ISOLATION", "STAGE_UID", "STAGE_GID", "STAGE_RIGHTS_MASK", "CAP_NAMES",
-                     "STAGE_REFUSAL_EXIT", "STAGE_SHARED_FOLDERS", "STAGE_SHARE", "STAGE_PROBE")
+                     "STAGE_REFUSAL_EXIT", "STAGE_SHARED_FOLDERS", "STAGE_SHARE", "STAGE_PROBE",
+                     "STAGE_END_PROTECTION")
 
 
 def _helper_part_replaced(text: str) -> Optional[str]:
@@ -210,15 +213,21 @@ def _helper_part_replaced(text: str) -> Optional[str]:
 
 
 def stage_runner_problem(modules: Path) -> Optional[str]:
-    """STAGE_RUNNER_OLD when the target's stage runner (`modules`/build.sh) does not start its modules under the stage
-    account (a runner that never sources modules/stage_user.sh, runs no preflight or starts a module another way),
-    else None; None too when the target has no runner of its own. In the build sandbox the entrypoint hands the runner
-    CAP_SETUID and CAP_SETGID as ambient capabilities, which every program it starts keeps: such a runner's modules
-    would run as the runner WITH those rights and without the preflight. The helper itself is not the target's to
-    give: every build context carries the framework's own modules/stage_user.sh
-    (utils/build_context.FRAMEWORK_STAGE_HELPER), whatever the target ships under that name, and a runner that defines
-    one of its functions (or setpriv) again or changes one of its variables is refused too
-    (STAGE_RUNNER_REPLACES_HELPER with the part's name): the switch would no longer be the framework's."""
+    """Deprecated: always None. It refused a target's own stage runner (`modules`/build.sh) that did not start its
+    modules under the stage account. A build no longer runs a target's runner at all: the framework's runtime layer
+    (orchestrator/Core/runtime_layer.py) is the runner of every build container, and a target's own build.sh is
+    ignored with a plain note (runtime_layer.own_runner_note, which the builder shows and audits). So there is nothing
+    left to refuse here; the old check of the runner's text stays as runner_text_problem for whoever reads a runner."""
+    import warnings
+    warnings.warn("sandbox.stage_runner_problem is deprecated: a target's own build.sh never runs (the runtime layer's "
+                  "runner does); see runtime_layer.own_runner_note", DeprecationWarning, stacklevel=2)
+    return None
+
+
+def runner_text_problem(modules: Path) -> Optional[str]:
+    """STAGE_RUNNER_OLD or STAGE_RUNNER_REPLACES_HELPER for a target runner's text (`modules`/build.sh) that does not
+    start its modules under the stage account or replaces a part of the helper, else None (also without a runner).
+    Only a description of an old runner now: no build runs it (stage_runner_problem)."""
     runner = Path(modules) / "build.sh"
     if not runner.is_file():
         return None

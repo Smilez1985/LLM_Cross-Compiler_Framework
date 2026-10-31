@@ -1,3 +1,4 @@
+# shellcheck shell=sh
 # cleanup.sh - the short clean-up container of an interrupted build (part of the runtime layer; tools.sh says what
 # that is)
 #

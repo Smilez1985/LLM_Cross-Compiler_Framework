@@ -864,8 +864,13 @@ main() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    # Started by hand: the build up to this stage, through the stage runner, with the package for the board (version
-    # 1.x: target_module.sh quantized and packaged).
-    [ -n "${STAGE_RUNNER:-}" ] || exec bash "$(dirname "${BASH_SOURCE[0]}")/build.sh" --to target --package "$@"
+    # Started by hand: the build up to this stage, through the framework's stage runner (the runtime layer's
+    # runner.sh: /llmcf in a build container, the repository's copy in a checkout), with the package for the board
+    # (version 1.x: target_module.sh quantized and packaged).
+    if [ -z "${STAGE_RUNNER:-}" ]; then
+        layer="${LLMCF_LAYER:-/llmcf}"
+        [ -f "$layer/runner.sh" ] || layer="$(dirname "${BASH_SOURCE[0]}")/../../../orchestrator/runtime_layer"
+        LLMCF_MODULES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" exec sh "$layer/runner.sh" --to target --package "$@"
+    fi
     main "$@"
 fi

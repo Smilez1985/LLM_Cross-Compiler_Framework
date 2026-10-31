@@ -53,14 +53,28 @@ def _work(tmp_path):
     return tmp_path / "cache" / "builds" / "b1" / "work"
 
 
-def _idle_after_its_record(client, tmp_path, status="done", code=0):
-    """A stage container that writes its end record, then prints nothing and never exits by itself."""
+def _end_folder(engine, tmp_path):
+    """The build job's end folder of the runtime layer as the BuildEngine prepares it (_sandbox): owned by the stage
+    runner's uid, nobody else may write it."""
+    from orchestrator.Core import runtime_layer
+    from orchestrator.utils.sandbox import runner_ids
+    folder = runtime_layer.end_folder(tmp_path / "cache" / "builds" / "b1", "build")
+    runtime_layer.prepare_end_folder(folder, runner_ids(engine.docker_client))
+    return folder
+
+
+def _idle_after_its_record(client, tmp_path, status="done", code=0, end=None):
+    """A stage container that writes its end record (into the runtime layer's end folder `end`), then prints nothing
+    and never exits by itself."""
     work = _work(tmp_path)
+    volumes = {str(work): {"bind": "/build-cache/work", "mode": "rw"}}
+    if end is not None:
+        volumes[str(end)] = {"bind": "/llmcf-end", "mode": "rw"}
     container = FakeContainer(client, "llm-build-b1", auto_exit=False, lines=["=== Stage 4/4: target ==="],
-                              volumes={str(work): {"bind": "/build-cache/work", "mode": "rw"}})
+                              volumes=volumes)
 
     def idle():
-        if not (work / "stages" / "build" / "build.end").exists():
+        if end is not None and not (end / "build.end").exists():
             write_end_record(container.volumes, container.name, code if status == "failed" else 0)
         time.sleep(0.05)
         return requests.exceptions.ReadTimeout("Read timed out.")
@@ -76,13 +90,13 @@ def test_idle_and_soft_cap_never_fire_after_the_done_marker(engine, client, tmp_
     framework stops it, and a stopped container is not done."""
     monkeypatch.setattr(builder_module, "END_RECORD_POLL", 0.05)
     monkeypatch.setattr(build_end, "END_GRACE", 0.6)
-    container, work = _idle_after_its_record(client, tmp_path)
+    end = _end_folder(engine, tmp_path)
+    container, work = _idle_after_its_record(client, tmp_path, end=end)
     progress = BuildProgress("b1", BuildStatus.BUILDING, "")
     engine._builds["b1"] = progress
     cfg = config_for(tmp_path, build_timeout=0.1, build_idle_timeout=0.2, owner=owner)
 
-    code = engine._run_container(cfg, progress, container, "CONT: ",
-                                 end_record=build_end.end_record_path(work, "build"))
+    code = engine._run_container(cfg, progress, container, "CONT: ", end_record=end / build_end.END_RECORD)
 
     assert code == 137
     assert progress.end_record is not None and progress.end_record.done and progress.end_record.sealed
@@ -130,22 +144,14 @@ def test_a_seal_fits_only_its_own_key_and_body(tmp_path):
     assert not build_end.read_end_record(path, key=key).sealed
 
 
-def test_the_key_is_new_for_each_run_and_never_through_a_link(tmp_path):
+def test_no_key_is_written_any_more(tmp_path):
+    """Changed on purpose (the runtime layer): the one-run key in the work folder (end.key), which a module could
+    find wherever the runner's isolation failed, is gone; new_end_key is deprecated, writes nothing and says so. The
+    end folder, which only the runner may write, is the record's trust (test_runtime_layer.py)."""
     work = tmp_path / "work"
-    first = build_end.new_end_key(work)
-    second = build_end.new_end_key(work)
-    assert first and second and first != second
-    assert (work / "stages" / "build" / build_end.END_KEY).read_text(encoding="ascii").strip() == second
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    linked = tmp_path / "linked"
-    (linked / "stages").mkdir(parents=True)
-    try:
-        (linked / "stages" / "build").symlink_to(outside, target_is_directory=True)
-    except (OSError, NotImplementedError):
-        pytest.skip("this system cannot make a folder link")
-    assert build_end.new_end_key(linked) is None
-    assert not list(outside.iterdir())
+    with pytest.warns(DeprecationWarning):
+        assert build_end.new_end_key(work) is None
+    assert not (work / "stages" / "build" / build_end.END_KEY).exists()
 
 
 def test_a_stale_record_is_removed_before_the_container_starts(engine, client, tmp_path, monkeypatch):
@@ -189,7 +195,11 @@ def test_a_completed_build_is_done_with_its_end_in_build_info(engine, client, tm
     progress = _finish(engine, "b1")
     assert progress.status == BuildStatus.COMPLETED and progress.end_reason == "done"
     info = json.loads((tmp_path / "out" / "b1" / "build_info.json").read_text())
-    assert info["end"] == {"reason": "done", "exit": 0, "stage": "target", "isolation": "stage_user"}
+    protection = "protected" if build_end.mounts_keep_owners() else "unprotected"
+    layer = info["end"].pop("runtime_layer")
+    assert info["end"] == {"reason": "done", "exit": 0, "stage": "target", "isolation": "stage_user",
+                           "end_folder": protection}
+    assert layer["verdict"] == "intact" and layer["stages"] == ["source", "config", "convert", "target"]
 
 
 def test_a_failed_build_is_failed(engine, client, tmp_path):
@@ -197,7 +207,11 @@ def test_a_failed_build_is_failed(engine, client, tmp_path):
     engine.build_model(config_for(tmp_path))
     progress = _finish(engine, "b1")
     assert progress.status == BuildStatus.FAILED and progress.end_reason == "failed"
-    assert progress.end_facts() == {"reason": "failed", "exit": 4, "stage": "target", "isolation": "stage_user"}
+    facts = progress.end_facts()
+    assert facts.pop("runtime_layer")["verdict"] == "intact"
+    protection = "protected" if build_end.mounts_keep_owners() else "unprotected"
+    assert facts == {"reason": "failed", "exit": 4, "stage": "target", "isolation": "stage_user",
+                     "end_folder": protection}
 
 
 def test_a_cancel_is_cancelled_and_leaves_the_note_for_the_stage_runner(engine, client, tmp_path):
