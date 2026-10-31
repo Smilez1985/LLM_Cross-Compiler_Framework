@@ -1100,6 +1100,9 @@ SUBUID_FILE="/etc/subuid"
 SUBGID_FILE="/etc/subgid"
 SUBID_COUNT=65536
 SUBID_FIRST=100000
+# Wo systemd die Laufzeitordner der Benutzer anlegt (/run/user/<uid>: rootless Docker legt dort docker.sock an, Podman
+# podman/podman.sock).
+USER_RUNTIME_ROOT="/run/user"
 # Was setup_rootless eingerichtet hat (podman, docker; leer: nichts), für finish.
 ROOTLESS_ENGINE=""
 
@@ -1156,7 +1159,7 @@ engine_user() {
 
 # Befehl als die Person, mit ihrem systemd des Benutzers (XDG_RUNTIME_DIR, D-Bus), nie mit der Umgebung von root.
 as_engine_user() {
-    local runtime="/run/user/${REAL_UID:-0}"
+    local runtime="${USER_RUNTIME_ROOT}/${REAL_UID:-0}"
     if command -v sudo &> /dev/null; then
         sudo -H -u "$REAL_USER" env XDG_RUNTIME_DIR="$runtime" DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" "$@"
     else
@@ -1199,9 +1202,22 @@ ensure_subids() {
     fi
 }
 
+# Ist $1 in der Gruppe docker selbst? 'groups NAME' sagt "NAME : g1 g2"; gezählt wird nur ein Gruppenname, der genau
+# docker ist (nicht docker-users, nicht ein Benutzername, der docker enthält).
+in_docker_group() {
+    groups "$1" 2> /dev/null | awk -F: '{ n = split($NF, g, /[ \t]+/); for (i = 1; i <= n; i++) if (g[i] == "docker") f = 1 } END { exit !f }'
+}
+
+# Ist das ein Socket von rootless Docker der Person? podman-docker legt dort einen Link auf Podmans Socket an (Podman,
+# kein Docker); nur ein echter Socket zählt.
+rootless_docker_there() {
+    local sock="${USER_RUNTIME_ROOT}/${REAL_UID:-x}/docker.sock"
+    [ -S "$sock" ] && [ ! -L "$sock" ]
+}
+
 # Sagt klar, wenn die Person in einer Gruppe mit Root-Wirkung ist (docker); nimmt sie nie selbst heraus.
 root_group_note() {
-    if groups "$REAL_USER" 2> /dev/null | grep -q -w docker; then
+    if in_docker_group "$REAL_USER"; then
         log_warn "'$REAL_USER' ist in der Gruppe docker: Wer darin ist, steuert den Docker-Dienst, der als root läuft, und hat damit dauerhaft Rechte wie root auf diesem Rechner, auch wenn das Framework nicht läuft. Das Framework braucht die Gruppe nicht mehr (es nimmt die Engine ohne Root-Rechte). Herausnehmen, wenn nichts anderes sie braucht: sudo gpasswd -d $REAL_USER docker (danach ab- und wieder anmelden)."
     fi
 }
@@ -1265,7 +1281,7 @@ setup_rootless_docker() {
         log_warn "dockerd-rootless-setuptool.sh ließ sich für '$REAL_USER' nicht ausführen (Meldungen oben; es braucht eine Anmeldung von '$REAL_USER'). Als '$REAL_USER' selbst: dockerd-rootless-setuptool.sh install"
     fi
     ROOTLESS_ENGINE=docker
-    log_success "Rootless Docker ist eingerichtet: Es läuft als Dienst von '$REAL_USER' mit dessen Rechten, ohne Gruppe docker. Das Framework findet seinen Socket selbst (unix:///run/user/${REAL_UID:-UID}/docker.sock)."
+    log_success "Rootless Docker ist eingerichtet: Es läuft als Dienst von '$REAL_USER' mit dessen Rechten, ohne Gruppe docker. Das Framework findet seinen Socket selbst (unix://${USER_RUNTIME_ROOT}/${REAL_UID:-UID}/docker.sock)."
 }
 
 # Der Standard: eine Engine ohne Root-Rechte für die Person. Gibt es schon eine (podman, oder rootless Docker der
@@ -1278,7 +1294,7 @@ setup_rootless() {
         return 0
     fi
     log_info "Container-Engine: ohne Root-Rechte (Standard). Sie läuft mit den Rechten von '$REAL_USER'; nichts bekommt dauerhaft Rechte wie root. Docker als root nur mit --rootful."
-    if [ -S "/run/user/${REAL_UID:-x}/docker.sock" ]; then
+    if rootless_docker_there; then
         ensure_subids || true
         ROOTLESS_ENGINE=docker
         log_success "Rootless Docker von '$REAL_USER' ist schon da; das Framework nimmt es."
@@ -1336,7 +1352,7 @@ plan_rootless_podman() {
     if [ "$PKG" = "apk" ]; then
         echo "     ohne systemd kein Dienst podman.socket: der Befehl docker (podman-docker) ruft Podman direkt auf"
     else
-        echo "     Dienst des Benutzers: systemctl --user --machine=$REAL_USER@ enable --now podman.socket (unix:///run/user/${REAL_UID:-UID}/podman/podman.sock)"
+        echo "     Dienst des Benutzers: systemctl --user --machine=$REAL_USER@ enable --now podman.socket (unix://${USER_RUNTIME_ROOT}/${REAL_UID:-UID}/podman/podman.sock)"
     fi
 }
 
@@ -1353,7 +1369,7 @@ plan_rootless_docker() {
     esac
     echo "     der Docker-Dienst mit Root-Rechten bleibt aus (systemctl disable --now docker.service docker.socket)"
     plan_subids
-    echo "     Dienst des Benutzers: dockerd-rootless-setuptool.sh install (als '$REAL_USER'; Socket unix:///run/user/${REAL_UID:-UID}/docker.sock)"
+    echo "     Dienst des Benutzers: dockerd-rootless-setuptool.sh install (als '$REAL_USER'; Socket unix://${USER_RUNTIME_ROOT}/${REAL_UID:-UID}/docker.sock)"
 }
 
 plan_engine() {
@@ -1367,7 +1383,7 @@ plan_engine() {
         echo "   Container-Engine: ohne Root-Rechte für deinen Benutzer; als root ohne sudo richtet der Installer keine ein (sudo ./install.sh als dein Benutzer)"
         return 0
     fi
-    if [ -S "/run/user/${REAL_UID:-x}/docker.sock" ]; then
+    if rootless_docker_there; then
         echo "   Container-Engine: rootless Docker von '$REAL_USER', vorhanden"
         plan_subids
     elif [ "$ENGINE_CHOICE" = "docker" ]; then
@@ -1379,7 +1395,7 @@ plan_engine() {
         echo "   Container-Engine: Podman geht hier nicht (für $(system_label) keine Paketverwaltung dafür); stattdessen rootless Docker:"
         plan_rootless_docker || engine_stop "Für $(system_label) kennt der Installer keine Paketverwaltung für Podman, und rootless Docker geht hier nicht: $ROOTLESS_DOCKER_WHY"
     fi
-    if groups "$REAL_USER" 2> /dev/null | grep -q -w docker; then
+    if in_docker_group "$REAL_USER"; then
         echo "     '$REAL_USER' ist in der Gruppe docker (dauerhaft Rechte wie root): Der Installer sagt es und nimmt dich nicht selbst heraus (sudo gpasswd -d $REAL_USER docker)"
     fi
 }
