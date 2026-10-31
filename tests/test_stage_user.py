@@ -525,3 +525,71 @@ def test_a_folder_the_stage_account_cannot_write_refuses_the_build(box):
 
     assert refused.returncode == build_end.STAGE_USER_EXIT["folders"], refused.stdout + refused.stderr
     assert "cannot write the folder home" in refused.stderr
+
+
+# --- a target whose stage runner predates the stage account (review cs-stage-user-v) -------------------------------
+#
+# The entrypoint hands the stage runner CAP_SETUID and CAP_SETGID as AMBIENT capabilities, which every program it
+# starts keeps. A runner that starts its modules without run_as_stage (a person's target made from the template before
+# 3.3.0, or a hand-written one) would therefore run them as itself WITH those two rights (a module could become any
+# uid in the container) and without the preflight, while the framework logged "stage_user". Such a runner is refused
+# before its container is made.
+
+OLD_RUNNER = '''#!/bin/bash
+set -euo pipefail
+MODULES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+for name in source config convert target; do
+    STAGE_NAME="$name" bash "$MODULES_DIR/${name}_module.sh"
+done
+'''
+
+
+def _target_with_runner(root: Path, runner: str, helper: bool = True) -> Path:
+    modules = root / "modules"
+    modules.mkdir(parents=True)
+    (modules / "build.sh").write_text(runner, encoding="utf-8")
+    if helper:
+        shutil.copy2(REPO_ROOT / "targets" / "_template" / "modules" / "stage_user.sh", modules / "stage_user.sh")
+    return root
+
+
+@pytest.mark.parametrize("helper", [True, False])
+def test_a_runner_that_starts_its_modules_without_the_stage_account_is_refused(engine, tmp_path, helper):
+    from test_pipeline import make_config
+    from orchestrator.utils.sandbox import STAGE_RUNNER_OLD, stage_runner_problem
+    target = _target_with_runner(tmp_path / "old", OLD_RUNNER, helper)
+    assert stage_runner_problem(target / "modules") == STAGE_RUNNER_OLD
+    with pytest.raises(RuntimeError) as refused:
+        engine._sandbox(make_config(), tmp_path / "builds" / "b1", target_path=target)
+    assert str(refused.value) == STAGE_RUNNER_OLD
+    assert str(tmp_path) not in str(refused.value)   # no host path
+    # the legacy mode keeps such a target buildable: its modules run as the runner, which has no rights there
+    engine.config.set("build_sandbox", False)
+    assert engine._sandbox(make_config(), tmp_path / "builds" / "b2", target_path=target)[0] == {"user": "0:0"}
+
+
+def test_the_shipped_runners_start_every_module_under_the_stage_account(engine, tmp_path):
+    from test_pipeline import make_config
+    from orchestrator.utils.sandbox import stage_runner_problem
+    for target in TARGETS:
+        assert stage_runner_problem(REPO_ROOT / "targets" / target / "modules") is None
+        kwargs, env, _ = engine._sandbox(make_config(), tmp_path / "builds" / target,
+                                         target_path=REPO_ROOT / "targets" / target)
+        assert kwargs["user"] == "0:0" and env["STAGE_ISOLATION"] == "user"
+    # a target without a runner of its own is no verdict here (the build fails on the missing runner elsewhere)
+    assert stage_runner_problem(tmp_path / "none") is None
+    # a target the module generator makes from the template carries the stage account too
+    from orchestrator.Core.module_generator import ModuleGenerator
+    from test_ai_safety import TestModuleGenerator
+    (tmp_path / "gen" / "Rockchip").mkdir(parents=True)
+    generator = ModuleGenerator(tmp_path / "gen")
+    generator.template_dir = REPO_ROOT / "targets" / "_template"
+    generated = generator.generate_module(TestModuleGenerator().data())
+    assert stage_runner_problem(generated / "modules") is None
+
+
+def test_both_conversion_containers_check_the_targets_runner():
+    import inspect as _inspect
+    from orchestrator.Core.builder import BuildEngine
+    for stage in (BuildEngine._generate_imatrix, BuildEngine._execute_build_modules):
+        assert "self._sandbox(config, build_temp, target_path=target_path)" in _inspect.getsource(stage)

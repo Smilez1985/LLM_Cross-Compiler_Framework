@@ -905,7 +905,9 @@ What a stage module may write: `$BUILD_SCRATCH_DIR` (with `tmp`, `home` and `cac
 loop counts, the end record). What it reads (the model, the dataset, the importance matrix, the hardware profile)
 must be readable for the person's group. The runner checks all of this before the first module and refuses the
 build with a plain reason (for example `inputs` for a model file only its owner may read). Keep
-`modules/stage_user.sh` as the template has it, and start a stage only through the template's `build.sh`.
+`modules/stage_user.sh` as the template has it, and start a stage only through the template's `build.sh`. A target
+made from the template before 3.3.0 has a `build.sh` without the stage account: the build sandbox refuses it before
+its container starts; copy `modules/build.sh` and `modules/stage_user.sh` from `targets/_template`.
 
 What this means for your target: install everything in the Dockerfile and keep the template's `llmstage` account
 and `setpriv` (util-linux) in the image; do not write into the image; do not rely on
