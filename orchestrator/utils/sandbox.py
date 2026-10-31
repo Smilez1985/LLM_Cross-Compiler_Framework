@@ -17,7 +17,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 FALLBACK_USER = (1000, 1000)  # used when the host user is root or on Windows
 # A tmpfs inside the container (not a host path).
@@ -270,6 +270,14 @@ def sandbox_problem(attrs: Any, options: Dict[str, Any], volumes: Dict[str, Dict
         wrong.append("capabilities " + "; ".join(parts))
     elif engine != "podman" and "ALL" not in drop and not isinstance(effective, list):
         wrong.append("capabilities not dropped (CapDrop ALL)")
+    # The framework's runtime layer: the host sets the container's entrypoint and command itself
+    # (Core/runtime_layer.py ENTRYPOINT); an image cannot have them replaced
+    if options.get("entrypoint") is not None and \
+            _argv(config.get("Entrypoint")) != _argv(options["entrypoint"]):
+        wrong.append("the entrypoint is not the framework's runtime layer")
+    if options.get("entrypoint") is not None and options.get("command") is not None and \
+            _argv(config.get("Cmd")) != _argv(options["command"]):
+        wrong.append("the command is not the framework's")
     if host.get("Privileged"):
         wrong.append("privileged mode")
     security = [str(s).replace("=", ":").lower() for s in host.get("SecurityOpt") or []]
@@ -286,4 +294,25 @@ def sandbox_problem(attrs: Any, options: Dict[str, Any], volumes: Dict[str, Dict
             wrong.append(f"the read-only mount {bind} is not listed")
         elif mount.get("RW", True):
             wrong.append(f"the mount {bind} is writable")
+    # Nothing the host did not decide is mounted inside a read-only mount: an image's VOLUME below one (VOLUME
+    # /llmcf/bin) makes the engine mount an anonymous volume there, filled from the image, over the decided files
+    decided = {str(v.get("bind", "")) for v in (volumes or {}).values()}
+    read_only = sorted(str(v.get("bind", "")) for v in (volumes or {}).values() if v.get("mode") == "ro")
+    for destination in sorted(mounts):
+        if destination in decided:
+            continue
+        inside = [b for b in read_only if b and destination.startswith(b.rstrip("/") + "/")]
+        if inside:
+            wrong.append(f"a mount the framework did not decide ({destination}) lies inside the read-only mount "
+                         f"{inside[0]}")
     return SANDBOX_REFUSED.format(what="; ".join(wrong)) if wrong else None
+
+
+def _argv(value: Any) -> List[str]:
+    """An inspect's Entrypoint or Cmd as a list: Docker and Podman 5 give a list, Podman 4 one string joined by
+    spaces (the framework's own words hold no spaces, so the split is exact for them)."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return value.split()
+    return [str(v) for v in value]

@@ -38,9 +38,11 @@ import hmac
 import os
 import re
 import secrets
+import stat
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 END_REASONS = ("done", "failed", "cancelled", "soft_cap", "idle")
 # The request status an old reader sees for each end reason (OrchestrationStatus values)
@@ -76,13 +78,16 @@ FAILED_RECORD_TEXT = "The end record says the build failed (stage {stage}, exit 
 PREFLIGHT_STAGE = "preflight"
 STAGE_USER_EXIT = {"rights_missing": 80, "rights_extra": 81, "no_new_privileges": 82, "same_account": 83,
                    "no_setpriv": 84, "switch_failed": 85, "stage_has_rights": 86, "reads_runner": 87, "folders": 88,
-                   "inputs": 89}
+                   "inputs": 89, "no_layer": 90}
 STAGE_USER_TEXT = {
     "rights_missing": "The stage runner lacked the rights to switch to the stage account (CAP_SETUID, CAP_SETGID).",
     "rights_extra": "The stage runner had rights beyond the switch to the stage account.",
     "no_new_privileges": "The stage runner ran without no-new-privileges.",
     "same_account": "The stage runner ran with the stage account's ids.",
-    "no_setpriv": "The build image has no setpriv, so the stage runner cannot switch to the stage account.",
+    "no_setpriv": "The framework's runtime layer has no setpriv, so the stage runner cannot switch to the stage "
+                  "account.",
+    "no_layer": "The framework's runtime layer has no tools, so the stage runner cannot run without the image's "
+                "programs.",
     "switch_failed": "The test switch to the stage account did not work.",
     "stage_has_rights": "The stage account still had capabilities after the switch.",
     "reads_runner": "A test child under the stage account could open the stage runner's memory or environment.",
@@ -128,6 +133,8 @@ class EndRecord:
     time: str = ""
     seal: str = "-"
     sealed: bool = False
+    # How the end folder was guarded (the runtime layer's end folder): protected, unprotected or none
+    end: str = "none"
 
     @property
     def done(self) -> bool:
@@ -196,6 +203,9 @@ def read_end_record(path: Path, key: Optional[str] = None) -> Optional[EndRecord
     stage, job = values.get("stage", "-") or "-", values.get("job", "build") or "build"
     inputs, when = values.get("inputs", "-") or "-", values.get("time", "")
     seal = values.get("seal", "-") or "-"
+    end = values.get("end", "none") or "none"
+    if end not in ("protected", "unprotected", "none"):
+        return None
     if not _STAGE.match(stage) or not _JOB.match(job) or not _INPUTS.match(inputs) or (when and not _TIME.match(when)):
         return None
     if not _SEAL.match(seal):
@@ -203,7 +213,57 @@ def read_end_record(path: Path, key: Optional[str] = None) -> Optional[EndRecord
     sealed = bool(key and _KEY.match(key) and seal != "-"
                   and hmac.compare_digest(seal, seal_of(record_body(status, int(code), stage, job, inputs, when),
                                                         key)))
-    return EndRecord(status, int(code), stage, job, inputs, when, seal, sealed)
+    return EndRecord(status, int(code), stage, job, inputs, when, seal, sealed, end)
+
+
+def mounts_keep_owners(platform_name: Optional[str] = None) -> bool:
+    """Whether this host's bind mounts keep owner and mode for the container (Linux); Docker Desktop on Windows and
+    macOS shares folders without them."""
+    return (platform_name or sys.platform).startswith("linux")
+
+
+def end_folder_state(path: Path, owner_uid: Optional[int], *, platform_name: Optional[str] = None
+                     ) -> Tuple[bool, Optional[str]]:
+    """(protected, problem) of an end folder after its container: protected when the host keeps owners and the folder
+    and its record belong to the runner (owner_uid), are no links and nobody else may write them; problem is a plain
+    reason when the folder or the record is not the runner's (then nothing in it counts)."""
+    path = Path(path)
+    record = path / END_RECORD
+    if not mounts_keep_owners(platform_name) or owner_uid is None or os.name != "posix":
+        return False, None
+    try:
+        st_dir = os.lstat(path)
+        if stat.S_ISLNK(st_dir.st_mode) or not stat.S_ISDIR(st_dir.st_mode):
+            return False, "The end folder was replaced, so its record does not count."
+        if st_dir.st_uid != owner_uid or stat.S_IMODE(st_dir.st_mode) & 0o022:
+            return False, "The end folder is not the stage runner's alone, so its record does not count."
+        if not os.path.lexists(record):
+            return True, None
+        st = os.lstat(record)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_uid != owner_uid:
+            return False, "The end record was not written by the stage runner, so it does not count."
+    except OSError:
+        return False, "The end folder could not be read, so its record does not count."
+    return True, None
+
+
+def read_runner_record(end_dir: Path, owner_uid: Optional[int], *, platform_name: Optional[str] = None
+                       ) -> "tuple[Optional[EndRecord], bool, Optional[str]]":
+    """The stage runner's end record from the runtime layer's end folder (no key in the container): (record,
+    protected, problem). The record counts as the runner's (`sealed`) when the end folder and the record belong to
+    the runner alone (end_folder_state) or, on a host whose mounts keep no owner or mode, as an
+    unprotected end (protected False: the exit status and the inspect check decide). A folder or record that is not
+    the runner's gives `problem` and no trusted record."""
+    from dataclasses import replace
+    protected, problem = end_folder_state(Path(end_dir), owner_uid, platform_name=platform_name)
+    record = read_end_record(Path(end_dir) / END_RECORD)
+    if record is None:
+        return None, protected, problem
+    if problem is not None:
+        return replace(record, sealed=False), False, problem
+    if record.end == "unprotected":
+        protected = False
+    return replace(record, sealed=True), protected, None
 
 
 def end_problem(record: Optional[EndRecord], exit_code: int, job: str = "build") -> Optional[str]:
@@ -319,6 +379,7 @@ __all__ = ["END_REASONS", "STATUS_OF", "EVENT_OF", "EVENTS", "NAME_OF_EVENT", "E
            "RUNNING_NOTE", "END_GRACE", "NO_RECORD_TEXT", "FOREIGN_RECORD_TEXT", "EXIT_MISMATCH_TEXT",
            "EARLY_RECORD_TEXT", "FAILED_RECORD_TEXT", "END_KEY", "LAST_STAGE", "PREFLIGHT_STAGE", "STAGE_USER_EXIT",
            "STAGE_USER_TEXT", "STAGE_USER_REFUSED", "stage_user_problem", "EndRecord", "read_end_record",
-           "record_body", "seal_of", "new_end_key", "end_problem", "end_record_path",
+           "record_body", "seal_of", "new_end_key", "read_runner_record", "end_folder_state", "mounts_keep_owners",
+           "end_problem", "end_record_path",
            "write_cancel_note", "reason_of_timeout", "status_of", "event_of", "speaking_name", "reason_text",
            "EXIT_CODES", "EXIT_STILL_RUNNING", "exit_code"]
