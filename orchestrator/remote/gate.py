@@ -45,8 +45,12 @@ GATE_REL = ".config/llm-framework/llmcf-gate"
 REFUSAL_PREFIX = "llmcf-gate: refused: "
 REFUSED_STATUS = 126
 # The options of the framework key's authorized_keys line besides command= (OpenSSH and Dropbear both read them; none
-# of llmcf's operations needs a terminal or a forwarding).
+# of llmcf's operations needs a terminal or a forwarding). The line in the account's own home (gate-install) keeps
+# exactly these: Dropbear refuses a key line with an option it does not know (and runs no ~/.ssh/rc).
 KEY_OPTIONS = ("no-pty", "no-port-forwarding", "no-agent-forwarding", "no-X11-forwarding")
+# The root-owned line (root-board, OpenSSH's sshd only) adds no-user-rc: sshd then never runs the account's
+# ~/.ssh/rc, which the account may write, before the forced command (the gate).
+ROOT_KEY_OPTIONS = KEY_OPTIONS + ("no-user-rc",)
 # llmcf's own folders on a board. Uploads and scratch work may only write into the upload folders ("place": the
 # staging and benchmark folders of the install folder, mktemp's .staging-XXXXXXXX and .bench.XXXXXXXX, and the private
 # upload folders of a package deploy, /tmp/llm_deploy.XXXXXXXX); nothing the gate runs as a program ever lies there.
@@ -122,6 +126,17 @@ _SH_BUILD = ('llmcf_k_path "$1" || return 1; '
              f'case $1 in {_ROOT}/current|{_ROOT}/{"[0-9a-f]" * 16}) return 0 ;; esac; return 1')
 _SH_VERIFIED = (f'llmcf_k_path "$1" || return 1; case $1 in {_ROOT}/{VERIFY_PREFIX}{_RND}) return 0 ;; esac; '
                 'return 1')
+# exactly a folder mktemp made (staging-create): eight letters or digits, no `/`, nothing below it
+_MKTEMP = "[A-Za-z0-9]" * 8
+_SH_STAGING = (f'llmcf_k_path "$1" || return 1; case $1 in {_ROOT}/{STAGING_PREFIX}{_MKTEMP}) return 0 ;; esac; '
+               'return 1')
+_RE_STAGING = re.compile(r"/.+/" + re.escape(INSTALL_ROOT_REL + "/" + STAGING_PREFIX) + r"[A-Za-z0-9]{8}", re.ASCII)
+
+
+def _staging_folder(value: str) -> bool:
+    """A staging folder of the install folder as staging-create makes it (here: its tail; the gate also compares the
+    install folder with $HOME)."""
+    return _plain_path(value) and bool(_RE_STAGING.fullmatch(value))
 KINDS: Dict[str, Kind] = {k.name: k for k in (
     # an absolute path without `.` or `..` parts and without characters that would need quoting (read-only operations)
     Kind("path", _plain_path, _SH_PATH),
@@ -135,6 +150,9 @@ KINDS: Dict[str, Kind] = {k.name: k for k in (
     Kind("build", _plain_path, _SH_BUILD),
     # the folder runtime-check unpacked a checked tarball into (<install folder>/.verify-XXXXXXXX)
     Kind("verified", _plain_path, _SH_VERIFIED),
+    # exactly the staging folder staging-create made (<install folder>/.staging-XXXXXXXX), nothing below it: the only
+    # folder runtime-check takes a tarball from (its checked folder is made next to it, in the install folder)
+    Kind("staging", _staging_folder, _SH_STAGING),
     # what a clean-up may remove: an upload folder, a checked folder or a build (a removal runs nothing)
     Kind("removable", _plain_path, 'llmcf_k_place "$1" || llmcf_k_verified "$1" || llmcf_k_build "$1"'),
     # the parent of a private folder: /tmp or the install folder
@@ -434,15 +452,21 @@ llmcf_verb=${1-}
 
 # --- the framework key's line in authorized_keys ----------------------------------------------------------------------
 
-def key_options(gate_path: str) -> str:
-    """The options before the framework's public key: the gate as forced command and the no-* options."""
+def key_options(gate_path: str, options: Tuple[str, ...] = KEY_OPTIONS) -> str:
+    """The options before the framework's public key: the gate as forced command and the no-* `options`."""
     if not _plain_path(gate_path):
         raise GateRefused("the gate's path on the board is not a plain absolute path")
-    return f'command="/bin/sh {gate_path}",' + ",".join(KEY_OPTIONS)
+    return f'command="/bin/sh {gate_path}",' + ",".join(options)
 
 
 def restricted_line(public_line: str, gate_path: str) -> str:
+    """The restricted line in the account's own authorized_keys (gate-install; OpenSSH or Dropbear)."""
     return f"{key_options(gate_path)} {public_line}"
+
+
+def root_key_line(public_line: str, gate_path: str) -> str:
+    """The root-owned restricted line (root-board, OpenSSH's sshd only): also no-user-rc (ROOT_KEY_OPTIONS)."""
+    return f"{key_options(gate_path, ROOT_KEY_OPTIONS)} {public_line}"
 
 
 def is_restricted_line(line: str, gate_path: str) -> bool:
@@ -460,6 +484,7 @@ class GateBundle:
     notes: Tuple[str, ...] = field(default_factory=tuple)
     signers: str = ""
     selftest: str = ""
+    missing: str = "no-signer"   # the reason word of the root step when there is no signer (board_ops.resolve_signer)
 
     @property
     def version(self) -> str:
@@ -600,6 +625,10 @@ def _answer(text: str, key: str) -> Tuple[bool, str]:
 SETUP_REASONS = {
     "account": "the board account is root or its name is not a plain account name",
     "no-signer": "the framework has no signing key to give the board (its secrets store is not available)",
+    "no-signer-store": "the framework has no signing key to give the board: this step ran without the framework's "
+                       "settings, so it could open the secrets store only as a keyring store (secret_storage keyring); "
+                       "a store protected with a passphrase or a credential helper (secret_storage passphrase or "
+                       "helper) cannot be opened there",
     "no-sshd": "the board's SSH server is not OpenSSH (sshd), which a root-owned key line needs (Match User)",
     "no-keygen": "the board has no ssh-keygen to check the framework's signature",
     "old-ssh": "the board's ssh-keygen cannot check the framework's signature (OpenSSH 8.1 or later needed)",
@@ -771,8 +800,8 @@ def install_root_board(run: Callable[..., object], public_line: str, bundle: "Ga
     if "\n" in password or "\r" in password:
         return False, "sudo", ""
     if not bundle.signers or not bundle.selftest:
-        return False, "no-signer", ""
-    line = restricted_line(" ".join(parts), (paths or BoardPaths()).gate)
+        return False, bundle.missing or "no-signer", ""
+    line = root_key_line(" ".join(parts), (paths or BoardPaths()).gate)
     body = root_board_script(paths).replace("@BLOB@", parts[1]) if paths else str(script("root-board", parts[1]))
     text = "".join(f"{k}={shlex.quote(v)}\n" for k, v in (("LLMCF_KEYLINE", line), ("LLMCF_SIGNERS", bundle.signers),
                                                           ("LLMCF_SELFTEST", bundle.selftest))) + body
@@ -800,7 +829,7 @@ __all__ = ["BoardPaths", "INSTALL_ROOT_REL", "KEYS_DIR", "LIBEXEC_DIR", "ROOT_GA
            "SIGN_NAMESPACE", "SIGN_PRINCIPAL", "install_root_board", "match_block", "root_board_script", "signed_sh",
            "GATE_NAME", "GATE_REL", "GateBundle", "GateCall", "GateRefused", "GateScript", "JOB_LOG", "JOB_STARTED",
            "JOB_STATUS", "KEY_OPTIONS", "KINDS", "Kind", "OPERATIONS", "Operation", "PLACE_HOME_REL",
-           "PLACE_TMP_PREFIX", "REFUSAL_PREFIX", "REFUSED_STATUS", "ROOT_HELPER", "SETUP_REASONS", "SUDOERS_DIR",
-           "define", "detached_command", "gate_call", "gate_operations", "gate_version", "install_gate",
+           "PLACE_TMP_PREFIX", "REFUSAL_PREFIX", "REFUSED_STATUS", "ROOT_HELPER", "ROOT_KEY_OPTIONS", "SETUP_REASONS",
+           "SUDOERS_DIR", "define", "detached_command", "gate_call", "gate_operations", "gate_version", "install_gate",
            "install_root", "is_refusal", "is_restricted_line", "job", "key_options", "operation", "poll_command",
-           "refusal_text", "render_gate", "restricted_line", "script", "sudoers_name"]
+           "refusal_text", "root_key_line", "render_gate", "restricted_line", "script", "sudoers_name"]

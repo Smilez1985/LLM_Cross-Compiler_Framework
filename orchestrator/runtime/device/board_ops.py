@@ -112,7 +112,7 @@ def _runtime_check(staging: str, sha: str, id16: str, rest: str = "") -> str:
     ])
 
 
-define("runtime-check", ("place", "sha256", "id16"), _runtime_check,
+define("runtime-check", ("staging", "sha256", "id16"), _runtime_check,
        doc="a copy of the tarball in its own folder: its sha256 and the framework's signature, unpacked, every file "
            "against SHA256SUMS")
 define("runtime-install", ("root", "id16", "verified"), lambda root, id16, verified, rest="": "\n".join([
@@ -495,20 +495,30 @@ def sudoers_path(user: str) -> str:
     return f"{SUDOERS_DIR}/{gate.sudoers_name(user)}"
 
 
+# The reason a pairing path without a framework gives when the state folder's store gave no signer (gate.SETUP_REASONS).
+NO_FRAMEWORK_STORE = "no-signer-store"
+
+
 def framework_signer(framework=None, state_dir=None):
     """The framework's board signer (orchestrator/Core/community_pack.py BoardSigner: the person's Ed25519 signing key
-    from the encrypted secrets store, the one key that signs their packs): from `framework`'s secrets store, else from
-    the store in `state_dir`. None when no store can give it (no keyring, a store this process cannot open); a board
-    whose root step installed the framework's signing key then refuses what this framework sends, with the reason."""
+    from the encrypted secrets store, the one key that signs their packs): from `framework`'s secrets store (opened as
+    its secret_storage says: keyring, passphrase or helper), never another store in its place. Only without any
+    framework (`framework` None) the store in `state_dir`: opened without the person's settings, that is as a keyring
+    store, so a store protected with a passphrase or a credential helper does not open there (pairing_bundle then says
+    so: NO_FRAMEWORK_STORE). None when no store can give it; a board whose root step installed the framework's
+    signing key then refuses what this framework sends, with the reason."""
     try:
         from orchestrator.Core.community_pack import board_signer
-        secrets = getattr(framework, "secrets_manager", None)
-        if secrets is None and state_dir is not None:
+        if framework is not None:
+            secrets = getattr(framework, "secrets_manager", None)
+        elif state_dir is not None:
             from orchestrator.Core.secrets_manager import SecretsManager
             secrets = SecretsManager(Path(state_dir))
             init = getattr(secrets, "initialize", None)
             if callable(init):
                 init()
+        else:
+            secrets = None
         if secrets is None:
             return None
         return board_signer(secrets)
@@ -516,13 +526,34 @@ def framework_signer(framework=None, state_dir=None):
         return None
 
 
-def bundle(signer=None) -> gate.GateBundle:
+def resolve_signer(signer=None, state_dir=None):
+    """(the signer, the reason word when there is none) for a pairing or deploy path: `signer` is the caller's
+    framework signer, a BoardSigner or a callable that looks it up only now (lambda: framework_signer(framework)), which
+    may give None (its store could not give it: "no-signer"); None is a caller without any framework, whose only store
+    is the one in `state_dir` (framework_signer(state_dir=...)): without a signer from it, NO_FRAMEWORK_STORE."""
+    if signer is None:
+        found = framework_signer(state_dir=state_dir) if state_dir is not None else None
+        return found, ("" if found is not None else NO_FRAMEWORK_STORE)
+    if callable(signer) and not hasattr(signer, "allowed_signers"):
+        signer = signer()
+    return signer, ("" if signer is not None else "no-signer")
+
+
+def bundle(signer=None, *, missing: str = "no-signer") -> gate.GateBundle:
     """What pairing installs: the gate with every operation of the framework, llmcf's root helper and, with `signer`
-    (framework_signer), the board's allowed_signers line of the framework's signing key and its self-test signature."""
+    (framework_signer), the board's allowed_signers line of the framework's signing key and its self-test signature.
+    `missing`: the reason word the root step gives when there is no signer (resolve_signer's)."""
     signers = getattr(signer, "allowed_signers", "") if signer is not None else ""
     selftest = signer.sign_bytes(gate.SELFTEST_DATA) if signers else ""
     return gate.GateBundle(gate=gate.render_gate(), root_helper=render_root_helper(), signers=signers,
-                           selftest=selftest)
+                           selftest=selftest, missing=missing or "no-signer")
+
+
+def pairing_bundle(signer=None, state_dir=None) -> gate.GateBundle:
+    """bundle() of resolve_signer(signer, state_dir): what scan_steps.scan_device and person_steps.connect_stored pair
+    a board with (their caller's framework signer; None only for a caller without any framework)."""
+    found, missing = resolve_signer(signer, state_dir)
+    return bundle(found, missing=missing)
 
 
 def key_facts(shell) -> dict:
@@ -627,10 +658,10 @@ def gate_path(home: str) -> str:
     return f"{home.rstrip('/')}/{gate.GATE_REL}"
 
 
-__all__ = ["BENCH_PID", "FACTS_SCRIPT", "INSTALL_LOG", "OLD_SIDECAR", "REQUIRED_TOOLS", "ROOT_HELPER", "SUDO_SCRIPT",
-           "bench_stop_command", "bundle", "gate_path", "old_sidecar_check", "render_root_helper",
-           "key_facts", "key_state", "framework_signer", "forbidden_refusal", "restrict_key", "sudoers_path",
-           "sudoers_text"]
+__all__ = ["BENCH_PID", "FACTS_SCRIPT", "INSTALL_LOG", "NO_FRAMEWORK_STORE", "OLD_SIDECAR", "REQUIRED_TOOLS",
+           "ROOT_HELPER", "SUDO_SCRIPT", "bench_stop_command", "bundle", "gate_path", "old_sidecar_check",
+           "render_root_helper", "key_facts", "key_state", "framework_signer", "pairing_bundle", "resolve_signer",
+           "forbidden_refusal", "restrict_key", "sudoers_path", "sudoers_text"]
 
 # The install folder lies in llmcf's place of the gate (tests/test_board_gate.py checks it with KEY_REL's folder).
 PLACES_FOLLOW_LAUNCHER = (INSTALL_REL == gate.INSTALL_ROOT_REL and INSTALL_REL.startswith(gate.PLACE_HOME_REL + "/")

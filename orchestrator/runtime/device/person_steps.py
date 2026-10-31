@@ -458,15 +458,17 @@ def board_address(store: Any, device_id: str) -> Tuple[str, int]:
 def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: str,
                    password: Optional[str] = None, *, step: str = "",
                    on_client: Optional[Callable[[Any], None]] = None, cancel: Any = None,
-                   on_event: Optional[Callable[[Any], None]] = None) -> Tuple[Any, Any]:
+                   on_event: Optional[Callable[[Any], None]] = None, signer: Any = None) -> Tuple[Any, Any]:
     """(board session, host key) of the stored board `device_id` at host:port as `user`: the logged-in RemoteSession
     (orchestrator/remote/session.py; RemoteShell runs the steps over it). Its host key must be the trusted one the
     board was probed with (the device ID derives from it), at this login and at every login after a network drop, so a
     step never reaches another machine at the same address; while the board's network is gone the session waits for
     it (N5; `on_event` gets its events, `cancel`, a session.CancelToken, ends the wait at once). A `password` is the
     person's one-time password (OneTimePassword credentials: used for this session's logins only, never stored) and
-    installs the framework's key once. `step` names the contact for Mojo's record of the board (W1). The caller closes
-    the session (`on_client` gets it at once, so a Cancel can close it)."""
+    installs the framework's key once, with `signer`, the caller's framework signer (board_ops.resolve_signer: a
+    BoardSigner, or `lambda: board_ops.framework_signer(framework)`, looked up only when a password pairs the board;
+    None only for a caller without any framework). `step` names the contact for Mojo's record of the board (W1). The
+    caller closes the session (`on_client` gets it at once, so a Cancel can close it)."""
     from orchestrator.remote.address import Endpoint
     from orchestrator.remote.session import KeyOnly, OneTimePassword, RemoteSession, SessionFailure, Stopped
     from orchestrator.runtime.device import reasons
@@ -511,8 +513,8 @@ def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: 
         try:
             from orchestrator.runtime.device import board_ops
             # the person's writer: the framework's key, installed once, with llmcf's command gate (board_ops.py)
-            signer = board_ops.framework_signer(state_dir=state_dir)
-            pairing.pair(session.client, state_dir, board_ops.bundle(signer), password=password)
+            # the caller's framework signer (board_ops.resolve_signer; None only for a caller without a framework)
+            pairing.pair(session.client, state_dir, board_ops.pairing_bundle(signer, state_dir), password=password)
         except ssh_trust.HostKeyError as e:
             session.close()
             raise BoardStepError(str(e), "key_install", error=e) from None

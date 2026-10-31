@@ -927,7 +927,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                                      say=lambda msg: handle.progress(None, None, device_text(msg, users,
                                                                                              folder_labels())[:200]),
                                      on_event=board_events(handle, device), config=getattr(framework, "config", None),
-                                     ai_started=True, signer=_board_signer())   # its build stops at the soft caps (DECISIONS round 25 Q8)
+                                     ai_started=True, signer=_board_signer)   # its build stops at the soft caps (DECISIONS round 25 Q8)
                 except dev.DeviceRuntimeError as e:
                     if stop.is_set() or handle.cancelled:
                         raise JobCancelled() from None

@@ -312,8 +312,10 @@ class DeployHooks:
     - `refuse_root`: the board's facts are read first and an SSH user that is root ends the flow with RootUser before
       any question (the person's channels; the AI's deploy leaves that refusal to deploy_runtime, whose words reach the
       AI as the device's text, as before).
-    - `signer`: the framework's board signer (board_ops.framework_signer of the caller's framework); None: the flow
-      takes it from the secrets store in the state folder. The tarball is signed with it right before it is sent, and
+    - `signer`: the caller's framework signer (board_ops.resolve_signer: a BoardSigner, or
+      `lambda: board_ops.framework_signer(framework)`, looked up once when the flow starts); None only for a caller
+      without any framework: the flow then takes it from the secrets store in the state folder and says plainly
+      through `progress` when that store cannot give it. The tarball is signed with it right before it is sent, and
       the root step of an unrestricted key installs its public key on the board."""
     open_board: Callable[[], Any]
     remember: Optional[Callable[[Any], Any]] = None
@@ -351,7 +353,10 @@ def deploy_runtime_flow(state_dir: Path, device_id: str, profile: Any, settings:
     if arch is None:
         arch = str((build.plan.get("target") or {}).get("arch") or profile.arch)
     from orchestrator.runtime.device import board_ops
-    signer = hooks.signer if hooks.signer is not None else board_ops.framework_signer(state_dir=state_dir)
+    signer, missing = board_ops.resolve_signer(hooks.signer, state_dir)
+    if missing == board_ops.NO_FRAMEWORK_STORE:   # said plainly, never a silent unsigned tarball
+        from orchestrator.remote.gate import SETUP_REASONS
+        hooks.progress(f"The runtime is sent unsigned: {SETUP_REASONS[missing]}.")
     session, key = hooks.open_board()
     try:
         if hooks.remember is not None:
