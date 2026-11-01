@@ -158,6 +158,34 @@ jobs:
           sudo -E env "PATH=$PATH" "LLMCF_TEST_TOOLBOX=$RUNNER_TEMP/runtime-toolbox" \
             "$(command -v python)" -m pytest -ra tests/test_runtime_layer.py tests/test_stage_user.py
 
+      - name: Build llmcf-setpriv (static musl, the toolchain of rust/rust-toolchain.toml)
+        # The framework's own Rust uid switch (rust/llmcf-setpriv): linked with rust-lld and the toolchain's own
+        # musl, no C cross toolchain; refused when it is not static
+        working-directory: rust
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+        run: |
+          cargo build --release --locked -p llmcf-setpriv --target x86_64-unknown-linux-musl
+          bin=target/x86_64-unknown-linux-musl/release/llmcf-setpriv
+          if readelf -lW "$bin" | grep -q 'program interpreter'; then echo "llmcf-setpriv is not static" >&2; exit 1; fi
+          cp "$bin" "$RUNNER_TEMP/llmcf-setpriv-amd64"
+
+      - name: llmcf-setpriv's switch on the real kernel (its own tests, as root)
+        # Drops to an unprivileged account and checks the ids, the groups, the capability sets and that becoming
+        # root again fails; the test binaries run through sudo
+        working-directory: rust
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: sudo -E
+        run: cargo test --locked -p llmcf-setpriv
+
+      - name: Runtime layer tests with llmcf-setpriv as the layer's uid switch (as root)
+        # The same real-kernel tests as above, with the static llmcf-setpriv in the layer's bin/setpriv: the runner's
+        # switch of the entrypoint and every stage switch of stage_user.sh go through it
+        run: |
+          sudo -E env "PATH=$PATH" "LLMCF_TEST_TOOLBOX=$RUNNER_TEMP/runtime-toolbox" \
+            "LLMCF_TEST_LAYER_SETPRIV=$RUNNER_TEMP/llmcf-setpriv-amd64" \
+            "$(command -v python)" -m pytest -ra tests/test_runtime_layer.py tests/test_stage_user.py
+
       - name: Upload the tools and their SHA256SUMS
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

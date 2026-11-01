@@ -51,6 +51,9 @@ WHY_NOT = _why_not()
 # The real static busybox and setpriv the CI job "Runtime layer tools" made (scripts/runtime_toolbox.py OUT); without
 # it the box uses this computer's setpriv and a busybox stand-in
 REAL_TOOLBOX = Path(os.environ["LLMCF_TEST_TOOLBOX"]) if os.environ.get("LLMCF_TEST_TOOLBOX") else None
+# The layer's setpriv for these tests when it is another program than the toolbox's: the CI job "Runtime layer
+# tools" runs the tests a second time with the static llmcf-setpriv (rust/llmcf-setpriv) as the layer's uid switch
+LAYER_SETPRIV = Path(os.environ["LLMCF_TEST_LAYER_SETPRIV"]) if os.environ.get("LLMCF_TEST_LAYER_SETPRIV") else None
 HOST_SETPRIV = shutil.which("setpriv") or "setpriv"
 needs_root = pytest.mark.skipif(bool(WHY_NOT), reason=WHY_NOT or "-")
 needs_posix = pytest.mark.skipif(os.name == "nt" or shutil.which("sh") is None,
@@ -74,6 +77,8 @@ class Box:
             else:
                 (self.layer / "bin" / "busybox").write_text(STAND_IN_BUSYBOX, encoding="utf-8")
                 shutil.copy2(shutil.which("setpriv"), self.layer / "bin" / "setpriv")
+            if LAYER_SETPRIV:
+                shutil.copy2(LAYER_SETPRIV, self.layer / "bin" / "setpriv")
         for path in [self.layer, *self.layer.rglob("*")]:
             os.chmod(path, 0o755)
         self.image = self.root / "image"
