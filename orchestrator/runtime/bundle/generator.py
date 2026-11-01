@@ -718,11 +718,20 @@ def _vision_checks(plan: BundlePlan, comp_id: str, pkg: RuntimePackage, picked: 
                           "llama-server on the board when it loads them")
         return
     before = len(plan.problems)
-    try:
-        m, p = gguf_header(model), gguf_header(mmproj)
-    except (BundleError, OSError) as e:
-        plan.problems.append(f"{comp_id}: {e}")
-        return
+    headers: Dict[str, Dict[str, Any]] = {}
+    for role, path in (("model", model), ("mmproj", mmproj)):
+        # the file's role, never the person's file name or its folder (the plan's labels go to an AI)
+        try:
+            headers[role] = gguf_header(path)
+        except BundleError as e:
+            reason = str(e)
+            reason = reason[len(path.name) + 2:] if reason.startswith(path.name + ": ") else reason
+            plan.problems.append(f"{comp_id}: the {role} file: {reason}")
+            return
+        except OSError as e:
+            plan.problems.append(f"{comp_id}: the {role} file cannot be read ({e.strerror or e.__class__.__name__})")
+            return
+    m, p = headers["model"], headers["mmproj"]
     arch = m.get("general.architecture")
     if arch == "clip" or not isinstance(arch, str):
         plan.problems.append(f"{comp_id}: the model file is no language model (general.architecture "
