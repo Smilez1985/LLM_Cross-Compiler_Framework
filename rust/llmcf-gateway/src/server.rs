@@ -31,6 +31,9 @@ pub type Body = UnsyncBoxBody<Bytes, hyper::Error>;
 pub const KEY_REL: &str = ".config/llm-framework/llama-server.key";
 const START_WAIT: Duration = Duration::from_secs(120);
 const ANSWER_WAIT: Duration = Duration::from_secs(900);
+/// How long a request's body may take once its in-flight permit is taken: a client that sends its headers and then
+/// stalls frees the permit after this time (408), so a few slow clients cannot hold the model away from the others.
+pub const BODY_WAIT: Duration = Duration::from_secs(30);
 
 #[derive(Default)]
 pub struct Metrics {
@@ -89,6 +92,28 @@ fn retry(mut r: Response<Body>, seconds: u64) -> Response<Body> {
         r.headers_mut().insert(RETRY_AFTER, v);
     }
     r
+}
+
+/// Why a request body was not read.
+#[derive(Debug)]
+pub enum BodyFail {
+    /// larger than the gateway takes
+    TooLarge,
+    /// not all there within its wait
+    Slow,
+}
+
+/// The request body, at most `cap` bytes, read within `wait`.
+pub async fn read_body<B>(body: B, cap: usize, wait: Duration) -> Result<Bytes, BodyFail>
+where
+    B: hyper::body::Body,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    match tokio::time::timeout(wait, Limited::new(body, cap).collect()).await {
+        Err(_) => Err(BodyFail::Slow),
+        Ok(Err(_)) => Err(BodyFail::TooLarge),
+        Ok(Ok(collected)) => Ok(collected.to_bytes()),
+    }
 }
 
 fn equal(a: &[u8], b: &[u8]) -> bool {
@@ -384,11 +409,15 @@ async fn route(state: &Arc<State>, peer: SocketAddr, req: Request<Incoming>, not
         return retry(error(StatusCode::TOO_MANY_REQUESTS, "busy", "the model is busy with other requests"), 2);
     };
     let cap = state.cfg.max_body_kb as usize * 1024;
-    let body = match Limited::new(req.into_body(), cap).collect().await {
-        Ok(b) => b.to_bytes(),
-        Err(_) => {
+    let body = match read_body(req.into_body(), cap, BODY_WAIT).await {
+        Ok(b) => b,
+        Err(BodyFail::TooLarge) => {
             state.metrics.too_large.fetch_add(1, Relaxed);
             return error(StatusCode::PAYLOAD_TOO_LARGE, "too_large", "the body is larger than the gateway takes");
+        }
+        Err(BodyFail::Slow) => {
+            state.metrics.refused.fetch_add(1, Relaxed);
+            return error(StatusCode::REQUEST_TIMEOUT, "slow_body", "the body did not arrive in time");
         }
     };
     if state.budget.load(Relaxed) == 0 {
@@ -521,5 +550,49 @@ pub async fn serve(state: Arc<State>, tls_cfg: Option<Arc<rustls::ServerConfig>>
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    /// A request body that never sends a byte (a client that stalls after its headers).
+    struct Stalled;
+
+    impl hyper::body::Body for Stalled {
+        type Data = Bytes;
+        type Error = std::convert::Infallible;
+        fn poll_frame(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Option<Result<hyper::body::Frame<Bytes>, Self::Error>>> {
+            Poll::Pending
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_stalled_body_ends_after_its_wait_and_frees_the_permit() {
+        // regression: the body was read without a time limit after the in-flight permit was taken, so a client that
+        // sent its headers and then nothing held one of the few permits for as long as it liked
+        assert_eq!(BODY_WAIT, Duration::from_secs(30));
+        let permits = Arc::new(Semaphore::new(1));
+        let permit = permits.clone().try_acquire_owned().unwrap();
+        let started = Instant::now();
+        let got = read_body(Stalled, 1024, Duration::from_millis(50)).await;
+        assert!(matches!(got, Err(BodyFail::Slow)), "a stalled body is refused as slow");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        drop(permit);
+        assert_eq!(permits.available_permits(), 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_body_in_time_is_read_and_a_large_one_refused() {
+        let ok = read_body(Full::new(Bytes::from_static(b"{\"a\":1}")), 1024, BODY_WAIT).await;
+        assert_eq!(ok.ok(), Some(Bytes::from_static(b"{\"a\":1}")));
+        let big = read_body(Full::new(Bytes::from(vec![b'x'; 2048])), 1024, BODY_WAIT).await;
+        assert!(matches!(big, Err(BodyFail::TooLarge)));
     }
 }
