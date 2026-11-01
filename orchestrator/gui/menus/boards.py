@@ -49,6 +49,7 @@ BUNDLE_PATHS: Dict[str, str] = {
     "bundle deploy": "btn_bundle_deploy",
     "bundle deploy --dry-run": "btn_bundle_dry_run",
     "bundle status": "btn_bundle_status",
+    "bundle status --bench": "btn_bundle_gateway_bench",
     "bundle uninstall": "btn_bundle_uninstall",
     "bundle rollback": "btn_bundle_rollback",
     "bundle rollback --root": "btn_bundle_root_rollback",     # llmcf-install's last run, after its own question
