@@ -54,15 +54,17 @@ def ask_interrupted(parent: Optional[QWidget], framework: Any, build_id: str, la
     state = getattr(getattr(framework, "config", None), "user_state_dir", None)
     state = Path(state) if state else None
     if clicked is continue_button:
+        service = getattr(framework, "build_service", None)
         try:
             started = interrupted_build.decide(engine, cache, build_id, "continue", "gui", state_dir=state,
-                                               service=getattr(framework, "build_service", None))
+                                               service=service)
         except interrupted_build.InterruptedBuildError as e:
             plain_box(parent, "warning", title, one_line(str(e)))
             return "failed"
-        if on_continued is not None:
+        if on_continued is not None and service is not None:   # a request id only with the build service
             on_continued(str(started))
-        plain_box(parent, "information", title, ui_text("bld.interrupted.continued", lang, id=one_line(started)))
+        # the build's own id, as Build History lists it (the request id is the Builder's)
+        plain_box(parent, "information", title, ui_text("bld.interrupted.continued", lang, id=one_line(build_id)))
         return "continued"
     if clicked is delete_button:
         return _delete(parent, framework, engine, item, state, lang)

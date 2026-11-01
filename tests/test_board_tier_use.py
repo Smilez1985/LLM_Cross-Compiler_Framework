@@ -615,6 +615,40 @@ def test_every_package_manager_removes_only_dropbears_packages(tmp_path, tool, i
     assert command in calls() and _disabled_first(calls())
 
 
+def test_a_removal_without_an_answer_in_time_does_not_claim_dropbear_still_runs():
+    """Regression (review): the disable runs before the removal, so after a timeout Dropbear may already be stopped;
+    the text must not say it keeps running."""
+    import socket as _socket
+
+    from orchestrator.remote import openssh_switch
+
+    def silent(script, stdin=None, timeout=None):
+        assert timeout == openssh_switch.INSTALL_TIMEOUT
+        raise _socket.timeout()
+    done = openssh_switch.remove_dropbear(silent, "")
+    assert (done.ok, done.reason) == (False, "remove-timeout")
+    text = openssh_switch.removal_text(done)
+    assert "keeps running next to OpenSSH" not in text and "may already be stopped" in text
+
+
+def test_the_deprecated_disable_dropbear_delegates_and_keeps_its_old_answer():
+    """Deprecate-and-delegate (review): disable_dropbear runs remove_dropbear and answers (ok, reason) as before,
+    with no reason when Dropbear is off, whatever happened to its packages."""
+    from orchestrator.remote import gate, openssh_switch
+    answers = {"off": "dropbear=disabled removal=none reason=no-packages packages=none",
+               "gone": "dropbear=removed removal=removed reason=- packages=dropbear",
+               "no": "dropbear=unavailable reason=no-sudo"}
+    for key, want in (("off", (True, "")), ("gone", (True, "")), ("no", (False, "no-sudo"))):
+        seen = []
+
+        def run(script, stdin=None, timeout=None, _key=key):
+            seen.append(str(script))
+            return SimpleNamespace(out=answers[_key] + "\n")
+        assert openssh_switch.disable_dropbear(run, "") == want, key
+        assert seen == [str(gate.script("dropbear-disable"))]
+    assert openssh_switch.disable_dropbear(lambda *a, **k: None, "a\nb") == (False, "sudo")
+
+
 @POSIX
 @pytest.mark.parametrize("tool", ["apk", "rpm"])
 def test_apk_and_rpm_refuse_a_removal_that_takes_other_packages(tmp_path, tool):
