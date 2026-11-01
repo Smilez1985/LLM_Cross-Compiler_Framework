@@ -37,7 +37,7 @@ EXPECTED_GATE_OPS = {
     "staging-create", "start-bench-job", "start-bundle-kept", "start-bundle-run", "bundle-root", "bundle-ready",
     "bundle-ready-setup", "bundle-ready-remove", "bundle-gateway",
     "start-bench-job-setsid", "start-bench-job-setsid-timeout", "start-bench-job-timeout", "start-install",
-    "start-status", "status", "thermal",
+    "start-status", "status", "thermal", "measure-idle", "start-measure-load", "limits-write",
 }
 def _signer():
     """A signing key of this test only (the framework's board signer shape)."""

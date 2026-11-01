@@ -144,7 +144,7 @@ class TestKvOnTheBoard:
                               capture_output=True, text=True, timeout=60, cwd=str(home))
 
     def test_the_types_are_passed_on(self, home):
-        res = self.run(home, "serve", str(home / "model.gguf"), "-ctk", "q8_0", "--cache-type-v", "q4_0")
+        res = self.run(home, "serve", str(home / "model.gguf"), "-c", "2048", "-ctk", "q8_0", "--cache-type-v", "q4_0")
         assert res.returncode == 0, res.stderr
         args = [line[4:] for line in res.stdout.splitlines() if line.startswith("ARG=")]
         assert args[-4:] == ["-ctk", "q8_0", "--cache-type-v", "q4_0"]

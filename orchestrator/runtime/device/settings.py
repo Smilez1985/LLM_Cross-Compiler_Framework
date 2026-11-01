@@ -60,9 +60,9 @@ def check_model_path(path: Any) -> str:
 
 @dataclass(frozen=True)
 class KvChoice:
-    """The KV-cache type a board's server gets, and why: "chosen" (the deploy settings name it), "little" (automatic:
-    little RAM left next to the model, `free_gib` left), "enough" (automatic: enough RAM) or "unknown" (automatic,
-    but the board was not probed: f16)."""
+    """The KV-cache type a board's server gets, and why: "chosen" (the deploy settings name it), "measured" (automatic,
+    from the board's measurement), "little" (automatic: little RAM left next to the model, `free_gib` left), "enough"
+    (automatic: enough RAM) or "unknown" (automatic, but the board was not probed: f16)."""
     kind: str
     why: str
     free_gib: Optional[float] = None
@@ -76,7 +76,9 @@ class KvChoice:
         why = {"chosen": "the person's choice in the deploy settings",
                "little": f"automatic: little memory is left next to the model on this board ({self.free_gib} GiB)",
                "enough": "automatic: enough memory on this board",
-               "unknown": "automatic: the board's memory is not known yet"}[self.why]
+               "unknown": "automatic: the board's memory is not known yet",
+               "measured": f"automatic from the board's measurement ({self.free_gib} GiB left next to the model)"
+               }[self.why]
         return f"{self.kind} ({why})"
 
 
@@ -145,11 +147,16 @@ class DeploySettings:
                 found.append("the systemd unit serves one model: set its path on the device with --model")
         return found
 
-    def kv_choice(self, profile: Any, model_bytes: Optional[int] = None) -> KvChoice:
-        """The KV-cache type of the board's server: the chosen one, or the automatic one from the board's RAM in its
-        stored probe (hardware.kv_cache_default) and the model's size when known."""
+    def kv_choice(self, profile: Any, model_bytes: Optional[int] = None, limits: Any = None) -> KvChoice:
+        """The KV-cache type of the board's server: the chosen one; else the one of the board's measurement
+        (`limits`, runtime/device/measure.BoardLimits) when there is one; else the automatic one from the board's RAM
+        in its stored probe (hardware.kv_cache_default) and the model's size when known. Without a measurement the
+        start script starts no server without a context the person gives (measure.py), so this is never a guess
+        that runs."""
         if self.kv_cache is not None:
             return KvChoice(self.kv_cache, "chosen")
+        if limits is not None and getattr(limits, "fits", False):
+            return KvChoice(limits.kv_cache, "measured", round(max(0, limits.usable_mib - limits.base_mib) / 1024, 1))
         from orchestrator.runtime.hardware import kv_cache_default
         ram_mib = profile.int_value("RAM_TOTAL_MB") if hasattr(profile, "int_value") else None
         if not ram_mib:

@@ -7045,7 +7045,8 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
             console.print(f"[red]{escape(problem)}[/red]")
         console.print("[red]Nothing was deployed; change the deploy settings first (llm-cli device settings).[/red]")
         sys.exit(1)
-    kv = settings.kv_choice(profile)
+    from orchestrator.runtime.device.steps import kv_choice_of
+    kv = kv_choice_of(settings, profile, state_dir, device_id)
     stored = _stored_runtime(state_dir, device_id, profile)
     build, devices = stored.build, stored.devices
     try:
@@ -7155,7 +7156,8 @@ def device_runtime_verify(ctx: FrameworkContext, device_name: str, ssh_user: Opt
                                                     device_id, user)
         report = steps.check_runtime(shell, state_dir=state_dir, device_id=device_id, home=facts.home, record=record,
                                      plan_verify=plan_verify, source=source, port=settings.port,
-                                     bench=steps.BenchChoice(model_path, allowed, digest))
+                                     bench=steps.BenchChoice(model_path, allowed, digest),
+                                     kv_chosen=settings.kv_cache)
     except RemoteError as e:
         _board_step_failed(ctx, e, host, port)
     finally:
@@ -7193,6 +7195,10 @@ def device_runtime_status(ctx: FrameworkContext, device_name: str, as_json: bool
                   f"{'passed' if report.get('ok') else 'failed'} ({escape(str(record.get('verified_at')))})")
     if record.get("kv_cache"):
         console.print(f"KV cache at that deployment: {escape(str(record['kv_cache']))}")
+    from orchestrator.runtime.device import measure
+    from orchestrator.runtime.device.steps import board_limits_of
+    for line in measure.person_lines(board_limits_of(state_dir, device_id), _config_language(ctx)):
+        console.print(escape(line))
     if not status["current"]:
         console.print("[yellow]The deployed build is not the one planned now (the profile, the pin or the recipe "
                       "changed): build and deploy again.[/yellow]")
@@ -7259,6 +7265,9 @@ def bundle_choice_options(func):
         click.option('--accept-terms', 'accept_terms', multiple=True, metavar='BLOCK',
                      help="Accept the licence terms of a block you have read (repeatable; 'llm-cli bundle plan' "
                           "shows them in full)"),
+        click.option('--without-measurement', is_flag=True,
+                     help="Your yes to plan a language model on a board that was not measured yet (the probe's "
+                          "declared memory is used then; the benchmark on the board measures it)"),
     ]
     for option in reversed(options):
         func = option(func)
@@ -7280,12 +7289,13 @@ def _bundle_plan(ctx: FrameworkContext, device_name: str, choice: Dict[str, Any]
     app_root, index = service.catalog_sources(framework)
     choice = dict(choice)
     terms = list(choice.pop("accept_terms", ()) or ()) + list(accepted)
+    unmeasured_ok = bool(choice.pop("without_measurement", False))
     try:
         selection = service.selection_from(**choice)
         service.accept_terms(blk.load_catalog(app_root, index=index), selection, terms)
         plan = service.plan_for_device(state_dir, device_id, selection, config=config, app_root=app_root,
                                        mode=framework_mode(config), allow_own=allow_own, profile=profile,
-                                       index=index, framework=framework)
+                                       index=index, framework=framework, unmeasured_ok=unmeasured_ok)
     except BundleError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)

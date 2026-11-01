@@ -981,8 +981,8 @@ OTHER_BOARD = "0123456789abcdef"
 
 class TestTheBoardsDataMoves:
     """P6 (DECISIONS round 22): after the person confirms a new host key for a board, the board's data moves to its new
-    device ID: its stored probe, deploy settings, deployed runtime, deploy record and "tested on" records. Each part
-    is copied and checked before known_hosts changes, the old copies go only after the change, and nothing is lost
+    device ID: its stored probe, deploy settings, measured limits, deployed runtime, deploy record and "tested on"
+    records. Each part is copied and checked before known_hosts changes, the old copies go only after the change, and nothing is lost
     when a step fails."""
 
     @pytest.fixture
@@ -1000,6 +1000,8 @@ class TestTheBoardsDataMoves:
         profiles.save_device(old, parse_profile((FIXTURES / "schema2_rk3566_dietpi.txt").read_text()),
                              label="Desk board", address=HOST)
         profiles.save_deploy_settings(old, {"install": "user", "ssh_user": "radxa", "port": 8081})
+        # a measured board (runtime/device/measure.py): its measurement moves with its data too
+        profiles.save_limits(old, {"schema": "llm-framework.board-limits/1", "version": 1, "kv_measured": "f16"})
         runtime = DeviceRuntimeStore(state, old)
         runtime.save_record({"build_id": "ab" * 32, "deployed_at": "2026-10-20T10:00:00Z", "ssh_user": "radxa",
                              "verification": {"checks": [{"name": "smoke", "ok": True}]}})
@@ -1064,8 +1066,8 @@ class TestTheBoardsDataMoves:
         assert [r for r in tested.device_tests(b.build) if r["device_id"] == OTHER_BOARD] == [b.rows[1]]
         assert not list(b.runtime.root.parent.glob(".*moving*")), "no temporary folder stays"
         assert person_steps.moved_lines(change) == [
-            f"Moved to the new device ID {new_id}: stored probe, deploy settings, deployed runtime, deploy record, "
-            "benchmark results ('tested on')."]
+            f"Moved to the new device ID {new_id}: stored probe, deploy settings, measured limits, deployed runtime, "
+            "deploy record, benchmark results ('tested on')."]
         assert any(f"Its data moves there from {b.old}" in line for line in person_steps.change_lines(change))
 
     def test_a_copy_that_fails_changes_nothing(self, b, monkeypatch):
@@ -1223,7 +1225,7 @@ class TestTheBoardsDataMoves:
         new_files["probe"].write_text(old_files["probe"].read_text())   # the same profile ...
         new_files["probe_info"].write_text(json.dumps({"label": "Its own", "address": "192.0.2.99"}))   # ... not so
         own = {kind: path.read_text() for kind, path in new_files.items() if path.exists()}
-        old = {kind: path.read_text() for kind, path in old_files.items() if kind != "deploy_settings"}
+        old = {kind: path.read_text() for kind, path in old_files.items() if kind not in ("deploy_settings", "limits")}
         person_steps.change_board(b.state, change, via="cli", audit=b.audit, actor="cli", output_dirs=[b.output])
         assert change.data.kept == ["probe"] and "probe" not in change.data.moved
         assert {kind: old_files[kind].read_text() for kind in old} == old, "the probe stays whole under the old ID"

@@ -27,13 +27,15 @@ def _programs(tmp: Path):
     return resolve
 
 
-def _plan(tmp: Path, values=None, blocks=("llm-llama-server", "gateway-llmcf"), programs=None):
+def _plan(tmp: Path, values=None, blocks=("llm-llama-server", "gateway-llmcf"), programs=None, limits=None):
     model, _w, _p = _files(tmp)
     sel = gen.Selection(blocks=list(blocks), values=values or {},
                         files={"llm": {"model": gen.FileChoice(path=str(model), licence="apache-2.0")}})
+    # an unmeasured board is planned after the person's yes here; the measured limits have tests of their own
     return gen.plan_bundle(sel, catalog=blk.load_catalog(), profile=RK3566, device_id=DEVICE, offline=False,
                            bundle_id="gw-test", runtime=_runtime_tarball(tmp),
-                           programs=programs if programs is not None else _programs(tmp))
+                           programs=programs if programs is not None else _programs(tmp),
+                           limits=limits, unmeasured_ok=limits is None)
 
 
 def test_the_gateway_block_is_ready_and_its_program_comes_from_the_framework():

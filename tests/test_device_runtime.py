@@ -280,7 +280,7 @@ class TestStartScript:
 
     def test_the_port_can_be_changed_but_only_to_an_unprivileged_one(self, home):
         install_folder(home)
-        res = self.run(home, "serve", str(home / "model.gguf"), "--port", "9090")
+        res = self.run(home, "serve", str(home / "model.gguf"), "--port", "9090", "-c", "2048")
         args, _env = self.args_env(res.stdout)
         assert res.returncode == 0 and args[args.index("--port") + 1] == "9090" and args.count("--port") == 1
         res = self.run(home, "serve", str(home / "model.gguf"), "--port", "80")
@@ -366,6 +366,9 @@ class TestStartScript:
         status = self.run(home, "status")
         assert status.returncode == 0 and "running" in status.stdout
         assert stat.S_IMODE(pidfile.stat().st_mode) & 0o077 == 0
+        again = self.run(home, "start", str(home / "model.gguf"), "-c", "2048")
+        assert again.returncode == 2 and "already running" in again.stderr
+        # without -c too (the board's measurement is not what stops a second start: review of ctx-measure)
         again = self.run(home, "start", str(home / "model.gguf"))
         assert again.returncode == 2 and "already running" in again.stderr
         assert self.run(home, "start", str(home / "model.gguf"), "--tools", "all").returncode == 2
@@ -695,7 +698,10 @@ class FakeDevice:
         moved = command.replace("/run/systemd/system", f"{self.fakeroot}/run/systemd/system") \
                        .replace("/etc/systemd/system/", f"{self.fakeroot}/etc/systemd/system/") \
                        .replace("/sys/class/thermal/", f"{self.fakeroot}/sys/class/thermal/") \
-                       .replace("/proc/device-tree/", f"{self.fakeroot}/proc/device-tree/")
+                       .replace("/proc/device-tree/", f"{self.fakeroot}/proc/device-tree/") \
+                       .replace("/proc/meminfo", f"{self.fakeroot}/proc/meminfo") \
+                       .replace("/sys/block/", f"{self.fakeroot}/sys/block/") \
+                       .replace("/sys/devices/system/cpu/", f"{self.fakeroot}/sys/devices/system/cpu/")
         env = {"HOME": str(self.home), "PATH": f"{self.stubs}:/usr/bin:/bin", "LANG": "C",
                "FAKE_LOG": str(self.log), "LLAMA_ARG_TOOLS": "all", "LLAMA_ARG_HOST": "0.0.0.0"}
         res = subprocess.run([SHELL, "-c", moved], input=stdin, env=env, capture_output=True, timeout=120,
