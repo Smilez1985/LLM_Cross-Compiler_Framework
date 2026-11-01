@@ -132,7 +132,8 @@ def test_every_workflow_build_has_push_false():
 
 # A step that starts the framework (not pytest, which fakes the vault) on a runner without a system keyring stops
 # with exit code 5 unless the workflow says how the vault is kept (the nightly retrieval evaluation failed so).
-FRAMEWORK_RUN = re.compile(r"orchestrator\.cli\b|\bllm-cli\b|\bllmcf\b|\bllm-gui\b")
+# `llmcf` the command, never a name that only starts with it (the static tools llmcf-setpriv, llmcf-install)
+FRAMEWORK_RUN = re.compile(r"orchestrator\.cli\b|\bllm-cli\b|\bllmcf\b(?!-)|\bllm-gui\b")
 
 
 def framework_steps_without_secret_storage(data: dict) -> list:
@@ -171,6 +172,10 @@ def test_the_vault_guard_finds_a_framework_step_without_secret_storage():
     assert framework_steps_without_secret_storage({"jobs": {"j": {"steps": [
         {"run": "docker run --rm -e LLM_SECRET_STORAGE=ephemeral lcf-framework:local llm-cli targets list"},
         {"run": "python -m pytest -q"}]}}}) == []
+    assert framework_steps_without_secret_storage({"jobs": {"j": {"steps": [
+        {"run": "cargo build -p llmcf-setpriv && cp llmcf-setpriv /tmp"}]}}}) == []
+    assert framework_steps_without_secret_storage({"jobs": {"j": {"steps": [{"name": "s", "run": "llmcf doctor"}]}}}) \
+        == ["j: s"]
 
 
 def test_the_guard_finds_a_push_and_a_framework_pull():
