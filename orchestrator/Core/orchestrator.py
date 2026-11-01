@@ -114,6 +114,10 @@ class BuildRequest:
     # The person's decision on a module's CMake options outside the allowlist (Core/module_flags.FlagDecision.as_dict):
     # handed to the build container, which leaves such options out or keeps the allowed ones
     flag_decision: Optional[Dict[str, Any]] = None
+    # An interrupted build continued (Core/interrupted_build.py): its kept configuration, run as this request's one job
+    # with its own build id and work folder, so the stage runner resumes every finished stage. The request then shows
+    # its progress, cancel and end like any started build (BuildService.continue_interrupted).
+    resume: Optional[BuildConfiguration] = None
 
     def __post_init__(self):
         if not self.request_id:
@@ -558,7 +562,13 @@ class LLMOrchestrator:
         return (targets_dir / target).exists()
 
     def _map_job_to_config(self, job: BuildJob, req: BuildRequest, attempt: int = 1) -> BuildConfiguration:
-        """Konvertiert internen Job zu Builder Config"""
+        """Konvertiert internen Job zu Builder Config. A continued build (req.resume) keeps its own configuration and
+        build id (its kept work folder), now under this request; a retry after a fix gets its own id, as always."""
+        if getattr(req, "resume", None) is not None:
+            from dataclasses import replace
+            kept = req.resume
+            return replace(kept, request_id=req.request_id,
+                           build_id=kept.build_id if attempt <= 1 else f"{kept.build_id}_r{attempt - 1}")
         base_img = "debian:bookworm-slim"
         if hasattr(self.config, 'image_base_debian'):
             base_img = self.config.image_base_debian
@@ -596,6 +606,15 @@ class LLMOrchestrator:
             disk_reservation=getattr(req, "disk_reservation", "") or "",
             module_flags=getattr(req, "flag_decision", None),
         )
+
+    @staticmethod
+    def _resume_job(req: BuildRequest) -> BuildJob:
+        """The one job of a continued build: the kept configuration's model, target, format and output folder."""
+        kept = req.resume
+        return BuildJob(job_id=kept.build_id, source_model=kept.model_source, target_architecture=kept.target_arch,
+                        target_format=kept.target_format, optimization=kept.optimization_level,
+                        quantization=kept.quantization, output_path=kept.output_dir, status=BuildStatus.QUEUED,
+                        model_label=model_label(kept.model_source, kept.local_inputs))
 
     async def _submit_to_engine(self, build_config: BuildConfiguration, state: Optional[WorkflowState]) -> Optional[str]:
         """Hands a build to the engine. While every engine slot is taken (another request's build, or a
@@ -796,10 +815,10 @@ class LLMOrchestrator:
                 req.use_imatrix = False
                 state.warnings.append(f"IMatrix disabled: {e}")
 
-        # 1. Expand Build Matrix
-        build_jobs: List[BuildJob] = []
-        
-        for model in req.models:
+        # 1. Expand Build Matrix (a continued build is its one kept job)
+        build_jobs: List[BuildJob] = [self._resume_job(req)] if getattr(req, "resume", None) is not None else []
+
+        for model in ([] if build_jobs else req.models):
             for target in req.targets:
                 if not self._target_exists(target):
                     state.warnings.append(f"Target '{target}' not found. Skipping.")

@@ -11,7 +11,7 @@ proposals AI clients made for it (marked AI-generated; their texts are the AI's,
 Reading the records is local file reading; nothing here starts, stops or changes a build. Every text is plain text.
 """
 
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox, QHeaderView, QPlainTextEdit,
@@ -106,10 +106,13 @@ class BuildDetailsDialog(QDialog):
 class BuildHistoryDialog(QDialog):
     """Every build of every framework process; [Show details] opens one, [Refresh] reads the records again."""
 
-    def __init__(self, framework: Any, parent: Optional[QWidget] = None, lang: Optional[str] = None):
+    def __init__(self, framework: Any, parent: Optional[QWidget] = None, lang: Optional[str] = None,
+                 on_continued: Optional[Callable[[str], None]] = None):
         super().__init__(parent)
         self.framework = framework
         self.lang = lang or current_language()
+        # a continued interrupted build's request goes there: the Builder tab shows its progress (Build > Build History)
+        self.on_continued = on_continued
         self.history = None
         self.rows: List[Any] = []
         self.setWindowTitle(self._t("bld.history.title"))
@@ -197,7 +200,7 @@ class BuildHistoryDialog(QDialog):
         if not build_id:
             plain_box(self, "information", self._t("bld.history.title"), self._t("bld.history.pick"))
             return "none"
-        outcome = ask_interrupted(self, self.framework, build_id, self.lang)
+        outcome = ask_interrupted(self, self.framework, build_id, self.lang, on_continued=self.on_continued)
         self.refresh()
         return outcome
 
