@@ -2343,6 +2343,11 @@ speeds, the KV cache the measurement used (as `llama-bench` reports it) next to 
 to, and whether the checks passed. The Deployment window lists the build as "tested on <board>".
 A model that no build of this framework made is recorded nowhere.
 
+The same short benchmark measures the board (its memory with the model); the board's server takes its context, KV
+cache and prompt cache from that measurement. A deploy without it says plainly that the board needs its
+measurement first: until then the start script does not start the server (exit code 78), and the systemd unit
+stays stopped instead of trying again every 10 seconds.
+
 The check lines end with the board's temperature during the checks (read before and after the short benchmark; see
 [Features](Features.md#runtime-on-the-board-self-built-llamacpp)). A hot board gets a warning with what helps and a
 Mojo Oracle line; it fails no check, so the exit code stays that of the checks. Ctrl+C during the short benchmark
