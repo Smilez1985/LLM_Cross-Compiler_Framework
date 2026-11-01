@@ -116,7 +116,8 @@ class BuildImageDialog(QDialog):
         form_layer.addRow(self.lbl_layer)
         self.combo_toolbox = QComboBox(group_layer)
         self.combo_toolbox.setObjectName("combo_bimg_toolbox")
-        for way in ("build", "fetch"):
+        from orchestrator.Core.runtime_layer import TOOLBOX_WAYS
+        for way in TOOLBOX_WAYS:
             self.combo_toolbox.addItem(self._t(f"bimg.layer.way.{way}"), way)
         form_layer.addRow(plain_label(self._t("bimg.layer.toolbox"), group_layer, wrap=False), self.combo_toolbox)
         self.btn_save_toolbox = QPushButton(button_text(self._t("bimg.layer.save")), group_layer)
@@ -228,7 +229,10 @@ class BuildImageDialog(QDialog):
         index = self.combo_toolbox.findData(status["toolbox_way"])
         if index >= 0:
             self.combo_toolbox.setCurrentIndex(index)
-        lines = [status["text"], self._t("bimg.layer.made", way=status["toolbox_made"] or "-"),
+        made = status["toolbox_made"] or "-"
+        if status["toolbox_setpriv"]:
+            made = self._t("bimg.layer.made.setpriv", way=made, setpriv=status["toolbox_setpriv"])
+        lines = [status["text"], self._t("bimg.layer.made", way=made),
                  runtime_layer.END_PROTECTED if status["end_folder"] == "protected" else runtime_layer.END_UNPROTECTED]
         if status["toolbox_way"] == "fetch" and not status["fetch_ready"]:
             lines.append(runtime_layer.PREBUILT_MISSING)

@@ -1,0 +1,24 @@
+# The framework's builder image of llmcf-setpriv (orchestrator/Core/runtime_layer.py, way "build-rust"): the
+# framework's own Rust uid switch (rust/llmcf-setpriv), built from the Cargo workspace rust/ that the host put into
+# this context. The base is pinned by digest and carries the Rust release that rust/rust-toolchain.toml pins; the
+# crates come by Cargo.lock's sha256 (--locked). The result is /out/setpriv, a static musl program linked with
+# rust-lld and the toolchain's own musl (no C cross toolchain), which the host copies out, checks (a static program)
+# and caches. Nothing of a target ever runs here.
+FROM rust:1.97.0-slim-trixie@sha256:686a437ead83701e8f871e66e838c3ec55f46b5fc235b025756396ac823bdc51
+
+# The image's own toolchain (the pinned release), never another one a toolchain file would ask for
+ENV RUSTUP_TOOLCHAIN=1.97.0 CARGO_TERM_COLOR=never
+RUN rustup target add "$(uname -m)-unknown-linux-musl"
+
+WORKDIR /src
+COPY rust/ ./
+
+RUN target="$(uname -m)-unknown-linux-musl" \
+    && linker="CARGO_TARGET_$(echo "$target" | tr 'a-z-' 'A-Z_')_LINKER" \
+    && env "$linker=rust-lld" cargo build --release --locked -p llmcf-setpriv --target "$target" \
+    && mkdir -p /out \
+    && cp "target/$target/release/llmcf-setpriv" /out/setpriv
+
+# Static (no program interpreter), and it runs
+RUN if readelf -l /out/setpriv | grep -q 'program interpreter'; then echo "llmcf-setpriv is not static" >&2; exit 1; fi \
+    && /out/setpriv --version
