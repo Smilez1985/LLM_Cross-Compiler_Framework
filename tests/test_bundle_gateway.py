@@ -187,6 +187,38 @@ def test_the_board_check_pins_the_fingerprint_and_reports_a_changed_one(tmp_path
     assert isinstance(rows, list)
 
 
+def test_the_gateway_budget_comes_from_the_boards_measurement(tmp_path):
+    """Seam of the gateway and the measured limits (failed before: the gateway took the llm block's default context,
+    4096, while the measurement gave the llm component its measured context, so the gateway's budget was not the
+    board's): without a context the person gave, both take the measured one; a context the person gave wins for both."""
+    from test_board_measure import record
+    from orchestrator.runtime.device import measure
+    limits = measure.derive(record())
+    plan = _plan(tmp_path, values={"gateway": {"bind": "loopback"}}, limits=limits)
+    assert plan.ok, plan.problems
+    comps = {c.kind: c for c in plan.manifest.components}
+    assert comps["llm"].variables["ctx_size"] == limits.ctx
+    assert comps["gateway"].variables["ctx_size"] == limits.ctx, "the gateway's budget is the measured context"
+    given = _plan(tmp_path, values={"llm": {"ctx_size": "1024"}, "gateway": {"bind": "loopback"}}, limits=limits)
+    comps = {c.kind: c for c in given.manifest.components}
+    assert comps["llm"].variables["ctx_size"] == comps["gateway"].variables["ctx_size"] == 1024
+
+
+def test_the_gateways_unit_runs_through_llmcf_install_from_its_fixed_place(tmp_path):
+    """Seam of the gateway and the root readiness: the gateway's autostart is a typed root action of the manifest
+    (its account, its unit, its memory limit), and every root action runs through the gate operation bundle-root,
+    which starts llmcf-install only from its fixed root-owned place, never from the bundle's own folder."""
+    from orchestrator.remote import gate
+    plan = _plan(tmp_path, values={"gateway": {"autostart": "yes"}})
+    assert plan.ok, plan.problems
+    mine = [(a.action, a.unit) for a in plan.manifest.root_actions if a.component == "gateway"]
+    assert ("install_unit", "llmcf-gateway.service") in mine and ("create_user", None) in mine
+    body = gate.script("bundle-root", "apply", "gw-test", "a" * 64)
+    assert gate_ops.FIXED_HELPER in body
+    runs = [ln for ln in body.splitlines() if "sudo" in ln and "llmcf-install" in ln]
+    assert runs and all(".kept" not in ln for ln in runs), runs
+
+
 def test_the_gateway_check_keeps_the_time_of_the_boards_last_installer_run(tmp_path, monkeypatch):
     """Regression (overwritten before: the gateway check wrote the board record's "at", the time of the last
     installer run that `bundle list` shows, so a status read looked like a deploy): the check keeps its own time in

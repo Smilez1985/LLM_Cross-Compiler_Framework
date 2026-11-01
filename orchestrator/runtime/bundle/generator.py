@@ -385,19 +385,21 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
     memory = 0
     measured_llm = 0          # MiB the llm servers need by the board's measurement
     has_llm = any(b.kind == "llm" for b in blocks)
+    # the memory the board's measurement leaves for the bundle (free at rest less the measured reserve), the same
+    # number with and without a language model: every component is checked against it
+    measured_usable = int(limits.usable_mib) if limits is not None else None
     pairs = list(zip(_component_ids(blocks), blocks))
     for comp_id, block in pairs:
         given = dict(selection.values.get(comp_id) or {})
         if block.kind == "gateway":
-            _gateway_from_llm(plan, comp_id, given, pairs, selection)
-        if block.kind == "llm" and limits is not None and getattr(limits, "fits", False):
+            _gateway_from_llm(plan, comp_id, given, pairs, selection, limits)
+        if block.kind == "llm":
             # the board's measurement decides what the person did not set (never a guessed default)
-            names = {v.name for v in block.variables}
-            if "ctx_size" in names and "ctx_size" not in given:
-                given["ctx_size"] = limits.ctx
+            measured = measured_llm_values(block, given, limits)
+            given.update(measured)
+            if "ctx_size" in measured:
                 plan.notes.append(f"{comp_id}: context {limits.ctx} tokens from the board's measurement")
-            if "kv_cache" in names and "kv_cache" not in given and limits.kv_cache != "f16":
-                given["kv_cache"] = limits.kv_cache
+            if "kv_cache" in measured:
                 plan.notes.append(f"{comp_id}: KV cache {limits.kv_cache} from the board's measurement")
         plan.accounts[comp_id] = tuple(v.name for v in block.variables if v.type == "user")
         values: Dict[str, Any] = {}
@@ -533,7 +535,7 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
         else:
             comp_memory = int(block.memory_base_mb + block.memory_model_factor * model_bytes / 1048576)
         memory += comp_memory
-        _component_check(plan, comp_id, block, comp_runtime, board_arch, comp_memory)
+        _component_check(plan, comp_id, block, comp_runtime, board_arch, comp_memory, measured_usable)
         if block.kind == "vision" and comp_runtime is not None:
             _vision_checks(plan, comp_id, comp_runtime, picked)
         program = block.program
@@ -604,6 +606,20 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
                             ("warning" if memory > usable * 0.9 else "passed"),
                             "detail": f"measured: about {memory} MB needed ({measured_llm} MB for the language "
                                       f"model as measured on the board), {usable} MB usable"})
+    elif limits is not None:
+        # no language model on the board: the components fit by the board's measured memory all the same
+        usable = int(limits.usable_mib)
+        plan.board_memory_mb = usable
+        if memory > usable:
+            plan.problems.append(f"the bundle needs about {memory} MB of memory, the board's measurement leaves "
+                                 f"{usable} MB for it ({limits.available_mib} MB free at rest less the measured "
+                                 f"reserve of {limits.reserve_mib} MB)")
+        elif memory > usable * 0.9:
+            plan.warnings.append(f"the bundle takes about {memory} of the {usable} MB the board's measurement leaves: "
+                                 "little room is left")
+        plan.checks.append({"check": "memory", "result": "failed" if memory > usable else
+                            ("warning" if memory > usable * 0.9 else "passed"),
+                            "detail": f"measured: about {memory} MB needed, {usable} MB usable"})
     elif has_llm and not unmeasured_ok:
         from orchestrator.runtime.device.measure import NOT_MEASURED
         plan.problems.append(f"{NOT_MEASURED}; or plan without the measurement after your own yes (the probe's "
@@ -659,16 +675,33 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
 GATEWAY_FROM_LLM = {"upstream_port": "port", "ctx_size": "ctx_size"}
 
 
+def measured_llm_values(block: Block, given: Dict[str, Any], limits: Any) -> Dict[str, Any]:
+    """The values the board's measurement sets for an llm block where the person set none: its measured context and
+    KV-cache type (never a guessed default). {} for another block, without a measurement, or when the model does not
+    fit. The one rule for the llm component and the gateway that takes its context (GATEWAY_FROM_LLM)."""
+    if block.kind != "llm" or limits is None or not getattr(limits, "fits", False):
+        return {}
+    names = {v.name for v in block.variables}
+    out: Dict[str, Any] = {}
+    if "ctx_size" in names and "ctx_size" not in given:
+        out["ctx_size"] = limits.ctx
+    if "kv_cache" in names and "kv_cache" not in given and limits.kv_cache != "f16":
+        out["kv_cache"] = limits.kv_cache
+    return out
+
+
 def _gateway_from_llm(plan: BundlePlan, comp_id: str, given: Dict[str, Any], pairs: List[Tuple[str, Block]],
-                      selection: Selection) -> None:
+                      selection: Selection, limits: Any = None) -> None:
     """A gateway talks to the bundle's llm component: its upstream_port and ctx_size are that component's port and
-    context size (the board's start parameters), set here; a different value the person gave is refused."""
+    context size (the board's start parameters, with the board's measurement where the person set none:
+    measured_llm_values), set here; a different value the person gave is refused."""
     llm = next(((cid, b) for cid, b in pairs if b.kind == "llm"), None)
     if llm is None:
         plan.problems.append(f"{comp_id}: the gateway needs the bundle's llm component (block llm-llama-server)")
         return
     llm_id, llm_block = llm
-    llm_values = selection.values.get(llm_id) or {}
+    llm_values = dict(selection.values.get(llm_id) or {})
+    llm_values.update(measured_llm_values(llm_block, llm_values, limits))
     for mine, theirs in GATEWAY_FROM_LLM.items():
         var = llm_block.variable(theirs)
         if var is None:
@@ -712,20 +745,27 @@ def _probe_checks(plan: BundlePlan, board_arch: Optional[str], init: Optional[st
 
 
 def _component_check(plan: BundlePlan, comp_id: str, block: Block, pkg: Optional[RuntimePackage],
-                     board_arch: Optional[str], memory_mb: int) -> None:
+                     board_arch: Optional[str], memory_mb: int, measured_usable: Optional[int] = None) -> None:
     """plan.checks "component <id>": the probe facts this one component depends on. A framework-built runtime
     (llama.cpp, whisper.cpp) was planned from the board's own probe: its architecture must be the board's, and the
     CPU features its build uses are named; its own memory need is named (the bundle's total is the "memory" check).
     A wrong architecture refuses the plan (one rule: arch_matches, as for a program the person picked)."""
     parts = [f"block {block.id}", f"about {memory_mb} MB"]
     result = "passed"
+    if measured_usable is not None:
+        # the component fits by the board's measurement (its memory free at rest less the measured reserve)
+        parts.append(f"of the {measured_usable} MB the board's measurement leaves")
+        if memory_mb > measured_usable:
+            plan.problems.append(f"{comp_id}: it needs about {memory_mb} MB, the board's measurement leaves "
+                                 f"{measured_usable} MB")
+            result = "failed"
     if pkg is not None and pkg.path is not None:
         built_for = pkg.arch or "an architecture its record does not name"
         if pkg.arch and board_arch and not arch_matches(pkg.arch, board_arch):
             plan.problems.append(f"{comp_id}: the board's {pkg.project} package is built for {pkg.arch}, the board "
                                  f"runs {board_arch}; build it again from the board's probe")
             result = "failed"
-        elif not pkg.arch or not board_arch:
+        elif (not pkg.arch or not board_arch) and result != "failed":
             result = "unknown"
         parts.insert(1, f"{pkg.project} built for {built_for} with the CPU features "
                         + (", ".join(pkg.cpu_features) if pkg.cpu_features else "of its base level"))
