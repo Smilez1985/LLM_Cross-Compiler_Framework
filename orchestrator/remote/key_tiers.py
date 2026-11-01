@@ -79,7 +79,7 @@ def is_weaker(tier: str) -> bool:
 
 
 # The ways on for a board enterprise mode refuses to use (the person's channels and the AI's next step read it; the
-# GUI shows its own words, deploy.tier.refused_use of utils/l10n_deploy.py).
+# Boards window and the Builder tab's scan show their own words, boards.err.weaker_tier of utils/l10n_boards.py).
 USE_WAYS = ("pair the board again with its password and choose the switch to OpenSSH (the board account needs sudo), "
             "which gives it the root-owned key line; or choose password login at that pairing; or switch the "
             "framework to private mode in its settings (only you can)")

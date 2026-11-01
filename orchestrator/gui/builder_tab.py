@@ -257,6 +257,8 @@ class SSHProbeWorker(QThread):
                         if e.reason in reasons.CODES else ui_text("deploy.remote.login_failed", reason=str(e.error)))
             elif e.kind == "probe":
                 text = ui_text("deploy.remote.probe_failed", address=self.ip, reason=str(e.error))
+            elif e.kind == "weaker_tier":   # enterprise mode refuses the board's weaker key tier (nothing ran there)
+                text = ui_text("boards.err.weaker_tier")
             else:
                 text = ui_text("deploy.remote.save_failed", reason=str(e.error))
             self.finished.emit(False, text, "")

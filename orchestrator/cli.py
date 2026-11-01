@@ -6077,6 +6077,8 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
             _board_step_failed(ctx, e.error, host, port)
         elif e.kind == "probe":
             console.print(f"[red]The probe on {escape(host)} failed: {escape(str(e.error))}[/red]")
+        elif e.kind == "weaker_tier":   # enterprise mode refuses the board's weaker key tier (nothing ran there)
+            console.print(f"[red]{escape(str(e))}[/red]")
         else:
             console.print(f"[red]Could not save the profile: {escape(str(e.error))}[/red]")
         sys.exit(1)

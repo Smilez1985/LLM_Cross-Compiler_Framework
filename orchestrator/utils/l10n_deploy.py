@@ -314,7 +314,7 @@ TEXTS = {
         "deploy.mode.private": "Privat (Standard)",
         "deploy.mode.enterprise": "Enterprise",
         "deploy.mode.explain": "Der Enterprise-Modus nimmt auf einem Board nur OpenSSH mit sudo (die Schlüsselzeile in "
-                               "Root-Besitz) und lehnt die schwächere Dropbear-Stufe und das Home-Tor ab, auch für "
+                               "Root-Besitz) und lehnt die schwächere Dropbear-Stufe und das Home-Gate ab, auch für "
                                "früher gekoppelte Boards. Den Modus wählst nur du; eine KI darf ihn lesen, nie ändern.",
         "deploy.mode.saved": "Gespeichert: {mode}.",
         "deploy.mode.not_saved": "Nicht gespeichert: config.yml ließ sich nicht schreiben; der Modus bleibt, wie er war.",
