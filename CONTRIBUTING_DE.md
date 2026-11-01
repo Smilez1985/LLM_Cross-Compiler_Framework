@@ -217,6 +217,31 @@ Eine Änderung, die nur unter einer Python-Version funktioniert, ist nicht ferti
 Verhalten der Standardbibliothek (etwa Filter beim Entpacken von tar-Archiven) und Wheels, die für die neueste
 Version noch fehlen.
 
+### Die Rust-Helfer
+
+Die kleinen Programme des Frameworks für Boards liegen im Cargo-Workspace `rust/` (`rust/Cargo.toml`):
+`llmcf-install`, der Root-Helfer des Board-Bündels, und `llmcf-setpriv`. Die Toolchain ist in
+`rust/rust-toolchain.toml` festgelegt (rustup installiert sie beim ersten Aufruf), `rust/Cargo.lock` ist eingecheckt,
+und jedes Crate ist mit `=` festgelegt. Jedes Crate beginnt mit `#![forbid(unsafe_code)]`. Release-Builds sind
+statisch (musl, gelinkt mit `rust-lld`, siehe `rust/.cargo/config.toml`) für x86_64, aarch64 und armv7:
+
+```bash
+cd rust
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --features llmcf-install/test-root
+cargo build --release --locked -p llmcf-install --target aarch64-unknown-linux-musl
+```
+
+Das cargo-Feature `test-root` gibt llmcf-install seinen Testmodus `--root PREFIX` (jeder Pfad unter einem Präfix,
+dort falsche `useradd` und `systemctl`); ein Release-Build hat ihn nie und lehnt `--root` ab. Die Python-Tests, die
+den echten Helfer ausführen (`tests/test_llmcf_install.py`), bauen dieses Test-Binary mit cargo oder nehmen eines aus
+`LLMCF_INSTALL_TEST_BIN` und werden mit dem Grund übersprungen, wenn beides fehlt. Die Regeln des Manifests gibt es
+zweimal, in `orchestrator/runtime/bundle/manifest.py` und `rust/llmcf-install/src/manifest.rs`: Ändere beide und die
+gemeinsamen Vektoren in `tests/data/bundle_manifest_vectors.json`, die beide Testreihen lesen. Der CI-Job `rust`
+führt die Befehle oben aus, prüft, dass die drei Release-Builds statisch sind und `--root` ablehnen, und führt
+`cargo deny check` aus (`rust/deny.toml`).
+
 ### Der Smoke-Test mit einem echten Client
 
 Die Unit-Tests steuern den MCP-Server mit dem eigenen Client des SDK. `scripts/mcp_client_smoke.sh` (POSIX sh) prüft

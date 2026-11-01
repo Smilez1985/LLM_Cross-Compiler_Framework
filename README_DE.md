@@ -438,8 +438,9 @@ vertrauen oder einen geänderten Host-Schlüssel annehmen.
 Bündel auf ein Board: Du wählst eine Vorlage oder die Bausteine, ihre Variablen und Dateien, siehst dir den vollen
 Plan an (jede Datei mit Quelle und Größe, die Prüfungen gegen die Untersuchung des Boards), baust es und rollst es
 aus. Sein Installer auf dem Board installiert die Schritte ohne Sonderrechte einmal, zeigt ihren Status, rollt sie
-zurück und deinstalliert sie; Root-Schritte wie eine Autostart-Unit warten auf den Root-Helfer llmcf-install des
-Frameworks, wähle also vorerst die Variante ohne Sonderrechte. Jedes Ausrollen fragt dich vorher. Details:
+zurück und deinstalliert sie; Root-Schritte wie eine Autostart-Unit laufen nur über den signierten Root-Helfer
+llmcf-install des Frameworks, nach einem zweiten Ja dafür, mit einem Journal für ihr Zurückrollen und Deinstallieren.
+Jedes Ausrollen fragt dich vorher. Details:
 [Funktionen](docs/Features_DE.md#das-board-bündel).
 
 ### Das Board
@@ -964,8 +965,8 @@ Version 3.3.0 ist in Arbeit. Kurz:
   Verdichtung, Cloud-Caching so, wie der Anbieter es vorsieht, und Dittos Archiv
   dessen, was es über llmcf und das Bauen gelernt hat (nie die privaten Gespräche der Person).
 - **Das Board-Bündel:** sein nutzbarer erster Teil ist da (Bausteine, Plan, signiertes Bündel, der Installer ohne
-  Sonderrechte, Fenster, CLI und MCP-Werkzeuge); als Nächstes kommen der Root-Helfer llmcf-install, vom Framework
-  selbst gebaute Bestandteile, das Token sparende Gateway `llmcf-gateway` in Rust, Sprache und Bild als Bausteine des Bündels und MCP
+  Sonderrechte, Fenster, CLI und MCP-Werkzeuge, und der Root-Helfer llmcf-install); als Nächstes kommen vom
+  Framework selbst gebaute Bestandteile, das Token sparende Gateway `llmcf-gateway` in Rust, Sprache und Bild als Bausteine des Bündels und MCP
   auf dem Board (zuerst nur Loopback, ins Netz nur mit TLS).
 - **Laufzeit auf dem Gerät und mehr Hardware:** Rezepte als Target-Vorlagen, eine Rotationsstufe vor der
   Quantisierung, ein allgemeines ARM64-Target für den Raspberry Pi, Targets aus der Hardware-Probe, auf dem Board

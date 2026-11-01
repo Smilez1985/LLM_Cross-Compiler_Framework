@@ -640,13 +640,17 @@ set their variables (port, threads, memory limit, autostart, ...; each checked a
 files (a local file is hashed and copied into the bundle, an online item is pinned by its sha256 and size).
 
 Before anything is built or sent, the plan shows every component, every file with its source and size, the root
-actions that need llmcf-install, and its checks against the board's probe (architecture, init system, sudo, offline
+actions that run through llmcf-install, and its checks against the board's probe (architecture, init system, sudo, offline
 mode, memory). The bundle is signed with the framework's key and kept in this framework's store; its installer on the
 board installs only the unprivileged steps, each only once (a second run changes nothing, a run cut off continues),
-and shows a dry run, a status, a rollback and an uninstall of its own steps. Root actions stop the installer with the
-plain words that they need llmcf-install, the framework's root helper, which is not there yet: until then choose the
-unprivileged-only variant (no autostart unit). A deploy, an uninstall and a rollback ask you first ("No" is the
-default); stored bundles are deleted only from the full list you tick, into the trash or for good.
+and shows a dry run, a status, a rollback and an uninstall of its own steps. The root actions (the account of a
+component, its autostart unit, its memory and CPU limits) run only through llmcf-install, the framework's root
+helper in Rust, which the bundle carries signed: it shows its own plan, and after a second yes for them it runs as
+root through `sudo -n` (in private mode you may instead type the board account's password once for this run; it is
+never kept). It checks the bundle's signature itself against the root-owned key only, does only the typed actions of
+the signed manifest, changes nothing twice and keeps a journal, so its status, a rollback of its last run and the
+uninstall are exact. An AI never starts a root action. A deploy, an uninstall and a rollback ask you first ("No" is
+the default); stored bundles are deleted only from the full list you tick, into the trash or for good.
 
 For AI clients the optional tools `bundle_plan` (the plan as labels only, never a file, path, address or account)
 and `bundle_deploy` (you confirm every deploy in the framework's own window, never a standing approval or a

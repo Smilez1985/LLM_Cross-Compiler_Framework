@@ -1526,7 +1526,7 @@ variables:
   - {name: port, type: port, default: 8090, help: "Loopback-Port"}
   - {name: threads, type: threads, default: 0}
   - {name: language, type: choice, default: auto, choices: [auto, en, de]}
-  - {name: autostart, type: bool, default: false, help: "Beim Booten starten (braucht llmcf-install)"}
+  - {name: autostart, type: bool, default: false, help: "Beim Booten starten (Root-Aktionen über llmcf-install)"}
   - {name: user, type: user, default: llmcf}
   - {name: memory_limit_mb, type: memory_mb, default: 1024}
 files:
@@ -1592,3 +1592,29 @@ Exportiere deinen Baustein als signiertes Community-Paket der Art `block`: **Ext
 `block.yml` und seine Anleitung, von privaten Daten bereinigt; eine Installation prüft es als Baustein, bevor es in
 `community/blocks/` landet. Sobald ein Maintainer es in den signierten Index aufgenommen hat, nimmt der
 Enterprise-Modus es als `indexed`.
+
+### 12.6 Root-Aktionen und llmcf-install
+
+Ein Baustein führt selbst nie etwas als root aus. Mit `unit: true` und eingeschalteter Autostart-Variable listet das
+Manifest typisierte Root-Aktionen, und nur der Rust-Helfer `llmcf-install` des Frameworks (in `rust/llmcf-install/`)
+führt sie aus:
+
+| Aktion | Was sie tut | Ihre Felder |
+|---|---|---|
+| `create_user` | ein Systemkonto ohne Anmeldung, Home `/var/lib/llmcf/home/<user>` (ein vorhandenes Konto nur, wenn es ein solches Bündel-Konto ist) | `user` (nie root) |
+| `install_unit` | die Unit `llmcf-<name>.service` aus einer festen Vorlage (`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`), gestartet aus einer root-eigenen Kopie des Ordners der Komponente, dann `systemctl enable --now` | `component`, `unit`, `user` |
+| `set_cgroup` | das Drop-in `llmcf-cgroup.conf` mit `MemoryMax` und `CPUWeight` für eine Unit dieses Bündels | `unit`, `memory_max_mb`, `cpu_weight` |
+| `place_root_file` | eine Datei der Komponente (nur `llmcf-*.conf`) als Unit-Drop-in, in `/etc/tmpfiles.d/` oder in `/etc/sysctl.d/` | `component`, `place` (`unit-dropin`, `tmpfiles`, `sysctl`), `file`, bei einem Drop-in `unit` |
+
+Die Aktionen `remove_*` nehmen dieselben Felder und machen sie rückgängig; Deinstallieren und Zurückrollen nutzen
+stattdessen das Journal.
+
+Das Manifest prüft sie in Python und Rust nach denselben Regeln (eine gemeinsame Datei mit Testvektoren,
+`tests/data/bundle_manifest_vectors.json`): Ein `install_unit` braucht einen Start, ein `set_cgroup` nennt eine Unit,
+die ein `install_unit` desselben Bündels anlegt, ein `place_root_file` nennt eine Datei seiner Komponente.
+llmcf-install prüft die Signatur des Manifests selbst, nur gegen den root-eigenen Signaturschlüssel des Frameworks
+(`/etc/llmcf/allowed_signers`, sonst `/etc/llmcf/signing_key.pem`), liest für seine Pfade keine Umgebung, startet keine
+Shell und öffnet kein Netz. Sein Journal liegt in `/var/lib/llmcf/install/<Bündel-ID>/`. Muss das Programm eines
+Bausteins beim Start Dateien lesen, lege sie in den Ordner der Komponente: Die Unit läuft aus der root-eigenen Kopie
+unter `/var/lib/llmcf/bundle/<Bündel-ID>/` (das Dienstkonto kann das Home des ausrollenden Kontos nicht lesen), die
+auf dem Board die Größe der Komponente ein zweites Mal belegt.
