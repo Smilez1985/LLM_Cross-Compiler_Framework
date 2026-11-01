@@ -671,7 +671,10 @@ def test_alpine_is_disable_only_and_says_why_in_plain_words(tmp_path, extra):
     assert (done.ok, done.removal, done.reason, done.tool) == (True, "refused", "dependents", "apk"), (done, calls())
     assert done.packages == ("dropbear", "dropbear-openrc")
     assert not [c for c in calls() if c.startswith("apk del")], calls()
-    assert any("rc-service dropbear stop" in c for c in calls())
+    # the board script picks the init system from /run/systemd/system of the computer it runs on (a CI runner has
+    # systemd, this sandbox may not): Dropbear is switched off through that one, never removed
+    off = ("systemctl disable --now dropbear" if os.path.isdir("/run/systemd/system") else "rc-service dropbear stop")
+    assert any(off in c for c in calls()), calls()
     text = openssh_switch.removal_text(done)
     assert "stopped and switched off but not removed" in text and "libraries" in text and "Alpine" in text
     assert done.as_dict()["tool"] == "apk"
