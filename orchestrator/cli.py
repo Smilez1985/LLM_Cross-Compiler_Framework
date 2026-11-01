@@ -7318,7 +7318,8 @@ def bundle_plan(ctx: FrameworkContext, device_name: str, as_json: bool, **choice
 def bundle_build(ctx: FrameworkContext, device_name: str, allow_own: bool, **choice):
     """Plan the bundle, show the plan and build it into this framework's bundle store, signed with the framework's
     board key (nothing is sent to the board)"""
-    from orchestrator.runtime.bundle.generator import BundleError, build_bundle
+    from orchestrator.runtime.bundle import service
+    from orchestrator.runtime.bundle.generator import BundleError
     state_dir, device_id, plan = _bundle_plan(ctx, device_name, choice, allow_own)
     if not plan.ok and plan.own_blocks and not allow_own and set(plan.problems) == {
             p for p in plan.problems if "is not signed: it is used only after your yes" in p}:
@@ -7333,7 +7334,10 @@ def bundle_build(ctx: FrameworkContext, device_name: str, allow_own: bool, **cho
         console.print("[red]Nothing was built.[/red]")
         sys.exit(1)
     try:
-        built = build_bundle(plan, _bundle_store(ctx), _bundle_signer(ctx))
+        # a bundle with root actions carries llmcf-install for its board (built once per architecture, then kept)
+        signer = _bundle_signer(ctx)
+        built = service.build_for(plan, _bundle_store(ctx), signer, framework=ctx.framework_manager,
+                                  say=lambda msg: console.print(escape(msg)))
     except BundleError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
@@ -7382,10 +7386,90 @@ def _bundle_board(ctx: FrameworkContext, built):
     return state_dir, device_id, host, port, user, label
 
 
-def _bundle_run(ctx: FrameworkContext, bundle_id: str, action: str, *, ask: bool = False):
+def _bundle_opener(ctx: FrameworkContext, built):
+    """(open_session, host, port, label, device_id) of the board a stored bundle was made for: the person's login with
+    the framework's key only (person_steps.connect_stored, never a password for the login)."""
+    state_dir, device_id, host, port, user, label = _bundle_board(ctx, built)
+
+    def open_session():
+        client, _key = _open_device(state_dir, device_id, host, port, user, None, ctx=ctx, step="bundle")
+        return client
+    return open_session, host, port, label, device_id
+
+
+def _bundle_root(ctx: FrameworkContext, built, action: str, opener=None, *, ask: bool = True):
+    """llmcf-install `action` of a stored bundle on its board (service.run_root_on_board: the gate operation
+    bundle-root, sudo -n): `ask` first runs its plan of that action (service.ROOT_CHANGING_ACTIONS) and asks the
+    person's question with "No" as the default. When the board's sudo asks for a password, private mode prompts for
+    it once at a terminal (sent on stdin for sudo -S, never kept); enterprise mode refuses (sudo -n only). Prints the
+    report; exit 1 when it did not pass. Only the person runs this, never an AI."""
+    from orchestrator.runtime.bundle import service
+    from orchestrator.runtime.bundle.generator import BundleError
+    from orchestrator.runtime.device.remote import RemoteError
+    open_session, host, port, label, _device_id = opener or _bundle_opener(ctx, built)
+    password = {"text": ""}
+
+    def run(what: str):
+        try:
+            return service.run_root_on_board(open_session, built, what, password=password["text"],
+                                             say=lambda msg: console.print(escape(msg)))
+        except BundleError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(1)
+        except RemoteError as e:
+            _board_step_failed(ctx, e, host, port)
+
+    def with_password(what: str):
+        done = run(what)
+        if not done.report.needs_password:
+            return done
+        if not service.password_allowed(_framework_mode(ctx)):
+            console.print(f"[red]{escape(service.ENTERPRISE_NO_PASSWORD)}[/red]")
+            sys.exit(1)
+        if not _interactive():
+            console.print("[red]The board's sudo asks for a password, which only you can type at a terminal; nothing "
+                          "was changed.[/red]")
+            sys.exit(1)
+        password["text"] = click.prompt(service.PASSWORD_PROMPT, hide_input=True, default="", show_default=False)
+        if not password["text"]:
+            console.print("Nothing was changed on the board.")
+            sys.exit(1)
+        return run(what)
+
+    first = with_password(service.ROOT_CHANGING_ACTIONS[action] if ask else action)
+    for line in first.lines():
+        console.print(escape(line))
+    if not ask:
+        if not first.ok:
+            sys.exit(1)
+        return first
+    if not first.ok:
+        console.print("[red]llmcf-install's plan did not pass; nothing was changed.[/red]")
+        sys.exit(1)
+    if action != "apply" and first.report.result == "absent":
+        return first   # llmcf-install made nothing of this bundle on the board: nothing to undo
+    if not (_interactive() and click.confirm(service.root_question(action, built, label, service.root_count(first)),
+                                             default=False)):
+        console.print("Nothing was changed on the board by llmcf-install"
+                      + ("" if _interactive() else " (it needs your answer at a terminal)") + ".")
+        return None
+    result = run(action)
+    for line in result.lines():
+        console.print(escape(line))
+    if not result.ok:
+        if result.report.result == "failed":
+            console.print("[yellow]A root action failed after others were done; llmcf-install's journal says what: "
+                          f"llm-cli bundle rollback {built.bundle_id} --root undoes that run.[/yellow]")
+        sys.exit(1)
+    return result
+
+
+def _bundle_run(ctx: FrameworkContext, bundle_id: str, action: str, *, ask: bool = False, root: bool = True):
     """Runs the installer `action` of a stored bundle on its board through the person's login with the framework's
     key only (person_steps.connect_stored, never a password here); `ask`: first the installer's dry run of that
-    action, then the person's question with "No" as the default. Prints the report; exit 1 when it did not pass."""
+    action, then the person's question with "No" as the default. An apply that stops before the root actions goes on
+    with llmcf-install (_bundle_root: its plan, a second question) unless `root` is off; a status adds
+    llmcf-install's status. Prints the report; exit 1 when it did not pass."""
     from orchestrator.runtime.bundle import service
     from orchestrator.runtime.bundle.generator import BundleError
     from orchestrator.runtime.device.remote import RemoteError
@@ -7396,12 +7480,10 @@ def _bundle_run(ctx: FrameworkContext, bundle_id: str, action: str, *, ask: bool
             for line in revoked:
                 console.print(f"[red]{escape(line)}[/red]")
             sys.exit(1)
-    state_dir, device_id, host, port, user, label = _bundle_board(ctx, built)
+    opener = _bundle_opener(ctx, built)
+    open_session, host, port, label, device_id = opener
 
     def run(what: str):
-        def open_session():
-            client, _key = _open_device(state_dir, device_id, host, port, user, None, ctx=ctx, step="bundle")
-            return client
         try:
             return service.run_on_board(open_session, built, what, store=store, device_id=device_id,
                                         say=lambda msg: console.print(escape(msg)))
@@ -7429,29 +7511,40 @@ def _bundle_run(ctx: FrameworkContext, bundle_id: str, action: str, *, ask: bool
         console.print("[yellow]The apply did not finish; the next llm-cli bundle deploy continues in the same upload "
                       "folder.[/yellow]")
     if result.report.result == "stopped-root":
-        console.print("[yellow]The installer stopped before the root actions: they need llmcf-install, the "
-                      "framework's root helper (not there yet). Build the unprivileged-only variant to skip them."
-                      "[/yellow]")
+        if built.needs_root and root:
+            console.print("The unprivileged steps are done; the root actions follow through llmcf-install, after "
+                          "its plan and your own yes for them.")
+            _bundle_root(ctx, built, "apply", opener)
+        else:
+            console.print("[yellow]The installer stopped before the root actions: they run only through "
+                          "llmcf-install, after your own yes for them (llm-cli bundle deploy without --skip-root), "
+                          "or build the unprivileged-only variant to skip them.[/yellow]")
     if not result.ok:
         sys.exit(1)
+    if action == "status" and built.needs_root and result.report.result in ("installed", "partial"):
+        _bundle_root(ctx, built, "status", opener, ask=False)
     return result
 
 
 @bundle.command('deploy')
 @click.argument('bundle_id', metavar='BUNDLE')
 @click.option('--dry-run', is_flag=True, help="Send the bundle and run only the installer's plan (changes nothing)")
+@click.option('--skip-root', is_flag=True,
+              help="Stop before the root actions (they run through llmcf-install on a later deploy)")
 @pass_context
-def bundle_deploy(ctx: FrameworkContext, bundle_id: str, dry_run: bool):
+def bundle_deploy(ctx: FrameworkContext, bundle_id: str, dry_run: bool, skip_root: bool):
     """Send a stored bundle to its board and run its installer there, after its dry run and your yes at a terminal
-    ("No" is the default); a deploy cut off continues where it stopped"""
-    _bundle_run(ctx, bundle_id, "plan" if dry_run else "apply", ask=not dry_run)
+    ("No" is the default); a deploy cut off continues where it stopped. Root actions follow through llmcf-install
+    after its plan and a second yes (sudo -n, or in private mode your password typed once)"""
+    _bundle_run(ctx, bundle_id, "plan" if dry_run else "apply", ask=not dry_run, root=not skip_root)
 
 
 @bundle.command('status')
 @click.argument('bundle_id', metavar='BUNDLE')
 @pass_context
 def bundle_status(ctx: FrameworkContext, bundle_id: str):
-    """What the board's kept installer says of the bundle: every step done or not (changes nothing)"""
+    """What the board's kept installer says of the bundle: every step done or not, and llmcf-install's status of its
+    root actions (changes nothing)"""
     _bundle_run(ctx, bundle_id, "status")
 
 
@@ -7459,15 +7552,30 @@ def bundle_status(ctx: FrameworkContext, bundle_id: str):
 @click.argument('bundle_id', metavar='BUNDLE')
 @pass_context
 def bundle_uninstall(ctx: FrameworkContext, bundle_id: str):
-    """Remove the bundle's own steps from its board, after the installer's list and your yes ("No" is the default)"""
+    """Remove the bundle's own steps from its board, after the installer's list and your yes ("No" is the default);
+    first what llmcf-install made as root (its journal's list, its own question)"""
+    _store, built = _bundle_get(ctx, bundle_id)
+    if built.needs_root:
+        if _bundle_root(ctx, built, "uninstall") is None:
+            return   # the root part stays, so the installer the board kept (and llmcf-install with it) stays too
     _bundle_run(ctx, bundle_id, "uninstall", ask=True)
 
 
 @bundle.command('rollback')
 @click.argument('bundle_id', metavar='BUNDLE')
+@click.option('--root', 'root_part', is_flag=True,
+              help="Roll back the last run of llmcf-install (the root actions) instead of the installer's last apply")
 @pass_context
-def bundle_rollback(ctx: FrameworkContext, bundle_id: str):
-    """Undo the last apply of the bundle on its board, after the installer's status and your yes ("No" default)"""
+def bundle_rollback(ctx: FrameworkContext, bundle_id: str, root_part: bool):
+    """Undo the last apply of the bundle on its board, after the installer's status and your yes ("No" default);
+    with --root the last run of its root actions (llmcf-install's journal)"""
+    if root_part:
+        _store, built = _bundle_get(ctx, bundle_id)
+        if not built.needs_root:
+            console.print(f"[red]Bundle {bundle_id} has no root actions.[/red]")
+            sys.exit(1)
+        _bundle_root(ctx, built, "rollback")
+        return
     _bundle_run(ctx, bundle_id, "rollback", ask=True)
 
 

@@ -138,9 +138,9 @@ ROLLBACK_QUESTION = ("Roll back the last run of bundle {bundle} on board {board}
 CHANGING_ACTIONS = {"apply": "plan", "uninstall": "plan-uninstall", "rollback": "status"}
 # The person's question before llmcf-install changes the board as root ("No" is the default; the CLI and the Board
 # bundle window ask exactly these words, after its own plan of that action). {count}: the root actions listed.
-ROOT_QUESTION = ("Run the {count} root action(s) of bundle {bundle} on board {board} as root now, through llmcf-install "
-                 "(the framework's signed root helper)? It does only what the signed manifest lists above and keeps a "
-                 "journal for rollback and uninstall.")
+ROOT_QUESTION = ("Run the {count} root action(s) of bundle {bundle} on board {board} as root now, through "
+                 "llmcf-install (the framework's signed root helper)? It does only what the signed manifest lists "
+                 "above and keeps a journal for rollback and uninstall.")
 ROOT_UNINSTALL_QUESTION = ("Remove what llmcf-install made for bundle {bundle} on board {board} (the {count} entries "
                            "listed above), as root? Only what its journal says it made is removed.")
 ROOT_ROLLBACK_QUESTION = ("Roll back the last run of llmcf-install for bundle {bundle} on board {board}, as root? Its "
