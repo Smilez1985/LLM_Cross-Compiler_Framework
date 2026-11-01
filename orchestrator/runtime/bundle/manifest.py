@@ -58,6 +58,13 @@ RE_ARG = re.compile(r"^(?:@DIR@/)?[A-Za-z0-9._+:=,-][A-Za-z0-9._+/:=,-]{0,255}$"
 # An online item: https (or http, only for an address the locality rule counted as local), no quoting characters,
 # no credentials, no spaces.
 RE_URL = re.compile(r"^https?://[A-Za-z0-9.-]+(?::[0-9]{1,5})?(?:/[A-Za-z0-9._~+,=:@%/-]*)?$", re.ASCII)
+# A unit llmcf-install writes, a file it puts into one of the ROOT_PLACES (only llmcf's own .conf files) and a word
+# of the board facts (os, init system). llmcf-install (rust/llmcf-install/src/manifest.rs) checks the very same rules;
+# tests/data/bundle_manifest_vectors.json holds the vectors both sides are tested with.
+RE_UNIT = re.compile(r"^llmcf-[a-z0-9-]{1,40}\.service$", re.ASCII)
+RE_ROOT_FILE = re.compile(r"^llmcf-[a-z0-9._-]{1,60}\.conf$", re.ASCII)
+RE_FACT = re.compile(r"^[a-z0-9_.-]{1,32}$", re.ASCII)
+MAX_ROOT_ACTIONS = 64
 
 # The variable types of a building block, with the bounds every value is checked against.
 VARIABLE_TYPES = ("port", "uint", "threads", "memory_mb", "bool", "user", "word", "choice", "file")
@@ -276,7 +283,7 @@ class RootAction(_Strict):
             raise ValueError("component must be a component id")
         if self.user is not None:
             check_value("user", self.user, name="user")
-        if self.unit is not None and not re.fullmatch(r"llmcf-[a-z0-9-]{1,40}\.service", self.unit, re.ASCII):
+        if self.unit is not None and not RE_UNIT.fullmatch(self.unit):
             raise ValueError("a unit is named llmcf-<name>.service")
         if self.file is not None:
             check_value("file", self.file, name="file")
@@ -286,15 +293,20 @@ class RootAction(_Strict):
         missing = [k for k in need if getattr(self, k) is None]
         if missing:
             raise ValueError(f"{self.action} needs {', '.join(missing)}")
+        if self.action.endswith("root_file"):
+            if not RE_ROOT_FILE.fullmatch(self.file or ""):
+                raise ValueError("a root file is named llmcf-<name>.conf")
+            if self.place == "unit-dropin" and self.unit is None:
+                raise ValueError("a unit drop-in names its unit")
         return self
 
 
 class BoardFacts(_Strict):
     """The board the bundle was made for (from its probe: labels and fixed words only, no address, no account)."""
     device_id: str = Field(pattern=r"^[0-9a-f]{8,64}$")
-    os: str = "linux"
+    os: str = Field("linux", pattern=RE_FACT.pattern)
     arch: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,32}$")
-    init_system: Optional[str] = None
+    init_system: Optional[str] = Field(None, pattern=RE_FACT.pattern)
 
 
 class BundleManifest(_Strict):
@@ -326,9 +338,20 @@ class BundleManifest(_Strict):
         ids = [c.id for c in self.components]
         if len(ids) != len(set(ids)):
             raise ValueError("a component id twice")
+        if len(self.root_actions) > MAX_ROOT_ACTIONS:
+            raise ValueError(f"at most {MAX_ROOT_ACTIONS} root actions")
+        units = {a.unit for a in self.root_actions if a.action == "install_unit"}
         for action in self.root_actions:
             if action.component not in ids:
                 raise ValueError(f"root action {action.action} names no component of the bundle")
+            comp = next(c for c in self.components if c.id == action.component)
+            if action.action == "install_unit" and comp.start is None:
+                raise ValueError(f"root action install_unit: component {comp.id} has no start")
+            if action.action == "set_cgroup" and action.unit not in units:
+                raise ValueError(f"root action set_cgroup: unit {action.unit} is installed by no install_unit of "
+                                 "the bundle")
+            if action.action == "place_root_file" and action.file not in {f.name for f in comp.files}:
+                raise ValueError(f"root action place_root_file: {action.file} is no file of component {comp.id}")
         return self
 
     def as_json(self) -> Dict[str, Any]:
@@ -378,6 +401,7 @@ def problems_of(data: Any) -> List[str]:
 
 
 __all__ = ["BoardFacts", "BundleManifest", "Component", "FILE_MODES", "FileEntry", "KINDS", "MODES", "ManifestError",
-           "RE_ARG", "RE_FILE", "RE_ID", "RE_SHA", "RE_URL", "RE_WORD", "ROLES", "ROOT_ACTIONS", "ROOT_PLACES",
+           "MAX_ROOT_ACTIONS", "RE_ARG", "RE_FACT", "RE_FILE", "RE_ID", "RE_ROOT_FILE", "RE_SHA", "RE_UNIT", "RE_URL",
+           "RE_WORD", "ROLES", "ROOT_ACTIONS", "ROOT_PLACES",
            "RootAction", "SCHEMA", "StartSpec", "VARIABLE_TYPES", "check_value", "dump_manifest", "load_manifest",
            "problems_of"]

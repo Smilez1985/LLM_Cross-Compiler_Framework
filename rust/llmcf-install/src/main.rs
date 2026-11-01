@@ -76,7 +76,8 @@ fn main() -> ExitCode {
         return refuse(install::EXIT_REFUSED, "run it with sudo as the framework's board account");
     }
     let account = match sys::account(&env, &name) {
-        Some(a) if a.uid != 0 && sys::plain_abs(&a.home) => a,
+        // (a test build run by root, as on some CI runners, has the test's own account uid 0)
+        Some(a) if (a.uid != 0 || env.test) && sys::plain_abs(&a.home) => a,
         _ => return refuse(install::EXIT_REFUSED, "the board account has no plain home folder in the password file"),
     };
     ExitCode::from(install::run(&env, action, bid, account) as u8)
