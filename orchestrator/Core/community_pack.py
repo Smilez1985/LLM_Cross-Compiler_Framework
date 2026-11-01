@@ -53,7 +53,7 @@ SIGNATURE_NAME = "pack.sig"
 # Written next to an installed pack (source, trust level, digests); never part of a pack or its fingerprint.
 PROVENANCE_NAME = ".lcf-provenance.json"
 RESERVED_NAMES = frozenset({MANIFEST_NAME, SIGNATURE_NAME, PROVENANCE_NAME})
-Kind = Literal["target", "recipe", "knowledge"]
+Kind = Literal["target", "recipe", "knowledge", "block"]   # block: a board bundle building block
 PACK_KINDS = get_args(Kind)
 # Packs carry scripts, recipes and text, never model weights.
 MAX_PACK_BYTES = 512 * 1024 * 1024

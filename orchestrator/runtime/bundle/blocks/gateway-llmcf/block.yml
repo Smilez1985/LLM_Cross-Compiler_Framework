@@ -1,0 +1,14 @@
+schema: llmcf-bundle-block/1
+id: gateway-llmcf
+version: 0.1.0
+kind: gateway
+title: Gateway (llmcf-gateway)
+status: template
+summary: >-
+  Documented template: llmcf-gateway, the token-saving middleware in front of the board's model. Not buildable yet:
+  the Rust gateway is planned.
+variables:
+  - {name: port, type: port, default: 8088}
+files:
+  - {role: program, from: person, name: llmcf-gateway, mode: "0755", formats: [elf]}
+memory: {base_mb: 64}

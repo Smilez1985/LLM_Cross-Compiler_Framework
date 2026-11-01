@@ -1,0 +1,13 @@
+schema: llmcf-bundle-block/1
+id: harness-agent
+version: 0.1.0
+kind: harness
+title: Agent harness
+status: template
+summary: >-
+  Documented template: an agent harness at a pinned commit under its own account. Not buildable yet: the watched
+  harness installer is planned.
+variables:
+  - {name: user, type: user, default: llmcf-agent}
+files: []
+memory: {base_mb: 256}

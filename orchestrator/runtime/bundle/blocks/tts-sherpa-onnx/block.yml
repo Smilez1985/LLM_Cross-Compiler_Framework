@@ -1,0 +1,19 @@
+schema: llmcf-bundle-block/1
+id: tts-sherpa-onnx
+version: 0.1.0
+kind: tts
+title: Speech output (sherpa-onnx)
+status: template
+summary: >-
+  Documented template: sherpa-onnx's offline TTS server with one TTS model in sherpa-onnx's layout. Not buildable
+  yet: its model is a folder (model, tokens, data), and a bundle file is one file today.
+variables:
+  - {name: port, type: port, default: 8095}
+  - {name: threads, type: threads, default: 0}
+files:
+  - {role: program, from: person, name: sherpa-onnx-offline-tts-server, mode: "0755", formats: [elf]}
+  - {role: model, from: person, name: model.onnx, formats: [sherpa-onnx], licence: required}
+  - {role: data, from: person, name: tokens.txt, formats: [text]}
+memory: {base_mb: 128, model_factor: 2.0}
+notes:
+  - "Planned: a model folder (espeak-ng-data) as one checked archive of the bundle."

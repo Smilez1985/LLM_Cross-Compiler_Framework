@@ -1,0 +1,19 @@
+schema: llmcf-bundle-block/1
+id: vision-mmproj
+version: 0.1.0
+kind: vision
+title: Vision (llama-server with --mmproj)
+status: template
+summary: >-
+  Documented template: the board's llama.cpp runtime with a vision model and its multimodal projector (--mmproj).
+  Not buildable yet: the runtime's start script does not pass --mmproj on.
+variables:
+  - {name: port, type: port, default: 8081}
+  - {name: ctx_size, type: uint, default: 4096, min: 256, max: 262144}
+files:
+  - {role: runtime, from: runtime, name: runtime.tar.gz, formats: [tar.gz]}
+  - {role: model, from: person, name: model.gguf, formats: [gguf], licence: required}
+  - {role: mmproj, from: person, name: mmproj.gguf, formats: [mmproj-gguf], licence: required}
+memory: {base_mb: 384, model_factor: 1.3}
+notes:
+  - "Planned: --mmproj in the runtime start script's checked options (ROADMAP row 'Vision with --mmproj')."
