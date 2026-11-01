@@ -365,7 +365,12 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
             note_wait(ctx.actor, inp.request_id)
         if seconds and not ctx.metadata.get("waited"):  # Ditto: waits in its own thread; MCP waited on its loop
             service.wait_for_change(inp.request_id, seconds)
-        return service.get_status(inp.request_id)
+        status = service.get_status(inp.request_id)
+        # an interrupted build of this request with finished stages kept: only the person decides (a pending
+        # decision they answer in the GUI or at a terminal); the AI reads the labels and the fixed stage names
+        from orchestrator.Core.interrupted_build import ai_notes
+        ctx.notes.extend(ai_notes(framework, inp.request_id, ctx.actor))
+        return status
 
     def get_job_status(inp: JobWaitIn, ctx: ToolContext) -> JobStatusOut:
         ctx.notes.extend(ctx.metadata.get("wait_notes", []))

@@ -134,6 +134,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `build save` | Save a build that waits in the framework's build folder to the output folder or another folder |
 | `build image plan/sources/export/import` | The build container image of a target: can an offline build make it, the build sources in your network, move it to another offline computer as a checked file |
 | `build deps` | List, fetch and delete the dependencies of module CMake options that are fetched before a build |
+| `build interrupted list/continue/delete` | A build that stopped with finished stages kept: continue it, or delete what it left |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | List finished builds / pack a build into a ZIP / upload and install it on a board |
 | `deploy ssh-config show/edit/import` | The framework's own OpenSSH settings file (read instead of `~/.ssh/config`): show it, set a board's block, copy one block from `~/.ssh/config` |
 | `ditto login` / `ditto logout` | Sign Ditto in to a provider (the key from a hidden prompt, stdin or an environment variable, checked before it is stored) / sign out |
@@ -633,6 +634,28 @@ $ echo $?
 ```
 
 In the GUI: Deployment tab > **Save...**.
+
+### build interrupted
+
+```
+llm-cli build interrupted list
+llm-cli build interrupted continue BUILD_ID
+llm-cli build interrupted delete BUILD_ID
+```
+
+A build that stopped before its end (it failed, you cancelled it, a time limit stopped it, or the framework's process
+ended) keeps its folder when stages had finished there: started again on the same work folder, the stage runner does
+not run a finished stage again. A build with nothing to use again is deleted at once. Right after such a build ended,
+`build start` asks at a terminal: continue, delete, or later.
+
+| Command | What it does |
+|---------|--------------|
+| `list` | Every kept build: its target, its finished stages, its size, its folder, and whether an AI asked about it. |
+| `continue BUILD_ID` | Starts the same build again on its kept work folder. |
+| `delete BUILD_ID` | Shows the one item (full path, size, what it is) and deletes it after your yes at the terminal. When a stage module left files only the stage account could change, a short clean-up container runs first as that account (no network, no capability). The result says what stayed, with its paths. |
+
+Only you decide. An AI caller (MCP, Ditto) reads the kept build in `get_build_status` with its label and its finished
+stages, and its question waits in `list` for you. In the GUI: Build > **Build History...** > **Continue or delete...**.
 
 ### build deps
 

@@ -295,6 +295,9 @@ class BuildProgress:
     end_protection: Optional[str] = None
     # The runtime layer the stage containers ran with: its verdict, the toolbox way and the checks passed
     runtime_layer: Optional[Dict[str, Any]] = None
+    # A build that stopped with finished stages: its folder is kept, and the person decides to continue it or delete
+    # what it left (Core/interrupted_build.py)
+    resumable: bool = False
 
     def end_facts(self) -> Optional[Dict[str, Any]]:
         """{'reason', 'exit', 'stage'} of an ended build (build_info.json's "end", the build record), else None."""
@@ -504,7 +507,8 @@ class BuildEngine:
         record = dict(info, status=progress.status.value, stage=progress.current_stage,
                       progress=progress.progress_percent, end_reason=progress.end_reason,
                       ended=progress.end_time.isoformat(timespec="seconds") if progress.end_time else None,
-                      error=progress.errors[-1] if progress.errors else None)
+                      error=progress.errors[-1] if progress.errors else None,
+                      resumable=bool(getattr(progress, "resumable", False)) or None)
         try:
             build_records.write_record(self.records_dir, record)
         except (OSError, TypeError, ValueError) as e:
@@ -821,7 +825,11 @@ class BuildEngine:
                 raise RuntimeError("the stable name did not land on the build's image")
             self.docker_client.images.remove(tag, noprune=True)
 
-    def cleanup_build(self, build_id: str) -> bool:
+    def cleanup_build(self, build_id: str, keep_folder: bool = False) -> bool:
+        """Removes the build's container and its per-build image name; its folder too, unless `keep_folder` (an
+        interrupted build the person may continue: Core/interrupted_build.py). The folder goes through
+        interrupted_build.discard_now, after the clean-up container when a stage module left files only the stage
+        account could make removable."""
         progress = self._builds.get(build_id)
         if not progress: return False
         
@@ -843,17 +851,19 @@ class BuildEngine:
             # The builder never deletes an image (round 7 item 12): the build's image gets the stable name of its
             # target, then only the per-build name is dropped.
             tag = self._build_images.pop(build_id, None)
+            build_temp = self.cache_dir / "builds" / build_id
+            cleanup = self._cleanup_runner(tag, build_temp)
             if tag and self.docker_client:
                 try:
                     self._keep_as_last_build(tag)
                 except Exception as e:
                     self.logger.debug(f"The image of {build_id} keeps its per-build name: {e}")
-            
-            # Remove temp dirs
-            build_temp = self.cache_dir / "builds" / build_id
-            if build_temp.exists(): 
-                shutil.rmtree(build_temp)
-                
+
+            if not keep_folder:
+                from orchestrator.Core.interrupted_build import discard_now
+                left = discard_now(build_temp, cleanup)
+                if left:
+                    self.logger.warning(f"{len(left)} items of the build's working folder stayed.")
             return True
         except Exception: return False
         finally:
@@ -861,6 +871,42 @@ class BuildEngine:
             if previous.value in TERMINAL_STATES:
                 progress.status = previous
     
+    def _cleanup_runner(self, image: Optional[str], build_temp: Path):
+        """The clean-up container of a build folder (interrupted_build.run_cleanup) as a call, or None without an
+        engine or an image: the stage account makes what it wrote removable, nothing else."""
+        if not image or self.docker_client is None or not self._get_conf("build_sandbox", True):
+            return None
+        from orchestrator.Core import interrupted_build
+        from orchestrator.utils.docker_engine import engine_name
+        from orchestrator.utils.sandbox import runner_ids
+        try:   # by its id: the per-build name is dropped right after (_keep_as_last_build)
+            image = str(getattr(self.docker_client.images.get(image), "id", "") or image)
+        except Exception:  # noqa: BLE001 - the name still works while it exists
+            pass
+
+        def run():
+            try:
+                return interrupted_build.run_cleanup(self.docker_client, image, runner_ids(self.docker_client)[1],
+                                                     build_temp, Path(self.cache_dir),
+                                                     engine=engine_name(self.docker_client) or "docker")
+            except Exception as e:  # noqa: BLE001 - the deletion reports what stays; this says why
+                return f"The clean-up container could not run: {e}"
+        return run
+
+    def _keep_or_discard(self, config: BuildConfiguration, prog: "BuildProgress") -> None:
+        """After a failure or a Cancel: a build with finished stages keeps its folder (the person decides to continue
+        it or delete what it left); any other build's folder goes at once."""
+        from orchestrator.Core import interrupted_build
+        kept = interrupted_build.kept_build(Path(self.cache_dir), config.build_id)
+        if kept is not None:
+            prog.resumable = True
+            prog.add_warning(interrupted_build.KEPT_WARNING.format(done=kept.done_text()))
+            self._audit_build(config, "interrupted_build", "kept", kept.label)
+        try:
+            self.cleanup_build(config.build_id, keep_folder=kept is not None)
+        except Exception:
+            pass
+
     def _execute_build(self, config: BuildConfiguration):
         """Main execution flow running in worker thread."""
         bid = config.build_id
@@ -979,9 +1025,7 @@ class BuildEngine:
             prog.end_reason = reason_of_timeout(e) or "failed"
             prog.add_error(self._disk_full_text(e) or str(e))
             self.logger.error(f"Build {bid} failed: {e}", exc_info=True)
-            # Try cleanup even on failure
-            try: self.cleanup_build(bid)
-            except Exception: pass
+            self._keep_or_discard(config, prog)
             return BuildStatus.FAILED
 
     def _disk_full_text(self, error: BaseException) -> Optional[str]:
@@ -996,8 +1040,7 @@ class BuildEngine:
     def _end_cancelled(self, config: BuildConfiguration, prog: "BuildProgress") -> "BuildStatus":
         self._discard_staged(config, prog)
         prog.end_time = datetime.now()
-        try: self.cleanup_build(config.build_id)
-        except Exception: pass
+        self._keep_or_discard(config, prog)
         return BuildStatus.CANCELLED
 
     def _record_target(self, config: BuildConfiguration, progress: BuildProgress, target_path: Path):
