@@ -55,7 +55,7 @@ def cli_board(tmp_path, monkeypatch):
     monkeypatch.setattr(cli_module, "console", Console(width=1000, color_system=None))
     model, wmodel, prog = _files(tmp_path)
     board.state, board.opened = state, opened
-    board.choice = ["--preset", "stt", "--file", f"stt.model={wmodel}", "--file", f"stt.program={prog}",
+    board.choice = ["--block", "stt-whisper-cpp-program", "--file", f"stt.model={wmodel}", "--file", f"stt.program={prog}",
                     "--licence", "stt.model=MIT"]
     board.prog = prog
     return board
@@ -83,7 +83,7 @@ def test_plan_shows_components_files_with_source_and_size_root_actions_and_the_p
     res = invoke_plain("bundle", "plan", "ZERO 3W", *cli_board.choice, "--set", "stt.autostart=yes")
     assert res.code == 0, res.out
     out = res.out
-    assert "stt: block stt-whisper-cpp" in out and "autostart=True" in out
+    assert "stt: block stt-whisper-cpp-program" in out and "autostart=True" in out
     assert f"from {cli_board.prog}" in out and "program: whisper-server" in out and "MB" in out
     assert "root action: create_user for stt (llmcf-install)" in out
     assert "root action: install_unit" in out and "root action: set_cgroup" in out
@@ -102,7 +102,8 @@ def test_plan_json_is_labels_only_no_path_no_account(cli_board):
     assert labels["ok"] and labels["root_actions"] == ["create_user", "install_unit", "set_cgroup"]
     text = json.dumps(labels)
     assert str(cli_board.prog.parent) not in text and "llmcfsvc" not in text and "dietpi" not in text
-    assert {c["check"] for c in labels["checks"]} == {"architecture", "init system", "sudo", "offline mode", "memory"}
+    assert {c["check"] for c in labels["checks"]} == {"architecture", "init system", "sudo", "offline mode", "memory",
+                                                   "component stt"}
 
 
 def test_a_plan_with_problems_exits_1_and_builds_nothing(cli_board):
@@ -174,11 +175,11 @@ def test_an_unknown_bundle_is_refused(cli_board):
 def test_block_list_and_new(cli_board, tmp_path, monkeypatch):
     res = invoke_plain("bundle", "block", "list", "--json")
     ids = {b["id"] for b in json.loads(res.stdout)["blocks"]}
-    assert {"llm-llama-server", "stt-whisper-cpp", "tts-sherpa-onnx"} <= ids
+    assert {"llm-llama-server", "stt-whisper-cpp-program", "tts-sherpa-onnx"} <= ids
     app = tmp_path / "app"
     monkeypatch.setattr(service, "catalog_sources", lambda framework: (app, None))
     res = invoke_plain("bundle", "block", "new", "stt-mine", "--kind", "stt", "--title", "Mine",
-                       "--from", "stt-whisper-cpp")
+                       "--from", "stt-whisper-cpp-program")
     assert res.code == 0 and "Made block stt-mine" in res.out, res.out
     assert (app / "community" / "blocks" / "stt-mine" / "block.yml").is_file()
     res = invoke_plain("bundle", "block", "list", "--json")
@@ -190,7 +191,7 @@ def test_build_asks_before_an_own_unsigned_block_no_by_default(cli_board, tmp_pa
     from orchestrator import cli as cli_module
     from orchestrator.runtime.bundle import blocks as blk
     app = tmp_path / "app"
-    blk.new_block(app / "community" / "blocks", "stt-mine", kind="stt", title="Mine", template="stt-whisper-cpp")
+    blk.new_block(app / "community" / "blocks", "stt-mine", kind="stt", title="Mine", template="stt-whisper-cpp-program")
     monkeypatch.setattr(service, "catalog_sources", lambda framework: (app, None))
     choice = [c.replace("stt", "stt", 1) for c in cli_board.choice[2:]]
     res = invoke_plain("bundle", "build", "ZERO 3W", "--block", "stt-mine", *choice)
@@ -310,8 +311,9 @@ def test_the_checks_name_what_the_plan_found_never_a_second_rule(tmp_path):
     from test_board_bundle import _profile, _selection
     plan = _plan(tmp_path)
     checks = {c["check"]: c["result"] for c in plan.checks}
+    # one check per component since the components' own probe checks (the test runtime names no architecture)
     assert checks == {"architecture": "passed", "init system": "passed", "sudo": "passed", "offline mode": "passed",
-                      "memory": "passed"}
+                      "memory": "passed", "component llm": "unknown", "component stt": "passed"}
     (tmp_path / "whisper-server").write_bytes(_elf(0x3E))
     bad = _plan(tmp_path, _selection(tmp_path, values={"stt": {"autostart": "yes"}}),
                 profile=_profile(INIT_SYSTEM="openrc", RAM_TOTAL_MB="512"))

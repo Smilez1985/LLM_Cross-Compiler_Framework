@@ -1,0 +1,30 @@
+schema: llmcf-bundle-block/1
+id: stt-nemo-sherpa
+version: 0.1.0
+kind: stt
+title: Speech recognition with NVIDIA NeMo models (sherpa-onnx) - opt-in
+status: template
+summary: >-
+  Documented opt-in template: sherpa-onnx's offline recognition server with an NVIDIA NeMo speech model exported to
+  ONNX. Never part of a preset: its models come under their publisher's own licence terms, which are not all free
+  licences; the person reads and accepts them before the block is used. Not buildable yet: sherpa-onnx is not built
+  by the framework yet, and a model folder is one file today.
+variables:
+  - {name: port, type: port, default: 8091}
+  - {name: threads, type: threads, default: 0}
+files:
+  - {role: program, from: person, name: sherpa-onnx-offline-websocket-server, mode: "0755", formats: [elf]}
+  - {role: model, from: person, name: model.onnx, formats: [onnx], licence: required}
+  - {role: data, from: person, name: tokens.txt, formats: [text]}
+memory: {base_mb: 160, model_factor: 1.6}
+terms:
+  - part: NVIDIA NeMo speech models
+    licence: other
+    free: false
+    text: >-
+      NVIDIA NeMo speech models are published under the licence each model's own page names. Some come under a free
+      licence such as CC-BY-4.0, others under NVIDIA's own model licence, whose terms are not a free licence and may
+      limit how you use, share or change the model. Read the licence of the exact model you pick on its page before
+      you accept; the framework cannot read it for you.
+notes:
+  - "Planned: sherpa-onnx built by the framework, and a model folder as one checked archive of the bundle."

@@ -33,6 +33,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from orchestrator.runtime.build import ggml_cpu_options as _cpu_options
+from orchestrator.runtime.build import projects as _projects
 from orchestrator.runtime.catalog import BuildBase, CudaToolkit, RuntimeCatalog, version_tuple
 from orchestrator.runtime.profile import HardwareProfile
 
@@ -49,11 +50,8 @@ BACKENDS = ("auto", "cpu", "cuda", "vulkan", "rocm", "metal")
 GPU_BACKENDS = ("cuda", "vulkan", "rocm", "metal")
 
 # What each purpose builds. llama-cli exists only when the server is built (tools/CMakeLists.txt:24-28 at the pin).
-TARGETS: Mapping[str, Tuple[str, ...]] = {
-    "host-runtime": ("llama-server", "llama-cli", "llama-bench", "llama-perplexity"),
-    "host-tools": ("llama-quantize", "llama-imatrix", "llama-perplexity", "llama-completion", "llama-bench"),
-    "device-runtime": ("llama-server", "llama-cli", "llama-bench", "llama-perplexity"),
-}
+# The programs of every project the self-build path builds are listed in projects.py; these are llama.cpp's.
+TARGETS: Mapping[str, Tuple[str, ...]] = _projects.PROJECTS[_projects.LLAMA_CPP].targets
 
 # --- download-capable options of llama.cpp at the pin (paths in the llama.cpp tree) ---------------------------------
 # Re-checked at every pin bump (CONTRIBUTING.md, "Bumping the llama.cpp pin").
@@ -86,6 +84,24 @@ NEVER_SET: Mapping[str, str] = {
 DEPRECATED_DOWNLOAD_OPTIONS: Mapping[str, str] = {
     "LLAMA_CURL": "CMakeLists.txt:195 deprecated and ignored (llama_option_depr); older versions link libcurl to "
                   "download models",
+}
+
+# --- whisper.cpp at its pin (configs/llama_runtime.yml whisper_cpp.source; paths in the whisper.cpp tree) ------------
+# The same rule as for llama.cpp: every download-capable option OFF, FETCHCONTENT_FULLY_DISCONNECTED=ON, NEVER_SET
+# (its ggml options) never set. Re-checked at every whisper.cpp pin bump (CONTRIBUTING.md).
+WHISPER_DOWNLOAD_OPTIONS_OFF: Mapping[str, str] = {
+    "WHISPER_CURL": "CMakeLists.txt:108 links libcurl to download a model from an address",
+    "WHISPER_SDL2": "examples/CMakeLists.txt:112-120 builds talk-llama, whose examples/talk-llama/CMakeLists.txt:9-26 "
+                    "fetches llama.cpp with FetchContent",
+    "GGML_CPU_KLEIDIAI": "ggml/src/ggml-cpu/CMakeLists.txt:647-676 fetches the KleidiAI source archive",
+    "GGML_OPENMP_FETCH": "ggml/src/CMakeLists.txt:273-306 downloads an LLVM OpenMP installer and licence",
+}
+# What every whisper.cpp build of the framework sets beside them: the board programs only (whisper-server, -cli,
+# -bench from examples/), no tests, no ffmpeg linking, none of the vendor runtimes (Core ML, OpenVINO, Vitis AI).
+WHISPER_FIXED: Mapping[str, str] = {
+    "WHISPER_BUILD_TESTS": "OFF", "WHISPER_BUILD_EXAMPLES": "ON", "WHISPER_BUILD_SERVER": "ON",
+    "WHISPER_COMMON_FFMPEG": "OFF", "WHISPER_COREML": "OFF", "WHISPER_OPENVINO": "OFF", "WHISPER_VITISAI": "OFF",
+    "WHISPER_FATAL_WARNINGS": "OFF", "WHISPER_USE_SYSTEM_GGML": "OFF",
 }
 
 # CMake variables that make CMake run a script file at project() (cmake-variables(7): CMAKE_PROJECT_INCLUDE,
@@ -312,7 +328,10 @@ class BuildPlan:
             d = step.as_dict()
             d["options"] = {k: v for k, v in step.options if k not in _NOT_IN_BUILD_ID}
             steps.append(d)
-        return {"recipe": self.recipe_version, "source": {"commit": self.source["commit"], "tag": self.source["tag"]},
+        source = {"commit": self.source["commit"], "tag": self.source["tag"]}
+        if self.source.get("project") not in (None, _projects.LLAMA_CPP):
+            source["project"] = self.source["project"]   # llama.cpp's build IDs stay what they were
+        return {"recipe": self.recipe_version, "source": source,
                 "target": {k: self.target[k] for k in ("os", "arch", "libc")}, "builder": dict(self.builder),
                 "steps": steps, "toolchain": dict(self.toolchain)}
 
@@ -402,6 +421,13 @@ def build_id_of(inputs: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("ascii")).hexdigest()
 
 
+def download_options_off(project: Optional[str] = None) -> Mapping[str, str]:
+    """The download-capable options a build of `project` sets to OFF (llama.cpp: DOWNLOAD_OPTIONS_OFF; whisper.cpp:
+    WHISPER_DOWNLOAD_OPTIONS_OFF)."""
+    name = _projects.project(project).name
+    return WHISPER_DOWNLOAD_OPTIONS_OFF if name == _projects.WHISPER_CPP else DOWNLOAD_OPTIONS_OFF
+
+
 def refused_option(name: str, value: Optional[str]) -> Optional[str]:
     """Why the CMake option NAME=VALUE has no place in a llama.cpp build of the framework, or None: it downloads at
     configure time whenever it is set (NEVER_SET), it makes CMake run a script (SCRIPT_VARIABLE_RE), or it switches on what
@@ -415,6 +441,8 @@ def refused_option(name: str, value: Optional[str]) -> Optional[str]:
         return f"{name} makes CMake run a CMake script, which can set any option"
     if name in DOWNLOAD_OPTIONS_OFF and value != "OFF":
         return f"{name} must be OFF on every build: {DOWNLOAD_OPTIONS_OFF[name]}"
+    if name in WHISPER_DOWNLOAD_OPTIONS_OFF and value != "OFF":
+        return f"{name} must be OFF on every build: {WHISPER_DOWNLOAD_OPTIONS_OFF[name]}"
     if name in DEPRECATED_DOWNLOAD_OPTIONS and value != "OFF":
         return f"{name} must be OFF on every build: {DEPRECATED_DOWNLOAD_OPTIONS[name]}"
     if name == "FETCHCONTENT_FULLY_DISCONNECTED" and value != "ON":
@@ -424,15 +452,25 @@ def refused_option(name: str, value: Optional[str]) -> Optional[str]:
     return None
 
 
-def check_download_options(options: Mapping[str, str], prefetched: Sequence[str] = ()) -> None:
+def check_download_options(options: Mapping[str, str], prefetched: Sequence[str] = (),
+                           project: Optional[str] = None) -> None:
     """Refuses options that would let configure or build download anything (and a server with subprocesses): every
     option of NEVER_SET that is set, and every option a build must set to its value (refused_option). An option whose
     dependency the framework fetched before the build and mounts read-only (`prefetched`: the dependency names of
-    orchestrator/runtime/build/deps.py, DEPENDENCY_OF_OPTION) is no download: the build reads the mounted copy."""
+    orchestrator/runtime/build/deps.py, DEPENDENCY_OF_OPTION) is no download: the build reads the mounted copy.
+    `project`: the project of the plan (projects.py; None: llama.cpp) names the options its builds must keep OFF."""
     for name in NEVER_SET:
         if name in options and DEPENDENCY_OF_OPTION.get(name) not in prefetched:
             raise PlanError(refused_option(name, options[name]))
-    for name in (*DOWNLOAD_OPTIONS_OFF, "FETCHCONTENT_FULLY_DISCONNECTED", "LLAMA_SUBPROCESS"):
+    whisper = _projects.project(project).name == _projects.WHISPER_CPP
+    required = (*WHISPER_DOWNLOAD_OPTIONS_OFF, "FETCHCONTENT_FULLY_DISCONNECTED") if whisper else (
+        *DOWNLOAD_OPTIONS_OFF, "FETCHCONTENT_FULLY_DISCONNECTED", "LLAMA_SUBPROCESS")
+    if whisper:
+        for name in (*DOWNLOAD_OPTIONS_OFF, *DEPRECATED_DOWNLOAD_OPTIONS, "LLAMA_SUBPROCESS"):
+            problem = refused_option(name, options[name]) if name in options else None
+            if problem:
+                raise PlanError(problem)
+    for name in required:
         if DEPENDENCY_OF_OPTION.get(name) in prefetched and name in options:
             continue
         problem = refused_option(name, options.get(name))
@@ -1124,7 +1162,19 @@ def cpu_feature_lines(cpu_features: Mapping[str, Any]) -> List[str]:
     return lines
 
 
-def _every_build(source: Any, *, shared: bool, native: bool, ccache: bool) -> Dict[str, str]:
+def _every_build(source: Any, *, shared: bool, native: bool, ccache: bool,
+                 project: str = _projects.LLAMA_CPP) -> Dict[str, str]:
+    if project == _projects.WHISPER_CPP:
+        options = {name: "OFF" for name in WHISPER_DOWNLOAD_OPTIONS_OFF}
+        options.update(WHISPER_FIXED)
+        options.update({
+            "CMAKE_BUILD_TYPE": "Release",
+            "FETCHCONTENT_FULLY_DISCONNECTED": "ON",
+            "BUILD_SHARED_LIBS": "ON" if shared else "OFF",
+            "GGML_NATIVE": "ON" if native else "OFF",
+            "GGML_CCACHE": "ON" if ccache else "OFF",
+        })
+        return options
     options = {name: "OFF" for name in DOWNLOAD_OPTIONS_OFF}
     options.update({
         "CMAKE_BUILD_TYPE": "Release",
@@ -1221,8 +1271,11 @@ def _cpu_identity(profile: HardwareProfile, target: _Target) -> Dict[str, Any]:
 # --- the plan ----------------------------------------------------------------------------------------------------
 
 def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backend: str = "auto",
-               catalog: RuntimeCatalog, toolchain: ToolchainInfo) -> BuildPlan:
-    """The build plan for the machine `profile` describes (the machine that runs the binaries). Raises PlanError."""
+               catalog: RuntimeCatalog, toolchain: ToolchainInfo, project: str = _projects.LLAMA_CPP) -> BuildPlan:
+    """The build plan for the machine `profile` describes (the machine that runs the binaries). Raises PlanError.
+    `project` (projects.py): llama.cpp, or whisper.cpp for a board (purpose device-runtime, CPU, cross build), from
+    the same CPU plan of the probe; a whisper.cpp plan names its project in plan.source["project"] and its build ID
+    covers it."""
     if purpose not in PURPOSES:
         raise PlanError(f"purpose must be one of {', '.join(PURPOSES)}")
     if placement not in PLACEMENTS:
@@ -1231,9 +1284,17 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
         raise PlanError(f"backend must be one of {', '.join(BACKENDS)}")
     if not isinstance(profile, HardwareProfile):
         raise PlanError("expected a parsed HardwareProfile")
-    source = catalog.llama_cpp.source
+    try:
+        proj = _projects.project(project)
+    except _projects.ProjectError as e:
+        raise PlanError(str(e)) from None
+    whisper = proj.name == _projects.WHISPER_CPP
+    if whisper and (purpose not in proj.targets or placement != "cross" or backend not in ("auto", "cpu")):
+        raise PlanError("whisper.cpp is built for a board only: purpose device-runtime, a cross build, the CPU")
+    source = _projects.pin_of(catalog, proj.name)
     if source is None:
-        raise PlanError("configs/llama_runtime.yml has no llama_cpp.source: there is no pinned commit to build")
+        raise PlanError(f"configs/llama_runtime.yml has no {proj.name.replace('.', '_')}.source: there is no pinned "
+                        "commit to build")
 
     notes: List[str] = []
     target = _target_of(profile, purpose, placement, toolchain)
@@ -1243,6 +1304,8 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
     if profile.needs_reprobe and placement == "cross":
         notes.append("the profile is converted or incomplete; probe the machine again for a tuned build")
 
+    if backend == "auto" and whisper:
+        backend = "cpu"   # the board's speech recognition: the CPU build (its GPU backends are not planned)
     if backend == "auto":
         backend, reason = choose_backend(profile, purpose=purpose, placement=placement, catalog=catalog,
                                          toolchain=toolchain)
@@ -1322,8 +1385,10 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
                      "at run time")
     shared = mode == "variants" or windows_cuda
 
-    options = _every_build(source, shared=shared, native=(mode == "native"), ccache=toolchain.ccache)
-    options["LLAMA_BUILD_SERVER"] = "OFF" if purpose == "host-tools" else "ON"
+    options = _every_build(source, shared=shared, native=(mode == "native"), ccache=toolchain.ccache,
+                           project=proj.name)
+    if not whisper:
+        options["LLAMA_BUILD_SERVER"] = "OFF" if purpose == "host-tools" else "ON"
     options.update(cpu_opts)
     for name in ("GGML_CUDA", "GGML_VULKAN", "GGML_HIP", "GGML_METAL"):
         options[name] = "OFF"
@@ -1439,7 +1504,7 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
         devices = ["MTL0"]
         notes.append("macOS builds are untested (no Mac in the maintainer's hardware)")
 
-    targets = TARGETS[purpose]
+    targets = proj.targets[purpose]
     steps: List[BuildStep] = []
     if windows_cuda:
         # Upstream's split (release.yml windows-cuda): the CPU part with Clang, the CUDA backend as a dynamic backend
@@ -1464,7 +1529,7 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
         steps.append(BuildStep("main", compiler, "Ninja", _sorted(options), targets, toolchain_text))
 
     for step in steps:
-        _check_options(step.options)
+        _check_options(step.options, proj.name)
 
     toolchain_ids: Dict[str, Any] = dict(tool_versions)
     if builder["kind"] == "native" or purpose == "host-tools":
@@ -1480,7 +1545,8 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
             notes.append("what -march/-mcpu=native expands to is recorded by the executor")
 
     verify: Dict[str, Any] = {
-        "version": {"build_number": source.build_number, "commit": source.short_commit},
+        "version": ({"commit": source.short_commit, "tag": source.tag} if whisper else
+                    {"build_number": source.build_number, "commit": source.short_commit}),
         "binaries": list(targets),
         "devices": devices,
     }
@@ -1497,7 +1563,9 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
 
     plan = BuildPlan(
         recipe_version=RECIPE_VERSION, purpose=purpose, placement=placement, backend=backend,
-        source={"repo": source.repo, "commit": source.commit, "tag": source.tag, "build_number": source.build_number},
+        source=({"repo": source.repo, "commit": source.commit, "tag": source.tag, "project": proj.name} if whisper
+                else {"repo": source.repo, "commit": source.commit, "tag": source.tag,
+                      "build_number": source.build_number}),
         target={"os": target.os, "arch": target.arch, "libc": target.libc, "libc_version": target.libc_version,
                 "triple": triple},
         builder=builder, steps=tuple(steps), toolchain=toolchain_ids, verify=verify, notes=tuple(notes),
@@ -1522,10 +1590,10 @@ def _sorted(options: Mapping[str, str]) -> Tuple[Tuple[str, str], ...]:
     return tuple(sorted(options.items()))
 
 
-def _check_options(options: Sequence[Tuple[str, str]]) -> None:
+def _check_options(options: Sequence[Tuple[str, str]], project: Optional[str] = None) -> None:
     as_dict = dict(options)
     for name, value in options:
         if not _RE_OPTION_NAME.fullmatch(name) or not _RE_OPTION_VALUE.fullmatch(value):
             raise PlanError(f"refusing option {name!r}: unexpected characters")  # pragma: no cover - computed values
-    check_download_options(as_dict)
+    check_download_options(as_dict, project=project)
 

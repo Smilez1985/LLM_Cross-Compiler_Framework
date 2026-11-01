@@ -440,7 +440,8 @@ def _cli_root_board(tmp_path, monkeypatch, helper_binary, tier="root"):
     monkeypatch.setattr(cli_module, "_interactive", lambda: True)
     _model, wmodel, prog = _files(tmp_path)
     board.state = state
-    board.choice = ["--preset", "stt", "--file", f"stt.model={wmodel}", "--file", f"stt.program={prog}",
+    # the block with a whisper-server the person picks (the stt preset's block takes the framework's own build)
+    board.choice = ["--block", "stt-whisper-cpp-program", "--file", f"stt.model={wmodel}", "--file", f"stt.program={prog}",
                     "--licence", "stt.model=MIT", "--set", "stt.autostart=yes"]
     board.root = tmp_path
     return board

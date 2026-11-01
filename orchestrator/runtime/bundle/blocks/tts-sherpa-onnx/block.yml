@@ -17,3 +17,20 @@ files:
 memory: {base_mb: 128, model_factor: 2.0}
 notes:
   - "Planned: a model folder (espeak-ng-data) as one checked archive of the bundle."
+terms:
+  - part: onnxruntime (prebuilt, the inference library sherpa-onnx's programs load)
+    licence: MIT
+    free: true
+    text: >-
+      A prebuilt onnxruntime library is published by its authors under the MIT licence, together with the notices of
+      the third-party parts it contains. The framework does not build it from a pinned source; you take the prebuilt
+      binary as its publisher ships it. Read the licence and the third-party notices that come with the release you
+      pick before you use it.
+  - part: eSpeak NG data (the phoneme data VITS and Piper voices read)
+    licence: GPL-3.0-or-later
+    free: true
+    text: >-
+      eSpeak NG and its data (espeak-ng-data) are published under the GNU General Public License, version 3 or later.
+      It is a free licence with copyleft: when you pass the data or a program that contains it on to others, you pass
+      on the same freedoms and the corresponding source. Read the licence text that comes with eSpeak NG before you
+      use it.

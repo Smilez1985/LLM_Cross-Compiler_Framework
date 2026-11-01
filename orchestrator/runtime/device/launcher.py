@@ -44,7 +44,7 @@ DEVICE_FOLDER_MAX = 1024
 DEVICE_PATH_MAX = DEVICE_FOLDER_MAX + 512
 _RE_OPTION = re.compile(r"^-{1,2}[a-z][a-z0-9-]{0,40}$", re.ASCII | re.IGNORECASE)
 _RE_PATH = re.compile(r"^/[A-Za-z0-9._+/-]{1,%d}$" % DEVICE_PATH_MAX, re.ASCII)
-_KINDS = ("uint", "sint", "hex", "bit", "layers", "switch", "loadmode", "name", "cachetype")
+_KINDS = ("uint", "sint", "hex", "bit", "layers", "switch", "loadmode", "name", "cachetype", "file")
 _RE_CACHE_TYPE = re.compile(r"^[a-z0-9_]{1,16}$", re.ASCII)
 
 
@@ -149,6 +149,7 @@ value_ok() {
     loadmode) case $v in auto|none|mmap|mlock|mmap+mlock) return 0 ;; esac; return 1 ;;
     name) case $v in ''|-*|*[!A-Za-z0-9._:-]*) return 1 ;; esac; [ ${#v} -le 64 ] ;;
     cachetype) case $v in @CACHE_TYPES@) return 0 ;; esac; return 1 ;;
+    file) case $v in /*) ;; *) return 1 ;; esac; [ -f "$v" ] && [ -r "$v" ] ;;
     port) case $v in ''|*[!0-9]*) return 1 ;; esac; [ ${#v} -le 5 ] && [ "$v" -ge 1024 ] && [ "$v" -le 65535 ] ;;
     *) return 1 ;;
   esac

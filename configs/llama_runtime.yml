@@ -263,6 +263,17 @@ build_bases:
   - {id: debian-13, libc: glibc, libc_version: "2.41", gcc: "14.2", image: "debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f"}
   - {id: alpine-3.22, libc: musl, libc_version: "1.2.5", gcc: "14.2", image: "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"}
 
+# The one whisper.cpp pin: the speech recognition of the board bundle (block stt-whisper-cpp) is built from exactly
+# this commit for the board, by the same self-build path as llama.cpp (orchestrator/runtime/build/: the pinned source
+# fetched by commit and checked with `git rev-parse HEAD`, the cross build in the builder container without network,
+# every download option off). Its ggml and whisper options are re-checked at every pin bump (CONTRIBUTING.md).
+# Checked with git ls-remote on 2026-11-01: refs/tags/v1.9.5^{} = the commit below.
+whisper_cpp:
+  source:
+    repo: https://github.com/ggml-org/whisper.cpp.git
+    commit: d1be6fde11ac6e0407606b4e42fe72d34add8037
+    tag: v1.9.5
+
 # Parallel compile jobs of a self-built llama.cpp (orchestrator/runtime/build/toolchain.py, parallel_jobs):
 # -j = min(logical CPUs, available RAM / the value of the backend), at least 1, and never more than the setting
 # build_jobs when that is set. The values are estimates of the peak memory per compile job in MiB (nvcc needs far

@@ -1471,13 +1471,17 @@ start:
 ```
 
 - **Fields:** only `schema`, `id`, `version`, `kind`, `title`, `status`, `summary`, `variables`, `files`, `start`,
-  `memory`, `keygen` (the start script writes the runtime's key file, as `llm-llama-server` does), `unit` and `notes`;
+  `memory`, `keygen` (the start script writes the runtime's key file, as `llm-llama-server` does), `unit`, `terms`
+  (12.4) and `notes`;
   an unknown field is refused. block.yml is at most 64 KiB.
 - **Arguments** of `start.args` are fixed words, `{variable}` (the checked value), `@FILE:role@` (the file of that role
   in the component's folder) and `{when: variable, args: [...]}` (only when the variable is set). A shell character,
   an unknown variable or an unknown role refuses the block.
 - **Files:** `role` is model, mmproj, program, runtime, config or data; `from` is person (a local file the person picks
-  or a pinned online item) or runtime (the board's self-built llama.cpp runtime package of deploy way 2); `formats`
+  or a pinned online item) or runtime (a package the framework builds for the board through its one self-build path:
+  llama.cpp, the runtime package of deploy way 2, or with `project: whisper.cpp` the pinned whisper.cpp; a block whose
+  package is not built yet is planned with that as a problem, and `bundle build` or Build... offers to build it after
+  your yes); `formats`
   from gguf, mmproj-gguf, ggml-whisper, onnx, sherpa-onnx, elf, tar.gz, text (checked by the file's first bytes, a
   program's ELF architecture against the board's); `licence: required` makes the person name the model's licence;
   `min_bytes` and `max_bytes` bound the size.
@@ -1506,13 +1510,36 @@ the memory on the board, and the licence. The framework's guides are examples:
 
 - **Speech recognition (`stt-whisper-cpp`):** one ggml whisper model (`ggml-base.bin`, `ggml-small.bin`, ...; first
   bytes `lmgg`), memory about the model's size times 1.5 plus 128 MB, licence named by the person (the OpenAI whisper
-  models are MIT); the program is whisper.cpp's `whisper-server` built for the board's architecture.
-- **Vision (`vision-mmproj`, a template):** a GGUF vision model and its multimodal projector, the `mmproj` GGUF file
-  of exactly that model (format `mmproj-gguf`); a projector of another model does not fit. It stays a template until
-  the runtime's start script takes `--mmproj`.
+  models are MIT); the program is the framework's own `whisper-server` build of the pinned whisper.cpp commit for the
+  board's architecture and CPU features (`runtime/@RUNTIME@/bin/whisper-server`). A wake word is not offered:
+  whisper.cpp has one only in an example that needs SDL2 and a microphone, not in its server.
+  `stt-whisper-cpp-program` keeps the older way, a `whisper-server` you pick yourself, with a warning in the plan
+  that it was not built by the framework.
+- **Vision (`vision-mmproj`):** a GGUF vision model and its multimodal projector, the `mmproj` GGUF file of exactly
+  that model (format `mmproj-gguf`), started by the llama.cpp runtime's start script with `--mmproj`. The plan reads
+  both GGUF headers: a projector that is not a vision projector, or one named for another model, is a problem; a
+  projector whose embedding size differs from the model's, or one over four times the model's size, is a warning.
+  The memory in the plan counts both files. A runtime package built before its start script took `--mmproj` is a
+  problem until it is packed again (the framework does that from the kept source).
 - **Speech output (`tts-sherpa-onnx`, a template):** sherpa-onnx's offline TTS server for the board's architecture and
   a TTS model in the layout sherpa-onnx reads (format `sherpa-onnx`: the ONNX model with its token and voice files from
   the sherpa-onnx model list); a plain ONNX file from elsewhere does not fit.
+
+**Licence terms of a block's parts (`terms`).** A block whose parts come under their own terms lists them, at most
+eight, each with `part`, `licence`, `free` (true for a free licence) and `text` (at most 4000 characters, shown in
+full):
+
+```yaml
+terms:
+  - {part: eSpeak NG, licence: GPL-3.0-or-later, free: true, text: "..."}
+```
+
+The plan, `bundle build` and Build... show every block's terms in full and ask before anything of the block is built,
+sent or fetched ("No" as the default; at the command line also `--accept-terms BLOCK`, which accepts the text shown
+with `bundle plan`). The acceptance is bound to the text's sha256: a changed text is asked again. A block with a term
+that is not free is an opt-in: never part of a preset. The framework's opt-in templates are `stt-nemo-sherpa` (NVIDIA
+NeMo speech models) and `stt-kws-gigaspeech` (a wake word model trained on GigaSpeech); `tts-sherpa-onnx` lists
+onnxruntime (MIT) and eSpeak NG (GPL-3.0-or-later).
 
 ### 12.5 Publishing a block
 

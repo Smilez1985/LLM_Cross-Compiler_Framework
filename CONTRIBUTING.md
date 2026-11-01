@@ -354,6 +354,18 @@ content; a tag can be moved. A bump goes like this:
    recipe change only the commit, the build number and the build IDs change.
 7. Run the whole test suite, add a changelog entry in both languages, and merge only when every check is green.
 
+### Bumping the whisper.cpp pin
+
+The board's whisper.cpp comes from `whisper_cpp.source` in `configs/llama_runtime.yml` (`repo`, `commit`, `tag`
+`vX.Y.Z`) and is built through the same self-build path as llama.cpp (`orchestrator/runtime/build/projects.py`).
+Check that the commit is upstream's: `git ls-remote https://github.com/ggml-org/whisper.cpp.git refs/tags/v<X.Y.Z>`
+must print exactly the new commit. Re-check the new tree's download-capable options against
+`WHISPER_DOWNLOAD_OPTIONS_OFF` and `WHISPER_FIXED` in `orchestrator/runtime/build/recipe.py` (search for
+`FetchContent_Declare`, `ExternalProject_Add` and `file(DOWNLOAD`; `WHISPER_CURL`, `WHISPER_SDL2` and ggml's KleidiAI
+and OpenMP fetches are off today), and the server's options against `WHISPER_FORBIDDEN_FLAGS` in
+`orchestrator/runtime/server_policy.py` (`--convert` runs ffmpeg through a shell). Then run
+`tests/test_bundle_components.py` and the whole suite, and add a changelog entry in both languages.
+
 ---
 
 ## 5. Lint and security checks

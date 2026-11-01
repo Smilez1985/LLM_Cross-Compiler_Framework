@@ -51,7 +51,13 @@ def bundle(qapp, tmp_path, monkeypatch):
 
 
 def _pick_stt(dialog, board):
-    dialog.cmb_preset.setCurrentIndex(dialog.cmb_preset.findData("stt"))
+    # the block with a whisper-server the person picks (the preset's stt-whisper-cpp is the framework's own build)
+    from PySide6.QtCore import Qt
+    for i in range(dialog.lst_blocks.count()):
+        item = dialog.lst_blocks.item(i)
+        if item.data(Qt.UserRole) == "stt-whisper-cpp-program":
+            item.setCheckState(Qt.Checked)
+    dialog._fill_components()
     files = {}
     for r in range(dialog.tbl_files.rowCount()):
         files[dialog.tbl_files.item(r, 0).data(0x0100)[1]] = r   # Qt.UserRole
@@ -67,7 +73,7 @@ def test_the_window_lists_the_board_presets_and_blocks_templates_not_choosable(b
     assert dialog.cmb_preset.findData("voice") >= 0
     states = {dialog.lst_blocks.item(i).data(Qt.UserRole): bool(dialog.lst_blocks.item(i).flags() & Qt.ItemIsEnabled)
               for i in range(dialog.lst_blocks.count())}
-    assert states["stt-whisper-cpp"] and not states["tts-sherpa-onnx"]
+    assert states["stt-whisper-cpp-program"] and not states["tts-sherpa-onnx"]
 
 
 def test_the_variable_editor_checks_each_value_against_its_type(bundle):
@@ -88,7 +94,7 @@ def test_plan_shows_the_full_plan_off_the_gui_thread_and_builds_nothing(qapp, bu
     dialog.buttons["btn_bundle_plan"].click()
     wait(qapp, dialog)
     text = dialog.output.toPlainText()
-    assert "stt: block stt-whisper-cpp" in text and f"from {board.prog}" in text and "check memory:" in text
+    assert "stt: block stt-whisper-cpp-program" in text and f"from {board.prog}" in text and "check memory:" in text
     assert dialog.rows == [] and board.logins == []
 
 
@@ -162,7 +168,7 @@ def test_new_block_makes_an_own_block_in_community_blocks(bundle, monkeypatch, t
         kind = dialog.findChild(QComboBox, "cmb_bundle_new_kind")
         kind.setCurrentText("stt")
         src = dialog.findChild(QComboBox, "cmb_bundle_new_from")
-        src.setCurrentIndex(src.findData("stt-whisper-cpp"))
+        src.setCurrentIndex(src.findData("stt-whisper-cpp-program"))
         return True
     monkeypatch.setattr(bundle_window, "_exec", fill)
     Boxes(monkeypatch)
@@ -332,3 +338,40 @@ def test_a_not_ready_board_sets_the_readiness_up_once_and_the_status_never_asks_
         wait(qapp, dialog)
     assert runs == ["status"] and checks == [], (runs, checks)
     assert "not read" in dialog.output.toPlainText()
+
+
+def test_build_offers_the_missing_board_package_once_and_builds_it_off_the_gui_thread(qapp, bundle, monkeypatch):
+    # the framework's own whisper.cpp build is not there yet: one question ("No" as the default), the build through
+    # service.build_components in the worker, the plan again; a package still missing is not asked for twice
+    from PySide6.QtCore import Qt
+    from orchestrator.runtime.bundle import service
+    dialog, board = bundle
+    for i in range(dialog.lst_blocks.count()):
+        item = dialog.lst_blocks.item(i)
+        if item.data(Qt.UserRole) == "stt-whisper-cpp":
+            item.setCheckState(Qt.Checked)
+    dialog._fill_components()
+    for r in range(dialog.tbl_files.rowCount()):
+        if dialog.tbl_files.item(r, 0).data(0x0100)[1] == "model":
+            dialog.tbl_files.item(r, 3).setText(str(board.wmodel))
+            dialog.tbl_files.item(r, 6).setText("MIT")
+    calls = []
+
+    def build_components(state_dir, device_id, profile, projects, **kw):
+        calls.append((device_id, list(projects), threading.current_thread() is threading.main_thread()))
+        return {}
+    monkeypatch.setattr(service, "build_components", build_components)
+    monkeypatch.setattr(service, "device_profile", lambda state_dir, device_id: object())
+    boxes = Boxes(monkeypatch, "no")
+    dialog.buttons["btn_bundle_build"].click()
+    wait(qapp, dialog)
+    asked = boxes.questions()
+    assert len(asked) == 1 and asked[0].default_is_no and "whisper.cpp" in asked[0].text
+    assert calls == [] and dialog.rows == []
+    boxes.answer = "yes"
+    dialog.buttons["btn_bundle_build"].click()
+    for _ in range(3):
+        wait(qapp, dialog)
+    assert calls == [(DEVICE, ["whisper.cpp"], False)]
+    assert len(boxes.questions()) == 2, "asked once per Build..."
+    assert dialog.rows == [] and board.logins == []

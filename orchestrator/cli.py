@@ -15,7 +15,7 @@ import os
 import time
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Optional, Dict, Any, List, Tuple
+from typing import TYPE_CHECKING, Callable, Optional, Dict, Any, Iterable, List, Tuple
 from datetime import datetime
 
 import click
@@ -7256,24 +7256,33 @@ def bundle_choice_options(func):
                      help="The model's licence (SPDX id or a short word)"),
         click.option('--unprivileged-only', is_flag=True,
                      help='Skip the root actions (no autostart unit); everything else is installed'),
+        click.option('--accept-terms', 'accept_terms', multiple=True, metavar='BLOCK',
+                     help="Accept the licence terms of a block you have read (repeatable; 'llm-cli bundle plan' "
+                          "shows them in full)"),
     ]
     for option in reversed(options):
         func = option(func)
     return func
 
 
-def _bundle_plan(ctx: FrameworkContext, device_name: str, choice: Dict[str, Any], allow_own: bool = False):
+def _bundle_plan(ctx: FrameworkContext, device_name: str, choice: Dict[str, Any], allow_own: bool = False,
+                 accepted: Iterable[str] = ()):
     """(state dir, device ID, plan) of the person's choice for a stored board (service.plan_for_device with the
-    framework's block catalog and the verified cached index, so a revoked block is not used)."""
+    framework's block catalog and the verified cached index, so a revoked block is not used). `accepted` (and the
+    --accept-terms of `choice`): the blocks whose licence terms the person accepted (service.accept_terms)."""
     from orchestrator.Core.config_manager import framework_mode
+    from orchestrator.runtime.bundle import blocks as blk
     from orchestrator.runtime.bundle import service
     from orchestrator.runtime.bundle.generator import BundleError
     state_dir, _store, device_id, profile = _device_context(ctx, device_name)
     framework = _bundle_framework(ctx)
     config = getattr(framework, "config", None)
     app_root, index = service.catalog_sources(framework)
+    choice = dict(choice)
+    terms = list(choice.pop("accept_terms", ()) or ()) + list(accepted)
     try:
         selection = service.selection_from(**choice)
+        service.accept_terms(blk.load_catalog(app_root, index=index), selection, terms)
         plan = service.plan_for_device(state_dir, device_id, selection, config=config, app_root=app_root,
                                        mode=framework_mode(config), allow_own=allow_own, profile=profile,
                                        index=index, framework=framework)
@@ -7281,6 +7290,42 @@ def _bundle_plan(ctx: FrameworkContext, device_name: str, choice: Dict[str, Any]
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
     return state_dir, device_id, plan
+
+
+def _print_bundle_terms(plan, app_root=None, index=None) -> None:
+    """The full licence terms of every block the plan still waits for (the person reads them before accepting)."""
+    from orchestrator.runtime.bundle import blocks as blk
+    if not plan.terms_needed:
+        return
+    catalog = blk.load_catalog(app_root, index=index)
+    for block_id in plan.terms_needed:
+        block = catalog.get(block_id)
+        if block is not None:
+            console.print(f"[bold]Licence terms of block {escape(block_id)}[/bold]")
+            console.print(escape(block.terms_text()))
+
+
+def _bundle_offer_components(ctx: FrameworkContext, device_name: str, state_dir, device_id: str, plan) -> bool:
+    """When the plan waits only for board packages the framework builds (whisper.cpp, llama.cpp), asks the person
+    (service.COMPONENT_QUESTION, "No" as the default) and builds them through the one self-build path
+    (service.build_components). True when something was built (the caller plans again)."""
+    from orchestrator.runtime.bundle import service
+    from orchestrator.runtime.bundle.generator import BundleError
+    if not plan.missing_runtimes or not _interactive():
+        return False
+    if not click.confirm(service.component_question(plan.missing_runtimes, device_name), default=False):
+        console.print("Nothing was built.")
+        return False
+    profile = service.device_profile(state_dir, device_id)
+    framework = _bundle_framework(ctx)
+    try:
+        service.build_components(state_dir, device_id, profile, plan.missing_runtimes,
+                                 settings=getattr(framework, "config", None),
+                                 say=lambda msg: console.print(escape(msg)))
+    except BundleError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    return True
 
 
 def _print_bundle_plan(plan) -> None:
@@ -7310,6 +7355,8 @@ def bundle_plan(ctx: FrameworkContext, device_name: str, as_json: bool, **choice
         click.echo(json.dumps(plan.labels(), indent=2, sort_keys=True))
     else:
         _print_bundle_plan(plan)
+        from orchestrator.runtime.bundle import service
+        _print_bundle_terms(plan, *service.catalog_sources(_bundle_framework(ctx)))
     if not plan.ok:
         sys.exit(1)
 
@@ -7333,6 +7380,26 @@ def bundle_build(ctx: FrameworkContext, device_name: str, allow_own: bool, **cho
             console.print("Nothing was built.")
             sys.exit(1)
         state_dir, device_id, plan = _bundle_plan(ctx, device_name, choice, True)
+        allow_own = True
+    accepted: List[str] = []
+    if plan.terms_needed and _interactive():
+        # the person reads each block's terms in full and accepts them, "No" as the default; nothing of the block is
+        # built, sent or fetched before
+        _print_bundle_plan(plan)
+        app_root, index = service.catalog_sources(_bundle_framework(ctx))
+        _print_bundle_terms(plan, app_root, index)
+        for block_id in plan.terms_needed:
+            if not click.confirm(f"Accept the licence terms of block {block_id} shown above?", default=False):
+                console.print("Nothing was built.")
+                sys.exit(1)
+            accepted.append(block_id)
+        state_dir, device_id, plan = _bundle_plan(ctx, device_name, choice, allow_own, accepted)
+    if plan.missing_runtimes and _interactive():
+        # the plan once before the question; after a "No" nothing more is printed (it said "Nothing was built.")
+        _print_bundle_plan(plan)
+        if not _bundle_offer_components(ctx, device_name, state_dir, device_id, plan):
+            sys.exit(1)
+        state_dir, device_id, plan = _bundle_plan(ctx, device_name, choice, allow_own, accepted)
     _print_bundle_plan(plan)
     if not plan.ok:
         console.print("[red]Nothing was built.[/red]")

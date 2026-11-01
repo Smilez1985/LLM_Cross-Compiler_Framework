@@ -35,6 +35,9 @@ BUNDLE_PATHS: Dict[str, str] = {
     "bundle plan --size": "tbl_bundle_files",
     "bundle plan --licence": "tbl_bundle_files",
     "bundle plan --unprivileged-only": "chk_bundle_unprivileged",
+    # a block's licence terms: Build... shows them in full and asks before anything of the block is built
+    "bundle plan --accept-terms": "btn_bundle_build",
+    "bundle build --accept-terms": "btn_bundle_build",
     "bundle build": "btn_bundle_build",
     "bundle build --preset": "cmb_bundle_preset",
     "bundle build --block": "lst_bundle_blocks",

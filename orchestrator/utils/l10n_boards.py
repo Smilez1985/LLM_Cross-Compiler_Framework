@@ -75,6 +75,13 @@ TEXTS = {
         "bundle.built": "Built bundle {bundle} for board {device_id}. Deploy it from the list of stored bundles.",
         "bundle.not_built": "Nothing was built: the plan has problems.",
         "bundle.own.ask": "Use your own unsigned blocks {blocks}? Nobody else checked them.",
+        "bundle.terms.ask": "Block {block} brings in parts under their own licence terms. Read them:\n\n{terms}\n\n"
+                            "Accept these terms? Nothing of the block is built, sent or fetched before.",
+        "bundle.components.building": "Building {projects} for the board in the builder container",
+        "bundle.components.ask": "Build {projects} for board {board} now? It is built from the pinned source for the "
+                                 "board's probe (architecture, C library, CPU features) in the builder container "
+                                 "without network; the pinned source is fetched first when it is not cached (in "
+                                 "offline mode only from your own network).",
         "bundle.running": "Running the installer on the board ({action})",
         "bundle.ask.apply": "Send bundle {bundle} ({size}) to board {board} and run its installer there? It installs "
                             "the unprivileged steps; root actions stop before they run (they run through "
@@ -608,6 +615,14 @@ TEXTS = {
         "bundle.not_built": "Nichts wurde gebaut: der Plan hat Probleme.",
         "bundle.own.ask": "Deine eigenen, nicht signierten Bausteine {blocks} verwenden? Niemand sonst hat sie "
                           "geprüft.",
+        "bundle.terms.ask": "Baustein {block} bringt Teile mit eigenen Lizenzbedingungen mit. Lies sie:\n\n{terms}\n\n"
+                            "Diese Bedingungen annehmen? Vorher wird nichts von dem Baustein gebaut, gesendet oder "
+                            "geladen.",
+        "bundle.components.building": "{projects} wird im Builder-Container für das Board gebaut",
+        "bundle.components.ask": "{projects} jetzt für Board {board} bauen? Es wird aus der gepinnten Quelle für die "
+                                 "Probe des Boards (Architektur, C-Bibliothek, CPU-Merkmale) im Builder-Container ohne "
+                                 "Netzwerk gebaut; die gepinnte Quelle wird zuerst geladen, wenn sie nicht im Cache "
+                                 "liegt (im Offline-Modus nur aus deinem eigenen Netzwerk).",
         "bundle.running": "Der Installer läuft auf dem Board ({action})",
         "bundle.ask.apply": "Bündel {bundle} ({size}) an Board {board} senden und seinen Installer dort ausführen? Er "
                             "installiert die Schritte ohne Sonderrechte; vor Root-Aktionen hält er an (sie laufen "
