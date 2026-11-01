@@ -15,13 +15,15 @@ COPY util-linux-2.40.4.tar.xz busybox-1.37.0.tar.bz2 ./
 RUN echo "5c1daf733b04e9859afdc3bd87cc481180ee0f88b5c0946b16fdec931975fb79  util-linux-2.40.4.tar.xz" | sha256sum -c - \
     && echo "3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4  busybox-1.37.0.tar.bz2" | sha256sum -c -
 
-# util-linux: only setpriv, linked statically (libcap-ng's static library)
+# util-linux: only setpriv, linked statically (libcap-ng's static library). libtool takes a plain -static for its own
+# libraries only, so the link of setpriv gets -all-static; the readelf check stops the build if it is still dynamic.
 RUN tar -xJf util-linux-2.40.4.tar.xz \
     && cd util-linux-2.40.4 \
     && ./configure --disable-all-programs --enable-setpriv --disable-shared --enable-static --without-python \
         --without-systemd --without-udev --without-ncursesw --without-tinfo --disable-nls LDFLAGS=-static \
-    && make -j"$(nproc)" setpriv \
-    && mkdir -p /out && cp setpriv /out/setpriv && strip /out/setpriv
+    && make -j"$(nproc)" setpriv LDFLAGS=-all-static \
+    && mkdir -p /out && cp setpriv /out/setpriv && strip /out/setpriv \
+    && if readelf -l /out/setpriv | grep -q 'program interpreter'; then echo 'setpriv is not static' >&2; exit 1; fi
 
 # busybox: its default configuration, linked statically, without the applets that need the network or a TTY setup
 RUN tar -xjf busybox-1.37.0.tar.bz2 \
