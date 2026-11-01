@@ -645,7 +645,7 @@ mode, memory). The bundle is signed with the framework's key and kept in this fr
 board installs only the unprivileged steps, each only once (a second run changes nothing, a run cut off continues),
 and shows a dry run, a status, a rollback and an uninstall of its own steps. The root actions (the account of a
 component, its autostart unit, its memory and CPU limits) run only through llmcf-install, the framework's root
-helper in Rust, which the bundle carries signed: it shows its own plan, and after a second yes for them it runs as
+helper in Rust, which the bundle carries signed; it runs only from a fixed root-owned place that the board's root readiness sets up like a dependency (sudo if missing, the program, a sudo rule for it only; its plan first, your yes, Prepare root... in the Board bundle window or `llmcf bundle prepare-root`): it shows its own plan, and after a second yes for them it runs as
 root through `sudo -n` (in private mode you may instead type the board account's password once for this run; it is
 never kept). It checks the bundle's signature itself against the root-owned key only, does only the typed actions of
 the signed manifest, changes nothing twice and keeps a journal, so its status, a rollback of its last run and the

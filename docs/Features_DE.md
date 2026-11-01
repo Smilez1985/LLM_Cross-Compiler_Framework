@@ -713,7 +713,7 @@ tut nur die typisierten Aktionen des signierten Manifests, ändert nichts zweima
 Status, das Zurückrollen seines letzten Laufs und das Deinstallieren genau. Eine KI startet nie eine Root-Aktion.
 Ausrollen, Deinstallieren und Zurückrollen fragen dich
 vorher ("Nein" ist die Vorgabe); gespeicherte Bündel werden nur aus der vollen Liste gelöscht, die du anhakst, in
-den Papierkorb oder endgültig.
+den Papierkorb oder endgültig. llmcf-install läuft nur von einem festen Ort in Root-Besitz, den die Root-Bereitschaft des Boards wie eine Abhängigkeit einrichtet (sudo, wenn es fehlt, das Programm, eine sudo-Regel nur dafür; erst der Plan, dann dein Ja, mit Root vorbereiten... im Fenster Board-Bündel oder `llmcf bundle prepare-root`).
 
 Für KI-Clients tun die optionalen Werkzeuge `bundle_plan` (der Plan nur als Labels, nie eine Datei, ein Pfad, eine
 Adresse oder ein Konto) und `bundle_deploy` (du bestätigst jedes Ausrollen im eigenen Fenster des Frameworks, nie

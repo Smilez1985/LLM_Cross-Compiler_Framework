@@ -74,7 +74,7 @@ def _installed(board, bid: str) -> Path:
 def test_the_bundle_commands_exist_with_their_subcommands():
     from orchestrator import cli as cli_module
     group = cli_module.cli.commands["bundle"]
-    assert set(group.commands) == {"plan", "build", "list", "deploy", "status", "uninstall", "rollback", "delete",
+    assert set(group.commands) == {"plan", "build", "list", "deploy", "prepare-root", "status", "uninstall", "rollback", "delete",
                                    "block"}
     assert set(group.commands["block"].commands) == {"list", "new"}
 

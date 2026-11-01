@@ -1121,6 +1121,35 @@ def dropbear_packages_sh() -> str:
     ])
 
 
+# The board's system family as install.sh reads it (ID, then ID_LIKE), DietPi on its own, and the package managers
+# it has: fixed words family=WORD, dietpi=yes|no, manager=NAME (tier-facts and the bundle's root readiness read
+# them; key_tiers.TierFacts and bundle/readiness.Readiness parse them).
+SYSTEM_FACTS = (
+    "llmcf_id=; llmcf_like=",
+    "if [ -r /etc/os-release ]; then",
+    "  llmcf_id=$(sed -n 's/^ID=//p' /etc/os-release | tr -d '\"' | tr 'A-Z' 'a-z')",
+    "  llmcf_like=$(sed -n 's/^ID_LIKE=//p' /etc/os-release | tr -d '\"' | tr 'A-Z' 'a-z')",
+    "fi",
+    "llmcf_f=unknown",
+    "for llmcf_w in $llmcf_id $llmcf_like; do",
+    "  case $llmcf_w in",
+    "    debian|ubuntu|raspbian|dietpi|armbian|linuxmint|pop) llmcf_f=debian ;;",
+    "    fedora|rhel|centos|rocky|almalinux|amzn|ol) llmcf_f=fedora ;;",
+    "    opensuse*|sles|suse) llmcf_f=suse ;;",
+    "    arch|manjaro|endeavouros) llmcf_f=arch ;;",
+    "    alpine|postmarketos) llmcf_f=alpine ;;",
+    "    *) continue ;;",
+    "  esac",
+    "  break",
+    "done",
+    'echo "family=$llmcf_f"',
+    # DietPi on its own: the switch's plan tells a DietPi board that both of its steps go through apt
+    "if [ -d /boot/dietpi ] || [ -f /boot/dietpi/.version ]; then echo dietpi=yes; else echo dietpi=no; fi",
+    "for llmcf_m in apt-get dnf zypper pacman apk; do",
+    '  if command -v "$llmcf_m" >/dev/null 2>&1; then echo "manager=$llmcf_m"; fi',
+    "done",
+)
+
 TIER_FACTS = "\n".join([
     # stdin: a line with the person's one-time password (empty: sudo -n only). LLMCF_SIGNERS, LLMCF_PEM and
     # LLMCF_SELFTEST may come before it (then the board's own tools check the framework's self-test signature).
@@ -1152,30 +1181,7 @@ TIER_FACTS = "\n".join([
     "else echo verifier=old-ssh; fi",
     '  rm -rf "$llmcf_d"',
     "fi",
-    # the system family as install.sh reads it (ID, then ID_LIKE), and DietPi on its own
-    "llmcf_id=; llmcf_like=",
-    "if [ -r /etc/os-release ]; then",
-    "  llmcf_id=$(sed -n 's/^ID=//p' /etc/os-release | tr -d '\"' | tr 'A-Z' 'a-z')",
-    "  llmcf_like=$(sed -n 's/^ID_LIKE=//p' /etc/os-release | tr -d '\"' | tr 'A-Z' 'a-z')",
-    "fi",
-    "llmcf_f=unknown",
-    "for llmcf_w in $llmcf_id $llmcf_like; do",
-    "  case $llmcf_w in",
-    "    debian|ubuntu|raspbian|dietpi|armbian|linuxmint|pop) llmcf_f=debian ;;",
-    "    fedora|rhel|centos|rocky|almalinux|amzn|ol) llmcf_f=fedora ;;",
-    "    opensuse*|sles|suse) llmcf_f=suse ;;",
-    "    arch|manjaro|endeavouros) llmcf_f=arch ;;",
-    "    alpine|postmarketos) llmcf_f=alpine ;;",
-    "    *) continue ;;",
-    "  esac",
-    "  break",
-    "done",
-    'echo "family=$llmcf_f"',
-    # DietPi on its own: the switch's plan tells a DietPi board that both of its steps go through apt
-    "if [ -d /boot/dietpi ] || [ -f /boot/dietpi/.version ]; then echo dietpi=yes; else echo dietpi=no; fi",
-    "for llmcf_m in apt-get dnf zypper pacman apk; do",
-    '  if command -v "$llmcf_m" >/dev/null 2>&1; then echo "manager=$llmcf_m"; fi',
-    "done",
+    *SYSTEM_FACTS,
     # which installed packages provide Dropbear, asked from the package manager without root
     dropbear_packages_sh(),
     'for llmcf_n in $(llmcf_dbpkgs); do echo "dropbear_pkg=$llmcf_n"; done',

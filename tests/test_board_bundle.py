@@ -351,6 +351,11 @@ def _fake_board(tmp_path, tier: str):
     quoted = "'\"'\"'"
     text = gate.render_gate().replace(gate.signed_sh(), ours)
     text = text.replace(gate.signed_sh().replace("'", quoted), ours.replace("'", quoted))
+    # the root readiness's fixed places (llmcf-install and its sudoers drop-in) inside the test folder
+    from orchestrator.runtime.bundle import gate_ops
+    text = text.replace(gate_ops.places_sh(), gate_ops.places_sh(
+        (tmp_path / "usr/local/libexec/llmcf/llmcf-install").as_posix(),
+        (tmp_path / "etc/sudoers.d/llmcf-install").as_posix()))
     path = tmp_path / "llmcf-gate"
     path.write_text(text)
 
