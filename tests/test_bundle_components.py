@@ -406,6 +406,21 @@ class TestVision:
         with pytest.raises(gen.BundleError):
             gen.gguf_header(mm)
 
+    def test_a_damaged_header_in_the_plan_names_the_files_role_never_the_persons_file_name(self, tmp_path):
+        from orchestrator.runtime.device.launcher import render_start_script
+        model, mm = _vision_files(tmp_path)
+        own = tmp_path / "jdoe-private-projector.gguf"
+        own.write_bytes(b"GGUF" + b"\xff" * 64)
+        mm.unlink()
+        selection = gen.Selection(blocks=["vision-mmproj"], files={"vision": {
+            "model": gen.FileChoice(path=str(model), licence="apache-2.0"),
+            "mmproj": gen.FileChoice(path=str(own), licence="apache-2.0")}})
+        plan = gen.plan_bundle(selection, catalog=blk.load_catalog(), profile=RK3566, device_id=DEVICE,
+                               offline=False, bundle_id="vision-test",
+                               runtime=_runtime_package(tmp_path, render_start_script().encode()))
+        assert not plan.ok and any("vision: the mmproj file" in p for p in plan.problems), plan.problems
+        assert "jdoe" not in json.dumps(plan.labels())
+
 
 # --- 4. licence terms and opt-in blocks --------------------------------------------------------------------------------------
 
@@ -520,6 +535,25 @@ class TestCli:
         assert built == [] and "Build whisper.cpp for board ZERO 3W now?" in res.out and "Nothing was built" in res.out
         res = invoke_plain("bundle", "build", "ZERO 3W", *choice, input="y\n")
         assert built == [["whisper.cpp"]]
+
+    def test_a_missing_package_prints_the_plan_once_and_says_nothing_was_built_once(self, tmp_path, cli_state,
+                                                                                      monkeypatch):
+        # the output of `bundle build` for a plan that waits for a board package stays what it was without the offer
+        # (the plan once, "Nothing was built." once); at a terminal the question comes between them, still once each
+        from test_cli_builds import invoke_plain
+        from orchestrator import cli as cli_module
+        model = _whisper_model(tmp_path)
+        choice = ["--preset", "stt", "--file", f"stt.model={model}", "--licence", "stt.model=MIT"]
+        monkeypatch.setattr(service, "build_components", lambda *a, **kw: pytest.fail("nothing is built"))
+        res = invoke_plain("bundle", "build", "ZERO 3W", *choice)
+        assert res.code == 1
+        assert res.out.count("check memory:") == 1, res.out
+        assert res.out.count("Nothing was built") == 1, res.out
+        monkeypatch.setattr(cli_module, "_interactive", lambda: True)
+        res = invoke_plain("bundle", "build", "ZERO 3W", *choice, input="n\n")
+        assert res.code == 1
+        assert res.out.count("check memory:") == 1, res.out
+        assert res.out.count("Nothing was built") == 1, res.out
 
     def test_build_shows_the_terms_and_asks_with_no_as_the_default(self, tmp_path, cli_state, monkeypatch):
         from test_cli_builds import invoke_plain

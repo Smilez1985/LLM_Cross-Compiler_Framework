@@ -7394,10 +7394,12 @@ def bundle_build(ctx: FrameworkContext, device_name: str, allow_own: bool, **cho
                 sys.exit(1)
             accepted.append(block_id)
         state_dir, device_id, plan = _bundle_plan(ctx, device_name, choice, allow_own, accepted)
-    if plan.missing_runtimes:
+    if plan.missing_runtimes and _interactive():
+        # the plan once before the question; after a "No" nothing more is printed (it said "Nothing was built.")
         _print_bundle_plan(plan)
-        if _bundle_offer_components(ctx, device_name, state_dir, device_id, plan):
-            state_dir, device_id, plan = _bundle_plan(ctx, device_name, choice, allow_own, accepted)
+        if not _bundle_offer_components(ctx, device_name, state_dir, device_id, plan):
+            sys.exit(1)
+        state_dir, device_id, plan = _bundle_plan(ctx, device_name, choice, allow_own, accepted)
     _print_bundle_plan(plan)
     if not plan.ok:
         console.print("[red]Nothing was built.[/red]")
