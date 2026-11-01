@@ -1344,3 +1344,26 @@ def test_the_key_tier_column_shows_each_boards_tier_and_marks_what_enterprise_mo
     record_key_tier(state, device.device_id, "root")
     window.reload()
     assert window.table.item(0, column).text() == "root-owned key line"
+
+
+def test_the_verify_measures_with_the_persons_kv_cache_choice(qapp, window, monkeypatch):
+    """The Boards window's verify measures the board with the KV-cache type of the deploy settings, as the CLI's
+    `device runtime verify` does: a measurement in another type than the unit's -ctk sizes the context for the wrong
+    cache (review of ctx-measure)."""
+    from orchestrator.runtime.build.verify import Check, VerifyReport
+    from orchestrator.runtime.device import steps
+    from orchestrator.runtime.device.package import DeviceRuntimeStore
+    record, seen = [], []
+    runtime_fakes(monkeypatch, record)
+    report = VerifyReport([Check("version", True, "b1")])
+    monkeypatch.setattr(steps, "check_runtime", lambda shell, **kw: seen.append(kw.get("kv_chosen", "missing"))
+                        or report)
+    state = state_of(window)
+    stored(state, ssh_user="dietpi", kv_cache="q8_0")
+    window.reload()
+    Boxes(monkeypatch, answer="no")
+    DeviceRuntimeStore(state, "0123456789abcdef").save_record({"build_id": "b" * 64, "install": "user"})
+    window.verify(window.entries[0], RK3566, None, None)
+    wait(qapp, window)
+    wait(qapp, window)
+    assert seen == ["q8_0"], seen

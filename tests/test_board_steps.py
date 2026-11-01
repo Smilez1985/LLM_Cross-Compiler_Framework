@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import pytest
 
 from orchestrator.runtime.build.verify import Check, VerifyReport
-from orchestrator.runtime.device import person_steps, steps
+from orchestrator.runtime.device import measure, person_steps, steps
 from orchestrator.runtime.device.settings import DeploySettings, SettingsError
 from orchestrator.runtime.profile import ProfileStore
 from test_device_runtime import (DEVUAN, HOST, LICENCE, PIN, POSIX, RK3566, BoardAudit, FakeDevice,
@@ -545,7 +545,8 @@ class TestRuntimeSteps:
         plan = plan_for(RK3566)
         status = steps.runtime_status(tmp_path, "0123456789abcdef", plan)
         assert status == {"device_id": "0123456789abcdef", "planned_build_id": plan.build_id, "built": False,
-                          "deployed": None, "current": False}
+                          "deployed": None, "current": False,
+                          "limits": {"measured": False, "reason": measure.NOT_MEASURED}}
         DeviceRuntimeStore(tmp_path, "0123456789abcdef").save_record({"build_id": plan.build_id, "install": "user"})
         status = steps.runtime_status(tmp_path, "0123456789abcdef", plan)
         assert status["current"] is True and status["deployed"]["install"] == "user"

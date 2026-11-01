@@ -497,7 +497,14 @@ def kv_cache_default(ram_total: int, model_bytes: Optional[int] = None) -> Tuple
     usable = max(0, int(ram_total) - SYSTEM_RESERVE)
     weights = int(model_bytes * 1.05) if model_bytes else usable // 2
     left = max(0, usable - weights)
-    return ("q8_0" if left < KV_LITTLE_RAM else "f16"), round(left / GIB, 1)
+    return kv_kind_for_left(left), round(left / GIB, 1)
+
+
+def kv_kind_for_left(left_bytes: float) -> str:
+    """The boards' KV rule on the bytes left next to the model and the reserve: q8_0 below KV_LITTLE_RAM, else f16.
+    kv_cache_default applies it to the probe's RAM (Ditto's server), runtime/device/measure.derive to a board's
+    measured memory."""
+    return "q8_0" if left_bytes < KV_LITTLE_RAM else "f16"
 
 
 def kv_bytes_for(model: Any, kind: Optional[str] = "f16") -> int:

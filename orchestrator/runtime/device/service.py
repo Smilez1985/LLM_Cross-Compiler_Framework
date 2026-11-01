@@ -446,7 +446,8 @@ def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: An
                     consent(digest)  # raises when the consent cannot be written: nothing runs then
             report = verify_on_device(shell, home=facts.home, plan_verify=plan_verify,
                                       pin_build=source.build_number, pin_commit=source.commit, port=settings.port,
-                                      bench_model=path, bench_allowed=True)
+                                      bench_model=path, bench_allowed=True,
+                                      measure=steps.measure_request(settings, record["build_id"], digest))
         except RemoteError as e:
             raise _session_failed(device, e, state_dir, "benchmark", "The checks", cancel) from None
     finally:
@@ -455,6 +456,7 @@ def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: An
     record.pop("format", None)
     devices.save_record(record)
     steps.record_heat(state_dir, device.device_id, report.heat)   # for Mojo, until the next reading
+    steps.record_measurement(state_dir, device.device_id, report)
     recorded = record_board_test(output_dirs, device, profile, report, digest, record["build_id"], source,
                                  settings.kv_choice(profile).kind)
     smoke = report.check("smoke")
@@ -463,7 +465,7 @@ def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: An
               if isinstance(r.get("avg_ts"), (int, float))}
     return {"ok": report.ok, "trusted_model": trusted, "model_sha256": digest, "build_id": record["build_id"],
             "checks": [c.as_dict() for c in report.checks], "recorded_builds": len(recorded), **speeds,
-            **steps.heat_facts(report)}
+            **steps.heat_facts(report), "board_limits": steps.limits_facts(report)}
 
 
 def record_board_test(output_dirs: Sequence[Path], device: Any, profile: Any, report: Any, digest: Optional[str],

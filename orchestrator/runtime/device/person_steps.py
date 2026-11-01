@@ -349,6 +349,7 @@ def device_rows(state_dir: Path) -> List[Dict[str, Any]]:
     key on the board ("key_tier", remote/key_tiers.py; "" when none was recorded)."""
     from orchestrator.runtime.device.package import DeviceRuntimeStore
     from orchestrator.runtime.device.settings import DeploySettings, SettingsError
+    from orchestrator.runtime.device.steps import measured_limits_facts
     from orchestrator.runtime.device.trusted import TrustedDevices
     from orchestrator.runtime.profile import ProfileError, ProfileStore
     store = ProfileStore(Path(state_dir))
@@ -369,7 +370,8 @@ def device_rows(state_dir: Path) -> List[Dict[str, Any]]:
         rows.append({"device_id": device_id, "label": info.get("label"), "address": info.get("address"),
                      "system": system, "deploy": settings,
                      "deployed": {k: record.get(k) for k in ("build_id", "deployed_at", "install")} if record
-                     else None, "key_tier": trusted.key_tier(device_id)})
+                     else None, "key_tier": trusted.key_tier(device_id),
+                     "limits": measured_limits_facts(Path(state_dir), device_id)})
     return rows
 
 

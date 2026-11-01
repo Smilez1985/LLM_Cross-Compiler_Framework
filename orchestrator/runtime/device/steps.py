@@ -72,7 +72,34 @@ def runtime_status(state_dir: Path, device_id: str, plan: Any) -> Dict[str, Any]
     record = DeviceRuntimeStore(state_dir, device_id).record()
     built = BuildStore(state_dir).find(plan)
     return {"device_id": device_id, "planned_build_id": plan.build_id, "built": built is not None,
-            "deployed": record or None, "current": bool(record) and record.get("build_id") == plan.build_id}
+            "deployed": record or None, "current": bool(record) and record.get("build_id") == plan.build_id,
+            "limits": measured_limits_facts(state_dir, device_id)}
+
+
+def board_limits_of(state_dir: Path, device_id: str):
+    """The board's measured limits with the KV-cache type of its deploy settings (measure.board_limits; None: the
+    board was not measured, or its settings cannot be read)."""
+    from orchestrator.runtime.device import measure
+    from orchestrator.runtime.device.settings import DeploySettings, SettingsError
+    from orchestrator.runtime.profile import ProfileStore
+    try:
+        kv = DeploySettings.from_dict(ProfileStore(state_dir).load_deploy_settings(device_id)).kv_cache
+    except (SettingsError, ValueError, OSError):
+        kv = None
+    return measure.board_limits(state_dir, device_id, kv)
+
+
+def kv_choice_of(settings: Any, profile: Any, state_dir: Path, device_id: str):
+    """The board server's KV-cache type (DeploySettings.kv_choice) with the board's measured limits when it was
+    measured: the one place the deploy (CLI, Boards window, the AI's deploy_device_runtime) takes it from."""
+    limits = board_limits_of(state_dir, device_id)
+    return settings.kv_choice(profile, limits=limits) if limits is not None else settings.kv_choice(profile)
+
+
+def measured_limits_facts(state_dir: Path, device_id: str) -> Dict[str, Any]:
+    """board_limits_of as numbers and words (measure.ai_facts): for the listings, the status and an AI."""
+    from orchestrator.runtime.device import measure
+    return measure.ai_facts(board_limits_of(state_dir, device_id))
 
 
 # --- the build ----------------------------------------------------------------------------------------------------------
@@ -265,7 +292,8 @@ def install_runtime(shell: Any, *, state_dir: Path, device_id: str, profile: Any
     def check_new_build(home: str, folder: str):
         return verify_on_device(shell, home=home, folder=folder, plan_verify=build.plan.get("verify") or {},
                                 pin_build=source.build_number, pin_commit=source.commit, port=settings.port,
-                                bench_model=bench.path, bench_allowed=bench.allowed)
+                                bench_model=bench.path, bench_allowed=bench.allowed,
+                                measure=measure_request(settings, build.build_id, bench.digest))
 
     result = deploy_runtime(shell, tarball=packaged.path, tarball_sha256=packaged.sha256, build_id=build.build_id,
                             arch=arch, settings=settings, check=check_new_build, say=say, kv_cache=kv_cache,
@@ -273,6 +301,7 @@ def install_runtime(shell: Any, *, state_dir: Path, device_id: str, profile: Any
     report = result.report
     record_heat(state_dir, device_id, getattr(report, "heat", None))   # for Mojo, also when the checks failed
     record_key_tier(state_dir, device_id, report)
+    record_measurement(state_dir, device_id, report)
     if not result.activated or report is None or not report.ok:
         return InstallOutcome(result, report, False)
     now = utc_stamp()
@@ -376,7 +405,7 @@ def deploy_runtime_flow(state_dir: Path, device_id: str, profile: Any, settings:
     RootUser, the board session's errors (RemoteError, the session's SessionFailure and Stopped) and whatever a hook
     raises reach the caller as they are, so every caller keeps its own words."""
     from orchestrator.runtime.device.remote import RemoteShell, read_facts
-    kv = settings.kv_choice(profile)
+    kv = kv_choice_of(settings, profile, state_dir, device_id)
     if arch is None:
         arch = str((build.plan.get("target") or {}).get("arch") or profile.arch)
     from orchestrator.runtime.device import board_ops
@@ -418,22 +447,58 @@ def deployed_verify_plan(state_dir: Path, record: Dict[str, Any], plan_of_profil
 
 def check_runtime(shell: Any, *, state_dir: Path, device_id: str, home: str, record: Dict[str, Any],
                   plan_verify: Dict[str, Any], source: Any, port: int,
-                  bench: Optional[BenchChoice] = None):
+                  bench: Optional[BenchChoice] = None, kv_chosen: Optional[str] = None):
     """`llmcf device runtime verify`: checks the active build on the board again as the unprivileged user (never with
     sudo), with the short llama-bench run when `bench` allows it, and keeps the result in the deployment's record.
     Returns the VerifyReport."""
     from orchestrator.runtime.device.package import DeviceRuntimeStore
     from orchestrator.runtime.device.remote import verify_on_device
     bench = bench or BenchChoice()
+    from orchestrator.runtime.device.measure import MeasureRequest
     report = verify_on_device(shell, home=home, plan_verify=plan_verify, pin_build=source.build_number,
                               pin_commit=source.commit, port=port, bench_model=bench.path,
-                              bench_allowed=bench.allowed)
+                              bench_allowed=bench.allowed,
+                              measure=MeasureRequest(kv_chosen, record["build_id"], bench.digest or ""))
     record.update({"verification": report.as_dict(), "verified_at": utc_stamp()})
     record.pop("format", None)
     DeviceRuntimeStore(state_dir, device_id).save_record(record)
     record_heat(state_dir, device_id, report.heat)
     record_key_tier(state_dir, device_id, report)
+    record_measurement(state_dir, device_id, report)
     return report
+
+
+def measure_request(settings: Any, build_id: str, digest: Optional[str]):
+    """The board measurement of a benchmark with the deploy settings' KV-cache type (None: automatic)."""
+    from orchestrator.runtime.device.measure import MeasureRequest
+    return MeasureRequest(getattr(settings, "kv_cache", None), build_id, digest or "")
+
+
+def record_measurement(state_dir: Path, device_id: str, report: Any) -> bool:
+    """Keeps the board measurement of `report`'s check "measure" with the board (measure.save, next to its probe);
+    the one recorder for the CLI, the windows and the AI's benchmark. False when there is none; never fails the
+    caller's work."""
+    from orchestrator.runtime.device import measure
+    check = next((c for c in getattr(report, "checks", None) or () if getattr(c, "name", "") == "measure"), None)
+    data = getattr(check, "data", None) if check is not None else None
+    if not isinstance(data, dict) or not isinstance(data.get("record"), dict):
+        return False
+    try:
+        measure.save(state_dir, device_id, measure.Measurement.from_dict(data["record"]))
+        return True
+    except Exception:  # noqa: BLE001 - bookkeeping never changes what the step does
+        return False
+
+
+def limits_facts(report: Any) -> Dict[str, Any]:
+    """The board limits the measurement of `report` derived, numbers and words only (measure.BoardLimits.ai_facts),
+    or {"measured": False, "reason": ...} when the board was not measured."""
+    from orchestrator.runtime.device.measure import NOT_MEASURED
+    check = next((c for c in getattr(report, "checks", None) or () if getattr(c, "name", "") == "measure"), None)
+    data = getattr(check, "data", None) if check is not None else None
+    if isinstance(data, dict) and isinstance(data.get("limits"), dict):
+        return dict(data["limits"])
+    return {"measured": False, "reason": getattr(check, "detail", "") or NOT_MEASURED}
 
 
 def record_heat(state_dir: Path, device_id: str, heat: Any) -> None:

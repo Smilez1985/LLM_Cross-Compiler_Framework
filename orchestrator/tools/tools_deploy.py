@@ -153,6 +153,10 @@ class DeviceOut(BaseModel):
     trusted_via: str
     last_deploy: Optional[str] = None
     last_deploy_ok: Optional[bool] = None
+    board_limits: Dict[str, Any] = Field(default_factory=dict, description=(
+        "The board's limits measured on the board with the benchmark (numbers and words only): context tokens, "
+        "KV-cache type, prompt cache, what the server needs and the reserve; measured false when the board was "
+        "not measured yet (then nothing is guessed: ask the person to run the benchmark on the board)"))
 
 
 class DevicesOut(ToolOutput):
@@ -300,6 +304,13 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
 
     # --- list_devices ---
 
+    def board_limits(device_id: str) -> Dict[str, Any]:
+        from orchestrator.runtime.device.steps import measured_limits_facts
+        try:
+            return measured_limits_facts(devices().state_dir, device_id)
+        except Exception:  # noqa: BLE001 - a listing never fails for one board's record
+            return {}
+
     def list_devices(_inp: NoInput, ctx: ToolContext) -> DevicesOut:
         store = devices()
         last = store.last_deploys()
@@ -311,7 +322,8 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
                                   key_type=d.key_type, fingerprint=d.fingerprint, paired=d.paired,
                                   usable=not problem, problem=problem, trusted_via=d.trusted_via,
                                   last_deploy=str(seen["at"]) if seen.get("at") else None,
-                                  last_deploy_ok=bool(seen["ok"]) if "ok" in seen else None))
+                                  last_deploy_ok=bool(seen["ok"]) if "ok" in seen else None,
+                                  board_limits=board_limits(d.device_id)))
         if not rows:
             ctx.notes.append("No device is trusted and paired yet. " + PAIR_NEXT)
         return DevicesOut(devices=rows)

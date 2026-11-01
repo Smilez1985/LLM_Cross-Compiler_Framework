@@ -36,6 +36,8 @@ UNIT_PATH = f"/etc/systemd/system/{UNIT_NAME}"
 INSTALL_REL = ".local/share/llm-framework/llama.cpp"
 KEY_REL = ".config/llm-framework/llama-server.key"
 STATE_REL = ".local/state/llm-framework"
+# The board's measured limits the start script reads (runtime/device/measure.py writes them with the benchmark).
+LIMITS_REL = ".config/llm-framework/board-limits"
 
 # Absolute paths on the device carry plain characters only (no shell meaning). Their length is only a sanity bound,
 # far below PATH_MAX (4096 on Linux), so a deep home folder is never refused for its length: a folder (the home, the
@@ -96,6 +98,10 @@ _SCRIPT = r'''#!/bin/sh
 #   llama-server.sh stop | status | version
 #   llama-server.sh keygen                           create the API key file if it is missing (only you can read it)
 #
+# Without -c the context, the KV cache and the prompt cache come from the board's measurement
+# (~/.config/llm-framework/board-limits, written by the framework with the benchmark on the board); without a measurement
+# and without -c the server is not started (a guessed context is never used).
+#
 # The server listens on 127.0.0.1 only (default port @PORT@, --port to change it) and needs the key from
 # ~/.config/llm-framework/llama-server.key in every request but /health ("Authorization: Bearer <key>"). It starts
 # with a cleared environment. Options it passes on: @ALLOWED_TEXT@.
@@ -120,6 +126,7 @@ CONF=$(dirname -- "$KEY")
 STATE="$HOME/@STATE_REL@"
 PIDFILE="$STATE/llama-server.pid"
 LOG="$STATE/llama-server.log"
+LIMITS="$HOME/@LIMITS_REL@"
 
 [ -f "$SERVER" ] && [ -x "$SERVER" ] || die "no llama-server in $DIR/bin"
 
@@ -155,6 +162,34 @@ value_ok() {
   esac
 }
 
+# read_limits: the board's measured limits (written by the measurement with the benchmark on the board): every
+# value checked, a file with a value that is not one of them counts as none.
+read_limits() {
+  [ -f "$LIMITS" ] && [ -r "$LIMITS" ] || return 1
+  L_CTX='' L_KV='' L_CRAM='' L_NEED='' L_RESERVE='' L_SIZE=''
+  while IFS='=' read -r lk lv; do
+    case $lk in
+      ctx) value_ok uint "$lv" && L_CTX=$lv ;;
+      kv) value_ok cachetype "$lv" && L_KV=$lv ;;
+      cache_ram) value_ok uint "$lv" && L_CRAM=$lv ;;
+      need_mib) value_ok uint "$lv" && L_NEED=$lv ;;
+      reserve_mib) value_ok uint "$lv" && L_RESERVE=$lv ;;
+      model_size) case $lv in ''|*[!0-9]*) ;; *) [ ${#lv} -le 15 ] && L_SIZE=$lv ;; esac ;;
+    esac
+  done < "$LIMITS"
+  [ -n "$L_CTX" ] && [ -n "$L_KV" ] && [ -n "$L_CRAM" ] && [ -n "$L_NEED" ] && [ -n "$L_RESERVE" ] && [ -n "$L_SIZE" ]
+}
+
+# kv_rank TYPE: the KV-cache types by their memory per token (larger number, more memory).
+kv_rank() {
+  case $1 in
+    f16) echo 3 ;;
+    q8_0) echo 2 ;;
+    q4_0) echo 1 ;;
+    *) echo 9 ;;
+  esac
+}
+
 # run_server MODE MODEL [OPTION VALUE ...]: checks every argument; MODE exec starts the server, check only checks.
 run_server() {
   mode=$1 model=$2
@@ -165,6 +200,7 @@ run_server() {
   [ -f "$model" ] || die "no model file at $model"
   [ -r "$model" ] || die "cannot read $model"
   port=@PORT@
+  has_c=no has_ctk=no has_ctv=no has_cram=no ctk_val='' ctv_val=''
   n=$#
   i=0
   while [ "$i" -lt "$n" ]; do
@@ -188,12 +224,45 @@ run_server() {
     shift
     i=$((i + 1))
     value_ok "$kind" "$val" || die "$val is not a valid value for $opt"
+    case $opt in
+      -c|--ctx-size) has_c=yes ;;
+      -ctk|--cache-type-k) has_ctk=yes ctk_val=$val ;;
+      -ctv|--cache-type-v) has_ctv=yes ctv_val=$val ;;
+      -cram|--cache-ram) has_cram=yes ;;
+    esac
     if [ "$opt" = "--port" ]; then
       port=$val
     else
       set -- "$@" "$opt" "$val"
     fi
   done
+  # The context, the KV cache and the prompt cache come from the board's measurement unless given; a guessed
+  # context is never used: without -c and without a measurement the server is not started. A second start of a
+  # running server is refused by `start` itself ("already running"), not by the measurement.
+  if [ "$mode" = check ] && running; then return 0; fi
+  if read_limits; then
+    if [ "$has_c" = no ]; then
+      # the measured context holds for the measured KV-cache type: a larger one needs a context of its own (-c)
+      for given in "$ctk_val" "$ctv_val"; do
+        [ -n "$given" ] || continue
+        [ "$(kv_rank "$given")" -le "$(kv_rank "$L_KV")" ] || die "this board was measured with the KV cache $L_KV; $given needs more memory: run the benchmark on the board in the framework again with that KV cache, or give -c"
+      done
+      size=$(wc -c < "$model" | tr -d ' ')
+      [ "$size" = "$L_SIZE" ] || die "this board was measured with another model: run the benchmark on the board in the framework again with this model, or give -c"
+      [ "$L_CTX" -gt 0 ] || die "the board's measurement says this model does not fit on it (no context is left next to it): use a smaller model or quantization"
+      avail=$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null || true)
+      case $avail in
+        ''|*[!0-9]*) ;;
+        *) [ "$avail" -ge $((L_NEED + L_RESERVE)) ] || die "only $avail MiB are free now; the server needs $L_NEED MiB and $L_RESERVE MiB stay free for the board (its measured reserve): close other programs" ;;
+      esac
+      set -- "$@" -c "$L_CTX"
+    fi
+    [ "$has_ctk" = yes ] || [ "$L_KV" = f16 ] || set -- "$@" -ctk "$L_KV"
+    [ "$has_ctv" = yes ] || [ "$L_KV" = f16 ] || set -- "$@" -ctv "$L_KV"
+    [ "$has_cram" = yes ] || set -- "$@" --cache-ram "$L_CRAM"
+  elif [ "$has_c" = no ]; then
+    die "this board has not been measured yet: run the benchmark on the board in the framework once (it measures the board's memory with the model), or give -c; a guessed context is never used"
+  fi
   [ "$mode" = exec ] || return 0
   [ -s "$KEY" ] || keygen
   exec env -i @ENV@ @SERVER_ARGS@ "$@"
@@ -266,7 +335,8 @@ def render_start_script(default_port: int = DEVICE_DEFAULT_PORT) -> str:
         raise LauncherError("a KV-cache type is not a plain word")
     text = _SCRIPT
     for token, value in (("@PORT@", str(default_port)), ("@PATH@", POSIX_CLEARED_PATH), ("@KEY_REL@", KEY_REL),
-                         ("@STATE_REL@", STATE_REL), ("@FORBIDDEN@", _pattern(FORBIDDEN_FLAGS)),
+                         ("@STATE_REL@", STATE_REL), ("@LIMITS_REL@", LIMITS_REL),
+                         ("@FORBIDDEN@", _pattern(FORBIDDEN_FLAGS)),
                          ("@ALLOWED_CASES@", cases), ("@ALLOWED_TEXT@", allowed), ("@ENV@", _env_words()),
                          ("@CACHE_TYPES@", "|".join(KV_CACHE_TYPES)),
                          ("@SERVER_ARGS@", server_args)):
@@ -329,5 +399,5 @@ def render_systemd_unit(*, user: str, home: str, model: str, port: int, kv_cache
     ])
 
 
-__all__ = ["INSTALL_REL", "KEY_REL", "LauncherError", "START_SCRIPT", "STATE_REL", "UNIT_NAME", "UNIT_PATH",
+__all__ = ["INSTALL_REL", "KEY_REL", "LIMITS_REL", "LauncherError", "START_SCRIPT", "STATE_REL", "UNIT_NAME", "UNIT_PATH",
            "install_root", "render_start_script", "render_systemd_unit"]

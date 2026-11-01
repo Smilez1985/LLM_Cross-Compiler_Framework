@@ -144,7 +144,8 @@ def device_profile(state_dir: Path, device_id: str):
 def plan_for_device(state_dir: Path, device_id: str, selection: gen.Selection, *, config: Any = None,
                     app_root: Optional[Path] = None, mode: str = "private", allow_own: bool = False,
                     runtime: Optional[gen.RuntimePackage] = None, profile: Any = None,
-                    index: Any = None, programs: Any = None, framework: Any = None) -> gen.BundlePlan:
+                    index: Any = None, programs: Any = None, framework: Any = None,
+                    unmeasured_ok: bool = False) -> gen.BundlePlan:
     """plan_bundle for a stored board: its probe, the block catalog of this framework (`index`: the verified cached
     community index, CommunityManager.cached_index(revocations=True), so a revoked block is not used), its runtime
     package. `programs`: the resolver of a block's program "from: framework"; None builds it for the person
@@ -155,9 +156,11 @@ def plan_for_device(state_dir: Path, device_id: str, selection: gen.Selection, *
     if runtime is None and "llama.cpp" in projects:
         runtime = runtime_for(state_dir, device_id, profile)
     others = {p: runtime_for(state_dir, device_id, profile, project=p) for p in projects if p != "llama.cpp"}
+    from orchestrator.runtime.device.steps import board_limits_of
     return gen.plan_bundle(selection, catalog=catalog, profile=profile, device_id=device_id,
                            runtime=runtime, config=config, mode=mode, allow_own=allow_own, runtimes=others,
-                           programs=programs or framework_programs(config, client=engine_client(framework)))
+                           programs=programs or framework_programs(config, client=engine_client(framework)),
+                           limits=board_limits_of(state_dir, device_id), unmeasured_ok=unmeasured_ok)
 
 
 KEPT_ONLY = ("{name} for the board's architecture is not built on this computer yet; the person's plan in the "

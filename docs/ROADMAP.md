@@ -80,8 +80,6 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 
 | Item | Status |
 |---|---|
-| **Measure the board before any board default is set**: the RAM reserve of a board comes from a measurement on that board, never from a guess. | planned |
-| **The start script passes context, cache budget and a per-board reserve.** | planned |
 | **Prebuilt, signed Rust binaries for boards** (the board side of "The framework's Rust parts shipped prebuilt and signed" under Rust parts). | planned |
 | **Shared golden vectors for the context rules**, so the board's Rust code and the host's Python code decide the same. | planned |
 | **The bundle, its further components cross-compiled in their own steps** (the rest of deploy way 3): speech output (sherpa-onnx with onnxruntime and eSpeak NG) built by the framework for the board through the same self-build path as llama.cpp and whisper.cpp, instead of a program the person picks. | partly done (blocks, manifest, generator, store, the unprivileged installer, the Board bundle window, `llm-cli bundle`, the MCP tools, whisper.cpp through the one self-build path and vision with `--mmproj` are there) |
@@ -89,7 +87,6 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 | **The gateway's status for an AI and the token for network clients**: an MCP read tool with the gateway's labels, and the host's way to hand the bearer token of `bind lan` to a client the person names. | planned |
 | **A wake word on the board, and the opt-in voice parts runnable**: whisper.cpp's server has no wake word (only an example that needs SDL2 and a microphone has one), so a wake word needs its own engine; NeMo and the GigaSpeech wake word are documented opt-in templates whose licence terms the person accepts first, never on by default, and become buildable with the speech output's engine. | planned |
 | **An agent harness as a bundle component**, at a pinned commit, under its own Linux user, installed by its own installer after the person's yes; llmcf does not block what that installer fetches, watches what it does (network targets, packages, files, processes), flags suspicious activity and reports before and after. | planned |
-| **The board bundle decides with the measured limits**: whether the LLM runs on the board is the person's choice first, then the board's measured limits decide (after "Measure the board before any board default is set"). | planned |
 | **A contract test for harnesses** that plug into the gateway, without any harness code in llmcf. | planned |
 | **An optional session store on the board**, any time after the gateway is deployed. | planned |
 | **An MCP server in the gateway**: loopback only, read tools first (model status, health, bench, logs). | planned |
