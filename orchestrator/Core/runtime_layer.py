@@ -70,6 +70,9 @@ DEFAULT_TOOLBOX_WAY = "build"
 BUILDER_BASE = "debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f"
 BUILDER_DOCKERFILE = SHIPPED_DIR / "toolbox" / "Dockerfile"
 BUILDER_TAG = "llm-framework/runtime-toolbox-builder:2"
+# The toolbox record's version: a cached toolbox of another version is made again (version 2: musl instead of glibc,
+# whose static programs still loaded the host's NSS modules and crashed on Ubuntu).
+TOOLBOX_VERSION = 2
 BUILD_SOURCES: Dict[str, Dict[str, str]] = {
     "util-linux": {"url": "https://cdn.kernel.org/pub/linux/utils/util-linux/v2.40/util-linux-2.40.4.tar.xz",
                    "sha256": "5c1daf733b04e9859afdc3bd87cc481180ee0f88b5c0946b16fdec931975fb79",
@@ -279,6 +282,8 @@ def read_toolbox(folder: Path) -> Optional[Dict[str, Any]]:
     digests = record.get("sha256") if isinstance(record, dict) else None
     if not isinstance(digests, dict) or record.get("way") not in TOOLBOX_WAYS + ("test",):
         return None
+    if record.get("way") != "test" and record.get("version") != TOOLBOX_VERSION:
+        return None   # made before the current recipe (e.g. glibc-linked): made again
     if any(not re.fullmatch(r"[0-9a-f]{64}", str(digests.get(t, ""))) or not (Path(folder) / t).is_file()
            for t in TOOLS):
         return None
@@ -297,7 +302,7 @@ def write_toolbox(folder: Path, way: str, files: Dict[str, Path], sources: Dict[
         os.chmod(tmp, 0o555)
         os.replace(tmp, target)
         digests[tool] = sha256_file(target)
-    record = {"way": way, "arch": folder.name, "sha256": digests, "sources": sources}
+    record = {"way": way, "arch": folder.name, "sha256": digests, "sources": sources, "version": TOOLBOX_VERSION}
     (folder / TOOLBOX_RECORD).write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return record
 

@@ -9,6 +9,7 @@ static busybox and setpriv). They need root on Linux and are skipped elsewhere w
 under /tmp with mode 0755 (a uid switch needs a parent the stage account can walk).
 """
 
+import json
 import os
 import shutil
 import stat
@@ -643,3 +644,20 @@ def test_the_real_tools_are_static_and_run():
     version = subprocess.run([str(REAL_TOOLBOX / f"setpriv-{layer.machine()}"), "--version"], capture_output=True,
                              text=True, timeout=30)
     assert version.returncode == 0 and "util-linux" in version.stdout
+
+
+def test_a_toolbox_made_by_an_older_recipe_is_made_again(tmp_path):
+    """A toolbox cached before the musl recipe (glibc-linked: its static setpriv still loaded the host's NSS modules
+    and crashed on Ubuntu) has no current version in its record, so it is not used and is made again."""
+    from orchestrator.Core import runtime_layer as rl
+    folder = tmp_path / "x86_64"
+    files = {}
+    for tool in rl.TOOLS:
+        files[tool] = tmp_path / f"src-{tool}"
+        files[tool].write_bytes(b"\x7fELF" + tool.encode())
+    record = rl.write_toolbox(folder, "build", files, {})
+    assert record["version"] == rl.TOOLBOX_VERSION and rl.read_toolbox(folder) is not None
+    old = dict(record)
+    del old["version"]
+    (folder / rl.TOOLBOX_RECORD).write_text(json.dumps(old), encoding="utf-8")
+    assert rl.read_toolbox(folder) is None
