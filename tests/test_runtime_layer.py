@@ -858,3 +858,27 @@ def test_the_rust_builder_image_is_pinned_like_the_toolchain():
     assert layer.RUST_BUILDER_BASE.startswith(f"rust:{channel}-") and f"RUSTUP_TOOLCHAIN={channel}" in text
     assert "--locked" in text and "-p llmcf-setpriv" in text
 
+
+
+def test_the_release_workflow_runs_on_a_tools_tag_only_and_signs_without_a_secret():
+    """.github/workflows/release-tools.yml: only a pushed tag tools-v* starts it (never a push to a branch, never by
+    hand); id-token and attestations are writable in the release job alone; every action is pinned by its sha; the
+    three static targets are built and the asset names are the ones the fetch table takes (release_asset)."""
+    import yaml
+    path = layer.SHIPPED_DIR.parents[1] / ".github" / "workflows" / "release-tools.yml"
+    text = path.read_text(encoding="utf-8")
+    flow = yaml.safe_load(text)
+    on = flow.get("on", flow.get(True))
+    assert on == {"push": {"tags": ["tools-v*"]}}
+    assert flow["permissions"] == {}
+    jobs = flow["jobs"]
+    assert jobs["build"]["permissions"] == {"contents": "read"}
+    assert jobs["release"]["permissions"] == {"contents": "write", "id-token": "write", "attestations": "write"}
+    uses = re.findall(r"uses: (\S+)", text)
+    assert uses and all(re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", u) for u in uses), uses
+    assert any(u.startswith("actions/attest-build-provenance@") for u in uses)
+    assert "secrets." not in text
+    for target in ("x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl", "armv7-unknown-linux-musleabihf"):
+        assert target in text
+    assert '"../dist/$crate-$VERSION-$arch"' in text
+    assert layer.release_asset("1.2.3", "arm64") == "llmcf-setpriv-1.2.3-aarch64"

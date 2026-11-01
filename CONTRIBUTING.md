@@ -163,7 +163,13 @@ python -m pytest
   framework's stage runner (the runtime layer's `runner.sh`): stage order, resume markers, progress lines, the
   `stages:` slots, and that no stage runs a benchmark. `tests/test_target_template.py` checks the template's stage
   modules through the same runner, and `tests/test_runtime_layer.py` the layer itself (CI also runs it with the real
-  static tools). `tests/test_convert_stage.py` checks what the convert stage does around every
+  static tools, a second time with the framework's own llmcf-setpriv as the layer's uid switch:
+  `LLMCF_TEST_LAYER_SETPRIV=<path>` does the same on your computer, as root). The Rust tools live in the Cargo
+  workspace `rust/` (toolchain pinned in `rust/rust-toolchain.toml`, `Cargo.lock` committed): `cargo test --locked`
+  there runs llmcf-setpriv's option tests, and its switch tests (`rust/llmcf-setpriv/tests/as_root.rs`) run only as
+  root on Linux; the static builds take `CARGO_TARGET_<TARGET>_LINKER=rust-lld` and need no C cross toolchain.
+  Releases of these tools come only from a pushed tag `tools-v<version>` (`.github/workflows/release-tools.yml`).
+  `tests/test_convert_stage.py` checks what the convert stage does around every
   conversion (`scripts/model_check.py`, the same file in every target): format detection and refusals, the
   integrity checks of the input and of the written GGUF, the statistics in `build_info.json`, the functional test,
   and the backups and cleanup on failure; `tests/model_files.py` writes the small valid GGUF and SafeTensors files
