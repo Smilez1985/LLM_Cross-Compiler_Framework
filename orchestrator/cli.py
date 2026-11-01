@@ -1744,9 +1744,11 @@ def build_image_sources(ctx: FrameworkContext, apt_mirror: Optional[str], apt_pr
 
 
 @build_image_group.command('layer')
-@click.option('--toolbox', type=click.Choice(['build', 'fetch']), default=None,
+@click.option('--toolbox', type=click.Choice(['build', 'build-rust', 'fetch']), default=None,
               help="How the runtime layer's static busybox and setpriv are made once: 'build' (default, from pinned "
-                   "sources) or 'fetch' (pinned prebuilt files). Only you set it (an AI cannot)")
+                   "sources, util-linux setpriv), 'build-rust' (from pinned sources, the framework's own Rust "
+                   "llmcf-setpriv) or 'fetch' (pinned prebuilt files; setpriv only as llmcf-setpriv from a release of "
+                   "this project). Only you set it (an AI cannot)")
 @pass_context
 def build_image_layer(ctx: FrameworkContext, toolbox: Optional[str]):
     """Shows the framework's runtime layer that every build container runs (its stage runner, the stage account's
@@ -1761,8 +1763,10 @@ def build_image_layer(ctx: FrameworkContext, toolbox: Optional[str]):
     status = runtime_layer.layer_status(runtime_layer.cache_dir_of(config, resolve), config)
     colour = "green" if status["verdict"] in ("intact", "missing") else "red"
     console.print(f"[{colour}]{escape(status['text'])}[/{colour}]")
-    console.print(f"Toolbox way: {status['toolbox_way']}" + (f" (the tools here were made: {status['toolbox_made']})"
-                                                             if status["toolbox_made"] else " (no tools made yet)"))
+    made = (f" (the tools here were made: {status['toolbox_made']}, setpriv: {status['toolbox_setpriv']})"
+            if status["toolbox_setpriv"] else f" (the tools here were made: {status['toolbox_made']})"
+            if status["toolbox_made"] else " (no tools made yet)")
+    console.print(f"Toolbox way: {status['toolbox_way']}" + made)
     if status["toolbox_way"] == "fetch" and not status["fetch_ready"]:
         console.print(f"[yellow]{escape(runtime_layer.PREBUILT_MISSING)}[/yellow]")
     console.print(escape(runtime_layer.END_PROTECTED if status["end_folder"] == "protected"

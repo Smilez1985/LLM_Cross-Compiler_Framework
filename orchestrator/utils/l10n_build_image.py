@@ -38,12 +38,14 @@ TEXTS = {
         "bimg.layer": "Runtime layer (the framework's stage runner in every build container; only you choose how its "
                       "tools are made)",
         "bimg.layer.toolbox": "Its static busybox and setpriv:",
-        "bimg.layer.way.build": "built here from pinned sources (default)",
-        "bimg.layer.way.fetch": "fetched as pinned prebuilt files",
+        "bimg.layer.way.build": "built here from pinned sources, util-linux setpriv (default)",
+        "bimg.layer.way.build-rust": "built here from pinned sources, the framework's own Rust llmcf-setpriv",
+        "bimg.layer.way.fetch": "fetched as pinned prebuilt files (setpriv only as llmcf-setpriv from a release)",
         "bimg.layer.save": "Save choice",
         "bimg.layer.saved": "Saved: {way}. Tools made before stay until they are made again; the next build without "
                             "them uses this way.",
         "bimg.layer.made": "The tools on this computer were made: {way}",
+        "bimg.layer.made.setpriv": "{way} (setpriv: {setpriv})",
         "bimg.export.button": "Export to file...",
         "bimg.export.title": "Export the build container image",
         "bimg.export.done": "Exported to {file} ({size}). Its sha256 is {sha256}; the .sha256 file next to it carries "
@@ -89,12 +91,14 @@ TEXTS = {
         "bimg.layer": "Laufzeit-Schicht (der Stufen-Runner des Frameworks in jedem Build-Container; nur du wählst, wie "
                       "ihre Werkzeuge entstehen)",
         "bimg.layer.toolbox": "Ihre statische busybox und setpriv:",
-        "bimg.layer.way.build": "hier aus festgelegten Quellen gebaut (Vorgabe)",
-        "bimg.layer.way.fetch": "als festgelegte fertige Dateien geholt",
+        "bimg.layer.way.build": "hier aus festgelegten Quellen gebaut, util-linux setpriv (Vorgabe)",
+        "bimg.layer.way.build-rust": "hier aus festgelegten Quellen gebaut, das eigene Rust-llmcf-setpriv des Frameworks",
+        "bimg.layer.way.fetch": "als festgelegte fertige Dateien geholt (setpriv nur als llmcf-setpriv aus einem Release)",
         "bimg.layer.save": "Wahl speichern",
         "bimg.layer.saved": "Gespeichert: {way}. Schon gemachte Werkzeuge bleiben, bis sie neu gemacht werden; der "
                             "nächste Build ohne sie nutzt diesen Weg.",
         "bimg.layer.made": "Die Werkzeuge auf diesem Rechner entstanden: {way}",
+        "bimg.layer.made.setpriv": "{way} (setpriv: {setpriv})",
         "bimg.export.button": "In Datei exportieren...",
         "bimg.export.title": "Build-Container-Image exportieren",
         "bimg.export.done": "Exportiert nach {file} ({size}). Seine sha256 ist {sha256}; die .sha256-Datei daneben "

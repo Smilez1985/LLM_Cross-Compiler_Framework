@@ -5,14 +5,14 @@ runtime_layer.py: the framework's builder image orchestrator/runtime_layer/toolb
 tarballs, each checked by its sha256) and writes them with their SHA256SUMS into OUT.
 
 The CI job "Runtime layer tools" (.github/workflows/ci.yml) runs it, runs the runtime layer's tests with the real
-tools (LLMCF_TEST_TOOLBOX=OUT) and uploads OUT as a workflow artifact. Publishing a release with these files is the
-maintainer's step; their URL and sha256 then go into the one pinned table of the way "fetch"
-(orchestrator/runtime_layer/toolbox/prebuilt.json, kind "file"). This script publishes nothing.
+tools (LLMCF_TEST_TOOLBOX=OUT) and uploads OUT as a workflow artifact for inspection. These files are never a release
+asset: util-linux setpriv is C and is only ever built on the person's computer; the one prebuilt setpriv the way
+"fetch" takes is the framework's own Rust llmcf-setpriv from a release of this project
+(.github/workflows/release-tools.yml). This script publishes nothing.
 
 Usage: python scripts/runtime_toolbox.py OUT
 """
 
-import json
 import shutil
 import sys
 import tempfile
@@ -45,16 +45,13 @@ def main(argv) -> int:
         builder = runtime_layer.engine_builder(docker.from_env(), fetch, log=print)
         record = runtime_layer.ensure_toolbox(cache, "build", offline=False, fetch=fetch, build=builder, log=print)
         arch = runtime_layer.machine()
-        lines, table = [], {}
+        lines = []
         for tool in runtime_layer.TOOLS:
             name = f"{tool}-{arch}"
             shutil.copy2(runtime_layer.toolbox_dir(cache) / tool, out / name)
             digest = record["sha256"][tool]
             lines.append(f"{digest}  {name}\n")
-            table[tool] = {arch: {"kind": "file", "name": name, "sha256": digest,
-                                  "url": "(the release asset's https URL, entered when the maintainer publishes it)"}}
         (out / "SHA256SUMS").write_text("".join(lines), encoding="ascii")
-        (out / "prebuilt-entries.json").write_text(json.dumps(table, indent=2) + "\n", encoding="utf-8")
         print("".join(lines), end="")
         return 0
     finally:

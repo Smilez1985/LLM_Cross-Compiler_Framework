@@ -768,7 +768,7 @@ die Quellen und bringen ein fertiges Image auf einen anderen Offline-Rechner.
 ```
 llm-cli build image plan TARGET [--gpu] [--json]
 llm-cli build image sources [--apt-mirror URL] [--apt-proxy URL] [--pip-index URL]
-llm-cli build image layer [--toolbox build|fetch]
+llm-cli build image layer [--toolbox build|build-rust|fetch]
 llm-cli build image export TARGET --to DATEI [--image TAG_ODER_ID]
 llm-cli build image import DATEI [--sha256 HEX] [--target TARGET] [--yes]
 ```
@@ -788,12 +788,16 @@ llm-cli build image import DATEI [--sha256 HEX] [--target TARGET] [--yes]
   abgelehnt.
 - `layer` zeigt die Laufzeit-Schicht des Frameworks, die jeder Build-Container ausführt (ihren Stufen-Runner, den
   Helfer des Stufen-Kontos und eine statische busybox und setpriv): ob sie der mitgelieferten Kopie entspricht, wie
-  ihre Werkzeuge entstanden und ob dieser Rechner den Abschluss-Ordner eines Builds schützt (Docker Desktop unter
-  Windows und macOS tut es nicht: Ein solcher Build wird als „Abschluss-Ordner ungeschützt“ markiert). `--toolbox`
-  wählt, wie die Werkzeuge einmal entstehen: `build` (die Vorgabe, aus festgelegten Quellen im Builder-Image des
-  Frameworks) oder `fetch` (festgelegte fertige Dateien aus der Tabelle im Repository; solange sie kein statisches
-  setpriv hat, verweigert `fetch` und nennt `build`). Nur du setzt es: Eine KI und MCP `update_settings` werden
-  abgelehnt. Dasselbe steht in **Build > Build-Container-Images...**.
+  ihre Werkzeuge entstanden und welches setpriv sie enthalten (`util-linux` oder `llmcf-setpriv`) und ob dieser
+  Rechner den Abschluss-Ordner eines Builds schützt (Docker Desktop unter Windows und macOS tut es nicht: Ein solcher
+  Build wird als „Abschluss-Ordner ungeschützt“ markiert). `--toolbox` wählt, wie die Werkzeuge einmal entstehen:
+  `build` (die Vorgabe: beide aus festgelegten Quellen im Builder-Image des Frameworks, mit util-linux setpriv),
+  `build-rust` (busybox genauso, und der eigene Rust-uid-Wechsel des Frameworks, llmcf-setpriv, aus diesem Repository
+  in einem festgelegten Rust-Builder-Image gebaut) oder `fetch` (festgelegte fertige Dateien aus der Tabelle im
+  Repository: busybox von Debian, setpriv nur als llmcf-setpriv aus einem Release dieses Projekts; solange kein
+  Release festgelegt ist, verweigert `fetch` und nennt `build` und `build-rust`). Ein schon gemachter Werkzeugsatz
+  bleibt, bis er neu gemacht wird. Nur du setzt es: Eine KI und MCP `update_settings` werden abgelehnt. Dasselbe
+  steht in **Build > Build-Container-Images...**.
 - `export` schreibt das neueste Image von TARGET (oder `--image`) mit `docker save` in eine neue DATEI und seine
   sha256 in `DATEI.sha256` daneben; nichts wird ersetzt, und der Ziel-Datenträger muss seine Reserve frei behalten.
 - `import` prüft DATEI gegen `--sha256` oder `DATEI.sha256`, liest dann die Labels des Images: Sein Target und die
