@@ -221,6 +221,7 @@ run_server() {
     case ${opt%%=*} in
       @FORBIDDEN@) die "$opt is forbidden by the framework's server policy" ;;
     esac
+    # shellcheck disable=SC2209 # kind=file assigns the word, it runs no command
     case $opt in
       *=*) die "write the value of ${opt%%=*} as a separate argument" ;;
       --port) kind=port ;;

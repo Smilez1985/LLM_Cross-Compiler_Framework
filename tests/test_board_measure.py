@@ -236,6 +236,16 @@ class TestTheStartScriptTakesTheMeasurement:
         assert res.returncode == 2
 
 
+@pytest.mark.skipif(__import__("shutil").which("shellcheck") is None, reason="ShellCheck is not installed")
+def test_the_start_script_passes_shellcheck(tmp_path):
+    """The start script as the framework writes it (its option cases included, `kind=file` of --mmproj) has no
+    ShellCheck warning (it flagged SC2209 on `kind=file` before)."""
+    path = tmp_path / launcher.START_SCRIPT
+    path.write_bytes(launcher.render_start_script().encode("utf-8"))
+    done = subprocess.run(["shellcheck", "-S", "warning", "-s", "sh", str(path)], capture_output=True, text=True)
+    assert done.returncode == 0, done.stdout
+
+
 def test_the_unit_does_not_restart_an_unmeasured_board_every_ten_seconds():
     """Regression (looped before: the unit's Restart=on-failure started the start script again every 10 s on a board
     that was never measured, and it refused each time with the code of every refusal): the measurement refusals have
