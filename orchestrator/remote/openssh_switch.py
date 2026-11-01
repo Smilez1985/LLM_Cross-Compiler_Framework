@@ -14,16 +14,23 @@ the distribution's own package manager, known package names per family, a plan s
   fights Dropbear for port 22), makes missing host keys (ssh-keygen -A), checks the configuration (sshd -t) and starts
   sshd; answers openssh=installed|present port=N, or openssh=unavailable reason=WORD.
 - wait_until_answers(): the current session stays open until the new sshd answers on its port.
-- the setup operation dropbear-disable: only after a separate yes of the person (DietPi through dietpi-software,
-  else the init system's own commands); the framework never removes Dropbear on its own.
+- the setup operation dropbear-disable (remove_dropbear): only after a separate yes of the person, over the new
+  sshd's login (the way in stays open): the init system stops and disables the dropbear service first, then the
+  board's own package manager removes only the packages that provide the running SSH server (Debian: dropbear,
+  dropbear-bin, dropbear-run as installed; Arch, Fedora, openSUSE: dropbear; Alpine: dropbear, dropbear-openrc;
+  gate.DROPBEAR_PACKAGES), with remove, never purge and never autoremove, so its configuration stays.
+  dropbear-initramfs (the disk unlock at boot) is never removed, and the dropbear-bin it needs stays with it. The
+  removal is refused, with nothing removed, when the package manager would take any other package with them (apt's
+  simulation, rpm's test) or when it fails; a board without a package manager the switch knows gets the init
+  system's disable only, with a plain note. The framework never removes Dropbear on its own.
 
-DietPi: dietpi-software keeps one SSH server and replaces Dropbear in the same step it installs OpenSSH, which would
-end Dropbear before the person's separate yes and could cut the running session. So the install uses DietPi's own
-package manager underneath (apt), and dietpi-software does the removal of Dropbear when the person says yes to it.
+DietPi: OpenSSH is installed and Dropbear removed with apt, DietPi's package manager underneath, like on any Debian
+system; DietPi's own software list is not used or changed.
 
 Every step is written to the audit log by the caller (remote/pairing.py), with the plan's fixed words only.
 """
 
+import re
 import socket
 import time
 from dataclasses import dataclass
@@ -66,10 +73,15 @@ DROPIN = "/etc/ssh/sshd_config.d/llmcf-port.conf"
 # sshd-socket-generator turns the Port lines of sshd_config into ssh.socket's ListenStream only at `systemctl
 # daemon-reload`, and only a restart of ssh.socket makes it listen there; restarting ssh.service alone keeps port 22.
 SSH_SOCKET = "ssh.socket"
-# dietpi-software's software ID of Dropbear, used only for its removal after the person's separate yes. To be
-# confirmed on a real DietPi board (dietpi-software list): when the ID is wrong or dietpi-software refuses, the removal
-# falls back to the init system (systemctl disable --now dropbear), so Dropbear is never left half removed.
-DIETPI_DROPBEAR_ID = "104"
+# How Dropbear's packages are removed after the person's separate yes, per query program of gate.DROPBEAR_PACKAGES:
+# remove (never purge: the configuration stays) and never autoremove (no other package goes with them).
+REMOVE_COMMANDS = {
+    "dpkg": "env DEBIAN_FRONTEND=noninteractive apt-get remove -y -o APT::Get::AutomaticRemove=false",
+    "pacman": "pacman -R --noconfirm",
+    "apk": "apk del",
+    "dnf": "dnf remove -y --noautoremove",
+    "zypper": "zypper --non-interactive remove --no-clean-deps",
+}
 
 
 class SwitchUnavailable(ValueError):
@@ -97,6 +109,21 @@ SWITCH_REASONS = {
     "sshd-config": "sshd did not accept its configuration (sshd -t); it was not started",
     "start": "sshd could not be started",
     "no-answer": "the new sshd did not answer on its port in time; the current session stays as it is",
+    # the removal of Dropbear after the person's separate yes (remove_dropbear; no-manager above as well): Dropbear
+    # is stopped and disabled then, only its packages stay
+    "no-packages": "no package of the board's package manager provides Dropbear (it may have been installed by "
+                   "hand), so nothing was removed",
+    "remove": "the package manager did not remove Dropbear's packages (its output stays on the board); they stay "
+              "installed",
+    "dependents": "removing Dropbear's packages would also remove other packages, so nothing was removed",
+    "remove-timeout": "the removal of Dropbear gave no answer in time; it may still be running on the board",
+}
+# What the person reads about a removal that stopped and disabled Dropbear but did not remove its packages
+REMOVAL_NOTES = {
+    "no-manager": "the board has no package manager the framework knows, so Dropbear's program stays installed",
+    "no-packages": SWITCH_REASONS["no-packages"],
+    "remove": SWITCH_REASONS["remove"],
+    "dependents": SWITCH_REASONS["dependents"],
 }
 
 
@@ -113,15 +140,33 @@ def manager_for(facts: Any) -> str:
 @dataclass(frozen=True)
 class SwitchPlan:
     """What the switch does, shown before the person's yes: the package `manager`, the `packages` (none when OpenSSH is
-    there already), the `port` of the new sshd and the person's `lines`."""
+    there already), the `port` of the new sshd and the person's `lines`; `dropbear_packages`: the installed packages
+    that provide Dropbear as the board named them (gate.DROPBEAR_PACKAGES), for the later separate question."""
     manager: str
     packages: Tuple[str, ...]
     port: int
     dietpi: bool
     lines: Tuple[str, ...]
+    dropbear_packages: Tuple[str, ...] = ()
 
     def as_dict(self) -> dict:
-        return {"manager": self.manager, "packages": list(self.packages), "port": self.port, "dietpi": self.dietpi}
+        return {"manager": self.manager, "packages": list(self.packages), "port": self.port, "dietpi": self.dietpi,
+                "dropbear_packages": list(self.dropbear_packages)}
+
+    def removable(self) -> Tuple[str, ...]:
+        """The packages the separate yes removes (what the board's dropbear-disable decides again on the board):
+        every Dropbear package but dropbear-initramfs, and without dropbear-bin while dropbear-initramfs needs it."""
+        return removable_packages(self.dropbear_packages)
+
+
+def removable_packages(installed) -> Tuple[str, ...]:
+    """Of the installed Dropbear packages, the ones that provide the SSH server and may go (gate.DROPBEAR_KEEP stays,
+    and dropbear-bin with dropbear-initramfs)."""
+    have = tuple(installed or ())
+    keep = set(gate.DROPBEAR_KEEP)
+    if keep & set(have):
+        keep.add("dropbear-bin")
+    return tuple(p for p in have if p not in keep)
 
 
 def plan(facts: Any, port: int = SWITCH_PORT) -> SwitchPlan:
@@ -148,11 +193,20 @@ def plan(facts: Any, port: int = SWITCH_PORT) -> SwitchPlan:
               f"The new sshd has host keys of its own: you confirm its fingerprint like a new board's, then the board "
               f"is paired there with the root-owned key line, and it is reached on port {port} from then on.",
               "Dropbear stays as it is; removing it is a separate question afterwards."]
+    installed = tuple(getattr(facts, "dropbear_packages", ()) or ())
+    going = removable_packages(installed)
+    lines.append("Only if you say yes to that question: the init system stops and disables Dropbear, then the board's "
+                 "package manager removes only the packages that provide it"
+                 + (f" ({', '.join(going)})" if going else "")
+                 + " with remove, never purge or autoremove, so its configuration stays.")
+    if set(gate.DROPBEAR_KEEP) & set(installed):
+        lines.append("dropbear-initramfs stays installed (it unlocks an encrypted disk at boot), and with it "
+                     "dropbear-bin, which it needs.")
     if dietpi:
-        lines.append("On DietPi, OpenSSH is installed with apt (DietPi's own package manager underneath), because "
-                     "dietpi-software would replace Dropbear in the same step; dietpi-software removes Dropbear "
-                     "only when you say yes to that question.")
-    return SwitchPlan(manager=manager, packages=packages, port=int(port), dietpi=dietpi, lines=tuple(lines))
+        lines.append("On DietPi, both steps use apt, DietPi's package manager underneath, like on any Debian system; "
+                     "DietPi's own software list is not used or changed.")
+    return SwitchPlan(manager=manager, packages=packages, port=int(port), dietpi=dietpi, lines=tuple(lines),
+                      dropbear_packages=installed)
 
 
 def _install_script(manager: str, port: str) -> str:
@@ -220,32 +274,154 @@ define("openssh-install", ("word", "uint"), lambda manager, port, rest="": _inst
        doc="the switch to OpenSSH: install it if it is not there (sudo once), its port next to Dropbear, sshd -t, start")
 
 DROPBEAR_DISABLE = "\n".join([
+    # stdin: a line with the person's one-time password (empty: sudo -n only). Runs over the new sshd's login, so
+    # stopping Dropbear never cuts this session. Answers fixed words only.
     "set -u",
     'IFS= read -r llmcf_pw || llmcf_pw=""',
     'no() { echo "dropbear=unavailable reason=$1"; exit 0; }',
+    # Dropbear is stopped and disabled from here on: how its packages went (removal=removed|none|refused, reason=WORD
+    # or -, packages=the ones removed, or kept by a refusal, comma-separated, or none)
+    'off() { echo "dropbear=$1 removal=$2 reason=$3 packages=${4:-none}"; exit 0; }',
     'asroot() { if [ -n "$llmcf_pw" ]; then printf "%s\\n" "$llmcf_pw" | sudo -S -p "" "$@"; '
     'else sudo -n "$@"; fi; }',
     "command -v sudo >/dev/null 2>&1 || no no-sudo",
-    "llmcf_done=no",
-    # DietPi's own tool first (it keeps its software list right); its ID of Dropbear: DIETPI_DROPBEAR_ID
-    "if [ -x /boot/dietpi/dietpi-software ] || command -v dietpi-software >/dev/null 2>&1; then",
-    "  llmcf_ds=$(command -v dietpi-software 2>/dev/null || echo /boot/dietpi/dietpi-software)",
-    f'  asroot "$llmcf_ds" uninstall {DIETPI_DROPBEAR_ID} >/dev/null 2>&1 && llmcf_done=yes',
-    "fi",
-    # without dietpi-software, or when it refused: the init system stops and disables the dropbear service
-    'if [ "$llmcf_done" = no ]; then',
-    "  if [ -d /run/systemd/system ]; then",
-    "    asroot systemctl disable --now dropbear >/dev/null 2>&1 || no start",
-    "  elif command -v rc-service >/dev/null 2>&1; then",
-    "    asroot rc-update del dropbear default >/dev/null 2>&1; asroot rc-service dropbear stop >/dev/null 2>&1 || "
+    gate.dropbear_packages_sh(),
+    # 1. the init system stops and disables the dropbear service
+    "if [ -d /run/systemd/system ]; then",
+    "  asroot systemctl disable --now dropbear >/dev/null 2>&1 || no start",
+    "elif command -v rc-service >/dev/null 2>&1; then",
+    "  asroot rc-update del dropbear default >/dev/null 2>&1; asroot rc-service dropbear stop >/dev/null 2>&1 || "
     "no start",
-    "  else no start; fi",
-    "fi",
-    'echo "dropbear=disabled"',
+    "else no start; fi",
+    # 2. only the packages that provide the SSH server: never dropbear-initramfs, and its dropbear-bin stays with it
+    "llmcf_all=$(llmcf_dbpkgs | tr '\\n' ' ')",
+    "llmcf_rm=",
+    "for llmcf_p in $llmcf_all; do",
+    "  case $llmcf_p in",
+    f"    {'|'.join(gate.DROPBEAR_KEEP)}) ;;",
+    '    dropbear-bin) case " $llmcf_all " in *" dropbear-initramfs "*) ;; *) llmcf_rm="$llmcf_rm $llmcf_p" ;; '
+    "esac ;;",
+    '    *) llmcf_rm="$llmcf_rm $llmcf_p" ;;',
+    "  esac",
+    "done",
+    "llmcf_tool=$(llmcf_dbtool) || off disabled none no-manager",
+    '[ -n "$llmcf_rm" ] || off disabled none no-packages',
+    "llmcf_list=$(echo $llmcf_rm | tr ' ' ',')",
+    "case $llmcf_tool in",
+    "  dpkg)",
+    "    command -v apt-get >/dev/null 2>&1 || off disabled none no-manager",
+    # apt's simulation names every package the removal would take: only these, else nothing is removed
+    '    llmcf_sim=$(apt-get -s remove $llmcf_rm 2>/dev/null) || off disabled refused remove "$llmcf_list"',
+    "    for llmcf_n in $(printf '%s\\n' \"$llmcf_sim\" | sed -n -e 's/^Remv \\([^ ]*\\).*/\\1/p' "
+    "-e 's/^Purg \\([^ ]*\\).*/\\1/p'); do",
+    '      case " $llmcf_rm " in *" $llmcf_n "*) ;; *) off disabled refused dependents "$llmcf_list" ;; esac',
+    "    done",
+    f"    asroot {REMOVE_COMMANDS['dpkg']} $llmcf_rm >/dev/null 2>&1 || off disabled refused remove "
+    '"$llmcf_list" ;;',
+    # pacman -R (without -c or -dd) refuses by itself when another package needs one of them
+    "  pacman)",
+    f"    asroot {REMOVE_COMMANDS['pacman']} $llmcf_rm >/dev/null 2>&1 || off disabled refused remove "
+    '"$llmcf_list" ;;',
+    # apk's simulation names every package the removal would take ("(1/2) Purging NAME (VERSION)")
+    "  apk)",
+    '    llmcf_sim=$(asroot apk del -s $llmcf_rm 2>/dev/null) || off disabled refused remove "$llmcf_list"',
+    "    for llmcf_n in $(printf '%s\\n' \"$llmcf_sim\" | sed -n 's/.*Purging \\([^ ]*\\).*/\\1/p'); do",
+    '      case " $llmcf_rm " in *" $llmcf_n "*) ;; *) off disabled refused dependents "$llmcf_list" ;; esac',
+    "    done",
+    f"    asroot {REMOVE_COMMANDS['apk']} $llmcf_rm >/dev/null 2>&1 || off disabled refused remove "
+    '"$llmcf_list" ;;',
+    # rpm's test removal fails when another package needs one of them; dnf or zypper then remove only these
+    "  rpm)",
+    '    asroot rpm -e --test $llmcf_rm >/dev/null 2>&1 || off disabled refused dependents "$llmcf_list"',
+    "    if command -v dnf >/dev/null 2>&1; then",
+    f"      asroot {REMOVE_COMMANDS['dnf']} $llmcf_rm >/dev/null 2>&1 || off disabled refused remove "
+    '"$llmcf_list"',
+    "    elif command -v zypper >/dev/null 2>&1; then",
+    f"      asroot {REMOVE_COMMANDS['zypper']} $llmcf_rm >/dev/null 2>&1 || off disabled refused remove "
+    '"$llmcf_list"',
+    "    else off disabled none no-manager; fi ;;",
+    "esac",
+    'off removed removed - "$llmcf_list"',
 ])
 define("dropbear-disable", (), lambda rest="": DROPBEAR_DISABLE, gate=False,
-       doc="after the person's separate yes: Dropbear off (DietPi: dietpi-software, else or when it refuses the init "
-           "system)")
+       doc="after the person's separate yes: Dropbear stopped and disabled by the init system, then only its packages "
+           "removed with the board's package manager (never dropbear-initramfs, never purge or autoremove)")
+
+
+@dataclass(frozen=True)
+class DropbearRemoval:
+    """What dropbear-disable did: `ok` when Dropbear is stopped and disabled; `removal` removed (its packages are
+    gone), none (nothing to remove, or no package manager the switch knows) or refused (the package manager would
+    have taken other packages, or failed: nothing was removed); `reason` a word of SWITCH_REASONS ("" when its
+    packages were removed); `packages` the ones removed, or kept by a refusal (fixed names only)."""
+    ok: bool
+    removal: str = ""
+    reason: str = ""
+    packages: Tuple[str, ...] = ()
+
+    @property
+    def removed(self) -> bool:
+        return self.ok and self.removal == "removed"
+
+    def as_dict(self) -> dict:
+        """Fixed words only, for the audit log."""
+        return {"removal": self.removal or "none", "reason": self.reason, "packages": list(self.packages)}
+
+
+_REMOVALS = ("removed", "none", "refused")
+_WORD = re.compile(r"^[a-z][a-z-]{0,23}$", re.ASCII)
+
+
+def _removal(text: str) -> DropbearRemoval:
+    """The answer of dropbear-disable, fixed words only (anything else counts as unknown)."""
+    for line in (text or "").splitlines():
+        words = dict(w.split("=", 1) for w in line.split() if "=" in w)
+        state = words.get("dropbear")
+        if state is None:
+            continue
+        reason = words.get("reason", "-")
+        reason = reason if _WORD.fullmatch(reason) else ("" if reason == "-" else "unknown")
+        if state not in ("removed", "disabled"):
+            return DropbearRemoval(False, reason=reason or "unknown")
+        removal = words.get("removal", "none")
+        packages = tuple(p for p in words.get("packages", "none").split(",") if gate.DROPBEAR_PACKAGE.fullmatch(p))
+        return DropbearRemoval(True, removal=removal if removal in _REMOVALS else "none", reason=reason,
+                               packages=packages)
+    return DropbearRemoval(False, reason="unknown")
+
+
+def remove_dropbear(run: Callable[..., object], password: str = "") -> DropbearRemoval:
+    """dropbear-disable over `run` (the new sshd's login), only after the person's separate yes: Dropbear stopped and
+    disabled, then its packages removed with the board's package manager (DropbearRemoval says what happened)."""
+    if "\n" in password or "\r" in password:
+        return DropbearRemoval(False, reason="sudo")
+    try:
+        result = run(gate.script("dropbear-disable"), stdin=[(password + "\n").encode("utf-8")],
+                     timeout=INSTALL_TIMEOUT)
+    except (socket.timeout, TimeoutError):
+        return DropbearRemoval(False, reason="remove-timeout")
+    return _removal(getattr(result, "out", ""))
+
+
+def removal_text(done: DropbearRemoval) -> str:
+    """What the person reads after the separate yes (the CLI's and the GUI's report of the switch)."""
+    if done.reason == "remove-timeout":   # its disable comes first, so Dropbear may already be stopped
+        return ("The removal of Dropbear gave no answer in time; it may still be running on the board, so Dropbear "
+                "may already be stopped and its packages removed. OpenSSH keeps running.")
+    if not done.ok:
+        return (f"Dropbear could not be turned off ({SWITCH_REASONS.get(done.reason, done.reason)}); it keeps "
+                "running next to OpenSSH.")
+    if done.removed:
+        return (f"Dropbear is off: stopped, disabled, and its packages ({', '.join(done.packages)}) removed with the "
+                "board's package manager; their configuration files stay on the board.")
+    note = REMOVAL_NOTES.get(done.reason, SWITCH_REASONS.get(done.reason, done.reason or "nothing was removed"))
+    return f"Dropbear is off (stopped and disabled by the init system); {note}."
+
+
+def disable_dropbear(run: Callable[..., object], password: str = "") -> Tuple[bool, str]:
+    """Deprecated: remove_dropbear (which also says what happened to Dropbear's packages). (ok, reason)."""
+    done = remove_dropbear(run, password)
+    return done.ok, ("" if done.ok else done.reason)   # as before: no reason when Dropbear is off
 
 
 def _answer(text: str, key: str) -> Tuple[bool, str, str]:
@@ -270,15 +446,6 @@ def install(run: Callable[..., object], the_plan: SwitchPlan, password: str = ""
     except (socket.timeout, TimeoutError):
         return False, "install-timeout", ""
     return _answer(getattr(result, "out", ""), "openssh")
-
-
-def disable_dropbear(run: Callable[..., object], password: str = "") -> Tuple[bool, str]:
-    """dropbear-disable over `run`, only after the person's separate yes. (ok, reason)."""
-    if "\n" in password or "\r" in password:
-        return False, "sudo"
-    result = run(gate.script("dropbear-disable"), stdin=[(password + "\n").encode("utf-8")])
-    ok, reason, _state = _answer(getattr(result, "out", ""), "dropbear")
-    return ok, reason
 
 
 def banner_of(host: str, port: int, timeout: float = 5.0) -> str:
@@ -308,7 +475,9 @@ def wait_until_answers(host: str, port: int, *, seconds: float = WAIT_SECONDS, b
         sleep(1.0)
 
 
-__all__ = ["DIETPI_DROPBEAR_ID", "DROPIN", "FAMILY_MANAGER", "SSH_SOCKET", "INSTALL_COMMANDS", "INSTALL_TIMEOUT", "PACKAGES", "PACMAN_SYNC_DIR",
+__all__ = ["DROPIN", "DropbearRemoval", "REMOVAL_NOTES", "REMOVE_COMMANDS", "FAMILY_MANAGER", "SSH_SOCKET",
+           "INSTALL_COMMANDS", "INSTALL_TIMEOUT", "PACKAGES", "PACMAN_SYNC_DIR",
            "PREPARE_COMMANDS", "SWITCH_PORT", "SWITCH_REASONS", "SwitchPlan",
            "SwitchUnavailable", "banner_of", "disable_dropbear", "install", "manager_for", "plan",
+           "remove_dropbear", "removable_packages", "removal_text",
            "wait_until_answers"]

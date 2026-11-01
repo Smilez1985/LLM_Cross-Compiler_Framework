@@ -653,7 +653,7 @@ not run a finished stage again. A build with nothing to use again is deleted at 
 | Command | What it does |
 |---------|--------------|
 | `list` | Every kept build: its target, its finished stages, its size, its folder, and whether an AI asked about it. |
-| `continue BUILD_ID` | Starts the same build again on its kept work folder. |
+| `continue BUILD_ID` | Starts the same build again on its kept work folder, as a new build request, and follows it like `build start --follow`: a status line with its stage and percent whenever it changes, Ctrl+C cancels it (its container is stopped, exit code 130), and at the end how it ended, with that end's exit code (0 done, 1 failed, 2 cancelled). Its request shows in `build status` and in `get_build_status` like any started build. |
 | `delete BUILD_ID` | Shows the one item (full path, size, what it is) and deletes it after your yes at the terminal. When a stage module left files only the stage account could change, a short clean-up container runs first as that account (no network, no capability). The result says what stayed, with its paths. |
 
 Only you decide. An AI caller (MCP, Ditto) reads the kept build in `get_build_status` with its label and its finished
@@ -2138,7 +2138,8 @@ that runs the model, so the probe runs on that machine.
 - **What it prints**: a short summary of the profile (system, CPU, GPU, NPU, Hailo) and, since probe 3.3.0, an
   `Access:` line: the SSH server (OpenSSH or Dropbear) and its version, sudo (without a password, asks for one, absent,
   or the probe ran as root), the ssh-keygen version and whether it can check signatures, the init system, the package
-  manager and DietPi's dietpi-software. The Builder tab's scan shows the same line; an older probe file has none.
+  manager and the installed packages that provide Dropbear (asked from the package manager without root, such as
+  `dropbear, dropbear-bin, dropbear-run`). The Builder tab's scan shows the same line; an older probe file has none.
 - **A board's probe file** (`--import FILE`): a `target_hardware_config.txt` you copied from a board (written there
   by `scripts/hardware_probe.sh` or `llm-cli scan`) is checked like any probe file from outside, stored under a new
   random ID with your label (default: the board model in the file) and the CLI prints that **probe id** and the

@@ -376,11 +376,25 @@ def configuration(item: KeptBuild):
     return BuildConfiguration(**values)
 
 
-def continue_build(engine: Any, item: KeptBuild, actor: str, state_dir: Optional[Path] = None) -> str:
+def continue_build(engine: Any, item: KeptBuild, actor: str, state_dir: Optional[Path] = None,
+                   service: Any = None) -> str:
     """The person's "continue": the same build, on the same work folder (the stage runner resumes every finished
-    stage whose inputs are unchanged). Only the person; an AI's request is refused with needs_person."""
+    stage whose inputs are unchanged). Only the person; an AI's request is refused with needs_person.
+
+    With the build `service` (Core/build_service.py BuildService, as the CLI and the GUI pass it) the build is queued
+    as a build request (BuildService.continue_interrupted) and its request id is returned: it is followed, cancelled
+    and reported exactly like a started build (the CLI's follow line and Ctrl+C, the Builder's progress panel,
+    get_build_status). Without one (deprecated: a caller without a build service) the engine runs the configuration
+    directly and the build id is returned."""
     require_person(actor)
     from orchestrator.Core.builder import ValidationError
+    if service is not None:
+        try:   # a BuildServiceError (the queue is full, ...) is a ValueError
+            started = service.continue_interrupted(configuration(item), description=f"Continued: {item.label}")
+        except (RuntimeError, ValidationError, ValueError) as e:
+            raise InterruptedBuildError(f"{item.label} could not be continued now: {e}", "failed") from None
+        _settled(state_dir, item.build_id)
+        return started.request_id
     try:
         build_id = engine.build_model(configuration(item))
     except (RuntimeError, ValidationError, ValueError) as e:   # every slot busy, the same build still running here
@@ -391,9 +405,10 @@ def continue_build(engine: Any, item: KeptBuild, actor: str, state_dir: Optional
 
 def decide(engine: Any, cache_dir: Path, build_id: str, choice: str, actor: str, *,
            state_dir: Optional[Path] = None, accepted: Any = None, audit: Any = None,
-           cleanup: Optional[Callable[[], Optional[str]]] = None):
+           cleanup: Optional[Callable[[], Optional[str]]] = None, service: Any = None):
     """The one way to answer the question: `continue` or `delete` (with the person's accepted deletion). An AI
-    caller's answer is never taken: its question is recorded as pending and refused with needs_person."""
+    caller's answer is never taken: its question is recorded as pending and refused with needs_person. `continue`
+    with the build `service` returns the request id of the continued build (continue_build)."""
     if choice not in DECISIONS:
         raise InterruptedBuildError(f"Unknown choice {choice!r}: continue or delete.", "invalid_value")
     item = kept_build(cache_dir, build_id)
@@ -405,7 +420,7 @@ def decide(engine: Any, cache_dir: Path, build_id: str, choice: str, actor: str,
             record_pending(state_dir, item, actor)
         raise InterruptedBuildError(AI_NEXT, code="needs_person")
     if choice == "continue":
-        return continue_build(engine, item, actor, state_dir)
+        return continue_build(engine, item, actor, state_dir, service=service)
     if accepted is None:
         raise InterruptedBuildError("Deleting what it left needs your yes to its list first.", "needs_person")
     return discard(item, accepted, audit=audit, state_dir=state_dir, cleanup=cleanup)

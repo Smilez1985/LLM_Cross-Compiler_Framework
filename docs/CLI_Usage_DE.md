@@ -676,7 +676,7 @@ sich nichts noch einmal nutzen lässt, wird sofort gelöscht. Direkt nach dem En
 | Befehl | Was er tut |
 |--------|------------|
 | `list` | Jeden aufbewahrten Build: sein Target, seine fertigen Stufen, seine Größe, seinen Ordner und ob eine KI danach gefragt hat. |
-| `continue BUILD_ID` | Startet denselben Build erneut auf seinem aufbewahrten Arbeitsordner. |
+| `continue BUILD_ID` | Startet denselben Build erneut auf seinem aufbewahrten Arbeitsordner, als neuen Build-Auftrag, und verfolgt ihn wie `build start --follow`: eine Statuszeile mit seiner Stufe und dem Prozentwert, sobald sie sich ändert, Strg+C bricht ihn ab (sein Container wird gestoppt, Exit-Code 130), und am Ende, wie er geendet hat, mit dem Exit-Code dieses Endes (0 fertig, 1 gescheitert, 2 abgebrochen). Sein Auftrag erscheint in `build status` und in `get_build_status` wie jeder gestartete Build. |
 | `delete BUILD_ID` | Zeigt den einen Eintrag (voller Pfad, Größe, was er ist) und löscht ihn nach deinem Ja im Terminal. Wenn ein Stufenmodul Dateien hinterlassen hat, die nur das Stufen-Konto ändern konnte, läuft vorher ein kurzer Aufräum-Container als dieses Konto (kein Netzwerk, keine Capability). Das Ergebnis sagt, was geblieben ist, mit den Pfaden. |
 
 Nur du entscheidest. Ein KI-Aufrufer (MCP, Ditto) liest den aufbewahrten Build in `get_build_status` mit seiner
@@ -2233,8 +2233,9 @@ den Rechner geplant, auf dem das Modell läuft, deshalb läuft die Probe auf die
 - **Was sie ausgibt**: eine kurze Zusammenfassung des Profils (System, CPU, GPU, NPU, Hailo) und seit Probe 3.3.0
   eine Zeile `Access:`: der SSH-Server (OpenSSH oder Dropbear) und seine Version, sudo (ohne Passwort, fragt nach
   einem, fehlt, oder die Probe lief als root), die Version von ssh-keygen und ob es Signaturen prüfen kann, das
-  Init-System, die Paketverwaltung und DietPis dietpi-software. Der Scan im Builder-Tab zeigt dieselbe Zeile; eine
-  ältere Probe-Datei hat keine.
+  Init-System, die Paketverwaltung und die installierten Pakete, die Dropbear bereitstellen (ohne root bei der
+  Paketverwaltung erfragt, etwa `dropbear, dropbear-bin, dropbear-run`). Der Scan im Builder-Tab zeigt dieselbe
+  Zeile; eine ältere Probe-Datei hat keine.
 - **Die Probe-Datei eines Boards** (`--import DATEI`): Eine `target_hardware_config.txt`, die du von einem Board
   kopiert hast (dort von `scripts/hardware_probe.sh` oder `llm-cli scan` geschrieben), wird wie jede Probe-Datei von
   außen geprüft, unter einer neuen zufälligen ID mit deiner Bezeichnung gespeichert (Standard: das Board-Modell aus

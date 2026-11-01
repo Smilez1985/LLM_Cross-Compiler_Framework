@@ -38,6 +38,8 @@ import shlex
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, Optional, Sequence, Tuple
 
+from orchestrator.remote.key_tiers import DROPBEAR_PACKAGE as _DROPBEAR_PACKAGE
+
 GATE_NAME = "llmcf-gate"
 # Where the gate lives on the board, relative to the account's home folder (next to the runtime's API key folder).
 GATE_REL = ".config/llm-framework/llmcf-gate"
@@ -1083,6 +1085,42 @@ def install_dropbear_board(run: Callable[..., object], public_line: str, bundle:
 
 # --- the facts a pairing reads to offer the key tiers (remote/key_tiers.py) -----------------------------------------
 
+# The packages that may provide Dropbear, per query program of the board's package manager, asked without root
+# (dpkg-query -W, pacman -Qq, apk info -e, rpm -q). The hardware probe's table tables.dropbear_packages of
+# configs/hardware_probe_schema.yml is the same (a test compares them). dropbear-initramfs only unlocks an encrypted
+# disk at boot: it is recorded, never removed (DROPBEAR_KEEP), and the dropbear-bin it needs stays with it.
+DROPBEAR_PACKAGES = {"dpkg": ("dropbear", "dropbear-bin", "dropbear-run", "dropbear-initramfs"),
+                     "pacman": ("dropbear",), "apk": ("dropbear", "dropbear-openrc"), "rpm": ("dropbear",)}
+DROPBEAR_KEEP = ("dropbear-initramfs",)
+DROPBEAR_PACKAGE_NAMES = tuple(dict.fromkeys(n for names in DROPBEAR_PACKAGES.values() for n in names))
+DROPBEAR_PACKAGE = _DROPBEAR_PACKAGE   # a strict name, nothing else (the one pattern: remote/key_tiers.py)
+
+
+def dropbear_packages_sh() -> str:
+    """POSIX sh functions for a board script: llmcf_dbtool prints the query program it asks (dpkg, pacman, apk, rpm;
+    nothing without one), llmcf_dbpkgs the installed packages of DROPBEAR_PACKAGES, one per line, each checked
+    against the fixed names (nothing of the package manager's own text comes out). Neither needs root."""
+    names = "|".join(DROPBEAR_PACKAGE_NAMES)
+    return "\n".join([
+        "llmcf_dbtool() {",
+        "  for llmcf_t in dpkg-query:dpkg pacman:pacman apk:apk rpm:rpm; do",
+        '    if command -v "${llmcf_t%%:*}" >/dev/null 2>&1; then echo "${llmcf_t#*:}"; return 0; fi',
+        "  done",
+        "  return 1",
+        "}",
+        "llmcf_dbpkgs() {",
+        "  case $(llmcf_dbtool) in",
+        "    dpkg) dpkg-query -W -f '${Package} ${Status}\\n' " + " ".join(DROPBEAR_PACKAGES["dpkg"])
+        + " 2>/dev/null | while read -r llmcf_n llmcf_s; do case \" $llmcf_s\" in *' installed') "
+        "echo \"$llmcf_n\" ;; esac; done ;;",
+        "    pacman) pacman -Qq " + " ".join(DROPBEAR_PACKAGES["pacman"]) + " 2>/dev/null ;;",
+        "    apk) apk info -e " + " ".join(DROPBEAR_PACKAGES["apk"]) + " 2>/dev/null ;;",
+        "    rpm) rpm -q --qf '%{NAME}\\n' " + " ".join(DROPBEAR_PACKAGES["rpm"]) + " 2>/dev/null ;;",
+        f'  esac | while read -r llmcf_n; do case $llmcf_n in {names}) echo "$llmcf_n" ;; esac; done',
+        "}",
+    ])
+
+
 TIER_FACTS = "\n".join([
     # stdin: a line with the person's one-time password (empty: sudo -n only). LLMCF_SIGNERS, LLMCF_PEM and
     # LLMCF_SELFTEST may come before it (then the board's own tools check the framework's self-test signature).
@@ -1133,10 +1171,14 @@ TIER_FACTS = "\n".join([
     "  break",
     "done",
     'echo "family=$llmcf_f"',
+    # DietPi on its own: the switch's plan tells a DietPi board that both of its steps go through apt
     "if [ -d /boot/dietpi ] || [ -f /boot/dietpi/.version ]; then echo dietpi=yes; else echo dietpi=no; fi",
-    "for llmcf_m in apt-get dnf zypper pacman apk dietpi-software; do",
-    '  if command -v "$llmcf_m" >/dev/null 2>&1 || [ -x "/boot/dietpi/$llmcf_m" ]; then echo "manager=$llmcf_m"; fi',
+    "for llmcf_m in apt-get dnf zypper pacman apk; do",
+    '  if command -v "$llmcf_m" >/dev/null 2>&1; then echo "manager=$llmcf_m"; fi',
     "done",
+    # which installed packages provide Dropbear, asked from the package manager without root
+    dropbear_packages_sh(),
+    'for llmcf_n in $(llmcf_dbpkgs); do echo "dropbear_pkg=$llmcf_n"; done',
     "if [ -d /run/systemd/system ]; then echo init=systemd; elif command -v rc-service >/dev/null 2>&1; then "
     "echo init=openrc; else echo init=other; fi",
     'llmcf_port=${SSH_CONNECTION##* }',
@@ -1164,7 +1206,8 @@ def read_tier_facts(run: Callable[..., object], bundle: Optional["GateBundle"] =
     return getattr(result, "out", "") or ""
 
 
-__all__ = ["DROPBEAR_OPTIONS", "DROPBEAR_LATER_OPTIONS", "HOME_SIGNING_REL", "SIGNERS_PEM", "SSHSIG_ED25519_SIZE",
+__all__ = ["DROPBEAR_KEEP", "DROPBEAR_PACKAGE", "DROPBEAR_PACKAGE_NAMES", "DROPBEAR_PACKAGES",
+           "dropbear_packages_sh", "DROPBEAR_OPTIONS", "DROPBEAR_LATER_OPTIONS", "HOME_SIGNING_REL", "SIGNERS_PEM", "SSHSIG_ED25519_SIZE",
            "dropbear_board_script", "install_dropbear_board", "read_tier_facts", "sshsig_prefix", "verify_sh"]
 __all__ += ["BoardPaths", "INSTALL_ROOT_REL", "KEYS_DIR", "LIBEXEC_DIR", "ROOT_GATE", "SELFTEST_DATA", "SIGNERS",
            "SIGN_NAMESPACE", "SIGN_PRINCIPAL", "install_root_board", "match_block", "root_board_script", "signed_sh",

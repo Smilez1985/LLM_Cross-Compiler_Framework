@@ -1589,6 +1589,11 @@ class BuilderTab(QWidget):
     def _build_service(self):
         return getattr(self.framework, "build_service", None)
 
+    def track_build(self, request_id):
+        """Follows a build request until it ends in the progress panel (stage, percent, log), Cancel enabled
+        meanwhile: a build started here, or an interrupted build continued from Build > Build History."""
+        self._track_build(request_id)
+
     def _track_build(self, request_id):
         """Follows the submitted build until it ends; Cancel is enabled meanwhile."""
         self._active_request = request_id
