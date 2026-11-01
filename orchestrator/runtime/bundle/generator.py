@@ -657,7 +657,8 @@ class BundleStore:
             record = built.root_helper
             helper = built.path / ROOT_HELPER_FILE
             if record is None or not helper.is_file():
-                problems.append("the bundle's root actions need llmcf-install, which it does not carry (build it again)")
+                problems.append("the bundle's root actions need llmcf-install, which it does not carry (build it "
+                                "again)")
             elif sha256_file(helper) != record["sha256"]:
                 problems.append("llmcf-install changed since the bundle was built")
             elif not (built.path / f"{ROOT_HELPER_FILE}.sig").is_file():

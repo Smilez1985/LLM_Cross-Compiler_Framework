@@ -243,6 +243,7 @@ def _root_board(tmp_path, helper_binary, tier="root"):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
         path.chmod(0o755)
+    board.root = tmp_path
     return board
 
 
@@ -335,3 +336,95 @@ def test_the_root_operation_takes_only_its_actions_and_ids():
     assert "bundle-root" in {op.verb for op in gate.gate_operations()}
     text = gate.script("bundle-root", "apply", "voice-test")
     assert "sudo -n" in text and "sudo -S" in text and "LLMCF_HOME_GATE=; llmcf_trusted_signers" in text
+
+
+def test_an_ai_never_reaches_a_root_action():
+    """bundle_deploy (the one MCP tool that changes a board) runs the unprivileged installer only: no tool module
+    calls llmcf-install's run or names its gate operation, and its facts say where root actions run."""
+    root = Path(__file__).resolve().parents[1] / "orchestrator" / "tools"
+    for path in root.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert "run_root" not in text and "bundle-root" not in text, path.name
+    text = (root / "tools_bundle.py").read_text(encoding="utf-8")
+    assert "never from here" in text and "never through this tool" in text
+
+
+# --- the person's channels: `llmcf bundle ...` with the real helper on a fake board --------------------------------
+
+@pytest.fixture
+def cli_root_board(tmp_path, monkeypatch, helper_binary, sudo_on_path):
+    """`llmcf bundle` with its per-user folder in tmp_path/state, a stored board behind llmcf's gate whose sudo runs
+    the real llmcf-install test build (tests/test_bundle_ui.cli_board, plus the helper)."""
+    from rich.console import Console
+    from test_board_bundle import GateShell, _files
+    from test_bundle_ui import _stored_board
+    from orchestrator import cli as cli_module
+    from orchestrator.runtime.bundle import service
+    from orchestrator.runtime.bundle.root_helper import HelperBuild
+    from orchestrator.runtime.device import remote
+    from orchestrator.utils.helpers import sha256_file
+    state = tmp_path / "state"
+    _stored_board(state)
+    board = _root_board(tmp_path, helper_binary)
+    monkeypatch.setattr(cli_module, "_state_dir", lambda ctx: state)
+    monkeypatch.setattr(cli_module, "_open_device", lambda *a, **kw: (GateShell(board), "key"))
+    monkeypatch.setattr(cli_module, "_bundle_signer", lambda ctx: board.signer)
+    monkeypatch.setattr(cli_module, "console", Console(width=1000, color_system=None))
+    monkeypatch.setattr(remote, "RemoteShell", lambda session: session)
+    made = HelperBuild(helper_binary, sha256_file(helper_binary), "0.1.0", "aarch64-unknown-linux-musl", "test")
+    monkeypatch.setattr(service, "helper_for", lambda framework, arch, say=None: made)
+    monkeypatch.setattr(cli_module, "_interactive", lambda: True)
+    _model, wmodel, prog = _files(tmp_path)
+    board.state = state
+    board.choice = ["--preset", "stt", "--file", f"stt.model={wmodel}", "--file", f"stt.program={prog}",
+                    "--licence", "stt.model=MIT", "--set", "stt.autostart=yes"]
+    board.root = tmp_path
+    return board
+
+
+def _cli_bundle(board):
+    from test_cli_builds import invoke_plain
+    from orchestrator.runtime.bundle import generator as gen
+    res = invoke_plain("bundle", "build", "ZERO 3W", *board.choice)
+    assert res.code == 0 and "Built bundle" in res.out, res.out
+    [built] = gen.BundleStore(board.state).list()
+    assert built.needs_root and built.root_helper["sha256"]
+    return built.bundle_id
+
+
+@POSIX
+def test_the_cli_deploy_asks_a_second_time_before_the_root_actions(cli_root_board):
+    from test_cli_builds import invoke_plain
+    bid = _cli_bundle(cli_root_board)
+    unit = cli_root_board.root / "etc/systemd/system/llmcf-stt.service"
+    res = invoke_plain("bundle", "deploy", bid, input="y\n\n")     # yes to the apply, the default No to root
+    assert res.code == 0 and "stopped-root" in res.out and "Run the 3 root action(s)" in res.out, res.out
+    assert "would create_user" in res.out and not unit.exists()
+    res = invoke_plain("bundle", "deploy", bid, input="y\ny\n")
+    assert res.code == 0 and "done install_unit" in res.out and unit.is_file(), res.out
+    res = invoke_plain("bundle", "status", bid)
+    assert res.code == 0 and "already install_unit" in res.out and "result: installed" in res.out, res.out
+    res = invoke_plain("bundle", "rollback", bid, "--root", input="y\n")
+    assert res.code == 0 and not unit.exists(), res.out
+    res = invoke_plain("bundle", "deploy", bid, "--skip-root", input="y\n")
+    assert res.code == 0 and "--skip-root" in res.out and not unit.exists(), res.out
+    assert invoke_plain("bundle", "deploy", bid, input="y\ny\n").code == 0 and unit.is_file()
+    res = invoke_plain("bundle", "uninstall", bid, input="y\ny\n")
+    assert res.code == 0 and "would-remove user-created llmcf" in res.out and not unit.exists(), res.out
+    assert "llmcf:" not in (cli_root_board.root / "etc/passwd").read_text()
+
+
+@POSIX
+def test_the_cli_asks_for_the_sudo_password_in_private_mode_only(cli_root_board, monkeypatch):
+    from test_cli_builds import invoke_plain
+    from orchestrator import cli as cli_module
+    (cli_root_board.root / "sudo-password").write_text("correct horse")
+    bid = _cli_bundle(cli_root_board)
+    unit = cli_root_board.root / "etc/systemd/system/llmcf-stt.service"
+    monkeypatch.setattr(cli_module, "_framework_mode", lambda ctx: "enterprise")
+    res = invoke_plain("bundle", "deploy", bid, input="y\n")
+    assert res.code == 1 and "enterprise mode runs root actions only with sudo -n" in res.out, res.out
+    monkeypatch.setattr(cli_module, "_framework_mode", lambda ctx: "private")
+    res = invoke_plain("bundle", "deploy", bid, input="y\ncorrect horse\ny\n")
+    assert res.code == 0 and unit.is_file(), res.out
+    assert "correct horse" not in res.out

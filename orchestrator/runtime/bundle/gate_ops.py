@@ -103,8 +103,11 @@ def _root_body(action: str, bundle: str) -> str:
         f'case {action} in {cases}) ;; *) {refuse.format("refused", "not an action of this operation")} ;; esac',
         f'case {bundle} in ""|-*|.*|*[!a-z0-9._-]*) {refuse.format("refused", "not a bundle id")} ;; esac',
         f'llmcf_b="$HOME"/{inst.BUNDLE_REL}; llmcf_k="$llmcf_b"/{bundle}/.kept',
-        f'[ -f "$llmcf_k/{ROOT}" ] && [ -f "$llmcf_k/{ROOT}.sig" ] || {{ '
-        + refuse.format("refused", f"{ROOT} of this bundle is not on the board (deploy the bundle first)") + "; }",
+        # no kept helper: nothing to plan or apply (deploy first); for the other actions nothing it could have made
+        f'if [ ! -f "$llmcf_k/{ROOT}" ] || [ ! -f "$llmcf_k/{ROOT}.sig" ]; then case {action} in plan|apply) '
+        + refuse.format("refused", f"{ROOT} of this bundle is not on the board (deploy the bundle first)") + " ;; "
+        f'*) echo "llmcf-bundle: result=absent changed=0 {ROOT} of this bundle is not on the board"; exit 0 ;; '
+        "esac; fi",
         "LLMCF_HOME_GATE=; llmcf_trusted_signers || { "
         + refuse.format("refused", "this board holds no root-owned signing key of the framework, so no root action "
                                    "runs (pair it again with the board password)") + "; }",
