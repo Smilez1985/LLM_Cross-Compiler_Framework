@@ -77,6 +77,13 @@ DELETION_SITES = {
     # accepted list, built again first, audited first (tests/test_use_earlier_build.py covers no plan, another actor,
     # a changed list and the audit entry)
     ("orchestrator/Core/artifact_output.py", "_replace_with_copy"): PERSON,
+    # what an interrupted build left, kept to continue it: only the person's accepted list, built again first,
+    # audited first (tests/test_interrupted_build.py covers an AI, a changed list and the honest result)
+    ("orchestrator/Core/interrupted_build.py", "discard"): PERSON,
+    # a build that cannot be continued: its own working folder of intermediates, at once
+    ("orchestrator/Core/interrupted_build.py", "discard_now"): STAGING,
+    # the clean-up container the framework started for one build folder, by its id
+    ("orchestrator/Core/interrupted_build.py", "run_cleanup"): CONTAINERS,
     ("orchestrator/rag/edge_store.py", "EdgeStorage.delete"): KNOWLEDGE_REPLACED,
     # (the chat: FeedStore.clear_conversation and ChatHistory.clear delete rows and messages, not files; see below)
     ("orchestrator/Core/builder.py", "BuildEngine._keep_as_last_build"): NAME_ONLY,
@@ -161,7 +168,6 @@ DELETION_SITES = {
     ("orchestrator/Core/builder.py", "BuildEngine._discard_staged"): STAGING,
     ("orchestrator/Core/builder.py", "BuildEngine._extract_artifacts"): STAGING,
     ("orchestrator/Core/builder.py", "BuildEngine._forget_end_record"): STAGING,   # a stale build.end in its work folder
-    ("orchestrator/Core/build_end.py", "new_end_key"): STAGING,   # the stale one-run key of an earlier run
     ("orchestrator/Core/builder.py", "BuildEngine._publish_artifacts"): STAGING,
     ("orchestrator/Core/builder.py", "BuildEngine._save_image_for_scan"): STAGING,   # the scan's temporary archive
     ("orchestrator/Core/builder.py", "BuildEngine._stage_dataset"): STAGING,

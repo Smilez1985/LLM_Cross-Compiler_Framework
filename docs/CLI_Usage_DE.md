@@ -135,6 +135,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `build save` | Einen Build, der im Build-Ordner des Frameworks wartet, im Ausgabeordner oder einem anderen Ordner speichern |
 | `build image plan/sources/export/import` | Das Build-Container-Image eines Targets: Kann ein Offline-Build es bauen, die Build-Quellen in deinem Netz, auf einen anderen Offline-Rechner als geprüfte Datei bringen |
 | `build deps` | Die Abhängigkeiten von CMake-Optionen der Module, die vor einem Build geholt werden, listen, holen und löschen |
+| `build interrupted list/continue/delete` | Ein Build, der mit aufbewahrten fertigen Stufen angehalten hat: fortsetzen oder löschen, was er hinterlassen hat |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | Fertige Builds auflisten / einen Build in eine ZIP-Datei packen / sie auf ein Board laden und installieren |
 | `deploy ssh-config show/edit/import` | Die eigene OpenSSH-Einstellungsdatei des Frameworks (gelesen statt `~/.ssh/config`): zeigen, den Block eines Boards setzen, einen Block aus `~/.ssh/config` übernehmen |
 | `ditto login` / `ditto logout` | Ditto bei einem Anbieter anmelden (der Schlüssel verdeckt abgefragt, von stdin oder aus einer Umgebungsvariable, vor dem Speichern geprüft) / abmelden |
@@ -656,6 +657,30 @@ $ echo $?
 
 In der GUI: Tab „Deployment“ > **Speichern…**.
 
+### build interrupted
+
+```
+llm-cli build interrupted list
+llm-cli build interrupted continue BUILD_ID
+llm-cli build interrupted delete BUILD_ID
+```
+
+Ein Build, der vor seinem Ende angehalten hat (er ist gescheitert, du hast ihn abgebrochen, ein Zeitlimit hat ihn
+gestoppt oder der Prozess des Frameworks wurde beendet), behält seinen Ordner, wenn dort Stufen fertig waren: Erneut auf
+demselben Arbeitsordner gestartet, führt der Stage-Runner eine fertige Stufe nicht noch einmal aus. Ein Build, von dem
+sich nichts noch einmal nutzen lässt, wird sofort gelöscht. Direkt nach dem Ende eines solchen Builds fragt
+`build start` im Terminal: fortsetzen, löschen oder später.
+
+| Befehl | Was er tut |
+|--------|------------|
+| `list` | Jeden aufbewahrten Build: sein Target, seine fertigen Stufen, seine Größe, seinen Ordner und ob eine KI danach gefragt hat. |
+| `continue BUILD_ID` | Startet denselben Build erneut auf seinem aufbewahrten Arbeitsordner. |
+| `delete BUILD_ID` | Zeigt den einen Eintrag (voller Pfad, Größe, was er ist) und löscht ihn nach deinem Ja im Terminal. Wenn ein Stufenmodul Dateien hinterlassen hat, die nur das Stufen-Konto ändern konnte, läuft vorher ein kurzer Aufräum-Container als dieses Konto (kein Netzwerk, keine Capability). Das Ergebnis sagt, was geblieben ist, mit den Pfaden. |
+
+Nur du entscheidest. Ein KI-Aufrufer (MCP, Ditto) liest den aufbewahrten Build in `get_build_status` mit seiner
+Bezeichnung und seinen fertigen Stufen, und seine Frage wartet in `list` auf dich. In der GUI: Build >
+**Build-Verlauf…** > **Fortsetzen oder löschen…**.
+
 ### build deps
 
 ```
@@ -741,6 +766,7 @@ die Quellen und bringen ein fertiges Image auf einen anderen Offline-Rechner.
 ```
 llm-cli build image plan TARGET [--gpu] [--json]
 llm-cli build image sources [--apt-mirror URL] [--apt-proxy URL] [--pip-index URL]
+llm-cli build image layer [--toolbox build|fetch]
 llm-cli build image export TARGET --to DATEI [--image TAG_ODER_ID]
 llm-cli build image import DATEI [--sha256 HEX] [--target TARGET] [--yes]
 ```
@@ -758,6 +784,14 @@ llm-cli build image import DATEI [--sha256 HEX] [--target TARGET] [--yes]
   (deine Ausnahmen aus `config local-network` zählen). Eine Adresse ist http oder https ohne Benutzernamen,
   Passwort, Token oder Query; `""` löscht eine. Nur du setzt sie: Eine KI und MCP `update_settings` werden
   abgelehnt.
+- `layer` zeigt die Laufzeit-Schicht des Frameworks, die jeder Build-Container ausführt (ihren Stufen-Runner, den
+  Helfer des Stufen-Kontos und eine statische busybox und setpriv): ob sie der mitgelieferten Kopie entspricht, wie
+  ihre Werkzeuge entstanden und ob dieser Rechner den Abschluss-Ordner eines Builds schützt (Docker Desktop unter
+  Windows und macOS tut es nicht: Ein solcher Build wird als „Abschluss-Ordner ungeschützt“ markiert). `--toolbox`
+  wählt, wie die Werkzeuge einmal entstehen: `build` (die Vorgabe, aus festgelegten Quellen im Builder-Image des
+  Frameworks) oder `fetch` (festgelegte fertige Dateien aus der Tabelle im Repository; solange sie kein statisches
+  setpriv hat, verweigert `fetch` und nennt `build`). Nur du setzt es: Eine KI und MCP `update_settings` werden
+  abgelehnt. Dasselbe steht in **Build > Build-Container-Images...**.
 - `export` schreibt das neueste Image von TARGET (oder `--image`) mit `docker save` in eine neue DATEI und seine
   sha256 in `DATEI.sha256` daneben; nichts wird ersetzt, und der Ziel-Datenträger muss seine Reserve frei behalten.
 - `import` prüft DATEI gegen `--sha256` oder `DATEI.sha256`, liest dann die Labels des Images: Sein Target und die

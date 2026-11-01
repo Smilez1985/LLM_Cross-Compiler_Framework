@@ -6,10 +6,11 @@ DIREKTIVE: Goldstandard, Separation of Concerns.
 Zweck:
 Zentrale Logik zur Generierung neuer Hardware-Target-Module.
 Wird sowohl von der GUI (Wizard) als auch der CLI (Command) genutzt.
-Enthält Templates für Dockerfile, target.yml und build.sh.
+Enthält Templates für Dockerfile, target.yml und die vier Stufen-Module.
 
 The build of a generated target is the template's four stage modules (source, config, convert, target), which
-modules/build.sh, the stage runner, runs in this order (DECISIONS U9); the generator fills in the wizard's setup
+the framework's stage runner (the runtime layer, orchestrator/runtime_layer/runner.sh) runs in this order, with the
+modules of target.yml's stages: slots (DECISIONS U9); the generator fills in the wizard's setup
 commands (source), quantization logic (convert) and packaging commands (target).
 The generated target.yml carries a capabilities block (support level community) and no template placeholder.
 A knowledge snapshot is attached only on request and holds only the pages crawled for this target, as the licences
@@ -85,7 +86,7 @@ TEMPLATE_PLACEHOLDERS = re.compile(  # not after a name: COMPILER_CONFIG[CMAKE_F
     r"|SDK_SETUP_COMMANDS|PACKAGING_COMMANDS|ihr-target-name|VENDOR_SOURCES|PIP_PACKAGES|PINNED_DOWNLOADS"
     r"|PINNED_DOWNLOADS_COPY)\]|\{packages_str\}|YYYY-MM-DD")
 GGUF_DEFAULT_QUANTS = ["Q4_K_M", "Q4_0", "Q5_K_M", "Q6_K", "Q8_0", "F16"]
-# The stages of a target's build, in the order modules/build.sh (the stage runner) runs them (DECISIONS U9).
+# The four stages of a target's build, in the order the runtime layer's stage runner runs them (DECISIONS U9).
 STAGE_MODULES = ("source", "config", "convert", "target")
 STAGE_FALLBACK = ('#!/bin/bash\n# {stage}_module.sh - the {stage} stage (no template for it was found when this target '
                   'was generated)\necho "ERROR: the {stage} stage of this target has no script yet: write '
@@ -180,7 +181,8 @@ def _FETCHED_DEPENDENCIES() -> tuple:
 def flag_line_problems(line: str) -> List[str]:
     """The module verdict's refusals (other than downloads, which download_flag_problems names) for the CMake flags a
     line of a target folder sets (_FLAG_LINE_RE); empty for any other line. A word the shell expands ($X, ${X}) is a
-    documented limit of this check: build.sh's cmake and the package's last check see the expanded words."""
+    documented limit of this check: the cmake the runtime layer checks (stage_env.sh) and the package's last check see
+    the expanded words."""
     m = _FLAG_LINE_RE.match(line or "")
     if not m:
         return []
@@ -629,7 +631,9 @@ def validate_target_folder(root: Path, template_dir: Path = SHIPPED_TEMPLATE) ->
     or an earlier stage, no prebuilt llama.cpp (images, copied or downloaded binaries, packages: the framework shares
     recipes, decision D21), the shell deny-list and no llama.cpp option that downloads (download_flag_problems) on
     every script line that is not in the shipped template, the same option check on every Dockerfile line that is not
-    in the shipped template's Dockerfiles, bash -n, no template placeholders and no binary files.
+    in the shipped template's Dockerfiles, the stage order of target.yml's stages: block (runtime_layer.stage_order:
+    fixed slots, valid module names whose files exist, never benchmark), bash -n, no template placeholders and no
+    binary files. A target's own build.sh is no problem here: no build runs it (runtime_layer.own_runner_note).
     Used for generated modules, community exports and packs in quarantine."""
     from orchestrator.schemas.targets import TargetCapabilities, TargetRuntime
     root = Path(root)
@@ -689,6 +693,10 @@ def validate_target_folder(root: Path, template_dir: Path = SHIPPED_TEMPLATE) ->
                 problems += [f"{rel}:{number}: not allowed, {problem}"
                              for problem in download_flag_problems(line, fetched)]
                 problems += [f"{rel}:{number}: not allowed, {problem}" for problem in flag_line_problems(line)]
+    # the stage order of target.yml (stages: block, fixed slots) as the framework's runner takes it, for both jobs
+    from orchestrator.Core.runtime_layer import stage_order
+    if (root / "target.yml").is_file():
+        problems += [p for p in stage_order(root)[1] if p not in problems]
     problems += scan_target_folder(root, skip=(KNOWLEDGE_SNAPSHOT,))
     problems += [f"template placeholder left: {p}" for p in _leftover_placeholders(root)]
     return problems + check_shell_syntax(root)
@@ -782,9 +790,9 @@ class ModuleGenerator:
             for stage in STAGE_MODULES:
                 self._process_template(f"modules/{stage}_module.sh", target_dir, data)
 
-            # The stage runner that runs them, and its stage account of the build sandbox (sourced by build.sh)
-            self._write_build_script(target_dir, data)
-            self._process_template("modules/stage_user.sh", target_dir, data)
+            # No stage runner of its own: the framework's runtime layer runs these modules in every build, in the order
+            # of target.yml's stages: block (runtime_layer.stage_order), as the stage account; the target carries no
+            # build.sh and no stage_user.sh
             
             # Specialized Modules (Optional copy if template exists): the convert stage's format helpers, and the
             # host benchmark that no build runs (models for a board are measured on the board)
@@ -1021,95 +1029,24 @@ class ModuleGenerator:
         config.pop("performance_benchmarks", None)   # none yet: a board test measures them
         if data.get("runtime_block"):
             config["runtime"] = data["runtime_block"]
+        # The stage order of the framework's runner (runtime_layer.stage_order): the template's three fixed slots,
+        # empty (an empty slot is written as nothing, the same as an empty list)
+        from orchestrator.Core.runtime_layer import SLOTS
+        config["stages"] = {slot: (list(config.get("stages", {}).get(slot) or []) or None)
+                            for slot in SLOTS} if isinstance(config.get("stages", {}), dict) else \
+            {slot: None for slot in SLOTS}
 
         with open(dst, "w", encoding="utf-8", newline="\n") as f:  # LF like every file of the module
             yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
     def _write_build_script(self, target_dir: Path, data: Dict[str, Any]):
-        """modules/build.sh: the template's stage runner; without a template folder (an incomplete installation) a
-        self-contained dispatcher of the quantization logic."""
-        src = self.template_dir / "modules/build.sh"
-        if src.exists():
-            self._process_template("modules/build.sh", target_dir, data)
-            return
-
-        # Fallback Generator
-        quant_logic = data.get("quantization_logic", "")
-        if not quant_logic:
-            quant_logic = '    *) echo ">> Defaulting to FP16/Copy"; cp -r "$MODEL_SOURCE" "$OUTPUT_DIR/" ;;'
-
-        content = f'''#!/bin/bash
-# build.sh for {data["module_name"]}
-# Generated by LLM Cross-Compiler Framework
-
-set -euo pipefail
-
-WORK_DIR="${{BUILD_CACHE_DIR:-/build-cache}}"
-OUTPUT_DIR="${{WORK_DIR}}/output"
-mkdir -p "$OUTPUT_DIR"
-# This runner has no stage account (modules/stage_user.sh of the template): it runs its logic itself, so the build
-# sandbox, which runs every module under the stage account, refuses it (the same reason as the template's check)
-if [ "${{STAGE_ISOLATION:-}}" = "user" ]; then
-    echo "ERROR: Stage user check failed (no_setpriv): this generated runner cannot switch to the stage account; generate the target again from the template." >&2
-    exit 84
-fi
-
-# The end record the framework reads (the same as targets/_template/modules/build.sh): written as the very last step,
-# sealed with the one-run key the framework leaves in the job folder (taken and removed before anything else runs)
-JOB="build"
-LAST_STAGE="target"
-[ "${{JOB_TYPE:-build}}" = "imatrix" ] && JOB="imatrix" && LAST_STAGE="convert"
-STAGE_DIR="${{BUILD_SCRATCH_DIR:-$WORK_DIR}}/stages/$JOB"
-mkdir -p "$STAGE_DIR"
-END_RECORD="$STAGE_DIR/build.end"
-END_WRITTEN=0
-rm -f "$END_RECORD" "$END_RECORD.tmp"
-END_KEY="-"
-if [ -f "$STAGE_DIR/end.key" ] && [ ! -L "$STAGE_DIR/end.key" ]; then
-    END_KEY="$(head -c 128 "$STAGE_DIR/end.key" | tr -dc '0-9a-f')"
-    [ -n "$END_KEY" ] || END_KEY="-"
-fi
-rm -f "$STAGE_DIR/end.key"
-[ ! -e "$STAGE_DIR/end.key" ] || {{ echo "ERROR: the key file could not be removed." >&2; exit 1; }}
-write_end() {{
-    local body seal="-"
-    body="$(printf 'status %s\\nexit %s\\nstage %s\\njob %s\\ninputs -\\ntime %s' "$1" "$2" "${{3:--}}" "$JOB" \\
-        "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")"
-    if [ "$END_KEY" != "-" ]; then
-        seal="$(printf '%s\\n%s\\n%s' "$END_KEY" "$body" "$END_KEY" | sha256sum | cut -d' ' -f1)"
-    fi
-    END_WRITTEN=1
-    rm -rf -- "$END_RECORD.tmp" "$END_RECORD" 2>/dev/null || true
-    printf '%s\\nseal %s\\n' "$body" "$seal" > "$END_RECORD.tmp" && mv -f "$END_RECORD.tmp" "$END_RECORD"
-}}
-on_exit() {{
-    local rc=$?
-    if [ "$END_WRITTEN" = 0 ]; then
-        [ "$rc" -ne 0 ] || rc=1
-        write_end failed "$rc" "$LAST_STAGE" || true
-    fi
-    exit "$rc"
-}}
-trap on_exit EXIT
-trap 'exit 143' TERM
-
-echo "=== Build Started: {data['module_name']} ==="
-echo "Model: $MODEL_SOURCE"
-echo "Task:  ${{MODEL_TASK:-LLM}}"
-echo "Quantization: ${{QUANTIZATION:-None}}"
-
-QUANT_TYPE="${{QUANTIZATION:-FP16}}"
-
-case "$QUANT_TYPE" in
-{quant_logic}
-esac
-
-echo "=== Build Completed ==="
-write_end "done" 0 "$LAST_STAGE"
-'''
-        dst = target_dir / "modules" / "build.sh"
-        self._write_file(dst, content)
-        self._make_executable(dst)
+        """Deprecated: writes nothing. It wrote modules/build.sh, the target's own stage runner (the template's, or a
+        self-contained dispatcher without a template folder). A build no longer runs a target's runner at all: the
+        framework's runtime layer (Core/runtime_layer.py) runs the stage modules in the order of target.yml's
+        stages: block, and a build.sh a target ships is ignored with a plain note (runtime_layer.own_runner_note)."""
+        import warnings
+        warnings.warn("ModuleGenerator._write_build_script is deprecated: a generated target has no build.sh (the "
+                      "framework's runtime layer is the runner of every build)", DeprecationWarning, stacklevel=2)
 
     def _write_profile_script(self, target_dir: Path, data: Dict[str, Any]):
         """Generates the hardware probe script for the target."""

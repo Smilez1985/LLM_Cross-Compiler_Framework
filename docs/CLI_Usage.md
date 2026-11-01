@@ -134,6 +134,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `build save` | Save a build that waits in the framework's build folder to the output folder or another folder |
 | `build image plan/sources/export/import` | The build container image of a target: can an offline build make it, the build sources in your network, move it to another offline computer as a checked file |
 | `build deps` | List, fetch and delete the dependencies of module CMake options that are fetched before a build |
+| `build interrupted list/continue/delete` | A build that stopped with finished stages kept: continue it, or delete what it left |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | List finished builds / pack a build into a ZIP / upload and install it on a board |
 | `deploy ssh-config show/edit/import` | The framework's own OpenSSH settings file (read instead of `~/.ssh/config`): show it, set a board's block, copy one block from `~/.ssh/config` |
 | `ditto login` / `ditto logout` | Sign Ditto in to a provider (the key from a hidden prompt, stdin or an environment variable, checked before it is stored) / sign out |
@@ -634,6 +635,28 @@ $ echo $?
 
 In the GUI: Deployment tab > **Save...**.
 
+### build interrupted
+
+```
+llm-cli build interrupted list
+llm-cli build interrupted continue BUILD_ID
+llm-cli build interrupted delete BUILD_ID
+```
+
+A build that stopped before its end (it failed, you cancelled it, a time limit stopped it, or the framework's process
+ended) keeps its folder when stages had finished there: started again on the same work folder, the stage runner does
+not run a finished stage again. A build with nothing to use again is deleted at once. Right after such a build ended,
+`build start` asks at a terminal: continue, delete, or later.
+
+| Command | What it does |
+|---------|--------------|
+| `list` | Every kept build: its target, its finished stages, its size, its folder, and whether an AI asked about it. |
+| `continue BUILD_ID` | Starts the same build again on its kept work folder. |
+| `delete BUILD_ID` | Shows the one item (full path, size, what it is) and deletes it after your yes at the terminal. When a stage module left files only the stage account could change, a short clean-up container runs first as that account (no network, no capability). The result says what stayed, with its paths. |
+
+Only you decide. An AI caller (MCP, Ditto) reads the kept build in `get_build_status` with its label and its finished
+stages, and its question waits in `list` for you. In the GUI: Build > **Build History...** > **Continue or delete...**.
+
 ### build deps
 
 ```
@@ -715,6 +738,7 @@ to another offline computer.
 ```
 llm-cli build image plan TARGET [--gpu] [--json]
 llm-cli build image sources [--apt-mirror URL] [--apt-proxy URL] [--pip-index URL]
+llm-cli build image layer [--toolbox build|fetch]
 llm-cli build image export TARGET --to FILE [--image TAG_OR_ID]
 llm-cli build image import FILE [--sha256 HEX] [--target TARGET] [--yes]
 ```
@@ -730,6 +754,13 @@ llm-cli build image import FILE [--sha256 HEX] [--target TARGET] [--yes]
   (such as apt-cacher-ng) and the pip index in your network, and judges each by the locality rule (your opt-outs of
   `config local-network` count). An address is http or https without a user name, password, token or query; `""`
   clears one. Only you set them: an AI and MCP `update_settings` are refused.
+- `layer` shows the framework's runtime layer that every build container runs (its stage runner, the stage
+  account's helper and a static busybox and setpriv): whether it matches the shipped copy, how its tools were made,
+  and whether this computer protects a build's end folder (Docker Desktop on Windows and macOS does not: such a build
+  is marked "end folder unprotected"). `--toolbox` chooses how the tools are made once: `build` (the default, from
+  pinned sources in the framework's builder image) or `fetch` (pinned prebuilt files from the table in the
+  repository; while it has no static setpriv, `fetch` refuses and names `build`). Only you set it: an AI and MCP
+  `update_settings` are refused. The same is in **Build > Build Container Images...**.
 - `export` writes the newest image of TARGET (or `--image`) with `docker save` into a new FILE and its sha256 into
   `FILE.sha256` next to it; nothing is replaced, and the destination disk must keep its reserve free.
 - `import` checks FILE against `--sha256` or `FILE.sha256`, then reads the image's labels: its target and the inputs

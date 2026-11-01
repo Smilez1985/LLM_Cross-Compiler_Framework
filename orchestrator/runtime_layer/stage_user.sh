@@ -1,3 +1,4 @@
+# shellcheck shell=sh
 # stage_user.sh - the stage account of the build sandbox, sourced by the stage runner runner.sh (never run on its own)
 #
 # Part of the framework's runtime layer (tools.sh says what that is). Every stage module of the build sandbox (the host
@@ -174,7 +175,7 @@ stage_share() {
     [ -n "$STAGE_SHARED_FOLDERS" ] || return 0
     IFS='
 '
-    # shellcheck disable=SC2086 - one folder per line
+    # shellcheck disable=SC2086 # one folder per line
     set -- $STAGE_SHARED_FOLDERS
     unset IFS
     stage_sh "$STAGE_SHARE" _ "$(layer_sh)" "$(stage_shared_gid)" "$@" >/dev/null 2>&1 || true
@@ -200,6 +201,7 @@ run_as_stage() {
 # cannot write in and "read-fail NAME" for an input it cannot read. Arguments: BUSYBOX, RUNNER_PID, END_DIR, folders,
 # "--", then inputs.
 STAGE_PROBE='b="$1"; pid="$2"; end="$3"; shift 3
+cd / 2>/dev/null || true   # the working folder of the runner may be closed to this account, and find needs one
 if [ -x "$b" ]; then t="$b"; else t=""; fi
 run() { $t "$@"; }
 run id -u; run id -g
@@ -237,7 +239,7 @@ stage_switch_problem() {
     _n=0; _bad=""
     IFS='
 '
-    # shellcheck disable=SC2086 - one answer per line
+    # shellcheck disable=SC2086 # one answer per line
     set -- $1
     unset IFS
     if [ $# -lt 9 ] || [ "$1" != "$STAGE_UID" ] || [ "$2" != "$STAGE_GID" ]; then
@@ -283,12 +285,14 @@ stage_folders() {
         [ -d "$_folder" ] && [ ! -L "$_folder" ] && [ -w "$_folder" ] || continue
         _mode=2775
         case "$_folder" in "$_work"|"$_work/tmp"|"$_work/home"|"$_work/cache"|"$_stage_dir") _mode=3775 ;; esac
+        # shellcheck disable=SC3067 # test -O: busybox sh and dash have it
         if [ -O "$_folder" ]; then
             chmod "$_mode" "$_folder" 2>/dev/null || true
         fi
         printf '%s\n' "$_folder"
     done
     # the stages folder itself only for the runner: a module can neither rename nor replace a job folder
+    # shellcheck disable=SC3067 # test -O: busybox sh and dash have it
     if [ -d "$_work/stages" ] && [ -O "$_work/stages" ]; then
         chmod 0755 "$_work/stages" 2>/dev/null || true
     fi
@@ -316,7 +320,7 @@ stage_preflight() {
     STAGE_SHARED_FOLDERS="$(stage_folders "$@")"
     IFS='
 '
-    # shellcheck disable=SC2086 - one folder per line
+    # shellcheck disable=SC2086 # one folder per line
     set -- $STAGE_SHARED_FOLDERS
     unset IFS
     _probe="$(stage_sh "$STAGE_PROBE" _ "$(layer_sh)" "$$" "${LLMCF_END_DIR:-}" "$@" -- "${MODEL_SOURCE:-}" \

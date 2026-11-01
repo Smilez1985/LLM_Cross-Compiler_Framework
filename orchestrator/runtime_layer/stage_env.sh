@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # stage_env.sh - what every stage module finds (part of the framework's runtime layer; tools.sh says what that is)
 #
 # The stage runner starts every module as `bash MODULE` with BASH_ENV pointing here, so bash reads this file before

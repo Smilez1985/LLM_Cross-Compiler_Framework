@@ -1028,3 +1028,19 @@ def test_a_board_without_a_profile_goes_back_to_balanced_as_the_cli_does(builder
     builder._mark_opt_user_set()
     select(builder.target_combo, "MyJetson")
     assert builder.opt_combo.currentText() == "SPEED"            # the person's own pick stays
+
+
+def test_the_history_asks_about_the_chosen_interrupted_build(qapp, history_framework, monkeypatch):
+    """Build History > Continue or delete...: the chosen build's id goes to the person's question
+    (gui/interrupted_build_dialog.py); nothing is asked without a chosen build."""
+    from orchestrator.gui import build_history_window, interrupted_build_dialog
+    asked, boxes = [], []
+    monkeypatch.setattr(interrupted_build_dialog, "ask_interrupted",
+                        lambda parent, framework, build_id, lang=None: asked.append(build_id) or "later")
+    monkeypatch.setattr(build_history_window, "plain_box", lambda *a, **k: boxes.append(a[2]))
+    dialog = build_history_window.BuildHistoryDialog(history_framework, lang="en")
+    assert dialog.btn_interrupted.objectName() == "btn_history_interrupted"
+    assert dialog.decide_interrupted() == "none" and boxes and not asked
+    dialog.table.selectRow(1)
+    assert dialog.decide_interrupted() == "later" and asked == ["req_fail_001"]
+    dialog.close()

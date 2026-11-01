@@ -1068,7 +1068,7 @@ def test_a_generated_target_converts_with_the_same_checks(tmp_path):
         (TEMPLATE / "scripts" / "model_check.py").read_bytes()
     llama = stub_llama(tmp_path)
 
-    result, work = run_build(target / "modules" / "build.sh", tmp_path, llama, "Q4_K_M")
+    result, work = run_build(target / "modules", tmp_path, llama, "Q4_K_M")
 
     assert result.returncode == 0, result.stdout + result.stderr
     info = json.loads((work / "output" / "build_info.json").read_text())
@@ -1078,9 +1078,10 @@ def test_a_generated_target_converts_with_the_same_checks(tmp_path):
     onnx.write_bytes(b"onnx")
     env = {"PATH": f"{Path(sys.executable).parent}:/usr/bin:/bin", "HOME": str(tmp_path),
            "BUILD_CACHE_DIR": str(tmp_path / "work2"), "LLAMA_CPP_PATH": str(llama), "MODEL_SOURCE": str(onnx),
-           "QUANTIZATION": "Q4_K_M", "TARGET_FORMAT": "gguf", "JOB_TYPE": "build"}
-    refused = subprocess.run(["bash", str(target / "modules" / "build.sh")], env=env, capture_output=True, text=True,
-                             timeout=60)
+           "QUANTIZATION": "Q4_K_M", "TARGET_FORMAT": "gguf", "JOB_TYPE": "build",
+           "LLMCF_MODULES_DIR": str(target / "modules")}
+    refused = subprocess.run(["sh", str(REPO_ROOT / "orchestrator" / "runtime_layer" / "runner.sh")], env=env,
+                             capture_output=True, text=True, timeout=60)
     assert refused.returncode == 1
     assert "llama.cpp has no converter from ONNX to GGUF" in refused.stderr
     assert "such as the format rknn of the Rockchip target" in refused.stderr

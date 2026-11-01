@@ -91,8 +91,11 @@ Es prüft Python, Docker und buildx (und nennt die Container-Engine: Unter Podma
 cache, output und den Build-Ordner, die Targets, den Zustandsordner, den Secrets-Speicher und den Schlüsselbund, die
 Tool-Berechtigungen, die MCP-Token und das Audit-Log, den Chat-Feed, die Kalibrierdaten, die Community-Pakete, die
 Wissens-Snapshots im Vergleich zum freien Platz ihrer Platte, den Speicher der Wissensbasis, die lokale
-llama.cpp-Laufzeit (im Docker-Modus: ob Dittos Image da ist, auf diesem Rechner gebaut und geprüft) und die Boards,
-denen du vertraust.
+llama.cpp-Laufzeit (im Docker-Modus: ob Dittos Image da ist, auf diesem Rechner gebaut und geprüft), die
+Laufzeit-Schicht des Frameworks, die jeder Build-Container ausführt (ob sie der mitgelieferten Kopie entspricht, wie
+ihre zwei Werkzeuge entstanden und ob dieser Rechner den Abschluss-Ordner eines Builds schützt: Docker Desktop unter
+Windows und macOS und der Legacy-Modus ohne Build-Sandbox tun es nicht, und Mojo Oracle sagt „End folder
+unprotected“) und die Boards, denen du vertraust.
 
 ### Der Speicher der Wissensbasis
 
@@ -154,13 +157,15 @@ SSH-Port des Boards, ohne Anmeldung, und zeigt den Befund des Boards mit seinem 
 
 ## 3. Was Mojo Miracle repariert
 
-Mojo Miracle macht nur harmlose Reparaturen. Eine harmlose Reparatur schränkt Zugriff ein oder wechselt zu einem
-intakten Build, und sie lässt sich rückgängig machen. Heute gibt es zwei:
+Mojo Miracle macht nur harmlose Reparaturen. Eine harmlose Reparatur schränkt Zugriff ein, wechselt zu einem
+intakten Build oder legt die eigenen Dateien des Frameworks zurück, und sie lässt sich rückgängig machen. Heute gibt
+es drei:
 
 | Problem | Was Mojo Miracle tut |
 |---|---|
 | `state.permissions`: Andere Benutzer dieses Computers können deinen Zustandsordner lesen (Tool-Berechtigungen, Audit-Log, Chat) | Der Ordner verliert die Rechte anderer Benutzer, zum Beispiel wird Modus 0755 zu 0700. Deine eigenen Rechte bleiben. |
 | `runtime.build.missing`: Der aktive llama.cpp-Build von Dittos Server fehlt | Dittos Server wechselt zum neuesten intakten, geprüften Build der festgelegten llama.cpp-Version, falls einer gespeichert ist. Nichts wird gebaut oder gelöscht. |
+| `runtime_layer.changed`: Eine Datei der Laufzeit-Schicht weicht von der mitgelieferten Kopie ab, also wird jeder Build verweigert | Jede geänderte Datei wird aus der mitgelieferten Kopie des Frameworks (ein Skript) oder seinem Werkzeugvorrat (busybox, setpriv) zurückgelegt, ein Schritt je Datei, und nur solange sie noch so ist, wie der Plan sie zeigte. Die ersetzte Datei bleibt in `runtime-layer/replaced/` des Cache-Ordners. Eine Datei im Ordner der Schicht, die nicht zu ihr gehört, wird gezählt, nie genannt, und nicht entfernt: Das tust du. Mojo Oracle prüft die Schicht danach noch einmal. |
 
 So läuft eine Reparatur:
 

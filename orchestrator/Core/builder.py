@@ -16,7 +16,6 @@ Updates v2.4.0-IMatrix:
 import hashlib
 import os
 import sys
-import hashlib
 import json
 import subprocess
 import threading
@@ -291,6 +290,14 @@ class BuildProgress:
     # How the stage modules ran: "stage_user" in the build sandbox (their own user, the runner's memory out of their
     # reach), "same_user" in the legacy mode (the runner's own user); None before a stage container started
     isolation: Optional[str] = None
+    # How the end folder of the runtime layer guarded the end record: "protected" (only the runner could write it) or
+    # "unprotected" (a host whose mounts keep no owner or mode, or the legacy mode); None before a stage container ended
+    end_protection: Optional[str] = None
+    # The runtime layer the stage containers ran with: its verdict, the toolbox way and the checks passed
+    runtime_layer: Optional[Dict[str, Any]] = None
+    # A build that stopped with finished stages: its folder is kept, and the person decides to continue it or delete
+    # what it left (Core/interrupted_build.py)
+    resumable: bool = False
 
     def end_facts(self) -> Optional[Dict[str, Any]]:
         """{'reason', 'exit', 'stage'} of an ended build (build_info.json's "end", the build record), else None."""
@@ -302,6 +309,10 @@ class BuildProgress:
                  "stage": stage if stage and stage != "-" else None}
         if self.isolation:
             facts["isolation"] = self.isolation
+        if self.end_protection:
+            facts["end_folder"] = self.end_protection
+        if self.runtime_layer:
+            facts["runtime_layer"] = dict(self.runtime_layer)
         return facts
 
     def add_log(self, message: str, level: str = "INFO"):
@@ -496,7 +507,8 @@ class BuildEngine:
         record = dict(info, status=progress.status.value, stage=progress.current_stage,
                       progress=progress.progress_percent, end_reason=progress.end_reason,
                       ended=progress.end_time.isoformat(timespec="seconds") if progress.end_time else None,
-                      error=progress.errors[-1] if progress.errors else None)
+                      error=progress.errors[-1] if progress.errors else None,
+                      resumable=bool(getattr(progress, "resumable", False)) or None)
         try:
             build_records.write_record(self.records_dir, record)
         except (OSError, TypeError, ValueError) as e:
@@ -575,32 +587,30 @@ class BuildEngine:
         (utils/step_limits.py: a soft cap that stops only an AI-started build, an idle timeout for a step that prints
         nothing), honours cancellation and always removes the container. Returns the exit code.
 
-        `end_record`: where the stage runner writes its end record (Core/build_end.py, in the mounted work folder).
-        Before the container starts, the job folder gets this run's key (build_end.new_end_key), which the runner
-        takes before its first stage and seals its record with. Once a record sealed with that key says "status
-        done" for the job's last stage, the step's clock is switched off (no soft cap or idle stop after the done
-        marker) and the container gets END_GRACE seconds to exit by itself; then the framework stops it, and the
-        build is NOT done (its exit status is not 0: _ended_by_record). A record a module script wrote never switches
-        the clock off. The record that was read with the key is kept in progress.end_record.
+        `end_record`: where the stage runner writes its end record (Core/build_end.py): build.end in the job's end
+        folder of the runtime layer (Core/runtime_layer.py end_folder), which only the runner's uid may write. No key
+        exists in the container: the record counts as the runner's only when the end folder and the record belong to
+        the runner alone (build_end.read_runner_record), or, on a host whose mounts keep no owner or mode, as an
+        unprotected end (progress.end_protection "unprotected": the exit status and the inspect check decide). Once
+        such a record says "status done" for the job's last stage, the step's clock is switched off and the container
+        gets END_GRACE seconds to exit by itself; then the framework stops it, and the build is NOT done (its exit
+        status is not 0: _ended_by_record). The record is kept in progress.end_record.
 
         `decided`: the sandbox options, volumes and environment the container was created with (_sandbox). The log
         says how the stage modules run; with the stage account (the build sandbox) the container's inspect must show
         exactly the decided options before it starts (_verify_sandbox), else it never starts and the build fails with
         the reason."""
         from orchestrator.Core import build_end
-        from orchestrator.Core.build_end import read_end_record
+        from orchestrator.Core.build_end import read_runner_record
         from orchestrator.utils.step_limits import StepClock, StepTimedOut
         clock = StepClock(self._step_limits(config), prefix.strip(': ').lower() or 'build')
-        key: Optional[str] = None
         job = "build"
+        owner = self._end_owner()
         if end_record is not None:
             progress.end_record = None
             end_record = Path(end_record)
-            job = end_record.parent.name
+            job = end_record.parent.name.replace("end-", "", 1) or "build"
             self._forget_end_record(end_record)   # a record of an earlier run never ends this one
-            key = build_end.new_end_key(end_record.parent.parent.parent, job)
-            if key is not None and self._get_conf("build_sandbox", True):
-                hand_over(end_record.parent, runner_ids(self.docker_client))   # a root host's key: the runner's
         grace_until: Optional[float] = None
         with self._lock:
             self._active_containers[config.build_id] = container
@@ -660,9 +670,10 @@ class BuildEngine:
                     if expired and end_record is not None:
                         # The done marker first: once it is there, no clock may stop the step.
                         if grace_until is None:
-                            record = read_end_record(end_record, key=key)
+                            record = read_runner_record(end_record.parent, owner)[0]
                             # only the stage runner's own record (sealed, done, the job's last stage) counts here
-                            if record is not None and build_end.end_problem(record, 0, job) is None:
+                            if record is not None and build_end.end_problem(record, 0, job,
+                                                                            self._last_stage(progress)) is None:
                                 clock.finish()
                                 grace_until = time.monotonic() + build_end.END_GRACE
                                 progress.add_log(f"{prefix}The build wrote its end record (done); the container has "
@@ -709,7 +720,19 @@ class BuildEngine:
                 from orchestrator.Core.disk_plan import InsufficientSpace
                 raise InsufficientSpace(full["text"])
             if end_record is not None:
-                progress.end_record = read_end_record(end_record, key=key)
+                record, protected, problem = read_runner_record(end_record.parent, owner)
+                progress.end_record = record
+                if self._get_conf("build_sandbox", True) is False:
+                    protected = False   # the legacy mode: the modules run as the runner and could write the folder
+                progress.end_protection = "protected" if protected else "unprotected"
+                if problem:
+                    progress.add_warning(f"{prefix}{problem}")
+                elif protected and record is not None:
+                    self._passed(progress, "end_folder")
+                elif not protected and record is not None:
+                    from orchestrator.Core.runtime_layer import END_UNPROTECTED
+                    progress.add_warning(f"{prefix}{END_UNPROTECTED}")
+                    self._audit_build(config, "end_folder", "unprotected", END_UNPROTECTED)
             return int(result.get("StatusCode", 1))
         finally:
             if "watched" in locals():
@@ -802,7 +825,11 @@ class BuildEngine:
                 raise RuntimeError("the stable name did not land on the build's image")
             self.docker_client.images.remove(tag, noprune=True)
 
-    def cleanup_build(self, build_id: str) -> bool:
+    def cleanup_build(self, build_id: str, keep_folder: bool = False) -> bool:
+        """Removes the build's container and its per-build image name; its folder too, unless `keep_folder` (an
+        interrupted build the person may continue: Core/interrupted_build.py). The folder goes through
+        interrupted_build.discard_now, after the clean-up container when a stage module left files only the stage
+        account could make removable."""
         progress = self._builds.get(build_id)
         if not progress: return False
         
@@ -824,17 +851,19 @@ class BuildEngine:
             # The builder never deletes an image (round 7 item 12): the build's image gets the stable name of its
             # target, then only the per-build name is dropped.
             tag = self._build_images.pop(build_id, None)
+            build_temp = self.cache_dir / "builds" / build_id
+            cleanup = self._cleanup_runner(tag, build_temp)
             if tag and self.docker_client:
                 try:
                     self._keep_as_last_build(tag)
                 except Exception as e:
                     self.logger.debug(f"The image of {build_id} keeps its per-build name: {e}")
-            
-            # Remove temp dirs
-            build_temp = self.cache_dir / "builds" / build_id
-            if build_temp.exists(): 
-                shutil.rmtree(build_temp)
-                
+
+            if not keep_folder:
+                from orchestrator.Core.interrupted_build import discard_now
+                left = discard_now(build_temp, cleanup)
+                if left:
+                    self.logger.warning(f"{len(left)} items of the build's working folder stayed.")
             return True
         except Exception: return False
         finally:
@@ -842,6 +871,42 @@ class BuildEngine:
             if previous.value in TERMINAL_STATES:
                 progress.status = previous
     
+    def _cleanup_runner(self, image: Optional[str], build_temp: Path):
+        """The clean-up container of a build folder (interrupted_build.run_cleanup) as a call, or None without an
+        engine or an image: the stage account makes what it wrote removable, nothing else."""
+        if not image or self.docker_client is None or not self._get_conf("build_sandbox", True):
+            return None
+        from orchestrator.Core import interrupted_build
+        from orchestrator.utils.docker_engine import engine_name
+        from orchestrator.utils.sandbox import runner_ids
+        try:   # by its id: the per-build name is dropped right after (_keep_as_last_build)
+            image = str(getattr(self.docker_client.images.get(image), "id", "") or image)
+        except Exception:  # noqa: BLE001 - the name still works while it exists
+            pass
+
+        def run():
+            try:
+                return interrupted_build.run_cleanup(self.docker_client, image, runner_ids(self.docker_client)[1],
+                                                     build_temp, Path(self.cache_dir),
+                                                     engine=engine_name(self.docker_client) or "docker")
+            except Exception as e:  # noqa: BLE001 - the deletion reports what stays; this says why
+                return f"The clean-up container could not run: {e}"
+        return run
+
+    def _keep_or_discard(self, config: BuildConfiguration, prog: "BuildProgress") -> None:
+        """After a failure or a Cancel: a build with finished stages keeps its folder (the person decides to continue
+        it or delete what it left); any other build's folder goes at once."""
+        from orchestrator.Core import interrupted_build
+        kept = interrupted_build.kept_build(Path(self.cache_dir), config.build_id, ending=True)
+        if kept is not None:
+            prog.resumable = True
+            prog.add_warning(interrupted_build.KEPT_WARNING.format(done=kept.done_text()))
+            self._audit_build(config, "interrupted_build", "kept", kept.label)
+        try:
+            self.cleanup_build(config.build_id, keep_folder=kept is not None)
+        except Exception:
+            pass
+
     def _execute_build(self, config: BuildConfiguration):
         """Main execution flow running in worker thread."""
         bid = config.build_id
@@ -960,9 +1025,7 @@ class BuildEngine:
             prog.end_reason = reason_of_timeout(e) or "failed"
             prog.add_error(self._disk_full_text(e) or str(e))
             self.logger.error(f"Build {bid} failed: {e}", exc_info=True)
-            # Try cleanup even on failure
-            try: self.cleanup_build(bid)
-            except Exception: pass
+            self._keep_or_discard(config, prog)
             return BuildStatus.FAILED
 
     def _disk_full_text(self, error: BaseException) -> Optional[str]:
@@ -977,8 +1040,7 @@ class BuildEngine:
     def _end_cancelled(self, config: BuildConfiguration, prog: "BuildProgress") -> "BuildStatus":
         self._discard_staged(config, prog)
         prog.end_time = datetime.now()
-        try: self.cleanup_build(config.build_id)
-        except Exception: pass
+        self._keep_or_discard(config, prog)
         return BuildStatus.CANCELLED
 
     def _record_target(self, config: BuildConfiguration, progress: BuildProgress, target_path: Path):
@@ -2095,42 +2157,71 @@ class BuildEngine:
 
     SANDBOX_FALLBACK_USER = FALLBACK_USER  # the image's build user, used when the host user is root or on Windows
 
-    def _sandbox(self, config: BuildConfiguration, build_temp: Path, target_path: Optional[Path] = None
+    def _sandbox(self, config: BuildConfiguration, build_temp: Path, target_path: Optional[Path] = None,
+                 job: str = "build", progress: Optional[BuildProgress] = None
                  ) -> Tuple[Dict[str, Any], Dict[str, str], Dict[str, Dict[str, str]]]:
         """Container options for the conversion stages (imatrix, build). They run model tooling and the
         target's build code - possibly AI-generated - so: no network (the model was staged on the host),
         no capabilities, no privilege escalation, a read-only root filesystem, the host user instead of
-        root, and a writable work folder for intermediates. Returns (create kwargs, env, extra volumes)."""
+        root, and a writable work folder for intermediates. Returns (create kwargs, env, extra volumes); the kwargs
+        carry the container's command (and in the build sandbox its entrypoint), which the host sets itself.
+
+        Every stage container gets the framework's runtime layer (Core/runtime_layer.py): checked against the shipped
+        copy before every build (a changed layer refuses the build), mounted read-only at /llmcf, with the end folder
+        of this job (only the runner's uid may write it). The target's own runner (modules/build.sh) is ignored with
+        a plain note; the stage order comes from its target.yml."""
+        from orchestrator.Core import runtime_layer as layer
         work = build_temp / "work"
         for sub in ("tmp", "home", "cache"):
             ensure_directory(work / sub)
         volumes = {str(work): {"bind": "/build-cache/work", "mode": "rw"}}
         env = {"BUILD_SCRATCH_DIR": "/build-cache/work", "TMPDIR": "/build-cache/work/tmp"}
-        if not self._get_conf("build_sandbox", True):
-            return {"user": "0:0"}, env, volumes  # legacy mode: the entrypoint maps PUID/PGID and drops root
-
-        # The sandbox of the llama.cpp builder container (orchestrator/utils/sandbox.py) with the stage account: the
-        # container starts as root with only CAP_SETUID and CAP_SETGID, the stage runner becomes the person (the
-        # runner's ids) and starts every stage module under the image's stage account
-        # (targets/*/modules/stage_user.sh). A rootless engine whose sub-ids do not reach that account cannot run it:
-        # refused here, before anything is built.
-        supported, why = stage_user_support(self.docker_client)
-        if supported is False:
-            from orchestrator.utils.sandbox import STAGE_USER_NO_SUBIDS_WAY
-            raise RuntimeError(f"{why} {STAGE_USER_NO_SUBIDS_WAY}")
-        # A target's runner that starts its modules without the stage account (made before it) would hand them the
-        # runner's two rights (the entrypoint gives them as ambient capabilities): refused, never run that way
+        sandbox_on = self._get_conf("build_sandbox", True) is not False
+        if sandbox_on:
+            # A rootless engine whose sub-ids do not reach the stage account cannot run it: refused before anything
+            supported, why = stage_user_support(self.docker_client)
+            if supported is False:
+                from orchestrator.utils.sandbox import STAGE_USER_NO_SUBIDS_WAY
+                self._audit_build(config, "stage_user", "refused", why)
+                raise RuntimeError(f"{why} {STAGE_USER_NO_SUBIDS_WAY}")
+        stages = ["source", "config", "convert"] + ([] if job == "imatrix" else ["target"])
         if target_path is not None:
-            from orchestrator.utils.sandbox import stage_runner_problem
-            old = stage_runner_problem(Path(target_path) / "modules")
-            if old:
-                raise RuntimeError(old)
+            stages, problems = layer.stage_order(Path(target_path), job)
+            if problems:
+                text = "The stage order of this target cannot be used: " + " ".join(problems)
+                self._audit_build(config, "stage_order", "refused", text)
+                raise RuntimeError(text)
+            note = layer.own_runner_note(Path(target_path))
+            if note and progress is not None and job == "build":
+                progress.add_warning(note)
+                self._audit_build(config, "own_runner", "ignored", note)
+        checks = self._ready_runtime_layer(config, progress)
         user = runner_ids(self.docker_client)
+        end_dir = layer.end_folder(build_temp, job)
+        layer.prepare_end_folder(end_dir, user if sandbox_on else None)
+        volumes.update(layer.layer_volumes(Path(self.cache_dir), end_dir))
+        env.update({"LLMCF_STAGES": " ".join(stages), "LLMCF_END_DIR": layer.END_MOUNT,
+                    "LLMCF_MODULES_DIR": layer.MODULES_IN_IMAGE, "JOB_TYPE": job,
+                    "LLMCF_TARGET_LABEL": Path(target_path).name if target_path else str(config.target_arch or "")})
+        if progress is not None:
+            # the build's result records the mode its modules ran in and every check passed (_passed adds the
+            # container's own: the inspect check and the end record)
+            progress.runtime_layer = {**checks, "stages": stages, "mode": "sandbox" if sandbox_on else "legacy"}
+        if not sandbox_on:
+            # legacy mode: the image's entrypoint maps PUID/PGID and drops root; the framework's runner still runs
+            env.update({"STAGE_ISOLATION": "", "STAGE_RUNNER_IDS": ""})
+            return ({"user": "0:0", "command": [f"{layer.LAYER_MOUNT}/bin/busybox", "sh", f"{layer.LAYER_MOUNT}/runner.sh",
+                                                "--job", job]}, env, volumes)
+
         hand_over(build_temp, user)  # a root host owns the per-build folders; hand them to the stage runner
+        if os.name == "posix" and os.getuid() == 0:
+            os.chmod(end_dir, 0o755)
         memory = str(self._get_conf("build_memory_limit", "") or "").strip()
         kwargs, isolation_env = stage_user_sandbox(
             user, working_dir="/build-cache/work", mem_limit=memory or None,
             pids_limit=int(self._get_conf("build_pids_limit", 4096) or 4096))
+        kwargs["entrypoint"] = list(layer.ENTRYPOINT)
+        kwargs["command"] = ["--job", job]
         env.update(isolation_env)
         env.update({
             "HOME": "/build-cache/work/home",
@@ -2139,6 +2230,67 @@ class BuildEngine:
             "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "HF_DATASETS_OFFLINE": "1",
         })
         return kwargs, env, volumes
+
+    def _ready_runtime_layer(self, config: BuildConfiguration, progress: Optional[BuildProgress]) -> Dict[str, Any]:
+        """The runtime layer before a stage container: its tools made the person's way when none are cached
+        (refused offline with both ways named), the layer assembled or checked against the shipped copy. A refusal
+        is shown and written to the audit log; the checks passed go into the build's result."""
+        from orchestrator.Core import runtime_layer as layer
+        from orchestrator.utils.locality import offline_mode
+        way = layer.toolbox_way(self.config)
+        log = (progress.add_log if progress is not None else self.logger.info)
+        try:
+            layer.ensure_toolbox(Path(self.cache_dir), way, offline=bool(offline_mode(self.config)),
+                                 fetch=self._layer_fetch, build=self._layer_builder(), log=log)
+            check = layer.ready_layer(Path(self.cache_dir))
+        except (layer.ToolboxMissing, layer.LayerRefused) as e:
+            verdict = getattr(e, "verdict", "no_toolbox")
+            self._audit_build(config, "runtime_layer", "refused", str(e), verdict=verdict)
+            raise RuntimeError(str(e)) from e
+        if progress is not None:
+            progress.add_log(f"Runtime layer: {check.text}")
+        self._audit_build(config, "runtime_layer", "checked", check.text, verdict=check.verdict)
+        return {"verdict": check.verdict, "toolbox": check.toolbox_way or way,
+                "checks": ["shipped_copy", "toolbox", "layer_files"]}
+
+    @staticmethod
+    def _layer_fetch(url: str) -> bytes:
+        """A pinned https URL of the runtime layer's tools (the caller checks the sha256 pins; offline mode never gets
+        here: ensure_toolbox refuses first)."""
+        import urllib.request
+        if not url.startswith("https://"):
+            raise ValueError("only pinned https addresses are fetched")
+        with urllib.request.urlopen(url, timeout=120) as response:  # nosec B310 - pinned https URL, sha256-checked
+            return response.read(200 * 1024 * 1024)
+
+    def _layer_builder(self):
+        if self.docker_client is None:
+            return None
+        from orchestrator.Core.runtime_layer import engine_builder
+        return engine_builder(self.docker_client, self._layer_fetch, log=self.logger.info)
+
+    def _end_owner(self) -> Optional[int]:
+        """The host uid that owns what the stage runner writes (the end folder's rightful owner)."""
+        from orchestrator.Core.runtime_layer import runner_owner_on_host
+        from orchestrator.utils.docker_engine import rootless_docker, rootless_podman
+        client = getattr(self, "docker_client", None)   # an engine made without a client (a test, no daemon)
+        rootless = bool(client is not None and (rootless_docker(client) or rootless_podman(client)))
+        return runner_owner_on_host(runner_ids(client), rootless)
+
+    def _audit_build(self, config: BuildConfiguration, what: str, outcome: str, detail: str, **extra: Any) -> None:
+        """One audit row of the runtime layer (a refusal, an ignored own runner, a check, an unprotected end): time
+        and actor (the build's owner, else the person), never a host path (the texts here carry labels only)."""
+        audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
+        if audit is None or not callable(getattr(audit, "record", None)):
+            return
+        from orchestrator.Core.job_service import owner_actor
+        verdict = str(extra.get("verdict") or "")
+        try:
+            audit.record(owner_actor(getattr(config, "owner", "") or "") or "person", f"build.{what}", "local_write",
+                         "allow", outcome, arguments={"build_id": config.build_id, "target": config.target_arch},
+                         detail=(f"[{verdict}] " if verdict else "") + detail[:900])
+        except Exception as e:  # noqa: BLE001 - the build goes on; the log says what could not be recorded
+            self.logger.warning(f"The audit log could not record the runtime layer's {what}: {e}")
 
     @staticmethod
     def _render_group_ids() -> List[int]:
@@ -2166,7 +2318,8 @@ class BuildEngine:
 
         # Volumes for IMatrix run (the board's probe too: the config stage plans with it in this job as well)
         probe_vols, probe_env = self._hardware_probe_mount(config, progress, build_temp)
-        sandbox, sandbox_env, sandbox_vols = self._sandbox(config, build_temp, target_path=target_path)
+        sandbox, sandbox_env, sandbox_vols = self._sandbox(config, build_temp, target_path=target_path, job="imatrix",
+                                                           progress=progress)
         vols = {
             str(imatrix_dir): {"bind": "/build-cache/imatrix", "mode": "rw"},
             # the model arrives through staged[1]: only its own folder (one commit of a Hugging Face model) or file
@@ -2196,7 +2349,6 @@ class BuildEngine:
              
         container = create_container(self.docker_client,
             image=image.id,
-            command=["/app/modules/build.sh"],
             volumes=vols,
             environment=env,
             name=f"llm-imatrix-{config.build_id}",
@@ -2204,9 +2356,10 @@ class BuildEngine:
             **sandbox,
         )
         # A requested importance matrix that fails stops the build (low-bit types would be unusable).
-        from orchestrator.Core.build_end import end_record_path
+        from orchestrator.Core.build_end import END_RECORD
+        from orchestrator.Core.runtime_layer import end_folder
         exit_code = self._run_container(config, progress, container, "IMATRIX: ",
-                                        end_record=end_record_path(build_temp / "work", "imatrix"),
+                                        end_record=end_folder(build_temp, "imatrix") / END_RECORD,
                                         decided=(sandbox, vols, env))
         exit_code = self._ended_by_record(progress, exit_code, "IMATRIX: ", job="imatrix")
         if exit_code != 0:
@@ -2226,7 +2379,8 @@ class BuildEngine:
         build_temp = self.cache_dir / "builds" / config.build_id
         # The board's hardware probe, read-only (DECISIONS round 23 item 5): the config stage plans the build for it
         probe_vols, probe_env = self._hardware_probe_mount(config, progress, build_temp)
-        sandbox, sandbox_env, sandbox_vols = self._sandbox(config, build_temp, target_path=target_path)
+        sandbox, sandbox_env, sandbox_vols = self._sandbox(config, build_temp, target_path=target_path, job="build",
+                                                           progress=progress)
 
         # 1. Volume Setup
         vols = {
@@ -2287,9 +2441,8 @@ class BuildEngine:
 
         # 5. Run Container
         container = create_container(self.docker_client,
-            image=image.id, 
-            command=["/app/modules/build.sh"], 
-            volumes=vols, 
+            image=image.id,
+            volumes=vols,
             environment=env, 
             name=f"llm-build-{config.build_id}", 
             device_requests=device_requests,
@@ -2297,9 +2450,10 @@ class BuildEngine:
             **sandbox,
         )
         
-        from orchestrator.Core.build_end import end_record_path
+        from orchestrator.Core.build_end import END_RECORD
+        from orchestrator.Core.runtime_layer import end_folder
         exit_code = self._run_container(config, progress, container, "CONT: ",
-                                        end_record=end_record_path(build_temp / "work", "build"),
+                                        end_record=end_folder(build_temp, "build") / END_RECORD,
                                         decided=(sandbox, vols, env))
         exit_code = self._ended_by_record(progress, exit_code, "CONT: ")
         if exit_code != 0:
@@ -2346,6 +2500,23 @@ class BuildEngine:
                                   engine=engine_name(self.docker_client) or "docker")
         if problem:
             raise RuntimeError(problem)
+        self._passed(progress, "inspect")
+
+    @staticmethod
+    def _passed(progress: Optional["BuildProgress"], check: str) -> None:
+        """One more check this build passed (the build's result lists them, runtime_layer.checks), once."""
+        facts = getattr(progress, "runtime_layer", None)
+        if isinstance(facts, dict):
+            done = facts.setdefault("checks", [])
+            if check not in done:
+                done.append(check)
+
+    @staticmethod
+    def _last_stage(progress: "BuildProgress") -> Optional[str]:
+        """The last stage module of the running job's stage order (target.yml's slot after_target may add one after
+        target), which its done record must name; None before the order is known (build_end.LAST_STAGE then)."""
+        stages = (progress.runtime_layer or {}).get("stages") or []
+        return str(stages[-1]) if stages else None
 
     def _ended_by_record(self, progress: "BuildProgress", exit_code: int, prefix: str, job: str = "build") -> int:
         """The stage container's end by its end record AND its real exit status (Core/build_end.py end_problem):
@@ -2357,7 +2528,7 @@ class BuildEngine:
         refused = stage_user_problem(progress.end_record, exit_code)
         if refused is not None:   # the stage runner's check of the stage account refused the build
             raise RuntimeError(f"{refused}\n{self._log_tail(progress, prefix)}")
-        problem = end_problem(progress.end_record, exit_code, job)
+        problem = end_problem(progress.end_record, exit_code, job, self._last_stage(progress))
         if problem is not None:
             raise RuntimeError(f"{problem}\n{self._log_tail(progress, prefix)}")
         return exit_code
@@ -2555,6 +2726,13 @@ class BuildEngine:
             info["end"] = {"reason": "done", "exit": record.exit, "stage": stage}
             if getattr(progress, "isolation", None):
                 info["end"]["isolation"] = progress.isolation   # how the stage modules ran (stage_user, same_user)
+            # the mode and the checks it passed: how the end folder guarded the end record (protected, or plainly
+            # "unprotected" on a host whose mounts keep no owner or mode) and the runtime layer's verdict, toolbox way,
+            # checks passed and stage order
+            if getattr(progress, "end_protection", None):
+                info["end"]["end_folder"] = progress.end_protection
+            if getattr(progress, "runtime_layer", None):
+                info["end"]["runtime_layer"] = dict(progress.runtime_layer)
         info.update({
             "build_id": config.build_id,
             # A local model an AI caller pinned is recorded by its label, never its host path (it reaches AI callers)

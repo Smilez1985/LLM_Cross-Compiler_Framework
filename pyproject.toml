@@ -102,6 +102,7 @@ tmp_path_retention_policy = "failed"
 # than the per-test budget says so with this marker and its reason.
 markers = [
     "temp_budget(megabytes, reason): this test may leave up to `megabytes` in its temporary folders (reason required)",
+    "real_toolbox: this test runs the runtime layer's real ensure_toolbox (no test toolbox is put into its cache)",
 ]
 
 [tool.uv.build-backend]

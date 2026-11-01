@@ -792,7 +792,12 @@ main() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    # Started by hand: the build up to this stage, through the stage runner.
-    [ -n "${STAGE_RUNNER:-}" ] || exec bash "$(dirname "${BASH_SOURCE[0]}")/build.sh" --to config "$@"
+    # Started by hand: the build up to this stage, through the framework's stage runner (the runtime layer's
+    # runner.sh: /llmcf in a build container, the repository's copy in a checkout).
+    if [ -z "${STAGE_RUNNER:-}" ]; then
+        layer="${LLMCF_LAYER:-/llmcf}"
+        [ -f "$layer/runner.sh" ] || layer="$(dirname "${BASH_SOURCE[0]}")/../../../orchestrator/runtime_layer"
+        LLMCF_MODULES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" exec sh "$layer/runner.sh" --to config "$@"
+    fi
     main "$@"
 fi

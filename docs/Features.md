@@ -186,8 +186,9 @@ Further behaviour:
   builds).
 - **A build ends on its done marker:** the stage runner writes one end record as its very last step; a build is
   done only when that record says so, no clock can stop it after it, and a container that ends without it is a
-  failed build. Only the stage runner's own record counts (sealed with a key of that run that no module script
-  sees), and only with the container's real exit status 0: a module script cannot end a build early as done. Every build has one end reason (done, failed, cancelled, soft_cap, idle), which the Builder,
+  failed build. Only the stage runner's own record counts (in the build's end folder, which only the runner may
+  write; on Docker Desktop the build is marked "end folder unprotected"), and only with the container's real exit
+  status 0 and its inspect check: a module script cannot end a build early as done. Every build has one end reason (done, failed, cancelled, soft_cap, idle), which the Builder,
   `llm-cli build status`, `get_build_status` and `build_info.json` show; the CLI's waits end on it with their own exit
   codes ([CLI](CLI_Usage.md#build-status)).
 - **A doorbell for every build's end:** with your own MQTT broker set, every build's end is published once with
@@ -304,7 +305,8 @@ Conversion containers run untrusted model code (for example custom tokenizers), 
 
 | Measure | Effect |
 |---|---|
-| Your user ID instead of root, and the stage modules under their own user | Files belong to you. The stage runner runs as you with only the two rights to switch users; every stage module runs under the image's stage account without any capability, so it cannot read the runner's memory (where the key of the end record is). The runner checks this before the first module and the framework checks the container before it starts; either refuses the build with a plain reason. The build log says which mode a build ran in. Both share one group, yours: what a module writes, even a file its tool made private, stays readable and removable for you. |
+| Your user ID instead of root, and the stage modules under their own user | Files belong to you. The stage runner runs as you with only the two rights to switch users; every stage module runs under the image's stage account without any capability, so it cannot read the runner's memory or write the end folder. The runner is the framework's runtime layer, mounted
+read-only, never a target's `build.sh`. The runner checks this before the first module and the framework checks the container before it starts; either refuses the build with a plain reason. The build log says which mode a build ran in. Both share one group, yours: what a module writes, even a file its tool made private, stays readable and removable for you. |
 | No network (`network_mode: none`) | The model cannot send data anywhere; libraries cannot download anything. All Hugging Face libraries are set to offline. |
 | No Linux capabilities (`cap_drop: ALL`) and `no-new-privileges` | No privilege escalation. |
 | Read-only image filesystem | Only the build's own work folder, a 1 GB `/tmp` and the output folder are writable; the staged model is mounted read-only. |
