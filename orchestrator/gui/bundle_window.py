@@ -48,6 +48,7 @@ BUTTONS = (
     ("btn_bundle_dry_run", "bundle.btn.dry_run", "_on_dry_run", "bundle"),
     ("btn_bundle_deploy", "bundle.btn.deploy", "_on_deploy", "bundle"),
     ("btn_bundle_status", "bundle.btn.status", "_on_status", "bundle"),
+    ("btn_bundle_gateway_bench", "bundle.btn.gateway_bench", "_on_gateway_bench", "bundle"),
     ("btn_bundle_rollback", "bundle.btn.rollback", "_on_rollback", "bundle"),
     ("btn_bundle_root_rollback", "bundle.btn.root_rollback", "_on_root_rollback", "bundle"),
     ("btn_bundle_prepare_root", "bundle.btn.prepare_root", "_on_prepare_root", "bundle"),
@@ -56,9 +57,9 @@ BUTTONS = (
     ("btn_bundle_delete", "bundle.btn.delete", "_on_delete", ""),
 )
 PLAN_ROW = ("btn_bundle_file", "btn_bundle_plan", "btn_bundle_build", "btn_bundle_block_new", "btn_bundle_refresh")
-STORE_ROW = ("btn_bundle_dry_run", "btn_bundle_deploy", "btn_bundle_status", "btn_bundle_rollback",
-             "btn_bundle_root_rollback", "btn_bundle_prepare_root", "btn_bundle_unprepare_root", "btn_bundle_uninstall",
-             "btn_bundle_delete")
+STORE_ROW = ("btn_bundle_dry_run", "btn_bundle_deploy", "btn_bundle_status", "btn_bundle_gateway_bench",
+             "btn_bundle_rollback", "btn_bundle_root_rollback", "btn_bundle_prepare_root", "btn_bundle_unprepare_root",
+             "btn_bundle_uninstall", "btn_bundle_delete")
 # the person's question before an action changes the board (service.question's words, translated)
 ASK_KEYS = {"apply": "bundle.ask.apply", "uninstall": "bundle.ask.uninstall", "rollback": "bundle.ask.rollback"}
 # the person's question before llmcf-install changes the board as root (service.root_question's words, translated)
@@ -260,7 +261,8 @@ class BundleWindow(BoardSteps, QDialog):
         chosen = self.selected_bundle()
         self.tbl_store.setRowCount(len(self.rows))
         for r, row in enumerate(self.rows):
-            last = "; ".join(f"{d}: {b['last']}" for d, b in row["boards"].items()) or self._t("boards.dash")
+            last = "; ".join(f"{d}: {b['last']}" + (f" ({b['gateway']})" if b.get("gateway") else "")
+                             for d, b in row["boards"].items()) or self._t("boards.dash")
             cells = (row["bundle_id"], row["device_id"],
                      ", ".join(f"{c['id']} ({c['block']})" for c in row["components"]), row["mode"],
                      size_text(row["bytes"], self.lang), row["created"], last)
@@ -415,12 +417,13 @@ class BundleWindow(BoardSteps, QDialog):
         except BundleError as e:
             self._info(self._t("boards.err.failed", reason=one_line(str(e))), "warning")
             return None
-        state, config = self.state_dir, getattr(self.framework, "config", None)
+        state, config, framework = self.state_dir, getattr(self.framework, "config", None), self.framework
         app_root, index = self._sources()
 
         def work():
             plan = service.plan_for_device(state, device_id, selection, config=config, app_root=app_root,
-                                           mode=framework_mode(config), allow_own=allow_own, index=index)
+                                           mode=framework_mode(config), allow_own=allow_own, index=index,
+                                           framework=framework)
             self._check_cancel()
             return plan
         return work
@@ -510,7 +513,7 @@ class BundleWindow(BoardSteps, QDialog):
             return client
         return open_session, host, port, user, label
 
-    def _run(self, action: str, then=None) -> None:
+    def _run(self, action: str, then=None, gateway: str = "complete") -> None:
         """Runs the installer `action` of the selected bundle on its board in the worker thread, through the person's
         login with the framework's key only (person_steps.connect_stored, no password); `then(run)` afterwards. An
         apply that stops before the root actions goes on with llmcf-install (_root: its plan, a second question);
@@ -533,7 +536,7 @@ class BundleWindow(BoardSteps, QDialog):
 
         def work():
             return service.run_on_board(open_session, built, action, store=store, device_id=device_id,
-                                        say=self._progress)
+                                        say=self._progress, gateway=gateway)
 
         def done(run: Any) -> None:
             self._say("\n".join(run.lines()))
@@ -770,6 +773,10 @@ class BundleWindow(BoardSteps, QDialog):
 
     def _on_status(self) -> None:
         self._run("status")
+
+    def _on_gateway_bench(self) -> None:
+        """The status with the gateway's short bench (three tiny completions through it, on the board)."""
+        self._run("status", gateway="bench")
 
     def _on_deploy(self) -> None:
         self._changing("apply")

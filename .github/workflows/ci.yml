@@ -194,7 +194,8 @@ jobs:
           if-no-files-found: error
 
   rust:
-    # The Rust workspace (rust/): llmcf-install, the board bundle's root helper, and llmcf-setpriv. The toolchain is
+    # The Rust workspace (rust/): llmcf-install, the board bundle's root helper, llmcf-setpriv and llmcf-gateway (the
+    # board's token-saving middleware, tested against a stub llama-server). The toolchain is
     # the one rust/rust-toolchain.toml pins (rustup on the runner installs it with its three musl targets); the
     # release programs are static musl binaries linked with the toolchain's own rust-lld (rust/.cargo/config.toml).
     # The release build of llmcf-install must refuse the test mode (--root, only under the cargo feature test-root),
@@ -230,18 +231,24 @@ jobs:
         run: cargo test --locked --workspace --features llmcf-install/test-root
 
       - name: Static musl release builds (x86_64, aarch64, armv7)
+        # llmcf-gateway's TLS (rustls with ring) compiles a little C: clang cross-compiles it for each target
         run: |
+          ar="$(command -v llvm-ar || find /usr/bin -name 'llvm-ar-*' | sort -V | tail -n 1)"
           for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl armv7-unknown-linux-musleabihf; do
             cargo build --locked --release -p llmcf-install --target "$target"
+            t="$(echo "$target" | tr - _)"
+            env "CC_$t=clang" "CFLAGS_$t=--target=$target" "AR_$t=$ar" \
+              cargo build --locked --release -p llmcf-gateway --target "$target"
           done
 
       - name: Every release program is static
         run: |
           for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl armv7-unknown-linux-musleabihf; do
-            program="target/$target/release/llmcf-install"
-            file "$program"
-            if readelf -lW "$program" | grep -q INTERP; then echo "$program has a program interpreter" >&2; exit 1; fi
-            if readelf -dW "$program" | grep -q NEEDED; then echo "$program needs shared libraries" >&2; exit 1; fi
+            for program in "target/$target/release/llmcf-install" "target/$target/release/llmcf-gateway"; do
+              file "$program"
+              if readelf -lW "$program" | grep -q INTERP; then echo "$program has a program interpreter" >&2; exit 1; fi
+              if readelf -dW "$program" | grep -q NEEDED; then echo "$program needs shared libraries" >&2; exit 1; fi
+            done
           done
 
       - name: The release program refuses the test mode

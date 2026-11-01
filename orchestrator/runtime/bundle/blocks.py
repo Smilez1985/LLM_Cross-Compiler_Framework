@@ -7,7 +7,8 @@ signed, scrubbed, checked by check_block_folder before it is installed).
 A block says what it is (`kind`: llm, stt, tts, vision, gateway, harness), whether it can be built (`status` ready) or
 is a documented template only (`status` template: its guide says what is missing), its typed variables with defaults
 and bounds (manifest.VARIABLE_TYPES), the files it needs with their role, where they come from (`from` person: a file
-the person picks or a pinned online item; runtime: the board's self-built llama.cpp runtime package of deploy way 2)
+the person picks or a pinned online item; runtime: the board's self-built llama.cpp runtime package of deploy way 2;
+framework: a program the framework builds itself for the board, root_helper.FRAMEWORK_PROGRAMS such as llmcf-gateway)
 and the formats and licence its models must have, its memory needs, how it starts (a program inside its folder with
 argument templates: `{variable}` for a checked value, `@FILE:role@` for one of its files, `{when: variable, args:
 [...]}` for arguments only when the variable is set) and whether its unit needs root (`unit`: autostart through
@@ -37,7 +38,7 @@ GUIDE_FILE = "README.md"
 BUILTIN_DIR = Path(__file__).resolve().parent / "blocks"
 COMMUNITY_SUBDIR = ("community", "blocks")
 STATUSES = ("ready", "template")
-SOURCES = ("person", "runtime")
+SOURCES = ("person", "runtime", "framework")
 # The formats a block may name for a file, and how the generator recognizes each by its first bytes (or by its name
 # where a format has no magic number).
 FORMATS = ("gguf", "mmproj-gguf", "ggml-whisper", "onnx", "sherpa-onnx", "elf", "tar.gz", "text")
@@ -174,12 +175,18 @@ def _file(raw: Any) -> FileNeed:
     if role not in ROLES:
         raise BlockError(f"file role must be one of {', '.join(ROLES)}")
     if source not in SOURCES:
-        raise BlockError(f"file {role}: from must be person or runtime")
+        raise BlockError(f"file {role}: from must be person, runtime or framework")
     name = raw.get("name", "") or ""
     if name and not RE_FILE.fullmatch(str(name)):
         raise BlockError(f"file {role}: name must be a plain file name")
     if source == "runtime" and role != "runtime":
         raise BlockError("only the runtime role comes from the board's runtime package")
+    if source == "framework":
+        # a program the framework builds itself from its Rust workspace (root_helper.FRAMEWORK_PROGRAMS)
+        from orchestrator.runtime.bundle.root_helper import FRAMEWORK_PROGRAMS
+        if role != "program" or name not in FRAMEWORK_PROGRAMS:
+            raise BlockError(f"file {role}: from framework is only a program the framework builds "
+                             f"({', '.join(FRAMEWORK_PROGRAMS)})")
     mode = str(raw.get("mode", "0755" if role == "program" else "0644"))
     if mode not in ("0600", "0644", "0700", "0755"):
         raise BlockError(f"file {role}: mode must be 0600, 0644, 0700 or 0755")
