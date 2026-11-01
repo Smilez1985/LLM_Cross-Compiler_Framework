@@ -71,7 +71,7 @@ class BundlePlanOut(ToolOutput):
     plan: Dict[str, Any] = Field(description="The plan as labels (BundlePlan.labels()): no path, address or account")
     blocks: List[Dict[str, Any]] = Field(description="The building blocks it may choose from, as labels")
     files_by_person: bool = Field(default=True, description="The files (models, programs) are chosen by the person "
-                                                            "in Boards > Board bundle...")
+                                                            "in the framework's Board bundle window")
 
 
 class BundleDeployIn(BaseModel):
@@ -115,7 +115,7 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
         notes = [h.scrub(n) for n in catalog.notes]
         if not selection.blocks:
             return BundlePlanOut(plan={}, blocks=blocks, notes=notes + [
-                "Choose a preset or blocks; the person chooses the files in Boards > Board bundle..."])
+                "Choose a preset or blocks; the person chooses the files in the framework's Board bundle window"])
         try:
             plan = service.plan_for_device(h.state_dir(), device.device_id, selection, config=config,
                                            app_root=app_root, mode=framework_mode(config), index=index)
@@ -131,7 +131,7 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
             return store, store.get(bundle_id)
         except gen.BundleError:
             raise ToolError(f"No stored bundle '{bundle_id}'.", code="unknown_id", field="bundle_id",
-                            next="Ask the person which bundle they built (Boards > Board bundle...).") from None
+                            next="Ask the person which bundle they built (the framework's Board bundle window).") from None
 
     def deploy_facts(inp: BundleDeployIn, ctx: ToolContext) -> CallFacts:
         from orchestrator.runtime.bundle import service
@@ -142,13 +142,13 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
         problems = store.check(built)
         if problems:
             raise ToolError("The stored bundle is not the one that was built; nothing is sent.", code="failed",
-                            next="Ask the person to build the bundle again in Boards > Board bundle...")
+                            next="Ask the person to build the bundle again in the framework's Board bundle window")
         try:
             _host, _port, user, _label = service.board_contact(h.state_dir(), device.device_id)
             fp = dev.read_key(device, h.state_dir(), step="bundle")
         except BundleError as e:
             raise ToolError(h.scrub(str(e)), code="needs_person",
-                            next="Ask the person to set the board's deploy user in Boards > Boards and Devices...") \
+                            next="Ask the person to set the board's deploy user in the board's deploy settings") \
                 from None
         except dev.DeviceRuntimeError as e:
             raise h.svc_error(e, [u for u in (device.user,) if u]) from None
@@ -162,7 +162,7 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
                                  "steps, each only once; root actions stop it (they need llmcf-install)"
                  + ("" if m.root_actions else "; this bundle has none")),
             Fact("Undo", "the installer the board keeps can roll back or uninstall the bundle's own steps "
-                         "(Boards > Board bundle...)")]
+                         "(the framework's Board bundle window)")]
         consequence = (f"Sends bundle {m.bundle_id} to the board {device.label} and installs its unprivileged "
                        "steps there.")
         return CallFacts(consequence=consequence, facts=tuple(facts), cap=Decision.ASK.value,
@@ -236,7 +236,7 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
                  "Plans a board bundle for a trusted board from a preset or building blocks and their variables, and "
                  "lists the blocks: the plan as labels (components, variables, file roles and sizes, root actions, "
                  "memory, the checks against the board's probe, problems). Nothing is built or sent; the files are "
-                 "the person's choice in Boards > Board bundle...",
+                 "the person's choice in the framework's Board bundle window",
                  ToolTier.READ, BundlePlanIn, BundlePlanOut, bundle_plan, idempotent=True, takes_context=True,
                  default_decision=Decision.DENY,
                  fields={"device_id": FieldMeta(kind="id", list_tool="list_devices", describe=device_name)},
