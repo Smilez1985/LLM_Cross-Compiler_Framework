@@ -196,8 +196,7 @@ def _helper_part_replaced(text: str) -> Optional[str]:
     """The first part of the helper the runner's `text` defines again or changes, else None. Comment lines do not
     count. A hand-made check of a shell file: it catches a runner that overrides the helper by mistake or by habit
     (an older template, a copied snippet); it is no proof against a runner written to hide it."""
-    import re
-    code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+    code ="\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
     for name in _HELPER_FUNCTIONS:
         n = re.escape(name)
         if re.search(rf"(?m)(^|[;&|{{(\s])(function\s+{n}\b|{n}\s*\(\s*\))", code) or \
@@ -248,12 +247,14 @@ def _cap_set(values: Any) -> set:
 
 
 def sandbox_problem(attrs: Any, options: Dict[str, Any], volumes: Dict[str, Dict[str, str]],
-                    engine: str = "docker") -> Optional[str]:
+                    engine: str = "docker", caps: Optional[Tuple[str, ...]] = None) -> Optional[str]:
     """The host's check of a created stage container (docker or podman inspect, `attrs`) against the decided sandbox
     `options` (stage_user_sandbox) and `volumes`: None when it runs as decided, else the plain refusal naming what
     differs (SANDBOX_REFUSED). Checked: the user; exactly RUNNER_CAPS granted (Docker: CapDrop ALL and CapAdd those
     two; Podman lists capabilities relative to its defaults, or gives its effective set); no privileged mode;
-    no-new-privileges; the read-only image; no network; every mount decided read-only is read-only."""
+    no-new-privileges; the read-only image; no network; every mount decided read-only is read-only. `caps`: the
+    capabilities the container must have instead of RUNNER_CAPS (the clean-up container of an interrupted build: none,
+    `()`, Core/interrupted_build.py)."""
     if not isinstance(attrs, dict) or not attrs:
         return SANDBOX_REFUSED.format(what="the engine did not describe the container")
     config = attrs.get("Config") or {}
@@ -262,7 +263,7 @@ def sandbox_problem(attrs: Any, options: Dict[str, Any], volumes: Dict[str, Dict
     user, wanted = str(config.get("User") or ""), str(options.get("user") or "")
     if user.split(":")[0] != wanted.split(":")[0] or (":" in user and user != wanted):
         wrong.append(f"user {user or 'unset'} instead of {wanted}")
-    needed = set(RUNNER_CAPS)
+    needed = set(RUNNER_CAPS if caps is None else caps)
     drop, add = _cap_set(host.get("CapDrop")), _cap_set(host.get("CapAdd"))
     effective = attrs.get("EffectiveCaps")
     if isinstance(effective, list):

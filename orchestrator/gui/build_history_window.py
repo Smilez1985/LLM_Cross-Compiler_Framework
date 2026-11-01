@@ -134,7 +134,12 @@ class BuildHistoryDialog(QDialog):
         self.btn_details.setObjectName("btn_history_details")
         self.btn_refresh = QPushButton(button_text(self._t("bld.history.refresh")), self)
         self.btn_refresh.setObjectName("btn_history_refresh")
-        for button, slot in ((self.btn_details, self.show_details), (self.btn_refresh, self.refresh)):
+        # an interrupted build with finished stages kept: continue it, or delete what it left
+        # (gui/interrupted_build_dialog.py; `llm-cli build interrupted` at a terminal)
+        self.btn_interrupted = QPushButton(button_text(self._t("bld.history.interrupted")), self)
+        self.btn_interrupted.setObjectName("btn_history_interrupted")
+        for button, slot in ((self.btn_details, self.show_details), (self.btn_interrupted, self.decide_interrupted),
+                             (self.btn_refresh, self.refresh)):
             button.setAutoDefault(False)
             button.clicked.connect(slot)
             buttons.addButton(button, QDialogButtonBox.ActionRole)
@@ -162,6 +167,7 @@ class BuildHistoryDialog(QDialog):
                 if column == 0:
                     cell.setData(Qt.UserRole, entry.request_id if entry.kind == "request" else
                                  str(entry.data.get("request_id") or entry.build_id))
+                    cell.setData(Qt.UserRole + 1, "" if entry.kind == "request" else str(entry.build_id or ""))
                 self.table.setItem(row, column, cell)
         try:
             proposed = sorted({p.request_id for p in client_proposals(config)})
@@ -177,6 +183,23 @@ class BuildHistoryDialog(QDialog):
             return None
         item = self.table.item(rows[0].row(), 0)
         return item.data(Qt.UserRole) if item is not None else None
+
+    def selected_build(self) -> Optional[str]:
+        rows = self.table.selectionModel().selectedRows() if self.table.selectionModel() else []
+        item = self.table.item(rows[0].row(), 0) if rows else None
+        return (item.data(Qt.UserRole + 1) or None) if item is not None else None
+
+    def decide_interrupted(self) -> str:
+        """[Continue or delete...]: the person's question about the chosen build, when it stopped with finished
+        stages kept (Core/interrupted_build.py)."""
+        from orchestrator.gui.interrupted_build_dialog import ask_interrupted
+        build_id = self.selected_build()
+        if not build_id:
+            plain_box(self, "information", self._t("bld.history.title"), self._t("bld.history.pick"))
+            return "none"
+        outcome = ask_interrupted(self, self.framework, build_id, self.lang)
+        self.refresh()
+        return outcome
 
     def details_for(self, request_id: str) -> str:
         return details_text(self.history, request_id, self.framework.config, self.lang)

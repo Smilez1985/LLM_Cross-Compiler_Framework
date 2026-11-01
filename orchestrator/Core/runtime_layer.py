@@ -394,8 +394,9 @@ def cache_dir_of(config: Any, resolve: Optional[Callable[[str], Any]] = None) ->
     rule as BuildEngine.cache_dir); `resolve` is the framework's path rule (Core/framework.resolve_install_path)."""
     getter = getattr(config, "get", None)
     value = str((getter("cache_dir", "cache") if callable(getter) else None) or "cache")
-    if resolve is None:
-        from orchestrator.Core.framework import resolve_install_path as resolve
+    if resolve is None:   # the framework's rule (Core/framework.resolve_install_path), without importing the kernel
+        path = Path(value).expanduser()
+        return path if path.is_absolute() else SHIPPED_DIR.parents[1] / path
     return Path(resolve(value))
 
 
