@@ -101,6 +101,19 @@ def test_without_a_measurement_nothing_is_guessed(tmp_path):
     assert "noch nicht vermessen" in measure.person_lines(None, "de")[0]
 
 
+@pytest.mark.parametrize("lang, words", [("en", "from the board's measurement"), ("de", "aus der Vermessung")])
+def test_the_measured_kv_cache_is_said_in_words(lang, words):
+    """`device runtime deploy` and the windows name the measured KV-cache type with its reason in words, never with
+    a text key (review of ctx-measure: device.kv.why_measured was missing)."""
+    from orchestrator.cli import _kv_text
+    from orchestrator.runtime.device.settings import KvChoice
+    from orchestrator.utils.localization import ui_text
+    text = ui_text("device.kv.auto", lang, kind="q8_0",
+                   why=ui_text("device.kv.why_measured", lang, free=1.5))
+    assert "device.kv" not in text and words in text and "1.5 GiB" in text
+    assert "device.kv" not in _kv_text(None, KvChoice("q8_0", "measured", 1.5))
+
+
 def test_the_record_is_kept_per_board_with_its_version(tmp_path):
     device = "0123456789abcdef"
     measure.save(tmp_path, device, record())
@@ -182,6 +195,18 @@ class TestTheStartScriptTakesTheMeasurement:
         self.limits(home, **values)
         res = self.run(home, "serve", str(home / "model.gguf"))
         assert res.returncode == 2 and words in res.stderr and "ARG=" not in res.stdout
+
+    @pytest.mark.parametrize("given", [("-ctk", "f16"), ("--cache-type-v", "f16"), ("-ctk", "q8_0", "-ctv", "f16")])
+    def test_a_larger_kv_cache_than_measured_needs_its_own_context(self, home, given):
+        """The measured context holds for the measured KV-cache type: a larger type without -c would overfill the
+        board (review of ctx-measure); a smaller one fits, and with -c the person decides."""
+        self.limits(home, kv="q8_0")
+        res = self.run(home, "serve", str(home / "model.gguf"), *given)
+        assert res.returncode == 2 and "measured with the KV cache q8_0" in res.stderr and "ARG=" not in res.stdout
+        res = self.run(home, "serve", str(home / "model.gguf"), "-ctk", "q4_0", "-ctv", "q4_0")
+        assert res.returncode == 0, res.stderr
+        res = self.run(home, "serve", str(home / "model.gguf"), "-c", "1024", *given)
+        assert res.returncode == 0, res.stderr
 
     def test_a_damaged_limits_file_counts_as_none(self, home):
         self.limits(home, kv="q2_k; rm -rf ~")

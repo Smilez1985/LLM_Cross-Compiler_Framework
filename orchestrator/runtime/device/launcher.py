@@ -179,6 +179,16 @@ read_limits() {
   [ -n "$L_CTX" ] && [ -n "$L_KV" ] && [ -n "$L_CRAM" ] && [ -n "$L_NEED" ] && [ -n "$L_RESERVE" ] && [ -n "$L_SIZE" ]
 }
 
+# kv_rank TYPE: the KV-cache types by their memory per token (larger number, more memory).
+kv_rank() {
+  case $1 in
+    f16) echo 3 ;;
+    q8_0) echo 2 ;;
+    q4_0) echo 1 ;;
+    *) echo 9 ;;
+  esac
+}
+
 # run_server MODE MODEL [OPTION VALUE ...]: checks every argument; MODE exec starts the server, check only checks.
 run_server() {
   mode=$1 model=$2
@@ -189,7 +199,7 @@ run_server() {
   [ -f "$model" ] || die "no model file at $model"
   [ -r "$model" ] || die "cannot read $model"
   port=@PORT@
-  has_c=no has_ctk=no has_ctv=no has_cram=no
+  has_c=no has_ctk=no has_ctv=no has_cram=no ctk_val='' ctv_val=''
   n=$#
   i=0
   while [ "$i" -lt "$n" ]; do
@@ -215,8 +225,8 @@ run_server() {
     value_ok "$kind" "$val" || die "$val is not a valid value for $opt"
     case $opt in
       -c|--ctx-size) has_c=yes ;;
-      -ctk|--cache-type-k) has_ctk=yes ;;
-      -ctv|--cache-type-v) has_ctv=yes ;;
+      -ctk|--cache-type-k) has_ctk=yes ctk_val=$val ;;
+      -ctv|--cache-type-v) has_ctv=yes ctv_val=$val ;;
       -cram|--cache-ram) has_cram=yes ;;
     esac
     if [ "$opt" = "--port" ]; then
@@ -226,9 +236,16 @@ run_server() {
     fi
   done
   # The context, the KV cache and the prompt cache come from the board's measurement unless given; a guessed
-  # context is never used: without -c and without a measurement the server is not started.
+  # context is never used: without -c and without a measurement the server is not started. A second start of a
+  # running server is refused by `start` itself ("already running"), not by the measurement.
+  if [ "$mode" = check ] && running; then return 0; fi
   if read_limits; then
     if [ "$has_c" = no ]; then
+      # the measured context holds for the measured KV-cache type: a larger one needs a context of its own (-c)
+      for given in "$ctk_val" "$ctv_val"; do
+        [ -n "$given" ] || continue
+        [ "$(kv_rank "$given")" -le "$(kv_rank "$L_KV")" ] || die "this board was measured with the KV cache $L_KV; $given needs more memory: run the benchmark on the board in the framework again with that KV cache, or give -c"
+      done
       size=$(wc -c < "$model" | tr -d ' ')
       [ "$size" = "$L_SIZE" ] || die "this board was measured with another model: run the benchmark on the board in the framework again with this model, or give -c"
       [ "$L_CTX" -gt 0 ] || die "the board's measurement says this model does not fit on it (no context is left next to it): use a smaller model or quantization"

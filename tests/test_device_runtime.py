@@ -368,6 +368,9 @@ class TestStartScript:
         assert stat.S_IMODE(pidfile.stat().st_mode) & 0o077 == 0
         again = self.run(home, "start", str(home / "model.gguf"), "-c", "2048")
         assert again.returncode == 2 and "already running" in again.stderr
+        # without -c too (the board's measurement is not what stops a second start: review of ctx-measure)
+        again = self.run(home, "start", str(home / "model.gguf"))
+        assert again.returncode == 2 and "already running" in again.stderr
         assert self.run(home, "start", str(home / "model.gguf"), "--tools", "all").returncode == 2
         stopped = self.run(home, "stop")
         assert stopped.returncode == 0 and "stopped" in stopped.stdout and not pidfile.exists()

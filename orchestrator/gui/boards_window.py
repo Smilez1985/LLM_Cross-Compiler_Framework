@@ -1476,7 +1476,7 @@ class BoardsWindow(BoardSteps, QDialog):
             return
         host, port = address
         state, device_id, audit = self.state_dir, entry["device_id"], self.audit
-        kv = settings.kv_choice(profile)
+        kv = steps.kv_choice_of(settings, profile, state, device_id)   # the one the deploy flow takes
         tool, detail = person_steps.UNTRUSTED_CONSENT
 
         def prepare():
@@ -1631,7 +1631,7 @@ class BoardsWindow(BoardSteps, QDialog):
                 self._check_cancel()
                 report = steps.check_runtime(shell, state_dir=state, device_id=device_id, home=facts.home,
                                              record=record, plan_verify=plan_verify, source=source,
-                                             port=settings.port, bench=bench)
+                                             port=settings.port, bench=bench, kv_chosen=settings.kv_cache)
             finally:
                 client.close()
             tested = self._record_tested_on(entry, profile, report, bench.digest if bench.allowed else None,
