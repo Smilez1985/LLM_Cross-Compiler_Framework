@@ -48,8 +48,8 @@ def test_a_build_with_finished_stages_is_resumable_and_listed_with_fixed_names(t
     assert [k.build_id for k in ib.kept_builds(tmp_path)] == [folder.name]
     assert ib.kept_builds(tmp_path, running=[folder.name]) == []
     view = item.ai_view()
-    assert str(tmp_path) not in json.dumps(view) and "folder" not in view, "an AI reads labels, never a path"
-    assert str(folder) in json.dumps(item.person_view(), default=str)
+    assert json.dumps(str(tmp_path))[1:-1] not in json.dumps(view) and "folder" not in view, "an AI reads labels, never a path"
+    assert json.dumps(str(folder))[1:-1] in json.dumps(item.person_view(), default=str)   # as JSON writes it (\\ on Windows)
 
 
 @pytest.mark.parametrize("change", ["no_stage", "no_config", "other_id", "local_inputs", "bad_id"])
