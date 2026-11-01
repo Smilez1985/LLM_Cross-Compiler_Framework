@@ -897,7 +897,7 @@ class BuildEngine:
         """After a failure or a Cancel: a build with finished stages keeps its folder (the person decides to continue
         it or delete what it left); any other build's folder goes at once."""
         from orchestrator.Core import interrupted_build
-        kept = interrupted_build.kept_build(Path(self.cache_dir), config.build_id)
+        kept = interrupted_build.kept_build(Path(self.cache_dir), config.build_id, ending=True)
         if kept is not None:
             prog.resumable = True
             prog.add_warning(interrupted_build.KEPT_WARNING.format(done=kept.done_text()))
