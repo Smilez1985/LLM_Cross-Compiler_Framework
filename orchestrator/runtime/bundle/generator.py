@@ -1058,12 +1058,15 @@ class BundleStore:
             result.done.append(item.speaking_name)
         return result
 
-    def record_board(self, bundle_id: str, device_id: str, **values: Any) -> None:
+    def record_board(self, bundle_id: str, device_id: str, *, stamp: str = "at", **values: Any) -> None:
+        """Merges `values` into the board's record of the bundle (boards.json) and stamps the time in `stamp`: "at"
+        is the time of the last installer run (what `bundle list` shows); a check that is no installer run (the
+        gateway's) keeps its own time ("gateway_at") and never moves "at"."""
         from orchestrator.utils.atomic import write_private
         data = self.boards(bundle_id)
         entry = dict(data.get(device_id) or {})
         entry.update({k: v for k, v in values.items()})
-        entry["at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        entry[stamp] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         data[device_id] = entry
         write_private(self.folder(bundle_id) / "boards.json", json.dumps(data, indent=2, sort_keys=True))
 
