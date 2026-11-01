@@ -340,6 +340,31 @@ def test_the_measured_limits_set_the_context_kv_cache_and_the_memory(tmp_path):
     assert memory["result"] == "passed" and memory["detail"].startswith("measured")
 
 
+def test_components_without_a_language_model_fit_by_the_boards_measurement(tmp_path):
+    """Seam of the bundle components and the measured limits (failed before: a bundle without the llm block was
+    checked against the probe's declared RAM although the board was measured): the components fit by the memory the
+    measurement leaves (free at rest less the measured reserve), each component's check names it, and a component
+    larger than that is refused plainly."""
+    import test_board_bundle as tbb
+    limits = measure.derive(record())
+    selection = tbb._selection(tmp_path, blocks=["stt-whisper-cpp-program"])
+    del selection.files["llm"]
+    plan = _bundle_plan(tmp_path, selection=selection, limits=limits)
+    assert plan.ok, plan.problems
+    assert plan.board_memory_mb == limits.usable_mib
+    mem = next(c for c in plan.checks if c["check"] == "memory")
+    assert mem["result"] == "passed" and mem["detail"].startswith("measured"), mem
+    stt = next(c for c in plan.checks if c["check"] == "component stt")
+    assert f"{limits.usable_mib} MB" in stt["detail"] and "measurement" in stt["detail"], stt
+    import dataclasses
+    small = dataclasses.replace(limits, usable_mib=8)
+    selection = tbb._selection(tmp_path, blocks=["stt-whisper-cpp-program"])
+    del selection.files["llm"]
+    tight = _bundle_plan(tmp_path, selection=selection, limits=small)
+    assert not tight.ok and any("stt" in p and "measurement" in p for p in tight.problems), tight.problems
+    assert next(c for c in tight.checks if c["check"] == "component stt")["result"] == "failed"
+
+
 def test_the_persons_choice_first_and_a_plain_reason_when_it_does_not_fit(tmp_path):
     import test_board_bundle as tbb
     limits = measure.derive(record())
