@@ -1,0 +1,8 @@
+[package]
+name = "llmcf-setpriv"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Placeholder: the rs-setpriv chain owns this crate (cargo needs every workspace member to exist).
+[dependencies]
