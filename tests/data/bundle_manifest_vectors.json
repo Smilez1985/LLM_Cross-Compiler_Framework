@@ -1,0 +1,902 @@
+{
+ "_comment": "Shared test vectors of the bundle manifest's rules: orchestrator/runtime/bundle/manifest.py (tests/test_llmcf_install.py) and rust/llmcf-install (src/manifest.rs tests) both check them. Only documentation names and addresses.",
+ "manifests": {
+  "accept": [
+   {
+    "patches": [
+     {
+      "path": [
+       "mode"
+      ],
+      "value": "unprivileged"
+     }
+    ],
+    "why": "unprivileged variant"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": []
+     }
+    ],
+    "why": "no root actions"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       0
+      ],
+      "value": {
+       "action": "place_root_file",
+       "component": "llm",
+       "file": "llmcf-limits.conf",
+       "place": "sysctl"
+      }
+     }
+    ],
+    "why": "a sysctl file of the component"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       0
+      ],
+      "value": {
+       "action": "place_root_file",
+       "component": "llm",
+       "file": "llmcf-limits.conf",
+       "place": "unit-dropin",
+       "unit": "llmcf-llm.service"
+      }
+     }
+    ],
+    "why": "a unit drop-in with its unit"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       2,
+       "cpu_weight"
+      ],
+      "value": 200
+     }
+    ],
+    "why": "cpu weight"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "files",
+       1,
+       "source"
+      ],
+      "value": "online"
+     },
+     {
+      "path": [
+       "components",
+       0,
+       "files",
+       1,
+       "url"
+      ],
+      "value": "https://example.com/models/model.gguf"
+     }
+    ],
+    "why": "an online item"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "remove_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service"
+       },
+       {
+        "action": "remove_user",
+        "component": "llm",
+        "user": "llmcf"
+       }
+      ]
+     }
+    ],
+    "why": "removals"
+   }
+  ],
+  "base": {
+   "board": {
+    "arch": "aarch64",
+    "device_id": "0123456789abcdef",
+    "init_system": "systemd",
+    "os": "linux"
+   },
+   "bundle_id": "llm-0123abcd-20261101120000",
+   "components": [
+    {
+     "block": "llm-llama-server",
+     "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "block_trust": "framework",
+     "block_version": "1.0.0",
+     "files": [
+      {
+       "format": "tar.gz",
+       "mode": "0644",
+       "name": "runtime.tar.gz",
+       "role": "runtime",
+       "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "size": 1048576,
+       "source": "bundle"
+      },
+      {
+       "format": "gguf",
+       "licence": "Apache-2.0",
+       "mode": "0644",
+       "name": "model.gguf",
+       "role": "model",
+       "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "size": 2097152,
+       "source": "bundle"
+      },
+      {
+       "mode": "0644",
+       "name": "llmcf-limits.conf",
+       "role": "config",
+       "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "size": 10,
+       "source": "bundle"
+      }
+     ],
+     "id": "llm",
+     "keygen": true,
+     "kind": "llm",
+     "start": {
+      "args": [
+       "serve",
+       "@DIR@/model.gguf",
+       "--port",
+       "8080"
+      ],
+      "program": "runtime/0123456789abcdef/llama-server.sh"
+     },
+     "variables": {
+      "autostart": true,
+      "ctx_size": 4096,
+      "memory_limit_mb": 2048,
+      "port": 8080,
+      "user": "llmcf"
+     }
+    }
+   ],
+   "created": "2026-11-01T12:00:00Z",
+   "framework_version": "3.3.0",
+   "mode": "full",
+   "root_actions": [
+    {
+     "action": "create_user",
+     "component": "llm",
+     "user": "llmcf"
+    },
+    {
+     "action": "install_unit",
+     "component": "llm",
+     "unit": "llmcf-llm.service",
+     "user": "llmcf"
+    },
+    {
+     "action": "set_cgroup",
+     "component": "llm",
+     "memory_max_mb": 2048,
+     "unit": "llmcf-llm.service"
+    }
+   ],
+   "schema": "llmcf-bundle/1"
+  },
+  "reject": [
+   {
+    "patches": [
+     {
+      "path": [
+       "extra"
+      ],
+      "value": 1
+     }
+    ],
+    "why": "unknown top key"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "schema"
+      ],
+      "value": "llmcf-bundle/2"
+     }
+    ],
+    "why": "another schema"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "bundle_id"
+      ],
+      "value": "../etc"
+     }
+    ],
+    "why": "bundle id with a slash"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "bundle_id"
+      ],
+      "value": "LLM"
+     }
+    ],
+    "why": "bundle id upper case"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "created"
+      ],
+      "value": "2026-11-01 12:00:00"
+     }
+    ],
+    "why": "created not UTC"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": []
+     }
+    ],
+    "why": "no components"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "board",
+       "os"
+      ],
+      "value": "linux x"
+     }
+    ],
+    "why": "board os with a space"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "shell"
+      ],
+      "value": "rm -rf /"
+     }
+    ],
+    "why": "unknown component key"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "id"
+      ],
+      "value": "llm'"
+     }
+    ],
+    "why": "component id with a quote"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "variables",
+       "port"
+      ],
+      "value": "$(id)"
+     }
+    ],
+    "why": "variable with dollar"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "variables",
+       "port"
+      ],
+      "value": -1
+     }
+    ],
+    "why": "negative variable"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "files",
+       1,
+       "name"
+      ],
+      "value": "../model.gguf"
+     }
+    ],
+    "why": "file name traversal"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "files",
+       1,
+       "sha256"
+      ],
+      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "why": "sha upper case"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "files",
+       1,
+       "size"
+      ],
+      "value": "big"
+     }
+    ],
+    "why": "size as text"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "files",
+       1,
+       "mode"
+      ],
+      "value": "4755"
+     }
+    ],
+    "why": "mode 4755"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "files",
+       1,
+       "source"
+      ],
+      "value": "online"
+     }
+    ],
+    "why": "online without url"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "files",
+       1,
+       "url"
+      ],
+      "value": "https://example.com/m"
+     }
+    ],
+    "why": "bundle file with url"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "start",
+       "args"
+      ],
+      "value": [
+       "serve;id"
+      ]
+     }
+    ],
+    "why": "argument with semicolon"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "start",
+       "args"
+      ],
+      "value": [
+       "@DIR@/../x"
+      ]
+     }
+    ],
+    "why": "argument with dot-dot"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "start",
+       "program"
+      ],
+      "value": "/bin/sh"
+     }
+    ],
+    "why": "program absolute"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       0,
+       "action"
+      ],
+      "value": "run_shell"
+     }
+    ],
+    "why": "root action unknown"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       0,
+       "user"
+      ],
+      "value": "root"
+     }
+    ],
+    "why": "root user root"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       0,
+       "user"
+      ],
+      "value": "LLMCF"
+     }
+    ],
+    "why": "root user upper case"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       0,
+       "user"
+      ],
+      "value": "llmcf\nroot"
+     }
+    ],
+    "why": "root user with newline"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       1,
+       "unit"
+      ],
+      "value": "sshd.service"
+     }
+    ],
+    "why": "unit without prefix"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       1,
+       "unit"
+      ],
+      "value": "llmcf-../x.service"
+     }
+    ],
+    "why": "unit with a slash"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       1,
+       "user"
+      ]
+     }
+    ],
+    "why": "install_unit without user"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       2,
+       "memory_max_mb"
+      ],
+      "value": 1
+     }
+    ],
+    "why": "memory too small"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       2,
+       "memory_max_mb"
+      ],
+      "value": true
+     }
+    ],
+    "why": "memory as bool"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       2,
+       "unit"
+      ],
+      "value": "llmcf-other.service"
+     }
+    ],
+    "why": "cgroup of a unit no install_unit makes"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       0,
+       "component"
+      ],
+      "value": "nothing"
+     }
+    ],
+    "why": "root action of no component"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       0
+      ],
+      "value": {
+       "action": "place_root_file",
+       "component": "llm",
+       "file": "llmcf-limits.conf",
+       "place": "cron"
+      }
+     }
+    ],
+    "why": "root place unknown"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       0
+      ],
+      "value": {
+       "action": "place_root_file",
+       "component": "llm",
+       "file": "model.gguf",
+       "place": "sysctl"
+      }
+     }
+    ],
+    "why": "root file not llmcf-*.conf"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       0
+      ],
+      "value": {
+       "action": "place_root_file",
+       "component": "llm",
+       "file": "llmcf-other.conf",
+       "place": "sysctl"
+      }
+     }
+    ],
+    "why": "root file not of the component"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       0
+      ],
+      "value": {
+       "action": "place_root_file",
+       "component": "llm",
+       "file": "llmcf-limits.conf",
+       "place": "unit-dropin"
+      }
+     }
+    ],
+    "why": "unit drop-in without unit"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components",
+       0,
+       "start"
+      ]
+     }
+    ],
+    "why": "install_unit of a component without start"
+   }
+  ]
+ },
+ "values": {
+  "arg": {
+   "accept": [
+    "serve",
+    "@DIR@/model.gguf",
+    "--port",
+    "8080",
+    "a=b,c:d"
+   ],
+   "reject": [
+    "",
+    "a b",
+    "a;b",
+    "$(id)",
+    "../x",
+    "@DIR@/../x",
+    "/abs",
+    "'x'"
+   ]
+  },
+  "fact": {
+   "accept": [
+    "linux",
+    "systemd",
+    "openrc"
+   ],
+   "reject": [
+    "",
+    "Linux",
+    "a b",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   ]
+  },
+  "file": {
+   "accept": [
+    "model.gguf",
+    "_a",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   ],
+   "reject": [
+    "",
+    ".",
+    "..",
+    ".hidden",
+    "-x",
+    "a/b",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "a b"
+   ]
+  },
+  "id": {
+   "accept": [
+    "llm",
+    "a",
+    "stt-2",
+    "llm-0123abcd-20261101120000",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   ],
+   "reject": [
+    "",
+    "-x",
+    ".x",
+    "LLM",
+    "a b",
+    "a/b",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "llm;id"
+   ]
+  },
+  "licence": {
+   "accept": [
+    "MIT",
+    "Apache-2.0",
+    "GPL-3.0+",
+    "llama3"
+   ],
+   "reject": [
+    "",
+    "-x",
+    "a b",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   ]
+  },
+  "root_file": {
+   "accept": [
+    "llmcf-limits.conf",
+    "llmcf-a.b_c.conf"
+   ],
+   "reject": [
+    "limits.conf",
+    "llmcf-.conf",
+    "llmcf-a.txt",
+    "llmcf-A.conf",
+    "llmcf-a/b.conf"
+   ]
+  },
+  "sha": {
+   "accept": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   ],
+   "reject": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+    ""
+   ]
+  },
+  "unit": {
+   "accept": [
+    "llmcf-llm.service",
+    "llmcf-stt-2.service"
+   ],
+   "reject": [
+    "llm.service",
+    "llmcf-.service",
+    "llmcf-a_b.service",
+    "llmcf-a/b.service",
+    "llmcf-A.service",
+    "llmcf-llm.socket"
+   ]
+  },
+  "url": {
+   "accept": [
+    "https://example.com/m.gguf",
+    "http://192.0.2.1:8000/a",
+    "https://example.org"
+   ],
+   "reject": [
+    "ftp://example.com",
+    "https://user@example.com/",
+    "https://example.com/a b",
+    "https://example.com/a'b",
+    "https://",
+    "https://example.com:123456/"
+   ]
+  },
+  "user": {
+   "accept": [
+    "llmcf",
+    "llmcf-agent",
+    "_svc",
+    "a.b"
+   ],
+   "reject": [
+    "",
+    "root",
+    "Root",
+    "-x",
+    "1user",
+    "a b",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "a:b"
+   ]
+  },
+  "var": {
+   "accept": [
+    "port",
+    "ctx_size",
+    "a1"
+   ],
+   "reject": [
+    "",
+    "1a",
+    "Port",
+    "a-b",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   ]
+  },
+  "version": {
+   "accept": [
+    "1.0.0",
+    "1234.0.9"
+   ],
+   "reject": [
+    "1.0",
+    "1.0.0.0",
+    "a.b.c",
+    "12345.0.0",
+    ""
+   ]
+  },
+  "word": {
+   "accept": [
+    "auto",
+    "_x",
+    "A.b-c_d",
+    "0"
+   ],
+   "reject": [
+    "",
+    "-x",
+    ".x",
+    "a b",
+    "a$b",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   ]
+  }
+ }
+}

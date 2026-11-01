@@ -363,11 +363,24 @@ def _fake_board(tmp_path, tier: str):
     return run
 
 
+def _helper(tmp_path, plan, program: bytes = b"#!/bin/sh\necho llmcf-install stand-in\n"):
+    """llmcf-install for a plan with root actions (a bundle with them always carries it): a stand-in program, or the
+    caller's (tests/test_llmcf_install.py gives the real test build)."""
+    from orchestrator.runtime.bundle.root_helper import HelperBuild, target_of
+    if not gen.needs_root(plan.manifest):
+        return None
+    path = tmp_path / "llmcf-install.stand-in"
+    path.write_bytes(program)
+    return HelperBuild(path, hashlib.sha256(program).hexdigest(), "0.1.0", target_of(plan.manifest.board.arch), "test")
+
+
 def _built(tmp_path, board, **kw):
+    helper_program = kw.pop("helper_program", None)
     plan = _plan(tmp_path, kw.pop("selection", None), **kw)
     assert plan.ok, plan.problems
     store = gen.BundleStore(tmp_path / "state")
-    return store, gen.build_bundle(plan, store, board.signer)
+    helper = _helper(tmp_path, plan, helper_program) if helper_program else _helper(tmp_path, plan)
+    return store, gen.build_bundle(plan, store, board.signer, helper=helper)
 
 
 @pytest.fixture(params=["root", "home"])
@@ -487,6 +500,9 @@ def test_root_actions_stop_the_installer_unless_the_unprivileged_only_variant_wa
     run = run_bundle(GateShell(board), built, "apply")
     assert run.status == inst.EXIT_ROOT and run.report.result == "stopped-root", run.lines()
     assert "llmcf-install" in run.report.detail and run.report.count("needs-root") == 3
+    kept = board.home / inst.BUNDLE_REL / "voice-test" / ".kept"
+    # the bundle carries llmcf-install for its root actions; the installer keeps it, signed, for bundle-root
+    assert (kept / "llmcf-install").is_file() and (kept / "llmcf-install.sig").is_file()
     board2 = _fake_board(tmp_path / "b2", "root")
     sel = _selection(tmp_path / "b2", values=values, unprivileged_only=True)
     store2 = gen.BundleStore(tmp_path / "b2" / "state")

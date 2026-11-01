@@ -20,7 +20,8 @@ TEXTS = {
         "bundle.title": "Board bundle",
         "bundle.intro": "Pick a board, a preset or the building blocks, their variables and files, and look at the "
                         "plan before anything is built or sent. A bundle is signed with the framework's key; its "
-                        "installer on the board runs the unprivileged steps, root actions need llmcf-install.",
+                        "installer on the board runs the unprivileged steps; root actions run only through "
+                        "llmcf-install, after a second yes for them.",
         "bundle.board": "Board:",
         "bundle.board.none": "No probed board yet: probe one first ({path:act_deploy_scan_remote}).",
         "bundle.preset": "Preset:",
@@ -58,6 +59,7 @@ TEXTS = {
         "bundle.btn.dry_run": "Dry run on the board",
         "bundle.btn.status": "Status on the board",
         "bundle.btn.rollback": "Roll back...",
+        "bundle.btn.root_rollback": "Roll back root actions...",
         "bundle.btn.uninstall": "Uninstall...",
         "bundle.btn.delete": "Delete stored bundles...",
         "bundle.btn.block_new": "New block...",
@@ -74,7 +76,17 @@ TEXTS = {
         "bundle.own.ask": "Use your own unsigned blocks {blocks}? Nobody else checked them.",
         "bundle.running": "Running the installer on the board ({action})",
         "bundle.ask.apply": "Send bundle {bundle} ({size}) to board {board} and run its installer there? It installs "
-                            "the unprivileged steps; root actions stop before they run (they need llmcf-install).",
+                            "the unprivileged steps; root actions stop before they run (they run through "
+                            "llmcf-install only after a second yes for them).",
+        "bundle.ask.root_apply": "Run the {count} root action(s) of bundle {bundle} on board {board} as root now, "
+                                 "through llmcf-install (the framework's signed root helper)? It does only what the "
+                                 "signed manifest lists in the output pane and keeps a journal for rollback and "
+                                 "uninstall.",
+        "bundle.ask.root_uninstall": "Remove what llmcf-install made for bundle {bundle} on board {board} (the {count} "
+                                     "entries in the output pane), as root? Only what its journal says it made is "
+                                     "removed.",
+        "bundle.ask.root_rollback": "Roll back the last run of llmcf-install for bundle {bundle} on board {board}, as "
+                                    "root? Its journal says exactly what that run made or changed.",
         "bundle.ask.uninstall": "Uninstall bundle {bundle} from board {board}? The installer the board kept removes "
                                 "only the bundle's own steps, newest first.",
         "bundle.ask.rollback": "Roll back the last run of bundle {bundle} on board {board}? The installer the board "
@@ -84,8 +96,19 @@ TEXTS = {
                           "index since it was built. Build the bundle again without it. ({reason})",
         "bundle.unchanged": "Nothing was changed on the board.",
         "bundle.staging": "The apply did not finish; the next deploy continues in the same upload folder.",
-        "bundle.root": "The installer stopped before the root actions: they need llmcf-install, the framework's root "
-                       "helper (not there yet). Build the unprivileged-only variant to skip them.",
+        "bundle.root": "The unprivileged steps are done; the root actions follow through llmcf-install, after its "
+                       "plan and your own yes for them.",
+        "bundle.root.none": "The installer stopped before the root actions, and this bundle carries no llmcf-install "
+                            "(it was built before): build it again, or build the unprivileged-only variant.",
+        "bundle.root.none_here": "This bundle has no root actions.",
+        "bundle.root.running": "Running llmcf-install on the board as root ({action})",
+        "bundle.root.password_intro": "The board's sudo asks for a password. Type the board account's password for "
+                                      "this one run of llmcf-install; it is sent to sudo on the board and never kept.",
+        "bundle.root.password": "Board password:",
+        "bundle.root.plan_failed": "llmcf-install's plan did not pass; nothing was changed.",
+        "bundle.root.unchanged": "Nothing was changed on the board by llmcf-install.",
+        "bundle.root.failed": "A root action failed after others were done; llmcf-install's journal says what. Roll "
+                              "back root actions... undoes that run.",
         "bundle.delete.title": "Stored board bundles",
         "bundle.delete.intro": "Tick the bundles to delete from this framework's store (nothing is ticked). A board "
                                "keeps what it installed.",
@@ -512,7 +535,7 @@ TEXTS = {
         "bundle.intro": "Wähle ein Board, eine Vorlage oder die Bausteine, ihre Variablen und Dateien, und sieh dir "
                         "den Plan an, bevor etwas gebaut oder gesendet wird. Ein Bündel wird mit dem Schlüssel des "
                         "Frameworks signiert; sein Installer auf dem Board führt die Schritte ohne Sonderrechte aus, "
-                        "Root-Aktionen brauchen llmcf-install.",
+                        "Root-Aktionen laufen nur über llmcf-install, nach einem zweiten Ja dafür.",
         "bundle.board": "Board:",
         "bundle.board.none": "Noch kein geprüftes Board: prüfe zuerst eins ({path:act_deploy_scan_remote}).",
         "bundle.preset": "Vorlage:",
@@ -551,6 +574,7 @@ TEXTS = {
         "bundle.btn.dry_run": "Probelauf auf dem Board",
         "bundle.btn.status": "Status auf dem Board",
         "bundle.btn.rollback": "Zurückrollen...",
+        "bundle.btn.root_rollback": "Root-Aktionen zurückrollen...",
         "bundle.btn.uninstall": "Deinstallieren...",
         "bundle.btn.delete": "Gespeicherte Bündel löschen...",
         "bundle.btn.block_new": "Neuer Baustein...",
@@ -569,8 +593,18 @@ TEXTS = {
                           "geprüft.",
         "bundle.running": "Der Installer läuft auf dem Board ({action})",
         "bundle.ask.apply": "Bündel {bundle} ({size}) an Board {board} senden und seinen Installer dort ausführen? Er "
-                            "installiert die Schritte ohne Sonderrechte; vor Root-Aktionen hält er an (sie brauchen "
-                            "llmcf-install).",
+                            "installiert die Schritte ohne Sonderrechte; vor Root-Aktionen hält er an (sie laufen "
+                            "über llmcf-install erst nach einem zweiten Ja dafür).",
+        "bundle.ask.root_apply": "Die {count} Root-Aktion(en) von Bündel {bundle} auf Board {board} jetzt als root "
+                                 "ausführen, über llmcf-install (den signierten Root-Helfer des Frameworks)? Er tut "
+                                 "nur, was das signierte Manifest in der Ausgabe auflistet, und führt ein Journal für "
+                                 "Zurückrollen und Deinstallieren.",
+        "bundle.ask.root_uninstall": "Entfernen, was llmcf-install für Bündel {bundle} auf Board {board} angelegt hat "
+                                     "(die {count} Einträge in der Ausgabe), als root? Entfernt wird nur, was laut "
+                                     "seinem Journal von ihm stammt.",
+        "bundle.ask.root_rollback": "Den letzten Lauf von llmcf-install für Bündel {bundle} auf Board {board} "
+                                    "zurückrollen, als root? Sein Journal sagt genau, was dieser Lauf angelegt oder "
+                                    "geändert hat.",
         "bundle.ask.uninstall": "Bündel {bundle} von Board {board} deinstallieren? Der Installer, den das Board "
                                 "behalten hat, entfernt nur die eigenen Schritte des Bündels, die neuesten zuerst.",
         "bundle.ask.rollback": "Den letzten Lauf von Bündel {bundle} auf Board {board} zurückrollen? Der Installer, "
@@ -580,9 +614,22 @@ TEXTS = {
                           "Bauen im signierten Index zurückgezogen. Baue das Bündel ohne ihn neu. ({reason})",
         "bundle.unchanged": "Auf dem Board wurde nichts geändert.",
         "bundle.staging": "Das Apply wurde nicht fertig; das nächste Ausrollen macht im selben Upload-Ordner weiter.",
-        "bundle.root": "Der Installer hat vor den Root-Aktionen angehalten: sie brauchen llmcf-install, den "
-                       "Root-Helfer des Frameworks (noch nicht da). Baue die Variante ohne Sonderrechte, um sie zu "
-                       "überspringen.",
+        "bundle.root": "Die Schritte ohne Sonderrechte sind fertig; die Root-Aktionen folgen über llmcf-install, "
+                       "nach seinem Plan und deinem eigenen Ja dafür.",
+        "bundle.root.none": "Der Installer hat vor den Root-Aktionen angehalten, und dieses Bündel enthält kein "
+                            "llmcf-install (es wurde früher gebaut): baue es neu, oder baue die Variante ohne "
+                            "Sonderrechte.",
+        "bundle.root.none_here": "Dieses Bündel hat keine Root-Aktionen.",
+        "bundle.root.running": "llmcf-install läuft auf dem Board als root ({action})",
+        "bundle.root.password_intro": "sudo auf dem Board fragt nach einem Passwort. Gib das Passwort des "
+                                      "Board-Kontos für diesen einen Lauf von llmcf-install ein; es geht an sudo auf "
+                                      "dem Board und wird nie gespeichert.",
+        "bundle.root.password": "Board-Passwort:",
+        "bundle.root.plan_failed": "Der Plan von llmcf-install hat nicht bestanden; nichts wurde geändert.",
+        "bundle.root.unchanged": "llmcf-install hat auf dem Board nichts geändert.",
+        "bundle.root.failed": "Eine Root-Aktion ist fehlgeschlagen, nachdem andere schon erledigt waren; das Journal "
+                              "von llmcf-install sagt, welche. Root-Aktionen zurückrollen... macht diesen Lauf "
+                              "rückgängig.",
         "bundle.delete.title": "Gespeicherte Board-Bündel",
         "bundle.delete.intro": "Hake die Bündel an, die aus dem Speicher dieses Frameworks gelöscht werden (nichts "
                                "ist angehakt). Ein Board behält, was es installiert hat.",

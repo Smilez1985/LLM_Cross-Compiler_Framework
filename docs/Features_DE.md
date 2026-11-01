@@ -700,13 +700,18 @@ geprüft) und wählst ihre Dateien (eine lokale Datei wird gehasht und ins Bünd
 sha256 und Größe festgelegt).
 
 Bevor etwas gebaut oder gesendet wird, zeigt der Plan jede Komponente, jede Datei mit Quelle und Größe, die
-Root-Aktionen, die llmcf-install brauchen, und seine Prüfungen gegen die Untersuchung des Boards (Architektur,
+Root-Aktionen, die über llmcf-install laufen, und seine Prüfungen gegen die Untersuchung des Boards (Architektur,
 Init-System, sudo, Offline-Modus, Speicher). Das Bündel wird mit dem Schlüssel des Frameworks signiert und im Speicher
 dieses Frameworks aufbewahrt; sein Installer auf dem Board installiert nur die Schritte ohne Sonderrechte, jeden nur
 einmal (ein zweiter Lauf ändert nichts, ein abgebrochener macht weiter), und zeigt einen Probelauf, einen Status, ein
-Zurückrollen und ein Deinstallieren seiner eigenen Schritte. Vor Root-Aktionen hält der Installer mit dem klaren
-Hinweis an, dass sie llmcf-install brauchen, den Root-Helfer des Frameworks, der noch nicht da ist: bis dahin wählst
-du die Variante ohne Sonderrechte (keine Autostart-Unit). Ausrollen, Deinstallieren und Zurückrollen fragen dich
+Zurückrollen und ein Deinstallieren seiner eigenen Schritte. Die Root-Aktionen (das Konto eines Bestandteils,
+seine Autostart-Unit, seine Speicher- und CPU-Grenzen) laufen nur über llmcf-install, den Root-Helfer des Frameworks
+in Rust, den das Bündel signiert mitbringt: Er zeigt seinen eigenen Plan und läuft nach einem zweiten Ja dafür über
+`sudo -n` als root (im privaten Modus darfst du stattdessen das Passwort des Board-Kontos einmal für diesen Lauf
+eingeben; es wird nie aufbewahrt). Er prüft die Signatur des Bündels selbst, nur gegen den root-eigenen Schlüssel,
+tut nur die typisierten Aktionen des signierten Manifests, ändert nichts zweimal und führt ein Journal, so sind sein
+Status, das Zurückrollen seines letzten Laufs und das Deinstallieren genau. Eine KI startet nie eine Root-Aktion.
+Ausrollen, Deinstallieren und Zurückrollen fragen dich
 vorher ("Nein" ist die Vorgabe); gespeicherte Bündel werden nur aus der vollen Liste gelöscht, die du anhakst, in
 den Papierkorb oder endgültig.
 

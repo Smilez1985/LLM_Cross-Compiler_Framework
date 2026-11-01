@@ -219,3 +219,58 @@ def test_deploy_refuses_a_bundle_whose_block_was_revoked_since_the_build(qapp, b
     wait(qapp, dialog)
     assert board.logins == [] and boxes.questions() == []
     assert boxes.asked and "revoked" in boxes.asked[-1].text, [a.text for a in boxes.asked]
+
+
+@POSIX
+@VERIFIER
+def test_the_root_actions_follow_the_apply_after_their_own_question_and_the_password_once(qapp, bundle, monkeypatch):
+    """Deploy... with autostart: the installer stops before the root actions, llmcf-install's plan is shown, its own
+    question ("No" default) comes, and only a yes runs its apply; a sudo that asks for a password gets the person's
+    password from a dialog once (private mode). llmcf-install itself runs in tests/test_llmcf_install.py."""
+    import hashlib
+    from orchestrator.gui import bundle_window
+    from orchestrator.runtime.bundle import installer as inst
+    from orchestrator.runtime.bundle import service
+    from orchestrator.runtime.bundle.board import BoardRun
+    from orchestrator.runtime.bundle.root_helper import HelperBuild, target_of
+    dialog, board = bundle
+    stand_in = board.state.parent / "llmcf-install.stand-in"
+    stand_in.write_bytes(b"#!/bin/sh\n")
+    monkeypatch.setattr(service, "helper_for", lambda framework, arch, say=None: HelperBuild(
+        stand_in, hashlib.sha256(b"#!/bin/sh\n").hexdigest(), "0.1.0", target_of(arch), "test"))
+    runs = []
+    answers = {"plan": "llmcf-bundle: would create_user stt user=llmcf\n"
+                       "llmcf-bundle: result=plan changed=0 pending=1\n",
+               "apply": "llmcf-bundle: done create_user stt user=llmcf\nllmcf-bundle: result=ok changed=1\n"}
+
+    def run_root_on_board(open_session, built, action, *, password="", say=None):
+        runs.append((action, password, threading.current_thread() is threading.main_thread()))
+        if not password:
+            return BoardRun("root-" + action, 3, inst.report("llmcf-bundle: result=needs-password changed=0 x\n"))
+        return BoardRun("root-" + action, 0, inst.report(answers[action]))
+    monkeypatch.setattr(service, "run_root_on_board", run_root_on_board)
+
+    def fill(form):
+        from PySide6.QtWidgets import QLineEdit
+        form.findChild(QLineEdit, "txt_bundle_sudo_password").setText("correct horse")
+        return True
+    monkeypatch.setattr(bundle_window, "_exec", fill)
+    _pick_stt(dialog, board)
+    for r in range(dialog.tbl_vars.rowCount()):
+        if dialog.tbl_vars.item(r, 1).text() == "autostart":
+            dialog.tbl_vars.item(r, 3).setText("yes")
+    boxes = Boxes(monkeypatch, "yes")
+    dialog.buttons["btn_bundle_build"].click()
+    wait(qapp, dialog)
+    assert len(dialog.rows) == 1, dialog.output.toPlainText()
+    dialog.tbl_store.selectRow(0)
+    dialog.buttons["btn_bundle_deploy"].click()
+    for _ in range(6):
+        wait(qapp, dialog)
+    texts = [q.text for q in boxes.questions()]
+    assert any("Send bundle" in t for t in texts) and any("root action" in t for t in texts), texts
+    assert all(q.default_is_no for q in boxes.questions())
+    assert [r[:2] for r in runs] == [("plan", ""), ("plan", "correct horse"), ("apply", "correct horse")], runs
+    assert not any(r[2] for r in runs), "llmcf-install runs off the GUI thread"
+    assert "done create_user" in dialog.output.toPlainText()
+    assert "correct horse" not in dialog.output.toPlainText()

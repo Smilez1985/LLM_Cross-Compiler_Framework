@@ -2512,10 +2512,10 @@ llm-cli bundle plan GERÄT [--preset llm|voice|stt] [--block ID]... [--set KOMPO
                     --size KOMPONENTE.ROLLE=BYTES]... [--licence KOMPONENTE.ROLLE=ID]... [--unprivileged-only] [--json]
 llm-cli bundle build GERÄT (dieselbe Auswahl) [--allow-own]
 llm-cli bundle list [--json]
-llm-cli bundle deploy BUNDLE [--dry-run]
+llm-cli bundle deploy BUNDLE [--dry-run] [--skip-root]
 llm-cli bundle status BUNDLE
 llm-cli bundle uninstall BUNDLE
-llm-cli bundle rollback BUNDLE
+llm-cli bundle rollback BUNDLE [--root]
 llm-cli bundle delete [BUNDLE]...
 llm-cli bundle block list [--json]
 llm-cli bundle block new ID --kind ART --title TEXT [--summary TEXT] [--from BAUSTEIN]
@@ -2526,7 +2526,7 @@ llm-cli bundle block new ID --kind ART --title TEXT [--summary TEXT] [--from BAU
 Zeigt den ganzen Plan, bevor etwas gebaut oder gesendet wird: jede Komponente mit ihrem Baustein, ihrer
 Vertrauensstufe und ihren Variablen (jede gegen ihren Typ geprüft), jede Datei mit Rolle, Name, Größe, Quelle (die
 lokale Datei, aus der sie kopiert wird, das Laufzeitpaket des Boards oder die festgelegte Online-Adresse) und Lizenz,
-die Root-Aktionen, die llmcf-install brauchen, den Speicherbedarf gegenüber dem, was das Board hat, was gesendet wird,
+die Root-Aktionen, die über llmcf-install laufen, den Speicherbedarf gegenüber dem, was das Board hat, was gesendet wird,
 und die Prüfungen gegen die Untersuchung des Boards (Architektur, Init-System, sudo, Offline-Modus, Speicher:
 bestanden, nicht bestanden, Warnung oder unbekannt). Es wird kein Board kontaktiert. Eine Komponente heißt nach ihrer
 Art (`llm`, `stt`, eine zweite derselben Art `stt-2`). `--json` gibt den Plan nur als Labels aus: kein lokaler Pfad,
@@ -2537,23 +2537,39 @@ keine Adresse, kein Konto. Exit 1, wenn der Plan Probleme hat.
 Plant wie `bundle plan`, zeigt den Plan und schreibt das Bündel in den Speicher dieses Frameworks, signiert mit dem
 Board-Schlüssel des Frameworks (nichts wird ans Board gesendet). Ein eigener, nicht signierter Baustein wird nur nach
 deinem Ja im Terminal verwendet ("Nein" ist die Vorgabe; `--allow-own` beantwortet es vorab); der Enterprise-Modus
-nimmt nur die Bausteine des Frameworks und aus dem signierten Index installierte.
+nimmt nur die Bausteine des Frameworks und aus dem signierten Index installierte. Ein Bündel mit Root-Aktionen
+(Autostart: ein Konto, eine Unit, ihre Speicher- und CPU-Grenzen) enthält auch llmcf-install, den Root-Helfer des
+Frameworks, gebaut für die Architektur des Boards (x86_64, aarch64 oder armv7, statisch) und mit dem Bündel signiert:
+Die auf diesem Rechner aufbewahrte Kopie wird genommen, sonst wird er hier mit cargo oder im Builder-Image über die
+Container-Engine gebaut. Im Offline-Modus wird nur eine aufbewahrte Kopie genommen; ohne sie hält der Build mit dem
+klaren Grund an (einmal online bauen oder die Variante ohne Sonderrechte wählen).
 
 ### bundle deploy
 
 Meldet sich nur mit dem Schlüssel des Frameworks am Board des Bündels an (als Benutzer aus den Deploy-Einstellungen
 des Boards, nie mit Passwort), sendet, was das Board noch nicht hat, und führt zuerst den Probelauf des Installers
 aus; hat er bestanden, fragt es "Send bundle ... to board ...?" ("Nein" ist die Vorgabe; ohne Terminal wird nichts
-installiert) und installiert dann die Schritte ohne Sonderrechte. Vor Root-Aktionen hält der Installer mit dem
-klaren Hinweis an, dass sie llmcf-install brauchen (noch nicht da); baue die Variante ohne Sonderrechte, um sie zu
-überspringen. Ein abgebrochenes Deployment macht im selben Upload-Ordner weiter. `--dry-run` sendet das Bündel und
-führt nur den Probelauf aus.
+installiert) und installiert dann die Schritte ohne Sonderrechte. Vor den Root-Aktionen hält der Installer an;
+dann zeigt llmcf-install seinen eigenen Plan davon und fragt ein zweites Mal ("Run the ... root action(s) ... as root
+now, through llmcf-install?", "Nein" ist die Vorgabe). Nach deinem Ja führt das Board ihn über `sudo -n` als root
+aus; fragt sudo auf dem Board nach einem Passwort, lässt dich der private Modus das Passwort des Board-Kontos einmal
+für diesen Lauf eingeben (es wird einmal gesendet und nie aufbewahrt), während der Enterprise-Modus Root-Aktionen nur
+mit `sudo -n` ausführt und mit dem Hinweis anhält, was zu erlauben ist. llmcf-install prüft die Signatur des Bündels
+selbst gegen den root-eigenen Signaturschlüssel des Frameworks, führt nur die typisierten Root-Aktionen des Manifests
+aus, ändert nichts, was schon so ist, wie es sein soll, und führt ein Journal für Zurückrollen und Deinstallieren.
+`--skip-root` hält vor den Root-Aktionen an (ein späteres Deployment führt sie aus). Ein abgebrochenes Deployment
+macht im selben Upload-Ordner weiter. `--dry-run` sendet das Bündel und führt nur den Probelauf aus.
 
 ### bundle status, uninstall, rollback
 
-`status` fragt den Installer, den das Board behalten hat, welche Schritte erledigt sind (ändert nichts). `uninstall`
-listet, was es entfernen würde (nur die eigenen Schritte des Bündels, die neuesten zuerst), und fragt vorher ("Nein"
-ist die Vorgabe); `rollback` zeigt den Status und fragt, bevor es das letzte Apply rückgängig macht.
+`status` fragt den Installer, den das Board behalten hat, welche Schritte erledigt sind, und llmcf-install,
+welche Root-Aktionen bestehen (ändert nichts). `uninstall` listet zuerst, was llmcf-install als root angelegt hat
+(aus seinem Journal), und fragt für diesen Teil, dann listet es die eigenen Schritte des Installers (die neuesten
+zuerst) und fragt erneut ("Nein" ist jedes Mal die Vorgabe); behältst du den Root-Teil, bleibt auch der Rest.
+`rollback` zeigt den Status und fragt, bevor es das letzte Apply rückgängig macht; `rollback --root` nimmt
+stattdessen den letzten Lauf von llmcf-install zurück (genau das, was dieser Lauf laut Journal angelegt oder geändert
+hat). Scheitert eine Root-Aktion, nachdem andere schon erledigt sind, sagt es das; `rollback --root` nimmt diesen
+Lauf zurück.
 
 ### bundle delete
 

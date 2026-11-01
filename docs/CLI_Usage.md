@@ -2403,10 +2403,10 @@ llm-cli bundle plan DEVICE [--preset llm|voice|stt] [--block ID]... [--set COMPO
                     --size COMPONENT.ROLE=BYTES]... [--licence COMPONENT.ROLE=ID]... [--unprivileged-only] [--json]
 llm-cli bundle build DEVICE (the same choice) [--allow-own]
 llm-cli bundle list [--json]
-llm-cli bundle deploy BUNDLE [--dry-run]
+llm-cli bundle deploy BUNDLE [--dry-run] [--skip-root]
 llm-cli bundle status BUNDLE
 llm-cli bundle uninstall BUNDLE
-llm-cli bundle rollback BUNDLE
+llm-cli bundle rollback BUNDLE [--root]
 llm-cli bundle delete [BUNDLE]...
 llm-cli bundle block list [--json]
 llm-cli bundle block new ID --kind KIND --title TEXT [--summary TEXT] [--from BLOCK]
@@ -2416,7 +2416,7 @@ llm-cli bundle block new ID --kind KIND --title TEXT [--summary TEXT] [--from BL
 
 Shows the whole plan before anything is built or sent: each component with its block, trust and variables (each
 checked against its type), every file with its role, name, size, source (the local file it is copied from, the
-board's runtime package or the pinned online address) and licence, the root actions that need llmcf-install, the
+board's runtime package or the pinned online address) and licence, the root actions that run through llmcf-install, the
 memory it needs of what the board has, what is sent, and the checks against the board's probe (architecture, init
 system, sudo, offline mode, memory: passed, failed, warning or unknown). It contacts no board. A component is named
 by its kind (`llm`, `stt`, a second one of the same kind `stt-2`). `--json` gives the plan as labels only: no local
@@ -2427,22 +2427,35 @@ path, no address, no account. Exit 1 when the plan has problems.
 Plans as `bundle plan`, shows the plan and writes the bundle into this framework's store, signed with the framework's
 board key (nothing is sent to the board). An own block that is not signed is used only after your yes at a terminal
 ("No" is the default; `--allow-own` answers it beforehand); enterprise mode takes only the framework's blocks and
-blocks installed from the signed index.
+blocks installed from the signed index. A bundle with root actions (autostart: an account, a unit, its memory and
+CPU limits) also carries llmcf-install, the framework's root helper, built for the board's architecture (x86_64,
+aarch64 or armv7, static) and signed with the bundle: the copy this computer keeps is used, else it is built with
+cargo here or in the builder image over the container engine. In offline mode only a kept copy is used; without one
+the build stops with the plain reason (build it once online, or choose the unprivileged-only variant).
 
 ### bundle deploy
 
 Logs in to the bundle's board with the framework's key only (as the board's deploy settings' user, never a
 password), sends what the board does not hold yet and runs the installer's dry run first; after it passed, it asks
 "Send bundle ... to board ...?" ("No" is the default; without a terminal nothing is installed) and then installs the
-unprivileged steps. Root actions stop the installer with the plain words that they need llmcf-install (not there
-yet); build the unprivileged-only variant to skip them. A deploy cut off continues in the same upload folder.
-`--dry-run` sends the bundle and runs only the dry run.
+unprivileged steps. The installer stops before the root actions; then llmcf-install shows its own plan of them
+and asks a second time ("Run the ... root action(s) ... as root now, through llmcf-install?", "No" is the default).
+After your yes the board runs it as root through `sudo -n`; when the board's sudo asks for a password, private mode
+lets you type the board account's password once for this run (it is sent once and never kept), while enterprise mode
+runs root actions only with `sudo -n` and stops with what to allow. llmcf-install checks the bundle's signature
+itself against the root-owned signing key of the framework, carries out only the manifest's typed root actions,
+changes nothing that is already as it should be, and keeps a journal for rollback and uninstall. `--skip-root` stops
+before the root actions (a later deploy runs them). A deploy cut off continues in the same upload folder. `--dry-run`
+sends the bundle and runs only the dry run.
 
 ### bundle status, uninstall, rollback
 
-`status` asks the installer the board kept which steps are done (changes nothing). `uninstall` lists what it would
-remove (only the bundle's own steps, newest first) and asks first ("No" is the default); `rollback` shows the status
-and asks before it undoes the last apply.
+`status` asks the installer the board kept which steps are done, and llmcf-install which root actions are in
+place (changes nothing). `uninstall` first lists what llmcf-install made as root (from its journal) and asks for that
+part, then lists the installer's own steps (newest first) and asks again ("No" is the default each time); when you
+keep the root part, the rest stays too. `rollback` shows the status and asks before it undoes the last apply;
+`rollback --root` undoes the last run of llmcf-install instead (exactly what its journal says that run made or
+changed). A root action that failed after others were done says so; `rollback --root` undoes that run.
 
 ### bundle delete
 

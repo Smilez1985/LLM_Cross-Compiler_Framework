@@ -49,14 +49,18 @@ BUTTONS = (
     ("btn_bundle_deploy", "bundle.btn.deploy", "_on_deploy", "bundle"),
     ("btn_bundle_status", "bundle.btn.status", "_on_status", "bundle"),
     ("btn_bundle_rollback", "bundle.btn.rollback", "_on_rollback", "bundle"),
+    ("btn_bundle_root_rollback", "bundle.btn.root_rollback", "_on_root_rollback", "bundle"),
     ("btn_bundle_uninstall", "bundle.btn.uninstall", "_on_uninstall", "bundle"),
     ("btn_bundle_delete", "bundle.btn.delete", "_on_delete", ""),
 )
 PLAN_ROW = ("btn_bundle_file", "btn_bundle_plan", "btn_bundle_build", "btn_bundle_block_new", "btn_bundle_refresh")
 STORE_ROW = ("btn_bundle_dry_run", "btn_bundle_deploy", "btn_bundle_status", "btn_bundle_rollback",
-             "btn_bundle_uninstall", "btn_bundle_delete")
+             "btn_bundle_root_rollback", "btn_bundle_uninstall", "btn_bundle_delete")
 # the person's question before an action changes the board (service.question's words, translated)
 ASK_KEYS = {"apply": "bundle.ask.apply", "uninstall": "bundle.ask.uninstall", "rollback": "bundle.ask.rollback"}
+# the person's question before llmcf-install changes the board as root (service.root_question's words, translated)
+ROOT_ASK_KEYS = {"apply": "bundle.ask.root_apply", "uninstall": "bundle.ask.root_uninstall",
+                 "rollback": "bundle.ask.root_rollback"}
 
 
 def _choose_file(parent: QWidget, title: str) -> str:
@@ -445,12 +449,15 @@ class BundleWindow(BoardSteps, QDialog):
         if not plan.ok:
             self._info(self._t("bundle.not_built"), "warning")
             return
-        from orchestrator.runtime.bundle.generator import BundleStore, build_bundle
+        from orchestrator.runtime.bundle import service
+        from orchestrator.runtime.bundle.generator import BundleStore
         from orchestrator.runtime.device import board_ops
         store, framework = BundleStore(self.state_dir), self.framework
 
         def build():
-            return build_bundle(plan, store, board_ops.framework_signer(framework))
+            # a bundle with root actions carries llmcf-install for its board (service.build_for, as the CLI)
+            return service.build_for(plan, store, board_ops.framework_signer(framework), framework=framework,
+                                     say=self._progress)
 
         self._start(self._t("bundle.building"), build, self._built)
 
@@ -478,12 +485,34 @@ class BundleWindow(BoardSteps, QDialog):
             self._info(self._t("boards.err.failed", reason=one_line(str(e))), "warning")
             return None
 
-    def _run(self, action: str, then=None) -> None:
-        """Runs the installer `action` of the selected bundle on its board in the worker thread, through the person's
-        login with the framework's key only (person_steps.connect_stored, no password); `then(run)` afterwards."""
+    def _opener(self, built: Any):
+        """(open_session, host, port, user, label) of the bundle's board, the person's login with the framework's
+        key only (person_steps.connect_stored, no password for the login); None after telling the person why not."""
         from orchestrator.runtime.bundle import service
         from orchestrator.runtime.bundle.generator import BundleError
         from orchestrator.runtime.device import person_steps
+        state, device_id = self.state_dir, built.manifest.board.device_id
+        try:
+            host, port, user, label = service.board_contact(state, device_id)
+        except BundleError as e:
+            self._info(self._t("boards.err.failed", reason=one_line(str(e))), "warning")
+            return None
+
+        def open_session():
+            client, _key = person_steps.connect_stored(state, device_id, host, port, user, None, step="bundle",
+                                                       on_client=self._keep_client, cancel=self._cancel,
+                                                       on_event=self._board_lines(host), signer=self._signer(),
+                                                       mode=self._mode())
+            self._check_cancel()
+            return client
+        return open_session, host, port, user, label
+
+    def _run(self, action: str, then=None) -> None:
+        """Runs the installer `action` of the selected bundle on its board in the worker thread, through the person's
+        login with the framework's key only (person_steps.connect_stored, no password); `then(run)` afterwards. An
+        apply that stops before the root actions goes on with llmcf-install (_root: its plan, a second question);
+        a status adds llmcf-install's status."""
+        from orchestrator.runtime.bundle import service
         found = self._bundle()
         if found is None:
             return
@@ -493,20 +522,11 @@ class BundleWindow(BoardSteps, QDialog):
             if revoked:
                 self._info(self._t("bundle.revoked", reason=one_line("; ".join(revoked))), "warning")
                 return
-        state, device_id = self.state_dir, built.manifest.board.device_id
-        try:
-            host, port, user, label = service.board_contact(state, device_id)
-        except BundleError as e:
-            self._info(self._t("boards.err.failed", reason=one_line(str(e))), "warning")
+        opener = self._opener(built)
+        if opener is None:
             return
-
-        def open_session():
-            client, _key = person_steps.connect_stored(state, device_id, host, port, user, None, step="bundle",
-                                                       on_client=self._keep_client, cancel=self._cancel,
-                                                       on_event=self._board_lines(host), signer=self._signer(),
-                                                       mode=self._mode())
-            self._check_cancel()
-            return client
+        open_session, host, port, user, label = opener
+        device_id = built.manifest.board.device_id
 
         def work():
             return service.run_on_board(open_session, built, action, store=store, device_id=device_id,
@@ -516,15 +536,91 @@ class BundleWindow(BoardSteps, QDialog):
             self._say("\n".join(run.lines()))
             if run.staging and action == "apply":
                 self._say(self._t("bundle.staging"))
-            if run.report.result == "stopped-root":
-                self._say(self._t("bundle.root"))
             self.reload()
+            if run.report.result == "stopped-root":
+                if built.needs_root:
+                    self._say(self._t("bundle.root"))
+                    self._root("apply", built)
+                else:
+                    self._say(self._t("bundle.root.none"))
+            elif action == "status" and built.needs_root and run.report.result in ("installed", "partial"):
+                self._root("status", built, ask_first=False)
             if then is not None:
                 then(run, built, label)
 
         self._start(self._t("bundle.running", action=action), work, done,
                     failed=lambda e: self._show_error(e, address=host, port=port, user=user,
                                                       device_id=device_id) or True)
+
+    def _ask_password(self) -> str:
+        """The board's sudo password for this one run of llmcf-install (private mode only; never shown, never kept)."""
+        dialog, form = _form_dialog(self, self._t("bundle.title"), self._t("bundle.root.password_intro"))
+        txt = QLineEdit(dialog)
+        txt.setObjectName("txt_bundle_sudo_password")
+        txt.setEchoMode(QLineEdit.Password)
+        form.addRow(self._t("bundle.root.password"), txt)
+        return txt.text() if _exec(dialog) else ""
+
+    def _root(self, action: str, built: Any, *, ask_first: bool = True, then=None, password: str = "") -> None:
+        """llmcf-install `action` of the bundle on its board (service.run_root_on_board, the gate operation
+        bundle-root through sudo -n) in the worker thread: with `ask_first` first its plan of that action, then the
+        person's question ("No" is the default), then the action; `then()` afterwards. When the board's sudo asks for
+        a password, private mode asks the person for it once (sent on stdin for sudo -S, never kept); enterprise mode
+        says it runs root actions with sudo -n only. Only the person starts this, never an AI."""
+        from orchestrator.runtime.bundle import service
+        opener = self._opener(built)
+        if opener is None:
+            return
+        open_session, host, port, user, label = opener
+        device_id = built.manifest.board.device_id
+        first_action = service.ROOT_CHANGING_ACTIONS[action] if ask_first else action
+
+        def run_step(what: str, pw: str, after) -> None:
+            def work():
+                return service.run_root_on_board(open_session, built, what, password=pw, say=self._progress)
+
+            def done(run: Any) -> None:
+                if run.report.needs_password and not pw:
+                    if not service.password_allowed(self._mode()):
+                        self._info(service.ENTERPRISE_NO_PASSWORD, "warning")
+                        return
+                    typed = self._ask_password()
+                    if not typed:
+                        self._say(self._t("bundle.unchanged"))
+                        return
+                    run_step(what, typed, after)
+                    return
+                self._say("\n".join(run.lines()))
+                after(run, pw)
+
+            self._start(self._t("bundle.root.running", action=what), work, done,
+                        failed=lambda e: self._show_error(e, address=host, port=port, user=user,
+                                                          device_id=device_id) or True)
+
+        def planned(first: Any, pw: str) -> None:
+            if not ask_first:
+                return
+            if not first.ok:
+                self._info(self._t("bundle.root.plan_failed"), "warning")
+                return
+            if action != "apply" and first.report.result == "absent":
+                if then is not None:
+                    then()
+                return
+            if not ask(self, self._t("bundle.title"), self._t(ROOT_ASK_KEYS[action], bundle=built.bundle_id,
+                                                              board=label, count=service.root_count(first))):
+                self._say(self._t("bundle.root.unchanged"))
+                return
+
+            def finished(run: Any, _pw: str) -> None:
+                if not run.ok and run.report.result == "failed":
+                    self._info(self._t("bundle.root.failed"), "warning")
+                    return
+                if then is not None and run.ok:
+                    then()
+            run_step(action, pw, finished)
+
+        run_step(first_action, password, planned)
 
     def _changing(self, action: str) -> None:
         """Deploy... / Roll back... / Uninstall...: first what the installer shows without changing anything, then
@@ -557,7 +653,27 @@ class BundleWindow(BoardSteps, QDialog):
     def _on_rollback(self) -> None:
         self._changing("rollback")
 
+    def _on_root_rollback(self) -> None:
+        """Roll back root actions...: llmcf-install's last run (its journal), after its status and the question."""
+        found = self._bundle()
+        if found is None:
+            return
+        _store, built = found
+        if not built.needs_root:
+            self._info(self._t("bundle.root.none_here"))
+            return
+        self._root("rollback", built)
+
     def _on_uninstall(self) -> None:
+        """Uninstall...: first what llmcf-install made as root (its journal's list, its own question), then the
+        installer's own steps; the root part staying (a No) keeps the installer the board kept too."""
+        found = self._bundle()
+        if found is None:
+            return
+        _store, built = found
+        if built.needs_root:
+            self._root("uninstall", built, then=lambda: self._changing("uninstall"))
+            return
         self._changing("uninstall")
 
     # --- the stored bundles ------------------------------------------------------------------------------------------
