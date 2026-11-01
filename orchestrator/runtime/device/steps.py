@@ -383,14 +383,23 @@ class DeployHooks:
     signer: Any = None
 
 
+# What a deploy says when the board has no measurement after it (no benchmark ran): the start script does not start
+# the server then, and the systemd unit stays stopped (launcher.MEASURE_EXIT, RestartPreventExitStatus).
+NEEDS_MEASUREMENT = ("The board needs its measurement first: run the benchmark on the board once (it measures the "
+                     "board's memory with the model). Until then its server is not started; a systemd unit stays "
+                     "stopped instead of trying again every 10 seconds.")
+
+
 @dataclass
 class RuntimeDeploy:
     """What deploy_runtime_flow did: the install's outcome (the record is saved when it passed), the short benchmark's
-    model, the KV-cache choice of the deploy settings, and what `tested_on` returned (None: nothing recorded)."""
+    model, the KV-cache choice of the deploy settings, what `tested_on` returned (None: nothing recorded), and
+    `needs_measurement`: a passed deploy to a board that has no measurement after it (NEEDS_MEASUREMENT)."""
     outcome: InstallOutcome
     bench: BenchChoice
     kv: Any
     tested: Any = None
+    needs_measurement: bool = False
 
 
 def deploy_runtime_flow(state_dir: Path, device_id: str, profile: Any, settings: Any, *, hooks: DeployHooks,
@@ -434,7 +443,8 @@ def deploy_runtime_flow(state_dir: Path, device_id: str, profile: Any, settings:
     tested = None
     if outcome.ok and hooks.tested_on is not None:
         tested = hooks.tested_on(outcome.report, bench.digest if bench.allowed else None, build.build_id, kv.kind)
-    return RuntimeDeploy(outcome=outcome, bench=bench, kv=kv, tested=tested)
+    needs = bool(outcome.ok) and board_limits_of(state_dir, device_id) is None
+    return RuntimeDeploy(outcome=outcome, bench=bench, kv=kv, tested=tested, needs_measurement=needs)
 
 
 def deployed_verify_plan(state_dir: Path, record: Dict[str, Any], plan_of_profile: Callable[[], Any]) -> Dict:
@@ -540,7 +550,8 @@ def check_lines(report: Any) -> List[Dict[str, Any]]:
     return [{"name": c.name, "ok": c.ok, "detail": c.detail} for c in (report.checks if report is not None else [])]
 
 
-__all__ = ["BenchChoice", "BuildCancelled", "DeployHooks", "InstallOutcome", "NotBuilt", "PackageNeedsSource",
+__all__ = ["BenchChoice", "BuildCancelled", "DeployHooks", "InstallOutcome", "NEEDS_MEASUREMENT", "NotBuilt",
+           "PackageNeedsSource",
            "RootUser", "RuntimeBuild", "RuntimeDeploy", "SourceDeclined", "StoredRuntime", "build_runtime",
            "catalog_model_digests", "check_lines", "check_runtime", "choose_bench_model", "deploy_runtime_flow",
            "deployed_verify_plan", "ensure_package", "heat_facts", "heat_lines", "install_runtime",

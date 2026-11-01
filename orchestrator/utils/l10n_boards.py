@@ -532,6 +532,10 @@ TEXTS = {
                                      "foreground) work the same way as the start command above.",
         "boards.deploy.server_systemd": "systemd unit: {state}; the server listens on 127.0.0.1:{port}; its key is in "
                                         "~/.config/llm-framework/llama-server.key.",
+        "boards.deploy.needs_measurement": "The board needs its measurement first: run the benchmark on the board "
+                                           "once (it measures the board's memory with the model). Until then its "
+                                           "server is not started; a systemd unit stays stopped instead of trying "
+                                           "again every 10 seconds.",
         "boards.deploy.unit_started": "started",
         "boards.deploy.unit_enabled": "enabled",
         "boards.checks": "Checks on the board:",
@@ -1090,6 +1094,10 @@ TEXTS = {
                                      "Vordergrund) funktionieren genauso wie der Startbefehl oben.",
         "boards.deploy.server_systemd": "systemd-Unit: {state}; der Server lauscht auf 127.0.0.1:{port}; sein "
                                         "Schlüssel liegt in ~/.config/llm-framework/llama-server.key.",
+        "boards.deploy.needs_measurement": "Das Board braucht zuerst seine Messung: Lass einmal den Benchmark auf "
+                                           "dem Board laufen (er misst den Speicher des Boards mit dem Modell). Bis "
+                                           "dahin wird sein Server nicht gestartet; eine systemd-Unit bleibt "
+                                           "gestoppt, statt es alle 10 Sekunden neu zu versuchen.",
         "boards.deploy.unit_started": "gestartet",
         "boards.deploy.unit_enabled": "aktiviert",
         "boards.checks": "Prüfungen auf dem Board:",

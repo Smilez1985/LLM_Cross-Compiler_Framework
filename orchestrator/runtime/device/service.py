@@ -385,7 +385,9 @@ def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, 
     return {"activated": ok, "build_id": build.build_id, "install": settings.install, "previous": result.previous,
             "older_builds_kept": len(result.older),
             "checks": [c.as_dict() for c in (report.checks if report is not None else [])],
-            "notes": list(result.notes), **steps.heat_facts(report)}
+            "notes": list(result.notes), **steps.heat_facts(report),
+            # a passed deploy to a board without its measurement: its server does not start yet (NEEDS_MEASUREMENT)
+            **({"needs_measurement": True, "next": steps.NEEDS_MEASUREMENT} if flow.needs_measurement else {})}
 
 
 def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, expect_fingerprint: str, *,
