@@ -161,7 +161,9 @@ class AccessOut(BaseModel):
     keygen_signatures: Optional[bool] = Field(default=None, description="ssh-keygen -Y sign/verify (OpenSSH 8.1+)")
     init_system: Optional[untrusted_text(16)] = None
     package_manager: Optional[Literal["apt", "dnf", "zypper", "pacman", "apk", "other"]] = None
-    dietpi_software: bool = False
+    dropbear_packages: List[Literal["dropbear", "dropbear-bin", "dropbear-run", "dropbear-initramfs",
+                                    "dropbear-openrc"]] = Field(
+        default_factory=list, description="The installed packages that provide Dropbear (asked without root)")
     summary: untrusted_text(600) = Field(default="", description="The same facts as one line of text")
 
 

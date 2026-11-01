@@ -117,7 +117,11 @@ _WORDS = {
     "family": ("debian", "fedora", "suse", "arch", "alpine", "unknown"),
     "dietpi": ("yes", "no"), "init": ("systemd", "openrc", "other"),
 }
-MANAGERS = ("apt-get", "dnf", "zypper", "pacman", "apk", "dietpi-software")
+# The package managers a pairing reads. An answer of an earlier framework with dietpi-software is ignored: the switch
+# goes through the board's real package manager only.
+MANAGERS = ("apt-get", "dnf", "zypper", "pacman", "apk")
+# The installed packages that provide Dropbear (dropbear_pkg=NAME, gate.dropbear_packages_sh): fixed names only
+DROPBEAR_PACKAGE = re.compile(r"^dropbear(-(bin|run|initramfs|openrc))?$", re.ASCII)
 
 
 @dataclass(frozen=True)
@@ -137,16 +141,19 @@ class TierFacts:
     init: str = "unknown"
     managers: Tuple[str, ...] = field(default_factory=tuple)
     port: int = 0
+    dropbear_packages: Tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
     def parse(cls, text: str, banner: str = "") -> "TierFacts":
         words: Dict[str, str] = {}
-        managers = []
+        managers, packages = [], []
         port = 0
         for line in (text or "").splitlines():
             key, _, value = line.strip().partition("=")
             if key == "manager" and value in MANAGERS:
                 managers.append(value)
+            elif key == "dropbear_pkg" and DROPBEAR_PACKAGE.fullmatch(value):
+                packages.append(value)
             elif key == "port" and re.fullmatch(r"[0-9]{1,5}", value) and 0 < int(value) < 65536:
                 port = int(value)
             elif key in _WORDS and value in _WORDS[key]:
@@ -155,6 +162,7 @@ class TierFacts:
         if server == "unknown":
             server = {"openssh": "openssh", "dropbear": "dropbear"}.get(words.get("running", ""), "unknown")
         return cls(server=server, managers=tuple(dict.fromkeys(managers)), port=port,
+                   dropbear_packages=tuple(dict.fromkeys(packages)),
                    **{k: words.get(k, "unknown") for k in _WORDS if k != "running"})
 
     @property
@@ -169,7 +177,8 @@ class TierFacts:
         """The facts as fixed words (what the audit log and an AI may read: no host, no account, no path)."""
         return {"server": self.server, "sudo": self.sudo, "keygen": self.keygen, "openssl": self.openssl,
                 "verifier": self.verifier, "family": self.family, "dietpi": self.dietpi, "init": self.init,
-                "openssh_installed": self.openssh, "managers": list(self.managers)}
+                "openssh_installed": self.openssh, "managers": list(self.managers),
+                "dropbear_packages": list(self.dropbear_packages)}
 
 
 def server_of_banner(banner: str) -> str:

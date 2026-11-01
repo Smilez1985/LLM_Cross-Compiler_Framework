@@ -446,7 +446,7 @@ def test_the_deployment_tab_hands_its_tier_questions_to_a_password_deploy(qapp, 
         assert seen[-1]["chooser"] == expected
 
 
-# --- the switch on ssh.socket systems, and Dropbear's removal on DietPi ----------------------------------------------
+# --- the switch on ssh.socket systems, and Dropbear's removal through the package manager -----------------------
 
 POSIX = pytest.mark.skipif(os.name == "nt" or shutil.which("sh") is None,
                            reason="the board's setup steps are POSIX sh programs; Windows has no /bin/sh to run them")
@@ -466,37 +466,197 @@ def test_a_socket_activated_sshd_is_reloaded_and_its_socket_restarted_after_the_
         subprocess.run(["sh", "-n", "-c", body], check=True, timeout=60)
 
 
-def test_dropbears_dietpi_id_is_one_named_constant_with_a_fallback_to_the_init_system():
-    from orchestrator.remote import gate, openssh_switch
+def test_dropbear_is_removed_through_the_package_manager_never_dietpi_software():
+    """Regression (failed before: Dropbear went through dietpi-software with a software ID of DietPi's store, which
+    the maintainer's decision rules out): the removal script asks the board's real package manager only, and no
+    software-store ID is anywhere in the switch."""
+    from orchestrator.remote import gate, key_tiers, openssh_switch
     body = str(gate.script("dropbear-disable"))
-    assert f"uninstall {openssh_switch.DIETPI_DROPBEAR_ID}" in body and "104" not in body.replace(
-        f"uninstall {openssh_switch.DIETPI_DROPBEAR_ID}", "")
-    assert body.index("dietpi-software") < body.index("systemctl disable --now dropbear")
-    assert "confirmed on a real DietPi board" in open(openssh_switch.__file__, encoding="utf-8").read()
+    source = open(openssh_switch.__file__, encoding="utf-8").read()
+    assert "dietpi-software" not in body and "uninstall" not in body and "104" not in body
+    assert not hasattr(openssh_switch, "DIETPI_DROPBEAR_ID") and "dietpi-software" not in source
+    assert "dietpi-software" not in key_tiers.MANAGERS and "dietpi-software" not in str(gate.script("tier-facts"))
+    assert body.index("systemctl disable --now dropbear") < body.index("apt-get remove")
+    for word in ("purge", "autoremove", "--auto-remove", "-Rs", "-Rc", "-Rdd", "--clean-deps "):
+        assert word not in body.replace("AutomaticRemove=false", "").replace("--noautoremove", "").replace(
+            "--no-clean-deps", ""), word
+    # an earlier pairing's answer with dietpi-software as a manager is read and that word ignored
+    facts = key_tiers.TierFacts.parse("manager=apt-get\nmanager=dietpi-software\ndropbear_pkg=dropbear-bin\n"
+                                      "dropbear_pkg=../../etc\ndropbear_pkg=dropbear;rm\n")
+    assert facts.managers == ("apt-get",) and facts.dropbear_packages == ("dropbear-bin",)
+
+
+# A stand-in board: every program the script calls is a stub on a PATH of its own (no tool of this computer is
+# found, so its real package manager never answers). sudo writes down what it was asked and runs the stub; the
+# package managers write down what they were asked, so nothing is removed anywhere.
+SHELL_TOOLS = ("sh", "cat", "tr", "sed", "env")
+
+
+def _package_board(tmp_path, *, tool="dpkg", installed=(), extra_removed=(), remove_fails=False, manager=True):
+    log = tmp_path / "calls.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True)
+    for name in SHELL_TOOLS:
+        found = shutil.which(name)
+        assert found, name
+        os.symlink(found, bin_dir / name)
+    fail = "exit 100" if remove_fails else "exit 0"
+    stubs = {
+        "sudo": f'echo "sudo $*" >> "{log}"; while [ $# -gt 0 ]; do case $1 in -S) read -r _pw; shift ;; '
+                '-n) shift ;; -p) shift 2 ;; *) break ;; esac; done; exec "$@"',
+        "systemctl": f'echo "systemctl $*" >> "{log}"',
+        "rc-update": f'echo "rc-update $*" >> "{log}"',
+        "rc-service": f'echo "rc-service $*" >> "{log}"',
+    }
+    have = " ".join(installed)
+    if tool == "dpkg":
+        lines = "".join(f'printf "%s\\n" "{p} install ok installed"; ' for p in installed)
+        stubs["dpkg-query"] = f'{lines}printf "%s\\n" "dropbear-run deinstall ok config-files"; exit 1'
+        if manager:
+            stubs["apt-get"] = (f'echo "apt-get $*" >> "{log}"; case " $* " in *" -s "*) '
+                                'shift 2; for p in "$@" ' + " ".join(extra_removed)
+                                + '; do echo "Remv $p [1.0]"; done; exit 0 ;; esac; ' + fail)
+    elif tool == "pacman":
+        stubs["pacman"] = (f'case $1 in -Qq) for p in {have}; do echo "$p"; done; exit 0 ;; esac; '
+                           f'echo "pacman $*" >> "{log}"; {fail}')
+    elif tool == "apk":
+        stubs["apk"] = (f'case "$1 $2" in "info -e") for p in {have}; do echo "$p"; done; exit 0 ;; esac; '
+                        f'echo "apk $*" >> "{log}"; case " $* " in *" -s "*) n=0; for p in {have} '
+                        + " ".join(extra_removed)
+                        + '; do n=$((n+1)); echo "($n/9) Purging $p (1.0-r0)"; done; exit 0 ;; esac; ' + fail)
+    elif tool == "rpm":
+        stubs["rpm"] = (f'case $1 in -q) for p in {have}; do echo "$p"; done; exit 0 ;; esac; '
+                        f'echo "rpm $*" >> "{log}"; ' + ("exit 1" if extra_removed else "exit 0"))
+        stubs["dnf"] = f'echo "dnf $*" >> "{log}"; {fail}'
+    for name, text in stubs.items():
+        (bin_dir / name).write_text("#!/bin/sh\n" + text + "\n", encoding="utf-8")
+        (bin_dir / name).chmod(0o755)
+
+    def run(script, stdin=None, timeout=None):
+        done = subprocess.run([str(bin_dir / "sh"), "-c", str(script)], input=b"".join(stdin or []),
+                              capture_output=True, timeout=60, env={"PATH": str(bin_dir), "HOME": str(tmp_path)})
+        return SimpleNamespace(status=done.returncode, out=done.stdout.decode(), err=done.stderr.decode())
+
+    def calls():
+        return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    return run, calls
+
+
+def _disabled_first(calls):
+    stop = next(i for i, c in enumerate(calls) if "disable --now dropbear" in c or "rc-service dropbear stop" in c)
+    removes = [i for i, c in enumerate(calls) if c.startswith(("apt-get remove", "apt-get -y", "pacman -R", "apk del",
+                                                               "dnf remove"))]
+    return all(stop < i for i in removes)
 
 
 @POSIX
-@pytest.mark.parametrize("dietpi_ok", [True, False])
-def test_dropbear_goes_through_dietpi_software_or_else_the_init_system(tmp_path, dietpi_ok):
-    """A stand-in board: sudo writes down what it was asked (nothing runs as root), dietpi-software succeeds or
-    refuses; when it refuses (or is absent), the dropbear service is stopped and disabled by the init system."""
+@pytest.mark.parametrize("initramfs", [False, True])
+def test_dropbear_is_stopped_then_only_its_server_packages_are_removed_with_apt(tmp_path, initramfs):
+    """The init system stops and disables Dropbear first, then apt-get removes exactly the packages that provide the
+    SSH server; dropbear-initramfs (the disk unlock at boot) is never removed, and the dropbear-bin it needs stays."""
+    from orchestrator.remote import openssh_switch
+    installed = ("dropbear", "dropbear-bin", "dropbear-run") + (("dropbear-initramfs",) if initramfs else ())
+    run, calls = _package_board(tmp_path, installed=installed)
+    done = openssh_switch.remove_dropbear(run, "pw-once")
+    want = ("dropbear", "dropbear-run") if initramfs else ("dropbear", "dropbear-bin", "dropbear-run")
+    assert done == openssh_switch.DropbearRemoval(True, "removed", "", want), (done, calls())
+    removal = [c for c in calls() if c.startswith("apt-get remove")]
+    assert removal == ["apt-get remove -y -o APT::Get::AutomaticRemove=false " + " ".join(want)], calls()
+    assert not [c for c in calls() if "initramfs" in c and not c.startswith("apt-get -s")]
+    assert _disabled_first(calls()) and not [c for c in calls() if "purge" in c or "autoremove" in c]
+    text = openssh_switch.removal_text(done)
+    assert ", ".join(want) in text and "configuration files stay" in text
+
+
+@POSIX
+def test_a_removal_that_would_take_other_packages_is_refused_and_removes_nothing(tmp_path):
+    from orchestrator.remote import openssh_switch
+    run, calls = _package_board(tmp_path, installed=("dropbear", "dropbear-bin", "dropbear-run"),
+                                extra_removed=("dropbear-initramfs",))
+    done = openssh_switch.remove_dropbear(run, "")
+    assert (done.ok, done.removal, done.reason) == (True, "refused", "dependents"), done
+    assert not [c for c in calls() if c.startswith("apt-get remove")], calls()
+    assert "would also remove other packages" in openssh_switch.removal_text(done)
+
+
+@POSIX
+def test_a_package_manager_that_fails_is_reported_plainly_and_dropbear_stays_disabled(tmp_path):
+    from orchestrator.remote import openssh_switch
+    run, calls = _package_board(tmp_path, installed=("dropbear",), remove_fails=True)
+    done = openssh_switch.remove_dropbear(run, "pw-once")
+    assert (done.ok, done.removal, done.reason, done.packages) == (True, "refused", "remove", ("dropbear",))
+    assert [c for c in calls() if c.startswith("apt-get remove")], calls()
+    text = openssh_switch.removal_text(done)
+    assert text.startswith("Dropbear is off (stopped and disabled by the init system)") and "stay installed" in text
+
+
+@POSIX
+def test_without_a_package_manager_the_init_system_alone_turns_dropbear_off(tmp_path):
+    from orchestrator.remote import openssh_switch
+    run, calls = _package_board(tmp_path, tool="none")
+    done = openssh_switch.remove_dropbear(run, "")
+    assert (done.ok, done.removal, done.reason) == (True, "none", "no-manager"), done
+    assert any("disable --now dropbear" in c or "rc-service dropbear stop" in c for c in calls()), calls()
+    assert "no package manager the framework knows" in openssh_switch.removal_text(done)
+    run, calls = _package_board(tmp_path / "dpkg-only", installed=("dropbear",), manager=False)
+    assert openssh_switch.remove_dropbear(run, "").reason == "no-manager"   # dpkg without apt-get
+
+
+@POSIX
+@pytest.mark.parametrize("tool, installed, command", [
+    ("pacman", ("dropbear",), "pacman -R --noconfirm dropbear"),
+    ("apk", ("dropbear", "dropbear-openrc"), "apk del dropbear dropbear-openrc"),
+    ("rpm", ("dropbear",), "dnf remove -y --noautoremove dropbear")])
+def test_every_package_manager_removes_only_dropbears_packages(tmp_path, tool, installed, command):
+    from orchestrator.remote import openssh_switch
+    run, calls = _package_board(tmp_path, tool=tool, installed=installed)
+    done = openssh_switch.remove_dropbear(run, "pw-once")
+    assert done.removed and done.packages == installed, (done, calls())
+    assert command in calls() and _disabled_first(calls())
+
+
+def test_a_removal_without_an_answer_in_time_does_not_claim_dropbear_still_runs():
+    """Regression (review): the disable runs before the removal, so after a timeout Dropbear may already be stopped;
+    the text must not say it keeps running."""
+    import socket as _socket
+
+    from orchestrator.remote import openssh_switch
+
+    def silent(script, stdin=None, timeout=None):
+        assert timeout == openssh_switch.INSTALL_TIMEOUT
+        raise _socket.timeout()
+    done = openssh_switch.remove_dropbear(silent, "")
+    assert (done.ok, done.reason) == (False, "remove-timeout")
+    text = openssh_switch.removal_text(done)
+    assert "keeps running next to OpenSSH" not in text and "may already be stopped" in text
+
+
+def test_the_deprecated_disable_dropbear_delegates_and_keeps_its_old_answer():
+    """Deprecate-and-delegate (review): disable_dropbear runs remove_dropbear and answers (ok, reason) as before,
+    with no reason when Dropbear is off, whatever happened to its packages."""
     from orchestrator.remote import gate, openssh_switch
-    log = tmp_path / "sudo.log"
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    stubs = {"sudo": f'echo "$*" >> "{log}"; cat >/dev/null; case "$*" in *dietpi-software*) exit {0 if dietpi_ok else 1};; '
-                     "esac; exit 0",
-             "dietpi-software": "exit 0", "rc-service": "exit 0", "rc-update": "exit 0"}
-    for name, body in stubs.items():
-        (bin_dir / name).write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
-        (bin_dir / name).chmod(0o755)
-    done = subprocess.run(["sh", "-c", str(gate.script("dropbear-disable"))], input=b"pw\n", capture_output=True,
-                          timeout=60, env={"PATH": f"{bin_dir}{os.pathsep}/usr/bin:/bin", "HOME": str(tmp_path)})
-    calls = log.read_text(encoding="utf-8")
-    assert f"uninstall {openssh_switch.DIETPI_DROPBEAR_ID}" in calls
-    fallback = "disable --now dropbear" in calls or "rc-service dropbear stop" in calls
-    assert fallback is (not dietpi_ok), calls
-    assert b"dropbear=disabled" in done.stdout
+    answers = {"off": "dropbear=disabled removal=none reason=no-packages packages=none",
+               "gone": "dropbear=removed removal=removed reason=- packages=dropbear",
+               "no": "dropbear=unavailable reason=no-sudo"}
+    for key, want in (("off", (True, "")), ("gone", (True, "")), ("no", (False, "no-sudo"))):
+        seen = []
+
+        def run(script, stdin=None, timeout=None, _key=key):
+            seen.append(str(script))
+            return SimpleNamespace(out=answers[_key] + "\n")
+        assert openssh_switch.disable_dropbear(run, "") == want, key
+        assert seen == [str(gate.script("dropbear-disable"))]
+    assert openssh_switch.disable_dropbear(lambda *a, **k: None, "a\nb") == (False, "sudo")
+
+
+@POSIX
+@pytest.mark.parametrize("tool", ["apk", "rpm"])
+def test_apk_and_rpm_refuse_a_removal_that_takes_other_packages(tmp_path, tool):
+    from orchestrator.remote import openssh_switch
+    run, calls = _package_board(tmp_path, tool=tool, installed=("dropbear",), extra_removed=("busybox-extras",))
+    done = openssh_switch.remove_dropbear(run, "")
+    assert (done.removal, done.reason) == ("refused", "dependents"), (done, calls())
+    assert not [c for c in calls() if c.startswith(("apk del dropbear", "dnf remove"))], calls()
 
 
 # --- the mode choice: installers, File > Settings..., `llmcf config set framework_mode` -----------------------------

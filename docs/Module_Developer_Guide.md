@@ -1230,7 +1230,7 @@ PROBE_WARNINGS=needs_root:RKNPU_DRIVER_VERSION
 | SoC, NPU | `SOC_VENDOR`, `SOC_MODEL` (`rk3566`, ...), `BOARD_MODEL`, `JETSON_L4T_VERSION`, `JETSON_JETPACK_VERSION`, `NPU_VENDOR`, `NPU_MODEL`, `NPU_DEVICE`, `RKNPU_DRIVER_VERSION`, `RKLLM_RUNTIME_VERSION`, `RKNN_RUNTIME_VERSION`, `USB_ROCKCHIP_PID`, `USB_ROCKCHIP_MODE` (a board attached over USB), `SUPPORTS_RKNN`, `SUPPORTS_HAILO`, `SUPPORTS_METIS`, `SUPPORTS_MX3`, `SUPPORTS_CORAL`, `SUPPORTS_INTEL_NPU`, `INTEL_NPU_DEVICE` |
 | Hailo | `HAILO_FAMILY` (`hailo8`, `hailo1x`), `HAILO_ARCH` (`hailo8`, `hailo8l`, `hailo10h`, ...), `HAILO_DEVICES`, `HAILO_INTERFACE`, `HAILO_DRIVER`, `HAILO_DRIVER_VERSION`, `HAILO_FW_VERSION`, `HAILORT_VERSION`, `HAILO_PYHAILORT_VERSION` ([section 11.6](#116-the-keys-of-probe-310-and-how-a-module-uses-them)) |
 | GPU | `GPU_COUNT`; per GPU `_VENDOR`, `_NAME`, `_PCI_ID`, `_DISCRETE`, `_UNIFIED`, `_VRAM_MB`, `_VRAM_FREE_MB`, `_DRIVER_VERSION`, `_COMPUTE_CAP` (NVIDIA), `_GFX_TARGET` (AMD), `_SOURCE`; `NVIDIA_DRIVER_CUDA_MAX`, `SUPPORTS_CUDA`, `SUPPORTS_INTEL_XPU`, `VULKAN`, `VULKAN_DEVICES`, `VULKAN_INSTANCE_VERSION`, `OPENCL_PLATFORMS`, `HIP_RUNTIME`, `ROCM_VERSION`, `ROCM_GFX_TARGETS`, `CUDA_TOOLKIT_VERSION`, `TENSORRT_VERSION`, `OPENVINO_VERSION`, `INTEL_GPU_DEVICE`, `INTEL_GPU_DRIVER`, `METAL` |
-| Access | probe 3.3.0 ([section 11.8](#118-the-access-facts-of-probe-330)): `SSH_SERVER` (`openssh`, `dropbear`, `other`, `none`), `SSH_SERVER_VERSION`, `SSH_SERVER_SOURCE` (`socket`, `process`, `service`, `binary`), `SSH_SERVERS_INSTALLED`, `SUDO` (`root`, `nopasswd`, `password`, `absent`, `other`), `SSH_KEYGEN` (`openssh`, `none`), `SSH_KEYGEN_VERSION`, `PACKAGE_MANAGER` (`apt`, `dnf`, `zypper`, `pacman`, `apk`, `other`), `DIETPI_SOFTWARE` (`present`); with `INIT_SYSTEM` above |
+| Access | probe 3.3.0 ([section 11.8](#118-the-access-facts-of-probe-330)): `SSH_SERVER` (`openssh`, `dropbear`, `other`, `none`), `SSH_SERVER_VERSION`, `SSH_SERVER_SOURCE` (`socket`, `process`, `service`, `binary`), `SSH_SERVERS_INSTALLED`, `SUDO` (`root`, `nopasswd`, `password`, `absent`, `other`), `SSH_KEYGEN` (`openssh`, `none`), `SSH_KEYGEN_VERSION`, `PACKAGE_MANAGER` (`apt`, `dnf`, `zypper`, `pacman`, `apk`, `other`), `DROPBEAR_PACKAGES` (a list of `dropbear`, `dropbear-bin`, `dropbear-run`, `dropbear-initramfs`, `dropbear-openrc`); with `INIT_SYSTEM` above |
 | Toolchain | `TOOL_CC`, `TOOL_CXX` (`gcc-12.2.0`, `clang-18.1.3`), `TOOL_CLANG`, `TOOL_MSVC`, `TOOL_CMAKE`, `TOOL_NINJA`, `TOOL_MAKE`, `TOOL_GIT`, `TOOL_CCACHE`, `TOOL_NVCC`, `TOOL_GLSLC`, `TOOL_HIPCONFIG`, `TOOL_DOCKER`, `TOOL_PYTHON`: versions only, never paths |
 
 Not in a profile: the host name, serial or part numbers (also not the per-slot RAM part numbers the old Windows probe
@@ -1397,7 +1397,7 @@ the reason it is not usable.
 Probe 3.3.0 (`PROBE_TOOL_VERSION=3.3.0`) records how the framework reaches a machine and installs on it (the group
 `access` of the schema). Most private DietPi boards run Dropbear instead of OpenSSH, and many have no passwordless
 sudo, so the pairing takes its protection tier from these facts and a board installer derives its plan from them
-(for example OpenSSH as a dependency, through DietPi's `dietpi-software` on DietPi).
+(for example OpenSSH as a dependency, with the board's own package manager; on DietPi that is apt).
 
 | Key | Values and how they are read |
 |---|---|
@@ -1406,11 +1406,12 @@ sudo, so the pairing takes its protection tier from these facts and a board inst
 | `SSH_SERVER_VERSION`, `SSH_SERVERS_INSTALLED` | the version the server prints with `-V` (OpenSSH `9.2`, Dropbear `2022.83`); the servers with a program on the machine |
 | `SUDO` | `root` (the probe ran as root), `absent`, `nopasswd` (`sudo -k -n true` succeeded), `password` (sudo wants a password or refuses the account), `other` (Windows). `-n` never prompts and never reads a password, and `-k` ignores credentials cached in the terminal (a password typed a minute ago is no NOPASSWD rule); the probe asks sudo nothing else. The check can leave one line in the board's authentication log |
 | `SSH_KEYGEN`, `SSH_KEYGEN_VERSION` | `openssh` or `none`, and the version of the OpenSSH client next to it (`ssh -V`); signatures (`ssh-keygen -Y sign`/`-Y verify`) need 8.1 or later |
-| `PACKAGE_MANAGER`, `DIETPI_SOFTWARE` | `apt`, `dnf`, `zypper`, `pacman`, `apk` or `other` (left out when none is found); `present` when DietPi's `dietpi-software` exists |
+| `PACKAGE_MANAGER` | `apt`, `dnf`, `zypper`, `pacman`, `apk` or `other` (left out when none is found) |
+| `DROPBEAR_PACKAGES` | Linux: the installed packages that provide Dropbear, comma-separated in a fixed order (`dropbear`, `dropbear-bin`, `dropbear-run`, `dropbear-initramfs`, `dropbear-openrc`; nothing else is accepted). The first query program of the table `dropbear_package_queries` is asked without root: `dpkg-query -W` (a line ending in ` installed` counts), `pacman -Qq`, `apk info -e`, `rpm -q`. Left out when none is installed or no query program is there. The pairing asks the board the same again before the switch to OpenSSH removes them (never `dropbear-initramfs`). A file of an earlier 3.3.0 probe with `DIETPI_SOFTWARE` stays readable: that key is dropped and ignored |
 
 Every value is a fixed word or a version: no path, host name or account name is written, and the probe reads no
 network. The schema's tables (`ssh_server_names`, `ssh_server_binaries`, `ssh_server_services`, `sudo_paths`,
-`ssh_keygen_paths`, `ssh_client_paths`, `package_managers`, `dietpi_software_path`) list the fixed paths and names
+`ssh_keygen_paths`, `ssh_client_paths`, `package_managers`, `dropbear_package_queries`, `dropbear_packages`) list the fixed paths and names
 the probe looks at; the .py and the .sh carry copies, and a test compares them.
 
 **In code.** `HardwareProfile.access()` returns the facts as one typed record (`AccessFacts`) with the derived answers

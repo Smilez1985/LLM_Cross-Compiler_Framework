@@ -101,7 +101,7 @@ KEYS = {
     "SSH_KEYGEN": ("enum", ("openssh", "none"), 0, (), ()),
     "SSH_KEYGEN_VERSION": ("version", _VERSION, 0, (), ()),
     "PACKAGE_MANAGER": ("enum", ("apt", "dnf", "zypper", "pacman", "apk", "other"), 0, (), ()),
-    "DIETPI_SOFTWARE": ("enum", ("present",), 0, (), ("linux",)),
+    "DROPBEAR_PACKAGES": ("list", ("^dropbear(-(bin|run|initramfs|openrc))?$", 5), 0, (), ("linux",)),
     "CPU_MODEL": ("text", 128, 0, (), ()),
     "CPU_VENDOR": ("enum", ("intel", "amd", "hygon", "centaur", "zhaoxin", "arm", "broadcom", "cavium", "fujitsu",
                             "hisilicon", "nvidia", "apm", "qualcomm", "samsung", "marvell", "apple", "faraday",
@@ -328,7 +328,13 @@ PACKAGE_MANAGERS = {"/usr/bin/apt-get": "apt", "/usr/bin/dnf": "dnf", "/usr/bin/
                     "/bin/opkg": "other", "/usr/bin/opkg": "other", "/usr/bin/xbps-install": "other",
                     "/usr/bin/emerge": "other", "/usr/sbin/pkg": "other", "/usr/local/bin/brew": "other",
                     "/opt/homebrew/bin/brew": "other"}
-DIETPI_SOFTWARE_PATH = "/boot/dietpi/dietpi-software"
+# The query programs that say which packages are installed (no root), and the packages that may provide Dropbear
+DROPBEAR_PACKAGE_QUERIES = {"/usr/bin/dpkg-query": "dpkg", "/usr/bin/pacman": "pacman", "/sbin/apk": "apk",
+                            "/usr/bin/apk": "apk", "/usr/bin/rpm": "rpm", "/bin/rpm": "rpm"}
+DROPBEAR_PACKAGES = {"dpkg": ["dropbear", "dropbear-bin", "dropbear-run", "dropbear-initramfs"],
+                     "pacman": ["dropbear"], "apk": ["dropbear", "dropbear-openrc"], "rpm": ["dropbear"]}
+DROPBEAR_QUERY_ARGS = {"dpkg": ["-W", "-f", "${Package} ${Status}\n"], "pacman": ["-Qq"], "apk": ["info", "-e"],
+                       "rpm": ["-q", "--qf", "%{NAME}\n"]}
 # Several SSH servers found at one step: the first of these (claiming OpenSSH for a Dropbear board would give the
 # pairing key options Dropbear does not know; the other way round only costs protection).
 SSH_SERVER_ORDER = ("dropbear", "openssh", "other")
@@ -2364,8 +2370,27 @@ class Probe:
             if not self.put("SSH_KEYGEN_VERSION", version, warn_invalid=False):
                 self.warn("not_determined", "SSH_KEYGEN_VERSION")
         self.put("PACKAGE_MANAGER", next((v for p, v in PACKAGE_MANAGERS.items() if self.exists(p)), None))
-        if self.os == "linux" and self.exists(DIETPI_SOFTWARE_PATH):
-            self.put("DIETPI_SOFTWARE", "present")
+        if self.os == "linux":
+            self.put("DROPBEAR_PACKAGES", self._dropbear_packages())
+
+    def _dropbear_packages(self):
+        """The installed packages that provide Dropbear, asked the first query program of DROPBEAR_PACKAGE_QUERIES
+        (no root); only the fixed names of DROPBEAR_PACKAGES come out, in their order. None without any."""
+        found = next(((p, kind) for p, kind in DROPBEAR_PACKAGE_QUERIES.items() if self.exists(p)), None)
+        if found is None:
+            return None
+        path, kind = found
+        names = DROPBEAR_PACKAGES[kind]
+        _rc, out, _err = self.run([self.path(path)] + DROPBEAR_QUERY_ARGS[kind] + names, 15)
+        seen = set()
+        for line in (out or "").splitlines():
+            words = line.split()
+            if not words:
+                continue
+            if kind == "dpkg" and not line.rstrip().endswith(" installed"):
+                continue
+            seen.add(words[0])
+        return ",".join(n for n in names if n in seen) or None
 
     def _proc_pids(self):
         try:

@@ -15,7 +15,7 @@ import os
 import time
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Dict, Any, List, Tuple
+from typing import TYPE_CHECKING, Callable, Optional, Dict, Any, List, Tuple
 from datetime import datetime
 
 import click
@@ -787,7 +787,6 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
     models already here are listed, and --model takes one of their labels or a local path (at a terminal you are
     asked)."""
     from orchestrator.Core.build_service import BuildServiceError, ModelNotHere
-    from orchestrator.Core.orchestrator import OrchestrationStatus
     ctx.require_framework()
     if parallel:
         Console(stderr=True).print("[yellow]--parallel is deprecated and has no effect.[/yellow]")
@@ -881,72 +880,24 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
                                          remember_flags=remember_flags, flag_channel="framework-cli",
                                          description=f"CLI build: {model} -> {target} ({format})").request_id
 
-        # The CLI stays until the build has ended; from here on Ctrl+C cancels it.
-        last = None
-        workflow_status = None
-        try:
-            if not ctx.quiet:
-                console.print(Panel(
-                    f"[bold]Model:[/bold] {escape(model)}\n"
-                    f"[bold]Target:[/bold] {escape(target)}\n"
-                    # the format the build runs with, as the target spells it (a target.yml format id is free text)
-                    f"[bold]Format:[/bold] {escape(str(request.format))}\n"
-                    f"[bold]Quantization:[/bold] {escape(quantization or 'None')}\n"
-                    # the board's probe the build is planned for (round 23 item 5), or none
-                    f"[bold]Hardware probe:[/bold] {escape(request.probe or 'none (the target defaults)')}\n"
-                    f"[bold]Output:[/bold] {escape(output_dir)}\n"
-                    f"[bold]GPU:[/bold] {'✅ Enabled' if gpu else '❌ Disabled'}\n"
-                    f"[bold]Smart Calibration (IMatrix):[/bold] {'✅ Enabled' if imatrix else '❌ Disabled'}",
-                    title=f"🚀 Starting Build: {request_id}"
-                ))
-            if follow:
-                console.print("[blue]Following build progress (Ctrl+C cancels the build)...[/blue]")
-            while True:
-                workflow_status = service.request_state(request_id)
-                if workflow_status:
-                    # the running build's own step and percent (the model download: "Fetching model 37 % (...)"),
-                    # as get_build_status and the Builder show them
-                    stage, percent = _follow_progress(service, workflow_status)
-                    line = (workflow_status.status, stage, percent, workflow_status.completed_builds)
-                    if follow and line != last:
-                        status_color = {OrchestrationStatus.COMPLETED: "green", OrchestrationStatus.ERROR: "red",
-                                        OrchestrationStatus.HEALING: "magenta"}.get(workflow_status.status, "yellow")
-                        # Stages, proposals and errors can contain model or log text: never parse it as markup.
-                        console.print(f"[{status_color}]Status: {workflow_status.status.value} - {escape(stage)} "
-                                      f"({percent} %, {workflow_status.completed_builds}/"
-                                      f"{workflow_status.total_builds} builds)[/{status_color}]")
-                    last = line
-                    if (workflow_status.status == OrchestrationStatus.AWAITING_APPROVAL
-                            and workflow_status.healing_proposal is not None):
-                        _resolve_healing_interactively(ctx.orchestrator, request_id, workflow_status.healing_proposal)
-                    if workflow_status.status in [OrchestrationStatus.COMPLETED, OrchestrationStatus.ERROR, OrchestrationStatus.CANCELLED]:
-                        break
-                _pause(BUILD_POLL_SECONDS)
-        except KeyboardInterrupt:
-            _cancel_interrupted_build(ctx, request_id)
-
-        if workflow_status:
-            if workflow_status.status in (OrchestrationStatus.COMPLETED, OrchestrationStatus.ERROR,
-                                          OrchestrationStatus.CANCELLED):
-                _deliver_end_notices(ctx, request_id)   # the chat row and the doorbell before this process ends
-            if workflow_status.status in (OrchestrationStatus.ERROR, OrchestrationStatus.CANCELLED):
-                _ask_interrupted(ctx, request_id)   # finished stages kept: continue it, or delete what it left?
-            for artifact in workflow_status.artifacts:
-                console.print(f"[green]Artifacts: {escape(str(artifact))}[/green]")
-                if chosen:  # outside the output folder: the listings keep showing it
-                    _remember_saved(ctx, artifact, output_dir)
-            for warning in workflow_status.warnings:
-                console.print(f"[yellow]{escape(str(warning))}[/yellow]")
-            for error in workflow_status.errors:
-                console.print(f"[red]{escape(str(error))}[/red]")
-            # How it ended, in plain words, and the exit code of that end (0 done, 1 failed/soft_cap/idle, 2 cancelled)
-            reason = _end_reason(service, workflow_status)
-            _say_end(reason)
-            from orchestrator.Core.build_end import exit_code
-            if reason is not None and exit_code(reason):
-                sys.exit(exit_code(reason))
-            if workflow_status.status != OrchestrationStatus.COMPLETED or workflow_status.failed_builds:
-                sys.exit(1)
+        # The CLI stays until the build has ended; from here on Ctrl+C cancels it (the one follow loop of a request).
+        def header() -> None:
+            if ctx.quiet:
+                return
+            console.print(Panel(
+                f"[bold]Model:[/bold] {escape(model)}\n"
+                f"[bold]Target:[/bold] {escape(target)}\n"
+                # the format the build runs with, as the target spells it (a target.yml format id is free text)
+                f"[bold]Format:[/bold] {escape(str(request.format))}\n"
+                f"[bold]Quantization:[/bold] {escape(quantization or 'None')}\n"
+                # the board's probe the build is planned for (round 23 item 5), or none
+                f"[bold]Hardware probe:[/bold] {escape(request.probe or 'none (the target defaults)')}\n"
+                f"[bold]Output:[/bold] {escape(output_dir)}\n"
+                f"[bold]GPU:[/bold] {'✅ Enabled' if gpu else '❌ Disabled'}\n"
+                f"[bold]Smart Calibration (IMatrix):[/bold] {'✅ Enabled' if imatrix else '❌ Disabled'}",
+                title=f"🚀 Starting Build: {request_id}"
+            ))
+        _follow_build(ctx, service, request_id, follow=follow, header=header, output_dir=output_dir, chosen=chosen)
 
     except Exception as e:
         console.print(f"[red]Build failed: {escape(str(e))}[/red]")
@@ -954,6 +905,72 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
 
 
 BUILD_POLL_SECONDS = 2
+
+
+def _follow_build(ctx: FrameworkContext, service, request_id: str, *, follow: bool,
+                  header: Optional[Callable[[], None]] = None, output_dir: Optional[str] = None,
+                  chosen: bool = False) -> None:
+    """The one follow loop of a build request: `build start` and `build interrupted continue` both stay here until
+    the build has ended. With `follow` a status line (stage, percent, finished builds) whenever it changes; a
+    healing proposal is asked at the terminal; Ctrl+C cancels the build (its container is stopped) and exits with
+    130. At the end: the chat row and the doorbell go out, a build that stopped with finished stages kept is asked
+    about, the artifacts (remembered when `chosen` puts them outside the output folder), warnings, errors and the end
+    reason are printed, and the exit code is the end's (0 done, 1 failed, 2 cancelled). `header` prints first."""
+    from orchestrator.Core.orchestrator import OrchestrationStatus
+    last = None
+    workflow_status = None
+    try:
+        if header is not None:
+            header()
+        if follow:
+            console.print("[blue]Following build progress (Ctrl+C cancels the build)...[/blue]")
+        while True:
+            workflow_status = service.request_state(request_id)
+            if workflow_status:
+                # the running build's own step and percent (the model download: "Fetching model 37 % (...)"),
+                # as get_build_status and the Builder show them
+                stage, percent = _follow_progress(service, workflow_status)
+                line = (workflow_status.status, stage, percent, workflow_status.completed_builds)
+                if follow and line != last:
+                    status_color = {OrchestrationStatus.COMPLETED: "green", OrchestrationStatus.ERROR: "red",
+                                    OrchestrationStatus.HEALING: "magenta"}.get(workflow_status.status, "yellow")
+                    # Stages, proposals and errors can contain model or log text: never parse it as markup.
+                    console.print(f"[{status_color}]Status: {workflow_status.status.value} - {escape(stage)} "
+                                  f"({percent} %, {workflow_status.completed_builds}/"
+                                  f"{workflow_status.total_builds} builds)[/{status_color}]")
+                last = line
+                if (workflow_status.status == OrchestrationStatus.AWAITING_APPROVAL
+                        and workflow_status.healing_proposal is not None):
+                    _resolve_healing_interactively(ctx.orchestrator, request_id, workflow_status.healing_proposal)
+                if workflow_status.status in [OrchestrationStatus.COMPLETED, OrchestrationStatus.ERROR,
+                                              OrchestrationStatus.CANCELLED]:
+                    break
+            _pause(BUILD_POLL_SECONDS)
+    except KeyboardInterrupt:
+        _cancel_interrupted_build(ctx, request_id)
+
+    if workflow_status:
+        if workflow_status.status in (OrchestrationStatus.COMPLETED, OrchestrationStatus.ERROR,
+                                      OrchestrationStatus.CANCELLED):
+            _deliver_end_notices(ctx, request_id)   # the chat row and the doorbell before this process ends
+        if workflow_status.status in (OrchestrationStatus.ERROR, OrchestrationStatus.CANCELLED):
+            _ask_interrupted(ctx, request_id)   # finished stages kept: continue it, or delete what it left?
+        for artifact in workflow_status.artifacts:
+            console.print(f"[green]Artifacts: {escape(str(artifact))}[/green]")
+            if chosen:  # outside the output folder: the listings keep showing it
+                _remember_saved(ctx, artifact, output_dir)
+        for warning in workflow_status.warnings:
+            console.print(f"[yellow]{escape(str(warning))}[/yellow]")
+        for error in workflow_status.errors:
+            console.print(f"[red]{escape(str(error))}[/red]")
+        # How it ended, in plain words, and the exit code of that end (0 done, 1 failed/soft_cap/idle, 2 cancelled)
+        reason = _end_reason(service, workflow_status)
+        _say_end(reason)
+        from orchestrator.Core.build_end import exit_code
+        if reason is not None and exit_code(reason):
+            sys.exit(exit_code(reason))
+        if workflow_status.status != OrchestrationStatus.COMPLETED or workflow_status.failed_builds:
+            sys.exit(1)
 
 
 def _end_reason(service, state) -> Optional[str]:
@@ -1393,15 +1410,20 @@ def build_interrupted_list(ctx: FrameworkContext):
 @click.argument('build_id')
 @pass_context
 def build_interrupted_continue(ctx: FrameworkContext, build_id: str):
-    """Continue an interrupted build on its kept work folder (its finished stages are not run again)"""
+    """Continue an interrupted build on its kept work folder (its finished stages are not run again). Its progress is
+    shown as for `build start --follow`; Ctrl+C cancels it (its container is stopped) and exits with code 130"""
     from orchestrator.Core import interrupted_build
     engine, cache, state = _interrupted_context(ctx)
+    service = _build_service(ctx)   # the one build path: the continued build is a build request like any other
     try:
-        started = interrupted_build.decide(engine, cache, build_id, "continue", "cli", state_dir=state)
+        started = interrupted_build.decide(engine, cache, build_id, "continue", "cli", state_dir=state,
+                                           service=service)
     except interrupted_build.InterruptedBuildError as e:
         console.print(f"[yellow]{escape(str(e))}[/yellow]")
         sys.exit(1)
-    console.print(f"[green]Build {escape(str(started))} continues; follow it with: llm-cli build status[/green]")
+    console.print(f"[green]Build {escape(build_id)} continues as build request {escape(str(started))}; its finished "
+                  "stages are not run again.[/green]")
+    _follow_build(ctx, service, str(started), follow=True)
 
 
 @build_interrupted.command('delete')
