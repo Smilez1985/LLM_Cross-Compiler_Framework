@@ -73,7 +73,7 @@ def test_bundle_plan_gives_labels_only_and_the_blocks(fw, device, tmp_path):
     bad = call(fw, "bundle_plan", {"device_id": device.device_id, "preset": "stt", "values": {"stt": {"port": 80}}})
     assert any("stt:" in p and "port" in p for p in bad.plan["problems"])
     assert {c["check"] for c in plan["checks"]} >= {"architecture", "memory"}
-    assert "stt-whisper-cpp" in {b["id"] for b in out.blocks}
+    assert "stt-whisper-cpp-program" in {b["id"] for b in out.blocks}
     text = json.dumps(out.model_dump())
     for private in (ADDRESS, "boarduser", "llmcfsvc", str(tmp_path)):
         assert private not in text, private
@@ -106,7 +106,7 @@ def test_bundle_plan_passes_the_verified_index_with_its_revocations(fw, device, 
 def _built_for(fw, device, tmp_path, board):
     from orchestrator.runtime.bundle import generator as gen
     from orchestrator.runtime.bundle import blocks as blk
-    selection = _selection(tmp_path, blocks=["stt-whisper-cpp"])
+    selection = _selection(tmp_path, blocks=["stt-whisper-cpp-program"])
     del selection.files["llm"]
     plan = gen.plan_bundle(selection, catalog=blk.load_catalog(), profile=RK3566, device_id=device.device_id,
                            runtime=_runtime_tarball(tmp_path), offline=False, bundle_id="stt-test")

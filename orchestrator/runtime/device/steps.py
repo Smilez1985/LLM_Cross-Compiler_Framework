@@ -29,13 +29,16 @@ def utc_stamp() -> str:
 
 # --- the plan ---------------------------------------------------------------------------------------------------------
 
-def plan_runtime(profile: Any):
+def plan_runtime(profile: Any, project: Optional[str] = None):
     """The cross build of llama.cpp planned from the board's own probe profile (a BuildPlan); PlanError when the board
-    cannot get one (an old C library, not Linux, ...)."""
+    cannot get one (an old C library, not Linux, ...). `project` (runtime/build/projects.py; None: llama.cpp):
+    whisper.cpp for the bundle's speech recognition, from the same probe through the same recipe."""
     from orchestrator.runtime.build.toolchain import host_platform
     from orchestrator.runtime.catalog import load_catalog
     from orchestrator.runtime.device.package import plan_device_runtime
-    return plan_device_runtime(profile, catalog=load_catalog(), host=host_platform())
+    if project is None:
+        return plan_device_runtime(profile, catalog=load_catalog(), host=host_platform())
+    return plan_device_runtime(profile, catalog=load_catalog(), host=host_platform(), project=project)
 
 
 def plan_view(plan: Any, built: Any = None) -> Dict[str, Any]:
@@ -113,8 +116,12 @@ def build_runtime(state_dir: Path, device_id: str, profile: Any, plan: Any, sour
     from orchestrator.runtime.build.store import BuildStore
     from orchestrator.runtime.build.toolchain import host_platform
     from orchestrator.runtime.build.verify import Verifier
+    from orchestrator.runtime.build.projects import project_of
     from orchestrator.runtime.device.package import DeviceRuntimeStore, package_runtime
-    builds = BuildStore(state_dir)
+    # the plan names its project (llama.cpp, or whisper.cpp for the bundle's speech recognition): the same steps,
+    # each project's store and packages in its own folder
+    project = project_of(plan).name
+    builds = BuildStore(state_dir, project)
     src = cached_source(source, state_dir)
     if src is None:
         if not may_fetch():
@@ -136,8 +143,10 @@ def build_runtime(state_dir: Path, device_id: str, profile: Any, plan: Any, sour
         on_step("stored", build)
     if cancelled():
         raise BuildCancelled("the build was cancelled")
-    devices = DeviceRuntimeStore(state_dir, device_id)
+    devices = DeviceRuntimeStore(state_dir, device_id, project)
     packaged = devices.tarball(build) if reuse_package else None
+    if packaged is not None and _stale_start_script(packaged):
+        packaged = None   # made by an older framework: its start script lacks options added since (--mmproj)
     if packaged is None:
         packaged = package_runtime(builds, build, licence=src / "LICENSE", out_dir=devices.root)
     return RuntimeBuild(builds=builds, build=build, packaged=packaged, source_dir=src, built_now=built_now)
@@ -153,15 +162,30 @@ def ensure_package(state_dir: Path, device_id: str, builds: Any, build: Any, sou
     from the cached pinned source (`source()` names the pin; asked only then). PackageNeedsSource when the source is
     not cached; PackageError when packaging fails."""
     from orchestrator.runtime.build.source import cached_source
+    from orchestrator.runtime.build.projects import project_of
     from orchestrator.runtime.device.package import DeviceRuntimeStore, package_runtime
-    devices = DeviceRuntimeStore(state_dir, device_id)
+    project = project_of(build).name
+    devices = DeviceRuntimeStore(state_dir, device_id, project) if project != "llama.cpp" else \
+        DeviceRuntimeStore(state_dir, device_id)
     packaged = devices.tarball(build)
     if packaged is not None:
-        return devices, packaged
+        if not _stale_start_script(packaged):
+            return devices, packaged
+        src = cached_source(source(), state_dir)
+        if src is None:
+            return devices, packaged   # the older start script still runs; packaged again once the source is there
+        return devices, package_runtime(builds, build, licence=src / "LICENSE", out_dir=devices.root)
     src = cached_source(source(), state_dir)
     if src is None:
         raise PackageNeedsSource("the tarball must be packaged again, which needs the pinned source")
     return devices, package_runtime(builds, build, licence=src / "LICENSE", out_dir=devices.root)
+
+
+def _stale_start_script(packaged: Any) -> bool:
+    """A llama.cpp package whose start script is older than this framework's (package.start_script_current); a
+    package of another project has none and is never stale for it."""
+    from orchestrator.runtime.device.package import start_script_current
+    return start_script_current(Path(packaged.path)) is False
 
 
 def older_package_count(devices: Any, build: Any) -> int:
@@ -279,14 +303,16 @@ class StoredRuntime:
     packaged: Any    # its checked tarball
 
 
-def stored_runtime(state_dir: Path, device_id: str, profile: Any, source: Callable[[], Any]) -> StoredRuntime:
+def stored_runtime(state_dir: Path, device_id: str, profile: Any, source: Callable[[], Any],
+                   project: Optional[str] = None) -> StoredRuntime:
     """The stored build of the board's plan and its checked tarball, found before any contact with the board (`llmcf
     device runtime deploy` and the Boards window; the AI's deploy builds instead, service.ensure_build): PlanError when
     the board gets no plan, NotBuilt when the plan's build is not stored, PackageNeedsSource or PackageError when its
-    tarball must be packaged again and cannot be (`source()` names the pin, asked only then)."""
+    tarball must be packaged again and cannot be (`source()` names the pin, asked only then). `project`
+    (runtime/build/projects.py; None: llama.cpp): the board's whisper.cpp build of the bundle the same way."""
     from orchestrator.runtime.build.store import BuildStore
-    plan = plan_runtime(profile)
-    builds = BuildStore(state_dir)
+    plan = plan_runtime(profile) if project is None else plan_runtime(profile, project)
+    builds = BuildStore(state_dir) if project is None else BuildStore(state_dir, project)
     build = builds.find(plan)
     if build is None:
         raise NotBuilt("the runtime for this device is not built yet")

@@ -910,8 +910,9 @@ The [roadmap](docs/ROADMAP.md) lists what is planned; finished items move to the
   compaction, cloud caching the provider's way, and Ditto's archive of what it
   learned about llmcf and building (never the person's private talk).
 - **The board bundle:** its usable first part is there (blocks, plan, signed bundle, the unprivileged installer,
-  window, CLI and MCP tools, and the root helper llmcf-install); next come components built by the framework itself,
-  the token-saving gateway `llmcf-gateway` in Rust, voice and vision as bundle components, and MCP on the board
+  window, CLI and MCP tools, the root helper llmcf-install, whisper.cpp built by the framework for the board, and
+  vision with `--mmproj`); next come the token-saving gateway `llmcf-gateway` in Rust, the further components built
+  by the framework (speech output, a wake word), and MCP on the board
   (loopback first, the network only with TLS).
 - **Device runtime and more hardware:** recipes as target templates, a rotation stage before quantization, a generic
   ARM64 target for the Raspberry Pi, targets from the hardware probe proven on the board, the self-built llama.cpp

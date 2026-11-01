@@ -2404,7 +2404,8 @@ and questions as here, each board run in the background with **Cancel**.
 ```
 llm-cli bundle plan DEVICE [--preset llm|voice|stt] [--block ID]... [--set COMPONENT.NAME=VALUE]...
                     [--file COMPONENT.ROLE=PATH]... [--online COMPONENT.ROLE=URL --sha256 COMPONENT.ROLE=HEX
-                    --size COMPONENT.ROLE=BYTES]... [--licence COMPONENT.ROLE=ID]... [--unprivileged-only] [--json]
+                    --size COMPONENT.ROLE=BYTES]... [--licence COMPONENT.ROLE=ID]... [--unprivileged-only]
+                    [--accept-terms BLOCK]... [--json]
 llm-cli bundle build DEVICE (the same choice) [--allow-own]
 llm-cli bundle list [--json]
 llm-cli bundle deploy BUNDLE [--dry-run] [--skip-root]
@@ -2426,6 +2427,18 @@ system, sudo, offline mode, memory: passed, failed, warning or unknown). It cont
 by its kind (`llm`, `stt`, a second one of the same kind `stt-2`). `--json` gives the plan as labels only: no local
 path, no address, no account. Exit 1 when the plan has problems.
 
+A block whose parts come under their own licence terms (for example eSpeak NG in `tts-sherpa-onnx`, or the opt-in
+templates `stt-nemo-sherpa` and `stt-kws-gigaspeech` with terms that are not a free licence) is planned with the
+problem that its terms are not accepted yet, and the plan prints the terms in full after it. `--accept-terms BLOCK`
+accepts exactly the text shown (the acceptance is bound to its sha256; a changed text is not accepted). A block with
+a term that is not free is never part of a preset.
+
+A block whose program the framework builds for the board (`llm-llama-server` and `vision-mmproj`: llama.cpp;
+`stt-whisper-cpp`: the pinned whisper.cpp) needs that board package. The plan names it when it is not built yet, and
+checks each component against the board's probe (`component stt`: the package's architecture against the board's,
+the CPU features it was built for, the memory). For `vision-mmproj` the plan also checks that model and projector are
+a pair (`vision pair vision`) and counts both in the memory.
+
 ### bundle build
 
 Plans as `bundle plan`, shows the plan and writes the bundle into this framework's store, signed with the framework's
@@ -2436,6 +2449,13 @@ CPU limits) also carries llmcf-install, the framework's root helper, built for t
 aarch64 or armv7, static) and signed with the bundle: the copy this computer keeps is used, else it is built with
 cargo here or in the builder image over the container engine. In offline mode only a kept copy is used; without one
 the build stops with the plain reason (build it once online, or choose the unprivileged-only variant).
+
+Before anything is built, `bundle build` at a terminal shows each block's licence terms that are not accepted yet in
+full and asks for each ("No" is the default; `--accept-terms` answers it beforehand). When the plan waits for a board
+package that is not built yet (whisper.cpp, llama.cpp), it asks whether to build it now ("No" is the default) and
+builds it through the same self-build path as `device runtime build` (the pinned commit, the board's architecture, C
+library and CPU features; offline only from a kept source), then plans again. Without a terminal it stops with the
+plan's problems.
 
 ### bundle deploy
 

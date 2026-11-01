@@ -86,6 +86,8 @@ class BundleWindow(BoardSteps, QDialog):
         self.rows: List[Dict[str, Any]] = []
         self._values: Dict[Tuple[str, str], str] = {}     # what the person typed, kept while the blocks change
         self._files: Dict[Tuple[str, str], Dict[str, str]] = {}
+        # the blocks whose licence terms the person read and accepted in this window (block id -> terms sha256)
+        self._accepted_terms: Dict[str, str] = {}
         layout = QVBoxLayout(self)
         layout.addWidget(plain_label(self._t("bundle.intro")))
         top = QHBoxLayout()
@@ -378,7 +380,8 @@ class BundleWindow(BoardSteps, QDialog):
         preset = self.cmb_preset.currentData() or None
         return service.selection_from(preset=preset, blocks=self._checked_blocks(), sets=keep(sets),
                                       files=keep(files), online=keep(online), sha256=keep(sha), sizes=keep(sizes),
-                                      licences=keep(licences), unprivileged_only=self.chk_unprivileged.isChecked())
+                                      licences=keep(licences), unprivileged_only=self.chk_unprivileged.isChecked(),
+                                      accepted_terms=self._accepted_terms)
 
     def selected_board(self) -> Optional[str]:
         return self.cmb_board.currentData()
@@ -431,20 +434,36 @@ class BundleWindow(BoardSteps, QDialog):
         if work is not None:
             self._start(self._t("bundle.planning"), work, self._show_plan)
 
-    def _on_build(self, allow_own: bool = False) -> None:
+    def _on_build(self, allow_own: bool = False, offered: bool = False) -> None:
         work = self._plan_step(allow_own)
         if work is not None:
-            self._start(self._t("bundle.planning"), work, lambda plan: self._planned_for_build(plan, allow_own))
+            self._start(self._t("bundle.planning"), work,
+                        lambda plan: self._planned_for_build(plan, allow_own, offered))
 
-    def _planned_for_build(self, plan: Any, allow_own: bool) -> None:
+    def _planned_for_build(self, plan: Any, allow_own: bool, offered: bool = False) -> None:
         self._show_plan(plan)
         only_own = plan.own_blocks and not allow_own and all("is not signed: it is used only after your yes" in p
                                                              for p in plan.problems)
         if only_own:
             if ask(self, self._t("bundle.title"), self._t("bundle.own.ask", blocks=", ".join(plan.own_blocks))):
-                self._on_build(allow_own=True)
+                self._on_build(allow_own=True, offered=offered)
             else:
                 self._say(self._t("bundle.not_built"))
+            return
+        if plan.terms_needed:
+            # each block's terms in full, "No" as the default; nothing of the block is built, sent or fetched before
+            for block_id in plan.terms_needed:
+                block = self.catalog.get(block_id) if self.catalog is not None else None
+                if block is None or not ask(self, self._t("bundle.title"),
+                                            self._t("bundle.terms.ask", block=block_id, terms=block.terms_text())):
+                    self._say(self._t("bundle.not_built"))
+                    return
+                self._accepted_terms[block_id] = block.terms_sha256
+            self._on_build(allow_own, offered)
+            return
+        if plan.missing_runtimes and not offered:
+            # asked once per Build...: a package still missing after the build stays a problem of the plan
+            self._offer_components(plan, allow_own)
             return
         if not plan.ok:
             self._info(self._t("bundle.not_built"), "warning")
@@ -460,6 +479,30 @@ class BundleWindow(BoardSteps, QDialog):
                                      say=self._progress)
 
         self._start(self._t("bundle.building"), build, self._built)
+
+    def _offer_components(self, plan: Any, allow_own: bool) -> None:
+        """The board packages the plan waits for (whisper.cpp, llama.cpp): the person's question ("No" as the
+        default), then the build through the one self-build path in the worker thread (service.build_components,
+        as the CLI's `bundle build`), then the plan again."""
+        from orchestrator.runtime.bundle import service
+        device_id = self.selected_board()
+        projects = list(plan.missing_runtimes)
+        board = next((b.get("label") or device_id for b in self.boards if b.get("device_id") == device_id),
+                     device_id)
+        if device_id is None or not ask(self, self._t("bundle.title"),
+                                        self._t("bundle.components.ask", projects=" and ".join(projects),
+                                                board=board)):
+            self._say(self._t("bundle.not_built"))
+            return
+        state, config = self.state_dir, getattr(self.framework, "config", None)
+
+        def work():
+            profile = service.device_profile(state, device_id)
+            return service.build_components(state, device_id, profile, projects, settings=config,
+                                            say=self._progress, cancelled=self._cancel.is_set)
+
+        self._start(self._t("bundle.components.building", projects=" and ".join(projects)), work,
+                    lambda _built: self._on_build(allow_own, offered=True))
 
     def _built(self, built: Any) -> None:
         text = self._t("bundle.built", bundle=built.bundle_id, device_id=built.manifest.board.device_id)

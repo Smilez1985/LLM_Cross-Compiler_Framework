@@ -78,6 +78,25 @@ class FileNeed:
     min_bytes: int = 0
     max_bytes: int = 0
     note: str = ""
+    # a runtime file: the project of the framework's self-build path whose board package it is
+    # (runtime/build/projects.py: llama.cpp, whisper.cpp)
+    project: str = "llama.cpp"
+
+
+@dataclass(frozen=True)
+class Terms:
+    """The licence terms of a part a block brings in (a program, a runtime, a model family) that the person reads and
+    accepts before the block is used: shown in full before anything is built or downloaded. `free` false: terms that
+    are not a free licence; such a block is never part of a preset (opt-in only)."""
+    part: str
+    licence: str
+    free: bool
+    text: str
+
+    @property
+    def sha256(self) -> str:
+        from orchestrator.utils.helpers import sha256_bytes
+        return sha256_bytes(f"{self.part}\n{self.licence}\n{self.free}\n{self.text}".encode("utf-8"))
 
 
 @dataclass(frozen=True)
@@ -101,10 +120,29 @@ class Block:
     trust: str
     sha256: str
     notes: Tuple[str, ...] = field(default_factory=tuple)
+    terms: Tuple[Terms, ...] = field(default_factory=tuple)
 
     @property
     def ready(self) -> bool:
         return self.status == "ready"
+
+    @property
+    def terms_sha256(self) -> str:
+        """One digest of all its terms (what an acceptance is bound to); empty when the block has none."""
+        if not self.terms:
+            return ""
+        from orchestrator.utils.helpers import sha256_bytes
+        return sha256_bytes("\n".join(t.sha256 for t in self.terms).encode("ascii"))
+
+    @property
+    def opt_in(self) -> bool:
+        """Terms that are not a free licence: never part of a preset, used only after the person accepted them."""
+        return any(not t.free for t in self.terms)
+
+    def terms_text(self) -> str:
+        """The terms in full, as the person reads them before accepting (CLI and window)."""
+        return "\n\n".join(f"{t.part} ({t.licence}{'' if t.free else ', not a free licence'}):\n{t.text}"
+                           for t in self.terms)
 
     def variable(self, name: str) -> Optional[Variable]:
         return next((v for v in self.variables if v.name == name), None)
@@ -123,8 +161,10 @@ class Block:
                 "title": self.title, "summary": self.summary,
                 "variables": [{"name": v.name, "type": v.type, "default": v.default,
                                **({"choices": list(v.choices)} if v.choices else {})} for v in self.variables],
-                "files": [{"role": f.role, "from": f.source, "formats": list(f.formats), "licence": f.licence}
-                          for f in self.files]}
+                "files": [{"role": f.role, "from": f.source, "formats": list(f.formats), "licence": f.licence,
+                           **({"project": f.project} if f.source == "runtime" else {})} for f in self.files],
+                # the terms as labels (the person reads their text in the CLI or the window and accepts them there)
+                "terms": [{"part": t.part, "licence": t.licence, "free": t.free} for t in self.terms]}
 
 
 def _str(spec: dict, key: str, limit: int = 200, default: str = "") -> str:
@@ -167,7 +207,8 @@ def _variable(raw: Any) -> Variable:
 def _file(raw: Any) -> FileNeed:
     if not isinstance(raw, dict):
         raise BlockError("a file is a mapping")
-    unknown = set(raw) - {"role", "from", "name", "mode", "formats", "licence", "min_bytes", "max_bytes", "note"}
+    unknown = set(raw) - {"role", "from", "name", "mode", "formats", "licence", "min_bytes", "max_bytes", "note",
+                          "project"}
     if unknown:
         raise BlockError(f"file: unknown fields {', '.join(sorted(unknown))}")
     role, source = raw.get("role"), raw.get("from", "person")
@@ -175,6 +216,11 @@ def _file(raw: Any) -> FileNeed:
         raise BlockError(f"file role must be one of {', '.join(ROLES)}")
     if source not in SOURCES:
         raise BlockError(f"file {role}: from must be person or runtime")
+    from orchestrator.runtime.build.projects import PROJECTS
+    project = raw.get("project", "llama.cpp")
+    if project not in PROJECTS or (project != "llama.cpp" and source != "runtime"):
+        raise BlockError(f"file {role}: project names the framework's self-built runtime package "
+                         f"({', '.join(PROJECTS)}), only for a runtime file")
     name = raw.get("name", "") or ""
     if name and not RE_FILE.fullmatch(str(name)):
         raise BlockError(f"file {role}: name must be a plain file name")
@@ -196,7 +242,35 @@ def _file(raw: Any) -> FileNeed:
             raise BlockError(f"file {role}: {key} is a whole number")
         sizes.append(value)
     return FileNeed(role=role, source=source, name=str(name), mode=mode, formats=formats, licence=licence,
-                    min_bytes=sizes[0], max_bytes=sizes[1], note=_str(raw, "note", 300))
+                    min_bytes=sizes[0], max_bytes=sizes[1], note=_str(raw, "note", 300), project=project)
+
+
+MAX_TERMS_TEXT = 4000
+
+
+def _terms(raw: Any) -> Tuple[Terms, ...]:
+    """The block's `terms` list: each {part, licence (an SPDX identifier or a short word), free (yes/no), text}."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list) or len(raw) > 8:
+        raise BlockError("terms is a list of at most 8 parts")
+    out = []
+    from orchestrator.runtime.bundle.manifest import RE_LICENCE
+    for item in raw:
+        if not isinstance(item, dict) or set(item) - {"part", "licence", "free", "text"} or \
+                not {"part", "licence", "free", "text"} <= set(item):
+            raise BlockError("a terms entry is {part, licence, free, text}")
+        licence = item.get("licence")
+        if not isinstance(licence, str) or not RE_LICENCE.fullmatch(licence):
+            raise BlockError("terms licence is an SPDX identifier or a short word")
+        if not isinstance(item.get("free"), bool):
+            raise BlockError("terms free is yes or no")
+        text = item.get("text")
+        if not isinstance(text, str) or not text.strip() or len(text) > MAX_TERMS_TEXT or \
+                any(ord(c) < 32 and c not in "\n" for c in text):
+            raise BlockError(f"terms text is a plain text of at most {MAX_TERMS_TEXT} characters")
+        out.append(Terms(part=_str(item, "part", 120), licence=licence, free=item["free"], text=text.strip()))
+    return tuple(out)
 
 
 def _check_args(args: Any, variables: Dict[str, Variable], roles: set, depth: int = 0) -> Tuple[Any, ...]:
@@ -238,7 +312,7 @@ def parse_block(text: str, folder: Path, trust: str = "own", sha256: str = "") -
     if not isinstance(spec, dict):
         raise BlockError("block.yml is not a mapping")
     allowed = {"schema", "id", "version", "kind", "title", "status", "summary", "variables", "files", "start",
-               "memory", "keygen", "unit", "notes"}
+               "memory", "keygen", "unit", "notes", "terms"}
     unknown = set(spec) - allowed
     if unknown:
         raise BlockError(f"unknown fields: {', '.join(sorted(map(str, unknown)))}")
@@ -291,7 +365,7 @@ def parse_block(text: str, folder: Path, trust: str = "own", sha256: str = "") -
                  summary=_str(spec, "summary", 500), variables=variables, files=files, program=program, args=args,
                  memory_base_mb=base, memory_model_factor=float(factor), keygen=bool(spec.get("keygen", False)),
                  unit=bool(spec.get("unit", False)), folder=Path(folder), trust=trust, sha256=sha256,
-                 notes=tuple(notes))
+                 notes=tuple(notes), terms=_terms(spec.get("terms")))
 
 
 def _tree_sha256(folder: Path) -> str:
@@ -487,5 +561,5 @@ def new_block(dest_root: Path, block_id: str, *, kind: str, title: str, summary:
 
 
 __all__ = ["BLOCK_FILE", "BLOCK_SCHEMA", "BUILTIN_DIR", "Block", "BlockCatalog", "BlockError", "ENTERPRISE_TRUSTS",
-           "FORMATS", "FileNeed", "GUIDE_FILE", "TRUSTS", "Variable", "block_revoked", "check_block_folder",
+           "FORMATS", "FileNeed", "GUIDE_FILE", "TRUSTS", "Terms", "Variable", "block_revoked", "check_block_folder",
            "community_dir", "load_catalog", "new_block", "parse_block"]

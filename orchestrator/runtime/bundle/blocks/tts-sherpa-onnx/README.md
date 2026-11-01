@@ -10,6 +10,9 @@ Block `tts-sherpa-onnx` (kind tts), a documented template: the generator lists i
   sherpa-onnx model list fit; a plain ONNX file from elsewhere does not.
 - Memory: about twice the model's size plus 128 MB.
 - Licence: each voice has its own (Piper voices: mostly MIT or CC-BY; check the model card).
+- The block's terms name the parts it brings in beside the voice: a prebuilt onnxruntime (MIT, with its third-party
+  notices) and the eSpeak NG data (GPL-3.0-or-later). Their text is shown in full before the block is used, and
+  nothing of it is built, sent or fetched before you accepted them.
 
 ## What is missing
 

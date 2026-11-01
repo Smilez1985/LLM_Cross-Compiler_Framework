@@ -81,6 +81,8 @@ class Selection:
     files: Dict[str, Dict[str, FileChoice]] = field(default_factory=dict)
     unprivileged_only: bool = False
     preset: str = ""
+    # the blocks whose licence terms the person read and accepted: block id -> Block.terms_sha256 of the text shown
+    accepted_terms: Dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_preset(cls, name: str, **kw) -> "Selection":
@@ -90,17 +92,22 @@ class Selection:
 
     def as_json(self) -> Dict[str, Any]:
         return {"blocks": list(self.blocks), "values": self.values, "preset": self.preset,
-                "unprivileged_only": self.unprivileged_only,
+                "unprivileged_only": self.unprivileged_only, "accepted_terms": dict(self.accepted_terms),
                 "files": {c: {r: f.as_json() for r, f in roles.items()} for c, roles in self.files.items()}}
 
 
 @dataclass(frozen=True)
 class RuntimePackage:
-    """The board's runtime tarball (deploy way 2): its path, sha256 and build ID; or why there is none."""
+    """A board package of the framework's self-build path (runtime/build/projects.py): llama.cpp's runtime tarball of
+    deploy way 2, or the board's whisper.cpp build: its path, sha256 and build ID, the project, the architecture it
+    was built for and the CPU features of the board's probe its build uses; or why there is none."""
     path: Optional[Path] = None
     sha256: str = ""
     build_id: str = ""
     missing: str = ""
+    project: str = "llama.cpp"
+    arch: str = ""
+    cpu_features: Tuple[str, ...] = ()
 
 
 @dataclass
@@ -128,8 +135,14 @@ class BundlePlan:
     memory_mb: int = 0
     board_memory_mb: Optional[int] = None
     # the checks against the board's probe facts, in the framework's own words: {"check", "result", "detail"} with
-    # result passed, failed, warning or unknown (architecture, init system, sudo, offline mode, memory)
+    # result passed, failed, warning or unknown (architecture, init system, sudo, offline mode, memory, and one
+    # "component <id>" check each: its runtime's architecture and CPU features, its memory)
     checks: List[Dict[str, str]] = field(default_factory=list)
+    # the projects of the self-build path whose board package the plan needs and that are not built yet (the person's
+    # channels offer to build them: service.build_components)
+    missing_runtimes: List[str] = field(default_factory=list)
+    # the blocks whose licence terms the person has not accepted yet (block ids; the text: Block.terms_text())
+    terms_needed: List[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -160,7 +173,9 @@ class BundlePlan:
                 # while the files are still to choose (then there is no manifest and root_actions is empty)
                 "notes": [_scrub(n) for n in self.notes],
                 "checks":[{k: _scrub(str(v)) for k, v in c.items()} for c in self.checks],
-                "own_blocks": list(self.own_blocks)}
+                "own_blocks": list(self.own_blocks),
+                # built or accepted only by the person (the CLI or the Board bundle window), never through an AI
+                "missing_runtimes": list(self.missing_runtimes), "terms_needed": list(self.terms_needed)}
 
     def lines(self) -> List[str]:
         """The plan in plain words for the person (CLI and window)."""
@@ -290,11 +305,17 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
                 runtime: Optional[RuntimePackage] = None, config: Any = None, mode: str = "private",
                 offline: Optional[bool] = None, allow_own: bool = False, bundle_id: Optional[str] = None,
                 hasher: Optional[Callable[[Path], str]] = None, locality: Optional[Callable[..., Any]] = None,
-                now: Optional[datetime] = None) -> BundlePlan:
+                now: Optional[datetime] = None,
+                runtimes: Optional[Dict[str, RuntimePackage]] = None) -> BundlePlan:
     """The plan of `selection` for the board of `profile` (see the module text). `offline` None reads the setting
-    from `config` (utils/locality.offline_mode); `locality` stands in for utils/locality.check_reach in tests."""
+    from `config` (utils/locality.offline_mode); `locality` stands in for utils/locality.check_reach in tests.
+    `runtime` is llama.cpp's board package, `runtimes` every project's (runtime/build/projects.py: whisper.cpp for
+    the speech recognition), each a RuntimePackage."""
     from orchestrator.utils.helpers import sha256_file
     from orchestrator.utils import locality as loc
+    packages: Dict[str, RuntimePackage] = dict(runtimes or {})
+    if runtime is not None:
+        packages.setdefault("llama.cpp", runtime)
     hasher = hasher or sha256_file
     if offline is None:
         offline = loc.offline_mode(config)
@@ -335,6 +356,13 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
         elif block.trust == "signed":
             plan.notes.append(f"block {block.id} is signed by its author, installed from a file (not from the "
                               "signed index)")
+        if block.terms and selection.accepted_terms.get(block.id) != block.terms_sha256:
+            # nothing of it is built, sent or fetched before the person read its terms and accepted them
+            plan.terms_needed.append(block.id)
+            plan.problems.append(f"block {block.id} brings in parts under their own licence terms "
+                                 f"({', '.join(t.licence for t in block.terms)}"
+                                 + (", not all free licences" if block.opt_in else "")
+                                 + "): read them and accept them first")
         blocks.append(block)
     known = set(selection.blocks)
     for comp_id in set(selection.values) | set(selection.files):
@@ -369,20 +397,28 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
         entries: List[FileEntry] = []
         names: Dict[str, str] = {}
         model_bytes = 0
+        comp_runtime: Optional[RuntimePackage] = None
+        picked: Dict[str, Path] = {}
         choices = selection.files.get(comp_id) or {}
         for need in block.files:
             name = need.name or need.role
             names[need.role] = name
             if need.source == "runtime":
-                if runtime is None or runtime.path is None:
-                    plan.problems.append(f"{comp_id}: " + ((runtime.missing if runtime else "")
-                                                           or "the board's llama.cpp runtime package is not built "
-                                                              "yet; build the board's runtime first"))
+                pkg = packages.get(need.project)
+                if pkg is None or pkg.path is None:
+                    if need.project not in plan.missing_runtimes:
+                        plan.missing_runtimes.append(need.project)
+                    plan.problems.append(f"{comp_id}: " + ((pkg.missing if pkg else "") or (
+                        "the board's llama.cpp runtime package is not built yet; build the board's runtime first"
+                        if need.project == "llama.cpp" else
+                        f"the board's {need.project} package is not built yet; the framework builds it for the "
+                        "board when you build the bundle, after your yes")))
                     continue
-                entry = FileEntry(name=name, sha256=runtime.sha256, size=Path(runtime.path).stat().st_size,
+                comp_runtime = pkg
+                entry = FileEntry(name=name, sha256=pkg.sha256, size=Path(pkg.path).stat().st_size,
                                   mode=need.mode, role="runtime", format="tar.gz")
                 entries.append(entry)
-                plan.files[(comp_id, name)] = PlannedFile(entry, Path(runtime.path))
+                plan.files[(comp_id, name)] = PlannedFile(entry, Path(pkg.path))
                 continue
             choice = choices.get(need.role)
             if choice is None or not (choice.path or choice.url):
@@ -411,6 +447,9 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
                     if not arch_matches(arch, board_arch):
                         plan.problems.append(f"{comp_id}: the program is built for {arch or 'no known machine'}, "
                                              f"the board runs {board_arch or 'an unknown architecture'}")
+                    plan.warnings.append(f"{comp_id}: its program is one you picked: the framework did not build it "
+                                         "from a pinned source and cannot tell what it does beyond its architecture")
+                picked[need.role] = path
                 sha = hasher(path)
                 entry_kw: Dict[str, Any] = {"source": "bundle"}
             else:
@@ -444,21 +483,31 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
             plan.files[(comp_id, name)] = PlannedFile(entry, path)
             if need.role in ("model", "mmproj"):
                 model_bytes += size
-        memory += int(block.memory_base_mb + block.memory_model_factor * model_bytes / 1048576)
+        comp_memory = int(block.memory_base_mb + block.memory_model_factor * model_bytes / 1048576)
+        memory += comp_memory
+        _component_check(plan, comp_id, block, comp_runtime, board_arch, comp_memory)
+        if block.kind == "vision" and comp_runtime is not None:
+            _vision_checks(plan, comp_id, comp_runtime, picked)
         program = block.program
+        args: Tuple[str, ...] = ()
+        startable = True
         if "@RUNTIME@" in program:
-            if runtime is None or not runtime.build_id:
-                continue
-            program = program.replace("@RUNTIME@", runtime.build_id[:16])
-        try:
-            args = _args(block, values, names)
-        except KeyError as e:
-            plan.problems.append(f"{comp_id}: the block's start needs {e} that is not chosen")
-            continue
-        if block.kind in ("llm", "vision"):
-            from orchestrator.runtime.server_policy import PolicyError, check_command
+            if comp_runtime is None or not comp_runtime.build_id:
+                startable = False   # the missing runtime is a problem already; the rest is still planned
+            else:
+                program = program.replace("@RUNTIME@", comp_runtime.build_id[:16])
+        if startable:
             try:
-                check_command(list(args))
+                args = _args(block, values, names)
+            except KeyError as e:
+                plan.problems.append(f"{comp_id}: the block's start needs {e} that is not chosen")
+                continue
+            from orchestrator.runtime.server_policy import PolicyError, check_command, check_whisper_command
+            try:
+                if block.kind in ("llm", "vision"):
+                    check_command(list(args))
+                elif program.rsplit("/", 1)[-1] == "whisper-server":
+                    check_whisper_command(list(args))
             except PolicyError as e:
                 plan.problems.append(f"{comp_id}: {e}")
         if values.get("autostart"):
@@ -474,7 +523,8 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
             components.append(Component(id=comp_id, kind=block.kind, block=block.id, block_version=block.version,
                                         block_sha256=block.sha256 or "0" * 64, block_trust=block.trust,
                                         variables=values, files=tuple(entries), keygen=block.keygen,
-                                        start=StartSpec(program=program, args=args) if program else None))
+                                        start=StartSpec(program=program, args=args)
+                                        if program and startable else None))
         except Exception as e:  # noqa: BLE001 - pydantic's own reason, never pasted into shell text
             plan.problems.append(f"{comp_id}: {str(e).splitlines()[-1][:300]}")
     plan.memory_mb = memory
@@ -550,6 +600,152 @@ def _probe_checks(plan: BundlePlan, board_arch: Optional[str], init: Optional[st
     plan.checks.append({"check": "offline mode", "result": "failed" if failed("offline mode") else "passed",
                         "detail": "on: online items only from the own network" if offline else
                                   "off: the board fetches pinned online items itself"})
+
+
+def _component_check(plan: BundlePlan, comp_id: str, block: Block, pkg: Optional[RuntimePackage],
+                     board_arch: Optional[str], memory_mb: int) -> None:
+    """plan.checks "component <id>": the probe facts this one component depends on. A framework-built runtime
+    (llama.cpp, whisper.cpp) was planned from the board's own probe: its architecture must be the board's, and the
+    CPU features its build uses are named; its own memory need is named (the bundle's total is the "memory" check).
+    A wrong architecture refuses the plan (one rule: arch_matches, as for a program the person picked)."""
+    parts = [f"block {block.id}", f"about {memory_mb} MB"]
+    result = "passed"
+    if pkg is not None and pkg.path is not None:
+        built_for = pkg.arch or "an architecture its record does not name"
+        if pkg.arch and board_arch and not arch_matches(pkg.arch, board_arch):
+            plan.problems.append(f"{comp_id}: the board's {pkg.project} package is built for {pkg.arch}, the board "
+                                 f"runs {board_arch}; build it again from the board's probe")
+            result = "failed"
+        elif not pkg.arch or not board_arch:
+            result = "unknown"
+        parts.insert(1, f"{pkg.project} built for {built_for} with the CPU features "
+                        + (", ".join(pkg.cpu_features) if pkg.cpu_features else "of its base level"))
+    plan.checks.append({"check": f"component {comp_id}", "result": result, "detail": "; ".join(parts)})
+
+
+# What a GGUF header holds that the vision pair check reads (bounded: a header is read as llama.cpp's gguf reader
+# reads it, never more than these many keys or bytes per string).
+_GGUF_MAX_KV = 4096
+_GGUF_MAX_STRING = 1 << 20
+
+
+def gguf_header(path: Path) -> Dict[str, Any]:
+    """The key-value pairs of a GGUF file's header: scalars and strings as values, arrays by their length. Untrusted
+    input: every count and length is bounded; BundleError when the header is damaged or no GGUF."""
+    import struct
+    scalars = {0: "<B", 1: "<b", 2: "<H", 3: "<h", 4: "<I", 5: "<i", 6: "<f", 7: "<?", 10: "<Q", 11: "<q", 12: "<d"}
+    size = path.stat().st_size
+
+    with open(path, "rb") as fh:
+        def take(n: int) -> bytes:
+            if n < 0 or fh.tell() + n > size:
+                raise BundleError(f"{path.name}: its GGUF header ends early")
+            return fh.read(n)
+
+        def unpack(fmt: str):
+            return struct.unpack(fmt, take(struct.calcsize(fmt)))[0]
+
+        def string() -> str:
+            n = unpack("<Q")
+            if n > _GGUF_MAX_STRING:
+                raise BundleError(f"{path.name}: a GGUF string is longer than the header allows")
+            return take(n).decode("utf-8", errors="replace")
+
+        def value(kind: int, depth: int = 0) -> Any:
+            if kind in scalars:
+                return unpack(scalars[kind])
+            if kind == 8:
+                return string()
+            if kind == 9 and depth == 0:
+                item, count = unpack("<I"), unpack("<Q")
+                if count > size:
+                    raise BundleError(f"{path.name}: a GGUF array is larger than the file")
+                if item in scalars:
+                    take(count * struct.calcsize(scalars[item]))
+                else:
+                    for _ in range(count):
+                        value(item, 1)
+                return count
+            raise BundleError(f"{path.name}: a GGUF value of unknown type {kind}")
+
+        if take(4) != b"GGUF":
+            raise BundleError(f"{path.name}: no GGUF file")
+        if unpack("<I") not in (2, 3):
+            raise BundleError(f"{path.name}: a GGUF version llama.cpp does not read")
+        unpack("<Q")
+        n_kv = unpack("<Q")
+        if n_kv > _GGUF_MAX_KV:
+            raise BundleError(f"{path.name}: more GGUF keys than a header has")
+        meta: Dict[str, Any] = {}
+        for _ in range(n_kv):
+            key = string()
+            meta[key] = value(unpack("<I"))
+        return meta
+
+
+def start_script_takes(package: Path, option: str) -> Optional[bool]:
+    """Whether the llama.cpp start script (llama-server.sh) inside the board's runtime package passes `option` on;
+    None when the package holds no start script or cannot be read. A package made before the start script took an
+    option is packaged again from the stored build (steps.ensure_package) when the pinned source is cached."""
+    import tarfile
+    try:
+        with tarfile.open(package, mode="r|gz") as tar:
+            for member in tar:
+                if member.isfile() and member.name.endswith("/llama-server.sh") and member.size < 1 << 20:
+                    data = tar.extractfile(member)
+                    text = data.read().decode("utf-8", errors="replace") if data is not None else ""
+                    # one case line of the script's option check: "      --mmproj|-mm) kind=file ;;"
+                    return re.search(rf"^\s+(?:[A-Za-z-]+\|)*{re.escape(option)}(?:\|[A-Za-z-]+)*\) kind=",
+                                     text, re.M) is not None
+    except (OSError, tarfile.TarError, EOFError):
+        return None
+    return None
+
+
+def _vision_checks(plan: BundlePlan, comp_id: str, pkg: RuntimePackage, picked: Dict[str, Path]) -> None:
+    """The vision component's own checks: the board's runtime start script passes --mmproj on, and the model and its
+    multimodal projector are a pair (the projector is a CLIP GGUF with a vision encoder, the model is not; the same
+    base when both name it; the projector's output width is the model's embedding width, which llama-server checks
+    again when it loads them and refuses otherwise)."""
+    takes = start_script_takes(Path(pkg.path), "--mmproj") if pkg.path is not None else None
+    if takes is False:
+        plan.problems.append(f"{comp_id}: the board's llama.cpp runtime package was packaged before its start script "
+                             "took --mmproj; package it again (the framework does so when the pinned source is "
+                             "cached: build the board's runtime)")
+    model, mmproj = picked.get("model"), picked.get("mmproj")
+    if model is None or mmproj is None:
+        plan.notes.append(f"{comp_id}: the model or its projector is not a local file here; the pair is checked by "
+                          "llama-server on the board when it loads them")
+        return
+    before = len(plan.problems)
+    try:
+        m, p = gguf_header(model), gguf_header(mmproj)
+    except (BundleError, OSError) as e:
+        plan.problems.append(f"{comp_id}: {e}")
+        return
+    arch = m.get("general.architecture")
+    if arch == "clip" or not isinstance(arch, str):
+        plan.problems.append(f"{comp_id}: the model file is no language model (general.architecture "
+                             f"{arch or 'missing'}); the projector goes into the mmproj file")
+        return
+    if p.get("general.architecture") != "clip" or p.get("clip.has_vision_encoder") is not True:
+        plan.problems.append(f"{comp_id}: the mmproj file is no multimodal projector with a vision encoder "
+                             "(general.architecture clip, clip.has_vision_encoder)")
+        return
+    base_m, base_p = m.get("general.basename"), p.get("general.basename")
+    if isinstance(base_m, str) and isinstance(base_p, str) and base_m.strip().lower() != base_p.strip().lower():
+        plan.problems.append(f"{comp_id}: the model ({base_m}) and the projector ({base_p}) are of different bases")
+    width, proj = m.get(f"{arch}.embedding_length"), p.get("clip.vision.projection_dim")
+    if isinstance(width, int) and isinstance(proj, int) and width != proj:
+        plan.warnings.append(f"{comp_id}: the projector's width ({proj}) is not the model's embedding width "
+                             f"({width}); llama-server refuses a pair whose widths do not fit")
+    if mmproj.stat().st_size >= model.stat().st_size * 4:
+        plan.warnings.append(f"{comp_id}: the projector is much larger than the model; check that the two files are "
+                             "not swapped")
+    plan.checks.append({"check": f"vision pair {comp_id}", "result": "failed" if len(plan.problems) > before else
+                        "passed", "detail": f"a {arch} model with its CLIP vision projector"
+                                  + (f" of the same base ({base_m})" if isinstance(base_m, str) and base_m == base_p
+                                     else "")})
 
 
 def _trust_words(trust: str) -> str:

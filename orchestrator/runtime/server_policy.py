@@ -128,7 +128,31 @@ START_SCRIPT_OPTIONS: Mapping[Tuple[str, ...], str] = {
     ("--sleep-idle-seconds",): "uint",
     ("-ctk", "--cache-type-k"): "cachetype",
     ("-ctv", "--cache-type-v"): "cachetype",
+    # the multimodal projector of a vision model (the bundle's vision component): a readable local file by its
+    # absolute path, never an address (--mmproj-url and -mmu stay forbidden)
+    ("-mm", "--mmproj"): "file",
 }
+
+# --- whisper.cpp's whisper-server (the bundle's speech recognition, examples/server/server.cpp at the whisper.cpp
+# pin) ---
+# Options it never gets: --convert runs ffmpeg through the shell (system()) on every upload, --public serves a
+# folder of this board over HTTP, --tmp-dir, --request-path and --inference-path move where it writes and answers,
+# and --ov-e-device selects an OpenVINO device the framework's build does not have. Its server has no key file, so it
+# listens on the loopback address only (exactly one --host LOOPBACK); a component reaches it on the board itself.
+WHISPER_FORBIDDEN_FLAGS = frozenset({"--convert", "--public", "--tmp-dir", "--request-path", "--inference-path",
+                                     "--ov-e-device"})
+
+
+def check_whisper_command(args: Sequence[str]) -> None:
+    """Raises PolicyError unless the whisper-server arguments keep to the rules above (every spelling of a forbidden
+    option, also --name=value; exactly one --host, and that is the loopback address)."""
+    names = [option_name(a) for a in args]
+    bad = sorted({n for n in names if n in WHISPER_FORBIDDEN_FLAGS})
+    if bad:
+        raise PolicyError(f"Refusing to start whisper-server with {bad}")
+    hosts = [args[i + 1] for i, n in enumerate(names) if n == "--host" and i + 1 < len(args)]
+    if hosts != [LOOPBACK] or names.count("--host") != 1:
+        raise PolicyError(f"whisper-server listens on {LOOPBACK} only (exactly one --host {LOOPBACK})")
 
 
 class PolicyError(ValueError):

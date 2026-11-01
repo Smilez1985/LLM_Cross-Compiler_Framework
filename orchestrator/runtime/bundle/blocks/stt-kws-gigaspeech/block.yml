@@ -1,0 +1,29 @@
+schema: llmcf-bundle-block/1
+id: stt-kws-gigaspeech
+version: 0.1.0
+kind: stt
+title: Wake word with a GigaSpeech keyword model (sherpa-onnx) - opt-in
+status: template
+summary: >-
+  Documented opt-in template: sherpa-onnx's keyword spotter with a small wake-word model trained on the GigaSpeech
+  corpus. Never part of a preset: the corpus comes under its own terms of use; the person reads and accepts them
+  before the block is used. Not buildable yet: sherpa-onnx is not built by the framework yet, and a model folder is
+  one file today.
+variables:
+  - {name: port, type: port, default: 8092}
+  - {name: threads, type: threads, default: 0}
+files:
+  - {role: program, from: person, name: sherpa-onnx-keyword-spotter, mode: "0755", formats: [elf]}
+  - {role: model, from: person, name: encoder.onnx, formats: [onnx], licence: required}
+  - {role: data, from: person, name: keywords.txt, formats: [text]}
+memory: {base_mb: 64, model_factor: 2.0}
+terms:
+  - part: GigaSpeech keyword-spotting models
+    licence: other
+    free: false
+    text: >-
+      These wake-word models are trained on the GigaSpeech speech corpus, whose publisher sets its own terms of use
+      for the corpus. A model trained on it may carry conditions from those terms beyond the licence of the model
+      file itself. Read the terms of the corpus and the licence of the exact model you pick before you accept.
+notes:
+  - "Planned: sherpa-onnx built by the framework; whisper.cpp's own wake-word mode needs SDL2 and a microphone."
