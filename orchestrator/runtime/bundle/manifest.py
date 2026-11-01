@@ -58,7 +58,6 @@ RE_ARG = re.compile(r"^(?:@DIR@/)?[A-Za-z0-9._+:=,-][A-Za-z0-9._+/:=,-]{0,255}$"
 # An online item: https (or http, only for an address the locality rule counted as local), no quoting characters,
 # no credentials, no spaces.
 RE_URL = re.compile(r"^https?://[A-Za-z0-9.-]+(?::[0-9]{1,5})?(?:/[A-Za-z0-9._~+,=:@%/-]*)?$", re.ASCII)
-USER_PATTERN = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.ASCII)
 
 # The variable types of a building block, with the bounds every value is checked against.
 VARIABLE_TYPES = ("port", "uint", "threads", "memory_mb", "bool", "user", "word", "choice", "file")
@@ -101,8 +100,9 @@ def check_value(kind: str, value: Any, *, choices: Tuple[str, ...] = (), low: Op
         raise ManifestError(f"{name}: yes or no, not {value!r}"[:200])
     if not isinstance(value, str):
         raise ManifestError(f"{name}: a {kind} is text")
-    if kind == "user":
-        if not USER_PATTERN.fullmatch(value) or value == "root":
+    if kind == "user":   # the one account check (remote/address.valid_user), lower-case as useradd takes it
+        from orchestrator.remote.address import valid_user
+        if not valid_user(value) or value != value.lower():
             raise ManifestError(f"{name}: an account name (lower-case letters, digits, '_', '.', '-'; never root)")
         return value
     if kind == "choice":

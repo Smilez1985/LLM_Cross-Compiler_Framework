@@ -81,6 +81,31 @@ def _job(shell: Any, folder: str, job: Any, step: str) -> Tuple[int, str]:
     return status, log.out
 
 
+def _send(shell: Any, staging: str, uploads: List[Tuple[str, Path, str]], say: Callable[[str], None]) -> None:
+    for name, path, sha in uploads:
+        remote = f"{staging}/{name}"
+        if _on_board(shell, remote, sha):
+            continue
+        say(f"uploading {name} ...")
+        shell.upload(path, remote, sha)
+
+
+def _installed_files(shell: Any, root: str, staging: str, bid: str) -> set:
+    """The staged names (<component>--<file>) of the bundle's files the board's installer reports in place with
+    their sha256 (its status from the upload folder; an empty set when the bundle is not on the board yet)."""
+    folder = _new_folder(shell, root)
+    status, log = _job(shell, folder, gate.job("bundle-run", staging, "status", bid), "bundle")
+    found = inst.report(log)
+    if status != inst.EXIT_OK or found.result not in ("installed", "partial"):
+        return set()
+    out = set()
+    for line in found.lines:
+        parts = line["what"].split(" ")
+        if line["state"] == "already" and line["step"] in ("file", "fetch") and len(parts) == 2:
+            out.add(inst.staged_name(parts[0], parts[1]))
+    return out
+
+
 def run_bundle(shell: Any, built: BuiltBundle, action: str, *, store: Optional[BundleStore] = None,
                device_id: str = "", say: Callable[[str], None] = lambda _m: None) -> BoardRun:
     """Runs the bundle's installer on the board behind `shell` (see the module text): `action` plan or apply (the
@@ -112,21 +137,22 @@ def run_bundle(shell: Any, built: BuiltBundle, action: str, *, store: Optional[B
         staging = _new_folder(shell, root)
     if store is not None and device_id:
         store.record_board(bid, device_id, staging=staging, last="uploading")
-    uploads: List[Tuple[str, Path, str]] = [(name, built.file(name), sha256_file(built.file(name)))
-                                            for name in SIGNED_FILES]
-    uploads += [(name, path, entry.sha256) for name, path, entry in built.payload()]
-    for name, path, sha in uploads:
-        remote = f"{staging}/{name}"
-        if _on_board(shell, remote, sha):
-            continue
-        say(f"uploading {name} ...")
-        shell.upload(path, remote, sha)
+    signed: List[Tuple[str, Path, str]] = [(name, built.file(name), sha256_file(built.file(name)))
+                                           for name in SIGNED_FILES]
+    _send(shell, staging, signed, say)
     for name in SIGNED_FILES:   # the signatures are small: written on stdin, again after a drop
         sig = built.file(name + ".sig").read_bytes()
         res = shell.run(gate.script("file-write-private", f"{staging}/{name}.sig"), stdin=[sig], again=True)
         if res.status != 0:
             from orchestrator.runtime.device.remote import RemoteError
             raise RemoteError(f"the signature of {name} could not be written on the board (exit {res.status})")
+    payload = [(name, path, entry.sha256) for name, path, entry in built.payload()]
+    if action in ("plan", "apply") and payload:
+        # what the board holds in place already (the signed installer's own status, which changes nothing) is not
+        # sent again: a second deploy of an installed bundle sends no model a second time
+        installed = _installed_files(shell, root, staging, bid)
+        payload = [item for item in payload if item[0] not in installed]
+    _send(shell, staging, payload, say)
     say(f"running the installer on the board ({action}) ...")
     folder = _new_folder(shell, root)
     status, log = _job(shell, folder, gate.job("bundle-run", staging, action, bid), "bundle")
