@@ -182,6 +182,8 @@ DELETION_SITES = {
     ("orchestrator/Core/runtime_layer.py", "_remove_layer_folder"): STAGING,
     ("orchestrator/Core/runtime_layer.py", "prepare_end_folder"): STAGING,
     ("orchestrator/Core/runtime_layer.py", "_remove_work"): STAGING,
+    # llmcf-install's working folder in the framework's cache (the build's output before it is kept)
+    ("orchestrator/runtime/bundle/root_helper.py", "ensure_helper"): STAGING,
     ("orchestrator/Core/community_manager.py", "CommunityManager.discard"): STAGING,
     ("orchestrator/Core/community_manager.py", "CommunityManager.export_pack"): STAGING,
     # the export's staged copy of a target: its licence files are made anew there, the target folder is never touched
@@ -225,6 +227,8 @@ DELETION_SITES = {
     ("orchestrator/Core/builder.py", "BuildEngine._run_container"): CONTAINERS,
     ("orchestrator/Core/builder.py", "BuildEngine._scan_image_security"): CONTAINERS,
     ("orchestrator/Core/runtime_layer.py", "engine_builder.build"): CONTAINERS,   # the toolbox builder, never started
+    # llmcf-install's builder container: made only to copy the built program out, never started
+    ("orchestrator/runtime/bundle/root_helper.py", "engine_builder.build"): CONTAINERS,
     ("orchestrator/runtime/build/executor.py", "DockerEngine.run"): CONTAINERS,
     ("orchestrator/runtime/container_server.py", "DittoDocker.run_check"): CONTAINERS,   # checks of Ditto's image
     # the framework's own local model server

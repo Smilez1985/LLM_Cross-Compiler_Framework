@@ -251,3 +251,6 @@ ca-bundle.crt
 secrets.store
 audit.db
 audit.db.anchor
+
+# Rust workspace build output (rust/, cargo)
+rust/target/

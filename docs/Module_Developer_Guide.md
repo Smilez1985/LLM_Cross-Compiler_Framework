@@ -1456,7 +1456,7 @@ variables:
   - {name: port, type: port, default: 8090, help: "Loopback port"}
   - {name: threads, type: threads, default: 0}
   - {name: language, type: choice, default: auto, choices: [auto, en, de]}
-  - {name: autostart, type: bool, default: false, help: "Start at boot (needs llmcf-install)"}
+  - {name: autostart, type: bool, default: false, help: "Start at boot (root actions through llmcf-install)"}
   - {name: user, type: user, default: llmcf}
   - {name: memory_limit_mb, type: memory_mb, default: 1024}
 files:
@@ -1520,3 +1520,26 @@ Export your block as a signed community pack of kind `block`: **Tools > Knowledg
 bundle building block of my own") or `llm-cli zoo export block ID --author NAME`. The pack holds `block.yml` and its
 guide, scrubbed of private data; an install checks it as a block before it lands in `community/blocks/`. Once a
 maintainer has added it to the signed index, enterprise mode takes it as `indexed`.
+
+### 12.6 Root actions and llmcf-install
+
+A block never runs anything as root itself. With `unit: true` and the autostart variable on, the manifest lists
+typed root actions, and only the framework's Rust helper `llmcf-install` (in `rust/llmcf-install/`) carries them out:
+
+| Action | What it does | Its fields |
+|---|---|---|
+| `create_user` | a system account without login, home `/var/lib/llmcf/home/<user>` (an existing account only when it is such a bundle account) | `user` (never root) |
+| `install_unit` | the unit `llmcf-<name>.service` from one fixed template (`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`), started from a root-owned copy of the component's folder, then `systemctl enable --now` | `component`, `unit`, `user` |
+| `set_cgroup` | the drop-in `llmcf-cgroup.conf` with `MemoryMax` and `CPUWeight` for a unit of this bundle | `unit`, `memory_max_mb`, `cpu_weight` |
+| `place_root_file` | a file of the component (only `llmcf-*.conf`) as a unit drop-in, in `/etc/tmpfiles.d/` or in `/etc/sysctl.d/` | `component`, `place` (`unit-dropin`, `tmpfiles`, `sysctl`), `file`, for a drop-in `unit` |
+
+The `remove_*` actions take the same fields and undo them; uninstall and rollback use the journal instead.
+
+The manifest checks these with the same rules in Python and Rust (one shared test vector file,
+`tests/data/bundle_manifest_vectors.json`): an `install_unit` needs a start, a `set_cgroup` names a unit an
+`install_unit` of the same bundle makes, a `place_root_file` names a file of its component. llmcf-install checks the
+manifest's signature itself against the root-owned signing key of the framework only (`/etc/llmcf/allowed_signers`,
+else `/etc/llmcf/signing_key.pem`), reads no environment for its paths, starts no shell and opens no network. Its
+journal is `/var/lib/llmcf/install/<bundle id>/`. When a block's program must read files at start, keep them in the
+component's folder: the unit runs from the root-owned copy under `/var/lib/llmcf/bundle/<bundle id>/` (the service
+account cannot read the deploying account's home), which takes the component's size a second time on the board.

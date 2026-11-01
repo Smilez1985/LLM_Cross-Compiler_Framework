@@ -128,13 +128,92 @@ def run_on_board(open_session: Callable[[], Any], built: gen.BuiltBundle, action
 # The person's questions before a run changes a board (the CLI and the Board bundle window ask exactly these words;
 # "No" is the default). {bundle}: the bundle id, {board}: the board's label or device ID, {size}: what is sent.
 DEPLOY_QUESTION = ("Send bundle {bundle} ({size}) to board {board} and run its installer there (apply)? It installs "
-                   "the unprivileged steps; root actions stop before they run (they need llmcf-install).")
+                   "the unprivileged steps; root actions stop before they run (they run through llmcf-install only "
+                   "after a second yes for them).")
 UNINSTALL_QUESTION = ("Uninstall bundle {bundle} from board {board}? The installer the board kept removes only the "
                       "bundle's own steps, newest first.")
 ROLLBACK_QUESTION = ("Roll back the last run of bundle {bundle} on board {board}? The installer the board kept undoes "
                      "the steps of its last apply.")
 # What changes a board, and which installer action shows it first without changing anything.
 CHANGING_ACTIONS = {"apply": "plan", "uninstall": "plan-uninstall", "rollback": "status"}
+# The person's question before llmcf-install changes the board as root ("No" is the default; the CLI and the Board
+# bundle window ask exactly these words, after its own plan of that action). {count}: the root actions listed.
+ROOT_QUESTION = ("Run the {count} root action(s) of bundle {bundle} on board {board} as root now, through "
+                 "llmcf-install (the framework's signed root helper)? It does only what the signed manifest lists "
+                 "above and keeps a journal for rollback and uninstall.")
+ROOT_UNINSTALL_QUESTION = ("Remove what llmcf-install made for bundle {bundle} on board {board} (the {count} entries "
+                           "listed above), as root? Only what its journal says it made is removed.")
+ROOT_ROLLBACK_QUESTION = ("Roll back the last run of llmcf-install for bundle {bundle} on board {board}, as root? Its "
+                          "journal says exactly what that run made or changed.")
+ROOT_CHANGING_ACTIONS = {"apply": "plan", "uninstall": "plan-uninstall", "rollback": "status"}
+# What a person is told when sudo on the board asks for a password: private mode may type it (sent once, never kept),
+# enterprise mode runs root actions with sudo -n only.
+PASSWORD_PROMPT = "The board's sudo asks for a password. Type the board account's password for this run (never kept)"
+ENTERPRISE_NO_PASSWORD = ("The board's sudo asks for a password, and enterprise mode runs root actions only with sudo "
+                          "-n (no password): allow the board account llmcf-install's run with sudo -n, then deploy "
+                          "again. Nothing was changed.")
+
+
+def password_allowed(mode: Any) -> bool:
+    """Whether the person may type the board's sudo password for llmcf-install (private mode only)."""
+    from orchestrator.remote.key_tiers import MODE_ENTERPRISE, normal_mode
+    return normal_mode(mode) != MODE_ENTERPRISE
+
+
+def helper_for(framework: Any, arch: Optional[str], say: Callable[[str], None] = lambda _m: None):
+    """llmcf-install for the board's architecture (root_helper.ensure_helper): the cached one, else built with cargo
+    on this computer or in the builder image over the framework's container engine; offline only the cached one
+    (the one offline rule, utils/locality.offline_mode). gen.BundleError with the plain reason otherwise."""
+    from orchestrator.runtime.bundle import root_helper
+    from orchestrator.utils.locality import offline_mode
+    config = getattr(framework, "config", None)
+    try:
+        from orchestrator.Core.runtime_layer import cache_dir_of
+        cache = cache_dir_of(config)
+    except Exception:  # noqa: BLE001 - no settings: the framework's default cache folder
+        cache = root_helper.RUST_DIR.parent / "cache"
+    client = getattr(getattr(getattr(framework, "docker_manager", None), "builder", None), "docker_client", None)
+    try:
+        return root_helper.ensure_helper(cache, arch, offline=bool(offline_mode(config)),
+                                         build=root_helper.default_builder(client, log=say), log=say)
+    except root_helper.HelperMissing as e:
+        raise gen.BundleError(str(e)) from None
+
+
+def build_for(plan: gen.BundlePlan, store: gen.BundleStore, signer: Any, *, framework: Any = None, ledger: Any = None,
+              say: Callable[[str], None] = lambda _m: None) -> gen.BuiltBundle:
+    """build_bundle for every channel: a bundle with root actions gets llmcf-install for its board first
+    (helper_for), the others none."""
+    helper = None
+    if plan.ok and gen.needs_root(plan.manifest):
+        helper = helper_for(framework, plan.manifest.board.arch, say)
+    return gen.build_bundle(plan, store, signer, ledger=ledger, helper=helper)
+
+
+def run_root_on_board(open_session: Callable[[], Any], built: gen.BuiltBundle, action: str, *, password: str = "",
+                      say: Callable[[str], None] = lambda _m: None):
+    """llmcf-install `action` on the board through the caller's login (board.run_root), the session closed in every
+    case. Only the person's channels call this, after the person's yes."""
+    from orchestrator.runtime.bundle.board import run_root
+    from orchestrator.runtime.device.remote import RemoteShell
+    session = open_session()
+    try:
+        return run_root(RemoteShell(session), built, action, password=password, say=say)
+    finally:
+        close = getattr(session, "close", None)
+        if callable(close):
+            close()
+
+
+def root_question(action: str, built: gen.BuiltBundle, board: str, count: int) -> str:
+    """The person's question before llmcf-install's `action` (apply, uninstall, rollback) changes the board."""
+    text = {"apply": ROOT_QUESTION, "uninstall": ROOT_UNINSTALL_QUESTION, "rollback": ROOT_ROLLBACK_QUESTION}[action]
+    return text.format(bundle=built.bundle_id, board=board, count=count)
+
+
+def root_count(run: Any) -> int:
+    """How many root actions (or journal entries) llmcf-install's plan listed."""
+    return sum(1 for line in run.report.lines if line["state"] in ("would", "would-remove", "already", "pending"))
 
 
 def catalog_sources(framework: Any) -> Tuple[Optional[Path], Any]:
@@ -222,6 +301,8 @@ def question(action: str, built: gen.BuiltBundle, board: str) -> str:
     return text.format(bundle=built.bundle_id, board=board, size=gen._mb(size))
 
 
-__all__ = ["CHANGING_ACTIONS", "DEPLOY_QUESTION", "ROLLBACK_QUESTION", "UNINSTALL_QUESTION", "assignments",
-           "board_contact", "bundle_rows", "catalog_sources", "device_profile", "plan_for_device", "question",
-           "revoked_blocks", "run_on_board", "runtime_for", "selection_from"]
+__all__ = ["CHANGING_ACTIONS", "DEPLOY_QUESTION", "ENTERPRISE_NO_PASSWORD", "PASSWORD_PROMPT", "ROLLBACK_QUESTION",
+           "ROOT_CHANGING_ACTIONS", "ROOT_QUESTION", "ROOT_ROLLBACK_QUESTION", "ROOT_UNINSTALL_QUESTION",
+           "UNINSTALL_QUESTION", "assignments", "board_contact", "build_for", "bundle_rows", "catalog_sources",
+           "device_profile", "helper_for", "password_allowed", "plan_for_device", "question", "revoked_blocks",
+           "root_count", "root_question", "run_on_board", "run_root_on_board", "runtime_for", "selection_from"]

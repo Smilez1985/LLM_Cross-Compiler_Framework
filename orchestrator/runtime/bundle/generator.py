@@ -36,7 +36,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from orchestrator.runtime.bundle.blocks import ENTERPRISE_TRUSTS, Block, BlockCatalog
-from orchestrator.runtime.bundle.installer import SIGNED_FILES, installer_sh, render_steps, staged_name
+from orchestrator.runtime.bundle.installer import (ROOT_HELPER_FILE, SIGNED_FILES, installer_sh, render_steps,
+                                                   staged_name)
 from orchestrator.runtime.bundle.manifest import (RE_ID, RE_LICENCE, RE_URL, BundleManifest, Component, FileEntry,
                                                   ManifestError, RootAction, StartSpec, dump_manifest, load_manifest)
 
@@ -46,6 +47,7 @@ PRESETS: Dict[str, Tuple[str, ...]] = {
     "stt": ("stt-whisper-cpp",),
 }
 MEMORY_RESERVE_MB = 384
+ROOT_HELPER_RECORD = "llmcf-install.json"
 STORE_DIR = "bundles"
 _MAGIC = {"gguf": (b"GGUF",), "mmproj-gguf": (b"GGUF",), "ggml-whisper": (b"lmgg", b"ggjt", b"ggml"),
           "elf": (b"\x7fELF",), "tar.gz": (b"\x1f\x8b",)}
@@ -494,8 +496,10 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
         plan.checks.append({"check": "memory", "result": "unknown",
                             "detail": f"about {memory} MB needed; the probe does not say the board's memory"})
     if roots and not selection.unprivileged_only:
-        plan.notes.append("the root actions need llmcf-install, the framework's root helper; the installer stops "
-                          "before them (choose the unprivileged-only variant to skip them)")
+        plan.notes.append("the root actions run only through llmcf-install, the framework's root helper the bundle "
+                          "carries, after the person's own yes for them in the CLI or the Board bundle window (never "
+                          "through an AI); the installer stops before them (choose the unprivileged-only variant to "
+                          "skip them)")
         if access is not None and access.sudo == "absent":
             plan.warnings.append("the board has no sudo: llmcf-install cannot run there; the unprivileged-only "
                                  "variant still works")
@@ -572,6 +576,20 @@ class BuiltBundle:
     def file(self, name: str) -> Path:
         return self.path / name
 
+    @property
+    def needs_root(self) -> bool:
+        """The bundle has root actions to run (the full variant): it carries llmcf-install for them."""
+        return needs_root(self.manifest)
+
+    @property
+    def root_helper(self) -> Optional[Dict[str, str]]:
+        """llmcf-install's record in the bundle ({version, target, sha256}), None when it carries none."""
+        try:
+            data = json.loads((self.path / ROOT_HELPER_RECORD).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return {k: str(data.get(k, "")) for k in ("version", "target", "sha256")} if isinstance(data, dict) else None
+
     def payload(self) -> List[Tuple[str, Path, FileEntry]]:
         """(staged name on the board, local copy, entry) of every file the bundle sends."""
         out = []
@@ -635,6 +653,16 @@ class BundleStore:
         for name in SIGNED_FILES:
             if not (built.path / f"{name}.sig").is_file():
                 problems.append(f"{name} carries no signature of the framework's signing key")
+        if built.needs_root:
+            record = built.root_helper
+            helper = built.path / ROOT_HELPER_FILE
+            if record is None or not helper.is_file():
+                problems.append("the bundle's root actions need llmcf-install, which it does not carry (build it "
+                                "again)")
+            elif sha256_file(helper) != record["sha256"]:
+                problems.append("llmcf-install changed since the bundle was built")
+            elif not (built.path / f"{ROOT_HELPER_FILE}.sig").is_file():
+                problems.append("llmcf-install carries no signature of the framework's signing key")
         return problems
 
     def boards(self, bundle_id: str) -> Dict[str, Any]:
@@ -726,9 +754,18 @@ class BundleStore:
         write_private(self.folder(bundle_id) / "boards.json", json.dumps(data, indent=2, sort_keys=True))
 
 
-def build_bundle(plan: BundlePlan, store: BundleStore, signer: Any, *, ledger: Any = None) -> BuiltBundle:
-    """Writes the planned bundle into the store, signed (see the module text). BundleError when the plan has
-    problems, own blocks the person did not allow, no signer, no room, or a file that changed since the plan."""
+def needs_root(manifest: Optional[BundleManifest]) -> bool:
+    """Whether a manifest has root actions to run (not the unprivileged-only variant)."""
+    return manifest is not None and manifest.mode == "full" and bool(manifest.root_actions)
+
+
+def build_bundle(plan: BundlePlan, store: BundleStore, signer: Any, *, ledger: Any = None,
+                 helper: Any = None) -> BuiltBundle:
+    """Writes the planned bundle into the store, signed (see the module text). A bundle with root actions carries
+    llmcf-install for the board's architecture (`helper`, a root_helper.HelperBuild: service.build_for makes it),
+    signed like the installer, with its record llmcf-install.json. BundleError when the plan has problems, own
+    blocks the person did not allow, no signer, no room, no helper for root actions, or a file that changed since
+    the plan."""
     from orchestrator.Core.disk_plan import refusal, room
     from orchestrator.utils.helpers import copy_hashed, sha256_bytes
     if not plan.ok:
@@ -736,6 +773,9 @@ def build_bundle(plan: BundlePlan, store: BundleStore, signer: Any, *, ledger: A
     if signer is None:
         raise BundleError("the framework's signing key is needed to sign the bundle (its secrets store did not open)")
     manifest = plan.manifest
+    if needs_root(manifest) and helper is None:
+        raise BundleError("the bundle's root actions need llmcf-install for the board's architecture, and none was "
+                          "made; build it again (or choose the unprivileged-only variant)")
     dest = store.folder(manifest.bundle_id)
     if dest.exists():
         raise BundleError(f"bundle {manifest.bundle_id} exists already")
@@ -761,6 +801,18 @@ def build_bundle(plan: BundlePlan, store: BundleStore, signer: Any, *, ledger: A
         for name, body in texts.items():
             (tmp / name).write_bytes(body)
             (tmp / f"{name}.sig").write_text(signer.sign_bytes(body), encoding="ascii")
+        if needs_root(manifest):
+            from orchestrator.runtime.bundle.root_helper import target_of
+            if helper.target != target_of(manifest.board.arch):
+                raise BundleError(f"llmcf-install was built for {helper.target}, the board runs "
+                                  f"{manifest.board.arch}")
+            got = copy_hashed(Path(helper.path), tmp / ROOT_HELPER_FILE)
+            if got != helper.sha256:
+                raise BundleError("llmcf-install changed since it was built; build the bundle again")
+            (tmp / f"{ROOT_HELPER_FILE}.sig").write_text(signer.sign_file(tmp / ROOT_HELPER_FILE), encoding="ascii")
+            (tmp / ROOT_HELPER_RECORD).write_text(json.dumps({"version": helper.version, "target": helper.target,
+                                                              "sha256": got}, indent=2, sort_keys=True) + "\n",
+                                                  encoding="utf-8")
         (tmp / "selection.json").write_text(json.dumps(plan.selection.as_json(), indent=2, sort_keys=True),
                                             encoding="utf-8")
         try:
@@ -776,5 +828,5 @@ def build_bundle(plan: BundlePlan, store: BundleStore, signer: Any, *, ledger: A
 
 
 __all__ = ["BuiltBundle", "BundleError", "BundlePlan", "BundleStore", "FileChoice", "MEMORY_RESERVE_MB", "PRESETS",
-           "PlannedFile", "RuntimePackage", "SIGNED_FILES", "Selection", "arch_matches", "build_bundle", "component_ids",
-           "detect_format", "elf_arch", "new_bundle_id", "plan_bundle"]
+           "PlannedFile", "ROOT_HELPER_RECORD", "RuntimePackage", "SIGNED_FILES", "Selection", "arch_matches",
+           "build_bundle", "component_ids", "detect_format", "elf_arch", "needs_root", "new_bundle_id", "plan_bundle"]

@@ -14,7 +14,9 @@ Boards > Board bundle..., through runtime/bundle/service.py). Optional like the 
   after the person's yes in the framework's own window only (channels ("framework",)); never a standing approval
   (grants.NEVER_GRANT), never under a delegation (delegation.NEVER_DELEGATE). The login is
   runtime/device/service.connect with the framework's key only and the host key the person was shown; the result
-  holds the installer's report scrubbed (no account, no path of the board or of this computer).
+  holds the installer's report scrubbed (no account, no path of the board or of this computer). Root actions are never
+  run from here: they stop the installer (root_actions_waiting) and run only through llmcf-install after the person's
+  own yes in the CLI or the Board bundle window (runtime/bundle/board.py; no tool reaches it).
 
 Every caller of the block catalog passes the verified cached community index with its revocations
 (service.catalog_sources: CommunityManager.cached_index(revocations=True)), so a revoked block is never used.
@@ -170,7 +172,8 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
             Fact("Bundle", f"{m.bundle_id}: {comps}; mode {m.mode}; sends up to {_mb(size)}"),
             Fact("Deploy as", f"{user}@{device.address}, with the framework's key only", person_only=True),
             Fact("On the board", "the bundle's signed installer checks every file and installs the unprivileged "
-                                 "steps, each only once; root actions stop it (they need llmcf-install)"
+                                 "steps, each only once; root actions stop it: they run only through llmcf-install "
+                                 "after the person's own yes in the CLI or the Board bundle window, never from here"
                  + ("" if m.root_actions else "; this bundle has none")),
             Fact("Undo", "the installer the board keeps can roll back or uninstall the bundle's own steps "
                          "(the framework's Board bundle window)")]
@@ -257,8 +260,9 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
                                    f"{len(o.plan.get('components', []))} components."),
         ToolSpec("bundle_deploy", "Deploy a board bundle",
                  "Sends a bundle the person built to its trusted board and installs its unprivileged steps with its "
-                 "signed installer; root actions stop it (they need llmcf-install). The person confirms it in the "
-                 "framework's own window, every time. A job.",
+                 "signed installer; root actions stop it (they run only through llmcf-install, after the person's "
+                 "own yes in the CLI or the Board bundle window, never through this tool). The person confirms it in "
+                 "the framework's own window, every time. A job.",
                  ToolTier.EXTERNAL, BundleDeployIn, BundleJobOut, bundle_deploy, destructive=True,
                  channels=("framework",), prepare=deploy_facts, takes_context=True, open_world=True,
                  default_decision=Decision.DENY, max_decision=Decision.ASK,
