@@ -353,6 +353,11 @@ TOOL_FACTS: Dict[str, ToolFacts] = {
                                        "devices", "switch back to the previous runtime"),
     "run_device_benchmark": ToolFacts(_DEVICE | {"no_device_runtime", "no_device_model", "device_model_unset"}, _FS(),
                                       _FS({"untrusted_model_native"}), "devices"),
+    # the board bundle: the plan reads only; every deploy is the person's in the framework's own window
+    "bundle_plan": ToolFacts(_FS({"device_not_trusted", "host_key_unknown", "device_host_key_changed"}),
+                             delegable="not_needed", undo="nothing to undo"),
+    "bundle_deploy": ToolFacts(_DEVICE, delegable="never",
+                               undo="roll back or uninstall it in the Board bundle window"),
     "answer_approval": ToolFacts(delegable="never"),
     # Only harmless repairs, every call asked. Extension point M3a/M6 (with WP11): the blockers repair_manual,
     # repair_needs_person and wrong_account, and the delegation group "repairs" for harmless repairs only.

@@ -47,7 +47,7 @@ NEVER_GRANT = frozenset({
     "deploy_to_device", "probe_remote_device", "deploy_device_runtime", "run_device_benchmark",
     "update_settings", "crawl_docs_site", "create_target_module",
     "export_pack", "resolve_healing", "cancel_build", "cancel_job", "delete_artifact", "restore_knowledge_snapshot",
-    "remove_pack",
+    "remove_pack", "bundle_deploy",
 })
 
 # Licences a standing approval may cover (design 2.4); everything else asks.

@@ -710,6 +710,10 @@ du die Variante ohne Sonderrechte (keine Autostart-Unit). Ausrollen, Deinstallie
 vorher ("Nein" ist die Vorgabe); gespeicherte Bündel werden nur aus der vollen Liste gelöscht, die du anhakst, in
 den Papierkorb oder endgültig.
 
+Für KI-Clients tun die optionalen Werkzeuge `bundle_plan` (der Plan nur als Labels, nie eine Datei, ein Pfad, eine
+Adresse oder ein Konto) und `bundle_deploy` (du bestätigst jedes Ausrollen im eigenen Fenster des Frameworks, nie
+eine dauerhafte Freigabe oder eine Delegation) dasselbe; du gibst sie zuerst frei.
+
 In der GUI: **Boards > Board-Bündel...**; im Terminal: [`llm-cli bundle`](CLI_Usage_DE.md#bundle). Hast du noch
 keinen eigenen Baustein, zeigt der Export im Community Hub dorthin zu **Neuer Baustein...**.
 
