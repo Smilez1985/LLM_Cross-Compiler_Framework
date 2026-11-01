@@ -492,7 +492,9 @@ def ensure_toolbox(cache_dir: Path, way: str, *, offline: bool,
     returns the bytes of a pinned URL (through the framework's checked downloader); `build(work)` builds both tools
     in the builder image and returns their paths, `build(work, setpriv="llmcf-setpriv")` for the way "build-rust".
     Offline with nothing cached: ToolboxMissing (OFFLINE_REFUSAL). A toolbox made here replaces the tools an
-    assembled layer still holds: that layer is assembled again from the shipped copy and the new tools."""
+    assembled layer still holds when that layer was whole for the old record (the shipped scripts and the tools it
+    named): it is assembled again from the shipped copy and the new tools. Any other layer is left for ready_layer,
+    which refuses it as 'changed' (never replaced silently)."""
     folder = toolbox_dir(cache_dir)
     record = read_toolbox(folder)
     if record is not None:
@@ -501,13 +503,35 @@ def ensure_toolbox(cache_dir: Path, way: str, *, offline: bool,
         raise ToolboxMissing(OFFLINE_REFUSAL)
     if way not in TOOLBOX_WAYS:
         way = DEFAULT_TOOLBOX_WAY
+    was_whole = _layer_whole_for_old_record(cache_dir)
     record = _make_toolbox(cache_dir, way, fetch, build, log)
-    if layer_dir(cache_dir).exists() or layer_dir(cache_dir).is_symlink():
-        # the assembled layer holds the tools of before (an older recipe, or tools removed by hand): it is made
-        # again from the shipped copy and the new tools, never kept with tools the record no longer names
+    if was_whole:
+        # the assembled layer held exactly the shipped scripts and the tools of the old record (an older recipe):
+        # it is assembled again with the new tools. Any other layer (changed by hand, or tools no record names) is
+        # never replaced silently here: ready_layer refuses it as 'changed' and Mojo Miracle restores it.
         log("Runtime layer: assembling the layer again with the new tools ...")
         assemble(cache_dir)
     return record
+
+
+def _layer_whole_for_old_record(cache_dir: Path) -> bool:
+    """Whether the assembled layer is exactly the shipped scripts plus the tools the toolbox's present record names
+    (also a record of an older recipe that read_toolbox no longer takes): only such a layer is assembled again after
+    the toolbox is made anew."""
+    folder = layer_dir(cache_dir)
+    if not folder.is_dir() or folder.is_symlink() or shipped_problems():
+        return False
+    try:
+        old = json.loads((toolbox_dir(cache_dir) / TOOLBOX_RECORD).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    digests = old.get("sha256") if isinstance(old, dict) else None
+    if not isinstance(digests, dict) or any(not re.fullmatch(r"[0-9a-f]{64}", str(digests.get(t, "")))
+                                            for t in TOOLS):
+        return False
+    expected = {name: digest for name, digest in read_manifest().items() if name in SCRIPTS}
+    expected.update({f"bin/{tool}": str(digests[tool]) for tool in TOOLS})
+    return not _layer_changes(folder, expected)
 
 
 def _make_toolbox(cache_dir: Path, way: str, fetch: Optional[Callable[[str], bytes]],
@@ -684,6 +708,15 @@ def layer_check(cache_dir: Path) -> LayerCheck:
     folder = layer_dir(cache_dir)
     if not folder.is_dir() or folder.is_symlink():
         return LayerCheck("missing", toolbox_way=record.get("way", ""))
+    changed = _layer_changes(folder, expected)
+    if changed:
+        return LayerCheck("changed", changed, record.get("way", ""))
+    return LayerCheck("intact", toolbox_way=record.get("way", ""))
+
+
+def _layer_changes(folder: Path, expected: Dict[str, str]) -> List[str]:
+    """The names of the assembled layer `folder` that differ from `expected` (name -> sha256): changed, missing,
+    extra, a link, or writable by others than the owner."""
     found: Dict[str, Path] = {}
     extra: List[str] = []
     for path in sorted(folder.rglob("*")):
@@ -703,9 +736,7 @@ def layer_check(cache_dir: Path) -> LayerCheck:
             if mode & 0o022:
                 changed.append(rel)
         changed = sorted(set(changed))
-    if changed:
-        return LayerCheck("changed", changed, record.get("way", ""))
-    return LayerCheck("intact", toolbox_way=record.get("way", ""))
+    return changed
 
 
 def assemble(cache_dir: Path) -> LayerCheck:
