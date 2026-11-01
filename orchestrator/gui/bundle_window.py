@@ -100,6 +100,10 @@ class BundleWindow(BoardSteps, QDialog):
         self.chk_unprivileged = QCheckBox(self._t("bundle.unprivileged"), self)
         self.chk_unprivileged.setObjectName("chk_bundle_unprivileged")
         top.addWidget(self.chk_unprivileged)
+        # the person's yes to plan a language model on a board that was not measured yet (never an AI's)
+        self.chk_unmeasured = QCheckBox(self._t("bundle.unmeasured"), self)
+        self.chk_unmeasured.setObjectName("chk_bundle_unmeasured")
+        top.addWidget(self.chk_unmeasured)
         layout.addLayout(top)
         self.lbl_boards = plain_label("")
         self.lbl_boards.setObjectName("lbl_bundle_boards")
@@ -414,10 +418,12 @@ class BundleWindow(BoardSteps, QDialog):
             return None
         state, config = self.state_dir, getattr(self.framework, "config", None)
         app_root, index = self._sources()
+        unmeasured_ok = self.chk_unmeasured.isChecked()
 
         def work():
             plan = service.plan_for_device(state, device_id, selection, config=config, app_root=app_root,
-                                           mode=framework_mode(config), allow_own=allow_own, index=index)
+                                           mode=framework_mode(config), allow_own=allow_own, index=index,
+                                           unmeasured_ok=unmeasured_ok)
             self._check_cancel()
             return plan
         return work

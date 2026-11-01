@@ -11,6 +11,7 @@ variables:
   - {name: port, type: port, default: 8080, help: "Loopback port of the server"}
   - {name: ctx_size, type: uint, default: 4096, min: 256, max: 262144, help: "Context size in tokens"}
   - {name: threads, type: threads, default: 0, help: "CPU threads (0: llama.cpp decides)"}
+  - {name: kv_cache, type: choice, choices: [f16, q8_0, q4_0], help: "KV-cache type (unset: the board's measurement decides)"}
   - {name: memory_limit_mb, type: memory_mb, default: 2048, help: "Memory limit of its unit (autostart only)"}
   - {name: user, type: user, default: llmcf, help: "Account its unit runs as (autostart only)"}
   - {name: autostart, type: bool, default: false, help: "Start at boot through its own unit (needs llmcf-install)"}
@@ -30,3 +31,4 @@ start:
     - --ctx-size
     - "{ctx_size}"
     - {when: threads, args: [--threads, "{threads}"]}
+    - {when: kv_cache, args: [--cache-type-k, "{kv_cache}", --cache-type-v, "{kv_cache}"]}

@@ -99,6 +99,7 @@ def _selection(tmp: Path, **kw) -> gen.Selection:
 
 def _plan(tmp: Path, selection=None, **kw):
     kw.setdefault("runtime", _runtime_tarball(tmp))
+    kw.setdefault("unmeasured_ok", True)   # the measured limits have tests of their own (test_board_measure.py)
     return gen.plan_bundle(selection or _selection(tmp), catalog=blk.load_catalog(kw.pop("app_root", None)),
                            profile=kw.pop("profile", RK3566), device_id=DEVICE, offline=kw.pop("offline", False),
                            bundle_id=kw.pop("bundle_id", "voice-test"), **kw)

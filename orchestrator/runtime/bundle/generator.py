@@ -14,8 +14,14 @@ plan_bundle (nothing is written):
   program's ELF architecture against the board's) or a pinned online item (https with its sha256 and size; in offline
   mode only an address the one locality rule counts as local, utils/locality.check_reach);
 - the models' licences are named where the block requires it;
-- memory: each block's base plus its model factor times the model size must fit into the board's memory (the probe's
-  RAM_TOTAL_MB) with a reserve for the system (MEMORY_RESERVE_MB or a tenth, the larger);
+- memory, by the board's measured limits (runtime/device/measure.py, `limits`): whether the LLM runs on the board is
+  the person's choice first (they pick the llm block or not; a bundle without it notes that the model runs off the
+  board); with an llm block the board's measurement decides: its context (ctx_size, unless the person set one) and
+  KV-cache type come from it, the server's memory is the measured one (BoardLimits.need_for), the other blocks add
+  their base plus model factor, and all of it must fit into the measured usable memory (free at rest less the
+  measured reserve). A board without a measurement is refused for an llm block (nothing is guessed) unless the person
+  says yes to planning without it (`unmeasured_ok`, never an AI): then, and for bundles without an llm block, the
+  declared check of the probe's RAM_TOTAL_MB with a reserve (MEMORY_RESERVE_MB or a tenth, the larger) applies;
 - autostart needs a unit, so the root actions create_user, install_unit and set_cgroup (llmcf-install), and a board
   whose access facts name another init system than systemd cannot take it; a board without sudo gets the plain note
   that llmcf-install cannot run there (the unprivileged-only variant still works).
@@ -290,7 +296,7 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
                 runtime: Optional[RuntimePackage] = None, config: Any = None, mode: str = "private",
                 offline: Optional[bool] = None, allow_own: bool = False, bundle_id: Optional[str] = None,
                 hasher: Optional[Callable[[Path], str]] = None, locality: Optional[Callable[..., Any]] = None,
-                now: Optional[datetime] = None) -> BundlePlan:
+                now: Optional[datetime] = None, limits: Any = None, unmeasured_ok: bool = False) -> BundlePlan:
     """The plan of `selection` for the board of `profile` (see the module text). `offline` None reads the setting
     from `config` (utils/locality.offline_mode); `locality` stands in for utils/locality.check_reach in tests."""
     from orchestrator.utils.helpers import sha256_file
@@ -344,8 +350,19 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
     roots: List[RootAction] = []
     ports: Dict[int, str] = {}
     memory = 0
+    measured_llm = 0          # MiB the llm servers need by the board's measurement
+    has_llm = any(b.kind == "llm" for b in blocks)
     for comp_id, block in zip(_component_ids(blocks), blocks):
         given = dict(selection.values.get(comp_id) or {})
+        if block.kind == "llm" and limits is not None and getattr(limits, "fits", False):
+            # the board's measurement decides what the person did not set (never a guessed default)
+            names = {v.name for v in block.variables}
+            if "ctx_size" in names and "ctx_size" not in given:
+                given["ctx_size"] = limits.ctx
+                plan.notes.append(f"{comp_id}: context {limits.ctx} tokens from the board's measurement")
+            if "kv_cache" in names and "kv_cache" not in given and limits.kv_cache != "f16":
+                given["kv_cache"] = limits.kv_cache
+                plan.notes.append(f"{comp_id}: KV cache {limits.kv_cache} from the board's measurement")
         plan.accounts[comp_id] = tuple(v.name for v in block.variables if v.type == "user")
         values: Dict[str, Any] = {}
         for var in block.variables:
@@ -444,7 +461,16 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
             plan.files[(comp_id, name)] = PlannedFile(entry, path)
             if need.role in ("model", "mmproj"):
                 model_bytes += size
-        memory += int(block.memory_base_mb + block.memory_model_factor * model_bytes / 1048576)
+        if block.kind == "llm" and limits is not None and getattr(limits, "fits", False):
+            ctx = int(values.get("ctx_size") or limits.ctx)
+            if ctx > limits.ctx:
+                plan.problems.append(f"{comp_id}: a context of {ctx} tokens does not fit: the board's measurement "
+                                     f"leaves room for {limits.ctx} tokens with this model")
+            need = limits.need_for(model_bytes or limits.model_bytes, ctx, values.get("kv_cache") or limits.kv_cache)
+            measured_llm += need
+            memory += need
+        else:
+            memory += int(block.memory_base_mb + block.memory_model_factor * model_bytes / 1048576)
         program = block.program
         if "@RUNTIME@" in program:
             if runtime is None or not runtime.build_id:
@@ -480,7 +506,37 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
     plan.memory_mb = memory
     _probe_checks(plan, board_arch, init, access, offline, roots)
     ram = profile.int_value("RAM_TOTAL_MB") if hasattr(profile, "int_value") else None
-    if ram:
+    if not has_llm:
+        plan.notes.append("no language model on the board (your choice): the bundle's parts use a model off the "
+                          "board")
+    if has_llm and limits is not None and not getattr(limits, "fits", False):
+        plan.problems.append(f"the language model does not fit on this board by its measurement: {limits.reason}; "
+                             "leave the llm block out to run the model off the board")
+        plan.checks.append({"check": "memory", "result": "failed", "detail": f"measured: {limits.reason}"})
+    elif limits is not None and has_llm:
+        usable = int(limits.usable_mib)
+        plan.board_memory_mb = usable
+        if memory > usable:
+            plan.problems.append(f"the bundle needs about {memory} MB of memory, the board's measurement leaves "
+                                 f"{usable} MB for it ({limits.available_mib} MB free at rest less the measured "
+                                 f"reserve of {limits.reserve_mib} MB); leave the llm block out to run the model off "
+                                 "the board, or choose a smaller model")
+        elif memory > usable * 0.9:
+            plan.warnings.append(f"the bundle takes about {memory} of the {usable} MB the board's measurement leaves: "
+                                 "little room is left")
+        plan.checks.append({"check": "memory", "result": "failed" if memory > usable else
+                            ("warning" if memory > usable * 0.9 else "passed"),
+                            "detail": f"measured: about {memory} MB needed ({measured_llm} MB for the language "
+                                      f"model as measured on the board), {usable} MB usable"})
+    elif has_llm and not unmeasured_ok:
+        from orchestrator.runtime.device.measure import NOT_MEASURED
+        plan.problems.append(f"{NOT_MEASURED}; or plan without the measurement after your own yes (the probe's "
+                             "declared memory is used then)")
+        plan.checks.append({"check": "memory", "result": "unknown", "detail": "the board was not measured"})
+    elif ram:
+        if has_llm:
+            plan.warnings.append("planned without the board's measurement (your yes): the memory check uses the "
+                                 "probe's declared RAM")
         usable = ram - max(MEMORY_RESERVE_MB, ram // 10)
         plan.board_memory_mb = usable
         if memory > usable:
