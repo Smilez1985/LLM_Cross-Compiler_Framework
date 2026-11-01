@@ -41,7 +41,7 @@ JOBS = ("build", "imatrix")
 BUILD_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 QUESTION = "The build stopped with {done} kept. Continue it, or delete what it left?"
 AI_NEXT = ("Only the person decides whether an interrupted build is continued or what it left is deleted: tell them "
-           "it waits in the framework (Build > Build History...). Their answer is never yours to give.")
+           "the question waits for them in the framework's build history. Their answer is never yours to give.")
 KEPT_WARNING = ("The build stopped after {done}; they are kept. Continue the build (its finished stages are not run "
                 "again) or delete what it left.")
 DISCARDED_NOTE = "Nothing of the build could be used again, so what it left was deleted."
