@@ -43,10 +43,11 @@ def device_profile(state_dir: Path, device_id: str):
 def plan_for_device(state_dir: Path, device_id: str, selection: gen.Selection, *, config: Any = None,
                     app_root: Optional[Path] = None, mode: str = "private", allow_own: bool = False,
                     runtime: Optional[gen.RuntimePackage] = None, profile: Any = None,
-                    index: Any = None) -> gen.BundlePlan:
+                    index: Any = None, programs: Any = None, framework: Any = None) -> gen.BundlePlan:
     """plan_bundle for a stored board: its probe, the block catalog of this framework (`index`: the verified cached
     community index, CommunityManager.cached_index(revocations=True), so a revoked block is not used), its runtime
-    package."""
+    package. `programs`: the resolver of a block's program "from: framework"; None builds it for the person
+    (framework_programs over `framework`'s container engine when cargo is not here)."""
     profile = profile or device_profile(state_dir, device_id)
     catalog = blk.load_catalog(app_root, index=index)
     needs_runtime = any(need.source == "runtime" for bid in selection.blocks
@@ -54,7 +55,50 @@ def plan_for_device(state_dir: Path, device_id: str, selection: gen.Selection, *
     if runtime is None and needs_runtime:
         runtime = runtime_for(state_dir, device_id, profile)
     return gen.plan_bundle(selection, catalog=catalog, profile=profile, device_id=device_id,
-                           runtime=runtime, config=config, mode=mode, allow_own=allow_own)
+                           runtime=runtime, config=config, mode=mode, allow_own=allow_own,
+                           programs=programs or framework_programs(config, client=engine_client(framework)))
+
+
+KEPT_ONLY = ("{name} for the board's architecture is not built on this computer yet; the person's plan in the "
+             "framework's Board bundle window builds it once (an AI's plan only reads)")
+
+
+def engine_client(framework: Any) -> Any:
+    """The framework's container engine client (docker-py) for the builder image, None without one."""
+    return getattr(getattr(getattr(framework, "docker_manager", None), "builder", None), "docker_client", None)
+
+
+def _cache_of(config: Any) -> Path:
+    from orchestrator.runtime.bundle import root_helper
+    try:
+        from orchestrator.Core.runtime_layer import cache_dir_of
+        return cache_dir_of(config)
+    except Exception:  # noqa: BLE001 - no settings: the framework's default cache folder
+        return root_helper.RUST_DIR.parent / "cache"
+
+
+def framework_programs(config: Any = None, client: Any = None, say: Callable[[str], None] = lambda _m: None, *,
+                       build: bool = True):
+    """The resolver of a block's program "from: framework" (llmcf-gateway): the framework's own Rust program for the
+    board's architecture, the cached one or built once now (root_helper.ensure_helper with its crate: cargo here or
+    the builder image over `client`; offline only a kept one, through the one offline rule). `build` False (an AI's
+    read-only plan): only a kept one, nothing is built, fetched or written (KEPT_ONLY otherwise). (path, sha256)."""
+    from orchestrator.runtime.bundle import root_helper
+    from orchestrator.utils.locality import offline_mode
+
+    def resolve(name: str, arch: Optional[str]):
+        cache = _cache_of(config)
+        if not build:
+            if name not in root_helper.FRAMEWORK_PROGRAMS:
+                raise root_helper.HelperMissing(f"{name} is no program of the framework's Rust workspace")
+            kept = root_helper.cached(cache, arch, crate=name)
+            if kept is None:
+                raise root_helper.HelperMissing(KEPT_ONLY.format(name=name))
+            return kept.path, kept.sha256
+        made = root_helper.ensure_helper(cache, arch, offline=bool(offline_mode(config)), crate=name,
+                                         build=root_helper.default_builder(client, log=say, crate=name), log=say)
+        return made.path, made.sha256
+    return resolve
 
 
 _ASSIGN = re.compile(r"^([a-z][a-z0-9-]{0,40})\.([a-z][a-z0-9_]{0,31})=(.*)$", re.ASCII | re.DOTALL)
@@ -111,14 +155,16 @@ def selection_from(*, preset: Optional[str] = None, blocks: Iterable[str] = (), 
 
 def run_on_board(open_session: Callable[[], Any], built: gen.BuiltBundle, action: str, *,
                  store: Optional[gen.BundleStore] = None, device_id: str = "",
-                 say: Callable[[str], None] = lambda _m: None):
+                 say: Callable[[str], None] = lambda _m: None, gateway: str = "complete"):
     """The installer `action` on the board through the caller's login (`open_session()` gives the board session),
-    the session closed in every case (board.run_bundle)."""
+    the session closed in every case (board.run_bundle; `gateway`: what the status checks of a gateway component,
+    complete or bench)."""
     from orchestrator.runtime.bundle.board import run_bundle
     from orchestrator.runtime.device.remote import RemoteShell
     session = open_session()
     try:
-        return run_bundle(RemoteShell(session), built, action, store=store, device_id=device_id, say=say)
+        return run_bundle(RemoteShell(session), built, action, store=store, device_id=device_id, say=say,
+                          gateway=gateway)
     finally:
         close = getattr(session, "close", None)
         if callable(close):
@@ -168,12 +214,8 @@ def helper_for(framework: Any, arch: Optional[str], say: Callable[[str], None] =
     from orchestrator.runtime.bundle import root_helper
     from orchestrator.utils.locality import offline_mode
     config = getattr(framework, "config", None)
-    try:
-        from orchestrator.Core.runtime_layer import cache_dir_of
-        cache = cache_dir_of(config)
-    except Exception:  # noqa: BLE001 - no settings: the framework's default cache folder
-        cache = root_helper.RUST_DIR.parent / "cache"
-    client = getattr(getattr(getattr(framework, "docker_manager", None), "builder", None), "docker_client", None)
+    cache = _cache_of(config)
+    client = engine_client(framework)
     try:
         return root_helper.ensure_helper(cache, arch, offline=bool(offline_mode(config)),
                                          build=root_helper.default_builder(client, log=say), log=say)
@@ -305,9 +347,31 @@ def bundle_rows(store: gen.BundleStore) -> List[Dict[str, Any]]:
                      "created": m.created, "bytes": size,
                      "components": [{"id": c.id, "block": c.block, "kind": c.kind} for c in m.components],
                      "root_actions": [a.action for a in m.root_actions],
-                     "boards": {d: {"last": str((e or {}).get("last", "")), "at": str((e or {}).get("at", ""))}
+                     "boards": {d: {"last": str((e or {}).get("last", "")), "at": str((e or {}).get("at", "")),
+                                    "gateway": gateway_text((e or {}).get("gateway"))}
                                 for d, e in sorted(store.boards(m.bundle_id).items())}})
     return rows
+
+
+def gateway_text(found: Any) -> str:
+    """The last gateway check of a board as a short label ("" when none ran): per gateway component its state, the
+    model server, TLS with its pin, and the bench's tokens per second (fixed words and numbers only)."""
+    if not isinstance(found, dict):
+        return ""
+    out = []
+    for comp, facts in sorted(found.items()):
+        if not isinstance(facts, dict):
+            continue
+        word = str(facts.get("state", "unknown"))
+        parts = [word]
+        if facts.get("upstream"):
+            parts.append(f"model {facts['upstream']}")
+        if facts.get("tls") == "yes":
+            parts.append("TLS, pinned" if facts.get("pinned") else "TLS")
+        if facts.get("tokens_per_s"):
+            parts.append(f"{facts['tokens_per_s']} tokens/s")
+        out.append(f"gateway {comp}: " + ", ".join(parts))
+    return "; ".join(out)
 
 
 def board_contact(state_dir: Path, device_id: str) -> Tuple[str, int, str, str]:
@@ -344,9 +408,10 @@ def question(action: str, built: gen.BuiltBundle, board: str) -> str:
     return text.format(bundle=built.bundle_id, board=board, size=gen._mb(size))
 
 
-__all__ = ["CHANGING_ACTIONS", "DEPLOY_QUESTION", "ENTERPRISE_NO_PASSWORD", "PASSWORD_PROMPT", "ROLLBACK_QUESTION",
+__all__ = ["CHANGING_ACTIONS", "DEPLOY_QUESTION", "KEPT_ONLY", "ENTERPRISE_NO_PASSWORD", "PASSWORD_PROMPT", "ROLLBACK_QUESTION",
            "ROOT_CHANGING_ACTIONS", "ROOT_QUESTION", "ROOT_ROLLBACK_QUESTION", "ROOT_UNINSTALL_QUESTION",
            "UNINSTALL_QUESTION", "assignments", "board_contact", "build_for", "bundle_rows", "catalog_sources",
-           "device_profile", "helper_for", "password_allowed", "plan_for_device", "question", "readiness_on_board",
-           "ready_remove_on_board", "ready_setup_on_board", "revoked_blocks",
+           "device_profile", "engine_client", "framework_programs", "gateway_text", "helper_for", "password_allowed",
+           "plan_for_device", "question", "readiness_on_board", "ready_remove_on_board", "ready_setup_on_board",
+           "revoked_blocks",
            "root_count", "root_question", "run_on_board", "run_root_on_board", "runtime_for", "selection_from"]

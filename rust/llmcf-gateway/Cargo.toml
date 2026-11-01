@@ -1,0 +1,23 @@
+[package]
+name = "llmcf-gateway"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+publish = false
+description = "The LLM Cross-Compiler Framework's token-saving gateway in front of the board's llama-server"
+
+# One small async HTTP stack (tokio + hyper 1, HTTP/1.1 only), exact pins. TLS only for the local-network mode, and
+# then rustls with its ring provider (no aws-lc, no OpenSSL); rcgen makes the board's own certificate. ring builds a
+# little C, so the cross builds for the boards set CC_<target>=clang (rust/.cargo/config.toml stays the linker).
+[dependencies]
+tokio = { version = "=1.53.3", default-features = false, features = ["rt", "net", "time", "sync", "io-util", "macros"] }
+hyper = { version = "=1.11.1", default-features = false, features = ["http1", "server", "client"] }
+hyper-util = { version = "=0.1.21", default-features = false, features = ["tokio"] }
+http-body-util = { version = "=0.1.5", default-features = false }
+bytes = { version = "=1.12.1", default-features = false, features = ["std"] }
+serde_json = { version = "=1.0.128", default-features = false, features = ["std"] }
+rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std"] }
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring"] }
+rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "ring", "pem"] }
+ring = { version = "=0.17.14", default-features = false, features = ["alloc"] }

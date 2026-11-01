@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["llmcf-install", "llmcf-setpriv"]
+members = ["llmcf-install", "llmcf-setpriv", "llmcf-gateway"]
 
 [profile.release]
 opt-level = "s"

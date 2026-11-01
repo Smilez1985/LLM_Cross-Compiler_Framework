@@ -206,3 +206,21 @@ def test_bundle_deploy_refuses_a_bundle_whose_block_was_revoked_since_the_build(
         call(fw, "bundle_deploy", {"bundle_id": built.bundle_id}, confirm=confirm)
     assert "revoked" in str(e.value) and confirm.asked == [] and logins == []
     assert str(tmp_path) not in str(e.value)
+
+
+def test_bundle_plan_never_builds_a_framework_program_for_an_ai(fw, device, monkeypatch):
+    """bundle_plan is a read-only tool: a block whose program the framework builds (the gateway) takes only a kept
+    one; nothing is built, fetched or written for an AI's plan (the person's plan builds it once)."""
+    from orchestrator.runtime.bundle import root_helper
+    built = []
+
+    def no_build(*a, **kw):
+        built.append(kw.get("crate"))
+        raise AssertionError("an AI's plan must not build")
+    monkeypatch.setattr(root_helper, "default_builder", no_build)
+    monkeypatch.setattr(root_helper, "ensure_helper", no_build)
+    allow(fw, "bundle_plan")
+    out = call(fw, "bundle_plan", {"device_id": device.device_id, "blocks": ["llm-llama-server", "gateway-llmcf"]})
+    assert built == []
+    assert not out.plan["ok"]
+    assert any("gateway" in p and "Board bundle window" in p for p in out.plan["problems"]), out.plan["problems"]

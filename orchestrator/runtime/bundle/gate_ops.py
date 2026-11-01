@@ -358,4 +358,39 @@ define("bundle-ready-remove", ("word",), lambda via, rest="": _remove_body(via),
        doc="after the person's separate yes: removes exactly the sudoers drop-in and llmcf-install at its fixed place")
 
 
-__all__ = ["DROPIN", "FIXED_DIR", "FIXED_HELPER", "RUN_PREFIX", "places_sh"]
+GATEWAY_MODES = ("health", "complete", "bench")
+
+
+def _gateway_body(bundle: str, comp: str, port: str, tls: str, mode: str, rest: str = "") -> str:
+    """bundle-gateway with its values in place: the bundle's own llmcf-gateway (placed by the installer after its
+    sha256 check, in the component's folder) runs `probe` on loopback with a cleared environment: health, one tiny
+    completion, or a short bench of three. It prints `llmcf-gateway: key=value` lines only, never a prompt or an
+    answer; no gateway there: health=absent."""
+    from orchestrator.runtime.server_policy import POSIX_CLEARED_PATH
+    word = '""|-*|.*|*[!a-z0-9._-]*'
+    return "\n".join([
+        f'case {mode} in health) llmcf_m="" ;; complete) llmcf_m="--complete" ;; bench) llmcf_m="--complete '
+        '--bench 3" ;; *) echo "llmcf-gateway: health=refused"; exit 3 ;; esac',
+        f'case {tls} in yes) llmcf_t="--tls" ;; *) llmcf_t="" ;; esac',
+        f'case {bundle} in {word}) echo "llmcf-gateway: health=refused"; exit 3 ;; esac',
+        f'case {comp} in {word}) echo "llmcf-gateway: health=refused"; exit 3 ;; esac',
+        f'llmcf_p="$HOME"/{inst.BUNDLE_REL}/{bundle}/components/{comp}/llmcf-gateway',
+        '[ -f "$llmcf_p" ] && [ -x "$llmcf_p" ] || { echo "llmcf-gateway: health=absent"; exit 0; }',
+        f'PATH={POSIX_CLEARED_PATH}; export PATH',
+        f'exec env -i HOME="$HOME" PATH={POSIX_CLEARED_PATH} LC_ALL=C "$llmcf_p" probe --port {port} $llmcf_t '
+        '$llmcf_m </dev/null 2>&1',
+    ])
+
+
+def _gateway_refusal(args) -> str:
+    ok = (re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,47}", args[0]) and re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,47}", args[1])
+          and 1024 <= int(args[2]) <= 65535 and args[4] in GATEWAY_MODES)
+    return "" if ok else "not a bundle, component, port or check it takes"
+
+
+# The gateway's own check from the board (loopback only, what the host's verify and bench read): it changes nothing.
+define("bundle-gateway", ("word", "word", "uint", "yesno", "word"), _gateway_body, refuse=_gateway_refusal,
+       doc="the bundle's llmcf-gateway probe on loopback (health, one tiny completion, or a short bench)")
+
+
+__all__ = ["DROPIN", "FIXED_DIR", "FIXED_HELPER", "GATEWAY_MODES", "RUN_PREFIX", "places_sh"]

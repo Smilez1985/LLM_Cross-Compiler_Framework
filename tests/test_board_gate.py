@@ -34,8 +34,8 @@ EXPECTED_GATE_OPS = {
     "login-check", "mkprivate", "model-sha256", "old-sidecar", "ping", "probe-python", "probe-python-check",
     "probe-shell", "programs-check", "root-unit-enable", "root-unit-install", "root-unit-start", "run-program",
     "run-program-split", "runtime-activate", "runtime-check", "runtime-install", "server-tools-check",
-    "staging-create", "start-bench-job", "start-bundle-kept", "start-bundle-run", "bundle-root", "bundle-ready", "bundle-ready-setup",
-    "bundle-ready-remove",
+    "staging-create", "start-bench-job", "start-bundle-kept", "start-bundle-run", "bundle-root", "bundle-ready",
+    "bundle-ready-setup", "bundle-ready-remove", "bundle-gateway",
     "start-bench-job-setsid", "start-bench-job-setsid-timeout", "start-bench-job-timeout", "start-install",
     "start-status", "status", "thermal",
 }
