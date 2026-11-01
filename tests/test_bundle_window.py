@@ -201,3 +201,21 @@ def test_the_menu_entry_and_its_paths(qapp):
                if k.startswith("bundle"))
     entries = dict(e[:2] for menu in MENU_LAYOUT if menu[0] == "menu_boards" for e in menu[2] if e != "-")
     assert entries["act_boards_bundle"] == "boards.menu.bundle"
+
+
+def test_deploy_refuses_a_bundle_whose_block_was_revoked_since_the_build(qapp, bundle, tmp_path, monkeypatch):
+    """Review: a block the signed index revoked after the build is never sent (service.revoked_blocks), before the
+    dry run and the question; the CLI and bundle_deploy refuse it the same way."""
+    from test_bundle_ui import _Revoking, _indexed_built
+    from orchestrator.runtime.bundle import service
+    dialog, board = bundle
+    app, built = _indexed_built(tmp_path, board.state, board.signer)
+    monkeypatch.setattr(service, "catalog_sources", lambda framework: (app, _Revoking()))
+    dialog.reload()
+    rows = [r for r, row in enumerate(dialog.rows) if row["bundle_id"] == built.bundle_id]
+    dialog.tbl_store.selectRow(rows[0])
+    boxes = Boxes(monkeypatch, "yes")
+    dialog.buttons["btn_bundle_deploy"].click()
+    wait(qapp, dialog)
+    assert board.logins == [] and boxes.questions() == []
+    assert boxes.asked and "revoked" in boxes.asked[-1].text, [a.text for a in boxes.asked]

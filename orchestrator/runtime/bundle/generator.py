@@ -139,8 +139,8 @@ class BundlePlan:
 
     def labels(self) -> Dict[str, Any]:
         """The plan as labels only (bundle_plan for an AI): block ids, kinds, variable values (numbers, yes/no and
-        plain words), file roles, formats, sizes and licences, the root actions by type, memory numbers, problems
-        and warnings as the framework's own sentences. Never a local path, an address, an account or a URL."""
+        plain words), file roles, formats, sizes and licences, the root actions by type, memory numbers, problems,
+        warnings and notes as the framework's own sentences. Never a local path, an address, an account or a URL."""
         comps = []
         for comp in (self.manifest.components if self.manifest else ()):
             comps.append({"id": comp.id, "block": comp.block, "kind": comp.kind, "trust": comp.block_trust,
@@ -154,7 +154,10 @@ class BundlePlan:
                                                                    else "full"),
                 "memory_mb": self.memory_mb, "board_memory_mb": self.board_memory_mb, "bytes": self.size,
                 "problems": [_scrub(p) for p in self.problems], "warnings": [_scrub(w) for w in self.warnings],
-                "checks": [{k: _scrub(str(v)) for k, v in c.items()} for c in self.checks],
+                # the notes too: "the root actions need llmcf-install; the installer stops before them" holds even
+                # while the files are still to choose (then there is no manifest and root_actions is empty)
+                "notes": [_scrub(n) for n in self.notes],
+                "checks":[{k: _scrub(str(v)) for k, v in c.items()} for c in self.checks],
                 "own_blocks": list(self.own_blocks)}
 
     def lines(self) -> List[str]:

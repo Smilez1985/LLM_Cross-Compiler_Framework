@@ -169,3 +169,40 @@ def test_bundle_deploy_refuses_an_unknown_bundle_and_one_changed_since_it_was_bu
     with pytest.raises(ToolError) as e:
         call(fw, "bundle_deploy", {"bundle_id": built.bundle_id}, confirm=confirm)
     assert "not the one that was built" in str(e.value) and confirm.asked == []
+
+
+def test_bundle_plan_tells_the_ai_that_root_actions_wait_for_llmcf_install(fw, device):
+    allow(fw, "bundle_plan")
+    out = call(fw, "bundle_plan", {"device_id": device.device_id, "preset": "stt",
+                                   "values": {"stt": {"autostart": True}}})
+    assert any("llmcf-install" in n and "stops before them" in n for n in out.plan["notes"]), out.plan
+
+
+def test_bundle_deploy_refuses_a_bundle_whose_block_was_revoked_since_the_build(fw, device, tmp_path, monkeypatch):
+    from test_board_bundle import _indexed_block
+    from orchestrator.runtime.bundle import blocks as blk
+    from orchestrator.runtime.bundle import generator as gen
+    from orchestrator.runtime.bundle import service
+    from orchestrator.runtime.device import service as dev
+    board = _fake_board(tmp_path, "root")
+    app = tmp_path / "app"
+    _indexed_block(app)
+    selection = _selection(tmp_path, blocks=["stt-indexed"])
+    del selection.files["llm"]
+    plan = gen.plan_bundle(selection, catalog=blk.load_catalog(app), profile=RK3566, device_id=device.device_id,
+                           runtime=_runtime_tarball(tmp_path), offline=False, bundle_id="stt-test")
+    assert plan.ok, plan.problems
+    built = gen.build_bundle(plan, gen.BundleStore(Path(fw.config.user_state_dir)), board.signer)
+
+    class Revoking:
+        def revocation(self, kind, pack_id, version, sha256):
+            return object() if (kind, pack_id) == ("block", "stt-indexed") else None
+    monkeypatch.setattr(service, "catalog_sources", lambda framework: (app, Revoking()))
+    logins = []
+    monkeypatch.setattr(dev, "connect", lambda *a, **k: logins.append(a) or GateShell(board))
+    allow(fw, "bundle_deploy")
+    confirm = asking(True)
+    with pytest.raises(ToolError) as e:
+        call(fw, "bundle_deploy", {"bundle_id": built.bundle_id}, confirm=confirm)
+    assert "revoked" in str(e.value) and confirm.asked == [] and logins == []
+    assert str(tmp_path) not in str(e.value)

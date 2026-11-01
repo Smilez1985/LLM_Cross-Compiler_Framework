@@ -80,6 +80,8 @@ TEXTS = {
         "bundle.ask.rollback": "Roll back the last run of bundle {bundle} on board {board}? The installer the board "
                                "kept undoes the steps of its last apply.",
         "bundle.dry_failed": "The installer's dry run did not pass; nothing was changed.",
+        "bundle.revoked": "This bundle is not sent to the board: a building block of it was revoked in the signed "
+                          "index since it was built. Build the bundle again without it. ({reason})",
         "bundle.unchanged": "Nothing was changed on the board.",
         "bundle.staging": "The apply did not finish; the next deploy continues in the same upload folder.",
         "bundle.root": "The installer stopped before the root actions: they need llmcf-install, the framework's root "
@@ -574,6 +576,8 @@ TEXTS = {
         "bundle.ask.rollback": "Den letzten Lauf von Bündel {bundle} auf Board {board} zurückrollen? Der Installer, "
                                "den das Board behalten hat, macht die Schritte seines letzten Apply rückgängig.",
         "bundle.dry_failed": "Der Probelauf des Installers hat nicht bestanden; nichts wurde geändert.",
+        "bundle.revoked": "Dieses Bündel wird nicht an das Board gesendet: einer seiner Bausteine wurde seit dem "
+                          "Bauen im signierten Index zurückgezogen. Baue das Bündel ohne ihn neu. ({reason})",
         "bundle.unchanged": "Auf dem Board wurde nichts geändert.",
         "bundle.staging": "Das Apply wurde nicht fertig; das nächste Ausrollen macht im selben Upload-Ordner weiter.",
         "bundle.root": "Der Installer hat vor den Root-Aktionen angehalten: sie brauchen llmcf-install, den "
