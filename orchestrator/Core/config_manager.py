@@ -797,6 +797,8 @@ class ConfigManager:
                 "build_apt_mirror", "build_apt_proxy", "build_pip_index",
                 "mqtt_broker_url", "mqtt_username", "mqtt_topic_prefix", "mqtt_ca_file",
                 "local_cache_ram_mib", "local_cache_keep_minutes", "local_kv_cache", "local_cache_over_cap_ok",
+                # the framework mode (set_framework_mode: the person's alone)
+                "framework_mode",
                 # v2.3
                 "image_trivy", "image_base_debian", "image_inference_runtime",
                 "enable_security_scan", "llama_cpp_version", "build_jobs", "healing_approval_timeout",
@@ -952,6 +954,25 @@ def framework_mode(config: Any) -> str:
     except Exception:  # noqa: BLE001 - an unreadable setting is the default
         value = "private"
     return "enterprise" if str(value or "").strip().lower() == "enterprise" else "private"
+
+
+def set_framework_mode(config: Any, mode: Any) -> str:
+    """The person's setter of the framework mode: `llmcf config set framework_mode`, File > Settings... and the
+    installers (install.sh and install.bat, through the CLI). `mode` must be exactly private or enterprise (any case,
+    surrounding spaces ignored; ValueError otherwise, nothing changes). Set and saved to config.yml; when it cannot be
+    saved the mode stays as it was (OSError). Returns the mode now. An AI may read the setting, never change it:
+    llm/settings_change.py PERSON_DECIDES refuses it for every change of an AI, and no tool calls this."""
+    word = str(mode if mode is not None else "").strip().lower()
+    if word not in FRAMEWORK_MODES:
+        raise ValueError(f"framework_mode is private or enterprise, not '{mode}'.")
+    before = config.get("framework_mode", "private")
+    if config.set("framework_mode", word) is False:
+        raise ValueError(f"framework_mode is private or enterprise, not '{mode}'.")
+    save = getattr(config, "save_user_config", None)
+    if callable(save) and not save():
+        config.set("framework_mode", before)
+        raise OSError("The framework mode could not be saved to config.yml; it stays as it was.")
+    return framework_mode(config)
 
 
 if __name__ == "__main__":

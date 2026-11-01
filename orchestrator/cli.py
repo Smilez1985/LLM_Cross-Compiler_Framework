@@ -5607,7 +5607,9 @@ def run_deploy(ctx: FrameworkContext, package_path, host, user, port, password, 
                             credentials=OneTimePassword(password) if password else KeyOnly(), label=label,
                             wait=wait_seconds, on_event=lambda event: shown.update(_deploy_event_text(ctx, event, host)),
                             cancel=CancelToken(check=stop.is_set), key=key, bind_key=False, via="cli", actor="cli",
-                            state_dir=lambda: _state_dir(ctx), audit=lambda: _device_audit(ctx, _state_dir(ctx)))
+                            state_dir=lambda: _state_dir(ctx), audit=lambda: _device_audit(ctx, _state_dir(ctx)),
+                            # a password deploy offers the key tiers as a scan does (the terminal's questions)
+                            chooser=_tier_chooser() if password else None, mode=_framework_mode(ctx))
     result = done.result
 
     if result.success:
@@ -5812,23 +5814,27 @@ def deploy_devices_list(ctx: FrameworkContext, as_json: bool):
     table = Table(title="Trusted devices")
     for column in ("Device", "Label", "Address", "User", "Host key", "Paired", "Key tier", "Last deploy"):
         table.add_column(column)
+    mode = _framework_mode(ctx)
     for r in rows:
         state = {"known": "trusted", "changed": "[red]CHANGED in known_hosts[/red]",
                  "unknown": "[yellow]not in known_hosts[/yellow]"}[r["host_key"]]
         last_deploy = r["last_deploy"] or {}   # may hold only a recorded contact for Mojo: then no deploy is shown
         table.add_row(r["device_id"], escape(r["label"]), escape(r["address"]), escape(r["user"]),
                       f"{escape(r['key_type'])} {r['fingerprint']} ({state})", "yes" if r["paired"] else "no",
-                      _tier_cell(r.get("key_tier", "")),
+                      _tier_cell(r.get("key_tier", ""), mode),
                       escape(f"{last_deploy.get('at')} ({'ok' if last_deploy.get('ok') else 'failed'})")
                       if last_deploy.get("at") else "-")
     console.print(table)
 
 
-def _tier_cell(tier: str) -> str:
-    """The key tier of a board for the device list: the weaker ones marked (remote/key_tiers.py)."""
-    from orchestrator.remote.key_tiers import is_weaker
+def _tier_cell(tier: str, mode: str = "private") -> str:
+    """The key tier of a board for the device lists (`deploy devices list`, `device list`): the weaker ones marked,
+    and in enterprise `mode` the ones it refuses to use (remote/key_tiers.py)."""
+    from orchestrator.remote.key_tiers import allowed, is_weaker
     if not tier:
         return "-"
+    if not allowed(tier, mode):
+        return f"[red]{tier} (refused in enterprise mode)[/red]"
     return f"[yellow]{tier} (weaker)[/yellow]" if is_weaker(tier) else tier
 
 
@@ -6215,6 +6221,8 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
             _board_step_failed(ctx, e.error, host, port)
         elif e.kind == "probe":
             console.print(f"[red]The probe on {escape(host)} failed: {escape(str(e.error))}[/red]")
+        elif e.kind == "weaker_tier":   # enterprise mode refuses the board's weaker key tier (nothing ran there)
+            console.print(f"[red]{escape(str(e))}[/red]")
         else:
             console.print(f"[red]Could not save the profile: {escape(str(e.error))}[/red]")
         sys.exit(1)
@@ -6513,11 +6521,23 @@ def _open_device(state_dir: Path, device_id: str, host: str, port: int, user: st
     # the key that ends a wait, as `deploy run` names it (Ctrl+C ends the command; a wait never runs on to 300 s)
     lines = wait_lines(lambda text: console.print(escape(text)), host, _config_language(ctx), hint=" (Ctrl+C)")
     try:   # the shared step records the board's contacts for Mojo in `state_dir`
+        # the framework mode always (enterprise mode refuses a weaker-tier board at every use); the chooser only
+        # when a password pairs the board
+        tiers = _tier_kwargs(ctx, audit=lambda: _device_audit(ctx, state_dir)) if password else {}
+        tiers["mode"] = _framework_mode(ctx)
+        if tiers.get("chooser") is not None:   # the switch to OpenSSH moves the builds' "tested on" records too
+            from orchestrator.Core.artifact_output import artifact_folders
+            try:
+                tiers["output_dirs"] = artifact_folders(ctx.framework_manager) if ctx is not None and \
+                    ctx.framework_manager is not None else ()
+            except Exception:  # noqa: BLE001 - the "tested on" records stay; everything else moves
+                tiers["output_dirs"] = ()
         client, key = person_steps.connect_stored(state_dir, device_id, host, port, user, password, step=step,
-                                                  on_event=lines, signer=_board_signer(ctx),
-                                                  **(_tier_kwargs(ctx, audit=lambda: _device_audit(ctx, state_dir))
-                                                     if password else {}))
+                                                  on_event=lines, signer=_board_signer(ctx), **tiers)
     except person_steps.BoardStepError as e:
+        if e.kind == "switched":   # the switch to OpenSSH ended the step: the person runs it again
+            console.print(f"[yellow]{escape(str(e))}[/yellow]")
+            sys.exit(1)
         if e.kind in ("unreachable", "host_key_changed") and e.reason:
             _print_reason(ctx, e.reason, host, port)
             if e.kind == "host_key_changed":
@@ -6650,8 +6670,9 @@ def device_list(ctx: FrameworkContext, as_json: bool):
         console.print("No device is stored yet: probe one with llm-cli scan --device HOST --user USER.")
         return
     table = Table(title="Devices")
-    for column in ("Device", "Label", "Address", "System", "Deploy", "Deployed runtime"):
+    for column in ("Device", "Label", "Address", "System", "Deploy", "Deployed runtime", "Key tier"):
         table.add_column(column)
+    mode = _framework_mode(ctx)
     for row in rows:
         s = row["system"] or {}
         system = (f"{s.get('OS_ID') or s.get('OS') or '?'} {s.get('OS_VERSION_ID') or ''} {s.get('ARCH') or ''}, "
@@ -6662,7 +6683,7 @@ def device_list(ctx: FrameworkContext, as_json: bool):
         deployed = row["deployed"]
         table.add_row(row["device_id"], escape(row["label"] or "-"), escape(row["address"] or "-"), escape(system),
                       escape(deploy_text), escape(f"{deployed['build_id'][:16]} ({deployed.get('install')})")
-                      if deployed else "-")
+                      if deployed else "-", _tier_cell(row.get("key_tier", ""), mode))
     console.print(table)
 
 
@@ -7168,6 +7189,37 @@ def show_config(ctx: FrameworkContext):
     from orchestrator.Core.settings_view import effective_settings
     config, _ = _settings(ctx)
     click.echo(json.dumps(effective_settings(config), indent=2, default=str, ensure_ascii=False))
+
+
+# The settings `config set` takes: the person's own settings without a command of their own (an AI may read them with
+# get_settings, never change them).
+CONFIG_SET_KEYS = ("framework_mode",)
+
+
+@config.command('set')
+@click.argument('key', type=click.Choice(CONFIG_SET_KEYS))
+@click.argument('value')
+@pass_context
+def config_set(ctx: FrameworkContext, key: str, value: str):
+    """Set one of your own settings in config.yml. framework_mode: private (the default) or enterprise; enterprise
+    mode takes only OpenSSH with sudo on a board (the root-owned key line) and refuses the weaker Dropbear tier and
+    home gate, also for boards paired before. Only you set it, here or in File > Settings...; an AI may read it, never
+    change it"""
+    from orchestrator.Core.config_manager import framework_mode, set_framework_mode
+    config, _ = _settings(ctx)
+    before = framework_mode(config)
+    try:
+        now = set_framework_mode(config, value)
+    except ValueError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
+    except OSError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]framework_mode: {now}[/green]" + ("" if now != before else " (unchanged)"))
+    if now == "enterprise":
+        console.print("Enterprise mode refuses boards whose framework key sits on the Dropbear tier or the home "
+                      "gate; 'llm-cli deploy devices list' shows each board's key tier.")
 
 
 @config.command('output-folder')

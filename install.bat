@@ -71,6 +71,25 @@ foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
 if ($EngineChoice -notin @("podman")) {
     Write-Error "Unbekannter Wert fuer --engine: '$EngineChoice' (unter Windows: podman; Docker Desktop nur mit --rootful)."
 }
+# The framework mode: private (the default) or enterprise (only OpenSSH with sudo on a board, the root-owned key line).
+# --mode=private|enterprise, for unattended runs also LCF_MODE; without either the installer asks in this window
+# (Enter: private). A run without a console to ask, or with its input redirected (an unattended run: Read-Host would
+# read an empty line there and pick private), keeps the mode as it is (new: private). An unknown value stops here.
+$ModeChoice = if ($env:LCF_MODE) { $env:LCF_MODE } else { "" }
+foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
+    if ($InstallArg -like "--mode=*") { $ModeChoice = $InstallArg.Substring(7) }
+}
+if ($ModeChoice -notin @("", "private", "enterprise")) {
+    Write-Error "Unbekannter Wert fuer --mode: '$ModeChoice' (private oder enterprise)."
+}
+if (-not $ModeChoice -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+    try {
+        $ModeAnswer = Read-Host "Framework-Modus: privat (Standard) oder enterprise? Enterprise nimmt auf Boards nur OpenSSH mit sudo (die Schluesselzeile in Root-Besitz) und lehnt die schwaechere Dropbear-Stufe und das Home-Tor ab. [P/e]"
+        $ModeChoice = if ("$ModeAnswer".Trim().ToLower() -in @("e", "enterprise")) { "enterprise" } else { "private" }
+    } catch {
+        $ModeChoice = ""
+    }
+}
 
 Write-Host "===================================================" -ForegroundColor Cyan
 Write-Host "      LLM Framework - Enterprise Installer"
@@ -261,6 +280,26 @@ try {
     }
 } catch {
     Write-Warning "Ditto: $_ - die Installation ist trotzdem fertig. Spaeter: llm-cli ditto runtime ensure"
+}
+
+# MODUS: der gewaehlte Framework-Modus (llm-cli config set framework_mode), fuer die angemeldete Person selbst (ihre
+# config.yml). Ohne Wahl tut der Schritt nichts; ein Fehler laesst die Installation nicht scheitern.
+if ($ModeChoice) {
+    Write-Host "[Modus] Framework-Modus: $ModeChoice..." -ForegroundColor Yellow
+    try {
+        $SignedIn = (Get-CimInstance Win32_ComputerSystem).UserName
+        $Elevated = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        if ($SignedIn -and ($SignedIn -ne $Elevated)) {
+            Write-Warning "Der Framework-Modus wird fuer $SignedIn gesetzt, nicht fuer das Administratorkonto. Spaeter als du selbst (normales Terminal, im Ordner $InstallDir): .venv\Scripts\python.exe -m orchestrator.cli config set framework_mode $ModeChoice"
+        } else {
+            & $PythonVenv -m orchestrator.cli config set framework_mode $ModeChoice
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "Der Framework-Modus liess sich nicht setzen (Meldungen oben). Spaeter: llm-cli config set framework_mode $ModeChoice"
+            }
+        }
+    } catch {
+        Write-Warning "Framework-Modus: $_ - die Installation ist trotzdem fertig. Spaeter: llm-cli config set framework_mode $ModeChoice"
+    }
 }
 
 Write-Host "Installation Erfolgreich!" -ForegroundColor Green

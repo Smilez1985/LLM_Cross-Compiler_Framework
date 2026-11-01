@@ -428,7 +428,8 @@ class TestBoard:
         from orchestrator.runtime.device import service
         dev, presented, _ = device
         probed = []
-        monkeypatch.setattr(service, "probe", lambda d, s, fp, on_client=None, on_event=None: probed.append(fp) or
+        monkeypatch.setattr(service, "probe", lambda d, s, fp, on_client=None, on_event=None, mode="private":
+                            probed.append(fp) or
                             {"probe_id": d.device_id, "tool": "python", "warnings": 0})
         allow(fw, "probe_remote_device")
         confirm = asking(True)
@@ -452,7 +453,7 @@ class TestBoard:
             return update(self, job_id, **kw)
         monkeypatch.setattr(job_service.JobService, "update", recording)
 
-        def probe(d, s, fp, on_client=None, on_event=None):
+        def probe(d, s, fp, on_client=None, on_event=None, mode="private"):
             for event in (RemoteEvent("waiting", elapsed=5, limit=300, step="command"),
                           RemoteEvent("waiting", elapsed=5, limit=300, step="command"),
                           RemoteEvent("back", step="command")):

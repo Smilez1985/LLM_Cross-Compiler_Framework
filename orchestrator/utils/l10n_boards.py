@@ -32,6 +32,14 @@ TEXTS = {
         "boards.col.system": "System",
         "boards.col.settings": "Deploy settings",
         "boards.col.runtime": "Deployed runtime",
+        "boards.col.tier": "Key tier",
+        "boards.tier.root": "root-owned key line",
+        "boards.tier.dropbear": "Dropbear tier",
+        "boards.tier.home": "home gate",
+        "boards.tier.password": "no key (password)",
+        "boards.tier.unrestricted": "unrestricted key",
+        "boards.tier.weaker": "{tier} (weaker)",
+        "boards.tier.refused": "{tier} (refused in enterprise mode)",
         "boards.key.known": "{key_type} {fingerprint} (the trusted key)",
         "boards.key.changed": "{key_type} {fingerprint} (CHANGED in known_hosts)",
         "boards.key.unknown": "{key_type} {fingerprint} (not in known_hosts)",
@@ -82,6 +90,15 @@ TEXTS = {
         "boards.err.pair": "Pair the board once with its password (Deploy runtime... asks for it) or with "
                            "{path:act_deploy_scan_remote}",
         "boards.err.key_install": "The framework's key could not be installed on the board: {reason}",
+        "boards.err.switched": "The board now runs OpenSSH on port {port} with the root-owned key line, and the "
+                               "framework reaches it there from now on, as device {device_id} (its data moved "
+                               "there). This step ran over Dropbear and stopped: run it again.",
+        "boards.err.weaker_tier": "Enterprise mode refuses to use this board: the framework's key there sits on a "
+                                  "weaker tier (the Dropbear tier or the home gate), which enterprise mode counts as "
+                                  "too insecure. Nothing was done on the board.\n\nWays on: scan the board again "
+                                  "with its password ({path:act_deploy_scan_remote}) and choose the switch to "
+                                  "OpenSSH (the board account needs sudo) or password login; or switch the "
+                                  "framework to private mode ({path:act_file_settings}).",
         "boards.err.failed": "The step failed: {reason}",
         # add a trusted board (deploy devices add)
         "boards.add.title": "Add a trusted board",
@@ -418,6 +435,14 @@ TEXTS = {
         "boards.col.system": "System",
         "boards.col.settings": "Deploy-Einstellungen",
         "boards.col.runtime": "Installierte Laufzeit",
+        "boards.col.tier": "Schlüsselstufe",
+        "boards.tier.root": "root-eigene Schlüsselzeile",
+        "boards.tier.dropbear": "Dropbear-Stufe",
+        "boards.tier.home": "Home-Gate",
+        "boards.tier.password": "kein Schlüssel (Passwort)",
+        "boards.tier.unrestricted": "uneingeschränkter Schlüssel",
+        "boards.tier.weaker": "{tier} (schwächer)",
+        "boards.tier.refused": "{tier} (im Enterprise-Modus abgelehnt)",
         "boards.key.known": "{key_type} {fingerprint} (der vertraute Schlüssel)",
         "boards.key.changed": "{key_type} {fingerprint} (in known_hosts GEÄNDERT)",
         "boards.key.unknown": "{key_type} {fingerprint} (nicht in known_hosts)",
@@ -470,6 +495,17 @@ TEXTS = {
                            "mit {path:act_deploy_scan_remote}",
         "boards.err.key_install": "Der Schlüssel des Frameworks konnte nicht auf dem Board eingerichtet werden: "
                                   "{reason}",
+        "boards.err.switched": "Das Board läuft jetzt mit OpenSSH auf Port {port} und der Schlüsselzeile in "
+                               "Root-Besitz, und das Framework erreicht es ab jetzt dort, als Gerät {device_id} "
+                               "(seine Daten sind dorthin umgezogen). Dieser Schritt lief über Dropbear und hat "
+                               "angehalten: Starte ihn erneut.",
+        "boards.err.weaker_tier": "Der Enterprise-Modus lehnt es ab, dieses Board zu benutzen: Der Schlüssel des "
+                                  "Frameworks liegt dort auf einer schwächeren Stufe (der Dropbear-Stufe oder dem "
+                                  "Home-Gate), die der Enterprise-Modus als zu unsicher wertet. Auf dem Board ist "
+                                  "nichts geschehen.\n\nWege weiter: Scanne das Board erneut mit seinem Passwort "
+                                  "({path:act_deploy_scan_remote}) und wähle die Umstellung auf OpenSSH (das Konto "
+                                  "braucht sudo) oder die Anmeldung mit Passwort; oder stelle das Framework auf den "
+                                  "privaten Modus um ({path:act_file_settings}).",
         "boards.err.failed": "Der Schritt ist fehlgeschlagen: {reason}",
         "boards.add.title": "Vertrautes Board hinzufügen",
         "boards.add.intro": "Fügt ein Board hinzu, dessen Host-Schlüssel schon in der known_hosts-Datei des "

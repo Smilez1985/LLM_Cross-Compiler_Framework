@@ -114,6 +114,9 @@ class DeploymentWorker(QThread):
         # the one cancel of a board step (remote/session.py CancelToken): it holds the deploy's SSH session
         from orchestrator.remote.session import CancelToken
         self._stop = CancelToken()
+        # gui/key_tier_ask.py GuiTierChooser: the person's questions when a password deploy pairs a board that cannot
+        # take the root-owned key line (set by the window, asked in the GUI thread)
+        self.chooser = None
 
     def cancel(self) -> None:
         """Stops the deploy: the wait for the board ends at once, a running upload stops and its session closes."""
@@ -145,7 +148,8 @@ class DeploymentWorker(QThread):
                                 credentials=OneTimePassword(password) if password else KeyOnly(), label=self.label,
                                 kv_cache=self.kv_cache, wait=self.wait_seconds, on_event=self.event.emit,
                                 cancel=self._stop, key=self.key, via="gui", actor="gui",
-                                remember=lambda key: self._remember_device(key=key), on_step=self._on_step)
+                                remember=lambda key: self._remember_device(key=key), on_step=self._on_step,
+                                chooser=self.chooser if password else None)
             if done.package_error is not None:
                 error = done.package_error
                 self.finished.emit(False, "\n\n".join(
@@ -337,8 +341,10 @@ class BoardBenchWorker(QThread):
             profile = dev.device_profile(state, device)
             settings = dev.deploy_settings(state, device, profile).changed(model=check_model_path(self.model))
             fp = dev.read_key(device, state, step="benchmark")   # a failure is recorded for Mojo (W1)
+            from orchestrator.Core.config_manager import framework_mode
             out = dev.benchmark(state, device, profile, settings, fp, allow_untrusted=self.allow_untrusted,
-                                consent=self._consent, output_dirs=artifact_folders(self.framework))
+                                consent=self._consent, output_dirs=artifact_folders(self.framework),
+                                mode=framework_mode(config))
         except SettingsError as e:
             self.finished.emit(False, str(e))
             return
@@ -673,10 +679,27 @@ class DeploymentWindow(QWidget):
             port=conn.port, label=conn.label, wait_seconds=conn.wait, package=package, key=getattr(conn, "key", None))
         if package is None:
             self.worker.kv_cache, self.worker.kv_setting = self.kv_choice()
+        from orchestrator.gui.key_tier_ask import GuiTierChooser
+        from orchestrator.gui.worker_relay import worker_relay
+        # a board that cannot take the root-owned key line: the person's questions, asked in the GUI thread (as the
+        # scan asks them)
+        self._tier_token = object()
+        if not getattr(self, "_tier_relay", False):
+            worker_relay().done.connect(self._on_tier_question, Qt.QueuedConnection)
+            self._tier_relay = True
+        worker = self.worker
+        worker.chooser = GuiTierChooser(self._tier_token, stop=lambda: worker._stop.cancelled,
+                                        tell=lambda text: worker.progress.emit(text))
         self.worker.progress.connect(self._update_progress)
         self.worker.event.connect(self._on_event)
         self.worker.finished.connect(self._on_finished)
         self.worker.start()
+
+    def _on_tier_question(self, token: object, result) -> None:
+        """A key-tier question of the running deploy (gui/key_tier_ask.py), asked here with "No" as the default."""
+        from orchestrator.gui.worker_relay import WorkerQuestion
+        if token is getattr(self, "_tier_token", None) and isinstance(result, WorkerQuestion):
+            result.reply(lambda: ask(self, result.title, result.text))
 
     def _on_existing(self):
         """Deploy existing package...: a ZIP made earlier (here or with `llmcf deploy package`) to the board named
