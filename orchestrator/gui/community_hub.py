@@ -436,7 +436,9 @@ class CommunityHubWindow(QMainWindow):
         if not self.comm_manager:
             self.on_error("Community Manager missing.")
             return
-        dialog = ExportSourceDialog(self.comm_manager.exportable_targets(), self._build_start(), self, self.lang)
+        blocks = self.comm_manager.exportable_blocks() if hasattr(self.comm_manager, "exportable_blocks") else ()
+        dialog = ExportSourceDialog(self.comm_manager.exportable_targets(), self._build_start(), self, self.lang,
+                                    blocks=blocks)
         if not dialog.exec():
             return
         kind, source = dialog.values()

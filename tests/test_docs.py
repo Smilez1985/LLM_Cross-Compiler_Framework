@@ -79,6 +79,9 @@ EXCEPTIONS: Dict[str, str] = {
     # Knowledge packs shared by the community are data that users import, written in whatever language the
     # sources had.
     "community/*": "community knowledge packs (data)",
+    # The board bundle's building blocks ship their guide (README.md) as part of the block, like a community pack:
+    # data the generator and the block check read, published and installed with the block, in one language.
+    "orchestrator/runtime/bundle/blocks/*": "board bundle building blocks with their guides (pack data)",
     # The module generator writes a README.md next to the knowledge snapshot of a generated target
     # (orchestrator/Core/module_generator.py); it describes data and is regenerated, not maintained.
     "targets/*/knowledge/*": "generated knowledge snapshot of a target (data)",

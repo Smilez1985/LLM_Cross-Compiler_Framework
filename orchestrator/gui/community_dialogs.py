@@ -299,15 +299,15 @@ class PublicKeysDialog(_Dialog):
 
 # --- zoo export: what -------------------------------------------------------------------------------------------------
 
-EXPORT_KINDS = ("target", "recipe", "knowledge")
+EXPORT_KINDS = ("target", "recipe", "knowledge", "block")
 
 
 class ExportSourceDialog(_Dialog):
     """What to export: a target folder (CommunityManager.exportable_targets), a finished build's build_info.json, or
-    the knowledge base."""
+    the knowledge base, or one of the person's own board bundle blocks (CommunityManager.exportable_blocks)."""
 
     def __init__(self, targets: Sequence[str], build_start: str = "", parent: Optional[QWidget] = None,
-                 lang: Optional[str] = None):
+                 lang: Optional[str] = None, blocks: Sequence[str] = ()):
         super().__init__(parent, lang, "zoo.export.title")
         self.setObjectName("dlg_zoo_export_source")
         self.resize(720, 260)
@@ -339,7 +339,15 @@ class ExportSourceDialog(_Dialog):
         build_form.addRow(plain_label(self._t("zoo.export.build"), wrap=False), row)
         knowledge_page = QWidget(self.stack)
         QVBoxLayout(knowledge_page).addWidget(plain_label(self._t("zoo.export.knowledge.note")))
-        for page in (target_page, build_page, knowledge_page):
+        block_page = QWidget(self.stack)
+        block_form = QFormLayout(block_page)
+        self.block = QComboBox(block_page)
+        self.block.setObjectName("cmb_zoo_export_block")
+        self.block.addItems(list(blocks))
+        block_form.addRow(plain_label(self._t("zoo.export.block"), wrap=False), self.block)
+        if not blocks:
+            block_form.addRow(plain_label(self._t("zoo.export.no_blocks")))
+        for page in (target_page, build_page, knowledge_page, block_page):
             self.stack.addWidget(page)
         self.kind.currentIndexChanged.connect(self.stack.setCurrentIndex)
         layout.addWidget(self.stack)
@@ -364,6 +372,9 @@ class ExportSourceDialog(_Dialog):
         if kind == "target" and not self.target.currentText():
             self.problem.setText(self._t("zoo.export.choose_target"))
             return
+        if kind == "block" and not self.block.currentText():
+            self.problem.setText(self._t("zoo.export.choose_block"))
+            return
         if kind == "recipe" and not self.build_info:
             self.problem.setText(self._t("zoo.export.choose_build"))
             return
@@ -373,7 +384,8 @@ class ExportSourceDialog(_Dialog):
     def values(self) -> Tuple[str, Optional[str]]:
         """(kind, source): a target id, a build_info.json path, or None for the knowledge base."""
         kind = str(self.kind.currentData())
-        source = {"target": self.target.currentText(), "recipe": self.build_info}.get(kind)
+        source = {"target": self.target.currentText(), "recipe": self.build_info,
+                  "block": self.block.currentText()}.get(kind)
         return kind, source or None
 
 

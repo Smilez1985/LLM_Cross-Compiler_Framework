@@ -129,6 +129,10 @@ DELETION_SITES = {
     ("orchestrator/runtime/build/source.py", "export_source"): TEMP,
     ("orchestrator/runtime/build/store.py", "BuildStore.export_build"): TEMP,
     ("orchestrator/runtime/device/package.py", "package_runtime"): TEMP,
+    # the board bundle: the store's own temporary build folder of a bundle that failed before its rename, and the
+    # wizard's new block folder it made itself when writing its two files failed
+    ("orchestrator/runtime/bundle/generator.py", "build_bundle"): STAGING,
+    ("orchestrator/runtime/bundle/blocks.py", "new_block"): TEMP,
     ("orchestrator/runtime/probe_service.py", "HardwareProbes._script_probe"): TEMP,
     ("orchestrator/runtime/bench.py", "BenchRunner._pinned_copy"): TEMP,
     ("orchestrator/runtime/bench.py", "BenchRunner._pinned_link"): TEMP,
