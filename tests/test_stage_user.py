@@ -63,6 +63,42 @@ def _can_hand_out_rights() -> str:
 WHY_NOT = _can_hand_out_rights()
 needs_rights = pytest.mark.skipif(bool(WHY_NOT), reason=WHY_NOT or "-")
 
+
+def _may(st: os.stat_result, uid: int, gid: int, bits: int) -> bool:
+    """Whether the mode of `st` gives an account uid:gid (without supplementary groups) the rwx `bits` (4/2/1)."""
+    if st.st_uid == uid:
+        return st.st_mode >> 6 & bits == bits
+    if st.st_gid == gid:
+        return st.st_mode >> 3 & bits == bits
+    return st.st_mode & bits == bits
+
+
+def _person_cannot_read_the_repo(uid: int = RUNNER, gid: int = RUNNER) -> str:
+    """'' when the person of the tests (uid:gid, no groups) can import orchestrator.utils from this checkout and start
+    this Python, else why not. Root ignores the modes, so they are read: a private home folder (0750 or 0700) above
+    the checkout is no failure of the stage account, only of this computer."""
+    if not sys.platform.startswith("linux"):
+        return "the person's check needs Linux"
+    for start in (REPO_ROOT, Path(os.path.realpath(sys.executable))):
+        for parent in start.parents:
+            try:
+                if not _may(os.stat(parent), uid, gid, 1):
+                    return (f"the test account {uid} cannot pass through a folder above the checkout or this Python "
+                            f"({parent.name or '/'}, mode {oct(os.stat(parent).st_mode & 0o777)}): a private home")
+            except OSError:
+                return "a folder above the checkout cannot be read"
+    for folder in (REPO_ROOT, REPO_ROOT / "orchestrator", REPO_ROOT / "orchestrator" / "utils"):
+        if not _may(os.stat(folder), uid, gid, 5):
+            return f"the test account {uid} cannot read the checkout's folder {folder.name}"
+        for module in folder.glob("*.py") if folder != REPO_ROOT else ():
+            if not _may(os.stat(module), uid, gid, 4):
+                return f"the test account {uid} cannot read {module.name} of the checkout"
+    return ""
+
+
+WHY_NOT_PERSON = _person_cannot_read_the_repo()
+person_reads_repo = pytest.mark.skipif(bool(WHY_NOT_PERSON), reason=WHY_NOT_PERSON or "-")
+
 # A stage module that walks up its parents (the stage runner among them) and looks for a marker the runner holds in its
 # memory. It writes "seen" or "refused" into the work folder.
 ATTACK = r'''#!/bin/bash
@@ -817,6 +853,7 @@ print("left", len(left))
 
 
 @needs_rights
+@person_reads_repo
 @pytest.mark.parametrize("exit_code", [0, 3])
 def test_what_a_module_writes_the_person_can_read_and_remove(box, exit_code):
     box.module("source", TIGHT)
@@ -920,6 +957,7 @@ print("left", sum(len(remove_tree(p)) for p in sys.argv[2:]))
 
 
 @needs_rights
+@person_reads_repo
 def test_a_sticky_folder_a_module_made_the_person_can_still_clear(box):
     box.module("source", STICKY)
     result = box.run("--to", "source")

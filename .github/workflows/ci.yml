@@ -147,7 +147,14 @@ jobs:
         run: python scripts/runtime_toolbox.py "$RUNNER_TEMP/runtime-toolbox"
 
       - name: Runtime layer tests with the real tools (as root)
+        # Some tests start Python as an unprivileged test account (uid 64020, no groups) that imports the framework
+        # from this checkout; the runner's home is 0750, so the way to the checkout is opened for other users (pass
+        # through for the folders above it, read for the checkout). A computer with a private home skips those
+        # tests with a plain reason instead.
         run: |
+          dir="$GITHUB_WORKSPACE"
+          while [ "$dir" != "/" ]; do dir="$(dirname "$dir")"; sudo chmod o+x "$dir"; done
+          sudo chmod -R o+rX "$GITHUB_WORKSPACE"
           sudo -E env "PATH=$PATH" "LLMCF_TEST_TOOLBOX=$RUNNER_TEMP/runtime-toolbox" \
             "$(command -v python)" -m pytest -ra tests/test_runtime_layer.py tests/test_stage_user.py
 
