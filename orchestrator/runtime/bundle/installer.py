@@ -47,7 +47,14 @@ REPORT_PREFIX = "llmcf-bundle: "
 ACTIONS = ("plan", "apply", "status")
 KEPT_ACTIONS = ("status", "rollback", "uninstall", "plan-uninstall")
 EXIT_OK, EXIT_REFUSED, EXIT_ROOT = 0, 3, 4
+# llmcf-install's exit status when a root action failed after others were done (its journal says what: roll back or
+# run it again); its other statuses are the installer's (0 done, 3 refused with nothing changed).
+EXIT_ROOT_FAILED = 5
 SIGNED_FILES = ("install.sh", "steps.tsv", "manifest.json")
+# The root helper a bundle with root actions carries next to them (signed like them; the installer keeps it with them
+# in .kept/, where the gate operation bundle-root takes it from).
+ROOT_HELPER_FILE = "llmcf-install"
+ROOT_ACTIONS = ("plan", "apply", "status", "rollback", "uninstall", "plan-uninstall")
 SEP = "--"   # a staged file of the bundle is <component>--<file name> in the upload folder
 
 
@@ -408,13 +415,14 @@ case $act in
     : > "$S/last-run"
     # kept before the first step changes anything: a run cut off can be rolled back or uninstalled, not only continued
     mkdir -p "$K" || stop failed "the installer could not be kept on the board (nothing was changed)"
-    for f_ in install.sh steps.tsv manifest.json; do
+    for f_ in install.sh steps.tsv manifest.json @ROOT_FILES@; do
+      if [ "$f_" = @ROOT_FILES@ ] && [ ! -f "$run/$f_" ]; then continue; fi
       cp -- "$run/$f_" "$K/$f_.part" && mv -f "$K/$f_.part" "$K/$f_" || stop failed "the installer could not be kept on the board (nothing was changed)"
       if [ -f "$run/$f_.sig" ]; then cp -- "$run/$f_.sig" "$K/$f_.sig.part" && mv -f "$K/$f_.sig.part" "$K/$f_.sig"; fi
     done
     each_step
     if [ "$roots" -gt 0 ] && [ "$mode" = full ]; then
-      stop stopped-root "the unprivileged steps are done; the $roots root action(s) above need llmcf-install, the framework's root helper (not part of this installer). Choose the unprivileged-only variant to skip them" 4
+      stop stopped-root "the unprivileged steps are done; the $roots root action(s) above run only through llmcf-install, the framework's root helper, after your own yes for them (or choose the unprivileged-only variant to skip them)" 4
     fi
     stop ok "" 0 ;;
 esac
@@ -424,7 +432,7 @@ esac
 def installer_sh() -> str:
     """The installer program as the bundle ships it (INSTALLER_SH with its constants in place)."""
     text = (INSTALLER_SH.replace("@BUNDLE_REL@", BUNDLE_REL).replace("@MAGIC@", STEPS_MAGIC)
-            .replace("@PATH@", POSIX_CLEARED_PATH))
+            .replace("@PATH@", POSIX_CLEARED_PATH).replace("@ROOT_FILES@", ROOT_HELPER_FILE))
     if re.search(r"@[A-Z_]+@", text.replace("@DIR@", "")):  # pragma: no cover - template check
         raise RuntimeError("the installer template has an unfilled placeholder")
     return text
@@ -443,12 +451,26 @@ class Report:
     def ok(self) -> bool:
         return self.result in ("ok", "plan", "installed", "partial", "absent", "stopped-root")
 
+    @property
+    def needs_password(self) -> bool:
+        """llmcf-install was not run: the board's sudo asks for a password (gate operation bundle-root)."""
+        return self.result == "needs-password"
+
+    @property
+    def helper(self) -> str:
+        """The version llmcf-install named in its first line ("" when this is the unprivileged installer's report)."""
+        for line in self.lines:
+            if line["state"] == "helper" and line["step"] == ROOT_HELPER_FILE:
+                return line["what"].split(" ")[0][:20]
+        return ""
+
     def count(self, state: str) -> int:
         return sum(1 for line in self.lines if line["state"] == state)
 
 
 def report(text: str) -> Report:
-    """The installer's report from its output (only its own `llmcf-bundle: ` lines; anything else is ignored)."""
+    """The report of the installer or of llmcf-install (both write the same `llmcf-bundle: ` lines, the last one
+    `result=WORD changed=N ...`) from their output; anything else is ignored."""
     out = Report()
     for raw in (text or "").splitlines():
         if not raw.startswith(REPORT_PREFIX):
@@ -468,5 +490,6 @@ def report(text: str) -> Report:
     return out
 
 
-__all__ = ["ACTIONS", "BUNDLE_REL", "EXIT_OK", "EXIT_REFUSED", "EXIT_ROOT", "INSTALLER_SH", "KEPT_ACTIONS",
-           "REPORT_PREFIX", "Report", "SIGNED_FILES", "STEPS_MAGIC", "installer_sh", "render_steps", "report", "staged_name"]
+__all__ = ["ACTIONS", "BUNDLE_REL", "EXIT_OK", "EXIT_REFUSED", "EXIT_ROOT", "EXIT_ROOT_FAILED", "INSTALLER_SH",
+           "KEPT_ACTIONS", "REPORT_PREFIX", "ROOT_ACTIONS", "ROOT_HELPER_FILE", "Report", "SIGNED_FILES", "STEPS_MAGIC",
+           "installer_sh", "render_steps", "report", "staged_name"]

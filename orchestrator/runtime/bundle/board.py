@@ -137,10 +137,10 @@ def run_bundle(shell: Any, built: BuiltBundle, action: str, *, store: Optional[B
         staging = _new_folder(shell, root)
     if store is not None and device_id:
         store.record_board(bid, device_id, staging=staging, last="uploading")
-    signed: List[Tuple[str, Path, str]] = [(name, built.file(name), sha256_file(built.file(name)))
-                                           for name in SIGNED_FILES]
+    names = SIGNED_FILES + ((inst.ROOT_HELPER_FILE,) if built.file(inst.ROOT_HELPER_FILE).is_file() else ())
+    signed: List[Tuple[str, Path, str]] = [(name, built.file(name), sha256_file(built.file(name))) for name in names]
     _send(shell, staging, signed, say)
-    for name in SIGNED_FILES:   # the signatures are small: written on stdin, again after a drop
+    for name in names:   # the signatures are small: written on stdin, again after a drop
         sig = built.file(name + ".sig").read_bytes()
         res = shell.run(gate.script("file-write-private", f"{staging}/{name}.sig"), stdin=[sig], again=True)
         if res.status != 0:
@@ -166,4 +166,26 @@ def run_bundle(shell: Any, built: BuiltBundle, action: str, *, store: Optional[B
     return run
 
 
-__all__ = ["BoardRun", "JOB_TIMEOUT", "run_bundle"]
+def run_root(shell: Any, built: BuiltBundle, action: str, *, password: str = "",
+             say: Callable[[str], None] = lambda _m: None) -> BoardRun:
+    """llmcf-install `action` (installer.ROOT_ACTIONS) of the bundle on the board behind `shell`, through the gate
+    operation bundle-root: the helper the last apply kept, checked against the framework's signature with the
+    root-owned signers, run as root with `sudo -n`, or with the person's one-time `password` for `sudo -S` (sent on
+    stdin, never kept; the person's channels pass one only in private mode, after the person typed it). Only the
+    person's channels call this, after the person's yes for this run (never an AI: the MCP tool bundle_deploy runs the
+    unprivileged installer only). Its report is read by installer.report; result needs-password means sudo asked
+    for a password and nothing ran."""
+    if action not in inst.ROOT_ACTIONS:
+        raise BundleError(f"not an action of llmcf-install: {action}")
+    if not built.needs_root:
+        raise BundleError(f"bundle {built.bundle_id} has no root actions (llmcf-install is not part of it)")
+    if any(ch in password for ch in "\r\n\0"):
+        raise BundleError("the password holds a character sudo never takes")
+    _facts(shell, built)
+    say(f"running llmcf-install on the board as root ({action}) ...")
+    res = shell.run(gate.script("bundle-root", action, built.bundle_id), stdin=[(password + "\n").encode("utf-8")],
+                    timeout=JOB_TIMEOUT, step="bundle")
+    return BoardRun("root-" + action, int(getattr(res, "status", 3)), inst.report(getattr(res, "out", "")))
+
+
+__all__ = ["BoardRun", "JOB_TIMEOUT", "run_bundle", "run_root"]
