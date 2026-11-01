@@ -415,6 +415,7 @@ def ai_notes(framework: Any, request_id: str, actor: str) -> List[str]:
     """What an AI caller reads about the kept builds of a request (get_build_status): one note per build, labels and
     the fixed stage names only, and its question recorded as a pending decision for the person. Never raises."""
     try:
+        from orchestrator.Core.deletion import person_actor
         from orchestrator.Core.runtime_layer import cache_dir_of
         config = getattr(framework, "config", None)
         if config is None or not request_id:
@@ -426,7 +427,7 @@ def ai_notes(framework: Any, request_id: str, actor: str) -> List[str]:
         for item in kept_builds(cache):
             if item.request_id != request_id:
                 continue
-            if state:
+            if state and not person_actor(actor):   # the person's own read is no AI's question
                 record_pending(Path(state), item, actor)
             notes.append(f"{item.label} stopped with {item.done_text()} kept ({item.size_bytes} bytes). {AI_NEXT}")
         return notes
