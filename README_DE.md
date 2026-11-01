@@ -965,8 +965,9 @@ Version 3.3.0 ist in Arbeit. Kurz:
   Verdichtung, Cloud-Caching so, wie der Anbieter es vorsieht, und Dittos Archiv
   dessen, was es über llmcf und das Bauen gelernt hat (nie die privaten Gespräche der Person).
 - **Das Board-Bündel:** sein nutzbarer erster Teil ist da (Bausteine, Plan, signiertes Bündel, der Installer ohne
-  Sonderrechte, Fenster, CLI und MCP-Werkzeuge, und der Root-Helfer llmcf-install); als Nächstes kommen vom
-  Framework selbst gebaute Bestandteile, das Token sparende Gateway `llmcf-gateway` in Rust, Sprache und Bild als Bausteine des Bündels und MCP
+  Sonderrechte, Fenster, CLI und MCP-Werkzeuge, der Root-Helfer llmcf-install, whisper.cpp vom Framework für das
+  Board gebaut, und Bilderkennung mit `--mmproj`); als Nächstes kommen das Token sparende Gateway `llmcf-gateway` in
+  Rust, die weiteren vom Framework gebauten Bestandteile (Sprachausgabe, ein Weckwort) und MCP
   auf dem Board (zuerst nur Loopback, ins Netz nur mit TLS).
 - **Laufzeit auf dem Gerät und mehr Hardware:** Rezepte als Target-Vorlagen, eine Rotationsstufe vor der
   Quantisierung, ein allgemeines ARM64-Target für den Raspberry Pi, Targets aus der Hardware-Probe, auf dem Board

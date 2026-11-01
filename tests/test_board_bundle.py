@@ -91,7 +91,7 @@ def _files(tmp: Path, *, program_machine: int = 0xB7):
 def _selection(tmp: Path, **kw) -> gen.Selection:
     model, wmodel, prog = _files(tmp)
     values = kw.pop("values", {})
-    return gen.Selection(blocks=kw.pop("blocks", ["llm-llama-server", "stt-whisper-cpp"]), values=values, files={
+    return gen.Selection(blocks=kw.pop("blocks", ["llm-llama-server", "stt-whisper-cpp-program"]), values=values, files={
         "llm": {"model": gen.FileChoice(path=str(model), licence="apache-2.0")},
         "stt": {"model": gen.FileChoice(path=str(wmodel), licence="MIT"), "program": gen.FileChoice(path=str(prog))},
     }, **kw)
@@ -163,9 +163,13 @@ def test_an_online_item_takes_only_a_plain_https_address(url):
 def test_the_framework_ships_llm_and_stt_blocks_and_the_others_as_documented_templates():
     catalog = blk.load_catalog()
     assert catalog.notes == []
-    assert {b.id for b in catalog.ready()} == {"llm-llama-server", "stt-whisper-cpp", "gateway-llmcf"}
+    # since the bundle components: stt-whisper-cpp is the framework's own whisper.cpp build, the program the person
+    # picks is the explicit block stt-whisper-cpp-program, and vision-mmproj is a ready block; since the gateway
+    # component, gateway-llmcf is ready too
+    assert {b.id for b in catalog.ready()} == {"llm-llama-server", "stt-whisper-cpp", "stt-whisper-cpp-program",
+                                               "vision-mmproj", "gateway-llmcf"}
     templates = {b.kind for b in catalog.blocks.values() if not b.ready}
-    assert templates == {"tts", "vision", "harness"}
+    assert templates == {"tts", "stt", "harness"}
     for block in catalog.blocks.values():
         assert block.trust == "framework"
         assert blk.check_block_folder(block.folder) == []
@@ -174,7 +178,7 @@ def test_the_framework_ships_llm_and_stt_blocks_and_the_others_as_documented_tem
 
 
 def test_a_block_folder_holds_only_its_spec_and_guide_and_the_wizard_writes_one(tmp_path):
-    made = blk.new_block(tmp_path, "stt-mine", kind="stt", title="My STT", template="stt-whisper-cpp")
+    made = blk.new_block(tmp_path, "stt-mine", kind="stt", title="My STT", template="stt-whisper-cpp-program")
     assert blk.check_block_folder(made) == []
     (made / "run.sh").write_text("id\n")
     assert any("run.sh" in p for p in blk.check_block_folder(made))
@@ -186,7 +190,7 @@ def test_a_block_folder_holds_only_its_spec_and_guide_and_the_wizard_writes_one(
 
 @pytest.mark.parametrize("arg", ["$(id)", "a;b", "{nope}", "@FILE:nope@"])
 def test_a_block_whose_start_holds_anything_but_checked_tokens_is_refused(tmp_path, arg):
-    text = (blk.BUILTIN_DIR / "stt-whisper-cpp" / "block.yml").read_text().replace('"{port}"', json.dumps(arg))
+    text = (blk.BUILTIN_DIR / "stt-whisper-cpp-program" / "block.yml").read_text().replace('"{port}"', json.dumps(arg))
     with pytest.raises(blk.BlockError):
         blk.parse_block(text, tmp_path)
 
@@ -263,7 +267,7 @@ def test_an_online_item_in_offline_mode_must_be_in_the_own_network(tmp_path):
 
 def test_enterprise_mode_takes_only_framework_and_indexed_blocks_private_mode_warns_for_own(tmp_path):
     app = tmp_path / "app"
-    blk.new_block(app / "community" / "blocks", "stt-mine", kind="stt", title="Mine", template="stt-whisper-cpp")
+    blk.new_block(app / "community" / "blocks", "stt-mine", kind="stt", title="Mine", template="stt-whisper-cpp-program")
     selection = _selection(tmp_path, blocks=["stt-mine"])
     del selection.files["llm"]
     enterprise = _plan(tmp_path, selection, app_root=app, mode="enterprise")
@@ -588,7 +592,7 @@ def test_a_block_is_published_and_installed_as_a_signed_community_pack(tmp_path)
     app = tmp_path / "app"
     fw = SimpleNamespace(info=SimpleNamespace(installation_path=str(app)), config=None)
     manager = CommunityManager(fw)
-    blk.new_block(manager.blocks_dir, "stt-mine", kind="stt", title="Mine", template="stt-whisper-cpp")
+    blk.new_block(manager.blocks_dir, "stt-mine", kind="stt", title="Mine", template="stt-whisper-cpp-program")
     assert manager.exportable_blocks() == ["stt-mine"]
     from orchestrator.Core.community_pack import UserKeys
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -609,7 +613,7 @@ def test_a_block_is_published_and_installed_as_a_signed_community_pack(tmp_path)
     assert found is not None and found.trust == "signed"
     bad = tmp_path / "bad"
     bad.mkdir()
-    (bad / "block.yml").write_text((blk.BUILTIN_DIR / "stt-whisper-cpp" / "block.yml").read_text())
+    (bad / "block.yml").write_text((blk.BUILTIN_DIR / "stt-whisper-cpp-program" / "block.yml").read_text())
     (bad / "README.md").write_text("# no models section\n")
     (bad / "run.sh").write_text("id\n")
     assert len(blk.check_block_folder(bad)) == 2
@@ -624,7 +628,7 @@ def _indexed_block(app: Path, block_id: str = "stt-indexed") -> Path:
     from orchestrator.Core.community_manager import Provenance
     from orchestrator.Core.community_pack import PROVENANCE_NAME, tree_sha256
     folder = blk.new_block(app / "community" / "blocks", block_id, kind="stt", title="Indexed",
-                           template="stt-whisper-cpp")
+                           template="stt-whisper-cpp-program")
     prov = Provenance(kind="block", id=block_id, version="1.0.0", trust="verified", source="index",
                       pack_sha256="a" * 64, content_sha256=tree_sha256(folder), author="tester",
                       installed_at="2026-11-01T00:00:00Z")
@@ -652,7 +656,7 @@ def test_an_indexed_block_changed_after_its_install_is_no_longer_indexed(tmp_pat
 def test_a_plans_labels_leave_out_every_account_variable_whatever_its_name(tmp_path):
     app = tmp_path / "app"
     folder = blk.new_block(app / "community" / "blocks", "stt-acct", kind="stt", title="Acct",
-                           template="stt-whisper-cpp")
+                           template="stt-whisper-cpp-program")
     spec = folder / blk.BLOCK_FILE
     spec.write_text(spec.read_text().replace("name: user", "name: account"), encoding="utf-8")
     selection = _selection(tmp_path, blocks=["stt-acct"], values={"stt": {"account": "jdoe"}})

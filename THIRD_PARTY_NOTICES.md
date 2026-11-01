@@ -49,6 +49,18 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## whisper.cpp (built from source)
+
+Source: https://github.com/ggml-org/whisper.cpp, pinned by commit in `configs/llama_runtime.yml`
+(`whisper_cpp.source`).
+
+The framework contains no whisper.cpp code. It fetches the pinned commit and builds it on the user's machine for a
+board, through the same self-build path as llama.cpp (`orchestrator/runtime/build/projects.py`); the board package
+(the bundle block `stt-whisper-cpp`) holds whisper.cpp binaries under whisper.cpp's MIT licence and carries its
+notice as `LICENSE-whisper.cpp`. Its text is the MIT licence above, with the copyright line of the whisper.cpp
+repository (`Copyright (c) 2023-2026 The ggml authors`). The speech models a person picks come under their own
+licences; the person names each one in the bundle plan.
+
 ## SPDX License List data (canonical licence texts)
 
 Source: https://github.com/spdx/license-list-data, version 3.29.0 (tag `v3.29.0`), the folder `text/`.

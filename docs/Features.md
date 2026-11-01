@@ -634,14 +634,20 @@ board...**).
 
 Deploy way 3 beside the golden ZIP and the runtime package: one bundle for the whole board, made from building blocks
 (the framework's `llm-llama-server` with the board's self-built llama.cpp runtime and a GGUF model, and
-`stt-whisper-cpp` with whisper.cpp's server and a ggml model; speech output with sherpa-onnx, vision with `--mmproj`,
-the gateway and an agent harness are documented templates). You pick a preset (`llm`, `voice`, `stt`) or the blocks,
+`stt-whisper-cpp` with the framework's own whisper.cpp server build for the board and a ggml model, and
+`vision-mmproj` with the llama.cpp runtime started with `--mmproj` for a vision model and its projector; a
+`whisper-server` you pick yourself stays possible with `stt-whisper-cpp-program`, with a warning; speech output with
+sherpa-onnx, the gateway and an agent harness are documented templates). You pick a preset (`llm`, `voice`, `stt`) or the blocks,
 set their variables (port, threads, memory limit, autostart, ...; each checked against its type) and choose their
 files (a local file is hashed and copied into the bundle, an online item is pinned by its sha256 and size).
 
 Before anything is built or sent, the plan shows every component, every file with its source and size, the root
 actions that run through llmcf-install, and its checks against the board's probe (architecture, init system, sudo, offline
-mode, memory). The bundle is signed with the framework's key and kept in this framework's store; its installer on the
+mode, memory, and per component the board package's architecture and CPU features; for vision, whether model and
+projector are a pair). A board package that is not built yet (whisper.cpp at its pinned commit, llama.cpp) is built
+after your yes through the same self-build path as the runtime package. A block whose parts come under their own
+licence terms shows them in full and is used only after you accept them; one with terms that are not a free licence
+(NVIDIA NeMo models, a wake word model trained on GigaSpeech) is an opt-in, never part of a preset. The bundle is signed with the framework's key and kept in this framework's store; its installer on the
 board installs only the unprivileged steps, each only once (a second run changes nothing, a run cut off continues),
 and shows a dry run, a status, a rollback and an uninstall of its own steps. The root actions (the account of a
 component, its autostart unit, its memory and CPU limits) run only through llmcf-install, the framework's root

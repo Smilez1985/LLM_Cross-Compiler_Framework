@@ -1541,14 +1541,17 @@ start:
 ```
 
 - **Felder:** nur `schema`, `id`, `version`, `kind`, `title`, `status`, `summary`, `variables`, `files`, `start`,
-  `memory`, `keygen` (das Startskript schreibt die Schlüsseldatei der Laufzeit, wie bei `llm-llama-server`), `unit` und
-  `notes`; ein unbekanntes Feld wird abgelehnt. block.yml ist höchstens 64 KiB groß.
+  `memory`, `keygen` (das Startskript schreibt die Schlüsseldatei der Laufzeit, wie bei `llm-llama-server`), `unit`,
+  `terms` (12.4) und `notes`; ein unbekanntes Feld wird abgelehnt. block.yml ist höchstens 64 KiB groß.
 - **Argumente** von `start.args` sind feste Wörter, `{variable}` (der geprüfte Wert), `@FILE:role@` (die Datei dieser
   Rolle im Ordner der Komponente) und `{when: variable, args: [...]}` (nur, wenn die Variable gesetzt ist). Ein
   Shell-Zeichen, eine unbekannte Variable oder eine unbekannte Rolle lehnt den Baustein ab.
 - **Dateien:** `role` ist model, mmproj, program, runtime, config oder data; `from` ist person (eine lokale Datei, die
   die Person wählt, oder ein festgelegtes Online-Element) oder runtime (das selbst gebaute llama.cpp-Laufzeitpaket des
-  Boards aus Deploy-Weg 2); `formats` aus gguf, mmproj-gguf, ggml-whisper, onnx, sherpa-onnx, elf, tar.gz, text
+  Boards aus Deploy-Weg 2, oder mit `project: whisper.cpp` das festgelegte whisper.cpp; beide baut das Framework über
+  seinen einen Weg des eigenen Builds; ein Baustein, dessen Paket noch nicht gebaut ist, wird mit diesem Problem
+  geplant, und `bundle build` oder Bauen... bietet nach deinem Ja an, es zu bauen); `formats` aus gguf, mmproj-gguf,
+  ggml-whisper, onnx, sherpa-onnx, elf, tar.gz, text
   (geprüft an den ersten Bytes der Datei, bei einem Programm die ELF-Architektur gegen die des Boards); `licence:
   required` lässt die Person die Lizenz des Modells nennen; `min_bytes` und `max_bytes` begrenzen die Größe.
 
@@ -1577,13 +1580,38 @@ Format, die Größe und den Speicher auf dem Board und die Lizenz. Die Anleitung
 
 - **Spracherkennung (`stt-whisper-cpp`):** ein ggml-whisper-Modell (`ggml-base.bin`, `ggml-small.bin`, ...; erste
   Bytes `lmgg`), Speicher etwa die Modellgröße mal 1,5 plus 128 MB, die Lizenz nennt die Person (die whisper-Modelle
-  von OpenAI sind MIT); das Programm ist `whisper-server` von whisper.cpp, gebaut für die Architektur des Boards.
-- **Bilderkennung (`vision-mmproj`, eine Vorlage):** ein GGUF-Vision-Modell und sein multimodaler Projektor, die
-  `mmproj`-GGUF-Datei genau dieses Modells (Format `mmproj-gguf`); ein Projektor eines anderen Modells passt nicht. Er
-  bleibt eine Vorlage, bis das Startskript der Laufzeit `--mmproj` nimmt.
+  von OpenAI sind MIT); das Programm ist der eigene Build von `whisper-server` des Frameworks aus dem festgelegten
+  whisper.cpp-Commit für Architektur und CPU-Merkmale des Boards (`runtime/@RUNTIME@/bin/whisper-server`). Ein
+  Weckwort wird nicht angeboten: whisper.cpp hat eines nur in einem Beispiel, das SDL2 und ein Mikrofon braucht,
+  nicht in seinem Server. `stt-whisper-cpp-program` behält den älteren Weg, ein selbst gewähltes `whisper-server`,
+  mit einer Warnung im Plan, dass es nicht vom Framework gebaut ist.
+- **Bilderkennung (`vision-mmproj`):** ein GGUF-Vision-Modell und sein multimodaler Projektor, die `mmproj`-GGUF-Datei
+  genau dieses Modells (Format `mmproj-gguf`), gestartet vom Startskript der llama.cpp-Laufzeit mit `--mmproj`. Der
+  Plan liest beide GGUF-Köpfe: ein Projektor, der kein Vision-Projektor ist oder für ein anderes Modell benannt ist,
+  ist ein Problem; ein Projektor, dessen Einbettungsgröße von der des Modells abweicht, oder einer über dem Vierfachen
+  der Modellgröße, ist eine Warnung. Der Speicher im Plan zählt beide Dateien. Ein Laufzeitpaket, das gebaut wurde,
+  bevor sein Startskript `--mmproj` nahm, ist ein Problem, bis es neu gepackt ist (das Framework tut das aus der
+  aufbewahrten Quelle).
 - **Sprachausgabe (`tts-sherpa-onnx`, eine Vorlage):** der Offline-TTS-Server von sherpa-onnx für die Architektur des
   Boards und ein TTS-Modell im Aufbau, den sherpa-onnx liest (Format `sherpa-onnx`: das ONNX-Modell mit seinen Token-
   und Stimmdateien aus der Modellliste von sherpa-onnx); eine einfache ONNX-Datei von anderswo passt nicht.
+
+**Lizenzbedingungen der Teile eines Bausteins (`terms`).** Ein Baustein, dessen Teile eigenen Bedingungen
+unterliegen, listet sie, höchstens acht, jede mit `part`, `licence`, `free` (true für eine freie Lizenz) und `text`
+(höchstens 4000 Zeichen, vollständig gezeigt):
+
+```yaml
+terms:
+  - {part: eSpeak NG, licence: GPL-3.0-or-later, free: true, text: "..."}
+```
+
+Der Plan, `bundle build` und Bauen... zeigen die Bedingungen jedes Bausteins vollständig und fragen, bevor etwas vom
+Baustein gebaut, gesendet oder geholt wird („Nein“ als Vorgabe; auf der Kommandozeile auch `--accept-terms BAUSTEIN`,
+das den mit `bundle plan` gezeigten Text annimmt). Die Annahme ist an den sha256 des Textes gebunden: Ein geänderter
+Text wird neu gefragt. Ein Baustein mit einer nicht freien Bedingung ist ein Opt-in: nie Teil einer Vorlage. Die
+Opt-in-Vorlagen des Frameworks sind `stt-nemo-sherpa` (Sprachmodelle von NVIDIA NeMo) und `stt-kws-gigaspeech` (ein
+Weckwort-Modell, trainiert auf GigaSpeech); `tts-sherpa-onnx` nennt onnxruntime (MIT) und eSpeak NG
+(GPL-3.0-or-later).
 
 ### 12.5 Einen Baustein veröffentlichen
 

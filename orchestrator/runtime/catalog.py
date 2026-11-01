@@ -4,7 +4,7 @@
 
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, ClassVar, Dict, List, Literal, Optional, Tuple
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -114,6 +114,9 @@ class LlamaCppSource(_Strict):
     tag: str = Field(pattern=r"^b\d{1,7}$")
     build_number: int = Field(gt=0)
 
+    # the project the self-build path builds from this pin (runtime/build/projects.py)
+    project: ClassVar[str] = "llama.cpp"
+
     @model_validator(mode="after")
     def _label_matches_number(self) -> "LlamaCppSource":
         if self.tag != f"b{self.build_number}":
@@ -124,6 +127,26 @@ class LlamaCppSource(_Strict):
     def short_commit(self) -> str:
         """The 8 hex characters llama.cpp's --version prints."""
         return self.commit[:8]
+
+
+class WhisperCppSource(_Strict):
+    """The one whisper.cpp pin every self-built whisper.cpp (the board bundle's speech recognition) comes from: a
+    commit, never a moving tag. The tag is the label: the pin-bump check compares the tag's commit with this one."""
+    repo: str = Field(pattern=_GIT_URL, max_length=200)
+    commit: str = Field(pattern=_COMMIT)
+    tag: str = Field(pattern=r"^v\d{1,3}\.\d{1,3}\.\d{1,3}$")
+
+    # the project the self-build path builds from this pin (runtime/build/projects.py)
+    project: ClassVar[str] = "whisper.cpp"
+
+    @property
+    def short_commit(self) -> str:
+        return self.commit[:8]
+
+
+class WhisperCppBuild(_Strict):
+    """whisper.cpp for the board bundle: only self-built from `source` (there is no prebuilt archive)."""
+    source: WhisperCppSource
 
 
 class LlamaCppBuild(_Strict):
@@ -331,6 +354,8 @@ class TierRule(_Strict):
 class RuntimeCatalog(_Strict):
     schema_version: Literal[1] = 1
     llama_cpp: LlamaCppBuild
+    # the board bundle's speech recognition, built by the same self-build path as llama.cpp
+    whisper_cpp: Optional[WhisperCppBuild] = None
     cuda: Optional[CudaCatalog] = None
     build_bases: List[BuildBase] = Field(default_factory=list)
     build_jobs: BuildJobs = BuildJobs()

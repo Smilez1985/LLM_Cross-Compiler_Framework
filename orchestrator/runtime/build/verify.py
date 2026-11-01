@@ -42,6 +42,8 @@ BENCH_TIMEOUT = 900
 MAX_OUTPUT = 1024 * 1024
 
 _RE_BINARY = re.compile(r"^llama-[a-z0-9-]{1,40}(\.exe)?$", re.ASCII)
+# The programs of the other projects of the one self-build path (projects.py: whisper.cpp's whisper-server, ...)
+_RE_OTHER_BINARY = re.compile(r"^whisper-[a-z0-9-]{1,40}$", re.ASCII)
 # version: 0.6.0 (build 11429, commit d8123504)   -- common/build-info.cpp.in at the pin
 _RE_VERSION = re.compile(r"version:\s*(\S+)\s*\(build\s+(\d+),\s*commit\s+([0-9a-f]{4,40}|unknown)\)", re.ASCII)
 _RE_VERSION_OLD = re.compile(r"version:\s*(\d+)\s*\(([0-9a-f]{4,40}|unknown)\)", re.ASCII)
@@ -291,7 +293,7 @@ def parse_bench_json(text: str) -> List[Dict[str, Any]]:
 def binary_path(bin_dir: Path, name: str) -> Path:
     """The program `name` of a build: a regular, executable file directly in its bin/ folder. Never a lookup on PATH,
     never a link out of the folder."""
-    if not _RE_BINARY.fullmatch(name or ""):
+    if not (_RE_BINARY.fullmatch(name or "") or _RE_OTHER_BINARY.fullmatch(name or "")):
         raise VerifyError(f"{name!r} is not the name of a llama.cpp program")
     try:
         folder = Path(bin_dir).resolve(strict=True)
@@ -381,6 +383,8 @@ class Verifier:
         binaries += [name for name in present if name not in binaries]
         if run_binaries is None:
             run_binaries = data.get("placement") != "cross" and (host_arch is None or host_arch == target.get("arch"))
+        if (data.get("source") or {}).get("project") not in (None, "llama.cpp"):
+            run_binaries = False   # steps 2-5 are llama.cpp's; the other projects are built for a board only
         paths: Dict[str, Path] = {}
         missing = []
         for name in binaries:

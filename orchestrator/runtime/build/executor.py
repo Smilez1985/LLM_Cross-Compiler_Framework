@@ -371,7 +371,8 @@ class BuildExecutor:
         if plan.builder.get("prebuilt"):
             raise BuildError("builds in a prebuilt NVIDIA image come with the CUDA work package")
         try:
-            check_download_options(plan.options())
+            from orchestrator.runtime.build.projects import project_of
+            check_download_options(plan.options(), project=project_of(plan).name)
         except PlanError as e:
             raise BuildError(f"refusing the plan: {e}") from None
 
@@ -414,7 +415,8 @@ class BuildExecutor:
         self._check_plan(plan)
         source = Path(source).resolve()
         if not (source / "CMakeLists.txt").is_file():
-            raise BuildError(f"{source} is not a llama.cpp source tree")
+            from orchestrator.runtime.build.projects import project_of
+            raise BuildError(f"{source} is not a {project_of(plan).name} source tree")
         if jobs is None:
             cpus, ram = (toolchain.cpus, toolchain.ram_available_mib) if toolchain is not None else host_resources()
             jobs = parallel_jobs(cpus, ram, self.per_job_mib(plan.backend))

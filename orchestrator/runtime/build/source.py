@@ -81,16 +81,24 @@ def catalog_pin(catalog=None) -> LlamaCppSource:
     return source
 
 
-def runtime_source_root(state_dir: Union[str, Path]) -> Path:
-    """<state dir>/runtime/llama.cpp/src (next to the runtime installs of llama_server.runtime_root)."""
-    return Path(state_dir) / "runtime" / "llama.cpp" / "src"
+def runtime_source_root(state_dir: Union[str, Path], project: Optional[str] = None) -> Path:
+    """<state dir>/runtime/llama.cpp/src (next to the runtime installs of llama_server.runtime_root); for another
+    project of the one self-build path (projects.py, `project`) <state dir>/runtime/<its folder>/src."""
+    from orchestrator.runtime.build.projects import project as _project
+    return Path(state_dir) / "runtime" / _project(project).folder / "src"
 
 
-def source_dir(state_dir: Union[str, Path], commit: str) -> Path:
+def source_dir(state_dir: Union[str, Path], commit: str, project: Optional[str] = None) -> Path:
     """The cache folder of a commit; 12 hex characters on Windows, to stay clear of the 260-character path limit."""
     if not _SHA1.fullmatch(commit):
         raise SourceError("a commit is 40 lower-case hex characters")
-    return runtime_source_root(state_dir) / (commit[:12] if os.name == "nt" else commit)
+    return runtime_source_root(state_dir, project) / (commit[:12] if os.name == "nt" else commit)
+
+
+def _project_name(source: Any) -> str:
+    """The project of a pin (LlamaCppSource, WhisperCppSource, or a test's stand-in without one: llama.cpp)."""
+    from orchestrator.runtime.build.projects import project_of
+    return project_of(source).name
 
 
 # --- git ---------------------------------------------------------------------------------------------------------
@@ -295,7 +303,7 @@ def verify_source(path: Path, commit: str, *, git: Optional[Git] = None) -> None
 
 def cached_source(source: LlamaCppSource, state_dir: Union[str, Path], *, git: Optional[Git] = None) -> Optional[Path]:
     """The verified cached tree of the pin, or None (absent or damaged). Needs no network."""
-    path = source_dir(state_dir, source.commit)
+    path = source_dir(state_dir, source.commit, _project_name(source))
     if not path.is_dir():
         return None
     try:
@@ -305,8 +313,8 @@ def cached_source(source: LlamaCppSource, state_dir: Union[str, Path], *, git: O
     return path
 
 
-def _staging(state_dir: Union[str, Path]) -> Path:
-    root = runtime_source_root(state_dir)
+def _staging(state_dir: Union[str, Path], project: Optional[str] = None) -> Path:
+    root = runtime_source_root(state_dir, project)
     root.mkdir(parents=True, exist_ok=True)
     path = root / f".staging-{secrets.token_hex(6)}"
     path.mkdir()
@@ -324,7 +332,7 @@ def _install(staging: Path, source: LlamaCppSource, state_dir: Union[str, Path],
     git(["update-index", "-q", "--refresh"], cwd=staging, check=False)
     verify_source(staging, source.commit, git=git)
     _make_read_only(staging)
-    target = source_dir(state_dir, source.commit)
+    target = source_dir(state_dir, source.commit, _project_name(source))
     if target.exists():
         remove_tree(target)  # damaged (cached_source said so before we started)
     try:
@@ -361,18 +369,19 @@ def fetch_source(source: LlamaCppSource, state_dir: Union[str, Path], *, url: Op
     cached = cached_source(source, state_dir, git=git)
     if cached is not None:
         return cached
-    target = source_dir(state_dir, source.commit)
+    project = _project_name(source)
+    target = source_dir(state_dir, source.commit, project)
     if target.exists():
         say(f"The cached source in {target} is damaged; it is fetched again.")
         remove_tree(target)
     local = _is_local(url)
     # offline mode: only the own network, at the checked local addresses; git also uses no proxy and follows no
     # redirect (also for a mirror given by its address)
-    pinned = offline_git_options(url, settings)
-    staging = _staging(state_dir)
+    pinned = offline_git_options(url, settings, f"the {project} source repository")
+    staging = _staging(state_dir, project)
     try:
         _init(staging, git)
-        say(f"Fetching llama.cpp {source.tag} (commit {source.commit[:12]}) ...")
+        say(f"Fetching {project} {source.tag} (commit {source.commit[:12]}) ...")
         fetched = git(["fetch", "--quiet", "--depth", "1", "--no-tags", url, source.commit], cwd=staging,
                       allow_file=local, timeout=GIT_TIMEOUT, check=False, **pinned)
         if fetched.returncode != 0:
@@ -489,10 +498,10 @@ def import_source(source: LlamaCppSource, state_dir: Union[str, Path], bundle: P
     if cached is not None:
         say(f"The pinned source is already in {cached}.")
         return cached
-    target = source_dir(state_dir, source.commit)
+    target = source_dir(state_dir, source.commit, _project_name(source))
     if target.exists():
         remove_tree(target)
-    staging = _staging(state_dir)
+    staging = _staging(state_dir, _project_name(source))
     try:
         _init(staging, git)
         ref = _bundle_ref(bundle.resolve(), source.commit, git, staging)
