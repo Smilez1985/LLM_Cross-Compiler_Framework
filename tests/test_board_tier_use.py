@@ -605,7 +605,6 @@ def test_without_a_package_manager_the_init_system_alone_turns_dropbear_off(tmp_
 @POSIX
 @pytest.mark.parametrize("tool, installed, command", [
     ("pacman", ("dropbear",), "pacman -R --noconfirm dropbear"),
-    ("apk", ("dropbear", "dropbear-openrc"), "apk del dropbear dropbear-openrc"),
     ("rpm", ("dropbear",), "dnf remove -y --noautoremove dropbear")])
 def test_every_package_manager_removes_only_dropbears_packages(tmp_path, tool, installed, command):
     from orchestrator.remote import openssh_switch
@@ -657,6 +656,39 @@ def test_apk_and_rpm_refuse_a_removal_that_takes_other_packages(tmp_path, tool):
     done = openssh_switch.remove_dropbear(run, "")
     assert (done.removal, done.reason) == ("refused", "dependents"), (done, calls())
     assert not [c for c in calls() if c.startswith(("apk del dropbear", "dnf remove"))], calls()
+
+
+@POSIX
+@pytest.mark.parametrize("extra", [(), ("libutmps",)])
+def test_alpine_is_disable_only_and_says_why_in_plain_words(tmp_path, extra):
+    """The maintainer's decision (Alpine stays disable-only; this changed on purpose: before, apk del ran when its
+    simulation named only Dropbear's packages): apk never removes Dropbear, because it would also remove the
+    libraries only Dropbear pulled in. Dropbear is stopped and switched off, the refusal keeps the reason dependents,
+    and the text says it in plain words."""
+    from orchestrator.remote import openssh_switch
+    run, calls = _package_board(tmp_path, tool="apk", installed=("dropbear", "dropbear-openrc"), extra_removed=extra)
+    done = openssh_switch.remove_dropbear(run, "pw-once")
+    assert (done.ok, done.removal, done.reason, done.tool) == (True, "refused", "dependents", "apk"), (done, calls())
+    assert done.packages == ("dropbear", "dropbear-openrc")
+    assert not [c for c in calls() if c.startswith("apk del")], calls()
+    assert any("rc-service dropbear stop" in c for c in calls())
+    text = openssh_switch.removal_text(done)
+    assert "stopped and switched off but not removed" in text and "libraries" in text and "Alpine" in text
+    assert done.as_dict()["tool"] == "apk"
+
+
+def test_the_switch_plan_on_alpine_says_dropbear_is_only_switched_off():
+    from orchestrator.remote import key_tiers, openssh_switch
+    facts = key_tiers.TierFacts.parse("running=dropbear\nopenssh=no\nsudo=nopass\nfamily=alpine\nmanager=apk\n"
+                                      "dropbear_pkg=dropbear\ndropbear_pkg=dropbear-openrc\n")
+    plan = openssh_switch.plan(facts)
+    text = " ".join(plan.lines)
+    assert "On Alpine it is not removed" in text and "libraries" in text
+    assert "removes only the packages" not in text
+    # every other family keeps its removal plan
+    debian = openssh_switch.plan(key_tiers.TierFacts.parse("running=dropbear\nopenssh=no\nsudo=nopass\n"
+                                                           "family=debian\nmanager=apt-get\ndropbear_pkg=dropbear\n"))
+    assert "removes only the packages" in " ".join(debian.lines)
 
 
 # --- the mode choice: installers, File > Settings..., `llmcf config set framework_mode` -----------------------------
