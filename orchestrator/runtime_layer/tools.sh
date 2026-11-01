@@ -1,3 +1,4 @@
+# shellcheck shell=sh
 # tools.sh - the runtime layer's own tools, sourced by entrypoint.sh, runner.sh and cleanup.sh (never run on its own)
 #
 # The framework's runtime layer is one folder the host bind-mounts read-only into every build container at /llmcf
@@ -14,6 +15,7 @@
 # system's; the build sandbox refuses that (entrypoint.sh, stage_preflight).
 
 BB="$LLMCF_LAYER/bin/busybox"
+# shellcheck disable=SC2034 # read by the scripts that source this file
 SETPRIV="$LLMCF_LAYER/bin/setpriv"
 LAYER_APPLETS="basename cat chgrp chmod cut date dirname env find head id mkdir mktemp mv paste rm sed sha256sum sleep
 sort stat tr wc"
@@ -27,6 +29,7 @@ layer_tools() {
         eval "$_applet() { \"\$BB\" $_applet \"\$@\"; }"
     done
     unset _applet
+    # shellcheck disable=SC2123 # on purpose: the runner's PATH leads nowhere
     PATH="$LLMCF_LAYER/no-path"
     export PATH
 }

@@ -1301,6 +1301,8 @@ class CommunityManager:
             # Its knowledge snapshot reaches the recipient's knowledge base: the knowledge pack's validator too
             from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT
             snapshot = self._check_knowledge(root, KNOWLEDGE_SNAPSHOT) if (root / KNOWLEDGE_SNAPSHOT).exists() else []
+            if not exporting:   # the export names it from the target's own folder (_stage_target)
+                self._own_runner_note(root, notes)
             return (validate_target_folder(root) + snapshot
                     + self._check_licence_files(root, "target", licence_notes))
         allowed = {RECIPE_FILE if manifest.kind == "recipe" else KNOWLEDGE_FILE, "README.md"}
@@ -1333,6 +1335,15 @@ class CommunityManager:
         problems, found = pack_licences.check(folder, [e for e in entries if isinstance(e, dict)], prefix)
         notes += found
         return problems
+
+    @staticmethod
+    def _own_runner_note(folder: Path, notes: List[str]) -> None:
+        """A target that ships its own stage runner (modules/build.sh, modules/stage_user.sh): no build runs it, the
+        framework's runtime layer does; the person's summary says so (runtime_layer.own_runner_note)."""
+        from orchestrator.Core.runtime_layer import own_runner_note
+        note = own_runner_note(folder)
+        if note and note not in notes:
+            notes.append(note)
 
     def _target_folder(self, target_id: str) -> Optional[Path]:
         if not self.targets_dir.is_dir():
@@ -1731,6 +1742,7 @@ class CommunityManager:
         if prov is not None:  # re-signing it would replace its author and licence with yours
             raise PackError(f"Target {folder.name} is {prov.author}'s community pack (from {prov.source}) and is "
                             "shared already; a target of your own made from it keeps its author and licence.")
+        self._own_runner_note(folder, notes)
         if (folder / "knowledge").is_dir():
             notes.append("knowledge/ holds pages from the web: each keeps its source address, and the pack licence "
                          "does not cover them")

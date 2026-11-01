@@ -78,26 +78,43 @@ BUILD_SOURCES: Dict[str, Dict[str, str]] = {
                 "sha256": "3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4",
                 "file": "busybox-1.37.0.tar.bz2"},
 }
-# Prebuilt static binaries: Debian's busybox-static is static. Debian ships no static util-linux setpriv (its setpriv
-# links libc and libcap-ng, which would load from the image), so no prebuilt setpriv is pinned: the fetch way takes
-# setpriv from a local build and says so (PREBUILT_MISSING).
-PREBUILT: Dict[str, Dict[str, Dict[str, str]]] = {
-    "busybox": {
-        "amd64": {"url": "https://snapshot.debian.org/file/e12379ea301a52991b9868159ba3395c59acebc6",
-                  "archive_sha256": "03195b820588781f616f25e34e7636649d2eb7e9454fb02847a7c3110cfb8da1",
-                  "member": "./usr/bin/busybox",
-                  "sha256": "3b163626a2bbe6435cd8b45cb4ac73e5678d18565671618cfb078d2d7773c035",
-                  "name": "busybox-static_1.37.0-6_amd64.deb"},
-        "arm64": {"url": "https://snapshot.debian.org/file/5704024ea566a592797ec4de84f23cd5189cf607",
-                  "archive_sha256": "a86ffdf53b586bec93b8e15aaa5a4813b80297f71819a44288db408758214792",
-                  "member": "./usr/bin/busybox",
-                  "sha256": "a2be2ab83013d0a762bef43ec387f33e8765172f87aa9d3dde5c355ee3e1ca0e",
-                  "name": "busybox-static_1.37.0-6_arm64.deb"},
-    },
-    "setpriv": {},
-}
-PREBUILT_MISSING = ("No prebuilt static setpriv is pinned (Debian ships none: its setpriv would load libraries from "
-                    "the image), so the framework builds setpriv itself from its pinned util-linux source.")
+# Prebuilt static programs of the way "fetch": ONE pinned table in the repository (orchestrator/runtime_layer/toolbox/
+# prebuilt.json), per tool and architecture its URL and sha256. Debian's busybox-static is static and pinned there.
+# Debian ships no static util-linux setpriv (its setpriv links libc and libcap-ng, which would load from the image);
+# its proposed source is a release asset of this project built by its own CI, and while the table holds no entry for
+# setpriv the way "fetch" refuses and names the way "build" (PREBUILT_MISSING). The table is read, never written, here.
+PREBUILT_TABLE = SHIPPED_DIR / "toolbox" / "prebuilt.json"
+PREBUILT_KINDS = ("deb", "file")
+
+
+def read_prebuilt(path: Path = PREBUILT_TABLE) -> Dict[str, Dict[str, Dict[str, str]]]:
+    """The pinned table of the way "fetch": {tool: {arch: pin}}; a pin that lacks its url, sha256 (and for a Debian
+    package its archive_sha256 and member) or has an unknown kind is left out, so it is never fetched."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    table: Dict[str, Dict[str, Dict[str, str]]] = {tool: {} for tool in TOOLS}
+    for tool in TOOLS:
+        for arch, pin in ((data.get(tool) or {}) if isinstance(data, dict) else {}).items():
+            if not isinstance(pin, dict):
+                continue
+            pin = {k: str(v) for k, v in pin.items()}
+            kind = pin.setdefault("kind", "deb")
+            needed = ("url", "sha256", "name") + (("archive_sha256", "member") if kind == "deb" else ())
+            if kind not in PREBUILT_KINDS or not all(pin.get(k) for k in needed) \
+                    or not pin["url"].startswith("https://") or not re.fullmatch(r"[0-9a-f]{64}", pin["sha256"]):
+                continue
+            table[tool][str(arch)] = pin
+    return table
+
+
+PREBUILT: Dict[str, Dict[str, Dict[str, str]]] = read_prebuilt()
+PREBUILT_MISSING = ("No prebuilt static setpriv is pinned for this computer yet (Debian ships none: its setpriv would "
+                    "load libraries from the image; the proposed source is a release of this project, which is not "
+                    "published yet), so the way 'fetch' cannot make the runtime layer's tools. Use the way 'build' "
+                    "(setting runtime_layer_toolbox 'build', the default): the framework builds busybox and setpriv "
+                    "itself from pinned sources.")
 
 # --- Fixed vocabulary of the layer check (what Mojo, the CLI, the GUI, the audit log and an AI read) -----------------
 VERDICTS = ("intact", "missing", "changed", "shipped_changed", "no_toolbox", "toolbox_changed")
@@ -116,8 +133,9 @@ RESTORE_WAY = "Mojo Miracle restores it from the shipped copy."
 # The next step of a changed layer (orchestrator/utils/next_steps): Mojo Miracle, in the CLI, the GUI and for an AI
 RESTORE_STEP = "mojo.miracle"
 TOOLBOX_WAY_TEXT = ("Two ways: the framework builds them itself from pinned sources (setting runtime_layer_toolbox "
-                    "'build', the default; needs the network once), or it fetches pinned prebuilt files from "
-                    "snapshot.debian.org (setting runtime_layer_toolbox 'fetch'). Then they are kept and used offline.")
+                    "'build', the default; needs the network once), or it fetches pinned prebuilt files (setting "
+                    "runtime_layer_toolbox 'fetch': busybox from snapshot.debian.org, setpriv from a pinned release "
+                    "once one is published). Then they are kept and used offline.")
 OFFLINE_REFUSAL = ("The build is refused: offline mode is on and the runtime layer's tools (a static busybox and a "
                    "static setpriv) are not on this computer yet. " + TOOLBOX_WAY_TEXT)
 OWN_RUNNER_NOTE = ("This target ships its own stage runner ({names}); it is ignored and the framework's stage runner "
@@ -132,6 +150,9 @@ FOUR_STAGES = ("source", "config", "convert", "target")
 SLOTS = ("before_convert", "between_convert_and_target", "after_target")
 MODULE_NAME = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 OWN_RUNNER_FILES = ("build.sh", "stage_user.sh")
+# Module names a slot may never take: benchmark_module.sh measures the build host's CPU, never a build's step (a model
+# for a board is measured on the board), and the runner's own words
+RESERVED_MODULES = ("benchmark",)
 
 
 class ToolboxMissing(RuntimeError):
@@ -160,10 +181,27 @@ class LayerCheck:
 
     @property
     def text(self) -> str:
-        return VERDICT_TEXT[self.verdict].format(names=", ".join(self.names) or "-")
+        return VERDICT_TEXT[self.verdict].format(names=", ".join(label_names(self.names)) or "-")
 
     def facts(self) -> Dict[str, Any]:
-        return {"verdict": self.verdict, "names": list(self.names), "toolbox": self.toolbox_way or None}
+        return {"verdict": self.verdict, "names": label_names(self.names), "toolbox": self.toolbox_way or None}
+
+
+def layer_names() -> Tuple[str, ...]:
+    """Every name a file of the assembled layer has (the fixed vocabulary its checks speak in)."""
+    return (*SCRIPTS, *(f"bin/{tool}" for tool in TOOLS), *TOOLS)
+
+
+def label_names(names: List[str]) -> List[str]:
+    """The names a check reports, in the fixed vocabulary only: the layer's own file names as they are, any other name
+    (a file someone put into the layer folder: its name could be any text) counted, never quoted. What a person, the
+    build log and an AI read of a layer check."""
+    known = set(layer_names())
+    shown = [n for n in names if n in known]
+    others = len([n for n in names if n not in known])
+    if others:
+        shown.append("1 other file" if others == 1 else f"{others} other files")
+    return shown
 
 
 # --- The shipped copy ---------------------------------------------------------------------------------------------
@@ -290,8 +328,15 @@ def is_static_elf(data: bytes) -> bool:
 
 
 def extract_prebuilt(archive: bytes, pin: Dict[str, str]) -> bytes:
-    """The pinned binary out of a pinned Debian package: the archive's sha256, then the member's sha256 and that it is
-    a static ELF. ValueError with the plain reason otherwise. Nothing is executed."""
+    """The pinned program out of a pinned download: a Debian package (kind "deb": the archive's sha256, then the
+    member's sha256) or the program itself (kind "file": its sha256), and that it is a static ELF. ValueError with the
+    plain reason otherwise. Nothing is executed."""
+    if pin.get("kind", "deb") == "file":
+        if _sha_bytes(archive) != pin["sha256"]:
+            raise ValueError(f"the downloaded {pin['name']} does not have its pinned sha256")
+        if not is_static_elf(archive):
+            raise ValueError(f"the downloaded {pin['name']} is not statically linked")
+        return archive
     if _sha_bytes(archive) != pin["archive_sha256"]:
         raise ValueError(f"the downloaded {pin['name']} does not have its pinned sha256")
     for name, body in _ar_members(archive):
@@ -321,6 +366,54 @@ def toolbox_way(config: Any) -> str:
     return way if way in TOOLBOX_WAYS else DEFAULT_TOOLBOX_WAY
 
 
+TOOLBOX_SETTING = "runtime_layer_toolbox"
+
+
+class ToolboxWayError(ValueError):
+    """A way of making the toolbox that does not exist (TOOLBOX_WAYS)."""
+
+
+def set_toolbox_way(config: Any, way: str) -> str:
+    """The person's choice of the toolbox way (TOOLBOX_WAYS), saved in the setting runtime_layer_toolbox (only the
+    person sets it: llm/settings_change.PERSON_ONLY_SETTINGS; the CLI and the GUI call this). A toolbox made before
+    stays until it is made again; the next build without one uses the chosen way. Returns the way."""
+    way = str(way or "").strip().lower()
+    if way not in TOOLBOX_WAYS:
+        raise ToolboxWayError(f"'{way}' is no way of making the runtime layer's tools; the ways are "
+                              f"{', '.join(TOOLBOX_WAYS)}.")
+    before = config.get(TOOLBOX_SETTING, DEFAULT_TOOLBOX_WAY) if callable(getattr(config, "get", None)) else None
+    saver = getattr(config, "save_user_config", None)
+    if config.set(TOOLBOX_SETTING, way) is False or (callable(saver) and not saver()):
+        config.set(TOOLBOX_SETTING, before)   # the setting stays as it was, also in this program
+        raise ToolboxWayError("The choice could not be saved in the framework's settings; it stays as it was.")
+    return way
+
+
+def cache_dir_of(config: Any, resolve: Optional[Callable[[str], Any]] = None) -> Path:
+    """The folder the builds keep the runtime layer in (the setting cache_dir, relative to the installation: the same
+    rule as BuildEngine.cache_dir); `resolve` is the framework's path rule (Core/framework.resolve_install_path)."""
+    getter = getattr(config, "get", None)
+    value = str((getter("cache_dir", "cache") if callable(getter) else None) or "cache")
+    if resolve is None:   # the framework's rule (Core/framework.resolve_install_path), without importing the kernel
+        path = Path(value).expanduser()
+        return path if path.is_absolute() else SHIPPED_DIR.parents[1] / path
+    return Path(resolve(value))
+
+
+def layer_status(cache_dir: Path, config: Any = None, platform_name: Optional[str] = None) -> Dict[str, Any]:
+    """What the CLI, the GUI, Mojo and an AI read about the runtime layer here, labels only: the layer's verdict
+    (VERDICTS) and its text, the chosen toolbox way and the way the cached toolbox was made, whether the way 'fetch'
+    has every pinned tool for this machine, and whether this host's mounts protect the end folder."""
+    check = layer_check(cache_dir)
+    record = read_toolbox(toolbox_dir(cache_dir))
+    arch = machine()
+    return {"verdict": check.verdict, "names": label_names(check.names), "text": check.text,
+            "toolbox_way": toolbox_way(config) if config is not None else DEFAULT_TOOLBOX_WAY,
+            "toolbox_made": (record or {}).get("way") or None,
+            "fetch_ready": all(PREBUILT.get(t, {}).get(arch) for t in TOOLS),
+            "end_folder": "protected" if mounts_keep_owners(platform_name) else "unprotected"}
+
+
 def ensure_toolbox(cache_dir: Path, way: str, *, offline: bool,
                    fetch: Optional[Callable[[str], bytes]] = None,
                    build: Optional[Callable[[Path], Dict[str, Path]]] = None,
@@ -344,10 +437,15 @@ def ensure_toolbox(cache_dir: Path, way: str, *, offline: bool,
         sources: Dict[str, Any] = {}
         if way == "fetch":
             arch = machine()
+            missing = [t for t in TOOLS if not PREBUILT.get(t, {}).get(arch)]
+            if missing:
+                # nothing is fetched while a tool has no pinned entry: the way "fetch" is all or nothing, and
+                # "build" is named (never a silent switch to the other way)
+                raise ToolboxMissing(PREBUILT_MISSING if "setpriv" in missing else
+                                     f"No prebuilt {', '.join(missing)} is pinned for this computer. " +
+                                     TOOLBOX_WAY_TEXT)
             for tool in TOOLS:
-                pin = PREBUILT.get(tool, {}).get(arch)
-                if not pin:
-                    continue
+                pin = PREBUILT[tool][arch]
                 if fetch is None:
                     raise ToolboxMissing("The framework's downloader is not available, so the runtime layer's tools "
                                          "cannot be fetched. " + TOOLBOX_WAY_TEXT)
@@ -357,17 +455,6 @@ def ensure_toolbox(cache_dir: Path, way: str, *, offline: bool,
                 path.write_bytes(data)
                 files[tool] = path
                 sources[tool] = {"way": "fetch", "url": pin["url"], "sha256": pin["sha256"]}
-            missing = [t for t in TOOLS if t not in files]
-            if missing:
-                if "setpriv" in missing:
-                    log(f"Runtime layer: {PREBUILT_MISSING}")
-                if build is None:
-                    raise ToolboxMissing(PREBUILT_MISSING + " " + TOOLBOX_WAY_TEXT)
-                built = build(work)
-                for tool in missing:
-                    files[tool] = built[tool]
-                    sources[tool] = {"way": "build", "source": BUILD_SOURCES["util-linux" if tool == "setpriv"
-                                                                             else "busybox"]["url"]}
         else:
             if build is None:
                 raise ToolboxMissing("The container engine is not available, so the runtime layer's tools cannot be "
@@ -439,6 +526,23 @@ def engine_builder(client: Any, fetch: Callable[[str], bytes],
 
 
 # --- The assembled layer ------------------------------------------------------------------------------------------
+
+def expected_files(cache_dir: Path) -> Dict[str, str]:
+    """name -> sha256 of every file the assembled layer holds (Mojo Miracle's restore puts back exactly these)."""
+    return _expected(cache_dir)[0]
+
+
+def layer_mode(name: str) -> int:
+    """The mode a file of the assembled layer has (assemble): the scripts read-only, the tools read and run."""
+    return 0o555 if name.startswith("bin/") else 0o444
+
+
+def shipped_source(cache_dir: Path, name: str) -> Path:
+    """Where the layer's file `name` comes from: the shipped copy (a script) or the toolbox (bin/TOOL)."""
+    if name.startswith("bin/"):
+        return toolbox_dir(cache_dir) / name[len("bin/"):]
+    return SHIPPED_DIR / name
+
 
 def _expected(cache_dir: Path) -> Tuple[Dict[str, str], Optional[Dict[str, Any]]]:
     """name -> sha256 the assembled layer must hold: the shipped scripts' manifest and the toolbox's record."""
@@ -622,6 +726,10 @@ def stage_order(target_dir: Path, job: str = "build") -> Tuple[List[str], List[s
                 if not MODULE_NAME.fullmatch(name) or name in FOUR_STAGES:
                     problems.append(f"target.yml: '{name}' in the slot {key} is not a valid module name (lower case "
                                     "letters, digits and _, not one of the four stages).")
+                elif name in RESERVED_MODULES:
+                    problems.append(f"target.yml: '{name}' in the slot {key} is not allowed: benchmark_module.sh never "
+                                    "runs in a build (it would measure this build computer; a model for a board is "
+                                    "measured on the board).")
                 elif not (modules / f"{name}_module.sh").is_file():
                     problems.append(f"target.yml: the slot {key} names {name}, but modules/{name}_module.sh is "
                                     "missing.")
@@ -656,9 +764,11 @@ def own_runner_note(target_dir: Path) -> Optional[str]:
 
 __all__ = ["BUILD_SOURCES", "BUILDER_BASE", "CLEANUP_ENTRYPOINT", "DEFAULT_TOOLBOX_WAY", "END_MOUNT",
            "END_PROTECTED", "END_UNPROTECTED", "ENTRYPOINT", "FOUR_STAGES", "LAYER_MOUNT", "LayerCheck",
-           "LayerRefused", "MODULES_IN_IMAGE", "OFFLINE_REFUSAL", "OWN_RUNNER_NOTE", "PREBUILT", "RESTORE_STEP", "RESTORE_WAY",
+           "LayerRefused", "MODULES_IN_IMAGE", "OFFLINE_REFUSAL", "OWN_RUNNER_NOTE", "PREBUILT", "RESERVED_MODULES", "RESTORE_STEP", "RESTORE_WAY",
            "SCRIPTS", "SHIPPED_DIR", "SLOTS", "TOOLBOX_WAYS", "TOOLS", "ToolboxMissing", "VERDICTS", "VERDICT_TEXT",
-           "assemble", "builder_context", "end_folder", "end_folder_state", "ensure_toolbox", "extract_prebuilt",
+           "assemble", "builder_context", "end_folder", "layer_status", "read_prebuilt", "set_toolbox_way", "cache_dir_of",
+           "PREBUILT_TABLE", "TOOLBOX_SETTING", "ToolboxWayError", "end_folder_state", "ensure_toolbox", "extract_prebuilt",
            "is_static_elf", "layer_check", "layer_dir", "layer_volumes", "manifest_text", "mounts_keep_owners",
-           "own_runner_note", "prepare_end_folder", "read_manifest", "read_toolbox", "ready_layer",
+           "own_runner_note", "prepare_end_folder", "expected_files", "label_names", "layer_mode", "layer_names",
+           "shipped_source", "read_manifest", "read_toolbox", "ready_layer",
            "runner_owner_on_host", "shipped_problems", "stage_order", "toolbox_dir", "toolbox_way", "write_toolbox"]

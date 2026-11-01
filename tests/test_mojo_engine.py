@@ -78,7 +78,10 @@ def test_every_repair_of_the_table_is_harmless():
         text = path.read_text(encoding="utf-8")
         for kind in ("delete", "overwrite", "widen", "vault", "policy", "audit", "oversight", "system"):
             assert f'kind="{kind}"' not in text, (path.name, kind)
-    assert set(REPAIRS) == {"state.tighten", "runtime.switch_intact", "knowledge.reimport"}
+    assert set(REPAIRS) == {"state.tighten", "runtime.switch_intact", "knowledge.reimport", "runtime_layer.restore"}
+    # the runtime layer's restore only puts the framework's own files back (restore_file), the replaced ones kept
+    assert 'kind="restore_file"' in (REPO / "orchestrator/Core/mojo/repairs/runtime_layer.py").read_text(
+        encoding="utf-8")
     # the one repair that is not harmless by itself only re-imports, and only after the person's own yes
     assert 'kind="reimport"' in (REPO / "orchestrator/Core/mojo/repairs/knowledge.py").read_text(encoding="utf-8")
 

@@ -162,8 +162,9 @@ echo "toolchain env: ${CMAKE_TOOLCHAIN_FILE-unset}"
 
 
 def _shim(tmp_path, *words, env=None, target="Rockchip"):
-    """build.sh's cmake (the check of every cmake call of a module's own scripts), with a fake cmake on PATH."""
-    text = (REPO_ROOT / "targets" / target / "modules" / "build.sh").read_text(encoding="utf-8")
+    """The stage modules' cmake (the check of every cmake call of a module's own scripts: the runtime layer's
+    stage_env.sh, the same for every target since the runner is the framework's), with a fake cmake on PATH."""
+    text = (REPO_ROOT / "orchestrator" / "runtime_layer" / "stage_env.sh").read_text(encoding="utf-8")
     function = re.search(r"^cmake\(\) \{\n.*?^\}\n", text, re.M | re.S).group(0)
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)

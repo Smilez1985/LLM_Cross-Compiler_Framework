@@ -119,6 +119,45 @@ jobs:
           path: test-results.xml
           if-no-files-found: ignore
 
+  runtime-layer-tools:
+    # The runtime layer's two static tools made the way "build" (scripts/runtime_toolbox.py: the framework's builder
+    # image over the pinned util-linux and busybox tarballs, each checked by its sha256), then the runtime layer's
+    # tests on the real kernel with these real tools (as root: they hand the runner exactly CAP_SETUID and
+    # CAP_SETGID). The tools and their SHA256SUMS are uploaded as a workflow artifact; publishing a release with them
+    # is the maintainer's step (orchestrator/runtime_layer/toolbox/prebuilt.json then pins their URL and sha256).
+    name: Runtime layer tools (Linux, real static busybox and setpriv)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+          # pip cache off for now: the account's cache and egress quota ran out and a job hung at the cache restore
+
+      - name: Install dependencies (base only)
+        run: python -m pip install --no-deps -r requirements.txt -r requirements-dev.txt
+
+      - name: Build the static busybox and setpriv the way "build"
+        run: python scripts/runtime_toolbox.py "$RUNNER_TEMP/runtime-toolbox"
+
+      - name: Runtime layer tests with the real tools (as root)
+        run: |
+          sudo -E env "PATH=$PATH" "LLMCF_TEST_TOOLBOX=$RUNNER_TEMP/runtime-toolbox" \
+            "$(command -v python)" -m pytest -ra tests/test_runtime_layer.py tests/test_stage_user.py
+
+      - name: Upload the tools and their SHA256SUMS
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: runtime-layer-tools-linux-amd64
+          path: ${{ runner.temp }}/runtime-toolbox
+          if-no-files-found: error
+
   test-headless:
     # The install without the optional extra 'gui' (DECISIONS round 11, A3): a headless or server install and the
     # framework image without --gui. No PySide6 and no Qt libraries: the Qt-free checks (tests/test_qt_free_core.py:

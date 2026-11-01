@@ -88,7 +88,10 @@ It checks Python, Docker and buildx (and names the container engine: under Podma
 output and build folders, the targets, the state folder, the secrets store and the keyring, the tool permissions, the MCP tokens and
 the audit log, the chat feed, the calibration data, the community packs, the knowledge snapshots against the free
 space of their disk, the storage of the knowledge base, the local llama.cpp runtime (in Docker mode: whether Ditto's
-image is there, built on this computer and verified) and the boards you trusted.
+image is there, built on this computer and verified), the framework's runtime layer that every build container
+runs (whether it matches the shipped copy, how its two tools were made, and whether this computer protects a
+build's end folder: Docker Desktop on Windows and macOS, and the legacy mode without the build sandbox, do not, and
+Mojo Oracle says "End folder unprotected") and the boards you trusted.
 
 ### The storage of the knowledge base
 
@@ -146,13 +149,14 @@ single connection to the board's SSH port, without a login, and shows the board'
 
 ## 3. What Mojo Miracle repairs
 
-Mojo Miracle makes only harmless repairs. A harmless repair narrows access or switches to an intact build, and it
-can be undone. Today there are two:
+Mojo Miracle makes only harmless repairs. A harmless repair narrows access, switches to an intact build or puts the
+framework's own files back, and it can be undone. Today there are three:
 
 | Problem | What Mojo Miracle does |
 |---|---|
 | `state.permissions`: other users of this computer can read your state folder (tool permissions, audit log, chat) | The folder loses the rights of other users, for example mode 0755 becomes 0700. Your own rights stay. |
 | `runtime.build.missing`: the active llama.cpp build of Ditto's server is missing | Ditto's server switches to the newest intact, verified build of the pinned llama.cpp version, if one is stored. Nothing is built or deleted. |
+| `runtime_layer.changed`: a file of the runtime layer differs from the shipped copy, so every build is refused | Each changed file is put back from the framework's shipped copy (a script) or its toolbox (busybox, setpriv), one step per file, and only while it is still as the plan showed it. The file it replaces is kept in `runtime-layer/replaced/` of the cache folder. A file in the layer folder that is not the layer's is counted, never named, and not removed: you remove it. Mojo Oracle checks the layer again afterwards. |
 
 How a repair runs:
 

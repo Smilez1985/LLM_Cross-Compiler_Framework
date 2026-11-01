@@ -22,6 +22,9 @@ import pytest
 from orchestrator.Core import build_end
 from orchestrator.Core import runtime_layer as layer
 
+# These tests make and check the toolbox themselves: the real ensure_toolbox, never the test toolbox of conftest
+pytestmark = pytest.mark.real_toolbox
+
 RUNNER = 64020
 STAGE = 64010
 STAND_IN_BUSYBOX = """#!/bin/sh
@@ -44,6 +47,9 @@ def _why_not() -> str:
 
 
 WHY_NOT = _why_not()
+# The real static busybox and setpriv the CI job "Runtime layer tools" made (scripts/runtime_toolbox.py OUT); without
+# it the box uses this computer's setpriv and a busybox stand-in
+REAL_TOOLBOX = Path(os.environ["LLMCF_TEST_TOOLBOX"]) if os.environ.get("LLMCF_TEST_TOOLBOX") else None
 HOST_SETPRIV = shutil.which("setpriv") or "setpriv"
 needs_root = pytest.mark.skipif(bool(WHY_NOT), reason=WHY_NOT or "-")
 needs_posix = pytest.mark.skipif(os.name == "nt" or shutil.which("sh") is None,
@@ -61,8 +67,12 @@ class Box:
         shutil.copytree(layer.SHIPPED_DIR, self.layer, ignore=shutil.ignore_patterns("toolbox", "MANIFEST.sha256"))
         if tools:
             (self.layer / "bin").mkdir()
-            (self.layer / "bin" / "busybox").write_text(STAND_IN_BUSYBOX, encoding="utf-8")
-            shutil.copy2(shutil.which("setpriv"), self.layer / "bin" / "setpriv")
+            if REAL_TOOLBOX:   # the real static tools of the way "build" (CI job "Runtime layer tools")
+                for tool in layer.TOOLS:
+                    shutil.copy2(REAL_TOOLBOX / f"{tool}-{layer.machine()}", self.layer / "bin" / tool)
+            else:
+                (self.layer / "bin" / "busybox").write_text(STAND_IN_BUSYBOX, encoding="utf-8")
+                shutil.copy2(shutil.which("setpriv"), self.layer / "bin" / "setpriv")
         for path in [self.layer, *self.layer.rglob("*")]:
             os.chmod(path, 0o755)
         self.image = self.root / "image"
@@ -413,6 +423,25 @@ def test_an_image_volume_over_the_runtime_layer_refuses_the_build():
     assert sandbox_problem(attrs, _layer_options(), volumes) is None
 
 
+def test_an_image_volume_inside_the_end_folder_refuses_the_build(tmp_path):
+    """The end folder is the one writable mount the host trusts (only the runner writes it): an image's
+    `VOLUME /llmcf-end/build.end` made the engine mount an anonymous volume inside it, so the runner's record landed in
+    the image's volume and the host's end folder got a folder of the engine's in its place. Refused like a mount
+    inside the read-only layer, before the container starts."""
+    from orchestrator.utils.sandbox import sandbox_problem
+    end = tmp_path / "end-build"
+    volumes = layer.layer_volumes(Path("/cache"), end)
+    attrs = _layer_attrs()
+    attrs["Mounts"].append({"Type": "bind", "Source": str(end), "Destination": layer.END_MOUNT, "RW": True})
+    assert sandbox_problem(attrs, _layer_options(), volumes) is None
+    attrs["Mounts"].append({"Type": "volume", "Name": "f01", "Source": "/var/lib/volumes/f01/_data",
+                            "Destination": f"{layer.END_MOUNT}/build.end", "RW": True})
+    problem = sandbox_problem(attrs, _layer_options(), volumes) or ""
+    assert f"{layer.END_MOUNT}/build.end" in problem and "/var/lib" not in problem
+    from orchestrator.utils.sandbox import GUARDED_MOUNTS   # utils names the end mount without importing Core
+    assert layer.END_MOUNT in GUARDED_MOUNTS
+
+
 def test_podmans_entrypoint_as_one_string_is_the_frameworks():
     """Podman 4 reports Config.Entrypoint as one string ("/llmcf/bin/busybox sh /llmcf/entrypoint.sh"): the check
     compared it letter by letter with the list and refused every Podman build."""
@@ -464,3 +493,150 @@ def test_the_runners_path_leads_into_the_read_only_layer(tmp_path):
 def test_a_cut_off_program_is_not_static_and_raises_nothing():
     for data in (b"\x7fELF", b"\x7fELF\x02\x01\x01" + b"\0" * 20, b""):
         assert layer.is_static_elf(data) is False
+
+
+# --- the runtime layer wired into every build (chain runtime-layer3) ---------------------------------------------
+
+def test_benchmark_is_refused_as_a_slot_module(tmp_path):
+    """Regression: benchmark_module.sh measures the build computer and never runs in a build; a target.yml that put it
+    into a slot would have run it."""
+    target = _target(tmp_path, "stages:\n  after_target: [benchmark]\n", files=("benchmark",))
+    _stages, problems = layer.stage_order(target)
+    assert problems and "benchmark" in problems[0] and "never runs in a build" in problems[0]
+
+
+def test_a_done_record_must_name_the_last_slot_module():
+    """Regression: with a module in the slot after_target the runner's last stage is that module; its done record was
+    refused as "before the last stage" (the job's last of the four stages was the only one accepted)."""
+    record = build_end.EndRecord("done", 0, "after", sealed=True)
+    assert build_end.end_problem(record, 0, "build", last="after") is None
+    early = build_end.EndRecord("done", 0, "target", sealed=True)
+    assert "before the last stage after" in build_end.end_problem(early, 0, "build", last="after")
+    assert build_end.end_problem(early, 0, "build") is None   # without slots: target, as before
+
+
+@needs_root
+def test_what_the_host_hands_the_runner_never_reaches_a_module(box):
+    """Regression: the host's values for the runner alone (its ids, the end folder, the stage order, the target's
+    label) reached every stage module's environment; a module now finds none of them."""
+    box.module("source", "#!/bin/bash\nenv > \"$BUILD_SCRATCH_DIR/module-env\"\n")
+    result = box.run("--job", "build", "--to", "source", LLMCF_STAGES="source config convert target",
+                     LLMCF_TARGET_LABEL="label-only-for-the-runner")
+    assert result.returncode == 0, result.stdout + result.stderr
+    seen = (box.work / "module-env").read_text(encoding="utf-8")
+    for name in ("STAGE_RUNNER_IDS=", "LLMCF_END_DIR=", "LLMCF_STAGES=", "LLMCF_TARGET_LABEL="):
+        assert f"\n{name}" not in "\n" + seen, name
+    assert "label-only-for-the-runner" in result.stdout   # the runner itself still has it
+
+
+@needs_root
+def test_the_preflight_reads_the_inputs_whatever_the_runners_working_folder(box, tmp_path):
+    """Regression: the stage account's test child ran find in the runner's working folder; one the stage account
+    cannot enter (a closed folder) made find print nothing, and an unreadable input passed the check."""
+    model = box.root / "input-model"
+    model.mkdir()
+    (model / "weights.bin").write_bytes(b"0")
+    for path in (model, model / "weights.bin"):
+        os.chown(path, RUNNER, RUNNER)
+    os.chmod(model / "weights.bin", 0o600)
+    closed = tmp_path / "closed"
+    closed.mkdir()
+    os.chmod(closed, 0o700)
+    bounding = "-all,+setuid,+setgid"
+    result = subprocess.run([HOST_SETPRIV, f"--bounding-set={bounding}", f"--inh-caps={bounding}", "--no-new-privs",
+                             "--", str(box.layer / "bin" / "busybox"), "sh", str(box.layer / "entrypoint.sh"),
+                             "--job", "build", "--to", "source"],
+                            env=box.env(MODEL_SOURCE=str(model)), capture_output=True, text=True, timeout=120,
+                            stdin=subprocess.DEVNULL, cwd=closed)
+    assert result.returncode == build_end.STAGE_USER_EXIT["inputs"], result.stdout + result.stderr
+
+
+def test_the_builder_hands_the_end_record_check_the_last_stage_of_the_order():
+    from orchestrator.Core.builder import BuildEngine, BuildProgress, BuildStatus
+    progress = BuildProgress("b1", BuildStatus.BUILDING, "")
+    assert BuildEngine._last_stage(progress) is None
+    progress.runtime_layer = {"stages": ["source", "config", "convert", "target", "after"]}
+    assert BuildEngine._last_stage(progress) == "after"
+
+
+# --- the toolbox: the person's way, the one pinned table of the way "fetch" ---------------------------------------
+
+def test_the_fetch_way_refuses_plainly_while_setpriv_has_no_pinned_entry(tmp_path):
+    """Regression: the way "fetch" took busybox from the table and silently built setpriv the other way; while the
+    table has no setpriv entry it now refuses, names the way "build" and fetches nothing."""
+    fetched = []
+    with pytest.raises(layer.ToolboxMissing) as refused:
+        layer.ensure_toolbox(tmp_path, "fetch", offline=False, fetch=lambda url: fetched.append(url) or b"",
+                             build=lambda work: pytest.fail("the way fetch must not build"))
+    assert fetched == [] and "'build'" in str(refused.value) and "setpriv" in str(refused.value)
+
+
+def test_the_one_pinned_table_is_read_and_a_pin_without_its_sha256_is_left_out(tmp_path):
+    table = layer.read_prebuilt()
+    assert set(table["busybox"]) == {"amd64", "arm64"} and table["setpriv"] == {}
+    assert table == layer.PREBUILT
+    bad = tmp_path / "prebuilt.json"
+    bad.write_text('{"setpriv": {"amd64": {"kind": "file", "url": "http://example.com/setpriv", "sha256": "'
+                   + "a" * 64 + '", "name": "setpriv"}, "arm64": {"kind": "file", "url": "https://example.com/s", '
+                   '"name": "setpriv"}}}', encoding="utf-8")
+    assert layer.read_prebuilt(bad)["setpriv"] == {}   # not https, and no sha256
+
+
+def test_a_pinned_program_file_is_checked_by_its_sha256_and_must_be_static():
+    from orchestrator.utils.helpers import sha256_bytes
+    data = b"\x7fELF\x02\x01" + b"\0" * 58
+    pin = {"kind": "file", "name": "setpriv-amd64", "sha256": sha256_bytes(data), "url": "https://example.com/x"}
+    with pytest.raises(ValueError, match="pinned sha256"):
+        layer.extract_prebuilt(data + b"x", pin)
+    with pytest.raises(ValueError, match="statically linked"):   # no program headers: not a whole static program
+        layer.extract_prebuilt(data, pin)
+
+
+def test_only_the_person_chooses_the_toolbox_way(tmp_path):
+    from orchestrator.Core.config_manager import ConfigManager
+    from orchestrator.llm.settings_change import PERSON_ONLY_SETTINGS, AISettingsChange, person_only_text
+    assert "runtime_layer_toolbox" in PERSON_ONLY_SETTINGS
+    assert "never change" in person_only_text("runtime_layer_toolbox")
+    problems = AISettingsChange.problems_of_settings(None, None, {"runtime_layer_toolbox": "fetch"}, by_ai=True)
+    assert [p.code for p in problems] == ["person_only"]
+    config = ConfigManager(tmp_path / "configs")
+    assert layer.toolbox_way(config) == "build"
+    assert layer.set_toolbox_way(config, "fetch") == "fetch" and layer.toolbox_way(config) == "fetch"
+    assert ConfigManager(tmp_path / "configs").get("runtime_layer_toolbox") == "fetch"   # saved
+    with pytest.raises(layer.ToolboxWayError):
+        layer.set_toolbox_way(config, "download")
+
+
+def test_the_layer_status_names_labels_only(tmp_path):
+    import json
+    status = layer.layer_status(tmp_path, {"runtime_layer_toolbox": "fetch"}, platform_name="win32")
+    assert status["verdict"] == "no_toolbox" and status["toolbox_way"] == "fetch" and status["fetch_ready"] is False
+    assert status["end_folder"] == "unprotected" and str(tmp_path) not in json.dumps(status)
+    assert layer.layer_status(tmp_path, platform_name="linux")["end_folder"] == "protected"
+
+
+def test_the_cli_shows_the_layer_and_sets_the_way(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+    from orchestrator import cli as cli_module
+    from orchestrator.Core.config_manager import ConfigManager
+    config = ConfigManager(tmp_path / "configs")
+    config.set("cache_dir", str(tmp_path / "cache"))
+    monkeypatch.setattr(cli_module, "_settings", lambda ctx: (config, lambda v: Path(v)))
+    result = CliRunner().invoke(cli_module.cli, ["build", "image", "layer", "--toolbox", "fetch"])
+    assert result.exit_code == 0, result.output
+    text = " ".join(result.output.split())
+    assert "runtime_layer_toolbox set to fetch" in text and "not on this computer yet" in text
+    assert "Use the way 'build'" in text
+    assert config.get("runtime_layer_toolbox") == "fetch"
+
+
+@pytest.mark.skipif(REAL_TOOLBOX is None, reason="the real tools come from the CI job 'Runtime layer tools'")
+def test_the_real_tools_are_static_and_run():
+    """The tools the way "build" made: static programs (nothing loads from an image), and they run."""
+    for tool in layer.TOOLS:
+        path = REAL_TOOLBOX / f"{tool}-{layer.machine()}"
+        assert layer.is_static_elf(path.read_bytes()), tool
+    assert subprocess.run([str(REAL_TOOLBOX / f"busybox-{layer.machine()}"), "true"], timeout=30).returncode == 0
+    version = subprocess.run([str(REAL_TOOLBOX / f"setpriv-{layer.machine()}"), "--version"], capture_output=True,
+                             text=True, timeout=30)
+    assert version.returncode == 0 and "util-linux" in version.stdout

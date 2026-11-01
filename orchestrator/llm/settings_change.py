@@ -62,7 +62,8 @@ _KV_ORDER = {"q4_0": 0, "q8_0": 1, "f16": 2}   # memory of the KV-cache type, sm
 # Settings an AI may read but never change, in either direction (not even downwards): lowering the idle timeout can
 # stop the person's own long builds, and pinning "auto" of the prompt cache or the KV-cache type to a value freezes
 # a value that may no longer fit this computer later.
-PERSON_DECIDES = ("build_idle_timeout", "local_cache_ram_mib", "local_kv_cache", "framework_mode")
+PERSON_DECIDES = ("build_idle_timeout", "local_cache_ram_mib", "local_kv_cache", "framework_mode",
+                  "runtime_layer_toolbox")
 # The MQTT doorbell's broker, user name, topic prefix and CA file (Core/doorbell.py): an AI may not redirect or
 # silence the person's notifications.
 MQTT_SETTINGS = ("mqtt_broker_url", "mqtt_username", "mqtt_topic_prefix", "mqtt_ca_file")
@@ -80,6 +81,9 @@ CACHE_PERSON_ONLY_TEXT = ("{key} accepts memory values above this computer's sof
 IDLE_PERSON_ONLY_TEXT = ("{key} stops a build step that prints nothing for that long. Only the person sets it, in the "
                          "framework's settings: a lower value can stop the person's own long builds, so no AI changes "
                          "it, in either direction.")
+TOOLBOX_PERSON_ONLY_TEXT = ("{key} says where the runtime layer's two tools (a static busybox and setpriv) come from: "
+                            "built from pinned sources or fetched. Only the person sets it; an AI may read it, never "
+                            "change it, in either direction.")
 MODE_PERSON_ONLY_TEXT = ("{key} says whether the framework runs in private or enterprise mode, and with it which board key "
                          "tiers it accepts. Only the person sets it; an AI may read it, never change it.")
 CACHE_SIZE_PERSON_ONLY_TEXT = ("{key} is auto by default, the value measured on this computer. Only the person sets "
@@ -96,6 +100,8 @@ def person_only_text(key: str) -> str:
         return IDLE_PERSON_ONLY_TEXT.format(key=key)
     if key == "framework_mode":
         return MODE_PERSON_ONLY_TEXT.format(key=key)
+    if key == "runtime_layer_toolbox":
+        return TOOLBOX_PERSON_ONLY_TEXT.format(key=key)
     if key in PERSON_DECIDES:
         return CACHE_SIZE_PERSON_ONLY_TEXT.format(key=key)
     if key in MQTT_SETTINGS:
@@ -104,7 +110,7 @@ def person_only_text(key: str) -> str:
 
 
 def _person_only_title(key: str) -> str:
-    if key == "build_idle_timeout":
+    if key in ("build_idle_timeout", "runtime_layer_toolbox"):
         return "Build"
     if key == CACHE_OVER_CAP_OK or key in LOCAL_CACHE_SETTINGS:
         return "Prompt cache"

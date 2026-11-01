@@ -197,8 +197,9 @@ Weiteres Verhalten:
 - **Ein Build endet an seiner Fertig-Marke:** Der Stufen-Runner schreibt als allerletzten Schritt einen
   Abschluss-Eintrag; ein Build ist erst fertig, wenn dieser Eintrag das sagt, keine Uhr kann ihn danach stoppen, und
   ein Container, der ohne ihn endet, ist ein fehlgeschlagener Build. Nur der eigene Eintrag des Stufen-Runners zählt
-  (versiegelt mit einem Schlüssel dieses Laufs, den kein Modul-Skript sieht), und nur mit dem echten Exit-Status 0 des
-  Containers: Ein Modul-Skript kann einen Build nicht vorzeitig als fertig beenden. Jeder Build hat einen Endgrund (done, failed,
+  (im Abschluss-Ordner des Builds, den nur der Runner schreiben darf; unter Docker Desktop wird der Build als
+  „Abschluss-Ordner ungeschützt“ markiert), und nur mit dem echten Exit-Status 0 des Containers und seiner
+  Inspect-Prüfung: Ein Modul-Skript kann einen Build nicht vorzeitig als fertig beenden. Jeder Build hat einen Endgrund (done, failed,
   cancelled, soft_cap, idle), den der Builder, `llm-cli build status`, `get_build_status` und `build_info.json`
   zeigen; die Wartebefehle der CLI enden daran mit eigenen Exit-Codes ([CLI](CLI_Usage_DE.md#build-status)).
 - **Eine Türklingel für jedes Build-Ende:** mit deinem eigenen MQTT-Broker wird jedes Build-Ende einmal nur mit
@@ -327,7 +328,8 @@ sind sie abgeschottet (Einstellung `build_sandbox`, standardmäßig an):
 
 | Maßnahme | Wirkung |
 |---|---|
-| Deine Benutzer-ID statt root, und die Stufen-Module unter einem eigenen Benutzer | Dateien gehören dir. Der Stufen-Runner läuft als du mit nur den zwei Rechten, den Benutzer zu wechseln; jedes Stufen-Modul läuft unter dem Stufen-Konto des Images ohne jede Capability und kann so den Speicher des Runners nicht lesen (wo der Schlüssel des Abschluss-Eintrags liegt). Der Runner prüft das vor dem ersten Modul, und das Framework prüft den Container, bevor er startet; beide verweigern den Build mit einem klaren Grund. Das Build-Log sagt, in welchem Modus ein Build lief. Beide teilen sich eine Gruppe, deine: Was ein Modul schreibt, auch eine Datei, die sein Werkzeug privat gemacht hat, bleibt für dich lesbar und entfernbar. |
+| Deine Benutzer-ID statt root, und die Stufen-Module unter einem eigenen Benutzer | Dateien gehören dir. Der Stufen-Runner läuft als du mit nur den zwei Rechten, den Benutzer zu wechseln; jedes Stufen-Modul läuft unter dem Stufen-Konto des Images ohne jede Capability und kann so weder den Speicher des Runners lesen noch den Abschluss-Ordner schreiben. Der Runner ist die
+Laufzeit-Schicht des Frameworks, schreibgeschützt eingehängt, nie das `build.sh` eines Targets. Der Runner prüft das vor dem ersten Modul, und das Framework prüft den Container, bevor er startet; beide verweigern den Build mit einem klaren Grund. Das Build-Log sagt, in welchem Modus ein Build lief. Beide teilen sich eine Gruppe, deine: Was ein Modul schreibt, auch eine Datei, die sein Werkzeug privat gemacht hat, bleibt für dich lesbar und entfernbar. |
 | Kein Netzwerk (`network_mode: none`) | Das Modell kann keine Daten verschicken, Bibliotheken können nichts herunterladen. Alle Hugging-Face-Bibliotheken sind auf offline gestellt. |
 | Keine Linux-Capabilities (`cap_drop: ALL`) und `no-new-privileges` | Keine Rechteausweitung. |
 | Schreibgeschütztes Image-Dateisystem | Beschreibbar sind nur der eigene Arbeitsordner des Builds, ein 1 GB großes `/tmp` und der Ausgabeordner; das bereitgestellte Modell ist nur lesend eingebunden. |

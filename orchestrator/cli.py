@@ -929,6 +929,8 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
             if workflow_status.status in (OrchestrationStatus.COMPLETED, OrchestrationStatus.ERROR,
                                           OrchestrationStatus.CANCELLED):
                 _deliver_end_notices(ctx, request_id)   # the chat row and the doorbell before this process ends
+            if workflow_status.status in (OrchestrationStatus.ERROR, OrchestrationStatus.CANCELLED):
+                _ask_interrupted(ctx, request_id)   # finished stages kept: continue it, or delete what it left?
             for artifact in workflow_status.artifacts:
                 console.print(f"[green]Artifacts: {escape(str(artifact))}[/green]")
                 if chosen:  # outside the output folder: the listings keep showing it
@@ -1345,6 +1347,122 @@ def build_deps_delete(ctx: FrameworkContext):
     _print_deletion_result(result, accepted)
 
 
+@build.group('interrupted')
+def build_interrupted():
+    """Builds that stopped with finished stages kept: continue one (its finished stages are not run again) or delete
+    what it left. Only you decide; an AI's question about them waits here for you"""
+
+
+def _interrupted_context(ctx: FrameworkContext):
+    """(build engine, cache folder, state folder) for the interrupted builds."""
+    ctx.require_framework()
+    engine = ctx.build_engine or getattr(getattr(ctx, "orchestrator", None), "build_engine", None)
+    if engine is None:
+        console.print("[red]The build engine is not available here.[/red]")
+        sys.exit(1)
+    state = getattr(ctx.framework_manager.config, "user_state_dir", None)
+    return engine, Path(engine.cache_dir), Path(state) if state else None
+
+
+@build_interrupted.command('list')
+@pass_context
+def build_interrupted_list(ctx: FrameworkContext):
+    """Every kept interrupted build: its finished stages, its size and its folder, and whether an AI asked about it"""
+    from orchestrator.Core import interrupted_build
+    from orchestrator.Core.deletion import size_text
+    engine, cache, state = _interrupted_context(ctx)
+    running = [p.build_id for p in engine.list_builds() if p.status.value not in ("completed", "failed", "cancelled")]
+    kept = interrupted_build.kept_builds(cache, running)
+    if not kept:
+        console.print("No interrupted build is kept.")
+        return
+    asked = interrupted_build.pending(state)
+    table = Table(title=f"Interrupted builds ({len(kept)})")
+    for column in ("Build", "Target", "Finished stages", "Size", "Folder", "An AI asked"):
+        table.add_column(column, overflow="fold")
+    for item in kept:
+        table.add_row(escape(item.build_id), escape(item.target), escape(", ".join(item.stages_done)),
+                      size_text(item.size_bytes), escape(str(item.folder)),
+                      escape(asked[item.build_id].get("asked_by", "yes")) if item.build_id in asked else "-")
+    console.print(table)
+    console.print("Continue one: llm-cli build interrupted continue BUILD_ID; delete what it left: llm-cli build "
+                  "interrupted delete BUILD_ID")
+
+
+@build_interrupted.command('continue')
+@click.argument('build_id')
+@pass_context
+def build_interrupted_continue(ctx: FrameworkContext, build_id: str):
+    """Continue an interrupted build on its kept work folder (its finished stages are not run again)"""
+    from orchestrator.Core import interrupted_build
+    engine, cache, state = _interrupted_context(ctx)
+    try:
+        started = interrupted_build.decide(engine, cache, build_id, "continue", "cli", state_dir=state)
+    except interrupted_build.InterruptedBuildError as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        sys.exit(1)
+    console.print(f"[green]Build {escape(str(started))} continues; follow it with: llm-cli build status[/green]")
+
+
+@build_interrupted.command('delete')
+@click.argument('build_id')
+@pass_context
+def build_interrupted_delete(ctx: FrameworkContext, build_id: str):
+    """Delete what an interrupted build left, after you confirm its list in a terminal"""
+    from orchestrator.Core import interrupted_build
+    from orchestrator.Core.deletion import PlanChanged, size_text
+    engine, cache, state = _interrupted_context(ctx)
+    item = interrupted_build.kept_build(cache, build_id)
+    if item is None:
+        console.print(f"No interrupted build {escape(build_id)} is kept.")
+        return
+    plan = interrupted_build.deletion_plan(item)
+    accepted = confirm_deletion(plan, title=f"What the interrupted build left ({size_text(plan.total_bytes)})",
+                                again=f"llm-cli build interrupted delete {build_id}")
+    if accepted is None:
+        return
+    cleanup = getattr(engine, "_cleanup_runner", None)
+    try:
+        result = interrupted_build.decide(engine, cache, build_id, "delete", "cli", state_dir=state,
+                                          accepted=accepted, audit=_cli_audit(ctx),
+                                          cleanup=cleanup(_image_of(engine, build_id), item.folder)
+                                          if callable(cleanup) else None)
+    except (interrupted_build.InterruptedBuildError, PlanChanged, PermissionError, RuntimeError) as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        return
+    _print_deletion_result(result, accepted)
+
+
+def _image_of(engine, build_id: str):
+    """The image an interrupted build ran in (the clean-up container uses it): its recorded toolchain image."""
+    from orchestrator.Core import interrupted_build
+    item = interrupted_build.kept_build(Path(engine.cache_dir), build_id)
+    config = interrupted_build.read_config(item.folder) if item is not None else None
+    return (config or {}).get("toolchain_image") or None
+
+
+def _ask_interrupted(ctx: FrameworkContext, request_id: str) -> None:
+    """At a terminal, after a build of this request stopped with finished stages kept: continue it, or delete what
+    it left? Without a terminal nothing is asked (llm-cli build interrupted shows it later)."""
+    from orchestrator.Core import interrupted_build
+    if not sys.stdin.isatty():
+        return
+    engine = ctx.build_engine or getattr(getattr(ctx, "orchestrator", None), "build_engine", None)
+    if engine is None:
+        return
+    for item in interrupted_build.kept_builds(Path(engine.cache_dir)):
+        if item.request_id != request_id:
+            continue
+        console.print(f"[yellow]{escape(interrupted_build.QUESTION.format(done=item.done_text()))}[/yellow]")
+        answer = click.prompt("Continue, delete, or later?", type=click.Choice(["continue", "delete", "later"]),
+                              default="later")
+        if answer == "continue":
+            ctx_obj = click.get_current_context()
+            ctx_obj.invoke(build_interrupted_continue, build_id=item.build_id)
+        elif answer == "delete":
+            click.get_current_context().invoke(build_interrupted_delete, build_id=item.build_id)
+
+
 @build.command('save')
 @click.argument('artifact')
 @click.option('--to', 'destination', help="Folder to save it to (default: the output folder; at a terminal you are "
@@ -1601,6 +1719,32 @@ def build_image_sources(ctx: FrameworkContext, apt_mirror: Optional[str], apt_pr
         verdict = check(config, value)
         state = "[green]local[/green]" if verdict.local else "[yellow]NOT local[/yellow]"
         console.print(f"{key}: {escape(value)} - {state} ({escape(verdict.why())})")
+
+
+@build_image_group.command('layer')
+@click.option('--toolbox', type=click.Choice(['build', 'fetch']), default=None,
+              help="How the runtime layer's static busybox and setpriv are made once: 'build' (default, from pinned "
+                   "sources) or 'fetch' (pinned prebuilt files). Only you set it (an AI cannot)")
+@pass_context
+def build_image_layer(ctx: FrameworkContext, toolbox: Optional[str]):
+    """Shows the framework's runtime layer that every build container runs (its stage runner, the stage account's
+    helper and its static tools): whether it matches the shipped copy, how its tools were made, and whether this
+    computer protects the end folder of a build. With --toolbox it sets how the tools are made."""
+    from orchestrator.Core import runtime_layer
+    config, resolve = _settings(ctx)
+    if toolbox is not None:
+        runtime_layer.set_toolbox_way(config, toolbox)
+        console.print(f"[green]runtime_layer_toolbox set to {toolbox}.[/green] A toolbox made before stays until "
+                      "it is made again; the next build without one uses this way.")
+    status = runtime_layer.layer_status(runtime_layer.cache_dir_of(config, resolve), config)
+    colour = "green" if status["verdict"] in ("intact", "missing") else "red"
+    console.print(f"[{colour}]{escape(status['text'])}[/{colour}]")
+    console.print(f"Toolbox way: {status['toolbox_way']}" + (f" (the tools here were made: {status['toolbox_made']})"
+                                                             if status["toolbox_made"] else " (no tools made yet)"))
+    if status["toolbox_way"] == "fetch" and not status["fetch_ready"]:
+        console.print(f"[yellow]{escape(runtime_layer.PREBUILT_MISSING)}[/yellow]")
+    console.print(escape(runtime_layer.END_PROTECTED if status["end_folder"] == "protected"
+                         else runtime_layer.END_UNPROTECTED))
 
 
 @build_image_group.command('export')

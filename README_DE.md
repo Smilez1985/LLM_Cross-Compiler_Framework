@@ -858,7 +858,10 @@ Pack-Dateien installieren. Einzelheiten: [docs/Features_DE.md](docs/Features_DE.
 
 - **Builds in einer Sandbox:** Konvertierungs-Container laufen als dein Benutzer statt als root, ohne
   Netzwerkzugang, ohne Linux-Capabilities, mit `no-new-privileges`, schreibgeschütztem Image-Dateisystem und einem
-  Prozesslimit; ein Speicherlimit lässt sich setzen. Modelle werden vorher auf dem Host heruntergeladen.
+  Prozesslimit; ein Speicherlimit lässt sich setzen. Modelle werden vorher auf dem Host heruntergeladen. Jeder
+  Build-Container führt die eigene Laufzeit-Schicht des Frameworks aus (ihren Stufen-Runner auf einer statischen
+  busybox, vor jedem Build gegen die mitgelieferte Kopie geprüft), nie einen eigenen Runner eines Targets; ein
+  Build, der mit fertigen Stufen angehalten hat, lässt sich fortsetzen.
 - **Tool-Berechtigungen und Audit-Log:** Ditto und MCP-Clients handeln nur über registrierte Tools mit
   Risikokategorien. Du entscheidest, was selbst läuft, was fragt und was verboten ist. Jeder Aufruf landet in einem
   HMAC-verketteten Audit-Log; `llm-cli tools audit --verify` erkennt geänderte oder entfernte Einträge.

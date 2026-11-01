@@ -59,6 +59,10 @@ CLI_PATHS: Dict[str, str] = {
     "build deps delete": "btn_build_deps_delete",
     "build status": "act_build_history",
     "build status --all": "act_build_history",
+    # Build > Build History... > Continue or delete...: an interrupted build with finished stages kept
+    "build interrupted list": "act_build_history",
+    "build interrupted continue": "btn_history_interrupted",
+    "build interrupted delete": "btn_history_interrupted",
     # the Builder's progress panel follows a build until its end record and says how it ended
     "build status --wait": "panel_builder_progress",
     "config show": "act_file_settings",
@@ -81,7 +85,8 @@ CLI_PATHS: Dict[str, str] = {
     "config local-network --check": "act_file_settings",
 }
 # The objects of this area that live in a window, with the menu action that opens it (the parity test opens it).
-WINDOW_OBJECTS: Dict[str, str] = {"btn_build_deps_fetch": "act_build_deps", "btn_build_deps_delete": "act_build_deps"}
+WINDOW_OBJECTS: Dict[str, str] = {"btn_build_deps_fetch": "act_build_deps", "btn_build_deps_delete": "act_build_deps",
+                                   "btn_history_interrupted": "act_build_history"}
 # The switches of this area that are for scripts only, with the reason (as the other menu modules list theirs; the
 # hidden, deprecated build start --parallel is not offered at all).
 MACHINE_ONLY: Dict[str, str] = {

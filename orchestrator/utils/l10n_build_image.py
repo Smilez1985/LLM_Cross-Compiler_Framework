@@ -35,6 +35,15 @@ TEXTS = {
         "bimg.sources.hint": "http or https, no user name, password or token, e.g. http://192.0.2.10:3142",
         "bimg.sources.save": "Save sources",
         "bimg.sources.saved": "Saved. The next offline build of a build container image uses them.",
+        "bimg.layer": "Runtime layer (the framework's stage runner in every build container; only you choose how its "
+                      "tools are made)",
+        "bimg.layer.toolbox": "Its static busybox and setpriv:",
+        "bimg.layer.way.build": "built here from pinned sources (default)",
+        "bimg.layer.way.fetch": "fetched as pinned prebuilt files",
+        "bimg.layer.save": "Save choice",
+        "bimg.layer.saved": "Saved: {way}. Tools made before stay until they are made again; the next build without "
+                            "them uses this way.",
+        "bimg.layer.made": "The tools on this computer were made: {way}",
         "bimg.export.button": "Export to file...",
         "bimg.export.title": "Export the build container image",
         "bimg.export.done": "Exported to {file} ({size}). Its sha256 is {sha256}; the .sha256 file next to it carries "
@@ -77,6 +86,15 @@ TEXTS = {
         "bimg.sources.hint": "http oder https, ohne Benutzernamen, Passwort oder Token, z. B. http://192.0.2.10:3142",
         "bimg.sources.save": "Quellen speichern",
         "bimg.sources.saved": "Gespeichert. Der nächste Offline-Build eines Build-Container-Images nutzt sie.",
+        "bimg.layer": "Laufzeit-Schicht (der Stufen-Runner des Frameworks in jedem Build-Container; nur du wählst, wie "
+                      "ihre Werkzeuge entstehen)",
+        "bimg.layer.toolbox": "Ihre statische busybox und setpriv:",
+        "bimg.layer.way.build": "hier aus festgelegten Quellen gebaut (Vorgabe)",
+        "bimg.layer.way.fetch": "als festgelegte fertige Dateien geholt",
+        "bimg.layer.save": "Wahl speichern",
+        "bimg.layer.saved": "Gespeichert: {way}. Schon gemachte Werkzeuge bleiben, bis sie neu gemacht werden; der "
+                            "nächste Build ohne sie nutzt diesen Weg.",
+        "bimg.layer.made": "Die Werkzeuge auf diesem Rechner entstanden: {way}",
         "bimg.export.button": "In Datei exportieren...",
         "bimg.export.title": "Build-Container-Image exportieren",
         "bimg.export.done": "Exportiert nach {file} ({size}). Seine sha256 ist {sha256}; die .sha256-Datei daneben "
@@ -104,5 +122,7 @@ FORMAL = {
                            "Ihrem eigenen Netz.",
         "bimg.sources": "Quellen in Ihrem eigenen Netz (nur Sie stellen sie ein; ein Offline-Build prüft jede jedes "
                         "Mal)",
+        "bimg.layer": "Laufzeit-Schicht (der Stufen-Runner des Frameworks in jedem Build-Container; nur Sie wählen, "
+                      "wie ihre Werkzeuge entstehen)",
     },
 }

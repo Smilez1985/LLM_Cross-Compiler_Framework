@@ -62,7 +62,8 @@ def inspect_of(volumes, kwargs):
     """What `docker inspect` says of a container created with these docker-py create() arguments (the parts the
     build engine checks before a stage container starts: utils/sandbox.py sandbox_problem)."""
     return {
-        "Config": {"User": kwargs.get("user") or ""},
+        "Config": {"User": kwargs.get("user") or "", "Entrypoint": kwargs.get("entrypoint"),
+                   "Cmd": kwargs.get("command")},
         "HostConfig": {"CapAdd": list(kwargs.get("cap_add") or []) or None,
                        "CapDrop": list(kwargs.get("cap_drop") or []) or None,
                        "SecurityOpt": list(kwargs.get("security_opt") or []) or None,
@@ -73,24 +74,37 @@ def inspect_of(volumes, kwargs):
     }
 
 
-def write_end_record(volumes, name, exit_code):
-    """What the stage runner (targets/*/modules/build.sh) writes as its very last step into the mounted work folder
-    (Core/build_end.py): a fake stage container that exits by itself writes it too. Like the runner it takes the
-    run's key from the job folder (build_end.END_KEY) and seals its record with it, naming the job's last stage."""
+def end_folder_of(volumes):
+    """The host folder of the runtime layer's end folder in a stage container's volumes (Core/runtime_layer.py
+    END_MOUNT), or None."""
+    from orchestrator.Core.runtime_layer import END_MOUNT
+    return next((Path(host) for host, bind in (volumes or {}).items() if bind.get("bind") == END_MOUNT), None)
+
+
+def runner_writes(folder, text):
+    """`text` as the end record in the end folder, written as the stage runner writes it: a file of the folder's
+    owner (the runner's uid; on a root test host the record is handed to that owner like the runner's own file)."""
     from orchestrator.Core import build_end
-    for host, bind in (volumes or {}).items():
-        if bind.get("bind") == "/build-cache/work":
-            job = "imatrix" if "imatrix" in str(name) else "build"
-            folder = Path(host) / "stages" / job
-            folder.mkdir(parents=True, exist_ok=True)
-            key_file = folder / build_end.END_KEY
-            key = key_file.read_text(encoding="ascii").strip() if key_file.is_file() else ""
-            key_file.unlink(missing_ok=True)
-            status = "done" if exit_code == 0 else "failed"
-            body = build_end.record_body(status, exit_code, build_end.LAST_STAGE[job], job, "-",
-                                         "2026-10-30T12:00:00Z")
-            seal = build_end.seal_of(body, key) if key else "-"
-            (folder / "build.end").write_text(f"{body}\nseal {seal}\n", encoding="ascii")
+    record = Path(folder) / build_end.END_RECORD
+    record.write_text(text, encoding="ascii")
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        st = os.stat(folder)
+        os.chown(record, st.st_uid, st.st_gid)
+    return record
+
+
+def write_end_record(volumes, name, exit_code):
+    """What the stage runner (the runtime layer's runner.sh) writes as its very last step into its end folder
+    (Core/build_end.py): a fake stage container that exits by itself writes it too, naming the job's last stage. No
+    key: the end folder, which only the runner may write, is the record's trust."""
+    from orchestrator.Core import build_end
+    folder = end_folder_of(volumes)
+    if folder is None:
+        return
+    job = "imatrix" if "imatrix" in str(name) else "build"
+    status = "done" if exit_code == 0 else "failed"
+    body = build_end.record_body(status, exit_code, build_end.LAST_STAGE[job], job, "-", "2026-10-30T12:00:00Z")
+    runner_writes(folder, f"{body}\nend protected\n")
 
 
 class FakeContainer:
@@ -325,7 +339,7 @@ class FakeDockerClient:
         if name.startswith("llm-build-"):
             options.setdefault("outputs", {self.MODEL_FILE: b"gguf-weights"})
         container = FakeContainer(self, name, volumes=volumes, **options)
-        container.attrs = inspect_of(volumes, kwargs)
+        container.attrs = inspect_of(volumes, dict(kwargs, command=command))
         self.everything.append(container)
         self.events.append((name, "create"))
         return container

@@ -3,9 +3,11 @@
 Target Dockerfiles COPY `modules/`, `scripts/`, `sources/` and `docker/entrypoint.sh` relative to
 the context, so the context is staged from the target directory plus the shared entrypoint and an
 empty `sources/` folder (an offline build puts its local copy of llama.cpp there).
-`modules/stage_user.sh` (run_as_stage, stage_preflight: the stage account of the build sandbox) is
-always the framework's own (FRAMEWORK_STAGE_HELPER), whatever the target ships under that name, so a
-target can never carry a hollow helper into a sandboxed build.
+`modules/stage_user.sh` is always the framework's own (FRAMEWORK_STAGE_HELPER), whatever the target
+ships under that name. Deprecated: a build no longer reads it at all, since the stage runner and its
+stage account helper are the framework's runtime layer (orchestrator/runtime_layer, mounted read-only
+at /llmcf into every build container, orchestrator/Core/runtime_layer.py); the copy stays only for an
+image whose own scripts still source it by hand, and it is the layer's one helper.
 Symbolic links and special files in a target are never followed into the context (a community
 target could otherwise pull any file of the user into an image).
 Standard library only, so CI can stage a context without installing the framework.
@@ -20,11 +22,10 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# The one source of the stage account's helper (sourced by every stage runner build.sh): the framework's template copy.
-# targets/Rockchip/modules/stage_user.sh is the same file byte for byte (tests/test_stage_user.py pins it) so that a
-# stage runner started by hand from the repository finds it too; a build context always gets this one.
+# The one source of the stage account's helper: the runtime layer's (orchestrator/runtime_layer/stage_user.sh).
+# Deprecated as a part of the build context: the runner sources the layer's copy at /llmcf, never the image's.
 STAGE_HELPER_NAME = "stage_user.sh"
-FRAMEWORK_STAGE_HELPER = Path(__file__).resolve().parents[2] / "targets" / "_template" / "modules" / STAGE_HELPER_NAME
+FRAMEWORK_STAGE_HELPER = Path(__file__).resolve().parents[1] / "runtime_layer" / STAGE_HELPER_NAME
 
 
 def _is_link(path: Path) -> bool:
@@ -82,8 +83,7 @@ def stage_build_context(target_dir: Path, app_root: Path, context_dir: Path,
             (context_dir / sub).mkdir()
 
     # The framework's stage account helper in place of whatever the target has under that name (a file, a folder or
-    # nothing; the target's is never copied): the stage runner sources modules/stage_user.sh, and only the framework's
-    # run_as_stage and stage_preflight may switch the stage modules to the stage account and check the runner's rights.
+    # nothing; the target's is never copied). Deprecated: the runtime layer's runner sources the layer's own copy.
     shutil.copy2(FRAMEWORK_STAGE_HELPER, context_dir / "modules" / STAGE_HELPER_NAME)
 
     # Local sources an offline build may use (Core/build_image.py: the local copy of llama.cpp lands in
