@@ -104,6 +104,43 @@ def test_the_root_helper_way_builds_and_keeps_the_gateway_per_target(tmp_path):
     assert root_helper.cc_env("llmcf-install", "aarch64-unknown-linux-musl") == {}
 
 
+def test_the_persons_plan_offers_the_frameworks_container_engine_for_the_build(tmp_path, monkeypatch):
+    """Without cargo here, the gateway is built in the builder image over the framework's container engine, as
+    llmcf-install is (helper_for): the person's plan hands that client to the builder."""
+    seen = []
+
+    def builder(client=None, **kw):
+        seen.append(client)
+        return None
+    monkeypatch.setattr(root_helper, "default_builder", builder)
+    monkeypatch.setattr(root_helper, "cached", lambda *a, **k: None)
+    engine = object()
+    framework = SimpleNamespace(config=None, docker_manager=SimpleNamespace(builder=SimpleNamespace(
+        docker_client=engine)))
+    model, _w, _p = _files(tmp_path)
+    sel = gen.Selection(blocks=["llm-llama-server", "gateway-llmcf"], values={},
+                        files={"llm": {"model": gen.FileChoice(path=str(model), licence="apache-2.0")}})
+    plan = service.plan_for_device(tmp_path, DEVICE, sel, profile=RK3566, runtime=_runtime_tarball(tmp_path),
+                                   framework=framework)
+    assert seen and seen[0] is engine
+    assert not plan.ok
+    assert service.engine_client(None) is None
+
+
+def test_the_ais_resolver_takes_only_a_kept_program(tmp_path, monkeypatch):
+    monkeypatch.setattr(root_helper, "ensure_helper", lambda *a, **k: pytest.fail("an AI's plan builds nothing"))
+    kept = SimpleNamespace(path=tmp_path / "llmcf-gateway", sha256="2" * 64)
+    monkeypatch.setattr(root_helper, "cached", lambda cache, arch, rust_dir=None, crate="": kept
+                        if crate == "llmcf-gateway" else None)
+    resolve = service.framework_programs(None, build=False)
+    assert resolve("llmcf-gateway", "aarch64") == (kept.path, kept.sha256)
+    monkeypatch.setattr(root_helper, "cached", lambda *a, **k: None)
+    with pytest.raises(root_helper.HelperMissing, match="Board bundle window"):
+        resolve("llmcf-gateway", "aarch64")
+    with pytest.raises(root_helper.HelperMissing, match="no program"):
+        resolve("other", "aarch64")
+
+
 def test_the_gate_operation_runs_only_the_bundles_own_probe():
     from orchestrator.remote import gate
     text = gate.script("bundle-gateway", "gw-test", "gateway", "8088", "yes", "complete")

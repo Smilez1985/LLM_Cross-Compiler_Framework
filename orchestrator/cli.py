@@ -7276,7 +7276,7 @@ def _bundle_plan(ctx: FrameworkContext, device_name: str, choice: Dict[str, Any]
         selection = service.selection_from(**choice)
         plan = service.plan_for_device(state_dir, device_id, selection, config=config, app_root=app_root,
                                        mode=framework_mode(config), allow_own=allow_own, profile=profile,
-                                       index=index)
+                                       index=index, framework=framework)
     except BundleError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)

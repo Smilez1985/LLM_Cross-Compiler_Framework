@@ -119,8 +119,10 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
             return BundlePlanOut(plan={}, blocks=blocks, notes=notes + [
                 "Choose a preset or blocks; the person chooses the files in the framework's Board bundle window"])
         try:
+            # read-only for an AI: a program the framework builds (the gateway) only when it is kept already
             plan = service.plan_for_device(h.state_dir(), device.device_id, selection, config=config,
-                                           app_root=app_root, mode=framework_mode(config), index=index)
+                                           app_root=app_root, mode=framework_mode(config), index=index,
+                                           programs=service.framework_programs(config, build=False))
         except gen.BundleError as e:
             raise ToolError(h.scrub(str(e)), code="failed", next="Ask the person to probe the board first.") \
                 from None
