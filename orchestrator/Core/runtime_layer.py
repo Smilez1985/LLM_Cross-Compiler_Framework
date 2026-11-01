@@ -181,10 +181,27 @@ class LayerCheck:
 
     @property
     def text(self) -> str:
-        return VERDICT_TEXT[self.verdict].format(names=", ".join(self.names) or "-")
+        return VERDICT_TEXT[self.verdict].format(names=", ".join(label_names(self.names)) or "-")
 
     def facts(self) -> Dict[str, Any]:
-        return {"verdict": self.verdict, "names": list(self.names), "toolbox": self.toolbox_way or None}
+        return {"verdict": self.verdict, "names": label_names(self.names), "toolbox": self.toolbox_way or None}
+
+
+def layer_names() -> Tuple[str, ...]:
+    """Every name a file of the assembled layer has (the fixed vocabulary its checks speak in)."""
+    return (*SCRIPTS, *(f"bin/{tool}" for tool in TOOLS), *TOOLS)
+
+
+def label_names(names: List[str]) -> List[str]:
+    """The names a check reports, in the fixed vocabulary only: the layer's own file names as they are, any other name
+    (a file someone put into the layer folder: its name could be any text) counted, never quoted. What a person, the
+    build log and an AI read of a layer check."""
+    known = set(layer_names())
+    shown = [n for n in names if n in known]
+    others = len([n for n in names if n not in known])
+    if others:
+        shown.append("1 other file" if others == 1 else f"{others} other files")
+    return shown
 
 
 # --- The shipped copy ---------------------------------------------------------------------------------------------
@@ -389,7 +406,7 @@ def layer_status(cache_dir: Path, config: Any = None, platform_name: Optional[st
     check = layer_check(cache_dir)
     record = read_toolbox(toolbox_dir(cache_dir))
     arch = machine()
-    return {"verdict": check.verdict, "names": list(check.names), "text": check.text,
+    return {"verdict": check.verdict, "names": label_names(check.names), "text": check.text,
             "toolbox_way": toolbox_way(config) if config is not None else DEFAULT_TOOLBOX_WAY,
             "toolbox_made": (record or {}).get("way") or None,
             "fetch_ready": all(PREBUILT.get(t, {}).get(arch) for t in TOOLS),
@@ -508,6 +525,23 @@ def engine_builder(client: Any, fetch: Callable[[str], bytes],
 
 
 # --- The assembled layer ------------------------------------------------------------------------------------------
+
+def expected_files(cache_dir: Path) -> Dict[str, str]:
+    """name -> sha256 of every file the assembled layer holds (Mojo Miracle's restore puts back exactly these)."""
+    return _expected(cache_dir)[0]
+
+
+def layer_mode(name: str) -> int:
+    """The mode a file of the assembled layer has (assemble): the scripts read-only, the tools read and run."""
+    return 0o555 if name.startswith("bin/") else 0o444
+
+
+def shipped_source(cache_dir: Path, name: str) -> Path:
+    """Where the layer's file `name` comes from: the shipped copy (a script) or the toolbox (bin/TOOL)."""
+    if name.startswith("bin/"):
+        return toolbox_dir(cache_dir) / name[len("bin/"):]
+    return SHIPPED_DIR / name
+
 
 def _expected(cache_dir: Path) -> Tuple[Dict[str, str], Optional[Dict[str, Any]]]:
     """name -> sha256 the assembled layer must hold: the shipped scripts' manifest and the toolbox's record."""
@@ -734,5 +768,6 @@ __all__ = ["BUILD_SOURCES", "BUILDER_BASE", "CLEANUP_ENTRYPOINT", "DEFAULT_TOOLB
            "assemble", "builder_context", "end_folder", "layer_status", "read_prebuilt", "set_toolbox_way", "cache_dir_of",
            "PREBUILT_TABLE", "TOOLBOX_SETTING", "ToolboxWayError", "end_folder_state", "ensure_toolbox", "extract_prebuilt",
            "is_static_elf", "layer_check", "layer_dir", "layer_volumes", "manifest_text", "mounts_keep_owners",
-           "own_runner_note", "prepare_end_folder", "read_manifest", "read_toolbox", "ready_layer",
+           "own_runner_note", "prepare_end_folder", "expected_files", "label_names", "layer_mode", "layer_names",
+           "shipped_source", "read_manifest", "read_toolbox", "ready_layer",
            "runner_owner_on_host", "shipped_problems", "stage_order", "toolbox_dir", "toolbox_way", "write_toolbox"]

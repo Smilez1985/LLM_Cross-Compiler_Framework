@@ -723,6 +723,8 @@ class BuildEngine:
                 progress.end_protection = "protected" if protected else "unprotected"
                 if problem:
                     progress.add_warning(f"{prefix}{problem}")
+                elif protected and record is not None:
+                    self._passed(progress, "end_folder")
                 elif not protected and record is not None:
                     from orchestrator.Core.runtime_layer import END_UNPROTECTED
                     progress.add_warning(f"{prefix}{END_UNPROTECTED}")
@@ -2159,7 +2161,9 @@ class BuildEngine:
                     "LLMCF_MODULES_DIR": layer.MODULES_IN_IMAGE, "JOB_TYPE": job,
                     "LLMCF_TARGET_LABEL": Path(target_path).name if target_path else str(config.target_arch or "")})
         if progress is not None:
-            progress.runtime_layer = {**checks, "stages": stages}
+            # the build's result records the mode its modules ran in and every check passed (_passed adds the
+            # container's own: the inspect check and the end record)
+            progress.runtime_layer = {**checks, "stages": stages, "mode": "sandbox" if sandbox_on else "legacy"}
         if not sandbox_on:
             # legacy mode: the image's entrypoint maps PUID/PGID and drops root; the framework's runner still runs
             env.update({"STAGE_ISOLATION": "", "STAGE_RUNNER_IDS": ""})
@@ -2453,6 +2457,16 @@ class BuildEngine:
                                   engine=engine_name(self.docker_client) or "docker")
         if problem:
             raise RuntimeError(problem)
+        self._passed(progress, "inspect")
+
+    @staticmethod
+    def _passed(progress: Optional["BuildProgress"], check: str) -> None:
+        """One more check this build passed (the build's result lists them, runtime_layer.checks), once."""
+        facts = getattr(progress, "runtime_layer", None)
+        if isinstance(facts, dict):
+            done = facts.setdefault("checks", [])
+            if check not in done:
+                done.append(check)
 
     @staticmethod
     def _last_stage(progress: "BuildProgress") -> Optional[str]:
