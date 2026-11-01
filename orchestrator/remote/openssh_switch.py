@@ -62,6 +62,14 @@ PACMAN_SYNC_DIR = "/var/lib/pacman/sync"
 # manager halfway (the transport's default is 120 seconds).
 INSTALL_TIMEOUT = 1800.0
 DROPIN = "/etc/ssh/sshd_config.d/llmcf-port.conf"
+# Socket-activated OpenSSH (Ubuntu 22.10 and later: ssh.socket listens, sshd starts per connection): systemd's
+# sshd-socket-generator turns the Port lines of sshd_config into ssh.socket's ListenStream only at `systemctl
+# daemon-reload`, and only a restart of ssh.socket makes it listen there; restarting ssh.service alone keeps port 22.
+SSH_SOCKET = "ssh.socket"
+# dietpi-software's software ID of Dropbear, used only for its removal after the person's separate yes. To be
+# confirmed on a real DietPi board (dietpi-software list): when the ID is wrong or dietpi-software refuses, the removal
+# falls back to the init system (systemctl disable --now dropbear), so Dropbear is never left half removed.
+DIETPI_DROPBEAR_ID = "104"
 
 
 class SwitchUnavailable(ValueError):
@@ -187,8 +195,15 @@ def _install_script(manager: str, port: str) -> str:
         f"{port}; }} >/dev/null 2>&1 || no selinux",
         "fi",
         "if [ -d /run/systemd/system ]; then",
-        "  { asroot systemctl enable ssh || asroot systemctl enable sshd; } >/dev/null 2>&1",
-        "  { asroot systemctl restart ssh || asroot systemctl restart sshd; } >/dev/null 2>&1 || no start",
+        # the port drop-in is read by systemd's generators only after a daemon-reload (ssh.socket's ListenStream)
+        "  asroot systemctl daemon-reload >/dev/null 2>&1 || true",
+        f"  if systemctl is-enabled --quiet {SSH_SOCKET} 2>/dev/null || systemctl is-active --quiet {SSH_SOCKET} "
+        "2>/dev/null; then",
+        f"    asroot systemctl restart {SSH_SOCKET} >/dev/null 2>&1 || no start",
+        "  else",
+        "    { asroot systemctl enable ssh || asroot systemctl enable sshd; } >/dev/null 2>&1",
+        "    { asroot systemctl restart ssh || asroot systemctl restart sshd; } >/dev/null 2>&1 || no start",
+        "  fi",
         "elif command -v rc-service >/dev/null 2>&1; then",
         "  asroot rc-update add sshd default >/dev/null 2>&1",
         "  asroot rc-service sshd restart >/dev/null 2>&1 || no start",
@@ -211,19 +226,26 @@ DROPBEAR_DISABLE = "\n".join([
     'asroot() { if [ -n "$llmcf_pw" ]; then printf "%s\\n" "$llmcf_pw" | sudo -S -p "" "$@"; '
     'else sudo -n "$@"; fi; }',
     "command -v sudo >/dev/null 2>&1 || no no-sudo",
+    "llmcf_done=no",
+    # DietPi's own tool first (it keeps its software list right); its ID of Dropbear: DIETPI_DROPBEAR_ID
     "if [ -x /boot/dietpi/dietpi-software ] || command -v dietpi-software >/dev/null 2>&1; then",
     "  llmcf_ds=$(command -v dietpi-software 2>/dev/null || echo /boot/dietpi/dietpi-software)",
-    '  asroot "$llmcf_ds" uninstall 104 >/dev/null 2>&1 || no start',   # 104: Dropbear in dietpi-software
-    "elif [ -d /run/systemd/system ]; then",
-    "  asroot systemctl disable --now dropbear >/dev/null 2>&1 || no start",
-    "elif command -v rc-service >/dev/null 2>&1; then",
-    "  asroot rc-update del dropbear default >/dev/null 2>&1; asroot rc-service dropbear stop >/dev/null 2>&1 || "
+    f'  asroot "$llmcf_ds" uninstall {DIETPI_DROPBEAR_ID} >/dev/null 2>&1 && llmcf_done=yes',
+    "fi",
+    # without dietpi-software, or when it refused: the init system stops and disables the dropbear service
+    'if [ "$llmcf_done" = no ]; then',
+    "  if [ -d /run/systemd/system ]; then",
+    "    asroot systemctl disable --now dropbear >/dev/null 2>&1 || no start",
+    "  elif command -v rc-service >/dev/null 2>&1; then",
+    "    asroot rc-update del dropbear default >/dev/null 2>&1; asroot rc-service dropbear stop >/dev/null 2>&1 || "
     "no start",
-    "else no start; fi",
+    "  else no start; fi",
+    "fi",
     'echo "dropbear=disabled"',
 ])
 define("dropbear-disable", (), lambda rest="": DROPBEAR_DISABLE, gate=False,
-       doc="after the person's separate yes: Dropbear off (DietPi: dietpi-software; else the init system)")
+       doc="after the person's separate yes: Dropbear off (DietPi: dietpi-software, else or when it refuses the init "
+           "system)")
 
 
 def _answer(text: str, key: str) -> Tuple[bool, str, str]:
@@ -286,7 +308,7 @@ def wait_until_answers(host: str, port: int, *, seconds: float = WAIT_SECONDS, b
         sleep(1.0)
 
 
-__all__ = ["DROPIN", "FAMILY_MANAGER", "INSTALL_COMMANDS", "INSTALL_TIMEOUT", "PACKAGES", "PACMAN_SYNC_DIR",
+__all__ = ["DIETPI_DROPBEAR_ID", "DROPIN", "FAMILY_MANAGER", "SSH_SOCKET", "INSTALL_COMMANDS", "INSTALL_TIMEOUT", "PACKAGES", "PACMAN_SYNC_DIR",
            "PREPARE_COMMANDS", "SWITCH_PORT", "SWITCH_REASONS", "SwitchPlan",
            "SwitchUnavailable", "banner_of", "disable_dropbear", "install", "manager_for", "plan",
            "wait_until_answers"]

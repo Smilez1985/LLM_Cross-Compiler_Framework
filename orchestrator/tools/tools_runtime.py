@@ -184,6 +184,12 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
         from orchestrator.utils.locality import offline_mode   # the one offline check
         return offline_mode(getattr(framework, "config", None))
 
+    def framework_mode() -> str:
+        """The framework mode of the framework's settings (Core/config_manager.py framework_mode): in enterprise mode
+        a board whose key sits on a weaker tier is refused at every use (runtime/device/trusted.py tier_refusal)."""
+        from orchestrator.Core.config_manager import framework_mode as mode_of
+        return mode_of(getattr(framework, "config", None))
+
     def outside(needs) -> str:
         """Offline mode: why one of `needs` ((what, url) the call would fetch) is not on this computer or in the
         person's own network by the network-locality rule (utils/locality.py: a local mirror of the pinned source or
@@ -828,7 +834,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                     # the cancel holds the probe's session: closing it ends the probe and any wait for the board; the
                     # waits show in the job's progress as for the other board tools (the board by its label only, D0)
                     out = dev.probe(device, state_dir(), bound["fingerprint"], on_client=on_client,
-                                    on_event=board_events(handle, device))
+                                    on_event=board_events(handle, device), mode=framework_mode())
                 except dev.DeviceRuntimeError as e:
                     if stop.is_set():
                         raise JobCancelled() from None
@@ -927,7 +933,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                                      say=lambda msg: handle.progress(None, None, device_text(msg, users,
                                                                                              folder_labels())[:200]),
                                      on_event=board_events(handle, device), config=getattr(framework, "config", None),
-                                     ai_started=True, signer=_board_signer)   # its build stops at the soft caps (DECISIONS round 25 Q8)
+                                     ai_started=True, signer=_board_signer, mode=framework_mode())   # its build stops at the soft caps (DECISIONS round 25 Q8)
                 except dev.DeviceRuntimeError as e:
                     if stop.is_set() or handle.cancelled:
                         raise JobCancelled() from None
@@ -1029,7 +1035,8 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                     handle.progress(None, None, f"checking the runtime on {device.label}")
                     out = dev.benchmark(state_dir(), device, profile, settings, bound["fingerprint"],
                                         allow_untrusted=True, on_client=on_client, consent=consent,
-                                        output_dirs=output_folders(), on_event=board_events(handle, device))
+                                        output_dirs=output_folders(), on_event=board_events(handle, device),
+                                        mode=framework_mode())
                 except dev.DeviceRuntimeError as e:
                     if stop.is_set():
                         raise JobCancelled() from None

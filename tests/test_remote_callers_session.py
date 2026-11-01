@@ -851,7 +851,7 @@ def test_the_cli_names_ctrl_c_in_its_wait_line_as_deploy_run_does(tmp_path, monk
     printed = quiet_console(monkeypatch)
 
     def connect(state, device_id, host, port, user, password=None, *, step="", on_client=None, cancel=None,
-                on_event=None, signer=None):
+                on_event=None, signer=None, mode="private"):
         on_event(RemoteEvent("waiting", elapsed=0, limit=300, step="command"))
         return object(), None
     monkeypatch.setattr(person_steps, "connect_stored", connect)

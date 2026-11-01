@@ -139,6 +139,14 @@ TEXTS = {
         "deploy.remote.cancelled": "The scan of {address} was cancelled; nothing was stored.",
         "deploy.remote.tool.python": "Python probe",
         "deploy.remote.tool.sh": "shell probe",
+        "deploy.mode.title": "Framework mode",
+        "deploy.mode.private": "Private (the default)",
+        "deploy.mode.enterprise": "Enterprise",
+        "deploy.mode.explain": "Enterprise mode takes only OpenSSH with sudo on a board (the root-owned key line) and "
+                               "refuses the weaker Dropbear tier and the home gate, also for boards paired before. "
+                               "Only you choose the mode; an AI may read it, never change it.",
+        "deploy.mode.saved": "Saved: {mode}.",
+        "deploy.mode.not_saved": "Not saved: config.yml could not be written; the mode stays as it was.",
         "deploy.tier.title": "How the framework reaches this board",
         "deploy.tier.enterprise": "Enterprise mode refuses the weaker Dropbear tier and the home gate as too "
                                   "insecure; it needs OpenSSH with sudo (the root-owned key line).",
@@ -154,6 +162,8 @@ TEXTS = {
                                 "instead? Weaker protection: without sudo the gate and the signing key live in the "
                                 "account's home; a stolen key still runs only llmcf's operations, but anything "
                                 "running as the account could change them.",
+        "deploy.tier.probe_disagrees": "The board's stored probe proposed another way than the board offers now; "
+                                       "the questions follow what the board says now.",
         "deploy.tier.ask.plan": "The switch to OpenSSH:\n\n{plan}\n\nGo ahead?",
         "deploy.tier.ask.dropbear_off": "{plan}",
         "deploy.tier.ask.host_key": "The new SSH server presents the host key {key_type} {fingerprint}. Compare it "
@@ -300,6 +310,14 @@ TEXTS = {
         "deploy.remote.cancelled": "Der Scan von {address} wurde abgebrochen; nichts wurde gespeichert.",
         "deploy.remote.tool.python": "Python-Probe",
         "deploy.remote.tool.sh": "Shell-Probe",
+        "deploy.mode.title": "Framework-Modus",
+        "deploy.mode.private": "Privat (Standard)",
+        "deploy.mode.enterprise": "Enterprise",
+        "deploy.mode.explain": "Der Enterprise-Modus nimmt auf einem Board nur OpenSSH mit sudo (die Schlüsselzeile in "
+                               "Root-Besitz) und lehnt die schwächere Dropbear-Stufe und das Home-Gate ab, auch für "
+                               "früher gekoppelte Boards. Den Modus wählst nur du; eine KI darf ihn lesen, nie ändern.",
+        "deploy.mode.saved": "Gespeichert: {mode}.",
+        "deploy.mode.not_saved": "Nicht gespeichert: config.yml ließ sich nicht schreiben; der Modus bleibt, wie er war.",
         "deploy.tier.title": "Wie das Framework dieses Board erreicht",
         "deploy.tier.enterprise": "Der Enterprise-Modus lehnt die schwächere Dropbear-Stufe und das Home-Gate als zu "
                                   "unsicher ab; er braucht OpenSSH mit sudo (die root-eigene Schlüsselzeile).",
@@ -316,6 +334,8 @@ TEXTS = {
                                 "Stattdessen das Home-Gate nehmen? Schwächerer Schutz: ohne sudo liegen Gate und "
                                 "Signierschlüssel im Home des Kontos; ein gestohlener Schlüssel führt weiter nur "
                                 "llmcfs Operationen aus, aber alles, was als das Konto läuft, könnte sie ändern.",
+        "deploy.tier.probe_disagrees": "Die gespeicherte Probe des Boards schlug einen anderen Weg vor, als das "
+                                       "Board jetzt anbietet; die Fragen folgen dem, was das Board jetzt sagt.",
         "deploy.tier.ask.plan": "Die Umstellung auf OpenSSH:\n\n{plan}\n\nWeitermachen?",
         "deploy.tier.ask.dropbear_off": "{plan}",
         "deploy.tier.ask.host_key": "Der neue SSH-Server zeigt den Host-Schlüssel {key_type} {fingerprint}. "

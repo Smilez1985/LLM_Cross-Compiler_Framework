@@ -115,8 +115,9 @@ def import_probe(probes: Any, path: Path, label: Optional[str] = None, target_ma
 class DeviceScanError(WithSteps, RemoteFailure):
     """A board scan that could not be done. `kind`: user (the SSH user is not an account name: refused before any
     contact, as on every other board path), login (the board could not be reached or logged in to; `reason` is its SSH
-    reason code when it has one), probe (the probe on the board failed), cancelled (the caller's Cancel ended it) or
-    save (the profile could not be stored or written). `error` is the exception behind it."""
+    reason code when it has one), probe (the probe on the board failed), weaker_tier (enterprise mode refuses the
+    board's key tier; the framework's key logged in, nothing ran), cancelled (the caller's Cancel ended it) or save
+    (the profile could not be stored or written). `error` is the exception behind it."""
 
     def __init__(self, message: str, kind: str, reason: str = "", error: Optional[BaseException] = None):
         super().__init__(message, kind, reason, error)
@@ -206,13 +207,23 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
         if key is None:
             key = client.get_transport().get_remote_server_key()   # the key of the session itself
         session.adopt(client, key)
+        if not password:
+            # enterprise mode refuses a board whose framework key sits on a weaker tier at every use, its probe too
+            # (trusted.tier_refusal, as the AI's probe); with a password the pairing below offers the ways on
+            from orchestrator.runtime.device.trusted import tier_refusal
+            refusal = tier_refusal(state_dir, device_id_for_host_key(ssh_trust.fingerprint(key)), mode, session)
+            if refusal:
+                raise DeviceScanError(refusal, "weaker_tier")
         if password:
             from orchestrator.remote import pairing
             from orchestrator.runtime.device import board_ops
             # the framework's key, over the one-time password session, with llmcf's command gate (board_ops.py)
+            from orchestrator.runtime.profile import stored_access
+            # the board's stored probe (an earlier scan) proposes a tier; the board's facts read now decide
+            access = stored_access(state_dir, device_id_for_host_key(ssh_trust.fingerprint(key)))
             paired = pairing.pair(client, state_dir, board_ops.pairing_bundle(signer, state_dir), password=password,
                                   chooser=chooser, mode=mode, audit=audit if audit is not None else audit_factory,
-                                  via=via, host=host, port=port, user=user)
+                                  via=via, host=host, port=port, user=user, access=access)
         result = probe_over_ssh(session)
     except (RemoteProbeError, ssh_trust.HostKeyError) as e:
         if session.cancel.cancelled:   # the Cancel closed the session under the running probe
@@ -232,10 +243,23 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
             session.close()   # the client of its current login
         else:
             client.close()
-    if getattr(paired, "endpoint", None) is not None and getattr(paired, "key", None) is not None:
+    switched = getattr(paired, "endpoint", None) is not None and getattr(paired, "key", None) is not None
+    old_id = device_id_for_host_key(ssh_trust.fingerprint(key))
+    if switched:
         # the switch to OpenSSH: the board is reached at its new sshd from now on (its own port and host key)
         port, key = paired.endpoint.port, paired.key
     device_id = device_id_for_host_key(ssh_trust.fingerprint(key))
+    trusted = None
+    if switched and record:
+        # the board's earlier data (a probe, deploy settings, a runtime) moves to its new device ID, its record follows
+        from orchestrator.runtime.device.person_steps import BoardStepError, adopt_switched_board
+        if audit is None and audit_factory is not None:
+            audit = audit_factory()
+        try:
+            trusted = adopt_switched_board(state_dir, old_id, host, user, paired, via=via, audit=audit,
+                                           actor=actor or via, label=label).device
+        except BoardStepError as e:
+            raise DeviceScanError(str(e), "save", error=e) from None
     try:
         if output_file is not None:
             write_profile_file(result.profile, Path(output_file), as_json)
@@ -243,8 +267,7 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
     except (OSError, ValueError) as e:
         raise DeviceScanError(f"Could not save the profile: {e}", "save", error=e) from None
     remember_ssh_user(store, device_id, user)  # the deploy user for `device runtime deploy` (never root)
-    trusted = None
-    if record:
+    if record and not switched:
         if audit is None and audit_factory is not None:
             audit = audit_factory()
         trusted = record_trusted_device(state_dir, host, port, user, key, via=via,
