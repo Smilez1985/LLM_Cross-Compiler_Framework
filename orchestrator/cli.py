@@ -7404,7 +7404,7 @@ def config_doorbell(ctx: FrameworkContext, broker: Optional[str], username: Opti
 # COMMUNITY ZOO (signed community packs: targets, recipes, knowledge)
 # ============================================================================
 
-ZOO_KINDS = ("target", "recipe", "knowledge")
+ZOO_KINDS = ("target", "recipe", "knowledge", "block")
 
 
 @cli.group()
@@ -7627,8 +7627,9 @@ def zoo_export(ctx: FrameworkContext, kind: str, source: Optional[str], author: 
     from pyrage.x25519 import Recipient
     from orchestrator.Core.community_manager import submit_contribution
     from orchestrator.Core.community_pack import PackError
-    if kind in ("target", "recipe") and not source:
-        _zoo_fail(click.UsageError(f"Name the {'target id' if kind == 'target' else 'build folder'} to export."), 2)
+    if kind in ("target", "recipe", "block") and not source:
+        what = {"target": "target id", "recipe": "build folder", "block": "block id"}[kind]
+        _zoo_fail(click.UsageError(f"Name the {what} to export."), 2)
     if recipients and use_passphrase:
         _zoo_fail(click.UsageError("Use --to or --passphrase, not both: age encrypts to keys or to one passphrase."), 2)
     if kind == "knowledge" and bool(topic) == bool(target):
