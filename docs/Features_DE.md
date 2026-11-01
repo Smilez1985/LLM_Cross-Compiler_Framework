@@ -710,7 +710,8 @@ du die Variante ohne Sonderrechte (keine Autostart-Unit). Ausrollen, Deinstallie
 vorher ("Nein" ist die Vorgabe); gespeicherte Bündel werden nur aus der vollen Liste gelöscht, die du anhakst, in
 den Papierkorb oder endgültig.
 
-Im Terminal: [`llm-cli bundle`](CLI_Usage_DE.md#bundle).
+In der GUI: **Boards > Board-Bündel...**; im Terminal: [`llm-cli bundle`](CLI_Usage_DE.md#bundle). Hast du noch
+keinen eigenen Baustein, zeigt der Export im Community Hub dorthin zu **Neuer Baustein...**.
 
 ## Ditto, der Assistent
 

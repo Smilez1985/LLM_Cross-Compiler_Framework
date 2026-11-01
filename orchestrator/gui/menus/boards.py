@@ -6,8 +6,9 @@ by mouse).
 Boards > Boards and Devices... (act_boards_devices) opens one window for every board (orchestrator/gui/
 boards_window.py): the stored and the trusted boards in one table, with Add a trusted board..., Edit address or
 key..., Remove trust..., Settings..., Runtime plan, Status, Build runtime..., Deploy runtime..., Verify..., Remove older runtime packages...,
-Remove older builds on the board... and Check this board (Mojo). The menu sits after the Build menu (after File while
-there is none). The window and the board modules load when the entry is first used (lazy loading, RG1).
+Remove older builds on the board... and Check this board (Mojo). Boards > Board bundle... (act_boards_bundle) opens
+the board bundle window (orchestrator/gui/bundle_window.py: `llmcf bundle` by mouse). The menu sits after the Build
+menu (after File while there is none). The window and the board modules load when the entry is first used (lazy loading, RG1).
 
 CLI_PATHS names, for each `llmcf` command path of this area, the object that does it by mouse; WINDOW_OBJECTS names,
 for an object that lives in a window, the menu action that opens that window. MACHINE_ONLY lists the switches of this
@@ -21,6 +22,43 @@ from orchestrator.utils.localization import ui_text
 
 MENU_NAME = place.MENU_BOARDS
 ACTION_NAME = "act_boards_devices"
+BUNDLE_ACTION = "act_boards_bundle"
+# `llmcf bundle ...` by mouse: the objects of the Board bundle window (gui/bundle_window.py)
+BUNDLE_PATHS: Dict[str, str] = {
+    "bundle plan": "btn_bundle_plan",
+    "bundle plan --preset": "cmb_bundle_preset",
+    "bundle plan --block": "lst_bundle_blocks",
+    "bundle plan --set": "tbl_bundle_vars",
+    "bundle plan --file": "tbl_bundle_files",
+    "bundle plan --online": "tbl_bundle_files",
+    "bundle plan --sha256": "tbl_bundle_files",
+    "bundle plan --size": "tbl_bundle_files",
+    "bundle plan --licence": "tbl_bundle_files",
+    "bundle plan --unprivileged-only": "chk_bundle_unprivileged",
+    "bundle build": "btn_bundle_build",
+    "bundle build --preset": "cmb_bundle_preset",
+    "bundle build --block": "lst_bundle_blocks",
+    "bundle build --set": "tbl_bundle_vars",
+    "bundle build --file": "tbl_bundle_files",
+    "bundle build --online": "tbl_bundle_files",
+    "bundle build --sha256": "tbl_bundle_files",
+    "bundle build --size": "tbl_bundle_files",
+    "bundle build --licence": "tbl_bundle_files",
+    "bundle build --unprivileged-only": "chk_bundle_unprivileged",
+    "bundle list": "tbl_bundle_store",
+    "bundle deploy": "btn_bundle_deploy",
+    "bundle deploy --dry-run": "btn_bundle_dry_run",
+    "bundle status": "btn_bundle_status",
+    "bundle uninstall": "btn_bundle_uninstall",
+    "bundle rollback": "btn_bundle_rollback",
+    "bundle delete": "btn_bundle_delete",
+    "bundle block list": "lst_bundle_blocks",
+    "bundle block new": "btn_bundle_block_new",
+    "bundle block new --kind": "btn_bundle_block_new",
+    "bundle block new --title": "btn_bundle_block_new",
+    "bundle block new --summary": "btn_bundle_block_new",
+    "bundle block new --from": "btn_bundle_block_new",
+}
 
 CLI_PATHS: Dict[str, str] = {
     "deploy devices": ACTION_NAME,
@@ -73,6 +111,8 @@ CLI_PATHS: Dict[str, str] = {
 # names its own objects for that path.
 WINDOW_OBJECTS: Dict[str, str] = {name: ACTION_NAME for name in set(CLI_PATHS.values()) if name != ACTION_NAME}
 WINDOW_OBJECTS["btn_boards_check"] = ACTION_NAME
+WINDOW_OBJECTS.update({name: BUNDLE_ACTION for name in set(BUNDLE_PATHS.values())})
+CLI_PATHS.update(BUNDLE_PATHS)
 MACHINE_ONLY: Dict[str, str] = {
     "deploy devices list --json": "machine-readable output; the window shows the same rows",
     "device list --json": "machine-readable output; the window shows the same rows",
@@ -81,6 +121,10 @@ MACHINE_ONLY: Dict[str, str] = {
     "device runtime build --yes": "script switch: the window asks the source question instead",
     "device settings --confirm-sudo": "script switch: the window asks the sudo question instead",
     "device runtime deploy --password-stdin": "script switch: the window asks for the password each time",
+    "bundle plan --json": "machine-readable output; Plan shows the same plan in the window",
+    "bundle list --json": "machine-readable output; the window lists the same stored bundles",
+    "bundle block list --json": "machine-readable output; the window lists the same blocks",
+    "bundle build --allow-own": "script switch: the window asks before an own unsigned block is used",
 }
 BUILD_MENU_TITLES = ("Build", "Bauen")
 
@@ -105,8 +149,11 @@ def install(window, menubar) -> None:
         place.place_menu_after(menubar, _after(menubar), menu)
     action = place.new_action(window, ACTION_NAME, ui_text("boards.menu.devices"), lambda: open_boards_window(window))
     menu.addAction(action)
+    bundle = place.new_action(window, BUNDLE_ACTION, ui_text("boards.menu.bundle"), lambda: open_bundle_window(window))
+    menu.addAction(bundle)
     window.menu_boards = menu
     window.act_boards_devices = action
+    window.act_boards_bundle = bundle
 
 
 def open_boards_window(window):
@@ -115,5 +162,11 @@ def open_boards_window(window):
     return open_boards(window)
 
 
-__all__ = ["ACTION_NAME", "CLI_PATHS", "MACHINE_ONLY", "MENU_NAME", "WINDOW_OBJECTS", "install",
-           "open_boards_window"]
+def open_bundle_window(window):
+    """Shows the Board bundle window of the main window (fresh data each time it opens)."""
+    from orchestrator.gui.bundle_window import open_bundle
+    return open_bundle(window)
+
+
+__all__ = ["ACTION_NAME", "BUNDLE_ACTION", "CLI_PATHS", "MACHINE_ONLY", "MENU_NAME", "WINDOW_OBJECTS", "install",
+           "open_boards_window", "open_bundle_window"]

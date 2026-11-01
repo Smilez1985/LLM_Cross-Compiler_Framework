@@ -29,6 +29,7 @@ MENU_LAYOUT = (
     )),
     ("menu_boards", "main.menu.boards", (
         ("act_boards_devices", "boards.menu.devices"),
+        ("act_boards_bundle", "boards.menu.bundle"),
     )),
     ("menu_ditto", "main.menu.ditto", (
         ("act_ditto_setup", "main.ditto.setup"),

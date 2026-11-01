@@ -2499,6 +2499,12 @@ Dateien, ein gegen die Untersuchung des Boards geprüfter Plan, ein mit dem Schl
 im Speicher dieses Frameworks und sein Installer auf dem Board. `GERÄT` ist ein gespeichertes Board wie bei
 [`device`](#device); `BUNDLE` ist die ID eines Bündels, wie `bundle list` sie zeigt.
 
+In der GUI: **Boards > Board-Bündel...**: das Board, eine Vorlage und die Bausteine, eine Tabelle der Variablen (jede
+beim Tippen gegen ihren Typ geprüft) und eine der Dateien (**Datei wählen...** oder eine https-Adresse mit sha256 und
+Größe), **Planen**, **Bauen...**, die gespeicherten Bündel mit **Probelauf auf dem Board**, **Ausrollen...**, **Status
+auf dem Board**, **Zurückrollen...**, **Deinstallieren...** und **Gespeicherte Bündel löschen...**, und **Neuer
+Baustein...**; dieselben Schritte und Fragen wie hier, jeder Lauf auf dem Board im Hintergrund mit **Abbrechen**.
+
 ```
 llm-cli bundle plan GERÄT [--preset llm|voice|stt] [--block ID]... [--set KOMPONENTE.NAME=WERT]...
                     [--file KOMPONENTE.ROLLE=PFAD]... [--online KOMPONENTE.ROLLE=URL --sha256 KOMPONENTE.ROLLE=HEX

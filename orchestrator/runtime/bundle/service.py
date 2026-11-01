@@ -175,6 +175,32 @@ def bundle_rows(store: gen.BundleStore) -> List[Dict[str, Any]]:
     return rows
 
 
+def board_contact(state_dir: Path, device_id: str) -> Tuple[str, int, str, str]:
+    """(host, port, SSH user, label) of the stored board a bundle was made for, for the person's own login (the CLI
+    and the Board bundle window log in with person_steps.connect_stored and the framework's key only; this module
+    never logs in). gen.BundleError with the person's words when the board has no stored probe, no SSH user in its
+    deploy settings or no usable address."""
+    from orchestrator.runtime.device.person_steps import board_address
+    from orchestrator.runtime.device.settings import DeploySettings, SettingsError
+    from orchestrator.runtime.profile import ProfileStore
+    store = ProfileStore(Path(state_dir))
+    if store.load_device(device_id) is None:
+        raise gen.BundleError(f"board {device_id} has no stored probe; probe it first")
+    try:
+        settings = DeploySettings.from_dict(store.load_deploy_settings(device_id))
+    except (SettingsError, ValueError) as e:
+        raise gen.BundleError(f"the deploy settings of board {device_id} cannot be used: {e}") from None
+    if not settings.ssh_user:
+        raise gen.BundleError(f"No SSH user is set for board {device_id}: set the board's deploy user in its "
+                              "deploy settings first.")
+    try:
+        host, port = board_address(store, device_id)
+    except ValueError as e:
+        raise gen.BundleError(str(e)) from None
+    label = str(store.device_info(device_id).get("label") or device_id)
+    return host, port, settings.ssh_user, label
+
+
 def question(action: str, built: gen.BuiltBundle, board: str) -> str:
     """The person's question before `action` (apply, uninstall, rollback) changes the board."""
     size = sum(entry.size for _n, _p, entry in built.payload())
@@ -183,5 +209,5 @@ def question(action: str, built: gen.BuiltBundle, board: str) -> str:
 
 
 __all__ = ["CHANGING_ACTIONS", "DEPLOY_QUESTION", "ROLLBACK_QUESTION", "UNINSTALL_QUESTION", "assignments",
-           "bundle_rows", "catalog_sources", "device_profile", "plan_for_device", "question", "run_on_board",
+           "board_contact", "bundle_rows", "catalog_sources", "device_profile", "plan_for_device", "question", "run_on_board",
            "runtime_for", "selection_from"]

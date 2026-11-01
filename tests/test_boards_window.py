@@ -146,7 +146,8 @@ def test_the_boards_menu_opens_the_window_from_the_menu_bar(qapp, tmp_path, monk
         action.trigger()
         dialog = win.boards_window
         assert isinstance(dialog, BoardsWindow) and dialog.isVisible() and dialog.table.rowCount() == 1
-        for name in set(menu_module.WINDOW_OBJECTS):
+        # the Boards window's objects (the Board bundle window's own are checked in tests/test_bundle_window.py)
+        for name in {n for n, opener in menu_module.WINDOW_OBJECTS.items() if opener == menu_module.ACTION_NAME}:
             assert dialog.findChild(type(dialog.btn_cancel), name) is not None, name
         action.trigger()
         assert len(win.findChildren(BoardsWindow)) == 1, "a second click shows the same window"
@@ -176,8 +177,9 @@ def test_cli_paths_name_every_command_of_the_area_and_existing_objects():
                 continue
             key = f"{path} {flag}"
             assert key in menu_module.CLI_PATHS or key in menu_module.MACHINE_ONLY, key
-    for name in menu_module.CLI_PATHS.values():
-        assert name == menu_module.ACTION_NAME or menu_module.WINDOW_OBJECTS[name] == menu_module.ACTION_NAME
+    for path, name in menu_module.CLI_PATHS.items():   # the bundle's paths open the Board bundle window
+        window = menu_module.BUNDLE_ACTION if path.startswith("bundle") else menu_module.ACTION_NAME
+        assert name == menu_module.ACTION_NAME or menu_module.WINDOW_OBJECTS[name] == window
 
 
 # --- texts ------------------------------------------------------------------------------------------------------------
