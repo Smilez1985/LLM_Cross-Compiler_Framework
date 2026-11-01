@@ -187,6 +187,26 @@ def test_the_board_check_pins_the_fingerprint_and_reports_a_changed_one(tmp_path
     assert isinstance(rows, list)
 
 
+def test_the_gateway_check_keeps_the_time_of_the_boards_last_installer_run(tmp_path, monkeypatch):
+    """Regression (overwritten before: the gateway check wrote the board record's "at", the time of the last
+    installer run that `bundle list` shows, so a status read looked like a deploy): the check keeps its own time in
+    "gateway_at"."""
+    store = gen.BundleStore(tmp_path / "state")
+    (store.folder("gw-test")).mkdir(parents=True, exist_ok=True)
+    store.record_board("gw-test", DEVICE, last="apply", result="done")
+    before = store.boards("gw-test")[DEVICE]["at"]
+    record = json.loads((store.folder("gw-test") / "boards.json").read_text(encoding="utf-8"))
+    record[DEVICE]["at"] = "2026-01-01T00:00:00Z"   # an earlier run, so a new stamp would differ
+    (store.folder("gw-test") / "boards.json").write_text(json.dumps(record), encoding="utf-8")
+    assert before
+    ok = (f"llmcf-gateway: fingerprint={FP}\nllmcf-gateway: health=ok upstream=up bind=lan tls=yes budget=4096 "
+          "control=none version=0.1.0\n")
+    board.check_gateway(_Shell(ok), _built(tmp_path), "complete", store=store, device_id=DEVICE)
+    entry = store.boards("gw-test")[DEVICE]
+    assert entry["at"] == "2026-01-01T00:00:00Z" and entry["last"] == "apply", entry
+    assert entry.get("gateway_at") and entry["gateway"]["gateway"]["state"] == "ok"
+
+
 def test_the_check_says_plainly_when_the_gateway_is_not_there_or_not_running(tmp_path):
     built = _built(tmp_path, bind="loopback")
     found, _ = board.check_gateway(_Shell("llmcf-gateway: health=absent\n"), built)

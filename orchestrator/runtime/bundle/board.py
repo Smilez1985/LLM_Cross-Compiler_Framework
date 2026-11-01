@@ -110,8 +110,9 @@ def check_gateway(shell: Any, built: BuiltBundle, mode: str = "complete", *, sto
                 entry["fingerprint"] = fp
         found[comp] = entry
     if store is not None and device_id and found:
-        store.record_board(built.bundle_id, device_id, gateway={c: {k: v for k, v in e.items() if k != "fingerprint"}
-                                                                for c, e in found.items()}, gateway_pins=pins)
+        store.record_board(built.bundle_id, device_id, stamp="gateway_at",   # never the installer run's "at"
+                           gateway={c: {k: v for k, v in e.items() if k != "fingerprint"} for c, e in found.items()},
+                           gateway_pins=pins)
     return found, notes
 
 
