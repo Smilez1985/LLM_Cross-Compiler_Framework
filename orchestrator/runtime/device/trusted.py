@@ -51,7 +51,7 @@ _STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", re.ASCII)
 BOARD_FACTS = ("old_sidecar", "board_checked_at", "reach", "heat", "key_tier")
 # The framework's contacts with a board whose failure is recorded for Mojo (note_reach), in plain words.
 REACH_STEPS = {"deploy": "deploy", "runtime_deploy": "runtime deploy", "verify": "verify", "benchmark": "benchmark",
-               "probe": "probe"}
+               "probe": "probe", "bundle": "bundle deploy"}
 
 
 class DeviceStoreError(ValueError):

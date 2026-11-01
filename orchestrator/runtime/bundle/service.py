@@ -125,4 +125,63 @@ def run_on_board(open_session: Callable[[], Any], built: gen.BuiltBundle, action
             close()
 
 
-__all__ = ["assignments", "device_profile", "plan_for_device", "run_on_board", "runtime_for", "selection_from"]
+# The person's questions before a run changes a board (the CLI and the Board bundle window ask exactly these words;
+# "No" is the default). {bundle}: the bundle id, {board}: the board's label or device ID, {size}: what is sent.
+DEPLOY_QUESTION = ("Send bundle {bundle} ({size}) to board {board} and run its installer there (apply)? It installs "
+                   "the unprivileged steps; root actions stop before they run (they need llmcf-install).")
+UNINSTALL_QUESTION = ("Uninstall bundle {bundle} from board {board}? The installer the board kept removes only the "
+                      "bundle's own steps, newest first.")
+ROLLBACK_QUESTION = ("Roll back the last run of bundle {bundle} on board {board}? The installer the board kept undoes "
+                     "the steps of its last apply.")
+# What changes a board, and which installer action shows it first without changing anything.
+CHANGING_ACTIONS = {"apply": "plan", "uninstall": "plan-uninstall", "rollback": "status"}
+
+
+def catalog_sources(framework: Any) -> Tuple[Optional[Path], Any]:
+    """(app_root, index) every caller of plan_for_device / load_catalog passes: the folder whose community/blocks/
+    holds the installed and own blocks, and the verified cached community index with its revocations
+    (CommunityManager.cached_index(revocations=True); None when there is none, so nothing counts as revoked)."""
+    manager = getattr(framework, "community_manager", None)
+    if manager is None and framework is not None:
+        try:
+            from orchestrator.Core.community_manager import CommunityManager
+            manager = CommunityManager(framework)
+        except Exception:  # noqa: BLE001 - no community manager: the framework's own blocks only
+            manager = None
+    if manager is None:
+        return None, None
+    try:
+        index = manager.cached_index(revocations=True)
+    except Exception:  # noqa: BLE001 - an unreadable cache: no revocations known, as the Community Hub shows it
+        index = None
+    root = getattr(manager, "app_root", None)
+    return (Path(root) if root else None), index
+
+
+def bundle_rows(store: gen.BundleStore) -> List[Dict[str, Any]]:
+    """The stored bundles as `llmcf bundle list` and the window list them (labels and sizes; the person's views add
+    the folder): id, board, mode, components with their blocks, root actions, bytes sent, created, and per board where
+    its last run stands."""
+    rows = []
+    for built in store.list():
+        m = built.manifest
+        size = sum(f.size for comp in m.components for f in comp.files if f.source == "bundle")
+        rows.append({"bundle_id": m.bundle_id, "device_id": m.board.device_id, "arch": m.board.arch, "mode": m.mode,
+                     "created": m.created, "bytes": size,
+                     "components": [{"id": c.id, "block": c.block, "kind": c.kind} for c in m.components],
+                     "root_actions": [a.action for a in m.root_actions],
+                     "boards": {d: {"last": str((e or {}).get("last", "")), "at": str((e or {}).get("at", ""))}
+                                for d, e in sorted(store.boards(m.bundle_id).items())}})
+    return rows
+
+
+def question(action: str, built: gen.BuiltBundle, board: str) -> str:
+    """The person's question before `action` (apply, uninstall, rollback) changes the board."""
+    size = sum(entry.size for _n, _p, entry in built.payload())
+    text = {"apply": DEPLOY_QUESTION, "uninstall": UNINSTALL_QUESTION, "rollback": ROLLBACK_QUESTION}[action]
+    return text.format(bundle=built.bundle_id, board=board, size=gen._mb(size))
+
+
+__all__ = ["CHANGING_ACTIONS", "DEPLOY_QUESTION", "ROLLBACK_QUESTION", "UNINSTALL_QUESTION", "assignments",
+           "bundle_rows", "catalog_sources", "device_profile", "plan_for_device", "question", "run_on_board",
+           "runtime_for", "selection_from"]
