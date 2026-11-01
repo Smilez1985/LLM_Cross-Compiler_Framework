@@ -2562,6 +2562,10 @@ wählst den Papierkorb (die Vorgabe) oder endgültiges Löschen und bestätigst 
 Terminal; ohne eines listet es nur. Das Löschen wird zuerst ins Audit-Log geschrieben; was nicht gelöscht werden
 konnte, wird mit jedem gebliebenen Pfad gemeldet.
 
+Für ein [vertrautes Gerät](#deploy-devices) tun die optionalen MCP-Werkzeuge `bundle_plan` (der Plan nur als Labels)
+und `bundle_deploy` (`bundle deploy` ohne den Probelauf-Schritt, von dir im eigenen Fenster des Frameworks bestätigt)
+das für einen KI-Client; die Dateien wählst immer du.
+
 ### bundle block list, block new
 
 `block list` zeigt jeden Baustein mit Art, Status (bereit oder dokumentierte Vorlage) und Vertrauensstufe

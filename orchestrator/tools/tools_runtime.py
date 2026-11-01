@@ -1095,6 +1095,13 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                      prepare=bench_device_facts, limits=ToolLimits(per_day=20, what="board benchmarks"),
                      summary=lambda o: f"Board benchmark job {fact(o.job_id)} is {fact(o.state)}.", **external),
         ]
+        # the board bundle (deploy way 3) over the same board helpers (orchestrator/tools/tools_bundle.py)
+        from types import SimpleNamespace
+        from orchestrator.tools.tools_bundle import bundle_tool_specs
+        specs += bundle_tool_specs(registry, framework, jobs, SimpleNamespace(
+            trusted=trusted, svc_error=svc_error, job_error=job_error, device_lines=device_lines,
+            session_hooks=session_hooks, board_events=board_events, audited=audited, state_dir=state_dir,
+            framework_mode=framework_mode, scrub=scrub, folder_labels=folder_labels))
 
     for spec in specs:
         registry.register(spec)

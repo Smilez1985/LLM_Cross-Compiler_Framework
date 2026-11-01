@@ -67,6 +67,7 @@ TOOL_WINDOWS: Dict[str, str] = {
     "probe_remote_device": "boards",
     "deploy_device_runtime": "boards",
     "run_device_benchmark": "boards",
+    "bundle_deploy": "board_bundle",
     "create_deploy_package": "deployment",
     "deploy_to_device": "deployment",
     "probe_local_hardware": "builder",       # the Builder recommends a board from this computer's probe

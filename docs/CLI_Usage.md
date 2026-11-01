@@ -2451,6 +2451,10 @@ default) or deleting for good, and confirm exactly those (default no). It needs 
 them. The deletion is written to the audit log first; what could not be deleted is reported with every path that
 stayed.
 
+For a [trusted device](#deploy-devices), the optional MCP tools `bundle_plan` (the plan as labels only) and
+`bundle_deploy` (`bundle deploy` without the dry-run step, confirmed by you in the framework's own window) do this
+for an AI client; the files are always your choice.
+
 ### bundle block list, block new
 
 `block list` shows every building block with its kind, status (ready or a documented template) and trust

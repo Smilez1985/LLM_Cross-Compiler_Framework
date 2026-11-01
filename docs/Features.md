@@ -648,6 +648,10 @@ plain words that they need llmcf-install, the framework's root helper, which is 
 unprivileged-only variant (no autostart unit). A deploy, an uninstall and a rollback ask you first ("No" is the
 default); stored bundles are deleted only from the full list you tick, into the trash or for good.
 
+For AI clients the optional tools `bundle_plan` (the plan as labels only, never a file, path, address or account)
+and `bundle_deploy` (you confirm every deploy in the framework's own window, never a standing approval or a
+delegation) do the same; you enable them first.
+
 In the GUI: **Boards > Board bundle...**; at the command line: [`llm-cli bundle`](CLI_Usage.md#bundle). When you
 have no block of your own yet, the Community Hub's export points to **New block...** there.
 
