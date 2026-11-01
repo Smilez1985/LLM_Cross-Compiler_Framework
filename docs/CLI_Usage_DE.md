@@ -2572,7 +2572,8 @@ das für einen KI-Client; die Dateien wählst immer du.
 (framework, indexed, signed, own). `block new` legt deinen eigenen Baustein an (`block.yml` und seine Anleitung
 `README.md`, auf Wunsch ausgehend von einem Baustein des Frameworks) in `community/blocks/`, nicht signiert: der
 private Modus fragt, bevor er verwendet wird, der Enterprise-Modus nimmt ihn erst, wenn er veröffentlicht und aus dem
-signierten Index installiert ist.
+signierten Index installiert ist. Wie du ihn ausfüllst und veröffentlichst:
+[Modul-Entwicklerhandbuch](Module_Developer_Guide_DE.md#12-bausteine-für-das-bündel).
 
 ```bash
 llm-cli bundle plan "ZERO 3W" --preset stt --file stt.model=models/ggml-base.bin \
