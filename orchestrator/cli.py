@@ -7367,7 +7367,8 @@ def bundle_list(ctx: FrameworkContext, as_json: bool):
     for column in ("Bundle", "Board", "Components", "Mode", "Size", "Created", "Last run"):
         table.add_column(column, overflow="fold")
     for row in rows:
-        last = "; ".join(f"{d}: {b['last']}" for d, b in row["boards"].items()) or "-"
+        last = "; ".join(f"{d}: {b['last']}" + (f" ({b['gateway']})" if b.get("gateway") else "")
+                         for d, b in row["boards"].items()) or "-"
         table.add_row(row["bundle_id"], row["device_id"],
                       escape(", ".join(f"{c['id']} ({c['block']})" for c in row["components"])), row["mode"],
                       size_text(row["bytes"]), escape(row["created"]), escape(last))
@@ -7483,7 +7484,8 @@ def _bundle_root(ctx: FrameworkContext, built, action: str, opener=None, *, ask:
     return result
 
 
-def _bundle_run(ctx: FrameworkContext, bundle_id: str, action: str, *, ask: bool = False, root: bool = True):
+def _bundle_run(ctx: FrameworkContext, bundle_id: str, action: str, *, ask: bool = False, root: bool = True,
+                gateway: str = "complete"):
     """Runs the installer `action` of a stored bundle on its board through the person's login with the framework's
     key only (person_steps.connect_stored, never a password here); `ask`: first the installer's dry run of that
     action, then the person's question with "No" as the default. An apply that stops before the root actions goes on
@@ -7504,7 +7506,7 @@ def _bundle_run(ctx: FrameworkContext, bundle_id: str, action: str, *, ask: bool
 
     def run(what: str):
         try:
-            return service.run_on_board(open_session, built, what, store=store, device_id=device_id,
+            return service.run_on_board(open_session, built, what, store=store, device_id=device_id, gateway=gateway,
                                         say=lambda msg: console.print(escape(msg)))
         except BundleError as e:
             console.print(f"[red]{escape(str(e))}[/red]")
@@ -7560,11 +7562,13 @@ def bundle_deploy(ctx: FrameworkContext, bundle_id: str, dry_run: bool, skip_roo
 
 @bundle.command('status')
 @click.argument('bundle_id', metavar='BUNDLE')
+@click.option('--bench', is_flag=True, help="Also measure the gateway: three tiny completions through it")
 @pass_context
-def bundle_status(ctx: FrameworkContext, bundle_id: str):
+def bundle_status(ctx: FrameworkContext, bundle_id: str, bench: bool):
     """What the board's kept installer says of the bundle: every step done or not, and llmcf-install's status of its
-    root actions (changes nothing)"""
-    _bundle_run(ctx, bundle_id, "status")
+    root actions; a bundle with the gateway also gets its check (health and one tiny completion with the bundled
+    model; its TLS fingerprint pinned at the first check) (changes nothing on the board)"""
+    _bundle_run(ctx, bundle_id, "status", gateway="bench" if bench else "complete")
 
 
 @bundle.command('uninstall')

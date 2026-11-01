@@ -290,9 +290,13 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
                 runtime: Optional[RuntimePackage] = None, config: Any = None, mode: str = "private",
                 offline: Optional[bool] = None, allow_own: bool = False, bundle_id: Optional[str] = None,
                 hasher: Optional[Callable[[Path], str]] = None, locality: Optional[Callable[..., Any]] = None,
-                now: Optional[datetime] = None) -> BundlePlan:
+                now: Optional[datetime] = None,
+                programs: Optional[Callable[[str, Optional[str]], Tuple[Path, str]]] = None) -> BundlePlan:
     """The plan of `selection` for the board of `profile` (see the module text). `offline` None reads the setting
-    from `config` (utils/locality.offline_mode); `locality` stands in for utils/locality.check_reach in tests."""
+    from `config` (utils/locality.offline_mode); `locality` stands in for utils/locality.check_reach in tests.
+    `programs(name, arch)` gives (path, sha256) of a program the framework builds itself for the board (a block's
+    file "from: framework", service.framework_programs: root_helper.ensure_helper); it raises with the plain reason
+    when it cannot. A gateway component takes the llm component's port and context size (GATEWAY_FROM_LLM)."""
     from orchestrator.utils.helpers import sha256_file
     from orchestrator.utils import locality as loc
     hasher = hasher or sha256_file
@@ -344,8 +348,11 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
     roots: List[RootAction] = []
     ports: Dict[int, str] = {}
     memory = 0
-    for comp_id, block in zip(_component_ids(blocks), blocks):
+    pairs = list(zip(_component_ids(blocks), blocks))
+    for comp_id, block in pairs:
         given = dict(selection.values.get(comp_id) or {})
+        if block.kind == "gateway":
+            _gateway_from_llm(plan, comp_id, given, pairs, selection)
         plan.accounts[comp_id] = tuple(v.name for v in block.variables if v.type == "user")
         values: Dict[str, Any] = {}
         for var in block.variables:
@@ -361,7 +368,8 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
         for name in sorted(given):
             plan.problems.append(f"{comp_id}: the block {block.id} has no variable {name}")
         for var in block.variables:
-            if var.type == "port" and var.name in values:
+            if var.type == "port" and var.name in values and not (block.kind == "gateway"
+                                                                   and var.name in GATEWAY_FROM_LLM):
                 other = ports.get(values[var.name])
                 if other:
                     plan.problems.append(f"{comp_id} and {other} both want port {values[var.name]}")
@@ -373,6 +381,19 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
         for need in block.files:
             name = need.name or need.role
             names[need.role] = name
+            if need.source == "framework":
+                try:
+                    if programs is None:
+                        raise BundleError(f"{need.name} is built by the framework, and no builder was given")
+                    path, sha = programs(need.name, board_arch)
+                except Exception as e:  # noqa: BLE001 - HelperMissing or BundleError: the person's words
+                    plan.problems.append(f"{comp_id}: {str(e)[:400]}")
+                    continue
+                entry = FileEntry(name=name, sha256=sha, size=Path(path).stat().st_size, mode=need.mode,
+                                  role="program", format="elf")
+                entries.append(entry)
+                plan.files[(comp_id, name)] = PlannedFile(entry, Path(path))
+                continue
             if need.source == "runtime":
                 if runtime is None or runtime.path is None:
                     plan.problems.append(f"{comp_id}: " + ((runtime.missing if runtime else "")
@@ -461,6 +482,10 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
                 check_command(list(args))
             except PolicyError as e:
                 plan.problems.append(f"{comp_id}: {e}")
+        if block.kind == "gateway" and values.get("bind") == "lan":
+            plan.notes.append(f"{comp_id}: the local network only with TLS: the board makes the gateway's own "
+                              "certificate on its first start, and the first check over the board's SSH session pins "
+                              "its SHA-256 fingerprint; a client on the network sends the gateway's bearer token")
         if values.get("autostart"):
             if init and init != "systemd":
                 plan.problems.append(f"{comp_id}: autostart needs systemd; the board runs {init}")
@@ -521,6 +546,33 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
     except Exception as e:  # noqa: BLE001
         plan.problems.append(f"the manifest: {str(e).splitlines()[-1][:300]}")
     return plan
+
+
+# The gateway's variables the bundle sets from its llm component (gateway variable -> llm variable).
+GATEWAY_FROM_LLM = {"upstream_port": "port", "ctx_size": "ctx_size"}
+
+
+def _gateway_from_llm(plan: BundlePlan, comp_id: str, given: Dict[str, Any], pairs: List[Tuple[str, Block]],
+                      selection: Selection) -> None:
+    """A gateway talks to the bundle's llm component: its upstream_port and ctx_size are that component's port and
+    context size (the board's start parameters), set here; a different value the person gave is refused."""
+    llm = next(((cid, b) for cid, b in pairs if b.kind == "llm"), None)
+    if llm is None:
+        plan.problems.append(f"{comp_id}: the gateway needs the bundle's llm component (block llm-llama-server)")
+        return
+    llm_id, llm_block = llm
+    llm_values = selection.values.get(llm_id) or {}
+    for mine, theirs in GATEWAY_FROM_LLM.items():
+        var = llm_block.variable(theirs)
+        if var is None:
+            continue
+        try:
+            value = var.check(llm_values.get(theirs, var.default))
+        except ManifestError:
+            continue   # the llm component reports its own value
+        if mine in given and str(given[mine]) != str(value):
+            plan.problems.append(f"{comp_id}: {mine} is set by the bundle from {llm_id} ({value})")
+        given[mine] = value
 
 
 def _probe_checks(plan: BundlePlan, board_arch: Optional[str], init: Optional[str], access: Any, offline: bool,

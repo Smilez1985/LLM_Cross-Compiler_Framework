@@ -1,14 +1,46 @@
 schema: llmcf-bundle-block/1
 id: gateway-llmcf
-version: 0.1.0
+version: 1.0.0
 kind: gateway
 title: Gateway (llmcf-gateway)
-status: template
+status: ready
 summary: >-
-  Documented template: llmcf-gateway, the token-saving middleware in front of the board's model. Not buildable yet:
-  the Rust gateway is planned.
+  llmcf-gateway, the framework's token-saving OpenAI-compatible front in front of the bundle's llama-server: strict
+  JSON checks, the context budget from the board's start parameters, prompt-cache reuse, size caps, a rate limit,
+  health and metrics; loopback by default, the local network only with TLS.
 variables:
-  - {name: port, type: port, default: 8088}
+  - {name: port, type: port, default: 8088, help: "Port of the gateway"}
+  - {name: bind, type: choice, choices: [loopback, lan], default: loopback, help: "loopback, or lan (TLS only)"}
+  - {name: max_body_kb, type: uint, default: 256, min: 4, max: 16384, help: "Largest request body in KB"}
+  - {name: max_tokens, type: uint, default: 512, min: 16, max: 1048576, help: "Cap on the tokens of one answer"}
+  - {name: rate_per_minute, type: uint, default: 60, min: 1, max: 100000, help: "Requests per minute per client"}
+  - {name: max_inflight, type: uint, default: 2, min: 1, max: 64, help: "Requests the model works on at once"}
+  - {name: upstream_port, type: port, default: 8080, help: "Set by the bundle: the llm component's port"}
+  - {name: ctx_size, type: uint, default: 4096, min: 256, max: 262144, help: "Set by the bundle: the llm's context"}
+  - {name: memory_limit_mb, type: memory_mb, default: 64, help: "Memory limit of its unit (autostart only)"}
+  - {name: user, type: user, default: llmcf, help: "Account its unit runs as (autostart only)"}
+  - {name: autostart, type: bool, default: false, help: "Start at boot through its own unit (needs llmcf-install)"}
 files:
-  - {role: program, from: person, name: llmcf-gateway, mode: "0755", formats: [elf]}
+  - {role: program, from: framework, name: llmcf-gateway, mode: "0755", formats: [elf]}
 memory: {base_mb: 64}
+unit: true
+start:
+  program: llmcf-gateway
+  args:
+    - serve
+    - --port
+    - "{port}"
+    - --bind
+    - "{bind}"
+    - --upstream-port
+    - "{upstream_port}"
+    - --ctx-size
+    - "{ctx_size}"
+    - --max-body-kb
+    - "{max_body_kb}"
+    - --max-tokens
+    - "{max_tokens}"
+    - --rate-per-minute
+    - "{rate_per_minute}"
+    - --max-inflight
+    - "{max_inflight}"

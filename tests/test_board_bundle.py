@@ -163,9 +163,9 @@ def test_an_online_item_takes_only_a_plain_https_address(url):
 def test_the_framework_ships_llm_and_stt_blocks_and_the_others_as_documented_templates():
     catalog = blk.load_catalog()
     assert catalog.notes == []
-    assert {b.id for b in catalog.ready()} == {"llm-llama-server", "stt-whisper-cpp"}
+    assert {b.id for b in catalog.ready()} == {"llm-llama-server", "stt-whisper-cpp", "gateway-llmcf"}
     templates = {b.kind for b in catalog.blocks.values() if not b.ready}
-    assert templates == {"tts", "vision", "gateway", "harness"}
+    assert templates == {"tts", "vision", "harness"}
     for block in catalog.blocks.values():
         assert block.trust == "framework"
         assert blk.check_block_folder(block.folder) == []
