@@ -246,6 +246,11 @@ def _cap_set(values: Any) -> set:
     return {str(v).strip().upper().replace("CAP_", "", 1) for v in values or [] if str(v).strip()}
 
 
+# Decided writable mounts nothing undecided may lie inside, like the read-only ones: the runtime layer's end folder
+# (Core/runtime_layer.END_MOUNT; named here so that utils imports no Core module, tests/test_runtime_layer.py pins both)
+GUARDED_MOUNTS = ("/llmcf-end",)
+
+
 def sandbox_problem(attrs: Any, options: Dict[str, Any], volumes: Dict[str, Dict[str, str]],
                     engine: str = "docker", caps: Optional[Tuple[str, ...]] = None) -> Optional[str]:
     """The host's check of a created stage container (docker or podman inspect, `attrs`) against the decided sandbox
@@ -305,16 +310,18 @@ def sandbox_problem(attrs: Any, options: Dict[str, Any], volumes: Dict[str, Dict
         elif mount.get("RW", True):
             wrong.append(f"the mount {bind} is writable")
     # Nothing the host did not decide is mounted inside a read-only mount: an image's VOLUME below one (VOLUME
-    # /llmcf/bin) makes the engine mount an anonymous volume there, filled from the image, over the decided files
+    # /llmcf/bin) makes the engine mount an anonymous volume there, filled from the image, over the decided files; and
+    # nothing inside the runtime layer's end folder (GUARDED_MOUNTS), the one writable mount whose record the host trusts
     decided = {str(v.get("bind", "")) for v in (volumes or {}).values()}
-    read_only = sorted(str(v.get("bind", "")) for v in (volumes or {}).values() if v.get("mode") == "ro")
+    read_only = sorted(str(v.get("bind", "")) for v in (volumes or {}).values()
+                       if v.get("mode") == "ro" or str(v.get("bind", "")) in GUARDED_MOUNTS)
     for destination in sorted(mounts):
         if destination in decided:
             continue
         inside = [b for b in read_only if b and destination.startswith(b.rstrip("/") + "/")]
         if inside:
-            wrong.append(f"a mount the framework did not decide ({destination}) lies inside the read-only mount "
-                         f"{inside[0]}")
+            kind = "the end folder" if inside[0] in GUARDED_MOUNTS else "the read-only mount"
+            wrong.append(f"a mount the framework did not decide ({destination}) lies inside {kind} {inside[0]}")
     return SANDBOX_REFUSED.format(what="; ".join(wrong)) if wrong else None
 
 

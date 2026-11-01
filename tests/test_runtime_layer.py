@@ -423,6 +423,25 @@ def test_an_image_volume_over_the_runtime_layer_refuses_the_build():
     assert sandbox_problem(attrs, _layer_options(), volumes) is None
 
 
+def test_an_image_volume_inside_the_end_folder_refuses_the_build(tmp_path):
+    """The end folder is the one writable mount the host trusts (only the runner writes it): an image's
+    `VOLUME /llmcf-end/build.end` made the engine mount an anonymous volume inside it, so the runner's record landed in
+    the image's volume and the host's end folder got a folder of the engine's in its place. Refused like a mount
+    inside the read-only layer, before the container starts."""
+    from orchestrator.utils.sandbox import sandbox_problem
+    end = tmp_path / "end-build"
+    volumes = layer.layer_volumes(Path("/cache"), end)
+    attrs = _layer_attrs()
+    attrs["Mounts"].append({"Type": "bind", "Source": str(end), "Destination": layer.END_MOUNT, "RW": True})
+    assert sandbox_problem(attrs, _layer_options(), volumes) is None
+    attrs["Mounts"].append({"Type": "volume", "Name": "f01", "Source": "/var/lib/volumes/f01/_data",
+                            "Destination": f"{layer.END_MOUNT}/build.end", "RW": True})
+    problem = sandbox_problem(attrs, _layer_options(), volumes) or ""
+    assert f"{layer.END_MOUNT}/build.end" in problem and "/var/lib" not in problem
+    from orchestrator.utils.sandbox import GUARDED_MOUNTS   # utils names the end mount without importing Core
+    assert layer.END_MOUNT in GUARDED_MOUNTS
+
+
 def test_podmans_entrypoint_as_one_string_is_the_frameworks():
     """Podman 4 reports Config.Entrypoint as one string ("/llmcf/bin/busybox sh /llmcf/entrypoint.sh"): the check
     compared it letter by letter with the list and refused every Podman build."""
