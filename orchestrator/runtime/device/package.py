@@ -31,6 +31,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
+from orchestrator.runtime.build.projects import LLAMA_CPP, project_of
+from orchestrator.runtime.build.projects import project as _project
 from orchestrator.runtime.build.recipe import BuildPlan, PlanError, ToolchainInfo, plan_build
 from orchestrator.runtime.build.store import BuildStore, StoredBuild
 from orchestrator.runtime.catalog import RuntimeCatalog
@@ -50,6 +52,14 @@ _RE_ID = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
 _RE_TARBALL = re.compile(r"^llama-runtime-(x86_64|arm64)-([0-9a-f]{16})\.tar\.gz$", re.ASCII)
 
 
+def _tarball_re(project: str = LLAMA_CPP) -> "re.Pattern[str]":
+    """The package names of `project` (projects.py package_prefix); llama.cpp's is _RE_TARBALL."""
+    if project == LLAMA_CPP:
+        return _RE_TARBALL
+    prefix = re.escape(_project(project).package_prefix)
+    return re.compile(rf"^{prefix}-(x86_64|arm64)-([0-9a-f]{{16}})\.tar\.gz$", re.ASCII)
+
+
 class PackageError(RuntimeError):
     """The device runtime cannot be packaged; the message says why and what to do."""
 
@@ -61,11 +71,12 @@ def device_toolchain(host: Tuple[str, str]) -> ToolchainInfo:
 
 
 def plan_device_runtime(profile: HardwareProfile, *, catalog: RuntimeCatalog, host: Tuple[str, str],
-                        backend: str = "cpu") -> BuildPlan:
+                        backend: str = "cpu", project: Optional[str] = None) -> BuildPlan:
     """The cross build plan of the device runtime for the device `profile` describes. Raises PlanError.
 
     The CPU build is the device runtime for now: Vulkan on a board's Mali GPU only after llama-bench shows that it
-    beats the CPU build (decision D8), and CUDA cross builds are not offered."""
+    beats the CPU build (decision D8), and CUDA cross builds are not offered. `project` (projects.py; None:
+    llama.cpp): whisper.cpp gets the same plan for the board, through the same recipe."""
     if not isinstance(profile, HardwareProfile):
         raise PlanError("expected a parsed HardwareProfile of the device")
     if profile.os != "linux":
@@ -75,14 +86,14 @@ def plan_device_runtime(profile: HardwareProfile, *, catalog: RuntimeCatalog, ho
         raise PlanError("the device runtime is a CPU build for now (Vulkan on a board only after llama-bench shows "
                         "it beats the CPU build, decision D8; no CUDA cross builds)")
     return plan_build(profile, purpose="device-runtime", placement="cross", backend=backend, catalog=catalog,
-                      toolchain=device_toolchain(host))
+                      toolchain=device_toolchain(host), project=project or LLAMA_CPP)
 
 
 def tarball_name(build: StoredBuild) -> str:
     arch = str((build.plan.get("target") or {}).get("arch") or "")
     if arch not in ("x86_64", "arm64"):
         raise PackageError(f"the build is for {arch or 'an unknown architecture'}, not a device architecture")
-    return f"llama-runtime-{arch}-{build.build_id[:16]}.tar.gz"
+    return f"{project_of(build).package_prefix}-{arch}-{build.build_id[:16]}.tar.gz"
 
 
 def _mtime(build: StoredBuild) -> int:
@@ -121,13 +132,14 @@ def _check_build(store: BuildStore, build: StoredBuild) -> Dict[str, Any]:
 def package_runtime(store: BuildStore, build: StoredBuild, *, licence: Path, out_dir: Path) -> PackagedRuntime:
     """Writes the device tarball of a stored, checked device build into out_dir (see the module docstring)."""
     plan = _check_build(store, build)
+    proj = project_of(build)
     try:
         licence_text = Path(licence).read_bytes()
     except OSError as e:
-        raise PackageError(f"llama.cpp's licence text cannot be read from the pinned source ({e.strerror or e}); "
+        raise PackageError(f"{proj.name}'s licence text cannot be read from the pinned source ({e.strerror or e}); "
                            "fetch the source again") from None
     if not licence_text or len(licence_text) > MAX_LICENCE_BYTES or b"MIT License" not in licence_text:
-        raise PackageError("the licence file of the source is not llama.cpp's MIT licence text")
+        raise PackageError(f"the licence file of the source is not {proj.name}'s MIT licence text")
     runtime_libs = set((plan.get("verify") or {}).get("runtime_libs") or [])
     top = build.build_id[:16]
     files: Mapping[str, str] = build.manifest.get("files") or {}
@@ -140,12 +152,13 @@ def package_runtime(store: BuildStore, build: StoredBuild, *, licence: Path, out
     entries: List[Tuple[str, Union[bytes, Path, str], int]] = []  # (path in the folder, content or link target, mode)
     for name in sorted(files):
         where = "lib" if name in runtime_libs else "bin"
-        mode = 0o755 if _RE_PROGRAM.fullmatch(name) else 0o644
+        mode = 0o755 if (_RE_PROGRAM.fullmatch(name) or proj.program.fullmatch(name)) else 0o644
         entries.append((f"{where}/{name}", build.bin_dir / name, mode))
-    entries.append((START_SCRIPT, render_start_script().encode("utf-8"), 0o755))
+    if proj.start_script:   # llama.cpp's start script; whisper-server starts from the bundle's own start.sh
+        entries.append((START_SCRIPT, render_start_script().encode("utf-8"), 0o755))
     for name in ("build.json", "manifest.json"):
         entries.append((name, build.path / name, 0o644))
-    entries.append((LICENCE_NAME, licence_text, 0o644))
+    entries.append((proj.licence_name, licence_text, 0o644))
     sums = sha256sums_text((_sha256_bytes(content) if isinstance(content, bytes) else _sha256_file(content), rel)
                            for rel, content, _mode in entries)
     entries.append((SUMS_NAME, sums.encode("ascii"), 0o644))
@@ -189,15 +202,33 @@ def package_runtime(store: BuildStore, build: StoredBuild, *, licence: Path, out
     return PackagedRuntime(path=target, sha256=digest, build_id=build.build_id, members=tuple(members))
 
 
+def start_script_current(path: Path) -> Optional[bool]:
+    """Whether the llama.cpp start script inside the package at `path` is the one this framework writes now (a package
+    made by an older framework lacks the options added since, such as --mmproj); None when it cannot be read or holds
+    no start script (another project's package)."""
+    want = render_start_script().encode("utf-8")
+    try:
+        with tarfile.open(path, mode="r|gz") as tar:
+            for member in tar:
+                if member.isfile() and member.name.endswith("/" + START_SCRIPT) and member.size <= 1 << 20:
+                    data = tar.extractfile(member)
+                    return data is not None and data.read() == want
+    except (OSError, tarfile.TarError, EOFError):
+        return None
+    return None
+
+
 class DeviceRuntimeStore:
     """<state dir>/runtime/llama.cpp/device/<device id>/: the device's tarballs (with .sha256) and deployed.json, the
     record of the last deployment and its checks on the device."""
 
-    def __init__(self, state_dir: Union[str, Path], device_id: str):
+    def __init__(self, state_dir: Union[str, Path], device_id: str, project: Optional[str] = None):
         if not isinstance(device_id, str) or not DEVICE_ID.fullmatch(device_id):
             raise PackageError("a device ID is 16 lower-case hex characters")
         self.device_id = device_id
-        self.root = Path(state_dir) / "runtime" / "llama.cpp" / "device" / device_id
+        self.project = _project(project).name   # another project's packages: <state>/runtime/<its folder>/device/
+        self._re_tarball = _tarball_re(self.project)
+        self.root = Path(state_dir) / "runtime" / _project(project).folder / "device" / device_id
         self.record_file = self.root / "deployed.json"
 
     def tarball(self, build: StoredBuild) -> Optional[PackagedRuntime]:
@@ -215,7 +246,7 @@ class DeviceRuntimeStore:
     def tarballs(self) -> List[Path]:
         if not self.root.is_dir():
             return []
-        return sorted(p for p in self.root.iterdir() if _RE_TARBALL.fullmatch(p.name))
+        return sorted(p for p in self.root.iterdir() if self._re_tarball.fullmatch(p.name))
 
     def cleanup_plan(self):
         """What `llm-cli device runtime prune DEVICE` lists for the person's multiple choice: every tarball of this
@@ -228,7 +259,7 @@ class DeviceRuntimeStore:
         items = []
         for path in sorted(self.root.iterdir()) if self.root.is_dir() else []:
             sums = path.name.endswith(".sha256")
-            match = _RE_TARBALL.fullmatch(path.name[:-len(".sha256")] if sums else path.name)
+            match = self._re_tarball.fullmatch(path.name[:-len(".sha256")] if sums else path.name)
             if match is None or match.group(2) == deployed:
                 continue
             what = ("the checksum file of a runtime package" if sums else

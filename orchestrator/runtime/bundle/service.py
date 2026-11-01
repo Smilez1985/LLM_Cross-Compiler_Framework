@@ -15,21 +15,122 @@ from orchestrator.runtime.bundle import blocks as blk
 from orchestrator.runtime.bundle import generator as gen
 
 
-def runtime_for(state_dir: Path, device_id: str, profile: Any, source: Optional[Callable[[], Any]] = None
-                ) -> gen.RuntimePackage:
-    """The board's runtime tarball of deploy way 2 (steps.stored_runtime), or why there is none (never built here)."""
+def component_pin(project: Optional[str] = None):
+    """The pinned source of a project of the self-build path (configs/llama_runtime.yml: llama_cpp.source,
+    whisper_cpp.source); gen.BundleError when the installation lacks it."""
+    from orchestrator.runtime.build.projects import pin_of
+    from orchestrator.runtime.catalog import load_catalog
+    pin = pin_of(load_catalog(), project)
+    if pin is None:
+        raise gen.BundleError(f"configs/llama_runtime.yml names no pinned {project or 'llama.cpp'} source; this "
+                              "installation cannot build it")
+    return pin
+
+
+def runtime_for(state_dir: Path, device_id: str, profile: Any, source: Optional[Callable[[], Any]] = None,
+                project: Optional[str] = None) -> gen.RuntimePackage:
+    """The board's package of a project of the self-build path, never built here: llama.cpp's runtime tarball of
+    deploy way 2 (steps.stored_runtime), or with `project` whisper.cpp's board package the same way; or why there
+    is none."""
     from orchestrator.runtime.device import steps
+    name = project or "llama.cpp"
     if source is None:
-        from orchestrator.runtime.device.service import pinned_source
-        source = pinned_source
+        if project is None:
+            from orchestrator.runtime.device.service import pinned_source
+            source = pinned_source
+        else:
+            def source():
+                return component_pin(project)
     try:
-        stored = steps.stored_runtime(Path(state_dir), device_id, profile, source)
+        stored = steps.stored_runtime(Path(state_dir), device_id, profile, source) if project is None else \
+            steps.stored_runtime(Path(state_dir), device_id, profile, source, project)
     except Exception as e:  # noqa: BLE001 - PlanError, NotBuilt, PackageNeedsSource, PackageError: the plan says so
         text = str(e) or e.__class__.__name__
-        return gen.RuntimePackage(missing=f"the board's llama.cpp runtime package is not ready ({text[:200]}); "
-                                          "build the board's runtime first")
-    packaged = stored.packaged
-    return gen.RuntimePackage(Path(packaged.path), packaged.sha256, stored.build.build_id)
+        if name == "llama.cpp":
+            return gen.RuntimePackage(missing=f"the board's llama.cpp runtime package is not ready ({text[:200]}); "
+                                              "build the board's runtime first")
+        return gen.RuntimePackage(project=name, missing=f"the board's {name} package is not ready ({text[:200]}); "
+                                                        "the framework builds it for the board when you build the "
+                                                        "bundle, after your yes")
+    packaged, plan = stored.packaged, stored.build.plan
+    return gen.RuntimePackage(Path(packaged.path), packaged.sha256, stored.build.build_id, project=name,
+                              arch=str((plan.get("target") or {}).get("arch") or ""),
+                              cpu_features=tuple((plan.get("cpu_features") or {}).get("used") or ()))
+
+
+def needed_projects(catalog: blk.BlockCatalog, selection: gen.Selection) -> List[str]:
+    """The projects of the self-build path whose board package the chosen blocks take (llama.cpp first)."""
+    found: List[str] = []
+    for block_id in selection.blocks:
+        for need in getattr(catalog.get(block_id), "files", ()):
+            if need.source == "runtime" and need.project not in found:
+                found.append(need.project)
+    return sorted(found, key=lambda p: (p != "llama.cpp", p))
+
+
+# The person's question before the framework builds a board package the bundle needs (the CLI and the Board bundle
+# window ask exactly these words; "No" is the default). {projects}: the project names, {board}: the board.
+COMPONENT_QUESTION = ("Build {projects} for board {board} now? It is built from the pinned source for the board's "
+                      "probe (architecture, C library, CPU features) in the builder container without network; the "
+                      "pinned source is fetched first when it is not cached (in offline mode only from your own "
+                      "network).")
+
+
+def component_question(projects: Iterable[str], board: str) -> str:
+    return COMPONENT_QUESTION.format(projects=" and ".join(projects), board=board)
+
+
+def build_components(state_dir: Path, device_id: str, profile: Any, projects: Iterable[str], *,
+                     settings: Any = None, mirror: Optional[str] = None,
+                     say: Callable[[str], None] = lambda _m: None, cancelled: Callable[[], bool] = lambda: False,
+                     ai_started: bool = False) -> Dict[str, gen.RuntimePackage]:
+    """Builds the board packages of `projects` for the stored board, after the person's yes (COMPONENT_QUESTION):
+    each through the one self-build path of llama.cpp's device runtime (steps.plan_runtime and steps.build_runtime:
+    the pinned source fetched by commit and checked, the cross build in the builder container without network, the
+    format check, the store with its record, the board package). Returns each project's RuntimePackage
+    (runtime_for). gen.BundleError with the person's words when one cannot be built."""
+    from orchestrator.runtime.build.recipe import PlanError
+    from orchestrator.runtime.build.source import SourceError
+    from orchestrator.runtime.build.store import BuildFailed, StoreError
+    from orchestrator.runtime.device import steps
+    from orchestrator.runtime.device.package import PackageError
+    out: Dict[str, gen.RuntimePackage] = {}
+    for project in projects:
+        pin = component_pin(None if project == "llama.cpp" else project)
+        try:
+            plan = steps.plan_runtime(profile) if project == "llama.cpp" else steps.plan_runtime(profile, project)
+            say(f"building {project} for board {device_id} in the builder container")
+            steps.build_runtime(Path(state_dir), device_id, profile, plan, pin, mirror=mirror, log=say,
+                                cancelled=cancelled, reuse_package=True, settings=settings, ai_started=ai_started,
+                                on_step=lambda kind, _b, p=project: say(f"fetching the pinned {p} source")
+                                if kind == "fetch" else None)
+        except PlanError as e:
+            raise gen.BundleError(f"{project} cannot be planned for this board: {e}") from None
+        except SourceError as e:
+            raise gen.BundleError(f"the pinned {project} source: {e}") from None
+        except (BuildFailed, StoreError) as e:
+            raise gen.BundleError(f"{project} could not be built for the board: {e}") from None
+        except PackageError as e:
+            raise gen.BundleError(f"{project} could not be packaged for the board: {e}") from None
+        except steps.BuildCancelled:
+            raise gen.BundleError(f"the build of {project} was cancelled; nothing was built") from None
+        out[project] = runtime_for(state_dir, device_id, profile,
+                                   project=None if project == "llama.cpp" else project)
+    return out
+
+
+def accept_terms(catalog: blk.BlockCatalog, selection: gen.Selection, block_ids: Iterable[str]) -> List[str]:
+    """Records in `selection` that the person read and accepted the terms of `block_ids` as the catalog holds them
+    now (bound to Block.terms_sha256, so changed terms need a new yes). Only the person's channels call this, after
+    showing Block.terms_text(); the AI's tools never do. Returns the blocks accepted (a block without terms is
+    left out)."""
+    done = []
+    for block_id in block_ids:
+        block = catalog.get(block_id)
+        if block is not None and block.terms:
+            selection.accepted_terms[block_id] = block.terms_sha256
+            done.append(block_id)
+    return done
 
 
 def device_profile(state_dir: Path, device_id: str):
@@ -49,12 +150,12 @@ def plan_for_device(state_dir: Path, device_id: str, selection: gen.Selection, *
     package."""
     profile = profile or device_profile(state_dir, device_id)
     catalog = blk.load_catalog(app_root, index=index)
-    needs_runtime = any(need.source == "runtime" for bid in selection.blocks
-                        for need in getattr(catalog.get(bid), "files", ()))
-    if runtime is None and needs_runtime:
+    projects = needed_projects(catalog, selection)
+    if runtime is None and "llama.cpp" in projects:
         runtime = runtime_for(state_dir, device_id, profile)
+    others = {p: runtime_for(state_dir, device_id, profile, project=p) for p in projects if p != "llama.cpp"}
     return gen.plan_bundle(selection, catalog=catalog, profile=profile, device_id=device_id,
-                           runtime=runtime, config=config, mode=mode, allow_own=allow_own)
+                           runtime=runtime, config=config, mode=mode, allow_own=allow_own, runtimes=others)
 
 
 _ASSIGN = re.compile(r"^([a-z][a-z0-9-]{0,40})\.([a-z][a-z0-9_]{0,31})=(.*)$", re.ASCII | re.DOTALL)
@@ -74,7 +175,8 @@ def assignments(items: Iterable[str], what: str) -> List[Tuple[str, str, str]]:
 def selection_from(*, preset: Optional[str] = None, blocks: Iterable[str] = (), sets: Iterable[str] = (),
                    files: Iterable[str] = (), online: Iterable[str] = (), sha256: Iterable[str] = (),
                    sizes: Iterable[str] = (), licences: Iterable[str] = (),
-                   unprivileged_only: bool = False) -> gen.Selection:
+                   unprivileged_only: bool = False, accepted_terms: Optional[Dict[str, str]] = None
+                   ) -> gen.Selection:
     """The person's choice from the command line's options (the window builds its Selection directly)."""
     chosen = list(blocks)
     if preset:
@@ -84,6 +186,7 @@ def selection_from(*, preset: Optional[str] = None, blocks: Iterable[str] = (), 
         selection = gen.Selection(blocks=chosen, unprivileged_only=unprivileged_only)
     else:
         raise gen.BundleError("choose a preset or at least one block")
+    selection.accepted_terms.update(accepted_terms or {})
     for comp, name, value in assignments(sets, "--set"):
         selection.values.setdefault(comp, {})[name] = value
     choices: Dict[Tuple[str, str], gen.FileChoice] = {}
@@ -301,8 +404,10 @@ def question(action: str, built: gen.BuiltBundle, board: str) -> str:
     return text.format(bundle=built.bundle_id, board=board, size=gen._mb(size))
 
 
-__all__ = ["CHANGING_ACTIONS", "DEPLOY_QUESTION", "ENTERPRISE_NO_PASSWORD", "PASSWORD_PROMPT", "ROLLBACK_QUESTION",
-           "ROOT_CHANGING_ACTIONS", "ROOT_QUESTION", "ROOT_ROLLBACK_QUESTION", "ROOT_UNINSTALL_QUESTION",
-           "UNINSTALL_QUESTION", "assignments", "board_contact", "build_for", "bundle_rows", "catalog_sources",
-           "device_profile", "helper_for", "password_allowed", "plan_for_device", "question", "revoked_blocks",
-           "root_count", "root_question", "run_on_board", "run_root_on_board", "runtime_for", "selection_from"]
+__all__ = ["CHANGING_ACTIONS", "COMPONENT_QUESTION", "DEPLOY_QUESTION", "ENTERPRISE_NO_PASSWORD", "PASSWORD_PROMPT",
+           "ROLLBACK_QUESTION", "ROOT_CHANGING_ACTIONS", "ROOT_QUESTION", "ROOT_ROLLBACK_QUESTION",
+           "ROOT_UNINSTALL_QUESTION", "UNINSTALL_QUESTION", "accept_terms", "assignments", "board_contact",
+           "build_components", "build_for", "bundle_rows", "catalog_sources", "component_pin", "component_question",
+           "device_profile", "helper_for", "needed_projects", "password_allowed", "plan_for_device", "question",
+           "revoked_blocks", "root_count", "root_question", "run_on_board", "run_root_on_board", "runtime_for",
+           "selection_from"]

@@ -161,8 +161,13 @@ class StoredBuild:
 
 
 class BuildStore:
-    def __init__(self, state_dir: Union[str, Path]):
-        self.root = Path(state_dir) / "runtime" / "llama.cpp"
+    """The stored builds of one project of the self-build path (projects.py; None: llama.cpp, the folder above):
+    another project's builds live the same way in <state dir>/runtime/<its folder>/."""
+
+    def __init__(self, state_dir: Union[str, Path], project: Optional[str] = None):
+        from orchestrator.runtime.build.projects import project as _project
+        self.project = _project(project).name
+        self.root = Path(state_dir) / "runtime" / _project(project).folder
         self.builds_dir = self.root / "builds"
         self.logs_dir = self.root / "logs"
         self.active_file = self.root / "active.json"

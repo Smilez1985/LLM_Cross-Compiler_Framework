@@ -693,15 +693,22 @@ entfernen...**, **Ältere Builds auf dem Board entfernen...**).
 
 Deploy-Weg 3 neben dem Golden-ZIP und dem Laufzeitpaket: ein Bündel für das ganze Board, gebaut aus Bausteinen (die
 des Frameworks: `llm-llama-server` mit der selbst gebauten llama.cpp-Laufzeit des Boards und einem GGUF-Modell, und
-`stt-whisper-cpp` mit dem Server von whisper.cpp und einem ggml-Modell; Sprachausgabe mit sherpa-onnx, Vision mit
-`--mmproj`, das Gateway und ein Agent-Harness sind dokumentierte Vorlagen). Du wählst eine Vorlage (`llm`, `voice`,
+`stt-whisper-cpp` mit dem eigenen Build des whisper.cpp-Servers des Frameworks für das Board und einem ggml-Modell,
+und `vision-mmproj` mit der llama.cpp-Laufzeit, gestartet mit `--mmproj` für ein Vision-Modell und seinen Projektor;
+ein selbst gewähltes `whisper-server` bleibt mit `stt-whisper-cpp-program` möglich, mit einer Warnung; Sprachausgabe
+mit sherpa-onnx, das Gateway und ein Agent-Harness sind dokumentierte Vorlagen). Du wählst eine Vorlage (`llm`, `voice`,
 `stt`) oder die Bausteine, setzt ihre Variablen (Port, Threads, Speichergrenze, Autostart, ...; jede gegen ihren Typ
 geprüft) und wählst ihre Dateien (eine lokale Datei wird gehasht und ins Bündel kopiert, ein Online-Element ist über
 sha256 und Größe festgelegt).
 
 Bevor etwas gebaut oder gesendet wird, zeigt der Plan jede Komponente, jede Datei mit Quelle und Größe, die
 Root-Aktionen, die über llmcf-install laufen, und seine Prüfungen gegen die Untersuchung des Boards (Architektur,
-Init-System, sudo, Offline-Modus, Speicher). Das Bündel wird mit dem Schlüssel des Frameworks signiert und im Speicher
+Init-System, sudo, Offline-Modus, Speicher, und je Komponente Architektur und CPU-Merkmale des Board-Pakets; bei
+Vision, ob Modell und Projektor ein Paar sind). Ein noch nicht gebautes Board-Paket (whisper.cpp auf seinem
+festgelegten Commit, llama.cpp) wird nach deinem Ja über denselben Weg des eigenen Builds gebaut wie das
+Laufzeitpaket. Ein Baustein, dessen Teile eigenen Lizenzbedingungen unterliegen, zeigt sie vollständig und wird erst
+verwendet, wenn du sie annimmst; einer mit Bedingungen, die keine freie Lizenz sind (Modelle von NVIDIA NeMo, ein
+Weckwort-Modell, trainiert auf GigaSpeech), ist ein Opt-in, nie Teil einer Vorlage. Das Bündel wird mit dem Schlüssel des Frameworks signiert und im Speicher
 dieses Frameworks aufbewahrt; sein Installer auf dem Board installiert nur die Schritte ohne Sonderrechte, jeden nur
 einmal (ein zweiter Lauf ändert nichts, ein abgebrochener macht weiter), und zeigt einen Probelauf, einen Status, ein
 Zurückrollen und ein Deinstallieren seiner eigenen Schritte. Die Root-Aktionen (das Konto eines Bestandteils,

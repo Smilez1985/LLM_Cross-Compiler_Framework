@@ -124,6 +124,13 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
         except gen.BundleError as e:
             raise ToolError(h.scrub(str(e)), code="failed", next="Ask the person to probe the board first.") \
                 from None
+        if plan.missing_runtimes:
+            notes.append("The board packages " + ", ".join(plan.missing_runtimes) + " are built by the framework "
+                         "for the board only after the person's yes, when the person builds the bundle in the "
+                         "framework's Board bundle window; a tool never starts that build")
+        if plan.terms_needed:
+            notes.append("The blocks " + ", ".join(plan.terms_needed) + " bring in parts under their own licence "
+                         "terms; only the person reads and accepts them, in the framework's Board bundle window")
         return BundlePlanOut(plan=plan.labels(), blocks=blocks, notes=notes)
 
     def stored(bundle_id: str):

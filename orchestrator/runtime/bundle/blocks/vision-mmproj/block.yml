@@ -1,19 +1,36 @@
 schema: llmcf-bundle-block/1
 id: vision-mmproj
-version: 0.1.0
+version: 1.0.0
 kind: vision
 title: Vision (llama-server with --mmproj)
-status: template
+status: ready
 summary: >-
-  Documented template: the board's llama.cpp runtime with a vision model and its multimodal projector (--mmproj).
-  Not buildable yet: the runtime's start script does not pass --mmproj on.
+  The board's self-built llama.cpp runtime package (deploy way 2) with a vision language model and its multimodal
+  projector (--mmproj), started by the runtime's own start script on 127.0.0.1 with its key file. The plan checks that
+  the two files are a pair.
 variables:
-  - {name: port, type: port, default: 8081}
-  - {name: ctx_size, type: uint, default: 4096, min: 256, max: 262144}
+  - {name: port, type: port, default: 8081, help: "Loopback port of the server"}
+  - {name: ctx_size, type: uint, default: 4096, min: 256, max: 262144, help: "Context size in tokens"}
+  - {name: threads, type: threads, default: 0, help: "CPU threads (0: llama.cpp decides)"}
+  - {name: memory_limit_mb, type: memory_mb, default: 3072, help: "Memory limit of its unit (autostart only)"}
+  - {name: user, type: user, default: llmcf, help: "Account its unit runs as (autostart only)"}
+  - {name: autostart, type: bool, default: false, help: "Start at boot through its own unit (needs llmcf-install)"}
 files:
   - {role: runtime, from: runtime, name: runtime.tar.gz, formats: [tar.gz]}
-  - {role: model, from: person, name: model.gguf, formats: [gguf], licence: required}
-  - {role: mmproj, from: person, name: mmproj.gguf, formats: [mmproj-gguf], licence: required}
+  - {role: model, from: person, name: model.gguf, formats: [gguf], licence: required, min_bytes: 1048576}
+  - {role: mmproj, from: person, name: mmproj.gguf, formats: [mmproj-gguf], licence: required, min_bytes: 1048576}
 memory: {base_mb: 384, model_factor: 1.3}
-notes:
-  - "Planned: --mmproj in the runtime start script's checked options (ROADMAP row 'Vision with --mmproj')."
+keygen: true
+unit: true
+start:
+  program: runtime/@RUNTIME@/llama-server.sh
+  args:
+    - serve
+    - "@FILE:model@"
+    - --port
+    - "{port}"
+    - --ctx-size
+    - "{ctx_size}"
+    - --mmproj
+    - "@FILE:mmproj@"
+    - {when: threads, args: [--threads, "{threads}"]}

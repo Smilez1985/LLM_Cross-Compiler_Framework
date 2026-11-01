@@ -377,6 +377,19 @@ Commit legt den Inhalt fest; ein Tag lässt sich verschieben. Eine Anhebung läu
 7. Die ganze Testsuite ausführen, einen Changelog-Eintrag in beiden Sprachen ergänzen und erst mergen, wenn alle
    Prüfungen grün sind.
 
+### Den whisper.cpp-Pin anheben
+
+Das whisper.cpp des Boards kommt aus `whisper_cpp.source` in `configs/llama_runtime.yml` (`repo`, `commit`, `tag`
+`vX.Y.Z`) und wird über denselben Weg des eigenen Builds gebaut wie llama.cpp
+(`orchestrator/runtime/build/projects.py`). Prüfe, dass der Commit der von Upstream ist:
+`git ls-remote https://github.com/ggml-org/whisper.cpp.git refs/tags/v<X.Y.Z>` muss genau den neuen Commit ausgeben.
+Prüfe die Optionen des neuen Baums, die etwas herunterladen können, erneut gegen `WHISPER_DOWNLOAD_OPTIONS_OFF` und
+`WHISPER_FIXED` in `orchestrator/runtime/build/recipe.py` (suche nach `FetchContent_Declare`, `ExternalProject_Add`
+und `file(DOWNLOAD`; `WHISPER_CURL`, `WHISPER_SDL2` und das Holen von KleidiAI und OpenMP durch ggml sind heute aus),
+und die Optionen des Servers gegen `WHISPER_FORBIDDEN_FLAGS` in `orchestrator/runtime/server_policy.py` (`--convert`
+startet ffmpeg über eine Shell). Dann `tests/test_bundle_components.py` und die ganze Suite ausführen und einen
+Changelog-Eintrag in beiden Sprachen ergänzen.
+
 ---
 
 ## 5. Lint- und Sicherheitsprüfungen

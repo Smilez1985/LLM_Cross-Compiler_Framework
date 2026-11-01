@@ -2513,7 +2513,8 @@ Baustein...**; dieselben Schritte und Fragen wie hier, jeder Lauf auf dem Board 
 ```
 llm-cli bundle plan GERÄT [--preset llm|voice|stt] [--block ID]... [--set KOMPONENTE.NAME=WERT]...
                     [--file KOMPONENTE.ROLLE=PFAD]... [--online KOMPONENTE.ROLLE=URL --sha256 KOMPONENTE.ROLLE=HEX
-                    --size KOMPONENTE.ROLLE=BYTES]... [--licence KOMPONENTE.ROLLE=ID]... [--unprivileged-only] [--json]
+                    --size KOMPONENTE.ROLLE=BYTES]... [--licence KOMPONENTE.ROLLE=ID]... [--unprivileged-only]
+                    [--accept-terms BAUSTEIN]... [--json]
 llm-cli bundle build GERÄT (dieselbe Auswahl) [--allow-own]
 llm-cli bundle list [--json]
 llm-cli bundle deploy BUNDLE [--dry-run] [--skip-root]
@@ -2536,6 +2537,18 @@ bestanden, nicht bestanden, Warnung oder unbekannt). Es wird kein Board kontakti
 Art (`llm`, `stt`, eine zweite derselben Art `stt-2`). `--json` gibt den Plan nur als Labels aus: kein lokaler Pfad,
 keine Adresse, kein Konto. Exit 1, wenn der Plan Probleme hat.
 
+Ein Baustein, dessen Teile eigenen Lizenzbedingungen unterliegen (zum Beispiel eSpeak NG in `tts-sherpa-onnx` oder
+die Opt-in-Vorlagen `stt-nemo-sherpa` und `stt-kws-gigaspeech` mit Bedingungen, die keine freie Lizenz sind), wird
+mit dem Problem geplant, dass seine Bedingungen noch nicht angenommen sind, und der Plan druckt die Bedingungen danach
+vollständig. `--accept-terms BAUSTEIN` nimmt genau den gezeigten Text an (die Annahme ist an seinen sha256 gebunden;
+ein geänderter Text ist nicht angenommen). Ein Baustein mit einer nicht freien Bedingung ist nie Teil einer Vorlage.
+
+Ein Baustein, dessen Programm das Framework für das Board baut (`llm-llama-server` und `vision-mmproj`: llama.cpp;
+`stt-whisper-cpp`: das festgelegte whisper.cpp), braucht dieses Board-Paket. Der Plan nennt es, wenn es noch nicht
+gebaut ist, und prüft jede Komponente gegen die Untersuchung des Boards (`component stt`: die Architektur des Pakets
+gegen die des Boards, die CPU-Merkmale, für die es gebaut ist, der Speicher). Für `vision-mmproj` prüft der Plan auch,
+dass Modell und Projektor ein Paar sind (`vision pair vision`), und zählt beide im Speicher.
+
 ### bundle build
 
 Plant wie `bundle plan`, zeigt den Plan und schreibt das Bündel in den Speicher dieses Frameworks, signiert mit dem
@@ -2547,6 +2560,13 @@ Frameworks, gebaut für die Architektur des Boards (x86_64, aarch64 oder armv7, 
 Die auf diesem Rechner aufbewahrte Kopie wird genommen, sonst wird er hier mit cargo oder im Builder-Image über die
 Container-Engine gebaut. Im Offline-Modus wird nur eine aufbewahrte Kopie genommen; ohne sie hält der Build mit dem
 klaren Grund an (einmal online bauen oder die Variante ohne Sonderrechte wählen).
+
+Bevor etwas gebaut wird, zeigt `bundle build` im Terminal die noch nicht angenommenen Lizenzbedingungen jedes
+Bausteins vollständig und fragt je Baustein ("Nein" ist die Vorgabe; `--accept-terms` beantwortet es vorab). Wartet
+der Plan auf ein noch nicht gebautes Board-Paket (whisper.cpp, llama.cpp), fragt es, ob es jetzt gebaut werden soll
+("Nein" ist die Vorgabe), baut es über denselben Weg des eigenen Builds wie `device runtime build` (der festgelegte
+Commit, Architektur, C-Bibliothek und CPU-Merkmale des Boards; offline nur aus einer aufbewahrten Quelle) und plant
+dann neu. Ohne Terminal hält es mit den Problemen des Plans an.
 
 ### bundle deploy
 
