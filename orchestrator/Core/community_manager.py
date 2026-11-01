@@ -683,6 +683,8 @@ class CommunityManager:
         self.community_dir = self.app_root / "community"
         self.knowledge_dir = self.community_dir / "knowledge"
         self.recipes_dir = self.community_dir / "recipes"
+        # board bundle building blocks (orchestrator/runtime/bundle/blocks.py community_dir: the same folder)
+        self.blocks_dir = self.community_dir / "blocks"
         self.contributions_dir = self.community_dir / "contributions"
         # The same folder the build engine and the target manager use.
         resolve = getattr(framework_manager, "resolve_path", None)
@@ -717,7 +719,8 @@ class CommunityManager:
         return PinnedDownloader(self._session, logger=self.logger, space=download_rule(ledger=ledger))
 
     def _install_root(self, kind: str) -> Path:
-        return {"target": self.targets_dir, "recipe": self.recipes_dir, "knowledge": self.knowledge_dir}[kind]
+        return {"target": self.targets_dir, "recipe": self.recipes_dir, "knowledge": self.knowledge_dir,
+                "block": self.blocks_dir}[kind]
 
     # --- index ------------------------------------------------------------------------------------------------
     @classmethod
@@ -1092,6 +1095,17 @@ class CommunityManager:
                        if p.is_dir() and not p.is_symlink() and not p.name.startswith((".", "_"))
                        and re.fullmatch(ID_PATTERN, p.name) and (p / "target.yml").is_file()), key=str.casefold)
 
+    def exportable_blocks(self) -> List[str]:
+        """The person's own board bundle blocks in community/blocks/ (a folder with block.yml and no provenance: an
+        installed pack is its author's to share), sorted: what `llm-cli zoo export block` can be asked for."""
+        from orchestrator.Core.community_pack import PROVENANCE_NAME
+        if not self.blocks_dir.is_dir():
+            return []
+        return sorted((p.name for p in self.blocks_dir.iterdir()
+                       if p.is_dir() and not p.is_symlink() and not p.name.startswith((".", "_"))
+                       and re.fullmatch(ID_PATTERN, p.name) and (p / "block.yml").is_file()
+                       and not (p / PROVENANCE_NAME).exists()), key=str.casefold)
+
     # --- install ----------------------------------------------------------------------------------------------
     def _new_quarantine(self, kind: str, pack_id: str) -> Path:
         # Inside the install folder, so the final rename stays on one file system (atomic).
@@ -1305,6 +1319,9 @@ class CommunityManager:
                 self._own_runner_note(root, notes)
             return (validate_target_folder(root) + snapshot
                     + self._check_licence_files(root, "target", licence_notes))
+        if manifest.kind == "block":   # a board bundle building block: block.yml and its guide, checked as a block
+            from orchestrator.runtime.bundle.blocks import check_block_folder
+            return check_block_folder(root)
         allowed = {RECIPE_FILE if manifest.kind == "recipe" else KNOWLEDGE_FILE, "README.md"}
         if manifest.kind == "knowledge":   # the licence texts and the NOTICE its pages need (_check_licence_files)
             allowed |= {licence_texts.NOTICE_NAME} | {n for n in names if n.startswith(licence_texts.LICENSES_DIR + "/")}
@@ -1696,6 +1713,8 @@ class CommunityManager:
                 pack_id, version = self._stage_target(str(source or ""), root, notes, shares, texts)
             elif kind == "recipe":
                 pack_id = self._stage_recipe(Path(str(source or "")), root, author, model_license, notes)
+            elif kind == "block":
+                pack_id, version = self._stage_block(str(source or ""), root, notes)
             else:
                 pack_id = pack_id or f"knowledge-{datetime.now():%Y%m%d}"
                 pages, left_out, shares = self.knowledge_share(root_urls)
@@ -1732,6 +1751,24 @@ class CommunityManager:
             return ExportResult(out, manifest, signature.key_id, changes, notes, encrypted, shares, texts)
         finally:
             remove_tree(staging)
+
+    def _stage_block(self, block_id: str, root: Path, notes: List[str]) -> Tuple[str, str]:
+        """The person's own board bundle block (community/blocks/<id>) into the export folder: block.yml and its
+        guide; its id and version from block.yml."""
+        from orchestrator.runtime.bundle.blocks import BLOCK_FILE, GUIDE_FILE, BlockError, parse_block
+        if block_id not in self.exportable_blocks():
+            raise PackError(f"No block of your own named '{block_id}' in {self.blocks_dir} (an installed block pack is "
+                            "shared by its author already).")
+        folder = self.blocks_dir / block_id
+        try:
+            block = parse_block((folder / BLOCK_FILE).read_text(encoding="utf-8"), folder)
+        except (BlockError, OSError, UnicodeDecodeError) as e:
+            raise PackError(f"The block {block_id} cannot be exported: {e}") from None
+        for name in (BLOCK_FILE, GUIDE_FILE):
+            if (folder / name).is_file():
+                shutil.copy2(folder / name, root / name, follow_symlinks=False)
+        notes.append("a block holds no program and no model: its guide names what the person picks for it")
+        return block.id, block.version
 
     def _stage_target(self, target_id: str, root: Path, notes: List[str], shares: List[PageShare],
                       texts: List[pack_licences.IncludedText]) -> Tuple[str, str]:

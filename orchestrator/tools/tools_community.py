@@ -53,7 +53,7 @@ REFRESH_EVERY = 3600.0          # index refreshes per client (the limits table: 
 QUARANTINE_TTL = 20 * 60.0      # a quarantined copy waits this long for the person (a pending approval: 15 minutes)
 INDEX_TEXT = "text from the pack index, not checked"
 PACK_TEXT = "from the pack's files, not checked"
-Kind = Literal["target", "recipe", "knowledge"]
+Kind = Literal["target", "recipe", "knowledge", "block"]
 
 
 # --- base images of a target pack ---------------------------------------------------------------------------------
@@ -923,7 +923,7 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                                 note="Moved to the trash: the person can restore it. Excerpts another pack or the "
                                      "person's own crawl still holds stay in the knowledge base.")
 
-    kind_field = FieldMeta(kind="choice", choices=("target", "recipe", "knowledge"))
+    kind_field = FieldMeta(kind="choice", choices=("target", "recipe", "knowledge", "block"))
     specs = [
         ToolSpec("list_packs", "List community packs",
                  "Packs of the signed community index (targets, recipes, knowledge) and the installed ones, with trust "
