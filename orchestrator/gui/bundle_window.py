@@ -414,12 +414,13 @@ class BundleWindow(BoardSteps, QDialog):
         except BundleError as e:
             self._info(self._t("boards.err.failed", reason=one_line(str(e))), "warning")
             return None
-        state, config = self.state_dir, getattr(self.framework, "config", None)
+        state, config, framework = self.state_dir, getattr(self.framework, "config", None), self.framework
         app_root, index = self._sources()
 
         def work():
             plan = service.plan_for_device(state, device_id, selection, config=config, app_root=app_root,
-                                           mode=framework_mode(config), allow_own=allow_own, index=index)
+                                           mode=framework_mode(config), allow_own=allow_own, index=index,
+                                           framework=framework)
             self._check_cancel()
             return plan
         return work
