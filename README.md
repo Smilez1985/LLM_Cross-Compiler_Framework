@@ -812,7 +812,9 @@ so today only pack files can be installed. Details: [docs/Features.md](docs/Feat
 
 - **Sandboxed builds:** conversion containers run as your user instead of root, without network access, without
   Linux capabilities, with `no-new-privileges`, a read-only image filesystem and a process limit; a memory limit
-  can be set. Models are downloaded on the host beforehand.
+  can be set. Models are downloaded on the host beforehand. Every build container runs the framework's own runtime
+  layer (its stage runner on a static busybox, checked against the shipped copy before every build), never a
+  target's own runner; a build that stopped with finished stages can be continued.
 - **Tool permissions and audit log:** Ditto and MCP clients act only through registered tools with risk
   categories. You decide what runs on its own, what asks and what is denied. Every call lands in an HMAC-chained
   audit log; `llm-cli tools audit --verify` detects changed or removed entries.
