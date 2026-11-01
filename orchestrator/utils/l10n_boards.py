@@ -65,6 +65,8 @@ TEXTS = {
         "bundle.btn.cancel": "Cancel",
         "bundle.need_board": "Choose a board first.",
         "bundle.need_bundle": "Choose a stored bundle first.",
+        "bundle.need_file_row": "Choose the file row first.",
+        "bundle.new.no_folder": "The framework's folder for community blocks is not known here.",
         "bundle.planning": "Planning the bundle",
         "bundle.building": "Building and signing the bundle",
         "bundle.built": "Built bundle {bundle} for board {device_id}. Deploy it from the list of stored bundles.",
@@ -503,10 +505,10 @@ TEXTS = {
     "de": {
         "boards.menu": "Boards",
         "boards.menu.devices": "Boards und Geräte...",
-        "boards.menu.bundle": "Board-Bundle...",
-        "bundle.title": "Board-Bundle",
+        "boards.menu.bundle": "Board-Bündel...",
+        "bundle.title": "Board-Bündel",
         "bundle.intro": "Wähle ein Board, eine Vorlage oder die Bausteine, ihre Variablen und Dateien, und sieh dir "
-                        "den Plan an, bevor etwas gebaut oder gesendet wird. Ein Bundle wird mit dem Schlüssel des "
+                        "den Plan an, bevor etwas gebaut oder gesendet wird. Ein Bündel wird mit dem Schlüssel des "
                         "Frameworks signiert; sein Installer auf dem Board führt die Schritte ohne Sonderrechte aus, "
                         "Root-Aktionen brauchen llmcf-install.",
         "bundle.board": "Board:",
@@ -527,13 +529,13 @@ TEXTS = {
         "bundle.col.sha256": "sha256 (online)",
         "bundle.col.size": "Größe in Bytes (online)",
         "bundle.col.licence": "Lizenz",
-        "bundle.files": "Dateien (eine lokale Datei wird gehasht und ins Bundle kopiert; ein Online-Element ist "
+        "bundle.files": "Dateien (eine lokale Datei wird gehasht und ins Bündel kopiert; ein Online-Element ist "
                         "festgelegt):",
         "bundle.var.bad": "{component}.{name}: {reason}",
         "bundle.var.ok": "{component}.{name} = {value}",
         "bundle.unprivileged": "Nur ohne Sonderrechte (keine Autostart-Unit, keine Root-Aktion)",
-        "bundle.store": "Gespeicherte Bundles:",
-        "bundle.col.bundle": "Bundle",
+        "bundle.store": "Gespeicherte Bündel:",
+        "bundle.col.bundle": "Bündel",
         "bundle.col.board": "Board",
         "bundle.col.components": "Komponenten",
         "bundle.col.mode": "Modus",
@@ -548,26 +550,28 @@ TEXTS = {
         "bundle.btn.status": "Status auf dem Board",
         "bundle.btn.rollback": "Zurückrollen...",
         "bundle.btn.uninstall": "Deinstallieren...",
-        "bundle.btn.delete": "Gespeicherte Bundles löschen...",
+        "bundle.btn.delete": "Gespeicherte Bündel löschen...",
         "bundle.btn.block_new": "Neuer Baustein...",
         "bundle.btn.refresh": "Aktualisieren",
         "bundle.btn.cancel": "Abbrechen",
         "bundle.need_board": "Wähle zuerst ein Board.",
-        "bundle.need_bundle": "Wähle zuerst ein gespeichertes Bundle.",
-        "bundle.planning": "Das Bundle wird geplant",
-        "bundle.building": "Das Bundle wird gebaut und signiert",
-        "bundle.built": "Bundle {bundle} für Board {device_id} gebaut. Rolle es aus der Liste der gespeicherten "
-                        "Bundles aus.",
+        "bundle.need_bundle": "Wähle zuerst ein gespeichertes Bündel.",
+        "bundle.need_file_row": "Wähle zuerst die Zeile der Datei.",
+        "bundle.new.no_folder": "Der Ordner des Frameworks für Community-Bausteine ist hier nicht bekannt.",
+        "bundle.planning": "Das Bündel wird geplant",
+        "bundle.building": "Das Bündel wird gebaut und signiert",
+        "bundle.built": "Bündel {bundle} für Board {device_id} gebaut. Rolle es aus der Liste der gespeicherten "
+                        "Bündel aus.",
         "bundle.not_built": "Nichts wurde gebaut: der Plan hat Probleme.",
         "bundle.own.ask": "Deine eigenen, nicht signierten Bausteine {blocks} verwenden? Niemand sonst hat sie "
                           "geprüft.",
         "bundle.running": "Der Installer läuft auf dem Board ({action})",
-        "bundle.ask.apply": "Bundle {bundle} ({size}) an Board {board} senden und seinen Installer dort ausführen? Er "
+        "bundle.ask.apply": "Bündel {bundle} ({size}) an Board {board} senden und seinen Installer dort ausführen? Er "
                             "installiert die Schritte ohne Sonderrechte; vor Root-Aktionen hält er an (sie brauchen "
                             "llmcf-install).",
-        "bundle.ask.uninstall": "Bundle {bundle} von Board {board} deinstallieren? Der Installer, den das Board "
-                                "behalten hat, entfernt nur die eigenen Schritte des Bundles, die neuesten zuerst.",
-        "bundle.ask.rollback": "Den letzten Lauf von Bundle {bundle} auf Board {board} zurückrollen? Der Installer, "
+        "bundle.ask.uninstall": "Bündel {bundle} von Board {board} deinstallieren? Der Installer, den das Board "
+                                "behalten hat, entfernt nur die eigenen Schritte des Bündels, die neuesten zuerst.",
+        "bundle.ask.rollback": "Den letzten Lauf von Bündel {bundle} auf Board {board} zurückrollen? Der Installer, "
                                "den das Board behalten hat, macht die Schritte seines letzten Apply rückgängig.",
         "bundle.dry_failed": "Der Probelauf des Installers hat nicht bestanden; nichts wurde geändert.",
         "bundle.unchanged": "Auf dem Board wurde nichts geändert.",
@@ -575,12 +579,12 @@ TEXTS = {
         "bundle.root": "Der Installer hat vor den Root-Aktionen angehalten: sie brauchen llmcf-install, den "
                        "Root-Helfer des Frameworks (noch nicht da). Baue die Variante ohne Sonderrechte, um sie zu "
                        "überspringen.",
-        "bundle.delete.title": "Gespeicherte Board-Bundles",
-        "bundle.delete.intro": "Hake die Bundles an, die aus dem Speicher dieses Frameworks gelöscht werden (nichts "
+        "bundle.delete.title": "Gespeicherte Board-Bündel",
+        "bundle.delete.intro": "Hake die Bündel an, die aus dem Speicher dieses Frameworks gelöscht werden (nichts "
                                "ist angehakt). Ein Board behält, was es installiert hat.",
-        "bundle.delete.reading": "Die gespeicherten Bundles werden gelesen",
-        "bundle.delete.deleting": "Die Bundles werden gelöscht",
-        "bundle.delete.none": "Kein gespeichertes Bundle zum Löschen.",
+        "bundle.delete.reading": "Die gespeicherten Bündel werden gelesen",
+        "bundle.delete.deleting": "Die Bündel werden gelöscht",
+        "bundle.delete.none": "Kein gespeichertes Bündel zum Löschen.",
         "bundle.new.title": "Neuer Baustein",
         "bundle.new.intro": "Legt deinen eigenen Baustein (block.yml und seine Anleitung README.md) in "
                             "community/blocks/ an. Er ist nicht signiert: der private Modus fragt, bevor er verwendet "

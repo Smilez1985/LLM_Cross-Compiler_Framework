@@ -28,7 +28,7 @@ from orchestrator.Core.job_service import JOB_KINDS
 WINDOW_IDS: Tuple[str, ...] = (
     "builder", "deployment", "build_history", "targets", "boards", "settings", "trash", "knowledge_sources",
     "knowledge_snapshots", "community_hub", "hf_browser", "ditto_runtime", "ditto_models", "mojo", "approvals",
-    "proposals", "ai_settings", "tool_permissions", "module_wizard", "chat")
+    "proposals", "ai_settings", "tool_permissions", "module_wizard", "chat", "board_bundle")
 WINDOW_ID_RE = "^(?:" + "|".join(WINDOW_IDS) + ")$"
 
 # A step of the next-step catalogue (orchestrator/utils/next_steps, chain a0) by its id only: "<area>.<name>", e.g.
@@ -113,6 +113,7 @@ WINDOW_OPENERS: Dict[str, str] = {
     "build_history": "act_build_history",
     "targets": "act_build_targets",
     "boards": "act_boards_devices",
+    "board_bundle": "act_boards_bundle",
     "settings": "act_file_settings",
     "trash": "act_file_trash",
     "knowledge_sources": "act_knowledge_sources",

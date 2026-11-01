@@ -2390,6 +2390,12 @@ files, a plan checked against the board's probe, a bundle signed with the framew
 and its installer on the board. `DEVICE` is a stored board as in [`device`](#device); `BUNDLE` is a bundle's ID as
 `bundle list` shows it.
 
+In the GUI: **Boards > Board bundle...**: the board, a preset and the building blocks, a table of the variables (each
+checked against its type as you type it) and one of the files (**Choose file...**, or an https address with its
+sha256 and size), **Plan**, **Build...**, the stored bundles with **Dry run on the board**, **Deploy...**, **Status on
+the board**, **Roll back...**, **Uninstall...** and **Delete stored bundles...**, and **New block...**; the same steps
+and questions as here, each board run in the background with **Cancel**.
+
 ```
 llm-cli bundle plan DEVICE [--preset llm|voice|stt] [--block ID]... [--set COMPONENT.NAME=VALUE]...
                     [--file COMPONENT.ROLE=PATH]... [--online COMPONENT.ROLE=URL --sha256 COMPONENT.ROLE=HEX

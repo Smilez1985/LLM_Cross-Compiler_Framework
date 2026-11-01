@@ -207,7 +207,8 @@ TEXTS = {
         "zoo.export.kind.knowledge": "My knowledge base",
         "zoo.export.kind.block": "A board bundle building block of my own",
         "zoo.export.block": "Block:",
-        "zoo.export.no_blocks": "There is no block of your own to export yet.",
+        "zoo.export.no_blocks": "There is no block of your own to export yet; make one with New block... in "
+                                 "{path:act_boards_bundle}.",
         "zoo.export.choose_block": "Choose a block first.",
         "zoo.export.target": "Target:",
         "zoo.export.no_targets": "There is no target folder to export.",
@@ -489,7 +490,8 @@ TEXTS = {
         "zoo.export.kind.knowledge": "Meine Wissensdatenbank",
         "zoo.export.kind.block": "Ein eigener Baustein für das Board-Bundle",
         "zoo.export.block": "Baustein:",
-        "zoo.export.no_blocks": "Es gibt noch keinen eigenen Baustein zum Exportieren.",
+        "zoo.export.no_blocks": "Es gibt noch keinen eigenen Baustein zum Exportieren; lege einen mit Neuer "
+                                 "Baustein... in {path:act_boards_bundle} an.",
         "zoo.export.choose_block": "Wähle zuerst einen Baustein.",
         "zoo.export.target": "Target:",
         "zoo.export.no_targets": "Es gibt keinen Target-Ordner zum Exportieren.",

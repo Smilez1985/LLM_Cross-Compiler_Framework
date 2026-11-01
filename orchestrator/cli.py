@@ -7345,20 +7345,19 @@ def bundle_list(ctx: FrameworkContext, as_json: bool):
 
 
 def _bundle_board(ctx: FrameworkContext, built):
-    """(state dir, device ID, host, port, user) of the board a stored bundle was made for."""
-    from orchestrator.runtime.device.person_steps import board_address
-    state_dir, store, device_id, _profile = _device_context(ctx, built.manifest.board.device_id)
-    settings = _deploy_settings(store, device_id)
-    if settings.ssh_user is None:
-        console.print(f"[red]No SSH user is set for device {device_id}: llm-cli device settings {device_id} --user "
-                      "NAME.[/red]")
-        sys.exit(1)
+    """(state dir, device ID, host, port, user, label) of the board a stored bundle was made for
+    (service.board_contact); exits with the reason when it cannot be reached as the person's deploy user."""
+    from orchestrator.runtime.bundle.generator import BundleError
+    from orchestrator.runtime.bundle.service import board_contact
+    state_dir, _store, device_id, _profile = _device_context(ctx, built.manifest.board.device_id)
     try:
-        host, port = board_address(store, device_id)
-    except ValueError as e:
+        host, port, user, label = board_contact(state_dir, device_id)
+    except BundleError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
+        if "No SSH user" in str(e):
+            console.print(f"[red]Set it with llm-cli device settings {device_id} --user NAME.[/red]")
         sys.exit(1)
-    return state_dir, device_id, host, port, settings.ssh_user
+    return state_dir, device_id, host, port, user, label
 
 
 def _bundle_run(ctx: FrameworkContext, bundle_id: str, action: str, *, ask: bool = False):
@@ -7369,7 +7368,7 @@ def _bundle_run(ctx: FrameworkContext, bundle_id: str, action: str, *, ask: bool
     from orchestrator.runtime.bundle.generator import BundleError
     from orchestrator.runtime.device.remote import RemoteError
     store, built = _bundle_get(ctx, bundle_id)
-    state_dir, device_id, host, port, user = _bundle_board(ctx, built)
+    state_dir, device_id, host, port, user, label = _bundle_board(ctx, built)
 
     def run(what: str):
         def open_session():
@@ -7391,7 +7390,7 @@ def _bundle_run(ctx: FrameworkContext, bundle_id: str, action: str, *, ask: bool
         if not first.ok:
             console.print("[red]The installer's dry run did not pass; nothing was changed.[/red]")
             sys.exit(1)
-        if not (_interactive() and click.confirm(service.question(action, built, device_id), default=False)):
+        if not (_interactive() and click.confirm(service.question(action, built, label), default=False)):
             console.print("Nothing was changed on the board"
                           + ("" if _interactive() else " (it needs your answer at a terminal)") + ".")
             return None

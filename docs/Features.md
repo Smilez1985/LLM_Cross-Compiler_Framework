@@ -648,7 +648,8 @@ plain words that they need llmcf-install, the framework's root helper, which is 
 unprivileged-only variant (no autostart unit). A deploy, an uninstall and a rollback ask you first ("No" is the
 default); stored bundles are deleted only from the full list you tick, into the trash or for good.
 
-At the command line: [`llm-cli bundle`](CLI_Usage.md#bundle).
+In the GUI: **Boards > Board bundle...**; at the command line: [`llm-cli bundle`](CLI_Usage.md#bundle). When you
+have no block of your own yet, the Community Hub's export points to **New block...** there.
 
 ## Ditto, the assistant
 

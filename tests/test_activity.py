@@ -132,7 +132,7 @@ class TestWindowVocabulary:
 
     def test_window_ids_are_one_closed_list_that_holds_the_gui_tools_windows(self):
         from orchestrator.tools.tools_gui import WINDOWS
-        assert len(WINDOW_IDS) == len(set(WINDOW_IDS)) == 20
+        assert len(WINDOW_IDS) == len(set(WINDOW_IDS)) == 21
         assert set(WINDOWS) <= set(WINDOW_IDS), "show_window's ids are a part of the one list"
         for window in WINDOW_IDS:
             assert re.fullmatch(tool_windows.WINDOW_ID_RE, window)
