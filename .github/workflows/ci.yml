@@ -165,6 +165,82 @@ jobs:
           path: ${{ runner.temp }}/runtime-toolbox
           if-no-files-found: error
 
+  rust:
+    # The Rust workspace (rust/): llmcf-install, the board bundle's root helper, and llmcf-setpriv. The toolchain is
+    # the one rust/rust-toolchain.toml pins (rustup on the runner installs it with its three musl targets); the
+    # release programs are static musl binaries linked with the toolchain's own rust-lld (rust/.cargo/config.toml).
+    # The release build of llmcf-install must refuse the test mode (--root, only under the cargo feature test-root),
+    # and the framework's tests of llmcf-install run against the test build on a fake board.
+    name: Rust (fmt, clippy, tests, static musl builds, cargo-deny)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: rust
+    env:
+      CARGO_TERM_COLOR: never
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The pinned toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+
+      - name: cargo clippy (warnings are errors)
+        run: |
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo clippy --locked -p llmcf-install --all-targets --features test-root -- -D warnings
+
+      - name: cargo test (the test build of llmcf-install against a fake root prefix)
+        run: cargo test --locked --workspace --features llmcf-install/test-root
+
+      - name: Static musl release builds (x86_64, aarch64, armv7)
+        run: |
+          for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl armv7-unknown-linux-musleabihf; do
+            cargo build --locked --release -p llmcf-install --target "$target"
+          done
+
+      - name: Every release program is static
+        run: |
+          for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl armv7-unknown-linux-musleabihf; do
+            program="target/$target/release/llmcf-install"
+            file "$program"
+            if readelf -lW "$program" | grep -q INTERP; then echo "$program has a program interpreter" >&2; exit 1; fi
+            if readelf -dW "$program" | grep -q NEEDED; then echo "$program needs shared libraries" >&2; exit 1; fi
+          done
+
+      - name: The release program refuses the test mode
+        run: |
+          set +e
+          out="$(./target/x86_64-unknown-linux-musl/release/llmcf-install --root /tmp plan llm-test 2>&1)"
+          code=$?
+          set -e
+          echo "$out"
+          [ "$code" -eq 2 ] && echo "$out" | grep -q "no test mode"
+
+      - name: cargo-deny (pinned version)
+        run: |
+          cargo install --locked cargo-deny --version =0.19.9
+          cargo deny --manifest-path Cargo.toml check
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+          # pip cache off for now: the account's cache and egress quota ran out and a job hung at the cache restore
+
+      - name: The framework's tests of llmcf-install with the test build
+        working-directory: .
+        run: |
+          python -m pip install --no-deps -r requirements.txt -r requirements-dev.txt
+          cargo build --locked --manifest-path rust/Cargo.toml -p llmcf-install --features test-root
+          LLMCF_INSTALL_TEST_BIN="$GITHUB_WORKSPACE/rust/target/debug/llmcf-install" \
+            python -m pytest -ra tests/test_llmcf_install.py tests/test_board_bundle.py
+
   test-headless:
     # The install without the optional extra 'gui' (DECISIONS round 11, A3): a headless or server install and the
     # framework image without --gui. No PySide6 and no Qt libraries: the Qt-free checks (tests/test_qt_free_core.py:
