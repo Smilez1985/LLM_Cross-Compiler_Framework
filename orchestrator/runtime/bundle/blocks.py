@@ -22,7 +22,6 @@ mode takes every block, an own unsigned one after a plain warning (generator.pla
 
 import json
 import re
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -330,22 +329,34 @@ def check_block_folder(folder: Path) -> List[str]:
     return problems
 
 
-def _provenance_trust(folder: Path) -> str:
+def _provenance_trust(folder: Path, index: Any = None) -> Tuple[str, str]:
+    """(trust, note) of a block in community/blocks/ from its install record (.lcf-provenance.json, written by
+    CommunityManager.finish_install): "revoked" when the verified cached index `index`
+    (CommunityManager.cached_index(revocations=True)) revokes it; indexed or signed only while the folder is exactly
+    what was installed (the rule of Provenance.installed_unchanged: tree_sha256 of the folder is the record's
+    content_sha256 or local_sha256); a block changed since its install is the person's own, with a note.
+    The record is read here as plain JSON, not through community_manager.read_provenance: community_manager imports
+    this module for its block check, and the layering test counts that loop."""
     from orchestrator.Core.community_pack import PROVENANCE_NAME
     path = folder / PROVENANCE_NAME
-    if not path.is_file():
-        return "own"
+    if path.is_symlink() or not path.is_file():
+        return "own", ""
     try:
         prov = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return "own"
-    if not isinstance(prov, dict) or prov.get("kind") != "block":
-        return "own"
+        return "own", ""
+    if not isinstance(prov, dict) or prov.get("kind") != "block" or prov.get("id") != folder.name:
+        return "own", ""
+    if index is not None and index.revocation("block", prov.get("id"), prov.get("version"),
+                                              prov.get("pack_sha256")) is not None:
+        return "revoked", f"block {folder.name}: revoked in the signed index; not used"
+    digest = _tree_sha256(folder)
+    if digest not in {prov.get("content_sha256"), prov.get("local_sha256")} - {None, ""}:
+        return "own", (f"block {folder.name}: changed since it was installed; it counts as your own block (install "
+                       "it again to use it as installed)")
     if prov.get("trust") in ("verified", "community"):
-        return "indexed"
-    if prov.get("trust") == "revoked":
-        return "revoked"
-    return "signed" if prov.get("signer") else "own"
+        return "indexed", ""
+    return ("signed" if prov.get("signer") else "own"), ""
 
 
 def community_dir(app_root: Optional[Path]) -> Optional[Path]:
@@ -366,7 +377,10 @@ class BlockCatalog:
         return [b for b in self.blocks.values() if b.ready]
 
 
-def load_catalog(app_root: Optional[Path] = None, *, builtin: Path = BUILTIN_DIR) -> BlockCatalog:
+def load_catalog(app_root: Optional[Path] = None, *, builtin: Path = BUILTIN_DIR, index: Any = None) -> BlockCatalog:
+    """The block catalog (BlockCatalog). `index`: the verified cached community index with its revocations, when the
+    caller has one (CommunityManager.cached_index(revocations=True)); a block it revokes is listed in the notes and
+    not used."""
     blocks: Dict[str, Block] = {}
     notes: List[str] = []
     for root, trust in ((builtin, "framework"), (community_dir(app_root), None)):
@@ -377,9 +391,10 @@ def load_catalog(app_root: Optional[Path] = None, *, builtin: Path = BUILTIN_DIR
                 if trust is None and check_block_folder(folder):
                     notes.append(f"block {folder.name}: " + "; ".join(check_block_folder(folder))[:300])
                     continue
-                found = trust or _provenance_trust(folder)
+                found, note = (trust, "") if trust else _provenance_trust(folder, index)
+                if note:
+                    notes.append(note)
                 if found == "revoked":
-                    notes.append(f"block {folder.name}: revoked in the signed index; not used")
                     continue
                 block = parse_block((folder / BLOCK_FILE).read_text(encoding="utf-8"), folder, found,
                                     _tree_sha256(folder))
@@ -451,7 +466,8 @@ def new_block(dest_root: Path, block_id: str, *, kind: str, title: str, summary:
                                                              summary=clean_summary or "What this block runs."),
                                        encoding="utf-8")
     except OSError:
-        shutil.rmtree(dest, ignore_errors=True)
+        from orchestrator.utils.atomic import remove_tree
+        remove_tree(dest)   # the framework's own unfinished folder (utils/atomic.remove_tree)
         raise
     return dest
 

@@ -24,7 +24,7 @@ from orchestrator.remote.transport import Result
 from orchestrator.runtime.bundle import blocks as blk
 from orchestrator.runtime.bundle import generator as gen
 from orchestrator.runtime.bundle import installer as inst
-from orchestrator.runtime.bundle.manifest import (BundleManifest, ManifestError, StartSpec, check_value,
+from orchestrator.runtime.bundle.manifest import (ManifestError, StartSpec, check_value,
                                                   load_manifest)
 from orchestrator.runtime.device import board_ops  # noqa: F401 - defines every board operation
 from orchestrator.runtime.profile import parse_profile, read_profile
@@ -592,3 +592,133 @@ def test_a_block_is_published_and_installed_as_a_signed_community_pack(tmp_path)
     assert len(blk.check_block_folder(bad)) == 2
     with pytest.raises(PackError):
         manager.export_pack("block", "nope", author="tester", out_dir=tmp_path / "out")
+
+
+# --- review findings (bundle-gen-v): regression tests -----------------------------------------------------------------
+
+def _indexed_block(app: Path, block_id: str = "stt-indexed") -> Path:
+    """An own block made into one installed from the signed index (its provenance as the install writes it)."""
+    from orchestrator.Core.community_manager import Provenance
+    from orchestrator.Core.community_pack import PROVENANCE_NAME, tree_sha256
+    folder = blk.new_block(app / "community" / "blocks", block_id, kind="stt", title="Indexed",
+                           template="stt-whisper-cpp")
+    prov = Provenance(kind="block", id=block_id, version="1.0.0", trust="verified", source="index",
+                      pack_sha256="a" * 64, content_sha256=tree_sha256(folder), author="tester",
+                      installed_at="2026-11-01T00:00:00Z")
+    (folder / PROVENANCE_NAME).write_text(prov.to_json(), encoding="utf-8")
+    return folder
+
+
+def test_an_indexed_block_changed_after_its_install_is_no_longer_indexed(tmp_path):
+    """Enterprise mode takes indexed blocks because the signed index checked them; a block.yml changed after the
+    install is no longer what the index checked, so it counts as the person's own (and enterprise mode refuses it)."""
+    app = tmp_path / "app"
+    folder = _indexed_block(app)
+    assert blk.load_catalog(app).get("stt-indexed").trust == "indexed"
+    spec = folder / blk.BLOCK_FILE
+    spec.write_text(spec.read_text().replace("default: 8090", "default: 8091"), encoding="utf-8")
+    changed = blk.load_catalog(app)
+    assert changed.get("stt-indexed").trust == "own"
+    assert any("changed since" in n for n in changed.notes), changed.notes
+    selection = _selection(tmp_path, blocks=["stt-indexed"])
+    del selection.files["llm"]
+    enterprise = _plan(tmp_path, selection, app_root=app, mode="enterprise")
+    assert any("enterprise mode takes only" in p for p in enterprise.problems), enterprise.problems
+
+
+def test_a_plans_labels_leave_out_every_account_variable_whatever_its_name(tmp_path):
+    app = tmp_path / "app"
+    folder = blk.new_block(app / "community" / "blocks", "stt-acct", kind="stt", title="Acct",
+                           template="stt-whisper-cpp")
+    spec = folder / blk.BLOCK_FILE
+    spec.write_text(spec.read_text().replace("name: user", "name: account"), encoding="utf-8")
+    selection = _selection(tmp_path, blocks=["stt-acct"], values={"stt": {"account": "jdoe"}})
+    del selection.files["llm"]
+    plan = _plan(tmp_path, selection, app_root=app, allow_own=True)
+    assert plan.ok, plan.problems
+    assert plan.manifest.components[0].variables["account"] == "jdoe"
+    assert "jdoe" not in json.dumps(plan.labels())
+
+
+@POSIX
+@VERIFIER
+def test_the_installers_words_name_no_path_of_the_board(tmp_path):
+    """A stopped run's lock: the installer's report names the bundle's own folder, never the account's home."""
+    from orchestrator.runtime.bundle.board import run_bundle
+    board = _fake_board(tmp_path, "root")
+    store, built = _built(tmp_path, board)
+    (board.home / inst.BUNDLE_REL / "voice-test" / ".state" / ".lock").mkdir(parents=True)
+    run = run_bundle(GateShell(board), built, "apply")
+    assert run.report.result == "refused" and ".lock" in run.report.detail, run.lines()
+    assert str(board.home) not in "\n".join(run.lines()) and "/" + inst.BUNDLE_REL not in run.report.detail
+
+
+def _cut_apply(tmp_path, board, store, built, shell):
+    from orchestrator.runtime.bundle.board import run_bundle
+    shim = tmp_path / "shim"
+    shim.mkdir()
+    real_cp = shutil.which("cp")
+    (shim / "cp").write_text(f'#!/bin/sh\ncase "$*" in *whisper-server*) exit 1 ;; esac\nexec {real_cp} "$@"\n')
+    (shim / "cp").chmod(0o755)
+    old = os.environ["PATH"]
+    os.environ["PATH"] = f"{shim}{os.pathsep}{old}"
+    try:
+        return run_bundle(shell, built, "apply", store=store, device_id=DEVICE)
+    finally:
+        os.environ["PATH"] = old
+
+
+@POSIX
+@VERIFIER
+def test_a_first_apply_cut_off_can_be_uninstalled(tmp_path):
+    """The board keeps the signed installer as soon as an apply starts changing things, so a first deploy that
+    stopped in a step can still be rolled back or uninstalled (not only continued)."""
+    from orchestrator.runtime.bundle.board import run_bundle
+    board = _fake_board(tmp_path, "root")
+    store, built = _built(tmp_path, board)
+    shell = GateShell(board)
+    cut = _cut_apply(tmp_path, board, store, built, shell)
+    assert cut.report.result == "failed" and cut.report.count("done") > 0, cut.lines()
+    removed = run_bundle(shell, built, "uninstall")
+    assert removed.report.result == "ok", removed.lines()
+    assert not (board.home / inst.BUNDLE_REL / "voice-test").exists()
+
+
+class CountingShell(GateShell):
+    def __init__(self, board):
+        super().__init__(board)
+        self.uploaded = []
+
+    def upload(self, path, remote, sha):
+        self.uploaded.append(remote.rsplit("/", 1)[-1])
+        super().upload(path, remote, sha)
+
+
+@POSIX
+@VERIFIER
+def test_a_second_apply_does_not_send_the_files_the_board_holds_already(tmp_path):
+    """One click again on an installed bundle: the board's installer says what is in place, and those files (models
+    of several GB) are not sent again; the run changes nothing."""
+    from orchestrator.runtime.bundle.board import run_bundle
+    board = _fake_board(tmp_path, "root")
+    store, built = _built(tmp_path, board)
+    first = CountingShell(board)
+    assert run_bundle(first, built, "apply", store=store, device_id=DEVICE).report.result == "ok"
+    payload = {name for name, _path, _entry in built.payload()}
+    assert payload <= set(first.uploaded)
+    again = CountingShell(board)
+    run = run_bundle(again, built, "apply", store=store, device_id=DEVICE)
+    assert run.report.result == "ok" and run.report.changed == 0, run.lines()
+    assert not payload & set(again.uploaded), again.uploaded
+
+
+def test_a_block_the_signed_index_revoked_is_not_used(tmp_path):
+    app = tmp_path / "app"
+    _indexed_block(app)
+
+    class Index:
+        def revocation(self, kind, pack_id, version, sha256):
+            return object() if (kind, pack_id) == ("block", "stt-indexed") else None
+    catalog = blk.load_catalog(app, index=Index())
+    assert catalog.get("stt-indexed") is None and any("revoked" in n for n in catalog.notes), catalog.notes
+    assert blk.load_catalog(app).get("stt-indexed").trust == "indexed"

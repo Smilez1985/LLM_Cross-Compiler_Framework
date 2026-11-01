@@ -42,14 +42,18 @@ def device_profile(state_dir: Path, device_id: str):
 
 def plan_for_device(state_dir: Path, device_id: str, selection: gen.Selection, *, config: Any = None,
                     app_root: Optional[Path] = None, mode: str = "private", allow_own: bool = False,
-                    runtime: Optional[gen.RuntimePackage] = None, profile: Any = None) -> gen.BundlePlan:
-    """plan_bundle for a stored board: its probe, the block catalog of this framework, its runtime package."""
+                    runtime: Optional[gen.RuntimePackage] = None, profile: Any = None,
+                    index: Any = None) -> gen.BundlePlan:
+    """plan_bundle for a stored board: its probe, the block catalog of this framework (`index`: the verified cached
+    community index, CommunityManager.cached_index(revocations=True), so a revoked block is not used), its runtime
+    package."""
     profile = profile or device_profile(state_dir, device_id)
+    catalog = blk.load_catalog(app_root, index=index)
     needs_runtime = any(need.source == "runtime" for bid in selection.blocks
-                        for need in getattr(blk.load_catalog(app_root).get(bid), "files", ()))
+                        for need in getattr(catalog.get(bid), "files", ()))
     if runtime is None and needs_runtime:
         runtime = runtime_for(state_dir, device_id, profile)
-    return gen.plan_bundle(selection, catalog=blk.load_catalog(app_root), profile=profile, device_id=device_id,
+    return gen.plan_bundle(selection, catalog=catalog, profile=profile, device_id=device_id,
                            runtime=runtime, config=config, mode=mode, allow_own=allow_own)
 
 

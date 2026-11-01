@@ -29,7 +29,6 @@ boards.json (where each board's upload stands, for a deploy that continues).
 import json
 import os
 import re
-import shutil
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -122,6 +121,8 @@ class BundlePlan:
     warnings: List[str] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
     own_blocks: List[str] = field(default_factory=list)
+    # per component, the names of its account variables (type user): never in labels(), whatever the block calls them
+    accounts: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
     memory_mb: int = 0
     board_memory_mb: Optional[int] = None
 
@@ -140,7 +141,8 @@ class BundlePlan:
         comps = []
         for comp in (self.manifest.components if self.manifest else ()):
             comps.append({"id": comp.id, "block": comp.block, "kind": comp.kind, "trust": comp.block_trust,
-                          "variables": {k: v for k, v in comp.variables.items() if k != "user"},
+                          "variables": {k: v for k, v in comp.variables.items()
+                                        if k != "user" and k not in self.accounts.get(comp.id, ())},
                           "files": [{"role": f.role, "format": f.format, "size": f.size, "source": f.source,
                                      "licence": f.licence} for f in comp.files]})
         roots = [a.action for a in (self.manifest.root_actions if self.manifest else ())]
@@ -318,6 +320,7 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
     memory = 0
     for comp_id, block in zip(_component_ids(blocks), blocks):
         given = dict(selection.values.get(comp_id) or {})
+        plan.accounts[comp_id] = tuple(v.name for v in block.variables if v.type == "user")
         values: Dict[str, Any] = {}
         for var in block.variables:
             raw = given.pop(var.name, var.default)
@@ -636,7 +639,8 @@ def build_bundle(plan: BundlePlan, store: BundleStore, signer: Any, *, ledger: A
             pass
         os.replace(tmp, dest)
     except BaseException:
-        shutil.rmtree(tmp, ignore_errors=True)
+        from orchestrator.utils.atomic import remove_tree
+        remove_tree(tmp)   # the framework's own unfinished folder (utils/atomic.remove_tree)
         raise
     return BuiltBundle(dest, manifest, msha)
 

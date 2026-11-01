@@ -30,7 +30,8 @@ Exit status: 0 done, 3 refused or failed, 4 stopped before root actions.
 
 The layout on the board, in the account's home: ~/.local/share/llm-framework/bundle/<bundle id>/components/<component>
 (the files, the unpacked runtime, start.sh), .state/ (step markers, the journal, the last run, a lock), .kept/ (the
-signed installer, steps and manifest of the last apply, for status, rollback and uninstall later).
+signed installer, steps and manifest of the last apply, kept before its first step, for status, rollback and
+uninstall later, also after a run that was cut off).
 """
 
 import re
@@ -278,7 +279,7 @@ what_of() {
 # --- the actions
 lock() {
   mkdir -p "$S" || stop failed "the state folder cannot be made"
-  mkdir "$S/.lock" 2>/dev/null || stop refused "another run of this bundle's installer is going on (or one stopped: remove $S/.lock)"
+  mkdir "$S/.lock" 2>/dev/null || stop refused "another run of this bundle's installer is going on (or one stopped: remove the folder .state/.lock in the bundle's folder $bid on the board)"
   trap 'rmdir "$S/.lock" 2>/dev/null' EXIT
 }
 
@@ -407,11 +408,13 @@ case $act in
     precheck
     lock
     : > "$S/last-run"
-    each_step
-    mkdir -p "$K" && for f_ in install.sh steps.tsv manifest.json; do
-      cp -- "$run/$f_" "$K/$f_.part" && mv -f "$K/$f_.part" "$K/$f_"
+    # kept before the first step changes anything: a run cut off can be rolled back or uninstalled, not only continued
+    mkdir -p "$K" || stop failed "the installer could not be kept on the board (nothing was changed)"
+    for f_ in install.sh steps.tsv manifest.json; do
+      cp -- "$run/$f_" "$K/$f_.part" && mv -f "$K/$f_.part" "$K/$f_" || stop failed "the installer could not be kept on the board (nothing was changed)"
       if [ -f "$run/$f_.sig" ]; then cp -- "$run/$f_.sig" "$K/$f_.sig.part" && mv -f "$K/$f_.sig.part" "$K/$f_.sig"; fi
     done
+    each_step
     if [ "$roots" -gt 0 ] && [ "$mode" = full ]; then
       stop stopped-root "the unprivileged steps are done; the $roots root action(s) above need llmcf-install, the framework's root helper (not part of this installer). Choose the unprivileged-only variant to skip them" 4
     fi
