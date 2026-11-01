@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Finding a stored device (by its ID, its label or its address) and its SSH address."""
 
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from orchestrator.remote.address import Endpoint
 from orchestrator.runtime.profile import DEVICE_ID, ProfileStore
@@ -42,4 +42,10 @@ def split_address(address: Optional[str]) -> Tuple[str, int]:
     return endpoint.host, endpoint.port
 
 
-__all__ = ["DeviceNotFound", "resolve_device", "split_address"]
+def board_address(store: Any, device_id: str) -> Tuple[str, int]:
+    """(host, port) of a stored board from its stored address; ValueError when it has none or it is not host[:port].
+    The one reader (person_steps.board_address delegates here, so a module an AI can reach needs no person step)."""
+    return split_address(store.device_info(device_id).get("address"))
+
+
+__all__ = ["DeviceNotFound", "board_address", "resolve_device", "split_address"]

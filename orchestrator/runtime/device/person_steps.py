@@ -456,8 +456,8 @@ def change_settings(store: Any, device_id: str, profile: Any, current: Any, chan
 def board_address(store: Any, device_id: str) -> Tuple[str, int]:
     """(host, port) of a stored board from its stored address; ValueError when it has none or it is not
     host[:port]."""
-    from orchestrator.runtime.device.devices import split_address
-    return split_address(store.device_info(device_id).get("address"))
+    from orchestrator.runtime.device.devices import board_address as stored_address
+    return stored_address(store, device_id)
 
 
 def connect_stored(state_dir: Path, device_id: str, host: str, port: int, user: str,

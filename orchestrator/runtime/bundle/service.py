@@ -180,7 +180,8 @@ def board_contact(state_dir: Path, device_id: str) -> Tuple[str, int, str, str]:
     and the Board bundle window log in with person_steps.connect_stored and the framework's key only; this module
     never logs in). gen.BundleError with the person's words when the board has no stored probe, no SSH user in its
     deploy settings or no usable address."""
-    from orchestrator.runtime.device.person_steps import board_address
+    # devices.board_address, not person_steps: no module an AI can reach imports the person's trust writers
+    from orchestrator.runtime.device.devices import board_address
     from orchestrator.runtime.device.settings import DeploySettings, SettingsError
     from orchestrator.runtime.profile import ProfileStore
     store = ProfileStore(Path(state_dir))
