@@ -1,0 +1,18 @@
+[package]
+name = "llmcf-install"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+publish = false
+description = "The root helper of the LLM Cross-Compiler Framework's board bundle: typed root actions from the signed manifest"
+
+[features]
+# Compiled only for the tests (cargo test --features test-root): the --root PREFIX test mode. Release builds never
+# enable it, and CI checks that the release binary refuses --root.
+test-root = []
+
+[dependencies]
+ed25519-dalek = { version = "=2.1.1", default-features = false, features = ["std"] }
+sha2 = { version = "=0.10.8", default-features = false, features = ["std"] }
+serde_json = { version = "=1.0.128", default-features = false, features = ["std"] }
