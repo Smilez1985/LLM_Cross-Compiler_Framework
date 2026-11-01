@@ -172,7 +172,14 @@ python -m pytest
   Exit-Codes), und prüft den Stage-Runner des Frameworks (`runner.sh` der Laufzeit-Schicht): Reihenfolge der Stufen, Marken
   zum Fortsetzen, Fortschrittszeilen, die `stages:`-Plätze und dass keine Stufe einen Benchmark ausführt.
   `tests/test_target_template.py` prüft die Stufenmodule der Vorlage über denselben Runner und
-  `tests/test_runtime_layer.py` die Schicht selbst (die CI auch mit den echten statischen Werkzeugen). `tests/test_convert_stage.py` prüft, was die Stufe convert um jede Umwandlung herum tut
+  `tests/test_runtime_layer.py` die Schicht selbst (die CI auch mit den echten statischen Werkzeugen, ein zweites Mal
+  mit dem eigenen llmcf-setpriv des Frameworks als uid-Wechsel der Schicht: `LLMCF_TEST_LAYER_SETPRIV=<Pfad>` tut
+  dasselbe auf deinem Rechner, als root). Die Rust-Werkzeuge liegen im Cargo-Workspace `rust/` (Toolchain festgelegt
+  in `rust/rust-toolchain.toml`, `Cargo.lock` eingecheckt): `cargo test --locked` dort führt die Optionstests von
+  llmcf-setpriv aus, und seine Wechseltests (`rust/llmcf-setpriv/tests/as_root.rs`) laufen nur als root unter Linux;
+  die statischen Builds nehmen `CARGO_TARGET_<ZIEL>_LINKER=rust-lld` und brauchen keine C-Cross-Toolchain. Releases
+  dieser Werkzeuge entstehen nur aus einem gepushten Tag `tools-v<Version>` (`.github/workflows/release-tools.yml`).
+  `tests/test_convert_stage.py` prüft, was die Stufe convert um jede Umwandlung herum tut
   (`scripts/model_check.py`, dieselbe Datei in jedem Target): Erkennen des Formats und Ablehnungen, die
   Integritätsprüfungen der Eingabe und des geschriebenen GGUF, die Statistik in `build_info.json`, den
   Funktionstest sowie Sicherungen und Aufräumen bei einem Fehler; `tests/model_files.py` schreibt die kleinen

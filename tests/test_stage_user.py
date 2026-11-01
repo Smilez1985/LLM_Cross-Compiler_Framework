@@ -168,7 +168,10 @@ class RunnerBox:
         shutil.copytree(LAYER, self.layer, ignore=shutil.ignore_patterns("toolbox", "MANIFEST.sha256"))
         (self.layer / "bin").mkdir()
         (self.layer / "bin" / "busybox").write_text(STAND_IN_BUSYBOX, encoding="utf-8")
-        shutil.copy2(shutil.which("setpriv") or "/usr/bin/setpriv", self.layer / "bin" / "setpriv")
+        # the layer's uid switch: this computer's setpriv, or the program LLMCF_TEST_LAYER_SETPRIV names (the CI job
+        # "Runtime layer tools" runs these tests a second time with the static llmcf-setpriv)
+        shutil.copy2(os.environ.get("LLMCF_TEST_LAYER_SETPRIV") or shutil.which("setpriv") or "/usr/bin/setpriv",
+                     self.layer / "bin" / "setpriv")
         for path in [self.layer, *self.layer.rglob("*")]:
             os.chmod(path, 0o755)
         self.app = self.root / "app"

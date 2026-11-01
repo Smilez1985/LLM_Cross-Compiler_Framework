@@ -230,9 +230,10 @@ parts move only when a measurement shows a gain (maintainer decision of 2026-10-
     `target.yml` (with its `stages:` slots) and the Dockerfile. The stage runner is never among them: it is the
     framework's runtime layer, the same for every target. Why: vendor paths and flags can be finished before the
     module is saved.
-  - **A published static setpriv for the toolbox way `fetch`**: a release of this project with the busybox and setpriv
-    its CI builds, pinned by URL and sha256 in `orchestrator/runtime_layer/toolbox/prebuilt.json`. Why: until then
-    `fetch` refuses plainly and the tools are built on this computer (`build`, needs the network once).
+  - **The first release of llmcf-setpriv for the toolbox way `fetch`**: the maintainer pushes a tag `tools-v<version>`
+    (the release workflow builds, checks, attests and uploads it), then its URL and sha256 go into
+    `orchestrator/runtime_layer/toolbox/prebuilt.json`. Why: until then `fetch` refuses plainly ("no release yet")
+    and the tools are built on this computer (`build` or `build-rust`, needs the network once).
   - **A history of healing fixes** with their success rate in Mojo; a fix is never applied by itself. Why: it shows
     which fixes really work.
   - **A purpose field** (chat, code, summaries, embeddings) for the quantization recommendation. Why: the best type

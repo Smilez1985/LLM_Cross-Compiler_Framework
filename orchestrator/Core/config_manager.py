@@ -384,11 +384,13 @@ class ConfigManager:
                          ["regex:^(mixed|de|en)$"]),
             ConfigSchema("build_sandbox", bool, False, True, "Run conversion containers without network, capabilities or root"),
             # How the runtime layer's two static tools (busybox, setpriv) are made once per computer
-            # (Core/runtime_layer.py): built from pinned sources in the framework's builder image (default) or fetched
-            # from the pinned table; the person's choice only (llm/settings_change PERSON_ONLY_SETTINGS)
+            # (Core/runtime_layer.py TOOLBOX_WAYS): built from pinned sources in the framework's builder image (default,
+            # util-linux setpriv), built the same way with the framework's own Rust llmcf-setpriv, or fetched from the
+            # pinned table; the person's choice only (llm/settings_change PERSON_ONLY_SETTINGS)
             ConfigSchema("runtime_layer_toolbox", str, False, "build",
-                         "build (default) or fetch: how the runtime layer's static busybox and setpriv are made once",
-                         ["regex:^(build|fetch)$"]),
+                         "build (default), build-rust or fetch: how the runtime layer's static busybox and setpriv "
+                         "are made once",
+                         ["regex:^(build|build-rust|fetch)$"]),
             ConfigSchema("build_memory_limit", str, False, "", "Memory limit for conversion containers, e.g. 24g (empty: none)"),
             ConfigSchema("build_pids_limit", int, False, 4096, "Process limit for conversion containers", ["min:64"]),
             ConfigSchema("build_jobs", int, False, 0, "Parallel compile jobs in image builds (0 = all cores)", ["min:0", "max:256"]),

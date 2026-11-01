@@ -1,3 +1,6 @@
+# The one Rust toolchain of the framework's own static tools (llmcf-setpriv, llmcf-install): a pinned stable
+# release with the three static musl targets the release builds make (linked with rust-lld and the toolchain's own
+# self-contained musl, no C cross toolchain).
 [toolchain]
 channel = "1.97.0"
 profile = "minimal"

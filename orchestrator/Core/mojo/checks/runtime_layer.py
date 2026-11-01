@@ -78,8 +78,10 @@ def check_runtime_layer(framework, platform_name: Optional[str] = None) -> List[
                                 cannot="person"))
     record = layer.read_toolbox(layer.toolbox_dir(cache))
     if record is not None:
+        kind = layer.toolbox_setpriv(record)
         findings.append(_ok(AREA, "runtime_layer.toolbox",
-                            f"The runtime layer's tools were made the way '{record.get('way')}'; the setting "
+                            f"The runtime layer's tools were made the way '{record.get('way')}'"
+                            + (f" (setpriv: {kind})" if kind else "") + "; the setting "
                             f"runtime_layer_toolbox says '{way or layer.DEFAULT_TOOLBOX_WAY}'."))
     if mounts_keep_owners(platform_name) and _sandbox_on(framework):
         findings.append(_ok(AREA, "runtime_layer.end_folder", layer.END_PROTECTED))

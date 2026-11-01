@@ -11,6 +11,7 @@ under /tmp with mode 0755 (a uid switch needs a parent the stage account can wal
 
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -51,6 +52,9 @@ WHY_NOT = _why_not()
 # The real static busybox and setpriv the CI job "Runtime layer tools" made (scripts/runtime_toolbox.py OUT); without
 # it the box uses this computer's setpriv and a busybox stand-in
 REAL_TOOLBOX = Path(os.environ["LLMCF_TEST_TOOLBOX"]) if os.environ.get("LLMCF_TEST_TOOLBOX") else None
+# The layer's setpriv for these tests when it is another program than the toolbox's: the CI job "Runtime layer
+# tools" runs the tests a second time with the static llmcf-setpriv (rust/llmcf-setpriv) as the layer's uid switch
+LAYER_SETPRIV = Path(os.environ["LLMCF_TEST_LAYER_SETPRIV"]) if os.environ.get("LLMCF_TEST_LAYER_SETPRIV") else None
 HOST_SETPRIV = shutil.which("setpriv") or "setpriv"
 needs_root = pytest.mark.skipif(bool(WHY_NOT), reason=WHY_NOT or "-")
 needs_posix = pytest.mark.skipif(os.name == "nt" or shutil.which("sh") is None,
@@ -74,6 +78,8 @@ class Box:
             else:
                 (self.layer / "bin" / "busybox").write_text(STAND_IN_BUSYBOX, encoding="utf-8")
                 shutil.copy2(shutil.which("setpriv"), self.layer / "bin" / "setpriv")
+            if LAYER_SETPRIV:
+                shutil.copy2(LAYER_SETPRIV, self.layer / "bin" / "setpriv")
         for path in [self.layer, *self.layer.rglob("*")]:
             os.chmod(path, 0o755)
         self.image = self.root / "image"
@@ -661,3 +667,254 @@ def test_a_toolbox_made_by_an_older_recipe_is_made_again(tmp_path):
     del old["version"]
     (folder / rl.TOOLBOX_RECORD).write_text(json.dumps(old), encoding="utf-8")
     assert rl.read_toolbox(folder) is None
+
+
+# --- which setpriv the toolbox holds: util-linux (built here), or the framework's own Rust llmcf-setpriv -----------
+
+def _static_elf(tag: bytes) -> bytes:
+    """A minimal 64-bit ELF with one PT_LOAD program header and no interpreter: a 'static program' to is_static_elf."""
+    import struct
+    head = b"\x7fELF\x02\x01\x01" + b"\0" * 9 + struct.pack("<HHIQQQIHHHHHH", 2, 62, 1, 0, 64, 0, 0, 64, 56, 1, 0, 0, 0)
+    return head + struct.pack("<IIQQQQQQ", 1, 5, 0, 0, 0, 0, 0, 0) + tag
+
+
+def _stub_build(calls):
+    def build(work, setpriv="util-linux"):
+        calls.append(setpriv)
+        files = {}
+        for tool in layer.TOOLS:
+            files[tool] = Path(work) / tool
+            files[tool].write_bytes(_static_elf(f"{tool}-{setpriv}".encode()))
+        return files
+    return build
+
+
+def test_the_ways_and_which_setpriv_each_makes():
+    """The person's three ways in the one setting runtime_layer_toolbox: the local util-linux build stays the default;
+    the Rust build and the fetch way give llmcf-setpriv. The CLI offers exactly these ways."""
+    assert layer.TOOLBOX_WAYS == ("build", "build-rust", "fetch") and layer.DEFAULT_TOOLBOX_WAY == "build"
+    assert layer.WAY_SETPRIV == {"build": "util-linux", "build-rust": "llmcf-setpriv", "fetch": "llmcf-setpriv"}
+    from orchestrator import cli as cli_module
+    option = next(p for p in cli_module.build_image_layer.params if p.name == "toolbox")
+    assert tuple(option.type.choices) == layer.TOOLBOX_WAYS
+
+
+def test_the_toolbox_record_says_which_setpriv_it_holds(tmp_path):
+    """Regression: the record named only the way; now it names the setpriv it holds, and the layer status, the CLI and
+    the GUI show it."""
+    calls = []
+    record = layer.ensure_toolbox(tmp_path / "a", "build", offline=False, build=_stub_build(calls))
+    assert calls == ["util-linux"] and record["setpriv"] == "util-linux" and record["version"] == 3
+    record = layer.ensure_toolbox(tmp_path / "b", "build-rust", offline=False, build=_stub_build(calls))
+    assert calls[-1] == "llmcf-setpriv" and record["setpriv"] == "llmcf-setpriv" and record["way"] == "build-rust"
+    assert record["sources"]["setpriv"]["builder"] == layer.RUST_BUILDER_BASE
+    status = layer.layer_status(tmp_path / "b", {"runtime_layer_toolbox": "build-rust"})
+    assert status["toolbox_made"] == "build-rust" and status["toolbox_setpriv"] == "llmcf-setpriv"
+
+
+def test_the_fetch_way_refuses_with_no_release_yet_and_names_the_local_ways(tmp_path):
+    """Regression: while no release of llmcf-setpriv is pinned (the table's setpriv entry stays empty until a real
+    release exists), the way 'fetch' refuses plainly, says so, names the ways that build here and fetches nothing."""
+    assert layer.read_prebuilt()["setpriv"] == {}
+    fetched = []
+    with pytest.raises(layer.ToolboxMissing) as refused:
+        layer.ensure_toolbox(tmp_path, "fetch", offline=False, fetch=lambda url: fetched.append(url) or b"",
+                             build=lambda work, **kw: pytest.fail("the way fetch must not build"))
+    text = str(refused.value)
+    assert fetched == [] and "no release yet" in text and "llmcf-setpriv" in text
+    assert "'build'" in text and "'build-rust'" in text and str(tmp_path) not in text
+
+
+def _pin_table(tmp_path: Path, setpriv: dict) -> Path:
+    path = tmp_path / "prebuilt.json"
+    path.write_text(json.dumps({"busybox": {}, "setpriv": setpriv}), encoding="utf-8")
+    return path
+
+
+def test_only_llmcf_setpriv_from_this_projects_releases_is_ever_fetched(tmp_path):
+    """Regression: the table took any static setpriv file with a URL and a sha256 (also a util-linux one from
+    anywhere); a prebuilt setpriv may only be the framework's own Rust llmcf-setpriv, a release asset of this project,
+    so every other setpriv entry is left out (never fetched)."""
+    digest = "a" * 64
+    good = {"kind": "file", "name": "llmcf-setpriv-0.1.0-x86_64", "sha256": digest,
+            "url": layer.RELEASES + "0.1.0/llmcf-setpriv-0.1.0-x86_64"}
+    assert layer.read_prebuilt(_pin_table(tmp_path, {"amd64": good}))["setpriv"] == {"amd64": good}
+    assert layer.release_asset("0.1.0", "amd64") == good["name"]
+    bad = [
+        {**good, "name": "setpriv-amd64", "url": layer.RELEASES + "0.1.0/setpriv-amd64"},   # util-linux's
+        {**good, "url": "https://example.com/llmcf-setpriv-0.1.0-x86_64"},                  # not this project
+        {**good, "url": layer.RELEASES + "0.2.0/llmcf-setpriv-0.1.0-x86_64"},                # another release
+        {**good, "name": "llmcf-setpriv-0.1.0-aarch64",
+         "url": layer.RELEASES + "0.1.0/llmcf-setpriv-0.1.0-aarch64"},                       # another machine
+        {"kind": "deb", "name": "util-linux_2.40.4-1_amd64.deb", "url": "https://snapshot.debian.org/file/x",
+         "sha256": digest, "archive_sha256": digest, "member": "./usr/bin/setpriv"},          # Debian's C setpriv
+    ]
+    for pin in bad:
+        assert layer.read_prebuilt(_pin_table(tmp_path, {"amd64": pin}))["setpriv"] == {}, pin
+
+
+def test_a_toolbox_of_the_last_version_is_read_as_util_linux_and_kept_offline(tmp_path):
+    """Characterization of the version bump: a version-2 record (before it named its setpriv) holds the musl
+    util-linux setpriv of the way 'build'; it is read as such, so an offline computer keeps its tools."""
+    folder = layer.toolbox_dir(tmp_path)
+    files = {}
+    for tool in layer.TOOLS:
+        files[tool] = tmp_path / f"src-{tool}"
+        files[tool].write_bytes(_static_elf(tool.encode()))
+    record = layer.write_toolbox(folder, "build", files, {})
+    old = {k: v for k, v in record.items() if k != "setpriv"}
+    old["version"] = 2
+    (folder / layer.TOOLBOX_RECORD).write_text(json.dumps(old), encoding="utf-8")
+    kept = layer.ensure_toolbox(tmp_path, "build-rust", offline=True)
+    assert kept["setpriv"] == "util-linux" and kept["version"] == 2
+    assert layer.layer_status(tmp_path)["toolbox_setpriv"] == "util-linux"
+
+
+def test_a_toolbox_of_an_older_version_is_made_again_and_the_layer_with_it(tmp_path):
+    """Regression: a toolbox record of an older recipe (version 1) is made again on the next online build; the layer
+    assembled from the old tools was then refused as 'changed' until Mojo restored it. Now the layer is assembled
+    again with the new tools and the build goes on."""
+    calls = []
+    layer.ensure_toolbox(tmp_path, "build", offline=False, build=_stub_build(calls))
+    assert layer.ready_layer(tmp_path).ok
+    folder = layer.toolbox_dir(tmp_path)
+    old = json.loads((folder / layer.TOOLBOX_RECORD).read_text(encoding="utf-8"))
+    old["version"] = 1
+    del old["setpriv"]
+    (folder / layer.TOOLBOX_RECORD).write_text(json.dumps(old), encoding="utf-8")
+    with pytest.raises(layer.ToolboxMissing):   # offline with nothing usable: refused, naming the ways
+        layer.ensure_toolbox(tmp_path, "build-rust", offline=True)
+    record = layer.ensure_toolbox(tmp_path, "build-rust", offline=False, build=_stub_build(calls))
+    assert record["version"] == layer.TOOLBOX_VERSION and record["setpriv"] == "llmcf-setpriv"
+    check = layer.ready_layer(tmp_path)
+    assert check.ok and check.toolbox_way == "build-rust"
+    assert (layer.layer_dir(tmp_path) / "bin" / "setpriv").read_bytes().endswith(b"setpriv-llmcf-setpriv")
+
+
+def _age_the_record(cache):
+    folder = layer.toolbox_dir(cache)
+    old = json.loads((folder / layer.TOOLBOX_RECORD).read_text(encoding="utf-8"))
+    old["version"] = 1
+    del old["setpriv"]
+    (folder / layer.TOOLBOX_RECORD).write_text(json.dumps(old), encoding="utf-8")
+
+
+@needs_posix
+@pytest.mark.parametrize("change", ["script", "tool", "no_record"])
+def test_a_changed_layer_is_never_replaced_silently_when_the_toolbox_is_made_again(tmp_path, change):
+    """Regression (review of the remake): ensure_toolbox assembled the layer again after every remake, so a layer
+    changed by hand (a script, a tool the old record does not name, or tools no record names any more) was replaced
+    without the 'changed' report. Only a layer that held exactly the shipped scripts and the tools of the old record
+    is assembled again; any other layer is refused as 'changed' as before (Mojo Miracle restores it)."""
+    calls = []
+    layer.ensure_toolbox(tmp_path, "build", offline=False, build=_stub_build(calls))
+    assert layer.ready_layer(tmp_path).ok
+    current = layer.layer_dir(tmp_path)
+    target = current / ("runner.sh" if change == "script" else "bin/setpriv")
+    os.chmod(target.parent, 0o755)
+    os.chmod(target, 0o644)
+    target.write_bytes(b"#!/bin/sh\necho changed\n")
+    os.chmod(target, 0o444)
+    os.chmod(target.parent, 0o555)
+    if change == "no_record":
+        shutil.rmtree(layer.toolbox_dir(tmp_path))
+    else:
+        _age_the_record(tmp_path)
+    layer.ensure_toolbox(tmp_path, "build-rust", offline=False, build=_stub_build(calls))
+    with pytest.raises(layer.LayerRefused) as refused:
+        layer.ready_layer(tmp_path)
+    assert refused.value.verdict == "changed" and "Mojo Miracle" in str(refused.value)
+    assert target.read_bytes() == b"#!/bin/sh\necho changed\n"
+
+
+class _FakeImages:
+    def __init__(self, built):
+        self.built = built
+
+    def build(self, path, tag, **_kw):
+        self.built.append((tag, sorted(p.name for p in Path(path).iterdir())))
+        image = type("Image", (), {})()
+        image.id = tag
+        return image, []
+
+
+class _FakeContainer:
+    def __init__(self, image, removed):
+        self.image, self.removed = image, removed
+
+    def get_archive(self, where):
+        import io as _io
+        import tarfile as _tarfile
+        name = where.rsplit("/", 1)[-1]
+        data = _static_elf(f"{name}@{self.image}".encode())
+        buf = _io.BytesIO()
+        with _tarfile.open(fileobj=buf, mode="w") as tar:
+            info = _tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, _io.BytesIO(data))
+        return [buf.getvalue()], {}
+
+    def remove(self, force=False):
+        self.removed.append(self.image)
+
+
+def test_the_rust_way_builds_llmcf_setpriv_in_its_own_builder_image(tmp_path, monkeypatch):
+    """The way 'build-rust' over the container engine: busybox from the framework's builder image, setpriv from
+    llmcf-setpriv's builder image over the workspace rust/ (no build folder copied), each container removed."""
+    from orchestrator.utils import docker_engine
+    built, removed = [], []
+    client = type("Client", (), {"images": _FakeImages(built)})()
+    monkeypatch.setattr(docker_engine, "create_container", lambda _c, image, **_kw: _FakeContainer(image, removed))
+    monkeypatch.setattr(layer, "builder_context", lambda work, fetch: Path(work))
+    build = layer.engine_builder(client, fetch=lambda url: b"")
+    work = tmp_path / "work"
+    work.mkdir()
+    files = build(work, setpriv="llmcf-setpriv")
+    assert [tag for tag, _ in built] == [layer.BUILDER_TAG, layer.RUST_BUILDER_TAG]
+    rust_context = dict(built)[layer.RUST_BUILDER_TAG]
+    assert rust_context == ["Dockerfile", "rust"]
+    copied = work / "rust-context" / "rust"
+    assert (copied / "Cargo.lock").is_file() and (copied / "llmcf-setpriv" / "src" / "main.rs").is_file()
+    assert not (copied / "target").exists()
+    assert files["busybox"].read_bytes().endswith(f"busybox@{layer.BUILDER_TAG}".encode())
+    assert files["setpriv"].read_bytes().endswith(f"setpriv@{layer.RUST_BUILDER_TAG}".encode())
+    assert sorted(removed) == sorted([layer.BUILDER_TAG, layer.RUST_BUILDER_TAG])
+    built.clear()
+    build(work, setpriv="util-linux")
+    assert [tag for tag, _ in built] == [layer.BUILDER_TAG]   # the default way builds no Rust image
+
+
+def test_the_rust_builder_image_is_pinned_like_the_toolchain():
+    """Dockerfile.rust's base carries the Rust release rust/rust-toolchain.toml pins, by digest, and builds with
+    --locked; RUST_BUILDER_BASE names the same image."""
+    text = (layer.SHIPPED_DIR / "toolbox" / "Dockerfile.rust").read_text(encoding="utf-8")
+    toolchain = (layer.RUST_WORKSPACE / "rust-toolchain.toml").read_text(encoding="utf-8")
+    channel = re.search(r'^channel = "([0-9.]+)"', toolchain, re.M).group(1)
+    assert f"FROM {layer.RUST_BUILDER_BASE}\n" in text and re.search(r"@sha256:[0-9a-f]{64}$", layer.RUST_BUILDER_BASE)
+    assert layer.RUST_BUILDER_BASE.startswith(f"rust:{channel}-") and f"RUSTUP_TOOLCHAIN={channel}" in text
+    assert "--locked" in text and "-p llmcf-setpriv" in text
+
+
+
+def test_the_release_workflow_runs_on_a_tools_tag_only_and_signs_without_a_secret():
+    """.github/workflows/release-tools.yml: only a pushed tag tools-v* starts it (never a push to a branch, never by
+    hand); id-token and attestations are writable in the release job alone; every action is pinned by its sha; the
+    three static targets are built and the asset names are the ones the fetch table takes (release_asset)."""
+    import yaml
+    path = layer.SHIPPED_DIR.parents[1] / ".github" / "workflows" / "release-tools.yml"
+    text = path.read_text(encoding="utf-8")
+    flow = yaml.safe_load(text)
+    on = flow.get("on", flow.get(True))
+    assert on == {"push": {"tags": ["tools-v*"]}}
+    assert flow["permissions"] == {}
+    jobs = flow["jobs"]
+    assert jobs["build"]["permissions"] == {"contents": "read"}
+    assert jobs["release"]["permissions"] == {"contents": "write", "id-token": "write", "attestations": "write"}
+    uses = re.findall(r"uses: (\S+)", text)
+    assert uses and all(re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", u) for u in uses), uses
+    assert any(u.startswith("actions/attest-build-provenance@") for u in uses)
+    assert "secrets." not in text
+    for target in ("x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl", "armv7-unknown-linux-musleabihf"):
+        assert target in text
+    assert '"../dist/$crate-$VERSION-$arch"' in text
+    assert layer.release_asset("1.2.3", "arm64") == "llmcf-setpriv-1.2.3-aarch64"

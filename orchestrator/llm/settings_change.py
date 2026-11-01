@@ -82,8 +82,9 @@ IDLE_PERSON_ONLY_TEXT = ("{key} stops a build step that prints nothing for that 
                          "framework's settings: a lower value can stop the person's own long builds, so no AI changes "
                          "it, in either direction.")
 TOOLBOX_PERSON_ONLY_TEXT = ("{key} says where the runtime layer's two tools (a static busybox and setpriv) come from: "
-                            "built from pinned sources or fetched. Only the person sets it; an AI may read it, never "
-                            "change it, in either direction.")
+                            "built from pinned sources (with util-linux setpriv or the framework's own llmcf-setpriv) "
+                            "or fetched. Only the person sets it; an AI may read it, never change it, in either "
+                            "direction.")
 MODE_PERSON_ONLY_TEXT = ("{key} says whether the framework runs in private or enterprise mode, and with it which board key "
                          "tiers it accepts. Only the person sets it; an AI may read it, never change it.")
 CACHE_SIZE_PERSON_ONLY_TEXT = ("{key} is auto by default, the value measured on this computer. Only the person sets "
