@@ -134,11 +134,28 @@ def tree_size(path: Path) -> int:
     return total
 
 
-def kept_build(cache_dir: Path, build_id: str) -> Optional[KeptBuild]:
+def still_running(cache_dir: Path, build_id: str) -> bool:
+    """Whether a build engine still runs this build, in this process or in another one (GUI, CLI, MCP server): its
+    build record (Core/build_records.py) is not finished and the process that wrote it still exists. A running build
+    has finished stage markers and its configuration too, so without this it would look interrupted."""
+    from orchestrator.Core import build_records
+    try:
+        data = json.loads((build_records.records_dir(cache_dir) / f"{build_id}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return False
+    return (isinstance(data, dict) and data.get("status") not in build_records.FINISHED
+            and build_records.is_alive(data))
+
+
+def kept_build(cache_dir: Path, build_id: str, *, ending: bool = False) -> Optional[KeptBuild]:
+    """The kept build `build_id`, or None when it cannot be continued or still runs. `ending`: the build itself asks
+    as it ends (BuildEngine._keep_or_discard), while its record still says it runs."""
     if not BUILD_ID.fullmatch(str(build_id or "")) or ".." in str(build_id):
         return None
     folder = builds_root(cache_dir) / build_id
     if folder.is_symlink() or not folder.is_dir() or not resumable(folder):
+        return None
+    if not ending and still_running(cache_dir, build_id):
         return None
     config = read_config(folder) or {}
     return KeptBuild(build_id, str(config.get("target_arch") or ""), stages_done(folder), folder, tree_size(folder),
@@ -416,4 +433,4 @@ def ai_notes(framework: Any, request_id: str, actor: str) -> List[str]:
 __all__ = ["ai_notes", "AI_NEXT", "DECISIONS", "DISCARDED_NOTE", "InterruptedBuildError", "KEPT_WARNING", "KIND", "KeptBuild",
            "QUESTION", "cleanup_container", "configuration", "continue_build", "decide", "deletion_plan", "discard",
            "discard_now", "kept_build", "kept_builds", "needs_cleanup", "pending", "read_config", "record_pending",
-           "require_person", "resumable", "run_cleanup", "stages_done"]
+           "require_person", "resumable", "run_cleanup", "stages_done", "still_running"]

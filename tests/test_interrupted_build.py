@@ -229,3 +229,45 @@ def test_the_engine_keeps_a_resumable_failed_build_and_discards_the_rest(tmp_pat
     assert resumable.is_dir() and engine._builds["job_kept"].resumable
     assert any("Continue the build" in w for w in engine._builds["job_kept"].warnings)
     assert not lost.exists() and not engine._builds["job_lost"].resumable
+
+
+def _running_record(cache: Path, build_id: str, alive: bool = True) -> None:
+    """The build record a build engine writes while the build runs (Core/build_records.py): by this process (alive),
+    or by a process that has ended (a crash of the framework: the build really was interrupted)."""
+    from orchestrator.Core import build_records
+    owner = build_records.this_process() if alive else {"pid": 2 ** 22 + 12345, "process_started": 1.0}
+    build_records.write_record(build_records.records_dir(cache), {"build_id": build_id, "status": "running",
+                                                                  "request_id": "req_1a2b3c4d", **owner})
+
+
+def test_a_build_that_still_runs_is_never_offered_as_interrupted(tmp_path):
+    """Regression: a running build has finished stage markers and its configuration after its first stage, so it
+    looked like a kept interrupted build. Every status read of an AI then said it had stopped (and recorded a pending
+    question for the person), and the CLI and the GUI offered to continue it (a second run on the same work folder)
+    or to delete what it 'left' while it ran, in this process or in another one (GUI, CLI, MCP server)."""
+    cache = tmp_path / "cache"
+    kept(cache)
+    _running_record(cache, "job_0123456789ab")
+    state = tmp_path / "state"
+    framework = SimpleNamespace(config=SimpleNamespace(user_state_dir=state,
+                                                       get=lambda k, d=None: str(cache) if k == "cache_dir" else d),
+                                resolve_path=lambda v: Path(v))
+    assert ib.ai_notes(framework, "req_1a2b3c4d", "mcp:laptop") == []
+    assert ib.pending(state) == {}, "no question is recorded about a running build"
+    assert ib.kept_builds(cache) == [] and ib.kept_build(cache, "job_0123456789ab") is None
+    engine = SimpleNamespace(build_model=lambda c: pytest.fail("a running build is never started a second time"))
+    for choice in ib.DECISIONS:
+        with pytest.raises(ib.InterruptedBuildError) as e:
+            ib.decide(engine, cache, "job_0123456789ab", choice, "cli", accepted=None, audit=Audit())
+        assert e.value.code == "unknown_id"
+    assert (cache / "builds" / "job_0123456789ab").is_dir()
+    # the build itself, as it ends, still decides to keep its folder (BuildEngine._keep_or_discard)
+    assert ib.kept_build(cache, "job_0123456789ab", ending=True) is not None
+
+
+def test_a_build_whose_process_ended_while_it_ran_is_interrupted(tmp_path):
+    """A crash of the framework's process leaves an unfinished record of a process that no longer exists: that build
+    really stopped, so it is offered to continue or delete."""
+    kept(tmp_path)
+    _running_record(tmp_path, "job_0123456789ab", alive=False)
+    assert [k.build_id for k in ib.kept_builds(tmp_path)] == ["job_0123456789ab"]
