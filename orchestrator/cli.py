@@ -7202,6 +7202,15 @@ def _bundle_get(ctx: FrameworkContext, bundle_id: str):
         sys.exit(1)
 
 
+def _bundle_signer(ctx: FrameworkContext):
+    """The framework's board signer the bundle is signed with (board_ops.framework_signer: the person's signing key
+    from the framework's secrets store; the framework boots for it). None when the store cannot give it: build_bundle
+    then refuses with the reason, nothing is built unsigned."""
+    from orchestrator.runtime.device import board_ops
+    ctx.require_framework()
+    return board_ops.framework_signer(ctx.framework_manager)
+
+
 def bundle_choice_options(func):
     """The person's choice of a bundle (`bundle plan` and `bundle build`): a preset and/or blocks, the variables and
     the files of each component (service.selection_from reads them)."""
@@ -7288,7 +7297,6 @@ def bundle_build(ctx: FrameworkContext, device_name: str, allow_own: bool, **cho
     """Plan the bundle, show the plan and build it into this framework's bundle store, signed with the framework's
     board key (nothing is sent to the board)"""
     from orchestrator.runtime.bundle.generator import BundleError, build_bundle
-    from orchestrator.runtime.device import board_ops
     state_dir, device_id, plan = _bundle_plan(ctx, device_name, choice, allow_own)
     if not plan.ok and plan.own_blocks and not allow_own and set(plan.problems) == {
             p for p in plan.problems if "is not signed: it is used only after your yes" in p}:
@@ -7302,10 +7310,8 @@ def bundle_build(ctx: FrameworkContext, device_name: str, allow_own: bool, **cho
     if not plan.ok:
         console.print("[red]Nothing was built.[/red]")
         sys.exit(1)
-    ctx.require_framework()
-    signer = board_ops.framework_signer(ctx.framework_manager)
     try:
-        built = build_bundle(plan, _bundle_store(ctx), signer)
+        built = build_bundle(plan, _bundle_store(ctx), _bundle_signer(ctx))
     except BundleError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)

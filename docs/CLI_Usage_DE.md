@@ -31,6 +31,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [module](#module): `create`, `generate-ai`
 - [scan](#scan): Hardware-Probe
 - [device](#device): `list`, `settings`, `runtime`
+- [bundle](#bundle): `plan`, `build`, `list`, `deploy`, `status`, `uninstall`, `rollback`, `delete`, `block`
 - [config](#config): `show`, `output-folder`, `repos`
 - [zoo](#zoo): `list`, `show`, `install`, `verify`, `export`, `keys`, `maintainer`
 - [trash](#trash): `list`, `restore`, `empty`
@@ -2487,6 +2488,88 @@ llm-cli device runtime build "ZERO 3W" --yes
 llm-cli device runtime deploy "ZERO 3W" --bench-model models/qwen3.5-2b-q4_0.gguf
 # Die systemd-Unit statt des Startskripts, vor dem nächsten Deployment entschieden
 llm-cli device settings "ZERO 3W" --install systemd --model models/qwen3.5-2b-q4_0.gguf
+```
+
+---
+
+## bundle
+
+Das Board-Bündel, Deploy-Weg 3 ([Funktionen](Features_DE.md#das-board-bündel)): Bausteine mit ihren Variablen und
+Dateien, ein gegen die Untersuchung des Boards geprüfter Plan, ein mit dem Schlüssel des Frameworks signiertes Bündel
+im Speicher dieses Frameworks und sein Installer auf dem Board. `GERÄT` ist ein gespeichertes Board wie bei
+[`device`](#device); `BUNDLE` ist die ID eines Bündels, wie `bundle list` sie zeigt.
+
+```
+llm-cli bundle plan GERÄT [--preset llm|voice|stt] [--block ID]... [--set KOMPONENTE.NAME=WERT]...
+                    [--file KOMPONENTE.ROLLE=PFAD]... [--online KOMPONENTE.ROLLE=URL --sha256 KOMPONENTE.ROLLE=HEX
+                    --size KOMPONENTE.ROLLE=BYTES]... [--licence KOMPONENTE.ROLLE=ID]... [--unprivileged-only] [--json]
+llm-cli bundle build GERÄT (dieselbe Auswahl) [--allow-own]
+llm-cli bundle list [--json]
+llm-cli bundle deploy BUNDLE [--dry-run]
+llm-cli bundle status BUNDLE
+llm-cli bundle uninstall BUNDLE
+llm-cli bundle rollback BUNDLE
+llm-cli bundle delete [BUNDLE]...
+llm-cli bundle block list [--json]
+llm-cli bundle block new ID --kind ART --title TEXT [--summary TEXT] [--from BAUSTEIN]
+```
+
+### bundle plan
+
+Zeigt den ganzen Plan, bevor etwas gebaut oder gesendet wird: jede Komponente mit ihrem Baustein, ihrer
+Vertrauensstufe und ihren Variablen (jede gegen ihren Typ geprüft), jede Datei mit Rolle, Name, Größe, Quelle (die
+lokale Datei, aus der sie kopiert wird, das Laufzeitpaket des Boards oder die festgelegte Online-Adresse) und Lizenz,
+die Root-Aktionen, die llmcf-install brauchen, den Speicherbedarf gegenüber dem, was das Board hat, was gesendet wird,
+und die Prüfungen gegen die Untersuchung des Boards (Architektur, Init-System, sudo, Offline-Modus, Speicher:
+bestanden, nicht bestanden, Warnung oder unbekannt). Es wird kein Board kontaktiert. Eine Komponente heißt nach ihrer
+Art (`llm`, `stt`, eine zweite derselben Art `stt-2`). `--json` gibt den Plan nur als Labels aus: kein lokaler Pfad,
+keine Adresse, kein Konto. Exit 1, wenn der Plan Probleme hat.
+
+### bundle build
+
+Plant wie `bundle plan`, zeigt den Plan und schreibt das Bündel in den Speicher dieses Frameworks, signiert mit dem
+Board-Schlüssel des Frameworks (nichts wird ans Board gesendet). Ein eigener, nicht signierter Baustein wird nur nach
+deinem Ja im Terminal verwendet ("Nein" ist die Vorgabe; `--allow-own` beantwortet es vorab); der Enterprise-Modus
+nimmt nur die Bausteine des Frameworks und aus dem signierten Index installierte.
+
+### bundle deploy
+
+Meldet sich nur mit dem Schlüssel des Frameworks am Board des Bündels an (als Benutzer aus den Deploy-Einstellungen
+des Boards, nie mit Passwort), sendet, was das Board noch nicht hat, und führt zuerst den Probelauf des Installers
+aus; hat er bestanden, fragt es "Send bundle ... to board ...?" ("Nein" ist die Vorgabe; ohne Terminal wird nichts
+installiert) und installiert dann die Schritte ohne Sonderrechte. Vor Root-Aktionen hält der Installer mit dem
+klaren Hinweis an, dass sie llmcf-install brauchen (noch nicht da); baue die Variante ohne Sonderrechte, um sie zu
+überspringen. Ein abgebrochenes Deployment macht im selben Upload-Ordner weiter. `--dry-run` sendet das Bündel und
+führt nur den Probelauf aus.
+
+### bundle status, uninstall, rollback
+
+`status` fragt den Installer, den das Board behalten hat, welche Schritte erledigt sind (ändert nichts). `uninstall`
+listet, was es entfernen würde (nur die eigenen Schritte des Bündels, die neuesten zuerst), und fragt vorher ("Nein"
+ist die Vorgabe); `rollback` zeigt den Status und fragt, bevor es das letzte Apply rückgängig macht.
+
+### bundle delete
+
+Listet die gespeicherten Bündel (oder die genannten) mit vollem Pfad, Größe und was sie sind (ein Bündel, das ein
+Board hat, sagt das: es hier zu löschen lässt das Board, wie es ist). Nichts ist angehakt: du tippst die Nummern,
+wählst den Papierkorb (die Vorgabe) oder endgültiges Löschen und bestätigst genau diese (Vorgabe Nein). Es braucht ein
+Terminal; ohne eines listet es nur. Das Löschen wird zuerst ins Audit-Log geschrieben; was nicht gelöscht werden
+konnte, wird mit jedem gebliebenen Pfad gemeldet.
+
+### bundle block list, block new
+
+`block list` zeigt jeden Baustein mit Art, Status (bereit oder dokumentierte Vorlage) und Vertrauensstufe
+(framework, indexed, signed, own). `block new` legt deinen eigenen Baustein an (`block.yml` und seine Anleitung
+`README.md`, auf Wunsch ausgehend von einem Baustein des Frameworks) in `community/blocks/`, nicht signiert: der
+private Modus fragt, bevor er verwendet wird, der Enterprise-Modus nimmt ihn erst, wenn er veröffentlicht und aus dem
+signierten Index installiert ist.
+
+```bash
+llm-cli bundle plan "ZERO 3W" --preset stt --file stt.model=models/ggml-base.bin \
+    --file stt.program=build/whisper-server --licence stt.model=MIT
+llm-cli bundle build "ZERO 3W" --preset stt --file stt.model=models/ggml-base.bin \
+    --file stt.program=build/whisper-server --licence stt.model=MIT --unprivileged-only
+llm-cli bundle deploy stt-01234567-20261101120000
 ```
 
 ---

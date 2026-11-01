@@ -179,7 +179,6 @@ class BundlePlan:
         out += [f"  problem: {p}" for p in self.problems]
         return out
 
-
     def _source(self, comp_id: str, entry: FileEntry) -> str:
         """Where a file comes from, for the person (never in labels()): the local file it is copied from, the board's
         runtime package, or the pinned online address."""
