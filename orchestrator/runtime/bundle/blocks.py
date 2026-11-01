@@ -363,6 +363,20 @@ def community_dir(app_root: Optional[Path]) -> Optional[Path]:
     return Path(app_root).joinpath(*COMMUNITY_SUBDIR) if app_root else None
 
 
+def block_revoked(app_root: Optional[Path], block_id: str, version: Optional[str], index: Any) -> bool:
+    """Whether the verified cached index `index` (CommunityManager.cached_index(revocations=True)) revokes the
+    community block `block_id` in `version`: by its id and version, or, while the block is still installed in
+    community/blocks/, through its install record (_provenance_trust: by the pack's sha256 too). False without an
+    index (nothing is known as revoked)."""
+    if index is None:
+        return False
+    if index.revocation("block", block_id, version, None) is not None:
+        return True
+    root = community_dir(app_root)
+    folder = root / block_id if root is not None and RE_ID.fullmatch(block_id or "") else None
+    return folder is not None and folder.is_dir() and _provenance_trust(folder, index)[0] == "revoked"
+
+
 @dataclass
 class BlockCatalog:
     """Every block this framework knows: its own, then those in community/blocks/ (an installed pack or the person's
@@ -473,5 +487,5 @@ def new_block(dest_root: Path, block_id: str, *, kind: str, title: str, summary:
 
 
 __all__ = ["BLOCK_FILE", "BLOCK_SCHEMA", "BUILTIN_DIR", "Block", "BlockCatalog", "BlockError", "ENTERPRISE_TRUSTS",
-           "FORMATS", "FileNeed", "GUIDE_FILE", "TRUSTS", "Variable", "check_block_folder", "community_dir",
-           "load_catalog", "new_block", "parse_block"]
+           "FORMATS", "FileNeed", "GUIDE_FILE", "TRUSTS", "Variable", "block_revoked", "check_block_folder",
+           "community_dir", "load_catalog", "new_block", "parse_block"]

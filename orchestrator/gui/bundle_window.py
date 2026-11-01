@@ -488,6 +488,11 @@ class BundleWindow(BoardSteps, QDialog):
         if found is None:
             return
         store, built = found
+        if action == "apply" or (then is not None and action == service.CHANGING_ACTIONS["apply"]):
+            revoked = service.revoked_blocks(built, *self._sources())   # nothing is sent (service.revoked_blocks)
+            if revoked:
+                self._info(self._t("bundle.revoked", reason=one_line("; ".join(revoked))), "warning")
+                return
         state, device_id = self.state_dir, built.manifest.board.device_id
         try:
             host, port, user, label = service.board_contact(state, device_id)

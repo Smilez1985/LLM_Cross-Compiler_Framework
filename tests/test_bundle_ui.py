@@ -343,3 +343,67 @@ def test_the_questions_before_a_board_changes_name_bundle_board_and_size(tmp_pat
     assert set(service.CHANGING_ACTIONS) == {"apply", "uninstall", "rollback"}
     rows = service.bundle_rows(gen.BundleStore(tmp_path / "state"))
     assert rows[0]["bundle_id"] == "voice-test" and str(tmp_path) not in json.dumps(rows)
+
+
+# --- review: what the plan says to an AI, and a block revoked after the build ----------------------------------------
+
+def test_the_labels_say_that_root_actions_wait_for_llmcf_install_even_when_files_are_still_missing(tmp_path):
+    """bundle_plan and `bundle plan --json` give labels(): they say that the installer stops before the root actions
+    (llmcf-install is not there yet), as the person's plan lines do, also while the files are still to choose (an
+    AI's plan never has them)."""
+    from test_board_bundle import _selection
+    full = _plan(tmp_path, _selection(tmp_path, values={"stt": {"autostart": "yes"}}))
+    assert full.ok and full.labels()["root_actions"]
+    assert any("llmcf-install" in n and "stops before them" in n for n in full.labels()["notes"])
+    selection = _selection(tmp_path, values={"stt": {"autostart": "yes"}})
+    selection.files = {}
+    missing = _plan(tmp_path, selection)
+    assert not missing.ok
+    assert any("llmcf-install" in n and "stops before them" in n for n in missing.labels()["notes"])
+    assert str(tmp_path) not in json.dumps(missing.labels()["notes"])
+
+
+class _Revoking:
+    """A verified cached index that revokes block stt-indexed (every version)."""
+    def revocation(self, kind, pack_id, version, sha256):
+        return object() if (kind, pack_id) == ("block", "stt-indexed") else None
+
+
+def _indexed_built(tmp_path, state: Path, signer):
+    from test_board_bundle import _indexed_block, _selection
+    app = tmp_path / "app"
+    _indexed_block(app)
+    selection = _selection(tmp_path, blocks=["stt-indexed"])
+    del selection.files["llm"]
+    plan = _plan(tmp_path, selection, app_root=app, bundle_id="stt-indexed-test")
+    assert plan.ok, plan.problems
+    return app, gen.build_bundle(plan, gen.BundleStore(state), signer)
+
+
+def test_a_block_revoked_after_the_build_is_named_before_a_deploy(tmp_path):
+    app, built = _indexed_built(tmp_path, tmp_path / "state", _signer())
+    assert service.revoked_blocks(built, app, None) == []
+    found = service.revoked_blocks(built, app, _Revoking())
+    assert found and "stt-indexed" in found[0] and str(tmp_path) not in found[0]
+
+    class BySha:   # revoked by the pack's sha256 only: found through the install record of the folder
+        def revocation(self, kind, pack_id, version, sha256):
+            return object() if sha256 == "a" * 64 else None
+    assert service.revoked_blocks(built, app, BySha())
+    # the framework's own blocks are never revoked by the community index
+    framework_built = gen.build_bundle(_plan(tmp_path, bundle_id="fw-test"), gen.BundleStore(tmp_path / "s2"),
+                                       _signer())
+    assert service.revoked_blocks(framework_built, app, _Revoking()) == []
+
+
+def test_the_cli_deploy_refuses_a_bundle_whose_block_was_revoked_since_the_build(cli_board, tmp_path, monkeypatch):
+    from orchestrator import cli as cli_module
+    app, built = _indexed_built(tmp_path, cli_board.state, cli_board.signer)
+    monkeypatch.setattr(service, "catalog_sources", lambda framework: (app, _Revoking()))
+    monkeypatch.setattr(cli_module, "_interactive", lambda: True)
+    res = invoke_plain("bundle", "deploy", built.bundle_id, input="y\n")
+    assert res.code == 1 and "revoked" in res.out and "nothing was sent" in res.out, res.out
+    assert cli_board.opened == [], "no board is contacted"
+    # status, rollback and uninstall of what the board holds stay possible
+    assert invoke_plain("bundle", "status", built.bundle_id).code in (0, 1)
+    assert cli_board.opened, "a status run is not refused"

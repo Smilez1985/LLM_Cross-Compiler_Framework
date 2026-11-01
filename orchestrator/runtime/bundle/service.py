@@ -158,6 +158,19 @@ def catalog_sources(framework: Any) -> Tuple[Optional[Path], Any]:
     return (Path(root) if root else None), index
 
 
+def revoked_blocks(built: gen.BuiltBundle, app_root: Optional[Path], index: Any) -> List[str]:
+    """Why a stored bundle may not be applied any more ([]: nothing): a community block of one of its components that
+    the verified cached index (catalog_sources) revoked since the bundle was built (blocks.block_revoked). Every
+    channel asks this before an apply sends anything (`llmcf bundle deploy`, the window's Deploy..., bundle_deploy);
+    status, rollback and uninstall of what a board holds stay possible. The sentences name no path."""
+    out = []
+    for comp in built.manifest.components:
+        if comp.block_trust != "framework" and blk.block_revoked(app_root, comp.block, comp.block_version, index):
+            out.append(f"block {comp.block} {comp.block_version} of component {comp.id} was revoked in the signed "
+                       "index since the bundle was built; nothing was sent (build the bundle again without it)")
+    return out
+
+
 def bundle_rows(store: gen.BundleStore) -> List[Dict[str, Any]]:
     """The stored bundles as `llmcf bundle list` and the window list them (labels and sizes; the person's views add
     the folder): id, board, mode, components with their blocks, root actions, bytes sent, created, and per board where
@@ -211,4 +224,4 @@ def question(action: str, built: gen.BuiltBundle, board: str) -> str:
 
 __all__ = ["CHANGING_ACTIONS", "DEPLOY_QUESTION", "ROLLBACK_QUESTION", "UNINSTALL_QUESTION", "assignments",
            "board_contact", "bundle_rows", "catalog_sources", "device_profile", "plan_for_device", "question",
-           "run_on_board", "runtime_for", "selection_from"]
+           "revoked_blocks", "run_on_board", "runtime_for", "selection_from"]

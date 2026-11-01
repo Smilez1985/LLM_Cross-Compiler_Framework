@@ -7368,6 +7368,12 @@ def _bundle_run(ctx: FrameworkContext, bundle_id: str, action: str, *, ask: bool
     from orchestrator.runtime.bundle.generator import BundleError
     from orchestrator.runtime.device.remote import RemoteError
     store, built = _bundle_get(ctx, bundle_id)
+    if action == "apply":   # a block the signed index revoked since the build is not sent (service.revoked_blocks)
+        revoked = service.revoked_blocks(built, *service.catalog_sources(_bundle_framework(ctx)))
+        if revoked:
+            for line in revoked:
+                console.print(f"[red]{escape(line)}[/red]")
+            sys.exit(1)
     state_dir, device_id, host, port, user, label = _bundle_board(ctx, built)
 
     def run(what: str):

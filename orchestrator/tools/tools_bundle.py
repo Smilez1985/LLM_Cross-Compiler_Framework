@@ -134,6 +134,15 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
                             next="Ask the person which bundle they built (the framework's Board bundle "
                                  "window).") from None
 
+    def not_revoked(built) -> None:
+        """A block the signed index revoked since the build: nothing is asked or sent (service.revoked_blocks)."""
+        from orchestrator.runtime.bundle import service
+        revoked = service.revoked_blocks(built, *catalog_sources())
+        if revoked:
+            raise ToolError(h.scrub("; ".join(revoked)), code="failed",
+                            next="Ask the person to build the bundle again without that block in the framework's "
+                                 "Board bundle window")
+
     def deploy_facts(inp: BundleDeployIn, ctx: ToolContext) -> CallFacts:
         from orchestrator.runtime.bundle import service
         from orchestrator.runtime.bundle.generator import BundleError, _mb
@@ -144,6 +153,7 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
         if problems:
             raise ToolError("The stored bundle is not the one that was built; nothing is sent.", code="failed",
                             next="Ask the person to build the bundle again in the framework's Board bundle window")
+        not_revoked(built)
         try:
             _host, _port, user, _label = service.board_contact(h.state_dir(), device.device_id)
             fp = dev.read_key(device, h.state_dir(), step="bundle")
@@ -183,6 +193,7 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
         if built.manifest_sha256 != bound["manifest_sha256"] or built.manifest.board.device_id != bound["device_id"]:
             raise ToolError("The bundle changed after the person was asked; nothing was sent.", code="failed",
                             next="Call bundle_deploy again.")
+        not_revoked(built)
         device = h.trusted(bound["device_id"])
         on_client, cancel, stop = h.session_hooks()
         users = [u for u in (device.user, bound.get("user")) if u]
