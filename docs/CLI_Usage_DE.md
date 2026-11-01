@@ -2232,8 +2232,9 @@ den Rechner geplant, auf dem das Modell läuft, deshalb läuft die Probe auf die
 - **Was sie ausgibt**: eine kurze Zusammenfassung des Profils (System, CPU, GPU, NPU, Hailo) und seit Probe 3.3.0
   eine Zeile `Access:`: der SSH-Server (OpenSSH oder Dropbear) und seine Version, sudo (ohne Passwort, fragt nach
   einem, fehlt, oder die Probe lief als root), die Version von ssh-keygen und ob es Signaturen prüfen kann, das
-  Init-System, die Paketverwaltung und DietPis dietpi-software. Der Scan im Builder-Tab zeigt dieselbe Zeile; eine
-  ältere Probe-Datei hat keine.
+  Init-System, die Paketverwaltung und die installierten Pakete, die Dropbear bereitstellen (ohne root bei der
+  Paketverwaltung erfragt, etwa `dropbear, dropbear-bin, dropbear-run`). Der Scan im Builder-Tab zeigt dieselbe
+  Zeile; eine ältere Probe-Datei hat keine.
 - **Die Probe-Datei eines Boards** (`--import DATEI`): Eine `target_hardware_config.txt`, die du von einem Board
   kopiert hast (dort von `scripts/hardware_probe.sh` oder `llm-cli scan` geschrieben), wird wie jede Probe-Datei von
   außen geprüft, unter einer neuen zufälligen ID mit deiner Bezeichnung gespeichert (Standard: das Board-Modell aus

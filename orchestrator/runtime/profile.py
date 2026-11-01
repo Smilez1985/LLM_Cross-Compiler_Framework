@@ -419,7 +419,9 @@ class AccessFacts:
     servers with a program on the machine. sudo: root (the probe ran as root), nopasswd (`sudo -k -n true` worked),
     password (sudo wants a password or refuses the account), absent, other (Windows). ssh_keygen: openssh or none, with
     ssh_keygen_version. init_system: INIT_SYSTEM. package_manager: apt, dnf, zypper, pacman, apk or other.
-    dietpi_software: DietPi's dietpi-software is there (the way DietPi installs OpenSSH)."""
+    dropbear_packages: the installed packages that provide Dropbear, as the package manager named them without root
+    (dropbear, dropbear-bin, dropbear-run, dropbear-initramfs, dropbear-openrc). A file of an earlier 3.3.0 probe
+    with DIETPI_SOFTWARE stays readable; that key is ignored."""
     ssh_server: Optional[str] = None
     ssh_server_version: Optional[str] = None
     ssh_server_source: Optional[str] = None
@@ -429,7 +431,7 @@ class AccessFacts:
     ssh_keygen_version: Optional[str] = None
     init_system: Optional[str] = None
     package_manager: Optional[str] = None
-    dietpi_software: bool = False
+    dropbear_packages: Tuple[str, ...] = ()
 
     @property
     def sudo_present(self) -> Optional[bool]:
@@ -475,8 +477,8 @@ class AccessFacts:
             out.append(("deploy.access.init", {"init": self.init_system}))
         if self.package_manager:
             out.append(("deploy.access.packages", {"manager": self.package_manager}))
-        if self.dietpi_software:
-            out.append(("deploy.access.dietpi", {}))
+        if self.dropbear_packages:
+            out.append(("deploy.access.dropbear_packages", {"packages": ", ".join(self.dropbear_packages)}))
         return out
 
     def summary(self, text) -> str:
@@ -491,7 +493,7 @@ class AccessFacts:
                 "sudo_without_password": self.sudo_without_password, "ssh_keygen": self.ssh_keygen,
                 "ssh_keygen_version": self.ssh_keygen_version, "keygen_signatures": self.keygen_signatures,
                 "init_system": self.init_system, "package_manager": self.package_manager,
-                "dietpi_software": self.dietpi_software}
+                "dropbear_packages": list(self.dropbear_packages)}
 
 
 class HardwareProfile:
@@ -604,7 +606,7 @@ class HardwareProfile:
             ssh_servers_installed=tuple(self.items_of("SSH_SERVERS_INSTALLED")), sudo=self.get("SUDO"),
             ssh_keygen=self.get("SSH_KEYGEN"), ssh_keygen_version=self.get("SSH_KEYGEN_VERSION"),
             init_system=self.get("INIT_SYSTEM"), package_manager=self.get("PACKAGE_MANAGER"),
-            dietpi_software=self.get("DIETPI_SOFTWARE") == "present")
+            dropbear_packages=tuple(self.items_of("DROPBEAR_PACKAGES")))
 
     def gpus(self) -> List[Dict[str, str]]:
         """Per GPU (GPU0, GPU1, ...) its keys without the GPU<n>_ prefix."""

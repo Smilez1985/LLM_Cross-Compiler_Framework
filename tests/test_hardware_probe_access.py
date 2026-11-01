@@ -1,9 +1,9 @@
 """
 The access facts of hardware probe 3.3.0 (the group access of configs/hardware_probe_schema.yml): the SSH server
 (OpenSSH, Dropbear) and its version, sudo (present, and whether the account may use it without a password prompt,
-asked only with `sudo -n true`), ssh-keygen and its version, the init system and the package manager with DietPi's
-dietpi-software. Most private DietPi boards run Dropbear, so the pairing takes its protection tier from these facts
-and the board installer derives its plan from them.
+asked only with `sudo -n true`), ssh-keygen and its version, the init system, the package manager and the installed
+packages that provide Dropbear (asked from the package manager without root). Most private DietPi boards run Dropbear,
+so the pairing takes its protection tier from these facts and the board installer derives its plan from them.
 
 The fixture boards are sysroots (HW_PROBE_SYSROOT) with fake programs: DietPi with Dropbear and sudo, Debian with
 OpenSSH and no sudo, Alpine with OpenRC and Dropbear, and Windows. The .py and the .sh run on the same boards and must
@@ -93,7 +93,11 @@ def board(tmp_path: Path, kind: str) -> Path:
         program(root, "/usr/bin/sudo", '[ "$*" = "-k -n true" ] && exit 0; exit 1')
         write(root, f"/etc/sudoers.d/{MADE_UP_USER}", f"{MADE_UP_USER} ALL=(ALL:ALL) NOPASSWD: ALL\n")
         program(root, "/usr/bin/apt-get", "exit 0")
-        program(root, "/boot/dietpi/dietpi-software", "exit 0")
+        # dpkg-query names the installed packages (one only left its configuration); asked without sudo
+        program(root, "/usr/bin/dpkg-query", 'printf "%s\\n" "dropbear install ok installed" '
+                                             '"dropbear-bin install ok installed" "dropbear-run install ok installed" '
+                                             '"dropbear-initramfs deinstall ok config-files"; exit 1')
+        program(root, "/boot/dietpi/dietpi-software", "exit 0")   # there, and never asked
     elif kind == "debian-openssh":   # OpenSSH listening on port 22, Dropbear installed and running too, no sudo
         root = make_sysroot(tmp_path, "intel")
         write(root, "/etc/os-release", DEBIAN_OS_RELEASE)
@@ -115,7 +119,7 @@ def board(tmp_path: Path, kind: str) -> Path:
         dangling(root, "/etc/runlevels/default/dropbear", "/etc/init.d/dropbear")
         program(root, "/usr/sbin/dropbear", 'echo "Dropbear server v2024.85 https://matt.ucc.asn.au/dropbear" >&2')
         program(root, "/usr/bin/sudo", 'echo "sudo: a password is required" >&2; exit 1')
-        program(root, "/sbin/apk", "exit 0")
+        program(root, "/sbin/apk", 'case "$1 $2" in "info -e") echo dropbear ;; esac; exit 0')
     else:
         raise ValueError(kind)
     return root
@@ -124,13 +128,14 @@ def board(tmp_path: Path, kind: str) -> Path:
 EXPECTED = {
     "dietpi-dropbear": {"SSH_SERVER": "dropbear", "SSH_SERVER_VERSION": "2022.83", "SSH_SERVER_SOURCE": "process",
                         "SSH_SERVERS_INSTALLED": "dropbear", "SUDO": "nopasswd", "SSH_KEYGEN": "none",
-                        "PACKAGE_MANAGER": "apt", "DIETPI_SOFTWARE": "present", "INIT_SYSTEM": "systemd"},
+                        "PACKAGE_MANAGER": "apt", "DROPBEAR_PACKAGES": "dropbear,dropbear-bin,dropbear-run",
+                        "INIT_SYSTEM": "systemd"},
     "debian-openssh": {"SSH_SERVER": "openssh", "SSH_SERVER_VERSION": "9.2", "SSH_SERVER_SOURCE": "socket",
                        "SSH_SERVERS_INSTALLED": "openssh,dropbear", "SUDO": "absent", "SSH_KEYGEN": "openssh",
                        "SSH_KEYGEN_VERSION": "9.2", "PACKAGE_MANAGER": "apt", "INIT_SYSTEM": "systemd"},
     "alpine-dropbear": {"SSH_SERVER": "dropbear", "SSH_SERVER_VERSION": "2024.85", "SSH_SERVER_SOURCE": "service",
                         "SSH_SERVERS_INSTALLED": "dropbear", "SUDO": "password", "SSH_KEYGEN": "none",
-                        "PACKAGE_MANAGER": "apk", "INIT_SYSTEM": "openrc"},
+                        "PACKAGE_MANAGER": "apk", "DROPBEAR_PACKAGES": "dropbear", "INIT_SYSTEM": "openrc"},
 }
 
 
@@ -176,7 +181,8 @@ class TestBoards:
         access = parse_profile(py_run(root, bindir, tmp_path)).access()
         assert access == AccessFacts(ssh_server="dropbear", ssh_server_version="2022.83", ssh_server_source="process",
                                      ssh_servers_installed=("dropbear",), sudo="nopasswd", ssh_keygen="none",
-                                     init_system="systemd", package_manager="apt", dietpi_software=True)
+                                     init_system="systemd", package_manager="apt",
+                                     dropbear_packages=("dropbear", "dropbear-bin", "dropbear-run"))
         assert access.sudo_present is True and access.sudo_without_password is True
         assert access.keygen_signatures is False
 
@@ -186,7 +192,7 @@ class TestBoards:
         fake_id(bindir, 1000)
         access = parse_profile(py_run(root, bindir, tmp_path)).access()
         assert (access.ssh_server, access.sudo_present, access.sudo_without_password) == ("openssh", False, False)
-        assert access.keygen_signatures is True and access.dietpi_software is False
+        assert access.keygen_signatures is True and access.dropbear_packages == ()
 
     @pytest.mark.parametrize("kind", sorted(EXPECTED))
     def test_root_needs_no_sudo(self, tmp_path, kind):
@@ -361,7 +367,7 @@ class TestSchema:
 
     def test_the_access_keys_are_never_required_or_booleans(self):
         assert ACCESS_KEYS == ["SSH_SERVER", "SSH_SERVER_VERSION", "SSH_SERVER_SOURCE", "SSH_SERVERS_INSTALLED",
-                               "SUDO", "SSH_KEYGEN", "SSH_KEYGEN_VERSION", "PACKAGE_MANAGER", "DIETPI_SOFTWARE"]
+                               "SUDO", "SSH_KEYGEN", "SSH_KEYGEN_VERSION", "PACKAGE_MANAGER", "DROPBEAR_PACKAGES"]
         for key in ACCESS_KEYS:
             spec = RAW_SCHEMA["keys"][key]
             assert spec["type"] != "bool" and not spec.get("required") and spec["since"] == "3.3.0", key
@@ -376,7 +382,11 @@ class TestSchema:
         assert probe.SSH_KEYGEN_PATHS == tuple(t["ssh_keygen_paths"])
         assert probe.SSH_CLIENT_PATHS == tuple(t["ssh_client_paths"])
         assert probe.PACKAGE_MANAGERS == t["package_managers"]
-        assert probe.DIETPI_SOFTWARE_PATH == t["dietpi_software_path"]
+        assert probe.DROPBEAR_PACKAGE_QUERIES == t["dropbear_package_queries"]
+        assert probe.DROPBEAR_PACKAGES == t["dropbear_packages"]
+        assert set(probe.DROPBEAR_QUERY_ARGS) == set(t["dropbear_packages"])
+        from orchestrator.remote import gate   # the pairing asks the board for the same packages
+        assert {k: list(v) for k, v in gate.DROPBEAR_PACKAGES.items()} == t["dropbear_packages"]
         from test_hardware_probe import sh_table
         assert sh_table("ssh_server_name") == t["ssh_server_names"]
         pairs = lambda name: dict(item.rsplit(":", 1) for item in sh_list(name))
@@ -388,7 +398,12 @@ class TestSchema:
         assert sh_list("SUDO_PATHS") == t["sudo_paths"]
         assert sh_list("SSH_KEYGEN_PATHS") == t["ssh_keygen_paths"]
         assert sh_list("SSH_CLIENT_PATHS") == t["ssh_client_paths"]
-        assert f"DIETPI_SOFTWARE_PATH={t['dietpi_software_path']}" in PROBE_SH.read_text(encoding="utf-8")
+        assert pairs("DROPBEAR_PACKAGE_QUERIES") == t["dropbear_package_queries"]
+        assert list(pairs("DROPBEAR_PACKAGE_QUERIES")) == list(t["dropbear_package_queries"])
+        for kind, names in t["dropbear_packages"].items():
+            assert sh_list("DROPBEAR_PACKAGES_" + kind.upper()) == names, kind
+        assert "dietpi" not in PROBE_SH.read_text(encoding="utf-8").split("access_facts() {", 1)[1].split(
+            "\naccess_facts\n", 1)[0]
 
     @pytest.mark.parametrize("name", sorted(p.name for p in FIXTURES.glob("schema2_*.txt")))
     def test_older_profiles_stay_readable_without_access(self, tmp_path, name):
@@ -410,9 +425,24 @@ class TestSchema:
         assert parse_profile_json(json.dumps(profile.as_dict())).access() == profile.access()
         assert profile.stable().access() == profile.access()   # the access keys are stable: kept in the store
 
+    def test_an_earlier_profile_with_dietpi_software_stays_readable_and_it_is_ignored(self, dietpi_text):
+        """Regression (failed before: the probe wrote DIETPI_SOFTWARE, the way of DietPi's software store, which the
+        maintainer's decision rules out): a file of an earlier 3.3.0 probe that still has the key is read, the key is
+        dropped (unknown_key) and nothing of it reaches the access record."""
+        old = dietpi_text.replace("DROPBEAR_PACKAGES=dropbear,dropbear-bin,dropbear-run\n", "DIETPI_SOFTWARE=present\n")
+        assert "DIETPI_SOFTWARE=present" in old and "DROPBEAR_PACKAGES" not in old
+        profile = parse_profile(old)
+        assert "DIETPI_SOFTWARE" not in profile.values and "unknown_key:DIETPI_SOFTWARE" in profile.notes
+        access = profile.access()
+        assert access.ssh_server == "dropbear" and access.dropbear_packages == ()
+        assert "dietpi" not in json.dumps(access.as_dict())
+        assert "DIETPI_SOFTWARE" not in RAW_SCHEMA["keys"] and "dietpi_software_path" not in RAW_SCHEMA["tables"]
+
     def test_values_outside_the_schema_are_refused(self, dietpi_text):
         from orchestrator.runtime.profile import ProfileError
-        for bad in ("SSH_SERVER=telnet", "SUDO=yes", "PACKAGE_MANAGER=/usr/bin/apt", "SSH_SERVERS_INSTALLED=lsh"):
+        for bad in ("SSH_SERVER=telnet", "SUDO=yes", "PACKAGE_MANAGER=/usr/bin/apt", "SSH_SERVERS_INSTALLED=lsh",
+                    "SSH_SERVER=dropbear\nDROPBEAR_PACKAGES=openssh-server",
+                    "SSH_SERVER=dropbear\nDROPBEAR_PACKAGES=dropbear;rm"):
             with pytest.raises(ProfileError):
                 parse_profile(dietpi_text.replace("SSH_SERVER=dropbear", bad))
 
@@ -443,7 +473,8 @@ class TestLabels:
         lines = cli_module._profile_summary(parse_profile(dietpi_text))
         access = [line for line in lines if line.startswith("Access:")]
         assert access == [("Access: SSH server Dropbear 2022.83, running, sudo without a password, no ssh-keygen, "
-                           "init systemd, packages through apt, dietpi-software")]
+                           "init systemd, packages through apt, Dropbear from the packages dropbear, dropbear-bin, "
+                           "dropbear-run")]
 
     def test_an_old_profile_prints_no_access_line(self):
         from orchestrator import cli as cli_module
@@ -456,7 +487,7 @@ class TestLabels:
         assert en == {k for k in TEXTS["de"] if k.startswith("deploy.access.")}
         facts = [AccessFacts(ssh_server=s, ssh_server_source=src, ssh_servers_installed=("openssh", "dropbear"),
                              sudo=sudo, ssh_keygen=kg, ssh_keygen_version=v, init_system="openrc",
-                             package_manager="apk", dietpi_software=True)
+                             package_manager="apk", dropbear_packages=("dropbear",))
                  for s, src, sudo, kg, v in (("openssh", "socket", "root", "openssh", "9.2"),
                                              ("dropbear", "service", "password", "openssh", "8.0"),
                                              ("other", "binary", "absent", "openssh", None),
@@ -490,7 +521,8 @@ class TestLabels:
         out = fm.tool_registry.call("get_hardware_probe", {"probe_id": probe_id}, ToolContext("ditto", session="s"))
         assert out.access.ssh_server == "dropbear" and out.access.sudo == "nopasswd"
         assert out.access.sudo_without_password is True and out.access.keygen_signatures is False
-        assert out.access.dietpi_software is True and out.access.package_manager == "apt"
+        assert out.access.dropbear_packages == ["dropbear", "dropbear-bin", "dropbear-run"]
+        assert out.access.package_manager == "apt"
         assert out.access.summary.startswith("Access: SSH server Dropbear 2022.83")
         schema = fm.tool_registry.get("get_hardware_probe").output_model.model_json_schema()
         assert "access" in schema["properties"]

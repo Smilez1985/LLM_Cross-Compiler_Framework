@@ -2137,7 +2137,8 @@ that runs the model, so the probe runs on that machine.
 - **What it prints**: a short summary of the profile (system, CPU, GPU, NPU, Hailo) and, since probe 3.3.0, an
   `Access:` line: the SSH server (OpenSSH or Dropbear) and its version, sudo (without a password, asks for one, absent,
   or the probe ran as root), the ssh-keygen version and whether it can check signatures, the init system, the package
-  manager and DietPi's dietpi-software. The Builder tab's scan shows the same line; an older probe file has none.
+  manager and the installed packages that provide Dropbear (asked from the package manager without root, such as
+  `dropbear, dropbear-bin, dropbear-run`). The Builder tab's scan shows the same line; an older probe file has none.
 - **A board's probe file** (`--import FILE`): a `target_hardware_config.txt` you copied from a board (written there
   by `scripts/hardware_probe.sh` or `llm-cli scan`) is checked like any probe file from outside, stored under a new
   random ID with your label (default: the board model in the file) and the CLI prints that **probe id** and the

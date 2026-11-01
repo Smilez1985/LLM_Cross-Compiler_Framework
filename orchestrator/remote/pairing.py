@@ -306,13 +306,17 @@ def _switch_to_openssh(client: Any, state_dir: Path, bundle: Any, line: str, off
         _step(audit, via, "board_key_tier_installed", {"tier": "root", "port": plan.port})
         report = [f"OpenSSH answers on port {plan.port} and the framework's key is paired there with the root-owned "
                   "key line."]
-        if chooser.confirm("dropbear", ["Remove Dropbear now? The board is then reached only through OpenSSH on port "
-                                        f"{plan.port}; your current session ends when Dropbear stops."]):
-            done, why = openssh_switch.disable_dropbear(transport.ParamikoTransport(fresh).run, password)
-            _step(audit, via, "board_dropbear_disabled", {"dietpi": plan.dietpi}, "ok" if done else "error", why)
-            report.append("Dropbear is off." if done else
-                          f"Dropbear could not be turned off ({openssh_switch.SWITCH_REASONS.get(why, why)}); it "
-                          "keeps running next to OpenSSH.")
+        going = plan.removable()
+        if chooser.confirm("dropbear", [
+                "Remove Dropbear now? The board is then reached only through OpenSSH on port "
+                f"{plan.port}; your current session ends when Dropbear stops.",
+                "Its service is stopped and disabled first, then the board's package manager removes only the "
+                "packages that provide it" + (f" ({', '.join(going)})" if going else "")
+                + "; nothing is purged or autoremoved."]):
+            done = openssh_switch.remove_dropbear(transport.ParamikoTransport(fresh).run, password)
+            _step(audit, via, "board_dropbear_disabled", {"dietpi": plan.dietpi, **done.as_dict()},
+                  "ok" if done.ok else "error", done.reason)
+            report.append(openssh_switch.removal_text(done))
         else:
             _step(audit, via, "board_dropbear_disabled", {"dietpi": plan.dietpi}, "error", "declined")
             report.append("Dropbear keeps running next to OpenSSH; you can remove it later.")

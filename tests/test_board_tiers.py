@@ -279,8 +279,8 @@ def test_pairing_the_home_gate_writes_the_signing_key_after_its_self_test(tmp_pa
 # --- (1) tier detection and the offer ------------------------------------------------------------------------------
 
 DROPBEAR_FACTS = ("running=dropbear\nopenssh=no\ndropbear=yes\nsudo=password\nkeygen=none\nopenssl=yes\n"
-                  "verifier=yes\nfamily=debian\ndietpi=yes\nmanager=apt-get\nmanager=dietpi-software\ninit=systemd\n"
-                  "port=22\n")
+                  "verifier=yes\nfamily=debian\ndietpi=yes\nmanager=apt-get\ninit=systemd\n"
+                  "dropbear_pkg=dropbear\ndropbear_pkg=dropbear-bin\ndropbear_pkg=dropbear-run\nport=22\n")
 NOSUDO_FACTS = "running=openssh\nopenssh=yes\nsudo=none\nkeygen=yes\nverifier=yes\nfamily=alpine\nmanager=apk\n"
 
 
@@ -288,7 +288,8 @@ def test_the_tier_facts_are_fixed_words_only():
     facts = key_tiers.TierFacts.parse(DROPBEAR_FACTS + "family=/home/radxa\nmanager=rm -rf\nsudo=$(id)\n",
                                       banner="SSH-2.0-dropbear_2022.83")
     assert facts.server == "dropbear" and facts.sudo == "password" and facts.family == "debian"
-    assert facts.managers == ("apt-get", "dietpi-software") and facts.port == 22 and facts.can_verify
+    assert facts.managers == ("apt-get",) and facts.port == 22 and facts.can_verify
+    assert facts.dropbear_packages == ("dropbear", "dropbear-bin", "dropbear-run")
     assert key_tiers.TierFacts.parse("", banner="SSH-2.0-OpenSSH_9.2p1").server == "openssh"
     for value in facts.as_dict().values():
         assert "/" not in str(value)
@@ -303,6 +304,26 @@ def test_tier_facts_run_on_a_board_and_read_back(tmp_path):
                                "TMPDIR": str(tmp_path), "SSH_CONNECTION": "192.0.2.10 50000 192.0.2.20 2222"})
     facts = key_tiers.TierFacts.parse(done.stdout.decode())
     assert facts.sudo == "password" and facts.port == 2222 and facts.init in ("systemd", "openrc", "other")
+
+
+@POSIX
+def test_tier_facts_name_the_packages_that_provide_dropbear_asked_without_root(tmp_path):
+    """Regression (failed before: the pairing knew of dietpi-software as a 'manager' and nothing of Dropbear's own
+    packages): the board's package manager is asked without sudo which installed packages provide Dropbear; only
+    fixed package names come back, never the package manager's own text."""
+    log = tmp_path / "sudo.log"
+    bin_dir = _bin(tmp_path, {
+        "sudo": f'echo "$*" >> "{log}"; exit 1',
+        "dpkg-query": 'printf "%s\\n" "dropbear-bin install ok installed" "dropbear-initramfs install ok installed" '
+                      '"dropbear-run deinstall ok config-files" "dropbear half-installed"; exit 1',
+    })
+    done = subprocess.run(["sh", "-c", str(gate.script("tier-facts"))], input=b"\n", capture_output=True, timeout=60,
+                          env={"PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}", "HOME": str(tmp_path),
+                               "TMPDIR": str(tmp_path)})
+    facts = key_tiers.TierFacts.parse(done.stdout.decode())
+    assert facts.dropbear_packages == ("dropbear-bin", "dropbear-initramfs"), done.stdout
+    assert "dpkg-query" not in (log.read_text() if log.exists() else "")
+    assert facts.as_dict()["dropbear_packages"] == ["dropbear-bin", "dropbear-initramfs"]
 
 
 def test_the_offer_follows_the_board_and_the_mode():
@@ -451,9 +472,16 @@ def test_the_switch_needs_sudo_and_a_known_package_manager():
         openssh_switch.plan(key_tiers.TierFacts(sudo="none", managers=("apt-get",)))
     with pytest.raises(openssh_switch.SwitchUnavailable):
         openssh_switch.plan(key_tiers.TierFacts(sudo="nopass", managers=()))
-    dietpi = openssh_switch.plan(key_tiers.TierFacts(sudo="nopass", family="debian", dietpi="yes",
-                                                     managers=("apt-get", "dietpi-software")))
-    assert dietpi.manager == "apt-get" and any("dietpi-software" in line for line in dietpi.lines)
+    # DietPi: both steps through apt, its package manager underneath; dietpi-software is never named or used
+    dietpi = openssh_switch.plan(key_tiers.TierFacts(
+        sudo="nopass", family="debian", dietpi="yes", managers=("apt-get",),
+        dropbear_packages=("dropbear", "dropbear-bin", "dropbear-run", "dropbear-initramfs")))
+    assert dietpi.manager == "apt-get" and not any("dietpi-software" in line for line in dietpi.lines)
+    assert any(line.startswith("On DietPi, both steps use apt") for line in dietpi.lines)
+    assert dietpi.removable() == ("dropbear", "dropbear-run")
+    assert any("(dropbear, dropbear-run)" in line and "never purge or autoremove" in line for line in dietpi.lines)
+    assert any(line.startswith("dropbear-initramfs stays installed") for line in dietpi.lines)
+    assert dietpi.as_dict()["dropbear_packages"][-1] == "dropbear-initramfs"
 
 
 @POSIX
@@ -484,8 +512,8 @@ def test_the_switch_keeps_dropbear_until_the_separate_yes_and_logs_every_step(fr
                                                                                                     "installed"))
     monkeypatch.setattr(openssh_switch, "wait_until_answers",
                         lambda host, port: order.append(("wait", port)) or "SSH-2.0-OpenSSH_9.2p1")
-    monkeypatch.setattr(openssh_switch, "disable_dropbear", lambda run, pw: order.append("dropbear-off") or (True,
-                                                                                                             ""))
+    removed = openssh_switch.DropbearRemoval(True, "removed", "", ("dropbear", "dropbear-run"))
+    monkeypatch.setattr(openssh_switch, "remove_dropbear", lambda run, pw: order.append("dropbear-off") or removed)
 
     class Key:
         def get_name(self):
@@ -514,6 +542,11 @@ def test_the_switch_keeps_dropbear_until_the_separate_yes_and_logs_every_step(fr
         tools = [row[1] for row in audit.rows]
         assert tools[-1] == "board_dropbear_disabled" and "board_openssh_installed" in tools
         assert all("board.example.com" not in str(row[3]) and "dietpi" != row[3].get("user") for row in audit.rows)
+        if off:   # the audit row names the removal and its packages (fixed words), the person reads it plainly
+            assert audit.rows[-1][3]["removal"] == "removed"
+            assert audit.rows[-1][3]["packages"] == ["dropbear", "dropbear-run"]
+            assert any("dropbear, dropbear-run" in line and "configuration files stay" in line
+                       for line in chooser.told), chooser.told
 
 
 def test_the_switch_does_nothing_without_the_yes_to_its_plan(framework_key, monkeypatch):

@@ -320,8 +320,23 @@ tables:
     /usr/sbin/pkg: other
     /usr/local/bin/brew: other
     /opt/homebrew/bin/brew: other
-  # DietPi's software installer (DIETPI_SOFTWARE=present when the file exists)
-  dietpi_software_path: /boot/dietpi/dietpi-software
+  # The package managers' query programs that say, without root, which packages are installed (the first one found
+  # is asked) -> DROPBEAR_PACKAGES. dpkg: dpkg-query -W -f '${Package} ${Status}\n' NAMES (a line ending in
+  # " installed" counts); pacman: pacman -Qq NAMES; apk: apk info -e NAMES; rpm: rpm -q --qf '%{NAME}\n' NAMES.
+  dropbear_package_queries:
+    /usr/bin/dpkg-query: dpkg
+    /usr/bin/pacman: pacman
+    /sbin/apk: apk
+    /usr/bin/apk: apk
+    /usr/bin/rpm: rpm
+    /bin/rpm: rpm
+  # The packages that may provide Dropbear, per query program (orchestrator/remote/gate.py DROPBEAR_PACKAGES is the
+  # same list: the pairing asks the board again and removes only these, never dropbear-initramfs).
+  dropbear_packages:
+    dpkg: [dropbear, dropbear-bin, dropbear-run, dropbear-initramfs]
+    pacman: [dropbear]
+    apk: [dropbear, dropbear-openrc]
+    rpm: [dropbear]
   # Codes in PROBE_WARNINGS: "<code>" or "<code>:<KEY>". Unknown codes are accepted (display only) if they match
   # the item pattern of PROBE_WARNINGS.
   warning_codes:
@@ -630,7 +645,7 @@ keys:
   # HardwareProfile.access() returns them as one typed record (None for a profile of a probe before 3.3.0). The
   # pairing takes its protection tier from them (OpenSSH with sudo: the root-owned key line; Dropbear or no sudo:
   # the weaker tiers), and a board installer derives its plan from them (OpenSSH as a dependency, the package
-  # manager, DietPi's dietpi-software). INIT_SYSTEM above is the init system of these facts.
+  # manager, the packages that provide Dropbear). INIT_SYSTEM above is the init system of these facts.
   SSH_SERVER:
     group: access
     type: enum
@@ -761,10 +776,11 @@ keys:
       windows: "constant other"
     normalise: "left out when none is found"
     consumers: [deploy, gui, mcp]
-  DIETPI_SOFTWARE:
+  DROPBEAR_PACKAGES:
     group: access
-    type: enum
-    values: [present]
+    type: list
+    item_pattern: '^dropbear(-(bin|run|initramfs|openrc))?$'
+    max_items: 5
     only_os: [linux]
     since: 3.3.0
     required: false
@@ -772,8 +788,12 @@ keys:
     perf: none
     platforms: [linux]
     sources:
-      linux: "tables.dietpi_software_path exists (DietPi's dietpi-software, the way DietPi installs OpenSSH)"
-    normalise: "present, else left out"
+      linux: >-
+        the first query program of tables.dropbear_package_queries that exists is asked which packages of
+        tables.dropbear_packages are installed (no root, no network); only those fixed names are kept, in the
+        table's order. A file of an earlier 3.3.0 probe with DIETPI_SOFTWARE stays readable: that key is dropped
+        (unknown_key) and ignored
+    normalise: "comma-separated, left out when none is installed or no query program is there"
     consumers: [deploy, gui, mcp]
 
   # --- CPU identity -------------------------------------------------------------------------------------------
