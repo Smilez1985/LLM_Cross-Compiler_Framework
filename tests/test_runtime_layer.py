@@ -632,10 +632,13 @@ def test_the_cli_shows_the_layer_and_sets_the_way(tmp_path, monkeypatch):
 
 @pytest.mark.skipif(REAL_TOOLBOX is None, reason="the real tools come from the CI job 'Runtime layer tools'")
 def test_the_real_tools_are_static_and_run():
-    """The tools the way "build" made: static programs (nothing loads from an image), and they run."""
+    """The tools the way "build" made: static programs (nothing loads from an image), and they run. Neither names
+    nsswitch.conf: a static glibc setpriv loaded the NSS modules of the host's own glibc for its id lookups (Ubuntu's
+    libnss_systemd) and died with SIGFPE, so both are linked against musl."""
     for tool in layer.TOOLS:
         path = REAL_TOOLBOX / f"{tool}-{layer.machine()}"
         assert layer.is_static_elf(path.read_bytes()), tool
+        assert b"nsswitch.conf" not in path.read_bytes(), f"{tool} would load NSS modules"
     assert subprocess.run([str(REAL_TOOLBOX / f"busybox-{layer.machine()}"), "true"], timeout=30).returncode == 0
     version = subprocess.run([str(REAL_TOOLBOX / f"setpriv-{layer.machine()}"), "--version"], capture_output=True,
                              text=True, timeout=30)

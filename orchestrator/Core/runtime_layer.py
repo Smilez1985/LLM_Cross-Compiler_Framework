@@ -69,7 +69,7 @@ DEFAULT_TOOLBOX_WAY = "build"
 # The framework's builder image: a pinned base (the same digest as the framework's own image) and pinned sources
 BUILDER_BASE = "debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f"
 BUILDER_DOCKERFILE = SHIPPED_DIR / "toolbox" / "Dockerfile"
-BUILDER_TAG = "llm-framework/runtime-toolbox-builder:1"
+BUILDER_TAG = "llm-framework/runtime-toolbox-builder:2"
 BUILD_SOURCES: Dict[str, Dict[str, str]] = {
     "util-linux": {"url": "https://cdn.kernel.org/pub/linux/utils/util-linux/v2.40/util-linux-2.40.4.tar.xz",
                    "sha256": "5c1daf733b04e9859afdc3bd87cc481180ee0f88b5c0946b16fdec931975fb79",
@@ -77,6 +77,11 @@ BUILD_SOURCES: Dict[str, Dict[str, str]] = {
     "busybox": {"url": "https://busybox.net/downloads/busybox-1.37.0.tar.bz2",
                 "sha256": "3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4",
                 "file": "busybox-1.37.0.tar.bz2"},
+    # setpriv's capability library, built static for musl (a static glibc setpriv loads the NSS modules of the
+    # image's or the host's own glibc; see the Dockerfile)
+    "libcap-ng": {"url": "https://people.redhat.com/sgrubb/libcap-ng/libcap-ng-0.8.5.tar.gz",
+                  "sha256": "3ba5294d1cbdfa98afaacfbc00b6af9ed2b83e8a21817185dfd844cc8c7ac6ff",
+                  "file": "libcap-ng-0.8.5.tar.gz"},
 }
 # Prebuilt static programs of the way "fetch": ONE pinned table in the repository (orchestrator/runtime_layer/toolbox/
 # prebuilt.json), per tool and architecture its URL and sha256. Debian's busybox-static is static and pinned there.
