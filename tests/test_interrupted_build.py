@@ -289,3 +289,16 @@ def test_continue_when_the_engine_cannot_take_the_build_says_so_plainly(tmp_path
     assert e.value.code == "failed" and "Max concurrent builds reached" in str(e.value)
     assert "job_0123456789ab" in ib.pending(state), "the question still waits"
     assert ib.kept_build(tmp_path, "job_0123456789ab") is not None
+
+
+def test_the_persons_own_status_read_records_no_ai_question(tmp_path):
+    """Regression: get_build_status called by the person (actor cli or gui) recorded a pending 'AI asked' question
+    under the person's own name, which `llm-cli build interrupted list` then showed as an AI's."""
+    kept(tmp_path / "cache")
+    state = tmp_path / "state"
+    framework = SimpleNamespace(config=SimpleNamespace(user_state_dir=state,
+                                                       get=lambda k, d=None: str(tmp_path / "cache") if k == "cache_dir"
+                                                       else d),
+                                resolve_path=lambda v: Path(v))
+    assert len(ib.ai_notes(framework, "req_1a2b3c4d", "cli")) == 1
+    assert ib.pending(state) == {}
