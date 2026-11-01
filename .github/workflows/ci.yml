@@ -123,8 +123,8 @@ jobs:
     # The runtime layer's two static tools made the way "build" (scripts/runtime_toolbox.py: the framework's builder
     # image over the pinned util-linux and busybox tarballs, each checked by its sha256), then the runtime layer's
     # tests on the real kernel with these real tools (as root: they hand the runner exactly CAP_SETUID and
-    # CAP_SETGID). The tools and their SHA256SUMS are uploaded as a workflow artifact; publishing a release with them
-    # is the maintainer's step (orchestrator/runtime_layer/toolbox/prebuilt.json then pins their URL and sha256).
+    # CAP_SETGID). The tools and their SHA256SUMS are uploaded as a workflow artifact for inspection only: util-linux
+    # setpriv is C and never a release asset; the framework's own Rust llmcf-setpriv is (release-tools.yml).
     name: Runtime layer tools (Linux, real static busybox and setpriv)
     runs-on: ubuntu-latest
     timeout-minutes: 30
