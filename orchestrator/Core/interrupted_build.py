@@ -380,7 +380,11 @@ def continue_build(engine: Any, item: KeptBuild, actor: str, state_dir: Optional
     """The person's "continue": the same build, on the same work folder (the stage runner resumes every finished
     stage whose inputs are unchanged). Only the person; an AI's request is refused with needs_person."""
     require_person(actor)
-    build_id = engine.build_model(configuration(item))
+    from orchestrator.Core.builder import ValidationError
+    try:
+        build_id = engine.build_model(configuration(item))
+    except (RuntimeError, ValidationError, ValueError) as e:   # every slot busy, the same build still running here
+        raise InterruptedBuildError(f"{item.label} could not be continued now: {e}", "failed") from None
     _settled(state_dir, item.build_id)
     return build_id
 

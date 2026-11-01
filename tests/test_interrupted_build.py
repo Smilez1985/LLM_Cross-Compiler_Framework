@@ -271,3 +271,21 @@ def test_a_build_whose_process_ended_while_it_ran_is_interrupted(tmp_path):
     kept(tmp_path)
     _running_record(tmp_path, "job_0123456789ab", alive=False)
     assert [k.build_id for k in ib.kept_builds(tmp_path)] == ["job_0123456789ab"]
+
+
+def test_continue_when_the_engine_cannot_take_the_build_says_so_plainly(tmp_path):
+    """Regression: the engine's refusal (every build slot busy, the same build still running here) escaped decide()
+    as a BuildSlotsBusy or RuntimeError, which the CLI printed as a traceback and the GUI's question did not catch.
+    It is an InterruptedBuildError now, and the question stays for the person (the build is still kept)."""
+    from orchestrator.Core.builder import BuildSlotsBusy
+    kept(tmp_path)
+    state = tmp_path / "state"
+    ib.record_pending(state, ib.kept_build(tmp_path, "job_0123456789ab"), "ditto")
+
+    def busy(_config):
+        raise BuildSlotsBusy("Max concurrent builds reached")
+    with pytest.raises(ib.InterruptedBuildError) as e:
+        ib.decide(SimpleNamespace(build_model=busy), tmp_path, "job_0123456789ab", "continue", "cli", state_dir=state)
+    assert e.value.code == "failed" and "Max concurrent builds reached" in str(e.value)
+    assert "job_0123456789ab" in ib.pending(state), "the question still waits"
+    assert ib.kept_build(tmp_path, "job_0123456789ab") is not None
