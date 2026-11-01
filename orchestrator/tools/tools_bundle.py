@@ -131,7 +131,8 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
             return store, store.get(bundle_id)
         except gen.BundleError:
             raise ToolError(f"No stored bundle '{bundle_id}'.", code="unknown_id", field="bundle_id",
-                            next="Ask the person which bundle they built (the framework's Board bundle window).") from None
+                            next="Ask the person which bundle they built (the framework's Board bundle "
+                                 "window).") from None
 
     def deploy_facts(inp: BundleDeployIn, ctx: ToolContext) -> CallFacts:
         from orchestrator.runtime.bundle import service
