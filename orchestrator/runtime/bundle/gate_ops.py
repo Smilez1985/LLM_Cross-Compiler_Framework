@@ -108,9 +108,17 @@ def _root_body(action: str, bundle: str) -> str:
         + refuse.format("refused", f"{ROOT} of this bundle is not on the board (deploy the bundle first)") + " ;; "
         f'*) echo "llmcf-bundle: result=absent changed=0 {ROOT} of this bundle is not on the board"; exit 0 ;; '
         "esac; fi",
+        # where llmcf-install cannot run as root at all (no root-owned signer, no sudo), it made nothing of the
+        # bundle: plan and apply are refused, the other actions say absent, so the installer's own status, rollback
+        # and uninstall stay possible there, as before llmcf-install
         "LLMCF_HOME_GATE=; llmcf_trusted_signers || { "
+        + f"case {action} in plan|apply) "
         + refuse.format("refused", "this board holds no root-owned signing key of the framework, so no root action "
-                                   "runs (pair it again with the board password)") + "; }",
+                                   "runs (pair it again with the board password)") + " ;; "
+        f'*) echo "llmcf-bundle: result=absent changed=0 this board holds no root-owned signing key of the framework, '
+        f'so {ROOT} never ran here"; exit 0 ;; esac; }}',
+        f"case {action} in plan|apply) ;; *) command -v sudo >/dev/null 2>&1 || {{ echo \"llmcf-bundle: "
+        f'result=absent changed=0 the board has no sudo, so {ROOT} never ran here"; exit 0; }} ;; esac',
         f'llmcf_r=$(mktemp -d "$llmcf_b/{RUN_PREFIX}XXXXXXXX") || exit 3',
         "trap 'cd /; rm -rf \"$llmcf_r\"' EXIT",
         f'cp -- "$llmcf_k/{ROOT}" "$llmcf_r/{ROOT}" && cp -- "$llmcf_k/{ROOT}.sig" "$llmcf_r/{ROOT}.sig" || exit 3',
