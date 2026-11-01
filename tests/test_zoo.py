@@ -1210,13 +1210,23 @@ def test_automation_code_never_publishes_or_installs_a_pack_from_a_file():
 # --- GUI ------------------------------------------------------------------------------------------------------
 
 def wait(hub, qapp):
-    for _ in range(50):
+    """Until the hub's background tasks are done and their queued results are delivered. A finished task's result
+    reaches the GUI thread as a queued signal, and handling it may start the next task (an install starts the index
+    refresh), so the hub counts as settled only after several quiet rounds in a row (a slow Windows runner delivered
+    the refresh's result after a single processEvents)."""
+    import time
+    quiet = 0
+    for _ in range(200):
         for task in list(hub._tasks):
             task.wait(5000)
         qapp.processEvents()
-        if not any(t.isRunning() for t in hub._tasks):
-            qapp.processEvents()
+        if any(t.isRunning() for t in hub._tasks):
+            quiet = 0
+            continue
+        quiet += 1
+        if quiet >= 5:
             return
+        time.sleep(0.02)
 
 
 def test_hub_smoke(qapp, world, tmp_path, monkeypatch):
