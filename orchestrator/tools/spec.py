@@ -304,7 +304,8 @@ DELETION_KINDS = ("artifact", "model_file", "download", "knowledge_snapshot", "t
                   "runtime_record",  # the old mode's entries in Ditto's records and its image build log (W2), and
                   "knowledge_store",  # the old knowledge base storage after its conversion (rag/migration.py)
                   "build_dependency",  # a pinned source of the build dependency cache (runtime/build/deps.py)
-                  "failed_build")  # what an interrupted build left, kept to continue it (Core/interrupted_build.py)
+                  "failed_build",  # what an interrupted build left, kept to continue it (Core/interrupted_build.py)
+                  "bundle")  # a stored board bundle (runtime/bundle/generator.py BundleStore)
 # Docker's own objects have no host path; every other item is listed with its full path.
 NO_PATH_KINDS = ("docker_image", "build_cache", "docker_container")
 DeletionKind = Literal[DELETION_KINDS]  # type: ignore[valid-type]

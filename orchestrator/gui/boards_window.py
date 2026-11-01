@@ -103,61 +103,15 @@ def _exec(dialog: QDialog) -> bool:
     return bool(dialog.exec())
 
 
-class BoardsWindow(QDialog):
-    """The person's boards; one step at a time, each off the GUI thread."""
+class BoardSteps:
+    """One step at a time off the GUI thread, with a busy line, Cancel (it closes the step's board session) and the
+    person's words for a failed board step: the one step runner of the Boards window and the Board bundle window
+    (gui/bundle_window.py). A window using it has `lbl_busy`, `btn_cancel`, `output`, `framework`, `lang` and
+    `_update_buttons()`, calls `_init_steps()` once, and names its title key in TITLE_KEY."""
 
-    def __init__(self, framework: Any, parent: Optional[QWidget] = None, lang: Optional[str] = None):
-        super().__init__(parent)
-        self.setObjectName("dlg_boards")
-        self.framework = framework
-        self.lang = lang or current_language()
-        self.setWindowTitle(self._t("boards.title"))
-        self.resize(1200, 620)
-        layout = QVBoxLayout(self)
-        self.intro = plain_label(self._t("boards.intro"))
-        layout.addWidget(self.intro)
-        self.table = QTableWidget(0, len(COLUMNS), self)
-        self.table.setObjectName("tbl_boards")
-        self.table.setHorizontalHeaderLabels([self._t(c) for c in COLUMNS])
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.itemSelectionChanged.connect(self._update_buttons)
-        layout.addWidget(self.table, stretch=2)
-        self.buttons: Dict[str, QPushButton] = {}
-        for name, key, slot, _need in BUTTONS:
-            button = QPushButton(button_text(self._t(key)), self)
-            button.setObjectName(name)
-            button.setAutoDefault(False)
-            button.clicked.connect(getattr(self, slot))
-            self.buttons[name] = button
-        for row in ROWS:
-            line = QHBoxLayout()
-            for name in row:
-                line.addWidget(self.buttons[name])
-            line.addStretch(1)
-            layout.addLayout(line)
-        busy = QHBoxLayout()
-        self.lbl_busy = plain_label("")
-        self.lbl_busy.setObjectName("lbl_boards_busy")
-        self.btn_cancel = QPushButton(button_text(self._t("boards.btn.cancel")), self)
-        self.btn_cancel.setObjectName("btn_boards_cancel")
-        self.btn_cancel.setAutoDefault(False)
-        self.btn_cancel.clicked.connect(self._on_cancel)
-        self.btn_cancel.setVisible(False)
-        busy.addWidget(self.lbl_busy, stretch=1)
-        busy.addWidget(self.btn_cancel)
-        layout.addLayout(busy)
-        self.output = QPlainTextEdit(self)   # plain text by nature: never rich text
-        self.output.setObjectName("txt_boards_output")
-        self.output.setReadOnly(True)
-        layout.addWidget(self.output, stretch=1)
-        close = QDialogButtonBox(QDialogButtonBox.Close, self)
-        close.rejected.connect(self.reject)
-        layout.addWidget(close)
-        self.entries: List[Dict[str, Any]] = []
+    TITLE_KEY = "boards.title"
+
+    def _init_steps(self) -> None:
         self._token: Optional[object] = None
         self._progress_token: Optional[object] = None
         self._done: Optional[Callable[[Any], None]] = None
@@ -167,7 +121,6 @@ class BoardsWindow(QDialog):
         self._worker: Optional[threading.Thread] = None
         from orchestrator.gui.worker_relay import worker_relay
         worker_relay().done.connect(self._finished, Qt.QueuedConnection)
-        self._update_buttons()
 
     # --- basics ---------------------------------------------------------------------------------------------------
 
@@ -223,107 +176,10 @@ class BoardsWindow(QDialog):
         return framework_mode(getattr(self.framework, "config", None))
 
     def _info(self, text: str, kind: str = "information") -> None:
-        plain_box(self, kind, self._t("boards.title"), text)
+        plain_box(self, kind, self._t(self.TITLE_KEY), text)
 
     def _say(self, text: str) -> None:
         self.output.appendPlainText(one_line(text) if "\n" not in text else text)
-
-    # --- the table ------------------------------------------------------------------------------------------------
-
-    def reload(self) -> None:
-        """Reads the boards again (files only; no board is contacted)."""
-        from orchestrator.runtime.device.person_steps import boards_overview
-        try:
-            self.entries = boards_overview(self.state_dir)
-        except Exception as e:  # noqa: BLE001 - e.g. no per-user folder: shown as plain text
-            self.entries = []
-            self.intro.setText(f"{self._t('boards.intro')}\n\n{self._t('boards.err.failed', reason=one_line(str(e)))}")
-        else:
-            self.intro.setText(self._t("boards.intro") if self.entries else
-                               f"{self._t('boards.intro')}\n\n{self._t('boards.empty')}")
-        self.table.setRowCount(len(self.entries))
-        for row, entry in enumerate(self.entries):
-            for column, value in enumerate(self._cells(entry)):
-                cell = QTableWidgetItem(one_line(value))   # plain text, never rich text
-                if column == 0:
-                    cell.setData(Qt.UserRole, entry["device_id"])
-                self.table.setItem(row, column, cell)
-        self._update_buttons()
-
-    def _cells(self, entry: Dict[str, Any]) -> List[str]:
-        t, dash = self._t, self._t("boards.dash")
-        trusted, stored = entry.get("trusted"), entry.get("stored")
-        address = (trusted or {}).get("address") or (stored or {}).get("address") or dash
-        if trusted:
-            key = t(f"boards.key.{trusted['host_key']}", key_type=trusted["key_type"],
-                    fingerprint=trusted["fingerprint"])
-            last = trusted.get("last_deploy") or {}   # may hold only a recorded contact for Mojo: no deploy then
-            last_text = t("boards.last", at=last.get("at"), result=t("boards.last.ok" if last.get("ok") else
-                                                                     "boards.last.failed")) if last.get("at") else dash
-            trust = [trusted["user"], key, t("boards.yes" if trusted["paired"] else "boards.no"), trusted["trusted"],
-                     last_text]
-        else:
-            trust = [dash, t("boards.not_trusted"), dash, dash, dash]
-        if stored:
-            s = stored.get("system") or {}
-            system = t("boards.system", os=s.get("OS_ID") or s.get("OS") or "?", version=s.get("OS_VERSION_ID") or "",
-                       arch=s.get("ARCH") or "", libc=s.get("LIBC") or "?", libc_version=s.get("LIBC_VERSION") or "",
-                       init=s.get("INIT_SYSTEM") or "?") if s else t("boards.system.missing")
-            deploy = stored.get("deploy") or {}
-            settings = t("boards.settings.damaged") if deploy.get("problem") else t(
-                "boards.settings.row", install=deploy.get("install", "user"),
-                user=deploy.get("ssh_user") or t("boards.settings.not_set"))
-            deployed = stored.get("deployed")
-            runtime = t("boards.runtime.row", build=str(deployed.get("build_id") or "")[:16],
-                        install=deployed.get("install"), at=deployed.get("deployed_at")) if deployed else dash
-            probe = [system, settings, runtime]
-        else:
-            probe = [t("boards.not_probed"), dash, dash]
-        return [entry["label"], entry["device_id"], address, *trust, *probe, self._tier_cell(trusted)]
-
-    def _tier_cell(self, trusted: Optional[Dict[str, Any]]) -> str:
-        """The tier of the framework's key on the board as its pairing or last verify recorded it
-        (remote/key_tiers.py; person_steps.trusted_rows "key_tier"), the weaker ones marked, and in enterprise mode
-        the ones it refuses to use."""
-        from orchestrator.remote.key_tiers import TIERS, allowed, is_weaker
-        tier = (trusted or {}).get("key_tier") or ""
-        if tier not in TIERS:
-            return self._t("boards.dash")
-        text = self._t(f"boards.tier.{tier}")
-        if not allowed(tier, self._mode()):
-            return self._t("boards.tier.refused", tier=text)
-        return self._t("boards.tier.weaker", tier=text) if is_weaker(tier) else text
-
-    def select(self, device_id: str) -> bool:
-        for row, entry in enumerate(self.entries):
-            if entry["device_id"] == device_id:
-                self.table.selectRow(row)
-                return True
-        return False
-
-    def selected(self) -> Optional[Dict[str, Any]]:
-        rows = {index.row() for index in self.table.selectionModel().selectedRows()}
-        if len(rows) != 1:
-            return None
-        row = rows.pop()
-        return self.entries[row] if 0 <= row < len(self.entries) else None
-
-    def _update_buttons(self) -> None:
-        entry, running = self.selected(), self._token is not None
-        for name, _key, _slot, need in BUTTONS:
-            ok = not need or (entry is not None and entry.get(need) is not None)
-            self.buttons[name].setEnabled(ok and (not running or name == "btn_boards_refresh"))
-
-    def _need(self, what: str) -> Optional[Dict[str, Any]]:
-        """The selected board when it has `what` (trusted or stored), else the reason as a message."""
-        entry = self.selected()
-        if entry is None:
-            self._info(self._t("boards.need_selection"))
-            return None
-        if entry.get(what) is None:
-            self._info(self._t("boards.need_trusted" if what == "trusted" else "boards.need_stored"))
-            return None
-        return entry
 
     # --- one step at a time, off the GUI thread ------------------------------------------------------------------
 
@@ -462,6 +318,177 @@ class BoardsWindow(QDialog):
         text = self._error_text(error, **where)
         self._say(text)
         self._info(text, "warning")
+
+    def _deletion_result(self, result: Any, mode: str, title: str) -> None:
+        """The honest report of a deletion for the person (every item done, every item kept with each path that
+        stayed), in the output pane and a box; then the window reads its list again."""
+        from orchestrator.Core.deletion import size_text
+        key = "deletion.done.trash" if mode == "trash" else "deletion.done.permanent"
+        lines = [self._t(key, name=one_line(n)) for n in result.done]
+        from orchestrator.Core.deletion import kept_lines
+        lines += [one_line(line) for line in kept_lines(result, self.lang)]   # with every path that stayed
+        if mode != "trash" and result.done:
+            lines.append(self._t("boards.prune_board.freed", size=size_text(result.freed_bytes)))
+        text = "\n".join(lines)
+        self._say(text)
+        plain_box(self, "information", title, text)
+        self.reload()
+
+
+class BoardsWindow(BoardSteps, QDialog):
+    """The person's boards; one step at a time, each off the GUI thread."""
+
+    def __init__(self, framework: Any, parent: Optional[QWidget] = None, lang: Optional[str] = None):
+        super().__init__(parent)
+        self.setObjectName("dlg_boards")
+        self.framework = framework
+        self.lang = lang or current_language()
+        self.setWindowTitle(self._t("boards.title"))
+        self.resize(1200, 620)
+        layout = QVBoxLayout(self)
+        self.intro = plain_label(self._t("boards.intro"))
+        layout.addWidget(self.intro)
+        self.table = QTableWidget(0, len(COLUMNS), self)
+        self.table.setObjectName("tbl_boards")
+        self.table.setHorizontalHeaderLabels([self._t(c) for c in COLUMNS])
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.itemSelectionChanged.connect(self._update_buttons)
+        layout.addWidget(self.table, stretch=2)
+        self.buttons: Dict[str, QPushButton] = {}
+        for name, key, slot, _need in BUTTONS:
+            button = QPushButton(button_text(self._t(key)), self)
+            button.setObjectName(name)
+            button.setAutoDefault(False)
+            button.clicked.connect(getattr(self, slot))
+            self.buttons[name] = button
+        for row in ROWS:
+            line = QHBoxLayout()
+            for name in row:
+                line.addWidget(self.buttons[name])
+            line.addStretch(1)
+            layout.addLayout(line)
+        busy = QHBoxLayout()
+        self.lbl_busy = plain_label("")
+        self.lbl_busy.setObjectName("lbl_boards_busy")
+        self.btn_cancel = QPushButton(button_text(self._t("boards.btn.cancel")), self)
+        self.btn_cancel.setObjectName("btn_boards_cancel")
+        self.btn_cancel.setAutoDefault(False)
+        self.btn_cancel.clicked.connect(self._on_cancel)
+        self.btn_cancel.setVisible(False)
+        busy.addWidget(self.lbl_busy, stretch=1)
+        busy.addWidget(self.btn_cancel)
+        layout.addLayout(busy)
+        self.output = QPlainTextEdit(self)   # plain text by nature: never rich text
+        self.output.setObjectName("txt_boards_output")
+        self.output.setReadOnly(True)
+        layout.addWidget(self.output, stretch=1)
+        close = QDialogButtonBox(QDialogButtonBox.Close, self)
+        close.rejected.connect(self.reject)
+        layout.addWidget(close)
+        self.entries: List[Dict[str, Any]] = []
+        self._init_steps()
+        self._update_buttons()
+
+    # --- the table ------------------------------------------------------------------------------------------------
+
+    def reload(self) -> None:
+        """Reads the boards again (files only; no board is contacted)."""
+        from orchestrator.runtime.device.person_steps import boards_overview
+        try:
+            self.entries = boards_overview(self.state_dir)
+        except Exception as e:  # noqa: BLE001 - e.g. no per-user folder: shown as plain text
+            self.entries = []
+            self.intro.setText(f"{self._t('boards.intro')}\n\n{self._t('boards.err.failed', reason=one_line(str(e)))}")
+        else:
+            self.intro.setText(self._t("boards.intro") if self.entries else
+                               f"{self._t('boards.intro')}\n\n{self._t('boards.empty')}")
+        self.table.setRowCount(len(self.entries))
+        for row, entry in enumerate(self.entries):
+            for column, value in enumerate(self._cells(entry)):
+                cell = QTableWidgetItem(one_line(value))   # plain text, never rich text
+                if column == 0:
+                    cell.setData(Qt.UserRole, entry["device_id"])
+                self.table.setItem(row, column, cell)
+        self._update_buttons()
+
+    def _cells(self, entry: Dict[str, Any]) -> List[str]:
+        t, dash = self._t, self._t("boards.dash")
+        trusted, stored = entry.get("trusted"), entry.get("stored")
+        address = (trusted or {}).get("address") or (stored or {}).get("address") or dash
+        if trusted:
+            key = t(f"boards.key.{trusted['host_key']}", key_type=trusted["key_type"],
+                    fingerprint=trusted["fingerprint"])
+            last = trusted.get("last_deploy") or {}   # may hold only a recorded contact for Mojo: no deploy then
+            last_text = t("boards.last", at=last.get("at"), result=t("boards.last.ok" if last.get("ok") else
+                                                                     "boards.last.failed")) if last.get("at") else dash
+            trust = [trusted["user"], key, t("boards.yes" if trusted["paired"] else "boards.no"), trusted["trusted"],
+                     last_text]
+        else:
+            trust = [dash, t("boards.not_trusted"), dash, dash, dash]
+        if stored:
+            s = stored.get("system") or {}
+            system = t("boards.system", os=s.get("OS_ID") or s.get("OS") or "?", version=s.get("OS_VERSION_ID") or "",
+                       arch=s.get("ARCH") or "", libc=s.get("LIBC") or "?", libc_version=s.get("LIBC_VERSION") or "",
+                       init=s.get("INIT_SYSTEM") or "?") if s else t("boards.system.missing")
+            deploy = stored.get("deploy") or {}
+            settings = t("boards.settings.damaged") if deploy.get("problem") else t(
+                "boards.settings.row", install=deploy.get("install", "user"),
+                user=deploy.get("ssh_user") or t("boards.settings.not_set"))
+            deployed = stored.get("deployed")
+            runtime = t("boards.runtime.row", build=str(deployed.get("build_id") or "")[:16],
+                        install=deployed.get("install"), at=deployed.get("deployed_at")) if deployed else dash
+            probe = [system, settings, runtime]
+        else:
+            probe = [t("boards.not_probed"), dash, dash]
+        return [entry["label"], entry["device_id"], address, *trust, *probe, self._tier_cell(trusted)]
+
+    def _tier_cell(self, trusted: Optional[Dict[str, Any]]) -> str:
+        """The tier of the framework's key on the board as its pairing or last verify recorded it
+        (remote/key_tiers.py; person_steps.trusted_rows "key_tier"), the weaker ones marked, and in enterprise mode
+        the ones it refuses to use."""
+        from orchestrator.remote.key_tiers import TIERS, allowed, is_weaker
+        tier = (trusted or {}).get("key_tier") or ""
+        if tier not in TIERS:
+            return self._t("boards.dash")
+        text = self._t(f"boards.tier.{tier}")
+        if not allowed(tier, self._mode()):
+            return self._t("boards.tier.refused", tier=text)
+        return self._t("boards.tier.weaker", tier=text) if is_weaker(tier) else text
+
+    def select(self, device_id: str) -> bool:
+        for row, entry in enumerate(self.entries):
+            if entry["device_id"] == device_id:
+                self.table.selectRow(row)
+                return True
+        return False
+
+    def selected(self) -> Optional[Dict[str, Any]]:
+        rows = {index.row() for index in self.table.selectionModel().selectedRows()}
+        if len(rows) != 1:
+            return None
+        row = rows.pop()
+        return self.entries[row] if 0 <= row < len(self.entries) else None
+
+    def _update_buttons(self) -> None:
+        entry, running = self.selected(), self._token is not None
+        for name, _key, _slot, need in BUTTONS:
+            ok = not need or (entry is not None and entry.get(need) is not None)
+            self.buttons[name].setEnabled(ok and (not running or name == "btn_boards_refresh"))
+
+    def _need(self, what: str) -> Optional[Dict[str, Any]]:
+        """The selected board when it has `what` (trusted or stored), else the reason as a message."""
+        entry = self.selected()
+        if entry is None:
+            self._info(self._t("boards.need_selection"))
+            return None
+        if entry.get(what) is None:
+            self._info(self._t("boards.need_trusted" if what == "trusted" else "boards.need_stored"))
+            return None
+        return entry
 
     # --- helpers for the stored board ---------------------------------------------------------------------------
 
@@ -1299,19 +1326,6 @@ class BoardsWindow(QDialog):
 
         self._start(self._t("boards.prune.deleting"), delete,
                     lambda result: self._deletion_result(result, accepted.mode, title), failed=failed)
-
-    def _deletion_result(self, result: Any, mode: str, title: str) -> None:
-        from orchestrator.Core.deletion import size_text
-        key = "deletion.done.trash" if mode == "trash" else "deletion.done.permanent"
-        lines = [self._t(key, name=one_line(n)) for n in result.done]
-        from orchestrator.Core.deletion import kept_lines
-        lines += [one_line(line) for line in kept_lines(result, self.lang)]   # with every path that stayed
-        if mode != "trash" and result.done:
-            lines.append(self._t("boards.prune_board.freed", size=size_text(result.freed_bytes)))
-        text = "\n".join(lines)
-        self._say(text)
-        plain_box(self, "information", title, text)
-        self.reload()
 
     # --- older builds on the board --------------------------------------------------------------------------------
 

@@ -125,6 +125,9 @@ class BundlePlan:
     accounts: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
     memory_mb: int = 0
     board_memory_mb: Optional[int] = None
+    # the checks against the board's probe facts, in the framework's own words: {"check", "result", "detail"} with
+    # result passed, failed, warning or unknown (architecture, init system, sudo, offline mode, memory)
+    checks: List[Dict[str, str]] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -151,6 +154,7 @@ class BundlePlan:
                                                                    else "full"),
                 "memory_mb": self.memory_mb, "board_memory_mb": self.board_memory_mb, "bytes": self.size,
                 "problems": [_scrub(p) for p in self.problems], "warnings": [_scrub(w) for w in self.warnings],
+                "checks": [{k: _scrub(str(v)) for k, v in c.items()} for c in self.checks],
                 "own_blocks": list(self.own_blocks)}
 
     def lines(self) -> List[str]:
@@ -161,19 +165,31 @@ class BundlePlan:
                 values = ", ".join(f"{k}={v}" for k, v in sorted(comp.variables.items()))
                 out.append(f"  {comp.id}: block {comp.block} {comp.block_version} ({comp.block_trust}); {values}")
                 for f in comp.files:
-                    where = "online, pinned" if f.source == "online" else "in the bundle"
                     lic = f", licence {f.licence}" if f.licence else ""
-                    out.append(f"    {f.role}: {f.name}, {_mb(f.size)} ({where}{lic})")
+                    out.append(f"    {f.role}: {f.name}, {_mb(f.size)} ({self._source(comp.id, f)}{lic})")
             for action in self.manifest.root_actions:
                 out.append(f"  root action: {action.action} for {action.component} (llmcf-install)"
                            + (", skipped: unprivileged only" if self.manifest.mode == "unprivileged" else ""))
         out.append(f"  memory: about {self.memory_mb} MB needed" + (
             f" of {self.board_memory_mb} MB usable on the board" if self.board_memory_mb is not None else ""))
         out.append(f"  sends {_mb(self.size)}")
+        out += [f"  check {c['check']}: {c['result']} - {c['detail']}" for c in self.checks]
         out += [f"  note: {n}" for n in self.notes]
         out += [f"  warning: {w}" for w in self.warnings]
         out += [f"  problem: {p}" for p in self.problems]
         return out
+
+
+    def _source(self, comp_id: str, entry: FileEntry) -> str:
+        """Where a file comes from, for the person (never in labels()): the local file it is copied from, the board's
+        runtime package, or the pinned online address."""
+        if entry.source == "online":
+            return f"online, pinned: {entry.url}"
+        planned = self.files.get((comp_id, entry.name))
+        local = f" {planned.local}" if planned is not None and planned.local is not None else ""
+        if entry.role == "runtime":
+            return "in the bundle, the board's runtime package" + local
+        return "in the bundle, from" + (local or " the store")
 
 
 def _mb(size: int) -> str:
@@ -221,6 +237,12 @@ def arch_matches(elf: Optional[str], board: Optional[str]) -> bool:
     if elf == "arm":
         return board.startswith("arm") and board not in ("arm64", "aarch64")
     return elf == board or (elf == "arm64" and board == "aarch64")
+
+
+def component_ids(blocks: List[Block]) -> List[str]:
+    """The component ids of `blocks` in order: the kind, a second block of the same kind `<kind>-2` (the plan, the
+    window and the labels name components so)."""
+    return _component_ids(blocks)
 
 
 def _component_ids(blocks: List[Block]) -> List[str]:
@@ -452,6 +474,7 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
         except Exception as e:  # noqa: BLE001 - pydantic's own reason, never pasted into shell text
             plan.problems.append(f"{comp_id}: {str(e).splitlines()[-1][:300]}")
     plan.memory_mb = memory
+    _probe_checks(plan, board_arch, init, access, offline, roots)
     ram = profile.int_value("RAM_TOTAL_MB") if hasattr(profile, "int_value") else None
     if ram:
         usable = ram - max(MEMORY_RESERVE_MB, ram // 10)
@@ -461,8 +484,13 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
                                  f"({ram} MB with a reserve for the system)")
         elif memory > usable * 0.8:
             plan.warnings.append(f"the bundle takes about {memory} of {usable} MB: little room is left")
+        plan.checks.append({"check": "memory", "result": "failed" if memory > usable else
+                            ("warning" if memory > usable * 0.8 else "passed"),
+                            "detail": f"about {memory} MB needed, {usable} MB usable ({ram} MB on the board)"})
     else:
         plan.warnings.append("the board's probe does not say its memory; probe it again to check the bundle fits")
+        plan.checks.append({"check": "memory", "result": "unknown",
+                            "detail": f"about {memory} MB needed; the probe does not say the board's memory"})
     if roots and not selection.unprivileged_only:
         plan.notes.append("the root actions need llmcf-install, the framework's root helper; the installer stops "
                           "before them (choose the unprivileged-only variant to skip them)")
@@ -487,6 +515,35 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
     except Exception as e:  # noqa: BLE001
         plan.problems.append(f"the manifest: {str(e).splitlines()[-1][:300]}")
     return plan
+
+
+def _probe_checks(plan: BundlePlan, board_arch: Optional[str], init: Optional[str], access: Any, offline: bool,
+                  roots: List[RootAction]) -> None:
+    """plan.checks: what the plan checked against the board's probe facts, one entry each (the memory check follows
+    with its numbers). Each result comes from the problems plan_bundle found, never from a second rule."""
+    def failed(*words: str) -> bool:
+        return any(all(w in p for w in words) for p in plan.problems)
+    plan.checks.append({"check": "architecture", "result": "unknown" if not board_arch else
+                        ("failed" if failed("the program is built for") else "passed"),
+                        "detail": f"the board runs {board_arch or 'an unknown architecture'}; every program of the "
+                                  "bundle must be built for it"})
+    unit = bool(roots)
+    plan.checks.append({"check": "init system",
+                        "result": "failed" if failed("autostart needs systemd") else
+                                  ("unknown" if unit and not init else "passed"),
+                        "detail": f"the board runs {init or 'an init system the probe does not name'}"
+                                  + ("; autostart needs systemd" if unit else "; no component starts by itself")})
+    sudo = getattr(access, "sudo", None) if access is not None else None
+    only = plan.selection.unprivileged_only
+    plan.checks.append({"check": "sudo", "result": "passed" if not unit or only else
+                        ("warning" if sudo == "absent" else "unknown" if not sudo else "passed"),
+                        "detail": "no root action is needed" if not unit else
+                                  ("the unprivileged-only variant skips the root actions" if only else
+                                   f"sudo on the board: {sudo or 'not in the probe'}; the root actions need "
+                                   "llmcf-install")})
+    plan.checks.append({"check": "offline mode", "result": "failed" if failed("offline mode") else "passed",
+                        "detail": "on: online items only from the own network" if offline else
+                                  "off: the board fetches pinned online items itself"})
 
 
 def _trust_words(trust: str) -> str:
@@ -586,6 +643,77 @@ class BundleStore:
         except (OSError, ValueError):
             return {}
 
+    def deletion_plan(self, bundle_ids: Optional[List[str]] = None):
+        """What `llmcf bundle delete` and the Board bundle window list for the person's multiple choice: the stored
+        bundles (all, or exactly `bundle_ids`), each folder with its full path, size and what it is (a bundle a board
+        holds says so: deleting it here leaves the board as it is). None when there is nothing to list. Reads only:
+        the framework deletes no bundle by itself."""
+        from orchestrator.Core.deletion import plan_of
+        from orchestrator.Core.trash import tree_size
+        from orchestrator.tools.spec import DeletionItem
+        wanted = None if bundle_ids is None else set(bundle_ids)
+        items = []
+        for built in self.list():
+            if wanted is not None and built.bundle_id not in wanted:
+                continue
+            folder = built.path
+            if folder.is_symlink() or not folder.is_dir():
+                continue
+            boards = sorted(d for d, e in self.boards(built.bundle_id).items()
+                            if str((e or {}).get("last", "")).startswith("apply:"))
+            what = (f"board bundle of {len(built.manifest.components)} components for board "
+                    f"{built.manifest.board.device_id}"
+                    + (f"; applied on board {', '.join(boards)}: deleting it here does not uninstall it there, and "
+                       "the framework can no longer roll it back or uninstall it from here" if boards else ""))
+            items.append(DeletionItem(kind="bundle", speaking_name=built.bundle_id, full_path=str(folder),
+                                      file_name=folder.name, size_bytes=tree_size(folder), what=what))
+        return plan_of(items, ("trash", "permanent"))
+
+    def delete(self, accepted: Any, state_dir: Path, trash: Any = None, audit: Any = None):
+        """Deletes exactly the bundles of deletion_plan() the person ticked and confirmed (Core/deletion.py): into
+        the trash of the per-user folder `state_dir` or for good. The list is looked up again first (PlanChanged
+        when a chosen bundle changed); the deletion is audited before anything goes (RuntimeError, nothing deleted,
+        without the audit log); only the person (PermissionError otherwise). The honest deletion.DeletionResult:
+        what stayed is kept with its reason (no path, safe for an AI) and its full paths for the person's own text."""
+        from orchestrator.Core.deletion import DeletionResult, note_kept, require_person, require_same, same_items
+        from orchestrator.utils.atomic import remove_tree
+        accepted = require_person(accepted)
+        if accepted.actor not in ("gui", "cli"):
+            raise PermissionError("Only the person deletes stored bundles, in the GUI or at a terminal.")
+        require_same(accepted, same_items(self.deletion_plan(), accepted.plan), "the list of bundles")
+        if accepted.mode == "trash" and trash is None:
+            raise RuntimeError("The trash is not available; nothing was deleted.")
+        if audit is None or not callable(getattr(audit, "record", None)):
+            raise RuntimeError("The audit log is not available, so nothing was deleted.")
+        names = [i.speaking_name for i in accepted.plan.items]
+        try:
+            audit.record(accepted.actor, "bundle_delete", "framework", "person", "started", approved=True,
+                         arguments={"bundles": names, "bytes": accepted.plan.total_bytes, "mode": accepted.mode},
+                         detail=f"{len(names)} stored board bundles "
+                                + ("moved to the trash" if accepted.mode == "trash" else "deleted for good"),
+                         extra=accepted.audit_extra())
+        except Exception:  # noqa: BLE001 - the reason could name a host path
+            raise RuntimeError("The audit log cannot record the deletion; nothing was deleted.") from None
+        result = DeletionResult()
+        for item in accepted.plan.items:
+            path = Path(item.full_path)
+            try:
+                if accepted.mode == "trash":
+                    entry = trash.move("bundle", path, Path(state_dir), "state", item.speaking_name, accepted,
+                                       accepted.actor)
+                    result.trash_ids.append(entry.id)
+                else:
+                    if path.is_symlink() or not path.is_dir():
+                        raise OSError("not a bundle folder")
+                    if note_kept(result, item.speaking_name, path, remove_tree(path)):
+                        continue   # something stayed: kept, with its paths for the person
+                    result.freed_bytes += item.size_bytes
+            except Exception as e:  # noqa: BLE001 - a TrashError or an OSError: that bundle stays and is reported
+                result.failed.append((item.speaking_name, type(e).__name__ if isinstance(e, OSError) else str(e)))
+                continue
+            result.done.append(item.speaking_name)
+        return result
+
     def record_board(self, bundle_id: str, device_id: str, **values: Any) -> None:
         from orchestrator.utils.atomic import write_private
         data = self.boards(bundle_id)
@@ -646,5 +774,5 @@ def build_bundle(plan: BundlePlan, store: BundleStore, signer: Any, *, ledger: A
 
 
 __all__ = ["BuiltBundle", "BundleError", "BundlePlan", "BundleStore", "FileChoice", "MEMORY_RESERVE_MB", "PRESETS",
-           "PlannedFile", "RuntimePackage", "SIGNED_FILES", "Selection", "arch_matches", "build_bundle",
+           "PlannedFile", "RuntimePackage", "SIGNED_FILES", "Selection", "arch_matches", "build_bundle", "component_ids",
            "detect_format", "elf_arch", "new_bundle_id", "plan_bundle"]

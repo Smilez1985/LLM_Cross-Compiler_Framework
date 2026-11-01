@@ -7173,6 +7173,356 @@ def device_runtime_status(ctx: FrameworkContext, device_name: str, as_json: bool
 
 
 # ============================================================================
+# BOARD BUNDLE COMMANDS (deploy way 3: orchestrator/runtime/bundle/, the same steps as Boards > Board bundle...)
+# ============================================================================
+
+def _bundle_framework(ctx: FrameworkContext):
+    """The framework this command's bundle steps read: the booted one, else its settings and installation folder
+    without booting it (the catalog's community blocks and the cached community index need no keyring)."""
+    if getattr(ctx, "_initialized", False) and ctx.framework_manager is not None:
+        return ctx.framework_manager
+    from types import SimpleNamespace
+    from orchestrator.Core.framework import APP_ROOT, FrameworkInfo
+    config, _ = _settings(ctx)
+    return SimpleNamespace(config=config, info=FrameworkInfo(installation_path=APP_ROOT))
+
+
+def _bundle_store(ctx: FrameworkContext):
+    from orchestrator.runtime.bundle.generator import BundleStore
+    return BundleStore(_state_dir(ctx))
+
+
+def _bundle_get(ctx: FrameworkContext, bundle_id: str):
+    from orchestrator.runtime.bundle.generator import BundleError
+    store = _bundle_store(ctx)
+    try:
+        return store, store.get(bundle_id)
+    except BundleError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+
+
+def bundle_choice_options(func):
+    """The person's choice of a bundle (`bundle plan` and `bundle build`): a preset and/or blocks, the variables and
+    the files of each component (service.selection_from reads them)."""
+    options = [
+        click.option('--preset', default=None, help='Start from a preset: llm, voice or stt'),
+        click.option('--block', 'blocks', multiple=True, metavar='ID',
+                     help="A building block (repeatable; 'llm-cli bundle block list' lists them)"),
+        click.option('--set', 'sets', multiple=True, metavar='COMPONENT.NAME=VALUE',
+                     help='A variable of a component, checked against its type (repeatable)'),
+        click.option('--file', 'files', multiple=True, metavar='COMPONENT.ROLE=PATH',
+                     help='A local file for a component (repeatable): hashed and copied into the bundle'),
+        click.option('--online', multiple=True, metavar='COMPONENT.ROLE=URL',
+                     help='A pinned online item instead of a file (needs --sha256 and --size)'),
+        click.option('--sha256', 'sha256', multiple=True, metavar='COMPONENT.ROLE=HEX', help='The pinned sha256'),
+        click.option('--size', 'sizes', multiple=True, metavar='COMPONENT.ROLE=BYTES', help='The pinned size'),
+        click.option('--licence', 'licences', multiple=True, metavar='COMPONENT.ROLE=ID',
+                     help="The model's licence (SPDX id or a short word)"),
+        click.option('--unprivileged-only', is_flag=True,
+                     help='Skip the root actions (no autostart unit); everything else is installed'),
+    ]
+    for option in reversed(options):
+        func = option(func)
+    return func
+
+
+def _bundle_plan(ctx: FrameworkContext, device_name: str, choice: Dict[str, Any], allow_own: bool = False):
+    """(state dir, device ID, plan) of the person's choice for a stored board (service.plan_for_device with the
+    framework's block catalog and the verified cached index, so a revoked block is not used)."""
+    from orchestrator.Core.config_manager import framework_mode
+    from orchestrator.runtime.bundle import service
+    from orchestrator.runtime.bundle.generator import BundleError
+    state_dir, _store, device_id, profile = _device_context(ctx, device_name)
+    framework = _bundle_framework(ctx)
+    config = getattr(framework, "config", None)
+    app_root, index = service.catalog_sources(framework)
+    try:
+        selection = service.selection_from(**choice)
+        plan = service.plan_for_device(state_dir, device_id, selection, config=config, app_root=app_root,
+                                       mode=framework_mode(config), allow_own=allow_own, profile=profile,
+                                       index=index)
+    except BundleError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    return state_dir, device_id, plan
+
+
+def _print_bundle_plan(plan) -> None:
+    for line in plan.lines():
+        style = "red" if line.lstrip().startswith("problem:") else (
+            "yellow" if line.lstrip().startswith("warning:") else "")
+        console.print(f"[{style}]{escape(line)}[/{style}]" if style else escape(line))
+
+
+@cli.group()
+def bundle():
+    """The board bundle (deploy way 3): building blocks, the plan, the signed bundle and its installer on a board"""
+    pass
+
+
+@bundle.command('plan')
+@click.argument('device_name', metavar='DEVICE')
+@bundle_choice_options
+@click.option('--json', 'as_json', is_flag=True, help='The plan as labels (no paths, no accounts) in JSON')
+@pass_context
+def bundle_plan(ctx: FrameworkContext, device_name: str, as_json: bool, **choice):
+    """Show the full plan of a bundle for a stored board before anything is built or sent: its components and
+    variables, every file with its source and size, the root actions that need llmcf-install, and the checks against
+    the board's probe"""
+    _state, _device_id, plan = _bundle_plan(ctx, device_name, choice)
+    if as_json:
+        click.echo(json.dumps(plan.labels(), indent=2, sort_keys=True))
+    else:
+        _print_bundle_plan(plan)
+    if not plan.ok:
+        sys.exit(1)
+
+
+@bundle.command('build')
+@click.argument('device_name', metavar='DEVICE')
+@bundle_choice_options
+@click.option('--allow-own', is_flag=True, help='Use your own unsigned blocks without the question (private mode)')
+@pass_context
+def bundle_build(ctx: FrameworkContext, device_name: str, allow_own: bool, **choice):
+    """Plan the bundle, show the plan and build it into this framework's bundle store, signed with the framework's
+    board key (nothing is sent to the board)"""
+    from orchestrator.runtime.bundle.generator import BundleError, build_bundle
+    from orchestrator.runtime.device import board_ops
+    state_dir, device_id, plan = _bundle_plan(ctx, device_name, choice, allow_own)
+    if not plan.ok and plan.own_blocks and not allow_own and set(plan.problems) == {
+            p for p in plan.problems if "is not signed: it is used only after your yes" in p}:
+        _print_bundle_plan(plan)
+        if not (_interactive() and click.confirm(f"Use your own unsigned blocks {', '.join(plan.own_blocks)}? "
+                                                 "Nobody else checked them.", default=False)):
+            console.print("Nothing was built.")
+            sys.exit(1)
+        state_dir, device_id, plan = _bundle_plan(ctx, device_name, choice, True)
+    _print_bundle_plan(plan)
+    if not plan.ok:
+        console.print("[red]Nothing was built.[/red]")
+        sys.exit(1)
+    ctx.require_framework()
+    signer = board_ops.framework_signer(ctx.framework_manager)
+    try:
+        built = build_bundle(plan, _bundle_store(ctx), signer)
+    except BundleError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]Built bundle {built.bundle_id} for board {device_id}.[/green] Send it with llm-cli bundle "
+                  f"deploy {built.bundle_id}.")
+
+
+@bundle.command('list')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def bundle_list(ctx: FrameworkContext, as_json: bool):
+    """List the stored bundles with their board, components, size and where each board's last run stands"""
+    from orchestrator.Core.deletion import size_text
+    from orchestrator.runtime.bundle.service import bundle_rows
+    rows = bundle_rows(_bundle_store(ctx))
+    if as_json:
+        click.echo(json.dumps(rows, indent=2, sort_keys=True))
+        return
+    if not rows:
+        console.print("No bundle is stored yet: llm-cli bundle build DEVICE --preset llm ... makes one.")
+        return
+    table = Table(title="Board bundles")
+    for column in ("Bundle", "Board", "Components", "Mode", "Size", "Created", "Last run"):
+        table.add_column(column, overflow="fold")
+    for row in rows:
+        last = "; ".join(f"{d}: {b['last']}" for d, b in row["boards"].items()) or "-"
+        table.add_row(row["bundle_id"], row["device_id"],
+                      escape(", ".join(f"{c['id']} ({c['block']})" for c in row["components"])), row["mode"],
+                      size_text(row["bytes"]), escape(row["created"]), escape(last))
+    console.print(table)
+
+
+def _bundle_board(ctx: FrameworkContext, built):
+    """(state dir, device ID, host, port, user) of the board a stored bundle was made for."""
+    from orchestrator.runtime.device.person_steps import board_address
+    state_dir, store, device_id, _profile = _device_context(ctx, built.manifest.board.device_id)
+    settings = _deploy_settings(store, device_id)
+    if settings.ssh_user is None:
+        console.print(f"[red]No SSH user is set for device {device_id}: llm-cli device settings {device_id} --user "
+                      "NAME.[/red]")
+        sys.exit(1)
+    try:
+        host, port = board_address(store, device_id)
+    except ValueError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    return state_dir, device_id, host, port, settings.ssh_user
+
+
+def _bundle_run(ctx: FrameworkContext, bundle_id: str, action: str, *, ask: bool = False):
+    """Runs the installer `action` of a stored bundle on its board through the person's login with the framework's
+    key only (person_steps.connect_stored, never a password here); `ask`: first the installer's dry run of that
+    action, then the person's question with "No" as the default. Prints the report; exit 1 when it did not pass."""
+    from orchestrator.runtime.bundle import service
+    from orchestrator.runtime.bundle.generator import BundleError
+    from orchestrator.runtime.device.remote import RemoteError
+    store, built = _bundle_get(ctx, bundle_id)
+    state_dir, device_id, host, port, user = _bundle_board(ctx, built)
+
+    def run(what: str):
+        def open_session():
+            client, _key = _open_device(state_dir, device_id, host, port, user, None, ctx=ctx, step="bundle")
+            return client
+        try:
+            return service.run_on_board(open_session, built, what, store=store, device_id=device_id,
+                                        say=lambda msg: console.print(escape(msg)))
+        except BundleError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(1)
+        except RemoteError as e:
+            _board_step_failed(ctx, e, host, port)
+
+    if ask:
+        first = run(service.CHANGING_ACTIONS[action])
+        for line in first.lines():
+            console.print(escape(line))
+        if not first.ok:
+            console.print("[red]The installer's dry run did not pass; nothing was changed.[/red]")
+            sys.exit(1)
+        if not (_interactive() and click.confirm(service.question(action, built, device_id), default=False)):
+            console.print("Nothing was changed on the board"
+                          + ("" if _interactive() else " (it needs your answer at a terminal)") + ".")
+            return None
+    result = run(action)
+    for line in result.lines():
+        console.print(escape(line))
+    if result.staging:
+        console.print("[yellow]The apply did not finish; the next llm-cli bundle deploy continues in the same upload "
+                      "folder.[/yellow]")
+    if result.report.result == "stopped-root":
+        console.print("[yellow]The installer stopped before the root actions: they need llmcf-install, the "
+                      "framework's root helper (not there yet). Build the unprivileged-only variant to skip them."
+                      "[/yellow]")
+    if not result.ok:
+        sys.exit(1)
+    return result
+
+
+@bundle.command('deploy')
+@click.argument('bundle_id', metavar='BUNDLE')
+@click.option('--dry-run', is_flag=True, help="Send the bundle and run only the installer's plan (changes nothing)")
+@pass_context
+def bundle_deploy(ctx: FrameworkContext, bundle_id: str, dry_run: bool):
+    """Send a stored bundle to its board and run its installer there, after its dry run and your yes at a terminal
+    ("No" is the default); a deploy cut off continues where it stopped"""
+    _bundle_run(ctx, bundle_id, "plan" if dry_run else "apply", ask=not dry_run)
+
+
+@bundle.command('status')
+@click.argument('bundle_id', metavar='BUNDLE')
+@pass_context
+def bundle_status(ctx: FrameworkContext, bundle_id: str):
+    """What the board's kept installer says of the bundle: every step done or not (changes nothing)"""
+    _bundle_run(ctx, bundle_id, "status")
+
+
+@bundle.command('uninstall')
+@click.argument('bundle_id', metavar='BUNDLE')
+@pass_context
+def bundle_uninstall(ctx: FrameworkContext, bundle_id: str):
+    """Remove the bundle's own steps from its board, after the installer's list and your yes ("No" is the default)"""
+    _bundle_run(ctx, bundle_id, "uninstall", ask=True)
+
+
+@bundle.command('rollback')
+@click.argument('bundle_id', metavar='BUNDLE')
+@pass_context
+def bundle_rollback(ctx: FrameworkContext, bundle_id: str):
+    """Undo the last apply of the bundle on its board, after the installer's status and your yes ("No" default)"""
+    _bundle_run(ctx, bundle_id, "rollback", ask=True)
+
+
+@bundle.command('delete')
+@click.argument('bundle_ids', metavar='[BUNDLE]...', nargs=-1)
+@pass_context
+def bundle_delete(ctx: FrameworkContext, bundle_ids: Tuple[str, ...]):
+    """List the stored bundles (or the ones named) and delete the ones you pick from this framework's store, after
+    you confirm them at a terminal (nothing preselected; a board keeps what it installed)"""
+    from orchestrator.Core.deletion import PlanChanged, size_text
+    store = _bundle_store(ctx)
+    plan = store.deletion_plan(list(bundle_ids) if bundle_ids else None)
+    if plan is None:
+        console.print("No stored bundle " + ("of these ids " if bundle_ids else "") + "to delete.")
+        return
+    accepted = confirm_deletion(plan, title=f"Stored board bundles ({len(plan.items)}, {size_text(plan.total_bytes)})",
+                                multiple=True, again="llm-cli bundle delete")
+    if accepted is None:
+        return
+    state_dir = _state_dir(ctx)
+    trash, audit = _person_trash(ctx, state_dir)
+    try:
+        result = store.delete(accepted, state_dir, trash=trash, audit=audit)
+    except (PlanChanged, PermissionError, RuntimeError) as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        return
+    _print_deletion_result(result, accepted)
+
+
+@bundle.group('block')
+def bundle_block():
+    """The building blocks of a bundle: the framework's, installed packs and your own"""
+    pass
+
+
+@bundle_block.command('list')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def bundle_block_list(ctx: FrameworkContext, as_json: bool):
+    """List every building block with its kind, status (ready or template) and trust"""
+    from orchestrator.runtime.bundle import service
+    from orchestrator.runtime.bundle.blocks import load_catalog
+    app_root, index = service.catalog_sources(_bundle_framework(ctx))
+    catalog = load_catalog(app_root, index=index)
+    rows = [b.label() for b in catalog.blocks.values()]
+    if as_json:
+        click.echo(json.dumps({"blocks": rows, "notes": catalog.notes}, indent=2, sort_keys=True))
+        return
+    table = Table(title="Building blocks")
+    for column in ("Block", "Kind", "Status", "Trust", "Title"):
+        table.add_column(column, overflow="fold")
+    for row in rows:
+        table.add_row(row["id"], row["kind"], row["status"], row["trust"], escape(row["title"]))
+    console.print(table)
+    for note in catalog.notes:
+        console.print(f"[yellow]{escape(note)}[/yellow]")
+
+
+@bundle_block.command('new')
+@click.argument('block_id', metavar='ID')
+@click.option('--kind', required=True, help='llm, stt, tts, vision, gateway or harness')
+@click.option('--title', required=True, help='A short title')
+@click.option('--summary', default='', help='One or two sentences on what it runs')
+@click.option('--from', 'template', default=None, metavar='BLOCK',
+              help="Start from one of the framework's blocks (its variables, files and start)")
+@pass_context
+def bundle_block_new(ctx: FrameworkContext, block_id: str, kind: str, title: str, summary: str,
+                     template: Optional[str]):
+    """Make your own building block (block.yml and its guide README.md) in community/blocks/; it is not signed:
+    private mode asks before it is used, enterprise mode takes it only once it is published and installed from the
+    signed index"""
+    from orchestrator.runtime.bundle import service
+    from orchestrator.runtime.bundle.blocks import BlockError, community_dir, new_block
+    app_root, _index = service.catalog_sources(_bundle_framework(ctx))
+    if app_root is None:
+        console.print("[red]The framework's folder for community blocks is not known here.[/red]")
+        sys.exit(1)
+    try:
+        folder = new_block(community_dir(app_root), block_id, kind=kind, title=title, summary=summary,
+                           template=template)
+    except (BlockError, OSError) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]Made block {block_id} in {escape(str(folder))}.[/green] Fill in block.yml and the guide's "
+                  "'## Models' section; publish it with llm-cli zoo export.")
+
+
+# ============================================================================
 # CONFIG COMMANDS (SOURCES MANAGEMENT)
 # ============================================================================
 
