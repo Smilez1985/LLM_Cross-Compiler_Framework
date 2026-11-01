@@ -522,7 +522,7 @@ def test_the_installer_and_the_steps_are_fixed_text_with_data_only(tmp_path):
 @pytest.mark.skipif(shutil.which("shellcheck") is None, reason="ShellCheck is not installed")
 def test_the_installer_passes_shellcheck(tmp_path):
     path = tmp_path / "install.sh"
-    path.write_text(inst.installer_sh())
+    path.write_bytes(inst.installer_sh().encode())   # LF as on the board (write_text would write CRLF on Windows)
     done = subprocess.run(["shellcheck", "-S", "warning", "-s", "sh", str(path)], capture_output=True, text=True)
     assert done.returncode == 0, done.stdout
 
