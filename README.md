@@ -420,8 +420,8 @@ its host key fingerprint and the package's hash. No AI can trust a new board or 
 bundle: you pick a preset or the building blocks, their variables and files, look at the full plan (every file with
 its source and size, the checks against the board's probe), build it and deploy it. Its installer on the board
 installs the unprivileged steps once, can show its status, roll back and uninstall them; root steps such as an
-autostart unit wait for the framework's root helper llmcf-install, so choose the unprivileged-only variant for now.
-Every deploy asks you first. Details: [Features](docs/Features.md#the-board-bundle).
+autostart unit run only through the framework's signed root helper llmcf-install, after a second yes for them, with
+a journal for their rollback and uninstall. Every deploy asks you first. Details: [Features](docs/Features.md#the-board-bundle).
 
 ### The board
 
@@ -910,7 +910,7 @@ The [roadmap](docs/ROADMAP.md) lists what is planned; finished items move to the
   compaction, cloud caching the provider's way, and Ditto's archive of what it
   learned about llmcf and building (never the person's private talk).
 - **The board bundle:** its usable first part is there (blocks, plan, signed bundle, the unprivileged installer,
-  window, CLI and MCP tools); next come the root helper llmcf-install, components built by the framework itself,
+  window, CLI and MCP tools, and the root helper llmcf-install); next come components built by the framework itself,
   the token-saving gateway `llmcf-gateway` in Rust, voice and vision as bundle components, and MCP on the board
   (loopback first, the network only with TLS).
 - **Device runtime and more hardware:** recipes as target templates, a rotation stage before quantization, a generic

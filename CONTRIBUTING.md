@@ -206,6 +206,30 @@ done
 A change that only works on one Python version is not ready. Typical differences are standard-library behaviour
 (for example tar extraction filters) and wheels that are not yet available for the newest version.
 
+### The Rust helpers
+
+The framework's small programs for boards live in the Cargo workspace `rust/` (`rust/Cargo.toml`): `llmcf-install`,
+the root helper of the board bundle, and `llmcf-setpriv`. The toolchain is pinned in `rust/rust-toolchain.toml`
+(rustup installs it on first use), `rust/Cargo.lock` is committed, and every crate is pinned with `=`. Each crate
+starts with `#![forbid(unsafe_code)]`. Release builds are static (musl, linked with `rust-lld`, see
+`rust/.cargo/config.toml`) for x86_64, aarch64 and armv7:
+
+```bash
+cd rust
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --features llmcf-install/test-root
+cargo build --release --locked -p llmcf-install --target aarch64-unknown-linux-musl
+```
+
+The cargo feature `test-root` gives llmcf-install its test mode `--root PREFIX` (every path under a prefix, fake
+`useradd` and `systemctl` there); a release build never has it and refuses `--root`. The Python tests that run the
+real helper (`tests/test_llmcf_install.py`) build that test binary with cargo, or take one from
+`LLMCF_INSTALL_TEST_BIN`, and skip with the reason when neither is there. The manifest's rules exist twice, in
+`orchestrator/runtime/bundle/manifest.py` and `rust/llmcf-install/src/manifest.rs`: change both and the shared vectors
+in `tests/data/bundle_manifest_vectors.json`, which both test suites read. The CI job `rust` runs the commands above,
+checks the three release builds are static and refuse `--root`, and runs `cargo deny check` (`rust/deny.toml`).
+
 ### The real-client smoke test
 
 The unit tests drive the MCP server with the SDK's own client. `scripts/mcp_client_smoke.sh` (POSIX sh) checks the
