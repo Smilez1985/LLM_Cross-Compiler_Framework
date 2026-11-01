@@ -151,8 +151,18 @@ def open_targets(window, select: Optional[str] = None):
 def open_build_history(window):
     """Build > Build History...: every build of every framework process and its details (build_history)."""
     from orchestrator.gui.build_history_window import BuildHistoryDialog
+    builder = getattr(window, "builder_tab", None)
+
+    def follow_continued(request_id: str) -> None:
+        """A continued interrupted build shows its progress in the Builder tab, as a started build does."""
+        if builder is None:
+            return
+        tabs = getattr(window, "tabs", None)
+        if tabs is not None:
+            tabs.setCurrentWidget(builder)
+        builder.track_build(request_id)
     try:
-        dialog = BuildHistoryDialog(window.framework, window)
+        dialog = BuildHistoryDialog(window.framework, window, on_continued=follow_continued)
     except Exception as e:  # noqa: BLE001 - e.g. no cache folder; plain text (SEC-M2)
         plain_box(window, "critical", ui_text("bld.history.title"), one_line(str(e)))
         return None

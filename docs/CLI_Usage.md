@@ -652,7 +652,7 @@ not run a finished stage again. A build with nothing to use again is deleted at 
 | Command | What it does |
 |---------|--------------|
 | `list` | Every kept build: its target, its finished stages, its size, its folder, and whether an AI asked about it. |
-| `continue BUILD_ID` | Starts the same build again on its kept work folder. |
+| `continue BUILD_ID` | Starts the same build again on its kept work folder, as a new build request, and follows it like `build start --follow`: a status line with its stage and percent whenever it changes, Ctrl+C cancels it (its container is stopped, exit code 130), and at the end how it ended, with that end's exit code (0 done, 1 failed, 2 cancelled). Its request shows in `build status` and in `get_build_status` like any started build. |
 | `delete BUILD_ID` | Shows the one item (full path, size, what it is) and deletes it after your yes at the terminal. When a stage module left files only the stage account could change, a short clean-up container runs first as that account (no network, no capability). The result says what stayed, with its paths. |
 
 Only you decide. An AI caller (MCP, Ditto) reads the kept build in `get_build_status` with its label and its finished

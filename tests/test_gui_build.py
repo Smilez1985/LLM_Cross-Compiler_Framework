@@ -1036,7 +1036,7 @@ def test_the_history_asks_about_the_chosen_interrupted_build(qapp, history_frame
     from orchestrator.gui import build_history_window, interrupted_build_dialog
     asked, boxes = [], []
     monkeypatch.setattr(interrupted_build_dialog, "ask_interrupted",
-                        lambda parent, framework, build_id, lang=None: asked.append(build_id) or "later")
+                        lambda parent, framework, build_id, lang=None, **kw: asked.append(build_id) or "later")
     monkeypatch.setattr(build_history_window, "plain_box", lambda *a, **k: boxes.append(a[2]))
     dialog = build_history_window.BuildHistoryDialog(history_framework, lang="en")
     assert dialog.btn_interrupted.objectName() == "btn_history_interrupted"

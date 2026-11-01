@@ -8,7 +8,7 @@ through Core/deletion.py; the result says honestly what stayed. Every text is pl
 """
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from PySide6.QtWidgets import QMessageBox, QWidget
 
@@ -20,8 +20,12 @@ def _engine(framework: Any):
     return getattr(getattr(framework, "orchestrator", None), "build_engine", None)
 
 
-def ask_interrupted(parent: Optional[QWidget], framework: Any, build_id: str, lang: Optional[str] = None) -> str:
-    """Asks the person about one kept build; returns what happened: continued, deleted, later, none or failed."""
+def ask_interrupted(parent: Optional[QWidget], framework: Any, build_id: str, lang: Optional[str] = None,
+                    on_continued: Optional[Callable[[str], None]] = None) -> str:
+    """Asks the person about one kept build; returns what happened: continued, deleted, later, none or failed.
+    [Continue] queues the build as a build request through the framework's build service (the one build path), and
+    `on_continued(request_id)` hands it to the window that shows its progress (the Builder tab's progress panel, as
+    for a started build)."""
     from orchestrator.Core import interrupted_build
     lang = lang or current_language()
     title = ui_text("bld.interrupted.title", lang)
@@ -51,10 +55,13 @@ def ask_interrupted(parent: Optional[QWidget], framework: Any, build_id: str, la
     state = Path(state) if state else None
     if clicked is continue_button:
         try:
-            started = interrupted_build.decide(engine, cache, build_id, "continue", "gui", state_dir=state)
+            started = interrupted_build.decide(engine, cache, build_id, "continue", "gui", state_dir=state,
+                                               service=getattr(framework, "build_service", None))
         except interrupted_build.InterruptedBuildError as e:
             plain_box(parent, "warning", title, one_line(str(e)))
             return "failed"
+        if on_continued is not None:
+            on_continued(str(started))
         plain_box(parent, "information", title, ui_text("bld.interrupted.continued", lang, id=one_line(started)))
         return "continued"
     if clicked is delete_button:

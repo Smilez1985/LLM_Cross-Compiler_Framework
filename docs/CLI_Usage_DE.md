@@ -675,7 +675,7 @@ sich nichts noch einmal nutzen lässt, wird sofort gelöscht. Direkt nach dem En
 | Befehl | Was er tut |
 |--------|------------|
 | `list` | Jeden aufbewahrten Build: sein Target, seine fertigen Stufen, seine Größe, seinen Ordner und ob eine KI danach gefragt hat. |
-| `continue BUILD_ID` | Startet denselben Build erneut auf seinem aufbewahrten Arbeitsordner. |
+| `continue BUILD_ID` | Startet denselben Build erneut auf seinem aufbewahrten Arbeitsordner, als neuen Build-Auftrag, und verfolgt ihn wie `build start --follow`: eine Statuszeile mit seiner Stufe und dem Prozentwert, sobald sie sich ändert, Strg+C bricht ihn ab (sein Container wird gestoppt, Exit-Code 130), und am Ende, wie er geendet hat, mit dem Exit-Code dieses Endes (0 fertig, 1 gescheitert, 2 abgebrochen). Sein Auftrag erscheint in `build status` und in `get_build_status` wie jeder gestartete Build. |
 | `delete BUILD_ID` | Zeigt den einen Eintrag (voller Pfad, Größe, was er ist) und löscht ihn nach deinem Ja im Terminal. Wenn ein Stufenmodul Dateien hinterlassen hat, die nur das Stufen-Konto ändern konnte, läuft vorher ein kurzer Aufräum-Container als dieses Konto (kein Netzwerk, keine Capability). Das Ergebnis sagt, was geblieben ist, mit den Pfaden. |
 
 Nur du entscheidest. Ein KI-Aufrufer (MCP, Ditto) liest den aufbewahrten Build in `get_build_status` mit seiner

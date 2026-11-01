@@ -1472,6 +1472,14 @@ class BuildService:
         )
         if disk_reservation:
             self._orchestrator.disk_ledger = self.disk_ledger()
+        handle = self._submit(build_request)
+        self.logger.info(f"Build request {handle.request_id} submitted ({req.model} -> {req.target}/{req.format}/"
+                         f"{req.quantization})")
+        return handle
+
+    def _submit(self, build_request: BuildRequest) -> BuildHandle:
+        """Queues a build request on the orchestrator: the one submission of start_build and continue_interrupted, so
+        every request is followed, cancelled and reported the same way (CLI follow line, Builder progress, MCP status)."""
         try:
             request_id = self.framework.run_coroutine(self._orchestrator.submit_build_request(build_request),
                                                       timeout=30)
@@ -1479,8 +1487,37 @@ class BuildService:
             raise BuildServiceError(str(e), code="limit_reached",
                                     next="Wait until a build finishes (get_build_status with wait_seconds) or cancel "
                                          "one of your builds, then call start_build again.") from None
-        self.logger.info(f"Build request {request_id} submitted ({req.model} -> {req.target}/{req.format}/{req.quantization})")
         return BuildHandle(request_id=request_id, status=OrchestrationStatus.QUEUED.value)
+
+    def continue_interrupted(self, configuration: Any, *, description: str = "") -> BuildHandle:
+        """The person's "continue" of an interrupted build (Core/interrupted_build.py continue_build): its kept
+        configuration as a new build request, on its own build id and work folder (the stage runner resumes every
+        finished stage). Returns the request, which is followed, cancelled and reported exactly like a started build.
+        Only the person's own channels reach this (interrupted_build.decide refuses an AI caller first)."""
+        quantization = getattr(configuration, "quantization", None)
+        branch = getattr(configuration, "model_branch", None)
+        build_request = BuildRequest(
+            request_id="",
+            workflow_type=WorkflowType.SIMPLE_CONVERSION,
+            priority=PriorityLevel.NORMAL,
+            models=[configuration.model_source],
+            model_revision=branch if branch and branch != "main" else None,
+            targets=[configuration.target_arch],
+            target_formats=[configuration.target_format],
+            optimization_level=configuration.optimization_level,
+            quantization_options=[quantization] if quantization else [],
+            parallel_builds=False,
+            output_base_dir=str(configuration.output_dir),
+            description=description or f"Continued build {configuration.build_id}",
+            use_gpu=bool(getattr(configuration, "use_gpu", False)),
+            target_board=getattr(configuration, "target_board", None),
+            hardware_probe=getattr(configuration, "hardware_probe", None),
+            max_context_length=getattr(configuration, "max_context_length", None),
+            resume=configuration,
+        )
+        handle = self._submit(build_request)
+        self.logger.info(f"Build {configuration.build_id} continues as request {handle.request_id}")
+        return handle
 
     def request_state(self, request_id: str) -> Optional[WorkflowState]:
         """The orchestrator's own state of a request this process queued (WorkflowState: the finished builds' real
