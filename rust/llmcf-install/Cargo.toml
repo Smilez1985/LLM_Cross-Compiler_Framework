@@ -1,0 +1,11 @@
+# Placeholder of the workspace member llmcf-install: the crate itself (the board's root helper) is made by its own
+# chain. Cargo refuses a workspace whose member is missing, so this minimal crate stands in until then.
+[package]
+name = "llmcf-install"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+publish = false
+license = "MIT"
+
+[dependencies]
