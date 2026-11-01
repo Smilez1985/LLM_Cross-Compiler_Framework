@@ -435,20 +435,24 @@ def tier_refusal(state_dir: Path, device_id: str, mode: str, shell: Any = None) 
     private mode): enterprise mode refuses a board whose framework key sits on the Dropbear tier or the home gate
     (remote/key_tiers.py use_problem) at every use, not only at its pairing. The tier is the one recorded at the
     board's pairing or last verify; a board with none recorded is asked through `shell` (a logged-in session: the gate's
-    status operation, board_ops.key_facts), and its answer is recorded. Without a record and without a shell nothing
-    is refused (nothing says the key is weaker)."""
-    from orchestrator.remote.key_tiers import MODE_ENTERPRISE, normal_mode, use_problem
-    if normal_mode(mode) != MODE_ENTERPRISE or not DEVICE_ID_RE.fullmatch(device_id or ""):
+    status operation, board_ops.key_facts), and its answer is recorded. A recorded "password" (a pairing that ended
+    with password login) is asked again too, since an earlier framework key may still be on the board and the login
+    may use it: a gated tier it reports replaces the record; a board without a framework key keeps "password". Without
+    a record and without a shell nothing is refused (nothing says the key is weaker)."""
+    from orchestrator.remote import key_tiers as kt
+    if kt.normal_mode(mode) != kt.MODE_ENTERPRISE or not DEVICE_ID_RE.fullmatch(device_id or ""):
         return ""
     try:
         tier = TrustedDevices(Path(state_dir)).key_tier(device_id)
     except Exception:  # noqa: BLE001 - an unreadable record: the board itself is asked below
         tier = ""
-    if not tier and shell is not None:
+    if tier in ("", kt.TIER_PASSWORD) and shell is not None:
         from orchestrator.runtime.device.board_ops import key_facts
-        tier = key_facts(shell).get("tier", "") or ""
-        record_key_tier(state_dir, device_id, tier)
-    return use_problem(tier, mode) if tier else ""
+        asked = key_facts(shell).get("tier", "") or ""
+        if not tier or asked in (kt.TIER_ROOT, kt.TIER_DROPBEAR, kt.TIER_HOME):
+            tier = asked
+            record_key_tier(state_dir, device_id, tier)
+    return kt.use_problem(tier, mode) if tier else ""
 
 
 def record_heat(state_dir: Path, device_id: str, heat: Any) -> None:

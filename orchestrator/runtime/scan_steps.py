@@ -115,8 +115,9 @@ def import_probe(probes: Any, path: Path, label: Optional[str] = None, target_ma
 class DeviceScanError(WithSteps, RemoteFailure):
     """A board scan that could not be done. `kind`: user (the SSH user is not an account name: refused before any
     contact, as on every other board path), login (the board could not be reached or logged in to; `reason` is its SSH
-    reason code when it has one), probe (the probe on the board failed), cancelled (the caller's Cancel ended it) or
-    save (the profile could not be stored or written). `error` is the exception behind it."""
+    reason code when it has one), probe (the probe on the board failed), weaker_tier (enterprise mode refuses the
+    board's key tier; the framework's key logged in, nothing ran), cancelled (the caller's Cancel ended it) or save
+    (the profile could not be stored or written). `error` is the exception behind it."""
 
     def __init__(self, message: str, kind: str, reason: str = "", error: Optional[BaseException] = None):
         super().__init__(message, kind, reason, error)
@@ -206,6 +207,13 @@ def scan_device(state_dir: Path, host: str, port: int, user: str, key: Any = Non
         if key is None:
             key = client.get_transport().get_remote_server_key()   # the key of the session itself
         session.adopt(client, key)
+        if not password:
+            # enterprise mode refuses a board whose framework key sits on a weaker tier at every use, its probe too
+            # (trusted.tier_refusal, as the AI's probe); with a password the pairing below offers the ways on
+            from orchestrator.runtime.device.trusted import tier_refusal
+            refusal = tier_refusal(state_dir, device_id_for_host_key(ssh_trust.fingerprint(key)), mode, session)
+            if refusal:
+                raise DeviceScanError(refusal, "weaker_tier")
         if password:
             from orchestrator.remote import pairing
             from orchestrator.runtime.device import board_ops

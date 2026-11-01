@@ -77,6 +77,55 @@ def test_the_refusal_reads_the_recorded_tier_else_asks_the_board_once_and_record
     assert tier_refusal(tmp_path, DEVICE, "enterprise", again) == ""
 
 
+def test_a_recorded_password_tier_never_lets_a_keyed_login_past_enterprise_mode(tmp_path):
+    """Regression (failed before: a pairing that ended with "password login" recorded the tier "password" over the
+    board's earlier Dropbear-tier record while the framework's Dropbear-tier key stayed on the board, so every later
+    login with that key passed tier_refusal in enterprise mode). A recorded "password" is asked again on the board; a
+    board without a framework key keeps its record."""
+    from orchestrator.runtime.device import trusted
+    TrustedDevices, record_key_tier, tier_refusal = trusted.TrustedDevices, trusted.record_key_tier, trusted.tier_refusal
+    record_key_tier(tmp_path, DEVICE, "dropbear")
+    record_key_tier(tmp_path, DEVICE, "password")
+    keyed = _Session(status="restricted=yes gate=/x keys=home signing=yes tier=dropbear")
+    assert "Dropbear tier" in tier_refusal(tmp_path, DEVICE, "enterprise", keyed)
+    assert keyed.ran == ["status"] and TrustedDevices(tmp_path).key_tier(DEVICE) == "dropbear"
+    record_key_tier(tmp_path, DEVICE, "password")
+    no_key = _Session(status="restricted=no gate=none")   # the status operation outside the gate: no framework key
+    assert tier_refusal(tmp_path, DEVICE, "enterprise", no_key) == "" and no_key.ran == ["status"]
+    assert TrustedDevices(tmp_path).key_tier(DEVICE) == "password"
+    assert tier_refusal(tmp_path, DEVICE, "enterprise") == ""   # nobody to ask: nothing says the key is weaker
+
+
+class _ScanKey:
+    def get_name(self):
+        return "ssh-ed25519"
+
+    def asbytes(self):
+        return b"made-up host key of a scanned board"
+
+
+def test_a_scan_with_the_frameworks_key_refuses_a_weaker_board_in_enterprise_mode(tmp_path, monkeypatch):
+    """Regression (failed before: `llmcf scan --device` and the Builder tab's remote scan without a password logged in
+    with a Dropbear-tier key and ran the probe in enterprise mode, while the AI's probe of the same board was
+    refused). The probe never runs; nothing is stored."""
+    from orchestrator.runtime import remote_probe
+    from orchestrator.runtime.device.trusted import record_key_tier
+    from orchestrator.runtime.profile import ProfileStore
+    from orchestrator.runtime.scan_steps import DeviceScanError, scan_device
+    from orchestrator.utils import ssh_trust
+    closed = []
+    client = SimpleNamespace(close=lambda: closed.append(1),
+                             get_transport=lambda: SimpleNamespace(get_remote_server_key=_ScanKey))
+    monkeypatch.setattr(ssh_trust, "connect", lambda *a, **k: client)
+    monkeypatch.setattr(remote_probe, "probe_over_ssh", lambda *a, **k: pytest.fail("the probe ran"))
+    device_id = device_id_for_host_key(ssh_trust.fingerprint(_ScanKey()))
+    record_key_tier(tmp_path, device_id, "dropbear")
+    with pytest.raises(DeviceScanError) as refused:
+        scan_device(tmp_path, HOST, 22, "dietpi", _ScanKey(), record=False, mode="enterprise")
+    assert refused.value.kind == "weaker_tier" and "Enterprise mode refuses to use this board" in str(refused.value)
+    assert closed and ProfileStore(tmp_path).list_devices() == []
+
+
 # --- the person's board steps (CLI, Boards window) ----------------------------------------------------------------
 
 @pytest.fixture
@@ -563,3 +612,6 @@ def test_the_windows_installer_takes_the_mode_flag_asks_and_sets_it_through_the_
     assert '--mode=*' in text and "LCF_MODE" in text and "Read-Host" in text
     assert "config set framework_mode $ModeChoice" in text
     assert '@("", "private", "enterprise")' in text
+    # Regression (failed before: an unattended run with its input redirected read an empty line from Read-Host and
+    # set private mode over an enterprise one); without a console to ask, the mode stays as it is
+    assert "[Environment]::UserInteractive -and -not [Console]::IsInputRedirected" in text

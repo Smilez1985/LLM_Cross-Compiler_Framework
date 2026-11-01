@@ -73,7 +73,8 @@ if ($EngineChoice -notin @("podman")) {
 }
 # The framework mode: private (the default) or enterprise (only OpenSSH with sudo on a board, the root-owned key line).
 # --mode=private|enterprise, for unattended runs also LCF_MODE; without either the installer asks in this window
-# (Enter: private). A run without a console to ask keeps the mode as it is (new: private). An unknown value stops here.
+# (Enter: private). A run without a console to ask, or with its input redirected (an unattended run: Read-Host would
+# read an empty line there and pick private), keeps the mode as it is (new: private). An unknown value stops here.
 $ModeChoice = if ($env:LCF_MODE) { $env:LCF_MODE } else { "" }
 foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
     if ($InstallArg -like "--mode=*") { $ModeChoice = $InstallArg.Substring(7) }
@@ -81,7 +82,7 @@ foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
 if ($ModeChoice -notin @("", "private", "enterprise")) {
     Write-Error "Unbekannter Wert fuer --mode: '$ModeChoice' (private oder enterprise)."
 }
-if (-not $ModeChoice -and [Environment]::UserInteractive) {
+if (-not $ModeChoice -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
     try {
         $ModeAnswer = Read-Host "Framework-Modus: privat (Standard) oder enterprise? Enterprise nimmt auf Boards nur OpenSSH mit sudo (die Schluesselzeile in Root-Besitz) und lehnt die schwaechere Dropbear-Stufe und das Home-Tor ab. [P/e]"
         $ModeChoice = if ("$ModeAnswer".Trim().ToLower() -in @("e", "enterprise")) { "enterprise" } else { "private" }
