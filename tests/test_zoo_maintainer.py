@@ -1346,3 +1346,15 @@ def test_a_framework_step_reads_as_its_command_at_a_terminal_and_as_its_place_in
     assert next_steps.mouse_path("btn_zoo_refresh", "de") in window and "llmcf" not in window
     with pytest.raises(ValueError):
         l10n_maintainer.places("en", "ai")
+
+
+def test_a_key_id_of_digits_only_stays_a_string_in_the_public_entry():
+    """About 1 key in 30 has a key id of hex digits only (2860522183611117 once in CI): written bare, YAML read it back
+    as a number and the entry was refused. The entry quotes its values."""
+    import datetime
+    import yaml
+    from orchestrator.Core.community_maintainer import KeyEntry
+    entry = KeyEntry("2860522183611117", "QUJD", datetime.date(2027, 1, 1), "name: with # yaml syntax")
+    row = yaml.safe_load(entry.text())[0]
+    assert row["key_id"] == "2860522183611117" and row["name"] == "name: with # yaml syntax"
+    assert row["pubkey_b64"] == "QUJD" and row["valid_until"] == datetime.date(2027, 1, 1)

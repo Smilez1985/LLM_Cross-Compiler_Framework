@@ -168,11 +168,15 @@ class KeyEntry:
     name: str
 
     def text(self) -> str:
+        # Quoted (a JSON string is a YAML string): a key id of hex digits only, such as 2860522183611117, would else
+        # be read back as a number, and a name could hold YAML syntax.
+        def q(value: str) -> str:
+            return json.dumps(str(value), ensure_ascii=False)
         return ("# Add to configs/community_keys.yml (keys:) and ship it with a release:\n"
-                f"  - key_id: {self.key_id}\n"
-                f"    pubkey_b64: {self.pubkey_b64}\n"
+                f"  - key_id: {q(self.key_id)}\n"
+                f"    pubkey_b64: {q(self.pubkey_b64)}\n"
                 f"    valid_until: {self.valid_until}\n"
-                f"    name: {self.name}\n")
+                f"    name: {q(self.name)}\n")
 
     def save(self, path: Path, *, overwrite: bool = False) -> Path:
         """Writes text() to the file the person chose; an existing file is replaced only when the person said so in
