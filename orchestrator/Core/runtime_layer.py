@@ -357,6 +357,10 @@ def write_toolbox(folder: Path, way: str, files: Dict[str, Path], sources: Dict[
         tmp = folder / f".{tool}.tmp"
         shutil.copyfile(files[tool], tmp)
         os.chmod(tmp, 0o555)
+        if os.name == "nt" and target.exists():
+            # Windows refuses to replace a read-only file (WinError 5): the old tool of an earlier toolbox is made
+            # writable first, so a toolbox made again replaces it as on POSIX.
+            os.chmod(target, stat.S_IREAD | stat.S_IWRITE)
         os.replace(tmp, target)
         digests[tool] = sha256_file(target)
     record = {"way": way, "arch": folder.name, "sha256": digests, "sources": sources, "version": TOOLBOX_VERSION,
