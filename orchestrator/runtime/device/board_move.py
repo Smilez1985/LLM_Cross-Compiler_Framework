@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, List, Optional, Sequence
 
 # The kinds of a board's data, in the order they are moved and named.
-KINDS = ("probe", "deploy_settings", "runtime", "deploy_record", "tested_on")
+KINDS = ("probe", "deploy_settings", "limits", "runtime", "deploy_record", "tested_on")
 _MOVING = ".moving-"   # the runtime folder's temporary name: .<new id>.moving-<random>
 
 
@@ -339,7 +339,8 @@ def _add(kinds: List[str], kind: str) -> None:
 
 
 # The kinds in the person's words (English; the GUI shows its own texts, boards.edit.data.<kind>).
-_WORDS = {"probe": "stored probe", "deploy_settings": "deploy settings", "limits": "measured limits", "runtime": "deployed runtime",
+_WORDS = {"probe": "stored probe", "deploy_settings": "deploy settings", "limits": "measured limits",
+          "runtime": "deployed runtime",
           "deploy_record": "deploy record", "tested_on": "benchmark results ('tested on')"}
 
 
