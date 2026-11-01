@@ -221,9 +221,17 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
                 if stop.is_set() or handle.cancelled:
                     raise JobCancelled() from None
                 raise h.job_error(e, users) from None
-            return {"bundle_id": built.bundle_id, "result": run.report.result or "none",
-                    "changed": run.report.changed, "ok": run.ok, "root_actions_waiting":
-                        run.report.result == "stopped-root", EXTERNAL_KEY: [clean(line) for line in run.lines()]}
+            out = {"bundle_id": built.bundle_id, "result": run.report.result or "none",
+                   "changed": run.report.changed, "ok": run.ok, "root_actions_waiting":
+                       run.report.result == "stopped-root", EXTERNAL_KEY: [clean(line) for line in run.lines()]}
+            if out["root_actions_waiting"]:
+                # the board's root readiness, only read (fixed words): the person sets it up in the Board bundle
+                # window (Prepare root...) or the CLI, never through this tool
+                try:
+                    out["root_readiness"] = service.readiness_on_board(open_session, built).as_dict()
+                except (dev.DeviceRuntimeError, BundleError, RemoteError):
+                    out["root_readiness"] = None
+            return out
 
         def done(out: Dict[str, Any]):
             ok = bool(out.get("ok"))

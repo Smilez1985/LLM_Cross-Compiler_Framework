@@ -166,6 +166,15 @@ def run_bundle(shell: Any, built: BuiltBundle, action: str, *, store: Optional[B
     return run
 
 
+def helper_sha256(built: BuiltBundle) -> str:
+    """The sha256 of the bundle's own llmcf-install (the file the store checked against its manifest record)."""
+    from orchestrator.utils.helpers import sha256_file
+    path = built.file(inst.ROOT_HELPER_FILE)
+    if not path.is_file():
+        raise BundleError(f"bundle {built.bundle_id} carries no llmcf-install")
+    return sha256_file(path)
+
+
 def run_root(shell: Any, built: BuiltBundle, action: str, *, password: str = "",
              say: Callable[[str], None] = lambda _m: None) -> BoardRun:
     """llmcf-install `action` (installer.ROOT_ACTIONS) of the bundle on the board behind `shell`, through the gate
@@ -174,7 +183,8 @@ def run_root(shell: Any, built: BuiltBundle, action: str, *, password: str = "",
     stdin, never kept; the person's channels pass one only in private mode, after the person typed it). Only the
     person's channels call this, after the person's yes for this run (never an AI: the MCP tool bundle_deploy runs the
     unprivileged installer only). Its report is read by installer.report; result needs-password means sudo asked
-    for a password and nothing ran."""
+    for a password and nothing ran, not-ready that the board's root readiness (readiness.py) is not there: llmcf-install
+    runs only from its fixed root-owned place, with this bundle's sha256 (helper_sha256)."""
     if action not in inst.ROOT_ACTIONS:
         raise BundleError(f"not an action of llmcf-install: {action}")
     if not built.needs_root:
@@ -183,9 +193,9 @@ def run_root(shell: Any, built: BuiltBundle, action: str, *, password: str = "",
         raise BundleError("the password holds a character sudo never takes")
     _facts(shell, built)
     say(f"running llmcf-install on the board as root ({action}) ...")
-    res = shell.run(gate.script("bundle-root", action, built.bundle_id), stdin=[(password + "\n").encode("utf-8")],
-                    timeout=JOB_TIMEOUT, step="bundle")
+    res = shell.run(gate.script("bundle-root", action, built.bundle_id, helper_sha256(built)),
+                    stdin=[(password + "\n").encode("utf-8")], timeout=JOB_TIMEOUT, step="bundle")
     return BoardRun("root-" + action, int(getattr(res, "status", 3)), inst.report(getattr(res, "out", "")))
 
 
-__all__ = ["BoardRun", "JOB_TIMEOUT", "run_bundle", "run_root"]
+__all__ = ["BoardRun", "JOB_TIMEOUT", "helper_sha256", "run_bundle", "run_root"]

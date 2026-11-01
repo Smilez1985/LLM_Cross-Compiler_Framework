@@ -191,15 +191,44 @@ esac
 # sudo on the fake board: -n, or -S with the password on stdin when the test sets one; then the command with the
 # account in SUDO_USER and the test build's --root PREFIX in front (the board's / is the test's folder)
 FAKE_SUDO = r'''#!/bin/sh
-nopass=
-while [ $# -gt 0 ]; do case $1 in -n) nopass=1; shift ;; -S) shift ;; -p) shift 2 ;; *) break ;; esac; done
-if [ -s "@ROOT@/sudo-password" ]; then
+nopass=; list=
+while [ $# -gt 0 ]; do case $1 in -n) nopass=1; shift ;; -S) shift ;; -l) list=1; shift ;; -p) shift 2 ;;
+  *) break ;; esac; done
+fixed="@ROOT@/usr/local/libexec/llmcf/llmcf-install"; dropin="@ROOT@/etc/sudoers.d/llmcf-install"
+allowed=
+if [ "$1" = "$fixed" ] && [ -f "$dropin" ] && grep -q "NOPASSWD: .*$fixed $2 \*" "$dropin"; then allowed=1; fi
+if [ -n "$list" ]; then
+  [ -n "$allowed" ] && exit 0
+  [ -s "@ROOT@/sudo-password" ] && exit 1
+  exit 0
+fi
+if [ -z "$allowed" ] && [ -s "@ROOT@/sudo-password" ]; then
   [ -z "$nopass" ] || { echo "sudo: a password is required" >&2; exit 1; }
   IFS= read -r pw || pw=""
   [ "$pw" = "$(cat "@ROOT@/sudo-password")" ] || { echo "sudo: wrong password" >&2; exit 1; }
 fi
 [ "$1" = true ] && exit 0
-exec env SUDO_USER=board "$1" --root "@ROOT@" "$2" "$3"
+case $1 in */llmcf-install) exec env SUDO_USER=board "$1" --root "@ROOT@" "$2" "$3" ;; esac
+exec "$@"
+'''
+# install, visudo and su on the fake board: install drops -o/-g (the test's own user stands in for root), visudo
+# checks that the rule names only llmcf-install, su takes root's password on stdin from @ROOT@/root-password
+FAKE_INSTALL = r'''#!/bin/sh
+for a in "$@"; do shift; case $skip in 1) skip=; continue ;; esac
+  case $a in -o|-g) skip=1 ;; *) set -- "$@" "$a" ;; esac; done
+exec @INSTALL@ "$@"
+'''
+FAKE_VISUDO = r'''#!/bin/sh
+echo "visudo $*" >> "@ROOT@/calls.log"
+[ "$1" = -cf ] || exit 0
+grep -q "^[A-Za-z0-9._-]* ALL=(root) NOPASSWD: " "$2" && ! grep -q "NOPASSWD: ALL" "$2"
+'''
+FAKE_SU = r'''#!/bin/sh
+[ "$1" = root ] && [ "$2" = -c ] || exit 1
+IFS= read -r pw || pw=""
+[ -s "@ROOT@/root-password" ] && [ "$pw" = "$(cat "@ROOT@/root-password")" ] || { echo "su: Authentication failure" >&2; exit 1; }
+echo "su -c" >> "@ROOT@/calls.log"
+exec sh -c "$3"
 '''
 
 
@@ -238,13 +267,28 @@ def _root_board(tmp_path, helper_binary, tier="root"):
     (tmp_path / "etc" / "group").write_text(f"root:x:0:\nboard:x:{gid}:\n")
     for rel, text in (("usr/sbin/useradd", FAKE_USERADD), ("usr/sbin/userdel", FAKE_USERDEL),
                       ("usr/bin/systemctl", FAKE_SYSTEMCTL), ("usr/sbin/nologin", "#!/bin/sh\nexit 1\n"),
-                      ("shim/sudo", FAKE_SUDO.replace("@ROOT@", str(tmp_path)))):
+                      ("shim/sudo", FAKE_SUDO.replace("@ROOT@", str(tmp_path))),
+                      ("shim/install", FAKE_INSTALL.replace("@INSTALL@", shutil.which("install") or "/usr/bin/install")),
+                      ("shim/visudo", FAKE_VISUDO.replace("@ROOT@", str(tmp_path))),
+                      ("shim/su", FAKE_SU.replace("@ROOT@", str(tmp_path))),
+                      # the board account's name (a CI runner or sandbox may run the tests as root)
+                      ("shim/id", '#!/bin/sh\n[ "$*" = -un ] && { echo board; exit 0; }\nexec '
+                                  + (shutil.which("id") or "/usr/bin/id") + ' "$@"\n')):
         path = tmp_path / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
+        path.write_bytes(text.encode("utf-8"))
         path.chmod(0o755)
     board.root = tmp_path
     return board
+
+
+def _ready(shell, built, password="", mode="private"):
+    """The board's root readiness for the bundle, set up through the gate (what the person's yes does)."""
+    from orchestrator.runtime.bundle import readiness
+    from orchestrator.runtime.bundle.board import helper_sha256
+    sha = helper_sha256(built)
+    found = readiness.check(shell.run, sha)
+    return readiness.setup(shell.run, built.bundle_id, sha, found, mode=mode, password=password)
 
 
 @pytest.fixture
@@ -268,6 +312,12 @@ def test_the_root_actions_run_through_llmcf_install_behind_the_gate(tmp_path, he
     shell = GateShell(board)
     first = run_bundle(shell, built, "apply", store=store, device_id=DEVICE)
     assert first.report.result == "stopped-root", first.lines()
+    before = run_root(shell, built, "plan")
+    assert before.report.result == "not-ready" and not before.ok, before.lines()
+    done = _ready(shell, built)
+    assert done.ok and "helper" in done.changed, done
+    fixed = tmp_path / "usr/local/libexec/llmcf/llmcf-install"
+    assert fixed.read_bytes() == helper_binary.read_bytes() and oct(fixed.stat().st_mode & 0o777) == "0o755"
     plan = run_root(shell, built, "plan")
     assert plan.ok and plan.report.result == "plan" and plan.report.helper == "0.1.0", plan.lines()
     unit_path = tmp_path / "etc/systemd/system/llmcf-stt.service"
@@ -299,8 +349,11 @@ def test_a_changed_helper_or_a_home_signer_never_runs_as_root(tmp_path, helper_b
     assert run_bundle(shell, built, "apply").report.result == "stopped-root"
     kept = board.home / inst.BUNDLE_REL / "voice-test" / ".kept" / "llmcf-install"
     kept.write_bytes(kept.read_bytes() + b"\0")
+    done = _ready(shell, built)
+    assert (done.ok, done.reason) == (False, "not-signed"), done
+    assert not (tmp_path / "usr/local/libexec/llmcf/llmcf-install").exists()
     run = run_root(shell, built, "apply")
-    assert run.report.result == "refused" and "not signed" in run.report.detail, run.lines()
+    assert run.report.result == "not-ready", run.lines()
     assert not (tmp_path / "etc/systemd/system/llmcf-stt.service").exists()
     home_board = _root_board(tmp_path / "h", helper_binary, tier="home")
     _store2, built2 = _autostart_bundle(tmp_path / "h", home_board, helper_binary)
@@ -319,6 +372,9 @@ def test_sudo_with_a_password_runs_only_with_the_persons_password(tmp_path, help
     _store, built = _autostart_bundle(tmp_path, board, helper_binary)
     shell = GateShell(board)
     assert run_bundle(shell, built, "apply").report.result == "stopped-root"
+    assert _ready(shell, built).reason == "needs-password"
+    assert _ready(shell, built, password="correct horse").ok
+    (tmp_path / "etc/sudoers.d/llmcf-install").unlink()   # without the drop-in, sudo asks for the password again
     asked = run_root(shell, built, "plan")
     assert asked.report.needs_password and not asked.ok, asked.lines()
     wrong = run_root(shell, built, "plan", password="wrong")
@@ -334,7 +390,9 @@ def test_the_root_operation_takes_only_its_actions_and_ids():
         with pytest.raises(gate.GateRefused):
             gate.script("bundle-root", *args)
     assert "bundle-root" in {op.verb for op in gate.gate_operations()}
-    text = gate.script("bundle-root", "apply", "voice-test")
+    with pytest.raises(gate.GateRefused):
+        gate.script("bundle-root", "apply", "voice-test")   # the sha256 of the bundle's llmcf-install is needed
+    text = gate.script("bundle-root", "apply", "voice-test", "a" * 64)
     assert "sudo -n" in text and "sudo -S" in text and "LLMCF_HOME_GATE=; llmcf_trusted_signers" in text
 
 
@@ -345,6 +403,8 @@ def test_an_ai_never_reaches_a_root_action():
     for path in root.rglob("*.py"):
         text = path.read_text(encoding="utf-8")
         assert "run_root" not in text and "bundle-root" not in text, path.name
+        # the root readiness: an AI may read it, never set it up or remove it
+        assert "ready_setup" not in text and "ready_remove" not in text and "bundle-ready-" not in text, path.name
     text = (root / "tools_bundle.py").read_text(encoding="utf-8")
     assert "never from here" in text and "never through this tool" in text
 
@@ -401,8 +461,12 @@ def test_the_cli_deploy_asks_a_second_time_before_the_root_actions(cli_root_boar
     from test_cli_builds import invoke_plain
     bid = _cli_bundle(cli_root_board)
     unit = cli_root_board.root / "etc/systemd/system/llmcf-stt.service"
-    res = invoke_plain("bundle", "deploy", bid, input="y\n\n")     # yes to the apply, the default No to root
+    res = invoke_plain("bundle", "deploy", bid, input="y\n\n")     # yes to the apply, the default No to the readiness
+    assert res.code == 1 and "Set up the root readiness" in res.out and "prepare-root" in res.out, res.out
+    assert not unit.exists()
+    res = invoke_plain("bundle", "deploy", bid, input="y\ny\n\n")  # the readiness yes, the default No to root
     assert res.code == 0 and "stopped-root" in res.out and "Run the 3 root action(s)" in res.out, res.out
+    assert "root readiness is set up" in res.out, res.out
     assert "would create_user" in res.out and not unit.exists()
     res = invoke_plain("bundle", "deploy", bid, input="y\ny\n")
     assert res.code == 0 and "done install_unit" in res.out and unit.is_file(), res.out
@@ -426,9 +490,16 @@ def test_the_cli_asks_for_the_sudo_password_in_private_mode_only(cli_root_board,
     bid = _cli_bundle(cli_root_board)
     unit = cli_root_board.root / "etc/systemd/system/llmcf-stt.service"
     monkeypatch.setattr(cli_module, "_framework_mode", lambda ctx: "enterprise")
+    # the one-time setup takes the password (in enterprise mode too); the root actions then run with sudo -n only
+    res = invoke_plain("bundle", "deploy", bid, input="y\ny\ncorrect horse\nn\n")
+    assert res.code == 0 and "root readiness is set up" in res.out and not unit.exists(), res.out
+    (cli_root_board.root / "etc/sudoers.d/llmcf-install").unlink()
     res = invoke_plain("bundle", "deploy", bid, input="y\n")
-    assert res.code == 1 and "enterprise mode runs root actions only with sudo -n" in res.out, res.out
+    assert res.code == 1, res.out
+    assert "correct horse" not in res.out
+    assert "root readiness" in res.out, res.out
     monkeypatch.setattr(cli_module, "_framework_mode", lambda ctx: "private")
+    # private mode: without the drop-in, the person's password for this run (sent on stdin, never kept)
     res = invoke_plain("bundle", "deploy", bid, input="y\ncorrect horse\ny\n")
     assert res.code == 0 and unit.is_file(), res.out
     assert "correct horse" not in res.out
@@ -471,8 +542,9 @@ def test_the_cli_status_of_the_root_part_never_fails_the_status_for_a_missing_pa
     from orchestrator import cli as cli_module
     (cli_root_board.root / "sudo-password").write_text("correct horse")
     bid = _cli_bundle(cli_root_board)
-    res = invoke_plain("bundle", "deploy", bid, input="y\ncorrect horse\ny\n")
+    res = invoke_plain("bundle", "deploy", bid, input="y\ny\ncorrect horse\ny\n")
     assert res.code == 0, res.out
+    (cli_root_board.root / "etc/sudoers.d/llmcf-install").unlink()   # sudo asks for the password again
     monkeypatch.setattr(cli_module, "_framework_mode", lambda ctx: "enterprise")
     res = invoke_plain("bundle", "status", bid)
     assert res.code == 0 and "result: installed" in res.out, res.out

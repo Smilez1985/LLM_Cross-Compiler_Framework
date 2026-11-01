@@ -150,8 +150,9 @@ ROOT_CHANGING_ACTIONS = {"apply": "plan", "uninstall": "plan-uninstall", "rollba
 # enterprise mode runs root actions with sudo -n only.
 PASSWORD_PROMPT = "The board's sudo asks for a password. Type the board account's password for this run (never kept)"
 ENTERPRISE_NO_PASSWORD = ("The board's sudo asks for a password, and enterprise mode runs root actions only with sudo "
-                          "-n (no password): allow the board account llmcf-install's run with sudo -n, then deploy "
-                          "again. Nothing was changed.")
+                          "-n (no password): set up the board's root readiness again (Prepare root in the Board bundle "
+                          "window, or the CLI's bundle prepare-root), whose sudo rule lets the board account run "
+                          "llmcf-install with sudo -n, then deploy again. Nothing was changed.")
 
 
 def password_allowed(mode: Any) -> bool:
@@ -203,6 +204,48 @@ def run_root_on_board(open_session: Callable[[], Any], built: gen.BuiltBundle, a
         close = getattr(session, "close", None)
         if callable(close):
             close()
+
+
+def _on_board(open_session: Callable[[], Any], step: Callable[[Any], Any]):
+    """`step(shell)` over the caller's login (`open_session()`), the session closed in every case."""
+    from orchestrator.runtime.device.remote import RemoteShell
+    session = open_session()
+    try:
+        return step(RemoteShell(session))
+    finally:
+        close = getattr(session, "close", None)
+        if callable(close):
+            close()
+
+
+def readiness_on_board(open_session: Callable[[], Any], built: gen.BuiltBundle):
+    """The board's root readiness for the bundle's llmcf-install (readiness.check, read without root): every channel
+    asks this, the MCP tool bundle_deploy too (it only reads it)."""
+    from orchestrator.runtime.bundle import readiness
+    from orchestrator.runtime.bundle.board import helper_sha256
+    sha = helper_sha256(built)
+    return _on_board(open_session, lambda shell: readiness.check(shell.run, sha))
+
+
+def ready_setup_on_board(open_session: Callable[[], Any], built: gen.BuiltBundle, found: Any, *, mode: Any,
+                         password: str = ""):
+    """readiness.setup on the bundle's board, only from the person's channels and after the person's yes (an AI
+    never calls this: no tool module names it)."""
+    from orchestrator.runtime.bundle import readiness
+    from orchestrator.runtime.bundle.board import helper_sha256
+    sha = helper_sha256(built)
+    return _on_board(open_session, lambda shell: readiness.setup(
+        lambda script, stdin=None, timeout=None: shell.run(script, stdin=stdin, timeout=timeout or 1800.0,
+                                                           step="bundle"),
+        built.bundle_id, sha, found, mode=mode, password=password))
+
+
+def ready_remove_on_board(open_session: Callable[[], Any], found: Any, *, mode: Any, password: str = ""):
+    """readiness.remove on a board, only from the person's channels and after the person's separate yes."""
+    from orchestrator.runtime.bundle import readiness
+    return _on_board(open_session, lambda shell: readiness.remove(
+        lambda script, stdin=None: shell.run(script, stdin=stdin, step="bundle"), found, mode=mode,
+        password=password))
 
 
 def root_question(action: str, built: gen.BuiltBundle, board: str, count: int) -> str:
@@ -304,5 +347,6 @@ def question(action: str, built: gen.BuiltBundle, board: str) -> str:
 __all__ = ["CHANGING_ACTIONS", "DEPLOY_QUESTION", "ENTERPRISE_NO_PASSWORD", "PASSWORD_PROMPT", "ROLLBACK_QUESTION",
            "ROOT_CHANGING_ACTIONS", "ROOT_QUESTION", "ROOT_ROLLBACK_QUESTION", "ROOT_UNINSTALL_QUESTION",
            "UNINSTALL_QUESTION", "assignments", "board_contact", "build_for", "bundle_rows", "catalog_sources",
-           "device_profile", "helper_for", "password_allowed", "plan_for_device", "question", "revoked_blocks",
+           "device_profile", "helper_for", "password_allowed", "plan_for_device", "question", "readiness_on_board",
+           "ready_remove_on_board", "ready_setup_on_board", "revoked_blocks",
            "root_count", "root_question", "run_on_board", "run_root_on_board", "runtime_for", "selection_from"]

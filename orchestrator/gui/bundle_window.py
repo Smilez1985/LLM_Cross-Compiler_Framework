@@ -50,12 +50,15 @@ BUTTONS = (
     ("btn_bundle_status", "bundle.btn.status", "_on_status", "bundle"),
     ("btn_bundle_rollback", "bundle.btn.rollback", "_on_rollback", "bundle"),
     ("btn_bundle_root_rollback", "bundle.btn.root_rollback", "_on_root_rollback", "bundle"),
+    ("btn_bundle_prepare_root", "bundle.btn.prepare_root", "_on_prepare_root", "bundle"),
+    ("btn_bundle_unprepare_root", "bundle.btn.unprepare_root", "_on_unprepare_root", "bundle"),
     ("btn_bundle_uninstall", "bundle.btn.uninstall", "_on_uninstall", "bundle"),
     ("btn_bundle_delete", "bundle.btn.delete", "_on_delete", ""),
 )
 PLAN_ROW = ("btn_bundle_file", "btn_bundle_plan", "btn_bundle_build", "btn_bundle_block_new", "btn_bundle_refresh")
 STORE_ROW = ("btn_bundle_dry_run", "btn_bundle_deploy", "btn_bundle_status", "btn_bundle_rollback",
-             "btn_bundle_root_rollback", "btn_bundle_uninstall", "btn_bundle_delete")
+             "btn_bundle_root_rollback", "btn_bundle_prepare_root", "btn_bundle_unprepare_root", "btn_bundle_uninstall",
+             "btn_bundle_delete")
 # the person's question before an action changes the board (service.question's words, translated)
 ASK_KEYS = {"apply": "bundle.ask.apply", "uninstall": "bundle.ask.uninstall", "rollback": "bundle.ask.rollback"}
 # the person's question before llmcf-install changes the board as root (service.root_question's words, translated)
@@ -552,9 +555,10 @@ class BundleWindow(BoardSteps, QDialog):
                     failed=lambda e: self._show_error(e, address=host, port=port, user=user,
                                                       device_id=device_id) or True)
 
-    def _ask_password(self) -> str:
-        """The board's sudo password for this one run of llmcf-install (private mode only; never shown, never kept)."""
-        dialog, form = _form_dialog(self, self._t("bundle.title"), self._t("bundle.root.password_intro"))
+    def _ask_password(self, intro: str = "bundle.root.password_intro") -> str:
+        """The board's sudo password for this one run of llmcf-install (private mode only), or the one-time password
+        of the root readiness's setup (`intro`); never shown, never kept."""
+        dialog, form = _form_dialog(self, self._t("bundle.title"), self._t(intro))
         txt = QLineEdit(dialog)
         txt.setObjectName("txt_bundle_sudo_password")
         txt.setEchoMode(QLineEdit.Password)
@@ -580,6 +584,11 @@ class BundleWindow(BoardSteps, QDialog):
                 return service.run_root_on_board(open_session, built, what, password=pw, say=self._progress)
 
             def done(run: Any) -> None:
+                if run.report.result == "not-ready":
+                    # llmcf-install runs only from its fixed root-owned place: the board's root readiness first
+                    self._say("\n".join(run.lines()))
+                    self._prepare(built, then=lambda: run_step(what, pw, after))
+                    return
                 if run.report.needs_password and not pw:
                     if not service.password_allowed(self._mode()):
                         self._info(service.ENTERPRISE_NO_PASSWORD, "warning")
@@ -621,6 +630,112 @@ class BundleWindow(BoardSteps, QDialog):
             run_step(action, pw, finished)
 
         run_step(first_action, password, planned)
+
+    def _prepare(self, built: Any, then=None) -> None:
+        """The board's root readiness for the bundle's llmcf-install (bundle/readiness.py, the CLI's very steps): its
+        check, the plan of only what is missing, the person's question ("No" is the default), the one-time password
+        when one is needed, then the setup as root once; `then()` when it is there. Only the person starts this."""
+        from orchestrator.runtime.bundle import readiness, service
+        opener = self._opener(built)
+        if opener is None:
+            return
+        open_session, host, port, user, label = opener
+        device_id = built.manifest.board.device_id
+        mode = self._mode()
+
+        def failed(e):
+            return self._show_error(e, address=host, port=port, user=user, device_id=device_id) or True
+
+        def checked(found: Any) -> None:
+            version = str((built.root_helper or {}).get("version", ""))
+            self._say("\n".join(readiness.plan_lines(found, version=version, mode=mode)))
+            if found.ready:
+                if then is not None:
+                    then()
+                return
+            why = found.problem(mode) or ("" if "signers" not in found.missing() else readiness.REASONS["no-signer"])
+            if why:
+                self._info(self._t("bundle.ready.cannot", reason=one_line(why)), "warning")
+                return
+            if not ask(self, self._t("bundle.title"), self._t("bundle.ask.ready", board=label)):
+                self._info(self._t("bundle.ready.declined", bundle=built.bundle_id, board=label), "warning")
+                return
+            pw = ""
+            if found.needs_password(mode):
+                pw = self._ask_password("bundle.ready.password_su" if found.way(mode) == "su"
+                                        else "bundle.ready.password_sudo")
+                if not pw:
+                    self._say(self._t("bundle.unchanged"))
+                    return
+
+            def set_up(done: Any) -> None:
+                self._say(done.text())
+                if not done.ok:
+                    self._info(self._t("bundle.ready.failed", reason=one_line(done.text())), "warning")
+                    return
+                if then is not None:
+                    then()
+            self._start(self._t("bundle.ready.running"),
+                        lambda: service.ready_setup_on_board(open_session, built, found, mode=mode, password=pw),
+                        set_up, failed=failed)
+
+        self._start(self._t("bundle.ready.checking"), lambda: service.readiness_on_board(open_session, built),
+                    checked, failed=failed)
+
+    def _on_prepare_root(self) -> None:
+        """Prepare root...: the board's root readiness for the selected bundle (its plan, then the question)."""
+        found = self._bundle()
+        if found is None:
+            return
+        _store, built = found
+        if not built.needs_root:
+            self._info(self._t("bundle.root.none_here"))
+            return
+        self._prepare(built, then=lambda: self._say(self._t("bundle.ready.there")))
+
+    def _on_unprepare_root(self) -> None:
+        """Remove root readiness...: exactly the sudo rule and llmcf-install at its fixed place, listed first, after a
+        separate question ("No" is the default)."""
+        from orchestrator.runtime.bundle import readiness, service
+        found_bundle = self._bundle()
+        if found_bundle is None:
+            return
+        _store, built = found_bundle
+        if not built.needs_root:
+            self._info(self._t("bundle.root.none_here"))
+            return
+        opener = self._opener(built)
+        if opener is None:
+            return
+        open_session, host, port, user, label = opener
+        device_id = built.manifest.board.device_id
+        mode = self._mode()
+
+        def failed(e):
+            return self._show_error(e, address=host, port=port, user=user, device_id=device_id) or True
+
+        def checked(found: Any) -> None:
+            paths = [p for p, there in ((readiness.DROPIN, found.dropin == "yes"),
+                                        (readiness.FIXED_HELPER, found.helper != "absent")) if there]
+            if not paths:
+                self._info(self._t("bundle.ready.nothing"))
+                return
+            if not ask(self, self._t("bundle.title"), self._t("bundle.ask.unready", board=label,
+                                                              paths="\n".join(paths))):
+                self._say(self._t("bundle.unchanged"))
+                return
+            pw = ""
+            if found.rootway != "nopass":
+                pw = self._ask_password("bundle.ready.password_sudo")
+                if not pw:
+                    self._say(self._t("bundle.unchanged"))
+                    return
+            self._start(self._t("bundle.ready.removing"),
+                        lambda: service.ready_remove_on_board(open_session, found, mode=mode, password=pw),
+                        lambda done: self._say(done.text()), failed=failed)
+
+        self._start(self._t("bundle.ready.checking"), lambda: service.readiness_on_board(open_session, built),
+                    checked, failed=failed)
 
     def _changing(self, action: str) -> None:
         """Deploy... / Roll back... / Uninstall...: first what the installer shows without changing anything, then

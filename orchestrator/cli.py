@@ -7431,6 +7431,15 @@ def _bundle_root(ctx: FrameworkContext, built, action: str, opener=None, *, ask:
 
     def with_password(what: str):
         done = run(what)
+        if done.report.result == "not-ready":
+            # llmcf-install runs only from its fixed root-owned place: the board's root readiness first
+            if not ask:
+                return unread("the board's root readiness for llmcf-install is not set up (llm-cli bundle "
+                              f"prepare-root {built.bundle_id}).")
+            for line in done.lines():
+                console.print(escape(line))
+            _bundle_prepare(ctx, built, (open_session, host, port, label, _device_id))
+            done = run(what)
         if not done.report.needs_password:
             return done
         if not service.password_allowed(_framework_mode(ctx)):
@@ -7481,6 +7490,106 @@ def _bundle_root(ctx: FrameworkContext, built, action: str, opener=None, *, ask:
                           f"llm-cli bundle rollback {built.bundle_id} --root undoes that run.[/yellow]")
         sys.exit(1)
     return result
+
+
+def _bundle_ready_password(ctx: FrameworkContext, found, mode) -> str:
+    """The person's one-time password for the root readiness (root's for su, the board account's for sudo), typed at
+    a terminal and sent on stdin only; "" when none is needed. Exits when it is needed and nobody can type it."""
+    from orchestrator.runtime.bundle import readiness
+    if not found.needs_password(mode):
+        return ""
+    if not _interactive():
+        console.print("[red]The board's root readiness needs a password, which only you can type at a terminal; "
+                      "nothing was changed.[/red]")
+        sys.exit(1)
+    text = click.prompt(readiness.PASSWORD_SU if found.way(mode) == "su" else readiness.PASSWORD_SUDO,
+                        hide_input=True, default="", show_default=False)
+    if not text:
+        console.print("Nothing was changed on the board.")
+        sys.exit(1)
+    return text
+
+
+def _bundle_prepare(ctx: FrameworkContext, built, opener):
+    """The board's root readiness for the bundle's llmcf-install (bundle/readiness.py, the one implementation): its
+    check, the plan of only what is missing, the person's question ("No" is the default), then the setup as root
+    once. Returns the readiness when it is there; exits 1 with what is missing and how to set it up when the person
+    says no, the board cannot take it, or the setup fails. Only the person runs this, never an AI."""
+    from orchestrator.runtime.bundle import readiness, service
+    from orchestrator.runtime.bundle.generator import BundleError
+    from orchestrator.runtime.device.remote import RemoteError
+    open_session, host, port, label, _device_id = opener
+    mode = _framework_mode(ctx)
+    try:
+        found = service.readiness_on_board(open_session, built)
+    except BundleError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    except RemoteError as e:
+        _board_step_failed(ctx, e, host, port)
+    version = str((built.root_helper or {}).get("version", ""))
+    for line in readiness.plan_lines(found, version=version, mode=mode):
+        console.print(escape(line))
+    if found.ready:
+        return found
+    why = found.problem(mode) or ("" if "signers" not in found.missing() else readiness.REASONS["no-signer"])
+    if why:
+        console.print(f"[red]The board's root readiness cannot be set up here: {escape(why)}.[/red]")
+        console.print(f"[red]{escape(readiness.declined_text(built.bundle_id, label, found))}[/red]")
+        sys.exit(1)
+    if not (_interactive() and click.confirm(readiness.QUESTION.format(board=label), default=False)):
+        console.print(f"[red]{escape(readiness.declined_text(built.bundle_id, label, found))}[/red]")
+        console.print(f"On its own: llm-cli bundle prepare-root {escape(built.bundle_id)}")
+        sys.exit(1)
+    password = _bundle_ready_password(ctx, found, mode)
+    try:
+        done = service.ready_setup_on_board(open_session, built, found, mode=mode, password=password)
+    except BundleError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    except RemoteError as e:
+        _board_step_failed(ctx, e, host, port)
+    console.print(escape(done.text()) if done.ok else f"[red]{escape(done.text())}[/red]")
+    if not done.ok:
+        console.print(f"[red]{escape(readiness.declined_text(built.bundle_id, label, found))}[/red]")
+        sys.exit(1)
+    return found
+
+
+def _bundle_unprepare(ctx: FrameworkContext, built, opener) -> None:
+    """Removes the board's root readiness after its exact list and the person's separate yes ("No" default):
+    exactly the sudoers drop-in and llmcf-install at its fixed place (readiness.REMOVE_PATHS)."""
+    from orchestrator.runtime.bundle import readiness, service
+    from orchestrator.runtime.bundle.generator import BundleError
+    from orchestrator.runtime.device.remote import RemoteError
+    open_session, host, port, label, _device_id = opener
+    mode = _framework_mode(ctx)
+    try:
+        found = service.readiness_on_board(open_session, built)
+        paths = [p for p, there in ((readiness.DROPIN, found.dropin == "yes"),
+                                    (readiness.FIXED_HELPER, found.helper != "absent")) if there]
+        if not paths:
+            console.print("The board holds no root readiness of the framework; nothing to remove.")
+            return
+        console.print("These files are removed from the board, nothing else:")
+        for path in paths:
+            console.print(f"  {escape(path)}")
+        if not (_interactive() and click.confirm(readiness.REMOVE_QUESTION.format(board=label,
+                                                                                  paths=", ".join(paths)),
+                                                 default=False)):
+            console.print("Nothing was removed.")
+            return
+        password = "" if found.rootway == "nopass" else _bundle_ready_password(
+            ctx, readiness.Readiness(**{**found.__dict__, "rootway": "password"}), mode)
+        done = service.ready_remove_on_board(open_session, found, mode=mode, password=password)
+    except BundleError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    except RemoteError as e:
+        _board_step_failed(ctx, e, host, port)
+    console.print(escape(done.text()) if done.ok else f"[red]{escape(done.text())}[/red]")
+    if not done.ok:
+        sys.exit(1)
 
 
 def _bundle_run(ctx: FrameworkContext, bundle_id: str, action: str, *, ask: bool = False, root: bool = True):
@@ -7556,6 +7665,29 @@ def bundle_deploy(ctx: FrameworkContext, bundle_id: str, dry_run: bool, skip_roo
     ("No" is the default); a deploy cut off continues where it stopped. Root actions follow through llmcf-install
     after its plan and a second yes (sudo -n, or in private mode your password typed once)"""
     _bundle_run(ctx, bundle_id, "plan" if dry_run else "apply", ask=not dry_run, root=not skip_root)
+
+
+@bundle.command('prepare-root')
+@click.argument('bundle_id', metavar='BUNDLE')
+@click.option('--remove', 'remove', is_flag=True,
+              help="Remove the board's root readiness instead (its exact files listed first, a separate yes)")
+@pass_context
+def bundle_prepare_root(ctx: FrameworkContext, bundle_id: str, remove: bool):
+    """Set up what llmcf-install needs on the bundle's board, like a dependency: sudo, llmcf-install at its fixed
+    root-owned place and its sudo rule; the plan first, then your yes at a terminal ("No" is the default), as root once
+    (your password typed once, never kept). With --remove: its exact files, then a separate yes"""
+    _store, built = _bundle_get(ctx, bundle_id)
+    if not built.needs_root:
+        console.print(f"[red]Bundle {escape(bundle_id)} has no root actions, so its board needs no root "
+                      "readiness.[/red]")
+        sys.exit(1)
+    opener = _bundle_opener(ctx, built)
+    if remove:
+        _bundle_unprepare(ctx, built, opener)
+        return
+    _bundle_prepare(ctx, built, opener)
+    console.print("The board's root readiness is there: the root actions run llmcf-install from its root-owned "
+                  "place (llm-cli bundle deploy).")
 
 
 @bundle.command('status')

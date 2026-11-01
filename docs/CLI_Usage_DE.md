@@ -2520,6 +2520,7 @@ llm-cli bundle deploy BUNDLE [--dry-run] [--skip-root]
 llm-cli bundle status BUNDLE
 llm-cli bundle uninstall BUNDLE
 llm-cli bundle rollback BUNDLE [--root]
+llm-cli bundle prepare-root BUNDLE [--remove]
 llm-cli bundle delete [BUNDLE]...
 llm-cli bundle block list [--json]
 llm-cli bundle block new ID --kind ART --title TEXT [--summary TEXT] [--from BAUSTEIN]
@@ -2574,6 +2575,14 @@ zuerst) und fragt erneut ("Nein" ist jedes Mal die Vorgabe); behältst du den Ro
 stattdessen den letzten Lauf von llmcf-install zurück (genau das, was dieser Lauf laut Journal angelegt oder geändert
 hat). Scheitert eine Root-Aktion, nachdem andere schon erledigt sind, sagt es das; `rollback --root` nimmt diesen
 Lauf zurück.
+
+### bundle prepare-root
+
+```
+llm-cli bundle prepare-root BUNDLE [--remove]
+```
+
+Richtet die Root-Bereitschaft des Boards für das llmcf-install des Bündels ein, wie eine Abhängigkeit: Es liest, was da ist (sudo, der Signierschlüssel in Root-Besitz, llmcf-install unter `/usr/local/libexec/llmcf/llmcf-install`, seine sudo-Regel `/etc/sudoers.d/llmcf-install`), zeigt den Plan von nur dem, was fehlt, fragt (Nein ist die Vorgabe) und richtet es einmal als root ein: sudo über die Paketverwaltung des Boards (ein Board ohne sudo: das root-Passwort für `su`, nur im Privatmodus), das Programm in Root-Besitz nach Prüfung von Signatur und sha256, die Regel geprüft mit `visudo -cf`. Ein Passwort wird einmal getippt und nur über stdin gesendet. Der Signierschlüssel in Root-Besitz kommt vom erneuten Koppeln des Boards mit seinem Passwort. `llm-cli bundle deploy` fragt dasselbe, wenn die Root-Aktionen es brauchen; ein Nein beendet es mit Exit 1. `--remove` listet genau die zwei Dateien und entfernt sie nach einem getrennten Ja.
 
 ### bundle delete
 
