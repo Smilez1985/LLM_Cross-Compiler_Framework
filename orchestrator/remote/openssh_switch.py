@@ -17,8 +17,10 @@ the distribution's own package manager, known package names per family, a plan s
 - the setup operation dropbear-disable (remove_dropbear): only after a separate yes of the person, over the new
   sshd's login (the way in stays open): the init system stops and disables the dropbear service first, then the
   board's own package manager removes only the packages that provide the running SSH server (Debian: dropbear,
-  dropbear-bin, dropbear-run as installed; Arch, Fedora, openSUSE: dropbear; Alpine: dropbear, dropbear-openrc;
-  gate.DROPBEAR_PACKAGES), with remove, never purge and never autoremove, so its configuration stays.
+  dropbear-bin, dropbear-run as installed; Arch, Fedora, openSUSE: dropbear; gate.DROPBEAR_PACKAGES), with remove,
+  never purge and never autoremove, so its configuration stays. Alpine is disable-only: apk del would also remove
+  the libraries only Dropbear pulled in, so Dropbear is stopped and switched off there and its packages (dropbear,
+  dropbear-openrc) stay, refused with the reason dependents and a plain note (ALPINE_NOTE).
   dropbear-initramfs (the disk unlock at boot) is never removed, and the dropbear-bin it needs stays with it. The
   removal is refused, with nothing removed, when the package manager would take any other package with them (apt's
   simulation, rpm's test) or when it fails; a board without a package manager the switch knows gets the init
@@ -33,7 +35,7 @@ Every step is written to the audit log by the caller (remote/pairing.py), with t
 import re
 import socket
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Tuple
 
 from orchestrator.remote import gate
@@ -78,7 +80,6 @@ SSH_SOCKET = "ssh.socket"
 REMOVE_COMMANDS = {
     "dpkg": "env DEBIAN_FRONTEND=noninteractive apt-get remove -y -o APT::Get::AutomaticRemove=false",
     "pacman": "pacman -R --noconfirm",
-    "apk": "apk del",
     "dnf": "dnf remove -y --noautoremove",
     "zypper": "zypper --non-interactive remove --no-clean-deps",
 }
@@ -118,6 +119,11 @@ SWITCH_REASONS = {
     "dependents": "removing Dropbear's packages would also remove other packages, so nothing was removed",
     "remove-timeout": "the removal of Dropbear gave no answer in time; it may still be running on the board",
 }
+# Alpine is disable-only (the maintainer's decision): `apk del` removes every package that only the removed ones
+# pulled in, so it would also take libraries Dropbear brought; the framework never runs it, Dropbear is stopped and
+# switched off, and the person reads why in plain words.
+ALPINE_NOTE = ("on Alpine, Dropbear is stopped and switched off but not removed: apk would also remove the libraries "
+               "that only Dropbear pulled in, so its packages stay installed")
 # What the person reads about a removal that stopped and disabled Dropbear but did not remove its packages
 REMOVAL_NOTES = {
     "no-manager": "the board has no package manager the framework knows, so Dropbear's program stays installed",
@@ -195,6 +201,12 @@ def plan(facts: Any, port: int = SWITCH_PORT) -> SwitchPlan:
               "Dropbear stays as it is; removing it is a separate question afterwards."]
     installed = tuple(getattr(facts, "dropbear_packages", ()) or ())
     going = removable_packages(installed)
+    if manager == "apk":
+        lines.append("Only if you say yes to that question: the init system stops and switches off Dropbear. On Alpine "
+                     "it is not removed: apk would also remove the libraries that only Dropbear pulled in, so its "
+                     "packages stay installed.")
+        return SwitchPlan(manager=manager, packages=packages, port=int(port), dietpi=dietpi, lines=tuple(lines),
+                          dropbear_packages=installed)
     lines.append("Only if you say yes to that question: the init system stops and disables Dropbear, then the board's "
                  "package manager removes only the packages that provide it"
                  + (f" ({', '.join(going)})" if going else "")
@@ -280,8 +292,9 @@ DROPBEAR_DISABLE = "\n".join([
     'IFS= read -r llmcf_pw || llmcf_pw=""',
     'no() { echo "dropbear=unavailable reason=$1"; exit 0; }',
     # Dropbear is stopped and disabled from here on: how its packages went (removal=removed|none|refused, reason=WORD
-    # or -, packages=the ones removed, or kept by a refusal, comma-separated, or none)
-    'off() { echo "dropbear=$1 removal=$2 reason=$3 packages=${4:-none}"; exit 0; }',
+    # or -, packages=the ones removed, or kept by a refusal, comma-separated, or none; tool=the query program asked)
+    "llmcf_tool=",
+    'off() { echo "dropbear=$1 removal=$2 reason=$3 packages=${4:-none} tool=${llmcf_tool:-none}"; exit 0; }',
     'asroot() { if [ -n "$llmcf_pw" ]; then printf "%s\\n" "$llmcf_pw" | sudo -S -p "" "$@"; '
     'else sudo -n "$@"; fi; }',
     "command -v sudo >/dev/null 2>&1 || no no-sudo",
@@ -322,14 +335,8 @@ DROPBEAR_DISABLE = "\n".join([
     "  pacman)",
     f"    asroot {REMOVE_COMMANDS['pacman']} $llmcf_rm >/dev/null 2>&1 || off disabled refused remove "
     '"$llmcf_list" ;;',
-    # apk's simulation names every package the removal would take ("(1/2) Purging NAME (VERSION)")
-    "  apk)",
-    '    llmcf_sim=$(asroot apk del -s $llmcf_rm 2>/dev/null) || off disabled refused remove "$llmcf_list"',
-    "    for llmcf_n in $(printf '%s\\n' \"$llmcf_sim\" | sed -n 's/.*Purging \\([^ ]*\\).*/\\1/p'); do",
-    '      case " $llmcf_rm " in *" $llmcf_n "*) ;; *) off disabled refused dependents "$llmcf_list" ;; esac',
-    "    done",
-    f"    asroot {REMOVE_COMMANDS['apk']} $llmcf_rm >/dev/null 2>&1 || off disabled refused remove "
-    '"$llmcf_list" ;;',
+    # Alpine is disable-only: apk del would also remove the libraries only Dropbear pulled in (ALPINE_NOTE)
+    '  apk) off disabled refused dependents "$llmcf_list" ;;',
     # rpm's test removal fails when another package needs one of them; dnf or zypper then remove only these
     "  rpm)",
     '    asroot rpm -e --test $llmcf_rm >/dev/null 2>&1 || off disabled refused dependents "$llmcf_list"',
@@ -353,11 +360,13 @@ class DropbearRemoval:
     """What dropbear-disable did: `ok` when Dropbear is stopped and disabled; `removal` removed (its packages are
     gone), none (nothing to remove, or no package manager the switch knows) or refused (the package manager would
     have taken other packages, or failed: nothing was removed); `reason` a word of SWITCH_REASONS ("" when its
-    packages were removed); `packages` the ones removed, or kept by a refusal (fixed names only)."""
+    packages were removed); `packages` the ones removed, or kept by a refusal (fixed names only); `tool` the board's package query program
+    (dpkg, pacman, apk, rpm; "" when it said none)."""
     ok: bool
     removal: str = ""
     reason: str = ""
     packages: Tuple[str, ...] = ()
+    tool: str = field(default="", compare=False)   # a fact for the text, not part of what happened
 
     @property
     def removed(self) -> bool:
@@ -365,10 +374,12 @@ class DropbearRemoval:
 
     def as_dict(self) -> dict:
         """Fixed words only, for the audit log."""
-        return {"removal": self.removal or "none", "reason": self.reason, "packages": list(self.packages)}
+        return {"removal": self.removal or "none", "reason": self.reason, "packages": list(self.packages),
+                "tool": self.tool}
 
 
 _REMOVALS = ("removed", "none", "refused")
+_TOOLS = ("dpkg", "pacman", "apk", "rpm")
 _WORD = re.compile(r"^[a-z][a-z-]{0,23}$", re.ASCII)
 
 
@@ -385,8 +396,9 @@ def _removal(text: str) -> DropbearRemoval:
             return DropbearRemoval(False, reason=reason or "unknown")
         removal = words.get("removal", "none")
         packages = tuple(p for p in words.get("packages", "none").split(",") if gate.DROPBEAR_PACKAGE.fullmatch(p))
+        tool = words.get("tool", "")
         return DropbearRemoval(True, removal=removal if removal in _REMOVALS else "none", reason=reason,
-                               packages=packages)
+                               packages=packages, tool=tool if tool in _TOOLS else "")
     return DropbearRemoval(False, reason="unknown")
 
 
@@ -414,6 +426,8 @@ def removal_text(done: DropbearRemoval) -> str:
     if done.removed:
         return (f"Dropbear is off: stopped, disabled, and its packages ({', '.join(done.packages)}) removed with the "
                 "board's package manager; their configuration files stay on the board.")
+    if done.tool == "apk":
+        return f"Dropbear is off: {ALPINE_NOTE}."
     note = REMOVAL_NOTES.get(done.reason, SWITCH_REASONS.get(done.reason, done.reason or "nothing was removed"))
     return f"Dropbear is off (stopped and disabled by the init system); {note}."
 
@@ -475,7 +489,7 @@ def wait_until_answers(host: str, port: int, *, seconds: float = WAIT_SECONDS, b
         sleep(1.0)
 
 
-__all__ = ["DROPIN", "DropbearRemoval", "REMOVAL_NOTES", "REMOVE_COMMANDS", "FAMILY_MANAGER", "SSH_SOCKET",
+__all__ = ["ALPINE_NOTE", "DROPIN", "DropbearRemoval", "REMOVAL_NOTES", "REMOVE_COMMANDS", "FAMILY_MANAGER", "SSH_SOCKET",
            "INSTALL_COMMANDS", "INSTALL_TIMEOUT", "PACKAGES", "PACMAN_SYNC_DIR",
            "PREPARE_COMMANDS", "SWITCH_PORT", "SWITCH_REASONS", "SwitchPlan",
            "SwitchUnavailable", "banner_of", "disable_dropbear", "install", "manager_for", "plan",
