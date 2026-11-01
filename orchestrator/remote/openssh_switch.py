@@ -405,6 +405,9 @@ def remove_dropbear(run: Callable[..., object], password: str = "") -> DropbearR
 
 def removal_text(done: DropbearRemoval) -> str:
     """What the person reads after the separate yes (the CLI's and the GUI's report of the switch)."""
+    if done.reason == "remove-timeout":   # its disable comes first, so Dropbear may already be stopped
+        return ("The removal of Dropbear gave no answer in time; it may still be running on the board, so Dropbear "
+                "may already be stopped and its packages removed. OpenSSH keeps running.")
     if not done.ok:
         return (f"Dropbear could not be turned off ({SWITCH_REASONS.get(done.reason, done.reason)}); it keeps "
                 "running next to OpenSSH.")
@@ -418,7 +421,7 @@ def removal_text(done: DropbearRemoval) -> str:
 def disable_dropbear(run: Callable[..., object], password: str = "") -> Tuple[bool, str]:
     """Deprecated: remove_dropbear (which also says what happened to Dropbear's packages). (ok, reason)."""
     done = remove_dropbear(run, password)
-    return done.ok, done.reason
+    return done.ok, ("" if done.ok else done.reason)   # as before: no reason when Dropbear is off
 
 
 def _answer(text: str, key: str) -> Tuple[bool, str, str]:

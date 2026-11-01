@@ -243,7 +243,33 @@ def test_the_gui_continue_follows_the_build_in_the_builder(qapp, tmp_path, monke
     outcome = dialog_module.ask_interrupted(None, framework, BUILD_ID, "en", on_continued=followed.append)
     assert outcome == "continued" and followed == ["req_cont0001"]
     assert queued and queued[0].build_id == BUILD_ID
-    assert "req_cont0001" in boxes[-1]
+    # Regression (review): the message names the build as Build History lists it (its build id), as before the
+    # continued build became a request; the request id goes to the Builder's progress panel only
+    assert BUILD_ID in boxes[-1] and "req_cont0001" not in boxes[-1]
+
+
+def test_the_gui_continue_without_a_build_service_hands_no_build_id_to_the_builder(qapp, tmp_path, monkeypatch):
+    """Regression (review): without the framework's build service the engine runs the build directly and returns
+    its build id, which is no build request: the Builder must not be asked to follow it."""
+    from orchestrator.gui import interrupted_build_dialog as dialog_module
+    kept(tmp_path / "cache", build_id=BUILD_ID)
+    followed, boxes = [], []
+    engine = SimpleNamespace(cache_dir=tmp_path / "cache", build_model=lambda cfg: cfg.build_id)
+    framework = SimpleNamespace(build_service=None, config=SimpleNamespace(user_state_dir=str(tmp_path / "state")),
+                                orchestrator=SimpleNamespace(build_engine=engine))
+
+    from PySide6.QtWidgets import QMessageBox
+
+    class ContinueBox(QMessageBox):
+        def exec(self):
+            return 0
+
+        def clickedButton(self):
+            return next(b for b in self.buttons() if self.buttonRole(b) == QMessageBox.AcceptRole)
+    monkeypatch.setattr(dialog_module, "QMessageBox", ContinueBox)
+    monkeypatch.setattr(dialog_module, "plain_box", lambda *a, **k: boxes.append(a[3]))
+    outcome = dialog_module.ask_interrupted(None, framework, BUILD_ID, "en", on_continued=followed.append)
+    assert outcome == "continued" and followed == [] and BUILD_ID in boxes[-1]
 
 
 def test_build_history_hands_the_continued_build_to_the_builder_tab(qapp, monkeypatch):
