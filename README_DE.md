@@ -226,7 +226,7 @@ unbeaufsichtigten Lauf setzt du stattdessen `LCF_DITTO` (zum Beispiel `sudo LCF_
 nichts gefragt, und ein Modell unter einer freien Lizenz (etwa Apache 2.0) wird heruntergeladen, nachdem Größe und
 Lizenz angezeigt wurden.
 
-Der Installer fragt auch nach dem Framework-Modus: privat (Standard, Enter) oder enterprise, der auf einem Board nur OpenSSH mit sudo nimmt; `--mode=private|enterprise` (oder `LCF_MODE`) beantwortet das für einen unbeaufsichtigten Lauf, und später änderst du ihn unter Datei > Einstellungen... oder mit `llmcf config set framework_mode`.
+Der Installer fragt auch nach dem Framework-Modus: privat oder enterprise; Enter behält bei einer Aktualisierung den jetzigen Modus (die Frage zeigt ihn als Vorgabe, `[P/e]` oder `[p/E]`) und wählt bei einer neuen Installation privat. Enterprise nimmt auf einem Board nur OpenSSH mit sudo; `--mode=private|enterprise` (oder `LCF_MODE`) beantwortet das für einen unbeaufsichtigten Lauf, und später änderst du ihn unter Datei > Einstellungen... oder mit `llmcf config set framework_mode`.
 
 Was der Installer auf diesem Rechner täte, ohne etwas zu verändern, zeigt `./install.sh --dry-run` (ohne `sudo`):
 die Familie, die Paketverwaltung, die Pakete, die Repositorys und die Fingerabdrücke der Schlüssel; er ruft

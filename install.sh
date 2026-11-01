@@ -42,7 +42,8 @@ HEADLESS="${LCF_HEADLESS:-0}"
 DITTO_CHOICE="${LCF_DITTO:-auto}"
 # Der Framework-Modus: private (Standard) oder enterprise (nimmt auf Boards nur OpenSSH mit sudo, die Schlüsselzeile in
 # Root-Besitz). --mode=private|enterprise, für unbeaufsichtigte Läufe auch LCF_MODE=...; ohne Angabe fragt der
-# Installer am Terminal (Enter: privat). Ohne Angabe und ohne Terminal bleibt der Modus, wie er ist (neu: privat).
+# Installer am Terminal (Enter: der jetzige Modus einer Aktualisierung, neu: privat). Ohne Angabe und ohne Terminal
+# bleibt der Modus, wie er ist (neu: privat).
 MODE_CHOICE="${LCF_MODE:-}"
 
 # Die Container-Engine läuft standardmäßig ohne Root-Rechte (rootless Podman; --engine=docker: rootless Docker);
@@ -1758,18 +1759,50 @@ ditto_option() {
     esac
 }
 
-# Fragt den Framework-Modus, wenn weder --mode noch LCF_MODE ihn nennen: am Terminal (ASK_TTY, nie aus stdin), Enter
-# heißt privat. Ohne Terminal (ein unbeaufsichtigter Lauf) bleibt der Modus, wie er ist (MODE_CHOICE leer).
+# Der Framework-Modus einer früheren Installation an diesem Ort (private oder enterprise; leer bei einer neuen
+# Installation oder wenn er sich nicht lesen lässt): gelesen wie jede Einstellung, mit dem Python der vorhandenen .venv
+# und dem Leser des Modus (ConfigManager und framework_mode, orchestrator/Core/config_manager.py), als die Person, die
+# installiert (ihre config.yml). Setzt CURRENT_MODE.
+CURRENT_MODE=""
+read_current_mode() {
+    CURRENT_MODE=""
+    local py="$INSTALL_DIR/.venv/bin/python" run=() out=""
+    [ -x "$py" ] || return 0
+    if [ "$CONTAINER_BUILD" != "1" ]; then
+        local real_user="${SUDO_USER:-${USER:-}}"
+        if [ -n "$real_user" ] && [ "$real_user" != "root" ] && [ "$(id -u)" = "0" ]; then
+            run=(sudo -H -u "$real_user")
+            if ! command -v sudo &> /dev/null; then run=(runuser -u "$real_user" --); fi
+        fi
+    fi
+    out=$(cd "$INSTALL_DIR" && ${run[@]+"${run[@]}"} "$py" -c 'from orchestrator.Core.config_manager import ConfigManager, framework_mode; print(framework_mode(ConfigManager()))' 2> /dev/null | tail -n 1) || out=""
+    case "$out" in private|enterprise) CURRENT_MODE="$out" ;; esac
+    return 0
+}
+
+# Fragt den Framework-Modus, wenn weder --mode noch LCF_MODE ihn nennen: am Terminal (ASK_TTY, nie aus stdin). Die
+# Vorgabe ist der jetzige Modus einer Aktualisierung ([P/e] bei privat, [p/E] bei enterprise): Enter allein behält ihn;
+# eine neue Installation hat privat als Vorgabe. Ohne Terminal (ein unbeaufsichtigter Lauf) bleibt der Modus, wie er
+# ist (MODE_CHOICE leer).
 ask_mode() {
-    local answer=""
+    local answer="" hint="[P/e]" default="private" now="privat (Standard)"
     if [ -n "$MODE_CHOICE" ]; then return 0; fi
-    printf '%s [P/e] ' "Framework-Modus: privat (Standard) oder enterprise? Enterprise nimmt auf Boards nur OpenSSH mit sudo (die Schlüsselzeile in Root-Besitz) und lehnt die schwächere Dropbear-Stufe und das Home-Tor ab."
+    read_current_mode
+    if [ "$CURRENT_MODE" = "enterprise" ]; then hint="[p/E]"; default="enterprise"; now="enterprise (jetzt eingestellt)"; fi
+    if [ "$CURRENT_MODE" = "private" ]; then now="privat (jetzt eingestellt)"; fi
+    printf '%s %s ' "Framework-Modus: $now; Enter behält ihn. privat oder enterprise? Enterprise nimmt auf Boards nur OpenSSH mit sudo (die Schlüsselzeile in Root-Besitz) und lehnt die schwächere Dropbear-Stufe und das Home-Tor ab." "$hint"
     if ! { IFS= read -r answer < "$ASK_TTY"; } 2> /dev/null; then
         echo ""
         log_info "Kein Terminal für die Antwort (ein unbeaufsichtigter Lauf): Der Framework-Modus bleibt, wie er ist (neu: privat; --mode=enterprise wählt ihn)."
         return 0
     fi
-    case "${answer,,}" in e|enterprise) MODE_CHOICE="enterprise" ;; *) MODE_CHOICE="private" ;; esac
+    answer="${answer,,}"
+    answer="${answer//[[:space:]]/}"
+    case "$answer" in
+        e|enterprise) MODE_CHOICE="enterprise" ;;
+        p|privat|private) MODE_CHOICE="private" ;;
+        *) MODE_CHOICE="$default" ;;
+    esac
 }
 
 # Setzt den gewählten Framework-Modus mit 'llm-cli config set framework_mode' als die Person, die installiert (ihre
