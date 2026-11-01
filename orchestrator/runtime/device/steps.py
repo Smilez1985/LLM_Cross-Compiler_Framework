@@ -130,14 +130,16 @@ def build_runtime(state_dir: Path, device_id: str, profile: Any, plan: Any, sour
                   may_fetch: Callable[[], bool] = lambda: True,
                   on_step: Callable[[str, Any], None] = lambda _kind, _build: None,
                   log: Say = lambda _m: None, cancelled: Callable[[], bool] = lambda: False,
-                  reuse_package: bool = False, settings: Any = None, ai_started: bool = False) -> RuntimeBuild:
+                  reuse_package: bool = False, settings: Any = None, ai_started: bool = False,
+                  current_script: bool = False) -> RuntimeBuild:
     """Builds the board's runtime as `llmcf device runtime build`: the pinned llama.cpp source from the cache, or
     fetched (from `mirror` when given) only after `may_fetch()` said yes; the cross build in the builder container
     without network (`jobs` parallel compile jobs; None: the CPUs, limited by the memory); then the tarball for the
     board. `on_step(kind, build)` tells the caller where it is: "fetch" and "fetched" around the download, "build"
     before the build, "stored" when the plan's build was stored already. `cancelled()` is asked between the steps
     (the build in the container itself runs to its end). With `reuse_package` a checked tarball of the build that is
-    there already is used again. `settings`: the framework's settings; in offline mode the source comes only from the
+    there already is used again (packed again only with `current_script`, when the caller needs this framework's
+    start script, ensure_package). `settings`: the framework's settings; in offline mode the source comes only from the
     person's own network (a local mirror), at its checked address (runtime/build/source.offline_reach).
     `ai_started`: a tool caller (an AI) started it, so the soft caps of the build's steps stop it
     (utils/step_limits.py, DECISIONS round 25 Q8); the idle timeout of its steps is the settings' build_idle_timeout,
@@ -176,7 +178,7 @@ def build_runtime(state_dir: Path, device_id: str, profile: Any, plan: Any, sour
         raise BuildCancelled("the build was cancelled")
     devices = DeviceRuntimeStore(state_dir, device_id, project)
     packaged = devices.tarball(build) if reuse_package else None
-    if packaged is not None and _stale_start_script(packaged):
+    if packaged is not None and current_script and _stale_start_script(packaged):
         packaged = None   # made by an older framework: its start script lacks options added since (--mmproj)
     if packaged is None:
         packaged = package_runtime(builds, build, licence=src / "LICENSE", out_dir=devices.root)
@@ -188,10 +190,13 @@ class PackageNeedsSource(RuntimeError):
     cached."""
 
 
-def ensure_package(state_dir: Path, device_id: str, builds: Any, build: Any, source: Callable[[], Any]):
+def ensure_package(state_dir: Path, device_id: str, builds: Any, build: Any, source: Callable[[], Any], *,
+                   current_script: bool = False):
     """(DeviceRuntimeStore, packaged tarball) of a stored build: the checked tarball that is there, or packaged again
     from the cached pinned source (`source()` names the pin; asked only then). PackageNeedsSource when the source is
-    not cached; PackageError when packaging fails."""
+    not cached; PackageError when packaging fails. `current_script`: the caller needs this framework's start script
+    (a bundle's vision component and its --mmproj); only then is a package with an older start script packed again
+    (when the pinned source is cached), never silently for every caller."""
     from orchestrator.runtime.build.source import cached_source
     from orchestrator.runtime.build.projects import project_of
     from orchestrator.runtime.device.package import DeviceRuntimeStore, package_runtime
@@ -200,7 +205,7 @@ def ensure_package(state_dir: Path, device_id: str, builds: Any, build: Any, sou
         DeviceRuntimeStore(state_dir, device_id)
     packaged = devices.tarball(build)
     if packaged is not None:
-        if not _stale_start_script(packaged):
+        if not current_script or not _stale_start_script(packaged):
             return devices, packaged
         src = cached_source(source(), state_dir)
         if src is None:
@@ -216,7 +221,7 @@ def _stale_start_script(packaged: Any) -> bool:
     """A llama.cpp package whose start script is older than this framework's (package.start_script_current); a
     package of another project has none and is never stale for it."""
     from orchestrator.runtime.device.package import start_script_current
-    return start_script_current(Path(packaged.path)) is False
+    return start_script_current(Path(packaged.path), getattr(packaged, "sha256", None)) is False
 
 
 def older_package_count(devices: Any, build: Any) -> int:
@@ -337,7 +342,7 @@ class StoredRuntime:
 
 
 def stored_runtime(state_dir: Path, device_id: str, profile: Any, source: Callable[[], Any],
-                   project: Optional[str] = None) -> StoredRuntime:
+                   project: Optional[str] = None, *, current_script: bool = False) -> StoredRuntime:
     """The stored build of the board's plan and its checked tarball, found before any contact with the board (`llmcf
     device runtime deploy` and the Boards window; the AI's deploy builds instead, service.ensure_build): PlanError when
     the board gets no plan, NotBuilt when the plan's build is not stored, PackageNeedsSource or PackageError when its
@@ -349,7 +354,7 @@ def stored_runtime(state_dir: Path, device_id: str, profile: Any, source: Callab
     build = builds.find(plan)
     if build is None:
         raise NotBuilt("the runtime for this device is not built yet")
-    devices, packaged = ensure_package(state_dir, device_id, builds, build, source)
+    devices, packaged = ensure_package(state_dir, device_id, builds, build, source, current_script=current_script)
     return StoredRuntime(plan=plan, builds=builds, build=build, devices=devices, packaged=packaged)
 
 

@@ -28,10 +28,11 @@ def component_pin(project: Optional[str] = None):
 
 
 def runtime_for(state_dir: Path, device_id: str, profile: Any, source: Optional[Callable[[], Any]] = None,
-                project: Optional[str] = None) -> gen.RuntimePackage:
+                project: Optional[str] = None, current_script: bool = False) -> gen.RuntimePackage:
     """The board's package of a project of the self-build path, never built here: llama.cpp's runtime tarball of
     deploy way 2 (steps.stored_runtime), or with `project` whisper.cpp's board package the same way; or why there
-    is none."""
+    is none. `current_script`: the bundle needs this framework's start script (needs_current_script), so a package
+    with an older one is packed again when the pinned source is cached."""
     from orchestrator.runtime.device import steps
     name = project or "llama.cpp"
     if source is None:
@@ -42,8 +43,8 @@ def runtime_for(state_dir: Path, device_id: str, profile: Any, source: Optional[
             def source():
                 return component_pin(project)
     try:
-        stored = steps.stored_runtime(Path(state_dir), device_id, profile, source) if project is None else \
-            steps.stored_runtime(Path(state_dir), device_id, profile, source, project)
+        stored = steps.stored_runtime(Path(state_dir), device_id, profile, source, current_script=current_script) \
+            if project is None else steps.stored_runtime(Path(state_dir), device_id, profile, source, project)
     except Exception as e:  # noqa: BLE001 - PlanError, NotBuilt, PackageNeedsSource, PackageError: the plan says so
         text = str(e) or e.__class__.__name__
         if name == "llama.cpp":
@@ -56,6 +57,12 @@ def runtime_for(state_dir: Path, device_id: str, profile: Any, source: Optional[
     return gen.RuntimePackage(Path(packaged.path), packaged.sha256, stored.build.build_id, project=name,
                               arch=str((plan.get("target") or {}).get("arch") or ""),
                               cpu_features=tuple((plan.get("cpu_features") or {}).get("used") or ()))
+
+
+def needs_current_script(catalog: blk.BlockCatalog, selection: gen.Selection) -> bool:
+    """Whether the chosen blocks need this framework's llama.cpp start script: a vision component (its --mmproj, which
+    an older start script refuses). Only then is an older runtime package packed again."""
+    return any(getattr(catalog.get(b), "kind", "") == "vision" for b in selection.blocks)
 
 
 def needed_projects(catalog: blk.BlockCatalog, selection: gen.Selection) -> List[str]:
@@ -154,7 +161,7 @@ def plan_for_device(state_dir: Path, device_id: str, selection: gen.Selection, *
     catalog = blk.load_catalog(app_root, index=index)
     projects = needed_projects(catalog, selection)
     if runtime is None and "llama.cpp" in projects:
-        runtime = runtime_for(state_dir, device_id, profile)
+        runtime = runtime_for(state_dir, device_id, profile, current_script=needs_current_script(catalog, selection))
     others = {p: runtime_for(state_dir, device_id, profile, project=p) for p in projects if p != "llama.cpp"}
     from orchestrator.runtime.device.steps import board_limits_of
     return gen.plan_bundle(selection, catalog=catalog, profile=profile, device_id=device_id,
@@ -519,6 +526,6 @@ __all__ = ["CHANGING_ACTIONS", "COMPONENT_QUESTION", "DEPLOY_QUESTION", "ENTERPR
            "ROOT_ROLLBACK_QUESTION", "ROOT_UNINSTALL_QUESTION", "UNINSTALL_QUESTION", "accept_terms", "assignments",
            "board_contact", "build_components", "build_for", "bundle_rows", "catalog_sources", "component_pin",
            "component_question", "device_profile", "engine_client", "framework_programs", "gateway_text",
-           "helper_for", "needed_projects", "password_allowed", "plan_for_device", "question", "readiness_on_board",
+           "helper_for", "needed_projects", "needs_current_script", "password_allowed", "plan_for_device", "question", "readiness_on_board",
            "ready_remove_on_board", "ready_setup_on_board", "revoked_blocks", "root_count", "root_question",
            "run_on_board", "run_root_on_board", "runtime_for", "selection_from"]

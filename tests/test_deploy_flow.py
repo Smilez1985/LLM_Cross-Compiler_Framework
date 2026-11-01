@@ -302,7 +302,7 @@ def runtime_stand_ins(monkeypatch, order, *, uid=1000, ok=True):
     monkeypatch.setattr(steps, "plan_runtime", lambda profile: SimpleNamespace(build_id="b" * 64,
                                                                                target={"arch": "arm64"}, verify={}))
     monkeypatch.setattr(BuildStore, "find", lambda self, plan: build)
-    monkeypatch.setattr(steps, "ensure_package", lambda state, device_id, builds, b, source: (
+    monkeypatch.setattr(steps, "ensure_package", lambda state, device_id, builds, b, source, **kw: (
         SimpleNamespace(cleanup_plan=lambda: None, device_id=device_id),
         SimpleNamespace(path=Path("/x.tar.gz"), sha256="a" * 64)))
 
