@@ -414,6 +414,15 @@ client connected over MCP, or Ditto, can then package a build and deploy it to t
 `create_deploy_package`, `deploy_to_device`), each time only after you confirmed a question that shows the board,
 its host key fingerprint and the package's hash. No AI can trust a new board or accept a changed host key.
 
+### The whole board in one bundle
+
+**Boards > Board bundle...** (or `llm-cli bundle`) puts a speech server and the LLM server on a board as one signed
+bundle: you pick a preset or the building blocks, their variables and files, look at the full plan (every file with
+its source and size, the checks against the board's probe), build it and deploy it. Its installer on the board
+installs the unprivileged steps once, can show its status, roll back and uninstall them; root steps such as an
+autostart unit wait for the framework's root helper llmcf-install, so choose the unprivileged-only variant for now.
+Every deploy asks you first. Details: [Features](docs/Features.md#the-board-bundle).
+
 ### The board
 
 To run the model on the board you need a runtime there: llama.cpp (`llama-server`) for GGUF, Rockchip's RKLLM
@@ -900,7 +909,8 @@ The [roadmap](docs/ROADMAP.md) lists what is planned; finished items move to the
 - **Ditto's context:** real token numbers per provider and model, the real context window per model with
   compaction, cloud caching the provider's way, and Ditto's archive of what it
   learned about llmcf and building (never the person's private talk).
-- **The board bundle:** a complete, hash-listed bundle as a third deploy way, an idempotent installer on the board,
+- **The board bundle:** its usable first part is there (blocks, plan, signed bundle, the unprivileged installer,
+  window, CLI and MCP tools); next come the root helper llmcf-install, components built by the framework itself,
   the token-saving gateway `llmcf-gateway` in Rust, voice and vision as bundle components, and MCP on the board
   (loopback first, the network only with TLS).
 - **Device runtime and more hardware:** recipes as target templates, a rotation stage before quantization, a generic

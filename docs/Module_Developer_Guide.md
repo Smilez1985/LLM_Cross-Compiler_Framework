@@ -1,4 +1,4 @@
-Version 3.3.0 · Last updated 2026-10-31
+Version 3.3.0 · Last updated 2026-11-01
 
 **English** · [Deutsch](Module_Developer_Guide_DE.md)
 
@@ -25,6 +25,7 @@ hardware (or its specifications).
 9. [Sharing a target](#9-sharing-a-target)
 10. [What the stage modules kept from version 1.x](#10-what-the-stage-modules-kept-from-version-1x)
 11. [The hardware probe file](#11-the-hardware-probe-file)
+12. [Bundle building blocks](#12-bundle-building-blocks)
 
 ## 1. How the framework uses a target
 
@@ -1417,3 +1418,104 @@ the probe looks at; the .py and the .sh carry copies, and a test compares them.
 `None` for a profile of a probe older than 3.3.0, which never looked. `llm-cli scan` prints them on an `Access:` line,
 the Builder tab's scan logs the same line, and the MCP tool `get_hardware_probe` returns them as `access`. A file of an
 older probe stays readable; probe the board again to get the facts.
+
+## 12. Bundle building blocks
+
+The board bundle (deploy way 3, [Features](Features.md#the-board-bundle)) is made from building blocks. A block is one
+folder with exactly two files: `block.yml` (schema `llmcf-bundle-block/1`) and its guide `README.md`. Nothing else is
+allowed in the folder (no script, no program): what runs on the board is the bundle's one signed installer, which
+reads the block's checked values as data.
+
+### 12.1 Where blocks come from
+
+| Where | Trust | Used in private mode | Used in enterprise mode |
+|---|---|---|---|
+| The framework's own blocks (`orchestrator/runtime/bundle/blocks/`) | `framework` | yes | yes |
+| Installed from the signed community index (Community Hub, `llm-cli zoo install`) | `indexed` | yes | yes |
+| A block pack installed from a file and signed by its author | `signed` | yes, with a note | no |
+| Your own block in `community/blocks/` (never signed) | `own` | only after your yes | no |
+
+An installed block counts as indexed or signed only while it is exactly what was installed; a block you changed
+afterwards is your own. A block the signed index revoked is listed with a note and never used.
+
+Make your own block with **Boards > Board bundle... > New block...** or `llm-cli bundle block new ID --kind KIND
+--title TEXT [--from BLOCK]` (starting from one of the framework's blocks copies its variables, files and start).
+
+### 12.2 block.yml
+
+```yaml
+schema: llmcf-bundle-block/1
+id: stt-mine                # lower-case letters, digits, '.', '_', '-'; the folder carries the same name
+version: 1.0.0              # MAJOR.MINOR.PATCH
+kind: stt                   # llm, stt, tts, vision, gateway or harness
+title: My speech recognition
+status: ready               # ready, or template (listed with its guide, never built)
+summary: whisper.cpp's server with one ggml model, on 127.0.0.1.
+variables:
+  - {name: port, type: port, default: 8090, help: "Loopback port"}
+  - {name: threads, type: threads, default: 0}
+  - {name: language, type: choice, default: auto, choices: [auto, en, de]}
+  - {name: autostart, type: bool, default: false, help: "Start at boot (needs llmcf-install)"}
+  - {name: user, type: user, default: llmcf}
+  - {name: memory_limit_mb, type: memory_mb, default: 1024}
+files:
+  - {role: program, from: person, name: whisper-server, mode: "0755", formats: [elf]}
+  - {role: model, from: person, name: model.bin, formats: [ggml-whisper], licence: required, min_bytes: 1048576}
+memory: {base_mb: 128, model_factor: 1.5}   # base plus the factor times the model size
+unit: true                  # with autostart, the root actions create_user, install_unit, set_cgroup
+start:
+  program: whisper-server   # a file of the block, or runtime/@RUNTIME@/... for the board's llama.cpp runtime
+  args: [--host, 127.0.0.1, --port, "{port}", -m, "@FILE:model@", -l, "{language}",
+         {when: threads, args: [-t, "{threads}"]}]
+```
+
+- **Fields:** only `schema`, `id`, `version`, `kind`, `title`, `status`, `summary`, `variables`, `files`, `start`,
+  `memory`, `keygen` (the start script writes the runtime's key file, as `llm-llama-server` does), `unit` and `notes`;
+  an unknown field is refused. block.yml is at most 64 KiB.
+- **Arguments** of `start.args` are fixed words, `{variable}` (the checked value), `@FILE:role@` (the file of that role
+  in the component's folder) and `{when: variable, args: [...]}` (only when the variable is set). A shell character,
+  an unknown variable or an unknown role refuses the block.
+- **Files:** `role` is model, mmproj, program, runtime, config or data; `from` is person (a local file the person picks
+  or a pinned online item) or runtime (the board's self-built llama.cpp runtime package of deploy way 2); `formats`
+  from gguf, mmproj-gguf, ggml-whisper, onnx, sherpa-onnx, elf, tar.gz, text (checked by the file's first bytes, a
+  program's ELF architecture against the board's); `licence: required` makes the person name the model's licence;
+  `min_bytes` and `max_bytes` bound the size.
+
+### 12.3 Variables and their types
+
+| Type | Takes | Bounds |
+|---|---|---|
+| `port` | a whole number | 1024 to 65535; two components never share a port |
+| `uint` | a whole number | 0 to 2^31-1 |
+| `threads` | a whole number (0: the program decides) | 0 to 512 |
+| `memory_mb` | a whole number of MB | 16 to 1048576 |
+| `bool` | yes/no, true/false, on/off, 1/0 | |
+| `user` | an account name (lower-case letters, digits, '_', '.', '-'), never root | never shown to an AI |
+| `word` | letters, digits, '.', '_' and '-' (not starting with '.' or '-') | |
+| `choice` | one of `choices` | |
+| `file` | a file name in the component's folder | |
+
+`min` and `max` narrow the bounds of a number type; `required: true` makes a variable without a default needed. A
+value outside its type is refused, never escaped: quotes, `$(...)`, `../` and newlines never reach the board.
+
+### 12.4 The guide's `## Models` section
+
+Every block's `README.md` has a `## Models` section that names exactly which models it needs: the format, the size and
+the memory on the board, and the licence. The framework's guides are examples:
+
+- **Speech recognition (`stt-whisper-cpp`):** one ggml whisper model (`ggml-base.bin`, `ggml-small.bin`, ...; first
+  bytes `lmgg`), memory about the model's size times 1.5 plus 128 MB, licence named by the person (the OpenAI whisper
+  models are MIT); the program is whisper.cpp's `whisper-server` built for the board's architecture.
+- **Vision (`vision-mmproj`, a template):** a GGUF vision model and its multimodal projector, the `mmproj` GGUF file
+  of exactly that model (format `mmproj-gguf`); a projector of another model does not fit. It stays a template until
+  the runtime's start script takes `--mmproj`.
+- **Speech output (`tts-sherpa-onnx`, a template):** sherpa-onnx's offline TTS server for the board's architecture and
+  a TTS model in the layout sherpa-onnx reads (format `sherpa-onnx`: the ONNX model with its token and voice files from
+  the sherpa-onnx model list); a plain ONNX file from elsewhere does not fit.
+
+### 12.5 Publishing a block
+
+Export your block as a signed community pack of kind `block`: **Tools > Knowledge > Open Community Hub > Export...** (kind "A board
+bundle building block of my own") or `llm-cli zoo export block ID --author NAME`. The pack holds `block.yml` and its
+guide, scrubbed of private data; an install checks it as a block before it lands in `community/blocks/`. Once a
+maintainer has added it to the signed index, enterprise mode takes it as `indexed`.

@@ -2460,7 +2460,8 @@ for an AI client; the files are always your choice.
 `block list` shows every building block with its kind, status (ready or a documented template) and trust
 (framework, indexed, signed, own). `block new` makes your own block (`block.yml` and its guide `README.md`, optionally
 from one of the framework's blocks) in `community/blocks/`, not signed: private mode asks before it is used,
-enterprise mode takes it only once it is published and installed from the signed index.
+enterprise mode takes it only once it is published and installed from the signed index. How to fill it in and
+publish it: [Module Developer Guide](Module_Developer_Guide.md#12-bundle-building-blocks).
 
 ```bash
 llm-cli bundle plan "ZERO 3W" --preset stt --file stt.model=models/ggml-base.bin \

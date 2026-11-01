@@ -1,4 +1,4 @@
-Version 3.3.0 · Stand 2026-10-31
+Version 3.3.0 · Stand 2026-11-01
 
 [English](Module_Developer_Guide.md) · **Deutsch**
 
@@ -25,6 +25,7 @@ Hardware (oder ihre technischen Daten).
 9. [Ein Target teilen](#9-ein-target-teilen)
 10. [Was die Stufenmodule aus Version 1.x behalten haben](#10-was-die-stufenmodule-aus-version-1x-behalten-haben)
 11. [Die Datei der Hardware-Probe](#11-die-datei-der-hardware-probe)
+12. [Bausteine für das Bündel](#12-bausteine-für-das-bündel)
 
 ## 1. Wie das Framework ein Target nutzt
 
@@ -1484,3 +1485,108 @@ nicht sagen konnte); für ein Profil einer Probe vor 3.3.0, die nie nachsah, gib
 zeigt sie in einer Zeile `Access:`, der Scan im Builder-Tab schreibt dieselbe Zeile ins Protokoll, und das MCP-Tool
 `get_hardware_probe` gibt sie als `access` zurück. Eine Datei einer älteren Probe bleibt lesbar; lass die Probe auf
 dem Board noch einmal laufen, um die Angaben zu bekommen.
+
+## 12. Bausteine für das Bündel
+
+Das Board-Bündel (Deploy-Weg 3, [Funktionen](Features_DE.md#das-board-bündel)) entsteht aus Bausteinen. Ein Baustein
+ist ein Ordner mit genau zwei Dateien: `block.yml` (Schema `llmcf-bundle-block/1`) und seiner Anleitung `README.md`.
+Sonst ist nichts im Ordner erlaubt (kein Skript, kein Programm): Auf dem Board läuft der eine signierte Installer des
+Bündels, der die geprüften Werte des Bausteins als Daten liest.
+
+### 12.1 Woher Bausteine kommen
+
+| Woher | Vertrauensstufe | Im privaten Modus | Im Enterprise-Modus |
+|---|---|---|---|
+| Die eigenen Bausteine des Frameworks (`orchestrator/runtime/bundle/blocks/`) | `framework` | ja | ja |
+| Aus dem signierten Community-Index installiert (Community Hub, `llm-cli zoo install`) | `indexed` | ja | ja |
+| Ein Baustein-Paket aus einer Datei, von seinem Autor signiert | `signed` | ja, mit Hinweis | nein |
+| Dein eigener Baustein in `community/blocks/` (nie signiert) | `own` | erst nach deinem Ja | nein |
+
+Ein installierter Baustein gilt nur als indexed oder signed, solange er genau so ist, wie er installiert wurde; ein
+Baustein, den du danach geändert hast, zählt als dein eigener. Einen Baustein, den der signierte Index widerrufen hat,
+listet das Framework mit Hinweis und verwendet ihn nie.
+
+Deinen eigenen Baustein legst du mit **Boards > Board-Bündel... > Neuer Baustein...** an oder mit `llm-cli bundle
+block new ID --kind ART --title TEXT [--from BAUSTEIN]` (ausgehend von einem Baustein des Frameworks übernimmt er
+dessen Variablen, Dateien und Start).
+
+### 12.2 block.yml
+
+```yaml
+schema: llmcf-bundle-block/1
+id: stt-mine                # Kleinbuchstaben, Ziffern, '.', '_', '-'; der Ordner trägt denselben Namen
+version: 1.0.0              # MAJOR.MINOR.PATCH
+kind: stt                   # llm, stt, tts, vision, gateway oder harness
+title: Meine Spracherkennung
+status: ready               # ready, oder template (mit Anleitung gelistet, nie gebaut)
+summary: Der Server von whisper.cpp mit einem ggml-Modell, auf 127.0.0.1.
+variables:
+  - {name: port, type: port, default: 8090, help: "Loopback-Port"}
+  - {name: threads, type: threads, default: 0}
+  - {name: language, type: choice, default: auto, choices: [auto, en, de]}
+  - {name: autostart, type: bool, default: false, help: "Beim Booten starten (braucht llmcf-install)"}
+  - {name: user, type: user, default: llmcf}
+  - {name: memory_limit_mb, type: memory_mb, default: 1024}
+files:
+  - {role: program, from: person, name: whisper-server, mode: "0755", formats: [elf]}
+  - {role: model, from: person, name: model.bin, formats: [ggml-whisper], licence: required, min_bytes: 1048576}
+memory: {base_mb: 128, model_factor: 1.5}   # Grundbedarf plus Faktor mal Modellgröße
+unit: true                  # mit Autostart die Root-Aktionen create_user, install_unit, set_cgroup
+start:
+  program: whisper-server   # eine Datei des Bausteins, oder runtime/@RUNTIME@/... für die llama.cpp-Laufzeit des Boards
+  args: [--host, 127.0.0.1, --port, "{port}", -m, "@FILE:model@", -l, "{language}",
+         {when: threads, args: [-t, "{threads}"]}]
+```
+
+- **Felder:** nur `schema`, `id`, `version`, `kind`, `title`, `status`, `summary`, `variables`, `files`, `start`,
+  `memory`, `keygen` (das Startskript schreibt die Schlüsseldatei der Laufzeit, wie bei `llm-llama-server`), `unit` und
+  `notes`; ein unbekanntes Feld wird abgelehnt. block.yml ist höchstens 64 KiB groß.
+- **Argumente** von `start.args` sind feste Wörter, `{variable}` (der geprüfte Wert), `@FILE:role@` (die Datei dieser
+  Rolle im Ordner der Komponente) und `{when: variable, args: [...]}` (nur, wenn die Variable gesetzt ist). Ein
+  Shell-Zeichen, eine unbekannte Variable oder eine unbekannte Rolle lehnt den Baustein ab.
+- **Dateien:** `role` ist model, mmproj, program, runtime, config oder data; `from` ist person (eine lokale Datei, die
+  die Person wählt, oder ein festgelegtes Online-Element) oder runtime (das selbst gebaute llama.cpp-Laufzeitpaket des
+  Boards aus Deploy-Weg 2); `formats` aus gguf, mmproj-gguf, ggml-whisper, onnx, sherpa-onnx, elf, tar.gz, text
+  (geprüft an den ersten Bytes der Datei, bei einem Programm die ELF-Architektur gegen die des Boards); `licence:
+  required` lässt die Person die Lizenz des Modells nennen; `min_bytes` und `max_bytes` begrenzen die Größe.
+
+### 12.3 Variablen und ihre Typen
+
+| Typ | Nimmt | Grenzen |
+|---|---|---|
+| `port` | eine ganze Zahl | 1024 bis 65535; zwei Komponenten teilen nie einen Port |
+| `uint` | eine ganze Zahl | 0 bis 2^31-1 |
+| `threads` | eine ganze Zahl (0: das Programm entscheidet) | 0 bis 512 |
+| `memory_mb` | eine ganze Zahl in MB | 16 bis 1048576 |
+| `bool` | yes/no, true/false, on/off, 1/0 | |
+| `user` | ein Kontoname (Kleinbuchstaben, Ziffern, '_', '.', '-'), nie root | nie einer KI gezeigt |
+| `word` | Buchstaben, Ziffern, '.', '_' und '-' (nicht mit '.' oder '-' am Anfang) | |
+| `choice` | einer der `choices` | |
+| `file` | ein Dateiname im Ordner der Komponente | |
+
+`min` und `max` engen die Grenzen eines Zahlentyps ein; `required: true` macht eine Variable ohne Vorgabe nötig. Ein
+Wert außerhalb seines Typs wird abgelehnt, nie maskiert: Anführungszeichen, `$(...)`, `../` und Zeilenumbrüche
+erreichen das Board nie.
+
+### 12.4 Der Abschnitt `## Models` der Anleitung
+
+Die `README.md` jedes Bausteins hat einen Abschnitt `## Models`, der genau nennt, welche Modelle er braucht: das
+Format, die Größe und den Speicher auf dem Board und die Lizenz. Die Anleitungen des Frameworks sind Beispiele:
+
+- **Spracherkennung (`stt-whisper-cpp`):** ein ggml-whisper-Modell (`ggml-base.bin`, `ggml-small.bin`, ...; erste
+  Bytes `lmgg`), Speicher etwa die Modellgröße mal 1,5 plus 128 MB, die Lizenz nennt die Person (die whisper-Modelle
+  von OpenAI sind MIT); das Programm ist `whisper-server` von whisper.cpp, gebaut für die Architektur des Boards.
+- **Bilderkennung (`vision-mmproj`, eine Vorlage):** ein GGUF-Vision-Modell und sein multimodaler Projektor, die
+  `mmproj`-GGUF-Datei genau dieses Modells (Format `mmproj-gguf`); ein Projektor eines anderen Modells passt nicht. Er
+  bleibt eine Vorlage, bis das Startskript der Laufzeit `--mmproj` nimmt.
+- **Sprachausgabe (`tts-sherpa-onnx`, eine Vorlage):** der Offline-TTS-Server von sherpa-onnx für die Architektur des
+  Boards und ein TTS-Modell im Aufbau, den sherpa-onnx liest (Format `sherpa-onnx`: das ONNX-Modell mit seinen Token-
+  und Stimmdateien aus der Modellliste von sherpa-onnx); eine einfache ONNX-Datei von anderswo passt nicht.
+
+### 12.5 Einen Baustein veröffentlichen
+
+Exportiere deinen Baustein als signiertes Community-Paket der Art `block`: **Extras > Wissen > Community Hub öffnen > Exportieren...**
+(Art "Ein eigener Baustein für das Board-Bundle") oder `llm-cli zoo export block ID --author NAME`. Das Paket enthält
+`block.yml` und seine Anleitung, von privaten Daten bereinigt; eine Installation prüft es als Baustein, bevor es in
+`community/blocks/` landet. Sobald ein Maintainer es in den signierten Index aufgenommen hat, nimmt der
+Enterprise-Modus es als `indexed`.

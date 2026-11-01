@@ -432,6 +432,16 @@ list`). Ein über MCP verbundener KI-Client oder Ditto kann dann einen Build pak
 die das Board, den Fingerabdruck seines Host-Schlüssels und den Hash des Pakets zeigt. Keine KI kann einem neuen Board
 vertrauen oder einen geänderten Host-Schlüssel annehmen.
 
+### Das ganze Board in einem Bündel
+
+**Boards > Board-Bündel...** (oder `llm-cli bundle`) bringt einen Sprachserver und den LLM-Server als ein signiertes
+Bündel auf ein Board: Du wählst eine Vorlage oder die Bausteine, ihre Variablen und Dateien, siehst dir den vollen
+Plan an (jede Datei mit Quelle und Größe, die Prüfungen gegen die Untersuchung des Boards), baust es und rollst es
+aus. Sein Installer auf dem Board installiert die Schritte ohne Sonderrechte einmal, zeigt ihren Status, rollt sie
+zurück und deinstalliert sie; Root-Schritte wie eine Autostart-Unit warten auf den Root-Helfer llmcf-install des
+Frameworks, wähle also vorerst die Variante ohne Sonderrechte. Jedes Ausrollen fragt dich vorher. Details:
+[Funktionen](docs/Features_DE.md#das-board-bündel).
+
 ### Das Board
 
 Um das Modell auf dem Board auszuführen, brauchst du dort eine Laufzeitumgebung: llama.cpp (`llama-server`) für
@@ -953,8 +963,9 @@ Version 3.3.0 ist in Arbeit. Kurz:
 - **Dittos Kontext:** echte Token-Zahlen je Anbieter und Modell, das echte Kontextfenster je Modell mit
   Verdichtung, Cloud-Caching so, wie der Anbieter es vorsieht, und Dittos Archiv
   dessen, was es über llmcf und das Bauen gelernt hat (nie die privaten Gespräche der Person).
-- **Das Board-Bündel:** ein vollständiges Bündel mit Hash-Liste als dritter Deploy-Weg, ein idempotenter Installer auf
-  dem Board, das Token sparende Gateway `llmcf-gateway` in Rust, Sprache und Bild als Bausteine des Bündels und MCP
+- **Das Board-Bündel:** sein nutzbarer erster Teil ist da (Bausteine, Plan, signiertes Bündel, der Installer ohne
+  Sonderrechte, Fenster, CLI und MCP-Werkzeuge); als Nächstes kommen der Root-Helfer llmcf-install, vom Framework
+  selbst gebaute Bestandteile, das Token sparende Gateway `llmcf-gateway` in Rust, Sprache und Bild als Bausteine des Bündels und MCP
   auf dem Board (zuerst nur Loopback, ins Netz nur mit TLS).
 - **Laufzeit auf dem Gerät und mehr Hardware:** Rezepte als Target-Vorlagen, eine Rotationsstufe vor der
   Quantisierung, ein allgemeines ARM64-Target für den Raspberry Pi, Targets aus der Hardware-Probe, auf dem Board
