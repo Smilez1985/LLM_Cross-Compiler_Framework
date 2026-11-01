@@ -689,6 +689,29 @@ entfernen...**, **Ältere Builds auf dem Board entfernen...**).
 
 ---
 
+### Das Board-Bündel
+
+Deploy-Weg 3 neben dem Golden-ZIP und dem Laufzeitpaket: ein Bündel für das ganze Board, gebaut aus Bausteinen (die
+des Frameworks: `llm-llama-server` mit der selbst gebauten llama.cpp-Laufzeit des Boards und einem GGUF-Modell, und
+`stt-whisper-cpp` mit dem Server von whisper.cpp und einem ggml-Modell; Sprachausgabe mit sherpa-onnx, Vision mit
+`--mmproj`, das Gateway und ein Agent-Harness sind dokumentierte Vorlagen). Du wählst eine Vorlage (`llm`, `voice`,
+`stt`) oder die Bausteine, setzt ihre Variablen (Port, Threads, Speichergrenze, Autostart, ...; jede gegen ihren Typ
+geprüft) und wählst ihre Dateien (eine lokale Datei wird gehasht und ins Bündel kopiert, ein Online-Element ist über
+sha256 und Größe festgelegt).
+
+Bevor etwas gebaut oder gesendet wird, zeigt der Plan jede Komponente, jede Datei mit Quelle und Größe, die
+Root-Aktionen, die llmcf-install brauchen, und seine Prüfungen gegen die Untersuchung des Boards (Architektur,
+Init-System, sudo, Offline-Modus, Speicher). Das Bündel wird mit dem Schlüssel des Frameworks signiert und im Speicher
+dieses Frameworks aufbewahrt; sein Installer auf dem Board installiert nur die Schritte ohne Sonderrechte, jeden nur
+einmal (ein zweiter Lauf ändert nichts, ein abgebrochener macht weiter), und zeigt einen Probelauf, einen Status, ein
+Zurückrollen und ein Deinstallieren seiner eigenen Schritte. Vor Root-Aktionen hält der Installer mit dem klaren
+Hinweis an, dass sie llmcf-install brauchen, den Root-Helfer des Frameworks, der noch nicht da ist: bis dahin wählst
+du die Variante ohne Sonderrechte (keine Autostart-Unit). Ausrollen, Deinstallieren und Zurückrollen fragen dich
+vorher ("Nein" ist die Vorgabe); gespeicherte Bündel werden nur aus der vollen Liste gelöscht, die du anhakst, in
+den Papierkorb oder endgültig.
+
+Im Terminal: [`llm-cli bundle`](CLI_Usage_DE.md#bundle).
+
 ## Ditto, der Assistent
 
 Ditto baut auf der eigenen **Anbieterschicht** des Frameworks auf (`orchestrator/llm`), die die offiziellen SDKs

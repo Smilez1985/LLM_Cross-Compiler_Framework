@@ -31,6 +31,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [module](#module): `create`, `generate-ai`
 - [scan](#scan): hardware probe
 - [device](#device): `list`, `settings`, `runtime`
+- [bundle](#bundle): `plan`, `build`, `list`, `deploy`, `status`, `uninstall`, `rollback`, `delete`, `block`
 - [config](#config): `show`, `output-folder`, `repos`
 - [zoo](#zoo): `list`, `show`, `install`, `verify`, `export`, `keys`, `maintainer`
 - [trash](#trash): `list`, `restore`, `empty`
@@ -2378,6 +2379,85 @@ llm-cli device runtime build "ZERO 3W" --yes
 llm-cli device runtime deploy "ZERO 3W" --bench-model models/qwen3.5-2b-q4_0.gguf
 # The systemd unit instead of the start script, decided before the next deployment
 llm-cli device settings "ZERO 3W" --install systemd --model models/qwen3.5-2b-q4_0.gguf
+```
+
+---
+
+## bundle
+
+The board bundle, deploy way 3 ([Features](Features.md#the-board-bundle)): building blocks with their variables and
+files, a plan checked against the board's probe, a bundle signed with the framework's key in this framework's store,
+and its installer on the board. `DEVICE` is a stored board as in [`device`](#device); `BUNDLE` is a bundle's ID as
+`bundle list` shows it.
+
+```
+llm-cli bundle plan DEVICE [--preset llm|voice|stt] [--block ID]... [--set COMPONENT.NAME=VALUE]...
+                    [--file COMPONENT.ROLE=PATH]... [--online COMPONENT.ROLE=URL --sha256 COMPONENT.ROLE=HEX
+                    --size COMPONENT.ROLE=BYTES]... [--licence COMPONENT.ROLE=ID]... [--unprivileged-only] [--json]
+llm-cli bundle build DEVICE (the same choice) [--allow-own]
+llm-cli bundle list [--json]
+llm-cli bundle deploy BUNDLE [--dry-run]
+llm-cli bundle status BUNDLE
+llm-cli bundle uninstall BUNDLE
+llm-cli bundle rollback BUNDLE
+llm-cli bundle delete [BUNDLE]...
+llm-cli bundle block list [--json]
+llm-cli bundle block new ID --kind KIND --title TEXT [--summary TEXT] [--from BLOCK]
+```
+
+### bundle plan
+
+Shows the whole plan before anything is built or sent: each component with its block, trust and variables (each
+checked against its type), every file with its role, name, size, source (the local file it is copied from, the
+board's runtime package or the pinned online address) and licence, the root actions that need llmcf-install, the
+memory it needs of what the board has, what is sent, and the checks against the board's probe (architecture, init
+system, sudo, offline mode, memory: passed, failed, warning or unknown). It contacts no board. A component is named
+by its kind (`llm`, `stt`, a second one of the same kind `stt-2`). `--json` gives the plan as labels only: no local
+path, no address, no account. Exit 1 when the plan has problems.
+
+### bundle build
+
+Plans as `bundle plan`, shows the plan and writes the bundle into this framework's store, signed with the framework's
+board key (nothing is sent to the board). An own block that is not signed is used only after your yes at a terminal
+("No" is the default; `--allow-own` answers it beforehand); enterprise mode takes only the framework's blocks and
+blocks installed from the signed index.
+
+### bundle deploy
+
+Logs in to the bundle's board with the framework's key only (as the board's deploy settings' user, never a
+password), sends what the board does not hold yet and runs the installer's dry run first; after it passed, it asks
+"Send bundle ... to board ...?" ("No" is the default; without a terminal nothing is installed) and then installs the
+unprivileged steps. Root actions stop the installer with the plain words that they need llmcf-install (not there
+yet); build the unprivileged-only variant to skip them. A deploy cut off continues in the same upload folder.
+`--dry-run` sends the bundle and runs only the dry run.
+
+### bundle status, uninstall, rollback
+
+`status` asks the installer the board kept which steps are done (changes nothing). `uninstall` lists what it would
+remove (only the bundle's own steps, newest first) and asks first ("No" is the default); `rollback` shows the status
+and asks before it undoes the last apply.
+
+### bundle delete
+
+Lists the stored bundles (or the ones named) with their full path, size and what they are (a bundle a board holds
+says so: deleting it here leaves the board as it is). Nothing is ticked: you type the numbers, choose the trash (the
+default) or deleting for good, and confirm exactly those (default no). It needs a terminal; without one it only lists
+them. The deletion is written to the audit log first; what could not be deleted is reported with every path that
+stayed.
+
+### bundle block list, block new
+
+`block list` shows every building block with its kind, status (ready or a documented template) and trust
+(framework, indexed, signed, own). `block new` makes your own block (`block.yml` and its guide `README.md`, optionally
+from one of the framework's blocks) in `community/blocks/`, not signed: private mode asks before it is used,
+enterprise mode takes it only once it is published and installed from the signed index.
+
+```bash
+llm-cli bundle plan "ZERO 3W" --preset stt --file stt.model=models/ggml-base.bin \
+    --file stt.program=build/whisper-server --licence stt.model=MIT
+llm-cli bundle build "ZERO 3W" --preset stt --file stt.model=models/ggml-base.bin \
+    --file stt.program=build/whisper-server --licence stt.model=MIT --unprivileged-only
+llm-cli bundle deploy stt-01234567-20261101120000
 ```
 
 ---
