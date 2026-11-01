@@ -326,6 +326,8 @@ class GateShell:
 def _fake_board(tmp_path, tier: str):
     """A board with llmcf's gate. tier root: the signers file root-owned (OpenSSH or Dropbear with sudo; this test's
     own user stands in for root); home: Dropbear without sudo, the home gate with the account's own signing folder."""
+    if os.name == "nt" or shutil.which("sh") is None:
+        pytest.skip("the fake board runs llmcf's gate and installer in POSIX sh; Windows has no /bin/sh")
     home = tmp_path / "home"
     (home / gate.INSTALL_ROOT_REL).mkdir(parents=True)
     signer = _signer()

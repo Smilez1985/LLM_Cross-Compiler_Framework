@@ -112,8 +112,6 @@ umask 077
 LC_ALL=C; export LC_ALL
 set -f
 TAB=$(printf '\t')
-NL='
-'
 act=${1-}; run=${2-}; src=${3-}; bid=${4-}
 say() { printf 'llmcf-bundle: %s\n' "$*"; }
 stop() { say "result=$1 changed=${changed:-0} $2"; exit "${3:-3}"; }
@@ -252,7 +250,7 @@ step_run() {
       [ "$(ls -A "$r_/.tmp-$3")" = "$3" ] || { say "failed unpack $1 (the package holds more than its build)"; return 1; }
       (cd "$r_/.tmp-$3/$3" && sha256sum -c SHA256SUMS >/dev/null) || { say "failed unpack $1 (SHA256SUMS)"; return 1; }
       chmod -R go-rwx "$r_/.tmp-$3"
-      rm -rf "$r_/$3"; mv "$r_/.tmp-$3/$3" "$r_/$3" && rmdir "$r_/.tmp-$3" && : > "$r_/.unpacked-$3" ;;
+      rm -rf "${r_:?}/${3:?}"; mv "$r_/.tmp-$3/$3" "$r_/$3" && rmdir "$r_/.tmp-$3" && : > "$r_/.unpacked-$3" ;;
     keygen) sh "$C/$1/runtime/$2/llama-server.sh" keygen >/dev/null ;;
     start) c_=$1; shift; render_start "$c_" "$@" > "$C/$c_/start.sh.part" && chmod 0700 "$C/$c_/start.sh.part" &&
            mv -f "$C/$c_/start.sh.part" "$C/$c_/start.sh" ;;
