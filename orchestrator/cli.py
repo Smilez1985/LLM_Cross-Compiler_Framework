@@ -7419,24 +7419,39 @@ def _bundle_root(ctx: FrameworkContext, built, action: str, opener=None, *, ask:
         except RemoteError as e:
             _board_step_failed(ctx, e, host, port)
 
+    def unread(why: str):
+        """A read-only run (the status) whose sudo password nobody types: the installer's status stands, with a note
+        (it changes nothing, so it never fails the command)."""
+        console.print(f"[yellow]The status of the root actions was not read: {escape(why)}[/yellow]")
+        return None
+
     def with_password(what: str):
         done = run(what)
         if not done.report.needs_password:
             return done
         if not service.password_allowed(_framework_mode(ctx)):
+            if not ask:
+                return unread("the board's sudo asks for a password, and enterprise mode runs llmcf-install only "
+                              "with sudo -n.")
             console.print(f"[red]{escape(service.ENTERPRISE_NO_PASSWORD)}[/red]")
             sys.exit(1)
         if not _interactive():
+            if not ask:
+                return unread("the board's sudo asks for a password, which only you can type at a terminal.")
             console.print("[red]The board's sudo asks for a password, which only you can type at a terminal; nothing "
                           "was changed.[/red]")
             sys.exit(1)
         password["text"] = click.prompt(service.PASSWORD_PROMPT, hide_input=True, default="", show_default=False)
         if not password["text"]:
+            if not ask:
+                return unread("no password was typed.")
             console.print("Nothing was changed on the board.")
             sys.exit(1)
         return run(what)
 
     first = with_password(service.ROOT_CHANGING_ACTIONS[action] if ask else action)
+    if first is None:
+        return None
     for line in first.lines():
         console.print(escape(line))
     if not ask:

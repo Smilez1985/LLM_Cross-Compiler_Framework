@@ -355,6 +355,10 @@ def test_an_ai_never_reaches_a_root_action():
 def cli_root_board(tmp_path, monkeypatch, helper_binary, sudo_on_path):
     """`llmcf bundle` with its per-user folder in tmp_path/state, a stored board behind llmcf's gate whose sudo runs
     the real llmcf-install test build (tests/test_bundle_ui.cli_board, plus the helper)."""
+    return _cli_root_board(tmp_path, monkeypatch, helper_binary)
+
+
+def _cli_root_board(tmp_path, monkeypatch, helper_binary, tier="root"):
     from rich.console import Console
     from test_board_bundle import GateShell, _files
     from test_bundle_ui import _stored_board
@@ -365,7 +369,7 @@ def cli_root_board(tmp_path, monkeypatch, helper_binary, sudo_on_path):
     from orchestrator.utils.helpers import sha256_file
     state = tmp_path / "state"
     _stored_board(state)
-    board = _root_board(tmp_path, helper_binary)
+    board = _root_board(tmp_path, helper_binary, tier=tier)
     monkeypatch.setattr(cli_module, "_state_dir", lambda ctx: state)
     monkeypatch.setattr(cli_module, "_open_device", lambda *a, **kw: (GateShell(board), "key"))
     monkeypatch.setattr(cli_module, "_bundle_signer", lambda ctx: board.signer)
@@ -428,3 +432,57 @@ def test_the_cli_asks_for_the_sudo_password_in_private_mode_only(cli_root_board,
     res = invoke_plain("bundle", "deploy", bid, input="y\ncorrect horse\ny\n")
     assert res.code == 0 and unit.is_file(), res.out
     assert "correct horse" not in res.out
+
+
+@POSIX
+def test_a_board_where_llmcf_install_cannot_run_as_root_keeps_its_uninstall(tmp_path, monkeypatch, helper_binary,
+                                                                            sudo_on_path):
+    """A full bundle deployed to a board without root-owned signers (the home tier: root actions never run there)
+    stops before the root actions as before; its status, uninstall and rollback still work, because llmcf-install
+    can have made nothing there (bundle-root says absent for them; plan and apply stay refused)."""
+    from test_cli_builds import invoke_plain
+    from orchestrator.runtime.bundle.board import run_root
+    from test_board_bundle import GateShell
+    board = _cli_root_board(tmp_path, monkeypatch, helper_binary, tier="home")
+    bid = _cli_bundle(board)
+    res = invoke_plain("bundle", "deploy", bid, input="y\n")
+    assert res.code == 1 and "stopped-root" in res.out and "root-owned signing key" in res.out, res.out
+    from orchestrator.runtime.bundle import generator as gen
+    built = gen.BundleStore(board.state).get(bid)
+    for action in ("status", "plan-uninstall", "uninstall", "rollback"):
+        run = run_root(GateShell(board), built, action)
+        assert run.ok and run.report.result == "absent", (action, run.lines())
+    assert run_root(GateShell(board), built, "apply").report.result == "refused"
+    res = invoke_plain("bundle", "status", bid)
+    assert res.code == 0 and ("result: partial" in res.out or "result: installed" in res.out), res.out
+    res = invoke_plain("bundle", "uninstall", bid, input="y\n")
+    assert res.code == 0, res.out
+    kept = board.home / inst.BUNDLE_REL / bid / ".kept"
+    assert not kept.exists(), res.out
+
+
+@POSIX
+def test_the_cli_status_of_the_root_part_never_fails_the_status_for_a_missing_password(cli_root_board,
+                                                                                         monkeypatch):
+    """bundle status changes nothing: when the board's sudo asks for a password that enterprise mode never types
+    (or nobody is at a terminal), the installer's status stands with its exit code and a note says the root part's
+    status was not read."""
+    from test_cli_builds import invoke_plain
+    from orchestrator import cli as cli_module
+    (cli_root_board.root / "sudo-password").write_text("correct horse")
+    bid = _cli_bundle(cli_root_board)
+    res = invoke_plain("bundle", "deploy", bid, input="y\ncorrect horse\ny\n")
+    assert res.code == 0, res.out
+    monkeypatch.setattr(cli_module, "_framework_mode", lambda ctx: "enterprise")
+    res = invoke_plain("bundle", "status", bid)
+    assert res.code == 0 and "result: installed" in res.out, res.out
+    assert "status of the root actions was not read" in res.out, res.out
+    monkeypatch.setattr(cli_module, "_framework_mode", lambda ctx: "private")
+    monkeypatch.setattr(cli_module, "_interactive", lambda: False)
+    res = invoke_plain("bundle", "status", bid)
+    assert res.code == 0 and "status of the root actions was not read" in res.out, res.out
+    monkeypatch.setattr(cli_module, "_interactive", lambda: True)
+    res = invoke_plain("bundle", "status", bid, input="\n")
+    assert res.code == 0 and "status of the root actions was not read" in res.out, res.out
+    res = invoke_plain("bundle", "status", bid, input="correct horse\n")
+    assert res.code == 0 and "already install_unit" in res.out, res.out
