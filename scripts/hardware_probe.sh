@@ -1685,7 +1685,7 @@ emit METAL OFF
 # --- access: SSH server, sudo, ssh-keygen, package manager (probe 3.3.0; the same rules as hardware_probe.py) ----
 
 # Copies of configs/hardware_probe_schema.yml tables.ssh_server_*, sudo_paths, ssh_keygen_paths, ssh_client_paths,
-# package_managers and dietpi_software_path (tests compare them). Fixed paths and words only: no path, host name or
+# package_managers, dropbear_package_queries and dropbear_packages (tests compare them). Fixed paths and words only: no path, host name or
 # user name reaches the result.
 ssh_server_name() {  # /proc/<pid>/comm -> SSH server (tables.ssh_server_names)
     case "$1" in
@@ -1713,7 +1713,12 @@ PACKAGE_MANAGERS="/usr/bin/apt-get:apt /usr/bin/dnf:dnf /usr/bin/zypper:zypper /
 PACKAGE_MANAGERS="$PACKAGE_MANAGERS /usr/bin/apk:apk /usr/bin/yum:other /bin/opkg:other /usr/bin/opkg:other"
 PACKAGE_MANAGERS="$PACKAGE_MANAGERS /usr/bin/xbps-install:other /usr/bin/emerge:other /usr/sbin/pkg:other"
 PACKAGE_MANAGERS="$PACKAGE_MANAGERS /usr/local/bin/brew:other /opt/homebrew/bin/brew:other"
-DIETPI_SOFTWARE_PATH=/boot/dietpi/dietpi-software
+DROPBEAR_PACKAGE_QUERIES="/usr/bin/dpkg-query:dpkg /usr/bin/pacman:pacman /sbin/apk:apk /usr/bin/apk:apk"
+DROPBEAR_PACKAGE_QUERIES="$DROPBEAR_PACKAGE_QUERIES /usr/bin/rpm:rpm /bin/rpm:rpm"
+DROPBEAR_PACKAGES_DPKG="dropbear dropbear-bin dropbear-run dropbear-initramfs"
+DROPBEAR_PACKAGES_PACMAN="dropbear"
+DROPBEAR_PACKAGES_APK="dropbear dropbear-openrc"
+DROPBEAR_PACKAGES_RPM="dropbear"
 
 first_path() {  # PATH...: the first one that exists (a link counts)
     for p in "$@"; do exists "$p" && { printf '%s' "$p"; return 0; }; done
@@ -1749,6 +1754,34 @@ proc_kind() {  # COMM: the server a process name is; a name that is also a progr
         [ "${p##*/}" = "$1" ] && exists "$p" && found=$(kind_add "$found" "$(binary_kind "$p" "${spec#*:}")")
     done
     pick_server "$found" || ssh_server_name "$1"
+}
+
+dropbear_packages() {  # the installed packages that provide Dropbear (no root): DROPBEAR_PACKAGES
+    for spec in $DROPBEAR_PACKAGE_QUERIES; do
+        exists "${spec%%:*}" || continue
+        q=$(f "${spec%%:*}")
+        case "${spec#*:}" in
+            dpkg) names=$DROPBEAR_PACKAGES_DPKG
+                  # shellcheck disable=SC2086,SC2016
+                  out=$(tool "$q" -W -f '${Package} ${Status}\n' $names | sed -n 's/^\([^ ]*\) .* installed$/\1/p') ;;
+            pacman) names=$DROPBEAR_PACKAGES_PACMAN
+                    # shellcheck disable=SC2086
+                    out=$(tool "$q" -Qq $names) ;;
+            apk) names=$DROPBEAR_PACKAGES_APK
+                 # shellcheck disable=SC2086
+                 out=$(tool "$q" info -e $names) ;;
+            *) names=$DROPBEAR_PACKAGES_RPM
+               # shellcheck disable=SC2086
+               out=$(tool "$q" -q --qf '%{NAME}\n' $names) ;;
+        esac
+        list=""
+        for n in $names; do
+            printf '%s\n' "$out" | grep -qx -- "$n" && list="${list:+$list,}$n"
+        done
+        [ -n "$list" ] && put DROPBEAR_PACKAGES "$list"
+        return 0
+    done
+    return 0
 }
 
 access_facts() {
@@ -1829,7 +1862,7 @@ access_facts() {
     for spec in $PACKAGE_MANAGERS; do
         if exists "${spec%%:*}"; then put PACKAGE_MANAGER "${spec#*:}"; break; fi
     done
-    [ "$OS" = linux ] && exists "$DIETPI_SOFTWARE_PATH" && put DIETPI_SOFTWARE present
+    [ "$OS" = linux ] && dropbear_packages
     return 0
 }
 access_facts

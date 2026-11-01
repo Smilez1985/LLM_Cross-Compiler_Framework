@@ -1283,7 +1283,7 @@ PROBE_WARNINGS=needs_root:RKNPU_DRIVER_VERSION
 | SoC, NPU | `SOC_VENDOR`, `SOC_MODEL` (`rk3566`, ...), `BOARD_MODEL`, `JETSON_L4T_VERSION`, `JETSON_JETPACK_VERSION`, `NPU_VENDOR`, `NPU_MODEL`, `NPU_DEVICE`, `RKNPU_DRIVER_VERSION`, `RKLLM_RUNTIME_VERSION`, `RKNN_RUNTIME_VERSION`, `USB_ROCKCHIP_PID`, `USB_ROCKCHIP_MODE` (ein per USB angeschlossenes Board), `SUPPORTS_RKNN`, `SUPPORTS_HAILO`, `SUPPORTS_METIS`, `SUPPORTS_MX3`, `SUPPORTS_CORAL`, `SUPPORTS_INTEL_NPU`, `INTEL_NPU_DEVICE` |
 | Hailo | `HAILO_FAMILY` (`hailo8`, `hailo1x`), `HAILO_ARCH` (`hailo8`, `hailo8l`, `hailo10h`, ...), `HAILO_DEVICES`, `HAILO_INTERFACE`, `HAILO_DRIVER`, `HAILO_DRIVER_VERSION`, `HAILO_FW_VERSION`, `HAILORT_VERSION`, `HAILO_PYHAILORT_VERSION` ([Abschnitt 11.6](#116-die-schlüssel-der-probe-310-und-wie-ein-modul-sie-nutzt)) |
 | GPU | `GPU_COUNT`; je GPU `_VENDOR`, `_NAME`, `_PCI_ID`, `_DISCRETE`, `_UNIFIED`, `_VRAM_MB`, `_VRAM_FREE_MB`, `_DRIVER_VERSION`, `_COMPUTE_CAP` (NVIDIA), `_GFX_TARGET` (AMD), `_SOURCE`; `NVIDIA_DRIVER_CUDA_MAX`, `SUPPORTS_CUDA`, `SUPPORTS_INTEL_XPU`, `VULKAN`, `VULKAN_DEVICES`, `VULKAN_INSTANCE_VERSION`, `OPENCL_PLATFORMS`, `HIP_RUNTIME`, `ROCM_VERSION`, `ROCM_GFX_TARGETS`, `CUDA_TOOLKIT_VERSION`, `TENSORRT_VERSION`, `OPENVINO_VERSION`, `INTEL_GPU_DEVICE`, `INTEL_GPU_DRIVER`, `METAL` |
-| Zugang | Probe 3.3.0 ([Abschnitt 11.8](#118-die-zugangsangaben-der-probe-330)): `SSH_SERVER` (`openssh`, `dropbear`, `other`, `none`), `SSH_SERVER_VERSION`, `SSH_SERVER_SOURCE` (`socket`, `process`, `service`, `binary`), `SSH_SERVERS_INSTALLED`, `SUDO` (`root`, `nopasswd`, `password`, `absent`, `other`), `SSH_KEYGEN` (`openssh`, `none`), `SSH_KEYGEN_VERSION`, `PACKAGE_MANAGER` (`apt`, `dnf`, `zypper`, `pacman`, `apk`, `other`), `DIETPI_SOFTWARE` (`present`); dazu `INIT_SYSTEM` oben |
+| Zugang | Probe 3.3.0 ([Abschnitt 11.8](#118-die-zugangsangaben-der-probe-330)): `SSH_SERVER` (`openssh`, `dropbear`, `other`, `none`), `SSH_SERVER_VERSION`, `SSH_SERVER_SOURCE` (`socket`, `process`, `service`, `binary`), `SSH_SERVERS_INSTALLED`, `SUDO` (`root`, `nopasswd`, `password`, `absent`, `other`), `SSH_KEYGEN` (`openssh`, `none`), `SSH_KEYGEN_VERSION`, `PACKAGE_MANAGER` (`apt`, `dnf`, `zypper`, `pacman`, `apk`, `other`), `DROPBEAR_PACKAGES` (eine Liste aus `dropbear`, `dropbear-bin`, `dropbear-run`, `dropbear-initramfs`, `dropbear-openrc`); dazu `INIT_SYSTEM` oben |
 | Werkzeuge | `TOOL_CC`, `TOOL_CXX` (`gcc-12.2.0`, `clang-18.1.3`), `TOOL_CLANG`, `TOOL_MSVC`, `TOOL_CMAKE`, `TOOL_NINJA`, `TOOL_MAKE`, `TOOL_GIT`, `TOOL_CCACHE`, `TOOL_NVCC`, `TOOL_GLSLC`, `TOOL_HIPCONFIG`, `TOOL_DOCKER`, `TOOL_PYTHON`: nur Versionen, nie Pfade |
 
 Nicht in einem Profil: der Hostname, Serien- oder Teilenummern (auch nicht die RAM-Teilenummern je Steckplatz der
@@ -1461,8 +1461,8 @@ mit dem Grund, warum sie nicht nutzbar ist.
 Die Probe 3.3.0 (`PROBE_TOOL_VERSION=3.3.0`) hält fest, wie das Framework eine Maschine erreicht und auf ihr
 installiert (die Gruppe `access` des Schemas). Die meisten privaten DietPi-Boards laufen mit Dropbear statt OpenSSH,
 und viele haben kein sudo ohne Passwort; deshalb nimmt die Kopplung ihre Schutzstufe aus diesen Angaben, und ein
-Board-Installer leitet seinen Plan daraus ab (zum Beispiel OpenSSH als Abhängigkeit, unter DietPi über
-`dietpi-software`).
+Board-Installer leitet seinen Plan daraus ab (zum Beispiel OpenSSH als Abhängigkeit, mit der eigenen
+Paketverwaltung des Boards; unter DietPi ist das apt).
 
 | Schlüssel | Werte und wie sie gelesen werden |
 |---|---|
@@ -1471,11 +1471,13 @@ Board-Installer leitet seinen Plan daraus ab (zum Beispiel OpenSSH als Abhängig
 | `SSH_SERVER_VERSION`, `SSH_SERVERS_INSTALLED` | die Version, die der Server mit `-V` ausgibt (OpenSSH `9.2`, Dropbear `2022.83`); die Server, deren Programm auf der Maschine liegt |
 | `SUDO` | `root` (die Probe lief als root), `absent`, `nopasswd` (`sudo -k -n true` klappte), `password` (sudo will ein Passwort oder erlaubt das Konto nicht), `other` (Windows). `-n` fragt nie und liest nie ein Passwort, und `-k` übergeht im Terminal zwischengespeicherte Anmeldedaten (ein vor einer Minute getipptes Passwort ist keine NOPASSWD-Regel); sonst fragt die Probe sudo nichts. Die Prüfung kann eine Zeile im Anmeldeprotokoll des Boards hinterlassen |
 | `SSH_KEYGEN`, `SSH_KEYGEN_VERSION` | `openssh` oder `none`, und die Version des OpenSSH-Clients daneben (`ssh -V`); Signaturen (`ssh-keygen -Y sign`/`-Y verify`) brauchen 8.1 oder neuer |
-| `PACKAGE_MANAGER`, `DIETPI_SOFTWARE` | `apt`, `dnf`, `zypper`, `pacman`, `apk` oder `other` (fehlt, wenn keiner gefunden wird); `present`, wenn DietPis `dietpi-software` vorhanden ist |
+| `PACKAGE_MANAGER` | `apt`, `dnf`, `zypper`, `pacman`, `apk` oder `other` (fehlt, wenn keiner gefunden wird) |
+| `DROPBEAR_PACKAGES` | Linux: die installierten Pakete, die Dropbear bereitstellen, durch Komma getrennt in fester Reihenfolge (`dropbear`, `dropbear-bin`, `dropbear-run`, `dropbear-initramfs`, `dropbear-openrc`; nichts anderes wird angenommen). Gefragt wird ohne root das erste Abfrageprogramm der Tabelle `dropbear_package_queries`: `dpkg-query -W` (eine Zeile, die auf ` installed` endet, zählt), `pacman -Qq`, `apk info -e`, `rpm -q`. Fehlt, wenn keines installiert ist oder kein Abfrageprogramm da ist. Die Kopplung fragt das Board noch einmal dasselbe, bevor der Wechsel zu OpenSSH sie entfernt (nie `dropbear-initramfs`). Eine Datei einer früheren Probe 3.3.0 mit `DIETPI_SOFTWARE` bleibt lesbar: Dieser Schlüssel wird verworfen und nicht beachtet |
 
 Jeder Wert ist ein festes Wort oder eine Version: Kein Pfad, Host-Name oder Kontoname wird geschrieben, und die Probe
 nutzt kein Netz. Die Tabellen des Schemas (`ssh_server_names`, `ssh_server_binaries`, `ssh_server_services`,
-`sudo_paths`, `ssh_keygen_paths`, `ssh_client_paths`, `package_managers`, `dietpi_software_path`) nennen die festen
+`sudo_paths`, `ssh_keygen_paths`, `ssh_client_paths`, `package_managers`, `dropbear_package_queries`,
+`dropbear_packages`) nennen die festen
 Pfade und Namen, auf die die Probe schaut; die .py und die .sh tragen Kopien, und ein Test vergleicht sie.
 
 **Im Code.** `HardwareProfile.access()` gibt die Angaben als einen typisierten Datensatz (`AccessFacts`) zurück, mit
