@@ -2273,7 +2273,7 @@ class BuildEngine:
         """The host uid that owns what the stage runner writes (the end folder's rightful owner)."""
         from orchestrator.Core.runtime_layer import runner_owner_on_host
         from orchestrator.utils.docker_engine import rootless_docker, rootless_podman
-        client = self.docker_client
+        client = getattr(self, "docker_client", None)   # an engine made without a client (a test, no daemon)
         rootless = bool(client is not None and (rootless_docker(client) or rootless_podman(client)))
         return runner_owner_on_host(runner_ids(client), rootless)
 

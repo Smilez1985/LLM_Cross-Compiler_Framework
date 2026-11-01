@@ -264,10 +264,11 @@ def run_cleanup(client: Any, image: str, runner_gid: int, folder: Path, cache_di
                 timeout: int = 300) -> Optional[str]:
     """Runs the clean-up container and removes it; None when it ran as decided and ended 0, else the plain reason
     (a container that differs from the decided sandbox never starts)."""
+    from orchestrator.utils.docker_engine import create_container
     from orchestrator.utils.sandbox import sandbox_problem
     options = cleanup_container(runner_gid, folder, cache_dir)
     volumes = options["volumes"]
-    container = client.containers.create(image, detach=True, **options)
+    container = create_container(client, image=image, detach=True, **options)   # the one helper for every container
     try:
         reload = getattr(container, "reload", None)
         if callable(reload):
