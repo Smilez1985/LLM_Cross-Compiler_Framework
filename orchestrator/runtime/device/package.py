@@ -20,6 +20,7 @@ device.
 """
 
 import gzip
+import hashlib
 import io
 import json
 import os
@@ -202,20 +203,33 @@ def package_runtime(store: BuildStore, build: StoredBuild, *, licence: Path, out
     return PackagedRuntime(path=target, sha256=digest, build_id=build.build_id, members=tuple(members))
 
 
-def start_script_current(path: Path) -> Optional[bool]:
+# start_script_current's answers: (package sha256, sha256 of the start script compared with) -> answer. A package is
+# read once per framework start, never on every ensure_package call (its sha256 names its content).
+_SCRIPT_CURRENT: Dict[Tuple[str, str], Optional[bool]] = {}
+
+
+def start_script_current(path: Path, sha256: Optional[str] = None) -> Optional[bool]:
     """Whether the llama.cpp start script inside the package at `path` is the one this framework writes now (a package
     made by an older framework lacks the options added since, such as --mmproj); None when it cannot be read or holds
-    no start script (another project's package)."""
+    no start script (another project's package). With the package's `sha256` (its checked .sha256, as
+    DeviceRuntimeStore.tarball gives it) the answer is kept for that content, so the tarball is unpacked once."""
     want = render_start_script().encode("utf-8")
+    key = (sha256, hashlib.sha256(want).hexdigest()) if sha256 else None
+    if key is not None and key in _SCRIPT_CURRENT:
+        return _SCRIPT_CURRENT[key]
+    found: Optional[bool] = None
     try:
         with tarfile.open(path, mode="r|gz") as tar:
             for member in tar:
                 if member.isfile() and member.name.endswith("/" + START_SCRIPT) and member.size <= 1 << 20:
                     data = tar.extractfile(member)
-                    return data is not None and data.read() == want
+                    found = data is not None and data.read() == want
+                    break
     except (OSError, tarfile.TarError, EOFError):
-        return None
-    return None
+        return None   # not kept: a package being written may be read again
+    if key is not None:
+        _SCRIPT_CURRENT[key] = found
+    return found
 
 
 class DeviceRuntimeStore:

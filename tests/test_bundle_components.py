@@ -393,12 +393,54 @@ class TestVision:
         monkeypatch.setattr("orchestrator.runtime.device.package.render_start_script", lambda: "#!/bin/sh\nnew\n")
         assert start_script_current(first.path) is False
         monkeypatch.setattr("orchestrator.runtime.build.source.cached_source", lambda pin, state, **kw: src)
-        _devices, again = steps.ensure_package(tmp_path / "state", DEVICE, store, build, lambda: None)
+        # since the repack follows the need: only a caller that needs the current start script (a vision component's
+        # --mmproj) packs again; every other caller keeps the package that is there (before: every caller)
+        _devices, kept = steps.ensure_package(tmp_path / "state", DEVICE, store, build, lambda: None)
+        assert kept.sha256 == first.sha256, "no need named: the existing package is never packed again silently"
+        _devices, again = steps.ensure_package(tmp_path / "state", DEVICE, store, build, lambda: None,
+                                               current_script=True)
         assert again.sha256 != first.sha256 and start_script_current(again.path) is True
         monkeypatch.setattr("orchestrator.runtime.device.package.render_start_script", lambda: "#!/bin/sh\nnewer\n")
         monkeypatch.setattr("orchestrator.runtime.build.source.cached_source", lambda pin, state, **kw: None)
-        _devices, kept = steps.ensure_package(tmp_path / "state", DEVICE, store, build, lambda: None)
+        _devices, kept = steps.ensure_package(tmp_path / "state", DEVICE, store, build, lambda: None,
+                                              current_script=True)
         assert kept.sha256 == again.sha256, "without the source the older package still serves"
+
+    def test_the_start_script_check_reads_a_package_once(self, tmp_path, monkeypatch):
+        """Regression (unpacked the whole tarball on every ensure_package call before): the answer of
+        start_script_current is kept per package sha256 (and the start script it is compared with)."""
+        import tarfile
+        from test_device_runtime import stored_build
+        from orchestrator.runtime.device import package as pkg
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "LICENSE").write_bytes(LICENCE.encode())
+        store, build = stored_build(tmp_path / "state", src)
+        packaged = package_runtime(store, build, licence=src / "LICENSE", out_dir=tmp_path / "out")
+        monkeypatch.setattr(pkg, "_SCRIPT_CURRENT", {})   # the same package content may be cached by a test before
+        opened = []
+        real = tarfile.open
+        monkeypatch.setattr(pkg.tarfile, "open", lambda *a, **k: (opened.append(a[0]), real(*a, **k))[1])
+        assert start_script_current(packaged.path, packaged.sha256) is True
+        assert start_script_current(packaged.path, packaged.sha256) is True
+        assert len(opened) == 1, opened
+        monkeypatch.setattr("orchestrator.runtime.device.package.render_start_script", lambda: "#!/bin/sh\nnew\n")
+        assert start_script_current(packaged.path, packaged.sha256) is False, "another start script: read again"
+        assert len(opened) == 2
+
+    def test_only_a_vision_bundle_asks_for_the_current_start_script(self, tmp_path, monkeypatch):
+        asked = []
+
+        def runtime_for(state_dir, device_id, profile, source=None, project=None, current_script=False):
+            asked.append((project, current_script))
+            return gen.RuntimePackage(missing="not built in this test")
+        monkeypatch.setattr(service, "runtime_for", runtime_for)
+        monkeypatch.setattr(service, "device_profile", lambda state_dir, device_id: RK3566)
+        for blocks, want in ((["llm-llama-server"], False), (["vision-mmproj"], True)):
+            asked.clear()
+            service.plan_for_device(tmp_path, DEVICE, gen.Selection(blocks=blocks), programs=lambda n, a: None,
+                                    unmeasured_ok=True)
+            assert asked == [(None, want)], (blocks, asked)
 
     def test_a_damaged_header_is_a_problem_not_a_crash(self, tmp_path):
         model, mm = _vision_files(tmp_path)

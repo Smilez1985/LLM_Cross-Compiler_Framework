@@ -602,7 +602,7 @@ def runtime_fakes(monkeypatch, record):
                                                                                target={"arch": "arm64"},
                                                                                verify={}))
     monkeypatch.setattr(BuildStore, "find", lambda self, plan: build)
-    monkeypatch.setattr(steps, "ensure_package", lambda state, device_id, builds, b, source: (
+    monkeypatch.setattr(steps, "ensure_package", lambda state, device_id, builds, b, source, **kw: (
         SimpleNamespace(cleanup_plan=lambda: None), SimpleNamespace(path=Path("/x.tar.gz"), sha256="a" * 64)))
 
     class Client:
