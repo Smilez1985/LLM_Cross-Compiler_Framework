@@ -860,7 +860,8 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 settings = dev.deploy_settings(state_dir(), device, profile)
                 users = device_users(device, settings)
                 plan = dev.plan_facts(state_dir(), profile)
-                kv = settings.kv_choice(profile)
+                from orchestrator.runtime.device.steps import kv_choice_of
+                kv = kv_choice_of(settings, profile, state_dir(), device.device_id)
                 if offline():   # the source only from the person's own network (the network-locality rule)
                     refuse_device_source(plan)
                 fp = dev.read_key(device, state_dir(), step="runtime_deploy")
@@ -925,7 +926,9 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                     profile = dev.device_profile(state_dir(), device)
                     settings = dev.deploy_settings(state_dir(), device, profile)
                     users = device_users(device, settings)
-                    if (settings.ssh_user, settings.install, settings.kv_choice(profile).kind) != \
+                    from orchestrator.runtime.device.steps import kv_choice_of
+                    kv_now = kv_choice_of(settings, profile, state_dir(), device.device_id)
+                    if (settings.ssh_user, settings.install, kv_now.kind) != \
                             (bound["user"], bound["install"], bound.get("kv_cache")):
                         raise ValueError("The deploy settings changed after the person was asked; nothing was done.")
                     out = dev.deploy(state_dir(), device, profile, settings, bound["fingerprint"], bound["build_id"],

@@ -1352,16 +1352,49 @@ class ProfileStore:
         write_private(path, text)
         return path
 
+    def _limits_path(self, device_id: str) -> Path:
+        return self.devices_dir / f"{_check_device_id(device_id)}.limits.json"
+
+    def load_limits(self, device_id: str) -> Dict[str, Any]:
+        """The board's measurement record (runtime/device/measure.py; {} when the board was not measured).
+        ValueError when the file is damaged: a damaged record is never read as limits."""
+        path = self._limits_path(device_id)
+        try:
+            with open(path, "rb") as f:
+                raw = f.read(_META_MAX_BYTES + 1)
+        except FileNotFoundError:
+            return {}
+        except OSError as e:
+            raise ValueError(f"the measurement of device {device_id} cannot be read: {e.strerror or e}") from None
+        try:
+            data = json.loads(raw) if len(raw) <= _META_MAX_BYTES else None
+        except ValueError:
+            data = None
+        if not isinstance(data, dict):
+            raise ValueError(f"the measurement of device {device_id} is damaged: measure the board again")
+        return data
+
+    def save_limits(self, device_id: str, record: Mapping[str, Any]) -> Path:
+        """Stores the board's measurement record (a private file next to its profile)."""
+        path = self._limits_path(device_id)
+        text = json.dumps(dict(record), indent=2, sort_keys=True, ensure_ascii=True) + "\n"
+        if len(text.encode("ascii")) > _META_MAX_BYTES:
+            raise ValueError("the measurement record is too large")
+        self._prepare(path.parent)
+        write_private(path, text)
+        return path
+
     def device_files(self, device_id: str) -> Dict[str, Path]:
         """Where the stored board's files are, whether they exist or not: its probe ("probe"), the probe's label and
-        address ("probe_info") and its deploy settings ("deploy_settings"). The person's change of a board's host key
-        moves them to the board's new device ID (runtime/device/board_move.py, P6)."""
+        address ("probe_info"), its deploy settings ("deploy_settings") and its measurement ("limits"). The person's
+        change of a board's host key moves them to the board's new device ID (runtime/device/board_move.py, P6)."""
         return {"probe": self.device_path(device_id), "probe_info": self._meta_path(device_id),
-                "deploy_settings": self._deploy_path(device_id)}
+                "deploy_settings": self._deploy_path(device_id), "limits": self._limits_path(device_id)}
 
     def remove_device(self, device_id: str) -> bool:
         removed = False
-        for path in (self.device_path(device_id), self._meta_path(device_id), self._deploy_path(device_id)):
+        for path in (self.device_path(device_id), self._meta_path(device_id), self._deploy_path(device_id),
+                     self._limits_path(device_id)):
             try:
                 path.unlink()
                 removed = True

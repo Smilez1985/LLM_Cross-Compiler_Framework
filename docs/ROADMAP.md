@@ -80,8 +80,6 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 
 | Item | Status |
 |---|---|
-| **Measure the board before any board default is set**: the RAM reserve of a board comes from a measurement on that board, never from a guess. | planned |
-| **The start script passes context, cache budget and a per-board reserve.** | planned |
 | **Prebuilt, signed Rust binaries for boards** (the board side of "The framework's Rust parts shipped prebuilt and signed" under Rust parts). | planned |
 | **Shared golden vectors for the context rules**, so the board's Rust code and the host's Python code decide the same. | planned |
 | **The bundle, its further components cross-compiled in their own steps** (the rest of deploy way 3): whisper.cpp and the other components built by the framework for the board, as llama.cpp is, instead of a program the person picks. | partly done (blocks, manifest, generator, store, the unprivileged installer, the Board bundle window, `llm-cli bundle` and the MCP tools are there) |
@@ -90,7 +88,6 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 | **Voice with whisper.cpp** for speech recognition and the wake word; other voice parts (NeMo, the GigaSpeech wake word, eSpeak NG, a prebuilt onnxruntime) only as opt-ins with their licence shown before download, never on by default for non-free terms. | planned |
 | **Vision with `--mmproj`** as a bundle component. | planned |
 | **An agent harness as a bundle component**, at a pinned commit, under its own Linux user, installed by its own installer after the person's yes; llmcf does not block what that installer fetches, watches what it does (network targets, packages, files, processes), flags suspicious activity and reports before and after. | planned |
-| **The board bundle decides with the measured limits**: whether the LLM runs on the board is the person's choice first, then the board's measured limits decide (after "Measure the board before any board default is set"). | planned |
 | **A contract test for harnesses** that plug into the gateway, without any harness code in llmcf. | planned |
 | **An optional session store on the board**, any time after the gateway is deployed. | planned |
 | **An MCP server in the gateway**: loopback only, read tools first (model status, health, bench, logs). | planned |

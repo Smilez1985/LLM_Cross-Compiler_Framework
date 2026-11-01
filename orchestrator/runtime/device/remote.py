@@ -661,6 +661,15 @@ def _run_on_its_own(shell: RemoteShell, home: str, root: str, argv: Sequence[str
     timed = "timeout=yes" in tools
     verb = "bench-job" + ("-setsid" if group else "") + ("-timeout" if timed else "")
     job = gate.job(verb, home, argv[0], *([str(int(timeout))] if timed else []), *argv[1:])
+    return follow_job(shell, root, job, timeout, group)
+
+
+def follow_job(shell: RemoteShell, root: str, job: str, timeout: float, group: bool = False) -> Result:
+    """Runs the board job `job` (gate.job: its body writes its PID to BENCH_PID and its output to `out` and `err` in
+    its folder) on its own in a new private folder of the install folder `root`, follows it to its exit status, reads
+    both files and removes the folder: the follower of _run_on_its_own, also for the board measurement
+    (runtime/device/measure.py). A Cancel, a Ctrl+C or the follower's time limit stops exactly the recorded PID (or
+    its group)."""
     sweep_bench_folders(shell, root)
     folder = shell.private_dir(root, BENCH_PREFIX)
     try:
@@ -710,10 +719,13 @@ def model_sha256(shell: RemoteShell, path: str) -> Optional[str]:
 def verify_on_device(shell: RemoteShell, *, home: str, plan_verify: Mapping[str, Any], pin_build: int,
                      pin_commit: str, port: int, bench_model: Optional[str] = None,
                      bench_allowed: bool = False, threads: Optional[int] = None,
-                     folder: Optional[str] = None) -> VerifyReport:
+                     folder: Optional[str] = None, measure: Any = None) -> VerifyReport:
     """The checks of design 3.8 steps 2-5 on the device, as the unprivileged SSH user (never with sudo), of the
     programs in `folder`: a build folder of the install folder (a deployment checks the new build there before it
-    becomes current), by default the active build (`current`)."""
+    becomes current), by default the active build (`current`). With `measure` (measure.MeasureRequest) and a short
+    benchmark that passed, the board is measured with the same model (runtime/device/measure.py): the check
+    "measure" carries the record, and the derived limits are written to the board for its start script. A
+    measurement that does not work fails no check (it is "skipped" with the reason)."""
     report = VerifyReport()
     root = install_root(home)
     if folder is None:
@@ -830,7 +842,34 @@ def verify_on_device(shell: RemoteShell, *, home: str, plan_verify: Mapping[str,
                 report.checks.append(Check("smoke", True, ", ".join(f"{k} {v:.1f} t/s" for k, v in speeds.items()
                                                                     if isinstance(v, (int, float))) or "ran",
                                            {"bench": records}))
+    if measure is not None and bench_model is not None and bench_allowed:
+        report.checks.append(_measure_check(shell, home, root, folder, bench_model, measure, report))
     return report
+
+
+def _measure_check(shell: RemoteShell, home: str, root: str, folder: str, model: str, request: Any,
+                   report: VerifyReport) -> Check:
+    """The board measurement after the short benchmark (measure.py): its record in the check's data, the derived
+    limits written to the board. Never a failed check: a board that cannot be measured is "skipped" with why."""
+    from orchestrator.runtime.device import measure
+    smoke = report.check("smoke")
+    if smoke is None or smoke.ok is not True:
+        return Check("measure", None, "the board was not measured: the short benchmark did not pass")
+    try:
+        record = measure.measure_on_board(shell, home=home, root=root, folder=folder, model=model, request=request,
+                                          heat=report.heat)
+    except (RemoteError, gate.GateRefused) as e:
+        if getattr(e, "kind", "") == "stopped":
+            raise
+        return Check("measure", None, f"the board could not be measured: {_tail(str(e))}")
+    limits = measure.derive(record, request.kv_chosen)
+    # also when the model does not fit (ctx=0: the start script then refuses without -c), so an older file of
+    # another measurement never stays
+    written = measure.write_board_limits(shell, home, limits)
+    detail = limits.reason + ("" if written else "; the limits could not be written to the board for its start "
+                                                 "script")
+    return Check("measure", True if limits.fits else None, detail,
+                 {"record": record.as_dict(), "limits": limits.ai_facts()})
 
 
 def start_script_path(home: str) -> str:

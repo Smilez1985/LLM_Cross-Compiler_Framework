@@ -81,8 +81,6 @@ Anbieter, Prüfung, Fehler mit nächstem Schritt) und der Anmeldebereich der GUI
 
 | Punkt | Status |
 |---|---|
-| **Das Board messen, bevor eine Board-Vorgabe gesetzt wird**: Die RAM-Reserve eines Boards kommt aus einer Messung auf diesem Board, nie aus einer Schätzung. | geplant |
-| **Das Startskript gibt Kontext, Cache-Budget und eine Reserve je Board weiter.** | geplant |
 | **Fertig gebaute, signierte Rust-Programme für Boards** (die Board-Seite von „Die Rust-Teile des Frameworks fertig gebaut und signiert ausgeliefert“ unter Rust-Teile). | geplant |
 | **Gemeinsame goldene Vektoren für die Kontextregeln**, damit der Rust-Code des Boards und der Python-Code des Hosts gleich entscheiden. | geplant |
 | **Das Bündel, seine weiteren Bestandteile in eigenen Schritten cross-kompiliert** (der Rest von Deploy-Weg 3): whisper.cpp und die anderen Bestandteile vom Framework für das Board gebaut, wie llama.cpp, statt eines Programms, das die Person wählt. | teilweise erledigt (Bausteine, Manifest, Generator, Speicher, der Installer ohne root, das Fenster Board-Bündel, `llm-cli bundle` und die MCP-Werkzeuge sind da) |
@@ -91,7 +89,6 @@ Anbieter, Prüfung, Fehler mit nächstem Schritt) und der Anmeldebereich der GUI
 | **Sprache mit whisper.cpp** für Spracherkennung und Weckwort; andere Sprachteile (NeMo, das GigaSpeech-Weckwort, eSpeak NG, ein fertiges onnxruntime) nur als Opt-in mit ihrer Lizenz vor dem Download gezeigt, nie standardmäßig an bei unfreien Bedingungen. | geplant |
 | **Bilderkennung mit `--mmproj`** als Bestandteil des Bündels. | geplant |
 | **Ein Agenten-Harness als Bestandteil des Bündels**, auf einem festgelegten Commit, unter einem eigenen Linux-Benutzer, installiert von seinem eigenen Installer nach dem Ja der Person; llmcf blockiert nicht, was dieser Installer holt, beobachtet, was er tut (Netzziele, Pakete, Dateien, Prozesse), markiert Verdächtiges und berichtet vorher und nachher. | geplant |
-| **Das Board-Bündel entscheidet mit den gemessenen Grenzen**: Ob das LLM auf dem Board läuft, entscheidet zuerst die Person, dann die gemessenen Grenzen des Boards (nach „Das Board messen, bevor eine Board-Vorgabe gesetzt wird“). | geplant |
 | **Ein Vertragstest für Harnesses**, die sich an das Gateway anschließen, ohne Harness-Code in llmcf. | geplant |
 | **Ein optionaler Sitzungsspeicher auf dem Board**, jederzeit, nachdem das Gateway deployt ist. | geplant |
 | **Ein MCP-Server im Gateway**: nur Loopback, zuerst lesende Tools (Modellstatus, Zustand, Benchmark, Logs). | geplant |

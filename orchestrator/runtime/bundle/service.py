@@ -43,7 +43,7 @@ def device_profile(state_dir: Path, device_id: str):
 def plan_for_device(state_dir: Path, device_id: str, selection: gen.Selection, *, config: Any = None,
                     app_root: Optional[Path] = None, mode: str = "private", allow_own: bool = False,
                     runtime: Optional[gen.RuntimePackage] = None, profile: Any = None,
-                    index: Any = None) -> gen.BundlePlan:
+                    index: Any = None, unmeasured_ok: bool = False) -> gen.BundlePlan:
     """plan_bundle for a stored board: its probe, the block catalog of this framework (`index`: the verified cached
     community index, CommunityManager.cached_index(revocations=True), so a revoked block is not used), its runtime
     package."""
@@ -53,8 +53,10 @@ def plan_for_device(state_dir: Path, device_id: str, selection: gen.Selection, *
                         for need in getattr(catalog.get(bid), "files", ()))
     if runtime is None and needs_runtime:
         runtime = runtime_for(state_dir, device_id, profile)
+    from orchestrator.runtime.device.steps import board_limits_of
     return gen.plan_bundle(selection, catalog=catalog, profile=profile, device_id=device_id,
-                           runtime=runtime, config=config, mode=mode, allow_own=allow_own)
+                           runtime=runtime, config=config, mode=mode, allow_own=allow_own,
+                           limits=board_limits_of(state_dir, device_id), unmeasured_ok=unmeasured_ok)
 
 
 _ASSIGN = re.compile(r"^([a-z][a-z0-9-]{0,40})\.([a-z][a-z0-9_]{0,31})=(.*)$", re.ASCII | re.DOTALL)
