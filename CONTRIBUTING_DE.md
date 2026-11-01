@@ -169,10 +169,10 @@ python -m pytest
   `modules/rkllm_module.sh`, `modules/rknn_module.sh` und `scripts/export_rkllm.py` passen.
 - `tests/test_build_stages.py` hält mit nachgebauten Werkzeugketten fest, was ein Rockchip-Build erzeugt (Befehle
   und ihre Reihenfolge, Ausgabedateien und Namen, `SHA256SUMS`, die Umgebungsvariablen, die die Skripte lesen,
-  Exit-Codes), und prüft den Stage-Runner `modules/build.sh`: Reihenfolge der Stufen, Marken zum Fortsetzen,
-  Fortschrittszeilen, den Platz für die Rotation und dass keine Stufe einen Benchmark ausführt.
-  `tests/test_target_template.py` prüft die Stufenmodule der Vorlage und dass ihr `build.sh` derselbe Runner ist wie
-  der von Rockchip. `tests/test_convert_stage.py` prüft, was die Stufe convert um jede Umwandlung herum tut
+  Exit-Codes), und prüft den Stage-Runner des Frameworks (`runner.sh` der Laufzeit-Schicht): Reihenfolge der Stufen, Marken
+  zum Fortsetzen, Fortschrittszeilen, die `stages:`-Plätze und dass keine Stufe einen Benchmark ausführt.
+  `tests/test_target_template.py` prüft die Stufenmodule der Vorlage über denselben Runner und
+  `tests/test_runtime_layer.py` die Schicht selbst (die CI auch mit den echten statischen Werkzeugen). `tests/test_convert_stage.py` prüft, was die Stufe convert um jede Umwandlung herum tut
   (`scripts/model_check.py`, dieselbe Datei in jedem Target): Erkennen des Formats und Ablehnungen, die
   Integritätsprüfungen der Eingabe und des geschriebenen GGUF, die Statistik in `build_info.json`, den
   Funktionstest sowie Sicherungen und Aufräumen bei einem Fehler; `tests/model_files.py` schreibt die kleinen
@@ -560,8 +560,8 @@ Der vollständige Leitfaden ist der [Leitfaden für Modulentwickler](docs/Module
    dort steht.
 4. **Dockerfile und Build-Skript:** Lege jede Version fest (Tags, Commits, Hashes, wie `RKLLM_WHEEL_SHA256` im
    Rockchip-Dockerfile). Die Umwandlung muss in der Sandbox funktionieren: unter dem Stufen-Konto `llmstage` (weder
-   root noch der Stufen-Runner: behalte das Konto und `setpriv` der Vorlage; `modules/stage_user.sh` ist immer das
-   des Frameworks, jeder Build-Kontext bringt seine eigene Kopie mit), ohne
+   root noch der Stufen-Runner: der Runner und der Helfer des Stufen-Kontos sind die Laufzeit-Schicht des
+   Frameworks, schreibgeschützt in jeden Build eingehängt; ein Target bringt kein `build.sh` mit), ohne
    Netzwerk, mit schreibgeschütztem Image-Dateisystem und nur den eigenen Ordnern des Builds beschreibbar. Die Stufe
    convert der Vorlage erkennt bereits das Format der Eingabe, prüft die Eingabe und das geschriebene GGUF, führt
    einen kurzen Funktionstest aus und hält eine Statistik fest; behalte ihr `scripts/model_check.py` in deinem

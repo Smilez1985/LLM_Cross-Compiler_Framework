@@ -235,6 +235,10 @@ Rust geschrieben; andere Teile wechseln nur, wenn eine Messung einen Gewinn zeig
     Stufen-Module, `target.yml` (mit ihren `stages:`-Plätzen) und das Dockerfile. Der Stufen-Runner ist nie dabei: Er
     ist die Laufzeit-Schicht des Frameworks, für jedes Target dieselbe. Warum: Herstellerpfade und Flags lassen sich
     fertigstellen, bevor das Modul gespeichert wird.
+  - **Ein veröffentlichtes statisches setpriv für den Werkzeug-Weg `fetch`**: ein Release dieses Projekts mit der
+    busybox und dem setpriv, die seine CI baut, per Adresse und sha256 in
+    `orchestrator/runtime_layer/toolbox/prebuilt.json` festgelegt. Warum: Bis dahin verweigert `fetch` klar, und die
+    Werkzeuge werden auf diesem Rechner gebaut (`build`, braucht einmal das Netz).
   - **Ein Verlauf der Heilungs-Korrekturen** mit ihrer Erfolgsquote in Mojo; eine Korrektur wird nie von selbst
     angewendet. Warum: Er zeigt, welche Korrekturen wirklich helfen.
   - **Ein Feld für den Zweck** (Chat, Code, Zusammenfassungen, Embeddings) für die Quantisierungsempfehlung. Warum:
