@@ -114,6 +114,18 @@ def test_the_measured_kv_cache_is_said_in_words(lang, words):
     assert "device.kv" not in _kv_text(None, KvChoice("q8_0", "measured", 1.5))
 
 
+def test_the_measurement_is_a_kind_of_the_boards_data_with_its_words():
+    """A host-key change moves the measurement with the board's data (board_move): it is one of the KINDS the move
+    reports, with its words for the CLI and the window in English and German (review of ctx-measure: it moved but
+    was no kind, so the window would have shown a text key)."""
+    from orchestrator.runtime.device import board_move
+    from orchestrator.utils.localization import ui_text
+    assert "limits" in board_move.KINDS and board_move.kind_words(["limits"]) == "measured limits"
+    for kind in board_move.KINDS:
+        for lang in ("en", "de"):
+            assert not ui_text(f"boards.edit.data.{kind}", lang).startswith("boards."), (kind, lang)
+
+
 def test_the_record_is_kept_per_board_with_its_version(tmp_path):
     device = "0123456789abcdef"
     measure.save(tmp_path, device, record())
