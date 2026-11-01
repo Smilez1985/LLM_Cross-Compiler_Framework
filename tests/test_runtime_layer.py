@@ -791,6 +791,42 @@ def test_a_toolbox_of_an_older_version_is_made_again_and_the_layer_with_it(tmp_p
     assert (layer.layer_dir(tmp_path) / "bin" / "setpriv").read_bytes().endswith(b"setpriv-llmcf-setpriv")
 
 
+def _age_the_record(cache):
+    folder = layer.toolbox_dir(cache)
+    old = json.loads((folder / layer.TOOLBOX_RECORD).read_text(encoding="utf-8"))
+    old["version"] = 1
+    del old["setpriv"]
+    (folder / layer.TOOLBOX_RECORD).write_text(json.dumps(old), encoding="utf-8")
+
+
+@needs_posix
+@pytest.mark.parametrize("change", ["script", "tool", "no_record"])
+def test_a_changed_layer_is_never_replaced_silently_when_the_toolbox_is_made_again(tmp_path, change):
+    """Regression (review of the remake): ensure_toolbox assembled the layer again after every remake, so a layer
+    changed by hand (a script, a tool the old record does not name, or tools no record names any more) was replaced
+    without the 'changed' report. Only a layer that held exactly the shipped scripts and the tools of the old record
+    is assembled again; any other layer is refused as 'changed' as before (Mojo Miracle restores it)."""
+    calls = []
+    layer.ensure_toolbox(tmp_path, "build", offline=False, build=_stub_build(calls))
+    assert layer.ready_layer(tmp_path).ok
+    current = layer.layer_dir(tmp_path)
+    target = current / ("runner.sh" if change == "script" else "bin/setpriv")
+    os.chmod(target.parent, 0o755)
+    os.chmod(target, 0o644)
+    target.write_bytes(b"#!/bin/sh\necho changed\n")
+    os.chmod(target, 0o444)
+    os.chmod(target.parent, 0o555)
+    if change == "no_record":
+        shutil.rmtree(layer.toolbox_dir(tmp_path))
+    else:
+        _age_the_record(tmp_path)
+    layer.ensure_toolbox(tmp_path, "build-rust", offline=False, build=_stub_build(calls))
+    with pytest.raises(layer.LayerRefused) as refused:
+        layer.ready_layer(tmp_path)
+    assert refused.value.verdict == "changed" and "Mojo Miracle" in str(refused.value)
+    assert target.read_bytes() == b"#!/bin/sh\necho changed\n"
+
+
 class _FakeImages:
     def __init__(self, built):
         self.built = built
