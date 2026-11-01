@@ -73,7 +73,7 @@ if ($EngineChoice -notin @("podman")) {
 }
 # The framework mode: private (the default) or enterprise (only OpenSSH with sudo on a board, the root-owned key line).
 # --mode=private|enterprise, for unattended runs also LCF_MODE; without either the installer asks in this window
-# (Enter: private). A run without a console to ask, or with its input redirected (an unattended run: Read-Host would
+# (Enter: the current mode on an update, private on a fresh install). A run without a console to ask, or with its input redirected (an unattended run: Read-Host would
 # read an empty line there and pick private), keeps the mode as it is (new: private). An unknown value stops here.
 $ModeChoice = if ($env:LCF_MODE) { $env:LCF_MODE } else { "" }
 foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
@@ -82,10 +82,30 @@ foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
 if ($ModeChoice -notin @("", "private", "enterprise")) {
     Write-Error "Unbekannter Wert fuer --mode: '$ModeChoice' (private oder enterprise)."
 }
+# On an update the default is the current mode (read like every setting, with the earlier installation's Python and
+# the mode's one reader, ConfigManager and framework_mode): Enter alone keeps it ([p/E] for enterprise); a fresh
+# install has private as its default ([P/e]).
+$CurrentMode = ""
+$OldPython = Join-Path $InstallDir ".venv\Scripts\python.exe"
+if (-not $ModeChoice -and (Test-Path $OldPython)) {
+    try {
+        Push-Location $InstallDir
+        $CurrentMode = ("" + (& $OldPython -c "from orchestrator.Core.config_manager import ConfigManager, framework_mode; print(framework_mode(ConfigManager()))" 2>$null | Select-Object -Last 1)).Trim()
+    } catch {
+        $CurrentMode = ""
+    } finally {
+        Pop-Location
+    }
+    if ($CurrentMode -notin @("private", "enterprise")) { $CurrentMode = "" }
+}
 if (-not $ModeChoice -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
     try {
-        $ModeAnswer = Read-Host "Framework-Modus: privat (Standard) oder enterprise? Enterprise nimmt auf Boards nur OpenSSH mit sudo (die Schluesselzeile in Root-Besitz) und lehnt die schwaechere Dropbear-Stufe und das Home-Tor ab. [P/e]"
-        $ModeChoice = if ("$ModeAnswer".Trim().ToLower() -in @("e", "enterprise")) { "enterprise" } else { "private" }
+        $ModeDefault = if ($CurrentMode -eq "enterprise") { "enterprise" } else { "private" }
+        $ModeHint = if ($ModeDefault -eq "enterprise") { "[p/E]" } else { "[P/e]" }
+        $ModeNow = if ($CurrentMode -eq "enterprise") { "enterprise (jetzt eingestellt)" } elseif ($CurrentMode) { "privat (jetzt eingestellt)" } else { "privat (Standard)" }
+        $ModeAnswer = Read-Host "Framework-Modus: $ModeNow; Enter behaelt ihn. privat oder enterprise? Enterprise nimmt auf Boards nur OpenSSH mit sudo (die Schluesselzeile in Root-Besitz) und lehnt die schwaechere Dropbear-Stufe und das Home-Tor ab. $ModeHint"
+        $ModeWord = "$ModeAnswer".Trim().ToLower()
+        $ModeChoice = if ($ModeWord -in @("e", "enterprise")) { "enterprise" } elseif ($ModeWord -in @("p", "privat", "private")) { "private" } else { $ModeDefault }
     } catch {
         $ModeChoice = ""
     }

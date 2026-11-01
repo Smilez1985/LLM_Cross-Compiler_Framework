@@ -775,3 +775,68 @@ def test_the_windows_installer_takes_the_mode_flag_asks_and_sets_it_through_the_
     # Regression (failed before: an unattended run with its input redirected read an empty line from Read-Host and
     # set private mode over an enterprise one); without a console to ask, the mode stays as it is
     assert "[Environment]::UserInteractive -and -not [Console]::IsInputRedirected" in text
+
+
+def _old_install(tmp_path, mode):
+    """An earlier installation at INSTALL_DIR whose .venv Python answers the mode reader (ConfigManager +
+    framework_mode) with `mode`, and logs how it was called."""
+    venv = tmp_path / "inst" / ".venv" / "bin"
+    venv.mkdir(parents=True, exist_ok=True)
+    log = tmp_path / "py-calls"
+    script = f'#!/bin/sh\necho "$*" >> "{log}"\necho {mode}\n'
+    (venv / "python").write_bytes(script.encode("utf-8"))
+    (venv / "python").chmod(0o755)
+    return log
+
+
+def _ask(tmp_path, folder, answer):
+    return _install_sh(tmp_path, f'INSTALL_DIR="{tmp_path}/{folder}"; CONTAINER_BUILD=1; ASK_TTY="{answer}"; ask_mode; '
+                                 'echo "MODE=$MODE_CHOICE"')
+
+
+@BASH
+def test_install_sh_keeps_the_current_mode_on_an_empty_answer_of_an_update(tmp_path):
+    """Regression (failed before: an empty answer set private mode over an enterprise installation): on an update the
+    current mode, read with the installation's own mode reader, is the default; the prompt shows it ([p/E])."""
+    answer = tmp_path / "tty"
+    log = _old_install(tmp_path, "enterprise")
+    for typed, expected in (("\n", "enterprise"), ("  \n", "enterprise"), ("p\n", "private"), ("e\n", "enterprise"),
+                            ("private\n", "private")):
+        answer.write_bytes(typed.encode("utf-8"))
+        done = _ask(tmp_path, "inst", answer)
+        assert f"MODE={expected}" in done.stdout, (typed, done.stdout + done.stderr)
+        assert "[p/E]" in done.stdout and "enterprise (jetzt eingestellt)" in done.stdout
+    assert "framework_mode(ConfigManager())" in log.read_text(encoding="utf-8")
+    # an earlier private installation: [P/e], Enter keeps private
+    _old_install(tmp_path, "private")
+    answer.write_bytes(b"\n")
+    done = _ask(tmp_path, "inst", answer)
+    assert "MODE=private" in done.stdout and "[P/e]" in done.stdout and "privat (jetzt eingestellt)" in done.stdout
+
+
+@BASH
+def test_install_sh_fresh_install_and_an_unreadable_mode_default_to_private(tmp_path):
+    answer = tmp_path / "tty"
+    answer.write_bytes(b"\n")
+    # fresh: no earlier .venv at INSTALL_DIR
+    done = _ask(tmp_path, "fresh", answer)
+    assert "MODE=private" in done.stdout and "[P/e]" in done.stdout and "privat (Standard)" in done.stdout
+    # an earlier installation whose Python answers nothing the reader knows: private stays the default
+    _old_install(tmp_path, "garbage")
+    done = _ask(tmp_path, "inst", answer)
+    assert "MODE=private" in done.stdout and "[P/e]" in done.stdout
+    # a flag never asks and never reads
+    log = _old_install(tmp_path, "enterprise")
+    if log.exists():
+        log.unlink()
+    done = _install_sh(tmp_path, f'INSTALL_DIR="{tmp_path}/inst"; CONTAINER_BUILD=1; MODE_CHOICE=private; ask_mode; '
+                                 'echo "MODE=$MODE_CHOICE"')
+    assert "MODE=private" in done.stdout and not log.exists()
+
+
+def test_the_windows_installer_keeps_the_current_mode_on_an_empty_answer():
+    """Regression (failed before: Enter alone picked private over an enterprise installation)."""
+    text = (REPO / "install.bat").read_text(encoding="utf-8")
+    assert "framework_mode(ConfigManager())" in text and "$CurrentMode" in text
+    assert '"[p/E]"' in text and '"[P/e]"' in text
+    assert "else { $ModeDefault }" in text
