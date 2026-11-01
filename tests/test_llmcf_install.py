@@ -497,7 +497,7 @@ def test_the_cli_asks_for_the_sudo_password_in_private_mode_only(cli_root_board,
     res = invoke_plain("bundle", "deploy", bid, input="y\n")
     assert res.code == 1, res.out
     assert "correct horse" not in res.out
-    assert "root readiness" in res.out, res.out
+    assert "enterprise mode runs root actions only with sudo -n" in res.out and "root readiness" in res.out, res.out
     monkeypatch.setattr(cli_module, "_framework_mode", lambda ctx: "private")
     # private mode: without the drop-in, the person's password for this run (sent on stdin, never kept)
     res = invoke_plain("bundle", "deploy", bid, input="y\ncorrect horse\ny\n")
