@@ -179,10 +179,13 @@ class TestTheStartScriptTakesTheMeasurement:
         path.write_bytes("".join(f"{k}={v}\n" for k, v in data.items()).encode())
 
     def test_without_a_measurement_and_without_a_context_it_refuses(self, home):
+        # since the board's unit stops on it: the measurement refusals end with their own exit code (MEASURE_EXIT),
+        # which the unit's RestartPreventExitStatus names (before: 2, the code of every refusal)
         res = self.run(home, "serve", str(home / "model.gguf"))
-        assert res.returncode == 2 and "not been measured" in res.stderr and "ARG=" not in res.stdout
+        assert res.returncode == launcher.MEASURE_EXIT and "not been measured" in res.stderr
+        assert "ARG=" not in res.stdout
         res = self.run(home, "start", str(home / "model.gguf"))
-        assert res.returncode == 2 and "not been measured" in res.stderr
+        assert res.returncode == launcher.MEASURE_EXIT and "not been measured" in res.stderr
 
     def test_the_measured_limits_are_passed_on(self, home):
         self.limits(home)
@@ -198,15 +201,17 @@ class TestTheStartScriptTakesTheMeasurement:
         args, _env = tdr.TestStartScript.args_env(res.stdout)
         assert res.returncode == 0 and args[12:] == ["-c", "1024", "-ctk", "f16", "-ctv", "f16", "--cache-ram", "256"]
 
-    @pytest.mark.parametrize("values, words", [
-        ({"model_size": 41}, "measured with another model"),
-        ({"ctx": 0}, "does not fit"),
-        ({"need_mib": 900000000}, "MiB are free now"),
+    @pytest.mark.parametrize("values, words, code", [
+        ({"model_size": 41}, "measured with another model", "measure"),
+        ({"ctx": 0}, "does not fit", "measure"),
+        # too little free memory right now may pass: the ordinary refusal (2), which the unit tries again
+        ({"need_mib": 900000000}, "MiB are free now", 2),
     ])
-    def test_a_measurement_that_does_not_hold_refuses(self, home, values, words):
+    def test_a_measurement_that_does_not_hold_refuses(self, home, values, words, code):
         self.limits(home, **values)
         res = self.run(home, "serve", str(home / "model.gguf"))
-        assert res.returncode == 2 and words in res.stderr and "ARG=" not in res.stdout
+        want = launcher.MEASURE_EXIT if code == "measure" else code
+        assert res.returncode == want and words in res.stderr and "ARG=" not in res.stdout
 
     @pytest.mark.parametrize("given", [("-ctk", "f16"), ("--cache-type-v", "f16"), ("-ctk", "q8_0", "-ctv", "f16")])
     def test_a_larger_kv_cache_than_measured_needs_its_own_context(self, home, given):
@@ -214,7 +219,8 @@ class TestTheStartScriptTakesTheMeasurement:
         board (review of ctx-measure); a smaller one fits, and with -c the person decides."""
         self.limits(home, kv="q8_0")
         res = self.run(home, "serve", str(home / "model.gguf"), *given)
-        assert res.returncode == 2 and "measured with the KV cache q8_0" in res.stderr and "ARG=" not in res.stdout
+        assert res.returncode == launcher.MEASURE_EXIT and "measured with the KV cache q8_0" in res.stderr
+        assert "ARG=" not in res.stdout
         res = self.run(home, "serve", str(home / "model.gguf"), "-ctk", "q4_0", "-ctv", "q4_0")
         assert res.returncode == 0, res.stderr
         res = self.run(home, "serve", str(home / "model.gguf"), "-c", "1024", *given)
@@ -223,7 +229,24 @@ class TestTheStartScriptTakesTheMeasurement:
     def test_a_damaged_limits_file_counts_as_none(self, home):
         self.limits(home, kv="q2_k; rm -rf ~")
         res = self.run(home, "serve", str(home / "model.gguf"))
-        assert res.returncode == 2 and "not been measured" in res.stderr
+        assert res.returncode == launcher.MEASURE_EXIT and "not been measured" in res.stderr
+
+    def test_an_option_the_script_refuses_keeps_the_ordinary_refusal(self, home):
+        res = self.run(home, "serve", str(home / "model.gguf"), "--tools", "all")
+        assert res.returncode == 2
+
+
+def test_the_unit_does_not_restart_an_unmeasured_board_every_ten_seconds():
+    """Regression (looped before: the unit's Restart=on-failure started the start script again every 10 s on a board
+    that was never measured, and it refused each time with the code of every refusal): the measurement refusals have
+    their own exit code, and the unit names it in RestartPreventExitStatus, so systemd leaves the unit stopped; every
+    other failure still restarts."""
+    code = getattr(launcher, "MEASURE_EXIT", None)
+    assert code is not None and code not in (0, 1, 2, 3)
+    unit = launcher.render_systemd_unit(user="dietpi", home="/home/dietpi", model="/home/dietpi/m.gguf", port=8080)
+    lines = unit.splitlines()
+    assert "Restart=on-failure" in lines and f"RestartPreventExitStatus={code}" in lines
+    assert f"exit {code}" in launcher.render_start_script()
 
 
 # --- on the fake board ----------------------------------------------------------------------------------------------

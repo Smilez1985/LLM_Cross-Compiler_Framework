@@ -7106,6 +7106,9 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
         console.print(f"The server listens on 127.0.0.1:{settings.port}, key in "
                       "~/.config/llm-framework/llama-server.key; stop, status and serve (foreground) work the same "
                       "way.")
+    if flow.needs_measurement:
+        console.print(f"[yellow]{escape(steps.NEEDS_MEASUREMENT)}[/yellow]")
+        console.print("The benchmark on the board: llm-cli device runtime verify DEVICE --bench-model PATH")
 
 
 @device_runtime.command('verify')

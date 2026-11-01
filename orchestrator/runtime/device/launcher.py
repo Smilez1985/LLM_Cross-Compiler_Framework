@@ -38,6 +38,11 @@ KEY_REL = ".config/llm-framework/llama-server.key"
 STATE_REL = ".local/state/llm-framework"
 # The board's measured limits the start script reads (runtime/device/measure.py writes them with the benchmark).
 LIMITS_REL = ".config/llm-framework/board-limits"
+# The start script's exit code when the board's measurement does not allow the start (not measured, measured with
+# another model, a larger KV cache than measured, the model does not fit): EX_CONFIG of sysexits.h. The systemd unit
+# names it in RestartPreventExitStatus, so an unmeasured board's unit stays stopped instead of starting again every
+# 10 seconds; every other refusal stays 2 (too little free memory right now is tried again).
+MEASURE_EXIT = 78
 
 # Absolute paths on the device carry plain characters only (no shell meaning). Their length is only a sanity bound,
 # far below PATH_MAX (4096 on Linux), so a deep home folder is never refused for its length: a folder (the home, the
@@ -100,7 +105,8 @@ _SCRIPT = r'''#!/bin/sh
 #
 # Without -c the context, the KV cache and the prompt cache come from the board's measurement
 # (~/.config/llm-framework/board-limits, written by the framework with the benchmark on the board); without a measurement
-# and without -c the server is not started (a guessed context is never used).
+# and without -c the server is not started (a guessed context is never used); that refusal ends with exit code
+# @MEASURE_EXIT@ (every other refusal with 2), which the framework's systemd unit does not restart.
 #
 # The server listens on 127.0.0.1 only (default port @PORT@, --port to change it) and needs the key from
 # ~/.config/llm-framework/llama-server.key in every request but /health ("Authorization: Bearer <key>"). It starts
@@ -113,6 +119,8 @@ umask 077
 
 me=llama-server.sh
 die() { printf '%s: %s\n' "$me" "$*" >&2; exit 2; }
+# unmeasured: the board's measurement does not allow this start (its own exit code, never restarted by the unit)
+unmeasured() { printf '%s: %s\n' "$me" "$*" >&2; exit @MEASURE_EXIT@; }
 
 DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 BASE=$(dirname -- "$DIR")
@@ -245,11 +253,11 @@ run_server() {
       # the measured context holds for the measured KV-cache type: a larger one needs a context of its own (-c)
       for given in "$ctk_val" "$ctv_val"; do
         [ -n "$given" ] || continue
-        [ "$(kv_rank "$given")" -le "$(kv_rank "$L_KV")" ] || die "this board was measured with the KV cache $L_KV; $given needs more memory: run the benchmark on the board in the framework again with that KV cache, or give -c"
+        [ "$(kv_rank "$given")" -le "$(kv_rank "$L_KV")" ] || unmeasured "this board was measured with the KV cache $L_KV; $given needs more memory: run the benchmark on the board in the framework again with that KV cache, or give -c"
       done
       size=$(wc -c < "$model" | tr -d ' ')
-      [ "$size" = "$L_SIZE" ] || die "this board was measured with another model: run the benchmark on the board in the framework again with this model, or give -c"
-      [ "$L_CTX" -gt 0 ] || die "the board's measurement says this model does not fit on it (no context is left next to it): use a smaller model or quantization"
+      [ "$size" = "$L_SIZE" ] || unmeasured "this board was measured with another model: run the benchmark on the board in the framework again with this model, or give -c"
+      [ "$L_CTX" -gt 0 ] || unmeasured "the board's measurement says this model does not fit on it (no context is left next to it): use a smaller model or quantization"
       avail=$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null || true)
       case $avail in
         ''|*[!0-9]*) ;;
@@ -261,7 +269,7 @@ run_server() {
     [ "$has_ctv" = yes ] || [ "$L_KV" = f16 ] || set -- "$@" -ctv "$L_KV"
     [ "$has_cram" = yes ] || set -- "$@" --cache-ram "$L_CRAM"
   elif [ "$has_c" = no ]; then
-    die "this board has not been measured yet: run the benchmark on the board in the framework once (it measures the board's memory with the model), or give -c; a guessed context is never used"
+    unmeasured "this board has not been measured yet: run the benchmark on the board in the framework once (it measures the board's memory with the model), or give -c; a guessed context is never used"
   fi
   [ "$mode" = exec ] || return 0
   [ -s "$KEY" ] || keygen
@@ -334,7 +342,7 @@ def render_start_script(default_port: int = DEVICE_DEFAULT_PORT) -> str:
     if not all(_RE_CACHE_TYPE.fullmatch(kind) for kind in KV_CACHE_TYPES):  # pragma: no cover - policy constants
         raise LauncherError("a KV-cache type is not a plain word")
     text = _SCRIPT
-    for token, value in (("@PORT@", str(default_port)), ("@PATH@", POSIX_CLEARED_PATH), ("@KEY_REL@", KEY_REL),
+    for token, value in (("@MEASURE_EXIT@", str(MEASURE_EXIT)), ("@PORT@", str(default_port)), ("@PATH@", POSIX_CLEARED_PATH), ("@KEY_REL@", KEY_REL),
                          ("@STATE_REL@", STATE_REL), ("@LIMITS_REL@", LIMITS_REL),
                          ("@FORBIDDEN@", _pattern(FORBIDDEN_FLAGS)),
                          ("@ALLOWED_CASES@", cases), ("@ALLOWED_TEXT@", allowed), ("@ENV@", _env_words()),
@@ -380,6 +388,8 @@ def render_systemd_unit(*, user: str, home: str, model: str, port: int, kv_cache
         "ExecStart=" + " ".join(argv),
         "Restart=on-failure",
         "RestartSec=10",
+        # the start script's measurement refusal (an unmeasured board) is not tried again every 10 seconds
+        f"RestartPreventExitStatus={MEASURE_EXIT}",
         "NoNewPrivileges=yes",
         "PrivateTmp=yes",
         "ProtectSystem=strict",
@@ -399,5 +409,5 @@ def render_systemd_unit(*, user: str, home: str, model: str, port: int, kv_cache
     ])
 
 
-__all__ = ["INSTALL_REL", "KEY_REL", "LIMITS_REL", "LauncherError", "START_SCRIPT", "STATE_REL", "UNIT_NAME", "UNIT_PATH",
+__all__ = ["INSTALL_REL", "KEY_REL", "LIMITS_REL", "LauncherError", "MEASURE_EXIT", "START_SCRIPT", "STATE_REL", "UNIT_NAME", "UNIT_PATH",
            "install_root", "render_start_script", "render_systemd_unit"]

@@ -416,6 +416,18 @@ class TestCliRuntimeDeploy:
         assert res.code == 1 and "did not pass its checks" in res.out
         assert not [o for o in order if isinstance(o, tuple) and o[0] == "tested"]
 
+    def test_an_unmeasured_board_is_told_plainly_that_it_needs_its_measurement_first(self, monkeypatch):
+        """Regression (said nothing before: the deploy ended with "systemd unit: started" on a board that was never
+        measured, whose server then refused to start): the deploy names the measurement as the next step; a measured
+        board hears nothing of it."""
+        from orchestrator.runtime.device import steps
+        res, _device_id, _state, _consents = self.deploy(monkeypatch, [])
+        out = " ".join(res.out.split())
+        assert res.code == 0 and "needs its measurement first" in out and "benchmark on the board" in out
+        monkeypatch.setattr(steps, "board_limits_of", lambda state_dir, device_id: object())
+        res, _device_id, _state, _consents = self.deploy(monkeypatch, [])
+        assert res.code == 0 and "needs its measurement first" not in " ".join(res.out.split())
+
 
 # --- the Boards window's Deploy runtime... ------------------------------------------------------------------------------
 
@@ -473,6 +485,7 @@ def test_the_boards_window_steps_in_their_order(qapp, tmp_path, monkeypatch):
         assert tools == ["device_trusted", "device_runtime_untrusted_model"], "remembered, then the consent"
         text = window.output.toPlainText()
         assert "Deployed build bbbbbbbbbbbbbbbb" in text and "with 1 build(s) of this model" in text
+        assert "needs its measurement first" in " ".join(text.split()), "the board was not measured"
     finally:
         window.deleteLater()
         qapp.processEvents()
@@ -520,7 +533,7 @@ def ai_board(tmp_path, monkeypatch):
 class TestServiceDeploy:
 
     def test_the_ai_deploy_logs_in_with_the_trusted_key_and_remembers_nothing(self, ai_board):
-        from orchestrator.runtime.device import service
+        from orchestrator.runtime.device import service, steps
         before = ai_board.records.list()
         out = service.deploy(ai_board.state, ai_board.device, RK3566, ai_board.settings, ai_board.device.fingerprint,
                              "b" * 64)
@@ -532,7 +545,9 @@ class TestServiceDeploy:
                        "older_builds_kept": 0, "checks": [{"name": "version", "result": "passed", "detail": "b1"},
                                                           {"name": "smoke", "result": "passed",
                                                            "detail": "llama-bench ran"}],
-                       "notes": ["start the server with: ..."]}
+                       "notes": ["start the server with: ..."],
+                       # since the deploy says it: the board was not measured, so its server does not start yet
+                       "needs_measurement": True, "next": steps.NEEDS_MEASUREMENT}
 
     def test_a_cancel_before_the_install_stops_it_and_closes_the_session(self, ai_board):
         from orchestrator.runtime.device import service

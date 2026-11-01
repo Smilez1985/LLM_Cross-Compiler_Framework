@@ -1523,13 +1523,13 @@ class BoardsWindow(BoardSteps, QDialog):
             except steps.RootUser:
                 raise _Refusal(self._t("boards.deploy.root")) from None
             older = steps.older_package_count(found.devices, found.build)
-            return found.build, flow.bench, flow.outcome, older, flow.tested
+            return found.build, flow.bench, flow.outcome, older, flow.tested, flow.needs_measurement
 
         self._start(self._t("boards.deploy.preparing"), prepare, prepared,
                     failed=lambda e: self._runtime_failed(e, host, port, settings.ssh_user, device_id))
 
     def _deployed(self, entry: Dict[str, Any], profile: Any, settings: Any, kv: Any, out: Any) -> None:
-        build, bench, outcome, older, tested = out
+        build, bench, outcome, older, tested, needs_measurement = out
         t, result = self._t, outcome.result
         lines = []
         if bench.missing:
@@ -1557,6 +1557,8 @@ class BoardsWindow(BoardSteps, QDialog):
                            state=t("boards.deploy.unit_started" if started else "boards.deploy.unit_enabled")))
         else:
             lines.append(t("boards.deploy.server_user", port=settings.port))
+        if needs_measurement:   # steps.NEEDS_MEASUREMENT, translated
+            lines.append(t("boards.deploy.needs_measurement"))
         self._say("\n".join(lines))
         self.reload()
 
