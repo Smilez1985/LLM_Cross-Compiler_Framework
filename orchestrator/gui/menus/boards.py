@@ -51,9 +51,9 @@ BUNDLE_PATHS: Dict[str, str] = {
     "bundle status": "btn_bundle_status",
     "bundle uninstall": "btn_bundle_uninstall",
     "bundle rollback": "btn_bundle_rollback",
-    "bundle rollback --root": "btn_bundle_root_rollback",
+    "bundle rollback --root": "btn_bundle_root_rollback",     # llmcf-install's last run, after its own question
     "bundle prepare-root": "btn_bundle_prepare_root",           # the board's root readiness, after its plan and a yes
-    "bundle prepare-root --remove": "btn_bundle_unprepare_root",  # its exact files, then a separate yes     # llmcf-install's last run, after its own question
+    "bundle prepare-root --remove": "btn_bundle_unprepare_root",  # its exact files, then a separate yes
     # the Deploy... window asks the root actions' own question after the apply; its No stops before them
     "bundle deploy --skip-root": "btn_bundle_deploy",
     "bundle delete": "btn_bundle_delete",

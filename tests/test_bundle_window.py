@@ -274,3 +274,61 @@ def test_the_root_actions_follow_the_apply_after_their_own_question_and_the_pass
     assert not any(r[2] for r in runs), "llmcf-install runs off the GUI thread"
     assert "done create_user" in dialog.output.toPlainText()
     assert "correct horse" not in dialog.output.toPlainText()
+
+
+def _built_with_root(qapp, dialog, board, monkeypatch):
+    """A stored autostart bundle (root actions) of the fake board, built through the window."""
+    import hashlib
+    from orchestrator.runtime.bundle import service
+    from orchestrator.runtime.bundle.root_helper import HelperBuild, target_of
+    stand_in = board.state.parent / "llmcf-install.stand-in"
+    stand_in.write_bytes(b"#!/bin/sh\n")
+    monkeypatch.setattr(service, "helper_for", lambda framework, arch, say=None: HelperBuild(
+        stand_in, hashlib.sha256(b"#!/bin/sh\n").hexdigest(), "0.1.0", target_of(arch), "test"))
+    _pick_stt(dialog, board)
+    for r in range(dialog.tbl_vars.rowCount()):
+        if dialog.tbl_vars.item(r, 1).text() == "autostart":
+            dialog.tbl_vars.item(r, 3).setText("yes")
+    Boxes(monkeypatch, "yes")
+    dialog.buttons["btn_bundle_build"].click()
+    wait(qapp, dialog)
+    dialog.tbl_store.selectRow(0)
+    return dialog._bundle()[1]
+
+
+def test_a_not_ready_board_sets_the_readiness_up_once_and_the_status_never_asks_for_it(qapp, bundle, monkeypatch):
+    """Regression (looped before: when llmcf-install still answered not-ready after the readiness check said it was
+    there, the window checked and ran again without end; and the read-only status started the readiness's setup,
+    which the CLI's status never does): one setup per run, and the status only says that it was not read."""
+    from orchestrator.runtime.bundle import installer as inst
+    from orchestrator.runtime.bundle import readiness, service
+    from orchestrator.runtime.bundle.board import BoardRun
+    dialog, board = bundle
+    built = _built_with_root(qapp, dialog, board, monkeypatch)
+    runs, checks = [], []
+
+    def run_root_on_board(open_session, built, action, *, password="", say=None):
+        runs.append(action)
+        if len(runs) > 6:
+            raise AssertionError("the window runs llmcf-install again and again")
+        return BoardRun("root-" + action, 3, inst.report("llmcf-bundle: result=not-ready changed=0 x\n"))
+
+    def readiness_on_board(open_session, built):
+        checks.append(1)
+        return readiness.Readiness.parse("sudo=yes\nrootway=nopass\nsigners=root\nhelper=same\ndropin=yes\n"
+                                         "account=ok\n")
+    monkeypatch.setattr(service, "run_root_on_board", run_root_on_board)
+    monkeypatch.setattr(service, "readiness_on_board", readiness_on_board)
+    boxes = Boxes(monkeypatch, "yes")
+    dialog._root("apply", built)
+    for _ in range(10):
+        wait(qapp, dialog)
+    assert runs == ["plan", "plan"] and len(checks) == 1, (runs, checks)
+    assert any("root readiness" in a.text for a in boxes.asked), [a.text for a in boxes.asked]
+    runs.clear()
+    checks.clear()
+    dialog._root("status", built, ask_first=False)
+    for _ in range(4):
+        wait(qapp, dialog)
+    assert runs == ["status"] and checks == [], (runs, checks)
+    assert "not read" in dialog.output.toPlainText()

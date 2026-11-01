@@ -579,7 +579,7 @@ class BundleWindow(BoardSteps, QDialog):
         device_id = built.manifest.board.device_id
         first_action = service.ROOT_CHANGING_ACTIONS[action] if ask_first else action
 
-        def run_step(what: str, pw: str, after) -> None:
+        def run_step(what: str, pw: str, after, prepared: bool = False) -> None:
             def work():
                 return service.run_root_on_board(open_session, built, what, password=pw, say=self._progress)
 
@@ -587,7 +587,16 @@ class BundleWindow(BoardSteps, QDialog):
                 if run.report.result == "not-ready":
                     # llmcf-install runs only from its fixed root-owned place: the board's root readiness first
                     self._say("\n".join(run.lines()))
-                    self._prepare(built, then=lambda: run_step(what, pw, after))
+                    if not ask_first:
+                        # the read-only status never sets anything up (the CLI's status: a note only)
+                        self._say(self._t("bundle.ready.status_unread"))
+                        return
+                    if prepared:
+                        # set up once in this run and still not ready: say so, never check and run again
+                        self._info(self._t("bundle.ready.failed", reason=one_line(run.report.detail or "")),
+                                   "warning")
+                        return
+                    self._prepare(built, then=lambda: run_step(what, pw, after, prepared=True))
                     return
                 if run.report.needs_password and not pw:
                     if not service.password_allowed(self._mode()):
