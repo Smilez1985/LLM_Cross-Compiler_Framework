@@ -188,3 +188,24 @@ def test_the_import_expects_the_labels_of_the_build_context_a_build_stages(boote
     config.target_pack_sha256 = installed_digest(folder)
     built = engine.image_labels(config, BuildProgress("b1", BuildStatus.QUEUED, ""), staged)[1]
     assert build_image.expected_labels(booted_framework, "Rockchip") == built
+
+
+def test_the_window_offers_the_three_toolbox_ways_and_saves_the_choice(qapp, booted_framework, monkeypatch):
+    """Build > Build Container Images...: the runtime layer group offers every way of the one setting
+    runtime_layer_toolbox (the local util-linux build, the local Rust build, the fetch way) and saves the choice; the
+    texts exist in both languages."""
+    from orchestrator.Core import runtime_layer
+    from orchestrator.gui.build_image_window import BuildImageDialog
+    from orchestrator.utils.l10n_build_image import TEXTS
+    no_docker(monkeypatch, booted_framework, Docker(here=set(), built=[]))
+    dialog = BuildImageDialog(booted_framework, lang="en", select="Rockchip")
+    ways = [dialog.combo_toolbox.itemData(i) for i in range(dialog.combo_toolbox.count())]
+    assert tuple(ways) == runtime_layer.TOOLBOX_WAYS
+    dialog.combo_toolbox.setCurrentIndex(ways.index("build-rust"))
+    dialog.save_toolbox()
+    assert booted_framework.config.get("runtime_layer_toolbox") == "build-rust"
+    assert "build-rust" in dialog.txt_result.toPlainText()
+    for lang in ("en", "de"):
+        assert all(TEXTS[lang].get(f"bimg.layer.way.{way}") for way in runtime_layer.TOOLBOX_WAYS), lang
+        assert "{setpriv}" in TEXTS[lang]["bimg.layer.made.setpriv"]
+    dialog.close()

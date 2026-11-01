@@ -169,7 +169,10 @@ dependencies = [
 
 [[package]]
 name = "llmcf-setpriv"
-version = "0.0.0"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "memchr"

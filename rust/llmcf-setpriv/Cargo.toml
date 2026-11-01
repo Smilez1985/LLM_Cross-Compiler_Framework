@@ -1,8 +1,14 @@
+# llmcf-setpriv: the runtime layer's uid switch as a small static Rust program. It takes exactly the setpriv
+# (util-linux) options the framework's layer scripts and tests use, with the same names and meaning, and refuses
+# every other option. One dependency: the libc crate (the C library's own setgroups/setresgid/setresuid/prctl).
 [package]
 name = "llmcf-setpriv"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2021"
+rust-version = "1.85"
 publish = false
+license = "MIT"
+description = "The LLM Cross-Compiler Framework's static uid switch (a setpriv subset)"
 
-# Placeholder: the rs-setpriv chain owns this crate (cargo needs every workspace member to exist).
 [dependencies]
+libc = { version = "=0.2.191", default-features = false }

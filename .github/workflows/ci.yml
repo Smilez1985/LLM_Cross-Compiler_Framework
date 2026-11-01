@@ -123,8 +123,8 @@ jobs:
     # The runtime layer's two static tools made the way "build" (scripts/runtime_toolbox.py: the framework's builder
     # image over the pinned util-linux and busybox tarballs, each checked by its sha256), then the runtime layer's
     # tests on the real kernel with these real tools (as root: they hand the runner exactly CAP_SETUID and
-    # CAP_SETGID). The tools and their SHA256SUMS are uploaded as a workflow artifact; publishing a release with them
-    # is the maintainer's step (orchestrator/runtime_layer/toolbox/prebuilt.json then pins their URL and sha256).
+    # CAP_SETGID). The tools and their SHA256SUMS are uploaded as a workflow artifact for inspection only: util-linux
+    # setpriv is C and never a release asset; the framework's own Rust llmcf-setpriv is (release-tools.yml).
     name: Runtime layer tools (Linux, real static busybox and setpriv)
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -156,6 +156,34 @@ jobs:
           while [ "$dir" != "/" ]; do dir="$(dirname "$dir")"; sudo chmod o+x "$dir"; done
           sudo chmod -R o+rX "$GITHUB_WORKSPACE"
           sudo -E env "PATH=$PATH" "LLMCF_TEST_TOOLBOX=$RUNNER_TEMP/runtime-toolbox" \
+            "$(command -v python)" -m pytest -ra tests/test_runtime_layer.py tests/test_stage_user.py
+
+      - name: Build llmcf-setpriv (static musl, the toolchain of rust/rust-toolchain.toml)
+        # The framework's own Rust uid switch (rust/llmcf-setpriv): linked with rust-lld and the toolchain's own
+        # musl, no C cross toolchain; refused when it is not static
+        working-directory: rust
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+        run: |
+          cargo build --release --locked -p llmcf-setpriv --target x86_64-unknown-linux-musl
+          bin=target/x86_64-unknown-linux-musl/release/llmcf-setpriv
+          if readelf -lW "$bin" | grep -q 'program interpreter'; then echo "llmcf-setpriv is not static" >&2; exit 1; fi
+          cp "$bin" "$RUNNER_TEMP/llmcf-setpriv-amd64"
+
+      - name: llmcf-setpriv's switch on the real kernel (its own tests, as root)
+        # Drops to an unprivileged account and checks the ids, the groups, the capability sets and that becoming
+        # root again fails; the test binaries run through sudo
+        working-directory: rust
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: sudo -E
+        run: cargo test --locked -p llmcf-setpriv
+
+      - name: Runtime layer tests with llmcf-setpriv as the layer's uid switch (as root)
+        # The same real-kernel tests as above, with the static llmcf-setpriv in the layer's bin/setpriv: the runner's
+        # switch of the entrypoint and every stage switch of stage_user.sh go through it
+        run: |
+          sudo -E env "PATH=$PATH" "LLMCF_TEST_TOOLBOX=$RUNNER_TEMP/runtime-toolbox" \
+            "LLMCF_TEST_LAYER_SETPRIV=$RUNNER_TEMP/llmcf-setpriv-amd64" \
             "$(command -v python)" -m pytest -ra tests/test_runtime_layer.py tests/test_stage_user.py
 
       - name: Upload the tools and their SHA256SUMS

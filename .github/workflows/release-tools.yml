@@ -1,0 +1,136 @@
+name: Release tools
+
+# The framework's own static Rust tools (the Cargo workspace rust/: llmcf-setpriv, and llmcf-install once it is
+# there) as release assets of this repository: each built static for x86_64, aarch64 and armv7 (musl, linked with
+# rust-lld and the toolchain's own musl, the toolchain of rust/rust-toolchain.toml), checked static, listed in
+# SHA256SUMS, given a GitHub artifact attestation (build provenance, signed keyless through the workflow's OIDC
+# identity: no secret key anywhere) and uploaded to the GitHub release of the tag. It runs on a pushed tag
+# tools-v<version> only, never on a push to a branch; tagging is the maintainer's step. The runtime layer's way
+# "fetch" takes llmcf-setpriv-<version>-<arch> only after its URL and sha256 are entered into
+# orchestrator/runtime_layer/toolbox/prebuilt.json.
+
+on:
+  push:
+    tags:
+      - "tools-v*"
+
+permissions: {}
+
+concurrency:
+  group: release-tools-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build the static tools (x86_64, aarch64, armv7)
+    if: startsWith(github.ref, 'refs/tags/tools-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The version of the tag
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#tools-v}"
+          if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "The tag $TAG is not tools-v<major>.<minor>.<patch>" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Unit tests
+        working-directory: rust
+        run: cargo test --locked --workspace
+
+      - name: Build every tool for the three targets
+        working-directory: rust
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+          CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_LINKER: rust-lld
+        run: |
+          set -eu
+          # every member of the workspace that is a real tool (a placeholder crate says so in its first line)
+          tools=""
+          for crate in llmcf-setpriv llmcf-install; do
+            if [ -f "$crate/Cargo.toml" ] && ! head -n 1 "$crate/Cargo.toml" | grep -q '^# Placeholder'; then
+              tools="$tools $crate"
+            fi
+          done
+          [ -n "$tools" ] || { echo "No tool to release" >&2; exit 1; }
+          mkdir -p ../dist
+          for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl armv7-unknown-linux-musleabihf; do
+            arch="${target%%-*}"
+            for crate in $tools; do
+              cargo build --release --locked -p "$crate" --target "$target"
+              cp "target/$target/release/$crate" "../dist/$crate-$VERSION-$arch"
+            done
+          done
+
+      - name: Every tool is a static program
+        working-directory: dist
+        run: |
+          set -eu
+          for tool in llmcf-*; do
+            file "$tool"
+            if readelf -lW "$tool" | grep -q 'program interpreter'; then echo "$tool is not static" >&2; exit 1; fi
+            if readelf -dW "$tool" | grep -q '(NEEDED)'; then echo "$tool needs shared libraries" >&2; exit 1; fi
+          done
+          sha256sum llmcf-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Keep the tools for the release job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-tools
+          path: dist
+          if-no-files-found: error
+
+  release:
+    name: Attest and publish the release assets
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-tools
+          path: dist
+
+      - name: The files are the ones the build listed
+        working-directory: dist
+        run: sha256sum -c SHA256SUMS
+
+      - name: Build provenance attestation of every tool
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+
+      - name: Upload to the release of the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -eu
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --title "Static tools $VERSION" \
+              --notes "The framework's static Rust tools $VERSION (x86_64, aarch64, armv7; musl). Each file has its sha256 in SHA256SUMS and a build provenance attestation of this workflow."
+          fi
+          # never replaces an asset: a second run of the same tag fails here instead of changing a published file
+          gh release upload "$TAG" dist/llmcf-* dist/SHA256SUMS

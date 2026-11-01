@@ -21,9 +21,13 @@ runs the build, marked plainly "end folder unprotected".
 The toolbox (bin/busybox, bin/setpriv) is never a committed third-party binary. The person picks the way
 (TOOLBOX_WAYS, setting runtime_layer_toolbox, default "build"): "build" makes both from pinned source tarballs
 (BUILD_SOURCES, sha256 pinned here) in the framework's own builder image (orchestrator/runtime_layer/toolbox/
-Dockerfile) and caches the result; "fetch" takes prebuilt static binaries from pinned snapshot.debian.org URLs with the
-sha256 of the archive and of the extracted binary (PREBUILT). Offline with nothing cached the build is refused with a
-plain message naming both ways (ToolboxMissing).
+Dockerfile) and caches the result; "build-rust" builds busybox the same way and the framework's own Rust uid switch
+llmcf-setpriv (rust/llmcf-setpriv: exactly the setpriv options the layer uses) from this repository in a pinned Rust
+builder image (toolbox/Dockerfile.rust); "fetch" takes prebuilt static binaries from the one pinned table (PREBUILT):
+busybox from snapshot.debian.org with the sha256 of the archive and of the extracted binary, setpriv only as
+llmcf-setpriv, a release asset of this project built by its CI (a prebuilt C setpriv is never taken). The toolbox
+record says which setpriv it holds (SETPRIV_KINDS). Offline with nothing cached the build is refused with a plain
+message naming the ways (ToolboxMissing).
 
 Before every build the assembled layer (<cache>/runtime-layer/current) is checked file by file against the shipped
 copy (layer_check, a fixed vocabulary of verdicts); a changed layer refuses the build and Mojo Miracle restores it
@@ -63,16 +67,30 @@ ENTRYPOINT = [f"{LAYER_MOUNT}/bin/busybox", "sh", f"{LAYER_MOUNT}/entrypoint.sh"
 CLEANUP_ENTRYPOINT = [f"{LAYER_MOUNT}/bin/busybox", "sh", f"{LAYER_MOUNT}/cleanup.sh"]
 MODULES_IN_IMAGE = "/app/modules"
 
-# --- Where the toolbox comes from (DECISIONS: both ways, the person picks, default local build) ---------------------
-TOOLBOX_WAYS = ("build", "fetch")
+# --- Where the toolbox comes from (the person picks, default the local build) ---------------------------------------
+TOOLBOX_WAYS = ("build", "build-rust", "fetch")
 DEFAULT_TOOLBOX_WAY = "build"
+# Which setpriv a toolbox holds: util-linux's (C, only ever built on this computer) or the framework's own Rust
+# llmcf-setpriv (built here, or fetched as a release asset of this project); the way decides it
+SETPRIV_KINDS = ("util-linux", "llmcf-setpriv")
+WAY_SETPRIV = {"build": "util-linux", "build-rust": "llmcf-setpriv", "fetch": "llmcf-setpriv"}
 # The framework's builder image: a pinned base (the same digest as the framework's own image) and pinned sources
 BUILDER_BASE = "debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f"
 BUILDER_DOCKERFILE = SHIPPED_DIR / "toolbox" / "Dockerfile"
 BUILDER_TAG = "llm-framework/runtime-toolbox-builder:2"
+# The builder image of llmcf-setpriv (way "build-rust"): the Rust toolchain of rust/rust-toolchain.toml on a pinned
+# base, over the workspace rust/ of this repository (its crates checked by Cargo.lock's sha256)
+RUST_BUILDER_BASE = ("rust:1.97.0-slim-trixie@sha256:"
+                     "686a437ead83701e8f871e66e838c3ec55f46b5fc235b025756396ac823bdc51")
+RUST_BUILDER_DOCKERFILE = SHIPPED_DIR / "toolbox" / "Dockerfile.rust"
+RUST_BUILDER_TAG = "llm-framework/runtime-toolbox-rust-builder:1"
+RUST_WORKSPACE = SHIPPED_DIR.parents[1] / "rust"
 # The toolbox record's version: a cached toolbox of another version is made again (version 2: musl instead of glibc,
-# whose static programs still loaded the host's NSS modules and crashed on Ubuntu).
-TOOLBOX_VERSION = 2
+# whose static programs still loaded the host's NSS modules and crashed on Ubuntu; version 3: the record names its
+# setpriv). A version-2 record is read as what it is, a util-linux setpriv of the musl recipe (read_toolbox), so an
+# offline computer keeps its tools.
+TOOLBOX_VERSION = 3
+READABLE_OLD_VERSIONS = {2: "util-linux"}
 BUILD_SOURCES: Dict[str, Dict[str, str]] = {
     "util-linux": {"url": "https://cdn.kernel.org/pub/linux/utils/util-linux/v2.40/util-linux-2.40.4.tar.xz",
                    "sha256": "5c1daf733b04e9859afdc3bd87cc481180ee0f88b5c0946b16fdec931975fb79",
@@ -88,16 +106,35 @@ BUILD_SOURCES: Dict[str, Dict[str, str]] = {
 }
 # Prebuilt static programs of the way "fetch": ONE pinned table in the repository (orchestrator/runtime_layer/toolbox/
 # prebuilt.json), per tool and architecture its URL and sha256. Debian's busybox-static is static and pinned there.
-# Debian ships no static util-linux setpriv (its setpriv links libc and libcap-ng, which would load from the image);
-# its proposed source is a release asset of this project built by its own CI, and while the table holds no entry for
-# setpriv the way "fetch" refuses and names the way "build" (PREBUILT_MISSING). The table is read, never written, here.
+# A prebuilt setpriv is taken only as the framework's own Rust llmcf-setpriv, a release asset of this project built by
+# its CI (.github/workflows/release-tools.yml on a tag tools-v<version>): kind "file", named
+# llmcf-setpriv-<version>-<arch> and fetched from this project's releases; util-linux setpriv is C and is only ever
+# built on this computer. While the table holds no such entry (no release yet) the way "fetch" refuses and names the
+# ways that build here (PREBUILT_MISSING). The table is read, never written, here.
 PREBUILT_TABLE = SHIPPED_DIR / "toolbox" / "prebuilt.json"
 PREBUILT_KINDS = ("deb", "file")
+RELEASES = "https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/releases/download/tools-v"
+# The release assets' architecture names (Rust's) for the toolbox's (Debian's)
+RELEASE_ARCH = {"amd64": "x86_64", "arm64": "aarch64"}
+
+
+def release_asset(version: str, arch: str) -> str:
+    """The name of llmcf-setpriv's release asset of `version` for the toolbox architecture `arch` (amd64, arm64)."""
+    return f"llmcf-setpriv-{version}-{RELEASE_ARCH.get(arch, arch)}"
+
+
+def _setpriv_pin_ok(arch: str, pin: Dict[str, str]) -> bool:
+    """Whether a setpriv pin is llmcf-setpriv from this project's releases: the program itself (kind "file"), its
+    asset name for this architecture, under the release of the same version."""
+    m = re.fullmatch(r"llmcf-setpriv-([0-9]+\.[0-9]+\.[0-9]+)-([a-z0-9_]+)", pin.get("name", ""))
+    return bool(m and pin.get("kind") == "file" and m.group(2) == RELEASE_ARCH.get(arch)
+                and pin["url"] == f"{RELEASES}{m.group(1)}/{pin['name']}")
 
 
 def read_prebuilt(path: Path = PREBUILT_TABLE) -> Dict[str, Dict[str, Dict[str, str]]]:
     """The pinned table of the way "fetch": {tool: {arch: pin}}; a pin that lacks its url, sha256 (and for a Debian
-    package its archive_sha256 and member) or has an unknown kind is left out, so it is never fetched."""
+    package its archive_sha256 and member) or has an unknown kind is left out, so it is never fetched, and so is a
+    setpriv pin that is not llmcf-setpriv from this project's releases (_setpriv_pin_ok)."""
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -113,16 +150,18 @@ def read_prebuilt(path: Path = PREBUILT_TABLE) -> Dict[str, Dict[str, Dict[str, 
             if kind not in PREBUILT_KINDS or not all(pin.get(k) for k in needed) \
                     or not pin["url"].startswith("https://") or not re.fullmatch(r"[0-9a-f]{64}", pin["sha256"]):
                 continue
+            if tool == "setpriv" and not _setpriv_pin_ok(str(arch), pin):
+                continue
             table[tool][str(arch)] = pin
     return table
 
 
 PREBUILT: Dict[str, Dict[str, Dict[str, str]]] = read_prebuilt()
-PREBUILT_MISSING = ("No prebuilt static setpriv is pinned for this computer yet (Debian ships none: its setpriv would "
-                    "load libraries from the image; the proposed source is a release of this project, which is not "
-                    "published yet), so the way 'fetch' cannot make the runtime layer's tools. Use the way 'build' "
-                    "(setting runtime_layer_toolbox 'build', the default): the framework builds busybox and setpriv "
-                    "itself from pinned sources.")
+PREBUILT_MISSING = ("No release of llmcf-setpriv is pinned for this computer yet (no release yet): a prebuilt setpriv "
+                    "comes only as the framework's own Rust program llmcf-setpriv from a release of this project built "
+                    "by its CI, never as util-linux setpriv. So the way 'fetch' cannot make the runtime layer's tools. "
+                    "Use the way 'build' (setting runtime_layer_toolbox 'build', the default) or 'build-rust': the "
+                    "framework builds busybox and setpriv itself from pinned sources.")
 
 # --- Fixed vocabulary of the layer check (what Mojo, the CLI, the GUI, the audit log and an AI read) -----------------
 VERDICTS = ("intact", "missing", "changed", "shipped_changed", "no_toolbox", "toolbox_changed")
@@ -140,10 +179,11 @@ VERDICT_TEXT = {
 RESTORE_WAY = "Mojo Miracle restores it from the shipped copy."
 # The next step of a changed layer (orchestrator/utils/next_steps): Mojo Miracle, in the CLI, the GUI and for an AI
 RESTORE_STEP = "mojo.miracle"
-TOOLBOX_WAY_TEXT = ("Two ways: the framework builds them itself from pinned sources (setting runtime_layer_toolbox "
-                    "'build', the default; needs the network once), or it fetches pinned prebuilt files (setting "
-                    "runtime_layer_toolbox 'fetch': busybox from snapshot.debian.org, setpriv from a pinned release "
-                    "once one is published). Then they are kept and used offline.")
+TOOLBOX_WAY_TEXT = ("Three ways: the framework builds them itself from pinned sources (setting runtime_layer_toolbox "
+                    "'build', the default, with util-linux setpriv; or 'build-rust', with the framework's own Rust "
+                    "llmcf-setpriv; both need the network once), or it fetches pinned prebuilt files (setting "
+                    "runtime_layer_toolbox 'fetch': busybox from snapshot.debian.org, llmcf-setpriv from a pinned "
+                    "release of this project once one is published). Then they are kept and used offline.")
 OFFLINE_REFUSAL = ("The build is refused: offline mode is on and the runtime layer's tools (a static busybox and a "
                    "static setpriv) are not on this computer yet. " + TOOLBOX_WAY_TEXT)
 OWN_RUNNER_NOTE = ("This target ships its own stage runner ({names}); it is ignored and the framework's stage runner "
@@ -274,7 +314,10 @@ def layer_dir(cache_dir: Path) -> Path:
 
 
 def read_toolbox(folder: Path) -> Optional[Dict[str, Any]]:
-    """The toolbox record ({way, arch, sha256: {tool: digest}}) when the folder holds a complete toolbox."""
+    """The toolbox record ({way, arch, sha256: {tool: digest}, setpriv, version}) when the folder holds a complete
+    toolbox of the current recipe. A record of version 2 (before the record named its setpriv) holds the musl
+    util-linux setpriv of the way 'build' (the only setpriv any way could make then) and is read as such; any other
+    version is not used, so the toolbox is made again."""
     try:
         record = json.loads((Path(folder) / TOOLBOX_RECORD).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -282,16 +325,30 @@ def read_toolbox(folder: Path) -> Optional[Dict[str, Any]]:
     digests = record.get("sha256") if isinstance(record, dict) else None
     if not isinstance(digests, dict) or record.get("way") not in TOOLBOX_WAYS + ("test",):
         return None
-    if record.get("way") != "test" and record.get("version") != TOOLBOX_VERSION:
-        return None   # made before the current recipe (e.g. glibc-linked): made again
+    if record.get("way") != "test":
+        version = record.get("version")
+        if version in READABLE_OLD_VERSIONS and "setpriv" not in record:
+            record = {**record, "setpriv": READABLE_OLD_VERSIONS[version]}
+        elif version != TOOLBOX_VERSION:
+            return None   # made before the current recipe (e.g. glibc-linked): made again
+        if record.get("setpriv") not in SETPRIV_KINDS:
+            return None
     if any(not re.fullmatch(r"[0-9a-f]{64}", str(digests.get(t, ""))) or not (Path(folder) / t).is_file()
            for t in TOOLS):
         return None
     return record
 
 
-def write_toolbox(folder: Path, way: str, files: Dict[str, Path], sources: Dict[str, Any]) -> Dict[str, Any]:
-    """Puts the made toolbox `files` ({tool: path}) into `folder` with its record and returns the record."""
+def toolbox_setpriv(record: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Which setpriv a toolbox record holds (SETPRIV_KINDS), None without a record or for a test toolbox."""
+    kind = (record or {}).get("setpriv")
+    return kind if kind in SETPRIV_KINDS else None
+
+
+def write_toolbox(folder: Path, way: str, files: Dict[str, Path], sources: Dict[str, Any],
+                  setpriv: Optional[str] = None) -> Dict[str, Any]:
+    """Puts the made toolbox `files` ({tool: path}) into `folder` with its record and returns the record; `setpriv`
+    (SETPRIV_KINDS) is the setpriv it holds, by default the one the way makes (WAY_SETPRIV)."""
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
     digests = {}
@@ -302,7 +359,8 @@ def write_toolbox(folder: Path, way: str, files: Dict[str, Path], sources: Dict[
         os.chmod(tmp, 0o555)
         os.replace(tmp, target)
         digests[tool] = sha256_file(target)
-    record = {"way": way, "arch": folder.name, "sha256": digests, "sources": sources, "version": TOOLBOX_VERSION}
+    record = {"way": way, "arch": folder.name, "sha256": digests, "sources": sources, "version": TOOLBOX_VERSION,
+              "setpriv": setpriv or WAY_SETPRIV.get(way, "util-linux")}
     (folder / TOOLBOX_RECORD).write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return record
 
@@ -412,14 +470,16 @@ def cache_dir_of(config: Any, resolve: Optional[Callable[[str], Any]] = None) ->
 
 def layer_status(cache_dir: Path, config: Any = None, platform_name: Optional[str] = None) -> Dict[str, Any]:
     """What the CLI, the GUI, Mojo and an AI read about the runtime layer here, labels only: the layer's verdict
-    (VERDICTS) and its text, the chosen toolbox way and the way the cached toolbox was made, whether the way 'fetch'
-    has every pinned tool for this machine, and whether this host's mounts protect the end folder."""
+    (VERDICTS) and its text, the chosen toolbox way and the way the cached toolbox was made, which setpriv it holds
+    (SETPRIV_KINDS), whether the way 'fetch' has every pinned tool for this machine, and whether this host's mounts
+    protect the end folder."""
     check = layer_check(cache_dir)
     record = read_toolbox(toolbox_dir(cache_dir))
     arch = machine()
     return {"verdict": check.verdict, "names": label_names(check.names), "text": check.text,
             "toolbox_way": toolbox_way(config) if config is not None else DEFAULT_TOOLBOX_WAY,
             "toolbox_made": (record or {}).get("way") or None,
+            "toolbox_setpriv": toolbox_setpriv(record),
             "fetch_ready": all(PREBUILT.get(t, {}).get(arch) for t in TOOLS),
             "end_folder": "protected" if mounts_keep_owners(platform_name) else "unprotected"}
 
@@ -430,7 +490,11 @@ def ensure_toolbox(cache_dir: Path, way: str, *, offline: bool,
                    log: Callable[[str], None] = lambda _t: None) -> Dict[str, Any]:
     """The toolbox record for this computer, making the toolbox the person's way when none is cached. `fetch(url)`
     returns the bytes of a pinned URL (through the framework's checked downloader); `build(work)` builds both tools
-    in the builder image and returns their paths. Offline with nothing cached: ToolboxMissing (OFFLINE_REFUSAL)."""
+    in the builder image and returns their paths, `build(work, setpriv="llmcf-setpriv")` for the way "build-rust".
+    Offline with nothing cached: ToolboxMissing (OFFLINE_REFUSAL). A toolbox made here replaces the tools an
+    assembled layer still holds when that layer was whole for the old record (the shipped scripts and the tools it
+    named): it is assembled again from the shipped copy and the new tools. Any other layer is left for ready_layer,
+    which refuses it as 'changed' (never replaced silently)."""
     folder = toolbox_dir(cache_dir)
     record = read_toolbox(folder)
     if record is not None:
@@ -439,6 +503,42 @@ def ensure_toolbox(cache_dir: Path, way: str, *, offline: bool,
         raise ToolboxMissing(OFFLINE_REFUSAL)
     if way not in TOOLBOX_WAYS:
         way = DEFAULT_TOOLBOX_WAY
+    was_whole = _layer_whole_for_old_record(cache_dir)
+    record = _make_toolbox(cache_dir, way, fetch, build, log)
+    if was_whole:
+        # the assembled layer held exactly the shipped scripts and the tools of the old record (an older recipe):
+        # it is assembled again with the new tools. Any other layer (changed by hand, or tools no record names) is
+        # never replaced silently here: ready_layer refuses it as 'changed' and Mojo Miracle restores it.
+        log("Runtime layer: assembling the layer again with the new tools ...")
+        assemble(cache_dir)
+    return record
+
+
+def _layer_whole_for_old_record(cache_dir: Path) -> bool:
+    """Whether the assembled layer is exactly the shipped scripts plus the tools the toolbox's present record names
+    (also a record of an older recipe that read_toolbox no longer takes): only such a layer is assembled again after
+    the toolbox is made anew."""
+    folder = layer_dir(cache_dir)
+    if not folder.is_dir() or folder.is_symlink() or shipped_problems():
+        return False
+    try:
+        old = json.loads((toolbox_dir(cache_dir) / TOOLBOX_RECORD).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    digests = old.get("sha256") if isinstance(old, dict) else None
+    if not isinstance(digests, dict) or any(not re.fullmatch(r"[0-9a-f]{64}", str(digests.get(t, "")))
+                                            for t in TOOLS):
+        return False
+    expected = {name: digest for name, digest in read_manifest().items() if name in SCRIPTS}
+    expected.update({f"bin/{tool}": str(digests[tool]) for tool in TOOLS})
+    return not _layer_changes(folder, expected)
+
+
+def _make_toolbox(cache_dir: Path, way: str, fetch: Optional[Callable[[str], bytes]],
+                  build: Optional[Callable[..., Dict[str, Path]]], log: Callable[[str], None]) -> Dict[str, Any]:
+    """Makes the toolbox `way` (TOOLBOX_WAYS) in a fresh working folder and writes it with its record."""
+    folder = toolbox_dir(cache_dir)
+    setpriv = WAY_SETPRIV[way]
     work = Path(cache_dir) / "runtime-layer" / "work"
     _remove_work(work)
     work.mkdir(parents=True, exist_ok=True)
@@ -469,15 +569,22 @@ def ensure_toolbox(cache_dir: Path, way: str, *, offline: bool,
             if build is None:
                 raise ToolboxMissing("The container engine is not available, so the runtime layer's tools cannot be "
                                      "built. " + TOOLBOX_WAY_TEXT)
-            log("Runtime layer: building a static busybox and a static setpriv from pinned sources (once) ...")
-            files = build(work)
-            sources = {tool: {"way": "build", "source": BUILD_SOURCES["util-linux" if tool == "setpriv"
-                                                                     else "busybox"]["url"]} for tool in TOOLS}
+            if setpriv == "llmcf-setpriv":
+                log("Runtime layer: building a static busybox from pinned sources and the framework's static "
+                    "llmcf-setpriv (once) ...")
+                files = build(work, setpriv=setpriv)
+            else:
+                log("Runtime layer: building a static busybox and a static setpriv from pinned sources (once) ...")
+                files = build(work)
+            sources = {"busybox": {"way": way, "source": BUILD_SOURCES["busybox"]["url"]},
+                       "setpriv": ({"way": way, "source": "rust/llmcf-setpriv (Cargo.lock)",
+                                    "builder": RUST_BUILDER_BASE} if setpriv == "llmcf-setpriv"
+                                   else {"way": way, "source": BUILD_SOURCES["util-linux"]["url"]})}
         for tool in TOOLS:
             data = Path(files[tool]).read_bytes()
             if not is_static_elf(data):
                 raise ToolboxMissing(f"The made {tool} is not a static program, so it was not kept. " + TOOLBOX_WAY_TEXT)
-        return write_toolbox(folder, way, files, sources)
+        return write_toolbox(folder, way, files, sources, setpriv=setpriv)
     except ValueError as e:
         raise ToolboxMissing(f"The runtime layer's tools could not be made: {e}. " + TOOLBOX_WAY_TEXT) from e
     finally:
@@ -505,33 +612,54 @@ def builder_context(work: Path, fetch: Callable[[str], bytes]) -> Path:
     return context
 
 
+def rust_context(work: Path) -> Path:
+    """The build context of llmcf-setpriv's builder image (way "build-rust"): its Dockerfile and the framework's Cargo
+    workspace rust/ (sources, Cargo.toml, Cargo.lock; never a build folder). The crates come in the image build by
+    Cargo.lock's sha256 (cargo build --locked)."""
+    if not (RUST_WORKSPACE / "Cargo.lock").is_file() or not (RUST_WORKSPACE / "llmcf-setpriv").is_dir():
+        raise ValueError("the framework's Rust workspace (rust/ with llmcf-setpriv) is not part of this installation")
+    context = Path(work) / "rust-context"
+    context.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(RUST_BUILDER_DOCKERFILE, context / "Dockerfile")
+    shutil.copytree(RUST_WORKSPACE, context / "rust", ignore=shutil.ignore_patterns("target", ".git"))
+    return context
+
+
 def engine_builder(client: Any, fetch: Callable[[str], bytes],
-                   log: Callable[[str], None] = lambda _t: None) -> Callable[[Path], Dict[str, Path]]:
-    """The 'build' way over the container engine `client` (docker-py): the builder image from builder_context, then
-    /out/busybox and /out/setpriv copied out of a container of it that never runs."""
-    def build(work: Path) -> Dict[str, Path]:
+                   log: Callable[[str], None] = lambda _t: None) -> Callable[..., Dict[str, Path]]:
+    """The ways 'build' and 'build-rust' over the container engine `client` (docker-py): the builder image from
+    builder_context (and for setpriv="llmcf-setpriv" also llmcf-setpriv's builder image from rust_context), then
+    /out/busybox and /out/setpriv copied out of a container of each that never runs."""
+    def build(work: Path, setpriv: str = "util-linux") -> Dict[str, Path]:
         context = builder_context(work, fetch)
         log("Runtime layer: building the builder image (pinned base, pinned sources) ...")
         image, _logs = client.images.build(path=str(context), tag=BUILDER_TAG, rm=True, pull=False)
+        made_in = {tool: image.id for tool in TOOLS}
+        if setpriv == "llmcf-setpriv":
+            rust = rust_context(work)
+            log("Runtime layer: building llmcf-setpriv in its builder image (pinned base, Cargo.lock) ...")
+            rust_image, _logs = client.images.build(path=str(rust), tag=RUST_BUILDER_TAG, rm=True, pull=False)
+            made_in["setpriv"] = rust_image.id
         from orchestrator.utils.docker_engine import create_container
-        container = create_container(client, image=image.id, command=["true"], network_disabled=True)
-        try:
-            files: Dict[str, Path] = {}
-            for tool in TOOLS:
-                stream, _info = container.get_archive(f"/out/{tool}")
-                with tarfile.open(fileobj=io.BytesIO(b"".join(stream))) as tar:
-                    member = tar.getmember(tool)
-                    handle = tar.extractfile(member)
-                    data = handle.read() if handle else b""
-                path = Path(work) / tool
-                path.write_bytes(data)
-                files[tool] = path
-            return files
-        finally:
+        files: Dict[str, Path] = {}
+        for image_id in dict.fromkeys(made_in.values()):
+            container = create_container(client, image=image_id, command=["true"], network_disabled=True)
             try:
-                container.remove(force=True)
-            except Exception:  # noqa: BLE001 - the copy is made; a left container is no harm
-                pass
+                for tool in (t for t in TOOLS if made_in[t] == image_id):
+                    stream, _info = container.get_archive(f"/out/{tool}")
+                    with tarfile.open(fileobj=io.BytesIO(b"".join(stream))) as tar:
+                        member = tar.getmember(tool)
+                        handle = tar.extractfile(member)
+                        data = handle.read() if handle else b""
+                    path = Path(work) / tool
+                    path.write_bytes(data)
+                    files[tool] = path
+            finally:
+                try:
+                    container.remove(force=True)
+                except Exception:  # noqa: BLE001 - the copy is made; a left container is no harm
+                    pass
+        return files
     return build
 
 
@@ -580,6 +708,15 @@ def layer_check(cache_dir: Path) -> LayerCheck:
     folder = layer_dir(cache_dir)
     if not folder.is_dir() or folder.is_symlink():
         return LayerCheck("missing", toolbox_way=record.get("way", ""))
+    changed = _layer_changes(folder, expected)
+    if changed:
+        return LayerCheck("changed", changed, record.get("way", ""))
+    return LayerCheck("intact", toolbox_way=record.get("way", ""))
+
+
+def _layer_changes(folder: Path, expected: Dict[str, str]) -> List[str]:
+    """The names of the assembled layer `folder` that differ from `expected` (name -> sha256): changed, missing,
+    extra, a link, or writable by others than the owner."""
     found: Dict[str, Path] = {}
     extra: List[str] = []
     for path in sorted(folder.rglob("*")):
@@ -599,9 +736,7 @@ def layer_check(cache_dir: Path) -> LayerCheck:
             if mode & 0o022:
                 changed.append(rel)
         changed = sorted(set(changed))
-    if changed:
-        return LayerCheck("changed", changed, record.get("way", ""))
-    return LayerCheck("intact", toolbox_way=record.get("way", ""))
+    return changed
 
 
 def assemble(cache_dir: Path) -> LayerCheck:
@@ -781,4 +916,6 @@ __all__ = ["BUILD_SOURCES", "BUILDER_BASE", "CLEANUP_ENTRYPOINT", "DEFAULT_TOOLB
            "is_static_elf", "layer_check", "layer_dir", "layer_volumes", "manifest_text", "mounts_keep_owners",
            "own_runner_note", "prepare_end_folder", "expected_files", "label_names", "layer_mode", "layer_names",
            "shipped_source", "read_manifest", "read_toolbox", "ready_layer",
-           "runner_owner_on_host", "shipped_problems", "stage_order", "toolbox_dir", "toolbox_way", "write_toolbox"]
+           "runner_owner_on_host", "shipped_problems", "stage_order", "toolbox_dir", "toolbox_way", "write_toolbox",
+           "PREBUILT_MISSING", "RELEASES", "RELEASE_ARCH", "RUST_BUILDER_BASE", "RUST_WORKSPACE", "SETPRIV_KINDS",
+           "TOOLBOX_VERSION", "WAY_SETPRIV", "release_asset", "rust_context", "toolbox_setpriv"]
