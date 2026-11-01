@@ -996,7 +996,7 @@ class BoardsWindow(BoardSteps, QDialog):
             return
         current, replaced = found
         dialog, form = _form_dialog(self, self._t("boards.settings.title", label=entry["label"]),
-                                    self._settings_text(current, profile))
+                                    self._settings_text(current, profile, entry["device_id"]))
         install = QComboBox(dialog)
         install.setObjectName("cmb_boards_install")
         install.addItem(self._t("boards.settings.opt_user"), "user")
@@ -1013,7 +1013,8 @@ class BoardsWindow(BoardSteps, QDialog):
         model.setPlaceholderText(self._t("boards.settings.model_hint"))
         kv = QComboBox(dialog)
         kv.setObjectName("cmb_boards_kv")
-        auto = current.changed(kv_cache=None).kv_choice(profile)
+        from orchestrator.runtime.device.steps import kv_choice_of
+        auto = kv_choice_of(current.changed(kv_cache=None), profile, self.state_dir, entry["device_id"])
         for kind in KV_CHOICES:
             text = self._t("boards.settings.kv_auto", kind=auto.kind, why=ui_text(
                 f"device.kv.why_{auto.why}", self.lang, free=auto.free_gib)) if kind == "auto" else \
@@ -1051,13 +1052,14 @@ class BoardsWindow(BoardSteps, QDialog):
                        "warning")
             return None
 
-    def _settings_text(self, current: Any, profile: Any) -> str:
+    def _settings_text(self, current: Any, profile: Any, device_id: str) -> str:
+        from orchestrator.runtime.device.steps import kv_choice_of
         t = self._t
         install = t("boards.settings.install_user") if current.install == "user" else \
             t("boards.settings.install_systemd", at=current.sudo_confirmed_at or t("boards.settings.not_set"))
         lines = [t("boards.settings.current", install=install, user=current.ssh_user or t("boards.settings.not_set"),
                    port=current.port, model=current.model or t("boards.settings.not_set"),
-                   kv=self._kv_text(current.kv_choice(profile)))]
+                   kv=self._kv_text(kv_choice_of(current, profile, self.state_dir, device_id)))]
         problems = current.problems(profile)
         if problems:
             lines.append(t("boards.settings.problems"))
@@ -1098,7 +1100,8 @@ class BoardsWindow(BoardSteps, QDialog):
         except Exception as e:  # noqa: BLE001 - the consent could not be written: nothing was changed
             self._info(self._t("boards.settings.consent_failed", reason=one_line(str(e))), "warning")
             return False
-        self._say(self._t("boards.settings.saved", label=entry["label"]) + "\n" + self._settings_text(new, profile))
+        self._say(self._t("boards.settings.saved", label=entry["label"]) + "\n"
+                  + self._settings_text(new, profile, device_id))
         self.reload()
         self.select(device_id)
         return True
@@ -1637,7 +1640,8 @@ class BoardsWindow(BoardSteps, QDialog):
             finally:
                 client.close()
             tested = self._record_tested_on(entry, profile, report, bench.digest if bench.allowed else None,
-                                            record["build_id"], source, settings.kv_choice(profile).kind)
+                                            record["build_id"], source,
+                                            steps.kv_choice_of(settings, profile, state, device_id).kind)
             return bench, report, tested
 
         def done(out: Any) -> None:
