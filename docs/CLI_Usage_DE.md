@@ -2448,6 +2448,11 @@ gemessenen Geschwindigkeiten, den KV-Cache der Messung (wie `llama-bench` ihn me
 des Boards eingestellt ist, und ob die Prüfungen bestanden. Das Deployment-Fenster zeigt den Build als
 „getestet auf <Board>“. Ein Modell, das kein Build dieses Frameworks gemacht hat, wird nirgends vermerkt.
 
+Derselbe kurze Benchmark misst das Board (seinen Speicher mit dem Modell); der Server des Boards nimmt Kontext,
+KV-Cache und Prompt-Cache aus dieser Messung. Ein Deployment ohne ihn sagt klar, dass das Board zuerst seine
+Messung braucht: Bis dahin startet das Startskript den Server nicht (Exit-Code 78), und die systemd-Unit bleibt
+gestoppt, statt es alle 10 Sekunden neu zu versuchen.
+
 Die Prüfzeilen enden mit der Temperatur des Boards während der Prüfungen (vor und nach dem kurzen Benchmark gelesen;
 siehe [Funktionen](Features_DE.md#laufzeit-auf-dem-board-selbst-gebautes-llamacpp)). Ein heißes Board bekommt eine
 Warnung mit dem, was hilft, und eine Zeile zu Mojo Oracle; es lässt keine Prüfung scheitern, der Exit-Code bleibt also
