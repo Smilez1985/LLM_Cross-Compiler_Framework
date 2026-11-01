@@ -209,5 +209,5 @@ def question(action: str, built: gen.BuiltBundle, board: str) -> str:
 
 
 __all__ = ["CHANGING_ACTIONS", "DEPLOY_QUESTION", "ROLLBACK_QUESTION", "UNINSTALL_QUESTION", "assignments",
-           "board_contact", "bundle_rows", "catalog_sources", "device_profile", "plan_for_device", "question", "run_on_board",
-           "runtime_for", "selection_from"]
+           "board_contact", "bundle_rows", "catalog_sources", "device_profile", "plan_for_device", "question",
+           "run_on_board", "runtime_for", "selection_from"]
