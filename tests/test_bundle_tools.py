@@ -224,3 +224,20 @@ def test_bundle_plan_never_builds_a_framework_program_for_an_ai(fw, device, monk
     assert built == []
     assert not out.plan["ok"]
     assert any("gateway" in p and "Board bundle window" in p for p in out.plan["problems"]), out.plan["problems"]
+
+
+def test_bundle_plan_never_packs_the_runtime_again_for_an_ai(fw, device, monkeypatch):
+    """Regression (review of the c16 integration: an AI's read-only bundle_plan with a vision block asked
+    runtime_for for the current start script, so steps.ensure_package packed the board's runtime tarball again into
+    the framework's store): an AI's plan only reads; a package with an older start script is named as a problem and
+    the person's plan packs it again."""
+    from orchestrator.runtime.bundle import generator as gen, service
+    asked = []
+
+    def runtime_for(state_dir, device_id, profile, source=None, project=None, current_script=False):
+        asked.append((project, current_script))
+        return gen.RuntimePackage(missing="not built in this test")
+    monkeypatch.setattr(service, "runtime_for", runtime_for)
+    allow(fw, "bundle_plan")
+    call(fw, "bundle_plan", {"device_id": device.device_id, "blocks": ["vision-mmproj"]})
+    assert asked == [(None, False)], asked
