@@ -369,6 +369,24 @@ def test_damaged_settings_are_set_again_after_a_question_with_the_file(qapp, win
     assert "user as not set" in window.table.item(0, 9).text()
 
 
+def test_the_settings_name_the_kv_cache_of_the_boards_measurement(qapp, window, monkeypatch):
+    """Regression (the probe's guess before): the Boards window's settings text names the measured KV-cache type, as
+    the deploy takes it (steps.kv_choice_of)."""
+    from test_board_measure import record
+    from orchestrator.runtime.device import measure
+    from orchestrator.runtime.device.person_steps import load_settings
+    state = state_of(window)
+    store = stored(state)
+    measure.save(state, "0123456789abcdef", record())
+    window.reload()
+    Boxes(monkeypatch, answer="yes")
+    entry = window.entries[0]
+    current = load_settings(store, "0123456789abcdef")
+    assert window.change_settings(entry, RK3566, current, {"port": 8090}) is True
+    text = " ".join(window.output.toPlainText().split())
+    assert "from the board's measurement" in text, text
+
+
 def test_settings_refusals_are_the_clis(qapp, window, monkeypatch):
     from orchestrator.runtime.device.person_steps import load_settings
     from orchestrator.runtime.profile import ProfileStore

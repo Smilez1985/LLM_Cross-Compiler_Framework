@@ -6770,7 +6770,8 @@ def device_settings(ctx: FrameworkContext, device_name: str, install: Optional[s
     console.print(f"SSH user: {escape(current.ssh_user or 'not set (--user)')}")
     console.print(f"Port: {current.port}")
     console.print(f"Model for the systemd unit: {escape(current.model or 'not set')}")
-    console.print(f"KV cache: {escape(_kv_text(ctx, current.kv_choice(profile)))}")
+    from orchestrator.runtime.device.steps import kv_choice_of
+    console.print(f"KV cache: {escape(_kv_text(ctx, kv_choice_of(current, profile, _state, device_id)))}")
     for problem in current.problems(profile):
         console.print(f"[yellow]{escape(problem)}[/yellow]")
 
@@ -7168,7 +7169,7 @@ def device_runtime_verify(ctx: FrameworkContext, device_name: str, ssh_user: Opt
     console.print(f"Device {device_id}, build {record['build_id'][:16]}:")
     _print_report(report, _config_language(ctx))
     _record_board_test(ctx, store, device_id, profile, report, digest if allowed else None, record["build_id"],
-                       source, settings.kv_choice(profile).kind)
+                       source, steps.kv_choice_of(settings, profile, state_dir, device_id).kind)
     if not report.ok:
         sys.exit(1)
 

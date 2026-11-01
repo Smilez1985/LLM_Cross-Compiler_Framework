@@ -91,8 +91,12 @@ def board_limits_of(state_dir: Path, device_id: str):
 
 def kv_choice_of(settings: Any, profile: Any, state_dir: Path, device_id: str):
     """The board server's KV-cache type (DeploySettings.kv_choice) with the board's measured limits when it was
-    measured: the one place the deploy (CLI, Boards window, the AI's deploy_device_runtime) takes it from."""
-    limits = board_limits_of(state_dir, device_id)
+    measured: the one place every caller takes it from, the deploy (CLI, Boards window, the AI's
+    deploy_device_runtime), the settings shown (`device settings`, the Boards window's Settings...) and the type
+    recorded with a board test. The limits are those for `settings`' own KV-cache choice (settings not saved yet, such
+    as the automatic choice offered in Settings..., are measured by their own choice)."""
+    from orchestrator.runtime.device import measure
+    limits = measure.board_limits(state_dir, device_id, getattr(settings, "kv_cache", None))
     return settings.kv_choice(profile, limits=limits) if limits is not None else settings.kv_choice(profile)
 
 

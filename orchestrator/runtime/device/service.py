@@ -460,7 +460,7 @@ def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: An
     steps.record_heat(state_dir, device.device_id, report.heat)   # for Mojo, until the next reading
     steps.record_measurement(state_dir, device.device_id, report)
     recorded = record_board_test(output_dirs, device, profile, report, digest, record["build_id"], source,
-                                 settings.kv_choice(profile).kind)
+                                 steps.kv_choice_of(settings, profile, state_dir, device.device_id).kind)
     smoke = report.check("smoke")
     bench = (smoke.data.get("bench") if smoke is not None else None) or []
     speeds = {("prompt_ts" if r.get("n_prompt") else "gen_ts"): r.get("avg_ts") for r in bench

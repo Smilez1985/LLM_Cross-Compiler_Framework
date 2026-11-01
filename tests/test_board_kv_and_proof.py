@@ -211,6 +211,29 @@ class TestKvCli:
         assert back.code == 0 and DeploySettings.from_dict(store.load_deploy_settings(device_id)).kv_cache is None
         assert invoke_plain("device", "settings", device_id, "--kv-cache", "q5_1").code == 2
 
+    def test_the_settings_name_the_kv_cache_of_the_boards_measurement(self):
+        """Regression (said the probe's guess before: `device settings` showed the automatic type from the board's
+        RAM although the board was measured, while the deploy took the measured one): every KV display takes
+        steps.kv_choice_of, as the deploy does."""
+        from test_board_measure import record
+        from test_cli_builds import invoke_plain
+        from orchestrator.runtime.device import measure
+        _store, device_id = tdr.stored_device()
+        measure.save(tdr.cli_state(), device_id, record())
+        shown = invoke_plain("device", "settings", device_id)
+        out = " ".join(shown.out.split())
+        assert shown.code == 0 and "KV cache: Automatic: q8_0 (from the board's measurement" in out, out
+
+
+def test_no_kv_display_guesses_past_the_measurement():
+    """The KV-cache type the person sees or that is recorded with a board test is the deploy's: steps.kv_choice_of
+    (the board's measurement when there is one), never DeploySettings.kv_choice(profile) on its own."""
+    import re
+    root = Path(__file__).resolve().parent.parent / "orchestrator"
+    for rel in ("cli.py", "runtime/device/service.py", "gui/boards_window.py"):
+        text = (root / rel).read_text(encoding="utf-8")
+        assert not re.search(r"\.kv_choice\(profile\)", text), rel
+
 
 # --- N3: "tested on board X" -----------------------------------------------------------------------------------------
 
