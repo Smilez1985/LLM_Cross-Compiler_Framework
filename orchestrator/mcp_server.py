@@ -247,7 +247,8 @@ def _client_label_text(ctx) -> str:
                             capabilities=())
     where = ", ".join(part for part in (label.transport, f"protocol {label.protocol}" if label.protocol else "")
                       if part)
-    return f"{label.name} {label.version}".strip() + (f" ({where})" if where else "")
+    front = f"{label.channel}: " if label.channel else ""   # the framework's own label of an ACP agent's server
+    return front + f"{label.name} {label.version}".strip() + (f" ({where})" if where else "")
 
 
 def _tool_context(ctx, caller: str = "mcp", instance: str = "") -> ToolContext:
@@ -585,11 +586,16 @@ class ClientLabel:
     transport: str                 # "stdio" or "http"
     elicitation: str               # how it can ask the person: "form", "url", "form+url" or "none"
     capabilities: Tuple[str, ...]  # the capabilities it declared, for the log
+    # The framework's channel label of a server it handed one of the person's ACP agents ("acp-client:<agent name>",
+    # tools/mcp_env.CHANNEL_ENV); "" for every other client. Set by the framework, still only a label.
+    channel: str = ""
 
     def describe(self) -> str:
-        """For a person: "Claude Code 2.1.295 (self-reported) over stdio"."""
+        """For a person: "Claude Code 2.1.295 (self-reported) over stdio", with the channel in front when the server
+        serves one of the framework's ACP agents ("acp-client:Gemini CLI: ...")."""
         version = f" {self.version}" if self.version else ""
-        return f"{self.name}{version} (self-reported) over {self.transport}"
+        front = f"{self.channel}: " if self.channel else ""
+        return f"{front}{self.name}{version} (self-reported) over {self.transport}"
 
 
 _CLIENT: "contextvars.ContextVar[Optional[ClientLabel]]" = contextvars.ContextVar("lcf_mcp_client", default=None)
@@ -671,12 +677,14 @@ class ClientTracker:
 
     def __init__(self, transport: str = "stdio", stream=None, caller: str = "mcp",
                  still_valid: Optional[Callable[[], bool]] = None,
-                 refused: Optional[Callable[[str, Any, str], None]] = None):
+                 refused: Optional[Callable[[str, Any, str], None]] = None, channel: str = ""):
         self.transport = transport
         self._stream = stream  # None: sys.stderr at the time of writing (stdio moves stdout there)
         self.default_caller = caller
         self.still_valid = still_valid
         self.refused = refused
+        # "acp-client:<agent name>" for a stdio server the framework handed one of its ACP agents (mcp_env.CHANNEL_ENV)
+        self.channel = channel if transport == "stdio" else ""
         self._seen: set = set()
         self._lock = threading.Lock()
 
@@ -703,7 +711,8 @@ class ClientTracker:
                            protocol=_client_text(session.protocol_version or ctx.protocol_version or "", 32),
                            transport="http" if ctx.request is not None else self.transport,
                            elicitation=elicitation_modes(capabilities),
-                           capabilities=_capability_names(capabilities))
+                           capabilities=_capability_names(capabilities),
+                           channel=self.channel if ctx.request is None else "")
 
     def _note(self, label: ClientLabel, caller: str) -> None:
         with self._lock:
@@ -712,7 +721,8 @@ class ClientTracker:
             if len(self._seen) >= self.MAX_REMEMBERED:
                 self._seen.clear()
             self._seen.add((label, caller))
-        line = (f'MCP client: "{label.name}" {label.version or "-"} (self-reported), protocol {label.protocol}, '
+        front = f"{label.channel}: " if label.channel else ""
+        line = (f'MCP client: {front}"{label.name}" {label.version or "-"} (self-reported), protocol {label.protocol}, '
                 f"{label.transport}, caller {caller}, elicitation {label.elicitation}, capabilities: "
                 f"{', '.join(label.capabilities) or 'none'}")
         with contextlib.suppress(AttributeError, OSError, ValueError):
@@ -1336,7 +1346,7 @@ def closed_schema(model: type) -> Dict[str, Any]:
 
 def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespan=None, caller: str = "mcp",
                      transport: str = "stdio", still_valid: Optional[Callable[[], bool]] = None,
-                     events: bool = True):
+                     events: bool = True, channel: str = ""):
     """The MCP server for the registry. Each request's caller comes from ClientTracker: over stdio `caller` ("mcp"
     for the local stdio clients, "mcp:<name>" for LCF_MCP_TOKEN; `still_valid` ends it once that token is revoked
     or rotated), over HTTP the named token TokenAuth checked. Tools, resources and prompts the caller's permissions
@@ -1344,7 +1354,10 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
 
     `events`: the server owns a bus and publishes list changes and build updates on it, so `subscriptions/listen`
     is served (2026-07-28 clients; the handshake revisions advertise no list changes). Without events the server is
-    built with subscriptions=False and advertises none."""
+    built with subscriptions=False and advertises none.
+
+    `channel`: the framework's label of a stdio server it handed one of the person's ACP agents
+    ("acp-client:<agent name>", tools/mcp_env.CHANNEL_ENV): in front of the client's name in the log and the audit."""
     import anyio
     caller = caller if transport == "stdio" else UNCHECKED_CALLER
     import anyio.to_thread
@@ -1493,7 +1506,8 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
                            version=getattr(getattr(framework, "info", None), "version", "") or "",
                            lifespan=_session_lifespan(framework, registry, lifespan, caller, questions, publisher),
                            middleware=[ClientTracker(transport, caller=caller, still_valid=still_valid,
-                                                     refused=lambda *args: _audit_refused_call(registry, *args))],
+                                                     refused=lambda *args: _audit_refused_call(registry, *args),
+                                                     channel=channel)],
                            subscriptions=bus if bus is not None else False)
     server.open_questions = questions
     server.events = publisher
@@ -1814,16 +1828,19 @@ def stop_when_input_ends(server, stream) -> threading.Thread:
 
 
 def serve(framework, transport: str = "stdio", host: str = "127.0.0.1", port: int = 8765,
-          stdio_token: Optional[str] = None, container: bool = False) -> None:
+          stdio_token: Optional[str] = None, container: bool = False, channel: str = "") -> None:
     """Runs the server until the client (stdio) or the process (HTTP) ends it. The session's builds and jobs are
     cancelled by the lifespan; afterwards the framework is shut down, so nothing is left without an owner.
     `stdio_token`: the value of LCF_MCP_TOKEN (read and removed from the environment by the CLI before the framework
-    starts). ValueError when the server must not start."""
+    starts). `channel`: the value of LCF_MCP_CHANNEL (the framework's label of a server it handed one of its ACP
+    agents; stdio only). ValueError when the server must not start."""
     try:
         if transport == "stdio":
             caller, still_valid = stdio_caller(_token_store(framework), stdio_token) if stdio_token is not None \
                 else ("mcp", None)
-            server = build_mcp_server(framework, lifespan=_stdout_to_stderr, caller=caller, still_valid=still_valid)
+            from orchestrator.tools.mcp_env import checked_channel
+            server = build_mcp_server(framework, lifespan=_stdout_to_stderr, caller=caller, still_valid=still_valid,
+                                      channel=checked_channel(channel))
             _logging_to_stderr()
             stdout = sys.stdout
             try:

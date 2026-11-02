@@ -65,7 +65,9 @@ THIRD_PARTY_HOMES = {
     "rich": ("orchestrator.cli",),
     "mcp": ("orchestrator.mcp_server", "orchestrator.mcp"),
     "uvicorn": ("orchestrator.mcp_server", "orchestrator.mcp"),
-    "acp": ("orchestrator.acp_agent",),
+    # The Agent Client Protocol SDK: Ditto as an ACP agent (the CLI adapter's `llm-cli acp`) and the ACP client that
+    # runs the person's own agents (Core/acp_client.py, the only Core module that imports it, lazily).
+    "acp": ("orchestrator.acp_agent", "orchestrator.Core.acp_client"),
     "paramiko": ("orchestrator.utils.ssh_trust", "orchestrator.remote.transport"),
 }
 # Inside the domain: the language-model layer and the knowledge base are used by the Core and never import it.

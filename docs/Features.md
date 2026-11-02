@@ -1,4 +1,4 @@
-Version 3.3.0 · Last updated 2026-10-31
+Version 3.3.0 · Last updated 2026-11-02
 
 **English** · [Deutsch](Features_DE.md)
 
@@ -26,6 +26,7 @@ Back to the [README](../README.md) · All commands: [CLI_Usage.md](CLI_Usage.md)
 - [Local runtime and model tiers](#local-runtime-and-model-tiers)
 - [Knowledge base (RAG)](#knowledge-base-rag)
 - [Deep Ingest](#deep-ingest)
+- [ACP agents you pick](#acp-agents-you-pick)
 - [MCP server](#mcp-server)
 - [Tool permissions and audit log](#tool-permissions-and-audit-log)
 - [Secrets and personal state](#secrets-and-personal-state)
@@ -2102,6 +2103,36 @@ same crawler with the same opt-out checks as the GUI, as a job.
   that is saved at once), when `LLM_FRAMEWORK_NO_AUDIO` is set (to anything but empty, `0`, `false`, `no` or
   `off`), under CI (`CI` set in the same way), in an SSH session without a display, and on Linux
   without a display (no `DISPLAY` or `WAYLAND_DISPLAY`).
+
+---
+
+## ACP agents you pick
+
+Beside Ditto you can chat with external coding agents (Claude Agent, Codex, Gemini CLI and the other agents of the ACP
+registry, or a program you name yourself) that speak the Agent Client Protocol. The framework starts the agent when you
+send it your first message and gives it the framework's own tools: every action it takes goes through your tool
+permissions, the approvals and the audit log, as for any AI app over MCP. Ditto stays the default of the chat.
+
+- **Ditto > Agents...** lists your agents (distribution, version, where it came from, whether it needs the internet,
+  the variables of its keys). **Fetch the registry** reads the ACP registry, only on that click; pick an agent and
+  **Add the selected agent...**: you see its name, description, distribution, licence, the exact command, the
+  download and its checksum before you say yes ("No" is the default). Or add **your own command** (the program, its
+  arguments, whether it works without the internet, the variables of its keys).
+- npx and uvx agents run with the exact version the registry names, through the Node.js or uv on this computer. A
+  binary is downloaded over HTTPS only with the registry's checksum; without one it is not downloaded.
+- **Sign in...** uses the agent's own sign-in: its browser login (your provider's sign-in and second factor), its own
+  login in a console window, or keys you store in the credential vault. **Store a key...** stores one key; it goes only
+  to that agent.
+- In the chat panel, **Chat with:** picks the agent. Its answer streams in a box below the chat (its thoughts behind a
+  button, tool calls with their status, the plan); **Stop** ends its turn; the whole answer then becomes its bubble.
+- When the agent asks before a step, the framework's own dialog asks you: **Allow once** or **Reject** ("Reject" is the
+  default). An "always" of the agent is never chosen; **Standing approvals...** opens the framework's approvals.
+- Each agent gets a clean environment (the system basics and its own keys only) and works in its own folder under the
+  framework home; it gets no access to files or a terminal from the framework. Offline mode refuses an agent that needs
+  the internet. Closing the chat panel or the application stops the agents it started.
+- **Remove...** lists the agent's folders and its entry ("No" is the default) and takes its keys from the vault.
+- At the terminal: `llm-cli agents list|search|add|remove|login|run` ([CLI](CLI_Usage.md#agents)). An AI can never
+  add, sign in or start an agent.
 
 ---
 

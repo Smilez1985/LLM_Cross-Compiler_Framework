@@ -1,4 +1,4 @@
-Version 3.3.0 · Last updated 2026-10-30
+Version 3.3.0 · Last updated 2026-11-02
 
 **English** · [Deutsch](CLI_Usage_DE.md)
 
@@ -26,6 +26,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [deploy](#deploy): `list-artifacts`, `package`, `run`, `devices`, `ssh-config`
 - [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
+- [agents](#agents): `list`, `search`, `add`, `remove`, `login`, `run`
 - [mcp](#mcp): `serve`, `config`, `token add|list|rotate|revoke`
 - [acp](#acp): Ditto as an agent of editors (`config`, `servers`)
 - [secrets](#secrets): `set`, `list`
@@ -150,6 +151,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `ditto models list/download` | The model tiers for offline mode |
 | `ditto cache` / `ditto cache set` | The memory budget of Ditto's local server: prompt cache, keep time, KV cache |
 | `tools list` / `tools permissions` / `tools audit` | The framework tools, their permissions and the audit log |
+| `agents list/search/add/remove/login/run` | External ACP agents you pick (Claude Agent, Codex, Gemini CLI, your own program), run with the framework's tools |
 | `mcp serve` / `mcp config` | Run the MCP server / show how to connect AI clients |
 | `acp` / `acp config` / `acp servers` | Ditto as an agent of editors that speak ACP (the editor starts it) / show the editor entry / the MCP servers editors passed, with your consent per entry |
 | `secrets set` / `secrets list` | Store a token (Hugging Face, GitHub) / list the stored names |
@@ -1857,6 +1859,27 @@ is shown and nothing changes; after its text changes it must be read again.
 In the GUI: **Tools > Deep Ingest Notice...** shows the notice at any time; while it is still needed it asks you to
 confirm that you read it ("No" is the default) and records it with `via: gui` (actor `gui`). The module wizard's Deep
 Ingest shows it before the first crawl, also while the knowledge base is switched off.
+
+---
+
+## agents
+
+External ACP agents you pick, run with this framework's tools ([Features](Features.md#acp-agents-you-pick)). Every
+command that changes something is yours alone: an AI can never add, sign in or start an agent.
+
+| Command | What it does |
+|---|---|
+| `agents list [--json]` | Your agents: name, distribution, version, where it came from, whether it needs the internet, the variables of its keys |
+| `agents search [TEXT] [--refresh] [--json]` | Search the ACP registry as fetched last; `--refresh` fetches it now (HTTPS, refused in offline mode) |
+| `agents add ID [--kind npx\|uvx\|binary]` | Add a registry agent after it shows name, description, distribution, licence, the exact command, the download and its checksum and you say yes ("No" is the default); npx and uvx only with an exact version, a binary only with the registry's checksum |
+| `agents add --command PATH --name NAME [--arg A]... [--local] [--key VAR]...` | Add your own program (`--local`: it works without the internet and may start in offline mode; `--key`: a variable its key goes into) |
+| `agents login NAME [--method ID]` | Sign in with the agent's own sign-in: its browser login, its login command in this terminal, or keys asked hidden and stored in the credential vault |
+| `agents login NAME --key VAR` | Store one key for the agent (asked hidden, twice); it goes only to that agent, as `VAR` |
+| `agents remove NAME...` | Remove agents after the full list of their folders and entries ("No" is the default); their keys leave the vault |
+| `agents run NAME` | Chat with the agent in this terminal: its text and thoughts as they come, tool calls with status, the plan; its permission questions are asked here (allow once or reject, "No" default); Ctrl+C stops its turn, an empty line ends |
+
+The agent runs in its own folder under the framework home with a clean environment (the system basics and its own
+keys) and gets the framework's MCP server (`llm-cli mcp serve`) as its only tools.
 
 ---
 

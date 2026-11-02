@@ -57,9 +57,10 @@ _ENTRY_ID = re.compile(ENTRY_ID)
 WHAT = {"artifact": "built model", "model_file": "model file", "knowledge_snapshot": "knowledge snapshot",
         "module": "hardware module", "pack": "community pack", "runtime_build": "llama.cpp runtime build",
         "deploy_package": "device runtime package", "knowledge_store": "old knowledge base storage",
-        "build_dependency": "pinned build dependency", "bundle": "board bundle"}
+        "build_dependency": "pinned build dependency", "bundle": "board bundle",
+        "acp_agent": "ACP agent folder"}
 EntryKind = Literal["artifact", "model_file", "knowledge_snapshot", "module", "pack", "runtime_build",
-                    "deploy_package", "knowledge_store", "build_dependency", "bundle"]
+                    "deploy_package", "knowledge_store", "build_dependency", "bundle", "acp_agent"]
 # Names that keep their double suffix when a restored copy needs another name.
 _SUFFIXES = (".jsonl.gz", ".tar.gz", ".zip", ".gguf", ".rkllm", ".rknn", ".onnx", ".bin", ".safetensors")
 
