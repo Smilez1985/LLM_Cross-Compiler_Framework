@@ -49,6 +49,8 @@ EXPECTED_PAIRS: List[Tuple[str, str]] = [
     ("docs/Module_Developer_Guide.md", "docs/Module_Developer_Guide_DE.md"),
     ("docs/Container_Setup.md", "docs/Container_Setup_DE.md"),  # the framework in a container you build locally
     ("docs/Mojo.md", "docs/Mojo_DE.md"),  # the health check (Mojo Oracle and Mojo Miracle)
+    ("docs/research/ACP.md", "docs/research/ACP_DE.md"),  # research: the Agent Client Protocol and other ACPs
+    ("docs/research/MCP_vs_ACP.md", "docs/research/MCP_vs_ACP_DE.md"),  # research: MCP, ACP and A2A side by side
     ("configs/SSOT_ARCHITECTURE.md", "configs/SSOT_ARCHITECTURE_DE.md"),
     ("data/calibration/README.md", "data/calibration/README_DE.md"),
 ]
