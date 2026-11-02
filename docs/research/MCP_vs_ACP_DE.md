@@ -46,7 +46,7 @@ Verglichen werden drei Protokolle:
 | **SDKs** | Python `mcp` 2.3.0 (2026-10-02); eigenständiges FastMCP 4.1.5 (2026-11-01); weitere Sprachen vorhanden [9][10][11] | Python `agent-client-protocol` 0.12.1 (Vorabversion 1.0.0rc3); TypeScript und Rust 1.0 (angekündigt am 2026-06-25); Kotlin `acp` 0.34.0, Java `acp-core` 0.80.0 [30][31][49][50] | Python `a2a-sdk` 1.3.0 (2026-10-27); fünf produktive Sprachen: Python, JavaScript, Java, Go, .NET [35][37] |
 | **Governance** | Agentic AI Foundation (AAIF) unter der Linux Foundation seit 2025-12-09 [7][8] | Zed und JetBrains, Übergangsmodell, Stiftung geplant; kein AAIF-Projekt [23][51] | Linux-Foundation-Projekt seit 2025-06-23; AAIF-Projekt seit 2026-08-17 [34][36] |
 | **Reife** | Fünf Revisionen seit 2024-11-05; formale Abkündigungsregeln; 2026-07-28 war ein Umbau mit Brüchen [2][6][45] | v1 stabil, viele Funktionen 2026 stabilisiert; v2-Entwurf seit 2026-07-20 [22][27] | v1.0.0 am 2026-03-12, v1.0.1 am 2026-05-28 [33] |
-| **Verbreitung** | Breit; llmcf wird aus Claude Code, Claude Desktop und VS Code genutzt (Repo-Doku). Keine Zahl recherchiert | 49 Agenten; 21 Editoren und IDEs sowie etwa 130 weitere Clients gelistet; etwa 4,6k GitHub-Sterne [24][25][46] | Über 150 Organisationen (2026-04-09) [35] |
+| **Verbreitung** | Breit; llmcf wird aus Claude Code, Claude Desktop und VS Code genutzt (Repo-Doku). Keine Zahl recherchiert | 49 Agenten; 21 Editoren und IDEs sowie etwa 130 weitere Clients gelistet; etwa 4,6k GitHub-Sterne [24][25][46]. Android Studio Rabbit 2 (2026-10-28) lässt jeden „ACP-konformen Agenten“ wählen [53] | Über 150 Organisationen (2026-04-09) [35] |
 
 ---
 
@@ -214,3 +214,4 @@ Alle abgerufen am 2026-11-02.
 50. https://repo1.maven.org/maven2/com/agentclientprotocol/acp-core/maven-metadata.xml
 51. https://aaif.io/projects/
 52. https://pypi.org/pypi/acp-sdk/json
+53. https://developer.android.com/blog/posts/ai-agents-android-studio-integration

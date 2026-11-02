@@ -29,7 +29,7 @@ widely used ones is called "Agent Context Protocol".
 | Agent Communication Protocol | IBM Research / BeeAI | Agent-to-agent communication over REST (OpenAPI 0.2.0) [56][58] | Merged into **A2A** in August 2025. Repository archived 2025-08-27; SDK frozen at 1.0.3 since 2025-08-21 [59][60][61][63] |
 | Agent Connect Protocol | AGNTCY (Cisco-donated, Linux Foundation project since 2025-07-29 [78]) | REST interface to call and configure remote agents [69] | Repository archived 2026-04-11 [69] |
 | Agentic Commerce Protocol | OpenAI and Stripe | Checkout and orders between buyers, their agents and shops [68] | Beta. Unrelated to developer tools |
-| "Agent Context Protocol" | Small academic or personal projects | Multi-agent coordination, or a documentation convention [70][71][72][73] | Fewer than 130 GitHub stars each; no editor or client implements them |
+| "Agent Context Protocol" | Small academic or personal projects; also how heise (2026-10-30) names the ACP in Android Studio [85] | Multi-agent coordination, or a documentation convention [70][71][72][73] | Fewer than 130 GitHub stars each; no editor or client implements them |
 
 **This document focuses on the Agent Client Protocol.** Reasons:
 
@@ -265,6 +265,14 @@ Negotiated once in `initialize`. Anything not advertised counts as unsupported [
   2026-01-28 (Zed blog [49]; JetBrains blog January 2026 [52]; heise 2026-01-30 [53]). The ACP updates page dates
   "ACP Registry is Released" (RFD moved to Completed) to 2026-03-09 [28]. The registry showed 43 agents [33]; its
   JSON lists the distribution kinds `npx` (23 agents), `binary` (20) and `uvx` (2) [82].
+- **Android Studio** (Google, IntelliJ-based) added "Bring Your Own Agent" (BYOA) in **Android Studio Rabbit 2**
+  (2026.2.2), announced as stable on 2026-10-28 [83]. The person picks "an ACP-compliant agent" in the agent window
+  or under Settings > Tools > AI > Agents, signs in and sends a prompt; "over 40 coding agents" are offered, among
+  them Claude Agent, OpenAI's Codex, Junie and Google Antigravity. The agents get Android Studio tools such as the
+  emulator, the build systems and Logcat [83][84]. Google's post says only "ACP"; heise (2026-10-30) spells it out as
+  "Agent Context Protocol" [85]. **[Inference]** It is the Agent Client Protocol: the agent count matches the ACP
+  agent list, and the IntelliJ platform carries JetBrains' ACP client. The heise wording is likely where the name
+  "Agent Context Protocol" in the request comes from.
 - The main repository had about 4.6k stars [38].
 - Zed 1.0 shipped on 2026-04-29; the announcement names ACP as the way Zed runs Claude Agent, Codex, OpenCode and
   Cursor [55].
@@ -514,3 +522,6 @@ All accessed 2026-11-02.
 80. https://repo1.maven.org/maven2/com/agentclientprotocol/acp-core/maven-metadata.xml
 81. https://github.com/agentclientprotocol/java-sdk
 82. https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json
+83. https://developer.android.com/blog/posts/ai-agents-android-studio-integration
+84. https://developer.android.com/studio/releases
+85. https://www.heise.de/news/Android-Entwickler-duerfen-Fremdgehen-Google-oeffnet-Studio-fuer-Claude-GPT-usw-11506272.html
