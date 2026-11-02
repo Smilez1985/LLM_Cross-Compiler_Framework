@@ -419,6 +419,25 @@ def test_the_experimental_notice_and_the_editors_mcp_servers(tmp_path, registry,
     assert tools <= {"list_targets", "start_build"}
 
 
+def test_secrets_in_an_editor_servers_arguments_are_never_kept(tmp_path):
+    """A secret handed as a command-line value (after a flag that names a secret, as --flag=value or NAME=value) is
+    redacted like a known token format: neither the state file nor what the person is shown keeps it."""
+    state = tmp_path / "state"
+    secrets_ = ["abcd1234efgh5678ijkl", "zzzz9999yyyy8888", "hunter2hunter2", "s3cr3t-bearer-value", "envvalue777xyz"]
+    server = {"name": "gh", "command": "npx", "args": [
+        "-y", "some-mcp", "--api-key", secrets_[0], f"--token={secrets_[1]}", "--password", secrets_[2],
+        f"--auth={secrets_[3]}", f"GITHUB_TOKEN={secrets_[4]}", "--root", "/srv/data", "--port", "8080"]}
+    (record,) = EditorServers(state).record([server], editor="Zed")
+    stored = (state / "acp_editor_servers.json").read_text(encoding="utf-8")
+    shown = record.summary() + json.dumps(record.args)
+    for secret in secrets_:
+        assert secret not in stored and secret not in shown, secret
+    # what is no secret stays readable for the person
+    assert record.args[:2] == ["-y", "some-mcp"] and "--api-key" in record.args
+    assert record.args[-4:] == ["--root", "/srv/data", "--port", "8080"]
+    assert "GITHUB_TOKEN=" in " ".join(record.args)
+
+
 # --- the parts below the adapter -------------------------------------------------------------------------------------
 
 def test_the_tool_loop_stops_at_a_cancel_and_answers_every_call():

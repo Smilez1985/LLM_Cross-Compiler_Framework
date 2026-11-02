@@ -18,6 +18,7 @@ Enabling and disabling is the person's alone (no tool, no AI caller can).
 
 import hashlib
 import json
+import re
 import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -40,6 +41,37 @@ def _clean(value: Any, limit: int = MAX_TEXT) -> str:
     text = redact_secrets(str(value if value is not None else ""))
     text = "".join(ch for ch in text if ch.isprintable())
     return text[:limit]
+
+
+# A command-line flag or variable whose value is a secret (--api-key VALUE, --token=VALUE, GITHUB_TOKEN=VALUE): its
+# value is redacted even when it has no known token format (redact_secrets only knows the formats).
+_SECRET_NAME = re.compile(r"(token|secret|passw(or)?d|pass|pwd|api[-_]?key|apikey|auth|credential|bearer|cookie|"
+                          r"session|private[-_]?key)", re.I)
+_FLAG = re.compile(r"^(-{1,2}[A-Za-z][\w.-]*)$")
+_ASSIGNED = re.compile(r"^(-{0,2}[A-Za-z_][\w.-]*)=(.*)$", re.S)
+REDACTED = "REDACTED"
+
+
+def _clean_args(args: Iterable[Any]) -> List[str]:
+    """The arguments as the person may see and the file may keep them: each cleaned, the value after a flag that names
+    a secret and the value of `--flag=VALUE` or `NAME=VALUE` with such a name replaced by REDACTED."""
+    out: List[str] = []
+    secret_next = False
+    for raw in list(args)[:MAX_ARGS]:
+        text = str(raw if raw is not None else "")
+        if secret_next and not _FLAG.match(text):
+            out.append(REDACTED)
+            secret_next = False
+            continue
+        secret_next = False
+        assigned = _ASSIGNED.match(text)
+        if assigned and _SECRET_NAME.search(assigned.group(1)):
+            out.append(_clean(f"{assigned.group(1)}={REDACTED}"))
+            continue
+        if _FLAG.match(text) and _SECRET_NAME.search(text):
+            secret_next = True
+        out.append(_clean(text))
+    return out
 
 
 def _now() -> str:
@@ -92,7 +124,7 @@ def describe_entry(server: Any) -> Dict[str, Any]:
             names.append(_clean(name, 80))
     return {"transport": transport, "name": _clean(get("name", "") or "unnamed", 80),
             "command": _clean(get("command", "") or ""),
-            "args": [_clean(a) for a in list(get("args") or [])[:MAX_ARGS]],
+            "args": _clean_args(get("args") or []),
             "env_names": names, "url": _clean(get("url", "") or "")}
 
 
