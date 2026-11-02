@@ -1,4 +1,4 @@
-Version 3.3.0 · Stand 2026-10-30
+Version 3.3.0 · Stand 2026-11-02
 
 [English](README.md) · **Deutsch**
 
@@ -7,7 +7,9 @@ Version 3.3.0 · Stand 2026-10-30
 Das Framework bereitet Sprachmodelle (LLMs) so auf, dass sie auf kleinen Edge-Geräten laufen, zunächst auf
 Rockchip-Boards wie dem Radxa ZERO 3W oder dem Radxa ROCK 5B. Es besteht aus einer Desktop-App (GUI), einer
 Kommandozeile (`llm-cli`), einem Server, über den KI-Clients wie Claude Code, Claude Desktop oder VS Code das
-Framework bedienen (MCP), und dem eingebauten Assistenten **Ditto**.
+Framework bedienen (MCP), und dem eingebauten Assistenten **Ditto**. Neben Ditto kannst du mit externen Coding-Agenten
+chatten, die du auswählst (Claude Agent, Codex, Gemini CLI, ...), über das Agent Client Protocol; sie arbeiten nur mit
+den Werkzeugen des Frameworks ([Features](docs/Features_DE.md#acp-agenten-die-du-auswählst)).
 
 Diese README beschreibt den Stand des Entwicklungszweigs: Version 3.1.0 und was der [CHANGELOG](CHANGELOG_DE.md)
 seitdem aufführt. Was als Nächstes kommt, steht in der [Roadmap](docs/ROADMAP_DE.md).

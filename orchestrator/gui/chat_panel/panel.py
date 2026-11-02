@@ -392,10 +392,16 @@ class ChatPanel(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         self.header = PanelHeader(self.lang, self)
         layout.addWidget(self.header)
+        # Beside Ditto (the default, unchanged): the external ACP agents the person added (agent_chat.py)
+        from orchestrator.gui.chat_panel.agent_chat import AgentLive, AgentPicker
+        self.agent_picker = AgentPicker(self.lang, self)
+        layout.addWidget(self.agent_picker)
         self.notice = DittoNoticeBanner(self.history_file.parent, self.lang, self)
         layout.addWidget(self.notice)
         self.feed_view = FeedView(self.lang, self.names, self)
         layout.addWidget(self.feed_view, stretch=1)
+        self.agent_live = AgentLive(self.lang, self)
+        layout.addWidget(self.agent_live)
         self.progress = QProgressBar(self)
         self.progress.setRange(0, 0)
         self.progress.setFixedHeight(5)
@@ -428,6 +434,14 @@ class ChatPanel(QWidget):
         self.header.act_permissions.triggered.connect(self.permissions_requested.emit)
         self.header.act_auto_show.toggled.connect(self.auto_show_changed.emit)
         self.header.cb_filter.currentIndexChanged.connect(self._filter_changed)
+
+        from orchestrator.gui.chat_panel.agent_chat import AgentChat
+        self.agents = AgentChat(self.framework, self.agent_live, self._agent_reply, self._local_notice,
+                                lambda: self.open_approvals_requested.emit(""), self, self.lang)
+        self.agents.busy_changed.connect(self._set_thinking)
+        self.agent_picker.changed.connect(self._agent_changed)
+        self.agent_picker.manage_requested.connect(self._open_agents)
+        self.reload_agents()
 
     def focus_composer(self) -> None:
         self.composer.input.setFocus(Qt.ShortcutFocusReason)
@@ -679,6 +693,8 @@ class ChatPanel(QWidget):
         if request is not self._access_request:  # another window's answer, or an older one of this window
             return
         self.lbl_access.setText(one_line(value or ""))
+        if self.agent_picker.current():   # an agent is chosen: Ditto's access does not decide the composer
+            return
         if self.ditto is None:
             self.composer.set_available(False, text("chat.composer.no_ditto", self.lang))
             return
@@ -735,8 +751,47 @@ class ChatPanel(QWidget):
     def _ditto_sender() -> FeedSender:
         return FeedSender(role="ditto", caller="ditto")
 
+    # --- the person's ACP agents (beside Ditto; agent_chat.py) --------------------------------------------------------
+
+    def reload_agents(self) -> None:
+        """The picker's agents, read again (after Agents... added or removed one)."""
+        self.agent_picker.set_agents(self.agents.agents())
+
+    def _open_agents(self) -> None:
+        from orchestrator.gui.acp_agents_window import open_agents_window
+        open_agents_window(self.window(), framework=self.framework, panel=self)
+
+    def _agent_changed(self, agent_id: str) -> None:
+        """Ditto's options are for Ditto; an agent is asked directly and needs no Ditto set up."""
+        self.options.setVisible(not agent_id)
+        if agent_id:
+            self.composer.lbl_to.setText(f"{ui_text('acp.chat.with', self.lang)} {one_line(self.agent_picker.name())}")
+            self.composer.set_available(True, "")
+        else:
+            self.composer.lbl_to.setText(text("chat.composer.to", self.lang))
+            self.refresh_access()
+
+    def _agent_reply(self, name: str, reply: str) -> None:
+        """The agent's whole answer of a turn: one bubble of an AI app, its words marked as its own."""
+        # The agent's tools reach the framework as a local stdio MCP client ("mcp"), labelled with its channel.
+        from orchestrator.tools.mcp_env import channel_label
+        sender = FeedWriter.sender("client", "mcp", caller_label=channel_label(name), client=name)
+        self._post("client_reply", sender, ai_text=reply, ai_text_kind="reply", announce_row=True)
+
+    def _send_to_agent(self, question: str) -> None:
+        if self.agents.running:
+            return
+        self.txt_input.clear()
+        reply_to = self.composer.reply_to
+        self.composer.clear_reply()
+        self._post("person_message", FeedSender(role="person"), person_text=question, refs=FeedRefs(reply_to=reply_to))
+        self.agents.send(self.agent_picker.current(), self.agent_picker.name(), question)
+
     def send_message(self) -> None:
         question = self.txt_input.text().strip()
+        if question and self.agent_picker.current():
+            self._send_to_agent(question)
+            return
         if not question or (self.worker is not None and self.worker.isRunning()):
             return
         choice = self._question_choice()
@@ -938,6 +993,9 @@ class ChatPanel(QWidget):
         self.notice.retranslate(lang)
         self.composer.retranslate(lang)
         self.options.retranslate(lang)
+        self.agent_picker.retranslate(lang)
+        self.agent_live.lang = lang
+        self.agents.lang = lang
         self.progress.setAccessibleName(text("chat.panel.thinking", lang))
         self.feed_view.lang = lang
         self.feed_view.btn_earlier.setText(button_text(text("chat.view.earlier", lang)))
@@ -951,6 +1009,7 @@ class ChatPanel(QWidget):
 
     def closeEvent(self, event: Any) -> None:
         self.confirmation.close()  # a waiting call is answered "no"
+        self.agents.close_all()    # the agents this panel started stop (only their own processes)
         if self.watcher is not None:
             self.watcher.stop()
         super().closeEvent(event)

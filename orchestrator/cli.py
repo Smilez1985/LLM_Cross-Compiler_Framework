@@ -5215,6 +5215,9 @@ def mcp_serve(ctx: FrameworkContext, transport: str, host: str, port: int, conta
     if token is not None and transport != 'stdio':
         Console(stderr=True).print(f"[yellow]{ENV_VAR} is ignored over HTTP: each client sends its own "
                                    "token.[/yellow]")
+    # The framework's label of a server it handed one of the person's ACP agents (stdio only; read once, not inherited)
+    from orchestrator.tools.mcp_env import CHANNEL_ENV
+    channel = os.environ.pop(CHANNEL_ENV, "")
     # Nothing may reach stdout before the transport owns it.
     with contextlib.redirect_stdout(sys.stderr):
         ctx.require_framework()
@@ -5230,6 +5233,8 @@ def mcp_serve(ctx: FrameworkContext, transport: str, host: str, port: int, conta
                                        "everything else asks (or is denied without elicitation). "
                                        "Run 'llm-cli ditto setup'.[/yellow]")
     stdio_token = {"stdio_token": token} if token is not None and transport == 'stdio' else {}
+    if channel and transport == 'stdio':
+        stdio_token["channel"] = channel
     try:
         mcp_server.serve(ctx.framework_manager, transport=transport, host=host, port=port, **stdio_token,
                          **({"container": True} if container else {}))
@@ -8565,6 +8570,330 @@ def zoo_maintainer_revoke(ctx: FrameworkContext, kind: str, pack_id: str, reason
         m.revoke(kind, pack_id, reason=reason, version=version, sha256=sha256, key_name=key)
     except cmaint.MaintainerError as e:
         _zoo_fail(e)
+
+
+# ============================================================================
+# ACP AGENTS: external coding agents the person picks, run with this framework's tools (Core/acp_hosts.py)
+# ============================================================================
+
+@cli.group()
+def agents():
+    """External ACP agents you pick (from the ACP registry or your own command), run with this framework's tools"""
+    pass
+
+
+def _agent_store(ctx: FrameworkContext, boot: bool = False):
+    """The person's agents; `boot`: with the framework's credential vault and audit log (add, remove, login, run)."""
+    from orchestrator.Core.acp_hosts import AgentStore
+    if boot:
+        ctx.require_framework()
+        return AgentStore.for_framework(ctx.framework_manager)
+    config, _ = _settings(ctx)
+    return AgentStore(_state_dir(ctx), config=config)
+
+
+def _agent_fail(error: BaseException, code: int = 1) -> None:
+    _say_error(error)
+    sys.exit(code)
+
+
+@agents.command('list')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def agents_list(ctx: FrameworkContext, as_json: bool):
+    """List the agents you added: name, kind, version, where it came from, whether it needs the internet"""
+    entries = _agent_store(ctx).list()
+    if as_json:
+        click.echo(json.dumps({"agents": [e.ai_view() for e in entries]}, indent=2, sort_keys=True))
+        return
+    if not entries:
+        console.print("No agent added yet ('llm-cli agents search --refresh', then 'llm-cli agents add ID').")
+        return
+    table = Table(title="ACP agents")
+    for column in ("Name", "Kind", "Version", "From", "Internet", "Keys"):
+        table.add_column(column, overflow="fold")
+    for e in entries:
+        table.add_row(escape(e.name), e.kind, escape(e.version or "-"), e.source, "needed" if e.network else "local",
+                      escape(", ".join(e.keys) or "-"))
+    console.print(table)
+
+
+@agents.command('search')
+@click.argument('text', required=False, default="")
+@click.option('--refresh', is_flag=True, help='Fetch the ACP registry first (over HTTPS; refused in offline mode)')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def agents_search(ctx: FrameworkContext, text: str, refresh: bool, as_json: bool):
+    """Search the ACP registry (the copy fetched last; --refresh fetches it now)"""
+    from orchestrator.Core.acp_hosts import AgentError
+    from orchestrator.utils.locality import LocalityRefused
+    store = _agent_store(ctx)
+    if refresh:
+        try:
+            store.refresh_registry("cli")
+        except (AgentError, LocalityRefused) as e:
+            _agent_fail(e)
+    agents_found = store.search(text)
+    if as_json:
+        click.echo(json.dumps({"agents": [{"id": a.id, "name": a.name, "version": a.version, "license": a.license,
+                                           "kinds": a.kinds(), "description": a.description} for a in agents_found]},
+                              indent=2, sort_keys=True))
+        return
+    if store.cached_registry()[1] is None:
+        console.print("The ACP registry was not fetched yet: 'llm-cli agents search --refresh'.")
+        return
+    table = Table(title=f"ACP registry ({len(agents_found)} agents)")
+    for column in ("Id", "Name", "Version", "Licence", "Distribution", "Description"):
+        table.add_column(column, overflow="fold")
+    for a in agents_found:
+        table.add_row(escape(a.id), escape(a.name), escape(a.version), escape(a.license or "-"),
+                      ", ".join(a.kinds()), escape(a.description))
+    console.print(table)
+
+
+def _show_agent_preview(preview) -> None:
+    e = preview.entry
+    console.print(f"[bold]{escape(e.name)}[/bold] {escape(e.version)} (text from the ACP registry or from you)")
+    for label, value in (("Description", e.description), ("Distribution", e.kind), ("Licence", e.license or "-"),
+                         ("Command", preview.command_line), ("Download", preview.download),
+                         ("Checksum (sha256)", preview.sha256),
+                         ("Internet", "needed (refused in offline mode)" if e.network else "not needed (local)"),
+                         ("Keys", ", ".join(e.keys))):
+        if value:
+            console.print(f"  {label}: {escape(_printable(value))}")
+    for problem in preview.problems:
+        console.print(f"[yellow]  Not possible: {escape(problem)}[/yellow]")
+
+
+@agents.command('add')
+@click.argument('agent_id', required=False)
+@click.option('--kind', type=click.Choice(['npx', 'uvx', 'binary']), help='Which distribution of a registry agent')
+@click.option('--command', 'command', help='Your own agent: the full path of its program')
+@click.option('--name', help='Your own agent: its name')
+@click.option('--arg', 'args', multiple=True, help='Your own agent: one argument (repeat it)')
+@click.option('--local', is_flag=True, help='Your own agent works without the internet (it may start in offline mode)')
+@click.option('--key', 'keys', multiple=True, help='Your own agent: a variable its key goes into (repeat it)')
+@pass_context
+def agents_add(ctx: FrameworkContext, agent_id: Optional[str], kind: Optional[str], command: Optional[str],
+               name: Optional[str], args: Tuple[str, ...], local: bool, keys: Tuple[str, ...]):
+    """Add an agent from the ACP registry (by its id) or your own command, after you saw its name, description,
+    distribution, licence and the exact command, and said yes ("No" is the default)"""
+    from orchestrator.Core.acp_hosts import AgentError
+    from orchestrator.utils.locality import LocalityRefused
+    if bool(agent_id) == bool(command):
+        _agent_fail(click.UsageError("Give a registry agent's id, or --command with --name for your own agent."), 2)
+    store = _agent_store(ctx, boot=True)
+    try:
+        preview = store.preview_registry(agent_id, kind or "") if agent_id else \
+            store.preview_command(name or Path(command).stem, command, args, local=local, keys=keys)
+    except AgentError as e:
+        _agent_fail(e)
+    _show_agent_preview(preview)
+    if not preview.ok:
+        sys.exit(1)
+    if not (_interactive() and click.confirm(f"Add {preview.entry.name} and run it with this command when you start "
+                                             "it?", default=False)):
+        console.print("Nothing was added.")
+        return
+    try:
+        entry = store.add(preview, "cli")
+    except (AgentError, LocalityRefused, RuntimeError) as e:
+        _agent_fail(e)
+    import shlex
+    console.print(f"[green]{escape(entry.name)} was added.[/green] Sign in with 'llm-cli agents login "
+                  f"{shlex.quote(entry.id)}', then 'llm-cli agents run {shlex.quote(entry.id)}'.")
+
+
+@agents.command('remove')
+@click.argument('names', metavar='NAME...', nargs=-1, required=True)
+@pass_context
+def agents_remove(ctx: FrameworkContext, names: Tuple[str, ...]):
+    """Remove agents: their installed program, working folder, entry and keys, after you confirm the full list"""
+    from orchestrator.Core.acp_hosts import AgentError
+    from orchestrator.Core.deletion import PlanChanged, size_text
+    store = _agent_store(ctx, boot=True)
+    try:
+        plan = store.deletion_plan(list(names))
+    except AgentError as e:
+        _agent_fail(e)
+    if plan is None:
+        console.print("Nothing to remove.")
+        return
+    accepted = confirm_deletion(plan, title=f"ACP agents ({size_text(plan.total_bytes)})",
+                                again="llm-cli agents remove")
+    if accepted is None:
+        return
+    trash, _audit = _person_trash(ctx, store.state_dir)
+    try:
+        result = store.delete(accepted, trash=trash)
+    except (PlanChanged, PermissionError, RuntimeError) as e:
+        _agent_fail(e)
+    _print_deletion_result(result, accepted)
+
+
+@agents.command('login')
+@click.argument('name')
+@click.option('--method', 'method_id', help="The id of the agent's sign-in method (default: ask)")
+@click.option('--key', 'variable', help="Store a key for the agent in the credential vault (asked hidden)")
+@pass_context
+def agents_login(ctx: FrameworkContext, name: str, method_id: Optional[str], variable: Optional[str]):
+    """Sign in to an agent with its own sign-in: its browser login (the provider's sign-in and second factor), its
+    login command in this terminal, or keys stored in the credential vault"""
+    from orchestrator.Core.acp_client import AgentHost, AgentSession, run_login_attached
+    from orchestrator.Core.acp_hosts import AgentError
+    store = _agent_store(ctx, boot=True)
+    if variable:
+        if not _interactive():
+            _agent_fail(ValueError("A key is asked at a terminal only (hidden)."))
+        value = click.prompt(f"Key for {variable}", hide_input=True, confirmation_prompt=True)
+        try:
+            store.set_key(name, variable, value, "cli")
+        except AgentError as e:
+            _agent_fail(e)
+        console.print(f"[green]Stored in the credential vault; it goes only to this agent as {escape(variable)}."
+                      "[/green]")
+        return
+    try:
+        spec = store.launch_spec(name, "cli")
+        session = AgentSession(spec, AgentHost(), store, "cli")
+        methods = session.start()
+    except AgentError as e:
+        _agent_fail(e)
+    try:
+        if not methods:
+            console.print(f"{escape(spec.entry.name)} lists no sign-in: it signs in by itself, or needs none.")
+            return
+        chosen = next((m for m in methods if m.id == method_id), None) if method_id else None
+        if chosen is None:
+            for number, m in enumerate(methods, 1):
+                console.print(f"  {number}. {escape(m.name)} ({m.type}) {escape(m.description)}")
+            if not _interactive():
+                _agent_fail(ValueError("Choose a sign-in method with --method."))
+            pick = click.prompt("Sign in with", type=click.IntRange(1, len(methods)), default=1)
+            chosen = methods[pick - 1]
+        if chosen.type == "agent":
+            console.print("The agent opens its own sign-in (in your browser); finish it there.")
+            session.authenticate(chosen.id)
+        elif chosen.type == "terminal":
+            session.close()
+            code = run_login_attached(spec, chosen, store)
+            store.record_event("cli", spec.entry, f"terminal sign-in ended ({code})")
+            if code:
+                _agent_fail(AgentError(f"The agent's own sign-in ended with exit code {code}."))
+        else:
+            for var in chosen.variables:
+                store.set_key(name, var, click.prompt(f"Key for {var}", hide_input=True), "cli")
+        console.print(f"[green]Signed in to {escape(spec.entry.name)}.[/green]")
+    except AgentError as e:
+        _agent_fail(e)
+    finally:
+        session.close()
+
+
+class _TerminalAgentHost:
+    """The terminal as the host of a running agent: its text and thoughts as they come, tool calls with status, the
+    plan; permission questions answered here (allow once or reject; "No" is the default)."""
+
+    def __init__(self, name: str):
+        import threading
+        self.name = name
+        self.lock = threading.Lock()
+
+    def on_event(self, event) -> None:
+        with self.lock:
+            if event.kind == "text":
+                click.echo(_printable(event.text), nl=False)
+            elif event.kind == "thought":
+                click.secho(_printable(event.text), dim=True, nl=False)
+            elif event.kind == "tool":
+                click.secho(f"\n[tool {_printable(event.text) or event.tool_id}: {event.status or '...'}]", fg="cyan")
+            elif event.kind == "plan":
+                click.secho("\nPlan: " + "; ".join(f"{_printable(c)} ({s})" for c, s in event.entries), fg="cyan")
+            else:
+                click.secho(f"\n{_printable(event.text)}", fg="yellow")
+
+    def ask_permission(self, question) -> str:
+        with self.lock:
+            click.echo()
+            if question.has_always:
+                click.echo("(Its 'always' option is not offered here: standing approvals are made in the "
+                           "framework's approvals.)")
+            ok = _interactive() and click.confirm(f"{self.name} wants to: {_printable(question.title)}. Allow once?",
+                                                  default=False)
+        return "allow" if ok else "reject"
+
+    def ask_form(self, question):
+        if not _interactive():
+            return None
+        with self.lock:
+            click.echo(f"\n{self.name} asks: {_printable(question.message)}")
+            values = {}
+            for field_name, kind, title in question.fields:
+                if kind == "boolean":
+                    values[field_name] = click.confirm(_printable(title), default=False)
+                elif kind == "choice":
+                    values[field_name] = click.prompt(_printable(title),
+                                                      type=click.Choice(list(question.choices[field_name])))
+                elif kind == "number":
+                    values[field_name] = click.prompt(_printable(title), type=float)
+                else:
+                    values[field_name] = click.prompt(_printable(title))
+            return values if click.confirm("Send these answers?", default=False) else None
+
+
+@agents.command('run')
+@click.argument('name')
+@pass_context
+def agents_run(ctx: FrameworkContext, name: str):
+    """Chat with an agent in this terminal: it works with this framework's tools (every call through your
+    permissions, approvals and the audit log); Ctrl+C stops its turn, an empty line or Ctrl+D ends"""
+    import threading
+    from orchestrator.Core.acp_client import AgentSession
+    from orchestrator.Core.acp_hosts import AgentError
+    store = _agent_store(ctx, boot=True)
+    try:
+        spec = store.launch_spec(name, "cli")
+    except AgentError as e:
+        _agent_fail(e)
+    session = AgentSession(spec, _TerminalAgentHost(spec.entry.name), store, "cli")
+    try:
+        session.start()
+        session.new_session()
+        console.print(f"{escape(spec.entry.name)} is ready (its words are its own; it uses this framework's tools "
+                      "only). An empty line ends.")
+        while True:
+            try:
+                text = click.prompt("You", default="", show_default=False)
+            except (EOFError, click.Abort):
+                break
+            if not text.strip():
+                break
+            result: Dict[str, Any] = {}
+            worker = threading.Thread(target=lambda: result.setdefault("stop", _agent_turn(session, text, result)),
+                                      daemon=True)
+            worker.start()
+            while worker.is_alive():
+                try:
+                    worker.join(0.2)
+                except KeyboardInterrupt:
+                    session.cancel()
+            click.echo()
+            if "error" in result:
+                _say_error(result["error"])
+                if getattr(result["error"], "code", "") == "not_signed_in":
+                    break
+    except AgentError as e:
+        _agent_fail(e)
+    finally:
+        session.close()
+
+
+def _agent_turn(session, text: str, result: Dict[str, Any]) -> str:
+    try:
+        return session.prompt(text)
+    except Exception as e:  # noqa: BLE001 - shown by the loop
+        result["error"] = e
+        return "error"
 
 
 if __name__ == "__main__":

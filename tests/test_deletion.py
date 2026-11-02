@@ -94,6 +94,11 @@ DELETION_SITES = {
     # covers no plan, another actor and a changed list)
     ("orchestrator/Core/community_manager.py", "CommunityManager.uninstall"): PERSON,
     ("orchestrator/Core/community_manager.py", "CommunityManager.import_again"): IMPORT_MARKS,
+    # an ACP agent the person removes (Manage agents..., llm-cli agents remove): its program and working folders,
+    # its entry and keys, only the person's accepted plan (tests/test_acp_hosts.py covers no plan and an AI actor)
+    ("orchestrator/Core/acp_hosts.py", "AgentStore.delete"): PERSON,
+    # an agent's install: its own unpack folder of that version made again, and the archive once unpacked
+    ("orchestrator/Core/acp_hosts.py", "AgentStore._install_binary"): STAGING,
     ("orchestrator/Core/community_manager.py", "CommunityManager.sync_knowledge_base"): RELEASED_NOTE,
     # temporary and partial files
     ("orchestrator/Core/build_records.py", "write_record"): TEMP,

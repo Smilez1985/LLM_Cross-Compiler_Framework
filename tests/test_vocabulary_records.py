@@ -320,6 +320,8 @@ def test_text_modules_are_merged_and_never_replace_a_key(monkeypatch):
                                              "orchestrator.utils.l10n_network",
                                              # offline-builder-image: Build > Build Container Images...
                                              "orchestrator.utils.l10n_build_image",
+                                             # acp-client: Ditto > Agents... and the chat panel's agent picker
+                                             "orchestrator.utils.l10n_acp",
                                              # wave 6: chain a0 pre-registers every planned module (a missing one is
                                              # skipped): the menu bar, the shell, the activity, Hugging Face, the
                                              # Ditto setup guide and the glossary

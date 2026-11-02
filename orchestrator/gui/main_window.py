@@ -257,7 +257,7 @@ class MainOrchestrator(QMainWindow):
         menu_knowledge.install(self, menubar)  # Tools > Knowledge > Knowledge Sources...
         menu_mojo.install(self, menubar)  # Tools > Maintenance > Mojo Health Check...
         # Optional install hooks of later chains (no shared list to edit): Set up Ditto's guide and the Help menu.
-        for optional in ("ditto_setup", "help"):
+        for optional in ("ditto_setup", "help", "acp_agents"):
             module = menu_place.optional_module(optional)
             if module is not None:
                 module.install(self, menubar)

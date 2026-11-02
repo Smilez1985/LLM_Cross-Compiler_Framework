@@ -1,4 +1,4 @@
-Version 3.3.0 · Last updated 2026-10-30
+Version 3.3.0 · Last updated 2026-11-02
 
 **English** · [Deutsch](README_DE.md)
 
@@ -7,7 +7,8 @@ Version 3.3.0 · Last updated 2026-10-30
 The framework prepares language models (LLMs) so they run on small edge devices, starting with Rockchip boards
 such as the Radxa ZERO 3W or the Radxa ROCK 5B. It has a desktop app (GUI), a command line (`llm-cli`), a server
 that lets AI clients such as Claude Code, Claude Desktop or VS Code operate it (MCP), and a built-in assistant
-called **Ditto**.
+called **Ditto**. Beside Ditto you can chat with external coding agents you pick (Claude Agent, Codex, Gemini CLI,
+...) over the Agent Client Protocol; they work only with the framework's tools ([Features](docs/Features.md#acp-agents-you-pick)).
 
 This README describes the state of the development branch: version 3.1.0 and what the [CHANGELOG](CHANGELOG.md) lists
 since. What comes next is in the [roadmap](docs/ROADMAP.md).

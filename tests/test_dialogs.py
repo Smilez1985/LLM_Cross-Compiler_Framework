@@ -1470,7 +1470,9 @@ class TestMainWindowWiring:
                      for m in win.findChildren(QMenu) if m.objectName()}
             assert menus["menu_ditto"] == ["Set up Ditto...", "AI Settings...", "Tool Permissions...",
                                            "Folders the AI May Use...", "Pending Approvals...",
-                                           "Fix Proposals from AI Apps...", "&Advanced"]
+                                           "Fix Proposals from AI Apps...",
+                                           "Agents...",   # acp-client: the ACP agents the person picks
+                                           "&Advanced"]
             assert menus["menu_ditto_advanced"] == ["Local Runtime...", "Local Models...", "Evaluation..."]
             assert menus["menu_tools"] == ["Create Hardware Module...", "Hugging Face Model Browser...", "&Knowledge",
                                            "&Maintenance", "Spoken Announcements", "Clear Input History..."]

@@ -1,4 +1,4 @@
-Version 3.3.0 · Stand 2026-10-30
+Version 3.3.0 · Stand 2026-11-02
 
 [English](CLI_Usage.md) · **Deutsch**
 
@@ -26,6 +26,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [deploy](#deploy): `list-artifacts`, `package`, `run`, `devices`, `ssh-config`
 - [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
+- [agents](#agents): `list`, `search`, `add`, `remove`, `login`, `run`
 - [mcp](#mcp): `serve`, `config`, `token add|list|rotate|revoke`
 - [secrets](#secrets): `set`, `list`
 - [module](#module): `create`, `generate-ai`
@@ -150,6 +151,7 @@ liefert 1, wenn ein Lauf unter dem angegebenen Anteil bleibt.
 | `ditto models list/download` | Die Modellstufen für den Offline-Modus |
 | `ditto cache` / `ditto cache set` | Das Speicherbudget von Dittos lokalem Server: Prompt-Cache, Haltezeit, KV-Cache |
 | `tools list` / `tools permissions` / `tools audit` | Die Tools des Frameworks, ihre Berechtigungen und das Audit-Log |
+| `agents list/search/add/remove/login/run` | Externe ACP-Agenten, die du auswählst (Claude Agent, Codex, Gemini CLI, dein eigenes Programm), mit den Werkzeugen des Frameworks |
 | `mcp serve` / `mcp config` | Den MCP-Server betreiben / zeigen, wie man KI-Clients verbindet |
 | `secrets set` / `secrets list` | Ein Token speichern (Hugging Face, GitHub) / die gespeicherten Namen auflisten |
 | `module create` / `module generate-ai` | Ein neues Hardware-Target anlegen, per Fragen oder mit Ditto aus einer Probe-Datei |
@@ -1940,6 +1942,27 @@ einer Änderung seines Textes muss er erneut gelesen werden.
 In der GUI: **Tools > Hinweis zu Deep Ingest...** zeigt den Hinweis jederzeit; solange er noch nötig ist, bittet es
 dich zu bestätigen, dass du ihn gelesen hast („Nein“ ist vorgewählt), und hält das mit `via: gui` fest (Akteur `gui`).
 Der Deep Ingest des Modul-Assistenten zeigt ihn vor dem ersten Crawl, auch solange die Wissensdatenbank aus ist.
+
+---
+
+## agents
+
+Externe ACP-Agenten, die du auswählst, mit den Werkzeugen dieses Frameworks ([Features](Features_DE.md#acp-agenten-die-du-auswählst)).
+Jeder Befehl, der etwas ändert, ist allein deiner: Eine KI kann nie einen Agenten hinzufügen, anmelden oder starten.
+
+| Befehl | Was er tut |
+|---|---|
+| `agents list [--json]` | Deine Agenten: Name, Verteilung, Version, Herkunft, ob er das Internet braucht, die Variablen seiner Schlüssel |
+| `agents search [TEXT] [--refresh] [--json]` | Die ACP-Registry durchsuchen, wie zuletzt abgerufen; `--refresh` ruft sie jetzt ab (HTTPS, im Offline-Modus abgelehnt) |
+| `agents add ID [--kind npx\|uvx\|binary]` | Einen Registry-Agenten hinzufügen, nachdem Name, Beschreibung, Verteilung, Lizenz, der genaue Befehl, der Download und seine Prüfsumme gezeigt sind und du Ja sagst („Nein“ ist vorgewählt); npx und uvx nur mit genauer Version, ein Binary nur mit der Prüfsumme der Registry |
+| `agents add --command PFAD --name NAME [--arg A]... [--local] [--key VAR]...` | Dein eigenes Programm hinzufügen (`--local`: es geht ohne Internet und darf im Offline-Modus starten; `--key`: eine Variable für seinen Schlüssel) |
+| `agents login NAME [--method ID]` | Mit der eigenen Anmeldung des Agenten anmelden: seine Browser-Anmeldung, sein Anmeldebefehl in diesem Terminal oder verdeckt abgefragte Schlüssel im Tresor für Zugangsdaten |
+| `agents login NAME --key VAR` | Einen Schlüssel für den Agenten speichern (verdeckt, zweimal); er geht nur an diesen Agenten, als `VAR` |
+| `agents remove NAME...` | Agenten entfernen nach der vollständigen Liste ihrer Ordner und Einträge („Nein“ ist vorgewählt); ihre Schlüssel verlassen den Tresor |
+| `agents run NAME` | Mit dem Agenten in diesem Terminal chatten: sein Text und seine Gedanken, wie sie kommen, Werkzeugaufrufe mit Stand, der Plan; seine Berechtigungsfragen werden hier gestellt (einmal erlauben oder ablehnen, „Nein“ vorgewählt); Strg+C beendet seinen Zug, eine leere Zeile beendet den Chat |
+
+Der Agent läuft in seinem eigenen Ordner im Framework-Home mit einer sauberen Umgebung (das Nötigste des Systems und
+seine eigenen Schlüssel) und bekommt den MCP-Server des Frameworks (`llm-cli mcp serve`) als seine einzigen Werkzeuge.
 
 ---
 

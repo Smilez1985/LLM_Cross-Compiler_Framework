@@ -1,4 +1,4 @@
-Version 3.3.0 · Stand 2026-10-31
+Version 3.3.0 · Stand 2026-11-02
 
 [English](Features.md) · **Deutsch**
 
@@ -26,6 +26,7 @@ Zurück zur [README](../README_DE.md) · Alle Befehle: [CLI_Usage_DE.md](CLI_Usa
 - [Lokale Laufzeit und Modellstufen](#lokale-laufzeit-und-modellstufen)
 - [Wissensbasis (RAG)](#wissensbasis-rag)
 - [Deep Ingest](#deep-ingest)
+- [ACP-Agenten, die du auswählst](#acp-agenten-die-du-auswählst)
 - [MCP-Server](#mcp-server)
 - [Tool-Berechtigungen und Audit-Log](#tool-berechtigungen-und-audit-log)
 - [Geheimnisse und persönlicher Zustand](#geheimnisse-und-persönlicher-zustand)
@@ -2293,6 +2294,41 @@ Mit `crawl_docs_site` kann ein MCP-Client oder Ditto Dokumentation in die Wissen
   `LLM_FRAMEWORK_NO_AUDIO` gesetzt ist (auf alles außer leer, `0`, `false`, `no` oder `off`), unter CI (`CI`
   ebenso gesetzt), in einer SSH-Sitzung ohne Bildschirm und unter Linux ohne Bildschirm (kein
   `DISPLAY` oder `WAYLAND_DISPLAY`).
+
+---
+
+## ACP-Agenten, die du auswählst
+
+Neben Ditto kannst du mit externen Coding-Agenten chatten (Claude Agent, Codex, Gemini CLI und die anderen Agenten der
+ACP-Registry, oder ein Programm, das du selbst nennst), die das Agent Client Protocol sprechen. Das Framework startet
+den Agenten, wenn du ihm deine erste Nachricht schickst, und gibt ihm die eigenen Werkzeuge des Frameworks: Jede Aktion
+läuft über deine Werkzeug-Berechtigungen, die Freigaben und das Audit-Log, wie bei jeder KI-App über MCP. Ditto bleibt
+die Vorgabe im Chat.
+
+- **Ditto > Agenten...** listet deine Agenten (Verteilung, Version, Herkunft, ob er das Internet braucht, die
+  Variablen seiner Schlüssel). **Registry abrufen** liest die ACP-Registry, nur bei diesem Klick; wähle einen Agenten
+  und **Gewählten Agenten hinzufügen...**: Du siehst Name, Beschreibung, Verteilung, Lizenz, den genauen Befehl, den
+  Download und seine Prüfsumme, bevor du Ja sagst („Nein“ ist vorgewählt). Oder füge **deinen eigenen Befehl** hinzu
+  (das Programm, seine Argumente, ob es ohne Internet geht, die Variablen seiner Schlüssel).
+- npx- und uvx-Agenten laufen mit genau der Version, die die Registry nennt, über Node.js oder uv auf diesem Computer.
+  Ein Binary wird nur über HTTPS mit der Prüfsumme der Registry heruntergeladen; ohne sie gar nicht.
+- **Anmelden...** nutzt die eigene Anmeldung des Agenten: seine Browser-Anmeldung (die Anmeldung deines Anbieters und
+  den zweiten Faktor), seine eigene Anmeldung in einem Konsolenfenster oder Schlüssel, die du im Tresor für Zugangsdaten
+  speicherst. **Schlüssel speichern...** speichert einen Schlüssel; er geht nur an diesen Agenten.
+- Im Chat-Panel wählt **Chatten mit:** den Agenten. Seine Antwort läuft in einem Feld unter dem Chat ein (seine
+  Gedanken hinter einem Knopf, Werkzeugaufrufe mit ihrem Stand, der Plan); **Stopp** beendet seinen Zug; die ganze
+  Antwort wird dann seine Sprechblase.
+- Fragt der Agent vor einem Schritt, fragt dich der eigene Dialog des Frameworks: **Einmal erlauben** oder
+  **Ablehnen** („Ablehnen“ ist vorgewählt). Ein „immer“ des Agenten wird nie gewählt; **Dauerhafte Freigaben...**
+  öffnet die Freigaben des Frameworks.
+- Jeder Agent bekommt eine saubere Umgebung (nur das Nötigste des Systems und seine eigenen Schlüssel) und arbeitet in
+  seinem eigenen Ordner im Framework-Home; vom Framework bekommt er keinen Zugriff auf Dateien oder ein Terminal. Der
+  Offline-Modus lehnt einen Agenten ab, der das Internet braucht. Schließt du das Chat-Panel oder die Anwendung, enden
+  die Agenten, die es gestartet hat.
+- **Entfernen...** listet die Ordner und den Eintrag des Agenten („Nein“ ist vorgewählt) und nimmt seine Schlüssel aus
+  dem Tresor.
+- Im Terminal: `llm-cli agents list|search|add|remove|login|run` ([CLI](CLI_Usage_DE.md#agents)). Eine KI kann nie einen
+  Agenten hinzufügen, anmelden oder starten.
 
 ---
 
