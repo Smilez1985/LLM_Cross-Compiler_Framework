@@ -48,6 +48,9 @@ dependencies = [
     "pydantic>=2.12,<3",
     # Model Context Protocol server (spec 2026-07-28). Exact pin: LLM tooling is a supply-chain target.
     "mcp==2.3.0",
+    # Agent Client Protocol (Zed/JetBrains, protocol version 1, Apache-2.0): Ditto as an ACP agent for editors and
+    # llmcf as an ACP client that runs agents the person picks (DECISIONS round 54). Exact pin, as for mcp.
+    "agent-client-protocol==0.12.1",
 
     # --- 6. Crawler & Ingestion ---
     "beautifulsoup4>=4.14,<5",
