@@ -75,6 +75,7 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 | **LLMLingua-2 on demand**, off by default: about 150 lines of the MIT method ported (a numpy runner in the app), the model fetched on demand from its original source and only when it is missing, never shipped in the repository. | planned |
 | **Ditto's archive, phase 2**: facts from Ditto's own answers, export and import, snapshots. | planned |
 | **Saved conversation caches on disk**, only if the measurement shows that people often come back after the server slept. | planned |
+| **Ditto in editors (ACP): the MCP servers an editor passes.** A minimal MCP client for the stdio servers an editor hands to Ditto, used only for an entry the person enabled in the framework: their tools offered to the model under their own names, every call asked in the framework (no standing approval), its results marked as untrusted data, through the privacy filter and recorded in the audit log. Until then the entries are recorded and shown, and none is used. | planned |
 
 ### Board bundle, gateway, voice, MCP on the board
 

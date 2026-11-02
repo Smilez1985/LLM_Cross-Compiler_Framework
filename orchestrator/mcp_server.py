@@ -54,27 +54,30 @@ import hashlib
 import hmac
 import inspect
 import json
-import logging
-import ntpath
 import os
-import posixpath
 import re
 import secrets
-import shlex
 import sys
 import tempfile
 import threading
 import time
-import unicodedata
 import uuid
 import weakref
 from dataclasses import dataclass, field
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from typing import Annotated, Any, Callable, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field, ValidationError
 
 from orchestrator.tools.confirmation import MAX_ELICITATION, CallTooLong
+# The stdio helpers live in the bottom layer, shared with Ditto as an ACP agent (`llm-cli acp`); their names here
+# stay for every caller and test of the MCP server.
+from orchestrator.utils.stdio_programs import (_WINDOWS_QUOTED, _WINDOWS_UNSAFE, installation_root,  # noqa: F401
+                                               launch_command, no_programs_from_the_working_directory,
+                                               shell_command)
+from orchestrator.utils.stdio_programs import logging_to_stderr as _logging_to_stderr  # noqa: F401
+from orchestrator.utils.stdio_programs import sigterm_ends_the_session as _sigterm_ends_the_session  # noqa: F401
+from orchestrator.utils.stdio_programs import windows_argument as _windows_argument  # noqa: F401
 from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, ENV_VAR, TokenStore, TokenStoreError, token_digest
 from orchestrator.tools.output import has_untrusted, notes_text
 from orchestrator.tools.policy import Decision
@@ -1760,17 +1763,6 @@ def stdio_caller(tokens: TokenStore, token: Optional[str]) -> Tuple[str, Optiona
 
 # --- stdio: stdout belongs to the protocol -----------------------------------------------------------
 
-def _logging_to_stderr() -> None:
-    """Points every logging handler that writes to stdout at stderr."""
-    stdout = [s for s in (sys.stdout, sys.__stdout__) if s is not None]
-    loggers = [logging.getLogger()] + [lg for lg in logging.Logger.manager.loggerDict.values()
-                                       if isinstance(lg, logging.Logger)]
-    for lg in loggers:
-        for handler in lg.handlers:
-            if isinstance(handler, logging.StreamHandler) and any(handler.stream is s for s in stdout):
-                handler.setStream(sys.stderr)
-
-
 @contextlib.asynccontextmanager
 async def _stdout_to_stderr(_server):
     """Server lifespan: entered once the stdio transport owns the wire (fd 1 points at stderr while it serves).
@@ -1790,42 +1782,6 @@ def _stdout_fd_to_stderr(stdout) -> None:
             os.dup2(2, 1)
     with contextlib.suppress(AttributeError, OSError, ValueError):
         stdout.flush()
-
-
-def no_programs_from_the_working_directory() -> None:
-    """Windows looks for a program such as docker or git in the working directory before PATH (CreateProcess,
-    shutil.which), and clients start the server inside a project. This turns that off for the server and every
-    process it starts, as -P does for imports. Call it before the framework starts (it checks Docker)."""
-    if sys.platform == "win32":
-        os.environ["NoDefaultCurrentDirectoryInExePath"] = "1"
-
-
-@contextlib.contextmanager
-def _sigterm_ends_the_session():
-    """Clients stop a stdio server by closing its input and, when it has not ended a few seconds later (some right
-    away), with SIGTERM, then SIGKILL. Python's default for SIGTERM ends the process at once, so the lifespan would
-    never cancel the session's builds and jobs. Here SIGTERM interrupts the server like Ctrl+C: the main task is
-    cancelled and the shielded cleanup runs; a second SIGTERM is ignored while it does (SIGKILL still ends it)."""
-    import signal
-    import threading
-    if threading.current_thread() is not threading.main_thread() or not hasattr(signal, "SIGTERM"):
-        yield
-        return
-
-    def interrupt(signum, frame):
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        handler = signal.getsignal(signal.SIGINT)
-        if callable(handler) and handler is not interrupt:
-            handler(signal.SIGINT, frame)  # asyncio's runner cancels its main task (default handler: raises)
-        else:
-            raise KeyboardInterrupt
-
-    previous = signal.signal(signal.SIGTERM, interrupt)
-    try:
-        yield
-    finally:
-        with contextlib.suppress(TypeError, ValueError):
-            signal.signal(signal.SIGTERM, previous)
 
 
 def http_server_config(app, host: str, port: int):
@@ -1910,23 +1866,6 @@ def serve(framework, transport: str = "stdio", host: str = "127.0.0.1", port: in
 
 # --- Client configuration -----------------------------------------------------------------------
 
-def launch_command(app_root: Path, windows: Optional[bool] = None) -> Dict[str, Any]:
-    """How a client starts this server over stdio (the current interpreter, so the venv is used).
-    -P keeps the folder the client starts it in off sys.path; the installation comes from PYTHONPATH. The POSIX
-    variant follows POSIX path rules on every host: a path the caller made on Windows ('\\opt\\llm' from
-    Path('/opt/llm')) is written with '/' again."""
-    windows = (sys.platform == "win32") if windows is None else windows
-    root = PureWindowsPath(app_root).as_posix() if not windows and isinstance(app_root, PureWindowsPath) \
-        else str(app_root)
-    separator = ";" if windows else ":"
-    # A relative entry, or one that the separator splits, would be looked up in the working directory.
-    if separator in root or not (ntpath if windows else posixpath).isabs(root):
-        raise ValueError(f"The installation path {root!r} cannot be put on PYTHONPATH safely (it is relative or "
-                         f"contains '{separator}'); install the framework to another folder.")
-    return {"command": sys.executable, "args": ["-P", "-m", "orchestrator.cli", "-q", "mcp", "serve"],
-            "cwd": root, "env": {"PYTHONPATH": root}}
-
-
 def claude_desktop_config_path() -> Path:
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
@@ -1935,29 +1874,6 @@ def claude_desktop_config_path() -> Path:
     # Electron's appData, which Claude Desktop uses; the XDG spec says to ignore a relative value.
     xdg = os.environ.get("XDG_CONFIG_HOME", "")
     return (Path(xdg) if os.path.isabs(xdg) else Path.home() / ".config") / "Claude" / "claude_desktop_config.json"
-
-
-# cmd.exe and PowerShell both keep these literal inside double quotes (PowerShell reads smart single quotes as ').
-_WINDOWS_QUOTED = frozenset("&|<>^'(),;@{}#\u2018\u2019\u201a\u201b")
-# No quoting protects these in both: % (cmd), ! (cmd with delayed expansion), $ and ` (PowerShell), double quotes.
-_WINDOWS_UNSAFE = frozenset('%!$`"\u201c\u201d\u201e')
-
-
-def _windows_argument(arg: str) -> str:
-    if any(ch in _WINDOWS_UNSAFE or unicodedata.category(ch) == "Cc" for ch in arg):
-        raise ValueError(f"{arg!r} contains a character that cmd.exe or PowerShell would change even in quotes.")
-    if arg and not any(ch in _WINDOWS_QUOTED or ch.isspace() for ch in arg):
-        return arg
-    # C runtime rules: backslashes are literal except before a quote, so the closing quote needs them doubled.
-    trailing = len(arg) - len(arg.rstrip("\\"))
-    return '"' + arg + "\\" * trailing + '"'
-
-
-def shell_command(argv, windows: Optional[bool] = None) -> str:
-    """A command line that survives copy and paste: POSIX shell quoting, or on Windows double quotes that
-    cmd.exe and PowerShell both keep literal. ValueError if an argument cannot be quoted safely for both."""
-    windows = (sys.platform == "win32") if windows is None else windows
-    return " ".join(_windows_argument(a) for a in argv) if windows else shlex.join(argv)
 
 
 def client_snippets(app_root: Path, windows: Optional[bool] = None) -> Dict[str, str]:
@@ -2063,12 +1979,6 @@ def write_claude_desktop_config(app_root: Path, path: Optional[Path] = None,
         _write_private(target.with_name(target.name + ".bak"), plan.original)
     _write_private(target, json.dumps(plan.data, indent=2).encode("utf-8"))
     return plan.path
-
-
-def installation_root() -> Path:
-    """The framework's installation (the folder that holds orchestrator/): what the client snippets put on
-    PYTHONPATH, for the CLI and the GUI alike."""
-    return Path(__file__).resolve().parents[1]
 
 
 # --- the HTTP server as a child process of the GUI (Security > AI App Connections (MCP)...) -----------------------

@@ -53,6 +53,8 @@ INPUT_ERROR_CODES = frozenset({"unknown_argument", "missing_argument", "invalid_
 PENDING_CODES = frozenset(_PENDING)
 # The result of a call that never ran because the answer ended before it was complete (length limit).
 CALL_NOT_RUN = "Not run: the answer was cut off before this tool call was complete."
+# The result of a call that never ran because the person cancelled the turn (run_tool_loop's `cancelled`).
+CALL_CANCELLED = "Not run: the person cancelled this turn before this tool call ran."
 # The answer to a call whose result is byte for byte one still in the request (ResultIndex).
 DUPLICATE_TEXT = "same result as tool call #{call_id}"
 
@@ -127,7 +129,7 @@ def conversation_is_consistent(messages: Sequence[Message]) -> bool:
 @dataclass
 class ToolLoopResult:
     text: str
-    stop: str                      # end | max_tokens | refusal | max_steps
+    stop: str                      # end | max_tokens | refusal | max_steps | cancelled
     steps: int
     new_messages: List[Message] = field(default_factory=list)  # append these to the conversation
     results: List[ChatResult] = field(default_factory=list)
@@ -137,11 +139,17 @@ class ToolLoopResult:
 
 
 def run_tool_loop(client: Any, request: ChatRequest, execute_tool: ExecuteTool, max_steps: int = 8,
-                  extra_steps: int = 0, stop_after: int = 3) -> ToolLoopResult:
+                  extra_steps: int = 0, stop_after: int = 3, cancelled: Optional[Callable[[], bool]] = None,
+                  on_text: Optional[Callable[[str], None]] = None) -> ToolLoopResult:
     """Runs model turns and tool calls until the model answers, refuses, or the step budget is used up (max_steps
     model turns, plus up to `extra_steps` while the model fixes an input error, plus the one answer turn after an
     early stop). `execute_tool(name, arguments)` returns the result (text, dict or pydantic model) or raises on
-    failure; an exception's `code` and `field` (ToolError) tell progress from a repeat."""
+    failure; an exception's `code` and `field` (ToolError) tell progress from a repeat.
+
+    `cancelled()` (read before every model turn and every tool call): once true, no further call runs and no further
+    model turn starts; the open calls are answered with CALL_CANCELLED and the loop ends with stop "cancelled" (the
+    pairs stay consistent). `on_text(text)`: the text of a model turn that also calls tools (what the model says
+    between its calls), for a caller that shows it as it comes; its failure never stops the loop."""
     history = list(request.messages)
     seen = ResultIndex(history)  # results still in this request (a summarized conversation's are not)
     new: List[Message] = []
@@ -152,7 +160,18 @@ def run_tool_loop(client: Any, request: ChatRequest, execute_tool: ExecuteTool, 
     previous: Optional[tuple] = None  # (tool, code, field) of the failure before
     streak = 0                        # failures in a row without progress
     stopped = noted = was_fixing = False
+
+    def is_cancelled() -> bool:
+        try:
+            return bool(cancelled is not None and cancelled())
+        except Exception:  # noqa: BLE001 - a broken check never cancels
+            return False
+
     while step < budget:
+        if is_cancelled():
+            last = results[-1] if results else None
+            return ToolLoopResult(text=last.text if last else "", stop="cancelled", steps=step, new_messages=new,
+                                  results=results, usage=usage)
         step += 1
         step_request = request.model_copy(update={"messages": list(history), "tools": tools})
         try:
@@ -170,9 +189,19 @@ def run_tool_loop(client: Any, request: ChatRequest, execute_tool: ExecuteTool, 
             new.extend(close_open_calls(new))
             return ToolLoopResult(text=result.text, stop=result.stop, steps=step, new_messages=new,
                                   results=results, usage=usage, parsed=result.parsed)
+        if on_text is not None and (result.text or "").strip():
+            try:
+                on_text(result.text)
+            except Exception:  # noqa: BLE001 - showing the text never stops the loop
+                pass
         fixing = fixed = False
         for call in result.tool_calls:
             failure = None
+            if is_cancelled():  # answered, never run: the pairs stay consistent
+                outcome = Message.tool_result(call.id, CALL_CANCELLED, is_error=True)
+                history.append(outcome)
+                new.append(outcome)
+                continue
             if stopped:  # every call is answered, none runs after the stop instruction
                 outcome = Message.tool_result(call.id, NOT_RUN_TEXT, is_error=True)
             elif call.parse_error:

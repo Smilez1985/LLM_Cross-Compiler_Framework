@@ -1173,6 +1173,34 @@ settings). It was removed before any release. What it may have left behind:
 
 Board deployment over SSH (pairing, deploy, the runtime on the board) is a different thing and stays as it is.
 
+### Ditto in editors (ACP)
+
+Editors that speak the Agent Client Protocol (ACP), such as Zed, JetBrains IDEs, Android Studio, Neovim or Emacs, can
+use Ditto as their AI agent: the editor starts `llm-cli acp` and you chat with Ditto in the editor; Ditto works with the
+framework's own tools, the same ones as in the chat panel. This is an additional way in; the chat panel and
+`ditto ask` stay as they are. Like Ditto, it is experimental: the notice is the first message of every editor session.
+
+- **Adding it**: **File > Settings...**, tab **Ditto in editors**, shows the command and the `agent_servers` entry for
+  the editor (Zed's `settings.json`, a JetBrains IDE's `acp.json`), each with a **Copy** button; `llm-cli acp config`
+  prints the same.
+- **Sign-in**: while Ditto has no AI provider set up, the editor offers "Sign Ditto in", which runs the framework's own
+  sign-in in a terminal. No key ever passes through the editor.
+- **Permissions**: every tool call runs within your tool permissions and is recorded in the audit log (channel
+  `acp`, the editor's own name as the client). A call that asks shows the framework's question in the editor with
+  only "Allow once" and "Reject"; "do not ask again" exists only in the framework's approval window. A deletion, or a
+  tool you set to "confirm in the framework", is never asked in the editor; a question the editor does not answer
+  becomes a pending approval in the framework.
+- **Privacy**: the editor's project folders reach the model only as labels (`project`, `project-2`, ...), never as
+  paths; the privacy filter applies to every cloud call as everywhere.
+- **In the editor**: each tool call shows while it runs; a build Ditto started shows its progress and the four build
+  stages; Cancel ends the turn; provider and model can be chosen per session (the saved AI settings stay as they are);
+  slash commands `/status`, `/targets`, `/builds`, `/mojo`.
+- **The editor's MCP servers**: an editor may pass Ditto its own MCP servers. They are recorded and shown in the same
+  tab (`llm-cli acp servers list`), and none of them is used: their tools would bypass the framework's permissions and
+  audit log. Ticking one is your consent for a later version that connects to it.
+- The editor's file and terminal services are never used; builds and deployments run only through the framework's
+  tools.
+
 ---
 
 ## Ditto evaluation

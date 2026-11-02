@@ -76,6 +76,7 @@ Anbieter, Prüfung, Fehler mit nächstem Schritt) und der Anmeldebereich der GUI
 | **LLMLingua-2 bei Bedarf**, standardmäßig aus: etwa 150 Zeilen der MIT-Methode übernommen (ein numpy-Runner in der App), das Modell bei Bedarf von seiner Originalquelle geholt und nur, wenn es fehlt, nie im Repository mitgeliefert. | geplant |
 | **Dittos Archiv, Phase 2**: Fakten aus Dittos eigenen Antworten, Export und Import, Schnappschüsse. | geplant |
 | **Gespeicherte Gesprächs-Caches auf der Platte**, nur wenn die Messung zeigt, dass Leute oft zurückkommen, nachdem der Server geschlafen hat. | geplant |
+| **Ditto in Editoren (ACP): die MCP-Server, die ein Editor übergibt.** Ein kleiner MCP-Client für die stdio-Server, die ein Editor an Ditto übergibt, nur für einen Eintrag, dem die Person im Framework zugestimmt hat: ihre Tools unter eigenem Namen dem Modell angeboten, jeder Aufruf im Framework gefragt (keine Dauerfreigabe), die Ergebnisse als nicht vertrauenswürdige Daten markiert, durch den Datenschutzfilter und im Audit-Log vermerkt. Bis dahin werden die Einträge vermerkt und gezeigt, und keiner wird benutzt. | geplant |
 
 ### Board-Bündel, Gateway, Sprache, MCP auf dem Board
 

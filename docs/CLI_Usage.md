@@ -27,6 +27,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
 - [mcp](#mcp): `serve`, `config`, `token add|list|rotate|revoke`
+- [acp](#acp): Ditto as an agent of editors (`config`, `servers`)
 - [secrets](#secrets): `set`, `list`
 - [module](#module): `create`, `generate-ai`
 - [scan](#scan): hardware probe
@@ -150,6 +151,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | `ditto cache` / `ditto cache set` | The memory budget of Ditto's local server: prompt cache, keep time, KV cache |
 | `tools list` / `tools permissions` / `tools audit` | The framework tools, their permissions and the audit log |
 | `mcp serve` / `mcp config` | Run the MCP server / show how to connect AI clients |
+| `acp` / `acp config` / `acp servers` | Ditto as an agent of editors that speak ACP (the editor starts it) / show the editor entry / the MCP servers editors passed, with your consent per entry |
 | `secrets set` / `secrets list` | Store a token (Hugging Face, GitHub) / list the stored names |
 | `module create` / `module generate-ai` | Create a new hardware target, by questions or from a probe file with Ditto |
 | `scan` | Run the hardware probe on this computer or, with `--device`, on a board over SSH, or with `--import` store a board's probe file, and print its probe id |
@@ -1976,6 +1978,53 @@ tokens": **Add...** (read only, a copy of the local stdio clients', Ditto's or a
 Ditto's by reference), **Rotate**, **Revoke** (the token, its permissions and its standing approvals, after a question
 that counts them), **Back to read only...** and **Permissions...**. A token is shown once, right after it is made or
 rotated; the list shows names only.
+
+---
+
+## acp
+
+Ditto as an agent of editors that speak the Agent Client Protocol (ACP), such as Zed, JetBrains IDEs, Android Studio,
+Neovim or Emacs. The editor starts `llm-cli acp` itself and talks to Ditto over stdin and stdout (version 1). This is an
+additional way in: Ditto's chat in the GUI and with `ditto ask` stays as it is. Experimental, like Ditto; the notice is
+the first message of every editor session.
+
+```
+llm-cli acp [--login]
+llm-cli acp config [--json]
+llm-cli acp servers list [--json]
+llm-cli acp servers enable|disable SERVER
+```
+
+| Command / option | Meaning |
+|---|---|
+| `acp` | Run the agent (the editor does this; stdout carries only the protocol, logs go to stderr). Ditto answers with the AI provider of your AI settings; every tool call runs within your tool permissions and is recorded in the audit log with the channel `acp`. |
+| `acp --login` | Sign Ditto in: asks which provider and runs `ditto login` for it. The editor runs this when it offers "Sign Ditto in" (shown while Ditto has no provider set up). Needs a terminal. |
+| `acp config` | Print the command line and the `agent_servers` entry for the editor (Zed: `settings.json`; JetBrains IDEs: `acp.json`), with the Python and folder of this installation and `-P`, like `mcp config`. `--json`: only the entry. |
+| `acp servers list` | The MCP servers editors passed to Ditto: name, transport, what would run (secrets redacted, environment variable names only), the editor (as it names itself), last seen, enabled or not. `--json` for scripts. |
+| `acp servers enable` / `disable` | Your consent for one entry (by its ID or a name only one entry has). This version connects to no editor MCP server either way: their tools would bypass the framework's permissions and audit log. |
+
+What the editor gets:
+
+- **Permission requests** offer only "allow once" and "reject", with the framework's own question; "do not ask
+  again" exists only in the framework's approval window. A deletion or a tool set to "confirm in the framework" is
+  never asked in the editor, and a question the editor does not answer (an error, no answer within 10 minutes) waits
+  as a pending approval in the framework (`tools approvals`).
+- **Folders**: the editor's project folders reach the model only as labels (`project`, `project-2`, ...), every path
+  in a prompt as `label:relative/path` or its file name.
+- **Progress**: each tool call shows in the editor while it runs; a build Ditto started shows its progress and the
+  four build stages. Cancel in the editor ends the turn; nothing more is started.
+- **Provider and model** can be chosen per session in the editor; the saved AI settings stay as they are.
+- **Slash commands**: `/status`, `/targets`, `/builds`, `/mojo`.
+- The editor's file and terminal services are never used.
+
+```bash
+llm-cli acp config
+llm-cli acp servers list
+llm-cli acp servers enable 0123456789abcdef
+```
+
+In the GUI: **File > Settings...**, tab **Ditto in editors**: the command and the entry, each with a **Copy** button,
+and the recorded editor MCP servers with a consent box each. The sign-in is **Security > Sign-in Overview...**.
 
 ---
 

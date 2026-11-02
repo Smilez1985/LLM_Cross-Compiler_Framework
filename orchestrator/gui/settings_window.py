@@ -17,6 +17,9 @@ counts as local besides this computer and the own network, the person's opt-outs
 each added only after the person read what can then leave the network ("No" is the default), the VPN check of this
 computer and a check of any address. Both checks look names up and may run the tailscale command: in a worker thread,
 never on the GUI thread. No field here is one Ditto's GUI tools may fill (no form binding): only the person decides.
+
+Ditto in editors (`llm-cli acp config` and `llm-cli acp servers`, orchestrator/gui/acp_settings.py): the editor entry
+with Copy buttons and the MCP servers editors passed to Ditto, with the person's consent per entry.
 """
 
 import json
@@ -81,6 +84,9 @@ class SettingsDialog(QDialog):
         from orchestrator.gui.doorbell_settings import DoorbellSettings
         self.page_bell = DoorbellSettings(framework, self, self.lang)
         self.tabs.addTab(self.page_bell, self._t("bell.tab"))
+        from orchestrator.gui.acp_settings import AcpSettings
+        self.page_acp = AcpSettings(framework, self, self.lang)   # Ditto in editors (`llm-cli acp`)
+        self.tabs.addTab(self.page_acp, self._t("acp.tab"))
         self.tabs.currentChanged.connect(self._tab_changed)
         layout.addWidget(self.tabs)
         buttons = QDialogButtonBox(QDialogButtonBox.Close, self)

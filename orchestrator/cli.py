@@ -5269,6 +5269,137 @@ def mcp_config(ctx: FrameworkContext, write_client: Optional[str]):
     click.echo("Sign in to these clients with your own Claude account or key; the framework never sees it.")
 
 
+# ============================================================================
+# DITTO AS AN ACP AGENT (editors: Zed, JetBrains IDEs, Android Studio, Neovim, Emacs)
+# ============================================================================
+
+@cli.group('acp', invoke_without_command=True)
+@click.option('--login', is_flag=True,
+              help="Sign Ditto in to an AI provider (the editor's sign-in for this agent runs this; same as "
+                   "'llm-cli ditto login PROVIDER')")
+@click.pass_context
+def acp(click_ctx, login: bool):
+    """Ditto as an ACP agent: an editor starts `llm-cli acp` and talks to it over stdin/stdout (stdout carries the
+    protocol; logs go to stderr). Experimental, like Ditto. `acp config` shows the editor entry."""
+    if click_ctx.invoked_subcommand is not None:
+        return
+    ctx = click_ctx.ensure_object(FrameworkContext)
+    if login:
+        _acp_login(click_ctx, ctx)
+        return
+    import contextlib
+    from orchestrator.utils.stdio_programs import no_programs_from_the_working_directory
+    no_programs_from_the_working_directory()
+    # The editor's `llm-cli acp` is a CLI process (the cli() group set the program already); its builds show as
+    # started in the CLI. Nothing may reach stdout before the agent owns it.
+    with contextlib.redirect_stdout(sys.stderr):
+        ctx.require_framework()
+    from orchestrator import acp_agent
+    acp_agent.serve(ctx.framework_manager)
+
+
+def _acp_login(click_ctx, ctx: FrameworkContext) -> None:
+    """The editor's terminal sign-in: the provider is asked for, then the existing `ditto login` runs."""
+    _ditto_notice_once()
+    from orchestrator.llm import load_catalog
+    config, _ = _settings(ctx)
+    try:
+        catalog = load_catalog(user_dir=getattr(config, "config_dir", None))
+        ids = list(catalog.ids())
+    except Exception as e:  # noqa: BLE001 - the catalogue cannot be read: the person names the provider
+        click.echo(f"The provider list cannot be read ({type(e).__name__}).", err=True)
+        ids = []
+    if not sys.stdin or not sys.stdin.isatty():
+        click.echo("The sign-in needs a terminal: run 'llm-cli ditto login PROVIDER' in one.", err=True)
+        sys.exit(2)
+    provider = click.prompt("Sign Ditto in to which AI provider?", type=click.Choice(ids) if ids else str, err=True)
+    click_ctx.invoke(ditto_login, provider=provider)
+
+
+@acp.command('config')
+@click.option('--json', 'as_json', is_flag=True, help="Print only the editor's agent_servers JSON entry")
+def acp_config(as_json: bool):
+    """Show how to add Ditto as an ACP agent to an editor (the command, and the agent_servers entry of Zed's
+    settings.json or a JetBrains IDE's acp.json)"""
+    from orchestrator.utils.stdio_programs import acp_entries, installation_root
+    try:
+        entries = acp_entries(installation_root())
+    except ValueError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    if as_json:
+        click.echo(entries["json"])
+        return
+    # Plain text without panels or wrapping, so the entries can be copied exactly.
+    click.echo("# Command (an editor that asks for the agent's command line)")
+    click.echo(entries["command"])
+    click.echo("")
+    click.echo("# agent_servers entry (Zed: settings.json; JetBrains IDEs: acp.json)")
+    click.echo(entries["json"])
+    click.echo("")
+    click.echo("Ditto answers with the AI provider of your AI settings; sign it in with 'llm-cli ditto login "
+               "PROVIDER' (or the editor's sign-in for this agent). Tools run within your tool permissions.")
+
+
+@acp.group('servers')
+def acp_servers():
+    """The MCP servers editors passed to Ditto: recorded, shown here, never used without your consent"""
+
+
+def _editor_servers(ctx: FrameworkContext):
+    from orchestrator.Core.acp_editor_servers import EditorServers
+    return EditorServers(_state_dir(ctx))
+
+
+@acp_servers.command('list')
+@click.option('--json', 'as_json', is_flag=True, help='Print the entries as JSON')
+@pass_context
+def acp_servers_list(ctx: FrameworkContext, as_json: bool):
+    """The recorded editor MCP servers: name, transport, what would run, the editor, enabled or not"""
+    from dataclasses import asdict
+    servers = _editor_servers(ctx).list()
+    if as_json:
+        click.echo(json.dumps([asdict(s) for s in servers], indent=2, ensure_ascii=False))
+        return
+    if not servers:
+        click.echo("No editor has passed an MCP server to Ditto yet.")
+        return
+    table = Table(title="MCP servers editors passed to Ditto (none is used by this version)")
+    for column in ("ID", "Enabled", "Server", "Editor", "Last seen"):
+        table.add_column(column)
+    for server in servers:
+        table.add_row(server.id, "yes" if server.enabled else "no", escape(_printable(server.summary())),
+                      escape(_printable(server.editor)), server.last_seen)
+    console.print(table)
+
+
+@acp_servers.command('enable')
+@click.argument('server')
+@pass_context
+def acp_servers_enable(ctx: FrameworkContext, server: str):
+    """Enable a recorded editor MCP server (by ID or name): your consent for a later version that connects to it"""
+    _acp_server_switch(ctx, server, True)
+
+
+@acp_servers.command('disable')
+@click.argument('server')
+@pass_context
+def acp_servers_disable(ctx: FrameworkContext, server: str):
+    """Disable a recorded editor MCP server (by ID or name)"""
+    _acp_server_switch(ctx, server, False)
+
+
+def _acp_server_switch(ctx: FrameworkContext, key: str, enabled: bool) -> None:
+    changed = _editor_servers(ctx).set_enabled(key, enabled)
+    if changed is None:
+        console.print(f"[red]No recorded editor MCP server '{escape(_printable(key))}' (see 'llm-cli acp servers "
+                      "list').[/red]")
+        sys.exit(1)
+    state = "enabled" if enabled else "disabled"
+    console.print(f"[green]{escape(_printable(changed.name))} ({changed.id}) {state}.[/green] This version connects "
+                  "to no editor MCP server either way.")
+
+
 # Named MCP tokens: created, changed and revoked only by a person at a terminal, never by a tool.
 
 def _stdout_is_terminal() -> bool:
