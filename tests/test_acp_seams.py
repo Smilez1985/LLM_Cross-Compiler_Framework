@@ -59,6 +59,24 @@ def test_redacted_arguments_keep_what_is_no_secret():
         "--verbose", "--api-key", "--root", "/srv"]
 
 
+def test_an_argument_name_with_a_short_secret_word_inside_stays_redacted():
+    """Before the two rules became one, the editor-server record redacted the value after any flag or variable whose
+    name held pass, pwd, auth or session anywhere (--dbpass, MYSQLPWD, --basicauth, --sessionid). The one rule counts
+    those short words only as words of their own for a form field; for a command-line value that would keep a
+    password in the record (and show it in the settings), so arguments keep the old, wider rule as well."""
+    for flag in ("--dbpass", "--basicauth", "--proxyauth", "--sessionid", "--sshpass", "--dbpwd", "--adminpass"):
+        assert acp_common.redact_secret_arguments([flag, "hunter2"]) == [flag, "REDACTED"], flag
+        assert describe_entry({"name": "x", "command": "srv", "args": [flag, "hunter2"]})["args"] == \
+            [flag, "REDACTED"], flag
+    for assigned in ("DBPASS=hunter2", "MYSQLPWD=hunter2", "--httpauth=user:hunter2", "SESSIONKEY=hunter2"):
+        name = assigned.split("=", 1)[0]
+        assert acp_common.redact_secret_arguments([assigned]) == [f"{name}=REDACTED"], assigned
+    # the whole-word rule of a form field is unchanged: "bypass" is no secret field
+    assert not acp_common.names_a_secret("bypass") and not acp_common.names_a_secret("author")
+    assert acp_common.redact_secret_arguments(["--port", "8080", "--root", "/srv"]) == ["--port", "8080", "--root",
+                                                                                         "/srv"]
+
+
 def test_one_line_and_label_clean_outside_text():
     key = "ghp_" + "A1b2" * 9          # built at runtime: the repository holds no matching literal
     cleaned = acp_common.one_line(f"two\nlines\tand\x07 a key {key}", 200)
@@ -231,3 +249,16 @@ def test_a_kill_after_a_stuck_stop_reaps_the_process(tmp_path, monkeypatch):
     assert time.monotonic() - started < 10
     with pytest.raises(ChildProcessError):     # reaped already: nothing left to wait for
         os.waitpid(pid, os.WNOHANG)
+
+
+def test_the_fake_agent_refuses_a_report_path_that_is_no_regular_file(tmp_path):
+    """The fixture replaces its report file on every write; given a device such as os.devnull (as root) it would
+    replace the device for the whole machine. It refuses any existing path that is no regular file (here a folder,
+    which works the same on every system) before it writes anything."""
+    import subprocess
+    folder = tmp_path / "not-a-file"
+    folder.mkdir()
+    done = subprocess.run([sys.executable, str(REPO_ROOT / "tests" / "fixtures" / "acp" / "fake_agent.py"),
+                           str(folder)], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+    assert done.returncode != 0 and "no regular file" in done.stderr
+    assert folder.is_dir() and not list(tmp_path.glob("not-a-file.*.tmp"))

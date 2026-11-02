@@ -39,6 +39,10 @@ PATHS, ARGS = _paths(sys.argv[1:])
 sys.path[:0] = PATHS
 REPORT = ARGS[0]
 LOGIN = "--login" in ARGS
+# The report is replaced (os.replace) on every write: a path that exists and is no regular file (os.devnull, a
+# device, a folder) would be replaced too, and as root that turns /dev/null into a file for the whole machine.
+if os.path.lexists(REPORT) and not os.path.isfile(REPORT) or os.path.islink(REPORT):
+    sys.exit(f"fake_agent: the report path {REPORT!r} is no regular file; give it a file in the test's tmp_path.")
 
 import acp  # noqa: E402
 from acp import schema  # noqa: E402

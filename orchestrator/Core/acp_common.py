@@ -16,7 +16,10 @@ helpers does that for both, so the two sides cannot drift apart:
   token, a key, a one-time code ...): the long words count inside a word too ("accessToken"), the short ones (otp,
   2fa, pin, pass, pwd, auth, session) only as words of their own, so "mapping" or "author" is no secret;
 - redact_secret_arguments(args): command-line arguments as they may be shown and kept: the value after a flag whose
-  name names a secret, and the value of `--flag=VALUE` or `NAME=VALUE` with such a name, becomes REDACTED.
+  name names a secret, and the value of `--flag=VALUE` or `NAME=VALUE` with such a name, becomes REDACTED. For an
+  argument name the short words pass, pwd, auth and session count inside a word too (`--dbpass`, `MYSQLPWD`,
+  `--basicauth`), as the editor-server record always did: a value too many redacted only hides it, one too few
+  would keep a password in the record.
 
 Qt-free and lazy: standard library and orchestrator.utils.helpers.redact_secrets only.
 """
@@ -38,6 +41,8 @@ _CAMEL = re.compile(r"(?<=[a-z])(?=[A-Z])")
 _LABEL = re.compile(r"[^\w .,:;()+/@-]")
 _FLAG = re.compile(r"^(-{1,2}[A-Za-z][\w.-]*)$")
 _ASSIGNED = re.compile(r"^(-{0,2}[A-Za-z_][\w.-]*)=(.*)$", re.S)
+# In an argument name these short words count inside a word as well ("--dbpass", "SESSIONKEY", "--basicauth").
+_INSIDE_AN_ARGUMENT_NAME = re.compile(r"pass|pwd|auth|session", re.I)
 
 
 def one_line(value: Any, limit: int = 300) -> str:
@@ -64,10 +69,15 @@ def names_a_secret(*texts: Any) -> bool:
     return bool(_SHORT.search(joined))
 
 
+def _secret_argument_name(name: str) -> bool:
+    """Whether a flag or variable name names a secret: names_a_secret, or one of the short words inside the name."""
+    return names_a_secret(name) or bool(_INSIDE_AN_ARGUMENT_NAME.search(name))
+
+
 def redact_secret_arguments(args: Iterable[Any]) -> List[str]:
     """The arguments with every secret value replaced by REDACTED: the one after a flag whose name names a secret
-    (`--api-key VALUE`, `--token VALUE`), and the value of `--flag=VALUE` or `NAME=VALUE` with such a name. Every other
-    argument stays as it is (the caller cleans it for display)."""
+    (`--api-key VALUE`, `--token VALUE`, `--dbpass VALUE`), and the value of `--flag=VALUE` or `NAME=VALUE` with such a
+    name. Every other argument stays as it is (the caller cleans it for display)."""
     out: List[str] = []
     secret_next = False
     for raw in args:
@@ -78,10 +88,10 @@ def redact_secret_arguments(args: Iterable[Any]) -> List[str]:
             continue
         secret_next = False
         assigned = _ASSIGNED.match(text)
-        if assigned and names_a_secret(assigned.group(1)):
+        if assigned and _secret_argument_name(assigned.group(1)):
             out.append(f"{assigned.group(1)}={REDACTED}")
             continue
-        if _FLAG.match(text) and names_a_secret(text):
+        if _FLAG.match(text) and _secret_argument_name(text):
             secret_next = True
         out.append(text)
     return out
