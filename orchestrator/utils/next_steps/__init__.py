@@ -67,8 +67,9 @@ PERSON_ONLY: Tuple[str, ...] = ("secret", "permission", "audit", "host_key", "de
 SHOWN_ONLY: Tuple[str, ...] = ("admin", "board", "third_party")
 AUDIENCES: Tuple[str, ...] = ("cli", "gui", "ai")
 # Who is asking (ToolContext.channel): Ditto with a question typed into this window's chat, Ditto working for the
-# GUI without a chat turn (healing), `llmcf ditto ask`, or None for an MCP app.
-CHANNELS: Tuple[Optional[str], ...] = ("gui-chat", "gui", "cli", None)
+# GUI without a chat turn (healing), `llmcf ditto ask`, an editor that drives Ditto over ACP (`llmcf acp`; rendered
+# like the CLI: the person sits at an editor with a terminal), or None for an MCP app.
+CHANNELS: Tuple[Optional[str], ...] = ("gui-chat", "gui", "cli", "acp", None)
 GUI_CHANNELS: Tuple[str, ...] = ("gui-chat", "gui")
 PROGRAM = "llmcf"                       # the command's name in what the person reads
 STEP_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}\.[a-z][a-z0-9_]{0,47}$")   # = tools/tool_windows.STEP_ID_RE

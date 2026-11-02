@@ -397,6 +397,27 @@ class ResourceUnknown(ToolInputError):
 
 Confirm = Callable[[ToolSpec, BaseModel], bool]
 
+
+@dataclass(frozen=True)
+class ConfirmReply:
+    """A confirm callback's answer that is more than yes or no (a plain bool stays the usual answer):
+
+    NOT_ASKED  the channel could not put the question at all (an editor that does not answer a permission request, a
+               closed connection): not the person's "no". The call is treated as one nobody could be asked about: a
+               pending approval in the framework when the context allows it, else a refusal with reason needs_person
+               (never recorded as declined, so the same question may be asked again).
+    CANCELLED  the person cancelled the turn while the question was open: the call does not run, the audit records
+               the answer "cancelled", and it does not count as a recent "no"."""
+    approved: Optional[bool]
+    answer: str
+
+    def __bool__(self) -> bool:
+        return bool(self.approved)
+
+
+NOT_ASKED = ConfirmReply(None, "unavailable")
+CANCELLED = ConfirmReply(False, "cancelled")
+
 # The registry and actor of the call a handler runs for (handlers do not get the context; get_status reads it).
 _CALL: contextvars.ContextVar = contextvars.ContextVar("lcf_tool_call", default=(None, ""))
 # The question the registry asks through a framework channel (Ditto's dialog or prompt shows exactly this text).
@@ -1620,9 +1641,15 @@ class ToolRegistry:
                 # the handler sees which standing approval ran it (a pack installed under one is marked so)
                 ctx = dataclasses.replace(ctx, confirm_channel=channel)
                 self.events.emit("grant_used", tool=spec.name, actor=ctx.actor, owner=ctx.owner, grant_id=grant.id)
-        # Only a framework window asks about a deletion (a confirm callback of another channel cannot).
+        # Only a framework window asks about a deletion (a confirm callback of another channel cannot), and a callback
+        # of a client's own dialog ("elicitation": an editor that drives Ditto over ACP) never asks about a tool only the
+        # framework's own window may ask about (the same rule as an MCP client's form): nobody can be asked there.
         confirm = ctx.confirm
-        if confirm is not None and deleting and not person_confirmed(getattr(confirm, "confirm_channel", "framework")):
+        confirm_via = getattr(confirm, "confirm_channel", "framework") if confirm is not None else ""
+        if confirm is not None and deleting and not person_confirmed(confirm_via):
+            confirm = None
+        elif (confirm is not None and confirm_via == "elicitation"
+              and self.framework_channel_required(spec, ctx.actor, ctx.facts)):
             confirm = None
         # A person's "no" is final, even if the policy was loosened to "allow" while they were asked.
         if decision == Decision.ASK or approved is False:
@@ -1652,8 +1679,11 @@ class ToolRegistry:
                     _CALL.reset(calling)
                     _OFFER.reset(offered)
                     _QUESTION.reset(token)
-                approved = bool(reply)
-                answer = "accepted" if approved else "declined"
+                if isinstance(reply, ConfirmReply):  # not asked at all, or the turn cancelled (not a person's "no")
+                    approved, answer = reply.approved, reply.answer
+                else:
+                    approved = bool(reply)
+                    answer = "accepted" if approved else "declined"
                 choice = getattr(reply, "grant_choice", None)
                 if approved and offer is not None and choice is not None:
                     # "Yes, and do not ask again" in Ditto's own dialog or prompt: the framework's window.

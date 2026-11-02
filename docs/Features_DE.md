@@ -1299,6 +1299,37 @@ in den KI-Einstellungen). Er wurde vor jedem Release entfernt. Was er hinterlass
 Das Deployment auf Boards über SSH (Kopplung, Deploy, die Laufzeit auf dem Board) ist etwas anderes und bleibt, wie es
 ist.
 
+### Ditto in Editoren (ACP)
+
+Editoren, die das Agent Client Protocol (ACP) sprechen, etwa Zed, JetBrains-IDEs, Android Studio, Neovim oder Emacs,
+können Ditto als KI-Agent nutzen: Der Editor startet `llm-cli acp`, und du chattest im Editor mit Ditto; Ditto arbeitet
+mit den eigenen Tools des Frameworks, denselben wie im Chat-Panel. Das ist ein zusätzlicher Weg; das Chat-Panel und
+`ditto ask` bleiben, wie sie sind. Wie Ditto ist es experimentell: Der Hinweis ist die erste Nachricht jeder Sitzung im
+Editor.
+
+- **Hinzufügen**: **Datei > Einstellungen...**, Tab **Ditto in Editoren**, zeigt den Befehl und den
+  `agent_servers`-Eintrag für den Editor (`settings.json` von Zed, `acp.json` einer JetBrains-IDE), jeweils mit einem
+  Knopf **Kopieren**; `llm-cli acp config` gibt dasselbe aus.
+- **Anmeldung**: Solange Ditto keinen KI-Anbieter eingerichtet hat, bietet der Editor „Ditto anmelden“ an; das führt
+  die eigene Anmeldung des Frameworks in einem Terminal aus. Kein Schlüssel geht je über den Editor.
+- **Berechtigungen**: Jeder Tool-Aufruf läuft innerhalb deiner Tool-Berechtigungen und steht im Audit-Log (Kanal
+  `acp`, der eigene Name des Editors als Client). Ein Aufruf, der fragt, zeigt die Frage des Frameworks im Editor, nur
+  mit „Einmal erlauben“ und „Ablehnen“; „nicht mehr fragen“ gibt es nur im Freigabefenster des Frameworks. Eine
+  Löschung oder ein Tool, das du auf „im Framework bestätigen“ gestellt hast, wird nie im Editor gefragt; eine Frage,
+  die der Editor nicht beantwortet, wird zu einer ausstehenden Freigabe im Framework.
+- **Datenschutz**: Die Projektordner des Editors erreichen das Modell nur als Labels (`project`, `project-2`, ...),
+  nie als Pfade; der Datenschutzfilter gilt wie überall für jeden Cloud-Aufruf.
+- **Im Editor**: Jeder Tool-Aufruf zeigt sich, während er läuft; ein Build, den Ditto gestartet hat, zeigt seinen
+  Fortschritt und die vier Build-Stufen; Abbrechen beendet die Runde; Anbieter und Modell lassen sich je Sitzung
+  wählen (die gespeicherten KI-Einstellungen bleiben, wie sie sind); Slash-Befehle `/status`, `/targets`, `/builds`,
+  `/mojo`.
+- **Die MCP-Server des Editors**: Ein Editor kann Ditto eigene MCP-Server übergeben. Sie werden vermerkt und im selben
+  Tab gezeigt (`llm-cli acp servers list`), und keiner davon wird benutzt: Ihre Tools würden an den Berechtigungen und
+  am Audit-Log des Frameworks vorbeilaufen. Ein Häkchen ist deine Zustimmung für eine spätere Version, die sich damit
+  verbindet.
+- Die Datei- und Terminal-Dienste des Editors werden nie benutzt; Builds und Deployments laufen nur über die Tools des
+  Frameworks.
+
 ---
 
 ## Ditto-Evaluation

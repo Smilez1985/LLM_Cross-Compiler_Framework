@@ -452,6 +452,30 @@ class ToolUse:
     title: str
     ok: bool
     detail: str = ""  # why it failed or was not run (the model saw the same text)
+    # The result as the model saw it (filtered by the registry, wrapped as untrusted data), for a caller that shows it
+    # (the ACP agent's tool_call_update); not part of the transcript and not compared.
+    output: str = field(default="", compare=False, repr=False)
+
+
+@dataclass
+class ChatTurn:
+    """Where the person who asks sits and what the caller listens to during one chat turn (DittoCoder.chat `turn`).
+    The defaults are the chat as the GUI and the CLI have it.
+
+    channel            ToolContext.channel of every tool call ("acp" for an editor that drives Ditto, None otherwise)
+    client             the asking program's self-reported label (a label for people and the audit, never trusted)
+    pending_approvals  a question nobody can answer in the caller's channel becomes a pending approval in the
+                       framework (as for an MCP client) instead of a refusal
+    cancel             set by the caller to end the turn: no further model turn or tool call starts, a running handler
+                       that checks its context's cancel event stops early; the reply's stop is "cancelled"
+    on_text            the text of a model turn that also calls tools (what the model says between its calls)
+    on_tool_start      (name, title, arguments) right before a tool call goes to the registry"""
+    channel: Optional[str] = None
+    client: str = ""
+    pending_approvals: bool = False
+    cancel: Optional[Any] = None          # a threading.Event
+    on_text: Optional[Callable[[str], None]] = None
+    on_tool_start: Optional[Callable[[str, str, Dict[str, Any]], None]] = None
 
 
 def tool_note(use: ToolUse) -> str:
@@ -468,7 +492,7 @@ class ChatReply:
     new_messages: List[Message]
     new_conversation: bool = False    # earlier turns were summarized into a new conversation
     tools: List[ToolUse] = field(default_factory=list)
-    stop: str = "end"                 # end | max_tokens | max_steps
+    stop: str = "end"                 # end | max_tokens | max_steps | cancelled
     provider: str = ""
     model: str = ""
     usage: Usage = field(default_factory=Usage)
@@ -986,12 +1010,17 @@ class DittoCoder:
         return tool_specs_from_registry(registry, names) if names else []
 
     def _executor(self, registry, confirm: Optional[Confirm], uses: List[ToolUse],
-                  on_tool: Optional[Callable[[ToolUse], None]]):
+                  on_tool: Optional[Callable[[ToolUse], None]], turn: Optional["ChatTurn"] = None):
         """execute_tool for a chat turn: this computer's registry (validation, permissions, audit). One session per
         question, for the repeat guard and the example calls after repeated input errors; output and handler errors
-        come back as untrusted blocks, the framework's own refusals as they are."""
-        run = make_registry_executor(registry, ToolContext(actor="ditto", confirm=confirm,  # output: untrusted block
-                                                           session=f"ditto-{secrets.token_hex(6)}"))
+        come back as untrusted blocks, the framework's own refusals as they are. `turn`: where the person sits and
+        what the caller listens to (ChatTurn); None is the chat as before (no channel, no pending approvals)."""
+        turn = turn or ChatTurn()
+        context = ToolContext(actor="ditto", confirm=confirm, session=f"ditto-{secrets.token_hex(6)}",
+                              channel=turn.channel, client=turn.client, pending_approvals=turn.pending_approvals)
+        if turn.cancel is not None:
+            context.cancel = turn.cancel   # a running handler that checks it stops early
+        run = make_registry_executor(registry, context)  # output: untrusted block
 
         def title_of(name: str) -> str:
             try:
@@ -1008,6 +1037,11 @@ class DittoCoder:
                     pass
 
         def execute(name: str, arguments: dict) -> str:
+            if turn.on_tool_start is not None:
+                try:
+                    turn.on_tool_start(str(name), title_of(name), dict(arguments or {}))
+                except Exception:  # noqa: BLE001 - a listener never stops the call
+                    pass
             try:
                 output = run(name, arguments)
             except (ToolDenied, ToolInputError) as e:  # the framework's own messages
@@ -1019,19 +1053,26 @@ class DittoCoder:
                 note(ToolUse(str(name), title_of(name), False, redact_secrets(str(e))[:300]))
                 raise ToolError(wrap_untrusted(str(e), source=f"tool error:{name}", max_len=4000), code=e.code,
                                 field=e.field) from None
-            note(ToolUse(str(name), title_of(name), True))
+            note(ToolUse(str(name), title_of(name), True, output=output if isinstance(output, str) else ""))
             return output
 
         return execute
 
     def chat(self, question: str, history: Optional[ChatHistory] = None, *, confirm: Optional[Confirm] = None,
-             use_tools: bool = True, on_tool: Optional[Callable[[ToolUse], None]] = None) -> ChatReply:
+             use_tools: bool = True, on_tool: Optional[Callable[[ToolUse], None]] = None,
+             turn: Optional[ChatTurn] = None) -> ChatReply:
         """One user turn. `history` is only read: the caller appends the reply with history.apply(reply).
         `confirm(spec, input)` answers tool calls that need confirmation (None: they are denied). The tools are the
-        framework's own on this computer (the same ones an MCP client with the same permissions is offered)."""
+        framework's own on this computer (the same ones an MCP client with the same permissions is offered).
+        `turn` (ChatTurn): the channel, pending approvals, cancel and listeners of another front end (the ACP agent);
+        None keeps the chat exactly as before."""
         question = (question or "").strip()
         if not question:
             raise DittoError("Please enter a question.")
+        turn = turn or ChatTurn()
+
+        def cancelled() -> bool:
+            return bool(turn.cancel is not None and turn.cancel.is_set())
         client = self._client_for_call()
         earlier = list(history.messages) if history is not None else []
         blocks: List[Dict[str, str]] = []
@@ -1068,8 +1109,10 @@ class DittoCoder:
         uses: List[ToolUse] = []
         try:
             if tools:
-                loop = run_tool_loop(client, request, self._executor(registry, confirm, uses, on_tool),
-                                     max_steps=MAX_TOOL_STEPS, extra_steps=FIX_EXTRA_STEPS)
+                loop = run_tool_loop(client, request, self._executor(registry, confirm, uses, on_tool, turn),
+                                     max_steps=MAX_TOOL_STEPS, extra_steps=FIX_EXTRA_STEPS,
+                                     cancelled=cancelled if turn.cancel is not None else None,
+                                     on_text=turn.on_text)
                 if loop.stop == "refusal":
                     raise loop.refusal   # the same message as any other failed turn, with the tools that ran
                 results, new, text, stop, usage = loop.results, loop.new_messages, loop.text, loop.stop, loop.usage
@@ -1086,6 +1129,8 @@ class DittoCoder:
                                                        "answer. Ask to continue if needed.)")
         elif stop == "max_tokens":
             text = (text + "\n\n" if text else "") + "(The answer was cut off at the length limit.)"
+        elif stop == "cancelled":
+            text = (text + "\n\n" if text else "") + "(Cancelled: no further tool call ran.)"
         elif not text:
             text = "(Ditto gave no answer.)"
         last = results[-1] if results else None

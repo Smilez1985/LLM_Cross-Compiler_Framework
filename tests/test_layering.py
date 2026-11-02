@@ -9,7 +9,8 @@ Each module belongs to a layer, and an import may only point to its own layer or
     3 domain        orchestrator.Core, orchestrator.runtime, orchestrator.rag, orchestrator.llm, orchestrator.evals;
                     llm and rag are libraries the Core uses and never import orchestrator.Core
     4 tool defs     orchestrator.tools.tools_*, framework_*, gui_bridge, gui_surface
-    5 adapters      orchestrator.cli, orchestrator.mcp_server (and a later orchestrator.mcp), orchestrator.gui with
+    5 adapters      orchestrator.cli (with orchestrator.acp_agent, the ACP agent it starts), orchestrator.mcp_server (and a
+                    later orchestrator.mcp), orchestrator.gui with
                     orchestrator.main (its start); an adapter never imports another adapter
 
 Every import counts: at module level, inside a function, under `if TYPE_CHECKING:`, and a module or a library named
@@ -46,14 +47,16 @@ _PREFIX_LAYERS = (("orchestrator.utils", BOTTOM), ("orchestrator.security", BOTT
                   ("orchestrator.Core", DOMAIN), ("orchestrator.runtime", DOMAIN), ("orchestrator.rag", DOMAIN),
                   ("orchestrator.llm", DOMAIN), ("orchestrator.evals", DOMAIN),
                   ("orchestrator.cli", ADAPTERS), ("orchestrator.mcp_server", ADAPTERS), ("orchestrator.mcp", ADAPTERS),
-                  ("orchestrator.gui", ADAPTERS), ("orchestrator.main", ADAPTERS))
+                  ("orchestrator.gui", ADAPTERS), ("orchestrator.main", ADAPTERS), ("orchestrator.acp_agent", ADAPTERS))
 # The SSH layer that lives in utils until orchestrator/remote takes it over (it imports remote, never the bottom).
 _SSH_LAYER = ("orchestrator.utils.ssh_trust",)
 # The tools package: tool definitions are tools_* plus the modules that put them together or reach the window.
 _TOOL_DEFINITIONS = ("framework_tools", "framework_prompts", "framework_resources", "gui_bridge", "gui_surface")
 # The adapters, each one unit: the GUI's start (orchestrator.main) belongs to the GUI.
 _ADAPTERS = (("orchestrator.cli", "cli"), ("orchestrator.mcp_server", "mcp"), ("orchestrator.mcp", "mcp"),
-             ("orchestrator.gui", "gui"), ("orchestrator.main", "gui"))
+             ("orchestrator.gui", "gui"), ("orchestrator.main", "gui"),
+             # Ditto as an ACP agent: the stdio front end `llm-cli acp` starts, part of the CLI adapter
+             ("orchestrator.acp_agent", "cli"))
 # Third-party libraries and the only places that may import them.
 THIRD_PARTY_HOMES = {
     "PySide6": ("orchestrator.gui", "orchestrator.main"),
@@ -62,6 +65,7 @@ THIRD_PARTY_HOMES = {
     "rich": ("orchestrator.cli",),
     "mcp": ("orchestrator.mcp_server", "orchestrator.mcp"),
     "uvicorn": ("orchestrator.mcp_server", "orchestrator.mcp"),
+    "acp": ("orchestrator.acp_agent",),
     "paramiko": ("orchestrator.utils.ssh_trust", "orchestrator.remote.transport"),
 }
 # Inside the domain: the language-model layer and the knowledge base are used by the Core and never import it.
