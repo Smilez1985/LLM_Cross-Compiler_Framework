@@ -1,19 +1,16 @@
 """
 The environment of a stdio MCP server: the variable that carries a stdio client's MCP token, the variable that names
-the channel of a server the framework hands one of the person's ACP agents, and how a client starts the server
-(launch_command).
+the channel of a server the framework hands one of the person's ACP agents.
 
 It has its own module so `llm-cli` can take the token out of the environment before any command runs without
-importing the token store (lazy loading); orchestrator.tools.mcp_tokens re-exports ENV_VAR. launch_command and
-installation_root live here (kernel layer) so the Core can build the stdio entry it hands an ACP agent
-(Core/acp_hosts.py) without importing the MCP adapter; orchestrator.mcp_server keeps both names and delegates here.
+importing the token store (lazy loading); orchestrator.tools.mcp_tokens re-exports ENV_VAR. How a client starts the
+server (launch_command, installation_root) lives in orchestrator/utils/stdio_programs.py, the one implementation the
+MCP server's entries, Ditto as an ACP agent and the entry the ACP client hands an agent (Core/acp_hosts.py) share;
+the two names here stay as deprecated delegates.
 """
 
-import ntpath
-import posixpath
 import re
-import sys
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 ENV_VAR = "LCF_MCP_TOKEN"      # the token of a stdio client, read once by `llm-cli mcp serve`
@@ -42,26 +39,18 @@ def checked_channel(value: Any) -> str:
 
 
 def installation_root() -> Path:
-    """The framework's installation (the folder that holds orchestrator/): what the client snippets put on
-    PYTHONPATH, for the CLI and the GUI alike."""
-    return Path(__file__).resolve().parents[2]
+    """Deprecated name: the one implementation is orchestrator/utils/stdio_programs.installation_root (shared by the
+    MCP server, Ditto as an ACP agent and the ACP client); this name stays for its callers."""
+    from orchestrator.utils.stdio_programs import installation_root as root
+    return root()
 
 
 def launch_command(app_root: Path, windows: Optional[bool] = None) -> Dict[str, Any]:
-    """How a client starts this server over stdio (the current interpreter, so the venv is used).
-    -P keeps the folder the client starts it in off sys.path; the installation comes from PYTHONPATH. The POSIX
-    variant follows POSIX path rules on every host: a path the caller made on Windows ('\\opt\\llm' from
-    Path('/opt/llm')) is written with '/' again."""
-    windows = (sys.platform == "win32") if windows is None else windows
-    root = PureWindowsPath(app_root).as_posix() if not windows and isinstance(app_root, PureWindowsPath) \
-        else str(app_root)
-    separator = ";" if windows else ":"
-    # A relative entry, or one that the separator splits, would be looked up in the working directory.
-    if separator in root or not (ntpath if windows else posixpath).isabs(root):
-        raise ValueError(f"The installation path {root!r} cannot be put on PYTHONPATH safely (it is relative or "
-                         f"contains '{separator}'); install the framework to another folder.")
-    return {"command": sys.executable, "args": ["-P", "-m", "orchestrator.cli", "-q", "mcp", "serve"],
-            "cwd": root, "env": {"PYTHONPATH": root}}
+    """Deprecated name: how a client starts the MCP server over stdio. The one implementation is
+    orchestrator/utils/stdio_programs.launch_command (its default command is `mcp serve`); this name stays for its
+    callers."""
+    from orchestrator.utils.stdio_programs import launch_command as launch
+    return launch(app_root, windows)
 
 
 __all__ = ["CHANNEL_ENV", "CHANNEL_PREFIX", "ENV_VAR", "channel_label", "checked_channel", "installation_root",

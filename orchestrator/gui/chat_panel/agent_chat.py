@@ -338,10 +338,26 @@ class AgentChat(QObject):
         self.running = True
         self.current_name = name
         self.live.reset(name)
+        session = self.sessions.get(agent_id)
+        if session is None or not session.running():
+            self.live.steps.setText(self.starting_line(agent_id, name))
         self.live.setVisible(True)
         self.busy_changed.emit(True)
         thread = threading.Thread(target=self._turn, args=(agent_id, message), name="acp-turn", daemon=True)
         thread.start()
+
+    def starting_line(self, agent_id: str, name: str) -> str:
+        """The wait line while the agent starts: the first start of a freshly added npx/uvx agent may download its
+        package and take up to FIRST_START_TIMEOUT, which the line says."""
+        from orchestrator.Core.acp_client import FIRST_START_TIMEOUT
+        try:
+            first = self.store.first_start(self.store.get(agent_id))
+        except Exception:  # noqa: BLE001 - an agent that cannot be read: the start says why
+            first = False
+        if first:
+            return ui_text("acp.chat.first_start", self.lang, name=one_line(name),
+                           minutes=int(FIRST_START_TIMEOUT // 60))
+        return ui_text("acp.chat.starting", self.lang, name=one_line(name))
 
     def _turn(self, agent_id: str, message: str) -> None:
         from orchestrator.Core.acp_client import AgentSession

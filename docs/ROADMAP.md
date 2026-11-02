@@ -76,6 +76,10 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 | **Ditto's archive, phase 2**: facts from Ditto's own answers, export and import, snapshots. | planned |
 | **Saved conversation caches on disk**, only if the measurement shows that people often come back after the server slept. | planned |
 | **Ditto in editors (ACP): the MCP servers an editor passes.** A minimal MCP client for the stdio servers an editor hands to Ditto, used only for an entry the person enabled in the framework: their tools offered to the model under their own names, every call asked in the framework (no standing approval), its results marked as untrusted data, through the privacy filter and recorded in the audit log. Until then the entries are recorded and shown, and none is used. | planned |
+| **ACP agents in the MCP listing (read-only).** An MCP tool that lists the ACP agents the person added (name, kind, version, whether it needs the internet, labels only, never a path or a key), so an AI can name them; adding, signing in and starting stay the person's. | planned |
+| **ACP sessions that can be continued (`session/load`).** Ditto as an ACP agent offers `loadSession` and the ACP client resumes an agent's session when the agent offers it; today a session lives in memory for one connection. | planned |
+| **A real end-to-end run with a third-party ACP agent.** One registry agent (npx or uvx) added, signed in with its own sign-in and run through a turn that calls the framework's tools, on a computer with network access; the tests so far use a fake agent. | planned |
+| **The ACP setup guide**, after the ACP agent and client are accepted: a tested guide for Android Studio, Zed and JetBrains IDEs (the framework's MCP server in their agents, and Ditto as their ACP agent), linked from the existing docs; only what is missing is new. | planned |
 
 ### Board bundle, gateway, voice, MCP on the board
 

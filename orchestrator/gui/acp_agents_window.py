@@ -54,6 +54,20 @@ def run_in_worker(relay: _Relay, work: Callable[[], Any], then: Callable[[Any], 
     return thread
 
 
+def close_in_background(session: Any) -> threading.Thread:
+    """Closes an agent session on a worker thread: closing waits for the agent to stop (its input closed, then
+    terminate, then kill: several seconds for an agent that ignores its closed input), which the GUI thread never
+    does."""
+    def body():
+        try:
+            session.close()
+        except Exception as e:  # noqa: BLE001 - stopped by its PID in close(); nothing for the person to do
+            logger.warning(f"An agent did not stop cleanly: {type(e).__name__}")
+    thread = threading.Thread(target=body, name="acp-close", daemon=True)
+    thread.start()
+    return thread
+
+
 def _button(key: str, name: str, lang: str) -> QPushButton:
     button = QPushButton(button_text(ui_text(key, lang)))
     button.setObjectName(name)
@@ -387,7 +401,14 @@ class ManageAgentsWindow(QDialog):
         if not agent_id:
             self._say(ui_text("acp.select_first", self.lang))
             return
-        from orchestrator.Core.acp_client import AgentHost, AgentSession
+        from orchestrator.Core.acp_client import FIRST_START_TIMEOUT, AgentHost, AgentSession
+        try:
+            entry = self.store.get(agent_id)
+            if self.store.first_start(entry):   # the wait line of a first start that may download the package
+                self._say(ui_text("acp.chat.first_start", self.lang, name=one_line(entry.name),
+                                  minutes=int(FIRST_START_TIMEOUT // 60)))
+        except Exception:  # noqa: BLE001 - an agent that cannot be read: the start says why
+            pass
         self._set_busy(True)
         holder: dict = {}
 
@@ -402,7 +423,7 @@ class ManageAgentsWindow(QDialog):
             session = holder.get("session")
             if isinstance(result, Exception):
                 if session is not None:
-                    session.close()
+                    close_in_background(session)
                 self._failed(ui_text("acp.login", self.lang), result)
                 return
             self._choose_sign_in(holder["spec"], session, result)
@@ -411,7 +432,7 @@ class ManageAgentsWindow(QDialog):
     def _choose_sign_in(self, spec: Any, session: Any, methods: List[Any]) -> None:
         name = one_line(spec.entry.name)
         if not methods:
-            session.close()
+            close_in_background(session)
             self._say(ui_text("acp.login.none", self.lang, name=name))
             return
         dialog = QDialog(self)
@@ -435,11 +456,11 @@ class ManageAgentsWindow(QDialog):
         row.addWidget(cancel)
         layout.addLayout(row)
         if not dialog.exec() or choices.currentRow() < 0:
-            session.close()
+            close_in_background(session)
             return
         method = methods[choices.currentRow()]
         if method.type == "terminal":
-            session.close()
+            close_in_background(session)
             from orchestrator.Core.acp_client import open_console
             try:
                 open_console(spec, method, self.store)
@@ -450,7 +471,7 @@ class ManageAgentsWindow(QDialog):
             self._say(ui_text("acp.login.console", self.lang, name=name))
             return
         if method.type == "env_var":
-            session.close()
+            close_in_background(session)
             plain_box(self, "information", dialog.windowTitle(), ui_text("acp.login.keys", self.lang, name=name))
             for variable in method.variables:
                 if not self.store_key(variable):
@@ -460,7 +481,7 @@ class ManageAgentsWindow(QDialog):
         self._set_busy(True)
 
         def done(result: Any) -> None:
-            session.close()
+            close_in_background(session)
             self._set_busy(False)
             if isinstance(result, Exception):
                 self._failed(ui_text("acp.login", self.lang), result)
@@ -515,4 +536,5 @@ def open_agents_window(window: Any, framework: Any = None, panel: Any = None) ->
     return dialog
 
 
-__all__ = ["AddAgentDialog", "KeyDialog", "ManageAgentsWindow", "open_agents_window", "run_in_worker"]
+__all__ = ["AddAgentDialog", "KeyDialog", "ManageAgentsWindow", "close_in_background", "open_agents_window",
+           "run_in_worker"]

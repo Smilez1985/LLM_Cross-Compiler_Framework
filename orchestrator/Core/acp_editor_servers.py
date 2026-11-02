@@ -18,7 +18,6 @@ Enabling and disabling is the person's alone (no tool, no AI caller can).
 
 import hashlib
 import json
-import re
 import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -26,7 +25,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from orchestrator.utils.atomic import write_private
-from orchestrator.utils.helpers import redact_secrets
+from orchestrator.Core.acp_common import REDACTED, one_line, redact_secret_arguments  # noqa: F401 - REDACTED: kept name
 
 FILE_NAME = "acp_editor_servers.json"
 VERSION = 1
@@ -37,41 +36,16 @@ TRANSPORTS = ("stdio", "http", "sse", "acp")
 
 
 def _clean(value: Any, limit: int = MAX_TEXT) -> str:
-    """One line, secrets redacted, control characters removed, cut to `limit`."""
-    text = redact_secrets(str(value if value is not None else ""))
-    text = "".join(ch for ch in text if ch.isprintable())
-    return text[:limit]
-
-
-# A command-line flag or variable whose value is a secret (--api-key VALUE, --token=VALUE, GITHUB_TOKEN=VALUE): its
-# value is redacted even when it has no known token format (redact_secrets only knows the formats).
-_SECRET_NAME = re.compile(r"(token|secret|passw(or)?d|pass|pwd|api[-_]?key|apikey|auth|credential|bearer|cookie|"
-                          r"session|private[-_]?key)", re.I)
-_FLAG = re.compile(r"^(-{1,2}[A-Za-z][\w.-]*)$")
-_ASSIGNED = re.compile(r"^(-{0,2}[A-Za-z_][\w.-]*)=(.*)$", re.S)
-REDACTED = "REDACTED"
+    """One line, secrets redacted, control characters removed, cut to `limit` (Core/acp_common.one_line, the helper
+    the ACP client uses too)."""
+    return one_line(value, limit)
 
 
 def _clean_args(args: Iterable[Any]) -> List[str]:
     """The arguments as the person may see and the file may keep them: each cleaned, the value after a flag that names
-    a secret and the value of `--flag=VALUE` or `NAME=VALUE` with such a name replaced by REDACTED."""
-    out: List[str] = []
-    secret_next = False
-    for raw in list(args)[:MAX_ARGS]:
-        text = str(raw if raw is not None else "")
-        if secret_next and not _FLAG.match(text):
-            out.append(REDACTED)
-            secret_next = False
-            continue
-        secret_next = False
-        assigned = _ASSIGNED.match(text)
-        if assigned and _SECRET_NAME.search(assigned.group(1)):
-            out.append(_clean(f"{assigned.group(1)}={REDACTED}"))
-            continue
-        if _FLAG.match(text) and _SECRET_NAME.search(text):
-            secret_next = True
-        out.append(_clean(text))
-    return out
+    a secret and the value of `--flag=VALUE` or `NAME=VALUE` with such a name replaced by REDACTED
+    (Core/acp_common.redact_secret_arguments: the same secret-name rule as the ACP client's forms)."""
+    return [_clean(a) for a in redact_secret_arguments(list(args)[:MAX_ARGS])]
 
 
 def _now() -> str:
@@ -99,9 +73,14 @@ class EditorServer:
         return f"{self.name} ({self.transport}): {what}" if what else f"{self.name} ({self.transport})"
 
 
-def entry_id(transport: str, name: str, command: str, args: Iterable[str], url: str) -> str:
-    """The same server from the same editor setup keeps its id (and the person's choice) across sessions."""
-    raw = json.dumps([transport, name, command, list(args), url], ensure_ascii=False)
+def entry_id(transport: str, name: str, command: str, args: Iterable[str], url: str,
+             env_names: Iterable[str] = ()) -> str:
+    """The same server from the same editor setup keeps its id (and the person's choice) across sessions. What would
+    run is part of the id: the command, its arguments and the names of its variables (sorted; never their values), so
+    an entry the person enabled is a new entry, asked again, as soon as any of them changes (another command, an added
+    LD_PRELOAD). An entry without variables keeps the id it had before the names counted."""
+    names = sorted(set(env_names or ()))
+    raw = json.dumps([transport, name, command, list(args), url] + ([names] if names else []), ensure_ascii=False)
     return hashlib.sha256(raw.encode("utf-8", "surrogatepass")).hexdigest()[:16]
 
 
@@ -182,7 +161,8 @@ class EditorServers:
             by_id = {s.id: s for s in servers}
             result = []
             for item in seen:
-                key = entry_id(item["transport"], item["name"], item["command"], item["args"], item["url"])
+                key = entry_id(item["transport"], item["name"], item["command"], item["args"], item["url"],
+                               item["env_names"])
                 server = by_id.get(key)
                 if server is None:
                     server = EditorServer(id=key, first_seen=now, **item)

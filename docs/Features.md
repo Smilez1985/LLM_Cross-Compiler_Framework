@@ -2120,6 +2120,8 @@ permissions, the approvals and the audit log, as for any AI app over MCP. Ditto 
   arguments, whether it works without the internet, the variables of its keys).
 - npx and uvx agents run with the exact version the registry names, through the Node.js or uv on this computer. A
   binary is downloaded over HTTPS only with the registry's checksum; without one it is not downloaded.
+- The first start of a newly added npx or uvx agent may download its package first: it may take up to 5 minutes, and
+  the chat panel, the sign-in and the terminal say so while it starts. Every later start has one minute.
 - **Sign in...** uses the agent's own sign-in: its browser login (your provider's sign-in and second factor), its own
   login in a console window, or keys you store in the credential vault. **Store a key...** stores one key; it goes only
   to that agent.

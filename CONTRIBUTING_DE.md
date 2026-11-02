@@ -741,7 +741,7 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
   Freigaben, Signaturen, spec, ...); (4) Fachlogik: `Core/`, `runtime/`, `rag/`, `llm/`, `evals/`, wobei `llm` und `rag`
   nie `Core` importieren; (5) Tool-Definitionen: `tools/tools_*`, `framework_*`, `gui_bridge`, `gui_surface`; (6)
   Adapter: `cli.py` (mit `acp_agent.py`), `mcp_server.py`, `gui/` mit `main.py`, und kein Adapter importiert einen anderen. PySide6 gibt es
-  nur in der GUI, click und rich nur in der CLI, das ACP-SDK `acp` nur in `acp_agent.py`, mcp und uvicorn nur im MCP-Server, paramiko nur im SSH-Transport
+  nur in der GUI, click und rich nur in der CLI, das ACP-SDK `acp` nur in `acp_agent.py` und `Core/acp_client.py`, mcp und uvicorn nur im MCP-Server, paramiko nur im SSH-Transport
   (`remote/transport.py` und das `utils/ssh_trust.py`, aus dem er entstand). `tests/test_layering.py` liest jeden Import (auch in Funktionen,
   unter `TYPE_CHECKING` und Modulnamen, die `import_module`, `lazy_attributes` oder `LazyModule` bekommen). Was heute
   eine Regel bricht, steht in `tests/data/layering_allowlist.json`, jeder Eintrag mit seinem Grund und der Kette, die

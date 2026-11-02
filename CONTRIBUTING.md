@@ -700,7 +700,7 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   domain: `Core/`, `runtime/`, `rag/`, `llm/`, `evals/`, where `llm` and `rag` never import `Core`; (5) tool
   definitions: `tools/tools_*`, `framework_*`, `gui_bridge`, `gui_surface`; (6) adapters: `cli.py` (with `acp_agent.py`), `mcp_server.py`,
   `gui/` with `main.py`, and no adapter imports another. PySide6 lives only in the GUI, click and rich only in the CLI,
-  the ACP SDK `acp` only in `acp_agent.py`, mcp and uvicorn only in the MCP server, paramiko only in the SSH transport (`remote/transport.py` and the
+  the ACP SDK `acp` only in `acp_agent.py` and `Core/acp_client.py`, mcp and uvicorn only in the MCP server, paramiko only in the SSH transport (`remote/transport.py` and the
   `utils/ssh_trust.py` it grew out of). `tests/test_layering.py` reads every import (also inside functions, under `TYPE_CHECKING` and
   module names handed to `import_module`, `lazy_attributes` or `LazyModule`). What breaks a rule today stands in
   `tests/data/layering_allowlist.json`, each entry with its reason and the chain that removes it; the test fails on a

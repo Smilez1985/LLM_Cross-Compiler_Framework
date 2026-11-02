@@ -8887,6 +8887,7 @@ def agents_login(ctx: FrameworkContext, name: str, method_id: Optional[str], var
     try:
         spec = store.launch_spec(name, "cli")
         session = AgentSession(spec, AgentHost(), store, "cli")
+        _agent_start_line(spec)
         methods = session.start()
     except AgentError as e:
         _agent_fail(e)
@@ -8919,6 +8920,15 @@ def agents_login(ctx: FrameworkContext, name: str, method_id: Optional[str], var
         _agent_fail(e)
     finally:
         session.close()
+
+
+def _agent_start_line(spec) -> None:
+    """The wait line before an agent starts: the first start of a freshly added npx/uvx agent may download its package
+    first (up to FIRST_START_TIMEOUT), every later start is quick."""
+    from orchestrator.Core.acp_client import FIRST_START_TIMEOUT
+    if getattr(spec, "first_start", False):
+        console.print(f"{escape(spec.entry.name)} starts for the first time and may download its package first; this "
+                      f"can take up to {int(FIRST_START_TIMEOUT // 60)} minutes.")
 
 
 class _TerminalAgentHost:
@@ -8991,6 +9001,7 @@ def agents_run(ctx: FrameworkContext, name: str):
     except AgentError as e:
         _agent_fail(e)
     session = AgentSession(spec, _TerminalAgentHost(spec.entry.name), store, "cli")
+    _agent_start_line(spec)
     try:
         session.start()
         session.new_session()

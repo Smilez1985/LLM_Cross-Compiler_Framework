@@ -2343,6 +2343,9 @@ die Vorgabe im Chat.
   (das Programm, seine Argumente, ob es ohne Internet geht, die Variablen seiner Schlüssel).
 - npx- und uvx-Agenten laufen mit genau der Version, die die Registry nennt, über Node.js oder uv auf diesem Computer.
   Ein Binary wird nur über HTTPS mit der Prüfsumme der Registry heruntergeladen; ohne sie gar nicht.
+- Der erste Start eines neu hinzugefügten npx- oder uvx-Agenten lädt vielleicht erst sein Paket herunter: Er darf bis zu
+  5 Minuten dauern, und das Chat-Panel, die Anmeldung und das Terminal sagen das, während er startet. Jeder spätere Start
+  hat eine Minute.
 - **Anmelden...** nutzt die eigene Anmeldung des Agenten: seine Browser-Anmeldung (die Anmeldung deines Anbieters und
   den zweiten Faktor), seine eigene Anmeldung in einem Konsolenfenster oder Schlüssel, die du im Tresor für Zugangsdaten
   speicherst. **Schlüssel speichern...** speichert einen Schlüssel; er geht nur an diesen Agenten.

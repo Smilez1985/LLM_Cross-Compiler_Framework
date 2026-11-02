@@ -62,7 +62,6 @@ from acp.schema import (AgentCapabilities, AuthenticateResponse, AvailableComman
                         UnstructuredCommandInput)
 
 from orchestrator import __version__
-from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 
 logger = get_logger("AcpAgent")
@@ -91,12 +90,13 @@ SLASH_COMMANDS: Tuple[Tuple[str, str, str, str], ...] = (
     ("builds", "list_build_requests", "The build requests and how far they are", ""),
     ("mojo", "run_mojo_oracle", "Mojo's check of this computer and its setup", "an area to check, optional"),
 )
-_CLIENT_TEXT = re.compile(r"[^\w .,:;()+/@-]")
 
 
 def _label_text(value: Any, limit: int = 64) -> str:
-    """A self-reported value as one short, harmless line (secrets redacted first)."""
-    return _CLIENT_TEXT.sub("?", redact_secrets(str(value or ""))[:limit * 4])[:limit]
+    """Deprecated name: a self-reported value as one short, harmless line (secrets redacted first). The one
+    implementation is Core/acp_common.label, shared with the ACP client."""
+    from orchestrator.Core.acp_common import label
+    return label(value, limit)
 
 
 def tool_kind(spec: Any) -> str:

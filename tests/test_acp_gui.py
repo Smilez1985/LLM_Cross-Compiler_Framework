@@ -248,6 +248,25 @@ def test_the_registry_is_fetched_only_on_the_click(qapp, framework, monkeypatch)
     window.close()
 
 
+def test_the_sign_in_closes_the_agent_off_the_gui_thread(qapp, framework, monkeypatch):
+    """Closing an agent may wait for it to stop (up to several seconds for one that ignores its closed input); the
+    window's sign-in never does that on the GUI thread."""
+    import threading
+    from orchestrator.gui import acp_agents_window as module
+    window = module.ManageAgentsWindow(framework)
+    threads = []
+
+    class Session:
+        def close(self):
+            threads.append(threading.current_thread())
+
+    spec = SimpleNamespace(entry=SimpleNamespace(name="Fake Agent"))
+    window._choose_sign_in(spec, Session(), [])          # no sign-in methods: the started agent is closed again
+    assert wait_until(qapp, lambda: bool(threads), 10)
+    assert threads[0] is not threading.main_thread()
+    window.close()
+
+
 # --- the command line ------------------------------------------------------------------------------------------------
 
 def test_llm_cli_agents_add_list_and_run(framework, tmp_path, monkeypatch):

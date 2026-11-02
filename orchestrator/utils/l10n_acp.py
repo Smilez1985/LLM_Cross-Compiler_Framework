@@ -129,6 +129,8 @@ TEXTS = {
         "acp.chat.tool": "Tool call: {title} ({status})",
         "acp.chat.plan": "Plan: {entries}",
         "acp.chat.starting": "{name} is starting...",
+        "acp.chat.first_start": "{name} starts for the first time and may download its package first; this can take up "
+                                "to {minutes} minutes.",
         "acp.chat.notice": "{name}: {text}",
         "acp.chat.error": "{name}: {reason}",
         "acp.chat.stopped": "{name} stopped its turn.",
@@ -267,6 +269,8 @@ TEXTS = {
         "acp.chat.tool": "Werkzeugaufruf: {title} ({status})",
         "acp.chat.plan": "Plan: {entries}",
         "acp.chat.starting": "{name} startet...",
+        "acp.chat.first_start": "{name} startet zum ersten Mal und lädt dafür vielleicht erst sein Paket herunter; das "
+                                "kann bis zu {minutes} Minuten dauern.",
         "acp.chat.notice": "{name}: {text}",
         "acp.chat.error": "{name}: {reason}",
         "acp.chat.stopped": "{name} hat seinen Zug beendet.",

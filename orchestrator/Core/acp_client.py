@@ -27,25 +27,27 @@ import asyncio
 import concurrent.futures
 import contextlib
 import os
-import re
 import subprocess  # nosec B404 - the person's agent, started from its LaunchSpec argv (no shell)
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from orchestrator.Core.acp_common import SECRET_WORDS, SHORT_SECRET_WORDS, names_a_secret  # noqa: F401
 from orchestrator.Core.acp_hosts import PROTOCOL_VERSION, AgentError, LaunchSpec, clean_env
 from orchestrator.utils.logging import get_logger
 
 logger = get_logger("AcpClient")
 
 START_TIMEOUT = 60.0      # seconds for initialize and session/new
+# The first start of a freshly added npx or uvx agent: the runner may download the agent's package first, so its
+# initialize may take this long (the person sees a wait line meanwhile); every later start keeps START_TIMEOUT.
+FIRST_START_TIMEOUT = 300.0
 PROMPT_TIMEOUT = None     # a turn runs until the agent ends it or the person cancels it
 STOP_GRACE = 2.0          # seconds after the input is closed before terminate, and again before kill
 STDERR_TAIL = 4000        # the last characters of the agent's own log kept for a failure message
-SECRET_WORDS = ("password", "passwort", "secret", "token", "api key", "apikey", "api_key", "credential", "private key",
-                "passphrase", "otp", "2fa", "pin")
-SHORT_SECRET_WORDS = ("otp", "2fa", "pin")   # whole words only (looks_secret)
+# SECRET_WORDS and SHORT_SECRET_WORDS (imported above) are the secret-name rule of both ACP directions
+# (Core/acp_common.py); their names here stay for their callers.
 
 
 @dataclass(frozen=True)
@@ -126,16 +128,10 @@ def _content_text(content: Any) -> str:
 
 def looks_secret(*texts: Any) -> bool:
     """Whether a form (its message) or a field asks for something secret (by its name, title, description or
-    format). The long words count inside a word too ("accessToken"); the short ones (otp, 2fa, pin) only as words
-    of their own, so "mapping" or "footprint" is no secret."""
-    joined = " ".join(str(t or "") for t in texts).lower().replace("-", " ").replace("_", " ")
-    for word in SECRET_WORDS:
-        if word in SHORT_SECRET_WORDS:
-            if re.search(rf"(?<![a-z0-9]){re.escape(word)}(?![a-z0-9])", joined):
-                return True
-        elif word in joined:
-            return True
-    return False
+    format). Deprecated name: the one rule is Core/acp_common.names_a_secret, which Ditto as an ACP agent uses for an
+    editor's server arguments too (the long words count inside a word, "accessToken"; the short ones such as otp,
+    2fa, pin only as words of their own, so "mapping" or "footprint" is no secret)."""
+    return names_a_secret(*texts)
 
 
 def form_question(message: str, schema: Any) -> Optional[FormQuestion]:
@@ -329,11 +325,17 @@ class AgentSession:
 
     # --- starting ---------------------------------------------------------------------------------------------------
 
+    @property
+    def start_timeout(self) -> float:
+        """How long the start may take: FIRST_START_TIMEOUT for the first start of a freshly added npx or uvx agent
+        (its package may be downloaded first), START_TIMEOUT otherwise."""
+        return FIRST_START_TIMEOUT if getattr(self.spec, "first_start", False) else START_TIMEOUT
+
     def start(self) -> List[AuthMethod]:
         """Starts the process and initializes ACP v1; the sign-in methods the agent offers. AgentError when it does not
         start or speaks another version; a start that fails (also: no answer in time) stops the process it started."""
         try:
-            return self._run(self._start(), START_TIMEOUT)
+            return self._run(self._start(), self.start_timeout)
         except AgentError:
             if self._loop is not None and self.process is not None and not self._closed:
                 with contextlib.suppress(Exception):
@@ -382,6 +384,9 @@ class AgentSession:
             await self._stop()
             raise AgentError(f"{self.spec.entry.name} speaks ACP version {answer.protocol_version}; this framework "
                              f"speaks version {PROTOCOL_VERSION}.", "failed")
+        if getattr(self.spec, "first_start", False) and self.store is not None:
+            with contextlib.suppress(Exception):   # a list that cannot be written: the next start waits long again
+                self.store.mark_started(self.spec.entry)
         info = getattr(answer, "agent_info", None)
         self.agent_name = _outside(getattr(info, "title", None) or getattr(info, "name", "") or "", 100)
         self.auth_methods = [m for m in (self._method(m) for m in (answer.auth_methods or [])) if m is not None]
@@ -517,10 +522,19 @@ class AgentSession:
                 await asyncio.wait_for(process.wait(), STOP_GRACE)
 
     def _kill_now(self) -> None:
+        """Kills the agent's process (only this PID) and reaps it, so no zombie stays when the session's loop no
+        longer runs (its child watcher would have reaped it)."""
         process = self.process
-        if process is not None and process.returncode is None:
-            with contextlib.suppress(ProcessLookupError, OSError):
-                process.kill()
+        if process is None or process.returncode is not None:
+            return
+        popen = None
+        with contextlib.suppress(Exception):
+            popen = process._transport.get_extra_info("subprocess")   # the subprocess.Popen behind it
+        with contextlib.suppress(ProcessLookupError, OSError):
+            (popen or process).kill()
+        if popen is not None:
+            with contextlib.suppress(Exception):   # already reaped by the loop: nothing left to wait for
+                popen.wait(STOP_GRACE * 3)
 
     def _tail(self) -> str:
         """The end of the agent's own log, for the person (outside text, one line)."""

@@ -106,10 +106,10 @@ def require_person(actor: Any, what: str = "This") -> str:
 
 
 def _text(value: Any, limit: int = 300) -> str:
-    """A label from outside (the registry, an agent): one printable line, cut."""
-    text = " ".join(str(value or "").split())
-    text = "".join(ch for ch in text if ch.isprintable())
-    return text[:limit]
+    """A label from outside (the registry, an agent): one printable line, secrets redacted, cut. The one helper is
+    Core/acp_common.one_line, shared with Ditto as an ACP agent."""
+    from orchestrator.Core.acp_common import one_line
+    return one_line(value, limit)
 
 
 def _slug(name: str) -> str:
@@ -222,6 +222,7 @@ class AgentEntry:
     network: bool = True               # needs the network (offline mode refuses it)
     keys: List[str] = field(default_factory=list)   # variables whose values live in the credential vault
     added_at: str = ""
+    started: bool = False              # it answered a start once (an npx/uvx package is then in the runner's cache)
 
     def secret_name(self, variable: str) -> str:
         return f"{SECRET_PREFIX}{self.id}/{variable}"
@@ -267,6 +268,7 @@ class LaunchSpec:
     cwd: Path
     mcp_server: Dict[str, Any]
     channel: str
+    first_start: bool = False          # the first start of a freshly added npx/uvx agent (it may download first)
 
 
 def _command_line(argv: Sequence[str]) -> str:
@@ -653,10 +655,12 @@ class AgentStore:
 
     def mcp_entry(self, entry: AgentEntry) -> Dict[str, Any]:
         """The stdio entry of the framework's MCP server the agent gets in session/new: the current Python with
-        `-m orchestrator.cli -q mcp serve` (tools/mcp_env.launch_command), its PYTHONPATH, the framework home when it
-        is not the default one, and the channel label."""
-        from orchestrator.tools.mcp_env import CHANNEL_ENV, channel_label, installation_root, launch_command
-        launch = launch_command(installation_root())
+        `-m orchestrator.cli -q mcp serve` (utils/stdio_programs.launch_command, the launch every MCP client entry
+        of the framework uses), its PYTHONPATH, the framework home when it is not the default one, and the channel
+        label."""
+        from orchestrator.tools.mcp_env import CHANNEL_ENV, channel_label
+        from orchestrator.utils.stdio_programs import MCP_SERVE, installation_root, launch_command
+        launch = launch_command(installation_root(), command=MCP_SERVE)
         env = dict(launch.get("env") or {})
         source = self._environ if self._environ is not None else os.environ
         for name in ("LLM_FRAMEWORK_HOME", "LLM_FRAMEWORK_CONFIG_DIR"):
@@ -690,7 +694,24 @@ class AgentStore:
             argv = [str(program)] + list(entry.args)
         mcp = self.mcp_entry(entry)
         return LaunchSpec(entry=entry, argv=tuple(argv), env=self.clean_environment(entry), cwd=self.workspace(entry),
-                          mcp_server=mcp, channel=mcp["env"].get("LCF_MCP_CHANNEL", ""))
+                          mcp_server=mcp, channel=mcp["env"].get("LCF_MCP_CHANNEL", ""),
+                          first_start=self.first_start(entry))
+
+    @staticmethod
+    def first_start(entry: AgentEntry) -> bool:
+        """Whether the next start is the first one of a freshly added npx or uvx agent: its runner may download the
+        agent's package first, so the start may take FIRST_START_TIMEOUT (Core/acp_client.py) instead of the usual
+        START_TIMEOUT, and the person is told so."""
+        return entry.kind in ("npx", "uvx") and not entry.started
+
+    def mark_started(self, entry: AgentEntry) -> None:
+        """Notes that the agent answered a start (its next starts are quick again). Changes nothing else."""
+        with self._lock():
+            entries = self.list()
+            for item in entries:
+                if item.id == entry.id:
+                    item.started = True
+            self._save(entries)
 
     # --- removing ---------------------------------------------------------------------------------------------------
 
