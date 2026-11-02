@@ -187,6 +187,10 @@ class PermissionDialog(QDialog):
         self.btn_reject = make_button(ui_text("acp.perm.reject", lang))
         self.btn_reject.setObjectName("btn_acp_perm_reject")
         self.btn_reject.setDefault(True)
+        if not question.allow_option:   # only "always" or reject offered: no "Allow once" the client could send
+            self.btn_allow.setEnabled(False)
+            self.btn_allow.setToolTip(plain_tooltip(ui_text("acp.perm.no_once", lang)))
+            box.addWidget(text_label(ui_text("acp.perm.no_once", lang), lang, caption=True))
         self.btn_allow.clicked.connect(lambda: self._done("allow"))
         self.btn_reject.clicked.connect(lambda: self._done("reject"))
         row.addWidget(self.btn_allow)

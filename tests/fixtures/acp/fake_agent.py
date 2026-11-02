@@ -8,7 +8,8 @@
 - every prompt and the permission answers it got.
 
 Prompts it understands: "hello" (a streamed answer: two text chunks, a thought, a tool call with status updates, a
-plan), "ask" (a permission request with allow once / allow always / reject once; the answer is in its reply), "wait"
+plan), "ask" (a permission request with allow once / allow always / reject once; the answer is in its reply), "ask
+always" (a permission request with only allow always / reject once), "wait"
 (waits until the client cancels, then ends the turn as cancelled), "fs" (asks the client to read a file, which the
 client refuses), "form" and "secret form" (a form elicitation without and with a password field).
 
@@ -116,6 +117,13 @@ class FakeAgent:
             chosen = getattr(answer.outcome, "option_id", "cancelled")
             report("permission", chosen)
             await self.conn.session_update(session_id, acp.update_agent_message_text(f"answer={chosen}"))
+            return schema.PromptResponse(stop_reason="end_turn")
+        if text == "ask always":   # no "allow once": only "always" or reject
+            answer = await self.conn.request_permission(
+                session_id, schema.ToolCallUpdate(tool_call_id="t3", title="Delete every build"),
+                [schema.PermissionOption(option_id="always", name="Always", kind="allow_always"),
+                 schema.PermissionOption(option_id="no", name="Reject", kind="reject_once")])
+            report("permission", getattr(answer.outcome, "option_id", "cancelled"))
             return schema.PromptResponse(stop_reason="end_turn")
         if text == "wait":
             try:

@@ -488,3 +488,89 @@ def test_the_mcp_client_label_carries_the_channel():
     assert ClientTracker("stdio", channel="acp-client:Claude").channel == "acp-client:Claude"
     assert ClientTracker("http", channel="acp-client:Claude").channel == ""
     assert ClientLabel("x", "", "", "stdio", "none", ()).describe() == "x (self-reported) over stdio"
+
+
+# --- review findings (cs-acp-client-v) -------------------------------------------------------------------------------
+
+def test_an_agent_without_allow_once_is_never_told_allowed_and_the_audit_says_rejected(running, store):
+    """The agent offers only "always" and "reject": the person's question has no allow option, the client sends the
+    rejection and the audit records what was sent, never "allowed once"."""
+    session, host, report = running
+    host.answer = "allow"
+    session.prompt("ask always")
+    assert read(report)["permission"] == ["no"]
+    [question] = host.questions
+    assert question.allow_option == "" and question.has_always
+    whats = [str(r.get("arguments", {}).get("what", "")) for r in store.audit.rows]
+    assert any(w.startswith("permission rejected") for w in whats)
+    assert not any(w.startswith("permission allowed") for w in whats)
+
+
+def test_an_agent_that_does_not_answer_initialize_is_stopped(store, tmp_path, monkeypatch):
+    """A start that fails (here: no answer in time) leaves no agent process running."""
+    from orchestrator.Core import acp_client
+    monkeypatch.setattr(acp_client, "START_TIMEOUT", 1.0)
+    preview = store.preview_command("Silent", sys.executable, ["-c", "import time; time.sleep(60)"], local=True)
+    store.add(preview, "cli")
+    session = AgentSession(store.launch_spec("Silent", "cli"), Host(), store, "cli")
+    try:
+        with pytest.raises(AgentError):
+            session.start()
+        assert session.process is not None
+        for _ in range(100):
+            if session.process.returncode is not None:
+                break
+            time.sleep(0.05)
+        assert session.process.returncode is not None and not session.running()
+    finally:
+        session.close()
+
+
+def _try(call):
+    try:
+        return call()
+    except Exception as e:  # noqa: BLE001
+        return e
+
+
+def test_a_call_after_close_is_refused_instead_of_waiting_forever(store, tmp_path):
+    add_fake(store, tmp_path)
+    session = AgentSession(store.launch_spec("Fake Agent", "cli"), Host(), store, "cli")
+    session.start()
+    session.new_session()
+    session.close()
+    result = {}
+    thread = threading.Thread(target=lambda: result.setdefault("r", _try(lambda: session.prompt("hello"))),
+                              daemon=True)
+    thread.start()
+    thread.join(10)
+    assert not thread.is_alive() and isinstance(result["r"], AgentError)
+
+
+def test_a_form_whose_message_asks_for_a_secret_is_declined_and_short_words_are_whole_words():
+    from types import SimpleNamespace
+
+    from orchestrator.Core.acp_client import form_question
+    schema = SimpleNamespace(properties={"value": SimpleNamespace(type="string", title="Value")})
+    assert form_question("Paste your API token here", schema) is None
+    assert form_question("Which board?", schema) is not None
+    assert looks_secret("PIN") and looks_secret("one-time OTP") and looks_secret("accessToken")
+    for harmless in ("Board mapping", "Shipping", "Spinner speed", "Footprint", "Opinion"):
+        assert not looks_secret(harmless), harmless
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the display variables of a POSIX desktop")
+def test_the_agent_and_its_console_sign_in_get_the_desktop_display(store, tmp_path):
+    """The browser sign-in (OAuth with the provider's second factor) and the console window need the person's
+    display; the display variables are no secret and go along, nothing else of the framework's environment."""
+    from orchestrator.Core.acp_client import login_env
+    display = {"DISPLAY": ":0", "WAYLAND_DISPLAY": "wayland-0", "XDG_RUNTIME_DIR": str(tmp_path / "run"),
+               "XAUTHORITY": str(tmp_path / "xauth"), "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1/bus"}
+    store._environ = environment(tmp_path, **display)
+    add_fake(store, tmp_path)
+    spec = store.launch_spec("Fake Agent", "cli")
+    for name, value in display.items():
+        assert spec.env[name] == value
+    method = AuthMethod(id="console", name="Console", type="terminal", args=("--login",))
+    env = login_env(spec, method, store)
+    assert env["DISPLAY"] == ":0" and "OPENAI_API_KEY" not in env and "LCF_MCP_TOKEN" not in env

@@ -163,6 +163,29 @@ def test_the_permission_dialog_offers_once_and_reject_and_points_to_the_approval
     assert dialog.answer == "allow"
 
 
+def test_an_agent_without_allow_once_gets_no_allow_button(qapp):
+    """The agent offers only "always" and "reject": the dialog offers no "Allow once" the client could not send."""
+    from orchestrator.Core.acp_client import PermissionQuestion
+    from orchestrator.gui.chat_panel.agent_chat import PermissionDialog
+    dialog = PermissionDialog("Fake Agent", PermissionQuestion("Delete every build", "", True, "", "no"),
+                              open_approvals=lambda: None)
+    assert not dialog.btn_allow.isEnabled() and dialog.btn_reject.isDefault()
+    dialog.btn_allow.click()
+    assert dialog.answer == "reject"
+
+
+def test_the_terminal_does_not_ask_allow_once_when_the_agent_offers_none(monkeypatch):
+    from orchestrator import cli
+    from orchestrator.Core.acp_client import PermissionQuestion
+    asked = []
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    monkeypatch.setattr(cli.click, "confirm", lambda *a, **k: asked.append(a) or True)
+    host = cli._TerminalAgentHost("Fake Agent")
+    assert host.ask_permission(PermissionQuestion("Delete every build", "", True, "", "no")) == "reject"
+    assert asked == []
+    assert host.ask_permission(PermissionQuestion("Delete a build", "", True, "yes", "no")) == "allow"
+
+
 # --- the window ------------------------------------------------------------------------------------------------------
 
 def test_the_window_adds_an_own_command_after_the_question_and_removes_it_through_the_list(qapp, framework, tmp_path,

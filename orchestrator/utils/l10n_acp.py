@@ -106,6 +106,8 @@ TEXTS = {
         "acp.perm.always": "Standing approvals...",
         "acp.perm.always_tip": "The agent also offers 'always'. The framework never chooses it for you; standing "
                                "approvals are made in their own window.",
+        "acp.perm.no_once": "The agent offers no 'allow once' for this, only 'always' or reject. The framework never "
+                            "chooses 'always', so only Reject is possible here.",
         "acp.form.title": "{name} asks",
         "acp.form.send": "Send",
         "acp.form.cancel": "Do not answer",
@@ -211,6 +213,8 @@ TEXTS = {
         "acp.perm.always": "Dauerhafte Freigaben...",
         "acp.perm.always_tip": "Der Agent bietet auch „immer“ an. Das Framework wählt das nie für dich; dauerhafte "
                                "Freigaben entstehen in ihrem eigenen Fenster.",
+        "acp.perm.no_once": "Der Agent bietet hierfür kein „einmal erlauben“ an, nur „immer“ oder ablehnen. Das "
+                            "Framework wählt nie „immer“, darum ist hier nur Ablehnen möglich.",
         "acp.form.title": "{name} fragt",
         "acp.form.send": "Senden",
         "acp.form.cancel": "Nicht antworten",

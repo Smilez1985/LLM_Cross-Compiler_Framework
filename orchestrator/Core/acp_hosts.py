@@ -15,8 +15,8 @@ This module is Qt-free and imports the ACP SDK nowhere (Core/acp_client.py does,
   registry names (never "latest" or a range: refused otherwise); a binary is downloaded over HTTPS only, with the
   sha256 the registry gives (no checksum, no download: refused with a plain reason), through the framework's one
   pinned downloader and the one disk rule (Core/disk_plan.download_rule);
-- the start of an agent (`launch_spec`): a CLEAN environment (PATH, HOME and the locale; nothing else of the
-  framework's environment) plus that one agent's own keys from the credential vault (`acp/<agent id>/<VARIABLE>`),
+- the start of an agent (`launch_spec`): a CLEAN environment (PATH, HOME, the locale and the desktop's display
+  variables, so its browser sign-in reaches the person's screen; nothing else of the framework's environment) plus that one agent's own keys from the credential vault (`acp/<agent id>/<VARIABLE>`),
   the working folder `acp/workspaces/<agent id>` under the framework home (never the person's home), and the stdio
   entry of the framework's MCP server with its channel label "acp-client:<agent name>";
 - removal through Core/deletion (the full list and the person's yes; the trash or for good).
@@ -65,7 +65,10 @@ SECRET_PREFIX = "acp/"
 
 # The clean environment of an agent: these, when set, and nothing else of the framework's own environment.
 POSIX_BASICS = ("PATH", "HOME", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LC_NUMERIC", "LC_TIME",
-                "LC_COLLATE", "LC_MONETARY", "TZ", "TERM", "TMPDIR")
+                "LC_COLLATE", "LC_MONETARY", "TZ", "TERM", "TMPDIR",
+                # the person's desktop (no secret): the agent's browser sign-in and the console window of its own
+                # login open on the person's screen only with these
+                "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
 WINDOWS_BASICS = ("PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "TEMP", "TMP", "USERPROFILE",
                   "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES",
                   "PROGRAMFILES(X86)", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "LANG", "TZ")

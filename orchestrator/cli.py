@@ -8815,6 +8815,10 @@ class _TerminalAgentHost:
     def ask_permission(self, question) -> str:
         with self.lock:
             click.echo()
+            if not question.allow_option:   # only "always" or reject offered: nothing to allow once
+                click.echo(f"{self.name} wants to: {_printable(question.title)}. It offers no 'allow once' for "
+                           "this, only 'always', which the framework never chooses: rejected.")
+                return "reject"
             if question.has_always:
                 click.echo("(Its 'always' option is not offered here: standing approvals are made in the "
                            "framework's approvals.)")

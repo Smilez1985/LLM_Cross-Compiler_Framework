@@ -27,6 +27,7 @@ import asyncio
 import concurrent.futures
 import contextlib
 import os
+import re
 import subprocess  # nosec B404 - the person's agent, started from its LaunchSpec argv (no shell)
 import threading
 from dataclasses import dataclass, field
@@ -44,6 +45,7 @@ STOP_GRACE = 2.0          # seconds after the input is closed before terminate, 
 STDERR_TAIL = 4000        # the last characters of the agent's own log kept for a failure message
 SECRET_WORDS = ("password", "passwort", "secret", "token", "api key", "apikey", "api_key", "credential", "private key",
                 "passphrase", "otp", "2fa", "pin")
+SHORT_SECRET_WORDS = ("otp", "2fa", "pin")   # whole words only (looks_secret)
 
 
 @dataclass(frozen=True)
@@ -123,13 +125,24 @@ def _content_text(content: Any) -> str:
 
 
 def looks_secret(*texts: Any) -> bool:
-    """Whether a form field asks for something secret (by its name, title, description or format)."""
+    """Whether a form (its message) or a field asks for something secret (by its name, title, description or
+    format). The long words count inside a word too ("accessToken"); the short ones (otp, 2fa, pin) only as words
+    of their own, so "mapping" or "footprint" is no secret."""
     joined = " ".join(str(t or "") for t in texts).lower().replace("-", " ").replace("_", " ")
-    return any(word in joined for word in SECRET_WORDS)
+    for word in SECRET_WORDS:
+        if word in SHORT_SECRET_WORDS:
+            if re.search(rf"(?<![a-z0-9]){re.escape(word)}(?![a-z0-9])", joined):
+                return True
+        elif word in joined:
+            return True
+    return False
 
 
 def form_question(message: str, schema: Any) -> Optional[FormQuestion]:
-    """The form as plain fields; None when any field looks secret or is no plain field (it is declined)."""
+    """The form as plain fields; None when its message or any field looks secret or a field is no plain field (it
+    is declined)."""
+    if looks_secret(message):
+        return None
     fields: List[Tuple[str, str, str]] = []
     choices: Dict[str, Tuple[str, ...]] = {}
     for name, prop in (getattr(schema, "properties", None) or {}).items():
@@ -168,11 +181,14 @@ class _Client:
                                       allow_option=allow.option_id if allow else "",
                                       reject_option=reject.option_id if reject else "")
         answer = await self.session._ask(self.session.host.ask_permission, question)
-        self.session._permission_answered(question, answer)
+        # What is sent decides the audit: an "allow" for an agent that offers no "allow once" becomes its rejection.
         if answer == "allow" and allow is not None:
+            self.session._permission_answered(question, "allow")
             return RequestPermissionResponse(outcome=AllowedOutcome(outcome="selected", option_id=allow.option_id))
         if answer in ("allow", "reject") and reject is not None:
+            self.session._permission_answered(question, "reject")
             return RequestPermissionResponse(outcome=AllowedOutcome(outcome="selected", option_id=reject.option_id))
+        self.session._permission_answered(question, None)
         return RequestPermissionResponse(outcome=DeniedOutcome(outcome="cancelled"))
 
     async def create_elicitation(self, message: str, mode: Any, **kwargs: Any):
@@ -251,6 +267,9 @@ class AgentSession:
     # --- the loop ---------------------------------------------------------------------------------------------------
 
     def _run(self, coro: Any, timeout: Optional[float]) -> Any:
+        if self._closed:   # the loop is stopped: a call now would wait forever
+            coro.close()
+            raise AgentError(f"{self.spec.entry.name} was stopped. Start it again.", "failed")
         if self._loop is None:
             self._loop = asyncio.new_event_loop()
             self._thread = threading.Thread(target=self._loop.run_forever, name=f"acp-{self.spec.entry.id}",
@@ -312,8 +331,16 @@ class AgentSession:
 
     def start(self) -> List[AuthMethod]:
         """Starts the process and initializes ACP v1; the sign-in methods the agent offers. AgentError when it does not
-        start or speaks another version."""
-        return self._run(self._start(), START_TIMEOUT)
+        start or speaks another version; a start that fails (also: no answer in time) stops the process it started."""
+        try:
+            return self._run(self._start(), START_TIMEOUT)
+        except AgentError:
+            if self._loop is not None and self.process is not None and not self._closed:
+                with contextlib.suppress(Exception):
+                    asyncio.run_coroutine_threadsafe(self._stop(), self._loop).result(STOP_GRACE * 3 + 2)
+                if self.process.returncode is None:
+                    self._kill_now()
+            raise
 
     async def _start(self) -> List[AuthMethod]:
         import acp
