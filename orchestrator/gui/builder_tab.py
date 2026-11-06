@@ -750,7 +750,8 @@ class BuilderTab(QWidget):
                                    signer=lambda: board_ops.framework_signer(self.framework),
                                    audit=lambda: device_audit(self.framework, home))
         except Exception as e:  # noqa: BLE001 - the folder could not be written: the person reads why
-            plain_box(self, "warning", ui_text("deploy.kit.title"), ui_text("deploy.kit.failed", reason=str(e)))
+            reason = e.text() if callable(getattr(e, "text", None)) else str(e)   # a refusal in the person's words
+            plain_box(self, "warning", ui_text("deploy.kit.title"), ui_text("deploy.kit.failed", reason=reason))
             return None
         said = (ui_text("deploy.kit.paired", expires=kit.offer.expires_at) if kit.pairing
                 else kit.problem or ui_text("deploy.kit.unpaired"))
@@ -789,16 +790,14 @@ class BuilderTab(QWidget):
                                     audit=lambda: device_audit(self.framework, state_dir(self.framework)))
             self._probe_id = imported.probe_id  # the build the tab starts next is planned for this board
             self._log(ui_text("deploy.import.done", probe_id=imported.probe_id, label=imported.info.label))
-            done = imported.pairing.done
-            if done is not None:
-                self._log(ui_text("deploy.import.paired", device_id=done.device_id, tier=done.tier))
-            elif imported.pairing.message:
-                self._log(ui_text("deploy.import.pairing", message=imported.pairing.message))
+            if imported.pairing.state != "none":   # paired, paired before, or refused: in the person's language
+                self._log(ui_text("deploy.import.pairing", message=imported.pairing.text()))
             if imported.profile.needs_reprobe:
                 self._log(ui_text("deploy.import.reprobe"))
         except Exception as e:  # not a probe file the framework can read: the match below still runs
             self._probe_id = None
-            self._log(ui_text("deploy.import.failed", reason=str(e)))
+            text = getattr(e, "text", None)   # PairedButNotStored: the board IS paired, only its data is missing
+            self._log(text() if callable(text) else ui_text("deploy.import.failed", reason=str(e)))
             if getattr(e, "next", ""):   # the next step, as `llmcf scan --import` prints it
                 self._log(str(e.next))
         self._load_probe_config(Path(path))

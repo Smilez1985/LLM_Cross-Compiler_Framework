@@ -559,7 +559,11 @@ class TestShellEquivalence:
         outside = [ln for ln in code if ln not in body]
         assert outside == ['SUDO_PATHS="/usr/bin/sudo /bin/sudo /usr/local/bin/sudo /usr/sbin/sudo"'], outside
         sudo_runs = [ln.strip() for ln in text.splitlines() if '"$(f "$s")"' in ln]
-        assert sudo_runs == ['$TIMEOUT "$(f "$s")" -k -n true </dev/null >/dev/null 2>&1'], sudo_runs
+        # Probe 3.4.0 (changed on purpose): run as root through sudo or doas, the same check runs as the calling
+        # account (root becomes it without a password; -n still never prompts), so SUDO is that account's fact.
+        assert sudo_runs == ['if $TIMEOUT "$(f "$s")" -n -u "$SUDO_ACCOUNT" "$(f "$s")" -k -n true </dev/null '
+                             '>/dev/null 2>&1; then',
+                             '$TIMEOUT "$(f "$s")" -k -n true </dev/null >/dev/null 2>&1'], sudo_runs
         assert code and all(ln in body for ln in code if ln not in outside), "sudo only inside the opt-in install helper"
         reads = [ln for ln in text.replace(body, "").splitlines()
                  if not ln.lstrip().startswith("#") and re.search(r"(^|[;&|]\s*)read\s", ln.strip())]

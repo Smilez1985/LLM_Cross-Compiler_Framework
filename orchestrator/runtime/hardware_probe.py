@@ -2486,12 +2486,21 @@ class Probe:
 
     def _sudo(self):
         """root, absent, nopasswd or password: `sudo -k -n true` never prompts and never reads a password (-n), and
-        ignores credentials cached in this terminal (-k: a password typed a minute ago is no NOPASSWD rule)."""
-        if self._uid() == 0:
+        ignores credentials cached in this terminal (-k: a password typed a minute ago is no NOPASSWD rule). Run as
+        root through sudo or doas (the probe kit's pairing), the fact is the calling ACCOUNT's (invoking_account): the
+        same check run as that account (`sudo -n -u ACCOUNT sudo -k -n true`; root needs no password to become it),
+        and 'password' whenever that cannot be checked (conservative: the board's facts never promise more than the
+        account has). Only a real root login without such an account records root."""
+        account = invoking_account(self.env) if self._uid() == 0 else None
+        if self._uid() == 0 and not account:
             return "root"
         sudo = next((p for p in SUDO_PATHS if self.exists(p)), None)
         if sudo is None:
             return "absent"
+        if account:
+            rc, _out, _err = self.run([self.path(sudo), "-n", "-u", account, self.path(sudo), "-k", "-n", "true"],
+                                      10)
+            return "nopasswd" if rc == 0 else "password"
         rc, _out, _err = self.run([self.path(sudo), "-k", "-n", "true"], 10)
         if rc == -1:
             self.warn("not_determined", "SUDO")
@@ -2794,6 +2803,8 @@ PAIR_HOST_KEYS = (("ed25519", "PAIR_HOSTKEY_ED25519", "/etc/ssh/ssh_host_ed25519
 PAIR_TEXTS = {
     "installed": "Paired: the framework's key line and signing key are in place; import the result file on your "
                  "computer to finish the pairing.",
+    "installed-code": "Paired by code: the framework's key line and signing key are in place; the framework has "
+                      "finished the pairing already (importing the result file brings the hardware data).",
     "not-root": "Pairing was skipped: the probe did not run with sudo. The hardware data is complete; import the file "
                 "as usual, or run the probe again with sudo to pair this board.",
     "account": "Pairing was skipped: the probe could not tell which board account to pair (run it with sudo from that "
@@ -2806,6 +2817,19 @@ PAIR_TEXTS = {
     "opted-out": "Pairing is switched off for this probe kit. The hardware data is complete.",
 }
 _PAIR_ACCOUNT = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._-]{0,63}$")
+# The root step's time limit (both probes; a board's sshd -t and reload take seconds, never minutes).
+PAIR_STEP_SECONDS = 300
+
+
+def invoking_account(env=None):
+    """The board account that started the probe as root: SUDO_USER (sudo), else DOAS_USER (doas, Alpine's default);
+    None for a real root login or a name that is not a plain account name."""
+    env = os.environ if env is None else env
+    for name in ("SUDO_USER", "DOAS_USER"):
+        account = env.get(name) or ""
+        if account:
+            return account if _PAIR_ACCOUNT.match(account) and account != "root" else None
+    return None
 
 
 def host_key_fingerprint(line, types):
@@ -2860,7 +2884,7 @@ def pair(kit, root=None, account=None, euid=None, run=None, env=None):
         euid = os.geteuid() if hasattr(os, "geteuid") else -1
     if euid != 0:
         return skipped("not-root")
-    account = account or env.get("SUDO_USER") or ""
+    account = account or invoking_account(env) or ""
     if not _PAIR_ACCOUNT.match(account) or account == "root":
         return skipped("account")
     fingerprints = {}
@@ -2881,7 +2905,7 @@ def pair(kit, root=None, account=None, euid=None, run=None, env=None):
     try:
         with open(gate, "rb") as program:
             done = run(["sh", step], stdin=program, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=step_env,
-                       timeout=300, check=False)
+                       timeout=PAIR_STEP_SECONDS, check=False)
         out = (done.stdout or b"").decode("ascii", "replace")
     except (OSError, subprocess.SubprocessError):
         return skipped("sh", "failed")
@@ -2909,10 +2933,11 @@ def with_pairing(values, pairing):
     return out
 
 
-def pairing_text(pairing):
-    """The person's line about the pairing (stderr of the probe)."""
+def pairing_text(pairing, by_code=False):
+    """The person's line about the pairing (stderr of the probe); `by_code`: the pairing by code, which the framework
+    finished already."""
     if pairing.get("PAIR_STATE") == "installed":
-        return PAIR_TEXTS["installed"]
+        return PAIR_TEXTS["installed-code" if by_code else "installed"]
     word = pairing.get("PAIR_REASON", "unknown")
     if word in PAIR_TEXTS:
         return PAIR_TEXTS[word]
@@ -2930,29 +2955,64 @@ def render_json(values):
     return json.dumps(values, indent=2, ensure_ascii=True) + "\n"
 
 
-def pair_by_code(version=None):
-    """--pair-code (run with sudo): llmcf-pair (next to this script, else on PATH) shows an 8-digit code on this
-    console and waits at most 10 minutes for the framework on a local link (a cable straight to the computer, the
-    computer's hotspot, this board's WLAN or the own network; never the internet). The person types the code into the
-    framework; the content it then sends (its public key line and signer files) goes to the probe's pairing install,
-    pair_install_content(path), the install of a probe kit's content. The identity llmcf-pair sends holds the probe's
-    version and the sudo account only (never a host name or an address). Returns 0 when paired and installed."""
+# The pairing content llmcf-pair receives (the framework's remote/pair_pake.py pairing_content): at most this size.
+PAIR_CONTENT_MAX = 4 * 1024 * 1024
+
+
+def pair_install_content(path, account=None, root=None, euid=None, run=None, env=None):
+    """The probe's install of the framework's pairing content (pairing by code: the JSON file llmcf-pair received).
+    Its offer's nonce, the probe kit's root step (root_step_b64) and the gate program (gate_b64) are written as a probe
+    kit's pairing folder in a private temporary folder and handed to pair(), the kit's own pairing step: the same
+    root-owned key line and signer files, the same checks, the same PAIR_* block. No second install. The folder is
+    removed afterwards (a failure to remove it is reported). Returns pair()'s block; skipped/no-kit when the content
+    is not the framework's."""
+    import base64
     import tempfile
-    if os.environ.get("HW_PROBE_SYSROOT"):
-        sys.stderr.write("[PROBE] Pairing by code is not run against a sysroot.\n")
-        return 1
+    try:
+        with open(path, "rb") as f:
+            data = f.read(PAIR_CONTENT_MAX + 1)
+        content = json.loads(data.decode("utf-8")) if len(data) <= PAIR_CONTENT_MAX else None
+        nonce = content.get("nonce") if isinstance(content, dict) else None
+        step = base64.b64decode(content["root_step_b64"], validate=True)
+        gate = base64.b64decode(content["gate_b64"], validate=True)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return {"PAIR_STATE": "skipped", "PAIR_REASON": "no-kit"}
+    if not isinstance(nonce, str) or not re.match(r"^[0-9a-f]{32}$", nonce) or not step or not gate:
+        return {"PAIR_STATE": "skipped", "PAIR_REASON": "no-kit"}
+    folder = tempfile.mkdtemp(prefix="llmcf-kit.")
+    try:
+        for name, body in (("nonce", (nonce + "\n").encode("ascii")), ("root-board.sh", step), ("llmcf-gate", gate)):
+            with open(os.path.join(folder, name), "wb") as f:
+                f.write(body)
+        return pair(folder, root=root, account=account, euid=euid, run=run, env=env)
+    finally:
+        try:
+            shutil.rmtree(folder)
+        except OSError as e:
+            sys.stderr.write("[PROBE] The private pairing folder could not be removed: {}\n".format(e.strerror or e))
+
+
+def pair_by_code(version=None, account=None):
+    """--pair-code (run with sudo or doas): llmcf-pair (next to this script, else on PATH) shows an 8-digit code on
+    this console and waits at most 10 minutes for the framework on a local link (a cable straight to the computer, the
+    computer's hotspot, this board's WLAN or the own network; never the internet). The person types the code into the
+    framework; the content it then sends goes to pair_install_content(path), which installs it exactly as a probe
+    kit's pairing does. The identity llmcf-pair sends holds the probe's version and the calling account only (never a
+    host name or an address). Returns the pairing block for the result (PAIR_*), or None when no pairing came about
+    (no llmcf-pair, the window ended, wrong codes)."""
+    import tempfile
     if not hasattr(os, "geteuid") or os.geteuid() != 0:
         sys.stderr.write("[PROBE] Pairing by code needs the probe run as root (it installs root-owned files).\n")
-        return 1
+        return {"PAIR_STATE": "skipped", "PAIR_REASON": "not-root"}
     here = os.path.dirname(os.path.abspath(__file__))
     binary = os.path.join(here, "llmcf-pair")
     if not os.access(binary, os.X_OK):
         binary = shutil.which("llmcf-pair") or ""
     if not binary:
         sys.stderr.write("[PROBE] llmcf-pair is not next to this script or on PATH: no pairing by code.\n")
-        return 1
-    account = os.environ.get("SUDO_USER", "")
-    if not re.fullmatch(r"[A-Za-z0-9._][A-Za-z0-9._-]*", account or "") or account == "root":
+        return None
+    account = account or invoking_account() or ""
+    if not _PAIR_ACCOUNT.match(account) or account == "root":
         account = ""
     folder = tempfile.mkdtemp(prefix="llmcf-pair.")
     try:
@@ -2963,12 +3023,8 @@ def pair_by_code(version=None):
         code = subprocess.call([binary, "announce", "--out", content, "--identity", identity])
         if code != 0:
             sys.stderr.write("[PROBE] Not paired (llmcf-pair ended with {}).\n".format(code))
-            return 1
-        install = globals().get("pair_install_content")
-        if install is None:
-            sys.stderr.write("[PROBE] This probe has no pairing install; the framework's content was not installed.\n")
-            return 1
-        return 0 if install(content) else 1
+            return None
+        return pair_install_content(content, account=account or None)
     finally:
         try:
             shutil.rmtree(folder)
@@ -3000,10 +3056,16 @@ def main(argv=None):
     sections = [s for s in SECTIONS if not (args.no_toolchain and s == "toolchain")]
     values = collect(sections=sections, disk_path=args.disk_path)
     kit = None if args.no_pair else (args.pair_kit or find_pair_kit())
-    if kit:
+    pairing = None
+    if args.pair_code:   # pairing by code (the person chose it): it installs like the kit and reports like the kit
+        pairing = pair_by_code(account=args.pair_account)
+        if pairing is None:
+            sys.stderr.write("[PROBE] Pairing by code did not finish; the profile is written without it.\n")
+    elif kit:
         pairing = pair(kit, account=args.pair_account)
+    if pairing:
         values = with_pairing(values, pairing)
-        sys.stderr.write("[PROBE] " + pairing_text(pairing) + "\n")
+        sys.stderr.write("[PROBE] " + pairing_text(pairing, by_code=args.pair_code) + "\n")
     text = render_json(values) if args.json else render_text(values)
     missing = missing_required(values)
     if args.output == "-":
@@ -3017,8 +3079,6 @@ def main(argv=None):
             sys.stderr.write("[PROBE] cannot write {}: {}\n".format(args.output, e.strerror or e))
             return 1
         sys.stderr.write("[PROBE] Wrote {} ({} keys).\n".format(args.output, len(values)))
-    if args.pair_code and pair_by_code() != 0:
-        sys.stderr.write("[PROBE] Pairing by code did not finish; the profile above is written.\n")
     if missing:
         sys.stderr.write("[PROBE] Could not determine required keys: {}\n".format(", ".join(missing)))
         return 1

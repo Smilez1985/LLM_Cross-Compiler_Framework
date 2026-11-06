@@ -1413,7 +1413,9 @@ def test_pair_by_code_looks_off_the_gui_thread_and_pairs_with_the_typed_code(qap
     def pair(state, board, code, **kw):
         threads.append(threading.get_ident())
         paired.append((board.address, code, kw["via"], kw["audit"]))
-        return NS(result=NS(host_keys=(1, 2)), done=NS(trusted=("SHA256:x",)))
+        return NS(result=NS(host_keys=(1, 2), board=board),
+                  done=NS(fingerprints={"ed25519": "SHA256:x", "rsa": "SHA256:y"}, device_id="fedcba9876543210",
+                          address="169.254.20.30"))
     monkeypatch.setattr(person_steps, "pair_by_code", pair)
 
     def fill(dialog):

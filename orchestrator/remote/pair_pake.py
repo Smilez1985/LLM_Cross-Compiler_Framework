@@ -70,6 +70,12 @@ class PakeError(Exception):
         super().__init__(message)
         self.kind = kind if kind in KINDS else "protocol"
 
+    def text(self, lang: Optional[str] = None) -> str:
+        """The failure in the person's language (utils/l10n_boards.py boards.pair.err.<kind>; `lang` None: the UI
+        language), what the CLI prints and the GUI shows; str(self) stays the English detail it quotes."""
+        from orchestrator.utils.localization import ui_text
+        return ui_text(f"boards.pair.err.{self.kind}", lang, reason=" ".join(str(self).split())[:200])
+
 
 # --- the code ----------------------------------------------------------------------------------------------------------
 
@@ -219,12 +225,30 @@ def _json_object(data: bytes) -> Dict[str, Any]:
 class FoundBoard:
     """A board that announced the pairing: its mDNS instance name, its address on the local link (an IPv6 link-local
     one with the interface's zone `scope_id`), the TCP port of the pairing and the kind of link (locality.LINK_KINDS,
-    or "test" in the tests' loopback-as-link mode)."""
+    or "test" in the tests' loopback-as-link mode); `ipv4`, the board's own IPv4 address on a local link when its
+    answer came over IPv6 and named one too ("" otherwise)."""
     instance: str
     address: str
     port: int
     scope_id: int = 0
     link: str = ""
+    ipv4: str = ""
+
+    @property
+    def ssh_host(self) -> str:
+        """The address the framework reaches the board at later by SSH (kept with its pairing): its IPv4 address on
+        the link when it has one, else its address, a link-local IPv6 one with the zone (fe80::1%eth0): without the
+        zone such an address names no interface and no later connection finds the board."""
+        if self.ipv4:
+            return self.ipv4
+        ip = ipaddress.ip_address(self.address)
+        if ip.version == 6 and ip.is_link_local and self.scope_id:
+            try:
+                zone = socket.if_indextoname(self.scope_id)
+            except (OSError, AttributeError, ValueError):
+                zone = str(self.scope_id)
+            return f"{self.address}%{zone}"
+        return self.address
 
     @property
     def label(self) -> str:
@@ -456,14 +480,17 @@ def boards_in(packet: bytes, source: Tuple[Any, ...], *, link: str = "", allow_l
         port, host = found["srv"][instance]
         if not 0 < port < 65536:
             continue
-        address = sender
+        address, ipv4 = sender, ""
+        version = ipaddress.ip_address(sender).version
         for candidate in found["addresses"].get(host, []):
-            if _address_allowed(candidate, allow_loopback) and ipaddress.ip_address(candidate).version == \
-                    ipaddress.ip_address(sender).version:
+            if not _address_allowed(candidate, allow_loopback):
+                continue
+            if ipaddress.ip_address(candidate).version == version and address == sender:
                 address = candidate
-                break
+            elif version == 6 and ipaddress.ip_address(candidate).version == 4 and not ipv4:
+                ipv4 = candidate   # the board's IPv4 address on the link: the one kept for SSH later
         zone = scope if ipaddress.ip_address(address).is_link_local else 0
-        out.append(FoundBoard(instance=instance, address=address, port=port, scope_id=zone, link=link))
+        out.append(FoundBoard(instance=instance, address=address, port=port, scope_id=zone, link=link, ipv4=ipv4))
     return out
 
 
@@ -557,46 +584,91 @@ def pairing_content(state_dir: Any, bundle: Any) -> Dict[str, Any]:
     """The framework's pairing content for a board: the same rendered content pairing's root step installs
     (gate.root_board_script and install_root_board): the framework's public key line, its root-owned restricted key
     line, and from `bundle` (the caller's runtime/device/board_ops.pairing_bundle: gate.GateBundle) the allowed_signers
-    line, the signing key as PEM, its self-test signature and the gate program. No secret: the private key never leaves
-    the computer."""
+    line, the signing key as PEM, its self-test signature and the gate program. With a signer it also carries the
+    probe kit's very root step (gate.probe_kit_root_step, `root_step_b64`) and the gate program (`gate_b64`), base64
+    so the shell probe reads them without a JSON parser: the probe's pair_install_content writes them as a kit folder
+    and runs the kit's own pairing step on it, one implementation for both ways. No secret: the private key never
+    leaves the computer."""
+    import base64
     from pathlib import Path
 
     from orchestrator.remote import gate
     from orchestrator.utils import ssh_trust
     public_line = ssh_trust.client_key(Path(state_dir))[1]
     signers = getattr(bundle, "signers", "") or ""
-    return {"format": CONTENT_FORMAT, "public_key": public_line,
-            "key_line": gate.root_key_line(public_line, gate.ROOT_GATE), "signers": signers,
-            "signing_key_pem": getattr(bundle, "pem", "") or "", "selftest": getattr(bundle, "selftest", "") or "",
-            "gate": getattr(bundle, "gate", "") or "",
-            "missing": "" if signers else (getattr(bundle, "missing", "") or "no-signer")}
+    content = {"format": CONTENT_FORMAT, "public_key": public_line,
+               "key_line": gate.root_key_line(public_line, gate.ROOT_GATE), "signers": signers,
+               "signing_key_pem": getattr(bundle, "pem", "") or "", "selftest": getattr(bundle, "selftest", "") or "",
+               "gate": getattr(bundle, "gate", "") or "",
+               "missing": "" if signers else (getattr(bundle, "missing", "") or "no-signer")}
+    if signers and getattr(bundle, "selftest", ""):
+        step = gate.probe_kit_root_step(public_line, bundle)
+        content["root_step_b64"] = base64.b64encode(step.encode("utf-8")).decode("ascii")
+        content["gate_b64"] = base64.b64encode(content["gate"].encode("utf-8")).decode("ascii")
+    return content
+
+
+# How long a pairing offer of the short code's way stays open (the board's window is 10 minutes; the offer is made
+# just before the exchange and used at its end).
+PAKE_OFFER_HOURS = 1
+
+
+def pairing_result(result: "PakeResult", nonce: str, tier: str = "root") -> Any:
+    """The remote/pairing.py PairingResult of what the board proved: the host keys' fingerprints RECOMPUTED here from
+    the key lines the board sent (never its own fingerprint strings), one per key family (the first of each), the
+    offer's `nonce`, the way pake and the key tier the root step gives (root)."""
+    from orchestrator.remote.pairing import PairingResult
+    from orchestrator.remote.trust import FAMILY_ORDER, KeyTextError, fingerprint, key_family, parse_public_key
+    found: Dict[str, str] = {}
+    for fact in result.host_keys:
+        try:
+            key = parse_public_key(fact.key)
+        except KeyTextError:
+            continue
+        family = key_family(key.get_name())
+        if family and family not in found:
+            found[family] = fingerprint(key)
+    keys = tuple((f, found[f]) for f in FAMILY_ORDER if f in found)
+    return PairingResult(state="installed", nonce=nonce, host_keys=keys, way="pake", tier=tier)
 
 
 @dataclass(frozen=True)
 class PairedByCode:
-    """A finished pairing by code: what the board proved and what complete_pairing() did with it."""
+    """A finished pairing by code: what the board proved, the offer the session was recorded under and what
+    complete_pairing() did with it (remote/pairing.py PairingDone)."""
     result: PakeResult
     done: Any
+    offer: Any = None
 
 
 def pair_by_code(board: FoundBoard, code: str, content: Dict[str, Any], *, state_dir: Any, via: str = "cli",
                  audit: Any = None, ssh_port: int = 22, allow_loopback: bool = False,
                  connect: Optional[Callable[[FoundBoard, float], Any]] = None) -> PairedByCode:
-    """The person's pairing by code, end to end: the exchange with the code the person typed and the framework's
-    pairing `content` (pairing_content), then complete_pairing() with what the board proved (method "pake"): the
-    board's host keys are pinned for its address and SSH port (the probe's identity may name another ssh_port). Only
-    the person's channels call this (`via` cli or gui), through runtime/device/person_steps.pair_by_code."""
+    """The person's pairing by code, end to end, through the one pairing core (remote/pairing.py): a pairing offer of
+    the way pake first (create_offer: the session's record, single use, audited; PairingRefused no-key without the
+    framework's signer), its nonce sent with the framework's pairing `content` (pairing_content), the exchange with
+    the code the person typed, then complete_pairing() with a PairingResult of the host keys the board proved
+    (pairing_result: fingerprints recomputed from the key lines). The board's SSH address (FoundBoard.ssh_host, with
+    the SSH port of the probe's identity) is kept with the pin. Only the person's channels call this (`via` cli or
+    gui), through runtime/device/person_steps.pair_by_code. PakeError when the exchange fails, PairingRefused when the
+    core refuses."""
     from orchestrator.remote.address import Endpoint
-    from orchestrator.remote.pairing import complete_pairing
-    result = exchange(board, code, content, allow_loopback=allow_loopback, connect=connect)
+    from orchestrator.remote import pairing
+    normal_code(code)   # a typo is no session: no offer is made for it
+    offer = pairing.create_offer(state_dir, public_line=content.get("public_key", ""),
+                                 signers=content.get("signers", ""), pem=content.get("signing_key_pem", ""), via=via,
+                                 audit=audit, actor=via, way="pake", ttl_hours=PAKE_OFFER_HOURS)
+    sent = dict(content, nonce=offer.nonce)
+    result = exchange(board, code, sent, allow_loopback=allow_loopback, connect=connect)
     port = result.identity.get("ssh_port", ssh_port)
-    port = port if isinstance(port, int) and 0 < port < 65536 else ssh_port
-    done = complete_pairing(result.identity, result.fingerprints, method="pake", offer=None, state_dir=state_dir,
-                            endpoint=Endpoint(board.address, port), host_keys=result.key_lines, via=via, audit=audit)
-    return PairedByCode(result=result, done=done)
+    port = port if isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536 else ssh_port
+    done = pairing.complete_pairing(state_dir, pairing_result(result, offer.nonce), via=via, audit=audit, actor=via,
+                                    label=board.label[:64], address=Endpoint(board.ssh_host, port).store_form)
+    return PairedByCode(result=result, done=done, offer=offer)
 
 
 __all__ = ["BROWSE_SECONDS", "CODE_DIGITS", "CONTENT_FORMAT", "FoundBoard", "HostKeyFact", "KINDS", "Keys", "MAGIC",
-           "PairedByCode", "PakeError", "PakeResult", "SERVICE", "Spake2B", "boards_in", "browse", "exchange",
-           "normal_code", "pair_by_code", "pairing_content", "parse_answer", "password_scalar", "query_packet",
+           "PAKE_OFFER_HOURS", "PairedByCode", "PakeError", "PakeResult", "SERVICE", "Spake2B", "boards_in", "browse",
+           "exchange", "normal_code", "pair_by_code", "pairing_content", "pairing_result", "parse_answer",
+           "password_scalar", "query_packet",
            "read_frame", "write_frame"]

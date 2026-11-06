@@ -46,7 +46,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Set, Tuple
 
-from orchestrator.remote.address import Endpoint, valid_host, valid_port
+from orchestrator.remote.address import Endpoint, stored_address, valid_host, valid_port
 from orchestrator.remote.trust import PAIRING_WAYS, KeyCheck, TrustStore, device_id_for, host_entry, load_host_keys
 
 _LOCK = ".known_hosts.lock"
@@ -539,6 +539,30 @@ class PairingRefused(ValueError):
         super().__init__(message)
         self.kind, self.reason = kind, reason
 
+    def text(self, lang: Optional[str] = None) -> str:
+        """The refusal in the person's language (utils/l10n_pairing.py; `lang` None: the UI language): what the CLI
+        prints and the GUI shows. str(self) stays the English message for the logs."""
+        return refusal_text(self.kind, self.reason, lang)
+
+
+def board_reason_text(word: str, lang: Optional[str] = None) -> str:
+    """What the board's own word for a pairing it did not do (PAIR_REASON) means, in the person's language."""
+    from orchestrator.utils.localization import ui_text
+    if word in BOARD_REASONS:
+        return ui_text(f"pairing.board.{word}", lang)
+    return ui_text("pairing.board.other", lang, word=word or "unknown")
+
+
+def refusal_text(kind: str, reason: str = "", lang: Optional[str] = None) -> str:
+    """The person's sentence for a refused pairing of `kind` (PairingRefused.kind; `reason`: the board's word for
+    skipped and failed) in `lang`."""
+    from orchestrator.utils.localization import ui_text
+    if kind in ("skipped", "failed"):
+        return ui_text(f"pairing.refused.{kind}", lang, why=board_reason_text(reason, lang).rstrip("."))
+    if kind not in ("channel", "invalid", "unknown", "expired", "used", "audit", "no-key"):
+        kind = "invalid"
+    return ui_text(f"pairing.refused.{kind}", lang)
+
 
 @dataclass(frozen=True)
 class PairingOffer:
@@ -624,13 +648,18 @@ class PairingResult:
 @dataclass(frozen=True)
 class PairingDone:
     """A completed pairing: the board's device ID (from its preferred host key), its pinned fingerprints by family,
-    the key tier, the way, the stored probe it came with ("" for none) and when."""
+    the key tier, the way, the stored probe it came with ("" for none) and when; `address`, the board's SSH address
+    the pairing learnt (the short code's way: its IPv4 address on the link, else its link-local IPv6 address with the
+    zone; "" for the probe kit's way), and `again`: this pairing was completed before (the same result imported once
+    more: nothing new was pinned or written)."""
     device_id: str
     fingerprints: Dict[str, str]
     tier: str
     way: str
     probe_id: str
     paired_at: str
+    address: str = ""
+    again: bool = False
 
 
 def _person_channel(via: str) -> None:
@@ -712,17 +741,37 @@ REFUSAL_TEXTS = {
 }
 
 
+def _done_before(offers: list, pins: list, result: PairingResult, want: str) -> Optional[PairingDone]:
+    """The pairing `result` completed before (its offer, of either way, used for this very board, and the board's pin
+    still holding these fingerprints), or None. Importing the same result file again (its hardware data could not be
+    stored the first time, or the short code's probe file) is then no refusal: nothing changes."""
+    used = any(r.get("nonce_sha256") == want and r.get("used_at") and r.get("device_id") == result.device_id
+               for r in offers)
+    pin = next((p for p in pins if p.get("device_id") == result.device_id
+                and set(result.fingerprints.items()) <= set((p.get("fingerprints") or {}).items())), None)
+    if not used or pin is None:
+        return None
+    return PairingDone(device_id=result.device_id, fingerprints=dict(pin.get("fingerprints") or {}),
+                       tier=str(pin.get("tier", "")), way=str(pin.get("way", "")),
+                       probe_id=str(pin.get("probe_id", "")), paired_at=str(pin.get("paired_at", "")),
+                       address=str(pin.get("address", "")), again=True)
+
+
 def complete_pairing(state_dir: Path, result: PairingResult, *, via: str, audit: Any, actor: str = "",
-                     probe_id: str = "", label: str = "", now: Optional[datetime] = None) -> PairingDone:
+                     probe_id: str = "", label: str = "", address: str = "",
+                     now: Optional[datetime] = None) -> PairingDone:
     """The one end of both pairing ways (the probe's result file, the PAKE session): checks `result` (its state, its
     fingerprints, its nonce against an open offer of its way: single use, not expired), writes the pairing to the audit
     log first (no record, no pairing), pins the board's host keys (PAIRED_FILE: first_use then trusts them without the
     TOFU question; an earlier pin of the same board is replaced), marks the offer used and the board paired with
     result.tier, and returns a PairingDone. Only the person's channels (`via` cli or gui) pair; PairingRefused with
     its kind otherwise (nothing is changed then). `probe_id` names the stored probe the result came with, `label` the
-    person's name for the board."""
+    person's name for the board, `address` the board's SSH address the pairing learnt (valid_host; kept with the pin,
+    never shown to an AI). A result completed before (the same file imported again) returns that pairing with `again`
+    set and changes nothing."""
     from orchestrator.remote.trust import OFFERS_FILE, PAIRED_FILE
     _person_channel(via)
+    address = stored_address(address)
     problem = result.problem()
     if problem:
         raise PairingRefused(f"The pairing in this result cannot be used: {problem}.", "invalid")
@@ -737,6 +786,10 @@ def complete_pairing(state_dir: Path, result: PairingResult, *, via: str, audit:
         row = next((r for r in offers if r.get("nonce_sha256") == want and r.get("way") == result.way), None)
         kind = ("unknown" if row is None else "used" if row.get("used_at")
                 else "expired" if str(row.get("expires_at", "")) <= stamp else "")
+        if kind in ("unknown", "used"):
+            before = _done_before(offers, _load(pins_path, "boards"), result, want)
+            if before is not None:
+                return before
         if kind:
             raise PairingRefused(f"Pairing refused: {REFUSAL_TEXTS[kind]}. The hardware data is kept.", kind)
         log = _open_audit(audit)
@@ -754,12 +807,13 @@ def complete_pairing(state_dir: Path, result: PairingResult, *, via: str, audit:
         clean_label = " ".join(str(label or "").split())[:64]
         pins.append({"device_id": result.device_id, "fingerprints": result.fingerprints, "tier": result.tier,
                      "way": result.way, "paired_at": stamp, "label": clean_label,
-                     "probe_id": probe_id if re.fullmatch(r"[0-9a-f]{16}", probe_id or "") else "", "via": via})
+                     "probe_id": probe_id if re.fullmatch(r"[0-9a-f]{16}", probe_id or "") else "", "via": via,
+                     "address": address})
         _save(pins_path, "boards", pins)
         row["used_at"], row["device_id"] = stamp, result.device_id
         _save(offers_path, "offers", offers)
     return PairingDone(device_id=result.device_id, fingerprints=result.fingerprints, tier=result.tier,
-                       way=result.way, probe_id=probe_id, paired_at=stamp)
+                       way=result.way, probe_id=probe_id, paired_at=stamp, address=address)
 
 
 # --- consents ----------------------------------------------------------------------------------------------------
@@ -776,6 +830,7 @@ def record_consent(audit: Any, tool: str, arguments: Dict[str, Any], detail: str
 __all__ = ["PairOutcome", "TierChooser", "FirstUse", "KeyReplaceError", "KeyReplacement", "PAIRING_METHODS",
            "PERSON_CHANNELS",
            "BOARD_REASONS", "NONCE_RE", "OFFER_TTL_HOURS", "PAIR_KEYS", "PAIR_STATES", "PairingDone", "PairingOffer",
-           "PairingRefused", "PairingResult", "REFUSAL_TEXTS", "complete_pairing", "create_offer", "offer_problem",
+           "PairingRefused", "PairingResult", "REFUSAL_TEXTS", "board_reason_text", "complete_pairing", "create_offer",
+           "offer_problem", "refusal_text",
            "PersonChannel", "first_use", "pair",
            "plan_replacement", "record_consent", "replace_key", "trust_presented_key"]

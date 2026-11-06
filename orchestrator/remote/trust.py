@@ -393,9 +393,12 @@ def _paired_row(row: Any) -> Optional[Dict[str, Any]]:
             or row.get("way") not in PAIRING_WAYS or not _STAMP.fullmatch(str(row.get("paired_at", ""))):
         return None
     label = row.get("label", "")
+    from orchestrator.remote.address import stored_address
+    address = row.get("address", "")
     return {"device_id": row["device_id"], "fingerprints": dict(fps), "tier": row["tier"], "way": row["way"],
             "paired_at": row["paired_at"], "label": label if isinstance(label, str) and len(label) <= 64 else "",
-            "probe_id": row.get("probe_id", "") if _DEVICE_ID.fullmatch(str(row.get("probe_id", ""))) else ""}
+            "probe_id": row.get("probe_id", "") if _DEVICE_ID.fullmatch(str(row.get("probe_id", ""))) else "",
+            "address": stored_address(address)}
 
 
 def paired_boards(state_dir: Path) -> list:

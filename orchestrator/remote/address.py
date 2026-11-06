@@ -24,7 +24,10 @@ from typing import Any
 DEFAULT_PORT = 22
 # A board's address or host name (192.168.1.50, myboard.local, an IPv6 address); the person enters what they know.
 # An IPv6 address is written without brackets: the port is a field of its own.
-HOST_PATTERN = re.compile(r"^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|[0-9A-Fa-f:.]{2,45})$", re.ASCII)
+# An IPv6 link-local address (fe80::/10) may carry its zone, the interface it is reached on (fe80::1%eth0, or the
+# interface's number on Windows): a board paired over a direct cable is reached that way (DECISIONS: local links).
+HOST_PATTERN = re.compile(r"^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|[0-9A-Fa-f:.]{2,45}"
+                          r"(?:%[A-Za-z0-9_.-]{1,32})?)$", re.ASCII)
 # An account name on a board: no option, no shell character, at most 32 characters.
 USER_PATTERN = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.ASCII | re.IGNORECASE)
 _PORT_TEXT = re.compile(r"^\d{1,5}$", re.ASCII)
@@ -41,15 +44,19 @@ def valid_host(host: Any) -> bool:
     name such as myboard.local; never an option (a leading '-' would read as one) or a shell character. Digits and
     dots alone must be a valid IPv4 address (192.168.1.300 is a typo, not a name), and a name has no empty part. An
     IPv6 address is written without brackets (fe80::1, never [fe80::1]): the port is a field of its own, and the deploy
-    refuses brackets too, so a CLI or GUI check never passes an address the deploy then refuses."""
+    refuses brackets too, so a CLI or GUI check never passes an address the deploy then refuses. A link-local IPv6
+    address may name its zone (fe80::1%eth0), the interface a board on a direct cable is reached on."""
     if not host_shaped(host):
         return False
     if ":" in host:
+        address, _, zone = host.partition("%")
         try:
-            ipaddress.IPv6Address(host)
+            ip = ipaddress.IPv6Address(address)
         except ValueError:
             return False
-        return True
+        return not zone or ip.is_link_local   # a zone only on a link-local address
+    if "%" in host:
+        return False
     if re.fullmatch(r"[0-9.]+", host):
         try:
             ipaddress.IPv4Address(host)
@@ -114,5 +121,15 @@ class Endpoint:
         return cls(host, int(port))
 
 
-__all__ = ["DEFAULT_PORT", "Endpoint", "HOST_PATTERN", "USER_PATTERN", "host_shaped", "valid_host", "valid_port",
-           "valid_user"]
+def stored_address(text: Any) -> str:
+    """`text` as a checked stored address (Endpoint.store_form of a valid_host and valid_port: host, host:port or
+    [IPv6]:port, a link-local IPv6 address with its zone), or "" when it is none."""
+    try:
+        endpoint = Endpoint.parse(text)
+    except ValueError:
+        return ""
+    return endpoint.store_form if valid_host(endpoint.host) and valid_port(endpoint.port) else ""
+
+
+__all__ = ["DEFAULT_PORT", "Endpoint", "HOST_PATTERN", "USER_PATTERN", "host_shaped", "stored_address", "valid_host",
+           "valid_port", "valid_user"]

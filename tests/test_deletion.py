@@ -112,6 +112,8 @@ DELETION_SITES = {
     ("orchestrator/Core/trash.py", "Trash._save"): TEMP,
     # the private folder the board's probe made for llmcf-pair's identity and received content (pairing by code)
     ("orchestrator/runtime/hardware_probe.py", "pair_by_code"): TEMP,
+    # the private kit folder the probe writes the received pairing content into for the kit's own pairing step
+    ("orchestrator/runtime/hardware_probe.py", "pair_install_content"): TEMP,
     ("orchestrator/Core/trash.py", "Trash.move"): TEMP,      # the empty entry folder of a move that failed
     ("orchestrator/Core/trash.py", "Trash.restore"): TEMP,   # the empty entry folder after a restore
     ("orchestrator/Core/vault_key.py", "KeyFileHolder._write"): TEMP,

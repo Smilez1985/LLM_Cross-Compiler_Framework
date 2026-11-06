@@ -7,8 +7,9 @@
 - The mDNS answers: only local senders count, an IPv6 link-local board keeps its zone, the code is 8 digits.
 - The local links of this computer (utils/locality.local_links): cable, hotspot, lan; public and loopback addresses
   are no link.
-- pair_by_code() ends in complete_pairing(): the board's proven host key is pinned in the framework's known_hosts with
-  its audit row, no trust-on-first-use question.
+- pair_by_code() ends in the one complete_pairing() (remote/pairing.py, the probe kit's too): an offer of the way pake
+  first, then the fingerprints recomputed from the key lines the board proved are pinned with the audit row; no
+  trust-on-first-use question (tests/test_pair_integration.py holds the seams of both ways).
 - End to end with the Rust program (its test build, loopback-as-link mode), when CI built it (LLMCF_PAIR_TEST_BIN or
   rust/target/debug/llmcf-pair of the test build); skipped otherwise, with the reason.
 
@@ -34,7 +35,17 @@ from orchestrator.remote.pair_pake import FoundBoard, PakeError
 
 nacl = pytest.importorskip("nacl.bindings")
 
-CONTENT = {"format": pair_pake.CONTENT_FORMAT, "public_key": "ssh-ed25519 AAAA llmcf", "signers": "x"}
+# the framework's public key line as pairing_content gives it (a well-formed line: the offer checks it) and a signer
+CONTENT = {"format": pair_pake.CONTENT_FORMAT,
+           "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBk1yLqJZPTB7vXoG2C2Y2f0Q0hX8sYxS7o3nqgKJpWm llmcf",
+           "signers": "llmcf namespaces=\"llmcf\" ssh-ed25519 AAAA"}
+
+
+def _sent(got):
+    """What the board received, without the offer's nonce (a new one per pairing)."""
+    content = dict(got)
+    assert len(content.pop("nonce", "")) == 32, "the pairing offer's nonce travels with the content"
+    return content
 
 
 # --- a fake board: SPAKE2 side A and the board's half of protocol version 1 -------------------------------------------
@@ -287,34 +298,38 @@ def _host_key_line():
 
 
 def test_pair_by_code_pins_the_proven_host_key(tmp_path):
+    """Behaviour changed on purpose (one complete_pairing for both ways): the proven key is pinned through the full
+    pairing core (an offer of the way pake, its nonce sent with the content, the fingerprint recomputed from the key
+    line), first_use then trusts it without the question; the board's own fingerprint strings count for nothing."""
     pytest.importorskip("paramiko")
+    from orchestrator.remote import pairing, trust
     from orchestrator.remote.trust import TrustStore, fingerprint, parse_public_key
-    from orchestrator.remote.address import Endpoint
     line = _host_key_line()
     fp = fingerprint(parse_public_key(line))
     other = _host_key_line()
     facts = {"identity": {"probe_id": "p-2"},
-             "host_keys": [{"type": "ssh-ed25519", "key": line, "fingerprint": fp},
+             "host_keys": [{"type": "ssh-ed25519", "key": line, "fingerprint": "SHA256:the-board-says-anything"},
                            {"type": "ssh-ed25519", "key": other, "fingerprint": "SHA256:not-this-one"}]}
     connect, got = fake_board("24682468", facts)
     audit = Audit()
     board = FoundBoard("llmcf-cd34." + pair_pake.SERVICE, "192.168.137.20", 40000, link="hotspot")
     paired = pair_pake.pair_by_code(board, "24682468", CONTENT, state_dir=tmp_path, via="cli", audit=audit,
                                     connect=connect)
-    assert paired.done.method == "pake" and paired.done.trusted == (fp,)
-    assert TrustStore(tmp_path).status(Endpoint("192.168.137.20", 22), parse_public_key(line)) == "known"
-    # the key the board did not prove is not trusted: known_hosts holds the proven one of its type there
-    assert TrustStore(tmp_path).status(Endpoint("192.168.137.20", 22), parse_public_key(other)) == "changed"
-    assert [r[1] for r in audit.rows] == ["host_key_trusted"]
-    assert got["content"] == CONTENT
+    assert paired.done.way == "pake" and paired.done.fingerprints == {"ed25519": fp}
+    assert paired.done.address == "192.168.137.20"
+    assert TrustStore(tmp_path).pinned(fp, "ssh-ed25519")
+    assert not TrustStore(tmp_path).pinned(fingerprint(parse_public_key(other)), "ssh-ed25519")
+    assert [r[1] for r in audit.rows] == ["board_pairing_offered", "board_paired"]
+    assert _sent(got["content"]) == CONTENT
+    assert pairing.offer_problem(tmp_path, got["content"]["nonce"], way="pake") == "used"
+    assert [b["device_id"] for b in trust.paired_boards(tmp_path)] == [paired.done.device_id]
 
 
-def test_complete_pairing_takes_only_known_methods():
-    from orchestrator.remote.pairing import complete_pairing
-    with pytest.raises(ValueError):
-        complete_pairing({}, [], method="tofu")
-    done = complete_pairing({"probe_id": "p"}, ["SHA256:a", "MD5:b"], method="kit")
-    assert done.fingerprints == ("SHA256:a",) and done.trusted == ()
+def test_the_old_method_vocabulary_delegates_to_the_pairing_ways():
+    """One vocabulary for the two ways: 'file' (the probe kit's result file) and 'pake' (the short code); the old
+    name PAIRING_METHODS (which said 'kit') delegates to remote/trust.py PAIRING_WAYS."""
+    from orchestrator.remote import pairing, trust
+    assert pairing.PAIRING_METHODS is trust.PAIRING_WAYS == ("file", "pake")
 
 
 def test_the_pairing_content_carries_no_private_key(tmp_path):
@@ -386,9 +401,9 @@ def test_end_to_end_with_the_board_program(tmp_path):
         assert paired.result.identity["probe_id"] == "p-e2e"
         assert paired.result.key_lines == (" ".join(line.split()[:2]),)
         assert "example.com" not in json.dumps(paired.result.identity)
-        assert len(paired.done.trusted) == 1
+        assert len(paired.done.fingerprints) == 1 and paired.done.way == "pake"
         assert proc.wait(timeout=30) == 0
-        assert json.loads(out.read_text()) == CONTENT
+        assert _sent(json.loads(out.read_text())) == CONTENT
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -445,12 +460,14 @@ def test_cli_pair_code_asks_the_person_and_pairs(tmp_path, monkeypatch):
         seen.append((board, code, kw["via"]))
         return SimpleNamespace(result=pair_pake.PakeResult(board, {}, (pair_pake.HostKeyFact("ssh-ed25519", "k",
                                                                                               "SHA256:a"),)),
-                               done=SimpleNamespace(trusted=("SHA256:a",)))
+                               done=SimpleNamespace(fingerprints={"ed25519": "SHA256:a"}, device_id="fedcba9876543210",
+                                                    address="169.254.20.30"))
     monkeypatch.setattr(person_steps, "pair_by_code", pair)
     result = _cli(tmp_path, monkeypatch, "deploy", "devices", "pair-code", "--wait", "0.5", input="1234 5678\n")
     assert result.exit_code == 0, result.output
     assert seen == [(BOARD, "1234 5678", "cli")]
-    assert "Paired with llmcf-ab12 (cable)" in result.output and "SHA256:a" in result.output
+    assert "Paired with llmcf-ab12 (cable)" in result.output and "fedcba9876543210" in result.output
+    assert "169.254.20.30" in result.output
     assert "1234" not in result.output, "the code is not echoed"
 
 
@@ -478,7 +495,9 @@ def test_cli_pair_code_without_a_board_or_with_a_wrong_code_fails_plainly(tmp_pa
 # --- the probe starts llmcf-pair (scripts/hardware_probe.sh --pair-code) ------------------------------------------------
 
 @pytest.mark.skipif(os.name == "nt", reason="the shell probe runs on the boards (POSIX sh)")
-def test_the_shell_probe_starts_llmcf_pair_and_installs_nothing_without_its_install(tmp_path):
+def test_the_shell_probe_starts_llmcf_pair_and_installs_nothing_that_is_not_the_frameworks(tmp_path):
+    """Behaviour changed on purpose: the probe has its own install now (pair_install_content, the kit's pairing step);
+    content that is not the framework's (no nonce, no root step) installs nothing and reports skipped/no-kit."""
     import shutil
     sh = shutil.which("sh")
     if sh is None:
@@ -517,7 +536,9 @@ def test_the_shell_probe_starts_llmcf_pair_and_installs_nothing_without_its_inst
     assert args[0] == "announce" and "--out" in args and "--identity" in args
     identity = json.loads(seen_id.read_text())
     assert identity == {"probe_version": identity["probe_version"], "account": "dietpi", "ssh_port": 22}
-    assert "no pairing install" in proc.stderr, proc.stderr
+    assert "pairing files of the probe kit are missing or damaged" in proc.stderr, proc.stderr
+    result = (tmp_path / "p.txt").read_text()
+    assert "PAIR_STATE=skipped" in result and "PAIR_REASON=no-kit" in result
     assert not stray_ran.exists(), "a program named pair_install_content on PATH ran as the probe's install"
 
 
@@ -551,7 +572,7 @@ def test_the_shell_probe_hands_the_content_to_its_install_function(tmp_path):
     proc = subprocess.run([sh, str(probe), "--no-toolchain", "--pair-code", "--output", str(tmp_path / "p.txt")],
                           capture_output=True, text=True, timeout=300, env=env)
     assert json.loads(got.read_text()) == {"format": "x"}, proc.stderr
-    assert "no pairing install" not in proc.stderr and "did not finish" not in proc.stderr, proc.stderr
+    assert "no pairing install" not in proc.stderr, proc.stderr
 
 
 def test_ci_and_the_release_build_llmcf_pair_static_and_refuse_its_test_mode():
@@ -593,16 +614,18 @@ def test_the_python_probe_starts_llmcf_pair_and_hands_the_content_to_its_install
     monkeypatch.setenv("SUDO_USER", "dietpi")
     monkeypatch.delenv("HW_PROBE_SYSROOT", raising=False)
     monkeypatch.setattr(probe.os, "geteuid", lambda: 0, raising=False)
-    assert probe.pair_by_code() == 1, "without the probe's pairing install nothing counts as paired"
+    # behaviour changed on purpose: the probe's own install (the kit's pairing step) takes the content; one that is
+    # not the framework's installs nothing and says so in the pairing block
+    assert probe.pair_by_code() == {"PAIR_STATE": "skipped", "PAIR_REASON": "no-kit"}
     got = []
 
-    def install(path):
-        got.append(json.loads(Path(path).read_text()))
-        return True
-    monkeypatch.setattr(probe, "pair_install_content", install, raising=False)
-    assert probe.pair_by_code() == 0
-    assert got == [{"format": "x"}]
+    def install(path, account=None):
+        got.append((json.loads(Path(path).read_text()), account))
+        return {"PAIR_STATE": "installed"}
+    monkeypatch.setattr(probe, "pair_install_content", install)
+    assert probe.pair_by_code() == {"PAIR_STATE": "installed"}
+    assert got == [({"format": "x"}, "dietpi")]
     identity = json.loads(seen_id.read_text())
     assert identity["account"] == "dietpi" and identity["probe_version"] == probe.TOOL_VERSION
     monkeypatch.setattr(probe.os, "geteuid", lambda: 1000, raising=False)
-    assert probe.pair_by_code() == 1
+    assert probe.pair_by_code() == {"PAIR_STATE": "skipped", "PAIR_REASON": "not-root"}

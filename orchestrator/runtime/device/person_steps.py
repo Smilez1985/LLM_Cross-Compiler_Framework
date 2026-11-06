@@ -570,24 +570,26 @@ def remember_board(state_dir: Path, host: str, port: int, user: str, key: Any, *
 def pair_by_code(state_dir: Path, board: Any, code: str, *, signer: Any = None, via: str, audit: Any):
     """The person's pairing of a board by the code its hardware probe shows (`llmcf deploy devices pair-code` and the
     Boards window's Pair by code...): the framework's pairing content (remote/pair_pake.pairing_content with the
-    caller's framework signer, board_ops.pairing_bundle: the same content pairing's root step installs), the exchange
-    with the person's `code`, and complete_pairing() with the host keys the board proved. Returns
-    pair_pake.PairedByCode; pair_pake.PakeError (with its kind) when it did not pair."""
+    caller's framework signer, board_ops.pairing_bundle: the same content pairing's root step installs), a pairing
+    offer of the way pake (the session's record), the exchange with the person's `code`, and the one end of every
+    pairing, remote/pairing.py complete_pairing(), with the host keys the board proved. Returns
+    pair_pake.PairedByCode; pair_pake.PakeError (with its kind) when the exchange failed, pairing.PairingRefused when
+    the core refused (no signing key: no-key)."""
     from orchestrator.remote import pair_pake
     from orchestrator.runtime.device import board_ops
     content = pair_pake.pairing_content(state_dir, board_ops.pairing_bundle(signer, state_dir))
     return pair_pake.pair_by_code(board, code, content, state_dir=state_dir, via=via, audit=audit)
 
 
-def paired_by_code_lines(paired: Any) -> List[str]:
-    """What the CLI and the GUI tell the person after a pairing by code (English; the GUI shows its own words)."""
+def paired_by_code_lines(paired: Any, lang: Optional[str] = None) -> List[str]:
+    """What the CLI and the GUI tell the person after a pairing by code, in `lang` (utils/l10n_pairing.py; None: the
+    UI language): the board, how many host keys it proved, its device ID and the address it is reached at."""
+    from orchestrator.utils.localization import ui_text
     result, done = paired.result, paired.done
-    lines = [f"Paired with {result.board.label}: the board proved {len(result.host_keys)} SSH host key(s) with the "
-             "code; no host-key question follows."]
-    for fp in getattr(done, "trusted", ()):
-        lines.append(f"  trusted: {fp}")
-    lines.append("The board's probe installs the framework's key and signer files now; its console says when it is "
-                 "done.")
+    lines = [ui_text("pairing.code.done", lang, board=result.board.label, count=len(done.fingerprints),
+                     device_id=done.device_id)]
+    if done.address:
+        lines.append(ui_text("pairing.code.address", lang, address=done.address))
     return lines
 
 

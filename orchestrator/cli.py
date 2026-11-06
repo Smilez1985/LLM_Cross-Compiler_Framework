@@ -6077,6 +6077,7 @@ def deploy_devices_pair_code(ctx: FrameworkContext, wait: float):
     cable between the computer and the board, the computer's hotspot, the board's WLAN or the own network). You type
     the code yourself; the board's SSH host keys are then pinned without a host-key question. Needs a terminal."""
     from orchestrator.remote import pair_pake
+    from orchestrator.remote.pairing import PairingRefused
     from orchestrator.runtime.device import person_steps
     from orchestrator.utils.locality import local_links
     if not _interactive():
@@ -6104,10 +6105,10 @@ def deploy_devices_pair_code(ctx: FrameworkContext, wait: float):
     try:
         paired = person_steps.pair_by_code(state_dir, board, text, signer=_board_signer(ctx), via="cli",
                                            audit=_device_audit(ctx, state_dir))
-    except pair_pake.PakeError as e:
-        console.print(f"[red]{escape(str(e))}[/red]")
+    except (pair_pake.PakeError, PairingRefused) as e:
+        console.print(f"[red]{escape(e.text(_config_language(ctx)))}[/red]")
         sys.exit(1)
-    for line in person_steps.paired_by_code_lines(paired):
+    for line in person_steps.paired_by_code_lines(paired, _config_language(ctx)):
         console.print(escape(line))
 
 
@@ -6535,7 +6536,7 @@ def _scan_import(ctx: FrameworkContext, probes, import_file, label: Optional[str
     """Copies a board's probe file, validated and without its host name, into the probe store and prints its probe
     id (MCP design T5: AI clients and Ditto name a board's probe only by that id, never by a path)."""
     from orchestrator.runtime.probe_service import ProbeError
-    from orchestrator.runtime.scan_steps import import_probe, label_problem
+    from orchestrator.runtime.scan_steps import PairedButNotStored, import_probe, label_problem
     if label_problem(label):
         raise click.UsageError("--label takes 1 to 64 printable characters")
     try:  # the targets only, without booting the framework: the match is a hint
@@ -6555,12 +6556,15 @@ def _scan_import(ctx: FrameworkContext, probes, import_file, label: Optional[str
         if e.next:
             console.print(escape(e.next))
         sys.exit(1)
+    except PairedButNotStored as e:   # paired, but the hardware data was not stored: the same file again stores it
+        console.print(f"[yellow]{escape(e.text(_config_language(ctx)))}[/yellow]")
+        sys.exit(1)
     probe_id, profile, info, match = imported.probe_id, imported.profile, imported.info, imported.match
     console.print(f"[bold green]Imported as probe {probe_id} ({escape(info.label)}).[/bold green]")
     if imported.pairing.state == "paired":
-        console.print(f"[green]{escape(imported.pairing.message)}[/green]")
+        console.print(f"[green]{escape(imported.pairing.text(_config_language(ctx)))}[/green]")
     elif imported.pairing.state == "refused":
-        console.print(f"[yellow]{escape(imported.pairing.message)}[/yellow]")
+        console.print(f"[yellow]{escape(imported.pairing.text(_config_language(ctx)))}[/yellow]")
     for line in _profile_summary(profile):
         console.print(line)
     if profile.needs_reprobe:
@@ -6584,7 +6588,8 @@ def _scan_kit(ctx: FrameworkContext, state_dir: Path, folder: Path, *, pair: boo
         kit = export_probe_kit(state_dir, folder, pair=pair, signer=signer, via="cli",
                                audit=lambda: _device_audit(ctx, state_dir), actor="cli")
     except (OSError, PairingRefused) as e:
-        console.print(f"[red]The probe kit could not be written: {escape(str(e))}[/red]")
+        reason = e.text(_config_language(ctx)) if isinstance(e, PairingRefused) else str(e)
+        console.print(f"[red]The probe kit could not be written: {escape(reason)}[/red]")
         sys.exit(1)
     console.print(f"[bold green]Probe kit written to {escape(str(kit.folder))} ({len(kit.files)} files).[/bold green]")
     if kit.pairing:

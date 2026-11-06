@@ -356,9 +356,6 @@ TEXTS = {
         "boards.pair.code": "Code:",
         "boards.pair.links": "Local links: {links}",
         "boards.pair.pairing": "pairing with {board}",
-        "boards.pair.done": "Paired with {board}: the board proved {count} SSH host key(s) with the code; no host-key "
-                            "question follows. The board's probe installs the framework's key and signer files "
-                            "now; its console says when it is done.",
         "boards.pair.err.code": "The code is the 8 digits the board shows on its console.",
         "boards.pair.err.wrong_code": "The code was wrong: the board did not accept it. Each wrong code uses one of "
                                       "its three tries; after the third the board stops and the probe can be "
@@ -948,9 +945,6 @@ TEXTS = {
         "boards.pair.code": "Code:",
         "boards.pair.links": "Lokale Verbindungen: {links}",
         "boards.pair.pairing": "kopple mit {board}",
-        "boards.pair.done": "Mit {board} gekoppelt: Das Board hat mit dem Code {count} SSH-Host-Key(s) bewiesen; es "
-                            "folgt keine Host-Key-Frage. Der Probe des Boards installiert jetzt den Schlüssel und die "
-                            "Signer-Dateien des Frameworks; seine Konsole sagt, wann er fertig ist.",
         "boards.pair.err.code": "Der Code sind die 8 Ziffern, die das Board auf seiner Konsole zeigt.",
         "boards.pair.err.wrong_code": "Der Code war falsch: Das Board hat ihn nicht angenommen. Jeder falsche Code "
                                       "verbraucht einen seiner drei Versuche; nach dem dritten hört das Board auf, und "

@@ -1014,8 +1014,10 @@ Setup commands:
             self._update_description_hint()
             self._set_avatar_state("success")
             self.status_label.setText(tr("msg.import_success"))
-            QMessageBox.information(self, tr("msg.import_success"), 
-                                  f"Hardware profile loaded.\nDetected Arch: {detected_arch}\nSuggested SDK: {sdk}")
+            note = getattr(self, "pairing_note", "")   # what became of a probe kit's pairing block
+            QMessageBox.information(self, tr("msg.import_success"),
+                                    f"Hardware profile loaded.\nDetected Arch: {detected_arch}\nSuggested SDK: {sdk}"
+                                    + (f"\n\n{note}" if note else ""))
             self.next()
             
         except Exception as e:
@@ -1039,13 +1041,26 @@ Setup commands:
     def _store_probe(self, path):
         """Copies the chosen probe file, validated and without its host name, into the probe store, so AI clients and
         Ditto can name the board's probe by its id (design T5); a file that is no probe the framework reads stays a
-        file the AI analysis reads."""
+        file the AI analysis reads. The one import path of a probe file (runtime/scan_steps.import_probe, as the
+        Builder tab's Import from File and `llmcf scan --import`): a probe kit's pairing block pairs here too, through
+        the person's channel (gui) and the audit log; what became of it is kept in `pairing_note` (the person's
+        language) and shown with the import's result."""
+        self.pairing_note = ""
         try:
+            from orchestrator.runtime.device.person_steps import device_audit
             from orchestrator.runtime.probe_service import HardwareProbes
-            probes = HardwareProbes.for_framework(self.framework_manager)
-            self.probe_id = probes.import_file(path)
-        except Exception:
+            from orchestrator.runtime.scan_steps import import_probe
+            framework = self.framework_manager
+            probes = HardwareProbes.for_framework(framework)
+            home = probes.store.state_dir
+            imported = import_probe(probes, Path(path), None, None, via="gui", actor="gui",
+                                    audit=lambda: device_audit(framework, home))
+            self.probe_id = imported.probe_id
+            self.pairing_note = imported.pairing.text()
+        except Exception as e:  # noqa: BLE001 - not a probe file the framework reads: the AI analysis reads the file
             self.probe_id = None
+            text = getattr(e, "text", None)   # PairedButNotStored: the board IS paired, only its data is missing
+            self.pairing_note = text() if callable(text) else ""
         return self.probe_id
 
     def _target_profile(self):

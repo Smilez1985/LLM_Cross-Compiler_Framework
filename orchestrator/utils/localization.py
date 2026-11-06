@@ -562,6 +562,7 @@ TEXT_MODULES += ("orchestrator.utils.l10n_maintainer",)   # Community Hub > Main
 TEXT_MODULES += ("orchestrator.utils.l10n_network",)   # offline mode's locality rule, File > Settings... > Local network
 TEXT_MODULES += ("orchestrator.utils.l10n_build_image",)   # Build > Build Container Images..., the build sources
 TEXT_MODULES += ("orchestrator.utils.l10n_acp",)   # Ditto in editors (ACP agent) and Ditto > Agents... (ACP client)
+TEXT_MODULES += ("orchestrator.utils.l10n_pairing",)   # the pairing during the hardware probe (both ways)
 
 
 def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,

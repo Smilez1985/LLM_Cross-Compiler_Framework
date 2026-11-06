@@ -104,6 +104,14 @@ if have timeout && timeout 5 true </dev/null >/dev/null 2>&1; then TIMEOUT="time
 tool() { $TIMEOUT "$@" </dev/null 2>/dev/null; }
 tool_all() { $TIMEOUT "$@" </dev/null 2>&1; }
 
+# The board account that started the probe as root: SUDO_USER (sudo), else DOAS_USER (doas, Alpine's default); empty
+# for a real root login or a name that is not a plain account name (the same rule as hardware_probe.py).
+invoking_account() {
+    ia=${SUDO_USER:-${DOAS_USER:-}}
+    case $ia in ""|root|-*|*[!A-Za-z0-9._-]*) ia="" ;; esac
+    printf '%s' "$ia"
+}
+
 valid() {  # ERE VALUE: the whole value (one line) matches
     case "$2" in *"$NL"*) return 1 ;; esac
     printf '%s\n' "$2" | grep -Eq -- "$1"
@@ -1864,10 +1872,19 @@ access_facts() {
                 break
             done ;;
     esac
-    # sudo: root needs none; else `sudo -k -n true` only (never prompts, never reads a password).
+    # sudo: root needs none; else `sudo -k -n true` only (never prompts, never reads a password). Run as root through
+    # sudo or doas, the fact is the calling account's: the same check as that account, 'password' when it cannot be
+    # checked (conservative); only a real root login records root.
     UID_NOW=$(tool id -u)
-    if [ "$UID_NOW" = 0 ]; then put SUDO root
+    SUDO_ACCOUNT=""
+    [ "$UID_NOW" = 0 ] && SUDO_ACCOUNT=$(invoking_account)
+    if [ "$UID_NOW" = 0 ] && [ -z "$SUDO_ACCOUNT" ]; then put SUDO root
     elif ! s=$(first_path $SUDO_PATHS); then put SUDO absent
+    elif [ -n "$SUDO_ACCOUNT" ]; then
+        if $TIMEOUT "$(f "$s")" -n -u "$SUDO_ACCOUNT" "$(f "$s")" -k -n true </dev/null >/dev/null 2>&1; then
+            put SUDO nopasswd
+        else put SUDO password
+        fi
     else
         $TIMEOUT "$(f "$s")" -k -n true </dev/null >/dev/null 2>&1
         rc=$?
@@ -1946,6 +1963,21 @@ fi
 
 P_FPR='^SHA256:[A-Za-z0-9+/]{43}$'
 PAIR_WORD=""
+PAIR_STEP_SECONDS=300   # the root step's time limit, as in hardware_probe.py (sshd -t and a reload take seconds)
+run_limited() {  # SECONDS INFILE CMD...: CMD with INFILE on stdin and a time limit: timeout(1) where it works, else a
+    # watchdog that stops CMD after SECONDS (old busybox without a working timeout); CMD's exit status, 124 when stopped
+    rl_s=$1; rl_in=$2; shift 2
+    if [ -n "$TIMEOUT" ]; then timeout "$rl_s" "$@" < "$rl_in"; return $?; fi
+    "$@" < "$rl_in" &
+    rl_pid=$!
+    ( sleep "$rl_s" && kill "$rl_pid" ) >/dev/null 2>&1 &
+    rl_dog=$!
+    wait "$rl_pid"; rl_rc=$?
+    kill "$rl_dog" 2>/dev/null
+    wait "$rl_dog" 2>/dev/null
+    [ "$rl_rc" = 143 ] && rl_rc=124   # stopped by the watchdog's TERM
+    return "$rl_rc"
+}
 pair_skip() { emit PAIR_STATE "${2:-skipped}"; emit PAIR_REASON "$1"; PAIR_WORD=$1; }
 host_fp() {  # FILE TYPES...: the SHA256 fingerprint of the host key line in FILE when its type is one of TYPES
     hf_file=$1; shift
@@ -1964,14 +1996,15 @@ pairing() {  # KIT
         pair_skip no-kit; return 0
     fi
     if [ "$(tool id -u)" != 0 ]; then pair_skip not-root; return 0; fi
-    acct=${PAIR_ACCOUNT:-${SUDO_USER:-}}
+    acct=${PAIR_ACCOUNT:-$(invoking_account)}
     case $acct in ""|root|-*|*[!A-Za-z0-9._-]*) pair_skip account; return 0 ;; esac
     fp_ed=$(host_fp "$(f /etc/ssh/ssh_host_ed25519_key.pub)" ssh-ed25519) || fp_ed=""
     fp_ec=$(host_fp "$(f /etc/ssh/ssh_host_ecdsa_key.pub)" ecdsa-sha2-nistp256 ecdsa-sha2-nistp384 \
         ecdsa-sha2-nistp521) || fp_ec=""
     fp_rsa=$(host_fp "$(f /etc/ssh/ssh_host_rsa_key.pub)" ssh-rsa) || fp_rsa=""
     if [ -z "$fp_ed$fp_ec$fp_rsa" ]; then pair_skip no-host-keys; return 0; fi
-    answer=$(LLMCF_ACCOUNT=$acct LC_ALL=C sh "$1/root-board.sh" < "$1/llmcf-gate" 2>/dev/null)
+    answer=$(LLMCF_ACCOUNT=$acct LC_ALL=C run_limited "$PAIR_STEP_SECONDS" "$1/llmcf-gate" sh "$1/root-board.sh" \
+        2>/dev/null)
     case $answer in
         *root-board=installed*)
             emit PAIR_STATE installed; emit PAIR_NONCE "$nonce"; PAIR_WORD=installed
@@ -1989,8 +2022,13 @@ pairing() {  # KIT
 }
 pairing_text() {
     case $PAIR_WORD in
-        installed) echo "Paired: the framework's key line and signing key are in place; import the result file on" \
-            "your computer to finish the pairing." ;;
+        installed)
+            if [ "$PAIR_CODE" = 1 ]; then echo "Paired by code: the framework's key line and signing key are in" \
+                "place; the framework has finished the pairing already (importing the result file brings the" \
+                "hardware data)."
+            else echo "Paired: the framework's key line and signing key are in place; import the result file on" \
+                "your computer to finish the pairing."
+            fi ;;
         not-root) echo "Pairing was skipped: the probe did not run with sudo. The hardware data is complete; import" \
             "the file as usual, or run the probe again with sudo to pair this board." ;;
         account) echo "Pairing was skipped: the probe could not tell which board account to pair (run it with sudo" \
@@ -2004,7 +2042,72 @@ pairing_text() {
             "hardware data is complete; import the file as usual." ;;
     esac
 }
-if [ "$PAIR" != off ]; then
+# --- pairing by code (llmcf-pair, the framework's rust/llmcf-pair) ----------------------------------------------
+# The probe's part: find llmcf-pair, give it the probe's identity (the version and the calling account, never a host
+# name or an address), let it show the code and wait for the framework, then install the content it received with
+# pair_install_content, which writes it as a probe kit's pairing folder and runs the kit's own pairing step on it
+# (pairing above): one install for both ways, the same PAIR_* block in the result. llmcf-pair's exit status: 0 paired,
+# 3 the 10 minutes ended, 4 three wrong codes.
+pair_field() {  # FILE NAME: the value of "NAME":"..." in the one-line JSON FILE, when it is base64 or hex only
+    sed -n 's|.*"'"$2"'":"\([A-Za-z0-9+/=]*\)".*|\1|p' "$1" | head -n1
+}
+b64_decode() {  # base64 on stdin -> bytes on stdout: base64 -d (coreutils, busybox), else openssl
+    if have base64; then base64 -d 2>/dev/null
+    elif have openssl; then openssl base64 -d -A 2>/dev/null
+    else return 1
+    fi
+}
+pair_install_content() {  # FILE: the framework's pairing content llmcf-pair received
+    pi_nonce=$(pair_field "$1" nonce)
+    if ! pi_dir=$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/llmcf-kit.XXXXXXXX"); then pair_skip no-kit; return 1; fi
+    if valid '^[0-9a-f]{32}$' "$pi_nonce" \
+            && pair_field "$1" root_step_b64 | b64_decode > "$pi_dir/root-board.sh" && [ -s "$pi_dir/root-board.sh" ] \
+            && pair_field "$1" gate_b64 | b64_decode > "$pi_dir/llmcf-gate" && [ -s "$pi_dir/llmcf-gate" ]; then
+        printf '%s\n' "$pi_nonce" > "$pi_dir/nonce"
+        pairing "$pi_dir"
+    else
+        pair_skip no-kit
+    fi
+    rm -rf "$pi_dir" || log "The private pairing folder could not be removed."
+    [ "$PAIR_WORD" = installed ]
+}
+pair_by_code() {
+    # against a sysroot (HW_PROBE_SYSROOT) the board's files are read from it, as the kit's pairing reads them
+    if [ "$(tool id -u)" != 0 ]; then
+        log "Pairing by code needs the probe run as root (it installs root-owned files)."; pair_skip not-root; return 1
+    fi
+    pair_bin=""
+    pair_dir=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
+    if [ -n "$pair_dir" ] && [ -x "$pair_dir/llmcf-pair" ]; then pair_bin=$pair_dir/llmcf-pair
+    elif have llmcf-pair; then pair_bin=$(command -v llmcf-pair)
+    fi
+    if [ -z "$pair_bin" ]; then log "llmcf-pair is not next to this script or on PATH: no pairing by code."; return 1; fi
+    pair_tmp=$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/llmcf-pair.XXXXXXXX") || { log "No private folder."; return 1; }
+    pair_account=${PAIR_ACCOUNT:-$(invoking_account)}
+    case $pair_account in ""|root|-*|*[!A-Za-z0-9._-]*) pair_account="" ;; esac
+    printf '{"probe_version":"%s","account":"%s","ssh_port":22}\n' "$PROBE_VERSION" "$pair_account" \
+        > "$pair_tmp/identity.json"
+    "$pair_bin" announce --out "$pair_tmp/content.json" --identity "$pair_tmp/identity.json"
+    pair_rc=$?
+    if [ "$pair_rc" -ne 0 ]; then rm -rf "$pair_tmp"; log "Not paired (llmcf-pair ended with $pair_rc)."; return 1; fi
+    # only the probe's own shell function counts, never a program of that name on PATH (this runs as root)
+    case $(command -V pair_install_content 2>/dev/null) in
+        *" is a function"*|*" is a shell function"*) pair_install=1 ;;
+        *) pair_install=0 ;;
+    esac
+    if [ "$pair_install" = 1 ]; then
+        PAIR_ACCOUNT=$pair_account pair_install_content "$pair_tmp/content.json"; pair_rc=$?
+    else
+        log "This probe has no pairing install; the framework's content was not installed."; pair_rc=1
+    fi
+    rm -rf "$pair_tmp"
+    return "$pair_rc"
+}
+
+if [ "$PAIR_CODE" = 1 ]; then   # the person chose pairing by code: it installs and reports like the kit
+    pair_by_code || [ -n "$PAIR_WORD" ] || log "Pairing by code did not finish; the profile is written without it."
+    [ -n "$PAIR_WORD" ] && log "$(pairing_text)"
+elif [ "$PAIR" != off ]; then
     # only next to this script as a file (a probe sent over SSH on stdin has no kit)
     if [ -z "$PAIR_KIT" ] && [ -f "$0" ]; then
         case $0 in
@@ -2031,44 +2134,5 @@ else
     log "Wrote $OUTPUT_FILE."
 fi
 
-# --- pairing by code (llmcf-pair, the framework's rust/llmcf-pair) ----------------------------------------------
-# The probe's part: find llmcf-pair, give it the probe's identity (the version and the sudo account, never a host
-# name or an address), let it show the code and wait for the framework, then hand the content it received to the
-# probe's pairing install (pair_install_content FILE, the install of a probe kit's content). llmcf-pair's exit status:
-# 0 paired, 3 the 10 minutes ended, 4 three wrong codes.
-pair_by_code() {
-    if [ "$SYSROOT" = 1 ]; then log "Pairing by code is not run against a sysroot."; return 1; fi
-    if [ "$(id -u 2>/dev/null)" != 0 ]; then
-        log "Pairing by code needs the probe run as root (it installs root-owned files)."; return 1
-    fi
-    pair_bin=""
-    pair_dir=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
-    if [ -n "$pair_dir" ] && [ -x "$pair_dir/llmcf-pair" ]; then pair_bin=$pair_dir/llmcf-pair
-    elif have llmcf-pair; then pair_bin=$(command -v llmcf-pair)
-    fi
-    if [ -z "$pair_bin" ]; then log "llmcf-pair is not next to this script or on PATH: no pairing by code."; return 1; fi
-    pair_tmp=$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/llmcf-pair.XXXXXXXX") || { log "No private folder."; return 1; }
-    pair_account=${SUDO_USER:-}
-    case $pair_account in ""|root|-*|*[!A-Za-z0-9._-]*) pair_account="" ;; esac
-    printf '{"probe_version":"%s","account":"%s","ssh_port":22}\n' "$PROBE_VERSION" "$pair_account" \
-        > "$pair_tmp/identity.json"
-    "$pair_bin" announce --out "$pair_tmp/content.json" --identity "$pair_tmp/identity.json"
-    pair_rc=$?
-    if [ "$pair_rc" -ne 0 ]; then rm -rf "$pair_tmp"; log "Not paired (llmcf-pair ended with $pair_rc)."; return 1; fi
-    # only the probe's own shell function counts, never a program of that name on PATH (this runs as root)
-    case $(command -V pair_install_content 2>/dev/null) in
-        *" is a function"*|*" is a shell function"*) pair_install=1 ;;
-        *) pair_install=0 ;;
-    esac
-    if [ "$pair_install" = 1 ]; then
-        pair_install_content "$pair_tmp/content.json"; pair_rc=$?
-    else
-        log "This probe has no pairing install; the framework's content was not installed."; pair_rc=1
-    fi
-    rm -rf "$pair_tmp"
-    return "$pair_rc"
-}
-
-if [ "$PAIR_CODE" = 1 ]; then pair_by_code || log "Pairing by code did not finish; the profile above is written."; fi
 if [ -n "$MISSING" ]; then log "Could not determine required keys:$MISSING"; exit 1; fi
 exit 0

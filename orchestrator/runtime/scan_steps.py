@@ -92,11 +92,42 @@ class PairingImport:
     """What the import did with a probe kit's pairing block: `state` none (the file has none: pairing was off or an
     older probe), paired (complete_pairing pinned the board's host keys: `done` is its PairingDone) or refused (the
     board skipped or failed the pairing, or the nonce matches no open offer, has expired or was used: `kind` is
-    PairingRefused's kind). `message` is the person's sentence (the hardware data was imported in every case)."""
+    PairingRefused's kind, `reason` the board's word). `message` is the English sentence for the logs (the hardware
+    data was imported in every case); text(lang) is the person's sentence in their language."""
     state: str = "none"
     message: str = ""
     kind: str = ""
     done: Any = None
+    reason: str = ""
+
+    def text(self, lang: Optional[str] = None) -> str:
+        """What the CLI prints and the GUI shows about the pairing block ("" when the file had none)."""
+        from orchestrator.utils.localization import ui_text
+        if self.state == "paired" and self.done is not None:
+            if getattr(self.done, "again", False):
+                return ui_text("pairing.import.already", lang, device_id=self.done.device_id)
+            return ui_text("deploy.import.paired", lang, device_id=self.done.device_id, tier=self.done.tier)
+        if self.state == "refused":
+            from orchestrator.remote.pairing import refusal_text
+            return refusal_text(self.kind, self.reason, lang)
+        return ""
+
+
+class PairedButNotStored(OSError):
+    """The board's pairing was completed (its host key is pinned, its offer used), but the probe file could not be
+    stored after it (the disk is full, the probe store cannot be written). The board IS paired: importing the same
+    result file again imports only the hardware data (complete_pairing then reports it as paired before). `done` is
+    the PairingDone, `cause` the error of the store."""
+
+    def __init__(self, done: Any, cause: BaseException):
+        super().__init__(f"The board is paired (device {done.device_id}), but its hardware data could not be stored "
+                         f"({cause.__class__.__name__}: {cause}). Import the same result file again.")
+        self.done, self.cause = done, cause
+
+    def text(self, lang: Optional[str] = None) -> str:
+        from orchestrator.utils.localization import ui_text
+        return ui_text("pairing.import.store_failed", lang, device_id=self.done.device_id,
+                       reason=" ".join(str(self.cause).split())[:200] or self.cause.__class__.__name__)
 
 
 @dataclass
@@ -119,7 +150,9 @@ def import_probe(probes: Any, path: Path, label: Optional[str] = None, target_ma
     function that opens it): when its nonce matches an open offer, the board's host keys are pinned (no TOFU question
     at its first login) and the probe is stored under the board's device ID; otherwise the pairing is refused with a
     plain reason and the hardware data is imported as usual. ValueError for a label that is refused (label_problem),
-    ProbeError when the file is not a probe file the framework can read."""
+    ProbeError when the file is not a probe file the framework can read, PairedButNotStored when the pairing was
+    completed but the probe could not be stored after it (the board IS paired; importing the file again stores the
+    hardware data: the pairing block then counts as completed before)."""
     from orchestrator.remote import pairing
     from orchestrator.runtime.probe_service import match_target
     if label_problem(label):
@@ -132,13 +165,18 @@ def import_probe(probes: Any, path: Path, label: Optional[str] = None, target_ma
             done = pairing.complete_pairing(probes.store.state_dir, result, via=via, audit=audit, actor=actor,
                                             probe_id=result.device_id, label=label or parsed.get("BOARD_MODEL") or "")
         except pairing.PairingRefused as e:
-            outcome = PairingImport("refused", str(e), e.kind)
+            outcome = PairingImport("refused", str(e), e.kind, reason=e.reason)
         else:
             device_id = done.device_id
             outcome = PairingImport("paired", f"Paired: the board's host key is pinned (device {done.device_id}, key "
                                               f"tier {done.tier}); its first login needs no host-key question.",
                                     done=done)
-    probe_id = probes.import_text(parsed, label, device_id=device_id)
+    try:
+        probe_id = probes.import_text(parsed, label, device_id=device_id)
+    except Exception as e:  # noqa: BLE001 - the pairing above stays: say so, the hardware data can be imported again
+        if outcome.state == "paired" and not isinstance(e, ValueError):
+            raise PairedButNotStored(outcome.done, e) from e
+        raise
     profile = probes.get(probe_id)
     info = probes.info(probe_id, profile)
     return ImportedProbe(probe_id=probe_id, profile=profile, info=info, match=match_target(profile, target_manager),

@@ -140,9 +140,17 @@ def test_complete_pairing_pins_the_host_keys_once(state):
     assert pinned and pinned["label"] == "Board A" and pinned["tier"] == "root"
     assert TrustStore(state).pinned(FP, "ssh-rsa") is None   # another key family is not this pin
     assert log.rows and log.rows[0][0][1] == "board_paired"
-    with pytest.raises(pairing.PairingRefused) as again:
-        pairing.complete_pairing(state, _result(offer.nonce, FP), via="gui", audit=Log())
-    assert again.value.kind == "used"
+    # the same result once more (its hardware data could not be stored the first time): no refusal, nothing changes
+    # (behaviour changed on purpose: "paired, re-import the hardware data")
+    before = (state / PAIRED_FILE).read_bytes()
+    second = Log()
+    again = pairing.complete_pairing(state, _result(offer.nonce, FP), via="gui", audit=second)
+    assert again.again and again.device_id == done.device_id and not second.rows
+    assert (state / PAIRED_FILE).read_bytes() == before
+    # the used nonce with another board's key is still refused: a kit pairs one board once
+    with pytest.raises(pairing.PairingRefused) as other:
+        pairing.complete_pairing(state, _result(offer.nonce, "SHA256:" + "B" * 43), via="gui", audit=Log())
+    assert other.value.kind == "used"
 
 
 @pytest.mark.parametrize("case, kind", [("unknown", "unknown"), ("expired", "expired"), ("way", "unknown")])
@@ -461,9 +469,10 @@ def test_the_import_completes_the_pairing_once_and_keeps_the_hardware_data(tmp_p
     assert TrustStore(state).pinned(fp)["probe_id"] == imported.probe_id
     stored = probes.store.device_path(imported.probe_id).read_text(encoding="utf-8")
     assert kit.offer.nonce not in stored and fp not in stored
+    # importing the same file again brings the hardware data again under the board's ID; the pairing counts as done
     again = import_probe(probes, path, label="Board A", via="cli", audit=Log())
-    assert again.pairing.state == "refused" and again.pairing.kind == "used"
-    assert again.probe_id != imported.probe_id and again.profile.get("SOC_MODEL") == imported.profile.get("SOC_MODEL")
+    assert again.pairing.state == "paired" and again.pairing.done.again
+    assert again.probe_id == imported.probe_id and again.profile.get("SOC_MODEL") == imported.profile.get("SOC_MODEL")
 
 
 def test_a_skipped_pairing_imports_the_hardware_with_a_plain_reason(tmp_path, state, kit):
@@ -525,4 +534,4 @@ def test_cli_kit_without_pairing_and_the_import_that_pairs(tmp_path, monkeypatch
     out = " ".join(done.output.split())
     assert f"Imported as probe {device_id_for(fp)}" in out and "Paired: the board's host key is pinned" in out
     again = CliRunner().invoke(cli_module.cli, ["-q", "scan", "--import", str(path)])
-    assert again.exit_code == 0 and "already completed once" in " ".join(again.output.split())
+    assert again.exit_code == 0 and "Already paired" in " ".join(again.output.split())

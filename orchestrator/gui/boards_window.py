@@ -642,15 +642,19 @@ class BoardsWindow(BoardSteps, QDialog):
             return person_steps.pair_by_code(state, board, code, signer=signer, via="gui", audit=audit)
 
         def done(paired: Any) -> None:
-            text = self._t("boards.pair.done", board=board.label, count=len(paired.result.host_keys))
+            text = "\n".join(person_steps.paired_by_code_lines(paired, self.lang))
             self._say(text)
             self._info(text)
             self.reload()
 
         def failed(error: BaseException) -> bool:
+            from orchestrator.remote.pairing import PairingRefused
+            if isinstance(error, PairingRefused):   # the pairing core's refusal (no signing key, an AI's channel)
+                self._info(error.text(self.lang), "warning")
+                return True
             if not isinstance(error, pair_pake.PakeError):
                 return False
-            self._info(self._t(f"boards.pair.err.{error.kind}", reason=one_line(str(error))), "warning")
+            self._info(error.text(self.lang), "warning")
             return True
 
         self._start(self._t("boards.pair.pairing", board=board.label), pair, done, failed=failed)
