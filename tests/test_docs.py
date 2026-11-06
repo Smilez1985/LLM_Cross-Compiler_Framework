@@ -1194,3 +1194,22 @@ def test_the_guide_names_the_menus_by_their_mouse_paths(rel, lang):
     for action in ("act_tools_mcp_connections", "act_file_settings", "act_acp_agents", "act_signin_overview",
                    "act_tools_approvals", "act_ditto_settings"):
         assert f"**{mouse_path(action, lang)}**" in text, f"{rel}: {action} -> {mouse_path(action, lang)}"
+
+
+# The buttons, boxes and fields the guide names in bold are the GUI's own labels, in the guide's language (a label
+# the guide spells differently, "Offline Mode" for the field "Offline mode", sends the person looking for the wrong
+# word).
+GUIDE_LABELS = ("acp.registry.refresh", "acp.add.registry", "acp.own.title", "acp.login", "acp.key", "acp.remove",
+                "acp.chat.with", "acp.perm.allow", "acp.perm.reject", "tmcp.mcp.write", "gui.field.ai.offline")
+
+
+@pytest.mark.parametrize("rel, lang", [(GUIDE[0], "en"), (GUIDE[1], "de")])
+def test_the_guide_names_the_gui_labels_as_the_gui_shows_them(rel, lang):
+    from orchestrator.utils.localization import ui_text
+    text = " ".join(_read(rel).split())
+    missing = [f"{key}: **{ui_text(key, lang)}**" for key in GUIDE_LABELS if f"**{ui_text(key, lang)}**" not in text]
+    assert not missing, f"{rel} does not name these labels as the GUI shows them: {missing}"
+    # The offline switch is named where it is: the AI settings window, then its field.
+    from orchestrator.utils.next_steps import mouse_path
+    where = f"**{mouse_path('act_ditto_settings', lang)}**, **{ui_text('gui.field.ai.offline', lang)}**"
+    assert where in text, f"{rel}: the offline switch is not named as {where}"

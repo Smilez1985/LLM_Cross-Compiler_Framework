@@ -83,9 +83,10 @@ Sie sagt "may": Ob ein bestimmter externer Agent den Server bekommt, hängt von 
    lokalen Server: Füge den Eintrag **Claude Desktop** (`mcpServers`) aus **Sicherheit > Verbindungen zu KI-Apps
    (MCP)...** oder `llm-cli mcp config` ein. Nutzt du Claude Desktop schon, macht **In Claude Desktop eintragen...**
    (oder `llm-cli mcp config --write claude-desktop`) und danach der Knopf **Import from Claude** der IDE dasselbe.
-2. Lass in **Settings | Tools | AI Assistant | Agents** die Option **Pass custom MCP servers** an (`use_custom_mcp`,
-   standardmäßig an): Sie gibt die Server, die du eingerichtet hast, an die ACP-Agenten der IDE weiter
-   ([JetBrains: ACP][jb-acp]).
+2. Lass die IDE die Server, die du eingerichtet hast, an ihre ACP-Agenten weitergeben ([JetBrains: ACP][jb-acp]):
+   Für Agenten aus der Registry lass in **Settings | Tools | AI Assistant | Agents** die Option
+   **Pass custom MCP servers** an; für einen eigenen Agenten in `~/.jetbrains/acp.json` macht das `use_custom_mcp`
+   unter `default_mcp_settings` (standardmäßig an).
 
 **[Unbestätigt]** Die JetBrains-Seite dokumentiert im JSON nur `command` und `args` und im Dialog ein eigenes Feld
 **Working directory**. Ob die IDE das `env` des Eintrags (`PYTHONPATH`) behält, wurde nicht bestätigt. Ohne es startet
@@ -223,7 +224,7 @@ llm-cli agents login NAME --key VARIABLE
 - **Chatten mit:** im Chat-Bereich wählt den Agenten; im Terminal `llm-cli agents run NAME`. Die
   Berechtigungsfragen des Agenten kommen im eigenen Dialog des Frameworks: **Einmal erlauben** oder **Ablehnen**; ein
   "immer" des Agenten wird nie gewählt.
-- **Offline-Modus** (**Ditto > KI-Einstellungen...**, Offline-Modus) lehnt einen Agenten ab, der das Internet braucht.
+- **Offline-Modus** (**Ditto > KI-Einstellungen...**, **Offline-Modus**) lehnt einen Agenten ab, der das Internet braucht.
   Ein eigener Befehl, den du als ohne Internet lauffähig hinzugefügt hast (`--local`), darf starten.
 - **Was der Agent sieht:** die MCP-Werkzeuge des Frameworks und sonst nichts vom Framework. Seine Sitzung bekommt genau
   einen MCP-Server, den des Frameworks über stdio; dieser Eintrag nennt lokale Pfade (den Python-Interpreter, den

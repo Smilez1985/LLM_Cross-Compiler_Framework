@@ -81,8 +81,10 @@ It says "may": whether a given external agent receives the server depends on Zed
    server: paste the **Claude Desktop** entry (`mcpServers`) from **Security > AI App Connections (MCP)...** or
    `llm-cli mcp config`. If you use Claude Desktop already, **Write to Claude Desktop...** (or
    `llm-cli mcp config --write claude-desktop`) followed by the IDE's **Import from Claude** button does the same.
-2. In **Settings | Tools | AI Assistant | Agents**, keep **Pass custom MCP servers** on (`use_custom_mcp`, on by
-   default): it hands the servers you configured to the ACP agents of the IDE ([JetBrains: ACP][jb-acp]).
+2. Let the IDE hand the servers you configured to its ACP agents ([JetBrains: ACP][jb-acp]): for agents installed
+   from the registry, keep **Pass custom MCP servers** on in **Settings | Tools | AI Assistant | Agents**; for an
+   agent of your own in `~/.jetbrains/acp.json`, `use_custom_mcp` under `default_mcp_settings` does it (on by
+   default).
 
 **[Unconfirmed]** The JetBrains page documents only `command` and `args` in the JSON, and a separate **Working
 directory** field in the dialog. Whether the IDE keeps the entry's `env` (`PYTHONPATH`) was not confirmed. Without it
@@ -213,7 +215,7 @@ llm-cli agents login NAME --key VARIABLE
 - **Chat with:** in the chat panel picks the agent; at the terminal `llm-cli agents run NAME`. The agent's
   permission questions come in the framework's own dialog: **Allow once** or **Reject**; an "always" of the agent is
   never chosen.
-- **Offline mode** (**Ditto > AI Settings...**, **Offline Mode**) refuses an agent that needs the internet. An own
+- **Offline mode** (**Ditto > AI Settings...**, **Offline mode**) refuses an agent that needs the internet. An own
   command added as working without the internet (`--local`) may start.
 - **What the agent sees:** the framework's MCP tools, and nothing else of the framework. Its session gets exactly one
   MCP server, the framework's own over stdio; that entry names local paths (the Python interpreter, the installation

@@ -5323,7 +5323,8 @@ def _acp_login(click_ctx, ctx: FrameworkContext) -> None:
 
 
 @acp.command('config')
-@click.option('--json', 'as_json', is_flag=True, help="Print only the editor's agent_servers JSON entry")
+@click.option('--json', 'as_json', is_flag=True,
+              help="Print only the agent_servers JSON entry of a JetBrains IDE's acp.json")
 def acp_config(as_json: bool):
     """Show how to add Ditto as an ACP agent to an editor (the command, the agent_servers entry of Zed's
     settings.json and of a JetBrains IDE's acp.json; --json prints the JetBrains entry)"""
