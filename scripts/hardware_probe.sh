@@ -1961,7 +1961,12 @@ pair_by_code() {
     "$pair_bin" announce --out "$pair_tmp/content.json" --identity "$pair_tmp/identity.json"
     pair_rc=$?
     if [ "$pair_rc" -ne 0 ]; then rm -rf "$pair_tmp"; log "Not paired (llmcf-pair ended with $pair_rc)."; return 1; fi
-    if command -v pair_install_content >/dev/null 2>&1; then
+    # only the probe's own shell function counts, never a program of that name on PATH (this runs as root)
+    case $(command -V pair_install_content 2>/dev/null) in
+        *" is a function"*|*" is a shell function"*) pair_install=1 ;;
+        *) pair_install=0 ;;
+    esac
+    if [ "$pair_install" = 1 ]; then
         pair_install_content "$pair_tmp/content.json"; pair_rc=$?
     else
         log "This probe has no pairing install; the framework's content was not installed."; pair_rc=1

@@ -504,6 +504,11 @@ def test_the_shell_probe_starts_llmcf_pair_and_installs_nothing_without_its_inst
     real_id = shutil.which("id") or "/usr/bin/id"
     fake_id.write_bytes(f'#!/bin/sh\n[ "$1" = "-u" ] && {{ echo 0; exit 0; }}\nexec "{real_id}" "$@"\n'.encode())
     fake_id.chmod(0o755)
+    # a program on PATH with the install's name is not the probe's install: only a shell function counts (the probe
+    # runs as root, and the content must not go to whatever program happens to carry that name)
+    stray, stray_ran = bindir / "pair_install_content", tmp_path / "stray-ran"
+    stray.write_bytes(f'#!/bin/sh\ntouch "{stray_ran}"\n'.encode())
+    stray.chmod(0o755)
     env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}", SUDO_USER="dietpi")
     proc = subprocess.run([sh, str(probe), "--no-toolchain", "--pair-code", "--output", str(tmp_path / "p.txt")],
                           capture_output=True, text=True, timeout=300, env=env)
@@ -513,6 +518,40 @@ def test_the_shell_probe_starts_llmcf_pair_and_installs_nothing_without_its_inst
     identity = json.loads(seen_id.read_text())
     assert identity == {"probe_version": identity["probe_version"], "account": "dietpi", "ssh_port": 22}
     assert "no pairing install" in proc.stderr, proc.stderr
+    assert not stray_ran.exists(), "a program named pair_install_content on PATH ran as the probe's install"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the shell probe runs on the boards (POSIX sh)")
+def test_the_shell_probe_hands_the_content_to_its_install_function(tmp_path):
+    """The seam the probe kit's install fills: a shell function pair_install_content in the probe gets the file."""
+    import shutil
+    sh = shutil.which("sh")
+    if sh is None:
+        pytest.skip("no POSIX sh")
+    kit = tmp_path / "kit"
+    kit.mkdir()
+    got = tmp_path / "installed.json"
+    text = (REPO_ROOT / "scripts" / "hardware_probe.sh").read_text(encoding="utf-8")
+    assert "\npair_by_code() {" in text
+    text = text.replace("\npair_by_code() {", f'\npair_install_content() {{ cp "$1" "{got}"; }}\npair_by_code() {{', 1)
+    probe = kit / "hardware_probe.sh"
+    probe.write_bytes(text.encode())
+    fake = kit / "llmcf-pair"
+    fake.write_bytes(("#!/bin/sh\n"
+                      'while [ $# -gt 0 ]; do case "$1" in --out) out=$2; shift 2;; *) shift;; esac; done\n'
+                      "printf '{\"format\":\"x\"}' > \"$out\"\nexit 0\n").encode())
+    fake.chmod(0o755)
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    fake_id = bindir / "id"
+    real_id = shutil.which("id") or "/usr/bin/id"
+    fake_id.write_bytes(f'#!/bin/sh\n[ "$1" = "-u" ] && {{ echo 0; exit 0; }}\nexec "{real_id}" "$@"\n'.encode())
+    fake_id.chmod(0o755)
+    env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}")
+    proc = subprocess.run([sh, str(probe), "--no-toolchain", "--pair-code", "--output", str(tmp_path / "p.txt")],
+                          capture_output=True, text=True, timeout=300, env=env)
+    assert json.loads(got.read_text()) == {"format": "x"}, proc.stderr
+    assert "no pairing install" not in proc.stderr and "did not finish" not in proc.stderr, proc.stderr
 
 
 def test_ci_and_the_release_build_llmcf_pair_static_and_refuse_its_test_mode():
