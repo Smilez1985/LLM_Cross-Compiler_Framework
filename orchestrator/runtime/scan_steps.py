@@ -236,8 +236,8 @@ def export_probe_kit(state_dir: Path, folder: Path, *, pair: bool = True, signer
             put(name, (scripts / name).read_bytes(), 0o755 if name.endswith(".sh") else 0o644)
     offer, problem = None, ""
     stale = folder / KIT_PAIR_DIR / "nonce"
-    if stale.exists():   # an earlier kit's pairing in this folder never pairs again from here
-        stale.unlink()
+    if stale.exists():   # an earlier kit's pairing in this folder never pairs again from here (nothing is deleted)
+        stale.write_bytes(b"off\n")
     if pair:
         bundle = board_ops.pairing_bundle(signer, state_dir)
         public_line = ssh_trust.client_key(Path(state_dir))[1]

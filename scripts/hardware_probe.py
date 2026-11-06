@@ -2802,6 +2802,7 @@ PAIR_TEXTS = {
     "no-kit": "Pairing was skipped: the pairing files of the probe kit are missing or damaged. The hardware data is "
               "complete.",
     "windows": "Pairing was skipped: pairing a Windows board is not there yet. The hardware data is complete.",
+    "opted-out": "Pairing is switched off for this probe kit. The hardware data is complete.",
 }
 _PAIR_ACCOUNT = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._-]{0,63}$")
 
@@ -2849,6 +2850,8 @@ def pair(kit, root=None, account=None, euid=None, run=None, env=None):
             nonce = f.read(64).strip()
     except (OSError, UnicodeDecodeError):
         return skipped("no-kit")
+    if nonce == "off":   # the kit was written again with pairing switched off
+        return skipped("opted-out")
     step, gate = os.path.join(kit, "root-board.sh"), os.path.join(kit, "llmcf-gate")
     if not re.match(r"^[0-9a-f]{32}$", nonce) or not os.path.isfile(step) or not os.path.isfile(gate):
         return skipped("no-kit")

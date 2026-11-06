@@ -283,6 +283,16 @@ def test_pairing_can_be_switched_off(state, tmp_path):
     assert not off.pairing and not (tmp_path / "plain" / KIT_PAIR_DIR).exists()
     assert "Pairing is OFF" in (tmp_path / "plain" / "README.txt").read_text(encoding="utf-8")
     assert pairing_overview(state)["open_offers"] == 0
+    # a kit written again into the same folder with pairing off never pairs from the earlier kit's files (and the
+    # framework deletes nothing there: the nonce is overwritten)
+    on = export_probe_kit(state, tmp_path / "again", signer=_signer(), via="cli", audit=Log())
+    export_probe_kit(state, tmp_path / "again", pair=False, via="cli")
+    assert (tmp_path / "again" / KIT_PAIR_DIR / "nonce").read_text(encoding="ascii").strip() == "off"
+    if os.name != "nt":
+        block = probe.pair(str(tmp_path / "again" / KIT_PAIR_DIR), account="radxa", euid=0, run=installed_run([]),
+                           env={})
+        assert block == {"PAIR_STATE": "skipped", "PAIR_REASON": "opted-out"}
+    assert pairing.offer_problem(state, on.offer.nonce) == ""   # the earlier offer itself just expires
 
 
 def test_without_a_signing_key_the_kit_says_so_and_reads_hardware_only(state, tmp_path):

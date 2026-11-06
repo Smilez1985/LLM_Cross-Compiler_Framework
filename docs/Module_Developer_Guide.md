@@ -1426,7 +1426,7 @@ Probe 3.4.0 (`PROBE_TOOL_VERSION=3.4.0`) adds the group `pairing`, written only 
 
 | Key | Values |
 |---|---|
-| `PAIR_STATE` | `installed` (the kit's root step answered `root-board=installed`), `failed` (it refused; `PAIR_REASON` says why) or `skipped` (`not-root`: no sudo; `account`: no board account; `no-host-keys`; `no-kit`; `windows` from the `.ps1`) |
+| `PAIR_STATE` | `installed` (the kit's root step answered `root-board=installed`), `failed` (it refused; `PAIR_REASON` says why) or `skipped` (`not-root`: no sudo; `account`: no board account; `no-host-keys`; `no-kit`; `opted-out`: a kit written again without pairing; `windows` from the `.ps1`) |
 | `PAIR_REASON` | one word (`^[a-z][a-z-]{0,23}$`), only with `skipped` or `failed` |
 | `PAIR_NONCE` | the kit's one-time number (32 hex characters), only with `installed` |
 | `PAIR_HOSTKEY_ED25519`, `PAIR_HOSTKEY_ECDSA`, `PAIR_HOSTKEY_RSA` | the SHA256 fingerprint of `/etc/ssh/ssh_host_<type>_key.pub` as `ssh-keygen -lf` prints it, only with `installed`; the comment of the key line is never read into the result |

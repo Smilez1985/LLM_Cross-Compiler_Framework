@@ -1494,7 +1494,7 @@ Probe 3.4.0 (`PROBE_TOOL_VERSION=3.4.0`) bringt die Gruppe `pairing`, geschriebe
 
 | Schlüssel | Werte |
 |---|---|
-| `PAIR_STATE` | `installed` (der Root-Schritt des Kits antwortete `root-board=installed`), `failed` (er lehnte ab; `PAIR_REASON` sagt warum) oder `skipped` (`not-root`: kein sudo; `account`: kein Board-Konto; `no-host-keys`; `no-kit`; `windows` aus der `.ps1`) |
+| `PAIR_STATE` | `installed` (der Root-Schritt des Kits antwortete `root-board=installed`), `failed` (er lehnte ab; `PAIR_REASON` sagt warum) oder `skipped` (`not-root`: kein sudo; `account`: kein Board-Konto; `no-host-keys`; `no-kit`; `opted-out`: ein ohne Kopplung neu geschriebenes Kit; `windows` aus der `.ps1`) |
 | `PAIR_REASON` | ein Wort (`^[a-z][a-z-]{0,23}$`), nur mit `skipped` oder `failed` |
 | `PAIR_NONCE` | die Einmal-Zahl des Kits (32 Hex-Zeichen), nur mit `installed` |
 | `PAIR_HOSTKEY_ED25519`, `PAIR_HOSTKEY_ECDSA`, `PAIR_HOSTKEY_RSA` | der SHA256-Fingerabdruck von `/etc/ssh/ssh_host_<Typ>_key.pub`, wie `ssh-keygen -lf` ihn zeigt, nur mit `installed`; der Kommentar der Schlüsselzeile kommt nie ins Ergebnis |

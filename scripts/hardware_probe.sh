@@ -1951,6 +1951,7 @@ host_fp() {  # FILE TYPES...: the SHA256 fingerprint of the host key line in FIL
 }
 pairing() {  # KIT
     nonce=$(head -c 64 "$1/nonce" 2>/dev/null | tr -d ' \r\n')
+    if [ "$nonce" = off ]; then pair_skip opted-out; return 0; fi   # the kit was written again without pairing
     if ! valid '^[0-9a-f]{32}$' "$nonce" || [ ! -f "$1/root-board.sh" ] || [ ! -f "$1/llmcf-gate" ]; then
         pair_skip no-kit; return 0
     fi
@@ -1990,6 +1991,7 @@ pairing_text() {
             "hardware data is complete." ;;
         no-kit) echo "Pairing was skipped: the pairing files of the probe kit are missing or damaged. The hardware" \
             "data is complete." ;;
+        opted-out) echo "Pairing is switched off for this probe kit. The hardware data is complete." ;;
         *) echo "Pairing failed on this board ($PAIR_WORD); nothing of the framework's key was changed. The" \
             "hardware data is complete; import the file as usual." ;;
     esac
