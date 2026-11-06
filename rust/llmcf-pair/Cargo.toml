@@ -1,0 +1,27 @@
+[package]
+name = "llmcf-pair"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+publish = false
+description = "Pairing of a board with the LLM Cross-Compiler Framework by a short code (SPAKE2) over a local link"
+
+[features]
+# Compiled only for the tests (cargo test/build --features test-mode): --test-loopback (a peer on the loopback address
+# counts as the link, and the mDNS answer comes from a loopback port the test names). Release builds never enable it,
+# and CI checks that the release binary refuses --test-loopback.
+test-mode = []
+
+# RustCrypto's SPAKE2 (Ed25519 group) with the versions it is built on (hkdf, hmac, sha2, rand_core 0.6 with the
+# operating system's random source), ChaCha20-Poly1305 for the channel after the key confirmation, and socket2 for
+# the mDNS socket (address reuse next to a running Avahi, multicast membership per interface). Exact pins.
+[dependencies]
+spake2 = { version = "=0.4.0", default-features = false, features = ["getrandom"] }
+rand_core = { version = "=0.6.4", default-features = false, features = ["getrandom"] }
+hkdf = { version = "=0.12.4", default-features = false }
+hmac = { version = "=0.12.1", default-features = false }
+sha2 = { version = "=0.10.8", default-features = false, features = ["std"] }
+chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }
+serde_json = { version = "=1.0.128", default-features = false, features = ["std"] }
+socket2 = { version = "=0.6.5", default-features = false, features = ["all"] }

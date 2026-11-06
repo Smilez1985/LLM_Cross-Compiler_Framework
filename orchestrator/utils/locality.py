@@ -48,6 +48,10 @@ Two questions, one rule (round 26 Q3):
     the checked local addresses (connect_addresses: in the resolver's order, tried in turn as the system's own
     connection would, a link-local one with its zone; a localhost name to the loopback addresses), so a DNS answer
     that changes between the check and the connection cannot reach a public host.
+(g) The local links of this computer (local_links): its private and link-local addresses, labelled cable (link-local:
+    a direct cable between the computer and a board, no router), hotspot (the computer's own hotspot: NetworkManager's
+    shared connection, Windows' mobile hotspot) or lan. The pairing by code (remote/pair_pake.py) looks for boards
+    only over these and talks only to local addresses; no relay outside the own network.
 (f) A crawl the person starts in offline mode (round 26 Q5) may read sites in the own network by this rule
     (crawl_addresses), except IPv4 link-local addresses (169.254.0.0/16) and the cloud metadata services
     (METADATA_ADDRESSES, METADATA_NAMES, also in their IPv4-mapped, IPv4-compatible, NAT64 and 6to4 spellings).
@@ -217,6 +221,89 @@ def url_host(url: Any) -> Tuple[str, Optional[int]]:
     except ValueError:
         return "", None
     return normal_host(parts.hostname or ""), port
+
+
+# --- the local links of this computer (pairing during the hardware probe) -------------------------------------------
+
+# The address ranges the computer's own hotspot hands out by default: NetworkManager's shared connection (a Linux
+# hotspot, ipv4.method shared) and Windows' mobile hotspot (Internet Connection Sharing). Both are private ranges of
+# rule (a): the label only tells the person which link it is.
+HOTSPOT_NETWORKS = (ipaddress.ip_network("10.42.0.0/24"), ipaddress.ip_network("192.168.137.0/24"))
+LINK_KINDS = ("cable", "hotspot", "lan")
+
+
+@dataclass(frozen=True)
+class LocalLink:
+    """One address of this computer on a local link: the interface's name (for the person only, never for an AI),
+    the address (an IPv6 link-local one with its zone) and its kind: cable (link-local 169.254/16 or fe80::/10, a
+    direct cable or a link without DHCP), hotspot (the computer's own hotspot, HOTSPOT_NETWORKS) or lan (another
+    private address: a router's network or a board as access point)."""
+    interface: str
+    address: str
+    kind: str
+    scope_id: int = 0
+
+    @property
+    def version(self) -> int:
+        ip = parse_address(self.address)
+        return ip.version if ip is not None else 0
+
+
+def link_kind(address: Any) -> Optional[str]:
+    """The LINK_KINDS word of an address of this computer, or None when it is no local link (rule a without
+    loopback; Tailscale's ranges are not a link)."""
+    ip = parse_address(address)
+    kind = address_kind(address)
+    if ip is None or kind not in ("private", "link_local"):
+        return None
+    if kind == "link_local":
+        return "cable"
+    if any(ip in net for net in HOTSPOT_NETWORKS if net.version == ip.version):
+        return "hotspot"
+    return "lan"
+
+
+def local_links(addresses: Optional[Callable[[], Dict[str, Any]]] = None) -> List[LocalLink]:
+    """This computer's addresses on local links (psutil.net_if_addrs, or `addresses` in the tests: interface ->
+    entries with .family and .address), interfaces that are down left out where psutil can tell. The pairing by code
+    looks for boards only over these, and they count as local for the one locality rule (rule a) as every private and
+    link-local address does."""
+    stats: Dict[str, Any] = {}
+    if addresses is None:
+        try:
+            import psutil
+            addresses = psutil.net_if_addrs
+            try:
+                stats = psutil.net_if_stats()
+            except Exception:  # noqa: BLE001 - without the states every interface counts as up
+                stats = {}
+        except Exception:  # noqa: BLE001 - no psutil: no link can be listed
+            return []
+    out: List[LocalLink] = []
+    try:
+        table = addresses() or {}
+    except Exception:  # noqa: BLE001 - the system's interface list cannot be read
+        return []
+    for name, entries in sorted(table.items()):
+        state = stats.get(name)
+        if state is not None and not getattr(state, "isup", True):
+            continue
+        for entry in entries or ():
+            family = getattr(entry, "family", None)
+            if family not in (socket.AF_INET, socket.AF_INET6):
+                continue
+            text = str(getattr(entry, "address", "") or "")
+            kind = link_kind(text)
+            if kind is None:
+                continue
+            scope = 0
+            if family == socket.AF_INET6 and kind == "cable":
+                try:
+                    scope = socket.if_nametoindex(name)
+                except (OSError, AttributeError):
+                    scope = 0
+            out.append(LocalLink(interface=str(name), address=text.split("%", 1)[0], kind=kind, scope_id=scope))
+    return out
 
 
 # --- the person's opt-outs (rule d) --------------------------------------------------------------------------------
@@ -876,12 +963,13 @@ def _check_tailscale(run: Optional[CliRunner], resolver: Optional[Resolver],
     return VpnCheck(True, "own_headscale", control, **net)
 
 
-__all__ = ["BUILD_SOURCE_SETTINGS", "CLI_TIMEOUT", "CRAWL_EXCLUDED_NETWORKS", "FAILURE_TTL", "HOME_SUFFIXES", "LINK_LOCAL_NETWORKS",
+__all__ = ["BUILD_SOURCE_SETTINGS", "CLI_TIMEOUT", "CRAWL_EXCLUDED_NETWORKS", "FAILURE_TTL", "HOME_SUFFIXES", "HOTSPOT_NETWORKS",
+           "LINK_KINDS", "LINK_LOCAL_NETWORKS", "LocalLink",
            "LOCAL_REASONS", "LOOKUP_TTL", "LOOPBACK_NETWORKS", "Locality", "LocalityRefused", "LookupFailed",
            "LookupOnUiThread", "METADATA_ADDRESSES", "METADATA_NAMES", "NAT64_NETWORKS", "NOT_LOCAL_REASONS",
            "OPT_OUT_SETTINGS", "OptOuts", "PRIVATE_NETWORKS", "RESOLVE_TIMEOUT", "TAILSCALE_CONTROL_HOSTS", "VPNS",
            "VPN_NETWORKS", "VpnCheck", "address_kind", "cached", "check_host", "check_location", "check_reach",
            "check_url", "clear_cache", "connect_address", "connect_addresses", "crawl_addresses", "crawl_excluded",
-           "embedded_ipv4", "forget", "is_home_name", "is_localhost_name", "is_metadata_name", "label",
+           "embedded_ipv4", "forget", "is_home_name", "is_localhost_name", "is_metadata_name", "label", "link_kind", "local_links",
            "mark_ui_thread", "needs_lookup", "normal_host", "offline_mode", "on_ui_thread", "parse_address",
            "parse_network", "resolve", "tailscale_vpn", "url_host"]

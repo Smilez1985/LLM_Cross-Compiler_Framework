@@ -59,6 +59,10 @@ dependencies = [
 
     # --- 7. Deployment (SSH) ---
     "paramiko>=3.5.1,<6",
+    # Pairing a board by the code its hardware probe shows (orchestrator/remote/pair_pake.py): SPAKE2 over Ed25519
+    # with libsodium's constant-time group operations. Already installed through paramiko; a direct dependency now,
+    # exact pin: it carries the pairing's key exchange.
+    "pynacl==1.6.2",
 
     # --- 8. The build doorbell (Core/doorbell.py): every build end to the person's MQTT broker ---
     # aiomqtt (BSD-3-Clause) over Eclipse Paho (EPL-2.0 OR BSD-3-Clause, used under BSD-3-Clause); imported only when a

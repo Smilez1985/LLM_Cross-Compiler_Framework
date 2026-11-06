@@ -23,6 +23,9 @@ tests/test_board_steps.py check the calls and the module name in that code.
   host name or IP address (and port) and/or a new host key (pasted or read from the board, never typed). The plan holds
   the old and the new fingerprint for the person to compare; the change is written to the audit log before
   known_hosts changes (no record, no change), and it is refused when known_hosts changed since the plan was made.
+- complete_pairing(board_identity, host_key_fingerprints, method='pake', offer=None, ...): the one end of a pairing
+  during the hardware probe (the probe kit's result file, or the code typed into the framework: remote/pair_pake.py);
+  the board's proven host keys are pinned, no trust-on-first-use question follows.
 - record_consent(audit, tool, arguments, detail, *, channel): a person's consent in the audit log (RuntimeError when
   it cannot be written: without its record there is no consent).
 
@@ -471,6 +474,51 @@ def replace_key(store: TrustStore, plan: KeyReplacement, *, via: str, audit: Any
     return plan
 
 
+# --- the end of a pairing during the hardware probe ------------------------------------------------------------------
+
+PAIRING_METHODS = ("kit", "pake")
+
+
+@dataclass(frozen=True)
+class PairingDone:
+    """What complete_pairing() did: the `method` (kit: the probe kit's result file; pake: the code typed into the
+    framework), the board's `identity` as the probe gave it, the host key fingerprints it pinned, and the fingerprints
+    it trusted in the framework's known_hosts now (those whose key lines and address it had)."""
+    method: str
+    identity: Dict[str, Any]
+    fingerprints: Tuple[str, ...]
+    trusted: Tuple[str, ...] = ()
+
+
+def complete_pairing(board_identity: Dict[str, Any], host_key_fingerprints: Any, method: str = "pake",
+                     offer: Any = None, *, state_dir: Any = None, endpoint: Optional[Endpoint] = None,
+                     host_keys: Any = (), via: str = "", audit: Any = None, actor: str = "") -> PairingDone:
+    """The one end of a pairing during the hardware probe, for both ways (the probe kit's result file and the code):
+    the board proved its SSH host keys (`host_key_fingerprints`, SHA256:...) over a channel the person vouched for, so
+    no trust-on-first-use question follows. THIN FORM of this chain (pairing by code); the probe-kit chain replaces the
+    body with the full one (the paired board record, the nonce of `offer`) and keeps this signature. Here: every key
+    line of `host_keys` whose fingerprint is one of `host_key_fingerprints` is trusted for `endpoint` in the
+    framework's known_hosts in `state_dir` through trust_presented_key (audited as the person's, channel `via`)."""
+    if method not in PAIRING_METHODS:
+        raise ValueError(f"a pairing method is one of {', '.join(PAIRING_METHODS)}")
+    wanted = tuple(str(f) for f in (host_key_fingerprints or ()) if str(f).startswith("SHA256:"))
+    trusted = []
+    if state_dir is not None and endpoint is not None:
+        from orchestrator.remote.trust import KeyTextError, fingerprint, parse_public_key
+        store = TrustStore(Path(state_dir))
+        for line in host_keys or ():
+            try:
+                key = parse_public_key(str(line))
+            except KeyTextError:
+                continue
+            fp = fingerprint(key)
+            if fp in wanted and fp not in trusted:
+                trust_presented_key(store, endpoint, key, via=via or "cli", audit=audit, actor=actor)
+                trusted.append(fp)
+    return PairingDone(method=method, identity=dict(board_identity or {}), fingerprints=wanted,
+                       trusted=tuple(trusted))
+
+
 # --- consents ----------------------------------------------------------------------------------------------------
 
 def record_consent(audit: Any, tool: str, arguments: Dict[str, Any], detail: str, *, channel: str) -> None:
@@ -482,6 +530,6 @@ def record_consent(audit: Any, tool: str, arguments: Dict[str, Any], detail: str
                  extra={"answer": "accepted", "confirm_channel": channel})
 
 
-__all__ = ["PairOutcome", "TierChooser", "FirstUse", "KeyReplaceError", "KeyReplacement", "PERSON_CHANNELS",
-           "PersonChannel", "first_use", "pair",
+__all__ = ["PairOutcome", "TierChooser", "FirstUse", "KeyReplaceError", "KeyReplacement", "PAIRING_METHODS",
+           "PERSON_CHANNELS", "PairingDone", "PersonChannel", "complete_pairing", "first_use", "pair",
            "plan_replacement", "record_consent", "replace_key", "trust_presented_key"]
