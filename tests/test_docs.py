@@ -49,6 +49,8 @@ EXPECTED_PAIRS: List[Tuple[str, str]] = [
     ("docs/Module_Developer_Guide.md", "docs/Module_Developer_Guide_DE.md"),
     ("docs/Container_Setup.md", "docs/Container_Setup_DE.md"),  # the framework in a container you build locally
     ("docs/Mojo.md", "docs/Mojo_DE.md"),  # the health check (Mojo Oracle and Mojo Miracle)
+    # the setup guide: the MCP server in editors' ACP agents, Ditto as their agent, the framework as ACP client
+    ("docs/Editors_and_Agents.md", "docs/Editors_and_Agents_DE.md"),
     ("docs/research/ACP.md", "docs/research/ACP_DE.md"),  # research: the Agent Client Protocol and other ACPs
     ("docs/research/MCP_vs_ACP.md", "docs/research/MCP_vs_ACP_DE.md"),  # research: MCP, ACP and A2A side by side
     ("configs/SSOT_ARCHITECTURE.md", "configs/SSOT_ARCHITECTURE_DE.md"),
@@ -1077,3 +1079,118 @@ def test_the_working_log_check_finds_every_form():
     for line in ("the decision of 2026-10-22 replaced it", "a round trip", "one more round of checks",
                  "Key decisions", "eine Runde später"):
         assert not working_log_mentions("x.md", line), line
+
+
+# --- the editors and agents guide: every command line parses, every quoted message and menu path is the real one ---
+
+GUIDE = ("docs/Editors_and_Agents.md", "docs/Editors_and_Agents_DE.md")
+_CODE_SPAN = re.compile(r"`([^`\n]+)`")
+
+
+def documented_cli_lines(text: str) -> List[str]:
+    """Every `llm-cli ...` command line of a document: the lines of its code blocks and its inline code spans. A
+    line with a placeholder that is no argument ("...", "[...]", "|") is left out."""
+    found, fenced = [], False
+    for line in text.splitlines():
+        if _FENCE.match(line):
+            fenced = not fenced
+            continue
+        candidates = [line.strip()] if fenced else _CODE_SPAN.findall(line)
+        for candidate in candidates:
+            if candidate.startswith("llm-cli ") and not any(mark in candidate for mark in ("...", "[", "|")):
+                found.append(candidate)
+    return found
+
+
+def parse_cli_line(line: str) -> None:
+    """Parses a documented command line with the real argument parser, without running it: each group resolves its
+    subcommand, the last command checks its options and arguments. click.UsageError when it does not parse."""
+    import shlex
+
+    import click
+
+    from orchestrator import cli as cli_module
+    words = shlex.split(line)[1:]
+    command, name, parent = cli_module.cli, "llm-cli", None
+    while True:
+        ctx = command.make_context(name, list(words), parent=parent, resilient_parsing=False)
+        if not isinstance(command, click.Group):
+            return
+        rest = list(getattr(ctx, "_protected_args", None) or []) + list(ctx.args)
+        if not rest:
+            return   # a group that runs on its own (`llm-cli acp`)
+        sub = command.get_command(ctx, rest[0])
+        if sub is None:
+            raise click.UsageError(f"no command {rest[0]!r} in {name!r}")
+        command, name, words, parent = sub, rest[0], rest[1:], ctx
+
+
+@pytest.mark.parametrize("rel", GUIDE)
+def test_every_command_line_of_the_guide_parses(rel):
+    lines = documented_cli_lines(_read(rel))
+    assert len(lines) >= 20, f"{rel}: the guide's command lines were not found ({len(lines)})"
+    failed = []
+    for line in lines:
+        try:
+            parse_cli_line(line)
+        except Exception as e:  # noqa: BLE001 - every parser error is a finding
+            failed.append(f"{line}: {type(e).__name__}: {e}")
+    assert not failed, "command lines that do not parse:\n  " + "\n  ".join(failed)
+
+
+def test_the_command_line_check_finds_a_wrong_line():
+    import click
+    for line in ("llm-cli agents add --no-such-option", "llm-cli acp nosuch", "llm-cli agents add ID --kind zip"):
+        with pytest.raises(click.UsageError):
+            parse_cli_line(line)
+    parse_cli_line("llm-cli acp --login")
+    assert documented_cli_lines("a `llm-cli mcp config` b\n```bash\nllm-cli acp config\n```\n`llm-cli x [--y]`") == \
+        ["llm-cli mcp config", "llm-cli acp config"]
+
+
+# The guide's troubleshooting table quotes the framework's own messages: each must still exist in the code (the
+# English ones) or in the German GUI texts, so the table cannot drift away from what a person sees.
+GUIDE_MESSAGES = {
+    "en": ["Ditto has no AI provider set up yet. Sign Ditto in first", "cannot be put on PYTHONPATH safely",
+           "The entry cannot be shown: {reason}", "needs the internet", "gives no checksum for the download of",
+           "Node.js (npx) is not installed on this computer.", "uv (uvx) is not installed on this computer.",
+           "The ACP registry was not fetched yet.", "starts for the first time and may download its package first",
+           "did not start the Agent Client Protocol", "is missing. Remove the agent and add it again.",
+           "The agent offers no 'allow once' for this, only 'always' or reject.",
+           "This version connects to no editor MCP server either way.",
+           "Zed can forward configured MCP servers over ACP; agents may also read native MCP config"],
+    "de": ["Ditto has no AI provider set up yet. Sign Ditto in first", "cannot be put on PYTHONPATH safely",
+           "Der Eintrag kann nicht gezeigt werden: {reason}", "needs the internet",
+           "gives no checksum for the download of", "Node.js (npx) is not installed on this computer.",
+           "Die ACP-Registry wurde noch nicht abgerufen.",
+           "startet zum ersten Mal und lädt dafür vielleicht erst sein Paket herunter",
+           "did not start the Agent Client Protocol", "is missing. Remove the agent and add it again.",
+           "Der Agent bietet hierfür kein „einmal erlauben“ an, nur „immer“ oder ablehnen.",
+           "Diese Version verbindet sich so oder so mit keinem MCP-Server eines"],
+}
+# Quoted from the editors' own documentation, not from the framework's code.
+EDITOR_QUOTES = {"Zed can forward configured MCP servers over ACP; agents may also read native MCP config"}
+
+
+def _framework_sources() -> str:
+    return "\n".join(" ".join(p.read_text(encoding="utf-8").split()).replace('" "', "")
+                     for p in sorted((REPO_ROOT / "orchestrator").rglob("*.py")))
+
+
+@pytest.mark.parametrize("rel, lang", [(GUIDE[0], "en"), (GUIDE[1], "de")])
+def test_the_guides_messages_are_the_frameworks_own(rel, lang):
+    guide = " ".join(_read(rel).split())
+    sources = _framework_sources()
+    missing = [m for m in GUIDE_MESSAGES[lang] if m not in guide]
+    assert not missing, f"{rel} no longer quotes: {missing}"
+    stale = [m for m in GUIDE_MESSAGES[lang] if m not in EDITOR_QUOTES and m.split(" ", 1)[1] not in sources]
+    assert not stale, f"{rel} quotes messages the code no longer has: {stale}"
+
+
+@pytest.mark.parametrize("rel, lang", [(GUIDE[0], "en"), (GUIDE[1], "de")])
+def test_the_guide_names_the_menus_by_their_mouse_paths(rel, lang):
+    from orchestrator.utils.next_steps import mouse_path
+    text = " ".join(_read(rel).split())
+    for action in ("act_tools_mcp_connections", "act_file_settings", "act_acp_agents", "act_signin_overview",
+                   "act_tools_approvals", "act_ditto_settings"):
+        assert f"**{mouse_path(action, lang)}**" in text, f"{rel}: {action} -> {mouse_path(action, lang)}"

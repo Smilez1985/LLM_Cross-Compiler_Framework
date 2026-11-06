@@ -1965,6 +1965,8 @@ Jeder Befehl, der etwas ändert, ist allein deiner: Eine KI kann nie einen Agent
 
 Der Agent läuft in seinem eigenen Ordner im Framework-Home mit einer sauberen Umgebung (das Nötigste des Systems und
 seine eigenen Schlüssel) und bekommt den MCP-Server des Frameworks (`llm-cli mcp serve`) als seine einzigen Werkzeuge.
+Schritt für Schritt, mit den Meldungen, die dir begegnen können: [Editoren und Agenten:
+Einrichtungsanleitung](Editors_and_Agents_DE.md#c-agenten-im-eigenen-fenster-des-frameworks).
 
 ---
 
@@ -2030,8 +2032,10 @@ stoppt den Server wie Strg+C, nach 15 Sekunden sofort). Den stdio-Transport star
 llm-cli mcp config [--write claude-desktop]
 ```
 
-Zeigt, wie du Claude Code (ein Befehl `claude mcp add ...`), Claude Desktop (JSON für dessen Konfigurationsdatei) und
-VS Code (JSON für `.vscode/mcp.json`) verbindest, jeweils mit dem Python und dem Ordner dieser Installation. Ruf es
+Zeigt, wie du Claude Code (ein Befehl `claude mcp add ...`), Claude Desktop (JSON für dessen Konfigurationsdatei),
+VS Code (JSON für `.vscode/mcp.json`) und Zed (JSON für `context_servers` in seiner `settings.json`; Zed kann den
+Server an die ACP-Agenten weitergeben, die es startet, siehe die [Einrichtungsanleitung](Editors_and_Agents_DE.md))
+verbindest, jeweils mit dem Python und dem Ordner dieser Installation. Ruf es
 mit dem Python des Frameworks auf, damit der ausgegebene Befehl dieses verwendet. Der Befehl startet Python mit `-P`,
 sodass nichts aus dem Ordner importiert wird, in dem der Client den Server startet. Unter Windows ist die
 Befehlszeile so gequotet, dass cmd und PowerShell sie unverändert lassen; enthält ein Pfad `%`, `!`, `$`, einen
@@ -2048,7 +2052,7 @@ llm-cli mcp config --write claude-desktop
 
 An diesen Clients meldest du dich mit deinem eigenen Konto oder Schlüssel an; das Framework sieht das nie.
 
-In der GUI: **Security > Verbindungen zu KI-Apps (MCP)...** zeigt die drei Einträge, jeden mit einer Schaltfläche
+In der GUI: **Security > Verbindungen zu KI-Apps (MCP)...** zeigt die vier Einträge, jeden mit einer Schaltfläche
 **Kopieren**, und den Pfad der Konfigurationsdatei von Claude Desktop. **In Claude Desktop eintragen...** (`--write
 claude-desktop`) zeigt die Datei, ob es sie gibt, die Änderung, die Einträge, die bleiben, und die Sicherung, fragt
 zuerst („Nein“ ist vorgewählt) und schreibt genau das; eine inzwischen geänderte Datei wird nicht überschrieben.
@@ -2114,7 +2118,7 @@ llm-cli acp servers enable|disable SERVER
 |---|---|
 | `acp` | Den Agent betreiben (das tut der Editor; stdout trägt nur das Protokoll, Logs gehen nach stderr). Ditto antwortet mit dem KI-Anbieter deiner KI-Einstellungen; jeder Tool-Aufruf läuft innerhalb deiner Tool-Berechtigungen und steht mit dem Kanal `acp` im Audit-Log. |
 | `acp --login` | Ditto anmelden: fragt nach dem Anbieter und führt dafür `ditto login` aus. Der Editor führt das aus, wenn er „Ditto anmelden“ anbietet (gezeigt, solange Ditto keinen Anbieter eingerichtet hat). Braucht ein Terminal. |
-| `acp config` | Die Befehlszeile und den `agent_servers`-Eintrag für den Editor ausgeben (Zed: `settings.json`; JetBrains-IDEs: `acp.json`), mit dem Python und dem Ordner dieser Installation und `-P`, wie `mcp config`. `--json`: nur der Eintrag. |
+| `acp config` | Die Befehlszeile und die `agent_servers`-Einträge für den Editor ausgeben (`settings.json` von Zed, mit `"type": "custom"`; `acp.json` einer JetBrains-IDE), mit dem Python und dem Ordner dieser Installation und `-P`, wie `mcp config`. `--json`: nur der JetBrains-Eintrag. |
 | `acp servers list` | Die MCP-Server, die Editoren an Ditto übergeben haben: Name, Transport, was laufen würde (Geheimnisse geschwärzt, nur die Namen der Umgebungsvariablen), der Editor (wie er sich selbst nennt), zuletzt gesehen, zugestimmt oder nicht. `--json` für Skripte. |
 | `acp servers enable` / `disable` | Deine Zustimmung für einen Eintrag (per ID oder einem Namen, den nur ein Eintrag hat). Diese Version verbindet sich so oder so mit keinem MCP-Server eines Editors: Ihre Tools würden an den Berechtigungen und am Audit-Log des Frameworks vorbeilaufen. |
 
@@ -2139,9 +2143,10 @@ llm-cli acp servers list
 llm-cli acp servers enable 0123456789abcdef
 ```
 
-In der GUI: **Datei > Einstellungen...**, Tab **Ditto in Editoren**: der Befehl und der Eintrag, jeweils mit einem Knopf
-**Kopieren**, und die vermerkten MCP-Server der Editoren mit je einem Zustimmungs-Häkchen. Die Anmeldung ist
-**Security > Anmeldeübersicht...**.
+In der GUI: **Datei > Einstellungen...**, Tab **Ditto in Editoren**: der Befehl und die zwei Einträge, jeweils mit einem
+Knopf **Kopieren**, und die vermerkten MCP-Server der Editoren mit je einem Zustimmungs-Häkchen. Die Anmeldung ist
+**Security > Anmeldeübersicht...**. Schritt für Schritt für Zed, JetBrains-IDEs und Android Studio: [Editoren und
+Agenten: Einrichtungsanleitung](Editors_and_Agents_DE.md#b-ditto-als-agent-des-editors).
 
 ---
 

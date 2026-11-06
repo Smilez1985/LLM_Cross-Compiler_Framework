@@ -5266,7 +5266,8 @@ def mcp_config(ctx: FrameworkContext, write_client: Optional[str]):
     sections = [("Claude Code (run once in a terminal)", snippets["claude-code"]),
                 (f"Claude Desktop ({mcp_server.claude_desktop_config_path()}), "
                  "or: llm-cli mcp config --write claude-desktop", snippets["claude-desktop"]),
-                ("VS Code (.vscode/mcp.json)", snippets["vscode"])]
+                ("VS Code (.vscode/mcp.json)", snippets["vscode"]),
+                ("Zed (settings.json, context_servers)", snippets["zed"])]
     for title, text in sections:
         click.echo(f"# {title}")
         click.echo(text)
@@ -5324,8 +5325,8 @@ def _acp_login(click_ctx, ctx: FrameworkContext) -> None:
 @acp.command('config')
 @click.option('--json', 'as_json', is_flag=True, help="Print only the editor's agent_servers JSON entry")
 def acp_config(as_json: bool):
-    """Show how to add Ditto as an ACP agent to an editor (the command, and the agent_servers entry of Zed's
-    settings.json or a JetBrains IDE's acp.json)"""
+    """Show how to add Ditto as an ACP agent to an editor (the command, the agent_servers entry of Zed's
+    settings.json and of a JetBrains IDE's acp.json; --json prints the JetBrains entry)"""
     from orchestrator.utils.stdio_programs import acp_entries, installation_root
     try:
         entries = acp_entries(installation_root())
@@ -5339,7 +5340,10 @@ def acp_config(as_json: bool):
     click.echo("# Command (an editor that asks for the agent's command line)")
     click.echo(entries["command"])
     click.echo("")
-    click.echo("# agent_servers entry (Zed: settings.json; JetBrains IDEs: acp.json)")
+    click.echo("# Zed (settings.json, agent_servers)")
+    click.echo(entries["zed"])
+    click.echo("")
+    click.echo("# JetBrains IDEs (~/.jetbrains/acp.json, agent_servers)")
     click.echo(entries["json"])
     click.echo("")
     click.echo("Ditto answers with the AI provider of your AI settings; sign it in with 'llm-cli ditto login "

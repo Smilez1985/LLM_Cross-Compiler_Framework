@@ -1181,9 +1181,10 @@ use Ditto as their AI agent: the editor starts `llm-cli acp` and you chat with D
 framework's own tools, the same ones as in the chat panel. This is an additional way in; the chat panel and
 `ditto ask` stay as they are. Like Ditto, it is experimental: the notice is the first message of every editor session.
 
-- **Adding it**: **File > Settings...**, tab **Ditto in editors**, shows the command and the `agent_servers` entry for
-  the editor (Zed's `settings.json`, a JetBrains IDE's `acp.json`), each with a **Copy** button; `llm-cli acp config`
-  prints the same.
+- **Adding it**: **File > Settings...**, tab **Ditto in editors**, shows the command and the `agent_servers` entries
+  for the editor (Zed's `settings.json` with `"type": "custom"`, a JetBrains IDE's `acp.json`), each with a **Copy**
+  button; `llm-cli acp config` prints the same. Step by step for Zed, JetBrains IDEs and Android Studio:
+  [Editors and agents: setup guide](Editors_and_Agents.md#b-ditto-as-the-editors-agent).
 - **Sign-in**: while Ditto has no AI provider set up, the editor offers "Sign Ditto in", which runs the framework's own
   sign-in in a terminal. No key ever passes through the editor.
 - **Permissions**: every tool call runs within your tool permissions and is recorded in the audit log (channel
@@ -2135,6 +2136,8 @@ permissions, the approvals and the audit log, as for any AI app over MCP. Ditto 
 - **Remove...** lists the agent's folders and its entry ("No" is the default) and takes its keys from the vault.
 - At the terminal: `llm-cli agents list|search|add|remove|login|run` ([CLI](CLI_Usage.md#agents)). An AI can never
   add, sign in or start an agent.
+- Step by step, with the messages you may meet: [Editors and agents: setup
+  guide](Editors_and_Agents.md#c-agents-in-the-frameworks-own-window).
 
 ---
 
@@ -2146,7 +2149,8 @@ can then use the [same tools as Ditto](#dittos-tools). You sign in to the client
 framework never sees it.
 
 **GUI:** Security > AI App Connections (MCP)... shows how to connect Claude Code, Claude Desktop (with the path of its
-configuration file) and VS Code, each with a Copy button, writes the entry into Claude Desktop's configuration after
+configuration file), VS Code and Zed (its `context_servers` entry; Zed may pass it on to the ACP agents it runs:
+[setup guide](Editors_and_Agents.md#a-the-frameworks-mcp-server-in-an-editors-agent)), each with a Copy button, writes the entry into Claude Desktop's configuration after
 showing the file and the change (Write to Claude Desktop..., the backup as with `mcp config --write`), starts and
 stops the local HTTP server as a child process of the GUI (address, port, container binding; the same refusals as
 `mcp serve --transport http`; its address, state and output shown; the framework asks before it closes while the

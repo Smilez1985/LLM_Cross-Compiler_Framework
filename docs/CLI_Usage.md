@@ -1879,7 +1879,8 @@ command that changes something is yours alone: an AI can never add, sign in or s
 | `agents run NAME` | Chat with the agent in this terminal: its text and thoughts as they come, tool calls with status, the plan; its permission questions are asked here (allow once or reject, "No" default); Ctrl+C stops its turn, an empty line ends |
 
 The agent runs in its own folder under the framework home with a clean environment (the system basics and its own
-keys) and gets the framework's MCP server (`llm-cli mcp serve`) as its only tools.
+keys) and gets the framework's MCP server (`llm-cli mcp serve`) as its only tools. Step by step, with the messages
+you may meet: [Editors and agents: setup guide](Editors_and_Agents.md#c-agents-in-the-frameworks-own-window).
 
 ---
 
@@ -1943,7 +1944,9 @@ llm-cli mcp config [--write claude-desktop]
 ```
 
 Prints how to connect Claude Code (a `claude mcp add ...` command), Claude Desktop (JSON for its configuration
-file) and VS Code (JSON for `.vscode/mcp.json`), with the Python and folder of this installation. Run it with the
+file), VS Code (JSON for `.vscode/mcp.json`) and Zed (JSON for `context_servers` in its `settings.json`; Zed may pass
+the server on to the ACP agents it runs, see the [setup guide](Editors_and_Agents.md)), with the Python and folder of
+this installation. Run it with the
 framework's own Python so the printed command uses it. The command starts Python with `-P`, so nothing is imported
 from the folder the client starts the server in. On Windows the command line is quoted so that cmd and PowerShell
 both keep it as it is; if a path contains `%`, `!`, `$`, a backtick or a double quote, only the JSON is shown.
@@ -1959,7 +1962,7 @@ llm-cli mcp config --write claude-desktop
 
 You sign in to these clients with your own account or key; the framework never sees it.
 
-In the GUI: **Security > AI App Connections (MCP)...** shows the three entries, each with a **Copy** button, and the
+In the GUI: **Security > AI App Connections (MCP)...** shows the four entries, each with a **Copy** button, and the
 path of Claude Desktop's configuration file. **Write to Claude Desktop...** (`--write claude-desktop`) shows the file,
 whether it exists, the change, the entries that are kept and the backup, asks first ("No" is the default) and writes
 exactly that; a file changed in the meantime is not overwritten.
@@ -2022,7 +2025,7 @@ llm-cli acp servers enable|disable SERVER
 |---|---|
 | `acp` | Run the agent (the editor does this; stdout carries only the protocol, logs go to stderr). Ditto answers with the AI provider of your AI settings; every tool call runs within your tool permissions and is recorded in the audit log with the channel `acp`. |
 | `acp --login` | Sign Ditto in: asks which provider and runs `ditto login` for it. The editor runs this when it offers "Sign Ditto in" (shown while Ditto has no provider set up). Needs a terminal. |
-| `acp config` | Print the command line and the `agent_servers` entry for the editor (Zed: `settings.json`; JetBrains IDEs: `acp.json`), with the Python and folder of this installation and `-P`, like `mcp config`. `--json`: only the entry. |
+| `acp config` | Print the command line and the `agent_servers` entries for the editor (Zed's `settings.json`, with `"type": "custom"`; a JetBrains IDE's `acp.json`), with the Python and folder of this installation and `-P`, like `mcp config`. `--json`: only the JetBrains entry. |
 | `acp servers list` | The MCP servers editors passed to Ditto: name, transport, what would run (secrets redacted, environment variable names only), the editor (as it names itself), last seen, enabled or not. `--json` for scripts. |
 | `acp servers enable` / `disable` | Your consent for one entry (by its ID or a name only one entry has). This version connects to no editor MCP server either way: their tools would bypass the framework's permissions and audit log. |
 
@@ -2046,8 +2049,10 @@ llm-cli acp servers list
 llm-cli acp servers enable 0123456789abcdef
 ```
 
-In the GUI: **File > Settings...**, tab **Ditto in editors**: the command and the entry, each with a **Copy** button,
-and the recorded editor MCP servers with a consent box each. The sign-in is **Security > Sign-in Overview...**.
+In the GUI: **File > Settings...**, tab **Ditto in editors**: the command and the two entries, each with a **Copy**
+button, and the recorded editor MCP servers with a consent box each. The sign-in is **Security > Sign-in
+Overview...**. Step by step for Zed, JetBrains IDEs and Android Studio: [Editors and agents: setup
+guide](Editors_and_Agents.md#b-ditto-as-the-editors-agent).
 
 ---
 

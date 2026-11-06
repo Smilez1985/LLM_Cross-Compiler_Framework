@@ -1308,9 +1308,11 @@ mit den eigenen Tools des Frameworks, denselben wie im Chat-Panel. Das ist ein z
 `ditto ask` bleiben, wie sie sind. Wie Ditto ist es experimentell: Der Hinweis ist die erste Nachricht jeder Sitzung im
 Editor.
 
-- **Hinzufügen**: **Datei > Einstellungen...**, Tab **Ditto in Editoren**, zeigt den Befehl und den
-  `agent_servers`-Eintrag für den Editor (`settings.json` von Zed, `acp.json` einer JetBrains-IDE), jeweils mit einem
-  Knopf **Kopieren**; `llm-cli acp config` gibt dasselbe aus.
+- **Hinzufügen**: **Datei > Einstellungen...**, Tab **Ditto in Editoren**, zeigt den Befehl und die
+  `agent_servers`-Einträge für den Editor (`settings.json` von Zed mit `"type": "custom"`, `acp.json` einer
+  JetBrains-IDE), jeweils mit einem Knopf **Kopieren**; `llm-cli acp config` gibt dasselbe aus. Schritt für Schritt für
+  Zed, JetBrains-IDEs und Android Studio: [Editoren und Agenten:
+  Einrichtungsanleitung](Editors_and_Agents_DE.md#b-ditto-als-agent-des-editors).
 - **Anmeldung**: Solange Ditto keinen KI-Anbieter eingerichtet hat, bietet der Editor „Ditto anmelden“ an; das führt
   die eigene Anmeldung des Frameworks in einem Terminal aus. Kein Schlüssel geht je über den Editor.
 - **Berechtigungen**: Jeder Tool-Aufruf läuft innerhalb deiner Tool-Berechtigungen und steht im Audit-Log (Kanal
@@ -2363,6 +2365,8 @@ die Vorgabe im Chat.
   dem Tresor.
 - Im Terminal: `llm-cli agents list|search|add|remove|login|run` ([CLI](CLI_Usage_DE.md#agents)). Eine KI kann nie einen
   Agenten hinzufügen, anmelden oder starten.
+- Schritt für Schritt, mit den Meldungen, die dir begegnen können: [Editoren und Agenten:
+  Einrichtungsanleitung](Editors_and_Agents_DE.md#c-agenten-im-eigenen-fenster-des-frameworks).
 
 ---
 
@@ -2374,7 +2378,9 @@ VS Code können dann [dieselben Tools wie Ditto](#dittos-tools) nutzen. Am Clien
 Konto oder Schlüssel an; das Framework sieht das nie.
 
 **GUI:** Security > Verbindungen zu KI-Apps (MCP)... zeigt, wie du Claude Code, Claude Desktop (mit dem Pfad seiner
-Konfigurationsdatei) und VS Code verbindest, jeweils mit einer Schaltfläche zum Kopieren, trägt den Eintrag in die
+Konfigurationsdatei), VS Code und Zed verbindest (sein `context_servers`-Eintrag; Zed kann ihn an die ACP-Agenten
+weitergeben, die es startet: [Einrichtungsanleitung](Editors_and_Agents_DE.md#a-der-mcp-server-des-frameworks-im-agenten-eines-editors)),
+jeweils mit einer Schaltfläche zum Kopieren, trägt den Eintrag in die
 Konfiguration von Claude Desktop ein, nachdem es Datei und Änderung gezeigt hat (In Claude Desktop eintragen..., die
 Sicherung wie bei `mcp config --write`), startet und stoppt den lokalen HTTP-Server als Kindprozess der GUI (Adresse,
 Port, Container-Bindung; dieselben Ablehnungen wie `mcp serve --transport http`; Adresse, Zustand und Ausgabe zu

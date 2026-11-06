@@ -9,7 +9,9 @@ Rockchip-Boards wie dem Radxa ZERO 3W oder dem Radxa ROCK 5B. Es besteht aus ein
 Kommandozeile (`llm-cli`), einem Server, über den KI-Clients wie Claude Code, Claude Desktop oder VS Code das
 Framework bedienen (MCP), und dem eingebauten Assistenten **Ditto**. Neben Ditto kannst du mit externen Coding-Agenten
 chatten, die du auswählst (Claude Agent, Codex, Gemini CLI, ...), über das Agent Client Protocol; sie arbeiten nur mit
-den Werkzeugen des Frameworks ([Features](docs/Features_DE.md#acp-agenten-die-du-auswählst)).
+den Werkzeugen des Frameworks ([Features](docs/Features_DE.md#acp-agenten-die-du-auswählst)). Editoren wie Android
+Studio, Zed und JetBrains-IDEs können den MCP-Server des Frameworks in ihren Agenten oder Ditto als ihren Agenten
+nutzen: [Editoren und Agenten: Einrichtungsanleitung](docs/Editors_and_Agents_DE.md).
 
 Diese README beschreibt den Stand des Entwicklungszweigs: Version 3.1.0 und was der [CHANGELOG](CHANGELOG_DE.md)
 seitdem aufführt. Was als Nächstes kommt, steht in der [Roadmap](docs/ROADMAP_DE.md).
@@ -583,10 +585,11 @@ llm-cli mcp config                          # zeigt die Einrichtung für Claude 
 llm-cli mcp config --write claude-desktop   # oder direkt in Claude Desktop eintragen (andere Einträge bleiben, eine Sicherung wird geschrieben)
 ```
 
-`llm-cli mcp config` gibt für Claude Code einen Befehl `claude mcp add ...` und für Claude Desktop und VS Code
-(`.vscode/mcp.json`) JSON-Schnipsel aus, jeweils mit dem Python und dem Ordner deiner Installation. Ruf es mit dem
-Python des Frameworks auf (siehe [`llm-cli` aufrufen](#llm-cli-aufrufen)). Nach `--write claude-desktop` startest
-du Claude Desktop neu.
+`llm-cli mcp config` gibt für Claude Code einen Befehl `claude mcp add ...` und für Claude Desktop, VS Code
+(`.vscode/mcp.json`) und Zed (`context_servers`) JSON-Schnipsel aus, jeweils mit dem Python und dem Ordner deiner
+Installation. Ruf es mit dem Python des Frameworks auf (siehe [`llm-cli` aufrufen](#llm-cli-aufrufen)). Nach
+`--write claude-desktop` startest du Claude Desktop neu. Für die Agenten von Android Studio, Zed und JetBrains-IDEs
+siehe die [Einrichtungsanleitung](docs/Editors_and_Agents_DE.md).
 
 - **Berechtigungen:** Nur lesende Tools sind standardmäßig erlaubt. Builds starten oder abbrechen und über
   Self-Healing-Vorschläge entscheiden fragt nach deiner Bestätigung, die der Client als Frage anzeigt, außer du

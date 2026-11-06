@@ -86,12 +86,14 @@ ACP_AGENT_NAME = "llmcf"   # the entry's name in an editor's agent list
 
 
 def acp_entries(app_root: Path, windows: Optional[bool] = None) -> Dict[str, str]:
-    """How an editor adds Ditto as an ACP agent: "command" (the command line, for an editor that asks for one, such as
-    Android Studio's or a JetBrains IDE's custom agent) and "json" (the `agent_servers` entry of Zed's settings.json and
-    a JetBrains IDE's acp.json). The same launch as the MCP server's entries (this interpreter, -P, PYTHONPATH)."""
+    """How an editor adds Ditto as an ACP agent: "command" (the command line, for an editor that asks for one), "json"
+    (the `agent_servers` entry of a JetBrains IDE's acp.json) and "zed" (the same entry with `"type": "custom"`, as
+    Zed's settings.json takes a custom agent). The same launch as the MCP server's entries (this interpreter, -P,
+    PYTHONPATH)."""
     import json
     launch = launch_command(app_root, windows, ACP_AGENT)
     entry = {"command": launch["command"], "args": launch["args"], "env": launch["env"]}
+    zed = {"agent_servers": {ACP_AGENT_NAME: {"type": "custom", **entry}}}
     try:
         command = shell_command([launch["command"], *launch["args"]], windows)
         windows_ = (sys.platform == "win32") if windows is None else windows
@@ -101,7 +103,8 @@ def acp_entries(app_root: Path, windows: Optional[bool] = None) -> Dict[str, str
     except ValueError:
         command = ("# Not shown: the command would contain a character that cmd.exe or PowerShell change even in "
                    "quotes. Use the JSON entry, or install Python and the framework to folders without it.")
-    return {"command": command, "json": json.dumps({"agent_servers": {ACP_AGENT_NAME: entry}}, indent=2)}
+    return {"command": command, "json": json.dumps({"agent_servers": {ACP_AGENT_NAME: entry}}, indent=2),
+            "zed": json.dumps(zed, indent=2)}
 
 
 def no_programs_from_the_working_directory() -> None:

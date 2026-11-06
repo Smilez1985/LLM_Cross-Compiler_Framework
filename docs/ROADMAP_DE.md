@@ -80,7 +80,6 @@ Anbieter, Prüfung, Fehler mit nächstem Schritt) und der Anmeldebereich der GUI
 | **ACP-Agenten in der MCP-Liste (nur lesen).** Ein MCP-Werkzeug, das die ACP-Agenten auflistet, die die Person hinzugefügt hat (Name, Art, Version, ob er das Internet braucht, nur Bezeichnungen, nie ein Pfad oder ein Schlüssel), damit eine KI sie nennen kann; Hinzufügen, Anmelden und Starten bleiben Sache der Person. | geplant |
 | **ACP-Sitzungen, die sich fortsetzen lassen (`session/load`).** Ditto als ACP-Agent bietet `loadSession` an, und der ACP-Client setzt die Sitzung eines Agenten fort, wenn der Agent das anbietet; heute lebt eine Sitzung für eine Verbindung im Speicher. | geplant |
 | **Ein echter Lauf von Anfang bis Ende mit einem ACP-Agenten eines Drittanbieters.** Ein Registry-Agent (npx oder uvx) hinzugefügt, mit seiner eigenen Anmeldung angemeldet und durch eine Runde geführt, die die Werkzeuge des Frameworks aufruft, auf einem Computer mit Netzzugang; die Tests nutzen bisher einen Schein-Agenten. | geplant |
-| **Die ACP-Einrichtungsanleitung**, nachdem ACP-Agent und -Client angenommen sind: eine getestete Anleitung für Android Studio, Zed und JetBrains-IDEs (der MCP-Server des Frameworks in ihren Agenten und Ditto als ihr ACP-Agent), von den bestehenden Dokumenten verlinkt; neu ist nur, was fehlt. | geplant |
 
 ### Board-Bündel, Gateway, Sprache, MCP auf dem Board
 

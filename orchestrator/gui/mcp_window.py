@@ -35,7 +35,7 @@ from orchestrator.gui.worker_relay import worker_relay
 from orchestrator.utils.localization import current_language, ui_text
 
 SNIPPETS = (("claude-code", "tmcp.mcp.claude_code"), ("claude-desktop", "tmcp.mcp.claude_desktop"),
-            ("vscode", "tmcp.mcp.vscode"))
+            ("vscode", "tmcp.mcp.vscode"), ("zed", "tmcp.mcp.zed"))
 LOOPBACK_CHOICES = ("127.0.0.1", "::1", "localhost")
 DEFAULT_PORT = 8765           # the CLI's --port default
 STOP_WAIT = 15.0              # seconds the server gets to end its sessions before it is stopped at once

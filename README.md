@@ -9,6 +9,8 @@ such as the Radxa ZERO 3W or the Radxa ROCK 5B. It has a desktop app (GUI), a co
 that lets AI clients such as Claude Code, Claude Desktop or VS Code operate it (MCP), and a built-in assistant
 called **Ditto**. Beside Ditto you can chat with external coding agents you pick (Claude Agent, Codex, Gemini CLI,
 ...) over the Agent Client Protocol; they work only with the framework's tools ([Features](docs/Features.md#acp-agents-you-pick)).
+Editors such as Android Studio, Zed and JetBrains IDEs can use the framework's MCP server in their agents or Ditto as
+their agent: [Editors and agents: setup guide](docs/Editors_and_Agents.md).
 
 This README describes the state of the development branch: version 3.1.0 and what the [CHANGELOG](CHANGELOG.md) lists
 since. What comes next is in the [roadmap](docs/ROADMAP.md).
@@ -554,9 +556,11 @@ llm-cli mcp config                          # prints the setup for Claude Code, 
 llm-cli mcp config --write claude-desktop   # or add it to Claude Desktop directly (other entries are kept, a backup is written)
 ```
 
-`llm-cli mcp config` prints a `claude mcp add ...` command for Claude Code and JSON snippets for Claude Desktop
-and VS Code (`.vscode/mcp.json`), with the Python and folder of your installation. Run it with the framework's
-Python (see [Calling `llm-cli`](#calling-llm-cli)). After `--write claude-desktop`, restart Claude Desktop.
+`llm-cli mcp config` prints a `claude mcp add ...` command for Claude Code and JSON snippets for Claude Desktop,
+VS Code (`.vscode/mcp.json`) and Zed (`context_servers`), with the Python and folder of your installation. Run it
+with the framework's Python (see [Calling `llm-cli`](#calling-llm-cli)). After `--write claude-desktop`, restart
+Claude Desktop. For the agents of Android Studio, Zed and JetBrains IDEs see the
+[setup guide](docs/Editors_and_Agents.md).
 
 - **Permissions:** read-only tools are allowed by default. Starting or cancelling builds and deciding on
   self-healing proposals ask for your confirmation, which the client shows as a question, unless you allowed

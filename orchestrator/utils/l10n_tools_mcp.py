@@ -195,6 +195,7 @@ TEXTS = {
         "tmcp.mcp.claude_code": "Claude Code (run once in a terminal)",
         "tmcp.mcp.claude_desktop": "Claude Desktop (its configuration file: {path})",
         "tmcp.mcp.vscode": "VS Code (.vscode/mcp.json in your project)",
+        "tmcp.mcp.zed": "Zed (context_servers in its settings.json; Zed may pass it on to the ACP agents it runs)",
         "tmcp.mcp.copy": "Copy",
         "tmcp.mcp.copied": "Copied to the clipboard.",
         "tmcp.mcp.snippets_failed": "The connection entries cannot be shown: {reason}",
@@ -418,6 +419,8 @@ TEXTS = {
         "tmcp.mcp.claude_code": "Claude Code (einmal in einem Terminal ausführen)",
         "tmcp.mcp.claude_desktop": "Claude Desktop (seine Konfigurationsdatei: {path})",
         "tmcp.mcp.vscode": "VS Code (.vscode/mcp.json in deinem Projekt)",
+        "tmcp.mcp.zed": "Zed (context_servers in seiner settings.json; Zed kann ihn an die ACP-Agenten weitergeben, "
+                        "die es startet)",
         "tmcp.mcp.copy": "Kopieren",
         "tmcp.mcp.copied": "In die Zwischenablage kopiert.",
         "tmcp.mcp.snippets_failed": "Die Verbindungs-Einträge lassen sich nicht zeigen: {reason}",

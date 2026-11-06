@@ -1897,6 +1897,9 @@ def client_snippets(app_root: Path, windows: Optional[bool] = None) -> Dict[str,
     launch = launch_command(app_root, windows)
     desktop = {"mcpServers": {SERVER_NAME: launch}}
     vscode = {"servers": {SERVER_NAME: {"type": "stdio", **launch}}}
+    # Zed's settings.json: a context_servers entry has no working folder; -P and PYTHONPATH are all the launch needs.
+    # Zed may forward it to the ACP agents it runs (docs/Editors_and_Agents.md).
+    zed = {"context_servers": {SERVER_NAME: {k: launch[k] for k in ("command", "args", "env")}}}
     # Claude Code cannot set a working directory and starts the server inside the project; -P keeps that
     # folder off sys.path, and the server reads only the installation's configs/ and the per-user folder.
     try:
@@ -1911,6 +1914,7 @@ def client_snippets(app_root: Path, windows: Optional[bool] = None) -> Dict[str,
     return {
         "claude-desktop": json.dumps(desktop, indent=2),
         "vscode": json.dumps(vscode, indent=2),
+        "zed": json.dumps(zed, indent=2),
         "claude-code": claude_code,
     }
 

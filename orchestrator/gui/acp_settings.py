@@ -40,7 +40,7 @@ class AcpSettings(QWidget):
             entries = acp_entries(app_root or installation_root())
             problem = ""
         except ValueError as e:
-            entries, problem = {"command": "", "json": ""}, str(e)
+            entries, problem = {"command": "", "json": "", "zed": ""}, str(e)
         layout.addWidget(plain_label(self._t("acp.command.label"), self))
         row = QHBoxLayout()
         self.edit_command = QLineEdit(entries["command"], self)
@@ -50,6 +50,18 @@ class AcpSettings(QWidget):
         self.btn_copy_command = self._button("btn_acp_copy_command", "acp.copy",
                                              lambda: self._copy(self.edit_command.text()))
         row.addWidget(self.btn_copy_command)
+        layout.addLayout(row)
+        layout.addWidget(plain_label(self._t("acp.zed.label"), self))
+        self.text_zed = QPlainTextEdit(entries["zed"], self)
+        self.text_zed.setObjectName("text_acp_zed")
+        self.text_zed.setReadOnly(True)
+        self.text_zed.setMaximumHeight(160)
+        layout.addWidget(self.text_zed)
+        row = QHBoxLayout()
+        self.btn_copy_zed = self._button("btn_acp_copy_zed", "acp.copy",
+                                         lambda: self._copy(self.text_zed.toPlainText()))
+        row.addWidget(self.btn_copy_zed)
+        row.addStretch(1)
         layout.addLayout(row)
         layout.addWidget(plain_label(self._t("acp.json.label"), self))
         self.text_json = QPlainTextEdit(entries["json"], self)

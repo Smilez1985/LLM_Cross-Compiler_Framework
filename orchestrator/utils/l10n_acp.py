@@ -21,7 +21,8 @@ TEXTS = {
                      "talks to Ditto; every tool call runs within your tool permissions and is recorded in the audit "
                      "log. Ditto is experimental, in the editor too.",
         "acp.command.label": "Command (for an editor that asks for the agent's command)",
-        "acp.json.label": "Entry for the editor's agent settings (Zed: settings.json, JetBrains IDEs: acp.json)",
+        "acp.json.label": "Entry for a JetBrains IDE's agent settings (acp.json, agent_servers)",
+        "acp.zed.label": "Entry for Zed's settings.json (agent_servers, a custom agent)",
         "acp.copy": "Copy",
         "acp.copied": "Copied.",
         "acp.entry.problem": "The entry cannot be shown: {reason}",
@@ -155,8 +156,8 @@ TEXTS = {
                      "spricht mit Ditto; jeder Tool-Aufruf läuft innerhalb der Tool-Berechtigungen und steht im "
                      "Audit-Log. Ditto ist experimentell, auch im Editor.",
         "acp.command.label": "Befehl (für einen Editor, der nach dem Befehl des Agents fragt)",
-        "acp.json.label": "Eintrag für die Agent-Einstellungen des Editors (Zed: settings.json, JetBrains-IDEs: "
-                          "acp.json)",
+        "acp.json.label": "Eintrag für die Agent-Einstellungen einer JetBrains-IDE (acp.json, agent_servers)",
+        "acp.zed.label": "Eintrag für die settings.json von Zed (agent_servers, ein eigener Agent)",
         "acp.copy": "Kopieren",
         "acp.copied": "Kopiert.",
         "acp.entry.problem": "Der Eintrag kann nicht gezeigt werden: {reason}",

@@ -553,6 +553,17 @@ class TestMcpConnections:
         assert QGuiApplication.clipboard().text() == snippets["vscode"]
         assert "lcf_mcp_" not in " ".join(snippets.values()), "no token in an entry"
 
+    def test_zed_has_its_own_entry_with_a_copy_button(self, qapp, window_of):
+        """The setup guide (docs/Editors_and_Agents.md) points Zed users here: its context_servers entry."""
+        from PySide6.QtGui import QGuiApplication
+
+        from orchestrator import mcp_server
+        dialog = window_of()
+        zed = mcp_server.client_snippets(REPO_ROOT)["zed"]
+        assert dialog.snippet_fields["zed"].toPlainText() == zed
+        dialog.findChild(type(dialog.btn_write), "btn_mcp_copy_zed").click()
+        assert QGuiApplication.clipboard().text() == zed
+
     def test_write_to_claude_desktop_shows_the_change_asks_and_keeps_a_backup(self, window_of, tmp_path,
                                                                               monkeypatch):
         from orchestrator import mcp_server
