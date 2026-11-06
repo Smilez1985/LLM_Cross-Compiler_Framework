@@ -157,6 +157,36 @@ def test_a_board_off_the_local_links_is_refused_before_any_connection(address):
     assert e.value.kind == "not_local"
 
 
+def test_a_board_that_sends_slowly_cannot_hold_the_pairing_past_its_time():
+    """The session's time is for the whole exchange, not for each read: a board (or a stranger posing as one) that
+    sends one byte at a time stays inside every per-read timeout and would otherwise hold the person's pairing (the
+    CLI or the GUI's worker) for as long as it likes."""
+    import time
+
+    def connect(board, timeout):
+        near, far = socket.socketpair()
+        near.settimeout(timeout)
+
+        def trickle():
+            try:
+                for byte in struct.pack(">I", 45) + pair_pake.MAGIC + bytes(33):
+                    far.sendall(bytes([byte]))
+                    time.sleep(0.05)
+                far.recv(1024)
+            except OSError:
+                pass
+            finally:
+                far.close()
+        threading.Thread(target=trickle, daemon=True).start()
+        return near
+
+    started = time.monotonic()
+    with pytest.raises(PakeError) as e:
+        pair_pake.exchange(BOARD, "12345678", CONTENT, timeout=0.5, connect=connect)
+    assert e.value.kind == "network"
+    assert time.monotonic() - started < 1.5
+
+
 @pytest.mark.parametrize("text,ok", [("12345678", True), ("1234 5678", True), ("1234-5678", True),
                                      ("1234567", False), ("123456789", False), ("1234abcd", False), ("", False),
                                      ("１２３４５６７８", False)])

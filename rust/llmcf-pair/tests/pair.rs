@@ -155,3 +155,40 @@ fn the_program_pairs_in_the_test_mode_and_writes_the_content() {
     assert_eq!(std::fs::metadata(&out).unwrap().permissions().mode() & 0o777, 0o600);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// A peer that sends its bytes slowly: every byte keeps the board's per-read timeout alive, so without a deadline for
+/// the whole session it could finish the pairing long after the window closed.
+struct Trickle(TcpStream);
+
+impl std::io::Read for Trickle {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.0.read(buf)
+    }
+}
+
+impl std::io::Write for Trickle {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        thread::sleep(Duration::from_millis(40));
+        self.0.write(&buf[..1])
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
+#[test]
+fn a_slow_peer_cannot_pair_after_the_window_ended() {
+    let started = Instant::now();
+    let (port, board) = window("16180339", 1, 3, true);
+    let s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    let host = thread::spawn(move || host_session(&mut Trickle(s), "16180339", CONTENT));
+    let (outcome, _) = board.join().unwrap();
+    assert_eq!(outcome, Outcome::WindowEnded, "the board paired after its window ended");
+    assert!(started.elapsed() < Duration::from_secs(3), "the session outlived the window: {:?}", started.elapsed());
+    assert!(host.join().unwrap().is_err());
+}

@@ -293,6 +293,32 @@ def _connect(board: FoundBoard, timeout: float) -> socket.socket:
     return sock
 
 
+class _Bounded:
+    """The connection with one end for the whole exchange (`timeout` seconds after it was opened): every receive and
+    send gets only the time left, and none starts after the end (socket.timeout, a network failure). A per-read
+    timeout alone would let a board that sends one byte at a time hold the person's pairing as long as it likes."""
+
+    def __init__(self, sock: Any, timeout: float):
+        self._sock = sock
+        self._end = time.monotonic() + max(0.0, float(timeout))
+
+    def _left(self) -> float:
+        left = self._end - time.monotonic()
+        if left <= 0:
+            raise socket.timeout("the pairing's time ended")
+        if hasattr(self._sock, "settimeout"):
+            self._sock.settimeout(left)
+        return left
+
+    def recv(self, n: int) -> bytes:
+        self._left()
+        return self._sock.recv(n)
+
+    def sendall(self, data: bytes) -> None:
+        self._left()
+        self._sock.sendall(data)
+
+
 def exchange(board: FoundBoard, code: str, content: Dict[str, Any], *, timeout: float = SESSION_SECONDS,
              allow_loopback: bool = False, connect: Optional[Callable[[FoundBoard, float], Any]] = None) -> PakeResult:
     """Runs the pairing with `board` (protocol version 1): SPAKE2 with the person's `code`, the board's confirmation
@@ -308,6 +334,7 @@ def exchange(board: FoundBoard, code: str, content: Dict[str, Any], *, timeout: 
     except OSError as e:
         raise PakeError(f"The board does not answer on its pairing port ({e.__class__.__name__}).",
                         "network") from None
+    raw, sock = sock, _Bounded(sock, timeout)
     try:
         hello = read_frame(sock)
         if len(hello) != len(MAGIC) + 33 or hello[:len(MAGIC)] != MAGIC:
@@ -331,7 +358,7 @@ def exchange(board: FoundBoard, code: str, content: Dict[str, Any], *, timeout: 
         raise PakeError(f"The connection to the board broke ({e.__class__.__name__}).", "network") from None
     finally:
         try:
-            sock.close()
+            raw.close()
         except Exception:  # noqa: BLE001 - the connection is done
             pass
 
