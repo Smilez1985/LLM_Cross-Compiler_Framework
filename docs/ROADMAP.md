@@ -79,6 +79,7 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 | **ACP agents in the MCP listing (read-only).** An MCP tool that lists the ACP agents the person added (name, kind, version, whether it needs the internet, labels only, never a path or a key), so an AI can name them; adding, signing in and starting stay the person's. | planned |
 | **ACP sessions that can be continued (`session/load`).** Ditto as an ACP agent offers `loadSession` and the ACP client resumes an agent's session when the agent offers it; today a session lives in memory for one connection. | planned |
 | **A real end-to-end run with a third-party ACP agent.** One registry agent (npx or uvx) added, signed in with its own sign-in and run through a turn that calls the framework's tools, on a computer with network access; the tests so far use a fake agent. | planned |
+| **Add-on, later: Android Studio as a partner for Android deployment.** Ditto runs as a custom ACP agent in Android Studio (`~/.jetbrains/acp.json`, see [Editors and agents](Editors_and_Agents.md#android-studio-1)) and uses the tools Android Studio hands its agents (build, emulator, Logcat) for an Android target: build the app that carries the model, install it on an emulator or a phone, read the result back. Needs the minimal MCP client of the row "Ditto in editors (ACP): the MCP servers an editor passes" first; every Android Studio tool call asked in the framework, recorded in the audit log. | later (add-on) |
 
 ### Board bundle, gateway, voice, MCP on the board
 
