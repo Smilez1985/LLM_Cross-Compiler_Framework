@@ -932,7 +932,14 @@ class TestDeploy:
         deploy(dev, first, packaged)
         sleeper = dev.root / first.build_id[:16] / "bin" / "sleeper"
         shutil.copy2(shutil.which("sleep"), sleeper)
-        proc = subprocess.Popen([str(sleeper), "30"])
+        # argv[0] stays "sleep": on systems whose coreutils is one multi-call program (Ubuntu 26.04's
+        # rust-coreutils) the copy picks the utility by that name and would exit at once as "sleeper".
+        proc = subprocess.Popen(["sleep", "30"], executable=str(sleeper))
+        deadline = time.monotonic() + 10
+        while os.path.realpath(f"/proc/{proc.pid}/exe") != os.path.realpath(sleeper):
+            assert proc.poll() is None, "the stand-in program ended before the deployment looked at it"
+            assert time.monotonic() < deadline, "the stand-in program never ran"
+            time.sleep(0.05)
         try:
             for index, libc in enumerate(("2.39", "2.41")):
                 build, packaged = packaged_build(tmp_path / f"b{index}", source,
