@@ -2245,7 +2245,7 @@ read, 2 for wrong options.
 | `--trust-fingerprint TEXT` | Trust a new board without asking if its host key has this SHA256 fingerprint. |
 | `--label TEXT` | Your name for the board in the profile store (with `--device` or `--import`). |
 | `--import FILE` | Store a board's probe file in the probe store and print its probe id (not together with `--device`). A probe kit's pairing in the file is completed: the board's host key is pinned and the probe is stored under the board's ID; a file of another framework, an expired or a used one is refused with the reason, the hardware data is stored anyway. |
-| `--kit FOLDER` | Write the probe kit for a board into FOLDER: the three probes, a README and, unless `--no-pair`, the folder `llmcf-pairing` (the framework's public key, its signer file and a one-time number, valid 24 hours for one board). Run the probe there once with sudo to pair the board; without sudo it only reads the hardware. |
+| `--kit FOLDER` | Write the probe kit for a board into FOLDER: the three probes, a README and, unless `--no-pair`, the folder `llmcf-pairing` (the framework's public key, its signer file and a one-time number, valid 24 hours for one board). Run the probe there once with sudo to pair the board; without sudo it only reads the hardware. A folder that already holds a README.txt or probe of yours (not an earlier kit's) is refused with their names; nothing is written over. |
 | `--no-pair` | With `--kit`: no pairing (the kit only reads the hardware). |
 
 When the board's network drops during `--device` (a board with Wi-Fi only, for example), the scan waits up to

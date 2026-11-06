@@ -295,6 +295,25 @@ def test_pairing_can_be_switched_off(state, tmp_path):
     assert pairing.offer_problem(state, on.offer.nonce) == ""   # the earlier offer itself just expires
 
 
+def test_the_kit_never_overwrites_a_persons_own_files(state, tmp_path):
+    """Review (pair-file-v): the kit wrote README.txt and the probes over whatever the chosen folder held (a USB
+    stick's own README.txt was lost without a word). Files of an earlier kit are replaced; anything else is refused
+    with its list before anything is written or offered."""
+    stick = tmp_path / "stick"
+    stick.mkdir()
+    (stick / "README.txt").write_bytes(b"my own notes\n")
+    with pytest.raises(OSError) as refused:
+        export_probe_kit(state, stick, signer=_signer(), via="cli", audit=Log())
+    assert "README.txt" in str(refused.value)
+    assert (stick / "README.txt").read_bytes() == b"my own notes\n"
+    assert sorted(p.name for p in stick.iterdir()) == ["README.txt"]
+    assert pairing_overview(state)["open_offers"] == 0
+    # an earlier kit's folder is written again (its own files are replaced)
+    first = export_probe_kit(state, tmp_path / "kit", signer=_signer(), via="cli", audit=Log())
+    again = export_probe_kit(state, tmp_path / "kit", signer=_signer(), via="cli", audit=Log())
+    assert first.pairing and again.pairing and set(again.files) == set(first.files)
+
+
 def test_without_a_signing_key_the_kit_says_so_and_reads_hardware_only(state, tmp_path):
     from orchestrator.runtime.device import board_ops
     kit = export_probe_kit(state, tmp_path / "kit", signer=lambda: None, via="cli")

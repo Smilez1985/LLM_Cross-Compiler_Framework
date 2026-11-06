@@ -197,6 +197,30 @@ def _kit_readme(pairing_on: bool, expires_at: str = "") -> str:
     return "\n".join(lines) + "\n"
 
 
+# The names a probe kit writes outside its own folder llmcf-pairing, and the words every one of them (the framework's
+# probes and the kit's README) carries in its first lines: such a file is an earlier kit's and may be written again.
+KIT_TOP_FILES = ("hardware_probe.py", "hardware_probe.sh", "hardware_probe.ps1", KIT_README)
+_KIT_MARK = b"llm cross-compiler framework"
+
+
+def _foreign_files(folder: Path) -> List[str]:
+    """The files in `folder` the kit would replace that are not an earlier kit's (sorted names; [] for a new or empty
+    folder): a person's own README.txt on a USB stick is never written over."""
+    found = []
+    for name in KIT_TOP_FILES:
+        path = folder / name
+        if not path.exists() and not path.is_symlink():
+            continue
+        try:
+            with open(path, "rb") as f:
+                head = f.read(1024)
+        except OSError:
+            head = b""
+        if path.is_symlink() or not path.is_file() or _KIT_MARK not in head.lower():
+            found.append(name)
+    return sorted(found)
+
+
 def export_probe_kit(state_dir: Path, folder: Path, *, pair: bool = True, signer: Any = None, via: str,
                      audit: Any = None, actor: str = "", scripts_dir: Optional[Path] = None) -> ProbeKit:
     """Writes the probe kit the person carries to a board into `folder`: the three probes (hardware_probe.py from the
@@ -207,7 +231,8 @@ def export_probe_kit(state_dir: Path, folder: Path, *, pair: bool = True, signer
     (gate.probe_kit_root_step: the very text the pairing over a password login installs, in its as-root form) with the
     gate program it installs. `signer`: the caller's framework signer (board_ops.resolve_signer); without a signing
     key the kit is written without pairing and `problem` says why. Files a shell reads are written with LF line ends.
-    OSError when the folder cannot be written."""
+    OSError when the folder cannot be written; FileExistsError, before anything is written or offered, when the folder
+    holds a file of the person's own under a name the kit writes (_foreign_files: only an earlier kit's are replaced)."""
     from orchestrator.remote import gate, pairing
     from orchestrator.runtime.device import board_ops
     from orchestrator.runtime.probe_service import SCRIPTS_DIR
@@ -216,6 +241,11 @@ def export_probe_kit(state_dir: Path, folder: Path, *, pair: bool = True, signer
         raise pairing.PairingRefused("Only you can make a probe kit, in the CLI or the GUI; an AI cannot.", "channel")
     folder = Path(folder)
     scripts = Path(scripts_dir) if scripts_dir is not None else SCRIPTS_DIR
+    foreign = _foreign_files(folder)
+    if foreign:   # a person's own files are never replaced (nothing written, no offer made)
+        raise FileExistsError(f"The folder already holds files of yours the probe kit would replace: "
+                              f"{', '.join(foreign)}. Choose an empty folder (or the folder of an earlier probe kit); "
+                              "nothing was written.")
     folder.mkdir(parents=True, exist_ok=True)
     files: List[str] = []
 
