@@ -1965,10 +1965,19 @@ P_FPR='^SHA256:[A-Za-z0-9+/]{43}$'
 PAIR_WORD=""
 PAIR_STEP_SECONDS=300   # the root step's time limit, as in hardware_probe.py (sshd -t and a reload take seconds)
 run_limited() {  # SECONDS INFILE CMD...: CMD with INFILE on stdin and a time limit: timeout(1) where it works, else a
-    # watchdog that stops CMD after SECONDS (old busybox without a working timeout); CMD's exit status, 124 when stopped
+    # watchdog that stops CMD after SECONDS (old busybox without a working timeout); CMD's exit status, 124 when stopped.
+    # The watchdog stops CMD itself, not a program it started that hangs (sshd -t, a reload): CMD's output goes to a
+    # private file, read when CMD ends, so a hung child never holds the caller's $(...) open past the limit (as
+    # Python's subprocess.run(timeout=) returns at the limit). Without mktemp, cat or rm the output stays a pipe.
     rl_s=$1; rl_in=$2; shift 2
     if [ -n "$TIMEOUT" ]; then timeout "$rl_s" "$@" < "$rl_in"; return $?; fi
-    "$@" < "$rl_in" &
+    rl_out=""
+    if have mktemp && have cat && have rm; then
+        rl_out=$(umask 077 && mktemp "${TMPDIR:-/tmp}/llmcf-step.XXXXXXXX" 2>/dev/null) || rl_out=""
+    fi
+    if [ -n "$rl_out" ]; then "$@" < "$rl_in" > "$rl_out" &
+    else "$@" < "$rl_in" &
+    fi
     rl_pid=$!
     ( sleep "$rl_s" && kill "$rl_pid" ) >/dev/null 2>&1 &
     rl_dog=$!
@@ -1976,6 +1985,7 @@ run_limited() {  # SECONDS INFILE CMD...: CMD with INFILE on stdin and a time li
     kill "$rl_dog" 2>/dev/null
     wait "$rl_dog" 2>/dev/null
     [ "$rl_rc" = 143 ] && rl_rc=124   # stopped by the watchdog's TERM
+    if [ -n "$rl_out" ]; then cat "$rl_out"; rm -f "$rl_out"; fi
     return "$rl_rc"
 }
 pair_skip() { emit PAIR_STATE "${2:-skipped}"; emit PAIR_REASON "$1"; PAIR_WORD=$1; }

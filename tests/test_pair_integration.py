@@ -207,6 +207,33 @@ def test_the_shell_watchdog_stops_a_root_step_that_hangs(tmp_path):
     assert "rc=124" in done.stdout and "done\nrc=0" in done.stdout, done.stdout + done.stderr
 
 
+@POSIX
+def test_the_shell_watchdog_bounds_the_wait_when_a_child_of_the_step_hangs(tmp_path):
+    """Regression (review of the integration): the root step's hang sits in a program it runs (sshd -t, a reload),
+    not in its own sh. The watchdog stopped only the step's sh; the hung child kept the command substitution's pipe
+    open (`answer=$(run_limited ...)`), so the probe waited for the child, far past the limit. Python's
+    subprocess.run(timeout=) returns at the limit; the shell probe does too now."""
+    import time
+    text = PROBE_SH.read_text(encoding="utf-8")
+    body = text.split("\nrun_limited() {", 1)[1].split("\n}\n", 1)[0]
+    script = tmp_path / "limited.sh"
+    have = "\nhave() {" + text.split("\nhave() {", 1)[1].split("\n", 1)[0] + "\n"
+    script.write_bytes((have + "TIMEOUT=''\nrun_limited() {" + body + "\n}\n"
+                        'answer=$(run_limited 1 /dev/null sh -c "echo started; sleep 20; echo late" 2>/dev/null)\n'
+                        'echo "rc=$? answer=$answer"\n'
+                        'answer=$(run_limited 5 /dev/null sh -c "echo root-board=installed; true")\n'
+                        'echo "rc=$? answer=$answer"\n').encode())
+    started = time.monotonic()
+    done = subprocess.run([shutil.which("sh"), str(script)], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          stdin=subprocess.DEVNULL, text=True, timeout=60,
+                          env=dict(os.environ, TMPDIR=str(tmp_path)))
+    took = time.monotonic() - started
+    assert took < 12, f"the probe waited {took:.0f} s for a step limited to 1 s"
+    assert "rc=124 answer=started" in done.stdout, done.stdout + done.stderr
+    assert "rc=0 answer=root-board=installed" in done.stdout, done.stdout + done.stderr
+    assert not list(tmp_path.glob("llmcf-step.*")), "the step's output file is removed"
+
+
 # --- the SUDO fact of a probe run with sudo or doas, and doas names the account --------------------------------------
 
 def _run_py_probe(root, bindir, home, **env):
