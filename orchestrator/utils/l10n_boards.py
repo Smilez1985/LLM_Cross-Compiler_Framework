@@ -341,6 +341,33 @@ TEXTS = {
                                 "finished.",
         "boards.edit.err.local": "What failed on this computer: {detail}. The table shows the board's record now.",
         "boards.edit.err.stopped": "The change stopped: {reason}. The table shows the board's record now.",
+        # pairing by the code the board's hardware probe shows (remote/pair_pake.py)
+        "boards.btn.pair_code": "Pair by code...",
+        "boards.pair.title": "Pair a board by its code",
+        "boards.pair.looking": "looking for boards that show a pairing code on the local links",
+        "boards.pair.no_link": "This computer has no local link (no private or link-local address). Connect it to the "
+                               "board first: by a cable straight between the two (no router needed), by this "
+                               "computer's hotspot, by the board's own WLAN or in your own network.",
+        "boards.pair.none": "No board shows a pairing code on the local links. Start the hardware probe on the board "
+                            "with pairing on (its window lasts 10 minutes) and look again.",
+        "boards.pair.intro": "Choose the board and type the 8-digit code it shows on its console. The code never "
+                             "crosses the network; a wrong code uses one of the board's three tries.",
+        "boards.pair.board": "Board:",
+        "boards.pair.code": "Code:",
+        "boards.pair.links": "Local links: {links}",
+        "boards.pair.pairing": "pairing with {board}",
+        "boards.pair.done": "Paired with {board}: the board proved {count} SSH host key(s) with the code; no host-key "
+                            "question follows. The board's probe installs the framework's key and signer files "
+                            "now; its console says when it is done.",
+        "boards.pair.err.code": "The code is the 8 digits the board shows on its console.",
+        "boards.pair.err.wrong_code": "The code was wrong: the board did not accept it. Each wrong code uses one of "
+                                      "its three tries; after the third the board stops and the probe can be "
+                                      "started again.",
+        "boards.pair.err.not_local": "The board's address is not on a local link; pairing by code works only over a "
+                                     "cable, a hotspot or WLAN of the computer or the board, or your own network.",
+        "boards.pair.err.network": "The board did not answer ({reason}). Its pairing window may have ended (10 "
+                                   "minutes) or its three tries are used up: start the probe again.",
+        "boards.pair.err.protocol": "The other side is not a pairing board of this framework ({reason}).",
         # the framework's own SSH settings (round 25 Q4)
         "boards.btn.ssh": "SSH settings...",
         "boards.ssh.title": "The framework's SSH settings",
@@ -904,6 +931,37 @@ TEXTS = {
                                  "des Boards.",
         "boards.edit.err.stopped": "Die Änderung wurde abgebrochen: {reason}. Die Tabelle zeigt jetzt den Eintrag des "
                                    "Boards.",
+        "boards.btn.pair_code": "Mit Code koppeln...",
+        "boards.pair.title": "Board mit seinem Code koppeln",
+        "boards.pair.looking": "suche Boards, die einen Kopplungscode zeigen, auf den lokalen Verbindungen",
+        "boards.pair.no_link": "Dieser Computer hat keine lokale Verbindung (keine private oder Link-Local-Adresse). "
+                               "Verbinde ihn zuerst mit dem Board: mit einem Kabel direkt zwischen beiden (kein Router "
+                               "nötig), über den Hotspot dieses Computers, über das eigene WLAN des Boards oder in "
+                               "deinem eigenen Netz.",
+        "boards.pair.none": "Kein Board zeigt auf den lokalen Verbindungen einen Kopplungscode. Starte den "
+                            "Hardware-Probe auf dem Board mit eingeschalteter Kopplung (das Fenster bleibt 10 Minuten "
+                            "offen) und suche erneut.",
+        "boards.pair.intro": "Wähle das Board und gib den 8-stelligen Code ein, den es auf seiner Konsole zeigt. Der "
+                             "Code geht nie über das Netz; ein falscher Code verbraucht einen der drei Versuche des "
+                             "Boards.",
+        "boards.pair.board": "Board:",
+        "boards.pair.code": "Code:",
+        "boards.pair.links": "Lokale Verbindungen: {links}",
+        "boards.pair.pairing": "kopple mit {board}",
+        "boards.pair.done": "Mit {board} gekoppelt: Das Board hat mit dem Code {count} SSH-Host-Key(s) bewiesen; es "
+                            "folgt keine Host-Key-Frage. Der Probe des Boards installiert jetzt den Schlüssel und die "
+                            "Signer-Dateien des Frameworks; seine Konsole sagt, wann er fertig ist.",
+        "boards.pair.err.code": "Der Code sind die 8 Ziffern, die das Board auf seiner Konsole zeigt.",
+        "boards.pair.err.wrong_code": "Der Code war falsch: Das Board hat ihn nicht angenommen. Jeder falsche Code "
+                                      "verbraucht einen seiner drei Versuche; nach dem dritten hört das Board auf, und "
+                                      "der Probe kann neu gestartet werden.",
+        "boards.pair.err.not_local": "Die Adresse des Boards liegt auf keiner lokalen Verbindung; Koppeln mit Code "
+                                     "geht nur über ein Kabel, einen Hotspot oder ein WLAN des Computers oder des "
+                                     "Boards oder dein eigenes Netz.",
+        "boards.pair.err.network": "Das Board hat nicht geantwortet ({reason}). Sein Kopplungsfenster ist vielleicht "
+                                   "abgelaufen (10 Minuten), oder seine drei Versuche sind verbraucht: Starte den "
+                                   "Probe neu.",
+        "boards.pair.err.protocol": "Die Gegenseite ist kein koppelndes Board dieses Frameworks ({reason}).",
         "boards.btn.ssh": "SSH-Einstellungen...",
         "boards.ssh.title": "SSH-Einstellungen des Frameworks",
         "boards.ssh.intro": "Jede Verbindung, die das Framework mit dem OpenSSH-Client dieses Computers aufbaut "

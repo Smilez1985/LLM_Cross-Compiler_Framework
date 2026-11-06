@@ -6,7 +6,7 @@
 # where Python 3.8 or newer is missing (minimal board images, air-gapped machines): run it on the machine, carry the
 # file to the framework and import it there.
 #
-# Usage: hardware_probe.sh [--output FILE | --output -] [--no-toolchain] [--install-tools]
+# Usage: hardware_probe.sh [--output FILE | --output -] [--no-toolchain] [--install-tools] [--pair-code]
 #   --output FILE    file to write (default: target_hardware_config.txt in the current folder); "-": standard output
 #   --no-toolchain   skip the compiler and build tool versions
 #   --install-tools  opt-in: offer to install vulkan-tools (vulkaninfo) with the package manager first; asks on the
@@ -17,6 +17,12 @@
 #                    kit's one-time nonce go into the result. Without sudo pairing is skipped, said plainly.
 #   --no-pair        do not pair, even when the probe kit has a pairing folder
 #   --pair-account NAME  the board account to pair (default: the account that called sudo)
+#   --pair-code      pair the board with the framework by a code (run the probe with sudo): after the profile is
+#                    written, llmcf-pair (next to this script, else on PATH) shows an 8-digit code on this console and
+#                    waits at most 10 minutes for the framework on a local link (a cable straight to the computer,
+#                    the computer's hotspot, this board's WLAN or the own network; never the internet). The person
+#                    types the code into the framework; the framework's key and signer files it then sends are
+#                    installed by the probe's pairing install (pair_install_content), the same as a probe kit's.
 #
 # POSIX sh (dash, busybox ash, bash), LC_ALL=C. No network, no stdin (tools get /dev/null), no sudo prompt: sudo is
 # only asked `sudo -k -n true` (the access facts; -n never prompts or reads a password, -k ignores cached
@@ -36,9 +42,10 @@ TOOLCHAIN=1
 PAIR=auto
 PAIR_KIT=""
 PAIR_ACCOUNT=""
+PAIR_CODE=0
 
 usage() { echo "Usage: $0 [--output FILE|-] [--no-toolchain] [--install-tools] [--pair-kit DIR|--no-pair]" \
-    "[--pair-account NAME]"; }
+    "[--pair-account NAME] [--pair-code]"; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -58,6 +65,7 @@ while [ $# -gt 0 ]; do
         --pair-account)
             if [ $# -lt 2 ] || [ -z "$2" ]; then usage >&2; exit 2; fi
             PAIR_ACCOUNT=$2; shift 2 ;;
+        --pair-code) PAIR_CODE=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown option: $1 ($(usage))" >&2; exit 2 ;;
     esac
@@ -2022,5 +2030,45 @@ else
     if ! printf '%s' "$CONTENT" > "$OUTPUT_FILE"; then log "Cannot write $OUTPUT_FILE."; exit 1; fi
     log "Wrote $OUTPUT_FILE."
 fi
+
+# --- pairing by code (llmcf-pair, the framework's rust/llmcf-pair) ----------------------------------------------
+# The probe's part: find llmcf-pair, give it the probe's identity (the version and the sudo account, never a host
+# name or an address), let it show the code and wait for the framework, then hand the content it received to the
+# probe's pairing install (pair_install_content FILE, the install of a probe kit's content). llmcf-pair's exit status:
+# 0 paired, 3 the 10 minutes ended, 4 three wrong codes.
+pair_by_code() {
+    if [ "$SYSROOT" = 1 ]; then log "Pairing by code is not run against a sysroot."; return 1; fi
+    if [ "$(id -u 2>/dev/null)" != 0 ]; then
+        log "Pairing by code needs the probe run as root (it installs root-owned files)."; return 1
+    fi
+    pair_bin=""
+    pair_dir=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
+    if [ -n "$pair_dir" ] && [ -x "$pair_dir/llmcf-pair" ]; then pair_bin=$pair_dir/llmcf-pair
+    elif have llmcf-pair; then pair_bin=$(command -v llmcf-pair)
+    fi
+    if [ -z "$pair_bin" ]; then log "llmcf-pair is not next to this script or on PATH: no pairing by code."; return 1; fi
+    pair_tmp=$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/llmcf-pair.XXXXXXXX") || { log "No private folder."; return 1; }
+    pair_account=${SUDO_USER:-}
+    case $pair_account in ""|root|-*|*[!A-Za-z0-9._-]*) pair_account="" ;; esac
+    printf '{"probe_version":"%s","account":"%s","ssh_port":22}\n' "$PROBE_VERSION" "$pair_account" \
+        > "$pair_tmp/identity.json"
+    "$pair_bin" announce --out "$pair_tmp/content.json" --identity "$pair_tmp/identity.json"
+    pair_rc=$?
+    if [ "$pair_rc" -ne 0 ]; then rm -rf "$pair_tmp"; log "Not paired (llmcf-pair ended with $pair_rc)."; return 1; fi
+    # only the probe's own shell function counts, never a program of that name on PATH (this runs as root)
+    case $(command -V pair_install_content 2>/dev/null) in
+        *" is a function"*|*" is a shell function"*) pair_install=1 ;;
+        *) pair_install=0 ;;
+    esac
+    if [ "$pair_install" = 1 ]; then
+        pair_install_content "$pair_tmp/content.json"; pair_rc=$?
+    else
+        log "This probe has no pairing install; the framework's content was not installed."; pair_rc=1
+    fi
+    rm -rf "$pair_tmp"
+    return "$pair_rc"
+}
+
+if [ "$PAIR_CODE" = 1 ]; then pair_by_code || log "Pairing by code did not finish; the profile above is written."; fi
 if [ -n "$MISSING" ]; then log "Could not determine required keys:$MISSING"; exit 1; fi
 exit 0

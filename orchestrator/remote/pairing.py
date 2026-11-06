@@ -47,7 +47,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Set, Tuple
 
 from orchestrator.remote.address import Endpoint, valid_host, valid_port
-from orchestrator.remote.trust import KeyCheck, TrustStore, device_id_for, host_entry, load_host_keys
+from orchestrator.remote.trust import PAIRING_WAYS, KeyCheck, TrustStore, device_id_for, host_entry, load_host_keys
 
 _LOCK = ".known_hosts.lock"
 
@@ -501,6 +501,9 @@ def replace_key(store: TrustStore, plan: KeyReplacement, *, via: str, audit: Any
 # marks the board paired with its key tier. No secret travels: the result holds fingerprints and the nonce only.
 
 OFFER_TTL_HOURS = 24
+# Deprecated name of the pairing ways (it once said 'kit' for the probe kit's way, now 'file'): the one vocabulary is
+# remote/trust.py PAIRING_WAYS ('file', 'pake'); this name delegates to it.
+PAIRING_METHODS = PAIRING_WAYS
 NONCE_RE = re.compile(r"^[0-9a-f]{32}$", re.ASCII)
 PAIR_STATES = ("installed", "skipped", "failed")
 _REASON_RE = re.compile(r"^[a-z][a-z-]{0,23}$", re.ASCII)
@@ -770,7 +773,8 @@ def record_consent(audit: Any, tool: str, arguments: Dict[str, Any], detail: str
                  extra={"answer": "accepted", "confirm_channel": channel})
 
 
-__all__ = ["PairOutcome", "TierChooser", "FirstUse", "KeyReplaceError", "KeyReplacement", "PERSON_CHANNELS",
+__all__ = ["PairOutcome", "TierChooser", "FirstUse", "KeyReplaceError", "KeyReplacement", "PAIRING_METHODS",
+           "PERSON_CHANNELS",
            "BOARD_REASONS", "NONCE_RE", "OFFER_TTL_HOURS", "PAIR_KEYS", "PAIR_STATES", "PairingDone", "PairingOffer",
            "PairingRefused", "PairingResult", "REFUSAL_TEXTS", "complete_pairing", "create_offer", "offer_problem",
            "PersonChannel", "first_use", "pair",

@@ -900,6 +900,7 @@ llm-cli deploy run output/deploy_model_1791801300.zip --host 192.168.1.50 --user
 llm-cli deploy devices list [--json]
 llm-cli deploy devices add HOST --user USER [--port 22] [--label TEXT]
 llm-cli deploy devices edit DEVICE [--host HOST] [--port PORT] [--key "KEY LINE" | --read-key]
+llm-cli deploy devices pair-code [--wait SECONDS]
 llm-cli deploy devices remove DEVICE_ID
 ```
 
@@ -915,6 +916,7 @@ deployment, and by `deploy devices add` and `deploy devices edit`. No tool write
 | `list` | Every record with its host key and whether the key is still the trusted one in the framework's `known_hosts` (`trusted`, `CHANGED in known_hosts`, `not in known_hosts`), paired, and the last deploy. |
 | `add HOST --user USER` | Adds a board you trusted before this version (its host key is already in the framework's `known_hosts`). Needs a terminal: it shows the fingerprint and asks; it never trusts a new key and never asks for a password, and it marks the board as paired only when the framework's key logs in. |
 | `edit DEVICE` | Changes a trusted board's address (`--host`: host name or IP address, `--port`) or its SSH host key in the framework's `known_hosts`, e.g. after its address changed or it was reinstalled. `DEVICE` is its device ID, its label or its address. The new key is pasted with `--key` (the line of `/etc/ssh/ssh_host_ed25519_key.pub` on the board, a `known_hosts` line or a line of `ssh-keyscan`, in quotes; nobody types a key) or read from the board at its (new) address with `--read-key`; a line with `authorized_keys` options, commands or a second key, and the key of another trusted board, are refused. Needs a terminal: it shows the address and the fingerprint now and after the change and asks ("No" is the default); the change is written to the audit log first. A new key gives the board a new device ID (it derives from the key): the record moves there with its label and user, and whether the framework's key logs in is tested once. The board's data moves with it: its stored probe, deploy settings, deployed runtime (the record of the last deployment with its checks and benchmark, and its runtime packages), deploy record and its benchmark results with the builds ("tested on"). Each part is copied to the new ID and checked before `known_hosts` changes, and the old ID's copies go only after the change; when a copy fails, nothing is changed. A part the new ID already has with other content stays under the old ID, and an old copy that cannot be removed stays too; the command names both. Probe the board again if it was set up anew. When something on this computer stops the change (the framework's `known_hosts` held by another part of the framework, such as the GUI or an MCP server, settings or a file that cannot be read), it says so with the reason (`local_problem`) and exit code 1, never with a traceback; nothing is changed. |
+| `pair-code` | Pairs a board whose hardware probe shows a pairing code (`hardware_probe.sh --pair-code` or `hardware_probe.py --pair-code`, run with sudo on the board; the probe starts `llmcf-pair`, which shows 8 digits on the board's console for at most 10 minutes). It looks for such boards on this computer's local links only (`--wait`, default 3 seconds): a cable straight between the computer and the board (link-local addresses, no router needed), the computer's own hotspot, the board's WLAN as access point, or the own network; never through the internet. You pick the board and type the code (hidden; it never crosses the network: SPAKE2). A wrong code uses one of the board's three tries. After both sides proved the code, the board's SSH host keys are pinned in the framework's `known_hosts` (no host-key question follows, audited) and the framework's key line and signer files go to the board, where the probe installs them. Needs a terminal; never through an AI. |
 | `remove DEVICE_ID` | Removes the record (written to the audit log); AI tools can no longer name the device. Its `known_hosts` entry is kept. |
 
 A record is usable only while the framework's `known_hosts` holds exactly the key it names: for a reinstalled board
@@ -923,7 +925,8 @@ trust the board again with `deploy run` or `scan --device`).
 
 In the GUI: **Boards > Boards and Devices...**: the table lists every trusted board (label, address, user, the host key with its full
 fingerprint and its state in `known_hosts`, paired, since when and how it was trusted, the last deploy), next to
-the probed boards. **Add a trusted board...** does `add` (address, user, port, label; the fingerprint is shown and
+the probed boards. **Pair by code...** does `pair-code` (it looks for boards off the GUI thread, then asks for the board and the
+code in one dialog), **Add a trusted board...** does `add` (address, user, port, label; the fingerprint is shown and
 asked, "No" is the default), **Edit address or key...** does `edit` (host name or IP address, port and a field you
 paste the new key into, or **Read the key from the board** instead; the address, the host key and the device ID now
 and after the change side by side, "No" is the default) and **Remove trust...** does `remove` (it names exactly what

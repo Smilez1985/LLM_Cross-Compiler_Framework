@@ -215,7 +215,9 @@ A change that only works on one Python version is not ready. Typical differences
 ### The Rust helpers
 
 The framework's small programs for boards live in the Cargo workspace `rust/` (`rust/Cargo.toml`): `llmcf-install`,
-the root helper of the board bundle, and `llmcf-setpriv`. The toolchain is pinned in `rust/rust-toolchain.toml`
+the root helper of the board bundle, `llmcf-setpriv`, `llmcf-gateway` and `llmcf-pair` (the board's side of pairing by
+code; its test build, `--features test-mode`, is the only one that takes the loopback-as-link mode the framework's
+tests run against). The toolchain is pinned in `rust/rust-toolchain.toml`
 (rustup installs it on first use), `rust/Cargo.lock` is committed, and every crate is pinned with `=`. Each crate
 starts with `#![forbid(unsafe_code)]`. Release builds are static (musl, linked with `rust-lld`, see
 `rust/.cargo/config.toml`) for x86_64, aarch64 and armv7:

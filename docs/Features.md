@@ -457,7 +457,9 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   table, with what only you see (the board's account, the full host-key fingerprint and whether `known_hosts` still
   holds it, since when and how it was trusted, the last deploy, the system of its probe, its deploy settings and the
   deployed runtime). Its buttons call the same functions as the CLI, with the same questions ("No" is the default)
-  and audit records: **Add a trusted board...** (`deploy devices add`), **Edit address or key...** (`deploy devices
+  and audit records: **Pair by code...** (`deploy devices pair-code`: the boards whose probe shows a pairing code on
+  this computer's local links, the code you type, then the board's host keys pinned without a host-key question),
+  **Add a trusted board...** (`deploy devices add`), **Edit address or key...** (`deploy devices
   edit`: host name or IP address, port and the key pasted or read from the board, old and new side by side; with a
   new key the board's probe, deploy settings, deployed runtime, deploy record and "tested on" records move to its new
   device ID, each copied and checked before the change),

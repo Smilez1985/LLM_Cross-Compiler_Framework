@@ -6068,6 +6068,49 @@ def deploy_devices_add(ctx: FrameworkContext, host: str, user: str, port: int, l
         console.print("[yellow]The trusted key is not in the framework's known_hosts.[/yellow]")
 
 
+@deploy_devices.command('pair-code')
+@click.option('--wait', 'wait', default=3.0, show_default=True, type=click.FloatRange(0.5, 30.0),
+              help="Seconds to look for boards that show a pairing code on the local links")
+@pass_context
+def deploy_devices_pair_code(ctx: FrameworkContext, wait: float):
+    """Pair a board whose hardware probe shows a pairing code (8 digits on its console): only over a local link (a
+    cable between the computer and the board, the computer's hotspot, the board's WLAN or the own network). You type
+    the code yourself; the board's SSH host keys are then pinned without a host-key question. Needs a terminal."""
+    from orchestrator.remote import pair_pake
+    from orchestrator.runtime.device import person_steps
+    from orchestrator.utils.locality import local_links
+    if not _interactive():
+        console.print("[red]'deploy devices pair-code' needs a terminal: you type the code the board shows "
+                      "yourself.[/red]")
+        sys.exit(1)
+    links = local_links()
+    if not links:
+        console.print("[red]This computer has no local link (no private or link-local address): connect it to the "
+                      "board by cable, by the computer's hotspot or by the board's WLAN first.[/red]")
+        sys.exit(1)
+    console.print("Local links: " + ", ".join(f"{escape(link.interface)} {escape(link.address)} ({link.kind})"
+                                              for link in links))
+    boards = pair_pake.browse(wait, links=links)
+    if not boards:
+        console.print("[red]No board shows a pairing code on the local links. Start the hardware probe on the board "
+                      "with pairing on (its window lasts 10 minutes) and try again.[/red]")
+        sys.exit(1)
+    for i, board in enumerate(boards, 1):
+        console.print(f"  {i}. {escape(board.label)} {escape(board.address)}")
+    choice = 1 if len(boards) == 1 else click.prompt("Which board", type=click.IntRange(1, len(boards)), default=1)
+    board = boards[choice - 1]
+    text = click.prompt("The 8-digit code the board shows", hide_input=True)
+    state_dir = _state_dir(ctx)
+    try:
+        paired = person_steps.pair_by_code(state_dir, board, text, signer=_board_signer(ctx), via="cli",
+                                           audit=_device_audit(ctx, state_dir))
+    except pair_pake.PakeError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    for line in person_steps.paired_by_code_lines(paired):
+        console.print(escape(line))
+
+
 @deploy_devices.command('edit')
 @click.argument('device')
 @click.option('--host', default=None,

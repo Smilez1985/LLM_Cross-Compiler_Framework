@@ -1385,3 +1385,70 @@ def test_the_verify_measures_with_the_persons_kv_cache_choice(qapp, window, monk
     wait(qapp, window)
     wait(qapp, window)
     assert seen == ["q8_0"], seen
+
+
+# --- Pair by code... (deploy devices pair-code) -------------------------------------------------------------------------
+
+def _found_board():
+    from orchestrator.remote.pair_pake import SERVICE, FoundBoard
+    return FoundBoard(f"llmcf-ab12.{SERVICE}", "169.254.20.30", 40123, link="cable")
+
+
+def test_pair_by_code_looks_off_the_gui_thread_and_pairs_with_the_typed_code(qapp, window, monkeypatch):
+    from types import SimpleNamespace as NS
+
+    from orchestrator.gui import boards_window
+    from orchestrator.remote import pair_pake
+    from orchestrator.runtime.device import person_steps
+    from orchestrator.utils import locality
+    gui_thread, threads, paired = threading.get_ident(), [], []
+    monkeypatch.setattr(locality, "local_links",
+                        lambda: [locality.LocalLink("eth0", "169.254.1.2", "cable")])
+
+    def browse(**kw):
+        threads.append(threading.get_ident())
+        return [_found_board()]
+    monkeypatch.setattr(pair_pake, "browse", browse)
+
+    def pair(state, board, code, **kw):
+        threads.append(threading.get_ident())
+        paired.append((board.address, code, kw["via"], kw["audit"]))
+        return NS(result=NS(host_keys=(1, 2)), done=NS(trusted=("SHA256:x",)))
+    monkeypatch.setattr(person_steps, "pair_by_code", pair)
+
+    def fill(dialog):
+        from PySide6.QtWidgets import QComboBox, QLineEdit
+        assert dialog.findChild(QComboBox, "cmb_boards_pair_board").count() == 1
+        code = dialog.findChild(QLineEdit, "txt_boards_pair_code")
+        assert code.echoMode() == QLineEdit.Password
+        code.setText("1234 5678")
+        return True
+    monkeypatch.setattr(boards_window, "_exec", fill)
+    boxes = Boxes(monkeypatch)
+    window.buttons["btn_boards_pair_code"].click()
+    wait(qapp, window)
+    wait(qapp, window)
+    assert paired == [("169.254.20.30", "12345678", "gui", window.framework.tool_registry.audit)]
+    assert threads and gui_thread not in threads, "browsing and pairing run off the GUI thread"
+    assert "proved 2 SSH host key(s)" in boxes.asked[-1].text
+    assert "169.254.1.2 (cable)" in window.output.toPlainText()
+
+
+def test_pair_by_code_says_plainly_what_is_missing(qapp, window, monkeypatch):
+    from orchestrator.remote import pair_pake
+    from orchestrator.runtime.device import person_steps
+    from orchestrator.utils import locality
+    boxes = Boxes(monkeypatch)
+    monkeypatch.setattr(locality, "local_links", lambda: [])
+    window.buttons["btn_boards_pair_code"].click()
+    wait(qapp, window)
+    assert "no local link" in boxes.asked[-1].text and "cable" in boxes.asked[-1].text
+    window.pair_board(_found_board(), "12ab")
+    assert boxes.asked[-1].text.startswith("The code is the 8 digits")
+
+    def wrong(*a, **k):
+        raise pair_pake.PakeError("x", "wrong_code")
+    monkeypatch.setattr(person_steps, "pair_by_code", wrong)
+    window.pair_board(_found_board(), "12345678")
+    wait(qapp, window)
+    assert "three tries" in boxes.asked[-1].text

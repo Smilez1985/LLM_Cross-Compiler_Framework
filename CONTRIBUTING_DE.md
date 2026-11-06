@@ -227,7 +227,9 @@ Version noch fehlen.
 ### Die Rust-Helfer
 
 Die kleinen Programme des Frameworks für Boards liegen im Cargo-Workspace `rust/` (`rust/Cargo.toml`):
-`llmcf-install`, der Root-Helfer des Board-Bündels, und `llmcf-setpriv`. Die Toolchain ist in
+`llmcf-install`, der Root-Helfer des Board-Bündels, `llmcf-setpriv`, `llmcf-gateway` und `llmcf-pair` (die
+Board-Seite des Koppelns mit Code; nur sein Test-Build, `--features test-mode`, nimmt den Loopback-als-Verbindung-Modus,
+gegen den die Tests des Frameworks laufen). Die Toolchain ist in
 `rust/rust-toolchain.toml` festgelegt (rustup installiert sie beim ersten Aufruf), `rust/Cargo.lock` ist eingecheckt,
 und jedes Crate ist mit `=` festgelegt. Jedes Crate beginnt mit `#![forbid(unsafe_code)]`. Release-Builds sind
 statisch (musl, gelinkt mit `rust-lld`, siehe `rust/.cargo/config.toml`) für x86_64, aarch64 und armv7:

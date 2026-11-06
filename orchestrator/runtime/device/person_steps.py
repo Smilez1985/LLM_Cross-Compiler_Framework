@@ -567,6 +567,30 @@ def remember_board(state_dir: Path, host: str, port: int, user: str, key: Any, *
                                  actor=actor, label=label)
 
 
+def pair_by_code(state_dir: Path, board: Any, code: str, *, signer: Any = None, via: str, audit: Any):
+    """The person's pairing of a board by the code its hardware probe shows (`llmcf deploy devices pair-code` and the
+    Boards window's Pair by code...): the framework's pairing content (remote/pair_pake.pairing_content with the
+    caller's framework signer, board_ops.pairing_bundle: the same content pairing's root step installs), the exchange
+    with the person's `code`, and complete_pairing() with the host keys the board proved. Returns
+    pair_pake.PairedByCode; pair_pake.PakeError (with its kind) when it did not pair."""
+    from orchestrator.remote import pair_pake
+    from orchestrator.runtime.device import board_ops
+    content = pair_pake.pairing_content(state_dir, board_ops.pairing_bundle(signer, state_dir))
+    return pair_pake.pair_by_code(board, code, content, state_dir=state_dir, via=via, audit=audit)
+
+
+def paired_by_code_lines(paired: Any) -> List[str]:
+    """What the CLI and the GUI tell the person after a pairing by code (English; the GUI shows its own words)."""
+    result, done = paired.result, paired.done
+    lines = [f"Paired with {result.board.label}: the board proved {len(result.host_keys)} SSH host key(s) with the "
+             "code; no host-key question follows."]
+    for fp in getattr(done, "trusted", ()):
+        lines.append(f"  trusted: {fp}")
+    lines.append("The board's probe installs the framework's key and signer files now; its console says when it is "
+                 "done.")
+    return lines
+
+
 def device_audit(framework: Any, state_dir: Path):
     """The tool audit log for the person's decisions about a board: the framework's registry's log, else the per-user
     audit.db opened with its key, as `llmcf` opens it when the framework is not booted; None when it cannot be opened

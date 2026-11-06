@@ -536,8 +536,9 @@ def path_to(via, module):
     return " <- ".join(chain)
 
 
-PERSON_ONLY = ("orchestrator.remote.pairing", "orchestrator.runtime.device.person_steps",
-               "orchestrator.runtime.scan_steps", "orchestrator.runtime.device.board_move")
+PERSON_ONLY = ("orchestrator.remote.pairing", "orchestrator.remote.pair_pake",
+               "orchestrator.runtime.device.person_steps", "orchestrator.runtime.scan_steps",
+               "orchestrator.runtime.device.board_move")
 
 
 def test_no_module_an_ai_can_reach_imports_the_person_s_trust_writers():

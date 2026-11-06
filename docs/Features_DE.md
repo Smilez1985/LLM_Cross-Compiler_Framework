@@ -491,7 +491,9 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   des Host-Schlüssels und ob `known_hosts` ihn noch enthält, seit wann und wie ihm vertraut wird, das letzte
   Deployment, das System aus seiner Probe, seine Deploy-Einstellungen und die installierte Laufzeit). Seine Knöpfe
   rufen dieselben Funktionen wie die CLI auf, mit denselben Fragen ("Nein" ist die Vorgabe) und Audit-Einträgen:
-  **Vertrautes Board hinzufügen...** (`deploy devices add`), **Adresse oder Schlüssel ändern...** (`deploy devices
+  **Mit Code koppeln...** (`deploy devices pair-code`: die Boards, deren Probe auf den lokalen Verbindungen dieses
+  Computers einen Kopplungscode zeigt, der Code, den du eingibst, danach die Host-Keys des Boards ohne Host-Key-Frage
+  festgehalten), **Vertrautes Board hinzufügen...** (`deploy devices add`), **Adresse oder Schlüssel ändern...** (`deploy devices
   edit`: Hostname oder IP-Adresse, Port und der Schlüssel eingefügt oder vom Board gelesen, alt und neu
   nebeneinander; mit einem neuen Schlüssel ziehen Probe, Deploy-Einstellungen, deployte Laufzeit, Deploy-Eintrag und
   "getestet auf"-Einträge des Boards zu seiner neuen Geräte-ID, jeweils vor der Änderung kopiert und geprüft),
