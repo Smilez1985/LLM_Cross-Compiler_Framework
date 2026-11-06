@@ -125,10 +125,17 @@ and opens it ([JetBrains: ACP][jb-acp]). Paste the **JetBrains** entry (`agent_s
 
 Android Studio (Rabbit 2 and later) runs ACP agents ("Bring Your Own Agent"): you pick an agent in the agent window,
 and "Additional agents can be found in the registry Settings > Tools > AI > Agents" ([Android Developers blog,
-2026-09-24][as-byoa]). Ditto is not an agent of the ACP registry. **[Unconfirmed]** Google's post and the Android
-Studio pages read for this guide show no way to add an own command. Android Studio is built on the IntelliJ platform,
-so the JetBrains `acp.json` above may apply; this was not confirmed. If Android Studio asks for a command, use the
-command line from the **Ditto in editors** tab.
+2026-09-24][as-byoa]). Ditto is not an agent of the ACP registry; you add it as a custom agent. Google's setup page for
+its Antigravity agent says: "Android Studio uses the same `~/.jetbrains/acp.json` file as other JetBrains IDEs", and
+"Custom agents are in preview" ([Antigravity: other editors (ACP)][ag-acp]). So:
+
+1. Add Ditto's entry to `~/.jetbrains/acp.json` under `agent_servers`, as in the JetBrains steps above (the **Copy**
+   button on the **Ditto in editors** tab, or `llm-cli acp config --json`).
+2. Restart Android Studio and open the **Agent** tool window.
+3. Pick the name you gave the entry in the agent picker at the top of the panel.
+
+Android Studio's own pages (the blog posts and the release notes read for this guide) do not describe custom agents;
+the statement above comes from Google's Antigravity documentation.
 
 ### Signing Ditto in
 
@@ -263,6 +270,7 @@ All accessed on 2026-11-06.
 - [as-mcp]: Android Studio, add an MCP server: https://developer.android.com/studio/gemini/add-mcp-server
 - [as-byoa]: Android Developers blog, "Build your way: Use any AI agent of your choice in Android Studio" (2026-09-24):
   https://developer.android.com/blog/posts/build-your-way-use-any-ai-agent-of-your-choice-in-android-studio
+- [ag-acp]: Google Antigravity, other editors (ACP): https://antigravity.google/docs/ide/extensions/acp
 - The framework's research on ACP: [ACP research](research/ACP.md).
 
 [acp-session]: https://agentclientprotocol.com/protocol/v1/session-setup.md
@@ -272,3 +280,4 @@ All accessed on 2026-11-06.
 [jb-mcp]: https://www.jetbrains.com/help/ai-assistant/mcp.html
 [as-mcp]: https://developer.android.com/studio/gemini/add-mcp-server
 [as-byoa]: https://developer.android.com/blog/posts/build-your-way-use-any-ai-agent-of-your-choice-in-android-studio
+[ag-acp]: https://antigravity.google/docs/ide/extensions/acp
