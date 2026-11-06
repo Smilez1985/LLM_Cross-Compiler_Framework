@@ -4,7 +4,7 @@ hardware_probe.py - hardware probe of the LLM Cross-Compiler Framework (main pat
 
 Run it on the machine that will run the binaries, this PC or a board:
 
-    python3 -I hardware_probe.py [--output FILE | --output -] [--json] [--no-toolchain] [--disk-path DIR]
+    python3 -I hardware_probe.py [--output FILE | --output -] [--json] [--no-toolchain] [--disk-path DIR] [--pair-code]
 
 It writes target_hardware_config.txt: KEY=VALUE lines starting with PROBE_SCHEMA=2, exactly the keys of
 configs/hardware_probe_schema.yml in the framework. --json writes the same keys and string values as one JSON object.
@@ -2772,6 +2772,49 @@ def render_json(values):
     return json.dumps(values, indent=2, ensure_ascii=True) + "\n"
 
 
+def pair_by_code(version=None):
+    """--pair-code (run with sudo): llmcf-pair (next to this script, else on PATH) shows an 8-digit code on this
+    console and waits at most 10 minutes for the framework on a local link (a cable straight to the computer, the
+    computer's hotspot, this board's WLAN or the own network; never the internet). The person types the code into the
+    framework; the content it then sends (its public key line and signer files) goes to the probe's pairing install,
+    pair_install_content(path), the install of a probe kit's content. The identity llmcf-pair sends holds the probe's
+    version and the sudo account only (never a host name or an address). Returns 0 when paired and installed."""
+    import tempfile
+    if os.environ.get("HW_PROBE_SYSROOT"):
+        sys.stderr.write("[PROBE] Pairing by code is not run against a sysroot.\n")
+        return 1
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        sys.stderr.write("[PROBE] Pairing by code needs the probe run as root (it installs root-owned files).\n")
+        return 1
+    here = os.path.dirname(os.path.abspath(__file__))
+    binary = os.path.join(here, "llmcf-pair")
+    if not os.access(binary, os.X_OK):
+        binary = shutil.which("llmcf-pair") or ""
+    if not binary:
+        sys.stderr.write("[PROBE] llmcf-pair is not next to this script or on PATH: no pairing by code.\n")
+        return 1
+    account = os.environ.get("SUDO_USER", "")
+    if not re.fullmatch(r"[A-Za-z0-9._][A-Za-z0-9._-]*", account or "") or account == "root":
+        account = ""
+    folder = tempfile.mkdtemp(prefix="llmcf-pair.")
+    try:
+        identity = os.path.join(folder, "identity.json")
+        with open(identity, "w", encoding="utf-8", newline="\n") as f:
+            json.dump({"probe_version": version or TOOL_VERSION, "account": account, "ssh_port": 22}, f)
+        content = os.path.join(folder, "content.json")
+        code = subprocess.call([binary, "announce", "--out", content, "--identity", identity])
+        if code != 0:
+            sys.stderr.write("[PROBE] Not paired (llmcf-pair ended with {}).\n".format(code))
+            return 1
+        install = globals().get("pair_install_content")
+        if install is None:
+            sys.stderr.write("[PROBE] This probe has no pairing install; the framework's content was not installed.\n")
+            return 1
+        return 0 if install(content) else 1
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="hardware_probe.py",
@@ -2782,6 +2825,8 @@ def main(argv=None):
     parser.add_argument("--no-toolchain", action="store_true", help="skip the compiler and build tool versions")
     parser.add_argument("--disk-path", default=None, help="folder whose free space DISK_FREE_MB reports "
                         "(default: LLM_FRAMEWORK_HOME, ~/.llm-framework or the home folder)")
+    parser.add_argument("--pair-code", action="store_true", help="after the profile, pair the board with the "
+                        "framework by the code llmcf-pair shows (run with sudo; local links only, at most 10 minutes)")
     args = parser.parse_args(argv)
     if not args.output:
         parser.error("--output must not be empty")
@@ -2800,6 +2845,8 @@ def main(argv=None):
             sys.stderr.write("[PROBE] cannot write {}: {}\n".format(args.output, e.strerror or e))
             return 1
         sys.stderr.write("[PROBE] Wrote {} ({} keys).\n".format(args.output, len(values)))
+    if args.pair_code and pair_by_code() != 0:
+        sys.stderr.write("[PROBE] Pairing by code did not finish; the profile above is written.\n")
     if missing:
         sys.stderr.write("[PROBE] Could not determine required keys: {}\n".format(", ".join(missing)))
         return 1

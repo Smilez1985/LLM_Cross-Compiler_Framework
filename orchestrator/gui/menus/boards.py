@@ -78,6 +78,8 @@ CLI_PATHS: Dict[str, str] = {
     "deploy devices add --user": "btn_boards_add",
     "deploy devices add --port": "btn_boards_add",
     "deploy devices add --label": "btn_boards_add",
+    "deploy devices pair-code": "btn_boards_pair_code",   # the boards found, the code typed by the person
+    "deploy devices pair-code --wait": "btn_boards_pair_code",
     "deploy devices remove": "btn_boards_remove_trust",
     # Q5: host name or IP address, port and the host key (pasted, or read from the board with the dialog's check box)
     "deploy devices edit": "btn_boards_edit",

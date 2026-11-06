@@ -385,3 +385,155 @@ def test_end_to_end_three_wrong_codes_end_the_board_window(tmp_path):
         if proc.poll() is None:
             proc.kill()
             proc.wait()
+
+
+# --- llmcf deploy devices pair-code -------------------------------------------------------------------------------------
+
+def _cli(tmp_path, monkeypatch, *args, input=None):
+    from click.testing import CliRunner
+
+    from orchestrator import cli as cli_module
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "state"))
+    return CliRunner().invoke(cli_module.cli, ["-q", *args], input=input)
+
+
+def test_cli_pair_code_needs_a_terminal(tmp_path, monkeypatch):
+    result = _cli(tmp_path, monkeypatch, "deploy", "devices", "pair-code")
+    assert result.exit_code == 1 and "needs a terminal" in result.output
+
+
+def test_cli_pair_code_asks_the_person_and_pairs(tmp_path, monkeypatch):
+    from orchestrator import cli as cli_module
+    from orchestrator.runtime.device import person_steps
+    from orchestrator.utils import locality
+    monkeypatch.setattr(cli_module, "_interactive", lambda: True)
+    monkeypatch.setattr(locality, "local_links", lambda: [locality.LocalLink("eth0", "169.254.1.2", "cable")])
+    monkeypatch.setattr(pair_pake, "browse", lambda wait, links: [BOARD])
+    seen = []
+
+    def pair(state, board, code, **kw):
+        seen.append((board, code, kw["via"]))
+        return SimpleNamespace(result=pair_pake.PakeResult(board, {}, (pair_pake.HostKeyFact("ssh-ed25519", "k",
+                                                                                              "SHA256:a"),)),
+                               done=SimpleNamespace(trusted=("SHA256:a",)))
+    monkeypatch.setattr(person_steps, "pair_by_code", pair)
+    result = _cli(tmp_path, monkeypatch, "deploy", "devices", "pair-code", "--wait", "0.5", input="1234 5678\n")
+    assert result.exit_code == 0, result.output
+    assert seen == [(BOARD, "1234 5678", "cli")]
+    assert "Paired with llmcf-ab12 (cable)" in result.output and "SHA256:a" in result.output
+    assert "1234" not in result.output, "the code is not echoed"
+
+
+def test_cli_pair_code_without_a_board_or_with_a_wrong_code_fails_plainly(tmp_path, monkeypatch):
+    from orchestrator import cli as cli_module
+    from orchestrator.runtime.device import person_steps
+    from orchestrator.utils import locality
+    monkeypatch.setattr(cli_module, "_interactive", lambda: True)
+    monkeypatch.setattr(locality, "local_links", lambda: [])
+    result = _cli(tmp_path, monkeypatch, "deploy", "devices", "pair-code")
+    assert result.exit_code == 1 and "no local link" in result.output
+    monkeypatch.setattr(locality, "local_links", lambda: [locality.LocalLink("eth0", "10.42.0.1", "hotspot")])
+    monkeypatch.setattr(pair_pake, "browse", lambda wait, links: [])
+    result = _cli(tmp_path, monkeypatch, "deploy", "devices", "pair-code")
+    assert result.exit_code == 1 and "No board shows a pairing code" in result.output
+    monkeypatch.setattr(pair_pake, "browse", lambda wait, links: [BOARD])
+
+    def wrong(*a, **k):
+        raise PakeError("The code was wrong: the board did not accept it.", "wrong_code")
+    monkeypatch.setattr(person_steps, "pair_by_code", wrong)
+    result = _cli(tmp_path, monkeypatch, "deploy", "devices", "pair-code", input="00000000\n")
+    assert result.exit_code == 1 and "The code was wrong" in result.output
+
+
+# --- the probe starts llmcf-pair (scripts/hardware_probe.sh --pair-code) ------------------------------------------------
+
+@pytest.mark.skipif(os.name == "nt", reason="the shell probe runs on the boards (POSIX sh)")
+def test_the_shell_probe_starts_llmcf_pair_and_installs_nothing_without_its_install(tmp_path):
+    import shutil
+    sh = shutil.which("sh")
+    if sh is None:
+        pytest.skip("no POSIX sh")
+    kit = tmp_path / "kit"
+    kit.mkdir()
+    probe = kit / "hardware_probe.sh"
+    probe.write_bytes((REPO_ROOT / "scripts" / "hardware_probe.sh").read_bytes())
+    calls, seen_id = tmp_path / "calls.txt", tmp_path / "identity.json"
+    # a stand-in llmcf-pair next to the probe: it keeps its arguments and the identity, and "pairs"
+    fake = kit / "llmcf-pair"
+    fake.write_bytes(("#!/bin/sh\n"
+                      f'printf "%s\\n" "$@" > "{calls}"\n'
+                      'while [ $# -gt 0 ]; do case "$1" in --out) out=$2; shift 2;; --identity) id=$2; shift 2;; '
+                      '*) shift;; esac; done\n'
+                      f'cp "$id" "{seen_id}"\n'
+                      "printf '{\"format\":\"x\"}' > \"$out\"\nexit 0\n").encode())
+    fake.chmod(0o755)
+    # the probe asks id -u: a stand-in says root, as under the probe's sudo
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    fake_id = bindir / "id"
+    real_id = shutil.which("id") or "/usr/bin/id"
+    fake_id.write_bytes(f'#!/bin/sh\n[ "$1" = "-u" ] && {{ echo 0; exit 0; }}\nexec "{real_id}" "$@"\n'.encode())
+    fake_id.chmod(0o755)
+    env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}", SUDO_USER="dietpi")
+    proc = subprocess.run([sh, str(probe), "--no-toolchain", "--pair-code", "--output", str(tmp_path / "p.txt")],
+                          capture_output=True, text=True, timeout=300, env=env)
+    assert (tmp_path / "p.txt").is_file(), proc.stderr
+    args = calls.read_text().split()
+    assert args[0] == "announce" and "--out" in args and "--identity" in args
+    identity = json.loads(seen_id.read_text())
+    assert identity == {"probe_version": identity["probe_version"], "account": "dietpi", "ssh_port": 22}
+    assert "no pairing install" in proc.stderr, proc.stderr
+
+
+def test_ci_and_the_release_build_llmcf_pair_static_and_refuse_its_test_mode():
+    flows = REPO_ROOT / ".github" / "workflows"
+    release = (flows / "release-tools.yml").read_text(encoding="utf-8")
+    assert "for crate in llmcf-setpriv llmcf-install llmcf-pair; do" in release
+    ci = (flows / "ci.yml").read_text(encoding="utf-8")
+    assert 'cargo build --locked --release -p llmcf-pair --target "$target"' in ci
+    assert "llmcf-pair announce --out /tmp/x --test-loopback 0" in ci
+    assert "LLMCF_PAIR_TEST_BIN=" in ci and "tests/test_pair_pake.py" in ci
+    members = (REPO_ROOT / "rust" / "Cargo.toml").read_text(encoding="utf-8")
+    assert '"llmcf-pair"' in members
+    for source in (REPO_ROOT / "rust" / "llmcf-pair" / "src").glob("*.rs"):
+        text = source.read_text(encoding="utf-8")
+        assert "unsafe " not in text.replace("forbid(unsafe_code)", ""), source.name
+    lib = (REPO_ROOT / "rust" / "llmcf-pair" / "src" / "lib.rs").read_text(encoding="utf-8")
+    assert "#![forbid(unsafe_code)]" in lib
+    cargo = (REPO_ROOT / "rust" / "llmcf-pair" / "Cargo.toml").read_text(encoding="utf-8")
+    for line in cargo.splitlines():
+        if "version = " in line and line.split("=")[0].strip() not in ("version", "rust-version"):
+            assert 'version = "=' in line, line
+
+
+
+@pytest.mark.skipif(os.name == "nt", reason="llmcf-pair and the probe's pairing run on Linux boards")
+def test_the_python_probe_starts_llmcf_pair_and_hands_the_content_to_its_install(tmp_path, monkeypatch):
+    from orchestrator.runtime import hardware_probe as probe
+    seen_id = tmp_path / "identity.json"
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    fake = bindir / "llmcf-pair"
+    fake.write_bytes(("#!/bin/sh\n"
+                      'while [ $# -gt 0 ]; do case "$1" in --out) out=$2; shift 2;; --identity) id=$2; shift 2;; '
+                      '*) shift;; esac; done\n'
+                      f'cp "$id" "{seen_id}"\n'
+                      "printf '{\"format\":\"x\"}' > \"$out\"\nexit 0\n").encode())
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("SUDO_USER", "dietpi")
+    monkeypatch.delenv("HW_PROBE_SYSROOT", raising=False)
+    monkeypatch.setattr(probe.os, "geteuid", lambda: 0, raising=False)
+    assert probe.pair_by_code() == 1, "without the probe's pairing install nothing counts as paired"
+    got = []
+
+    def install(path):
+        got.append(json.loads(Path(path).read_text()))
+        return True
+    monkeypatch.setattr(probe, "pair_install_content", install, raising=False)
+    assert probe.pair_by_code() == 0
+    assert got == [{"format": "x"}]
+    identity = json.loads(seen_id.read_text())
+    assert identity["account"] == "dietpi" and identity["probe_version"] == probe.TOOL_VERSION
+    monkeypatch.setattr(probe.os, "geteuid", lambda: 1000, raising=False)
+    assert probe.pair_by_code() == 1

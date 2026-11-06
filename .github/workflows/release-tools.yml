@@ -1,7 +1,7 @@
 name: Release tools
 
-# The framework's own static Rust tools (the Cargo workspace rust/: llmcf-setpriv, and llmcf-install once it is
-# there) as release assets of this repository: each built static for x86_64, aarch64 and armv7 (musl, linked with
+# The framework's own static Rust tools (the Cargo workspace rust/: llmcf-setpriv, llmcf-install and llmcf-pair, the
+# board's side of pairing by code that the hardware probe starts) as release assets of this repository: each built static for x86_64, aarch64 and armv7 (musl, linked with
 # rust-lld and the toolchain's own musl, the toolchain of rust/rust-toolchain.toml), checked static, listed in
 # SHA256SUMS, given a GitHub artifact attestation (build provenance, signed keyless through the workflow's OIDC
 # identity: no secret key anywhere) and uploaded to the GitHub release of the tag. It runs on a pushed tag
@@ -62,7 +62,7 @@ jobs:
           set -eu
           # every member of the workspace that is a real tool (a placeholder crate says so in its first line)
           tools=""
-          for crate in llmcf-setpriv llmcf-install; do
+          for crate in llmcf-setpriv llmcf-install llmcf-pair; do
             if [ -f "$crate/Cargo.toml" ] && ! head -n 1 "$crate/Cargo.toml" | grep -q '^# Placeholder'; then
               tools="$tools $crate"
             fi

@@ -52,6 +52,7 @@ KV_CHOICES = ("auto", "f16", "q8_0", "q4_0")
 # object name -> (text key, slot name, what the selected board needs: "" nothing, "trusted", "stored")
 BUTTONS = (
     ("btn_boards_add", "boards.btn.add", "_on_add", ""),
+    ("btn_boards_pair_code", "boards.btn.pair_code", "_on_pair_code", ""),
     ("btn_boards_edit", "boards.btn.edit", "_on_edit", "trusted"),
     ("btn_boards_remove_trust", "boards.btn.remove_trust", "_on_remove_trust", "trusted"),
     ("btn_boards_settings", "boards.btn.settings", "_on_settings", "stored"),
@@ -66,7 +67,7 @@ BUTTONS = (
     ("btn_boards_prune", "boards.btn.prune", "_on_prune", "stored"),
     ("btn_boards_prune_board", "boards.btn.prune_board", "_on_prune_board", "stored"),
 )
-ROWS = (("btn_boards_add", "btn_boards_edit", "btn_boards_remove_trust", "btn_boards_settings", "btn_boards_ssh",
+ROWS = (("btn_boards_add", "btn_boards_pair_code", "btn_boards_edit", "btn_boards_remove_trust", "btn_boards_settings", "btn_boards_ssh",
          "btn_boards_check", "btn_boards_refresh"),
         ("btn_boards_plan", "btn_boards_status", "btn_boards_build", "btn_boards_deploy", "btn_boards_verify"),
         ("btn_boards_prune", "btn_boards_prune_board"))
@@ -585,6 +586,74 @@ class BoardsWindow(BoardSteps, QDialog):
                 ui_text("device.bench.not_recorded", self.lang)]
 
     # --- trusted boards ------------------------------------------------------------------------------------------
+
+    def _on_pair_code(self) -> None:
+        """deploy devices pair-code: the boards that show a pairing code on this computer's local links (looked for
+        off the GUI thread), then the person's choice and the code they type (never an AI's), then the pairing."""
+        from orchestrator.remote import pair_pake
+        from orchestrator.utils.locality import local_links
+
+        def look():
+            links = local_links()
+            return links, (pair_pake.browse(links=links) if links else [])
+
+        self._start(self._t("boards.pair.looking"), look, self._pair_choose)
+
+    def _pair_choose(self, found: Any) -> None:
+        links, boards = found
+        if not links:
+            self._info(self._t("boards.pair.no_link"), "warning")
+            return
+        self._say(self._t("boards.pair.links", links=", ".join(f"{link.interface} {link.address} ({link.kind})"
+                                                               for link in links)))
+        if not boards:
+            self._info(self._t("boards.pair.none"), "warning")
+            return
+        dialog, form = _form_dialog(self, self._t("boards.pair.title"), self._t("boards.pair.intro"))
+        choice = QComboBox(dialog)
+        choice.setObjectName("cmb_boards_pair_board")
+        for board in boards:
+            choice.addItem(f"{board.label} {board.address}")
+        code = QLineEdit(dialog)
+        code.setObjectName("txt_boards_pair_code")
+        code.setEchoMode(QLineEdit.Password)
+        code.setMaxLength(12)
+        form.addRow(self._t("boards.pair.board"), choice)
+        form.addRow(self._t("boards.pair.code"), code)
+        if not _exec(dialog):
+            dialog.deleteLater()
+            return
+        board, text = boards[max(0, choice.currentIndex())], code.text()
+        dialog.deleteLater()
+        self.pair_board(board, text)
+
+    def pair_board(self, board: Any, text: str) -> None:
+        """Pairs `board` (pair_pake.FoundBoard) with the code the person typed: person_steps.pair_by_code."""
+        from orchestrator.remote import pair_pake
+        from orchestrator.runtime.device import person_steps
+        try:
+            code = pair_pake.normal_code(text)
+        except pair_pake.PakeError:
+            self._info(self._t("boards.pair.err.code"), "warning")
+            return
+        state, signer, audit = self.state_dir, self._signer(), self.audit
+
+        def pair():
+            return person_steps.pair_by_code(state, board, code, signer=signer, via="gui", audit=audit)
+
+        def done(paired: Any) -> None:
+            text = self._t("boards.pair.done", board=board.label, count=len(paired.result.host_keys))
+            self._say(text)
+            self._info(text)
+            self.reload()
+
+        def failed(error: BaseException) -> bool:
+            if not isinstance(error, pair_pake.PakeError):
+                return False
+            self._info(self._t(f"boards.pair.err.{error.kind}", reason=one_line(str(error))), "warning")
+            return True
+
+        self._start(self._t("boards.pair.pairing", board=board.label), pair, done, failed=failed)
 
     def _on_add(self) -> None:
         """deploy devices add: host, user, port, label; the fingerprint is shown and asked ("No" by default)."""

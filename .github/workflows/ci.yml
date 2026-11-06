@@ -194,8 +194,9 @@ jobs:
           if-no-files-found: error
 
   rust:
-    # The Rust workspace (rust/): llmcf-install, the board bundle's root helper, llmcf-setpriv and llmcf-gateway (the
-    # board's token-saving middleware, tested against a stub llama-server). The toolchain is
+    # The Rust workspace (rust/): llmcf-install, the board bundle's root helper, llmcf-setpriv, llmcf-gateway (the
+    # board's token-saving middleware, tested against a stub llama-server) and llmcf-pair (pairing by code, SPAKE2 over
+    # a local link; its test build's loopback-as-link mode runs against the framework's side). The toolchain is
     # the one rust/rust-toolchain.toml pins (rustup on the runner installs it with its three musl targets); the
     # release programs are static musl binaries linked with the toolchain's own rust-lld (rust/.cargo/config.toml).
     # The release build of llmcf-install must refuse the test mode (--root, only under the cargo feature test-root),
@@ -226,9 +227,12 @@ jobs:
         run: |
           cargo clippy --locked --workspace --all-targets -- -D warnings
           cargo clippy --locked -p llmcf-install --all-targets --features test-root -- -D warnings
+          cargo clippy --locked -p llmcf-pair --all-targets --features test-mode -- -D warnings
 
       - name: cargo test (the test build of llmcf-install against a fake root prefix)
-        run: cargo test --locked --workspace --features llmcf-install/test-root
+        run: |
+          cargo test --locked --workspace --features llmcf-install/test-root
+          cargo test --locked -p llmcf-pair --features test-mode
 
       - name: Static musl release builds (x86_64, aarch64, armv7)
         # llmcf-gateway's TLS (rustls with ring) compiles a little C: clang cross-compiles it for each target
@@ -236,6 +240,7 @@ jobs:
           ar="$(command -v llvm-ar || find /usr/bin -name 'llvm-ar-*' | sort -V | tail -n 1)"
           for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl armv7-unknown-linux-musleabihf; do
             cargo build --locked --release -p llmcf-install --target "$target"
+            cargo build --locked --release -p llmcf-pair --target "$target"
             t="$(echo "$target" | tr - _)"
             env "CC_$t=clang" "CFLAGS_$t=--target=$target" "AR_$t=$ar" \
               cargo build --locked --release -p llmcf-gateway --target "$target"
@@ -244,7 +249,8 @@ jobs:
       - name: Every release program is static
         run: |
           for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl armv7-unknown-linux-musleabihf; do
-            for program in "target/$target/release/llmcf-install" "target/$target/release/llmcf-gateway"; do
+            for program in "target/$target/release/llmcf-install" "target/$target/release/llmcf-gateway" \
+                "target/$target/release/llmcf-pair"; do
               file "$program"
               if readelf -lW "$program" | grep -q INTERP; then echo "$program has a program interpreter" >&2; exit 1; fi
               if readelf -dW "$program" | grep -q NEEDED; then echo "$program needs shared libraries" >&2; exit 1; fi
@@ -255,6 +261,12 @@ jobs:
         run: |
           set +e
           out="$(./target/x86_64-unknown-linux-musl/release/llmcf-install --root /tmp plan llm-test 2>&1)"
+          code=$?
+          set -e
+          echo "$out"
+          [ "$code" -eq 2 ] && echo "$out" | grep -q "no test mode"
+          set +e
+          out="$(./target/x86_64-unknown-linux-musl/release/llmcf-pair announce --out /tmp/x --test-loopback 0 2>&1)"
           code=$?
           set -e
           echo "$out"
@@ -277,6 +289,13 @@ jobs:
           cargo build --locked --manifest-path rust/Cargo.toml -p llmcf-install --features test-root
           LLMCF_INSTALL_TEST_BIN="$GITHUB_WORKSPACE/rust/target/debug/llmcf-install" \
             python -m pytest -ra tests/test_llmcf_install.py tests/test_board_bundle.py
+
+      - name: The framework's pairing by code against the test build of llmcf-pair
+        working-directory: .
+        run: |
+          cargo build --locked --manifest-path rust/Cargo.toml -p llmcf-pair --features test-mode
+          LLMCF_PAIR_TEST_BIN="$GITHUB_WORKSPACE/rust/target/debug/llmcf-pair" \
+            python -m pytest -ra tests/test_pair_pake.py
 
   test-headless:
     # The install without the optional extra 'gui' (DECISIONS round 11, A3): a headless or server install and the
