@@ -20,7 +20,9 @@ from conftest import REPO_ROOT
 
 REMOTE = REPO_ROOT / "orchestrator" / "remote"
 ALLOWED_INSIDE = ("orchestrator.remote", "orchestrator.utils", "orchestrator.security")
-ALLOWED_OUTSIDE = {"paramiko"}   # the SSH library, imported on first use only
+# the SSH library, imported on first use only, and the two crypto libraries it is built on, which pairing by code
+# (remote/pair_pake.py) uses for SPAKE2 (PyNaCl's libsodium) and its channel (cryptography's AEAD)
+ALLOWED_OUTSIDE = {"paramiko", "nacl", "cryptography"}
 
 
 def imports_of(path):

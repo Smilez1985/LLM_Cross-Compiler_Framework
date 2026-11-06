@@ -2812,7 +2812,10 @@ def pair_by_code(version=None):
             return 1
         return 0 if install(content) else 1
     finally:
-        shutil.rmtree(folder, ignore_errors=True)
+        try:
+            shutil.rmtree(folder)
+        except OSError as e:
+            sys.stderr.write("[PROBE] The private pairing folder could not be removed: {}\n".format(e.strerror or e))
 
 
 def main(argv=None):
