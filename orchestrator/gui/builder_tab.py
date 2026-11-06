@@ -714,7 +714,50 @@ class BuilderTab(QWidget):
         self.act_scan_script_save.setObjectName("act_deploy_scan_script_save")
         self.act_scan_script_save.triggered.connect(lambda _=False: self._scan_local_save_as(use_script=True))
         self.scan_menu.addAction(self.act_scan_script_save)
+        # `scan --kit FOLDER [--no-pair]`: the probe kit the person carries to a board (pairing on by default)
+        self.act_scan_kit = QAction(ui_text("deploy.kit.action"), self)
+        self.act_scan_kit.setObjectName("act_deploy_scan_kit")
+        self.act_scan_kit.triggered.connect(lambda _=False: self._make_probe_kit())
+        self.scan_menu.addAction(self.act_scan_kit)
         self.host_keys = HostKeyCheck(self, self.framework)
+
+    def _make_probe_kit(self, folder=None, pair=None):
+        """`llmcf scan --kit FOLDER [--no-pair]` by mouse (scan_steps.export_probe_kit, the same core step): a folder
+        dialog, then the question with "Pair the board during the probe" ticked (the person may untick it)."""
+        from PySide6.QtWidgets import QCheckBox, QMessageBox
+        from orchestrator.gui.host_key import state_dir
+        from orchestrator.gui.plain import plain_box
+        from orchestrator.runtime.device import board_ops
+        from orchestrator.runtime.device.person_steps import device_audit
+        from orchestrator.runtime.scan_steps import export_probe_kit
+        if folder is None:
+            folder = QFileDialog.getExistingDirectory(self, ui_text("deploy.kit.folder"))
+            if not folder:
+                return
+        if pair is None:
+            box = QMessageBox(QMessageBox.Question, ui_text("deploy.kit.title"), ui_text("deploy.kit.question"),
+                              QMessageBox.Ok | QMessageBox.Cancel, self)
+            check = QCheckBox(ui_text("deploy.kit.pair"), box)
+            check.setObjectName("chk_deploy_kit_pair")
+            check.setChecked(True)
+            box.setCheckBox(check)
+            if box.exec() != QMessageBox.Ok:
+                return
+            pair = check.isChecked()
+        home = state_dir(self.framework)
+        try:
+            kit = export_probe_kit(home, Path(folder), pair=pair, via="gui", actor="gui",
+                                   signer=lambda: board_ops.framework_signer(self.framework),
+                                   audit=lambda: device_audit(self.framework, home))
+        except Exception as e:  # noqa: BLE001 - the folder could not be written: the person reads why
+            plain_box(self, "warning", ui_text("deploy.kit.title"), ui_text("deploy.kit.failed", reason=str(e)))
+            return None
+        said = (ui_text("deploy.kit.paired", expires=kit.offer.expires_at) if kit.pairing
+                else kit.problem or ui_text("deploy.kit.unpaired"))
+        text = ui_text("deploy.kit.done", count=len(kit.files), pairing=said)
+        self._log(text)
+        plain_box(self, "information", ui_text("deploy.kit.title"), text)
+        return kit
 
     def _import_probe_file(self):
         """Option 1: Import existing file (USB/Network), with the person's name for the board (`llmcf scan --import
@@ -738,9 +781,19 @@ class BuilderTab(QWidget):
         try:
             from orchestrator.runtime.probe_service import HardwareProbes
             tm = self.framework.get_component("target_manager") if hasattr(self.framework, "get_component") else None
-            imported = import_probe(HardwareProbes.for_framework(self.framework), path, label, tm)
+            from orchestrator.gui.host_key import state_dir
+            from orchestrator.runtime.device.person_steps import device_audit
+            probes = HardwareProbes.for_framework(self.framework)
+            # a probe kit's pairing in the file is completed through the person's channel (scan_steps.import_probe)
+            imported = import_probe(probes, path, label, tm, via="gui", actor="gui",
+                                    audit=lambda: device_audit(self.framework, state_dir(self.framework)))
             self._probe_id = imported.probe_id  # the build the tab starts next is planned for this board
             self._log(ui_text("deploy.import.done", probe_id=imported.probe_id, label=imported.info.label))
+            done = imported.pairing.done
+            if done is not None:
+                self._log(ui_text("deploy.import.paired", device_id=done.device_id, tier=done.tier))
+            elif imported.pairing.message:
+                self._log(ui_text("deploy.import.pairing", message=imported.pairing.message))
             if imported.profile.needs_reprobe:
                 self._log(ui_text("deploy.import.reprobe"))
         except Exception as e:  # not a probe file the framework can read: the match below still runs

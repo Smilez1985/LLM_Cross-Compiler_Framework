@@ -6424,12 +6424,19 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
               "--import)")
 @click.option('--import', 'import_file', default=None, type=click.Path(exists=True, dir_okay=False),
               help="Import a board's probe file (target_hardware_config.txt copied from the board) into the probe "
-                   "store and print its probe id, which AI clients and Ditto use")
+                   "store and print its probe id, which AI clients and Ditto use; a probe kit's pairing in it is "
+                   "completed (the board's host key is pinned)")
+@click.option('--kit', 'kit_folder', default=None, type=click.Path(file_okay=False),
+              help="Write the probe kit you carry to a board into this folder: the probes and, unless --no-pair, the "
+                   "pairing files (the framework's public key, its signer file and a one-time number)")
+@click.option('--no-pair', 'no_pair', is_flag=True,
+              help="With --kit: no pairing during the probe (the kit only reads the hardware)")
 @pass_context
 def run_scan(ctx: FrameworkContext, output, as_json, use_script, device, user, port, password, password_stdin,
-             trust_fingerprint, label, import_file):
+             trust_fingerprint, label, import_file, kit_folder, no_pair):
     """Run the hardware probe on this computer, or with --device on a board over SSH, and store the profile
-    (exit code 1 if the probe fails or writes no file). With --import, store a board's probe file instead."""
+    (exit code 1 if the probe fails or writes no file). With --import, store a board's probe file instead; with
+    --kit, write the probe kit for a board (pairing during the probe is on unless --no-pair)."""
     from orchestrator.runtime.probe_service import HardwareProbes, ProbeError
     from orchestrator.runtime.profile import ProfileStore, default_state_dir
     config, _ = _settings(ctx)
@@ -6437,8 +6444,13 @@ def run_scan(ctx: FrameworkContext, output, as_json, use_script, device, user, p
     store = ProfileStore(state_dir)
     probes = HardwareProbes(store=store)
     output_file = Path(output).expanduser().resolve()
-    if import_file and device:
-        raise click.UsageError("--import and --device exclude each other")
+    if sum(bool(x) for x in (import_file, device, kit_folder)) > 1:
+        raise click.UsageError("--import, --device and --kit exclude each other")
+    if no_pair and not kit_folder:
+        raise click.UsageError("--no-pair goes with --kit")
+    if kit_folder:
+        _scan_kit(ctx, state_dir, Path(kit_folder).expanduser(), pair=not no_pair)
+        return
     if import_file:
         _scan_import(ctx, probes, import_file, label)
         return
@@ -6491,8 +6503,10 @@ def _scan_import(ctx: FrameworkContext, probes, import_file, label: Optional[str
         target_manager = TargetManager(SimpleNamespace(config=config, resolve_path=resolve_install_path))
     except Exception:  # noqa: BLE001
         target_manager = None
+    state_dir = probes.store.state_dir
     try:  # the same core step as the GUI's Builder tab > Scan / Import... > Import from File (scan_steps.import_probe)
-        imported = import_probe(probes, import_file, label, target_manager)
+        imported = import_probe(probes, import_file, label, target_manager, via="cli",
+                                audit=lambda: _device_audit(ctx, state_dir), actor="cli")
     except ProbeError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         if e.next:
@@ -6500,6 +6514,10 @@ def _scan_import(ctx: FrameworkContext, probes, import_file, label: Optional[str
         sys.exit(1)
     probe_id, profile, info, match = imported.probe_id, imported.profile, imported.info, imported.match
     console.print(f"[bold green]Imported as probe {probe_id} ({escape(info.label)}).[/bold green]")
+    if imported.pairing.state == "paired":
+        console.print(f"[green]{escape(imported.pairing.message)}[/green]")
+    elif imported.pairing.state == "refused":
+        console.print(f"[yellow]{escape(imported.pairing.message)}[/yellow]")
     for line in _profile_summary(profile):
         console.print(line)
     if profile.needs_reprobe:
@@ -6511,6 +6529,29 @@ def _scan_import(ctx: FrameworkContext, probes, import_file, label: Optional[str
     else:
         console.print("No target matches this probe yet: an AI client or Ditto can propose a module for it "
                       f"(MCP prompt add_board with probe_id {probe_id}).")
+
+
+def _scan_kit(ctx: FrameworkContext, state_dir: Path, folder: Path, *, pair: bool) -> None:
+    """Writes the probe kit for a board (scan_steps.export_probe_kit, also the GUI's Builder tab > Scan / Import... >
+    Make a Probe Kit for a Board...): the probes and, with `pair`, the pairing files of a new pairing offer."""
+    from orchestrator.remote.pairing import PairingRefused
+    from orchestrator.runtime.scan_steps import export_probe_kit
+    signer = _board_signer(ctx) if pair else None   # the framework's signing key, looked up only for pairing
+    try:
+        kit = export_probe_kit(state_dir, folder, pair=pair, signer=signer, via="cli",
+                               audit=lambda: _device_audit(ctx, state_dir), actor="cli")
+    except (OSError, PairingRefused) as e:
+        console.print(f"[red]The probe kit could not be written: {escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[bold green]Probe kit written to {escape(str(kit.folder))} ({len(kit.files)} files).[/bold green]")
+    if kit.pairing:
+        console.print(f"Pairing is on: run the probe on the board once with sudo (README.txt in the kit says how). The "
+                      f"kit pairs one board once and is valid until {kit.offer.expires_at} (UTC).")
+    elif kit.problem:
+        console.print(f"[yellow]{escape(kit.problem)}[/yellow]")
+    else:
+        console.print("Pairing is off for this kit: the probe only reads the hardware.")
+    console.print("Import the result file with: llm-cli scan --import target_hardware_config.txt")
 
 
 # ============================================================================

@@ -493,6 +493,11 @@ as options: `hardware_probe.sh --install-tools` first offers to install `vulkan-
 `hardware_probe.ps1 -Elevate` restarts with administrator rights. Bring the file into the framework with **Scan /
 Import... > Import from File (USB/Disk)...** in the GUI, or pass it to `llm-cli module generate-ai`.
 
+**The probe kit that pairs the board:** `llm-cli scan --kit FOLDER` (GUI: **Scan / Import... > Make a Probe Kit for a
+Board...**) writes that folder for you, with the pairing on unless you switch it off (`--no-pair`): run the probe on the
+board once with `sudo` and importing its result pins the board's host key, so its first login asks no fingerprint
+question. The kit and the result hold no secret. Details: [Features](docs/Features.md#hardware-probe-and-new-targets).
+
 ---
 
 ## Quick start: the command line

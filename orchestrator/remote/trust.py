@@ -235,6 +235,19 @@ class TrustStore:
         from orchestrator.utils import ssh_trust   # looked up now: tests replace fetch_host_key there
         return ssh_trust.fetch_host_key(endpoint.host, endpoint.port)
 
+    def pinned(self, fingerprint_text: str, key_type: str = "") -> Optional[Dict[str, Any]]:
+        """The board a completed pairing during the hardware probe pinned this host key for (paired_boards: a row
+        whose fingerprints hold `fingerprint_text`, of `key_type`'s family when one is given), or None. Reads only the
+        file; first_use then trusts that key without asking."""
+        family = key_family(key_type) if key_type else ""
+        if key_type and not family:
+            return None
+        for row in paired_boards(self.state_dir):
+            for fam, fp in row["fingerprints"].items():
+                if fp == fingerprint_text and (not family or fam == family):
+                    return row
+        return None
+
     def check(self, endpoint: Endpoint, key: Any = None, *, expect_fingerprint: Optional[str] = None,
               expect_device_id: Optional[str] = None) -> KeyCheck:
         """The key the board presents (read now when `key` is None) against known_hosts, and against the fingerprint
@@ -330,6 +343,86 @@ def parse_public_key(text: str) -> Any:
     return key
 
 
+# --- the boards a pairing during the hardware probe pinned (read-only; remote/pairing.py writes these files) ---------
+
+# The board host keys a completed pairing pinned (complete_pairing), and the open pairing offers (create_offer). Both
+# live in the framework's per-user folder, readable only by this user.
+PAIRED_FILE = "paired_host_keys.json"
+OFFERS_FILE = "pairing_offers.json"
+# The host key families a pairing names a board's keys by (the probe reads /etc/ssh/ssh_host_<family>_key.pub), and
+# the SSH key types of each.
+HOST_KEY_FAMILIES = {"ed25519": ("ssh-ed25519",),
+                     "ecdsa": ("ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521"),
+                     "rsa": ("ssh-rsa",)}
+# The order a board's identity is taken in (the key an SSH client prefers first).
+FAMILY_ORDER = ("ed25519", "ecdsa", "rsa")
+PAIRED_TIERS = ("root", "dropbear", "home")
+PAIRING_WAYS = ("file", "pake")
+_DEVICE_ID = re.compile(r"^[0-9a-f]{16}$", re.ASCII)
+_STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", re.ASCII)
+_MAX_PAIRING_FILE = 512 * 1024
+
+
+def key_family(key_type: str) -> str:
+    """The family word (ed25519, ecdsa, rsa) of an SSH key type; "" for another type."""
+    return next((family for family, types in HOST_KEY_FAMILIES.items() if key_type in types), "")
+
+
+def _read_json(path: Path) -> Any:
+    """A pairing file's content, or None when it is missing, too large or not JSON."""
+    import json
+    try:
+        if not path.is_file() or path.stat().st_size > _MAX_PAIRING_FILE:
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _paired_row(row: Any) -> Optional[Dict[str, Any]]:
+    """One pinned board as complete_pairing wrote it, or None when a field is not of its kind (a damaged or edited
+    file pins nothing)."""
+    if not isinstance(row, dict):
+        return None
+    fps = row.get("fingerprints")
+    if not isinstance(fps, dict) or not fps or any(
+            family not in HOST_KEY_FAMILIES or not isinstance(fp, str) or not FINGERPRINT.fullmatch(fp)
+            for family, fp in fps.items()):
+        return None
+    if not _DEVICE_ID.fullmatch(str(row.get("device_id", ""))) or row.get("tier") not in PAIRED_TIERS \
+            or row.get("way") not in PAIRING_WAYS or not _STAMP.fullmatch(str(row.get("paired_at", ""))):
+        return None
+    label = row.get("label", "")
+    return {"device_id": row["device_id"], "fingerprints": dict(fps), "tier": row["tier"], "way": row["way"],
+            "paired_at": row["paired_at"], "label": label if isinstance(label, str) and len(label) <= 64 else "",
+            "probe_id": row.get("probe_id", "") if _DEVICE_ID.fullmatch(str(row.get("probe_id", ""))) else ""}
+
+
+def paired_boards(state_dir: Path) -> list:
+    """The boards a completed pairing pinned (device_id, fingerprints by family, tier, way, paired_at, label,
+    probe_id), oldest first; [] when there are none. Reads only the file."""
+    data = _read_json(Path(state_dir) / PAIRED_FILE)
+    rows = data.get("boards") if isinstance(data, dict) else None
+    return [r for r in (_paired_row(x) for x in (rows if isinstance(rows, list) else [])) if r is not None]
+
+
+def pairing_overview(state_dir: Path, now: Any = None) -> Dict[str, Any]:
+    """What the pairing during the hardware probe holds, read-only, for every channel (the AI's tools included): the
+    number of open offers (not used, not expired) and the paired boards by device ID, label, key tier, way and time.
+    No nonce, no fingerprint, no address."""
+    from datetime import datetime, timezone
+    stamp = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    data = _read_json(Path(state_dir) / OFFERS_FILE)
+    offers = data.get("offers") if isinstance(data, dict) else None
+    open_offers = sum(1 for o in (offers if isinstance(offers, list) else []) if isinstance(o, dict)
+                      and not o.get("used_at") and isinstance(o.get("expires_at"), str) and o["expires_at"] > stamp)
+    return {"open_offers": open_offers,
+            "paired": [{k: r[k] for k in ("device_id", "label", "tier", "way", "paired_at")}
+                       for r in paired_boards(state_dir)]}
+
+
 __all__ = ["FINGERPRINT", "HostKeyChanged", "HostKeyError", "KEY_TYPES", "KeyCheck", "KeyTextError", "TrustStore",
+           "FAMILY_ORDER", "HOST_KEY_FAMILIES", "OFFERS_FILE", "PAIRED_FILE", "PAIRED_TIERS", "PAIRING_WAYS",
+           "key_family", "paired_boards", "pairing_overview",
            "UnknownHostKey", "check_host_key", "device_id_for", "fingerprint", "host_entry", "known_hosts_path",
            "load_host_keys", "parse_public_key"]

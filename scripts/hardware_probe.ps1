@@ -20,6 +20,11 @@
 
 .PARAMETER NoToolchain
     Skip the compiler and build tool versions.
+
+.PARAMETER NoPair
+    Ignore the probe kit's pairing folder (llmcf-pairing next to this script). Pairing a Windows board (its SSH host
+    key and the framework's key line) is not there yet: with the folder present, the result says PAIR_STATE=skipped
+    with PAIR_REASON=windows and the probe says so; the hardware data is complete either way.
 #>
 param(
     # File the probe writes ("-": standard output)
@@ -27,11 +32,13 @@ param(
     # Opt-in: restart elevated (Windows asks for permission)
     [switch]$Elevate,
     # Skip the compiler and build tool versions
-    [switch]$NoToolchain
+    [switch]$NoToolchain,
+    # Ignore the probe kit's pairing folder
+    [switch]$NoPair
 )
 
-$ProbeVersion = '3.3.0'
-if ($OutputFile -eq '') { [Console]::Error.WriteLine('Usage: hardware_probe.ps1 [-OutputFile FILE|-] [-Elevate] [-NoToolchain]'); Exit 2 }
+$ProbeVersion = '3.4.0'
+if ($OutputFile -eq '') { [Console]::Error.WriteLine('Usage: hardware_probe.ps1 [-OutputFile FILE|-] [-Elevate] [-NoToolchain] [-NoPair]'); Exit 2 }
 if ($OutputFile -ne '-') {
     # Absolute, because an elevated restart starts in another folder.
     $OutputFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputFile)
@@ -44,6 +51,7 @@ if ($Elevate -and -not $isAdmin) {
     if ($OutputFile -eq '-') { [Console]::Error.WriteLine('-Elevate needs -OutputFile FILE.'); Exit 2 }
     $extra = ''
     if ($NoToolchain) { $extra = ' -NoToolchain' }
+    if ($NoPair) { $extra += ' -NoPair' }
     # -Wait: the caller (llm-cli scan --script) reads the output file as soon as this script returns.
     try { $elevated = Start-Process PowerShell -Verb RunAs -Wait -PassThru -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -OutputFile `"$OutputFile`"$extra"; Exit $elevated.ExitCode }
     catch { [Console]::Error.WriteLine('Failed to elevate.'); Exit 1 }
@@ -860,6 +868,15 @@ if (Get-Command 'ssh-keygen' -CommandType Application -ErrorAction SilentlyConti
     Put 'SSH_KEYGEN' 'none'
 }
 Put 'PACKAGE_MANAGER' 'other'
+
+# --- pairing during the hardware probe (probe 3.4.0) -------------------------------------------------------------
+# The Windows target port has no pairing yet (no root-owned key line for Windows' OpenSSH): a probe kit's pairing
+# folder next to this script only gives the plain note, the hardware data is complete.
+if (-not $NoPair -and $PSScriptRoot -and (Test-Path -LiteralPath (Join-Path (Join-Path $PSScriptRoot 'llmcf-pairing') 'nonce'))) {
+    Put 'PAIR_STATE' 'skipped'
+    Put 'PAIR_REASON' 'windows'
+    Write-Log 'Pairing was skipped: pairing a Windows board is not there yet. The hardware data is complete.'
+}
 
 # --- the result ----------------------------------------------------------------------------------------------------
 if ($script:Warnings.Count -gt 0) { Put 'PROBE_WARNINGS' ($script:Warnings -join ',') }

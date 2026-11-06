@@ -326,7 +326,28 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
                                   board_limits=board_limits(d.device_id)))
         if not rows:
             ctx.notes.append("No device is trusted and paired yet. " + PAIR_NEXT)
+        ctx.notes.extend(probe_pairing_notes(store.state_dir, {r.device_id for r in rows}))
         return DevicesOut(devices=rows)
+
+    def probe_pairing_notes(state_dir: Path, listed: set) -> List[str]:
+        """The pairing during the hardware probe, read-only (remote/trust.py pairing_overview: labels, key tier and
+        counts, never a nonce, a fingerprint or an address): boards it pinned that have no trusted record yet, and how
+        many probe kits wait for their result file. Only the person makes a kit or imports its result."""
+        from orchestrator.remote import trust as remote_trust
+        try:
+            view = remote_trust.pairing_overview(state_dir)
+        except Exception:  # noqa: BLE001 - a status line never fails the listing
+            return []
+        waiting = [p for p in view["paired"] if p["device_id"] not in listed]
+        notes = []
+        if waiting:
+            names = ", ".join(f"{p['label'] or p['device_id']} (key tier {p['tier']})" for p in waiting[:10])
+            notes.append(f"Paired during the hardware probe, not logged in to yet: {names}. The person's first scan "
+                         "or deploy of such a board needs no host-key question.")
+        if view["open_offers"]:
+            notes.append(f"{view['open_offers']} probe kit(s) with pairing wait for their result file (only the "
+                         "person imports it).")
+        return notes
 
     # --- create_deploy_package ---
 

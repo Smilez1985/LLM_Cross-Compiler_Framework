@@ -5,6 +5,10 @@ hardware_probe.py - hardware probe of the LLM Cross-Compiler Framework (main pat
 Run it on the machine that will run the binaries, this PC or a board:
 
     python3 -I hardware_probe.py [--output FILE | --output -] [--json] [--no-toolchain] [--disk-path DIR]
+                                 [--pair-kit DIR | --no-pair] [--pair-account NAME]
+
+From a probe kit with pairing on (the folder llmcf-pairing next to this script), run it once with sudo: it then also
+pairs the board (see pair() below); without sudo it says that pairing was skipped and the result is complete anyway.
 
 It writes target_hardware_config.txt: KEY=VALUE lines starting with PROBE_SCHEMA=2, exactly the keys of
 configs/hardware_probe_schema.yml in the framework. --json writes the same keys and string values as one JSON object.
@@ -16,7 +20,8 @@ Rules:
 - No network, no prompts, no stdin, no elevation, no package installs. sudo is only asked `sudo -k -n true` (the
   access facts: -n never prompts and never reads a password, -k ignores cached credentials). External tools (nvidia-smi,
   vulkaninfo, compilers, PowerShell on Windows) run with a time limit and an empty stdin; a missing tool contributes
-  nothing.
+  nothing. The one elevated step is the probe kit's pairing, which the person starts with sudo themselves; the probe
+  never asks for a password.
 - Every value is checked against KEYS / GPU_KEYS below (the validation of the schema; a test compares them) before it
   is written; a value that fails is left out with a warning. Free text is printable ASCII, whitespace collapsed.
 - No host name, user name, path, serial number, MAC address or memory part number is ever read into the result.
@@ -33,7 +38,9 @@ while the two differ.
 """
 
 import argparse
+import base64
 import glob
+import hashlib
 import json
 import os
 import platform
@@ -46,7 +53,7 @@ import time
 from datetime import datetime, timezone
 
 TOOL = "python"
-TOOL_VERSION = "3.3.0"
+TOOL_VERSION = "3.4.0"
 SCHEMA = "2"
 FILE_NAME = "target_hardware_config.txt"
 MAX_VALUE = 4096
@@ -102,6 +109,12 @@ KEYS = {
     "SSH_KEYGEN_VERSION": ("version", _VERSION, 0, (), ()),
     "PACKAGE_MANAGER": ("enum", ("apt", "dnf", "zypper", "pacman", "apk", "other"), 0, (), ()),
     "DROPBEAR_PACKAGES": ("list", ("^dropbear(-(bin|run|initramfs|openrc))?$", 5), 0, (), ("linux",)),
+    "PAIR_STATE": ("enum", ("installed", "skipped", "failed"), 0, (), ()),
+    "PAIR_REASON": ("pattern", "^[a-z][a-z-]{0,23}$", 0, (), ()),
+    "PAIR_NONCE": ("pattern", "^[0-9a-f]{32}$", 0, (), ()),
+    "PAIR_HOSTKEY_ED25519": ("pattern", "^SHA256:[A-Za-z0-9+/]{43}$", 0, (), ()),
+    "PAIR_HOSTKEY_ECDSA": ("pattern", "^SHA256:[A-Za-z0-9+/]{43}$", 0, (), ()),
+    "PAIR_HOSTKEY_RSA": ("pattern", "^SHA256:[A-Za-z0-9+/]{43}$", 0, (), ()),
     "CPU_MODEL": ("text", 128, 0, (), ()),
     "CPU_VENDOR": ("enum", ("intel", "amd", "hygon", "centaur", "zhaoxin", "arm", "broadcom", "cavium", "fujitsu",
                             "hisilicon", "nvidia", "apm", "qualcomm", "samsung", "marvell", "apple", "faraday",
@@ -2762,6 +2775,150 @@ def missing_required(values):
     return [k for k, rule in KEYS.items() if rule[2] and k not in values]
 
 
+# --- pairing during the hardware probe (probe 3.4.0) ----------------------------------------------------------------
+#
+# The probe kit the framework writes for a board carries, when pairing is on, a folder llmcf-pairing next to this
+# script: nonce (the pairing offer's one-time number), root-board.sh (the framework's root step, the same one its
+# pairing over a password login runs), llmcf-gate (the gate program the root step installs) and, for the person to
+# read, the framework's public key and signer files. Run once with sudo, the probe runs that root step for the account
+# that called sudo and writes the board's SSH host key fingerprints and the nonce into its result. Without sudo it says
+# plainly that pairing was skipped; the hardware data is complete either way. Nothing secret is written: the nonce is
+# the framework's one-time number, the fingerprints are public, the comment of a host key line is never read.
+
+PAIR_KIT_DIR = "llmcf-pairing"
+PAIR_HOST_KEYS = (("ed25519", "PAIR_HOSTKEY_ED25519", "/etc/ssh/ssh_host_ed25519_key.pub", ("ssh-ed25519",)),
+                  ("ecdsa", "PAIR_HOSTKEY_ECDSA", "/etc/ssh/ssh_host_ecdsa_key.pub",
+                   ("ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521")),
+                  ("rsa", "PAIR_HOSTKEY_RSA", "/etc/ssh/ssh_host_rsa_key.pub", ("ssh-rsa",)))
+PAIR_TEXTS = {
+    "installed": "Paired: the framework's key line and signing key are in place; import the result file on your "
+                 "computer to finish the pairing.",
+    "not-root": "Pairing was skipped: the probe did not run with sudo. The hardware data is complete; import the file "
+                "as usual, or run the probe again with sudo to pair this board.",
+    "account": "Pairing was skipped: the probe could not tell which board account to pair (run it with sudo from that "
+               "account, or give --pair-account NAME). The hardware data is complete.",
+    "no-host-keys": "Pairing was skipped: this board has no OpenSSH host key the probe could read. The hardware data "
+                    "is complete.",
+    "no-kit": "Pairing was skipped: the pairing files of the probe kit are missing or damaged. The hardware data is "
+              "complete.",
+    "windows": "Pairing was skipped: pairing a Windows board is not there yet. The hardware data is complete.",
+    "opted-out": "Pairing is switched off for this probe kit. The hardware data is complete.",
+}
+_PAIR_ACCOUNT = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._-]{0,63}$")
+
+
+def host_key_fingerprint(line, types):
+    """The SHA256 fingerprint (as ssh-keygen -lf prints it) of a public key line of one of `types`; None otherwise."""
+    parts = (line or "").split()
+    if len(parts) < 2 or parts[0] not in types or not re.match(r"^[A-Za-z0-9+/]{16,16384}={0,3}$", parts[1]):
+        return None
+    try:
+        blob = base64.b64decode(parts[1], validate=True)
+    except (ValueError, TypeError):
+        return None
+    if len(blob) < 4 or blob[4:4 + struct.unpack(">I", blob[:4])[0]].decode("ascii", "replace") != parts[0]:
+        return None
+    return "SHA256:" + base64.b64encode(hashlib.sha256(blob).digest()).decode("ascii").rstrip("=")
+
+
+def find_pair_kit(script_path=None):
+    """The probe kit's pairing folder next to this script (it holds a nonce file), or None; a probe sent over SSH on
+    stdin (no script file) has none."""
+    script_path = script_path or __file__
+    if not os.path.isfile(script_path):
+        return None
+    folder = os.path.join(os.path.dirname(os.path.abspath(script_path)), PAIR_KIT_DIR)
+    return folder if os.path.isfile(os.path.join(folder, "nonce")) else None
+
+
+def pair(kit, root=None, account=None, euid=None, run=None, env=None):
+    """The pairing block of the result: runs the kit's root step (as root only) and reads the board's host key
+    fingerprints. {PAIR_STATE: installed, PAIR_NONCE, PAIR_HOSTKEY_*} or {PAIR_STATE: skipped|failed, PAIR_REASON}.
+    `root`, `euid`, `run` and `env` are for tests (a sysroot, the effective user id, subprocess.run, the
+    environment)."""
+    env = os.environ if env is None else env
+    root = root if root is not None else (env.get("HW_PROBE_SYSROOT") or "")
+    run = run or subprocess.run
+
+    def skipped(word, state="skipped"):
+        return {"PAIR_STATE": state, "PAIR_REASON": word}
+
+    if os.name == "nt" or platform.system() == "Windows":
+        return skipped("windows")
+    try:
+        with open(os.path.join(kit, "nonce"), encoding="ascii") as f:
+            nonce = f.read(64).strip()
+    except (OSError, UnicodeDecodeError):
+        return skipped("no-kit")
+    if nonce == "off":   # the kit was written again with pairing switched off
+        return skipped("opted-out")
+    step, gate = os.path.join(kit, "root-board.sh"), os.path.join(kit, "llmcf-gate")
+    if not re.match(r"^[0-9a-f]{32}$", nonce) or not os.path.isfile(step) or not os.path.isfile(gate):
+        return skipped("no-kit")
+    if euid is None:
+        euid = os.geteuid() if hasattr(os, "geteuid") else -1
+    if euid != 0:
+        return skipped("not-root")
+    account = account or env.get("SUDO_USER") or ""
+    if not _PAIR_ACCOUNT.match(account) or account == "root":
+        return skipped("account")
+    fingerprints = {}
+    for _family, key, path, types in PAIR_HOST_KEYS:
+        try:
+            with open(root.rstrip("/\\") + path if root else path, encoding="ascii", errors="replace") as f:
+                fp = host_key_fingerprint(f.readline(), types)
+        except OSError:
+            fp = None
+        if fp:
+            fingerprints[key] = fp
+    if not fingerprints:
+        return skipped("no-host-keys")
+    step_env = {"PATH": env.get("PATH") or "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C", "LLMCF_ACCOUNT": account}
+    for name in ("TMPDIR", "HOME"):
+        if env.get(name):
+            step_env[name] = env[name]
+    try:
+        with open(gate, "rb") as program:
+            done = run(["sh", step], stdin=program, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=step_env,
+                       timeout=300, check=False)
+        out = (done.stdout or b"").decode("ascii", "replace")
+    except (OSError, subprocess.SubprocessError):
+        return skipped("sh", "failed")
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("root-board=installed"):
+            result = {"PAIR_STATE": "installed", "PAIR_NONCE": nonce}
+            result.update(fingerprints)
+            return result
+        if line.startswith("root-board=unavailable"):
+            word = line.partition("reason=")[2].strip()
+            return skipped(word if re.match(r"^[a-z][a-z-]{0,23}$", word) else "unknown", "failed")
+    return skipped("unknown", "failed")
+
+
+def with_pairing(values, pairing):
+    """`values` with the pairing block, each value checked against KEYS, before PROBE_WARNINGS."""
+    out = {k: v for k, v in values.items() if k != "PROBE_WARNINGS"}
+    for key, value in pairing.items():
+        rule = KEYS.get(key)
+        if rule and (rule[0] != "enum" or value in rule[1]) and (rule[0] != "pattern" or re.match(rule[1], value)):
+            out[key] = value
+    if "PROBE_WARNINGS" in values:
+        out["PROBE_WARNINGS"] = values["PROBE_WARNINGS"]
+    return out
+
+
+def pairing_text(pairing):
+    """The person's line about the pairing (stderr of the probe)."""
+    if pairing.get("PAIR_STATE") == "installed":
+        return PAIR_TEXTS["installed"]
+    word = pairing.get("PAIR_REASON", "unknown")
+    if word in PAIR_TEXTS:
+        return PAIR_TEXTS[word]
+    return ("Pairing failed on this board ({}); nothing of the framework's key was changed. The hardware data is "
+            "complete; import the file as usual.".format(word))
+
+
 def render_text(values):
     lines = ["# LLM Cross-Compiler Framework hardware profile (schema 2, hardware_probe.py {})".format(TOOL_VERSION)]
     lines += ["{}={}".format(k, v) for k, v in values.items()]
@@ -2782,11 +2939,22 @@ def main(argv=None):
     parser.add_argument("--no-toolchain", action="store_true", help="skip the compiler and build tool versions")
     parser.add_argument("--disk-path", default=None, help="folder whose free space DISK_FREE_MB reports "
                         "(default: LLM_FRAMEWORK_HOME, ~/.llm-framework or the home folder)")
+    parser.add_argument("--pair-kit", default=None, help="the probe kit's pairing folder (default: " + PAIR_KIT_DIR +
+                        " next to this script, when it is there)")
+    parser.add_argument("--no-pair", action="store_true", help="do not pair, even when the probe kit has a pairing "
+                        "folder")
+    parser.add_argument("--pair-account", default=None, help="the board account to pair (default: the account that "
+                        "called sudo)")
     args = parser.parse_args(argv)
     if not args.output:
         parser.error("--output must not be empty")
     sections = [s for s in SECTIONS if not (args.no_toolchain and s == "toolchain")]
     values = collect(sections=sections, disk_path=args.disk_path)
+    kit = None if args.no_pair else (args.pair_kit or find_pair_kit())
+    if kit:
+        pairing = pair(kit, account=args.pair_account)
+        values = with_pairing(values, pairing)
+        sys.stderr.write("[PROBE] " + pairing_text(pairing) + "\n")
     text = render_json(values) if args.json else render_text(values)
     missing = missing_required(values)
     if args.output == "-":

@@ -159,7 +159,7 @@ class TestBoards:
         fake_id(bindir, 1000)
         profile = parse_profile(py_run(root, bindir, tmp_path))
         assert access_values(profile) == EXPECTED[kind]
-        assert profile.get("PROBE_TOOL_VERSION") == "3.3.0"
+        assert profile.get("PROBE_TOOL_VERSION") == "3.4.0"   # probe 3.4.0 (pairing) keeps the access keys
         assert not [w for w in profile.warnings if w.endswith(tuple(ACCESS_KEYS))]
 
     @NEEDS_SHELL
@@ -417,7 +417,7 @@ class TestSchema:
     def test_a_3_2_0_profile_has_no_access_record(self, dietpi_text):
         text = "".join(line for line in dietpi_text.splitlines(keepends=True)
                        if line.split("=", 1)[0] not in ACCESS_KEYS)
-        profile = parse_profile(text.replace("PROBE_TOOL_VERSION=3.3.0", "PROBE_TOOL_VERSION=3.2.0"))
+        profile = parse_profile(text.replace("PROBE_TOOL_VERSION=3.4.0", "PROBE_TOOL_VERSION=3.2.0"))
         assert profile.get("PROBE_TOOL_VERSION") == "3.2.0" and profile.access() is None
 
     def test_a_3_3_0_profile_round_trips(self, dietpi_text):

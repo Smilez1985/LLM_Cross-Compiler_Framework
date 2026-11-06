@@ -2195,6 +2195,7 @@ llm-cli scan --device HOST --user TEXT [--port N] [--password [VALUE] | --passwo
              [--trust-fingerprint TEXT] [--label TEXT]
              [--output TEXT] [--json]
 llm-cli scan --import FILE [--label TEXT]
+llm-cli scan --kit FOLDER [--no-pair]
 ```
 
 Runs the hardware probe and keeps its result, the hardware profile (schema 2, described in the
@@ -2248,7 +2249,9 @@ read, 2 for wrong options.
 | `--password`, `--password-stdin` | Only for the first connection: used once to install the framework's SSH key, never stored. As for [deploy run](#deploy-run): without a value asked with hidden input (also when you give nothing on a terminal), or one line from a pipe; `--password VALUE` is deprecated and warns. |
 | `--trust-fingerprint TEXT` | Trust a new board without asking if its host key has this SHA256 fingerprint. |
 | `--label TEXT` | Your name for the board in the profile store (with `--device` or `--import`). |
-| `--import FILE` | Store a board's probe file in the probe store and print its probe id (not together with `--device`). |
+| `--import FILE` | Store a board's probe file in the probe store and print its probe id (not together with `--device`). A probe kit's pairing in the file is completed: the board's host key is pinned and the probe is stored under the board's ID; a file of another framework, an expired or a used one is refused with the reason, the hardware data is stored anyway. |
+| `--kit FOLDER` | Write the probe kit for a board into FOLDER: the three probes, a README and, unless `--no-pair`, the folder `llmcf-pairing` (the framework's public key, its signer file and a one-time number, valid 24 hours for one board). Run the probe there once with sudo to pair the board; without sudo it only reads the hardware. A folder that already holds a README.txt or probe of yours (not an earlier kit's) is refused with their names; nothing is written over. |
+| `--no-pair` | With `--kit`: no pairing (the kit only reads the hardware). |
 
 When the board's network drops during `--device` (a board with Wi-Fi only, for example), the scan waits up to
 300 s for the board and says so once (`Waiting for the board at ... (Ctrl+C)`); Ctrl+C ends the command at once,
@@ -2271,6 +2274,7 @@ background; the log on the right shows the result, its notes and where the profi
 llm-cli scan                                        # this computer, stored as "local"
 llm-cli scan --device 192.0.2.10 --user dietpi --label "ZERO 3W" --output zero3w.txt
 llm-cli scan --import zero3w.txt --label "ZERO 3W"   # a probe file copied from a board
+llm-cli scan --kit /media/stick/probe-kit             # the kit for a board, pairing on
 ```
 
 ---

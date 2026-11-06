@@ -789,6 +789,7 @@ SETUP_REASONS = {
     "sh": "the board's /bin/sh cannot read the gate",
     "tmp": "the board cannot make a private temporary folder",
     "no-sudo": "the board has no sudo",
+    "not-root": "the probe did not run with sudo, so it could not put the framework's key and signing key in place",
     "no-visudo": "the board has no visudo to check the sudo rules",
     "sudoers": "visudo did not accept the sudo rules",
     "sudo": "sudo refused (it needs a password the framework was not given, or the account may not use it)",
@@ -879,7 +880,7 @@ def match_block(user: str, keys_dir: str = KEYS_DIR) -> str:
             f"\tAuthorizedKeysFile {keys_dir}/%u .ssh/authorized_keys\n{MATCH_END} {user}\n")
 
 
-def root_board_script(paths: BoardPaths = BoardPaths()) -> str:
+def root_board_script(paths: BoardPaths = BoardPaths(), *, as_root: bool = False) -> str:
     """The root step's script (the setup operation root-board, run by an unrestricted login of the board account):
     stdin is a line with the person's one-time password (empty: sudo -n), then the gate program; LLMCF_KEYLINE (the
     framework key's restricted line), LLMCF_SIGNERS (the allowed_signers line) and LLMCF_SELFTEST (the framework key's
@@ -889,25 +890,40 @@ def root_board_script(paths: BoardPaths = BoardPaths()) -> str:
     gate (0755), the signers file and the key line (0644, folders 0755) and the configuration (the earlier one kept as
     sshd_config.llmcf-backup), reloads sshd (the earlier configuration put back when that fails) and only then removes
     the framework key's line from the account's own ~/.ssh/authorized_keys (as the account, never as root). Answers
-    root-board=installed home=removed|kept|none, or root-board=unavailable reason=WORD (nothing changed then)."""
+    root-board=installed home=removed|kept|none, or root-board=unavailable reason=WORD (nothing changed then).
+
+    `as_root` (probe_kit_root_step: the pairing during the hardware probe, run once with sudo on the board itself):
+    the very same checks and installs, but the script already runs as root, so it reads no password line (stdin is
+    only the gate program), runs each root step directly instead of through sudo, takes the board account from
+    LLMCF_ACCOUNT (the account that called sudo, checked as above, never root; not-root when it is not run as root) and
+    leaves the account's own authorized_keys alone (no framework key was put there on this way: home=none)."""
     q = paths
     block = match_block("@USER@", q.keys_dir).replace("@USER@", "$llmcf_u")
+    if as_root:   # the probe kit's pairing: already root, the account from LLMCF_ACCOUNT, no password line
+        who = ['no() { echo "root-board=unavailable reason=$1"; exit 0; }',
+               '[ "$(id -u)" = 0 ] || no not-root',
+               'llmcf_u=${LLMCF_ACCOUNT-}',
+               'case $llmcf_u in ""|root|-*|*[!A-Za-z0-9._-]*) no account ;; esac']
+        root_way = ['asroot() { "$@"; }']
+    else:
+        who = ['IFS= read -r llmcf_pw || llmcf_pw=""',
+               'no() { echo "root-board=unavailable reason=$1"; exit 0; }',
+               'llmcf_u=$(id -un 2>/dev/null) || no account',
+               'case $llmcf_u in ""|root|-*|*[!A-Za-z0-9._-]*) no account ;; esac',
+               '[ "$(id -u)" != 0 ] || no account']
+        root_way = ['asroot() { if [ -n "$llmcf_pw" ]; then printf "%s\\n" "$llmcf_pw" | sudo -S -p "" "$@"; '
+                    'else sudo -n "$@"; fi; }',
+                    "command -v sudo >/dev/null 2>&1 || no no-sudo"]
     return "\n".join([
         "set -u",
         "umask 077",
-        'IFS= read -r llmcf_pw || llmcf_pw=""',
-        'no() { echo "root-board=unavailable reason=$1"; exit 0; }',
-        'llmcf_u=$(id -un 2>/dev/null) || no account',
-        'case $llmcf_u in ""|root|-*|*[!A-Za-z0-9._-]*) no account ;; esac',
-        '[ "$(id -u)" != 0 ] || no account',
+        *who,
         '[ -n "${LLMCF_SIGNERS-}" ] || no no-signer',
         'llmcf_d=$(mktemp -d "${TMPDIR:-/tmp}/llmcf-root.XXXXXXXX") || no tmp',
         "trap 'rm -rf \"$llmcf_d\"' EXIT",
         'cat > "$llmcf_d/gate"',
         'printf "%s\\n" "$LLMCF_KEYLINE" > "$llmcf_d/key"',
-        'asroot() { if [ -n "$llmcf_pw" ]; then printf "%s\\n" "$llmcf_pw" | sudo -S -p "" "$@"; '
-        'else sudo -n "$@"; fi; }',
-        "command -v sudo >/dev/null 2>&1 || no no-sudo",
+        *root_way,
         'llmcf_sshd=$(command -v sshd 2>/dev/null) || llmcf_sshd=/usr/sbin/sshd',
         '[ -x "$llmcf_sshd" ] || no no-sshd',
         verify_sh(),
@@ -937,6 +953,8 @@ def root_board_script(paths: BoardPaths = BoardPaths()) -> str:
         "  no reload",
         "fi",
         'llmcf_keys="$HOME/.ssh/authorized_keys"; llmcf_home=none',
+        # as root, $HOME is not the account's: its own authorized_keys stays as it is (home=none)
+        'if false; then' if as_root else
         'if [ -f "$llmcf_keys" ] && grep -qF "@BLOB@" "$llmcf_keys" 2>/dev/null; then',
         '  llmcf_new="$llmcf_keys.llmcf.$$"; llmcf_home=kept',
         "  if cp -p \"$llmcf_keys\" \"$llmcf_new\" 2>/dev/null && awk -v blob=@BLOB@ '{ hit = 0; "
@@ -986,6 +1004,25 @@ def install_root_board(run: Callable[..., object], public_line: str, bundle: "Ga
     home = next((w.split("=", 1)[1] for ln in out.splitlines() if ln.startswith("root-board=installed")
                  for w in ln.split() if w.startswith("home=")), "none")
     return True, "", home if home in ("removed", "kept", "none") else "none"
+
+
+def probe_kit_root_step(public_line: str, bundle: "GateBundle", *, paths: Optional[BoardPaths] = None) -> str:
+    """The root step of the pairing during the hardware probe (the probe kit, way 1 of the pairing): the same text
+    install_root_board sends (the framework key's root-owned line, the signers file, its PEM twin and the self-test
+    signature as plain assignments, then root_board_script) in its `as_root` form, which the probe runs once with sudo
+    on the board with the gate program on stdin and the board account in LLMCF_ACCOUNT. Answers like the root step:
+    root-board=installed, or root-board=unavailable reason=WORD (SETUP_REASONS; not-root: it did not run as root).
+    GateRefused for a public line that is not a plain key, ValueError(bundle.missing) without a signing key: the kit
+    then carries no pairing."""
+    parts = (public_line or "").split(" ")
+    if len(parts) not in (2, 3) or not KINDS["b64"].check(parts[1]):
+        raise GateRefused("the framework's public key line is not a plain SSH public key")
+    if not bundle.signers or not bundle.selftest:
+        raise ValueError(bundle.missing or "no-signer")
+    line = root_key_line(" ".join(parts), (paths or BoardPaths()).gate)
+    body = root_board_script(paths or BoardPaths(), as_root=True).replace("@BLOB@", parts[1])
+    return "#!/bin/sh\n# llmcf's root step of the pairing during the hardware probe (generated; run by the probe)\n" + \
+        _assignments(bundle, LLMCF_KEYLINE=line) + body + "\n"
 
 
 # --- the Dropbear tier: root-owned gate and signing key, the key line in the account's own authorized_keys -----------
@@ -1216,7 +1253,8 @@ __all__ = ["DROPBEAR_KEEP", "DROPBEAR_PACKAGE", "DROPBEAR_PACKAGE_NAMES", "DROPB
            "dropbear_packages_sh", "DROPBEAR_OPTIONS", "DROPBEAR_LATER_OPTIONS", "HOME_SIGNING_REL", "SIGNERS_PEM", "SSHSIG_ED25519_SIZE",
            "dropbear_board_script", "install_dropbear_board", "read_tier_facts", "sshsig_prefix", "verify_sh"]
 __all__ += ["BoardPaths", "INSTALL_ROOT_REL", "KEYS_DIR", "LIBEXEC_DIR", "ROOT_GATE", "SELFTEST_DATA", "SIGNERS",
-           "SIGN_NAMESPACE", "SIGN_PRINCIPAL", "install_root_board", "match_block", "root_board_script", "signed_sh",
+           "SIGN_NAMESPACE", "SIGN_PRINCIPAL", "install_root_board", "match_block", "probe_kit_root_step",
+           "root_board_script", "signed_sh",
            "GATE_NAME", "GATE_REL", "GateBundle", "GateCall", "GateRefused", "GateScript", "JOB_LOG", "JOB_STARTED",
            "JOB_STATUS", "KEY_OPTIONS", "KINDS", "Kind", "OPERATIONS", "Operation", "PLACE_HOME_REL",
            "PLACE_TMP_PREFIX", "REFUSAL_PREFIX", "REFUSED_STATUS", "ROOT_HELPER", "ROOT_KEY_OPTIONS", "SETUP_REASONS",

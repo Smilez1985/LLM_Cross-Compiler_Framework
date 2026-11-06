@@ -1420,6 +1420,19 @@ the probe looks at; the .py and the .sh carry copies, and a test compares them.
 the Builder tab's scan logs the same line, and the MCP tool `get_hardware_probe` returns them as `access`. A file of an
 older probe stays readable; probe the board again to get the facts.
 
+### 11.9 The pairing block of probe 3.4.0
+
+Probe 3.4.0 (`PROBE_TOOL_VERSION=3.4.0`) adds the group `pairing`, written only when the probe ran from a probe kit with pairing on (the folder `llmcf-pairing` next to the script, or `--pair-kit DIR`; `--no-pair` switches it off; `--pair-account NAME` names the board account when sudo does not). Its stability is `pairing`: the import reads it to complete the pairing and the profile store never keeps it, so an AI never sees it.
+
+| Key | Values |
+|---|---|
+| `PAIR_STATE` | `installed` (the kit's root step answered `root-board=installed`), `failed` (it refused; `PAIR_REASON` says why) or `skipped` (`not-root`: no sudo; `account`: no board account; `no-host-keys`; `no-kit`; `opted-out`: a kit written again without pairing; `windows` from the `.ps1`) |
+| `PAIR_REASON` | one word (`^[a-z][a-z-]{0,23}$`), only with `skipped` or `failed` |
+| `PAIR_NONCE` | the kit's one-time number (32 hex characters), only with `installed` |
+| `PAIR_HOSTKEY_ED25519`, `PAIR_HOSTKEY_ECDSA`, `PAIR_HOSTKEY_RSA` | the SHA256 fingerprint of `/etc/ssh/ssh_host_<type>_key.pub` as `ssh-keygen -lf` prints it, only with `installed`; the comment of the key line is never read into the result |
+
+A file of an older probe has no such keys and stays readable (`PairingResult.from_profile` returns `None`). In code: `orchestrator/remote/pairing.py` `PairingResult` checks the block and `complete_pairing` completes it.
+
 ## 12. Bundle building blocks
 
 The board bundle (deploy way 3, [Features](Features.md#the-board-bundle)) is made from building blocks. A block is one
