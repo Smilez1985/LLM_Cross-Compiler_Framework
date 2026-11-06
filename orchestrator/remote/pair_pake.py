@@ -480,13 +480,13 @@ def boards_in(packet: bytes, source: Tuple[Any, ...], *, link: str = "", allow_l
         port, host = found["srv"][instance]
         if not 0 < port < 65536:
             continue
-        address, ipv4 = sender, ""
+        address, ipv4, picked = sender, "", False
         version = ipaddress.ip_address(sender).version
         for candidate in found["addresses"].get(host, []):
             if not _address_allowed(candidate, allow_loopback):
                 continue
-            if ipaddress.ip_address(candidate).version == version and address == sender:
-                address = candidate
+            if ipaddress.ip_address(candidate).version == version and not picked:
+                address, picked = candidate, True   # the answer's first local address of the sender's family
             elif version == 6 and ipaddress.ip_address(candidate).version == 4 and not ipv4:
                 ipv4 = candidate   # the board's IPv4 address on the link: the one kept for SSH later
         zone = scope if ipaddress.ip_address(address).is_link_local else 0

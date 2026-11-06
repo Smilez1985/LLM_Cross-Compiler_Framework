@@ -448,3 +448,16 @@ def test_the_paired_board_record_keeps_the_address_and_no_ai_reads_it(tmp_path):
     result = pairing.PairingResult(state="installed", nonce=bad.nonce, host_keys=(("ed25519", "SHA256:" + "D" * 43),),
                                    way="pake")
     assert pairing.complete_pairing(tmp_path, result, via="cli", audit=Log(), address="-oProxyCommand=x").address == ""
+
+
+def test_the_first_local_address_of_the_answer_stays_the_board_s_address():
+    """Regression (review of the integration): looking for the board's IPv4 address must not change which address of
+    the answer's own family is used. Before, the first same-family address was taken (and the search stopped); an
+    answer whose first address was the sender's own then let a later one replace it."""
+    instance = "llmcf-ab12." + pair_pake.SERVICE
+    packet = _answer(instance, "board.local", 40123, ["fe80::db8:2", "fd00:db8::2", "169.254.0.2"])
+    found = pair_pake.boards_in(packet, ("fe80::db8:2", 5353, 0, 3), link="cable")[0]
+    assert (found.address, found.scope_id, found.ipv4) == ("fe80::db8:2", 3, "169.254.0.2")
+    packet = _answer(instance, "board.local", 40123, ["169.254.0.2", "169.254.0.3"])
+    found = pair_pake.boards_in(packet, ("169.254.0.2", 5353), link="cable")[0]
+    assert (found.address, found.ipv4) == ("169.254.0.2", "")

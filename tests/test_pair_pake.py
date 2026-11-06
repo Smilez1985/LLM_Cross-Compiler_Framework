@@ -572,7 +572,7 @@ def test_the_shell_probe_hands_the_content_to_its_install_function(tmp_path):
     proc = subprocess.run([sh, str(probe), "--no-toolchain", "--pair-code", "--output", str(tmp_path / "p.txt")],
                           capture_output=True, text=True, timeout=300, env=env)
     assert json.loads(got.read_text()) == {"format": "x"}, proc.stderr
-    assert "no pairing install" not in proc.stderr, proc.stderr
+    assert "no pairing install" not in proc.stderr and "did not finish" not in proc.stderr, proc.stderr
 
 
 def test_ci_and_the_release_build_llmcf_pair_static_and_refuse_its_test_mode():
