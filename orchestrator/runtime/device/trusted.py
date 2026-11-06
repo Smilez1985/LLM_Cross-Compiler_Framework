@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional
 
 from orchestrator.remote.address import Endpoint, host_shaped, valid_port, valid_user
 from orchestrator.remote.trust import FINGERPRINT, TrustStore
+from orchestrator.remote.trust import device_id_for as device_id_for_fp
 from orchestrator.utils.file_lock import file_lock
 
 DEVICES_FILE = "devices.json"
@@ -336,10 +337,16 @@ class TrustedDevices:
             pass  # bookkeeping never fails a pairing or a verify
 
     def key_tier(self, device_id: str) -> str:
-        """The recorded tier of the framework's key on the board ("" when none was recorded). Reads only the file."""
+        """The recorded tier of the framework's key on the board ("" when none was recorded); without a record, the
+        tier a completed pairing during the hardware probe marked the board with (remote/trust.py paired_boards: the
+        probe kit put the root-owned key line there). Reads only the files."""
         from orchestrator.remote.key_tiers import TIERS
+        from orchestrator.remote.trust import paired_boards
         row = (self.last_deploys().get(device_id) or {}).get("key_tier")
         tier = row.get("tier") if isinstance(row, dict) else ""
+        if tier not in TIERS:
+            tier = next((p["tier"] for p in paired_boards(self.state_dir) if p["device_id"] == device_id
+                         or device_id in {device_id_for_fp(fp) for fp in p["fingerprints"].values()}), "")
         return tier if tier in TIERS else ""
 
     def last_heat(self, device: TrustedDevice) -> Optional[Dict[str, Any]]:

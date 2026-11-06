@@ -54,6 +54,8 @@ CLI_PATHS: Dict[str, str] = {
     "scan --label": "act_deploy_scan_remote",              # the dialog's Name field (txt_scan_label); for --import
                                                            # the name is asked after the file dialog
     "scan --import": "act_deploy_scan_import",             # Import from File (USB/Disk)...
+    "scan --kit": "act_deploy_scan_kit",                   # Make a Probe Kit for a Board... (the folder dialog)
+    "scan --no-pair": "act_deploy_scan_kit",               # its "Pair the board during the probe" box, unticked
 }
 TAB_OBJECTS: Dict[str, str] = {name: (BUILDER_TAB if name.startswith("act_deploy_scan") else DEPLOYMENT_TAB)
                                for name in set(CLI_PATHS.values())}

@@ -2287,6 +2287,7 @@ llm-cli scan --device HOST --user TEXT [--port N] [--password [WERT] | --passwor
              [--trust-fingerprint TEXT] [--label TEXT]
              [--output TEXT] [--json]
 llm-cli scan --import DATEI [--label TEXT]
+llm-cli scan --kit ORDNER [--no-pair]
 ```
 
 Führt die Hardware-Probe aus und behält ihr Ergebnis, das Hardware-Profil (Schema 2, beschrieben im
@@ -2342,7 +2343,9 @@ scheitert oder ihre Datei nicht lesbar ist, 2 bei falschen Optionen.
 | `--password`, `--password-stdin` | Nur für die erste Verbindung: wird einmal genutzt, um den SSH-Schlüssel des Frameworks zu installieren, und nie gespeichert. Wie bei [deploy run](#deploy-run): ohne Wert verdeckt abgefragt (auch wenn du in einem Terminal nichts angibst) oder eine Zeile aus einer Weiterleitung; `--password WERT` ist veraltet und warnt. |
 | `--trust-fingerprint TEXT` | Einem neuen Board ohne Nachfrage vertrauen, wenn sein Hostschlüssel diesen SHA256-Fingerabdruck hat. |
 | `--label TEXT` | Deine Bezeichnung für das Board im Profilspeicher (mit `--device` oder `--import`). |
-| `--import DATEI` | Die Probe-Datei eines Boards im Probe-Speicher ablegen und ihre Probe-ID zeigen (nicht zusammen mit `--device`). |
+| `--import DATEI` | Die Probe-Datei eines Boards im Probe-Speicher ablegen und ihre Probe-ID zeigen (nicht zusammen mit `--device`). Die Kopplung eines Probe-Kits in der Datei wird abgeschlossen: Der Host-Key des Boards wird gepinnt und die Probe unter der ID des Boards gespeichert; eine Datei eines anderen Frameworks, eine abgelaufene oder eine benutzte wird mit Grund abgelehnt, die Hardware-Daten werden trotzdem gespeichert. |
+| `--kit ORDNER` | Das Probe-Kit für ein Board in ORDNER schreiben: die drei Probes, eine README und, außer mit `--no-pair`, den Ordner `llmcf-pairing` (der öffentliche Schlüssel des Frameworks, seine Signer-Datei und eine Einmal-Zahl, 24 Stunden für ein Board gültig). Starte die Probe dort einmal mit sudo, um das Board zu koppeln; ohne sudo liest sie nur die Hardware. |
+| `--no-pair` | Mit `--kit`: keine Kopplung (das Kit liest nur die Hardware). |
 
 Bricht das Netz des Boards während `--device` ab (zum Beispiel bei einem Board nur mit WLAN), wartet der Scan bis zu
 300 s auf das Board und sagt das einmal (`Warte auf das Board unter ... (Ctrl+C)`); Strg+C beendet den Befehl
@@ -2366,6 +2369,7 @@ Profil gespeichert wurde.
 llm-cli scan                                        # dieser Rechner, gespeichert als „local“
 llm-cli scan --device 192.0.2.10 --user dietpi --label "ZERO 3W" --output zero3w.txt
 llm-cli scan --import zero3w.txt --label "ZERO 3W"   # eine von einem Board kopierte Probe-Datei
+llm-cli scan --kit /media/stick/probe-kit             # das Kit für ein Board, Kopplung an
 ```
 
 ---

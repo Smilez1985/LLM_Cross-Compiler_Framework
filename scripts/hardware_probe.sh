@@ -11,6 +11,12 @@
 #   --no-toolchain   skip the compiler and build tool versions
 #   --install-tools  opt-in: offer to install vulkan-tools (vulkaninfo) with the package manager first; asks on the
 #                    terminal and uses sudo. Without it the probe never prompts, installs or asks for a password.
+#   --pair-kit DIR   the probe kit's pairing folder (default: llmcf-pairing next to this script, when it is there).
+#                    Run once with sudo, the probe then also pairs the board: the framework's root step puts its
+#                    root-owned key line and signer files in place, and the board's SSH host key fingerprints and the
+#                    kit's one-time nonce go into the result. Without sudo pairing is skipped, said plainly.
+#   --no-pair        do not pair, even when the probe kit has a pairing folder
+#   --pair-account NAME  the board account to pair (default: the account that called sudo)
 #
 # POSIX sh (dash, busybox ash, bash), LC_ALL=C. No network, no stdin (tools get /dev/null), no sudo prompt: sudo is
 # only asked `sudo -k -n true` (the access facts; -n never prompts or reads a password, -k ignores cached
@@ -23,12 +29,16 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-PROBE_VERSION=3.3.0
+PROBE_VERSION=3.4.0
 OUTPUT_FILE=target_hardware_config.txt
 INSTALL_TOOLS=0
 TOOLCHAIN=1
+PAIR=auto
+PAIR_KIT=""
+PAIR_ACCOUNT=""
 
-usage() { echo "Usage: $0 [--output FILE|-] [--no-toolchain] [--install-tools]"; }
+usage() { echo "Usage: $0 [--output FILE|-] [--no-toolchain] [--install-tools] [--pair-kit DIR|--no-pair]" \
+    "[--pair-account NAME]"; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -41,6 +51,13 @@ while [ $# -gt 0 ]; do
             shift ;;
         --no-toolchain) TOOLCHAIN=0; shift ;;
         --install-tools) INSTALL_TOOLS=1; shift ;;
+        --pair-kit)
+            if [ $# -lt 2 ] || [ -z "$2" ]; then usage >&2; exit 2; fi
+            PAIR_KIT=$2; shift 2 ;;
+        --no-pair) PAIR=off; shift ;;
+        --pair-account)
+            if [ $# -lt 2 ] || [ -z "$2" ]; then usage >&2; exit 2; fi
+            PAIR_ACCOUNT=$2; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown option: $1 ($(usage))" >&2; exit 2 ;;
     esac
@@ -1911,6 +1928,81 @@ if [ "$TOOLCHAIN" = 1 ]; then
         put TOOL_CLANG "$(first_number "$v")" "$P_VERSION" quiet
     fi
     have python3 && put TOOL_PYTHON "$(first_number "$(tool_all python3 --version)")" "$P_VERSION" quiet
+fi
+
+# --- pairing during the hardware probe (probe 3.4.0; the same rules as hardware_probe.py pair()) ---------------
+# The probe kit's folder llmcf-pairing (next to this script, or --pair-kit DIR; --no-pair skips it): run once with
+# sudo, the kit's root step (the framework's own, unchanged) puts the framework's root-owned key line and signer files
+# in place for the account that called sudo, and the board's SSH host key fingerprints and the kit's nonce go into the
+# result. Without sudo the probe says that pairing was skipped; the hardware data is complete either way.
+
+P_FPR='^SHA256:[A-Za-z0-9+/]{43}$'
+PAIR_WORD=""
+pair_skip() { emit PAIR_STATE "${2:-skipped}"; emit PAIR_REASON "$1"; PAIR_WORD=$1; }
+host_fp() {  # FILE TYPES...: the SHA256 fingerprint of the host key line in FILE when its type is one of TYPES
+    hf_file=$1; shift
+    [ -f "$hf_file" ] || return 1
+    hf_type=$(head -n1 "$hf_file" 2>/dev/null | awk '{ print $1 }')
+    hf_ok=0
+    for hf_t in "$@"; do [ "$hf_t" = "$hf_type" ] && hf_ok=1; done
+    [ "$hf_ok" = 1 ] && have ssh-keygen || return 1
+    hf_fp=$(tool ssh-keygen -lf "$hf_file" | awk '{ print $2 }' | head -n1)
+    valid "$P_FPR" "$hf_fp" && printf '%s' "$hf_fp"
+}
+pairing() {  # KIT
+    nonce=$(head -c 64 "$1/nonce" 2>/dev/null | tr -d ' \r\n')
+    if ! valid '^[0-9a-f]{32}$' "$nonce" || [ ! -f "$1/root-board.sh" ] || [ ! -f "$1/llmcf-gate" ]; then
+        pair_skip no-kit; return 0
+    fi
+    if [ "$(tool id -u)" != 0 ]; then pair_skip not-root; return 0; fi
+    acct=${PAIR_ACCOUNT:-${SUDO_USER:-}}
+    case $acct in ""|root|-*|*[!A-Za-z0-9._-]*) pair_skip account; return 0 ;; esac
+    fp_ed=$(host_fp "$(f /etc/ssh/ssh_host_ed25519_key.pub)" ssh-ed25519) || fp_ed=""
+    fp_ec=$(host_fp "$(f /etc/ssh/ssh_host_ecdsa_key.pub)" ecdsa-sha2-nistp256 ecdsa-sha2-nistp384 \
+        ecdsa-sha2-nistp521) || fp_ec=""
+    fp_rsa=$(host_fp "$(f /etc/ssh/ssh_host_rsa_key.pub)" ssh-rsa) || fp_rsa=""
+    if [ -z "$fp_ed$fp_ec$fp_rsa" ]; then pair_skip no-host-keys; return 0; fi
+    answer=$(LLMCF_ACCOUNT=$acct LC_ALL=C sh "$1/root-board.sh" < "$1/llmcf-gate" 2>/dev/null)
+    case $answer in
+        *root-board=installed*)
+            emit PAIR_STATE installed; emit PAIR_NONCE "$nonce"; PAIR_WORD=installed
+            [ -n "$fp_ed" ] && emit PAIR_HOSTKEY_ED25519 "$fp_ed"
+            [ -n "$fp_ec" ] && emit PAIR_HOSTKEY_ECDSA "$fp_ec"
+            [ -n "$fp_rsa" ] && emit PAIR_HOSTKEY_RSA "$fp_rsa"
+            ;;
+        *root-board=unavailable*)
+            word=$(printf '%s\n' "$answer" | sed -n 's/.*root-board=unavailable reason=\([a-z-]*\).*/\1/p' | head -n1)
+            valid '^[a-z][a-z-]{0,23}$' "$word" || word=unknown
+            pair_skip "$word" failed ;;
+        *) pair_skip unknown failed ;;
+    esac
+    return 0
+}
+pairing_text() {
+    case $PAIR_WORD in
+        installed) echo "Paired: the framework's key line and signing key are in place; import the result file on" \
+            "your computer to finish the pairing." ;;
+        not-root) echo "Pairing was skipped: the probe did not run with sudo. The hardware data is complete; import" \
+            "the file as usual, or run the probe again with sudo to pair this board." ;;
+        account) echo "Pairing was skipped: the probe could not tell which board account to pair (run it with sudo" \
+            "from that account, or give --pair-account NAME). The hardware data is complete." ;;
+        no-host-keys) echo "Pairing was skipped: this board has no OpenSSH host key the probe could read. The" \
+            "hardware data is complete." ;;
+        no-kit) echo "Pairing was skipped: the pairing files of the probe kit are missing or damaged. The hardware" \
+            "data is complete." ;;
+        *) echo "Pairing failed on this board ($PAIR_WORD); nothing of the framework's key was changed. The" \
+            "hardware data is complete; import the file as usual." ;;
+    esac
+}
+if [ "$PAIR" != off ]; then
+    # only next to this script as a file (a probe sent over SSH on stdin has no kit)
+    if [ -z "$PAIR_KIT" ] && [ -f "$0" ]; then
+        case $0 in
+            */hardware_probe.sh) kit_dir=${0%/*}/llmcf-pairing; [ -f "$kit_dir/nonce" ] && PAIR_KIT=$kit_dir ;;
+            hardware_probe.sh) [ -f llmcf-pairing/nonce ] && PAIR_KIT=llmcf-pairing ;;
+        esac
+    fi
+    if [ -n "$PAIR_KIT" ]; then pairing "$PAIR_KIT"; log "$(pairing_text)"; fi
 fi
 
 # --- the result ------------------------------------------------------------------------------------------------

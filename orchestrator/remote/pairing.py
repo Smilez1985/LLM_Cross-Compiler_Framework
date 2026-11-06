@@ -25,13 +25,24 @@ tests/test_board_steps.py check the calls and the module name in that code.
   known_hosts changes (no record, no change), and it is refused when known_hosts changed since the plan was made.
 - record_consent(audit, tool, arguments, detail, *, channel): a person's consent in the audit log (RuntimeError when
   it cannot be written: without its record there is no consent).
+- The pairing during the hardware probe, one core for both ways (the probe kit's result file and the short-code PAKE):
+  create_offer(state_dir, *, public_line, signers, pem, via, audit, way) -> PairingOffer (a one-time nonce, 24 hours),
+  offer_problem(state_dir, nonce, way=), PairingResult (from_profile of a probe file's PAIR_* block, or built by the
+  PAKE session) and complete_pairing(state_dir, result, *, via, audit, actor, probe_id, label) -> PairingDone, which
+  pins the board's host keys (remote/trust.py PAIRED_FILE; first_use then trusts them without the question) and marks
+  the board paired with its key tier. PairingRefused(kind) for everything it does not do; only cli and gui pair.
 
 The primitives that write known_hosts and the board's authorized_keys (ssh_trust.trust_host_key, save_host_keys and
 install_public_key) are looked up through orchestrator/utils/ssh_trust.py when they are called (tests replace them
 there). Audit rows name a board by its device ID and fingerprint, never by its address (D0).
 """
 
+import hashlib
+import json
+import re
+import secrets
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Set, Tuple
 
@@ -61,11 +72,12 @@ def _lock(store: TrustStore):
 # --- trust on first use ------------------------------------------------------------------------------------------
 
 def trust_presented_key(store: TrustStore, endpoint: Endpoint, key: Any, *, via: str, audit: Any,
-                        actor: str = "") -> None:
+                        actor: str = "", pinned: bool = False) -> None:
     """Stores a host key the person confirmed (compared with the fingerprint shown, or given as --trust-fingerprint)
     for `endpoint` in the framework's known_hosts and writes the trust to the audit log in the same step (actor `actor`
     or `via`, confirm channel framework-<via>). The row is written whenever an audit log can be opened (`audit`: the log
-    or a function that opens it); the trust itself never fails on its bookkeeping, as the board's record never did."""
+    or a function that opens it); the trust itself never fails on its bookkeeping, as the board's record never did.
+    `pinned`: a completed pairing pinned the key (the row's answer is "pinned", not the person's "accepted")."""
     from orchestrator.utils import ssh_trust   # looked up now: tests replace trust_host_key there
     with _lock(store):
         ssh_trust.trust_host_key(store.state_dir, endpoint.host, endpoint.port, key)
@@ -76,7 +88,8 @@ def trust_presented_key(store: TrustStore, endpoint: Endpoint, key: Any, *, via:
     try:
         log.record(actor or via, "host_key_trusted", "external", "ask", "ok",
                    arguments={"device_id": device_id_for(fp), "fingerprint": fp, "key_type": key.get_name()},
-                   approved=True, extra={"confirm_channel": f"framework-{via}", "answer": "accepted"})
+                   approved=True, extra={"confirm_channel": f"framework-{via}",
+                                         "answer": "pinned" if pinned else "accepted"})
     except Exception:  # noqa: BLE001 - logged by the audit log itself
         pass
 
@@ -106,32 +119,36 @@ class PersonChannel:
 @dataclass(frozen=True)
 class FirstUse:
     """What trust on first use decided: `verdict` known (the key was trusted before), trusted (the person trusted it
-    now), changed (another key than the trusted one: refused), mismatch (not the --trust-fingerprint given) or declined
-    (the person said no, or there was nobody to ask)."""
+    now), paired (a completed pairing during the hardware probe pinned this key: trusted without a question), changed
+    (another key than the trusted one: refused), mismatch (not the --trust-fingerprint given) or declined (the person
+    said no, or there was nobody to ask)."""
     verdict: str
     check: KeyCheck
 
     @property
     def trusted(self) -> bool:
-        return self.verdict in ("known", "trusted")
+        return self.verdict in ("known", "trusted", "paired")
 
 
 def first_use(store: TrustStore, check: KeyCheck, *, ask: Optional[Callable[[KeyCheck], bool]],
               preset_fingerprint: Optional[str] = None, via: str, audit: Any = None, actor: str = "") -> FirstUse:
     """The one decision of trust on first use (CLI and GUI): known goes on, changed is refused; an unknown key is
-    trusted (trust_presented_key, audited) only when it has `preset_fingerprint` or, without one, when `ask(check)`
-    returns True. `ask` None: nobody can be asked (no terminal), so an unknown key is declined."""
+    trusted (trust_presented_key, audited) when a completed pairing pinned it (TrustStore.pinned: the person carried
+    the board's fingerprints home in the probe's result file, or the PAKE session exchanged them; no question then,
+    verdict "paired"), when it has `preset_fingerprint` or, without either, when `ask(check)` returns True. A
+    `preset_fingerprint` that differs is refused even for a pinned key. `ask` None: nobody can be asked (no terminal),
+    so an unknown key that is not pinned is declined."""
     if check.status == "known":
         return FirstUse("known", check)
     if check.status != "unknown":
         return FirstUse("changed", check)
-    if preset_fingerprint:
-        if preset_fingerprint != check.fingerprint:
-            return FirstUse("mismatch", check)
-    elif ask is None or not ask(check):
+    if preset_fingerprint and preset_fingerprint != check.fingerprint:
+        return FirstUse("mismatch", check)
+    pinned = store is not None and store.pinned(check.fingerprint, check.key_type) is not None
+    if not pinned and not preset_fingerprint and (ask is None or not ask(check)):
         return FirstUse("declined", check)
-    trust_presented_key(store, check.endpoint, check.key, via=via, audit=audit, actor=actor)
-    return FirstUse("trusted", check)
+    trust_presented_key(store, check.endpoint, check.key, via=via, audit=audit, actor=actor, pinned=pinned)
+    return FirstUse("paired" if pinned else "trusted", check)
 
 
 # --- pairing ----------------------------------------------------------------------------------------------------
@@ -471,6 +488,277 @@ def replace_key(store: TrustStore, plan: KeyReplacement, *, via: str, audit: Any
     return plan
 
 
+# --- the pairing during the hardware probe: one core, two ways ---------------------------------------------------
+#
+# Finding a board is not trusting it. A pairing offer (create_offer) is made only by the person (CLI or GUI): a random
+# one-time nonce with the framework's PUBLIC key line and signer file, kept in the per-user folder (OFFERS_FILE,
+# readable only by this user; the nonce itself only as its sha256). Way 1 carries it to the board in the probe kit
+# (runtime/scan_steps.py export_probe_kit): the probe, run once with sudo, installs the root-owned key line and the
+# signer files and writes the board's host key fingerprints and the nonce into its result file. Way 2 (the PAKE short
+# code, the board's Rust tools) exchanges the same facts in an authenticated session. Both hand a PairingResult to
+# complete_pairing, which checks the nonce against an open offer (single use, expires), writes the audit row, pins the
+# host keys (PAIRED_FILE, which TrustStore.pinned reads: first_use then trusts that key without the question) and
+# marks the board paired with its key tier. No secret travels: the result holds fingerprints and the nonce only.
+
+OFFER_TTL_HOURS = 24
+NONCE_RE = re.compile(r"^[0-9a-f]{32}$", re.ASCII)
+PAIR_STATES = ("installed", "skipped", "failed")
+_REASON_RE = re.compile(r"^[a-z][a-z-]{0,23}$", re.ASCII)
+_PAIR_LOCK = ".pairing.lock"
+# The probe file keys of the pairing block (configs/hardware_probe_schema.yml, group pairing, never stored).
+PAIR_KEYS = {"ed25519": "PAIR_HOSTKEY_ED25519", "ecdsa": "PAIR_HOSTKEY_ECDSA", "rsa": "PAIR_HOSTKEY_RSA"}
+# What the board's own word for a pairing it did not do means, in the person's words.
+BOARD_REASONS = {
+    "not-root": "the probe did not run with sudo, so pairing was skipped (the hardware data is complete)",
+    "no-kit": "the probe found no pairing files next to it",
+    "opted-out": "pairing was switched off for this probe",
+    "windows": "pairing of a Windows board is not there yet (the hardware data is complete)",
+    "account": "the probe could not tell which board account to pair (run it with sudo from that account)",
+    "no-host-keys": "the board has no SSH host key the probe could read",
+}
+
+
+def _now_stamp(now: Optional[datetime] = None) -> str:
+    return (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _nonce_hash(nonce: str) -> str:
+    return hashlib.sha256(("llmcf-pairing-nonce:" + nonce).encode("ascii")).hexdigest()
+
+
+class PairingRefused(ValueError):
+    """A pairing that was not made; the message is for the person. `kind`: channel (not the person's channel),
+    invalid (the result's pairing block is damaged), skipped / failed (the board did not pair: `reason` is its word),
+    unknown (no offer with this nonce), expired, used (the offer was used already), audit (the audit log could not be
+    written: nothing was pinned), no-key (the framework has no public key or signer to offer)."""
+
+    def __init__(self, message: str, kind: str, reason: str = ""):
+        super().__init__(message)
+        self.kind, self.reason = kind, reason
+
+
+@dataclass(frozen=True)
+class PairingOffer:
+    """A pairing offer: `nonce` (128 random bits as 32 hex characters, single use), the framework's public key line,
+    its board signer file (allowed_signers line) and its PEM twin, when it was made and when it expires, and the way
+    it is for (file: the probe kit; pake: the short code)."""
+    nonce: str
+    public_line: str
+    signers: str
+    pem: str
+    created_at: str
+    expires_at: str
+    way: str = "file"
+
+
+@dataclass(frozen=True)
+class PairingResult:
+    """What a board sends back for a pairing (the probe's result file, or the PAKE session): its state (installed,
+    skipped, failed) and the board's own reason word, the offer's nonce, the board's SSH host key fingerprints by
+    family (ed25519, ecdsa, rsa: SHA256 as ssh-keygen -lf prints them), a few facts of the board from the probe
+    (`board`: BOARD_MODEL, SOC_MODEL, ARCH, OS_ID when known) and the way and the key tier."""
+    state: str
+    nonce: str = ""
+    host_keys: Tuple[Tuple[str, str], ...] = ()
+    reason: str = ""
+    board: Tuple[Tuple[str, str], ...] = ()
+    way: str = "file"
+    tier: str = "root"
+
+    @classmethod
+    def from_profile(cls, profile: Any) -> Optional["PairingResult"]:
+        """The pairing block of a parsed probe file (HardwareProfile: its PAIR_* keys, already checked by the probe
+        schema), or None when the file has none (pairing off, or an older probe)."""
+        state = profile.get("PAIR_STATE")
+        if not state:
+            return None
+        keys = tuple((family, profile.get(key)) for family, key in PAIR_KEYS.items() if profile.get(key))
+        board = tuple((k, profile.get(k)) for k in ("BOARD_MODEL", "SOC_MODEL", "ARCH", "OS_ID") if profile.get(k))
+        return cls(state=state, nonce=profile.get("PAIR_NONCE") or "", host_keys=keys,
+                   reason=profile.get("PAIR_REASON") or "", board=board)
+
+    @property
+    def fingerprints(self) -> Dict[str, str]:
+        return dict(self.host_keys)
+
+    @property
+    def primary_fingerprint(self) -> str:
+        """The fingerprint the board is known by (the family an SSH client prefers first)."""
+        from orchestrator.remote.trust import FAMILY_ORDER
+        fps = self.fingerprints
+        return next((fps[f] for f in FAMILY_ORDER if f in fps), "")
+
+    @property
+    def device_id(self) -> str:
+        """The board's device ID from its preferred host key ("" without one)."""
+        fp = self.primary_fingerprint
+        return device_id_for(fp) if fp else ""
+
+    def problem(self) -> str:
+        """Why this result cannot complete a pairing ("" when it can)."""
+        from orchestrator.remote.key_tiers import TIERS
+        from orchestrator.remote.trust import FINGERPRINT, HOST_KEY_FAMILIES, PAIRING_WAYS
+        if self.state not in PAIR_STATES:
+            return "the pairing state is not one the framework knows"
+        if self.reason and not _REASON_RE.fullmatch(self.reason):
+            return "the board's reason is not a plain word"
+        if self.state != "installed":
+            return ""
+        if not NONCE_RE.fullmatch(self.nonce or ""):
+            return "the pairing nonce is missing or not 32 hex characters"
+        if not self.host_keys:
+            return "the board sent no host key fingerprint"
+        families = [f for f, _ in self.host_keys]
+        if len(set(families)) != len(families) or any(f not in HOST_KEY_FAMILIES for f in families):
+            return "the host key fingerprints are not one per key family"
+        if any(not FINGERPRINT.fullmatch(fp or "") for _, fp in self.host_keys):
+            return "a host key fingerprint is not an SHA256 fingerprint"
+        if self.way not in PAIRING_WAYS or self.tier not in TIERS or self.tier in ("password", "unrestricted"):
+            return "the way or the key tier of the pairing is not one the framework pairs with"
+        return ""
+
+
+@dataclass(frozen=True)
+class PairingDone:
+    """A completed pairing: the board's device ID (from its preferred host key), its pinned fingerprints by family,
+    the key tier, the way, the stored probe it came with ("" for none) and when."""
+    device_id: str
+    fingerprints: Dict[str, str]
+    tier: str
+    way: str
+    probe_id: str
+    paired_at: str
+
+
+def _person_channel(via: str) -> None:
+    if via not in PERSON_CHANNELS:
+        raise PairingRefused("Only you can pair a board, in the CLI or the GUI; an AI cannot.", "channel")
+
+
+def _load(path: Path, key: str) -> list:
+    from orchestrator.remote.trust import _read_json
+    data = _read_json(path)
+    rows = data.get(key) if isinstance(data, dict) else None
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
+def _save(path: Path, key: str, rows: list) -> None:
+    from orchestrator.utils.atomic import write_private
+    write_private(path, json.dumps({"version": 1, key: rows}, indent=2, sort_keys=True) + "\n")
+
+
+def _pair_lock(state_dir: Path):
+    from orchestrator.utils.file_lock import file_lock
+    Path(state_dir).mkdir(parents=True, exist_ok=True)
+    return file_lock(Path(state_dir) / _PAIR_LOCK)
+
+
+def create_offer(state_dir: Path, *, public_line: str, signers: str, pem: str = "", via: str, audit: Any = None,
+                 actor: str = "", way: str = "file", ttl_hours: int = OFFER_TTL_HOURS,
+                 now: Optional[datetime] = None) -> PairingOffer:
+    """A new pairing offer, made only by the person (`via` cli or gui; PairingRefused channel otherwise): 128 random
+    bits as the nonce, the framework's public key line and signer file, valid for `ttl_hours` (24 by default). It is
+    kept in OFFERS_FILE (owner-only, the nonce as its sha256 only; expired and used offers older than a week leave),
+    and the offer is written to the audit log when one can be opened (`audit`: the log or a function that opens it).
+    PairingRefused no-key without a public key line or a signer file."""
+    from orchestrator.remote.trust import OFFERS_FILE, PAIRING_WAYS
+    from orchestrator.utils import ssh_trust
+    _person_channel(via)
+    if way not in PAIRING_WAYS:
+        raise ValueError(f"a pairing way is one of {', '.join(PAIRING_WAYS)}")
+    if not isinstance(public_line, str) or not ssh_trust.PUBLIC_LINE.fullmatch(public_line) or not signers:
+        raise PairingRefused("The framework has no public key or no signing key to offer the board; nothing was made.",
+                             "no-key")
+    created = now or datetime.now(timezone.utc)
+    offer = PairingOffer(nonce=secrets.token_hex(16), public_line=public_line, signers=signers.strip(), pem=pem or "",
+                         created_at=_now_stamp(created),
+                         expires_at=_now_stamp(created + timedelta(hours=max(1, int(ttl_hours)))), way=way)
+    path = Path(state_dir) / OFFERS_FILE
+    week = _now_stamp(created - timedelta(days=7))
+    with _pair_lock(state_dir):
+        rows = [r for r in _load(path, "offers") if str(r.get("expires_at", "")) > week]
+        rows.append({"nonce_sha256": _nonce_hash(offer.nonce), "created_at": offer.created_at,
+                     "expires_at": offer.expires_at, "way": way, "used_at": "", "via": via})
+        _save(path, "offers", rows)
+    _step(audit, actor or via, "board_pairing_offered", {"way": way, "expires_at": offer.expires_at})
+    return offer
+
+
+def offer_problem(state_dir: Path, nonce: str, *, way: str = "file", now: Optional[datetime] = None) -> str:
+    """Why `nonce` matches no open offer of `way` ("" when it does): unknown, expired or used. Reads only the file."""
+    from orchestrator.remote.trust import OFFERS_FILE
+    if not NONCE_RE.fullmatch(nonce or ""):
+        return "unknown"
+    want = _nonce_hash(nonce)
+    row = next((r for r in _load(Path(state_dir) / OFFERS_FILE, "offers")
+                if r.get("nonce_sha256") == want and r.get("way") == way), None)
+    if row is None:
+        return "unknown"
+    if row.get("used_at"):
+        return "used"
+    if str(row.get("expires_at", "")) <= _now_stamp(now):
+        return "expired"
+    return ""
+
+
+REFUSAL_TEXTS = {
+    "unknown": "this result file does not belong to an open pairing of this framework (made for another framework, "
+               "or the offer was withdrawn)",
+    "expired": "the pairing offer in this probe kit has expired (it is valid for 24 hours); make a new probe kit",
+    "used": "this pairing was already completed once; a probe kit pairs one board once",
+}
+
+
+def complete_pairing(state_dir: Path, result: PairingResult, *, via: str, audit: Any, actor: str = "",
+                     probe_id: str = "", label: str = "", now: Optional[datetime] = None) -> PairingDone:
+    """The one end of both pairing ways (the probe's result file, the PAKE session): checks `result` (its state, its
+    fingerprints, its nonce against an open offer of its way: single use, not expired), writes the pairing to the audit
+    log first (no record, no pairing), pins the board's host keys (PAIRED_FILE: first_use then trusts them without the
+    TOFU question; an earlier pin of the same board is replaced), marks the offer used and the board paired with
+    result.tier, and returns a PairingDone. Only the person's channels (`via` cli or gui) pair; PairingRefused with
+    its kind otherwise (nothing is changed then). `probe_id` names the stored probe the result came with, `label` the
+    person's name for the board."""
+    from orchestrator.remote.trust import OFFERS_FILE, PAIRED_FILE
+    _person_channel(via)
+    problem = result.problem()
+    if problem:
+        raise PairingRefused(f"The pairing in this result cannot be used: {problem}.", "invalid")
+    if result.state != "installed":
+        why = BOARD_REASONS.get(result.reason) or _reason_text(result.reason or "unknown")
+        raise PairingRefused(f"The board did not pair: {why.rstrip('.')}.", result.state, result.reason)
+    stamp = _now_stamp(now)
+    want = _nonce_hash(result.nonce)
+    offers_path, pins_path = Path(state_dir) / OFFERS_FILE, Path(state_dir) / PAIRED_FILE
+    with _pair_lock(state_dir):
+        offers = _load(offers_path, "offers")
+        row = next((r for r in offers if r.get("nonce_sha256") == want and r.get("way") == result.way), None)
+        kind = ("unknown" if row is None else "used" if row.get("used_at")
+                else "expired" if str(row.get("expires_at", "")) <= stamp else "")
+        if kind:
+            raise PairingRefused(f"Pairing refused: {REFUSAL_TEXTS[kind]}. The hardware data is kept.", kind)
+        log = _open_audit(audit)
+        arguments = {"device_id": result.device_id, "fingerprints": result.fingerprints, "tier": result.tier,
+                     "way": result.way, "board": dict(result.board)}
+        try:
+            record_consent(log, "board_paired", arguments, "pairing during the hardware probe",
+                           channel=f"framework-{via}")
+        except Exception as e:  # noqa: BLE001 - without its record there is no pairing
+            raise PairingRefused(f"The pairing could not be written to the audit log ({e.__class__.__name__}); "
+                                 "nothing was paired.", "audit") from None
+        pins = [p for p in _load(pins_path, "boards")
+                if p.get("device_id") != result.device_id
+                and not set((p.get("fingerprints") or {}).values()) & set(result.fingerprints.values())]
+        clean_label = " ".join(str(label or "").split())[:64]
+        pins.append({"device_id": result.device_id, "fingerprints": result.fingerprints, "tier": result.tier,
+                     "way": result.way, "paired_at": stamp, "label": clean_label,
+                     "probe_id": probe_id if re.fullmatch(r"[0-9a-f]{16}", probe_id or "") else "", "via": via})
+        _save(pins_path, "boards", pins)
+        row["used_at"], row["device_id"] = stamp, result.device_id
+        _save(offers_path, "offers", offers)
+    return PairingDone(device_id=result.device_id, fingerprints=result.fingerprints, tier=result.tier,
+                       way=result.way, probe_id=probe_id, paired_at=stamp)
+
+
 # --- consents ----------------------------------------------------------------------------------------------------
 
 def record_consent(audit: Any, tool: str, arguments: Dict[str, Any], detail: str, *, channel: str) -> None:
@@ -483,5 +771,7 @@ def record_consent(audit: Any, tool: str, arguments: Dict[str, Any], detail: str
 
 
 __all__ = ["PairOutcome", "TierChooser", "FirstUse", "KeyReplaceError", "KeyReplacement", "PERSON_CHANNELS",
+           "BOARD_REASONS", "NONCE_RE", "OFFER_TTL_HOURS", "PAIR_KEYS", "PAIR_STATES", "PairingDone", "PairingOffer",
+           "PairingRefused", "PairingResult", "REFUSAL_TEXTS", "complete_pairing", "create_offer", "offer_problem",
            "PersonChannel", "first_use", "pair",
            "plan_replacement", "record_consent", "replace_key", "trust_presented_key"]

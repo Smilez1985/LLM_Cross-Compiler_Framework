@@ -517,6 +517,12 @@ Paketmanager zu installieren, und `hardware_probe.ps1 -Elevate` startet sich mit
 holst du in der GUI mit **Scan / Import... > Import from File (USB/Disk)...** ins Framework oder übergibst sie an
 `llm-cli module generate-ai`.
 
+**Das Probe-Kit, das das Board koppelt:** `llm-cli scan --kit ORDNER` (GUI: **Scan / Import... > Make a Probe Kit for a
+Board...**) schreibt diesen Ordner für dich, mit Kopplung, wenn du sie nicht abschaltest (`--no-pair`): Starte die Probe
+auf dem Board einmal mit `sudo`, und der Import ihres Ergebnisses pinnt den Host-Key des Boards, seine erste Anmeldung
+stellt also keine Fingerabdruck-Frage. Kit und Ergebnis enthalten kein Geheimnis. Details:
+[Features](docs/Features_DE.md#hardware-probe-und-neue-targets).
+
 ---
 
 ## Schnellstart: die Kommandozeile

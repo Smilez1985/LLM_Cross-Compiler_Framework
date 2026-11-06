@@ -180,6 +180,23 @@ TEXTS = {
         "deploy.import.done": "Stored as probe {probe_id} ({label}): AI clients and Ditto can use the board's probe "
                               "by this id.",
         "deploy.import.failed": "Not stored as a probe: {reason}",
+        "deploy.import.pairing": "{message}",
+        "deploy.import.paired": "Paired: the board's host key is pinned (device {device_id}, key tier {tier}); "
+                                "its first login asks no host-key question.",
+        "deploy.kit.action": "🧳 Make a Probe Kit for a Board...",
+        "deploy.kit.folder": "Folder for the probe kit",
+        "deploy.kit.title": "Probe kit for a board",
+        "deploy.kit.question": "Copy the kit folder to the board, run the probe there and import its result file "
+                               "here ({path:act_deploy_scan_import}).\n\nPair the board during the probe? The probe, "
+                               "run once with sudo, then also puts the framework's key line and signing key on the "
+                               "board, and importing its result pins the board's host key (no host-key question "
+                               "later). The kit carries only public data and pairs one board once, for 24 hours.",
+        "deploy.kit.pair": "Pair the board during the probe (recommended)",
+        "deploy.kit.done": "Probe kit written ({count} files). {pairing}",
+        "deploy.kit.paired": "Pairing is on: run the probe on the board once with sudo (README.txt in the kit says "
+                             "how); valid until {expires} (UTC).",
+        "deploy.kit.unpaired": "Pairing is off: the probe only reads the hardware.",
+        "deploy.kit.failed": "The probe kit could not be written: {reason}",
         "deploy.import.reprobe": "This probe was converted from an older probe file and lacks facts; probe the "
                                  "board again with the current script when you can.",
     },
@@ -352,6 +369,24 @@ TEXTS = {
         "deploy.import.done": "Als Probe {probe_id} gespeichert ({label}): KI-Clients und Ditto können die Probe "
                               "des Boards unter dieser ID verwenden.",
         "deploy.import.failed": "Nicht als Probe gespeichert: {reason}",
+        "deploy.import.pairing": "{message}",
+        "deploy.import.paired": "Gekoppelt: Der Host-Key des Boards ist gepinnt (Gerät {device_id}, "
+                                "Schlüsselstufe {tier}); seine erste Anmeldung stellt keine Host-Key-Frage.",
+        "deploy.kit.action": "🧳 Probe-Kit für ein Board erstellen...",
+        "deploy.kit.folder": "Ordner für das Probe-Kit",
+        "deploy.kit.title": "Probe-Kit für ein Board",
+        "deploy.kit.question": "Kopiere den Kit-Ordner auf das Board, lass die Probe dort laufen und importiere ihre "
+                               "Ergebnisdatei hier ({path:act_deploy_scan_import}).\n\nDas Board während der Probe "
+                               "koppeln? Die Probe legt dann, einmal mit sudo gestartet, auch die Schlüsselzeile und "
+                               "den Signierschlüssel des Frameworks auf dem Board ab, und der Import ihres Ergebnisses "
+                               "pinnt den Host-Key des Boards (später keine Host-Key-Frage). Das Kit enthält nur "
+                               "öffentliche Daten und koppelt ein Board einmal, 24 Stunden lang.",
+        "deploy.kit.pair": "Board während der Probe koppeln (empfohlen)",
+        "deploy.kit.done": "Probe-Kit geschrieben ({count} Dateien). {pairing}",
+        "deploy.kit.paired": "Koppeln ist an: Lass die Probe auf dem Board einmal mit sudo laufen (README.txt im Kit "
+                             "sagt wie); gültig bis {expires} (UTC).",
+        "deploy.kit.unpaired": "Koppeln ist aus: Die Probe liest nur die Hardware.",
+        "deploy.kit.failed": "Das Probe-Kit konnte nicht geschrieben werden: {reason}",
         "deploy.import.reprobe": "Diese Probe wurde aus einer älteren Probe-Datei umgewandelt und hat Lücken; lass "
                                  "die Probe auf dem Board mit dem aktuellen Skript noch einmal laufen, wenn du "
                                  "kannst.",

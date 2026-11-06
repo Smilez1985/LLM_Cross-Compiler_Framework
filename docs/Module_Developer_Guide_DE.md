@@ -1488,6 +1488,19 @@ zeigt sie in einer Zeile `Access:`, der Scan im Builder-Tab schreibt dieselbe Ze
 `get_hardware_probe` gibt sie als `access` zurück. Eine Datei einer älteren Probe bleibt lesbar; lass die Probe auf
 dem Board noch einmal laufen, um die Angaben zu bekommen.
 
+### 11.9 Der Kopplungsblock der Probe 3.4.0
+
+Probe 3.4.0 (`PROBE_TOOL_VERSION=3.4.0`) bringt die Gruppe `pairing`, geschrieben nur, wenn die Probe aus einem Probe-Kit mit Kopplung lief (der Ordner `llmcf-pairing` neben dem Skript, oder `--pair-kit ORDNER`; `--no-pair` schaltet sie ab; `--pair-account NAME` nennt das Board-Konto, wenn sudo es nicht tut). Ihre Stabilität ist `pairing`: Der Import liest sie, um die Kopplung abzuschließen, und der Profilspeicher behält sie nie, eine KI sieht sie also nie.
+
+| Schlüssel | Werte |
+|---|---|
+| `PAIR_STATE` | `installed` (der Root-Schritt des Kits antwortete `root-board=installed`), `failed` (er lehnte ab; `PAIR_REASON` sagt warum) oder `skipped` (`not-root`: kein sudo; `account`: kein Board-Konto; `no-host-keys`; `no-kit`; `windows` aus der `.ps1`) |
+| `PAIR_REASON` | ein Wort (`^[a-z][a-z-]{0,23}$`), nur mit `skipped` oder `failed` |
+| `PAIR_NONCE` | die Einmal-Zahl des Kits (32 Hex-Zeichen), nur mit `installed` |
+| `PAIR_HOSTKEY_ED25519`, `PAIR_HOSTKEY_ECDSA`, `PAIR_HOSTKEY_RSA` | der SHA256-Fingerabdruck von `/etc/ssh/ssh_host_<Typ>_key.pub`, wie `ssh-keygen -lf` ihn zeigt, nur mit `installed`; der Kommentar der Schlüsselzeile kommt nie ins Ergebnis |
+
+Eine Datei einer älteren Probe hat diese Schlüssel nicht und bleibt lesbar (`PairingResult.from_profile` gibt `None`). Im Code: `orchestrator/remote/pairing.py` `PairingResult` prüft den Block, `complete_pairing` schließt ihn ab.
+
 ## 12. Bausteine für das Bündel
 
 Das Board-Bündel (Deploy-Weg 3, [Funktionen](Features_DE.md#das-board-bündel)) entsteht aus Bausteinen. Ein Baustein

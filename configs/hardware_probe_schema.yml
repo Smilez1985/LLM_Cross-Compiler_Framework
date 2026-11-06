@@ -796,6 +796,97 @@ keys:
     normalise: "comma-separated, left out when none is installed or no query program is there"
     consumers: [deploy, gui, mcp]
 
+  # --- pairing during the hardware probe (probe 3.4.0) ----------------------------------------------------------
+  # Written only when the probe ran from a probe kit with pairing on (the folder llmcf-pairing next to the script,
+  # or --pair-kit DIR; --no-pair switches it off). Stability "pairing": the import reads them to complete the pairing
+  # (orchestrator/remote/pairing.py complete_pairing) and the profile store never keeps them. No secret: the nonce is
+  # a one-time number the framework made, the fingerprints are public.
+  PAIR_STATE:
+    group: pairing
+    type: enum
+    values: [installed, skipped, failed]
+    since: 3.4.0
+    required: false
+    stability: pairing
+    perf: none
+    platforms: [linux, freebsd, windows]
+    sources:
+      linux: >-
+        installed: the kit's root step (the framework's root-owned key line, its signer files in /etc/llmcf, sshd's
+        Match block) answered root-board=installed; failed: it answered root-board=unavailable (PAIR_REASON says
+        why); skipped: the probe did not run as root (not-root), could not tell the board account (account) or found
+        no host key (no-host-keys)
+      windows: "constant skipped with PAIR_REASON windows (the Windows target port has no pairing yet)"
+    normalise: "left out when the probe ran without a pairing kit or with --no-pair"
+    consumers: [deploy, gui]
+  PAIR_REASON:
+    group: pairing
+    type: pattern
+    pattern: '^[a-z][a-z-]{0,23}$'
+    since: 3.4.0
+    required: false
+    stability: pairing
+    perf: none
+    platforms: [linux, freebsd, windows]
+    sources:
+      linux: "the reason word of the root step (orchestrator/remote/gate.py SETUP_REASONS) or of the probe itself"
+    normalise: "only with PAIR_STATE skipped or failed"
+    consumers: [deploy, gui]
+  PAIR_NONCE:
+    group: pairing
+    type: pattern
+    pattern: '^[0-9a-f]{32}$'
+    since: 3.4.0
+    required: false
+    stability: pairing
+    perf: none
+    platforms: [linux, freebsd]
+    sources:
+      linux: "the file nonce of the probe kit (the pairing offer's one-time number), copied as it is"
+    normalise: "only with PAIR_STATE installed"
+    consumers: [deploy]
+  PAIR_HOSTKEY_ED25519:
+    group: pairing
+    type: pattern
+    pattern: '^SHA256:[A-Za-z0-9+/]{43}$'
+    since: 3.4.0
+    required: false
+    stability: pairing
+    perf: none
+    platforms: [linux, freebsd]
+    sources:
+      linux: >-
+        the SHA256 fingerprint of /etc/ssh/ssh_host_ed25519_key.pub as `ssh-keygen -lf` prints it (the .py computes
+        the same from the key's base64 data); the comment of the key line is never read into the result
+    normalise: "only with PAIR_STATE installed; left out when the board has no such key"
+    consumers: [deploy]
+  PAIR_HOSTKEY_ECDSA:
+    group: pairing
+    type: pattern
+    pattern: '^SHA256:[A-Za-z0-9+/]{43}$'
+    since: 3.4.0
+    required: false
+    stability: pairing
+    perf: none
+    platforms: [linux, freebsd]
+    sources:
+      linux: "the SHA256 fingerprint of /etc/ssh/ssh_host_ecdsa_key.pub (as PAIR_HOSTKEY_ED25519)"
+    normalise: "only with PAIR_STATE installed; left out when the board has no such key"
+    consumers: [deploy]
+  PAIR_HOSTKEY_RSA:
+    group: pairing
+    type: pattern
+    pattern: '^SHA256:[A-Za-z0-9+/]{43}$'
+    since: 3.4.0
+    required: false
+    stability: pairing
+    perf: none
+    platforms: [linux, freebsd]
+    sources:
+      linux: "the SHA256 fingerprint of /etc/ssh/ssh_host_rsa_key.pub (as PAIR_HOSTKEY_ED25519)"
+    normalise: "only with PAIR_STATE installed; left out when the board has no such key"
+    consumers: [deploy]
+
   # --- CPU identity -------------------------------------------------------------------------------------------
   CPU_MODEL:
     group: cpu

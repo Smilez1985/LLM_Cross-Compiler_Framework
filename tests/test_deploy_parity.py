@@ -607,7 +607,8 @@ class TestScanMenu:
     def test_the_menu_entries(self, tab):
         names = [a.objectName() for a in tab.scan_menu.actions() if a.objectName()]
         assert names == ["act_deploy_scan_import", "act_deploy_scan_remote", "act_deploy_scan_local",
-                         "act_deploy_scan_script", "act_deploy_scan_save", "act_deploy_scan_script_save"]
+                         "act_deploy_scan_script", "act_deploy_scan_save", "act_deploy_scan_script_save",
+                         "act_deploy_scan_kit"]   # probe 3.4.0: the probe kit with pairing (scan --kit)
         assert tab.act_scan_script.text().endswith("Fallback Script")
         assert tab.scan_btn.objectName() == "btn_deploy_scan" and tab.scan_btn.menu() is tab.scan_menu
 
@@ -711,6 +712,41 @@ class TestScanMenu:
                            (tmp_path / "probe.json", {"use_script": True, "as_json": True, "gui_copy": gui_copy})]
         assert "Fallback Script" in tab.act_scan_script_save.text()
 
+    def test_the_probe_kit_by_mouse_is_the_clis_step(self, tab, window_framework, monkeypatch, tmp_path, told):
+        """`scan --kit FOLDER [--no-pair]` by mouse: the same core step (scan_steps.export_probe_kit) through the
+        person's channel gui; pairing on unless the person unticks the box."""
+        from orchestrator.runtime import scan_steps
+        calls = []
+
+        def export(state_dir, folder, **kw):
+            calls.append((folder, kw["pair"], kw["via"]))
+            return scan_steps.ProbeKit(folder=folder, files=["hardware_probe.py"], offer=None, problem="")
+        monkeypatch.setattr(scan_steps, "export_probe_kit", export)
+        kit = tab._make_probe_kit(folder=str(tmp_path / "kit"), pair=False)
+        assert calls == [(tmp_path / "kit", False, "gui")] and kit.files == ["hardware_probe.py"]
+        assert "Pairing is off" in tab.log_area.toPlainText()
+
+    def test_the_import_completes_a_kits_pairing(self, tab, window_framework, monkeypatch, tmp_path):
+        from PySide6.QtWidgets import QInputDialog
+        from orchestrator.gui import builder_tab
+        from orchestrator.remote.pairing import PairingDone
+        from orchestrator.runtime import scan_steps
+        seen = {}
+
+        def imported(probes, path, label=None, tm=None, **kw):
+            seen.update(kw)
+            done = PairingDone(device_id="0123456789abcdef", fingerprints={}, tier="root", way="file",
+                               probe_id="0123456789abcdef", paired_at="2026-11-06T12:00:00Z")
+            return scan_steps.ImportedProbe(probe_id="0123456789abcdef", profile=board(), info=type(
+                "Info", (), {"label": "Board A"})(), pairing=scan_steps.PairingImport("paired", "paired", done=done))
+        monkeypatch.setattr(scan_steps, "import_probe", imported)
+        monkeypatch.setattr(builder_tab.QFileDialog, "getOpenFileName", lambda *a: (str(tmp_path / "r.txt"), ""))
+        monkeypatch.setattr(QInputDialog, "getText", lambda *a: ("", True))
+        monkeypatch.setattr(tab, "_load_probe_config", lambda path: None)
+        tab.act_scan_import.trigger()
+        assert seen["via"] == "gui" and callable(seen["audit"])
+        assert "0123456789abcdef" in tab.log_area.toPlainText() and "key tier root" in tab.log_area.toPlainText()
+
     def test_a_failed_import_names_the_next_step(self, tab, monkeypatch, tmp_path):
         """Review (w5-deploy-v): `llmcf scan --import` prints the refusal and its next step; the GUI logged only the
         refusal."""
@@ -720,10 +756,11 @@ class TestScanMenu:
         broken = tmp_path / "not_a_probe.txt"
         broken.write_text("hello\n", encoding="utf-8")
 
-        def refuse(self, path, label=None):
+        def refuse(data):
             raise probe_service.ProbeError("This is not a probe file.", next="Run the probe script on the board.")
 
-        monkeypatch.setattr(probe_service.HardwareProbes, "import_file", refuse)
+        # the import reads the file and checks it (HardwareProbes.parse_text) before the pairing and the store
+        monkeypatch.setattr(probe_service.HardwareProbes, "parse_text", staticmethod(refuse))
         monkeypatch.setattr(builder_tab.QFileDialog, "getOpenFileName", lambda *a: (str(broken), ""))
         monkeypatch.setattr(QInputDialog, "getText", lambda *a: ("", True))
         monkeypatch.setattr(tab, "_load_probe_config", lambda path: None)

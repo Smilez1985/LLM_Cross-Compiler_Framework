@@ -45,7 +45,7 @@ BOOL_VALUES = ("ON", "OFF", "UNKNOWN")
 PERF_KEY_VERSION = 1  # bump when the hashed structure changes: every stored benchmark result then becomes stale
 
 _TYPES = {"bool", "enum", "int", "pattern", "version", "text", "list", "timestamp"}
-_STABILITY = {"stable", "volatile"}
+_STABILITY = {"stable", "volatile", "pairing"}   # pairing: read by the import, never stored
 _PERF = {"key", "recorded", "none"}
 _GPU_KEY = re.compile(r"^GPU(\d{1,3})_([A-Z][A-Z0-9_]*)$", re.ASCII)
 _INT = re.compile(r"^(0|[1-9][0-9]{0,11})$", re.ASCII)
@@ -167,7 +167,7 @@ class ProbeSchema:
                 raise SchemaError(f"{where}: field {needed!r} missing")
         if raw["stability"] not in _STABILITY or raw["perf"] not in _PERF:
             raise SchemaError(f"{where}: stability or perf has an unknown value")
-        if raw["stability"] == "volatile" and (raw["perf"] != "none" or raw.get("required")):
+        if raw["stability"] in ("volatile", "pairing") and (raw["perf"] != "none" or raw.get("required")):
             raise SchemaError(f"{where}: a volatile key cannot be required, enter perf_key or be recorded")
         if not isinstance(raw["sources"], Mapping) or not raw["sources"] or not str(raw["normalise"]).strip():
             raise SchemaError(f"{where}: sources and normalise must be filled in")
@@ -642,11 +642,11 @@ class HardwareProfile:
         return out
 
     def stable(self) -> "HardwareProfile":
-        """The profile without volatile keys (what the store keeps)."""
+        """The profile without volatile keys and without the pairing block (what the store keeps)."""
         kept = {}
         for key, value in self._values.items():
             found = self.schema.lookup(key)
-            if found and found[0].stability != "volatile":
+            if found and found[0].stability not in ("volatile", "pairing"):
                 kept[key] = value
         return HardwareProfile(kept, schema=self.schema, source_schema=self.source_schema, notes=self.notes)
 

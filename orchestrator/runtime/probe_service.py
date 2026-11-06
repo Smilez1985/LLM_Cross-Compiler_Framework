@@ -242,39 +242,62 @@ class HardwareProbes:
 
     # --- adding -------------------------------------------------------------------------------------------------
 
-    def import_text(self, data: Union[str, bytes], label: Optional[str] = None) -> str:
-        """Stores a board's probe file (schema 2, or schema 1 converted: what the schema does not know, the host
-        name among it, is dropped) under a new random id and returns that id."""
+    @staticmethod
+    def parse_text(data: Union[str, bytes, HardwareProfile]) -> HardwareProfile:
+        """A board's probe file as a profile (schema 2, or schema 1 converted), with the pairing block of a probe kit
+        still in it (the store drops it); ProbeError when it is no probe file the framework can read."""
+        if isinstance(data, HardwareProfile):
+            return data
         if len(data) > MAX_PROBE_FILE:
             raise ProbeError(f"The probe file is larger than {MAX_PROBE_FILE // 1024} KiB; it is not a probe file.",
                              code="invalid_value", next="Import the target_hardware_config.txt the probe wrote.")
         try:
-            profile = parse_profile(data)
+            return parse_profile(data)
         except (ProfileError, ValueError) as e:
             raise ProbeError(f"The file is not a hardware probe the framework can read: {e}", code="invalid_value",
                              next="Run the probe on the board (scripts/hardware_probe.sh or llm-cli scan) and import "
                                   "the file it wrote.") from None
-        label = " ".join(str(label or "").split()) or profile.get("BOARD_MODEL") or "imported board"
-        device_id = new_device_id()
-        while self.store.device_path(device_id).exists():  # practically never
+
+    def import_text(self, data: Union[str, bytes, HardwareProfile], label: Optional[str] = None,
+                    device_id: Optional[str] = None) -> str:
+        """Stores a board's probe file (schema 2, or schema 1 converted: what the schema does not know, the host
+        name among it, is dropped, and so is a probe kit's pairing block) under a new random id, or under
+        `device_id` (the board's device ID from its host key, after a completed pairing: a probe stored there before
+        is replaced, its label kept when none is given), and returns that id."""
+        profile = self.parse_text(data)
+        label = " ".join(str(label or "").split()) or None
+        if device_id is not None:
+            self.check_id(device_id)
+            if device_id == LOCAL_ID:
+                raise ProbeError("A board's probe cannot be stored as this computer's.", code="invalid_value")
+            if not self.store.device_path(device_id).exists():
+                label = label or profile.get("BOARD_MODEL") or "imported board"
+        else:
+            label = label or profile.get("BOARD_MODEL") or "imported board"
             device_id = new_device_id()
+            while self.store.device_path(device_id).exists():  # practically never
+                device_id = new_device_id()
         try:
-            self.store.save_device(device_id, profile, label=label[:64])
+            self.store.save_device(device_id, profile, label=label[:64] if label else None)
         except ValueError as e:
             raise ProbeError(f"The probe could not be stored: {e}", code="invalid_value",
                              next="Give a label of 1 to 64 printable characters.") from None
         return device_id
 
-    def import_file(self, path: Union[str, Path], label: Optional[str] = None) -> str:
-        """Imports a probe file the person chose (CLI or GUI; never a path an AI gave)."""
-        path = Path(path)
+    @staticmethod
+    def read_file(path: Union[str, Path]) -> bytes:
+        """The bytes of a probe file the person chose (at most MAX_PROBE_FILE + 1: a larger one is refused when it is
+        parsed); ProbeError when it cannot be read."""
         try:
-            with open(path, "rb") as f:
-                data = f.read(MAX_PROBE_FILE + 1)
+            with open(Path(path), "rb") as f:
+                return f.read(MAX_PROBE_FILE + 1)
         except OSError as e:
             raise ProbeError(f"The probe file cannot be read: {e.strerror or e}", code="invalid_value",
                              next="Check the file name.") from None
-        return self.import_text(data, label)
+
+    def import_file(self, path: Union[str, Path], label: Optional[str] = None) -> str:
+        """Imports a probe file the person chose (CLI or GUI; never a path an AI gave)."""
+        return self.import_text(self.read_file(path), label)
 
     def run_local(self, *, use_script: bool = False, timeout: float = PROBE_TIMEOUT,
                   probe: Optional[Callable[[], HardwareProfile]] = None,

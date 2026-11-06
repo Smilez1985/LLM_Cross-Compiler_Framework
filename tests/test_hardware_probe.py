@@ -550,7 +550,10 @@ class TestShellEquivalence:
         text = PROBE_SH.read_text(encoding="utf-8")
         assert re.search(r'\[ "\$INSTALL_TOOLS" = 1 \] && install_tools', text)
         body = text.split("install_tools() {", 1)[1].split("\n}\n", 1)[0]
-        code = [ln for ln in text.splitlines() if "sudo" in ln and not ln.lstrip().startswith("#")]
+        # Probe 3.4.0: the pairing's messages tell the person to start the probe with sudo (pairing_text: words for
+        # the person, never a run of sudo); the probe itself never runs sudo for the pairing.
+        said = text.split("\npairing_text() {", 1)[1].split("\n}\n", 1)[0]
+        code = [ln for ln in text.splitlines() if "sudo" in ln and not ln.lstrip().startswith("#") and ln not in said]
         # Probe 3.3.0 asks sudo one thing outside the opt-in helper: `sudo -k -n true` (the access facts; -n never
         # prompts and never reads a password, -k ignores cached credentials). Outside the helper, sudo is named only in the table of its paths.
         outside = [ln for ln in code if ln not in body]
