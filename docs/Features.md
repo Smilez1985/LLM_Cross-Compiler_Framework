@@ -640,7 +640,9 @@ Deploy way 3 beside the golden ZIP and the runtime package: one bundle for the w
 `stt-whisper-cpp` with the framework's own whisper.cpp server build for the board and a ggml model, and
 `vision-mmproj` with the llama.cpp runtime started with `--mmproj` for a vision model and its projector; a
 `whisper-server` you pick yourself stays possible with `stt-whisper-cpp-program`, with a warning; speech output with
-sherpa-onnx and the gateway are documented templates; your own agent harness is the block `harness-agent`, below). You pick a preset (`llm`, `voice`, `stt`) or the blocks,
+sherpa-onnx is a documented template; `gateway-llmcf` is the framework's own gateway in front of the model, which
+lets a request that finds the model busy wait its turn in a fair queue instead of refusing it, and holds new requests
+back while the board's free memory is low; your own agent harness is the block `harness-agent`, below). You pick a preset (`llm`, `voice`, `stt`) or the blocks,
 set their variables (port, threads, memory limit, autostart, ...; each checked against its type) and choose their
 files (a local file is hashed and copied into the bundle, an online item is pinned by its sha256 and size).
 

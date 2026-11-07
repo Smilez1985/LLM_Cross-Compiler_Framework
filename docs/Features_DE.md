@@ -700,7 +700,9 @@ des Frameworks: `llm-llama-server` mit der selbst gebauten llama.cpp-Laufzeit de
 `stt-whisper-cpp` mit dem eigenen Build des whisper.cpp-Servers des Frameworks für das Board und einem ggml-Modell,
 und `vision-mmproj` mit der llama.cpp-Laufzeit, gestartet mit `--mmproj` für ein Vision-Modell und seinen Projektor;
 ein selbst gewähltes `whisper-server` bleibt mit `stt-whisper-cpp-program` möglich, mit einer Warnung; Sprachausgabe
-mit sherpa-onnx und das Gateway sind dokumentierte Vorlagen; dein eigener Agent-Harness ist der Baustein `harness-agent`, unten). Du wählst eine Vorlage (`llm`, `voice`,
+mit sherpa-onnx ist eine dokumentierte Vorlage; `gateway-llmcf` ist das eigene Gateway des Frameworks vor dem
+Modell, das eine Anfrage bei beschäftigtem Modell in einer fairen Warteschlange warten lässt, statt sie abzulehnen,
+und neue Anfragen zurückhält, solange der freie Speicher des Boards knapp ist; dein eigener Agent-Harness ist der Baustein `harness-agent`, unten). Du wählst eine Vorlage (`llm`, `voice`,
 `stt`) oder die Bausteine, setzt ihre Variablen (Port, Threads, Speichergrenze, Autostart, ...; jede gegen ihren Typ
 geprüft) und wählst ihre Dateien (eine lokale Datei wird gehasht und ins Bündel kopiert, ein Online-Element ist über
 sha256 und Größe festgelegt).
