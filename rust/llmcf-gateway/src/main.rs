@@ -12,6 +12,7 @@
 mod args;
 mod control;
 mod limits;
+mod memory;
 mod peer;
 mod probe;
 mod queue;

@@ -204,6 +204,29 @@ def test_the_gateway_budget_comes_from_the_boards_measurement(tmp_path):
     assert comps["llm"].variables["ctx_size"] == comps["gateway"].variables["ctx_size"] == 1024
 
 
+def test_the_gateways_memory_guard_and_queue_come_from_the_plan(tmp_path):
+    """The memory guard's floor is half the board's measured reserve (the block's conservative default without a
+    measurement, the person's own value always wins); the queue's settings reach the gateway's start."""
+    from test_board_measure import record
+    from orchestrator.runtime.device import measure
+    limits = measure.derive(record())
+    plan = _plan(tmp_path, values={"gateway": {"queue_max": "8"}}, limits=limits)
+    assert plan.ok, plan.problems
+    gw = next(c for c in plan.manifest.components if c.kind == "gateway")
+    floor = max(32, limits.reserve_mib // 2)
+    assert gw.variables["memory_floor_mb"] == floor == measure.gateway_memory_floor_mib(limits)
+    args = list(gw.start.args)
+    assert args[args.index("--memory-floor-mb") + 1] == str(floor)
+    assert args[args.index("--queue-max") + 1] == "8" and args[args.index("--queue-wait-seconds") + 1] == "120"
+    assert args[args.index("--memory-psi-max") + 1] == "50"
+    assert any("half the reserve" in n for n in plan.notes)
+    own = _plan(tmp_path, values={"gateway": {"memory_floor_mb": "200"}}, limits=limits)
+    assert next(c for c in own.manifest.components if c.kind == "gateway").variables["memory_floor_mb"] == 200
+    unmeasured = _plan(tmp_path)
+    assert next(c for c in unmeasured.manifest.components if c.kind == "gateway").variables["memory_floor_mb"] == 64
+    assert measure.gateway_memory_floor_mib(None) is None
+
+
 def test_the_gateways_unit_runs_through_llmcf_install_from_its_fixed_place(tmp_path):
     """Seam of the gateway and the root readiness: the gateway's autostart is a typed root action of the manifest
     (its account, its unit, its memory limit), and every root action runs through the gate operation bundle-root,

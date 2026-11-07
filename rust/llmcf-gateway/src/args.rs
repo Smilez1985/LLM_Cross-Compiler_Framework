@@ -37,6 +37,11 @@ pub struct Serve {
     pub queue_max: u32,
     /// How long one request may wait for its place before it is answered 503.
     pub queue_wait_seconds: u32,
+    /// MiB of the board's MemAvailable below which no new request goes in (memory.rs; 0: not watched). The bundle
+    /// passes half the board's measured reserve; without a measurement this conservative floor holds.
+    pub memory_floor_mb: u32,
+    /// The memory pressure ("some avg10", percent) above which no new request goes in (0: not watched).
+    pub memory_psi_max: u32,
     /// The llm component's systemd unit the gateway starts and stops (None: it controls nothing).
     pub llm_unit: Option<String>,
     pub idle_stop_minutes: u32,
@@ -56,6 +61,8 @@ impl Default for Serve {
             max_inflight: 2,
             queue_max: 32,
             queue_wait_seconds: 120,
+            memory_floor_mb: 64,
+            memory_psi_max: 50,
             llm_unit: None,
             idle_stop_minutes: 0,
         }
@@ -148,6 +155,8 @@ pub fn parse(args: &[String]) -> Result<Call, String> {
                     "--max-inflight" => s.max_inflight = number(name, v, 1, 64)? as u32,
                     "--queue-max" => s.queue_max = number(name, v, 0, 1024)? as u32,
                     "--queue-wait-seconds" => s.queue_wait_seconds = number(name, v, 1, 3600)? as u32,
+                    "--memory-floor-mb" => s.memory_floor_mb = number(name, v, 0, 1 << 20)? as u32,
+                    "--memory-psi-max" => s.memory_psi_max = number(name, v, 0, 100)? as u32,
                     "--idle-stop-minutes" => s.idle_stop_minutes = number(name, v, 0, 10_080)? as u32,
                     "--llm-unit" => {
                         if !is_unit(v) {
@@ -215,6 +224,7 @@ mod tests {
             &["serve", "--ctx-size", "-1"],
             &["serve", "--queue-max", "5000"],
             &["serve", "--queue-wait-seconds", "0"],
+            &["serve", "--memory-psi-max", "101"],
             &["bogus"],
         ] {
             assert!(parse(&a(bad)).is_err(), "{bad:?}");

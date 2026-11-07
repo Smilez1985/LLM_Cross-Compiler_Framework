@@ -25,6 +25,9 @@ Licence: the gateway is the framework's (MIT); the model's licence is named in t
   connection, else its address), at most `queue_wait_seconds` (then 503 with Retry-After) and at most `queue_max` of
   them (then 429 with Retry-After); a client that hangs up while it waits frees its place; a streamed answer holds
   its place until its end.
+- A memory guard: while the board's free memory (MemAvailable) is below `memory_floor_mb` or its memory pressure
+  (`/proc/pressure/memory`, "some avg10") is above `memory_psi_max`, new requests wait in the queue instead of going
+  to the model, until memory recovers or their wait ends; the change is logged with the numbers only.
 - Logs: route, status, time and token counts, never prompt text.
 
 ## Variables
@@ -36,6 +39,8 @@ Licence: the gateway is the framework's (MIT); the model's licence is named in t
   token (kept on the board, 0600).
 - `max_body_kb` (256), `max_tokens` (512), `rate_per_minute` (60), `max_inflight` (2): the limits.
 - `queue_max` (32), `queue_wait_seconds` (120): the queue's length and the longest wait of one request.
+- `memory_floor_mb` (64; set by the bundle to half the board's measured reserve), `memory_psi_max` (50): the memory
+  guard (0 turns either check off).
 - `upstream_port`, `ctx_size`: set by the bundle from the llm component (its port and context size).
 - `autostart` (no): with yes, the root actions create_user, install_unit and set_cgroup with `user` (llmcf) and
   `memory_limit_mb` (64); llmcf-install carries them out.

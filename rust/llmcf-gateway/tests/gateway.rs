@@ -434,3 +434,25 @@ fn serve_refuses_options_it_does_not_take() {
     let v = Command::new(env!("CARGO_BIN_EXE_llmcf-gateway")).arg("--version").output().unwrap();
     assert!(String::from_utf8_lossy(&v.stdout).starts_with("llmcf-gateway "));
 }
+
+#[test]
+fn while_memory_is_low_new_requests_wait_and_are_not_sent_on() {
+    // a floor no board reaches: the guard holds every request back until its wait ends
+    let s = stub();
+    let g = gateway("qmem", s.port, &["--memory-floor-mb", "1048576", "--queue-wait-seconds", "1"]);
+    let (status, body) = post(g.port, "/v1/chat/completions", CHAT);
+    assert_eq!(status, 503, "{body}");
+    assert!(body.contains("queue_timeout"), "{body}");
+    assert!(s.times.lock().unwrap().is_empty(), "nothing reached the model");
+    let (_, health) = http(g.port, "GET", "/health", "", "text/plain");
+    let v: serde_json::Value = serde_json::from_str(&health).unwrap();
+    assert_eq!(v["memory"]["low"], true, "{health}");
+    assert_eq!(v["memory"]["floor_mib"], 1048576);
+    assert_eq!(metric(g.port, "llmcf_gateway_memory_low"), 1.0);
+    assert!(metric(g.port, "llmcf_gateway_admission_held_total") >= 1.0);
+    let log = g.log.lock().unwrap().clone();
+    assert!(log.contains("memory low (MemAvailable ") && log.contains("new requests wait"), "{log}");
+    // the guard off: the same request goes through
+    let g = gateway("qmem0", s.port, &["--memory-floor-mb", "0", "--memory-psi-max", "0"]);
+    assert_eq!(post(g.port, "/v1/chat/completions", CHAT).0, 200);
+}

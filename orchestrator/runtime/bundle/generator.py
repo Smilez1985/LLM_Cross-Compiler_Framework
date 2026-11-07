@@ -403,6 +403,7 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
         given = dict(selection.values.get(comp_id) or {})
         if block.kind == "gateway":
             _gateway_from_llm(plan, comp_id, given, pairs, selection, limits)
+            _gateway_memory_floor(plan, comp_id, block, given, limits)
         if block.kind == "llm":
             # the board's measurement decides what the person did not set (never a guessed default)
             measured = measured_llm_values(block, given, limits)
@@ -794,6 +795,20 @@ def _gateway_from_llm(plan: BundlePlan, comp_id: str, given: Dict[str, Any], pai
         if mine in given and str(given[mine]) != str(value):
             plan.problems.append(f"{comp_id}: {mine} is set by the bundle from {llm_id} ({value})")
         given[mine] = value
+
+
+def _gateway_memory_floor(plan: BundlePlan, comp_id: str, block: Block, given: Dict[str, Any], limits: Any) -> None:
+    """The gateway's memory guard from the board's measurement where the person set none: no new request goes to
+    the model while the board's free memory is below half the measured reserve (measure.gateway_memory_floor_mib);
+    without a measurement the block's conservative default holds."""
+    from orchestrator.runtime.device.measure import gateway_memory_floor_mib
+    if block.variable("memory_floor_mb") is None or "memory_floor_mb" in given:
+        return
+    floor = gateway_memory_floor_mib(limits)
+    if floor is not None:
+        given["memory_floor_mb"] = floor
+        plan.notes.append(f"{comp_id}: new requests wait while the board has less than {floor} MB free (half the "
+                          "reserve the board's measurement keeps free)")
 
 
 def _probe_checks(plan: BundlePlan, board_arch: Optional[str], init: Optional[str], access: Any, offline: bool,

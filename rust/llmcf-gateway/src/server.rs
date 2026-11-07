@@ -9,6 +9,7 @@
 use crate::args::{Bind, Serve};
 use crate::control;
 use crate::limits::RateLimit;
+use crate::memory::{self, Guard};
 use crate::peer;
 use crate::queue::{self, Permit, Queue, Refused};
 use crate::rules::{self, Limits, Refusal};
@@ -62,6 +63,7 @@ pub struct State {
     pub fingerprint: Option<String>,
     pub rate: Mutex<RateLimit>,
     pub queue: Arc<Queue>,
+    pub memory: Arc<Guard>,
     pub metrics: Metrics,
     pub last: Mutex<Instant>,
     pub budget: AtomicU64,
@@ -250,6 +252,7 @@ async fn health(state: &State) -> Response<Body> {
             "ctx_budget": state.budget.load(Relaxed),
             "max_tokens": state.cfg.max_tokens,
             "control": if state.cfg.llm_unit.is_some() { "systemd" } else { "none" },
+            "memory": memory_facts(&state.memory),
             "queue": {
                 "running": state.queue.running(),
                 "max_inflight": state.cfg.max_inflight,
@@ -259,6 +262,17 @@ async fn health(state: &State) -> Response<Body> {
             },
         }),
     )
+}
+
+fn memory_facts(g: &Guard) -> Value {
+    let r = g.reading();
+    json!({
+        "available_mib": r.available_mib,
+        "psi_some_avg10": r.psi_some_avg10,
+        "floor_mib": g.floor_mib,
+        "psi_max": g.psi_max,
+        "low": g.watching() && !g.room(&r),
+    })
 }
 
 fn metrics(state: &State) -> Response<Body> {
@@ -299,6 +313,12 @@ fn metrics(state: &State) -> Response<Body> {
     for (name, help, v) in [
         ("llmcf_gateway_inflight", "requests in flight", state.queue.running() as u64),
         ("llmcf_gateway_queued", "requests waiting for a place in flight", state.queue.queued() as u64),
+        ("llmcf_gateway_memory_low", "1 while the memory guard holds new requests back", state.memory.is_low() as u64),
+        (
+            "llmcf_gateway_memory_available_mib",
+            "the board's MemAvailable",
+            state.memory.reading().available_mib.unwrap_or(0),
+        ),
     ] {
         text.push_str(&format!("# HELP {name} {help}\n# TYPE {name} gauge\n{name} {v}\n"));
     }
@@ -551,15 +571,18 @@ pub fn build_state(cfg: Serve) -> Result<(Arc<State>, Option<Arc<rustls::ServerC
     } else {
         (None, None, None)
     };
+    let guard = Arc::new(Guard::new(cfg.memory_floor_mb as u64, cfg.memory_psi_max, Box::new(memory::read_proc)));
+    let admit = guard.clone();
     let queue = Queue::new(
         cfg.max_inflight as usize,
         cfg.queue_max as usize,
         Duration::from_secs(cfg.queue_wait_seconds as u64),
-        Box::new(|| true),
+        Box::new(move || admit.ok()),
     );
     let state = Arc::new(State {
         rate: Mutex::new(RateLimit::new(cfg.rate_per_minute)),
         queue,
+        memory: guard,
         metrics: Metrics::default(),
         last: Mutex::new(Instant::now()),
         budget: AtomicU64::new((cfg.ctx_size / cfg.slots) as u64),

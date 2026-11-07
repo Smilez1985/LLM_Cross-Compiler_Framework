@@ -257,6 +257,9 @@ class Measurement:
     steps: List[Step]
     heat: Optional[Dict[str, Any]] = None
     version: int = MEASURE_VERSION
+    # the board's own llmcf-gateway, its peak resident memory under load (MiB; 0: not measured yet: the measurement
+    # step does not run the gateway yet, and the gateway's unit keeps its fallback limit until it does)
+    gateway_rss_mib: int = 0
 
     def as_dict(self) -> Dict[str, Any]:
         out = asdict(self)
@@ -276,7 +279,8 @@ class Measurement:
         return cls(measured_at=str(data["measured_at"])[:32], build_id=str(data["build_id"])[:64],
                    model_sha256=str(data["model_sha256"])[:64], model_bytes=int(data["model_bytes"]),
                    kv_measured=kv, idle_before=Idle(**data["idle_before"]), idle_after=Idle(**data["idle_after"]),
-                   steps=[Step(**s) for s in data.get("steps") or []], heat=data.get("heat"))
+                   steps=[Step(**s) for s in data.get("steps") or []], heat=data.get("heat"),
+                   gateway_rss_mib=max(0, int(data.get("gateway_rss_mib") or 0)))
 
 
 @dataclass
@@ -307,6 +311,7 @@ class BoardLimits:
     build_id: str = ""
     version: int = MEASURE_VERSION
     reasons: Dict[str, str] = field(default_factory=dict)
+    gateway_rss_mib: int = 0
 
     def board_file(self) -> str:
         """The key=value file the start script reads (LIMITS_REL): numbers and the KV type only."""
@@ -366,7 +371,8 @@ def derive(m: Measurement, kv_chosen: Optional[str] = None) -> BoardLimits:
     common = dict(total_mib=total, available_mib=available, reserve_mib=reserve, usable_mib=usable,
                   model_bytes=m.model_bytes or m.idle_before.model_bytes, model_sha256=m.model_sha256,
                   throttled=throttled, swap_mib=m.idle_before.swap_total_mib, zram_mib=m.idle_before.zram_mib,
-                  cpus=m.idle_before.cpus, measured_at=m.measured_at, build_id=m.build_id, train_ctx=train)
+                  cpus=m.idle_before.cpus, measured_at=m.measured_at, build_id=m.build_id, train_ctx=train,
+                  gateway_rss_mib=m.gateway_rss_mib)
     reasons: Dict[str, str] = {"reserve_mib": f"{reserve} MiB: {int(RESERVE_SHARE * 100)} % of the measured "
                                               f"{total} MiB RAM (at least {RESERVE_MIN_MIB} MiB) plus the measured "
                                               f"swing of the free memory at rest ({swing} MiB)"}
@@ -416,6 +422,36 @@ def derive(m: Measurement, kv_chosen: Optional[str] = None) -> BoardLimits:
                      f"the model ({base} MiB) leaves room for only {ctx} tokens of the {usable} MiB usable: try a "
                      "smaller model or quantization")
     return limits
+
+
+# The gateway's unit: its memory limit without a measurement of the gateway on the board (the block's default), and
+# what one request costs it beyond its measured resident memory: a waiting request its connection's read buffer
+# (hyper's, 64 KiB at most), a request in flight its body up to the cap about four times (the bytes, the parsed and
+# the rewritten JSON, the answer's buffer); a margin on top.
+GATEWAY_FALLBACK_MIB = 64
+GATEWAY_WAIT_KIB = 64
+GATEWAY_BODY_COPIES = 4
+GATEWAY_MARGIN_MIB = 16
+
+
+def gateway_memory_max_mib(limits: Optional["BoardLimits"], queue_max: int, max_inflight: int,
+                           max_body_kb: int) -> Optional[int]:
+    """The gateway unit's MemoryMax from the board's measurement: its measured peak resident memory, plus what the
+    queue's waiting requests and the requests in flight can add, plus a margin. None while the gateway was not
+    measured on the board (the unit keeps GATEWAY_FALLBACK_MIB then)."""
+    rss = int(getattr(limits, "gateway_rss_mib", 0) or 0) if limits is not None else 0
+    if rss <= 0:
+        return None
+    kib = queue_max * GATEWAY_WAIT_KIB + max_inflight * (GATEWAY_WAIT_KIB + GATEWAY_BODY_COPIES * max_body_kb)
+    return int(rss + -(-kib // 1024) + GATEWAY_MARGIN_MIB)
+
+
+def gateway_memory_floor_mib(limits: Optional["BoardLimits"]) -> Optional[int]:
+    """The free memory below which the gateway lets no new request in: half the board's measured reserve (the
+    memory the plan keeps free), at least 32 MiB. None without a measurement (the gateway's own default holds)."""
+    if limits is None or not getattr(limits, "reserve_mib", 0):
+        return None
+    return max(32, int(limits.reserve_mib) // 2)
 
 
 def utc_stamp() -> str:
