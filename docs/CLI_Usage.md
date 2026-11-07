@@ -2507,7 +2507,7 @@ llm-cli bundle block list [--json]
 llm-cli bundle block new ID --kind KIND --title TEXT [--summary TEXT] [--from BLOCK]
 llm-cli bundle harness take-in ID LOCATION --kind git|archive|folder --installer PATH [--ref REF] [--pin PIN]
                     [--title TEXT] [--dry-run-arg=OPTION]... [--assume-yes NAME=VALUE] [--exit-code CODE=done|findings]...
-                    [--image-partition N]
+                    [--image-partition N] [--image-path FOLDER]
 llm-cli bundle harness dry-run BUNDLE [--component ID]
 llm-cli bundle harness run BUNDLE [--component ID] [--assume-yes] [--skip-dry-run]
 llm-cli bundle harness attach|stop BUNDLE RUN [--component ID]
@@ -2605,8 +2605,12 @@ Your own agent harness on the board ([Features](Features.md#your-agent-harness-o
 at a pin and keeps its tree with one checksum in this computer's per-user folder (`--kind git`: an https link, `--ref`
 a branch or tag resolved to its commit, or `--pin` the commit; `archive`: an archive or disk image, `--pin` its
 sha256: zip, tar, tar.gz, tar.bz2, tar.xz, tar.zst, a single .gz/.bz2/.xz/.zst file, and with 7-Zip 7z, rar, iso, cpio
-and .img/.bin disk images, recognised by their content, not their name; `--image-partition N` names the partition of a
-disk image (0 the first) when more than one holds the installer; a .bin that is a script or a program is a harness of
+and .img/.bin disk images, recognised by their content, not their name; a disk image's ext partition is read in place
+(only the harness's folder; `--image-path FOLDER` names it inside the partition, otherwise the installer is searched by
+the folders alone), a FAT or NTFS partition through 7-Zip; `--image-partition N` names the partition (0 the first)
+when more than one holds the installer, and the take-in says how much of the image it read; an encrypted archive asks
+for its password without echo (three tries; without a terminal it is refused); a hard link inside the tree becomes a
+file of its own; a .bin that is a script or a program is a harness of
 one file, `--installer` its own name; `folder`: a folder; on Windows, which keeps no executable bit, a git checkout
 takes the bits from its index, any other folder from the content: a file starting with `#!` or an ELF or Mach-O
 program, and the installer, is executable, and the take-in says how many it marked). A format that needs 7-Zip is

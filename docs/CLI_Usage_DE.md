@@ -2617,7 +2617,7 @@ llm-cli bundle block list [--json]
 llm-cli bundle block new ID --kind ART --title TEXT [--summary TEXT] [--from BAUSTEIN]
 llm-cli bundle harness take-in ID LOCATION --kind git|archive|folder --installer PATH [--ref REF] [--pin PIN]
                     [--title TEXT] [--dry-run-arg=OPTION]... [--assume-yes NAME=VALUE] [--exit-code CODE=done|findings]...
-                    [--image-partition N]
+                    [--image-partition N] [--image-path FOLDER]
 llm-cli bundle harness dry-run BUNDLE [--component ID]
 llm-cli bundle harness run BUNDLE [--component ID] [--assume-yes] [--skip-dry-run]
 llm-cli bundle harness attach|stop BUNDLE RUN [--component ID]
@@ -2721,8 +2721,12 @@ Dein eigener Agent-Harness auf dem Board ([Funktionen](Features_DE.md#dein-agent
 (`--kind git`: ein https-Link, `--ref` ein Branch oder Tag, der zu seinem Commit aufgelöst wird, oder `--pin` der Commit;
 `archive`: ein Archiv oder Disk-Image, `--pin` seine sha256: zip, tar, tar.gz, tar.bz2, tar.xz, tar.zst, eine einzelne
 .gz-/.bz2-/.xz-/.zst-Datei und mit 7-Zip 7z, rar, iso, cpio und .img-/.bin-Disk-Images, erkannt an ihrem Inhalt, nicht
-am Namen; `--image-partition N` nennt die Partition eines Disk-Images (0 die erste), wenn mehrere den Installer
-enthalten; eine .bin, die ein Skript oder ein Programm ist, ist ein Harness aus einer Datei, `--installer` ihr eigener
+am Namen; die ext-Partition eines Disk-Images wird an Ort und Stelle gelesen (nur der Ordner des Harness;
+`--image-path ORDNER` nennt ihn in der Partition, sonst wird der Installer allein über die Ordner gesucht), eine FAT-
+oder NTFS-Partition über 7-Zip; `--image-partition N` nennt die Partition (0 die erste), wenn mehrere den Installer
+enthalten, und die Übernahme sagt, wie viel sie vom Image gelesen hat; ein verschlüsseltes Archiv fragt ohne Anzeige
+nach seinem Passwort (drei Versuche; ohne Terminal wird es abgelehnt); ein harter Link innerhalb des Baums wird eine
+eigene Datei; eine .bin, die ein Skript oder ein Programm ist, ist ein Harness aus einer Datei, `--installer` ihr eigener
 Name; `folder`: ein Ordner; unter Windows, das kein Ausführbar-Bit kennt, nimmt ein git-Checkout die Bits aus seinem
 Index, jeder andere Ordner aus dem Inhalt: Eine Datei, die mit `#!` beginnt oder ein ELF- oder Mach-O-Programm ist, und
 der Installer sind ausführbar, und die Übernahme sagt, wie viele sie markiert hat). Ein Format, das 7-Zip braucht, wird

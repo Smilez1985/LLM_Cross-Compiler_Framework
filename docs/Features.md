@@ -675,10 +675,18 @@ in at a pin (a commit of its repository, or the sha256 of an archive or a folder
 the options of its own dry run, what its exit codes mean and, if it has one, its own "assume yes" switch; llmcf keeps
 its tree with one checksum. Every common format is taken in, recognised by its content, never by its name: zip, tar,
 tar.gz/.tgz, tar.bz2, tar.xz and tar.zst, a single .gz, .bz2, .xz or .zst file, and through 7-Zip (which llmcf's
-installers set up) 7z, rar, iso, cpio and disk images (.img or .bin with MBR or GPT partitions holding ext4, FAT or
-NTFS: the partition that holds the installer is taken, or the one you name with `--image-partition` when several do).
-Every archive is listed and checked before anything is written (no absolute path, no `..`, no link out of the tree, no
-device, the size and file caps) and extracted into a quarantine folder, and the tree is checked again. A .bin that is
+installers set up) 7z, rar, iso and cpio, and disk images (.img or .bin with MBR or GPT partitions holding ext4, FAT or
+NTFS). A disk image is never extracted whole: an ext2/3/4 partition (a board's rootfs) is read in place, without root
+and without a loop device, first only its folders to find the installer, then only the harness's folder
+(`--image-path`, e.g. `opt/chimera`, names it; otherwise it is searched); a FAT or NTFS partition (small boot
+partitions as a rule) goes through 7-Zip, one partition at a time and only after the disk check with its exact size.
+When the installer is in more than one place, you name the partition with `--image-partition` and the folder with
+`--image-path`. The take-in says how much of the image it read. Every archive is listed and checked before anything is
+written (no absolute path, no `..`, no link out of the tree, no device, the size and file caps) and extracted into a
+quarantine folder, and the tree is checked again. A hard link inside the tree becomes a file of its own with its
+target's content; one that points out of the tree is refused. An encrypted archive asks you for its password (at the
+command line without echo, in the window in a password field, three tries at most); the password reaches 7-Zip only
+on its standard input, is used for this one take-in and never kept, logged or shown, and an AI cannot give it. A .bin that is
 no archive but a script or a program (a makeself self-extracting installer, for example) is a harness of one file:
 its installer is the file itself. The pin of an archive is always its file's sha256. The executable bits come from the
 source itself (git's file modes, the archive's members), so the same harness gives the same checksum on Windows and
