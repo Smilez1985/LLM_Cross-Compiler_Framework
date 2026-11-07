@@ -3,11 +3,14 @@
 //! Loopback mode listens on 127.0.0.1 with plain HTTP; the local-network mode listens on every address with TLS 1.3
 //! only (never plain HTTP off loopback), and a client that is not on the board itself must send the gateway's
 //! bearer token. Every request is size-capped, rate-limited per client address and counted against a small number
-//! of requests in flight; the log line of a request holds its route, status, time and token counts, never a prompt.
+//! of requests in flight; a request that finds them all taken waits in a fair queue (queue.rs) with a time limit and
+//! a capped length. The log line of a request holds its route, status, time and token counts, never a prompt.
 
 use crate::args::{Bind, Serve};
 use crate::control;
 use crate::limits::RateLimit;
+use crate::peer;
+use crate::queue::{self, Permit, Queue, Refused};
 use crate::rules::{self, Limits, Refusal};
 use crate::tls;
 use bytes::Bytes;
@@ -22,8 +25,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tokio::io::Interest;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Semaphore;
 
 pub type Body = UnsyncBoxBody<Bytes, hyper::Error>;
 
@@ -42,7 +45,6 @@ pub struct Metrics {
     pub refused: AtomicU64,
     pub too_large: AtomicU64,
     pub rate_limited: AtomicU64,
-    pub busy: AtomicU64,
     pub unauthorized: AtomicU64,
     pub upstream_errors: AtomicU64,
     pub prompt_tokens: AtomicU64,
@@ -59,7 +61,7 @@ pub struct State {
     pub token: Option<String>,
     pub fingerprint: Option<String>,
     pub rate: Mutex<RateLimit>,
-    pub inflight: Arc<Semaphore>,
+    pub queue: Arc<Queue>,
     pub metrics: Metrics,
     pub last: Mutex<Instant>,
     pub budget: AtomicU64,
@@ -211,7 +213,7 @@ pub async fn idle_stopper(state: Arc<State>) {
         tokio::time::sleep(Duration::from_secs(30)).await;
         let idle = state.last.lock().map(|t| t.elapsed()).unwrap_or_default();
         let stopped = state.stopped.lock().map(|s| *s).unwrap_or(false);
-        let busy = state.inflight.available_permits() < state.cfg.max_inflight as usize;
+        let busy = state.queue.running() > 0 || state.queue.queued() > 0;
         if stopped || busy || idle < Duration::from_secs(minutes as u64 * 60) {
             continue;
         }
@@ -248,21 +250,31 @@ async fn health(state: &State) -> Response<Body> {
             "ctx_budget": state.budget.load(Relaxed),
             "max_tokens": state.cfg.max_tokens,
             "control": if state.cfg.llm_unit.is_some() { "systemd" } else { "none" },
+            "queue": {
+                "running": state.queue.running(),
+                "max_inflight": state.cfg.max_inflight,
+                "queued": state.queue.queued(),
+                "max": state.queue.cap(),
+                "wait_seconds": state.queue.wait().as_secs(),
+            },
         }),
     )
 }
 
 fn metrics(state: &State) -> Response<Body> {
     let m = &state.metrics;
-    let inflight =
-        state.cfg.max_inflight as usize - state.inflight.available_permits().min(state.cfg.max_inflight as usize);
-    let rows: [(&str, &str, u64); 14] = [
+    let q = &state.queue.metrics;
+    let rows: [(&str, &str, u64); 18] = [
         ("llmcf_gateway_requests_total", "requests received", m.requests.load(Relaxed)),
         ("llmcf_gateway_answered_total", "requests the model server answered", m.ok.load(Relaxed)),
         ("llmcf_gateway_refused_total", "requests refused by the strict checks", m.refused.load(Relaxed)),
         ("llmcf_gateway_too_large_total", "bodies over the size cap", m.too_large.load(Relaxed)),
         ("llmcf_gateway_rate_limited_total", "requests over the rate limit", m.rate_limited.load(Relaxed)),
-        ("llmcf_gateway_busy_total", "requests over the in-flight limit", m.busy.load(Relaxed)),
+        ("llmcf_gateway_queued_total", "requests that waited for a place in flight", q.queued_total.load(Relaxed)),
+        ("llmcf_gateway_queue_timeouts_total", "requests that waited their whole time (503)", q.timeouts.load(Relaxed)),
+        ("llmcf_gateway_queue_full_total", "requests that found the queue full (429)", q.full.load(Relaxed)),
+        ("llmcf_gateway_queue_gone_total", "waiting requests whose client left", q.gone.load(Relaxed)),
+        ("llmcf_gateway_admission_held_total", "times the memory guard held requests back", q.held.load(Relaxed)),
         ("llmcf_gateway_unauthorized_total", "requests without the token", m.unauthorized.load(Relaxed)),
         ("llmcf_gateway_upstream_errors_total", "model server errors", m.upstream_errors.load(Relaxed)),
         ("llmcf_gateway_prompt_tokens_estimated_total", "prompt tokens counted", m.prompt_tokens.load(Relaxed)),
@@ -284,9 +296,20 @@ fn metrics(state: &State) -> Response<Body> {
     for (name, help, v) in rows {
         text.push_str(&format!("# HELP {name} {help}\n# TYPE {name} counter\n{name} {v}\n"));
     }
-    text.push_str(&format!(
-        "# HELP llmcf_gateway_inflight requests in flight\n# TYPE llmcf_gateway_inflight gauge\nllmcf_gateway_inflight {inflight}\n"
-    ));
+    for (name, help, v) in [
+        ("llmcf_gateway_inflight", "requests in flight", state.queue.running() as u64),
+        ("llmcf_gateway_queued", "requests waiting for a place in flight", state.queue.queued() as u64),
+    ] {
+        text.push_str(&format!("# HELP {name} {help}\n# TYPE {name} gauge\n{name} {v}\n"));
+    }
+    let name = "llmcf_gateway_queue_wait_seconds";
+    text.push_str(&format!("# HELP {name} time a request waited for its place\n# TYPE {name} histogram\n"));
+    for (i, b) in queue::BUCKETS.iter().enumerate() {
+        text.push_str(&format!("{name}_bucket{{le=\"{b}\"}} {}\n", q.buckets[i].load(Relaxed)));
+    }
+    let count = q.wait_count.load(Relaxed);
+    text.push_str(&format!("{name}_bucket{{le=\"+Inf\"}} {count}\n"));
+    text.push_str(&format!("{name}_sum {:.6}\n{name}_count {count}\n", q.wait_micros.load(Relaxed) as f64 / 1e6));
     let mut r = Response::new(full(text));
     r.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/plain; version=0.0.4"));
     r
@@ -297,7 +320,7 @@ fn refusal(state: &State, r: Refusal) -> Response<Body> {
     error(StatusCode::from_u16(r.status).unwrap_or(StatusCode::BAD_REQUEST), r.code, &r.message)
 }
 
-async fn forward(state: &State, path: &str, out: Value, permit: tokio::sync::OwnedSemaphorePermit) -> Response<Body> {
+async fn forward(state: &State, path: &str, out: Value, permit: Permit) -> Response<Body> {
     if let Err(e) = ensure_up(state).await {
         state.metrics.upstream_errors.fetch_add(1, Relaxed);
         return retry(error(StatusCode::SERVICE_UNAVAILABLE, "upstream_down", &e), 10);
@@ -335,12 +358,35 @@ async fn forward(state: &State, path: &str, out: Value, permit: tokio::sync::Own
     }
 }
 
-async fn handle(state: Arc<State>, peer: SocketAddr, req: Request<Incoming>) -> Response<Body> {
+/// One connection's two ends and a second handle on its socket, only to see the client hang up while its request
+/// waits in the queue (the request's own handle belongs to hyper).
+pub struct Conn {
+    pub peer: SocketAddr,
+    pub local: SocketAddr,
+    pub watch: Option<TcpStream>,
+}
+
+/// Ends when the connection's client hung up (or never, without a second handle).
+async fn hung_up(watch: Option<&TcpStream>) {
+    let Some(s) = watch else { return std::future::pending().await };
+    loop {
+        match s.ready(Interest::READABLE).await {
+            Ok(r) if r.is_read_closed() || r.is_error() => return,
+            Ok(_) => {
+                // only readable (the request's body not read yet): forget that and wait for the next event
+                let _ = s.try_io(Interest::READABLE, || Err::<(), _>(std::io::ErrorKind::WouldBlock.into()));
+            }
+            Err(_) => return,
+        }
+    }
+}
+
+async fn handle(state: Arc<State>, conn: Arc<Conn>, req: Request<Incoming>) -> Response<Body> {
     let started = Instant::now();
     let method = req.method().clone();
     let path = req.uri().path().to_string();
     let mut note = String::new();
-    let resp = route(&state, peer, req, &mut note).await;
+    let resp = route(&state, &conn, req, &mut note).await;
     eprintln!(
         "llmcf-gateway: {} {} {} {}ms{}",
         method,
@@ -352,7 +398,8 @@ async fn handle(state: Arc<State>, peer: SocketAddr, req: Request<Incoming>) -> 
     resp
 }
 
-async fn route(state: &Arc<State>, peer: SocketAddr, req: Request<Incoming>, note: &mut String) -> Response<Body> {
+async fn route(state: &Arc<State>, conn: &Conn, req: Request<Incoming>, note: &mut String) -> Response<Body> {
+    let peer = conn.peer;
     state.metrics.requests.fetch_add(1, Relaxed);
     let local = peer.ip().is_loopback();
     if let (Some(token), false) = (&state.token, local) {
@@ -404,10 +451,36 @@ async fn route(state: &Arc<State>, peer: SocketAddr, req: Request<Incoming>, not
         state.metrics.refused.fetch_add(1, Relaxed);
         return error(StatusCode::UNSUPPORTED_MEDIA_TYPE, "invalid_json", "the body is application/json");
     }
-    let Ok(permit) = state.inflight.clone().try_acquire_owned() else {
-        state.metrics.busy.fetch_add(1, Relaxed);
-        return retry(error(StatusCode::TOO_MANY_REQUESTS, "busy", "the model is busy with other requests"), 2);
+    let auth = req.headers().get(AUTHORIZATION).and_then(|v| v.to_str().ok());
+    let key = peer::client_key(auth, state.token.as_deref(), peer, conn.local);
+    let kind = key.kind();
+    let permit = match state.queue.acquire(key, hung_up(conn.watch.as_ref())).await {
+        Ok((permit, waited)) => {
+            if waited > Duration::ZERO {
+                *note = format!(" queued={}ms by={kind}", waited.as_millis());
+            }
+            permit
+        }
+        Err(Refused::Full) => {
+            *note = " queue=full".into();
+            return retry(
+                error(StatusCode::TOO_MANY_REQUESTS, "queue_full", "the model is busy and its queue is full"),
+                5,
+            );
+        }
+        Err(Refused::Timeout) => {
+            *note = " queue=timeout".into();
+            return retry(
+                error(StatusCode::SERVICE_UNAVAILABLE, "queue_timeout", "the model was busy for the whole wait"),
+                15,
+            );
+        }
+        Err(Refused::Gone) => {
+            *note = " queue=gone".into();
+            return error(StatusCode::REQUEST_TIMEOUT, "client_gone", "the client left while it waited");
+        }
     };
+    let before = std::mem::take(note);
     let cap = state.cfg.max_body_kb as usize * 1024;
     let body = match read_body(req.into_body(), cap, BODY_WAIT).await {
         Ok(b) => b,
@@ -441,7 +514,7 @@ async fn route(state: &Arc<State>, peer: SocketAddr, req: Request<Incoming>, not
         m.clamped.fetch_add(1, Relaxed);
     }
     *note = format!(
-        " prompt~{} max={} dropped={} pointed={}{}",
+        "{before} prompt~{} max={} dropped={} pointed={}{}",
         o.prompt_tokens,
         o.max_tokens,
         o.system_dropped,
@@ -478,9 +551,15 @@ pub fn build_state(cfg: Serve) -> Result<(Arc<State>, Option<Arc<rustls::ServerC
     } else {
         (None, None, None)
     };
+    let queue = Queue::new(
+        cfg.max_inflight as usize,
+        cfg.queue_max as usize,
+        Duration::from_secs(cfg.queue_wait_seconds as u64),
+        Box::new(|| true),
+    );
     let state = Arc::new(State {
         rate: Mutex::new(RateLimit::new(cfg.rate_per_minute)),
-        inflight: Arc::new(Semaphore::new(cfg.max_inflight as usize)),
+        queue,
         metrics: Metrics::default(),
         last: Mutex::new(Instant::now()),
         budget: AtomicU64::new((cfg.ctx_size / cfg.slots) as u64),
@@ -491,6 +570,13 @@ pub fn build_state(cfg: Serve) -> Result<(Arc<State>, Option<Arc<rustls::ServerC
         cfg,
     });
     Ok((state, tls))
+}
+
+/// The connection and a second handle on the same socket (a duplicate descriptor), to see its client hang up.
+fn with_watch(stream: TcpStream) -> Option<(TcpStream, Option<TcpStream>)> {
+    let std_stream = stream.into_std().ok()?;
+    let watch = std_stream.try_clone().ok().and_then(|d| TcpStream::from_std(d).ok());
+    Some((TcpStream::from_std(std_stream).ok()?, watch))
 }
 
 pub async fn serve(state: Arc<State>, tls_cfg: Option<Arc<rustls::ServerConfig>>) -> Result<(), String> {
@@ -521,6 +607,14 @@ pub async fn serve(state: Arc<State>, tls_cfg: Option<Arc<rustls::ServerConfig>>
         }
         tokio::spawn(idle_stopper(state.clone()));
     }
+    let ticking = state.clone();
+    tokio::spawn(async move {
+        // the waiting requests are let in once the admission check says yes again (nothing else wakes them then)
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            ticking.queue.tick();
+        }
+    });
     let acceptor = tls_cfg.map(tokio_rustls::TlsAcceptor::from);
     loop {
         let Ok((stream, peer)) = listener.accept().await else {
@@ -529,10 +623,14 @@ pub async fn serve(state: Arc<State>, tls_cfg: Option<Arc<rustls::ServerConfig>>
         };
         let state = state.clone();
         let acceptor = acceptor.clone();
+        let local = stream.local_addr().unwrap_or(addr);
+        let Some((stream, watch)) = with_watch(stream) else { continue };
+        let conn_info = Arc::new(Conn { peer, local, watch });
         tokio::spawn(async move {
             let svc = hyper::service::service_fn(move |req| {
                 let state = state.clone();
-                async move { Ok::<_, std::convert::Infallible>(handle(state, peer, req).await) }
+                let conn_info = conn_info.clone();
+                async move { Ok::<_, std::convert::Infallible>(handle(state, conn_info, req).await) }
             });
             let conn = hyper::server::conn::http1::Builder::new()
                 .max_buf_size(64 * 1024)
@@ -558,6 +656,7 @@ mod tests {
     use super::*;
     use std::pin::Pin;
     use std::task::{Context, Poll};
+    use tokio::sync::Semaphore;
 
     /// A request body that never sends a byte (a client that stalls after its headers).
     struct Stalled;

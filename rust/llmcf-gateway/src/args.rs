@@ -33,6 +33,10 @@ pub struct Serve {
     pub max_tokens: u32,
     pub rate_per_minute: u32,
     pub max_inflight: u32,
+    /// Requests that may wait for a place in flight at once (queue.rs); 0: none wait, a full board answers 429.
+    pub queue_max: u32,
+    /// How long one request may wait for its place before it is answered 503.
+    pub queue_wait_seconds: u32,
     /// The llm component's systemd unit the gateway starts and stops (None: it controls nothing).
     pub llm_unit: Option<String>,
     pub idle_stop_minutes: u32,
@@ -50,6 +54,8 @@ impl Default for Serve {
             max_tokens: 512,
             rate_per_minute: 60,
             max_inflight: 2,
+            queue_max: 32,
+            queue_wait_seconds: 120,
             llm_unit: None,
             idle_stop_minutes: 0,
         }
@@ -140,6 +146,8 @@ pub fn parse(args: &[String]) -> Result<Call, String> {
                     "--max-tokens" => s.max_tokens = number(name, v, 16, 1 << 20)? as u32,
                     "--rate-per-minute" => s.rate_per_minute = number(name, v, 1, 100_000)? as u32,
                     "--max-inflight" => s.max_inflight = number(name, v, 1, 64)? as u32,
+                    "--queue-max" => s.queue_max = number(name, v, 0, 1024)? as u32,
+                    "--queue-wait-seconds" => s.queue_wait_seconds = number(name, v, 1, 3600)? as u32,
                     "--idle-stop-minutes" => s.idle_stop_minutes = number(name, v, 0, 10_080)? as u32,
                     "--llm-unit" => {
                         if !is_unit(v) {
@@ -190,6 +198,11 @@ mod tests {
             panic!()
         };
         assert_eq!((s.port, s.bind, s.ctx_size, s.upstream_port), (9000, Bind::Lan, 8192, 8080));
+        assert_eq!((s.queue_max, s.queue_wait_seconds), (32, 120));
+        let Call::Serve(s) = parse(&a(&["serve", "--queue-max", "0", "--queue-wait-seconds", "5"])).unwrap() else {
+            panic!()
+        };
+        assert_eq!((s.queue_max, s.queue_wait_seconds), (0, 5));
         for bad in [
             &["serve", "--port", "80"][..],
             &["serve", "--bind", "0.0.0.0"],
@@ -200,6 +213,8 @@ mod tests {
             &["serve", "--port", "8080"],
             &["serve", "--idle-stop-minutes", "5"],
             &["serve", "--ctx-size", "-1"],
+            &["serve", "--queue-max", "5000"],
+            &["serve", "--queue-wait-seconds", "0"],
             &["bogus"],
         ] {
             assert!(parse(&a(bad)).is_err(), "{bad:?}");

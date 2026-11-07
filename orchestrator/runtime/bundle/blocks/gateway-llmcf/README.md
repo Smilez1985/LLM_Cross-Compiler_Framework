@@ -20,6 +20,11 @@ Licence: the gateway is the framework's (MIT); the model's licence is named in t
   prompt is sent once, a tool result byte for byte the same as an earlier one of the same tool and arguments is sent
   as "same result as tool call #<id>", and `max_tokens` is cut to what the board's context leaves.
 - Limits: the largest request body, a rate limit per client, requests in flight; `/health` and `/metrics`.
+- A queue instead of a refusal: a request that finds every place in flight taken waits, in a fair order per client
+  (round robin over the clients: a client's own bearer key, else the board account the kernel names for its
+  connection, else its address), at most `queue_wait_seconds` (then 503 with Retry-After) and at most `queue_max` of
+  them (then 429 with Retry-After); a client that hangs up while it waits frees its place; a streamed answer holds
+  its place until its end.
 - Logs: route, status, time and token counts, never prompt text.
 
 ## Variables
@@ -30,6 +35,7 @@ Licence: the gateway is the framework's (MIT); the model's licence is named in t
   fingerprint at the first check over the board's SSH session; a client on the network sends the gateway's bearer
   token (kept on the board, 0600).
 - `max_body_kb` (256), `max_tokens` (512), `rate_per_minute` (60), `max_inflight` (2): the limits.
+- `queue_max` (32), `queue_wait_seconds` (120): the queue's length and the longest wait of one request.
 - `upstream_port`, `ctx_size`: set by the bundle from the llm component (its port and context size).
 - `autostart` (no): with yes, the root actions create_user, install_unit and set_cgroup with `user` (llmcf) and
   `memory_limit_mb` (64); llmcf-install carries them out.

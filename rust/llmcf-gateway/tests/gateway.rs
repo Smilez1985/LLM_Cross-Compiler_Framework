@@ -18,6 +18,8 @@ fn free_port() -> u16 {
 struct Stub {
     port: u16,
     seen: Arc<Mutex<Vec<(String, String, String)>>>,
+    /// each completion request: when it reached the stub and when its answer's last byte went out
+    times: Arc<Mutex<Vec<(Instant, Instant)>>>,
 }
 
 fn read_request(stream: &mut TcpStream) -> Option<(String, String, String, String)> {
@@ -48,17 +50,45 @@ fn read_request(stream: &mut TcpStream) -> Option<(String, String, String, Strin
 }
 
 fn stub() -> Stub {
+    stub_with(Duration::ZERO, false)
+}
+
+/// A stub whose completions take `delay`; with `stream`, the answer is a server-sent event stream whose first event
+/// goes out at once and whose end comes after the delay.
+fn stub_with(delay: Duration, sse: bool) -> Stub {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let seen = Arc::new(Mutex::new(Vec::new()));
-    let log = seen.clone();
+    let times = Arc::new(Mutex::new(Vec::new()));
+    let (log, timelog) = (seen.clone(), times.clone());
     thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { continue };
-            let log = log.clone();
+        for conn in listener.incoming() {
+            let Ok(mut conn) = conn else { continue };
+            let (log, timelog) = (log.clone(), timelog.clone());
             thread::spawn(move || {
-                let Some((method, path, auth, body)) = read_request(&mut stream) else { return };
+                let mut stream = conn.try_clone().unwrap();
+                let Some((method, path, auth, body)) = read_request(&mut conn) else { return };
                 log.lock().unwrap().push((path.clone(), auth, body));
+                if method == "POST" {
+                    let arrived = Instant::now();
+                    if sse {
+                        let first = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"O\"}}]}\n\n";
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\
+                             Connection: close\r\n\r\n{:x}\r\n{first}\r\n",
+                            first.len()
+                        );
+                        let _ = stream.flush();
+                        thread::sleep(delay);
+                        let last = "data: [DONE]\n\n";
+                        let _ = write!(stream, "{:x}\r\n{last}\r\n0\r\n\r\n", last.len());
+                        timelog.lock().unwrap().push((arrived, Instant::now()));
+                        return;
+                    }
+                    thread::sleep(delay);
+                    timelog.lock().unwrap().push((arrived, Instant::now()));
+                }
                 let answer = match (method.as_str(), path.as_str()) {
                     ("GET", "/health") => r#"{"status":"ok"}"#.to_string(),
                     ("GET", "/props") => r#"{"default_generation_settings":{"n_ctx":2048},"total_slots":1}"#.into(),
@@ -74,7 +104,7 @@ fn stub() -> Stub {
             });
         }
     });
-    Stub { port, seen }
+    Stub { port, seen, times }
 }
 
 struct Gateway {
@@ -152,6 +182,35 @@ fn http(port: u16, method: &str, path: &str, body: &str, content_type: &str) -> 
     (status, body)
 }
 
+/// One request whose whole answer (headers included) comes back as text.
+fn raw(port: u16, path: &str, body: &str) -> String {
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    write!(
+        s,
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    let mut out = String::new();
+    let _ = s.read_to_string(&mut out);
+    out
+}
+
+fn status_of(answer: &str) -> u16 {
+    answer.split_whitespace().nth(1).and_then(|c| c.parse().ok()).unwrap_or(0)
+}
+
+fn metric(port: u16, name: &str) -> f64 {
+    let (_, text) = http(port, "GET", "/metrics", "", "text/plain");
+    text.lines()
+        .find_map(|l| l.strip_prefix(name).and_then(|r| r.strip_prefix(' ')))
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or_else(|| panic!("no {name} in {text}"))
+}
+
+const CHAT: &str = r#"{"messages":[{"role":"user","content":"x"}]}"#;
+
 fn post(port: u16, path: &str, body: &str) -> (u16, String) {
     http(port, "POST", path, body, "application/json")
 }
@@ -167,6 +226,93 @@ fn health_reports_the_model_server_and_the_budget_from_its_props() {
     assert_eq!(v["ctx_budget"], 2048);
     assert_eq!(v["tls"], false);
     assert_eq!(v["control"], "none");
+    assert_eq!(v["queue"]["queued"], 0);
+    assert_eq!(v["queue"]["max"], 32);
+    assert_eq!(v["queue"]["wait_seconds"], 120);
+}
+
+#[test]
+fn a_busy_model_queues_requests_and_a_full_queue_answers_429() {
+    let s = stub_with(Duration::from_millis(900), false);
+    let g = gateway("queue", s.port, &["--max-inflight", "1", "--queue-max", "1"]);
+    let port = g.port;
+    let first = thread::spawn(move || post(port, "/v1/chat/completions", CHAT).0);
+    thread::sleep(Duration::from_millis(250));
+    let second = thread::spawn(move || post(port, "/v1/chat/completions", CHAT).0);
+    thread::sleep(Duration::from_millis(250));
+    assert_eq!(metric(port, "llmcf_gateway_queued"), 1.0);
+    let third = raw(port, "/v1/chat/completions", CHAT);
+    assert_eq!(status_of(&third), 429, "{third}");
+    assert!(third.contains("queue_full") && third.to_ascii_lowercase().contains("retry-after: 5"), "{third}");
+    assert_eq!(first.join().unwrap(), 200);
+    assert_eq!(second.join().unwrap(), 200, "the queued request is answered once the first is done");
+    assert_eq!(metric(port, "llmcf_gateway_queue_full_total"), 1.0);
+    assert_eq!(metric(port, "llmcf_gateway_queued_total"), 1.0);
+    assert_eq!(metric(port, "llmcf_gateway_queue_wait_seconds_count"), 2.0);
+    assert!(metric(port, "llmcf_gateway_queue_wait_seconds_sum") > 0.3);
+    let log = g.log.lock().unwrap().clone();
+    assert!(log.contains(" queued=") && (log.contains("by=account") || log.contains("by=address")), "{log}");
+}
+
+#[test]
+fn a_request_that_waits_too_long_gets_503_with_retry_after() {
+    let s = stub_with(Duration::from_millis(2500), false);
+    let g = gateway("qwait", s.port, &["--max-inflight", "1", "--queue-wait-seconds", "1"]);
+    let port = g.port;
+    let first = thread::spawn(move || post(port, "/v1/chat/completions", CHAT).0);
+    thread::sleep(Duration::from_millis(250));
+    let started = Instant::now();
+    let second = raw(port, "/v1/chat/completions", CHAT);
+    assert_eq!(status_of(&second), 503, "{second}");
+    assert!(second.contains("queue_timeout") && second.to_ascii_lowercase().contains("retry-after: 15"), "{second}");
+    assert!(started.elapsed() >= Duration::from_millis(900) && started.elapsed() < Duration::from_secs(2));
+    assert_eq!(first.join().unwrap(), 200);
+    assert_eq!(metric(port, "llmcf_gateway_queue_timeouts_total"), 1.0);
+    assert_eq!(s.times.lock().unwrap().len(), 1, "the request that waited too long never reached the model");
+}
+
+#[test]
+fn a_client_that_hangs_up_while_it_waits_frees_its_place() {
+    let s = stub_with(Duration::from_millis(1500), false);
+    let g = gateway("qgone", s.port, &["--max-inflight", "1", "--queue-max", "1"]);
+    let port = g.port;
+    let first = thread::spawn(move || post(port, "/v1/chat/completions", CHAT).0);
+    thread::sleep(Duration::from_millis(250));
+    {
+        let mut c = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        write!(
+            c,
+            "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{CHAT}",
+            CHAT.len()
+        )
+        .unwrap();
+        thread::sleep(Duration::from_millis(250));
+        assert_eq!(metric(port, "llmcf_gateway_queued"), 1.0);
+    }
+    thread::sleep(Duration::from_millis(250));
+    assert_eq!(metric(port, "llmcf_gateway_queued"), 0.0, "the place of the client that left is free");
+    assert_eq!(metric(port, "llmcf_gateway_queue_gone_total"), 1.0);
+    // the freed place takes the next request (the queue holds one)
+    let next = thread::spawn(move || post(port, "/v1/chat/completions", CHAT).0);
+    assert_eq!(first.join().unwrap(), 200);
+    assert_eq!(next.join().unwrap(), 200);
+    assert_eq!(s.times.lock().unwrap().len(), 2, "the request whose client left never reached the model");
+}
+
+#[test]
+fn a_streamed_answer_holds_its_place_until_its_end() {
+    let s = stub_with(Duration::from_millis(800), true);
+    let g = gateway("qstream", s.port, &["--max-inflight", "1"]);
+    let port = g.port;
+    let body = r#"{"messages":[{"role":"user","content":"x"}],"stream":true}"#;
+    let first = thread::spawn(move || raw(port, "/v1/chat/completions", body));
+    thread::sleep(Duration::from_millis(200));
+    let second = thread::spawn(move || raw(port, "/v1/chat/completions", body));
+    let (a, b) = (first.join().unwrap(), second.join().unwrap());
+    assert!(a.contains("[DONE]") && b.contains("[DONE]"), "{a}\n{b}");
+    let times = s.times.lock().unwrap().clone();
+    assert_eq!(times.len(), 2);
+    assert!(times[1].0 >= times[0].1, "the second request reached the model only after the first stream ended");
 }
 
 #[test]

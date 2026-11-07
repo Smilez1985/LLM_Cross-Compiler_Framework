@@ -12,7 +12,9 @@
 mod args;
 mod control;
 mod limits;
+mod peer;
 mod probe;
+mod queue;
 mod rules;
 mod server;
 mod tls;
