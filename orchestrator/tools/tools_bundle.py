@@ -18,6 +18,11 @@ Boards > Board bundle..., through runtime/bundle/service.py). Optional like the 
   run from here: they stop the installer (root_actions_waiting) and run only through llmcf-install after the person's
   own yes in the CLI or the Board bundle window (runtime/bundle/board.py; no tool reaches it).
 
+- harness_report (read): the person's harness runs this computer keeps (harness_run.list_runs) and each run's report,
+  scrubbed (harness_run.scrubbed: states, numbers and the fixed flag codes; no account name, no path, no address,
+  nothing the installer printed). An AI never starts a harness run, never answers an installer's question and never
+  stops one: those are the person's, in the CLI or the Board harness window; this tool contacts no board.
+
 Every caller of the block catalog passes the verified cached community index with its revocations
 (service.catalog_sources: CommunityManager.cached_index(revocations=True)), so a revoked block is never used.
 """
@@ -80,6 +85,19 @@ class BundleDeployIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     bundle_id: str = Field(min_length=1, max_length=48, pattern=BLOCK_ID,
                            description="A bundle the person built (bundle_plan names none; ask the person)")
+
+
+class HarnessReportIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    bundle_id: Optional[str] = Field(default=None, min_length=1, max_length=48, pattern=BLOCK_ID,
+                                     description="Only the runs of this bundle")
+    run: Optional[str] = Field(default=None, min_length=1, max_length=48, pattern=r"^[a-z0-9][a-z0-9_-]{0,47}$",
+                               description="Only this run (its name, e.g. run-20261107120000)")
+
+
+class HarnessReportOut(ToolOutput):
+    runs: List[Dict[str, Any]] = Field(description="Each run, newest first: its state and its report as numbers and "
+                                                   "flag codes (no account, path, address or installer output)")
 
 
 class BundleJobOut(ToolOutput):
@@ -256,6 +274,17 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
                          on_cancel=cancel)
         return BundleJobOut(job_id=job.job_id, kind=job.kind, state=job.state)
 
+    def harness_report(inp: HarnessReportIn) -> HarnessReportOut:
+        from orchestrator.runtime.bundle import harness_run as hr
+        runs = [s for s in hr.list_runs(h.state_dir())
+                if (inp.bundle_id is None or s.bundle_id == inp.bundle_id) and (inp.run is None or s.run == inp.run)]
+        out = [hr.scrubbed(s, hr.stored_report(h.state_dir(), s)) for s in runs[:50]]
+        notes = [] if out else ["No harness run is kept on this computer" + (" for that bundle or run" if
+                                                                             (inp.bundle_id or inp.run) else "")]
+        notes.append("Only the person starts, answers or stops a harness run (the CLI or the framework's Board harness "
+                     "window); this tool only reads")
+        return HarnessReportOut(runs=out, notes=notes)
+
     def device_name(value) -> Optional[str]:
         try:
             from orchestrator.runtime.device.trusted import TrustedDevices
@@ -276,6 +305,15 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
                  examples=({"device_id": "0123456789abcdef", "preset": "stt"},),
                  summary=lambda o: f"Bundle plan: {'ok' if o.plan.get('ok') else 'not ready'}, "
                                    f"{len(o.plan.get('components', []))} components."),
+        ToolSpec("harness_report", "Read harness run reports",
+                 "Reads the person's harness runs on boards as this computer keeps them: each run's state and its "
+                 "report as numbers and fixed flag codes (packages, accounts, ports and files changed, the outcome by "
+                 "the harness's exit codes). No board is contacted; a run is started, answered or stopped only by the "
+                 "person, never through a tool",
+                 ToolTier.READ, HarnessReportIn, HarnessReportOut, harness_report, idempotent=True,
+                 default_decision=Decision.DENY,
+                 examples=({"bundle_id": "harness-01234567-20261107120000"},),
+                 summary=lambda o: f"Harness runs: {len(o.runs)}."),
         ToolSpec("bundle_deploy", "Deploy a board bundle",
                  "Sends a bundle the person built to its trusted board and installs its unprivileged steps with its "
                  "signed installer; root actions stop it (they run only through llmcf-install, after the person's "
@@ -290,4 +328,4 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
     ]
 
 
-__all__ = ["BundleDeployIn", "BundleJobOut", "BundlePlanIn", "BundlePlanOut", "bundle_tool_specs"]
+__all__ = ["BundleDeployIn", "BundleJobOut", "HarnessReportIn", "HarnessReportOut", "BundlePlanIn", "BundlePlanOut", "bundle_tool_specs"]

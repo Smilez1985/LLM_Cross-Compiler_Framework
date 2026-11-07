@@ -204,9 +204,13 @@ def test_the_menu_entry_and_its_paths(qapp):
     assert {k for k in boards.CLI_PATHS if k.startswith("bundle")} >= {"bundle plan", "bundle deploy", "bundle delete",
                                                                         "bundle block new"}
     assert all(boards.WINDOW_OBJECTS[o] == "act_boards_bundle" for k, o in boards.CLI_PATHS.items()
-               if k.startswith("bundle"))
+               if k.startswith("bundle") and not k.startswith("bundle harness"))
+    # the person's harness run has its own window (gui/harness_window.py)
+    assert all(boards.WINDOW_OBJECTS[o] == "act_boards_harness" for k, o in boards.CLI_PATHS.items()
+               if k.startswith("bundle harness"))
     entries = dict(e[:2] for menu in MENU_LAYOUT if menu[0] == "menu_boards" for e in menu[2] if e != "-")
     assert entries["act_boards_bundle"] == "boards.menu.bundle"
+    assert entries["act_boards_harness"] == "boards.menu.harness"
 
 
 def test_deploy_refuses_a_bundle_whose_block_was_revoked_since_the_build(qapp, bundle, tmp_path, monkeypatch):

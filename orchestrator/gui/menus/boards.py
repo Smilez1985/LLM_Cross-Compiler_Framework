@@ -7,7 +7,9 @@ Boards > Boards and Devices... (act_boards_devices) opens one window for every b
 boards_window.py): the stored and the trusted boards in one table, with Add a trusted board..., Edit address or
 key..., Remove trust..., Settings..., Runtime plan, Status, Build runtime..., Deploy runtime..., Verify..., Remove older runtime packages...,
 Remove older builds on the board... and Check this board (Mojo). Boards > Board bundle... (act_boards_bundle) opens
-the board bundle window (orchestrator/gui/bundle_window.py: `llmcf bundle` by mouse). The menu sits after the Build
+the board bundle window (orchestrator/gui/bundle_window.py: `llmcf bundle` by mouse), Boards > Board harness...
+(act_boards_harness) the person's harness run (orchestrator/gui/harness_window.py: `llmcf bundle harness` by mouse). The
+menu sits after the Build
 menu (after File while there is none). The window and the board modules load when the entry is first used (lazy loading, RG1).
 
 CLI_PATHS names, for each `llmcf` command path of this area, the object that does it by mouse; WINDOW_OBJECTS names,
@@ -23,6 +25,29 @@ from orchestrator.utils.localization import ui_text
 MENU_NAME = place.MENU_BOARDS
 ACTION_NAME = "act_boards_devices"
 BUNDLE_ACTION = "act_boards_bundle"
+HARNESS_ACTION = "act_boards_harness"
+# `llmcf bundle harness ...` by mouse: the objects of the Board harness window (gui/harness_window.py)
+HARNESS_PATHS: Dict[str, str] = {
+    "bundle harness take-in": "btn_harness_take_in",
+    **{f"bundle harness take-in {o}": "btn_harness_take_in"
+       for o in ("--kind", "--installer", "--ref", "--pin", "--title", "--dry-run-arg", "--assume-yes",
+                 "--exit-code")},
+    "bundle harness dry-run": "btn_harness_dry_run",
+    "bundle harness dry-run --component": "cmb_harness_bundle",
+    "bundle harness run": "btn_harness_run",
+    "bundle harness run --component": "cmb_harness_bundle",
+    "bundle harness run --assume-yes": "chk_harness_assume_yes",
+    "bundle harness run --skip-dry-run": "chk_harness_skip_dry",
+    "bundle harness attach": "btn_harness_attach",               # the run chosen in lst_harness_runs
+    "bundle harness attach --component": "cmb_harness_bundle",
+    "bundle harness answer": "btn_harness_send",                 # the answer field, then Send
+    "bundle harness answer --component": "cmb_harness_bundle",
+    "bundle harness answer --hidden": "chk_harness_hidden",
+    "bundle harness stop": "btn_harness_stop",
+    "bundle harness stop --component": "cmb_harness_bundle",
+    "bundle harness report": "btn_harness_report",               # without a run: the list of runs in the window
+    "bundle harness report --component": "cmb_harness_bundle",
+}
 # `llmcf bundle ...` by mouse: the objects of the Board bundle window (gui/bundle_window.py)
 BUNDLE_PATHS: Dict[str, str] = {
     "bundle plan": "btn_bundle_plan",
@@ -125,7 +150,9 @@ CLI_PATHS: Dict[str, str] = {
 WINDOW_OBJECTS: Dict[str, str] = {name: ACTION_NAME for name in set(CLI_PATHS.values()) if name != ACTION_NAME}
 WINDOW_OBJECTS["btn_boards_check"] = ACTION_NAME
 WINDOW_OBJECTS.update({name: BUNDLE_ACTION for name in set(BUNDLE_PATHS.values())})
+WINDOW_OBJECTS.update({name: HARNESS_ACTION for name in set(HARNESS_PATHS.values())})
 CLI_PATHS.update(BUNDLE_PATHS)
+CLI_PATHS.update(HARNESS_PATHS)
 MACHINE_ONLY: Dict[str, str] = {
     "deploy devices list --json": "machine-readable output; the window shows the same rows",
     "device list --json": "machine-readable output; the window shows the same rows",
@@ -138,6 +165,7 @@ MACHINE_ONLY: Dict[str, str] = {
     "bundle list --json": "machine-readable output; the window lists the same stored bundles",
     "bundle block list --json": "machine-readable output; the window lists the same blocks",
     "bundle build --allow-own": "script switch: the window asks before an own unsigned block is used",
+    "bundle harness report --json": "machine-readable output; Report shows the same report in the window",
 }
 BUILD_MENU_TITLES = ("Build", "Bauen")
 
@@ -164,9 +192,13 @@ def install(window, menubar) -> None:
     menu.addAction(action)
     bundle = place.new_action(window, BUNDLE_ACTION, ui_text("boards.menu.bundle"), lambda: open_bundle_window(window))
     menu.addAction(bundle)
+    harness = place.new_action(window, HARNESS_ACTION, ui_text("boards.menu.harness"),
+                               lambda: open_harness_window(window))
+    menu.addAction(harness)
     window.menu_boards = menu
     window.act_boards_devices = action
     window.act_boards_bundle = bundle
+    window.act_boards_harness = harness
 
 
 def open_boards_window(window):
@@ -181,5 +213,11 @@ def open_bundle_window(window):
     return open_bundle(window)
 
 
-__all__ = ["ACTION_NAME", "BUNDLE_ACTION", "CLI_PATHS", "MACHINE_ONLY", "MENU_NAME", "WINDOW_OBJECTS", "install",
-           "open_boards_window", "open_bundle_window"]
+def open_harness_window(window):
+    """Shows the Board harness window of the main window (fresh data each time it opens)."""
+    from orchestrator.gui.harness_window import open_harness
+    return open_harness(window)
+
+
+__all__ = ["ACTION_NAME", "BUNDLE_ACTION", "CLI_PATHS", "HARNESS_ACTION", "MACHINE_ONLY", "MENU_NAME", "WINDOW_OBJECTS", "install",
+           "open_boards_window", "open_bundle_window", "open_harness_window"]

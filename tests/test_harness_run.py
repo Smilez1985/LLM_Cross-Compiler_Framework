@@ -7,6 +7,7 @@ report; the scrubbed view an AI may read holds no account, no path and nothing t
 The fake board is tests/test_llmcf_install.py's (a POSIX sh gate, a fake sudo running the test build with --root);
 every name and value here is a test value."""
 
+import json
 import os
 import shutil
 import time
@@ -153,3 +154,69 @@ def test_the_records_are_read_back_into_the_watch_layout(tmp_path):
     assert (tmp_path / "exit_code").read_text() == "0\n"
     assert (tmp_path / "after" / "accounts.txt").read_text().startswith("agent:990")
     assert not (tmp_path.parent / "escape").exists() and not (tmp_path / "escape").exists()
+
+
+# --- the person's channels ---------------------------------------------------------------------------------------------
+
+def test_an_ai_never_starts_answers_or_stops_a_harness_run():
+    root = Path(__file__).resolve().parents[1] / "orchestrator" / "tools"
+    for path in root.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        for word in ("start_run", "answer_run", "stop_run", "collect_report", "follow_on_board", "bundle-harness",
+                     "harness_window"):
+            assert word not in text, f"{path.name} names {word}"
+    assert "hr.scrubbed(" in (root / "tools_bundle.py").read_text(encoding="utf-8")
+
+
+@pytest.fixture
+def cli_harness(harness_board, monkeypatch):
+    from rich.console import Console
+    from orchestrator import cli as cli_module
+    from orchestrator.runtime.device import remote
+    from test_bundle_ui import _stored_board
+    shell, built, state = harness_board
+    _stored_board(state)
+    monkeypatch.setattr(cli_module, "_state_dir", lambda ctx: state)
+    monkeypatch.setattr(cli_module, "_open_device", lambda *a, **kw: (shell, "key"))
+    monkeypatch.setattr(remote, "RemoteShell", lambda session: session)
+    monkeypatch.setattr(cli_module, "console", Console(width=1000, color_system=None))
+    return built, state
+
+
+def test_the_cli_asks_runs_with_the_answer_typed_and_reports(cli_harness, monkeypatch):
+    from orchestrator import cli as cli_module
+    from test_cli_builds import invoke_plain
+    built, state = cli_harness
+    res = invoke_plain("bundle", "harness", "run", built.bundle_id)
+    assert res.code == 1 and "needs your answer at a terminal" in res.out and hr.list_runs(state) == []
+    monkeypatch.setattr(cli_module, "_interactive", lambda: True)
+    res = invoke_plain("bundle", "harness", "run", built.bundle_id, input="y\ny\nagent-account\n")
+    assert res.code == 0, res.out
+    assert "would install the demo agent" in res.out and "set up for agent-account" in res.out
+    assert "finished with findings" in res.out
+    runs = invoke_plain("bundle", "harness", "report", built.bundle_id)
+    assert runs.code == 0 and runs.out.count("findings") == 1 and "done" in runs.out
+    run = hr.list_runs(state)[0].run
+    one = invoke_plain("bundle", "harness", "report", built.bundle_id, run, "--json")
+    assert json.loads(one.stdout)["report"]["outcome"] == "findings"
+    res = invoke_plain("bundle", "harness", "run", built.bundle_id, "--assume-yes", "--skip-dry-run", input="y\n")
+    assert res.code == 1 and "carries no assume-yes switch" in res.out
+
+
+def test_the_cli_takes_a_harness_in(tmp_path, monkeypatch):
+    from orchestrator import cli as cli_module
+    from test_cli_builds import invoke_plain
+    monkeypatch.setattr(cli_module, "_state_dir", lambda ctx: tmp_path / "state")
+    src = tmp_path / "h"
+    (src / "installer").mkdir(parents=True)
+    (src / "installer" / "install.sh").write_text("#!/bin/sh\nexit 0\n")
+    res = invoke_plain("bundle", "harness", "take-in", "mine", str(src), "--kind", "folder", "--installer",
+                       "installer/install.sh", "--dry-run-arg=--dry-run", "--exit-code", "0=done",
+                       "--exit-code", "2=findings")
+    assert res.code == 0 and "Took in harness mine" in res.out, res.out
+    record = hz.stored(tmp_path / "state", "mine")[0]
+    assert record["spec"]["dry_run_args"] == ["--dry-run"] and record["spec"]["exit_codes"] == {"0": "done",
+                                                                                                "2": "findings"}
+    bad = invoke_plain("bundle", "harness", "take-in", "mine", str(src), "--kind", "folder", "--installer",
+                       "installer/install.sh", "--exit-code", "0=fine")
+    assert bad.code == 1 and "CODE=done" in bad.out

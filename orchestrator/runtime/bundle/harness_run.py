@@ -435,6 +435,19 @@ def on_board(open_session: Callable[[], Any], step: Callable[[Any], Any]) -> Any
             close()
 
 
+_RE_ESCAPES = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()*+][0-9A-Za-z]|\x1b[@-_]?")
+_RE_CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def plain_output(chunk: bytes) -> str:
+    """The installer's output as plain text for the person's terminal or window: its terminal's escape sequences
+    (colours, cursor moves, a window title, a clipboard write) and other control characters taken out, line ends as
+    "\\n". Nothing the installer prints can steer the person's own terminal."""
+    text = chunk.decode("utf-8", errors="replace").replace("\r\n", "\n")
+    text = _RE_ESCAPES.sub("", text)
+    return _RE_CONTROLS.sub("", text)
+
+
 def report_lines(state: RunState, rep: Optional[HarnessReport], lang: str = "en") -> List[str]:
     """The run for the person: its state, then the report (harness_report.render) when it was read."""
     from orchestrator.runtime.bundle.harness_report import render
@@ -445,6 +458,6 @@ def report_lines(state: RunState, rep: Optional[HarnessReport], lang: str = "en"
 
 
 __all__ = ["DRY_QUESTION", "Follower", "HarnessRunError", "NOT_READY_NEXT", "RUN_QUESTION", "RunState",
-           "STOP_QUESTION", "answer_run", "collect_report", "follow_on_board", "harness_component", "list_runs",
+           "STOP_QUESTION", "answer_run", "plain_output", "collect_report", "follow_on_board", "harness_component", "list_runs",
            "load_state", "on_board", "parse_records", "report_lines", "run_folder", "run_name", "save_state",
            "scrubbed", "start_run", "stop_run", "stored_report"]

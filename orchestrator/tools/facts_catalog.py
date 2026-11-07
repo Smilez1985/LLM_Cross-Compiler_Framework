@@ -358,6 +358,8 @@ TOOL_FACTS: Dict[str, ToolFacts] = {
                              delegable="not_needed", undo="nothing to undo"),
     "bundle_deploy": ToolFacts(_DEVICE, delegable="never",
                                undo="roll back or uninstall it in the Board bundle window"),
+    # the person's harness runs: read only, scrubbed; starting, answering and stopping are the person's
+    "harness_report": ToolFacts(delegable="not_needed", undo="nothing to undo"),
     "answer_approval": ToolFacts(delegable="never"),
     # Only harmless repairs, every call asked. Extension point M3a/M6 (with WP11): the blockers repair_manual,
     # repair_needs_person and wrong_account, and the delegation group "repairs" for harmless repairs only.

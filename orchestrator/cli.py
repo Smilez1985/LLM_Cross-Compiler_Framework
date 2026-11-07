@@ -8129,6 +8129,342 @@ def bundle_block_new(ctx: FrameworkContext, block_id: str, kind: str, title: str
                   "'## Models' section; publish it with llm-cli zoo export.")
 
 
+@bundle.group('harness')
+def bundle_harness():
+    """The person's own agent harness on the board: take it in at a pin, its installer's dry run and run as root
+    through llmcf-install (watched, detached from the SSH session, its questions answered live), attach again,
+    answer, stop and the report"""
+    pass
+
+
+@bundle_harness.command('take-in')
+@click.argument('harness_id', metavar='ID')
+@click.argument('location')
+@click.option('--kind', type=click.Choice(['git', 'archive', 'folder']), required=True,
+              help='git: an https link to its repository; archive: a .zip, .tar.gz or .tar file; folder: a folder')
+@click.option('--installer', required=True, help="The installer's path inside the harness, e.g. installer/install.sh")
+@click.option('--ref', default=None, help='git only: the branch or tag to take (resolved to its commit)')
+@click.option('--pin', default=None, help="The commit (git) or the archive's sha256 it must have")
+@click.option('--title', default=None, help='A short title (default: the id)')
+@click.option('--dry-run-arg', 'dry_args', multiple=True,
+              help="An option of the installer's own dry run, written --dry-run-arg=--dry-run (repeatable)")
+@click.option('--assume-yes', 'assume_yes', default=None,
+              help="The harness's own assume-yes switch NAME=value; a run uses it only after your opt-in")
+@click.option('--exit-code', 'exit_codes', multiple=True,
+              help='CODE=done or CODE=findings: what an exit code of the installer means (repeatable; default 0=done)')
+@pass_context
+def bundle_harness_take_in(ctx: FrameworkContext, harness_id: str, location: str, kind: str, installer: str,
+                           ref: Optional[str], pin: Optional[str], title: Optional[str], dry_args: Tuple[str, ...],
+                           assume_yes: Optional[str], exit_codes: Tuple[str, ...]):
+    """Take your harness in at a pin (a commit of its repository, or the sha256 of an archive) and keep its tree with
+    one checksum; llmcf never builds it: its own installer runs on the board later, after your yes"""
+    from orchestrator.runtime.bundle import harness as hz
+    from orchestrator.utils.locality import offline_mode
+    codes: Dict[int, str] = {}
+    for item in exit_codes or ("0=done",):
+        code, _, meaning = item.partition("=")
+        if not code.isdigit() or meaning not in hz.OUTCOMES:
+            console.print(f"[red]--exit-code {escape(item)}: CODE=done or CODE=findings.[/red]")
+            sys.exit(1)
+        codes[int(code)] = meaning
+    spec = hz.HarnessSpec(id=harness_id, title=title or harness_id, kind=kind,
+                          location=location if kind == "git" else str(Path(location).expanduser()),
+                          installer=installer, ref=ref, pin=pin, dry_run_args=tuple(dry_args), assume_yes=assume_yes,
+                          exit_codes=codes)
+    config, _ = _settings(ctx)
+    try:
+        taken = hz.take_in(spec, _state_dir(ctx), offline=bool(offline_mode(config)))
+    except hz.HarnessError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]Took in harness {taken.spec.id}[/green] at {taken.pin}: {taken.files} files, "
+                  f"{taken.size} bytes, tree checksum {taken.tree_sha256}.")
+    console.print(f"Put it into a bundle: llm-cli bundle build DEVICE --block harness-agent --set "
+                  f"harness.harness={taken.spec.id}")
+
+
+def _harness_bundle(ctx: FrameworkContext, bundle_id: str, component: Optional[str]):
+    """(built, component, opener, audit) of a stored bundle's harness; exits with the reason when it has none."""
+    from orchestrator.runtime.bundle import harness_run as hr
+    _store, built = _bundle_get(ctx, bundle_id)
+    try:
+        comp = hr.harness_component(built, component)
+    except hr.HarnessRunError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        if e.next_step:
+            console.print(escape(e.next_step))
+        sys.exit(1)
+    opener = _bundle_opener(ctx, built)
+    return built, comp, opener, _device_audit(ctx, _state_dir(ctx))
+
+
+def _harness_failed(ctx: FrameworkContext, error, opener) -> None:
+    """A refused or failed harness step in the person's words, with its next step; exits 1."""
+    from orchestrator.runtime.bundle import harness_run as hr
+    from orchestrator.runtime.device.remote import RemoteError
+    if isinstance(error, hr.HarnessRunError):
+        console.print(f"[red]{escape(str(error))}[/red]")
+        if error.next_step:
+            console.print(escape(error.next_step))
+        sys.exit(1)
+    if isinstance(error, RemoteError):
+        _board_step_failed(ctx, error, opener[1], opener[2])
+    raise error
+
+
+def _harness_follow(ctx: FrameworkContext, built, state, opener, *, answers: bool) -> None:
+    """Prints the run's output live until the installer ended (a dropped connection: a new session reads on from the
+    stored offset). With `answers`, every line typed at the terminal goes to the installer as its answer, over a
+    session of its own. Ctrl+C detaches: the installer goes on on the board."""
+    import queue
+    import threading
+    from orchestrator.runtime.bundle import harness_run as hr
+    state_dir = _state_dir(ctx)
+    open_session = opener[0]
+    stop = threading.Event()
+    failure: List[BaseException] = []
+
+    def show(chunk: bytes) -> None:
+        click.echo(hr.plain_output(chunk), nl=False)
+
+    def follow() -> None:
+        try:
+            hr.follow_on_board(open_session, built, state, state_dir=state_dir, on_output=show,
+                               cancelled=stop.is_set, say=lambda m: console.print(f"[yellow]{escape(m)}[/yellow]"))
+        except BaseException as e:  # noqa: BLE001 - reported in the main thread
+            failure.append(e)
+
+    reader = threading.Thread(target=follow, name="harness-follow", daemon=True)
+    reader.start()
+    lines: "queue.Queue[str]" = queue.Queue()
+    if answers and _interactive():
+        console.print("[dim]Type an answer and Enter when the installer asks; Ctrl+C detaches (the installer goes "
+                      "on).[/dim]")
+
+        def typed() -> None:
+            for line in sys.stdin:
+                lines.put(line.rstrip("\r\n"))
+        threading.Thread(target=typed, name="harness-answers", daemon=True).start()
+    try:
+        while reader.is_alive():
+            reader.join(0.2)
+            try:
+                line = lines.get_nowait()
+            except queue.Empty:
+                continue
+            try:
+                hr.on_board(open_session, lambda shell: hr.answer_run(shell, built, state, line))
+            except Exception as e:  # noqa: BLE001 - the run goes on; the person reads why the answer did not go
+                console.print(f"[yellow]The answer did not reach the installer: {escape(str(e))}[/yellow]")
+    except KeyboardInterrupt:
+        stop.set()
+        console.print(f"\nDetached; the installer goes on on the board. Attach again: llm-cli bundle harness attach "
+                      f"{built.bundle_id} {state.run}")
+        sys.exit(0)
+    if failure:
+        _harness_failed(ctx, failure[0], opener)
+
+
+def _harness_report(ctx: FrameworkContext, built, state, opener) -> None:
+    from orchestrator.runtime.bundle import harness_run as hr
+    try:
+        rep = hr.on_board(opener[0], lambda shell: hr.collect_report(
+            shell, built, state, state_dir=_state_dir(ctx), audit=_device_audit(ctx, _state_dir(ctx))))
+    except Exception as e:  # noqa: BLE001 - _harness_failed says why
+        _harness_failed(ctx, e, opener)
+    for line in hr.report_lines(state, rep):
+        console.print(escape(line))
+    console.print(f"The installer's whole output: {escape(str(hr.run_folder(_state_dir(ctx), state) / hr.LOG_FILE))}")
+
+
+def _harness_start(ctx: FrameworkContext, built, comp, opener, mode: str):
+    from orchestrator.runtime.bundle import harness_run as hr
+    try:
+        return hr.on_board(opener[0], lambda shell: hr.start_run(
+            shell, built, comp.id, mode, state_dir=_state_dir(ctx), device_id=built.manifest.board.device_id,
+            audit=_device_audit(ctx, _state_dir(ctx))))
+    except Exception as e:  # noqa: BLE001 - _harness_failed says why
+        _harness_failed(ctx, e, opener)
+
+
+def _harness_dry(ctx: FrameworkContext, built, comp, opener) -> bool:
+    """The report before: the harness's own dry run after the person's yes, or (it has none) what the bundle says."""
+    from orchestrator.runtime.bundle import harness_run as hr
+    part = comp.harness
+    if not part.dry_run_args:
+        console.print(f"Harness {part.id} has no dry run of its own. The bundle says: installer {part.installer}, "
+                      f"tree {part.tree_sha256}, pin {part.pin}.")
+        return True
+    if not (_interactive() and click.confirm(hr.DRY_QUESTION.format(harness=part.id, board=opener[3],
+                                                                    args=" ".join(part.dry_run_args)),
+                                             default=False)):
+        console.print("Nothing was started on the board" + ("" if _interactive() else
+                                                             " (it needs your answer at a terminal)") + ".")
+        return False
+    state = _harness_start(ctx, built, comp, opener, "dry")
+    _harness_follow(ctx, built, state, opener, answers=False)
+    _harness_report(ctx, built, state, opener)
+    return True
+
+
+@bundle_harness.command('dry-run')
+@click.argument('bundle_id', metavar='BUNDLE')
+@click.option('--component', default=None, help='The harness component (when the bundle has several)')
+@pass_context
+def bundle_harness_dry_run(ctx: FrameworkContext, bundle_id: str, component: Optional[str]):
+    """The harness installer's own dry run on the board, after your yes: what it would do, watched, and its report
+    (the report before)"""
+    built, comp, opener, _audit = _harness_bundle(ctx, bundle_id, component)
+    if not _harness_dry(ctx, built, comp, opener):
+        sys.exit(1)
+
+
+@bundle_harness.command('run')
+@click.argument('bundle_id', metavar='BUNDLE')
+@click.option('--component', default=None, help='The harness component (when the bundle has several)')
+@click.option('--assume-yes', 'assume_yes', is_flag=True,
+              help="Use the harness's own assume-yes switch (only when the bundle carries it: your opt-in at build)")
+@click.option('--skip-dry-run', 'skip_dry', is_flag=True, help='Run without the dry run before')
+@pass_context
+def bundle_harness_run(ctx: FrameworkContext, bundle_id: str, component: Optional[str], assume_yes: bool,
+                       skip_dry: bool):
+    """Run the harness's own installer on the board as root through llmcf-install, after its dry run and your yes:
+    its output live, its questions answered at this terminal, detached from the SSH session (Ctrl+C detaches; attach
+    again with bundle harness attach), and the report after"""
+    from orchestrator.runtime.bundle import harness_run as hr
+    built, comp, opener, _audit = _harness_bundle(ctx, bundle_id, component)
+    if not skip_dry and not _harness_dry(ctx, built, comp, opener):
+        sys.exit(1)
+    if not (_interactive() and click.confirm(hr.RUN_QUESTION.format(harness=comp.harness.id, board=opener[3]),
+                                             default=False)):
+        console.print("The harness installer was not started" + ("" if _interactive() else
+                                                                 " (it needs your answer at a terminal)") + ".")
+        sys.exit(1)
+    state = _harness_start(ctx, built, comp, opener, "run-yes" if assume_yes else "run")
+    console.print(f"Started run {state.run} on the board.")
+    _harness_follow(ctx, built, state, opener, answers=not assume_yes)
+    _harness_report(ctx, built, state, opener)
+
+
+def _harness_state(ctx: FrameworkContext, built, comp, run: str):
+    """The run's state on this computer, or a new one for a run started elsewhere (read from byte 0)."""
+    from orchestrator.runtime.bundle import harness_run as hr
+    if not hr.RE_RUN.fullmatch(run):
+        console.print("[red]That is not the name of a run (llm-cli bundle harness report BUNDLE lists them).[/red]")
+        sys.exit(1)
+    state = hr.load_state(_state_dir(ctx), comp.harness.id, built.bundle_id, comp.id, run)
+    if state is None:
+        state = hr.RunState(bundle_id=built.bundle_id, component=comp.id, run=run,
+                            mode="dry" if run.startswith("dry-") else "run", harness=comp.harness.id,
+                            tree_sha256=comp.harness.tree_sha256, device_id=built.manifest.board.device_id,
+                            status="running")
+        hr.save_state(_state_dir(ctx), state)
+    return state
+
+
+@bundle_harness.command('attach')
+@click.argument('bundle_id', metavar='BUNDLE')
+@click.argument('run')
+@click.option('--component', default=None, help='The harness component (when the bundle has several)')
+@pass_context
+def bundle_harness_attach(ctx: FrameworkContext, bundle_id: str, run: str, component: Optional[str]):
+    """Attach to a run again (after Ctrl+C or a dropped connection): its output from where this computer read it,
+    your answers, and the report once it ended"""
+    built, comp, opener, _audit = _harness_bundle(ctx, bundle_id, component)
+    state = _harness_state(ctx, built, comp, run)
+    if state.status != "ended":
+        _harness_follow(ctx, built, state, opener, answers=state.mode != "dry")
+    _harness_report(ctx, built, state, opener)
+
+
+@bundle_harness.command('answer')
+@click.argument('bundle_id', metavar='BUNDLE')
+@click.argument('run')
+@click.option('--component', default=None, help='The harness component (when the bundle has several)')
+@click.option('--hidden', is_flag=True, help='Type the answer hidden (a password the installer asks for)')
+@pass_context
+def bundle_harness_answer(ctx: FrameworkContext, bundle_id: str, run: str, component: Optional[str], hidden: bool):
+    """Pass one answer to the installer of a run (typed at this terminal; never kept, never in the audit log)"""
+    from orchestrator.runtime.bundle import harness_run as hr
+    built, comp, opener, _audit = _harness_bundle(ctx, bundle_id, component)
+    state = _harness_state(ctx, built, comp, run)
+    if not _interactive():
+        console.print("[red]An answer is typed by you at a terminal.[/red]")
+        sys.exit(1)
+    line = click.prompt("Answer", hide_input=hidden, default="", show_default=False)
+    try:
+        hr.on_board(opener[0], lambda shell: hr.answer_run(shell, built, state, line))
+    except Exception as e:  # noqa: BLE001 - _harness_failed says why
+        _harness_failed(ctx, e, opener)
+    console.print("The answer went to the installer.")
+
+
+@bundle_harness.command('stop')
+@click.argument('bundle_id', metavar='BUNDLE')
+@click.argument('run')
+@click.option('--component', default=None, help='The harness component (when the bundle has several)')
+@pass_context
+def bundle_harness_stop(ctx: FrameworkContext, bundle_id: str, run: str, component: Optional[str]):
+    """Stop the installer of a run on the board, after your yes (what it did so far stays; the watch records the
+    end)"""
+    from orchestrator.runtime.bundle import harness_run as hr
+    built, comp, opener, audit = _harness_bundle(ctx, bundle_id, component)
+    state = _harness_state(ctx, built, comp, run)
+    if not (_interactive() and click.confirm(hr.STOP_QUESTION.format(harness=comp.harness.id, board=opener[3]),
+                                             default=False)):
+        console.print("The installer was not stopped.")
+        sys.exit(1)
+    try:
+        hr.on_board(opener[0], lambda shell: hr.stop_run(shell, built, state, state_dir=_state_dir(ctx), audit=audit))
+    except Exception as e:  # noqa: BLE001 - _harness_failed says why
+        _harness_failed(ctx, e, opener)
+    console.print(f"Stopped. Its report: llm-cli bundle harness report {bundle_id} {run}")
+
+
+@bundle_harness.command('report')
+@click.argument('bundle_id', metavar='BUNDLE')
+@click.argument('run', required=False)
+@click.option('--component', default=None, help='The harness component (when the bundle has several)')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def bundle_harness_report(ctx: FrameworkContext, bundle_id: str, run: Optional[str], component: Optional[str],
+                          as_json: bool):
+    """The runs of a bundle's harness (without RUN), or one run's report: the one kept on this computer, else read
+    from the board once the installer ended"""
+    from dataclasses import asdict
+    from orchestrator.runtime.bundle import harness_run as hr
+    _store, built = _bundle_get(ctx, bundle_id)
+    state_dir = _state_dir(ctx)
+    if run is None:
+        runs = [s for s in hr.list_runs(state_dir) if s.bundle_id == bundle_id
+                and (component is None or s.component == component)]
+        if as_json:
+            click.echo(json.dumps({"runs": [asdict(s) for s in runs]}, indent=2, sort_keys=True))
+            return
+        if not runs:
+            console.print(f"No harness run of bundle {bundle_id} on this computer yet.")
+            return
+        for s in runs:
+            console.print(escape(f"{s.run}  {s.component}  {s.mode}  {s.status}  "
+                                 f"{s.outcome or '-'}  started {s.started}"))
+        return
+    built, comp, opener, _audit = _harness_bundle(ctx, bundle_id, component)
+    state = _harness_state(ctx, built, comp, run)
+    rep = hr.stored_report(state_dir, state)
+    if rep is None and state.status == "ended":
+        _harness_report(ctx, built, state, opener)
+        return
+    if as_json:
+        click.echo(json.dumps({"run": asdict(state), "report": rep.as_dict() if rep else None}, indent=2,
+                              sort_keys=True))
+        return
+    for line in hr.report_lines(state, rep):
+        console.print(escape(line))
+    if rep is None:
+        console.print(f"The installer has not ended (as far as this computer read): llm-cli bundle harness attach "
+                      f"{bundle_id} {run}")
+
+
 # ============================================================================
 # CONFIG COMMANDS (SOURCES MANAGEMENT)
 # ============================================================================
