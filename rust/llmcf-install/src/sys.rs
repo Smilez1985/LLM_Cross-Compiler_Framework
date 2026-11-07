@@ -74,7 +74,10 @@ impl Env {
         let mut cmd = Command::new(program);
         cmd.args(args).env_clear().env("PATH", CLEARED_PATH).env("LC_ALL", "C").stdin(Stdio::null());
         if self.test {
+            // the test build only: the harness watch looks at the prefix's own places, never this computer's
             cmd.env("LLMCF_TEST_ROOT", &self.root);
+            cmd.env("LLMCF_WATCH_DIRS", self.root.join("watched"));
+            cmd.env("LLMCF_WATCH_PASSWD", self.root.join("etc/passwd"));
         }
         match cmd.output() {
             Ok(out) => {

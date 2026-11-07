@@ -96,7 +96,10 @@ define("bundle-kept", ("word", "word"),
 FIXED_HELPER = gate.LIBEXEC_DIR + "/" + ROOT
 FIXED_DIR = gate.LIBEXEC_DIR
 DROPIN = gate.SUDOERS_DIR + "/llmcf-install"
-_HELPER_ACTIONS = inst.ROOT_ACTIONS
+# the sudo rule names every action of llmcf-install: the bundle's root actions and the person's harness run
+_HELPER_ACTIONS = inst.ROOT_ACTIONS + inst.HARNESS_ACTIONS
+# a drop-in written before the harness actions lacks them: the readiness reads it as missing and sets it up again
+_DROPIN_CHECK = "harness-read"
 
 
 def places_sh(helper: str = FIXED_HELPER, dropin: str = DROPIN) -> str:
@@ -136,7 +139,8 @@ def _ready_body(sha: str) -> str:
         'case $llmcf_u in ""|root|-*|*[!A-Za-z0-9._-]*) echo account=bad ;; *) echo account=ok ;; esac',
         'if [ ! -e "$llmcf_fx" ]; then echo helper=absent; elif ! llmcf_fixed_ok; then echo helper=unsafe; '
         f'elif [ "$(llmcf_sha "$llmcf_fx")" = {sha} ]; then echo helper=same; else echo helper=other; fi',
-        "if llmcf_dropin_ok status llmcf-check; then echo dropin=yes; else echo dropin=no; fi",
+        f"if llmcf_dropin_ok status llmcf-check && llmcf_dropin_ok {_DROPIN_CHECK} llmcf-check; then echo dropin=yes; "
+        "else echo dropin=no; fi",
         *gate.SYSTEM_FACTS,
     ])
 
@@ -203,7 +207,8 @@ def _setup_body(via: str, manager: str, bundle: str, sha: str) -> str:
         # 2. the root-owned signer files: pairing's root step puts them there, never this operation
         "LLMCF_HOME_GATE=; llmcf_trusted_signers || no no-signer",
         # root is asked for only when something is missing (a second setup of a ready board needs no password)
-        f'if ! {{ llmcf_fixed_ok && [ "$(llmcf_sha "$llmcf_fx")" = {sha} ] && llmcf_dropin_ok status {bundle}; }}; then',
+        f'if ! {{ llmcf_fixed_ok && [ "$(llmcf_sha "$llmcf_fx")" = {sha} ] && llmcf_dropin_ok status {bundle} && '
+        f'llmcf_dropin_ok {_DROPIN_CHECK} {bundle}; }}; then',
         "  asroot true >/dev/null 2>&1 || { if [ -n \"$llmcf_pw\" ]; then no sudo-refused; else no needs-password; fi; }",
         "fi",
         f'llmcf_b="$HOME"/{inst.BUNDLE_REL}; llmcf_k="$llmcf_b"/{bundle}/.kept',
@@ -223,7 +228,7 @@ def _setup_body(via: str, manager: str, bundle: str, sha: str) -> str:
         "  did helper",
         "fi",
         # 4. the sudoers drop-in: only llmcf-install at its fixed place, only its actions, no password
-        f"if ! llmcf_dropin_ok status {bundle}; then",
+        f"if ! {{ llmcf_dropin_ok status {bundle} && llmcf_dropin_ok {_DROPIN_CHECK} {bundle}; }}; then",
         '  llmcf_v=$(command -v visudo 2>/dev/null || echo /usr/sbin/visudo)',
         '  [ -x "$llmcf_v" ] || no no-visudo',
         '  printf "%s\\n" "# llmcf-install: the board account may run only the framework\'s root helper at its fixed '
@@ -236,7 +241,7 @@ def _setup_body(via: str, manager: str, bundle: str, sha: str) -> str:
         '  if ! asroot "$llmcf_v" -cf "$llmcf_di.llmcf-new" >/dev/null 2>&1; then '
         'asroot rm -f "$llmcf_di.llmcf-new" >/dev/null 2>&1; no sudoers; fi',
         '  asroot mv -f "$llmcf_di.llmcf-new" "$llmcf_di" >/dev/null 2>&1 || no sudo',
-        f"  llmcf_dropin_ok status {bundle} || no dropin",
+        f"  llmcf_dropin_ok status {bundle} && llmcf_dropin_ok {_DROPIN_CHECK} {bundle} || no dropin",
         "  did dropin",
         "fi",
         'echo "ready=done changed=${llmcf_ch:-none}"',
@@ -356,6 +361,75 @@ define("bundle-ready-setup", ("word", "word", "word", "sha256"),
 define("bundle-ready-remove", ("word",), lambda via, rest="": _remove_body(via),
        refuse=lambda args: "" if args[0] in ("sudo", "su") else "not a way to reach root (sudo or su)",
        doc="after the person's separate yes: removes exactly the sudoers drop-in and llmcf-install at its fixed place")
+
+
+_RUN_NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,47}")
+
+
+def _harness_body(action: str, bundle: str, comp: str, run: str, value: str, sha: str) -> str:
+    """bundle-harness with its values in place: llmcf-install's harness action (installer.HARNESS_ACTIONS) for the
+    run `run` of the harness component `comp`, from its fixed root-owned place with this bundle's sha256, through its
+    sudoers drop-in only (sudo -n: a harness run never takes a password; the board's root readiness sets it up).
+    `value` is the mode of harness-start or the byte offset of harness-read ("0" for the others). stdin's first line
+    is the person's answer for harness-answer, passed on stdin, never as an argument and never shown."""
+    cases = "|".join(inst.HARNESS_ACTIONS)
+    refuse = 'echo "llmcf-bundle: result={0} changed=0 {1}"; exit 3'
+    word = '""|-*|.*|*[!a-z0-9._-]*'
+    return "\n".join([
+        gate.signed_sh(),
+        places_sh(),
+        _FIXED_FNS,
+        'IFS= read -r llmcf_line || llmcf_line=""',
+        f'case {action} in {cases}) ;; *) {refuse.format("refused", "not an action of this operation")} ;; esac',
+        f'case {bundle} in {word}) {refuse.format("refused", "not a bundle id")} ;; esac',
+        f'case {comp} in {word}) {refuse.format("refused", "not a component")} ;; esac',
+        f'case {run} in {word}|*.*) {refuse.format("refused", "not a run")} ;; esac',
+        f'case {action} in harness-start) case {value} in dry|run|run-yes) ;; *) '
+        + refuse.format("refused", "not a mode of a harness run") + " ;; esac ;; "
+        f'harness-read) case {value} in ""|*[!0-9]*) ' + refuse.format("refused", "not a byte offset")
+        + " ;; esac ;; esac",
+        "LLMCF_HOME_GATE=; llmcf_trusted_signers || { " + refuse.format(
+            "not-ready", "this board holds no root-owned signing key of the framework (pair it again with the board "
+                         "password)") + "; }",
+        "command -v sudo >/dev/null 2>&1 || { " + refuse.format(
+            "not-ready", "the board has no sudo yet (set up the board's root readiness; nothing was started)") + "; }",
+        "llmcf_fixed_ok || { " + refuse.format(
+            "not-ready", f"{ROOT} is not at its root-owned place on the board (set up the board's root readiness; "
+                         "nothing was started)") + "; }",
+        f'[ "$(llmcf_sha "$llmcf_fx")" = {sha} ] || {{ '
+        + refuse.format("not-ready", f"{ROOT} at its root-owned place is not this bundle's (update it through the "
+                                     "board's root readiness; nothing was started)") + "; }",
+        f"llmcf_dropin_ok {action} {bundle} || {{ " + refuse.format(
+            "not-ready", "the board's sudo rule for llmcf-install does not take the harness actions yet (set up the "
+                         "board's root readiness again; nothing was started)") + "; }",
+        f"case {action} in",
+        f'  harness-answer) printf "%s\\n" "$llmcf_line" | sudo -n "$llmcf_fx" {action} {bundle} {comp} {run} 2>&1 ;;',
+        f'  harness-start|harness-read) sudo -n "$llmcf_fx" {action} {bundle} {comp} {run} {value} </dev/null 2>&1 ;;',
+        f'  *) sudo -n "$llmcf_fx" {action} {bundle} {comp} {run} </dev/null 2>&1 ;;',
+        "esac",
+    ])
+
+
+def _harness_refusal(args) -> str:
+    action, bundle, comp, run, value = args[:5]
+    if action not in inst.HARNESS_ACTIONS or not _BUNDLE_ID.fullmatch(bundle) or not _BUNDLE_ID.fullmatch(comp) \
+            or not _RUN_NAME.fullmatch(run):
+        return "not an action, a bundle, a component or a run it takes"
+    if action == "harness-start" and value not in inst.HARNESS_MODES:
+        return "not a mode of a harness run"
+    if action == "harness-read" and not re.fullmatch(r"[0-9]{1,15}", value):
+        return "not a byte offset"
+    return ""
+
+
+# The person's harness run (harness_run.py): llmcf-install's harness actions as root, through the sudoers drop-in of the
+# board's root readiness only. Only the person's channels start, answer or stop a run (the CLI and the Board harness
+# window, after the person's yes); an AI only reads a run's report on the host (MCP tool harness_report).
+define("bundle-harness", ("word", "word", "word", "word", "word", "sha256"),
+       lambda action, bundle, comp, run, value, sha, rest="": _harness_body(action, bundle, comp, run, value, sha),
+       refuse=_harness_refusal,
+       doc="llmcf-install's harness actions (start, read, answer, stop, records) for the person's harness run, at "
+           "its fixed root-owned place, through its sudoers drop-in only (sudo -n); an answer only on stdin")
 
 
 GATEWAY_MODES = ("health", "complete", "bench")

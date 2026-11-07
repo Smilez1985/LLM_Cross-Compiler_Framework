@@ -118,6 +118,425 @@
      }
     ],
     "why": "removals"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        }
+       },
+       {
+        "block": "harness-agent",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar",
+          "mode": "0644",
+          "name": "harness.tar",
+          "role": "data",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": 10240,
+          "source": "bundle"
+         },
+         {
+          "mode": "0755",
+          "name": "harness_watch.sh",
+          "role": "program",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size": 9000,
+          "source": "bundle"
+         }
+        ],
+        "harness": {
+         "dry_run_args": [
+          "--dry-run"
+         ],
+         "exit_codes": {
+          "0": "done",
+          "1": "findings"
+         },
+         "id": "chimera",
+         "installer": "installer/chimera-install",
+         "pin": "ffffffffffffffffffffffffffffffffffffffff",
+         "tree_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "id": "agent",
+        "keygen": false,
+        "kind": "harness",
+        "variables": {
+         "assume_yes": false,
+         "harness": "chimera",
+         "tree": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+       }
+      ]
+     },
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       },
+       {
+        "action": "run_harness",
+        "component": "agent"
+       }
+      ]
+     }
+    ],
+    "why": "a harness component with its run_harness action"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        }
+       },
+       {
+        "block": "harness-agent",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar",
+          "mode": "0644",
+          "name": "harness.tar",
+          "role": "data",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": 10240,
+          "source": "bundle"
+         },
+         {
+          "mode": "0755",
+          "name": "harness_watch.sh",
+          "role": "program",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size": 9000,
+          "source": "bundle"
+         }
+        ],
+        "harness": {
+         "dry_run_args": [
+          "--dry-run"
+         ],
+         "exit_codes": {
+          "0": "done",
+          "1": "findings"
+         },
+         "id": "chimera",
+         "installer": "installer/chimera-install",
+         "pin": "ffffffffffffffffffffffffffffffffffffffff",
+         "tree_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+         "assume_yes": "CHIMERA_ASSUME_YES=1"
+        },
+        "id": "agent",
+        "keygen": false,
+        "kind": "harness",
+        "variables": {
+         "assume_yes": false,
+         "harness": "chimera",
+         "tree": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+       }
+      ]
+     },
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       },
+       {
+        "action": "run_harness",
+        "component": "agent"
+       }
+      ]
+     }
+    ],
+    "why": "a harness with its opted-in assume-yes switch"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        }
+       },
+       {
+        "block": "harness-agent",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar",
+          "mode": "0644",
+          "name": "harness.tar",
+          "role": "data",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": 10240,
+          "source": "bundle"
+         },
+         {
+          "mode": "0755",
+          "name": "harness_watch.sh",
+          "role": "program",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size": 9000,
+          "source": "bundle"
+         }
+        ],
+        "harness": {
+         "dry_run_args": [],
+         "exit_codes": {
+          "0": "done",
+          "1": "findings"
+         },
+         "id": "chimera",
+         "installer": "installer/chimera-install",
+         "pin": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+         "tree_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "id": "agent",
+        "keygen": false,
+        "kind": "harness",
+        "variables": {
+         "assume_yes": false,
+         "harness": "chimera",
+         "tree": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+       }
+      ]
+     },
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       },
+       {
+        "action": "run_harness",
+        "component": "agent"
+       }
+      ]
+     }
+    ],
+    "why": "a harness without a dry run of its own and a sha256 pin"
    }
   ],
   "base": {
@@ -698,6 +1117,2120 @@
      }
     ],
     "why": "install_unit of a component without start"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        }
+       }
+      ]
+     },
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       },
+       {
+        "action": "run_harness",
+        "component": "llm"
+       }
+      ]
+     }
+    ],
+    "why": "run_harness for a component that is no harness"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        }
+       },
+       {
+        "block": "harness-agent",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar",
+          "mode": "0644",
+          "name": "harness.tar",
+          "role": "data",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": 10240,
+          "source": "bundle"
+         },
+         {
+          "mode": "0755",
+          "name": "harness_watch.sh",
+          "role": "program",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size": 9000,
+          "source": "bundle"
+         }
+        ],
+        "id": "agent",
+        "keygen": false,
+        "kind": "harness",
+        "variables": {
+         "assume_yes": false,
+         "harness": "chimera",
+         "tree": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+       }
+      ]
+     },
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       },
+       {
+        "action": "run_harness",
+        "component": "agent"
+       }
+      ]
+     }
+    ],
+    "why": "a harness component without its harness"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        },
+        "harness": {
+         "dry_run_args": [
+          "--dry-run"
+         ],
+         "exit_codes": {
+          "0": "done",
+          "1": "findings"
+         },
+         "id": "chimera",
+         "installer": "installer/chimera-install",
+         "pin": "ffffffffffffffffffffffffffffffffffffffff",
+         "tree_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+       }
+      ]
+     }
+    ],
+    "why": "a harness on an llm component"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        }
+       },
+       {
+        "block": "harness-agent",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "mode": "0755",
+          "name": "harness_watch.sh",
+          "role": "program",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size": 9000,
+          "source": "bundle"
+         }
+        ],
+        "harness": {
+         "dry_run_args": [
+          "--dry-run"
+         ],
+         "exit_codes": {
+          "0": "done",
+          "1": "findings"
+         },
+         "id": "chimera",
+         "installer": "installer/chimera-install",
+         "pin": "ffffffffffffffffffffffffffffffffffffffff",
+         "tree_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "id": "agent",
+        "keygen": false,
+        "kind": "harness",
+        "variables": {
+         "assume_yes": false,
+         "harness": "chimera",
+         "tree": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+       }
+      ]
+     },
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       },
+       {
+        "action": "run_harness",
+        "component": "agent"
+       }
+      ]
+     }
+    ],
+    "why": "a harness without its tar"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        }
+       },
+       {
+        "block": "harness-agent",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar",
+          "mode": "0644",
+          "name": "harness.tar",
+          "role": "data",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": 10240,
+          "source": "online",
+          "url": "https://example.invalid/h.tar"
+         },
+         {
+          "mode": "0755",
+          "name": "harness_watch.sh",
+          "role": "program",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size": 9000,
+          "source": "bundle"
+         }
+        ],
+        "harness": {
+         "dry_run_args": [
+          "--dry-run"
+         ],
+         "exit_codes": {
+          "0": "done",
+          "1": "findings"
+         },
+         "id": "chimera",
+         "installer": "installer/chimera-install",
+         "pin": "ffffffffffffffffffffffffffffffffffffffff",
+         "tree_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "id": "agent",
+        "keygen": false,
+        "kind": "harness",
+        "variables": {
+         "assume_yes": false,
+         "harness": "chimera",
+         "tree": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+       }
+      ]
+     },
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       },
+       {
+        "action": "run_harness",
+        "component": "agent"
+       }
+      ]
+     }
+    ],
+    "why": "a harness tar that is online"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        }
+       },
+       {
+        "block": "harness-agent",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar",
+          "mode": "0644",
+          "name": "harness.tar",
+          "role": "data",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": 10240,
+          "source": "bundle"
+         },
+         {
+          "mode": "0755",
+          "name": "harness_watch.sh",
+          "role": "program",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size": 9000,
+          "source": "bundle"
+         }
+        ],
+        "harness": {
+         "dry_run_args": [
+          "--dry-run"
+         ],
+         "exit_codes": {
+          "0": "done",
+          "1": "findings"
+         },
+         "id": "chimera",
+         "installer": "installer/chimera-install",
+         "pin": "ffffffffffffffffffffffffffffffffffffffff",
+         "tree_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "id": "agent",
+        "keygen": false,
+        "kind": "harness",
+        "variables": {
+         "assume_yes": false,
+         "harness": "chimera",
+         "tree": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "start": {
+         "program": "harness_watch.sh"
+        }
+       }
+      ]
+     },
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       },
+       {
+        "action": "run_harness",
+        "component": "agent"
+       }
+      ]
+     }
+    ],
+    "why": "a harness with a start of its own"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        }
+       },
+       {
+        "block": "harness-agent",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar",
+          "mode": "0644",
+          "name": "harness.tar",
+          "role": "data",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": 10240,
+          "source": "bundle"
+         },
+         {
+          "mode": "0755",
+          "name": "harness_watch.sh",
+          "role": "program",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size": 9000,
+          "source": "bundle"
+         }
+        ],
+        "harness": {
+         "dry_run_args": [
+          "--dry-run"
+         ],
+         "exit_codes": {
+          "0": "done",
+          "1": "findings"
+         },
+         "id": "chimera",
+         "installer": "../evil.sh",
+         "pin": "ffffffffffffffffffffffffffffffffffffffff",
+         "tree_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "id": "agent",
+        "keygen": false,
+        "kind": "harness",
+        "variables": {
+         "assume_yes": false,
+         "harness": "chimera",
+         "tree": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+       }
+      ]
+     },
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       },
+       {
+        "action": "run_harness",
+        "component": "agent"
+       }
+      ]
+     }
+    ],
+    "why": "an installer outside the tree"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        }
+       },
+       {
+        "block": "harness-agent",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar",
+          "mode": "0644",
+          "name": "harness.tar",
+          "role": "data",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": 10240,
+          "source": "bundle"
+         },
+         {
+          "mode": "0755",
+          "name": "harness_watch.sh",
+          "role": "program",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size": 9000,
+          "source": "bundle"
+         }
+        ],
+        "harness": {
+         "dry_run_args": [
+          "--dry-run"
+         ],
+         "exit_codes": {
+          "0": "done",
+          "1": "findings"
+         },
+         "id": "chimera",
+         "installer": "/bin/sh",
+         "pin": "ffffffffffffffffffffffffffffffffffffffff",
+         "tree_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "id": "agent",
+        "keygen": false,
+        "kind": "harness",
+        "variables": {
+         "assume_yes": false,
+         "harness": "chimera",
+         "tree": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+       }
+      ]
+     },
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       },
+       {
+        "action": "run_harness",
+        "component": "agent"
+       }
+      ]
+     }
+    ],
+    "why": "an absolute installer"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        }
+       },
+       {
+        "block": "harness-agent",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar",
+          "mode": "0644",
+          "name": "harness.tar",
+          "role": "data",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": 10240,
+          "source": "bundle"
+         },
+         {
+          "mode": "0755",
+          "name": "harness_watch.sh",
+          "role": "program",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size": 9000,
+          "source": "bundle"
+         }
+        ],
+        "harness": {
+         "dry_run_args": [
+          "--x;id"
+         ],
+         "exit_codes": {
+          "0": "done",
+          "1": "findings"
+         },
+         "id": "chimera",
+         "installer": "installer/chimera-install",
+         "pin": "ffffffffffffffffffffffffffffffffffffffff",
+         "tree_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "id": "agent",
+        "keygen": false,
+        "kind": "harness",
+        "variables": {
+         "assume_yes": false,
+         "harness": "chimera",
+         "tree": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+       }
+      ]
+     },
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       },
+       {
+        "action": "run_harness",
+        "component": "agent"
+       }
+      ]
+     }
+    ],
+    "why": "a dry-run option that is shell text"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        }
+       },
+       {
+        "block": "harness-agent",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar",
+          "mode": "0644",
+          "name": "harness.tar",
+          "role": "data",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": 10240,
+          "source": "bundle"
+         },
+         {
+          "mode": "0755",
+          "name": "harness_watch.sh",
+          "role": "program",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size": 9000,
+          "source": "bundle"
+         }
+        ],
+        "harness": {
+         "dry_run_args": [
+          "--dry-run"
+         ],
+         "exit_codes": {
+          "0": "done",
+          "1": "findings"
+         },
+         "id": "chimera",
+         "installer": "installer/chimera-install",
+         "pin": "ffffffffffffffffffffffffffffffffffffffff",
+         "tree_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+         "assume_yes": "X=$(id)"
+        },
+        "id": "agent",
+        "keygen": false,
+        "kind": "harness",
+        "variables": {
+         "assume_yes": false,
+         "harness": "chimera",
+         "tree": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+       }
+      ]
+     },
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       },
+       {
+        "action": "run_harness",
+        "component": "agent"
+       }
+      ]
+     }
+    ],
+    "why": "an assume-yes switch that is shell text"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        }
+       },
+       {
+        "block": "harness-agent",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar",
+          "mode": "0644",
+          "name": "harness.tar",
+          "role": "data",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": 10240,
+          "source": "bundle"
+         },
+         {
+          "mode": "0755",
+          "name": "harness_watch.sh",
+          "role": "program",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size": 9000,
+          "source": "bundle"
+         }
+        ],
+        "harness": {
+         "dry_run_args": [
+          "--dry-run"
+         ],
+         "exit_codes": {
+          "256": "done"
+         },
+         "id": "chimera",
+         "installer": "installer/chimera-install",
+         "pin": "ffffffffffffffffffffffffffffffffffffffff",
+         "tree_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "id": "agent",
+        "keygen": false,
+        "kind": "harness",
+        "variables": {
+         "assume_yes": false,
+         "harness": "chimera",
+         "tree": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+       }
+      ]
+     },
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       },
+       {
+        "action": "run_harness",
+        "component": "agent"
+       }
+      ]
+     }
+    ],
+    "why": "an exit code above 255"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        }
+       },
+       {
+        "block": "harness-agent",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar",
+          "mode": "0644",
+          "name": "harness.tar",
+          "role": "data",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": 10240,
+          "source": "bundle"
+         },
+         {
+          "mode": "0755",
+          "name": "harness_watch.sh",
+          "role": "program",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size": 9000,
+          "source": "bundle"
+         }
+        ],
+        "harness": {
+         "dry_run_args": [
+          "--dry-run"
+         ],
+         "exit_codes": {
+          "01": "done"
+         },
+         "id": "chimera",
+         "installer": "installer/chimera-install",
+         "pin": "ffffffffffffffffffffffffffffffffffffffff",
+         "tree_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "id": "agent",
+        "keygen": false,
+        "kind": "harness",
+        "variables": {
+         "assume_yes": false,
+         "harness": "chimera",
+         "tree": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+       }
+      ]
+     },
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       },
+       {
+        "action": "run_harness",
+        "component": "agent"
+       }
+      ]
+     }
+    ],
+    "why": "an exit code with a leading zero"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        }
+       },
+       {
+        "block": "harness-agent",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar",
+          "mode": "0644",
+          "name": "harness.tar",
+          "role": "data",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": 10240,
+          "source": "bundle"
+         },
+         {
+          "mode": "0755",
+          "name": "harness_watch.sh",
+          "role": "program",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size": 9000,
+          "source": "bundle"
+         }
+        ],
+        "harness": {
+         "dry_run_args": [
+          "--dry-run"
+         ],
+         "exit_codes": {
+          "0": "fine"
+         },
+         "id": "chimera",
+         "installer": "installer/chimera-install",
+         "pin": "ffffffffffffffffffffffffffffffffffffffff",
+         "tree_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "id": "agent",
+        "keygen": false,
+        "kind": "harness",
+        "variables": {
+         "assume_yes": false,
+         "harness": "chimera",
+         "tree": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+       }
+      ]
+     },
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       },
+       {
+        "action": "run_harness",
+        "component": "agent"
+       }
+      ]
+     }
+    ],
+    "why": "an exit code meaning something else"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        }
+       },
+       {
+        "block": "harness-agent",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar",
+          "mode": "0644",
+          "name": "harness.tar",
+          "role": "data",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": 10240,
+          "source": "bundle"
+         },
+         {
+          "mode": "0755",
+          "name": "harness_watch.sh",
+          "role": "program",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size": 9000,
+          "source": "bundle"
+         }
+        ],
+        "harness": {
+         "dry_run_args": [
+          "--dry-run"
+         ],
+         "exit_codes": {
+          "0": "done",
+          "1": "findings"
+         },
+         "id": "chimera",
+         "installer": "installer/chimera-install",
+         "pin": "abc",
+         "tree_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "id": "agent",
+        "keygen": false,
+        "kind": "harness",
+        "variables": {
+         "assume_yes": false,
+         "harness": "chimera",
+         "tree": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+       }
+      ]
+     },
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       },
+       {
+        "action": "run_harness",
+        "component": "agent"
+       }
+      ]
+     }
+    ],
+    "why": "a short pin"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        }
+       },
+       {
+        "block": "harness-agent",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar",
+          "mode": "0644",
+          "name": "harness.tar",
+          "role": "data",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": 10240,
+          "source": "bundle"
+         },
+         {
+          "mode": "0755",
+          "name": "harness_watch.sh",
+          "role": "program",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size": 9000,
+          "source": "bundle"
+         }
+        ],
+        "harness": {
+         "dry_run_args": [
+          "--dry-run"
+         ],
+         "exit_codes": {
+          "0": "done",
+          "1": "findings"
+         },
+         "id": "Chimera",
+         "installer": "installer/chimera-install",
+         "pin": "ffffffffffffffffffffffffffffffffffffffff",
+         "tree_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "id": "agent",
+        "keygen": false,
+        "kind": "harness",
+        "variables": {
+         "assume_yes": false,
+         "harness": "chimera",
+         "tree": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+       }
+      ]
+     },
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       },
+       {
+        "action": "run_harness",
+        "component": "agent"
+       }
+      ]
+     }
+    ],
+    "why": "a harness id with upper case"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "components"
+      ],
+      "value": [
+       {
+        "block": "llm-llama-server",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar.gz",
+          "mode": "0644",
+          "name": "runtime.tar.gz",
+          "role": "runtime",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 1048576,
+          "source": "bundle"
+         },
+         {
+          "format": "gguf",
+          "licence": "Apache-2.0",
+          "mode": "0644",
+          "name": "model.gguf",
+          "role": "model",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 2097152,
+          "source": "bundle"
+         },
+         {
+          "mode": "0644",
+          "name": "llmcf-limits.conf",
+          "role": "config",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "size": 10,
+          "source": "bundle"
+         }
+        ],
+        "id": "llm",
+        "keygen": true,
+        "kind": "llm",
+        "start": {
+         "args": [
+          "serve",
+          "@DIR@/model.gguf",
+          "--port",
+          "8080"
+         ],
+         "program": "runtime/0123456789abcdef/llama-server.sh"
+        },
+        "variables": {
+         "autostart": true,
+         "ctx_size": 4096,
+         "memory_limit_mb": 2048,
+         "port": 8080,
+         "user": "llmcf"
+        }
+       },
+       {
+        "block": "harness-agent",
+        "block_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_trust": "framework",
+        "block_version": "1.0.0",
+        "files": [
+         {
+          "format": "tar",
+          "mode": "0644",
+          "name": "harness.tar",
+          "role": "data",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "size": 10240,
+          "source": "bundle"
+         },
+         {
+          "mode": "0755",
+          "name": "harness_watch.sh",
+          "role": "program",
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "size": 9000,
+          "source": "bundle"
+         }
+        ],
+        "harness": {
+         "dry_run_args": [
+          "--dry-run"
+         ],
+         "exit_codes": {
+          "0": "done",
+          "1": "findings"
+         },
+         "id": "chimera",
+         "installer": "installer/chimera-install",
+         "pin": "ffffffffffffffffffffffffffffffffffffffff",
+         "tree_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+         "shell": "id"
+        },
+        "id": "agent",
+        "keygen": false,
+        "kind": "harness",
+        "variables": {
+         "assume_yes": false,
+         "harness": "chimera",
+         "tree": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+       }
+      ]
+     },
+     {
+      "path": [
+       "root_actions"
+      ],
+      "value": [
+       {
+        "action": "create_user",
+        "component": "llm",
+        "user": "llmcf"
+       },
+       {
+        "action": "install_unit",
+        "component": "llm",
+        "unit": "llmcf-llm.service",
+        "user": "llmcf"
+       },
+       {
+        "action": "set_cgroup",
+        "component": "llm",
+        "memory_max_mb": 2048,
+        "unit": "llmcf-llm.service"
+       },
+       {
+        "action": "run_harness",
+        "component": "agent"
+       }
+      ]
+     }
+    ],
+    "why": "an unknown key in the harness"
    }
   ]
  },

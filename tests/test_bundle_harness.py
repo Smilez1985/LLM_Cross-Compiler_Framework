@@ -247,3 +247,73 @@ def test_the_manifest_refuses_a_harness_that_is_not_whole(tmp_path):
                  lambda d: d["components"][0].__setitem__("kind", "llm")):
         with pytest.raises(ManifestError):
             load_manifest(changed(edit))
+
+
+# --- the tree checksum both sides compute (tests/data/harness_tree_vectors.json; rust/llmcf-install harness.rs) -----
+
+TREE_VECTORS = json.loads((Path(__file__).parent / "data" / "harness_tree_vectors.json").read_text(encoding="utf-8"))
+
+
+def _build(root: Path, entries) -> None:
+    for e in entries:
+        path = root / e["path"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if e["kind"] == "l":
+            os.symlink(e["target"], path)
+        else:
+            path.write_text(e["data"], encoding="utf-8")
+            path.chmod(0o755 if e["kind"] == "x" else 0o644)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the vectors hold links and executable bits, as a board's tree does")
+@pytest.mark.parametrize("index", range(len(TREE_VECTORS["trees"])))
+def test_the_shared_tree_vectors_hold_for_harness_py(tmp_path, index):
+    case = TREE_VECTORS["trees"][index]
+    _build(tmp_path, case["entries"])
+    rows = h.tree_listing(tmp_path)
+    assert "".join(f"{k} {d} {p}\n" for p, k, d in rows) == case["listing"]
+    assert h.tree_sha256(rows) == case["tree_sha256"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the vectors hold links and executable bits, as a board's tree does")
+def test_the_vector_pack_unpacks_to_its_checksum_and_packing_again_gives_the_same_tree(tmp_path):
+    import base64
+    case = TREE_VECTORS["pack"]
+    tar = tmp_path / "harness.tar"
+    tar.write_bytes(base64.b64decode(case["tar_base64"]))
+    with tarfile.open(tar) as tf:
+        assert all(m.isfile() or m.issym() for m in tf.getmembers())
+        tf.extractall(tmp_path / "tree", filter="tar")
+    assert h.tree_sha256(h.tree_listing(tmp_path / "tree")) == case["tree_sha256"]
+    tar.unlink()
+    path, _sha, _size = h.pack(tmp_path / "tree", case["tree_sha256"])
+    with tarfile.open(path) as tf:
+        tf.extractall(tmp_path / "again", filter="tar")
+    assert h.tree_sha256(h.tree_listing(tmp_path / "again")) == case["tree_sha256"]
+
+
+def test_the_harness_gate_operation_takes_only_its_actions_and_never_an_answer_as_argument():
+    from orchestrator.remote import gate
+    from orchestrator.runtime.device import board_ops  # noqa: F401 - defines every board operation
+    sha = "a" * 64
+    text = gate.script("bundle-harness", "harness-answer", "voice-test", "agent", "run-1", "0", sha)
+    assert "sudo -n" in text and "sudo -S" not in text and 'printf "%s\\n" "$llmcf_line" | sudo -n' in text
+    assert "LLMCF_HOME_GATE=; llmcf_trusted_signers" in text
+    gate.script("bundle-harness", "harness-start", "voice-test", "agent", "dry-1", "dry", sha)
+    gate.script("bundle-harness", "harness-read", "voice-test", "agent", "run-1", "1024", sha)
+    for args in (("harness-start", "voice-test", "agent", "run-1", "sh", sha),
+                 ("harness-read", "voice-test", "agent", "run-1", "x1", sha),
+                 ("apply", "voice-test", "agent", "run-1", "0", sha),
+                 ("harness-stop", "voice-test", "agent", "run.1", "0", sha),
+                 ("harness-stop", "voice-test", "../agent", "run-1", "0", sha)):
+        with pytest.raises(gate.GateRefused):
+            gate.script("bundle-harness", *args)
+
+
+def test_the_sudo_rule_names_the_harness_actions_and_an_older_rule_is_set_up_again():
+    from orchestrator.runtime.bundle import gate_ops
+    body = gate_ops._setup_body("sudo", "apt", "voice-test", "a" * 64)
+    for action in ("harness-start", "harness-read", "harness-answer", "harness-stop", "harness-records"):
+        assert f"$llmcf_fx {action} *" in body
+    assert "llmcf_dropin_ok harness-read voice-test" in body
+    assert "llmcf_dropin_ok harness-read llmcf-check" in gate_ops._ready_body("a" * 64)

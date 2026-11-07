@@ -11,7 +11,7 @@ pub const MAX_COMPONENTS: usize = 16;
 pub const MAX_FILES: usize = 64;
 pub const MAX_ARGS: usize = 48;
 pub const MAX_ROOT_ACTIONS: usize = 64;
-pub const ROOT_ACTIONS: [&str; 8] = [
+pub const ROOT_ACTIONS: [&str; 9] = [
     "create_user",
     "install_unit",
     "set_cgroup",
@@ -20,7 +20,11 @@ pub const ROOT_ACTIONS: [&str; 8] = [
     "remove_unit",
     "remove_cgroup",
     "remove_root_file",
+    "run_harness",
 ];
+/// The two files of a harness component (manifest.HARNESS_ARCHIVE, manifest.HARNESS_WATCH).
+pub const HARNESS_ARCHIVE: &str = "harness.tar";
+pub const HARNESS_WATCH: &str = "harness_watch.sh";
 pub const ROOT_PLACES: [&str; 3] = ["unit-dropin", "tmpfiles", "sysctl"];
 
 // --- the value rules (manifest.py RE_*; no regex crate: each pattern as a small function) ------------------------
@@ -148,6 +152,45 @@ pub fn is_fact(s: &str) -> bool {
     (1..=32).contains(&s.len()) && all(s, |c| lower_digit(c) || b"_.-".contains(&c))
 }
 
+/// RE_HARNESS_ID `^[a-z][a-z0-9-]{1,39}$`
+pub fn is_harness_id(s: &str) -> bool {
+    let b = s.as_bytes();
+    (2..=40).contains(&b.len()) && b[0].is_ascii_lowercase() && all(s, |c| lower_digit(c) || c == b'-')
+}
+
+/// RE_HARNESS_PATH `^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+){0,15}$`, at most 255 characters, no `.` or `..` part
+pub fn is_harness_path(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('/').collect();
+    !s.is_empty()
+        && s.len() <= 255
+        && parts.len() <= 16
+        && parts.iter().all(|p| !p.is_empty() && *p != "." && *p != ".." && all(p, |c| alnum(c) || b"._-".contains(&c)))
+}
+
+/// RE_HARNESS_ARG `^--?[A-Za-z0-9][A-Za-z0-9_.=-]{0,63}$`
+pub fn is_harness_arg(s: &str) -> bool {
+    let rest = s.strip_prefix("--").or_else(|| s.strip_prefix('-')).unwrap_or("");
+    let b = rest.as_bytes();
+    !b.is_empty() && b.len() <= 64 && alnum(b[0]) && all(rest, |c| alnum(c) || b"_.=-".contains(&c))
+}
+
+/// RE_HARNESS_ENV `^[A-Z][A-Z0-9_]{0,63}=[A-Za-z0-9_.:-]{0,64}$`
+pub fn is_harness_env(s: &str) -> bool {
+    let Some((name, value)) = s.split_once('=') else { return false };
+    let n = name.as_bytes();
+    !n.is_empty()
+        && n.len() <= 64
+        && n[0].is_ascii_uppercase()
+        && all(name, |c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_')
+        && value.len() <= 64
+        && all(value, |c| alnum(c) || b"_.:-".contains(&c))
+}
+
+/// RE_PIN `^(?:[0-9a-f]{40}|[0-9a-f]{64})$`
+pub fn is_pin(s: &str) -> bool {
+    (s.len() == 40 || s.len() == 64) && all(s, |c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+}
+
 fn is_created(s: &str) -> bool {
     let b = s.as_bytes();
     b.len() == 20
@@ -169,6 +212,19 @@ pub struct FileEntry {
     pub size: u64,
     pub mode: String,
     pub role: String,
+    pub source: String,
+}
+
+/// The person's harness of a harness component (manifest.HarnessPart).
+#[derive(Debug, Clone, PartialEq)]
+pub struct HarnessPart {
+    pub id: String,
+    pub pin: String,
+    pub tree_sha256: String,
+    pub installer: String,
+    pub dry_run_args: Vec<String>,
+    pub exit_codes: Vec<(u8, String)>,
+    pub assume_yes: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -178,6 +234,7 @@ pub struct Component {
     pub files: Vec<FileEntry>,
     pub has_start: bool,
     pub keygen: bool,
+    pub harness: Option<HarnessPart>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -316,7 +373,79 @@ fn file_entry(v: &Value, comp: &str) -> R<FileEntry> {
             return Err(format!("{what} {name}: licence must be an SPDX identifier or a short word"));
         }
     }
-    Ok(FileEntry { name: name.into(), sha256: sha.into(), size, mode: mode.into(), role: role.into() })
+    Ok(FileEntry {
+        name: name.into(),
+        sha256: sha.into(),
+        size,
+        mode: mode.into(),
+        role: role.into(),
+        source: source.into(),
+    })
+}
+
+fn harness_part(v: &Value, what: &str) -> R<HarnessPart> {
+    let what = format!("{what} harness");
+    let m = obj(v, &what)?;
+    keys(m, &what, &["id", "pin", "tree_sha256", "installer"], &["dry_run_args", "exit_codes", "assume_yes"])?;
+    let id = text(m, "id", &what)?;
+    if !is_harness_id(id) {
+        return Err(format!("{what}: a harness id is 2 to 40 lower-case letters, digits and '-'"));
+    }
+    let pin = text(m, "pin", &what)?;
+    if !is_pin(pin) {
+        return Err(format!("{what}: a pin is a 40-digit commit or a sha256"));
+    }
+    let tree = text(m, "tree_sha256", &what)?;
+    if !is_sha(tree) {
+        return Err(format!("{what}: tree_sha256 must be 64 lower-case hex digits"));
+    }
+    let installer = text(m, "installer", &what)?;
+    if !is_harness_path(installer) {
+        return Err(format!("{what}: the installer is a plain path inside the harness"));
+    }
+    let dry_run_args: Vec<String> = match m.get("dry_run_args") {
+        None => Vec::new(),
+        Some(Value::Array(items)) if items.len() <= 8 => items
+            .iter()
+            .map(|a| a.as_str().filter(|a| is_harness_arg(a)).map(String::from))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| format!("{what}: dry_run_args are options such as --dry-run"))?,
+        Some(_) => return Err(format!("{what}: dry_run_args: up to 8 options such as --dry-run")),
+    };
+    let mut exit_codes = Vec::new();
+    match m.get("exit_codes") {
+        None => exit_codes.push((0u8, "done".to_string())),
+        Some(Value::Object(codes)) if !codes.is_empty() => {
+            for (k, v) in codes {
+                let plain = !k.is_empty()
+                    && k.len() <= 3
+                    && all(k, |c| c.is_ascii_digit())
+                    && (k == "0" || !k.starts_with('0'));
+                let code = k.parse::<u16>().ok().filter(|c| plain && *c <= 255);
+                let outcome = v.as_str().filter(|o| *o == "done" || *o == "findings");
+                match (code, outcome) {
+                    (Some(c), Some(o)) => exit_codes.push((c as u8, o.to_string())),
+                    _ => return Err(format!("{what}: exit_codes: codes 0 to 255, each meaning done or findings")),
+                }
+            }
+        }
+        Some(_) => return Err(format!("{what}: exit_codes: codes 0 to 255, each meaning done or findings")),
+    }
+    let assume_yes = opt_text(m, "assume_yes", &what)?;
+    if let Some(a) = assume_yes {
+        if !is_harness_env(a) {
+            return Err(format!("{what}: assume_yes is NAME=value"));
+        }
+    }
+    Ok(HarnessPart {
+        id: id.into(),
+        pin: pin.into(),
+        tree_sha256: tree.into(),
+        installer: installer.into(),
+        dry_run_args,
+        exit_codes,
+        assume_yes: assume_yes.map(Into::into),
+    })
 }
 
 fn component(v: &Value) -> R<Component> {
@@ -325,7 +454,7 @@ fn component(v: &Value) -> R<Component> {
         m,
         "component",
         &["id", "kind", "block", "block_version", "block_sha256"],
-        &["block_trust", "variables", "files", "start", "keygen"],
+        &["block_trust", "variables", "files", "start", "keygen", "harness"],
     )?;
     let id = text(m, "id", "component")?;
     if !is_id(id) {
@@ -412,7 +541,26 @@ fn component(v: &Value) -> R<Component> {
         Some(Value::Bool(b)) => *b,
         Some(_) => return Err(format!("{what}: keygen is yes or no")),
     };
-    Ok(Component { id: id.into(), kind: kind.into(), files, has_start, keygen })
+    let harness = match m.get("harness") {
+        None | Some(Value::Null) => None,
+        Some(h) => Some(harness_part(h, &what)?),
+    };
+    if (kind == "harness") != harness.is_some() {
+        return Err(format!("{what}: a harness component, and only one, names its harness"));
+    }
+    if harness.is_some() {
+        let has =
+            |name: &str, role: &str| files.iter().any(|f| f.name == name && f.role == role && f.source == "bundle");
+        if !has(HARNESS_ARCHIVE, "data") || !has(HARNESS_WATCH, "program") {
+            return Err(format!(
+                "{what}: a harness comes as {HARNESS_ARCHIVE} (data) and {HARNESS_WATCH} (program) in the bundle"
+            ));
+        }
+        if has_start {
+            return Err(format!("{what}: a harness has no start of its own (its installer runs once)"));
+        }
+    }
+    Ok(Component { id: id.into(), kind: kind.into(), files, has_start, keygen, harness })
 }
 
 fn root_action(v: &Value) -> R<RootAction> {
@@ -458,6 +606,7 @@ fn root_action(v: &Value) -> R<RootAction> {
         "install_unit" => &["unit", "user"],
         "remove_unit" | "remove_cgroup" => &["unit"],
         "set_cgroup" => &["unit", "memory_max_mb"],
+        "run_harness" => &[],
         _ => &["place", "file"],
     };
     let have = |k: &str| match k {
@@ -582,6 +731,9 @@ pub fn parse(data: &[u8]) -> R<Manifest> {
                 if !comp.files.iter().any(|f| f.name == name) {
                     return Err(format!("root action place_root_file: {name} is no file of component {}", comp.id));
                 }
+            }
+            "run_harness" if comp.harness.is_none() => {
+                return Err(format!("root action run_harness: component {} names no harness", comp.id))
             }
             _ => {}
         }

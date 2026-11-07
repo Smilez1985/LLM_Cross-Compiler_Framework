@@ -208,7 +208,7 @@ if [ -z "$allowed" ] && [ -s "@ROOT@/sudo-password" ]; then
   [ "$pw" = "$(cat "@ROOT@/sudo-password")" ] || { echo "sudo: wrong password" >&2; exit 1; }
 fi
 [ "$1" = true ] && exit 0
-case $1 in */llmcf-install) exec env SUDO_USER=board "$1" --root "@ROOT@" "$2" "$3" ;; esac
+case $1 in */llmcf-install) llmcf_p=$1; shift; exec env SUDO_USER=board "$llmcf_p" --root "@ROOT@" "$@" ;; esac
 exec "$@"
 '''
 # install, visudo and su on the fake board: install drops -o/-g (the test's own user stands in for root), visudo

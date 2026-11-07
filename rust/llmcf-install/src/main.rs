@@ -8,10 +8,15 @@
 //! nothing the manifest says is trusted before. No network, no shell, no path from the environment; a test build
 //! (cargo feature test-root, never in a release) takes `--root PREFIX` first.
 //!
+//! `sudo llmcf-install harness-start|harness-read|harness-answer|harness-stop|harness-records BUNDLE COMPONENT RUN
+//! [MODE|OFFSET]` runs the person's harness of a harness component (manifest root action run_harness) through the
+//! framework's harness watch, detached, and reads it back (harness.rs).
+//!
 //! Exit status: 0 done (also plan, status, absent), 2 not a call it takes, 3 refused (nothing changed), 5 a step
 //! failed (the journal says what was done: roll back or run it again).
 #![forbid(unsafe_code)]
 
+mod harness;
 mod install;
 mod manifest;
 mod sig;
@@ -51,7 +56,27 @@ fn main() -> ExitCode {
     } else {
         sys::Env::real()
     };
-    if args.len() != 2 || !install::ACTIONS.contains(&args[0].as_str()) {
+    let harness_action = args.first().map(|a| harness::ACTIONS.contains(&a.as_str())).unwrap_or(false);
+    if harness_action {
+        let want = if args[0] == "harness-start" || args[0] == "harness-read" { 5 } else { 4 };
+        let ok = args.len() == want
+            && manifest::is_id(&args[2])
+            && harness::is_run(&args[3])
+            && match args[0].as_str() {
+                "harness-start" => ["dry", "run", "run-yes"].contains(&args[4].as_str()),
+                "harness-read" => {
+                    !args[4].is_empty() && args[4].len() <= 15 && args[4].bytes().all(|c| c.is_ascii_digit())
+                }
+                _ => true,
+            };
+        if !ok {
+            return refuse(
+                install::EXIT_USAGE,
+                "usage: llmcf-install harness-start BUNDLE COMPONENT RUN dry|run|run-yes, harness-read BUNDLE COMPONENT \
+                 RUN OFFSET, or harness-answer|harness-stop|harness-records BUNDLE COMPONENT RUN",
+            );
+        }
+    } else if args.len() != 2 || !install::ACTIONS.contains(&args[0].as_str()) {
         return refuse(
             install::EXIT_USAGE,
             "usage: llmcf-install plan|apply|status|rollback|uninstall|plan-uninstall BUNDLE",
@@ -80,5 +105,8 @@ fn main() -> ExitCode {
         Some(a) if (a.uid != 0 || env.test) && sys::plain_abs(&a.home) => a,
         _ => return refuse(install::EXIT_REFUSED, "the board account has no plain home folder in the password file"),
     };
+    if harness_action {
+        return ExitCode::from(harness::run(&env, action, bid, &account, &args[2..]) as u8);
+    }
     ExitCode::from(install::run(&env, action, bid, account) as u8)
 }

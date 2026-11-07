@@ -493,3 +493,166 @@ fn the_unprivileged_variant_has_no_root_actions_to_run() {
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("unprivileged-only variant"), "{out}");
 }
+
+// --- the person's harness (root action run_harness and the harness actions) -----------------------------------------
+
+const WATCH: &str = include_str!("../../../orchestrator/runtime/bundle/harness_watch.sh");
+const VECTORS: &str = include_str!("../../../tests/data/harness_tree_vectors.json");
+
+fn unb64(text: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    let (mut acc, mut bits) = (0u32, 0);
+    for c in text.bytes() {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => continue,
+        } as u32;
+        acc = (acc << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+        }
+    }
+    out
+}
+
+impl Board {
+    fn hcomp(&self) -> PathBuf {
+        self.p(&format!("home/board/.local/share/llm-framework/bundle/{BID}/components/agent"))
+    }
+
+    /// A harness component as the unprivileged installer leaves it (the vectors' packed tree and the real watch).
+    fn deploy_harness(&self, assume_yes: bool) -> String {
+        let v: serde_json::Value = serde_json::from_str(VECTORS).unwrap();
+        let tar = unb64(v["pack"]["tar_base64"].as_str().unwrap());
+        let tree = v["pack"]["tree_sha256"].as_str().unwrap().to_string();
+        write_mode(&self.hcomp().join("harness.tar"), &tar, 0o644);
+        write_mode(&self.hcomp().join("harness_watch.sh"), WATCH.as_bytes(), 0o755);
+        fs::create_dir_all(self.p("watched")).unwrap();
+        fs::create_dir_all(self.p("bin")).unwrap();
+        let _ = symlink("/bin/sh", self.p("bin/sh"));
+        let file = |name: &str, data: &[u8], role: &str, mode: &str| {
+            serde_json::json!({"name": name, "sha256": sha(data), "size": data.len(), "mode": mode, "role": role,
+                               "source": "bundle"})
+        };
+        let mut harness = serde_json::json!({"id": "demo", "pin": tree, "tree_sha256": tree,
+            "installer": "installer/install.sh", "dry_run_args": ["--dry-run"],
+            "exit_codes": {"0": "done", "1": "findings"}});
+        if assume_yes {
+            harness["assume_yes"] = serde_json::json!("DEMO_YES=1");
+        }
+        let manifest = serde_json::json!({
+            "schema": "llmcf-bundle/1", "bundle_id": BID, "created": "2026-11-01T12:00:00Z",
+            "framework_version": "3.4.0", "mode": "full",
+            "board": {"device_id": "0123456789abcdef", "os": "linux", "arch": "aarch64", "init_system": "systemd"},
+            "components": [{"id": "agent", "kind": "harness", "block": "harness-agent", "block_version": "1.0.0",
+                            "block_sha256": "a".repeat(64), "variables": {"harness": "demo"},
+                            "files": [file("harness.tar", &tar, "data", "0644"),
+                                      file("harness_watch.sh", WATCH.as_bytes(), "program", "0755")],
+                            "harness": harness}],
+            "root_actions": [{"action": "run_harness", "component": "agent"}]});
+        let data = serde_json::to_vec_pretty(&manifest).unwrap();
+        self.keep(&data, &sign(&self.key, &data));
+        tree
+    }
+
+    fn harness(&self, args: &[&str]) -> (i32, String) {
+        let out = Command::new(env!("CARGO_BIN_EXE_llmcf-install"))
+            .args(["--root", self.root.to_str().unwrap(), args[0], BID])
+            .args(&args[1..])
+            .env_clear()
+            .env("SUDO_USER", "board")
+            .output()
+            .unwrap();
+        (out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    /// The installer's output of a run until it ended (harness-read from offset 0, again and again).
+    fn read_all(&self, run: &str) -> (String, String) {
+        let mut offset = 0u64;
+        let mut text = Vec::new();
+        for _ in 0..60 {
+            let (code, out) = self.harness(&["harness-read", "agent", run, &offset.to_string()]);
+            assert_eq!(code, 0, "{out}");
+            let head = out.lines().find(|l| l.starts_with("llmcf-harness: status=")).unwrap().to_string();
+            let data = out.lines().find_map(|l| l.strip_prefix("llmcf-harness: data ")).unwrap_or("");
+            text.extend(unb64(data));
+            offset = head.split("offset=").nth(1).unwrap().split(' ').next().unwrap().parse().unwrap();
+            if head.contains("status=ended") {
+                return (head, String::from_utf8_lossy(&text).into_owned());
+            }
+        }
+        panic!("the run did not end");
+    }
+}
+
+#[test]
+fn a_harness_is_unpacked_checked_run_and_read_back_and_a_changed_tree_never_runs() {
+    let b = Board::new();
+    let tree = b.deploy_harness(false);
+    let (code, out) = b.harness(&["harness-start", "agent", "dry-1", "dry"]);
+    assert_eq!(code, 3, "the harness is not in place before the apply: {out}");
+    let (code, out) = b.run("apply");
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("llmcf-bundle: done run_harness agent"), "{out}");
+    let copy = b.p(&format!("var/lib/llmcf/bundle/{BID}/agent"));
+    assert_eq!(fs::read_to_string(copy.join("tree.sha256")).unwrap().trim(), tree);
+    assert_eq!(fs::metadata(&copy).unwrap().mode() & 0o777, 0o700);
+    assert!(copy.join("tree/installer/install.sh").is_file() && !copy.join("tree/.git").exists());
+    let (code, out) = b.run("status");
+    assert_eq!((code, last(&out)), (0, "llmcf-bundle: result=installed changed=0 root=1"), "{out}");
+
+    // the dry run: its own option, the watch's records read back
+    let (code, out) = b.harness(&["harness-start", "agent", "dry-1", "dry"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("llmcf-bundle: started harness agent run=dry-1 mode=dry"), "{out}");
+    let (head, text) = b.read_all("dry-1");
+    assert!(head.contains("status=ended code=0"), "{head}");
+    assert!(text.contains("installed"), "{text}");
+    let (code, out) = b.harness(&["harness-records", "agent", "dry-1"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("llmcf-harness: file exit_code\n> 0\n"), "{out}");
+    assert!(out.contains("llmcf-harness: file after/files.txt"), "{out}");
+    let (code, out) = b.harness(&["harness-start", "agent", "dry-1", "dry"]);
+    assert_eq!(code, 3, "a run name is used once: {out}");
+    let (code, out) = b.harness(&["harness-start", "agent", "yes-1", "run-yes"]);
+    assert_eq!(code, 3, "no assume-yes switch without the person's opt-in: {out}");
+    let (code, out) = b.harness(&["harness-answer", "agent", "dry-1"]);
+    assert_eq!(code, 3, "a dry run takes no answers: {out}");
+
+    // a tree changed on the board is never run
+    fs::write(copy.join("tree/src/app.py"), "print('changed')\n").unwrap();
+    let (code, out) = b.harness(&["harness-start", "agent", "run-1", "run"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("does not match its checksum"), "{out}");
+    assert!(!copy.join("runs/run-1").exists());
+
+    // uninstall removes the harness's root copy with its runs
+    let (code, out) = b.run("uninstall");
+    assert_eq!(code, 0, "{out}");
+    assert!(!copy.exists(), "{out}");
+}
+
+#[test]
+fn hostile_harness_arguments_are_refused_before_anything() {
+    let b = Board::new();
+    b.deploy_harness(true);
+    for args in [
+        vec!["harness-start", "agent", "../x", "run"],
+        vec!["harness-start", "agent", "run-1", "sh"],
+        vec!["harness-read", "agent", "run-1", "-1"],
+        vec!["harness-read", "agent", "run-1"],
+        vec!["harness-stop", "../agent", "run-1"],
+        vec!["harness-records", "agent", "run-1", "more"],
+    ] {
+        let (code, out) = b.harness(&args);
+        assert_eq!(code, 2, "{args:?}: {out}");
+    }
+    let (code, out) = b.harness(&["harness-start", "llm", "run-1", "run"]);
+    assert_eq!(code, 3, "{out}");
+}

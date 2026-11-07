@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+use crate::harness;
 use crate::manifest::{self, is_id, is_root_file, is_unit, is_user, Component, Manifest, RootAction};
 use crate::sig;
 use crate::sys::{self, Account, Env};
@@ -43,7 +44,11 @@ impl Done {
     pub fn refused(detail: impl Into<String>) -> Done {
         Done { result: "refused", detail: detail.into(), code: EXIT_REFUSED }
     }
-    fn failed(detail: impl Into<String>) -> Done {
+    /// A run that ended well with its own result word (the harness actions: started, ok).
+    pub fn ok_text(result: &'static str, detail: impl Into<String>) -> Done {
+        Done::ok(result, detail)
+    }
+    pub fn failed(detail: impl Into<String>) -> Done {
         Done { result: "failed", detail: detail.into(), code: EXIT_FAILED }
     }
 }
@@ -440,6 +445,11 @@ fn copy_file_checked(from: &Path, to: &Path, uid: u32, want_sha: Option<&str>) -
     Ok(())
 }
 
+/// copy_file_checked for the harness's files (harness.rs): `from` owned by `uid`, its sha256 `want`.
+pub fn copy_checked(from: &Path, to: &Path, uid: u32, want: &str) -> Result<(), String> {
+    copy_file_checked(from, to, uid, Some(want))
+}
+
 struct Places {
     source: PathBuf,
     dest: PathBuf,
@@ -530,6 +540,37 @@ impl<'a> Ctx<'a> {
         fs::rename(&tmp, &p.dest).map_err(|e| e.to_string())?;
         self.note("tree-made", &[&comp.id, &backup])?;
         Ok(true)
+    }
+
+    /// The root copy of a harness component (/var/lib/llmcf/bundle/<bid>/<component>: tree/, harness_watch.sh,
+    /// tree.sha256, runs/), root-only (0700): its tar checked against the manifest's sha256, unpacked, its tree
+    /// checksum checked (harness.rs); the runs of an earlier copy stay with the new one.
+    fn make_harness(&mut self, comp: &Component) -> Result<(), String> {
+        let p = self.places(&comp.id)?;
+        let parent = p.dest.parent().ok_or("no folder")?.to_path_buf();
+        mkdirs(self.env, &parent, 0o755)?;
+        let tmp = parent.join(format!(".{}.llmcf-tmp", comp.id));
+        if exists(&tmp) {
+            fs::remove_dir_all(&tmp).map_err(|e| e.to_string())?;
+        }
+        fs::create_dir(&tmp).map_err(|e| e.to_string())?;
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+        if let Err(e) = harness::make_copy(&tmp, &p.source, comp, self.account.uid) {
+            let _ = fs::remove_dir_all(&tmp);
+            return Err(e);
+        }
+        let backup = if exists(&p.dest) {
+            if p.dest.join("runs").is_dir() {
+                fs::rename(p.dest.join("runs"), tmp.join("runs")).map_err(|e| e.to_string())?;
+            }
+            let (id, to) = self.next_backup()?;
+            fs::rename(&p.dest, &to).map_err(|e| e.to_string())?;
+            id
+        } else {
+            "-".into()
+        };
+        fs::rename(&tmp, &p.dest).map_err(|e| e.to_string())?;
+        self.note("tree-made", &[&comp.id, &backup])
     }
 
     /// The runtime's key file of the board account, copied for the unit's account (its own home, mode 0600), so
@@ -717,6 +758,10 @@ impl<'a> Ctx<'a> {
                     State::Done
                 }
             }
+            "run_harness" => match m.component(&a.component) {
+                Some(comp) if harness::is_current(env, &self.bid, comp) => State::Done,
+                _ => State::Pending,
+            },
             "place_root_file" => {
                 let path = env.path(&format!("/{}", root_file_rel(a)));
                 let want = m
@@ -810,6 +855,24 @@ impl<'a> Ctx<'a> {
                         "the unit's account {user} does not exist and the bundle does not make it; \
                                         nothing was changed"
                     ));
+                }
+            }
+            if a.action == "run_harness" {
+                let comp = m.component(&a.component).ok_or("no component")?;
+                let p = self.places(&comp.id)?;
+                for f in comp
+                    .files
+                    .iter()
+                    .filter(|f| f.name == manifest::HARNESS_ARCHIVE || f.name == manifest::HARNESS_WATCH)
+                {
+                    let there = fs::symlink_metadata(p.source.join(&f.name))
+                        .map(|m| m.file_type().is_file() && m.len() == f.size);
+                    if !there.unwrap_or(false) {
+                        return Err(format!(
+                            "the file {} of component {} is not in place yet (run the deploy first); nothing was changed",
+                            f.name, comp.id
+                        ));
+                    }
                 }
             }
             if a.action == "place_root_file" {
@@ -980,6 +1043,10 @@ impl<'a> Ctx<'a> {
                     self.reload = true;
                 }
                 Ok(())
+            }
+            "run_harness" => {
+                let comp = m.component(&a.component).ok_or("no component")?.clone();
+                self.make_harness(&comp)
             }
             "place_root_file" => {
                 let comp = m.component(&a.component).ok_or("no component")?;

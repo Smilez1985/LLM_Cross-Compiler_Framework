@@ -55,6 +55,10 @@ SIGNED_FILES = ("install.sh", "steps.tsv", "manifest.json")
 # in .kept/, where the gate operation bundle-root takes it from).
 ROOT_HELPER_FILE = "llmcf-install"
 ROOT_ACTIONS = ("plan", "apply", "status", "rollback", "uninstall", "plan-uninstall")
+# llmcf-install's actions for the person's harness (rust/llmcf-install/src/harness.rs; gate operation bundle-harness):
+# BUNDLE COMPONENT RUN, start with dry|run|run-yes and read with a byte offset after them.
+HARNESS_ACTIONS = ("harness-start", "harness-read", "harness-answer", "harness-stop", "harness-records")
+HARNESS_MODES = ("dry", "run", "run-yes")
 SEP = "--"   # a staged file of the bundle is <component>--<file name> in the upload folder
 
 
@@ -490,6 +494,7 @@ def report(text: str) -> Report:
     return out
 
 
-__all__ = ["ACTIONS", "BUNDLE_REL", "EXIT_OK", "EXIT_REFUSED", "EXIT_ROOT", "EXIT_ROOT_FAILED", "INSTALLER_SH",
+__all__ = ["ACTIONS", "BUNDLE_REL", "EXIT_OK", "EXIT_REFUSED", "EXIT_ROOT", "EXIT_ROOT_FAILED", "HARNESS_ACTIONS",
+           "HARNESS_MODES", "INSTALLER_SH",
            "KEPT_ACTIONS", "REPORT_PREFIX", "ROOT_ACTIONS", "ROOT_HELPER_FILE", "Report", "SIGNED_FILES", "STEPS_MAGIC",
            "installer_sh", "render_steps", "report", "staged_name"]
