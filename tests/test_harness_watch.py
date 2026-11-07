@@ -6,6 +6,7 @@ from a recorded trace."""
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,22 @@ WATCH = Path(hr.__file__).with_name("harness_watch.sh")
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="the watch runs on Linux boards")
 
 
-def run_watch(tmp_path: Path, script: str, mode: str = "run", yes: str = "DEMO_YES=1", *extra: str):
+def watch(*args, env=None, inp=None, timeout=60):
+    return subprocess.run(["sh", str(WATCH), *args], env=env, input=inp, capture_output=True, text=True,
+                          timeout=timeout)
+
+
+def wait_ended(out: Path, env, seconds: float = 60) -> str:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        status = watch("status", str(out), env=env).stdout.strip()
+        if status.startswith("ended"):
+            return status
+        time.sleep(0.2)
+    raise AssertionError("the run did not end")
+
+
+def setup(tmp_path: Path, script: str):
     tree, sysroot = tmp_path / "tree", tmp_path / "sys"
     (tree / "installer").mkdir(parents=True)
     (sysroot / "etc").mkdir(parents=True)
@@ -24,17 +40,63 @@ def run_watch(tmp_path: Path, script: str, mode: str = "run", yes: str = "DEMO_Y
     inst = tree / "installer" / "install.sh"
     inst.write_text("#!/bin/sh\n" + script)
     inst.chmod(0o755)
-    out = tmp_path / "out"
+    (sysroot / "etc" / "passwd").write_text("root:x:0:0:root:/root:/bin/sh\n")
     env = dict(os.environ, SYSROOT=str(sysroot), SECRET_TOKEN="do-not-pass", LLMCF_WATCH_KEEP="SYSROOT",
                LLMCF_WATCH_DIRS=f"{sysroot}/etc {sysroot}/opt", LLMCF_WATCH_PASSWD=str(sysroot / "etc" / "passwd"))
-    (sysroot / "etc" / "passwd").write_text("root:x:0:0:root:/root:/bin/sh\n")
-    args = ["sh", str(WATCH), mode, str(tree), "installer/install.sh", str(out)]
+    return tree, sysroot, env
+
+
+def run_watch(tmp_path: Path, script: str, mode: str = "run", yes: str = "DEMO_YES=1", *extra: str):
+    tree, sysroot, env = setup(tmp_path, script)
+    out = tmp_path / "out"
+    args = ["start", mode, str(tree), "installer/install.sh", str(out)]
     if yes:
         args.append(yes)
     if extra:
         args += ["--", *extra]
-    rc = subprocess.run(args, env=env, capture_output=True, text=True, timeout=120).returncode
-    return rc, out, sysroot
+    started = watch(*args, env=env)
+    if started.returncode:
+        return started.returncode, out, sysroot
+    status = wait_ended(out, env)
+    return int(status.split()[1]), out, sysroot
+
+
+def test_a_question_is_answered_live_and_a_dropped_attach_reads_on_where_it_was(tmp_path):
+    script = ('[ -t 0 ] && echo "terminal: yes" || echo "terminal: no"\n'
+              'printf "Continue? [yes/no] "\nread -r a\necho "answer=$a"\n[ "$a" = yes ]\n')
+    tree, _, env = setup(tmp_path, script)
+    out = tmp_path / "out"
+    assert watch("start", "run", str(tree), "installer/install.sh", str(out), env=env).stdout.strip() == "started"
+    deadline = time.monotonic() + 30
+    while "Continue?" not in (out / "installer.log").read_text() if (out / "installer.log").exists() else True:
+        assert time.monotonic() < deadline, "the question never showed"
+        time.sleep(0.2)
+    seen = len((out / "installer.log").read_bytes())
+    assert watch("status", str(out), env=env).stdout.strip() == "running"    # it waits for the person
+    assert watch("answer", str(out), env=env, inp="yes\n").returncode == 0
+    assert wait_ended(out, env) == "ended 0"
+    rest = watch("attach", str(out), str(seen), env=env).stdout               # attach again from where it was
+    assert "answer=yes" in rest and "Continue?" not in rest
+    if shutil.which("script"):
+        assert (out / "terminal").read_text().strip() == "pty" and "terminal: yes" in (out / "installer.log").read_text()
+
+
+def test_stop_ends_the_installer_and_the_watch_still_records_the_end(tmp_path):
+    tree, _, env = setup(tmp_path, "echo waiting\nsleep 300\n")
+    out = tmp_path / "out"
+    watch("start", "run", str(tree), "installer/install.sh", str(out), env=env)
+    deadline = time.monotonic() + 30
+    while not (out / "installer.log").exists() or "waiting" not in (out / "installer.log").read_text():
+        assert time.monotonic() < deadline
+        time.sleep(0.2)
+    assert watch("stop", str(out), env=env).returncode == 0
+    assert wait_ended(out, env) == "ended 143" and (out / "after" / "files.txt").exists()
+    assert hr.read_report(out).outcome == "failed"
+
+
+def test_answers_are_refused_when_the_run_takes_none(tmp_path):
+    rc, out, _ = run_watch(tmp_path, "exit 0\n")
+    assert rc == 0 and watch("answer", str(out), inp="x\n").returncode == 90
 
 
 def test_a_run_records_before_and_after_and_keeps_the_installers_exit_code(tmp_path):
@@ -75,7 +137,7 @@ def test_the_dry_run_passes_its_own_arguments_and_never_traces(tmp_path):
 def test_the_watch_refuses_bad_arguments_with_90(tmp_path, args):
     tree = tmp_path / "T"
     tree.mkdir()
-    full = [args[0], str(tree), args[2], str(tmp_path / "out")]
+    full = ["start", args[0], str(tree), args[2], str(tmp_path / "out")]
     rc = subprocess.run(["sh", str(WATCH), *full], capture_output=True, text=True).returncode
     assert rc == 90
 

@@ -7,8 +7,9 @@ or a folder; llmcf takes it in here, on the host, at a pin (the commit of a repo
 and records the whole tree with one checksum, so what reaches the board is exactly what the person saw.
 
 What the harness's own installer needs is described by a small spec (`HarnessSpec`, schema llmcf-harness/1): the
-installer's path inside the tree, its dry-run arguments (the "before" report), its own "assume yes" switch (set only
-after the person's one yes, never without it), and what its exit codes mean (`done` or `findings`; any other code is
+installer's path inside the tree, its dry-run arguments (the "before" report), its own "assume yes" switch (an opt-in
+only: by default the installer's questions reach the person live and are answered one by one), and what its exit codes
+mean (`done` or `findings`; any other code is
 a failure). Chimera, the first example, is: installer `installer/chimera-install`, dry run `--dry-run`, assume yes
 `CHIMERA_ASSUME_YES=1`, exit 0 done and 1 findings.
 
