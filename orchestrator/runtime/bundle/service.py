@@ -169,7 +169,8 @@ def plan_for_device(state_dir: Path, device_id: str, selection: gen.Selection, *
     return gen.plan_bundle(selection, catalog=catalog, profile=profile, device_id=device_id,
                            runtime=runtime, config=config, mode=mode, allow_own=allow_own, runtimes=others,
                            programs=programs or framework_programs(config, client=engine_client(framework)),
-                           limits=board_limits_of(state_dir, device_id), unmeasured_ok=unmeasured_ok)
+                           limits=board_limits_of(state_dir, device_id), unmeasured_ok=unmeasured_ok,
+                           state_dir=state_dir, pack_harness=repack)
 
 
 KEPT_ONLY = ("{name} for the board's architecture is not built on this computer yet; the person's plan in the "

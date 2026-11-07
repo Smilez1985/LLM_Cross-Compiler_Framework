@@ -2,6 +2,7 @@
 sources (folder, archive, git), the pin, the one tree checksum, and the refusals (links out, a missing installer, a
 wrong sha256, a credential in the link)."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -141,3 +142,108 @@ def test_bad_specs_name_their_field(change, field):
 def test_the_chimera_example_is_a_valid_spec():
     assert h.check_spec(h.CHIMERA_EXAMPLE).assume_yes == "CHIMERA_ASSUME_YES=1"
     assert h.CHIMERA_EXAMPLE.exit_codes == {0: "done", 1: "findings"}
+
+
+# --- the harness in the bundle (generator, manifest) -----------------------------------------------------------------
+
+def _taken(tmp_path, **kw):
+    src = make_tree(tmp_path / "src")
+    return h.take_in(spec(location=str(src), **kw), tmp_path / "state")
+
+
+def test_the_pack_is_the_same_bytes_every_time_and_holds_only_the_listing(tmp_path):
+    taken = _taken(tmp_path)
+    os.symlink("app.py", taken.path / "src" / "link")
+    rows = h.tree_listing(taken.path)
+    first, sha, size = h.pack(taken.path, h.tree_sha256(rows))
+    data = first.read_bytes()
+    first.unlink()
+    again, sha2, _ = h.pack(taken.path, h.tree_sha256(rows))
+    assert again.read_bytes() == data and sha == sha2 and size == len(data)
+    with tarfile.open(again) as tf:
+        members = tf.getmembers()
+    assert [m.name for m in members] == [r[0] for r in rows]
+    assert all(m.mtime == 0 and m.uid == 0 and m.gid == 0 for m in members)
+    assert {m.name: m.mode for m in members if m.isfile()} == {"installer/install.sh": 0o755, "src/app.py": 0o644}
+    assert next(m for m in members if m.name == "src/link").linkname == "app.py"
+    with pytest.raises(h.HarnessError, match="does not match"):
+        h.pack(taken.path, "0" * 64)
+
+
+def test_an_ai_plan_never_packs(tmp_path):
+    taken = _taken(tmp_path)
+    with pytest.raises(h.HarnessError, match="not packed"):
+        h.pack(taken.path, taken.tree_sha256, make=False)
+    h.pack(taken.path, taken.tree_sha256)
+    assert h.pack(taken.path, taken.tree_sha256, make=False)[1]
+
+
+def _harness_plan(tmp_path, values, **kw):
+    from orchestrator.runtime.bundle import blocks as blk
+    from orchestrator.runtime.bundle import generator as gen
+    from test_board_bundle import RK3566, DEVICE
+    sel = gen.Selection(blocks=["harness-agent"], values={"harness": values}, **kw)
+    return gen.plan_bundle(sel, catalog=blk.load_catalog(), profile=RK3566, device_id=DEVICE, offline=False,
+                           bundle_id="harness-test", unmeasured_ok=True, state_dir=tmp_path / "state")
+
+
+def test_the_plan_carries_the_tree_its_checksum_and_the_run_harness_action(tmp_path):
+    taken = _taken(tmp_path)
+    plan = _harness_plan(tmp_path, {"harness": "demo"})
+    assert plan.ok, plan.problems
+    comp = plan.manifest.components[0]
+    assert comp.kind == "harness" and comp.start is None
+    assert comp.harness.tree_sha256 == taken.tree_sha256 and comp.harness.installer == "installer/install.sh"
+    assert comp.harness.dry_run_args == ("--dry-run",) and comp.harness.outcomes() == {0: "done", 1: "findings"}
+    assert comp.harness.assume_yes is None   # the switch only after the person's opt-in
+    assert {f.name: f.role for f in comp.files} == {"harness.tar": "data", "harness_watch.sh": "program"}
+    watch = next(f for f in comp.files if f.name == "harness_watch.sh")
+    assert watch.sha256 == h._sha256_file(h.WATCH_SH)
+    assert [(a.action, a.component) for a in plan.manifest.root_actions] == [("run_harness", "harness")]
+    assert comp.variables["tree"] == taken.tree_sha256
+    from orchestrator.runtime.bundle.installer import render_steps
+    assert render_steps(plan.manifest, "a" * 64).endswith("root\trun_harness\tharness\n")
+    opted = _harness_plan(tmp_path, {"harness": "demo", "assume_yes": True})
+    assert opted.manifest.components[0].harness.assume_yes == "DEMO_YES=1"
+    assert any("opt-in" in line for line in opted.lines())
+
+
+@pytest.mark.parametrize("values, kw, words", [
+    ({"harness": "other"}, {}, "no harness other"),
+    ({"harness": "demo", "tree": "f" * 64}, {}, "with tree ffffffffffff"),
+    ({"harness": "demo"}, {"unprivileged_only": True}, "unprivileged-only variant cannot take it"),
+    ({}, {}, "harness is needed"),
+])
+def test_a_harness_the_plan_cannot_take_says_why(tmp_path, values, kw, words):
+    _taken(tmp_path)
+    plan = _harness_plan(tmp_path, values, **kw)
+    assert not plan.ok and any(words in p for p in plan.problems), plan.problems
+
+
+def test_assume_yes_needs_a_switch_of_the_harness(tmp_path):
+    _taken(tmp_path, assume_yes=None)
+    plan = _harness_plan(tmp_path, {"harness": "demo", "assume_yes": True})
+    assert any("names no assume-yes switch" in p for p in plan.problems)
+
+
+def test_the_manifest_refuses_a_harness_that_is_not_whole(tmp_path):
+    from orchestrator.runtime.bundle.manifest import ManifestError, load_manifest
+    _taken(tmp_path)
+    good = _harness_plan(tmp_path, {"harness": "demo"}).manifest.as_json()
+    load_manifest(good)
+
+    def changed(edit):
+        doc = json.loads(json.dumps(good))
+        edit(doc)
+        return doc
+    for edit in (lambda d: d["components"][0].pop("harness"),
+                 lambda d: d["components"][0].__setitem__("files", d["components"][0]["files"][:1]),
+                 lambda d: d["components"][0]["harness"].__setitem__("installer", "../x.sh"),
+                 lambda d: d["components"][0]["harness"].__setitem__("assume_yes", "X=$(id)"),
+                 lambda d: d["components"][0]["harness"].__setitem__("exit_codes", {"256": "done"}),
+                 lambda d: d["components"][0]["harness"].__setitem__("exit_codes", {"0": "maybe"}),
+                 lambda d: d["components"][0]["harness"].__setitem__("dry_run_args", ["; rm"]),
+                 lambda d: d["components"][0]["harness"].__setitem__("tree_sha256", "x" * 64),
+                 lambda d: d["components"][0].__setitem__("kind", "llm")):
+        with pytest.raises(ManifestError):
+            load_manifest(changed(edit))

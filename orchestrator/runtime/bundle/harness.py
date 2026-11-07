@@ -14,7 +14,12 @@ a failure). Chimera, the first example, is: installer `installer/chimera-install
 `CHIMERA_ASSUME_YES=1`, exit 0 done and 1 findings.
 
 The store: <state>/harnesses/<id>/<tree sha256>/tree/ and harness.json beside it; a tree that is already there is
-reused. Nothing here runs the installer: that happens on the board, watched (the next step of the roadmap row).
+reused. Nothing here runs the installer: that happens on the board, as root through llmcf-install (harness_run.py).
+
+For the bundle the tree is packed into one plain tar file (`pack`: harness.tar beside the tree, USTAR, only the
+listing's entries in its order, every owner 0, every time 0, mode 0755 or 0644 by the executable bit, links as links),
+so the same tree gives the same bytes; llmcf-install unpacks it on the board and computes the same tree checksum
+(rust/llmcf-install/src/harness.rs; tests/data/harness_tree_vectors.json holds the vectors both sides check).
 """
 
 import hashlib
@@ -168,6 +173,54 @@ def tree_sha256(rows: List[Tuple[str, str, str]]) -> str:
     """One checksum over the listing: the same tree gives the same checksum on every computer."""
     text = "".join(f"{kind} {digest} {path}\n" for path, kind, digest in rows)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+PACK_FILE = "harness.tar"
+WATCH_FILE = "harness_watch.sh"
+WATCH_SH = Path(__file__).resolve().parent / WATCH_FILE
+
+
+def pack(tree: Path, tree_sha: str, *, make: bool = True) -> Tuple[Path, str, int]:
+    """The tree packed for the bundle: (path of harness.tar beside the tree, its sha256, its size). The tree is
+    listed again first and must still have `tree_sha`; a pack that is there already is reused when its record
+    (harness.tar.sha256) still matches its bytes. HarnessError when a path does not fit a plain tar header, or
+    (`make` False: an AI's read-only plan) when no pack is there yet."""
+    tree = Path(tree)
+    rows = tree_listing(tree)
+    if tree_sha256(rows) != tree_sha:
+        raise HarnessError("the stored tree does not match what was taken in; take the harness in again")
+    out = tree.parent / PACK_FILE
+    record = tree.parent / (PACK_FILE + ".sha256")
+    if out.is_file() and record.is_file():
+        known = record.read_text(encoding="ascii", errors="replace").strip()
+        if RE_SHA256.fullmatch(known) and _sha256_file(out) == known:
+            return out, known, out.stat().st_size
+    if not make:
+        raise HarnessError("the harness is not packed for a bundle yet; the person's own plan packs it")
+    tmp = tree.parent / f".{PACK_FILE}.{os.getpid()}.tmp"
+    try:
+        with tarfile.open(tmp, "w", format=tarfile.USTAR_FORMAT) as tf:
+            for rel, kind, digest in rows:
+                info = tarfile.TarInfo(rel)
+                info.uid = info.gid = 0
+                info.uname = info.gname = ""
+                info.mtime = 0
+                if kind == "l":
+                    info.type, info.linkname, info.mode = tarfile.SYMTYPE, digest, 0o777
+                    tf.addfile(info)
+                    continue
+                path = tree / rel
+                info.size = path.stat().st_size
+                info.mode = 0o755 if kind == "x" else 0o644
+                with open(path, "rb") as fh:
+                    tf.addfile(info, fh)
+    except ValueError as e:   # a name or a link target longer than a plain tar header takes
+        tmp.unlink(missing_ok=True)
+        raise HarnessError(f"the harness cannot be packed for the board: {e}") from None
+    sha = _sha256_file(tmp)
+    os.replace(tmp, out)
+    record.write_text(sha + "\n", encoding="ascii")
+    return out, sha, out.stat().st_size
 
 
 def _sha256_file(path: Path) -> str:

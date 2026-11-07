@@ -45,7 +45,8 @@ from orchestrator.runtime.bundle.blocks import ENTERPRISE_TRUSTS, Block, BlockCa
 from orchestrator.runtime.bundle.installer import (ROOT_HELPER_FILE, SIGNED_FILES, installer_sh, render_steps,
                                                    staged_name)
 from orchestrator.runtime.bundle.manifest import (RE_ID, RE_LICENCE, RE_URL, BundleManifest, Component, FileEntry,
-                                                  ManifestError, RootAction, StartSpec, dump_manifest, load_manifest)
+                                                  HarnessPart, ManifestError, RootAction, StartSpec, dump_manifest,
+                                                  load_manifest)
 
 PRESETS: Dict[str, Tuple[str, ...]] = {
     "llm": ("llm-llama-server",),
@@ -193,6 +194,12 @@ class BundlePlan:
                 for f in comp.files:
                     lic = f", licence {f.licence}" if f.licence else ""
                     out.append(f"    {f.role}: {f.name}, {_mb(f.size)} ({self._source(comp.id, f)}{lic})")
+                if comp.harness is not None:
+                    hp = comp.harness
+                    out.append(f"    harness {hp.id} at {hp.pin[:12]}, tree {hp.tree_sha256}, installer "
+                               f"{hp.installer}" + (f", dry run {' '.join(hp.dry_run_args)}" if hp.dry_run_args
+                                                     else ", no dry run of its own")
+                               + (f", assume yes {hp.assume_yes} (opt-in)" if hp.assume_yes else ""))
             for action in self.manifest.root_actions:
                 out.append(f"  root action: {action.action} for {action.component} (llmcf-install)"
                            + (", skipped: unprivileged only" if self.manifest.mode == "unprivileged" else ""))
@@ -314,14 +321,17 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
                 now: Optional[datetime] = None,
                 programs: Optional[Callable[[str, Optional[str]], Tuple[Path, str]]] = None,
                 runtimes: Optional[Dict[str, RuntimePackage]] = None, limits: Any = None,
-                unmeasured_ok: bool = False) -> BundlePlan:
+                unmeasured_ok: bool = False, state_dir: Optional[Path] = None,
+                pack_harness: bool = True) -> BundlePlan:
     """The plan of `selection` for the board of `profile` (see the module text). `offline` None reads the setting
     from `config` (utils/locality.offline_mode); `locality` stands in for utils/locality.check_reach in tests.
     `runtime` is llama.cpp's board package, `runtimes` every project's (runtime/build/projects.py: whisper.cpp for
     the speech recognition), each a RuntimePackage. `programs(name, arch)` gives (path, sha256) of a program the
     framework builds itself for the board (a block's file "from: framework", service.framework_programs:
     root_helper.ensure_helper); it raises with the plain reason when it cannot. A gateway component takes the llm
-    component's port and context size (GATEWAY_FROM_LLM)."""
+    component's port and context size (GATEWAY_FROM_LLM). A harness component takes the person's harness taken in
+    below `state_dir` (harness.stored; packed with harness.pack, never anew when `pack_harness` is False) and gets
+    the root action run_harness."""
     from orchestrator.utils.helpers import sha256_file
     from orchestrator.utils import locality as loc
     packages: Dict[str, RuntimePackage] = dict(runtimes or {})
@@ -428,9 +438,28 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
         comp_runtime: Optional[RuntimePackage] = None
         picked: Dict[str, Path] = {}
         choices = selection.files.get(comp_id) or {}
+        harness_part: Optional[HarnessPart] = None
+        harness_tar: Optional[Tuple[Path, str, int]] = None
+        if block.kind == "harness":
+            found = _harness_of(plan, comp_id, values, state_dir, selection, pack_harness)
+            if found is not None:
+                harness_part, harness_tar = found
         for need in block.files:
             name = need.name or need.role
             names[need.role] = name
+            if need.source == "harness":
+                if harness_tar is None:
+                    continue   # the reason is a problem already
+                from orchestrator.runtime.bundle.harness import WATCH_SH
+                if need.role == "data":
+                    path, sha, size = harness_tar
+                else:
+                    path, sha, size = WATCH_SH, hasher(WATCH_SH), WATCH_SH.stat().st_size
+                entry = FileEntry(name=name, sha256=sha, size=size, mode=need.mode, role=need.role,
+                                  format="tar" if need.role == "data" else None)
+                entries.append(entry)
+                plan.files[(comp_id, name)] = PlannedFile(entry, Path(path))
+                continue
             if need.source == "framework":
                 try:
                     if programs is None:
@@ -573,12 +602,16 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
                       RootAction(action="install_unit", component=comp_id, unit=unit, user=user),
                       RootAction(action="set_cgroup", component=comp_id, unit=unit,
                                  memory_max_mb=int(values.get("memory_limit_mb") or 1024))]
+        if harness_part is not None:
+            roots.append(RootAction(action="run_harness", component=comp_id))
+        if block.kind == "harness" and harness_part is None:
+            continue   # its reason is a problem already
         try:
             components.append(Component(id=comp_id, kind=block.kind, block=block.id, block_version=block.version,
                                         block_sha256=block.sha256 or "0" * 64, block_trust=block.trust,
                                         variables=values, files=tuple(entries), keygen=block.keygen,
                                         start=StartSpec(program=program, args=args)
-                                        if program and startable else None))
+                                        if program and startable else None, harness=harness_part))
         except Exception as e:  # noqa: BLE001 - pydantic's own reason, never pasted into shell text
             plan.problems.append(f"{comp_id}: {str(e).splitlines()[-1][:300]}")
     plan.memory_mb = memory
@@ -669,6 +702,54 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
     except Exception as e:  # noqa: BLE001
         plan.problems.append(f"the manifest: {str(e).splitlines()[-1][:300]}")
     return plan
+
+
+def _harness_of(plan: BundlePlan, comp_id: str, values: Dict[str, Any], state_dir: Optional[Path],
+                selection: Selection, make: bool) -> Optional[Tuple[HarnessPart, Tuple[Path, str, int]]]:
+    """The harness of a harness component: the person's take-in named by its variables `harness` (the id) and `tree`
+    (the tree checksum; not set: the newest take-in), packed for the bundle; its assume-yes switch only when the
+    person set `assume_yes`. None with the reason in plan.problems."""
+    from orchestrator.runtime.bundle import harness as hz
+    hid = values.get("harness")
+    if not hid:
+        return None   # "harness is needed" is a problem already
+    if selection.unprivileged_only:
+        plan.problems.append(f"{comp_id}: a harness runs its own installer as root through llmcf-install; the "
+                             "unprivileged-only variant cannot take it")
+        return None
+    if state_dir is None:
+        plan.problems.append(f"{comp_id}: the harnesses taken in on this computer are not known to this plan")
+        return None
+    want = values.get("tree")
+    record = next((r for r in hz.stored(Path(state_dir), str(hid))
+                   if not want or r.get("tree_sha256") == want), None)
+    if record is None:
+        plan.problems.append(f"{comp_id}: no harness {hid}" + (f" with tree {str(want)[:12]}" if want else "")
+                             + " is taken in on this computer (llm-cli bundle harness take-in)")
+        return None
+    spec = record.get("spec") or {}
+    tree = Path(state_dir) / hz.STORE_DIR / str(hid) / str(record.get("tree_sha256")) / hz.TREE_DIR
+    try:
+        packed = hz.pack(tree, str(record.get("tree_sha256")), make=make)
+        part = HarnessPart(id=str(hid), pin=str(record.get("pin")), tree_sha256=str(record.get("tree_sha256")),
+                           installer=str(spec.get("installer", "")),
+                           dry_run_args=tuple(spec.get("dry_run_args") or ()),
+                           exit_codes={str(k): v for k, v in (spec.get("exit_codes") or {"0": "done"}).items()},
+                           assume_yes=spec.get("assume_yes") if values.get("assume_yes") else None)
+    except (hz.HarnessError, OSError) as e:
+        plan.problems.append(f"{comp_id}: {str(e)[:300]}")
+        return None
+    except Exception as e:  # noqa: BLE001 - pydantic's own reason: a record written by another version
+        plan.problems.append(f"{comp_id}: the harness record does not read: {str(e).splitlines()[-1][:200]}")
+        return None
+    if values.get("assume_yes") and not spec.get("assume_yes"):
+        plan.problems.append(f"{comp_id}: the harness {hid} names no assume-yes switch of its own")
+        return None
+    values["tree"] = part.tree_sha256
+    plan.notes.append(f"{comp_id}: harness {hid} at {part.pin[:12]}, tree {part.tree_sha256[:12]}; its installer runs "
+                      "only on your start (dry run first), as root through llmcf-install"
+                      + ("; its assume-yes switch is in the bundle (your opt-in)" if part.assume_yes else ""))
+    return part, packed
 
 
 # The gateway's variables the bundle sets from its llm component (gateway variable -> llm variable).

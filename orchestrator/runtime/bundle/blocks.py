@@ -8,7 +8,9 @@ A block says what it is (`kind`: llm, stt, tts, vision, gateway, harness), wheth
 is a documented template only (`status` template: its guide says what is missing), its typed variables with defaults
 and bounds (manifest.VARIABLE_TYPES), the files it needs with their role, where they come from (`from` person: a file
 the person picks or a pinned online item; runtime: the board's self-built llama.cpp runtime package of deploy way 2;
-framework: a program the framework builds itself for the board, root_helper.FRAMEWORK_PROGRAMS such as llmcf-gateway)
+framework: a program the framework builds itself for the board, root_helper.FRAMEWORK_PROGRAMS such as llmcf-gateway;
+harness: the person's harness taken in at its pin, packed as harness.tar, and the framework's harness_watch.sh, only in
+a block of kind harness, which has no start of its own: its installer runs through llmcf-install's harness actions)
 and the formats and licence its models must have, its memory needs, how it starts (a program inside its folder with
 argument templates: `{variable}` for a checked value, `@FILE:role@` for one of its files, `{when: variable, args:
 [...]}` for arguments only when the variable is set) and whether its unit needs root (`unit`: autostart through
@@ -38,7 +40,9 @@ GUIDE_FILE = "README.md"
 BUILTIN_DIR = Path(__file__).resolve().parent / "blocks"
 COMMUNITY_SUBDIR = ("community", "blocks")
 STATUSES = ("ready", "template")
-SOURCES = ("person", "runtime", "framework")
+SOURCES = ("person", "runtime", "framework", "harness")
+# The two files of a harness block (from: harness): the taken-in tree and the watch.
+HARNESS_FILES = {"data": "harness.tar", "program": "harness_watch.sh"}
 # The formats a block may name for a file, and how the generator recognizes each by its first bytes (or by its name
 # where a format has no magic number).
 FORMATS = ("gguf", "mmproj-gguf", "ggml-whisper", "onnx", "sherpa-onnx", "elf", "tar.gz", "text")
@@ -216,7 +220,9 @@ def _file(raw: Any) -> FileNeed:
     if role not in ROLES:
         raise BlockError(f"file role must be one of {', '.join(ROLES)}")
     if source not in SOURCES:
-        raise BlockError(f"file {role}: from must be person, runtime or framework")
+        raise BlockError(f"file {role}: from must be person, runtime, framework or harness")
+    if source == "harness" and HARNESS_FILES.get(role) != raw.get("name"):
+        raise BlockError("file from harness: role data named harness.tar, or role program named harness_watch.sh")
     from orchestrator.runtime.build.projects import PROJECTS
     project = raw.get("project", "llama.cpp")
     if project not in PROJECTS or (project != "llama.cpp" and source != "runtime"):
@@ -347,7 +353,13 @@ def parse_block(text: str, folder: Path, trust: str = "own", sha256: str = "") -
     if not isinstance(start, dict) or set(start) - {"program", "args"}:
         raise BlockError("start is {program, args}")
     program = str(start.get("program", ""))
-    if status == "ready":
+    if any(f.source == "harness" for f in files) != (kind == "harness") and status == "ready":
+        raise BlockError("files from harness belong to a ready block of kind harness, and it takes only those")
+    if kind == "harness" and status == "ready":
+        if program or sorted(f.role for f in files) != ["data", "program"] or \
+                any(f.source != "harness" for f in files):
+            raise BlockError("a ready harness block has no start and exactly its two files from harness")
+    elif status == "ready":
         if not program:
             raise BlockError("a ready block names its program")
         parts = program.replace("@RUNTIME@", "0" * 16).split("/")

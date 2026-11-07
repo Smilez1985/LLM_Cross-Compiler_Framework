@@ -1,13 +1,20 @@
 schema: llmcf-bundle-block/1
 id: harness-agent
-version: 0.1.0
+version: 1.0.0
 kind: harness
 title: Agent harness
-status: template
+status: ready
 summary: >-
-  Documented template: an agent harness at a pinned commit under its own account. Not buildable yet: the watched
-  harness installer is planned.
+  The person's own agent harness at its pin (taken in with llm-cli bundle harness take-in): its tree goes to the
+  board in the bundle, llmcf-install unpacks it root-owned and checks its tree checksum, and its own installer runs
+  only on the person's start, watched and reported before and after.
 variables:
-  - {name: user, type: user, default: llmcf-agent}
-files: []
+  - {name: harness, type: word, required: true, help: "The harness id it was taken in with (llm-cli bundle harness list)"}
+  - {name: tree, type: word, help: "The tree checksum of the take-in to use (not set: the newest)"}
+  - {name: assume_yes, type: bool, default: false, help: "Carry the harness's own assume-yes switch (an opt-in)"}
+files:
+  - {role: data, from: harness, name: harness.tar, mode: "0644"}
+  - {role: program, from: harness, name: harness_watch.sh, mode: "0755"}
 memory: {base_mb: 256}
+notes:
+  - "The harness runs its own installer as root through llmcf-install, after the person's yes; it needs the full variant."

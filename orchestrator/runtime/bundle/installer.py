@@ -156,7 +156,7 @@ k_kv() {
 }
 k_root() {
   case $1 in create_user|install_unit|set_cgroup|place_root_file|remove_user|remove_unit|remove_cgroup|\
-remove_root_file) return 0 ;; esac
+remove_root_file|run_harness) return 0 ;; esac
   return 1
 }
 sha_of() { sha256sum "$1" 2>/dev/null | cut -d ' ' -f 1; }

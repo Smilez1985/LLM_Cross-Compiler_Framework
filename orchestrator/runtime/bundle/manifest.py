@@ -38,8 +38,11 @@ ROLES = ("model", "mmproj", "program", "runtime", "config", "data")
 FILE_MODES = ("0600", "0644", "0700", "0755")
 # The root actions a manifest may list (typed; llmcf-install, the Rust root helper, carries them out; the unprivileged
 # installer never does, it stops before them or skips them in the "unprivileged only" variant).
+# run_harness: the person's harness of a harness component, unpacked root-owned by llmcf-install's apply with its tree
+# checksum checked, its own installer run only on the person's start (dry run or run) through llmcf-install's harness
+# actions (harness_run.py), never by the apply itself.
 ROOT_ACTIONS = ("create_user", "install_unit", "set_cgroup", "place_root_file",
-                "remove_user", "remove_unit", "remove_cgroup", "remove_root_file")
+                "remove_user", "remove_unit", "remove_cgroup", "remove_root_file", "run_harness")
 # Where place_root_file may put a file (fixed places only; llmcf-install knows each one).
 ROOT_PLACES = ("unit-dropin", "tmpfiles", "sysctl")
 MODES = ("full", "unprivileged")
@@ -65,6 +68,16 @@ RE_UNIT = re.compile(r"^llmcf-[a-z0-9-]{1,40}\.service$", re.ASCII)
 RE_ROOT_FILE = re.compile(r"^llmcf-[a-z0-9._-]{1,60}\.conf$", re.ASCII)
 RE_FACT = re.compile(r"^[a-z0-9_.-]{1,32}$", re.ASCII)
 MAX_ROOT_ACTIONS = 64
+# A harness component (harness.py's rules, the same in llmcf-install): its harness id, its installer's path inside the
+# tree, one option of its dry run, its own "assume yes" switch, the pin (a commit or a sha256).
+RE_HARNESS_ID = re.compile(r"^[a-z][a-z0-9-]{1,39}$", re.ASCII)
+RE_HARNESS_PATH = re.compile(r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+){0,15}$", re.ASCII)
+RE_HARNESS_ARG = re.compile(r"^--?[A-Za-z0-9][A-Za-z0-9_.=-]{0,63}$", re.ASCII)
+RE_HARNESS_ENV = re.compile(r"^[A-Z][A-Z0-9_]{0,63}=[A-Za-z0-9_.:-]{0,64}$", re.ASCII)
+RE_PIN = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$", re.ASCII)
+HARNESS_ARCHIVE = "harness.tar"
+HARNESS_WATCH = "harness_watch.sh"
+HARNESS_OUTCOMES = ("done", "findings")
 
 # The variable types of a building block, with the bounds every value is checked against.
 VARIABLE_TYPES = ("port", "uint", "threads", "memory_mb", "bool", "user", "word", "choice", "file")
@@ -202,6 +215,44 @@ class StartSpec(_Strict):
         return v
 
 
+class HarnessPart(_Strict):
+    """The person's harness in a harness component (harness.py TakenIn): its id and pin, the checksum of its tree
+    (harness.tree_sha256, which llmcf-install computes again over the unpacked tree before every start), the
+    installer's path inside the tree, the options of its own dry run, what its exit codes mean (done or findings;
+    any other code is a failure) and its "assume yes" switch, only when the person opted in. The tree comes as the
+    component's file harness.tar, the watch as its file harness_watch.sh."""
+    id: str
+    pin: str
+    tree_sha256: str
+    installer: str
+    dry_run_args: Tuple[str, ...] = ()
+    exit_codes: Dict[str, Literal["done", "findings"]] = Field(default_factory=lambda: {"0": "done"})
+    assume_yes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _values(self):
+        if not RE_HARNESS_ID.fullmatch(self.id):
+            raise ValueError("a harness id is 2 to 40 lower-case letters, digits and '-', starting with a letter")
+        if not RE_PIN.fullmatch(self.pin):
+            raise ValueError("a harness pin is a 40-digit commit or a sha256")
+        if not RE_SHA.fullmatch(self.tree_sha256):
+            raise ValueError("tree_sha256 must be 64 lower-case hex digits")
+        if not RE_HARNESS_PATH.fullmatch(self.installer) or len(self.installer) > 255 or \
+                any(p in (".", "..") for p in self.installer.split("/")):
+            raise ValueError("the installer is a plain path inside the harness")
+        if len(self.dry_run_args) > 8 or not all(RE_HARNESS_ARG.fullmatch(a) for a in self.dry_run_args):
+            raise ValueError("dry_run_args: up to 8 options such as --dry-run")
+        if not 1 <= len(self.exit_codes) <= 256 or not all(re.fullmatch(r"0|[1-9][0-9]{0,2}", k, re.ASCII)
+                                                          and int(k) <= 255 for k in self.exit_codes):
+            raise ValueError("exit_codes: codes 0 to 255, each meaning done or findings")
+        if self.assume_yes is not None and not RE_HARNESS_ENV.fullmatch(self.assume_yes):
+            raise ValueError("assume_yes is NAME=value")
+        return self
+
+    def outcomes(self) -> Dict[int, str]:
+        return {int(k): v for k, v in self.exit_codes.items()}
+
+
 class Component(_Strict):
     """One component of the bundle, made from the block `block` (version, sha256 of its block folder, its trust when
     the bundle was built) with its checked `variables`."""
@@ -215,6 +266,7 @@ class Component(_Strict):
     files: Tuple[FileEntry, ...] = ()
     start: Optional[StartSpec] = None
     keygen: bool = False   # the runtime's own key file (llama-server.sh keygen), made on the board
+    harness: Optional[HarnessPart] = None   # kind harness only: the person's harness (HarnessPart)
 
     @field_validator("id", "block")
     @classmethod
@@ -261,6 +313,15 @@ class Component(_Strict):
             runtime = [f for f in self.files if f.role == "runtime"]
             if first not in names and not (runtime and first == "runtime"):
                 raise ValueError(f"component {self.id}: its program is none of its files")
+        if (self.kind == "harness") != (self.harness is not None):
+            raise ValueError(f"component {self.id}: a harness component, and only one, names its harness")
+        if self.harness is not None:
+            roles = {f.name: (f.role, f.source) for f in self.files}
+            if roles.get(HARNESS_ARCHIVE) != ("data", "bundle") or roles.get(HARNESS_WATCH) != ("program", "bundle"):
+                raise ValueError(f"component {self.id}: a harness comes as {HARNESS_ARCHIVE} (data) and "
+                                 f"{HARNESS_WATCH} (program) in the bundle")
+            if self.start is not None:
+                raise ValueError(f"component {self.id}: a harness has no start of its own (its installer runs once)")
         return self
 
 
@@ -268,7 +329,7 @@ class RootAction(_Strict):
     """A root action, typed: `action` (ROOT_ACTIONS), the component it belongs to and its checked values (user,
     unit, memory_max_mb, cpu_weight, place, file). Never a shell line."""
     action: Literal["create_user", "install_unit", "set_cgroup", "place_root_file",
-                    "remove_user", "remove_unit", "remove_cgroup", "remove_root_file"]
+                    "remove_user", "remove_unit", "remove_cgroup", "remove_root_file", "run_harness"]
     component: str
     user: Optional[str] = None
     unit: Optional[str] = None
@@ -289,7 +350,8 @@ class RootAction(_Strict):
             check_value("file", self.file, name="file")
         need = {"create_user": ("user",), "remove_user": ("user",), "install_unit": ("unit", "user"),
                 "remove_unit": ("unit",), "set_cgroup": ("unit", "memory_max_mb"), "remove_cgroup": ("unit",),
-                "place_root_file": ("place", "file"), "remove_root_file": ("place", "file")}[self.action]
+                "place_root_file": ("place", "file"), "remove_root_file": ("place", "file"),
+                "run_harness": ()}[self.action]
         missing = [k for k in need if getattr(self, k) is None]
         if missing:
             raise ValueError(f"{self.action} needs {', '.join(missing)}")
@@ -352,6 +414,8 @@ class BundleManifest(_Strict):
                                  "the bundle")
             if action.action == "place_root_file" and action.file not in {f.name for f in comp.files}:
                 raise ValueError(f"root action place_root_file: {action.file} is no file of component {comp.id}")
+            if action.action == "run_harness" and comp.harness is None:
+                raise ValueError(f"root action run_harness: component {comp.id} names no harness")
         return self
 
     def as_json(self) -> Dict[str, Any]:
@@ -400,7 +464,8 @@ def problems_of(data: Any) -> List[str]:
         return [str(e)]
 
 
-__all__ = ["BoardFacts", "BundleManifest", "Component", "FILE_MODES", "FileEntry", "KINDS", "MODES", "ManifestError",
+__all__ = ["BoardFacts", "BundleManifest", "Component", "FILE_MODES", "FileEntry", "HARNESS_ARCHIVE", "HARNESS_WATCH",
+           "HarnessPart", "KINDS", "MODES", "ManifestError",
            "MAX_ROOT_ACTIONS", "RE_ARG", "RE_FACT", "RE_FILE", "RE_ID", "RE_ROOT_FILE", "RE_SHA", "RE_UNIT", "RE_URL",
            "RE_WORD", "ROLES", "ROOT_ACTIONS", "ROOT_PLACES",
            "RootAction", "SCHEMA", "StartSpec", "VARIABLE_TYPES", "check_value", "dump_manifest", "load_manifest",
