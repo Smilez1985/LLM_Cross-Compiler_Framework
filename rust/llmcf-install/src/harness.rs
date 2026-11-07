@@ -37,6 +37,8 @@ const READ_CHUNK: u64 = 256 * 1024;
 const MAX_ANSWER: usize = 4096;
 const MAX_RECORD_LINES: usize = 20000;
 const MAX_RECORD_LINE: usize = 600;
+/// All records together stay below what the host reads of one answer (harness_run.RECORDS_LIMIT, 32 MiB).
+const MAX_RECORD_BYTES: usize = 24 * 1024 * 1024;
 /// O_NONBLOCK on the three targets llmcf-install is built for (x86_64, aarch64, armv7: the generic value).
 const O_NONBLOCK: i32 = 0o4000;
 
@@ -608,18 +610,22 @@ fn lines_of(path: &Path) -> Vec<String> {
     fs::read(path).map(|d| String::from_utf8_lossy(&d).lines().map(String::from).collect()).unwrap_or_default()
 }
 
-fn emit(name: &str, lines: &[String]) -> bool {
+/// Prints one record (`llmcf-harness: file NAME`, then `> line` each); true when it was cut (too many lines, or the
+/// whole answer's `budget` of bytes is used up).
+fn emit(name: &str, lines: &[String], budget: &mut usize) -> bool {
     println!("llmcf-harness: file {name}");
-    let mut cut = false;
     for (i, l) in lines.iter().enumerate() {
         if i >= MAX_RECORD_LINES {
-            cut = true;
-            break;
+            return true;
         }
         let l: String = l.chars().filter(|c| !c.is_control() || *c == '\t').take(MAX_RECORD_LINE).collect();
+        if l.len() + 3 > *budget {
+            return true;
+        }
+        *budget -= l.len() + 3;
         println!("> {l}");
     }
-    cut
+    false
 }
 
 /// The trace lines the host's report reads: programs started, connections, files written, renamed or made setuid.
@@ -647,8 +653,9 @@ fn records(r: &Run) -> Done {
         return Done::refused("the installer is still running; its records are read once it ended");
     }
     let mut cut = false;
+    let mut budget = MAX_RECORD_BYTES;
     for name in ["exit_code", "started", "ended", "watch", "terminal"] {
-        cut |= emit(name, &lines_of(&r.out.join(name)));
+        cut |= emit(name, &lines_of(&r.out.join(name)), &mut budget);
     }
     // of each snapshot only the lines that differ between before and after (all the report compares)
     for name in ["packages.txt", "accounts.txt", "ports.txt", "files.txt"] {
@@ -658,11 +665,11 @@ fn records(r: &Run) -> Done {
         let a: std::collections::HashSet<&String> = after.iter().collect();
         let only_b: Vec<String> = before.iter().filter(|l| !a.contains(l)).cloned().collect();
         let only_a: Vec<String> = after.iter().filter(|l| !b.contains(l)).cloned().collect();
-        cut |= emit(&format!("before/{name}"), &only_b);
-        cut |= emit(&format!("after/{name}"), &only_a);
+        cut |= emit(&format!("before/{name}"), &only_b, &mut budget);
+        cut |= emit(&format!("after/{name}"), &only_a, &mut budget);
     }
     let trace: Vec<String> = lines_of(&r.out.join("trace.txt")).into_iter().filter(|l| wanted_trace(l)).collect();
-    cut |= emit("trace.txt", &trace);
+    cut |= emit("trace.txt", &trace, &mut budget);
     if cut {
         println!("llmcf-harness: truncated");
     }
