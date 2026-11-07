@@ -614,10 +614,39 @@ fn a_harness_is_unpacked_checked_run_and_read_back_and_a_changed_tree_never_runs
     let (head, text) = b.read_all("dry-1");
     assert!(head.contains("status=ended code=0"), "{head}");
     assert!(text.contains("installed"), "{text}");
-    let (code, out) = b.harness(&["harness-records", "agent", "dry-1"]);
+    // the records: an index of files with size and sha256, then each file in parts, nothing cut off
+    let (code, out) = b.harness(&["harness-records", "agent", "dry-1", "index"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("llmcf-harness: file exit_code\n> 0\n"), "{out}");
-    assert!(out.contains("llmcf-harness: file after/files.txt"), "{out}");
+    assert!(out.contains("llmcf-harness: records part=4194304"), "{out}");
+    let index: Vec<(String, String, u64, String)> = out
+        .lines()
+        .filter_map(|l| l.strip_prefix("llmcf-harness: record "))
+        .map(|l| {
+            let w: Vec<&str> = l.split(' ').collect();
+            (w[0].to_string(), w[1].to_string(), w[2].parse().unwrap(), w[3].to_string())
+        })
+        .collect();
+    assert_eq!(index.len(), 14, "{out}");
+    assert_eq!(index[0].1, "exit_code");
+    for (n, name, size, digest) in &index {
+        let mut data = Vec::new();
+        while (data.len() as u64) < *size {
+            let value = format!("{n}.{}.7", data.len());
+            let (code, part) = b.harness(&["harness-records", "agent", "dry-1", &value]);
+            assert_eq!(code, 0, "{part}");
+            let head = part.lines().find(|l| l.starts_with("llmcf-harness: part ")).unwrap();
+            let chunk = unb64(part.lines().find_map(|l| l.strip_prefix("llmcf-harness: data ")).unwrap());
+            assert!(!chunk.is_empty() && chunk.len() <= 7, "{head}");
+            assert!(head.contains(&format!("sha256={}", sha(&chunk))), "{head}");
+            data.extend(chunk);
+        }
+        assert_eq!(&sha(&data), digest, "{name}");
+        if name == "exit_code" {
+            assert_eq!(data, b"0\n");
+        }
+    }
+    let (code, out) = b.harness(&["harness-records", "agent", "dry-1", "0.99.1"]);
+    assert_eq!(code, 3, "an offset beyond the end: {out}");
     let (code, out) = b.harness(&["harness-start", "agent", "dry-1", "dry"]);
     assert_eq!(code, 3, "a run name is used once: {out}");
     let (code, out) = b.harness(&["harness-start", "agent", "yes-1", "run-yes"]);
@@ -649,6 +678,9 @@ fn hostile_harness_arguments_are_refused_before_anything() {
         vec!["harness-read", "agent", "run-1"],
         vec!["harness-stop", "../agent", "run-1"],
         vec!["harness-records", "agent", "run-1", "more"],
+        vec!["harness-records", "agent", "run-1"],
+        vec!["harness-records", "agent", "run-1", "14.0.1"],
+        vec!["harness-records", "agent", "run-1", "0.0.0"],
     ] {
         let (code, out) = b.harness(&args);
         assert_eq!(code, 2, "{args:?}: {out}");

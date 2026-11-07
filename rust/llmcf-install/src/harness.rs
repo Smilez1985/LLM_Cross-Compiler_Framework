@@ -9,14 +9,20 @@
 //!   harness-read BUNDLE COMPONENT RUN OFFSET  the installer's output from OFFSET (waits a little for more), base64
 //!   harness-answer BUNDLE COMPONENT RUN       one line of stdin goes to the installer (never shown, never kept)
 //!   harness-stop BUNDLE COMPONENT RUN         ends the installer (the watch still records the end)
-//!   harness-records BUNDLE COMPONENT RUN      what the watch recorded, for the report on the host
+//!   harness-records BUNDLE COMPONENT RUN index         what the watch recorded, for the report on the host: the
+//!                                                      list of record files with their size and sha256
+//!   harness-records BUNDLE COMPONENT RUN N.OFFSET.LEN  one part of record N (at most PART_SIZE bytes), base64
+//!
+//! Nothing of the records is cut off: they are sent in parts of at most 4 MiB, and the host fetches part by part
+//! (reading on from its last good offset after a dropped connection) and checks every file's sha256 at the end.
 //!
 //! The tree checksum is computed again before every start: a tree that changed on the board is never run. Every
 //! record stays root-only on the board (the run folder is 0700); the board account reads them only through these
 //! actions.
 
+use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::{FileTypeExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -35,10 +41,25 @@ const MAX_DEPTH: usize = 64;
 const READ_WAIT: Duration = Duration::from_secs(15);
 const READ_CHUNK: u64 = 256 * 1024;
 const MAX_ANSWER: usize = 4096;
-const MAX_RECORD_LINES: usize = 20000;
-const MAX_RECORD_LINE: usize = 600;
-/// All records together stay below what the host reads of one answer (harness_run.RECORDS_LIMIT, 32 MiB).
-const MAX_RECORD_BYTES: usize = 24 * 1024 * 1024;
+/// The largest part of a record one harness-records call sends (harness_run.PART_SIZE on the host).
+pub const PART_SIZE: u64 = 4 * 1024 * 1024;
+/// The records the host's report reads, in this order: their number is the N of a part call.
+pub const RECORDS: [&str; 14] = [
+    "exit_code",
+    "started",
+    "ended",
+    "watch",
+    "terminal",
+    "before/packages.txt",
+    "after/packages.txt",
+    "before/accounts.txt",
+    "after/accounts.txt",
+    "before/ports.txt",
+    "after/ports.txt",
+    "before/files.txt",
+    "after/files.txt",
+    "trace.txt",
+];
 /// O_NONBLOCK on the three targets llmcf-install is built for (x86_64, aarch64, armv7: the generic value).
 const O_NONBLOCK: i32 = 0o4000;
 
@@ -440,7 +461,7 @@ pub fn run(env: &Env, action: &str, bid: &str, account: &Account, args: &[String
                 "harness-read" => read(&r, args[2].parse().unwrap_or(0)),
                 "harness-answer" => answer(&r),
                 "harness-stop" => stop(&r),
-                _ => records(&r),
+                _ => records(&r, args.get(2).map(String::as_str).unwrap_or("")),
             },
         },
     };
@@ -606,26 +627,17 @@ fn stop(r: &Run) -> Done {
     Done::ok_text("ok", "")
 }
 
-fn lines_of(path: &Path) -> Vec<String> {
-    fs::read(path).map(|d| String::from_utf8_lossy(&d).lines().map(String::from).collect()).unwrap_or_default()
+/// The lines of a record, each as text (a byte that is not UTF-8 replaced, control characters but the tab taken out:
+/// nothing a record holds steers the host's terminal); never cut.
+fn clean_lines(path: &Path) -> Vec<String> {
+    match File::open(path) {
+        Ok(f) => BufReader::new(f).split(b'\n').map_while(Result::ok).map(|l| clean(&l)).collect(),
+        Err(_) => Vec::new(),
+    }
 }
 
-/// Prints one record (`llmcf-harness: file NAME`, then `> line` each); true when it was cut (too many lines, or the
-/// whole answer's `budget` of bytes is used up).
-fn emit(name: &str, lines: &[String], budget: &mut usize) -> bool {
-    println!("llmcf-harness: file {name}");
-    for (i, l) in lines.iter().enumerate() {
-        if i >= MAX_RECORD_LINES {
-            return true;
-        }
-        let l: String = l.chars().filter(|c| !c.is_control() || *c == '\t').take(MAX_RECORD_LINE).collect();
-        if l.len() + 3 > *budget {
-            return true;
-        }
-        *budget -= l.len() + 3;
-        println!("> {l}");
-    }
-    false
+fn clean(line: &[u8]) -> String {
+    String::from_utf8_lossy(line).chars().filter(|c| !c.is_control() || *c == '\t').collect()
 }
 
 /// The trace lines the host's report reads: programs started, connections, files written, renamed or made setuid.
@@ -645,34 +657,123 @@ fn wanted_trace(line: &str) -> bool {
     line.contains("rename") || line.contains("chmod(") || line.contains("fchmodat(")
 }
 
-fn records(r: &Run) -> Done {
+fn write_lines(path: &Path, lines: impl Iterator<Item = String>) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut out = BufWriter::new(OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)?);
+    for l in lines {
+        out.write_all(l.as_bytes())?;
+        out.write_all(b"\n")?;
+    }
+    out.flush()
+}
+
+/// The records as the host reads them, made once after the run ended in `<run>/export` (root-only like the run):
+/// the small records whole, of each snapshot only the lines that differ between before and after (all the report
+/// compares), of the trace only the lines the report reads. Nothing is cut; the folder never changes afterwards, so
+/// a part read later continues the same bytes.
+fn export(out: &Path) -> Result<PathBuf, String> {
+    let dir = out.join("export");
+    if dir.join(".done").is_file() {
+        return Ok(dir);
+    }
+    let tmp = out.join("export.new");
+    if fs::symlink_metadata(&tmp).is_ok() {
+        fs::remove_dir_all(&tmp).map_err(|e| format!("an unfinished export cannot be cleared: {e}"))?;
+    }
+    fs::create_dir(&tmp).map_err(|e| e.to_string())?;
+    for name in &RECORDS[..5] {
+        write_lines(&tmp.join(name), clean_lines(&out.join(name)).into_iter()).map_err(|e| e.to_string())?;
+    }
+    for name in ["packages.txt", "accounts.txt", "ports.txt", "files.txt"] {
+        let before = clean_lines(&out.join("before").join(name));
+        let after = clean_lines(&out.join("after").join(name));
+        let b: HashSet<&String> = before.iter().collect();
+        let a: HashSet<&String> = after.iter().collect();
+        write_lines(&tmp.join("before").join(name), before.iter().filter(|l| !a.contains(l)).cloned())
+            .map_err(|e| e.to_string())?;
+        write_lines(&tmp.join("after").join(name), after.iter().filter(|l| !b.contains(l)).cloned())
+            .map_err(|e| e.to_string())?;
+    }
+    // the trace can be large: read line by line, never whole
+    let trace: Box<dyn Iterator<Item = String>> = match File::open(out.join("trace.txt")) {
+        Ok(f) => Box::new(
+            BufReader::new(f).split(b'\n').map_while(Result::ok).map(|l| clean(&l)).filter(|l| wanted_trace(l)),
+        ),
+        Err(_) => Box::new(std::iter::empty()),
+    };
+    write_lines(&tmp.join("trace.txt"), trace).map_err(|e| e.to_string())?;
+    fs::write(tmp.join(".done"), b"").map_err(|e| e.to_string())?;
+    if fs::symlink_metadata(&dir).is_ok() {
+        fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
+    fs::rename(&tmp, &dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// A part call's value N.OFFSET.LEN: (record number, offset, length), each in range.
+pub fn part_value(value: &str) -> Option<(usize, u64, u64)> {
+    let mut it = value.split('.');
+    let (n, off, len) = (it.next()?, it.next()?, it.next()?);
+    if it.next().is_some() {
+        return None;
+    }
+    let digits = |s: &str, max: usize| !s.is_empty() && s.len() <= max && s.bytes().all(|c| c.is_ascii_digit());
+    if !digits(n, 2) || !digits(off, 15) || !digits(len, 8) {
+        return None;
+    }
+    let (n, off, len): (usize, u64, u64) = (n.parse().ok()?, off.parse().ok()?, len.parse().ok()?);
+    (n < RECORDS.len() && len >= 1).then_some((n, off, len))
+}
+
+/// Whether `value` is one harness-records takes: "index" or a part N.OFFSET.LEN.
+pub fn is_records_value(value: &str) -> bool {
+    value == "index" || part_value(value).is_some()
+}
+
+fn records(r: &Run, value: &str) -> Done {
     if !r.out.is_dir() {
         return Done::refused("no such run of the harness");
     }
     if !r.out.join("ended").exists() {
         return Done::refused("the installer is still running; its records are read once it ended");
     }
-    let mut cut = false;
-    let mut budget = MAX_RECORD_BYTES;
-    for name in ["exit_code", "started", "ended", "watch", "terminal"] {
-        cut |= emit(name, &lines_of(&r.out.join(name)), &mut budget);
+    let dir = match export(&r.out) {
+        Ok(d) => d,
+        Err(e) => return Done::failed(format!("the records could not be prepared: {e}")),
+    };
+    if value == "index" {
+        println!("llmcf-harness: records part={PART_SIZE}");
+        for (n, name) in RECORDS.iter().enumerate() {
+            let path = dir.join(name);
+            let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            match file_sha256(&path) {
+                Ok(sha) => println!("llmcf-harness: record {n} {name} {size} {sha}"),
+                Err(_) => return Done::failed("a record could not be read"),
+            }
+        }
+        return Done::ok_text("ok", "");
     }
-    // of each snapshot only the lines that differ between before and after (all the report compares)
-    for name in ["packages.txt", "accounts.txt", "ports.txt", "files.txt"] {
-        let before = lines_of(&r.out.join("before").join(name));
-        let after = lines_of(&r.out.join("after").join(name));
-        let b: std::collections::HashSet<&String> = before.iter().collect();
-        let a: std::collections::HashSet<&String> = after.iter().collect();
-        let only_b: Vec<String> = before.iter().filter(|l| !a.contains(l)).cloned().collect();
-        let only_a: Vec<String> = after.iter().filter(|l| !b.contains(l)).cloned().collect();
-        cut |= emit(&format!("before/{name}"), &only_b, &mut budget);
-        cut |= emit(&format!("after/{name}"), &only_a, &mut budget);
+    let Some((n, offset, len)) = part_value(value) else {
+        return Done::refused("not a part of a record (N.OFFSET.LENGTH)");
+    };
+    let path = dir.join(RECORDS[n]);
+    let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    if offset > size {
+        return Done::refused("the offset lies beyond the record's end");
     }
-    let trace: Vec<String> = lines_of(&r.out.join("trace.txt")).into_iter().filter(|l| wanted_trace(l)).collect();
-    cut |= emit("trace.txt", &trace, &mut budget);
-    if cut {
-        println!("llmcf-harness: truncated");
+    let take = len.min(PART_SIZE).min(size - offset);
+    let mut data = vec![0u8; take as usize];
+    let got = File::open(&path).and_then(|mut f| {
+        f.seek(SeekFrom::Start(offset))?;
+        f.read_exact(&mut data)
+    });
+    if got.is_err() {
+        return Done::failed("the record could not be read");
     }
+    println!("llmcf-harness: part {n} offset={offset} size={take} sha256={}", sig::hex(&Sha256::digest(&data)));
+    println!("llmcf-harness: data {}", b64(&data));
     Done::ok_text("ok", "")
 }
 
@@ -815,5 +916,40 @@ mod tests {
         assert!(wanted_trace("12 execve(\"/bin/sh\", [\"sh\"], 0x0) = 0"));
         assert!(!wanted_trace("12 openat(AT_FDCWD, \"/etc/x\", O_RDONLY) = 3"));
         assert!(wanted_trace("12 openat(AT_FDCWD, \"/etc/x\", O_WRONLY|O_CREAT, 0644) = 3"));
+    }
+
+    #[test]
+    fn a_part_call_names_a_record_an_offset_and_a_length() {
+        assert_eq!(part_value("0.0.4194304"), Some((0, 0, 4194304)));
+        assert_eq!(part_value("13.123456789012345.1"), Some((13, 123456789012345, 1)));
+        for bad in ["", "index", "14.0.1", "1.0.0", "1.0", "1.0.1.2", "-1.0.1", "1.x.1", "1.0.123456789", "001.0.1"] {
+            assert_eq!(part_value(bad), None, "{bad}");
+        }
+        assert!(is_records_value("index") && is_records_value("2.10.20") && !is_records_value("more"));
+    }
+
+    #[test]
+    fn the_export_keeps_every_line_whole_and_never_changes_afterwards() {
+        let out = temp("export");
+        fs::create_dir_all(out.join("before")).unwrap();
+        fs::create_dir_all(out.join("after")).unwrap();
+        fs::write(out.join("exit_code"), "0\n").unwrap();
+        let long = "x".repeat(5000);
+        let many: String = (0..30000).map(|i| format!("/opt/agent/f{i}|1|2|644\n")).collect();
+        fs::write(out.join("before/files.txt"), "/etc/same|1|1|644\n").unwrap();
+        fs::write(out.join("after/files.txt"), format!("/etc/same|1|1|644\n{many}/opt/{long}|1|1|644\n")).unwrap();
+        fs::write(out.join("trace.txt"), "1 openat(AT_FDCWD, \"/etc/x\", O_RDONLY) = 3\n1 connect(3, {}) = 0\n")
+            .unwrap();
+        let dir = export(&out).unwrap();
+        let after = fs::read_to_string(dir.join("after/files.txt")).unwrap();
+        assert_eq!(after.lines().count(), 30001);
+        assert!(after.contains(&long) && !after.contains("/etc/same"));
+        assert_eq!(fs::read_to_string(dir.join("before/files.txt")).unwrap(), "");
+        assert_eq!(fs::read_to_string(dir.join("trace.txt")).unwrap(), "1 connect(3, {}) = 0\n");
+        assert_eq!(fs::read_to_string(dir.join("exit_code")).unwrap(), "0\n");
+        assert_eq!(fs::read_to_string(dir.join("watch")).unwrap(), "");
+        fs::write(out.join("after/files.txt"), "changed\n").unwrap();
+        assert_eq!(fs::read_to_string(export(&out).unwrap().join("after/files.txt")).unwrap(), after);
+        let _ = fs::remove_dir_all(&out);
     }
 }

@@ -9,7 +9,7 @@
 //! (cargo feature test-root, never in a release) takes `--root PREFIX` first.
 //!
 //! `sudo llmcf-install harness-start|harness-read|harness-answer|harness-stop|harness-records BUNDLE COMPONENT RUN
-//! [MODE|OFFSET]` runs the person's harness of a harness component (manifest root action run_harness) through the
+//! [MODE|OFFSET|PART]` runs the person's harness of a harness component (manifest root action run_harness) through the
 //! framework's harness watch, detached, and reads it back (harness.rs).
 //!
 //! Exit status: 0 done (also plan, status, absent), 2 not a call it takes, 3 refused (nothing changed), 5 a step
@@ -58,7 +58,7 @@ fn main() -> ExitCode {
     };
     let harness_action = args.first().map(|a| harness::ACTIONS.contains(&a.as_str())).unwrap_or(false);
     if harness_action {
-        let want = if args[0] == "harness-start" || args[0] == "harness-read" { 5 } else { 4 };
+        let want = if ["harness-start", "harness-read", "harness-records"].contains(&args[0].as_str()) { 5 } else { 4 };
         let ok = args.len() == want
             && manifest::is_id(&args[2])
             && harness::is_run(&args[3])
@@ -67,13 +67,15 @@ fn main() -> ExitCode {
                 "harness-read" => {
                     !args[4].is_empty() && args[4].len() <= 15 && args[4].bytes().all(|c| c.is_ascii_digit())
                 }
+                "harness-records" => harness::is_records_value(&args[4]),
                 _ => true,
             };
         if !ok {
             return refuse(
                 install::EXIT_USAGE,
                 "usage: llmcf-install harness-start BUNDLE COMPONENT RUN dry|run|run-yes, harness-read BUNDLE COMPONENT \
-                 RUN OFFSET, or harness-answer|harness-stop|harness-records BUNDLE COMPONENT RUN",
+                 RUN OFFSET, harness-records BUNDLE COMPONENT RUN index|N.OFFSET.LENGTH, or harness-answer|harness-stop \
+                 BUNDLE COMPONENT RUN",
             );
         }
     } else if args.len() != 2 || !install::ACTIONS.contains(&args[0].as_str()) {
