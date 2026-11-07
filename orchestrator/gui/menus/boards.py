@@ -31,7 +31,7 @@ HARNESS_PATHS: Dict[str, str] = {
     "bundle harness take-in": "btn_harness_take_in",
     **{f"bundle harness take-in {o}": "btn_harness_take_in"
        for o in ("--kind", "--installer", "--ref", "--pin", "--title", "--dry-run-arg", "--assume-yes",
-                 "--exit-code")},
+                 "--exit-code", "--image-partition")},
     "bundle harness dry-run": "btn_harness_dry_run",
     "bundle harness dry-run --component": "cmb_harness_bundle",
     "bundle harness run": "btn_harness_run",

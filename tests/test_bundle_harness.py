@@ -2,8 +2,8 @@
 sources (folder, archive, git), the pin, the one tree checksum, and the refusals (links out, a missing installer, a
 wrong sha256, a credential in the link). The executable bit and links come from the source's own metadata where the
 host's file system has none (Windows: harness.NO_EXEC_BIT, forced here on every system too): the same harness gives
-the same tree checksum and pack everywhere; a plain folder on Windows is refused, a git checkout's index has the
-modes."""
+the same tree checksum and pack everywhere; a plain folder on Windows takes the content rule, a git checkout's index
+has the modes. Every other format: tests/test_harness_formats.py."""
 
 import json
 import os
@@ -45,11 +45,8 @@ def git_tree(root: Path) -> Path:
 
 
 def source_tree(root: Path) -> Path:
-    """A folder harness that can be taken in on this system: a plain folder, or on Windows a git checkout."""
-    if os.name == "nt":
-        if shutil.which("git") is None:
-            pytest.skip("a folder harness on Windows takes its modes from git")
-        return git_tree(root)
+    """A folder harness that can be taken in on this system: a plain folder (on Windows its modes come from the content
+    rule: the installer starts with "#!")."""
     return make_tree(root)
 
 
@@ -414,10 +411,11 @@ def no_exec_bit(monkeypatch):
     monkeypatch.setattr(h, "NO_EXEC_BIT", True)
 
 
-def test_without_exec_bits_a_plain_folder_is_refused_with_its_repair(tmp_path, no_exec_bit):
+def test_without_exec_bits_a_plain_folder_is_taken_in_by_the_content_rule(tmp_path, no_exec_bit):
     src = make_tree(tmp_path / "src")
-    with pytest.raises(h.HarnessError, match="git link or as an archive"):
-        h.take_in(spec(location=str(src)), tmp_path / "state")
+    taken = h.take_in(spec(location=str(src)), tmp_path / "state")
+    assert taken.content_rule and taken.derived == ("installer/install.sh",)
+    assert json.loads((taken.path.parent / h.MODES_FILE).read_text())["executable"] == ["installer/install.sh"]
 
 
 @GIT

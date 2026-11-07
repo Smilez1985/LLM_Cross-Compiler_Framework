@@ -145,6 +145,7 @@ DELETION_SITES = {
     ("orchestrator/runtime/bundle/blocks.py", "new_block"): TEMP,
     # the harness take-in's own staging folder and the half-written pack; the run's records read again from the board
     ("orchestrator/runtime/bundle/harness.py", "take_in"): STAGING,
+    ("orchestrator/runtime/bundle/harness.py", "_partition"): STAGING,   # a disk image's partition without the installer
     ("orchestrator/runtime/bundle/harness.py", "pack"): TEMP,
     ("orchestrator/runtime/bundle/harness_run.py", "fetch_records"): RECORDS,
     ("orchestrator/runtime/probe_service.py", "HardwareProbes._script_probe"): TEMP,

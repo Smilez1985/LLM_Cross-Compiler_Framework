@@ -2,8 +2,8 @@
 """
 The person's harness for the board (ROADMAP 3.4.0 "An agent harness on the board as an opt-in bundle component";
 DESIGN "A harness on the board is the person's opt-in"): a harness is its own project with its own repository, never
-code in llmcf, and llmcf does not build it. The person names it as a git repository link, an archive (zip, tar.gz)
-or a folder; llmcf takes it in here, on the host, at a pin (the commit of a repository, the sha256 of an archive)
+code in llmcf, and llmcf does not build it. The person names it as a git repository link, an archive or disk image
+(any common format, see below), one installer file, or a folder; llmcf takes it in here, on the host, at a pin (the commit of a repository, the sha256 of an archive)
 and records the whole tree with one checksum, so what reaches the board is exactly what the person saw.
 
 What the harness's own installer needs is described by a small spec (`HarnessSpec`, schema llmcf-harness/1): the
@@ -24,10 +24,20 @@ so the same tree gives the same bytes; llmcf-install unpacks it on the board and
 The executable bit and links come from the source's own metadata where the host's file system has none (Windows,
 NO_EXEC_BIT): at take-in the modes are recorded beside the tree (modes.json: the executable files and the links with
 their targets) from the git tree (`git ls-tree`: 100755, 120000), the archive's members (a tar member's mode, a zip
-entry's external attributes) or, for a folder, its git index (`git ls-files --stage`); tree_listing and pack use them
-there instead of os.stat, so the same harness gives the same tree checksum and the same pack on Windows and Linux. A
-folder that is no git checkout has no mode source on Windows and is refused (take it in by its git link or as an
-archive). On Linux and macOS the file system's own modes count, as before.
+entry's external attributes, 7-Zip's attributes) or, for a folder, its git index (`git ls-files --stage`);
+tree_listing and pack use them there instead of os.stat, so the same harness gives the same tree checksum and the same
+pack on Windows and Linux. Where the source records no mode (a plain folder on Windows, a zip made on Windows, a FAT
+image) the bit is derived from the content, deterministically: a file that starts with "#!" or an ELF or Mach-O magic,
+and the spec's installer, is executable (`content_modes`; TakenIn.derived names them). On Linux and macOS a folder's
+own file system modes count, as before.
+
+An archive's format comes from its content, never its name (utils/archives.sniff): zip, tar and tar compressed with
+gzip, bzip2 or xz (and zstd where this Python has compression.zstd) through the standard library; one gzip, bzip2, xz
+or zstd file that holds no tar is the harness's one file; rar, 7z, iso, cpio, SquashFS, zstd otherwise and disk images
+(MBR or GPT with ext, FAT or NTFS partitions) through 7-Zip, listed and checked before anything is written
+(utils/archives); a file that is no archive but a script or a program (a makeself installer .bin) is a harness of one
+file, its installer the file itself. A disk image whose partitions hold the installer more than once needs the spec's
+`image_partition`. The pin is always the sha256 of the file the person named.
 """
 
 import hashlib
@@ -38,7 +48,7 @@ import shutil
 import stat
 import tarfile
 import zipfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Dict, List, Optional, Tuple
 
@@ -51,9 +61,7 @@ SPEC_FILE = "harness.json"
 MODES_FILE = "modes.json"
 # The host's file system keeps no executable bit (Windows): the source's recorded modes count instead.
 NO_EXEC_BIT = os.name == "nt"
-FOLDER_NO_MODES = ("a folder taken in on Windows has no executable bits to read (Windows keeps none), and it is not a "
-                   "git checkout whose index has them; take the harness in by its git link or as an archive (zip or "
-                   "tar keep the bits)")
+MAX_PARTITIONS = 128
 
 RE_ID = re.compile(r"[a-z][a-z0-9-]{1,39}")
 RE_COMMIT = re.compile(r"[0-9a-f]{40}")
@@ -87,6 +95,7 @@ class HarnessSpec:
     dry_run_args: Tuple[str, ...] = ()
     assume_yes: Optional[str] = None
     exit_codes: Dict[int, str] = field(default_factory=lambda: {0: "done"})
+    image_partition: Optional[int] = None
 
 
 def check_spec(spec: HarnessSpec) -> HarnessSpec:
@@ -111,6 +120,10 @@ def check_spec(spec: HarnessSpec) -> HarnessSpec:
             raise HarnessError("pin: the archive's sha256 (64 hex characters)")
         if spec.kind == "folder" and spec.pin is not None:
             raise HarnessError("a folder has no pin; its tree checksum is taken at intake")
+    if spec.image_partition is not None and (spec.kind != "archive" or isinstance(spec.image_partition, bool)
+                                             or not isinstance(spec.image_partition, int)
+                                             or not 0 <= spec.image_partition < MAX_PARTITIONS):
+        raise HarnessError("image_partition: for a disk image only, the partition's number (0 the first)")
     _check_relative(spec.installer, "installer")
     if len(spec.dry_run_args) > MAX_ARGS or not all(RE_ARG.fullmatch(a) for a in spec.dry_run_args):
         raise HarnessError("dry_run_args: up to 8 options such as --dry-run")
@@ -133,20 +146,31 @@ def _check_relative(path: str, what: str) -> None:
 
 @dataclass(frozen=True)
 class TakenIn:
-    """A harness taken in: the spec, the resolved pin, the tree's checksum and size, and where it lies."""
+    """A harness taken in: the spec, the resolved pin, the tree's checksum and size, and where it lies. `derived`: the
+    files marked executable by the content rule where the source recorded no mode (empty when every mode came from
+    the source or the file system); `format` the archive's format by its content."""
     spec: HarnessSpec
     pin: str
     tree_sha256: str
     files: int
     size: int
     path: Path
+    derived: Tuple[str, ...] = ()
+    content_rule: bool = False
+    format: str = ""
 
     def record(self) -> dict:
+        """harness.json; of the derived modes only their count (the names stay in modes.json and the person's text)."""
         spec = asdict(self.spec)
         spec["dry_run_args"] = list(self.spec.dry_run_args)
         spec["exit_codes"] = {str(k): v for k, v in sorted(self.spec.exit_codes.items())}
-        return {"schema": SCHEMA, "spec": spec, "pin": self.pin, "tree_sha256": self.tree_sha256,
-                "files": self.files, "size": self.size}
+        out = {"schema": SCHEMA, "spec": spec, "pin": self.pin, "tree_sha256": self.tree_sha256,
+               "files": self.files, "size": self.size}
+        if self.format:
+            out["format"] = self.format
+        if self.content_rule:
+            out["modes_derived_from_content"] = len(self.derived)
+        return out
 
 
 @dataclass(frozen=True)
@@ -171,17 +195,25 @@ class Modes:
 
 def _link_inside(rel: str, target: str) -> bool:
     """A link `rel` with `target` stays inside the tree by its words (llmcf-install's stays_inside)."""
-    if not target or target.startswith("/") or "\0" in target or "\\" in target or re.match(r"[A-Za-z]:", target):
-        return False
-    parts = rel.split("/")[:-1]
-    for p in target.split("/"):
-        if p == "..":
-            if not parts:
-                return False
-            parts.pop()
-        elif p not in ("", "."):
-            parts.append(p)
-    return True
+    from orchestrator.utils.archives import link_inside
+    return link_inside(rel, target)
+
+
+def content_modes(tree: Path, installer: str) -> Tuple[Modes, Tuple[str, ...]]:
+    """The content rule where nothing records the executable bit (a plain folder on Windows): a regular file that
+    starts with "#!" or an ELF or Mach-O magic, and the installer, is executable. (modes, the executable files)."""
+    from orchestrator.utils.archives import is_program
+    tree = Path(tree)
+    found: List[str] = []
+    for dirpath, dirnames, filenames in os.walk(tree):
+        dirnames[:] = sorted(d for d in dirnames if not (Path(dirpath) == tree and d == ".git"))
+        for name in sorted(filenames):
+            full = Path(dirpath) / name
+            rel = full.relative_to(tree).as_posix()
+            if not full.is_symlink() and full.is_file() and (rel == installer or is_program(full)):
+                found.append(rel)
+    found.sort()
+    return Modes(tuple(found)), tuple(found)
 
 
 def tree_listing(root: Path, modes: Optional[Modes] = None) -> List[Tuple[str, str, str]]:
@@ -305,43 +337,302 @@ def _member(name: str) -> str:
     return PurePosixPath(name.replace("\\", "/")).as_posix().lstrip("/").removeprefix("./")
 
 
-def _extract(archive: Path, dest: Path) -> Modes:
-    """Extracts the archive into `dest` and returns its members' modes (the executable files and the links), keyed by
-    their path inside the archive."""
-    from orchestrator.utils.helpers import UnsafeArchive, safe_extract_tar
-    name = archive.name.lower()
+@dataclass(frozen=True)
+class _Found:
+    """What an archive gave: the modes it records (or the content rule decided), the members whose mode no record
+    gave (`unknown`, decided by the content rule), and its format by content."""
+    modes: Modes
+    unknown: Tuple[str, ...] = ()
+    format: str = ""
+
+
+# Only to name the one file of a compressed single file after its archive ("install.sh.gz" -> "install.sh"); the
+# format itself always comes from the content.
+COMPRESSION_SUFFIXES = (".gz", ".bz2", ".xz", ".zst", ".zstd")
+NOT_READ = ("archive: neither an archive or disk image this framework reads (zip, tar, gz, bz2, xz, zst, 7z, rar, "
+            "iso, cpio, img) nor a script or a program; the format is read from the file's content, not its name")
+
+
+def _set_mode(path: Path, executable: bool) -> None:
+    """On a host with an executable bit the file system follows the decided bit (so its listing is the same)."""
+    if not NO_EXEC_BIT and not os.path.islink(path):
+        os.chmod(path, 0o755 if executable else 0o644)
+
+
+def _caps(files: int, size: int) -> None:
+    if files > MAX_FILES:
+        raise HarnessError(f"the harness has more than {MAX_FILES} files")
+    if size > MAX_BYTES:
+        raise HarnessError(f"the harness is larger than {MAX_BYTES // (1024 * 1024)} MB")
+
+
+def _room(folder: Path, need: int, state_dir: Path) -> None:
+    """The one disk rule for what an extraction writes; HarnessError with its plain reason when it does not fit."""
+    from orchestrator.Core.disk_plan import ReservationLedger, refusal, room
+    try:
+        check = room(folder, need, label="harness take-in", ledger=ReservationLedger(Path(state_dir)))
+    except OSError:
+        return
+    refused = refusal([check], "the harness take-in")
+    if refused is not None:
+        raise HarnessError(str(refused))
+
+
+def _extract(archive: Path, dest: Path, spec: HarnessSpec, state_dir: Path) -> _Found:
+    """Extracts the archive (its format by content) into the fresh folder `dest` and returns its members' modes,
+    keyed by their path inside the archive."""
+    from orchestrator.utils import archives as ar
+    from orchestrator.utils.helpers import UnsafeArchive
+    try:
+        kind = ar.sniff(archive)
+    except OSError as e:
+        raise HarnessError(f"archive: it cannot be read: {e}") from None
+    try:
+        if kind == "zip":
+            return _extract_zip(archive, dest)
+        if kind == "tar" or kind in ("gzip", "bzip2", "xz") or (kind == "zstd" and ar.ZSTD_STDLIB):
+            if _holds_tar(archive):
+                return _extract_tar(archive, dest, kind)
+            return _one_file(archive, dest, spec, kind, decompress=True)
+        if kind in ar.PROGRAMS:
+            return _one_file(archive, dest, spec, kind)
+        if kind in ar.SEVEN_ZIP_KINDS:
+            return _extract_7zip(archive, dest, spec, kind, state_dir)
+    except (UnsafeArchive, zipfile.BadZipFile, tarfile.TarError, EOFError, OSError) as e:
+        raise HarnessError(f"the archive cannot be taken in: {e}") from None
+    raise HarnessError(NOT_READ)
+
+
+def _holds_tar(archive: Path) -> bool:
+    """Whether the (maybe compressed) file is a tar archive with at least one member."""
+    try:
+        with tarfile.open(archive, "r:*") as tf:
+            return tf.next() is not None
+    except (tarfile.TarError, OSError, EOFError, ValueError):
+        return False
+
+
+def _extract_tar(archive: Path, dest: Path, kind: str) -> _Found:
+    from orchestrator.utils.helpers import safe_extract_tar
     executable: List[str] = []
     links: Dict[str, str] = {}
+    with tarfile.open(archive, "r:*") as tf:
+        members = tf.getmembers()
+        _caps(sum(1 for m in members if not m.isdir()), sum(m.size for m in members if m.isfile()))
+        dest.mkdir(parents=True, exist_ok=True)
+        safe_extract_tar(tf, dest)
+        for member in members:
+            if member.issym():
+                links[_member(member.name)] = member.linkname
+            elif (member.isfile() or member.islnk()) and member.mode & 0o111:
+                executable.append(_member(member.name))
+    return _Found(Modes(tuple(executable), links), format="tar" if kind == "tar" else f"tar+{kind}")
+
+
+def _extract_zip(archive: Path, dest: Path) -> _Found:
+    """A zip's members, checked first; the executable bit from its attributes, and by the content rule for a member
+    that records no unix mode (a zip made on Windows)."""
+    from orchestrator.utils.archives import is_program
+    executable: List[str] = []
+    unknown: List[str] = []
+    dest.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive) as zf:
+        root = dest.resolve()
+        infos = zf.infolist()
+        _caps(sum(1 for i in infos if not i.is_dir()), sum(i.file_size for i in infos if not i.is_dir()))
+        for info in infos:
+            target = (dest / info.filename).resolve()
+            if info.filename.startswith(("/", "\\")) or not target.is_relative_to(root):
+                raise HarnessError(f"{info.filename}: an archive entry outside the harness")
+            if stat.S_ISLNK(info.external_attr >> 16):
+                raise HarnessError(f"{info.filename}: a link in a zip archive")
+        zf.extractall(dest)  # nosec B202 - every entry checked above
+        for info in infos:   # zip keeps the executable bit in its attributes
+            if info.is_dir():
+                continue
+            mode = (info.external_attr >> 16) & 0o777 if info.create_system == 3 else 0   # 3: made on unix
+            if mode:
+                os.chmod(dest / info.filename, mode & 0o755)
+                if mode & 0o111:
+                    executable.append(_member(info.filename))
+            else:
+                unknown.append(_member(info.filename))
+                if is_program(dest / info.filename):
+                    executable.append(_member(info.filename))
+                    _set_mode(dest / info.filename, True)
+                else:
+                    _set_mode(dest / info.filename, False)
+    return _Found(Modes(tuple(executable)), tuple(unknown), format="zip")
+
+
+def _one_file(archive: Path, dest: Path, spec: HarnessSpec, kind: str, *, decompress: bool = False) -> _Found:
+    """A harness of one file: a script or a program (a makeself .bin), or the one file of a gzip, bzip2, xz or zstd
+    file that holds no tar. The tree holds that file, executable; the installer is the file itself."""
+    from orchestrator.utils.archives import is_program
+    name = _one_file_name(archive) if decompress else archive.name
+    if not RE_REL.fullmatch(name) or "/" in name or name in (".", ".."):
+        raise HarnessError(f"a harness of one file keeps its file's name, and {name!r} is not one the framework "
+                           "takes: rename the file to letters, digits, '.', '_' and '-'")
+    if spec.installer != name:
+        raise HarnessError(f"installer: a harness of one file is that file itself: give the installer {name}")
+    if archive.stat().st_size > MAX_BYTES:
+        _caps(1, archive.stat().st_size)
+    dest.mkdir(parents=True, exist_ok=True)
+    target = dest / name
+    if decompress:
+        _decompress(archive, kind, target)
+        if not is_program(target):
+            raise HarnessError("archive: a compressed file that holds neither a tar archive nor a script or a program")
+    else:
+        shutil.copyfile(archive, target)
+    _set_mode(target, True)
+    return _Found(Modes((name,)), (name,), format=f"{kind}+one-file" if decompress else "one-file")
+
+
+def _decompress(archive: Path, kind: str, target: Path) -> None:
+    """The one file of a gzip, bzip2, xz or zstd file into `target`, at most MAX_BYTES."""
+    import bz2
+    import gzip
+    import lzma
+    if kind == "zstd":
+        from compression import zstd as opener  # type: ignore[import-not-found]
+    else:
+        opener = {"gzip": gzip, "bzip2": bz2, "xz": lzma}[kind]
+    written = 0
+    with opener.open(archive, "rb") as src, open(target, "wb") as out:
+        while True:
+            chunk = src.read(1024 * 1024)
+            if not chunk:
+                break
+            written += len(chunk)
+            _caps(1, written)
+            out.write(chunk)
+
+
+def _extract_7zip(archive: Path, dest: Path, spec: HarnessSpec, kind: str, state_dir: Path) -> _Found:
+    """Through 7-Zip: listed and checked first (utils/archives), the disk rule, then extracted into `dest`; a disk
+    image's partition holding the installer is found first. The executable bit from 7-Zip's attributes (the unix mode
+    where the archive keeps one), else by the content rule."""
+    from orchestrator.utils import archives as ar
+    from orchestrator.utils.helpers import UnsafeArchive
+    what = ar.SEVEN_ZIP_KINDS[kind]
+    exe = ar.find_7zip()
+    if exe is None:
+        raise HarnessError(ar.missing_text(what[0].upper() + what[1:]))
     try:
-        if name.endswith(".zip"):
-            with zipfile.ZipFile(archive) as zf:
-                root = dest.resolve()
-                for info in zf.infolist():
-                    target = (dest / info.filename).resolve()
-                    if info.filename.startswith(("/", "\\")) or not target.is_relative_to(root):
-                        raise HarnessError(f"{info.filename}: an archive entry outside the harness")
-                    if stat.S_ISLNK(info.external_attr >> 16):
-                        raise HarnessError(f"{info.filename}: a link in a zip archive")
-                zf.extractall(dest)  # nosec B202 - every entry checked above
-                for info in zf.infolist():   # zip keeps the executable bit in its attributes
-                    mode = (info.external_attr >> 16) & 0o777
-                    if mode and not info.is_dir():
-                        os.chmod(dest / info.filename, mode & 0o755)
-                        if mode & 0o111:
-                            executable.append(_member(info.filename))
-        elif name.endswith((".tar.gz", ".tgz", ".tar")):
-            with tarfile.open(archive, "r:*") as tf:
-                safe_extract_tar(tf, dest)
-                for member in tf.getmembers():
-                    if member.issym():
-                        links[_member(member.name)] = member.linkname
-                    elif (member.isfile() or member.islnk()) and member.mode & 0o111:
-                        executable.append(_member(member.name))
+        listed = ar.list_archive(exe, archive)
+    except UnsafeArchive as e:
+        if kind == "zstd":
+            raise HarnessError(f"a zstd-compressed file: {e} (this Python reads zstd from 3.14 on; a newer 7-Zip "
+                               "reads it too)") from None
+        raise
+    source = archive
+    if kind == "disk" and ar.is_partition_listing(listed):
+        source, listed = _partition(exe, archive, listed, dest.parent, spec, state_dir)
+    elif spec.image_partition not in (None, 0):
+        raise HarnessError("image_partition: this file has one file system and no partitions to choose from")
+    total = ar.check_caps(listed, max_files=MAX_FILES, max_bytes=MAX_BYTES)
+    _room(dest.parent, total, state_dir)
+    if kind == "zstd":   # one stream: a tar inside, or the harness's one file
+        stream = dest.parent / "zstd-stream"
+        ar.extract(exe, source, stream, listed)
+        files = [e for e in listed if e.kind == "file"]
+        if len(files) != 1:
+            raise HarnessError("archive: a zstd file that holds more than one stream")
+        inner = stream / files[0].path
+        if _holds_tar(inner):
+            return replace(_extract_tar(inner, dest, "tar"), format="tar+zstd")
+        name = _one_file_name(archive)
+        if not RE_REL.fullmatch(name) or "/" in name:
+            raise HarnessError(f"a harness of one file keeps its file's name, and {name!r} is not one the "
+                               "framework takes: rename the file to letters, digits, '.', '_' and '-'")
+        if spec.installer != name:
+            raise HarnessError(f"installer: a harness of one file is that file itself: give the installer {name}")
+        if not ar.is_program(inner):
+            raise HarnessError("archive: a compressed file that holds neither a tar archive nor a script or a program")
+        dest.mkdir(parents=True, exist_ok=True)
+        os.replace(inner, dest / name)
+        _set_mode(dest / name, True)
+        return _Found(Modes((name,)), (name,), format="zstd+one-file")
+    ar.extract(exe, source, dest, listed)
+    executable: List[str] = []
+    links: Dict[str, str] = {}
+    unknown: List[str] = []
+    for entry in listed:
+        full = dest / entry.path
+        if entry.kind == "link":
+            target = entry.link
+            if target is None:   # 7z keeps a link's target as its content
+                if os.path.islink(full):
+                    target = os.readlink(full)
+                else:
+                    with open(full, "rb") as fh:
+                        target = fh.read(4096).decode("utf-8", errors="replace")
+            if not ar.link_inside(entry.path, target):
+                raise HarnessError(f"{entry.path}: a link that leaves the harness")
+            links[entry.path] = target
+        elif entry.kind == "file":
+            if entry.mode is not None:
+                bit = bool(entry.mode & 0o111)
+            else:
+                unknown.append(entry.path)
+                bit = ar.is_program(full)
+            if bit:
+                executable.append(entry.path)
+            _set_mode(full, bit)
+    return _Found(Modes(tuple(executable), links), tuple(unknown), format=kind)
+
+
+def _one_file_name(archive: Path) -> str:
+    name = archive.name
+    low = name.lower()
+    for suffix in COMPRESSION_SUFFIXES:
+        if low.endswith(suffix) and len(name) > len(suffix):
+            return name[:-len(suffix)]
+    return name
+
+
+def _holds_installer(listed, installer: str) -> bool:
+    return any(e.kind == "file" and (e.path == installer or ("/" in e.path and e.path.split("/", 1)[1] == installer))
+               for e in listed)
+
+
+def _partition(exe: str, archive: Path, parts, work: Path, spec: HarnessSpec, state_dir: Path):
+    """(the extracted partition, its checked listing) of a disk image: the one partition that holds the installer, or
+    the spec's image_partition. HarnessError when none does, or more than one does and the spec names none."""
+    from orchestrator.utils import archives as ar
+    from orchestrator.utils.atomic import remove_tree
+    from orchestrator.utils.helpers import UnsafeArchive
+    if len(parts) > MAX_PARTITIONS:
+        raise HarnessError(f"the disk image has more than {MAX_PARTITIONS} partitions")
+    if spec.image_partition is not None and spec.image_partition >= len(parts):
+        raise HarnessError(f"image_partition: the image has {len(parts)} partitions (0 to {len(parts) - 1})")
+    numbers = range(len(parts)) if spec.image_partition is None else [spec.image_partition]
+    chosen = None
+    unread: List[str] = []
+    for i in numbers:
+        part = parts[i]
+        _room(work, part.size, state_dir)
+        folder = work / f"partition-{i}"
+        ar.extract(exe, archive, folder, parts, only=[part.raw])
+        try:
+            inner = ar.list_archive(exe, folder / part.path)
+        except UnsafeArchive as e:
+            if spec.image_partition is not None:
+                raise HarnessError(f"partition {i} of the disk image cannot be taken in: {e}") from None
+            unread.append(f"{i} ({e})")
+            inner = None
+        if inner is not None and (spec.image_partition is not None or _holds_installer(inner, spec.installer)):
+            if chosen is not None:
+                raise HarnessError(f"image_partition: partitions {chosen[0]} and {i} of the disk image both hold "
+                                   f"{spec.installer}; name the one to take (its number, 0 the first)")
+            chosen = (i, folder / part.path, inner)
         else:
-            raise HarnessError("archive: a .zip, .tar.gz, .tgz or .tar file")
-    except (UnsafeArchive, zipfile.BadZipFile, tarfile.TarError) as e:
-        raise HarnessError(f"the archive cannot be taken in: {e}") from None
-    return Modes(tuple(executable), links)
+            remove_tree(folder, label="a partition of the disk image")
+    if chosen is None:
+        more = f"; partitions that could not be read: {', '.join(unread)}" if unread else ""
+        raise HarnessError(f"no partition of the disk image holds {spec.installer} (it has {len(parts)}){more}")
+    return chosen[1], chosen[2]
 
 
 def _below(modes: Modes, top: str) -> Modes:
@@ -420,6 +711,9 @@ def take_in(spec: HarnessSpec, state_dir: Path, *, git=None, offline: bool = Fal
     root.mkdir(parents=True, exist_ok=True)
     staging = root / f".staging-{os.getpid()}-{os.urandom(4).hex()}"
     staging.mkdir()
+    derived: Tuple[str, ...] = ()
+    content_rule = False
+    fmt = ""
     try:
         if spec.kind == "git":
             if git is None:
@@ -438,23 +732,35 @@ def take_in(spec: HarnessSpec, state_dir: Path, *, git=None, offline: bool = Fal
             pin = _sha256_file(archive)
             if spec.pin and pin != spec.pin:
                 raise HarnessError("archive: its sha256 is not the one given")
-            found = _extract(archive, staging)
-            tree = _single_top(staging, spec.installer)
-            modes = _below(found, tree.relative_to(staging).as_posix() if tree != staging else "")
+            quarantine = staging / "q"
+            found = _extract(archive, quarantine, spec, Path(state_dir))
+            fmt = found.format
+            tree = _single_top(quarantine, spec.installer)
+            top = tree.relative_to(quarantine).as_posix() if tree != quarantine else ""
+            modes = _below(found.modes, top)
+            unknown = set(_below(Modes(found.unknown), top).executable)
+            if spec.installer in unknown and spec.installer not in modes.executable:
+                modes = Modes(modes.executable + (spec.installer,), modes.links)
+                if (tree / spec.installer).is_file():
+                    _set_mode(tree / spec.installer, True)
+            content_rule = bool(unknown)
+            derived = tuple(sorted(p for p in modes.executable if p in unknown))
         else:
             folder = Path(spec.location)
             if not folder.is_dir():
                 raise HarnessError("folder: it is not there")
-            modes = None
-            if NO_EXEC_BIT:
-                if not (folder / ".git").exists():
-                    raise HarnessError(FOLDER_NO_MODES)
-                if git is None:
-                    from orchestrator.runtime.build.source import Git
-                    git = Git()
-                modes = _git_modes(git, folder, ["ls-files", "--stage", "-z"])
             shutil.copytree(folder, staging / "t", symlinks=True, ignore=shutil.ignore_patterns(".git"))
             tree = staging / "t"
+            modes = None
+            if NO_EXEC_BIT:
+                if (folder / ".git").exists():
+                    if git is None:
+                        from orchestrator.runtime.build.source import Git
+                        git = Git()
+                    modes = _git_modes(git, folder, ["ls-files", "--stage", "-z"])
+                else:   # a plain folder: the content rule
+                    modes, derived = content_modes(tree, spec.installer)
+                    content_rule = True
             pin = ""
         used = modes if NO_EXEC_BIT else None
         rows = tree_listing(tree, used)
@@ -473,12 +779,24 @@ def take_in(spec: HarnessSpec, state_dir: Path, *, git=None, offline: bool = Fal
                                             encoding="utf-8")
         if tree_sha256(tree_listing(final / TREE_DIR, used)) != digest:
             raise HarnessError("the stored tree does not match what was taken in")
-        taken = TakenIn(spec=spec, pin=pin, tree_sha256=digest, files=len(rows), size=size, path=final / TREE_DIR)
+        taken = TakenIn(spec=spec, pin=pin, tree_sha256=digest, files=len(rows), size=size, path=final / TREE_DIR,
+                        derived=derived, content_rule=content_rule, format=fmt)
         (final / SPEC_FILE).write_text(json.dumps(taken.record(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return taken
     finally:
         from orchestrator.utils.atomic import remove_tree
         remove_tree(staging, label="the harness's staging folder")
+
+
+DERIVED_SHOWN = 10
+
+
+def derived_text(taken: TakenIn, lang: str = "en") -> str:
+    """The person's line when the executable bits were derived from the content: how many files, and their names (at
+    most DERIVED_SHOWN). An AI's view (harness.json) has the count only."""
+    from orchestrator.utils.localization import ui_text
+    names = ", ".join(taken.derived[:DERIVED_SHOWN]) + (", ..." if len(taken.derived) > DERIVED_SHOWN else "")
+    return ui_text("harness.take.derived", lang=lang, count=len(taken.derived), names=names or "-")
 
 
 def stored(state_dir: Path, harness_id: str) -> List[dict]:

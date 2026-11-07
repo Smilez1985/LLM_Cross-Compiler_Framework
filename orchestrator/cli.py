@@ -8141,7 +8141,9 @@ def bundle_harness():
 @click.argument('harness_id', metavar='ID')
 @click.argument('location')
 @click.option('--kind', type=click.Choice(['git', 'archive', 'folder']), required=True,
-              help='git: an https link to its repository; archive: a .zip, .tar.gz or .tar file; folder: a folder')
+              help='git: an https link to its repository; archive: an archive or disk image (zip, tar, gz, bz2, xz, '
+                   'zst, 7z, rar, iso, cpio, img; read by its content, 7-Zip for the last ones) or one installer file '
+                   '(a script or a program, e.g. a .bin); folder: a folder')
 @click.option('--installer', required=True, help="The installer's path inside the harness, e.g. installer/install.sh")
 @click.option('--ref', default=None, help='git only: the branch or tag to take (resolved to its commit)')
 @click.option('--pin', default=None, help="The commit (git) or the archive's sha256 it must have")
@@ -8152,10 +8154,12 @@ def bundle_harness():
               help="The harness's own assume-yes switch NAME=value; a run uses it only after your opt-in")
 @click.option('--exit-code', 'exit_codes', multiple=True,
               help='CODE=done or CODE=findings: what an exit code of the installer means (repeatable; default 0=done)')
+@click.option('--image-partition', 'image_partition', type=int, default=None,
+              help='A disk image only: the partition to take (0 the first) when more than one holds the installer')
 @pass_context
 def bundle_harness_take_in(ctx: FrameworkContext, harness_id: str, location: str, kind: str, installer: str,
                            ref: Optional[str], pin: Optional[str], title: Optional[str], dry_args: Tuple[str, ...],
-                           assume_yes: Optional[str], exit_codes: Tuple[str, ...]):
+                           assume_yes: Optional[str], exit_codes: Tuple[str, ...], image_partition: Optional[int]):
     """Take your harness in at a pin (a commit of its repository, or the sha256 of an archive) and keep its tree with
     one checksum; llmcf never builds it: its own installer runs on the board later, after your yes"""
     from orchestrator.runtime.bundle import harness as hz
@@ -8170,7 +8174,7 @@ def bundle_harness_take_in(ctx: FrameworkContext, harness_id: str, location: str
     spec = hz.HarnessSpec(id=harness_id, title=title or harness_id, kind=kind,
                           location=location if kind == "git" else str(Path(location).expanduser()),
                           installer=installer, ref=ref, pin=pin, dry_run_args=tuple(dry_args), assume_yes=assume_yes,
-                          exit_codes=codes)
+                          exit_codes=codes, image_partition=image_partition)
     config, _ = _settings(ctx)
     try:
         taken = hz.take_in(spec, _state_dir(ctx), offline=bool(offline_mode(config)))
@@ -8179,6 +8183,8 @@ def bundle_harness_take_in(ctx: FrameworkContext, harness_id: str, location: str
         sys.exit(1)
     console.print(f"[green]Took in harness {taken.spec.id}[/green] at {taken.pin}: {taken.files} files, "
                   f"{taken.size} bytes, tree checksum {taken.tree_sha256}.")
+    if taken.content_rule:
+        console.print(escape(hz.derived_text(taken, "en")))
     console.print(f"Put it into a bundle: llm-cli bundle build DEVICE --block harness-agent --set "
                   f"harness.harness={taken.spec.id}")
 

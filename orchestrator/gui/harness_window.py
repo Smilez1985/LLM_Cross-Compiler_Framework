@@ -543,7 +543,7 @@ class HarnessWindow(BoardSteps, QDialog):
         dialog, form = _form_dialog(self, self._t("harness.take.title"), "")
         fields: Dict[str, QLineEdit] = {}
         for key in ("id", "title_field", "location", "installer", "ref", "pin", "dry_args", "assume_yes",
-                    "exit_codes"):
+                    "exit_codes", "image_partition"):
             edit = QLineEdit(dialog)
             edit.setObjectName(f"edt_harness_take_{key}")
             fields[key] = edit
@@ -564,12 +564,17 @@ class HarnessWindow(BoardSteps, QDialog):
                 self._info(self._t("harness.take.bad_codes"), "warning")
                 return
             codes[int(code)] = meaning
+        part_text = fields["image_partition"].text().strip()
+        if part_text and not part_text.isdigit():
+            self._info(self._t("harness.take.bad_partition"), "warning")
+            return
         hid = fields["id"].text().strip()
         spec = hz.HarnessSpec(id=hid, title=fields["title_field"].text().strip() or hid, kind=kind.currentData(),
                               location=fields["location"].text().strip(), installer=fields["installer"].text().strip(),
                               ref=fields["ref"].text().strip() or None, pin=fields["pin"].text().strip() or None,
                               dry_run_args=tuple(fields["dry_args"].text().split()),
-                              assume_yes=fields["assume_yes"].text().strip() or None, exit_codes=codes or {0: "done"})
+                              assume_yes=fields["assume_yes"].text().strip() or None, exit_codes=codes or {0: "done"},
+                              image_partition=int(part_text) if part_text else None)
         state_dir = self.state_dir
         config = getattr(self.framework, "config", None)
 
@@ -580,6 +585,8 @@ class HarnessWindow(BoardSteps, QDialog):
         def done(taken: Any) -> None:
             text = self._t("harness.take.done", id=taken.spec.id, pin=taken.pin, files=taken.files,
                            tree=taken.tree_sha256)
+            if taken.content_rule:
+                text += " " + hz.derived_text(taken, None)
             self._say(text)
             self._info(text)
 

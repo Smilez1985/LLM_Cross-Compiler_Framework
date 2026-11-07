@@ -59,7 +59,12 @@ TEXTS = {
         "harness.take.title": "Take in a harness",
         "harness.take.id": "Id (lower-case letters, digits, '-'):",
         "harness.take.kind": "Where it comes from:",
-        "harness.take.location": "Repository link (https), archive file or folder:",
+        "harness.take.location": "Repository link (https), archive, disk image, installer file or folder:",
+        "harness.take.image_partition": "Partition of a disk image (only when more than one holds the installer; 0 "
+                                        "the first):",
+        "harness.take.bad_partition": "The partition is a number: 0 the first.",
+        "harness.take.derived": ("The executable bits were derived from the content (the source records none): "
+                                 "{count} files marked executable ({names})."),
         "harness.take.installer": "Installer inside the harness (e.g. installer/install.sh):",
         "harness.take.ref": "Branch or tag (git only):",
         "harness.take.pin": "Pin: the commit (git) or the archive's sha256 (optional):",
@@ -137,7 +142,12 @@ TEXTS = {
         "harness.take.title": "Harness übernehmen",
         "harness.take.id": "Kennung (Kleinbuchstaben, Ziffern, '-'):",
         "harness.take.kind": "Woher sie kommt:",
-        "harness.take.location": "Repository-Link (https), Archivdatei oder Ordner:",
+        "harness.take.location": "Repository-Link (https), Archiv, Disk-Image, Installer-Datei oder Ordner:",
+        "harness.take.image_partition": "Partition eines Disk-Images (nur wenn mehrere den Installer enthalten; 0 die "
+                                        "erste):",
+        "harness.take.bad_partition": "Die Partition ist eine Zahl: 0 die erste.",
+        "harness.take.derived": ("Die Ausführbar-Bits wurden aus dem Inhalt abgeleitet (die Quelle hält keine fest): "
+                                 "{count} Dateien als ausführbar markiert ({names})."),
         "harness.take.installer": "Installer in der Harness (z. B. installer/install.sh):",
         "harness.take.ref": "Branch oder Tag (nur git):",
         "harness.take.pin": "Pin: der Commit (git) oder die sha256 des Archivs (optional):",
