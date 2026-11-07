@@ -157,11 +157,7 @@ def tree_listing(root: Path) -> List[Tuple[str, str, str]]:
                 size += st.st_size
                 if size > MAX_BYTES:
                     raise HarnessError(f"the harness is larger than {MAX_BYTES // (1024 * 1024)} MB")
-                digest = hashlib.sha256()
-                with open(full, "rb") as fh:
-                    for chunk in iter(lambda: fh.read(1 << 20), b""):
-                        digest.update(chunk)
-                rows.append((rel, "x" if st.st_mode & 0o111 else "f", digest.hexdigest()))
+                rows.append((rel, "x" if st.st_mode & 0o111 else "f", _sha256_file(full)))
             else:
                 raise HarnessError(f"{rel}: not a file (a device or another special file)")
             if len(rows) > MAX_FILES:
@@ -224,11 +220,8 @@ def pack(tree: Path, tree_sha: str, *, make: bool = True) -> Tuple[Path, str, in
 
 
 def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    from orchestrator.utils.helpers import sha256_file
+    return sha256_file(Path(path))
 
 
 def _extract(archive: Path, dest: Path) -> None:
