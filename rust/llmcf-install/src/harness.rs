@@ -922,7 +922,7 @@ mod tests {
     fn a_part_call_names_a_record_an_offset_and_a_length() {
         assert_eq!(part_value("0.0.4194304"), Some((0, 0, 4194304)));
         assert_eq!(part_value("13.123456789012345.1"), Some((13, 123456789012345, 1)));
-        for bad in ["", "index", "14.0.1", "1.0.0", "1.0", "1.0.1.2", "-1.0.1", "1.x.1", "1.0.123456789", "001.0.1"] {
+        for bad in ["", "index", "14.0.1", "1.0.0", "1.0", "1.0.1.", "-1.0.1", "1.x.1", "1.0.123456789", "001.0.1"] {
             assert_eq!(part_value(bad), None, "{bad}");
         }
         assert!(is_records_value("index") && is_records_value("2.10.20") && !is_records_value("more"));
