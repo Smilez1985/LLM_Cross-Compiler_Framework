@@ -132,6 +132,23 @@ class TestTheRecipeInTheDockerfiles:
         rules = [r for r in docker.get("ignore") or [] if r.get("dependency-name") == "ubuntu"]
         assert rules and {"version-update:semver-major", "version-update:semver-minor"} <= set(rules[0]["update-types"])
 
+    def test_every_pinned_build_base_in_a_dockerfile_matches_the_catalog(self):
+        """Dependabot moves the digest of an image in a Dockerfile but not in configs/llama_runtime.yml, which names
+        the same build bases. A Dockerfile line and the catalog entry for the same image and tag stay on one digest;
+        the failure names both, so a Dependabot pull request is finished by copying its digest into the catalog."""
+        catalog = {b.image.partition("@")[0]: b.image for b in CATALOG.build_bases if "@sha256:" in b.image}
+        apart = []
+        for dockerfile in sorted((REPO_ROOT / "targets").rglob("Dockerfile*")):
+            for word, rest in instructions(text(dockerfile)):
+                image = rest.split()[0] if word == "FROM" and rest.split() else ""
+                name = image.partition("@")[0]
+                if "@sha256:" in image and name in catalog and image != catalog[name]:
+                    apart.append(f"{dockerfile.relative_to(REPO_ROOT)}: {image}  (configs/llama_runtime.yml: "
+                                 f"{catalog[name]})")
+        assert not apart, ("a Dockerfile and the build-base catalog name different digests for one image; copy the "
+                           "Dockerfile's digest (Dependabot's update) into configs/llama_runtime.yml:\n"
+                           + "\n".join(apart))
+
     def test_the_gpu_template_takes_cuda_from_the_pinned_redist_archives(self):
         """Decision D6: CUDA from NVIDIA's redist archives pinned through the manifest; the prebuilt development image
         only as a labelled opt-in pinned by digest. Every value comes from configs/llama_runtime.yml."""
