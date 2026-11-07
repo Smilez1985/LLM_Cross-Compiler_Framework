@@ -20,6 +20,14 @@ For the bundle the tree is packed into one plain tar file (`pack`: harness.tar b
 listing's entries in its order, every owner 0, every time 0, mode 0755 or 0644 by the executable bit, links as links),
 so the same tree gives the same bytes; llmcf-install unpacks it on the board and computes the same tree checksum
 (rust/llmcf-install/src/harness.rs; tests/data/harness_tree_vectors.json holds the vectors both sides check).
+
+The executable bit and links come from the source's own metadata where the host's file system has none (Windows,
+NO_EXEC_BIT): at take-in the modes are recorded beside the tree (modes.json: the executable files and the links with
+their targets) from the git tree (`git ls-tree`: 100755, 120000), the archive's members (a tar member's mode, a zip
+entry's external attributes) or, for a folder, its git index (`git ls-files --stage`); tree_listing and pack use them
+there instead of os.stat, so the same harness gives the same tree checksum and the same pack on Windows and Linux. A
+folder that is no git checkout has no mode source on Windows and is refused (take it in by its git link or as an
+archive). On Linux and macOS the file system's own modes count, as before.
 """
 
 import hashlib
@@ -40,6 +48,12 @@ OUTCOMES = ("done", "findings")
 STORE_DIR = "harnesses"
 TREE_DIR = "tree"
 SPEC_FILE = "harness.json"
+MODES_FILE = "modes.json"
+# The host's file system keeps no executable bit (Windows): the source's recorded modes count instead.
+NO_EXEC_BIT = os.name == "nt"
+FOLDER_NO_MODES = ("a folder taken in on Windows has no executable bits to read (Windows keeps none), and it is not a "
+                   "git checkout whose index has them; take the harness in by its git link or as an archive (zip or "
+                   "tar keep the bits)")
 
 RE_ID = re.compile(r"[a-z][a-z0-9-]{1,39}")
 RE_COMMIT = re.compile(r"[0-9a-f]{40}")
@@ -135,12 +149,51 @@ class TakenIn:
                 "files": self.files, "size": self.size}
 
 
-def tree_listing(root: Path) -> List[Tuple[str, str, str]]:
+@dataclass(frozen=True)
+class Modes:
+    """What the source says about its entries (where the host's file system cannot): the executable files and the
+    links with their targets, by relative path."""
+    executable: Tuple[str, ...] = ()
+    links: Dict[str, str] = field(default_factory=dict)
+
+    def record(self) -> dict:
+        return {"executable": sorted(self.executable), "links": dict(sorted(self.links.items()))}
+
+    @classmethod
+    def load(cls, path: Path) -> Optional["Modes"]:
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            return cls(tuple(str(p) for p in data.get("executable", [])),
+                       {str(k): str(v) for k, v in dict(data.get("links", {})).items()})
+        except (OSError, ValueError, TypeError, AttributeError):
+            return None
+
+
+def _link_inside(rel: str, target: str) -> bool:
+    """A link `rel` with `target` stays inside the tree by its words (llmcf-install's stays_inside)."""
+    if not target or target.startswith("/") or "\0" in target or "\\" in target or re.match(r"[A-Za-z]:", target):
+        return False
+    parts = rel.split("/")[:-1]
+    for p in target.split("/"):
+        if p == "..":
+            if not parts:
+                return False
+            parts.pop()
+        elif p not in ("", "."):
+            parts.append(p)
+    return True
+
+
+def tree_listing(root: Path, modes: Optional[Modes] = None) -> List[Tuple[str, str, str]]:
     """(relative path, kind, digest) for every entry below `root`, sorted, `.git` left out: kind "x" an executable
-    file, "f" another file, "l" a link (its target as digest). A link that leaves the tree, a device or another
-    special file raises HarnessError."""
+    file, "f" another file, "l" a link (its target as digest). With `modes` (a host without executable bits: the
+    source's recorded modes) a file's kind comes from them, and a recorded link that the host wrote as a file (or not
+    at all) is listed as the link. A link that leaves the tree, a device or another special file raises
+    HarnessError."""
     root = Path(root)
     rows: List[Tuple[str, str, str]] = []
+    executable = set(modes.executable) if modes is not None else set()
+    links = dict(modes.links) if modes is not None else {}
     size = 0
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames if not (Path(dirpath) == root and d == ".git"))
@@ -152,17 +205,41 @@ def tree_listing(root: Path) -> List[Tuple[str, str, str]]:
                 target = os.readlink(full)
                 if os.path.isabs(target) or not (full.parent / target).resolve().is_relative_to(root.resolve()):
                     raise HarnessError(f"{rel}: a link that leaves the harness")
-                rows.append((rel, "l", target))
+                rows.append((rel, "l", target.replace(os.sep, "/") if modes is not None else target))
+            elif stat.S_ISREG(st.st_mode) and rel in links:
+                rows.append((rel, "l", links[rel]))
             elif stat.S_ISREG(st.st_mode):
                 size += st.st_size
                 if size > MAX_BYTES:
                     raise HarnessError(f"the harness is larger than {MAX_BYTES // (1024 * 1024)} MB")
-                rows.append((rel, "x" if st.st_mode & 0o111 else "f", _sha256_file(full)))
+                kind = ("x" if rel in executable else "f") if modes is not None else \
+                    ("x" if st.st_mode & 0o111 else "f")
+                rows.append((rel, kind, _sha256_file(full)))
             else:
                 raise HarnessError(f"{rel}: not a file (a device or another special file)")
             if len(rows) > MAX_FILES:
                 raise HarnessError(f"the harness has more than {MAX_FILES} files")
+    seen = {r[0] for r in rows}
+    for rel, target in links.items():   # a link the host could not write at all
+        if rel not in seen and not os.path.lexists(root / rel):
+            rows.append((rel, "l", target))
+    for rel, kind, target in rows:
+        if kind == "l" and rel in links and not _link_inside(rel, target):
+            raise HarnessError(f"{rel}: a link that leaves the harness")
     return sorted(rows)
+
+
+def modes_of(tree: Path) -> Optional[Modes]:
+    """The recorded modes of a stored tree (modes.json beside it) where the host keeps no executable bit; None where
+    the file system's own modes count (Linux, macOS)."""
+    if not NO_EXEC_BIT:
+        return None
+    return Modes.load(Path(tree).parent / MODES_FILE) or Modes()
+
+
+def stored_listing(tree: Path) -> List[Tuple[str, str, str]]:
+    """tree_listing of a stored tree with its recorded modes where the host needs them."""
+    return tree_listing(tree, modes_of(tree))
 
 
 def tree_sha256(rows: List[Tuple[str, str, str]]) -> str:
@@ -182,7 +259,7 @@ def pack(tree: Path, tree_sha: str, *, make: bool = True) -> Tuple[Path, str, in
     (harness.tar.sha256) still matches its bytes. HarnessError when a path does not fit a plain tar header, or
     (`make` False: an AI's read-only plan) when no pack is there yet."""
     tree = Path(tree)
-    rows = tree_listing(tree)
+    rows = stored_listing(tree)
     if tree_sha256(rows) != tree_sha:
         raise HarnessError("the stored tree does not match what was taken in; take the harness in again")
     out = tree.parent / PACK_FILE
@@ -224,9 +301,17 @@ def _sha256_file(path: Path) -> str:
     return sha256_file(Path(path))
 
 
-def _extract(archive: Path, dest: Path) -> None:
+def _member(name: str) -> str:
+    return PurePosixPath(name.replace("\\", "/")).as_posix().lstrip("/").removeprefix("./")
+
+
+def _extract(archive: Path, dest: Path) -> Modes:
+    """Extracts the archive into `dest` and returns its members' modes (the executable files and the links), keyed by
+    their path inside the archive."""
     from orchestrator.utils.helpers import UnsafeArchive, safe_extract_tar
     name = archive.name.lower()
+    executable: List[str] = []
+    links: Dict[str, str] = {}
     try:
         if name.endswith(".zip"):
             with zipfile.ZipFile(archive) as zf:
@@ -242,13 +327,56 @@ def _extract(archive: Path, dest: Path) -> None:
                     mode = (info.external_attr >> 16) & 0o777
                     if mode and not info.is_dir():
                         os.chmod(dest / info.filename, mode & 0o755)
+                        if mode & 0o111:
+                            executable.append(_member(info.filename))
         elif name.endswith((".tar.gz", ".tgz", ".tar")):
             with tarfile.open(archive, "r:*") as tf:
                 safe_extract_tar(tf, dest)
+                for member in tf.getmembers():
+                    if member.issym():
+                        links[_member(member.name)] = member.linkname
+                    elif (member.isfile() or member.islnk()) and member.mode & 0o111:
+                        executable.append(_member(member.name))
         else:
             raise HarnessError("archive: a .zip, .tar.gz, .tgz or .tar file")
     except (UnsafeArchive, zipfile.BadZipFile, tarfile.TarError) as e:
         raise HarnessError(f"the archive cannot be taken in: {e}") from None
+    return Modes(tuple(executable), links)
+
+
+def _below(modes: Modes, top: str) -> Modes:
+    """The modes of the entries below `top` ("" the archive's top), keyed relative to it."""
+    if not top:
+        return modes
+    cut = top.rstrip("/") + "/"
+    return Modes(tuple(p[len(cut):] for p in modes.executable if p.startswith(cut)),
+                 {p[len(cut):]: t for p, t in modes.links.items() if p.startswith(cut)})
+
+
+def _git_modes(git, folder: Path, args: List[str]) -> Modes:
+    """The modes git records for a checkout's files (`ls-tree -r -z HEAD` or `ls-files --stage -z`): 100755 an
+    executable file, 120000 a link, its target read from the checkout (a link, or the file Windows wrote instead)."""
+    from orchestrator.runtime.build.source import SourceError
+    try:
+        out = git(args, cwd=folder).stdout
+    except SourceError as e:
+        raise HarnessError(f"the modes of the harness's files cannot be read from git: {e}") from None
+    executable: List[str] = []
+    links: Dict[str, str] = {}
+    for entry in (out or "").split("\0"):
+        head, _, path = entry.partition("\t")
+        if not path:
+            continue
+        mode = head.split(" ", 1)[0]
+        if mode == "100755":
+            executable.append(path)
+        elif mode == "120000":
+            full = Path(folder) / path
+            try:
+                links[path] = os.readlink(full) if os.path.islink(full) else full.read_text(encoding="utf-8")
+            except OSError:
+                raise HarnessError(f"{path}: a link in the repository that cannot be read") from None
+    return Modes(tuple(executable), links)
 
 
 def _single_top(folder: Path, installer: str) -> Path:
@@ -298,7 +426,10 @@ def take_in(spec: HarnessSpec, state_dir: Path, *, git=None, offline: bool = Fal
                 from orchestrator.runtime.build.source import Git
                 git = Git()
             pin = _fetch_git(spec, staging, git, offline)
-            shutil.rmtree(staging / ".git")
+            modes = _git_modes(git, staging, ["ls-tree", "-r", "-z", "--full-tree", "HEAD"])
+            from orchestrator.utils.atomic import remove_tree
+            if remove_tree(staging / ".git", label="the harness checkout's git folder"):
+                raise HarnessError("the git folder of the harness's checkout could not be removed")
             tree = staging
         elif spec.kind == "archive":
             archive = Path(spec.location)
@@ -307,16 +438,26 @@ def take_in(spec: HarnessSpec, state_dir: Path, *, git=None, offline: bool = Fal
             pin = _sha256_file(archive)
             if spec.pin and pin != spec.pin:
                 raise HarnessError("archive: its sha256 is not the one given")
-            _extract(archive, staging)
+            found = _extract(archive, staging)
             tree = _single_top(staging, spec.installer)
+            modes = _below(found, tree.relative_to(staging).as_posix() if tree != staging else "")
         else:
             folder = Path(spec.location)
             if not folder.is_dir():
                 raise HarnessError("folder: it is not there")
+            modes = None
+            if NO_EXEC_BIT:
+                if not (folder / ".git").exists():
+                    raise HarnessError(FOLDER_NO_MODES)
+                if git is None:
+                    from orchestrator.runtime.build.source import Git
+                    git = Git()
+                modes = _git_modes(git, folder, ["ls-files", "--stage", "-z"])
             shutil.copytree(folder, staging / "t", symlinks=True, ignore=shutil.ignore_patterns(".git"))
             tree = staging / "t"
             pin = ""
-        rows = tree_listing(tree)
+        used = modes if NO_EXEC_BIT else None
+        rows = tree_listing(tree, used)
         installer = next((r for r in rows if r[0] == spec.installer), None)
         if installer is None or installer[1] == "l":
             raise HarnessError(f"installer: {spec.installer} is not a file in the harness")
@@ -327,7 +468,10 @@ def take_in(spec: HarnessSpec, state_dir: Path, *, git=None, offline: bool = Fal
         if not (final / TREE_DIR).is_dir():
             final.mkdir(exist_ok=True)
             os.replace(tree, final / TREE_DIR)
-        if tree_sha256(tree_listing(final / TREE_DIR)) != digest:
+        if modes is not None:
+            (final / MODES_FILE).write_text(json.dumps(modes.record(), indent=2, sort_keys=True) + "\n",
+                                            encoding="utf-8")
+        if tree_sha256(tree_listing(final / TREE_DIR, used)) != digest:
             raise HarnessError("the stored tree does not match what was taken in")
         taken = TakenIn(spec=spec, pin=pin, tree_sha256=digest, files=len(rows), size=size, path=final / TREE_DIR)
         (final / SPEC_FILE).write_text(json.dumps(taken.record(), indent=2, sort_keys=True) + "\n", encoding="utf-8")

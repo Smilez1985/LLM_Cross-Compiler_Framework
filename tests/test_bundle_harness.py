@@ -1,6 +1,9 @@
 """The person's harness taken in on the host (orchestrator/runtime/bundle/harness.py): spec checks, the three
 sources (folder, archive, git), the pin, the one tree checksum, and the refusals (links out, a missing installer, a
-wrong sha256, a credential in the link)."""
+wrong sha256, a credential in the link). The executable bit and links come from the source's own metadata where the
+host's file system has none (Windows: harness.NO_EXEC_BIT, forced here on every system too): the same harness gives
+the same tree checksum and pack everywhere; a plain folder on Windows is refused, a git checkout's index has the
+modes."""
 
 import json
 import os
@@ -15,6 +18,11 @@ import pytest
 
 from orchestrator.runtime.bundle import harness as h
 
+POSIX = pytest.mark.skipif(os.name == "nt", reason="sets a file's mode with chmod, which Windows does not keep")
+GIT = pytest.mark.skipif(shutil.which("git") is None, reason="git is needed")
+GIT_ENV = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid", GIT_COMMITTER_NAME="t",
+               GIT_COMMITTER_EMAIL="t@example.invalid")
+
 
 def make_tree(root: Path) -> Path:
     (root / "installer").mkdir(parents=True)
@@ -26,6 +34,38 @@ def make_tree(root: Path) -> Path:
     return root
 
 
+def git_tree(root: Path) -> Path:
+    """make_tree as a git checkout whose index marks the installer executable (on every system: Windows keeps no
+    executable bit in its file system, git's index does)."""
+    make_tree(root)
+    for args in (["init", "-q", "-b", "main"], ["add", "."], ["update-index", "--chmod=+x", "installer/install.sh"],
+                 ["commit", "-qm", "one"]):
+        subprocess.run(["git", *args], cwd=root, check=True, env=GIT_ENV, capture_output=True)
+    return root
+
+
+def source_tree(root: Path) -> Path:
+    """A folder harness that can be taken in on this system: a plain folder, or on Windows a git checkout."""
+    if os.name == "nt":
+        if shutil.which("git") is None:
+            pytest.skip("a folder harness on Windows takes its modes from git")
+        return git_tree(root)
+    return make_tree(root)
+
+
+def tar_source(path: Path, top: str = "") -> Path:
+    """The same harness as an archive whose members carry the modes (0755 for the installer), on every system."""
+    pre = f"{top}/" if top else ""
+    with tarfile.open(path, "w:gz") as tf:
+        for name, data, mode in ((f"{pre}installer/install.sh", b"#!/bin/sh\necho ok\n", 0o755),
+                                 (f"{pre}src/app.py", b"print('hi')\n", 0o644)):
+            info = tarfile.TarInfo(name)
+            info.size, info.mode = len(data), mode
+            import io
+            tf.addfile(info, io.BytesIO(data))
+    return path
+
+
 def spec(**kw):
     base = dict(id="demo", title="Demo", kind="folder", location="", installer="installer/install.sh",
                 dry_run_args=("--dry-run",), assume_yes="DEMO_YES=1", exit_codes={0: "done", 1: "findings"})
@@ -34,10 +74,10 @@ def spec(**kw):
 
 
 def test_a_folder_is_taken_in_with_one_tree_checksum_and_reused(tmp_path):
-    src = make_tree(tmp_path / "src")
+    src = source_tree(tmp_path / "src")
     taken = h.take_in(spec(location=str(src)), tmp_path / "state")
     assert taken.files == 2 and taken.pin == taken.tree_sha256 and len(taken.tree_sha256) == 64
-    assert (taken.path / "installer" / "install.sh").stat().st_mode & 0o100
+    assert ("installer/install.sh", "x") in [(r[0], r[1]) for r in h.stored_listing(taken.path)]
     again = h.take_in(spec(location=str(src)), tmp_path / "state")
     assert again.path == taken.path and again.tree_sha256 == taken.tree_sha256
     record = h.stored(tmp_path / "state", "demo")[0]
@@ -46,16 +86,25 @@ def test_a_folder_is_taken_in_with_one_tree_checksum_and_reused(tmp_path):
 
 def test_the_checksum_follows_content_and_the_executable_bit(tmp_path):
     src = make_tree(tmp_path / "src")
-    first = h.tree_sha256(h.tree_listing(src))
+    modes = h.Modes(("installer/install.sh",))
+    first = h.tree_sha256(h.tree_listing(src, modes))
     (src / "src" / "app.py").write_text("print('changed')\n")
-    second = h.tree_sha256(h.tree_listing(src))
-    (src / "src" / "app.py").chmod(0o755)
-    third = h.tree_sha256(h.tree_listing(src))
+    second = h.tree_sha256(h.tree_listing(src, modes))
+    third = h.tree_sha256(h.tree_listing(src, h.Modes(("installer/install.sh", "src/app.py"))))
     assert len({first, second, third}) == 3
 
 
-def test_a_link_out_of_the_harness_is_refused(tmp_path):
+@POSIX
+def test_on_posix_the_file_systems_own_bit_counts(tmp_path):
     src = make_tree(tmp_path / "src")
+    first = h.tree_sha256(h.tree_listing(src))
+    assert first == h.tree_sha256(h.tree_listing(src, h.Modes(("installer/install.sh",))))
+    (src / "src" / "app.py").chmod(0o755)
+    assert h.tree_sha256(h.tree_listing(src)) != first
+
+
+def test_a_link_out_of_the_harness_is_refused(tmp_path):
+    src = source_tree(tmp_path / "src")
     os.symlink("/etc/passwd", src / "src" / "out")
     with pytest.raises(h.HarnessError, match="leaves the harness"):
         h.take_in(spec(location=str(src)), tmp_path / "state")
@@ -63,7 +112,7 @@ def test_a_link_out_of_the_harness_is_refused(tmp_path):
 
 
 def test_a_missing_installer_is_refused(tmp_path):
-    src = make_tree(tmp_path / "src")
+    src = source_tree(tmp_path / "src")
     with pytest.raises(h.HarnessError, match="installer"):
         h.take_in(spec(location=str(src), installer="installer/nope.sh"), tmp_path / "state")
 
@@ -86,7 +135,9 @@ def test_a_zip_keeps_the_executable_bit_and_refuses_a_path_outside(tmp_path):
         info.external_attr = (0o100755 << 16)
         zf.writestr(info, "#!/bin/sh\n")
     taken = h.take_in(spec(kind="archive", location=str(good)), tmp_path / "state")
-    assert (taken.path / "installer" / "install.sh").stat().st_mode & 0o100
+    assert h.stored_listing(taken.path)[0][:2] == ("installer/install.sh", "x")
+    if os.name != "nt":
+        assert (taken.path / "installer" / "install.sh").stat().st_mode & 0o100
     bad = tmp_path / "bad.zip"
     with zipfile.ZipFile(bad, "w") as zf:
         zf.writestr("../evil.sh", "x")
@@ -95,13 +146,23 @@ def test_a_zip_keeps_the_executable_bit_and_refuses_a_path_outside(tmp_path):
         h.take_in(spec(kind="archive", location=str(bad)), tmp_path / "state2")
 
 
-@pytest.mark.skipif(shutil.which("git") is None, reason="git is needed")
+def _local_git(repo):
+    class LocalGit:
+        def __call__(self, args, cwd=None, timeout=60, offline=False, check=True):
+            args = [str(repo) if a == "https://example.invalid/demo" else a for a in args]
+            res = subprocess.run(["git", "-c", "protocol.file.allow=always", *args], cwd=cwd, capture_output=True,
+                                 text=True, env=GIT_ENV)
+            if check and res.returncode:
+                from orchestrator.runtime.build.source import SourceError
+                raise SourceError(res.stderr)
+            return res
+    return LocalGit()
+
+
+@GIT
 def test_a_git_repository_is_resolved_to_its_commit_and_checked_against_a_pin(tmp_path):
-    repo = make_tree(tmp_path / "repo")
-    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
-               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid")
-    for args in (["init", "-q", "-b", "main"], ["add", "."], ["commit", "-qm", "one"]):
-        subprocess.run(["git", *args], cwd=repo, check=True, env=env)
+    repo = git_tree(tmp_path / "repo")
+    env = GIT_ENV
     commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
 
     class LocalGit:
@@ -117,6 +178,8 @@ def test_a_git_repository_is_resolved_to_its_commit_and_checked_against_a_pin(tm
     s = spec(kind="git", location="https://example.invalid/demo", ref="main")
     taken = h.take_in(s, tmp_path / "state", git=LocalGit())
     assert taken.pin == commit and not (taken.path / ".git").exists()
+    assert ("installer/install.sh", "x") in [(r[0], r[1]) for r in h.stored_listing(taken.path)]
+    assert json.loads((taken.path.parent / h.MODES_FILE).read_text())["executable"] == ["installer/install.sh"]
     with pytest.raises(h.HarnessError, match="not"):
         h.take_in(replace(s, ref=None, pin="1" * 40), tmp_path / "state", git=LocalGit())
 
@@ -147,14 +210,23 @@ def test_the_chimera_example_is_a_valid_spec():
 # --- the harness in the bundle (generator, manifest) -----------------------------------------------------------------
 
 def _taken(tmp_path, **kw):
-    src = make_tree(tmp_path / "src")
-    return h.take_in(spec(location=str(src), **kw), tmp_path / "state")
+    """The demo harness taken in from an archive whose members carry their modes (the same on every system)."""
+    archive = tar_source(tmp_path / "demo.tar.gz", top="demo-1.0")
+    return h.take_in(spec(kind="archive", location=str(archive), **kw), tmp_path / "state")
+
+
+def _can_link(folder: Path) -> bool:
+    try:
+        os.symlink("app.py", folder / "link")
+        return True
+    except (OSError, NotImplementedError):   # Windows without the right to make links
+        return False
 
 
 def test_the_pack_is_the_same_bytes_every_time_and_holds_only_the_listing(tmp_path):
     taken = _taken(tmp_path)
-    os.symlink("app.py", taken.path / "src" / "link")
-    rows = h.tree_listing(taken.path)
+    linked = _can_link(taken.path / "src")
+    rows = h.stored_listing(taken.path)
     first, sha, size = h.pack(taken.path, h.tree_sha256(rows))
     data = first.read_bytes()
     first.unlink()
@@ -165,7 +237,8 @@ def test_the_pack_is_the_same_bytes_every_time_and_holds_only_the_listing(tmp_pa
     assert [m.name for m in members] == [r[0] for r in rows]
     assert all(m.mtime == 0 and m.uid == 0 and m.gid == 0 for m in members)
     assert {m.name: m.mode for m in members if m.isfile()} == {"installer/install.sh": 0o755, "src/app.py": 0o644}
-    assert next(m for m in members if m.name == "src/link").linkname == "app.py"
+    if linked:
+        assert next(m for m in members if m.name == "src/link").linkname == "app.py"
     with pytest.raises(h.HarnessError, match="does not match"):
         h.pack(taken.path, "0" * 64)
 
@@ -301,7 +374,14 @@ def test_the_harness_gate_operation_takes_only_its_actions_and_never_an_answer_a
     assert "LLMCF_HOME_GATE=; llmcf_trusted_signers" in text
     gate.script("bundle-harness", "harness-start", "voice-test", "agent", "dry-1", "dry", sha)
     gate.script("bundle-harness", "harness-read", "voice-test", "agent", "run-1", "1024", sha)
+    gate.script("bundle-harness", "harness-records", "voice-test", "agent", "run-1", "index", sha)
+    gate.script("bundle-harness", "harness-records", "voice-test", "agent", "run-1", "13.4194304.4194304", sha)
+    assert "harness-start|harness-read|harness-records) sudo -n" in text
     for args in (("harness-start", "voice-test", "agent", "run-1", "sh", sha),
+                 ("harness-records", "voice-test", "agent", "run-1", "0", sha),
+                 ("harness-records", "voice-test", "agent", "run-1", "1.0.0", sha),
+                 ("harness-records", "voice-test", "agent", "run-1", "100.0.1", sha),
+                 ("harness-records", "voice-test", "agent", "run-1", "1.-1.1", sha),
                  ("harness-read", "voice-test", "agent", "run-1", "x1", sha),
                  ("apply", "voice-test", "agent", "run-1", "0", sha),
                  ("harness-stop", "voice-test", "agent", "run.1", "0", sha),
@@ -316,4 +396,78 @@ def test_the_sudo_rule_names_the_harness_actions_and_an_older_rule_is_set_up_aga
     for action in ("harness-start", "harness-read", "harness-answer", "harness-stop", "harness-records"):
         assert f"$llmcf_fx {action} *" in body
     assert "llmcf_dropin_ok harness-read voice-test" in body
-    assert "llmcf_dropin_ok harness-read llmcf-check" in gate_ops._ready_body("a" * 64)
+    ready = gate_ops._ready_body("a" * 64)
+    assert "llmcf_dropin_ok harness-read llmcf-check" in ready and "echo dropin=old" in ready
+    from orchestrator.runtime.bundle import readiness
+    old = readiness.Readiness.parse("sudo=yes\nrootway=nopass\nsigners=root\nhelper=same\ndropin=old\n")
+    assert old.missing() == ["dropin-update"] and not old.ready
+    assert any(line.startswith("Replace the older sudo rule") for line in readiness.plan_lines(old))
+    assert "older one" in readiness.declined_text("voice-test", "board", old)
+    done = readiness.SetupDone(True, "", ("dropin",), ("dropin",))
+    assert "older sudo rule" in done.text() and done.as_dict()["updated"] == ["dropin"]
+
+
+# --- a host without executable bits (Windows; forced here on every system) ------------------------------------------
+
+@pytest.fixture
+def no_exec_bit(monkeypatch):
+    monkeypatch.setattr(h, "NO_EXEC_BIT", True)
+
+
+def test_without_exec_bits_a_plain_folder_is_refused_with_its_repair(tmp_path, no_exec_bit):
+    src = make_tree(tmp_path / "src")
+    with pytest.raises(h.HarnessError, match="git link or as an archive"):
+        h.take_in(spec(location=str(src)), tmp_path / "state")
+
+
+@GIT
+def test_without_exec_bits_a_git_folder_takes_its_modes_from_the_index(tmp_path, monkeypatch):
+    src = git_tree(tmp_path / "src")
+    posix = h.take_in(spec(location=str(src)), tmp_path / "a") if os.name != "nt" else None
+    monkeypatch.setattr(h, "NO_EXEC_BIT", True)
+    if os.name != "nt":
+        (src / "installer" / "install.sh").chmod(0o644)   # what Windows would show: no bit in the file system
+    taken = h.take_in(spec(location=str(src)), tmp_path / "b")
+    assert ("installer/install.sh", "x") in [(r[0], r[1]) for r in h.stored_listing(taken.path)]
+    if posix is not None:
+        assert taken.tree_sha256 == posix.tree_sha256
+
+
+def test_without_exec_bits_an_archive_gives_the_same_checksum_and_pack(tmp_path, monkeypatch):
+    archive = tar_source(tmp_path / "demo.tar.gz", top="demo-1.0")
+    plain = h.take_in(spec(kind="archive", location=str(archive)), tmp_path / "a")
+    plain_pack = h.pack(plain.path, plain.tree_sha256)[0].read_bytes()
+    monkeypatch.setattr(h, "NO_EXEC_BIT", True)
+    taken = h.take_in(spec(kind="archive", location=str(archive)), tmp_path / "b")
+    if os.name != "nt":
+        (taken.path / "installer" / "install.sh").chmod(0o644)   # the file system says nothing; the record counts
+    assert taken.tree_sha256 == plain.tree_sha256
+    assert h.pack(taken.path, taken.tree_sha256)[0].read_bytes() == plain_pack
+    assert json.loads((taken.path.parent / h.MODES_FILE).read_text()) == {"executable": ["installer/install.sh"],
+                                                                         "links": {}}
+
+
+def test_recorded_links_are_listed_as_links_and_never_leave_the_tree(tmp_path):
+    src = make_tree(tmp_path / "src")
+    (src / "src" / "link").write_text("app.py")   # a link Windows wrote as a file
+    rows = h.tree_listing(src, h.Modes(("installer/install.sh",), {"src/link": "app.py", "src/gone": "app.py"}))
+    assert ("src/link", "l", "app.py") in rows and ("src/gone", "l", "app.py") in rows
+    for target in ("../../outside", "/etc/passwd", "C:/x"):
+        with pytest.raises(h.HarnessError, match="leaves the harness"):
+            h.tree_listing(src, h.Modes((), {"src/bad": target}))
+
+
+@GIT
+def test_the_checkouts_read_only_git_folder_goes_through_the_one_removal(tmp_path, monkeypatch):
+    from orchestrator.utils import atomic
+    repo = git_tree(tmp_path / "repo")
+    removed = []
+    real = atomic.remove_tree
+
+    def watched(path, **kw):
+        removed.append(Path(path).name)
+        return real(path, **kw)
+    monkeypatch.setattr(atomic, "remove_tree", watched)
+    s = spec(kind="git", location="https://example.invalid/demo", ref="main")
+    taken = h.take_in(s, tmp_path / "state", git=_local_git(repo))
+    assert ".git" in removed and not (taken.path / ".git").exists()
