@@ -126,7 +126,7 @@ def _ready_body(sha: str) -> str:
     """bundle-ready: what llmcf-install needs on this board, read without root and without a password, in fixed
     words: sudo=yes|no, rootway=nopass|password|none (sudo -n true), signers=root|none, account=ok|bad,
     helper=same|other|absent|unsafe (llmcf-install at its fixed root-owned place, its sha256 against `sha`),
-    dropin=yes|no, and the board's family/dietpi/manager words (gate.SYSTEM_FACTS)."""
+    dropin=yes|old|no (old: a rule written before the harness actions, which the setup replaces), and the board's family/dietpi/manager words (gate.SYSTEM_FACTS)."""
     return "\n".join([
         gate.signed_sh(),
         places_sh(),
@@ -140,7 +140,7 @@ def _ready_body(sha: str) -> str:
         'if [ ! -e "$llmcf_fx" ]; then echo helper=absent; elif ! llmcf_fixed_ok; then echo helper=unsafe; '
         f'elif [ "$(llmcf_sha "$llmcf_fx")" = {sha} ]; then echo helper=same; else echo helper=other; fi',
         f"if llmcf_dropin_ok status llmcf-check && llmcf_dropin_ok {_DROPIN_CHECK} llmcf-check; then echo dropin=yes; "
-        "else echo dropin=no; fi",
+        "elif llmcf_dropin_ok status llmcf-check; then echo dropin=old; else echo dropin=no; fi",
         *gate.SYSTEM_FACTS,
     ])
 
@@ -364,13 +364,16 @@ define("bundle-ready-remove", ("word",), lambda via, rest="": _remove_body(via),
 
 
 _RUN_NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,47}")
+# harness-records: its index, or one part of record N from OFFSET, LENGTH bytes (llmcf-install sends at most 4 MiB)
+RECORDS_VALUE = re.compile(r"index|(?:0|[1-9][0-9]?)\.[0-9]{1,15}\.[1-9][0-9]{0,7}", re.ASCII)
 
 
 def _harness_body(action: str, bundle: str, comp: str, run: str, value: str, sha: str) -> str:
     """bundle-harness with its values in place: llmcf-install's harness action (installer.HARNESS_ACTIONS) for the
     run `run` of the harness component `comp`, from its fixed root-owned place with this bundle's sha256, through its
     sudoers drop-in only (sudo -n: a harness run never takes a password; the board's root readiness sets it up).
-    `value` is the mode of harness-start or the byte offset of harness-read ("0" for the others). stdin's first line
+    `value` is the mode of harness-start, the byte offset of harness-read, or the index or a part N.OFFSET.LENGTH of
+    harness-records ("0" for the others). stdin's first line
     is the person's answer for harness-answer, passed on stdin, never as an argument and never shown."""
     cases = "|".join(inst.HARNESS_ACTIONS)
     refuse = 'echo "llmcf-bundle: result={0} changed=0 {1}"; exit 3'
@@ -387,7 +390,9 @@ def _harness_body(action: str, bundle: str, comp: str, run: str, value: str, sha
         f'case {action} in harness-start) case {value} in dry|run|run-yes) ;; *) '
         + refuse.format("refused", "not a mode of a harness run") + " ;; esac ;; "
         f'harness-read) case {value} in ""|*[!0-9]*) ' + refuse.format("refused", "not a byte offset")
-        + " ;; esac ;; esac",
+        + " ;; esac ;; "
+        f'harness-records) case {value} in index) ;; ""|.*|*[!0-9.]*) '
+        + refuse.format("refused", "not a part of the records") + " ;; esac ;; esac",
         "LLMCF_HOME_GATE=; llmcf_trusted_signers || { " + refuse.format(
             "not-ready", "this board holds no root-owned signing key of the framework (pair it again with the board "
                          "password)") + "; }",
@@ -404,7 +409,7 @@ def _harness_body(action: str, bundle: str, comp: str, run: str, value: str, sha
                          "board's root readiness again; nothing was started)") + "; }",
         f"case {action} in",
         f'  harness-answer) printf "%s\\n" "$llmcf_line" | sudo -n "$llmcf_fx" {action} {bundle} {comp} {run} 2>&1 ;;',
-        f'  harness-start|harness-read) sudo -n "$llmcf_fx" {action} {bundle} {comp} {run} {value} </dev/null 2>&1 ;;',
+        f'  harness-start|harness-read|harness-records) sudo -n "$llmcf_fx" {action} {bundle} {comp} {run} {value} </dev/null 2>&1 ;;',
         f'  *) sudo -n "$llmcf_fx" {action} {bundle} {comp} {run} </dev/null 2>&1 ;;',
         "esac",
     ])
@@ -419,6 +424,8 @@ def _harness_refusal(args) -> str:
         return "not a mode of a harness run"
     if action == "harness-read" and not re.fullmatch(r"[0-9]{1,15}", value):
         return "not a byte offset"
+    if action == "harness-records" and not RECORDS_VALUE.fullmatch(value):
+        return "not a part of the records (index, or N.OFFSET.LENGTH)"
     return ""
 
 

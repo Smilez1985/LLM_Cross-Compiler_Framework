@@ -17,6 +17,10 @@ reaches the output pane live, as plain text (harness_run.plain_output: nothing t
 window), while the GUI thread stays free; Send and Stop go over a board session of their own, beside the step. Detach
 (the step's Cancel) closes the step's session: the installer goes on on the board, and Re-attach reads on from the
 byte this computer read last. An AI never starts, answers or stops a run here (no tool reaches this window's steps).
+
+When a step finds the board's root readiness missing, the window names what its setup will do and asks the person
+("No" is the default); on yes it carries out the one root-readiness setup (harness_run.ready_plan / ready_setup, the
+CLI's very steps, audited) and runs the step again. A second time changes nothing and says so.
 """
 
 import threading
@@ -250,10 +254,71 @@ class HarnessWindow(BoardSteps, QDialog):
             return str(error) + (f"\n\n{error.next_step}" if error.next_step else "")
         return None
 
-    def _harness_failed(self, opener):
+    def _harness_ready(self, built: Any, opener: Any, then=None) -> None:
+        """The board's root readiness when a harness step found it missing: what its setup will do, the person's
+        question ("No" is the default), the one-time password when one is needed, then the one setup in the worker
+        thread (harness_run.ready_setup: only what is missing, audited); `then()` once it is there."""
+        from orchestrator.gui.bundle_window import BundleWindow
+        from orchestrator.runtime.bundle import harness_run as hr
+        open_session, label = opener[0], opener[4]
+        mode, audit = self._mode(), self.audit
+
+        def checked(plan: Any) -> None:
+            if plan.ready:
+                hr.ready_setup(open_session, built, plan, approved=True, mode=mode, audit=audit, actor="gui")
+                self._say(self._t("harness.ready.there"))
+                if then is not None:
+                    then()
+                return
+            self._say(self._t("harness.ready.missing") + "\n" + "\n".join(plan.lines))
+            if plan.problem:
+                self._info(self._t("harness.ready.cannot", reason=one_line(plan.problem)), "warning")
+                return
+            approved = ask(self, self._t("harness.title"), self._t("harness.ready.ask", board=label,
+                                                                   bundle=built.bundle_id))
+            if not approved:
+                hr.ready_setup(open_session, built, plan, approved=False, mode=mode, audit=audit, actor="gui")
+                self._info(self._t("harness.ready.declined", board=label), "warning")
+                return
+            pw = ""
+            if plan.found.needs_password(mode):
+                pw = BundleWindow._ask_password(self, "bundle.ready.password_su" if plan.found.way(mode) == "su"
+                                                else "bundle.ready.password_sudo")
+                if not pw:
+                    self._say(self._t("bundle.unchanged"))
+                    return
+
+            def set_up(done: Any) -> None:
+                self._say(done.text())
+                if not done.ok:
+                    self._info(self._t("harness.ready.failed", reason=one_line(done.text())), "warning")
+                    return
+                self._say(self._t("harness.ready.after"))
+                if then is not None:
+                    then()
+            self._start(self._t("harness.ready.running"), lambda: hr.ready_setup(
+                open_session, built, plan, approved=True, mode=mode, password=pw, audit=audit, actor="gui"),
+                set_up, failed=self._harness_failed(opener))
+
+        self._start(self._t("harness.ready.checking"), lambda: hr.ready_plan(open_session, built, mode=mode,
+                                                                            actor="gui"),
+                    checked, failed=self._harness_failed(opener))
+
+    @staticmethod
+    def _not_ready(error: BaseException) -> bool:
+        from orchestrator.runtime.bundle import harness_run as hr
+        return isinstance(error, hr.HarnessRunError) and error.result == "not-ready"
+
+    def _harness_failed(self, opener, built: Any = None, again=None):
+        """The failure of a harness step in the person's words; with `built` and `again`, a missing root readiness is
+        offered for setup first (_harness_ready), and `again()` runs the step once more afterwards."""
         def failed(error: BaseException) -> bool:
             self.following = None
             self._fill_runs()
+            if built is not None and again is not None and self._not_ready(error):
+                self._say(self._failed_text(error) or str(error))
+                self._harness_ready(built, opener, then=again)
+                return True
             text = self._failed_text(error)
             if text is not None:
                 self._say(text)
@@ -313,6 +378,7 @@ class HarnessWindow(BoardSteps, QDialog):
                     audit=audit, actor="gui"))
                 self._progress(self._t("harness.started", run=state.run))
             holder["state"] = state
+            holder["run"] = state.run
             self.following = state
             if state.status != "ended":
                 try:
@@ -324,8 +390,8 @@ class HarnessWindow(BoardSteps, QDialog):
             if state.status != "ended":   # Detach: the installer goes on on the board
                 return state, None
             self._progress(self._t("harness.ended", code=state.exit_code))
-            return state, hr.on_board(open_session, lambda shell: hr.collect_report(
-                shell, built, state, state_dir=state_dir, audit=audit, actor="gui"))
+            return state, hr.report_on_board(open_session, built, state, state_dir=state_dir, audit=audit,
+                                             actor="gui", say=self._progress)
 
         def done(result: Any) -> None:
             state, rep = result
@@ -345,7 +411,8 @@ class HarnessWindow(BoardSteps, QDialog):
                 self._say(self._t("harness.detached"))
                 self._fill_runs()
                 return True
-            return self._harness_failed(opener)(error)
+            return self._harness_failed(opener, built, lambda: self._follow_step(
+                built, comp, opener, mode=mode, run=run or holder.get("run", ""), then=then))(error)
 
         what = self._t("harness.running", mode=mode or ("dry run" if run.startswith("dry-") else "run"))
         self._start(what, work, done, failed=failed)
@@ -404,11 +471,11 @@ class HarnessWindow(BoardSteps, QDialog):
             self.txt_report.setPlainText("\n".join(hr.report_lines(state, rep, self.lang)))
             return
         state_dir, audit = self.state_dir, self.audit
-        self._start(self._t("harness.reading"), lambda: hr.on_board(opener[0], lambda shell: hr.collect_report(
-            shell, built, state, state_dir=state_dir, audit=audit, actor="gui")),
+        self._start(self._t("harness.reading"), lambda: hr.report_on_board(
+            opener[0], built, state, state_dir=state_dir, audit=audit, actor="gui", say=self._progress),
             lambda r: (self.txt_report.setPlainText("\n".join(hr.report_lines(state, r, self.lang))),
                        self._fill_runs()),
-            failed=self._harness_failed(opener))
+            failed=self._harness_failed(opener, built, self._on_report))
 
     # --- beside the step: an answer and a stop over a session of their own ------------------------------------------
 

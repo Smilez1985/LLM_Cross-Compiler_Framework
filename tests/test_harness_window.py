@@ -105,3 +105,26 @@ def test_a_no_starts_nothing_and_detach_leaves_the_run_for_re_attach(qapp, windo
     _until(qapp, dialog, "set up for second")
     wait(qapp, dialog, timeout=60)
     assert dialog.output.toPlainText().count("Name of the agent account?") == 1
+
+
+def test_a_missing_readiness_is_offered_and_the_step_goes_on(qapp, window, harness_board, monkeypatch):
+    from orchestrator.gui.bundle_window import BundleWindow
+    from test_harness_run import PASSWORD, _older_rule
+    dialog, built = window
+    _older_rule(harness_board[0].board.root)
+    typed = []
+    monkeypatch.setattr(BundleWindow, "_ask_password", lambda self, intro="": typed.append(intro) or PASSWORD)
+    boxes = Boxes(monkeypatch, "yes")
+    dialog.buttons["btn_harness_dry_run"].click()
+    _until(qapp, dialog, "would install the demo agent")
+    wait(qapp, dialog, timeout=60)
+    text = dialog.output.toPlainText()
+    assert "root readiness for llmcf-install is missing" in text and "Replace the older sudo rule" in text
+    assert "older sudo rule" in text and "replaced" in text and "the harness step goes on" in text
+    questions = boxes.questions()
+    assert len(questions) == 2 and all(q.default_is_no for q in questions) and "root readiness" in questions[1].text
+    assert typed == ["bundle.ready.password_sudo"]
+    assert "A dry run: it brought no account" in dialog.txt_report.toPlainText()
+    rows = [r for r in dialog.audit.rows if r["tool"] == "harness_readiness"]
+    assert [(r["actor"], r["outcome"]) for r in rows] == [("gui", "approved"), ("gui", "set_up")]
+    assert PASSWORD not in repr(dialog.audit.rows)

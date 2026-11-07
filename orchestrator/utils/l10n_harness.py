@@ -70,6 +70,18 @@ TEXTS = {
         "harness.take.done": ("Took in harness {id} at {pin}: {files} files, tree checksum {tree}. Build a bundle with "
                               "the block harness-agent and harness={id} in the Board bundle window."),
         "harness.take.bad_codes": "Exit codes are written CODE=done or CODE=findings, separated by spaces.",
+        "harness.ready.checking": "reading the board's root readiness",
+        "harness.ready.running": "setting up the board's root readiness",
+        "harness.ready.missing": "The board's root readiness for llmcf-install is missing. Its setup does this:",
+        "harness.ready.ask": ("Set up the root readiness of board {board} for bundle {bundle} now, as listed above? The "
+                              "harness runs only through it. It changes only what is missing, as root once; nothing "
+                              "else on the board is changed."),
+        "harness.ready.there": "The board's root readiness is there already; nothing was changed.",
+        "harness.ready.after": "The root readiness is there now; the harness step goes on.",
+        "harness.ready.declined": ("Nothing was set up; the harness cannot run on board {board} until its root "
+                                   "readiness is there."),
+        "harness.ready.cannot": "The board's root readiness cannot be set up here: {reason}",
+        "harness.ready.failed": "{reason}",
     },
     "de": {
         "boards.menu.harness": "Board-Harness...",
@@ -137,5 +149,17 @@ TEXTS = {
                               "Fenster Board-Bündel ein Bündel mit dem Baustein harness-agent und harness={id}."),
         "harness.take.bad_codes": "Rückgabewerte werden als CODE=done oder CODE=findings geschrieben, durch "
                                   "Leerzeichen getrennt.",
+        "harness.ready.checking": "Root-Bereitschaft des Boards wird gelesen",
+        "harness.ready.running": "Root-Bereitschaft des Boards wird eingerichtet",
+        "harness.ready.missing": "Die Root-Bereitschaft des Boards für llmcf-install fehlt. Ihre Einrichtung tut dies:",
+        "harness.ready.ask": ("Die Root-Bereitschaft von Board {board} für das Bündel {bundle} jetzt einrichten, wie "
+                              "oben aufgeführt? Der Harness läuft nur über sie. Sie ändert nur, was fehlt, einmal als "
+                              "root; sonst wird auf dem Board nichts geändert."),
+        "harness.ready.there": "Die Root-Bereitschaft des Boards ist schon da; nichts wurde geändert.",
+        "harness.ready.after": "Die Root-Bereitschaft ist jetzt da; der Harness-Schritt geht weiter.",
+        "harness.ready.declined": ("Nichts wurde eingerichtet; der Harness kann auf Board {board} erst laufen, wenn "
+                                   "seine Root-Bereitschaft da ist."),
+        "harness.ready.cannot": "Die Root-Bereitschaft des Boards kann hier nicht eingerichtet werden: {reason}",
+        "harness.ready.failed": "{reason}",
     },
 }

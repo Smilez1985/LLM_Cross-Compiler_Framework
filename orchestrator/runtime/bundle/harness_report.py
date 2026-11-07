@@ -11,8 +11,15 @@ started, network targets, files it wrote). llmcf never blocks the installer; it 
   notice  a kernel module loaded or built, the boot configuration changed, a system unit added, a port opened on
           loopback, a connection to an address outside the local network
 
+It also says whether the installer brought its own account(s) and service unit(s) (the person's decision: llmcf never
+nests an account or a service of its own around a harness that brings its own): new rows of the account file, and
+unit files it added or wrote in a systemd system folder or /etc/init.d. Only when it brought neither does the report
+say so and point to the roadmap (an own account and service for a harness, only as the person's opt-in); the
+framework sets none up.
+
 The report holds no file contents, only paths, sizes and names; it is the person's to read (and the same text goes to
-the audit log). Codes are fixed words, so GUI, CLI and an AI read the same report.
+the audit log). Codes are fixed words, so GUI, CLI and an AI read the same report. The records are read line by line
+(a trace of a long run can be large): only the lines that differ are ever held in memory.
 """
 
 import ipaddress
@@ -21,7 +28,7 @@ import socket
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 TMP_PLACES = ("/tmp/", "/var/tmp/", "/dev/shm/")
 FIREWALL_OFF = (("ufw", "disable"), ("iptables", "-F"), ("nft", "flush"), ("systemctl", "disable", "nftables"),
@@ -36,6 +43,12 @@ RE_RENAME = re.compile(r'rename(?:at2?)?\((?:AT_FDCWD, )?"([^"]+)", (?:AT_FDCWD,
 RE_UNLINK = re.compile(r'unlink(?:at)?\((?:AT_FDCWD, )?"([^"]+)"')
 RE_CHMOD = re.compile(r'(?:fchmodat\(AT_FDCWD, |chmod\()"([^"]+)", (0[0-7]+)\)')
 RE_ARG = re.compile(r'"((?:[^"\\]|\\.)*)"')
+# A service unit of its own: a unit file directly in a systemd system folder (not a link in a .wants folder), or an
+# init script (a board without systemd).
+RE_UNIT = re.compile(r"/systemd/system/([^/]+\.(?:service|timer|socket|path|mount|automount|target))$|"
+                     r"/etc/init\.d/([^/.][^/]*)$")
+# What the installer brought of its own: both, accounts, units or neither (fixed words for the AI's view).
+BRINGS = ("both", "accounts", "units", "neither")
 
 
 @dataclass
@@ -63,11 +76,19 @@ class HarnessReport:
     programs: Dict[str, int] = field(default_factory=dict)
     network: List[str] = field(default_factory=list)
     written: List[str] = field(default_factory=list)
+    own_units: List[str] = field(default_factory=list)
     flags: List[Flag] = field(default_factory=list)
 
     def flag(self, level: str, code: str, detail: str) -> None:
         if not any(f.code == code and f.detail == detail for f in self.flags):
             self.flags.append(Flag(level, code, detail))
+
+    @property
+    def brings(self) -> str:
+        """Whether the installer brought its own account(s) and service unit(s): both, accounts, units or neither."""
+        if self.accounts_added and self.own_units:
+            return "both"
+        return "accounts" if self.accounts_added else ("units" if self.own_units else "neither")
 
     def as_dict(self) -> dict:
         d = dict(self.__dict__)
@@ -75,22 +96,31 @@ class HarnessReport:
         return d
 
 
-def _lines(path: Path) -> List[str]:
+def _iter_lines(path: Path) -> Iterator[str]:
+    """The non-empty lines of a record, one by one (never the whole file in memory)."""
     try:
-        return [ln for ln in path.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()]
+        with open(path, "r", encoding="utf-8", errors="replace", newline="") as fh:
+            for ln in fh:
+                ln = ln.rstrip("\r\n")
+                if ln.strip():
+                    yield ln
     except OSError:
-        return []
+        return
+
+
+def _first(path: Path) -> Optional[str]:
+    return next(_iter_lines(path), None)
 
 
 def _int(path: Path) -> Optional[int]:
-    lines = _lines(path)
+    line = _first(path)
     try:
-        return int(lines[0]) if lines else None
+        return int(line) if line is not None else None
     except ValueError:
         return None
 
 
-def _packages(lines: List[str]) -> Dict[str, str]:
+def _packages(lines: Iterator[str]) -> Dict[str, str]:
     out = {}
     for ln in lines:
         name, _, version = ln.partition("\t")
@@ -98,7 +128,7 @@ def _packages(lines: List[str]) -> Dict[str, str]:
     return out
 
 
-def _files(lines: List[str]) -> Dict[str, Tuple[str, str, str]]:
+def _files(lines: Iterator[str]) -> Dict[str, Tuple[str, str, str]]:
     out = {}
     for ln in lines:
         parts = ln.rsplit("|", 3)
@@ -142,32 +172,32 @@ def read_report(folder: Path, exit_codes: Optional[Dict[int, str]] = None, mode:
     exit_codes = exit_codes or {0: "done"}
     code = _int(folder / "exit_code")
     started, ended = _int(folder / "started"), _int(folder / "ended")
-    watch = (_lines(folder / "watch") or ["compare"])[0]
+    watch = _first(folder / "watch") or "compare"
     rep = HarnessReport(mode=mode, watch=watch, exit_code=code, outcome=_outcome(code, exit_codes),
                         seconds=(ended - started) if started is not None and ended is not None else None)
 
     before, after = folder / "before", folder / "after"
-    pb, pa = _packages(_lines(before / "packages.txt")), _packages(_lines(after / "packages.txt"))
+    pb, pa = _packages(_iter_lines(before / "packages.txt")), _packages(_iter_lines(after / "packages.txt"))
     rep.packages_added = sorted(p for p in pa if p not in pb)
     rep.packages_removed = sorted(p for p in pb if p not in pa)
     rep.packages_changed = sorted(p for p in pa if p in pb and pa[p] != pb[p])
 
-    ab = set(_lines(before / "accounts.txt"))
-    for row in sorted(set(_lines(after / "accounts.txt")) - ab):
+    ab = set(_iter_lines(before / "accounts.txt"))
+    for row in sorted(set(_iter_lines(after / "accounts.txt")) - ab):
         name, _, rest = row.partition(":")
         uid = rest.split(":", 1)[0]
         rep.accounts_added.append(name)
         if uid == "0":
             rep.flag("warn", "account_uid0", name)
 
-    for row in sorted(set(_lines(after / "ports.txt")) - set(_lines(before / "ports.txt"))):
+    for row in sorted(set(_iter_lines(after / "ports.txt")) - set(_iter_lines(before / "ports.txt"))):
         kind, _, hexaddr = row.partition(" ")
         label = port_label(kind, hexaddr)
         rep.ports_added.append(label)
         open_all = hexaddr.startswith("00000000:") or hexaddr.startswith("00000000000000000000000000000000:")
         rep.flag("warn" if open_all else "notice", "port_every_address" if open_all else "port_opened", label)
 
-    fb, fa = _files(_lines(before / "files.txt")), _files(_lines(after / "files.txt"))
+    fb, fa = _files(_iter_lines(before / "files.txt")), _files(_iter_lines(after / "files.txt"))
     rep.files_added = sorted(p for p in fa if p not in fb)
     rep.files_removed = sorted(p for p in fb if p not in fa)
     rep.files_changed = sorted(p for p in fa if p in fb and fa[p] != fb[p])
@@ -175,8 +205,20 @@ def read_report(folder: Path, exit_codes: Optional[Dict[int, str]] = None, mode:
         _path_flags(rep, p, fa[p][2])
 
     if watch == "strace":
-        _read_trace(rep, _lines(folder / "trace.txt"))
+        _read_trace(rep, _iter_lines(folder / "trace.txt"))
+    rep.own_units = own_units(rep.files_added + rep.written)
     return rep
+
+
+def own_units(paths: List[str]) -> List[str]:
+    """The names of the service units the installer brought (files it added or wrote: a unit file in a systemd
+    system folder, or an init script), each once, sorted."""
+    names = set()
+    for path in paths:
+        m = RE_UNIT.search(path)
+        if m:
+            names.add(m.group(1) or m.group(2))
+    return sorted(names)
 
 
 def _path_flags(rep: HarnessReport, path: str, mode: Optional[str] = None) -> None:
@@ -202,8 +244,9 @@ def _setid(mode: str) -> bool:
         return False
 
 
-def _read_trace(rep: HarnessReport, lines: List[str]) -> None:
+def _read_trace(rep: HarnessReport, lines: Iterator[str]) -> None:
     downloaded: Set[str] = set()
+    written: Set[str] = set(rep.written)   # a long trace writes many paths: a set to look them up
     for ln in lines:
         m = RE_EXECVE.search(ln)
         if m and ln.rstrip().endswith("= 0"):
@@ -238,7 +281,8 @@ def _read_trace(rep: HarnessReport, lines: List[str]) -> None:
         if m and any(f in m.group(2) for f in ("O_WRONLY", "O_RDWR", "O_CREAT", "O_TRUNC", "O_APPEND")) \
                 and "= -1" not in ln:
             path = m.group(1)
-            if path not in rep.written and not path.startswith(("/dev/", "/proc/")):
+            if path not in written and not path.startswith(("/dev/", "/proc/")):
+                written.add(path)
                 rep.written.append(path)
                 _path_flags(rep, path)
             continue
@@ -249,7 +293,8 @@ def _read_trace(rep: HarnessReport, lines: List[str]) -> None:
             continue
         m = RE_RENAME.search(ln)
         if m and "= -1" not in ln:
-            if m.group(2) not in rep.written:
+            if m.group(2) not in written:
+                written.add(m.group(2))
                 rep.written.append(m.group(2))
                 _path_flags(rep, m.group(2))
 
@@ -268,6 +313,17 @@ TEXT = {
         "counts": "Packages: {pa} added, {pr} removed, {pc} changed. Accounts added: {acc}. Files: {fa} added, "
                   "{fc} changed, {fr} removed.",
         "net": "Network targets: {net}.", "none": "none",
+        "own_both": "The installer brought its own accounts ({accounts}) and its own service units ({units}): the "
+                    "framework adds no account and no service of its own for this harness.",
+        "own_accounts": "The installer brought its own accounts ({accounts}) and no service unit: the framework adds "
+                        "no account and no service of its own for this harness.",
+        "own_units": "The installer brought its own service units ({units}) and no account: the framework adds no "
+                     "account and no service of its own for this harness.",
+        "own_neither": "The installer brought neither an account nor a service unit of its own. The framework sets "
+                       "none up now: an own account and service for a harness are a later step of the roadmap (the "
+                       "harness row), and only as your opt-in.",
+        "own_dry": "A dry run: it brought no account and no service unit of its own (the run shows what the installer "
+                   "brings).",
     },
     "de": {
         "done": "fertig", "findings": "fertig mit Befunden", "failed": "fehlgeschlagen",
@@ -283,6 +339,17 @@ TEXT = {
         "counts": "Pakete: {pa} neu, {pr} entfernt, {pc} geändert. Neue Konten: {acc}. Dateien: {fa} neu, "
                   "{fc} geändert, {fr} entfernt.",
         "net": "Netzziele: {net}.", "none": "keine",
+        "own_both": "Der Installer hat eigene Konten ({accounts}) und eigene Service-Units ({units}) mitgebracht: "
+                    "Das Framework legt für diesen Harness kein eigenes Konto und keinen eigenen Dienst an.",
+        "own_accounts": "Der Installer hat eigene Konten ({accounts}) und keine Service-Unit mitgebracht: Das "
+                        "Framework legt für diesen Harness kein eigenes Konto und keinen eigenen Dienst an.",
+        "own_units": "Der Installer hat eigene Service-Units ({units}) und kein Konto mitgebracht: Das Framework legt "
+                     "für diesen Harness kein eigenes Konto und keinen eigenen Dienst an.",
+        "own_neither": "Der Installer hat weder ein Konto noch eine Service-Unit mitgebracht. Das Framework legt jetzt "
+                       "keines an: Ein eigenes Konto und ein eigener Dienst für einen Harness sind ein späterer "
+                       "Schritt der Roadmap (die Harness-Zeile), und nur als dein Opt-in.",
+        "own_dry": "Ein Probelauf: Er hat kein eigenes Konto und keine eigene Service-Unit mitgebracht (der Lauf "
+                   "zeigt, was der Installer mitbringt).",
     },
 }
 
@@ -297,6 +364,9 @@ def render(rep: HarnessReport, lang: str = "en") -> str:
                                 fc=len(rep.files_changed), fr=len(rep.files_removed))]
     if rep.watch == "strace":
         lines.append(t["net"].format(net=", ".join(rep.network[:20]) or t["none"]))
+    brings = rep.brings
+    lines.append(t["own_dry"] if brings == "neither" and rep.mode == "dry" else
+                 t[f"own_{brings}"].format(accounts=", ".join(rep.accounts_added), units=", ".join(rep.own_units)))
     for level in ("warn", "notice"):
         for f in (f for f in rep.flags if f.level == level):
             lines.append(f"{'!' if level == 'warn' else '-'} {t[f.code]}: {f.detail}")

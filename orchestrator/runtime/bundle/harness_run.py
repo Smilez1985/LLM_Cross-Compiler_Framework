@@ -19,9 +19,18 @@ bundle-harness, sudo -n through the board's root readiness only, never a passwor
   detached through setsid);
 - answer_run: one line of the person's answer on stdin (never an argument, never kept, never in the audit log);
 - stop_run: the person's cancel; the watch still records the end;
-- collect_report: harness-records once the run ended (only the lines that differ before and after, the trace lines the
-  report reads), written into records/ beside the log, read by harness_report.read_report with the exit codes the
-  harness names, kept as report.json.
+- collect_report: the run's records once it ended, nothing cut off: harness-records' index (each record file with its
+  size and sha256: only the lines that differ before and after, the trace lines the report reads), the disk rule on
+  this computer (Core/disk_plan.room) for what is still to come, then each file part by part (at most PART_SIZE, base64,
+  each part with its own sha256) into records/ beside the log; a dropped connection reads on from the last good offset
+  (report_on_board opens a new session; the parts already here stay); every file's sha256 is checked at the end, and
+  only then harness_report.read_report makes the report (with the exit codes the harness names), kept as report.json.
+  The report says whether the installer brought its own account(s) and service unit(s): the framework never nests an
+  account or a service of its own around them;
+- the board's root readiness, when a harness step finds it missing: ready_plan names what will be done, the person
+  says yes in the CLI or the window, and ready_setup carries out the one root-readiness setup (bundle/readiness.py),
+  idempotently (a second time changes nothing and says so; an older sudo rule is replaced, a current one left), with
+  audit rows for the approval and the result. An AI never sets it up: both refuse any actor but the person's channels.
 
 Only the person starts, answers or stops a run (the CLI and the Board harness window); an AI never answers an
 installer question and never starts a run: over MCP it reads only `scrubbed` (outcome, counts and flag codes: no
@@ -30,12 +39,14 @@ person as actor; never an answer).
 """
 
 import base64
+import hashlib
 import json
+import os
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from orchestrator.remote import gate
 from orchestrator.runtime.bundle import gate_ops  # noqa: F401 - defines bundle-harness
@@ -51,11 +62,16 @@ RECORDS_DIR = "records"
 REPORT_FILE = "report.json"
 READ_TIMEOUT = 90.0          # one harness-read: the board waits up to 15 s for output, a slow board answers later
 RECORDS_TIMEOUT = 600.0
-RECORDS_LIMIT = 32 * 1024 * 1024
+INDEX_FILE = "index.json"          # in records/: the board's index the parts here belong to
+PART_SIZE = 4 * 1024 * 1024        # one part of a record (llmcf-install sends at most this much)
+PART_LIMIT = PART_SIZE * 4 // 3 + 64 * 1024   # what the host reads of one part's answer: its base64 and its lines
+PERSON_ACTORS = ("cli", "gui")
 MAX_ANSWER = 4096
 RECONNECTS = 5
 RE_RUN = re.compile(r"[a-z0-9][a-z0-9_-]{0,47}", re.ASCII)
 _RE_STATUS = re.compile(r"status=(running|ended)(?: code=(\d{1,3}))? offset=(\d{1,15}) size=(\d{1,10})$", re.ASCII)
+_RE_RECORD = re.compile(r"record (\d{1,2}) (\S{1,64}) (\d{1,15}) ([0-9a-f]{64})", re.ASCII)
+_RE_PART = re.compile(r"part (\d{1,2}) offset=(\d{1,15}) size=(\d{1,8}) sha256=([0-9a-f]{64})", re.ASCII)
 _RECORD_NAMES = {"exit_code", "started", "ended", "watch", "terminal", "trace.txt"} | {
     f"{side}/{name}" for side in ("before", "after") for name in ("packages.txt", "accounts.txt", "ports.txt",
                                                                     "files.txt")}
@@ -70,6 +86,16 @@ DRY_QUESTION = ("Start the dry run of harness {harness} on board {board} (its ow
 STOP_QUESTION = "Stop the installer of harness {harness} on board {board} now? What it did so far stays."
 NOT_READY_NEXT = ("Set up the board's root readiness for bundle {bundle} first (its Prepare root step), then apply "
                   "the bundle's root actions, which place the harness.")
+READY_QUESTION = ("Set up the root readiness of board {board} for bundle {bundle} now, as listed above? The harness "
+                  "runs only through it. It changes only what is missing, as root once; nothing else on the board is "
+                  "changed.")
+READY_THERE = "The board's root readiness is there already; nothing was changed."
+READY_DECLINED = "Nothing was set up; the harness cannot run on board {board} until its root readiness is there."
+READY_AFTER = "The root readiness is there now; the harness step goes on."
+PERSON_ONLY = ("Only the person sets up a board's root readiness, after reading what it changes; an AI never does "
+               "(the AI's tools only read harness reports).")
+PERSON_ONLY_NEXT = ("Tell the person that the board's root readiness is missing: they set it up themselves in the Board "
+                    "harness window or at the command line, which names what will be done and asks them first.")
 
 
 class HarnessRunError(RuntimeError):
@@ -98,6 +124,9 @@ class RunState:
     ended: str = ""
     outcome: str = ""                 # done, findings or failed, once the report was read
     flags: Dict[str, int] = field(default_factory=dict)
+    own_accounts: int = 0             # the accounts the installer brought itself (a count, never a name)
+    own_units: int = 0                # the service units it brought itself
+    brings: str = ""                  # both, accounts, units or neither (harness_report.BRINGS), once read
 
     @property
     def key(self) -> str:
@@ -306,49 +335,145 @@ def stop_run(shell: Any, built: Any, state: RunState, *, state_dir: Path, audit:
     save_state(state_dir, state)
 
 
-def parse_records(text: str, folder: Path) -> bool:
-    """Writes what harness-records sent into `folder` (the watch's layout); True when the board cut a long record."""
-    files: Dict[str, List[str]] = {}
-    current: Optional[str] = None
-    cut = False
-    for line in (text or "").splitlines():
-        if line.startswith("llmcf-harness: file "):
-            name = line[len("llmcf-harness: file "):].strip()
-            current = name if name in _RECORD_NAMES else None
-            if current:
-                files.setdefault(current, [])
-        elif line == "llmcf-harness: truncated":
-            cut = True
-        elif line.startswith("> ") and current:
-            files[current].append(line[2:])
-        elif line == ">" and current:
-            files[current].append("")
-    for name, lines in files.items():
-        path = Path(folder) / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("".join(f"{ln}\n" for ln in lines), encoding="utf-8")
-    return cut
+@dataclass(frozen=True)
+class RecordFile:
+    """One record file of harness-records' index: its number (a part call names it), name, size and sha256."""
+    number: int
+    name: str
+    size: int
+    sha256: str
 
 
-def collect_report(shell: Any, built: Any, state: RunState, *, state_dir: Path, audit: Any = None,
-                   actor: str = "cli") -> HarnessReport:
-    """The run's records read back once it ended, its report made by the exit codes the harness names, kept as
-    report.json beside the log; the report's summary goes to the audit log."""
-    comp = harness_component(built, state.component)
-    _report, out = _call(shell, built, "harness-records", state.component, state.run, again=True,
-                         timeout=RECORDS_TIMEOUT, limit=RECORDS_LIMIT)
+def records_index(shell: Any, built: Any, state: RunState) -> List[RecordFile]:
+    """harness-records' index: every record file the report reads, with its size and sha256 (refused while the
+    installer still runs)."""
+    _report, out = _call(shell, built, "harness-records", state.component, state.run, "index", again=True,
+                         timeout=RECORDS_TIMEOUT)
+    files: List[RecordFile] = []
+    for line in out.splitlines():
+        if line.startswith("llmcf-harness: record "):
+            m = _RE_RECORD.fullmatch(line[len("llmcf-harness: "):].strip())
+            if m is None or m.group(2) not in _RECORD_NAMES:
+                raise HarnessRunError("the board's index of the records did not read")
+            files.append(RecordFile(int(m.group(1)), m.group(2), int(m.group(3)), m.group(4)))
+    if not files or len({f.name for f in files}) != len(files) or len({f.number for f in files}) != len(files):
+        raise HarnessRunError("the board's index of the records did not read")
+    return files
+
+
+def _stored_index(folder: Path) -> Optional[Dict[str, Any]]:
+    try:
+        data = json.loads((folder / INDEX_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) and isinstance(data.get("files"), dict) else None
+
+
+def _save_index(folder: Path, files: List[RecordFile], complete: bool) -> None:
+    from orchestrator.utils.atomic import write_private
+    write_private(folder / INDEX_FILE, json.dumps({"complete": complete, "files": {
+        f.name: {"size": f.size, "sha256": f.sha256} for f in files}}, indent=2, sort_keys=True))
+
+
+def _size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
+def _part(shell: Any, built: Any, state: RunState, rec: RecordFile, offset: int, length: int) -> bytes:
+    """One part of a record from the board, checked: its record, its offset, its length and its own sha256."""
+    _report, out = _call(shell, built, "harness-records", state.component, state.run,
+                         f"{rec.number}.{offset}.{length}", again=True, timeout=RECORDS_TIMEOUT, limit=PART_LIMIT)
+    head = data = None
+    for line in out.splitlines():
+        if line.startswith("llmcf-harness: part "):
+            head = _RE_PART.fullmatch(line[len("llmcf-harness: "):].strip())
+        elif line.startswith("llmcf-harness: data"):
+            data = line[len("llmcf-harness: data"):].strip()
+    if head is None:
+        raise HarnessRunError("the board's answer to reading a part of the records did not read")
+    try:
+        chunk = base64.b64decode(data or "", validate=True)
+    except ValueError:
+        raise HarnessRunError("a part of the records came back damaged; read the report again") from None
+    if (int(head.group(1)), int(head.group(2))) != (rec.number, offset) or not chunk or \
+            len(chunk) != int(head.group(3)) or len(chunk) > length or \
+            hashlib.sha256(chunk).hexdigest() != head.group(4):
+        raise HarnessRunError("a part of the records came back damaged; read the report again")
+    return chunk
+
+
+def fetch_records(shell: Any, built: Any, state: RunState, *, state_dir: Path, part_size: int = PART_SIZE,
+                  disk_usage: Any = None) -> Path:
+    """The run's records into records/ beside the log, nothing cut off: the board's index, the disk rule for what is
+    still to come, every file part by part from what is here already (a dropped connection reads on from the last
+    good offset), every file's sha256 checked at the end. Returns the folder once every file is whole."""
+    files = records_index(shell, built, state)
     folder = run_folder(state_dir, state) / RECORDS_DIR
-    if folder.exists():
+    stored = _stored_index(folder)
+    if folder.exists() and stored is None:
+        # records of another layout (or a half-written index): fetched anew
         from orchestrator.utils.atomic import remove_tree
         remove_tree(folder, label="the harness run's earlier records")
     folder.mkdir(parents=True, exist_ok=True)
-    cut = parse_records(out, folder)
+    known = (stored or {}).get("files", {})
+    for rec in files:
+        path = folder / rec.name
+        if known.get(rec.name) != {"size": rec.size, "sha256": rec.sha256} or _size(path) > rec.size:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "wb"):   # another record than the one these bytes began: from its start again
+                pass
+    _save_index(folder, files, complete=False)
+    need = sum(max(0, rec.size - _size(folder / rec.name)) for rec in files)
+    if need:
+        from orchestrator.Core.disk_plan import ReservationLedger, refusal, room
+        try:
+            check = room(folder, need, label="harness records", ledger=ReservationLedger(Path(state_dir)),
+                         disk_usage=disk_usage)
+        except OSError:
+            check = None
+        refused = refusal([check], "the harness run's records") if check is not None else None
+        if refused is not None:
+            raise HarnessRunError(str(refused), "Free space on this computer, then read the report again: what "
+                                                "arrived stays and the rest is read on from there.", "disk")
+    for rec in files:
+        path = folder / rec.name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        have = _size(path)
+        with open(path, "ab") as fh:
+            while have < rec.size:
+                chunk = _part(shell, built, state, rec, have, min(part_size, rec.size - have))
+                fh.write(chunk)
+                fh.flush()
+                os.fsync(fh.fileno())
+                have += len(chunk)
+    from orchestrator.utils.helpers import sha256_file
+    for rec in files:
+        if sha256_file(folder / rec.name) != rec.sha256:
+            with open(folder / rec.name, "wb"):
+                pass
+            _save_index(folder, files, complete=False)
+            raise HarnessRunError(f"the record {rec.name} did not arrive whole (its sha256 differs); read the report "
+                                  "again: it is read anew")
+    _save_index(folder, files, complete=True)
+    return folder
+
+
+def collect_report(shell: Any, built: Any, state: RunState, *, state_dir: Path, audit: Any = None,
+                   actor: str = "cli", part_size: int = PART_SIZE, disk_usage: Any = None) -> HarnessReport:
+    """The run's records read back once it ended (fetch_records: in parts, nothing cut off, every file's sha256
+    checked), its report made by the exit codes the harness names, kept as report.json beside the log; the report's
+    summary goes to the audit log."""
+    comp = harness_component(built, state.component)
+    folder = fetch_records(shell, built, state, state_dir=state_dir, part_size=part_size, disk_usage=disk_usage)
     rep = read_report(folder, comp.harness.outcomes(), "dry" if state.mode == "dry" else "run")
     state.status = "ended"
     state.exit_code, state.outcome = rep.exit_code, rep.outcome
     state.flags = {level: sum(1 for f in rep.flags if f.level == level) for level in ("warn", "notice")}
+    state.own_accounts, state.own_units, state.brings = len(rep.accounts_added), len(rep.own_units), rep.brings
     data = rep.as_dict()
-    data["truncated"] = cut
     from orchestrator.utils.atomic import write_private
     write_private(run_folder(state_dir, state) / REPORT_FILE, json.dumps(data, indent=2, sort_keys=True))
     save_state(state_dir, state)
@@ -356,9 +481,34 @@ def collect_report(shell: Any, built: Any, state: RunState, *, state_dir: Path, 
     _audit(audit, actor, state, rep.outcome,
            f"harness {state.harness} {state.mode}: {rep.outcome} (exit code {rep.exit_code}); packages "
            f"+{len(rep.packages_added)}/-{len(rep.packages_removed)}, accounts +{len(rep.accounts_added)}, ports "
-           f"+{len(rep.ports_added)}, files +{len(rep.files_added)}/~{len(rep.files_changed)}"
+           f"+{len(rep.ports_added)}, files +{len(rep.files_added)}/~{len(rep.files_changed)}; brought its own "
+           f"accounts {len(rep.accounts_added)}, service units {len(rep.own_units)} ({rep.brings})"
            + (f"; flags {', '.join(codes)}" if codes else ""))
     return rep
+
+
+def report_on_board(open_session: Callable[[], Any], built: Any, state: RunState, *, state_dir: Path,
+                    audit: Any = None, actor: str = "cli", say: Callable[[str], None] = lambda _m: None,
+                    reconnects: int = RECONNECTS, part_size: int = PART_SIZE) -> HarnessReport:
+    """collect_report over the caller's login: when the connection drops while the records come (RemoteError), a new
+    session reads on from the last good offset (the parts already here stay), up to `reconnects` times."""
+    from orchestrator.runtime.device.remote import RemoteError, RemoteShell
+    tries = 0
+    while True:
+        session = open_session()
+        try:
+            return collect_report(RemoteShell(session), built, state, state_dir=state_dir, audit=audit, actor=actor,
+                                  part_size=part_size)
+        except RemoteError as e:
+            if tries >= reconnects or getattr(e, "kind", "") == "stopped":
+                raise
+            tries += 1
+            say(f"the connection to the board dropped while the records came; reading on from what arrived "
+                f"({tries}/{reconnects})")
+        finally:
+            close = getattr(session, "close", None)
+            if callable(close):
+                close()
 
 
 def stored_report(state_dir: Path, state: RunState) -> Optional[HarnessReport]:
@@ -369,7 +519,6 @@ def stored_report(state_dir: Path, state: RunState) -> Optional[HarnessReport]:
     except (OSError, ValueError):
         return None
     flags = [Flag(**f) for f in data.pop("flags", []) if isinstance(f, dict)]
-    data.pop("truncated", None)
     try:
         rep = HarnessReport(**{k: v for k, v in data.items() if k in HarnessReport.__dataclass_fields__})
     except TypeError:
@@ -393,6 +542,7 @@ def scrubbed(state: RunState, rep: Optional[HarnessReport]) -> Dict[str, Any]:
                     "files": {"added": len(rep.files_added), "changed": len(rep.files_changed),
                               "removed": len(rep.files_removed)},
                     "programs_started": sum(rep.programs.values()), "network_targets": len(rep.network),
+                    "own": {"accounts": len(rep.accounts_added), "units": len(rep.own_units), "brings": rep.brings},
                     "flags": [{"level": f.level, "code": f.code} for f in rep.flags]})
     return out
 
@@ -435,6 +585,76 @@ def on_board(open_session: Callable[[], Any], step: Callable[[Any], Any]) -> Any
             close()
 
 
+# --- the board's root readiness, when a harness step finds it missing ----------------------------------------------------
+
+def _person(actor: str) -> None:
+    """Only the person's channels (the CLI and the Board harness window) set a board's root readiness up."""
+    if actor not in PERSON_ACTORS:
+        raise HarnessRunError(PERSON_ONLY, PERSON_ONLY_NEXT, "person-only")
+
+
+@dataclass(frozen=True)
+class ReadyPlan:
+    """What the board's root readiness needs (readiness.Readiness), what the setup will do in the person's words,
+    and why it cannot run here ("" when it can)."""
+    found: Any
+    lines: Tuple[str, ...]
+    problem: str = ""
+
+    @property
+    def ready(self) -> bool:
+        return bool(self.found.ready)
+
+
+def ready_plan(open_session: Callable[[], Any], built: Any, *, mode: Any = "private", actor: str = "cli") -> ReadyPlan:
+    """The board's root readiness read without root (readiness.check through service.readiness_on_board), and the plan
+    of only what is missing (readiness.plan_lines), before the person's question."""
+    _person(actor)
+    from orchestrator.runtime.bundle import readiness, service
+    found = service.readiness_on_board(open_session, built)
+    version = str((getattr(built, "root_helper", None) or {}).get("version", ""))
+    problem = "" if found.ready else (found.problem(mode) or (readiness.REASONS["no-signer"]
+                                                                if "signers" in found.missing() else ""))
+    return ReadyPlan(found, tuple(readiness.plan_lines(found, version=version, mode=mode)), problem)
+
+
+def _audit_ready(audit: Any, actor: str, built: Any, plan: ReadyPlan, outcome: str, detail: str) -> None:
+    if audit is None or not callable(getattr(audit, "record", None)):
+        return
+    try:
+        audit.record(actor, "harness_readiness", "person", "approved" if outcome != "declined" else "declined",
+                     outcome, approved=outcome != "declined",
+                     arguments={"bundle": built.bundle_id, "device": built.manifest.board.device_id,
+                                "missing": plan.found.missing()},
+                     detail=detail[:900])
+    except Exception:  # noqa: BLE001 - the audit log's own failure never names a path here
+        pass
+
+
+def ready_setup(open_session: Callable[[], Any], built: Any, plan: ReadyPlan, *, approved: bool,
+                mode: Any = "private", password: str = "", audit: Any = None, actor: str = "cli"):
+    """After the person's answer to READY_QUESTION: the one root-readiness setup (service.ready_setup_on_board, only
+    what is missing), with an audit row for the approval and one for the result. Idempotent: a board whose readiness
+    is there changes nothing (SetupDone ok, nothing changed; READY_THERE). None when the person said no; HarnessRunError
+    when it cannot run here or an AI asked (never the person's password in a row)."""
+    _person(actor)
+    from orchestrator.runtime.bundle import readiness, service
+    if plan.ready:
+        _audit_ready(audit, actor, built, plan, "unchanged", READY_THERE)
+        return readiness.SetupDone(True)
+    if plan.problem:
+        raise HarnessRunError(f"The board's root readiness cannot be set up here: {plan.problem}.",
+                              readiness.declined_text(built.bundle_id, built.manifest.board.device_id, plan.found))
+    _audit_ready(audit, actor, built, plan, "approved" if approved else "declined",
+                 "the person's answer to setting up the board's root readiness for a harness run: "
+                 + ("yes" if approved else "no") + "; missing: " + ", ".join(plan.found.missing()))
+    if not approved:
+        return None
+    done = service.ready_setup_on_board(open_session, built, plan.found, mode=mode, password=password)
+    _audit_ready(audit, actor, built, plan, "set_up" if done.ok else "failed", done.text())
+    return done
+
+
 _RE_ESCAPES = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()*+][0-9A-Za-z]|\x1b[@-_]?")
 _RE_CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
@@ -457,7 +677,9 @@ def report_lines(state: RunState, rep: Optional[HarnessReport], lang: str = "en"
     return [head] + (render(rep, lang).splitlines() if rep is not None else [])
 
 
-__all__ = ["DRY_QUESTION", "Follower", "HarnessRunError", "NOT_READY_NEXT", "RUN_QUESTION", "RunState",
-           "STOP_QUESTION", "answer_run", "plain_output", "collect_report", "follow_on_board", "harness_component", "list_runs",
-           "load_state", "on_board", "parse_records", "report_lines", "run_folder", "run_name", "save_state",
-           "scrubbed", "start_run", "stop_run", "stored_report"]
+__all__ = ["DRY_QUESTION", "Follower", "HarnessRunError", "NOT_READY_NEXT", "PART_SIZE", "PERSON_ONLY",
+           "READY_AFTER", "READY_DECLINED", "READY_QUESTION", "READY_THERE", "RUN_QUESTION", "ReadyPlan", "RecordFile",
+           "RunState", "STOP_QUESTION", "answer_run", "collect_report", "fetch_records", "follow_on_board",
+           "harness_component", "list_runs", "load_state", "on_board", "plain_output", "ready_plan", "ready_setup",
+           "records_index", "report_lines", "report_on_board", "run_folder", "run_name", "save_state", "scrubbed",
+           "start_run", "stop_run", "stored_report"]

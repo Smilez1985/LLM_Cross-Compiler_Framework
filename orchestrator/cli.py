@@ -7878,7 +7878,7 @@ def _bundle_unprepare(ctx: FrameworkContext, built, opener) -> None:
     mode = _framework_mode(ctx)
     try:
         found = service.readiness_on_board(open_session, built)
-        paths = [p for p, there in ((readiness.DROPIN, found.dropin == "yes"),
+        paths = [p for p, there in ((readiness.DROPIN, found.dropin in ("yes", "old")),
                                     (readiness.FIXED_HELPER, found.helper != "absent")) if there]
         if not paths:
             console.print("The board holds no root readiness of the framework; nothing to remove.")
@@ -8198,6 +8198,73 @@ def _harness_bundle(ctx: FrameworkContext, bundle_id: str, component: Optional[s
     return built, comp, opener, _device_audit(ctx, _state_dir(ctx))
 
 
+def _harness_ready(ctx: FrameworkContext, built, opener) -> None:
+    """The board's root readiness when a harness step found it missing (harness_run.ready_plan and ready_setup, the
+    very steps of the Board harness window): what its setup will do, the person's question ("No" is the default), the
+    one-time password when one is needed, then the one root-readiness setup, only what is missing (an older sudo rule
+    is replaced, a current one left; a second time changes nothing and says so). Audited: the answer and the result.
+    Returns once the readiness is there; exits 1 otherwise. Only the person runs this, never an AI."""
+    from orchestrator.runtime.bundle import harness_run as hr
+    from orchestrator.runtime.bundle.generator import BundleError
+    from orchestrator.runtime.device.remote import RemoteError
+    open_session, host, port, label, _device_id = opener
+    mode = _framework_mode(ctx)
+    audit = _device_audit(ctx, _state_dir(ctx))
+    try:
+        plan = hr.ready_plan(open_session, built, mode=mode, actor="cli")
+        if plan.ready:
+            hr.ready_setup(open_session, built, plan, approved=True, mode=mode, audit=audit, actor="cli")
+            console.print(hr.READY_THERE)
+            return
+        console.print("The board's root readiness for llmcf-install is missing. Its setup does this:")
+        for line in plan.lines:
+            console.print(f"  {escape(line)}")
+        approved = False
+        if not plan.problem:
+            approved = _interactive() and click.confirm(hr.READY_QUESTION.format(board=label, bundle=built.bundle_id),
+                                                        default=False)
+        password = _bundle_ready_password(ctx, plan.found, mode) if approved else ""
+        done = hr.ready_setup(open_session, built, plan, approved=approved, mode=mode, password=password, audit=audit,
+                              actor="cli")
+    except hr.HarnessRunError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        if e.next_step:
+            console.print(escape(e.next_step))
+        sys.exit(1)
+    except BundleError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    except RemoteError as e:
+        _board_step_failed(ctx, e, host, port)
+    if done is None:
+        console.print(f"[red]{escape(hr.READY_DECLINED.format(board=label))}[/red]"
+                      + ("" if _interactive() else " (the question needs your answer at a terminal)"))
+        sys.exit(1)
+    console.print(escape(done.text()) if done.ok else f"[red]{escape(done.text())}[/red]")
+    if not done.ok:
+        sys.exit(1)
+
+
+def _harness_step(ctx: FrameworkContext, built, opener, step):
+    """`step()` (a harness step over its own session); when the board's root readiness is missing, the person is asked
+    to set it up (_harness_ready) and the step runs once more. Any other failure: _harness_failed."""
+    from orchestrator.runtime.bundle import harness_run as hr
+    try:
+        return step()
+    except hr.HarnessRunError as e:
+        if e.result != "not-ready":
+            _harness_failed(ctx, e, opener)
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+    except Exception as e:  # noqa: BLE001 - _harness_failed says why
+        _harness_failed(ctx, e, opener)
+    _harness_ready(ctx, built, opener)
+    console.print(hr.READY_AFTER)
+    try:
+        return step()
+    except Exception as e:  # noqa: BLE001 - _harness_failed says why
+        _harness_failed(ctx, e, opener)
+
+
 def _harness_failed(ctx: FrameworkContext, error, opener) -> None:
     """A refused or failed harness step in the person's words, with its next step; exits 1."""
     from orchestrator.runtime.bundle import harness_run as hr
@@ -8267,11 +8334,9 @@ def _harness_follow(ctx: FrameworkContext, built, state, opener, *, answers: boo
 
 def _harness_report(ctx: FrameworkContext, built, state, opener) -> None:
     from orchestrator.runtime.bundle import harness_run as hr
-    try:
-        rep = hr.on_board(opener[0], lambda shell: hr.collect_report(
-            shell, built, state, state_dir=_state_dir(ctx), audit=_device_audit(ctx, _state_dir(ctx))))
-    except Exception as e:  # noqa: BLE001 - _harness_failed says why
-        _harness_failed(ctx, e, opener)
+    rep = _harness_step(ctx, built, opener, lambda: hr.report_on_board(
+        opener[0], built, state, state_dir=_state_dir(ctx), audit=_device_audit(ctx, _state_dir(ctx)),
+        say=lambda m: console.print(f"[yellow]{escape(m)}[/yellow]")))
     for line in hr.report_lines(state, rep):
         console.print(escape(line))
     console.print(f"The installer's whole output: {escape(str(hr.run_folder(_state_dir(ctx), state) / hr.LOG_FILE))}")
@@ -8279,12 +8344,9 @@ def _harness_report(ctx: FrameworkContext, built, state, opener) -> None:
 
 def _harness_start(ctx: FrameworkContext, built, comp, opener, mode: str):
     from orchestrator.runtime.bundle import harness_run as hr
-    try:
-        return hr.on_board(opener[0], lambda shell: hr.start_run(
-            shell, built, comp.id, mode, state_dir=_state_dir(ctx), device_id=built.manifest.board.device_id,
-            audit=_device_audit(ctx, _state_dir(ctx))))
-    except Exception as e:  # noqa: BLE001 - _harness_failed says why
-        _harness_failed(ctx, e, opener)
+    return _harness_step(ctx, built, opener, lambda: hr.on_board(opener[0], lambda shell: hr.start_run(
+        shell, built, comp.id, mode, state_dir=_state_dir(ctx), device_id=built.manifest.board.device_id,
+        audit=_device_audit(ctx, _state_dir(ctx)))))
 
 
 def _harness_dry(ctx: FrameworkContext, built, comp, opener) -> bool:
@@ -8392,10 +8454,8 @@ def bundle_harness_answer(ctx: FrameworkContext, bundle_id: str, run: str, compo
         console.print("[red]An answer is typed by you at a terminal.[/red]")
         sys.exit(1)
     line = click.prompt("Answer", hide_input=hidden, default="", show_default=False)
-    try:
-        hr.on_board(opener[0], lambda shell: hr.answer_run(shell, built, state, line))
-    except Exception as e:  # noqa: BLE001 - _harness_failed says why
-        _harness_failed(ctx, e, opener)
+    _harness_step(ctx, built, opener, lambda: hr.on_board(opener[0], lambda shell: hr.answer_run(shell, built, state,
+                                                                                                  line)))
     console.print("The answer went to the installer.")
 
 
@@ -8414,10 +8474,8 @@ def bundle_harness_stop(ctx: FrameworkContext, bundle_id: str, run: str, compone
                                              default=False)):
         console.print("The installer was not stopped.")
         sys.exit(1)
-    try:
-        hr.on_board(opener[0], lambda shell: hr.stop_run(shell, built, state, state_dir=_state_dir(ctx), audit=audit))
-    except Exception as e:  # noqa: BLE001 - _harness_failed says why
-        _harness_failed(ctx, e, opener)
+    _harness_step(ctx, built, opener, lambda: hr.on_board(opener[0], lambda shell: hr.stop_run(
+        shell, built, state, state_dir=_state_dir(ctx), audit=audit)))
     console.print(f"Stopped. Its report: llm-cli bundle harness report {bundle_id} {run}")
 
 

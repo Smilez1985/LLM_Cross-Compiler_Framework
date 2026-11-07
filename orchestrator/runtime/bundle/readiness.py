@@ -39,7 +39,7 @@ WAYS = ("sudo", "su")
 _WORDS = {
     "sudo": ("yes", "no"), "rootway": ("nopass", "password", "none"), "su": ("yes", "no"),
     "signers": ("root", "none"), "account": ("ok", "bad"), "helper": ("same", "other", "absent", "unsafe"),
-    "dropin": ("yes", "no"), "family": ("debian", "fedora", "suse", "arch", "alpine", "unknown"),
+    "dropin": ("yes", "old", "no"), "family": ("debian", "fedora", "suse", "arch", "alpine", "unknown"),
     "dietpi": ("yes", "no"),
 }
 _MANAGERS = ("apt-get", "dnf", "zypper", "pacman", "apk")
@@ -51,6 +51,8 @@ MISSING_TEXTS = {
     "helper": "llmcf-install is not at its root-owned place " + FIXED_HELPER,
     "helper-update": "llmcf-install at " + FIXED_HELPER + " is not this bundle's (it is updated with the same yes)",
     "dropin": "no sudo rule lets the board account run llmcf-install without a password (" + DROPIN + ")",
+    "dropin-update": "the sudo rule " + DROPIN + " is an older one without the harness actions (it is replaced with "
+                     "the same yes)",
 }
 SIGNERS_HOW = ("pair the board again with its password (a scan of the board with its password, in the CLI or the "
                "GUI) and take the root-owned key line; it puts the framework's signing key in root-owned files")
@@ -140,7 +142,9 @@ class Readiness:
             out.append("helper")
         elif self.helper == "other":
             out.append("helper-update")
-        if self.dropin != "yes":
+        if self.dropin == "old":
+            out.append("dropin-update")
+        elif self.dropin != "yes":
             out.append("dropin")
         return out
 
@@ -209,10 +213,12 @@ def plan_lines(found: Readiness, *, version: str = "", mode: Any = "private") ->
                    "root-owned (0755): copied from the bundle on the board after its signature is checked against "
                    "the root-owned signing key and its sha256 against the one this framework built, and checked "
                    "again in place.")
-    if "dropin" in missing:
-        out.append(f"Write the sudo rule {DROPIN} (root-owned, 0440, checked with visudo -cf before it is moved in): "
+    if "dropin" in missing or "dropin-update" in missing:
+        verb = "Replace the older sudo rule" if "dropin-update" in missing else "Write the sudo rule"
+        out.append(f"{verb} {DROPIN} (root-owned, 0440, checked with visudo -cf before it is moved in): "
                    f"the board account may run only {FIXED_HELPER} with its actions (plan, apply, status, rollback, "
-                   "uninstall, plan-uninstall), without a password; nothing else.")
+                   "uninstall, plan-uninstall, and the harness run's start, read, answer, stop and records), without "
+                   "a password; nothing else.")
     if way == "sudo":
         out.append("Root is reached once through the board account's sudo"
                    + (" without a password." if found.rootway == "nopass" else
@@ -224,21 +230,25 @@ def plan_lines(found: Readiness, *, version: str = "", mode: Any = "private") ->
 
 @dataclass(frozen=True)
 class SetupDone:
-    """What bundle-ready-setup did: `ok`, `reason` (a word of REASONS when not), `changed` (sudo, helper, dropin)."""
+    """What bundle-ready-setup did: `ok`, `reason` (a word of REASONS when not), `changed` (sudo, helper, dropin),
+    `updated` (those of `changed` that replaced an older one: helper, dropin)."""
     ok: bool
     reason: str = ""
     changed: Tuple[str, ...] = ()
+    updated: Tuple[str, ...] = ()
 
     def text(self) -> str:
-        done = ", ".join({"sudo": "sudo installed", "helper": f"llmcf-install put at {FIXED_HELPER}",
-                          "dropin": f"sudo rule {DROPIN} written"}.get(c, c) for c in self.changed)
+        words = {"sudo": "sudo installed", "helper": f"llmcf-install put at {FIXED_HELPER}",
+                 "dropin": f"sudo rule {DROPIN} written"}
+        again = {"helper": f"llmcf-install at {FIXED_HELPER} replaced", "dropin": f"older sudo rule {DROPIN} replaced"}
+        done = ", ".join((again if c in self.updated else words).get(c, c) for c in self.changed)
         if self.ok:
             return "The board's root readiness is set up" + (f" ({done})." if done else " (nothing was missing).")
         return ("The board's root readiness could not be set up: " + REASONS.get(self.reason, REASONS["unknown"])
                 + (f". Done before it stopped: {done}." if done else "."))
 
     def as_dict(self) -> Dict[str, Any]:
-        return {"ok": self.ok, "reason": self.reason, "changed": list(self.changed)}
+        return {"ok": self.ok, "reason": self.reason, "changed": list(self.changed), "updated": list(self.updated)}
 
 
 _CHANGED = ("sudo", "helper", "dropin")
@@ -267,10 +277,12 @@ def setup(run: Callable[..., Any], bundle_id: str, sha256: str, found: Readiness
                  stdin=[(password + "\n").encode("utf-8")], timeout=1800.0)
     words = _words(getattr(result, "out", "") or "", "ready")
     changed = tuple(c for c in words.get("changed", "").split(",") if c in _CHANGED)
+    updated = tuple(c for c in changed if (c == "helper" and found.helper == "other")
+                    or (c == "dropin" and found.dropin == "old"))
     if words.get("ready") == "done":
-        return SetupDone(True, "", changed)
+        return SetupDone(True, "", changed, updated)
     reason = words.get("reason", "unknown")
-    return SetupDone(False, reason if reason in REASONS else "unknown", changed)
+    return SetupDone(False, reason if reason in REASONS else "unknown", changed, updated)
 
 
 @dataclass(frozen=True)

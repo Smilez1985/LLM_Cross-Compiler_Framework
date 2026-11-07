@@ -775,7 +775,7 @@ class BundleWindow(BoardSteps, QDialog):
             return self._show_error(e, address=host, port=port, user=user, device_id=device_id) or True
 
         def checked(found: Any) -> None:
-            paths = [p for p, there in ((readiness.DROPIN, found.dropin == "yes"),
+            paths = [p for p, there in ((readiness.DROPIN, found.dropin in ("yes", "old")),
                                         (readiness.FIXED_HELPER, found.helper != "absent")) if there]
             if not paths:
                 self._info(self._t("bundle.ready.nothing"))
