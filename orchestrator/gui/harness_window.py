@@ -543,7 +543,7 @@ class HarnessWindow(BoardSteps, QDialog):
         dialog, form = _form_dialog(self, self._t("harness.take.title"), "")
         fields: Dict[str, QLineEdit] = {}
         for key in ("id", "title_field", "location", "installer", "ref", "pin", "dry_args", "assume_yes",
-                    "exit_codes", "image_partition"):
+                    "exit_codes", "image_partition", "image_path"):
             edit = QLineEdit(dialog)
             edit.setObjectName(f"edt_harness_take_{key}")
             fields[key] = edit
@@ -574,26 +574,56 @@ class HarnessWindow(BoardSteps, QDialog):
                               ref=fields["ref"].text().strip() or None, pin=fields["pin"].text().strip() or None,
                               dry_run_args=tuple(fields["dry_args"].text().split()),
                               assume_yes=fields["assume_yes"].text().strip() or None, exit_codes=codes or {0: "done"},
-                              image_partition=int(part_text) if part_text else None)
+                              image_partition=int(part_text) if part_text else None,
+                              image_path=fields["image_path"].text().strip() or None)
+        self._take_in(spec)
+
+    def _take_in(self, spec: Any, password: Optional[str] = None, attempt: int = 0) -> None:
+        """The take-in in the worker thread; an encrypted archive asks the person for its password here, in a password
+        field (at most MAX_PASSWORD_TRIES times), and starts again with it. The password goes only into this one
+        take-in: never kept, logged, audited or shown."""
+        from orchestrator.runtime.bundle import harness as hz
         state_dir = self.state_dir
         config = getattr(self.framework, "config", None)
 
         def work():
             from orchestrator.utils.locality import offline_mode
-            return hz.take_in(spec, state_dir, offline=bool(offline_mode(config)))
+            return hz.take_in(spec, state_dir, offline=bool(offline_mode(config)), password=password)
 
         def done(taken: Any) -> None:
             text = self._t("harness.take.done", id=taken.spec.id, pin=taken.pin, files=taken.files,
                            tree=taken.tree_sha256)
             if taken.content_rule:
                 text += " " + hz.derived_text(taken, None)
+            if taken.image_size:
+                text += " " + hz.image_text(taken, None)
             self._say(text)
             self._info(text)
 
         def failed(error: BaseException) -> bool:
+            if isinstance(error, hz.PasswordNeeded):
+                tries = attempt + 1
+                if tries > hz.MAX_PASSWORD_TRIES:
+                    self._info(self._t("harness.take.password_gave_up", tries=hz.MAX_PASSWORD_TRIES), "warning")
+                    return True
+                asked = self._ask_archive_password(
+                    self._t("harness.take.password_wrong", attempt=tries, tries=hz.MAX_PASSWORD_TRIES)
+                    if error.wrong else self._t("harness.take.password"))
+                if asked:
+                    self._take_in(spec, asked, tries)
+                return True
             self._info(self._t("harness.failed", reason=one_line(str(error))), "warning")
             return True
         self._start(self._t("harness.take.title"), work, done, failed=failed)
+
+    def _ask_archive_password(self, text: str) -> str:
+        """The archive's password from a password field ("" when the person cancels); never shown, never kept."""
+        dialog, form = _form_dialog(self, self._t("harness.take.title"), text)
+        field = QLineEdit(dialog)
+        field.setObjectName("edt_harness_take_password")
+        field.setEchoMode(QLineEdit.Password)
+        form.addRow("", field)
+        return field.text() if _exec(dialog) else ""
 
 
 def open_harness(window: Any) -> Optional[HarnessWindow]:

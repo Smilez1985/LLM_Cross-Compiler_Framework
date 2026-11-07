@@ -1,27 +1,34 @@
 #!/usr/bin/env python3
 """
 An archive's format by its content, never by its name (`sniff`), and 7-Zip for the formats Python's standard library
-cannot read: rar, 7z, iso, cpio, zstd (where this Python has no compression.zstd), SquashFS and disk images (raw .img
-or .bin with MBR or GPT partitions holding ext2/3/4, FAT or NTFS file systems, or one such file system alone).
+cannot read: rar, 7z, iso, cpio, zstd (where this Python has no compression.zstd), SquashFS, an encrypted zip, and a
+disk image's FAT or NTFS file system (an ext2/3/4 one is read in place by utils/ext4_read, never extracted whole).
 
 7-Zip is found as `7zz`, `7z` or `7za` on PATH, on Windows also in its usual install folder; llmcf's installers set it
 up. It is run with an argument list only (never a shell, never archive text as an option: `--` before the archive and
-`-spd` so a name is never a wildcard), with stdin closed and a time limit. An archive is listed first (`l -slt -ba`) and
-every entry checked by the same rules as safe_extract_tar (utils/helpers.py): no absolute path, no "..", no link out of
-the folder, no hard link, no device, FIFO, socket or other special file, the caller's caps on files and bytes; only
-then is it extracted, into a fresh folder of the caller's (a quarantine, never a store), and what was written is
-compared with the listing again. A block of the listing with a field twice (a name with a line break in it) is
-refused, so a crafted name cannot forge an entry.
+`-spd` so a name is never a wildcard), with stdin closed (or holding only the password) and a time limit. An archive
+is listed first (`l -slt -ba`) and every entry checked by the same rules as safe_extract_tar (utils/helpers.py): no
+absolute path, no "..", no link out of the folder, no hard link to a path outside or to an entry the listing does not
+have (one inside is materialised by the caller as a regular file with its target's content), no device, FIFO, socket
+or other special file, the caller's caps on files and bytes; only then is it extracted, into a fresh folder of the
+caller's (a quarantine, never a store), and what was written is compared with the listing again. A block of the
+listing with a field twice (a name with a line break in it) is refused, so a crafted name cannot forge an entry.
+
+An encrypted archive (encrypted names, or encrypted entries) raises PasswordNeeded; the caller asks the person and
+calls again with the password, which reaches 7-Zip on its standard input only (7-Zip reads it there when no -p switch
+is given; never on the command line, where other processes could read it). Without a password the empty `-p` is
+passed, so 7-Zip never waits for one. The password is never logged or kept here.
 """
 
 import os
 import re
 import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
-from orchestrator.utils.helpers import UnsafeArchive, execute_command
+from orchestrator.utils.helpers import UnsafeArchive, windowless_flags
 
 SEVEN_ZIP_NAMES = ("7zz", "7z", "7za")
 LIST_TIMEOUT = 300
@@ -32,6 +39,7 @@ HEAD = 40 * 1024
 SEVEN_ZIP_KINDS = {
     "7z": "a 7z archive", "rar": "a RAR archive", "iso": "an ISO image", "cpio": "a cpio archive",
     "disk": "a disk image", "squashfs": "a SquashFS image", "zstd": "a zstd-compressed file",
+    "zip": "an encrypted zip archive",
 }
 COMPRESSED = ("gzip", "bzip2", "xz", "zstd")
 PROGRAMS = ("script", "elf", "macho")
@@ -49,6 +57,35 @@ except ImportError:
 
 class SevenZipMissing(Exception):
     """7-Zip is needed for this format and is not on this computer; the message says which format and the repair."""
+
+
+class PasswordNeeded(Exception):
+    """The archive is encrypted: it needs the person's password (`wrong`: the one given was not right)."""
+
+    def __init__(self, wrong: bool = False):
+        super().__init__("the password is not right" if wrong else "the archive is encrypted and needs its password")
+        self.wrong = wrong
+
+
+def _run(argv: Sequence[str], timeout: int, password: Optional[str]):
+    """(returncode, stdout, stderr) of 7-Zip without a shell; the password, when given, on stdin only."""
+    try:
+        res = subprocess.run(list(argv), timeout=timeout, capture_output=True, check=False,
+                             input=(password + "\n").encode("utf-8") if password is not None else None,
+                             stdin=None if password is not None else subprocess.DEVNULL,
+                             creationflags=windowless_flags())
+    except (OSError, subprocess.SubprocessError, ValueError) as e:
+        return -1, "", str(e)
+    return (res.returncode, res.stdout.decode("utf-8", errors="replace"),
+            res.stderr.decode("utf-8", errors="replace"))
+
+
+def _password_args(password: Optional[str]) -> List[str]:
+    return [] if password is not None else ["-p"]
+
+
+def _wrong_password(text: str) -> bool:
+    return "Wrong password" in text or "encrypted archive" in text
 
 
 def missing_text(what: str) -> str:
@@ -232,6 +269,11 @@ def entries(blocks: Sequence[Dict[str, str]]) -> List[Entry]:
     """The checked entries of a listing (the archive's top itself left out). UnsafeArchive for an absolute path,
     "..", a link out of the folder, a hard link, a device, FIFO, socket or other special file."""
     found: List[Entry] = []
+    files = set()
+    for block in blocks:
+        rel = relative(block["Path"])
+        if rel and not block.get("Hard Link") and block.get("Folder") != "+":
+            files.add(rel)
     for block in blocks:
         raw = block["Path"]
         rel = relative(raw)
@@ -240,8 +282,17 @@ def entries(blocks: Sequence[Dict[str, str]]) -> List[Entry]:
         letter, mode = _unix(block)
         attrs = block.get("Attributes", "").split(" ", 1)[0]
         target = block.get("Symbolic Link", "") or None
-        if block.get("Hard Link"):
-            raise UnsafeArchive(f"Security: a hard link in the archive: {rel}")
+        hard = block.get("Hard Link")
+        if hard:   # inside the tree and to an entry the listing has: materialised as a file by the caller
+            try:
+                hard_target = relative(hard)
+            except UnsafeArchive:
+                raise UnsafeArchive(f"Security: a hard link out of the folder in the archive: {rel} -> "
+                                    f"{hard}") from None
+            if hard_target not in files:
+                raise UnsafeArchive(f"Security: a hard link to an entry the archive does not have: {rel} -> {hard}")
+            found.append(Entry(rel, raw, "hardlink", 0, mode, hard_target, dict(block)))
+            continue
         if letter in ("c", "b", "p", "s"):
             raise UnsafeArchive(f"Security: a device, FIFO or socket in the archive: {rel}")
         if letter == "l" or target:
@@ -265,7 +316,8 @@ def check_caps(found: Sequence[Entry], *, max_files: int, max_bytes: int) -> int
     files = [e for e in found if e.kind != "dir"]
     if len(files) > max_files:
         raise UnsafeArchive(f"the archive has more than {max_files} files")
-    total = sum(e.size for e in files)
+    sizes = {e.path: e.size for e in files if e.kind == "file"}
+    total = sum(sizes.get(e.link or "", 0) if e.kind == "hardlink" else e.size for e in files)
     if total > max_bytes:
         raise UnsafeArchive(f"the archive unpacks to more than {max_bytes // (1024 * 1024)} MB")
     return total
@@ -276,24 +328,35 @@ def is_partition_listing(found: Sequence[Entry]) -> bool:
     return bool(found) and all(e.kind == "file" and "Offset" in e.fields and "/" not in e.path for e in found)
 
 
-def list_archive(exe: str, archive: Path) -> List[Entry]:
-    """The checked listing of `archive`; UnsafeArchive when 7-Zip cannot read it or an entry is refused."""
-    code, out, err = execute_command([exe, "l", "-slt", "-ba", "-sccUTF-8", "-spd", "-p", "--", str(archive)],
-                                     timeout=LIST_TIMEOUT)
+def list_archive(exe: str, archive: Path, password: Optional[str] = None) -> List[Entry]:
+    """The checked listing of `archive`; UnsafeArchive when 7-Zip cannot read it or an entry is refused,
+    PasswordNeeded when it is encrypted and no (or a wrong) password was given."""
+    code, out, err = _run([exe, "l", "-slt", "-ba", "-sccUTF-8", "-spd", *_password_args(password), "--",
+                           str(archive)], LIST_TIMEOUT, password)
     if code != 0:
+        if _wrong_password(out + err):
+            raise PasswordNeeded(wrong=password is not None)
         reason = (err or out).strip().splitlines()
         raise UnsafeArchive(f"7-Zip cannot read it: {reason[-1] if reason else f'exit code {code}'}")
-    return entries(parse_blocks(out))
+    if password is not None:   # 7-Zip's own prompt, printed although the password came on stdin
+        out = "\n".join(line for line in out.splitlines() if not line.startswith("Enter password"))
+    blocks = parse_blocks(out)
+    if password is None and any(b.get("Encrypted") == "+" for b in blocks):
+        raise PasswordNeeded()
+    return entries(blocks)
 
 
-def extract(exe: str, archive: Path, dest: Path, listed: Sequence[Entry], *, only: Sequence[str] = ()) -> None:
+def extract(exe: str, archive: Path, dest: Path, listed: Sequence[Entry], *, only: Sequence[str] = (),
+            password: Optional[str] = None) -> None:
     """Extracts the listed (and checked) entries of `archive` into the fresh folder `dest` (`only`: these names of
     7-Zip's listing alone) and compares what was written with the listing: a path that was not listed is refused."""
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=False)
-    code, out, err = execute_command([exe, "x", "-y", "-bd", "-sccUTF-8", "-spd", "-p", f"-o{dest}", "--",
-                                      str(archive), *only], timeout=EXTRACT_TIMEOUT)
+    code, out, err = _run([exe, "x", "-y", "-bd", "-sccUTF-8", "-spd", *_password_args(password), f"-o{dest}", "--",
+                           str(archive), *only], EXTRACT_TIMEOUT, password)
     if code != 0:
+        if _wrong_password(out + err):
+            raise PasswordNeeded(wrong=password is not None)
         reason = (err or out).strip().splitlines()
         raise UnsafeArchive(f"7-Zip could not extract it: {reason[-1] if reason else f'exit code {code}'}")
     wanted = {e.path for e in listed if not only or e.raw in only}
@@ -308,6 +371,7 @@ def extract(exe: str, archive: Path, dest: Path, listed: Sequence[Entry], *, onl
                 raise UnsafeArchive(f"Security: 7-Zip wrote what the listing did not name: {rel}")
 
 
-__all__ = ["COMPRESSED", "Entry", "PROGRAMS", "SEVEN_ZIP_KINDS", "SevenZipMissing", "ZSTD_STDLIB", "check_caps",
+__all__ = ["COMPRESSED", "Entry", "PROGRAMS", "PasswordNeeded", "SEVEN_ZIP_KINDS", "SevenZipMissing", "ZSTD_STDLIB",
+           "check_caps",
            "entries", "extract", "find_7zip", "is_partition_listing", "is_program", "link_inside", "list_archive",
            "missing_text", "parse_blocks", "program_kind", "relative", "sniff"]

@@ -128,3 +128,29 @@ def test_a_missing_readiness_is_offered_and_the_step_goes_on(qapp, window, harne
     rows = [r for r in dialog.audit.rows if r["tool"] == "harness_readiness"]
     assert [(r["actor"], r["outcome"]) for r in rows] == [("gui", "approved"), ("gui", "set_up")]
     assert PASSWORD not in repr(dialog.audit.rows)
+
+
+def test_an_encrypted_archive_asks_the_person_for_its_password_three_times_at_most(qapp, window, monkeypatch):
+    """The window asks in a password field and starts the take-in again with it; after three wrong ones it stops.
+    The password is never shown in the pane."""
+    from orchestrator.runtime.bundle import harness as hz
+    dialog, _built = window
+    given = []
+
+    def needs(spec, state, **kw):
+        given.append(kw.get("password"))
+        raise hz.PasswordNeeded(wrong=kw.get("password") is not None)
+    monkeypatch.setattr(hz, "take_in", needs)
+    asked = []
+    monkeypatch.setattr(dialog, "_ask_archive_password", lambda text: asked.append(text) or "pw-guess")
+    infos = []
+    monkeypatch.setattr(dialog, "_info", lambda text, *a: infos.append(text))
+    dialog._take_in(hz.HarnessSpec(id="demo", title="Demo", kind="archive", location="x", installer="i.sh"))
+    end = time.monotonic() + 30
+    while time.monotonic() < end and not infos:
+        qapp.processEvents()
+        time.sleep(0.02)
+    wait(qapp, dialog)
+    assert given == [None, "pw-guess", "pw-guess", "pw-guess"] and len(asked) == 3
+    assert "encrypted" in asked[0] and "attempt 2 of 3" in asked[1]
+    assert infos and "not right 3 times" in infos[-1] and "pw-guess" not in dialog.output.toPlainText()

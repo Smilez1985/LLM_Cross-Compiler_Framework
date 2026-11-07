@@ -2,9 +2,11 @@
 the format by content, never by name; zip, tar and its compressed kinds and a single compressed file through the
 standard library; 7z, iso, cpio, rar and disk images through 7-Zip (those tests run only where 7-Zip and the tool that
 makes the fixture are on this computer); a script or a program as a harness of one file; the archive pin is always the
-file's sha256. The listing parser and its refusals are tested on a recorded `7z l -slt -ba` text without 7-Zip. The
-content rule for a host without executable bits (forced here) gives the same listing as a Linux file system's modes,
-and a plain folder on Windows is taken in."""
+file's sha256. The listing parser and its refusals are tested on a recorded `7z l -slt -ba` text without 7-Zip. Hard
+links inside the tree become files of their own; one out of it is refused. An encrypted archive asks the person's
+password (never on 7-Zip's command line). A disk image's ext partition is read in place (utils/ext4_read), never
+extracted whole. The content rule for a host without executable bits (forced here) gives the same listing as a Linux
+file system's modes, and a plain folder on Windows is taken in."""
 
 import bz2
 import gzip
@@ -177,7 +179,9 @@ def with_entry(block: str) -> str:
     ("Path = abs\nFolder = -\nSize = 0\nMode = lrwxrwxrwx\nSymbolic Link = /etc/shadow", "link out"),
     ("Path = dev/sda\nFolder = -\nSize = 0\nMode = brw-rw----", "device"),
     ("Path = fifo\nFolder = -\nSize = 0\nMode = prw-r--r--", "device, FIFO"),
-    ("Path = hard\nFolder = -\nSize = 0\nMode = -rw-r--r--\nHard Link = a.txt", "hard link"),
+    ("Path = hard\nFolder = -\nSize = 0\nMode = -rw-r--r--\nHard Link = ../../etc/passwd", "hard link out"),
+    ("Path = hard\nFolder = -\nSize = 0\nMode = -rw-r--r--\nHard Link = /etc/passwd", "hard link out"),
+    ("Path = hard\nFolder = -\nSize = 0\nMode = -rw-r--r--\nHard Link = nothere.txt", "does not have"),
     ("Path = x\nFolder = -\nPath = ../evil", "twice"),
     ("Folder = -\nSize = 1", "no path"),
 ])
@@ -407,3 +411,299 @@ def test_a_plain_folder_on_windows_is_taken_in_with_the_content_rule(tmp_path, m
     assert kinds(taken) == {"installer/install.ps1-like": "x", "run.sh": "x", "notes.txt": "f"}
     assert taken.derived == ("installer/install.ps1-like", "run.sh")
     assert h.stored(tmp_path / "state", "demo")[0]["modes_derived_from_content"] == 2
+
+
+# --- hard links -------------------------------------------------------------------------------------------------------
+
+def hardlink_tar(path: Path, linkname: str) -> Path:
+    with tarfile.open(path, "w") as tf:
+        for name, data, perm in members():
+            info = tarfile.TarInfo(name)
+            info.size, info.mode = len(data), perm
+            tf.addfile(info, io.BytesIO(data))
+        link = tarfile.TarInfo("installer/again.sh")
+        link.type, link.linkname, link.mode = tarfile.LNKTYPE, linkname, 0o755
+        tf.addfile(link)
+    return path
+
+
+def test_a_hard_link_inside_the_tree_is_a_file_of_its_own(tmp_path):
+    archive = hardlink_tar(tmp_path / "h.tar", "installer/install.sh")
+    taken = h.take_in(spec(location=str(archive)), tmp_path / "state")
+    assert kinds(taken) == {"installer/install.sh": "x", "installer/again.sh": "x", "src/app.py": "f"}
+    rows = {r[0]: r[2] for r in h.stored_listing(taken.path)}
+    assert rows["installer/again.sh"] == rows["installer/install.sh"]
+    if os.name != "nt":
+        assert (taken.path / "installer" / "again.sh").stat().st_nlink == 1
+
+
+@pytest.mark.parametrize("target", ["../../etc/passwd", "nothere.sh"])
+def test_a_hard_link_out_of_the_tree_or_to_nothing_is_refused(tmp_path, target):
+    archive = hardlink_tar(tmp_path / "h.tar", target)
+    with pytest.raises(h.HarnessError, match="hard ?link|Tar Slip"):
+        h.take_in(spec(location=str(archive)), tmp_path / "state")
+
+
+def test_a_listed_hard_link_inside_is_kept_as_an_entry():
+    found = {e.path: e for e in ar.entries(ar.parse_blocks(with_entry(
+        "Path = b.txt\nFolder = -\nSize = 0\nMode = -rw-r--r--\nHard Link = a.txt")))}
+    assert found["b.txt"].kind == "hardlink" and found["b.txt"].link == "a.txt"
+
+
+@NEEDS_7Z
+def test_7zip_materialises_a_hard_link_inside(tmp_path):
+    archive = hardlink_tar(tmp_path / "h.tar", "installer/install.sh")
+    dest = tmp_path / "work" / "q"
+    dest.parent.mkdir()
+    found = h._extract_7zip(archive, dest, spec(), "7z", tmp_path / "state")
+    assert (dest / "installer" / "again.sh").read_bytes() == SCRIPT and "installer/again.sh" in found.modes.executable
+
+
+# --- encrypted archives: the person's password, on 7-Zip's stdin only -------------------------------------------------
+
+def take_with_passwords(archive, state, passwords):
+    """take_in as the CLI and the window drive it: PasswordNeeded, then the next password."""
+    given = None
+    asked = []
+    for _ in range(h.MAX_PASSWORD_TRIES + 1):
+        try:
+            return h.take_in(spec(location=str(archive)), state, password=given), asked
+        except h.PasswordNeeded as e:
+            asked.append(e.wrong)
+            if not passwords:
+                raise
+            given = passwords.pop(0)
+    raise AssertionError("asked too often")
+
+
+@NEEDS_7Z
+@pytest.mark.parametrize("args", [["-mhe=on"], []], ids=["encrypted-names", "encrypted-data"])
+def test_an_encrypted_7z_asks_for_the_password_and_never_puts_it_on_the_command_line(tmp_path, args, monkeypatch):
+    src = tree(tmp_path / "src")
+    archive = tmp_path / "harness.7z"
+    seven("a", "-pS3cret-pw", *args, str(archive), "installer", "src", cwd=src)
+    seen = []
+    real = subprocess.run
+
+    def watched(argv, *a, **kw):
+        seen.append((list(argv), kw.get("input")))
+        return real(argv, *a, **kw)
+    monkeypatch.setattr(ar.subprocess, "run", watched)
+    with pytest.raises(h.PasswordNeeded) as e:
+        h.take_in(spec(location=str(archive)), tmp_path / "a")
+    assert not e.value.wrong and "only the person" in str(e.value)
+    taken, asked = take_with_passwords(archive, tmp_path / "b", ["wrong", "S3cret-pw"])
+    assert asked == [False, True] and kinds(taken)["installer/install.sh"] == "x"
+    assert all("S3cret-pw" not in " ".join(argv) for argv, _ in seen)
+    assert any(data == b"S3cret-pw\n" for _, data in seen)
+    assert "S3cret-pw" not in json.dumps(taken.record())
+
+
+@NEEDS_7Z
+def test_a_zipcrypto_zip_without_7zip_goes_through_python_and_gives_up_after_three_wrong(tmp_path, monkeypatch):
+    src = tree(tmp_path / "src")
+    archive = tmp_path / "harness.zip"
+    seven("a", "-tzip", "-pS3cret-pw", "-mem=ZipCrypto", str(archive), "installer", "src", cwd=src)
+    monkeypatch.setattr(ar, "find_7zip", lambda: None)
+    taken, asked = take_with_passwords(archive, tmp_path / "a", ["S3cret-pw"])
+    assert asked == [False] and "installer/install.sh" in kinds(taken)
+    with pytest.raises(h.PasswordNeeded) as e:
+        take_with_passwords(archive, tmp_path / "b", ["no", "nope", "never"])
+    assert e.value.wrong
+
+
+def test_the_cli_refuses_an_encrypted_archive_without_a_terminal(tmp_path, monkeypatch):
+    from orchestrator import cli as cli_module
+    from test_cli_builds import invoke_plain
+    monkeypatch.setattr(cli_module, "_state_dir", lambda ctx: tmp_path / "state")
+
+    def needs(*a, **kw):
+        raise h.PasswordNeeded()
+    monkeypatch.setattr(h, "take_in", needs)
+    res = invoke_plain("bundle", "harness", "take-in", "mine", str(tmp_path), "--kind", "archive", "--installer",
+                       "install.sh")
+    assert res.code == 1 and "only the person" in res.out
+
+
+def test_the_cli_asks_three_times_without_echo(tmp_path, monkeypatch):
+    from orchestrator import cli as cli_module
+    from test_cli_builds import invoke_plain
+    monkeypatch.setattr(cli_module, "_state_dir", lambda ctx: tmp_path / "state")
+    calls = []
+
+    def wrong(spec_, state, **kw):
+        calls.append(kw.get("password"))
+        raise h.PasswordNeeded(wrong=kw.get("password") is not None)
+    monkeypatch.setattr(h, "take_in", wrong)
+    monkeypatch.setattr(cli_module, "_ask_hidden", lambda prompt: "guess")
+    res = invoke_plain("bundle", "harness", "take-in", "mine", str(tmp_path), "--kind", "archive", "--installer",
+                       "install.sh")
+    assert res.code == 1 and "not right 3 times" in res.out and calls == [None, "guess", "guess", "guess"]
+    assert "guess" not in res.out
+
+
+# --- ext file systems in a disk image: read in place -----------------------------------------------------------------
+
+NEEDS_EXT4 = pytest.mark.skipif(shutil.which("mkfs.ext4") is None, reason="mkfs.ext4 makes the ext4 images")
+
+
+def rootfs(root: Path) -> Path:
+    """A board's rootfs in small: the harness in opt/demo with a symlink inside, an extent-tree file (sparse, many
+    extents), a big file, and other folders around it."""
+    tree(root / "opt" / "demo")
+    os.symlink("../installer/install.sh", root / "opt" / "demo" / "src" / "run")
+    with open(root / "opt" / "demo" / "src" / "sparse.bin", "wb") as fh:
+        for i in range(40):
+            fh.seek(i * 8192)
+            fh.write(bytes([i + 1]) * 4096)
+    (root / "opt" / "demo" / "src" / "big.bin").write_bytes(bytes(range(256)) * 9000)
+    (root / "etc").mkdir()
+    (root / "etc" / "hostname").write_text("board\n")
+    many = root / "usr" / "share" / "many"
+    many.mkdir(parents=True)
+    for i in range(600):   # an htree directory
+        (many / f"file-{i:04d}.txt").write_text(str(i))
+    return root
+
+
+def ext_image(path: Path, src: Path, *, size="64M", opts=()) -> Path:
+    subprocess.run(["truncate", "-s", size, str(path)], check=True)
+    subprocess.run(["mkfs.ext4", "-q", "-F", *opts, "-d", str(src), str(path)], check=True, capture_output=True)
+    return path
+
+
+def mbr_with(path: Path, fs_image: Path, start: int = 2048) -> Path:
+    """A disk image: an MBR, an empty first partition slot taken by a small FAT-less gap, and the ext image."""
+    data = fs_image.read_bytes()
+    sectors = len(data) // 512
+    with open(path, "wb") as fh:
+        fh.write(bytes(start * 512))
+        fh.write(data)
+    with open(path, "r+b") as fh:
+        fh.seek(446)
+        fh.write(bytes([0, 0, 2, 0, 0x83, 0, 0, 0]) + struct.pack("<II", start, sectors))
+        fh.seek(510)
+        fh.write(b"\x55\xaa")
+    return path
+
+
+@NEEDS_EXT4
+@POSIX
+@pytest.mark.parametrize("opts", [(), ("-O", "64bit"), ("-b", "1024")], ids=["default", "64bit", "1k-blocks"])
+def test_the_ext4_reader_reads_files_links_and_an_extent_tree(tmp_path, opts):
+    from orchestrator.utils.ext4_read import Ext4
+    src = rootfs(tmp_path / "src")
+    image = ext_image(tmp_path / "fs.img", src, opts=opts)
+    with Ext4(image) as fs:
+        for rel in ("opt/demo/installer/install.sh", "opt/demo/src/sparse.bin", "opt/demo/src/big.bin"):
+            assert fs.read_data(fs.lookup(rel), limit=1 << 30) == (src / rel).read_bytes(), rel
+        assert fs.link_target(fs.lookup("opt/demo/src/run")) == "../installer/install.sh"
+        names = {n for n, _i, _t in fs.entries(fs.lookup("usr/share/many"))}
+        assert len(names) == 600
+        assert fs.lookup("opt/demo/installer/install.sh").mode & 0o777 == 0o755
+
+
+@NEEDS_EXT4
+@POSIX
+@pytest.mark.parametrize("image_path", [None, "opt/demo"])
+def test_a_disk_image_reads_only_the_harness_folder_of_its_ext_partition(tmp_path, image_path):
+    src = rootfs(tmp_path / "src")
+    (src / "var").mkdir()
+    (src / "var" / "big.img").write_bytes(os.urandom(8 * 1024 * 1024))   # never read
+    disk = mbr_with(tmp_path / "board.img", ext_image(tmp_path / "fs.img", src))
+    taken = h.take_in(spec(location=str(disk), image_path=image_path), tmp_path / "state")
+    plain = h.take_in(spec(kind="folder", location=str(src / "opt" / "demo")), tmp_path / "folder")
+    assert taken.tree_sha256 == plain.tree_sha256 and kinds(taken)["src/run"] == "l"
+    assert taken.image_size == disk.stat().st_size and taken.image_read < 4 * 1024 * 1024   # never var/big.img
+    assert taken.format == "disk:ext" and taken.pin == h._sha256_file(disk)
+    assert "Read" in h.image_text(taken) and taken.record()["image_read"] == taken.image_read
+
+
+@NEEDS_EXT4
+@POSIX
+def test_an_ext_file_system_alone_and_the_installer_twice(tmp_path):
+    src = rootfs(tmp_path / "src")
+    tree(src / "srv" / "demo")
+    image = ext_image(tmp_path / "fs.img", src)
+    with pytest.raises(h.HarnessError, match="more than once.*image_path"):
+        h.take_in(spec(location=str(image)), tmp_path / "state")
+    taken = h.take_in(spec(location=str(image), image_path="srv/demo"), tmp_path / "state")
+    assert set(kinds(taken)) == {"installer/install.sh", "src/app.py"}
+    with pytest.raises(h.HarnessError, match="image_path"):
+        h.take_in(spec(location=str(image), image_path="opt/none", image_partition=0), tmp_path / "state")
+
+
+@NEEDS_EXT4
+@POSIX
+def test_a_link_out_of_the_harness_in_an_ext_image_is_refused(tmp_path):
+    src = rootfs(tmp_path / "src")
+    os.symlink("/etc/shadow", src / "opt" / "demo" / "src" / "out")
+    image = ext_image(tmp_path / "fs.img", src)
+    with pytest.raises(h.HarnessError, match="leaves the harness"):
+        h.take_in(spec(location=str(image), image_path="opt/demo"), tmp_path / "state")
+
+
+@NEEDS_EXT4
+@POSIX
+@pytest.mark.skipif(os.geteuid() != 0 if hasattr(os, "geteuid") else True,
+                    reason="a device node in the source folder needs root (mknod)")
+def test_a_device_node_in_an_ext_image_is_refused(tmp_path):
+    src = rootfs(tmp_path / "src")
+    os.mknod(src / "opt" / "demo" / "src" / "tty", 0o600 | 0o020000, os.makedev(4, 1))
+    image = ext_image(tmp_path / "fs.img", src)
+    with pytest.raises(h.HarnessError, match="device"):
+        h.take_in(spec(location=str(image), image_path="opt/demo"), tmp_path / "state")
+
+
+def test_a_crafted_ext_superblock_is_refused(tmp_path):
+    from orchestrator.utils.ext4_read import Ext4, Ext4Error
+    image = tmp_path / "bad.img"
+    sb = bytearray(1024)
+    struct.pack_into("<H", sb, 0x38, 0xEF53)
+    struct.pack_into("<I", sb, 0x18, 2)
+    struct.pack_into("<I", sb, 0x28, 8)
+    struct.pack_into("<I", sb, 0x00, 1 << 30)
+    struct.pack_into("<I", sb, 0x60, 0x10000)   # encryption
+    image.write_bytes(bytes(1024) + sb + bytes(4096))
+    with pytest.raises(Ext4Error, match="encryption"):
+        Ext4(image)
+    struct.pack_into("<I", sb, 0x60, 0x2)
+    struct.pack_into("<I", sb, 0x4C, 1)
+    struct.pack_into("<H", sb, 0x58, 256)
+    image.write_bytes(bytes(1024) + sb)   # the group descriptors would lie beyond the image
+    with Ext4(image) as fs, pytest.raises(Ext4Error, match="beyond"):
+        fs.inode(2)
+
+
+def gpt_with(path: Path, fs_image: Path, start: int = 2048) -> Path:
+    """A disk image with a protective MBR and a GPT (one entry: Linux filesystem) around the ext image."""
+    data = fs_image.read_bytes()
+    sectors = len(data) // 512
+    with open(path, "wb") as fh:
+        fh.write(bytes(start * 512))
+        fh.write(data)
+        fh.write(bytes(33 * 512))
+    with open(path, "r+b") as fh:
+        fh.seek(446)
+        fh.write(bytes([0, 0, 2, 0, 0xEE, 0, 0, 0]) + struct.pack("<II", 1, 0xFFFFFFFF))
+        fh.seek(510)
+        fh.write(b"\x55\xaa")
+        fh.seek(512)
+        fh.write(b"EFI PART" + bytes(64) + struct.pack("<QII", 2, 128, 128))
+        fh.seek(1024)
+        linux = bytes.fromhex("af3dc60f838472478e793d69d8477de4")
+        fh.write(linux + bytes(16) + struct.pack("<QQ", start, start + sectors - 1))
+    return path
+
+
+@NEEDS_EXT4
+@POSIX
+def test_a_gpt_disk_image_is_read_the_same_way(tmp_path):
+    from orchestrator.utils.ext4_read import partitions
+    src = rootfs(tmp_path / "src")
+    disk = gpt_with(tmp_path / "board.img", ext_image(tmp_path / "fs.img", src))
+    parts = partitions(disk)
+    assert [(p.number, p.offset) for p in parts] == [(0, 2048 * 512)]
+    assert parts[0].type == "0fc63daf-8483-4772-8e79-3d69d8477de4"
+    taken = h.take_in(spec(location=str(disk)), tmp_path / "state")
+    assert "installer/install.sh" in kinds(taken) and taken.format == "disk:ext"

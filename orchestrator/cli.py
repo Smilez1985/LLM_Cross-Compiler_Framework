@@ -8156,10 +8156,13 @@ def bundle_harness():
               help='CODE=done or CODE=findings: what an exit code of the installer means (repeatable; default 0=done)')
 @click.option('--image-partition', 'image_partition', type=int, default=None,
               help='A disk image only: the partition to take (0 the first) when more than one holds the installer')
+@click.option('--image-path', 'image_path', default=None,
+              help="A disk image only: the harness's folder inside the partition, e.g. opt/chimera (default: searched)")
 @pass_context
 def bundle_harness_take_in(ctx: FrameworkContext, harness_id: str, location: str, kind: str, installer: str,
                            ref: Optional[str], pin: Optional[str], title: Optional[str], dry_args: Tuple[str, ...],
-                           assume_yes: Optional[str], exit_codes: Tuple[str, ...], image_partition: Optional[int]):
+                           assume_yes: Optional[str], exit_codes: Tuple[str, ...], image_partition: Optional[int],
+                           image_path: Optional[str]):
     """Take your harness in at a pin (a commit of its repository, or the sha256 of an archive) and keep its tree with
     one checksum; llmcf never builds it: its own installer runs on the board later, after your yes"""
     from orchestrator.runtime.bundle import harness as hz
@@ -8174,19 +8177,46 @@ def bundle_harness_take_in(ctx: FrameworkContext, harness_id: str, location: str
     spec = hz.HarnessSpec(id=harness_id, title=title or harness_id, kind=kind,
                           location=location if kind == "git" else str(Path(location).expanduser()),
                           installer=installer, ref=ref, pin=pin, dry_run_args=tuple(dry_args), assume_yes=assume_yes,
-                          exit_codes=codes, image_partition=image_partition)
+                          exit_codes=codes, image_partition=image_partition, image_path=image_path)
     config, _ = _settings(ctx)
-    try:
-        taken = hz.take_in(spec, _state_dir(ctx), offline=bool(offline_mode(config)))
-    except hz.HarnessError as e:
-        console.print(f"[red]{escape(str(e))}[/red]")
-        sys.exit(1)
+    from orchestrator.utils.localization import ui_text
+    password: Optional[str] = None
+    attempt = 0
+    while True:
+        try:
+            taken = hz.take_in(spec, _state_dir(ctx), offline=bool(offline_mode(config)), password=password)
+            break
+        except hz.PasswordNeeded as e:
+            # an encrypted archive: only the person at this terminal gives its password, without echo, never kept
+            attempt += 1
+            prompt = ui_text("harness.take.password_wrong", lang="en", attempt=attempt, tries=hz.MAX_PASSWORD_TRIES) \
+                if e.wrong else ui_text("harness.take.password", lang="en")
+            password = _ask_hidden(prompt) if attempt <= hz.MAX_PASSWORD_TRIES else None
+            if password is None:
+                text = ui_text("harness.take.password_gave_up", lang="en", tries=hz.MAX_PASSWORD_TRIES) \
+                    if e.wrong and attempt > hz.MAX_PASSWORD_TRIES else str(e)
+                console.print(f"[red]{escape(text)}[/red]")
+                sys.exit(1)
+        except hz.HarnessError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(1)
+    password = None
     console.print(f"[green]Took in harness {taken.spec.id}[/green] at {taken.pin}: {taken.files} files, "
                   f"{taken.size} bytes, tree checksum {taken.tree_sha256}.")
     if taken.content_rule:
         console.print(escape(hz.derived_text(taken, "en")))
+    if taken.image_size:
+        console.print(escape(hz.image_text(taken, "en")))
     console.print(f"Put it into a bundle: llm-cli bundle build DEVICE --block harness-agent --set "
                   f"harness.harness={taken.spec.id}")
+
+
+def _ask_hidden(prompt: str) -> Optional[str]:
+    """A secret typed by the person at this terminal without echo (getpass); None without a terminal."""
+    if not sys.stdin.isatty():
+        return None
+    import getpass
+    return getpass.getpass(prompt + " ")
 
 
 def _harness_bundle(ctx: FrameworkContext, bundle_id: str, component: Optional[str]):

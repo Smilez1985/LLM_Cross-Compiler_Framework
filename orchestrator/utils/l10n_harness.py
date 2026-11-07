@@ -63,6 +63,12 @@ TEXTS = {
         "harness.take.image_partition": "Partition of a disk image (only when more than one holds the installer; 0 "
                                         "the first):",
         "harness.take.bad_partition": "The partition is a number: 0 the first.",
+        "harness.take.image_path": "Folder of the harness inside the disk image's partition (optional, e.g. "
+                                   "opt/chimera):",
+        "harness.take.image_read": "Read {read} of the disk image's {size}; nothing was extracted whole.",
+        "harness.take.password": "The archive is encrypted. Its password (used for this take-in only, never kept):",
+        "harness.take.password_wrong": "The password is not right. Try again (attempt {attempt} of {tries}):",
+        "harness.take.password_gave_up": "The password was not right {tries} times; nothing was taken in.",
         "harness.take.derived": ("The executable bits were derived from the content (the source records none): "
                                  "{count} files marked executable ({names})."),
         "harness.take.installer": "Installer inside the harness (e.g. installer/install.sh):",
@@ -146,6 +152,13 @@ TEXTS = {
         "harness.take.image_partition": "Partition eines Disk-Images (nur wenn mehrere den Installer enthalten; 0 die "
                                         "erste):",
         "harness.take.bad_partition": "Die Partition ist eine Zahl: 0 die erste.",
+        "harness.take.image_path": "Ordner des Harness in der Partition des Disk-Images (optional, z. B. "
+                                   "opt/chimera):",
+        "harness.take.image_read": "Gelesen: {read} der {size} des Disk-Images; nichts wurde ganz ausgepackt.",
+        "harness.take.password": "Das Archiv ist verschlüsselt. Sein Passwort (nur für diese Übernahme, nie "
+                                 "aufbewahrt):",
+        "harness.take.password_wrong": "Das Passwort stimmt nicht. Noch einmal (Versuch {attempt} von {tries}):",
+        "harness.take.password_gave_up": "Das Passwort stimmte {tries}-mal nicht; nichts wurde übernommen.",
         "harness.take.derived": ("Die Ausführbar-Bits wurden aus dem Inhalt abgeleitet (die Quelle hält keine fest): "
                                  "{count} Dateien als ausführbar markiert ({names})."),
         "harness.take.installer": "Installer in der Harness (z. B. installer/install.sh):",
