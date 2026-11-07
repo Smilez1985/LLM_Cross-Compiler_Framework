@@ -33,7 +33,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [module](#module): `create`, `generate-ai`
 - [scan](#scan): hardware probe
 - [device](#device): `list`, `settings`, `runtime`
-- [bundle](#bundle): `plan`, `build`, `list`, `deploy`, `status`, `uninstall`, `rollback`, `delete`, `block`
+- [bundle](#bundle): `plan`, `build`, `list`, `deploy`, `status`, `uninstall`, `rollback`, `delete`, `block`, `harness`
 - [config](#config): `show`, `output-folder`, `repos`
 - [zoo](#zoo): `list`, `show`, `install`, `verify`, `export`, `keys`, `maintainer`
 - [trash](#trash): `list`, `restore`, `empty`
@@ -2505,6 +2505,13 @@ llm-cli bundle prepare-root BUNDLE [--remove]
 llm-cli bundle delete [BUNDLE]...
 llm-cli bundle block list [--json]
 llm-cli bundle block new ID --kind KIND --title TEXT [--summary TEXT] [--from BLOCK]
+llm-cli bundle harness take-in ID LOCATION --kind git|archive|folder --installer PATH [--ref REF] [--pin PIN]
+                    [--title TEXT] [--dry-run-arg=OPTION]... [--assume-yes NAME=VALUE] [--exit-code CODE=done|findings]...
+llm-cli bundle harness dry-run BUNDLE [--component ID]
+llm-cli bundle harness run BUNDLE [--component ID] [--assume-yes] [--skip-dry-run]
+llm-cli bundle harness attach|stop BUNDLE RUN [--component ID]
+llm-cli bundle harness answer BUNDLE RUN [--component ID] [--hidden]
+llm-cli bundle harness report BUNDLE [RUN] [--component ID] [--json]
 ```
 
 ### bundle plan
@@ -2590,6 +2597,37 @@ stayed.
 For a [trusted device](#deploy-devices), the optional MCP tools `bundle_plan` (the plan as labels only) and
 `bundle_deploy` (`bundle deploy` without the dry-run step, confirmed by you in the framework's own window) do this
 for an AI client; the files are always your choice.
+
+### bundle harness
+
+Your own agent harness on the board ([Features](Features.md#your-agent-harness-on-the-board)). `take-in` takes it in
+at a pin and keeps its tree with one checksum in this computer's per-user folder (`--kind git`: an https link, `--ref`
+a branch or tag resolved to its commit, or `--pin` the commit; `archive`: a .zip, .tar.gz or .tar file, `--pin` its
+sha256; `folder`: a folder). Write a dry-run option with `=`, as in `--dry-run-arg=--dry-run`. Put it into a bundle
+with `bundle build DEVICE --block harness-agent --set harness.harness=ID` (`--set harness.assume_yes=yes` carries its
+assume-yes switch, your opt-in); `bundle deploy` places it on the board with the bundle's root actions.
+
+`run` starts with `dry-run` (the installer's own dry run after its question, its output and its report: the report
+before; `--skip-dry-run` leaves it out), then asks "Run the installer of harness ... as root ...?" ("No" is the
+default; without a terminal nothing starts) and runs it through llmcf-install, which computes the tree checksum again
+first. The output comes live as plain text; every line you type is passed to the installer as its answer (`answer
+--hidden` types one hidden, for a password the installer asks for). Ctrl+C detaches: the installer goes on on the
+board, and `attach BUNDLE RUN` reads on from where this computer read last, as after a dropped connection. `stop`
+ends the installer after its question. Once it ended, the report says done, done with findings or failed (by the
+harness's exit codes), what changed and what is flagged; `report BUNDLE` lists the runs, `report BUNDLE RUN` shows one
+(`--json` for scripts). `--assume-yes` uses the harness's own switch, only when the bundle carries it. The runs need
+the board's root readiness (`bundle prepare-root`): a harness run takes no password.
+
+The MCP tool `harness_report` (optional) lets an AI read the runs as outcome, numbers and flag codes only; it never
+starts, answers or stops one.
+
+```bash
+llm-cli bundle harness take-in chimera https://git.example.invalid/agents/chimera --kind git --ref entwicklung \
+    --installer installer/chimera-install --dry-run-arg=--dry-run --assume-yes CHIMERA_ASSUME_YES=1 \
+    --exit-code 0=done --exit-code 1=findings
+llm-cli bundle build "ZERO 3W" --block harness-agent --set harness.harness=chimera
+llm-cli bundle harness run harness-01234567-20261107120000
+```
 
 ### bundle block list, block new
 

@@ -700,7 +700,7 @@ des Frameworks: `llm-llama-server` mit der selbst gebauten llama.cpp-Laufzeit de
 `stt-whisper-cpp` mit dem eigenen Build des whisper.cpp-Servers des Frameworks für das Board und einem ggml-Modell,
 und `vision-mmproj` mit der llama.cpp-Laufzeit, gestartet mit `--mmproj` für ein Vision-Modell und seinen Projektor;
 ein selbst gewähltes `whisper-server` bleibt mit `stt-whisper-cpp-program` möglich, mit einer Warnung; Sprachausgabe
-mit sherpa-onnx, das Gateway und ein Agent-Harness sind dokumentierte Vorlagen). Du wählst eine Vorlage (`llm`, `voice`,
+mit sherpa-onnx und das Gateway sind dokumentierte Vorlagen; dein eigener Agent-Harness ist der Baustein `harness-agent`, unten). Du wählst eine Vorlage (`llm`, `voice`,
 `stt`) oder die Bausteine, setzt ihre Variablen (Port, Threads, Speichergrenze, Autostart, ...; jede gegen ihren Typ
 geprüft) und wählst ihre Dateien (eine lokale Datei wird gehasht und ins Bündel kopiert, ein Online-Element ist über
 sha256 und Größe festgelegt).
@@ -732,6 +732,34 @@ eine dauerhafte Freigabe oder eine Delegation) dasselbe; du gibst sie zuerst fre
 
 In der GUI: **Boards > Board-Bündel...**; im Terminal: [`llm-cli bundle`](CLI_Usage_DE.md#bundle). Hast du noch
 keinen eigenen Baustein, zeigt der Export im Community Hub dorthin zu **Neuer Baustein...**.
+
+#### Dein Agent-Harness auf dem Board
+
+Ein Harness ist dein eigenes Projekt mit eigenem Repository, nie Code von llmcf, und llmcf baut ihn nicht. Du
+übernimmst ihn an einem Pin (ein Commit seines Repositorys, oder die sha256 eines Archivs oder der Baum eines Ordners)
+mit dem Pfad seines Installers, den Optionen seines eigenen Probelaufs, der Bedeutung seiner Rückgabewerte und, wenn er
+einen hat, seinem eigenen „Ja zu allem“-Schalter; llmcf bewahrt seinen Baum mit einer Prüfsumme auf. Der Baustein
+`harness-agent` legt ihn in ein Bündel: den Baum als eine Tar-Datei, seine Prüfsumme im signierten Manifest und die
+Root-Aktion `run_harness`. Mit deinem Ja für die Root-Aktionen packt llmcf-install ihn auf dem Board in Root-Besitz aus
+und prüft die Prüfsumme; vor jedem Start rechnet es sie neu, so läuft ein auf dem Board geänderter Baum nie.
+
+Ein Lauf gehört nur dir: zuerst der eigene Probelauf des Installers (der Bericht vorher), dann dein Ja („Nein“ ist die
+Vorgabe), dann läuft sein eigener Installer als root über llmcf-install, abgekoppelt von der SSH-Sitzung wie bei tmux.
+Seine Ausgabe kommt live als reiner Text zu dir, seine Fragen eine nach der anderen, und deine Antwort geht in ihn
+zurück (nie aufbewahrt, nie im Audit-Protokoll); sein „Ja zu allem“-Schalter wird nur genutzt, wenn du ihn beim Bauen
+des Bündels und noch einmal für den Lauf gewählt hast. Eine abgebrochene Verbindung stoppt ihn nie: llmcf verbindet
+sich wieder und liest ab dem letzten gelesenen Byte weiter. llmcf blockiert nicht, was der Installer tut, es beobachtet
+es: mit `strace` mitgeschrieben, wo das Board es hat, und immer vorher und nachher verglichen (Pakete, Konten, offene
+Ports, Dateien an den Orten des Systems). Der Bericht nachher sagt fertig, fertig mit Befunden oder fehlgeschlagen,
+nach den eigenen Rückgabewerten des Harness, und markiert, was einen Blick verdient (eine sudoers- oder
+authorized_keys-Datei geschrieben, ein neues Konto mit uid 0, ein setuid-Bit, ein Download direkt in eine Shell, eine
+abgeschaltete Firewall, ein Port auf allen Adressen, ...). Start, Stopp und Bericht sind Zeilen im Audit-Protokoll.
+Eine KI startet nie einen Lauf und beantwortet nie eine Frage eines Installers; das optionale MCP-Werkzeug
+`harness_report` lässt sie nur Ergebnis, Zahlen und Markierungs-Codes eines Laufs lesen (kein Kontoname, kein Pfad,
+keine Adresse, nichts, was der Installer ausgegeben hat).
+
+In der GUI: **Boards > Board-Harness...** (die Live-Ausgabe, ein Antwortfeld mit **Senden**, **Stoppen...**, **Neu
+verbinden** und der Bericht); im Terminal: [`llm-cli bundle harness`](CLI_Usage_DE.md#bundle-harness).
 
 ## Ditto, der Assistent
 

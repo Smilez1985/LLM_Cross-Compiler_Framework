@@ -640,7 +640,7 @@ Deploy way 3 beside the golden ZIP and the runtime package: one bundle for the w
 `stt-whisper-cpp` with the framework's own whisper.cpp server build for the board and a ggml model, and
 `vision-mmproj` with the llama.cpp runtime started with `--mmproj` for a vision model and its projector; a
 `whisper-server` you pick yourself stays possible with `stt-whisper-cpp-program`, with a warning; speech output with
-sherpa-onnx, the gateway and an agent harness are documented templates). You pick a preset (`llm`, `voice`, `stt`) or the blocks,
+sherpa-onnx and the gateway are documented templates; your own agent harness is the block `harness-agent`, below). You pick a preset (`llm`, `voice`, `stt`) or the blocks,
 set their variables (port, threads, memory limit, autostart, ...; each checked against its type) and choose their
 files (a local file is hashed and copied into the bundle, an online item is pinned by its sha256 and size).
 
@@ -667,6 +667,32 @@ delegation) do the same; you enable them first.
 
 In the GUI: **Boards > Board bundle...**; at the command line: [`llm-cli bundle`](CLI_Usage.md#bundle). When you
 have no block of your own yet, the Community Hub's export points to **New block...** there.
+
+#### Your agent harness on the board
+
+A harness is your own project with its own repository, never code of llmcf, and llmcf does not build it. You take it
+in at a pin (a commit of its repository, or the sha256 of an archive or a folder's tree) with its installer's path,
+the options of its own dry run, what its exit codes mean and, if it has one, its own "assume yes" switch; llmcf keeps
+its tree with one checksum. The block `harness-agent` puts it into a bundle: the tree as one tar file, its checksum in
+the signed manifest and the root action `run_harness`. With your yes for the root actions, llmcf-install unpacks it
+root-owned on the board and checks the checksum; it computes it again before every start, so a tree changed on the
+board never runs.
+
+A run is yours alone: first the installer's own dry run (the report before), then your yes ("No" is the default), then
+its own installer runs as root through llmcf-install, detached from the SSH session like tmux. Its output comes to you
+live as plain text, its questions one by one, and your answer goes back into it (never kept, never in the audit log);
+its "assume yes" switch is used only when you chose it when building the bundle and again for the run. A dropped
+connection never stops it: llmcf attaches again and reads on from the last byte it read. llmcf does not block what the
+installer does, it watches it: traced with `strace` where the board has it, and always compared before and after
+(packages, accounts, listening ports, files in the system's places). The report after says done, done with findings
+or failed by the harness's own exit codes, and flags what deserves a look (a sudoers or authorized_keys file
+written, a new account with uid 0, a setuid bit, a download piped into a shell, a firewall switched off, a port open
+on every address, ...). Start, stop and report are rows of the audit log. An AI never starts a run and never answers
+an installer's question; the optional MCP tool `harness_report` lets it read a run's outcome, counts and flag codes
+only (no account name, path, address or anything the installer printed).
+
+In the GUI: **Boards > Board harness...** (the live output, an answer field with **Send**, **Stop...**,
+**Re-attach** and the report); at the command line: [`llm-cli bundle harness`](CLI_Usage.md#bundle-harness).
 
 ## Ditto, the assistant
 

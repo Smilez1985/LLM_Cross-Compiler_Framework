@@ -74,21 +74,21 @@ TEXTS = {
     "de": {
         "boards.menu.harness": "Board-Harness...",
         "harness.title": "Board-Harness",
-        "harness.intro": ("Ihre eigene Agent-Harness auf einem Board: an einem Pin übernehmen, in ein Bündel legen "
-                          "(Baustein harness-agent), dann ihren eigenen Installer dort als root über llmcf-install "
-                          "ausführen. Seine Fragen kommen hier zu Ihnen, eine nach der anderen; eine abgebrochene "
+        "harness.intro": ("Dein eigener Agent-Harness auf einem Board: an einem Pin übernehmen, in ein Bündel legen "
+                          "(Baustein harness-agent), dann seinen eigenen Installer dort als root über llmcf-install "
+                          "ausführen. Seine Fragen kommen hier zu dir, eine nach der anderen; eine abgebrochene "
                           "Verbindung stoppt ihn nie, Neu verbinden liest weiter. llmcf blockiert ihn nicht: es "
                           "beobachtet und berichtet vorher und nachher."),
         "harness.bundle": "Bündel und Harness:",
-        "harness.none": "Noch kein gespeichertes Bündel hat eine Harness: übernehmen Sie eine und bauen Sie dann im "
+        "harness.none": "Noch kein gespeichertes Bündel hat einen Harness: übernimm einen und baue dann im "
                         "Fenster Board-Bündel ein Bündel mit dem Baustein harness-agent.",
-        "harness.runs": "Läufe dieser Harness (auf diesem Computer gemerkt):",
+        "harness.runs": "Läufe dieses Harness (auf diesem Computer gemerkt):",
         "harness.output": "Ausgabe des Installers (live):",
         "harness.report_label": "Bericht:",
-        "harness.assume_yes": "Den eigenen Assume-Yes-Schalter der Harness nutzen (nur wenn das Bündel ihn trägt)",
+        "harness.assume_yes": "Den eigenen Assume-Yes-Schalter des Harness nutzen (nur wenn das Bündel ihn trägt)",
         "harness.skip_dry": "Ohne Probelauf vorher ausführen",
         "harness.hidden": "Eingabe verbergen",
-        "harness.answer_ph": "Ihre Antwort auf die Frage des Installers, dann Senden",
+        "harness.answer_ph": "Deine Antwort auf die Frage des Installers, dann Senden",
         "harness.btn.take_in": "Harness übernehmen...",
         "harness.btn.refresh": "Aktualisieren",
         "harness.btn.dry_run": "Probelauf...",
@@ -98,17 +98,17 @@ TEXTS = {
         "harness.btn.report": "Bericht",
         "harness.btn.send": "Senden",
         "harness.btn.cancel": "Trennen",
-        "harness.ask.dry": ("Den Probelauf der Harness {harness} auf Board {board} starten (ihr eigenes {args}), als "
+        "harness.ask.dry": ("Den Probelauf des Harness {harness} auf Board {board} starten (sein eigenes {args}), als "
                             "root über llmcf-install? Ein Probelauf sollte nichts ändern; llmcf beobachtet ihn "
                             "trotzdem."),
-        "harness.ask.run": ("Den Installer der Harness {harness} auf Board {board} jetzt ausführen, als root über "
+        "harness.ask.run": ("Den Installer des Harness {harness} auf Board {board} jetzt ausführen, als root über "
                             "llmcf-install? Er kann Pakete installieren, Konten und Dienste anlegen und holen, was er "
                             "braucht; llmcf blockiert ihn nicht, es beobachtet und berichtet, was er getan hat. Seine "
-                            "Fragen kommen eine nach der anderen zu Ihnen. Die Verantwortung für sein Tun liegt bei "
-                            "Ihnen."),
-        "harness.ask.stop": ("Den Installer der Harness {harness} auf Board {board} jetzt stoppen? Was er bisher getan "
+                            "Fragen kommen eine nach der anderen zu dir. Die Verantwortung für sein Tun liegt bei "
+                            "dir."),
+        "harness.ask.stop": ("Den Installer des Harness {harness} auf Board {board} jetzt stoppen? Was er bisher getan "
                              "hat, bleibt."),
-        "harness.no_dry": ("Die Harness {harness} hat keinen eigenen Probelauf. Das Bündel sagt: Installer "
+        "harness.no_dry": ("Der Harness {harness} hat keinen eigenen Probelauf. Das Bündel sagt: Installer "
                            "{installer}, Baum {tree}."),
         "harness.started": "Lauf {run} auf dem Board gestartet.",
         "harness.ended": "Der Installer ist beendet (Rückgabewert {code}).",
@@ -119,8 +119,8 @@ TEXTS = {
         "harness.dropped": "{text}",
         "harness.running": "Harness-{mode} läuft auf dem Board",
         "harness.reading": "Bericht wird vom Board gelesen",
-        "harness.need_bundle": "Wählen Sie zuerst ein Bündel mit einer Harness.",
-        "harness.need_run": "Wählen Sie zuerst einen Lauf.",
+        "harness.need_bundle": "Wähle zuerst ein Bündel mit einem Harness.",
+        "harness.need_run": "Wähle zuerst einen Lauf.",
         "harness.failed": "{reason}",
         "harness.take.title": "Harness übernehmen",
         "harness.take.id": "Kennung (Kleinbuchstaben, Ziffern, '-'):",
@@ -129,11 +129,11 @@ TEXTS = {
         "harness.take.installer": "Installer in der Harness (z. B. installer/install.sh):",
         "harness.take.ref": "Branch oder Tag (nur git):",
         "harness.take.pin": "Pin: der Commit (git) oder die sha256 des Archivs (optional):",
-        "harness.take.dry_args": "Optionen ihres eigenen Probelaufs (durch Leerzeichen getrennt, z. B. --dry-run):",
-        "harness.take.assume_yes": "Ihr eigener Assume-Yes-Schalter NAME=Wert (optional):",
-        "harness.take.exit_codes": "Was ihre Rückgabewerte bedeuten (z. B. 0=done 1=findings):",
+        "harness.take.dry_args": "Optionen seines eigenen Probelaufs (durch Leerzeichen getrennt, z. B. --dry-run):",
+        "harness.take.assume_yes": "Sein eigener Assume-Yes-Schalter NAME=Wert (optional):",
+        "harness.take.exit_codes": "Was seine Rückgabewerte bedeuten (z. B. 0=done 1=findings):",
         "harness.take.title_field": "Titel:",
-        "harness.take.done": ("Harness {id} an {pin} übernommen: {files} Dateien, Baum-Prüfsumme {tree}. Bauen Sie im "
+        "harness.take.done": ("Harness {id} an {pin} übernommen: {files} Dateien, Baum-Prüfsumme {tree}. Baue im "
                               "Fenster Board-Bündel ein Bündel mit dem Baustein harness-agent und harness={id}."),
         "harness.take.bad_codes": "Rückgabewerte werden als CODE=done oder CODE=findings geschrieben, durch "
                                   "Leerzeichen getrennt.",
