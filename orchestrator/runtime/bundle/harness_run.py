@@ -62,14 +62,14 @@ _RECORD_NAMES = {"exit_code", "started", "ended", "watch", "terminal", "trace.tx
 
 # The person's questions (the CLI and the Board harness window ask exactly these words; "No" is the default).
 RUN_QUESTION = ("Run the installer of harness {harness} on board {board} now, as root through llmcf-install? It may "
-                "install packages, add accounts and services and fetch what it needs; llmcf does not block it, it "
+                "install packages, add accounts and services and fetch what it needs; the framework does not block it, it "
                 "watches and reports what it did. Its questions come to you one by one. The responsibility for "
                 "what it does is yours.")
 DRY_QUESTION = ("Start the dry run of harness {harness} on board {board} (its own {args}), as root through "
-                "llmcf-install? A dry run should change nothing; llmcf watches it all the same.")
+                "llmcf-install? A dry run should change nothing; the framework watches it all the same.")
 STOP_QUESTION = "Stop the installer of harness {harness} on board {board} now? What it did so far stays."
-NOT_READY_NEXT = ("Set up the board's root readiness first (llm-cli bundle prepare-root {bundle}, or Prepare root... "
-                  "in the Board bundle window), then apply the bundle's root actions, which place the harness.")
+NOT_READY_NEXT = ("Set up the board's root readiness for bundle {bundle} first (its Prepare root step), then apply "
+                  "the bundle's root actions, which place the harness.")
 
 
 class HarnessRunError(RuntimeError):
@@ -151,8 +151,8 @@ def harness_component(built: Any, component: Optional[str] = None) -> Component:
     if not comps:
         raise HarnessRunError(f"bundle {built.bundle_id} has no harness component"
                               + (f" {component}" if component else ""),
-                              "Build a bundle with the block harness-agent (llm-cli bundle build ... --block "
-                              "harness-agent --set harness.harness=ID).")
+                              "Build a bundle with the block harness-agent and its variable harness set to the "
+                              "harness's id.")
     if len(comps) > 1:
         raise HarnessRunError(f"bundle {built.bundle_id} has several harness components; name one: "
                               + ", ".join(c.id for c in comps))

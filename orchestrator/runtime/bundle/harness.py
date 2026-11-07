@@ -333,7 +333,8 @@ def take_in(spec: HarnessSpec, state_dir: Path, *, git=None, offline: bool = Fal
         (final / SPEC_FILE).write_text(json.dumps(taken.record(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return taken
     finally:
-        shutil.rmtree(staging, ignore_errors=True)
+        from orchestrator.utils.atomic import remove_tree
+        remove_tree(staging, label="the harness's staging folder")
 
 
 def stored(state_dir: Path, harness_id: str) -> List[dict]:

@@ -725,7 +725,7 @@ def _harness_of(plan: BundlePlan, comp_id: str, values: Dict[str, Any], state_di
                    if not want or r.get("tree_sha256") == want), None)
     if record is None:
         plan.problems.append(f"{comp_id}: no harness {hid}" + (f" with tree {str(want)[:12]}" if want else "")
-                             + " is taken in on this computer (llm-cli bundle harness take-in)")
+                             + " is taken in on this computer; take it in first")
         return None
     spec = record.get("spec") or {}
     tree = Path(state_dir) / hz.STORE_DIR / str(hid) / str(record.get("tree_sha256")) / hz.TREE_DIR

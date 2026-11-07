@@ -15,7 +15,7 @@ TEXTS = {
         "harness.intro": ("Your own agent harness on a board: take it in at a pin, put it into a bundle (block "
                           "harness-agent), then run its own installer there as root through llmcf-install. Its "
                           "questions come to you here, one by one; a dropped connection never stops it, Re-attach "
-                          "reads on. llmcf does not block it: it watches and reports before and after."),
+                          "reads on. The framework does not block it: it watches and reports before and after."),
         "harness.bundle": "Bundle and harness:",
         "harness.none": "No stored bundle has a harness yet: take one in, then build a bundle with the block "
                         "harness-agent in the Board bundle window.",
@@ -36,10 +36,10 @@ TEXTS = {
         "harness.btn.send": "Send",
         "harness.btn.cancel": "Detach",
         "harness.ask.dry": ("Start the dry run of harness {harness} on board {board} (its own {args}), as root through "
-                            "llmcf-install? A dry run should change nothing; llmcf watches it all the same."),
+                            "llmcf-install? A dry run should change nothing; the framework watches it all the same."),
         "harness.ask.run": ("Run the installer of harness {harness} on board {board} now, as root through "
                             "llmcf-install? It may install packages, add accounts and services and fetch what it "
-                            "needs; llmcf does not block it, it watches and reports what it did. Its questions come to "
+                            "needs; the framework does not block it, it watches and reports what it did. Its questions come to "
                             "you one by one. The responsibility for what it does is yours."),
         "harness.ask.stop": "Stop the installer of harness {harness} on board {board} now? What it did so far stays.",
         "harness.no_dry": ("Harness {harness} has no dry run of its own. The bundle says: installer {installer}, tree "
@@ -77,7 +77,7 @@ TEXTS = {
         "harness.intro": ("Dein eigener Agent-Harness auf einem Board: an einem Pin übernehmen, in ein Bündel legen "
                           "(Baustein harness-agent), dann seinen eigenen Installer dort als root über llmcf-install "
                           "ausführen. Seine Fragen kommen hier zu dir, eine nach der anderen; eine abgebrochene "
-                          "Verbindung stoppt ihn nie, Neu verbinden liest weiter. llmcf blockiert ihn nicht: es "
+                          "Verbindung stoppt ihn nie, Neu verbinden liest weiter. Das Framework blockiert ihn nicht: es "
                           "beobachtet und berichtet vorher und nachher."),
         "harness.bundle": "Bündel und Harness:",
         "harness.none": "Noch kein gespeichertes Bündel hat einen Harness: übernimm einen und baue dann im "
@@ -99,11 +99,11 @@ TEXTS = {
         "harness.btn.send": "Senden",
         "harness.btn.cancel": "Trennen",
         "harness.ask.dry": ("Den Probelauf des Harness {harness} auf Board {board} starten (sein eigenes {args}), als "
-                            "root über llmcf-install? Ein Probelauf sollte nichts ändern; llmcf beobachtet ihn "
+                            "root über llmcf-install? Ein Probelauf sollte nichts ändern; das Framework beobachtet ihn "
                             "trotzdem."),
         "harness.ask.run": ("Den Installer des Harness {harness} auf Board {board} jetzt ausführen, als root über "
                             "llmcf-install? Er kann Pakete installieren, Konten und Dienste anlegen und holen, was er "
-                            "braucht; llmcf blockiert ihn nicht, es beobachtet und berichtet, was er getan hat. Seine "
+                            "braucht; das Framework blockiert ihn nicht, es beobachtet und berichtet, was er getan hat. Seine "
                             "Fragen kommen eine nach der anderen zu dir. Die Verantwortung für sein Tun liegt bei "
                             "dir."),
         "harness.ask.stop": ("Den Installer des Harness {harness} auf Board {board} jetzt stoppen? Was er bisher getan "
