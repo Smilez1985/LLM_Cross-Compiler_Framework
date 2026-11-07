@@ -210,7 +210,9 @@ Der Installer:
    Gruppe ist, steuert den Docker-Dienst, und der läuft als root; jedes Programm, das als dein Benutzer läuft, kann
    damit Root-Rechte auf diesem Rechner bekommen (`sudo gpasswd -d BENUTZER docker` macht es rückgängig),
 3. kopiert die Dateien, die das Repository ausliefert, nach `/opt/llm-cross-compiler-framework` (Eigentümer ist dein
-   Benutzer; fehlt `rsync`, kommt es aus der Paketverwaltung) und führt sie in `.lcf-installed-files` auf. Ein erneuter
+   Benutzer; fehlt `rsync`, kommt es aus der Paketverwaltung, ebenso 7-Zip, das die Übernahme eines Harness für 7z,
+   rar, iso und Disk-Images braucht: das Paket `7zip`, unter apt und dnf sonst `p7zip`; lässt es sich nicht
+   installieren, geht die Installation weiter) und führt sie in `.lcf-installed-files` auf. Ein erneuter
    Aufruf aktualisiert diese Dateien und entfernt nur Dateien, die ein früherer Aufruf kopiert hat und die das
    Repository nicht mehr ausliefert; alles andere dort bleibt: deine eigenen Targets (Modul-Assistent,
    `llm-cli module create`), installierte Community-Packs, `configs/config.yml`, Builds, Cache und Modelle. Starte
@@ -256,7 +258,9 @@ Der Installer sucht Python (installiert Python 3.13 mit `winget`, wenn keines ge
 3.11 bis 3.14), kopiert das Framework nach `C:\Program Files\LLM-Cross-Compiler-Framework`, legt dort `.venv` an,
 installiert `requirements-gui.txt` (mit der GUI) und legt eine Verknüpfung **LLM-Cross-Compiler-Framework** auf
 den Desktop. Die
-Verknüpfung startet `start_framework.bat` und damit die GUI. Der Ditto-Schritt ist derselbe wie unter Linux
+Verknüpfung startet `start_framework.bat` und damit die GUI. Findet er kein 7-Zip (`7z` oder `7zz` im PATH oder
+`C:\Program Files\7-Zip\7z.exe`), installiert er es mit `winget install -e --id 7zip.7zip` für die Übernahme einer
+Harness (7z, rar, iso und Disk-Images); ein Fehlschlag ist eine Warnung, die Installation geht weiter. Der Ditto-Schritt ist derselbe wie unter Linux
 (`install.bat --ditto=...` oder `LCF_DITTO`); er läuft nur für die angemeldete Person. In dieser Version hat Windows
 noch keinen selbst gebauten Server und keinen Docker-Modus für Ditto, also sagt der Schritt das, und die
 Installation geht weiter.

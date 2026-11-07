@@ -2507,6 +2507,7 @@ llm-cli bundle block list [--json]
 llm-cli bundle block new ID --kind KIND --title TEXT [--summary TEXT] [--from BLOCK]
 llm-cli bundle harness take-in ID LOCATION --kind git|archive|folder --installer PATH [--ref REF] [--pin PIN]
                     [--title TEXT] [--dry-run-arg=OPTION]... [--assume-yes NAME=VALUE] [--exit-code CODE=done|findings]...
+                    [--image-partition N]
 llm-cli bundle harness dry-run BUNDLE [--component ID]
 llm-cli bundle harness run BUNDLE [--component ID] [--assume-yes] [--skip-dry-run]
 llm-cli bundle harness attach|stop BUNDLE RUN [--component ID]
@@ -2602,8 +2603,14 @@ for an AI client; the files are always your choice.
 
 Your own agent harness on the board ([Features](Features.md#your-agent-harness-on-the-board)). `take-in` takes it in
 at a pin and keeps its tree with one checksum in this computer's per-user folder (`--kind git`: an https link, `--ref`
-a branch or tag resolved to its commit, or `--pin` the commit; `archive`: a .zip, .tar.gz or .tar file, `--pin` its
-sha256; `folder`: a folder; on Windows, which keeps no executable bit, only a git checkout, whose index has them: otherwise use the git link or an archive). Write a dry-run option with `=`, as in `--dry-run-arg=--dry-run`. Put it into a bundle
+a branch or tag resolved to its commit, or `--pin` the commit; `archive`: an archive or disk image, `--pin` its
+sha256: zip, tar, tar.gz, tar.bz2, tar.xz, tar.zst, a single .gz/.bz2/.xz/.zst file, and with 7-Zip 7z, rar, iso, cpio
+and .img/.bin disk images, recognised by their content, not their name; `--image-partition N` names the partition of a
+disk image (0 the first) when more than one holds the installer; a .bin that is a script or a program is a harness of
+one file, `--installer` its own name; `folder`: a folder; on Windows, which keeps no executable bit, a git checkout
+takes the bits from its index, any other folder from the content: a file starting with `#!` or an ELF or Mach-O
+program, and the installer, is executable, and the take-in says how many it marked). A format that needs 7-Zip is
+refused with its name and the repair when 7-Zip is missing (run the installer again, or install 7-Zip). Write a dry-run option with `=`, as in `--dry-run-arg=--dry-run`. Put it into a bundle
 with `bundle build DEVICE --block harness-agent --set harness.harness=ID` (`--set harness.assume_yes=yes` carries its
 assume-yes switch, your opt-in); `bundle deploy` places it on the board with the bundle's root actions.
 

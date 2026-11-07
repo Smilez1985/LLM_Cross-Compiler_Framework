@@ -203,7 +203,9 @@ The installer:
    control the Docker service, which runs as root, so every program that runs as your user can get root rights on
    this computer (`sudo gpasswd -d USER docker` undoes it),
 3. copies the files the repository ships to `/opt/llm-cross-compiler-framework` (owned by your user; `rsync` comes from
-   the package manager if it is missing) and lists them in `.lcf-installed-files`. Running it again updates those files
+   the package manager if it is missing, and so does 7-Zip, which the harness take-in uses for 7z, rar, iso and disk
+   images: the package `7zip`, on apt and dnf otherwise `p7zip`; when it cannot be installed the installation goes on)
+   and lists them in `.lcf-installed-files`. Running it again updates those files
    and removes only files that an earlier run copied and the repository no longer ships; everything else there stays:
    your own targets (module wizard, `llm-cli module create`), installed community packs, `configs/config.yml`, builds,
    cache and models. Start updates in the repository folder: the copy of `install.sh` in `/opt` copies and removes
@@ -245,7 +247,9 @@ After `--rootful`, log out and back in once so the `docker` group takes effect. 
 The installer checks for Python (installs Python 3.13 with `winget` if none is found, then requires 3.11 to
 3.14), copies the framework to `C:\Program Files\LLM-Cross-Compiler-Framework`, creates `.venv` there, installs
 `requirements-gui.txt` (with the GUI), and puts a **LLM-Cross-Compiler-Framework** shortcut on the desktop. The shortcut runs
-`start_framework.bat`, which starts the GUI. The Ditto step is the same as on Linux (`install.bat --ditto=...` or
+`start_framework.bat`, which starts the GUI. When no 7-Zip is found (`7z` or `7zz` on the PATH, or
+`C:\Program Files\7-Zip\7z.exe`), it installs it with `winget install -e --id 7zip.7zip` for the harness take-in
+(7z, rar, iso and disk images); a failure is a warning, the installation goes on. The Ditto step is the same as on Linux (`install.bat --ditto=...` or
 `LCF_DITTO`); it runs only for the person who is signed in. In this version Windows has no self-built server and
 no Docker mode for Ditto yet, so the step says so and the installation goes on.
 

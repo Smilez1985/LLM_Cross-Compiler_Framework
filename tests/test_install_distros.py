@@ -3,7 +3,7 @@
 The family comes from ID and ID_LIKE in /etc/os-release (the table of the hardware probe, tables.os_families):
 apt (Debian, Ubuntu, Raspberry Pi OS and the systems built on them), dnf (Fedora, RHEL, CentOS Stream, Rocky Linux,
 AlmaLinux, Oracle Linux, Amazon Linux), zypper (openSUSE Leap and Tumbleweed, SLES), pacman (Arch, Manjaro,
-EndeavourOS) and apk (Alpine). Everything install.sh installs (Python 3.11 to 3.14, rsync, Docker) goes through it,
+EndeavourOS) and apk (Alpine). Everything install.sh installs (Python 3.11 to 3.14, rsync, 7-Zip, Docker) goes through it,
 with the distribution's real package names; nothing is downloaded and run. A third-party repository (Docker's, for
 Fedora, RHEL and CentOS Stream as for apt) is trusted only after its key matches the pinned fingerprint; every other
 family gets the distribution's own package, checked by its package manager. Any other family stops in plain words with
@@ -105,6 +105,7 @@ for arg in "$@"; do
         docker-ce|moby-engine|docker|podman-docker) "$LCF_MAKE" docker ;;
         podman) "$LCF_MAKE" podman ;;
         rsync|curl) "$LCF_MAKE" "$arg" ;;
+        7zip|p7zip-full|p7zip) "$LCF_MAKE" 7z ;;
     esac
 done
 exit 0
@@ -303,11 +304,12 @@ Error: Failed to download metadata for repo 'docker-ce-stable': Cannot download 
 class Box:
     """A sandbox with the os-release of `system`. `present`: commands there from the start ("python3=3.9", "docker",
     "rsync", "curl"); `fails`: argument texts the package managers and tools fail on; `failing_until_suseconnect`:
-    one that SUSEConnect lifts (the Containers Module makes docker installable)."""
+    one that SUSEConnect lifts (the Containers Module makes docker installable). `sevenzip`: 7-Zip (7z) is there
+    from the start, so the tests of the other steps see only their own calls."""
 
     def __init__(self, tmp_path, system, key_file=None, present=("curl",), fails=(), failing_until_suseconnect=None,
                  py_base="3.13", pinned=None, machine="x86_64", tools=(), dnf_plan=DNF_PLAN_CLEAN, answer=None,
-                 fail_output=None, suse_status=None, rootful=True):
+                 fail_output=None, suse_status=None, rootful=True, sevenzip=True):
         self.root = tmp_path / "sandbox"
         self.bin = self.root / "bin"
         self.etc = self.root / "etc"
@@ -358,6 +360,8 @@ class Box:
         for item in present:
             name, _, version = item.partition("=")
             self.make(name, version)
+        if sevenzip:
+            self.make("7z")
 
     @staticmethod
     def write(path: Path, text: str):
@@ -1533,3 +1537,49 @@ class TestRootlessReview:
         assert ("in der Gruppe docker:" in said(run)) is named, said(run)
         plan, _ = box.run("main --dry-run")
         assert ("ist in der Gruppe docker (dauerhaft" in said(plan)) is named, said(plan)
+
+
+# --- 7-Zip for the harness take-in (rar, 7z, iso, cpio, zstd, disk images) -----------------------------------------
+
+@needs_bash_and_gpg
+class TestSevenZip:
+    """7-Zip comes from the family's package manager: the package 7zip, on apt and dnf the older p7zip as the next
+    try; when neither installs, or the system has no package manager the installer knows, the installation goes on
+    with a plain note (the framework reads zip, tar and folders itself)."""
+
+    @pytest.mark.parametrize("system, plan", [
+        ("debian", "7-Zip: fehlt -> apt-get install -y 7zip (sonst: p7zip-full)"),
+        ("fedora", "7-Zip: fehlt -> dnf install -y 7zip (sonst: p7zip p7zip-plugins)"),
+        ("opensuse-tumbleweed", "7-Zip: fehlt -> zypper --non-interactive install 7zip"),
+        ("arch", "7-Zip: fehlt -> pacman -S --needed --noconfirm 7zip"),
+    ])
+    def test_the_dry_run_names_the_7zip_package_of_the_family(self, tmp_path, system, plan):
+        box = Box(tmp_path, system, present=("curl",), sevenzip=False)
+        run, calls = box.run("main --dry-run")
+        assert run.returncode == 0 and calls == [] and plan in said(run), said(run)
+        there = Box(tmp_path / "there", system, present=("curl",))
+        assert "7-Zip: vorhanden" in said(there.run("main --dry-run")[0])
+
+    @pytest.mark.parametrize("system, install", [
+        ("ubuntu", "apt-get install -y 7zip"), ("fedora", "dnf install -y 7zip"),
+        ("opensuse-leap", "zypper --non-interactive install 7zip"), ("arch", "pacman -S --needed --noconfirm 7zip")])
+    def test_a_missing_7zip_is_installed(self, tmp_path, system, install):
+        box = Box(tmp_path, system, present=("python3=3.13",), sevenzip=False)
+        run, calls = box.run("ensure_sevenzip")
+        assert run.returncode == 0 and install in calls and "7-Zip installiert (7zip)." in said(run), said(run)
+        assert (box.bin / "7z").exists()
+
+    def test_apt_falls_back_to_p7zip_and_a_failure_never_stops(self, tmp_path):
+        box = Box(tmp_path, "debian", present=("python3=3.13",), sevenzip=False, fails=("install -y 7zip",))
+        run, calls = box.run("ensure_sevenzip")
+        assert run.returncode == 0 and calls[-2:] == ["apt-get install -y 7zip", "apt-get install -y p7zip-full"]
+        assert "7-Zip installiert (p7zip-full)." in said(run)
+        box = Box(tmp_path / "b", "debian", present=("python3=3.13",), sevenzip=False, fails=("7zip",))
+        run, calls = box.run("ensure_sevenzip; echo went-on")
+        assert run.returncode == 0 and "went-on" in run.stdout and "rar, 7z, iso und Disk-Images" in said(run)
+
+    def test_without_a_known_package_manager_the_installation_goes_on(self, tmp_path):
+        box = Box(tmp_path, "gentoo", present=("python3=3.13",), sevenzip=False)
+        run, calls = box.run("ensure_sevenzip; echo went-on")
+        assert run.returncode == 0 and calls == [] and "went-on" in run.stdout
+        assert "kann der Installer es nicht selbst installieren" in said(run)

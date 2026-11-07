@@ -738,10 +738,21 @@ keinen eigenen Baustein, zeigt der Export im Community Hub dorthin zu **Neuer Ba
 Ein Harness ist dein eigenes Projekt mit eigenem Repository, nie Code von llmcf, und llmcf baut ihn nicht. Du
 übernimmst ihn an einem Pin (ein Commit seines Repositorys, oder die sha256 eines Archivs oder der Baum eines Ordners)
 mit dem Pfad seines Installers, den Optionen seines eigenen Probelaufs, der Bedeutung seiner Rückgabewerte und, wenn er
-einen hat, seinem eigenen „Ja zu allem“-Schalter; llmcf bewahrt seinen Baum mit einer Prüfsumme auf. Die Ausführbar-Bits kommen
-aus der Quelle selbst (die Dateimodi von git, die Einträge des Archivs), darum gibt derselbe Harness unter Windows und
-Linux dieselbe Prüfsumme; unter Windows, das kein Ausführbar-Bit kennt, wird ein Ordner nur übernommen, wenn er ein
-git-Checkout ist (sein Index hat die Bits), sonst über seinen git-Link oder als Archiv. Der Baustein
+einen hat, seinem eigenen „Ja zu allem“-Schalter; llmcf bewahrt seinen Baum mit einer Prüfsumme auf. Jedes übliche
+Format wird übernommen, erkannt an seinem Inhalt, nie am Namen: zip, tar, tar.gz/.tgz, tar.bz2, tar.xz und tar.zst, eine
+einzelne .gz-, .bz2-, .xz- oder .zst-Datei, und über 7-Zip (das die Installer von llmcf einrichten) 7z, rar, iso, cpio
+und Disk-Images (.img oder .bin mit MBR- oder GPT-Partitionen mit ext4, FAT oder NTFS: genommen wird die Partition, die
+den Installer enthält, oder die du mit `--image-partition` nennst, wenn es mehrere sind). Jedes Archiv wird erst
+aufgelistet und geprüft, bevor etwas geschrieben wird (kein absoluter Pfad, kein `..`, kein Link aus dem Baum, kein
+Gerät, die Grenzen für Größe und Dateizahl), in einen Quarantäne-Ordner ausgepackt, und der Baum wird noch einmal
+geprüft. Eine .bin, die kein Archiv, sondern ein Skript oder ein Programm ist (zum Beispiel ein selbstentpackender
+makeself-Installer), ist ein Harness aus einer Datei: sein Installer ist die Datei selbst. Der Pin eines Archivs ist
+immer die sha256 seiner Datei. Die Ausführbar-Bits kommen aus der Quelle selbst (die Dateimodi von git, die Einträge
+des Archivs), darum gibt derselbe Harness unter Windows und Linux dieselbe Prüfsumme. Wo die Quelle keine festhält (ein
+einfacher Ordner unter Windows, das kein Ausführbar-Bit kennt, ein unter Windows gepacktes zip, ein FAT-Image), werden
+sie aus dem Inhalt abgeleitet: Eine Datei, die mit `#!` beginnt oder ein ELF- oder Mach-O-Programm ist, und der
+Installer sind ausführbar; die Übernahme sagt das und wie viele Dateien sie markiert hat. Der Index eines git-Checkouts
+gilt weiter vorrangig, und unter Linux zählen die eigenen Modi eines Ordners. Der Baustein
 `harness-agent` legt ihn in ein Bündel: den Baum als eine Tar-Datei, seine Prüfsumme im signierten Manifest und die
 Root-Aktion `run_harness`. Mit deinem Ja für die Root-Aktionen packt llmcf-install ihn auf dem Board in Root-Besitz aus
 und prüft die Prüfsumme; vor jedem Start rechnet es sie neu, so läuft ein auf dem Board geänderter Baum nie.

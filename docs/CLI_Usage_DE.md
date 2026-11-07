@@ -2617,6 +2617,7 @@ llm-cli bundle block list [--json]
 llm-cli bundle block new ID --kind ART --title TEXT [--summary TEXT] [--from BAUSTEIN]
 llm-cli bundle harness take-in ID LOCATION --kind git|archive|folder --installer PATH [--ref REF] [--pin PIN]
                     [--title TEXT] [--dry-run-arg=OPTION]... [--assume-yes NAME=VALUE] [--exit-code CODE=done|findings]...
+                    [--image-partition N]
 llm-cli bundle harness dry-run BUNDLE [--component ID]
 llm-cli bundle harness run BUNDLE [--component ID] [--assume-yes] [--skip-dry-run]
 llm-cli bundle harness attach|stop BUNDLE RUN [--component ID]
@@ -2718,7 +2719,14 @@ das für einen KI-Client; die Dateien wählst immer du.
 Dein eigener Agent-Harness auf dem Board ([Funktionen](Features_DE.md#dein-agent-harness-auf-dem-board)). `take-in`
 übernimmt ihn an einem Pin und bewahrt seinen Baum mit einer Prüfsumme im Benutzerordner dieses Computers auf
 (`--kind git`: ein https-Link, `--ref` ein Branch oder Tag, der zu seinem Commit aufgelöst wird, oder `--pin` der Commit;
-`archive`: eine .zip-, .tar.gz- oder .tar-Datei, `--pin` ihre sha256; `folder`: ein Ordner; unter Windows, das kein Ausführbar-Bit kennt, nur ein git-Checkout, dessen Index sie hat: sonst den git-Link oder ein Archiv nehmen). Eine Option des
+`archive`: ein Archiv oder Disk-Image, `--pin` seine sha256: zip, tar, tar.gz, tar.bz2, tar.xz, tar.zst, eine einzelne
+.gz-/.bz2-/.xz-/.zst-Datei und mit 7-Zip 7z, rar, iso, cpio und .img-/.bin-Disk-Images, erkannt an ihrem Inhalt, nicht
+am Namen; `--image-partition N` nennt die Partition eines Disk-Images (0 die erste), wenn mehrere den Installer
+enthalten; eine .bin, die ein Skript oder ein Programm ist, ist ein Harness aus einer Datei, `--installer` ihr eigener
+Name; `folder`: ein Ordner; unter Windows, das kein Ausführbar-Bit kennt, nimmt ein git-Checkout die Bits aus seinem
+Index, jeder andere Ordner aus dem Inhalt: Eine Datei, die mit `#!` beginnt oder ein ELF- oder Mach-O-Programm ist, und
+der Installer sind ausführbar, und die Übernahme sagt, wie viele sie markiert hat). Ein Format, das 7-Zip braucht, wird
+ohne 7-Zip mit seinem Namen und der Abhilfe abgelehnt (den Installer noch einmal ausführen oder 7-Zip installieren). Eine Option des
 Probelaufs schreibst du mit `=`, wie in `--dry-run-arg=--dry-run`. In ein Bündel kommt er mit
 `bundle build GERÄT --block harness-agent --set harness.harness=ID` (`--set harness.assume_yes=yes` nimmt seinen Assume-Yes-Schalter mit,
 dein Opt-in); `bundle deploy` legt ihn mit den Root-Aktionen des Bündels auf das Board.

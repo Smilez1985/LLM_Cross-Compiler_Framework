@@ -55,7 +55,7 @@ MODE_CHOICE="${LCF_MODE:-}"
 # Installation liefe durch; 1: sie hielte an (der Grund steht dabei).
 DRY_RUN=0
 
-# Alles, was der Installer installiert (Python, rsync, Docker), kommt über die Paketverwaltung der Linux-Familie
+# Alles, was der Installer installiert (Python, rsync, 7-Zip, Docker), kommt über die Paketverwaltung der Linux-Familie
 # (apt, dnf, zypper, pacman, apk; Familie aus ID und ID_LIKE in /etc/os-release), nie mit einem heruntergeladenen
 # Skript. Jede Paketverwaltung prüft die Signaturen auf ihre Weise; einem fremden Repository (Dockers) wird erst
 # vertraut, wenn der Fingerabdruck seines Schlüssels der hier festgelegte ist.
@@ -343,6 +343,66 @@ pkg_failure_hint() {
     case "$PKG" in
         pacman) echo " Ist die Paketdatenbank veraltet, aktualisiere das System zuerst (sudo pacman -Syu) und starte 'sudo ./install.sh' erneut; der Installer selbst ruft nie 'pacman -Sy' auf (ein Teil-Upgrade, das Arch nicht unterstützt)." ;;
     esac
+}
+
+# --- 7-ZIP ---
+# Die Übernahme eines Harness liest rar, 7z, iso, cpio, zstd und Disk-Images mit 7-Zip (orchestrator/utils/archives.py:
+# 7zz, 7z oder 7za). Es kommt aus der Paketverwaltung der Familie; fehlt es danach, geht die Installation trotzdem
+# weiter (zip, tar, gz, bz2, xz und Ordner liest das Framework selbst), mit einem Hinweis.
+sevenzip_present() {
+    command -v 7zz &> /dev/null || command -v 7z &> /dev/null || command -v 7za &> /dev/null
+}
+
+# Die Paketsätze für 7-Zip, je Zeile einer, der Reihe nach versucht: das Paket 7zip (Debian 12, Ubuntu 24.04, Fedora
+# 41, openSUSE, Arch, Alpine), sonst das ältere p7zip (ältere Debian- und Ubuntu-Versionen, RHEL mit EPEL).
+sevenzip_packages() {
+    case "$PKG" in
+        apt) printf '%s\n' 7zip p7zip-full ;;
+        dnf) printf '%s\n' 7zip "p7zip p7zip-plugins" ;;
+        zypper|pacman|apk) echo 7zip ;;
+    esac
+}
+
+sevenzip_missing_text() {
+    echo "Ohne 7-Zip nimmt das Framework einen Harness als zip, tar, gz, bz2, xz oder Ordner an; rar, 7z, iso und Disk-Images brauchen 7-Zip (Paket 7zip oder p7zip-full). Die Installation geht weiter."
+}
+
+ensure_sevenzip() {
+    local set pkgs=() tool
+    if sevenzip_present; then return 0; fi
+    [ "$SYSTEM_DETECTED" = "1" ] || detect_system
+    tool="$(pkg_tool)"
+    if [ -z "$tool" ] || ! command -v "$tool" &> /dev/null || ! pacman_database_ready; then
+        log_warn "7-Zip fehlt, und für $(system_label) kann der Installer es nicht selbst installieren. $(sevenzip_missing_text)"
+        return 0
+    fi
+    log_info "7-Zip fehlt. Installiere es über $tool..."
+    while IFS= read -r set; do
+        [ -n "$set" ] || continue
+        read -r -a pkgs <<< "$set"
+        if pkg_install "${pkgs[@]}" && sevenzip_present; then
+            log_success "7-Zip installiert (${pkgs[*]})."
+            return 0
+        fi
+    done < <(sevenzip_packages)
+    log_warn "7-Zip ließ sich mit $tool nicht installieren (Meldungen oben). $(sevenzip_missing_text)"
+    return 0
+}
+
+plan_sevenzip() {
+    local sets=() rest=""
+    if sevenzip_present; then
+        echo "   7-Zip: vorhanden"
+        return 0
+    fi
+    pkg_argv
+    mapfile -t sets < <(sevenzip_packages)
+    if [ "${#sets[@]}" -eq 0 ] || [ "${#PKG_ARGV[@]}" -eq 0 ]; then
+        echo "   7-Zip: fehlt; der Installer kann es hier nicht installieren (die Installation geht weiter)"
+        return 0
+    fi
+    if [ "${#sets[@]}" -gt 1 ]; then rest=" (sonst: ${sets[*]:1})"; fi
+    echo "   7-Zip: fehlt -> ${PKG_ARGV[*]} ${sets[0]}$rest"
 }
 
 # --- PYTHON 3.11 BIS 3.14 ---
@@ -1423,6 +1483,7 @@ setup_system() {
 
     # requirements.txt only matches Python 3.11-3.14; outside that range pip would silently install nothing.
     ensure_python
+    ensure_sevenzip
 
     # In einem selbst gebauten Framework-Image gibt es keine Docker-Engine und keine docker-Gruppe.
     if [ "$CONTAINER_BUILD" = "1" ]; then
@@ -1991,6 +2052,7 @@ plan_installation() {
         pkg_argv
         echo "   rsync: fehlt -> ${PKG_ARGV[*]} rsync"
     fi
+    plan_sevenzip
     echo "   Danach: Programmdateien nach $INSTALL_DIR, .venv mit $requirements (${PYTHON:-dem eben installierten Python}), Starter /usr/local/bin/llm-framework, Ditto ($DITTO_CHOICE)"
     echo "   Framework-Modus: ${MODE_CHOICE:-wird gefragt (ohne Terminal: bleibt, wie er ist; neu: privat)}"
     log_success "Probelauf fertig: Die Installation liefe hier durch."

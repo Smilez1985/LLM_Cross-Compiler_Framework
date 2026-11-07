@@ -673,10 +673,19 @@ have no block of your own yet, the Community Hub's export points to **New block.
 A harness is your own project with its own repository, never code of llmcf, and llmcf does not build it. You take it
 in at a pin (a commit of its repository, or the sha256 of an archive or a folder's tree) with its installer's path,
 the options of its own dry run, what its exit codes mean and, if it has one, its own "assume yes" switch; llmcf keeps
-its tree with one checksum. The executable bits come from the source itself (git's file modes, the archive's
-members), so the same harness gives the same checksum on Windows and Linux; on Windows, which keeps no executable bit,
-a folder is taken in only when it is a git checkout (its index has the bits), otherwise by its git link or as an
-archive. The block `harness-agent` puts it into a bundle: the tree as one tar file, its checksum in
+its tree with one checksum. Every common format is taken in, recognised by its content, never by its name: zip, tar,
+tar.gz/.tgz, tar.bz2, tar.xz and tar.zst, a single .gz, .bz2, .xz or .zst file, and through 7-Zip (which llmcf's
+installers set up) 7z, rar, iso, cpio and disk images (.img or .bin with MBR or GPT partitions holding ext4, FAT or
+NTFS: the partition that holds the installer is taken, or the one you name with `--image-partition` when several do).
+Every archive is listed and checked before anything is written (no absolute path, no `..`, no link out of the tree, no
+device, the size and file caps) and extracted into a quarantine folder, and the tree is checked again. A .bin that is
+no archive but a script or a program (a makeself self-extracting installer, for example) is a harness of one file:
+its installer is the file itself. The pin of an archive is always its file's sha256. The executable bits come from the
+source itself (git's file modes, the archive's members), so the same harness gives the same checksum on Windows and
+Linux. Where the source records none (a plain folder on Windows, which keeps no executable bit, a zip made on Windows,
+a FAT image) they are derived from the content: a file that starts with `#!` or is an ELF or Mach-O program, and the
+installer, is executable; the take-in says so and how many files it marked. A git checkout's index still wins, and
+on Linux a folder's own modes count. The block `harness-agent` puts it into a bundle: the tree as one tar file, its checksum in
 the signed manifest and the root action `run_harness`. With your yes for the root actions, llmcf-install unpacks it
 root-owned on the board and checks the checksum; it computes it again before every start, so a tree changed on the
 board never runs.

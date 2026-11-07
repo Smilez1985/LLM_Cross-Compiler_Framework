@@ -233,6 +233,22 @@ try {
     Write-Warning "Marker fuer den Uninstaller nicht geschrieben ($_); er findet die Installation dann nicht."
 }
 
+# 7-ZIP: the harness take-in reads rar, 7z, iso, cpio, zstd and disk images with it (orchestrator/utils/archives.py:
+# 7zz or 7z on PATH, or the usual install folder). Installed with winget only when none is there, like Python and
+# Podman above; a failure never stops the installation (zip, tar and folders need no 7-Zip).
+Write-Host "[7-Zip] Pruefe 7-Zip (fuer Harness-Archive wie rar, 7z, iso und Disk-Images)..." -ForegroundColor Yellow
+try {
+    $SevenZipExe = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
+    $SevenZipThere = (Get-Command "7z" -ErrorAction SilentlyContinue) -or (Get-Command "7zz" -ErrorAction SilentlyContinue) -or (Test-Path $SevenZipExe)
+    if (-not $SevenZipThere) {
+        Write-Host "7-Zip fehlt. Installiere es ueber winget (7zip.7zip)..."
+        winget install -e --id 7zip.7zip --accept-source-agreements --accept-package-agreements
+        if ($LASTEXITCODE -ne 0) { Write-Warning "7-Zip liess sich nicht mit winget installieren; selbst: 7-Zip fuer Windows installieren (winget install -e --id 7zip.7zip). Ohne 7-Zip nimmt das Framework einen Harness als zip, tar oder Ordner an; rar, 7z, iso und Disk-Images brauchen 7-Zip." }
+    }
+} catch {
+    Write-Warning "7-Zip: $_ - die Installation geht weiter."
+}
+
 # CONTAINER ENGINE: without administrator rights by default (docs/DESIGN.md, no standing rights that can do more than
 # needed). Podman with its machine (a WSL 2 machine, rootless by default) for the signed-in person; Docker Desktop
 # only with --rootful, after a warning: its group docker-users controls a service with administrator rights, so the

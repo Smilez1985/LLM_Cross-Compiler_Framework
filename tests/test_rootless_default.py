@@ -317,6 +317,20 @@ def test_the_windows_installer_passes_its_flags_and_stops_on_an_unknown_engine()
     assert all(ord(c) < 128 for c in step), "the PowerShell part stays ASCII like the rest of install.bat"
 
 
+def test_the_windows_installer_sets_up_7zip_only_when_none_is_there():
+    """7-Zip for the harness take-in (rar, 7z, iso, disk images): winget's exact id 7zip.7zip with the same switches as
+    the other winget calls, only when neither 7z nor 7zz is on PATH and the usual install folder has none; a failure is
+    a warning with a plain hint, never the end of the installation."""
+    from conftest import REPO_ROOT
+    text = (REPO_ROOT / "install.bat").read_text(encoding="utf-8")
+    step = text[text.index("# 7-ZIP:"):text.index("# CONTAINER ENGINE:")]
+    assert "winget install -e --id 7zip.7zip --accept-source-agreements --accept-package-agreements" in step
+    assert 'Get-Command "7z"' in step and 'Get-Command "7zz"' in step and '"7-Zip\\7z.exe"' in step
+    assert "if (-not $SevenZipThere)" in step and "Write-Warning" in step and "Write-Error" not in step
+    assert "--silent" not in step and "--disable-interactivity" not in step
+    assert all(ord(c) < 128 for c in step), "the PowerShell part stays ASCII like the rest of install.bat"
+
+
 @POSIX_SOCKETS
 class TestRootlessDockerWithoutARuntimeVariable:
     """Review: without XDG_RUNTIME_DIR (a start through sudo -u, cron or a service) the person's Podman socket was
