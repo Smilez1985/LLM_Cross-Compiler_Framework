@@ -1,4 +1,4 @@
-Version 3.3.0 · Stand 2026-11-02
+Version 3.4.0 · Stand 2026-11-07
 
 [English](README.md) · **Deutsch**
 
@@ -967,7 +967,7 @@ Die Einstellungen zu Wissensbasis, Deep Ingest und Community erklärt [docs/Feat
 ## Wie es weitergeht
 
 Die [Roadmap](docs/ROADMAP_DE.md) führt auf, was geplant ist; Erledigtes wandert in den [CHANGELOG](CHANGELOG_DE.md).
-Version 3.3.0 ist in Arbeit. Kurz:
+Version 3.4.0 ist in Arbeit. Sie führt fort, was 3.3.0 offen ließ, danach LoRA und große Modelle. Kurz:
 
 - **Aus 3.1.0 übernommen:** die übrigen Anmeldeverfahren je Zugangsart (Anmeldung im Browser, wo der Anbieter sie
   erlaubt, Cloud-Plattformen), der letzte Durchgang durch die deutschen Texte jedes Fensters und der veröffentlichte
@@ -987,7 +987,8 @@ Version 3.3.0 ist in Arbeit. Kurz:
 - **Entschieden, wartet auf seine Reihe:** Vollmachten, ein Postfach für jeden MCP-Client, ein eigenes Konto
   `llmcf`, Board-Sicherungen, die der PC holt, und die geteilte OpenSSH-Verbindung für einen Board-Schritt.
 
-Nach 3.3.0: der Build-Dienst mit einer Warteschlange über alle Programme, LoRA und große Modelle (3.4.0), eine
+Danach in 3.4.0: LoRA-Adapter und ihr optionales Training sowie große Modelle (Prüfungen vor dem Build, GGUF als
+Eingabe, Rezepte je Tensor). Nach 3.4.0: der Build-Dienst mit einer Warteschlange über alle Programme, eine
 gehärtete Lieferkette (3.5.0) und Rust dort, wo das Framework auf das Netzwerk oder ein Board trifft. Builds in der
 Cloud sind nicht geplant.
 

@@ -1,4 +1,4 @@
-Version 3.3.0 · Last updated 2026-11-01
+Version 3.4.0 · Last updated 2026-11-01
 
 **English** · [Deutsch](Module_Developer_Guide_DE.md)
 

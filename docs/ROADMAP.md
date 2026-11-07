@@ -1,4 +1,4 @@
-Version 3.3.0 · Last updated 2026-10-31
+Version 3.4.0 · Last updated 2026-11-07
 
 **English** · [Deutsch](ROADMAP_DE.md)
 
@@ -6,7 +6,7 @@ Version 3.3.0 · Last updated 2026-10-31
 
 What comes next. Version numbers and contents can still change; nothing in this document is part of a released
 version. It is one of the three files of the [blueprint](BLUEPRINT.md): how the framework is built and why is in the
-[design](DESIGN.md), what each version contains is in the [changelog](../CHANGELOG.md). The latest version is 3.1.0
+[design](DESIGN.md), what each version contains is in the [changelog](../CHANGELOG.md). The latest version is 3.3.0
 (see the changelog).
 
 Status per item:
@@ -20,15 +20,15 @@ decisions it comes from.
 
 | Version | Theme | Status |
 |---|---|---|
-| 3.3.0 | Ditto's context, the board bundle, the device runtime and more hardware | in progress |
+| 3.4.0 | Ditto's context, the board bundle, the device runtime and more hardware; LoRA and large models | in progress |
 | next | Build service, queue and modes | planned |
-| 3.4.0 | LoRA and large models | planned |
 | 3.5.0 | Supply chain and community | planned |
 | later | Rust parts for the network and the board | planned |
 | later | More hardware and MCP extensions | planned |
 
-## 3.3.0 - Ditto's context, the board bundle, the device runtime and more hardware (in progress)
+## 3.4.0 - Ditto's context, the board bundle, the device runtime and more hardware; LoRA and large models (in progress)
 
+3.3.0 is released (see the changelog); what it left open is carried on here, with LoRA and large models after it.
 This version comes in this order: Ditto's context first, the board bundle next to it, then the gateway, voice and MCP
 on the board. The first hardware sets the priorities for the device runtime: RK3566 boards, NVIDIA RTX GPUs and the
 AMD Ryzen Z1 Extreme, on Windows and Linux. The recipes come first there; the rotation stage and the generic ARM64
@@ -91,7 +91,9 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 | **`llmcf-gateway`, the rest of stage 1**: the root action that lets the gateway's account start and stop exactly the llm component's unit (a polkit rule through llmcf-install); the gateway's `--llm-unit` and its idle stop are built, the bundle does not pass them yet. | partly done (the gateway, its block, check and bench) |
 | **The gateway's status for an AI and the token for network clients**: an MCP read tool with the gateway's labels, and the host's way to hand the bearer token of `bind lan` to a client the person names. | planned |
 | **A wake word on the board, and the opt-in voice parts runnable**: whisper.cpp's server has no wake word (only an example that needs SDL2 and a microphone has one), so a wake word needs its own engine; NeMo and the GigaSpeech wake word are documented opt-in templates whose licence terms the person accepts first, never on by default, and become buildable with the speech output's engine. | planned |
-| **An agent harness as a bundle component**, at a pinned commit, under its own Linux user, installed by its own installer after the person's yes; llmcf does not block what that installer fetches, watches what it does (network targets, packages, files, processes), flags suspicious activity and reports before and after. | planned |
+| **An agent harness on the board as an opt-in bundle component**: the person names it, as files, a zip, a folder or a link to its repository (a harness is its own project with its own repository, never code in llmcf); llmcf takes it in at a pinned commit or hash (it does not build it: what a harness compiles, it ships itself), installs it under its own Linux user by its own installer after the person's yes, does not block what that installer fetches, watches what it does (network targets, packages, files, processes: traced with `strace` where the board has it, and always a comparison before and after of packages, files and listening ports), flags suspicious activity and reports before and after. This is the board only: llmcf itself keeps Ditto, with a local model or a cloud API. | planned |
+| **Three ways for a harness installer to reach what it fetches**, the person's choice per board: (1) the board is online itself; (2) the board is linked only to the PC (cable, the PC's hotspot) and llmcf on the PC relays and caches what the installer fetches (packages, Python packages, downloads), every request logged; (3) fully offline: llmcf fetches beforehand on the PC what the installer needs for the board (packages, Python wheels for the board's architecture, cross-built by llmcf where no wheel exists, the harness's own release files), from a list the harness gives or from a recorded first run, puts it in the bundle and runs the installer against these local sources. | planned |
+| **Languages on the board like in llmcf**: German and English for the board's voice and texts, and language packs the person makes and adds (upload), checked before they are used. | planned |
 | **A contract test for harnesses** that plug into the gateway, without any harness code in llmcf. | planned |
 | **An optional session store on the board**, any time after the gateway is deployed. | planned |
 | **An MCP server in the gateway**: loopback only, read tools first (model status, health, bench, logs). | planned |
@@ -136,6 +138,18 @@ errors with a next step) and the sign-in panel in the GUI with the matching CLI 
 | **Benchmark window** (`orchestrator/gui/benchmark_window.py`, in development): run llama-bench and show the results as a table; still to be finished on top of the runtime on the device and made reachable from the GUI. | planned |
 | **One SSH connection shared by a board step's commands** (OpenSSH `ControlMaster`, as an option): the OpenSSH fallback logs in once per step instead of once per command; connection sharing stays off until then, and the framework's own SSH settings refuse it. | planned |
 
+### LoRA and large models
+
+| Item | Status |
+|---|---|
+| **LoRA adapters**: merge them into the model or keep them as an adapter (or both), with an own streaming merger, GGUF adapters for `llama-server --lora`, RKLLM LoRA, and a `lora` block in the target capabilities. | planned |
+| **Optional LoRA training** with a lean trainer of our own: ideas from Unsloth, but no Unsloth code and no Unsloth installation. | planned |
+| **Large models**: a check of disk space and RAM before a build, reuse of F16 intermediates, GGUF as input (passthrough and requantization), per-tensor quantization recipes checked by KL divergence, an importance matrix computed, taken from Hugging Face or loaded from a file, and tokenizer and chat-template checks after each build. | planned |
+| **Defaults for the importance matrix and calibration** (settings `default_enable_imatrix` and `default_calibration_dataset`, in development): used as the defaults of the Builder, the CLI and the AI tools. | planned |
+| **Bring the pip cache back in CI once the quota allows**: `cache: pip` in the setup-python steps of `ci.yml`, `security.yml` and `retrieval-eval.yml` is switched off for now, because the account's cache and egress quota ran out and a job hung at the cache restore ([design](DESIGN.md#tests-ci-and-the-windows-hazards)). | planned |
+
+Not planned: airllm. It is a runtime, not a converter, and does not belong in the pipeline.
+
 ## Next - build service, queue and modes (planned; starts right after the architecture consolidation)
 
 The steps come in this order. Decisions that are still open are written into their row; they are asked when that
@@ -150,18 +164,6 @@ step starts.
 | **Step 5 - Kubernetes and Nomad**: opt-in places to run builds, next to the local Docker builds that stay the default. They use images the company builds itself from the framework's Dockerfiles into its own registry, pinned by digest, never images from the community hub. Why: a company may want builds on its own cluster. Open decisions: both modes or enterprise mode only; through `kubectl`/`nomad` or their HTTP APIs. | planned |
 | **Step 6 - Own keyring service on Linux**: the framework ships its own keyring service on Linux (decided on 2026-10-15, not built; Windows keeps the Windows Credential Manager); after step 4. Why: many Linux installations have no usable keyring, and the vault refuses one that hangs, keeps nothing or stores in plain text. Open decision: build it or keep the OS keyring. | planned |
 | **Step 7 - Newest fitting versions kept automatically**: every dependency (Python, CUDA, Docker base images, toolkits, GitHub Actions) stays on the highest version that fits, and each update is tested before it lands. A plan is being prepared. Why: old versions collect security advisories, and an update must not break anything. | planned |
-
-## 3.4.0 - LoRA and large models (planned)
-
-| Item | Status |
-|---|---|
-| **LoRA adapters**: merge them into the model or keep them as an adapter (or both), with an own streaming merger, GGUF adapters for `llama-server --lora`, RKLLM LoRA, and a `lora` block in the target capabilities. | planned |
-| **Optional LoRA training** with a lean trainer of our own: ideas from Unsloth, but no Unsloth code and no Unsloth installation. | planned |
-| **Large models**: a check of disk space and RAM before a build, reuse of F16 intermediates, GGUF as input (passthrough and requantization), per-tensor quantization recipes checked by KL divergence, an importance matrix computed, taken from Hugging Face or loaded from a file, and tokenizer and chat-template checks after each build. | planned |
-| **Defaults for the importance matrix and calibration** (settings `default_enable_imatrix` and `default_calibration_dataset`, in development): used as the defaults of the Builder, the CLI and the AI tools. | planned |
-| **Bring the pip cache back in CI once the quota allows**: `cache: pip` in the setup-python steps of `ci.yml`, `security.yml` and `retrieval-eval.yml` is switched off for now, because the account's cache and egress quota ran out and a job hung at the cache restore ([design](DESIGN.md#tests-ci-and-the-windows-hazards)). | planned |
-
-Not planned: airllm. It is a runtime, not a converter, and does not belong in the pipeline.
 
 ## 3.5.0 - Supply chain and community (planned)
 

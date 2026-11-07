@@ -1,4 +1,4 @@
-Version 3.3.0 · Stand 2026-10-31
+Version 3.4.0 · Stand 2026-11-07
 
 [English](ROADMAP.md) · **Deutsch**
 
@@ -7,7 +7,7 @@ Version 3.3.0 · Stand 2026-10-31
 Was als Nächstes kommt. Versionsnummern und Inhalte können sich noch ändern; nichts in diesem Dokument ist Teil
 einer veröffentlichten Version. Es ist eine der drei Dateien des [Bauplans](BLUEPRINT_DE.md): Wie das Framework
 gebaut ist und warum, steht im [Design](DESIGN_DE.md), was jede Version enthält, im [Changelog](../CHANGELOG_DE.md).
-Die neueste Version ist 3.1.0 (siehe Changelog).
+Die neueste Version ist 3.3.0 (siehe Changelog).
 
 Status je Punkt:
 
@@ -20,15 +20,15 @@ der Entscheidungen des Maintainers, aus der sie stammt.
 
 | Version | Thema | Status |
 |---|---|---|
-| 3.3.0 | Dittos Kontext, das Board-Bündel, die Laufzeit auf dem Gerät und mehr Hardware | in Arbeit |
+| 3.4.0 | Dittos Kontext, das Board-Bündel, die Laufzeit auf dem Gerät und mehr Hardware; LoRA und große Modelle | in Arbeit |
 | als Nächstes | Build-Dienst, Warteschlange und Modi | geplant |
-| 3.4.0 | LoRA und große Modelle | geplant |
 | 3.5.0 | Lieferkette und Community | geplant |
 | später | Rust-Teile für das Netzwerk und das Board | geplant |
 | später | Mehr Hardware und MCP-Erweiterungen | geplant |
 
-## 3.3.0 - Dittos Kontext, das Board-Bündel, die Laufzeit auf dem Gerät und mehr Hardware (in Arbeit)
+## 3.4.0 - Dittos Kontext, das Board-Bündel, die Laufzeit auf dem Gerät und mehr Hardware; LoRA und große Modelle (in Arbeit)
 
+3.3.0 ist veröffentlicht (siehe Changelog); was es offen ließ, geht hier weiter, LoRA und große Modelle danach.
 Diese Version kommt in dieser Reihenfolge: zuerst Dittos Kontext, daneben das Board-Bündel, dann das Gateway,
 Sprache und MCP auf dem Board. Die erste Hardware setzt die Prioritäten für die Laufzeit auf dem Gerät:
 RK3566-Boards, NVIDIA-RTX-GPUs und der AMD Ryzen Z1 Extreme, unter Windows und Linux. Die Rezepte kommen dort
@@ -92,7 +92,9 @@ Anbieter, Prüfung, Fehler mit nächstem Schritt) und der Anmeldebereich der GUI
 | **`llmcf-gateway`, der Rest von Stufe 1**: die Root-Aktion, mit der das Konto des Gateways genau die Unit der llm-Komponente starten und stoppen darf (eine polkit-Regel über llmcf-install); `--llm-unit` und das Stoppen im Leerlauf sind gebaut, das Bündel gibt sie noch nicht mit. | teilweise erledigt (das Gateway, sein Baustein, Prüfung und Benchmark) |
 | **Der Zustand des Gateways für eine KI und das Token für Clients im Netz**: ein MCP-Lesewerkzeug mit den Labels des Gateways und der Weg des Hosts, das Bearer-Token von `bind lan` an einen Client zu geben, den die Person nennt. | geplant |
 | **Ein Weckwort auf dem Board, und die Opt-in-Sprachteile lauffähig**: Der Server von whisper.cpp hat kein Weckwort (nur ein Beispiel, das SDL2 und ein Mikrofon braucht, hat eines), also braucht ein Weckwort eine eigene Engine; NeMo und das GigaSpeech-Weckwort sind dokumentierte Opt-in-Vorlagen, deren Lizenzbedingungen die Person zuerst annimmt, nie standardmäßig an, und werden mit der Engine der Sprachausgabe baubar. | geplant |
-| **Ein Agenten-Harness als Bestandteil des Bündels**, auf einem festgelegten Commit, unter einem eigenen Linux-Benutzer, installiert von seinem eigenen Installer nach dem Ja der Person; llmcf blockiert nicht, was dieser Installer holt, beobachtet, was er tut (Netzziele, Pakete, Dateien, Prozesse), markiert Verdächtiges und berichtet vorher und nachher. | geplant |
+| **Ein Agenten-Harness auf dem Board als Opt-in-Bestandteil des Bündels**: Die Person nennt ihn, als Dateien, Zip, Ordner oder Link zu seinem Repository (ein Harness ist ein eigenes Projekt mit eigenem Repository, nie Code in llmcf); llmcf übernimmt ihn auf einem festgelegten Commit oder Hash (es baut ihn nicht: Was ein Harness kompiliert, liefert er selbst), installiert ihn unter einem eigenen Linux-Benutzer mit seinem eigenen Installer nach dem Ja der Person, blockiert nicht, was dieser Installer holt, beobachtet, was er tut (Netzziele, Pakete, Dateien, Prozesse: mit `strace` mitgeschrieben, wo das Board es hat, und immer ein Vergleich vorher und nachher von Paketen, Dateien und offenen Ports), markiert Verdächtiges und berichtet vorher und nachher. Das betrifft nur das Board: llmcf selbst behält Ditto, mit lokalem Modell oder Cloud-API. | geplant |
+| **Drei Wege, auf denen ein Harness-Installer bekommt, was er holt**, je Board nach Wahl der Person: (1) Das Board ist selbst online; (2) das Board hängt nur am PC (Kabel, Hotspot des PCs), und llmcf auf dem PC leitet weiter und puffert, was der Installer holt (Pakete, Python-Pakete, Downloads), jede Anfrage protokolliert; (3) ganz offline: llmcf holt vorher auf dem PC, was der Installer für das Board braucht (Pakete, Python-Wheels für die Architektur des Boards, von llmcf cross-gebaut, wo es kein Wheel gibt, die eigenen Release-Dateien des Harness), aus einer Liste des Harness oder einem mitgeschriebenen ersten Lauf, legt es ins Bündel und lässt den Installer gegen diese lokalen Quellen laufen. | geplant |
+| **Sprachen auf dem Board wie in llmcf**: Deutsch und Englisch für Sprache und Texte des Boards, dazu Sprachpakete, die die Person selbst erstellt und hinzufügt (Upload), geprüft, bevor sie genutzt werden. | geplant |
 | **Ein Vertragstest für Harnesses**, die sich an das Gateway anschließen, ohne Harness-Code in llmcf. | geplant |
 | **Ein optionaler Sitzungsspeicher auf dem Board**, jederzeit, nachdem das Gateway deployt ist. | geplant |
 | **Ein MCP-Server im Gateway**: nur Loopback, zuerst lesende Tools (Modellstatus, Zustand, Benchmark, Logs). | geplant |
@@ -137,6 +139,18 @@ Anbieter, Prüfung, Fehler mit nächstem Schritt) und der Anmeldebereich der GUI
 | **Benchmark-Fenster** (`orchestrator/gui/benchmark_window.py`, in Entwicklung): llama-bench ausführen und die Ergebnisse als Tabelle zeigen; muss noch auf Basis der Laufzeit auf dem Gerät fertig gebaut und in der GUI erreichbar gemacht werden. | geplant |
 | **Eine SSH-Verbindung für die Befehle eines Board-Schritts** (OpenSSH `ControlMaster`, als Option): Der OpenSSH-Rückfallweg meldet sich einmal je Schritt an statt einmal je Befehl; geteilte Verbindungen bleiben bis dahin aus, und die eigenen SSH-Einstellungen des Frameworks lehnen sie ab. | geplant |
 
+### LoRA und große Modelle
+
+| Punkt | Status |
+|---|---|
+| **LoRA-Adapter**: in das Modell einrechnen oder als Adapter behalten (oder beides), mit eigenem Streaming-Merger, GGUF-Adaptern für `llama-server --lora`, RKLLM-LoRA und einem Block `lora` in den Target-Capabilities. | geplant |
+| **Optionales LoRA-Training** mit einem eigenen, schlanken Trainer: Ideen von Unsloth, aber kein Unsloth-Code und keine Unsloth-Installation. | geplant |
+| **Große Modelle**: eine Prüfung von Speicherplatz und RAM vor dem Build, Wiederverwendung von F16-Zwischenständen, GGUF als Eingabe (Durchreichen und Neu-Quantisieren), Quantisierungsrezepte je Tensor, per KL-Divergenz geprüft, eine Importance-Matrix berechnet, von Hugging Face übernommen oder aus einer Datei geladen, und Prüfungen von Tokenizer und Chat-Vorlage nach jedem Build. | geplant |
+| **Vorgaben für Importance-Matrix und Kalibrierung** (Einstellungen `default_enable_imatrix` und `default_calibration_dataset`, in Entwicklung): als Vorgaben in Builder, CLI und den KI-Tools genutzt. | geplant |
+| **Den pip-Cache in der CI zurückbringen, sobald das Kontingent es erlaubt**: `cache: pip` in den setup-python-Schritten von `ci.yml`, `security.yml` und `retrieval-eval.yml` ist vorerst abgeschaltet, weil das Cache- und Egress-Kontingent des Kontos aufgebraucht war und ein Job beim Wiederherstellen des Caches hing ([Design](DESIGN_DE.md#tests-ci-und-die-windows-fallen)). | geplant |
+
+Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht in die Pipeline.
+
 ## Als Nächstes - Build-Dienst, Warteschlange und Modi (geplant; beginnt direkt nach der Architektur-Konsolidierung)
 
 Die Schritte kommen in dieser Reihenfolge. Entscheidungen, die noch offen sind, stehen in ihrer Zeile; sie werden
@@ -151,18 +165,6 @@ gefragt, wenn der Schritt beginnt.
 | **Schritt 5 - Kubernetes und Nomad**: Orte für Builds als Opt-in, neben den lokalen Docker-Builds, die die Vorgabe bleiben. Sie nutzen Images, die die Firma selbst aus den Dockerfiles des Frameworks in ihre eigene Registry baut, per Digest festgelegt, nie Images aus dem Community Hub. Warum: Eine Firma will Builds vielleicht auf ihrem eigenen Cluster. Offene Entscheidungen: beide Modi oder nur der Enterprise-Modus; über `kubectl`/`nomad` oder ihre HTTP-APIs. | geplant |
 | **Schritt 6 - Eigener Schlüsselbund-Dienst unter Linux**: Das Framework bringt unter Linux einen eigenen Schlüsselbund-Dienst mit (beschlossen am 2026-10-15, nicht gebaut; Windows behält die Windows-Anmeldeinformationsverwaltung); nach Schritt 4. Warum: Viele Linux-Installationen haben keinen nutzbaren Schlüsselbund, und der Tresor lehnt einen ab, der hängt, nichts behält oder im Klartext speichert. Offene Entscheidung: bauen oder beim Schlüsselbund des Systems bleiben. | geplant |
 | **Schritt 7 - Neueste passende Versionen, automatisch gehalten**: Jede Abhängigkeit (Python, CUDA, Docker-Basis-Images, Toolkits, GitHub Actions) bleibt auf der höchsten Version, die passt, und jedes Update wird getestet, bevor es übernommen wird. Ein Plan wird vorbereitet. Warum: Alte Versionen sammeln Sicherheitsmeldungen, und ein Update darf nichts kaputt machen. | geplant |
-
-## 3.4.0 - LoRA und große Modelle (geplant)
-
-| Punkt | Status |
-|---|---|
-| **LoRA-Adapter**: in das Modell einrechnen oder als Adapter behalten (oder beides), mit eigenem Streaming-Merger, GGUF-Adaptern für `llama-server --lora`, RKLLM-LoRA und einem Block `lora` in den Target-Capabilities. | geplant |
-| **Optionales LoRA-Training** mit einem eigenen, schlanken Trainer: Ideen von Unsloth, aber kein Unsloth-Code und keine Unsloth-Installation. | geplant |
-| **Große Modelle**: eine Prüfung von Speicherplatz und RAM vor dem Build, Wiederverwendung von F16-Zwischenständen, GGUF als Eingabe (Durchreichen und Neu-Quantisieren), Quantisierungsrezepte je Tensor, per KL-Divergenz geprüft, eine Importance-Matrix berechnet, von Hugging Face übernommen oder aus einer Datei geladen, und Prüfungen von Tokenizer und Chat-Vorlage nach jedem Build. | geplant |
-| **Vorgaben für Importance-Matrix und Kalibrierung** (Einstellungen `default_enable_imatrix` und `default_calibration_dataset`, in Entwicklung): als Vorgaben in Builder, CLI und den KI-Tools genutzt. | geplant |
-| **Den pip-Cache in der CI zurückbringen, sobald das Kontingent es erlaubt**: `cache: pip` in den setup-python-Schritten von `ci.yml`, `security.yml` und `retrieval-eval.yml` ist vorerst abgeschaltet, weil das Cache- und Egress-Kontingent des Kontos aufgebraucht war und ein Job beim Wiederherstellen des Caches hing ([Design](DESIGN_DE.md#tests-ci-und-die-windows-fallen)). | geplant |
-
-Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht in die Pipeline.
 
 ## 3.5.0 - Lieferkette und Community (geplant)
 

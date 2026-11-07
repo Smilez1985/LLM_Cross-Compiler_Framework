@@ -1,4 +1,4 @@
-Version 3.3.0 · Last updated 2026-11-06
+Version 3.4.0 · Last updated 2026-11-06
 
 **English** · [Deutsch](Editors_and_Agents_DE.md)
 

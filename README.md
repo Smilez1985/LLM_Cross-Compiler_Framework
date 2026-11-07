@@ -1,4 +1,4 @@
-Version 3.3.0 · Last updated 2026-11-02
+Version 3.4.0 · Last updated 2026-11-07
 
 **English** · [Deutsch](README_DE.md)
 
@@ -912,7 +912,7 @@ The knowledge-base, Deep Ingest and community settings are explained in [docs/Fe
 ## What comes next
 
 The [roadmap](docs/ROADMAP.md) lists what is planned; finished items move to the [CHANGELOG](CHANGELOG.md). Version
-3.3.0 is in progress. In short:
+3.4.0 is in progress. It carries on what 3.3.0 left open, then LoRA and large models. In short:
 
 - **Carried over from 3.1.0:** the remaining sign-in methods per access type (browser sign-in where the vendor allows
   it, cloud platforms), the last pass over the German texts of every window, and the published community index.
@@ -930,8 +930,8 @@ The [roadmap](docs/ROADMAP.md) lists what is planned; finished items move to the
 - **Decided, waiting for its turn:** delegations, a message box for every MCP client, an own `llmcf` account,
   board backups pulled by the PC, and the shared OpenSSH connection for a board step.
 
-After 3.3.0: the build service with one queue across all programs, LoRA and large models (3.4.0), supply-chain
-hardening (3.5.0), and Rust where the framework meets the network or a board. Builds in the cloud are not planned.
+Then in 3.4.0: LoRA adapters and their optional training, and large models (checks before the build, GGUF as input,
+per-tensor recipes). After 3.4.0: the build service with one queue across all programs, supply-chain hardening (3.5.0), and Rust where the framework meets the network or a board. Builds in the cloud are not planned.
 
 Full list: [docs/ROADMAP.md](docs/ROADMAP.md).
 

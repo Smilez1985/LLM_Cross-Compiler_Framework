@@ -10,6 +10,16 @@ weicht bewusst ab: Es gibt keinen Abschnitt `[Unreleased]`. Jeder Eintrag beginn
 der [Roadmap](docs/ROADMAP_DE.md), nicht hier; wie das Framework gebaut ist und warum, steht im
 [Design](docs/DESIGN_DE.md).
 
+## [3.4.0] - 2026-11-07
+
+### Hinzugefügt
+- `2026-11-07 08:21 UTC` · `v3.4.0` **Code-Scanning mit CodeQL** ([Design](docs/DESIGN_DE.md#tests-ci-und-die-windows-fallen)): `.github/workflows/codeql.yml` prüft Python, Rust und die Workflows bei jedem Push und Pull Request auf `main` und `development`, wöchentlich und auf Abruf, mit den Abfragen `security-extended` und ohne etwas zu kompilieren. Seine Actions sind per Commit gepinnt wie in jedem anderen Workflow, der Checkout behält keine Zugangsdaten, der Job hat nur `contents: read` und `security-events: write`, und eine laufende Analyse wird nie abgebrochen. Die Ergebnisse stehen im Security-Tab des Repositorys.
+- `2026-11-07 08:16 UTC` · `v3.4.0` **Ein Dev-Container für GitHub Codespaces** ([Design](docs/DESIGN_DE.md#tests-ci-und-die-windows-fallen)): `.devcontainer/devcontainer.json` richtet Python 3.13 mit uv und den gesperrten Abhängigkeiten (dem GUI-Extra und der Dev-Gruppe), Rust und Docker ein, mit Qt ohne Bildschirm. Tests und Builds laufen dort ohne lokale Einrichtung; Boards, GPUs und NPUs bleiben auf deinem Rechner.
+
+### Geändert
+- `2026-11-07 09:13 UTC` · `v3.4.0` **Die Build-Basis Ubuntu 22.04 auf dem neuen Digest von Dependabot, in der GPU-Vorlage und im Katalog zugleich** ([Design](docs/DESIGN_DE.md#tests-ci-und-die-windows-fallen)): Dependabot hat den Digest nur in `targets/_template/Dockerfile.gpu` verschoben, und der Test der Vorlage, der ihn mit `configs/llama_runtime.yml` vergleicht, schlug fehl. Der Katalog hat den neuen Digest, und ein neuer Test vergleicht jede gepinnte Build-Basis in einem Dockerfile mit dem Katalog und nennt beide Zeilen und die Abhilfe, wenn sie abweichen.
+- `2026-11-07 08:16 UTC` · `v3.4.0` **Aktualisierte Abhängigkeiten: anthropic 2.4.0, openai 3.45.0, pydantic 2.14.2, filelock 4.2.8, actions/download-artifact 8.0.2** ([Design](docs/DESIGN_DE.md#installer-plattformen-und-abhängigkeiten)): die Aktualisierungen von Dependabot, dazu `requirements.txt`, `requirements-gui.txt` und `requirements-dev.txt` neu aus `uv.lock` exportiert. anthropic 2.x sendet einen API-Schlüssel als `Authorization: Bearer` statt im Header `x-api-key`; das Framework setzt diesen Header nicht selbst, daher änderten sich nur die Tests, die den Schlüssel aus dem Header lesen.
+
 ## [3.3.0] - 2026-11-06
 
 ### Hinzugefügt
@@ -5297,6 +5307,7 @@ Cross-Kompilierung zu ermöglichen.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Grundlegende Unterstützung für die Cross-Kompilierung für Rockchip RK3588/RK3566.
 - `2025-11-20 00:00 UTC` · `v1.0.0` Einstiegspunkte für CLI (`llm-cli`) und GUI (`llm-gui`).
 
+[3.4.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0

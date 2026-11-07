@@ -9,6 +9,16 @@ purpose: there is no `[Unreleased]` section. Every entry starts with its time st
 (`` `YYYY-MM-DD HH:MM UTC` · `vX.Y.Z` ``) and is written under the version it lands in. Planned work is listed in the
 [roadmap](docs/ROADMAP.md), not here; how the framework is built and why is in the [design](docs/DESIGN.md).
 
+## [3.4.0] - 2026-11-07
+
+### Added
+- `2026-11-07 08:21 UTC` · `v3.4.0` **CodeQL code scanning** ([design](docs/DESIGN.md#tests-ci-and-the-windows-hazards)): `.github/workflows/codeql.yml` scans Python, Rust and the workflows on every push and pull request to `main` and `development`, weekly and by hand, with the `security-extended` queries and without compiling anything. Its actions are pinned by commit like every other workflow, the checkout keeps no credentials, the job has only `contents: read` and `security-events: write`, and a running analysis is never cancelled. The results are in the repository's Security tab.
+- `2026-11-07 08:16 UTC` · `v3.4.0` **A dev container for GitHub Codespaces** ([design](docs/DESIGN.md#tests-ci-and-the-windows-hazards)): `.devcontainer/devcontainer.json` sets up Python 3.13 with uv and the locked dependencies (the GUI extra and the dev group), Rust and Docker, with Qt offscreen. Tests and builds run there without a local setup; boards, GPUs and NPUs stay on your computer.
+
+### Changed
+- `2026-11-07 09:13 UTC` · `v3.4.0` **The Ubuntu 22.04 build base on Dependabot's new digest, in the GPU template and the catalog together** ([design](docs/DESIGN.md#tests-ci-and-the-windows-hazards)): Dependabot moved the digest in `targets/_template/Dockerfile.gpu` only, and the template test, which compares it with `configs/llama_runtime.yml`, failed. The catalog has the new digest, and a new test compares every pinned build base in a Dockerfile with the catalog and names both lines and the fix when they differ.
+- `2026-11-07 08:16 UTC` · `v3.4.0` **Dependency updates: anthropic 2.4.0, openai 3.45.0, pydantic 2.14.2, filelock 4.2.8, actions/download-artifact 8.0.2** ([design](docs/DESIGN.md#installer-platforms-and-dependencies)): the Dependabot updates, with `requirements.txt`, `requirements-gui.txt` and `requirements-dev.txt` exported again from `uv.lock`. anthropic 2.x sends an API key as `Authorization: Bearer` instead of the `x-api-key` header; the framework sets no such header itself, so only the tests that read the key from the header changed.
+
 ## [3.3.0] - 2026-11-06
 
 ### Added
@@ -4686,6 +4696,7 @@ taken from source headers and the git history (2025-12-13 to 2026-01-14).
 - `2025-11-20 00:00 UTC` · `v1.0.0` Basic support for Rockchip RK3588/RK3566 cross-compilation.
 - `2025-11-20 00:00 UTC` · `v1.0.0` CLI (`llm-cli`) and GUI (`llm-gui`) entry points.
 
+[3.4.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/Smilez1985/LLM_Cross-Compiler_Framework/compare/v3.0.0...v3.1.0

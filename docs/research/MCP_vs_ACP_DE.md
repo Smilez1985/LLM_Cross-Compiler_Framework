@@ -1,4 +1,4 @@
-Version 3.3.0 · Stand 2026-11-02
+Version 3.4.0 · Stand 2026-11-02
 
 # MCP vs ACP
 
