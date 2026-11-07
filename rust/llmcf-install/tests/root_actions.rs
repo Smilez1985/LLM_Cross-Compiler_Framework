@@ -242,7 +242,7 @@ fn autostart() -> serde_json::Value {
         {"action": "create_user", "component": "llm", "user": "llmcf"},
         {"action": "install_unit", "component": "llm", "unit": "llmcf-llm.service", "user": "llmcf"},
         {"action": "set_cgroup", "component": "llm", "unit": "llmcf-llm.service", "memory_max_mb": 1024,
-         "cpu_weight": 200},
+         "memory_high_mb": 960, "cpu_weight": 200, "oom_score_adj": 500},
         {"action": "place_root_file", "component": "llm", "place": "sysctl", "file": "llmcf-limits.conf"}])
 }
 
@@ -269,6 +269,8 @@ fn plan_apply_again_status_rollback_and_uninstall() {
     assert!(unit.contains(&format!("ExecStart=/bin/sh /var/lib/llmcf/bundle/{BID}/llm/start.sh\n")));
     let dropin = fs::read_to_string(b.p("etc/systemd/system/llmcf-llm.service.d/llmcf-cgroup.conf")).unwrap();
     assert!(dropin.contains("MemoryMax=1024M\n") && dropin.contains("CPUWeight=200\n"));
+    // the model's unit goes first if the kernel must take one, and is slowed above its measured need
+    assert!(dropin.contains("MemoryHigh=960M\n") && dropin.contains("OOMScoreAdjust=500\n"), "{dropin}");
     assert_eq!(fs::read(b.p("etc/sysctl.d/llmcf-limits.conf")).unwrap(), b"vm.swappiness = 10\n");
     let copy = b.p(&format!("var/lib/llmcf/bundle/{BID}/llm"));
     assert_eq!(fs::read(copy.join("model.gguf")).unwrap(), b"GGUF model bytes");

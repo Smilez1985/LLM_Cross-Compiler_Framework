@@ -601,8 +601,7 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
             unit = f"llmcf-{comp_id}.service"
             roots += [RootAction(action="create_user", component=comp_id, user=user),
                       RootAction(action="install_unit", component=comp_id, unit=unit, user=user),
-                      RootAction(action="set_cgroup", component=comp_id, unit=unit,
-                                 memory_max_mb=int(values.get("memory_limit_mb") or 1024))]
+                      _cgroup_action(plan, comp_id, block, unit, values, selection, limits, comp_memory)]
         if harness_part is not None:
             roots.append(RootAction(action="run_harness", component=comp_id))
         if block.kind == "harness" and harness_part is None:
@@ -795,6 +794,36 @@ def _gateway_from_llm(plan: BundlePlan, comp_id: str, given: Dict[str, Any], pai
         if mine in given and str(given[mine]) != str(value):
             plan.problems.append(f"{comp_id}: {mine} is set by the bundle from {llm_id} ({value})")
         given[mine] = value
+
+
+# Who the kernel's out-of-memory killer takes first, if it must take one: a model server (its unit restarts it), never
+# the gateway before it (the gateway keeps the queue and answers the harnesses).
+OOM_SCORE = {"gateway": -500, "llm": 500, "stt": 500, "vision": 500}
+
+
+def _cgroup_action(plan: BundlePlan, comp_id: str, block: Block, unit: str, values: Dict[str, Any],
+                   selection: Selection, limits: Any, comp_memory: int) -> RootAction:
+    """The set_cgroup root action of a component with autostart: its memory limit, the OOM order (OOM_SCORE) and,
+    for the llm component on a measured board, MemoryHigh and MemoryMax from the measured need
+    (measure.engine_memory_limits_mib); the gateway's limit from its own measurement on the board
+    (measure.gateway_memory_max_mib, the block's 64 MB without one). A memory limit the person set always wins."""
+    from orchestrator.runtime.device import measure
+    own = "memory_limit_mb" in (selection.values.get(comp_id) or {})
+    memory_max = int(values.get("memory_limit_mb") or 1024)
+    memory_high: Optional[int] = None
+    if not own and block.kind == "llm" and limits is not None and getattr(limits, "fits", False):
+        memory_high, memory_max = measure.engine_memory_limits_mib(comp_memory)
+        plan.notes.append(f"{comp_id}: its unit's memory from the board's measurement: slowed above {memory_high} MB, "
+                          f"stopped above {memory_max} MB")
+    elif not own and block.kind == "gateway":
+        derived = measure.gateway_memory_max_mib(limits, int(values.get("queue_max") or 0),
+                                                 int(values.get("max_inflight") or 1),
+                                                 int(values.get("max_body_kb") or 256))
+        if derived is not None:
+            memory_max = derived
+            plan.notes.append(f"{comp_id}: its unit's memory limit {memory_max} MB from its measurement on the board")
+    return RootAction(action="set_cgroup", component=comp_id, unit=unit, memory_max_mb=memory_max,
+                      memory_high_mb=memory_high, oom_score_adj=OOM_SCORE.get(block.kind))
 
 
 def _gateway_memory_floor(plan: BundlePlan, comp_id: str, block: Block, given: Dict[str, Any], limits: Any) -> None:

@@ -23,7 +23,7 @@ framework for this board.
 ## Variables
 
 - `port` (8090), `threads` (0 = whisper.cpp decides), `language` (auto or a language code).
-- `autostart` (no): with yes, root actions create_user, install_unit and set_cgroup (`user`, `memory_limit_mb`),
-  carried out by llmcf-install.
+- `autostart` (no): with yes, root actions create_user, install_unit and set_cgroup (`user`, `memory_limit_mb`,
+  OOMScoreAdjust 500: the kernel takes a model's server before the gateway), carried out by llmcf-install.
 - The server never gets `--convert` (it runs ffmpeg through the shell), `--public` (it serves a folder over HTTP) or
   another `--host` than 127.0.0.1: the plan refuses them.

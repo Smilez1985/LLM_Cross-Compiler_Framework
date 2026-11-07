@@ -635,11 +635,19 @@ pub fn unit_text(bid: &str, comp: &str, user: &str) -> String {
     )
 }
 
-/// The cgroup drop-in of a unit (systemd's MemoryMax and CPUWeight).
-pub fn cgroup_text(memory_mb: u64, cpu_weight: Option<u64>) -> String {
-    let mut text = format!("# Written by llmcf-install. Do not edit.\n[Service]\nMemoryMax={memory_mb}M\n");
-    if let Some(w) = cpu_weight {
+/// The cgroup drop-in of a unit: systemd's MemoryMax, and where the manifest names them MemoryHigh, CPUWeight and
+/// OOMScoreAdjust (the model's units before the gateway's when the kernel must take one).
+pub fn cgroup_text(a: &RootAction) -> String {
+    let mut text =
+        format!("# Written by llmcf-install. Do not edit.\n[Service]\nMemoryMax={}M\n", a.memory_max_mb.unwrap_or(0));
+    if let Some(h) = a.memory_high_mb {
+        text.push_str(&format!("MemoryHigh={h}M\n"));
+    }
+    if let Some(w) = a.cpu_weight {
         text.push_str(&format!("CPUWeight={w}\n"));
+    }
+    if let Some(o) = a.oom_score_adj {
+        text.push_str(&format!("OOMScoreAdjust={o}\n"));
     }
     text
 }
@@ -743,7 +751,7 @@ impl<'a> Ctx<'a> {
             }
             "set_cgroup" => {
                 let rel = dropin_rel(a.unit.as_deref().unwrap_or(""), DROPIN);
-                let text = cgroup_text(a.memory_max_mb.unwrap_or(0), a.cpu_weight);
+                let text = cgroup_text(a);
                 if same_text(&env.path(&format!("/{rel}")), text.as_bytes()) {
                     State::Done
                 } else {
@@ -1032,7 +1040,7 @@ impl<'a> Ctx<'a> {
             "set_cgroup" => {
                 let rel = dropin_rel(a.unit.as_deref().unwrap_or(""), DROPIN);
                 let root = self.env.root_uid();
-                let text = cgroup_text(a.memory_max_mb.unwrap_or(0), a.cpu_weight);
+                let text = cgroup_text(a);
                 if self.put_file(&rel, text.as_bytes(), 0o644, (root, root))? {
                     self.reload = true;
                 }
@@ -1417,9 +1425,29 @@ mod tests {
         ] {
             assert!(text.lines().any(|l| l == line), "{line}");
         }
+        let mut a = RootAction {
+            action: "set_cgroup".into(),
+            component: "llm".into(),
+            user: None,
+            unit: Some("llmcf-llm.service".into()),
+            memory_max_mb: Some(512),
+            memory_high_mb: None,
+            cpu_weight: Some(100),
+            oom_score_adj: None,
+            place: None,
+            file: None,
+        };
+        // the text of a drop-in without the newer values stays byte for byte what earlier bundles wrote
         assert_eq!(
-            cgroup_text(512, Some(100)),
+            cgroup_text(&a),
             "# Written by llmcf-install. Do not edit.\n[Service]\nMemoryMax=512M\nCPUWeight=100\n"
+        );
+        a.memory_high_mb = Some(448);
+        a.oom_score_adj = Some(500);
+        assert_eq!(
+            cgroup_text(&a),
+            "# Written by llmcf-install. Do not edit.\n[Service]\nMemoryMax=512M\nMemoryHigh=448M\nCPUWeight=100\n\
+             OOMScoreAdjust=500\n"
         );
     }
 }

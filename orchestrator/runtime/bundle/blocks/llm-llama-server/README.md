@@ -19,4 +19,7 @@ Block `llm-llama-server` (kind llm) of the board bundle. It runs the board's sel
 - `port` (8080): the loopback port; the server never listens on another interface.
 - `ctx_size` (4096), `threads` (0 = llama.cpp decides): passed to the start script, which checks them again.
 - `autostart` (no): with yes, the bundle lists the root actions create_user, install_unit and set_cgroup with
-  `user` (llmcf) and `memory_limit_mb` (2048); llmcf-install carries them out.
+  `user` (llmcf) and `memory_limit_mb` (2048); llmcf-install carries them out. On a measured board without a
+  limit the person set, the unit's limits come from the measured need of the server (MemoryHigh at the need plus
+  5 %, MemoryMax at the need plus 10 %); its OOMScoreAdjust is 500, so the kernel takes the model's server before
+  the gateway if it must take one.

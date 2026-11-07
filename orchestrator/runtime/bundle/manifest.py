@@ -327,16 +327,28 @@ class Component(_Strict):
 
 class RootAction(_Strict):
     """A root action, typed: `action` (ROOT_ACTIONS), the component it belongs to and its checked values (user,
-    unit, memory_max_mb, cpu_weight, place, file). Never a shell line."""
+    unit, memory_max_mb, memory_high_mb, cpu_weight, oom_score_adj, place, file). Never a shell line. memory_high_mb
+    is systemd's MemoryHigh (never above memory_max_mb), oom_score_adj its OOMScoreAdjust (-999 to 1000: no unit is
+    ever exempt from the kernel's out-of-memory killer, the gateway only goes after the model)."""
     action: Literal["create_user", "install_unit", "set_cgroup", "place_root_file",
                     "remove_user", "remove_unit", "remove_cgroup", "remove_root_file", "run_harness"]
     component: str
     user: Optional[str] = None
     unit: Optional[str] = None
     memory_max_mb: Optional[int] = Field(default=None, ge=16, le=1 << 20)
+    memory_high_mb: Optional[int] = Field(default=None, ge=16, le=1 << 20)
     cpu_weight: Optional[int] = Field(default=None, ge=1, le=10000)
+    oom_score_adj: Optional[int] = Field(default=None, ge=-999, le=1000)
     place: Optional[Literal["unit-dropin", "tmpfiles", "sysctl"]] = None
     file: Optional[str] = None
+
+    @field_validator("memory_high_mb", "oom_score_adj", mode="before")
+    @classmethod
+    def _whole(cls, v):
+        # a JSON number only, as llmcf-install reads it (never true/false or a text)
+        if v is not None and (isinstance(v, bool) or not isinstance(v, int)):
+            raise ValueError("a whole number")
+        return v
 
     @model_validator(mode="after")
     def _values(self):
@@ -348,6 +360,9 @@ class RootAction(_Strict):
             raise ValueError("a unit is named llmcf-<name>.service")
         if self.file is not None:
             check_value("file", self.file, name="file")
+        if self.memory_high_mb is not None and self.memory_max_mb is not None \
+                and self.memory_high_mb > self.memory_max_mb:
+            raise ValueError("memory_high_mb is above memory_max_mb")
         need = {"create_user": ("user",), "remove_user": ("user",), "install_unit": ("unit", "user"),
                 "remove_unit": ("unit",), "set_cgroup": ("unit", "memory_max_mb"), "remove_cgroup": ("unit",),
                 "place_root_file": ("place", "file"), "remove_root_file": ("place", "file"),

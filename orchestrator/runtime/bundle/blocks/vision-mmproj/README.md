@@ -23,5 +23,5 @@ runtime's key file.
 ## Variables
 
 - `port` (8081), `ctx_size` (4096), `threads` (0 = llama.cpp decides).
-- `autostart` (no): with yes, root actions create_user, install_unit and set_cgroup (`user`, `memory_limit_mb`),
-  carried out by llmcf-install.
+- `autostart` (no): with yes, root actions create_user, install_unit and set_cgroup (`user`, `memory_limit_mb`,
+  OOMScoreAdjust 500: the kernel takes a model's server before the gateway), carried out by llmcf-install.

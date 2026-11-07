@@ -537,6 +537,40 @@
      }
     ],
     "why": "a harness without a dry run of its own and a sha256 pin"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       2,
+       "memory_high_mb"
+      ],
+      "value": 1792
+     },
+     {
+      "path": [
+       "root_actions",
+       2,
+       "oom_score_adj"
+      ],
+      "value": 500
+     }
+    ],
+    "why": "memory high and the out-of-memory order"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       2,
+       "oom_score_adj"
+      ],
+      "value": -500
+     }
+    ],
+    "why": "the gateway before the model"
    }
   ],
   "base": {
@@ -3231,6 +3265,84 @@
      }
     ],
     "why": "an unknown key in the harness"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       2,
+       "memory_high_mb"
+      ],
+      "value": 2049
+     }
+    ],
+    "why": "memory high above memory max"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       2,
+       "memory_high_mb"
+      ],
+      "value": 8
+     }
+    ],
+    "why": "memory high too small"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       2,
+       "oom_score_adj"
+      ],
+      "value": -1000
+     }
+    ],
+    "why": "a unit exempt from the out-of-memory killer"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       2,
+       "oom_score_adj"
+      ],
+      "value": 1001
+     }
+    ],
+    "why": "oom score above 1000"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       2,
+       "oom_score_adj"
+      ],
+      "value": true
+     }
+    ],
+    "why": "oom score as bool"
+   },
+   {
+    "patches": [
+     {
+      "path": [
+       "root_actions",
+       2,
+       "oom_score_adj"
+      ],
+      "value": "500"
+     }
+    ],
+    "why": "oom score as text"
    }
   ]
  },

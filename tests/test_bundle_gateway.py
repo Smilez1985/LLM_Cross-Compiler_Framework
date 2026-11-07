@@ -227,6 +227,40 @@ def test_the_gateways_memory_guard_and_queue_come_from_the_plan(tmp_path):
     assert measure.gateway_memory_floor_mib(None) is None
 
 
+def test_the_units_keep_the_gateway_and_give_the_model_its_measured_memory(tmp_path):
+    """The rendered limits of the units: the gateway's unit never before the model (OOMScoreAdjust -500 against
+    500), its memory limit the block's 64 MB while the gateway was not measured on the board and derived from its
+    measured resident memory, the queue and the bodies once it was; the llm's unit slowed and capped by its measured
+    need; a limit the person set wins."""
+    import dataclasses
+    from test_board_measure import record
+    from orchestrator.runtime.device import measure
+    limits = measure.derive(record())
+    both = {"llm": {"autostart": "yes"}, "gateway": {"autostart": "yes"}}
+    plan = _plan(tmp_path, values=both, limits=limits)
+    assert plan.ok, plan.problems
+    cg = {a.component: a for a in plan.manifest.root_actions if a.action == "set_cgroup"}
+    assert (cg["gateway"].oom_score_adj, cg["llm"].oom_score_adj) == (-500, 500)
+    assert cg["gateway"].memory_max_mb == measure.GATEWAY_FALLBACK_MIB == 64 and cg["gateway"].memory_high_mb is None
+    llm = next(c for c in plan.manifest.components if c.kind == "llm")
+    model = next(f.size for f in llm.files if f.role == "model")
+    need = limits.need_for(model, llm.variables["ctx_size"], llm.variables.get("kv_cache") or limits.kv_cache)
+    high, top = measure.engine_memory_limits_mib(need)
+    assert (cg["llm"].memory_high_mb, cg["llm"].memory_max_mb) == (high, top) and need < high < top
+    # once the measurement step adds the gateway's own peak resident memory, its unit's limit follows from it
+    measured = dataclasses.replace(limits, gateway_rss_mib=5)
+    plan = _plan(tmp_path, values={**both, "gateway": {"autostart": "yes", "queue_max": "32"}}, limits=measured)
+    gw = next(a for a in plan.manifest.root_actions if a.action == "set_cgroup" and a.component == "gateway")
+    # 5 MiB + 32 waiting * 64 KiB + 2 in flight * (64 KiB + 4 * 256 KiB) + 16 MiB margin
+    assert gw.memory_max_mb == measure.gateway_memory_max_mib(measured, 32, 2, 256) == 5 + 5 + 16
+    own = _plan(tmp_path, values={"llm": {"autostart": "yes", "memory_limit_mb": "3000"}}, limits=limits)
+    mine = next(a for a in own.manifest.root_actions if a.action == "set_cgroup")
+    assert (mine.memory_max_mb, mine.memory_high_mb, mine.oom_score_adj) == (3000, None, 500)
+    unmeasured = _plan(tmp_path, values={"llm": {"autostart": "yes"}})
+    mine = next(a for a in unmeasured.manifest.root_actions if a.action == "set_cgroup")
+    assert (mine.memory_max_mb, mine.memory_high_mb) == (2048, None)
+
+
 def test_the_gateways_unit_runs_through_llmcf_install_from_its_fixed_place(tmp_path):
     """Seam of the gateway and the root readiness: the gateway's autostart is a typed root action of the manifest
     (its account, its unit, its memory limit), and every root action runs through the gate operation bundle-root,

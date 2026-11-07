@@ -8,8 +8,10 @@ bundle; you pick no file.
 ## Models
 
 None of its own: the gateway talks to the bundle's llm component (block `llm-llama-server`, one GGUF model) on
-127.0.0.1 with that component's key file. A bundle with the gateway needs the llm component. Memory: about 64 MB, in
-its own small unit with autostart (its memory limit, default 64 MB); llama-server keeps its own unit and limit.
+127.0.0.1 with that component's key file. A bundle with the gateway needs the llm component. Memory: a few MB
+resident, in its own small unit with autostart (its memory limit 64 MB while the gateway was not measured on the
+board; from its measured peak plus the queue and a margin once it was); llama-server keeps its own unit and limit.
+The gateway's unit has OOMScoreAdjust -500: the kernel takes a model's server first, never the gateway before it.
 Licence: the gateway is the framework's (MIT); the model's licence is named in the llm component.
 
 ## What it does
@@ -43,4 +45,4 @@ Licence: the gateway is the framework's (MIT); the model's licence is named in t
   guard (0 turns either check off).
 - `upstream_port`, `ctx_size`: set by the bundle from the llm component (its port and context size).
 - `autostart` (no): with yes, the root actions create_user, install_unit and set_cgroup with `user` (llmcf) and
-  `memory_limit_mb` (64); llmcf-install carries them out.
+  `memory_limit_mb` (64, or derived from the gateway's measurement on the board); llmcf-install carries them out.

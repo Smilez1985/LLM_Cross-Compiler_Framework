@@ -244,7 +244,11 @@ pub struct RootAction {
     pub user: Option<String>,
     pub unit: Option<String>,
     pub memory_max_mb: Option<u64>,
+    /// systemd's MemoryHigh (the unit is slowed and reclaimed above it), never above memory_max_mb
+    pub memory_high_mb: Option<u64>,
     pub cpu_weight: Option<u64>,
+    /// systemd's OOMScoreAdjust: who the kernel's out-of-memory killer takes first (never -1000, never exempt)
+    pub oom_score_adj: Option<i64>,
     pub place: Option<String>,
     pub file: Option<String>,
 }
@@ -253,11 +257,13 @@ impl RootAction {
     /// What a report line says of it: the component and its values (key=value, the manifest's own order).
     pub fn what(&self) -> String {
         let mut out = vec![self.component.clone()];
-        let pairs: [(&str, Option<String>); 6] = [
+        let pairs: [(&str, Option<String>); 8] = [
             ("user", self.user.clone()),
             ("unit", self.unit.clone()),
             ("memory_max_mb", self.memory_max_mb.map(|v| v.to_string())),
+            ("memory_high_mb", self.memory_high_mb.map(|v| v.to_string())),
             ("cpu_weight", self.cpu_weight.map(|v| v.to_string())),
+            ("oom_score_adj", self.oom_score_adj.map(|v| v.to_string())),
             ("place", self.place.clone()),
             ("file", self.file.clone()),
         ];
@@ -322,6 +328,17 @@ fn uint(m: &Map<String, Value>, key: &str, what: &str, lo: u64, hi: u64) -> R<Op
     match m.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(Value::Number(n)) => match n.as_u64() {
+            Some(v) if (lo..=hi).contains(&v) => Ok(Some(v)),
+            _ => Err(format!("{what}.{key} must be a whole number from {lo} to {hi}")),
+        },
+        Some(_) => Err(format!("{what}.{key} must be a whole number from {lo} to {hi}")),
+    }
+}
+
+fn int(m: &Map<String, Value>, key: &str, what: &str, lo: i64, hi: i64) -> R<Option<i64>> {
+    match m.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Number(n)) => match n.as_i64() {
             Some(v) if (lo..=hi).contains(&v) => Ok(Some(v)),
             _ => Err(format!("{what}.{key} must be a whole number from {lo} to {hi}")),
         },
@@ -569,7 +586,7 @@ fn root_action(v: &Value) -> R<RootAction> {
         m,
         "root action",
         &["action", "component"],
-        &["user", "unit", "memory_max_mb", "cpu_weight", "place", "file"],
+        &["user", "unit", "memory_max_mb", "memory_high_mb", "cpu_weight", "oom_score_adj", "place", "file"],
     )?;
     let action = one_of(text(m, "action", "root action")?, &ROOT_ACTIONS, "root action")?.to_string();
     let component = text(m, "component", "root action")?;
@@ -590,7 +607,14 @@ fn root_action(v: &Value) -> R<RootAction> {
         }
     }
     let memory_max_mb = uint(m, "memory_max_mb", &what, 16, 1 << 20)?;
+    let memory_high_mb = uint(m, "memory_high_mb", &what, 16, 1 << 20)?;
+    if let (Some(high), Some(max)) = (memory_high_mb, memory_max_mb) {
+        if high > max {
+            return Err(format!("{what}: memory_high_mb is above memory_max_mb"));
+        }
+    }
     let cpu_weight = uint(m, "cpu_weight", &what, 1, 10000)?;
+    let oom_score_adj = int(m, "oom_score_adj", &what, -999, 1000)?;
     let place = opt_text(m, "place", &what)?;
     if let Some(p) = place {
         one_of(p, &ROOT_PLACES, &format!("{what} place"))?;
@@ -634,7 +658,9 @@ fn root_action(v: &Value) -> R<RootAction> {
         user: user.map(Into::into),
         unit: unit.map(Into::into),
         memory_max_mb,
+        memory_high_mb,
         cpu_weight,
+        oom_score_adj,
         place: place.map(Into::into),
         file: file.map(Into::into),
     })

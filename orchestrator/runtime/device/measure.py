@@ -42,7 +42,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from orchestrator.remote import gate
 from orchestrator.remote.gate import define
@@ -444,6 +444,14 @@ def gateway_memory_max_mib(limits: Optional["BoardLimits"], queue_max: int, max_
         return None
     kib = queue_max * GATEWAY_WAIT_KIB + max_inflight * (GATEWAY_WAIT_KIB + GATEWAY_BODY_COPIES * max_body_kb)
     return int(rss + -(-kib // 1024) + GATEWAY_MARGIN_MIB)
+
+
+def engine_memory_limits_mib(need_mib: int) -> Tuple[int, int]:
+    """(MemoryHigh, MemoryMax) of a model server's unit from its measured need: above the need plus 5 % (at least
+    32 MiB) the kernel reclaims and slows it, above the need plus 10 % (at least 64 MiB) its own unit's limit takes
+    it, never the board's other parts."""
+    need = max(16, int(need_mib))
+    return need + max(32, need // 20), need + max(64, need // 10)
 
 
 def gateway_memory_floor_mib(limits: Optional["BoardLimits"]) -> Optional[int]:
