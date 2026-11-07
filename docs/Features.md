@@ -673,7 +673,10 @@ have no block of your own yet, the Community Hub's export points to **New block.
 A harness is your own project with its own repository, never code of llmcf, and llmcf does not build it. You take it
 in at a pin (a commit of its repository, or the sha256 of an archive or a folder's tree) with its installer's path,
 the options of its own dry run, what its exit codes mean and, if it has one, its own "assume yes" switch; llmcf keeps
-its tree with one checksum. The block `harness-agent` puts it into a bundle: the tree as one tar file, its checksum in
+its tree with one checksum. The executable bits come from the source itself (git's file modes, the archive's
+members), so the same harness gives the same checksum on Windows and Linux; on Windows, which keeps no executable bit,
+a folder is taken in only when it is a git checkout (its index has the bits), otherwise by its git link or as an
+archive. The block `harness-agent` puts it into a bundle: the tree as one tar file, its checksum in
 the signed manifest and the root action `run_harness`. With your yes for the root actions, llmcf-install unpacks it
 root-owned on the board and checks the checksum; it computes it again before every start, so a tree changed on the
 board never runs.
@@ -687,7 +690,17 @@ installer does, it watches it: traced with `strace` where the board has it, and 
 (packages, accounts, listening ports, files in the system's places). The report after says done, done with findings
 or failed by the harness's own exit codes, and flags what deserves a look (a sudoers or authorized_keys file
 written, a new account with uid 0, a setuid bit, a download piped into a shell, a firewall switched off, a port open
-on every address, ...). Start, stop and report are rows of the audit log. An AI never starts a run and never answers
+on every address, ...). It also says whether the installer brought its own account(s) and service unit(s), as a
+harness like Chimera does (its own system accounts and systemd units): llmcf then adds no account or service of its
+own on top, never nested around the harness's. When the installer brought neither, the report says so; an own account
+and service for a harness are a later step, only as your opt-in. The records come back in full, never cut off: in
+parts of at most 4 MiB, after a check of this computer's free space, read on after a dropped connection, every file's
+sha256 checked before the report is made. Start, stop and report are rows of the audit log.
+
+When a harness step finds the board's root readiness missing (or an older sudo rule without the harness actions),
+the CLI and the window list what its setup does and ask you first ("No" is the default); on yes they carry out the
+one root-readiness setup (only what is missing; a second time changes nothing and says so) and go on with the step.
+Your answer and its result are rows of the audit log; an AI never sets it up. An AI never starts a run and never answers
 an installer's question; the optional MCP tool `harness_report` lets it read a run's outcome, counts and flag codes
 only (no account name, path, address or anything the installer printed).
 

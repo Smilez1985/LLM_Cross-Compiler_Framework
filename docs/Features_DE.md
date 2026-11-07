@@ -738,7 +738,10 @@ keinen eigenen Baustein, zeigt der Export im Community Hub dorthin zu **Neuer Ba
 Ein Harness ist dein eigenes Projekt mit eigenem Repository, nie Code von llmcf, und llmcf baut ihn nicht. Du
 übernimmst ihn an einem Pin (ein Commit seines Repositorys, oder die sha256 eines Archivs oder der Baum eines Ordners)
 mit dem Pfad seines Installers, den Optionen seines eigenen Probelaufs, der Bedeutung seiner Rückgabewerte und, wenn er
-einen hat, seinem eigenen „Ja zu allem“-Schalter; llmcf bewahrt seinen Baum mit einer Prüfsumme auf. Der Baustein
+einen hat, seinem eigenen „Ja zu allem“-Schalter; llmcf bewahrt seinen Baum mit einer Prüfsumme auf. Die Ausführbar-Bits kommen
+aus der Quelle selbst (die Dateimodi von git, die Einträge des Archivs), darum gibt derselbe Harness unter Windows und
+Linux dieselbe Prüfsumme; unter Windows, das kein Ausführbar-Bit kennt, wird ein Ordner nur übernommen, wenn er ein
+git-Checkout ist (sein Index hat die Bits), sonst über seinen git-Link oder als Archiv. Der Baustein
 `harness-agent` legt ihn in ein Bündel: den Baum als eine Tar-Datei, seine Prüfsumme im signierten Manifest und die
 Root-Aktion `run_harness`. Mit deinem Ja für die Root-Aktionen packt llmcf-install ihn auf dem Board in Root-Besitz aus
 und prüft die Prüfsumme; vor jedem Start rechnet es sie neu, so läuft ein auf dem Board geänderter Baum nie.
@@ -753,7 +756,20 @@ es: mit `strace` mitgeschrieben, wo das Board es hat, und immer vorher und nachh
 Ports, Dateien an den Orten des Systems). Der Bericht nachher sagt fertig, fertig mit Befunden oder fehlgeschlagen,
 nach den eigenen Rückgabewerten des Harness, und markiert, was einen Blick verdient (eine sudoers- oder
 authorized_keys-Datei geschrieben, ein neues Konto mit uid 0, ein setuid-Bit, ein Download direkt in eine Shell, eine
-abgeschaltete Firewall, ein Port auf allen Adressen, ...). Start, Stopp und Bericht sind Zeilen im Audit-Protokoll.
+abgeschaltete Firewall, ein Port auf allen Adressen, ...). Er sagt auch, ob der Installer eigene Konten und
+Service-Units mitgebracht hat, wie ein Harness wie Chimera es tut (eigene Systemkonten und systemd-Units): llmcf legt
+dann kein eigenes Konto und keinen eigenen Dienst obendrauf an, nie verschachtelt um die des Harness. Hat der
+Installer keines von beiden mitgebracht, sagt der Bericht das; ein eigenes Konto und ein eigener Dienst für einen
+Harness sind ein späterer Schritt, nur als dein Opt-in. Die Aufzeichnungen kommen vollständig zurück, nie
+abgeschnitten: in Teilen von höchstens 4 MiB, nach einer Prüfung des freien Platzes auf diesem Computer, nach einer
+abgebrochenen Verbindung weitergelesen, die sha256 jeder Datei geprüft, bevor der Bericht entsteht. Start, Stopp und
+Bericht sind Zeilen im Audit-Protokoll.
+
+Findet ein Harness-Schritt die Root-Bereitschaft des Boards fehlend (oder eine ältere sudo-Regel ohne die
+Harness-Aktionen), listen CLI und Fenster, was ihre Einrichtung tut, und fragen dich zuerst („Nein“ ist die Vorgabe);
+bei Ja führen sie die eine Einrichtung der Root-Bereitschaft aus (nur was fehlt; ein zweites Mal ändert nichts und
+sagt das) und setzen den Schritt fort. Deine Antwort und ihr Ergebnis sind Zeilen im Audit-Protokoll; eine KI richtet
+sie nie ein.
 Eine KI startet nie einen Lauf und beantwortet nie eine Frage eines Installers; das optionale MCP-Werkzeug
 `harness_report` lässt sie nur Ergebnis, Zahlen und Markierungs-Codes eines Laufs lesen (kein Kontoname, kein Pfad,
 keine Adresse, nichts, was der Installer ausgegeben hat).

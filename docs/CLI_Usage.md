@@ -2603,7 +2603,7 @@ for an AI client; the files are always your choice.
 Your own agent harness on the board ([Features](Features.md#your-agent-harness-on-the-board)). `take-in` takes it in
 at a pin and keeps its tree with one checksum in this computer's per-user folder (`--kind git`: an https link, `--ref`
 a branch or tag resolved to its commit, or `--pin` the commit; `archive`: a .zip, .tar.gz or .tar file, `--pin` its
-sha256; `folder`: a folder). Write a dry-run option with `=`, as in `--dry-run-arg=--dry-run`. Put it into a bundle
+sha256; `folder`: a folder; on Windows, which keeps no executable bit, only a git checkout, whose index has them: otherwise use the git link or an archive). Write a dry-run option with `=`, as in `--dry-run-arg=--dry-run`. Put it into a bundle
 with `bundle build DEVICE --block harness-agent --set harness.harness=ID` (`--set harness.assume_yes=yes` carries its
 assume-yes switch, your opt-in); `bundle deploy` places it on the board with the bundle's root actions.
 
@@ -2616,10 +2616,24 @@ board, and `attach BUNDLE RUN` reads on from where this computer read last, as a
 ends the installer after its question. Once it ended, the report says done, done with findings or failed (by the
 harness's exit codes), what changed and what is flagged; `report BUNDLE` lists the runs, `report BUNDLE RUN` shows one
 (`--json` for scripts). `--assume-yes` uses the harness's own switch, only when the bundle carries it. The runs need
-the board's root readiness (`bundle prepare-root`): a harness run takes no password.
+the board's root readiness (`bundle prepare-root`): a harness run takes no password. When a harness step finds it
+missing (or the board's sudo rule is an older one without the harness actions), the command lists what its setup will
+do, asks "Set up the root readiness of board ... now?" ("No" is the default; without a terminal nothing is set up),
+asks for the board account's password when sudo needs one (once, never kept), carries out the one root-readiness setup
+of `bundle prepare-root` (only what is missing: an older sudo rule is replaced, a current one left) and runs the step
+again; when the readiness is there already it says so and changes nothing. Your answer and the result are rows of the
+audit log.
 
-The MCP tool `harness_report` (optional) lets an AI read the runs as outcome, numbers and flag codes only; it never
-starts, answers or stops one.
+The records come back in full, never cut off: llmcf-install lists them with their size and sha256 and sends them in
+parts of at most 4 MiB; this computer checks its free space first (the framework's one disk rule), reads part by part
+into the run's folder, reads on from the last good part after a dropped connection, and makes the report only once
+every file's sha256 matches. The report also says whether the installer brought its own account(s) and service
+unit(s); the framework never adds an account or a service of its own on top. When it brought neither, the report says
+so: an own account and service for a harness are a later roadmap step, only as your opt-in.
+
+The MCP tool `harness_report` (optional) lets an AI read the runs as outcome, numbers and flag codes only (also how
+many accounts and service units the installer brought, never their names); it never starts, answers or stops one and
+never sets up a board's root readiness.
 
 ```bash
 llm-cli bundle harness take-in chimera https://git.example.invalid/agents/chimera --kind git --ref entwicklung \

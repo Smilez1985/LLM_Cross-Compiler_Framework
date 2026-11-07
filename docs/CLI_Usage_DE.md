@@ -2718,7 +2718,7 @@ das für einen KI-Client; die Dateien wählst immer du.
 Dein eigener Agent-Harness auf dem Board ([Funktionen](Features_DE.md#dein-agent-harness-auf-dem-board)). `take-in`
 übernimmt ihn an einem Pin und bewahrt seinen Baum mit einer Prüfsumme im Benutzerordner dieses Computers auf
 (`--kind git`: ein https-Link, `--ref` ein Branch oder Tag, der zu seinem Commit aufgelöst wird, oder `--pin` der Commit;
-`archive`: eine .zip-, .tar.gz- oder .tar-Datei, `--pin` ihre sha256; `folder`: ein Ordner). Eine Option des
+`archive`: eine .zip-, .tar.gz- oder .tar-Datei, `--pin` ihre sha256; `folder`: ein Ordner; unter Windows, das kein Ausführbar-Bit kennt, nur ein git-Checkout, dessen Index sie hat: sonst den git-Link oder ein Archiv nehmen). Eine Option des
 Probelaufs schreibst du mit `=`, wie in `--dry-run-arg=--dry-run`. In ein Bündel kommt er mit
 `bundle build GERÄT --block harness-agent --set harness.harness=ID` (`--set harness.assume_yes=yes` nimmt seinen Assume-Yes-Schalter mit,
 dein Opt-in); `bundle deploy` legt ihn mit den Root-Aktionen des Bündels auf das Board.
@@ -2733,10 +2733,25 @@ hat, wie nach einer abgebrochenen Verbindung. `stop` beendet den Installer nach 
 Bericht fertig, fertig mit Befunden oder fehlgeschlagen (nach den Rückgabewerten des Harness), was sich geändert hat
 und was markiert ist; `report BUNDLE` listet die Läufe, `report BUNDLE RUN` zeigt einen (`--json` für Skripte).
 `--assume-yes` nutzt den eigenen Schalter des Harness, nur wenn das Bündel ihn trägt. Die Läufe brauchen die
-Root-Bereitschaft des Boards (`bundle prepare-root`): Ein Harness-Lauf nimmt kein Passwort.
+Root-Bereitschaft des Boards (`bundle prepare-root`): Ein Harness-Lauf nimmt kein Passwort. Findet ein Harness-Schritt
+sie fehlend (oder ist die sudo-Regel des Boards eine ältere ohne die Harness-Aktionen), listet der Befehl, was ihre
+Einrichtung tun wird, fragt „Die Root-Bereitschaft von Board ... jetzt einrichten?“ („Nein“ ist die Vorgabe; ohne
+Terminal wird nichts eingerichtet), fragt nach dem Passwort des Board-Kontos, wenn sudo eines braucht (einmal, nie
+gespeichert), führt die eine Einrichtung der Root-Bereitschaft von `bundle prepare-root` aus (nur was fehlt: eine
+ältere sudo-Regel wird ersetzt, eine aktuelle bleibt) und führt den Schritt erneut aus; ist die Bereitschaft schon da,
+sagt er das und ändert nichts. Deine Antwort und das Ergebnis sind Zeilen im Audit-Protokoll.
+
+Die Aufzeichnungen kommen vollständig zurück, nie abgeschnitten: llmcf-install listet sie mit Größe und sha256 und
+schickt sie in Teilen von höchstens 4 MiB; dieser Computer prüft zuerst seinen freien Platz (die eine Speicherregel
+des Frameworks), liest Teil für Teil in den Ordner des Laufs, liest nach einer abgebrochenen Verbindung ab dem letzten
+guten Teil weiter und macht den Bericht erst, wenn die sha256 jeder Datei stimmt. Der Bericht sagt auch, ob der
+Installer eigene Konten und Service-Units mitgebracht hat; das Framework legt nie ein eigenes Konto oder einen eigenen
+Dienst obendrauf an. Hat er keines von beiden mitgebracht, sagt der Bericht das: Ein eigenes Konto und ein eigener
+Dienst für einen Harness sind ein späterer Schritt der Roadmap, nur als dein Opt-in.
 
 Das MCP-Werkzeug `harness_report` (optional) lässt eine KI die Läufe nur als Ergebnis, Zahlen und Markierungs-Codes
-lesen; es startet, beantwortet oder stoppt nie einen.
+lesen (auch, wie viele Konten und Service-Units der Installer mitgebracht hat, nie ihre Namen); es startet,
+beantwortet oder stoppt nie einen und richtet nie die Root-Bereitschaft eines Boards ein.
 
 ```bash
 llm-cli bundle harness take-in chimera https://git.example.invalid/agents/chimera --kind git --ref entwicklung \
