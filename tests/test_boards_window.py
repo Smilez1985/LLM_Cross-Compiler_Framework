@@ -179,6 +179,8 @@ def test_cli_paths_name_every_command_of_the_area_and_existing_objects():
             assert key in menu_module.CLI_PATHS or key in menu_module.MACHINE_ONLY, key
     for path, name in menu_module.CLI_PATHS.items():   # the bundle's paths open the Board bundle window
         window = menu_module.BUNDLE_ACTION if path.startswith("bundle") else menu_module.ACTION_NAME
+        if path.startswith("bundle harness"):              # the harness run has its own window
+            window = menu_module.HARNESS_ACTION
         assert name == menu_module.ACTION_NAME or menu_module.WINDOW_OBJECTS[name] == window
 
 
