@@ -319,7 +319,7 @@ ANSWER = {"type": "message", "id": "m", "role": "assistant", "status": "complete
 
 
 @pytest.mark.parametrize("provider, answer, header", [
-    ("anthropic", claude_message([text_block("ok")]), "x-api-key"),
+    ("anthropic", claude_message([text_block("ok")]), "authorization"),
     ("openai", responses_body([ANSWER]), "authorization"),
     ("openrouter", completion("ok"), "authorization"),
 ])

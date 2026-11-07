@@ -222,7 +222,7 @@ class TestAnthropic:
                                               text_block("Hi!")]))
         result = make_client(http, SECRETS, **ANTHROPIC).chat(ask(tools=TOOLS))
         req = http.last
-        assert req.path == "/v1/messages" and req.headers["x-api-key"] == KEY
+        assert req.path == "/v1/messages" and req.headers["authorization"] == f"Bearer {KEY}"
         assert req.headers["anthropic-beta"] == "server-side-fallback-2026-07-01"
         body = req.json
         assert body["model"] == "claude-opus-5-5" and body["max_tokens"] == 16000
@@ -317,11 +317,11 @@ class TestAnthropic:
         client = make_client(http, {}, **ANTHROPIC)
         assert client.describe()["auth_source"] == "env:ANTHROPIC_API_KEY"
         client.chat(ask())
-        assert http.last.headers["x-api-key"] == env_key
+        assert http.last.headers["authorization"] == f"Bearer {env_key}"
         stored = make_client(http, SECRETS, **ANTHROPIC)
         assert stored.describe()["auth_source"] == "vault"
         stored.chat(ask())
-        assert http.last.headers["x-api-key"] == KEY
+        assert http.last.headers["authorization"] == f"Bearer {KEY}"
 
     def test_custom_base_url_never_receives_the_cloud_key(self, make_client):
         http = FakeHTTP().add(claude_message([text_block("ok")]))
@@ -808,7 +808,8 @@ class TestSignInMethod:
         client = make_client(http, SECRETS, **ANTHROPIC)
         assert client.describe()["auth"] == "api_key"
         client.chat(ask())
-        assert http.last.headers["x-api-key"] == KEY and "authorization" not in http.last.headers
+        # anthropic 2.x sends an API key as a bearer token, so the stored key (not the profile token) is in it
+        assert http.last.headers["authorization"] == f"Bearer {KEY}" and "x-api-key" not in http.last.headers
         assert anthropic_clients and all("profile" not in kw for kw in anthropic_clients)
         assert all(kw["base_url"] == "https://api.anthropic.com" for kw in anthropic_clients)
 
