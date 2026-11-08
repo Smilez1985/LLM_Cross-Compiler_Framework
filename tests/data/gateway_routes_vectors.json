@@ -1,0 +1,993 @@
+{
+ "_comment": "Shared test vectors of the gateway's route table (routes.json, schema llmcf-gateway-routes/1): orchestrator/runtime/bundle/reach.py (tests/test_bundle_reach.py) and rust/llmcf-gateway (src/routes.rs tests) both check them. A patch sets the value at its path, or removes the key without a value. Only documentation names and addresses.",
+ "tables": {
+  "base": {
+   "schema": "llmcf-gateway-routes/1",
+   "engines": [
+    {
+     "id": "llm",
+     "port": 8080,
+     "key": true,
+     "ctx_size": 4096
+    },
+    {
+     "id": "stt",
+     "port": 8090,
+     "key": false
+    },
+    {
+     "id": "vision",
+     "port": 8081,
+     "key": true,
+     "ctx_size": 4096
+    },
+    {
+     "id": "detect",
+     "port": 8093,
+     "key": false
+    }
+   ],
+   "routes": [
+    {
+     "path": "/v1/models",
+     "method": "GET",
+     "protocol": "openai-models",
+     "engine": "llm",
+     "upstream_path": "/v1/models",
+     "max_body_kb": 256,
+     "timeout_s": 900,
+     "stream": false,
+     "key": "models"
+    },
+    {
+     "path": "/v1/chat/completions",
+     "method": "POST",
+     "protocol": "openai-chat",
+     "engine": "llm",
+     "upstream_path": "/v1/chat/completions",
+     "max_body_kb": 256,
+     "timeout_s": 900,
+     "stream": true,
+     "key": "chat"
+    },
+    {
+     "path": "/v1/chat/completions",
+     "method": "POST",
+     "protocol": "openai-chat",
+     "engine": "vision",
+     "upstream_path": "/v1/chat/completions",
+     "max_body_kb": 256,
+     "timeout_s": 900,
+     "stream": true,
+     "key": "chat-images",
+     "match": "images"
+    },
+    {
+     "path": "/v1/completions",
+     "method": "POST",
+     "protocol": "openai-completions",
+     "engine": "llm",
+     "upstream_path": "/v1/completions",
+     "max_body_kb": 256,
+     "timeout_s": 900,
+     "stream": true,
+     "key": "completions"
+    },
+    {
+     "path": "/v1/audio/transcriptions",
+     "method": "POST",
+     "protocol": "openai-audio-transcription",
+     "engine": "stt",
+     "upstream_path": "/inference",
+     "max_body_kb": 25600,
+     "timeout_s": 900,
+     "stream": false,
+     "key": "transcriptions"
+    },
+    {
+     "path": "/api/detect",
+     "method": "POST",
+     "protocol": "http-multipart",
+     "engine": "detect",
+     "upstream_path": "/detect",
+     "max_body_kb": 8192,
+     "timeout_s": 60,
+     "stream": false,
+     "key": "detect",
+     "fields": [
+      {
+       "name": "image",
+       "file": true,
+       "types": [
+        "jpeg",
+        "png"
+       ],
+       "required": true
+      },
+      {
+       "name": "threshold",
+       "file": false,
+       "required": false
+      }
+     ]
+    },
+    {
+     "path": "/api/detect/raw",
+     "method": "POST",
+     "protocol": "http-binary",
+     "engine": "detect",
+     "upstream_path": "/detect/raw",
+     "max_body_kb": 8192,
+     "timeout_s": 60,
+     "stream": false,
+     "key": "raw",
+     "types": [
+      "jpeg"
+     ]
+    },
+    {
+     "path": "/api/detect/config",
+     "method": "POST",
+     "protocol": "http-json",
+     "engine": "detect",
+     "upstream_path": "/config",
+     "max_body_kb": 16,
+     "timeout_s": 10,
+     "stream": false,
+     "key": "config"
+    },
+    {
+     "path": "/api/detect/events",
+     "method": "GET",
+     "protocol": "http-sse",
+     "engine": "detect",
+     "upstream_path": "/events",
+     "max_body_kb": 1,
+     "timeout_s": 30,
+     "stream": true,
+     "key": "events"
+    }
+   ]
+  },
+  "accept": [
+   {
+    "why": "the base table",
+    "patches": []
+   },
+   {
+    "why": "a GET http-json route",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "method"
+      ],
+      "value": "GET"
+     }
+    ]
+   },
+   {
+    "why": "a POST http-sse route",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       8,
+       "method"
+      ],
+      "value": "POST"
+     }
+    ]
+   },
+   {
+    "why": "an embeddings route",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7
+      ],
+      "value": {
+       "path": "/v1/embeddings",
+       "method": "POST",
+       "protocol": "openai-embeddings",
+       "engine": "llm",
+       "upstream_path": "/v1/embeddings",
+       "max_body_kb": 256,
+       "timeout_s": 900,
+       "stream": false,
+       "key": "embeddings"
+      }
+     }
+    ]
+   },
+   {
+    "why": "a speech route with a binary answer",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7
+      ],
+      "value": {
+       "path": "/v1/audio/speech",
+       "method": "POST",
+       "protocol": "openai-audio-speech",
+       "engine": "detect",
+       "upstream_path": "/tts",
+       "max_body_kb": 64,
+       "timeout_s": 120,
+       "stream": false,
+       "key": "speech"
+      }
+     }
+    ]
+   },
+   {
+    "why": "an engine without a context size",
+    "patches": [
+     {
+      "path": [
+       "engines",
+       0,
+       "ctx_size"
+      ]
+     }
+    ]
+   },
+   {
+    "why": "the largest body and the longest wait",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       6,
+       "max_body_kb"
+      ],
+      "value": 204800
+     },
+     {
+      "path": [
+       "routes",
+       6,
+       "timeout_s"
+      ],
+      "value": 3600
+     }
+    ]
+   },
+   {
+    "why": "a multipart field without types",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       5,
+       "fields"
+      ],
+      "value": [
+       {
+        "name": "image",
+        "file": true,
+        "required": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "why": "a path with dots and dashes under /api",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "path"
+      ],
+      "value": "/api/v2.0/detect-config_x"
+     }
+    ]
+   }
+  ],
+  "reject": [
+   {
+    "why": "another schema",
+    "patches": [
+     {
+      "path": [
+       "schema"
+      ],
+      "value": "llmcf-gateway-routes/2"
+     }
+    ]
+   },
+   {
+    "why": "an unknown top-level field",
+    "patches": [
+     {
+      "path": [
+       "extra"
+      ],
+      "value": 1
+     }
+    ]
+   },
+   {
+    "why": "an unknown route field",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       0,
+       "extra"
+      ],
+      "value": 1
+     }
+    ]
+   },
+   {
+    "why": "an unknown engine field",
+    "patches": [
+     {
+      "path": [
+       "engines",
+       0,
+       "host"
+      ],
+      "value": "127.0.0.1"
+     }
+    ]
+   },
+   {
+    "why": "a route field missing",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       0,
+       "timeout_s"
+      ]
+     }
+    ]
+   },
+   {
+    "why": "a route key missing",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       0,
+       "key"
+      ]
+     }
+    ]
+   },
+   {
+    "why": "a path outside /v1 and /api",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "path"
+      ],
+      "value": "/detect"
+     }
+    ]
+   },
+   {
+    "why": "the health path",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "path"
+      ],
+      "value": "/health"
+     }
+    ]
+   },
+   {
+    "why": "the gateway's own prefix",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "path"
+      ],
+      "value": "/v1/llmcf/routes"
+     }
+    ]
+   },
+   {
+    "why": "a path that climbs",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "path"
+      ],
+      "value": "/api/../health"
+     }
+    ]
+   },
+   {
+    "why": "a path with upper case",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "path"
+      ],
+      "value": "/api/Detect"
+     }
+    ]
+   },
+   {
+    "why": "a path with a query",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "path"
+      ],
+      "value": "/api/detect?x=1"
+     }
+    ]
+   },
+   {
+    "why": "a path with a trailing slash",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "path"
+      ],
+      "value": "/api/detect/"
+     }
+    ]
+   },
+   {
+    "why": "an upstream path that climbs",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "upstream_path"
+      ],
+      "value": "/a/../b"
+     }
+    ]
+   },
+   {
+    "why": "an upstream path with a scheme",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "upstream_path"
+      ],
+      "value": "http://198.51.100.7/x"
+     }
+    ]
+   },
+   {
+    "why": "an unknown protocol",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "protocol"
+      ],
+      "value": "grpc"
+     }
+    ]
+   },
+   {
+    "why": "a method the protocol does not take",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       1,
+       "method"
+      ],
+      "value": "GET"
+     }
+    ]
+   },
+   {
+    "why": "PUT",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "method"
+      ],
+      "value": "PUT"
+     }
+    ]
+   },
+   {
+    "why": "a body cap of 0",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "max_body_kb"
+      ],
+      "value": 0
+     }
+    ]
+   },
+   {
+    "why": "a body cap above 200 MB",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "max_body_kb"
+      ],
+      "value": 204801
+     }
+    ]
+   },
+   {
+    "why": "a body cap as text",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "max_body_kb"
+      ],
+      "value": "16"
+     }
+    ]
+   },
+   {
+    "why": "a timeout of 0",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "timeout_s"
+      ],
+      "value": 0
+     }
+    ]
+   },
+   {
+    "why": "a timeout above an hour",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "timeout_s"
+      ],
+      "value": 3601
+     }
+    ]
+   },
+   {
+    "why": "stream as text",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "stream"
+      ],
+      "value": "yes"
+     }
+    ]
+   },
+   {
+    "why": "an http-sse route that does not stream",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       8,
+       "stream"
+      ],
+      "value": false
+     }
+    ]
+   },
+   {
+    "why": "a binary route that streams",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       6,
+       "stream"
+      ],
+      "value": true
+     }
+    ]
+   },
+   {
+    "why": "a binary route without types",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       6,
+       "types"
+      ]
+     }
+    ]
+   },
+   {
+    "why": "an unknown magic type",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       6,
+       "types"
+      ],
+      "value": [
+       "exe"
+      ]
+     }
+    ]
+   },
+   {
+    "why": "a magic type twice",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       6,
+       "types"
+      ],
+      "value": [
+       "jpeg",
+       "jpeg"
+      ]
+     }
+    ]
+   },
+   {
+    "why": "types on a json route",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "types"
+      ],
+      "value": [
+       "jpeg"
+      ]
+     }
+    ]
+   },
+   {
+    "why": "a multipart route without fields",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       5,
+       "fields"
+      ]
+     }
+    ]
+   },
+   {
+    "why": "fields on a json route",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "fields"
+      ],
+      "value": [
+       {
+        "name": "x",
+        "file": false,
+        "required": false
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "why": "a field name twice",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       5,
+       "fields"
+      ],
+      "value": [
+       {
+        "name": "a",
+        "file": false,
+        "required": false
+       },
+       {
+        "name": "a",
+        "file": false,
+        "required": false
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "why": "types on a text field",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       5,
+       "fields"
+      ],
+      "value": [
+       {
+        "name": "a",
+        "file": false,
+        "types": [
+         "png"
+        ],
+        "required": false
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "why": "a field name with a quote",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       5,
+       "fields"
+      ],
+      "value": [
+       {
+        "name": "a\"b",
+        "file": true,
+        "required": false
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "why": "an unknown field key",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       5,
+       "fields"
+      ],
+      "value": [
+       {
+        "name": "a",
+        "file": true,
+        "required": false,
+        "max": 1
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "why": "match on a route that is not openai-chat",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       3,
+       "match"
+      ],
+      "value": "images"
+     }
+    ]
+   },
+   {
+    "why": "an unknown match",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       2,
+       "match"
+      ],
+      "value": "audio"
+     }
+    ]
+   },
+   {
+    "why": "an images route without the plain chat route",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       1,
+       "path"
+      ],
+      "value": "/v1/chat/other"
+     }
+    ]
+   },
+   {
+    "why": "the same method and path twice",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "path"
+      ],
+      "value": "/api/detect"
+     }
+    ]
+   },
+   {
+    "why": "the same key twice in one engine",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "key"
+      ],
+      "value": "raw"
+     }
+    ]
+   },
+   {
+    "why": "a key with upper case",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "key"
+      ],
+      "value": "Config"
+     }
+    ]
+   },
+   {
+    "why": "a route to an engine the table lacks",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "engine"
+      ],
+      "value": "camera"
+     }
+    ]
+   },
+   {
+    "why": "an engine id with a dot",
+    "patches": [
+     {
+      "path": [
+       "engines",
+       3,
+       "id"
+      ],
+      "value": "de.tect"
+     }
+    ]
+   },
+   {
+    "why": "an engine port twice",
+    "patches": [
+     {
+      "path": [
+       "engines",
+       3,
+       "port"
+      ],
+      "value": 8090
+     }
+    ]
+   },
+   {
+    "why": "an engine port below 1024",
+    "patches": [
+     {
+      "path": [
+       "engines",
+       3,
+       "port"
+      ],
+      "value": 80
+     }
+    ]
+   },
+   {
+    "why": "an engine id twice",
+    "patches": [
+     {
+      "path": [
+       "engines",
+       3,
+       "id"
+      ],
+      "value": "stt"
+     }
+    ]
+   },
+   {
+    "why": "key as text",
+    "patches": [
+     {
+      "path": [
+       "engines",
+       0,
+       "key"
+      ],
+      "value": "true"
+     }
+    ]
+   },
+   {
+    "why": "a context size too small",
+    "patches": [
+     {
+      "path": [
+       "engines",
+       0,
+       "ctx_size"
+      ],
+      "value": 8
+     }
+    ]
+   },
+   {
+    "why": "no engines",
+    "patches": [
+     {
+      "path": [
+       "engines"
+      ],
+      "value": []
+     }
+    ]
+   },
+   {
+    "why": "no routes",
+    "patches": [
+     {
+      "path": [
+       "routes"
+      ],
+      "value": []
+     }
+    ]
+   }
+  ]
+ }
+}

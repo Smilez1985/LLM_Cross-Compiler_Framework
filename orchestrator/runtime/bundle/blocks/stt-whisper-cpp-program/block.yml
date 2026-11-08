@@ -1,6 +1,6 @@
 schema: llmcf-bundle-block/1
 id: stt-whisper-cpp-program
-version: 1.0.0
+version: 1.1.0
 kind: stt
 title: Speech recognition (a whisper-server you picked)
 status: ready
@@ -21,6 +21,11 @@ files:
   - {role: model, from: person, name: model.bin, formats: [ggml-whisper], licence: required, min_bytes: 1048576}
 memory: {base_mb: 128, model_factor: 1.5}
 unit: true
+# OpenAI's speech route, checked by the gateway and sent to whisper-server's own /inference as its form
+reach:
+  routes:
+    - {path: /v1/audio/transcriptions, protocol: openai-audio-transcription, upstream_path: /inference,
+       engine_route_key: transcriptions}
 start:
   program: whisper-server
   args:

@@ -13,8 +13,11 @@ harness: the person's harness taken in at its pin, packed as harness.tar, and th
 a block of kind harness, which has no start of its own: its installer runs through llmcf-install's harness actions)
 and the formats and licence its models must have, its memory needs, how it starts (a program inside its folder with
 argument templates: `{variable}` for a checked value, `@FILE:role@` for one of its files, `{when: variable, args:
-[...]}` for arguments only when the variable is set) and whether its unit needs root (`unit`: autostart through
-llmcf-install).
+[...]}` for arguments only when the variable is set), whether its unit needs root (`unit`: autostart through
+llmcf-install) and, optionally, how the gateway reaches its engine (`reach`, reach.py: the routes, each with its
+protocol, the engine's own path and its limits). The schema stays llmcf-bundle-block/1: `reach` is an optional,
+additive field; a block without it keeps the routes its kind always had (generator.legacy_reach), a framework version
+that does not know the field refuses such a block instead of serving it wrongly.
 
 Where blocks come from, and their trust (decided once, here): the framework's own blocks below this package's
 `blocks/` folder (trust "framework"); blocks installed from the signed community index ("indexed": the index's trust
@@ -33,6 +36,7 @@ import yaml
 
 from orchestrator.runtime.bundle.manifest import (KINDS, RE_ARG, RE_FILE, RE_ID, RE_VAR, RE_VERSION, ROLES,
                                                   VARIABLE_TYPES, ManifestError, check_value)
+from orchestrator.runtime.bundle.reach import Reach, ReachError, parse_reach
 
 BLOCK_SCHEMA = "llmcf-bundle-block/1"
 BLOCK_FILE = "block.yml"
@@ -126,6 +130,8 @@ class Block:
     sha256: str
     notes: Tuple[str, ...] = field(default_factory=tuple)
     terms: Tuple[Terms, ...] = field(default_factory=tuple)
+    # how the gateway reaches its engine (reach.Reach; None: the routes its kind always had)
+    reach: Optional[Reach] = None
 
     @property
     def ready(self) -> bool:
@@ -169,7 +175,11 @@ class Block:
                 "files": [{"role": f.role, "from": f.source, "formats": list(f.formats), "licence": f.licence,
                            **({"project": f.project} if f.source == "runtime" else {})} for f in self.files],
                 # the terms as labels (the person reads their text in the CLI or the window and accepts them there)
-                "terms": [{"part": t.part, "licence": t.licence, "free": t.free} for t in self.terms]}
+                "terms": [{"part": t.part, "licence": t.licence, "free": t.free} for t in self.terms],
+                # the routes the gateway serves for it (paths, methods and protocols are labels)
+                "reach": [{"method": r.method, "path": r.path, "protocol": r.protocol,
+                           **({"match": r.match} if r.match else {})} for r in (self.reach.routes if self.reach
+                                                                               else ())]}
 
 
 def _str(spec: dict, key: str, limit: int = 200, default: str = "") -> str:
@@ -325,7 +335,7 @@ def parse_block(text: str, folder: Path, trust: str = "own", sha256: str = "") -
     if not isinstance(spec, dict):
         raise BlockError("block.yml is not a mapping")
     allowed = {"schema", "id", "version", "kind", "title", "status", "summary", "variables", "files", "start",
-               "memory", "keygen", "unit", "notes", "terms"}
+               "memory", "keygen", "unit", "notes", "terms", "reach"}
     unknown = set(spec) - allowed
     if unknown:
         raise BlockError(f"unknown fields: {', '.join(sorted(map(str, unknown)))}")
@@ -380,11 +390,17 @@ def parse_block(text: str, folder: Path, trust: str = "own", sha256: str = "") -
     notes = spec.get("notes") or []
     if not isinstance(notes, list) or not all(isinstance(n, str) and len(n) <= 300 for n in notes):
         raise BlockError("notes is a list of short texts")
+    try:
+        reach = parse_reach(spec.get("reach"), {v.name: v for v in variables})
+    except ReachError as e:
+        raise BlockError(f"reach: {e}") from None
+    if reach is not None and (kind in ("gateway", "harness") or (status == "ready" and not program)):
+        raise BlockError("reach belongs to a block that runs an engine (not the gateway, not a harness)")
     return Block(id=block_id, version=version, kind=kind, title=_str(spec, "title", 120, block_id), status=status,
                  summary=_str(spec, "summary", 500), variables=variables, files=files, program=program, args=args,
                  memory_base_mb=base, memory_model_factor=float(factor), keygen=bool(spec.get("keygen", False)),
                  unit=bool(spec.get("unit", False)), folder=Path(folder), trust=trust, sha256=sha256,
-                 notes=tuple(notes), terms=_terms(spec.get("terms")))
+                 notes=tuple(notes), terms=_terms(spec.get("terms")), reach=reach)
 
 
 def _tree_sha256(folder: Path) -> str:

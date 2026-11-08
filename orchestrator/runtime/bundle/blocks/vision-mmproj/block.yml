@@ -1,6 +1,6 @@
 schema: llmcf-bundle-block/1
 id: vision-mmproj
-version: 1.0.0
+version: 1.1.0
 kind: vision
 title: Vision (llama-server with --mmproj)
 status: ready
@@ -21,6 +21,10 @@ files:
   - {role: mmproj, from: person, name: mmproj.gguf, formats: [mmproj-gguf], licence: required, min_bytes: 1048576}
 memory: {base_mb: 384, model_factor: 1.3}
 keygen: true
+# the chats that carry image parts go to this engine (the language model keeps the others on the same path)
+reach:
+  routes:
+    - {path: /v1/chat/completions, protocol: openai-chat, match: images, stream: true, engine_route_key: chat-images}
 unit: true
 start:
   program: runtime/@RUNTIME@/llama-server.sh

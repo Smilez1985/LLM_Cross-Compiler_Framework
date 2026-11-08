@@ -1,6 +1,6 @@
 schema: llmcf-bundle-block/1
 id: llm-llama-server
-version: 1.0.0
+version: 1.1.0
 kind: llm
 title: Language model (llama-server)
 status: ready
@@ -20,6 +20,12 @@ files:
   - {role: model, from: person, name: model.gguf, formats: [gguf], licence: required, min_bytes: 1048576}
 memory: {base_mb: 256, model_factor: 1.2}
 keygen: true
+# how the gateway reaches it (the llm's port is the gateway's upstream; requests carry the runtime's key)
+reach:
+  routes:
+    - {path: /v1/models, method: GET, protocol: openai-models, engine_route_key: models}
+    - {path: /v1/chat/completions, protocol: openai-chat, stream: true, engine_route_key: chat}
+    - {path: /v1/completions, protocol: openai-completions, stream: true, engine_route_key: completions}
 unit: true
 start:
   program: runtime/@RUNTIME@/llama-server.sh
