@@ -100,10 +100,11 @@ const FAKE_SYSTEMCTL: &str = r#"#!/bin/sh
 echo "systemctl $*" >> "$LLMCF_TEST_ROOT/calls.log"
 mark="$LLMCF_TEST_ROOT/fake-enabled"
 mkdir -p "$mark"
+for unit; do :; done
 case $1 in
   is-enabled) if [ -e "$mark/$2" ]; then echo enabled; exit 0; fi; echo disabled; exit 1 ;;
-  enable) : > "$mark/$3" ;;
-  disable) rm -f "$mark/$3" ;;
+  enable) : > "$mark/$unit" ;;
+  disable) rm -f "$mark/$unit" ;;
 esac
 exit 0
 "#;
@@ -816,4 +817,63 @@ fn a_control_of_a_unit_not_of_the_bundle_is_refused() {
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("is no engine unit of this bundle"), "{out}");
     assert!(!b.p("etc/polkit-1").exists());
+}
+
+// --- engines in turn: their units installed, not enabled at boot (on_demand) --------------------------------------
+
+#[test]
+fn an_engine_unit_on_demand_is_installed_but_not_enabled_at_boot() {
+    let b = Board::new();
+    write_mode(&b.p("usr/bin/pkaction"), b"#!/bin/sh\necho 'pkaction version 0.120'\n", 0o755);
+    // first together: the engine's unit is enabled and started as before
+    b.deploy_gateway(with_control());
+    let (code, out) = b.run("apply");
+    assert_eq!(code, 0, "{out}");
+    assert!(b.p("fake-enabled/llmcf-llm.service").exists());
+    // then in turn: the same unit on demand is disabled at boot, never stopped by llmcf-install
+    let _ = fs::remove_file(b.p("calls.log"));
+    let mut actions = with_control();
+    actions[1]["on_demand"] = serde_json::json!(true);
+    b.deploy_gateway(actions.clone());
+    let (code, out) = b.run("apply");
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("llmcf-bundle: done disable llmcf-llm.service"), "{out}");
+    let calls = fs::read_to_string(b.p("calls.log")).unwrap();
+    assert!(calls.contains("systemctl disable llmcf-llm.service\n"), "{calls}");
+    assert!(!calls.contains("--now llmcf-llm.service"), "{calls}");
+    assert!(!b.p("fake-enabled/llmcf-llm.service").exists());
+    assert!(b.p("fake-enabled/llmcf-gateway.service").exists(), "the gateway itself starts at boot");
+    assert!(b.unit().exists());
+    // in place now: the next run changes nothing
+    let (code, out) = b.run("apply");
+    assert_eq!(code, 0, "{out}");
+    assert!(last(&out).ends_with("everything was in place already (nothing changed)"), "{out}");
+    // the uninstall stops a unit the gateway may have started and takes it away
+    let (code, out) = b.run("uninstall");
+    assert_eq!(code, 0, "{out}");
+    assert!(fs::read_to_string(b.p("calls.log")).unwrap().contains("systemctl stop llmcf-llm.service\n"));
+    assert!(!b.unit().exists());
+}
+
+#[test]
+fn a_fresh_unit_on_demand_is_never_enabled_and_only_an_engine_of_the_control_may_be_one() {
+    let b = Board::new();
+    write_mode(&b.p("usr/bin/pkaction"), b"#!/bin/sh\necho 'pkaction version 0.120'\n", 0o755);
+    let mut actions = with_control();
+    actions[1]["on_demand"] = serde_json::json!(true);
+    b.deploy_gateway(actions.clone());
+    let (code, out) = b.run("apply");
+    assert_eq!(code, 0, "{out}");
+    let calls = fs::read_to_string(b.p("calls.log")).unwrap();
+    assert!(!calls.contains("enable --now llmcf-llm.service"), "{calls}");
+    assert!(calls.contains("enable --now llmcf-gateway.service"), "{calls}");
+    assert!(b.unit().exists() && !b.p("fake-enabled/llmcf-llm.service").exists());
+    // the gateway's own unit is no engine: it is never on demand
+    let b2 = Board::new();
+    let mut bad = with_control();
+    bad[3]["on_demand"] = serde_json::json!(true);
+    b2.deploy_gateway(bad);
+    let (code, out) = b2.run("apply");
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("is on demand but no engine unit"), "{out}");
 }

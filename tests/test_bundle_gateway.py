@@ -426,6 +426,19 @@ def test_in_turn_when_together_does_not_fit_and_refused_when_one_does_not_either
     assert args[args.index("--engines-budget-mb") + 1] == str(tight.usable_mib - rest)
     assert any("starts the speech and vision engines for requests through itself" in n for n in turn.notes)
     assert not any("not there yet" in w for w in turn.warnings)
+    # in turn the engines' units are installed but not enabled at boot (the gateway starts them); the gateway's is
+    units = {a.unit: a for a in turn.manifest.root_actions if a.action == "install_unit"}
+    assert units["llmcf-llm.service"].on_demand and units["llmcf-stt.service"].on_demand
+    assert units["llmcf-gateway.service"].on_demand is None
+    assert any("not started at boot" in n for n in turn.notes)
+    from orchestrator.runtime.bundle import installer as inst
+    from orchestrator.runtime.bundle.manifest import dump_manifest, load_manifest
+    assert load_manifest(dump_manifest(turn.manifest)) == turn.manifest
+    assert "root\tinstall_unit\tstt\tuser=llmcf\tunit=llmcf-stt.service\ton_demand=True" in \
+        inst.render_steps(turn.manifest, "a" * 64)
+    # together: every unit starts at boot as before
+    together_ok = _voice(tmp_path)
+    assert not any(a.on_demand for a in together_ok.manifest.root_actions)
     assert service.engines_lines(turn, "en")[-1] == "Chosen: the engines in turn, loaded by the gateway."
     # even the largest engine alone does not fit: in turn is refused with the numbers
     none = _voice(tmp_path, engines="in-turn", limits=_squeezed(tmp_path, "none"))

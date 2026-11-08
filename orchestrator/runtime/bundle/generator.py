@@ -970,6 +970,14 @@ def _tell_engines(plan: BundlePlan, components: List[Component], roots: List[Roo
         return components
     units = tuple(unit for _comp, unit in engines.values())
     roots.append(RootAction(action="allow_unit_control", component=gateway.id, user=own.user, units=units))
+    if in_turn and len(engine_mem) > 1:
+        # in turn the engines' units are installed but not enabled at boot: the gateway starts the llm at its own
+        # start and each other engine for its requests (together: every unit starts at boot as before)
+        for i, action in enumerate(roots):
+            if action.action == "install_unit" and action.unit in units:
+                roots[i] = action.model_copy(update={"on_demand": True})
+        plan.notes.append("in turn: the engines' units are installed but not started at boot; the gateway starts the "
+                          "language model at its own start and each other engine when a request needs it")
     plan.notes.append(f"{gateway.id}: its account may start, stop and restart exactly {', '.join(units)} (a polkit "
                       "rule through llmcf-install; on a board without polkit's rules a sudoers file with exactly "
                       "these systemctl commands)")

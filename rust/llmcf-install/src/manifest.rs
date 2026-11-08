@@ -258,6 +258,9 @@ pub struct RootAction {
     pub file: Option<String>,
     /// allow_unit_control only: the bundle's engine units the gateway's account may start, stop and restart
     pub units: Vec<String>,
+    /// install_unit only: the unit is installed but not enabled at boot; the gateway starts it on demand (engines in
+    /// turn). Only `true` is written; absent means enabled and started as before.
+    pub on_demand: bool,
 }
 
 impl RootAction {
@@ -265,7 +268,7 @@ impl RootAction {
     pub fn what(&self) -> String {
         let mut out = vec![self.component.clone()];
         let units = (!self.units.is_empty()).then(|| self.units.join(","));
-        let pairs: [(&str, Option<String>); 9] = [
+        let pairs: [(&str, Option<String>); 10] = [
             ("user", self.user.clone()),
             ("unit", self.unit.clone()),
             ("units", units),
@@ -275,6 +278,7 @@ impl RootAction {
             ("oom_score_adj", self.oom_score_adj.map(|v| v.to_string())),
             ("place", self.place.clone()),
             ("file", self.file.clone()),
+            ("on_demand", self.on_demand.then(|| "true".to_string())),
         ];
         for (k, v) in pairs {
             if let Some(v) = v {
@@ -595,7 +599,18 @@ fn root_action(v: &Value) -> R<RootAction> {
         m,
         "root action",
         &["action", "component"],
-        &["user", "unit", "memory_max_mb", "memory_high_mb", "cpu_weight", "oom_score_adj", "place", "file", "units"],
+        &[
+            "user",
+            "unit",
+            "memory_max_mb",
+            "memory_high_mb",
+            "cpu_weight",
+            "oom_score_adj",
+            "place",
+            "file",
+            "units",
+            "on_demand",
+        ],
     )?;
     let action = one_of(text(m, "action", "root action")?, &ROOT_ACTIONS, "root action")?.to_string();
     let component = text(m, "component", "root action")?;
@@ -658,6 +673,14 @@ fn root_action(v: &Value) -> R<RootAction> {
     if !units.is_empty() && action != "allow_unit_control" {
         return Err(format!("{what}: only allow_unit_control names units"));
     }
+    let on_demand = match m.get("on_demand") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(true)) => true,
+        Some(_) => return Err(format!("{what}: on_demand is true or absent")),
+    };
+    if on_demand && action != "install_unit" {
+        return Err(format!("{what}: only install_unit is on demand"));
+    }
     let need: &[&str] = match action.as_str() {
         "allow_unit_control" => &["user", "units"],
         "create_user" | "remove_user" => &["user"],
@@ -699,6 +722,7 @@ fn root_action(v: &Value) -> R<RootAction> {
         place: place.map(Into::into),
         file: file.map(Into::into),
         units,
+        on_demand,
     })
 }
 
@@ -828,6 +852,17 @@ pub fn parse(data: &[u8]) -> R<Manifest> {
             }
             "allow_unit_control" => control_rule(a, comp, &components, &root_actions)?,
             _ => {}
+        }
+        if a.on_demand {
+            let control = root_actions.iter().find(|b| b.action == "allow_unit_control");
+            let unit = a.unit.as_deref().unwrap_or("");
+            if !ENGINE_KINDS.contains(&comp.kind.as_str())
+                || !control.is_some_and(|c| c.units.iter().any(|u| u == unit))
+            {
+                return Err(format!(
+                    "root action install_unit: {unit} is on demand but no engine unit the bundle's gateway may start"
+                ));
+            }
         }
     }
     Ok(Manifest {

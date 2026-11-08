@@ -862,7 +862,11 @@ impl<'a> Ctx<'a> {
                 let Some(comp) = m.component(&a.component) else { return State::Pending };
                 let text = unit_text(&self.bid, &comp.id, user);
                 let path = env.path(&format!("/etc/systemd/system/{unit}"));
-                if same_text(&path, text.as_bytes()) && self.copy_is_current(comp) && self.is_enabled(unit) {
+                // a unit on demand is in place when it is not enabled at boot (the gateway starts it)
+                if same_text(&path, text.as_bytes())
+                    && self.copy_is_current(comp)
+                    && self.is_enabled(unit) != a.on_demand
+                {
                     State::Done
                 } else {
                     State::Pending
@@ -1224,6 +1228,9 @@ impl<'a> Ctx<'a> {
                 if self.is_enabled(unit) {
                     self.systemctl_run(&["disable", "--now", unit])?;
                     self.note("unit-disabled", &[unit])?;
+                } else {
+                    // a unit on demand is not enabled, but the gateway may have started it
+                    let _ = self.systemctl_run(&["stop", unit]);
                 }
                 if self.drop_file(&format!("etc/systemd/system/{unit}"))? {
                     self.reload = true;
@@ -1327,6 +1334,12 @@ impl<'a> Ctx<'a> {
             }
             "file-made" => {
                 let path = env.path(&format!("/{}", e.args[0]));
+                if let Some(unit) = e.args[0].strip_prefix("etc/systemd/system/").filter(|u| is_unit(u)) {
+                    // a unit on demand is not enabled, but the gateway may have started it: stopped before it goes
+                    if exists(&path) {
+                        let _ = self.systemctl_run(&["stop", unit]);
+                    }
+                }
                 if exists(&path) {
                     fs::remove_file(&path).map_err(|x| x.to_string())?;
                 }
@@ -1562,6 +1575,24 @@ fn apply(ctx: &mut Ctx, m: &Manifest, states: &[State], data: &[u8], signature: 
     }
     for a in m.root_actions.iter().filter(|a| a.action == "install_unit") {
         let unit = a.unit.as_deref().unwrap_or("");
+        if a.on_demand {
+            // installed, not enabled at boot: the gateway starts it for a request (engines in turn); one that an
+            // earlier bundle enabled is disabled, never stopped here (the gateway decides at its start what runs)
+            if ctx.is_enabled(unit) {
+                if let Err(e) = ctx.systemctl_run(&["disable", unit]) {
+                    say("failed", "disable", unit);
+                    return Done::failed(format!("{e}; roll back or run it again"));
+                }
+                if let Err(e) = ctx.note("unit-disabled", &[unit]) {
+                    return Done::failed(e);
+                }
+                ctx.changed += 1;
+                say("done", "disable", unit);
+            } else if touched.contains(unit) {
+                let _ = ctx.systemctl_run(&["try-restart", unit]);
+            }
+            continue;
+        }
         if !ctx.is_enabled(unit) {
             if let Err(e) = ctx.systemctl_run(&["enable", "--now", unit]) {
                 say("failed", "enable", unit);
@@ -1671,6 +1702,7 @@ mod tests {
             place: None,
             file: None,
             units: Vec::new(),
+            on_demand: false,
         };
         // the text of a drop-in without the newer values stays byte for byte what earlier bundles wrote
         assert_eq!(

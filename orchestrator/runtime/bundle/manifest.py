@@ -350,6 +350,17 @@ class RootAction(_Strict):
     file: Optional[str] = None
     # allow_unit_control only: the bundle's engine units the gateway's account may start, stop and restart
     units: Optional[Tuple[str, ...]] = None
+    # install_unit only: the unit is installed but not enabled at boot; the gateway starts it on demand (engines in
+    # turn). Only true is written; without it the unit is enabled and started as before.
+    on_demand: Optional[bool] = None
+
+    @field_validator("on_demand", mode="before")
+    @classmethod
+    def _yes(cls, v):
+        # JSON true only (absent means no), as llmcf-install reads it
+        if v is not None and v is not True:
+            raise ValueError("on_demand is true or absent")
+        return v
 
     @field_validator("memory_high_mb", "oom_score_adj", mode="before")
     @classmethod
@@ -378,6 +389,8 @@ class RootAction(_Strict):
                 raise ValueError("a unit is named llmcf-<name>.service")
             if len(set(self.units)) != len(self.units):
                 raise ValueError("a unit twice")
+        if self.on_demand is not None and self.action != "install_unit":
+            raise ValueError("only install_unit is on demand")
         if self.memory_high_mb is not None and self.memory_max_mb is not None \
                 and self.memory_high_mb > self.memory_max_mb:
             raise ValueError("memory_high_mb is above memory_max_mb")
@@ -453,6 +466,11 @@ class BundleManifest(_Strict):
                 raise ValueError(f"root action run_harness: component {comp.id} names no harness")
             if action.action == "allow_unit_control":
                 self._control_rule(action, comp)
+            if action.on_demand:
+                control = next((a for a in self.root_actions if a.action == "allow_unit_control"), None)
+                if comp.kind not in ENGINE_KINDS or control is None or action.unit not in (control.units or ()):
+                    raise ValueError(f"root action install_unit: {action.unit} is on demand but no engine unit the "
+                                     "bundle's gateway may start")
         return self
 
     def _control_rule(self, action: "RootAction", comp: Component) -> None:
