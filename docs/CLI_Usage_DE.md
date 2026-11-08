@@ -1,4 +1,4 @@
-Version 3.4.0 · Stand 2026-11-02
+Version 3.4.0 · Stand 2026-11-08
 
 [English](CLI_Usage.md) · **Deutsch**
 
@@ -2604,7 +2604,7 @@ Baustein...**; dieselben Schritte und Fragen wie hier, jeder Lauf auf dem Board 
 llm-cli bundle plan GERÄT [--preset llm|voice|stt] [--block ID]... [--set KOMPONENTE.NAME=WERT]...
                     [--file KOMPONENTE.ROLLE=PFAD]... [--online KOMPONENTE.ROLLE=URL --sha256 KOMPONENTE.ROLLE=HEX
                     --size KOMPONENTE.ROLLE=BYTES]... [--licence KOMPONENTE.ROLLE=ID]... [--unprivileged-only]
-                    [--accept-terms BAUSTEIN]... [--json]
+                    [--accept-terms BAUSTEIN]... [--without-measurement] [--engines together|in-turn] [--json]
 llm-cli bundle build GERÄT (dieselbe Auswahl) [--allow-own]
 llm-cli bundle list [--json]
 llm-cli bundle deploy BUNDLE [--dry-run] [--skip-root]
@@ -2647,6 +2647,17 @@ Ein Baustein, dessen Programm das Framework für das Board baut (`llm-llama-serv
 gebaut ist, und prüft jede Komponente gegen die Untersuchung des Boards (`component stt`: die Architektur des Pakets
 gegen die des Boards, die CPU-Merkmale, für die es gebaut ist, der Speicher). Für `vision-mmproj` prüft der Plan auch,
 dass Modell und Projektor ein Paar sind (`vision pair vision`), und zählt beide im Speicher.
+
+`--engines together|in-turn` ist deine Wahl, wie sich die Programme des Bündels (Sprachmodell, Spracherkennung und
+Bild) den Speicher des Boards teilen; `together` ist die Vorgabe. Der Plan zeigt immer beide Zahlen, in seiner
+Prüfung `engines` und in einer Zeile in deiner Sprache: alle zusammen (die Programme, der Rest des Bündels und die
+Reserve gegen den gemessenen freien Speicher des Boards) und nacheinander (das größte Programm mit dem Rest und der
+Reserve). Mit `in-turn` lädt das Gateway des Boards die Programme nacheinander: Bevor eine Anfrage an ein Programm
+geht, das nicht läuft, beenden die anderen ihre Anfragen und werden gestoppt, dann wird dieses Programm gestartet. Das
+braucht das Gateway und jedes Programm mit Autostart (ihre Units); der Plan lehnt `in-turn` ab, wenn schon das größte
+Programm allein nicht passt, und nennt `in-turn`, wenn alle zusammen nicht passen, eines nach dem anderen aber schon.
+Bisher gehen nur die Anfragen an das Sprachmodell durch das Gateway, nacheinander bleibt ein Sprach- oder Bildprogramm
+also gestoppt, während das Modell läuft. Der Plan einer KI wählt das nie.
 
 ### bundle build
 

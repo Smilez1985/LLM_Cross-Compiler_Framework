@@ -1,4 +1,4 @@
-Version 3.4.0 · Last updated 2026-11-02
+Version 3.4.0 · Last updated 2026-11-08
 
 **English** · [Deutsch](CLI_Usage_DE.md)
 
@@ -2494,7 +2494,7 @@ and questions as here, each board run in the background with **Cancel**.
 llm-cli bundle plan DEVICE [--preset llm|voice|stt] [--block ID]... [--set COMPONENT.NAME=VALUE]...
                     [--file COMPONENT.ROLE=PATH]... [--online COMPONENT.ROLE=URL --sha256 COMPONENT.ROLE=HEX
                     --size COMPONENT.ROLE=BYTES]... [--licence COMPONENT.ROLE=ID]... [--unprivileged-only]
-                    [--accept-terms BLOCK]... [--json]
+                    [--accept-terms BLOCK]... [--without-measurement] [--engines together|in-turn] [--json]
 llm-cli bundle build DEVICE (the same choice) [--allow-own]
 llm-cli bundle list [--json]
 llm-cli bundle deploy BUNDLE [--dry-run] [--skip-root]
@@ -2536,6 +2536,16 @@ A block whose program the framework builds for the board (`llm-llama-server` and
 checks each component against the board's probe (`component stt`: the package's architecture against the board's,
 the CPU features it was built for, the memory). For `vision-mmproj` the plan also checks that model and projector are
 a pair (`vision pair vision`) and counts both in the memory.
+
+`--engines together|in-turn` is your choice of how the bundle's engines (the language model, speech recognition and
+vision) share the board's memory; `together` is the default. The plan always shows both numbers in its `engines`
+check and in a line in your language: all together (the engines, the rest of the bundle and the reserve against the
+board's measured free memory) and in turn (the largest engine with the rest and the reserve). With `in-turn` the
+board's gateway loads the engines one after another: before a request goes to an engine that is not running, the
+others finish their requests and are stopped, then that engine is started. It needs the gateway and each engine with
+autostart (their units); the plan refuses `in-turn` when even the largest engine alone does not fit, and names
+`in-turn` when all together does not fit but one at a time does. Only the language model's requests pass the gateway
+so far, so in turn a speech or vision engine stays stopped while the model runs. An AI's plan never chooses this.
 
 ### bundle build
 

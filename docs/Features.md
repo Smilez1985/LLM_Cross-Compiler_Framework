@@ -1,4 +1,4 @@
-Version 3.4.0 · Last updated 2026-11-02
+Version 3.4.0 · Last updated 2026-11-08
 
 **English** · [Deutsch](Features_DE.md)
 
@@ -641,15 +641,20 @@ Deploy way 3 beside the golden ZIP and the runtime package: one bundle for the w
 `vision-mmproj` with the llama.cpp runtime started with `--mmproj` for a vision model and its projector; a
 `whisper-server` you pick yourself stays possible with `stt-whisper-cpp-program`, with a warning; speech output with
 sherpa-onnx is a documented template; `gateway-llmcf` is the framework's own gateway in front of the model, which
-lets a request that finds the model busy wait its turn in a fair queue instead of refusing it, and holds new requests
-back while the board's free memory is low; your own agent harness is the block `harness-agent`, below). You pick a preset (`llm`, `voice`, `stt`) or the blocks,
+lets a request that finds the model busy wait its turn in a fair queue instead of refusing it, holds new requests
+back while the board's free memory is low, and starts and stops the bundle's engines (the language model, speech
+recognition, vision) through their units, all together or one after another when the board's memory cannot hold
+them together, as you choose in the plan; your own agent harness is the block `harness-agent`, below). You pick a preset (`llm`, `voice`, `stt`) or the blocks,
 set their variables (port, threads, memory limit, autostart, ...; each checked against its type) and choose their
 files (a local file is hashed and copied into the bundle, an online item is pinned by its sha256 and size).
 
 Before anything is built or sent, the plan shows every component, every file with its source and size, the root
 actions that run through llmcf-install, and its checks against the board's probe (architecture, init system, sudo, offline
 mode, memory, and per component the board package's architecture and CPU features; for vision, whether model and
-projector are a pair). A board package that is not built yet (whisper.cpp at its pinned commit, llama.cpp) is built
+projector are a pair), and always whether the engines fit all together and whether they fit one after another, with
+the numbers (the engines, the rest of the bundle and the reserve against the board's measured free memory). Whether
+they run together or in turn is your choice (a checkbox in the window, `--engines` at the command line), never an
+AI's. A board package that is not built yet (whisper.cpp at its pinned commit, llama.cpp) is built
 after your yes through the same self-build path as the runtime package. A block whose parts come under their own
 licence terms shows them in full and is used only after you accept them; one with terms that are not a free licence
 (NVIDIA NeMo models, a wake word model trained on GigaSpeech) is an opt-in, never part of a preset. The bundle is signed with the framework's key and kept in this framework's store; its installer on the

@@ -1,4 +1,4 @@
-Version 3.4.0 · Stand 2026-11-02
+Version 3.4.0 · Stand 2026-11-08
 
 [English](Features.md) · **Deutsch**
 
@@ -702,7 +702,9 @@ und `vision-mmproj` mit der llama.cpp-Laufzeit, gestartet mit `--mmproj` für ei
 ein selbst gewähltes `whisper-server` bleibt mit `stt-whisper-cpp-program` möglich, mit einer Warnung; Sprachausgabe
 mit sherpa-onnx ist eine dokumentierte Vorlage; `gateway-llmcf` ist das eigene Gateway des Frameworks vor dem
 Modell, das eine Anfrage bei beschäftigtem Modell in einer fairen Warteschlange warten lässt, statt sie abzulehnen,
-und neue Anfragen zurückhält, solange der freie Speicher des Boards knapp ist; dein eigener Agent-Harness ist der Baustein `harness-agent`, unten). Du wählst eine Vorlage (`llm`, `voice`,
+neue Anfragen zurückhält, solange der freie Speicher des Boards knapp ist, und die Programme des Bündels (Sprachmodell,
+Spracherkennung, Bild) über ihre Units startet und stoppt, alle zusammen oder nacheinander, wenn der Speicher des
+Boards sie nicht zusammen hält, wie du es im Plan wählst; dein eigener Agent-Harness ist der Baustein `harness-agent`, unten). Du wählst eine Vorlage (`llm`, `voice`,
 `stt`) oder die Bausteine, setzt ihre Variablen (Port, Threads, Speichergrenze, Autostart, ...; jede gegen ihren Typ
 geprüft) und wählst ihre Dateien (eine lokale Datei wird gehasht und ins Bündel kopiert, ein Online-Element ist über
 sha256 und Größe festgelegt).
@@ -710,7 +712,10 @@ sha256 und Größe festgelegt).
 Bevor etwas gebaut oder gesendet wird, zeigt der Plan jede Komponente, jede Datei mit Quelle und Größe, die
 Root-Aktionen, die über llmcf-install laufen, und seine Prüfungen gegen die Untersuchung des Boards (Architektur,
 Init-System, sudo, Offline-Modus, Speicher, und je Komponente Architektur und CPU-Merkmale des Board-Pakets; bei
-Vision, ob Modell und Projektor ein Paar sind). Ein noch nicht gebautes Board-Paket (whisper.cpp auf seinem
+Vision, ob Modell und Projektor ein Paar sind), und immer, ob die Programme alle zusammen passen und ob sie
+nacheinander passen, mit den Zahlen (die Programme, der Rest des Bündels und die Reserve gegen den gemessenen freien
+Speicher des Boards). Ob sie zusammen oder nacheinander laufen, wählst du (ein Kontrollkästchen im Fenster,
+`--engines` auf der Kommandozeile), nie eine KI. Ein noch nicht gebautes Board-Paket (whisper.cpp auf seinem
 festgelegten Commit, llama.cpp) wird nach deinem Ja über denselben Weg des eigenen Builds gebaut wie das
 Laufzeitpaket. Ein Baustein, dessen Teile eigenen Lizenzbedingungen unterliegen, zeigt sie vollständig und wird erst
 verwendet, wenn du sie annimmst; einer mit Bedingungen, die keine freie Lizenz sind (Modelle von NVIDIA NeMo, ein
