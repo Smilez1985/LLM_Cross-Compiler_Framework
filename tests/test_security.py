@@ -664,7 +664,7 @@ class TestCrawlerPoliteness:
         writer.add_metadata({"/Title": "  Board guide  "})
         data = io.BytesIO()
         writer.write(data)
-        url = "http://93.184.215.14/guide.pdf"
+        url = f"{SITE}/guide.pdf"
         crawler, _ = make_crawler({url: response(content_type="application/pdf", content=data.getvalue())},
                                   respect_robots=False)
 
