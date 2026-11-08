@@ -51,12 +51,41 @@ impl Kind {
     }
 }
 
-/// The engine a route needs (None: no engine; such a route is the gateway's own). A new route is one line here.
+/// One route of the gateway to an engine: the client's method and path, the engine it needs and the engine's own path
+/// the request goes to (whisper.cpp's whisper-server takes its uploads at /inference).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Route {
+    pub method: &'static str,
+    pub path: &'static str,
+    pub engine: Kind,
+    pub upstream: &'static str,
+}
+
+/// The routing table: every route to an engine the gateway serves (/health and /metrics are its own). A chat request
+/// with image parts goes to the vision engine instead (`for_request`). A new route is one line here.
+pub const ROUTES: [Route; 4] = [
+    Route { method: "GET", path: "/v1/models", engine: Kind::Llm, upstream: "/v1/models" },
+    Route { method: "POST", path: "/v1/chat/completions", engine: Kind::Llm, upstream: "/v1/chat/completions" },
+    Route { method: "POST", path: "/v1/completions", engine: Kind::Llm, upstream: "/v1/completions" },
+    Route { method: "POST", path: "/v1/audio/transcriptions", engine: Kind::Stt, upstream: "/inference" },
+];
+
+/// The route of a method and path (its place in ROUTES).
+pub fn route_index(method: &str, path: &str) -> Option<usize> {
+    ROUTES.iter().position(|r| r.method == method && r.path == path)
+}
+
+/// The engine a route needs (None: no engine; such a route is the gateway's own).
 pub fn for_route(path: &str) -> Option<Kind> {
-    match path {
-        "/v1/chat/completions" | "/v1/completions" | "/v1/embeddings" | "/v1/models" => Some(Kind::Llm),
-        "/v1/audio/transcriptions" => Some(Kind::Stt),
-        _ => None,
+    ROUTES.iter().find(|r| r.path == path).map(|r| r.engine)
+}
+
+/// The engine one request goes to: a chat request with image parts to the vision engine (a llama-server of its own
+/// with the projector), every other one to its route's engine.
+pub fn for_request(path: &str, images: bool) -> Option<Kind> {
+    match for_route(path) {
+        Some(Kind::Llm) if images && path == "/v1/chat/completions" => Some(Kind::Vision),
+        other => other,
     }
 }
 
@@ -612,9 +641,19 @@ mod tests {
     #[test]
     fn routes_name_their_engine_and_specs_are_checked() {
         assert_eq!(for_route("/v1/chat/completions"), Some(Kind::Llm));
-        assert_eq!(for_route("/v1/embeddings"), Some(Kind::Llm));
+        assert_eq!(for_route("/v1/models"), Some(Kind::Llm));
         assert_eq!(for_route("/v1/audio/transcriptions"), Some(Kind::Stt));
         assert_eq!(for_route("/health"), None);
+        assert_eq!(for_route("/v1/embeddings"), None, "not served");
+        // images: the chat route goes to vision, nothing else does
+        assert_eq!(for_request("/v1/chat/completions", true), Some(Kind::Vision));
+        assert_eq!(for_request("/v1/chat/completions", false), Some(Kind::Llm));
+        assert_eq!(for_request("/v1/completions", true), Some(Kind::Llm));
+        assert_eq!(for_request("/v1/audio/transcriptions", false), Some(Kind::Stt));
+        assert_eq!(route_index("POST", "/v1/audio/transcriptions"), Some(3));
+        assert_eq!(ROUTES[3].upstream, "/inference");
+        assert_eq!(route_index("GET", "/v1/audio/transcriptions"), None);
+        assert_eq!(route_index("POST", "/metrics"), None);
         assert_eq!(
             parse_spec("stt=llmcf-stt.service:300:8090").unwrap(),
             Spec { kind: Kind::Stt, unit: "llmcf-stt.service".into(), mib: 300, port: Some(8090) }
@@ -748,9 +787,8 @@ mod tests {
     }
 
     /// Two fake upstreams on their own loopback ports stand for the llm and the speech engine: "starting" a unit
-    /// opens its port, "stopping" it closes it, and the health is the real HTTP check (http_up). The speech engine is
-    /// asked for through the scheduler itself, since the gateway's speech route is not there yet (only the routing
-    /// hook, for_route); the llm side goes the same way as a request of the gateway.
+    /// opens its port, "stopping" it closes it, and the health is the real HTTP check (http_up). The scheduler alone
+    /// here; server.rs tests the same switch through the gateway's real HTTP routes.
     struct Upstreams {
         ports: HashMap<String, u16>,
         servers: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,

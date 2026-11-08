@@ -11,8 +11,10 @@
 #![forbid(unsafe_code)]
 
 mod args;
+mod audio;
 mod control;
 mod engines;
+mod images;
 mod limits;
 mod memory;
 mod peer;

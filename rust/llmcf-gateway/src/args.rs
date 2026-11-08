@@ -53,6 +53,25 @@ pub struct Serve {
     /// how long an engine stays loaded at least before it may give way to another one in turn
     pub engine_hold_seconds: u32,
     pub idle_stop_minutes: u32,
+    /// The loopback port of the speech engine (whisper.cpp's whisper-server; None: the board has none the gateway
+    /// speaks to, and the speech route answers 501). An stt `--engine` with a port gives it too.
+    pub stt_port: Option<u16>,
+    /// The loopback port of the vision engine (a second llama-server with --mmproj; None: no vision, image parts are
+    /// refused). A vision `--engine` with a port gives it too.
+    pub vision_port: Option<u16>,
+    /// The context size the vision engine was started with (the vision component's ctx_size).
+    pub vision_ctx_size: u32,
+    /// The largest audio upload (the whole multipart body) in MB, apart from the JSON cap max_body_kb.
+    pub max_audio_mb: u32,
+    /// Images one chat request may carry (0: none).
+    pub max_images: u32,
+    /// The largest image (decoded bytes) in KB.
+    pub max_image_kb: u32,
+    /// All images of one request together (decoded bytes) in KB.
+    pub max_images_kb: u32,
+    /// The tokens one image is counted with against the vision engine's context (a conservative fixed number: the
+    /// projector's own count depends on the model and the picture).
+    pub image_tokens: u32,
 }
 
 impl Default for Serve {
@@ -76,6 +95,14 @@ impl Default for Serve {
             engines_budget_mb: 0,
             engine_hold_seconds: 30,
             idle_stop_minutes: 0,
+            stt_port: None,
+            vision_port: None,
+            vision_ctx_size: 4096,
+            max_audio_mb: 25,
+            max_images: 4,
+            max_image_kb: 2048,
+            max_images_kb: 4096,
+            image_tokens: 768,
         }
     }
 }
@@ -142,6 +169,31 @@ fn port(name: &str, v: &str) -> Result<u16, String> {
     Ok(number(name, v, 1024, 65535)? as u16)
 }
 
+/// A port, or 0 for none.
+fn port_or_none(name: &str, v: &str) -> Result<Option<u16>, String> {
+    if v == "0" {
+        return Ok(None);
+    }
+    port(name, v).map(Some)
+}
+
+impl Serve {
+    /// The body cap of a chat request: the JSON cap, and with vision as many images as a request may carry in base64
+    /// (4 characters for 3 bytes) with their data-URL heads.
+    pub fn chat_body_cap(&self) -> usize {
+        let json = self.max_body_kb as usize * 1024;
+        if self.vision_port.is_none() || self.max_images == 0 {
+            return json;
+        }
+        json + (self.max_images_kb as usize * 1024).div_ceil(3) * 4 + self.max_images as usize * 64
+    }
+
+    /// The body cap of an audio upload.
+    pub fn audio_body_cap(&self) -> usize {
+        self.max_audio_mb as usize * 1024 * 1024
+    }
+}
+
 pub fn parse(args: &[String]) -> Result<Call, String> {
     let Some(first) = args.first() else { return Err("usage: llmcf-gateway serve|probe [OPTION VALUE ...]".into()) };
     match first.as_str() {
@@ -186,6 +238,14 @@ pub fn parse(args: &[String]) -> Result<Call, String> {
                     }
                     "--engines-budget-mb" => s.engines_budget_mb = number(name, v, 0, 1 << 20)?,
                     "--engine-hold-seconds" => s.engine_hold_seconds = number(name, v, 0, 3600)? as u32,
+                    "--stt-port" => s.stt_port = port_or_none(name, v)?,
+                    "--vision-port" => s.vision_port = port_or_none(name, v)?,
+                    "--vision-ctx-size" => s.vision_ctx_size = number(name, v, 256, 1 << 20)? as u32,
+                    "--max-audio-mb" => s.max_audio_mb = number(name, v, 1, 200)? as u32,
+                    "--max-images" => s.max_images = number(name, v, 0, 16)? as u32,
+                    "--max-image-kb" => s.max_image_kb = number(name, v, 16, 16384)? as u32,
+                    "--max-images-kb" => s.max_images_kb = number(name, v, 16, 65536)? as u32,
+                    "--image-tokens" => s.image_tokens = number(name, v, 16, 16384)? as u32,
                     _ => return Err(format!("{name} is not an option of serve")),
                 }
             }
@@ -218,6 +278,29 @@ pub fn parse(args: &[String]) -> Result<Call, String> {
                     }
                     _ => {}
                 }
+                // the speech or vision engine's port: from --engine, or the same as --stt-port / --vision-port
+                let given = match e.kind {
+                    Kind::Stt => &mut s.stt_port,
+                    Kind::Vision => &mut s.vision_port,
+                    Kind::Llm => continue,
+                };
+                match (*given, e.port) {
+                    (None, p) => *given = p,
+                    (Some(a), Some(b)) if a != b => {
+                        return Err(format!("the {} engine's port is given twice, differently", e.kind.word()))
+                    }
+                    _ => {}
+                }
+            }
+            if s.max_image_kb > s.max_images_kb {
+                return Err("--max-image-kb is above --max-images-kb".into());
+            }
+            let mut ports = vec![s.port, s.upstream_port];
+            for p in [s.stt_port, s.vision_port].into_iter().flatten() {
+                if ports.contains(&p) {
+                    return Err("--stt-port and --vision-port are ports of their own".into());
+                }
+                ports.push(p);
             }
             Ok(Call::Serve(s))
         }
@@ -278,6 +361,15 @@ mod tests {
             &["serve", "--engines", "sometimes"],
             &["serve", "--engines-budget-mb", "-5"],
             &["serve", "--engine-hold-seconds", "3601"],
+            &["serve", "--stt-port", "8080"],
+            &["serve", "--stt-port", "8090", "--vision-port", "8090"],
+            &["serve", "--stt-port", "80"],
+            &["serve", "--stt-port", "8090", "--engine", "stt=llmcf-stt.service:9:8091"],
+            &["serve", "--max-audio-mb", "0"],
+            &["serve", "--max-audio-mb", "201"],
+            &["serve", "--max-images", "17"],
+            &["serve", "--max-image-kb", "8192", "--max-images-kb", "4096"],
+            &["serve", "--image-tokens", "8"],
             &["bogus"],
         ] {
             assert!(parse(&a(bad)).is_err(), "{bad:?}");
@@ -309,6 +401,36 @@ mod tests {
         let Call::Serve(s) = parse(&a(&["serve", "--llm-unit", "llmcf-llm.service"])).unwrap() else { panic!() };
         assert_eq!(s.engines, vec![Spec { kind: Kind::Llm, unit: "llmcf-llm.service".into(), mib: 0, port: None }]);
         assert_eq!(s.engines_mode, Mode::Together);
+    }
+
+    #[test]
+    fn speech_and_vision_take_their_ports_and_caps() {
+        let Call::Serve(s) = parse(&a(&["serve"])).unwrap() else { panic!() };
+        assert_eq!((s.stt_port, s.vision_port, s.max_audio_mb, s.max_images, s.image_tokens), (None, None, 25, 4, 768));
+        assert_eq!(s.chat_body_cap(), 256 * 1024, "without vision the JSON cap alone");
+        assert_eq!(s.audio_body_cap(), 25 << 20);
+        let Call::Serve(s) = parse(&a(&[
+            "serve",
+            "--stt-port",
+            "0",
+            "--vision-port",
+            "8081",
+            "--engine",
+            "stt=llmcf-stt.service:300:8090",
+            "--max-images-kb",
+            "3072",
+        ]))
+        .unwrap() else {
+            panic!()
+        };
+        assert_eq!((s.stt_port, s.vision_port), (Some(8090), Some(8081)), "the stt engine's port is the route's");
+        assert_eq!(s.chat_body_cap(), 256 * 1024 + 4096 * 1024 + 4 * 64);
+        let Call::Serve(s) =
+            parse(&a(&["serve", "--stt-port", "8090", "--engine", "stt=llmcf-stt.service:300:8090"])).unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(s.stt_port, Some(8090));
     }
 
     #[test]

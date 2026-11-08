@@ -496,3 +496,239 @@ fn health_and_metrics_list_the_engines_and_a_running_llm_takes_requests() {
     let log = g.log.lock().unwrap().clone();
     assert!(log.contains("engines llm=900MiB,stt=300MiB (in-turn), 1000 MiB together"), "{log}");
 }
+
+/// What a recording stub saw of one request: path, Content-Type, Authorization and the body's bytes.
+type Seen = Arc<Mutex<Vec<(String, String, String, Vec<u8>)>>>;
+
+/// A stub engine that records every request whole (binary bodies too) and answers `answer` with `ctype`.
+fn recorder(answer: &'static str, ctype: &'static str) -> (u16, Seen) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let seen: Seen = Arc::new(Mutex::new(Vec::new()));
+    let log = seen.clone();
+    thread::spawn(move || {
+        for conn in listener.incoming() {
+            let Ok(mut conn) = conn else { continue };
+            let log = log.clone();
+            thread::spawn(move || {
+                let mut reader = BufReader::new(conn.try_clone().unwrap());
+                let mut line = String::new();
+                if reader.read_line(&mut line).is_err() {
+                    return;
+                }
+                let path = line.split_whitespace().nth(1).unwrap_or("").to_string();
+                let (mut length, mut ct, mut auth) = (0usize, String::new(), String::new());
+                loop {
+                    let mut h = String::new();
+                    if reader.read_line(&mut h).is_err() {
+                        return;
+                    }
+                    let h = h.trim_end();
+                    if h.is_empty() {
+                        break;
+                    }
+                    let (k, v) = h.split_once(':').unwrap_or((h, ""));
+                    match k.to_ascii_lowercase().as_str() {
+                        "content-length" => length = v.trim().parse().unwrap_or(0),
+                        "content-type" => ct = v.trim().to_string(),
+                        "authorization" => auth = v.trim().to_string(),
+                        _ => {}
+                    }
+                }
+                let mut body = vec![0u8; length];
+                if reader.read_exact(&mut body).is_err() {
+                    return;
+                }
+                let health = path == "/health";
+                if !health {
+                    log.lock().unwrap().push((path, ct, auth, body));
+                }
+                let answer = if health { r#"{"status":"ok"}"# } else { answer };
+                let _ = write!(
+                    conn,
+                    "HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                    answer.len()
+                );
+            });
+        }
+    });
+    (port, seen)
+}
+
+const BOUNDARY: &str = "test-boundary-31415";
+
+fn upload(parts: &[(&str, Option<&str>, &[u8])]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (name, filename, data) in parts {
+        out.extend_from_slice(format!("--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"").as_bytes());
+        if let Some(f) = filename {
+            out.extend_from_slice(format!("; filename=\"{f}\"\r\nContent-Type: application/octet-stream").as_bytes());
+        }
+        out.extend_from_slice(b"\r\n\r\n");
+        out.extend_from_slice(data);
+        out.extend_from_slice(b"\r\n");
+    }
+    out.extend_from_slice(format!("--{BOUNDARY}--\r\n").as_bytes());
+    out
+}
+
+/// One request with a binary body; (status, headers and body as text).
+fn http_bytes(port: u16, path: &str, content_type: &str, body: &[u8]) -> (u16, String) {
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    write!(
+        s,
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    )
+    .unwrap();
+    let _ = s.write_all(body);
+    let mut out = String::new();
+    let _ = s.read_to_string(&mut out);
+    (status_of(&out), out)
+}
+
+fn wav(len: usize) -> Vec<u8> {
+    let mut v = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00".to_vec();
+    v.resize(len, 0x11);
+    v
+}
+
+#[test]
+fn an_audio_upload_reaches_whisper_as_its_own_form() {
+    let s = stub();
+    let (stt, seen) = recorder("Hallo Welt\n", "text/html; charset=utf-8");
+    let g = gateway("stt", s.port, &["--stt-port", &stt.to_string(), "--max-audio-mb", "1"]);
+    let audio = wav(70_000);
+    let body = upload(&[
+        ("file", Some("../secret name.wav"), &audio),
+        ("model", None, b"whisper-1"),
+        ("language", None, b"de"),
+        ("prompt", None, b"Ein Gruss"),
+        ("response_format", None, b"text"),
+        ("temperature", None, b"0"),
+    ]);
+    let ctype = format!("multipart/form-data; boundary={BOUNDARY}");
+    let (status, answer) = http_bytes(g.port, "/v1/audio/transcriptions", &ctype, &body);
+    assert_eq!(status, 200, "{answer}");
+    assert!(answer.to_ascii_lowercase().contains("content-type: text/plain; charset=utf-8"), "{answer}");
+    assert!(answer.contains("\r\nHallo Welt\n\r\n"), "{answer}");
+    let got = seen.lock().unwrap().clone();
+    assert_eq!(got.len(), 1);
+    let (path, ct, auth, sent) = &got[0];
+    assert_eq!(path, "/inference", "whisper-server's own path");
+    assert_eq!(ct, &ctype);
+    assert!(auth.is_empty(), "the model server's key never goes to whisper");
+    let text = String::from_utf8_lossy(sent);
+    for field in [
+        "name=\"response_format\"\r\n\r\ntext\r\n",
+        "name=\"language\"\r\n\r\nde\r\n",
+        "name=\"prompt\"\r\n\r\nEin Gruss\r\n",
+        "name=\"temperature\"\r\n\r\n0\r\n",
+        "name=\"file\"; filename=\"audio.wav\"",
+    ] {
+        assert!(text.contains(field), "{field} in {text:.400}");
+    }
+    assert!(!text.contains("secret") && !text.contains("whisper-1"), "neither the client's file name nor its model");
+    let at = sent.windows(audio.len()).position(|w| w == audio.as_slice());
+    assert!(at.is_some(), "the audio arrives byte for byte");
+    // the log has the route, the type and the size, never the prompt or the transcript
+    let log = g.log.lock().unwrap().clone();
+    assert!(log.contains("POST /v1/audio/transcriptions 200") && log.contains("audio=wav"), "{log}");
+    assert!(!log.contains("Gruss") && !log.contains("Hallo"), "{log}");
+    assert_eq!(metric(g.port, "llmcf_gateway_route_requests_total{route=\"/v1/audio/transcriptions\"}"), 1.0);
+    assert_eq!(
+        metric(g.port, "llmcf_gateway_route_bytes_in_total{route=\"/v1/audio/transcriptions\"}"),
+        body.len() as f64
+    );
+}
+
+#[test]
+fn audio_the_gateway_does_not_take_never_reaches_whisper() {
+    let s = stub();
+    let (stt, seen) = recorder(r#"{"text":"x"}"#, "application/json");
+    let g = gateway("stt-no", s.port, &["--stt-port", &stt.to_string(), "--max-audio-mb", "1"]);
+    let ctype = format!("multipart/form-data; boundary={BOUNDARY}");
+    // too large by its Content-Length: refused before it is read
+    let (status, _) = http_bytes(g.port, "/v1/audio/transcriptions", &ctype, &vec![b'x'; (1 << 20) + 1]);
+    assert_eq!(status, 413);
+    let cases: Vec<(String, Vec<u8>, u16)> = vec![
+        ("application/json".into(), b"{}".to_vec(), 415),
+        (ctype.clone(), upload(&[("model", None, b"whisper-1")]), 400),
+        (ctype.clone(), upload(&[("file", Some("a.webm"), b"\x1a\x45\xdf\xa3\x9f\x42\x86\x81")]), 415),
+        (ctype.clone(), upload(&[("file", Some("a.wav"), &wav(100)), ("x", None, b"1")]), 400),
+        (ctype.clone(), b"not a form".to_vec(), 400),
+    ];
+    for (ct, body, want) in cases {
+        let (status, answer) = http_bytes(g.port, "/v1/audio/transcriptions", &ct, &body);
+        assert_eq!(status, want, "{answer}");
+    }
+    assert!(seen.lock().unwrap().is_empty());
+    assert_eq!(metric(g.port, "llmcf_gateway_route_refused_total{route=\"/v1/audio/transcriptions\"}"), 6.0);
+    // a gateway without a speech engine says so
+    let g2 = gateway("stt-none", s.port, &[]);
+    let (status, answer) = http_bytes(g2.port, "/v1/audio/transcriptions", &ctype, &upload(&[]));
+    assert_eq!(status, 501, "{answer}");
+    assert!(answer.contains("stt-whisper-cpp"), "{answer}");
+}
+
+fn png_url(size: usize) -> String {
+    const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut data = b"\x89PNG\r\n\x1a\n".to_vec();
+    data.resize(size, 3);
+    let mut out = String::from("data:image/png;base64,");
+    for c in data.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            out.push(if i <= c.len() { A[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+        }
+    }
+    out
+}
+
+#[test]
+fn a_chat_with_an_image_goes_to_the_vision_engine_unchanged() {
+    let s = stub();
+    let answer = r#"{"choices":[{"index":0,"message":{"role":"assistant","content":"a cat"}}]}"#;
+    let (vision, seen) = recorder(answer, "application/json");
+    let g = gateway("vision", s.port, &["--vision-port", &vision.to_string(), "--vision-ctx-size", "8192"]);
+    let image = serde_json::json!({"type": "image_url", "image_url": {"url": png_url(300_000), "detail": "auto"}});
+    let body = serde_json::json!({"messages": [{"role": "user", "content": [
+        {"type": "text", "text": "What is it?"}, image.clone()]}]});
+    let text = body.to_string();
+    assert!(text.len() > 256 * 1024, "larger than the JSON cap alone");
+    let (status, out) = post(g.port, "/v1/chat/completions", &text);
+    assert_eq!(status, 200, "{out}");
+    assert!(out.contains("a cat"));
+    let got = seen.lock().unwrap().clone();
+    assert_eq!(got.len(), 1);
+    let (path, _, auth, sent) = &got[0];
+    assert_eq!(path, "/v1/chat/completions");
+    assert_eq!(auth, &format!("Bearer {KEY}"), "the vision engine is a llama-server with the runtime's key");
+    let v: serde_json::Value = serde_json::from_slice(sent).unwrap();
+    assert_eq!(v["messages"][0]["content"][1], image, "the image part arrives unchanged");
+    assert!(v.get("id_slot").is_none());
+    // a text chat still goes to the llm
+    assert_eq!(post(g.port, "/v1/chat/completions", CHAT).0, 200);
+    assert_eq!(seen.lock().unwrap().len(), 1);
+    assert_eq!(s.seen.lock().unwrap().iter().filter(|r| r.0 == "/v1/chat/completions").count(), 1);
+    assert_eq!(metric(g.port, "llmcf_gateway_images_total"), 1.0);
+    // a remote image is never fetched: refused before any engine
+    let remote = serde_json::json!({"messages": [{"role": "user", "content": [
+        {"type": "image_url", "image_url": {"url": "https://example.invalid/cat.png"}}]}]});
+    let (status, out) = post(g.port, "/v1/chat/completions", &remote.to_string());
+    assert_eq!(status, 400);
+    assert!(out.contains("remote_image"), "{out}");
+    assert_eq!(seen.lock().unwrap().len(), 1);
+    let (_, health) = http(g.port, "GET", "/health", "", "text/plain");
+    let h: serde_json::Value = serde_json::from_str(&health).unwrap();
+    assert_eq!(h["routes"][1]["with_images"], "vision");
+    assert_eq!(h["routes"][1]["vision_port"], vision);
+    // without a vision engine an image part is refused
+    let g2 = gateway("novision", s.port, &[]);
+    let small = serde_json::json!({"messages": [{"role": "user", "content": [
+        {"type": "image_url", "image_url": {"url": png_url(100)}}]}]});
+    let (status, out) = post(g2.port, "/v1/chat/completions", &small.to_string());
+    assert_eq!(status, 400);
+    assert!(out.contains("unsupported_content"), "{out}");
+}

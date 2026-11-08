@@ -11,7 +11,11 @@
 //!   "same result as tool call #<id>" (Ditto's rule, tool_loop.ResultIndex, tested with the same vectors in
 //!   tests/fixtures/context_rules/duplicate_result.json); cache_prompt is set so llama-server reuses the cached
 //!   prefix, and with several slots a request goes to the slot its system prompt hashes to (slot reuse).
+//! - Images: with a vision engine, a user message may carry image parts (images.rs: data URLs only, png, jpeg or gif
+//!   by their bytes, capped in size and count); they go on unchanged, the request goes to the vision engine and is
+//!   counted against its context with a fixed number of tokens per image.
 
+use crate::images::{self, ImageRules, Seen};
 use ring::digest::{digest, SHA256};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -34,6 +38,10 @@ pub struct Limits {
     /// The gateway's cap on max_tokens.
     pub max_tokens: u64,
     pub slots: u32,
+    /// the image parts taken (None: no vision engine, only text parts)
+    pub images: Option<ImageRules>,
+    /// tokens of the vision engine's context, for a request with images
+    pub vision_budget: u64,
 }
 
 #[derive(Debug, PartialEq)]
@@ -56,6 +64,9 @@ pub struct Outcome {
     pub results_pointed: u64,
     pub clamped: bool,
     pub stream: bool,
+    /// image parts of the request (it goes to the vision engine then)
+    pub images: u32,
+    pub image_bytes: u64,
 }
 
 /// Rough token count of a text (ceil(chars / CHARS_PER_TOKEN)).
@@ -173,8 +184,9 @@ fn short(s: &str) -> String {
     }
 }
 
-/// The text of a message's content: a string, or a list of {"type":"text","text":...} parts.
-fn content_text(v: &Value) -> Result<String, Refusal> {
+/// The text of a message's content: a string, or a list of {"type":"text","text":...} parts; in a user message with
+/// a vision engine also {"type":"image_url","image_url":{"url":"data:...","detail":...}} parts (counted in `seen`).
+fn content_text(v: &Value, images: Option<&ImageRules>, seen: &mut Seen) -> Result<String, Refusal> {
     match v {
         Value::String(s) => Ok(s.clone()),
         Value::Null => Ok(String::new()),
@@ -184,11 +196,19 @@ fn content_text(v: &Value) -> Result<String, Refusal> {
                 let Some(o) = p.as_object() else {
                     return Err(refuse("invalid_message", "a content part is an object"));
                 };
-                if o.get("type").and_then(Value::as_str) != Some("text") {
-                    return Err(refuse(
-                        "unsupported_content",
-                        "only text content parts are taken (images need the vision component)",
-                    ));
+                let kind = o.get("type").and_then(Value::as_str);
+                if kind == Some("image_url") {
+                    let Some(rules) = images else {
+                        return Err(refuse(
+                            "unsupported_content",
+                            "the board runs no vision engine (block vision-mmproj): only text content parts are taken",
+                        ));
+                    };
+                    image_part(o, rules, seen)?;
+                    continue;
+                }
+                if kind != Some("text") {
+                    return Err(refuse("unsupported_content", "a content part is text or, for vision, image_url"));
                 }
                 if o.keys().any(|k| k != "type" && k != "text") {
                     return Err(refuse("invalid_message", "a text part has only type and text"));
@@ -199,6 +219,26 @@ fn content_text(v: &Value) -> Result<String, Refusal> {
         }
         _ => Err(refuse("invalid_message", "content is a text or a list of text parts")),
     }
+}
+
+/// One image part: only its type and image_url, the URL a checked data URL (images.rs), detail auto, low or high.
+fn image_part(o: &Map<String, Value>, rules: &ImageRules, seen: &mut Seen) -> Result<(), Refusal> {
+    if o.keys().any(|k| k != "type" && k != "image_url") {
+        return Err(refuse("invalid_message", "an image part has only type and image_url"));
+    }
+    let Some(iu) = o.get("image_url").and_then(Value::as_object) else {
+        return Err(refuse("invalid_message", "image_url is an object with its url"));
+    };
+    if iu.keys().any(|k| k != "url" && k != "detail") {
+        return Err(refuse("invalid_message", "image_url has only url and detail"));
+    }
+    if let Some(d) = iu.get("detail") {
+        if !matches!(d.as_str(), Some("auto" | "low" | "high")) {
+            return Err(refuse("invalid_value", "detail is auto, low or high"));
+        }
+    }
+    let url = iu.get("url").and_then(Value::as_str).ok_or_else(|| refuse("invalid_message", "image_url has a url"))?;
+    images::check_url(url, rules, seen)
 }
 
 /// One tool call of an assistant message: (id, name, arguments as canonical JSON text).
@@ -334,6 +374,7 @@ pub fn chat(body: &[u8], lim: &Limits) -> Result<Outcome, Refusal> {
     let mut o = Outcome::default();
     let mut tokens: u64 = 0;
     let mut first_system: Option<String> = None;
+    let mut seen = Seen::default();
     for msg in messages {
         let Value::Object(mut mo) = msg else { return Err(refuse("invalid_message", "a message is an object")) };
         let role = mo.get("role").and_then(Value::as_str).unwrap_or("").to_string();
@@ -351,7 +392,9 @@ pub fn chat(body: &[u8], lim: &Limits) -> Result<Outcome, Refusal> {
                 return Err(refuse("invalid_message", "name is a short text"));
             }
         }
-        let text = content_text(mo.get("content").unwrap_or(&Value::Null))?;
+        // images only in a user's message
+        let rules = if role == "user" { lim.images.as_ref() } else { None };
+        let text = content_text(mo.get("content").unwrap_or(&Value::Null), rules, &mut seen)?;
         match role.as_str() {
             "system" => {
                 if systems.contains(&text) {
@@ -395,6 +438,14 @@ pub fn chat(body: &[u8], lim: &Limits) -> Result<Outcome, Refusal> {
     if let Some(t) = m.get("tools") {
         tokens += tokens_of(&t.to_string());
     }
+    // a request with images goes to the vision engine: its own context, each image a fixed number of tokens
+    let mut lim = *lim;
+    if seen.count > 0 {
+        tokens += seen.count as u64 * lim.images.map(|r| r.tokens).unwrap_or(0);
+        lim.budget = lim.vision_budget;
+        lim.slots = 1;
+    }
+    let lim = &lim;
     let (n, clamped) = answer_tokens(&m, &["max_tokens", "max_completion_tokens"], tokens, lim)?;
     m.remove("max_completion_tokens");
     m.insert("max_tokens".into(), Value::from(n));
@@ -408,6 +459,8 @@ pub fn chat(body: &[u8], lim: &Limits) -> Result<Outcome, Refusal> {
     o.prompt_tokens = tokens;
     o.max_tokens = n;
     o.clamped = clamped;
+    o.images = seen.count;
+    o.image_bytes = seen.bytes;
     o.body = Value::Object(m);
     Ok(o)
 }
@@ -430,7 +483,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const LIM: Limits = Limits { budget: 4096, max_tokens: 512, slots: 1 };
+    const LIM: Limits = Limits { budget: 4096, max_tokens: 512, slots: 1, images: None, vision_budget: 0 };
 
     fn run(v: Value) -> Result<Outcome, Refusal> {
         chat(v.to_string().as_bytes(), &LIM)
@@ -454,6 +507,7 @@ mod tests {
             (json!({"messages": [{"role": "root", "content": "x"}]}), "invalid_message"),
             (json!({"messages": [{"role": "user", "content": "x", "extra": 1}]}), "invalid_message"),
             (json!({"messages": [{"role": "user", "content": [{"type": "image_url"}]}]}), "unsupported_content"),
+            (json!({"messages": [{"role": "user", "content": [{"type": "video"}]}]}), "unsupported_content"),
             (json!({"messages": [{"role": "user", "content": "x"}], "n": 2}), "invalid_value"),
             (json!({"messages": [{"role": "user", "content": "x"}], "temperature": "hot"}), "invalid_value"),
             (json!({"messages": [{"role": "user", "content": "x"}], "id_slot": 3}), "unknown_field"),
@@ -478,7 +532,7 @@ mod tests {
 
     #[test]
     fn the_budget_cuts_max_tokens_and_refuses_a_prompt_that_does_not_fit() {
-        let lim = Limits { budget: 100, max_tokens: 512, slots: 1 };
+        let lim = Limits { budget: 100, ..LIM };
         let o = chat(
             json!({"messages": [{"role": "user", "content": "x".repeat(150)}], "max_tokens": 400})
                 .to_string()
@@ -502,12 +556,67 @@ mod tests {
 
     #[test]
     fn several_slots_pick_the_slot_of_the_system_prompt() {
-        let lim = Limits { budget: 2048, max_tokens: 64, slots: 4 };
+        let lim = Limits { budget: 2048, max_tokens: 64, slots: 4, ..LIM };
         let body = json!({"messages": [{"role": "system", "content": "S"}, {"role": "user", "content": "q"}]});
         let a = chat(body.to_string().as_bytes(), &lim).unwrap();
         let b = chat(body.to_string().as_bytes(), &lim).unwrap();
         assert_eq!(a.body["id_slot"], b.body["id_slot"]);
         assert!(a.body["id_slot"].as_u64().unwrap() < 4);
+    }
+
+    #[test]
+    fn image_parts_need_the_vision_engine_and_are_counted_against_its_context() {
+        use crate::images::tests::{png, url, RULES};
+        let img = |u: String| json!({"type": "image_url", "image_url": {"url": u, "detail": "low"}});
+        let body = |parts: Vec<Value>| {
+            json!({"messages": [{"role": "user", "content": parts}], "max_tokens": 4000}).to_string().into_bytes()
+        };
+        let one = body(vec![json!({"type": "text", "text": "what is it?"}), img(url("image/png", &png(64)))]);
+        // without a vision engine an image part is refused
+        assert_eq!(chat(&one, &LIM).unwrap_err().code, "unsupported_content");
+        let lim = Limits { images: Some(RULES), vision_budget: 2048, slots: 4, ..LIM };
+        let o = chat(&one, &lim).unwrap();
+        assert_eq!((o.images, o.image_bytes), (1, 64));
+        assert_eq!(o.prompt_tokens, PER_MESSAGE_TOKENS + 4 + 768, "text plus the fixed tokens of the image");
+        assert_eq!(o.max_tokens, 512.min(2048 - o.prompt_tokens), "the vision engine's budget");
+        assert!(o.body.get("id_slot").is_none(), "the llm's slots are not the vision engine's");
+        // the image part goes on unchanged
+        let sent: Value = serde_json::from_slice(&one).unwrap();
+        assert_eq!(o.body["messages"][0]["content"], sent["messages"][0]["content"]);
+        // a text-only request with the same limits stays with the llm's budget and slots
+        let t = chat(br#"{"messages":[{"role":"user","content":"hi"}]}"#, &lim).unwrap();
+        assert_eq!(t.images, 0);
+        assert!(t.body.get("id_slot").is_some());
+        // two images do not fit a 1500 context counted at 768 each
+        let two = body(vec![img(url("image/png", &png(8))), img(url("image/png", &png(8)))]);
+        let small = Limits { images: Some(ImageRules { max_images: 3, ..RULES }), vision_budget: 1500, ..LIM };
+        assert_eq!(chat(&two, &small).unwrap_err().code, "context_exceeded");
+        // shapes and places refused
+        for (parts, code) in [
+            (vec![img("http://example.invalid/a.png".into())], "remote_image"),
+            (vec![json!({"type": "image_url", "image_url": "data:image/png;base64,AAAA"})], "invalid_message"),
+            (
+                vec![json!({"type": "image_url", "image_url": {"url": url("image/png", &png(8)), "x": 1}})],
+                "invalid_message",
+            ),
+            (
+                vec![json!({"type": "image_url", "image_url": {"url": url("image/png", &png(8)), "detail": "max"}})],
+                "invalid_value",
+            ),
+            (
+                vec![json!({"type": "input_audio", "input_audio": {"data": "AAAA", "format": "wav"}})],
+                "unsupported_content",
+            ),
+            (
+                vec![img(url("image/png", &png(8))), img(url("image/png", &png(8))), img(url("image/png", &png(8)))],
+                "too_many_images",
+            ),
+        ] {
+            assert_eq!(chat(&body(parts.clone()), &lim).unwrap_err().code, code, "{parts:?}");
+        }
+        let sys = json!({"messages": [{"role": "system", "content": [img(url("image/png", &png(8)))]},
+                                      {"role": "user", "content": "x"}]});
+        assert_eq!(chat(sys.to_string().as_bytes(), &lim).unwrap_err().code, "unsupported_content");
     }
 
     #[test]
