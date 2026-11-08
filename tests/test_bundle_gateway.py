@@ -41,7 +41,8 @@ def _plan(tmp: Path, values=None, blocks=("llm-llama-server", "gateway-llmcf"), 
 def test_the_gateway_block_is_ready_and_its_program_comes_from_the_framework():
     block = blk.load_catalog().get("gateway-llmcf")
     assert block.ready and block.kind == "gateway" and block.unit
-    assert [(f.role, f.source, f.name) for f in block.files] == [("program", "framework", "llmcf-gateway")]
+    assert [(f.role, f.source, f.name) for f in block.files] == [("program", "framework", "llmcf-gateway"),
+                                                                 ("config", "routes", "routes.json")]
     assert block.variable("bind").choices == ("loopback", "lan") and block.variable("bind").default == "loopback"
     assert "llmcf-gateway" in root_helper.FRAMEWORK_PROGRAMS
 
@@ -479,7 +480,7 @@ def test_the_idle_stop_reaches_the_gateway_only_with_the_engines_units(tmp_path)
 
 
 def test_the_speech_route_reaches_the_bundles_whisper_server(tmp_path):
-    """The gateway's speech route: stt_port is the port of the bundle's whisper-server and passed with the audio cap;
+    """The gateway's speech route: the route table names the bundle's whisper-server with its port and the audio cap;
     the unit's memory limit makes room for the uploads in flight; a value the person sets for the port is refused."""
     from orchestrator.runtime.device import measure
     plan = _voice(tmp_path)
@@ -488,8 +489,12 @@ def test_the_speech_route_reaches_the_bundles_whisper_server(tmp_path):
     stt_port = comps["stt"].variables["port"]
     assert comps["gateway"].variables["stt_port"] == stt_port
     args = list(comps["gateway"].start.args)
-    assert args[args.index("--stt-port") + 1] == str(stt_port) and args[args.index("--max-audio-mb") + 1] == "25"
-    assert "--vision-port" not in args and args[-2:] == ["--engines", "together"]
+    assert args[args.index("--routes") + 1] == "@DIR@/routes.json"
+    assert "--stt-port" not in args and "--vision-port" not in args and args[-2:] == ["--engines", "together"]
+    table = json.loads(plan.files[("gateway", "routes.json")].data)
+    assert {"id": "stt", "port": stt_port, "key": False} in table["engines"]
+    speech = next(r for r in table["routes"] if r["path"] == "/v1/audio/transcriptions")
+    assert (speech["engine"], speech["upstream_path"], speech["max_body_kb"]) == ("stt", "/inference", 25 * 1024)
     cg = next(a for a in plan.manifest.root_actions if a.action == "set_cgroup" and a.component == "gateway")
     # 64 MiB and two uploads of 25 MB in flight
     assert cg.memory_max_mb == measure.gateway_fallback_mib(2, 0, 25 * 1024) == 64 + 50
@@ -533,10 +538,16 @@ def test_chats_with_images_reach_the_bundles_vision_server(tmp_path):
     assert gw.variables["vision_port"] == comps["vision"].variables["port"] == 8081
     assert gw.variables["vision_ctx_size"] == 8192
     args = list(gw.start.args)
-    for flag, value in (("--vision-port", "8081"), ("--vision-ctx-size", "8192"), ("--max-images", "4"),
-                        ("--max-image-kb", "2048"), ("--max-images-kb", "4096"), ("--image-tokens", "768")):
+    for flag, value in (("--max-images", "4"), ("--max-image-kb", "2048"), ("--max-images-kb", "4096"),
+                        ("--image-tokens", "768")):
         assert args[args.index(flag) + 1] == value, flag
-    assert "--stt-port" not in args
+    assert "--stt-port" not in args and "--vision-port" not in args
+    # the chats with images go to the vision engine, by the route table
+    table = plan.routes.as_json()
+    assert {"id": "vision", "port": 8081, "key": True, "ctx_size": 8192} in table["engines"]
+    images = [r for r in table["routes"] if r.get("match") == "images"]
+    assert [(r["path"], r["engine"], r["protocol"]) for r in images] == [
+        ("/v1/chat/completions", "vision", "openai-chat")]
 
 
 def test_a_speech_block_the_gateway_does_not_speak_to_leaves_its_route_at_501():

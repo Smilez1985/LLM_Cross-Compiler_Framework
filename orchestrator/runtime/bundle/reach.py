@@ -52,8 +52,8 @@ GENERIC = ("http-json", "http-multipart", "http-sse", "http-binary")
 PROTOCOLS = ADAPTERS + GENERIC
 METHODS = {"openai-models": ("GET",), "http-json": ("GET", "POST"), "http-sse": ("GET", "POST")}
 # The protocols whose body is JSON (the gateway's --max-body-kb caps them) and those that carry an upload.
-JSON_PROTOCOLS = ("openai-chat", "openai-completions", "openai-embeddings", "openai-audio-speech", "http-json",
-                  "http-sse")
+JSON_PROTOCOLS = ("openai-chat", "openai-completions", "openai-models", "openai-embeddings", "openai-audio-speech",
+                  "http-json", "http-sse")
 # The magic types a binary body or a multipart file may be declared with (recognized by their first bytes).
 MAGIC_TYPES = ("jpeg", "png", "gif", "webp", "bmp", "tiff", "wav", "flac", "ogg", "mp3", "mp4", "webm", "pdf")
 MATCHES = ("images",)

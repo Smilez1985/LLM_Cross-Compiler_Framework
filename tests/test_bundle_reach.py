@@ -192,3 +192,105 @@ def test_an_engine_of_a_kind_of_its_own_is_started_and_stopped_like_the_others(t
     mb = plan.engines["engines_mb"]["detect"]
     assert f"detect=llmcf-detect.service:{mb}:8093" in args and args[args.index("--engines") + 1] == "in-turn"
     assert load_manifest(dump_manifest(plan.manifest)) == plan.manifest
+
+
+# --- the generated route table ------------------------------------------------------------------------------------------
+
+def test_the_generated_route_table_reproduces_todays_routes(tmp_path):
+    """llm, speech and the gateway: the table names exactly the routes the gateway always served, each to its engine
+    with today's caps (the JSON cap 256 KB, the audio cap 25 MB), and goes to the gateway as one signed file."""
+    from tests.test_bundle_gateway import _voice
+    plan = _voice(tmp_path)
+    assert plan.ok, plan.problems
+    table = plan.routes.as_json()
+    assert table["engines"] == [{"id": "llm", "port": 8080, "key": True, "ctx_size": 4096},
+                                {"id": "stt", "port": 8090, "key": False}]
+    assert [(r["method"], r["path"], r["engine"], r["upstream_path"], r["protocol"], r["max_body_kb"], r["stream"])
+            for r in table["routes"]] == [
+        ("GET", "/v1/models", "llm", "/v1/models", "openai-models", 256, False),
+        ("POST", "/v1/chat/completions", "llm", "/v1/chat/completions", "openai-chat", 256, True),
+        ("POST", "/v1/completions", "llm", "/v1/completions", "openai-completions", 256, True),
+        ("POST", "/v1/audio/transcriptions", "stt", "/inference", "openai-audio-transcription", 25600, False)]
+    assert all(r["timeout_s"] == 900 for r in table["routes"])
+    planned = plan.files[("gateway", "routes.json")]
+    gw = next(c for c in plan.manifest.components if c.kind == "gateway")
+    entry = next(f for f in gw.files if f.name == "routes.json")
+    assert (entry.role, entry.source, entry.mode, entry.size) == ("config", "bundle", "0644", len(planned.data))
+    assert rc.check_table(planned.data).as_json() == table, "the bytes the gateway reads are the table"
+    # the person sees the table; an AI reads it as labels
+    lines = plan.lines()
+    assert "  the gateway's routes (from the blocks' reach):" in lines
+    assert "    POST /v1/audio/transcriptions -> stt /inference (openai-audio-transcription, up to 25600 KB, 900 s)" \
+        in lines
+    assert plan.labels()["routes"][1] == {"method": "POST", "path": "/v1/chat/completions", "protocol": "openai-chat",
+                                         "engine": "llm", "max_body_kb": 256, "timeout_s": 900, "stream": True}
+
+
+def test_the_route_table_is_built_into_the_signed_bundle(tmp_path):
+    from orchestrator.runtime.bundle import generator as gen
+    from orchestrator.utils.helpers import sha256_file
+    from tests.test_board_bundle import _signer
+    from tests.test_board_bundle import _elf
+    from tests.test_bundle_gateway import _plan
+    prog = tmp_path / "llmcf-gateway-built"
+    prog.write_bytes(_elf(0xB7))
+    plan = _plan(tmp_path, programs=lambda name, arch: (prog, sha256_file(prog)))
+    assert plan.ok, plan.problems
+    store = gen.BundleStore(tmp_path / "state")
+    built = gen.build_bundle(plan, store, _signer())
+    path = built.path / "files" / "gateway--routes.json"
+    entry = next(f for c in built.manifest.components for f in c.files if f.name == "routes.json")
+    assert path.read_bytes() == plan.routes.dump() and sha256_file(path) == entry.sha256
+    assert store.check(built) == [], "the payload check covers the route table like every file"
+    path.write_bytes(path.read_bytes().replace(b"/inference", b"/elsewhere") + b" ")
+    assert any("gateway--routes.json" in p for p in store.check(built))
+
+
+def test_a_new_engine_is_reached_through_its_block_alone(tmp_path):
+    """A detection engine of a kind of its own: its block's reach adds its routes to the table (multipart in, an event
+    stream out), with no change of the gateway; the plan shows them."""
+    plan = _detect_plan(tmp_path)
+    assert plan.ok, plan.problems
+    table = plan.routes.as_json()
+    assert {"id": "detect", "port": 8093, "key": False} in table["engines"]
+    detect = [r for r in table["routes"] if r["engine"] == "detect"]
+    assert [(r["method"], r["path"], r["protocol"], r["max_body_kb"]) for r in detect] == [
+        ("POST", "/api/detect", "http-multipart", 8192), ("GET", "/api/detect/events", "http-sse", 256)]
+    assert detect[0]["fields"][0] == {"name": "image", "file": True, "required": True, "types": ["jpeg", "png"]}
+    assert any("GET /api/detect/events -> detect /events (http-sse" in line for line in plan.lines())
+    # the gateway's unit makes room for the uploads of the new route as for the speech upload
+    cg = next(a for a in plan.manifest.root_actions if a.action == "set_cgroup" and a.component == "gateway")
+    assert cg.memory_max_mb >= 64 + 2 * 8
+
+
+def test_two_blocks_that_want_the_same_route_refuse_the_plan(tmp_path):
+    from orchestrator.runtime.bundle import generator as gen
+    app = tmp_path / "app"
+    _own_detect(app)
+    clash = (app / "community" / "blocks" / "detect-demo" / "block.yml")
+    clash.write_text(clash.read_text(encoding="utf-8").replace("path: /api/detect\n", "path: /v1/completions\n"),
+                     encoding="utf-8")
+    catalog = blk.load_catalog(app)
+    plan = gen.BundlePlan(bundle_id="x", device_id="0" * 16, selection=gen.Selection(blocks=[]))
+    pairs = [("llm", catalog.get("llm-llama-server")), ("detect", catalog.get("detect-demo")),
+             ("gateway", catalog.get("gateway-llmcf"))]
+    assert gen._route_table(plan, "gateway", {"max_body_kb": 256, "max_audio_mb": 25, "ctx_size": 4096}, pairs,
+                            gen.Selection(blocks=[])) is None
+    assert any("POST /v1/completions is declared by llm and detect" in p for p in plan.problems)
+
+
+def test_a_block_without_reach_keeps_the_routes_of_its_kind(tmp_path):
+    """llmcf-bundle-block/1 without reach: an llm block keeps the language model's routes, a vision block the chats
+    with images; another engine is reached on its own port only (a note says so)."""
+    from orchestrator.runtime.bundle import generator as gen
+    text = (blk.BUILTIN_DIR / "llm-llama-server" / "block.yml").read_text(encoding="utf-8")
+    plain = text[:text.index("reach:")] + text[text.index("start:"):]
+    old = blk.parse_block(plain.replace("id: llm-llama-server", "id: llm-old"), tmp_path)
+    assert old.reach is None
+    assert [r.path for r in gen.block_reach(old).routes] == ["/v1/models", "/v1/chat/completions", "/v1/completions"]
+    other = blk.parse_block(DETECT[:DETECT.index("reach:")], tmp_path)
+    assert gen.block_reach(other) is None
+    plan = gen.BundlePlan(bundle_id="x", device_id="0" * 16, selection=gen.Selection(blocks=[]))
+    gen._route_table(plan, "gateway", {"max_body_kb": 256, "ctx_size": 4096}, [("llm", old), ("detect", other)],
+                     gen.Selection(blocks=[]))
+    assert any("no route to detect" in n and "own port only" in n for n in plan.notes)

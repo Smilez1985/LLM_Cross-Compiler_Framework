@@ -32,6 +32,7 @@ the disk rule first), selection.json (what the person chose, with the local path
 boards.json (where each board's upload stands, for a deploy that continues).
 """
 
+import dataclasses
 import json
 import os
 import re
@@ -41,7 +42,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from orchestrator.runtime.bundle.blocks import ENTERPRISE_TRUSTS, Block, BlockCatalog
+from orchestrator.runtime.bundle import reach as rc
+from orchestrator.runtime.bundle.blocks import BUILTIN_DIR, ENTERPRISE_TRUSTS, Block, BlockCatalog
 from orchestrator.runtime.bundle.installer import (ROOT_HELPER_FILE, SIGNED_FILES, installer_sh, render_steps,
                                                    staged_name)
 from orchestrator.runtime.bundle.manifest import (RE_ID, RE_LICENCE, RE_URL, BundleManifest, Component, FileEntry,
@@ -127,7 +129,8 @@ class RuntimePackage:
 @dataclass
 class PlannedFile:
     entry: FileEntry
-    local: Optional[Path] = None   # a file sent with the bundle (None: online)
+    local: Optional[Path] = None   # a file sent with the bundle (None: online, or made by the plan: `data`)
+    data: Optional[bytes] = None   # a file the plan made itself (the gateway's route table)
 
 
 @dataclass
@@ -160,6 +163,8 @@ class BundlePlan:
     # the engines' memory (engines_check): the choice, MB of each engine, of the rest and the reserve, the board's
     # free memory, the need all together and in turn and whether each fits ({} without an engine)
     engines: Dict[str, Any] = field(default_factory=dict)
+    # the gateway's route table made from the chosen blocks' reach (reach.Table; None without a gateway)
+    routes: Optional[rc.Table] = None
 
     @property
     def ok(self) -> bool:
@@ -167,7 +172,7 @@ class BundlePlan:
 
     @property
     def size(self) -> int:
-        return sum(p.entry.size for p in self.files.values() if p.local is not None)
+        return sum(p.entry.size for p in self.files.values() if p.local is not None or p.data is not None)
 
     def labels(self) -> Dict[str, Any]:
         """The plan as labels only (bundle_plan for an AI): block ids, kinds, variable values (numbers, yes/no and
@@ -193,7 +198,12 @@ class BundlePlan:
                 "own_blocks": list(self.own_blocks),
                 # built or accepted only by the person (the CLI or the Board bundle window), never through an AI
                 "missing_runtimes": list(self.missing_runtimes), "terms_needed": list(self.terms_needed),
-                "engines": dict(self.engines)}
+                "engines": dict(self.engines),
+                # the route table: paths, methods, protocols, engine ids and limits are labels
+                "routes": [{"method": r.method, "path": r.path, "protocol": r.protocol, "engine": engine,
+                            "max_body_kb": r.max_body_kb, "timeout_s": r.timeout_s, "stream": r.stream,
+                            **({"match": r.match} if r.match else {})}
+                           for r, engine in (self.routes.routes if self.routes else ())]}
 
     def lines(self) -> List[str]:
         """The plan in plain words for the person (CLI and window)."""
@@ -214,6 +224,9 @@ class BundlePlan:
             for action in self.manifest.root_actions:
                 out.append(f"  root action: {action.action} for {action.component} (llmcf-install)"
                            + (", skipped: unprivileged only" if self.manifest.mode == "unprivileged" else ""))
+        if self.routes is not None:
+            out.append("  the gateway's routes (from the blocks' reach):")
+            out += [f"    {line}" for line in self.routes.lines()]
         out.append(f"  memory: about {self.memory_mb} MB needed" + (
             f" of {self.board_memory_mb} MB usable on the board" if self.board_memory_mb is not None else ""))
         out.append(f"  sends {_mb(self.size)}")
@@ -232,6 +245,8 @@ class BundlePlan:
         local = f" {planned.local}" if planned is not None and planned.local is not None else ""
         if entry.role == "runtime":
             return "in the bundle, the board's runtime package" + local
+        if planned is not None and planned.data is not None:
+            return "in the bundle, made from the blocks' reach"
         return "in the bundle, from" + (local or " the store")
 
 
@@ -442,6 +457,8 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
                 plan.problems.append(f"{comp_id}: {e}")
         for name in sorted(given):
             plan.problems.append(f"{comp_id}: the block {block.id} has no variable {name}")
+        if block.kind == "gateway" and any(f.source == "routes" for f in block.files):
+            plan.routes = _route_table(plan, comp_id, values, pairs, selection)
         for var in block.variables:
             if var.type == "port" and var.name in values and not (block.kind == "gateway"
                                                                    and var.name in GATEWAY_FROM_LLM):
@@ -464,6 +481,16 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
         for need in block.files:
             name = need.name or need.role
             names[need.role] = name
+            if need.source == "routes":
+                if plan.routes is None:
+                    continue   # the reason is a problem already
+                data = plan.routes.dump()
+                from orchestrator.utils.helpers import sha256_bytes
+                entry = FileEntry(name=name, sha256=sha256_bytes(data), size=len(data), mode=need.mode,
+                                  role="config", format="json")
+                entries.append(entry)
+                plan.files[(comp_id, name)] = PlannedFile(entry, None, data)
+                continue
             if need.source == "harness":
                 if harness_tar is None:
                     continue   # the reason is a problem already
@@ -780,10 +807,92 @@ GATEWAY_FROM_LLM = {"upstream_port": "port", "ctx_size": "ctx_size"}
 
 
 # The gateway's variables the bundle sets from its speech and vision components (kind -> gateway variable -> the
-# component's variable). The gateway speaks to whisper.cpp's whisper-server only (WHISPER_BLOCKS); another speech
-# block leaves stt_port at 0 and the speech route answers 501.
+# component's variable): the engine that serves the speech route (openai-audio-transcription) and the one that takes
+# the chats with images (match images), by their reach. A speech block without such a route leaves stt_port at 0.
 GATEWAY_FROM_ENGINE = {"stt": {"stt_port": "port"}, "vision": {"vision_port": "port", "vision_ctx_size": "ctx_size"}}
 WHISPER_BLOCKS = ("stt-whisper-cpp", "stt-whisper-cpp-program")
+# A block without a reach section keeps the routes its kind always had (the schema stays llmcf-bundle-block/1): an llm
+# block the language model's, a vision block the chats with images, a whisper block the speech route. Any other block
+# without reach is reached on its own port only.
+LEGACY_REACH = {"llm": "llm-llama-server", "vision": "vision-mmproj"}
+
+
+def block_reach(block: Block) -> Optional[rc.Reach]:
+    """How the gateway reaches `block`'s engine: its own reach section, else the routes its kind always had
+    (LEGACY_REACH; whisper's speech route for a whisper block); None: no route to it."""
+    if block.reach is not None or not is_engine(block.kind):
+        return block.reach
+    source = LEGACY_REACH.get(block.kind) or ("stt-whisper-cpp" if block.id in WHISPER_BLOCKS else None)
+    if source is None:
+        return None
+    from orchestrator.runtime.bundle.blocks import BLOCK_FILE, parse_block
+    folder = BUILTIN_DIR / source
+    try:
+        return parse_block((folder / BLOCK_FILE).read_text(encoding="utf-8"), folder, "framework").reach
+    except (OSError, ValueError):
+        return None
+
+
+def _serves(block: Block, protocol: str, match: str = "") -> bool:
+    found = block_reach(block)
+    return found is not None and any(r.protocol == protocol and r.match == match for r in found.routes)
+
+
+def _effective_kb(route: rc.Route, values: Dict[str, Any]) -> int:
+    """A route's body cap in the table: the block's own cap, never above the gateway's cap for its protocol (the JSON
+    cap max_body_kb for a JSON body, max_audio_mb for the speech upload)."""
+    if route.protocol in rc.JSON_PROTOCOLS:
+        return min(route.max_body_kb, int(values.get("max_body_kb") or route.max_body_kb))
+    if route.protocol == "openai-audio-transcription":
+        return min(route.max_body_kb, int(values.get("max_audio_mb") or 0) * 1024 or route.max_body_kb)
+    return route.max_body_kb
+
+
+def _route_table(plan: BundlePlan, comp_id: str, values: Dict[str, Any], pairs: List[Tuple[str, Block]],
+                 selection: Selection) -> Optional[rc.Table]:
+    """The gateway's route table from the chosen blocks (never from the gateway's code): each engine component with a
+    reach (block_reach) is one engine of the table, at the port its reach names, with the runtime's key when its block
+    makes one (keygen), with its context size where it has one (the llm's as the gateway takes it); each of its routes
+    goes to it with its effective body cap (_effective_kb). Two blocks that declare the same method, path and match
+    refuse the plan. None, with the reason in plan.problems, when the table does not hold."""
+    engines: List[rc.Engine] = []
+    routes: List[Tuple[rc.Route, str]] = []
+    for cid, block in pairs:
+        found = block_reach(block)
+        if found is None:
+            if is_engine(block.kind) and not (block.kind == "stt"):
+                plan.notes.append(f"{comp_id}: the gateway has no route to {cid} (block {block.id} says no reach); "
+                                  "it is reached on its own port only")
+            continue
+        given = selection.values.get(cid) or {}
+        var = block.variable(found.port)
+        try:
+            port = var.check(given.get(found.port, var.default)) if var is not None else None
+        except ManifestError:
+            continue   # the component reports its own value
+        if not isinstance(port, int):
+            continue
+        ctx = None
+        if block.kind == "llm":
+            ctx = values.get("ctx_size")
+        elif block.variable("ctx_size") is not None:
+            ctx_var = block.variable("ctx_size")
+            try:
+                ctx = ctx_var.check(given.get("ctx_size", ctx_var.default))
+            except ManifestError:
+                ctx = None
+        engines.append(rc.Engine(id=cid, port=port, key=block.keygen,
+                                 ctx_size=ctx if isinstance(ctx, int) and 256 <= ctx <= 1 << 20 else None))
+        for route in found.routes:
+            routes.append((dataclasses.replace(route, max_body_kb=_effective_kb(route, values)), cid))
+    if not routes:
+        plan.problems.append(f"{comp_id}: no block of the bundle says how the gateway reaches it")
+        return None
+    try:
+        return rc.make_table(engines, routes)
+    except rc.ReachError as e:
+        plan.problems.append(f"{comp_id}: the gateway's routes: {e}")
+        return None
 
 
 def measured_llm_values(block: Block, given: Dict[str, Any], limits: Any) -> Dict[str, Any]:
@@ -828,15 +937,17 @@ def _gateway_from_llm(plan: BundlePlan, comp_id: str, given: Dict[str, Any], pai
 
 def _gateway_from_engines(plan: BundlePlan, comp_id: str, given: Dict[str, Any], pairs: List[Tuple[str, Block]],
                           selection: Selection) -> None:
-    """The gateway's speech and vision routes: stt_port is the port of the bundle's whisper-server (a whisper block),
-    vision_port and vision_ctx_size the port and context of its vision llama-server, set here (GATEWAY_FROM_ENGINE);
-    a value the person gave for them is refused. A speech block the gateway does not speak to is named in a note."""
+    """The gateway's speech and vision variables: stt_port is the port of the engine whose reach serves the speech
+    route, vision_port and vision_ctx_size the port and context of the one that takes the chats with images, set here
+    (GATEWAY_FROM_ENGINE; the routes themselves are the route table's); a value the person gave for them is refused. A
+    speech block without the speech route is named in a note."""
+    serves = {"stt": ("openai-audio-transcription", ""), "vision": ("openai-chat", "images")}
     for kind, names in GATEWAY_FROM_ENGINE.items():
-        found = next(((cid, b) for cid, b in pairs if b.kind == kind), None)
-        if found is not None and kind == "stt" and found[1].id not in WHISPER_BLOCKS:
-            plan.notes.append(f"{comp_id}: the gateway's speech route speaks to whisper.cpp's whisper-server only; with "
-                              f"{found[1].id} it answers 501")
-            found = None
+        found = next(((cid, b) for cid, b in pairs if _serves(b, *serves[kind])), None)
+        other = next(((cid, b) for cid, b in pairs if b.kind == kind), None)
+        if found is None and other is not None and kind == "stt":
+            plan.notes.append(f"{comp_id}: the gateway's speech route reaches an engine whose block declares it (the "
+                              f"whisper blocks do); {other[1].id} declares none, so the speech route answers 501")
         for mine, theirs in names.items():
             if found is None:
                 if mine.endswith("_port") and str(given.get(mine, 0)) != "0":
@@ -1022,6 +1133,9 @@ def _cgroup_action(plan: BundlePlan, comp_id: str, block: Block, unit: str, valu
                           f"stopped above {memory_max} MB")
     elif not own and block.kind == "gateway":
         images_kb, audio_kb = gateway_upload_kb(values)
+        # the uploads of the generic routes (multipart, binary) need the same room as the speech upload
+        audio_kb = max([audio_kb] + [r.max_body_kb for r, _e in (plan.routes.routes if plan.routes else ())
+                                     if r.protocol in ("http-multipart", "http-binary")])
         inflight = int(values.get("max_inflight") or 1)
         derived = measure.gateway_memory_max_mib(limits, int(values.get("queue_max") or 0), inflight,
                                                  int(values.get("max_body_kb") or 256), images_kb, audio_kb)
@@ -1492,6 +1606,12 @@ def build_bundle(plan: BundlePlan, store: BundleStore, signer: Any, *, ledger: A
         files = tmp / "files"
         files.mkdir()
         for (comp_id, name), planned in plan.files.items():
+            if planned.data is not None:
+                # a file the plan made (the gateway's route table): written as planned, its sha256 in the manifest
+                (files / staged_name(comp_id, name)).write_bytes(planned.data)
+                if sha256_bytes(planned.data) != planned.entry.sha256:
+                    raise BundleError(f"{comp_id}: {name} is not the one of the plan; plan again")
+                continue
             if planned.local is None:
                 continue
             got = copy_hashed(planned.local, files / staged_name(comp_id, name))

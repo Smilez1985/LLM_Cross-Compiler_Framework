@@ -1,6 +1,6 @@
 schema: llmcf-bundle-block/1
 id: gateway-llmcf
-version: 1.0.0
+version: 2.0.0
 kind: gateway
 title: Gateway (llmcf-gateway)
 status: ready
@@ -22,10 +22,10 @@ variables:
   - {name: idle_stop_minutes, type: uint, default: 0, min: 0, max: 10080, help: "Stop an engine after these minutes without a request (0: never; needs the engines' units)"}
   - {name: upstream_port, type: port, default: 8080, help: "Set by the bundle: the llm component's port"}
   - {name: ctx_size, type: uint, default: 4096, min: 256, max: 262144, help: "Set by the bundle: the llm's context"}
-  - {name: stt_port, type: uint, default: 0, min: 0, max: 65535, help: "Set by the bundle: whisper-server's port (0: none)"}
+  - {name: stt_port, type: uint, default: 0, min: 0, max: 65535, help: "Set by the bundle: the speech engine's port (0: none)"}
   - {name: vision_port, type: uint, default: 0, min: 0, max: 65535, help: "Set by the bundle: the vision server's port (0: none)"}
   - {name: vision_ctx_size, type: uint, default: 4096, min: 256, max: 262144, help: "Set by the bundle: the vision server's context"}
-  - {name: max_audio_mb, type: uint, default: 25, min: 1, max: 200, help: "Largest audio upload in MB"}
+  - {name: max_audio_mb, type: uint, default: 25, min: 1, max: 200, help: "Largest audio upload in MB (the speech route's cap)"}
   - {name: max_images, type: uint, default: 4, min: 0, max: 16, help: "Images one chat request may carry (0: none)"}
   - {name: max_image_kb, type: uint, default: 2048, min: 16, max: 16384, help: "Largest image in KB"}
   - {name: max_images_kb, type: uint, default: 4096, min: 16, max: 65536, help: "All images of one request in KB"}
@@ -35,6 +35,8 @@ variables:
   - {name: autostart, type: bool, default: false, help: "Start at boot through its own unit (needs llmcf-install)"}
 files:
   - {role: program, from: framework, name: llmcf-gateway, mode: "0755", formats: [elf]}
+  # the route table the generator makes from the chosen blocks' reach (one --routes argument, signed with the manifest)
+  - {role: config, from: routes, name: routes.json, mode: "0644"}
 memory: {base_mb: 64}
 unit: true
 start:
@@ -65,9 +67,10 @@ start:
     - "{memory_floor_mb}"
     - --memory-psi-max
     - "{memory_psi_max}"
-    - {when: stt_port, args: [--stt-port, "{stt_port}", --max-audio-mb, "{max_audio_mb}"]}
+    - --routes
+    - "@FILE:config@"
     - when: vision_port
-      args: [--vision-port, "{vision_port}", --vision-ctx-size, "{vision_ctx_size}", --max-images, "{max_images}",
-             --max-image-kb, "{max_image_kb}", --max-images-kb, "{max_images_kb}", --image-tokens, "{image_tokens}"]
+      args: [--max-images, "{max_images}", --max-image-kb, "{max_image_kb}", --max-images-kb, "{max_images_kb}",
+             --image-tokens, "{image_tokens}"]
     - --idle-stop-minutes
     - "{idle_stop_minutes}"
