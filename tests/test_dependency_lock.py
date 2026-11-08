@@ -90,6 +90,47 @@ def test_pyproject_is_pep621_and_poetry_is_gone():
     assert not (REPO_ROOT / "Docker Setup" / "pyproject.toml").exists(), "the stale copy must not come back"
 
 
+# The one exact pin (DECISIONS round 65): pyrage encrypts and decrypts user data.
+EXACT_PINS = {"pyrage"}
+# 0.x packages whose minor release breaks (the range ends before the next minor), each with its reason in pyproject.
+MINOR_CAPPED = {"fastembed", "qdrant-edge-py", "agent-client-protocol", "ruff", "shellcheck-py"}
+
+
+def all_requirements(data: dict) -> list:
+    project = data["project"]
+    return [Requirement(r) for r in project["dependencies"] + data["dependency-groups"]["dev"]
+            + [s for specs in project.get("optional-dependencies", {}).values() for s in specs]]
+
+
+def test_every_dependency_is_a_range_up_to_the_next_major_and_only_pyrage_is_exact():
+    """Round 65: no pins on old versions. Each dependency has a lower bound (the tested version) and an upper bound
+    below the next major (below the next minor for the 0.x packages that break in a minor release); uv then takes the
+    newest version inside it (the lock, the scheduled update run and every installer run). Only pyrage stays exact."""
+    for req in all_requirements(pyproject()):
+        name, specs = norm(req.name), list(req.specifier)
+        if name in EXACT_PINS:
+            assert [s.operator for s in specs] == ["=="], f"{name} stays an exact pin"
+            continue
+        ops = {s.operator: s.version for s in specs}
+        assert set(ops) == {">=", "<"}, f"{name}: a range >=tested,<next major, not {req.specifier}"
+        low = [int(x) for x in ops[">="].split(".")]
+        high = [int(x) for x in ops["<"].split(".")]
+        if name in MINOR_CAPPED:
+            assert low[0] == 0 and high == [0, low[1] + 1], f"{name}: 0.x, the range ends before the next minor"
+        else:
+            assert len(high) == 1 and high[0] > low[0], f"{name}: the upper bound is a next major, not {ops['<']}"
+        assert "==" not in str(req.specifier) and "~=" not in str(req.specifier), name
+
+
+def test_the_lock_takes_versions_inside_the_ranges():
+    data, locked = pyproject(), {}
+    for package in lock()["package"]:
+        locked.setdefault(norm(package["name"]), []).append(package["version"])
+    for req in all_requirements(data):
+        versions = locked.get(norm(req.name), [])
+        assert versions and all(req.specifier.contains(v, prereleases=True) for v in versions), (req, versions)
+
+
 def test_uv_lock_was_made_from_this_pyproject():
     """What `uv lock --check` checks, without uv: the lock records the same requirements as pyproject.toml."""
     data, project = lock(), pyproject()
