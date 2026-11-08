@@ -732,3 +732,124 @@ fn a_chat_with_an_image_goes_to_the_vision_engine_unchanged() {
     assert_eq!(status, 400);
     assert!(out.contains("unsupported_content"), "{out}");
 }
+
+/// The route table of a bundle (`--routes`): an engine of a kind of its own, reached only through what its block
+/// declares (a form in, JSON out, a binary body, a JSON route, an event stream, embeddings), next to the llm.
+#[test]
+fn a_route_table_reaches_a_new_engine_through_the_generic_adapters() {
+    let s = stub();
+    let (detect, seen) = recorder(r#"{"boxes":[{"label":"cat","score":0.9}]}"#, "application/json");
+    let events = stub_with(Duration::from_millis(200), true);
+    let stall = stub_with(Duration::from_secs(4), true);
+    let table = format!(
+        r#"{{"schema":"llmcf-gateway-routes/1",
+  "engines":[{{"id":"llm","port":{llm},"key":true,"ctx_size":4096}},{{"id":"detect","port":{detect},"key":false}},
+             {{"id":"events","port":{events},"key":false}},{{"id":"stall","port":{stall},"key":false}}],
+  "routes":[
+   {{"path":"/v1/chat/completions","method":"POST","protocol":"openai-chat","engine":"llm","upstream_path":"/v1/chat/completions","max_body_kb":256,"timeout_s":900,"stream":true,"key":"chat"}},
+   {{"path":"/api/detect","method":"POST","protocol":"http-multipart","engine":"detect","upstream_path":"/detect","max_body_kb":64,"timeout_s":30,"stream":false,"key":"detect",
+     "fields":[{{"name":"image","file":true,"types":["jpeg","png"],"required":true}},{{"name":"threshold"}}]}},
+   {{"path":"/api/detect/raw","method":"POST","protocol":"http-binary","engine":"detect","upstream_path":"/raw","max_body_kb":64,"timeout_s":30,"stream":false,"key":"raw","types":["jpeg"]}},
+   {{"path":"/api/detect/config","method":"POST","protocol":"http-json","engine":"detect","upstream_path":"/config","max_body_kb":4,"timeout_s":30,"stream":false,"key":"config"}},
+   {{"path":"/v1/embeddings","method":"POST","protocol":"openai-embeddings","engine":"detect","upstream_path":"/embed","max_body_kb":16,"timeout_s":30,"stream":false,"key":"embeddings"}},
+   {{"path":"/api/events","method":"POST","protocol":"http-sse","engine":"events","upstream_path":"/v1/chat/completions","max_body_kb":4,"timeout_s":10,"stream":true,"key":"events"}},
+   {{"path":"/api/events/plain","method":"POST","protocol":"http-json","engine":"events","upstream_path":"/v1/chat/completions","max_body_kb":4,"timeout_s":10,"stream":false,"key":"plain"}},
+   {{"path":"/api/stall","method":"POST","protocol":"http-sse","engine":"stall","upstream_path":"/v1/chat/completions","max_body_kb":4,"timeout_s":1,"stream":true,"key":"stall"}}]}}"#,
+        llm = s.port,
+        events = events.port,
+        stall = stall.port
+    );
+    let dir = home("routes-file");
+    let file = dir.join("routes.json");
+    std::fs::write(&file, table).unwrap();
+    let g = gateway("routes", s.port, &["--routes", file.to_str().unwrap()]);
+    // the llm keeps its route and its key
+    assert_eq!(post(g.port, "/v1/chat/completions", CHAT).0, 200);
+    assert_eq!(s.seen.lock().unwrap().last().unwrap().1, format!("Bearer {KEY}"));
+    // a form in: the declared fields only, the file by its bytes, under a fixed name; JSON out as the engine wrote it
+    let jpeg = b"\xFF\xD8\xFF\xE0\0\x10JFIF\0image-bytes";
+    let form = upload(&[("image", Some("../holiday photo.jpg"), jpeg), ("threshold", None, b"0.5")]);
+    let ctype = format!("multipart/form-data; boundary={BOUNDARY}");
+    let (status, answer) = http_bytes(g.port, "/api/detect", &ctype, &form);
+    assert_eq!(status, 200, "{answer}");
+    assert!(answer.contains(r#"{"boxes":[{"label":"cat""#) && answer.contains("application/json"));
+    {
+        let seen = seen.lock().unwrap();
+        let (path, ct, auth, body) = seen.last().unwrap();
+        let text = String::from_utf8_lossy(body);
+        assert_eq!((path.as_str(), auth.as_str()), ("/detect", ""), "the runtime's key never goes to another engine");
+        assert!(ct.starts_with("multipart/form-data; boundary="));
+        assert!(text.contains("filename=\"image.jpeg\"") && text.contains("Content-Type: image/jpeg"));
+        assert!(!text.contains("holiday"), "never the client's file name");
+    }
+    // what the route does not declare never reaches the engine
+    let before = seen.lock().unwrap().len();
+    let gif = upload(&[("image", Some("a.gif"), b"GIF89a-not-allowed")]);
+    assert_eq!(http_bytes(g.port, "/api/detect", &ctype, &gif).0, 415);
+    let extra = upload(&[("image", Some("a.jpg"), jpeg), ("secret", None, b"x")]);
+    assert_eq!(http_bytes(g.port, "/api/detect", &ctype, &extra).0, 400);
+    assert_eq!(http_bytes(g.port, "/api/detect/raw", "application/octet-stream", b"%PDF-1.7").0, 415);
+    assert_eq!(post(g.port, "/api/detect/config", "[1,2]").0, 400);
+    assert_eq!(post(g.port, "/api/detect/config", &format!("{{\"x\":\"{}\"}}", "a".repeat(5000))).0, 413);
+    assert_eq!(post(g.port, "/v1/embeddings", r#"{"input":"x","extra":1}"#).0, 400);
+    assert_eq!(http(g.port, "GET", "/api/detect", "", "application/json").0, 404, "a method it does not declare");
+    assert_eq!(seen.lock().unwrap().len(), before);
+    // a binary body by its magic type, with that type's media type; a JSON route; embeddings
+    let (status, _) = http_bytes(g.port, "/api/detect/raw", "text/plain", jpeg);
+    assert_eq!(status, 200);
+    assert_eq!(seen.lock().unwrap().last().unwrap().1, "image/jpeg");
+    assert_eq!(post(g.port, "/api/detect/config", r#"{"labels":["cat"]}"#).0, 200);
+    assert_eq!(seen.lock().unwrap().last().unwrap().3, br#"{"labels":["cat"]}"#.to_vec());
+    assert_eq!(post(g.port, "/v1/embeddings", r#"{"input":["a","b"]}"#).0, 200);
+    assert_eq!(seen.lock().unwrap().last().unwrap().0, "/embed");
+    // an event stream passes through on its stream route, is refused on a route that declares none
+    let stream = raw(g.port, "/api/events", r#"{"go":true}"#);
+    assert_eq!(status_of(&stream), 200);
+    assert!(stream.contains("text/event-stream") && stream.contains("data: [DONE]"), "{stream}");
+    let plain = raw(g.port, "/api/events/plain", r#"{"go":true}"#);
+    assert_eq!(status_of(&plain), 502, "{plain}");
+    // an engine silent for longer than its route's timeout: the stream ends there, its place is free again
+    let cut = raw(g.port, "/api/stall", r#"{"go":true}"#);
+    assert!(cut.contains("\"O\"") && !cut.contains("[DONE]"), "{cut}");
+    // counted per route, never the content
+    assert_eq!(metric(g.port, "llmcf_gateway_route_requests_total{route=\"/api/detect\"}"), 3.0);
+    assert_eq!(metric(g.port, "llmcf_gateway_route_refused_total{route=\"/api/detect\"}"), 2.0);
+    assert_eq!(metric(g.port, "llmcf_gateway_route_bytes_in_total{route=\"/api/detect\"}"), {
+        (form.len() + gif.len() + extra.len()) as f64
+    });
+    assert!(metric(g.port, "llmcf_gateway_generic_total") >= 5.0);
+    let (_, health) = http(g.port, "GET", "/health", "", "text/plain");
+    let v: serde_json::Value = serde_json::from_str(&health).unwrap();
+    let detect_route = &v["routes"][1];
+    assert_eq!(detect_route["protocol"], "http-multipart");
+    assert_eq!(
+        (detect_route["name"].as_str(), detect_route["port"].as_u64()),
+        (Some("detect.detect"), Some(detect as u64))
+    );
+    let log = g.log.lock().unwrap().clone();
+    assert!(!log.contains("holiday") && !log.contains("image-bytes") && !log.contains("labels"), "{log}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_route_table_that_breaks_a_rule_stops_the_start() {
+    let dir = home("routes-bad");
+    let file = dir.join("routes.json");
+    std::fs::write(&file, r#"{"schema":"llmcf-gateway-routes/1","engines":[],"routes":[]}"#).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_llmcf-gateway"))
+        .args(["serve", "--port", &free_port().to_string(), "--routes", file.to_str().unwrap()])
+        .env_clear()
+        .env("HOME", &dir)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("the route table (--routes)"));
+    let out = Command::new(env!("CARGO_BIN_EXE_llmcf-gateway"))
+        .args(["serve", "--routes", "/nowhere/routes.json", "--stt-port", "8090"])
+        .env_clear()
+        .env("HOME", &dir)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "the speech options are the route table's");
+    let _ = std::fs::remove_dir_all(&dir);
+}

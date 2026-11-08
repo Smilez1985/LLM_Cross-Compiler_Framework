@@ -72,6 +72,8 @@ pub struct Serve {
     /// The tokens one image is counted with against the vision engine's context (a conservative fixed number: the
     /// projector's own count depends on the model and the picture).
     pub image_tokens: u32,
+    /// The route table the bundle made from its blocks (routes.rs; None: the routes made from these options).
+    pub routes: Option<std::path::PathBuf>,
 }
 
 impl Default for Serve {
@@ -103,6 +105,7 @@ impl Default for Serve {
             max_image_kb: 2048,
             max_images_kb: 4096,
             image_tokens: 768,
+            routes: None,
         }
     }
 }
@@ -178,16 +181,6 @@ fn port_or_none(name: &str, v: &str) -> Result<Option<u16>, String> {
 }
 
 impl Serve {
-    /// The body cap of a chat request: the JSON cap, and with vision as many images as a request may carry in base64
-    /// (4 characters for 3 bytes) with their data-URL heads.
-    pub fn chat_body_cap(&self) -> usize {
-        let json = self.max_body_kb as usize * 1024;
-        if self.vision_port.is_none() || self.max_images == 0 {
-            return json;
-        }
-        json + (self.max_images_kb as usize * 1024).div_ceil(3) * 4 + self.max_images as usize * 64
-    }
-
     /// The body cap of an audio upload.
     pub fn audio_body_cap(&self) -> usize {
         self.max_audio_mb as usize * 1024 * 1024
@@ -246,6 +239,13 @@ pub fn parse(args: &[String]) -> Result<Call, String> {
                     "--max-image-kb" => s.max_image_kb = number(name, v, 16, 16384)? as u32,
                     "--max-images-kb" => s.max_images_kb = number(name, v, 16, 65536)? as u32,
                     "--image-tokens" => s.image_tokens = number(name, v, 16, 16384)? as u32,
+                    "--routes" => {
+                        // the route table's file, read once at the start (an absolute path, as the bundle passes it)
+                        if !v.starts_with('/') || v.len() > 4096 || v.chars().any(char::is_control) {
+                            return Err("--routes is the absolute path of the route table".into());
+                        }
+                        s.routes = Some(v.into());
+                    }
                     _ => return Err(format!("{name} is not an option of serve")),
                 }
             }
@@ -293,6 +293,15 @@ pub fn parse(args: &[String]) -> Result<Call, String> {
                     }
                     _ => {}
                 }
+            }
+            if s.routes.is_some()
+                && pairs(&args[1..])?
+                    .iter()
+                    .any(|(n, _)| matches!(*n, "--stt-port" | "--vision-port" | "--vision-ctx-size" | "--max-audio-mb"))
+            {
+                return Err("--routes names the engines, their ports and caps: --stt-port, --vision-port, \
+                            --vision-ctx-size and --max-audio-mb are not taken with it"
+                    .into());
             }
             if s.max_image_kb > s.max_images_kb {
                 return Err("--max-image-kb is above --max-images-kb".into());
@@ -372,6 +381,9 @@ mod tests {
             &["serve", "--max-images", "17"],
             &["serve", "--max-image-kb", "8192", "--max-images-kb", "4096"],
             &["serve", "--image-tokens", "8"],
+            &["serve", "--routes", "routes.json"],
+            &["serve", "--routes", "/x/routes.json", "--stt-port", "8090"],
+            &["serve", "--routes", "/x/routes.json", "--max-audio-mb", "5"],
             &["bogus"],
         ] {
             assert!(parse(&a(bad)).is_err(), "{bad:?}");
@@ -420,7 +432,6 @@ mod tests {
     fn speech_and_vision_take_their_ports_and_caps() {
         let Call::Serve(s) = parse(&a(&["serve"])).unwrap() else { panic!() };
         assert_eq!((s.stt_port, s.vision_port, s.max_audio_mb, s.max_images, s.image_tokens), (None, None, 25, 4, 768));
-        assert_eq!(s.chat_body_cap(), 256 * 1024, "without vision the JSON cap alone");
         assert_eq!(s.audio_body_cap(), 25 << 20);
         let Call::Serve(s) = parse(&a(&[
             "serve",
@@ -437,7 +448,6 @@ mod tests {
             panic!()
         };
         assert_eq!((s.stt_port, s.vision_port), (Some(8090), Some(8081)), "the stt engine's port is the route's");
-        assert_eq!(s.chat_body_cap(), 256 * 1024 + 4096 * 1024 + 4 * 64);
         let Call::Serve(s) =
             parse(&a(&["serve", "--stt-port", "8090", "--engine", "stt=llmcf-stt.service:300:8090"])).unwrap()
         else {

@@ -478,10 +478,121 @@ pub fn completion(body: &[u8], lim: &Limits) -> Result<Outcome, Refusal> {
     Ok(Outcome { body: Value::Object(m), prompt_tokens: tokens, max_tokens: n, clamped, stream, ..Outcome::default() })
 }
 
+const EMBEDDING_FIELDS: &[&str] = &["model", "input", "encoding_format", "dimensions", "user"];
+/// Inputs of one embeddings request.
+pub const MAX_EMBEDDING_INPUTS: usize = 2048;
+const SPEECH_FIELDS: &[&str] = &["model", "input", "voice", "response_format", "speed", "instructions", "user"];
+/// The longest text of one speech request (OpenAI's limit).
+pub const MAX_SPEECH_INPUT: usize = 4096;
+const SPEECH_FORMATS: &[&str] = &["mp3", "opus", "aac", "flac", "wav", "pcm"];
+
+/// An embeddings request (`POST /v1/embeddings`, OpenAI's fields only): `input` one text or a list of 1 to
+/// MAX_EMBEDDING_INPUTS texts, `encoding_format` float or base64, `dimensions` a whole number. The checked body.
+pub fn embeddings(body: &[u8]) -> Result<Value, Refusal> {
+    let m = object(body)?;
+    check_common(&m, EMBEDDING_FIELDS)?;
+    let ok = match m.get("input") {
+        Some(Value::String(s)) => !s.is_empty(),
+        Some(Value::Array(a)) => {
+            (1..=MAX_EMBEDDING_INPUTS).contains(&a.len()) && a.iter().all(|v| v.as_str().is_some_and(|s| !s.is_empty()))
+        }
+        _ => false,
+    };
+    if !ok {
+        return Err(refuse("invalid_value", format!("input is a text or a list of 1 to {MAX_EMBEDDING_INPUTS} texts")));
+    }
+    if let Some(v) = m.get("encoding_format") {
+        if !matches!(v.as_str(), Some("float" | "base64")) {
+            return Err(refuse("invalid_value", "encoding_format is float or base64"));
+        }
+    }
+    if let Some(v) = m.get("dimensions") {
+        if !v.as_u64().is_some_and(|n| (1..=65_536).contains(&n)) {
+            return Err(refuse("invalid_value", "dimensions is a whole number from 1 to 65536"));
+        }
+    }
+    Ok(Value::Object(m))
+}
+
+/// A speech request (`POST /v1/audio/speech`, OpenAI's fields only): `input` a text of 1 to MAX_SPEECH_INPUT
+/// characters, `voice` a plain word, `response_format` one of OpenAI's audio formats, `speed` 0.25 to 4. The checked
+/// body; the engine answers the audio itself.
+pub fn speech(body: &[u8]) -> Result<Value, Refusal> {
+    let m = object(body)?;
+    check_common(&m, SPEECH_FIELDS)?;
+    let input = m.get("input").and_then(Value::as_str).unwrap_or("");
+    if input.is_empty() || input.chars().count() > MAX_SPEECH_INPUT {
+        return Err(refuse("invalid_value", format!("input is a text of 1 to {MAX_SPEECH_INPUT} characters")));
+    }
+    if let Some(v) = m.get("voice") {
+        let word = v.as_str().is_some_and(|s| {
+            (1..=64).contains(&s.len()) && s.bytes().all(|c| c.is_ascii_alphanumeric() || b"_.-".contains(&c))
+        });
+        if !word {
+            return Err(refuse("invalid_value", "voice is a plain word"));
+        }
+    }
+    if let Some(v) = m.get("response_format") {
+        if !v.as_str().is_some_and(|f| SPEECH_FORMATS.contains(&f)) {
+            return Err(refuse("invalid_value", "response_format is mp3, opus, aac, flac, wav or pcm"));
+        }
+    }
+    if let Some(v) = m.get("speed") {
+        if !v.as_f64().is_some_and(|x| (0.25..=4.0).contains(&x)) {
+            return Err(refuse("invalid_value", "speed is a number from 0.25 to 4"));
+        }
+    }
+    if let Some(v) = m.get("instructions") {
+        if !v.as_str().is_some_and(|s| s.chars().count() <= MAX_SPEECH_INPUT) {
+            return Err(refuse("invalid_value", "instructions is a short text"));
+        }
+    }
+    Ok(Value::Object(m))
+}
+
+/// A generic JSON route's body (http-json, http-sse): one JSON object, nothing else; the engine reads its fields.
+pub fn json_object(body: &[u8]) -> Result<(), Refusal> {
+    object(body).map(|_| ())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn embeddings_and_speech_take_their_fields_only() {
+        assert!(embeddings(br#"{"model":"m","input":"hi"}"#).is_ok());
+        assert!(embeddings(br#"{"input":["a","b"],"encoding_format":"base64","dimensions":64}"#).is_ok());
+        for (body, code) in [
+            (&br#"{"input":""}"#[..], "invalid_value"),
+            (br#"{"input":[]}"#, "invalid_value"),
+            (br#"{"input":[1,2]}"#, "invalid_value"),
+            (br#"{"input":"x","encoding_format":"int8"}"#, "invalid_value"),
+            (br#"{"input":"x","dimensions":0}"#, "invalid_value"),
+            (br#"{"input":"x","extra":1}"#, "unknown_field"),
+            (b"[1]", "invalid_json"),
+        ] {
+            assert_eq!(embeddings(body).unwrap_err().code, code, "{}", String::from_utf8_lossy(body));
+        }
+        assert!(speech(
+            br#"{"model":"m","input":"Hallo","voice":"de_DE-thorsten","response_format":"wav","speed":1.5}"#
+        )
+        .is_ok());
+        for body in [
+            &br#"{"voice":"x"}"#[..],
+            br#"{"input":"x","voice":"a b"}"#,
+            br#"{"input":"x","response_format":"exe"}"#,
+            br#"{"input":"x","speed":9}"#,
+            br#"{"input":"x","stream":"yes"}"#,
+        ] {
+            assert!(speech(body).is_err(), "{}", String::from_utf8_lossy(body));
+        }
+        assert!(speech(format!(r#"{{"input":"{}"}}"#, "a".repeat(MAX_SPEECH_INPUT + 1)).as_bytes()).is_err());
+        assert!(json_object(br#"{"any":[1,{"x":null}]}"#).is_ok());
+        assert_eq!(json_object(b"[]").unwrap_err().code, "invalid_json");
+        assert_eq!(json_object(b"{\"a\":1} trailing").unwrap_err().code, "invalid_json");
+    }
 
     const LIM: Limits = Limits { budget: 4096, max_tokens: 512, slots: 1, images: None, vision_budget: 0 };
 

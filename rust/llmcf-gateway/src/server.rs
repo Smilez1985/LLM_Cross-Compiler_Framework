@@ -8,20 +8,26 @@
 //! place in flight first and then its engine, started (and in turn the others stopped) by the scheduler. The log line
 //! of a request holds its route, status, time and token counts, never a prompt, an image, audio or a transcript.
 //!
-//! The routes to the engines are engines::ROUTES: the chat and completion routes to the llm (a chat request with image
-//! parts to the vision engine, rules.rs and images.rs), the speech route `POST /v1/audio/transcriptions` to whisper.cpp's
-//! whisper-server (audio.rs). Each has its own body cap: the JSON cap (`--max-body-kb`), for chat with vision the
-//! images on top, for audio `--max-audio-mb`; a Content-Length above it is refused before the request waits.
+//! The routes to the engines are data (routes.rs): the bundle's route table (`--routes FILE`, made from the chosen
+//! blocks' reach) or, without it, the table the gateway always served. A route's protocol picks its adapter: the chat
+//! and completion routes (a chat request with image parts to the engine of the images route, rules.rs and images.rs),
+//! the speech route (audio.rs, whisper-server's own form), embeddings and speech output (rules.rs), and the generic
+//! checked passthrough (generic.rs: http-json, http-multipart, http-sse, http-binary). Each route has its own body
+//! cap (for chat with vision the images on top) and timeout; a Content-Length above the cap is refused before the
+//! request waits. Every route goes through the same fair queue, memory guard and engine scheduler, and is counted on
+//! its own in /metrics.
 
 use crate::args::{Bind, Serve};
 use crate::audio;
 use crate::control;
-use crate::engines::{self, Fut, Hooks, Scheduler, Spec, Ticket, Timing, LLM, ROUTES, STT, VISION};
+use crate::engines::{self, Fut, Hooks, Scheduler, Spec, Ticket, Timing, LLM, STT, VISION};
+use crate::generic;
 use crate::images::ImageRules;
 use crate::limits::RateLimit;
 use crate::memory::{self, Guard};
 use crate::peer;
 use crate::queue::{self, Permit, Queue, Refused};
+use crate::routes::{Protocol, Table};
 use crate::rules::{self, Limits, Refusal};
 use crate::tls;
 use bytes::{Buf, BufMut, Bytes};
@@ -42,7 +48,8 @@ use std::time::{Duration, Instant};
 use tokio::io::Interest;
 use tokio::net::{TcpListener, TcpStream};
 
-pub type Body = UnsyncBoxBody<Bytes, hyper::Error>;
+pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
+pub type Body = UnsyncBoxBody<Bytes, BoxError>;
 
 /// The runtime key of llama-server below the home (launcher.KEY_REL).
 pub const KEY_REL: &str = ".config/llm-framework/llama-server.key";
@@ -53,7 +60,7 @@ pub const BODY_WAIT: Duration = Duration::from_secs(30);
 /// The same for an audio upload (up to `--max-audio-mb`, which takes longer over a slow link).
 pub const AUDIO_BODY_WAIT: Duration = Duration::from_secs(120);
 
-/// One route's counts (engines::ROUTES), without any content.
+/// One route's counts (the route table's), without any content.
 #[derive(Default)]
 pub struct RouteMetrics {
     pub requests: AtomicU64,
@@ -64,6 +71,8 @@ pub struct RouteMetrics {
 
 #[derive(Default)]
 pub struct Metrics {
+    /// requests the engines answered through a generic route (http-json, -multipart, -sse, -binary)
+    pub generic: AtomicU64,
     pub requests: AtomicU64,
     pub ok: AtomicU64,
     pub refused: AtomicU64,
@@ -76,7 +85,8 @@ pub struct Metrics {
     pub results_pointed: AtomicU64,
     pub clamped: AtomicU64,
     pub images: AtomicU64,
-    pub routes: [RouteMetrics; ROUTES.len()],
+    /// one entry per route of the table, in its order
+    pub routes: Vec<RouteMetrics>,
 }
 
 pub struct State {
@@ -93,12 +103,18 @@ pub struct State {
     pub engines: Option<Arc<Scheduler>>,
     /// the board the scheduler works on instead of systemctl (tests only: a fake board; None: systemctl)
     pub board: Option<Arc<dyn Hooks>>,
+    /// the route table (routes.rs)
+    pub routes: Table,
+    /// the engine on --upstream-port (the language model's llama-server: its /health and /props set the budget)
+    pub primary: Option<String>,
 }
 
 impl State {
-    fn limits(&self) -> Limits {
+    fn limits(&self, path: &str) -> Limits {
         let c = &self.cfg;
-        let images = (c.vision_port.is_some() && c.max_images > 0).then_some(ImageRules {
+        let route = self.routes.images_route(path).map(|i| &self.routes.routes[i]);
+        let vision = route.and_then(|r| self.routes.engine(&r.engine)).filter(|e| e.port.is_some());
+        let images = (vision.is_some() && c.max_images > 0).then_some(ImageRules {
             max_images: c.max_images,
             max_image_bytes: c.max_image_kb as u64 * 1024,
             max_total_bytes: c.max_images_kb as u64 * 1024,
@@ -109,18 +125,28 @@ impl State {
             max_tokens: c.max_tokens as u64,
             slots: c.slots,
             images,
-            vision_budget: c.vision_ctx_size as u64,
+            vision_budget: vision.and_then(|e| e.ctx_size).unwrap_or(c.vision_ctx_size) as u64,
         }
     }
 
     /// The loopback port of an engine (None: the board has none the gateway speaks to).
     fn port_of(&self, id: &str) -> Option<u16> {
-        match id {
-            LLM => Some(self.cfg.upstream_port),
-            STT => self.cfg.stt_port,
-            VISION => self.cfg.vision_port,
-            _ => self.cfg.engines.iter().find(|e| e.id == id).and_then(|e| e.port),
+        self.routes.engine(id).and_then(|e| e.port)
+    }
+
+    fn is_primary(&self, id: &str) -> bool {
+        self.primary.as_deref() == Some(id)
+    }
+
+    /// The body cap of a route: its own, and for a chat route with an images route as many images as a request may
+    /// carry in base64 (4 characters for 3 bytes) with their data-URL heads.
+    fn body_cap(&self, idx: usize) -> usize {
+        let r = &self.routes.routes[idx];
+        if r.protocol != Protocol::Chat || self.limits(&r.path).images.is_none() {
+            return r.max_body;
         }
+        let c = &self.cfg;
+        r.max_body + (c.max_images_kb as usize * 1024).div_ceil(3) * 4 + c.max_images as usize * 64
     }
 }
 
@@ -237,20 +263,70 @@ fn equal(a: &[u8], b: &[u8]) -> bool {
 // --- llama-server on loopback --------------------------------------------------------------------------------
 
 async fn upstream(port: u16, req: Request<Chunks>) -> Result<Response<Incoming>, String> {
+    upstream_within(port, req, ANSWER_WAIT).await
+}
+
+/// A request to an engine on loopback whose answer's head must come within `wait`.
+async fn upstream_within(port: u16, req: Request<Chunks>, wait: Duration) -> Result<Response<Incoming>, String> {
     let stream = TcpStream::connect(("127.0.0.1", port)).await.map_err(|_| "down".to_string())?;
     let (mut sender, conn) =
         hyper::client::conn::http1::handshake(TokioIo::new(stream)).await.map_err(|e| e.to_string())?;
     tokio::spawn(async move {
         let _ = conn.await;
     });
-    tokio::time::timeout(ANSWER_WAIT, sender.send_request(req))
+    tokio::time::timeout(wait, sender.send_request(req))
         .await
-        .map_err(|_| "the model server did not answer in time".to_string())?
+        .map_err(|_| "the engine did not answer in time".to_string())?
         .map_err(|e| e.to_string())
 }
 
-/// A request to an engine on loopback: llama-server (the llm and vision) with the runtime's key, whisper-server
-/// without one (it has none).
+/// An answer body that ends with an error when its engine is silent for longer than `wait` between two pieces (the
+/// route's timeout): a stalled engine frees its place in flight instead of holding it.
+struct Idle {
+    inner: Body,
+    wait: Duration,
+    sleep: Pin<Box<tokio::time::Sleep>>,
+}
+
+impl Idle {
+    fn new(inner: Body, wait: Duration) -> Idle {
+        Idle { inner, wait, sleep: Box::pin(tokio::time::sleep(wait)) }
+    }
+}
+
+impl hyper::body::Body for Idle {
+    type Data = Bytes;
+    type Error = BoxError;
+
+    fn poll_frame(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Bytes>, BoxError>>> {
+        let this = &mut *self;
+        match Pin::new(&mut this.inner).poll_frame(cx) {
+            Poll::Ready(Some(Ok(frame))) => {
+                let next = tokio::time::Instant::now() + this.wait;
+                this.sleep.as_mut().reset(next);
+                Poll::Ready(Some(Ok(frame)))
+            }
+            Poll::Ready(other) => Poll::Ready(other),
+            Poll::Pending => match std::future::Future::poll(this.sleep.as_mut(), cx) {
+                Poll::Ready(()) => {
+                    Poll::Ready(Some(Err("the engine was silent longer than the route's timeout".into())))
+                }
+                Poll::Pending => Poll::Pending,
+            },
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+/// A request to an engine on loopback, with the runtime's key when the engine's block makes one (llama-server for the
+/// llm and vision), without one otherwise (whisper-server and the other engines never see it).
 fn upstream_request(
     state: &State,
     engine: &str,
@@ -265,7 +341,8 @@ fn upstream_request(
         .uri(path)
         .header(HOST, format!("127.0.0.1:{port}"))
         .header(CONTENT_TYPE, ctype);
-    if let (Some(key), LLM | VISION) = (&state.key, engine) {
+    let keyed = state.routes.engine(engine).is_some_and(|e| e.key);
+    if let (Some(key), true) = (&state.key, keyed) {
         b = b.header(AUTHORIZATION, format!("Bearer {key}"));
     }
     b.body(body).unwrap_or_else(|_| Request::new(Chunks::new(Vec::new())))
@@ -312,15 +389,16 @@ impl Hooks for State {
 
     fn up<'a>(&'a self, spec: &'a Spec) -> Fut<'a, bool> {
         Box::pin(async move {
+            let primary = self.is_primary(&spec.id);
             if let Some(board) = &self.board {
-                if spec.id != LLM {
+                if !primary {
                     return board.up(spec).await;
                 }
             }
-            match (spec.id.as_str(), spec.port) {
-                (LLM, _) => upstream_up(self).await,
-                (_, Some(port)) => engines::http_up(port).await,
-                (_, None) => matches!(run_systemctl("is-active", spec.unit.clone()).await, Ok(true)),
+            match (primary, spec.port.or(self.port_of(&spec.id))) {
+                (true, _) => upstream_up(self).await,
+                (false, Some(port)) => engines::http_up(port).await,
+                (false, None) => matches!(run_systemctl("is-active", spec.unit.clone()).await, Ok(true)),
             }
         })
     }
@@ -332,7 +410,7 @@ impl Hooks for State {
 /// (the caller answers 503 with Retry-After).
 async fn engine_ready(state: &State, id: &str, note: &mut String) -> Result<Option<Ticket>, String> {
     let Some(sched) = state.engines.as_ref().filter(|s| s.index(id).is_some()) else {
-        return if id != LLM || upstream_up(state).await {
+        return if !state.is_primary(id) || upstream_up(state).await {
             Ok(None)
         } else {
             Err("the model server does not answer".into())
@@ -344,7 +422,7 @@ async fn engine_ready(state: &State, id: &str, note: &mut String) -> Result<Opti
     if waited > Duration::ZERO {
         note.push_str(&format!(" engine={id}:{}ms", waited.as_millis()));
     }
-    if id == LLM && !upstream_up(state).await {
+    if state.is_primary(id) && !upstream_up(state).await {
         sched.mark_down(id);
         return Err("the model server does not answer".into());
     }
@@ -383,7 +461,8 @@ fn engine_facts(state: &State) -> Value {
 
 async fn health(state: &State) -> Response<Body> {
     let up = upstream_up(state).await;
-    let stopped = state.engines.as_ref().is_some_and(|s| s.index(LLM).is_some() && !s.running(LLM));
+    let primary = state.primary.as_deref().unwrap_or(LLM);
+    let stopped = state.engines.as_ref().is_some_and(|s| s.index(primary).is_some() && !s.running(primary));
     let upstream = if up {
         "up"
     } else if stopped {
@@ -416,18 +495,26 @@ async fn health(state: &State) -> Response<Body> {
     )
 }
 
-/// The routing table as the board has it: each route, its engine and that engine's loopback port (null: the board
-/// runs no such engine the gateway speaks to; the route then answers 501), and where a chat with images goes.
+/// The routing table as the board has it: each route, its protocol, its engine and that engine's loopback port (null:
+/// the board runs no such engine the gateway speaks to; the route then answers 501), and where a chat with images
+/// goes.
 fn route_facts(state: &State) -> Value {
-    let list: Vec<Value> = ROUTES
+    let list: Vec<Value> = state
+        .routes
+        .routes
         .iter()
         .map(|r| {
             let mut v = json!({"method": r.method, "path": r.path, "engine": r.engine, "to": r.upstream,
-                               "port": state.port_of(r.engine)});
-            if r.path == "/v1/chat/completions" {
-                let images = state.limits().images.is_some();
-                v["with_images"] = if images { json!(VISION) } else { Value::Null };
-                v["vision_port"] = json!(state.cfg.vision_port);
+                               "port": state.port_of(&r.engine), "protocol": r.protocol.word(),
+                               "name": format!("{}.{}", r.engine, r.key), "max_body_kb": r.max_body / 1024,
+                               "timeout_s": r.timeout.as_secs(), "stream": r.stream});
+            if r.images {
+                v["match"] = json!("images");
+            } else if r.protocol == Protocol::Chat {
+                let images = state.limits(&r.path).images.is_some();
+                let to = state.routes.images_route(&r.path).map(|i| state.routes.routes[i].engine.clone());
+                v["with_images"] = if images { json!(to) } else { Value::Null };
+                v["vision_port"] = json!(to.and_then(|e| state.port_of(&e)));
             }
             v
         })
@@ -452,12 +539,12 @@ fn metrics(state: &State) -> Response<Body> {
     let (llm_starts, llm_stops) = state
         .engines
         .as_ref()
-        .and_then(|s| s.states().into_iter().find(|e| e.id == LLM))
+        .and_then(|s| s.states().into_iter().find(|e| state.is_primary(&e.id)))
         .map(|e| (e.starts, e.stops))
         .unwrap_or((0, 0));
     let em = state.engines.as_ref().map(|s| &s.metrics);
     let switches = em.map(|m| m.switches.load(Relaxed)).unwrap_or(0);
-    let rows: [(&str, &str, u64); 20] = [
+    let rows: [(&str, &str, u64); 21] = [
         ("llmcf_gateway_requests_total", "requests received", m.requests.load(Relaxed)),
         ("llmcf_gateway_answered_total", "requests the model server answered", m.ok.load(Relaxed)),
         ("llmcf_gateway_refused_total", "requests refused by the strict checks", m.refused.load(Relaxed)),
@@ -483,6 +570,7 @@ fn metrics(state: &State) -> Response<Body> {
         ),
         ("llmcf_gateway_max_tokens_clamped_total", "answers cut to the budget", m.clamped.load(Relaxed)),
         ("llmcf_gateway_images_total", "image parts sent to the vision engine", m.images.load(Relaxed)),
+        ("llmcf_gateway_generic_total", "requests answered through a generic route", m.generic.load(Relaxed)),
         ("llmcf_gateway_llm_starts_total", "model server starts", llm_starts),
         ("llmcf_gateway_llm_stops_total", "model server stops", llm_stops),
         ("llmcf_gateway_engine_switches_total", "engines stopped so another one could run in turn", switches),
@@ -509,9 +597,10 @@ fn metrics(state: &State) -> Response<Body> {
         ("llmcf_gateway_route_bytes_in_total", "request body bytes per route", 2),
     ] {
         text.push_str(&format!("# HELP {name} {help}\n# TYPE {name} counter\n"));
-        for (r, rm) in ROUTES.iter().zip(m.routes.iter()) {
+        for (r, rm) in state.routes.routes.iter().zip(m.routes.iter()) {
             let v = [&rm.requests, &rm.refused, &rm.bytes_in][pick].load(Relaxed);
-            text.push_str(&format!("{name}{{route=\"{}\"}} {v}\n", r.path));
+            let matched = if r.images { ",match=\"images\"" } else { "" };
+            text.push_str(&format!("{name}{{route=\"{}\"{matched}}} {v}\n", r.path));
         }
     }
     let wait = em.map(|m| m.switch_wait_micros.load(Relaxed)).unwrap_or(0) as f64 / 1e6;
@@ -551,7 +640,7 @@ fn refusal(state: &State, r: Refusal) -> Response<Body> {
 /// How an engine's answer goes back to the client.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Answer {
-    /// as it is (llama-server's OpenAI-compatible answers, a stream too)
+    /// as it is (llama-server's OpenAI-compatible answers, a stream too; a generic route's answer)
     Pass,
     /// whisper-server's: its text format as text/plain (it says text/html), an error as the gateway's own error
     Speech { text: bool },
@@ -566,46 +655,63 @@ fn engine_name(id: &str) -> String {
     }
 }
 
-/// Sends a checked request to its engine (made ready first: engine_ready) and passes the answer back, the permit and
-/// the engine's ticket held to the answer's last byte.
-/// A checked request for an engine: its body, Content-Type and how its answer goes back.
+/// A checked request for an engine: its method, body, Content-Type and how its answer goes back.
 struct Outgoing {
+    method: Method,
     body: Chunks,
     ctype: String,
     answer: Answer,
 }
 
-async fn forward(
-    state: &State,
-    engine: &str,
-    path: &str,
-    out: Outgoing,
-    permit: Permit,
-    t: &mut Trace,
-) -> Response<Body> {
-    let Outgoing { body, ctype, answer } = out;
-    let ticket = match engine_ready(state, engine, &mut t.note).await {
+fn is_event_stream(h: &hyper::HeaderMap) -> bool {
+    h.get(CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.trim().to_ascii_lowercase().starts_with("text/event-stream"))
+}
+
+/// Sends a checked request to the engine of route `idx` (made ready first: engine_ready) at the route's own path and
+/// passes the answer back within the route's timeout (its head, and every gap inside it), the permit and the engine's
+/// ticket held to the answer's last byte. An event stream comes back only on a route that declares one (`stream`);
+/// an http-sse route's answer must be one.
+async fn forward(state: &State, idx: usize, out: Outgoing, permit: Permit, t: &mut Trace) -> Response<Body> {
+    let r = &state.routes.routes[idx];
+    let Outgoing { method, body, ctype, answer } = out;
+    let ticket = match engine_ready(state, &r.engine, &mut t.note).await {
         Ok(ticket) => ticket,
         Err(e) => {
             state.metrics.upstream_errors.fetch_add(1, Relaxed);
             return retry(error(StatusCode::SERVICE_UNAVAILABLE, "upstream_down", &e), 15);
         }
     };
-    let Some(port) = state.port_of(engine) else {
+    let Some(port) = state.port_of(&r.engine) else {
         return error(StatusCode::NOT_IMPLEMENTED, "no_engine", "the board runs no such engine");
     };
-    let req = upstream_request(state, engine, Method::POST, path, body, &ctype);
-    let resp = match upstream(port, req).await {
+    let req = upstream_request(state, &r.engine, method, &r.upstream, body, &ctype);
+    let resp = match upstream_within(port, req, r.timeout).await {
         Ok(resp) => resp,
         Err(e) => {
             state.metrics.upstream_errors.fetch_add(1, Relaxed);
-            let msg = if e == "down" { format!("{} does not answer", engine_name(engine)) } else { e };
+            let msg = if e == "down" { format!("{} does not answer", engine_name(&r.engine)) } else { e };
             return retry(error(StatusCode::BAD_GATEWAY, "upstream_error", &msg), 5);
         }
     };
+    let streams = is_event_stream(resp.headers());
+    if resp.status().is_success() && (streams && !r.stream || !streams && r.protocol == Protocol::Sse) {
+        // the engine answers otherwise than its block declares: nothing of it is passed on
+        state.metrics.upstream_errors.fetch_add(1, Relaxed);
+        let msg = if streams {
+            "the engine answered an event stream its route does not declare"
+        } else {
+            "the engine answered no event stream on its stream route"
+        };
+        return retry(error(StatusCode::BAD_GATEWAY, "upstream_error", msg), 5);
+    }
     t.engine_answered = true;
     if resp.status().is_success() {
         state.metrics.ok.fetch_add(1, Relaxed);
+        if !matches!(r.protocol, Protocol::Chat | Protocol::Completions | Protocol::Models | Protocol::Transcription) {
+            state.metrics.generic.fetch_add(1, Relaxed);
+        }
     } else {
         state.metrics.upstream_errors.fetch_add(1, Relaxed);
         if let Answer::Speech { .. } = answer {
@@ -621,23 +727,24 @@ async fn forward(
     }
     let (parts, body) = resp.into_parts();
     // the permit and the engine's ticket are held until the answer's last byte went out (a stream too)
-    let body = body
+    let body: Body = body
         .map_frame(move |f| {
             let _held = (&permit, &ticket);
             f
         })
+        .map_err(|e| Box::new(e) as BoxError)
         .boxed_unsync();
-    let mut r = Response::new(body);
-    *r.status_mut() = parts.status;
+    let mut out = Response::new(Idle::new(body, r.timeout).boxed_unsync());
+    *out.status_mut() = parts.status;
     for name in [CONTENT_TYPE, hyper::header::CACHE_CONTROL] {
         if let Some(v) = parts.headers.get(&name) {
-            r.headers_mut().insert(name, v.clone());
+            out.headers_mut().insert(name, v.clone());
         }
     }
     if answer == (Answer::Speech { text: true }) {
-        r.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/plain; charset=utf-8"));
+        out.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/plain; charset=utf-8"));
     }
-    r
+    out
 }
 
 /// One connection's two ends and a second handle on its socket, only to see the client hang up while its request
@@ -709,18 +816,20 @@ async fn route(state: &Arc<State>, conn: &Conn, req: Request<Incoming>, t: &mut 
         (&Method::GET, "/metrics") => return metrics(state),
         _ => {}
     }
-    let Some(idx) = engines::route_index(req.method().as_str(), &path) else {
+    let Some(idx) = state.routes.find(req.method().as_str(), &path) else {
         return error(StatusCode::NOT_FOUND, "not_found", "no such route");
     };
     t.route = Some(idx);
-    let speech = ROUTES[idx].engine == STT;
-    if speech && state.cfg.stt_port.is_none() {
-        return error(
-            StatusCode::NOT_IMPLEMENTED,
-            "no_engine",
-            "the board runs no speech engine the gateway speaks to (whisper.cpp's whisper-server: block \
-             stt-whisper-cpp or stt-whisper-cpp-program)",
-        );
+    let r = &state.routes.routes[idx];
+    if state.port_of(&r.engine).is_none() {
+        let msg = if r.protocol == Protocol::Transcription {
+            "the board runs no speech engine the gateway speaks to (a block whose reach serves the speech route, such \
+             as stt-whisper-cpp or stt-whisper-cpp-program)"
+                .to_string()
+        } else {
+            format!("the board runs no {} engine", r.engine)
+        };
+        return error(StatusCode::NOT_IMPLEMENTED, "no_engine", &msg);
     }
     let ip: IpAddr = peer.ip();
     let wait = state.rate.lock().map(|mut r| r.take(ip, Instant::now())).unwrap_or(Err(60));
@@ -728,57 +837,65 @@ async fn route(state: &Arc<State>, conn: &Conn, req: Request<Incoming>, t: &mut 
         state.metrics.rate_limited.fetch_add(1, Relaxed);
         return retry(error(StatusCode::TOO_MANY_REQUESTS, "rate_limited", "too many requests"), seconds);
     }
-    if req.method() == Method::GET {
-        let ticket = match engine_ready(state, LLM, &mut t.note).await {
+    if r.protocol == Protocol::Models {
+        let ticket = match engine_ready(state, &r.engine, &mut t.note).await {
             Ok(t) => t,
             Err(e) => return retry(error(StatusCode::SERVICE_UNAVAILABLE, "upstream_down", &e), 15),
         };
-        let get = upstream_request(state, LLM, Method::GET, "/v1/models", Chunks::new(Vec::new()), "application/json");
-        return match upstream(state.cfg.upstream_port, get).await {
+        let port = state.port_of(&r.engine).unwrap_or(0);
+        let get =
+            upstream_request(state, &r.engine, Method::GET, &r.upstream, Chunks::new(Vec::new()), "application/json");
+        return match upstream_within(port, get, r.timeout).await {
             Ok(resp) => {
                 t.engine_answered = true;
                 let status = resp.status();
-                let body = resp.into_body().map_frame(move |f| {
-                    let _held = &ticket;
-                    f
-                });
-                let mut r = Response::new(body.boxed_unsync());
-                *r.status_mut() = status;
-                r.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                r
+                let body = resp
+                    .into_body()
+                    .map_frame(move |f| {
+                        let _held = &ticket;
+                        f
+                    })
+                    .map_err(|e| Box::new(e) as BoxError);
+                let mut out = Response::new(body.boxed_unsync());
+                *out.status_mut() = status;
+                out.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                out
             }
             Err(_) => error(StatusCode::BAD_GATEWAY, "upstream_error", "the model server does not answer"),
         };
     }
+    let get = req.method() == Method::GET;
     let ctype = req.headers().get(CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-    let boundary = if speech {
-        let Some(b) = audio::boundary(&ctype) else {
-            state.metrics.refused.fetch_add(1, Relaxed);
-            return error(
-                StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                "invalid_multipart",
-                "the body is multipart/form-data with its boundary",
-            );
-        };
-        b
-    } else {
-        if !ctype.to_ascii_lowercase().starts_with("application/json") {
-            state.metrics.refused.fetch_add(1, Relaxed);
-            return error(StatusCode::UNSUPPORTED_MEDIA_TYPE, "invalid_json", "the body is application/json");
+    let boundary = match r.protocol {
+        Protocol::Transcription | Protocol::Multipart => {
+            let Some(b) = audio::boundary(&ctype) else {
+                state.metrics.refused.fetch_add(1, Relaxed);
+                return error(
+                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    "invalid_multipart",
+                    "the body is multipart/form-data with its boundary",
+                );
+            };
+            b
         }
-        String::new()
+        // a binary body is taken by its first bytes, never by the client's word
+        Protocol::Binary => String::new(),
+        _ if get => String::new(),
+        _ => {
+            if !ctype.to_ascii_lowercase().starts_with("application/json") {
+                state.metrics.refused.fetch_add(1, Relaxed);
+                return error(StatusCode::UNSUPPORTED_MEDIA_TYPE, "invalid_json", "the body is application/json");
+            }
+            String::new()
+        }
     };
-    let (cap, body_wait) = if speech {
-        (state.cfg.audio_body_cap(), AUDIO_BODY_WAIT)
-    } else if path == "/v1/chat/completions" {
-        (state.cfg.chat_body_cap(), BODY_WAIT)
-    } else {
-        (state.cfg.max_body_kb as usize * 1024, BODY_WAIT)
-    };
+    let cap = if get { 0 } else { state.body_cap(idx) };
+    let body_wait = if r.protocol.json_body() { BODY_WAIT } else { AUDIO_BODY_WAIT };
     if announced(&req).is_some_and(|n| n > cap as u64) {
         // refused before it waits or is read
         state.metrics.too_large.fetch_add(1, Relaxed);
-        return error(StatusCode::PAYLOAD_TOO_LARGE, "too_large", "the body is larger than the gateway takes");
+        let msg = if get { "a GET takes no body" } else { "the body is larger than the gateway takes" };
+        return error(StatusCode::PAYLOAD_TOO_LARGE, "too_large", msg);
     }
     let auth = req.headers().get(AUTHORIZATION).and_then(|v| v.to_str().ok());
     let key = peer::client_key(auth, state.token.as_deref(), peer, conn.local);
@@ -826,24 +943,45 @@ async fn route(state: &Arc<State>, conn: &Conn, req: Request<Incoming>, t: &mut 
         }
     };
     t.bytes_in = body.len() as u64;
-    if speech {
-        return transcribe(state, body, &boundary, permit, before, t).await;
+    match r.protocol {
+        Protocol::Transcription => transcribe(state, idx, body, &boundary, permit, before, t).await,
+        Protocol::Chat | Protocol::Completions => text_route(state, idx, body, permit, before, t).await,
+        _ => generic_route(state, idx, body, &boundary, permit, before, t).await,
     }
+}
+
+/// The chat and completion routes: the strict checks and savings (rules.rs), a chat with image parts to the engine of
+/// the images route on its path.
+async fn text_route(
+    state: &State,
+    idx: usize,
+    body: Bytes,
+    permit: Permit,
+    before: String,
+    t: &mut Trace,
+) -> Response<Body> {
+    let r = &state.routes.routes[idx];
     if state.budget.load(Relaxed) == 0 {
         state.budget.store((state.cfg.ctx_size / state.cfg.slots) as u64, Relaxed);
     }
-    let lim = state.limits();
-    let checked =
-        if path == "/v1/chat/completions" { rules::chat(&body, &lim) } else { rules::completion(&body, &lim) };
+    let lim = state.limits(&r.path);
+    let checked = if r.protocol == Protocol::Chat { rules::chat(&body, &lim) } else { rules::completion(&body, &lim) };
     // the client's body is not needed any more (with images it is large): only the checked one stays
     drop(body);
     let o = match checked {
         Ok(o) => o,
-        Err(r) => {
-            t.note = format!(" refused={}", r.code);
-            return refusal(state, r);
+        Err(e) => {
+            t.note = format!(" refused={}", e.code);
+            return refusal(state, e);
         }
     };
+    if o.stream && !r.stream {
+        t.note = " refused=no_stream".into();
+        return refusal(
+            state,
+            rules::Refusal { status: 400, code: "invalid_value", message: "this route answers no stream".into() },
+        );
+    }
     let m = &state.metrics;
     m.prompt_tokens.fetch_add(o.prompt_tokens, Relaxed);
     m.system_dropped.fetch_add(o.system_dropped, Relaxed);
@@ -861,16 +999,67 @@ async fn route(state: &Arc<State>, conn: &Conn, req: Request<Incoming>, t: &mut 
         if o.images > 0 { format!(" images={}", o.images) } else { String::new() },
         if o.stream { " stream" } else { "" }
     );
-    let engine = engines::for_request(&path, o.images > 0).unwrap_or(LLM);
+    // a chat with images goes to the images route's engine (counted on that route)
+    let target = if o.images > 0 { state.routes.images_route(&r.path).unwrap_or(idx) } else { idx };
+    if target != idx {
+        t.route = Some(target);
+    }
     let out = Chunks::new(vec![Bytes::from(o.body.to_string())]);
     drop(o);
-    let out = Outgoing { body: out, ctype: "application/json".into(), answer: Answer::Pass };
-    forward(state, engine, &path, out, permit, t).await
+    let out = Outgoing { method: Method::POST, body: out, ctype: "application/json".into(), answer: Answer::Pass };
+    forward(state, target, out, permit, t).await
 }
 
-/// The speech route: the upload checked (audio.rs) and sent to whisper-server's /inference as its own form.
+/// The other adapters (embeddings, speech output) and the generic checked passthrough (generic.rs): the body checked
+/// by the route's protocol and declared limits, then sent to the engine at the route's own path.
+async fn generic_route(
+    state: &State,
+    idx: usize,
+    body: Bytes,
+    boundary: &str,
+    permit: Permit,
+    before: String,
+    t: &mut Trace,
+) -> Response<Body> {
+    let r = &state.routes.routes[idx];
+    let json = |b: Bytes| Chunks::new(vec![b]);
+    let checked: Result<(Chunks, String, String), rules::Refusal> = match r.protocol {
+        Protocol::Embeddings => rules::embeddings(&body)
+            .map(|v| (json(Bytes::from(v.to_string())), "application/json".into(), String::new())),
+        Protocol::Speech => {
+            rules::speech(&body).map(|v| (json(Bytes::from(v.to_string())), "application/json".into(), String::new()))
+        }
+        Protocol::Json | Protocol::Sse if r.method == "GET" => {
+            Ok((Chunks::new(Vec::new()), "application/json".into(), String::new()))
+        }
+        Protocol::Json | Protocol::Sse => {
+            rules::json_object(&body).map(|_| (json(body.clone()), "application/json".into(), String::new()))
+        }
+        Protocol::Multipart => generic::multipart(&body, boundary, &r.fields).map(|f| {
+            let files = f.files;
+            (Chunks::new(f.chunks), format!("multipart/form-data; boundary={boundary}"), format!(" files={files}"))
+        }),
+        Protocol::Binary => generic::binary(&body, &r.types)
+            .map(|m| (json(body.clone()), m.mime().to_string(), format!(" type={}", m.word()))),
+        _ => Err(rules::Refusal { status: 404, code: "not_found", message: "no such route".into() }),
+    };
+    drop(body);
+    let (out, ctype, what) = match checked {
+        Ok(v) => v,
+        Err(e) => {
+            t.note = format!("{before} refused={}", e.code);
+            return refusal(state, e);
+        }
+    };
+    t.note = format!("{before} {}{what}", r.protocol.word());
+    let method = if r.method == "GET" { Method::GET } else { Method::POST };
+    forward(state, idx, Outgoing { method, body: out, ctype, answer: Answer::Pass }, permit, t).await
+}
+
+/// The speech route: the upload checked (audio.rs) and sent to whisper-server's form at the route's own path.
 async fn transcribe(
     state: &State,
+    idx: usize,
     body: Bytes,
     boundary: &str,
     permit: Permit,
@@ -891,8 +1080,7 @@ async fn transcribe(
     let answer = Answer::Speech { text: tr.format == "text" };
     drop(tr);
     drop(body);
-    let path = ROUTES.iter().find(|r| r.engine == STT).map(|r| r.upstream).unwrap_or("/inference");
-    forward(state, STT, path, Outgoing { body: form, ctype, answer }, permit, t).await
+    forward(state, idx, Outgoing { method: Method::POST, body: form, ctype, answer }, permit, t).await
 }
 
 // --- listening ---------------------------------------------------------------------------------------------
@@ -903,6 +1091,39 @@ fn home() -> Result<PathBuf, String> {
         return Err("HOME is not an absolute path".into());
     }
     Ok(home)
+}
+
+/// The route table (the bundle's `--routes` file, or the one made from the options), the engine on --upstream-port
+/// and the engines the scheduler controls, each with its port from the table where `--engine` gives none. Refused: a
+/// table engine on the gateway's own port, an `--engine` whose port is not its table engine's.
+fn route_table(cfg: &Serve) -> Result<(Table, Option<String>, Vec<Spec>), String> {
+    let table = match &cfg.routes {
+        None => Table::from_args(cfg),
+        Some(path) => {
+            let meta = std::fs::metadata(path).map_err(|_| "the route table (--routes) cannot be read".to_string())?;
+            if !meta.is_file() || meta.len() > crate::routes::MAX_TABLE_BYTES as u64 {
+                return Err("the route table (--routes) is no file of at most 64 KiB".into());
+            }
+            let data = std::fs::read(path).map_err(|_| "the route table (--routes) cannot be read".to_string())?;
+            Table::parse(&data).map_err(|e| format!("the route table (--routes): {e}"))?
+        }
+    };
+    if table.engines.iter().any(|e| e.port == Some(cfg.port)) {
+        return Err("an engine of the route table listens on the gateway's own port".into());
+    }
+    let primary = table.engines.iter().find(|e| e.port == Some(cfg.upstream_port)).map(|e| e.id.clone());
+    let mut specs = cfg.engines.clone();
+    for spec in &mut specs {
+        let Some(e) = table.engine(&spec.id) else { continue };
+        match (spec.port, e.port) {
+            (Some(a), Some(b)) if a != b && primary.as_deref() != Some(spec.id.as_str()) => {
+                return Err(format!("the {} engine's port is not the one of the route table", spec.id))
+            }
+            (None, Some(p)) if primary.as_deref() != Some(spec.id.as_str()) => spec.port = Some(p),
+            _ => {}
+        }
+    }
+    Ok((table, primary, specs))
 }
 
 pub fn build_state(cfg: Serve) -> Result<(Arc<State>, Option<Arc<rustls::ServerConfig>>), String> {
@@ -930,6 +1151,7 @@ pub fn build_state_on(
     } else {
         (None, None, None)
     };
+    let (table, primary, engines) = route_table(&cfg)?;
     let guard = Arc::new(Guard::new(cfg.memory_floor_mb as u64, cfg.memory_psi_max, Box::new(memory::read_proc)));
     let admit = guard.clone();
     let queue = Queue::new(
@@ -942,16 +1164,21 @@ pub fn build_state_on(
         rate: Mutex::new(RateLimit::new(cfg.rate_per_minute)),
         queue,
         memory: guard,
-        metrics: Metrics::default(),
+        metrics: Metrics {
+            routes: table.routes.iter().map(|_| RouteMetrics::default()).collect(),
+            ..Metrics::default()
+        },
         budget: AtomicU64::new((cfg.ctx_size / cfg.slots) as u64),
-        engines: (!cfg.engines.is_empty()).then(|| {
+        engines: (!engines.is_empty()).then(|| {
             let timing = Timing {
                 hold: Duration::from_secs(cfg.engine_hold_seconds as u64),
                 switch_wait: Duration::from_secs(cfg.queue_wait_seconds as u64),
                 ..Timing::default()
             };
-            Scheduler::new(cfg.engines_mode, cfg.engines_budget_mb, cfg.engines.clone(), timing)
+            Scheduler::new(cfg.engines_mode, cfg.engines_budget_mb, engines, timing)
         }),
+        routes: table,
+        primary,
         key,
         token,
         fingerprint,
@@ -996,8 +1223,9 @@ pub async fn serve(state: Arc<State>, tls_cfg: Option<Arc<rustls::ServerConfig>>
         tokio::spawn(async move {
             // which engines run already (in turn, those that do not fit together are stopped), then the llm
             sched.reconcile(&*st).await;
-            if sched.index(LLM).is_some() && !sched.running(LLM) {
-                if let Err(e) = sched.prepare(&*st, LLM).await {
+            let primary = st.primary.clone().unwrap_or_else(|| LLM.to_string());
+            if sched.index(&primary).is_some() && !sched.running(&primary) {
+                if let Err(e) = sched.prepare(&*st, &primary).await {
                     eprintln!("llmcf-gateway: the model server could not be started ({e}); it is tried again");
                 }
             }
@@ -1293,8 +1521,8 @@ mod tests {
         let sched = state.engines.as_ref().unwrap();
         assert_eq!(sched.metrics.switches.load(Relaxed), 2);
         let m = &state.metrics.routes;
-        let speech = engines::route_index("POST", "/v1/audio/transcriptions").unwrap();
-        let chat_i = engines::route_index("POST", "/v1/chat/completions").unwrap();
+        let speech = state.routes.find("POST", "/v1/audio/transcriptions").unwrap();
+        let chat_i = state.routes.find("POST", "/v1/chat/completions").unwrap();
         assert_eq!((m[speech].requests.load(Relaxed), m[speech].refused.load(Relaxed)), (1, 0));
         assert_eq!(m[speech].bytes_in.load(Relaxed), form.len() as u64);
         assert_eq!(m[chat_i].requests.load(Relaxed), 2);

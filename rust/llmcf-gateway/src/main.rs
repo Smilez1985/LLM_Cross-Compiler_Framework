@@ -1,7 +1,9 @@
 //! llmcf-gateway: the LLM Cross-Compiler Framework's token-saving middleware in front of the board's llama-server.
 //!
 //! `llmcf-gateway serve [OPTION VALUE ...]` runs the OpenAI-compatible front (rules.rs: strict JSON, the context
-//! budget, the savings; server.rs: routes, limits, TLS in the local-network mode); `llmcf-gateway probe --port P
+//! budget, the savings; server.rs: routes, limits, TLS in the local-network mode; routes.rs: the route table as data,
+//! `--routes FILE` from the bundle's blocks, so a new engine needs no change here; generic.rs: the checked
+//! passthrough of a route a block declares); `llmcf-gateway probe --port P
 //! [--tls] [--complete] [--bench N]` checks a running gateway from the board itself (probe.rs). It reads no
 //! environment but HOME (its state folder and the model server's key file live below it), runs no shell and talks
 //! only to the board's engines on 127.0.0.1; with --engine (or --llm-unit) it starts and stops exactly those systemd
@@ -14,12 +16,14 @@ mod args;
 mod audio;
 mod control;
 mod engines;
+mod generic;
 mod images;
 mod limits;
 mod memory;
 mod peer;
 mod probe;
 mod queue;
+mod routes;
 mod rules;
 mod server;
 mod tls;

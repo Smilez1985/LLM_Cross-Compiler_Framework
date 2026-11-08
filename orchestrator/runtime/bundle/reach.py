@@ -229,10 +229,10 @@ def _route(raw: Any, table: bool) -> Tuple[Route, Optional[str]]:
     elif protocol == "http-multipart":
         raise ReachError(f"{what}: an http-multipart route names its fields")
     match = raw.get("match", "")
-    if match and (match not in MATCHES or protocol != "openai-chat"):
+    if "match" in raw and (match not in MATCHES or protocol != "openai-chat"):
         raise ReachError(f"{what}: match is images, on an openai-chat route only")
     key = raw.get("key" if table else "engine_route_key", None)
-    if key is None:
+    if key is None and not table:
         key = path.rsplit("/", 1)[-1].replace(".", "-").replace("_", "-").lower()
         key = re.sub(r"^[^a-z]+", "", key)[:32] or "route"
         if match:

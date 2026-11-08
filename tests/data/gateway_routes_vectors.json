@@ -987,6 +987,72 @@
       "value": []
      }
     ]
+   },
+   {
+    "why": "an empty match",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       1,
+       "match"
+      ],
+      "value": ""
+     }
+    ]
+   },
+   {
+    "why": "a key that is null",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       0,
+       "key"
+      ],
+      "value": null
+     }
+    ]
+   },
+   {
+    "why": "a body cap as a fraction",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "max_body_kb"
+      ],
+      "value": 1.5
+     }
+    ]
+   },
+   {
+    "why": "a timeout as yes",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7,
+       "timeout_s"
+      ],
+      "value": true
+     }
+    ]
+   },
+   {
+    "why": "a route that is a list",
+    "patches": [
+     {
+      "path": [
+       "routes",
+       7
+      ],
+      "value": [
+       "/api/x"
+      ]
+     }
+    ]
    }
   ]
  }

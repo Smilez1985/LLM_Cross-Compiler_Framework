@@ -38,44 +38,6 @@ pub fn is_engine_id(s: &str) -> bool {
         && s.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
 }
 
-/// One route of the gateway to an engine: the client's method and path, the engine it needs and the engine's own path
-/// the request goes to (whisper.cpp's whisper-server takes its uploads at /inference).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Route {
-    pub method: &'static str,
-    pub path: &'static str,
-    pub engine: &'static str,
-    pub upstream: &'static str,
-}
-
-/// The routing table: every route to an engine the gateway serves (/health and /metrics are its own). A chat request
-/// with image parts goes to the vision engine instead (`for_request`). A new route is one line here.
-pub const ROUTES: [Route; 4] = [
-    Route { method: "GET", path: "/v1/models", engine: LLM, upstream: "/v1/models" },
-    Route { method: "POST", path: "/v1/chat/completions", engine: LLM, upstream: "/v1/chat/completions" },
-    Route { method: "POST", path: "/v1/completions", engine: LLM, upstream: "/v1/completions" },
-    Route { method: "POST", path: "/v1/audio/transcriptions", engine: STT, upstream: "/inference" },
-];
-
-/// The route of a method and path (its place in ROUTES).
-pub fn route_index(method: &str, path: &str) -> Option<usize> {
-    ROUTES.iter().position(|r| r.method == method && r.path == path)
-}
-
-/// The engine a route needs (None: no engine; such a route is the gateway's own).
-pub fn for_route(path: &str) -> Option<&'static str> {
-    ROUTES.iter().find(|r| r.path == path).map(|r| r.engine)
-}
-
-/// The engine one request goes to: a chat request with image parts to the vision engine (a llama-server of its own
-/// with the projector), every other one to its route's engine.
-pub fn for_request(path: &str, images: bool) -> Option<&'static str> {
-    match for_route(path) {
-        Some(LLM) if images && path == "/v1/chat/completions" => Some(VISION),
-        other => other,
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Together,
@@ -628,22 +590,8 @@ mod tests {
     }
 
     #[test]
-    fn routes_name_their_engine_and_specs_are_checked() {
-        assert_eq!(for_route("/v1/chat/completions"), Some(LLM));
+    fn engine_ids_and_specs_are_checked() {
         assert!(is_engine_id("detect") && is_engine_id("llm-2") && !is_engine_id("De") && !is_engine_id("a.b"));
-        assert_eq!(for_route("/v1/models"), Some(LLM));
-        assert_eq!(for_route("/v1/audio/transcriptions"), Some(STT));
-        assert_eq!(for_route("/health"), None);
-        assert_eq!(for_route("/v1/embeddings"), None, "not served");
-        // images: the chat route goes to vision, nothing else does
-        assert_eq!(for_request("/v1/chat/completions", true), Some(VISION));
-        assert_eq!(for_request("/v1/chat/completions", false), Some(LLM));
-        assert_eq!(for_request("/v1/completions", true), Some(LLM));
-        assert_eq!(for_request("/v1/audio/transcriptions", false), Some(STT));
-        assert_eq!(route_index("POST", "/v1/audio/transcriptions"), Some(3));
-        assert_eq!(ROUTES[3].upstream, "/inference");
-        assert_eq!(route_index("GET", "/v1/audio/transcriptions"), None);
-        assert_eq!(route_index("POST", "/metrics"), None);
         assert_eq!(
             parse_spec("stt=llmcf-stt.service:300:8090").unwrap(),
             Spec { id: STT.into(), unit: "llmcf-stt.service".into(), mib: 300, port: Some(8090) }
