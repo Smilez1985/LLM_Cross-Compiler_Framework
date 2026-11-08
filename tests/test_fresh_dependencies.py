@@ -1,5 +1,6 @@
-"""The newest compatible dependencies (DECISIONS round 65): scripts/fresh_deps.py (cooldown exceptions, the fresh
-resolve, pip-audit as CI runs it, the self-check) and the scheduled update run .github/workflows/deps-update.yml."""
+"""The newest compatible dependencies on every installer run (DECISIONS round 65): scripts/fresh_deps.py (cooldown
+exceptions, the fresh resolve, pip-audit as CI runs it, the self-check), install.bat's flow (install.sh runs its flow
+in tests/test_container_setup.py with fake tools) and the scheduled update run .github/workflows/deps-update.yml."""
 
 import importlib.util
 import os
@@ -48,8 +49,9 @@ def executable(path, text):
 
 def test_the_cutoff_is_now_minus_the_cooldown_in_utc(monkeypatch):
     monkeypatch.setenv("LCF_DEPS_NOW", "2026-11-08T21:00:00Z")
-    assert fresh_deps.rfc3339(fresh_deps.cutoff({"tool": {"uv": {"exclude-newer": "5 days"}}})) == "2026-11-03T21:00:00Z"
-    assert fresh_deps.cooldown_days({}) == 5 and fresh_deps.cooldown_days({"tool": {"uv": {"exclude-newer": "7 days"}}}) == 7
+    five, seven = {"tool": {"uv": {"exclude-newer": "5 days"}}}, {"tool": {"uv": {"exclude-newer": "7 days"}}}
+    assert fresh_deps.rfc3339(fresh_deps.cutoff(five)) == "2026-11-03T21:00:00Z"
+    assert fresh_deps.cooldown_days({}) == 5 and fresh_deps.cooldown_days(seven) == 7
 
 
 def test_an_exception_the_cooldown_has_passed_is_dropped_and_nothing_else_changes(tmp_path, monkeypatch):
@@ -213,7 +215,60 @@ def test_the_self_check_imports_every_direct_dependency():
     assert sorted(v for v in imports.values() if v) == sorted(fresh_deps.DEPENDENCY_IMPORTS)
 
 
-# --- the scheduled update run ------------------------------------------------------------------------------------------
+# --- install.bat: the same flow in PowerShell ------------------------------------------------------------------------
+
+def bat_venv_step():
+    text = (REPO_ROOT / "install.bat").read_text(encoding="utf-8")
+    return text, text[text.index("# 4. VENV SETUP"):text.index("# 5. LAUNCHER")]
+
+
+def test_install_bat_resolves_fresh_audits_installs_checks_and_rolls_back():
+    text, step = bat_venv_step()
+    order = ["fresh_deps.py resolve --project $InstallDir --work $FreshDir --out $FreshFile --extra gui",
+             'Rename-Item -Path ".venv" -NewName ".venv.previous"',
+             "if (Install-Venv $FreshFile)",
+             "if (Install-Venv $TestedFile)",
+             "Rename-Item -Path $PreviousVenv -NewName \".venv\""]
+    positions = [step.index(part) for part in order]
+    assert positions == sorted(positions), "resolve, keep the earlier venv aside, fresh, tested, restore"
+    # fresh resolve ok: the fresh set; each failure says why and takes the tested lock
+    assert "if (($ResolveCode -eq 0) -and (Test-Path $FreshFile)) {\n        $UseFresh = $true" in step
+    assert "($ResolveCode -eq 4)" in step and "bekannte Schwachstelle" in step               # audit finding
+    assert "($ResolveCode -eq 5)" in step and "pip-audit liess sich nicht ausfuehren" in step
+    assert "Der neueste Stand liess sich nicht ermitteln (offline, Paketindex nicht erreichbar" in step
+    # a failed install or self-check of the fresh set rolls back to the tested lock
+    assert "bestand die Selbstpruefung nicht (oben). Zurueck zum mitgelieferten, getesteten Stand (uv.lock)." in step
+    # the self-check runs in every new environment, with the GUI; its answer is the function's only output
+    install_venv = step[step.index("function Install-Venv"):step.index("$UseFresh = $false")]
+    assert "& $PythonVenv scripts\\fresh_deps.py selfcheck --root . --gui | Out-Host" in install_venv
+    assert "return ($LASTEXITCODE -eq 0)" in install_venv
+    assert "& $Pip install --require-hashes --no-deps -r $ReqFile | Out-Null" in install_venv
+    # offline: nothing resolved, the tested lock
+    assert '$Offline = ($env:LCF_OFFLINE -eq "1")' in text
+    assert 'if ($InstallArg -eq "--offline") { $Offline = $true }' in text
+    offline = step[step.index("if ($Offline) {"):step.index("} else {", step.index("if ($Offline) {"))]
+    assert "fresh_deps.py resolve" not in offline and "getestete Stand (uv.lock)" in offline
+    # the earlier environment is removed only after the new one passed
+    assert step.rindex("Remove-Item -Recurse -Force $PreviousVenv") > step.index("if (Install-Venv $TestedFile)")
+    raw = (REPO_ROOT / "install.bat").read_bytes().decode("utf-8")
+    assert "\r\n" in raw and "\n" not in raw.replace("\r\n", ""), "cmd needs CRLF line endings"
+
+
+def test_install_sh_and_install_bat_say_the_same_cases():
+    sh = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+    _, bat = bat_venv_step()
+    umlauts = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss", "Ä": "Ae", "Ö": "Oe", "Ü": "Ue"})
+    for phrase in ("bekannte Schwachstelle (oben); installiert wird der mitgelieferte, getestete Stand (uv.lock).",
+                   "Der neueste Stand ließ sich nicht ermitteln (offline, Paketindex nicht erreichbar oder keine "
+                   "Auflösung; oben)",
+                   "Der neueste Stand ließ sich nicht installieren oder bestand die Selbstprüfung nicht (oben).",
+                   "Offline (--offline): Es wird nichts neu aufgelöst",
+                   "Die bisherige Umgebung ist unverändert wieder da"):
+        assert phrase in sh, phrase
+        assert phrase.translate(umlauts) in bat, phrase
+
+
+# --- the scheduled update run ----------------------------------------------------------------------------------------
 
 def test_the_scheduled_update_run_lands_only_when_green():
     path = REPO_ROOT / ".github" / "workflows" / "deps-update.yml"

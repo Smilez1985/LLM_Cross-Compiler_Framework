@@ -849,8 +849,10 @@ class TestPython:
 
     def test_the_virtual_environment_is_made_with_that_python(self, tmp_path):
         text = INSTALL_SH.read_text(encoding="utf-8")
-        venv = text[text.index("setup_venv() {"):text.index("# --- SCHRITT 4")]
-        assert 'local python="${PYTHON:-python3}"' in venv and '"$python" -m venv .venv' in venv
+        venv = text[text.index("# --- SCHRITT 3"):text.index("# --- SCHRITT 4")]
+        # the environment and the fresh resolve (scripts/fresh_deps.py --python) use the Python setup_system found
+        assert 'VENV_PYTHON="${PYTHON:-python3}"' in venv and '"$2" -m venv .venv' in venv
+        assert '"$VENV_PYTHON" "$INSTALL_DIR/$FRESH_DIR_NAME"' not in venv and '--python "$VENV_PYTHON"' in venv
         assert "python3 -m venv" not in venv
 
     def test_no_fitting_python_stops(self, tmp_path):

@@ -197,20 +197,29 @@ def test_exports_say_how_they_are_made():
         "the base export has no Qt"
 
 
-def test_installers_install_only_the_hash_pinned_requirements_of_this_checkout():
-    """The desktop installers install the GUI too (requirements-gui.txt, A3); install.sh --headless (a server, the
-    framework image without --gui) installs requirements.txt, without Qt. Each from the hash-pinned export only, and
+def test_installers_install_only_hash_pinned_exports():
+    """Round 65: the newest compatible set, resolved fresh and exported with hashes (scripts/fresh_deps.py), or the
+    tested export of this checkout when that fails. The desktop installers install the GUI too (requirements-gui.txt,
+    A3); install.sh --headless (a server, the framework image without --gui) installs requirements.txt, without Qt.
+    Each from a hash-pinned export only, and
     nothing else: no "pip install --upgrade pip", which fetched the newest pip without a checksum (round 23, item 3:
     the installers download nothing unchecked; the venv keeps the pip that comes with Python)."""
     for name in ("install.sh", "install.bat"):
         text = (REPO_ROOT / name).read_text(encoding="utf-8")
         installs = re.findall(r"pip(?:\.exe)?\"?\)? install [^\r\n|>]*", text.replace("$Pip", "pip"))
         # --no-deps: the export is complete (every package, every hash), so pip installs exactly that set and does not
-        # resolve again (pyproject.toml [tool.uv] overrides one upstream cap: Pillow)
-        assert installs and all(
-            re.search(r'--require-hashes --no-deps -r "?(\$REQUIREMENTS|requirements(-gui)?\.txt)\b', i)
-            for i in installs), (name, installs)
+        # resolve again. The one install takes a file argument ("$3" in install.sh, $ReqFile in install.bat): the
+        # fresh export or the tested one, both with hashes (round 65).
+        assert len(installs) == 1 and re.search(r'--require-hashes --no-deps -r ("\$3"|\$ReqFile)', installs[0]), \
+            (name, installs)
         assert "requirements-gui.txt" in text, f"{name} installs the GUI"
+    sh = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+    assert re.findall(r"\bvenv_from \"[^\"]+\"", sh) == ['venv_from "$FRESH_REQUIREMENTS"',
+                                                         'venv_from "$INSTALL_DIR/$REQUIREMENTS"']
+    bat = (REPO_ROOT / "install.bat").read_text(encoding="utf-8")
+    assert re.findall(r"\bInstall-Venv \$\w+", bat) == ["Install-Venv $FreshFile", "Install-Venv $TestedFile"]
+    # the fresh file is only what fresh_deps.py resolve wrote: uv export with hashes, after pip-audit
+    assert 'FRESH_REQUIREMENTS="$work/requirements-fresh.txt"' in sh and "--out $FreshFile" in bat
     assert re.search(r'REQUIREMENTS="requirements\.txt"', (REPO_ROOT / "install.sh").read_text(encoding="utf-8")), \
         "install.sh --headless installs the base export"
 

@@ -835,57 +835,176 @@ class TestInstallShInAContainer:
         _stub(stubs, "runuser")
         if with_sudo:
             _stub(stubs, "sudo")
-        for tool in ("bash", "cat", "sed", "date"):
+        for tool in ("bash", "cat", "sed", "date", "rm", "mv", "mkdir"):
             if shutil.which(tool):
                 (stubs / tool).symlink_to(shutil.which(tool))
+        (tmp_path / "requirements-gui.txt").write_text("pyyaml==6.0.3\n")
         run = subprocess.run(["/bin/bash", "-c", 'source "$1"; INSTALL_DIR="$2"; setup_venv', "test", str(INSTALL_SH),
                               str(tmp_path)], env={"PATH": str(stubs), "HOME": str(tmp_path), "SUDO_USER": "lcf"},
-                             capture_output=True, text=True, timeout=60)
+                             capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
         assert run.returncode == 0, run.stdout + run.stderr
-        calls = (stubs / "calls.log").read_text()
-        expected = "sudo -u lcf bash" if with_sudo else "runuser -u lcf -- bash"
-        assert calls.splitlines() == [expected]
+        calls = (stubs / "calls.log").read_text().splitlines()
+        expected = "sudo -u lcf " if with_sudo else "runuser -u lcf -- "
+        # every step as the person who installs: the work folder, the fresh resolve, the environment
+        heads = [call for call in calls if call.startswith(("sudo ", "runuser "))]
+        assert len(heads) == 3 and all(call.startswith(expected) for call in heads), calls
+        assert "fresh_deps.py resolve" in heads[1] and heads[2] == expected + "bash -c ", heads
 
-    @pytest.mark.parametrize("headless", ["0", "1"], ids=["gui", "headless"])
-    @pytest.mark.parametrize("failing", ["pip", "venv", None])
-    def test_a_failed_python_environment_stops_the_installation(self, tmp_path, failing, headless):
-        """Before, a pip install that could not reach the index (or a missing venv module) still ended with
-        "Installation abgeschlossen", and the container builder reported a built image with an empty .venv. With the
-        GUI (the default) the installer installs requirements-gui.txt, with --headless (LCF_HEADLESS=1, the
-        framework image without --gui) requirements.txt (chain qt)."""
-        wanted = "requirements.txt" if headless == "1" else "requirements-gui.txt"
+
+VENV_FAKES = r"""
+#!/bin/sh
+# The installer's Python (python3) for the venv flow: "-m venv DIR" makes fake pip and python, "fresh_deps.py
+# resolve" answers as FAKE_RESOLVE says. The fake pip logs each install; the fake python's self-check fails as
+# FAKE_SELFCHECK says (fresh: only the fresh set, all: every set).
+if [ "$1" = "-m" ] && [ "$2" = venv ]; then
+    [ "${FAKE_VENV:-ok}" = fail ] && { echo "No module named venv" >&2; exit 1; }
+    mkdir -p "$3/bin"
+    cat > "$3/bin/pip" <<'EOF'
+#!/bin/sh
+echo "$*" >> pip.log
+if [ -n "${FAKE_PIP_FAILS:-}" ]; then
+    case "$*" in *"/$FAKE_PIP_FAILS") echo "No matching distribution found" >&2; exit 1 ;; esac
+fi
+exit 0
+EOF
+    cat > "$3/bin/python" <<'EOF'
+#!/bin/sh
+echo "$*" >> selfcheck.log
+last="$(tail -n 1 pip.log)"
+case "$FAKE_SELFCHECK:$last" in
+    all:*|fresh:*requirements-fresh.txt) echo "self-check failed: imports: import pypdf: ImportError" ; exit 1 ;;
+esac
+echo "self-check passed"
+EOF
+    chmod +x "$3/bin/pip" "$3/bin/python"
+    exit 0
+fi
+case "$1" in
+    *fresh_deps.py)
+        echo "$*" >> "$FAKE_LOG"
+        out=""; prev=""
+        for a in "$@"; do [ "$prev" = "--out" ] && out="$a"; prev="$a"; done
+        case "${FAKE_RESOLVE:-ok}" in
+            ok) echo "pyyaml==6.0.4" > "$out"; echo "newer than the tested lock: 1"; exit 0 ;;
+            offline) echo "uv lock --upgrade: error: Failed to fetch: https://pypi.org/simple/pyyaml/"; exit 3 ;;
+            audit) echo "Found 1 known vulnerability in 1 package"; exit 4 ;;
+            no-audit) echo "pip-audit could not run: connection refused"; exit 5 ;;
+        esac ;;
+esac
+exit 2
+""".lstrip()
+
+
+@needs_bash
+class TestInstallShFreshDependencies:
+    """Round 65: every installer run resolves the newest compatible set (uv, cooldown), audits it, installs it with
+    hashes and checks it; any failure rolls back to the shipped tested lock, and the earlier .venv stays aside until
+    the new one passed (or comes back unchanged when nothing works)."""
+
+    def _run(self, tmp_path, headless="0", previous=False, **fake):
         stubs = tmp_path / "bin"
         stubs.mkdir()
-        # runuser -u lcf -- bash: runs the script it gets on stdin, as the installer's own user here.
+        # runuser -u lcf -- CMD...: runs CMD as the installer's own user here.
         (stubs / "runuser").write_text('#!/bin/sh\nshift 3\nexec "$@"\n')
-        (stubs / "python3").write_text(
-            '#!/bin/sh\n'
-            f'[ "{failing}" = venv ] && {{ echo "No module named venv" >&2; exit 1; }}\n'
-            'mkdir -p .venv/bin\n'
-            f'printf \'#!/bin/sh\\necho "$*" >> pip.log\\ncase "$*" in *"-r {wanted}"*) [ "{failing}" = pip ] && '
-            '{ echo "No matching distribution found" >&2; exit 1; } ;; esac\\nexit 0\\n\' > .venv/bin/pip\n'
-            'chmod +x .venv/bin/pip\n')
+        (stubs / "python3").write_text(VENV_FAKES)
         for name in ("runuser", "python3"):
             (stubs / name).chmod(0o755)
         install_dir = tmp_path / "opt"
         install_dir.mkdir()
         (install_dir / "requirements.txt").write_text("pyyaml==6.0.3\n")
         (install_dir / "requirements-gui.txt").write_text("pyyaml==6.0.3\npyside6-essentials==6.12.0\n")
-        env = {"PATH": f"{stubs}:/usr/bin:/bin", "HOME": str(tmp_path), "SUDO_USER": "lcf", "LCF_HEADLESS": headless}
+        if previous:
+            (install_dir / ".venv" / "bin").mkdir(parents=True)
+            (install_dir / ".venv" / "bin" / "marker").write_text("the earlier environment")
+        env = {"PATH": f"{stubs}:/usr/bin:/bin", "HOME": str(tmp_path), "SUDO_USER": "lcf", "LCF_HEADLESS": headless,
+               "FAKE_LOG": str(tmp_path / "resolve.log"), **{f"FAKE_{k.upper()}": v for k, v in fake.items()}}
+        if fake.get("offline_flag"):
+            env["LCF_OFFLINE"] = "1"
         # No sudo on this PATH, so the installer takes runuser.
         script = ('source "$1"; INSTALL_DIR="$2"; command() { if [ "$2" = sudo ]; then return 1; fi; '
                   'builtin command "$@"; }; setup_venv; echo "AFTER setup_venv"')
         run = subprocess.run(["/bin/bash", "-c", script, "test", str(INSTALL_SH), str(install_dir)], env=env,
-                             capture_output=True, text=True, timeout=60)
-        if failing is None:
-            assert run.returncode == 0 and "AFTER setup_venv" in run.stdout, run.stdout + run.stderr
-            installs = [line for line in (install_dir / "pip.log").read_text().splitlines() if "--upgrade" not in line]
-            # --no-deps: the complete export as it is, never resolved again (the hashes pin every package)
-            assert installs == [f"install --require-hashes --no-deps -r {wanted}"]
-            return
-        assert run.returncode != 0, run.stdout + run.stderr
+                             capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+        log = install_dir / "pip.log"
+        installs = log.read_text().splitlines() if log.exists() else []
+        return run, install_dir, installs
+
+    @staticmethod
+    def _fresh(install_dir):
+        return f"install --require-hashes --no-deps -r {install_dir}/.deps-fresh/requirements-fresh.txt"
+
+    @pytest.mark.parametrize("headless", ["0", "1"], ids=["gui", "headless"])
+    def test_the_fresh_set_is_resolved_audited_installed_and_checked(self, tmp_path, headless):
+        run, install_dir, installs = self._run(tmp_path, headless=headless, previous=True)
+        out = run.stdout + run.stderr
+        assert run.returncode == 0 and "AFTER setup_venv" in run.stdout, out
+        assert installs == [self._fresh(install_dir)], installs
+        resolve = (tmp_path / "resolve.log").read_text()
+        assert f"resolve --project {install_dir} --work {install_dir}/.deps-fresh" in resolve
+        assert ("--extra gui" in resolve) == (headless == "0")
+        checks = (install_dir / "selfcheck.log").read_text().splitlines()
+        assert checks == ["scripts/fresh_deps.py selfcheck --root ." + (" --gui" if headless == "0" else "")]
+        assert "neuesten verträglichen Versionen sind installiert" in out
+        # the earlier environment was kept aside until the new one passed, then removed; the work folder too
+        assert (install_dir / ".venv" / "bin" / "pip").exists() and not (install_dir / ".venv" / "bin" / "marker").exists()
+        assert not (install_dir / ".venv.previous").exists() and not (install_dir / ".deps-fresh").exists()
+
+    @pytest.mark.parametrize("resolve,reason", [
+        ("audit", "pip-audit fand im neuesten Stand eine bekannte Schwachstelle"),
+        ("no-audit", "pip-audit ließ sich nicht ausführen"),
+        ("offline", "Der neueste Stand ließ sich nicht ermitteln (offline, Paketindex nicht erreichbar"),
+    ])
+    def test_an_audit_finding_or_no_index_installs_the_tested_lock(self, tmp_path, resolve, reason):
+        run, install_dir, installs = self._run(tmp_path, resolve=resolve)
+        out = run.stdout + run.stderr
+        assert run.returncode == 0 and "AFTER setup_venv" in run.stdout, out
+        assert installs == ["install --require-hashes --no-deps -r " + str(install_dir / "requirements-gui.txt")]
+        assert reason in out and "der mitgelieferte, getestete Stand (uv.lock)" in out
+        assert "Der mitgelieferte, getestete Stand (uv.lock) ist installiert und selbstgeprüft." in out
+
+    def test_a_failed_self_check_rolls_back_to_the_tested_lock(self, tmp_path):
+        run, install_dir, installs = self._run(tmp_path, previous=True, selfcheck="fresh")
+        out = run.stdout + run.stderr
+        assert run.returncode == 0 and "AFTER setup_venv" in run.stdout, out
+        assert installs == [self._fresh(install_dir),
+                            "install --require-hashes --no-deps -r " + str(install_dir / "requirements-gui.txt")]
+        assert "bestand die Selbstprüfung nicht" in out and "Zurück zum mitgelieferten, getesteten Stand" in out
+        assert "self-check failed: imports: import pypdf" in out
+        assert not (install_dir / ".venv.previous").exists() and (install_dir / ".venv" / "bin" / "pip").exists()
+
+    def test_a_fresh_set_pip_cannot_install_rolls_back_too(self, tmp_path):
+        run, install_dir, installs = self._run(tmp_path, pip_fails="requirements-fresh.txt")
+        assert run.returncode == 0 and "AFTER setup_venv" in run.stdout, run.stdout + run.stderr
+        assert installs[-1] == "install --require-hashes --no-deps -r " + str(install_dir / "requirements-gui.txt")
+
+    def test_offline_installs_the_tested_lock_without_resolving(self, tmp_path):
+        run, install_dir, installs = self._run(tmp_path, offline_flag="1")
+        out = run.stdout + run.stderr
+        assert run.returncode == 0 and "AFTER setup_venv" in run.stdout, out
+        assert not (tmp_path / "resolve.log").exists(), "offline: nothing is resolved"
+        assert installs == ["install --require-hashes --no-deps -r " + str(install_dir / "requirements-gui.txt")]
+        assert "Offline (--offline)" in out
+
+    @pytest.mark.parametrize("headless", ["0", "1"], ids=["gui", "headless"])
+    @pytest.mark.parametrize("failing", ["pip", "venv", "selfcheck"])
+    def test_a_failed_python_environment_stops_the_installation_and_keeps_the_earlier_one(self, tmp_path, failing,
+                                                                                          headless):
+        """Before, a pip install that could not reach the index (or a missing venv module) still ended with
+        "Installation abgeschlossen", and the container builder reported a built image with an empty .venv. Now the
+        tested lock is the last way: when it fails too, the installation stops and the earlier .venv comes back as it
+        was. With the GUI (the default) the tested lock is requirements-gui.txt, with --headless requirements.txt."""
+        wanted = "requirements.txt" if headless == "1" else "requirements-gui.txt"
+        fake = {"pip": {"pip_fails": wanted}, "venv": {"venv": "fail"}, "selfcheck": {"selfcheck": "all"}}[failing]
+        run, install_dir, installs = self._run(tmp_path, headless=headless, previous=True, resolve="offline", **fake)
+        out = run.stdout + run.stderr
+        assert run.returncode != 0, out
         assert "AFTER setup_venv" not in run.stdout, "the installer went on as if the environment existed"
-        assert ".venv ließ sich nicht einrichten" in run.stdout
+        assert ".venv ließ sich nicht einrichten" in out
+        assert (install_dir / ".venv" / "bin" / "marker").read_text() == "the earlier environment"
+        assert "Die bisherige Umgebung ist unverändert wieder da" in out
+        assert not (install_dir / ".venv.previous").exists() and not (install_dir / ".deps-fresh").exists()
+        if failing != "venv":
+            assert installs == [f"install --require-hashes --no-deps -r {install_dir / wanted}"]
 
     @needs_git
     def test_the_listing_without_git_keeps_nested_build_folders(self, tmp_path):

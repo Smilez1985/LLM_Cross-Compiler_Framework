@@ -1737,43 +1737,123 @@ old_installation_note() {
 }
 
 # --- SCHRITT 3: PYTHON VENV ---
+# Die Abhängigkeiten (DECISIONS Runde 65): Jeder Lauf, auch jede Aktualisierung, löst die neuesten verträglichen
+# Versionen frisch auf (uv lock --upgrade in einer Kopie, in den Bereichen aus pyproject.toml und mit 5 Tagen
+# Wartezeit), prüft sie mit pip-audit, installiert sie mit Hashes und prüft die neue Umgebung selbst
+# (scripts/fresh_deps.py selfcheck: pip check, jede Abhängigkeit und die Kernmodule importieren, llm-cli --help).
+# Scheitert einer dieser Schritte, kommt der mitgelieferte, getestete Stand (uv.lock, exportiert als
+# requirements-gui.txt bzw. requirements.txt). Offline (--offline oder LCF_OFFLINE=1) oder ohne erreichbaren Index
+# gleich der getestete Stand. Die bisherige .venv bleibt beiseite (.venv.previous), bis die neue die Selbstprüfung
+# bestanden hat; scheitert auch der getestete Stand, kommt sie unverändert zurück.
+OFFLINE="${LCF_OFFLINE:-0}"
+FRESH_DIR_NAME=".deps-fresh"
+PREVIOUS_VENV_NAME=".venv.previous"
+
+# Baut $INSTALL_DIR/.venv als die Person, die installiert, aus der Datei $1 (mit Hashes, --no-deps) und prüft sie
+# selbst. Die Befehle laufen in einer eigenen bash; Pfade gehen als Argumente hinein, nie in den Befehlstext.
+venv_from() {
+    local file="$1" gui=""
+    if [ "$HEADLESS" != "1" ]; then gui="--gui"; fi
+    rm -rf "$INSTALL_DIR/.venv"
+    "${VENV_AS_USER[@]}" bash -c '
+        set -e
+        cd "$1"
+        "$2" -m venv .venv
+        # Das pip der Umgebung ist das, was mit Python kommt (ensurepip). Es wird nicht aktualisiert: Das lüde die
+        # neueste Version von pip ohne Prüfsumme, und das mitgelieferte genügt für --require-hashes.
+        # --no-deps: die Datei ist ein vollständiger Export (jedes Paket, jeder Hash); pip löst nicht neu auf.
+        ./.venv/bin/pip install --require-hashes --no-deps -r "$3" > /dev/null
+        ./.venv/bin/python scripts/fresh_deps.py selfcheck --root . $4
+    ' venv "$INSTALL_DIR" "$VENV_PYTHON" "$file" "$gui"
+}
+
+# Die neuesten verträglichen Versionen in $INSTALL_DIR/$FRESH_DIR_NAME/requirements-fresh.txt (geprüft); setzt
+# FRESH_REQUIREMENTS, leer, wenn der getestete Stand kommt (der Grund steht dabei).
+FRESH_REQUIREMENTS=""
+resolve_fresh() {
+    local work="$INSTALL_DIR/${FRESH_DIR_NAME:?}" extra=() rc=0
+    FRESH_REQUIREMENTS=""
+    if [ "$HEADLESS" != "1" ]; then extra=(--extra gui); fi
+    rm -rf "$work"
+    if [ "$OFFLINE" = "1" ]; then
+        log_warn "Offline (--offline): Es wird nichts neu aufgelöst; installiert wird der mitgelieferte, getestete Stand (uv.lock)."
+        return 0
+    fi
+    log_info "Suche die neuesten verträglichen Versionen (uv, 5 Tage Wartezeit) und prüfe sie (pip-audit)..."
+    "${VENV_AS_USER[@]}" mkdir -p "$work" || rc=2
+    if [ "$rc" = "0" ]; then
+        "${VENV_AS_USER[@]}" "$VENV_PYTHON" "$INSTALL_DIR/scripts/fresh_deps.py" resolve --project "$INSTALL_DIR" \
+            --work "$work" --out "$work/requirements-fresh.txt" ${extra[@]+"${extra[@]}"} --python "$VENV_PYTHON" \
+            || rc=$?
+    fi
+    if [ "$rc" = "0" ] && [ -s "$work/requirements-fresh.txt" ]; then
+        FRESH_REQUIREMENTS="$work/requirements-fresh.txt"
+        return 0
+    fi
+    case "$rc" in
+        4) log_warn "pip-audit fand im neuesten Stand eine bekannte Schwachstelle (oben); installiert wird der mitgelieferte, getestete Stand (uv.lock)." ;;
+        5) log_warn "pip-audit ließ sich nicht ausführen (oben); ungeprüft wird nichts installiert, also der mitgelieferte, getestete Stand (uv.lock)." ;;
+        *) log_warn "Der neueste Stand ließ sich nicht ermitteln (offline, Paketindex nicht erreichbar oder keine Auflösung; oben); installiert wird der mitgelieferte, getestete Stand (uv.lock)." ;;
+    esac
+}
+
 setup_venv() {
     log_info "[3/5] Erstelle Python Environment (VENV)..."
-    
+
     # Wir führen dies als REAL_USER aus, damit das Venv nicht root gehört
     REAL_USER="${SUDO_USER:-$USER}"
     # sudo fehlt auf minimalen Systemen (und im Framework-Image); runuser (util-linux) tut dort dasselbe.
-    local as_user=(sudo -u "$REAL_USER")
-    if ! command -v sudo &> /dev/null; then as_user=(runuser -u "$REAL_USER" --); fi
-    
+    VENV_AS_USER=(sudo -u "$REAL_USER")
+    if ! command -v sudo &> /dev/null; then VENV_AS_USER=(runuser -u "$REAL_USER" --); fi
+
     # Mit grafischer Oberfläche requirements-gui.txt (Basis plus PySide6), mit --headless nur requirements.txt.
     REQUIREMENTS="requirements-gui.txt"
     if [ "$HEADLESS" = "1" ]; then REQUIREMENTS="requirements.txt"; fi
     # Das Python, das setup_system gefunden hat (auf RHEL 9 etwa python3.12), sonst python3.
-    local python="${PYTHON:-python3}"
+    VENV_PYTHON="${PYTHON:-python3}"
+    local previous="$INSTALL_DIR/$PREVIOUS_VENV_NAME" installed=""
 
-    # Scheitert ein Schritt (kein venv, ein Paket nicht erreichbar), bricht die Installation ab: Sonst meldete sie
-    # "abgeschlossen" mit einer leeren Umgebung, und ein Container-Image würde trotzdem gebaut.
-    if ! "${as_user[@]}" bash <<EOF
-    set -e
-    cd "$INSTALL_DIR"
-    "$python" -m venv .venv
-    # Das pip der Umgebung ist das, was mit Python kommt (ensurepip). Es wird nicht aktualisiert: Das lüde die neueste
-    # Version von pip ohne Prüfsumme, und das mitgelieferte genügt für die Installation mit --require-hashes unten.
-
-    # Genau die Versionen aus $REQUIREMENTS dieses Stands (uv export aus uv.lock); pip prüft jede Datei gegen
-    # ihren Hash. Ohne die Datei wird nichts ungeprüft nachinstalliert.
-    echo "Installiere Abhängigkeiten ($REQUIREMENTS)..."
-    if [ ! -f "$REQUIREMENTS" ]; then
-        echo "$REQUIREMENTS fehlt in $INSTALL_DIR; ohne die festgelegten Versionen wird nichts installiert." >&2
-        exit 1
+    # Ohne den getesteten Stand wird nichts installiert: Er ist der Rückweg für jeden Fehler.
+    if [ ! -f "$INSTALL_DIR/$REQUIREMENTS" ]; then
+        log_error "$REQUIREMENTS fehlt in $INSTALL_DIR; ohne die festgelegten Versionen wird nichts installiert."
     fi
-    # --no-deps: $REQUIREMENTS is the complete export of uv.lock (every package, every hash), so pip installs exactly
-    # that set and does not resolve again (pyproject.toml [tool.uv] overrides one upstream cap: Pillow).
-    ./.venv/bin/pip install --require-hashes --no-deps -r "$REQUIREMENTS" > /dev/null
-EOF
-    then
-        log_error "Die Python-Umgebung in $INSTALL_DIR/.venv ließ sich nicht einrichten (Meldungen oben); die Installation ist nicht fertig. Proxy oder eigener Spiegel: sudo -E ./install.sh bzw. PIP_INDEX_URL."
+
+    resolve_fresh
+
+    # Die bisherige Umgebung beiseite, bis die neue die Selbstprüfung bestanden hat (eine venv kennt ihren Pfad, darum
+    # entsteht die neue an ihrem Platz und die alte wartet daneben).
+    rm -rf "$previous"
+    if [ -d "$INSTALL_DIR/.venv" ] && ! mv "$INSTALL_DIR/.venv" "$previous"; then
+        log_error "Die bisherige Umgebung $INSTALL_DIR/.venv ließ sich nicht beiseitelegen; nichts verändert."
+    fi
+
+    if [ -n "$FRESH_REQUIREMENTS" ]; then
+        echo "Installiere die neuesten verträglichen Versionen (geprüft mit pip-audit)..."
+        if venv_from "$FRESH_REQUIREMENTS"; then
+            installed="fresh"
+        else
+            log_warn "Der neueste Stand ließ sich nicht installieren oder bestand die Selbstprüfung nicht (oben). Zurück zum mitgelieferten, getesteten Stand (uv.lock)."
+        fi
+    fi
+    if [ -z "$installed" ]; then
+        echo "Installiere Abhängigkeiten ($REQUIREMENTS, der getestete Stand)..."
+        if venv_from "$INSTALL_DIR/$REQUIREMENTS"; then
+            installed="tested"
+        else
+            # Scheitert eine Umgebung (kein venv, ein Paket nicht erreichbar), bricht die Installation ab: Sonst
+            # meldete sie "abgeschlossen" mit einer leeren Umgebung, und ein Container-Image würde trotzdem gebaut.
+            rm -rf "$INSTALL_DIR/.venv" "$INSTALL_DIR/${FRESH_DIR_NAME:?}"
+            if [ -d "$previous" ] && mv "$previous" "$INSTALL_DIR/.venv"; then
+                log_warn "Die bisherige Umgebung ist unverändert wieder da ($INSTALL_DIR/.venv)."
+            fi
+            log_error "Die Python-Umgebung in $INSTALL_DIR/.venv ließ sich nicht einrichten (Meldungen oben); die Installation ist nicht fertig. Proxy oder eigener Spiegel: sudo -E ./install.sh bzw. PIP_INDEX_URL."
+        fi
+    fi
+    rm -rf "$previous" "$INSTALL_DIR/${FRESH_DIR_NAME:?}"
+    if [ "$installed" = "fresh" ]; then
+        log_success "Die neuesten verträglichen Versionen sind installiert, mit pip-audit geprüft und selbstgeprüft."
+    else
+        log_success "Der mitgelieferte, getestete Stand (uv.lock) ist installiert und selbstgeprüft."
     fi
 }
 
@@ -1804,6 +1884,7 @@ ditto_option() {
             --rootful) ROOTFUL=1 ;;
             --engine=*) ENGINE_CHOICE="${arg#--engine=}" ;;
             --mode=*) MODE_CHOICE="${arg#--mode=}" ;;
+            --offline) OFFLINE=1 ;;
         esac
     done
     case "$MODE_CHOICE" in
@@ -2053,7 +2134,8 @@ plan_installation() {
         echo "   rsync: fehlt -> ${PKG_ARGV[*]} rsync"
     fi
     plan_sevenzip
-    echo "   Danach: Programmdateien nach $INSTALL_DIR, .venv mit $requirements (${PYTHON:-dem eben installierten Python}), Starter /usr/local/bin/llm-framework, Ditto ($DITTO_CHOICE)"
+    echo "   Danach: Programmdateien nach $INSTALL_DIR, .venv (${PYTHON:-dem eben installierten Python}) mit den neuesten verträglichen Versionen (uv, 5 Tage Wartezeit, pip-audit, Selbstprüfung; sonst $requirements, der getestete Stand), Starter /usr/local/bin/llm-framework, Ditto ($DITTO_CHOICE)"
+    if [ "$OFFLINE" = "1" ]; then echo "   Offline (--offline): ohne neue Auflösung, gleich $requirements"; fi
     echo "   Framework-Modus: ${MODE_CHOICE:-wird gefragt (ohne Terminal: bleibt, wie er ist; neu: privat)}"
     log_success "Probelauf fertig: Die Installation liefe hier durch."
 }

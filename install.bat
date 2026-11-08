@@ -82,6 +82,12 @@ foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
 if ($ModeChoice -notin @("", "private", "enterprise")) {
     Write-Error "Unbekannter Wert fuer --mode: '$ModeChoice' (private oder enterprise)."
 }
+# Dependencies (DECISIONS round 65): every run resolves the newest compatible versions fresh (step [3/5]); --offline (for
+# unattended runs also LCF_OFFLINE=1) installs the shipped tested lock without resolving.
+$Offline = ($env:LCF_OFFLINE -eq "1")
+foreach ($InstallArg in (("" + $env:LCF_INSTALL_ARGS) -split '\s+')) {
+    if ($InstallArg -eq "--offline") { $Offline = $true }
+}
 # On an update the default is the current mode (read like every setting, with the earlier installation's Python and
 # the mode's one reader, ConfigManager and framework_mode): Enter alone keeps it ([p/E] for enterprise); a fresh
 # install has private as its default ([P/e]).
@@ -164,23 +170,100 @@ Copy-Robust $ScriptPath $InstallDir -Exclude ".git", ".venv", "__pycache__", "bu
 Write-Host "[3/5] Erstelle Python Environment..." -ForegroundColor Yellow
 Set-Location $InstallDir
 
-# Venv erstellen
-& python -m venv .venv
-if ($LASTEXITCODE -ne 0) { Write-Error "Konnte VENV nicht erstellen." }
-
 $Pip = ".venv\Scripts\pip.exe"
 $PythonVenv = ".venv\Scripts\python.exe"
 
-# Dependencies. The venv's pip is the one that comes with Python (ensurepip) and is not upgraded: that would fetch the
-# newest pip without a checksum, and the bundled one is enough for --require-hashes below.
-Write-Host "Installiere Requirements..."
-# Exactly the versions in requirements-gui.txt of this checkout (uv export from uv.lock, the base packages plus the
-# optional extra 'gui', PySide6: this installer sets up the desktop GUI); pip checks every file against its hash.
-# Without the file nothing is installed unchecked.
-if (-not (Test-Path "requirements-gui.txt")) { Write-Error "requirements-gui.txt fehlt; ohne die festgelegten Versionen wird nichts installiert." }
-# --no-deps: the file is the complete export (every package, every hash); pip installs exactly that set.
-& $Pip install --require-hashes --no-deps -r requirements-gui.txt | Out-Null
-if ($LASTEXITCODE -ne 0) { Write-Error "Die Pakete aus requirements-gui.txt liessen sich nicht installieren (Proxy oder eigener Spiegel: PIP_INDEX_URL)." }
+# Dependencies (DECISIONS round 65). Every run, every update too, resolves the newest compatible versions fresh
+# (scripts\fresh_deps.py resolve: uv lock --upgrade in a copy, inside the ranges of pyproject.toml and with the 5-day
+# cooldown), audits them with pip-audit, installs them with hashes and checks the new environment itself
+# (fresh_deps.py selfcheck: pip check, every dependency and the core modules import, llm-cli --help). When any of
+# these fails, the shipped tested lock comes instead (uv.lock, exported as requirements-gui.txt: the base packages plus
+# the optional extra 'gui', PySide6). Offline (--offline, LCF_OFFLINE=1) or without a reachable index: the tested lock
+# at once. The earlier .venv waits aside (.venv.previous) until the new one passed; when the tested lock fails too, it
+# comes back unchanged. The venv's pip is the one that comes with Python (ensurepip) and is not upgraded: that would
+# fetch the newest pip without a checksum, and the bundled one is enough for --require-hashes.
+$TestedFile = Join-Path $InstallDir "requirements-gui.txt"
+$FreshDir = Join-Path $InstallDir ".deps-fresh"
+$FreshFile = Join-Path $FreshDir "requirements-fresh.txt"
+$PreviousVenv = Join-Path $InstallDir ".venv.previous"
+# Without the tested lock nothing is installed: it is the way back from every failure.
+if (-not (Test-Path $TestedFile)) { Write-Error "requirements-gui.txt fehlt; ohne die festgelegten Versionen wird nichts installiert." }
+
+# Builds .venv from one hash-pinned export and checks it; $true when the self-check passed. Output goes to the
+# console (Out-Host), so the function returns only its answer.
+function Install-Venv ($ReqFile) {
+    if (Test-Path ".venv") { Remove-Item -Recurse -Force ".venv" }
+    & python -m venv .venv | Out-Host
+    if ($LASTEXITCODE -ne 0) { Write-Host "Konnte VENV nicht erstellen."; return $false }
+    # --no-deps: the file is the complete export (every package, every hash); pip installs exactly that set.
+    & $Pip install --require-hashes --no-deps -r $ReqFile | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Host "Die Pakete aus $ReqFile liessen sich nicht installieren (Proxy oder eigener Spiegel: PIP_INDEX_URL)."; return $false }
+    & $PythonVenv scripts\fresh_deps.py selfcheck --root . --gui | Out-Host
+    return ($LASTEXITCODE -eq 0)
+}
+
+$UseFresh = $false
+if (Test-Path $FreshDir) { Remove-Item -Recurse -Force $FreshDir }
+if ($Offline) {
+    Write-Warning "Offline (--offline): Es wird nichts neu aufgeloest; installiert wird der mitgelieferte, getestete Stand (uv.lock)."
+} else {
+    Write-Host "Suche die neuesten vertraeglichen Versionen (uv, 5 Tage Wartezeit) und pruefe sie (pip-audit)..."
+    New-Item -Path $FreshDir -ItemType Directory -Force | Out-Null
+    $SystemPython = (Get-Command "python").Source
+    & python scripts\fresh_deps.py resolve --project $InstallDir --work $FreshDir --out $FreshFile --extra gui --python $SystemPython | Out-Host
+    $ResolveCode = $LASTEXITCODE
+    if (($ResolveCode -eq 0) -and (Test-Path $FreshFile)) {
+        $UseFresh = $true
+    } elseif ($ResolveCode -eq 4) {
+        Write-Warning "pip-audit fand im neuesten Stand eine bekannte Schwachstelle (oben); installiert wird der mitgelieferte, getestete Stand (uv.lock)."
+    } elseif ($ResolveCode -eq 5) {
+        Write-Warning "pip-audit liess sich nicht ausfuehren (oben); ungeprueft wird nichts installiert, also der mitgelieferte, getestete Stand (uv.lock)."
+    } else {
+        Write-Warning "Der neueste Stand liess sich nicht ermitteln (offline, Paketindex nicht erreichbar oder keine Aufloesung; oben); installiert wird der mitgelieferte, getestete Stand (uv.lock)."
+    }
+}
+
+# The earlier environment aside until the new one passed (a venv knows its own path, so the new one is built in its
+# place and the earlier one waits next to it). A running framework holds its files: then nothing is changed.
+if (Test-Path $PreviousVenv) { Remove-Item -Recurse -Force $PreviousVenv }
+if (Test-Path ".venv") {
+    try {
+        Rename-Item -Path ".venv" -NewName ".venv.previous"
+    } catch {
+        Write-Error "Die bisherige Umgebung $InstallDir\.venv liess sich nicht beiseitelegen (laeuft das Framework noch?); nichts veraendert."
+    }
+}
+
+$Installed = ""
+if ($UseFresh) {
+    Write-Host "Installiere die neuesten vertraeglichen Versionen (geprueft mit pip-audit)..."
+    if (Install-Venv $FreshFile) {
+        $Installed = "fresh"
+    } else {
+        Write-Warning "Der neueste Stand liess sich nicht installieren oder bestand die Selbstpruefung nicht (oben). Zurueck zum mitgelieferten, getesteten Stand (uv.lock)."
+    }
+}
+if (-not $Installed) {
+    Write-Host "Installiere Requirements (requirements-gui.txt, der getestete Stand)..."
+    if (Install-Venv $TestedFile) {
+        $Installed = "tested"
+    } else {
+        if (Test-Path ".venv") { Remove-Item -Recurse -Force ".venv" }
+        if (Test-Path $FreshDir) { Remove-Item -Recurse -Force $FreshDir }
+        if (Test-Path $PreviousVenv) {
+            Rename-Item -Path $PreviousVenv -NewName ".venv"
+            Write-Warning "Die bisherige Umgebung ist unveraendert wieder da ($InstallDir\.venv)."
+        }
+        Write-Error "Die Python-Umgebung in $InstallDir\.venv liess sich nicht einrichten (Meldungen oben); die Installation ist nicht fertig. Proxy oder eigener Spiegel: PIP_INDEX_URL."
+    }
+}
+if (Test-Path $PreviousVenv) { Remove-Item -Recurse -Force $PreviousVenv }
+if (Test-Path $FreshDir) { Remove-Item -Recurse -Force $FreshDir }
+if ($Installed -eq "fresh") {
+    Write-Host "Die neuesten vertraeglichen Versionen sind installiert, mit pip-audit geprueft und selbstgeprueft." -ForegroundColor Green
+} else {
+    Write-Host "Der mitgelieferte, getestete Stand (uv.lock) ist installiert und selbstgeprueft." -ForegroundColor Green
+}
 
 # 5. LAUNCHER
 Write-Host "[4/5] Erstelle Launcher..." -ForegroundColor Yellow
