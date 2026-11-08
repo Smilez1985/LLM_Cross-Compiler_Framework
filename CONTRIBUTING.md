@@ -1,4 +1,4 @@
-Version 3.4.0 · Last updated 2026-10-30
+Version 3.4.0 · Last updated 2026-11-08
 
 **English** · [Deutsch](CONTRIBUTING_DE.md)
 
@@ -99,32 +99,47 @@ separate quick-check script.
 
 ## 2. Dependencies
 
-- `pyproject.toml` declares the allowed versions (`[project]`, the dev tools in `[dependency-groups]`), `uv.lock`
-  pins them (the lock file of [uv](https://docs.astral.sh/uv/)).
+- `pyproject.toml` declares the allowed versions (`[project]`, the dev tools and the resolver tools in
+  `[dependency-groups]`), `uv.lock` pins them (the lock file of [uv](https://docs.astral.sh/uv/)).
+- Every dependency is a range from the tested version up to the next major (the 0.x packages whose minor release
+  breaks, such as fastembed, Qdrant Edge, the ACP SDK, ruff and uv: up to the next minor); only `pyrage` stays an exact
+  pin, since it encrypts user data. A new major is a deliberate change of the range, with the tests.
+- The cooldown: `[tool.uv] exclude-newer = "5 days"` lets uv take only versions uploaded at least 5 days ago (uv
+  computes now minus 5 days in UTC at every lock), for every `uv lock` and for `uv lock --check`. A version taken
+  inside its cooldown on purpose goes into `[tool.uv.exclude-newer-package]` with the second after its upload; the
+  scheduled update run and the installers drop such an entry once the cooldown has passed it. Needs uv 0.9 or newer.
 - `requirements.txt` (runtime), `requirements-gui.txt` (runtime plus the optional extra `gui`, PySide6) and
-  `requirements-dev.txt` (dev tools) are exports of `uv.lock` with hashes. Their first lines name the command that
+  `requirements-dev.txt` (dev tools) are exports of `uv.lock` with hashes, and so is `requirements-resolve.txt` (uv
+  and pip-audit, which the installers use for the fresh resolve). Their first lines name the command that
   made them. The installers and the CI install from them: the desktop installers `requirements-gui.txt`,
   `install.sh --headless` and the framework image without `--gui` `requirements.txt`. **Never edit them by hand.**
-- `anthropic`, `openai`, `fastembed` and `mcp` are pinned to exact versions on purpose: LLM tooling is a
-  supply-chain target (see the comments in `pyproject.toml`). If you change such a pin, explain why in the pull
-  request.
 
 After adding, removing or updating a dependency:
 
 ```bash
-uv lock                                         # update uv.lock (other pins stay; one package: --upgrade-package NAME)
+uv lock                                         # update uv.lock (other pins stay; one package: --upgrade-package NAME; all: --upgrade)
 uv lock --check                                 # pyproject.toml and uv.lock agree
 uv export --frozen --format requirements-txt --no-dev --no-emit-project -o requirements.txt
 uv export --frozen --format requirements-txt --no-dev --extra gui --no-emit-project -o requirements-gui.txt
 uv export --frozen --format requirements-txt --only-group dev --no-emit-project -o requirements-dev.txt
+uv export --frozen --format requirements-txt --only-group resolve --no-emit-project -o requirements-resolve.txt
 ```
 
 Then run pip-audit ([section 5](#5-lint-and-security-checks)) and the tests, and commit `pyproject.toml`, `uv.lock`
-and the three requirements files together. The CI job "Lock files" runs the same commands and fails when a file differs.
+and the four requirements files together. The CI job "Lock files" runs the same commands and fails when a file differs.
 
-Dependabot opens weekly pull requests for Python packages (`pyproject.toml` and `uv.lock`), GitHub Actions and the
-target Dockerfiles. It changes only `uv.lock`: run the three export commands on its branch and push the
-requirements files too.
+The scheduled update run (`.github/workflows/deps-update.yml`, Tuesdays and by hand) takes the whole lock forward:
+`uv lock --upgrade` with the cooldown, the four exports, pip-audit and the whole test matrix; only when all are green
+does it push `deps/update` and open a pull request to `development`. Nothing is merged automatically: review and merge
+it like any other pull request. A pull request opened with the workflow's token starts no other workflow, so CI on
+it runs when you start it by hand (or push to the branch); the run that opened it has passed the same tests.
+
+Dependabot opens weekly pull requests for Python packages (`pyproject.toml` and `uv.lock`, with the same 5-day
+cooldown), GitHub Actions and the target Dockerfiles. It changes only `uv.lock`: run the four export commands on its
+branch and push the requirements files too.
+
+The installers resolve fresh on every run as well (`scripts/fresh_deps.py`): the newest compatible set, audited and
+self-checked, else the tested `uv.lock`; see the README's installation section.
 
 ---
 

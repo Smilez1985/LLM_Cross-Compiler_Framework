@@ -1,4 +1,4 @@
-Version 3.4.0 · Stand 2026-10-30
+Version 3.4.0 · Stand 2026-11-08
 
 [English](CONTRIBUTING.md) · **Deutsch**
 
@@ -103,34 +103,52 @@ eigenes Schnellprüf-Skript gibt es nicht.
 
 ## 2. Abhängigkeiten
 
-- `pyproject.toml` legt die erlaubten Versionen fest (`[project]`, die Entwicklungswerkzeuge in
+- `pyproject.toml` legt die erlaubten Versionen fest (`[project]`, die Entwicklungs- und die Auflösungswerkzeuge in
   `[dependency-groups]`), `uv.lock` fixiert sie (die Lock-Datei von [uv](https://docs.astral.sh/uv/)).
+- Jede Abhängigkeit ist ein Bereich von der getesteten Version bis vor die nächste Hauptversion (die 0.x-Pakete, deren
+  Nebenversion bricht, etwa fastembed, Qdrant Edge, das ACP-SDK, ruff und uv: bis vor die nächste Nebenversion); nur
+  `pyrage` bleibt exakt festgelegt, weil es Daten der Person verschlüsselt. Eine neue Hauptversion ist eine bewusste
+  Änderung des Bereichs, mit den Tests.
+- Die Wartezeit: `[tool.uv] exclude-newer = "5 days"` lässt uv nur Versionen nehmen, die vor mindestens 5 Tagen
+  hochgeladen wurden (uv rechnet bei jedem Lock jetzt minus 5 Tage in UTC), für jedes `uv lock` und für
+  `uv lock --check`. Eine Version, die bewusst innerhalb ihrer Wartezeit genommen wird, steht in
+  `[tool.uv.exclude-newer-package]` mit der Sekunde nach ihrem Hochladen; der geplante Update-Lauf und die Installer
+  entfernen einen solchen Eintrag, sobald die Wartezeit sein Datum überholt hat. Braucht uv 0.9 oder neuer.
 - `requirements.txt` (Laufzeit), `requirements-gui.txt` (Laufzeit plus das optionale Extra `gui`, PySide6) und
-  `requirements-dev.txt` (Entwicklungswerkzeuge) sind Exporte von `uv.lock` mit Hashes. Ihre ersten Zeilen nennen den
+  `requirements-dev.txt` (Entwicklungswerkzeuge) sind Exporte von `uv.lock` mit Hashes, ebenso
+  `requirements-resolve.txt` (uv und pip-audit, mit denen die Installer frisch auflösen). Ihre ersten Zeilen nennen den
   Befehl, der sie erzeugt hat. Die Installer und die CI installieren daraus: die Desktop-Installer
   `requirements-gui.txt`, `install.sh --headless` und das Framework-Image ohne `--gui` `requirements.txt`.
   **Bearbeite sie nie von Hand.**
-- `anthropic`, `openai`, `fastembed` und `mcp` sind absichtlich auf exakte Versionen festgelegt: KI-Werkzeuge sind
-  ein Ziel von Angriffen auf die Lieferkette (siehe die Kommentare in `pyproject.toml`). Wenn du eine solche
-  Festlegung änderst, begründe es im Pull-Request.
 
 Nach dem Hinzufügen, Entfernen oder Aktualisieren einer Abhängigkeit:
 
 ```bash
-uv lock                                         # uv.lock aktualisieren (andere Festlegungen bleiben; ein Paket: --upgrade-package NAME)
+uv lock                                         # uv.lock aktualisieren (andere Festlegungen bleiben; ein Paket: --upgrade-package NAME; alle: --upgrade)
 uv lock --check                                 # pyproject.toml und uv.lock passen zusammen
 uv export --frozen --format requirements-txt --no-dev --no-emit-project -o requirements.txt
 uv export --frozen --format requirements-txt --no-dev --extra gui --no-emit-project -o requirements-gui.txt
 uv export --frozen --format requirements-txt --only-group dev --no-emit-project -o requirements-dev.txt
+uv export --frozen --format requirements-txt --only-group resolve --no-emit-project -o requirements-resolve.txt
 ```
 
 Danach pip-audit ([Abschnitt 5](#5-lint--und-sicherheitsprüfungen)) und die Tests ausführen und `pyproject.toml`,
-`uv.lock` und die drei Requirements-Dateien zusammen committen. Der CI-Job "Lock files" führt dieselben Befehle aus und
+`uv.lock` und die vier Requirements-Dateien zusammen committen. Der CI-Job "Lock files" führt dieselben Befehle aus und
 schlägt fehl, wenn eine Datei abweicht.
 
-Dependabot öffnet wöchentlich Pull-Requests für Python-Pakete (`pyproject.toml` und `uv.lock`), GitHub Actions und
-die Dockerfiles der Targets. Es ändert nur `uv.lock`: Führe die drei Export-Befehle auf seinem Branch aus und pushe
-die Requirements-Dateien mit.
+Der geplante Update-Lauf (`.github/workflows/deps-update.yml`, dienstags und von Hand) bringt das ganze Lock voran:
+`uv lock --upgrade` mit der Wartezeit, die vier Exporte, pip-audit und die ganze Testmatrix; nur wenn alles grün ist,
+pusht er `deps/update` und öffnet einen Pull-Request nach `development`. Nichts wird automatisch gemergt: Prüfe und
+merge ihn wie jeden anderen Pull-Request. Ein Pull-Request, den der Token des Workflows öffnet, startet keinen anderen
+Workflow; die CI darauf läuft, wenn du sie von Hand startest (oder auf den Branch pushst); der Lauf, der ihn geöffnet
+hat, hat dieselben Tests bestanden.
+
+Dependabot öffnet wöchentlich Pull-Requests für Python-Pakete (`pyproject.toml` und `uv.lock`, mit derselben Wartezeit
+von 5 Tagen), GitHub Actions und die Dockerfiles der Targets. Es ändert nur `uv.lock`: Führe die vier Export-Befehle
+auf seinem Branch aus und pushe die Requirements-Dateien mit.
+
+Auch die Installer lösen bei jedem Lauf frisch auf (`scripts/fresh_deps.py`): den neuesten verträglichen Stand,
+geprüft und selbstgeprüft, sonst das getestete `uv.lock`; siehe den Abschnitt zur Installation in der README.
 
 ---
 

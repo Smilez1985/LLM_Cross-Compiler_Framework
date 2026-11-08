@@ -1,4 +1,4 @@
-Version 3.4.0 · Last updated 2026-11-07
+Version 3.4.0 · Last updated 2026-11-08
 
 **English** · [Deutsch](README_DE.md)
 
@@ -210,10 +210,16 @@ The installer:
    your own targets (module wizard, `llm-cli module create`), installed community packs, `configs/config.yml`, builds,
    cache and models. Start updates in the repository folder: the copy of `install.sh` in `/opt` copies and removes
    nothing,
-4. creates a virtual environment (`.venv`) there and installs the pinned packages from `requirements-gui.txt`
-   (everything in `requirements.txt` plus the GUI's PySide6; with `--headless` only `requirements.txt`), each file
-   checked against its hash, with the pip that comes with Python (pip itself is not upgraded: that would download
-   it without a checksum),
+4. creates a virtual environment (`.venv`) there with the newest compatible versions, on every run and every update:
+   it resolves them fresh with uv inside the ranges of `pyproject.toml`, taking only versions released at least 5
+   days ago, audits them with pip-audit, installs them with their hashes and checks the new environment (every
+   dependency and the framework's core modules import, `llm-cli --help` works). If any of that fails (no network, a
+   known vulnerability, a failed check), it installs the tested set the repository ships instead (`uv.lock`, exported
+   as `requirements-gui.txt`: everything in `requirements.txt` plus the GUI's PySide6; with `--headless` only
+   `requirements.txt`) and says why. Your earlier `.venv` waits aside until the new one passed; if even the tested
+   set fails, it comes back unchanged and the installer stops. `--offline` (or `LCF_OFFLINE=1`) installs the tested
+   set without resolving. pip is the one that comes with Python (it is not upgraded: that would download it without
+   a checksum),
 5. creates the launcher `/usr/local/bin/llm-framework`, which starts the GUI,
 6. sets up Ditto's local model server (`llm-cli ditto runtime ensure`, run as you, never as root): bare metal by
    default, in Docker when you choose it or when bare metal is not possible here. If Ditto is there already, it does
@@ -245,8 +251,10 @@ After `--rootful`, log out and back in once so the `docker` group takes effect. 
 2. Right-click `install.bat` and choose **Run as administrator**.
 
 The installer checks for Python (installs Python 3.13 with `winget` if none is found, then requires 3.11 to
-3.14), copies the framework to `C:\Program Files\LLM-Cross-Compiler-Framework`, creates `.venv` there, installs
-`requirements-gui.txt` (with the GUI), and puts a **LLM-Cross-Compiler-Framework** shortcut on the desktop. The shortcut runs
+3.14), copies the framework to `C:\Program Files\LLM-Cross-Compiler-Framework`, creates `.venv` there with the
+newest compatible versions the same way as on Linux (resolved fresh, 5 days old at least, audited, checked; else the
+tested `requirements-gui.txt`, with the GUI; `install.bat --offline` or `LCF_OFFLINE=1` takes the tested set at
+once; the earlier `.venv` comes back when nothing works), and puts a **LLM-Cross-Compiler-Framework** shortcut on the desktop. The shortcut runs
 `start_framework.bat`, which starts the GUI. When no 7-Zip is found (`7z` or `7zz` on the PATH, or
 `C:\Program Files\7-Zip\7z.exe`), it installs it with `winget install -e --id 7zip.7zip` for the harness take-in
 (7z, rar, iso and disk images); a failure is a warning, the installation goes on. The Ditto step is the same as on Linux (`install.bat --ditto=...` or

@@ -1,4 +1,4 @@
-Version 3.4.0 · Stand 2026-11-07
+Version 3.4.0 · Stand 2026-11-08
 
 [English](README.md) · **Deutsch**
 
@@ -217,10 +217,17 @@ Der Installer:
    Repository nicht mehr ausliefert; alles andere dort bleibt: deine eigenen Targets (Modul-Assistent,
    `llm-cli module create`), installierte Community-Packs, `configs/config.yml`, Builds, Cache und Modelle. Starte
    Updates im Repository-Ordner: Die Kopie von `install.sh` in `/opt` kopiert und entfernt nichts,
-4. legt dort eine virtuelle Umgebung (`.venv`) an und installiert die festgelegten Pakete aus
-   `requirements-gui.txt` (alles aus `requirements.txt` plus PySide6 für die GUI; mit `--headless` nur
-   `requirements.txt`), jede Datei gegen ihren Hash geprüft, mit dem pip, das mit Python kommt (pip selbst wird
-   nicht aktualisiert: Das lüde es ohne Prüfsumme),
+4. legt dort eine virtuelle Umgebung (`.venv`) mit den neuesten verträglichen Versionen an, bei jedem Lauf und jeder
+   Aktualisierung: Er löst sie mit uv frisch auf, in den Bereichen aus `pyproject.toml` und nur mit Versionen, die
+   seit mindestens 5 Tagen erschienen sind, prüft sie mit pip-audit, installiert sie mit ihren Hashes und prüft die
+   neue Umgebung (jede Abhängigkeit und die Kernmodule des Frameworks lassen sich importieren, `llm-cli --help`
+   läuft). Scheitert etwas davon (kein Netz, eine bekannte Schwachstelle, eine gescheiterte Prüfung), installiert er
+   stattdessen den getesteten Stand, den das Repository mitliefert (`uv.lock`, exportiert als
+   `requirements-gui.txt`: alles aus `requirements.txt` plus PySide6 für die GUI; mit `--headless` nur
+   `requirements.txt`), und sagt, warum. Deine bisherige `.venv` wartet daneben, bis die neue die Prüfung bestanden
+   hat; scheitert sogar der getestete Stand, kommt sie unverändert zurück, und der Installer hält an. `--offline`
+   (oder `LCF_OFFLINE=1`) installiert den getesteten Stand ohne neue Auflösung. pip ist das, das mit Python kommt (es
+   wird nicht aktualisiert: Das lüde es ohne Prüfsumme),
 5. legt den Starter `/usr/local/bin/llm-framework` an, der die GUI startet,
 6. richtet Dittos lokalen Modellserver ein (`llm-cli ditto runtime ensure`, als du, nie als root): standardmäßig
    direkt, in Docker, wenn du das wählst oder wenn es direkt hier nicht geht. Ist Ditto schon da, tut der Schritt
@@ -255,8 +262,10 @@ Nach `--rootful` meldest du dich einmal ab und wieder an, damit die Gruppe `dock
 2. Rechtsklick auf `install.bat` und **Als Administrator ausführen** wählen.
 
 Der Installer sucht Python (installiert Python 3.13 mit `winget`, wenn keines gefunden wird, und verlangt dann
-3.11 bis 3.14), kopiert das Framework nach `C:\Program Files\LLM-Cross-Compiler-Framework`, legt dort `.venv` an,
-installiert `requirements-gui.txt` (mit der GUI) und legt eine Verknüpfung **LLM-Cross-Compiler-Framework** auf
+3.11 bis 3.14), kopiert das Framework nach `C:\Program Files\LLM-Cross-Compiler-Framework`, legt dort `.venv` mit
+den neuesten verträglichen Versionen an, wie unter Linux (frisch aufgelöst, mindestens 5 Tage alt, geprüft,
+selbstgeprüft; sonst der getestete Stand `requirements-gui.txt`, mit der GUI; `install.bat --offline` oder
+`LCF_OFFLINE=1` nimmt gleich den getesteten Stand; die bisherige `.venv` kommt zurück, wenn nichts geht) und legt eine Verknüpfung **LLM-Cross-Compiler-Framework** auf
 den Desktop. Die
 Verknüpfung startet `start_framework.bat` und damit die GUI. Findet er kein 7-Zip (`7z` oder `7zz` im PATH oder
 `C:\Program Files\7-Zip\7z.exe`), installiert er es mit `winget install -e --id 7zip.7zip` für die Übernahme einer

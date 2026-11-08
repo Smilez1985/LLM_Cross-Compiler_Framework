@@ -77,8 +77,8 @@ Sources: https://github.com/empicano/aiomqtt (version 2.5.1, BSD-3-Clause) and
 https://github.com/eclipse-paho/paho.mqtt.python (version 2.1.0, dual licensed EPL-2.0 OR BSD-3-Clause under the
 Eclipse Distribution License 1.0; this project uses it under the BSD-3-Clause terms of the EDL 1.0).
 
-The framework contains no code of either project. Both are installed as Python dependencies (exact pins in
-`pyproject.toml`) and imported only when the build doorbell sends a message (`orchestrator/Core/doorbell.py`).
+The framework contains no code of either project. Both are installed as Python dependencies (ranges up to the next
+major in `pyproject.toml`, the tested versions in `uv.lock`) and imported only when the build doorbell sends a message (`orchestrator/Core/doorbell.py`).
 
 aiomqtt licence:
 
