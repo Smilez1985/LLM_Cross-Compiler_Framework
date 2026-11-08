@@ -1523,7 +1523,7 @@ listet das Framework mit Hinweis und verwendet ihn nie.
 
 Deinen eigenen Baustein legst du mit **Boards > Board-Bündel... > Neuer Baustein...** an oder mit `llm-cli bundle
 block new ID --kind ART --title TEXT [--from BAUSTEIN]` (ausgehend von einem Baustein des Frameworks übernimmt er
-dessen Variablen, Dateien und Start).
+dessen Variablen, Dateien und Start), oder du lässt das Framework einen aus einem Modell vorschlagen (12.8).
 
 ### 12.2 block.yml
 
@@ -1743,3 +1743,52 @@ und wird wie die anderen behandelt (sein Speicher in der Programm-Prüfung des P
 und gestoppt, zusammen oder nacheinander). Die Regeln von `reach` und der Routentabelle sind im Framework
 (`orchestrator/runtime/bundle/reach.py`) und im Gateway (`rust/llmcf-gateway/src/routes.rs`) dieselben, geprüft mit
 einer Vektordatei (`tests/data/gateway_routes_vectors.json`).
+
+### 12.8 Einen Baustein aus einem Modell vorschlagen
+
+Statt mit einer leeren Vorlage zu beginnen, lass das Framework einen Baustein aus einem Modell vorschlagen:
+**Boards > Board-Bündel... > Aus Modell vorschlagen...** oder `llm-cli bundle block propose --hf BESITZER/NAME
+[--revision COMMIT]`, `--from-folder PFAD` (ein lokaler Modellordner: seine `config.json` und der Vorspann seiner
+`README.md`, ohne Netz) oder `--task AUFGABE`. Die Regeln (`orchestrator/runtime/bundle/propose.py`, ohne Netz) lesen
+die Hugging-Face-Pipeline-Aufgabe des Modells, seine Bibliothek, wo es keine Aufgabe hat, seine Dateien und seine
+Lizenz, und schlagen vor:
+
+| Pipeline-Aufgabe | Art | Wie das Gateway ihn erreicht (`reach`) |
+|---|---|---|
+| `text-generation` | `llm` | `openai-models` (GET `/v1/models`), `openai-chat` und `openai-completions`, gestreamt |
+| `image-text-to-text` | `vision` | `openai-chat` mit `match: images` (die Chats mit Bildern; den einfachen Chat bringt der Baustein des Sprachmodells) |
+| `feature-extraction`, `sentence-similarity` | `embed` | `openai-embeddings` |
+| `automatic-speech-recognition` | `stt` | `openai-audio-transcription` |
+| `text-to-speech` | `tts` | `openai-audio-speech` |
+| `object-detection`, `image-classification`, `image-segmentation`, `keypoint-detection` | `detect`, `classify`, `segment`, `keypoints` | `http-multipart` unter `/api/<art>` (Feld `image`, jpeg oder png, die Antwort JSON) und die Kamera-Variante `http-sse` unter `/api/<art>/events` |
+| `video-classification`, `video-text-to-text` | `video-classify`, `video-text` | `http-multipart` (Feld `video`, mp4 oder webm; `video-text` dazu ein `prompt`) und `http-sse`-Ereignisse |
+| jede andere Aufgabe oder keine | das Wort der Aufgabe, sonst `custom` | eine allgemeine `http-json`-Route; der Entwurf **braucht die Person** |
+
+Hat ein Modell keine Pipeline-Aufgabe, nennt seine Bibliothek sie: `sentence-transformers` (Embeddings),
+`ultralytics` (Erkennung), `timm` (Klassifikation). Die Modelldateien bestimmen die Dateiformate (`gguf`, ein
+GGUF-Projektor als `mmproj`, `ggml-whisper`, `onnx`; Gewichte in einem anderen Format: "das Zielmodul wandelt sie
+um") und die Speichergrenze (die größte Modelldatei mal 1,2 plus 128 MB); die Grenzen jeder Route kommen aus
+vorsichtigen Standardwerten (ein Chat 1 MB und 10 Minuten, ein Bildformular 8 MB und eine Minute, ein Audio-Upload
+25 MB und 5 Minuten, ein Event-Stream 30 s ohne Ereignis). Der Entwurf ist eine Vorlage (Status `template`), deren
+Programm aus dem Zielmodul kommt, das die Engine baut; er besteht immer die eigene Prüfung des Bausteinschemas.
+
+**Die Gründe.** Jedes Feld trägt seinen Grund und woher er kommt: `task` (die Pipeline-Aufgabe), `library`,
+`default` (ein vorsichtiger Standardwert der Regeln), `model files` (was die Dateien des Modells sagen) oder `needs
+the person` (nichts sagt es: der eigene Pfad der Engine, ihr Programm, das Protokoll einer unbekannten Aufgabe). Für
+eine Aufgabe vom Typ Erkennung (Objekterkennung, Bildklassifikation, Segmentierung, Keypoints, Videoklassifikation)
+notiert der Entwurf außerdem, was die Engine wissen muss und woher es kommen soll: die Eingabegröße (die
+`preprocessor_config.json` oder `config.json` des Modells), die Klassen (`config.json` `id2label` oder eine
+Label-Datei; der Baustein nennt sie dann als seine `config`-Datei), die Vorverarbeitung und die Nachverarbeitung
+(Schwelle, Non-Maximum-Suppression, Box- oder Maskenformat: das Zielmodul). Ein lokaler Ordner liefert auch die Zahlen,
+die er enthält (80 Klassen, 640 px). Diese Hinweise kommen in die `notes` des Bausteins und in den Abschnitt
+`## Models` seiner Anleitung, mit jedem Grund.
+
+**Die Person bestätigt.** Die Regeln schlagen vor; du prüfst den Entwurf mit seinen Gründen, änderst ihn, wenn du
+magst (der Prüfdialog des Fensters bearbeitet `block.yml`, die vor dem Speichern erneut geprüft wird), und schreibst
+ihn: **Als eigenen Baustein speichern** im Fenster oder `--write [ORDNER]` und dein Ja an einem Terminal ("Nein" als
+Vorgabe). Er ist dein eigener Baustein (Vertrauensstufe `own`), nie signiert; er bleibt eine Vorlage, bis du sein
+Programm und seine Startargumente ausfüllst. Eine KI (Ditto oder ein MCP-Client, über das optionale, nur lesende
+Werkzeug `propose_bundle_block`) darf denselben Entwurf lesen (die Fakten, den Baustein, die Gründe; kein Pfad dieses
+Computers, kein Token) und eine Notiz geben (Grenzen, ein Hinweis zur Modellkarte), die du im Prüfdialog und in der
+Ausgabe des Befehls siehst, als KI-erzeugt markiert und nie übernommen. Eine KI schreibt, speichert oder signiert nie
+einen Baustein: `report_cannot_do` nennt, wo du es tust.

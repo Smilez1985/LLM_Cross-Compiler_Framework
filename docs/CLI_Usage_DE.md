@@ -2615,6 +2615,8 @@ llm-cli bundle prepare-root BUNDLE [--remove]
 llm-cli bundle delete [BUNDLE]...
 llm-cli bundle block list [--json]
 llm-cli bundle block new ID --kind ART --title TEXT [--summary TEXT] [--from BAUSTEIN]
+llm-cli bundle block propose (--hf BESITZER/NAME [--revision COMMIT] | --from-folder PFAD | --task AUFGABE) [--id ID]
+                    [--write [ORDNER]] [--json]
 llm-cli bundle harness take-in ID LOCATION --kind git|archive|folder --installer PATH [--ref REF] [--pin PIN]
                     [--title TEXT] [--dry-run-arg=OPTION]... [--assume-yes NAME=VALUE] [--exit-code CODE=done|findings]...
                     [--image-partition N] [--image-path FOLDER]
@@ -2784,7 +2786,7 @@ llm-cli bundle build "ZERO 3W" --block harness-agent --set harness.harness=chime
 llm-cli bundle harness run harness-01234567-20261107120000
 ```
 
-### bundle block list, block new
+### bundle block list, block new, block propose
 
 `block list` zeigt jeden Baustein mit Art, Status (bereit oder dokumentierte Vorlage) und Vertrauensstufe
 (framework, indexed, signed, own). `block new` legt deinen eigenen Baustein an (`block.yml` und seine Anleitung
@@ -2792,6 +2794,25 @@ llm-cli bundle harness run harness-01234567-20261107120000
 private Modus fragt, bevor er verwendet wird, der Enterprise-Modus nimmt ihn erst, wenn er veröffentlicht und aus dem
 signierten Index installiert ist. Wie du ihn ausfüllst und veröffentlichst:
 [Modul-Entwicklerhandbuch](Module_Developer_Guide_DE.md#12-bausteine-für-das-bündel).
+
+`block propose` schlägt einen Baustein aus einem Modell vor: `--hf BESITZER/NAME` liest seine Hugging-Face-Fakten in
+einer Abfrage (Pipeline-Aufgabe, Bibliothek, Lizenz, Dateien; `--revision` legt einen Commit fest; der Offline-Modus
+lehnt es ab, ein gesperrtes Modell braucht dein gespeichertes Token), `--from-folder PFAD` liest einen lokalen
+Modellordner ohne Netz (seine `config.json` und den Vorspann seiner `README.md`), `--task AUFGABE` nimmt nur eine
+Pipeline-Aufgabe. Es zeigt die vorgeschlagene `block.yml` (Art, Dateien nach Rolle, `reach` mit vorsichtigen
+Grenzen), den Grund jedes Felds (die Aufgabe, die Bibliothek, ein Standardwert, die Modelldateien oder "needs the
+person"), was eine Engine vom Typ Erkennung wissen muss und woher, was du entscheidest, und die Texte, die KI-Clients
+für dieses Modell vorgeschlagen haben (als KI-erzeugt markiert, nie übernommen). Ohne `--write` wird nichts
+geschrieben: dann fragt es an einem Terminal ("Nein" als Vorgabe) und schreibt den Baustein als deinen eigenen,
+nicht signierten Baustein nach `ORDNER` oder, ohne `ORDNER`, nach `community/blocks/`. Er bleibt eine Vorlage, bis du
+sein Programm und seine Startargumente aus dem Zielmodul ausfüllst. `--json` gibt dasselbe als Kennzeichen aus. Die
+Regeln: [Modul-Entwicklerhandbuch](Module_Developer_Guide_DE.md#128-einen-baustein-aus-einem-modell-vorschlagen).
+
+```bash
+llm-cli bundle block propose --hf example/detector-tiny
+llm-cli bundle block propose --from-folder models/whisper-small --write
+llm-cli bundle block propose --task object-detection --id detect-cam --write
+```
 
 ```bash
 llm-cli bundle plan "ZERO 3W" --preset stt --file stt.model=models/ggml-base.bin \

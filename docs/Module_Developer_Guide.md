@@ -1453,7 +1453,8 @@ An installed block counts as indexed or signed only while it is exactly what was
 afterwards is your own. A block the signed index revoked is listed with a note and never used.
 
 Make your own block with **Boards > Board bundle... > New block...** or `llm-cli bundle block new ID --kind KIND
---title TEXT [--from BLOCK]` (starting from one of the framework's blocks copies its variables, files and start).
+--title TEXT [--from BLOCK]` (starting from one of the framework's blocks copies its variables, files and start),
+or let the framework propose one from a model (12.8).
 
 ### 12.2 block.yml
 
@@ -1666,3 +1667,49 @@ and is treated like the others (its memory in the plan's engine check, its unit 
 together or in turn). The rules of `reach` and the route table are the same in the framework
 (`orchestrator/runtime/bundle/reach.py`) and in the gateway (`rust/llmcf-gateway/src/routes.rs`), tested with one
 vector file (`tests/data/gateway_routes_vectors.json`).
+
+### 12.8 Propose a block from a model
+
+Instead of starting from an empty template, let the framework propose a block from a model: **Boards > Board
+bundle... > Propose from model...** or `llm-cli bundle block propose --hf OWNER/NAME [--revision COMMIT]`,
+`--from-folder PATH` (a local model folder: its `config.json` and the front matter of its `README.md`, no network) or
+`--task TASK`. The rules (`orchestrator/runtime/bundle/propose.py`, no network) read the model's Hugging Face pipeline
+task, its library where it has no task, its files and its licence, and propose:
+
+| Pipeline task | Kind | How the gateway reaches it (`reach`) |
+|---|---|---|
+| `text-generation` | `llm` | `openai-models` (GET `/v1/models`), `openai-chat` and `openai-completions`, streamed |
+| `image-text-to-text` | `vision` | `openai-chat` with `match: images` (the chats with images; the plain chat comes from the language model's block) |
+| `feature-extraction`, `sentence-similarity` | `embed` | `openai-embeddings` |
+| `automatic-speech-recognition` | `stt` | `openai-audio-transcription` |
+| `text-to-speech` | `tts` | `openai-audio-speech` |
+| `object-detection`, `image-classification`, `image-segmentation`, `keypoint-detection` | `detect`, `classify`, `segment`, `keypoints` | `http-multipart` at `/api/<kind>` (field `image`, jpeg or png, the answer JSON) and the camera variant `http-sse` at `/api/<kind>/events` |
+| `video-classification`, `video-text-to-text` | `video-classify`, `video-text` | `http-multipart` (field `video`, mp4 or webm; `video-text` also a `prompt`) and `http-sse` events |
+| any other task, or none | the task's word, else `custom` | one generic `http-json` route; the draft **needs the person** |
+
+Where a model has no pipeline task, its library names it: `sentence-transformers` (embeddings), `ultralytics`
+(detection), `timm` (classification). The model files set the file formats (`gguf`, a GGUF projector as `mmproj`,
+`ggml-whisper`, `onnx`; weights in another format: "the target module converts them") and the memory limit (the
+largest model file times 1.2 plus 128 MB); the limits of every route come from conservative defaults (a chat 1 MB and
+10 minutes, an image form 8 MB and one minute, an audio upload 25 MB and 5 minutes, an event stream 30 s without an
+event). The draft is a template (status `template`) whose program comes from the target module that builds the
+engine; it always passes the block schema's own check.
+
+**The reasons.** Every field carries its reason and where it came from: `task` (the pipeline task), `library`,
+`default` (a conservative default of the rules), `model files` (what the model's files say) or `needs the person`
+(nothing tells: the engine's own path, its program, an unknown task's protocol). For a detection-type task
+(object detection, image classification, segmentation, keypoints, video classification) the draft also notes what the
+engine needs to know and where it should come from: the input size (the model's `preprocessor_config.json` or
+`config.json`), the classes (`config.json` `id2label`, or a labels file; the block then names it as its `config`
+file), the pre-processing and the post-processing (score threshold, non-maximum suppression, box or mask format: the
+target module). A local folder also gives the numbers it holds (80 classes, 640 px). These notes go into the block's
+`notes` and into the `## Models` section of its guide, with every reason.
+
+**The person confirms.** The rules propose; you review the draft with its reasons, change it if you like (the window's
+review dialog edits `block.yml`, checked again before it is saved) and write it: **Save as own block** in the window,
+or `--write [DIR]` and your yes at a terminal ("No" by default). It is your own block (trust `own`), never signed; it
+stays a template until you fill in its program and start arguments. An AI (Ditto or an MCP client, through the
+optional read-only tool `propose_bundle_block`) may read the same draft (the facts, the block, the reasons; no path
+of this computer, no token) and give a note (limits, a model-card note) that you see in the review dialog and in the
+command's output, marked as AI-generated and never applied. An AI never writes, saves or signs a block:
+`report_cannot_do` names where you do it.

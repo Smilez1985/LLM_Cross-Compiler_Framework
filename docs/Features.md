@@ -679,6 +679,19 @@ For AI clients the optional tools `bundle_plan` (the plan as labels only, never 
 and `bundle_deploy` (you confirm every deploy in the framework's own window, never a standing approval or a
 delegation) do the same; you enable them first.
 
+A new model needs no hand-written block to start from: **Propose from model...** in the Board bundle window (or
+`llm-cli bundle block propose --hf OWNER/NAME`, `--from-folder PATH`, `--task TASK`) reads the model's Hugging Face
+pipeline task, library, files and licence (one lookup; a local model folder without the network) and proposes a block:
+its kind, its files by role and how the gateway reaches it (`reach`: an OpenAI adapter for chats, vision chats,
+embeddings, transcription and speech; an image or video form with a JSON answer and a camera event stream for
+detection, classification, segmentation, keypoints and video; a generic JSON route that needs you for any other
+task), with conservative limits and the reason of every field. For a detection-type model it notes what the engine
+needs to know (input size, classes, pre- and post-processing) and where it should come from. You review the draft
+with its reasons, may change it, and save it as your own block (unsigned, a template until its program is filled in);
+nothing is written before. An AI may read the same draft through the optional read-only tool `propose_bundle_block`
+and add a note you see in the review dialog, marked as AI-generated; it never writes or signs a block. The table and
+the rules: [Module Developer Guide](Module_Developer_Guide.md#128-propose-a-block-from-a-model).
+
 In the GUI: **Boards > Board bundle...**; at the command line: [`llm-cli bundle`](CLI_Usage.md#bundle). When you
 have no block of your own yet, the Community Hub's export points to **New block...** there.
 
@@ -1151,6 +1164,7 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `run_benchmark` | local write | Optional, hidden until enabled: llama-bench on Ditto's catalog model (natively or in the sandbox) or a built GGUF model (always in the sandbox: a model built for a board is measured on the board) |
 | `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | external | Optional, hidden until enabled: probe a trusted board, install its self-built runtime, or check and benchmark it (always asked; jobs) |
 | `delete_artifact` | external, optional | Move one built model (its folder below the output folder and its golden ZIP) to the trash; hidden until you enable it, always asked |
+| `propose_bundle_block` | read, optional | A bundle building block proposed from a Hugging Face model or a task: the model's facts, the draft block (kind, files, `reach`) and the reason of every field; a note it gives is shown to you in the review dialog, never applied; it never writes a block; hidden until you enable it |
 | `remove_pack` | external, optional | Ask to uninstall one installed community pack: you see its folder, its import notes and the excerpts only it holds in the framework's own window and decide; it goes to the trash; hidden until you enable it, always asked |
 | `list_trash` / `restore_from_trash` | read / local write, optional | See the trash by name, kind and size; restore what this AI asked to delete itself (always asked); hidden until you enable them. No tool empties the trash |
 | `restore_knowledge_snapshot` | external, optional | Replace the knowledge base with an earlier snapshot, after a backup of the current content (a job); hidden until you enable it, always asked |

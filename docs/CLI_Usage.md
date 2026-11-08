@@ -2505,6 +2505,8 @@ llm-cli bundle prepare-root BUNDLE [--remove]
 llm-cli bundle delete [BUNDLE]...
 llm-cli bundle block list [--json]
 llm-cli bundle block new ID --kind KIND --title TEXT [--summary TEXT] [--from BLOCK]
+llm-cli bundle block propose (--hf OWNER/NAME [--revision COMMIT] | --from-folder PATH | --task TASK) [--id ID]
+                    [--write [DIR]] [--json]
 llm-cli bundle harness take-in ID LOCATION --kind git|archive|folder --installer PATH [--ref REF] [--pin PIN]
                     [--title TEXT] [--dry-run-arg=OPTION]... [--assume-yes NAME=VALUE] [--exit-code CODE=done|findings]...
                     [--image-partition N] [--image-path FOLDER]
@@ -2664,13 +2666,31 @@ llm-cli bundle build "ZERO 3W" --block harness-agent --set harness.harness=chime
 llm-cli bundle harness run harness-01234567-20261107120000
 ```
 
-### bundle block list, block new
+### bundle block list, block new, block propose
 
 `block list` shows every building block with its kind, status (ready or a documented template) and trust
 (framework, indexed, signed, own). `block new` makes your own block (`block.yml` and its guide `README.md`, optionally
 from one of the framework's blocks) in `community/blocks/`, not signed: private mode asks before it is used,
 enterprise mode takes it only once it is published and installed from the signed index. How to fill it in and
 publish it: [Module Developer Guide](Module_Developer_Guide.md#12-bundle-building-blocks).
+
+`block propose` proposes a block from a model: `--hf OWNER/NAME` reads its Hugging Face facts in one lookup (pipeline
+task, library, licence, files; `--revision` pins a commit; offline mode refuses it, a gated model needs your stored
+token), `--from-folder PATH` reads a local model folder without the network (its `config.json` and the front matter
+of its `README.md`), `--task TASK` takes a pipeline task alone. It prints the draft `block.yml` (kind, files by role,
+`reach` with conservative limits), the reason of every field (the task, the library, a default, the model files, or
+"needs the person"), what a detection-type engine needs to know and where from, what you decide, and the texts AI
+clients proposed for that model (marked as AI-generated, never applied). Nothing is written without `--write`: then
+it asks at a terminal ("No" by default) and writes the block as your own, unsigned block, into `DIR` or, without
+`DIR`, into `community/blocks/`. It stays a template until you fill in its program and start arguments from the
+target module. `--json` gives the same as labels. The rules: [Module Developer
+Guide](Module_Developer_Guide.md#128-propose-a-block-from-a-model).
+
+```bash
+llm-cli bundle block propose --hf example/detector-tiny
+llm-cli bundle block propose --from-folder models/whisper-small --write
+llm-cli bundle block propose --task object-detection --id detect-cam --write
+```
 
 ```bash
 llm-cli bundle plan "ZERO 3W" --preset stt --file stt.model=models/ggml-base.bin \

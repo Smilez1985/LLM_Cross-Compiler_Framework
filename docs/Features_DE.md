@@ -745,6 +745,21 @@ Für KI-Clients tun die optionalen Werkzeuge `bundle_plan` (der Plan nur als Lab
 Adresse oder ein Konto) und `bundle_deploy` (du bestätigst jedes Ausrollen im eigenen Fenster des Frameworks, nie
 eine dauerhafte Freigabe oder eine Delegation) dasselbe; du gibst sie zuerst frei.
 
+Ein neues Modell braucht keinen von Hand geschriebenen Baustein als Anfang: **Aus Modell vorschlagen...** im Fenster
+Board-Bündel (oder `llm-cli bundle block propose --hf BESITZER/NAME`, `--from-folder PFAD`, `--task AUFGABE`) liest
+die Hugging-Face-Pipeline-Aufgabe, die Bibliothek, die Dateien und die Lizenz des Modells (eine Abfrage; ein lokaler
+Modellordner ohne Netz) und schlägt einen Baustein vor: seine Art, seine Dateien nach Rolle und wie das Gateway ihn
+erreicht (`reach`: ein OpenAI-Adapter für Chats, Vision-Chats, Embeddings, Transkription und Sprache; ein Bild- oder
+Videoformular mit JSON-Antwort und ein Kamera-Event-Stream für Erkennung, Klassifikation, Segmentierung, Keypoints und
+Video; eine allgemeine JSON-Route, die dich braucht, für jede andere Aufgabe), mit vorsichtigen Grenzen und dem Grund
+jedes Felds. Für ein Erkennungsmodell notiert er, was die Engine wissen muss (Eingabegröße, Klassen, Vor- und
+Nachverarbeitung) und woher es kommen soll. Du prüfst den Entwurf mit seinen Gründen, darfst ihn ändern und
+speicherst ihn als deinen eigenen Baustein (nicht signiert, eine Vorlage, bis sein Programm ausgefüllt ist); vorher
+wird nichts geschrieben. Eine KI darf denselben Entwurf über das optionale, nur lesende Werkzeug
+`propose_bundle_block` lesen und eine Notiz hinzufügen, die du im Prüfdialog siehst, als KI-erzeugt markiert; sie
+schreibt oder signiert nie einen Baustein. Die Tabelle und die Regeln:
+[Modul-Entwicklerhandbuch](Module_Developer_Guide_DE.md#128-einen-baustein-aus-einem-modell-vorschlagen).
+
 In der GUI: **Boards > Board-Bündel...**; im Terminal: [`llm-cli bundle`](CLI_Usage_DE.md#bundle). Hast du noch
 keinen eigenen Baustein, zeigt der Export im Community Hub dorthin zu **Neuer Baustein...**.
 
@@ -1267,6 +1282,7 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `run_benchmark` | lokal schreiben | Optional, verborgen bis zur Freigabe: llama-bench auf Dittos Katalogmodell (nativ oder in der Sandbox) oder einem gebauten GGUF-Modell (immer in der Sandbox: ein für ein Board gebautes Modell wird auf dem Board gemessen) |
 | `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | extern | Optional, verborgen bis zur Freigabe: ein vertrautes Board prüfen, seine selbst gebaute Laufzeit installieren oder sie prüfen und messen (immer mit Frage; Jobs) |
 | `delete_artifact` | extern, optional | Ein gebautes Modell (seinen Ordner unter dem Ausgabeordner und sein Golden-ZIP) in den Papierkorb verschieben; verborgen, bis du es freigibst, immer mit Frage |
+| `propose_bundle_block` | lesen, optional | Ein Baustein für das Bündel, aus einem Hugging-Face-Modell oder einer Aufgabe vorgeschlagen: die Fakten des Modells, der Entwurf (Art, Dateien, `reach`) und der Grund jedes Felds; eine Notiz von ihm siehst du im Prüfdialog, nie übernommen; es schreibt nie einen Baustein; verborgen, bis du es freigibst |
 | `remove_pack` | extern, optional | Bitten, ein installiertes Community-Paket zu deinstallieren: Du siehst seinen Ordner, seine Import-Notizen und die Auszüge, die nur es hält, im eigenen Fenster des Frameworks und entscheidest; es geht in den Papierkorb; verborgen, bis du es freigibst, immer mit Frage |
 | `list_trash` / `restore_from_trash` | lesen / lokal schreiben, optional | Den Papierkorb mit Name, Art und Größe sehen; wiederherstellen, was diese KI selbst löschen wollte (immer mit Frage); verborgen, bis du sie freigibst. Kein Tool leert den Papierkorb |
 | `restore_knowledge_snapshot` | extern, optional | Die Wissensbasis durch einen früheren Snapshot ersetzen, nach einer Sicherung des aktuellen Inhalts (ein Job); verborgen, bis du es freigibst, immer mit Frage |
