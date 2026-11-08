@@ -644,7 +644,14 @@ sherpa-onnx is a documented template; `gateway-llmcf` is the framework's own gat
 lets a request that finds the model busy wait its turn in a fair queue instead of refusing it, holds new requests
 back while the board's free memory is low, and starts and stops the bundle's engines (the language model, speech
 recognition, vision) through their units, all together or one after another when the board's memory cannot hold
-them together, as you choose in the plan; your own agent harness is the block `harness-agent`, below). You pick a preset (`llm`, `voice`, `stt`) or the blocks,
+them together, as you choose in the plan (in turn the engines do not start at boot: the gateway starts each one
+when a request needs it); your own agent harness is the block `harness-agent`, below). What a harness on the board
+can call through the gateway, with OpenAI's formats: `POST /v1/chat/completions` and `POST /v1/completions` (the
+language model), a chat whose user message carries images as `image_url` parts with data URLs (png, jpeg or gif;
+the bundle's vision model answers it; an image address is refused, the board fetches nothing from the internet for
+a client), `POST /v1/audio/transcriptions` with an audio file (wav, mp3, flac or ogg Vorbis, 25 MB by default; the
+bundle's whisper.cpp server writes the text), `GET /v1/models`, and `GET /health` with the routes and which engine
+answers each; speech output through the gateway waits for a speech output block with a server. You pick a preset (`llm`, `voice`, `stt`) or the blocks,
 set their variables (port, threads, memory limit, autostart, ...; each checked against its type) and choose their
 files (a local file is hashed and copied into the bundle, an online item is pinned by its sha256 and size).
 

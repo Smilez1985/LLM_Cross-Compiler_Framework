@@ -16,8 +16,17 @@ Licence: the gateway is the framework's (MIT); the model's licence is named in t
 
 ## What it does
 
-- Strict JSON: only the known fields of `/v1/chat/completions` and `/v1/completions`, text content only; anything
-  else is refused before it reaches the model.
+- Strict JSON: only the known fields of `/v1/chat/completions` and `/v1/completions`, text content (and, with the
+  vision component, images); anything else is refused before it reaches the model.
+- Speech: `POST /v1/audio/transcriptions` (OpenAI's multipart form: `file`, `model`, `language`, `prompt`,
+  `response_format` json, text, verbose_json, srt or vtt, `temperature`) goes to the bundle's whisper-server (blocks
+  `stt-whisper-cpp`, `stt-whisper-cpp-program`) as its own form at `/inference`. The audio's type is read from its
+  bytes: wav, mp3, flac and ogg with Vorbis (what whisper-server decodes without ffmpeg); webm, Opus and mp4 are
+  refused with the reason. Without a whisper component the route answers 501.
+- Images: with the vision component (block `vision-mmproj`, a llama-server of its own), a chat whose user message has
+  `image_url` parts goes to it unchanged. Only `data:` URLs (png, jpeg or gif, checked by their bytes): the board
+  never fetches an image from an address for a client. Each image counts `image_tokens` against the vision
+  component's context.
 - Saves tokens: `cache_prompt` on every request (llama-server reuses the cached prompt prefix), a repeated system
   prompt is sent once, a tool result byte for byte the same as an earlier one of the same tool and arguments is sent
   as "same result as tool call #<id>", and `max_tokens` is cut to what the board's context leaves.
@@ -37,8 +46,12 @@ Licence: the gateway is the framework's (MIT); the model's licence is named in t
   choice from the plan: all together (each started on demand), or in turn (`llm-cli bundle plan --engines in-turn`,
   the Board bundle window's checkbox) when the board's memory cannot hold them together: before a request goes to an
   engine that is not running, the others finish their requests, are stopped, and the engine is started and its
-  health awaited. The plan always shows whether all together fits. Only the llm's requests pass the gateway so far.
-- Logs: route, status, time and token counts, never prompt text.
+  health awaited. The plan always shows whether all together fits. In turn the engines' units are installed but not
+  started at boot: the gateway starts the llm at its own start and each other engine when a request needs it.
+- `/health` lists the routes with the engine and port of each; `/metrics` counts requests, refusals and body bytes
+  per route.
+- Logs: route, status, time and token counts, the audio's type and size, the number of images; never a prompt, an
+  image, audio or a transcript.
 
 ## Variables
 
@@ -53,6 +66,12 @@ Licence: the gateway is the framework's (MIT); the model's licence is named in t
   guard (0 turns either check off).
 - `idle_stop_minutes` (0): stops an engine after these minutes without a request, through its unit (needs the
   gateway's and the engines' units, autostart); the next request starts it again.
-- `upstream_port`, `ctx_size`: set by the bundle from the llm component (its port and context size).
+- `max_audio_mb` (25): the largest audio upload, apart from `max_body_kb`.
+- `max_images` (4), `max_image_kb` (2048), `max_images_kb` (4096): the images of one chat request (0 images: none);
+  `image_tokens` (768): the tokens one image is counted with (a fixed, conservative number: the projector's own count
+  depends on the model and the picture).
+- `upstream_port`, `ctx_size`: set by the bundle from the llm component (its port and context size); `stt_port` from
+  the whisper component, `vision_port` and `vision_ctx_size` from the vision component (0: none).
 - `autostart` (no): with yes, the root actions create_user, install_unit and set_cgroup with `user` (llmcf) and
-  `memory_limit_mb` (64, or derived from the gateway's measurement on the board); llmcf-install carries them out.
+  `memory_limit_mb` (64, plus room for the audio uploads and images in flight, or derived from the gateway's
+  measurement on the board); llmcf-install carries them out.

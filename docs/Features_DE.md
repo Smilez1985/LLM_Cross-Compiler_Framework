@@ -704,7 +704,15 @@ mit sherpa-onnx ist eine dokumentierte Vorlage; `gateway-llmcf` ist das eigene G
 Modell, das eine Anfrage bei beschäftigtem Modell in einer fairen Warteschlange warten lässt, statt sie abzulehnen,
 neue Anfragen zurückhält, solange der freie Speicher des Boards knapp ist, und die Programme des Bündels (Sprachmodell,
 Spracherkennung, Bild) über ihre Units startet und stoppt, alle zusammen oder nacheinander, wenn der Speicher des
-Boards sie nicht zusammen hält, wie du es im Plan wählst; dein eigener Agent-Harness ist der Baustein `harness-agent`, unten). Du wählst eine Vorlage (`llm`, `voice`,
+Boards sie nicht zusammen hält, wie du es im Plan wählst (nacheinander starten die Programme nicht beim Systemstart:
+Das Gateway startet jedes, wenn eine Anfrage es braucht); dein eigener Agent-Harness ist der Baustein
+`harness-agent`, unten). Was ein Harness auf dem Board über das Gateway aufrufen kann, in den Formaten von OpenAI:
+`POST /v1/chat/completions` und `POST /v1/completions` (das Sprachmodell), einen Chat, dessen Nachricht des Nutzers
+Bilder als Teile `image_url` mit Data-URLs trägt (png, jpeg oder gif; das Bildmodell des Bündels beantwortet ihn;
+eine Bildadresse wird abgelehnt, das Board holt für einen Client nichts aus dem Internet),
+`POST /v1/audio/transcriptions` mit einer Audiodatei (wav, mp3, flac oder ogg Vorbis, vorgegeben bis 25 MB; der
+whisper.cpp-Server des Bündels schreibt den Text), `GET /v1/models` und `GET /health` mit den Routen und welches
+Programm jede beantwortet; Sprachausgabe über das Gateway wartet auf einen Sprachausgabe-Baustein mit Server. Du wählst eine Vorlage (`llm`, `voice`,
 `stt`) oder die Bausteine, setzt ihre Variablen (Port, Threads, Speichergrenze, Autostart, ...; jede gegen ihren Typ
 geprüft) und wählst ihre Dateien (eine lokale Datei wird gehasht und ins Bündel kopiert, ein Online-Element ist über
 sha256 und Größe festgelegt).
