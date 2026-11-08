@@ -27,6 +27,10 @@ Rules that hold for every call here:
 - The person's own download (download_for_person) sends the token the person typed in the browser's token question
   or stored in the framework, never an implicit one either; in offline mode the browser refuses it before any request
   (ModelManager), like its search, licence check and file list.
+- The one lookup of a model (HubClient.info) also keeps its pipeline task and library (`pipeline_tag`,
+  `library_name`) as plain words; a local model folder gives the same facts without the Hub (folder_facts: its
+  config.json and README front matter, its files, never its path). runtime/bundle/propose.py proposes a block from
+  them.
 - A download lands in `<models_dir>/hf/<owner>--<name>/<commit[:12]>/<filename>`: one folder per commit (Hugging Face
   forbids `--` in repository ids, so the encoding cannot collide). The file is written to a `.part` file that a
   later run resumes, under a lock per file, and gets its name only after its size and sha256 matched what the Hub
@@ -157,6 +161,14 @@ class ModelFacts:
     base_license_restrictive: str = ""
     base_gated: Optional[str] = None  # None: no base model named, or it could not be looked up
     private: bool = False             # a private repository: read with the stored token only
+    # the model's Hugging Face pipeline task and library (model_info's pipeline_tag and library_name, else the model
+    # card's; a local folder: its config.json or README front matter): plain lower-case words, "" when not known
+    pipeline_tag: str = ""
+    library_name: str = ""
+    source: str = "hub"               # hub, or folder (folder_facts: a local model folder, no Hub)
+    folder_name: str = ""             # the local folder's own name (never its path)
+    classes: Optional[int] = None     # a local folder's config.json: the number of its id2label entries
+    image_size: Optional[int] = None  # a local folder's config.json or preprocessor_config.json: the input size
 
     @property
     def needs_token(self) -> bool:
@@ -165,6 +177,106 @@ class ModelFacts:
 
     def file(self, name: str) -> Optional[HubFile]:
         return next((f for f in self.files if f.name == name), None)
+
+
+RE_TASK_WORD = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$", re.ASCII)
+MAX_CARD_BYTES = 64 * 1024
+MAX_CONFIG_BYTES = 1024 * 1024
+
+
+def task_word(value: Any) -> str:
+    """A pipeline task or library name as the framework keeps it: a plain lower-case word (external text), else ""."""
+    text = str(value).strip().lower() if isinstance(value, str) else ""
+    return text if RE_TASK_WORD.fullmatch(text) else ""
+
+
+def _json_file(path: Path) -> Dict[str, Any]:
+    import json
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_CONFIG_BYTES:
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def front_matter(path: Path) -> Dict[str, Any]:
+    """The YAML front matter of a model card (README.md between two '---' lines), read safely; {} without one."""
+    import yaml
+    try:
+        if path.is_symlink() or not path.is_file():
+            return {}
+        with open(path, "rb") as f:
+            text = f.read(MAX_CARD_BYTES).decode("utf-8", errors="replace")
+    except OSError:
+        return {}
+    if not text.startswith("---"):
+        return {}
+    end = text.find("\n---", 3)
+    if end < 0:
+        return {}
+    try:
+        data = yaml.safe_load(text[3:end])
+    except yaml.YAMLError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _size_of(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and 0 < value <= 100000:
+        return value
+    if isinstance(value, dict):
+        sizes = [v for k, v in value.items() if k in ("height", "width", "shortest_edge", "longest_edge")
+                 and isinstance(v, int) and not isinstance(v, bool) and 0 < v <= 100000]
+        return max(sizes) if sizes else None
+    if isinstance(value, (list, tuple)) and value and all(isinstance(v, int) and not isinstance(v, bool)
+                                                          for v in value):
+        return max(value) if 0 < max(value) <= 100000 else None
+    return None
+
+
+def folder_facts(folder: Path) -> ModelFacts:
+    """The facts of a local model folder, without the Hub (no network): its files (plain relative names and sizes,
+    no link followed, at most MAX_FILES), its pipeline task and library from its config.json or its README's front
+    matter (`pipeline_tag`, `library_name`), its licence from the front matter, and for the rules of
+    runtime/bundle/propose.py the number of classes (config.json id2label) and the input size (config.json
+    image_size, preprocessor_config.json size). Never its path: the folder's own name only. ValueError when it is
+    no folder."""
+    import os
+    folder = Path(folder)
+    if not folder.is_dir():
+        raise ValueError("That is no folder.")
+    files: List[HubFile] = []
+    truncated = False
+    for root, dirs, names in os.walk(folder, followlinks=False):
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+        for name in sorted(names):
+            path = Path(root) / name
+            if name.startswith(".") or path.is_symlink() or not path.is_file():
+                continue
+            if len(files) >= MAX_FILES:
+                truncated = True
+                break
+            files.append(HubFile(path.relative_to(folder).as_posix(), path.stat().st_size))
+        if truncated:
+            break
+    config = _json_file(folder / "config.json")
+    card = front_matter(folder / "README.md")
+    licence, restrictive = classify_license(card.get("license"))
+    facts = ModelFacts(repo="", commit="", license=licence, license_restrictive=restrictive, source="folder",
+                       folder_name=folder.name[:100], files=files, files_truncated=truncated,
+                       pipeline_tag=task_word(config.get("pipeline_tag") or card.get("pipeline_tag")),
+                       library_name=task_word(config.get("library_name") or card.get("library_name")))
+    facts.total_bytes = sum(f.size or 0 for f in files)
+    labels = config.get("id2label")
+    if isinstance(labels, dict) and 0 < len(labels) <= 100000:
+        facts.classes = len(labels)
+    facts.image_size = _size_of(config.get("image_size")) or \
+        _size_of(_json_file(folder / "preprocessor_config.json").get("size"))
+    return facts
 
 
 def _error_name(e: BaseException) -> str:
@@ -377,6 +489,10 @@ class HubClient:
         facts = ModelFacts(repo=repo, commit=str(getattr(info, "sha", "") or ""), license=licence,
                            license_restrictive=restrictive, gated=gating(getattr(info, "gated", False)),
                            private=getattr(info, "private", False) is True or bool(sent and sent[-1]))
+        facts.pipeline_tag = task_word(getattr(info, "pipeline_tag", None)
+                                       or (card_get("pipeline_tag") if card is not None else None))
+        facts.library_name = task_word(getattr(info, "library_name", None)
+                                       or (card_get("library_name") if card is not None else None))
         if licence.lower() == "other" and card is not None:
             facts.license_name = str(card_get("license_name") or "")[:200]
             facts.license_link = str(card_get("license_link") or "")[:500]
