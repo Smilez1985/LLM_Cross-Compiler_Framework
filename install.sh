@@ -1755,6 +1755,7 @@ venv_from() {
     local file="$1" gui=""
     if [ "$HEADLESS" != "1" ]; then gui="--gui"; fi
     rm -rf "$INSTALL_DIR/.venv"
+    # shellcheck disable=SC2016 # the inner bash expands $1 to $4, its own arguments
     "${VENV_AS_USER[@]}" bash -c '
         set -e
         cd "$1"
