@@ -562,11 +562,13 @@ Describe each variable of `block.yml`, its default and when to change it.
 
 
 def new_block(dest_root: Path, block_id: str, *, kind: str, title: str, summary: str = "",
-              template: Optional[str] = None, builtin: Path = BUILTIN_DIR) -> Path:
+              template: Optional[str] = None, builtin: Path = BUILTIN_DIR, spec: Optional[Dict[str, Any]] = None,
+              guide: Optional[str] = None) -> Path:
     """The person's own block (the wizard): a new folder dest_root/<id> with block.yml (from the framework block
-    `template` when given, with the new id, title and version 1.0.0, else an empty template block) and the guide
-    skeleton. It is not signed: private mode warns before it is used, enterprise mode refuses it until it is
-    published and installed from the signed index. BlockError when the id is taken or not valid."""
+    `template` when given, with the new id, title and version 1.0.0; the block `spec` the person reviewed when given,
+    a proposal of propose.py, with the new id, kind and title; else an empty template block) and the guide skeleton
+    (or `guide`, the proposal's). It is not signed: private mode warns before it is used, enterprise mode refuses it
+    until it is published and installed from the signed index. BlockError when the id is taken or not valid."""
     if not RE_ID.fullmatch(block_id or ""):
         raise BlockError("the block id is lower-case letters, digits, '.', '_' and '-'")
     if not valid_kind(kind):
@@ -578,7 +580,12 @@ def new_block(dest_root: Path, block_id: str, *, kind: str, title: str, summary:
         raise BlockError(f"a block {block_id} exists already")
     clean_title = " ".join(str(title or block_id).split())[:120]
     clean_summary = " ".join(str(summary or "").split())[:500]
-    if template:
+    if spec is not None:
+        spec = dict(spec)
+        spec.update({"id": block_id, "title": clean_title, "kind": kind})
+        if clean_summary:
+            spec["summary"] = clean_summary
+    elif template:
         source = builtin / template / BLOCK_FILE
         if not source.is_file():
             raise BlockError(f"no framework block {template} to start from")
@@ -594,7 +601,8 @@ def new_block(dest_root: Path, block_id: str, *, kind: str, title: str, summary:
     dest.mkdir(parents=True)
     try:
         (dest / BLOCK_FILE).write_text(text, encoding="utf-8")
-        (dest / GUIDE_FILE).write_text(GUIDE_TEMPLATE.format(title=clean_title, id=block_id, kind=kind,
+        (dest / GUIDE_FILE).write_text(guide if guide and "## Models" in guide else
+                                       GUIDE_TEMPLATE.format(title=clean_title, id=block_id, kind=kind,
                                                              summary=clean_summary or "What this block runs."),
                                        encoding="utf-8")
     except OSError:
