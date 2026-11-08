@@ -1531,7 +1531,7 @@ dessen Variablen, Dateien und Start).
 schema: llmcf-bundle-block/1
 id: stt-mine                # Kleinbuchstaben, Ziffern, '.', '_', '-'; der Ordner trägt denselben Namen
 version: 1.0.0              # MAJOR.MINOR.PATCH
-kind: stt                   # llm, stt, tts, vision, gateway oder harness
+kind: stt                   # llm, stt, tts, vision, gateway, harness oder eine eigene Art (detect, ...)
 title: Meine Spracherkennung
 status: ready               # ready, oder template (mit Anleitung gelistet, nie gebaut)
 summary: Der Server von whisper.cpp mit einem ggml-Modell, auf 127.0.0.1.
@@ -1555,7 +1555,7 @@ start:
 
 - **Felder:** nur `schema`, `id`, `version`, `kind`, `title`, `status`, `summary`, `variables`, `files`, `start`,
   `memory`, `keygen` (das Startskript schreibt die Schlüsseldatei der Laufzeit, wie bei `llm-llama-server`), `unit`,
-  `terms` (12.4) und `notes`; ein unbekanntes Feld wird abgelehnt. block.yml ist höchstens 64 KiB groß.
+  `terms` (12.4), `reach` (12.7) und `notes`; ein unbekanntes Feld wird abgelehnt. block.yml ist höchstens 64 KiB groß.
 - **Argumente** von `start.args` sind feste Wörter, `{variable}` (der geprüfte Wert), `@FILE:role@` (die Datei dieser
   Rolle im Ordner der Komponente) und `{when: variable, args: [...]}` (nur, wenn die Variable gesetzt ist). Ein
   Shell-Zeichen, eine unbekannte Variable oder eine unbekannte Rolle lehnt den Baustein ab.
@@ -1659,3 +1659,87 @@ Shell und öffnet kein Netz. Sein Journal liegt in `/var/lib/llmcf/install/<Bün
 Bausteins beim Start Dateien lesen, lege sie in den Ordner der Komponente: Die Unit läuft aus der root-eigenen Kopie
 unter `/var/lib/llmcf/bundle/<Bündel-ID>/` (das Dienstkonto kann das Home des ausrollenden Kontos nicht lesen), die
 auf dem Board die Größe der Komponente ein zweites Mal belegt.
+
+### 12.7 Wie das Gateway einen Baustein erreicht (`reach`)
+
+Das Gateway des Boards (`llmcf-gateway`) ist ein universeller Adapter: ein neues Programm braucht keine Änderung des
+Gateways, nur ein Zielmodul, das es baut, und einen Baustein, dessen Abschnitt `reach` sagt, wie sein Programm
+erreicht wird. Der Bündel-Generator erzeugt die Routentabelle des Gateways (`routes.json`) aus den `reach`-Abschnitten
+der Bausteine, die du gewählt hast; sie geht in das signierte Bündel (der Gateway-Baustein nennt sie als seine Datei `{role: config, from: routes, name:
+routes.json}`, mit ihrem sha256 im signierten Manifest) und als ein Argument `--routes` an das Gateway, und der Plan
+zeigt sie Zeile für Zeile. Ein Baustein ohne `reach` behält die Routen, die seine Art immer hatte (ein
+llm-Baustein die des Sprachmodells, ein Bild-Baustein die Chats mit Bildern, ein whisper-Baustein die Sprachroute);
+jeder andere Baustein ohne es ist nur auf seinem eigenen Port erreichbar.
+
+Jede Route von `reach.routes`:
+
+| Feld | Nimmt | Vorgabe |
+|---|---|---|
+| `path` | den Pfad des Clients unter `/v1/` oder `/api/`, 1 bis 6 Segmente aus Kleinbuchstaben, Ziffern, `.`, `_`, `-`; `/health`, `/metrics` und alles unter `/v1/llmcf` und `/api/llmcf` gehören dem Gateway | nötig |
+| `method` | `GET` oder `POST`, wie das Protokoll es erlaubt | `POST` (`GET` bei `openai-models`) |
+| `protocol` | ein Adapter: `openai-chat`, `openai-completions`, `openai-models`, `openai-embeddings`, `openai-audio-transcription`, `openai-audio-speech`; oder ein generisches geprüftes Durchreichen: `http-json`, `http-multipart`, `http-sse`, `http-binary` | nötig |
+| `upstream_path` | der eigene Pfad des Programms (bei whisper-server `/inference`) | der `path` |
+| `max_body_kb` | die Body-Grenze, 1 bis 204800; die eigene Grenze des Gateways für das Protokoll bleibt die obere Schranke (`max_body_kb` des Gateways für JSON, `max_audio_mb` für einen Sprach-Upload) | 16384 für JSON, 204800 für einen Upload |
+| `timeout_s` | die Wartezeit auf die Antwort des Programms und die längste Lücke darin, 1 bis 3600 | 900 |
+| `stream` | die Antwort darf ein Event-Stream sein (eine `http-sse`-Route streamt immer; ohne es wird ein Stream mit 502 abgelehnt) | nein (`http-sse`: ja) |
+| `types` | nur `http-binary`: die Magic-Typen, die der Body haben darf (jpeg, png, gif, webp, bmp, tiff, wav, flac, ogg, mp3, mp4, webm, pdf), erkannt an seinen ersten Bytes | dort nötig |
+| `fields` | nur `http-multipart`: `name` jedes Felds, `file` (ja: eine Datei), die `types` einer Datei, `required` | dort nötig |
+| `engine_route_key` | der kurze Name der Route in ihrem Programm (`/metrics` und `/health` sagen `<Bestandteil>.<key>`); nötig, wo zwei Routen auf dasselbe Wort enden | das letzte Wort des Pfads |
+| `match` | `images`, nur auf einer `openai-chat`-Route: die Route nimmt die Chats mit Bildteilen, neben der einfachen Chat-Route eines anderen Bausteins auf demselben Pfad | keins |
+
+Das Gateway prüft jede Anfrage an ihrer Route, bevor das Programm sie sieht: `http-json` nimmt ein JSON-Objekt;
+`http-multipart` nimmt nur die erklärten Felder, jedes einmal, ein nötiges immer, eine Datei an ihrem Magic-Typ (nie
+an ihrem Namen oder dem Wort des Clients), ein Textfeld von höchstens 64 KiB, und schickt dem Programm sein eigenes
+Formular mit jeder Datei unter festem Namen (`<Feld>.<Typ>`); `http-binary` nimmt einen Body eines seiner Typen und
+schickt ihn mit dem Medientyp dieses Typs; `http-sse` reicht den Event-Stream durch und beendet ihn, wenn das
+Programm länger als `timeout_s` schweigt. Jede Route geht durch die faire Warteschlange, den Speicherwächter und den
+Programm-Planer des Gateways (das Programm startet bei seiner ersten Anfrage), wird in `/metrics` für sich gezählt,
+und ihr Inhalt wird nie geloggt. Der Schlüssel der Laufzeit geht nur an ein Programm, dessen Baustein einen macht
+(`keygen`). Zwei Bausteine, die dieselbe Methode, denselben Pfad und dasselbe `match` wollen, lassen den Plan
+scheitern.
+
+Ein Beispiel für ein Erkennungsprogramm (ein gedachter Baustein der Art `detect`): ein Bild als Formular hinein und
+die Rahmen als JSON heraus, seine Einstellungen als JSON und die Erkennungen seiner Kamera als Event-Stream:
+
+```yaml
+schema: llmcf-bundle-block/1
+id: detect-yolo
+version: 1.0.0
+kind: detect                # eine eigene Art: ein Programm wie llm, stt und vision
+title: Objekterkennung
+status: ready
+variables:
+  - {name: port, type: port, default: 8093}
+  - {name: autostart, type: bool, default: false}
+  - {name: user, type: user, default: llmcf}
+  - {name: memory_limit_mb, type: memory_mb, default: 512}
+files:
+  - {role: program, from: person, name: detect-server, formats: [elf]}
+  - {role: model, from: person, name: model.bin, licence: required}
+unit: true
+start:
+  program: detect-server
+  args: [--host, 127.0.0.1, --port, "{port}", --model, "@FILE:model@"]
+reach:
+  port: port                # die Variable vom Typ port, auf der das Programm lauscht (Vorgabe)
+  routes:
+    # ein Bild als Formular hinein, die Rahmen als JSON heraus
+    - path: /api/detect
+      protocol: http-multipart
+      upstream_path: /detect
+      max_body_kb: 8192
+      timeout_s: 60
+      fields:
+        - {name: image, file: true, types: [jpeg, png], required: true}
+        - {name: threshold}            # ein Textfeld, freiwillig
+    # seine Einstellungen als ein JSON-Objekt
+    - {path: /api/detect/config, protocol: http-json, upstream_path: /config, max_body_kb: 16, timeout_s: 10}
+    # die Erkennungen seiner Kamera als Event-Stream
+    - {path: /api/detect/events, method: GET, protocol: http-sse, upstream_path: /events, timeout_s: 30}
+```
+
+Die Art ist frei: 2 bis 32 Kleinbuchstaben, Ziffern und `-`; jede Art außer `gateway` und `harness` ist ein Programm
+und wird wie die anderen behandelt (sein Speicher in der Programm-Prüfung des Plans, seine Unit vom Gateway gestartet
+und gestoppt, zusammen oder nacheinander). Die Regeln von `reach` und der Routentabelle sind im Framework
+(`orchestrator/runtime/bundle/reach.py`) und im Gateway (`rust/llmcf-gateway/src/routes.rs`) dieselben, geprüft mit
+einer Vektordatei (`tests/data/gateway_routes_vectors.json`).

@@ -16,6 +16,11 @@ Licence: the gateway is the framework's (MIT); the model's licence is named in t
 
 ## What it does
 
+- A universal adapter: the bundle passes the gateway its route table (`routes.json`, made by the generator from the
+  chosen blocks' `reach` sections, signed with the manifest, one `--routes` argument). Each route reaches its
+  engine through its protocol: the OpenAI adapters below (and embeddings and speech output), or a generic checked
+  passthrough with the limits the block declares (`http-json`, `http-multipart`, `http-sse`, `http-binary`). A new
+  engine needs its block, never a new gateway.
 - Strict JSON: only the known fields of `/v1/chat/completions` and `/v1/completions`, text content (and, with the
   vision component, images); anything else is refused before it reaches the model.
 - Speech: `POST /v1/audio/transcriptions` (OpenAI's multipart form: `file`, `model`, `language`, `prompt`,

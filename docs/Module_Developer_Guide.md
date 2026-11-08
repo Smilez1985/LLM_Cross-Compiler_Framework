@@ -1461,7 +1461,7 @@ Make your own block with **Boards > Board bundle... > New block...** or `llm-cli
 schema: llmcf-bundle-block/1
 id: stt-mine                # lower-case letters, digits, '.', '_', '-'; the folder carries the same name
 version: 1.0.0              # MAJOR.MINOR.PATCH
-kind: stt                   # llm, stt, tts, vision, gateway or harness
+kind: stt                   # llm, stt, tts, vision, gateway, harness or a kind of its own (detect, ...)
 title: My speech recognition
 status: ready               # ready, or template (listed with its guide, never built)
 summary: whisper.cpp's server with one ggml model, on 127.0.0.1.
@@ -1485,7 +1485,7 @@ start:
 
 - **Fields:** only `schema`, `id`, `version`, `kind`, `title`, `status`, `summary`, `variables`, `files`, `start`,
   `memory`, `keygen` (the start script writes the runtime's key file, as `llm-llama-server` does), `unit`, `terms`
-  (12.4) and `notes`;
+  (12.4), `reach` (12.7) and `notes`;
   an unknown field is refused. block.yml is at most 64 KiB.
 - **Arguments** of `start.args` are fixed words, `{variable}` (the checked value), `@FILE:role@` (the file of that role
   in the component's folder) and `{when: variable, args: [...]}` (only when the variable is set). A shell character,
@@ -1583,3 +1583,86 @@ else `/etc/llmcf/signing_key.pem`), reads no environment for its paths, starts n
 journal is `/var/lib/llmcf/install/<bundle id>/`. When a block's program must read files at start, keep them in the
 component's folder: the unit runs from the root-owned copy under `/var/lib/llmcf/bundle/<bundle id>/` (the service
 account cannot read the deploying account's home), which takes the component's size a second time on the board.
+
+### 12.7 How the gateway reaches a block (`reach`)
+
+The board's gateway (`llmcf-gateway`) is a universal adapter: a new engine needs no change of the gateway, only a
+target module that builds it and a block whose `reach` section says how its engine is reached. The bundle generator
+makes the gateway's route table (`routes.json`) from the `reach` sections of the blocks you chose; it goes into the
+signed bundle (the gateway block names it as its file `{role: config, from: routes, name: routes.json}`, listed
+with its sha256 in the signed manifest) and to the gateway as one `--routes` argument, and the plan shows it line by
+line. A block without
+`reach` keeps the routes its kind always had (an llm block the language model's, a vision block the chats with
+images, a whisper block the speech route); any other block without it is reached on its own port only.
+
+Each route of `reach.routes`:
+
+| Field | Takes | Default |
+|---|---|---|
+| `path` | the client's path under `/v1/` or `/api/`, 1 to 6 segments of lower-case letters, digits, `.`, `_`, `-`; `/health`, `/metrics` and everything below `/v1/llmcf` and `/api/llmcf` are the gateway's own | needed |
+| `method` | `GET` or `POST`, as the protocol allows | `POST` (`GET` for `openai-models`) |
+| `protocol` | an adapter: `openai-chat`, `openai-completions`, `openai-models`, `openai-embeddings`, `openai-audio-transcription`, `openai-audio-speech`; or a generic checked passthrough: `http-json`, `http-multipart`, `http-sse`, `http-binary` | needed |
+| `upstream_path` | the engine's own path (whisper-server's is `/inference`) | the `path` |
+| `max_body_kb` | the body cap, 1 to 204800; the gateway's own cap for the protocol stays the upper bound (`max_body_kb` of the gateway for JSON, `max_audio_mb` for a speech upload) | 16384 for JSON, 204800 for an upload |
+| `timeout_s` | the wait for the engine's answer and the longest gap inside it, 1 to 3600 | 900 |
+| `stream` | the answer may be an event stream (an `http-sse` route always streams; without it a stream is refused with 502) | no (`http-sse`: yes) |
+| `types` | `http-binary` only: the magic types the body may have (jpeg, png, gif, webp, bmp, tiff, wav, flac, ogg, mp3, mp4, webm, pdf), recognized by its first bytes | needed there |
+| `fields` | `http-multipart` only: each field's `name`, `file` (yes: a file), a file's `types`, `required` | needed there |
+| `engine_route_key` | the route's short name within its engine (`/metrics` and `/health` say `<component>.<key>`); give it where two routes end in the same word | the path's last word |
+| `match` | `images`, on an `openai-chat` route only: the route takes the chats with image parts, next to the plain chat route of another block on the same path | none |
+
+The gateway checks every request by its route before the engine sees it: `http-json` takes one JSON object;
+`http-multipart` takes only the declared fields, each once, a needed one always, a file by its magic type (never by
+its name or the client's word), a text field of at most 64 KiB, and sends the engine its own form with each file
+under a fixed name (`<field>.<type>`); `http-binary` takes a body of one of its types and sends it with that type's
+media type; `http-sse` passes the event stream through and ends it when the engine is silent longer than
+`timeout_s`. Every route goes through the gateway's fair queue, memory guard and engine scheduler (the engine is
+started on its first request), is counted on its own in `/metrics`, and its content is never logged. The runtime's
+key goes only to an engine whose block makes one (`keygen`). Two blocks that want the same method, path and `match`
+refuse the plan.
+
+An example for a detection engine (a hypothetical block of kind `detect`): an image in as a form and the boxes out as
+JSON, its settings as JSON, and the detections of its camera as an event stream:
+
+```yaml
+schema: llmcf-bundle-block/1
+id: detect-yolo
+version: 1.0.0
+kind: detect                # a kind of its own: an engine like llm, stt and vision
+title: Object detection
+status: ready
+variables:
+  - {name: port, type: port, default: 8093}
+  - {name: autostart, type: bool, default: false}
+  - {name: user, type: user, default: llmcf}
+  - {name: memory_limit_mb, type: memory_mb, default: 512}
+files:
+  - {role: program, from: person, name: detect-server, formats: [elf]}
+  - {role: model, from: person, name: model.bin, licence: required}
+unit: true
+start:
+  program: detect-server
+  args: [--host, 127.0.0.1, --port, "{port}", --model, "@FILE:model@"]
+reach:
+  port: port                # the variable of type port the engine listens on (the default)
+  routes:
+    # an image in as a form, the boxes out as JSON
+    - path: /api/detect
+      protocol: http-multipart
+      upstream_path: /detect
+      max_body_kb: 8192
+      timeout_s: 60
+      fields:
+        - {name: image, file: true, types: [jpeg, png], required: true}
+        - {name: threshold}            # a text field, optional
+    # its settings as one JSON object
+    - {path: /api/detect/config, protocol: http-json, upstream_path: /config, max_body_kb: 16, timeout_s: 10}
+    # the detections of its camera as an event stream
+    - {path: /api/detect/events, method: GET, protocol: http-sse, upstream_path: /events, timeout_s: 30}
+```
+
+The kind is free: any 2 to 32 lower-case letters, digits and `-`; every kind but `gateway` and `harness` is an engine
+and is treated like the others (its memory in the plan's engine check, its unit started and stopped by the gateway,
+together or in turn). The rules of `reach` and the route table are the same in the framework
+(`orchestrator/runtime/bundle/reach.py`) and in the gateway (`rust/llmcf-gateway/src/routes.rs`), tested with one
+vector file (`tests/data/gateway_routes_vectors.json`).
