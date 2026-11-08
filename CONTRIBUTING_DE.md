@@ -113,7 +113,7 @@ eigenes Schnellprüf-Skript gibt es nicht.
   hochgeladen wurden (uv rechnet bei jedem Lock jetzt minus 5 Tage in UTC), für jedes `uv lock` und für
   `uv lock --check`. Eine Version, die bewusst innerhalb ihrer Wartezeit genommen wird, steht in
   `[tool.uv.exclude-newer-package]` mit der Sekunde nach ihrem Hochladen; der geplante Update-Lauf und die Installer
-  entfernen einen solchen Eintrag, sobald die Wartezeit sein Datum überholt hat. Braucht uv 0.9 oder neuer.
+  entfernen einen solchen Eintrag, sobald die Wartezeit sein Datum überholt hat. Braucht ein uv, das einen solchen relativen Wert liest (0.11.32, die Version der CI, tut es).
 - `requirements.txt` (Laufzeit), `requirements-gui.txt` (Laufzeit plus das optionale Extra `gui`, PySide6) und
   `requirements-dev.txt` (Entwicklungswerkzeuge) sind Exporte von `uv.lock` mit Hashes, ebenso
   `requirements-resolve.txt` (uv und pip-audit, mit denen die Installer frisch auflösen). Ihre ersten Zeilen nennen den

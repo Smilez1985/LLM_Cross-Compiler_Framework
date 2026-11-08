@@ -123,7 +123,7 @@ resolve = [
 # The cooldown (DECISIONS round 65): uv takes only versions uploaded at least 5 days ago (uv computes now minus 5 days
 # in UTC at every lock). It holds for every `uv lock` and `uv lock --upgrade`, in the scheduled update run
 # (.github/workflows/deps-update.yml), on the machine (install.sh, install.bat through scripts/fresh_deps.py) and for
-# `uv lock --check` in CI. Needs uv 0.9 or newer (relative values).
+# `uv lock --check` in CI. Needs a uv that reads relative values (0.11.32, the version CI uses, does).
 exclude-newer = "5 days"
 
 [tool.uv.exclude-newer-package]
