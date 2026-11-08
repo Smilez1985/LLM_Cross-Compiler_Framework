@@ -23,6 +23,14 @@ Boards > Board bundle..., through runtime/bundle/service.py). Optional like the 
   nothing the installer printed). An AI never starts a harness run, never answers an installer's question and never
   stops one: those are the person's, in the CLI or the Board harness window; this tool contacts no board.
 
+- propose_bundle_block (read): a building block proposed from a Hugging Face model (one lookup through
+  hf_hub.HubClient: the offline refusal and the token rules of every Hugging Face call) or from a task alone, by the
+  rules of runtime/bundle/propose.py: the model's facts, the draft block (kind, files by role, reach) and the reason
+  of every field, the model-card hints, what the person decides. No local path, no token. An AI may add a `note` (its
+  proposal for the person: limits, a model-card note), kept as AI-generated text that the person sees in the review
+  dialog (ProposalNotes, never applied). Writing or signing a block is never a tool: only the person saves it
+  (the CLI's --write at a terminal or the window's Save; framework_tools.NO_TOOL_ACTIONS write_bundle_block).
+
 Every caller of the block catalog passes the verified cached community index with its revocations
 (service.catalog_sources: CommunityManager.cached_index(revocations=True)), so a revoked block is never used.
 """
@@ -34,13 +42,14 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from orchestrator.tools.output import ToolOutput, fact
 from orchestrator.tools.policy import Decision, ToolTier
 from orchestrator.tools.registry import ToolContext, ToolError, ToolSpec
-from orchestrator.tools.spec import CallFacts, Fact, FieldMeta, ToolLimits
+from orchestrator.tools.spec import CallFacts, Fact, FieldMeta, Rate, ToolLimits
 
 BLOCK_ID = r"^[a-z0-9][a-z0-9._-]{0,47}$"
 COMPONENT_ID = r"^[a-z][a-z0-9-]{0,40}$"
 VARIABLE = r"^[a-z][a-z0-9_]{0,31}$"
 VALUE_TEXT = r"^[A-Za-z0-9._:,+-]{0,64}$"   # a plain word or number; the plan checks it against its type again
 PRESETS = ("llm", "voice", "stt")
+_INFO_RATE = Rate(60, 3600.0)   # Hugging Face lookups per client and hour (as get_hf_model_info)
 
 
 class BundlePlanIn(BaseModel):
@@ -98,6 +107,34 @@ class HarnessReportIn(BaseModel):
 class HarnessReportOut(ToolOutput):
     runs: List[Dict[str, Any]] = Field(description="Each run, newest first: its state and its report as numbers and "
                                                    "flag codes (no account, path, address or installer output)")
+
+
+class ProposeBlockIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    model: Optional[str] = Field(default=None, min_length=3, max_length=200, pattern=r"^[A-Za-z0-9][\w.-]*/[\w.-]+$",
+                                 description="A Hugging Face repository id (owner/name)")
+    revision: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{40}$",
+                                    description="A 40-character commit of the model; leave it out for the current one")
+    task: Optional[str] = Field(default=None, max_length=64, pattern=r"^[a-z0-9][a-z0-9-]{0,63}$",
+                                description="A Hugging Face pipeline task alone (no model), e.g. object-detection")
+    note: Optional[str] = Field(default=None, min_length=1, max_length=1000,
+                                description="Your proposal for the person on this model's draft (limits, a model-card "
+                                            "note), shown to them as AI-generated text in the review dialog; never "
+                                            "applied. Needs model")
+
+
+class ProposeBlockOut(ToolOutput):
+    facts: Dict[str, Any] = Field(description="What the draft came from: source, model, commit, task, library, "
+                                              "licence, gating, number of files")
+    rule: str = Field(description="The table entry: the task, library:<name>, or unknown (needs the person)")
+    block: Dict[str, Any] = Field(description="The draft block.yml as data (status template), checked by the block "
+                                              "schema")
+    reasons: List[Dict[str, str]] = Field(description="Each field's reason: field, origin (task, library, default, "
+                                                      "model files, needs the person), text")
+    model_card: List[Dict[str, str]] = Field(default_factory=list,
+                                             description="What a detection-type engine needs to know and where from")
+    needs_person: List[str] = Field(default_factory=list, description="What only the person decides")
+    note_kept: bool = Field(default=False, description="Your note is kept for the person's review dialog")
 
 
 class BundleJobOut(ToolOutput):
@@ -285,6 +322,42 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
                      "window); this tool only reads")
         return HarnessReportOut(runs=out, notes=notes)
 
+    def propose_bundle_block(inp: ProposeBlockIn, ctx: ToolContext) -> ProposeBlockOut:
+        from orchestrator.Core.hf_hub import HubClient
+        from orchestrator.runtime.bundle import propose as prop
+        if (inp.model is None) == (inp.task is None):
+            raise ToolError("Give either model (a Hugging Face repository id) or task.", code="invalid_argument",
+                            field="model", next="Call it again with model, or with task alone.")
+        if inp.revision and not inp.model:
+            raise ToolError("revision belongs to model.", code="invalid_argument", field="revision")
+        if inp.note and not inp.model:
+            raise ToolError("A note is kept for one model's draft: give model.", code="invalid_argument", field="note")
+        if inp.model:
+            client = HubClient(framework, api_factory=getattr(framework, "hf_api_factory", None))
+            summary = prop.summary_from_facts(client.info(inp.model, inp.revision, with_files=True))
+        else:
+            summary = prop.ModelSummary(task=inp.task or "", source="task")
+        draft = prop.propose(summary)
+        labels = draft.labels()
+        kept = False
+        if inp.note:
+            prop.ProposalNotes(h.state_dir()).add(inp.model, inp.note, ctx.actor)
+            kept = True
+        return ProposeBlockOut(facts=labels["facts"], rule=draft.rule, block=labels["block"],
+                               reasons=labels["reasons"], model_card=labels["model_card"],
+                               needs_person=labels["needs_person"], note_kept=kept)
+
+    def propose_notes(o: ProposeBlockOut) -> List[str]:
+        notes = ["A proposal only: the person reviews it, may change it and writes it as their own block (the "
+                 "framework's Board bundle window, Propose from model..., or the command line at a terminal); no "
+                 "tool writes or signs a block"]
+        if o.note_kept:
+            notes.append("Your note is shown to the person in the review dialog as AI-generated text")
+        if o.rule == "unknown":
+            notes.append("The task is none the rules know: the draft is a generic http-json route the person "
+                         "completes")
+        return notes
+
     def device_name(value) -> Optional[str]:
         try:
             from orchestrator.runtime.device.trusted import TrustedDevices
@@ -314,6 +387,20 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
                  default_decision=Decision.DENY,
                  examples=({"bundle_id": "harness-01234567-20261107120000"},),
                  summary=lambda o: f"Harness runs: {len(o.runs)}."),
+        ToolSpec("propose_bundle_block", "Propose a bundle block from a model",
+                 "Proposes a building block for the board bundle from a Hugging Face model (its pipeline task, "
+                 "library and files; one lookup) or from a task alone: the block's kind, files by role and how the "
+                 "gateway reaches it (reach: protocols, paths, limits), with the reason of every field and, for "
+                 "detection-type tasks, what the engine needs to know. Nothing is written: only the person writes a "
+                 "block. A note you give is shown to the person as your proposal in the review dialog, never "
+                 "applied. Model ids and file names are external text",
+                 ToolTier.READ, ProposeBlockIn, ProposeBlockOut, propose_bundle_block, idempotent=True,
+                 takes_context=True, open_world=True, default_decision=Decision.DENY,
+                 fields={"model": FieldMeta(kind="id"), "revision": FieldMeta(kind="trust")},
+                 limits=ToolLimits(rate=_INFO_RATE), notes=propose_notes,
+                 examples=({"model": "example/detector-tiny"}, {"task": "object-detection"}),
+                 summary=lambda o: f"Proposed block {fact(o.block.get('id', ''))} of kind "
+                                   f"{fact(o.block.get('kind', ''))} ({fact(o.rule)})."),
         ToolSpec("bundle_deploy", "Deploy a board bundle",
                  "Sends a bundle the person built to its trusted board and installs its unprivileged steps with its "
                  "signed installer; root actions stop it (they run only through llmcf-install, after the person's "
@@ -328,4 +415,4 @@ def bundle_tool_specs(registry: Any, framework: Any, jobs: Any, h: Any) -> List[
     ]
 
 
-__all__ = ["BundleDeployIn", "BundleJobOut", "HarnessReportIn", "HarnessReportOut", "BundlePlanIn", "BundlePlanOut", "bundle_tool_specs"]
+__all__ = ["BundleDeployIn", "BundleJobOut", "ProposeBlockIn", "ProposeBlockOut", "HarnessReportIn", "HarnessReportOut", "BundlePlanIn", "BundlePlanOut", "bundle_tool_specs"]

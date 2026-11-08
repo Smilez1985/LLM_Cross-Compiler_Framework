@@ -147,6 +147,10 @@ NO_TOOL_ACTIONS = [
     ("deep_ingest_notice", "Acknowledge the one-time Deep Ingest notice (before crawl_docs_site can run): the GUI "
                            "(Tools > Create Hardware Module..., Deep Ingest) or 'llm-cli tools crawl-notice' (only a "
                            "person reads it)."),
+    ("write_bundle_block", "Write, save or sign a bundle building block: only the person, after reviewing the "
+                           "proposal (Boards > Board bundle... > Propose from model... and Save, or 'llm-cli bundle "
+                           "block propose --write' at a terminal); propose_bundle_block only proposes, and a note "
+                           "you give it is shown to the person."),
     ("publish_pull_request", "Publish a community pull request: 'llm-cli zoo export --pr' (not for AI clients)."),
     ("install_pack_from_file", "Install a pack from a file: the Community Hub in the GUI or "
                                "'llm-cli zoo install --file' (unreviewed code an AI could write itself)."),
@@ -178,7 +182,7 @@ KNOWN_TOOLS = frozenset({
     # optional (default deny until the person enables them)
     "delete_artifact", "restore_knowledge_snapshot", "build_local_runtime", "start_local_runtime",
     "stop_local_runtime", "run_benchmark", "deploy_device_runtime", "list_trash", "restore_from_trash",
-    "remove_pack", "bundle_plan", "bundle_deploy", "harness_report",
+    "remove_pack", "bundle_plan", "bundle_deploy", "harness_report", "propose_bundle_block",
     # later
     "probe_remote_device", "run_device_benchmark",
 })

@@ -33,7 +33,8 @@ OPTIONAL = {"delete_artifact", "restore_knowledge_snapshot", "build_local_runtim
             "stop_local_runtime", "run_benchmark", "deploy_device_runtime", "list_trash", "restore_from_trash",
             "remove_pack",   # an AI's request to uninstall a pack: the person decides in the framework's window
             "bundle_plan", "bundle_deploy",   # the board bundle (deploy way 3): plan as labels, deploy asked each time
-            "harness_report"}   # the person's harness runs, read only and scrubbed
+            "harness_report",   # the person's harness runs, read only and scrubbed
+            "propose_bundle_block"}   # a block proposed from a model: read only, the person writes it
 LATER = {"probe_remote_device", "run_device_benchmark"}
 # The AI's hands in the open window (DECISIONS round 8, W4): one tool, the same for Ditto and every MCP caller.
 GUI = {"gui"}
@@ -44,7 +45,7 @@ BUILT = set(CORE)
 
 
 def test_the_catalogue_has_the_designed_size():
-    assert (len(CORE), len(OPTIONAL), len(LATER), len(HIDDEN)) == (40, 13, 2, 1)
+    assert (len(CORE), len(OPTIONAL), len(LATER), len(HIDDEN)) == (40, 14, 2, 1)
     assert GUI <= CORE
 
 

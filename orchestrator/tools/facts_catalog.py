@@ -360,6 +360,8 @@ TOOL_FACTS: Dict[str, ToolFacts] = {
                                undo="roll back or uninstall it in the Board bundle window"),
     # the person's harness runs: read only, scrubbed; starting, answering and stopping are the person's
     "harness_report": ToolFacts(delegable="not_needed", undo="nothing to undo"),
+    # a block proposed from a model: read only (a note is kept as AI text for the person); the person writes it
+    "propose_bundle_block": ToolFacts(_FS({"offline_mode"}), delegable="not_needed", undo="nothing to undo"),
     "answer_approval": ToolFacts(delegable="never"),
     # Only harmless repairs, every call asked. Extension point M3a/M6 (with WP11): the blockers repair_manual,
     # repair_needs_person and wrong_account, and the delegation group "repairs" for harmless repairs only.

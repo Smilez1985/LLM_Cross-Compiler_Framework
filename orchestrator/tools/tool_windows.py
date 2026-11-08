@@ -103,6 +103,7 @@ ACTION_WINDOWS: Dict[str, str] = {
     "deep_ingest_notice": "knowledge_sources",
     "install_pack_from_file": "community_hub",
     "publish_pull_request": "community_hub",
+    "write_bundle_block": "board_bundle",       # Propose from model... and Save: the person writes the block
 }
 
 BUILDER_TAB, DEPLOYMENT_TAB = "builder_tab", "deployment_window"   # menus/deploy.py: the main window's attributes

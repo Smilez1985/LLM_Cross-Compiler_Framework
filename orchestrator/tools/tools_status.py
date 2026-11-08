@@ -276,7 +276,7 @@ class CannotIn(BaseModel):
     tool: Optional[str] = Field(default=None, max_length=64, description="The tool that would do it or that failed")
     action: Optional[Literal["sign_in", "change_permissions", "audit_log", "trust_device",
                              "deep_ingest_notice", "publish_pull_request",
-                             "install_pack_from_file", "run_command"]] = Field(
+                             "install_pack_from_file", "run_command", "write_bundle_block"]] = Field(
         default=None, description="One of the framework's known actions without a tool")
     next_step: Optional[str] = Field(default=None, max_length=300)
 
