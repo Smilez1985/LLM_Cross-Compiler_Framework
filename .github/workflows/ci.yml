@@ -62,13 +62,15 @@ jobs:
         run: uv lock --check
 
       # The installers and the test jobs install from the exports, so they must be exactly what uv.lock pins.
+      # requirements-resolve.txt holds uv and pip-audit for the installers' fresh resolve (scripts/fresh_deps.py).
       # requirements-gui.txt is the base plus the optional extra 'gui' (PySide6), which the desktop installers install.
       - name: requirements.txt, requirements-gui.txt and requirements-dev.txt are the exports of uv.lock
         run: |
           uv export --frozen --format requirements-txt --no-dev --no-emit-project -o requirements.txt
           uv export --frozen --format requirements-txt --no-dev --extra gui --no-emit-project -o requirements-gui.txt
           uv export --frozen --format requirements-txt --only-group dev --no-emit-project -o requirements-dev.txt
-          git diff --exit-code -- requirements.txt requirements-gui.txt requirements-dev.txt
+          uv export --frozen --format requirements-txt --only-group resolve --no-emit-project -o requirements-resolve.txt
+          git diff --exit-code -- requirements.txt requirements-gui.txt requirements-dev.txt requirements-resolve.txt
 
   test:
     name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
