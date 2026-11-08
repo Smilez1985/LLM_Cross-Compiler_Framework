@@ -29,7 +29,7 @@ SCHEMA = "llmcf-bundle/1"
 MAX_MANIFEST_BYTES = 1 << 20
 MAX_COMPONENTS = 16
 MAX_FILES = 64
-MAX_ARGS = 48
+MAX_ARGS = 96
 
 # Component kinds a building block may have (the ROADMAP's bundle components).
 KINDS = ("llm", "stt", "tts", "vision", "gateway", "harness")

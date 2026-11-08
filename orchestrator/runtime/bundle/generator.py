@@ -418,6 +418,7 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
         given = dict(selection.values.get(comp_id) or {})
         if block.kind == "gateway":
             _gateway_from_llm(plan, comp_id, given, pairs, selection, limits)
+            _gateway_from_engines(plan, comp_id, given, pairs, selection)
             _gateway_memory_floor(plan, comp_id, block, given, limits)
         if block.kind == "llm":
             # the board's measurement decides what the person did not set (never a guessed default)
@@ -778,6 +779,13 @@ def _harness_of(plan: BundlePlan, comp_id: str, values: Dict[str, Any], state_di
 GATEWAY_FROM_LLM = {"upstream_port": "port", "ctx_size": "ctx_size"}
 
 
+# The gateway's variables the bundle sets from its speech and vision components (kind -> gateway variable -> the
+# component's variable). The gateway speaks to whisper.cpp's whisper-server only (WHISPER_BLOCKS); another speech
+# block leaves stt_port at 0 and the speech route answers 501.
+GATEWAY_FROM_ENGINE = {"stt": {"stt_port": "port"}, "vision": {"vision_port": "port", "vision_ctx_size": "ctx_size"}}
+WHISPER_BLOCKS = ("stt-whisper-cpp", "stt-whisper-cpp-program")
+
+
 def measured_llm_values(block: Block, given: Dict[str, Any], limits: Any) -> Dict[str, Any]:
     """The values the board's measurement sets for an llm block where the person set none: its measured context and
     KV-cache type (never a guessed default). {} for another block, without a measurement, or when the model does not
@@ -816,6 +824,36 @@ def _gateway_from_llm(plan: BundlePlan, comp_id: str, given: Dict[str, Any], pai
         if mine in given and str(given[mine]) != str(value):
             plan.problems.append(f"{comp_id}: {mine} is set by the bundle from {llm_id} ({value})")
         given[mine] = value
+
+
+def _gateway_from_engines(plan: BundlePlan, comp_id: str, given: Dict[str, Any], pairs: List[Tuple[str, Block]],
+                          selection: Selection) -> None:
+    """The gateway's speech and vision routes: stt_port is the port of the bundle's whisper-server (a whisper block),
+    vision_port and vision_ctx_size the port and context of its vision llama-server, set here (GATEWAY_FROM_ENGINE);
+    a value the person gave for them is refused. A speech block the gateway does not speak to is named in a note."""
+    for kind, names in GATEWAY_FROM_ENGINE.items():
+        found = next(((cid, b) for cid, b in pairs if b.kind == kind), None)
+        if found is not None and kind == "stt" and found[1].id not in WHISPER_BLOCKS:
+            plan.notes.append(f"{comp_id}: the gateway's speech route speaks to whisper.cpp's whisper-server only; with "
+                              f"{found[1].id} it answers 501")
+            found = None
+        for mine, theirs in names.items():
+            if found is None:
+                if mine.endswith("_port") and str(given.get(mine, 0)) != "0":
+                    plan.problems.append(f"{comp_id}: {mine} is set by the bundle from its {kind} component")
+                given.pop(mine, None)
+                continue
+            cid, block = found
+            var = block.variable(theirs)
+            if var is None:
+                continue
+            try:
+                value = var.check((selection.values.get(cid) or {}).get(theirs, var.default))
+            except ManifestError:
+                continue   # the component reports its own value
+            if mine in given and str(given[mine]) != str(value):
+                plan.problems.append(f"{comp_id}: {mine} is set by the bundle from {cid} ({value})")
+            given[mine] = value
 
 
 def engine_units(components: List[Component], roots: List[RootAction]) -> Dict[str, Tuple[str, str]]:
@@ -919,9 +957,9 @@ def _tell_engines(plan: BundlePlan, components: List[Component], roots: List[Roo
             plan.problems.append("in turn the gateway starts and stops each engine through its own unit: give each "
                                  "engine autostart, and at most one engine of each kind")
         elif any(kind != "llm" for kind in engines):
-            plan.warnings.append("in turn: the gateway starts the speech and vision engines only for requests through "
-                                 "itself, and its speech and image routes are not there yet: until then those engines "
-                                 "stay stopped while the language model runs")
+            plan.notes.append("in turn: the gateway starts the speech and vision engines for requests through itself "
+                              "(its speech route and chats with images); a program that calls them on their own ports "
+                              "finds them stopped while another engine runs")
     if gateway is None or not engines:
         return components
     if own is None:
@@ -973,14 +1011,29 @@ def _cgroup_action(plan: BundlePlan, comp_id: str, block: Block, unit: str, valu
         plan.notes.append(f"{comp_id}: its unit's memory from the board's measurement: slowed above {memory_high} MB, "
                           f"stopped above {memory_max} MB")
     elif not own and block.kind == "gateway":
-        derived = measure.gateway_memory_max_mib(limits, int(values.get("queue_max") or 0),
-                                                 int(values.get("max_inflight") or 1),
-                                                 int(values.get("max_body_kb") or 256))
+        images_kb, audio_kb = gateway_upload_kb(values)
+        inflight = int(values.get("max_inflight") or 1)
+        derived = measure.gateway_memory_max_mib(limits, int(values.get("queue_max") or 0), inflight,
+                                                 int(values.get("max_body_kb") or 256), images_kb, audio_kb)
         if derived is not None:
             memory_max = derived
             plan.notes.append(f"{comp_id}: its unit's memory limit {memory_max} MB from its measurement on the board")
+        elif images_kb or audio_kb:
+            memory_max = max(memory_max, measure.gateway_fallback_mib(inflight, images_kb, audio_kb))
+            plan.notes.append(f"{comp_id}: its unit's memory limit {memory_max} MB: room for the audio uploads and "
+                              "images of the requests in flight")
     return RootAction(action="set_cgroup", component=comp_id, unit=unit, memory_max_mb=memory_max,
                       memory_high_mb=memory_high, oom_score_adj=OOM_SCORE.get(block.kind))
+
+
+def gateway_upload_kb(values: Dict[str, Any]) -> Tuple[int, int]:
+    """KB of the images (in base64) and of the audio one gateway request may carry beyond the JSON cap: the images
+    only with a vision engine, the audio only with a speech engine (0 each without)."""
+    images = 0
+    if int(values.get("vision_port") or 0) and int(values.get("max_images") or 0):
+        images = -(-int(values.get("max_images_kb") or 0) * 4 // 3)
+    audio = int(values.get("max_audio_mb") or 0) * 1024 if int(values.get("stt_port") or 0) else 0
+    return images, audio
 
 
 def _gateway_memory_floor(plan: BundlePlan, comp_id: str, block: Block, given: Dict[str, Any], limits: Any) -> None:

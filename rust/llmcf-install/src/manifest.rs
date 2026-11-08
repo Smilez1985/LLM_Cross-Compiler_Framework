@@ -9,7 +9,7 @@ pub const SCHEMA: &str = "llmcf-bundle/1";
 pub const MAX_MANIFEST_BYTES: usize = 1 << 20;
 pub const MAX_COMPONENTS: usize = 16;
 pub const MAX_FILES: usize = 64;
-pub const MAX_ARGS: usize = 48;
+pub const MAX_ARGS: usize = 96;
 pub const MAX_ROOT_ACTIONS: usize = 64;
 pub const ROOT_ACTIONS: [&str; 10] = [
     "create_user",

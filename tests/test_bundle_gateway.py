@@ -424,7 +424,8 @@ def test_in_turn_when_together_does_not_fit_and_refused_when_one_does_not_either
     assert args[args.index("--engines") + 1] == "in-turn"
     rest = turn.engines["rest_mb"]
     assert args[args.index("--engines-budget-mb") + 1] == str(tight.usable_mib - rest)
-    assert any("speech and image routes are not there yet" in w for w in turn.warnings)
+    assert any("starts the speech and vision engines for requests through itself" in n for n in turn.notes)
+    assert not any("not there yet" in w for w in turn.warnings)
     assert service.engines_lines(turn, "en")[-1] == "Chosen: the engines in turn, loaded by the gateway."
     # even the largest engine alone does not fit: in turn is refused with the numbers
     none = _voice(tmp_path, engines="in-turn", limits=_squeezed(tmp_path, "none"))
@@ -462,3 +463,73 @@ def test_the_idle_stop_reaches_the_gateway_only_with_the_engines_units(tmp_path)
     default = _plan(tmp_path)
     gw = next(c for c in default.manifest.components if c.kind == "gateway")
     assert list(gw.start.args)[-2:] == ["--idle-stop-minutes", "0"], "0 stops nothing and needs no unit"
+
+
+def test_the_speech_route_reaches_the_bundles_whisper_server(tmp_path):
+    """The gateway's speech route: stt_port is the port of the bundle's whisper-server and passed with the audio cap;
+    the unit's memory limit makes room for the uploads in flight; a value the person sets for the port is refused."""
+    from orchestrator.runtime.device import measure
+    plan = _voice(tmp_path)
+    assert plan.ok, plan.problems
+    comps = {c.kind: c for c in plan.manifest.components}
+    stt_port = comps["stt"].variables["port"]
+    assert comps["gateway"].variables["stt_port"] == stt_port
+    args = list(comps["gateway"].start.args)
+    assert args[args.index("--stt-port") + 1] == str(stt_port) and args[args.index("--max-audio-mb") + 1] == "25"
+    assert "--vision-port" not in args and args[-2:] == ["--engines", "together"]
+    cg = next(a for a in plan.manifest.root_actions if a.action == "set_cgroup" and a.component == "gateway")
+    # 64 MiB and two uploads of 25 MB in flight
+    assert cg.memory_max_mb == measure.gateway_fallback_mib(2, 0, 25 * 1024) == 64 + 50
+    assert gen.gateway_upload_kb({"stt_port": 8090, "max_audio_mb": 25}) == (0, 25 * 1024)
+    assert gen.gateway_upload_kb({"vision_port": 8081, "max_images": 4, "max_images_kb": 3}) == (4, 0)
+    assert gen.gateway_upload_kb({"max_audio_mb": 25, "max_images_kb": 4096}) == (0, 0)
+    # without speech: no speech arguments, the block's 64 MB
+    plain = _plan(tmp_path, values={"llm": {"autostart": "yes"}, "gateway": {"autostart": "yes"}})
+    gw = next(c for c in plain.manifest.components if c.kind == "gateway")
+    assert gw.variables["stt_port"] == 0 and "--stt-port" not in gw.start.args
+    cg = next(a for a in plain.manifest.root_actions if a.action == "set_cgroup" and a.component == "gateway")
+    assert cg.memory_max_mb == 64
+    # the port is the bundle's to set
+    mine = _plan(tmp_path, values={"gateway": {"stt_port": "9000"}})
+    assert any("stt_port is set by the bundle" in p for p in mine.problems)
+    # measured: the uploads are in the derived limit as well
+    import dataclasses
+    from test_board_measure import record
+    measured = dataclasses.replace(measure.derive(record()), gateway_rss_mib=5)
+    assert measure.gateway_memory_max_mib(measured, 32, 2, 256, 0, 25 * 1024) == 5 + 2 + 50 + 1 + 16
+
+
+def test_chats_with_images_reach_the_bundles_vision_server(tmp_path):
+    """The gateway's vision: vision_port and vision_ctx_size come from the bundle's vision component (a llama-server
+    of its own with --mmproj) and reach the gateway with the image caps."""
+    from orchestrator.runtime.device.launcher import render_start_script
+    from tests.test_bundle_components import _runtime_package, _vision_files
+    model, _w, _p = _files(tmp_path)
+    vmodel, mm = _vision_files(tmp_path)
+    sel = gen.Selection(blocks=["llm-llama-server", "vision-mmproj", "gateway-llmcf"],
+                        values={"vision": {"ctx_size": "8192"}},
+                        files={"llm": {"model": gen.FileChoice(path=str(model), licence="apache-2.0")},
+                               "vision": {"model": gen.FileChoice(path=str(vmodel), licence="apache-2.0"),
+                                          "mmproj": gen.FileChoice(path=str(mm), licence="apache-2.0")}})
+    plan = gen.plan_bundle(sel, catalog=blk.load_catalog(), profile=RK3566, device_id=DEVICE, offline=False,
+                           bundle_id="gw-test", runtime=_runtime_package(tmp_path, render_start_script().encode()),
+                           programs=_programs(tmp_path), unmeasured_ok=True)
+    assert plan.ok, plan.problems
+    comps = {c.kind: c for c in plan.manifest.components}
+    gw = comps["gateway"]
+    assert gw.variables["vision_port"] == comps["vision"].variables["port"] == 8081
+    assert gw.variables["vision_ctx_size"] == 8192
+    args = list(gw.start.args)
+    for flag, value in (("--vision-port", "8081"), ("--vision-ctx-size", "8192"), ("--max-images", "4"),
+                        ("--max-image-kb", "2048"), ("--max-images-kb", "4096"), ("--image-tokens", "768")):
+        assert args[args.index(flag) + 1] == value, flag
+    assert "--stt-port" not in args
+
+
+def test_a_speech_block_the_gateway_does_not_speak_to_leaves_its_route_at_501():
+    plan = gen.BundlePlan(bundle_id="x", device_id=DEVICE, selection=gen.Selection(blocks=[]))
+    catalog = blk.load_catalog()
+    given = {}
+    pairs = [("stt", catalog.get("stt-nemo-sherpa")), ("gateway", catalog.get("gateway-llmcf"))]
+    gen._gateway_from_engines(plan, "gateway", given, pairs, gen.Selection(blocks=[]))
+    assert "stt_port" not in given and any("answers 501" in n and "stt-nemo-sherpa" in n for n in plan.notes)

@@ -432,17 +432,33 @@ GATEWAY_FALLBACK_MIB = 64
 GATEWAY_WAIT_KIB = 64
 GATEWAY_BODY_COPIES = 4
 GATEWAY_MARGIN_MIB = 16
+# An audio upload is held once (read into one buffer of its announced size; the form to whisper-server is slices of
+# it), a chat with images like any JSON body (GATEWAY_BODY_COPIES): its images in base64 on top of the JSON cap.
+GATEWAY_AUDIO_COPIES = 1
+
+
+def gateway_request_kib(max_body_kb: int, images_kb: int = 0, audio_kb: int = 0) -> int:
+    """What one request in flight can hold at most beyond the gateway's resident memory: its body up to the largest
+    cap of its routes (the JSON cap and the images of a chat, or an audio upload), plus its connection's buffer."""
+    return GATEWAY_WAIT_KIB + max(GATEWAY_BODY_COPIES * (max_body_kb + images_kb), GATEWAY_AUDIO_COPIES * audio_kb)
+
+
+def gateway_fallback_mib(max_inflight: int, images_kb: int = 0, audio_kb: int = 0) -> int:
+    """The gateway unit's MemoryMax without a measurement: the block's 64 MiB, plus the audio uploads and images the
+    requests in flight can hold (a gateway with speech or vision routes must not be taken for a full upload)."""
+    extra = max(GATEWAY_BODY_COPIES * images_kb, GATEWAY_AUDIO_COPIES * audio_kb)
+    return GATEWAY_FALLBACK_MIB + -(-max_inflight * extra // 1024)
 
 
 def gateway_memory_max_mib(limits: Optional["BoardLimits"], queue_max: int, max_inflight: int,
-                           max_body_kb: int) -> Optional[int]:
+                           max_body_kb: int, images_kb: int = 0, audio_kb: int = 0) -> Optional[int]:
     """The gateway unit's MemoryMax from the board's measurement: its measured peak resident memory, plus what the
     queue's waiting requests and the requests in flight can add, plus a margin. None while the gateway was not
     measured on the board (the unit keeps GATEWAY_FALLBACK_MIB then)."""
     rss = int(getattr(limits, "gateway_rss_mib", 0) or 0) if limits is not None else 0
     if rss <= 0:
         return None
-    kib = queue_max * GATEWAY_WAIT_KIB + max_inflight * (GATEWAY_WAIT_KIB + GATEWAY_BODY_COPIES * max_body_kb)
+    kib = queue_max * GATEWAY_WAIT_KIB + max_inflight * gateway_request_kib(max_body_kb, images_kb, audio_kb)
     return int(rss + -(-kib // 1024) + GATEWAY_MARGIN_MIB)
 
 
