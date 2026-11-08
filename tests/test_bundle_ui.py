@@ -78,7 +78,7 @@ def test_the_bundle_commands_exist_with_their_subcommands():
                                    "block", "harness"}
     assert set(group.commands["harness"].commands) == {"take-in", "dry-run", "run", "attach", "answer", "stop",
                                                        "report"}
-    assert set(group.commands["block"].commands) == {"list", "new"}
+    assert set(group.commands["block"].commands) == {"list", "new", "propose"}
 
 
 def test_plan_shows_components_files_with_source_and_size_root_actions_and_the_probe_checks(cli_board):

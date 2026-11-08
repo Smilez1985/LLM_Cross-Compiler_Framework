@@ -15,6 +15,8 @@ bundle` (orchestrator/runtime/bundle/service.py), with the same checks, question
     Roll back... / Uninstall...             bundle rollback / bundle uninstall (the installer's list, then the question)
     Delete stored bundles...                bundle delete (ask_deletion with the full list, nothing ticked)
     New block...                            bundle block new
+    Propose from model...                   bundle block propose (the draft with its reasons in a review dialog,
+                                            editable; saved as an own block only by the person's Save)
 
 Every plan (it hashes the chosen files), build and board run is one step in a worker thread with a busy line and
 Cancel (BoardSteps of gui/boards_window.py, the one step runner); every question has "No" as the default. The board is
@@ -44,6 +46,7 @@ BUTTONS = (
     ("btn_bundle_plan", "bundle.btn.plan", "_on_plan", "board"),
     ("btn_bundle_build", "bundle.btn.build", "_on_build", "board"),
     ("btn_bundle_block_new", "bundle.btn.block_new", "_on_block_new", ""),
+    ("btn_bundle_block_propose", "bundle.btn.block_propose", "_on_block_propose", ""),
     ("btn_bundle_refresh", "bundle.btn.refresh", "reload", ""),
     ("btn_bundle_dry_run", "bundle.btn.dry_run", "_on_dry_run", "bundle"),
     ("btn_bundle_deploy", "bundle.btn.deploy", "_on_deploy", "bundle"),
@@ -56,7 +59,8 @@ BUTTONS = (
     ("btn_bundle_uninstall", "bundle.btn.uninstall", "_on_uninstall", "bundle"),
     ("btn_bundle_delete", "bundle.btn.delete", "_on_delete", ""),
 )
-PLAN_ROW = ("btn_bundle_file", "btn_bundle_plan", "btn_bundle_build", "btn_bundle_block_new", "btn_bundle_refresh")
+PLAN_ROW = ("btn_bundle_file", "btn_bundle_plan", "btn_bundle_build", "btn_bundle_block_new",
+            "btn_bundle_block_propose", "btn_bundle_refresh")
 STORE_ROW = ("btn_bundle_dry_run", "btn_bundle_deploy", "btn_bundle_status", "btn_bundle_gateway_bench",
              "btn_bundle_rollback", "btn_bundle_root_rollback", "btn_bundle_prepare_root", "btn_bundle_unprepare_root",
              "btn_bundle_uninstall", "btn_bundle_delete")
@@ -71,6 +75,11 @@ def _choose_file(parent: QWidget, title: str) -> str:
     """The person's choice of a local file (tests replace this)."""
     path, _filter = QFileDialog.getOpenFileName(parent, title)
     return path or ""
+
+
+def _choose_folder(parent: QWidget, title: str) -> str:
+    """The person's choice of a local folder (tests replace this)."""
+    return QFileDialog.getExistingDirectory(parent, title) or ""
 
 
 class BundleWindow(BoardSteps, QDialog):
@@ -944,6 +953,149 @@ class BundleWindow(BoardSteps, QDialog):
         self.reload()
         self._info(text)
 
+
+    # --- a block proposed from a model -----------------------------------------------------------------------------
+
+    def _on_block_propose(self) -> None:
+        """Propose from model...: as bundle block propose. The model's facts are read off the GUI thread (one Hub
+        lookup, or the local folder), the draft is shown with its reasons in a review dialog, the person may change
+        it, and only the person's Save writes it as an own block (unsigned) into community/blocks/."""
+        from orchestrator.runtime.bundle import propose as prop
+        dialog, form = _form_dialog(self, self._t("bundle.propose.title"), self._t("bundle.propose.intro"))
+        cmb_source = QComboBox(dialog)
+        cmb_source.setObjectName("cmb_bundle_propose_source")
+        for key in ("hf", "folder", "task"):
+            cmb_source.addItem(self._t(f"bundle.propose.source.{key}"), key)
+        txt_hf = QLineEdit(dialog)
+        txt_hf.setObjectName("txt_bundle_propose_hf")
+        txt_hf.setPlaceholderText("owner/name")
+        txt_revision = QLineEdit(dialog)
+        txt_revision.setObjectName("txt_bundle_propose_revision")
+        folder_row = QWidget(dialog)
+        folder_box = QHBoxLayout(folder_row)
+        folder_box.setContentsMargins(0, 0, 0, 0)
+        txt_folder = QLineEdit(folder_row)
+        txt_folder.setObjectName("txt_bundle_propose_folder")
+        btn_folder = QPushButton(button_text(self._t("bundle.propose.folder_choose")), folder_row)
+        btn_folder.setObjectName("btn_bundle_propose_folder")
+        btn_folder.clicked.connect(lambda: txt_folder.setText(
+            _choose_folder(dialog, self._t("bundle.propose.folder")) or txt_folder.text()))
+        folder_box.addWidget(txt_folder, stretch=1)
+        folder_box.addWidget(btn_folder)
+        cmb_task = QComboBox(dialog)
+        cmb_task.setObjectName("cmb_bundle_propose_task")
+        cmb_task.addItems(list(prop.TASKS))
+        cmb_task.setEditable(True)   # a task the rules do not know gives a generic draft that needs the person
+        for key, widget in (("bundle.propose.source", cmb_source), ("bundle.propose.hf", txt_hf),
+                            ("bundle.propose.revision", txt_revision), ("bundle.propose.folder", folder_row),
+                            ("bundle.propose.task", cmb_task)):
+            form.addRow(self._t(key), widget)
+        if not _exec(dialog):
+            return
+        source = cmb_source.currentData()
+        repo, revision = txt_hf.text().strip(), txt_revision.text().strip() or None
+        folder, task = txt_folder.text().strip(), cmb_task.currentText().strip()
+        if not {"hf": repo, "folder": folder, "task": task}.get(source):
+            self._info(self._t("bundle.propose.missing"), "warning")
+            return
+        framework = self.framework
+
+        def work():
+            from pathlib import Path
+
+            from orchestrator.Core import hf_hub
+            if source == "hf":
+                client = hf_hub.HubClient(framework, api_factory=getattr(framework, "hf_api_factory", None))
+                summary = prop.summary_from_facts(client.info(repo, revision, with_files=True))
+            elif source == "folder":
+                summary = prop.summary_from_facts(hf_hub.folder_facts(Path(folder)))
+            else:
+                summary = prop.ModelSummary(task=task, source="task")
+            notes = []
+            if summary.repo:
+                try:
+                    notes = prop.ProposalNotes(self.state_dir).for_model(summary.repo)
+                except (OSError, RuntimeError):
+                    notes = []
+            return prop.propose(summary), notes
+
+        def failed(error: BaseException) -> bool:
+            from orchestrator.Core.hf_hub import person_text
+            if isinstance(error, (ValueError, OSError)):
+                self._info(self._t("boards.err.failed", reason=one_line(person_text(error, self.lang))), "warning")
+                return True
+            return False
+
+        self._start(self._t("bundle.propose.busy"), work, lambda result: self._review_proposal(*result),
+                    failed=failed)
+
+    def _review_proposal(self, draft: Any, notes: List[Any]) -> None:
+        """The review dialog: the facts, every reason and what the engine needs to know (read only), the block.yml
+        (editable), the AI clients' texts on this model (read only, marked as AI-generated, never applied). Save
+        checks the edited block again and writes it as the person's own block."""
+        from orchestrator.runtime.bundle import blocks as blk
+        from orchestrator.runtime.bundle import propose as prop
+        app_root, _index = self._sources()
+        if app_root is None:
+            self._info(self._t("bundle.new.no_folder"), "warning")
+            return
+        dialog = QDialog(self)
+        dialog.setObjectName("dlg_bundle_propose_review")
+        dialog.setWindowTitle(self._t("bundle.propose.review.title"))
+        dialog.resize(900, 760)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(plain_label(self._t("bundle.propose.review.intro")))
+        row = QHBoxLayout()
+        row.addWidget(plain_label(self._t("bundle.propose.review.id")))
+        txt_id = QLineEdit(draft.block_id, dialog)
+        txt_id.setObjectName("txt_bundle_propose_id")
+        row.addWidget(txt_id, stretch=1)
+        layout.addLayout(row)
+        layout.addWidget(plain_label(self._t("bundle.propose.review.why")))
+        why = QPlainTextEdit(dialog)
+        why.setObjectName("txt_bundle_propose_reasons")
+        why.setReadOnly(True)
+        lines = draft.lines()
+        cut = lines.index("block.yml:") if "block.yml:" in lines else len(lines)
+        tail = lines[cut:]
+        rest = tail[tail.index("Why:"):] if "Why:" in tail else []
+        why.setPlainText("\n".join(lines[:cut] + rest))
+        layout.addWidget(why, stretch=2)
+        layout.addWidget(plain_label(self._t("bundle.propose.review.block")))
+        edit = QPlainTextEdit(dialog)
+        edit.setObjectName("txt_bundle_propose_yaml")
+        edit.setPlainText(draft.yaml_text())
+        layout.addWidget(edit, stretch=3)
+        if notes:
+            from orchestrator.utils.untrusted import sanitize_untrusted
+            layout.addWidget(plain_label(self._t("bundle.propose.review.ai")))
+            ai = QPlainTextEdit(dialog)
+            ai.setObjectName("txt_bundle_propose_ai")
+            ai.setReadOnly(True)
+            ai.setPlainText("\n\n".join(sanitize_untrusted(f"{n.created} {n.proposed_by}: {n.note}", 1200)
+                                          for n in notes))
+            layout.addWidget(ai, stretch=1)
+        buttons = QDialogButtonBox(QDialogButtonBox.Cancel, dialog)
+        save = buttons.addButton(button_text(self._t("bundle.propose.review.save")), QDialogButtonBox.AcceptRole)
+        save.setObjectName("btn_bundle_propose_save")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        buttons.button(QDialogButtonBox.Cancel).setDefault(True)
+        layout.addWidget(buttons)
+        if not _exec(dialog):
+            return
+        block_id = txt_id.text().strip()
+        try:
+            spec = prop.spec_from_text(edit.toPlainText())
+            folder = blk.new_block(blk.community_dir(app_root), block_id, kind=str(spec.get("kind", "")),
+                                   title=str(spec.get("title", block_id)), spec=spec, guide=draft.guide_text())
+        except (blk.BlockError, OSError) as e:
+            self._info(self._t("bundle.propose.invalid", reason=one_line(str(e))), "warning")
+            return
+        text = self._t("bundle.propose.done", id=block_id, path=str(folder))
+        self._say(text)
+        self.reload()
+        self._info(text)
 
 def open_bundle(window: Any) -> Optional[BundleWindow]:
     """Boards > Board bundle...: shows the window of `window` (the main window), with fresh data."""

@@ -98,6 +98,14 @@ BUNDLE_PATHS: Dict[str, str] = {
     "bundle block new --title": "btn_bundle_block_new",
     "bundle block new --summary": "btn_bundle_block_new",
     "bundle block new --from": "btn_bundle_block_new",
+    # a block proposed from a model: the review dialog with the reasons, saved as an own block by the person
+    "bundle block propose": "btn_bundle_block_propose",
+    "bundle block propose --hf": "btn_bundle_block_propose",
+    "bundle block propose --revision": "btn_bundle_block_propose",
+    "bundle block propose --from-folder": "btn_bundle_block_propose",
+    "bundle block propose --task": "btn_bundle_block_propose",
+    "bundle block propose --id": "btn_bundle_block_propose",
+    "bundle block propose --write": "btn_bundle_block_propose",
 }
 
 CLI_PATHS: Dict[str, str] = {
@@ -168,6 +176,7 @@ MACHINE_ONLY: Dict[str, str] = {
     "bundle plan --json": "machine-readable output; Plan shows the same plan in the window",
     "bundle list --json": "machine-readable output; the window lists the same stored bundles",
     "bundle block list --json": "machine-readable output; the window lists the same blocks",
+    "bundle block propose --json": "machine-readable output; Propose from model... shows the same proposal",
     "bundle build --allow-own": "script switch: the window asks before an own unsigned block is used",
     "bundle harness report --json": "machine-readable output; Report shows the same report in the window",
 }

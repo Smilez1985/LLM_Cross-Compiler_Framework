@@ -163,6 +163,34 @@ TEXTS = {
         "bundle.new.from.none": "(an empty template)",
         "bundle.new.done": "Made block {id} in {path}. Fill in block.yml and the guide's '## Models' section, then "
                            "publish it in the Community Hub.",
+        "bundle.btn.block_propose": "Propose from model...",
+        "bundle.propose.title": "Propose a block from a model",
+        "bundle.propose.intro": "The framework reads the model's task, library and files and proposes a block: its "
+                                "kind, its files and how the gateway reaches it, each with its reason. Nothing is "
+                                "written until you save it as your own block.",
+        "bundle.propose.source": "From:",
+        "bundle.propose.source.hf": "A Hugging Face model",
+        "bundle.propose.source.folder": "A local model folder",
+        "bundle.propose.source.task": "A task only",
+        "bundle.propose.hf": "Model (owner/name):",
+        "bundle.propose.revision": "Commit (optional):",
+        "bundle.propose.folder": "Model folder:",
+        "bundle.propose.folder_choose": "Choose...",
+        "bundle.propose.task": "Task:",
+        "bundle.propose.busy": "Reading the model",
+        "bundle.propose.missing": "Name the model, the folder or the task first.",
+        "bundle.propose.review.title": "Review the proposed block",
+        "bundle.propose.review.intro": "Read the reasons, change the block if you like, then save it as your own "
+                                       "block. It is not signed and stays a template until its program and start "
+                                       "arguments are filled in.",
+        "bundle.propose.review.id": "Block id:",
+        "bundle.propose.review.why": "Why the block says what it says:",
+        "bundle.propose.review.block": "block.yml (you may change it):",
+        "bundle.propose.review.ai": "Proposals of AI clients (AI-generated text, never applied):",
+        "bundle.propose.review.save": "Save as own block",
+        "bundle.propose.invalid": "The block was not saved: {reason}",
+        "bundle.propose.done": "Saved block {id} as your own block in {path}. Fill in its program and start "
+                               "arguments from the target module.",
         "boards.title": "Boards and Devices",
         "boards.intro": "Every board you probed or trusted, once. Only the trusted boards may be named by AI tools "
                         "for a deploy, and you still confirm each deploy. Every contact with a board runs in the "
@@ -750,6 +778,35 @@ TEXTS = {
         "bundle.new.from.none": "(eine leere Vorlage)",
         "bundle.new.done": "Baustein {id} in {path} angelegt. Fülle block.yml und den Abschnitt '## Models' der "
                            "Anleitung aus und veröffentliche ihn dann im Community Hub.",
+        "bundle.btn.block_propose": "Aus Modell vorschlagen...",
+        "bundle.propose.title": "Einen Baustein aus einem Modell vorschlagen",
+        "bundle.propose.intro": "Das Framework liest die Aufgabe, die Bibliothek und die Dateien des Modells und "
+                                "schlägt einen Baustein vor: seine Art, seine Dateien und wie das Gateway ihn "
+                                "erreicht, jeweils mit seinem Grund. Nichts wird geschrieben, bis du ihn als eigenen "
+                                "Baustein speicherst.",
+        "bundle.propose.source": "Aus:",
+        "bundle.propose.source.hf": "Einem Hugging-Face-Modell",
+        "bundle.propose.source.folder": "Einem lokalen Modellordner",
+        "bundle.propose.source.task": "Nur einer Aufgabe",
+        "bundle.propose.hf": "Modell (Besitzer/Name):",
+        "bundle.propose.revision": "Commit (optional):",
+        "bundle.propose.folder": "Modellordner:",
+        "bundle.propose.folder_choose": "Wählen...",
+        "bundle.propose.task": "Aufgabe:",
+        "bundle.propose.busy": "Das Modell wird gelesen",
+        "bundle.propose.missing": "Nenne zuerst das Modell, den Ordner oder die Aufgabe.",
+        "bundle.propose.review.title": "Den vorgeschlagenen Baustein prüfen",
+        "bundle.propose.review.intro": "Lies die Gründe, ändere den Baustein, wenn du magst, und speichere ihn dann "
+                                       "als eigenen Baustein. Er ist nicht signiert und bleibt eine Vorlage, bis sein "
+                                       "Programm und seine Startargumente ausgefüllt sind.",
+        "bundle.propose.review.id": "Baustein-ID:",
+        "bundle.propose.review.why": "Warum der Baustein sagt, was er sagt:",
+        "bundle.propose.review.block": "block.yml (du darfst ihn ändern):",
+        "bundle.propose.review.ai": "Vorschläge von KI-Clients (KI-erzeugter Text, nie übernommen):",
+        "bundle.propose.review.save": "Als eigenen Baustein speichern",
+        "bundle.propose.invalid": "Der Baustein wurde nicht gespeichert: {reason}",
+        "bundle.propose.done": "Baustein {id} als deinen eigenen Baustein in {path} gespeichert. Fülle sein Programm "
+                               "und seine Startargumente aus dem Zielmodul aus.",
         "boards.title": "Boards und Geräte",
         "boards.intro": "Jedes Board, das du geprüft oder dem du vertraut hast, einmal. Nur vertraute Boards dürfen "
                         "KI-Werkzeuge für ein Deployment nennen, und du bestätigst jedes Deployment. Jeder Kontakt "

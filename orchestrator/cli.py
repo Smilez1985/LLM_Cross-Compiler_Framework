@@ -8138,6 +8138,106 @@ def bundle_block_new(ctx: FrameworkContext, block_id: str, kind: str, title: str
                   "'## Models' section; publish it with llm-cli zoo export.")
 
 
+def _hub_client(ctx: FrameworkContext):
+    """The Hub as the person's commands read it (hf_hub.HubClient over the booted framework: the token the person
+    stored, never an implicit one; the offline refusal)."""
+    from orchestrator.Core.hf_hub import HubClient
+    ctx.require_framework()
+    fm = ctx.framework_manager
+    return HubClient(fm, api_factory=getattr(fm, "hf_api_factory", None))
+
+
+@bundle_block.command('propose')
+@click.option('--hf', 'repo', default=None, metavar='OWNER/NAME', help='A Hugging Face model (one lookup)')
+@click.option('--revision', default=None, metavar='COMMIT', help='The 40-character commit of --hf (default: current)')
+@click.option('--from-folder', 'folder', default=None, type=click.Path(file_okay=False, path_type=Path),
+              help='A local model folder (its config.json and README front matter; no network)')
+@click.option('--task', default=None, metavar='TASK', help='A Hugging Face pipeline task alone (no model)')
+@click.option('--id', 'block_id', default=None, metavar='ID', help="The block's id (default: its kind and the "
+                                                                   "model's name)")
+@click.option('--write', 'write_dir', is_flag=False, flag_value='', default=None, metavar='[DIR]',
+              help='Write the block after your yes at a terminal: into DIR, or without DIR into your own blocks '
+                   '(community/blocks/)')
+@click.option('--json', 'as_json', is_flag=True, help='The proposal as labels in JSON (nothing written)')
+@pass_context
+def bundle_block_propose(ctx: FrameworkContext, repo: Optional[str], revision: Optional[str], folder: Optional[Path],
+                         task: Optional[str], block_id: Optional[str], write_dir: Optional[str], as_json: bool):
+    """Propose a building block from a model: its kind, files by role and how the gateway reaches it (reach), each
+    with the reason it came from (the pipeline task, a default, the model files); written only with --write, after
+    your yes at a terminal, as your own unsigned block"""
+    from orchestrator.runtime.bundle import propose as prop
+    from orchestrator.runtime.bundle import service
+    from orchestrator.runtime.bundle.blocks import BlockError, community_dir, new_block
+    if sum(x is not None for x in (repo, folder, task)) != 1:
+        console.print("[red]Name exactly one of --hf OWNER/NAME, --from-folder PATH or --task TASK.[/red]")
+        sys.exit(2)
+    if revision and not repo:
+        console.print("[red]--revision belongs to --hf.[/red]")
+        sys.exit(2)
+    if as_json and write_dir is not None:
+        console.print("[red]--json shows the proposal only; leave out --write.[/red]")
+        sys.exit(2)
+    from orchestrator.Core import hf_hub
+    try:
+        if repo:
+            summary = prop.summary_from_facts(_hub_client(ctx).info(repo, revision, with_files=True))
+        elif folder is not None:
+            summary = prop.summary_from_facts(hf_hub.folder_facts(folder))
+        else:
+            summary = prop.ModelSummary(task=str(task), source="task")
+        draft = prop.propose(summary)
+    except hf_hub.HubError as e:
+        console.print(f"[red]{escape(hf_hub.person_text(e, _config_language(ctx)))}[/red]")
+        sys.exit(1)
+    except (ValueError, OSError) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    if block_id:
+        draft.spec["id"] = block_id
+    notes = []
+    if summary.repo:
+        try:
+            notes = prop.ProposalNotes(_state_dir(ctx)).for_model(summary.repo)
+        except OSError:
+            notes = []
+    if as_json:
+        out = draft.labels()
+        out["ai_notes"] = [n.as_json() for n in notes]
+        click.echo(json.dumps(out, indent=2, sort_keys=True))
+        return
+    for line in draft.lines():
+        console.print(escape(line))
+    if notes:
+        console.print("\nProposals of AI clients (AI-generated text, never applied; change the block yourself if you "
+                      "agree):")
+        for n in notes:
+            console.print(escape(f"  {n.created} {n.proposed_by}: {n.note}"))
+    if write_dir is None:
+        console.print("\nNothing was written. Add --write to write it as your own block after your yes.")
+        return
+    _require_terminal("llm-cli bundle block propose --write")
+    if write_dir:
+        dest_root = Path(write_dir)
+    else:
+        app_root, _index = service.catalog_sources(_bundle_framework(ctx))
+        if app_root is None:
+            console.print("[red]The framework's folder for community blocks is not known here.[/red]")
+            sys.exit(1)
+        dest_root = community_dir(app_root)
+    if not click.confirm(f"Write the block {draft.block_id} into {dest_root} as your own block (not signed; it "
+                         "stays a template until you fill in its program)?", default=False):
+        console.print("Nothing was written.")
+        return
+    try:
+        written = new_block(dest_root, draft.block_id, kind=draft.kind, title=str(draft.spec.get("title", "")),
+                            spec=draft.spec, guide=draft.guide_text())
+    except (BlockError, OSError) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]Wrote block {draft.block_id} in {escape(str(written))}.[/green] Fill in its program and "
+                  "start arguments from the target module; publish it with llm-cli zoo export.")
+
+
 @bundle.group('harness')
 def bundle_harness():
     """The person's own agent harness on the board: take it in at a pin, its installer's dry run and run as root
