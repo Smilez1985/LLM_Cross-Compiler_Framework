@@ -310,3 +310,38 @@ def test_the_label_names_state_model_tls_and_speed_only():
                                              "tokens_per_s": "12.50"}})
     assert text == "gateway gateway: ok, model up, TLS, pinned, 12.50 tokens/s"
     assert service.gateway_text(None) == ""
+
+
+def test_the_gateway_may_start_and_stop_exactly_the_bundles_engine_units(tmp_path):
+    """allow_unit_control: with the gateway's own unit and an engine unit, the plan lets the gateway's account start,
+    stop and restart exactly that unit (llmcf-install writes a polkit rule, or a sudoers file without polkit), and the
+    gateway is told the llm's unit; the steps carry the units as one checked value."""
+    from orchestrator.runtime.bundle import installer as inst
+    from orchestrator.runtime.bundle.manifest import dump_manifest, load_manifest
+    plan = _plan(tmp_path, values={"llm": {"autostart": "yes"}, "gateway": {"autostart": "yes"}})
+    assert plan.ok, plan.problems
+    control = [a for a in plan.manifest.root_actions if a.action == "allow_unit_control"]
+    assert len(control) == 1 and control[0].component == "gateway" and control[0].user == "llmcf"
+    assert control[0].units == ("llmcf-llm.service",)
+    gw = next(c for c in plan.manifest.components if c.kind == "gateway")
+    assert list(gw.start.args[-2:]) == ["--llm-unit", "llmcf-llm.service"]
+    assert any("polkit" in n and "sudoers" in n for n in plan.notes)
+    assert load_manifest(dump_manifest(plan.manifest)) == plan.manifest
+    steps = inst.render_steps(plan.manifest, "a" * 64)
+    assert "root\tallow_unit_control\tgateway\tuser=llmcf\tunits=llmcf-llm.service" in steps
+    # without the engines' units, or without the gateway's own unit, nothing to allow
+    only_gw = _plan(tmp_path, values={"gateway": {"autostart": "yes"}})
+    assert not [a for a in only_gw.manifest.root_actions if a.action == "allow_unit_control"]
+    assert "--llm-unit" not in only_gw.manifest.components[1].start.args
+    only_llm = _plan(tmp_path, values={"llm": {"autostart": "yes"}})
+    assert not [a for a in only_llm.manifest.root_actions if a.action == "allow_unit_control"]
+    assert any("without its own unit" in n for n in only_llm.notes)
+    # the unprivileged-only variant writes no units: nothing is allowed, the gateway is told none
+    sel = gen.Selection(blocks=["llm-llama-server", "gateway-llmcf"], unprivileged_only=True,
+                        values={"llm": {"autostart": "yes"}, "gateway": {"autostart": "yes"}},
+                        files={"llm": {"model": gen.FileChoice(path=str(_files(tmp_path)[0]), licence="apache-2.0")}})
+    unpriv = gen.plan_bundle(sel, catalog=blk.load_catalog(), profile=RK3566, device_id=DEVICE, offline=False,
+                             bundle_id="gw-test", runtime=_runtime_tarball(tmp_path), programs=_programs(tmp_path),
+                             unmeasured_ok=True)
+    assert unpriv.ok, unpriv.problems
+    assert not [a for a in unpriv.manifest.root_actions if a.action == "allow_unit_control"]

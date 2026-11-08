@@ -25,6 +25,18 @@ const MAX_TREE_ENTRIES: usize = 20000;
 const MAX_TREE_DEPTH: usize = 8;
 const MAX_ROOT_FILE: u64 = 64 * 1024;
 const DROPIN: &str = "llmcf-cgroup.conf";
+/// The gateway unit's drop-in of the sudoers way (allow_unit_control without polkit): sudo needs new privileges.
+const CONTROL_DROPIN: &str = "llmcf-control.conf";
+const SYSTEMCTLS: [&str; 3] = ["/usr/bin/systemctl", "/bin/systemctl", "/usr/sbin/systemctl"];
+const PKACTION: [&str; 2] = ["/usr/bin/pkaction", "/bin/pkaction"];
+const POLKITD: [&str; 4] = [
+    "/usr/lib/polkit-1/polkitd",
+    "/usr/libexec/polkitd",
+    "/usr/libexec/polkit-1/polkitd",
+    "/usr/lib/policykit-1/polkitd",
+];
+const SUDO: [&str; 2] = ["/usr/bin/sudo", "/bin/sudo"];
+const VISUDO: [&str; 3] = ["/usr/sbin/visudo", "/sbin/visudo", "/usr/bin/visudo"];
 
 pub fn say(state: &str, step: &str, what: &str) {
     println!("llmcf-bundle: {state} {step} {what}");
@@ -83,9 +95,21 @@ fn is_rel(rel: &str) -> bool {
             dir.strip_suffix(".d").map(is_unit).unwrap_or(false) && (is_root_file(file) || *file == DROPIN)
         }
         ["etc", "tmpfiles.d", file] | ["etc", "sysctl.d", file] => is_root_file(file),
+        ["etc", "polkit-1", "rules.d", file] => {
+            file.strip_prefix("60-llmcf-").and_then(|r| r.strip_suffix(".rules")).map(is_id).unwrap_or(false)
+        }
+        ["etc", "sudoers.d", file] => file.strip_prefix("llmcf-").map(is_sudoers_name).unwrap_or(false),
         ["var", "lib", "llmcf", "home", user, ".config", "llm-framework", "llama-server.key"] => is_user(user),
         _ => false,
     }
+}
+
+/// The rest of a sudoers drop-in's name after `llmcf-`: sudo skips names with a '.', so the bundle id's dots are '_'.
+fn is_sudoers_name(s: &str) -> bool {
+    let b = s.as_bytes();
+    (1..=48).contains(&b.len())
+        && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
+        && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'_' || *c == b'-')
 }
 
 fn parse_entry(line: &str) -> Option<Entry> {
@@ -652,6 +676,99 @@ pub fn cgroup_text(a: &RootAction) -> String {
     text
 }
 
+// --- the gateway's right to start and stop the bundle's engines (allow_unit_control) -------------------------------
+
+/// How this board lets an account start and stop a unit: polkit's JavaScript rules (polkit 0.106 or later), else a
+/// sudoers drop-in with exactly the systemctl commands (the systemctl it names), else not at all (the reason).
+#[derive(Debug, PartialEq)]
+pub enum ControlWay {
+    Polkit,
+    Sudoers(&'static str),
+    None(String),
+}
+
+/// Whether `pkaction --version` names a polkit that reads JavaScript rules (0.106 or later; the newer versions are
+/// plain numbers such as 122).
+pub fn polkit_reads_rules(version_text: &str) -> bool {
+    let Some(word) = version_text.split_whitespace().last() else { return false };
+    let mut parts = word.split('.').map(|p| p.parse::<u64>().ok());
+    match (parts.next().flatten(), parts.next().flatten()) {
+        (Some(0), Some(minor)) => minor >= 106,
+        (Some(0), None) | (None, _) => false,
+        (Some(_), _) => true,
+    }
+}
+
+/// The first of `candidates` that is a program on the board, as the board names it (without a test prefix).
+fn board_tool(env: &Env, candidates: &[&'static str]) -> Option<&'static str> {
+    candidates.iter().copied().find(|c| env.path(c).is_file())
+}
+
+pub fn control_way(env: &Env) -> ControlWay {
+    if let Some(pk) = env.tool(&PKACTION) {
+        let (ok, out) = env.run(&pk, &["--version"]);
+        if ok && polkit_reads_rules(&out) {
+            return ControlWay::Polkit;
+        }
+    } else if env.tool(&POLKITD).is_some() && env.path("/usr/share/polkit-1/rules.d").is_dir() {
+        return ControlWay::Polkit;
+    }
+    match (board_tool(env, &SYSTEMCTLS), env.tool(&SUDO), env.path("/etc/sudoers.d").is_dir()) {
+        (Some(systemctl), Some(_), true) => ControlWay::Sudoers(systemctl),
+        _ => ControlWay::None(
+            "the board has neither polkit with rules (0.106 or later) nor sudo with /etc/sudoers.d: the gateway \
+             cannot be allowed to start and stop its engines"
+                .into(),
+        ),
+    }
+}
+
+fn polkit_rel(bid: &str) -> String {
+    format!("etc/polkit-1/rules.d/60-llmcf-{bid}.rules")
+}
+
+fn sudoers_rel(bid: &str) -> String {
+    format!("etc/sudoers.d/llmcf-{}", bid.replace('.', "_"))
+}
+
+/// The polkit rule: the gateway's account may start, stop and restart exactly the named units, nothing else (every
+/// other question falls through to the board's own rules).
+pub fn polkit_text(bid: &str, user: &str, units: &[String]) -> String {
+    let names: Vec<String> = units.iter().map(|u| format!("unit == \"{u}\"")).collect();
+    format!(
+        "// Written by llmcf-install for bundle {bid}. Do not edit: llmcf-install writes it again.\n\
+         // The gateway's account may start, stop and restart exactly these units of the bundle, nothing else.\n\
+         polkit.addRule(function(action, subject) {{\n\
+         \x20   if (action.id == \"org.freedesktop.systemd1.manage-units\" && subject.user == \"{user}\") {{\n\
+         \x20       var unit = action.lookup(\"unit\");\n\
+         \x20       var verb = action.lookup(\"verb\");\n\
+         \x20       if (({}) && (verb == \"start\" || verb == \"stop\" || verb == \"restart\")) {{\n\
+         \x20           return polkit.Result.YES;\n\
+         \x20       }}\n\
+         \x20   }}\n\
+         }});\n",
+        names.join(" || ")
+    )
+}
+
+/// The sudoers drop-in of a board without polkit's rules: one exact command per line, no wildcard, no shell.
+pub fn sudoers_text(bid: &str, user: &str, units: &[String], systemctl: &str) -> String {
+    let mut text = format!(
+        "# Written by llmcf-install for bundle {bid}. Do not edit: llmcf-install writes it again.\n\
+         # The board has no polkit rules: the gateway's account may run exactly these commands, nothing else.\n"
+    );
+    for unit in units {
+        for verb in ["start", "stop", "restart"] {
+            text.push_str(&format!("{user} ALL=(root) NOPASSWD: {systemctl} {verb} {unit}\n"));
+        }
+    }
+    text
+}
+
+/// The gateway unit's drop-in of the sudoers way: sudo runs only with new privileges (the unit's hardening has
+/// NoNewPrivileges=yes; polkit's way needs none of this).
+pub const CONTROL_DROPIN_TEXT: &str = "# Written by llmcf-install. Do not edit.\n[Service]\nNoNewPrivileges=no\n";
+
 fn dropin_rel(unit: &str, file: &str) -> String {
     format!("etc/systemd/system/{unit}.d/{file}")
 }
@@ -663,6 +780,16 @@ fn root_file_rel(a: &RootAction) -> String {
         Some("tmpfiles") => format!("etc/tmpfiles.d/{file}"),
         _ => format!("etc/sysctl.d/{file}"),
     }
+}
+
+/// The unit of the gateway component an allow_unit_control belongs to (its install_unit; the manifest checks there is
+/// one).
+fn gateway_unit(m: &Manifest, a: &RootAction) -> String {
+    m.root_actions
+        .iter()
+        .find(|b| b.action == "install_unit" && b.component == a.component)
+        .and_then(|b| b.unit.clone())
+        .unwrap_or_default()
 }
 
 fn llmcf_account(a: &Account) -> bool {
@@ -770,6 +897,30 @@ impl<'a> Ctx<'a> {
                 Some(comp) if harness::is_current(env, &self.bid, comp) => State::Done,
                 _ => State::Pending,
             },
+            "allow_unit_control" => {
+                let user = a.user.as_deref().unwrap_or("");
+                let at = |rel: &str| env.path(&format!("/{rel}"));
+                let dropin = dropin_rel(&gateway_unit(m, a), CONTROL_DROPIN);
+                let done = match control_way(env) {
+                    ControlWay::None(why) => return State::Conflict(why),
+                    ControlWay::Polkit => {
+                        same_text(&at(&polkit_rel(&self.bid)), polkit_text(&self.bid, user, &a.units).as_bytes())
+                            && !exists(&at(&sudoers_rel(&self.bid)))
+                            && !exists(&at(&dropin))
+                    }
+                    ControlWay::Sudoers(systemctl) => {
+                        let text = sudoers_text(&self.bid, user, &a.units, systemctl);
+                        same_text(&at(&sudoers_rel(&self.bid)), text.as_bytes())
+                            && same_text(&at(&dropin), CONTROL_DROPIN_TEXT.as_bytes())
+                            && !exists(&at(&polkit_rel(&self.bid)))
+                    }
+                };
+                if done {
+                    State::Done
+                } else {
+                    State::Pending
+                }
+            }
             "place_root_file" => {
                 let path = env.path(&format!("/{}", root_file_rel(a)));
                 let want = m
@@ -998,8 +1149,50 @@ impl<'a> Ctx<'a> {
         Ok(())
     }
 
+    /// allow_unit_control: the polkit rule, else the sudoers drop-in (checked by the board's visudo where it has one)
+    /// and the gateway unit's drop-in; the file of the other way, left from an earlier run, is taken away.
+    fn allow_control(&mut self, m: &Manifest, a: &RootAction) -> Result<(), String> {
+        let user = a.user.as_deref().unwrap_or("");
+        let root = self.env.root_uid();
+        let dropin = dropin_rel(&gateway_unit(m, a), CONTROL_DROPIN);
+        match control_way(self.env) {
+            ControlWay::None(why) => Err(why),
+            ControlWay::Polkit => {
+                let text = polkit_text(&self.bid, user, &a.units);
+                self.put_file(&polkit_rel(&self.bid), text.as_bytes(), 0o644, (root, root))?;
+                self.drop_file(&sudoers_rel(&self.bid))?;
+                if self.drop_file(&dropin)? {
+                    self.reload = true;
+                }
+                Ok(())
+            }
+            ControlWay::Sudoers(systemctl) => {
+                let text = sudoers_text(&self.bid, user, &a.units, systemctl);
+                if let Some(visudo) = self.env.tool(&VISUDO) {
+                    let check = self.state.join("sudoers.check");
+                    write_atomic(self.env, &check, text.as_bytes(), 0o440, (root, root))?;
+                    let (ok, out) = self.env.run(&visudo, &["-c", "-f", &check.to_string_lossy()]);
+                    let _ = fs::remove_file(&check);
+                    if !ok {
+                        return Err(format!(
+                            "visudo refused the sudoers lines: {}",
+                            out.trim().chars().take(200).collect::<String>()
+                        ));
+                    }
+                }
+                self.put_file(&sudoers_rel(&self.bid), text.as_bytes(), 0o440, (root, root))?;
+                if self.put_file(&dropin, CONTROL_DROPIN_TEXT.as_bytes(), 0o644, (root, root))? {
+                    self.reload = true;
+                }
+                self.drop_file(&polkit_rel(&self.bid))?;
+                Ok(())
+            }
+        }
+    }
+
     fn perform(&mut self, m: &Manifest, a: &RootAction) -> Result<(), String> {
         match a.action.as_str() {
+            "allow_unit_control" => self.allow_control(m, a),
             "create_user" => self.make_user(a.user.as_deref().unwrap_or("")),
             "remove_user" => {
                 let user = a.user.as_deref().unwrap_or("");
@@ -1331,7 +1524,9 @@ fn apply(ctx: &mut Ctx, m: &Manifest, states: &[State], data: &[u8], signature: 
     }
     let mut touched: HashSet<String> = HashSet::new();
     for (a, s) in m.root_actions.iter().zip(states) {
-        if *s == State::Done {
+        // two components with the same account: its second create_user finds it made by the first one in this run
+        let made_now = *s == State::Pending && a.action == "create_user" && ctx.state_of(m, a) == State::Done;
+        if *s == State::Done || made_now {
             say("already", &a.action, &a.what());
             if a.action == "create_user" {
                 let user = a.user.clone().unwrap_or_default();
@@ -1352,6 +1547,10 @@ fn apply(ctx: &mut Ctx, m: &Manifest, states: &[State], data: &[u8], signature: 
         }
         if let Some(unit) = &a.unit {
             touched.insert(unit.clone());
+        }
+        if a.action == "allow_unit_control" {
+            // the gateway reads its right at its next start (and the sudoers way changes its unit)
+            touched.insert(gateway_unit(m, a));
         }
         if ctx.journal.len() > before {
             ctx.changed += 1;
@@ -1412,6 +1611,41 @@ mod tests {
     }
 
     #[test]
+    fn the_control_files_name_exactly_the_account_and_the_units() {
+        let units = vec!["llmcf-llm.service".to_string(), "llmcf-stt.service".to_string()];
+        let rule = polkit_text("b1", "llmcf", &units);
+        assert!(rule.contains("subject.user == \"llmcf\""), "{rule}");
+        assert!(rule.contains("(unit == \"llmcf-llm.service\" || unit == \"llmcf-stt.service\")"), "{rule}");
+        assert!(rule.contains("verb == \"start\" || verb == \"stop\" || verb == \"restart\""), "{rule}");
+        assert!(rule.contains("\n    if (action.id == \"org.freedesktop.systemd1.manage-units\""), "{rule}");
+        assert!(!rule.contains('*'));
+        let sudoers = sudoers_text("b1", "llmcf", &units, "/usr/bin/systemctl");
+        let lines: Vec<&str> = sudoers.lines().filter(|l| !l.starts_with('#')).collect();
+        assert_eq!(lines.len(), 6);
+        assert_eq!(lines[0], "llmcf ALL=(root) NOPASSWD: /usr/bin/systemctl start llmcf-llm.service");
+        assert_eq!(lines[5], "llmcf ALL=(root) NOPASSWD: /usr/bin/systemctl restart llmcf-stt.service");
+        assert!(!sudoers.contains('*') && !sudoers.contains("ALL, ") && !sudoers.contains("!"));
+        assert!(polkit_reads_rules("pkaction version 0.106"));
+        assert!(polkit_reads_rules("pkaction version 122"));
+        assert!(polkit_reads_rules("pkaction version 0.120\n"));
+        assert!(!polkit_reads_rules("pkaction version 0.105"));
+        assert!(!polkit_reads_rules(""));
+        assert!(!polkit_reads_rules("pkaction version x"));
+        assert_eq!(sudoers_rel("a.b-1"), "etc/sudoers.d/llmcf-a_b-1");
+        assert!(is_rel(&sudoers_rel("a.b-1")) && is_rel(&polkit_rel("a.b-1")));
+        assert!(is_rel("etc/systemd/system/llmcf-gateway.service.d/llmcf-control.conf"));
+        for bad in [
+            "etc/sudoers.d/llmcf-a.b",
+            "etc/sudoers.d/other",
+            "etc/polkit-1/rules.d/60-llmcf-../x.rules",
+            "etc/polkit-1/rules.d/49-other.rules",
+            "etc/sudoers.d/llmcf-",
+        ] {
+            assert!(!is_rel(bad), "{bad}");
+        }
+    }
+
+    #[test]
     fn the_unit_is_hardened_and_starts_the_root_copy() {
         let text = unit_text("b1", "llm", "llmcf");
         for line in [
@@ -1436,6 +1670,7 @@ mod tests {
             oom_score_adj: None,
             place: None,
             file: None,
+            units: Vec::new(),
         };
         // the text of a drop-in without the newer values stays byte for byte what earlier bundles wrote
         assert_eq!(

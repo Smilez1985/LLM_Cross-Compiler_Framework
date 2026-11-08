@@ -44,9 +44,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from orchestrator.runtime.bundle.blocks import ENTERPRISE_TRUSTS, Block, BlockCatalog
 from orchestrator.runtime.bundle.installer import (ROOT_HELPER_FILE, SIGNED_FILES, installer_sh, render_steps,
                                                    staged_name)
-from orchestrator.runtime.bundle.manifest import (RE_ID, RE_LICENCE, RE_URL, BundleManifest, Component, FileEntry,
-                                                  HarnessPart, ManifestError, RootAction, StartSpec, dump_manifest,
-                                                  load_manifest)
+from orchestrator.runtime.bundle.manifest import (ENGINE_KINDS, RE_ID, RE_LICENCE, RE_URL, BundleManifest, Component,
+                                                  FileEntry, HarnessPart, ManifestError, RootAction, StartSpec,
+                                                  dump_manifest, load_manifest)
 
 PRESETS: Dict[str, Tuple[str, ...]] = {
     "llm": ("llm-llama-server",),
@@ -615,6 +615,7 @@ def plan_bundle(selection: Selection, *, catalog: BlockCatalog, profile: Any, de
         except Exception as e:  # noqa: BLE001 - pydantic's own reason, never pasted into shell text
             plan.problems.append(f"{comp_id}: {str(e).splitlines()[-1][:300]}")
     plan.memory_mb = memory
+    components = _engine_control(plan, components, roots, selection)
     _probe_checks(plan, board_arch, init, access, offline, roots)
     ram = profile.int_value("RAM_TOTAL_MB") if hasattr(profile, "int_value") else None
     if not has_llm:
@@ -794,6 +795,51 @@ def _gateway_from_llm(plan: BundlePlan, comp_id: str, given: Dict[str, Any], pai
         if mine in given and str(given[mine]) != str(value):
             plan.problems.append(f"{comp_id}: {mine} is set by the bundle from {llm_id} ({value})")
         given[mine] = value
+
+
+def engine_units(components: List[Component], roots: List[RootAction]) -> Dict[str, Tuple[str, str]]:
+    """The bundle's engines with a unit of their own: engine kind (llm, stt, vision) -> (component id, unit), the first
+    component of each kind whose install_unit writes `llmcf-<component id>.service` (the one naming rule
+    allow_unit_control accepts)."""
+    kinds = {c.id: c.kind for c in components}
+    out: Dict[str, Tuple[str, str]] = {}
+    for action in roots:
+        kind = kinds.get(action.component)
+        if action.action == "install_unit" and kind in ENGINE_KINDS and kind not in out \
+                and action.unit == f"llmcf-{action.component}.service":
+            out[kind] = (action.component, action.unit)
+    return out
+
+
+def _engine_control(plan: BundlePlan, components: List[Component], roots: List[RootAction],
+                    selection: Selection) -> List[Component]:
+    """The gateway that starts and stops the bundle's engines: with the gateway's own unit and at least one engine
+    unit, the root action allow_unit_control (exactly the gateway's account and exactly these units; llmcf-install
+    writes a polkit rule, or a sudoers drop-in with the exact systemctl commands on a board without polkit's rules),
+    and the gateway is told the llm's unit (`--llm-unit`: it starts the model on demand). The unprivileged-only
+    variant writes no unit, so the gateway is told none."""
+    gateway = next((c for c in components if c.kind == "gateway"), None)
+    own = next((a for a in roots if gateway is not None and a.action == "install_unit"
+                and a.component == gateway.id), None)
+    engines = engine_units(components, roots)
+    if gateway is None or not engines:
+        return components
+    if own is None:
+        plan.notes.append(f"{gateway.id}: without its own unit (autostart) the gateway does not start or stop the "
+                          "engines; their units start at boot")
+        return components
+    if selection.unprivileged_only:
+        return components
+    units = tuple(unit for _comp, unit in engines.values())
+    roots.append(RootAction(action="allow_unit_control", component=gateway.id, user=own.user, units=units))
+    plan.notes.append(f"{gateway.id}: its account may start, stop and restart exactly {', '.join(units)} (a polkit "
+                      "rule through llmcf-install; on a board without polkit's rules a sudoers file with exactly "
+                      "these systemctl commands)")
+    if "llm" not in engines or gateway.start is None:
+        return components
+    args = gateway.start.args + ("--llm-unit", engines["llm"][1])
+    started = gateway.model_copy(update={"start": StartSpec(program=gateway.start.program, args=args)})
+    return [started if c is gateway else c for c in components]
 
 
 # Who the kernel's out-of-memory killer takes first, if it must take one: a model server (its unit restarts it), never

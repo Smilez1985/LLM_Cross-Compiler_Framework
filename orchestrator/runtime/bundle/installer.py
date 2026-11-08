@@ -103,8 +103,8 @@ def render_steps(manifest: BundleManifest, manifest_sha256: str) -> str:
         if comp.start is not None:
             lines.append("\t".join(["start", comp.id, comp.start.program, *comp.start.args]))
     for action in manifest.root_actions:
-        values = [f"{k}={v}" for k, v in action.model_dump(exclude_none=True).items()
-                  if k not in ("action", "component")]
+        values = [f"{k}={','.join(v) if isinstance(v, (list, tuple)) else v}"
+                  for k, v in action.model_dump(exclude_none=True).items() if k not in ("action", "component")]
         lines.append("\t".join(["root", action.action, action.component, *values]))
     for line in lines[1:]:
         if any(ch in line for ch in "\n\r'\"\\$`;&|<>(){}*?[]!~#^ ") and not line.startswith("fetch\t"):
@@ -156,11 +156,11 @@ k_arg() {
 }
 k_kv() {
   case $1 in [a-z]*=*) ;; *) return 1 ;; esac
-  case $1 in *[!A-Za-z0-9._=-]*) return 1 ;; esac
+  case $1 in *[!A-Za-z0-9._=,-]*) return 1 ;; esac
 }
 k_root() {
   case $1 in create_user|install_unit|set_cgroup|place_root_file|remove_user|remove_unit|remove_cgroup|\
-remove_root_file|run_harness) return 0 ;; esac
+remove_root_file|run_harness|allow_unit_control) return 0 ;; esac
   return 1
 }
 sha_of() { sha256sum "$1" 2>/dev/null | cut -d ' ' -f 1; }

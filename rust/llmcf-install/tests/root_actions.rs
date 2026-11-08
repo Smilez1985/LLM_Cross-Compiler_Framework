@@ -206,6 +206,28 @@ impl Board {
         self.keep(&data, &sign(&self.key, &data));
     }
 
+    /// The llm component as `deploy` leaves it, and a gateway component next to it (its program and start script),
+    /// with the signed manifest of both.
+    fn deploy_gateway(&self, root_actions: serde_json::Value) {
+        self.deploy(serde_json::json!([]));
+        let gw = self.p(&format!("home/board/.local/share/llm-framework/bundle/{BID}/components/gateway"));
+        let program = b"gateway program".to_vec();
+        write_mode(&gw.join("llmcf-gateway"), &program, 0o755);
+        write_mode(&gw.join("start.sh"), b"#!/bin/sh\nexec true\n", 0o700);
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(self.kept().join("manifest.json")).unwrap()).unwrap();
+        manifest["components"].as_array_mut().unwrap().push(serde_json::json!({
+            "id": "gateway", "kind": "gateway", "block": "gateway-llmcf", "block_version": "1.0.0",
+            "block_sha256": "b".repeat(64), "block_trust": "framework",
+            "variables": {"autostart": true, "user": "llmcf"},
+            "files": [{"name": "llmcf-gateway", "sha256": sha(&program), "size": program.len(), "mode": "0755",
+                       "role": "program", "source": "bundle"}],
+            "start": {"program": "llmcf-gateway", "args": ["serve"]}}));
+        manifest["root_actions"] = root_actions;
+        let data = serde_json::to_vec_pretty(&manifest).unwrap();
+        self.keep(&data, &sign(&self.key, &data));
+    }
+
     fn keep(&self, data: &[u8], signature: &str) {
         write_mode(&self.kept().join("manifest.json"), data, 0o644);
         write_mode(&self.kept().join("manifest.json.sig"), signature.as_bytes(), 0o644);
@@ -689,4 +711,109 @@ fn hostile_harness_arguments_are_refused_before_anything() {
     }
     let (code, out) = b.harness(&["harness-start", "llm", "run-1", "run"]);
     assert_eq!(code, 3, "{out}");
+}
+
+// --- the gateway's right to start and stop the bundle's engines (allow_unit_control) --------------------------------
+
+fn with_control() -> serde_json::Value {
+    serde_json::json!([
+        {"action": "create_user", "component": "llm", "user": "llmcf"},
+        {"action": "install_unit", "component": "llm", "unit": "llmcf-llm.service", "user": "llmcf"},
+        {"action": "create_user", "component": "gateway", "user": "llmcf"},
+        {"action": "install_unit", "component": "gateway", "unit": "llmcf-gateway.service", "user": "llmcf"},
+        {"action": "allow_unit_control", "component": "gateway", "user": "llmcf", "units": ["llmcf-llm.service"]}])
+}
+
+const FAKE_VISUDO: &str = r#"#!/bin/sh
+echo "visudo $*" >> "$LLMCF_TEST_ROOT/calls.log"
+grep -q 'NOPASSWD' "$3" || exit 1
+exit 0
+"#;
+
+#[test]
+fn the_gateway_may_start_its_engines_through_polkit() {
+    let b = Board::new();
+    write_mode(&b.p("usr/bin/pkaction"), b"#!/bin/sh\necho 'pkaction version 0.120'\n", 0o755);
+    b.deploy_gateway(with_control());
+    let (code, out) = b.run("apply");
+    assert_eq!(code, 0, "{out}");
+    let rule_path = b.p(&format!("etc/polkit-1/rules.d/60-llmcf-{BID}.rules"));
+    let rule = fs::read_to_string(&rule_path).unwrap();
+    assert!(rule.contains("subject.user == \"llmcf\"") && rule.contains("(unit == \"llmcf-llm.service\")"), "{rule}");
+    assert_eq!(fs::metadata(&rule_path).unwrap().mode() & 0o777, 0o644);
+    assert!(!b.p("etc/sudoers.d").exists(), "polkit's way writes no sudoers file");
+    assert!(out.contains("llmcf-bundle: done allow_unit_control gateway user=llmcf units=llmcf-llm.service"), "{out}");
+    // the same run again changes nothing
+    let (code, out) = b.run("apply");
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("llmcf-bundle: already allow_unit_control gateway"), "{out}");
+    assert!(last(&out).ends_with("everything was in place already (nothing changed)"), "{out}");
+    // the uninstall takes it away with the rest
+    let (code, out) = b.run("uninstall");
+    assert_eq!(code, 0, "{out}");
+    assert!(!rule_path.exists());
+}
+
+#[test]
+fn without_polkit_a_sudoers_file_with_exact_commands() {
+    let b = Board::new();
+    write_mode(&b.p("usr/bin/sudo"), b"#!/bin/sh\nexit 1\n", 0o755);
+    write_mode(&b.p("usr/sbin/visudo"), FAKE_VISUDO.as_bytes(), 0o755);
+    fs::create_dir_all(b.p("etc/sudoers.d")).unwrap();
+    // an old polkit (0.105) reads no JavaScript rules: the sudoers way
+    write_mode(&b.p("usr/bin/pkaction"), b"#!/bin/sh\necho 'pkaction version 0.105'\n", 0o755);
+    b.deploy_gateway(with_control());
+    let (code, out) = b.run("apply");
+    assert_eq!(code, 0, "{out}");
+    let path = b.p(&format!("etc/sudoers.d/llmcf-{BID}"));
+    let text = fs::read_to_string(&path).unwrap();
+    let lines: Vec<&str> = text.lines().filter(|l| !l.starts_with('#')).collect();
+    assert_eq!(
+        lines,
+        [
+            "llmcf ALL=(root) NOPASSWD: /usr/bin/systemctl start llmcf-llm.service",
+            "llmcf ALL=(root) NOPASSWD: /usr/bin/systemctl stop llmcf-llm.service",
+            "llmcf ALL=(root) NOPASSWD: /usr/bin/systemctl restart llmcf-llm.service",
+        ]
+    );
+    assert_eq!(fs::metadata(&path).unwrap().mode() & 0o777, 0o440);
+    let dropin = b.p("etc/systemd/system/llmcf-gateway.service.d/llmcf-control.conf");
+    assert!(fs::read_to_string(&dropin).unwrap().contains("NoNewPrivileges=no\n"));
+    assert!(fs::read_to_string(b.p("calls.log")).unwrap().contains("visudo -c -f "));
+    assert!(!b.p("etc/polkit-1").exists());
+    let (code, out) = b.run("apply");
+    assert_eq!(code, 0, "{out}");
+    assert!(last(&out).ends_with("everything was in place already (nothing changed)"), "{out}");
+    // the board gets a polkit with rules: the next run moves to its way and takes the sudoers files away
+    write_mode(&b.p("usr/bin/pkaction"), b"#!/bin/sh\necho 'pkaction version 124'\n", 0o755);
+    let (code, out) = b.run("apply");
+    assert_eq!(code, 0, "{out}");
+    assert!(!path.exists() && !dropin.exists());
+    assert!(b.p(&format!("etc/polkit-1/rules.d/60-llmcf-{BID}.rules")).exists());
+    let (code, out) = b.run("uninstall");
+    assert_eq!(code, 0, "{out}");
+    assert!(!path.exists() && !dropin.exists() && !b.p(&format!("etc/polkit-1/rules.d/60-llmcf-{BID}.rules")).exists());
+}
+
+#[test]
+fn a_board_with_neither_way_is_refused_and_nothing_changes() {
+    let b = Board::new();
+    b.deploy_gateway(with_control());
+    let (code, out) = b.run("apply");
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("neither polkit"), "{out}");
+    assert!(!b.passwd().contains("llmcf:"));
+}
+
+#[test]
+fn a_control_of_a_unit_not_of_the_bundle_is_refused() {
+    let b = Board::new();
+    write_mode(&b.p("usr/bin/pkaction"), b"#!/bin/sh\necho 'pkaction version 122'\n", 0o755);
+    let mut actions = with_control();
+    actions[4]["units"] = serde_json::json!(["llmcf-gateway.service"]);
+    b.deploy_gateway(actions);
+    let (code, out) = b.run("apply");
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("is no engine unit of this bundle"), "{out}");
+    assert!(!b.p("etc/polkit-1").exists());
 }

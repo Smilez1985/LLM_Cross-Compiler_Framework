@@ -41,8 +41,14 @@ FILE_MODES = ("0600", "0644", "0700", "0755")
 # run_harness: the person's harness of a harness component, unpacked root-owned by llmcf-install's apply with its tree
 # checksum checked, its own installer run only on the person's start (dry run or run) through llmcf-install's harness
 # actions (harness_run.py), never by the apply itself.
+# allow_unit_control: the gateway's account may start, stop and restart exactly the bundle's engine units (a polkit
+# rule, or on a board without polkit's rules a sudoers drop-in with exactly those systemctl commands; llmcf-install).
 ROOT_ACTIONS = ("create_user", "install_unit", "set_cgroup", "place_root_file",
-                "remove_user", "remove_unit", "remove_cgroup", "remove_root_file", "run_harness")
+                "remove_user", "remove_unit", "remove_cgroup", "remove_root_file", "run_harness",
+                "allow_unit_control")
+# The component kinds whose units the gateway may start and stop (its engines), at most one unit each.
+ENGINE_KINDS = ("llm", "stt", "vision")
+MAX_CONTROL_UNITS = 3
 # Where place_root_file may put a file (fixed places only; llmcf-install knows each one).
 ROOT_PLACES = ("unit-dropin", "tmpfiles", "sysctl")
 MODES = ("full", "unprivileged")
@@ -331,7 +337,8 @@ class RootAction(_Strict):
     is systemd's MemoryHigh (never above memory_max_mb), oom_score_adj its OOMScoreAdjust (-999 to 1000: no unit is
     ever exempt from the kernel's out-of-memory killer, the gateway only goes after the model)."""
     action: Literal["create_user", "install_unit", "set_cgroup", "place_root_file",
-                    "remove_user", "remove_unit", "remove_cgroup", "remove_root_file", "run_harness"]
+                    "remove_user", "remove_unit", "remove_cgroup", "remove_root_file", "run_harness",
+                    "allow_unit_control"]
     component: str
     user: Optional[str] = None
     unit: Optional[str] = None
@@ -341,6 +348,8 @@ class RootAction(_Strict):
     oom_score_adj: Optional[int] = Field(default=None, ge=-999, le=1000)
     place: Optional[Literal["unit-dropin", "tmpfiles", "sysctl"]] = None
     file: Optional[str] = None
+    # allow_unit_control only: the bundle's engine units the gateway's account may start, stop and restart
+    units: Optional[Tuple[str, ...]] = None
 
     @field_validator("memory_high_mb", "oom_score_adj", mode="before")
     @classmethod
@@ -360,13 +369,22 @@ class RootAction(_Strict):
             raise ValueError("a unit is named llmcf-<name>.service")
         if self.file is not None:
             check_value("file", self.file, name="file")
+        if self.units is not None:
+            if self.action != "allow_unit_control":
+                raise ValueError("only allow_unit_control names units")
+            if not 1 <= len(self.units) <= MAX_CONTROL_UNITS:
+                raise ValueError(f"1 to {MAX_CONTROL_UNITS} units")
+            if any(not isinstance(u, str) or not RE_UNIT.fullmatch(u) for u in self.units):
+                raise ValueError("a unit is named llmcf-<name>.service")
+            if len(set(self.units)) != len(self.units):
+                raise ValueError("a unit twice")
         if self.memory_high_mb is not None and self.memory_max_mb is not None \
                 and self.memory_high_mb > self.memory_max_mb:
             raise ValueError("memory_high_mb is above memory_max_mb")
         need = {"create_user": ("user",), "remove_user": ("user",), "install_unit": ("unit", "user"),
                 "remove_unit": ("unit",), "set_cgroup": ("unit", "memory_max_mb"), "remove_cgroup": ("unit",),
                 "place_root_file": ("place", "file"), "remove_root_file": ("place", "file"),
-                "run_harness": ()}[self.action]
+                "run_harness": (), "allow_unit_control": ("user", "units")}[self.action]
         missing = [k for k in need if getattr(self, k) is None]
         if missing:
             raise ValueError(f"{self.action} needs {', '.join(missing)}")
@@ -418,6 +436,8 @@ class BundleManifest(_Strict):
         if len(self.root_actions) > MAX_ROOT_ACTIONS:
             raise ValueError(f"at most {MAX_ROOT_ACTIONS} root actions")
         units = {a.unit for a in self.root_actions if a.action == "install_unit"}
+        if sum(a.action == "allow_unit_control" for a in self.root_actions) > 1:
+            raise ValueError("root action allow_unit_control: at most one in a bundle")
         for action in self.root_actions:
             if action.component not in ids:
                 raise ValueError(f"root action {action.action} names no component of the bundle")
@@ -431,7 +451,27 @@ class BundleManifest(_Strict):
                 raise ValueError(f"root action place_root_file: {action.file} is no file of component {comp.id}")
             if action.action == "run_harness" and comp.harness is None:
                 raise ValueError(f"root action run_harness: component {comp.id} names no harness")
+            if action.action == "allow_unit_control":
+                self._control_rule(action, comp)
         return self
+
+    def _control_rule(self, action: "RootAction", comp: Component) -> None:
+        """allow_unit_control in its bundle (llmcf-install's control_rule, the same rule): it belongs to the bundle's
+        gateway component, names the account the gateway's own unit runs as, and each unit is the unit an
+        install_unit of this bundle writes for one of its engine components (llm, stt, vision) under the bundle's one
+        naming rule, llmcf-<component id>.service. No other unit, no pattern, no wildcard."""
+        what = "root action allow_unit_control"
+        if comp.kind != "gateway":
+            raise ValueError(f"{what}: component {comp.id} is not the bundle's gateway")
+        own = next((a for a in self.root_actions if a.action == "install_unit" and a.component == comp.id), None)
+        if own is None or own.user != action.user:
+            raise ValueError(f"{what}: the account is not the one the gateway's own unit runs as")
+        kinds = {c.id: c.kind for c in self.components}
+        for unit in action.units or ():
+            engine = next((a.component for a in self.root_actions if a.action == "install_unit" and a.unit == unit
+                           and kinds.get(a.component) in ENGINE_KINDS), None)
+            if engine is None or unit != f"llmcf-{engine}.service":
+                raise ValueError(f"{what}: {unit} is no engine unit of this bundle")
 
     def as_json(self) -> Dict[str, Any]:
         return self.model_dump(mode="json", by_alias=True, exclude_none=True)
@@ -479,7 +519,7 @@ def problems_of(data: Any) -> List[str]:
         return [str(e)]
 
 
-__all__ = ["BoardFacts", "BundleManifest", "Component", "FILE_MODES", "FileEntry", "HARNESS_ARCHIVE", "HARNESS_WATCH",
+__all__ = ["BoardFacts", "BundleManifest", "Component", "ENGINE_KINDS", "FILE_MODES", "FileEntry", "HARNESS_ARCHIVE", "HARNESS_WATCH",
            "HarnessPart", "KINDS", "MODES", "ManifestError",
            "MAX_ROOT_ACTIONS", "RE_ARG", "RE_FACT", "RE_FILE", "RE_ID", "RE_ROOT_FILE", "RE_SHA", "RE_UNIT", "RE_URL",
            "RE_WORD", "ROLES", "ROOT_ACTIONS", "ROOT_PLACES",

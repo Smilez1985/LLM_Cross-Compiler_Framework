@@ -11,7 +11,7 @@ pub const MAX_COMPONENTS: usize = 16;
 pub const MAX_FILES: usize = 64;
 pub const MAX_ARGS: usize = 48;
 pub const MAX_ROOT_ACTIONS: usize = 64;
-pub const ROOT_ACTIONS: [&str; 9] = [
+pub const ROOT_ACTIONS: [&str; 10] = [
     "create_user",
     "install_unit",
     "set_cgroup",
@@ -21,7 +21,12 @@ pub const ROOT_ACTIONS: [&str; 9] = [
     "remove_cgroup",
     "remove_root_file",
     "run_harness",
+    "allow_unit_control",
 ];
+/// The engine kinds whose units the gateway may start and stop (allow_unit_control; manifest.ENGINE_KINDS).
+pub const ENGINE_KINDS: [&str; 3] = ["llm", "stt", "vision"];
+/// At most this many units in one allow_unit_control (one per engine kind).
+pub const MAX_CONTROL_UNITS: usize = 3;
 /// The two files of a harness component (manifest.HARNESS_ARCHIVE, manifest.HARNESS_WATCH).
 pub const HARNESS_ARCHIVE: &str = "harness.tar";
 pub const HARNESS_WATCH: &str = "harness_watch.sh";
@@ -251,15 +256,19 @@ pub struct RootAction {
     pub oom_score_adj: Option<i64>,
     pub place: Option<String>,
     pub file: Option<String>,
+    /// allow_unit_control only: the bundle's engine units the gateway's account may start, stop and restart
+    pub units: Vec<String>,
 }
 
 impl RootAction {
     /// What a report line says of it: the component and its values (key=value, the manifest's own order).
     pub fn what(&self) -> String {
         let mut out = vec![self.component.clone()];
-        let pairs: [(&str, Option<String>); 8] = [
+        let units = (!self.units.is_empty()).then(|| self.units.join(","));
+        let pairs: [(&str, Option<String>); 9] = [
             ("user", self.user.clone()),
             ("unit", self.unit.clone()),
+            ("units", units),
             ("memory_max_mb", self.memory_max_mb.map(|v| v.to_string())),
             ("memory_high_mb", self.memory_high_mb.map(|v| v.to_string())),
             ("cpu_weight", self.cpu_weight.map(|v| v.to_string())),
@@ -586,7 +595,7 @@ fn root_action(v: &Value) -> R<RootAction> {
         m,
         "root action",
         &["action", "component"],
-        &["user", "unit", "memory_max_mb", "memory_high_mb", "cpu_weight", "oom_score_adj", "place", "file"],
+        &["user", "unit", "memory_max_mb", "memory_high_mb", "cpu_weight", "oom_score_adj", "place", "file", "units"],
     )?;
     let action = one_of(text(m, "action", "root action")?, &ROOT_ACTIONS, "root action")?.to_string();
     let component = text(m, "component", "root action")?;
@@ -625,7 +634,32 @@ fn root_action(v: &Value) -> R<RootAction> {
             return Err(format!("{what}: file is not a plain file name"));
         }
     }
+    let units = match m.get("units") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(items)) => {
+            let mut out: Vec<String> = Vec::new();
+            for item in items {
+                let u = item
+                    .as_str()
+                    .filter(|u| is_unit(u))
+                    .ok_or_else(|| format!("{what}: a unit is named llmcf-<name>.service"))?;
+                if out.iter().any(|x| x == u) {
+                    return Err(format!("{what}: a unit twice"));
+                }
+                out.push(u.into());
+            }
+            if !(1..=MAX_CONTROL_UNITS).contains(&out.len()) {
+                return Err(format!("{what}: 1 to {MAX_CONTROL_UNITS} units"));
+            }
+            out
+        }
+        Some(_) => return Err(format!("{what}: units is a list")),
+    };
+    if !units.is_empty() && action != "allow_unit_control" {
+        return Err(format!("{what}: only allow_unit_control names units"));
+    }
     let need: &[&str] = match action.as_str() {
+        "allow_unit_control" => &["user", "units"],
         "create_user" | "remove_user" => &["user"],
         "install_unit" => &["unit", "user"],
         "remove_unit" | "remove_cgroup" => &["unit"],
@@ -638,6 +672,7 @@ fn root_action(v: &Value) -> R<RootAction> {
         "unit" => unit.is_some(),
         "memory_max_mb" => memory_max_mb.is_some(),
         "place" => place.is_some(),
+        "units" => !units.is_empty(),
         _ => file.is_some(),
     };
     let missing: Vec<&str> = need.iter().copied().filter(|k| !have(k)).collect();
@@ -663,7 +698,34 @@ fn root_action(v: &Value) -> R<RootAction> {
         oom_score_adj,
         place: place.map(Into::into),
         file: file.map(Into::into),
+        units,
     })
+}
+
+/// allow_unit_control in its bundle (manifest.py BundleManifest._whole, the same rule): it belongs to the bundle's
+/// gateway component, names the account the gateway's own unit runs as, and each of its units is the unit an
+/// install_unit of this bundle writes for one of its engine components (llm, stt, vision) under the bundle's one
+/// naming rule, `llmcf-<component id>.service`. Nothing else: no other unit, no pattern, no wildcard.
+fn control_rule(a: &RootAction, comp: &Component, components: &[Component], actions: &[RootAction]) -> R<()> {
+    let what = "root action allow_unit_control";
+    if comp.kind != "gateway" {
+        return Err(format!("{what}: component {} is not the bundle's gateway", comp.id));
+    }
+    let own = actions.iter().find(|b| b.action == "install_unit" && b.component == comp.id);
+    if own.and_then(|b| b.user.as_deref()) != a.user.as_deref() || own.is_none() {
+        return Err(format!("{what}: the account is not the one the gateway's own unit runs as"));
+    }
+    for unit in &a.units {
+        let engine = actions
+            .iter()
+            .filter(|b| b.action == "install_unit" && b.unit.as_deref() == Some(unit))
+            .find_map(|b| components.iter().find(|c| c.id == b.component && ENGINE_KINDS.contains(&c.kind.as_str())));
+        match engine {
+            Some(c) if *unit == format!("llmcf-{}.service", c.id) => {}
+            _ => return Err(format!("{what}: {unit} is no engine unit of this bundle")),
+        }
+    }
+    Ok(())
 }
 
 /// The manifest from its signed bytes (JSON as dump_manifest writes it), every value checked.
@@ -738,6 +800,9 @@ pub fn parse(data: &[u8]) -> R<Manifest> {
     }
     let units: Vec<&str> =
         root_actions.iter().filter(|a| a.action == "install_unit").filter_map(|a| a.unit.as_deref()).collect();
+    if root_actions.iter().filter(|a| a.action == "allow_unit_control").count() > 1 {
+        return Err("root action allow_unit_control: at most one in a bundle".into());
+    }
     for a in &root_actions {
         let Some(comp) = components.iter().find(|c| c.id == a.component) else {
             return Err(format!("root action {} names no component of the bundle", a.action));
@@ -761,6 +826,7 @@ pub fn parse(data: &[u8]) -> R<Manifest> {
             "run_harness" if comp.harness.is_none() => {
                 return Err(format!("root action run_harness: component {} names no harness", comp.id))
             }
+            "allow_unit_control" => control_rule(a, comp, &components, &root_actions)?,
             _ => {}
         }
     }

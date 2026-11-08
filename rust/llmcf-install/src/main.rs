@@ -2,7 +2,9 @@
 //!
 //! `sudo llmcf-install ACTION BUNDLE` (ACTION plan, apply, status, rollback, uninstall or plan-uninstall) carries out
 //! ONLY the typed root actions of the bundle's signed manifest (create_user/remove_user, install_unit/remove_unit,
-//! set_cgroup/remove_cgroup, place_root_file/remove_root_file) for the board account that called it through sudo.
+//! set_cgroup/remove_cgroup, place_root_file/remove_root_file, allow_unit_control: the gateway's account may start,
+//! stop and restart exactly the bundle's engine units, through a polkit rule or, on a board without polkit's rules,
+//! a sudoers drop-in with exactly those systemctl commands) for the board account that called it through sudo.
 //! The manifest is the one the unprivileged installer kept in the account's bundle folder; its signature is checked
 //! here against the root-owned signer files (/etc/llmcf/allowed_signers, else /etc/llmcf/signing_key.pem) and
 //! nothing the manifest says is trusted before. No network, no shell, no path from the environment; a test build
